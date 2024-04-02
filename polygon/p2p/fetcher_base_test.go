@@ -452,36 +452,6 @@ func TestFetcherFetchBodiesResponseTimeoutRetrySuccess(t *testing.T) {
 	})
 }
 
-func TestFetcherFetchBodiesErrEmptyBody(t *testing.T) {
-	t.Parallel()
-
-	peerId := PeerIdFromUint64(1)
-	requestId := uint64(1234)
-	mockHeaders := []*types.Header{{Number: big.NewInt(1)}}
-	mockHashes := []common.Hash{mockHeaders[0].Hash()}
-	mockInboundMessages := []*sentry.InboundMessage{
-		{
-			Id:     sentry.MessageId_BLOCK_BODIES_66,
-			PeerId: peerId.H512(),
-			Data:   newMockBlockBodiesPacketBytes(t, requestId, &types.Body{}),
-		},
-	}
-	mockRequestResponse := requestResponseMock{
-		requestId:                   requestId,
-		mockResponseInboundMessages: mockInboundMessages,
-		wantRequestPeerId:           peerId,
-		wantRequestHashes:           mockHashes,
-	}
-
-	test := newFetcherTest(t, newMockRequestGenerator(requestId))
-	test.mockSentryStreams(mockRequestResponse)
-	test.run(func(ctx context.Context, t *testing.T) {
-		bodies, err := test.fetcher.FetchBodies(ctx, mockHeaders, peerId)
-		require.ErrorIs(t, err, ErrEmptyBody)
-		require.Nil(t, bodies)
-	})
-}
-
 func TestFetcherFetchBodiesErrMissingBodies(t *testing.T) {
 	t.Parallel()
 
@@ -525,7 +495,7 @@ func newFetcherTest(t *testing.T, requestIdGenerator RequestIdGenerator) *fetche
 	messageListenerTest := newMessageListenerTest(t)
 	messageListener := messageListenerTest.messageListener
 	messageSender := NewMessageSender(messageListenerTest.sentryClient)
-	fetcher := newFetcher(fetcherConfig, messageListenerTest.logger, messageListener, messageSender, requestIdGenerator)
+	fetcher := newFetcher(fetcherConfig, messageListener, messageSender, requestIdGenerator)
 	return &fetcherTest{
 		messageListenerTest:         messageListenerTest,
 		fetcher:                     fetcher,
