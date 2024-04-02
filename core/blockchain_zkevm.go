@@ -178,7 +178,8 @@ func ExecuteBlockEphemerallyZk(
 			return nil, err
 		}
 
-		receipt, execResult, err := ApplyTransaction_zkevm(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, excessDataGas, effectiveGasPricePercentage)
+		zkConfig := vm.NewZkConfig(*vmConfig, nil)
+		receipt, execResult, err := ApplyTransaction_zkevm(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, zkConfig, excessDataGas, effectiveGasPricePercentage)
 		if err != nil {
 			return nil, err
 		}

@@ -69,6 +69,8 @@ func (s *SMT) GenerateFromKVBulk(logPrefix string, nodeKeys []utils.NodeKey) ([4
 
 	insertedKeysCount := uint64(0)
 
+	maxReachedLevel := 0
+
 	tempTreeBuildStart := time.Now()
 	for _, k := range nodeKeys {
 		// split the key
@@ -155,6 +157,10 @@ func (s *SMT) GenerateFromKVBulk(logPrefix string, nodeKeys []utils.NodeKey) ([4
 			}
 			deleteFunc()
 			// deletesQueue.AddJob(utils.Job{Action: deleteFunc})
+
+			if maxReachedLevel < level+level2+1 {
+				maxReachedLevel = level + level2 + 1
+			}
 		} else
 		// if it is not leaf
 		// insert the new leaf on the right side
@@ -216,11 +222,17 @@ func (s *SMT) GenerateFromKVBulk(logPrefix string, nodeKeys []utils.NodeKey) ([4
 					// deletesQueue.AddJob(utils.Job{Action: deleteFunc})
 				}
 			}
+
+			if maxReachedLevel < level+1 {
+				maxReachedLevel = level + 1
+			}
 		}
 
 		insertedKeysCount++
 		progressChan <- uint64(totalKeysCount) + insertedKeysCount
 	}
+
+	s.updateDepth(maxReachedLevel)
 
 	tempTreeBuildTime := time.Since(tempTreeBuildStart)
 

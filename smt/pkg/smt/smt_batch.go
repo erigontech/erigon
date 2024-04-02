@@ -13,6 +13,7 @@ func (s *SMT) InsertBatch(logPrefix string, nodeKeys []*utils.NodeKey, nodeValue
 	s.clearUpMutex.Lock()
 	defer s.clearUpMutex.Unlock()
 
+	var maxInsertingNodePathLevel = 0
 	var size int = len(nodeKeys)
 	var err error
 	var smtBatchNodeRoot *smtBatchNode
@@ -135,7 +136,13 @@ func (s *SMT) InsertBatch(logPrefix string, nodeKeys []*utils.NodeKey, nodeValue
 				insertingNodePathLevel--
 			}
 		}
+
+		if maxInsertingNodePathLevel < insertingNodePathLevel {
+			maxInsertingNodePathLevel = insertingNodePathLevel
+		}
 	}
+
+	s.updateDepth(maxInsertingNodePathLevel)
 
 	for _, mapLevel0 := range nodeHashesForDelete {
 		for _, mapLevel1 := range mapLevel0 {

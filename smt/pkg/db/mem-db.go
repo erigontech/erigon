@@ -16,6 +16,7 @@ type MemDb struct {
 	DbHashKey   map[string][]byte
 	DbCode      map[string][]byte
 	LastRoot    *big.Int
+	Depth       uint8
 
 	lock sync.RWMutex
 }
@@ -28,6 +29,7 @@ func NewMemDb() *MemDb {
 		DbHashKey:   make(map[string][]byte),
 		DbCode:      make(map[string][]byte),
 		LastRoot:    big.NewInt(0),
+		Depth:       0,
 	}
 }
 
@@ -53,6 +55,21 @@ func (m *MemDb) SetLastRoot(value *big.Int) error {
 	defer m.lock.Unlock()
 
 	m.LastRoot = value
+	return nil
+}
+
+func (m *MemDb) GetDepth() (uint8, error) {
+	m.lock.RLock()
+	defer m.lock.RUnlock()
+
+	return m.Depth, nil
+}
+
+func (m *MemDb) SetDepth(depth uint8) error {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	m.Depth = depth
 	return nil
 }
 

@@ -19,7 +19,9 @@ package vm
 import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/common/u256"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -36,6 +38,24 @@ func (evm *EVM) precompile(addr libcommon.Address) (PrecompiledContract, bool) {
 	}
 	p, ok := precompiles[addr]
 	return p, ok
+}
+
+// NewEVM returns a new EVM. The returned EVM is not thread safe and should
+// only ever be used *once*.
+func NewZkEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmtypes.IntraBlockState, chainConfig *chain.Config, zkVmConfig ZkConfig) *EVM {
+	evm := &EVM{
+		context:         blockCtx,
+		txContext:       txCtx,
+		intraBlockState: state,
+		config:          zkVmConfig.Config,
+		chainConfig:     chainConfig,
+		chainRules:      chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time),
+	}
+
+	// [zkevm] change
+	evm.interpreter = NewZKEVMInterpreter(evm, zkVmConfig)
+
+	return evm
 }
 
 // create creates a new contract using code as deployment code.
@@ -102,9 +122,6 @@ func (evm *EVM) createZkEvm(caller ContractRef, codeAndHash *codeAndHash, gas ui
 	// The contract is a scoped environment for this execution context only.
 	contract := NewContract(caller, AccountRef(address), value, gas, evm.config.SkipAnalysis)
 	contract.SetCodeOptionalHash(&address, codeAndHash)
-
-	// zkevm: ensure we set the IsCreate flag here so that zk virtual counters get the correct context
-	contract.IsCreate = true
 
 	if evm.config.NoRecursion && depth > 0 {
 		return nil, address, gas, nil

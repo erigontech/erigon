@@ -254,7 +254,7 @@ func populateDbTables(batch *memdb.MemoryMutation) error {
 		db2.TableAccountValues,
 		db2.TableMetadata,
 		db2.TableHashKey,
-		db2.TableLastRoot,
+		db2.TableStats,
 		hermez_db.TX_PRICE_PERCENTAGE,
 		hermez_db.BLOCKBATCHES,
 		hermez_db.BLOCK_GLOBAL_EXIT_ROOTS,

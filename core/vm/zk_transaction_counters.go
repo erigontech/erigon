@@ -1,11 +1,13 @@
 package vm
 
 import (
-	"bytes"
 	"fmt"
+	"math"
+
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"math"
+	"github.com/ledgerwatch/erigon/zk/tx"
 )
 
 type TransactionCounter struct {
@@ -16,8 +18,8 @@ type TransactionCounter struct {
 	smtLevels          int
 }
 
-func NewTransactionCounter(transaction types.Transaction, smtMaxLevel uint32) *TransactionCounter {
-	totalLevel := calculateSmtLevels(smtMaxLevel)
+func NewTransactionCounter(transaction types.Transaction, smtMaxLevel int) *TransactionCounter {
+	totalLevel := calculateSmtLevels(smtMaxLevel, 32)
 	tc := &TransactionCounter{
 		transaction:        transaction,
 		rlpCounters:        NewCounterCollector(totalLevel),
@@ -32,21 +34,27 @@ func NewTransactionCounter(transaction types.Transaction, smtMaxLevel uint32) *T
 }
 
 func (tc *TransactionCounter) CalculateRlp() error {
-	var rlpBytes []byte
-	buffer := bytes.NewBuffer(rlpBytes)
-	err := tc.transaction.EncodeRLP(buffer)
+	raw, err := tx.TransactionToL2Data(tc.transaction, 8, tx.MaxEffectivePercentage)
 	if err != nil {
 		return err
 	}
 
 	gasLimitHex := fmt.Sprintf("%x", tc.transaction.GetGas())
-	gasPriceHex := fmt.Sprintf("%x", tc.transaction.GetPrice().Uint64())
-	valueHex := fmt.Sprintf("%x", tc.transaction.GetValue().Uint64())
-	chainIdHex := fmt.Sprintf("%x", tc.transaction.GetChainID().Uint64())
+	hexutil.AddLeadingZeroToHexValueForByteCompletion(&gasLimitHex)
+	gasPriceHex := tc.transaction.GetPrice().Hex()
+	hexutil.Remove0xPrefixIfExists(&gasPriceHex)
+	hexutil.AddLeadingZeroToHexValueForByteCompletion(&gasPriceHex)
+	valueHex := tc.transaction.GetValue().Hex()
+	hexutil.Remove0xPrefixIfExists(&valueHex)
+	hexutil.AddLeadingZeroToHexValueForByteCompletion(&valueHex)
+	chainIdHex := tc.transaction.GetChainID().Hex()
+	hexutil.Remove0xPrefixIfExists(&chainIdHex)
+	hexutil.AddLeadingZeroToHexValueForByteCompletion(&chainIdHex)
 	nonceHex := fmt.Sprintf("%x", tc.transaction.GetNonce())
+	hexutil.AddLeadingZeroToHexValueForByteCompletion(&nonceHex)
 
-	txRlpLength := len(rlpBytes)
-	txDataLen := len(rlpBytes)
+	txRlpLength := len(raw)
+	txDataLen := len(tc.transaction.GetData())
 	gasLimitLength := len(gasLimitHex) / 2
 	gasPriceLength := len(gasPriceHex) / 2
 	valueLength := len(valueHex) / 2
@@ -57,8 +65,8 @@ func (tc *TransactionCounter) CalculateRlp() error {
 	collector.Deduct(S, 250)
 	collector.Deduct(B, 1+1)
 	collector.Deduct(K, int(math.Ceil(float64(txRlpLength+1)/136)))
-	collector.Deduct(P, int(math.Ceil(float64(txRlpLength+1)/56)))
-	collector.Deduct(D, int(math.Ceil(float64(txRlpLength+1)/56)))
+	collector.Deduct(P, int(math.Ceil(float64(txRlpLength+1)/56)+3))
+	collector.Deduct(D, int(math.Ceil(float64(txRlpLength+1)/56)+3))
 	collector.multiCall(collector.addBatchHashData, 21)
 	/**
 	from the original JS implementation:
@@ -94,6 +102,7 @@ func (tc *TransactionCounter) CalculateRlp() error {
 	collector.SHLarith()
 
 	v, r, s := tc.transaction.RawSignatureValues()
+	v = tx.GetDecodedV(tc.transaction, v)
 	err = collector.ecRecover(v, r, s, false)
 	if err != nil {
 		return err
@@ -127,8 +136,12 @@ func (tc *TransactionCounter) ProcessTx(ibs *state.IntraBlockState, returnData [
 	cc.subArith()
 	cc.divArith()
 	cc.multiCall(cc.mulArith, 4)
-	cc.fillBlockInfoTreeWithTxReceipt(tc.smtLevels)
+	cc.fillBlockInfoTreeWithTxReceipt()
+
+	// we always send false for isCreate and isCreate2 here as the original JS does the same
 	cc.processContractCall(tc.smtLevels, byteCodeLength, isDeploy, false, false)
+
+	tc.processingCounters = cc
 
 	return nil
 }

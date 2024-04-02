@@ -35,6 +35,7 @@ var migrations = map[kv.Label][]Migration{
 		dbSchemaVersion5,
 		txsBeginEnd,
 		resetBlocks4,
+		refactorTableLastRoot,
 	},
 	kv.TxPoolDB: {},
 	kv.SentryDB: {},

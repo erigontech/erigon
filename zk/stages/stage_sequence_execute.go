@@ -42,6 +42,8 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/smt/pkg/blockinfo"
+	db2 "github.com/ledgerwatch/erigon/smt/pkg/db"
+	"github.com/ledgerwatch/erigon/smt/pkg/smt"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/zk/erigon_db"
@@ -59,8 +61,6 @@ const (
 	stateStreamLimit uint64 = 1_000
 
 	transactionGasLimit = 30000000
-
-	totalVirtualCounterSmtLevel = 80 // todo [zkevm] this should be read from the db
 
 	yieldSize = 100 // arbitrary number defining how many transactions to yield from the pool at once
 )
@@ -232,10 +232,13 @@ func SpawnSequencingStage(
 	stateReader := state.NewPlainStateReader(tx)
 	ibs := state.New(stateReader)
 
+	eridb := db2.NewEriDb(tx)
+	smt := smt.NewSMT(eridb)
+
 	// here we have a special case and need to inject in the initial batch on the network before
 	// we can continue accepting transactions from the pool
 	if executionAt == 0 {
-		err = processInjectedInitialBatch(hermezDb, ibs, tx, cfg, header, parentBlock, stateReader, forkId)
+		err = processInjectedInitialBatch(hermezDb, ibs, tx, cfg, header, parentBlock, stateReader, forkId, smt)
 		if err != nil {
 			return err
 		}
@@ -247,7 +250,7 @@ func SpawnSequencingStage(
 		return nil
 	}
 
-	batchCounters := vm.NewBatchCounterCollector(totalVirtualCounterSmtLevel, uint16(forkId))
+	batchCounters := vm.NewBatchCounterCollector(smt.GetDepth()-1, uint16(forkId))
 
 	// whilst in the 1 batch = 1 block = 1 tx flow we can immediately add in the changeL2BlockTx calculation
 	// as this is the first tx we can skip the overflow check
@@ -288,7 +291,7 @@ LOOP:
 
 			for _, transaction := range transactions {
 				snap := ibs.Snapshot()
-				receipt, overflow, err := attemptAddTransaction(tx, cfg, batchCounters, header, parentBlock.Header(), transaction, ibs, hermezDb)
+				receipt, overflow, err := attemptAddTransaction(tx, cfg, batchCounters, header, parentBlock.Header(), transaction, ibs, hermezDb, smt)
 				if err != nil {
 					ibs.RevertToSnapshot(snap)
 					return err
@@ -315,7 +318,10 @@ LOOP:
 		}
 	}
 
-	counters := batchCounters.CombineCollectors()
+	counters, err := batchCounters.CombineCollectors()
+	if err != nil {
+		return err
+	}
 	log.Info("counters consumed", "counts", counters.UsedAsString())
 
 	l1BlockHash := common.Hash{}
@@ -401,6 +407,7 @@ func processInjectedInitialBatch(
 	parentBlock *types.Block,
 	stateReader *state.PlainStateReader,
 	forkId uint64,
+	smt *smt.SMT,
 ) error {
 	injected, err := hermezDb.GetL1InjectedBatch(0)
 	if err != nil {
@@ -420,7 +427,7 @@ func processInjectedInitialBatch(
 		return err
 	}
 
-	txn, receipt, err := handleInjectedBatch(cfg, tx, ibs, hermezDb, injected, header, parentBlock, forkId)
+	txn, receipt, err := handleInjectedBatch(cfg, tx, ibs, hermezDb, injected, header, parentBlock, forkId, smt)
 	if err != nil {
 		return err
 	}
@@ -515,6 +522,7 @@ func handleInjectedBatch(
 	header *types.Header,
 	parentBlock *types.Block,
 	forkId uint64,
+	smt *smt.SMT,
 ) (*types.Transaction, *types.Receipt, error) {
 	txs, _, _, err := tx.DecodeTxs(injected.Transaction, 5)
 	if err != nil {
@@ -524,10 +532,10 @@ func handleInjectedBatch(
 		return nil, nil, errors.New("expected 1 transaction in the injected batch")
 	}
 
-	batchCounters := vm.NewBatchCounterCollector(totalVirtualCounterSmtLevel, uint16(forkId))
+	batchCounters := vm.NewBatchCounterCollector(smt.GetDepth()-1, uint16(forkId))
 
 	// process the tx and we can ignore the counters as an overflow at this stage means no network anyway
-	receipt, _, err := attemptAddTransaction(dbTx, cfg, batchCounters, header, parentBlock.Header(), txs[0], ibs, hermezDb)
+	receipt, _, err := attemptAddTransaction(dbTx, cfg, batchCounters, header, parentBlock.Header(), txs[0], ibs, hermezDb, smt)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -711,8 +719,9 @@ func attemptAddTransaction(
 	transaction types.Transaction,
 	ibs *state.IntraBlockState,
 	hermezDb *hermez_db.HermezDb,
+	smt *smt.SMT,
 ) (*types.Receipt, bool, error) {
-	txCounters := vm.NewTransactionCounter(transaction, totalVirtualCounterSmtLevel)
+	txCounters := vm.NewTransactionCounter(transaction, smt.GetDepth()-1)
 	overflow, err := batchCounters.AddNewTransactionCounters(txCounters)
 	if err != nil {
 		return nil, false, err
@@ -731,7 +740,7 @@ func attemptAddTransaction(
 
 	ibs.Prepare(transaction.Hash(), common.Hash{}, 0)
 
-	receipt, returnData, err := core.ApplyTransaction(
+	receipt, execResult, err := core.ApplyTransaction_zkevm(
 		cfg.chainConfig,
 		core.GetHashFn(header, getHeader),
 		cfg.engine,
@@ -742,7 +751,7 @@ func attemptAddTransaction(
 		header,
 		transaction,
 		&header.GasUsed,
-		cfg.zkVmConfig.Config,
+		*cfg.zkVmConfig,
 		parentHeader.ExcessDataGas,
 		zktypes.EFFECTIVE_GAS_PRICE_PERCENTAGE_MAXIMUM)
 
@@ -756,13 +765,13 @@ func attemptAddTransaction(
 		return nil, false, err
 	}
 
-	err = txCounters.ProcessTx(ibs, returnData)
+	err = txCounters.ProcessTx(ibs, execResult.ReturnData)
 	if err != nil {
 		return nil, false, err
 	}
 
 	// now that we have executed we can check again for an overflow
-	overflow = batchCounters.CheckForOverflow()
+	overflow, err = batchCounters.CheckForOverflow()
 
 	return receipt, overflow, err
 }

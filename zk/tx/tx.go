@@ -18,14 +18,13 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/smt/pkg/utils"
+	"github.com/ledgerwatch/erigon/zk/constants"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zkevm/hex"
 	"github.com/ledgerwatch/log/v3"
 )
 
 const (
-	forkID4      = 4
-	forkID5      = 5
 	double       = 2
 	ether155V    = 27
 	etherPre155V = 35
@@ -63,6 +62,13 @@ func DecodeTxs(txsData []byte, forkID uint64) ([]types.Transaction, []byte, []ui
 			log.Debug("error parsing header length: ", err)
 			return []types.Transaction{}, txsData, []uint8{}, err
 		}
+
+		// if num is 11 then we are trying to parse a `changeL2Block` transaction so skip it
+		if num == changeL2BlockTxType {
+			pos += 9
+			continue
+		}
+
 		// First byte is the length and must be ignored
 		if num < c0 {
 			log.Debug("error num < c0 : %d, %d", num, c0)
@@ -89,7 +95,7 @@ func DecodeTxs(txsData []byte, forkID uint64) ([]types.Transaction, []byte, []ui
 
 		endPos := pos + length + rLength + sLength + vLength + headerByteLength
 
-		if forkID >= forkID5 {
+		if forkID >= constants.ForkDragonfruitId5 {
 			endPos += efficiencyPercentageByteLength
 		}
 
@@ -118,7 +124,7 @@ func DecodeTxs(txsData []byte, forkID uint64) ([]types.Transaction, []byte, []ui
 		sData := txsData[dataStart+rLength : dataStart+rLength+sLength]
 		vData := txsData[dataStart+rLength+sLength : dataStart+rLength+sLength+vLength]
 
-		if forkID >= forkID5 {
+		if forkID >= constants.ForkDragonfruitId5 {
 			efficiencyPercentage := txsData[dataStart+rLength+sLength+vLength : endPos]
 			efficiencyPercentages = append(efficiencyPercentages, efficiencyPercentage[0])
 		}
@@ -146,7 +152,7 @@ func DecodeTxs(txsData []byte, forkID uint64) ([]types.Transaction, []byte, []ui
 
 func DecodeTx(encodedTx []byte, efficiencyPercentage byte, forkId uint16) (types.Transaction, uint8, error) {
 	// efficiencyPercentage := uint8(0)
-	if forkId >= forkID5 {
+	if forkId >= constants.ForkDragonfruitId5 {
 		encodedTx = append(encodedTx, efficiencyPercentage)
 	}
 
@@ -245,6 +251,14 @@ func rlpFieldsToLegacyTx(fields [][]byte, v, r, s []byte) (tx *types.LegacyTx, e
 	}, nil
 }
 
+/*
+*
+Copy of TransactionToL2Data with modifications:
+- remove leading zeroes in individual byte arrays
+- add two empty bytes at the end
+
+Tne encoding is based on zkemv-commonjs/src/process-utils as of eb1ed1a1c05e2666cd32e3900beff5121bdeb4db
+*/
 func TransactionToL2Data(tx types.Transaction, forkId uint16, efficiencyPercentage uint8) ([]byte, error) {
 	nonceBytes := hermez_db.Uint64ToBytes(tx.GetNonce())
 	gasPriceBytes := tx.GetPrice().Bytes()
@@ -261,14 +275,21 @@ func TransactionToL2Data(tx types.Transaction, forkId uint16, efficiencyPercenta
 		to = tx.GetTo().Bytes()
 	}
 
+	v, r, s := tx.RawSignatureValues()
+
 	toEncode := [][]byte{
-		nonceBytes,
-		gasPriceBytes,
-		gas,
-		to,
-		valueBytes,
-		tx.GetData(),
-		chainIdBytes.Bytes(),
+		removeLeadingZeroesFromBytes(nonceBytes),
+		removeLeadingZeroesFromBytes(gasPriceBytes),
+		removeLeadingZeroesFromBytes(gas),
+		removeLeadingZeroesFromBytes(to),
+		removeLeadingZeroesFromBytes(valueBytes),
+		removeLeadingZeroesFromBytes(tx.GetData()),
+	}
+
+	if !tx.GetChainID().Eq(uint256.NewInt(0)) || !(v.Eq(uint256.NewInt(27)) || v.Eq(uint256.NewInt(28))) {
+		toEncode = append(toEncode, removeLeadingZeroesFromBytes(chainIdBytes.Bytes()))
+		toEncode = append(toEncode, []byte{})
+		toEncode = append(toEncode, []byte{})
 	}
 
 	encoded, err := rlp.EncodeToBytes(toEncode)
@@ -276,13 +297,9 @@ func TransactionToL2Data(tx types.Transaction, forkId uint16, efficiencyPercenta
 		return nil, err
 	}
 
-	v, r, s := tx.RawSignatureValues()
-
 	// reverse the eip-155 changes for the V value for transport
-	multiChain := new(big.Int).Mul(tx.GetChainID().ToBig(), big.NewInt(double))
-	plus155V := new(big.Int).Add(new(big.Int).SetBytes(v.Bytes()), big.NewInt(ether155V))
-	txV := new(big.Int).Sub(plus155V, multiChain)
-	txV = txV.Sub(txV, big.NewInt(etherPre155V))
+	v = GetDecodedV(tx, v)
+	txV := new(big.Int).SetBytes(v.Bytes())
 
 	vBytes := txV.Bytes()
 	rBytes := r.Bytes32()
@@ -292,12 +309,38 @@ func TransactionToL2Data(tx types.Transaction, forkId uint16, efficiencyPercenta
 	encoded = append(encoded, sBytes[:]...)
 	encoded = append(encoded, vBytes...)
 
-	if forkId >= forkID5 {
+	if forkId >= constants.ForkDragonfruitId5 {
 		ep := hermez_db.Uint8ToBytes(efficiencyPercentage)
 		encoded = append(encoded, ep...)
 	}
 
 	return encoded, nil
+}
+
+func removeLeadingZeroesFromBytes(source []byte) []byte {
+	size := len(source)
+	leadingZeroes := 0
+	for ; leadingZeroes < size; leadingZeroes++ {
+		if source[leadingZeroes] != 0 {
+			break
+		}
+	}
+
+	return source[leadingZeroes:]
+}
+
+func GetDecodedV(tx types.Transaction, v *uint256.Int) *uint256.Int {
+	if !tx.Protected() {
+		return v
+	}
+
+	multiChain := new(big.Int).Mul(tx.GetChainID().ToBig(), big.NewInt(double))
+	plus155V := new(big.Int).Add(new(big.Int).SetBytes(v.Bytes()), big.NewInt(ether155V))
+	txV := new(big.Int).Sub(plus155V, multiChain)
+	txV = txV.Sub(txV, big.NewInt(etherPre155V))
+
+	result, _ := uint256.FromBig(txV)
+	return result
 }
 
 func GenerateBlockBatchL2Data(forkId uint16, deltaTimestamp uint32, l1InfoTreeIndex uint32, transactions []types.Transaction) ([]byte, error) {

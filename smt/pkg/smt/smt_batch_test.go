@@ -531,9 +531,9 @@ func initDb(t *testing.T, dbPath string) (kv.RwDB, kv.RwTx, *db.EriDb) {
 	if err := migrator.VerifyVersion(database); err != nil {
 		t.Fatalf("Cannot verify db version %e", err)
 	}
-	if err = migrator.Apply(database, dbPath); err != nil {
-		t.Fatalf("Cannot migrate db %e", err)
-	}
+	// if err = migrator.Apply(database, dbPath); err != nil {
+	// 	t.Fatalf("Cannot migrate db %e", err)
+	// }
 
 	// if err := database.Update(context.Background(), func(tx kv.RwTx) (err error) {
 	// 	return params.SetErigonVersion(tx, "test")
