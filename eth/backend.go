@@ -207,6 +207,7 @@ type Ethereum struct {
 	silkwormSentryService    *silkworm.SentryService
 
 	polygonSyncService polygonsync.Service
+	stopNode           func() error
 }
 
 func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {
@@ -276,6 +277,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			Accumulator: shards.NewAccumulator(),
 		},
 		logger: logger,
+		stopNode: func() error {
+			return stack.Close()
+		},
 	}
 
 	var chainConfig *chain.Config
@@ -943,6 +947,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		go func() {
 			if err := cli.StartRpcServer(ctx, &httpRpcCfg, s.apiList, s.logger); err != nil {
 				s.logger.Error("cli.StartRpcServer error", "err", err)
+				stack.Close()
 			}
 		}()
 	}
@@ -1400,11 +1405,16 @@ func (s *Ethereum) Start() error {
 		go s.eth1ExecutionServer.Start(s.sentryCtx)
 	} else if s.config.PolygonSync {
 		go func() {
-			ctx, cancel := s.sentryCtx, s.sentryCancel
+			ctx := s.sentryCtx
 			err := s.polygonSyncService.Run(ctx)
-			if err != nil && !errors.Is(err, context.Canceled) {
-				s.logger.Error("polygon sync crashed", "err", err)
-				cancel()
+			if err == nil || errors.Is(err, context.Canceled) {
+				return
+			}
+
+			s.logger.Error("polygon sync crashed - stopping node", "err", err)
+			err = s.stopNode()
+			if err != nil {
+				s.logger.Error("could not stop node", "err", err)
 			}
 		}()
 	} else {
