@@ -34,6 +34,12 @@ func TryGracefully(ctx context.Context, logger log.Logger) {
 	for attempt := 1; attempt <= 10; attempt++ {
 		select {
 		case <-ctx.Done():
+			//
+			// TODO - this actually does not work - we never get to 10 attempts
+			//      - remove TryGracefully (it actually needs to spawn an independent process to supervise the gracefull shutdown...)
+			//      - instead simply log the error and cancel context when polygon sync service crashes
+			//      - or create a mechanism where there is a close channel that comes from the eri node container and notify it to close all services
+			//
 			return
 		case <-timer.C:
 			logger.Info("sending interrupt signal to current process", "attempt", attempt)

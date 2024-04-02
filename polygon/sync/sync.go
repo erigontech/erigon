@@ -228,7 +228,7 @@ func (s *Sync) Run(ctx context.Context) error {
 		return err
 	}
 
-	if newTip, err := s.blockDownloader.DownloadBlocksUsingCheckpoints(ctx, tip.Number.Uint64()); err != nil {
+	if newTip, err := s.blockDownloader.DownloadBlocksUsingCheckpoints(ctx, tip.Number.Uint64()+1); err != nil {
 		return err
 	} else if newTip != nil {
 		tip = newTip
