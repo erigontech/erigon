@@ -66,7 +66,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon-lib/terminate"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
@@ -1401,11 +1400,11 @@ func (s *Ethereum) Start() error {
 		go s.eth1ExecutionServer.Start(s.sentryCtx)
 	} else if s.config.PolygonSync {
 		go func() {
-			ctx := s.sentryCtx
+			ctx, cancel := s.sentryCtx, s.sentryCancel
 			err := s.polygonSyncService.Run(ctx)
 			if err != nil && !errors.Is(err, context.Canceled) {
-				s.logger.Error("polygon sync crashed, terminating process", "err", err)
-				terminate.TryGracefully(ctx, s.logger)
+				s.logger.Error("polygon sync crashed", "err", err)
+				cancel()
 			}
 		}()
 	} else {
