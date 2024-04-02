@@ -146,9 +146,8 @@ type CreateNewTorrentClientConfig struct {
 	CleanDir     bool
 }
 
-func NewTorrentClient(cliCtx *cli.Context, chain string) (*TorrentClient, error) {
-
-	conf := CreateNewTorrentClientConfig{
+func NewTorrentClientConfigFromCobra(cliCtx *cli.Context, chain string) CreateNewTorrentClientConfig {
+	return CreateNewTorrentClientConfig{
 		Chain:        chain,
 		WebSeeds:     cliCtx.String(utils.WebSeedsFlag.Name),
 		DownloadRate: cliCtx.String(utils.TorrentDownloadRateFlag.Name),
@@ -163,11 +162,10 @@ func NewTorrentClient(cliCtx *cli.Context, chain string) (*TorrentClient, error)
 		TempDir:      TempDir(cliCtx.Context),
 		CleanDir:     true,
 	}
-	return newTorrentClient(conf)
 }
 
-func NewDefaultTorrentClient(chain string, torrentDir string, logger log.Logger) (*TorrentClient, error) {
-	conf := CreateNewTorrentClientConfig{
+func NewDefaultTorrentClientConfig(chain string, torrentDir string, logger log.Logger) CreateNewTorrentClientConfig {
+	return CreateNewTorrentClientConfig{
 		Chain:        chain,
 		WebSeeds:     utils.WebSeedsFlag.Value,
 		DownloadRate: utils.TorrentDownloadRateFlag.Value,
@@ -182,22 +180,19 @@ func NewDefaultTorrentClient(chain string, torrentDir string, logger log.Logger)
 		TempDir:      torrentDir,
 		CleanDir:     false,
 	}
-
-	return newTorrentClient(conf)
 }
 
-func newTorrentClient(config CreateNewTorrentClientConfig) (*TorrentClient, error) {
+func NewTorrentClient(config CreateNewTorrentClientConfig) (*TorrentClient, error) {
 	logger := config.Logger
 	tempDir := config.TempDir
-	chain := config.Chain
 
-	torrentDir := filepath.Join(tempDir, "torrents", chain)
+	torrentDir := filepath.Join(tempDir, "torrents", config.Chain)
 
 	dirs := datadir.New(torrentDir)
 
 	webseedsList := common.CliString2Array(config.WebSeeds)
 
-	if known, ok := snapcfg.KnownWebseeds[chain]; ok {
+	if known, ok := snapcfg.KnownWebseeds[config.Chain]; ok {
 		webseedsList = append(webseedsList, known...)
 	}
 
@@ -221,7 +216,7 @@ func newTorrentClient(config CreateNewTorrentClientConfig) (*TorrentClient, erro
 
 	cfg, err := downloadercfg.New(dirs, version, logLevel, downloadRate, uploadRate,
 		config.TorrentPort,
-		config.ConnsPerFile, 0, nil, webseedsList, chain, true)
+		config.ConnsPerFile, 0, nil, webseedsList, config.Chain, true)
 
 	if err != nil {
 		return nil, err
@@ -245,7 +240,7 @@ func newTorrentClient(config CreateNewTorrentClientConfig) (*TorrentClient, erro
 	cfg.ClientConfig.DisableIPv6 = config.DisableIPv6
 	cfg.ClientConfig.DisableIPv4 = config.DisableIPv4
 
-	natif, err := nat.Parse(utils.NATFlag.Value)
+	natif, err := nat.Parse(config.NatFlag)
 
 	if err != nil {
 		return nil, fmt.Errorf("invalid nat option %s: %w", utils.NATFlag.Value, err)

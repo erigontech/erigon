@@ -38,9 +38,9 @@ type IndexFnType func(context.Context, snaptype.FileInfo, uint32, string, *backg
 
 func NewHeimdall(ctx context.Context, chain string, snapshotLocation string, logger log.Logger) (HeimdallSimulator, error) {
 	cfg := snapcfg.KnownCfg(chain)
-	fileDir := filepath.Join(snapshotLocation, "torrents", chain)
+	torrentDir := filepath.Join(snapshotLocation, "torrents", chain)
 
-	knownBorSnapshots := freezeblocks.NewBorRoSnapshots(ethconfig.Defaults.Snapshot, fileDir, 0, logger)
+	knownBorSnapshots := freezeblocks.NewBorRoSnapshots(ethconfig.Defaults.Snapshot, torrentDir, 0, logger)
 
 	files := make([]string, 0, len(cfg.Preverified))
 
@@ -53,13 +53,14 @@ func NewHeimdall(ctx context.Context, chain string, snapshotLocation string, log
 		return HeimdallSimulator{}, err
 	}
 
-	activeBorSnapshots := freezeblocks.NewBorRoSnapshots(ethconfig.Defaults.Snapshot, fileDir, 0, logger)
+	activeBorSnapshots := freezeblocks.NewBorRoSnapshots(ethconfig.Defaults.Snapshot, torrentDir, 0, logger)
 
 	if err := activeBorSnapshots.ReopenFolder(); err != nil {
 		return HeimdallSimulator{}, err
 	}
 
-	downloader, err := sync.NewDefaultTorrentClient(chain, snapshotLocation, logger)
+	config := sync.NewDefaultTorrentClientConfig(chain, snapshotLocation, logger)
+	downloader, err := sync.NewTorrentClient(config)
 	if err != nil {
 		return HeimdallSimulator{}, err
 	}
@@ -200,15 +201,17 @@ func (h *HeimdallSimulator) downloadData(ctx context.Context, spans *freezeblock
 	}
 
 	h.logger.Info(fmt.Sprintf("Downloading %s", fileName))
+
 	err = session.Download(ctx, fileName)
 	if err != nil {
 		return fmt.Errorf("can't download %s: %w", fileName, err)
 	}
 
 	h.logger.Info(fmt.Sprintf("Indexing %s", fileName))
+
 	err = indexFn(ctx, info, h.activeBorSnapshots.Salt, session.LocalFsRoot(), nil, log.LvlWarn, h.logger)
 	if err != nil {
-		return fmt.Errorf("error indexing %s: %w", fileName, err)
+		return fmt.Errorf("can't download %s: %w", fileName, err)
 	}
 
 	return h.activeBorSnapshots.ReopenSegments([]snaptype.Type{sType}, true)
