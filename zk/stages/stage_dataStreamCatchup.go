@@ -258,11 +258,12 @@ func writeGenesisToStream(
 		return err
 	}
 
+	batchBookmark := srv.CreateBookmarkEntry(server.BatchBookmarkType, genesis.NumberU64())
 	bookmark := srv.CreateBookmarkEntry(server.BlockBookmarkType, genesis.NumberU64())
 	blockStart := srv.CreateBlockStartEntry(genesis, batch, uint16(fork), ger, 0, 0, common.Hash{})
 	blockEnd := srv.CreateBlockEndEntry(genesis.NumberU64(), genesis.Hash(), genesis.Root())
 
-	if err = srv.CommitEntriesToStream([]server.DataStreamEntry{bookmark, blockStart, blockEnd}, true); err != nil {
+	if err = srv.CommitEntriesToStream([]server.DataStreamEntry{batchBookmark, bookmark, blockStart, blockEnd}, true); err != nil {
 		return err
 	}
 

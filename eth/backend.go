@@ -708,10 +708,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		return nil, err
 	}
 
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-
 	if backend.config.Zk != nil {
 		// zkevm: create a data stream server if we have the appropriate config for one.  This will be started on the call to Init
 		// alongside the http server
@@ -727,6 +723,17 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			backend.dataStream, err = datastreamer.NewServer(uint16(httpCfg.DataStreamPort), uint8(2), 1, datastreamer.StreamType(1), file, logConfig)
 			if err != nil {
 				return nil, err
+			}
+
+			// recovery here now, if the stream got into a bad state we want to be able to delete the file and have
+			// the stream re-populated from scratch.  So we check the stream for the latest header and if it is
+			// 0 we can just set the datastream progress to 0 also which will force a re-population of the stream
+			latestHeader := backend.dataStream.GetHeader()
+			if latestHeader.TotalEntries == 0 {
+				log.Info("[dataStream] setting the stream progress to 0")
+				if err := stages.SaveStageProgress(tx, stages.DataStream, 0); err != nil {
+					return nil, err
+				}
 			}
 		}
 
@@ -850,6 +857,10 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		backend.syncStages = stages2.NewDefaultStages(backend.sentryCtx, backend.chainDB, stack.Config().P2P, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, allSnapshots, backend.agg, backend.forkValidator, backend.engine)
 		backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
 		backend.syncPruneOrder = stagedsync.DefaultPruneOrder
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
 	}
 
 	return backend, nil
