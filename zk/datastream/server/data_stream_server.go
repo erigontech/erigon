@@ -15,6 +15,7 @@ import (
 type BookmarkType byte
 
 var BlockBookmarkType BookmarkType = 0
+var BatchBookmarkType BookmarkType = 1
 
 type OperationMode int
 
@@ -131,6 +132,7 @@ func (srv *DataStreamServer) CreateStreamEntries(
 	reader *hermez_db.HermezDbReader,
 	lastBlock *eritypes.Block,
 	batchNumber uint64,
+	lastBatchNumber uint64,
 	gerUpdates *[]types.GerUpdate,
 ) (*[]DataStreamEntry, error) {
 	blockNum := block.NumberU64()
@@ -148,15 +150,26 @@ func (srv *DataStreamServer) CreateStreamEntries(
 
 	entryCount += len(block.Transactions())
 
+	if lastBatchNumber != batchNumber {
+		// for the batch bookmark
+		entryCount++
+	}
+
 	entries := make([]DataStreamEntry, entryCount)
 	index := 0
 
-	//gerUpdates are before the the bookmark for this block and are gottne by previous ones bookmark
+	//gerUpdates are before the bookmark for this block and are gottne by previous ones bookmark
 	if gerUpdates != nil {
 		for _, gerUpdate := range *gerUpdates {
 			entries[index] = &gerUpdate
 			index++
 		}
+	}
+
+	if batchNumber != lastBatchNumber {
+		batchStart := srv.CreateBookmarkEntry(BatchBookmarkType, batchNumber)
+		entries[index] = batchStart
+		index++
 	}
 
 	bookmark := srv.CreateBookmarkEntry(BlockBookmarkType, block.NumberU64())
@@ -211,10 +224,11 @@ func (srv *DataStreamServer) CreateAndBuildStreamEntryBytes(
 	reader *hermez_db.HermezDbReader,
 	lastBlock *eritypes.Block,
 	batchNumber uint64,
+	lastBatchNumber uint64,
 	bigEndian bool,
 	gerUpdates *[]types.GerUpdate,
 ) ([]byte, error) {
-	entries, err := srv.CreateStreamEntries(block, reader, lastBlock, batchNumber, gerUpdates)
+	entries, err := srv.CreateStreamEntries(block, reader, lastBlock, batchNumber, lastBatchNumber, gerUpdates)
 	if err != nil {
 		return nil, err
 	}

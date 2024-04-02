@@ -181,7 +181,7 @@ func SpawnStageDataStreamCatchup(
 			return err
 		}
 
-		blockEntries, err := srv.CreateStreamEntries(block, reader, lastBlock, batchNum, gersInBetween)
+		blockEntries, err := srv.CreateStreamEntries(block, reader, lastBlock, batchNum, prevBatchNum, gersInBetween)
 		if err != nil {
 			return err
 		}

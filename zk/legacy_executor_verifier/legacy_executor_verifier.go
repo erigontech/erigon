@@ -232,6 +232,12 @@ func (v *LegacyExecutorVerifier) GetStreamBytes(request *VerifierRequest, tx kv.
 		return nil, err
 	}
 	var streamBytes []byte
+
+	// as we only ever use the executor verifier for whole batches we can safely assume that the previous batch
+	// will always be the request batch - 1 and that the first block in the batch will be at the batch
+	// boundary so we will always add in the batch bookmark to the stream
+	previousBatch := request.BatchNumber - 1
+
 	for _, blockNumber := range blocks {
 		block, err := rawdb.ReadBlockByNumber(tx, blockNumber)
 		if err != nil {
@@ -241,12 +247,14 @@ func (v *LegacyExecutorVerifier) GetStreamBytes(request *VerifierRequest, tx kv.
 		//TODO: get ger updates between blocks
 		gerUpdates := []dstypes.GerUpdate{}
 
-		sBytes, err := v.streamServer.CreateAndBuildStreamEntryBytes(block, hermezDb, lastBlock, request.BatchNumber, true, &gerUpdates)
+		sBytes, err := v.streamServer.CreateAndBuildStreamEntryBytes(block, hermezDb, lastBlock, request.BatchNumber, previousBatch, true, &gerUpdates)
 		if err != nil {
 			return nil, err
 		}
 		streamBytes = append(streamBytes, sBytes...)
 		lastBlock = block
+		// we only put in the batch bookmark at the start of the stream data once
+		previousBatch = request.BatchNumber
 	}
 	return streamBytes, nil
 }

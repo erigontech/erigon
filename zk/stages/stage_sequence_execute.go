@@ -472,7 +472,7 @@ func postBlockStateHandling(
 		}
 
 		l2TxHash, err := tx.ComputeL2TxHash(
-			cfg.chainConfig.ChainID,
+			t.GetChainID().ToBig(),
 			t.GetValue(),
 			t.GetPrice(),
 			t.GetNonce(),

@@ -21,7 +21,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/zk/datastream/server"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zk/legacy_executor_verifier"
 	types "github.com/ledgerwatch/erigon/zk/rpcdaemon"
@@ -458,39 +457,6 @@ func (api *ZkEvmAPIImpl) GetProverInput(ctx context.Context, batchNumber uint64,
 		TimestampLimit:    timestampLimit,
 		ForcedBlockhashL1: "",
 	}, nil
-}
-
-func getStreamBytes(
-	tx kv.Tx,
-	batchNumber uint64,
-	blockNumbers []uint64,
-	lastBlock *eritypes.Block,
-	hDb *hermez_db.HermezDbReader,
-	chainId uint64,
-) ([]byte, error) {
-	streamServer := server.NewDataStreamServer(nil, chainId, server.ExecutorOperationMode)
-	var streamBytes []byte
-	reader := hermez_db.NewHermezDbReader(tx)
-	for _, blockNumber := range blockNumbers {
-		block, err := rawdb.ReadBlockByNumber(tx, blockNumber)
-		if err != nil {
-			return nil, err
-		}
-
-		gersInBetween, err := reader.GetBatchGlobalExitRoots(blockNumber-1, blockNumber)
-		if err != nil {
-			return nil, err
-		}
-
-		sBytes, err := streamServer.CreateAndBuildStreamEntryBytes(block, hDb, lastBlock, batchNumber, true, gersInBetween)
-		if err != nil {
-			return nil, err
-		}
-		streamBytes = append(streamBytes, sBytes...)
-		lastBlock = block
-	}
-	return streamBytes, nil
-
 }
 
 func getLastBlockInBatchNumber(tx kv.Tx, batchNumber uint64) (uint64, error) {
