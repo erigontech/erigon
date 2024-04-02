@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"reflect"
 	"sync"
 	"time"
@@ -127,7 +126,6 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 	defer progressLogTicker.Stop()
 
 	var lastBlock *types.Block
-	lastBlockNum := waypoints[len(waypoints)-1].EndBlock().Uint64()
 	for len(waypoints) > 0 {
 		select {
 		case <-ctx.Done():
@@ -169,10 +167,10 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 		}
 
 		blockBatches := make([][]*types.Block, len(waypointsBatch))
-		maxWaypointLength := float64(0)
+		maxWaypointLength := uint64(0)
 		wg := sync.WaitGroup{}
 		for i, waypoint := range waypointsBatch {
-			maxWaypointLength = math.Max(float64(waypoint.Length()), maxWaypointLength)
+			maxWaypointLength = cmp.Max(waypoint.Length(), maxWaypointLength)
 			wg.Add(1)
 			go func(i int, waypoint heimdall.Waypoint, peerId *p2p.PeerId) {
 				defer wg.Done()
@@ -219,6 +217,11 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 				break
 			}
 
+			if blockBatch[0].Number().Uint64() == 0 {
+				// we do not want to insert block 0 (genesis)
+				blockBatch = blockBatch[1:]
+			}
+
 			blocks = append(blocks, blockBatch...)
 		}
 
@@ -243,9 +246,7 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 				"len", len(blocks),
 				"duration", time.Since(flushStartTime),
 			)
-		}
 
-		if (endBlockNum == lastBlockNum) && (len(blocks) > 0) {
 			lastBlock = blocks[len(blocks)-1]
 		}
 	}
