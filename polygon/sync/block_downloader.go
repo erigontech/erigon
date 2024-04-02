@@ -123,8 +123,8 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 		return nil, err
 	}
 
-	progressLogTimer := time.NewTimer(30 * time.Second)
-	defer progressLogTimer.Stop()
+	progressLogTicker := time.NewTicker(30 * time.Second)
+	defer progressLogTicker.Stop()
 
 	var lastBlock *types.Block
 	lastBlockNum := waypoints[len(waypoints)-1].EndBlock().Uint64()
@@ -154,7 +154,7 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 		waypointsBatch := waypoints[:numWorkers]
 
 		select {
-		case <-progressLogTimer.C:
+		case <-progressLogTicker.C:
 			d.logger.Info(
 				syncLogPrefix("downloading blocks progress"),
 				"waypointsBatchLength", len(waypointsBatch),

@@ -73,14 +73,14 @@ func (h *heimdall) FetchCheckpointsFromBlock(ctx context.Context, store Checkpoi
 		return nil, err
 	}
 
-	timer := time.NewTimer(30 * time.Second)
-	defer timer.Stop()
+	progressLogTicker := time.NewTicker(30 * time.Second)
+	defer progressLogTicker.Stop()
 
 	var checkpoints []Waypoint
 	var endBlock uint64
 	for i := count; i >= 1; i-- {
 		select {
-		case <-timer.C:
+		case <-progressLogTicker.C:
 			h.logger.Info(
 				heimdallLogPrefix("fetch checkpoints from block progress (backwards)"),
 				"checkpoint number", i,
@@ -197,14 +197,14 @@ func (h *heimdall) FetchMilestonesFromBlock(ctx context.Context, store Milestone
 		return nil, err
 	}
 
-	timer := time.NewTimer(30 * time.Second)
-	defer timer.Stop()
+	progressLogTicker := time.NewTicker(30 * time.Second)
+	defer progressLogTicker.Stop()
 
 	var milestones Waypoints
 	var endBlock uint64
 	for i := last; i >= 1; i-- {
 		select {
-		case <-timer.C:
+		case <-progressLogTicker.C:
 			h.logger.Info(
 				heimdallLogPrefix("fetching milestones from block progress (backwards)"),
 				"milestone id", i,
