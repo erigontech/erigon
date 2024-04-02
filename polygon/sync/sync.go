@@ -228,20 +228,27 @@ func (s *Sync) Run(ctx context.Context) error {
 		return err
 	}
 
-	if newTip, err := s.blockDownloader.DownloadBlocksUsingCheckpoints(ctx, tip.Number.Uint64()+1); err != nil {
-		return err
-	} else if newTip != nil {
-		tip = newTip
-	}
+	var newTip *types.Header
+	for tip != newTip { // loop until we converge at latest checkpoint & milestone
+		newTip, err = s.blockDownloader.DownloadBlocksUsingCheckpoints(ctx, tip.Number.Uint64()+1)
+		if err != nil {
+			return err
+		}
+		if newTip != nil {
+			tip = newTip
+		}
 
-	if newTip, err := s.blockDownloader.DownloadBlocksUsingMilestones(ctx, tip.Number.Uint64()); err != nil {
-		return err
-	} else if newTip != nil {
-		tip = newTip
-	}
+		newTip, err = s.blockDownloader.DownloadBlocksUsingMilestones(ctx, tip.Number.Uint64()+1)
+		if err != nil {
+			return err
+		}
+		if newTip != nil {
+			tip = newTip
+		}
 
-	if err = s.commitExecution(ctx, tip, tip); err != nil {
-		return err
+		if err = s.commitExecution(ctx, tip, tip); err != nil {
+			return err
+		}
 	}
 
 	latestSpan, err := s.fetchLatestSpan(ctx)
