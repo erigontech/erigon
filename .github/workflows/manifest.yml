@@ -5,11 +5,15 @@ on:
       - devel
       - e35
       - 'release/**'
+    paths:
+      - 'go.mod'
   pull_request:
     branches:
       - devel
       - e35
       - 'release/**'
+    paths:
+      - 'go.mod'
     types:
       - opened
       - reopened
@@ -17,8 +21,30 @@ on:
       - ready_for_review
 
 jobs:
+  check-snap-modifications:
+    runs-on: ubuntu-22.04
+    outputs:
+      modified: ${{ steps.check-modified.outputs.modified }}
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 2 # Ensures we fetch enough history to compare
+
+      - name: Is ledgerwatch/erigon-snapshots updated in go.mod
+        id: check-modified
+        run: |
+          git fetch origin ${{ github.base_ref }}:${{ github.base_ref }} --depth=1
+          DIFF=$(git diff ${{ github.base_ref }} HEAD -- go.mod | grep '+.*github.com/ledgerwatch/erigon-snapshots')
+          if [[ ! -z "$DIFF" ]]; then
+            echo "::set-output name=modified::true"
+          else
+            echo "::set-output name=modified::false"
+          fi
+
   ManifestCheck:
-    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
+    needs: check-snap-modifications
+    if: needs.check-modified.outputs.modified == 'true' && (${{ github.event_name == 'push' || !github.event.pull_request.draft }})
     strategy:
       matrix:
         os:
