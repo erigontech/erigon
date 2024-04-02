@@ -178,7 +178,7 @@ func (a *Attestation) Clone() clonable.Clonable {
 	var bitsBuffer []byte
 	copy(staticBuffer[:], a.staticBuffer[:])
 	if a.aggregationBitsBuffer != nil {
-		bitsBuffer := make([]byte, len(a.aggregationBitsBuffer))
+		bitsBuffer = make([]byte, len(a.aggregationBitsBuffer))
 		copy(bitsBuffer, a.aggregationBitsBuffer)
 	}
 	return &Attestation{
