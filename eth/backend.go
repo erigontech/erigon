@@ -66,7 +66,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon-lib/terminate"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
@@ -208,6 +207,7 @@ type Ethereum struct {
 	silkwormSentryService    *silkworm.SentryService
 
 	polygonSyncService polygonsync.Service
+	stopNode           func() error
 }
 
 func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {
@@ -277,6 +277,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			Accumulator: shards.NewAccumulator(),
 		},
 		logger: logger,
+		stopNode: func() error {
+			return stack.Close()
+		},
 	}
 
 	var chainConfig *chain.Config
@@ -944,6 +947,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		go func() {
 			if err := cli.StartRpcServer(ctx, &httpRpcCfg, s.apiList, s.logger); err != nil {
 				s.logger.Error("cli.StartRpcServer error", "err", err)
+				stack.Close()
 			}
 		}()
 	}
@@ -1403,9 +1407,14 @@ func (s *Ethereum) Start() error {
 		go func() {
 			ctx := s.sentryCtx
 			err := s.polygonSyncService.Run(ctx)
-			if err != nil && !errors.Is(err, context.Canceled) {
-				s.logger.Error("polygon sync crashed, terminating process", "err", err)
-				terminate.TryGracefully(ctx, s.logger)
+			if err == nil || errors.Is(err, context.Canceled) {
+				return
+			}
+
+			s.logger.Error("polygon sync crashed - stopping node", "err", err)
+			err = s.stopNode()
+			if err != nil {
+				s.logger.Error("could not stop node", "err", err)
 			}
 		}()
 	} else {
