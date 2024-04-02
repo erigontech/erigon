@@ -4,7 +4,6 @@ import (
 	"context"
 	"net"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -33,31 +32,23 @@ func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router
 			AllowCredentials: routerCfg.AllowCredentials,
 			MaxAge:           4,
 		}))
-	// enforce json content type
-	mux.Use(func(h http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			contentType := r.Header.Get("Content-Type")
-			if len(contentType) > 0 && !strings.EqualFold(contentType, "application/json") {
-				http.Error(w, "Content-Type header must be application/json", http.StatusUnsupportedMediaType)
-				return
-			}
-			h.ServeHTTP(w, r)
-		})
-	})
-	// layered handling - 404 on first handler falls back to the second
+
 	mux.HandleFunc("/*", func(w http.ResponseWriter, r *http.Request) {
 		nfw := &notFoundNoWriter{ResponseWriter: w, r: r}
 		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, chi.NewRouteContext()))
 		if isNotFound(nfw.code) || nfw.code == 0 {
 			start := time.Now()
 			beaconHandler.ArchiveApi.ServeHTTP(w, r)
-			log.Debug("[Beacon API] Request", "method", r.Method, "path", r.URL.Path, "time", time.Since(start))
+			log.Debug("[Beacon API] Request", "uri", r.URL.String(), "path", r.URL.Path, "time", time.Since(start))
+		} else {
+			log.Warn("[Beacon API] Request to unavaiable endpoint, check --beacon.api flag", "uri", r.URL.String(), "path", r.URL.Path)
 		}
 	})
-
-	mux.HandleFunc("/archive/*", func(w http.ResponseWriter, r *http.Request) {
-		http.StripPrefix("/archive", beaconHandler.ArchiveApi).ServeHTTP(w, r)
+	mux.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		log.Warn("[Beacon API] Not found", "method", r.Method, "path", r.URL.Path)
+		http.Error(w, "Not found", http.StatusNotFound)
 	})
+
 	server := &http.Server{
 		Handler:      mux,
 		ReadTimeout:  routerCfg.ReadTimeTimeout,

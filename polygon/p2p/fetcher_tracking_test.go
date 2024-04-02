@@ -161,7 +161,7 @@ func TestTrackingFetcherFetchBodiesUpdatesPeerTracker(t *testing.T) {
 
 func newTrackingFetcherTest(t *testing.T, requestIdGenerator RequestIdGenerator) *trackingFetcherTest {
 	fetcherTest := newFetcherTest(t, requestIdGenerator)
-	peerTracker := NewPeerTracker()
+	peerTracker := newPeerTracker(PreservingPeerShuffle)
 	unregister := fetcherTest.messageListener.RegisterPeerEventObserver(NewPeerEventObserver(peerTracker))
 	t.Cleanup(unregister)
 	trackingFetcher := newTrackingFetcher(fetcherTest.fetcher, peerTracker)

@@ -17,7 +17,7 @@ const (
 	TopicNameLightClientFinalityUpdate   = "light_client_finality_update"
 	TopicNameLightClientOptimisticUpdate = "light_client_optimistic_update"
 
-	TopicNamePrefixBlobSidecar       = "blob_sidecar_%d" // {id} is a placeholder for the blob id
+	TopicNamePrefixBlobSidecar       = "blob_sidecar_%d"
 	TopicNamePrefixBeaconAttestation = "beacon_attestation_%d"
 	TopicNamePrefixSyncCommittee     = "sync_committee_%d"
 )

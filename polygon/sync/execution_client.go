@@ -26,7 +26,8 @@ func (e *executionClient) InsertBlocks(ctx context.Context, blocks []*types.Bloc
 }
 
 func (e *executionClient) UpdateForkChoice(ctx context.Context, tip *types.Header, finalizedHeader *types.Header) error {
-	return e.engine.ForkChoiceUpdate(ctx, finalizedHeader.Hash(), tip.Hash())
+	_, err := e.engine.ForkChoiceUpdate(ctx, finalizedHeader.Hash(), tip.Hash(), nil)
+	return err
 }
 
 func (e *executionClient) CurrentHeader(ctx context.Context) (*types.Header, error) {

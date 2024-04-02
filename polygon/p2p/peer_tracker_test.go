@@ -15,7 +15,7 @@ import (
 func TestPeerTracker(t *testing.T) {
 	t.Parallel()
 
-	peerTracker := newPeerTracker()
+	peerTracker := newPeerTracker(PreservingPeerShuffle)
 	peerIds := peerTracker.ListPeersMayHaveBlockNum(100)
 	require.Len(t, peerIds, 0)
 
@@ -48,7 +48,7 @@ func TestPeerTracker(t *testing.T) {
 func TestPeerTrackerPeerEventObserver(t *testing.T) {
 	t.Parallel()
 
-	peerTracker := newPeerTracker()
+	peerTracker := newPeerTracker(PreservingPeerShuffle)
 	peerTrackerPeerEventObserver := NewPeerEventObserver(peerTracker)
 	messageListenerTest := newMessageListenerTest(t)
 	messageListenerTest.mockSentryStreams()

@@ -41,46 +41,70 @@ type fileDataProvider struct {
 	wg         *errgroup.Group
 }
 
+// FlushToDiskAsync - `doFsync` is true only for 'critical' collectors (which should not loose).
+func FlushToDiskAsync(logPrefix string, b Buffer, tmpdir string, doFsync bool, lvl log.Lvl) (dataProvider, error) {
+	if b.Len() == 0 {
+		return nil, nil
+	}
+
+	provider := &fileDataProvider{reader: nil, wg: &errgroup.Group{}}
+	provider.wg.Go(func() (err error) {
+		provider.file, err = sortAndFlush(b, tmpdir, doFsync)
+		if err != nil {
+			return err
+		}
+		_, fName := filepath.Split(provider.file.Name())
+		log.Log(lvl, fmt.Sprintf("[%s] Flushed buffer file", logPrefix), "name", fName)
+		return nil
+	})
+
+	return provider, nil
+}
+
 // FlushToDisk - `doFsync` is true only for 'critical' collectors (which should not loose).
 func FlushToDisk(logPrefix string, b Buffer, tmpdir string, doFsync bool, lvl log.Lvl) (dataProvider, error) {
 	if b.Len() == 0 {
 		return nil, nil
 	}
 
+	var err error
 	provider := &fileDataProvider{reader: nil, wg: &errgroup.Group{}}
-	provider.wg.Go(func() error {
-		b.Sort()
-
-		// if we are going to create files in the system temp dir, we don't need any
-		// subfolders.
-		if tmpdir != "" {
-			if err := os.MkdirAll(tmpdir, 0755); err != nil {
-				return err
-			}
-		}
-
-		bufferFile, err := os.CreateTemp(tmpdir, "erigon-sortable-buf-")
-		if err != nil {
-			return err
-		}
-		provider.file = bufferFile
-
-		if doFsync {
-			defer bufferFile.Sync() //nolint:errcheck
-		}
-
-		w := bufio.NewWriterSize(bufferFile, BufIOSize)
-		defer w.Flush() //nolint:errcheck
-
-		_, fName := filepath.Split(bufferFile.Name())
-		if err = b.Write(w); err != nil {
-			return fmt.Errorf("error writing entries to disk: %w", err)
-		}
-		log.Log(lvl, fmt.Sprintf("[%s] Flushed buffer file", logPrefix), "name", fName)
-		return nil
-	})
-
+	provider.file, err = sortAndFlush(b, tmpdir, doFsync)
+	if err != nil {
+		return nil, err
+	}
+	_, fName := filepath.Split(provider.file.Name())
+	log.Log(lvl, fmt.Sprintf("[%s] Flushed buffer file", logPrefix), "name", fName)
 	return provider, nil
+}
+
+func sortAndFlush(b Buffer, tmpdir string, doFsync bool) (*os.File, error) {
+	b.Sort()
+
+	// if we are going to create files in the system temp dir, we don't need any
+	// subfolders.
+	if tmpdir != "" {
+		if err := os.MkdirAll(tmpdir, 0755); err != nil {
+			return nil, err
+		}
+	}
+
+	bufferFile, err := os.CreateTemp(tmpdir, "erigon-sortable-buf-")
+	if err != nil {
+		return nil, err
+	}
+
+	if doFsync {
+		defer bufferFile.Sync() //nolint:errcheck
+	}
+
+	w := bufio.NewWriterSize(bufferFile, BufIOSize)
+	defer w.Flush() //nolint:errcheck
+
+	if err = b.Write(w); err != nil {
+		return bufferFile, fmt.Errorf("error writing entries to disk: %w", err)
+	}
+	return bufferFile, nil
 }
 
 func (p *fileDataProvider) Next(keyBuf, valBuf []byte) ([]byte, []byte, error) {

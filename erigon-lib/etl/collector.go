@@ -49,6 +49,11 @@ type Collector struct {
 	allFlushed    bool
 	autoClean     bool
 	logger        log.Logger
+
+	// sortAndFlushInBackground increase insert performance, but make RAM use less-predictable:
+	//   - if disk is over-loaded - app may have much background threads which waiting for flush - and each thread whill hold own `buf` (can't free RAM until flush is done)
+	//   - enable it only when writing to `etl` is a bottleneck and unlikely to have many parallel collectors (to not overload CPU/Disk)
+	sortAndFlushInBackground bool
 }
 
 // NewCollectorFromFiles creates collector from existing files (left over from previous unsuccessful loading)
@@ -90,6 +95,8 @@ func NewCollector(logPrefix, tmpdir string, sortableBuffer Buffer, logger log.Lo
 	return &Collector{autoClean: true, bufType: getTypeByBuffer(sortableBuffer), buf: sortableBuffer, logPrefix: logPrefix, tmpdir: tmpdir, logLvl: log.LvlInfo, logger: logger}
 }
 
+func (c *Collector) SortAndFlushInBackground(v bool) { c.sortAndFlushInBackground = v }
+
 func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 	c.buf.Put(k, v)
 	if !c.buf.CheckFlushSize() {
@@ -115,17 +122,26 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 		provider = KeepInRAM(c.buf)
 		c.allFlushed = true
 	} else {
-		fullBuf := c.buf
-		prevLen, prevSize := fullBuf.Len(), fullBuf.SizeLimit()
-		c.buf = getBufferByType(c.bufType, datasize.ByteSize(c.buf.SizeLimit()), c.buf)
-
 		doFsync := !c.autoClean /* is critical collector */
 		var err error
-		provider, err = FlushToDisk(c.logPrefix, fullBuf, c.tmpdir, doFsync, c.logLvl)
-		if err != nil {
-			return err
+
+		if c.sortAndFlushInBackground {
+			fullBuf := c.buf // can't `.Reset()` because this `buf` will move to another goroutine
+			prevLen, prevSize := fullBuf.Len(), fullBuf.SizeLimit()
+			c.buf = getBufferByType(c.bufType, datasize.ByteSize(c.buf.SizeLimit()), c.buf)
+
+			provider, err = FlushToDiskAsync(c.logPrefix, fullBuf, c.tmpdir, doFsync, c.logLvl)
+			if err != nil {
+				return err
+			}
+			c.buf.Prealloc(prevLen/8, prevSize/8)
+		} else {
+			provider, err = FlushToDisk(c.logPrefix, c.buf, c.tmpdir, doFsync, c.logLvl)
+			if err != nil {
+				return err
+			}
+			c.buf.Reset()
 		}
-		c.buf.Prealloc(prevLen/8, prevSize/8)
 	}
 	if provider != nil {
 		c.dataProviders = append(c.dataProviders, provider)

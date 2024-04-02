@@ -102,8 +102,8 @@ func addSszTests() {
 		//	With("DepositMessage", getSSZStaticConsensusTest(&cltypes.DepositMessage{})).
 		// With("Eth1Block", getSSZStaticConsensusTest(&cltypes.Eth1Block{})).
 		With("Eth1Data", getSSZStaticConsensusTest(&cltypes.Eth1Data{})).
-		//With("ExecutionPayload", getSSZStaticConsensusTest(&cltypes.NewEth1Block(mainn))).
-		With("ExecutionPayloadHeader", getSSZStaticConsensusTest(&cltypes.Eth1Header{})).
+		With("ExecutionPayload", getSSZStaticConsensusTest(cltypes.NewEth1Block(clparams.Phase0Version, &clparams.MainnetBeaconConfig))).
+		//With("ExecutionPayloadHeader", getSSZStaticConsensusTest(&cltypes.Eth1Header{})).
 		With("Fork", getSSZStaticConsensusTest(&cltypes.Fork{})).
 		//With("ForkData", getSSZStaticConsensusTest(&cltypes.ForkData{})).
 		//With("HistoricalBatch", getSSZStaticConsensusTest(&cltypes.HistoricalBatch{})).

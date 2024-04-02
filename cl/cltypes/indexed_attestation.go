@@ -1,6 +1,8 @@
 package cltypes
 
 import (
+	"encoding/json"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
@@ -25,6 +27,23 @@ func NewIndexedAttestation() *IndexedAttestation {
 
 func (i *IndexedAttestation) Static() bool {
 	return false
+}
+
+func (i *IndexedAttestation) UnmarshalJSON(buf []byte) error {
+	var tmp struct {
+		AttestingIndices *solid.RawUint64List  `json:"attesting_indicies"`
+		Data             solid.AttestationData `json:"data"`
+		Signature        libcommon.Bytes96     `json:"signature"`
+	}
+	tmp.AttestingIndices = solid.NewRawUint64List(2048, nil)
+	tmp.Data = solid.NewAttestationData()
+	if err := json.Unmarshal(buf, &tmp); err != nil {
+		return err
+	}
+	i.AttestingIndices = tmp.AttestingIndices
+	i.Data = tmp.Data
+	i.Signature = tmp.Signature
+	return nil
 }
 
 func (i *IndexedAttestation) EncodeSSZ(buf []byte) (dst []byte, err error) {

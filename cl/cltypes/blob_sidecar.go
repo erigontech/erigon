@@ -1,6 +1,8 @@
 package cltypes
 
 import (
+	"encoding/json"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
@@ -35,6 +37,29 @@ func NewBlobSidecar(index uint64, blob *Blob, kzgCommitment libcommon.Bytes48, k
 
 func (b *BlobSidecar) EncodeSSZ(buf []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(buf, b.getSchema()...)
+}
+
+func (b *BlobSidecar) UnmarshalJSON(buf []byte) error {
+	var tmp struct {
+		Index                    uint64                   `json:"index,string"`
+		Blob                     *Blob                    `json:"blob"`
+		KzgCommitment            libcommon.Bytes48        `json:"kzg_commitment"`
+		KzgProof                 libcommon.Bytes48        `json:"kzg_proof"`
+		SignedBlockHeader        *SignedBeaconBlockHeader `json:"signed_block_header"`
+		CommitmentInclusionProof solid.HashVectorSSZ      `json:"proof"`
+	}
+	tmp.Blob = &Blob{}
+	tmp.CommitmentInclusionProof = solid.NewHashVector(CommitmentBranchSize)
+	if err := json.Unmarshal(buf, &tmp); err != nil {
+		return err
+	}
+	b.Index = tmp.Index
+	b.Blob = *tmp.Blob
+	b.KzgCommitment = tmp.KzgCommitment
+	b.KzgProof = tmp.KzgProof
+	b.SignedBlockHeader = tmp.SignedBlockHeader
+	b.CommitmentInclusionProof = tmp.CommitmentInclusionProof
+	return nil
 }
 
 func (b *BlobSidecar) EncodingSizeSSZ() int {

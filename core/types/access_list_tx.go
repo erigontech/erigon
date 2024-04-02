@@ -43,7 +43,7 @@ type AccessListTx struct {
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.
-func (tx AccessListTx) copy() *AccessListTx {
+func (tx *AccessListTx) copy() *AccessListTx {
 	cpy := &AccessListTx{
 		LegacyTx: LegacyTx{
 			CommonTx: CommonTx{
@@ -76,11 +76,11 @@ func (tx AccessListTx) copy() *AccessListTx {
 	return cpy
 }
 
-func (tx AccessListTx) GetAccessList() types2.AccessList {
+func (tx *AccessListTx) GetAccessList() types2.AccessList {
 	return tx.AccessList
 }
 
-func (tx AccessListTx) Protected() bool {
+func (tx *AccessListTx) Protected() bool {
 	return true
 }
 
@@ -89,14 +89,14 @@ func (tx *AccessListTx) Unwrap() Transaction {
 }
 
 // EncodingSize returns the RLP encoding size of the whole transaction envelope
-func (tx AccessListTx) EncodingSize() int {
+func (tx *AccessListTx) EncodingSize() int {
 	payloadSize, _, _, _ := tx.payloadSize()
 	// Add envelope size and type size
 	return 1 + rlp2.ListPrefixLen(payloadSize) + payloadSize
 }
 
 // payloadSize calculates the RLP encoding size of transaction, without TxType and envelope
-func (tx AccessListTx) payloadSize() (payloadSize int, nonceLen, gasLen, accessListLen int) {
+func (tx *AccessListTx) payloadSize() (payloadSize int, nonceLen, gasLen, accessListLen int) {
 	// size of ChainID
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(tx.ChainID)
@@ -201,7 +201,7 @@ func EncodeStructSizePrefix(size int, w io.Writer, b []byte) error {
 // MarshalBinary returns the canonical encoding of the transaction.
 // For legacy transactions, it returns the RLP encoding. For EIP-2718 typed
 // transactions, it returns the type and payload.
-func (tx AccessListTx) MarshalBinary(w io.Writer) error {
+func (tx *AccessListTx) MarshalBinary(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize()
 	var b [33]byte
 	// encode TxType
@@ -215,7 +215,7 @@ func (tx AccessListTx) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (tx AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen int) error {
+func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen int) error {
 	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
@@ -283,7 +283,7 @@ func (tx AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLe
 }
 
 // EncodeRLP implements rlp.Encoder
-func (tx AccessListTx) EncodeRLP(w io.Writer) error {
+func (tx *AccessListTx) EncodeRLP(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize()
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp2.ListPrefixLen(payloadSize) + payloadSize
@@ -415,7 +415,7 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 }
 
 // AsMessage returns the transaction as a core.Message.
-func (tx AccessListTx) AsMessage(s Signer, _ *big.Int, rules *chain.Rules) (Message, error) {
+func (tx *AccessListTx) AsMessage(s Signer, _ *big.Int, rules *chain.Rules) (Message, error) {
 	msg := Message{
 		nonce:      tx.Nonce,
 		gasLimit:   tx.Gas,
@@ -479,7 +479,7 @@ func (tx *AccessListTx) Hash() libcommon.Hash {
 	return hash
 }
 
-func (tx AccessListTx) SigningHash(chainID *big.Int) libcommon.Hash {
+func (tx *AccessListTx) SigningHash(chainID *big.Int) libcommon.Hash {
 	return prefixedRlpHash(
 		AccessListTxType,
 		[]interface{}{
@@ -494,13 +494,13 @@ func (tx AccessListTx) SigningHash(chainID *big.Int) libcommon.Hash {
 		})
 }
 
-func (tx AccessListTx) Type() byte { return AccessListTxType }
+func (tx *AccessListTx) Type() byte { return AccessListTxType }
 
-func (tx AccessListTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
+func (tx *AccessListTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
 	return &tx.V, &tx.R, &tx.S
 }
 
-func (tx AccessListTx) GetChainID() *uint256.Int {
+func (tx *AccessListTx) GetChainID() *uint256.Int {
 	return tx.ChainID
 }
 

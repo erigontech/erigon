@@ -900,7 +900,6 @@ func (as *AggregatorPruneStat) Accumulate(other *AggregatorPruneStat) {
 }
 
 func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint64, withWarmup bool, logEvery *time.Ticker) (*AggregatorPruneStat, error) {
-	defer func(t time.Time) { fmt.Printf(" Prune took aggregator_v3.go:879: %s, %d\n", time.Since(t), limit) }(time.Now())
 	defer mxPruneTookAgg.ObserveDuration(time.Now())
 
 	if limit == 0 {

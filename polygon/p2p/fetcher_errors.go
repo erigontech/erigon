@@ -21,12 +21,7 @@ func (e ErrInvalidFetchHeadersRange) Error() string {
 
 func (e ErrInvalidFetchHeadersRange) Is(err error) bool {
 	var errInvalidFetchHeadersRange *ErrInvalidFetchHeadersRange
-	switch {
-	case errors.As(err, &errInvalidFetchHeadersRange):
-		return true
-	default:
-		return false
-	}
+	return errors.As(err, &errInvalidFetchHeadersRange)
 }
 
 type ErrIncompleteHeaders struct {
@@ -44,12 +39,7 @@ func (e ErrIncompleteHeaders) Error() string {
 
 func (e ErrIncompleteHeaders) Is(err error) bool {
 	var errIncompleteHeaders *ErrIncompleteHeaders
-	switch {
-	case errors.As(err, &errIncompleteHeaders):
-		return true
-	default:
-		return false
-	}
+	return errors.As(err, &errIncompleteHeaders)
 }
 
 func (e ErrIncompleteHeaders) LowestMissingBlockNum() uint64 {
@@ -67,12 +57,7 @@ func (e ErrTooManyHeaders) Error() string {
 
 func (e ErrTooManyHeaders) Is(err error) bool {
 	var errTooManyHeaders *ErrTooManyHeaders
-	switch {
-	case errors.As(err, &errTooManyHeaders):
-		return true
-	default:
-		return false
-	}
+	return errors.As(err, &errTooManyHeaders)
 }
 
 type ErrNonSequentialHeaderNumbers struct {
@@ -89,12 +74,7 @@ func (e ErrNonSequentialHeaderNumbers) Error() string {
 
 func (e ErrNonSequentialHeaderNumbers) Is(err error) bool {
 	var errDisconnectedHeaders *ErrNonSequentialHeaderNumbers
-	switch {
-	case errors.As(err, &errDisconnectedHeaders):
-		return true
-	default:
-		return false
-	}
+	return errors.As(err, &errDisconnectedHeaders)
 }
 
 type ErrTooManyBodies struct {
@@ -108,12 +88,7 @@ func (e ErrTooManyBodies) Error() string {
 
 func (e ErrTooManyBodies) Is(err error) bool {
 	var errTooManyBodies *ErrTooManyBodies
-	switch {
-	case errors.As(err, &errTooManyBodies):
-		return true
-	default:
-		return false
-	}
+	return errors.As(err, &errTooManyBodies)
 }
 
 func NewErrMissingBodies(headers []*types.Header) *ErrMissingBodies {
@@ -137,12 +112,7 @@ func (e ErrMissingBodies) LowestMissingBlockNum() (uint64, bool) {
 
 func (e ErrMissingBodies) Is(err error) bool {
 	var errMissingBodies *ErrMissingBodies
-	switch {
-	case errors.As(err, &errMissingBodies):
-		return true
-	default:
-		return false
-	}
+	return errors.As(err, &errMissingBodies)
 }
 
 func lowestHeadersNum(headers []*types.Header) (uint64, bool) {

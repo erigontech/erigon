@@ -1,15 +1,18 @@
 package cltypes
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/big"
 
+	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -32,8 +35,8 @@ type Eth1Block struct {
 	BlockHash     libcommon.Hash              `json:"block_hash"`
 	Transactions  *solid.TransactionsSSZ      `json:"transactions"`
 	Withdrawals   *solid.ListSSZ[*Withdrawal] `json:"withdrawals,omitempty"`
-	BlobGasUsed   uint64                      `json:"blob_gas_used,omitempty,string"`
-	ExcessBlobGas uint64                      `json:"excess_blob_gas,omitempty,string"`
+	BlobGasUsed   uint64                      `json:"blob_gas_used,string"`
+	ExcessBlobGas uint64                      `json:"excess_blob_gas,string"`
 	// internals
 	version   clparams.StateVersion
 	beaconCfg *clparams.BeaconChainConfig
@@ -88,6 +91,96 @@ func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody, be
 
 func (*Eth1Block) Static() bool {
 	return false
+}
+
+func (b *Eth1Block) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		ParentHash    libcommon.Hash              `json:"parent_hash"`
+		FeeRecipient  libcommon.Address           `json:"fee_recipient"`
+		StateRoot     libcommon.Hash              `json:"state_root"`
+		ReceiptsRoot  libcommon.Hash              `json:"receipts_root"`
+		LogsBloom     types.Bloom                 `json:"logs_bloom"`
+		PrevRandao    libcommon.Hash              `json:"prev_randao"`
+		BlockNumber   uint64                      `json:"block_number,string"`
+		GasLimit      uint64                      `json:"gas_limit,string"`
+		GasUsed       uint64                      `json:"gas_used,string"`
+		Time          uint64                      `json:"timestamp,string"`
+		Extra         *solid.ExtraData            `json:"extra_data"`
+		BaseFeePerGas string                      `json:"base_fee_per_gas"`
+		BlockHash     libcommon.Hash              `json:"block_hash"`
+		Transactions  *solid.TransactionsSSZ      `json:"transactions"`
+		Withdrawals   *solid.ListSSZ[*Withdrawal] `json:"withdrawals,omitempty"`
+		BlobGasUsed   uint64                      `json:"blob_gas_used,string"`
+		ExcessBlobGas uint64                      `json:"excess_blob_gas,string"`
+	}{
+		ParentHash:    b.ParentHash,
+		FeeRecipient:  b.FeeRecipient,
+		StateRoot:     b.StateRoot,
+		ReceiptsRoot:  b.ReceiptsRoot,
+		LogsBloom:     b.LogsBloom,
+		PrevRandao:    b.PrevRandao,
+		BlockNumber:   b.BlockNumber,
+		GasLimit:      b.GasLimit,
+		GasUsed:       b.GasUsed,
+		Time:          b.Time,
+		Extra:         b.Extra,
+		BaseFeePerGas: uint256.NewInt(0).SetBytes32(utils.ReverseOfByteSlice(b.BaseFeePerGas[:])).Dec(),
+		BlockHash:     b.BlockHash,
+		Transactions:  b.Transactions,
+		Withdrawals:   b.Withdrawals,
+		BlobGasUsed:   b.BlobGasUsed,
+		ExcessBlobGas: b.ExcessBlobGas,
+	})
+}
+
+func (b *Eth1Block) UnmarshalJSON(data []byte) error {
+	var aux struct {
+		ParentHash    libcommon.Hash              `json:"parent_hash"`
+		FeeRecipient  libcommon.Address           `json:"fee_recipient"`
+		StateRoot     libcommon.Hash              `json:"state_root"`
+		ReceiptsRoot  libcommon.Hash              `json:"receipts_root"`
+		LogsBloom     types.Bloom                 `json:"logs_bloom"`
+		PrevRandao    libcommon.Hash              `json:"prev_randao"`
+		BlockNumber   uint64                      `json:"block_number,string"`
+		GasLimit      uint64                      `json:"gas_limit,string"`
+		GasUsed       uint64                      `json:"gas_used,string"`
+		Time          uint64                      `json:"timestamp,string"`
+		Extra         *solid.ExtraData            `json:"extra_data"`
+		BaseFeePerGas string                      `json:"base_fee_per_gas"`
+		BlockHash     libcommon.Hash              `json:"block_hash"`
+		Transactions  *solid.TransactionsSSZ      `json:"transactions"`
+		Withdrawals   *solid.ListSSZ[*Withdrawal] `json:"withdrawals,omitempty"`
+		BlobGasUsed   uint64                      `json:"blob_gas_used,string"`
+		ExcessBlobGas uint64                      `json:"excess_blob_gas,string"`
+	}
+	aux.Withdrawals = solid.NewStaticListSSZ[*Withdrawal](int(b.beaconCfg.MaxWithdrawalsPerPayload), 44)
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	b.ParentHash = aux.ParentHash
+	b.FeeRecipient = aux.FeeRecipient
+	b.StateRoot = aux.StateRoot
+	b.ReceiptsRoot = aux.ReceiptsRoot
+	b.LogsBloom = aux.LogsBloom
+	b.PrevRandao = aux.PrevRandao
+	b.BlockNumber = aux.BlockNumber
+	b.GasLimit = aux.GasLimit
+	b.GasUsed = aux.GasUsed
+	b.Time = aux.Time
+	b.Extra = aux.Extra
+	tmp := uint256.NewInt(0)
+	if err := tmp.SetFromDecimal(aux.BaseFeePerGas); err != nil {
+		return err
+	}
+	tmpBaseFee := tmp.Bytes32()
+	b.BaseFeePerGas = libcommon.Hash{}
+	copy(b.BaseFeePerGas[:], utils.ReverseOfByteSlice(tmpBaseFee[:]))
+	b.BlockHash = aux.BlockHash
+	b.Transactions = aux.Transactions
+	b.Withdrawals = aux.Withdrawals
+	b.BlobGasUsed = aux.BlobGasUsed
+	b.ExcessBlobGas = aux.ExcessBlobGas
+	return nil
 }
 
 // PayloadHeader returns the equivalent ExecutionPayloadHeader object.

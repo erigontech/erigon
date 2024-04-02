@@ -308,9 +308,6 @@ func (sub *GossipSubscription) Listen() {
 				expirationTime := sub.expiration.Load().(time.Time)
 				if sub.subscribed.Load() && time.Now().After(expirationTime) {
 					sub.stopCh <- struct{}{}
-					if cancelFunc := sub.cf; cancelFunc != nil {
-						cancelFunc() // stop pubsub.Subscription.Next
-					}
 					sub.topic.Close()
 					sub.subscribed.Store(false)
 					continue
@@ -386,9 +383,6 @@ func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, 
 				}
 				log.Warn("[Sentinel] fail to decode gossip packet", "err", err, "topicName", topicName)
 				return
-			}
-			if msg.Topic != nil {
-				fmt.Println(*msg.Topic)
 			}
 			if msg.ReceivedFrom == s.host {
 				continue

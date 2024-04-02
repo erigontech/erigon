@@ -529,6 +529,7 @@ func (hc *HistoryContext) newWriter(tmpdir string, discard bool) *historyBuffere
 		ii: hc.ic.newWriter(tmpdir, discard),
 	}
 	w.historyVals.LogLvl(log.LvlTrace)
+	w.historyVals.SortAndFlushInBackground(true)
 	return w
 }
 

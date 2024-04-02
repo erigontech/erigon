@@ -5,11 +5,16 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon/cl/fork"
+	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/erigon/cl/utils"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
@@ -25,16 +30,15 @@ func (f *ForkChoiceStore) OnAttestation(attestation *solid.Attestation, fromBloc
 		return nil
 	}
 	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.headHash = libcommon.Hash{}
-	f.mu.Unlock()
 	data := attestation.AttestantionData()
 	if err := f.validateOnAttestation(attestation, fromBlock); err != nil {
 		return err
 	}
 	currentEpoch := f.computeEpochAtSlot(f.Slot())
-	// Schedule for later processing.
+
 	if f.Slot() < attestation.AttestantionData().Slot()+1 || data.Target().Epoch() > currentEpoch {
-		f.scheduleAttestationForLaterProcessing(attestation, fromBlock)
 		return nil
 	}
 
@@ -81,56 +85,174 @@ func (f *ForkChoiceStore) OnAttestation(attestation *solid.Attestation, fromBloc
 	return nil
 }
 
-func (f *ForkChoiceStore) OnAggregateAndProof(aggregateAndProof *cltypes.SignedAggregateAndProof, test bool) error {
-	if !f.synced.Load() {
-		return nil
+func (f *ForkChoiceStore) verifyAggregateAndProofSignature(state *state.CachingBeaconState, aggregate *cltypes.AggregateAndProof) error {
+	slot := aggregate.Aggregate.AttestantionData().Slot()
+	publicKey, err := state.ValidatorPublicKey(int(aggregate.AggregatorIndex))
+	if err != nil {
+		return err
 	}
-	slot := aggregateAndProof.Message.Aggregate.AttestantionData().Slot()
-	selectionProof := aggregateAndProof.Message.SelectionProof
-	committeeIndex := aggregateAndProof.Message.Aggregate.AttestantionData().CommitteeIndex()
-	epoch := state.GetEpochAtSlot(f.beaconCfg, slot)
+	domain, err := state.GetDomain(state.BeaconConfig().DomainSelectionProof, f.computeEpochAtSlot(slot))
+	if err != nil {
+		return err
+	}
+	signingRoot := utils.Sha256(merkle_tree.Uint64Root(slot).Bytes(), domain)
+	valid, err := bls.Verify(aggregate.SelectionProof[:], signingRoot[:], publicKey[:])
+	if err != nil {
+		return err
+	}
+	if !valid {
+		return fmt.Errorf("invalid bls signature on aggregate and proof")
+	}
+	return nil
+}
 
-	if err := f.validateOnAttestation(aggregateAndProof.Message.Aggregate, false); err != nil {
+func (f *ForkChoiceStore) verifyAggregatorSignature(state *state.CachingBeaconState, aggregate *cltypes.SignedAggregateAndProof) error {
+	publicKey, err := state.ValidatorPublicKey(int(aggregate.Message.AggregatorIndex))
+	if err != nil {
+		return err
+	}
+	domain, err := state.GetDomain(state.BeaconConfig().DomainAggregateAndProof, f.Slot())
+	if err != nil {
+		return err
+	}
+	signingRoot, err := fork.ComputeSigningRoot(aggregate.Message, domain)
+	if err != nil {
+		return err
+	}
+	valid, err := bls.Verify(aggregate.Signature[:], signingRoot[:], publicKey[:])
+	if err != nil {
+		return err
+	}
+	if !valid {
+		return fmt.Errorf("invalid bls signature on aggregate and proof")
+	}
+	return nil
+}
+
+func (f *ForkChoiceStore) verifyAggregateMessageSignature(s *state.CachingBeaconState, aggregateAndProof *cltypes.SignedAggregateAndProof, attestingIndicies []uint64) error {
+	indexedAttestation := state.GetIndexedAttestation(aggregateAndProof.Message.Aggregate, attestingIndicies)
+
+	valid, err := state.IsValidIndexedAttestation(s, indexedAttestation)
+	if err != nil {
+		return err
+	}
+	if !valid {
+		return fmt.Errorf("invalid aggregate signature")
+	}
+	return nil
+}
+
+func (f *ForkChoiceStore) canProcessAggregate() bool {
+	return f.synced.Load() && f.syncedDataManager.HeadState() != nil
+}
+
+func (f *ForkChoiceStore) verifySignaturesOnAggregate(s *state.CachingBeaconState, aggregateAndProof *cltypes.SignedAggregateAndProof) error {
+	aggregationBits := aggregateAndProof.Message.Aggregate.AggregationBits()
+	// [REJECT] The aggregate attestation has participants -- that is, len(get_attesting_indices(state, aggregate)) >= 1.
+	attestingIndicies, err := s.GetAttestingIndicies(aggregateAndProof.Message.Aggregate.AttestantionData(), aggregationBits, true)
+	if err != nil {
+		return err
+	}
+	if len(attestingIndicies) == 0 {
+		return fmt.Errorf("no attesting indicies")
+	}
+	// [REJECT] The aggregate_and_proof.selection_proof is a valid signature of the aggregate.data.slot by the validator with index aggregate_and_proof.aggregator_index.
+	if err := f.verifyAggregateAndProofSignature(s, aggregateAndProof.Message); err != nil {
 		return err
 	}
 
+	// [REJECT] The aggregator signature, signed_aggregate_and_proof.signature, is valid.
+	if err := f.verifyAggregatorSignature(s, aggregateAndProof); err != nil {
+		return err
+	}
+
+	return f.verifyAggregateMessageSignature(s, aggregateAndProof, attestingIndicies)
+}
+
+// OnAggregateAndProof processes incoming aggregate and proofs. it is called when a new aggregate and proof is received either via gossip or from the Beacon API.
+func (f *ForkChoiceStore) OnAggregateAndProof(aggregateAndProof *cltypes.SignedAggregateAndProof, _ bool) error {
+	if f.canProcessAggregate() {
+		return nil
+	}
+	headState := f.syncedDataManager.HeadState()
+	selectionProof := aggregateAndProof.Message.SelectionProof
+	aggregateData := aggregateAndProof.Message.Aggregate.AttestantionData()
 	target := aggregateAndProof.Message.Aggregate.AttestantionData().Target()
-	// getCheckpointState is non-thread safe, so we need to lock
-	targetState, err := f.getCheckpointState(target)
-	if err != nil {
+	slot := aggregateAndProof.Message.Aggregate.AttestantionData().Slot()
+	committeeIndex := aggregateAndProof.Message.Aggregate.AttestantionData().CommitteeIndex()
+
+	// [IGNORE] aggregate.data.slot is within the last ATTESTATION_PROPAGATION_SLOT_RANGE slots (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. current_slot >= aggregate.data.slot (a client MAY queue future aggregates for processing at the appropriate slot).
+	if aggregateData.Slot() > f.Slot() {
+		f.scheduleAggregateForLaterProcessing(aggregateAndProof)
+		return nil
+	}
+	// [IGNORE] the epoch of aggregate.data.slot is either the current or previous epoch (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. compute_epoch_at_slot(aggregate.data.slot) in (get_previous_epoch(state), get_current_epoch(state))
+	if state.PreviousEpoch(headState) != f.computeEpochAtSlot(slot) && state.Epoch(headState) != f.computeEpochAtSlot(slot) {
 		return nil
 	}
 
-	activeIndiciesLength := uint64(len(targetState.shuffledSet))
-
-	count := targetState.committeeCount(epoch, activeIndiciesLength) * f.beaconCfg.SlotsPerEpoch
-	start := (activeIndiciesLength * committeeIndex) / count
-	end := (activeIndiciesLength * (committeeIndex + 1)) / count
-	committeeLength := end - start
-	if !state.IsAggregator(f.beaconCfg, committeeLength, slot, committeeIndex, selectionProof) {
-		log.Warn("[forkChoice] invalid aggregate and proof")
-		return fmt.Errorf("[forkChoice] invalid aggregate and proof")
+	// [IGNORE] The current finalized_checkpoint is an ancestor of the block defined by aggregate.data.beacon_block_root -- i.e. get_checkpoint_block(store, aggregate.data.beacon_block_root, finalized_checkpoint.epoch) == store.finalized_checkpoint.root
+	if f.Ancestor(aggregateData.BeaconBlockRoot(), f.computeStartSlotAtEpoch(f.FinalizedCheckpoint().Epoch())) != f.FinalizedCheckpoint().BlockRoot() {
+		return nil
 	}
-	return f.OnAttestation(aggregateAndProof.Message.Aggregate, false, false)
+
+	// [IGNORE] The block being voted for (aggregate.data.beacon_block_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue aggregates for processing once block is retrieved).
+	if _, ok := f.forkGraph.GetHeader(aggregateData.BeaconBlockRoot()); !ok {
+		return nil
+	}
+
+	// [REJECT] The committee index is within the expected range -- i.e. index < get_committee_count_per_slot(state, aggregate.data.target.epoch).
+	committeeCountPerSlot := headState.CommitteeCount(target.Epoch())
+	if aggregateData.CommitteeIndex() >= committeeCountPerSlot {
+		return fmt.Errorf("invalid committee index in aggregate and proof")
+	}
+	// [REJECT] The aggregate attestation's epoch matches its target -- i.e. aggregate.data.target.epoch == compute_epoch_at_slot(aggregate.data.slot)
+	if aggregateData.Target().Epoch() != f.computeEpochAtSlot(slot) {
+		return fmt.Errorf("invalid target epoch in aggregate and proof")
+	}
+	committee, err := headState.GetBeaconCommitee(slot, committeeIndex)
+	if err != nil {
+		return err
+	}
+
+	// [REJECT] aggregate_and_proof.selection_proof selects the validator as an aggregator for the slot -- i.e. is_aggregator(state, aggregate.data.slot, index, aggregate_and_proof.selection_proof) returns True.
+	if !state.IsAggregator(f.beaconCfg, uint64(len(committee)), committeeIndex, selectionProof) {
+		log.Warn("receveived aggregate and proof from invalid aggregator")
+		return fmt.Errorf("invalid aggregate and proof")
+	}
+	// [REJECT] The aggregator's validator index is within the committee -- i.e. aggregate_and_proof.aggregator_index in get_beacon_committee(state, aggregate.data.slot, index).
+	if !slices.Contains(committee, aggregateAndProof.Message.AggregatorIndex) {
+		return fmt.Errorf("committee index not in committee")
+	}
+
+	if err := f.verifySignaturesOnAggregate(headState, aggregateAndProof); err != nil {
+		return err
+	}
+
+	// [REJECT] The aggregate attestation's target block is an ancestor of the block named in the LMD vote -- i.e. get_checkpoint_block(store, aggregate.data.beacon_block_root, aggregate.data.target.epoch) == aggregate.data.target.root
+	if f.Ancestor(aggregateData.BeaconBlockRoot(), f.computeStartSlotAtEpoch(target.Epoch())) != target.BlockRoot() {
+		return fmt.Errorf("invalid target block")
+	}
+
+	// Add to some sort of aggregation layer TODO(Giulio2002/domiwei)
+
+	return nil
 }
 
-type attestationJob struct {
-	attestation *solid.Attestation
-	insert      bool
-	when        time.Time
+type aggregateJob struct {
+	aggregate *cltypes.SignedAggregateAndProof
+	when      time.Time
 }
 
-// scheduleAttestationForLaterProcessing scheudules an attestation for later processing
-func (f *ForkChoiceStore) scheduleAttestationForLaterProcessing(attestation *solid.Attestation, insert bool) {
-	root, err := attestation.HashSSZ()
+func (f *ForkChoiceStore) scheduleAggregateForLaterProcessing(agg *cltypes.SignedAggregateAndProof) {
+	root, err := agg.HashSSZ()
 	if err != nil {
 		log.Error("failed to hash attestation", "err", err)
 		return
 	}
-	f.attestationSet.Store(root, &attestationJob{
-		attestation: attestation,
-		insert:      insert,
-		when:        time.Now(),
+	f.aggregatesSet.Store(root, &aggregateJob{
+		aggregate: agg,
+		when:      time.Now(),
 	})
 }
 
@@ -140,7 +262,6 @@ type blockJob struct {
 	when      time.Time
 }
 
-// scheduleAttestationForLaterProcessing scheudules an attestation for later processing
 func (f *ForkChoiceStore) scheduleBlockForLaterProcessing(block *cltypes.SignedBeaconBlock) {
 	root, err := block.HashSSZ()
 	if err != nil {
@@ -167,32 +288,27 @@ func (f *ForkChoiceStore) StartJobsRTT(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-interval.C:
-				f.attestationSet.Range(func(key, value interface{}) bool {
-					job := value.(*attestationJob)
+				f.aggregatesSet.Range(func(key, value interface{}) bool {
+					job := value.(*aggregateJob)
 					if time.Since(job.when) > maxAttestationJobLifetime {
-						f.attestationSet.Delete(key)
+						f.aggregatesSet.Delete(key)
 						return true
 					}
-					currentEpoch := f.computeEpochAtSlot(f.Slot())
-					if f.Slot() >= job.attestation.AttestantionData().Slot()+1 && job.attestation.AttestantionData().Target().Epoch() <= currentEpoch {
-						if err := f.OnAttestation(job.attestation, false, job.insert); err != nil {
+
+					if job.aggregate.Message.Aggregate.AttestantionData().Slot() <= f.Slot() {
+						if err := f.OnAggregateAndProof(job.aggregate, false); err != nil {
 							log.Warn("failed to process attestation", "err", err)
 						}
-						f.attestationSet.Delete(key)
+						f.aggregatesSet.Delete(key)
+					}
+					// helps the CPU not to be overloaded
+					select {
+					case <-ctx.Done():
+						return false
+					case <-time.After(20 * time.Millisecond):
 					}
 					return true
 				})
-			}
-		}
-	}()
-
-	go func() {
-		interval := time.NewTicker(50 * time.Millisecond)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-interval.C:
 				f.blocksSet.Range(func(key, value interface{}) bool {
 					job := value.(*blockJob)
 					if time.Since(job.when) > maxBlockJobLifetime {
@@ -217,6 +333,7 @@ func (f *ForkChoiceStore) StartJobsRTT(ctx context.Context) {
 			}
 		}
 	}()
+
 }
 
 func (f *ForkChoiceStore) setLatestMessage(index uint64, message LatestMessage) {
@@ -263,8 +380,6 @@ func (f *ForkChoiceStore) setUnequivocating(validatorIndex uint64) {
 }
 
 func (f *ForkChoiceStore) processAttestingIndicies(attestation *solid.Attestation, indicies []uint64) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
 	beaconBlockRoot := attestation.AttestantionData().BeaconBlockRoot()
 	target := attestation.AttestantionData().Target()
 

@@ -80,6 +80,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
+	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -319,11 +320,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return nil
 	}); err != nil {
 		return nil, err
-	}
-	if !config.Sync.UseSnapshots {
-		if err := downloader.CreateProhibitNewDownloadsFile(dirs.Snap); err != nil {
-			return nil, err
-		}
 	}
 
 	logger.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
@@ -567,6 +563,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 	backend.forkValidator = engine_helpers.NewForkValidator(ctx, currentBlockNumber, inMemoryExecution, tmpdir, backend.blockReader)
 
+	statusDataProvider := sentry.NewStatusDataProvider(
+		chainKv,
+		chainConfig,
+		genesis,
+		backend.config.NetworkID,
+	)
+
 	// limit "new block" broadcasts to at most 10 random peers at time
 	maxBlockBroadcastPeers := func(header *types.Header) uint { return 10 }
 
@@ -589,16 +592,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	backend.sentriesClient, err = sentry_multi_client.NewMultiClient(
 		backend.chainDB,
-		stack.Config().NodeName(),
 		chainConfig,
-		genesis.Hash(),
-		genesis.Time(),
 		backend.engine,
-		backend.config.NetworkID,
 		sentries,
 		config.Sync,
 		blockReader,
 		blockBufferSize,
+		statusDataProvider,
 		stack.Config().SentryLogPeerInfo,
 		maxBlockBroadcastPeers,
 		logger,
@@ -795,7 +795,15 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.syncPruneOrder = stagedsync.DefaultPruneOrder
 	backend.stagedSync = stagedsync.New(config.Sync, backend.syncStages, backend.syncUnwindOrder, backend.syncPruneOrder, logger)
 
-	hook := stages2.NewHook(backend.sentryCtx, backend.chainDB, backend.notifications, backend.stagedSync, backend.blockReader, backend.chainConfig, backend.logger, backend.sentriesClient.UpdateHead)
+	hook := stages2.NewHook(backend.sentryCtx, backend.chainDB, backend.notifications, backend.stagedSync, backend.blockReader, backend.chainConfig, backend.logger, backend.sentriesClient.SetStatus)
+
+	if !config.Sync.UseSnapshots && backend.downloaderClient != nil {
+		for _, p := range snaptype.AllTypes {
+			backend.downloaderClient.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
+				Type: p.String(),
+			})
+		}
+	}
 
 	checkStateRoot := true
 	pipelineStages := stages2.NewPipelineStages(ctx, backend.chainDB, config, stack.Config().P2P, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.agg, backend.silkworm, backend.forkValidator, logger, checkStateRoot)
@@ -1259,7 +1267,7 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 		}
 
 		discover := true
-		s.downloader, err = downloader.New(ctx, downloaderCfg, s.config.Dirs, s.logger, log.LvlDebug, discover)
+		s.downloader, err = downloader.New(ctx, downloaderCfg, s.logger, log.LvlDebug, discover)
 		if err != nil {
 			return err
 		}
@@ -1369,7 +1377,7 @@ func (s *Ethereum) Start() error {
 	s.sentriesClient.StartStreamLoops(s.sentryCtx)
 	time.Sleep(10 * time.Millisecond) // just to reduce logs order confusion
 
-	hook := stages2.NewHook(s.sentryCtx, s.chainDB, s.notifications, s.stagedSync, s.blockReader, s.chainConfig, s.logger, s.sentriesClient.UpdateHead)
+	hook := stages2.NewHook(s.sentryCtx, s.chainDB, s.notifications, s.stagedSync, s.blockReader, s.chainConfig, s.logger, s.sentriesClient.SetStatus)
 
 	currentTDProvider := func() *big.Int {
 		currentTD, err := readCurrentTotalDifficulty(s.sentryCtx, s.chainDB, s.blockReader)

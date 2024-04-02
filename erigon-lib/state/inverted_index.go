@@ -589,6 +589,8 @@ func (ic *InvertedIndexContext) newWriter(tmpdir string, discard bool) *inverted
 	}
 	w.indexKeys.LogLvl(log.LvlTrace)
 	w.index.LogLvl(log.LvlTrace)
+	w.indexKeys.SortAndFlushInBackground(true)
+	w.index.SortAndFlushInBackground(true)
 	return w
 }
 
@@ -966,6 +968,7 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 	collector := etl.NewCollector("snapshots", ii.dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), ii.logger)
 	defer collector.Close()
 	collector.LogLvl(log.LvlDebug)
+	collector.SortAndFlushInBackground(true)
 
 	// Invariant: if some `txNum=N` pruned - it's pruned Fully
 	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
@@ -1145,14 +1148,8 @@ func (it *FrozenInvertedIdxIter) Close() {
 }
 
 func (it *FrozenInvertedIdxIter) advance() {
-	if it.orderAscend {
-		if it.hasNext {
-			it.advanceInFiles()
-		}
-	} else {
-		if it.hasNext {
-			it.advanceInFiles()
-		}
+	if it.hasNext {
+		it.advanceInFiles()
 	}
 }
 
@@ -1375,14 +1372,8 @@ func (it *RecentInvertedIdxIter) advanceInDB() {
 }
 
 func (it *RecentInvertedIdxIter) advance() {
-	if it.orderAscend {
-		if it.hasNext {
-			it.advanceInDB()
-		}
-	} else {
-		if it.hasNext {
-			it.advanceInDB()
-		}
+	if it.hasNext {
+		it.advanceInDB()
 	}
 }
 
