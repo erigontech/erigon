@@ -3,7 +3,7 @@ package vm
 import (
 	"bytes"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
 	"github.com/ledgerwatch/erigon/params"
 )

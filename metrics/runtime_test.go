@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/gateway-fm/cdk-erigon-lib/common/dbg"
 )
 
 func TestRuntimeMemStatsBlocking(t *testing.T) {

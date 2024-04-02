@@ -28,11 +28,11 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
-	erigonchain "github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	erigonchain "github.com/gateway-fm/cdk-erigon-lib/chain"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/mdbx"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/log/v3"
 

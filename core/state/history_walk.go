@@ -6,10 +6,10 @@ import (
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common/length"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/bitmapdb"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -37,8 +37,8 @@ func WalkAsOfStorage(tx kv.Tx, address libcommon.Address, incarnation uint64, st
 		mCursor,
 		startkey,
 		8*(length.Addr+length.Incarnation),
-		length.Addr,                    /* part1end */
-		length.Addr+length.Incarnation, /* part2start */
+		length.Addr,                                /* part1end */
+		length.Addr+length.Incarnation,             /* part2start */
 		length.Addr+length.Incarnation+length.Hash, /* part3start */
 	)
 

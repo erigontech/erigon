@@ -3,8 +3,8 @@ package sentry
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces"
+	proto_sentry "github.com/gateway-fm/cdk-erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/p2p"

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/huandu/xstrings"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )

@@ -27,7 +27,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/gateway-fm/cdk-erigon-lib/common/length"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/log/v3"

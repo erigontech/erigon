@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
+	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces/grpcutil"
+	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"

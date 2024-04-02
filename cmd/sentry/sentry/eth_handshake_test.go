@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces"
+	proto_sentry "github.com/gateway-fm/cdk-erigon-lib/gointerfaces/sentry"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/ledgerwatch/erigon/core/forkid"

@@ -7,9 +7,9 @@ import (
 	"testing/fstest"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/compress"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
+	"github.com/gateway-fm/cdk-erigon-lib/compress"
+	"github.com/gateway-fm/cdk-erigon-lib/downloader/snaptype"
+	"github.com/gateway-fm/cdk-erigon-lib/recsplit"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 

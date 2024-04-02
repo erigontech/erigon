@@ -4,9 +4,9 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces"
+	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces/remote"
+	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces/types"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"

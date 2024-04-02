@@ -24,8 +24,8 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon/chain"
 
 	"github.com/ledgerwatch/erigon/common/math"

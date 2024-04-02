@@ -3,7 +3,7 @@ package merkle_tree
 import (
 	"encoding/binary"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 )
 
 // Uint64Root retrieves the root hash of a uint64 value by converting it to a byte array and returning it as a hash.

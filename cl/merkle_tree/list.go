@@ -3,7 +3,7 @@ package merkle_tree
 import (
 	"math/bits"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/prysmaticlabs/gohashtree"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"

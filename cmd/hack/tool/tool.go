@@ -3,7 +3,7 @@ package tool
 import (
 	"strconv"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/chain"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"

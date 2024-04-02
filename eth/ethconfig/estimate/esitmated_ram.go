@@ -5,7 +5,7 @@ import (
 	"runtime"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/gateway-fm/cdk-erigon-lib/common/cmp"
 	"github.com/pbnjay/memory"
 	"github.com/shirou/gopsutil/v3/docker"
 )

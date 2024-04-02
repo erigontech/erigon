@@ -6,8 +6,8 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/log/v3"
 
-	erigonchain "github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	erigonchain "github.com/gateway-fm/cdk-erigon-lib/chain"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/chain"
 
 	"github.com/ledgerwatch/erigon/consensus"

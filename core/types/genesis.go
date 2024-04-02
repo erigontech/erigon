@@ -24,8 +24,8 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon/chain"
 
 	common2 "github.com/ledgerwatch/erigon/common"

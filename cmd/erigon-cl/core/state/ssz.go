@@ -3,7 +3,7 @@ package state
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/gateway-fm/cdk-erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/clonable"

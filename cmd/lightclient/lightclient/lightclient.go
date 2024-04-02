@@ -20,10 +20,10 @@ import (
 	"time"
 
 	"github.com/hashicorp/golang-lru/v2"
-	common2 "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
+	common2 "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common/dbg"
+	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces/remote"
+	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"

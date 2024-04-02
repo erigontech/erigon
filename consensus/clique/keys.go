@@ -3,7 +3,7 @@ package clique
 import (
 	"encoding/binary"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 )
 
 // SnapshotFullKey = SnapshotBucket + num (uint64 big endian) + hash

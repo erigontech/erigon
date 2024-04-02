@@ -22,8 +22,8 @@ import (
 	"fmt"
 	"os"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common/length"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -791,7 +791,7 @@ func HashWithModifications(
 	sKeys common.StorageKeys, sValues [][]byte,
 	storagePrefixLen int,
 	newStream *Stream, // Streams that will be reused for old and new stream
-	hb *HashBuilder, // HashBuilder will be reused
+	hb *HashBuilder,   // HashBuilder will be reused
 	trace bool,
 ) (libcommon.Hash, error) {
 	keyCount := len(aKeys) + len(sKeys)

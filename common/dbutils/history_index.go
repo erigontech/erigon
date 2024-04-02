@@ -1,7 +1,7 @@
 package dbutils
 
 import (
-	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/gateway-fm/cdk-erigon-lib/common/length"
 )
 
 func CompositeKeyWithoutIncarnation(key []byte) []byte {

@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 
 	db2 "github.com/ledgerwatch/erigon/smt/pkg/db"
 	"net/url"

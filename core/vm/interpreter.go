@@ -20,8 +20,8 @@ import (
 	"hash"
 	"sync"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/math"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common/math"
 	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/log/v3"
 

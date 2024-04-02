@@ -3,7 +3,7 @@ package trie
 import (
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/ledgerwatch/erigon/smt/pkg/utils"
 	"github.com/ugorji/go/codec"
 )

@@ -4,8 +4,8 @@ import (
 	"bytes"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
 )
 
 // Given a ChunkLocator, moves forward over the chunks and inside each chunk, moves

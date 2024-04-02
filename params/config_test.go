@@ -21,7 +21,7 @@ import (
 	"reflect"
 	"testing"
 
-	chain2 "github.com/ledgerwatch/erigon-lib/chain"
+	chain2 "github.com/gateway-fm/cdk-erigon-lib/chain"
 	"github.com/ledgerwatch/erigon/chain"
 )
 

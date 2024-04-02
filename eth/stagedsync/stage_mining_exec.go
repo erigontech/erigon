@@ -11,16 +11,16 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/net/context"
 
 	"github.com/ledgerwatch/erigon/chain"
 	zktypes "github.com/ledgerwatch/erigon/zk/types"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/memdb"
+	types2 "github.com/gateway-fm/cdk-erigon-lib/types"
 	"github.com/ledgerwatch/erigon/zk/txpool"
 
 	"github.com/ledgerwatch/erigon/core/types/accounts"

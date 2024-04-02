@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -20,7 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/kvcache"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 )

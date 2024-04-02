@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
+	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces"
+	sentinelrpc "github.com/gateway-fm/cdk-erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"

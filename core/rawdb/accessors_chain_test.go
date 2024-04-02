@@ -24,8 +24,8 @@ import (
 	"math/big"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/memdb"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/sha3"
 

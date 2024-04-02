@@ -3,7 +3,7 @@ package cltypes_test
 import (
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"

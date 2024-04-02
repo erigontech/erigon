@@ -30,9 +30,9 @@ import (
 	"time"
 
 	"github.com/gballet/go-verkle"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
+	rlp2 "github.com/gateway-fm/cdk-erigon-lib/rlp"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"

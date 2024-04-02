@@ -3,7 +3,7 @@ package network
 import (
 	"sync"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/net/context"
 

@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common"
 	chain2 "github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/spf13/cobra"

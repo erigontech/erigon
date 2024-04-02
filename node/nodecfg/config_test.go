@@ -22,7 +22,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/gateway-fm/cdk-erigon-lib/common/datadir"
 	node2 "github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 )
