@@ -87,14 +87,23 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 	for chunkNum := uint64(0); chunkNum < numChunks; chunkNum++ {
 		chunkStart := start + chunkNum*eth.MaxHeadersServe
 		chunkEnd := cmp.Min(end, chunkStart+eth.MaxHeadersServe)
-		headersChunk, err := fetchWithRetry(f.config, func() ([]*types.Header, error) {
-			return f.fetchHeaders(ctx, chunkStart, chunkEnd, peerId)
-		})
-		if err != nil {
-			return nil, err
-		}
+		for chunkStart < chunkEnd {
+			// a node may not respond with all MaxHeadersServe in 1 response,
+			// so we keep on consuming from last received number (akin to consuming a paging api)
+			// until we have all headers of the chunk or the peer stopped returning headers
+			headersChunk, err := fetchWithRetry(f.config, func() ([]*types.Header, error) {
+				return f.fetchHeaders(ctx, chunkStart, chunkEnd, peerId)
+			})
+			if err != nil {
+				return nil, err
+			}
+			if len(headersChunk) == 0 {
+				break
+			}
 
-		headers = append(headers, headersChunk...)
+			headers = append(headers, headersChunk...)
+			chunkStart += uint64(len(headersChunk))
+		}
 	}
 
 	if err := f.validateHeadersResponse(headers, start, amount); err != nil {

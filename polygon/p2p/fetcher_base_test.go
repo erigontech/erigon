@@ -72,7 +72,7 @@ func TestFetcherFetchHeadersWithChunking(t *testing.T) {
 			Id:     sentry.MessageId_BLOCK_HEADERS_66,
 			PeerId: peerId.H512(),
 			// 1024 headers in first response
-			Data: blockHeadersPacket66Bytes(t, requestId1, mockHeaders[:1025]),
+			Data: blockHeadersPacket66Bytes(t, requestId1, mockHeaders[:1024]),
 		},
 	}
 	mockRequestResponse1 := requestResponseMock{
@@ -88,7 +88,7 @@ func TestFetcherFetchHeadersWithChunking(t *testing.T) {
 			Id:     sentry.MessageId_BLOCK_HEADERS_66,
 			PeerId: peerId.H512(),
 			// remaining 975 headers in second response
-			Data: blockHeadersPacket66Bytes(t, requestId2, mockHeaders[1025:]),
+			Data: blockHeadersPacket66Bytes(t, requestId2, mockHeaders[1024:]),
 		},
 	}
 	mockRequestResponse2 := requestResponseMock{
@@ -171,7 +171,7 @@ func TestFetcherFetchHeadersResponseTimeoutRetrySuccess(t *testing.T) {
 			Id:     sentry.MessageId_BLOCK_HEADERS_66,
 			PeerId: peerId.H512(),
 			// 1024 headers in first response
-			Data: blockHeadersPacket66Bytes(t, requestId1, mockHeaders[:1025]),
+			Data: blockHeadersPacket66Bytes(t, requestId1, mockHeaders[:1024]),
 		},
 	}
 	mockRequestResponse1 := requestResponseMock{
@@ -205,7 +205,7 @@ func TestFetcherFetchHeadersResponseTimeoutRetrySuccess(t *testing.T) {
 			Id:     sentry.MessageId_BLOCK_HEADERS_66,
 			PeerId: peerId.H512(),
 			// remaining 975 headers in third response
-			Data: blockHeadersPacket66Bytes(t, requestId3, mockHeaders[1025:]),
+			Data: blockHeadersPacket66Bytes(t, requestId3, mockHeaders[1024:]),
 		},
 	}
 	mockRequestResponse3 := requestResponseMock{
@@ -246,24 +246,39 @@ func TestFetcherFetchHeadersErrIncompleteResponse(t *testing.T) {
 	t.Parallel()
 
 	peerId := PeerIdFromUint64(1)
-	requestId := uint64(1234)
-	mockInboundMessages := []*sentry.InboundMessage{
+	requestId1 := uint64(1234)
+	requestId2 := uint64(1235)
+	mockInboundMessages1 := []*sentry.InboundMessage{
 		{
 			Id:     sentry.MessageId_BLOCK_HEADERS_66,
 			PeerId: peerId.H512(),
-			Data:   newMockBlockHeadersPacket66Bytes(t, requestId, 2),
+			Data:   newMockBlockHeadersPacket66Bytes(t, requestId1, 2),
 		},
 	}
-	mockRequestResponse := requestResponseMock{
-		requestId:                   requestId,
-		mockResponseInboundMessages: mockInboundMessages,
+	mockInboundMessages2 := []*sentry.InboundMessage{
+		{
+			Id:     sentry.MessageId_BLOCK_HEADERS_66,
+			PeerId: peerId.H512(),
+			Data:   newMockBlockHeadersPacket66Bytes(t, requestId2, 0),
+		},
+	}
+	mockRequestResponse1 := requestResponseMock{
+		requestId:                   requestId1,
+		mockResponseInboundMessages: mockInboundMessages1,
 		wantRequestPeerId:           peerId,
 		wantRequestOriginNumber:     1,
 		wantRequestAmount:           3,
 	}
+	mockRequestResponse2 := requestResponseMock{
+		requestId:                   requestId2,
+		mockResponseInboundMessages: mockInboundMessages2,
+		wantRequestPeerId:           peerId,
+		wantRequestOriginNumber:     3,
+		wantRequestAmount:           1,
+	}
 
-	test := newFetcherTest(t, newMockRequestGenerator(requestId))
-	test.mockSentryStreams(mockRequestResponse)
+	test := newFetcherTest(t, newMockRequestGenerator(requestId1, requestId2))
+	test.mockSentryStreams(mockRequestResponse1, mockRequestResponse2)
 	test.run(func(ctx context.Context, t *testing.T) {
 		var errIncompleteHeaders *ErrIncompleteHeaders
 		headers, err := test.fetcher.FetchHeaders(ctx, 1, 4, peerId)
