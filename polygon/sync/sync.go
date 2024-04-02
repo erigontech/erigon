@@ -228,9 +228,11 @@ func (s *Sync) Run(ctx context.Context) error {
 		return err
 	}
 
-	var newTip *types.Header
-	for tip != newTip { // loop until we converge at latest checkpoint & milestone
-		newTip, err = s.blockDownloader.DownloadBlocksUsingCheckpoints(ctx, tip.Number.Uint64()+1)
+	var prevTip *types.Header
+	for tip != prevTip { // loop until we converge at latest checkpoint & milestone
+		prevTip = tip
+
+		newTip, err := s.blockDownloader.DownloadBlocksUsingCheckpoints(ctx, tip.Number.Uint64()+1)
 		if err != nil {
 			return err
 		}
