@@ -16,10 +16,6 @@ on:
       - synchronize
       - ready_for_review
 
-concurrency:
-  group: ${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   tests:
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
