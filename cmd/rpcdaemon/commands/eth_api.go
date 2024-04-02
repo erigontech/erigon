@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	ethFilters "github.com/ledgerwatch/erigon/eth/filters"
+	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/rpc"
 	ethapi2 "github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
@@ -144,6 +145,13 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 
 func (api *BaseAPI) chainConfig(tx kv.Tx) (*chain.Config, error) {
 	cfg, _, err := api.chainConfigWithGenesis(tx)
+
+	//[zkevm] get dynamic fork config
+	hermezDb := hermez_db.NewHermezDbReader(tx)
+	if err := stagedsync.UpdateZkEVMBlockCfg(cfg, hermezDb, ""); err != nil {
+		return cfg, err
+	}
+
 	return cfg, err
 }
 

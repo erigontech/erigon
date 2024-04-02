@@ -131,6 +131,11 @@ func SpawnExecuteBlocksStageZk(s *StageState, u Unwinder, tx kv.RwTx, toBlock ui
 	if err != nil {
 		return err
 	}
+
+	if err := UpdateZkEVMBlockCfg(cfg.chainConfig, hermezDb, logPrefix); err != nil {
+		return err
+	}
+
 	prevBlockRoot := header.Root
 	prevBlockHash := prevheaderHash
 Loop:
@@ -161,9 +166,7 @@ Loop:
 		writeChangeSets := nextStagesExpectData || blockNum > cfg.prune.History.PruneTo(to)
 		writeReceipts := nextStagesExpectData || blockNum > cfg.prune.Receipts.PruneTo(to)
 		writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
-		if err := UpdateZkEVMBlockCfg(cfg.chainConfig, hermezDb, logPrefix); err != nil {
-			return err
-		}
+
 		header.ParentHash = prevBlockHash
 		if err := executeBlockZk(block, &prevBlockRoot, header, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, initialCycle, stateStream, hermezDb); err != nil {
 			if !errors.Is(err, context.Canceled) {
@@ -512,7 +515,11 @@ func PruneExecutionStageZk(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx c
 	return nil
 }
 
-func UpdateZkEVMBlockCfg(cfg *chain.Config, hermezDb *hermez_db.HermezDb, logPrefix string) error {
+type ForkReader interface {
+	GetForkIdBlock(forkId uint64) (uint64, error)
+}
+
+func UpdateZkEVMBlockCfg(cfg *chain.Config, hermezDb ForkReader, logPrefix string) error {
 	update := func(forkId uint64, forkBlock **big.Int) error {
 		if *forkBlock != nil && *forkBlock != big.NewInt(0) {
 			return nil
