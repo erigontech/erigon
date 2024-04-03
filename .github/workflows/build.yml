@@ -44,12 +44,13 @@ jobs:
               TAG=${{ github.event.release.tag_name }}
             fi
           fi
-          echo ::set-output name=version::$TAG
+          echo "version=$TAG" >> $GITHUB_OUTPUT
           # Determine if latest tag should be applied
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             echo "LATEST_TAG=false" >> $GITHUB_ENV
           else
             echo "LATEST_TAG=true" >> $GITHUB_ENV
+          fi
 
   build-and-push-amd64:
     needs: prepare
