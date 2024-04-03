@@ -31,13 +31,13 @@ jobs:
         with:
           fetch-depth: 2 # Ensures we fetch enough history to compare
 
-      - name: Is ledgerwatch/erigon-snapshots updated in go.mod
+      - name: Is ledgerwatch/erigon-snapshot updated in go.mod
         run: |
           DIFF=$(git diff HEAD~1 HEAD -- go.mod | grep 'github.com/ledgerwatch/erigon-snapshot')
           if [[ ! -z "$DIFF" ]]; then
-            echo "ModModified=true" >> "$GITHUB_ENV"
+            echo "{ModModified}={true}" >> "$GITHUB_ENV"
           else
-            echo "ModModified=false" >> "$GITHUB_ENV"
+            echo "{ModModified}={false}" >> "$GITHUB_ENV"
           fi
 
   ManifestCheck:
@@ -63,6 +63,7 @@ jobs:
 
       - name: mainnet webseeds
         run: |
+          echo $ModModified
           ./build/bin/downloader manifest-verify --chain mainnet
 
       - name: bor-mainnet webseeds
