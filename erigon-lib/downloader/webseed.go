@@ -172,8 +172,9 @@ func (d *WebSeeds) fetchFileEtags(ctx context.Context, manifestResponse snaptype
 }
 
 func (d *WebSeeds) VerifyManifestedBuckets(ctx context.Context, failFast bool) error {
-	var supErr []error
-	var reports []*WebSeedCheckReport
+	supErr := make([]error, 0, len(d.seeds))
+	reports := make([]*WebSeedCheckReport, 0, len(d.seeds))
+
 	for _, webSeedProviderURL := range d.seeds {
 		select {
 		case <-ctx.Done():
