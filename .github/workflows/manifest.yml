@@ -34,9 +34,9 @@ jobs:
       - name: Is ledgerwatch/erigon-snapshots updated in go.mod
         id: check-modified
         run: |
-          echo ${{ github.base_ref }}
-          git fetch origin/${{ github.base_ref }}:${{ github.base_ref }} --depth=1
-          DIFF=$(git diff ${{ github.base_ref }} HEAD -- go.mod | grep '+.*github.com/ledgerwatch/erigon-snapshots')
+          git remote get-ulr origin
+          git fetch origin ${{ github.base_ref }} --depth=2
+          DIFF=$(git diff ${{ github.base_ref }} HEAD -- go.mod | grep '*github.com/ledgerwatch/erigon-snapshots')
           if [[ ! -z "$DIFF" ]]; then
             echo "::set-output name=modified::true"
           else
