@@ -770,6 +770,7 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 		pruneLimit = 100_000
 		withWarmup = true
 	}
+	withWarmup = false // disabling this feature for now - seems it doesn't cancel even after prune finished
 
 	started := time.Now()
 	localTimeout := time.NewTicker(timeout)
