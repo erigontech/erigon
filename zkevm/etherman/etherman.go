@@ -161,13 +161,13 @@ func NewClient(cfg Config) (*Client, error) {
 	switch cfg.L1ChainID {
 	case params.MainnetChainConfig.ChainID.Uint64():
 		l1Conf = params.MainnetChainConfig
-		l2Conf = params.HermezMainnetChainConfig
+		l2Conf = params.ChainConfigByChainName(cfg.L2ChainName)
 	case params.SepoliaChainConfig.ChainID.Uint64():
 		l1Conf = params.SepoliaChainConfig
-		l2Conf = params.ChainConfigByChainName(zkchainconfig.GetChainName(cfg.L2ChainID))
+		l2Conf = params.ChainConfigByChainName(cfg.L2ChainName)
 	default:
 		l1Conf = params.ChainConfigByChainName(zkchainconfig.GetChainName(cfg.L1ChainID))
-		l2Conf = params.ChainConfigByChainName(zkchainconfig.GetChainName(cfg.L2ChainID))
+		l2Conf = params.ChainConfigByChainName(cfg.L2ChainName)
 	}
 	if l1Conf == nil {
 		panic(fmt.Sprintf("Config not found for L1 chain ID %d", cfg.L1ChainID))

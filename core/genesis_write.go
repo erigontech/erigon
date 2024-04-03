@@ -675,6 +675,6 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 	case networkname.X1TestnetChainName:
 		return X1TestnetGenesisBlock()
 	default:
-		return nil
+		return DynamicGenesisBlock(chain)
 	}
 }

@@ -17,6 +17,21 @@ Current status of cdk-erigon's support for running various chains and fork ids:
 - zkEVM mainnet — alpha support
 - CDK Chains - experimental support (forkid.8 and above)
 
+## Dynamic Chain Configuration
+To use chains other than the defaults above, a set of configuration files can be supplied to run any chain.
+
+1. Create a directory `~/dynamic-configs` (in the user home directory)
+2. Ensure your chain name starts with the word `dynamic` e.g. `dynamic-mynetwork`
+3. Create 3 files in dynamic configs (examples for Cardona in `zk/examples/dynamic-configs`):
+   - `dynamic-{network}-allocs.json` - the allocs file
+   - `dynamic-{network}-chainspec.json` - the chainspec file
+   - `dynamic-{network}-conf.json` - an additional configuration file
+- Ensure to create a run configuration to set flags, with the network name beginning dynamic
+
+This could be more concise, however we are attempting to retain upstream compatibility where possible.
+
+Mount point for this folder on docker container: `~/dynamic-configs` (home directory of erigon user)
+
 ## Prereqs
 In order to use the optimal vectorized poseidon hashing for the Sparse Merkle Tree, on x86 the following packages are required (for Apple silicon it will fall back to the iden3 library and as such these dependencies are not required in that case.
 
@@ -28,11 +43,11 @@ Using the Makefile command: `make build-libs` will install these for the relevan
 
 Due to dependency requirements Go 1.19 is required to build.
 
-## sequencer (WIP)
+## Sequencer (WIP)
 
 Enable Sequencer: `CDK_ERIGON_SEQUENCER=1 ./build/bin/cdk-erigon <flags>`
 
-## zkevm-specific API Support
+## zkEVM-specific API Support
 
 In order to enable the zkevm_ namespace, please add 'zkevm' to the http.api flag (see the example config below).
 

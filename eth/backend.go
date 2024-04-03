@@ -31,8 +31,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/holiman/uint256"
 	erigonchain "github.com/gateway-fm/cdk-erigon-lib/chain"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/zk/sequencer"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
@@ -748,7 +748,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 		// entering ZK territory!
 		cfg := backend.config.Zk
-		backend.etherMan = newEtherMan(cfg)
+		backend.etherMan = newEtherMan(cfg, chainConfig.ChainName)
 
 		isSequencer := sequencer.IsSequencer()
 		var l1Topics [][]libcommon.Hash
@@ -884,11 +884,12 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 }
 
 // creates an EtherMan instance with default parameters
-func newEtherMan(cfg *ethconfig.Zk) *etherman.Client {
+func newEtherMan(cfg *ethconfig.Zk, l2ChainName string) *etherman.Client {
 	ethmanConf := etherman.Config{
 		URL:                       cfg.L1RpcUrl,
 		L1ChainID:                 cfg.L1ChainId,
 		L2ChainID:                 cfg.L2ChainId,
+		L2ChainName:               l2ChainName,
 		PoEAddr:                   cfg.AddressRollup,
 		MaticAddr:                 cfg.L1MaticContractAddress,
 		GlobalExitRootManagerAddr: cfg.AddressGerManager,

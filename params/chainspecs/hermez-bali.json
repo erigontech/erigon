@@ -1,5 +1,5 @@
 {
-  "ChainName": "bali",
+  "ChainName": "hermez-bali",
   "chainId": 2440,
   "consensus": "ethash",
   "homesteadBlock": 0,

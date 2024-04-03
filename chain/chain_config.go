@@ -292,6 +292,9 @@ func (c *Config) CheckConfigForkOrder() error {
 		return zkchainconfig.CheckForkOrder()
 	}
 
+	// [dynamic fork]
+	return nil
+
 	var lastFork forkBlockNumber
 
 	for _, fork := range c.forkBlockNumbers() {
