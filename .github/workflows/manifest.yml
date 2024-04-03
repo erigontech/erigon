@@ -31,14 +31,13 @@ jobs:
         with:
           fetch-depth: 2 # Ensures we fetch enough history to compare
 
-      - name: Is ledgerwatch/erigon-snapshot updated in go.mod
+      - name: Is ledgerwatch/erigon-snapshot updated in go.mod # if not, pipeline should exit beacuse grep exit code >0 when no match
         run: |
           git diff HEAD~1 HEAD -- go.mod | grep 'github.com/ledgerwatch/erigon-snapshot'
-          echo "ModModified=true" >> "$GITHUB_ENV"
 
   ManifestCheck:
     needs: check-snap-modifications
-    if: $ModModified == 'true' && (${{ github.event_name == 'push' || !github.event.pull_request.draft }})
+    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     strategy:
       matrix:
         os:
