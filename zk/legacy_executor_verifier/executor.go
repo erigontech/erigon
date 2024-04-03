@@ -92,6 +92,7 @@ func (e *Executor) Verify(p *Payload, request *VerifierRequest) (bool, error) {
 
 	log.Debug("Sending request to grpc server", "grpcUrl", e.grpcUrl)
 
+	size := 1024 * 1024 * 256 // 256mb maximum size - hack for now until trimmed witness is proved off
 	resp, err := e.client.ProcessStatelessBatchV2(ctx, &executor.ProcessStatelessBatchRequestV2{
 		Witness:           p.Witness,
 		DataStream:        p.DataStream,
@@ -108,7 +109,7 @@ func (e *Executor) Verify(p *Payload, request *VerifierRequest) (bool, error) {
 		//	EnableReturnData:          0,
 		//	TxHashToGenerateFullTrace: nil,
 		//},
-	})
+	}, grpc.MaxCallSendMsgSize(size), grpc.MaxCallRecvMsgSize(size))
 	if err != nil {
 		return false, fmt.Errorf("failed to process stateless batch: %w", err)
 	}
@@ -137,7 +138,7 @@ func responseCheck(resp *executor.ProcessBatchResponseV2, erigonStateRoot common
 	}
 
 	if !bytes.Equal(resp.NewStateRoot, erigonStateRoot.Bytes()) {
-		return false, fmt.Errorf("erigon state root mismatch: expected %s, got %s", erigonStateRoot, resp.NewStateRoot)
+		return false, fmt.Errorf("erigon state root mismatch: expected %s, got %s", erigonStateRoot, common.BytesToHash(resp.NewStateRoot))
 	}
 
 	return true, nil
