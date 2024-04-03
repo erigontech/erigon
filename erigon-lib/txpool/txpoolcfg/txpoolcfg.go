@@ -110,7 +110,7 @@ const (
 	UnmatchedBlobTxExt      DiscardReason = 29 // KZGcommitments must match the corresponding blobs and proofs
 	BlobTxReplace           DiscardReason = 30 // Cannot replace type-3 blob txn with another type of txn
 	BlobPoolOverflow        DiscardReason = 31 // The total number of blobs (through blob txs) in the pool has reached its limit
-	GasExceedsBlockGasLimit DiscardReason = 32 // The gasLimit amount is greater than the block gas
+	GasExceedsBlockGasLimit DiscardReason = 32 // The gasLimit amount is greater than the block gas limit
 )
 
 func (r DiscardReason) String() string {
