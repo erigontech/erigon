@@ -34,11 +34,7 @@ jobs:
       - name: Is ledgerwatch/erigon-snapshot updated in go.mod
         run: |
           git diff HEAD~1 HEAD -- go.mod | grep 'github.com/ledgerwatch/erigon-snapshot'
-#          if [[ ! -z "$DIFF" ]]; then
-            echo "ModModified=true" >> "$GITHUB_ENV"
-#          else
-#            echo "ModModified=false" >> "$GITHUB_ENV"
-#          fi
+          echo "ModModified=true" >> "$GITHUB_ENV"
 
   ManifestCheck:
     needs: check-snap-modifications
