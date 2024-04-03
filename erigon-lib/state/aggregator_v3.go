@@ -1289,6 +1289,8 @@ func (ac *AggregatorV3Context) SqueezeCommitmentFiles() error {
 		sizeDelta      = datasize.B
 		sqExt          = ".squeezed"
 	)
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
 
 	for ci := 0; ci < len(commitFiles); ci++ {
 		cf := commitFiles[ci]
@@ -1330,9 +1332,11 @@ func (ac *AggregatorV3Context) SqueezeCommitmentFiles() error {
 			writer := NewArchiveWriter(squeezedCompr, commitment.d.compression)
 			vt := commitment.commitmentValTransformDomain(accounts, storage, af, sf)
 
+			i := 0
 			for reader.HasNext() {
 				k, _ := reader.Next(nil)
 				v, _ := reader.Next(nil)
+				i++
 
 				if k == nil {
 					// nil keys are not supported for domains
@@ -1350,6 +1354,13 @@ func (ac *AggregatorV3Context) SqueezeCommitmentFiles() error {
 				}
 				if err = writer.AddWord(v); err != nil {
 					return fmt.Errorf("write value word: %w", err)
+				}
+
+				select {
+				case <-logEvery.C:
+					log.Info("SqueezeCommitmentFiles", "file", cf.decompressor.FileName(), "k", fmt.Sprintf("%x", k),
+						"progress", fmt.Sprintf("%d/%d", i, cf.decompressor.Count()))
+				default:
 				}
 			}
 
