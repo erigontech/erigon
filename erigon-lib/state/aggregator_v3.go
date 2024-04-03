@@ -1336,7 +1336,7 @@ func (ac *AggregatorV3Context) SqueezeCommitmentFiles() error {
 			for reader.HasNext() {
 				k, _ := reader.Next(nil)
 				v, _ := reader.Next(nil)
-				i++
+				i += 2
 
 				if k == nil {
 					// nil keys are not supported for domains
