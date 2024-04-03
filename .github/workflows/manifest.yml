@@ -32,18 +32,17 @@ jobs:
           fetch-depth: 2 # Ensures we fetch enough history to compare
 
       - name: Is ledgerwatch/erigon-snapshots updated in go.mod
-        id: check-modified
         run: |
           DIFF=$(git diff HEAD~1 HEAD -- go.mod | grep 'github.com/ledgerwatch/erigon-snapshot')
           if [[ ! -z "$DIFF" ]]; then
-            echo "::set-output name=modified::true"
+            echo "ModModified=true" >> "$GITHUB_ENV"
           else
-            echo "::set-output name=modified::false"
+            echo "ModModified=false" >> "$GITHUB_ENV"
           fi
 
   ManifestCheck:
     needs: check-snap-modifications
-    if: needs.check-modified.outputs.modified == 'true' && (${{ github.event_name == 'push' || !github.event.pull_request.draft }})
+    if: $ModModified == 'true' && (${{ github.event_name == 'push' || !github.event.pull_request.draft }})
     strategy:
       matrix:
         os:
