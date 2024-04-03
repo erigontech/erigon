@@ -112,6 +112,10 @@ func New(
 	if err != nil {
 		return nil, err
 	}
+	err = ethereum.PreStart()
+	if err != nil {
+		return nil, err
+	}
 	return &ErigonNode{stack: node, backend: ethereum}, nil
 }
 
