@@ -917,7 +917,7 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 	}
 	if p.blockGasLimit.Load() > txn.Gas {
 		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: gas limit exceeds block gas limit"))
+			p.logger.Info("TX TRACING: gas limit exceeds block gas limit")
 		}
 		return txpoolcfg.GasExceedsBlockGasLimit
 	}
