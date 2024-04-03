@@ -376,30 +376,35 @@ var (
 		Usage: "Ethereum L1 RPC endpoint",
 		Value: "",
 	}
-	L1PolygonRollupManagerFlag = cli.StringFlag{
-		Name:  "zkevm.l1-polygon-rollup-manager",
-		Usage: "Ethereum L1 Polygon Rollup Manager Address",
+	AddressSequencerFlag = cli.StringFlag{
+		Name:  "zkevm.address-sequencer",
+		Usage: "Sequencer address",
 		Value: "",
 	}
-	L1RollupFlag = cli.StringFlag{
-		Name:  "zkevm.l1-rollup",
-		Usage: "Ethereum L1 Rollup Address",
+	AddressAdminFlag = cli.StringFlag{
+		Name:  "zkevm.address-admin",
+		Usage: "Admin address",
+		Value: "",
+	}
+	AddressRollupFlag = cli.StringFlag{
+		Name:  "zkevm.address-rollup",
+		Usage: "Rollup address",
+		Value: "",
+	}
+	AddressZkevmFlag = cli.StringFlag{
+		Name:  "zkevm.address-zkevm",
+		Usage: "Zkevm address",
+		Value: "",
+	}
+	AddressGerManagerFlag = cli.StringFlag{
+		Name:  "zkevm.address-ger-manager",
+		Usage: "Ger Manager address",
 		Value: "",
 	}
 	L1RollupIdFlag = cli.Uint64Flag{
 		Name:  "zkevm.l1-rollup-id",
 		Usage: "Ethereum L1 Rollup ID",
 		Value: 1,
-	}
-	L1TopicVerificationFlag = cli.StringFlag{
-		Name:  "zkevm.l1-topic-verification",
-		Usage: "Ethereum L1 topic for verification",
-		Value: "",
-	}
-	L1TopicSequenceFlag = cli.StringFlag{
-		Name:  "zkevm.l1-topic-sequence",
-		Usage: "Ethereum L1 topic for sequence",
-		Value: "",
 	}
 	L1BlockRangeFlag = cli.Uint64Flag{
 		Name:  "zkevm.l1-block-range",
@@ -417,11 +422,6 @@ var (
 		Usage: "Ethereum L1 Matic contract address",
 		Value: "",
 	}
-	L1GERManagerContractAddressFlag = cli.StringFlag{
-		Name:  "zkevm.l1-ger-manager-contract-address",
-		Usage: "Ethereum L1 GER Manager contract address",
-		Value: "",
-	}
 	L1FirstBlockFlag = cli.Uint64Flag{
 		Name:  "zkevm.l1-first-block",
 		Usage: "First block to start syncing from on the L1",
@@ -436,11 +436,6 @@ var (
 		Name:  "zkevm.sequencer-initial-fork-id",
 		Usage: "The initial fork id to launch the sequencer with",
 		Value: 8,
-	}
-	SequencerAddressFlag = cli.StringFlag{
-		Name:  "zkevm.sequencer-address",
-		Usage: "The sequencer address to use if running as a sequencer",
-		Value: "",
 	}
 	ExecutorUrls = cli.StringFlag{
 		Name:  "zkevm.executor-urls",

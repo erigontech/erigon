@@ -35,32 +35,31 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 
 	cfg.Zk = &ethconfig.Zk{
-		L2ChainId:                   ctx.Uint64(utils.L2ChainIdFlag.Name),
-		L2RpcUrl:                    ctx.String(utils.L2RpcUrlFlag.Name),
-		L2DataStreamerUrl:           ctx.String(utils.L2DataStreamerUrlFlag.Name),
-		L2DataStreamerTimeout:       l2DataStreamTimeout,
-		L1ChainId:                   ctx.Uint64(utils.L1ChainIdFlag.Name),
-		L1RpcUrl:                    ctx.String(utils.L1RpcUrlFlag.Name),
-		L1PolygonRollupManager:      libcommon.HexToAddress(ctx.String(utils.L1PolygonRollupManagerFlag.Name)),
-		L1Rollup:                    libcommon.HexToAddress(ctx.String(utils.L1RollupFlag.Name)),
-		L1RollupId:                  ctx.Uint64(utils.L1RollupIdFlag.Name),
-		L1TopicVerification:         libcommon.HexToHash(ctx.String(utils.L1TopicVerificationFlag.Name)),
-		L1TopicSequence:             libcommon.HexToHash(ctx.String(utils.L1TopicSequenceFlag.Name)),
-		L1BlockRange:                ctx.Uint64(utils.L1BlockRangeFlag.Name),
-		L1QueryDelay:                ctx.Uint64(utils.L1QueryDelayFlag.Name),
-		L1MaticContractAddress:      libcommon.HexToAddress(ctx.String(utils.L1MaticContractAddressFlag.Name)),
-		L1GERManagerContractAddress: libcommon.HexToAddress(ctx.String(utils.L1GERManagerContractAddressFlag.Name)),
-		L1FirstBlock:                ctx.Uint64(utils.L1FirstBlockFlag.Name),
-		RpcRateLimits:               ctx.Int(utils.RpcRateLimitsFlag.Name),
-		DatastreamVersion:           ctx.Int(utils.DatastreamVersionFlag.Name),
-		RebuildTreeAfter:            ctx.Uint64(utils.RebuildTreeAfterFlag.Name),
-		SequencerInitialForkId:      ctx.Uint64(utils.SequencerInitialForkId.Name),
-		SequencerAddress:            libcommon.HexToAddress(ctx.String(utils.SequencerAddressFlag.Name)),
-		ExecutorUrls:                strings.Split(ctx.String(utils.ExecutorUrls.Name), ","),
-		ExecutorStrictMode:          ctx.Bool(utils.ExecutorStrictMode.Name),
-		AllowFreeTransactions:       ctx.Bool(utils.AllowFreeTransactions.Name),
-		AllowPreEIP155Transactions:  ctx.Bool(utils.AllowPreEIP155Transactions.Name),
-		WitnessFull:                 ctx.Bool(utils.WitnessFullFlag.Name),
+		L2ChainId:                  ctx.Uint64(utils.L2ChainIdFlag.Name),
+		L2RpcUrl:                   ctx.String(utils.L2RpcUrlFlag.Name),
+		L2DataStreamerUrl:          ctx.String(utils.L2DataStreamerUrlFlag.Name),
+		L2DataStreamerTimeout:      l2DataStreamTimeout,
+		L1ChainId:                  ctx.Uint64(utils.L1ChainIdFlag.Name),
+		L1RpcUrl:                   ctx.String(utils.L1RpcUrlFlag.Name),
+		AddressSequencer:           libcommon.HexToAddress(ctx.String(utils.AddressSequencerFlag.Name)),
+		AddressAdmin:               libcommon.HexToAddress(ctx.String(utils.AddressAdminFlag.Name)),
+		AddressRollup:              libcommon.HexToAddress(ctx.String(utils.AddressRollupFlag.Name)),
+		AddressZkevm:               libcommon.HexToAddress(ctx.String(utils.AddressZkevmFlag.Name)),
+		AddressGerManager:          libcommon.HexToAddress(ctx.String(utils.AddressGerManagerFlag.Name)),
+		L1RollupId:                 ctx.Uint64(utils.L1RollupIdFlag.Name),
+		L1BlockRange:               ctx.Uint64(utils.L1BlockRangeFlag.Name),
+		L1QueryDelay:               ctx.Uint64(utils.L1QueryDelayFlag.Name),
+		L1MaticContractAddress:     libcommon.HexToAddress(ctx.String(utils.L1MaticContractAddressFlag.Name)),
+		L1FirstBlock:               ctx.Uint64(utils.L1FirstBlockFlag.Name),
+		RpcRateLimits:              ctx.Int(utils.RpcRateLimitsFlag.Name),
+		DatastreamVersion:          ctx.Int(utils.DatastreamVersionFlag.Name),
+		RebuildTreeAfter:           ctx.Uint64(utils.RebuildTreeAfterFlag.Name),
+		SequencerInitialForkId:     ctx.Uint64(utils.SequencerInitialForkId.Name),
+		ExecutorUrls:               strings.Split(ctx.String(utils.ExecutorUrls.Name), ","),
+		ExecutorStrictMode:         ctx.Bool(utils.ExecutorStrictMode.Name),
+		AllowFreeTransactions:      ctx.Bool(utils.AllowFreeTransactions.Name),
+		AllowPreEIP155Transactions: ctx.Bool(utils.AllowPreEIP155Transactions.Name),
+		WitnessFull:                ctx.Bool(utils.WitnessFullFlag.Name),
 	}
 
 	checkFlag(utils.L2ChainIdFlag.Name, cfg.Zk.L2ChainId)
@@ -70,7 +69,6 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		checkFlag(utils.L2DataStreamerTimeout.Name, cfg.Zk.L2DataStreamerTimeout)
 	} else {
 		checkFlag(utils.SequencerInitialForkId.Name, cfg.Zk.SequencerInitialForkId)
-		checkFlag(utils.SequencerAddressFlag.Name, cfg.Zk.SequencerAddress)
 		checkFlag(utils.ExecutorUrls.Name, cfg.Zk.ExecutorUrls)
 		checkFlag(utils.ExecutorStrictMode.Name, cfg.Zk.ExecutorStrictMode)
 
@@ -79,14 +77,16 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 			panic("You must set executor urls when running in executor strict mode (zkevm.executor-strict)")
 		}
 	}
+
+	checkFlag(utils.AddressSequencerFlag.Name, cfg.Zk.AddressSequencer)
+	checkFlag(utils.AddressAdminFlag.Name, cfg.Zk.AddressAdmin)
+	checkFlag(utils.AddressRollupFlag.Name, cfg.Zk.AddressRollup)
+	checkFlag(utils.AddressZkevmFlag.Name, cfg.Zk.AddressZkevm)
+	checkFlag(utils.AddressGerManagerFlag.Name, cfg.Zk.AddressGerManager)
+
 	checkFlag(utils.L1ChainIdFlag.Name, cfg.Zk.L1ChainId)
 	checkFlag(utils.L1RpcUrlFlag.Name, cfg.Zk.L1RpcUrl)
-	checkFlag(utils.L1PolygonRollupManagerFlag.Name, cfg.Zk.L1PolygonRollupManager.Hex())
-	checkFlag(utils.L1RollupFlag.Name, cfg.Zk.L1Rollup.Hex())
-	checkFlag(utils.L1TopicVerificationFlag.Name, cfg.Zk.L1TopicVerification.Hex())
-	checkFlag(utils.L1TopicSequenceFlag.Name, cfg.Zk.L1TopicSequence.Hex())
 	checkFlag(utils.L1MaticContractAddressFlag.Name, cfg.Zk.L1MaticContractAddress.Hex())
-	checkFlag(utils.L1GERManagerContractAddressFlag.Name, cfg.Zk.L1GERManagerContractAddress.Hex())
 	checkFlag(utils.L1FirstBlockFlag.Name, cfg.Zk.L1FirstBlock)
 	checkFlag(utils.RpcRateLimitsFlag.Name, cfg.Zk.RpcRateLimits)
 	checkFlag(utils.RebuildTreeAfterFlag.Name, cfg.Zk.RebuildTreeAfter)

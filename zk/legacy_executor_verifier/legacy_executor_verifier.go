@@ -185,7 +185,7 @@ func (v *LegacyExecutorVerifier) handleRequest(ctx context.Context, request *Ver
 
 	log.Debug("witness generated", "data", hex.EncodeToString(witness))
 
-	oldAccInputHash, err := v.l1Syncer.GetOldAccInputHash(innerCtx, &v.cfg.L1PolygonRollupManager, ROLLUP_ID, request.BatchNumber)
+	oldAccInputHash, err := v.l1Syncer.GetOldAccInputHash(innerCtx, &v.cfg.AddressRollup, ROLLUP_ID, request.BatchNumber)
 	if err != nil {
 		return err
 	}
@@ -203,7 +203,7 @@ func (v *LegacyExecutorVerifier) handleRequest(ctx context.Context, request *Ver
 	payload := &Payload{
 		Witness:           witness,
 		DataStream:        streamBytes,
-		Coinbase:          v.cfg.SequencerAddress.String(),
+		Coinbase:          v.cfg.AddressSequencer.String(),
 		OldAccInputHash:   oldAccInputHash.Bytes(),
 		L1InfoRoot:        nil,
 		TimestampLimit:    timestampLimit,

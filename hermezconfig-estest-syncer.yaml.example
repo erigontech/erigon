@@ -7,10 +7,14 @@ zkevm.l2-sequencer-rpc-url: "http://34.175.73.226:8123"
 zkevm.l2-datastreamer-url: "34.175.73.226:6900"
 zkevm.l1-chain-id: 11155111
 zkevm.l1-rpc-url: "https://rpc.eu-central-1.gateway.fm/v4/ethereum/non-archival/sepolia?apikey=IkrTRMPAlsjfgTyKz1Xfa5ldS8XSc0PN.En5aU2Gwdxvf3zk2"
-zkevm.l1-polygon-rollup-manager: "0xa0ee057f2746d3282a10b8cd26a351b5ca121e8d"
-zkevm.l1-rollup: "0x7597b12b953bffe1457d89e7e4fe3da149b45d88"
+
+zkevm.address-sequencer: "0x7597b12b953bffe1457d89e7e4fe3da149b45d88"
+zkevm.address-zkevm: "0x9b2e7dC74B5a1Ecb894F0BAAe99a9F3CB60FC455"
+zkevm.address-admin: "0xa0ee057f2746d3282a10b8cd26a351b5ca121e8d"
+zkevm.address-rollup: "0x7DFba61a337741a3d2F99Cc73069c9D0De8aa933"
+zkevm.address-ger-manager: "0x0FE6A2FcF455b9B8004fd625909857933d3c7494"
+
 zkevm.l1-matic-contract-address: "0x7cD0BAb63E3FE6a61D902d7bD8795C933A511BF8"
-zkevm.l1-ger-manager-contract-address: "0x76216E45Bdd20022eEcC07999e50228d7829534B"
 zkevm.l1-block-range: 20000
 zkevm.l1-query-delay: 6000
 zkevm.l1-first-block: 5192000

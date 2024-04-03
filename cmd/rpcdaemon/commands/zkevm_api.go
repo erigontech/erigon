@@ -443,7 +443,7 @@ func (api *ZkEvmAPIImpl) GetProverInput(ctx context.Context, batchNumber uint64,
 		return nil, err
 	}
 
-	oldAccInputHash, err := api.l1Syncer.GetOldAccInputHash(ctx, &api.config.L1PolygonRollupManager, ApiRollupId, batchNumber)
+	oldAccInputHash, err := api.l1Syncer.GetOldAccInputHash(ctx, &api.config.AddressRollup, ApiRollupId, batchNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -452,7 +452,7 @@ func (api *ZkEvmAPIImpl) GetProverInput(ctx context.Context, batchNumber uint64,
 
 	return &legacy_executor_verifier.RpcPayload{
 		Witness:           hex.EncodeToHex(rangeWitness),
-		Coinbase:          api.config.SequencerAddress.String(),
+		Coinbase:          api.config.AddressSequencer.String(),
 		OldAccInputHash:   oldAccInputHash.String(),
 		TimestampLimit:    timestampLimit,
 		ForcedBlockhashL1: "",

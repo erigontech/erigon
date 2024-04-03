@@ -752,8 +752,10 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 		isSequencer := sequencer.IsSequencer()
 		var l1Topics [][]libcommon.Hash
+		var l1Contracts []libcommon.Address
 		if isSequencer {
 			l1Topics = [][]libcommon.Hash{{contracts.UpdateL1InfoTreeTopic, contracts.InitialSequenceBatchesTopic}}
+			l1Contracts = []libcommon.Address{cfg.AddressGerManager, cfg.AddressZkevm}
 		} else {
 			l1Topics = [][]libcommon.Hash{{
 				contracts.SequencedBatchTopicPreEtrog,
@@ -761,11 +763,12 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				contracts.VerificationTopicPreEtrog,
 				contracts.VerificationTopicEtrog,
 			}}
+			l1Contracts = []libcommon.Address{cfg.AddressRollup, cfg.AddressAdmin}
 		}
 
 		backend.l1Syncer = syncer.NewL1Syncer(
 			backend.etherMan.EthClient,
-			[]libcommon.Address{cfg.L1Rollup, cfg.L1PolygonRollupManager},
+			l1Contracts,
 			l1Topics,
 			cfg.L1BlockRange,
 			cfg.L1QueryDelay,
@@ -886,9 +889,9 @@ func newEtherMan(cfg *ethconfig.Zk) *etherman.Client {
 		URL:                       cfg.L1RpcUrl,
 		L1ChainID:                 cfg.L1ChainId,
 		L2ChainID:                 cfg.L2ChainId,
-		PoEAddr:                   cfg.L1PolygonRollupManager,
+		PoEAddr:                   cfg.AddressRollup,
 		MaticAddr:                 cfg.L1MaticContractAddress,
-		GlobalExitRootManagerAddr: cfg.L1GERManagerContractAddress,
+		GlobalExitRootManagerAddr: cfg.AddressGerManager,
 	}
 
 	em, err := etherman.NewClient(ethmanConf)

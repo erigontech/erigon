@@ -7,13 +7,15 @@ zkevm.l2-sequencer-rpc-url: https://zkevm-rpc.com
 zkevm.l2-datastreamer-url: stream.zkevm-rpc.com:6900
 zkevm.l1-chain-id: 1
 zkevm.l1-rpc-url: https://rpc.eth.gateway.fm/
-zkevm.l1-polygon-rollup-manager: "0x5132A183E9F3CB7C848b0AAC5Ae0c4f0491B7aB2"
-zkevm.l1-rollup: "0x519E42c24163192Dca44CD3fBDCEBF6be9130987"
+
+zkevm.address-sequencer: ""
+zkevm.address-zkevm: ""
+zkevm.address-admin: "0x5132A183E9F3CB7C848b0AAC5Ae0c4f0491B7aB2"
+zkevm.address-rollup: "0x519E42c24163192Dca44CD3fBDCEBF6be9130987"
+zkevm.address-ger-manager: "0x580bda1e7A0CFAe92Fa7F6c20A3794F169CE3CFb"
+
 zkevm.l1-rollup-id: 1
 zkevm.l1-matic-contract-address: "0x7D1AfA7B718fb893dB30A3aBc0Cfc608AaCfeBB0"
-zkevm.l1-ger-manager-contract-address: "0x580bda1e7A0CFAe92Fa7F6c20A3794F169CE3CFb"
-zkevm.l1-topic-verification: "0x9c72852172521097ba7e1482e6b44b351323df0155f97f4ea18fcec28e1f5966"
-zkevm.l1-topic-sequence: "0x3e54d0825ed78523037d00a81759237eb436ce774bd546993ee67a1b67b6e766"
 zkevm.l1-block-range: 20000
 zkevm.l1-query-delay: 6000
 zkevm.l1-first-block: 16896700
