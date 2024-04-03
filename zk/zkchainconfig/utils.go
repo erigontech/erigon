@@ -9,6 +9,7 @@ var chainIds = []uint64{
 	2442,   // cardona
 	10010,  //etrog testnet
 	999999, // local devnet
+	123,    // estestnet
 }
 
 var chainIdToName = map[uint64]string{
