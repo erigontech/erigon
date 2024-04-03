@@ -41,6 +41,7 @@ func init() {
 }
 
 type callLog struct {
+	Index   uint64            `json:"index"`
 	Address libcommon.Address `json:"address"`
 	Topics  []libcommon.Hash  `json:"topics"`
 	Data    hexutility.Bytes  `json:"data"`
@@ -104,11 +105,13 @@ type callFrameMarshaling struct {
 
 type callTracer struct {
 	noopTracer
-	callstack []callFrame
-	config    callTracerConfig
-	gasLimit  uint64
-	interrupt uint32 // Atomic flag to signal execution interruption
-	reason    error  // Textual reason for the interruption
+	callstack        []callFrame
+	config           callTracerConfig
+	gasLimit         uint64
+	interrupt        uint32 // Atomic flag to signal execution interruption
+	reason           error  // Textual reason for the interruption
+	logIndex         uint64
+	failedLogIndexes []uint64
 }
 
 type callTracerConfig struct {
@@ -183,7 +186,8 @@ func (t *callTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, sco
 		}
 
 		data := scope.Memory.GetCopy(int64(mStart.Uint64()), int64(mSize.Uint64()))
-		log := callLog{Address: scope.Contract.Address(), Topics: topics, Data: hexutility.Bytes(data)}
+		log := callLog{Address: scope.Contract.Address(), Topics: topics, Data: hexutility.Bytes(data), Index: t.logIndex}
+		t.logIndex++
 		t.callstack[len(t.callstack)-1].Logs = append(t.callstack[len(t.callstack)-1].Logs, log)
 	}
 }
@@ -233,14 +237,19 @@ func (t *callTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
 
 func (t *callTracer) CaptureTxStart(gasLimit uint64) {
 	t.gasLimit = gasLimit
+	t.logIndex = 0
+	t.failedLogIndexes = make([]uint64, 0)
 }
 
 func (t *callTracer) CaptureTxEnd(restGas uint64) {
 	t.callstack[0].GasUsed = t.gasLimit - restGas
 	if t.config.WithLog {
 		// Logs are not emitted when the call fails
-		clearFailedLogs(&t.callstack[0], false)
+		clearFailedLogs(&t.callstack[0], false, &t.failedLogIndexes)
+		fixLogIndexGap(&t.callstack[0], &t.failedLogIndexes)
 	}
+	t.logIndex = 0
+	t.failedLogIndexes = nil
 }
 
 // GetResult returns the json-encoded nested list of call traces, and any
@@ -264,13 +273,35 @@ func (t *callTracer) Stop(err error) {
 
 // clearFailedLogs clears the logs of a callframe and all its children
 // in case of execution failure.
-func clearFailedLogs(cf *callFrame, parentFailed bool) {
+func clearFailedLogs(cf *callFrame, parentFailed bool, failedLogIndexes *[]uint64) {
 	failed := cf.failed() || parentFailed
 	// Clear own logs
 	if failed {
+		if len(cf.Logs) > 0 {
+			for _, log := range cf.Logs {
+				*failedLogIndexes = append(*failedLogIndexes, log.Index)
+			}
+		}
 		cf.Logs = nil
 	}
 	for i := range cf.Calls {
-		clearFailedLogs(&cf.Calls[i], failed)
+		clearFailedLogs(&cf.Calls[i], failed, failedLogIndexes)
+	}
+}
+
+// re-index logs in callFrame
+func fixLogIndexGap(cf *callFrame, failedLogIndexes *[]uint64) {
+	if len(cf.Logs) > 0 {
+		for i := range cf.Logs {
+			currentLogOriginalIndex := cf.Logs[i].Index
+			for _, deletedIndex := range *failedLogIndexes {
+				if currentLogOriginalIndex > deletedIndex {
+					cf.Logs[i].Index--
+				}
+			}
+		}
+	}
+	for i := range cf.Calls {
+		fixLogIndexGap(&cf.Calls[i], failedLogIndexes)
 	}
 }
