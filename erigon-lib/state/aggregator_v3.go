@@ -22,8 +22,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/seg"
 	math2 "math"
 	"os"
 	"path/filepath"
@@ -34,14 +32,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"golang.org/x/sync/semaphore"
-
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/log/v3"
 	rand2 "golang.org/x/exp/rand"
 	"golang.org/x/sync/errgroup"
-
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"golang.org/x/sync/semaphore"
 
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
@@ -52,7 +48,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/ledgerwatch/erigon-lib/seg"
 )
 
 var (
@@ -1324,6 +1322,8 @@ func (ac *AggregatorV3Context) SqueezeCommitmentFiles() error {
 			}
 			defer squeezedCompr.Close()
 
+			cf.decompressor.EnableReadAhead()
+			defer cf.decompressor.DisableReadAhead()
 			reader := NewArchiveGetter(cf.decompressor.MakeGetter(), commitment.d.compression)
 			reader.Reset(0)
 
