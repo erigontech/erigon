@@ -17,11 +17,23 @@ func BuildWitness(s *SMT, rd trie.RetainDecider, ctx context.Context) (*trie.Wit
 	}
 
 	action := func(prefix []byte, k utils.NodeKey, v utils.NodeValue12) (bool, error) {
-		if rd != nil && !rd.Retain(prefix) || (v.IsFinalNode() && !rd.Retain(prefix[:len(prefix)-1])) {
-			h := libcommon.BigToHash(k.ToBigInt())
-			hNode := trie.OperatorHash{Hash: h}
-			operands = append(operands, &hNode)
-			return false, nil
+		if rd != nil {
+			retain := true
+			if v.IsFinalNode() {
+				prefixLen := len(prefix)
+				if prefixLen > 0 {
+					retain = rd.Retain(prefix[:prefixLen-1])
+				}
+			} else {
+				retain = rd.Retain(prefix)
+			}
+
+			if !retain {
+				h := libcommon.BigToHash(k.ToBigInt())
+				hNode := trie.OperatorHash{Hash: h}
+				operands = append(operands, &hNode)
+				return false, nil
+			}
 		}
 
 		if v.IsFinalNode() {
@@ -31,39 +43,32 @@ func BuildWitness(s *SMT, rd trie.RetainDecider, ctx context.Context) (*trie.Wit
 			}
 
 			keySource, err := s.Db.GetKeySource(actualK)
-
 			if err != nil {
 				return false, err
 			}
 
 			t, addr, storage, err := utils.DecodeKeySource(keySource)
-
 			if err != nil {
 				return false, err
 			}
 
 			valHash := v.Get4to8()
-
 			v, err := s.Db.Get(*valHash)
-
-			vInBytes := utils.ArrayBigToScalar(utils.BigIntArrayFromNodeValue8(v.GetNodeValue8())).Bytes()
-
 			if err != nil {
 				return false, err
 			}
 
+			vInBytes := utils.ArrayBigToScalar(utils.BigIntArrayFromNodeValue8(v.GetNodeValue8())).Bytes()
 			if t == utils.SC_CODE {
 				code, err := s.Db.GetCode(vInBytes)
-
 				if err != nil {
 					return false, err
-				} else {
-					operands = append(operands, &trie.OperatorCode{Code: code})
 				}
+
+				operands = append(operands, &trie.OperatorCode{Code: code})
 			}
 
 			// fmt.Printf("Node hash: %s, Node type: %d, address %x, storage %x, value %x\n", utils.ConvertBigIntToHex(k.ToBigInt()), t, addr, storage, utils.ArrayBigToScalar(value8).Bytes())
-
 			operands = append(operands, &trie.OperatorSMTLeafValue{
 				NodeType:   uint8(t),
 				Address:    addr.Bytes(),

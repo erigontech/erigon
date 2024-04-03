@@ -359,6 +359,12 @@ func (rl *RetainList) String() string {
 	return fmt.Sprintf("%x", rl.hexes)
 }
 
+func (rl *RetainList) Dump() {
+	for i, h := range rl.hexes {
+		fmt.Printf("%d: %v\n", i, h[:16])
+	}
+}
+
 type AlwaysTrueRetainDecider struct{}
 
 func (a AlwaysTrueRetainDecider) Retain([]byte) bool {
