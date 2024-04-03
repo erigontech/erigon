@@ -25,7 +25,7 @@ jobs:
       latest_tag: ${{ env.LATEST_TAG }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Prepare
         id: prep
@@ -56,6 +56,9 @@ jobs:
     needs: prepare
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -83,6 +86,9 @@ jobs:
     needs: prepare
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
