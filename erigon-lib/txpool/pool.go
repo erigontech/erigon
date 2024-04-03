@@ -915,6 +915,12 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		}
 		return txpoolcfg.BlobPoolOverflow
 	}
+	if p.blockGasLimit.Load() > txn.Gas {
+		if txn.Traced {
+			p.logger.Info(fmt.Sprintf("TX TRACING: gas limit exceeds block gas limit"))
+		}
+		return txpoolcfg.GasExceedsBlockGasLimit
+	}
 
 	// check nonce and balance
 	senderNonce, senderBalance, _ := p.senders.info(stateCache, txn.SenderID)
