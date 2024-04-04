@@ -231,8 +231,9 @@ func startDownloadingMissingBlobs(ctx context.Context, cfg *Cfg, block *cltypes.
 	network2.RequestBlobsFranticallyAsyncronously(ctx2, cfg.rpc, ids, func(resp *network2.PeerAndSidecars) (keepRequesting bool, err error) {
 		fmt.Println("X")
 		if ids.Len() != len(resp.Responses) {
-			return false, nil
+			return true, nil
 		}
+		fmt.Println("X")
 		for _, sidecar := range resp.Responses {
 			if err := cfg.forkChoice.OnBlobSidecar(sidecar, false); err != nil {
 				cfg.rpc.BanPeer(resp.Peer)
@@ -240,6 +241,7 @@ func startDownloadingMissingBlobs(ctx context.Context, cfg *Cfg, block *cltypes.
 				return true, nil
 			}
 		}
+		fmt.Println("X")
 		return false, nil
 	})
 	return nil
