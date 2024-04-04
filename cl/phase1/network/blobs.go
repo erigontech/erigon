@@ -1,6 +1,7 @@
 package network
 
 import (
+	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -119,6 +120,7 @@ func RequestBlobsFranticallyAsyncronously(ctx context.Context, r *rpc.BeaconRpcP
 			case <-ctx.Done():
 				return
 			default:
+				fmt.Println("X1")
 				resp, err := RequestBlobsFrantically(ctx, r, req)
 				if err != nil {
 					continue
