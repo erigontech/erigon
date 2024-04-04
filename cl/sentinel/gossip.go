@@ -219,7 +219,7 @@ func (s *Sentinel) Unsubscribe(topic GossipTopic, opts ...pubsub.TopicOpt) (err 
 
 func (s *Sentinel) topicScoreParams(topic string) *pubsub.TopicScoreParams {
 	switch {
-	case strings.Contains(topic, gossip.TopicNameBeaconBlock):
+	case strings.Contains(topic, gossip.TopicNameBeaconBlock) || gossip.IsTopicBlobSidecar(topic):
 		return s.defaultBlockTopicParams()
 	/*case strings.Contains(topic, GossipAggregateAndProofMessage):
 	return defaultAggregateTopicParams(activeValidators), nil
