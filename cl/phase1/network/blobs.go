@@ -118,6 +118,7 @@ func RequestBlobsFranticallyAsyncronously(ctx context.Context, r *rpc.BeaconRpcP
 		for {
 			select {
 			case <-ctx.Done():
+				fmt.Println("Cancel")
 				return
 			default:
 				fmt.Println("X1")
