@@ -159,7 +159,8 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 		case gossip.IsTopicBlobSidecar(data.Name):
 			// decode sidecar
 			blobSideCar := &cltypes.BlobSidecar{}
-			if err := blobSideCar.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
+			data.Data = common.CopyBytes(data.Data)
+			if err := blobSideCar.DecodeSSZ(data.Data, int(version)); err != nil {
 				g.sentinel.BanPeer(ctx, data.Peer)
 				l["at"] = "decoding blob sidecar"
 				return err
