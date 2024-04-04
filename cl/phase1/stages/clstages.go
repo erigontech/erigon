@@ -664,12 +664,19 @@ func ConsensusClStages(ctx context.Context,
 								})
 								// Attestations processing can take some time if they are not cached in properly.
 								go func() {
+									defer func() {
+										r := recover()
+										if r != nil {
+											log.Warn("recovered from panic", "err", r)
+										}
+									}()
 									block.Block.Body.Attestations.Range(func(idx int, a *solid.Attestation, total int) bool {
 										// emit attestation
 										cfg.emitter.Publish("attestation", a)
 										if err = cfg.forkChoice.OnAttestation(a, true, false); err != nil {
 											log.Debug("bad attestation received", "err", err)
 										}
+
 										return true
 									})
 								}()
