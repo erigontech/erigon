@@ -241,7 +241,7 @@ func startDownloadingMissingBlobs(ctx context.Context, cfg *Cfg, block *cltypes.
 		}
 		return false, nil
 	})
-
+	return nil
 }
 
 // ConsensusClStages creates a stage loop container to be used to run caplin
