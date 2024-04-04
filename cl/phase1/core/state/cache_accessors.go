@@ -42,7 +42,7 @@ func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint64 {
 
 // GetTotalActiveBalance return the sum of all balances within active validators.
 func (b *CachingBeaconState) GetTotalActiveBalance() uint64 {
-	if b.totalActiveBalanceCache == nil {
+	if b.totalActiveBalanceCache == nil || *b.totalActiveBalanceCache == 0 {
 		b._refreshActiveBalances()
 	}
 	return *b.totalActiveBalanceCache
