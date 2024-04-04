@@ -221,31 +221,6 @@ digraph {
 }
 */
 
-func startDownloadingMissingBlobs(ctx context.Context, cfg *Cfg, block *cltypes.SignedBeaconBlock) error {
-	ctx2, _ := context.WithTimeout(ctx, 4*time.Second)
-	ids, err := network2.BlobsIdentifiersFromBlocks([]*cltypes.SignedBeaconBlock{block})
-	if err != nil {
-		return err
-	}
-	network2.RequestBlobsFranticallyAsyncronously(ctx2, cfg.rpc, ids, func(resp *network2.PeerAndSidecars) (keepRequesting bool, err error) {
-		fmt.Println("X")
-		if ids.Len() != len(resp.Responses) {
-			return true, nil
-		}
-		fmt.Println("X")
-		for _, sidecar := range resp.Responses {
-			if err := cfg.forkChoice.OnBlobSidecar(sidecar, false); err != nil {
-				cfg.rpc.BanPeer(resp.Peer)
-				log.Warn("failed to process requested blob sidecar", "err", err)
-				return true, nil
-			}
-		}
-		fmt.Println("X")
-		return false, nil
-	})
-	return nil
-}
-
 // ConsensusClStages creates a stage loop container to be used to run caplin
 func ConsensusClStages(ctx context.Context,
 	cfg *Cfg,
@@ -673,11 +648,6 @@ func ConsensusClStages(ctx context.Context,
 								}
 								seenBlockRoots[blockRoot] = struct{}{}
 								if err := processBlock(cfg.indiciesDB, block, true, true, true); err != nil {
-									if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) {
-										if err := startDownloadingMissingBlobs(ctx, cfg, block); err != nil {
-											return err
-										}
-									}
 									log.Debug("bad blocks segment received", "err", err)
 									continue
 								}

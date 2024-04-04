@@ -1,7 +1,6 @@
 package network
 
 import (
-	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -110,30 +109,4 @@ Loop:
 		}
 	}
 	return atomicResp.Load().(*PeerAndSidecars), nil
-}
-
-// RequestBlobsFrantically requests blobs from the network frantically.
-func RequestBlobsFranticallyAsyncronously(ctx context.Context, r *rpc.BeaconRpcP2P, req *solid.ListSSZ[*cltypes.BlobIdentifier], cb func(resp *PeerAndSidecars) (keepRequesting bool, err error)) {
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				fmt.Println("Cancel")
-				return
-			default:
-				fmt.Println("X1")
-				resp, err := RequestBlobsFrantically(ctx, r, req)
-				if err != nil {
-					continue
-				}
-				keepGoing, err := cb(resp)
-				if err != nil {
-					continue
-				}
-				if !keepGoing {
-					return
-				}
-			}
-		}
-	}()
 }
