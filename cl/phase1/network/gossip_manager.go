@@ -193,16 +193,18 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			if _, has := g.forkChoice.GetHeader(blockRoot); has {
 				return nil
 			}
-			// The background checks above are enough for now.
-			if err := g.forkChoice.OnBlobSidecar(blobSideCar, false); err != nil {
-				g.sentinel.BanPeer(ctx, data.Peer)
-				return err
-			}
+			go func() {
+				// The background checks above are enough for now.
+				if err := g.forkChoice.OnBlobSidecar(blobSideCar, false); err != nil {
+					g.sentinel.BanPeer(ctx, data.Peer)
+					return err
+				}
 
-			if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
-				log.Debug("failed publish gossip", "err", err)
-			}
-			fmt.Println("done", blobSideCar.Index, blobSideCar.SignedBlockHeader.Header.Slot)
+				if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
+					log.Debug("failed publish gossip", "err", err)
+				}
+				fmt.Println("done", blobSideCar.Index, blobSideCar.SignedBlockHeader.Header.Slot)
+			}()
 
 			log.Debug("Received blob sidecar via gossip", "index", *data.SubnetId, "size", datasize.ByteSize(len(blobSideCar.Blob)))
 		default:
