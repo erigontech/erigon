@@ -320,7 +320,7 @@ func (f *ForkChoiceStore) OnBlobSidecar(blobSidecar *cltypes.BlobSidecar, test b
 	f.hotSidecars[blockRoot] = append(f.hotSidecars[blockRoot], blobSidecar)
 
 	blobsMaxAge := 4 // a slot can live for up to 4 slots in the pool of hot sidecars.
-	currentSlot := utils.GetCurrentSlot(f.genesisTime, f.beaconCfg.SecondsPerSlot)
+	currentSlot := f.highestSeen.Load()
 	var pruneSlot uint64
 	if currentSlot > uint64(blobsMaxAge) {
 		pruneSlot = currentSlot - uint64(blobsMaxAge)
