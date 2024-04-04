@@ -247,14 +247,12 @@ func (f *ForkChoiceStore) isDataAvailable(ctx context.Context, slot uint64, bloc
 	}
 
 	if blobKzgCommitments.Len() != len(sidecars) {
-		fmt.Println("A", blobKzgCommitments.Len(), len(sidecars))
 		return errEIP4844DataNotAvailable // This should then schedule the block for reprocessing
 	}
 	for _, sidecar := range sidecars {
 		delete(commitmentsLeftToCheck, sidecar.KzgCommitment)
 	}
 	if len(commitmentsLeftToCheck) > 0 {
-		fmt.Println("B")
 		return errEIP4844DataNotAvailable // This should then schedule the block for reprocessing
 	}
 	if !foundOnDisk {
