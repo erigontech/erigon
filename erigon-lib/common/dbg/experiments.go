@@ -40,10 +40,11 @@ var (
 	mergeTr = EnvInt("MERGE_THRESHOLD", -1)
 
 	//state v3
-	noPrune           = EnvBool("NO_PRUNE", false)
-	noMerge           = EnvBool("NO_MERGE", false)
-	discardHistory    = EnvBool("DISCARD_HISTORY", false)
-	discardCommitment = EnvBool("DISCARD_COMMITMENT", false)
+	noPrune                  = EnvBool("NO_PRUNE", false)
+	noMerge                  = EnvBool("NO_MERGE", false)
+	discardHistory           = EnvBool("DISCARD_HISTORY", false)
+	DiscardCommitmentHistory = EnvBool("DISCARD_COMMITMENT_HISTORY", false)
+	discardCommitment        = EnvBool("DISCARD_COMMITMENT", false)
 
 	// force skipping of any non-Erigon2 .torrent files
 	DownloaderOnlyBlocks = EnvBool("DOWNLOADER_ONLY_BLOCKS", false)
