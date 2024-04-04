@@ -99,7 +99,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	if block.Version() >= clparams.DenebVersion && checkDataAvaiability {
 		if err := f.isDataAvailable(ctx, block.Block.Slot, blockRoot, block.Block.Body.BlobKzgCommitments); err != nil {
 			if err == errEIP4844DataNotAvailable {
-				log.Debug("Blob data is not available, the block will be scheduled for later processing", "slot", block.Block.Slot, "blockRoot", libcommon.Hash(blockRoot))
+				log.Info("Blob data is not available, the block will be scheduled for later processing", "slot", block.Block.Slot, "blockRoot", libcommon.Hash(blockRoot))
 				f.scheduleBlockForLaterProcessing(block)
 				return err
 			}
@@ -247,12 +247,14 @@ func (f *ForkChoiceStore) isDataAvailable(ctx context.Context, slot uint64, bloc
 	}
 
 	if blobKzgCommitments.Len() != len(sidecars) {
+		fmt.Println("A", blobKzgCommitments.Len(), len(sidecars))
 		return errEIP4844DataNotAvailable // This should then schedule the block for reprocessing
 	}
 	for _, sidecar := range sidecars {
 		delete(commitmentsLeftToCheck, sidecar.KzgCommitment)
 	}
 	if len(commitmentsLeftToCheck) > 0 {
+		fmt.Println("B")
 		return errEIP4844DataNotAvailable // This should then schedule the block for reprocessing
 	}
 	if !foundOnDisk {
@@ -306,11 +308,10 @@ func (f *ForkChoiceStore) OnBlobSidecar(blobSidecar *cltypes.BlobSidecar, test b
 		return err
 	}
 
+	// operation is not thread safe from here.
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	// operation is not thread safe here.
-	f.hotSidecars[blockRoot] = append(f.hotSidecars[blockRoot], blobSidecar)
 	for _, sidecar := range f.hotSidecars[blockRoot] {
 		if sidecar.SignedBlockHeader.Header.Slot == blobSidecar.SignedBlockHeader.Header.Slot &&
 			sidecar.SignedBlockHeader.Header.ProposerIndex == blobSidecar.SignedBlockHeader.Header.ProposerIndex &&
@@ -318,6 +319,7 @@ func (f *ForkChoiceStore) OnBlobSidecar(blobSidecar *cltypes.BlobSidecar, test b
 			return nil // ignore if we already have it
 		}
 	}
+	f.hotSidecars[blockRoot] = append(f.hotSidecars[blockRoot], blobSidecar)
 
 	blobsMaxAge := 4 // a slot can live for up to 4 slots in the pool of hot sidecars.
 	currentSlot := utils.GetCurrentSlot(f.genesisTime, f.beaconCfg.SecondsPerSlot)
@@ -327,8 +329,7 @@ func (f *ForkChoiceStore) OnBlobSidecar(blobSidecar *cltypes.BlobSidecar, test b
 	}
 	// also clean up all old blobs that may have been accumulating
 	for blockRoot := range f.hotSidecars {
-		h, has := f.GetHeader(blockRoot)
-		if !has || h == nil || h.Slot < pruneSlot {
+		if len(f.hotSidecars) == 0 || f.hotSidecars[blockRoot][0].SignedBlockHeader.Header.Slot < pruneSlot {
 			delete(f.hotSidecars, blockRoot)
 		}
 	}
