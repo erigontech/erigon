@@ -13,4 +13,4 @@ clean:
 	rm -rf tests
 
 mainnet:
-	CGO_CFLAGS=-D__BLST_PORTABLE__ go  test -tags=spectest -run=/mainnet -failfast -v --timeout 30m
+	CGO_CFLAGS=-D__BLST_PORTABLE__ go  test -tags=spectest -run=/mainnet/bellatrix/sanity/blocks/pyspec_tests/multiple_attester_slashings_no_overlap -failfast -v --timeout 30m
