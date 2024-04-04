@@ -269,6 +269,7 @@ func SpawnSequencingStage(
 	var addedReceipts []*types.Receipt
 	yielded := mapset.NewSet[[32]byte]()
 	lastTxTime := time.Now()
+	overflow := false
 
 	// start to wait for transactions to come in from the pool and attempt to add them to the current batch.  Once we detect a counter
 	// overflow we revert the IBS back to the previous snapshot and don't add the transaction/receipt to the collection that will
@@ -287,15 +288,13 @@ LOOP:
 			cfg.txPool.UnlockFlusher()
 
 			for _, transaction := range transactions {
-				snap := ibs.Snapshot()
-				receipt, overflow, err := attemptAddTransaction(tx, cfg, batchCounters, header, parentBlock.Header(), transaction, ibs, hermezDb, smt)
+				var receipt *types.Receipt
+				receipt, overflow, err = attemptAddTransaction(tx, cfg, batchCounters, header, parentBlock.Header(), transaction, ibs, hermezDb, smt)
 				if err != nil {
-					ibs.RevertToSnapshot(snap)
 					return err
 				}
 				if overflow {
-					ibs.RevertToSnapshot(snap)
-					log.Debug(fmt.Sprintf("[%s] overflowed adding transaction to batch", logPrefix), "tx-hash", transaction.Hash())
+					log.Info(fmt.Sprintf("[%s] overflowed adding transaction to batch", logPrefix), "batch", thisBatch, "tx-hash", transaction.Hash())
 					break LOOP
 				}
 
@@ -312,6 +311,26 @@ LOOP:
 				log.Info(fmt.Sprintf("[%s] No new transactions, closing block at %v transactions", logPrefix, len(addedTransactions)))
 				break LOOP
 			}
+		}
+	}
+
+	// todo: can we handle this scenario without needing to re-process the transactions?  We're doing this currently because the IBS can't be reverted once a tx has been
+	// finalised within it - it causes a panic
+	if overflow {
+		// we know now that we have a list of good transactions, so we need to get a fresh intra block state and re-run the known good ones
+		// before continuing on
+		batchCounters.ClearTransactionCounters()
+		ibs = state.New(stateReader)
+		for idx, transaction := range addedTransactions {
+			receipt, innerOverflow, err := attemptAddTransaction(tx, cfg, batchCounters, header, parentBlock.Header(), transaction, ibs, hermezDb, smt)
+			if err != nil {
+				return err
+			}
+			if innerOverflow {
+				// kill the node at this stage to prevent a batch being created that can't be proven
+				panic("overflowed twice during execution")
+			}
+			addedReceipts[idx] = receipt
 		}
 	}
 

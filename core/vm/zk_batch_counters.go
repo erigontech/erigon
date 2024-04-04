@@ -44,6 +44,10 @@ func (bcc *BatchCounterCollector) AddNewTransactionCounters(txCounters *Transact
 	return bcc.CheckForOverflow()
 }
 
+func (bcc *BatchCounterCollector) ClearTransactionCounters() {
+	bcc.transactions = bcc.transactions[:0]
+}
+
 // StartNewBlock adds in the counters to simulate a changeL2Block transaction.  As these transactions don't really exist
 // in a context that isn't the prover we just want to mark down that we have started one.  If adding one causes an overflow we
 // return true
