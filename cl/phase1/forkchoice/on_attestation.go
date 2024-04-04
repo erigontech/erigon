@@ -480,11 +480,20 @@ func (f *ForkChoiceStore) OnCheckReceivedAttestation(topic string, att *solid.At
 	}
 	//[REJECT] The attestation is unaggregated -- that is, it has exactly one participating validator (len([bit for bit in aggregation_bits if bit]) == 1, i.e. exactly 1 bit is set).
 	emptyCount := 0
+	onBitIndex := 0
 	for i := 0; i < len(bits); i++ {
 		if bits[i] == 0 {
 			emptyCount++
 		} else if bits[i]&(bits[i]-1) != 0 {
 			return fmt.Errorf("exactly one bit set")
+		} else {
+			// find the onBit bit index
+			for onBit := uint(0); onBit < 8; onBit++ {
+				if bits[i]&(1<<onBit) != 0 {
+					onBitIndex = i*8 + int(onBit)
+					break
+				}
+			}
 		}
 	}
 	if emptyCount != len(bits)-1 {
@@ -496,6 +505,31 @@ func (f *ForkChoiceStore) OnCheckReceivedAttestation(topic string, att *solid.At
 	}
 
 	// [IGNORE] There has been no other valid attestation seen on an attestation subnet that has an identical attestation.data.target.epoch and participating validator index.
+	committees, err := f.syncedDataManager.HeadState().GetBeaconCommitee(slot, committeeIndex)
+	if err != nil {
+		return err
+	}
+	if onBitIndex >= len(committees) {
+		return fmt.Errorf("on bit index out of committee range")
+	}
+	if err := func() error {
+		// mark the validator as seen
+		vIndex := committees[onBitIndex]
+		f.validatorAttSeenLock.Lock()
+		defer f.validatorAttSeenLock.Unlock()
+		if _, ok := f.validatorAttestationSeen[epoch]; !ok {
+			f.validatorAttestationSeen[epoch] = make(map[uint64]struct{})
+		}
+		if _, ok := f.validatorAttestationSeen[epoch][vIndex]; ok {
+			return fmt.Errorf("validator already seen in target epoch %w", ErrIgnore)
+		}
+		f.validatorAttestationSeen[epoch][vIndex] = struct{}{}
+		// always check and delete previous epoch if it exists
+		delete(f.validatorAttestationSeen, epoch-1)
+		return nil
+	}(); err != nil {
+		return err
+	}
 
 	// [IGNORE] The block being voted for (attestation.data.beacon_block_root) has been seen (via both gossip and non-gossip sources)
 	// (a client MAY queue attestations for processing once block is retrieved).

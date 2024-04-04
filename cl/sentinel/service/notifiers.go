@@ -59,6 +59,22 @@ func (g *gossipNotifier) notifyBlob(data []byte, pid string, blobIndex int) {
 	}
 }
 
+func (g *gossipNotifier) notifyAttestation(data []byte, pid string, subnetId int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	for _, ch := range g.notifiers {
+		sbI := new(uint64)
+		*sbI = uint64(subnetId)
+		ch <- gossipObject{
+			data:     data,
+			t:        gossip.TopicNameBeaconAttestation(uint64(subnetId)),
+			pid:      pid,
+			subnetId: sbI,
+		}
+	}
+}
+
 func (g *gossipNotifier) addSubscriber() (chan gossipObject, int, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()

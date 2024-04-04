@@ -140,6 +140,10 @@ type ForkChoiceStore struct {
 	emitters        *beaconevents.Emitters
 	synced          atomic.Bool
 	aggregationPool aggregation.AggregationPool
+
+	// validatorAttestationSeen maps from epoch to validator index. This is used to ignore duplicate validator attestations in the same epoch.
+	validatorAttestationSeen map[uint64]map[uint64]struct{}
+	validatorAttSeenLock     sync.Mutex
 }
 
 type LatestMessage struct {
