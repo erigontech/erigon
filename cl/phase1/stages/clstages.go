@@ -222,8 +222,7 @@ digraph {
 */
 
 func startDownloadingMissingBlobs(ctx context.Context, cfg *Cfg, block *cltypes.SignedBeaconBlock) error {
-	ctx2, cancel := context.WithTimeout(ctx, 4*time.Second)
-	defer cancel()
+	ctx2, _ := context.WithTimeout(ctx, 4*time.Second)
 	ids, err := network2.BlobsIdentifiersFromBlocks([]*cltypes.SignedBeaconBlock{block})
 	if err != nil {
 		return err
