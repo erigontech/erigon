@@ -561,6 +561,7 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 
 func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) (bool, error) {
 	urls, ok := d.ByFileName(name)
+	log.Warn("dbg herre", "a", fmt.Sprintf("#+v", d.byFileName))
 	if !ok {
 		return false, nil
 	}
