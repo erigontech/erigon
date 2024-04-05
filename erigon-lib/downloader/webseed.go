@@ -570,10 +570,13 @@ func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) 
 		if err != nil {
 			continue
 		}
+		if strings.Contains(name, "commitment") {
+			log.Warn("[dbg] see urls", "name", name, "urls", fmt.Sprintf())
+		}
 		res, err := d.callTorrentHttpProvider(ctx, parsedUrl, name)
 		if err != nil {
 			d.logger.Log(d.verbosity, "[snapshots] callTorrentHttpProvider", "name", name, "err", err)
-			continue //try another
+			continue
 		}
 
 		if d.torrentFiles.Exists(name) {
@@ -605,7 +608,7 @@ func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL, fi
 	defer resp.Body.Close()
 	//protect against too small and too big data
 	if resp.ContentLength == 0 || resp.ContentLength > int64(128*datasize.MB) {
-		return nil, fmt.Errorf(".torrent downloading size attack prevention: resp.ContentLength=%d, url=%s", resp.ContentLength, url.String())
+		return nil, fmt.Errorf(".torrent downloading size attack prevention: resp.ContentLength=%d, url=%s", resp.ContentLength, url.EscapedPath())
 	}
 	res, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -625,7 +628,7 @@ func validateTorrentBytes(fileName string, b []byte, whitelist snapcfg.Preverifi
 	torrentHash := mi.HashInfoBytes()
 	// files with different names can have same hash. means need check AND name AND hash.
 	if !nameAndHashWhitelisted(fileName, torrentHash.String(), whitelist) {
-		return fmt.Errorf(".torrent file is not whitelisted")
+		return fmt.Errorf(".torrent file is not whitelisted: %x", torrentHash.String())
 	}
 	return nil
 }
