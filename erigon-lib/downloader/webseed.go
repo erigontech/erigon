@@ -591,7 +591,7 @@ func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) 
 
 func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL, fileName string) ([]byte, error) {
 	if !strings.HasSuffix(url.Path, ".torrent") {
-
+		return nil, fmt.Errorf("seems not-torrent url passed: %s", url.String())
 	}
 	request, err := http.NewRequest(http.MethodGet, url.String(), nil)
 	if err != nil {
