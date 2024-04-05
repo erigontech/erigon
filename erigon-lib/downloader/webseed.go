@@ -570,9 +570,11 @@ func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) 
 			continue
 		}
 		res, err := d.callTorrentHttpProvider(ctx, parsedUrl, name)
+		d.logger.Log(d.verbosity, "[snapshots.dbg] .torrent downloaded", "name", name, "err", err, "len", len(res), "url", urlStr)
 		if err != nil {
 			return false, err
 		}
+
 		if d.torrentFiles.Exists(name) {
 			continue
 		}
