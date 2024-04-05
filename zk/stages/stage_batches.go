@@ -324,6 +324,12 @@ func SpawnStageBatches(
 		return err
 	}
 
+	// save the latest verified batch number as well just in case this node is upgraded
+	// to a sequencer in the future
+	if err := stages.SaveStageProgress(tx, stages.SequenceExecutorVerify, highestSeenBatchNo); err != nil {
+		return fmt.Errorf("save stage progress error: %w", err)
+	}
+
 	// stop printing blocks written progress routine
 	elapsed := time.Since(startSyncTime)
 	log.Info(fmt.Sprintf("[%s] Finished writing blocks", logPrefix), "blocksWritten", blocksWritten, "elapsed", elapsed)

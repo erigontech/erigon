@@ -38,7 +38,7 @@ type VerifierResponse struct {
 }
 
 type ILegacyExecutor interface {
-	Verify(*Payload, *VerifierRequest) (bool, error)
+	Verify(*Payload, *VerifierRequest, common.Hash) (bool, error)
 }
 
 type WitnessGenerator interface {
@@ -211,7 +211,9 @@ func (v *LegacyExecutorVerifier) handleRequest(ctx context.Context, request *Ver
 		ContextId:         strconv.Itoa(int(request.BatchNumber)),
 	}
 
-	ok, err := execer.Verify(payload, request)
+	previousBlock, _ := rawdb.ReadBlockByNumber(tx, blocks[0]-1)
+
+	ok, err := execer.Verify(payload, request, previousBlock.Root())
 	if err != nil {
 		return err
 	}

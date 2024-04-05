@@ -86,7 +86,7 @@ func (e *Executor) Close() {
 	}
 }
 
-func (e *Executor) Verify(p *Payload, request *VerifierRequest) (bool, error) {
+func (e *Executor) Verify(p *Payload, request *VerifierRequest, oldStateRoot common.Hash) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
@@ -122,7 +122,15 @@ func (e *Executor) Verify(p *Payload, request *VerifierRequest) (bool, error) {
 	counters += fmt.Sprintf("[P: %v]", resp.CntPoseidonHashes)
 	counters += fmt.Sprintf("[S: %v]", resp.CntSteps)
 	counters += fmt.Sprintf("[D: %v]", resp.CntPoseidonPaddings)
-	log.Info("executor result", "batch", request.BatchNumber, "counters", counters, "root", common.BytesToHash(resp.NewStateRoot), "our-root", request.StateRoot)
+
+	log.Info("executor result",
+		"batch", request.BatchNumber,
+		"counters", counters,
+		"exec-root", common.BytesToHash(resp.NewStateRoot),
+		"our-root", request.StateRoot,
+		"exec-old-root", common.BytesToHash(resp.OldStateRoot),
+		"our-old-root", oldStateRoot)
+
 	log.Debug("Received response from executor", "grpcUrl", e.grpcUrl, "response", resp)
 
 	return responseCheck(resp, request.StateRoot)
