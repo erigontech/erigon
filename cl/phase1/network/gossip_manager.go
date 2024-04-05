@@ -2,18 +2,20 @@ package network
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/gossip"
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
+	"github.com/ledgerwatch/erigon/cl/validator/committee_subscription"
 	"google.golang.org/grpc"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
@@ -33,12 +35,19 @@ type GossipManager struct {
 	genesisConfig *clparams.GenesisConfig
 
 	emitters     *beaconevents.Emitters
-	mu           sync.RWMutex
 	gossipSource *persistence.GossipSource
+	committeeSub *committee_subscription.CommitteeSubscribeMgmt
 }
 
-func NewGossipReceiver(s sentinel.SentinelClient, forkChoice *forkchoice.ForkChoiceStore,
-	beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, emitters *beaconevents.Emitters, gossipSource *persistence.GossipSource) *GossipManager {
+func NewGossipReceiver(
+	s sentinel.SentinelClient,
+	forkChoice *forkchoice.ForkChoiceStore,
+	beaconConfig *clparams.BeaconChainConfig,
+	genesisConfig *clparams.GenesisConfig,
+	emitters *beaconevents.Emitters,
+	gossipSource *persistence.GossipSource,
+	comitteeSub *committee_subscription.CommitteeSubscribeMgmt,
+) *GossipManager {
 	return &GossipManager{
 		sentinel:      s,
 		forkChoice:    forkChoice,
@@ -46,6 +55,7 @@ func NewGossipReceiver(s sentinel.SentinelClient, forkChoice *forkchoice.ForkCho
 		beaconConfig:  beaconConfig,
 		genesisConfig: genesisConfig,
 		gossipSource:  gossipSource,
+		committeeSub:  comitteeSub,
 	}
 }
 
@@ -219,6 +229,26 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 				l["at"] = "on sync committee message"
 				return err
 			}
+		case gossip.IsTopicBeaconAttestation(data.Name):
+			att := &solid.Attestation{}
+			if err := att.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
+				g.sentinel.BanPeer(ctx, data.Peer)
+				l["at"] = "decoding attestation"
+				return err
+			}
+			if err := g.forkChoice.OnCheckReceivedAttestation(data.Name, att); err != nil {
+				log.Debug("failed to check attestation", "err", err)
+				if errors.Is(err, forkchoice.ErrIgnore) {
+					return nil
+				}
+				g.sentinel.BanPeer(ctx, data.Peer)
+				return err
+			}
+			// check if it needs to be aggregated
+			if err := g.committeeSub.CheckAggregateAttestation(att); err != nil {
+				log.Debug("failed to check aggregate attestation", "err", err)
+			}
+			// publish
 			if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
 				log.Debug("failed publish gossip", "err", err)
 			}
@@ -238,50 +268,27 @@ func (g *GossipManager) Start(ctx context.Context) {
 	defer close(blocksCh)
 
 	// Start a goroutine that listens for new gossip messages and sends them to the operations processor.
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case data := <-operationsCh:
-				l := log.Ctx{}
-				err := g.onRecv(ctx, data, l)
-				if err != nil {
-					log.Debug("[Beacon Gossip] Recoverable Error", "err", err)
+	goWorker := func(ch <-chan *sentinel.GossipData, workerCount int) {
+		worker := func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case data := <-ch:
+					l := log.Ctx{}
+					if err := g.onRecv(ctx, data, l); err != nil {
+						log.Debug("[Beacon Gossip] Recoverable Error", "err", err)
+					}
 				}
 			}
 		}
-	}()
-
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case data := <-blocksCh:
-				l := log.Ctx{}
-				err := g.onRecv(ctx, data, l)
-				if err != nil {
-					log.Debug("[Beacon Gossip] Recoverable Error", "err", err)
-				}
-			}
+		for i := 0; i < workerCount; i++ {
+			go worker()
 		}
-	}()
-
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case data := <-blobsCh:
-				l := log.Ctx{}
-				err := g.onRecv(ctx, data, l)
-				if err != nil {
-					log.Warn("[Beacon Gossip] Recoverable Error", "err", err)
-				}
-			}
-		}
-	}()
+	}
+	goWorker(operationsCh, 1)
+	goWorker(blocksCh, 1)
+	goWorker(blobsCh, 1)
 
 	go func() {
 		for {

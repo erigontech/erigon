@@ -155,7 +155,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.BorBlockSizeFlag,
 	&utils.WithHeimdallMilestones,
 	&utils.EthStatsURLFlag,
-	&utils.OverrideCancunFlag,
+	&utils.OverridePragueFlag,
 
 	&utils.LightClientDiscoveryAddrFlag,
 	&utils.LightClientDiscoveryPortFlag,

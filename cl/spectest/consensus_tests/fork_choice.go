@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/afero"
 
 	"github.com/ledgerwatch/erigon/cl/abstract"
+	"github.com/ledgerwatch/erigon/cl/aggregation"
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -177,9 +178,11 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	require.NoError(t, err)
 
 	emitters := beaconevents.NewEmitters()
-	genesisConfig, _, _ := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
+	genesisConfig, netConfig, beaconConfig := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
 	blobStorage := blob_storage.NewBlobStore(memdb.New("/tmp"), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, genesisConfig)
-	forkStore, err := forkchoice.NewForkChoiceStore(anchorState, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig), fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}), emitters, nil, blobStorage, nil)
+	aggregationPool := aggregation.NewAggregationPool(ctx, genesisConfig, beaconConfig, netConfig)
+
+	forkStore, err := forkchoice.NewForkChoiceStore(anchorState, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig), fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}), emitters, nil, blobStorage, nil, netConfig, aggregationPool)
 	require.NoError(t, err)
 	forkStore.SetSynced(true)
 

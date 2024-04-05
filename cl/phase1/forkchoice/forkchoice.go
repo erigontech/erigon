@@ -9,6 +9,7 @@ import (
 	"github.com/Giulio2002/bls"
 	"golang.org/x/exp/slices"
 
+	"github.com/ledgerwatch/erigon/cl/aggregation"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -139,11 +140,17 @@ type ForkChoiceStore struct {
 	// operations pool
 	operationsPool pool.OperationsPool
 	beaconCfg      *clparams.BeaconChainConfig
+	netCfg         *clparams.NetworkConfig
 
 	syncContributionPool sync_contribution_pool.SyncContributionPool
+	aggregationPool      aggregation.AggregationPool
 
 	emitters *beaconevents.Emitters
 	synced   atomic.Bool
+
+	// validatorAttestationSeen maps from epoch to validator index. This is used to ignore duplicate validator attestations in the same epoch.
+	validatorAttestationSeen map[uint64]map[uint64]struct{}
+	validatorAttSeenLock     sync.Mutex
 }
 
 type LatestMessage struct {
@@ -159,7 +166,7 @@ type childrens struct {
 // NewForkChoiceStore initialize a new store from the given anchor state, either genesis or checkpoint sync state.
 func NewForkChoiceStore(anchorState *state2.CachingBeaconState, engine execution_client.ExecutionEngine,
 	operationsPool pool.OperationsPool, forkGraph fork_graph.ForkGraph, emitters *beaconevents.Emitters,
-	syncedDataManager *synced_data.SyncedDataManager, blobStorage blob_storage.BlobStorage, syncContributionPool sync_contribution_pool.SyncContributionPool) (*ForkChoiceStore, error) {
+	syncedDataManager *synced_data.SyncedDataManager, blobStorage blob_storage.BlobStorage, syncContributionPool sync_contribution_pool.SyncContributionPool, netCfg *clparams.NetworkConfig, aggrPool aggregation.AggregationPool) (*ForkChoiceStore, error) {
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
 		return nil, err
@@ -240,6 +247,7 @@ func NewForkChoiceStore(anchorState *state2.CachingBeaconState, engine execution
 		operationsPool:                 operationsPool,
 		anchorPublicKeys:               anchorPublicKeys,
 		beaconCfg:                      anchorState.BeaconConfig(),
+		netCfg:                         netCfg,
 		preverifiedSizes:               preverifiedSizes,
 		finalityCheckpoints:            finalityCheckpoints,
 		totalActiveBalances:            totalActiveBalances,
@@ -255,6 +263,7 @@ func NewForkChoiceStore(anchorState *state2.CachingBeaconState, engine execution
 		genesisValidatorsRoot:          anchorState.GenesisValidatorsRoot(),
 		hotSidecars:                    make(map[libcommon.Hash][]*cltypes.BlobSidecar),
 		blobStorage:                    blobStorage,
+		aggregationPool:                aggrPool,
 		seenSyncCommitteeMessages:      make(map[seenSyncCommitteeMessage]struct{}),
 		syncContributionPool:           syncContributionPool,
 		seenSyncCommitteeContributions: make(map[seenSyncCommitteeContribution]struct{}),
@@ -291,7 +300,7 @@ func (f *ForkChoiceStore) updateChildren(parentSlot uint64, parent, child libcom
 	if ok {
 		c = cI.(childrens)
 	}
-	c.parentSlot = parentSlot // can be innacurate.
+	c.parentSlot = parentSlot // can be inaccurate.
 	if slices.Contains(c.childrenHashes, child) {
 		return
 	}

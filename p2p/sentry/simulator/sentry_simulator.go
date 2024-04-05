@@ -4,6 +4,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"path/filepath"
+
+	"github.com/ledgerwatch/log/v3"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -11,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	sentry_if "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/ledgerwatch/erigon/cmd/snapshots/sync"
 	core_types "github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -21,8 +26,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/sentry"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/ledgerwatch/log/v3"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type server struct {
@@ -34,7 +37,8 @@ type server struct {
 	knownSnapshots   *freezeblocks.RoSnapshots
 	activeSnapshots  *freezeblocks.RoSnapshots
 	blockReader      *freezeblocks.BlockReader
-	downloader       *TorrentClient
+	downloader       *sync.TorrentClient
+	chain            string
 }
 
 func newPeer(name string, caps []p2p.Cap) (*p2p.Peer, error) {
@@ -60,6 +64,7 @@ func NewSentry(ctx context.Context, chain string, snapshotLocation string, peerC
 	}
 
 	cfg := snapcfg.KnownCfg(chain)
+	torrentDir := filepath.Join(snapshotLocation, "torrents", chain)
 
 	knownSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
 		Enabled:      true,
@@ -80,13 +85,14 @@ func NewSentry(ctx context.Context, chain string, snapshotLocation string, peerC
 		Enabled:      true,
 		Produce:      false,
 		NoDownloader: true,
-	}, snapshotLocation, 0, logger)
+	}, torrentDir, 0, logger)
 
 	if err := activeSnapshots.ReopenFolder(); err != nil {
 		return nil, err
 	}
 
-	downloader, err := NewTorrentClient(ctx, chain, snapshotLocation, logger)
+	config := sync.NewDefaultTorrentClientConfig(chain, snapshotLocation, logger)
+	downloader, err := sync.NewTorrentClient(config)
 
 	if err != nil {
 		return nil, err
@@ -101,6 +107,7 @@ func NewSentry(ctx context.Context, chain string, snapshotLocation string, peerC
 		blockReader:      freezeblocks.NewBlockReader(activeSnapshots, nil),
 		logger:           logger,
 		downloader:       downloader,
+		chain:            chain,
 	}
 
 	go func() {
@@ -112,10 +119,7 @@ func NewSentry(ctx context.Context, chain string, snapshotLocation string, peerC
 }
 
 func (s *server) Close() {
-	s.downloader.Close()
-	if closer, ok := s.downloader.cfg.DefaultStorage.(interface{ Close() error }); ok {
-		closer.Close()
-	}
+	_ = s.downloader.Close()
 	s.activeSnapshots.Close()
 }
 
@@ -418,7 +422,7 @@ func (s *server) getHeader(ctx context.Context, blockNum uint64) (*core_types.He
 			}
 		}
 
-		s.activeSnapshots.ReopenSegments([]snaptype.Type{snaptype.Headers})
+		s.activeSnapshots.ReopenSegments([]snaptype.Type{snaptype.Headers}, true)
 
 		header, err = s.blockReader.Header(ctx, nil, common.Hash{}, blockNum)
 
@@ -436,10 +440,11 @@ func (s *server) getHeaderByHash(ctx context.Context, hash common.Hash) (*core_t
 
 func (s *server) downloadHeaders(ctx context.Context, header *freezeblocks.Segment) error {
 	fileName := snaptype.SegmentFileName(0, header.From(), header.To(), snaptype.Enums.Headers)
+	session := sync.NewTorrentSession(s.downloader, s.chain)
 
 	s.logger.Info(fmt.Sprintf("Downloading %s", fileName))
 
-	err := s.downloader.Download(ctx, fileName)
+	err := session.Download(ctx, fileName)
 
 	if err != nil {
 		return fmt.Errorf("can't download %s: %w", fileName, err)
@@ -447,8 +452,8 @@ func (s *server) downloadHeaders(ctx context.Context, header *freezeblocks.Segme
 
 	s.logger.Info(fmt.Sprintf("Indexing %s", fileName))
 
-	info, _, _ := snaptype.ParseFileName(s.downloader.LocalFsRoot(), fileName)
+	info, _, _ := snaptype.ParseFileName(session.LocalFsRoot(), fileName)
 
-	salt := freezeblocks.GetIndicesSalt(s.downloader.LocalFsRoot())
-	return freezeblocks.HeadersIdx(ctx, info, salt, s.downloader.LocalFsRoot(), nil, log.LvlDebug, s.logger)
+	salt := freezeblocks.GetIndicesSalt(session.LocalFsRoot())
+	return freezeblocks.HeadersIdx(ctx, info, salt, session.LocalFsRoot(), nil, log.LvlDebug, s.logger)
 }
