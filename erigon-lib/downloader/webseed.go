@@ -303,7 +303,7 @@ func (d *WebSeeds) constructListsOfFiles(ctx context.Context, httpProviders []*u
 		}
 		manifestResponse, err := d.retrieveManifest(ctx, webSeedProviderURL)
 		if err != nil { // don't fail on error
-			d.logger.Debug("[snapshots.webseed] get from HTTP provider", "err", err, "url", webSeedProviderURL.EscapedPath())
+			d.logger.Debug("[snapshots.webseed] get from HTTP provider", "err", err, "url", webSeedProviderURL.String())
 			continue
 		}
 		// check if we need to prohibit new downloads for some files
@@ -477,7 +477,7 @@ func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url
 			return nil, err
 		}
 	}
-	d.logger.Debug("[snapshots.webseed] get from HTTP provider", "urls", len(response), "url", webSeedProviderUrl.EscapedPath())
+	d.logger.Debug("[snapshots.webseed] get from HTTP provider", "urls", len(response), "url", webSeedProviderUrl.String())
 	return response, nil
 }
 
