@@ -565,6 +565,7 @@ func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) 
 		return false, nil
 	}
 	for _, urlStr := range urls {
+		urlStr += ".torrent"
 		parsedUrl, err := url.Parse(urlStr)
 		if err != nil {
 			continue
@@ -589,6 +590,9 @@ func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) 
 }
 
 func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL, fileName string) ([]byte, error) {
+	if !strings.HasSuffix(url.Path, ".torrent") {
+
+	}
 	request, err := http.NewRequest(http.MethodGet, url.String(), nil)
 	if err != nil {
 		return nil, err
