@@ -74,6 +74,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			err = fmt.Errorf("%v", r)
 		}
 	}()
+	data.Data = common.CopyBytes(data.Data)
 
 	currentEpoch := utils.GetCurrentEpoch(g.genesisConfig.GenesisTime, g.beaconConfig.SecondsPerSlot, g.beaconConfig.SlotsPerEpoch)
 	version := g.beaconConfig.GetCurrentStateVersion(currentEpoch)
@@ -86,7 +87,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 	switch data.Name {
 	case gossip.TopicNameBeaconBlock:
 		object = cltypes.NewSignedBeaconBlock(g.beaconConfig)
-		if err := object.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
+		if err := object.DecodeSSZ(data.Data, int(version)); err != nil {
 			g.sentinel.BanPeer(ctx, data.Peer)
 			l["at"] = "decoding block"
 			return err
@@ -118,14 +119,14 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 		g.gossipSource.InsertBlock(ctx, &peers.PeeredObject[*cltypes.SignedBeaconBlock]{Data: block, Peer: data.Peer.Pid})
 	case gossip.TopicNameLightClientFinalityUpdate:
 		obj := &cltypes.LightClientFinalityUpdate{}
-		if err := obj.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
+		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
 			g.sentinel.BanPeer(ctx, data.Peer)
 			l["at"] = "decoding lc finality update"
 			return err
 		}
 	case gossip.TopicNameLightClientOptimisticUpdate:
 		obj := &cltypes.LightClientOptimisticUpdate{}
-		if err := obj.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
+		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
 			g.sentinel.BanPeer(ctx, data.Peer)
 			l["at"] = "decoding lc optimistic update"
 			return err
@@ -159,7 +160,6 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 		case gossip.IsTopicBlobSidecar(data.Name):
 			// decode sidecar
 			blobSideCar := &cltypes.BlobSidecar{}
-			data.Data = common.CopyBytes(data.Data)
 			if err := blobSideCar.DecodeSSZ(data.Data, int(version)); err != nil {
 				g.sentinel.BanPeer(ctx, data.Peer)
 				l["at"] = "decoding blob sidecar"
