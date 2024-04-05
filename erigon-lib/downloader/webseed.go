@@ -587,7 +587,6 @@ func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) 
 			if strings.Contains(name, "commitment.0-2048") {
 				log.Warn("[dbg] exists???", "name", name)
 			}
-
 			continue
 		}
 		if err := d.torrentFiles.Create(name, res); err != nil {
