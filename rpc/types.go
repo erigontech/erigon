@@ -131,6 +131,28 @@ func (bn *BlockNumber) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+func (bn *BlockNumber) MarshallJson() string {
+	if bn == nil {
+		return "latest"
+	}
+	switch *bn {
+	case 0:
+		return "earliest"
+	case -1:
+		return "latest"
+	case -2:
+		return "pending"
+	case -3:
+		return "safe"
+	case -4:
+		return "finalized"
+	case -5:
+		return "latestExecuted"
+	default:
+		return fmt.Sprintf("0x%x", *bn)
+	}
+}
+
 func (bn BlockNumber) Int64() int64 {
 	return int64(bn)
 }

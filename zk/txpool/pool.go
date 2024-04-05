@@ -1864,6 +1864,12 @@ func (b *BySenderAndNonce) nonce(senderID uint64) (nonce uint64, ok bool) {
 	s.Tx.Nonce = math.MaxUint64
 
 	b.tree.DescendLessOrEqual(s, func(mt *metaTx) bool {
+		if mt.currentSubPool != PendingSubPool {
+			// we only want to include transactions that are in the pending pool.  TXs in the queued pool
+			// artificially increase the "pending" call which can cause transactions to just stack up
+			// when libraries use eth_getTransactionCount "pending" for the next tx nonce - a common thing
+			return true
+		}
 		if mt.Tx.SenderID == senderID {
 			nonce = mt.Tx.Nonce
 			ok = true

@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/zk/sequencer"
 )
 
 // GetBalance implements eth_getBalance. Returns the balance of an account for a given address.
@@ -45,6 +46,15 @@ func (api *APIImpl) GetBalance(ctx context.Context, address libcommon.Address, b
 
 // GetTransactionCount implements eth_getTransactionCount. Returns the number of transactions sent from an address (the nonce).
 func (api *APIImpl) GetTransactionCount(ctx context.Context, address libcommon.Address, blockNrOrHash *rpc.BlockNumberOrHash) (*hexutil.Uint64, error) {
+	// zkevm: forward requests to the sequencer
+	if !sequencer.IsSequencer() {
+		res, err := api.sendGetTransactionCountToSequencer(api.l2RpcUrl, address, blockNrOrHash)
+		if err != nil {
+			return nil, err
+		}
+		return res, nil
+	}
+
 	// if not set, use latest
 	if blockNrOrHash == nil {
 		tmp := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)

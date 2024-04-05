@@ -14,30 +14,41 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/zkevm/jsonrpc/client"
 )
 
 // NetAPI the interface for the net_ RPC commands
 type TxPoolAPI interface {
-	Content(ctx context.Context) (map[string]map[string]map[string]*RPCTransaction, error)
+	Content(ctx context.Context) (interface{}, error)
 }
 
 // TxPoolAPIImpl data structure to store things needed for net_ commands
 type TxPoolAPIImpl struct {
 	*BaseAPI
-	pool proto_txpool.TxpoolClient
-	db   kv.RoDB
+	pool     proto_txpool.TxpoolClient
+	db       kv.RoDB
+	l2RPCUrl string
 }
 
 // NewTxPoolAPI returns NetAPIImplImpl instance
-func NewTxPoolAPI(base *BaseAPI, db kv.RoDB, pool proto_txpool.TxpoolClient) *TxPoolAPIImpl {
+func NewTxPoolAPI(base *BaseAPI, db kv.RoDB, pool proto_txpool.TxpoolClient, l2RPCUrl string) *TxPoolAPIImpl {
 	return &TxPoolAPIImpl{
-		BaseAPI: base,
-		pool:    pool,
-		db:      db,
+		BaseAPI:  base,
+		pool:     pool,
+		db:       db,
+		l2RPCUrl: l2RPCUrl,
 	}
 }
 
-func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]map[string]*RPCTransaction, error) {
+func (api *TxPoolAPIImpl) Content(ctx context.Context) (interface{}, error) {
+	if api.l2RPCUrl != "" {
+		res, err := client.JSONRPCCall(api.l2RPCUrl, "txpool_content")
+		if err != nil {
+			return nil, err
+		}
+		return res.Result, nil
+	}
+
 	reply, err := api.pool.All(ctx, &proto_txpool.AllRequest{})
 	if err != nil {
 		return nil, err
@@ -120,7 +131,15 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 }
 
 // Status returns the number of pending and queued transaction in the pool.
-func (api *TxPoolAPIImpl) Status(ctx context.Context) (map[string]hexutil.Uint, error) {
+func (api *TxPoolAPIImpl) Status(ctx context.Context) (interface{}, error) {
+	if api.l2RPCUrl != "" {
+		res, err := client.JSONRPCCall(api.l2RPCUrl, "txpool_status")
+		if err != nil {
+			return nil, err
+		}
+		return res.Result, nil
+	}
+
 	reply, err := api.pool.Status(ctx, &proto_txpool.StatusRequest{})
 	if err != nil {
 		return nil, err
