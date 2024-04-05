@@ -567,20 +567,27 @@ func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) 
 	for _, urlStr := range urls {
 		urlStr += ".torrent"
 		parsedUrl, err := url.Parse(urlStr)
-		if strings.Contains(name, "commitment") {
-			log.Warn("[dbg] see urls", "name", name, "urlStr", urlStr, "parsedUrl", parsedUrl, "err", err)
+		if strings.Contains(name, "commitment.0-2048") {
+			log.Warn("[dbg] see url", "name", name, "urlStr", urlStr, "parsedUrl", parsedUrl, "err", err)
 		}
 		if err != nil {
 			d.logger.Log(d.verbosity, "[snapshots] callTorrentHttpProvider parse url", "err", err)
 			continue
 		}
 		res, err := d.callTorrentHttpProvider(ctx, parsedUrl, name)
+		if strings.Contains(name, "commitment.0-2048") {
+			log.Warn("[dbg] did cal callTorrentHttpProvider", "name", name, "urlStr", urlStr, "parsedUrl", parsedUrl, "err", err, "len(res)", res)
+		}
 		if err != nil {
 			d.logger.Log(d.verbosity, "[snapshots] callTorrentHttpProvider", "name", name, "err", err)
 			continue
 		}
 
 		if d.torrentFiles.Exists(name) {
+			if strings.Contains(name, "commitment.0-2048") {
+				log.Warn("[dbg] exists???", "name", name)
+			}
+
 			continue
 		}
 		if err := d.torrentFiles.Create(name, res); err != nil {
@@ -604,7 +611,7 @@ func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL, fi
 	request = request.WithContext(ctx)
 	resp, err := http.DefaultClient.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("webseed.downloadTorrentFile: host=%s, url=%s, %w", url.Hostname(), url.EscapedPath(), err)
+		return nil, fmt.Errorf("webseed.downloadTorrentFile: url=%s, %w", url.String(), err)
 	}
 	defer resp.Body.Close()
 	//protect against too small and too big data
