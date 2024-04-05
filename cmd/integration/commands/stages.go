@@ -424,6 +424,7 @@ var cmdRunMigrations = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
+		migrations.EnableSqueezeCommitmentFiles = squeezeCommitmentFiles
 		//non-accede and exclusive mode - to apply create new tables if need.
 		cfg := dbCfg(kv.ChainDB, chaindata).Flags(func(u uint) uint { return u &^ mdbx.Accede }).Exclusive()
 		db, err := openDB(cfg, true, logger)
@@ -675,6 +676,7 @@ func init() {
 
 	withConfig(cmdRunMigrations)
 	withDataDir(cmdRunMigrations)
+	withSqueezeCommitmentFiles(cmdRunMigrations)
 	withChain(cmdRunMigrations)
 	withHeimdall(cmdRunMigrations)
 	rootCmd.AddCommand(cmdRunMigrations)

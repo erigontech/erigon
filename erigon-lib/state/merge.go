@@ -493,7 +493,9 @@ func mergeEfs(preval, val, buf []byte) ([]byte, error) {
 	return newEf.AppendBytes(buf), nil
 }
 
-func (dc *DomainContext) mergeFiles(ctx context.Context, domainFiles, indexFiles, historyFiles []*filesItem, r DomainRanges, ps *background.ProgressSet) (valuesIn, indexIn, historyIn *filesItem, err error) {
+type valueTransformer func(val []byte, startTxNum, endTxNum uint64) ([]byte, error)
+
+func (dc *DomainContext) mergeFiles(ctx context.Context, domainFiles, indexFiles, historyFiles []*filesItem, r DomainRanges, vt valueTransformer, ps *background.ProgressSet) (valuesIn, indexIn, historyIn *filesItem, err error) {
 	if !r.any() {
 		return
 	}
@@ -559,12 +561,13 @@ func (dc *DomainContext) mergeFiles(ctx context.Context, domainFiles, indexFiles
 			key, _ := g.Next(nil)
 			val, _ := g.Next(nil)
 			heap.Push(&cp, &CursorItem{
-				t:        FILE_CURSOR,
-				dg:       g,
-				key:      key,
-				val:      val,
-				endTxNum: item.endTxNum,
-				reverse:  true,
+				t:          FILE_CURSOR,
+				dg:         g,
+				key:        key,
+				val:        val,
+				startTxNum: item.startTxNum,
+				endTxNum:   item.endTxNum,
+				reverse:    true,
 			})
 		}
 	}
@@ -574,9 +577,11 @@ func (dc *DomainContext) mergeFiles(ctx context.Context, domainFiles, indexFiles
 	// to `lastKey` and `lastVal` correspondingly, and the next step of multi-way merge happens. Therefore, after the multi-way merge loop
 	// (when CursorHeap cp is empty), there is a need to process the last pair `keyBuf=>valBuf`, because it was one step behind
 	var keyBuf, valBuf []byte
+	var keyFileStartTxNum, keyFileEndTxNum uint64
 	for cp.Len() > 0 {
 		lastKey := common.Copy(cp[0].key)
 		lastVal := common.Copy(cp[0].val)
+		lastFileStartTxNum, lastFileEndTxNum := cp[0].startTxNum, cp[0].endTxNum
 		// Advance all the items that have this key (including the top)
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 			ci1 := heap.Pop(&cp).(*CursorItem)
@@ -591,6 +596,14 @@ func (dc *DomainContext) mergeFiles(ctx context.Context, domainFiles, indexFiles
 		deleted := r.valuesStartTxNum == 0 && len(lastVal) == 0
 		if !deleted {
 			if keyBuf != nil {
+				if vt != nil {
+					if !bytes.Equal(keyBuf, keyCommitmentState) { // no replacement for state key
+						valBuf, err = vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
+						if err != nil {
+							return nil, nil, nil, fmt.Errorf("merge: valTransform failed: %w", err)
+						}
+					}
+				}
 				if err = kvWriter.AddWord(keyBuf); err != nil {
 					return nil, nil, nil, err
 				}
@@ -600,9 +613,18 @@ func (dc *DomainContext) mergeFiles(ctx context.Context, domainFiles, indexFiles
 			}
 			keyBuf = append(keyBuf[:0], lastKey...)
 			valBuf = append(valBuf[:0], lastVal...)
+			keyFileStartTxNum, keyFileEndTxNum = lastFileStartTxNum, lastFileEndTxNum
 		}
 	}
 	if keyBuf != nil {
+		if vt != nil {
+			if !bytes.Equal(keyBuf, keyCommitmentState) { // no replacement for state key
+				valBuf, err = vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
+				if err != nil {
+					return nil, nil, nil, fmt.Errorf("merge: valTransform failed: %w", err)
+				}
+			}
+		}
 		if err = kvWriter.AddWord(keyBuf); err != nil {
 			return nil, nil, nil, err
 		}
@@ -1205,6 +1227,10 @@ func (dc *DomainContext) garbage(merged *filesItem) (outs []*filesItem) {
 				continue
 			}
 			if item.isSubsetOf(merged) {
+				if dc.d.restrictSubsetFileDeletions {
+					continue
+				}
+				fmt.Printf("garbage: %s is subset of %s", item.decompressor.FileName(), merged.decompressor.FileName())
 				outs = append(outs, item)
 			}
 			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainContext`)

@@ -1,14 +1,14 @@
 package state
 
 import (
-	"sort"
-	"testing"
-
+	"context"
 	"github.com/ledgerwatch/erigon-lib/seg"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	btree2 "github.com/tidwall/btree"
+	"sort"
+	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 )
@@ -481,4 +481,57 @@ func Test_mergeEliasFano(t *testing.T) {
 		v, _ := mit.Next()
 		require.Contains(t, mergedLists, int(v))
 	}
+}
+
+func TestMergeFiles(t *testing.T) {
+	db, d := testDbAndDomain(t, log.New())
+	defer db.Close()
+	defer d.Close()
+
+	dc := d.MakeContext()
+	defer dc.Close()
+
+	txs := d.aggregationStep * 8
+	data := generateTestData(t, 20, 52, txs, txs, 100)
+
+	rwTx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	w := dc.NewWriter()
+
+	prev := []byte{}
+	prevStep := uint64(0)
+	for key, upd := range data {
+		for _, v := range upd {
+			w.SetTxNum(v.txNum)
+			err := w.PutWithPrev([]byte(key), nil, v.value, prev, prevStep)
+
+			prev, prevStep = v.value, v.txNum/d.aggregationStep
+			require.NoError(t, err)
+		}
+	}
+
+	require.NoError(t, w.Flush(context.Background(), rwTx))
+	w.close()
+	err = rwTx.Commit()
+	require.NoError(t, err)
+
+	collateAndMerge(t, db, nil, d, txs)
+
+	rwTx, err = db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	dc = d.MakeContext()
+	defer dc.Close()
+
+	err = dc.IteratePrefix(rwTx, nil, func(key, value []byte) error {
+		upds, ok := data[string(key)]
+		require.True(t, ok)
+
+		require.EqualValues(t, upds[len(upds)-1].value, value)
+		return nil
+	})
+	require.NoError(t, err)
 }

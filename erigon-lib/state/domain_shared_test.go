@@ -18,6 +18,79 @@ import (
 	"github.com/ledgerwatch/erigon-lib/types"
 )
 
+func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
+	stepSize := uint64(100)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+
+	ctx := context.Background()
+	rwTx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	ac := agg.MakeContext()
+	defer ac.Close()
+
+	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	rnd := rand.New(rand.NewSource(2342))
+	maxTx := stepSize * 8
+
+	// 1. generate data
+	data := generateSharedDomainsUpdates(t, domains, maxTx, rnd, length.Addr, 10, stepSize)
+	fillRawdbTxNumsIndexForSharedDomains(t, rwTx, maxTx, stepSize)
+
+	err = domains.Flush(ctx, rwTx)
+	require.NoError(t, err)
+
+	// 2. remove just one key and compute commitment
+	removedKey := []byte{}
+	for key := range data {
+		removedKey = []byte(key)[:length.Addr]
+		domains.SetTxNum(maxTx + 1)
+		err = domains.DomainDel(kv.AccountsDomain, removedKey, nil, nil, 0)
+		require.NoError(t, err)
+		break
+	}
+
+	// 3. calculate commitment with all data +removed key
+	expectedHash, err := domains.ComputeCommitment(context.Background(), false, domains.txNum/stepSize, "")
+	require.NoError(t, err)
+	domains.Close()
+
+	err = rwTx.Commit()
+	require.NoError(t, err)
+
+	t.Logf("expected hash: %x", expectedHash)
+	t.Logf("valueTransform enabled: %t", agg.commitmentValuesTransform)
+	err = agg.BuildFiles(stepSize * 16)
+	require.NoError(t, err)
+
+	ac.Close()
+
+	ac = agg.MakeContext()
+	rwTx, err = db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	// 4. restart on same (replaced keys) files
+	domains, err = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	// 5. delete same key. commitment should be the same
+	domains.SetTxNum(maxTx + 1)
+	err = domains.DomainDel(kv.AccountsDomain, removedKey, nil, nil, 0)
+	require.NoError(t, err)
+
+	resultHash, err := domains.ComputeCommitment(context.Background(), false, domains.txNum/stepSize, "")
+	require.NoError(t, err)
+
+	t.Logf("result hash: %x", resultHash)
+	require.Equal(t, expectedHash, resultHash)
+}
+
 func TestSharedDomain_Unwind(t *testing.T) {
 	stepSize := uint64(100)
 	db, agg := testDbAndAggregatorv3(t, stepSize)

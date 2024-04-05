@@ -102,8 +102,8 @@ type histCfg struct {
 	withLocalityIndex  bool
 	withExistenceIndex bool // move to iiCfg
 
-	dontProduceFiles bool   // don't produce .v and .ef files. old data will be pruned anyway.
-	keepTxInDB       uint64 // When dontProduceFiles=true, keepTxInDB is used to keep this amount of tx in db before pruning
+	dontProduceHistoryFiles bool   // don't produce .v and .ef files. old data will be pruned anyway.
+	keepTxInDB              uint64 // When dontProduceHistoryFiles=true, keepTxInDB is used to keep this amount of tx in db before pruning
 }
 
 func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTable, indexTable, historyValsTable string, integrityCheck func(fromStep, toStep uint64) bool, logger log.Logger) (*History, error) {
@@ -115,7 +115,7 @@ func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTabl
 		indexList:          withHashMap,
 		integrityCheck:     integrityCheck,
 		historyLargeValues: cfg.historyLargeValues,
-		dontProduceFiles:   cfg.dontProduceFiles,
+		dontProduceFiles:   cfg.dontProduceHistoryFiles,
 		keepTxInDB:         cfg.keepTxInDB,
 	}
 	h.roFiles.Store(&[]ctxItem{})
@@ -1029,7 +1029,7 @@ func (hc *HistoryContext) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txT
 	minIdxTx, maxIdxTx := hc.ic.smallestTxNum(tx), hc.ic.highestTxNum(tx)
 	//defer func() {
 	//	fmt.Printf("CanPrune[%s]Until(%d) noFiles=%t txTo %d idxTx [%d-%d] keepTxInDB=%d; result %t\n",
-	//		hc.h.filenameBase, untilTx, hc.h.dontProduceFiles, txTo, minIdxTx, maxIdxTx, hc.h.keepTxInDB, minIdxTx < txTo)
+	//		hc.h.filenameBase, untilTx, hc.h.dontProduceHistoryFiles, txTo, minIdxTx, maxIdxTx, hc.h.keepTxInDB, minIdxTx < txTo)
 	//}()
 
 	if hc.h.dontProduceFiles {

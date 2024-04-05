@@ -634,7 +634,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 				return true
 			}
 			valuesOuts, indexOuts, historyOuts, _ := dc.staticFilesInRange(r)
-			valuesIn, indexIn, historyIn, err := dc.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, background.NewProgressSet())
+			valuesIn, indexIn, historyIn, err := dc.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
 			require.NoError(t, err)
 			if valuesIn != nil && valuesIn.decompressor != nil {
 				fmt.Printf("merge: %s\n", valuesIn.decompressor.FileName())
@@ -683,7 +683,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64, prune
 			break
 		}
 		valuesOuts, indexOuts, historyOuts, _ := dc.staticFilesInRange(r)
-		valuesIn, indexIn, historyIn, err := dc.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, background.NewProgressSet())
+		valuesIn, indexIn, historyIn, err := dc.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
 		require.NoError(t, err)
 
 		d.integrateMergedFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
@@ -1286,7 +1286,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		ranges := dc.findMergeRange(txFrom, txTo)
 		vl, il, hl, _ := dc.staticFilesInRange(ranges)
 
-		dv, di, dh, err := dc.mergeFiles(ctx, vl, il, hl, ranges, ps)
+		dv, di, dh, err := dc.mergeFiles(ctx, vl, il, hl, ranges, nil, ps)
 		require.NoError(t, err)
 
 		d.integrateMergedFiles(vl, il, hl, dv, di, dh)
@@ -1388,6 +1388,34 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 	return db, d, dat
 }
 
+func generateTestDataForDomainCommitment(tb testing.TB, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit uint64) map[string]map[string][]upd {
+	tb.Helper()
+
+	doms := make(map[string]map[string][]upd)
+	seed := 31
+	//seed := time.Now().Unix()
+	defer tb.Logf("generated data with seed %d, keys %d", seed, keyLimit)
+	r := rand.New(rand.NewSource(0))
+
+	accs := make(map[string][]upd)
+	stor := make(map[string][]upd)
+	if keyLimit == 1 {
+		key1 := generateRandomKey(r, keySize1)
+		accs[key1] = generateAccountUpdates(r, totalTx, keyTxsLimit)
+		doms["accounts"] = accs
+		return doms
+	}
+
+	for i := uint64(0); i < keyLimit/2; i++ {
+		key1 := generateRandomKey(r, keySize1)
+		accs[key1] = generateAccountUpdates(r, totalTx, keyTxsLimit)
+		key2 := key1 + generateRandomKey(r, keySize2-keySize1)
+		stor[key2] = generateStorageUpdates(r, totalTx, keyTxsLimit)
+	}
+
+	return doms
+}
+
 // generate arbitrary values for arbitrary keys within given totalTx
 func generateTestData(tb testing.TB, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit uint64) map[string][]upd {
 	tb.Helper()
@@ -1410,7 +1438,6 @@ func generateTestData(tb testing.TB, keySize1, keySize2, totalTx, keyTxsLimit, k
 		key2 := key1 + generateRandomKey(r, keySize2-keySize1)
 		data[key2] = generateUpdates(r, totalTx, keyTxsLimit)
 	}
-
 	return data
 }
 
@@ -1423,6 +1450,41 @@ func generateRandomKeyBytes(r *rand.Rand, size uint64) []byte {
 	r.Read(key)
 
 	return key
+}
+
+func generateAccountUpdates(r *rand.Rand, totalTx, keyTxsLimit uint64) []upd {
+	updates := make([]upd, 0)
+	usedTxNums := make(map[uint64]bool)
+
+	for i := uint64(0); i < keyTxsLimit; i++ {
+		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
+		jitter := r.Intn(10e7)
+		value := types.EncodeAccountBytesV3(i, uint256.NewInt(i*10e4+uint64(jitter)), nil, 0)
+
+		updates = append(updates, upd{txNum: txNum, value: value})
+		usedTxNums[txNum] = true
+	}
+	sort.Slice(updates, func(i, j int) bool { return updates[i].txNum < updates[j].txNum })
+
+	return updates
+}
+
+func generateStorageUpdates(r *rand.Rand, totalTx, keyTxsLimit uint64) []upd {
+	updates := make([]upd, 0)
+	usedTxNums := make(map[uint64]bool)
+
+	for i := uint64(0); i < keyTxsLimit; i++ {
+		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
+
+		value := make([]byte, r.Intn(24*(1<<10)))
+		r.Read(value)
+
+		updates = append(updates, upd{txNum: txNum, value: value})
+		usedTxNums[txNum] = true
+	}
+	sort.Slice(updates, func(i, j int) bool { return updates[i].txNum < updates[j].txNum })
+
+	return updates
 }
 
 func generateUpdates(r *rand.Rand, totalTx, keyTxsLimit uint64) []upd {
@@ -1625,7 +1687,6 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	d.historyLargeValues = false
 	d.History.compression = CompressKeys | CompressVals
 	d.compression = CompressKeys | CompressVals
-	d.withExistenceIndex = true
 
 	dc := d.MakeContext()
 	defer dc.Close()
@@ -2345,4 +2406,87 @@ func TestDomain_PruneSimple(t *testing.T) {
 
 		checkKeyPruned(t, dc, db, stepSize, pruneFrom, pruneTo)
 	})
+}
+
+func TestDomainContext_findShortenedKey(t *testing.T) {
+	db, d := testDbAndDomain(t, log.New())
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	d.historyLargeValues = true
+	dc := d.MakeContext()
+	defer dc.Close()
+	writer := dc.NewWriter()
+	defer writer.close()
+
+	keySize1 := uint64(length.Addr)
+	keySize2 := uint64(length.Addr + length.Hash)
+	totalTx := uint64(5000)
+	keyTxsLimit := uint64(50)
+	keyLimit := uint64(200)
+
+	// put some kvs
+	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
+	for key, updates := range data {
+		p := []byte{}
+		for i := 0; i < len(updates); i++ {
+			writer.SetTxNum(updates[i].txNum)
+			writer.PutWithPrev([]byte(key), nil, updates[i].value, p, 0)
+			p = common.Copy(updates[i].value)
+		}
+	}
+	writer.SetTxNum(totalTx)
+
+	err = writer.Flush(context.Background(), tx)
+	require.NoError(t, err)
+
+	// aggregate
+	collateAndMerge(t, db, tx, d, totalTx) // expected to left 2 latest steps in db
+
+	require.NoError(t, tx.Commit())
+
+	tx, err = db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	dc.Close()
+
+	dc = d.MakeContext()
+
+	findFile := func(start, end uint64) *filesItem {
+		var foundFile *filesItem
+		dc.d.files.Walk(func(items []*filesItem) bool {
+			for _, item := range items {
+				if item.startTxNum == start && item.endTxNum == end {
+					foundFile = item
+					return false
+				}
+			}
+			return true
+		})
+		return foundFile
+	}
+
+	var ki int
+	for key, updates := range data {
+
+		v, found, st, en, err := dc.getFromFiles([]byte(key))
+		require.True(t, found)
+		require.NoError(t, err)
+		for i := len(updates) - 1; i >= 0; i-- {
+			if st <= updates[i].txNum && updates[i].txNum < en {
+				require.EqualValues(t, updates[i].value, v)
+				break
+			}
+		}
+
+		lastFile := findFile(st, en)
+		require.NotNilf(t, lastFile, "%d-%d", st/dc.d.aggregationStep, en/dc.d.aggregationStep)
+
+		shortenedKey, found := dc.findShortenedKey([]byte(key), lastFile)
+		require.Truef(t, found, "key %d/%d %x file %d %d %s", ki, len(data), []byte(key), lastFile.startTxNum, lastFile.endTxNum, lastFile.decompressor.FileName())
+		require.NotNil(t, shortenedKey)
+		ki++
+	}
 }
