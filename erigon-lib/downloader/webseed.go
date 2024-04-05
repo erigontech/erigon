@@ -567,11 +567,12 @@ func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) 
 	for _, urlStr := range urls {
 		urlStr += ".torrent"
 		parsedUrl, err := url.Parse(urlStr)
-		if err != nil {
-			continue
-		}
 		if strings.Contains(name, "commitment") {
-			log.Warn("[dbg] see urls", "name", name, "urls", fmt.Sprintf())
+			log.Warn("[dbg] see urls", "name", name, "urlStr", urlStr, "parsedUrl", parsedUrl, "err", err)
+		}
+		if err != nil {
+			d.logger.Log(d.verbosity, "[snapshots] callTorrentHttpProvider parse url", "err", err)
+			continue
 		}
 		res, err := d.callTorrentHttpProvider(ctx, parsedUrl, name)
 		if err != nil {
