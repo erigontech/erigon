@@ -561,7 +561,6 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 
 func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) (bool, error) {
 	urls, ok := d.ByFileName(name)
-	log.Warn("dbg herre", "a", fmt.Sprintf("%#v", d.byFileName))
 	if !ok {
 		return false, nil
 	}
@@ -572,9 +571,9 @@ func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) 
 			continue
 		}
 		res, err := d.callTorrentHttpProvider(ctx, parsedUrl, name)
-		d.logger.Log(d.verbosity, "[snapshots.dbg] .torrent downloaded", "name", name, "err", err, "len", len(res), "url", urlStr)
 		if err != nil {
-			return false, err
+			d.logger.Log(d.verbosity, "[snapshots] callTorrentHttpProvider", "name", name, "err", err)
+			continue //try another
 		}
 
 		if d.torrentFiles.Exists(name) {
@@ -606,8 +605,7 @@ func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL, fi
 	defer resp.Body.Close()
 	//protect against too small and too big data
 	if resp.ContentLength == 0 || resp.ContentLength > int64(128*datasize.MB) {
-		d.logger.Log(d.verbosity, "[snapshots] .torrent downloading attack prevention", "name", fileName, "resp.ContentLength", resp.ContentLength, "url", url.String(), "err", err)
-		return nil, nil
+		return nil, fmt.Errorf(".torrent downloading size attack prevention: resp.ContentLength=%d, url=%s", resp.ContentLength, url.String())
 	}
 	res, err := io.ReadAll(resp.Body)
 	if err != nil {
