@@ -76,7 +76,7 @@ func (a *ApiHandler) PostEthV1ValidatorSyncCommitteeSubscriptions(w http.Respons
 	w.WriteHeader(http.StatusOK)
 }
 
-func (a *ApiHandler) EthV1ValidatorBeaconCommitteeSubscription(w http.ResponseWriter, r *http.Request) {
+func (a *ApiHandler) PostEthV1ValidatorBeaconCommitteeSubscription(w http.ResponseWriter, r *http.Request) {
 	req := []*cltypes.BeaconCommitteeSubscription{}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		log.Error("failed to decode request", "err", err)
