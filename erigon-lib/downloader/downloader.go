@@ -2380,9 +2380,22 @@ func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientC
 	m = storage.NewMMapWithCompletion(snapDir, c)
 	cfg.DefaultStorage = m
 
-	torrentClient, err = torrent.NewClient(cfg)
+	err = func() error {
+		defer func() {
+			if err := recover(); err != nil {
+				fmt.Printf("openTorrentClient: %v\n", err)
+			}
+		}()
+
+		torrentClient, err = torrent.NewClient(cfg)
+		if err != nil {
+			return fmt.Errorf("torrent.NewClient: %w", err)
+		}
+		return err
+	}()
+
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("torrent.NewClient: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("torrentcfg.openClient: %w", err)
 	}
 
 	return db, c, m, torrentClient, nil

@@ -93,6 +93,10 @@ func (c *Cursor) Di() uint64 {
 	return c.d
 }
 
+func (c *Cursor) offsetInFile() uint64 {
+	return c.btt.ef.Get(c.d)
+}
+
 func (c *Cursor) Value() []byte {
 	return c.value
 }
@@ -1084,6 +1088,9 @@ func (b *BtIndex) Seek(g ArchiveGetter, x []byte) (*Cursor, error) {
 		}
 		return nil, err
 	}
+	//if bytes.Compare(k, x) < 0 {
+	//	panic("seek key > found key")
+	//}
 	return b.newCursor(context.Background(), k, v, dt, g), nil
 }
 
