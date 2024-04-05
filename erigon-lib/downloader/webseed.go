@@ -594,6 +594,9 @@ func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) 
 			d.logger.Log(d.verbosity, "[snapshots] .torrent from webseed rejected", "name", name, "err", err, "url", urlStr)
 			continue
 		}
+		if strings.Contains(name, "commitment.0-2048") {
+			log.Warn("[dbg] created???", "name", name)
+		}
 		return true, nil
 	}
 
