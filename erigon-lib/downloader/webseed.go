@@ -576,7 +576,7 @@ func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) 
 		}
 		res, err := d.callTorrentHttpProvider(ctx, parsedUrl, name)
 		if strings.Contains(name, "commitment.0-2048") {
-			log.Warn("[dbg] did cal callTorrentHttpProvider", "name", name, "urlStr", urlStr, "parsedUrl", parsedUrl, "err", err, "len(res)", res)
+			log.Warn("[dbg] did cal callTorrentHttpProvider", "name", name, "urlStr", urlStr, "parsedUrl", parsedUrl, "err", err, "len(res)", len(res))
 		}
 		if err != nil {
 			d.logger.Log(d.verbosity, "[snapshots] callTorrentHttpProvider", "name", name, "err", err)
