@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"context"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
@@ -12,6 +14,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
@@ -652,4 +655,25 @@ func shouldStatusBeFiltered(status validatorStatus, statuses []validatorStatus) 
 		}
 	}
 	return true // filter if no filter condition is met
+}
+
+func (a *ApiHandler) EthV1ValidatorBeaconCommitteeSubscription(w http.ResponseWriter, r *http.Request) {
+	req := []*cltypes.BeaconCommitteeSubscription{}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Error("failed to decode request", "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if len(req) == 0 {
+		http.Error(w, "empty request", http.StatusBadRequest)
+		return
+	}
+	for _, sub := range req {
+		if err := a.committeeSub.AddAttestationSubscription(context.Background(), sub); err != nil {
+			log.Error("failed to add attestation subscription", "err", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	w.WriteHeader(http.StatusOK)
 }

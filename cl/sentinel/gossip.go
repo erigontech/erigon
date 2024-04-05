@@ -109,7 +109,7 @@ func NewGossipManager(
 func GossipSidecarTopics(maxBlobs uint64) (ret []GossipTopic) {
 	for i := uint64(0); i < maxBlobs; i++ {
 		ret = append(ret, GossipTopic{
-			Name:     gossip.TopicNameBlobSidecar(int(i)),
+			Name:     gossip.TopicNameBlobSidecar(i),
 			CodecStr: SSZSnappyCodec,
 		})
 	}

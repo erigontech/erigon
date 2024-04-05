@@ -170,6 +170,19 @@ func (a *Attestation) HashSSZ() (o [32]byte, err error) {
 
 // Clone creates a new clone of the Attestation instance.
 // This can be useful for creating copies without changing the original object.
-func (*Attestation) Clone() clonable.Clonable {
-	return &Attestation{}
+func (a *Attestation) Clone() clonable.Clonable {
+	if a == nil {
+		return &Attestation{}
+	}
+	var staticBuffer [attestationStaticBufferSize]byte
+	var bitsBuffer []byte
+	copy(staticBuffer[:], a.staticBuffer[:])
+	if a.aggregationBitsBuffer != nil {
+		bitsBuffer = make([]byte, len(a.aggregationBitsBuffer))
+		copy(bitsBuffer, a.aggregationBitsBuffer)
+	}
+	return &Attestation{
+		aggregationBitsBuffer: bitsBuffer,
+		staticBuffer:          staticBuffer,
+	}
 }
