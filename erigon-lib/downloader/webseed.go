@@ -601,6 +601,7 @@ func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL, fi
 	defer resp.Body.Close()
 	//protect against too small and too big data
 	if resp.ContentLength == 0 || resp.ContentLength > int64(128*datasize.MB) {
+		d.logger.Log(d.verbosity, "[snapshots] .torrent downloading attack prevention", "name", fileName, "resp.ContentLength", resp.ContentLength, "url", url.String(), "err", err)
 		return nil, nil
 	}
 	res, err := io.ReadAll(resp.Body)
