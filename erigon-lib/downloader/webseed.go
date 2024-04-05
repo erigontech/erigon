@@ -567,35 +567,22 @@ func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) 
 	for _, urlStr := range urls {
 		urlStr += ".torrent"
 		parsedUrl, err := url.Parse(urlStr)
-		if strings.Contains(name, "commitment.0-2048") {
-			log.Warn("[dbg] see url", "name", name, "urlStr", urlStr, "parsedUrl", parsedUrl, "err", err)
-		}
 		if err != nil {
 			d.logger.Log(d.verbosity, "[snapshots] callTorrentHttpProvider parse url", "err", err)
 			continue
 		}
 		res, err := d.callTorrentHttpProvider(ctx, parsedUrl, name)
-		if strings.Contains(name, "commitment.0-2048") {
-			log.Warn("[dbg] did cal callTorrentHttpProvider", "name", name, "urlStr", urlStr, "parsedUrl", parsedUrl, "err", err, "len(res)", len(res))
-		}
 		if err != nil {
 			d.logger.Log(d.verbosity, "[snapshots] callTorrentHttpProvider", "name", name, "err", err)
 			continue
 		}
 
 		if d.torrentFiles.Exists(name) {
-			if strings.Contains(name, "commitment.0-2048") {
-				log.Warn("[dbg] exists???", "name", name)
-			}
-
 			continue
 		}
 		if err := d.torrentFiles.Create(name, res); err != nil {
 			d.logger.Log(d.verbosity, "[snapshots] .torrent from webseed rejected", "name", name, "err", err, "url", urlStr)
 			continue
-		}
-		if strings.Contains(name, "commitment.0-2048") {
-			log.Warn("[dbg] created???", "name", name)
 		}
 		return true, nil
 	}
