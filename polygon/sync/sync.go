@@ -127,11 +127,12 @@ func (s *Sync) onNewBlockEvent(
 	} else {
 		newBlocks, err = s.p2pService.FetchBlocks(ctx, rootNum, newBlockHeaderNum+1, event.PeerId)
 		if err != nil {
-			if (p2p.ErrIncompleteHeaders{}).Is(err) || (p2p.ErrMissingBodies{}).Is(err) {
+			if errors.Is(err, &p2p.ErrIncompleteHeaders{}) || errors.Is(err, &p2p.ErrMissingBodies{}) {
 				s.logger.Debug("sync.Sync.onNewBlockEvent: failed to fetch complete blocks, ignoring event",
 					"err", err, "peerId", event.PeerId, "lastBlockNum", newBlockHeaderNum)
 				return nil
 			}
+
 			return err
 		}
 	}
@@ -183,11 +184,12 @@ func (s *Sync) onNewBlockHashesEvent(
 
 		newBlocks, err := s.p2pService.FetchBlocks(ctx, headerHashNum.Number, headerHashNum.Number+1, event.PeerId)
 		if err != nil {
-			if (p2p.ErrIncompleteHeaders{}).Is(err) || (p2p.ErrMissingBodies{}).Is(err) {
+			if errors.Is(err, &p2p.ErrIncompleteHeaders{}) || errors.Is(err, &p2p.ErrMissingBodies{}) {
 				s.logger.Debug("sync.Sync.onNewBlockHashesEvent: failed to fetch complete blocks, ignoring event",
 					"err", err, "peerId", event.PeerId, "lastBlockNum", headerHashNum.Number)
 				continue
 			}
+
 			return err
 		}
 
