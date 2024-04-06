@@ -265,6 +265,7 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 	prevLogSlot := currentSlot
 	prevTime := time.Now()
 	targetSlot := cfg.beaconCfg.DenebForkEpoch * cfg.beaconCfg.SlotsPerEpoch
+	cfg.logger.Info("Downloading blobs backwards", "from", currentSlot, "to", targetSlot)
 	for currentSlot >= targetSlot {
 		if currentSlot <= cfg.sn.FrozenBlobs() {
 			break

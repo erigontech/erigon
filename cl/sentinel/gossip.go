@@ -421,7 +421,6 @@ func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, 
 				log.Warn("[Sentinel] fail to decode gossip packet", "err", err, "topicName", topicName)
 				return
 			}
-			fmt.Println(topicName)
 
 			if msg.ReceivedFrom == s.host {
 				continue
