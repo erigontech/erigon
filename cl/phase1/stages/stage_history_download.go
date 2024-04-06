@@ -274,7 +274,11 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 		batch := make([]*cltypes.SignedBlindedBeaconBlock, 0, blocksBatchSize)
 		visited := uint64(0)
-		for ; len(batch) < int(blocksBatchSize); visited++ {
+		maxIterations := uint64(32)
+		for ; visited < blocksBatchSize; visited++ {
+			if visited >= maxIterations {
+				break
+			}
 			if currentSlot-visited < targetSlot {
 				break
 			}
