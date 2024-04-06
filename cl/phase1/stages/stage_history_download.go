@@ -346,6 +346,7 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 			}
 			return fmt.Errorf("block not in batch")
 		})
+		fmt.Println(len(blobs.Responses))
 		if err != nil {
 			rpc.BanPeer(blobs.Peer)
 			cfg.logger.Warn("Error verifying blobs", "err", err)

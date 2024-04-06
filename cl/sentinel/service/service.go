@@ -200,7 +200,6 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	defer resp.Body.Close()
 	// some standard http error code parsing
 	if resp.StatusCode < 200 || resp.StatusCode > 399 {
-		fmt.Println(resp.StatusCode)
 		errBody, _ := io.ReadAll(resp.Body)
 		errorMessage := fmt.Errorf("SentinelHttp: %s", string(errBody))
 		s.sentinel.Peers().RemovePeer(pid)
