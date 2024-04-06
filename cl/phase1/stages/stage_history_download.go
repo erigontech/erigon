@@ -211,12 +211,13 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 		cfg.antiquary.NotifyBackfilled()
 		if cfg.backfilling {
-			cfg.logger.Info("full backfilling finished")
+			cfg.logger.Info("Full backfilling finished")
 		} else {
 			cfg.logger.Info("Missing blocks download finished (note: this does not mean that the history is complete, only that the missing blocks need for sync have been downloaded)")
 		}
 
 		close(finishCh)
+		fmt.Println(cfg.blobsBackfilling)
 		if cfg.blobsBackfilling {
 			go func() {
 				if err := downloadBlobHistoryWorker(cfg, ctx, logger); err != nil {
