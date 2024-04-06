@@ -231,24 +231,15 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 			waypoints = waypoints[len(waypointsBatch):]
 		}
 
-		if len(blocks) > 0 {
-			if err := d.storage.InsertBlocks(ctx, blocks); err != nil {
-				return nil, err
-			}
-
-			flushStartTime := time.Now()
-			if err := d.storage.Flush(ctx); err != nil {
-				return nil, err
-			}
-
-			d.logger.Debug(
-				syncLogPrefix("stored blocks"),
-				"len", len(blocks),
-				"duration", time.Since(flushStartTime),
-			)
-
-			lastBlock = blocks[len(blocks)-1]
+		if len(blocks) == 0 {
+			continue
 		}
+
+		if err := d.storage.InsertBlocks(ctx, blocks); err != nil {
+			return nil, err
+		}
+
+		lastBlock = blocks[len(blocks)-1]
 	}
 
 	d.logger.Info(syncLogPrefix("finished downloading blocks using waypoints"))
