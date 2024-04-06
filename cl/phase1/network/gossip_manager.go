@@ -84,7 +84,15 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			err = fmt.Errorf("%v", r)
 		}
 	}()
-	data.Data = common.CopyBytes(data.Data)
+	// Make a copy of the gossip data so that we the received data is not modified.
+	// 1) When we publish and corrupt the data, the peers bans us.
+	// 2) We decode the block wrong
+	data = &sentinel.GossipData{
+		Name:     data.Name,
+		Peer:     data.Peer,
+		SubnetId: data.SubnetId,
+		Data:     common.CopyBytes(data.Data),
+	}
 
 	currentEpoch := utils.GetCurrentEpoch(g.genesisConfig.GenesisTime, g.beaconConfig.SecondsPerSlot, g.beaconConfig.SlotsPerEpoch)
 	version := g.beaconConfig.GetCurrentStateVersion(currentEpoch)
