@@ -148,10 +148,6 @@ func (f *ForkChoiceStore) verifyAggregateMessageSignature(s *state.CachingBeacon
 	return nil
 }
 
-func (f *ForkChoiceStore) canProcessAggregate() bool {
-	return f.synced.Load() && f.syncedDataManager.HeadState() != nil
-}
-
 func (f *ForkChoiceStore) verifySignaturesOnAggregate(s *state.CachingBeaconState, aggregateAndProof *cltypes.SignedAggregateAndProof) error {
 	aggregationBits := aggregateAndProof.Message.Aggregate.AggregationBits()
 	// [REJECT] The aggregate attestation has participants -- that is, len(get_attesting_indices(state, aggregate)) >= 1.
@@ -177,10 +173,10 @@ func (f *ForkChoiceStore) verifySignaturesOnAggregate(s *state.CachingBeaconStat
 
 // OnAggregateAndProof processes incoming aggregate and proofs. it is called when a new aggregate and proof is received either via gossip or from the Beacon API.
 func (f *ForkChoiceStore) OnAggregateAndProof(aggregateAndProof *cltypes.SignedAggregateAndProof, _ bool) error {
-	if f.canProcessAggregate() {
+	headState := f.syncedDataManager.HeadState()
+	if headState == nil {
 		return nil
 	}
-	headState := f.syncedDataManager.HeadState()
 	selectionProof := aggregateAndProof.Message.SelectionProof
 	aggregateData := aggregateAndProof.Message.Aggregate.AttestantionData()
 	target := aggregateAndProof.Message.Aggregate.AttestantionData().Target()

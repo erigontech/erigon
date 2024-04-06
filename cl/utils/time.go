@@ -15,6 +15,8 @@ package utils
 
 import "time"
 
+var maximumClockDisparity = 500 * time.Millisecond
+
 // compute time of slot.
 func GetSlotTime(genesisTime uint64, secondsPerSlot uint64, slot uint64) time.Time {
 	slotTime := genesisTime + secondsPerSlot*slot
@@ -31,14 +33,17 @@ func GetCurrentSlot(genesisTime uint64, secondsPerSlot uint64) uint64 {
 	return (now - genesisTime) / secondsPerSlot
 }
 
-// compute current slot.
-func GetCurrentSlotOverTime(genesisTime uint64, secondsPerSlot uint64) uint64 {
-	now := uint64(time.Now().Unix())
-	if now < genesisTime {
-		return 0
-	}
+func IsCurrentSlotWithMaximumClockDisparity(genesisTime uint64, secondsPerSlot uint64, slot uint64) bool {
+	slotTime := GetSlotTime(genesisTime, secondsPerSlot, slot)
+	currSlot := GetCurrentSlot(genesisTime, secondsPerSlot)
+	minSlot := GetSlotByTime(genesisTime, secondsPerSlot, slotTime.Add(-maximumClockDisparity))
+	maxSlot := GetSlotByTime(genesisTime, secondsPerSlot, slotTime.Add(maximumClockDisparity))
+	return minSlot == currSlot || maxSlot == currSlot
 
-	return (now - genesisTime) % secondsPerSlot
+}
+
+func GetSlotByTime(genesisTime uint64, secondsPerSlot uint64, time time.Time) uint64 {
+	return (uint64(time.Unix()) - genesisTime) / secondsPerSlot
 }
 
 // compute current epoch.

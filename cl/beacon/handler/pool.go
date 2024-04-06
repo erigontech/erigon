@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/gossip"
+	"github.com/ledgerwatch/erigon/cl/phase1/network/subnets"
 )
 
 func (a *ApiHandler) GetEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -220,4 +221,102 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 			}
 		}
 	}
+}
+
+// PostEthV1BeaconPoolSyncCommittees is a handler for POST /eth/v1/beacon/pool/sync_committees.
+// it receives a list of sync committee messages and adds them to the sync committee pool.
+func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r *http.Request) {
+	msgs := []*cltypes.SyncCommitteeMessage{}
+	if err := json.NewDecoder(r.Body).Decode(&msgs); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	s := a.syncedData.HeadState()
+	if s == nil {
+		http.Error(w, "node is not synced", http.StatusServiceUnavailable)
+		return
+	}
+	failures := []poolingFailure{}
+	for idx, v := range msgs {
+		publishingSubnets, err := subnets.ComputeSubnetsForSyncCommittee(s, v.ValidatorIndex)
+		if err != nil {
+			failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
+			continue
+		}
+		for _, subnet := range publishingSubnets {
+			if err := a.forkchoiceStore.OnSyncCommitteeMessage(v, subnet); err != nil {
+				failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
+				break
+			}
+			// Broadcast to gossip
+			if a.sentinel != nil {
+				encodedSSZ, err := v.EncodeSSZ(nil)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				subnetId := subnet // this effectively makes a copy
+				if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
+					Data:     encodedSSZ,
+					Name:     gossip.TopicNamePrefixSyncCommittee,
+					SubnetId: &subnetId,
+				}); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+			}
+		}
+	}
+	if len(failures) > 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(poolingError{Code: http.StatusBadRequest, Message: "some failures", Failures: failures})
+		return
+	}
+	// Only write 200
+	w.WriteHeader(http.StatusOK)
+}
+
+// PostEthV1ValidatorContributionsAndProofs is a handler for POST /eth/v1/validator/contributions_and_proofs.
+// it receives a list of signed contributions and proofs and adds them to the sync committee pool.
+func (a *ApiHandler) PostEthV1ValidatorContributionsAndProofs(w http.ResponseWriter, r *http.Request) {
+	msgs := []*cltypes.SignedContributionAndProof{}
+	if err := json.NewDecoder(r.Body).Decode(&msgs); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	s := a.syncedData.HeadState()
+	if s == nil {
+		http.Error(w, "node is not synced", http.StatusServiceUnavailable)
+		return
+	}
+	failures := []poolingFailure{}
+	for idx, v := range msgs {
+		if err := a.forkchoiceStore.OnSignedContributionAndProof(v, false); err != nil {
+			failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
+			continue
+		}
+		// Broadcast to gossip
+		if a.sentinel != nil {
+			encodedSSZ, err := v.EncodeSSZ(nil)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
+				Data: encodedSSZ,
+				Name: gossip.TopicNameSyncCommitteeContributionAndProof,
+			}); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+	}
+
+	if len(failures) > 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(poolingError{Code: http.StatusBadRequest, Message: "some failures", Failures: failures})
+		return
+	}
+	// Only write 200
+	w.WriteHeader(http.StatusOK)
 }

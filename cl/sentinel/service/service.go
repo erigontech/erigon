@@ -97,12 +97,17 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 	default:
 		// check subnets
 		switch {
-		case strings.Contains(msg.Name, "blob_sidecar"):
+		case gossip.IsTopicBlobSidecar(msg.Name):
 			if msg.SubnetId == nil {
 				return nil, fmt.Errorf("subnetId is required for blob sidecar")
 			}
+			subscription = manager.GetMatchingSubscription(fmt.Sprintf(gossip.TopicNamePrefixBlobSidecar, *msg.SubnetId))
+		case gossip.IsTopicSyncCommittee(msg.Name):
+			if msg.SubnetId == nil {
+				return nil, fmt.Errorf("subnetId is required for sync_committee")
+			}
 			subscription = manager.GetMatchingSubscription(gossip.TopicNameBlobSidecar(*msg.SubnetId))
-		case strings.Contains(msg.Name, gossip.TopicNamePrefixBeaconAttestation):
+		case gossip.IsTopicBeaconAttestation(msg.Name):
 			if msg.SubnetId == nil {
 				return nil, fmt.Errorf("subnetId is required for beacon attestation")
 			}
@@ -396,8 +401,9 @@ func (s *SentinelServer) handleGossipPacket(pkt *sentinel.GossipMessage) error {
 	} else if strings.Contains(topic, string(gossip.TopicNameSyncCommitteeContributionAndProof)) {
 		s.gossipNotifier.notify(gossip.TopicNameSyncCommitteeContributionAndProof, data, string(textPid))
 	} else if gossip.IsTopicBlobSidecar(topic) {
-		// extract the index
 		s.gossipNotifier.notifyBlob(data, string(textPid), extractSubnetIndex(topic))
+	} else if gossip.IsTopicSyncCommittee(topic) {
+		s.gossipNotifier.notifySyncCommittee(data, string(textPid), extractSubnetIndex(topic))
 	} else if gossip.IsTopicBeaconAttestation(topic) {
 		s.gossipNotifier.notifyAttestation(data, string(textPid), extractSubnetIndex(topic))
 	}
