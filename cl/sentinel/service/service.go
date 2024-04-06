@@ -252,6 +252,7 @@ func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelrpc.Reque
 
 	resp, err := s.requestPeer(ctx, pid, req)
 	if err != nil {
+		fmt.Println(err)
 		if strings.Contains(err.Error(), "protocols not supported") {
 			s.sentinel.Peers().RemovePeer(pid)
 			s.sentinel.Host().Peerstore().RemovePeer(pid)
