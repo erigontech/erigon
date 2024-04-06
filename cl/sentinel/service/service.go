@@ -202,11 +202,10 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	if resp.StatusCode < 200 || resp.StatusCode > 399 {
 		errBody, _ := io.ReadAll(resp.Body)
 		errorMessage := fmt.Errorf("SentinelHttp: %s", string(errBody))
-		if peerCount > gracePeerCount {
-			s.sentinel.Peers().RemovePeer(pid)
-			s.sentinel.Host().Peerstore().RemovePeer(pid)
-			s.sentinel.Host().Network().ClosePeer(pid)
-		}
+		s.sentinel.Peers().RemovePeer(pid)
+		s.sentinel.Host().Peerstore().RemovePeer(pid)
+		s.sentinel.Host().Network().ClosePeer(pid)
+
 		return nil, errorMessage
 	}
 	// we should never get an invalid response to this. our responder should always set it on non-error response
@@ -216,24 +215,14 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 		return nil, err
 	}
 	// known error codes, just remove the peer
-	if isError == 3 || isError == 2 {
-		if peerCount > gracePeerCount {
-			s.sentinel.Peers().RemovePeer(pid)
-			s.sentinel.Host().Peerstore().RemovePeer(pid)
-			s.sentinel.Host().Network().ClosePeer(pid)
-		}
+	if isError != 0 {
+		s.sentinel.Peers().RemovePeer(pid)
+		s.sentinel.Host().Peerstore().RemovePeer(pid)
+		s.sentinel.Host().Network().ClosePeer(pid)
+
 		return nil, fmt.Errorf("peer error code: %d", isError)
 	}
-	// unknown error codes
-	if isError > 3 {
-		s.logger.Debug("peer returned unknown erro", "id", pid.String())
-		if peerCount > gracePeerCount {
-			s.sentinel.Peers().RemovePeer(pid)
-			s.sentinel.Host().Peerstore().RemovePeer(pid)
-			s.sentinel.Host().Network().ClosePeer(pid)
-		}
-		return nil, fmt.Errorf("peer returned unknown error: %d", isError)
-	}
+
 	// read the body from the response
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
