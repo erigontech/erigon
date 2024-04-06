@@ -127,6 +127,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsSyncCommittees(w http.ResponseWriter,
 	if blk == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("block not found"))
 	}
+	slot := blk.Block.Slot
 	version := a.beaconChainCfg.GetCurrentStateVersion(blk.Block.Slot / a.beaconChainCfg.SlotsPerEpoch)
 	if version < clparams.AltairVersion {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("sync committee rewards not available before Altair fork"))
@@ -168,7 +169,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsSyncCommittees(w http.ResponseWriter,
 		}
 	} else {
 		var ok bool
-		syncCommittee, _, ok = a.forkchoiceStore.GetSyncCommittees(root)
+		syncCommittee, _, ok = a.forkchoiceStore.GetSyncCommittees(a.beaconChainCfg.SyncCommitteePeriod(slot))
 		if !ok {
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("non-finalized sync committee not found"))
 		}

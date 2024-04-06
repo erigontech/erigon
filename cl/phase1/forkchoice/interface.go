@@ -32,7 +32,7 @@ type ForkChoiceStorageReader interface {
 	ProposerBoostRoot() common.Hash
 	GetStateAtBlockRoot(blockRoot libcommon.Hash, alwaysCopy bool) (*state.CachingBeaconState, error)
 	GetFinalityCheckpoints(blockRoot libcommon.Hash) (bool, solid.Checkpoint, solid.Checkpoint, solid.Checkpoint)
-	GetSyncCommittees(blockRoot libcommon.Hash) (*solid.SyncCommittee, *solid.SyncCommittee, bool)
+	GetSyncCommittees(period uint64) (*solid.SyncCommittee, *solid.SyncCommittee, bool)
 	Slot() uint64
 	Time() uint64
 	Partecipation(epoch uint64) (*solid.BitList, bool)
@@ -63,6 +63,8 @@ type ForkChoiceStorageWriter interface {
 	OnProposerSlashing(proposerSlashing *cltypes.ProposerSlashing, test bool) error
 	OnBlsToExecutionChange(signedChange *cltypes.SignedBLSToExecutionChange, test bool) error
 	OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload bool, fullValidation bool, checkDataAvaibility bool) error
+	OnSyncCommitteeMessage(msg *cltypes.SyncCommitteeMessage, subnetID uint64) error
+	OnSignedContributionAndProof(signedContribution *cltypes.SignedContributionAndProof, test bool) error
 	OnTick(time uint64)
 	SetSynced(synced bool)
 }

@@ -109,7 +109,7 @@ func NewGossipManager(
 func GossipSidecarTopics(maxBlobs uint64) (ret []GossipTopic) {
 	for i := uint64(0); i < maxBlobs; i++ {
 		ret = append(ret, GossipTopic{
-			Name:     gossip.TopicNameBlobSidecar(int(i)),
+			Name:     gossip.TopicNameBlobSidecar(i),
 			CodecStr: SSZSnappyCodec,
 		})
 	}
@@ -192,6 +192,7 @@ func (s *Sentinel) SubscribeGossip(topic GossipTopic, expiration time.Time, opts
 		host:         s.host.ID(),
 		ctx:          s.ctx,
 		expiration:   exp,
+		s:            s,
 	}
 	path := fmt.Sprintf("/eth2/%x/%s/%s", digest, topic.Name, topic.CodecStr)
 	sub.topic, err = s.pubsub.Join(path, opts...)
@@ -292,6 +293,8 @@ type GossipSubscription struct {
 	cf context.CancelFunc
 	rf pubsub.RelayCancelFunc
 
+	s *Sentinel
+
 	stopCh    chan struct{}
 	closeOnce sync.Once
 }
@@ -314,6 +317,8 @@ func (sub *GossipSubscription) Listen() {
 					}
 					sub.topic.Close()
 					sub.subscribed.Store(false)
+					log.Info("[Gossip] Unsubscribed from topic", "topic", sub.gossip_topic.Name)
+					sub.s.updateENROnSubscription(sub.gossip_topic.Name, false)
 					continue
 				}
 				if !sub.subscribed.Load() && time.Now().Before(expirationTime) {
@@ -328,6 +333,8 @@ func (sub *GossipSubscription) Listen() {
 					sctx, sub.cf = context.WithCancel(sub.ctx)
 					go sub.run(sctx, sub.sub, sub.sub.Topic())
 					sub.subscribed.Store(true)
+					sub.s.updateENROnSubscription(sub.gossip_topic.Name, true)
+					log.Info("[Gossip] Subscribed to topic", "topic", sub.gossip_topic.Name)
 				}
 			}
 		}
@@ -335,7 +342,9 @@ func (sub *GossipSubscription) Listen() {
 }
 
 func (sub *GossipSubscription) OverwriteSubscriptionExpiry(expiry time.Time) {
-	sub.expiration.Store(expiry)
+	if expiry.After(sub.expiration.Load().(time.Time)) {
+		sub.expiration.Store(expiry)
+	}
 }
 
 // calls the cancel func for the subscriber and closes the topic and sub

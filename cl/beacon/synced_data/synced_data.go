@@ -29,6 +29,7 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 		return err
 	}
 	s.headState.Store(st)
+	//fmt.Println(newState.CurrentSyncCommittee().GetCommittee())
 
 	return
 }
