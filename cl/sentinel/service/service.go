@@ -187,7 +187,6 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println(req.Topic)
 	// set the peer and topic we are requesting
 	httpReq.Header.Set("REQRESP-PEER-ID", pid.String())
 	httpReq.Header.Set("REQRESP-TOPIC", req.Topic)
@@ -252,7 +251,6 @@ func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelrpc.Reque
 
 	resp, err := s.requestPeer(ctx, pid, req)
 	if err != nil {
-		fmt.Println(err)
 		if strings.Contains(err.Error(), "protocols not supported") {
 			s.sentinel.Peers().RemovePeer(pid)
 			s.sentinel.Host().Peerstore().RemovePeer(pid)

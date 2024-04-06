@@ -204,18 +204,15 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			if _, has := g.forkChoice.GetHeader(blockRoot); has {
 				return nil
 			}
-			// If we dont do that then blobs are processed too slowly and other peers punish us on the pubsub.
-			go func() {
-				// The background checks above are enough for now.
-				if err := g.forkChoice.OnBlobSidecar(blobSideCar, false); err != nil {
-					g.sentinel.BanPeer(ctx, data.Peer)
-					log.Warn("blob sidecar rejected", "err", err)
-				}
+			// The background checks above are enough for now.
+			if err := g.forkChoice.OnBlobSidecar(blobSideCar, false); err != nil {
+				g.sentinel.BanPeer(ctx, data.Peer)
+				log.Warn("blob sidecar rejected", "err", err)
+			}
 
-				if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
-					log.Debug("failed publish gossip", "err", err)
-				}
-			}()
+			if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
+				log.Debug("failed publish gossip", "err", err)
+			}
 
 			log.Debug("Received blob sidecar via gossip", "index", *data.SubnetId, "size", datasize.ByteSize(len(blobSideCar.Blob)))
 		case gossip.IsTopicSyncCommittee(data.Name):
