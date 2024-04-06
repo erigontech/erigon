@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
+	"github.com/ledgerwatch/erigon/cl/validator/sync_contribution_pool"
 )
 
 // Make mocks with maps and simple setters and getters, panic on methods from ForkChoiceStorageWriter
@@ -33,12 +34,13 @@ type ForkChoiceStorageMock struct {
 
 	StateAtBlockRootVal       map[common.Hash]*state.CachingBeaconState
 	StateAtSlotVal            map[uint64]*state.CachingBeaconState
-	GetSyncCommitteesVal      map[common.Hash][2]*solid.SyncCommittee
+	GetSyncCommitteesVal      map[uint64][2]*solid.SyncCommittee
 	GetFinalityCheckpointsVal map[common.Hash][3]solid.Checkpoint
 	WeightsMock               []ForkNode
 	LightClientBootstraps     map[common.Hash]*cltypes.LightClientBootstrap
 	NewestLCUpdate            *cltypes.LightClientUpdate
 	LCUpdates                 map[uint64]*cltypes.LightClientUpdate
+	SyncContributionPool      sync_contribution_pool.SyncContributionPool
 
 	Pool pool.OperationsPool
 }
@@ -58,10 +60,11 @@ func NewForkChoiceStorageMock() *ForkChoiceStorageMock {
 		TimeVal:                   0,
 		StateAtBlockRootVal:       make(map[common.Hash]*state.CachingBeaconState),
 		StateAtSlotVal:            make(map[uint64]*state.CachingBeaconState),
-		GetSyncCommitteesVal:      make(map[common.Hash][2]*solid.SyncCommittee),
+		GetSyncCommitteesVal:      make(map[uint64][2]*solid.SyncCommittee),
 		GetFinalityCheckpointsVal: make(map[common.Hash][3]solid.Checkpoint),
 		LightClientBootstraps:     make(map[common.Hash]*cltypes.LightClientBootstrap),
 		LCUpdates:                 make(map[uint64]*cltypes.LightClientUpdate),
+		SyncContributionPool:      sync_contribution_pool.NewSyncContributionPoolMock(),
 	}
 }
 
@@ -118,8 +121,8 @@ func (f *ForkChoiceStorageMock) GetFinalityCheckpoints(blockRoot common.Hash) (b
 	return oneNil, f.GetFinalityCheckpointsVal[blockRoot][0], f.GetFinalityCheckpointsVal[blockRoot][1], f.GetFinalityCheckpointsVal[blockRoot][2]
 }
 
-func (f *ForkChoiceStorageMock) GetSyncCommittees(blockRoot common.Hash) (*solid.SyncCommittee, *solid.SyncCommittee, bool) {
-	return f.GetSyncCommitteesVal[blockRoot][0], f.GetSyncCommitteesVal[blockRoot][1], f.GetSyncCommitteesVal[blockRoot][0] != nil && f.GetSyncCommitteesVal[blockRoot][1] != nil
+func (f *ForkChoiceStorageMock) GetSyncCommittees(period uint64) (*solid.SyncCommittee, *solid.SyncCommittee, bool) {
+	return f.GetSyncCommitteesVal[period][0], f.GetSyncCommitteesVal[period][1], f.GetSyncCommitteesVal[period][0] != nil && f.GetSyncCommitteesVal[period][1] != nil
 }
 
 func (f *ForkChoiceStorageMock) Slot() uint64 {
@@ -238,4 +241,14 @@ func (f *ForkChoiceStorageMock) GetCurrentPartecipationIndicies(blockRoot libcom
 
 func (f *ForkChoiceStorageMock) GetPublicKeyForValidator(blockRoot libcommon.Hash, idx uint64) (libcommon.Bytes48, error) {
 	panic("implement me")
+}
+
+func (f *ForkChoiceStorageMock) OnSyncCommitteeMessage(msg *cltypes.SyncCommitteeMessage, subnetID uint64) error {
+	f.SyncContributionPool.AddSyncCommitteeMessage(nil, 0, msg)
+	return nil
+}
+
+func (f *ForkChoiceStorageMock) OnSignedContributionAndProof(signedContribution *cltypes.SignedContributionAndProof, test bool) error {
+	f.SyncContributionPool.AddSyncContribution(nil, signedContribution.Message.Contribution)
+	return nil
 }

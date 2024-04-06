@@ -62,7 +62,7 @@ func TestForkChoiceBasic(t *testing.T) {
 	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchorStateEncoded, int(clparams.AltairVersion)))
 	pool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
 	emitters := beaconevents.NewEmitters()
-	store, err := forkchoice.NewForkChoiceStore(anchorState, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}), emitters, sd, nil, nil, nil)
+	store, err := forkchoice.NewForkChoiceStore(anchorState, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}), emitters, sd, nil, nil, nil, nil)
 	require.NoError(t, err)
 	// first steps
 	store.OnTick(0)
@@ -128,6 +128,7 @@ func TestForkChoiceBasic(t *testing.T) {
 func TestForkChoiceChainBellatrix(t *testing.T) {
 	ctx := context.Background()
 	blocks, anchorState, _ := tests.GetBellatrixRandom()
+	cfg := clparams.MainnetBeaconConfig
 
 	intermediaryState, err := anchorState.Copy()
 	require.NoError(t, err)
@@ -144,7 +145,7 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 	sd := synced_data.NewSyncedDataManager(true, &clparams.MainnetBeaconConfig)
 	store, err := forkchoice.NewForkChoiceStore(anchorState, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{
 		Beacon: true,
-	}), emitters, sd, nil, nil, nil)
+	}), emitters, sd, nil, nil, nil, nil)
 	store.OnTick(2000)
 	require.NoError(t, err)
 	for _, block := range blocks {
@@ -162,7 +163,7 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 	for i := 0; i < mixes.Length(); i++ {
 		require.Equal(t, mixes.Get(i), intermediaryState.RandaoMixes().Get(i), fmt.Sprintf("mixes mismatch at index %d, have: %x, expected: %x", i, mixes.Get(i), intermediaryState.RandaoMixes().Get(i)))
 	}
-	currentIntermediarySyncCommittee, nextIntermediarySyncCommittee, ok := store.GetSyncCommittees(intermediaryBlockRoot)
+	currentIntermediarySyncCommittee, nextIntermediarySyncCommittee, ok := store.GetSyncCommittees(cfg.SyncCommitteePeriod(store.HighestSeen()))
 	require.True(t, ok)
 
 	require.Equal(t, intermediaryState.CurrentSyncCommittee(), currentIntermediarySyncCommittee)

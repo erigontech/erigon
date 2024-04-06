@@ -43,7 +43,7 @@ func generateSubnetsTopics(template string, maxIds int) []sentinel.GossipTopic {
 }
 
 func getExpirationForTopic(topic string) time.Time {
-	if strings.Contains(topic, "beacon_attestation") || strings.Contains(topic, "sync_committee") {
+	if strings.Contains(topic, "beacon_attestation") || (strings.Contains(topic, "sync_committee_") && !strings.Contains(topic, gossip.TopicNameSyncCommitteeContributionAndProof)) {
 		return time.Unix(0, 0)
 	}
 

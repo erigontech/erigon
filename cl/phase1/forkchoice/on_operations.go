@@ -5,16 +5,18 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math/bits"
 
 	"github.com/Giulio2002/bls"
+	"github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/erigon/cl/phase1/network/subnets"
 	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"golang.org/x/exp/slices"
 )
 
 // NOTE: This file implements non-official handlers for other types of iterations. what it does is,using the forkchoices
@@ -100,7 +102,7 @@ func (f *ForkChoiceStore) OnProposerSlashing(proposerSlashing *cltypes.ProposerS
 		return err
 	}
 	if s == nil {
-		return fmt.Errorf("no head state avaible")
+		return nil
 	}
 	proposer, err := s.ValidatorForValidatorIndex(int(h1.ProposerIndex))
 	if err != nil {
@@ -160,7 +162,7 @@ func (f *ForkChoiceStore) OnBlsToExecutionChange(signedChange *cltypes.SignedBLS
 	// Take lock as we interact with state.
 	s := f.syncedDataManager.HeadState()
 	if s == nil {
-		return fmt.Errorf("no head state avaible")
+		return nil
 	}
 	validator, err := s.ValidatorForValidatorIndex(int(change.ValidatorIndex))
 	if err != nil {
@@ -205,110 +207,17 @@ func (f *ForkChoiceStore) OnBlsToExecutionChange(signedChange *cltypes.SignedBLS
 	return nil
 }
 
-func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.SignedContributionAndProof, test bool) error {
-	if f.operationsPool.SignedContributionAndProofPool.Has(signedChange.Signature) {
-		f.emitters.Publish("contribution_and_proof", signedChange)
-		return nil
-	}
-
-	contributionAndProof := signedChange.Message
-	signature := signedChange.Signature
-
-	//Take lock as we interact with state.
-	s := f.syncedDataManager.HeadState()
-	if s == nil {
-		return fmt.Errorf("no head state avaible")
-	}
-
-	// [IGNORE] The contribution's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. contribution.slot == current_slot.
-	messageTime := utils.GetSlotTime(s.GenesisTime(), f.beaconCfg.SecondsPerSlot, contributionAndProof.Contribution.Slot)
-	slotTime := utils.GetSlotTime(s.GenesisTime(), f.beaconCfg.SecondsPerSlot, s.Slot())
-
-	clockDisparity := clparams.NetworkConfigs[clparams.NetworkType(f.beaconCfg.DepositNetworkID)].MaximumGossipClockDisparity
-	lowerBound := slotTime.Add(-clockDisparity)
-	upperBound := slotTime.Add(clockDisparity)
-
-	if messageTime.Before(lowerBound) {
-		return fmt.Errorf("slot is too old")
-	}
-	if messageTime.After(upperBound) {
-		return fmt.Errorf("slot is too new")
-	}
-
-	// [REJECT] The subcommittee index is in the allowed range, i.e. contribution.subcommittee_index < SYNC_COMMITTEE_SUBNET_COUNT.
-	if contributionAndProof.Contribution.SubcommitteeIndex >= clparams.MainnetBeaconConfig.SyncCommitteeSubnetCount {
-		return fmt.Errorf("subcommittee index is out of range")
-	}
-
-	// [REJECT] The contribution has participants -- that is, any(contribution.aggregation_bits).
-	aggregationBits := contributionAndProof.Contribution.AggregationBits
-
-	if aggregationBits == nil {
-		return fmt.Errorf("aggretationBits is nil")
-	}
-
-	found := false
-	for _, bit := range contributionAndProof.Contribution.AggregationBits {
-		count := bits.OnesCount8(bit)
-		if count != 0 {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return fmt.Errorf("contribution has no participants")
-	}
-
-	// [REJECT] contribution_and_proof.selection_proof selects the validator as an aggregator for the slot -- i.e. is_sync_committee_aggregator(contribution_and_proof.selection_proof) returns True.
-	selectionProof := contributionAndProof.SelectionProof
-	if len(selectionProof) != 96 {
-		return fmt.Errorf("incorrect signiture length")
-	}
-	modulo := utils.Max64(1, f.beaconCfg.SyncCommitteeSize/f.beaconCfg.SyncCommitteeSubnetCount/f.beaconCfg.TargetAggregatorsPerSyncSubcommittee)
-	hashSignature := utils.Sha256(selectionProof[:])
-	if binary.LittleEndian.Uint64(hashSignature[:8])%modulo != 0 {
-		return fmt.Errorf("selects the validator as an aggregator")
-	}
-
-	// [REJECT] The aggregator's validator index is in the declared subcommittee of the current sync committee -- i.e. state.validators[contribution_and_proof.aggregator_index].pubkey in get_sync_subcommittee_pubkeys(state, contribution.subcommittee_index).
-	committee := s.CurrentSyncCommittee()
-	committeeKeys := committee.GetCommittee()
-	aggregatorPubKey, err := s.ValidatorPublicKey(int(contributionAndProof.AggregatorIndex))
-	if err != nil {
-		return err
-	}
-
-	subcommiteePubsKeys, err := f.getSyncSubcommitteePubkeys(committeeKeys, contributionAndProof.Contribution.SubcommitteeIndex)
-	if err != nil {
-		return err
-	}
-
-	inSubcommittee := false
-	for _, pubKey := range subcommiteePubsKeys {
-		if bytes.Equal(pubKey, aggregatorPubKey[:]) {
-			inSubcommittee = true
-			break
-		}
-	}
-	if !inSubcommittee {
-		return fmt.Errorf("aggregator's validator index is not in subcommittee1111")
-	}
-
-	// [IGNORE] The sync committee contribution is the first valid contribution received for the aggregator with index contribution_and_proof.aggregator_index for the slot contribution.slot and subcommittee index contribution.subcommittee_index (this requires maintaining a cache of size SYNC_COMMITTEE_SIZE for this topic that can be flushed after each slot).
-	indexSlotKey := make([]byte, 24)
-	indexSlotKey = binary.BigEndian.AppendUint64(indexSlotKey[0:], contributionAndProof.AggregatorIndex)
-	indexSlotKey = binary.BigEndian.AppendUint64(indexSlotKey[8:], contributionAndProof.Contribution.Slot)
-	indexSlotKey = binary.BigEndian.AppendUint64(indexSlotKey[16:], contributionAndProof.Contribution.SubcommitteeIndex)
-
-	if f.operationsPool.IndexSlotHasSeen.Has(string(indexSlotKey)) {
-		return nil
-	}
-	f.operationsPool.IndexSlotHasSeen.Insert(string(indexSlotKey), true)
-
-	// [REJECT] The contribution_and_proof.selection_proof is a valid signature of the SyncAggregatorSelectionData derived from the contribution by the validator with index contribution_and_proof.aggregator_index.
+// verifySyncContributionProof verifies the sync contribution proof.
+func (f *ForkChoiceStore) verifySyncContributionSelectionProof(s *state.CachingBeaconState, contributionAndProof *cltypes.ContributionAndProof) error {
 	syncAggregatorSelectionData := &cltypes.SyncAggregatorSelectionData{
 		Slot:              contributionAndProof.Contribution.Slot,
 		SubcommitteeIndex: contributionAndProof.Contribution.SubcommitteeIndex,
+	}
+	selectionProof := contributionAndProof.SelectionProof
+
+	aggregatorPubKey, err := s.ValidatorPublicKey(int(contributionAndProof.AggregatorIndex))
+	if err != nil {
+		return err
 	}
 
 	domain, err := s.GetDomain(s.BeaconConfig().DomainSyncCommitteeSelectionProof, state.GetEpochAtSlot(s.BeaconConfig(), contributionAndProof.Contribution.Slot))
@@ -328,62 +237,238 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 	if !valid {
 		return fmt.Errorf("invalid selectionProof signature")
 	}
+	return nil
+}
 
-	// [REJECT] The aggregator signature, signed_contribution_and_proof.signature, is valid.
-	domain, err = s.GetDomain(s.BeaconConfig().DomainContributionAndProof, state.GetEpochAtSlot(s.BeaconConfig(), contributionAndProof.Contribution.Slot))
+// verifySyncContributionProof verifies the contribution aggregated signature.
+func (f *ForkChoiceStore) verifySyncContributionProofAggregatedSignature(s *state.CachingBeaconState, contribution *cltypes.Contribution, subCommitteeKeys []libcommon.Bytes48) error {
+	domain, err := s.GetDomain(s.BeaconConfig().DomainSyncCommittee, state.Epoch(s))
 	if err != nil {
 		return err
 	}
 
-	aggregatorSignatureRoot, err := fork.ComputeSigningRoot(signedChange.Message, domain)
+	msg := utils.Sha256(contribution.BeaconBlockRoot[:], domain)
+	if err != nil {
+		return err
+	}
+	// only use the ones pertaining to the aggregation bits
+	subCommitteePubsKeys := make([][]byte, 0, len(subCommitteeKeys))
+	for i, key := range subCommitteeKeys {
+		if utils.IsBitOn(contribution.AggregationBits, i) {
+			subCommitteePubsKeys = append(subCommitteePubsKeys, common.Copy(key[:]))
+		}
+	}
+
+	valid, err := bls.VerifyAggregate(contribution.Signature[:], msg[:], subCommitteePubsKeys)
 	if err != nil {
 		return err
 	}
 
-	valid, err = bls.Verify(signature[:], aggregatorSignatureRoot[:], aggregatorPubKey[:])
-	if err != nil {
-		return err
-	}
 	if !valid {
-		return fmt.Errorf("invalid aggregator signature")
+		return fmt.Errorf("invalid signature for aggregate sync contribution")
+	}
+	return nil
+}
+
+// wasContributionSeen checks if the contribution was seen before.
+func (f *ForkChoiceStore) wasContributionSeen(contribution *cltypes.ContributionAndProof) bool {
+	key := seenSyncCommitteeContribution{
+		aggregatorIndex:   contribution.AggregatorIndex,
+		slot:              contribution.Contribution.Slot,
+		subCommitteeIndex: contribution.Contribution.SubcommitteeIndex,
 	}
 
+	_, ok := f.seenSyncCommitteeContributions[key]
+	return ok
+}
+
+// markContributionAsSeen marks the contribution as seen.
+func (f *ForkChoiceStore) markContributionAsSeen(contribution *cltypes.ContributionAndProof) {
+	key := seenSyncCommitteeContribution{
+		aggregatorIndex:   contribution.AggregatorIndex,
+		slot:              contribution.Contribution.Slot,
+		subCommitteeIndex: contribution.Contribution.SubcommitteeIndex,
+	}
+	f.seenSyncCommitteeContributions[key] = struct{}{}
+}
+
+// OnSignedContributionAndProof is the handler for signed contribution and proof operations. it pushes the signed contribution and proof in the pool.
+func (f *ForkChoiceStore) OnSignedContributionAndProof(signedContribution *cltypes.SignedContributionAndProof, test bool) error {
+	f.muSyncContribution.Lock()
+	defer f.muSyncContribution.Unlock()
+
+	contributionAndProof := signedContribution.Message
+	selectionProof := contributionAndProof.SelectionProof
+	aggregationBits := contributionAndProof.Contribution.AggregationBits
+
+	headState := f.syncedDataManager.HeadState()
+	if headState == nil {
+		return nil
+	}
+
+	aggregatorPubKey, err := headState.ValidatorPublicKey(int(contributionAndProof.AggregatorIndex))
+	if err != nil {
+		return err
+	}
+	subcommiteePubsKeys, err := f.getSyncSubcommitteePubkeys(headState, contributionAndProof.Contribution.SubcommitteeIndex)
+	if err != nil {
+		return err
+	}
+
+	// [IGNORE] The contribution's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. contribution.slot == current_slot.
+	if !utils.IsCurrentSlotWithMaximumClockDisparity(headState.GenesisTime(), f.beaconCfg.SecondsPerSlot, contributionAndProof.Contribution.Slot) {
+		return nil
+	}
+
+	// [REJECT] The subcommittee index is in the allowed range, i.e. contribution.subcommittee_index < SYNC_COMMITTEE_SUBNET_COUNT.
+	if contributionAndProof.Contribution.SubcommitteeIndex >= clparams.MainnetBeaconConfig.SyncCommitteeSubnetCount {
+		return fmt.Errorf("subcommittee index is out of range")
+	}
+
+	// [REJECT] The contribution has participants -- that is, any(contribution.aggregation_bits).
+	if bytes.Equal(aggregationBits, make([]byte, len(aggregationBits))) { // check if the aggregation bits are all zeros
+		return fmt.Errorf("contribution has no participants")
+	}
+
+	// [REJECT] contribution_and_proof.selection_proof selects the validator as an aggregator for the slot -- i.e. is_sync_committee_aggregator(contribution_and_proof.selection_proof) returns True.
+	if len(selectionProof) != 96 {
+		return fmt.Errorf("incorrect signiture length")
+	}
+	modulo := utils.Max64(1, f.beaconCfg.SyncCommitteeSize/f.beaconCfg.SyncCommitteeSubnetCount/f.beaconCfg.TargetAggregatorsPerSyncSubcommittee)
+	hashSignature := utils.Sha256(selectionProof[:])
+	if binary.LittleEndian.Uint64(hashSignature[:8])%modulo != 0 {
+		return fmt.Errorf("selects the validator as an aggregator")
+	}
+
+	// [REJECT] The aggregator's validator index is in the declared subcommittee of the current sync committee -- i.e. state.validators[contribution_and_proof.aggregator_index].pubkey in get_sync_subcommittee_pubkeys(state, contribution.subcommittee_index).
+	if !slices.Contains(subcommiteePubsKeys, aggregatorPubKey) {
+		return fmt.Errorf("aggregator's validator index is not in subcommittee")
+	}
+
+	// [IGNORE] The sync committee contribution is the first valid contribution received for the aggregator with index contribution_and_proof.aggregator_index for the slot contribution.slot and subcommittee index contribution.subcommittee_index (this requires maintaining a cache of size SYNC_COMMITTEE_SIZE for this topic that can be flushed after each slot).
+	if f.wasContributionSeen(contributionAndProof) {
+		return nil
+	}
+
+	// [REJECT] The contribution_and_proof.selection_proof is a valid signature of the SyncAggregatorSelectionData derived from the contribution by the validator with index contribution_and_proof.aggregator_index.
+	if err := f.verifySyncContributionSelectionProof(headState, contributionAndProof); err != nil {
+		return err
+	}
+	// [REJECT] The aggregator signature, signed_contribution_and_proof.signature, is valid.
+	if err := verifyAggregatorSignatureForSyncContribution(headState, signedContribution); err != nil {
+		return err
+	}
 	// [REJECT] The aggregate signature is valid for the message beacon_block_root and aggregate pubkey derived
 	// from the participation info in aggregation_bits for the subcommittee specified by the contribution.subcommittee_index.
-	message := contributionAndProof.Contribution.BeaconBlockRoot[:]
-	domain, err = s.GetDomain(s.BeaconConfig().DomainSyncCommittee, state.GetEpochAtSlot(s.BeaconConfig(), contributionAndProof.Contribution.Slot))
-	if err != nil {
+	if err := f.verifySyncContributionProofAggregatedSignature(headState, contributionAndProof.Contribution, subcommiteePubsKeys); err != nil {
 		return err
 	}
-	hash, err := merkle_tree.HashTreeRoot(message)
-	if err != nil {
-		return err
-	}
-
-	signatureRoot := utils.Sha256(hash[:], domain)
-	if err != nil {
-		return err
-	}
-
-	if len(subcommiteePubsKeys) != utils.GetBitlistLength(aggregationBits)+1 {
-		return fmt.Errorf("invalid length of aggregation bits or public keys")
-	}
-
-	valid, err = bls.VerifyAggregate(signature[:], signatureRoot[:], subcommiteePubsKeys)
-	if err != nil {
-		return err
-	}
-
-	if !valid {
-		//FIXME: Add more debug info
-		fmt.Println("invalid aggregate signature")
-		// return fmt.Errorf("invalid aggregate signature")
-	}
-
-	// Insert in the pool
-	f.operationsPool.SignedContributionAndProofPool.Insert(signedChange.Signature, signedChange)
+	// mark the valid contribution as seen
+	f.markContributionAsSeen(contributionAndProof)
 
 	// emit contribution_and_proof
-	f.emitters.Publish("contribution_and_proof", signedChange)
+	f.emitters.Publish("contribution_and_proof", signedContribution)
+	// add the contribution to the pool
+	return f.syncContributionPool.AddSyncContribution(headState, contributionAndProof.Contribution)
+
+}
+
+func verifySyncCommitteeMessageSignature(s *state.CachingBeaconState, msg *cltypes.SyncCommitteeMessage) error {
+	publicKey, err := s.ValidatorPublicKey(int(msg.ValidatorIndex))
+	if err != nil {
+		return err
+	}
+	cfg := s.BeaconConfig()
+	domain, err := s.GetDomain(cfg.DomainSyncCommittee, state.Epoch(s))
+	if err != nil {
+		return err
+	}
+	signingRoot, err := utils.Sha256(msg.BeaconBlockRoot[:], domain), nil
+	if err != nil {
+		return err
+	}
+	valid, err := bls.Verify(msg.Signature[:], signingRoot[:], publicKey[:])
+	if err != nil {
+		return errors.New("invalid signature")
+	}
+	if !valid {
+		return errors.New("invalid signature")
+	}
 	return nil
+}
+
+func verifyAggregatorSignatureForSyncContribution(s *state.CachingBeaconState, signedContributionAndProof *cltypes.SignedContributionAndProof) error {
+	contribution := signedContributionAndProof.Message.Contribution
+	domain, err := s.GetDomain(s.BeaconConfig().DomainContributionAndProof, contribution.Slot/s.BeaconConfig().SlotsPerEpoch)
+	if err != nil {
+		return err
+	}
+
+	signingRoot, err := fork.ComputeSigningRoot(signedContributionAndProof.Message, domain)
+	if err != nil {
+		return err
+	}
+	aggregatorPubKey, err := s.ValidatorPublicKey(int(signedContributionAndProof.Message.AggregatorIndex))
+	if err != nil {
+		return err
+	}
+	valid, err := bls.Verify(signedContributionAndProof.Signature[:], signingRoot[:], aggregatorPubKey[:])
+	if err != nil {
+		return err
+	}
+	if !valid {
+		return errors.New("invalid aggregator signature")
+	}
+	return nil
+}
+
+func (f *ForkChoiceStore) cleanupOldSyncCommitteeMessages() {
+	headSlot := f.syncedDataManager.HeadSlot()
+	for k := range f.seenSyncCommitteeMessages {
+		if headSlot != k.slot {
+			delete(f.seenSyncCommitteeMessages, k)
+		}
+	}
+}
+
+func (f *ForkChoiceStore) OnSyncCommitteeMessage(msg *cltypes.SyncCommitteeMessage, subnetID uint64) error {
+	f.muSyncCommitteeMessages.Lock()
+	defer f.muSyncCommitteeMessages.Unlock()
+	if f.syncedDataManager.Syncing() {
+		return nil
+	}
+	headState := f.syncedDataManager.HeadState()
+	// [IGNORE] The message's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. sync_committee_message.slot == current_slot.
+	if !utils.IsCurrentSlotWithMaximumClockDisparity(headState.GenesisTime(), f.beaconCfg.SecondsPerSlot, msg.Slot) {
+		return nil
+	}
+
+	// [REJECT] The subnet_id is valid for the given validator, i.e. subnet_id in compute_subnets_for_sync_committee(state, sync_committee_message.validator_index).
+	// Note this validation implies the validator is part of the broader current sync committee along with the correct subcommittee.
+	subnets, err := subnets.ComputeSubnetsForSyncCommittee(headState, msg.ValidatorIndex)
+	if err != nil {
+		return err
+	}
+	seenSyncCommitteeMessageIdentifier := seenSyncCommitteeMessage{
+		subnet:         subnetID,
+		slot:           msg.Slot,
+		validatorIndex: msg.ValidatorIndex,
+	}
+
+	if !slices.Contains(subnets, subnetID) {
+		return fmt.Errorf("validator is not into any subnet %d", subnetID)
+	}
+	// [IGNORE] There has been no other valid sync committee message for the declared slot for the validator referenced by sync_committee_message.validator_index.
+	if _, ok := f.seenSyncCommitteeMessages[seenSyncCommitteeMessageIdentifier]; ok {
+		return nil
+	}
+	// [REJECT] The signature is valid for the message beacon_block_root for the validator referenced by validator_index
+
+	if err := verifySyncCommitteeMessageSignature(headState, msg); err != nil {
+		return err
+	}
+	f.seenSyncCommitteeMessages[seenSyncCommitteeMessageIdentifier] = struct{}{}
+	f.cleanupOldSyncCommitteeMessages() // cleanup old messages
+	// Aggregate the message
+	return f.syncContributionPool.AddSyncCommitteeMessage(headState, subnetID, msg)
 }

@@ -59,7 +59,7 @@ func (a *ApiHandler) rootFromBlockId(ctx context.Context, tx kv.Tx, blockId *bea
 	return
 }
 
-func (a *ApiHandler) getBlock(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+func (a *ApiHandler) GetEthV1BeaconBlock(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
@@ -94,7 +94,7 @@ func (a *ApiHandler) getBlock(w http.ResponseWriter, r *http.Request) (*beaconht
 		WithVersion(blk.Version()), nil
 }
 
-func (a *ApiHandler) getBlindedBlock(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+func (a *ApiHandler) GetEthV1BlindedBlock(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
@@ -133,7 +133,7 @@ func (a *ApiHandler) getBlindedBlock(w http.ResponseWriter, r *http.Request) (*b
 		WithVersion(blk.Version()), nil
 }
 
-func (a *ApiHandler) getBlockAttestations(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+func (a *ApiHandler) GetEthV1BeaconBlockAttestations(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
@@ -165,7 +165,7 @@ func (a *ApiHandler) getBlockAttestations(w http.ResponseWriter, r *http.Request
 		WithVersion(blk.Version()), nil
 }
 
-func (a *ApiHandler) getBlockRoot(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+func (a *ApiHandler) GetEthV1BeaconBlockRoot(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
