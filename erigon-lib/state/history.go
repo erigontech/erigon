@@ -331,6 +331,7 @@ func (h *History) buildVi(ctx context.Context, item *filesItem, ps *background.P
 func (h *History) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
 	h.InvertedIndex.BuildMissedIndices(ctx, g, ps)
 	missedFiles := h.missedIdxFiles()
+	h.openFiles()
 	for _, item := range missedFiles {
 		item := item
 		g.Go(func() error {
