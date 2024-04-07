@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cl/aggregation"
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
@@ -72,6 +73,7 @@ type ApiHandler struct {
 	syncMessagePool     sync_contribution_pool.SyncContributionPool
 	committeeSub        *committee_subscription.CommitteeSubscribeMgmt
 	attestationProducer attestation_producer.AttestationDataProducer
+	aggregatePool       aggregation.AggregationPool
 }
 
 func NewApiHandler(
@@ -95,6 +97,7 @@ func NewApiHandler(
 	engine execution_client.ExecutionEngine,
 	syncMessagePool sync_contribution_pool.SyncContributionPool,
 	committeeSub *committee_subscription.CommitteeSubscribeMgmt,
+	aggregatePool aggregation.AggregationPool,
 ) *ApiHandler {
 	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("blobs", maxBlobBundleCacheSize)
 	if err != nil {
@@ -126,6 +129,7 @@ func NewApiHandler(
 		engine:              engine,
 		syncMessagePool:     syncMessagePool,
 		committeeSub:        committeeSub,
+		aggregatePool:       aggregatePool,
 	}
 }
 
@@ -239,7 +243,7 @@ func (a *ApiHandler) init() {
 					})
 					r.Get("/blinded_blocks/{slot}", http.NotFound)
 					r.Get("/attestation_data", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorAttestationData))
-					r.Get("/aggregate_attestation", http.NotFound)
+					r.Get("/aggregate_attestation", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorAggregateAttestation))
 					r.Post("/aggregate_and_proofs", a.PostEthV1ValidatorAggregatesAndProof)
 					r.Post("/beacon_committee_subscriptions", a.PostEthV1ValidatorBeaconCommitteeSubscription)
 					r.Post("/sync_committee_subscriptions", a.PostEthV1ValidatorSyncCommitteeSubscriptions)
