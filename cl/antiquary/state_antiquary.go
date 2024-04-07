@@ -125,8 +125,22 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	}
 	defer compressedWriter.Close()
 
-	if err := s.initializeStateAntiquaryIfNeeded(ctx, tx, changedValidators, stateAntiquaryCollector, compressedWriter); err != nil {
+	if err := s.initializeStateAntiquaryIfNeeded(ctx, tx); err != nil {
 		return err
+	}
+	if s.currentState.Slot() == s.genesisState.Slot() {
+		// Collect genesis state if we are at genesis
+		if err := stateAntiquaryCollector.addGenesisState(ctx, compressedWriter, s.currentState); err != nil {
+			return err
+		}
+		// Mark all validators as touched because we just initizialized the whole state.
+		s.currentState.ForEachValidator(func(v solid.Validator, index, total int) bool {
+			changedValidators[uint64(index)] = struct{}{}
+			if err = s.validatorsTable.AddValidator(v, uint64(index), 0); err != nil {
+				return false
+			}
+			return true
+		})
 	}
 
 	logLvl := log.LvlInfo
@@ -404,7 +418,7 @@ func (s *Antiquary) antiquateField(ctx context.Context, slot uint64, uncompresse
 	return collector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), common.Copy(buffer.Bytes()))
 }
 
-func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.Tx, changedValidators map[uint64]struct{}, stateAntiquaryCollector *beaconStatesCollector, compressedWriter *zstd.Encoder) error {
+func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.Tx) error {
 	if s.currentState != nil {
 		return nil
 	}
@@ -414,8 +428,8 @@ func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.
 		return err
 	}
 	// We want to backoff by some slots until we get a correct state from DB.
-	// we start from 2 * clparams.SlotsPerDump.
-	backoffStep := uint64(2)
+	// we start from 1 * clparams.SlotsPerDump.
+	backoffStep := uint64(10)
 
 	historicalReader := historical_states_reader.NewHistoricalStatesReader(s.cfg, s.snReader, s.validatorsTable, s.genesisState)
 
@@ -430,18 +444,6 @@ func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.
 			if err != nil {
 				return err
 			}
-			// Collect genesis state if we are at genesis
-			if err := stateAntiquaryCollector.addGenesisState(ctx, compressedWriter, s.currentState); err != nil {
-				return err
-			}
-			// Mark all validators as touched because we just initizialized the whole state.
-			s.currentState.ForEachValidator(func(v solid.Validator, index, total int) bool {
-				changedValidators[uint64(index)] = struct{}{}
-				if err = s.validatorsTable.AddValidator(v, uint64(index), 0); err != nil {
-					return false
-				}
-				return true
-			})
 			break
 		}
 
@@ -462,19 +464,15 @@ func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.
 		if computedBlockRoot != expectedBlockRoot {
 			log.Warn("Block root mismatch, trying again", "slot", attempt, "expected", expectedBlockRoot)
 			// backoff more
-			backoffStep++
+			backoffStep += 10
 			continue
 		}
 		break
 	}
 
-	if err := s.currentState.InitBeaconState(); err != nil {
-		return err
-	}
-
 	s.balances32 = s.balances32[:0]
 	s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
-	return nil
+	return s.currentState.InitBeaconState()
 }
 
 func computeSlotToBeRequested(tx kv.Tx, cfg *clparams.BeaconChainConfig, genesisSlot uint64, targetSlot uint64, backoffStep uint64) (uint64, error) {
