@@ -52,21 +52,6 @@ func (t *validatorTestSuite) SetupTest() {
 		t.mockAggrPool,
 	)
 	t.gomockCtrl = gomockCtrl
-	/*router := chi.NewRouter()
-	router.HandleFunc("/*", t.apiHandler.ServeHTTP)
-	server := &http.Server{
-		Handler: router,
-	}
-	lis, err := net.Listen("tcp", ":8080")
-	if err != nil {
-		log.Fatalf("net.Listen() failed: %v", err)
-	}
-	go func() {
-		err := server.Serve(lis)
-		if err != nil {
-			log.Printf("server.ListenAndServe() failed: %v", err)
-		}
-	}()*/
 }
 
 func (t *validatorTestSuite) TearDownTest() {
