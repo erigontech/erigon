@@ -27,7 +27,6 @@ var stateAntiquaryBufSz = etl.BufferOptimalSize / 8 // 18 collectors * 256mb / 8
 
 // beaconStatesCollector is a collector that collects some of the beacon states fields in sub-collectors.
 // these collectors then flush the data to the database.
-
 type beaconStatesCollector struct {
 	effectiveBalanceCollector        *etl.Collector
 	balancesCollector                *etl.Collector

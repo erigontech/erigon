@@ -117,21 +117,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	stateAntiquaryCollector := newBeaconStatesCollector(s.cfg, s.dirs.Tmp, s.logger)
 	defer stateAntiquaryCollector.close()
 
-	stageProgress, err := state_accessors.GetStateProcessingProgress(tx)
-	if err != nil {
-		return err
-	}
-	progress := stageProgress
-	// Go back a little bit
-	if progress > (s.cfg.SlotsPerEpoch*2 + clparams.SlotsPerDump) {
-		progress -= s.cfg.SlotsPerEpoch*2 + clparams.SlotsPerDump
-	} else {
-		progress = 0
-	}
-	progress, err = findNearestSlotBackwards(tx, s.cfg, progress) // Maybe the guess was a missed slot.
-	if err != nil {
-		return err
-	}
 	// buffers
 	commonBuffer := &bytes.Buffer{}
 	compressedWriter, err := zstd.NewWriter(commonBuffer, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
@@ -140,46 +125,8 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	}
 	defer compressedWriter.Close()
 
-	if s.currentState == nil {
-		// progress is 0 when we are at genesis
-		if progress == 0 {
-			s.currentState, err = s.genesisState.Copy()
-			if err != nil {
-				return err
-			}
-			// Collect genesis state if we are at genesis
-			if err := stateAntiquaryCollector.addGenesisState(ctx, compressedWriter, s.currentState); err != nil {
-				return err
-			}
-			// Mark all validators as touched because we just initizialized the whole state.
-			s.currentState.ForEachValidator(func(v solid.Validator, index, total int) bool {
-				changedValidators[uint64(index)] = struct{}{}
-				if err = s.validatorsTable.AddValidator(v, uint64(index), 0); err != nil {
-					return false
-				}
-				return true
-			})
-		} else {
-			start := time.Now()
-			// progress not 0? we need to load the state from the DB
-			historicalReader := historical_states_reader.NewHistoricalStatesReader(s.cfg, s.snReader, s.validatorsTable, s.genesisState)
-			s.currentState, err = historicalReader.ReadHistoricalState(ctx, tx, progress)
-			if err != nil {
-				s.currentState = nil
-				return fmt.Errorf("failed to read historical state at slot %d: %w", progress, err)
-			}
-			end := time.Since(start)
-			hashRoot, err := s.currentState.HashSSZ()
-			if err != nil {
-				return err
-			}
-			log.Info("Recovered Beacon State", "slot", s.currentState.Slot(), "elapsed", end, "root", libcommon.Hash(hashRoot).String())
-			if err := s.currentState.InitBeaconState(); err != nil {
-				return err
-			}
-		}
-		s.balances32 = s.balances32[:0]
-		s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
+	if err := s.initializeStateAntiquaryIfNeeded(ctx, tx, changedValidators, stateAntiquaryCollector, compressedWriter); err != nil {
+		return err
 	}
 
 	logLvl := log.LvlInfo
@@ -281,7 +228,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			return stateAntiquaryCollector.collectEth1DataVote(slot, data)
 		},
 	})
-	log.Log(logLvl, "Starting state processing", "from", slot, "to", to, "progress", stageProgress)
+	log.Log(logLvl, "Starting state processing", "from", slot, "to", to)
 	// Set up a timer to log progress
 	progressTimer := time.NewTicker(1 * time.Minute)
 	defer progressTimer.Stop()
@@ -455,4 +402,87 @@ func (s *Antiquary) antiquateField(ctx context.Context, slot uint64, uncompresse
 	}
 	roundedSlot := slot - (slot % clparams.SlotsPerDump)
 	return collector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), common.Copy(buffer.Bytes()))
+}
+
+func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.Tx, changedValidators map[uint64]struct{}, stateAntiquaryCollector *beaconStatesCollector, compressedWriter *zstd.Encoder) error {
+	if s.currentState != nil {
+		return nil
+	}
+	// Start by reading the state processing progress
+	targetSlot, err := state_accessors.GetStateProcessingProgress(tx)
+	if err != nil {
+		return err
+	}
+	// We want to backoff by some slots until we get a correct state from DB.
+	// we start from 2 * clparams.SlotsPerDump.
+	backoffStep := uint64(2)
+
+	historicalReader := historical_states_reader.NewHistoricalStatesReader(s.cfg, s.snReader, s.validatorsTable, s.genesisState)
+
+	for {
+		attempt, err := computeSlotToBeRequested(tx, s.cfg, s.genesisState.Slot(), targetSlot, backoffStep)
+		if err != nil {
+			return err
+		}
+		// If we are attempting slot=0 then we are at genesis.
+		if attempt == s.genesisState.Slot() {
+			s.currentState, err = s.genesisState.Copy()
+			if err != nil {
+				return err
+			}
+			// Collect genesis state if we are at genesis
+			if err := stateAntiquaryCollector.addGenesisState(ctx, compressedWriter, s.currentState); err != nil {
+				return err
+			}
+			// Mark all validators as touched because we just initizialized the whole state.
+			s.currentState.ForEachValidator(func(v solid.Validator, index, total int) bool {
+				changedValidators[uint64(index)] = struct{}{}
+				if err = s.validatorsTable.AddValidator(v, uint64(index), 0); err != nil {
+					return false
+				}
+				return true
+			})
+			break
+		}
+
+		// progress not 0 ? we need to load the state from the DB
+		s.currentState, err = historicalReader.ReadHistoricalState(ctx, tx, attempt)
+		if err != nil {
+			return fmt.Errorf("failed to read historical state at slot %d: %w", attempt, err)
+		}
+
+		computedBlockRoot, err := s.currentState.BlockRoot()
+		if err != nil {
+			return err
+		}
+		expectedBlockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, attempt)
+		if err != nil {
+			return err
+		}
+		if computedBlockRoot != expectedBlockRoot {
+			log.Warn("Block root mismatch, trying again", "slot", attempt, "expected", expectedBlockRoot)
+			// backoff more
+			backoffStep++
+			continue
+		}
+		break
+	}
+
+	if err := s.currentState.InitBeaconState(); err != nil {
+		return err
+	}
+
+	s.balances32 = s.balances32[:0]
+	s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
+	return nil
+}
+
+func computeSlotToBeRequested(tx kv.Tx, cfg *clparams.BeaconChainConfig, genesisSlot uint64, targetSlot uint64, backoffStep uint64) (uint64, error) {
+	// We want to backoff by some slots until we get a correct state from DB.
+	// we start from 2 * clparams.SlotsPerDump.
+	if targetSlot > clparams.SlotsPerDump*backoffStep {
+		return findNearestSlotBackwards(tx, cfg, targetSlot-clparams.SlotsPerDump*backoffStep)
+	}
+	fmt.Println(genesisSlot)
+	return genesisSlot, nil
 }
