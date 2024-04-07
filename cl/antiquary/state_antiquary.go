@@ -3,8 +3,6 @@ package antiquary
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/binary"
 	"fmt"
 	"sync"
 	"time"
@@ -24,7 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/raw"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
 	"github.com/ledgerwatch/erigon/cl/transition"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
 	"github.com/ledgerwatch/log/v3"
@@ -35,28 +32,6 @@ var bufferPool = sync.Pool{
 	New: func() interface{} {
 		return &bytes.Buffer{}
 	},
-}
-
-func excludeDuplicatesIdentity() etl.LoadFunc {
-	var prevKey, prevValue []byte
-	prevValue = []byte{}
-	return func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		if len(prevKey) == 0 {
-			prevKey = common.Copy(k)
-			prevValue = common.Copy(v)
-			return nil
-		}
-		if bytes.Equal(k, prevKey) {
-			prevValue = common.Copy(v)
-			return nil
-		}
-		if err := next(prevKey, prevKey, prevValue); err != nil {
-			return err
-		}
-		prevKey = common.Copy(k)
-		prevValue = common.Copy(v)
-		return nil
-	}
 }
 
 func (s *Antiquary) loopStates(ctx context.Context) {
@@ -139,7 +114,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	// maps which validators changes
 	changedValidators := make(map[uint64]struct{})
 
-	stateAntiquaryCollector := newInternalBeaconStatesCollector(s.cfg, s.dirs.Tmp, s.logger)
+	stateAntiquaryCollector := newBeaconStatesCollector(s.cfg, s.dirs.Tmp, s.logger)
 	defer stateAntiquaryCollector.close()
 
 	stageProgress, err := state_accessors.GetStateProcessingProgress(tx)
@@ -291,10 +266,10 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			return stateAntiquaryCollector.collectFlattenedProposers(epoch, getProposerDutiesValue(s.currentState))
 		},
 		OnNewBlockRoot: func(index int, root common.Hash) error {
-			return stateAntiquaryCollector.collectBlockRoot(slot, root)
+			return stateAntiquaryCollector.collectBlockRoot(s.currentState.Slot(), root)
 		},
 		OnNewStateRoot: func(index int, root common.Hash) error {
-			return stateAntiquaryCollector.collectStateRoot(slot, root)
+			return stateAntiquaryCollector.collectStateRoot(s.currentState.Slot(), root)
 		},
 		OnNewNextSyncCommittee: func(committee *solid.SyncCommittee) error {
 			return stateAntiquaryCollector.collectNextSyncCommittee(slot, committee)
@@ -480,76 +455,4 @@ func (s *Antiquary) antiquateField(ctx context.Context, slot uint64, uncompresse
 	}
 	roundedSlot := slot - (slot % clparams.SlotsPerDump)
 	return collector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), common.Copy(buffer.Bytes()))
-}
-
-func getProposerDutiesValue(s *state.CachingBeaconState) []byte {
-	epoch := state.Epoch(s)
-	var wg sync.WaitGroup
-	list := make([]byte, s.BeaconConfig().SlotsPerEpoch*4)
-	for slot := s.Slot(); slot < s.Slot()+s.BeaconConfig().SlotsPerEpoch; slot++ {
-		var proposerIndex uint64
-		// Lets do proposer index computation
-		mixPosition := (epoch + s.BeaconConfig().EpochsPerHistoricalVector - s.BeaconConfig().MinSeedLookahead - 1) %
-			s.BeaconConfig().EpochsPerHistoricalVector
-		// Input for the seed hash.
-		mix := s.GetRandaoMix(int(mixPosition))
-		input := shuffling.GetSeed(s.BeaconConfig(), mix, epoch, s.BeaconConfig().DomainBeaconProposer)
-		slotByteArray := make([]byte, 8)
-		binary.LittleEndian.PutUint64(slotByteArray, slot)
-
-		// Add slot to the end of the input.
-		inputWithSlot := append(input[:], slotByteArray...)
-		hash := sha256.New()
-
-		// Calculate the hash.
-		hash.Write(inputWithSlot)
-		seed := hash.Sum(nil)
-
-		indices := s.GetActiveValidatorsIndices(epoch)
-
-		// Write the seed to an array.
-		seedArray := [32]byte{}
-		copy(seedArray[:], seed)
-		wg.Add(1)
-
-		// Do it in parallel
-		go func(i, slot uint64, indicies []uint64, seedArray [32]byte) {
-			defer wg.Done()
-			var err error
-			proposerIndex, err = shuffling.ComputeProposerIndex(s.BeaconState, indices, seedArray)
-			if err != nil {
-				panic(err)
-			}
-			binary.BigEndian.PutUint32(list[i*4:(i+1)*4], uint32(proposerIndex))
-		}(slot-s.Slot(), slot, indices, seedArray)
-	}
-	wg.Wait()
-	return list
-}
-
-// func (s *Antiquary) dumpFullBeaconState() {
-// 	b, err := s.currentState.EncodeSSZ(nil)
-// 	if err != nil {
-// 		s.logger.Error("Failed to encode full beacon state", "err", err)
-// 		return
-// 	}
-// 	// just dump it in a.txt like an idiot without afero
-// 	if err := os.WriteFile("bab.txt", b, 0644); err != nil {
-// 		s.logger.Error("Failed to write full beacon state", "err", err)
-// 	}
-// }
-
-func findNearestSlotBackwards(tx kv.Tx, cfg *clparams.BeaconChainConfig, slot uint64) (uint64, error) {
-	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
-	if err != nil {
-		return 0, err
-	}
-	for (canonicalRoot == (common.Hash{}) && slot > 0) || slot%cfg.SlotsPerEpoch != 0 {
-		slot--
-		canonicalRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
-		if err != nil {
-			return 0, err
-		}
-	}
-	return slot, nil
 }

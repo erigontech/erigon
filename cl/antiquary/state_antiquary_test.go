@@ -1,4 +1,4 @@
-//go:build prevent
+//go:build integration
 
 package antiquary
 

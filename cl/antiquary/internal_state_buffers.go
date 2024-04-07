@@ -25,10 +25,10 @@ var stateAntiquaryBufSz = etl.BufferOptimalSize / 8 // 18 collectors * 256mb / 8
 // RATIONALE: MDBX locks the entire database when writing to it, so we need to minimize the time spent in the write lock.
 // so instead of writing the historical states on write transactions, we accumulate them in memory and write them in a single  write transaction.
 
-// internalBeaconStatesCollector is a collector that collects some of the beacon states fields in sub-collectors.
+// beaconStatesCollector is a collector that collects some of the beacon states fields in sub-collectors.
 // these collectors then flush the data to the database.
 
-type internalBeaconStatesCollector struct {
+type beaconStatesCollector struct {
 	effectiveBalanceCollector        *etl.Collector
 	balancesCollector                *etl.Collector
 	randaoMixesCollector             *etl.Collector
@@ -52,8 +52,8 @@ type internalBeaconStatesCollector struct {
 	logger    log.Logger
 }
 
-func newInternalBeaconStatesCollector(beaconCfg *clparams.BeaconChainConfig, tmpdir string, logger log.Logger) *internalBeaconStatesCollector {
-	return &internalBeaconStatesCollector{
+func newBeaconStatesCollector(beaconCfg *clparams.BeaconChainConfig, tmpdir string, logger log.Logger) *beaconStatesCollector {
+	return &beaconStatesCollector{
 		effectiveBalanceCollector:        etl.NewCollector(kv.ValidatorEffectiveBalance, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger),
 		balancesCollector:                etl.NewCollector(kv.ValidatorBalance, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger),
 		randaoMixesCollector:             etl.NewCollector(kv.RandaoMixes, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger),
@@ -77,7 +77,7 @@ func newInternalBeaconStatesCollector(beaconCfg *clparams.BeaconChainConfig, tmp
 	}
 }
 
-func (i *internalBeaconStatesCollector) addGenesisState(ctx context.Context, compressor *zstd.Encoder, state *state.CachingBeaconState) error {
+func (i *beaconStatesCollector) addGenesisState(ctx context.Context, compressor *zstd.Encoder, state *state.CachingBeaconState) error {
 	var err error
 	slot := state.Slot()
 	epoch := slot / i.beaconCfg.SlotsPerEpoch
@@ -138,7 +138,7 @@ func (i *internalBeaconStatesCollector) addGenesisState(ctx context.Context, com
 	return i.stateEventsCollector.Collect(base_encoding.Encode64ToBytes4(slot), events.CopyBytes())
 }
 
-func (i *internalBeaconStatesCollector) storeEpochData(buffer *bytes.Buffer, st *state.CachingBeaconState) error {
+func (i *beaconStatesCollector) storeEpochData(buffer *bytes.Buffer, st *state.CachingBeaconState) error {
 	buffer.Reset()
 	epochData := state_accessors.EpochDataFromBeaconState(st)
 
@@ -149,7 +149,7 @@ func (i *internalBeaconStatesCollector) storeEpochData(buffer *bytes.Buffer, st 
 	return i.epochDataCollector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), libcommon.Copy(buffer.Bytes()))
 }
 
-func (i *internalBeaconStatesCollector) storeSlotData(buffer *bytes.Buffer, st *state.CachingBeaconState, rewardsCollector *eth2.BlockRewardsCollector) error {
+func (i *beaconStatesCollector) storeSlotData(buffer *bytes.Buffer, st *state.CachingBeaconState, rewardsCollector *eth2.BlockRewardsCollector) error {
 	buffer.Reset()
 	slotData := state_accessors.SlotDataFromBeaconState(st)
 	if rewardsCollector != nil {
@@ -164,7 +164,7 @@ func (i *internalBeaconStatesCollector) storeSlotData(buffer *bytes.Buffer, st *
 	return i.slotDataCollector.Collect(base_encoding.Encode64ToBytes4(st.Slot()), libcommon.Copy(buffer.Bytes()))
 }
 
-func (i *internalBeaconStatesCollector) collectEffectiveBalancesDump(slot uint64, uncompressed []byte, buffer *bytes.Buffer, compressor *zstd.Encoder) error {
+func (i *beaconStatesCollector) collectEffectiveBalancesDump(slot uint64, uncompressed []byte, buffer *bytes.Buffer, compressor *zstd.Encoder) error {
 	buffer.Reset()
 	compressor.Reset(buffer)
 
@@ -183,28 +183,28 @@ func (i *internalBeaconStatesCollector) collectEffectiveBalancesDump(slot uint64
 	return i.effectiveBalancesDumpCollector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), common.Copy(buffer.Bytes()))
 }
 
-func (i *internalBeaconStatesCollector) collectBalancesDump(slot uint64, uncompressed []byte, buffer *bytes.Buffer, compressor *zstd.Encoder) error {
+func (i *beaconStatesCollector) collectBalancesDump(slot uint64, uncompressed []byte, buffer *bytes.Buffer, compressor *zstd.Encoder) error {
 	return antiquateField(context.Background(), slot, uncompressed, buffer, compressor, i.balancesDumpsCollector)
 }
 
-func (i *internalBeaconStatesCollector) collectIntraEpochRandaoMix(slot uint64, randao libcommon.Hash) error {
+func (i *beaconStatesCollector) collectIntraEpochRandaoMix(slot uint64, randao libcommon.Hash) error {
 	return i.intraRandaoMixesCollector.Collect(base_encoding.Encode64ToBytes4(slot), randao[:])
 }
 
-func (i *internalBeaconStatesCollector) collectEpochRandaoMix(epoch uint64, randao libcommon.Hash) error {
+func (i *beaconStatesCollector) collectEpochRandaoMix(epoch uint64, randao libcommon.Hash) error {
 	slot := epoch * i.beaconCfg.SlotsPerEpoch
-	return i.intraRandaoMixesCollector.Collect(base_encoding.Encode64ToBytes4(slot), randao[:])
+	return i.randaoMixesCollector.Collect(base_encoding.Encode64ToBytes4(slot), randao[:])
 }
 
-func (i *internalBeaconStatesCollector) collectStateRoot(slot uint64, stateRoot libcommon.Hash) error {
+func (i *beaconStatesCollector) collectStateRoot(slot uint64, stateRoot libcommon.Hash) error {
 	return i.stateRootsCollector.Collect(base_encoding.Encode64ToBytes4(slot), stateRoot[:])
 }
 
-func (i *internalBeaconStatesCollector) collectBlockRoot(slot uint64, blockRoot libcommon.Hash) error {
+func (i *beaconStatesCollector) collectBlockRoot(slot uint64, blockRoot libcommon.Hash) error {
 	return i.blockRootsCollector.Collect(base_encoding.Encode64ToBytes4(slot), blockRoot[:])
 }
 
-func (i *internalBeaconStatesCollector) collectActiveIndices(buf *bytes.Buffer, epoch uint64, activeIndices []uint64) error {
+func (i *beaconStatesCollector) collectActiveIndices(buf *bytes.Buffer, epoch uint64, activeIndices []uint64) error {
 	buf.Reset()
 	if err := base_encoding.WriteRabbits(activeIndices, buf); err != nil {
 		return err
@@ -213,21 +213,21 @@ func (i *internalBeaconStatesCollector) collectActiveIndices(buf *bytes.Buffer, 
 	return i.activeValidatorIndiciesCollector.Collect(base_encoding.Encode64ToBytes4(slot), libcommon.Copy(buf.Bytes()))
 }
 
-func (i *internalBeaconStatesCollector) collectFlattenedProposers(epoch uint64, proposers []byte) error {
+func (i *beaconStatesCollector) collectFlattenedProposers(epoch uint64, proposers []byte) error {
 	return i.proposersCollector.Collect(base_encoding.Encode64ToBytes4(epoch), proposers)
 }
 
-func (i *internalBeaconStatesCollector) collectCurrentSyncCommittee(slot uint64, committee *solid.SyncCommittee) error {
+func (i *beaconStatesCollector) collectCurrentSyncCommittee(slot uint64, committee *solid.SyncCommittee) error {
 	roundedSlot := i.beaconCfg.RoundSlotToSyncCommitteePeriod(slot)
 	return i.currentSyncCommitteeCollector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), committee[:])
 }
 
-func (i *internalBeaconStatesCollector) collectNextSyncCommittee(slot uint64, committee *solid.SyncCommittee) error {
+func (i *beaconStatesCollector) collectNextSyncCommittee(slot uint64, committee *solid.SyncCommittee) error {
 	roundedSlot := i.beaconCfg.RoundSlotToSyncCommitteePeriod(slot)
 	return i.nextSyncCommitteeCollector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), committee[:])
 }
 
-func (i *internalBeaconStatesCollector) collectEth1DataVote(slot uint64, eth1Data *cltypes.Eth1Data) error {
+func (i *beaconStatesCollector) collectEth1DataVote(slot uint64, eth1Data *cltypes.Eth1Data) error {
 	vote, err := eth1Data.EncodeSSZ(nil)
 	if err != nil {
 		return err
@@ -235,27 +235,27 @@ func (i *internalBeaconStatesCollector) collectEth1DataVote(slot uint64, eth1Dat
 	return i.eth1DataVotesCollector.Collect(base_encoding.Encode64ToBytes4(slot), vote)
 }
 
-func (i *internalBeaconStatesCollector) collectSlashings(buf *bytes.Buffer, compressedWriter *zstd.Encoder, slot uint64, rawSlashings []byte) error {
+func (i *beaconStatesCollector) collectSlashings(buf *bytes.Buffer, compressedWriter *zstd.Encoder, slot uint64, rawSlashings []byte) error {
 	return antiquateFullUint64List(i.slashingsCollector, slot, rawSlashings, buf, compressedWriter)
 }
 
-func (i *internalBeaconStatesCollector) collectStateEvents(slot uint64, events *state_accessors.StateEvents) error {
+func (i *beaconStatesCollector) collectStateEvents(slot uint64, events *state_accessors.StateEvents) error {
 	return i.stateEventsCollector.Collect(base_encoding.Encode64ToBytes4(slot), events.CopyBytes())
 }
 
-func (i *internalBeaconStatesCollector) collectBalancesDiffs(ctx context.Context, slot uint64, old, new []byte) error {
+func (i *beaconStatesCollector) collectBalancesDiffs(ctx context.Context, slot uint64, old, new []byte) error {
 	return antiquateBytesListDiff(ctx, base_encoding.Encode64ToBytes4(slot), old, new, i.balancesCollector, base_encoding.ComputeCompressedSerializedUint64ListDiff)
 }
 
-func (i *internalBeaconStatesCollector) collectEffectiveBalancesDiffs(ctx context.Context, slot uint64, oldValidatorSetSSZ, newValidatorSetSSZ []byte) error {
-	return antiquateBytesListDiff(ctx, base_encoding.Encode64ToBytes4(slot), oldValidatorSetSSZ, newValidatorSetSSZ, i.effectiveBalanceCollector, base_encoding.ComputeCompressedSerializedValidatorSetListDiff)
+func (i *beaconStatesCollector) collectEffectiveBalancesDiffs(ctx context.Context, slot uint64, oldValidatorSetSSZ, newValidatorSetSSZ []byte) error {
+	return antiquateBytesListDiff(ctx, base_encoding.Encode64ToBytes4(slot), oldValidatorSetSSZ, newValidatorSetSSZ, i.effectiveBalanceCollector, base_encoding.ComputeCompressedSerializedEffectiveBalancesDiff)
 }
 
-func (i *internalBeaconStatesCollector) collectInactivityScores(buf *bytes.Buffer, compressedWriter *zstd.Encoder, slot uint64, inactivityScores []byte) error {
+func (i *beaconStatesCollector) collectInactivityScores(buf *bytes.Buffer, compressedWriter *zstd.Encoder, slot uint64, inactivityScores []byte) error {
 	return antiquateFullUint64List(i.inactivityScoresCollector, slot, inactivityScores, buf, compressedWriter)
 }
 
-func (i *internalBeaconStatesCollector) flush(ctx context.Context, tx kv.RwTx) error {
+func (i *beaconStatesCollector) flush(ctx context.Context, tx kv.RwTx) error {
 	loadfunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		return next(k, k, v)
 	}
@@ -315,7 +315,7 @@ func (i *internalBeaconStatesCollector) flush(ctx context.Context, tx kv.RwTx) e
 	return i.balancesDumpsCollector.Load(tx, kv.BalancesDump, loadfunc, etl.TransformArgs{Quit: ctx.Done()})
 }
 
-func (i *internalBeaconStatesCollector) close() {
+func (i *beaconStatesCollector) close() {
 	i.effectiveBalanceCollector.Close()
 	i.balancesCollector.Close()
 	i.randaoMixesCollector.Close()
