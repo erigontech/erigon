@@ -110,15 +110,6 @@ func NewHeimdall(ctx context.Context, chain string, snapshotLocation string, log
 
 func (h *HeimdallSimulator) FetchLatestSpan(ctx context.Context) (*heimdall.Span, error) {
 	latestSpan := h.blockReader.LastFrozenSpanId()
-	if latestSpan == 0 {
-		// indicies have not been built, build index and get latest span again
-		_, err := h.getSpan(h.ctx, latestSpan)
-		if err != nil {
-			return nil, err
-		}
-
-		latestSpan = h.blockReader.LastFrozenSpanId()
-	}
 
 	span, err := h.getSpan(h.ctx, latestSpan)
 	if err != nil {
