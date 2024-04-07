@@ -84,6 +84,15 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			err = fmt.Errorf("%v", r)
 		}
 	}()
+	// Make a copy of the gossip data so that we the received data is not modified.
+	// 1) When we publish and corrupt the data, the peers bans us.
+	// 2) We decode the block wrong
+	data = &sentinel.GossipData{
+		Name:     data.Name,
+		Peer:     data.Peer,
+		SubnetId: data.SubnetId,
+		Data:     common.CopyBytes(data.Data),
+	}
 
 	currentEpoch := utils.GetCurrentEpoch(g.genesisConfig.GenesisTime, g.beaconConfig.SecondsPerSlot, g.beaconConfig.SlotsPerEpoch)
 	version := g.beaconConfig.GetCurrentStateVersion(currentEpoch)
@@ -96,7 +105,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 	switch data.Name {
 	case gossip.TopicNameBeaconBlock:
 		object = cltypes.NewSignedBeaconBlock(g.beaconConfig)
-		if err := object.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
+		if err := object.DecodeSSZ(data.Data, int(version)); err != nil {
 			g.sentinel.BanPeer(ctx, data.Peer)
 			l["at"] = "decoding block"
 			return err
@@ -128,14 +137,14 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 		g.gossipSource.InsertBlock(ctx, &peers.PeeredObject[*cltypes.SignedBeaconBlock]{Data: block, Peer: data.Peer.Pid})
 	case gossip.TopicNameLightClientFinalityUpdate:
 		obj := &cltypes.LightClientFinalityUpdate{}
-		if err := obj.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
+		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
 			g.sentinel.BanPeer(ctx, data.Peer)
 			l["at"] = "decoding lc finality update"
 			return err
 		}
 	case gossip.TopicNameLightClientOptimisticUpdate:
 		obj := &cltypes.LightClientOptimisticUpdate{}
-		if err := obj.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
+		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
 			g.sentinel.BanPeer(ctx, data.Peer)
 			l["at"] = "decoding lc optimistic update"
 			return err
@@ -170,7 +179,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 		case gossip.IsTopicBlobSidecar(data.Name):
 			// decode sidecar
 			blobSideCar := &cltypes.BlobSidecar{}
-			if err := blobSideCar.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
+			if err := blobSideCar.DecodeSSZ(data.Data, int(version)); err != nil {
 				g.sentinel.BanPeer(ctx, data.Peer)
 				l["at"] = "decoding blob sidecar"
 				return err
@@ -206,7 +215,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			// The background checks above are enough for now.
 			if err := g.forkChoice.OnBlobSidecar(blobSideCar, false); err != nil {
 				g.sentinel.BanPeer(ctx, data.Peer)
-				return err
+				log.Warn("blob sidecar rejected", "err", err)
 			}
 
 			if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {

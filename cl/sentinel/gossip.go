@@ -31,9 +31,10 @@ import (
 var (
 	// maxInMeshScore describes the max score a peer can attain from being in the mesh.
 	maxInMeshScore = 10.
-	// beaconBlockWeight specifies the scoring weight that we apply to
-	// our beacon block topic.
-	beaconBlockWeight = 0.8
+
+	// p2p weights
+	beaconBlockWeight   = 0.8
+	voluntaryExitWeight = 0.05
 )
 
 const SSZSnappyCodec = "ssz_snappy"
@@ -220,8 +221,10 @@ func (s *Sentinel) Unsubscribe(topic GossipTopic, opts ...pubsub.TopicOpt) (err 
 
 func (s *Sentinel) topicScoreParams(topic string) *pubsub.TopicScoreParams {
 	switch {
-	case strings.Contains(topic, gossip.TopicNameBeaconBlock):
+	case strings.Contains(topic, gossip.TopicNameBeaconBlock) || gossip.IsTopicBlobSidecar(topic):
 		return s.defaultBlockTopicParams()
+	case strings.Contains(topic, gossip.TopicNameVoluntaryExit):
+		return s.defaultVoluntaryExitTopicParams()
 	/*case strings.Contains(topic, GossipAggregateAndProofMessage):
 	return defaultAggregateTopicParams(activeValidators), nil
 	case strings.Contains(topic, GossipAttestationMessage):
@@ -230,8 +233,7 @@ func (s *Sentinel) topicScoreParams(topic string) *pubsub.TopicScoreParams {
 	return defaultSyncSubnetTopicParams(activeValidators), nil
 	case strings.Contains(topic, GossipContributionAndProofMessage):
 	return defaultSyncContributionTopicParams(), nil
-	case strings.Contains(topic, GossipExitMessage):
-	return defaultVoluntaryExitTopicParams(), nil
+
 	case strings.Contains(topic, GossipProposerSlashingMessage):
 	return defaultProposerSlashingTopicParams(), nil
 	case strings.Contains(topic, GossipAttesterSlashingMessage):
@@ -243,7 +245,7 @@ func (s *Sentinel) topicScoreParams(topic string) *pubsub.TopicScoreParams {
 	}
 }
 
-// Based on the lighthouse parameters.
+// Based on the prysm parameters.
 // https://gist.github.com/blacktemplar/5c1862cb3f0e32a1a7fb0b25e79e6e2c
 func (s *Sentinel) defaultBlockTopicParams() *pubsub.TopicScoreParams {
 	blocksPerEpoch := s.cfg.BeaconConfig.SlotsPerEpoch
@@ -265,6 +267,28 @@ func (s *Sentinel) defaultBlockTopicParams() *pubsub.TopicScoreParams {
 		MeshFailurePenaltyWeight:        meshWeight,
 		MeshFailurePenaltyDecay:         s.scoreDecay(5 * s.oneEpochDuration()),
 		InvalidMessageDeliveriesWeight:  -140.4475,
+		InvalidMessageDeliveriesDecay:   s.scoreDecay(50 * s.oneEpochDuration()),
+	}
+}
+
+func (s *Sentinel) defaultVoluntaryExitTopicParams() *pubsub.TopicScoreParams {
+	return &pubsub.TopicScoreParams{
+		TopicWeight:                     voluntaryExitWeight,
+		TimeInMeshWeight:                maxInMeshScore / s.inMeshCap(),
+		TimeInMeshQuantum:               s.oneSlotDuration(),
+		TimeInMeshCap:                   s.inMeshCap(),
+		FirstMessageDeliveriesWeight:    2,
+		FirstMessageDeliveriesDecay:     s.scoreDecay(100 * s.oneEpochDuration()),
+		FirstMessageDeliveriesCap:       5,
+		MeshMessageDeliveriesWeight:     0,
+		MeshMessageDeliveriesDecay:      0,
+		MeshMessageDeliveriesCap:        0,
+		MeshMessageDeliveriesThreshold:  0,
+		MeshMessageDeliveriesWindow:     0,
+		MeshMessageDeliveriesActivation: 0,
+		MeshFailurePenaltyWeight:        0,
+		MeshFailurePenaltyDecay:         0,
+		InvalidMessageDeliveriesWeight:  -2000,
 		InvalidMessageDeliveriesDecay:   s.scoreDecay(50 * s.oneEpochDuration()),
 	}
 }
@@ -397,6 +421,7 @@ func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, 
 				log.Warn("[Sentinel] fail to decode gossip packet", "err", err, "topicName", topicName)
 				return
 			}
+
 			if msg.ReceivedFrom == s.host {
 				continue
 			}

@@ -60,7 +60,7 @@ func createSentinel(cfg *sentinel.SentinelConfig, blockReader freezeblocks.Beaco
 	}
 	gossipTopics := []sentinel.GossipTopic{
 		sentinel.BeaconBlockSsz,
-		sentinel.VoluntaryExitSsz,
+		//sentinel.VoluntaryExitSsz,
 		sentinel.ProposerSlashingSsz,
 		sentinel.AttesterSlashingSsz,
 		sentinel.BlsToExecutionChangeSsz,

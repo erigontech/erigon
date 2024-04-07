@@ -30,8 +30,9 @@ import (
 )
 
 const (
-	logInterval           = 30 * time.Second
-	requestLoopCutOff int = 1
+	logInterval                 = 30 * time.Second
+	requestLoopCutOff       int = 1
+	forkchoiceTimeoutMillis     = 5000
 )
 
 type RequestBodyFunction func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool)
@@ -87,7 +88,7 @@ func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *header
 		blockPropagator: blockPropagator,
 		timeout:         timeout,
 		bodyReqSend:     bodyReqSend,
-		chainRW:         eth1_chain_reader.NewChainReaderEth1(config, executionClient, 1000),
+		chainRW:         eth1_chain_reader.NewChainReaderEth1(config, executionClient, forkchoiceTimeoutMillis),
 	}
 }
 
