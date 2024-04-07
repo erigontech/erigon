@@ -95,7 +95,7 @@ func (t *validatorTestSuite) TestGetEthV1ValidatorAggregateAttestation() {
 					),
 					[96]byte{},
 				)
-				t.mockAggrPool.EXPECT().GetAggregatationByRoot(libcommon.HexToHash(mockDataRoot)).Return(&ret)
+				t.mockAggrPool.EXPECT().GetAggregatationByRoot(libcommon.HexToHash(mockDataRoot)).Return(&ret).Times(1)
 			},
 			expCode: http.StatusBadRequest,
 			expBody: map[string]any{
@@ -119,7 +119,7 @@ func (t *validatorTestSuite) TestGetEthV1ValidatorAggregateAttestation() {
 					),
 					[96]byte{0, 1, 2, 3, 4, 5},
 				)
-				t.mockAggrPool.EXPECT().GetAggregatationByRoot(libcommon.HexToHash(mockDataRoot)).Return(&ret)
+				t.mockAggrPool.EXPECT().GetAggregatationByRoot(libcommon.HexToHash(mockDataRoot)).Return(&ret).Times(1)
 			},
 			expCode: http.StatusOK,
 			expBody: map[string]any{
