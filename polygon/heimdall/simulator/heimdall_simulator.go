@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -55,13 +54,38 @@ func NewHeimdall(ctx context.Context, chain string, snapshotLocation string, log
 
 	activeBorSnapshots := freezeblocks.NewBorRoSnapshots(ethconfig.Defaults.Snapshot, torrentDir, 0, logger)
 
-	if err := activeBorSnapshots.ReopenFolder(); err != nil {
-		return HeimdallSimulator{}, err
-	}
-
 	config := sync.NewDefaultTorrentClientConfig(chain, snapshotLocation, logger)
 	downloader, err := sync.NewTorrentClient(config)
 	if err != nil {
+		return HeimdallSimulator{}, err
+	}
+
+	// index local files
+	localFiles, err := os.ReadDir(torrentDir)
+	if err != nil {
+		return HeimdallSimulator{}, err
+	}
+
+	for _, file := range localFiles {
+		info, _, _ := snaptype.ParseFileName(torrentDir, file.Name())
+		if info.Ext == ".seg" {
+			if info.Type.Enum() == snaptype.Enums.BorSpans {
+				err = freezeblocks.BorSpansIdx(ctx, info, activeBorSnapshots.Salt, torrentDir, nil, log.LvlWarn, logger)
+				if err != nil {
+					return HeimdallSimulator{}, err
+				}
+			}
+
+			if info.Type.Enum() == snaptype.Enums.BorEvents {
+				err = freezeblocks.BorEventsIdx(ctx, info, activeBorSnapshots.Salt, torrentDir, nil, log.LvlWarn, logger)
+				if err != nil {
+					return HeimdallSimulator{}, err
+				}
+			}
+		}
+	}
+
+	if err = activeBorSnapshots.ReopenFolder(); err != nil {
 		return HeimdallSimulator{}, err
 	}
 
@@ -179,30 +203,9 @@ func (h *HeimdallSimulator) downloadData(ctx context.Context, spans *freezeblock
 	session := sync.NewTorrentSession(h.downloader, h.chain)
 	info, _, _ := snaptype.ParseFileName(session.LocalFsRoot(), fileName)
 
-	files, err := os.ReadDir(session.LocalFsRoot())
-	if err != nil {
-		return err
-	}
-
-	var fileNames []string
-	for _, file := range files {
-		if !file.IsDir() {
-			fileNames = append(fileNames, file.Name())
-		}
-	}
-
-	if slices.Contains(fileNames, fileName) {
-		err := indexFn(ctx, info, h.activeBorSnapshots.Salt, session.LocalFsRoot(), nil, log.LvlWarn, h.logger)
-		if err != nil {
-			return fmt.Errorf("error indexing %s: %w", fileName, err)
-		}
-
-		return h.activeBorSnapshots.ReopenSegments([]snaptype.Type{sType}, true)
-	}
-
 	h.logger.Info(fmt.Sprintf("Downloading %s", fileName))
 
-	err = session.Download(ctx, fileName)
+	err := session.Download(ctx, fileName)
 	if err != nil {
 		return fmt.Errorf("can't download %s: %w", fileName, err)
 	}
