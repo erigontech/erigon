@@ -22,7 +22,6 @@ type validatorTestSuite struct {
 	apiHandler   *ApiHandler
 	mockAggrPool *mock_aggregation.MockAggregationPool
 	gomockCtrl   *gomock.Controller
-	//server       *http.Server
 }
 
 func (t *validatorTestSuite) SetupTest() {
@@ -55,7 +54,6 @@ func (t *validatorTestSuite) SetupTest() {
 }
 
 func (t *validatorTestSuite) TearDownTest() {
-	//t.server.Close()
 	t.gomockCtrl.Finish()
 }
 
