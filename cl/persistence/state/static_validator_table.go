@@ -275,7 +275,7 @@ func (s *StaticValidatorTable) AddValidator(v solid.Validator, validatorIndex, s
 		return nil
 	}
 	s.validatorTable = append(s.validatorTable, NewStaticValidatorFromValidator(v, slot))
-	if validatorIndex != uint64(len(s.validatorTable)) {
+	if validatorIndex != uint64(len(s.validatorTable))-1 {
 		return fmt.Errorf("validator index mismatch")
 	}
 	return nil
@@ -421,15 +421,18 @@ func (s *StaticValidatorTable) GetStaticValidator(validatorIndex uint64) *Static
 func (s *StaticValidatorTable) SetSlot(slot uint64) {
 	s.sync.Lock()
 	defer s.sync.Unlock()
-	if slot <= s.slot && s.slot != 0 {
-		return
-	}
+	s.resetTable(slot)
 	s.slot = slot
 }
 
 func (s *StaticValidatorTable) resetTable(slot uint64) {
-	for _, v := range s.validatorTable {
+	for i, v := range s.validatorTable {
 		v.Reset(slot)
+		// if we remove all public keys, we can remove all subsequent fields
+		if len(v.publicKeys) == 0 {
+			s.validatorTable = s.validatorTable[:i]
+			break
+		}
 	}
 }
 
