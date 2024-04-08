@@ -131,7 +131,8 @@ func SpawnStageBatches(
 		return fmt.Errorf("save stage progress error: %v", err)
 	}
 
-	if batchesProgress > cfg.zkCfg.DebugLimit {
+	//// BISECT ////
+	if cfg.zkCfg.DebugLimit > 0 && batchesProgress > cfg.zkCfg.DebugLimit {
 		return nil
 	}
 
