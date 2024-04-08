@@ -97,7 +97,7 @@ jobs:
           platforms: linux/arm64
 
   create-and-push-manifest:
-    needs: [build-amd64, build-arm64]
+    needs: [prepare, build-amd64, build-arm64]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
