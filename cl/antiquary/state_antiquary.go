@@ -457,7 +457,7 @@ func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.
 			return err
 		}
 		if computedBlockRoot != expectedBlockRoot {
-			log.Warn("Block root mismatch, trying again", "slot", attempt, "expected", expectedBlockRoot)
+			log.Debug("Block root mismatch, trying again", "slot", attempt, "expected", expectedBlockRoot)
 			// backoff more
 			backoffStep += 10
 			continue
