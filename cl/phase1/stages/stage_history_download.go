@@ -211,7 +211,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 		cfg.antiquary.NotifyBackfilled()
 		if cfg.backfilling {
-			cfg.logger.Info("full backfilling finished")
+			cfg.logger.Info("Full backfilling finished")
 		} else {
 			cfg.logger.Info("Missing blocks download finished (note: this does not mean that the history is complete, only that the missing blocks need for sync have been downloaded)")
 		}
@@ -265,6 +265,7 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 	prevLogSlot := currentSlot
 	prevTime := time.Now()
 	targetSlot := cfg.beaconCfg.DenebForkEpoch * cfg.beaconCfg.SlotsPerEpoch
+	cfg.logger.Info("Downloading blobs backwards", "from", currentSlot, "to", targetSlot)
 	for currentSlot >= targetSlot {
 		if currentSlot <= cfg.sn.FrozenBlobs() {
 			break
@@ -272,7 +273,11 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 		batch := make([]*cltypes.SignedBlindedBeaconBlock, 0, blocksBatchSize)
 		visited := uint64(0)
-		for ; len(batch) < int(blocksBatchSize); visited++ {
+		maxIterations := uint64(32)
+		for ; visited < blocksBatchSize; visited++ {
+			if visited >= maxIterations {
+				break
+			}
 			if currentSlot-visited < targetSlot {
 				break
 			}
