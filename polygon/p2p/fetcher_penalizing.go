@@ -40,7 +40,7 @@ func (pf *penalizingFetcher) FetchHeaders(ctx context.Context, start uint64, end
 func (pf *penalizingFetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) ([]*types.Body, error) {
 	bodies, err := pf.Fetcher.FetchBodies(ctx, headers, peerId)
 	if err != nil {
-		return nil, pf.maybePenalize(ctx, peerId, err, &ErrTooManyBodies{}, ErrEmptyBody)
+		return nil, pf.maybePenalize(ctx, peerId, err, &ErrTooManyBodies{})
 	}
 
 	return bodies, nil
@@ -56,7 +56,11 @@ func (pf *penalizingFetcher) maybePenalize(ctx context.Context, peerId *PeerId, 
 	}
 
 	if shouldPenalize {
-		pf.logger.Debug("penalizing peer - penalize-able fetcher issue", "peerId", peerId, "err", err)
+		pf.logger.Debug(
+			"[p2p.penalizing.fetcher] penalizing peer - penalize-able fetcher issue",
+			"peerId", peerId,
+			"err", err,
+		)
 
 		if penalizeErr := pf.peerPenalizer.Penalize(ctx, peerId); penalizeErr != nil {
 			err = fmt.Errorf("%w: %w", penalizeErr, err)

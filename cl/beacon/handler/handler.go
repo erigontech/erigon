@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/ledgerwatch/erigon/cl/validator/attestation_producer"
 	"github.com/ledgerwatch/erigon/cl/validator/committee_subscription"
+	"github.com/ledgerwatch/erigon/cl/validator/sync_contribution_pool"
 	"github.com/ledgerwatch/erigon/cl/validator/validator_params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/log/v3"
@@ -40,18 +41,17 @@ type ApiHandler struct {
 	o   sync.Once
 	mux *chi.Mux
 
-	blockReader         freezeblocks.BeaconSnapshotReader
-	indiciesDB          kv.RwDB
-	genesisCfg          *clparams.GenesisConfig
-	beaconChainCfg      *clparams.BeaconChainConfig
-	forkchoiceStore     forkchoice.ForkChoiceStorage
-	operationsPool      pool.OperationsPool
-	syncedData          *synced_data.SyncedDataManager
-	stateReader         *historical_states_reader.HistoricalStatesReader
-	sentinel            sentinel.SentinelClient
-	blobStoage          blob_storage.BlobStorage
-	caplinSnapshots     *freezeblocks.CaplinSnapshots
-	attestationProducer attestation_producer.AttestationDataProducer
+	blockReader     freezeblocks.BeaconSnapshotReader
+	indiciesDB      kv.RwDB
+	genesisCfg      *clparams.GenesisConfig
+	beaconChainCfg  *clparams.BeaconChainConfig
+	forkchoiceStore forkchoice.ForkChoiceStorage
+	operationsPool  pool.OperationsPool
+	syncedData      *synced_data.SyncedDataManager
+	stateReader     *historical_states_reader.HistoricalStatesReader
+	sentinel        sentinel.SentinelClient
+	blobStoage      blob_storage.BlobStorage
+	caplinSnapshots *freezeblocks.CaplinSnapshots
 
 	version string // Node's version
 
@@ -66,10 +66,12 @@ type ApiHandler struct {
 	logger    log.Logger
 
 	// Validator data structures
-	validatorParams *validator_params.ValidatorParams
-	blobBundles     *lru.Cache[common.Bytes48, BlobBundle] // Keep recent bundled blobs from the execution layer.
-	engine          execution_client.ExecutionEngine
-	committeeSub    *committee_subscription.CommitteeSubscribeMgmt
+	validatorParams     *validator_params.ValidatorParams
+	blobBundles         *lru.Cache[common.Bytes48, BlobBundle] // Keep recent bundled blobs from the execution layer.
+	engine              execution_client.ExecutionEngine
+	syncMessagePool     sync_contribution_pool.SyncContributionPool
+	committeeSub        *committee_subscription.CommitteeSubscribeMgmt
+	attestationProducer attestation_producer.AttestationDataProducer
 }
 
 func NewApiHandler(
@@ -91,6 +93,7 @@ func NewApiHandler(
 	validatorParams *validator_params.ValidatorParams,
 	attestationProducer attestation_producer.AttestationDataProducer,
 	engine execution_client.ExecutionEngine,
+	syncMessagePool sync_contribution_pool.SyncContributionPool,
 	committeeSub *committee_subscription.CommitteeSubscribeMgmt,
 ) *ApiHandler {
 	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("blobs", maxBlobBundleCacheSize)
@@ -121,6 +124,7 @@ func NewApiHandler(
 		attestationProducer: attestationProducer,
 		blobBundles:         blobBundles,
 		engine:              engine,
+		syncMessagePool:     syncMessagePool,
 		committeeSub:        committeeSub,
 	}
 }
@@ -185,12 +189,12 @@ func (a *ApiHandler) init() {
 					})
 					r.Route("/blocks", func(r chi.Router) {
 						r.Post("/", a.PostEthV1BeaconBlocks)
-						r.Get("/{block_id}", beaconhttp.HandleEndpointFunc(a.getBlock))
-						r.Get("/{block_id}/attestations", beaconhttp.HandleEndpointFunc(a.getBlockAttestations))
-						r.Get("/{block_id}/root", beaconhttp.HandleEndpointFunc(a.getBlockRoot))
+						r.Get("/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconBlock))
+						r.Get("/{block_id}/attestations", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconBlockAttestations))
+						r.Get("/{block_id}/root", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconBlockRoot))
 					})
 					r.Get("/genesis", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconGenesis))
-					r.Get("/blinded_blocks/{block_id}", beaconhttp.HandleEndpointFunc(a.getBlindedBlock))
+					r.Get("/blinded_blocks/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BlindedBlock))
 					r.Route("/pool", func(r chi.Router) {
 						r.Get("/voluntary_exits", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconPoolVoluntaryExits))
 						r.Post("/voluntary_exits", a.PostEthV1BeaconPoolVoluntaryExits)
@@ -201,8 +205,8 @@ func (a *ApiHandler) init() {
 						r.Get("/bls_to_execution_changes", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconPoolBLSExecutionChanges))
 						r.Post("/bls_to_execution_changes", a.PostEthV1BeaconPoolBlsToExecutionChanges)
 						r.Get("/attestations", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconPoolAttestations))
-						r.Post("/attestations", http.NotFound)    // TODO
-						r.Post("/sync_committees", http.NotFound) // TODO
+						r.Post("/attestations", http.NotFound) // TODO
+						r.Post("/sync_committees", a.PostEthV1BeaconPoolSyncCommittees)
 					})
 					r.Route("/light_client", func(r chi.Router) {
 						r.Get("/bootstrap/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconLightClientBootstrap))
@@ -237,10 +241,10 @@ func (a *ApiHandler) init() {
 					r.Get("/attestation_data", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorAttestationData))
 					r.Get("/aggregate_attestation", http.NotFound)
 					r.Post("/aggregate_and_proofs", a.PostEthV1ValidatorAggregatesAndProof)
-					r.Post("/beacon_committee_subscriptions", a.EthV1ValidatorBeaconCommitteeSubscription)
-					r.Post("/sync_committee_subscriptions", http.NotFound)
-					r.Get("/sync_committee_contribution", http.NotFound)
-					r.Post("/contribution_and_proofs", http.NotFound)
+					r.Post("/beacon_committee_subscriptions", a.PostEthV1ValidatorBeaconCommitteeSubscription)
+					r.Post("/sync_committee_subscriptions", a.PostEthV1ValidatorSyncCommitteeSubscriptions)
+					r.Get("/sync_committee_contribution", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorSyncCommitteeContribution))
+					r.Post("/contribution_and_proofs", a.PostEthV1ValidatorContributionsAndProofs)
 					r.Post("/prepare_beacon_proposer", a.PostEthV1ValidatorPrepareBeaconProposal)
 					r.Post("/liveness/{epoch}", beaconhttp.HandleEndpointFunc(a.liveness))
 				})
@@ -258,7 +262,7 @@ func (a *ApiHandler) init() {
 			}
 			if a.routerCfg.Beacon {
 				r.Route("/beacon", func(r chi.Router) {
-					r.Get("/blocks/{block_id}", beaconhttp.HandleEndpointFunc(a.getBlock))
+					r.Get("/blocks/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconBlock))
 					r.Post("/blocks", a.PostEthV2BeaconBlocks)
 				})
 			}

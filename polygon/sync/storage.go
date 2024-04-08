@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -18,13 +20,15 @@ type Storage interface {
 }
 
 type executionClientStorage struct {
+	logger    log.Logger
 	execution ExecutionClient
 	queue     chan []*types.Block
 	waitGroup sync.WaitGroup
 }
 
-func NewStorage(execution ExecutionClient, queueCapacity int) Storage {
+func NewStorage(logger log.Logger, execution ExecutionClient, queueCapacity int) Storage {
 	return &executionClientStorage{
+		logger:    logger,
 		execution: execution,
 		queue:     make(chan []*types.Block, queueCapacity),
 	}
@@ -54,6 +58,8 @@ func (s *executionClientStorage) Flush(ctx context.Context) error {
 }
 
 func (s *executionClientStorage) Run(ctx context.Context) error {
+	s.logger.Debug(syncLogPrefix("running execution client storage component"))
+
 	for {
 		select {
 		case blocks := <-s.queue:

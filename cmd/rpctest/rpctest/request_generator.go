@@ -89,13 +89,28 @@ func (g *RequestGenerator) getLogs(prevBn uint64, bn uint64, account libcommon.A
 	return fmt.Sprintf(template, prevBn, bn, account, g.reqID)
 }
 
+func (g *RequestGenerator) getOverlayLogs(prevBn uint64, bn uint64, account libcommon.Address) string {
+	const template = `{"jsonrpc":"2.0","method":"overlay_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x"},{}],"id":%d}`
+	return fmt.Sprintf(template, prevBn, bn, account, g.reqID)
+}
+
 func (g *RequestGenerator) getLogs1(prevBn uint64, bn uint64, account libcommon.Address, topic libcommon.Hash) string {
 	const template = `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x", "topics": ["0x%x"]}],"id":%d}`
 	return fmt.Sprintf(template, prevBn, bn, account, topic, g.reqID)
 }
 
+func (g *RequestGenerator) getOverlayLogs1(prevBn uint64, bn uint64, account libcommon.Address, topic libcommon.Hash) string {
+	const template = `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x", "topics": ["0x%x"]},{}],"id":%d}`
+	return fmt.Sprintf(template, prevBn, bn, account, topic, g.reqID)
+}
+
 func (g *RequestGenerator) getLogs2(prevBn uint64, bn uint64, account libcommon.Address, topic1, topic2 libcommon.Hash) string {
 	const template = `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x", "topics": ["0x%x", "0x%x"]}],"id":%d}`
+	return fmt.Sprintf(template, prevBn, bn, account, topic1, topic2, g.reqID)
+}
+
+func (g *RequestGenerator) getOverlayLogs2(prevBn uint64, bn uint64, account libcommon.Address, topic1, topic2 libcommon.Hash) string {
+	const template = `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x", "topics": ["0x%x", "0x%x"]},{}],"id":%d}`
 	return fmt.Sprintf(template, prevBn, bn, account, topic1, topic2, g.reqID)
 }
 

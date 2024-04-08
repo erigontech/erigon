@@ -211,10 +211,6 @@ func TestBlockDownloaderDownloadBlocksUsingMilestones(t *testing.T) {
 		InsertBlocks(gomock.Any(), gomock.Any()).
 		DoAndReturn(test.defaultInsertBlocksMock(&blocks)).
 		Times(1)
-	test.storage.EXPECT().
-		Flush(gomock.Any()).
-		Return(nil).
-		Times(1)
 
 	tip, err := test.blockDownloader.DownloadBlocksUsingMilestones(context.Background(), 1)
 	require.NoError(t, err)
@@ -249,10 +245,6 @@ func TestBlockDownloaderDownloadBlocksUsingCheckpoints(t *testing.T) {
 	test.storage.EXPECT().
 		InsertBlocks(gomock.Any(), gomock.Any()).
 		DoAndReturn(test.defaultInsertBlocksMock(&blocks)).
-		Times(4)
-	test.storage.EXPECT().
-		Flush(gomock.Any()).
-		Return(nil).
 		Times(4)
 
 	tip, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1)
@@ -328,10 +320,6 @@ func TestBlockDownloaderDownloadBlocksWhenInvalidHeadersThenPenalizePeerAndReDow
 			DoAndReturn(test.defaultInsertBlocksMock(&blocksBatch2)).
 			Times(3),
 	)
-	test.storage.EXPECT().
-		Flush(gomock.Any()).
-		Return(nil).
-		Times(4)
 
 	_, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1)
 	require.NoError(t, err)
@@ -357,10 +345,6 @@ func TestBlockDownloaderDownloadBlocksWhenZeroPeersTriesAgain(t *testing.T) {
 	test.storage.EXPECT().
 		InsertBlocks(gomock.Any(), gomock.Any()).
 		DoAndReturn(test.defaultInsertBlocksMock(&blocks)).
-		Times(4)
-	test.storage.EXPECT().
-		Flush(gomock.Any()).
-		Return(nil).
 		Times(4)
 	gomock.InOrder(
 		// first time, no peers at all
@@ -439,10 +423,6 @@ func TestBlockDownloaderDownloadBlocksWhenInvalidBodiesThenPenalizePeerAndReDown
 			DoAndReturn(test.defaultInsertBlocksMock(&blocksBatch2)).
 			Times(3),
 	)
-	test.storage.EXPECT().
-		Flush(gomock.Any()).
-		Return(nil).
-		Times(4)
 
 	_, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1)
 	require.NoError(t, err)
@@ -504,10 +484,6 @@ func TestBlockDownloaderDownloadBlocksWhenMissingBodiesThenPenalizePeerAndReDown
 			DoAndReturn(test.defaultInsertBlocksMock(&blocksBatch2)).
 			Times(3),
 	)
-	test.storage.EXPECT().
-		Flush(gomock.Any()).
-		Return(nil).
-		Times(4)
 
 	_, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1)
 	require.NoError(t, err)
@@ -546,10 +522,6 @@ func TestBlockDownloaderDownloadBlocksRespectsMaxWorkers(t *testing.T) {
 			DoAndReturn(test.defaultInsertBlocksMock(&blocksBatch2)).
 			Times(1),
 	)
-	test.storage.EXPECT().
-		Flush(gomock.Any()).
-		Return(nil).
-		Times(2)
 
 	// max 1 worker
 	// 100 peers

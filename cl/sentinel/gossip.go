@@ -31,9 +31,10 @@ import (
 var (
 	// maxInMeshScore describes the max score a peer can attain from being in the mesh.
 	maxInMeshScore = 10.
-	// beaconBlockWeight specifies the scoring weight that we apply to
-	// our beacon block topic.
-	beaconBlockWeight = 0.8
+
+	// p2p weights
+	beaconBlockWeight   = 0.8
+	voluntaryExitWeight = 0.05
 )
 
 const SSZSnappyCodec = "ssz_snappy"
@@ -192,6 +193,7 @@ func (s *Sentinel) SubscribeGossip(topic GossipTopic, expiration time.Time, opts
 		host:         s.host.ID(),
 		ctx:          s.ctx,
 		expiration:   exp,
+		s:            s,
 	}
 	path := fmt.Sprintf("/eth2/%x/%s/%s", digest, topic.Name, topic.CodecStr)
 	sub.topic, err = s.pubsub.Join(path, opts...)
@@ -219,8 +221,10 @@ func (s *Sentinel) Unsubscribe(topic GossipTopic, opts ...pubsub.TopicOpt) (err 
 
 func (s *Sentinel) topicScoreParams(topic string) *pubsub.TopicScoreParams {
 	switch {
-	case strings.Contains(topic, gossip.TopicNameBeaconBlock):
+	case strings.Contains(topic, gossip.TopicNameBeaconBlock) || gossip.IsTopicBlobSidecar(topic):
 		return s.defaultBlockTopicParams()
+	case strings.Contains(topic, gossip.TopicNameVoluntaryExit):
+		return s.defaultVoluntaryExitTopicParams()
 	/*case strings.Contains(topic, GossipAggregateAndProofMessage):
 	return defaultAggregateTopicParams(activeValidators), nil
 	case strings.Contains(topic, GossipAttestationMessage):
@@ -229,8 +233,7 @@ func (s *Sentinel) topicScoreParams(topic string) *pubsub.TopicScoreParams {
 	return defaultSyncSubnetTopicParams(activeValidators), nil
 	case strings.Contains(topic, GossipContributionAndProofMessage):
 	return defaultSyncContributionTopicParams(), nil
-	case strings.Contains(topic, GossipExitMessage):
-	return defaultVoluntaryExitTopicParams(), nil
+
 	case strings.Contains(topic, GossipProposerSlashingMessage):
 	return defaultProposerSlashingTopicParams(), nil
 	case strings.Contains(topic, GossipAttesterSlashingMessage):
@@ -242,7 +245,7 @@ func (s *Sentinel) topicScoreParams(topic string) *pubsub.TopicScoreParams {
 	}
 }
 
-// Based on the lighthouse parameters.
+// Based on the prysm parameters.
 // https://gist.github.com/blacktemplar/5c1862cb3f0e32a1a7fb0b25e79e6e2c
 func (s *Sentinel) defaultBlockTopicParams() *pubsub.TopicScoreParams {
 	blocksPerEpoch := s.cfg.BeaconConfig.SlotsPerEpoch
@@ -264,6 +267,28 @@ func (s *Sentinel) defaultBlockTopicParams() *pubsub.TopicScoreParams {
 		MeshFailurePenaltyWeight:        meshWeight,
 		MeshFailurePenaltyDecay:         s.scoreDecay(5 * s.oneEpochDuration()),
 		InvalidMessageDeliveriesWeight:  -140.4475,
+		InvalidMessageDeliveriesDecay:   s.scoreDecay(50 * s.oneEpochDuration()),
+	}
+}
+
+func (s *Sentinel) defaultVoluntaryExitTopicParams() *pubsub.TopicScoreParams {
+	return &pubsub.TopicScoreParams{
+		TopicWeight:                     voluntaryExitWeight,
+		TimeInMeshWeight:                maxInMeshScore / s.inMeshCap(),
+		TimeInMeshQuantum:               s.oneSlotDuration(),
+		TimeInMeshCap:                   s.inMeshCap(),
+		FirstMessageDeliveriesWeight:    2,
+		FirstMessageDeliveriesDecay:     s.scoreDecay(100 * s.oneEpochDuration()),
+		FirstMessageDeliveriesCap:       5,
+		MeshMessageDeliveriesWeight:     0,
+		MeshMessageDeliveriesDecay:      0,
+		MeshMessageDeliveriesCap:        0,
+		MeshMessageDeliveriesThreshold:  0,
+		MeshMessageDeliveriesWindow:     0,
+		MeshMessageDeliveriesActivation: 0,
+		MeshFailurePenaltyWeight:        0,
+		MeshFailurePenaltyDecay:         0,
+		InvalidMessageDeliveriesWeight:  -2000,
 		InvalidMessageDeliveriesDecay:   s.scoreDecay(50 * s.oneEpochDuration()),
 	}
 }
@@ -292,6 +317,8 @@ type GossipSubscription struct {
 	cf context.CancelFunc
 	rf pubsub.RelayCancelFunc
 
+	s *Sentinel
+
 	stopCh    chan struct{}
 	closeOnce sync.Once
 }
@@ -314,6 +341,8 @@ func (sub *GossipSubscription) Listen() {
 					}
 					sub.topic.Close()
 					sub.subscribed.Store(false)
+					log.Info("[Gossip] Unsubscribed from topic", "topic", sub.gossip_topic.Name)
+					sub.s.updateENROnSubscription(sub.gossip_topic.Name, false)
 					continue
 				}
 				if !sub.subscribed.Load() && time.Now().Before(expirationTime) {
@@ -328,6 +357,8 @@ func (sub *GossipSubscription) Listen() {
 					sctx, sub.cf = context.WithCancel(sub.ctx)
 					go sub.run(sctx, sub.sub, sub.sub.Topic())
 					sub.subscribed.Store(true)
+					sub.s.updateENROnSubscription(sub.gossip_topic.Name, true)
+					log.Info("[Gossip] Subscribed to topic", "topic", sub.gossip_topic.Name)
 				}
 			}
 		}
@@ -335,7 +366,9 @@ func (sub *GossipSubscription) Listen() {
 }
 
 func (sub *GossipSubscription) OverwriteSubscriptionExpiry(expiry time.Time) {
-	sub.expiration.Store(expiry)
+	if expiry.After(sub.expiration.Load().(time.Time)) {
+		sub.expiration.Store(expiry)
+	}
 }
 
 // calls the cancel func for the subscriber and closes the topic and sub
@@ -388,6 +421,7 @@ func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, 
 				log.Warn("[Sentinel] fail to decode gossip packet", "err", err, "topicName", topicName)
 				return
 			}
+
 			if msg.ReceivedFrom == s.host {
 				continue
 			}

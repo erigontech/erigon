@@ -97,12 +97,17 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 	default:
 		// check subnets
 		switch {
-		case strings.Contains(msg.Name, "blob_sidecar"):
+		case gossip.IsTopicBlobSidecar(msg.Name):
 			if msg.SubnetId == nil {
 				return nil, fmt.Errorf("subnetId is required for blob sidecar")
 			}
+			subscription = manager.GetMatchingSubscription(fmt.Sprintf(gossip.TopicNamePrefixBlobSidecar, *msg.SubnetId))
+		case gossip.IsTopicSyncCommittee(msg.Name):
+			if msg.SubnetId == nil {
+				return nil, fmt.Errorf("subnetId is required for sync_committee")
+			}
 			subscription = manager.GetMatchingSubscription(gossip.TopicNameBlobSidecar(*msg.SubnetId))
-		case strings.Contains(msg.Name, gossip.TopicNamePrefixBeaconAttestation):
+		case gossip.IsTopicBeaconAttestation(msg.Name):
 			if msg.SubnetId == nil {
 				return nil, fmt.Errorf("subnetId is required for beacon attestation")
 			}
@@ -182,7 +187,6 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	if err != nil {
 		return nil, err
 	}
-	peerCount := len(s.sentinel.Host().Network().Peers())
 	// set the peer and topic we are requesting
 	httpReq.Header.Set("REQRESP-PEER-ID", pid.String())
 	httpReq.Header.Set("REQRESP-TOPIC", req.Topic)
@@ -197,11 +201,10 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	if resp.StatusCode < 200 || resp.StatusCode > 399 {
 		errBody, _ := io.ReadAll(resp.Body)
 		errorMessage := fmt.Errorf("SentinelHttp: %s", string(errBody))
-		if peerCount > gracePeerCount {
-			s.sentinel.Peers().RemovePeer(pid)
-			s.sentinel.Host().Peerstore().RemovePeer(pid)
-			s.sentinel.Host().Network().ClosePeer(pid)
-		}
+		s.sentinel.Peers().RemovePeer(pid)
+		s.sentinel.Host().Peerstore().RemovePeer(pid)
+		s.sentinel.Host().Network().ClosePeer(pid)
+
 		return nil, errorMessage
 	}
 	// we should never get an invalid response to this. our responder should always set it on non-error response
@@ -211,24 +214,14 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 		return nil, err
 	}
 	// known error codes, just remove the peer
-	if isError == 3 || isError == 2 {
-		if peerCount > gracePeerCount {
-			s.sentinel.Peers().RemovePeer(pid)
-			s.sentinel.Host().Peerstore().RemovePeer(pid)
-			s.sentinel.Host().Network().ClosePeer(pid)
-		}
+	if isError != 0 {
+		s.sentinel.Peers().RemovePeer(pid)
+		s.sentinel.Host().Peerstore().RemovePeer(pid)
+		s.sentinel.Host().Network().ClosePeer(pid)
+
 		return nil, fmt.Errorf("peer error code: %d", isError)
 	}
-	// unknown error codes
-	if isError > 3 {
-		s.logger.Debug("peer returned unknown erro", "id", pid.String())
-		if peerCount > gracePeerCount {
-			s.sentinel.Peers().RemovePeer(pid)
-			s.sentinel.Host().Peerstore().RemovePeer(pid)
-			s.sentinel.Host().Network().ClosePeer(pid)
-		}
-		return nil, fmt.Errorf("peer returned unknown error: %d", isError)
-	}
+
 	// read the body from the response
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -396,8 +389,9 @@ func (s *SentinelServer) handleGossipPacket(pkt *sentinel.GossipMessage) error {
 	} else if strings.Contains(topic, string(gossip.TopicNameSyncCommitteeContributionAndProof)) {
 		s.gossipNotifier.notify(gossip.TopicNameSyncCommitteeContributionAndProof, data, string(textPid))
 	} else if gossip.IsTopicBlobSidecar(topic) {
-		// extract the index
 		s.gossipNotifier.notifyBlob(data, string(textPid), extractSubnetIndex(topic))
+	} else if gossip.IsTopicSyncCommittee(topic) {
+		s.gossipNotifier.notifySyncCommittee(data, string(textPid), extractSubnetIndex(topic))
 	} else if gossip.IsTopicBeaconAttestation(topic) {
 		s.gossipNotifier.notifyAttestation(data, string(textPid), extractSubnetIndex(topic))
 	}

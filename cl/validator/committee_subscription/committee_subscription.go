@@ -64,7 +64,7 @@ func NewCommitteeSubscribeManagement(
 		syncedData:      syncedData,
 		validatorSubs:   make(map[uint64]map[uint64]*validatorSub),
 	}
-	c.sweepByStaleSlots(ctx)
+	go c.sweepByStaleSlots(ctx)
 	return c
 }
 

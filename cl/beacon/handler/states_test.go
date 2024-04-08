@@ -284,7 +284,7 @@ func TestGetStateSyncCommittees(t *testing.T) {
 	cSyncCommittee := postState.CurrentSyncCommittee().Copy()
 	nSyncCommittee := postState.NextSyncCommittee().Copy()
 
-	fcu.GetSyncCommitteesVal[fcu.HeadVal] = [2]*solid.SyncCommittee{
+	fcu.GetSyncCommitteesVal[fcu.HeadSlotVal] = [2]*solid.SyncCommittee{
 		cSyncCommittee,
 		nSyncCommittee,
 	}

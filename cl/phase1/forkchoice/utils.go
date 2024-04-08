@@ -143,16 +143,29 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 	return checkpointState, nil
 }
 
-func (f *ForkChoiceStore) getSyncSubcommitteePubkeys(pubkeys []libcommon.Bytes48, subcommitteeIndex uint64) ([][]byte, error) {
-	var syncSubcommitteePubkeys [][]byte
-	subcommitteeSize := f.beaconCfg.SyncCommitteeSize / f.beaconCfg.SyncCommitteeSubnetCount
-	left := subcommitteeIndex * subcommitteeSize
-	right := left + subcommitteeSize
-	if right > uint64(len(pubkeys)) {
-		return nil, fmt.Errorf("getSyncSubcommitteePubkeys: index out of range")
+// def get_sync_subcommittee_pubkeys(state: BeaconState, subcommittee_index: uint64) -> Sequence[BLSPubkey]:
+//
+//	# Committees assigned to `slot` sign for `slot - 1`
+//	# This creates the exceptional logic below when transitioning between sync committee periods
+//	next_slot_epoch = compute_epoch_at_slot(Slot(state.slot + 1))
+//	if compute_sync_committee_period(get_current_epoch(state)) == compute_sync_committee_period(next_slot_epoch):
+//	    sync_committee = state.current_sync_committee
+//	else:
+//	    sync_committee = state.next_sync_committee
+//	# Return pubkeys for the subcommittee index
+//	sync_subcommittee_size = SYNC_COMMITTEE_SIZE // SYNC_COMMITTEE_SUBNET_COUNT
+//	i = subcommittee_index * sync_subcommittee_size
+//	return sync_committee.pubkeys[i:i + sync_subcommittee_size]
+
+// getSyncSubcommitteePubkeys returns the public keys of the validators in the given subcommittee.
+func (f *ForkChoiceStore) getSyncSubcommitteePubkeys(s *state.CachingBeaconState, subcommitteeIndex uint64) ([]libcommon.Bytes48, error) {
+	var syncCommittee *solid.SyncCommittee
+	if f.beaconCfg.SyncCommitteePeriod(f.Slot()) == f.beaconCfg.SyncCommitteePeriod(f.Slot()+1) {
+		syncCommittee = s.CurrentSyncCommittee()
+	} else {
+		syncCommittee = s.NextSyncCommittee()
 	}
-	for i := left; i < right; i++ {
-		syncSubcommitteePubkeys = append(syncSubcommitteePubkeys, pubkeys[i][:])
-	}
-	return syncSubcommitteePubkeys, nil
+	syncSubcommitteeSize := f.beaconCfg.SyncCommitteeSize / f.beaconCfg.SyncCommitteeSubnetCount
+	i := subcommitteeIndex * syncSubcommitteeSize
+	return syncCommittee.GetCommittee()[i : i+syncSubcommitteeSize], nil
 }
