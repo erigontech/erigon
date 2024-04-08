@@ -2,8 +2,6 @@ name: Build and Push Docker
 
 on:
   push:
-    branches:
-      - fix/docker-build-push
     tags:
       - 'v*'
   release:
