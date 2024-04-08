@@ -156,6 +156,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.BorBlockPeriodFlag,
 	&utils.BorBlockSizeFlag,
 	&utils.WithHeimdallMilestones,
+	&utils.PolygonSyncFlag,
 	&utils.EthStatsURLFlag,
 	&utils.OverridePragueFlag,
 
