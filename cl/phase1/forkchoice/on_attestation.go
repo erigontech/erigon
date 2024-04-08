@@ -261,30 +261,6 @@ func (f *ForkChoiceStore) scheduleAggregateForLaterProcessing(agg *cltypes.Signe
 	})
 }
 
-type blockJob struct {
-	block     *cltypes.SignedBeaconBlock
-	blockRoot libcommon.Hash
-	when      time.Time
-}
-
-func (f *ForkChoiceStore) scheduleBlockForLaterProcessing(block *cltypes.SignedBeaconBlock) {
-	root, err := block.HashSSZ()
-	if err != nil {
-		log.Error("failed to hash block", "err", err)
-		return
-	}
-	blockRoot, err := block.Block.HashSSZ()
-	if err != nil {
-		log.Error("failed to hash block root", "err", err)
-		return
-	}
-	f.blocksSet.Store(root, &blockJob{
-		block:     block,
-		when:      time.Now(),
-		blockRoot: blockRoot,
-	})
-}
-
 func (f *ForkChoiceStore) StartJobsRTT(ctx context.Context) {
 	go func() {
 		interval := time.NewTicker(500 * time.Millisecond)
@@ -312,27 +288,6 @@ func (f *ForkChoiceStore) StartJobsRTT(ctx context.Context) {
 						return false
 					case <-time.After(20 * time.Millisecond):
 					}
-					return true
-				})
-				f.blocksSet.Range(func(key, value interface{}) bool {
-					job := value.(*blockJob)
-					if time.Since(job.when) > maxBlockJobLifetime {
-						f.blocksSet.Delete(key)
-						return true
-					}
-
-					f.mu.Lock()
-					if err := f.isDataAvailable(ctx, job.block.Block.Slot, job.blockRoot, job.block.Block.Body.BlobKzgCommitments); err != nil {
-						f.mu.Unlock()
-						return true
-					}
-					f.mu.Unlock()
-
-					if err := f.OnBlock(ctx, job.block, true, true, true); err != nil {
-						log.Warn("failed to process attestation", "err", err)
-					}
-					f.blocksSet.Delete(key)
-
 					return true
 				})
 			}

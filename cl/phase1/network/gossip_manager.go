@@ -12,9 +12,8 @@ import (
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/gossip"
-	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
-	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
+	"github.com/ledgerwatch/erigon/cl/phase1/network/services"
 	"github.com/ledgerwatch/erigon/cl/validator/committee_subscription"
 	"google.golang.org/grpc"
 
@@ -35,8 +34,8 @@ type GossipManager struct {
 	genesisConfig *clparams.GenesisConfig
 
 	emitters     *beaconevents.Emitters
-	gossipSource *persistence.GossipSource
 	committeeSub *committee_subscription.CommitteeSubscribeMgmt
+	blockService services.BlockService
 }
 
 func NewGossipReceiver(
@@ -45,8 +44,8 @@ func NewGossipReceiver(
 	beaconConfig *clparams.BeaconChainConfig,
 	genesisConfig *clparams.GenesisConfig,
 	emitters *beaconevents.Emitters,
-	gossipSource *persistence.GossipSource,
 	comitteeSub *committee_subscription.CommitteeSubscribeMgmt,
+	blockService services.BlockService,
 ) *GossipManager {
 	return &GossipManager{
 		sentinel:      s,
@@ -54,8 +53,8 @@ func NewGossipReceiver(
 		emitters:      emitters,
 		beaconConfig:  beaconConfig,
 		genesisConfig: genesisConfig,
-		gossipSource:  gossipSource,
 		committeeSub:  comitteeSub,
+		blockService:  blockService,
 	}
 }
 
@@ -78,12 +77,12 @@ func operationsContract[T ssz.EncodableSSZ](ctx context.Context, g *GossipManage
 }
 
 func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l log.Ctx) (err error) {
-	defer func() {
-		r := recover()
-		if r != nil {
-			err = fmt.Errorf("%v", r)
-		}
-	}()
+	// defer func() {
+	// 	r := recover()
+	// 	if r != nil {
+	// 		err = fmt.Errorf("%v", r)
+	// 	}
+	// }()
 	// Make a copy of the gossip data so that we the received data is not modified.
 	// 1) When we publish and corrupt the data, the peers bans us.
 	// 2) We decode the block wrong
@@ -110,19 +109,6 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			l["at"] = "decoding block"
 			return err
 		}
-		block := object.(*cltypes.SignedBeaconBlock)
-		l["slot"] = block.Block.Slot
-		currentSlotByTime := utils.GetCurrentSlot(g.genesisConfig.GenesisTime, g.beaconConfig.SecondsPerSlot)
-		maxGossipSlotThreshold := uint64(4)
-		// Skip if slot is too far behind.
-		if block.Block.Slot+maxGossipSlotThreshold < currentSlotByTime {
-			return nil
-		}
-		if block.Block.Slot == currentSlotByTime {
-			if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
-				log.Debug("failed publish gossip", "err", err)
-			}
-		}
 
 		count, err := g.sentinel.GetPeers(ctx, &sentinel.EmptyMessage{})
 		if err != nil {
@@ -132,9 +118,22 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 
 		log.Debug("Received block via gossip",
 			"peers", count.Active,
-			"slot", block.Block.Slot,
+			"slot", object.(*cltypes.SignedBeaconBlock).Block.Slot,
 		)
-		g.gossipSource.InsertBlock(ctx, &peers.PeeredObject[*cltypes.SignedBeaconBlock]{Data: block, Peer: data.Peer.Pid})
+		fmt.Println("A")
+		err = g.blockService.ProcessMessage(ctx, object.(*cltypes.SignedBeaconBlock))
+		fmt.Println(err)
+		if errors.Is(err, services.ErrIgnore) {
+			return nil
+		}
+		if err != nil {
+			l["at"] = "block service"
+			g.sentinel.BanPeer(ctx, data.Peer)
+			return err
+		}
+		if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
+			log.Debug("failed publish gossip", "err", err)
+		}
 	case gossip.TopicNameLightClientFinalityUpdate:
 		obj := &cltypes.LightClientFinalityUpdate{}
 		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {

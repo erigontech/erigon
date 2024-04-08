@@ -23,7 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/clstages"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
@@ -60,7 +59,6 @@ type Cfg struct {
 	syncedData              *synced_data.SyncedDataManager
 	emitter                 *beaconevents.Emitters
 	prebuffer               *etl.Collector
-	gossipSource            persistence.BlockSource
 	sn                      *freezeblocks.CaplinSnapshots
 	blobStore               blob_storage.BlobStorage
 	attestationDataProducer attestation_producer.AttestationDataProducer
@@ -116,7 +114,6 @@ func ClStagesCfg(
 	blobBackfilling bool,
 	syncedData *synced_data.SyncedDataManager,
 	emitters *beaconevents.Emitters,
-	gossipSource persistence.BlockSource,
 	blobStore blob_storage.BlobStorage,
 	attestationDataProducer attestation_producer.AttestationDataProducer,
 ) *Cfg {
@@ -139,7 +136,6 @@ func ClStagesCfg(
 		emitter:                 emitters,
 		blobStore:               blobStore,
 		prebuffer:               etl.NewCollector("Caplin-blocks", tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root()),
-		gossipSource:            gossipSource,
 		blobBackfilling:         blobBackfilling,
 		attestationDataProducer: attestationDataProducer,
 	}
@@ -518,99 +514,67 @@ func ConsensusClStages(ctx context.Context,
 					)
 					respCh := make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1024)
 					errCh := make(chan error)
-					sources := []persistence.BlockSource{cfg.gossipSource, rpcSource}
 
-					// if we are more than one block behind, we request the rpc source as well
-					if totalRequest > 2 {
-						sources = append(sources, rpcSource)
-					}
 					// 15 seconds is a good timeout for this
 					ctx, cn := context.WithTimeout(ctx, 25*time.Second)
 					defer cn()
 
-					// we go ask all the sources and see who gets back to us first. whoever does is the winner!!
-					for _, v := range sources {
-						sourceFunc := v.GetRange
-						go func(source persistence.BlockSource) {
-							if _, ok := source.(*persistence.BeaconRpcSource); ok {
+					go func() {
+						select {
+						case <-time.After((time.Duration(cfg.beaconCfg.SecondsPerSlot) * time.Second) / 2):
+						case <-ctx.Done():
+							return
+						}
 
+						for {
+							var blocks *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]
+							var err error
+							from := cfg.forkChoice.HighestSeen() - 2
+							currentSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
+							count := (currentSlot - from) + 4
+							if cfg.forkChoice.HighestSeen() >= args.targetSlot {
+								return
+							}
+							blocks, err = rpcSource.GetRange(ctx, nil, from, count)
+							if err != nil {
+								errCh <- err
+								return
+							}
+							if len(blocks.Data) == 0 {
+								continue
+							}
+							ids, err := network2.BlobsIdentifiersFromBlocks(blocks.Data)
+							if err != nil {
+								errCh <- err
+								return
+							}
+							var inserted uint64
+
+							for inserted != uint64(ids.Len()) {
 								select {
-								case <-time.After((time.Duration(cfg.beaconCfg.SecondsPerSlot) * time.Second) / 4):
 								case <-ctx.Done():
 									return
+								default:
 								}
-
-								for {
-									var blocks *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]
-									var err error
-									from := cfg.forkChoice.HighestSeen() - 2
-									currentSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
-									count := (currentSlot - from) + 4
-									if cfg.forkChoice.HighestSeen() >= args.targetSlot {
-										return
-									}
-									blocks, err = sourceFunc(ctx, nil, from, count)
-									if err != nil {
-										errCh <- err
-										return
-									}
-									if len(blocks.Data) == 0 {
-										continue
-									}
-									ids, err := network2.BlobsIdentifiersFromBlocks(blocks.Data)
-									if err != nil {
-										errCh <- err
-										return
-									}
-									var inserted uint64
-
-									for inserted != uint64(ids.Len()) {
-										select {
-										case <-ctx.Done():
-											return
-										default:
-										}
-										blobs, err := network2.RequestBlobsFrantically(ctx, cfg.rpc, ids)
-										if err != nil {
-											errCh <- err
-											return
-										}
-										if _, inserted, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, forkchoice.VerifyHeaderSignatureAgainstForkChoiceStoreFunction(cfg.forkChoice, cfg.beaconCfg, cfg.genesisCfg.GenesisValidatorRoot)); err != nil {
-											errCh <- err
-											return
-										}
-									}
-
-									select {
-									case respCh <- blocks:
-									case <-ctx.Done():
-										return
-									case <-time.After(time.Second): // take a smol pause
-									}
-								}
-							}
-							ticker := time.NewTicker(10 * time.Millisecond)
-							defer ticker.Stop()
-							for {
-								if cfg.forkChoice.HighestSeen() >= args.targetSlot {
-									return
-								}
-								blocks, err := sourceFunc(ctx, nil, args.seenSlot+1, 11)
+								blobs, err := network2.RequestBlobsFrantically(ctx, cfg.rpc, ids)
 								if err != nil {
 									errCh <- err
 									return
 								}
-
-								select {
-								case <-ctx.Done():
+								if _, inserted, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, forkchoice.VerifyHeaderSignatureAgainstForkChoiceStoreFunction(cfg.forkChoice, cfg.beaconCfg, cfg.genesisCfg.GenesisValidatorRoot)); err != nil {
+									errCh <- err
 									return
-								case respCh <- blocks:
 								}
-								<-ticker.C
-
 							}
-						}(v)
-					}
+							select {
+							case respCh <- blocks:
+							case <-ctx.Done():
+								return
+							case <-time.After(time.Second): // take a smol pause
+							}
+						}
+					}()
+
 					logTimer := time.NewTicker(30 * time.Second)
 					defer logTimer.Stop()
 					// blocks may be scheduled for later execution outside of the catch-up flow
@@ -661,29 +625,6 @@ func ConsensusClStages(ctx context.Context,
 									"slot":                 strconv.Itoa(int(block.Block.Slot)),
 									"block":                common.Hash(blockRoot),
 									"execution_optimistic": false, // TODO: i don't know what to put here. i see other places doing false, leaving flase for now
-								})
-								// Attestations processing can take some time if they are not cached in properly.
-								go func() {
-									defer func() {
-										r := recover()
-										if r != nil {
-											log.Warn("recovered from panic", "err", r)
-										}
-									}()
-									block.Block.Body.Attestations.Range(func(idx int, a *solid.Attestation, total int) bool {
-										// emit attestation
-										cfg.emitter.Publish("attestation", a)
-										if err = cfg.forkChoice.OnAttestation(a, true, false); err != nil {
-											log.Debug("bad attestation received", "err", err)
-										}
-
-										return true
-									})
-								}()
-								// emit the other stuff
-								block.Block.Body.VoluntaryExits.Range(func(index int, value *cltypes.SignedVoluntaryExit, length int) bool {
-									cfg.emitter.Publish("voluntary-exit", value)
-									return true
 								})
 								if block.Block.Slot >= args.targetSlot {
 									break MainLoop
@@ -914,12 +855,7 @@ func ConsensusClStages(ctx context.Context,
 					}
 					defer tx.Rollback()
 					pruneDistance := uint64(1_000_000)
-					// clean up some old ranges
-					err = cfg.gossipSource.PurgeRange(ctx, tx, 1, args.seenSlot-cfg.beaconCfg.SlotsPerEpoch*16)
-					if err != nil {
-						return err
-					}
-					// TODO(Giulio2002): schedule snapshots retirement if needed.
+
 					if !cfg.backfilling {
 						if err := beacon_indicies.PruneBlocks(ctx, tx, args.seenSlot-pruneDistance); err != nil {
 							return err

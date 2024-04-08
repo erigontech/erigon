@@ -92,7 +92,6 @@ type ForkChoiceStore struct {
 	proposerBoostRoot atomic.Value
 	// messages that are not yet processed but can be processable in the future.
 	aggregatesSet sync.Map
-	blocksSet     sync.Map // blocks that are not yet processed
 	// head data
 	headHash              libcommon.Hash
 	headSlot              uint64
