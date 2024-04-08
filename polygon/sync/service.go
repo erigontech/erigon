@@ -41,7 +41,7 @@ func NewService(
 ) Service {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	execution := NewExecutionClient(executionEngine)
-	storage := NewStorage(execution, maxPeers)
+	storage := NewStorage(logger, execution, maxPeers)
 	headersVerifier := VerifyAccumulatedHeaders
 	blocksVerifier := VerifyBlocks
 	p2pService := p2p.NewService(maxPeers, logger, sentryClient, statusDataProvider.GetStatusData)
@@ -76,7 +76,7 @@ func NewService(
 			headerValidator,
 			spansCache)
 	}
-	events := NewTipEvents(p2pService, heimdallService)
+	events := NewTipEvents(logger, p2pService, heimdallService)
 	sync := NewSync(
 		storage,
 		execution,
