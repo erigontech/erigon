@@ -24,6 +24,7 @@ import (
 	"testing/quick"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/stretchr/testify/require"
 )
 
 func TestParseNetlist(t *testing.T) {
@@ -160,9 +161,7 @@ func TestCheckRelayIP(t *testing.T) {
 
 	for _, test := range tests {
 		err := CheckRelayIP(parseIP(test.sender), parseIP(test.addr))
-		if err != test.want {
-			t.Errorf("%s from %s: got %q, want %q", test.addr, test.sender, err, test.want)
-		}
+		require.ErrorIs(t, err, test.want, "%s from %s: got %q, want %q", test.addr, test.sender, err, test.want)
 	}
 }
 
@@ -170,7 +169,8 @@ func BenchmarkCheckRelayIP(b *testing.B) {
 	sender := parseIP("23.55.1.242")
 	addr := parseIP("23.55.1.2")
 	for i := 0; i < b.N; i++ {
-		CheckRelayIP(sender, addr)
+		err := CheckRelayIP(sender, addr)
+		require.NoError(b, err)
 	}
 }
 

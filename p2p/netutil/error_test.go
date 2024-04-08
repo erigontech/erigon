@@ -17,9 +17,12 @@
 package netutil
 
 import (
+	"errors"
 	"net"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // This test checks that isPacketTooBig correctly identifies
@@ -30,12 +33,18 @@ func TestIsPacketTooBig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer listener.Close()
+	t.Cleanup(func() {
+		err := listener.Close()
+		require.NoError(t, err)
+	})
 	sender, err := net.Dial("udp", listener.LocalAddr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sender.Close()
+	t.Cleanup(func() {
+		err := sender.Close()
+		require.NoError(t, err)
+	})
 
 	sendN := 1800
 	recvN := 300
@@ -45,14 +54,17 @@ func TestIsPacketTooBig(t *testing.T) {
 			for i := range buf {
 				buf[i] = byte(i)
 			}
-			sender.Write(buf)
+			_, err := sender.Write(buf)
+			require.NoError(t, err)
 		}()
 
 		buf := make([]byte, recvN)
-		listener.SetDeadline(time.Now().Add(1 * time.Second))
+		err := listener.SetDeadline(time.Now().Add(1 * time.Second))
+		require.NoError(t, err)
 		n, _, err := listener.ReadFrom(buf)
 		if err != nil {
-			if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
+			var nerr net.Error
+			if errors.As(err, &nerr) && nerr.Timeout() {
 				continue
 			}
 			if !isPacketTooBig(err) {
@@ -66,7 +78,6 @@ func TestIsPacketTooBig(t *testing.T) {
 		for i := range buf {
 			if buf[i] != byte(i) {
 				t.Fatalf("error in pattern")
-				break
 			}
 		}
 	}

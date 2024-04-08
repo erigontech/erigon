@@ -20,6 +20,7 @@ package main
 import (
 	"bytes"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -35,13 +36,22 @@ var (
 	single  = flag.Bool("single", false, "print only the first element, discard the rest")
 )
 
+const usageMsg = `
+Dumps RLP data from the given file in readable form.
+If the filename is omitted, data is read from stdin.`
+
 func init() {
 	flag.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage:", os.Args[0], "[-noascii] [-hex <data>] [filename]")
+		_, err := fmt.Fprintln(os.Stderr, "Usage:", os.Args[0], "[-noascii] [-hex <data>] [filename]")
+		if err != nil {
+			die(err)
+		}
+
 		flag.PrintDefaults()
-		fmt.Fprintln(os.Stderr, `
-Dumps RLP data from the given file in readable form.
-If the filename is omitted, data is read from stdin.`)
+
+		if _, err = fmt.Fprintln(os.Stderr, usageMsg); err != nil {
+			die(err)
+		}
 	}
 }
 
@@ -65,11 +75,18 @@ func main() {
 		if err != nil {
 			die(err)
 		}
-		defer fd.Close()
+		defer func() {
+			if err := fd.Close(); err != nil {
+				die(err)
+			}
+		}()
 		r = fd
 
 	default:
-		fmt.Fprintln(os.Stderr, "Error: too many arguments")
+		if _, err := fmt.Fprintln(os.Stderr, "Error: too many arguments"); err != nil {
+			die(err)
+		}
+
 		flag.Usage()
 		os.Exit(2)
 	}
@@ -106,8 +123,17 @@ func dump(s *rlp.Stream, depth int) error {
 			fmt.Printf("%s%x", ws(depth), str)
 		}
 	case rlp.List:
-		s.List()
-		defer s.ListEnd()
+		_, err := s.List()
+		if err != nil {
+			return err
+		}
+
+		defer func() {
+			if err := s.ListEnd(); err != nil {
+				panic(err)
+			}
+		}()
+
 		if size == 0 {
 			fmt.Print(ws(depth) + "[]")
 		} else {
@@ -116,7 +142,7 @@ func dump(s *rlp.Stream, depth int) error {
 				if i > 0 {
 					fmt.Print(",\n")
 				}
-				if err := dump(s, depth+1); err == rlp.EOL {
+				if err := dump(s, depth+1); errors.Is(err, rlp.EOL) {
 					break
 				} else if err != nil {
 					return err
@@ -142,6 +168,9 @@ func ws(n int) string {
 }
 
 func die(args ...interface{}) {
-	fmt.Fprintln(os.Stderr, args...)
+	if _, err := fmt.Fprintln(os.Stderr, args...); err != nil {
+		panic(err)
+	}
+
 	os.Exit(1)
 }

@@ -29,11 +29,13 @@ import (
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/crypto/ecies"
 	"github.com/ledgerwatch/erigon/p2p/simulations/pipes"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/stretchr/testify/assert"
 )
 
 type message struct {
@@ -44,15 +46,23 @@ type message struct {
 
 func TestHandshake(t *testing.T) {
 	p1, p2 := createPeers(t)
-	p1.Close()
-	p2.Close()
+	err := p1.Close()
+	require.NoError(t, err)
+	err = p2.Close()
+	require.NoError(t, err)
 }
 
 // This test checks that messages can be sent and received through WriteMsg/ReadMsg.
 func TestReadWriteMsg(t *testing.T) {
 	peer1, peer2 := createPeers(t)
-	defer peer1.Close()
-	defer peer2.Close()
+	t.Cleanup(func() {
+		err := peer1.Close()
+		require.NoError(t, err)
+	})
+	t.Cleanup(func() {
+		err := peer2.Close()
+		require.NoError(t, err)
+	})
 
 	testCode := uint64(23)
 	testData := []byte("test")
@@ -360,7 +370,8 @@ func TestHandshakeForwardCompatibility(t *testing.T) {
 	if !bytes.Equal(derived.MAC, wantMAC) {
 		t.Errorf("mac-secret mismatch:\ngot %x\nwant %x", derived.MAC, wantMAC)
 	}
-	io.WriteString(derived.IngressMAC, "foo")
+	_, err = io.WriteString(derived.IngressMAC, "foo")
+	require.NoError(t, err)
 	fooIngressHash := derived.IngressMAC.Sum(nil)
 	if !bytes.Equal(fooIngressHash, wantFooIngressHash) {
 		t.Errorf("ingress-mac('foo') mismatch:\ngot %x\nwant %x", fooIngressHash, wantFooIngressHash)
@@ -398,7 +409,10 @@ func BenchmarkThroughput(b *testing.B) {
 
 	// Server side.
 	go func() {
-		defer conn1.Close()
+		defer func() {
+			err := conn1.Close()
+			require.NoError(b, err)
+		}()
 		// Perform handshake.
 		_, err := conn1.Handshake(keyA)
 		handshakeDone <- err
@@ -415,7 +429,11 @@ func BenchmarkThroughput(b *testing.B) {
 	}()
 
 	// Set up client side.
-	defer conn2.Close()
+	defer func() {
+		err := conn2.Close()
+		require.NoError(b, err)
+	}()
+
 	if _, err := conn2.Handshake(keyB); err != nil {
 		b.Fatal("client handshake error:", err)
 	}

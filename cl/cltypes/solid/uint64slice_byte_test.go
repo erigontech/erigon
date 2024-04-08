@@ -3,10 +3,11 @@ package solid_test
 import (
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 )
 
 func TestUint64SliceBasic(t *testing.T) {
@@ -32,7 +33,8 @@ func TestUint64SliceCopyTo(t *testing.T) {
 	set2 := solid.NewUint64ListSSZ(100_000)
 	for i := 0; i < num; i++ {
 		set.Append(uint64(i))
-		set.HashSSZ()
+		_, err := set.HashSSZ()
+		require.NoError(t, err)
 	}
 	firstHash, err := set.HashSSZ()
 	require.NoError(t, err)

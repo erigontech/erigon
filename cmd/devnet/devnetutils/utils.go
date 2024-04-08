@@ -13,8 +13,9 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon/crypto"
 )
 
 var ErrInvalidEnodeString = errors.New("invalid enode string")
@@ -107,7 +108,11 @@ func RandomInt(max int) int {
 	}
 
 	var n uint16
-	binary.Read(rand.Reader, binary.LittleEndian, &n)
+	err := binary.Read(rand.Reader, binary.LittleEndian, &n)
+	if err != nil {
+		panic(err)
+	}
+
 	return int(n) % (max + 1)
 }
 

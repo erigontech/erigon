@@ -25,9 +25,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/common/math"
-
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon/common/math"
 )
 
 type testEncoder struct {
@@ -72,7 +73,7 @@ type encodableReader struct {
 	A, B uint
 }
 
-func (e *encodableReader) Read(b []byte) (int, error) {
+func (e *encodableReader) Read(_ []byte) (int, error) {
 	panic("called")
 }
 
@@ -459,11 +460,16 @@ func TestEncodeToReaderReturnToPool(t *testing.T) {
 		go func() {
 			for i := 0; i < 1000; i++ {
 				_, r, _ := EncodeToReader("foo")
-				io.ReadAll(r)
-				r.Read(buf)
-				r.Read(buf)
-				r.Read(buf)
-				r.Read(buf)
+				_, err := io.ReadAll(r)
+				require.NoError(t, err)
+				_, err = r.Read(buf)
+				require.NoError(t, err)
+				_, err = r.Read(buf)
+				require.NoError(t, err)
+				_, err = r.Read(buf)
+				require.NoError(t, err)
+				_, err = r.Read(buf)
+				require.NoError(t, err)
 			}
 			wg.Done()
 		}()
@@ -471,11 +477,9 @@ func TestEncodeToReaderReturnToPool(t *testing.T) {
 	wg.Wait()
 }
 
-var sink interface{}
-
 func BenchmarkIntsize(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		sink = intsize(0x12345678)
+		intsize(0x12345678)
 	}
 }
 
@@ -483,7 +487,6 @@ func BenchmarkPutint(b *testing.B) {
 	buf := make([]byte, 8)
 	for i := 0; i < b.N; i++ {
 		putint(buf, 0x12345678)
-		sink = buf
 	}
 }
 

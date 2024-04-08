@@ -5,8 +5,10 @@ import (
 	"log"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 )
 
 var (
@@ -14,24 +16,31 @@ var (
 	attData1 = solid.NewAttestionDataFromParameters(1, 1, [32]byte{0, 4, 2, 6},
 		solid.NewCheckpointFromParameters([32]byte{0}, 4),
 		solid.NewCheckpointFromParameters([32]byte{0}, 4))
-	attData1Root, _ = attData1.HashSSZ()
+	attData1Root = func() [32]byte {
+		data, err := attData1.HashSSZ()
+		if err != nil {
+			panic(err)
+		}
 
-	att1_1 = solid.NewAttestionFromParameters(
+		return data
+	}()
+
+	att11 = solid.NewAttestionFromParameters(
 		[]byte{0b00000001, 0, 0, 0},
 		attData1,
 		[96]byte{'a', 'b', 'c', 'd', 'e', 'f'},
 	)
-	att1_2 = solid.NewAttestionFromParameters(
+	att12 = solid.NewAttestionFromParameters(
 		[]byte{0b00001011, 0, 0, 0},
 		attData1,
 		[96]byte{'d', 'e', 'f', 'g', 'h', 'i'},
 	)
-	att1_3 = solid.NewAttestionFromParameters(
+	att13 = solid.NewAttestionFromParameters(
 		[]byte{0b00000100, 0b00000011, 0, 0},
 		attData1,
 		[96]byte{'g', 'h', 'i', 'j', 'k', 'l'},
 	)
-	att1_4 = solid.NewAttestionFromParameters(
+	att14 = solid.NewAttestionFromParameters(
 		[]byte{0b00111010, 0, 0, 0},
 		attData1,
 		[96]byte{'m', 'n', 'o', 'p', 'q', 'r'},
@@ -40,7 +49,7 @@ var (
 	attData2 = solid.NewAttestionDataFromParameters(3, 1, [32]byte{5, 5, 6, 6},
 		solid.NewCheckpointFromParameters([32]byte{0}, 4),
 		solid.NewCheckpointFromParameters([32]byte{0}, 4))
-	att2_1 = solid.NewAttestionFromParameters(
+	att21 = solid.NewAttestionFromParameters(
 		[]byte{0b00000001, 0, 0, 0},
 		attData2,
 		[96]byte{'t', 'e', 's', 't', 'i', 'n'},
@@ -74,28 +83,28 @@ func (t *PoolTestSuite) TestAddAttestation() {
 		{
 			name: "simple, different hashRoot",
 			atts: []*solid.Attestation{
-				att1_1,
-				att2_1,
+				att11,
+				att21,
 			},
 			hashRoot: attData1Root,
-			expect:   att1_1,
+			expect:   att11,
 		},
 		{
 			name: "att1_2 is a super set of att1_1. skip att1_1",
 			atts: []*solid.Attestation{
-				att1_2,
-				att1_1,
-				att2_1, // none of its business
+				att12,
+				att11,
+				att21, // none of its business
 			},
 			hashRoot: attData1Root,
-			expect:   att1_2,
+			expect:   att12,
 		},
 		{
 			name: "merge att1_2, att1_3, att1_4",
 			atts: []*solid.Attestation{
-				att1_2,
-				att1_3,
-				att1_4,
+				att12,
+				att13,
+				att14,
 			},
 			hashRoot: attData1Root,
 			expect: solid.NewAttestionFromParameters(
@@ -109,7 +118,8 @@ func (t *PoolTestSuite) TestAddAttestation() {
 		log.Printf("test case: %s", tc.name)
 		pool := NewAggregationPool(context.Background(), nil, nil, nil)
 		for _, att := range tc.atts {
-			pool.AddAttestation(att)
+			err := pool.AddAttestation(att)
+			require.NoError(t.T(), err)
 		}
 		att := pool.GetAggregatationByRoot(tc.hashRoot)
 		t.Equal(tc.expect, att, tc.name)

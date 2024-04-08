@@ -4,10 +4,11 @@ import (
 	"math"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/persistence/base_encoding"
-	"github.com/stretchr/testify/require"
 )
 
 // 1 -> 2 -> 3 -> 4 -> 5
@@ -51,12 +52,18 @@ func TestDiffStorage(t *testing.T) {
 	require.NoError(t, err)
 
 	diffStorage := NewChainDiffStorage(base_encoding.ComputeCompressedSerializedUint64ListDiff, base_encoding.ApplyCompressedSerializedUint64ListDiff)
-	diffStorage.Insert(node1, libcommon.Hash{}, nil, enc1, true)
-	diffStorage.Insert(node2, node1, enc1, enc2, false)
-	diffStorage.Insert(node3, node2, enc2, enc3, false)
-	diffStorage.Insert(node4, node3, enc3, enc4, false)
-	diffStorage.Insert(node5, node4, enc4, enc5, false)
-	diffStorage.Insert(node6, node2, enc2, enc6, false)
+	err = diffStorage.Insert(node1, libcommon.Hash{}, nil, enc1, true)
+	require.NoError(t, err)
+	err = diffStorage.Insert(node2, node1, enc1, enc2, false)
+	require.NoError(t, err)
+	err = diffStorage.Insert(node3, node2, enc2, enc3, false)
+	require.NoError(t, err)
+	err = diffStorage.Insert(node4, node3, enc3, enc4, false)
+	require.NoError(t, err)
+	err = diffStorage.Insert(node5, node4, enc4, enc5, false)
+	require.NoError(t, err)
+	err = diffStorage.Insert(node6, node2, enc2, enc6, false)
+	require.NoError(t, err)
 
 	d1, err := diffStorage.Get(node1)
 	require.NoError(t, err)

@@ -20,16 +20,17 @@ import (
 	"bytes"
 	"crypto/ecdsa"
 	"encoding/hex"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"errors"
 	"os"
 	"reflect"
 	"testing"
 
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 )
@@ -66,18 +67,28 @@ func TestKeccak256HasherNew(t *testing.T) {
 }
 
 func TestKeccak256HasherMulti(t *testing.T) {
-	exp1, _ := hex.DecodeString("d341f310fa772d37e6966b84b37ad760811d784729b641630f6a03f729e1e20e")
-	exp2, _ := hex.DecodeString("6de9c0166df098306abb98b112c0834c29eedee6fcba804c7c4f4568204c9d81")
+	exp1, err := hex.DecodeString("d341f310fa772d37e6966b84b37ad760811d784729b641630f6a03f729e1e20e")
+	require.NoError(t, err)
+	exp2, err := hex.DecodeString("6de9c0166df098306abb98b112c0834c29eedee6fcba804c7c4f4568204c9d81")
+	require.NoError(t, err)
 	hasher := NewKeccakState()
-	d1, _ := hex.DecodeString("1234")
-	hasher.Write(d1)
-	d2, _ := hex.DecodeString("cafe")
-	hasher.Write(d2)
-	d3, _ := hex.DecodeString("babe")
-	hasher.Write(d3)
+	d1, err := hex.DecodeString("1234")
+	require.NoError(t, err)
+	_, err = hasher.Write(d1)
+	require.NoError(t, err)
+	d2, err := hex.DecodeString("cafe")
+	require.NoError(t, err)
+	_, err = hasher.Write(d2)
+	require.NoError(t, err)
+	d3, err := hex.DecodeString("babe")
+	require.NoError(t, err)
+	_, err = hasher.Write(d3)
+	require.NoError(t, err)
 	checkhash(t, "multi1", func(in []byte) []byte { var h libcommon.Hash; return hasher.Sum(h[:0]) }, []byte{}, exp1)
-	d4, _ := hex.DecodeString("5678")
-	hasher.Write(d4)
+	d4, err := hex.DecodeString("5678")
+	require.NoError(t, err)
+	_, err = hasher.Write(d4)
+	require.NoError(t, err)
 	checkhash(t, "multi2", func(in []byte) []byte { var h libcommon.Hash; return hasher.Sum(h[:0]) }, []byte{}, exp2)
 }
 
@@ -99,11 +110,11 @@ func BenchmarkSha3(b *testing.B) {
 
 func TestUnmarshalPubkey(t *testing.T) {
 	key, err := UnmarshalPubkey(nil)
-	if err != errInvalidPubkey || key != nil {
+	if !errors.Is(err, errInvalidPubkey) || key != nil {
 		t.Fatalf("expected error, got %v, %v", err, key)
 	}
 	key, err = UnmarshalPubkey([]byte{1, 2, 3})
-	if err != errInvalidPubkey || key != nil {
+	if !errors.Is(err, errInvalidPubkey) || key != nil {
 		t.Fatalf("expected error, got %v, %v", err, key)
 	}
 
@@ -239,8 +250,10 @@ func TestLoadECDSA(t *testing.T) {
 			t.Fatal(err)
 		}
 		filename := f.Name()
-		f.WriteString(test.input)
-		f.Close()
+		_, err = f.WriteString(test.input)
+		require.NoError(t, err)
+		err = f.Close()
+		require.NoError(t, err)
 
 		_, err = LoadECDSA(filename)
 		switch {
@@ -260,8 +273,13 @@ func TestSaveECDSA(t *testing.T) {
 		t.Fatal(err)
 	}
 	file := f.Name()
-	f.Close()
-	defer os.Remove(file)
+	err = f.Close()
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		err := os.Remove(file)
+		require.NoError(t, err)
+	})
 
 	key, _ := HexToECDSA(testPrivHex)
 	if e := SaveECDSA(file, key); e != nil {

@@ -115,9 +115,6 @@ issues:
         - golint
       text: "should be"
     - linters:
-        - errcheck
-      text: "not checked"
-    - linters:
         - staticcheck
       text: "SA(1019|1029|5011)"
     # Exclude some linters from running on tests files.

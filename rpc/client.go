@@ -185,8 +185,8 @@ func DialContext(ctx context.Context, rawurl string, logger log.Logger) (*Client
 	}
 }
 
-// Client retrieves the client from the context, if any. This can be used to perform
-// 'reverse calls' in a handler method.
+// ClientFromContext retrieves the client from the context, if any.
+// This can be used to perform 'reverse calls' in a handler method.
 func ClientFromContext(ctx context.Context, logger log.Logger) (*Client, bool) {
 	client, ok := ctx.Value(clientContextKey{}).(*Client)
 	client.logger = logger
@@ -334,7 +334,7 @@ func (c *Client) BatchCall(b []BatchElem) error {
 	return c.BatchCallContext(ctx, b)
 }
 
-// BatchCall sends all given requests as a single batch and waits for the server
+// BatchCallContext sends all given requests as a single batch and waits for the server
 // to return a response for all of them. The wait duration is bounded by the
 // context's deadline.
 //
@@ -628,8 +628,10 @@ func (c *Client) drainRead() {
 func (c *Client) read(codec ServerCodec) {
 	for {
 		msgs, batch, err := codec.ReadBatch()
-		if _, ok := err.(*json.SyntaxError); ok {
-			codec.WriteJSON(context.Background(), errorMessage(&parseError{err.Error()}))
+		var syntaxError *json.SyntaxError
+		if errors.As(err, &syntaxError) {
+			writeErr := codec.WriteJSON(context.Background(), errorMessage(&parseError{err.Error()}))
+			err = fmt.Errorf("%w: %w", writeErr, err)
 		}
 		if err != nil {
 			c.readErr <- err

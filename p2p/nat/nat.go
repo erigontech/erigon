@@ -30,7 +30,7 @@ import (
 	natpmp "github.com/jackpal/go-nat-pmp"
 )
 
-// An implementation of nat.Interface can map local ports to ports
+// Interface is an extension of nat.Interface which can map local ports to ports
 // accessible from the Internet.
 type Interface interface {
 	// These methods manage a mapping between a port on the local
@@ -39,15 +39,15 @@ type Interface interface {
 	// protocol is "UDP" or "TCP". Some implementations allow setting
 	// a display name for the mapping. The mapping may be removed by
 	// the gateway when its lifetime ends.
+
 	AddMapping(protocol string, extport, intport int, name string, lifetime time.Duration) error
 	DeleteMapping(protocol string, extport, intport int) error
 	SupportsMapping() bool
 
-	// This method should return the external (Internet-facing)
-	// address of the gateway device.
+	// ExternalIP should return the external (Internet-facing) address of the gateway device.
 	ExternalIP() (net.IP, error)
 
-	// Should return name of the method. This is used for logging.
+	// String should return name of the method. This is used for logging.
 	String() string
 }
 
@@ -115,17 +115,19 @@ func Map(m Interface, c <-chan struct{}, protocol string, extport, intport int, 
 		panic("Port mapping is not supported")
 	}
 
-	logger1 := logger.New("proto", protocol, "extport", extport, "intport", intport, "interface", m)
+	logger = logger.New("proto", protocol, "extport", extport, "intport", intport, "interface", m)
 	refresh := time.NewTimer(mapTimeout)
 	defer func() {
 		refresh.Stop()
-		logger1.Trace("Deleting port mapping")
-		m.DeleteMapping(protocol, extport, intport)
+		logger.Trace("Deleting port mapping")
+		if err := m.DeleteMapping(protocol, extport, intport); err != nil {
+			logger.Debug("Couldn't delete port mapping", "err", err)
+		}
 	}()
 	if err := m.AddMapping(protocol, extport, intport, name, mapTimeout); err != nil {
-		logger1.Debug("Couldn't add port mapping", "err", err)
+		logger.Debug("Couldn't add port mapping", "err", err)
 	} else {
-		logger1.Info("Mapped network port")
+		logger.Info("Mapped network port")
 	}
 	for {
 		select {
@@ -134,9 +136,9 @@ func Map(m Interface, c <-chan struct{}, protocol string, extport, intport int, 
 				return
 			}
 		case <-refresh.C:
-			logger1.Trace("Refreshing port mapping")
+			logger.Trace("Refreshing port mapping")
 			if err := m.AddMapping(protocol, extport, intport, name, mapTimeout); err != nil {
-				logger1.Debug("Couldn't add port mapping", "err", err)
+				logger.Debug("Couldn't add port mapping", "err", err)
 			}
 			refresh.Reset(mapTimeout)
 		}

@@ -27,6 +27,7 @@ import (
 	"github.com/huin/goupnp"
 	"github.com/huin/goupnp/dcps/internetgateway1"
 	"github.com/huin/goupnp/dcps/internetgateway2"
+
 	"github.com/ledgerwatch/erigon/common/debug"
 )
 
@@ -87,7 +88,9 @@ func (n *upnp) AddMapping(protocol string, extport, intport int, desc string, li
 	}
 	protocol = strings.ToUpper(protocol)
 	lifetimeS := uint32(lifetime / time.Second)
-	n.DeleteMapping(protocol, extport, intport)
+	if err := n.DeleteMapping(protocol, extport, intport); err != nil {
+		return err
+	}
 
 	return n.withRateLimit(func() error {
 		return n.client.AddPortMapping("", uint16(extport), protocol, uint16(intport), ip.String(), true, desc, lifetimeS)
@@ -117,7 +120,7 @@ func (n *upnp) internalAddress() (net.IP, error) {
 	return nil, fmt.Errorf("could not find local address in same net as %v", devaddr)
 }
 
-func (n *upnp) DeleteMapping(protocol string, extport, intport int) error {
+func (n *upnp) DeleteMapping(protocol string, extport, _ int) error {
 	return n.withRateLimit(func() error {
 		return n.client.DeletePortMapping("", uint16(extport), strings.ToUpper(protocol))
 	})

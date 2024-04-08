@@ -4,21 +4,23 @@ import (
 	"bytes"
 	"crypto/rand"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestG1Marshal(t *testing.T) {
-	_, Ga, err := RandomG1(rand.Reader)
+	_, ga, err := RandomG1(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ma := Ga.Marshal()
+	ma := ga.Marshal()
 
-	Gb := new(G1)
-	_, err = Gb.Unmarshal(ma)
+	gb := new(G1)
+	_, err = gb.Unmarshal(ma)
 	if err != nil {
 		t.Fatal(err)
 	}
-	mb := Gb.Marshal()
+	mb := gb.Marshal()
 
 	if !bytes.Equal(ma, mb) {
 		t.Fatal("bytes are different")
@@ -61,19 +63,28 @@ func TestBilinearity(t *testing.T) {
 }
 
 func TestTripartiteDiffieHellman(t *testing.T) {
-	a, _ := rand.Int(rand.Reader, Order)
-	b, _ := rand.Int(rand.Reader, Order)
-	c, _ := rand.Int(rand.Reader, Order)
+	a, err := rand.Int(rand.Reader, Order)
+	require.NoError(t, err)
+	b, err := rand.Int(rand.Reader, Order)
+	require.NoError(t, err)
+	c, err := rand.Int(rand.Reader, Order)
+	require.NoError(t, err)
 
 	pa, pb, pc := new(G1), new(G1), new(G1)
 	qa, qb, qc := new(G2), new(G2), new(G2)
 
-	pa.Unmarshal(new(G1).ScalarBaseMult(a).Marshal())
-	qa.Unmarshal(new(G2).ScalarBaseMult(a).Marshal())
-	pb.Unmarshal(new(G1).ScalarBaseMult(b).Marshal())
-	qb.Unmarshal(new(G2).ScalarBaseMult(b).Marshal())
-	pc.Unmarshal(new(G1).ScalarBaseMult(c).Marshal())
-	qc.Unmarshal(new(G2).ScalarBaseMult(c).Marshal())
+	_, err = pa.Unmarshal(new(G1).ScalarBaseMult(a).Marshal())
+	require.NoError(t, err)
+	_, err = qa.Unmarshal(new(G2).ScalarBaseMult(a).Marshal())
+	require.NoError(t, err)
+	_, err = pb.Unmarshal(new(G1).ScalarBaseMult(b).Marshal())
+	require.NoError(t, err)
+	_, err = qb.Unmarshal(new(G2).ScalarBaseMult(b).Marshal())
+	require.NoError(t, err)
+	_, err = pc.Unmarshal(new(G1).ScalarBaseMult(c).Marshal())
+	require.NoError(t, err)
+	_, err = qc.Unmarshal(new(G2).ScalarBaseMult(c).Marshal())
+	require.NoError(t, err)
 
 	k1 := Pair(pb, qc)
 	k1.ScalarMult(k1, a)

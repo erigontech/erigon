@@ -4,9 +4,10 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon-lib/common"
 )
 
 func TestValidator(t *testing.T) {
@@ -20,7 +21,7 @@ func TestValidator(t *testing.T) {
 		withdrawalCred[i] = byte(i + 50)
 	}
 	effectiveBalance := uint64(123456789)
-	slashed := true
+	const slashed = true
 	activationEligibilityEpoch := uint64(987654321)
 	activationEpoch := uint64(234567890)
 	exitEpoch := uint64(345678901)
@@ -64,7 +65,8 @@ func TestValidatorSetTest(t *testing.T) {
 		vset.Append(NewValidatorFromParameters(
 			pk, wk, uint64(1), true, uint64(1), uint64(1), uint64(1), uint64(1),
 		))
-		vset.HashSSZ()
+		_, err := vset.HashSSZ()
+		require.NoError(t, err)
 	}
 	firstHash, err := vset.HashSSZ()
 	require.NoError(t, err)

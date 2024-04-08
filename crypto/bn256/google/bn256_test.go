@@ -9,6 +9,8 @@ import (
 	"crypto/rand"
 	"math/big"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestGFp2Invert(t *testing.T) {
@@ -275,17 +277,23 @@ func TestTripartiteDiffieHellman(t *testing.T) {
 	c, _ := rand.Int(rand.Reader, Order)
 
 	pa := new(G1)
-	pa.Unmarshal(new(G1).ScalarBaseMult(a).Marshal())
+	_, err := pa.Unmarshal(new(G1).ScalarBaseMult(a).Marshal())
+	require.NoError(t, err)
 	qa := new(G2)
-	qa.Unmarshal(new(G2).ScalarBaseMult(a).Marshal())
+	_, err = qa.Unmarshal(new(G2).ScalarBaseMult(a).Marshal())
+	require.NoError(t, err)
 	pb := new(G1)
-	pb.Unmarshal(new(G1).ScalarBaseMult(b).Marshal())
+	_, err = pb.Unmarshal(new(G1).ScalarBaseMult(b).Marshal())
+	require.NoError(t, err)
 	qb := new(G2)
-	qb.Unmarshal(new(G2).ScalarBaseMult(b).Marshal())
+	_, err = qb.Unmarshal(new(G2).ScalarBaseMult(b).Marshal())
+	require.NoError(t, err)
 	pc := new(G1)
-	pc.Unmarshal(new(G1).ScalarBaseMult(c).Marshal())
+	_, err = pc.Unmarshal(new(G1).ScalarBaseMult(c).Marshal())
+	require.NoError(t, err)
 	qc := new(G2)
-	qc.Unmarshal(new(G2).ScalarBaseMult(c).Marshal())
+	_, err = qc.Unmarshal(new(G2).ScalarBaseMult(c).Marshal())
+	require.NoError(t, err)
 
 	k1 := Pair(pb, qc)
 	k1.ScalarMult(k1, a)

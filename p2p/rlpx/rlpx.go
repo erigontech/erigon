@@ -35,10 +35,11 @@ import (
 	"time"
 
 	"github.com/golang/snappy"
+	"golang.org/x/crypto/sha3"
+
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/crypto/ecies"
 	"github.com/ledgerwatch/erigon/rlp"
-	"golang.org/x/crypto/sha3"
 )
 
 // Conn is an RLPx network connection. It wraps a low-level network connection. The
@@ -242,12 +243,18 @@ func (h *sessionState) writeFrame(conn io.Writer, code uint64, data []byte) erro
 	h.enc.XORKeyStream(header, header)
 
 	// Write header MAC.
-	h.wbuf.Write(h.egressMAC.computeHeader(header))
+	_, err := h.wbuf.Write(h.egressMAC.computeHeader(header))
+	if err != nil {
+		return err
+	}
 
 	// Encode and encrypt the frame data.
 	offset := len(h.wbuf.data)
 	h.wbuf.data = rlp.AppendUint64(h.wbuf.data, code)
-	h.wbuf.Write(data)
+	_, err = h.wbuf.Write(data)
+	if err != nil {
+		return err
+	}
 	if padding := fsize % 16; padding > 0 {
 		h.wbuf.appendZero(16 - padding)
 	}
@@ -255,9 +262,12 @@ func (h *sessionState) writeFrame(conn io.Writer, code uint64, data []byte) erro
 	h.enc.XORKeyStream(framedata, framedata)
 
 	// Write frame MAC.
-	h.wbuf.Write(h.egressMAC.computeFrame(framedata))
+	_, err = h.wbuf.Write(h.egressMAC.computeFrame(framedata))
+	if err != nil {
+		return err
+	}
 
-	_, err := conn.Write(h.wbuf.data)
+	_, err = conn.Write(h.wbuf.data)
 	return err
 }
 

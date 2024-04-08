@@ -27,7 +27,7 @@ func NewEmitters() *Emitters {
 	}
 }
 
-// publish to all subscribers. each callback is run in a separate goroutine
+// Publish to all subscribers. each callback is run in a separate goroutine
 func (e *Emitters) Publish(s string, a any) {
 	// forward gossip object
 	e.mu.Lock()
@@ -47,10 +47,14 @@ func (e *Emitters) Publish(s string, a any) {
 			egg.Go(exec)
 		}
 	}
-	egg.Wait()
+
+	if err := egg.Wait(); err != nil {
+		// wg is guaranteed to not return an error by virtue of callback interface
+		panic(err)
+	}
 }
 
-// subscribe with callback. call the returned cancelfunc to unregister the callback
+// Subscribe with callback. call the returned cancel func to unregister the callback
 // publish will block until all callbacks for the message are resolved
 func (e *Emitters) Subscribe(topics []string, cb func(topic string, item any)) (func(), error) {
 	subid := uuid.New().String()

@@ -25,12 +25,15 @@ import (
 	"net/http"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/huin/goupnp/httpu"
+	"github.com/stretchr/testify/require"
 )
 
-func TestUPNP_DDWRT(t *testing.T) {
+func TestUPNPDDWRT(t *testing.T) {
+	//goland:noinspection GoBoolExpressions
 	if runtime.GOOS == "windows" {
 		t.Skipf("disabled to avoid firewall prompt")
 	}
@@ -204,15 +207,21 @@ func (dev *fakeIGD) ServeMessage(r *http.Request) {
 		fmt.Printf("reply Dial error: %v", err)
 		return
 	}
-	defer conn.Close()
-	io.WriteString(conn, dev.replaceListenAddr(dev.ssdpResp))
+	defer func() {
+		err := conn.Close()
+		require.NoError(dev.t, err)
+	}()
+
+	_, err = io.WriteString(conn, dev.replaceListenAddr(dev.ssdpResp))
+	require.NoError(dev.t, err)
 }
 
 // http.Handler
 func (dev *fakeIGD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if resp, ok := dev.httpResps[r.Method+" "+r.RequestURI]; ok {
 		dev.t.Logf(`HTTP request "%s %s" --> %d`, r.Method, r.RequestURI, 200)
-		io.WriteString(w, dev.replaceListenAddr(resp))
+		_, err := io.WriteString(w, dev.replaceListenAddr(resp))
+		require.NoError(dev.t, err)
 	} else {
 		dev.t.Logf(`HTTP request "%s %s" --> %d`, r.Method, r.RequestURI, 404)
 		w.WriteHeader(http.StatusNotFound)
@@ -229,18 +238,40 @@ func (dev *fakeIGD) listen() (err error) {
 	}
 	laddr := &net.UDPAddr{IP: net.ParseIP("239.255.255.250"), Port: 1900}
 	if dev.mcastListener, err = net.ListenMulticastUDP("udp", nil, laddr); err != nil {
-		dev.listener.Close()
-		return err
+		closeErr := dev.listener.Close()
+		return fmt.Errorf("%w: %w", closeErr, err)
 	}
 	return nil
 }
 
 func (dev *fakeIGD) serve() {
-	go httpu.Serve(dev.mcastListener, dev)
-	go http.Serve(dev.listener, dev)
+	go func() {
+		err := httpu.Serve(dev.mcastListener, dev)
+		require.NoError(dev.t, err)
+	}()
+
+	go func() {
+		err := http.Serve(dev.listener, dev)
+		require.NoError(dev.t, err)
+	}()
 }
 
 func (dev *fakeIGD) close() {
-	dev.mcastListener.Close()
-	dev.listener.Close()
+	wg := sync.WaitGroup{}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		err := dev.mcastListener.Close()
+		require.NoError(dev.t, err)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		err := dev.listener.Close()
+		require.NoError(dev.t, err)
+	}()
+
+	wg.Wait()
 }
