@@ -16,7 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pkg/errors"
 	"golang.org/x/exp/slices"
@@ -681,45 +680,5 @@ func (a *ApiHandler) GetEthV1ValidatorAggregateAttestation(w http.ResponseWriter
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("attestation slot mismatch"))
 	}
 
-	// prepare the response
-	var (
-		bits = att.AggregationBits()
-		sig  = att.Signature()
-		data = att.AttestantionData()
-	)
-	type responseCheckpoint struct {
-		Epoch string `json:"epoch"`
-		Root  string `json:"root"`
-	}
-	type responseData struct {
-		Slot            string             `json:"slot"`
-		Index           string             `json:"index"`
-		BeaconBlockRoot string             `json:"beacon_block_root"`
-		Source          responseCheckpoint `json:"source"`
-		Target          responseCheckpoint `json:"target"`
-	}
-	type response struct {
-		AggregationBits string       `json:"aggregation_bits"`
-		Signature       string       `json:"signature"`
-		Data            responseData `json:"data"`
-	}
-	resp := response{
-		AggregationBits: common.Bytes2Hex(bits),
-		Signature:       common.Bytes2Hex(sig[:]),
-		Data: responseData{
-			Slot:            strconv.FormatUint(data.Slot(), 10),
-			Index:           strconv.FormatUint(data.CommitteeIndex(), 10),
-			BeaconBlockRoot: data.BeaconBlockRoot().Hex(),
-			Source: responseCheckpoint{
-				Epoch: strconv.FormatUint(data.Source().Epoch(), 10),
-				Root:  data.Source().BlockRoot().Hex(),
-			},
-			Target: responseCheckpoint{
-				Epoch: strconv.FormatUint(data.Target().Epoch(), 10),
-				Root:  data.Target().BlockRoot().Hex(),
-			},
-		},
-	}
-
-	return newBeaconResponse(resp), nil
+	return newBeaconResponse(att), nil
 }

@@ -95,7 +95,7 @@ func (t *validatorTestSuite) TestGetEthV1ValidatorAggregateAttestation() {
 					),
 					[96]byte{},
 				)
-				t.mockAggrPool.EXPECT().GetAggregatationByRoot(libcommon.HexToHash(mockDataRoot)).Return(&ret).Times(1)
+				t.mockAggrPool.EXPECT().GetAggregatationByRoot(libcommon.HexToHash(mockDataRoot)).Return(&ret)
 			},
 			expCode: http.StatusBadRequest,
 			expBody: map[string]any{
@@ -119,13 +119,13 @@ func (t *validatorTestSuite) TestGetEthV1ValidatorAggregateAttestation() {
 					),
 					[96]byte{0, 1, 2, 3, 4, 5},
 				)
-				t.mockAggrPool.EXPECT().GetAggregatationByRoot(libcommon.HexToHash(mockDataRoot)).Return(&ret).Times(1)
+				t.mockAggrPool.EXPECT().GetAggregatationByRoot(libcommon.HexToHash(mockDataRoot)).Return(&ret)
 			},
 			expCode: http.StatusOK,
 			expBody: map[string]any{
 				"data": map[string]any{
-					"aggregation_bits": common.Bytes2Hex([]byte{0b00111111, 0b00000011, 0, 0}),
-					"signature":        common.Bytes2Hex([][96]byte{{0, 1, 2, 3, 4, 5}}[0][:]),
+					"aggregation_bits": "0x" + common.Bytes2Hex([]byte{0b00111111, 0b00000011, 0, 0}),
+					"signature":        "0x" + common.Bytes2Hex([][96]byte{{0, 1, 2, 3, 4, 5}}[0][:]),
 					"data": map[string]any{
 						"slot":              "1",
 						"index":             "1",
@@ -143,8 +143,8 @@ func (t *validatorTestSuite) TestGetEthV1ValidatorAggregateAttestation() {
 			},
 		},
 	}
-
 	for _, tc := range tests {
+
 		log.Printf("test case: %s", tc.name)
 		tc.mock()
 		req, err := http.NewRequest(tc.method, tc.url, nil)
