@@ -128,7 +128,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		// Mark all validators as touched because we just initizialized the whole state.
 		s.currentState.ForEachValidator(func(v solid.Validator, index, total int) bool {
 			changedValidators[uint64(index)] = struct{}{}
-			if err = s.validatorsTable.AddValidator(v, uint64(index), 0); err != nil {
+			if err = s.validatorsTable.AddValidator(v, uint64(index), s.currentState.Slot()); err != nil {
 				return false
 			}
 			return true
@@ -367,8 +367,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	if err := state_accessors.SetStateProcessingProgress(rwTx, s.currentState.Slot()); err != nil {
 		return err
 	}
-
-	s.validatorsTable.SetSlot(s.currentState.Slot())
 
 	buf := &bytes.Buffer{}
 	s.validatorsTable.ForEach(func(validatorIndex uint64, validator *state_accessors.StaticValidator) bool {
