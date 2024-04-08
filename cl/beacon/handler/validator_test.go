@@ -95,7 +95,7 @@ func (t *validatorTestSuite) TestGetEthV1ValidatorAggregateAttestation() {
 					),
 					[96]byte{},
 				)
-				t.mockAggrPool.EXPECT().GetAggregatationByRoot(libcommon.HexToHash(mockDataRoot)).Return(&ret)
+				t.mockAggrPool.EXPECT().GetAggregatationByRoot(libcommon.HexToHash(mockDataRoot)).Return(&ret).Times(1)
 			},
 			expCode: http.StatusBadRequest,
 			expBody: map[string]any{
@@ -119,7 +119,7 @@ func (t *validatorTestSuite) TestGetEthV1ValidatorAggregateAttestation() {
 					),
 					[96]byte{0, 1, 2, 3, 4, 5},
 				)
-				t.mockAggrPool.EXPECT().GetAggregatationByRoot(libcommon.HexToHash(mockDataRoot)).Return(&ret)
+				t.mockAggrPool.EXPECT().GetAggregatationByRoot(libcommon.HexToHash(mockDataRoot)).Return(&ret).Times(1)
 			},
 			expCode: http.StatusOK,
 			expBody: map[string]any{
@@ -144,7 +144,6 @@ func (t *validatorTestSuite) TestGetEthV1ValidatorAggregateAttestation() {
 		},
 	}
 	for _, tc := range tests {
-
 		log.Printf("test case: %s", tc.name)
 		tc.mock()
 		req, err := http.NewRequest(tc.method, tc.url, nil)
@@ -158,6 +157,8 @@ func (t *validatorTestSuite) TestGetEthV1ValidatorAggregateAttestation() {
 		err = json.Unmarshal(rr.Body.Bytes(), &jsonResp)
 		t.NoError(err)
 		t.Equal(tc.expBody, jsonResp)
+
+		t.True(t.gomockCtrl.Satisfied(), "mock expectations were not met")
 	}
 }
 
