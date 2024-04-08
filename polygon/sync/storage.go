@@ -58,7 +58,7 @@ func (s *executionClientStorage) Flush(ctx context.Context) error {
 }
 
 func (s *executionClientStorage) Run(ctx context.Context) error {
-	s.logger.Info(syncLogPrefix("running execution client storage component"))
+	s.logger.Debug(syncLogPrefix("running execution client storage component"))
 
 	for {
 		select {
