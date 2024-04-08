@@ -222,7 +222,7 @@ func (i *beaconStatesCollector) collectActiveIndices(epoch uint64, activeIndices
 		return err
 	}
 	slot := epoch * i.beaconCfg.SlotsPerEpoch
-	return i.activeValidatorIndiciesCollector.Collect(base_encoding.Encode64ToBytes4(slot), libcommon.Copy(buf.Bytes()))
+	return i.activeValidatorIndiciesCollector.Collect(base_encoding.Encode64ToBytes4(slot), libcommon.Copy(i.buf.Bytes()))
 }
 
 func (i *beaconStatesCollector) collectFlattenedProposers(epoch uint64, proposers []byte) error {
