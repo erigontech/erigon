@@ -12,7 +12,6 @@ import (
 	"sync/atomic"
 
 	"github.com/gateway-fm/cdk-erigon-lib/common"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/common/length"
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/holiman/uint256"
@@ -795,10 +794,15 @@ func (tsw *TrieStateWriter) WriteAccountStorage(address common.Address, incarnat
 		tsw.tds.currentBuffer.storageUpdates[addrHash] = m
 	}
 	tsw.tds.currentBuffer.storageIncarnation[addrHash] = incarnation
-	seckey, err := tsw.tds.HashSave(key[:])
+
+	// we need to clone the key as it's passed as a pointer
+	cloneKey := make([]byte, len(*key))
+	copy(cloneKey, key[:])
+	seckey, err := tsw.tds.HashSave(cloneKey)
 	if err != nil {
 		return err
 	}
+
 	var storageKey eriCommon.StorageKey
 	copy(storageKey[:], dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey))
 	tsw.tds.currentBuffer.storageReads[storageKey] = struct{}{}
@@ -966,26 +970,21 @@ func (tds *TrieDbState) ResolveSMTRetainList() (*trie.RetainList, error) {
 	}
 
 	/*add 0x00...05ca1ab1e and GER manager values*/
-
-	/* 0x00...05ca1ab1e */
-	for _, storageSlot := range []libcommon.Hash{LAST_BLOCK_STORAGE_POS, STATE_ROOT_STORAGE_POS, TIMESTAMP_STORAGE_POS, BLOCK_INFO_ROOT_STORAGE_POS} {
-		smtPath, err := getSMTPath(ADDRESS_SCALABLE_L2.String(), storageSlot.String())
-
+	for _, slot := range []common.Hash{LAST_BLOCK_STORAGE_POS, STATE_ROOT_STORAGE_POS, TIMESTAMP_STORAGE_POS, BLOCK_INFO_ROOT_STORAGE_POS} {
+		smtPath, err := getSMTPath(ADDRESS_SCALABLE_L2.String(), slot.String())
 		if err != nil {
 			return nil, err
 		}
-
 		keys = append(keys, smtPath)
 	}
 
-	/* GER manager */
-	smtPath, err := getSMTPath(GER_MANAGER_ADDRESS.String(), GLOBAL_EXIT_ROOT_STORAGE_POS.String())
-
-	if err != nil {
-		return nil, err
+	for _, slot := range []common.Hash{GLOBAL_EXIT_ROOT_STORAGE_POS, GLOBAL_EXIT_ROOT_POS_1} {
+		smtPath, err := getSMTPath(GER_MANAGER_ADDRESS.String(), slot.String())
+		if err != nil {
+			return nil, err
+		}
+		keys = append(keys, smtPath)
 	}
-
-	keys = append(keys, smtPath)
 
 	rl := trie.NewRetainList(0)
 

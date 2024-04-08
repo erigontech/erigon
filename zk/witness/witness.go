@@ -143,10 +143,16 @@ func (g *Generator) GenerateWitness(tx kv.Tx, ctx context.Context, startBlock, e
 
 	for blockNum := startBlock; blockNum <= endBlock; blockNum++ {
 		block, err := rawdb.ReadBlockByNumber(tx, blockNum)
-
 		if err != nil {
 			return nil, err
 		}
+
+		var prevBlockHash libcommon.Hash
+		prevBlock, err := rawdb.ReadBlockByNumber(tx, blockNum-1)
+		if err != nil {
+			return nil, err
+		}
+		prevBlockHash = prevBlock.Hash()
 
 		reader := state.NewPlainState(tx, blockNum, systemcontracts.SystemContractCodeLookup[g.chainCfg.ChainName])
 
@@ -210,7 +216,7 @@ func (g *Generator) GenerateWitness(tx kv.Tx, ctx context.Context, startBlock, e
 
 		chainReader := stagedsync.NewChainReaderImpl(g.chainCfg, tx, nil)
 
-		_, err = core.ExecuteBlockEphemerally(g.chainCfg, &vmConfig, getHashFn, engine, block, tds, trieStateWriter, chainReader, nil, nil, hermezDb)
+		_, err = core.ExecuteBlockEphemerallyZk(g.chainCfg, &vmConfig, getHashFn, engine, &prevBlockHash, block, tds, trieStateWriter, chainReader, nil, nil, hermezDb)
 
 		if err != nil {
 			return nil, err
@@ -261,6 +267,9 @@ func populateDbTables(batch *memdb.MemoryMutation) error {
 		hermez_db.GLOBAL_EXIT_ROOTS_BATCHES,
 		hermez_db.STATE_ROOTS,
 		hermez_db.BATCH_WITNESSES,
+		hermez_db.L1_BLOCK_HASHES,
+		hermez_db.BLOCK_L1_BLOCK_HASHES,
+		hermez_db.INTERMEDIATE_TX_STATEROOTS,
 	}
 
 	for _, t := range tables {

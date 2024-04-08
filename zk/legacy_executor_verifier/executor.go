@@ -142,7 +142,11 @@ func responseCheck(resp *executor.ProcessBatchResponseV2, erigonStateRoot common
 	}
 	if resp.Error != executor.ExecutorError_EXECUTOR_ERROR_UNSPECIFIED &&
 		resp.Error != executor.ExecutorError_EXECUTOR_ERROR_NO_ERROR {
+        // prover id here is the only string field in the response and will contain info on what key failed from
+        // the provided witness
+		log.Error("executor error", "detail", resp.ProverId)
 		return false, fmt.Errorf("error in response: %s", resp.Error)
+
 	}
 
 	if !bytes.Equal(resp.NewStateRoot, erigonStateRoot.Bytes()) {

@@ -20,6 +20,7 @@ var (
 	ADDRESS_SCALABLE_L2          = libcommon.HexToAddress("0x000000000000000000000000000000005ca1ab1e")
 	GER_MANAGER_ADDRESS          = libcommon.HexToAddress("0xa40D5f56745a118D0906a34E69aeC8C0Db1cB8fA")
 	GLOBAL_EXIT_ROOT_STORAGE_POS = libcommon.HexToHash("0x0")
+	GLOBAL_EXIT_ROOT_POS_1       = libcommon.HexToHash("0x1")
 )
 
 type ReadOnlyHermezDb interface {
