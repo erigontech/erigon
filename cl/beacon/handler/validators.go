@@ -656,7 +656,6 @@ func shouldStatusBeFiltered(status validatorStatus, statuses []validatorStatus) 
 }
 
 func (a *ApiHandler) GetEthV1ValidatorAggregateAttestation(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	fmt.Printf("GetEthV1ValidatorAggregateAttestation\n")
 	attDataRoot := r.URL.Query().Get("attestation_data_root")
 	if attDataRoot == "" {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("attestation_data_root is required"))
