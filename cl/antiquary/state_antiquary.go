@@ -357,6 +357,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		return err
 	}
 	defer rwTx.Rollback()
+
 	start = time.Now()
 	// We now need to store the state
 	if err := stateAntiquaryCollector.flush(ctx, rwTx); err != nil {
@@ -392,6 +393,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	if err != nil {
 		return err
 	}
+	//s.validatorsTable.SetSlot(s.currentState.Slot())
 	log.Info("Historical states antiquated", "slot", s.currentState.Slot(), "root", libcommon.Hash(stateRoot), "latency", endTime)
 	return nil
 }
@@ -473,6 +475,5 @@ func computeSlotToBeRequested(tx kv.Tx, cfg *clparams.BeaconChainConfig, genesis
 	if targetSlot > clparams.SlotsPerDump*backoffStep {
 		return findNearestSlotBackwards(tx, cfg, targetSlot-clparams.SlotsPerDump*backoffStep)
 	}
-	fmt.Println(genesisSlot)
 	return genesisSlot, nil
 }

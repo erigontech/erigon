@@ -421,7 +421,9 @@ func (s *StaticValidatorTable) GetStaticValidator(validatorIndex uint64) *Static
 func (s *StaticValidatorTable) SetSlot(slot uint64) {
 	s.sync.Lock()
 	defer s.sync.Unlock()
-	s.resetTable(slot)
+	if slot <= s.slot && s.slot != 0 {
+		return
+	}
 	s.slot = slot
 }
 
