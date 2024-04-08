@@ -113,7 +113,7 @@ func (i *beaconStatesCollector) addGenesisState(ctx context.Context, state *stat
 		return err
 	}
 
-	if err := i.collectEffectiveBalancesDump(roundedSlotToDump, state.RawValidatorSet()); err != nil {
+	if err := i.collectEffectiveBalancesDump(slot, state.RawValidatorSet()); err != nil {
 		return err
 	}
 	if err := antiquateFullUint64List(i.slashingsCollector, roundedSlotToDump, state.RawSlashings(), i.buf, i.compressor); err != nil {
