@@ -6,7 +6,6 @@ import (
 	"io"
 
 	"github.com/klauspost/compress/zstd"
-	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -47,11 +46,19 @@ type beaconStatesCollector struct {
 	balancesDumpsCollector           *etl.Collector
 	effectiveBalancesDumpCollector   *etl.Collector
 
+	buf        *bytes.Buffer
+	compressor *zstd.Encoder
+
 	beaconCfg *clparams.BeaconChainConfig
 	logger    log.Logger
 }
 
 func newBeaconStatesCollector(beaconCfg *clparams.BeaconChainConfig, tmpdir string, logger log.Logger) *beaconStatesCollector {
+	buf := &bytes.Buffer{}
+	compressor, err := zstd.NewWriter(buf)
+	if err != nil {
+		panic(err)
+	}
 	return &beaconStatesCollector{
 		effectiveBalanceCollector:        etl.NewCollector(kv.ValidatorEffectiveBalance, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger),
 		balancesCollector:                etl.NewCollector(kv.ValidatorBalance, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger),
@@ -73,10 +80,16 @@ func newBeaconStatesCollector(beaconCfg *clparams.BeaconChainConfig, tmpdir stri
 		effectiveBalancesDumpCollector:   etl.NewCollector(kv.EffectiveBalancesDump, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger),
 		logger:                           logger,
 		beaconCfg:                        beaconCfg,
+
+		buf:        buf,
+		compressor: compressor,
 	}
 }
 
-func (i *beaconStatesCollector) addGenesisState(ctx context.Context, compressor *zstd.Encoder, state *state.CachingBeaconState) error {
+func (i *beaconStatesCollector) addGenesisState(ctx context.Context, state *state.CachingBeaconState) error {
+	i.buf.Reset()
+	i.compressor.Reset(i.buf)
+
 	var err error
 	slot := state.Slot()
 	epoch := slot / i.beaconCfg.SlotsPerEpoch
@@ -95,26 +108,25 @@ func (i *beaconStatesCollector) addGenesisState(ctx context.Context, compressor 
 		return err
 	}
 	roundedSlotToDump := slot - (slot % clparams.SlotsPerDump)
-	var commonBuffer bytes.Buffer
 
-	if err := antiquateField(ctx, roundedSlotToDump, state.RawBalances(), &commonBuffer, compressor, i.balancesDumpsCollector); err != nil {
+	if err := antiquateField(ctx, roundedSlotToDump, state.RawBalances(), i.buf, i.compressor, i.balancesDumpsCollector); err != nil {
 		return err
 	}
 
-	if err := i.collectEffectiveBalancesDump(roundedSlotToDump, state.RawValidatorSet(), &commonBuffer, compressor); err != nil {
+	if err := i.collectEffectiveBalancesDump(roundedSlotToDump, state.RawValidatorSet()); err != nil {
 		return err
 	}
-	if err := antiquateFullUint64List(i.slashingsCollector, roundedSlotToDump, state.RawSlashings(), &commonBuffer, compressor); err != nil {
+	if err := antiquateFullUint64List(i.slashingsCollector, roundedSlotToDump, state.RawSlashings(), i.buf, i.compressor); err != nil {
 		return err
 	}
 
-	if err := i.storeEpochData(&commonBuffer, state); err != nil {
+	if err := i.storeEpochData(state); err != nil {
 		return err
 	}
 
 	if state.Version() >= clparams.AltairVersion {
 		// dump inactivity scores
-		if err := antiquateFullUint64List(i.inactivityScoresCollector, slot, state.RawInactivityScores(), &commonBuffer, compressor); err != nil {
+		if err := antiquateFullUint64List(i.inactivityScoresCollector, slot, state.RawInactivityScores(), i.buf, i.compressor); err != nil {
 			return err
 		}
 		committeeSlot := i.beaconCfg.RoundSlotToSyncCommitteePeriod(slot)
@@ -129,27 +141,26 @@ func (i *beaconStatesCollector) addGenesisState(ctx context.Context, compressor 
 		}
 	}
 
-	var b bytes.Buffer
-	if err := i.storeSlotData(&b, state, nil); err != nil {
+	if err := i.storeSlotData(state, nil); err != nil {
 		return err
 	}
 
 	return i.stateEventsCollector.Collect(base_encoding.Encode64ToBytes4(slot), events.CopyBytes())
 }
 
-func (i *beaconStatesCollector) storeEpochData(buffer *bytes.Buffer, st *state.CachingBeaconState) error {
-	buffer.Reset()
+func (i *beaconStatesCollector) storeEpochData(st *state.CachingBeaconState) error {
+	i.buf.Reset()
 	epochData := state_accessors.EpochDataFromBeaconState(st)
 
-	if err := epochData.WriteTo(buffer); err != nil {
+	if err := epochData.WriteTo(i.buf); err != nil {
 		return err
 	}
 	roundedSlot := i.beaconCfg.RoundSlotToEpoch(st.Slot())
-	return i.epochDataCollector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), libcommon.Copy(buffer.Bytes()))
+	return i.epochDataCollector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), libcommon.Copy(i.buf.Bytes()))
 }
 
-func (i *beaconStatesCollector) storeSlotData(buffer *bytes.Buffer, st *state.CachingBeaconState, rewardsCollector *eth2.BlockRewardsCollector) error {
-	buffer.Reset()
+func (i *beaconStatesCollector) storeSlotData(st *state.CachingBeaconState, rewardsCollector *eth2.BlockRewardsCollector) error {
+	i.buf.Reset()
 	slotData := state_accessors.SlotDataFromBeaconState(st)
 	if rewardsCollector != nil {
 		slotData.AttestationsRewards = rewardsCollector.Attestations
@@ -157,33 +168,35 @@ func (i *beaconStatesCollector) storeSlotData(buffer *bytes.Buffer, st *state.Ca
 		slotData.AttesterSlashings = rewardsCollector.AttesterSlashings
 		slotData.ProposerSlashings = rewardsCollector.ProposerSlashings
 	}
-	if err := slotData.WriteTo(buffer); err != nil {
+	if err := slotData.WriteTo(i.buf); err != nil {
 		return err
 	}
-	return i.slotDataCollector.Collect(base_encoding.Encode64ToBytes4(st.Slot()), libcommon.Copy(buffer.Bytes()))
+	return i.slotDataCollector.Collect(base_encoding.Encode64ToBytes4(st.Slot()), libcommon.Copy(i.buf.Bytes()))
 }
 
-func (i *beaconStatesCollector) collectEffectiveBalancesDump(slot uint64, uncompressed []byte, buffer *bytes.Buffer, compressor *zstd.Encoder) error {
-	buffer.Reset()
-	compressor.Reset(buffer)
+func (i *beaconStatesCollector) collectEffectiveBalancesDump(slot uint64, uncompressed []byte) error {
+	i.buf.Reset()
+	i.compressor.Reset(i.buf)
 
 	validatorSetSize := 121
-	for i := 0; i < len(uncompressed)/validatorSetSize; i++ {
+	for j := 0; j < len(uncompressed)/validatorSetSize; j++ {
 		// 80:88
-		if _, err := compressor.Write(uncompressed[i*validatorSetSize+80 : i*validatorSetSize+88]); err != nil {
+		if _, err := i.compressor.Write(uncompressed[j*validatorSetSize+80 : j*validatorSetSize+88]); err != nil {
 			return err
 		}
 	}
 
-	if err := compressor.Close(); err != nil {
+	if err := i.compressor.Close(); err != nil {
 		return err
 	}
 	roundedSlot := slot - (slot % clparams.SlotsPerDump)
-	return i.effectiveBalancesDumpCollector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), common.Copy(buffer.Bytes()))
+	return i.effectiveBalancesDumpCollector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), libcommon.Copy(i.buf.Bytes()))
 }
 
-func (i *beaconStatesCollector) collectBalancesDump(slot uint64, uncompressed []byte, buffer *bytes.Buffer, compressor *zstd.Encoder) error {
-	return antiquateField(context.Background(), slot, uncompressed, buffer, compressor, i.balancesDumpsCollector)
+func (i *beaconStatesCollector) collectBalancesDump(slot uint64, uncompressed []byte) error {
+	i.buf.Reset()
+	i.compressor.Reset(i.buf)
+	return antiquateField(context.Background(), slot, uncompressed, i.buf, i.compressor, i.balancesDumpsCollector)
 }
 
 func (i *beaconStatesCollector) collectIntraEpochRandaoMix(slot uint64, randao libcommon.Hash) error {
@@ -203,9 +216,9 @@ func (i *beaconStatesCollector) collectBlockRoot(slot uint64, blockRoot libcommo
 	return i.blockRootsCollector.Collect(base_encoding.Encode64ToBytes4(slot), blockRoot[:])
 }
 
-func (i *beaconStatesCollector) collectActiveIndices(buf *bytes.Buffer, epoch uint64, activeIndices []uint64) error {
-	buf.Reset()
-	if err := base_encoding.WriteRabbits(activeIndices, buf); err != nil {
+func (i *beaconStatesCollector) collectActiveIndices(epoch uint64, activeIndices []uint64) error {
+	i.buf.Reset()
+	if err := base_encoding.WriteRabbits(activeIndices, i.buf); err != nil {
 		return err
 	}
 	slot := epoch * i.beaconCfg.SlotsPerEpoch
@@ -234,8 +247,10 @@ func (i *beaconStatesCollector) collectEth1DataVote(slot uint64, eth1Data *cltyp
 	return i.eth1DataVotesCollector.Collect(base_encoding.Encode64ToBytes4(slot), vote)
 }
 
-func (i *beaconStatesCollector) collectSlashings(buf *bytes.Buffer, compressedWriter *zstd.Encoder, slot uint64, rawSlashings []byte) error {
-	return antiquateFullUint64List(i.slashingsCollector, slot, rawSlashings, buf, compressedWriter)
+func (i *beaconStatesCollector) collectSlashings(slot uint64, rawSlashings []byte) error {
+	i.buf.Reset()
+	i.compressor.Reset(i.buf)
+	return antiquateFullUint64List(i.slashingsCollector, slot, rawSlashings, i.buf, i.compressor)
 }
 
 func (i *beaconStatesCollector) collectStateEvents(slot uint64, events *state_accessors.StateEvents) error {
@@ -250,8 +265,8 @@ func (i *beaconStatesCollector) collectEffectiveBalancesDiffs(ctx context.Contex
 	return antiquateBytesListDiff(ctx, base_encoding.Encode64ToBytes4(slot), oldValidatorSetSSZ, newValidatorSetSSZ, i.effectiveBalanceCollector, base_encoding.ComputeCompressedSerializedEffectiveBalancesDiff)
 }
 
-func (i *beaconStatesCollector) collectInactivityScores(buf *bytes.Buffer, compressedWriter *zstd.Encoder, slot uint64, inactivityScores []byte) error {
-	return antiquateFullUint64List(i.inactivityScoresCollector, slot, inactivityScores, buf, compressedWriter)
+func (i *beaconStatesCollector) collectInactivityScores(slot uint64, inactivityScores []byte) error {
+	return antiquateFullUint64List(i.inactivityScoresCollector, slot, inactivityScores, i.buf, i.compressor)
 }
 
 func (i *beaconStatesCollector) flush(ctx context.Context, tx kv.RwTx) error {
@@ -345,7 +360,7 @@ func antiquateFullUint64List(collector *etl.Collector, slot uint64, raw []byte, 
 	if err := compressor.Close(); err != nil {
 		return err
 	}
-	return collector.Collect(base_encoding.Encode64ToBytes4(slot), common.Copy(buffer.Bytes()))
+	return collector.Collect(base_encoding.Encode64ToBytes4(slot), libcommon.Copy(buffer.Bytes()))
 }
 
 func antiquateField(ctx context.Context, slot uint64, uncompressed []byte, buffer *bytes.Buffer, compressor *zstd.Encoder, collector *etl.Collector) error {
@@ -359,7 +374,7 @@ func antiquateField(ctx context.Context, slot uint64, uncompressed []byte, buffe
 		return err
 	}
 	roundedSlot := slot - (slot % clparams.SlotsPerDump)
-	return collector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), common.Copy(buffer.Bytes()))
+	return collector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), libcommon.Copy(buffer.Bytes()))
 }
 
 func antiquateBytesListDiff(ctx context.Context, key []byte, old, new []byte, collector *etl.Collector, diffFn func(w io.Writer, old, new []byte) error) error {
@@ -372,5 +387,5 @@ func antiquateBytesListDiff(ctx context.Context, key []byte, old, new []byte, co
 		return err
 	}
 
-	return collector.Collect(key, common.Copy(diffBuffer.Bytes()))
+	return collector.Collect(key, libcommon.Copy(diffBuffer.Bytes()))
 }

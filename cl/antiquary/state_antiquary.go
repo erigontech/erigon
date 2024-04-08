@@ -118,19 +118,13 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	defer stateAntiquaryCollector.close()
 
 	// buffers
-	commonBuffer := &bytes.Buffer{}
-	compressedWriter, err := zstd.NewWriter(commonBuffer, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
-	if err != nil {
-		return err
-	}
-	defer compressedWriter.Close()
 
 	if err := s.initializeStateAntiquaryIfNeeded(ctx, tx); err != nil {
 		return err
 	}
 	if s.currentState.Slot() == s.genesisState.Slot() {
 		// Collect genesis state if we are at genesis
-		if err := stateAntiquaryCollector.addGenesisState(ctx, compressedWriter, s.currentState); err != nil {
+		if err := stateAntiquaryCollector.addGenesisState(ctx, s.currentState); err != nil {
 			return err
 		}
 		// Mark all validators as touched because we just initizialized the whole state.
@@ -200,7 +194,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			return s.validatorsTable.AddWithdrawalCredentials(uint64(index), slot, libcommon.BytesToHash(wc))
 		},
 		OnEpochBoundary: func(epoch uint64) error {
-			if err := stateAntiquaryCollector.storeEpochData(commonBuffer, s.currentState); err != nil {
+			if err := stateAntiquaryCollector.storeEpochData(s.currentState); err != nil {
 				return err
 			}
 			var prevEpoch uint64
@@ -212,13 +206,13 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 				return err
 			}
 			// Write active validator indicies
-			if err := stateAntiquaryCollector.collectActiveIndices(commonBuffer,
+			if err := stateAntiquaryCollector.collectActiveIndices(
 				prevEpoch,
 				s.currentState.GetActiveValidatorsIndices(prevEpoch),
 			); err != nil {
 				return err
 			}
-			if err := stateAntiquaryCollector.collectActiveIndices(commonBuffer,
+			if err := stateAntiquaryCollector.collectActiveIndices(
 				epoch,
 				s.currentState.GetActiveValidatorsIndices(epoch),
 			); err != nil {
@@ -265,10 +259,10 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		// If we have a missed block, we just skip it.
 		if block == nil {
 			if isDumpSlot {
-				if err := stateAntiquaryCollector.collectBalancesDump(slot, s.currentState.RawBalances(), commonBuffer, compressedWriter); err != nil {
+				if err := stateAntiquaryCollector.collectBalancesDump(slot, s.currentState.RawBalances()); err != nil {
 					return err
 				}
-				if err := stateAntiquaryCollector.collectEffectiveBalancesDump(slot, s.currentState.RawValidatorSet(), commonBuffer, compressedWriter); err != nil {
+				if err := stateAntiquaryCollector.collectEffectiveBalancesDump(slot, s.currentState.RawValidatorSet()); err != nil {
 					return err
 				}
 			}
@@ -301,12 +295,12 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 
 		// dump the whole slashings vector, if the slashing actually occured.
 		if slashingOccured {
-			if err := stateAntiquaryCollector.collectSlashings(commonBuffer, compressedWriter, slot, s.currentState.RawSlashings()); err != nil {
+			if err := stateAntiquaryCollector.collectSlashings(slot, s.currentState.RawSlashings()); err != nil {
 				return err
 			}
 		}
 
-		if err := stateAntiquaryCollector.storeSlotData(commonBuffer, s.currentState, blockRewardsCollector); err != nil {
+		if err := stateAntiquaryCollector.storeSlotData(s.currentState, blockRewardsCollector); err != nil {
 			return err
 		}
 
@@ -316,10 +310,10 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		events.Reset()
 
 		if isDumpSlot {
-			if err := stateAntiquaryCollector.collectBalancesDump(slot, s.currentState.RawBalances(), commonBuffer, compressedWriter); err != nil {
+			if err := stateAntiquaryCollector.collectBalancesDump(slot, s.currentState.RawBalances()); err != nil {
 				return err
 			}
-			if err := stateAntiquaryCollector.collectEffectiveBalancesDump(slot, s.currentState.RawValidatorSet(), commonBuffer, compressedWriter); err != nil {
+			if err := stateAntiquaryCollector.collectEffectiveBalancesDump(slot, s.currentState.RawValidatorSet()); err != nil {
 				return err
 			}
 		}
@@ -341,7 +335,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 				return err
 			}
 			if s.currentState.Version() >= clparams.AltairVersion {
-				if err := stateAntiquaryCollector.collectInactivityScores(commonBuffer, compressedWriter, slot, s.currentState.RawInactivityScores()); err != nil {
+				if err := stateAntiquaryCollector.collectInactivityScores(slot, s.currentState.RawInactivityScores()); err != nil {
 					return err
 				}
 			}
@@ -376,15 +370,16 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 
 	s.validatorsTable.SetSlot(s.currentState.Slot())
 
+	buf := &bytes.Buffer{}
 	s.validatorsTable.ForEach(func(validatorIndex uint64, validator *state_accessors.StaticValidator) bool {
 		if _, ok := changedValidators[validatorIndex]; !ok {
 			return true
 		}
-		commonBuffer.Reset()
-		if err = validator.WriteTo(commonBuffer); err != nil {
+		buf.Reset()
+		if err = validator.WriteTo(buf); err != nil {
 			return false
 		}
-		if err = rwTx.Put(kv.StaticValidators, base_encoding.Encode64ToBytes4(validatorIndex), common.Copy(commonBuffer.Bytes())); err != nil {
+		if err = rwTx.Put(kv.StaticValidators, base_encoding.Encode64ToBytes4(validatorIndex), common.Copy(buf.Bytes())); err != nil {
 			return false
 		}
 		return true
