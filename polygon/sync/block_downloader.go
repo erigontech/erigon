@@ -108,7 +108,7 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 		return nil, nil
 	}
 
-	d.logger.Info(
+	d.logger.Debug(
 		syncLogPrefix("downloading blocks using waypoints"),
 		"waypointsLen", len(waypoints),
 		"start", waypoints[0].StartBlock().Uint64(),
@@ -242,7 +242,7 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 		lastBlock = blocks[len(blocks)-1]
 	}
 
-	d.logger.Info(syncLogPrefix("finished downloading blocks using waypoints"))
+	d.logger.Debug(syncLogPrefix("finished downloading blocks using waypoints"))
 
 	return lastBlock.Header(), nil
 }

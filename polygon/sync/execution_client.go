@@ -25,9 +25,10 @@ func (e *executionClient) InsertBlocks(ctx context.Context, blocks []*types.Bloc
 	return e.engine.InsertBlocks(ctx, blocks, true)
 }
 
-func (e *executionClient) UpdateForkChoice(ctx context.Context, tip *types.Header, finalizedHeader *types.Header) error {
-	_, err := e.engine.ForkChoiceUpdate(ctx, finalizedHeader.Hash(), tip.Hash(), nil)
-	return err
+func (e *executionClient) UpdateForkChoice(_ context.Context, _ *types.Header, _ *types.Header) error {
+	// TODO - not ready for execution - missing state sync event and span data - uncomment once ready
+	//return e.engine.ForkChoiceUpdate(ctx, finalizedHeader.Hash(), tip.Hash())
+	return nil
 }
 
 func (e *executionClient) CurrentHeader(ctx context.Context) (*types.Header, error) {

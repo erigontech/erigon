@@ -65,7 +65,7 @@ func (h *heimdall) LastCheckpointId(ctx context.Context, _ CheckpointStore) (Che
 }
 
 func (h *heimdall) FetchCheckpointsFromBlock(ctx context.Context, store CheckpointStore, startBlock uint64) (Waypoints, error) {
-	h.logger.Info(heimdallLogPrefix("fetching checkpoints from block"), "start", startBlock)
+	h.logger.Trace(heimdallLogPrefix("fetching checkpoints from block"), "start", startBlock)
 	startFetchTime := time.Now()
 
 	count, _, err := h.LastCheckpointId(ctx, store)
@@ -119,7 +119,7 @@ func (h *heimdall) FetchCheckpointsFromBlock(ctx context.Context, store Checkpoi
 
 	common.SliceReverse(checkpoints)
 
-	h.logger.Info(
+	h.logger.Trace(
 		heimdallLogPrefix("finished fetching checkpoints from block"),
 		"count", len(checkpoints),
 		"start", startBlock,
@@ -189,7 +189,7 @@ func (h *heimdall) LastMilestoneId(ctx context.Context, _ MilestoneStore) (Miles
 }
 
 func (h *heimdall) FetchMilestonesFromBlock(ctx context.Context, store MilestoneStore, startBlock uint64) (Waypoints, error) {
-	h.logger.Info(heimdallLogPrefix("fetching milestones from block"), "start", startBlock)
+	h.logger.Trace(heimdallLogPrefix("fetching milestones from block"), "start", startBlock)
 	startFetchTime := time.Now()
 
 	last, _, err := h.LastMilestoneId(ctx, store)
@@ -243,7 +243,7 @@ func (h *heimdall) FetchMilestonesFromBlock(ctx context.Context, store Milestone
 
 	common.SliceReverse(milestones)
 
-	h.logger.Info(
+	h.logger.Trace(
 		heimdallLogPrefix("finished fetching milestones from block"),
 		"count", len(milestones),
 		"start", startBlock,

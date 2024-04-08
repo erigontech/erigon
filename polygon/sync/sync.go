@@ -221,15 +221,16 @@ func (s *Sync) onNewBlockHashesEvent(
 //
 
 func (s *Sync) Run(ctx context.Context) error {
-	s.logger.Info(syncLogPrefix("running sync component"))
+	s.logger.Debug(syncLogPrefix("running sync component"))
 
 	tip, err := s.execution.CurrentHeader(ctx)
 	if err != nil {
 		return err
 	}
 
+	// loop until we converge at the latest checkpoint & milestone
 	var prevTip *types.Header
-	for tip != prevTip { // loop until we converge at latest checkpoint & milestone
+	for tip != prevTip {
 		prevTip = tip
 
 		newTip, err := s.blockDownloader.DownloadBlocksUsingCheckpoints(ctx, tip.Number.Uint64()+1)
