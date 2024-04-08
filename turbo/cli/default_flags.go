@@ -191,4 +191,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.DataStreamHost,
 	&utils.DataStreamPort,
 	&utils.WitnessFullFlag,
+	&utils.DebugLimit,
+	&utils.DebugStep,
+	&utils.DebugStepAfter,
 }

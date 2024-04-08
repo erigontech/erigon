@@ -47,7 +47,7 @@ func NewDefaultZkStages(ctx context.Context,
 
 	return zkStages.DefaultZkStages(ctx,
 		zkStages.StageL1SyncerCfg(db, l1Syncer, cfg.Zk),
-		zkStages.StageBatchesCfg(db, datastreamClient),
+		zkStages.StageBatchesCfg(db, datastreamClient, cfg.Zk),
 		zkStages.StageDataStreamCatchupCfg(datastreamServer, db, cfg.Genesis.Config.ChainID.Uint64(), zkStages.NodeTypeSynchronizer),
 		stagedsync.StageCumulativeIndexCfg(db),
 		stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig),

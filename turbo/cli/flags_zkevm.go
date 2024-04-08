@@ -60,6 +60,9 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		AllowFreeTransactions:      ctx.Bool(utils.AllowFreeTransactions.Name),
 		AllowPreEIP155Transactions: ctx.Bool(utils.AllowPreEIP155Transactions.Name),
 		WitnessFull:                ctx.Bool(utils.WitnessFullFlag.Name),
+		DebugLimit:                 ctx.Uint64(utils.DebugLimit.Name),
+		DebugStep:                  ctx.Uint64(utils.DebugStep.Name),
+		DebugStepAfter:             ctx.Uint64(utils.DebugStepAfter.Name),
 	}
 
 	checkFlag(utils.L2ChainIdFlag.Name, cfg.Zk.L2ChainId)

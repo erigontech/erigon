@@ -18,6 +18,8 @@ import (
 
 	"math/big"
 
+	"os"
+
 	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -42,6 +44,18 @@ func SpawnExecuteBlocksStageZk(s *StageState, u Unwinder, tx kv.RwTx, toBlock ui
 		return nil
 	}
 
+	///// DEBUG BISECT /////
+	highestBlockExecuted := s.BlockNumber
+	defer func() {
+		if cfg.zk.DebugLimit > 0 {
+			if err != nil {
+				log.Error("Execution Failed", "err", err, "block", highestBlockExecuted)
+				os.Exit(2)
+			}
+		}
+	}()
+	///// DEBUG BISECT /////
+
 	quit := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -56,7 +70,7 @@ func SpawnExecuteBlocksStageZk(s *StageState, u Unwinder, tx kv.RwTx, toBlock ui
 	if err != nil {
 		return err
 	}
-	if shouldShortCircuit {
+	if shouldShortCircuit && cfg.zk.DebugLimit == 0 {
 		return nil
 	}
 
@@ -138,6 +152,7 @@ func SpawnExecuteBlocksStageZk(s *StageState, u Unwinder, tx kv.RwTx, toBlock ui
 
 	prevBlockRoot := header.Root
 	prevBlockHash := prevheaderHash
+
 Loop:
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
 		stageProgress = blockNum
@@ -259,7 +274,8 @@ Loop:
 	if !quiet {
 		log.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", stageProgress)
 	}
-	return stoppedErr
+	err = stoppedErr
+	return err
 }
 
 func getPreexecuteValues(cfg ExecuteBlockCfg, ctx context.Context, tx kv.RwTx, blockNum uint64) (common.Hash, *types.Block, *types.Header, []common.Address, error) {

@@ -33,6 +33,10 @@ type Zk struct {
 
 	RebuildTreeAfter uint64
 	WitnessFull      bool
+
+	DebugLimit     uint64
+	DebugStep      uint64
+	DebugStepAfter uint64
 }
 
 var DefaultZkConfig = &Zk{}

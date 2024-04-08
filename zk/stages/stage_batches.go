@@ -23,6 +23,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -81,13 +82,15 @@ type BatchesCfg struct {
 	db                  kv.RwDB
 	blockRoutineStarted bool
 	dsClient            DatastreamClient
+	zkCfg               *ethconfig.Zk
 }
 
-func StageBatchesCfg(db kv.RwDB, dsClient DatastreamClient) BatchesCfg {
+func StageBatchesCfg(db kv.RwDB, dsClient DatastreamClient, zkCfg *ethconfig.Zk) BatchesCfg {
 	return BatchesCfg{
 		db:                  db,
 		blockRoutineStarted: false,
 		dsClient:            dsClient,
+		zkCfg:               zkCfg,
 	}
 }
 
@@ -126,6 +129,10 @@ func SpawnStageBatches(
 	batchesProgress, err := stages.GetStageProgress(tx, stages.Batches)
 	if err != nil {
 		return fmt.Errorf("save stage progress error: %v", err)
+	}
+
+	if batchesProgress > cfg.zkCfg.DebugLimit {
+		return nil
 	}
 
 	highestVerifiedBatch, err := stages.GetStageProgress(tx, stages.L1VerificationsBatchNo)
@@ -196,6 +203,23 @@ func SpawnStageBatches(
 				panic(message)
 			}
 
+			/////// DEBUG BISECTION ///////
+			// exit stage when debug bisection flags set and we're at the limit block
+			if cfg.zkCfg.DebugLimit > 0 && l2Block.L2BlockNumber > cfg.zkCfg.DebugLimit {
+				fmt.Println(fmt.Sprintf("[%s] Debug limit reached, stopping stage", logPrefix))
+				endLoop = true
+			}
+
+			// if we're above StepAfter, and we're at a step, move the stages on
+			if cfg.zkCfg.DebugStep > 0 && cfg.zkCfg.DebugStepAfter > 0 && l2Block.L2BlockNumber > cfg.zkCfg.DebugStepAfter {
+				fmt.Println(fmt.Sprintf("[%s] Debug step after reached, continuing stage", logPrefix))
+				if l2Block.L2BlockNumber%cfg.zkCfg.DebugStep == 0 {
+					fmt.Println(fmt.Sprintf("[%s] Debug step reached, stopping stage", logPrefix))
+					endLoop = true
+				}
+			}
+			/////// END DEBUG BISECTION ///////
+
 			// update forkid
 			if l2Block.ForkId > lastForkId {
 				log.Info(fmt.Sprintf("[%s] Updated fork id, last fork id %d, new fork id:%d, block num:%d", logPrefix, lastForkId, l2Block.ForkId, l2Block.L2BlockNumber))
@@ -254,6 +278,10 @@ func SpawnStageBatches(
 			lastBlockHeight = l2Block.L2BlockNumber
 			blocksWritten++
 			progressChan <- blocksWritten
+
+			if endLoop && cfg.zkCfg.DebugLimit > 0 {
+				break
+			}
 		case gerUpdate := <-gerUpdateChan:
 			if gerUpdate.GlobalExitRoot == emptyHash {
 				log.Warn(fmt.Sprintf("[%s] Skipping GER update with empty root", logPrefix))
@@ -501,7 +529,7 @@ func UnwindBatchesStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg BatchesCfg, c
 	// store the highest hashable block number //
 	/////////////////////////////////////////////
 	// iterate until a block with lower batch number is found
-	// this is the last block of the previous batch and the highest hashable block for vrifications
+	// this is the last block of the previous batch and the highest hashable block for verifications
 	highestHashableL2BlockNo := uint64(fromBlock)
 	for i := fromBlock; i > 0; i-- {
 		batchNo, err := hermezDb.GetBatchNoByL2Block(i)

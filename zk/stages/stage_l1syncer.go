@@ -64,6 +64,12 @@ func SpawnStageL1Syncer(
 	quiet bool,
 ) error {
 
+	///// DEBUG BISECT /////
+	if cfg.zkCfg.DebugLimit > 0 {
+		return nil
+	}
+	///// DEBUG BISECT /////
+
 	logPrefix := s.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Starting L1 sync stage", logPrefix))
 	if sequencer.IsSequencer() {

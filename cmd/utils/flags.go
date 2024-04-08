@@ -485,6 +485,19 @@ var (
 		Usage: "Enable/Diable witness full",
 		Value: true,
 	}
+	DebugLimit = cli.UintFlag{
+		Name:  "debug.limit",
+		Usage: "Limit the number of blocks to sync",
+		Value: 0,
+	}
+	DebugStep = cli.UintFlag{
+		Name:  "debug.step",
+		Usage: "Number of blocks to process each run of the stage loop",
+	}
+	DebugStepAfter = cli.UintFlag{
+		Name:  "debug.step-after",
+		Usage: "Start incrementing by debug.step after this block",
+	}
 	RpcBatchConcurrencyFlag = cli.UintFlag{
 		Name:  "rpc.batch.concurrency",
 		Usage: "Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request",
