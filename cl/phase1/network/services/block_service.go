@@ -114,6 +114,7 @@ func (b *blockService) ProcessMessage(ctx context.Context, msg *cltypes.SignedBe
 	// [IGNORE] The block's parent (defined by block.parent_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue blocks for processing once the parent block is retrieved).
 	parentHeader, ok := b.forkchoiceStore.GetHeader(msg.Block.ParentRoot)
 	if !ok {
+		b.scheduleBlockForLaterProcessing(msg)
 		log.Debug("Parent header not found", "parentRoot", msg.Block.ParentRoot)
 		return ErrIgnore
 	}
