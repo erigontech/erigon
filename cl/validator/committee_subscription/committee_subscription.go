@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/gossip"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/erigon/cl/phase1/network/subnets"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
@@ -81,7 +82,8 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 		vIndex = p.ValidatorIndex
 	)
 
-	subnetId := c.computeSubnetId(slot, cIndex)
+	commiteePerSlot := subnets.ComputeCommitteePerSlot(c.syncedData.HeadState(), slot, c.beaconConfig.SlotsPerEpoch)
+	subnetId := subnets.ComputeSubnetForAttestation(commiteePerSlot, slot, cIndex, c.beaconConfig.SlotsPerEpoch, c.netConfig.AttestationSubnetCount)
 	// add validator to subscription
 	c.validatorSubsMutex.Lock()
 	if _, ok := c.validatorSubs[slot]; !ok {
@@ -154,19 +156,4 @@ func (c *CommitteeSubscribeMgmt) sweepByStaleSlots(ctx context.Context) {
 			c.validatorSubsMutex.Unlock()
 		}
 	}
-}
-
-func (c *CommitteeSubscribeMgmt) computeSubnetId(slot uint64, committeeIndex uint64) uint64 {
-	committeePerSlot := c.computeCommitteePerSlot(slot)
-	// slots_since_epoch_start = uint64(slot % SLOTS_PER_EPOCH)
-	// committees_since_epoch_start = committees_per_slot * slots_since_epoch_start
-	// return SubnetID((committees_since_epoch_start + committee_index) % ATTESTATION_SUBNET_COUNT)
-	slotsSinceEpochStart := slot % c.beaconConfig.SlotsPerEpoch
-	committeesSinceEpochStart := committeePerSlot * slotsSinceEpochStart
-	return (committeesSinceEpochStart + committeeIndex) % c.netConfig.AttestationSubnetCount
-}
-
-func (c *CommitteeSubscribeMgmt) computeCommitteePerSlot(slot uint64) uint64 {
-	epoch := slot / c.beaconConfig.SlotsPerEpoch
-	return c.syncedData.HeadState().CommitteeCount(epoch)
 }
