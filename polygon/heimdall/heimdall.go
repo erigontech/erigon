@@ -204,6 +204,15 @@ func (h *heimdall) FetchCheckpoints(ctx context.Context, store CheckpointStore, 
 	return checkpoints, nil
 }
 
+func (h *heimdall) FetchAllCheckpoints(ctx context.Context, store CheckpointStore) (Checkpoints, error) {
+	count, err := h.client.FetchCheckpointCount(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return h.fetchAllCheckpoints(ctx, store, count)
+}
+
 func (h *heimdall) LastMilestoneId(ctx context.Context, _ MilestoneStore) (MilestoneId, bool, error) {
 	// todo get this from store if its likely not changed (need timeout)
 
@@ -574,15 +583,6 @@ func (h *heimdall) pollMilestones(ctx context.Context, store MilestoneStore, tip
 		tip = MilestoneId(count)
 		go cb(m[len(m)-1])
 	}
-}
-
-func (h *heimdall) FetchAllCheckpoints(ctx context.Context, store CheckpointStore) (Checkpoints, error) {
-	count, err := h.client.FetchCheckpointCount(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	return h.fetchAllCheckpoints(ctx, store, count)
 }
 
 func (h *heimdall) fetchAllCheckpoints(ctx context.Context, store CheckpointStore, count int64) (Checkpoints, error) {
