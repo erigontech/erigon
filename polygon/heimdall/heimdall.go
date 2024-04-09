@@ -84,7 +84,7 @@ func (h *heimdall) FetchCheckpointsFromBlock(ctx context.Context, store Checkpoi
 
 	checkpointsToFetch := count - int64(lastStoredCheckpointId)
 	if checkpointsToFetch >= checkpointsBatchFetchThreshold {
-		checkpoints, err := h.FetchAllCheckpoints(ctx, store)
+		checkpoints, err := h.fetchAllCheckpoints(ctx, store, count)
 		if err != nil {
 			return nil, err
 		}
@@ -577,14 +577,19 @@ func (h *heimdall) pollMilestones(ctx context.Context, store MilestoneStore, tip
 }
 
 func (h *heimdall) FetchAllCheckpoints(ctx context.Context, store CheckpointStore) (Checkpoints, error) {
-	// TODO: once heimdall API is fixed to return sorted items in pages we can only fetch
-	//       the new pages after lastStoredCheckpointId using the checkpoints/list paging API
-	//       (for now we have to fetch all of them)
-	//       and also remove sorting we do after fetching
 	count, err := h.client.FetchCheckpointCount(ctx)
 	if err != nil {
 		return nil, err
 	}
+
+	return h.fetchAllCheckpoints(ctx, store, count)
+}
+
+func (h *heimdall) fetchAllCheckpoints(ctx context.Context, store CheckpointStore, count int64) (Checkpoints, error) {
+	// TODO: once heimdall API is fixed to return sorted items in pages we can only fetch
+	//       the new pages after lastStoredCheckpointId using the checkpoints/list paging API
+	//       (for now we have to fetch all of them)
+	//       and also remove sorting we do after fetching
 
 	h.logger.Debug(heimdallLogPrefix("fetching all checkpoints"))
 

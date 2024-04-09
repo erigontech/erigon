@@ -13,6 +13,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon/crypto"
 )
 
@@ -90,8 +91,18 @@ func (test heimdallTest) setupCheckpoints(count int) []*Checkpoint {
 			AnyTimes()
 	} else {
 		client.EXPECT().
-			FetchAllCheckpoints(gomock.Any()).Return(expectedCheckpoints, nil).
-			Times(1)
+			FetchCheckpoints(gomock.Any(), gomock.Any(), gomock.Any()).
+			DoAndReturn(func(ctx context.Context, page uint64, limit uint64) (Checkpoints, error) {
+				if page == 0 {
+					return nil, nil
+				}
+
+				limit = cmp.Min(10, limit)
+				l := (page - 1) * limit
+				r := page * limit
+				return expectedCheckpoints[l:r], nil
+			}).
+			AnyTimes()
 	}
 
 	// this is a dummy store
