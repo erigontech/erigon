@@ -239,6 +239,12 @@ type MemoryStats struct {
 	StageIndex  int       `json:"stageIndex"`
 }
 
+type NetworkSpeedTestResult struct {
+	Latency       time.Duration `json:"latency"`
+	DownloadSpeed float64       `json:"downloadSpeed"`
+	UploadSpeed   float64       `json:"uploadSpeed"`
+}
+
 func (ti MemoryStats) Type() Type {
 	return TypeOf(ti)
 }

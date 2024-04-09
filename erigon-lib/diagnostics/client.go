@@ -22,6 +22,8 @@ type DiagnosticClient struct {
 	bodiesMutex         sync.Mutex
 	resourcesUsage      ResourcesUsage
 	resourcesUsageMutex sync.Mutex
+	networkSpeed        NetworkSpeedTestResult
+	networkSpeedMutex   sync.Mutex
 }
 
 func NewDiagnosticClient(metricsMux *http.ServeMux, dataDirPath string) *DiagnosticClient {
@@ -50,6 +52,7 @@ func (d *DiagnosticClient) Setup() {
 	d.setupHeadersDiagnostics(rootCtx)
 	d.setupBodiesDiagnostics(rootCtx)
 	d.setupResourcesUsageDiagnostics(rootCtx)
+	d.setupSpeedtestDiagnostics(rootCtx)
 
 	//d.logDiagMsgs()
 }
