@@ -43,7 +43,7 @@ func generateSubnetsTopics(template string, maxIds int) []sentinel.GossipTopic {
 }
 
 func getExpirationForTopic(topic string) time.Time {
-	if strings.Contains(topic, "beacon_attestation") || strings.Contains(topic, "sync_committee") {
+	if strings.Contains(topic, "beacon_attestation") || (strings.Contains(topic, "sync_committee_") && !strings.Contains(topic, gossip.TopicNameSyncCommitteeContributionAndProof)) {
 		return time.Unix(0, 0)
 	}
 
@@ -60,7 +60,7 @@ func createSentinel(cfg *sentinel.SentinelConfig, blockReader freezeblocks.Beaco
 	}
 	gossipTopics := []sentinel.GossipTopic{
 		sentinel.BeaconBlockSsz,
-		sentinel.VoluntaryExitSsz,
+		//sentinel.VoluntaryExitSsz,
 		sentinel.ProposerSlashingSsz,
 		sentinel.AttesterSlashingSsz,
 		sentinel.BlsToExecutionChangeSsz,

@@ -232,13 +232,14 @@ type Config struct {
 
 	// URL to connect to Heimdall node
 	HeimdallURL string
-
 	// No heimdall service
 	WithoutHeimdall bool
 	// Heimdall services active
 	WithHeimdallMilestones bool
 	// Heimdall waypoint recording active
 	WithHeimdallWaypointRecording bool
+	// Use polygon checkpoint sync in preference to POW downloader
+	PolygonSync bool
 
 	// Ethstats service
 	Ethstats string

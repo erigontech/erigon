@@ -151,8 +151,6 @@ func Send[I Info](info I) {
 
 	if ctx.Err() != nil {
 		if errors.Is(ctx.Err(), context.Canceled) {
-			// drop the diagnostic message if there is
-			// no active diagnostic context for the type
 			return
 		}
 

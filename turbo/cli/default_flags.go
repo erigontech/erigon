@@ -89,6 +89,8 @@ var DefaultFlags = []cli.Flag{
 	&AuthRpcWriteTimeoutFlag,
 	&AuthRpcIdleTimeoutFlag,
 	&EvmCallTimeoutFlag,
+	&OverlayGetLogsFlag,
+	&OverlayReplayBlockFlag,
 
 	&utils.SnapKeepBlocksFlag,
 	&utils.SnapStopFlag,
@@ -155,6 +157,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.BorBlockSizeFlag,
 	&utils.WithHeimdallMilestones,
 	&utils.WithHeimdallWaypoints,
+	&utils.PolygonSyncFlag,
 	&utils.EthStatsURLFlag,
 	&utils.OverridePragueFlag,
 

@@ -3,12 +3,11 @@ package diagnostics
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 )
 
-func (d *DiagnosticClient) setupResourcesUsageDiagnostics() {
-	d.runMemoryStatsListener()
+func (d *DiagnosticClient) setupResourcesUsageDiagnostics(rootCtx context.Context) {
+	d.runMemoryStatsListener(rootCtx)
 }
 
 func (d *DiagnosticClient) GetResourcesUsage() ResourcesUsage {
@@ -20,18 +19,15 @@ func (d *DiagnosticClient) GetResourcesUsage() ResourcesUsage {
 	return returnObj
 }
 
-func (d *DiagnosticClient) runMemoryStatsListener() {
+func (d *DiagnosticClient) runMemoryStatsListener(rootCtx context.Context) {
 	go func() {
-		ctx, ch, cancel := Context[MemoryStats](context.Background(), 1)
-		defer cancel()
-
-		rootCtx, _ := common.RootContext()
+		ctx, ch, closeChannel := Context[MemoryStats](rootCtx, 1)
+		defer closeChannel()
 
 		StartProviders(ctx, TypeOf(MemoryStats{}), log.Root())
 		for {
 			select {
 			case <-rootCtx.Done():
-				cancel()
 				return
 			case info := <-ch:
 				d.resourcesUsageMutex.Lock()
