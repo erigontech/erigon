@@ -1,9 +1,8 @@
-//go:build integration
-
 package historical_states_reader_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -43,6 +42,7 @@ func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postSt
 	require.NoError(t, err)
 	_, err = postState.HashSSZ()
 	require.NoError(t, err)
+	fmt.Println(s.Validators().Get(0).PublicKey(), postState.Validators().Get(0).PublicKey())
 	require.Equal(t, libcommon.Hash(postHash), blocks[len(blocks)-1].Block.StateRoot)
 }
 

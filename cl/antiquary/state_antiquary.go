@@ -117,8 +117,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	stateAntiquaryCollector := newBeaconStatesCollector(s.cfg, s.dirs.Tmp, s.logger)
 	defer stateAntiquaryCollector.close()
 
-	// buffers
-
 	if err := s.initializeStateAntiquaryIfNeeded(ctx, tx); err != nil {
 		return err
 	}
@@ -136,6 +134,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			return true
 		})
 	}
+	s.validatorsTable.SetSlot(s.currentState.Slot())
 
 	logLvl := log.LvlInfo
 	if to-s.currentState.Slot() < 96 {
@@ -358,6 +357,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		return err
 	}
 	defer rwTx.Rollback()
+
 	start = time.Now()
 	// We now need to store the state
 	if err := stateAntiquaryCollector.flush(ctx, rwTx); err != nil {
@@ -457,7 +457,7 @@ func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.
 			return err
 		}
 		if computedBlockRoot != expectedBlockRoot {
-			log.Warn("Block root mismatch, trying again", "slot", attempt, "expected", expectedBlockRoot)
+			log.Debug("Block root mismatch, trying again", "slot", attempt, "expected", expectedBlockRoot)
 			// backoff more
 			backoffStep += 10
 			continue
@@ -476,6 +476,5 @@ func computeSlotToBeRequested(tx kv.Tx, cfg *clparams.BeaconChainConfig, genesis
 	if targetSlot > clparams.SlotsPerDump*backoffStep {
 		return findNearestSlotBackwards(tx, cfg, targetSlot-clparams.SlotsPerDump*backoffStep)
 	}
-	fmt.Println(genesisSlot)
 	return genesisSlot, nil
 }
