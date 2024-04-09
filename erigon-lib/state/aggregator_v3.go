@@ -275,27 +275,6 @@ func (a *AggregatorV3) OpenFolder(readonly bool) error {
 	return nil
 }
 
-func (a *AggregatorV3) OpenList(files []string, readonly bool) error {
-	//log.Warn("[dbg] OpenList", "l", files)
-
-	a.filesMutationLock.Lock()
-	defer a.filesMutationLock.Unlock()
-	eg := &errgroup.Group{}
-	for _, d := range a.d {
-		d := d
-		eg.Go(func() error { return d.OpenFolder(readonly) })
-	}
-	eg.Go(func() error { return a.logAddrs.OpenFolder(readonly) })
-	eg.Go(func() error { return a.logTopics.OpenFolder(readonly) })
-	eg.Go(func() error { return a.tracesFrom.OpenFolder(readonly) })
-	eg.Go(func() error { return a.tracesTo.OpenFolder(readonly) })
-	if err := eg.Wait(); err != nil {
-		return err
-	}
-	a.recalcMaxTxNum()
-	return nil
-}
-
 func (a *AggregatorV3) Close() {
 	if a.ctxCancel == nil { // invariant: it's safe to call Close multiple times
 		return

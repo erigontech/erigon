@@ -139,9 +139,9 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 	mutex := &sync.RWMutex{}
 	var stats AggStats
 
-	lock, err := getSnapshotLock(ctx, cfg, db, &stats, mutex, logger)
+	snapLock, err := getSnapshotLock(ctx, cfg, db, &stats, mutex, logger)
 	if err != nil {
-		return nil, fmt.Errorf("can't initialize snapshot lock: %w", err)
+		return nil, fmt.Errorf("can't initialize snapshot snapLock: %w", err)
 	}
 
 	d := &Downloader{
@@ -156,13 +156,17 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		logger:              logger,
 		verbosity:           verbosity,
 		torrentFiles:        &TorrentFiles{dir: cfg.Dirs.Snap},
-		snapshotLock:        lock,
+		snapshotLock:        snapLock,
 		webDownloadInfo:     map[string]webDownloadInfo{},
 		webDownloadSessions: map[string]*RCloneSession{},
 		downloading:         map[string]struct{}{},
 		webseedsDiscover:    discover,
 	}
-	d.webseeds.SetTorrent(d.torrentFiles, lock.Downloads, cfg.DownloadTorrentFilesFromWebseed)
+	if dbg.DownloaderOff() {
+		return d, nil
+	}
+
+	d.webseeds.SetTorrent(d.torrentFiles, snapLock.Downloads, cfg.DownloadTorrentFilesFromWebseed)
 
 	if cfg.ClientConfig.DownloadRateLimiter != nil {
 		downloadLimit := cfg.ClientConfig.DownloadRateLimiter.Limit()
@@ -174,7 +178,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 	if cfg.AddTorrentsFromDisk {
 		var downloadMismatches []string
 
-		for _, download := range lock.Downloads {
+		for _, download := range snapLock.Downloads {
 			if info, err := d.torrentInfo(download.Name); err == nil {
 				if info.Completed != nil {
 					if hash := hex.EncodeToString(info.Hash); download.Hash != hash {
@@ -199,10 +203,10 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 						fileHash := hex.EncodeToString(fileHashBytes)
 
 						if fileHash != download.Hash && fileHash != hash {
-							d.logger.Error("[snapshots] download db mismatch", "file", download.Name, "lock", download.Hash, "db", hash, "disk", fileHash, "downloaded", *info.Completed)
+							d.logger.Error("[snapshots] download db mismatch", "file", download.Name, "snapshotLock", download.Hash, "db", hash, "disk", fileHash, "downloaded", *info.Completed)
 							downloadMismatches = append(downloadMismatches, download.Name)
 						} else {
-							d.logger.Warn("[snapshots] lock hash does not match completed download", "file", download.Name, "lock", hash, "download", download.Hash, "downloaded", *info.Completed)
+							d.logger.Warn("[snapshots] snapshotLock hash does not match completed download", "file", download.Name, "snapshotLock", hash, "download", download.Hash, "downloaded", *info.Completed)
 						}
 					}
 				}
@@ -216,13 +220,13 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		//TODO: why do we need it if we have `addTorrentFilesFromDisk`? what if they are conflict?
 		//TODO: why it's before `BuildTorrentFilesIfNeed`? what if they are conflict?
 		//TODO: even if hash is saved in "snapshots-lock.json" - it still must preserve `prohibit_new_downloads.lock` and don't download new files ("user restart" must be fast, "erigon3 has .kv files which never-ending merge and delete small files")
-		//for _, it := range lock.Downloads {
+		//for _, it := range snapLock.Downloads {
 		//	if err := d.AddMagnetLink(ctx, snaptype.Hex2InfoHash(it.Hash), it.Name); err != nil {
 		//		return nil, err
 		//	}
 		//}
 
-		if err := d.BuildTorrentFilesIfNeed(d.ctx, lock.Chain, lock.Downloads); err != nil {
+		if err := d.BuildTorrentFilesIfNeed(d.ctx, snapLock.Chain, snapLock.Downloads); err != nil {
 			return nil, err
 		}
 
