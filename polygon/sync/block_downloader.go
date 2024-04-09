@@ -126,6 +126,7 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 	defer progressLogTicker.Stop()
 
 	var lastBlock *types.Block
+	batchFetchStartTime := time.Now()
 	for len(waypoints) > 0 {
 		select {
 		case <-ctx.Done():
@@ -234,6 +235,9 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 		if len(blocks) == 0 {
 			continue
 		}
+
+		d.logger.Debug(syncLogPrefix("fetched blocks"), "len", len(blocks), "duration", time.Since(batchFetchStartTime))
+		batchFetchStartTime = time.Now() // reset for next time
 
 		if err := d.storage.InsertBlocks(ctx, blocks); err != nil {
 			return nil, err
