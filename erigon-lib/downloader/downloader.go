@@ -2335,6 +2335,9 @@ func (d *Downloader) Stats() AggStats {
 }
 
 func (d *Downloader) Close() {
+	if dbg.DownloaderOff() {
+		return
+	}
 	d.logger.Debug("[snapshots] stopping downloader")
 	d.stopMainLoop()
 	d.wg.Wait()
