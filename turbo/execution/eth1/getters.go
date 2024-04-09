@@ -259,7 +259,7 @@ func (e *EthereumExecutionModule) CurrentHeader(ctx context.Context, _ *emptypb.
 	defer tx.Rollback()
 	hash := rawdb.ReadHeadHeaderHash(tx)
 	number := rawdb.ReadHeaderNumber(tx, hash)
-	h, err := e.blockReader.Header(context.Background(), tx, hash, *number)
+	h, err := e.blockReader.Header(ctx, tx, hash, *number)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.CurrentHeader: blockReader.Header error %w", err)
 	}
