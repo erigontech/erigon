@@ -75,19 +75,36 @@ func (test heimdallTest) setupCheckpoints(count int) []*Checkpoint {
 	}
 
 	client := test.client
-	client.EXPECT().FetchCheckpointCount(gomock.Any()).Return(int64(len(expectedCheckpoints)), nil)
-	client.EXPECT().FetchCheckpoint(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, number int64) (*Checkpoint, error) {
-		return expectedCheckpoints[number-1], nil
-	}).AnyTimes()
+
+	client.EXPECT().
+		FetchCheckpointCount(gomock.Any()).
+		Return(int64(len(expectedCheckpoints)), nil).
+		Times(1)
+
+	if count < checkpointsBatchFetchThreshold {
+		client.EXPECT().
+			FetchCheckpoint(gomock.Any(), gomock.Any()).
+			DoAndReturn(func(ctx context.Context, number int64) (*Checkpoint, error) {
+				return expectedCheckpoints[number-1], nil
+			}).
+			AnyTimes()
+	} else {
+		client.EXPECT().
+			FetchAllCheckpoints(gomock.Any()).Return(expectedCheckpoints, nil).
+			Times(1)
+	}
 
 	// this is a dummy store
 	test.store.EXPECT().
-		LastCheckpointId(gomock.Any()).Return(CheckpointId(0), false, nil).AnyTimes()
+		LastCheckpointId(gomock.Any()).Return(CheckpointId(0), false, nil).
+		AnyTimes()
+
 	test.store.EXPECT().
 		PutCheckpoint(gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(func(ctx context.Context, checkpointId CheckpointId, checkpoint *Checkpoint) error {
 			return nil
-		}).AnyTimes()
+		}).
+		AnyTimes()
 
 	return expectedCheckpoints
 }
@@ -141,6 +158,19 @@ func TestFetchCheckpointsPastLast(t *testing.T) {
 func TestFetchCheckpoints10(t *testing.T) {
 	test := newHeimdallTest(t)
 	expectedCheckpoints := test.setupCheckpoints(10)
+
+	checkpoints, err := test.heimdall.FetchCheckpointsFromBlock(test.ctx, test.store, 0)
+	require.Nil(t, err)
+
+	require.Equal(t, len(expectedCheckpoints), len(checkpoints))
+	for i := 0; i < len(checkpoints); i++ {
+		assert.Equal(t, expectedCheckpoints[i].StartBlock().Uint64(), checkpoints[i].StartBlock().Uint64())
+	}
+}
+
+func TestFetchCheckpoints100(t *testing.T) {
+	test := newHeimdallTest(t)
+	expectedCheckpoints := test.setupCheckpoints(100)
 
 	checkpoints, err := test.heimdall.FetchCheckpointsFromBlock(test.ctx, test.store, 0)
 	require.Nil(t, err)

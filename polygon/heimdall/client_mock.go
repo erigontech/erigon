@@ -52,6 +52,21 @@ func (mr *MockHeimdallClientMockRecorder) Close() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Close", reflect.TypeOf((*MockHeimdallClient)(nil).Close))
 }
 
+// FetchAllCheckpoints mocks base method.
+func (m *MockHeimdallClient) FetchAllCheckpoints(arg0 context.Context) (Checkpoints, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FetchAllCheckpoints", arg0)
+	ret0, _ := ret[0].(Checkpoints)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FetchAllCheckpoints indicates an expected call of FetchAllCheckpoints.
+func (mr *MockHeimdallClientMockRecorder) FetchAllCheckpoints(arg0 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchAllCheckpoints", reflect.TypeOf((*MockHeimdallClient)(nil).FetchAllCheckpoints), arg0)
+}
+
 // FetchCheckpoint mocks base method.
 func (m *MockHeimdallClient) FetchCheckpoint(arg0 context.Context, arg1 int64) (*Checkpoint, error) {
 	m.ctrl.T.Helper()
@@ -80,6 +95,21 @@ func (m *MockHeimdallClient) FetchCheckpointCount(arg0 context.Context) (int64, 
 func (mr *MockHeimdallClientMockRecorder) FetchCheckpointCount(arg0 any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchCheckpointCount", reflect.TypeOf((*MockHeimdallClient)(nil).FetchCheckpointCount), arg0)
+}
+
+// FetchCheckpoints mocks base method.
+func (m *MockHeimdallClient) FetchCheckpoints(arg0 context.Context, arg1, arg2 uint64) (Checkpoints, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FetchCheckpoints", arg0, arg1, arg2)
+	ret0, _ := ret[0].(Checkpoints)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FetchCheckpoints indicates an expected call of FetchCheckpoints.
+func (mr *MockHeimdallClientMockRecorder) FetchCheckpoints(arg0, arg1, arg2 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchCheckpoints", reflect.TypeOf((*MockHeimdallClient)(nil).FetchCheckpoints), arg0, arg1, arg2)
 }
 
 // FetchLastNoAckMilestone mocks base method.

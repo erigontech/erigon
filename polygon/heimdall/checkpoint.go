@@ -8,7 +8,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
-var _ Waypoint = Checkpoint{}
+var _ Waypoint = &Checkpoint{}
 
 type CheckpointId uint64
 
@@ -17,48 +17,64 @@ type Checkpoint struct {
 	Fields WaypointFields
 }
 
-func (c Checkpoint) StartBlock() *big.Int {
+func (c *Checkpoint) StartBlock() *big.Int {
 	return c.Fields.StartBlock
 }
 
-func (c Checkpoint) EndBlock() *big.Int {
+func (c *Checkpoint) EndBlock() *big.Int {
 	return c.Fields.EndBlock
 }
 
-func (c Checkpoint) RootHash() libcommon.Hash {
+func (c *Checkpoint) RootHash() libcommon.Hash {
 	return c.Fields.RootHash
 }
 
-func (c Checkpoint) Timestamp() uint64 {
+func (c *Checkpoint) Timestamp() uint64 {
 	return c.Fields.Timestamp
 }
 
-func (c Checkpoint) Length() uint64 {
+func (c *Checkpoint) Length() uint64 {
 	return c.Fields.Length()
 }
 
-func (c Checkpoint) CmpRange(n uint64) int {
+func (c *Checkpoint) CmpRange(n uint64) int {
 	return c.Fields.CmpRange(n)
 }
 
-func (m Checkpoint) String() string {
+func (c *Checkpoint) String() string {
 	return fmt.Sprintf(
 		"Checkpoint {%v (%d:%d) %v %v %v}",
-		m.Fields.Proposer.String(),
-		m.Fields.StartBlock,
-		m.Fields.EndBlock,
-		m.Fields.RootHash.Hex(),
-		m.Fields.ChainID,
-		m.Fields.Timestamp,
+		c.Fields.Proposer.String(),
+		c.Fields.StartBlock,
+		c.Fields.EndBlock,
+		c.Fields.RootHash.Hex(),
+		c.Fields.ChainID,
+		c.Fields.Timestamp,
 	)
 }
 
-func (c Checkpoint) MarshalJSON() ([]byte, error) {
+func (c *Checkpoint) MarshalJSON() ([]byte, error) {
 	return json.Marshal(c.Fields)
 }
 
 func (c *Checkpoint) UnmarshalJSON(b []byte) error {
 	return json.Unmarshal(b, &c.Fields)
+}
+
+type Checkpoints []*Checkpoint
+
+func (cs *Checkpoints) Len() int {
+	return len(*cs)
+}
+
+func (cs *Checkpoints) Less(i, j int) bool {
+	v := *cs
+	return v[i].StartBlock().Uint64() < v[j].StartBlock().Uint64()
+}
+
+func (cs *Checkpoints) Swap(i, j int) {
+	v := *cs
+	v[i], v[j] = v[j], v[i]
 }
 
 type CheckpointResponse struct {
@@ -73,4 +89,9 @@ type CheckpointCount struct {
 type CheckpointCountResponse struct {
 	Height string          `json:"height"`
 	Result CheckpointCount `json:"result"`
+}
+
+type CheckpointListResponse struct {
+	Height string      `json:"height"`
+	Result Checkpoints `json:"result"`
 }
