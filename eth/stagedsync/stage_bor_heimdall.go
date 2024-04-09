@@ -197,11 +197,13 @@ func BorHeimdallForward(
 		waypointStart := time.Now()
 
 		lastCheckpointId, err = fetchAndWriteHeimdallCheckpointsIfNeeded(ctx, headNumber, tx, cfg, s.LogPrefix(), logger)
+
 		if err != nil {
 			return err
 		}
 
 		lastMilestoneId, err = fetchAndWriteHeimdallMilestonesIfNeeded(ctx, headNumber, tx, cfg, s.LogPrefix(), logger)
+
 		if err != nil {
 			return err
 		}
@@ -890,17 +892,30 @@ func BorHeimdallUnwind(u *UnwindState, ctx context.Context, _ *StageState, tx kv
 	// Removing checkpoints
 	if len(cfg.unwindTypes) == 0 || slices.Contains(cfg.unwindTypes, "checkpoints") {
 		checkpointCursor, err := tx.RwCursor(kv.BorCheckpoints)
+
 		if err != nil {
 			return err
 		}
 
 		defer checkpointCursor.Close()
 		lastCheckpointToKeep, err := heimdall.CheckpointIdAt(tx, u.UnwindPoint)
-		var checkpointIdBytes [8]byte
-		binary.BigEndian.PutUint64(checkpointIdBytes[:], uint64(lastCheckpointToKeep+1))
-		for k, _, err := checkpointCursor.Seek(checkpointIdBytes[:]); err == nil && k != nil; k, _, err = checkpointCursor.Next() {
-			if err = checkpointCursor.DeleteCurrent(); err != nil {
+		hasCheckpoints := true
+
+		if err != nil {
+			if !errors.Is(err, heimdall.ErrCheckpointNotFound) {
 				return err
+			}
+
+			hasCheckpoints = false
+		}
+
+		if hasCheckpoints {
+			var checkpointIdBytes [8]byte
+			binary.BigEndian.PutUint64(checkpointIdBytes[:], uint64(lastCheckpointToKeep+1))
+			for k, _, err := checkpointCursor.Seek(checkpointIdBytes[:]); err == nil && k != nil; k, _, err = checkpointCursor.Next() {
+				if err = checkpointCursor.DeleteCurrent(); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -908,17 +923,30 @@ func BorHeimdallUnwind(u *UnwindState, ctx context.Context, _ *StageState, tx kv
 	// Removing milestones
 	if len(cfg.unwindTypes) == 0 || slices.Contains(cfg.unwindTypes, "milestones") {
 		milestoneCursor, err := tx.RwCursor(kv.BorMilestones)
+
 		if err != nil {
 			return err
 		}
 
 		defer milestoneCursor.Close()
 		lastMilestoneToKeep, err := heimdall.MilestoneIdAt(tx, u.UnwindPoint)
-		var milestoneIdBytes [8]byte
-		binary.BigEndian.PutUint64(milestoneIdBytes[:], uint64(lastMilestoneToKeep+1))
-		for k, _, err := milestoneCursor.Seek(milestoneIdBytes[:]); err == nil && k != nil; k, _, err = milestoneCursor.Next() {
-			if err = milestoneCursor.DeleteCurrent(); err != nil {
+		hasMilestones := true
+
+		if err != nil {
+			if !errors.Is(err, heimdall.ErrMilestoneNotFound) {
 				return err
+			}
+
+			hasMilestones = false
+		}
+
+		if hasMilestones {
+			var milestoneIdBytes [8]byte
+			binary.BigEndian.PutUint64(milestoneIdBytes[:], uint64(lastMilestoneToKeep+1))
+			for k, _, err := milestoneCursor.Seek(milestoneIdBytes[:]); err == nil && k != nil; k, _, err = milestoneCursor.Next() {
+				if err = milestoneCursor.DeleteCurrent(); err != nil {
+					return err
+				}
 			}
 		}
 	}

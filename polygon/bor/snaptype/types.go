@@ -244,6 +244,10 @@ var (
 
 					checkpointTo, err = heimdall.CheckpointIdAt(tx, blockTo)
 
+					if err != nil {
+						return err
+					}
+
 					if blockFrom > 0 {
 						if prevTo, err := heimdall.CheckpointIdAt(tx, blockFrom-1); err == nil {
 							if prevTo == checkpointFrom {
@@ -312,20 +316,23 @@ var (
 						return err
 					}
 
-					if milestoneFrom > 0 && blockFrom > 0 {
-						if prevTo, err := heimdall.MilestoneIdAt(tx, blockFrom-1); err == nil && prevTo == milestoneFrom {
-							milestoneFrom++
-						}
-					}
-
 					milestoneTo, err = heimdall.MilestoneIdAt(tx, blockTo)
 
 					if err != nil && !errors.Is(err, heimdall.ErrMilestoneNotFound) {
 						return err
 					}
 
-					if milestoneTo < milestoneFrom {
-						return fmt.Errorf("end milestone: %d before start milestone: %d", milestoneTo, milestoneFrom)
+					if milestoneFrom > 0 && blockFrom > 0 {
+						if prevTo, err := heimdall.MilestoneIdAt(tx, blockFrom-1); err == nil && prevTo == milestoneFrom {
+							if prevTo == milestoneFrom {
+								if prevTo == milestoneTo {
+									milestoneFrom = 0
+									milestoneTo = 0
+								} else {
+									milestoneFrom++
+								}
+							}
+						}
 					}
 
 					return nil

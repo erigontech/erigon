@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -1134,15 +1135,15 @@ func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt 
 	}
 
 	defer checkpointCursor.Close()
-	lastCheckpointToKeep, err := heimdall.CheckpointIdAt(tx, blockTo)
+	lastCheckpointToRemove, err := heimdall.CheckpointIdAt(tx, blockTo)
 
 	if err != nil {
 		return err
 	}
 
 	var checkpointIdBytes [8]byte
-	binary.BigEndian.PutUint64(checkpointIdBytes[:], uint64(lastCheckpointToKeep+1))
-	for k, _, err := checkpointCursor.Seek(checkpointIdBytes[:]); err == nil && k != nil; k, _, err = checkpointCursor.Next() {
+	binary.BigEndian.PutUint64(checkpointIdBytes[:], uint64(lastCheckpointToRemove))
+	for k, _, err := checkpointCursor.Seek(checkpointIdBytes[:]); err == nil && k != nil; k, _, err = checkpointCursor.Prev() {
 		if err = checkpointCursor.DeleteCurrent(); err != nil {
 			return err
 		}
@@ -1155,15 +1156,24 @@ func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt 
 	}
 
 	defer milestoneCursor.Close()
-	lastMilestoneToKeep, err := heimdall.MilestoneIdAt(tx, blockTo)
 
-	if err != nil {
-		return err
+	var lastMilestoneToRemove heimdall.MilestoneId
+
+	for blockCount := 1; err != nil && blockCount < blocksDeleteLimit; blockCount++ {
+		lastMilestoneToRemove, err = heimdall.MilestoneIdAt(tx, blockTo-uint64(blockCount))
+
+		if !errors.Is(err, heimdall.ErrMilestoneNotFound) {
+			return err
+		} else {
+			if blockCount == blocksDeleteLimit-1 {
+				return nil
+			}
+		}
 	}
 
 	var milestoneIdBytes [8]byte
-	binary.BigEndian.PutUint64(milestoneIdBytes[:], uint64(lastMilestoneToKeep+1))
-	for k, _, err := milestoneCursor.Seek(milestoneIdBytes[:]); err == nil && k != nil; k, _, err = milestoneCursor.Next() {
+	binary.BigEndian.PutUint64(milestoneIdBytes[:], uint64(lastMilestoneToRemove))
+	for k, _, err := milestoneCursor.Seek(milestoneIdBytes[:]); err == nil && k != nil; k, _, err = milestoneCursor.Prev() {
 		if err = milestoneCursor.DeleteCurrent(); err != nil {
 			return err
 		}

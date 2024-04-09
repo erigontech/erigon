@@ -40,7 +40,11 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 			minSnapNum = available
 		}
 
-		blockFrom, blockTo, ok := CanRetire(maxBlockNum, minSnapNum, snaptype.Enum(), br.chainConfig)
+		if maxBlockNum <= minSnapNum {
+			continue
+		}
+
+		blockFrom, blockTo, ok := canRetire(minSnapNum, maxBlockNum+1, snaptype.Enum(), br.chainConfig)
 
 		if ok {
 			blocksRetired = true
