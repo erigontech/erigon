@@ -35,6 +35,8 @@ type GossipManager struct {
 
 	emitters     *beaconevents.Emitters
 	committeeSub *committee_subscription.CommitteeSubscribeMgmt
+
+	// Services for processing messages from the network
 	blockService services.BlockService
 }
 
@@ -108,22 +110,22 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			l["at"] = "decoding block"
 			return err
 		}
+		log.Debug("Received block via gossip", "slot", obj.Block.Slot)
 		err = g.blockService.ProcessMessage(ctx, obj)
-
-	case gossip.TopicNameLightClientFinalityUpdate:
-		obj := &cltypes.LightClientFinalityUpdate{}
-		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
-			g.sentinel.BanPeer(ctx, data.Peer)
-			l["at"] = "decoding lc finality update"
-			return err
-		}
-	case gossip.TopicNameLightClientOptimisticUpdate:
-		obj := &cltypes.LightClientOptimisticUpdate{}
-		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
-			g.sentinel.BanPeer(ctx, data.Peer)
-			l["at"] = "decoding lc optimistic update"
-			return err
-		}
+	// case gossip.TopicNameLightClientFinalityUpdate:
+	// 	obj := &cltypes.LightClientFinalityUpdate{}
+	// 	if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
+	// 		g.sentinel.BanPeer(ctx, data.Peer)
+	// 		l["at"] = "decoding lc finality update"
+	// 		return err
+	// 	}
+	// case gossip.TopicNameLightClientOptimisticUpdate:
+	// 	obj := &cltypes.LightClientOptimisticUpdate{}
+	// 	if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
+	// 		g.sentinel.BanPeer(ctx, data.Peer)
+	// 		l["at"] = "decoding lc optimistic update"
+	// 		return err
+	// 	}
 	case gossip.TopicNameSyncCommitteeContributionAndProof:
 		if err := operationsContract[*cltypes.SignedContributionAndProof](ctx, g, l, data, int(version), "contribution and proof", g.forkChoice.OnSignedContributionAndProof); err != nil {
 			return err
