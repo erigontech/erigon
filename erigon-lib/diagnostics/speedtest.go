@@ -1,18 +1,18 @@
 package diagnostics
 
 import (
+	"context"
 	"time"
 
 	"github.com/showwin/speedtest-go/speedtest"
 )
 
-func (d *DiagnosticClient) setupSpeedtestDiagnostics() {
+func (d *DiagnosticClient) setupSpeedtestDiagnostics(rootCtx context.Context) {
 	d.networkSpeedMutex.Lock()
 	d.networkSpeed = d.runSpeedTest()
 	d.networkSpeedMutex.Unlock()
 
 	ticker := time.NewTicker(180 * time.Second)
-	quit := make(chan struct{})
 	go func() {
 		for {
 			select {
@@ -20,7 +20,7 @@ func (d *DiagnosticClient) setupSpeedtestDiagnostics() {
 				d.networkSpeedMutex.Lock()
 				d.networkSpeed = d.runSpeedTest()
 				d.networkSpeedMutex.Unlock()
-			case <-quit:
+			case <-rootCtx.Done():
 				ticker.Stop()
 				return
 			}
