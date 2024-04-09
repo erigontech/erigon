@@ -3,7 +3,8 @@ package zkchainconfig
 import "github.com/ledgerwatch/erigon/params/networkname"
 
 var chainIds = []uint64{
-	195,    // x1-testnet
+	195,    // xlayer-testnet
+	196,    // xlayer-mainet
 	1101,   // mainnet
 	2440,   // cardona internal
 	2442,   // cardona
@@ -13,7 +14,8 @@ var chainIds = []uint64{
 }
 
 var chainIdToName = map[uint64]string{
-	195:    networkname.X1TestnetChainName,
+	195:    networkname.XLayerTestnetChainName,
+	196:    networkname.XLayerMainnetChainName,
 	1101:   networkname.HermezMainnetChainName,
 	2440:   networkname.HermezBaliChainName,
 	2442:   networkname.HermezCardonaChainName,

@@ -1,5 +1,5 @@
 {
-  "ChainName": "x1-testnet",
+  "ChainName": "xlayer-testnet",
   "chainId": 195,
   "consensus": "ethash",
   "homesteadBlock": 0,
