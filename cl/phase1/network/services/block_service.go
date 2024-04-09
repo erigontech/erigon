@@ -80,6 +80,7 @@ func NewBlockService(
 func (b *blockService) ProcessMessage(ctx context.Context, msg *cltypes.SignedBeaconBlock) error {
 	headState := b.syncedData.HeadState()
 	if headState == nil {
+		b.scheduleBlockForLaterProcessing(msg)
 		log.Debug("Head state is nil")
 		return ErrIgnore
 	}
