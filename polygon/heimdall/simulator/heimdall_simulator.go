@@ -188,7 +188,7 @@ func (h *HeimdallSimulator) downloadData(ctx context.Context, spans *freezeblock
 
 	info, _, _ := snaptype.ParseFileName(session.LocalFsRoot(), fileName)
 
-	err = sType.BuildIndexes(ctx, info, nil, h.downloader.LocalFsRoot(), nil, log.LvlDebug, h.logger)
+	err = sType.BuildIndexes(ctx, info, nil, session.LocalFsRoot(), nil, log.LvlDebug, h.logger)
 
 	if err != nil {
 		return fmt.Errorf("can't download %s: %w", fileName, err)
