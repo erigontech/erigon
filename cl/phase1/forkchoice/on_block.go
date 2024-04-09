@@ -116,8 +116,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			if invalidBlock {
 				f.forkGraph.MarkHeaderAsInvalid(blockRoot)
 			}
-			log.Warn("newPayload failed", "err", err)
-			return err
+			return fmt.Errorf("newPayload failed: %v", err)
 		}
 		if invalidBlock {
 			f.forkGraph.MarkHeaderAsInvalid(blockRoot)
