@@ -100,28 +100,16 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 	// then attempts to deserialize the received data into it.
 	// If the deserialization fails, an error is logged and the loop returns to the next iteration.
 	// If the deserialization is successful, the object is set to the deserialized value and the loop returns to the next iteration.
-	var object ssz.Unmarshaler
 	switch data.Name {
 	case gossip.TopicNameBeaconBlock:
-		object = cltypes.NewSignedBeaconBlock(g.beaconConfig)
-		if err := object.DecodeSSZ(data.Data, int(version)); err != nil {
+		obj := cltypes.NewSignedBeaconBlock(g.beaconConfig)
+		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
 			g.sentinel.BanPeer(ctx, data.Peer)
 			l["at"] = "decoding block"
 			return err
 		}
+		err = g.blockService.ProcessMessage(ctx, obj)
 
-		err = g.blockService.ProcessMessage(ctx, object.(*cltypes.SignedBeaconBlock))
-		if errors.Is(err, services.ErrIgnore) {
-			return nil
-		}
-		if err != nil {
-			l["at"] = "block service"
-			g.sentinel.BanPeer(ctx, data.Peer)
-			return err
-		}
-		if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
-			log.Debug("failed publish gossip", "err", err)
-		}
 	case gossip.TopicNameLightClientFinalityUpdate:
 		obj := &cltypes.LightClientFinalityUpdate{}
 		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
@@ -250,6 +238,17 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			}
 		default:
 		}
+	}
+	if errors.Is(err, services.ErrIgnore) {
+		return nil
+	}
+	if err != nil {
+		l["at"] = "block service"
+		g.sentinel.BanPeer(ctx, data.Peer)
+		return err
+	}
+	if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
+		log.Debug("failed publish gossip", "err", err)
 	}
 	return nil
 }
