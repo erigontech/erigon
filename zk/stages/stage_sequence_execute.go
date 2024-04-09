@@ -321,6 +321,16 @@ LOOP:
 		// before continuing on
 		batchCounters.ClearTransactionCounters()
 		ibs = state.New(stateReader)
+
+		header = &types.Header{
+			ParentHash: parentBlock.Hash(),
+			Coinbase:   cfg.zk.AddressSequencer,
+			Difficulty: blockDifficulty,
+			Number:     new(big.Int).SetUint64(nextBlockNum),
+			GasLimit:   getGasLimit(uint16(forkId)),
+			Time:       newBlockTimestamp,
+		}
+
 		for idx, transaction := range addedTransactions {
 			receipt, innerOverflow, err := attemptAddTransaction(tx, cfg, batchCounters, header, parentBlock.Header(), transaction, ibs, hermezDb, smt)
 			if err != nil {
