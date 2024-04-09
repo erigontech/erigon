@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/ledgerwatch/log/v3"
 
@@ -63,13 +64,25 @@ func (s *executionClientStorage) Run(ctx context.Context) error {
 	for {
 		select {
 		case blocks := <-s.queue:
-			err := s.execution.InsertBlocks(ctx, blocks)
-			s.waitGroup.Done()
-			if err != nil {
+			if err := s.insertBlocks(ctx, blocks); err != nil {
 				return err
 			}
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 	}
+}
+
+func (s *executionClientStorage) insertBlocks(ctx context.Context, blocks []*types.Block) error {
+	defer s.waitGroup.Done()
+
+	insertStartTime := time.Now()
+	err := s.execution.InsertBlocks(ctx, blocks)
+	if err != nil {
+		return err
+	}
+
+	s.logger.Debug(syncLogPrefix("inserted blocks"), "len", len(blocks), "duration", time.Since(insertStartTime))
+
+	return nil
 }
