@@ -573,6 +573,7 @@ func (w *invertedIndexBufferedWriter) close() {
 
 // 3_domains * 2 + 3_history * 1 + 4_indices * 2 = 17 etl collectors, 17*(256Mb/8) = 512Mb - for all collectros
 var WALCollectorRAM = dbg.EnvDataSize("AGG_WAL_RAM", etl.BufferOptimalSize/8)
+var CollateETLRAM = dbg.EnvDataSize("AGG_COLLATE_RAM", etl.BufferOptimalSize/4)
 
 func (ic *InvertedIndexContext) newWriter(tmpdir string, discard bool) *invertedIndexBufferedWriter {
 	w := &invertedIndexBufferedWriter{

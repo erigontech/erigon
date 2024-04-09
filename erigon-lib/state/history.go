@@ -593,9 +593,13 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 		return HistoryCollation{}, fmt.Errorf("create %s history cursor: %w", h.filenameBase, err)
 	}
 	defer keysCursor.Close()
+
 	indexBitmaps := map[string]*roaring64.Bitmap{}
 	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
+	collector := etl.NewCollector(h.historyValsTable, h.iiCfg.dirs.Tmp, etl.NewSortableBuffer(CollateETLRAM), h.logger)
+	defer collector.Close()
+
 	for k, v, err := keysCursor.Seek(txKey[:]); err == nil && k != nil; k, v, err = keysCursor.Next() {
 		if err != nil {
 			return HistoryCollation{}, fmt.Errorf("iterate over %s history cursor: %w", h.filenameBase, err)
@@ -604,6 +608,10 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 		if txNum >= txTo { // [txFrom; txTo)
 			break
 		}
+		if err := collector.Collect(append(v, k...), k); err != nil {
+			return HistoryCollation{}, fmt.Errorf("collect %s history key [%x]=>txn %d [%x]: %w", h.filenameBase, v, txNum, k, err)
+		}
+
 		ks := string(v)
 		bitmap, ok := indexBitmaps[ks]
 		if !ok {
@@ -618,13 +626,6 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 		default:
 		}
 	}
-	keys := make([]string, 0, len(indexBitmaps))
-	for key, bm := range indexBitmaps {
-		keys = append(keys, key)
-		bm.RunOptimize()
-	}
-	slices.Sort(keys)
-	historyCount := 0
 
 	var c kv.Cursor
 	var cd kv.CursorDupSort
@@ -642,52 +643,60 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 		defer cd.Close()
 	}
 
-	keyBuf := make([]byte, 0, 256)
-	for _, key := range keys {
-		bitmap := indexBitmaps[key]
-		it := bitmap.Iterator()
-		keyBuf = append(append(keyBuf[:0], []byte(key)...), make([]byte, 8)...)
-		lk := len([]byte(key))
-
-		for it.HasNext() {
-			txNum := it.Next()
-			binary.BigEndian.PutUint64(keyBuf[lk:], txNum)
-			//TODO: use cursor range
-			if h.historyLargeValues {
-				val, err := roTx.GetOne(h.historyValsTable, keyBuf)
-				if err != nil {
-					return HistoryCollation{}, fmt.Errorf("getBeforeTxNum %s history val [%x]: %w", h.filenameBase, key, err)
-				}
-				if len(val) == 0 {
-					val = nil
-				}
-				if err = historyComp.AddWord(val); err != nil {
-					return HistoryCollation{}, fmt.Errorf("add %s history val [%x]=>[%x]: %w", h.filenameBase, key, val, err)
-				}
-			} else {
-				val, err := cd.SeekBothRange(keyBuf[:lk], keyBuf[lk:])
-				if err != nil {
-					return HistoryCollation{}, err
-				}
-				if val != nil && binary.BigEndian.Uint64(val) == txNum {
-					// fmt.Printf("HistCollate [%x]=>[%x]\n", []byte(key), val)
-					val = val[8:]
-				} else {
-					val = nil
-				}
-				if err = historyComp.AddWord(val); err != nil {
-					return HistoryCollation{}, fmt.Errorf("add %s history val [%x]=>[%x]: %w", h.filenameBase, key, val, err)
-				}
-			}
-			historyCount++
+	historyCount := 0
+	loadCollatedFunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		lk := len(k) - 8
+		kTxNum, txNum := binary.BigEndian.Uint64(k[lk:]), binary.BigEndian.Uint64(v)
+		if kTxNum != txNum {
+			return fmt.Errorf("loadCollatedFunc: key+TxNum [%x] != TxNum [%x]", k, v)
 		}
+
+		if h.historyLargeValues {
+			key, val, err := c.SeekExact(k)
+			if err != nil {
+				return fmt.Errorf("seekExact %s history val [%x]: %w", h.filenameBase, key, err)
+			}
+			if len(val) == 0 {
+				val = nil
+			}
+			if err = historyComp.AddWord(val); err != nil {
+				return fmt.Errorf("add %s history val [%x]=>[%x]: %w", h.filenameBase, key, val, err)
+			}
+		} else {
+			val, err := cd.SeekBothRange(k[:lk], v)
+			if err != nil {
+				return fmt.Errorf("seekBothRange %s history val [%x]: %w", h.filenameBase, k, err)
+			}
+			if val != nil && binary.BigEndian.Uint64(val) == txNum {
+				// fmt.Printf("HistCollate [%x]=>[%x]\n", []byte(key), val)
+				val = val[8:]
+			} else {
+				val = nil
+			}
+			if err = historyComp.AddWord(val); err != nil {
+				return fmt.Errorf("add %s history val [%x]=>[%x]: %w", h.filenameBase, k, val, err)
+			}
+		}
+		historyCount++
+
+		//return next(k, k, v)
+		return nil
+	}
+
+	err = collector.Load(nil, "", loadCollatedFunc, etl.TransformArgs{Quit: ctx.Done()})
+	if err != nil {
+		return HistoryCollation{}, err
 	}
 	closeComp = false
 	mxCollationSizeHist.SetUint64(uint64(historyComp.Count()))
+	if historyComp.Count() != historyCount { // todo remove historyCount
+		return HistoryCollation{}, fmt.Errorf("historyComp.Count() != historyCount %d != %d", historyComp.Count(), historyCount)
+	}
+
 	return HistoryCollation{
 		historyPath:  historyPath,
 		historyComp:  historyComp,
-		historyCount: historyCount,
+		historyCount: historyComp.Count(),
 		indexBitmaps: indexBitmaps,
 	}, nil
 }
