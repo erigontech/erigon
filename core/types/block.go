@@ -677,9 +677,7 @@ func (rb RawBody) EncodingSize() int {
 func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen, depositsLen int) {
 	// size of Transactions
 	for _, tx := range rb.Transactions {
-		txLen := len(tx)
-		txsLen += txLen
-		txsLen += rlp2.ListPrefixLen(txLen)
+		txsLen += len(tx)
 	}
 	payloadSize += rlp2.ListPrefixLen(txsLen) + txsLen
 
@@ -713,10 +711,8 @@ func (rb RawBody) EncodeRLP(w io.Writer) error {
 	if err := EncodeStructSizePrefix(txsLen, w, b[:]); err != nil {
 		return err
 	}
-	var buf [1024]byte
 	for _, tx := range rb.Transactions {
-		written := rlp2.EncodeString(tx, buf[:])
-		if _, err := w.Write(buf[:written]); err != nil {
+		if _, err := w.Write(tx); err != nil {
 			return nil
 		}
 	}

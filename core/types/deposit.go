@@ -8,6 +8,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -123,9 +124,9 @@ func (d *Deposit) DecodeRLP(s *rlp.Stream) error {
 	return s.ListEnd()
 }
 
-// func (*Deposit) Clone() clonable.Clonable { // TODO(racytech): make sure this one is correct
-// 	return &Deposit{}
-// }
+func (*Deposit) Clone() clonable.Clonable { // TODO(racytech): make sure this one is correct
+	return &Deposit{}
+}
 
 // field type overrides for gencodec
 type depositMarshaling struct {
