@@ -627,6 +627,9 @@ func fileHashBytes(ctx context.Context, fileInfo snaptype.FileInfo, stats *AggSt
 }
 
 func (d *Downloader) MainLoopInBackground(silent bool) {
+	if dbg.DownloaderOff() {
+		return
+	}
 	d.wg.Add(1)
 	go func() {
 		defer d.wg.Done()
