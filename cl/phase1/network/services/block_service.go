@@ -207,7 +207,7 @@ func (b *blockService) loop(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		default:
+		case <-ticker.C:
 		}
 		b.blocksScheduledForLaterExecution.Range(func(key, _ any) bool {
 			blockJob := key.(*blockJob)

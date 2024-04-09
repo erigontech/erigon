@@ -110,19 +110,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			return err
 		}
 
-		count, err := g.sentinel.GetPeers(ctx, &sentinel.EmptyMessage{})
-		if err != nil {
-			l["at"] = "sentinel peer count"
-			return err
-		}
-
-		log.Debug("Received block via gossip",
-			"peers", count.Active,
-			"slot", object.(*cltypes.SignedBeaconBlock).Block.Slot,
-		)
-		fmt.Println("A")
 		err = g.blockService.ProcessMessage(ctx, object.(*cltypes.SignedBeaconBlock))
-		fmt.Println(err)
 		if errors.Is(err, services.ErrIgnore) {
 			return nil
 		}
