@@ -210,6 +210,14 @@ func (h *Heimdall) FetchCheckpointCount(ctx context.Context) (int64, error) {
 	return 0, fmt.Errorf("TODO")
 }
 
+func (h *Heimdall) FetchCheckpoints(ctx context.Context, page uint64, limit uint64) (heimdall.Checkpoints, error) {
+	return nil, fmt.Errorf("TODO")
+}
+
+func (h *Heimdall) FetchAllCheckpoints(ctx context.Context) (heimdall.Checkpoints, error) {
+	return nil, fmt.Errorf("TODO")
+}
+
 func (h *Heimdall) FetchMilestone(ctx context.Context, number int64) (*heimdall.Milestone, error) {
 	return nil, fmt.Errorf("TODO")
 }
