@@ -586,6 +586,9 @@ func (h *heimdall) FetchAllCheckpoints(ctx context.Context, store CheckpointStor
 		return nil, err
 	}
 
+	h.logger.Debug(heimdallLogPrefix("fetching all checkpoints"))
+
+	fetchStartTime := time.Now()
 	progressLogTicker := time.NewTicker(30 * time.Second)
 	defer progressLogTicker.Stop()
 
@@ -622,6 +625,12 @@ func (h *heimdall) FetchAllCheckpoints(ctx context.Context, store CheckpointStor
 		}
 	}
 
+	h.logger.Debug(
+		heimdallLogPrefix("fetching all checkpoints done"),
+		"len", len(checkpoints), "duration",
+		time.Since(fetchStartTime),
+	)
+
 	return checkpoints, nil
 }
 
@@ -633,5 +642,6 @@ func (h *heimdall) waitPollingDelay(ctx context.Context) {
 	case <-ctx.Done():
 		return
 	case <-pollDelayTimer.C:
+		return
 	}
 }
