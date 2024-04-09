@@ -28,6 +28,8 @@ type Heimdall interface {
 	FetchMilestonesFromBlock(ctx context.Context, store MilestoneStore, startBlock uint64) (Waypoints, error)
 	FetchSpansFromBlock(ctx context.Context, store SpanStore, startBlock uint64) ([]*Span, error)
 
+	FetchAllCheckpoints(ctx context.Context, store CheckpointStore) (Checkpoints, error)
+
 	OnCheckpointEvent(ctx context.Context, store CheckpointStore, callback func(*Checkpoint)) error
 	OnMilestoneEvent(ctx context.Context, store MilestoneStore, callback func(*Milestone)) error
 	OnSpanEvent(ctx context.Context, store SpanStore, callback func(*Span)) error
@@ -82,7 +84,7 @@ func (h *heimdall) FetchCheckpointsFromBlock(ctx context.Context, store Checkpoi
 
 	checkpointsToFetch := count - int64(lastStoredCheckpointId)
 	if checkpointsToFetch >= checkpointsBatchFetchThreshold {
-		checkpoints, err := h.fetchAllCheckpoints(ctx, store)
+		checkpoints, err := h.FetchAllCheckpoints(ctx, store)
 		if err != nil {
 			return nil, err
 		}
@@ -574,14 +576,41 @@ func (h *heimdall) pollMilestones(ctx context.Context, store MilestoneStore, tip
 	}
 }
 
-func (h *heimdall) fetchAllCheckpoints(ctx context.Context, store CheckpointStore) (Checkpoints, error) {
+func (h *heimdall) FetchAllCheckpoints(ctx context.Context, store CheckpointStore) (Checkpoints, error) {
 	// TODO: once heimdall API is fixed to return sorted items in pages we can only fetch
 	//       the new pages after lastStoredCheckpointId using the checkpoints/list paging API
 	//       (for now we have to fetch all of them)
 	//       and also remove sorting we do after fetching
-	checkpoints, err := h.client.FetchAllCheckpoints(ctx)
+	count, err := h.client.FetchCheckpointCount(ctx)
 	if err != nil {
 		return nil, err
+	}
+
+	progressLogTicker := time.NewTicker(30 * time.Second)
+	defer progressLogTicker.Stop()
+
+	checkpoints := make(Checkpoints, 0, count)
+	page := uint64(1)
+	for count > 0 {
+		checkpointsBatch, err := h.client.FetchCheckpoints(ctx, page, 10_000)
+		if err != nil {
+			return nil, err
+		}
+
+		select {
+		case <-progressLogTicker.C:
+			h.logger.Debug(
+				heimdallLogPrefix("fetching all checkpoints progress"),
+				"page", page,
+				"len", len(checkpoints),
+			)
+		default:
+			// carry-on
+		}
+
+		checkpoints = append(checkpoints, checkpointsBatch...)
+		count = count - int64(len(checkpointsBatch))
+		page++
 	}
 
 	sort.Sort(&checkpoints)

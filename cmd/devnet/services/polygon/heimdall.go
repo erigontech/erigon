@@ -214,10 +214,6 @@ func (h *Heimdall) FetchCheckpoints(ctx context.Context, page uint64, limit uint
 	return nil, fmt.Errorf("TODO")
 }
 
-func (h *Heimdall) FetchAllCheckpoints(ctx context.Context) (heimdall.Checkpoints, error) {
-	return nil, fmt.Errorf("TODO")
-}
-
 func (h *Heimdall) FetchMilestone(ctx context.Context, number int64) (*heimdall.Milestone, error) {
 	return nil, fmt.Errorf("TODO")
 }
@@ -480,6 +476,25 @@ func makeHeimdallRouter(ctx context.Context, client heimdall.HeimdallClient) *ch
 
 	router.Get("/checkpoints/count", func(w http.ResponseWriter, r *http.Request) {
 		result, err := client.FetchCheckpointCount(ctx)
+		writeResponse(w, wrapResult(result), err)
+	})
+
+	router.Get("/checkpoints/list", func(w http.ResponseWriter, r *http.Request) {
+		pageStr := r.URL.Query().Get("page")
+		page, err := strconv.ParseUint(pageStr, 10, 64)
+		if err != nil {
+			http.Error(w, http.StatusText(400), 400)
+			return
+		}
+
+		limitStr := r.URL.Query().Get("limit")
+		limit, err := strconv.ParseUint(limitStr, 10, 64)
+		if err != nil {
+			http.Error(w, http.StatusText(400), 400)
+			return
+		}
+
+		result, err := client.FetchCheckpoints(ctx, page, limit)
 		writeResponse(w, wrapResult(result), err)
 	})
 

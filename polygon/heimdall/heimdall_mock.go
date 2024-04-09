@@ -39,6 +39,21 @@ func (m *MockHeimdall) EXPECT() *MockHeimdallMockRecorder {
 	return m.recorder
 }
 
+// FetchAllCheckpoints mocks base method.
+func (m *MockHeimdall) FetchAllCheckpoints(arg0 context.Context, arg1 CheckpointStore) (Checkpoints, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FetchAllCheckpoints", arg0, arg1)
+	ret0, _ := ret[0].(Checkpoints)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FetchAllCheckpoints indicates an expected call of FetchAllCheckpoints.
+func (mr *MockHeimdallMockRecorder) FetchAllCheckpoints(arg0, arg1 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchAllCheckpoints", reflect.TypeOf((*MockHeimdall)(nil).FetchAllCheckpoints), arg0, arg1)
+}
+
 // FetchCheckpoints mocks base method.
 func (m *MockHeimdall) FetchCheckpoints(arg0 context.Context, arg1 CheckpointStore, arg2, arg3 CheckpointId) ([]*Checkpoint, error) {
 	m.ctrl.T.Helper()
