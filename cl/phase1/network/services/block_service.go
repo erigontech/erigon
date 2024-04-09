@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"sync"
 	"time"
@@ -81,7 +80,6 @@ func (b *blockService) ProcessMessage(ctx context.Context, msg *cltypes.SignedBe
 	headState := b.syncedData.HeadState()
 	if headState == nil {
 		b.scheduleBlockForLaterProcessing(msg)
-		log.Debug("Head state is nil")
 		return ErrIgnore
 	}
 
@@ -91,13 +89,11 @@ func (b *blockService) ProcessMessage(ctx context.Context, msg *cltypes.SignedBe
 	// [IGNORE] The block is not from a future slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. validate that
 	//signed_beacon_block.message.slot <= current_slot (a client MAY queue future blocks for processing at the appropriate slot).
 	if currentSlot < msg.Block.Slot && !utils.IsCurrentSlotWithMaximumClockDisparity(b.genesisCfg.GenesisTime, b.beaconCfg.SecondsPerSlot, msg.Block.Slot) {
-		log.Debug("Block is from a future slot", "currentSlot", currentSlot, "blockSlot", msg.Block.Slot)
 		return ErrIgnore
 	}
 	// [IGNORE] The block is from a slot greater than the latest finalized slot -- i.e. validate that signed_beacon_block.message.slot > compute_start_slot_at_epoch(store.finalized_checkpoint.epoch)
 	// (a client MAY choose to validate and store such blocks for additional purposes -- e.g. slashing detection, archive nodes, etc).
 	if blockEpoch <= headState.FinalizedCheckpoint().Epoch() {
-		log.Debug("Block is from a slot less than or equal to the latest finalized slot", "blockEpoch", blockEpoch, "finalizedEpoch", headState.FinalizedCheckpoint().Epoch())
 		return ErrIgnore
 	}
 
@@ -107,7 +103,6 @@ func (b *blockService) ProcessMessage(ctx context.Context, msg *cltypes.SignedBe
 		slot:          msg.Block.Slot,
 	}
 	if b.seenBlocksCache.Contains(seenCacheKey) {
-		log.Debug("Block is the first block with valid signature received for the proposer for the slot", "proposerIndex", msg.Block.ProposerIndex, "slot", msg.Block.Slot)
 		return ErrIgnore
 	}
 
@@ -115,17 +110,14 @@ func (b *blockService) ProcessMessage(ctx context.Context, msg *cltypes.SignedBe
 	parentHeader, ok := b.forkchoiceStore.GetHeader(msg.Block.ParentRoot)
 	if !ok {
 		b.scheduleBlockForLaterProcessing(msg)
-		log.Debug("Parent header not found", "parentRoot", msg.Block.ParentRoot)
 		return ErrIgnore
 	}
 	if parentHeader.Slot >= msg.Block.Slot {
-		log.Debug("Parent header is greater than or equal to the block slot", "parentSlot", parentHeader.Slot, "blockSlot", msg.Block.Slot)
 		return ErrBlockYoungerThanParent
 	}
 
 	// [REJECT] The length of KZG commitments is less than or equal to the limitation defined in Consensus Layer -- i.e. validate that len(body.signed_beacon_block.message.blob_kzg_commitments) <= MAX_BLOBS_PER_BLOCK
 	if msg.Block.Body.BlobKzgCommitments.Len() > int(b.beaconCfg.MaxBlobsPerBlock) {
-		log.Debug("Invalid commitments count", "commitmentsCount", msg.Block.Body.BlobKzgCommitments.Len(), "maxCommitments", b.beaconCfg.MaxBlobsPerBlock)
 		return ErrInvalidCommitmentsCount
 	}
 	b.publishBlockEvent(msg)
@@ -177,7 +169,6 @@ func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeac
 
 // processAndStoreBlock processes and stores a block
 func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.SignedBeaconBlock) error {
-	start := time.Now()
 	if err := b.db.Update(ctx, func(tx kv.RwTx) error {
 		return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, false)
 	}); err != nil {
@@ -187,7 +178,6 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 		return err
 	}
 	go b.importBlockAttestations(block)
-	fmt.Println("Block stored in", time.Since(start))
 	return b.db.Update(ctx, func(tx kv.RwTx) error {
 		return beacon_indicies.WriteHighestFinalized(tx, b.forkchoiceStore.FinalizedSlot())
 	})
