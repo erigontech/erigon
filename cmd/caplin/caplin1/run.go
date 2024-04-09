@@ -177,7 +177,8 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, genesisConfig)
 	committeeSub := committee_subscription.NewCommitteeSubscribeManagement(ctx, indexDB, beaconConfig, networkConfig, genesisConfig, sentinel, state, aggregationPool, syncedDataManager)
 	blockService := services.NewBlockService(ctx, indexDB, forkChoice, syncedDataManager, genesisConfig, beaconConfig, emitters)
-	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, genesisConfig, emitters, committeeSub, blockService)
+	blobService := services.NewBlobSidecarService(ctx, beaconConfig, forkChoice, syncedDataManager)
+	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, genesisConfig, emitters, committeeSub, blockService, blobService)
 	{ // start ticking forkChoice
 		go func() {
 			tickInterval := time.NewTicker(2 * time.Millisecond)

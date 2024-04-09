@@ -6,14 +6,18 @@ import (
 )
 
 const (
-	SeenBlockCacheSize   = 1000 // SeenBlockCacheSize is the size of the cache for seen blocks.
-	jobsIntervalTick     = 50 * time.Millisecond
-	blockJobExpiry       = 10 * time.Minute
-	attestationJobExpiry = 30 * time.Minute
+	SeenBlockCacheSize    = 1000 // SeenBlockCacheSize is the size of the cache for seen blocks.
+	blockJobsIntervalTick = 50 * time.Millisecond
+	blobJobsIntervalTick  = 5 * time.Millisecond
+	blockJobExpiry        = 7 * time.Minute
+	blobJobExpiry         = 7 * time.Minute
+	attestationJobExpiry  = 30 * time.Minute
 )
 
 var (
-	ErrIgnore                  = errors.New("ignore") // ErrIgnore is used to indicate that the message should be ignored.
-	ErrBlockYoungerThanParent  = errors.New("block is younger than parent")
-	ErrInvalidCommitmentsCount = errors.New("invalid commitments count")
+	ErrIgnore                          = errors.New("ignore") // ErrIgnore is used to indicate that the message should be ignored.
+	ErrBlockYoungerThanParent          = errors.New("block is younger than parent")
+	ErrInvalidCommitmentsCount         = errors.New("invalid commitments count")
+	ErrCommitmentsInclusionProofFailed = errors.New("commitments inclusion proof failed")
+	ErrInvalidSidecarSlot              = errors.New("invalid sidecar slot")
 )

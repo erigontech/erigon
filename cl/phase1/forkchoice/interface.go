@@ -52,7 +52,6 @@ type ForkChoiceStorageReader interface {
 	GetPreviousPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error)
 	GetValidatorSet(blockRoot libcommon.Hash) (*solid.ValidatorSet, error)
 	GetCurrentPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error)
-	GetPublicKeyForValidator(blockRoot libcommon.Hash, idx uint64) (libcommon.Bytes48, error)
 }
 
 type ForkChoiceStorageWriter interface {
@@ -65,6 +64,7 @@ type ForkChoiceStorageWriter interface {
 	OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload bool, fullValidation bool, checkDataAvaibility bool) error
 	OnSyncCommitteeMessage(msg *cltypes.SyncCommitteeMessage, subnetID uint64) error
 	OnSignedContributionAndProof(signedContribution *cltypes.SignedContributionAndProof, test bool) error
+	AddPreverifiedBlobSidecar(blobSidecar *cltypes.BlobSidecar) error
 	OnTick(time uint64)
 	SetSynced(synced bool)
 }

@@ -11,3 +11,4 @@ type Service[T any] interface {
 }
 
 type BlockService Service[*cltypes.SignedBeaconBlock]
+type BlobSidecarsService Service[*cltypes.BlobSidecar]

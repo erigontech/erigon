@@ -247,11 +247,12 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 		if !cltypes.VerifyCommitmentInclusionProof(sidecar.KzgCommitment, sidecar.CommitmentInclusionProof, sidecar.Index, clparams.DenebVersion, sidecar.SignedBlockHeader.Header.BodyRoot) {
 			return 0, 0, fmt.Errorf("could not verify blob's inclusion proof")
 		}
-		// verify the signature of the sidecar head, we leave this step up to the caller to define
-		if verifySignatureFn(sidecar.SignedBlockHeader); err != nil {
-			return 0, 0, err
+		if verifySignatureFn != nil {
+			// verify the signature of the sidecar head, we leave this step up to the caller to define
+			if verifySignatureFn(sidecar.SignedBlockHeader); err != nil {
+				return 0, 0, err
+			}
 		}
-
 		// if the sidecar is valid, add it to the current payload of sidecars being built.
 		if identifier.BlockRoot != prevBlockRoot {
 			storableSidecars = append(storableSidecars, currentSidecarsPayload)

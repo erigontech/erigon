@@ -302,7 +302,6 @@ func ConsensusClStages(ctx context.Context,
 					currentSlot.Store(finalizedCheckpoint.Epoch() * cfg.beaconCfg.SlotsPerEpoch)
 					secsPerLog := 30
 					logTicker := time.NewTicker(time.Duration(secsPerLog) * time.Second)
-					verifyBlobSigFunc := forkchoice.VerifyHeaderSignatureAgainstForkChoiceStoreFunction(cfg.forkChoice, cfg.beaconCfg, cfg.genesisCfg.GenesisValidatorRoot)
 					// Always start from the current finalized checkpoint
 					downloader.SetHighestProcessedRoot(finalizedCheckpoint.BlockRoot())
 					downloader.SetHighestProcessedSlot(currentSlot.Load())
@@ -374,7 +373,7 @@ func ConsensusClStages(ctx context.Context,
 							return initialHighestSlotProcessed, initialHighestBlockRootProcessed, err
 						}
 						var highestProcessed, inserted uint64
-						if highestProcessed, inserted, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, verifyBlobSigFunc); err != nil {
+						if highestProcessed, inserted, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, nil); err != nil {
 							logger.Warn("failed to get verify blobs", "err", err)
 							cfg.rpc.BanPeer(blobs.Peer)
 							return initialHighestSlotProcessed, initialHighestBlockRootProcessed, err
@@ -561,7 +560,7 @@ func ConsensusClStages(ctx context.Context,
 									errCh <- err
 									return
 								}
-								if _, inserted, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, forkchoice.VerifyHeaderSignatureAgainstForkChoiceStoreFunction(cfg.forkChoice, cfg.beaconCfg, cfg.genesisCfg.GenesisValidatorRoot)); err != nil {
+								if _, inserted, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, nil); err != nil {
 									errCh <- err
 									return
 								}

@@ -38,6 +38,7 @@ type GossipManager struct {
 
 	// Services for processing messages from the network
 	blockService services.BlockService
+	blobService  services.BlobSidecarsService
 }
 
 func NewGossipReceiver(
@@ -48,6 +49,7 @@ func NewGossipReceiver(
 	emitters *beaconevents.Emitters,
 	comitteeSub *committee_subscription.CommitteeSubscribeMgmt,
 	blockService services.BlockService,
+	blobService services.BlobSidecarsService,
 ) *GossipManager {
 	return &GossipManager{
 		sentinel:      s,
@@ -57,6 +59,7 @@ func NewGossipReceiver(
 		genesisConfig: genesisConfig,
 		committeeSub:  comitteeSub,
 		blockService:  blockService,
+		blobService:   blobService,
 	}
 }
 
@@ -177,10 +180,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 				g.sentinel.BanPeer(ctx, data.Peer)
 				return fmt.Errorf("blob slot too far ahead")
 			}
-			// [IGNORE] The sidecar's block's parent (defined by block_header.parent_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue sidecars for processing once the parent block is retrieved).
-			if _, has := g.forkChoice.GetHeader(blobSideCar.SignedBlockHeader.Header.ParentRoot); !has {
-				return nil
-			}
+
 			blockRoot, err := blobSideCar.SignedBlockHeader.Header.HashSSZ()
 			if err != nil {
 				return err
@@ -189,16 +189,9 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			if _, has := g.forkChoice.GetHeader(blockRoot); has {
 				return nil
 			}
+
 			// The background checks above are enough for now.
-			if err := g.forkChoice.OnBlobSidecar(blobSideCar, false); err != nil {
-				g.sentinel.BanPeer(ctx, data.Peer)
-				log.Warn("blob sidecar rejected", "err", err)
-			}
-
-			if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
-				log.Debug("failed publish gossip", "err", err)
-			}
-
+			err = g.blobService.ProcessMessage(ctx, blobSideCar)
 			log.Debug("Received blob sidecar via gossip", "index", *data.SubnetId, "size", datasize.ByteSize(len(blobSideCar.Blob)))
 		case gossip.IsTopicSyncCommittee(data.Name):
 			if data.SubnetId == nil {
