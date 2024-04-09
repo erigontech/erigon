@@ -52,7 +52,7 @@ func (d *DiagnosticClient) Setup() {
 	d.setupHeadersDiagnostics(rootCtx)
 	d.setupBodiesDiagnostics(rootCtx)
 	d.setupResourcesUsageDiagnostics(rootCtx)
-	d.setupSpeedtestDiagnostics()
+	d.setupSpeedtestDiagnostics(rootCtx)
 
 	//d.logDiagMsgs()
 }
