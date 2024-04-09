@@ -1676,6 +1676,10 @@ func (d *Downloader) torrentInfo(name string) (*torrentInfo, error) {
 }
 
 func (d *Downloader) ReCalcStats(interval time.Duration) {
+	if dbg.DownloaderOff() {
+		return
+	}
+
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	//Call this methods outside of `lock` critical section, because they have own locks with contention

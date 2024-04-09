@@ -186,7 +186,7 @@ func SpawnStageSnapshots(
 }
 
 func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, initialCycle bool, logger log.Logger) error {
-	if !initialCycle {
+	if !initialCycle || dbg.DownloaderOff() {
 		return nil
 	}
 	if !cfg.blockReader.FreezingCfg().Enabled {
