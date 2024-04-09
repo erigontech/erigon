@@ -452,7 +452,7 @@ func (f *ForkChoiceStore) OnCheckReceivedAttestation(topic string, att *solid.At
 		bits           = att.AggregationBits()
 	)
 	// [REJECT] The committee index is within the expected range
-	committeeCount := subnets.ComputeCommitteePerSlot(f.syncedDataManager.HeadState(), slot, f.beaconCfg.SlotsPerEpoch)
+	committeeCount := subnets.ComputeCommitteeCountPerSlot(f.syncedDataManager.HeadState(), slot, f.beaconCfg.SlotsPerEpoch)
 	if committeeIndex >= committeeCount {
 		return fmt.Errorf("committee index out of range")
 	}

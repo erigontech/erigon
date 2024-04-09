@@ -82,7 +82,7 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 		vIndex = p.ValidatorIndex
 	)
 
-	commiteePerSlot := subnets.ComputeCommitteePerSlot(c.syncedData.HeadState(), slot, c.beaconConfig.SlotsPerEpoch)
+	commiteePerSlot := subnets.ComputeCommitteeCountPerSlot(c.syncedData.HeadState(), slot, c.beaconConfig.SlotsPerEpoch)
 	subnetId := subnets.ComputeSubnetForAttestation(commiteePerSlot, slot, cIndex, c.beaconConfig.SlotsPerEpoch, c.netConfig.AttestationSubnetCount)
 	// add validator to subscription
 	c.validatorSubsMutex.Lock()

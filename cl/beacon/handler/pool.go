@@ -59,7 +59,7 @@ func (a *ApiHandler) GetEthV1BeaconPoolAttestations(w http.ResponseWriter, r *ht
 func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *http.Request) {
 	req := []*solid.Attestation{}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
 	failures := []poolingFailure{}
@@ -83,7 +83,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 			var (
 				slot                  = attestation.AttestantionData().Slot()
 				cIndex                = attestation.AttestantionData().CommitteeIndex()
-				committeeCountPerSlot = subnets.ComputeCommitteePerSlot(a.syncedData.HeadState(), slot, a.beaconChainCfg.SlotsPerEpoch)
+				committeeCountPerSlot = subnets.ComputeCommitteeCountPerSlot(a.syncedData.HeadState(), slot, a.beaconChainCfg.SlotsPerEpoch)
 				subnet                = subnets.ComputeSubnetForAttestation(committeeCountPerSlot, slot, cIndex, a.beaconChainCfg.SlotsPerEpoch, a.netConfig.AttestationSubnetCount)
 			)
 			encodedSSZ, err := attestation.EncodeSSZ(nil)
