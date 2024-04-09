@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"testing"
 	"time"
@@ -41,6 +42,7 @@ func newBlockDownloaderTestWithOpts(t *testing.T, opts blockDownloaderTestOpts) 
 		blocksVerifier,
 		storage,
 		time.Millisecond,
+		opts.getOrCreateDefaultMaxWorkers(),
 	)
 	return &blockDownloaderTest{
 		heimdall:        heimdallService,
@@ -53,6 +55,7 @@ func newBlockDownloaderTestWithOpts(t *testing.T, opts blockDownloaderTestOpts) 
 type blockDownloaderTestOpts struct {
 	headersVerifier AccumulatedHeadersVerifier
 	blocksVerifier  BlocksVerifier
+	maxWorkers      int
 }
 
 func (opts blockDownloaderTestOpts) getOrCreateDefaultHeadersVerifier() AccumulatedHeadersVerifier {
@@ -73,6 +76,14 @@ func (opts blockDownloaderTestOpts) getOrCreateDefaultBlocksVerifier() BlocksVer
 	}
 
 	return opts.blocksVerifier
+}
+
+func (opts blockDownloaderTestOpts) getOrCreateDefaultMaxWorkers() int {
+	if opts.maxWorkers == 0 {
+		return math.MaxInt
+	}
+
+	return opts.maxWorkers
 }
 
 type blockDownloaderTest struct {
@@ -200,10 +211,6 @@ func TestBlockDownloaderDownloadBlocksUsingMilestones(t *testing.T) {
 		InsertBlocks(gomock.Any(), gomock.Any()).
 		DoAndReturn(test.defaultInsertBlocksMock(&blocks)).
 		Times(1)
-	test.storage.EXPECT().
-		Flush(gomock.Any()).
-		Return(nil).
-		Times(1)
 
 	tip, err := test.blockDownloader.DownloadBlocksUsingMilestones(context.Background(), 1)
 	require.NoError(t, err)
@@ -238,10 +245,6 @@ func TestBlockDownloaderDownloadBlocksUsingCheckpoints(t *testing.T) {
 	test.storage.EXPECT().
 		InsertBlocks(gomock.Any(), gomock.Any()).
 		DoAndReturn(test.defaultInsertBlocksMock(&blocks)).
-		Times(4)
-	test.storage.EXPECT().
-		Flush(gomock.Any()).
-		Return(nil).
 		Times(4)
 
 	tip, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1)
@@ -317,10 +320,6 @@ func TestBlockDownloaderDownloadBlocksWhenInvalidHeadersThenPenalizePeerAndReDow
 			DoAndReturn(test.defaultInsertBlocksMock(&blocksBatch2)).
 			Times(3),
 	)
-	test.storage.EXPECT().
-		Flush(gomock.Any()).
-		Return(nil).
-		Times(4)
 
 	_, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1)
 	require.NoError(t, err)
@@ -346,10 +345,6 @@ func TestBlockDownloaderDownloadBlocksWhenZeroPeersTriesAgain(t *testing.T) {
 	test.storage.EXPECT().
 		InsertBlocks(gomock.Any(), gomock.Any()).
 		DoAndReturn(test.defaultInsertBlocksMock(&blocks)).
-		Times(4)
-	test.storage.EXPECT().
-		Flush(gomock.Any()).
-		Return(nil).
 		Times(4)
 	gomock.InOrder(
 		// first time, no peers at all
@@ -428,10 +423,6 @@ func TestBlockDownloaderDownloadBlocksWhenInvalidBodiesThenPenalizePeerAndReDown
 			DoAndReturn(test.defaultInsertBlocksMock(&blocksBatch2)).
 			Times(3),
 	)
-	test.storage.EXPECT().
-		Flush(gomock.Any()).
-		Return(nil).
-		Times(4)
 
 	_, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1)
 	require.NoError(t, err)
@@ -493,13 +484,51 @@ func TestBlockDownloaderDownloadBlocksWhenMissingBodiesThenPenalizePeerAndReDown
 			DoAndReturn(test.defaultInsertBlocksMock(&blocksBatch2)).
 			Times(3),
 	)
-	test.storage.EXPECT().
-		Flush(gomock.Any()).
-		Return(nil).
-		Times(4)
 
 	_, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1)
 	require.NoError(t, err)
 	require.Len(t, blocksBatch1, 1)
 	require.Len(t, blocksBatch2, 5)
+}
+
+func TestBlockDownloaderDownloadBlocksRespectsMaxWorkers(t *testing.T) {
+	test := newBlockDownloaderTestWithOpts(t, blockDownloaderTestOpts{
+		maxWorkers: 1,
+	})
+	test.heimdall.EXPECT().
+		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
+		Return(test.fakeCheckpoints(2), nil).
+		Times(1)
+	test.p2pService.EXPECT().
+		ListPeersMayHaveBlockNum(gomock.Any()).
+		Return(test.fakePeers(100)).
+		Times(2)
+	test.p2pService.EXPECT().
+		FetchHeaders(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(test.defaultFetchHeadersMock()).
+		Times(2)
+	test.p2pService.EXPECT().
+		FetchBodies(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(test.defaultFetchBodiesMock()).
+		Times(2)
+	var blocksBatch1, blocksBatch2 []*types.Block
+	gomock.InOrder(
+		test.storage.EXPECT().
+			InsertBlocks(gomock.Any(), gomock.Any()).
+			DoAndReturn(test.defaultInsertBlocksMock(&blocksBatch1)).
+			Times(1),
+		test.storage.EXPECT().
+			InsertBlocks(gomock.Any(), gomock.Any()).
+			DoAndReturn(test.defaultInsertBlocksMock(&blocksBatch2)).
+			Times(1),
+	)
+
+	// max 1 worker
+	// 100 peers
+	// 2 waypoints
+	// the downloader should fetch the 2 waypoints in 2 separate batches
+	_, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1)
+	require.NoError(t, err)
+	require.Len(t, blocksBatch1, 1)
+	require.Len(t, blocksBatch2, 1)
 }

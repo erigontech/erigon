@@ -24,7 +24,7 @@ type ForkGraph interface {
 	GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.CachingBeaconState, error)
 	GetCurrentJustifiedCheckpoint(blockRoot libcommon.Hash) (solid.Checkpoint, bool)
 	GetFinalizedCheckpoint(blockRoot libcommon.Hash) (solid.Checkpoint, bool)
-	GetSyncCommittees(blockRoot libcommon.Hash) (*solid.SyncCommittee, *solid.SyncCommittee, bool)
+	GetSyncCommittees(period uint64) (*solid.SyncCommittee, *solid.SyncCommittee, bool)
 	MarkHeaderAsInvalid(blockRoot libcommon.Hash)
 	AnchorSlot() uint64
 	Prune(uint64) error

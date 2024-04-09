@@ -34,14 +34,25 @@ type MessageListener interface {
 	RegisterPeerEventObserver(observer MessageObserver[*sentry.PeerEvent]) UnregisterFunc
 }
 
-func NewMessageListener(logger log.Logger, sentryClient direct.SentryClient, peerPenalizer PeerPenalizer) MessageListener {
-	return newMessageListener(logger, sentryClient, peerPenalizer)
+func NewMessageListener(
+	logger log.Logger,
+	sentryClient direct.SentryClient,
+	statusDataFactory sentrymulticlient.StatusDataFactory,
+	peerPenalizer PeerPenalizer,
+) MessageListener {
+	return newMessageListener(logger, sentryClient, statusDataFactory, peerPenalizer)
 }
 
-func newMessageListener(logger log.Logger, sentryClient direct.SentryClient, peerPenalizer PeerPenalizer) *messageListener {
+func newMessageListener(
+	logger log.Logger,
+	sentryClient direct.SentryClient,
+	statusDataFactory sentrymulticlient.StatusDataFactory,
+	peerPenalizer PeerPenalizer,
+) *messageListener {
 	return &messageListener{
 		logger:                  logger,
 		sentryClient:            sentryClient,
+		statusDataFactory:       statusDataFactory,
 		peerPenalizer:           peerPenalizer,
 		newBlockObservers:       map[uint64]MessageObserver[*DecodedInboundMessage[*eth.NewBlockPacket]]{},
 		newBlockHashesObservers: map[uint64]MessageObserver[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]{},
@@ -56,6 +67,7 @@ type messageListener struct {
 	observerIdSequence      uint64
 	logger                  log.Logger
 	sentryClient            direct.SentryClient
+	statusDataFactory       sentrymulticlient.StatusDataFactory
 	peerPenalizer           PeerPenalizer
 	observersMu             sync.Mutex
 	newBlockObservers       map[uint64]MessageObserver[*DecodedInboundMessage[*eth.NewBlockPacket]]
@@ -67,6 +79,8 @@ type messageListener struct {
 }
 
 func (ml *messageListener) Run(ctx context.Context) {
+	ml.logger.Info(messageListenerLogPrefix("running p2p message listener component"))
+
 	backgroundLoops := []func(ctx context.Context){
 		ml.listenInboundMessages,
 		ml.listenPeerEvents,
@@ -160,14 +174,6 @@ func (ml *messageListener) notifyPeerEventObservers(peerEvent *sentry.PeerEvent)
 	return nil
 }
 
-func (ml *messageListener) statusDataFactory() sentrymulticlient.StatusDataFactory {
-	return func() *sentry.StatusData {
-		// TODO add a "status data component" that message listener will use as a dependency to fetch status data
-		//      "status data component" will be responsible for providing a mechanism to provide up-to-date status data
-		return &sentry.StatusData{}
-	}
-}
-
 func (ml *messageListener) nextObserverId() uint64 {
 	id := ml.observerIdSequence
 	ml.observerIdSequence++
@@ -212,7 +218,7 @@ func streamMessages[TMessage any](
 	sentrymulticlient.SentryReconnectAndPumpStreamLoop(
 		ctx,
 		ml.sentryClient,
-		ml.statusDataFactory(),
+		ml.statusDataFactory,
 		name,
 		streamFactory,
 		func() *TMessage { return new(TMessage) },
@@ -234,7 +240,7 @@ func notifyInboundMessageObservers[TPacket any](
 	var decodedData TPacket
 	if err := rlp.DecodeBytes(message.Data, &decodedData); err != nil {
 		if rlp.IsInvalidRLPError(err) {
-			logger.Debug("penalizing peer - invalid rlp", "peerId", peerId, "err", err)
+			logger.Debug(messageListenerLogPrefix("penalizing peer - invalid rlp"), "peerId", peerId, "err", err)
 
 			if penalizeErr := peerPenalizer.Penalize(ctx, peerId); penalizeErr != nil {
 				err = fmt.Errorf("%w: %w", penalizeErr, err)
@@ -257,4 +263,8 @@ func notifyObservers[TMessage any](observers map[uint64]MessageObserver[TMessage
 	for _, observer := range observers {
 		go observer(message)
 	}
+}
+
+func messageListenerLogPrefix(message string) string {
+	return fmt.Sprintf("[p2p.message.listener] %s", message)
 }

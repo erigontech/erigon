@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
-	"github.com/ledgerwatch/log/v3"
-	"modernc.org/mathutil"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 )
@@ -35,24 +35,21 @@ type Fetcher interface {
 
 func NewFetcher(
 	config FetcherConfig,
-	logger log.Logger,
 	messageListener MessageListener,
 	messageSender MessageSender,
 	requestIdGenerator RequestIdGenerator,
 ) Fetcher {
-	return newFetcher(config, logger, messageListener, messageSender, requestIdGenerator)
+	return newFetcher(config, messageListener, messageSender, requestIdGenerator)
 }
 
 func newFetcher(
 	config FetcherConfig,
-	logger log.Logger,
 	messageListener MessageListener,
 	messageSender MessageSender,
 	requestIdGenerator RequestIdGenerator,
 ) *fetcher {
 	return &fetcher{
 		config:             config,
-		logger:             logger,
 		messageListener:    messageListener,
 		messageSender:      messageSender,
 		requestIdGenerator: requestIdGenerator,
@@ -61,7 +58,6 @@ func newFetcher(
 
 type fetcher struct {
 	config             FetcherConfig
-	logger             log.Logger
 	messageListener    MessageListener
 	messageSender      MessageSender
 	requestIdGenerator RequestIdGenerator
@@ -90,15 +86,24 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 	headers := make([]*types.Header, 0, amount)
 	for chunkNum := uint64(0); chunkNum < numChunks; chunkNum++ {
 		chunkStart := start + chunkNum*eth.MaxHeadersServe
-		chunkEnd := mathutil.MinUint64(end, chunkStart+eth.MaxHeadersServe)
-		headersChunk, err := fetchWithRetry(f.config, func() ([]*types.Header, error) {
-			return f.fetchHeaders(ctx, chunkStart, chunkEnd, peerId)
-		})
-		if err != nil {
-			return nil, err
-		}
+		chunkEnd := cmp.Min(end, chunkStart+eth.MaxHeadersServe)
+		for chunkStart < chunkEnd {
+			// a node may not respond with all MaxHeadersServe in 1 response,
+			// so we keep on consuming from last received number (akin to consuming a paging api)
+			// until we have all headers of the chunk or the peer stopped returning headers
+			headersChunk, err := fetchWithRetry(f.config, func() ([]*types.Header, error) {
+				return f.fetchHeaders(ctx, chunkStart, chunkEnd, peerId)
+			})
+			if err != nil {
+				return nil, err
+			}
+			if len(headersChunk) == 0 {
+				break
+			}
 
-		headers = append(headers, headersChunk...)
+			headers = append(headers, headersChunk...)
+			chunkStart += uint64(len(headersChunk))
+		}
 	}
 
 	if err := f.validateHeadersResponse(headers, start, amount); err != nil {
@@ -281,12 +286,6 @@ func (f *fetcher) validateBodies(bodies []*types.Body, headers []*types.Header) 
 		}
 	}
 
-	for _, body := range bodies {
-		if len(body.Transactions) == 0 && len(body.Withdrawals) == 0 && len(body.Uncles) == 0 {
-			return ErrEmptyBody
-		}
-	}
-
 	return nil
 }
 
@@ -327,7 +326,7 @@ func awaitResponse[TPacket any](
 		select {
 		case <-ctx.Done():
 			var nilPacket TPacket
-			return nilPacket, fmt.Errorf("await response interrupted: %w", ctx.Err())
+			return nilPacket, fmt.Errorf("await %v response interrupted: %w", reflect.TypeOf(nilPacket), ctx.Err())
 		case message := <-messages:
 			if filter(message) {
 				continue

@@ -37,6 +37,8 @@ var DefaultHTTPTimeouts = HTTPTimeouts{
 }
 
 const DefaultEvmCallTimeout = 5 * time.Minute
+const DefaultOverlayGetLogsTimeout = 5 * time.Minute
+const DefaultOverlayReplayBlockTimeout = 10 * time.Second
 
 var SlowLogBlackList = []string{
 	"eth_getBlock", "eth_getBlockByNumber", "eth_getBlockByHash", "eth_blockNumber",

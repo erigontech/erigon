@@ -1717,8 +1717,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			bytesCompleted = t.Length()
 			delete(downloading, torrentName)
 		} else {
-			bytesRead := t.Stats().BytesReadData
-			bytesCompleted = bytesRead.Int64()
+			bytesCompleted = t.BytesCompleted()
 		}
 		progress := float32(float64(100) * (float64(bytesCompleted) / float64(tLen)))
 		stats.BytesCompleted += uint64(bytesCompleted)
@@ -1749,10 +1748,10 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 						if fi, err := os.Stat(filepath.Join(d.SnapDir(), t.Name())); err == nil {
 							if torrentComplete = (fi.Size() == *info.Length); torrentComplete {
-								infoRead := t.Stats().BytesReadData
-								if updateStats || infoRead.Int64() == 0 {
-									stats.BytesCompleted += uint64(*info.Length)
-								}
+								//infoRead := t.Stats().BytesReadData
+								//if updateStats || infoRead.Int64() == 0 {
+								//	stats.BytesCompleted += uint64(*info.Length)
+								//}
 								dbComplete++
 								progress = float32(100)
 							}
@@ -2167,13 +2166,10 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 			}
 		}
 
-		//TODO: remove whitelist check - Erigon may send us new seedable files
-		if !d.snapshotLock.Downloads.Contains(name) {
-			mi := t.Metainfo()
-			if err := CreateTorrentFileIfNotExists(d.SnapDir(), t.Info(), &mi, d.torrentFiles); err != nil {
-				d.logger.Warn("[snapshots] create torrent file", "err", err)
-				return
-			}
+		mi := t.Metainfo()
+		if err := CreateTorrentFileIfNotExists(d.SnapDir(), t.Info(), &mi, d.torrentFiles); err != nil {
+			d.logger.Warn("[snapshots] create torrent file", "err", err)
+			return
 		}
 
 		urls, ok := d.webseeds.ByFileName(t.Name())
