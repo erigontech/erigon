@@ -8,7 +8,7 @@ import (
 const (
 	SeenBlockCacheSize   = 1000 // SeenBlockCacheSize is the size of the cache for seen blocks.
 	jobsIntervalTick     = 50 * time.Millisecond
-	blockJobExpiry       = 64 * time.Second
+	blockJobExpiry       = 10 * time.Minute
 	attestationJobExpiry = 30 * time.Minute
 )
 
