@@ -564,28 +564,28 @@ func TestCtxFiles(t *testing.T) {
 		return true
 	})
 
-	roFiles := calcVisibleFiles(ii.dirtyFiles, 0, false)
-	for i, item := range roFiles {
+	visibleFiles := calcVisibleFiles(ii.dirtyFiles, 0, false)
+	for i, item := range visibleFiles {
 		if item.src.canDelete.Load() {
 			require.Failf(t, "deleted file", "%d-%d", item.startTxNum, item.endTxNum)
 		}
 		if i == 0 {
 			continue
 		}
-		if item.src.isSubsetOf(roFiles[i-1].src) || roFiles[i-1].src.isSubsetOf(item.src) {
-			require.Failf(t, "overlaping files", "%d-%d, %d-%d", item.startTxNum, item.endTxNum, roFiles[i-1].startTxNum, roFiles[i-1].endTxNum)
+		if item.src.isSubsetOf(visibleFiles[i-1].src) || visibleFiles[i-1].src.isSubsetOf(item.src) {
+			require.Failf(t, "overlaping files", "%d-%d, %d-%d", item.startTxNum, item.endTxNum, visibleFiles[i-1].startTxNum, visibleFiles[i-1].endTxNum)
 		}
 	}
-	require.Equal(t, 3, len(roFiles))
+	require.Equal(t, 3, len(visibleFiles))
 
-	require.Equal(t, 0, int(roFiles[0].startTxNum))
-	require.Equal(t, 4, int(roFiles[0].endTxNum))
+	require.Equal(t, 0, int(visibleFiles[0].startTxNum))
+	require.Equal(t, 4, int(visibleFiles[0].endTxNum))
 
-	require.Equal(t, 4, int(roFiles[1].startTxNum))
-	require.Equal(t, 5, int(roFiles[1].endTxNum))
+	require.Equal(t, 4, int(visibleFiles[1].startTxNum))
+	require.Equal(t, 5, int(visibleFiles[1].endTxNum))
 
-	require.Equal(t, 480, int(roFiles[2].startTxNum))
-	require.Equal(t, 512, int(roFiles[2].endTxNum))
+	require.Equal(t, 480, int(visibleFiles[2].startTxNum))
+	require.Equal(t, 512, int(visibleFiles[2].endTxNum))
 }
 
 func TestIsSubset(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/seg"
 	"github.com/ledgerwatch/log/v3"
+	btree2 "github.com/tidwall/btree"
 )
 
 // filesItem is "dirty" file - means file which can be:
@@ -120,3 +121,70 @@ type ctxItem struct {
 
 func (i *ctxItem) isSubSetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) } //nolint
 func (i *ctxItem) isSubsetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) } //nolint
+
+func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l idxList, trace bool) (roItems []ctxItem) {
+	visibleFiles := make([]ctxItem, 0, files.Len())
+	if trace {
+		log.Warn("[dbg] calcVisibleFiles", "amount", files.Len())
+	}
+	files.Walk(func(items []*filesItem) bool {
+		for _, item := range items {
+			if item.canDelete.Load() {
+				if trace {
+					log.Warn("[dbg] calcVisibleFiles0", "f", item.decompressor.FileName())
+				}
+				continue
+			}
+
+			// TODO: need somehow handle this case, but indices do not open in tests TestFindMergeRangeCornerCases
+			if item.decompressor == nil {
+				if trace {
+					log.Warn("[dbg] calcVisibleFiles1", "from", item.startTxNum, "to", item.endTxNum)
+				}
+				continue
+			}
+			if (l&withBTree != 0) && item.bindex == nil {
+				if trace {
+					log.Warn("[dbg] calcVisibleFiles2", "f", item.decompressor.FileName())
+				}
+				//panic(fmt.Errorf("btindex nil: %s", item.decompressor.FileName()))
+				continue
+			}
+			if (l&withHashMap != 0) && item.index == nil {
+				if trace {
+					log.Warn("[dbg] calcVisibleFiles3", "f", item.decompressor.FileName())
+				}
+				//panic(fmt.Errorf("index nil: %s", item.decompressor.FileName()))
+				continue
+			}
+			if (l&withExistence != 0) && item.existence == nil {
+				if trace {
+					log.Warn("[dbg] calcVisibleFiles4", "f", item.decompressor.FileName())
+				}
+				//panic(fmt.Errorf("existence nil: %s", item.decompressor.FileName()))
+				continue
+			}
+
+			// `kill -9` may leave small garbage files, but if big one already exists we assume it's good(fsynced) and no reason to merge again
+			// see super-set file, just drop sub-set files from list
+			for len(visibleFiles) > 0 && visibleFiles[len(visibleFiles)-1].src.isSubsetOf(item) {
+				if trace {
+					log.Warn("[dbg] calcVisibleFiles5", "f", visibleFiles[len(visibleFiles)-1].src.decompressor.FileName())
+				}
+				visibleFiles[len(visibleFiles)-1].src = nil
+				visibleFiles = visibleFiles[:len(visibleFiles)-1]
+			}
+			visibleFiles = append(visibleFiles, ctxItem{
+				startTxNum: item.startTxNum,
+				endTxNum:   item.endTxNum,
+				i:          len(visibleFiles),
+				src:        item,
+			})
+		}
+		return true
+	})
+	if visibleFiles == nil {
+		visibleFiles = []ctxItem{}
+	}
+	return visibleFiles
+}

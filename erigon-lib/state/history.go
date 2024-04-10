@@ -62,10 +62,11 @@ type History struct {
 	//  - no overlaps
 	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
 	//
-	// MakeContext() using roFiles in zero-copy way
+	// MakeContext() using visibleFiles in zero-copy way
 	dirtyFiles   *btree2.BTreeG[*filesItem]
 	visibleFiles atomic.Pointer[[]ctxItem]
-	indexList    idxList
+
+	indexList idxList
 
 	// Schema:
 	//  .v - list of values
@@ -718,8 +719,8 @@ func (sf HistoryFiles) CleanupOnError() {
 	}
 }
 func (h *History) reCalcVisibleFiles() {
-	roFiles := calcVisibleFiles(h.dirtyFiles, h.indexList, false)
-	h.visibleFiles.Store(&roFiles)
+	visibleFiles := calcVisibleFiles(h.dirtyFiles, h.indexList, false)
+	h.visibleFiles.Store(&visibleFiles)
 }
 
 // buildFiles performs potentially resource intensive operations of creating

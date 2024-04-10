@@ -114,7 +114,7 @@ type Domain struct {
 	//  - no overlaps
 	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
 	//
-	// MakeContext() using roFiles in zero-copy way
+	// MakeContext() using visibleFiles in zero-copy way
 	dirtyFiles   *btree2.BTreeG[*filesItem]
 	visibleFiles atomic.Pointer[[]ctxItem]
 
@@ -451,8 +451,8 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 }
 
 func (d *Domain) reCalcVisibleFiles() {
-	roFiles := calcVisibleFiles(d.dirtyFiles, d.indexList, false)
-	d.visibleFiles.Store(&roFiles)
+	visibleFiles := calcVisibleFiles(d.dirtyFiles, d.indexList, false)
+	d.visibleFiles.Store(&visibleFiles)
 }
 
 func (d *Domain) Close() {
