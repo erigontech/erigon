@@ -489,7 +489,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 							return err
 						}
 
-						return err
+						return nil
 					}); err != nil {
 						logger.Warn("Could not update metrics", "err", err)
 					}
