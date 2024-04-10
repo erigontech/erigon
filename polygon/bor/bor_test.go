@@ -8,8 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
-
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 
@@ -32,7 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 )
 
-type testHeimdall struct {
+type test_heimdall struct {
 	currentSpan  *heimdall.Span
 	chainConfig  *chain.Config
 	borConfig    *borcfg.BorConfig
@@ -40,8 +38,8 @@ type testHeimdall struct {
 	spans        map[heimdall.SpanId]*heimdall.Span
 }
 
-func newTestHeimdall(chainConfig *chain.Config) *testHeimdall {
-	return &testHeimdall{
+func newTestHeimdall(chainConfig *chain.Config) *test_heimdall {
+	return &test_heimdall{
 		currentSpan:  nil,
 		chainConfig:  chainConfig,
 		borConfig:    chainConfig.Bor.(*borcfg.BorConfig),
@@ -50,15 +48,15 @@ func newTestHeimdall(chainConfig *chain.Config) *testHeimdall {
 	}
 }
 
-func (h *testHeimdall) BorConfig() *borcfg.BorConfig {
+func (h *test_heimdall) BorConfig() *borcfg.BorConfig {
 	return h.borConfig
 }
 
-func (h *testHeimdall) FetchStateSyncEvents(_ context.Context, _ uint64, _ time.Time, _ int) ([]*heimdall.EventRecordWithTime, error) {
+func (h test_heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
 	return nil, nil
 }
 
-func (h *testHeimdall) FetchSpan(_ context.Context, spanID uint64) (*heimdall.Span, error) {
+func (h *test_heimdall) FetchSpan(ctx context.Context, spanID uint64) (*heimdall.Span, error) {
 
 	if span, ok := h.spans[heimdall.SpanId(spanID)]; ok {
 		h.currentSpan = span
@@ -75,7 +73,7 @@ func (h *testHeimdall) FetchSpan(_ context.Context, spanID uint64) (*heimdall.Sp
 		nextSpan.StartBlock = 1 //256
 	} else {
 		if spanID != uint64(h.currentSpan.Id+1) {
-			return nil, fmt.Errorf("can't initialize span: non consecutive span")
+			return nil, fmt.Errorf("Can't initialize span: non consecutive span")
 		}
 
 		nextSpan.StartBlock = h.currentSpan.EndBlock + 1
@@ -98,7 +96,7 @@ func (h *testHeimdall) FetchSpan(_ context.Context, spanID uint64) (*heimdall.Sp
 	return h.currentSpan, nil
 }
 
-func (h *testHeimdall) currentSprintLength() int {
+func (h test_heimdall) currentSprintLength() int {
 	if h.currentSpan != nil {
 		return int(h.borConfig.CalculateSprintLength(h.currentSpan.StartBlock))
 	}
@@ -106,51 +104,51 @@ func (h *testHeimdall) currentSprintLength() int {
 	return int(h.borConfig.CalculateSprintLength(256))
 }
 
-func (h *testHeimdall) FetchCheckpoint(_ context.Context, _ int64) (*heimdall.Checkpoint, error) {
+func (h test_heimdall) FetchCheckpoint(ctx context.Context, number int64) (*heimdall.Checkpoint, error) {
 	return nil, fmt.Errorf("TODO")
 }
 
-func (h *testHeimdall) FetchCheckpoints(_ context.Context, _ uint64, _ uint64) (heimdall.Checkpoints, error) {
-	return nil, fmt.Errorf("TODO")
-}
-
-func (h *testHeimdall) FetchCheckpointCount(_ context.Context) (int64, error) {
+func (h test_heimdall) FetchCheckpointCount(ctx context.Context) (int64, error) {
 	return 0, fmt.Errorf("TODO")
 }
 
-func (h *testHeimdall) FetchMilestone(_ context.Context, _ int64) (*heimdall.Milestone, error) {
+func (h *test_heimdall) FetchCheckpoints(ctx context.Context, page uint64, limit uint64) (heimdall.Checkpoints, error) {
 	return nil, fmt.Errorf("TODO")
 }
 
-func (h *testHeimdall) FetchMilestoneCount(_ context.Context) (int64, error) {
+func (h test_heimdall) FetchMilestone(ctx context.Context, number int64) (*heimdall.Milestone, error) {
+	return nil, fmt.Errorf("TODO")
+}
+
+func (h test_heimdall) FetchMilestoneCount(ctx context.Context) (int64, error) {
 	return 0, fmt.Errorf("TODO")
 }
 
-func (h *testHeimdall) FetchNoAckMilestone(_ context.Context, _ string) error {
+func (h test_heimdall) FetchNoAckMilestone(ctx context.Context, milestoneID string) error {
 	return fmt.Errorf("TODO")
 }
 
-func (h *testHeimdall) FetchLastNoAckMilestone(_ context.Context) (string, error) {
+func (h test_heimdall) FetchLastNoAckMilestone(ctx context.Context) (string, error) {
 	return "", fmt.Errorf("TODO")
 }
 
-func (h *testHeimdall) FetchMilestoneID(_ context.Context, _ string) error {
+func (h test_heimdall) FetchMilestoneID(ctx context.Context, milestoneID string) error {
 	return fmt.Errorf("TODO")
 }
-func (h *testHeimdall) FetchLatestSpan(_ context.Context) (*heimdall.Span, error) {
+func (h test_heimdall) FetchLatestSpan(ctx context.Context) (*heimdall.Span, error) {
 	return nil, fmt.Errorf("TODO")
 }
 
-func (h *testHeimdall) Close() {}
+func (h test_heimdall) Close() {}
 
-type testGenesisContract struct {
+type test_genesisContract struct {
 }
 
-func (g testGenesisContract) CommitState(_ rlp.RawValue, _ consensus.SystemCall) error {
+func (g test_genesisContract) CommitState(event rlp.RawValue, syscall consensus.SystemCall) error {
 	return nil
 }
 
-func (g testGenesisContract) LastStateId(_ consensus.SystemCall) (*big.Int, error) {
+func (g test_genesisContract) LastStateId(syscall consensus.SystemCall) (*big.Int, error) {
 	return big.NewInt(0), nil
 }
 
@@ -191,7 +189,7 @@ func (r headerReader) GetTd(libcommon.Hash, uint64) *big.Int {
 	return nil
 }
 
-func (r headerReader) BorSpan(_ uint64) []byte {
+func (r headerReader) BorSpan(spanId uint64) []byte {
 	b, _ := json.Marshal(&r.validator.heimdall.currentSpan)
 	return b
 }
@@ -202,16 +200,16 @@ type spanner struct {
 	currentSpan      heimdall.Span
 }
 
-func (c *spanner) GetCurrentSpan(_ consensus.SystemCall) (*heimdall.Span, error) {
+func (c spanner) GetCurrentSpan(_ consensus.SystemCall) (*heimdall.Span, error) {
 	return &c.currentSpan, nil
 }
 
-func (c *spanner) CommitSpan(heimdallSpan heimdall.Span, _ consensus.SystemCall) error {
+func (c *spanner) CommitSpan(heimdallSpan heimdall.Span, syscall consensus.SystemCall) error {
 	c.currentSpan = heimdallSpan
 	return nil
 }
 
-func (c *spanner) GetCurrentValidators(_ uint64, _ libcommon.Address, _ consensus.ChainHeaderReader) ([]*valset.Validator, error) {
+func (c *spanner) GetCurrentValidators(spanId uint64, signer libcommon.Address, chain consensus.ChainHeaderReader) ([]*valset.Validator, error) {
 	return []*valset.Validator{
 		{
 			ID:               1,
@@ -223,7 +221,7 @@ func (c *spanner) GetCurrentValidators(_ uint64, _ libcommon.Address, _ consensu
 
 type validator struct {
 	*mock.MockSentry
-	heimdall *testHeimdall
+	heimdall *test_heimdall
 	blocks   map[uint64]*types.Block
 }
 
@@ -279,7 +277,7 @@ func (v validator) verifyBlocks(blocks []*types.Block) error {
 	return nil
 }
 
-func newValidator(t *testing.T, heimdall *testHeimdall, blocks map[uint64]*types.Block) validator {
+func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*types.Block) validator {
 	logger := log.Root()
 
 	validatorKey, _ := crypto.GenerateKey()
@@ -293,7 +291,7 @@ func newValidator(t *testing.T, heimdall *testHeimdall, blocks map[uint64]*types
 			validatorAddress: validatorAddress,
 		},
 		heimdall,
-		testGenesisContract{},
+		test_genesisContract{},
 		logger,
 	)
 
@@ -312,7 +310,7 @@ func newValidator(t *testing.T, heimdall *testHeimdall, blocks map[uint64]*types
 			},
 		})
 	} else {
-		err := heimdall.validatorSet.UpdateWithChangeSet([]*valset.Validator{
+		heimdall.validatorSet.UpdateWithChangeSet([]*valset.Validator{
 			{
 				ID:               uint64(len(heimdall.validatorSet.Validators) + 1),
 				Address:          validatorAddress,
@@ -320,14 +318,13 @@ func newValidator(t *testing.T, heimdall *testHeimdall, blocks map[uint64]*types
 				ProposerPriority: 1,
 			},
 		})
-		require.NoError(t, err)
 	}
 
 	bor.Authorize(validatorAddress, func(_ libcommon.Address, mimeType string, message []byte) ([]byte, error) {
 		return crypto.Sign(crypto.Keccak256(message), validatorKey)
 	})
 
-	const checkStateRoot = true
+	checkStateRoot := true
 	return validator{
 		mock.MockWithEverything(t, &types.Genesis{Config: heimdall.chainConfig}, validatorKey, prune.DefaultMode, bor, 1024, false, false, checkStateRoot),
 		heimdall,

@@ -61,6 +61,7 @@ func (h *heimdall) LastCheckpointId(ctx context.Context, _ CheckpointStore) (Che
 	// todo get this from store if its likely not changed (need timeout)
 
 	count, err := h.client.FetchCheckpointCount(ctx)
+
 	if err != nil {
 		return 0, false, err
 	}
@@ -166,6 +167,7 @@ func (h *heimdall) FetchCheckpoints(ctx context.Context, store CheckpointStore, 
 	var checkpoints []*Checkpoint
 
 	lastCheckpointId, exists, err := store.LastCheckpointId(ctx)
+
 	if err != nil {
 		return nil, err
 	}
@@ -177,6 +179,7 @@ func (h *heimdall) FetchCheckpoints(ctx context.Context, store CheckpointStore, 
 
 		for id := start; id <= lastCheckpointId; id++ {
 			checkpoint, err := store.GetCheckpoint(ctx, id)
+
 			if err != nil {
 				return nil, err
 			}
@@ -189,11 +192,13 @@ func (h *heimdall) FetchCheckpoints(ctx context.Context, store CheckpointStore, 
 
 	for id := start; id <= end; id++ {
 		checkpoint, err := h.client.FetchCheckpoint(ctx, int64(id))
+
 		if err != nil {
 			return nil, err
 		}
 
 		err = store.PutCheckpoint(ctx, id, checkpoint)
+
 		if err != nil {
 			return nil, err
 		}
@@ -217,6 +222,7 @@ func (h *heimdall) LastMilestoneId(ctx context.Context, _ MilestoneStore) (Miles
 	// todo get this from store if its likely not changed (need timeout)
 
 	count, err := h.client.FetchMilestoneCount(ctx)
+
 	if err != nil {
 		return 0, false, err
 	}
@@ -294,6 +300,7 @@ func (h *heimdall) FetchMilestones(ctx context.Context, store MilestoneStore, st
 	var milestones []*Milestone
 
 	lastMilestoneId, exists, err := store.LastMilestoneId(ctx)
+
 	if err != nil {
 		return nil, err
 	}
@@ -305,6 +312,7 @@ func (h *heimdall) FetchMilestones(ctx context.Context, store MilestoneStore, st
 
 		for id := start; id <= lastMilestoneId; id++ {
 			milestone, err := store.GetMilestone(ctx, id)
+
 			if err != nil {
 				return nil, err
 			}
@@ -317,11 +325,13 @@ func (h *heimdall) FetchMilestones(ctx context.Context, store MilestoneStore, st
 
 	for id := start; id <= end; id++ {
 		milestone, err := h.client.FetchMilestone(ctx, int64(id))
+
 		if err != nil {
 			return nil, err
 		}
 
 		err = store.PutMilestone(ctx, id, milestone)
+
 		if err != nil {
 			return nil, err
 		}
@@ -334,6 +344,7 @@ func (h *heimdall) FetchMilestones(ctx context.Context, store MilestoneStore, st
 
 func (h *heimdall) LastSpanId(ctx context.Context, store SpanStore) (SpanId, bool, error) {
 	span, err := h.FetchLatestSpan(ctx, store)
+
 	if err != nil {
 		return 0, false, err
 	}
@@ -347,6 +358,7 @@ func (h *heimdall) FetchLatestSpan(ctx context.Context, _ SpanStore) (*Span, err
 
 func (h *heimdall) FetchSpansFromBlock(ctx context.Context, store SpanStore, startBlock uint64) ([]*Span, error) {
 	last, _, err := h.LastSpanId(ctx, store)
+
 	if err != nil {
 		return nil, err
 	}
@@ -385,6 +397,7 @@ func (h *heimdall) FetchSpans(ctx context.Context, store SpanStore, start SpanId
 	var spans []*Span
 
 	lastSpanId, exists, err := store.LastSpanId(ctx)
+
 	if err != nil {
 		return nil, err
 	}
@@ -396,6 +409,7 @@ func (h *heimdall) FetchSpans(ctx context.Context, store SpanStore, start SpanId
 
 		for id := start; id <= lastSpanId; id++ {
 			span, err := store.GetSpan(ctx, id)
+
 			if err != nil {
 				return nil, err
 			}
@@ -408,11 +422,13 @@ func (h *heimdall) FetchSpans(ctx context.Context, store SpanStore, start SpanId
 
 	for id := start; id <= end; id++ {
 		span, err := h.client.FetchSpan(ctx, uint64(id))
+
 		if err != nil {
 			return nil, err
 		}
 
 		err = store.PutSpan(ctx, span)
+
 		if err != nil {
 			return nil, err
 		}
@@ -437,42 +453,6 @@ func (h *heimdall) OnSpanEvent(ctx context.Context, store SpanStore, cb func(*Sp
 	}
 
 	go h.pollSpans(ctx, store, tip, cb)
-
-	return nil
-}
-
-func (h *heimdall) OnCheckpointEvent(ctx context.Context, store CheckpointStore, cb func(*Checkpoint)) error {
-	tip, ok, err := store.LastCheckpointId(ctx)
-	if err != nil {
-		return err
-	}
-
-	if !ok {
-		tip, _, err = h.LastCheckpointId(ctx, store)
-		if err != nil {
-			return err
-		}
-	}
-
-	go h.pollCheckpoints(ctx, store, tip, cb)
-
-	return nil
-}
-
-func (h *heimdall) OnMilestoneEvent(ctx context.Context, store MilestoneStore, cb func(*Milestone)) error {
-	tip, ok, err := store.LastMilestoneId(ctx)
-	if err != nil {
-		return err
-	}
-
-	if !ok {
-		tip, _, err = h.LastMilestoneId(ctx, store)
-		if err != nil {
-			return err
-		}
-	}
-
-	go h.pollMilestones(ctx, store, tip, cb)
 
 	return nil
 }
@@ -513,6 +493,24 @@ func (h *heimdall) pollSpans(ctx context.Context, store SpanStore, tip SpanId, c
 	}
 }
 
+func (h *heimdall) OnCheckpointEvent(ctx context.Context, store CheckpointStore, cb func(*Checkpoint)) error {
+	tip, ok, err := store.LastCheckpointId(ctx)
+	if err != nil {
+		return err
+	}
+
+	if !ok {
+		tip, _, err = h.LastCheckpointId(ctx, store)
+		if err != nil {
+			return err
+		}
+	}
+
+	go h.pollCheckpoints(ctx, store, tip, cb)
+
+	return nil
+}
+
 func (h *heimdall) pollCheckpoints(ctx context.Context, store CheckpointStore, tip CheckpointId, cb func(*Checkpoint)) {
 	for ctx.Err() == nil {
 		count, err := h.client.FetchCheckpointCount(ctx)
@@ -547,6 +545,24 @@ func (h *heimdall) pollCheckpoints(ctx context.Context, store CheckpointStore, t
 		tip = CheckpointId(count)
 		go cb(m[len(m)-1])
 	}
+}
+
+func (h *heimdall) OnMilestoneEvent(ctx context.Context, store MilestoneStore, cb func(*Milestone)) error {
+	tip, ok, err := store.LastMilestoneId(ctx)
+	if err != nil {
+		return err
+	}
+
+	if !ok {
+		tip, _, err = h.LastMilestoneId(ctx, store)
+		if err != nil {
+			return err
+		}
+	}
+
+	go h.pollMilestones(ctx, store, tip, cb)
+
+	return nil
 }
 
 func (h *heimdall) pollMilestones(ctx context.Context, store MilestoneStore, tip MilestoneId, cb func(*Milestone)) {
