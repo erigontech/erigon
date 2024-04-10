@@ -9,7 +9,17 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-// filesItem corresponding to a pair of files (.dat and .idx)
+// filesItem is "dirty" file - means file which can be:
+//   - uncomplete
+//   - not_indexed
+//   - overlaped_by_bigger_file
+//   - marked_as_ready_for_delete
+//   - can also be "good" file
+//
+// such files must be hiddend from user (reader), but may be useful for background merging process, etc...
+// list of filesItem must be represented as Tree - because they may overlap
+
+// ctxItem - class is used for good/visible files
 type filesItem struct {
 	decompressor *seg.Decompressor
 	index        *recsplit.Index
@@ -75,7 +85,8 @@ func (i *filesItem) closeFilesAndRemove() {
 	}
 }
 
-// filesItem corresponding to a pair of files (.dat and .idx)
+// ctxItem is like filesItem but only for good/visible files (indexed, not overlaped, not marked for deletion, etc...)
+// it's ok to store ctxItem in array
 type ctxItem struct {
 	getter     *seg.Getter
 	reader     *recsplit.IndexReader
