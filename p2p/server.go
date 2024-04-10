@@ -203,8 +203,8 @@ type Server struct {
 	newPeerHook  func(*Peer)
 	listenFunc   func(network, addr string) (net.Listener, error)
 
-	lock    sync.Mutex // protects running
-	running bool
+	lock    sync.Mutex // protects running AND whole bunch of stuff
+	running bool       // todo make it atomic
 
 	listener     net.Listener
 	ourHandshake *protoHandshake
@@ -234,7 +234,9 @@ type Server struct {
 
 	// State of run loop and listenLoop.
 	inboundHistory expHeap
-	errors         map[string]uint
+
+	errorsMu sync.Mutex
+	errors   map[string]uint
 }
 
 type peerOpFunc func(map[enode.ID]*Peer)
@@ -865,8 +867,8 @@ running:
 			vals := []interface{}{"protocol", srv.Config.Protocols[0].Version, "peers", len(peers), "trusted", len(trusted), "inbound", inboundCount}
 
 			func() {
-				srv.lock.Lock()
-				defer srv.lock.Unlock()
+				srv.errorsMu.Lock()
+				defer srv.errorsMu.Unlock()
 				for err, count := range srv.errors {
 					vals = append(vals, err, count)
 				}
@@ -924,7 +926,9 @@ func (srv *Server) listenLoop(ctx context.Context) {
 	// The slots limit accepts of new connections.
 	slots := semaphore.NewWeighted(int64(srv.MaxPendingPeers))
 
+	srv.errorsMu.Lock()
 	srv.errors = map[string]uint{}
+	srv.errorsMu.Unlock()
 
 	// Wait for slots to be returned on exit. This ensures all connection goroutines
 	// are down before listenLoop returns.
@@ -1043,14 +1047,14 @@ func cleanError(err string) string {
 
 func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) error {
 	// Prevent leftover pending conns from entering the handshake.
-	srv.lock.Lock()
-	running := srv.running
-	// reset error counts
-	srv.errors = map[string]uint{}
-	srv.lock.Unlock()
+	running := srv.Running()
 	if !running {
 		return errServerStopped
 	}
+	// reset error counts
+	srv.errorsMu.Lock()
+	srv.errors = map[string]uint{}
+	srv.errorsMu.Unlock()
 
 	// If dialing, figure out the remote public key.
 	var dialPubkey *ecdsa.PublicKey
@@ -1067,9 +1071,9 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) erro
 	remotePubkey, err := c.doEncHandshake(srv.PrivateKey)
 	if err != nil {
 		errStr := cleanError(err.Error())
-		srv.lock.Lock()
-		srv.errors[errStr] = srv.errors[errStr] + 1
-		srv.lock.Unlock()
+		srv.errorsMu.Lock()
+		srv.errors[errStr]++
+		srv.errorsMu.Unlock()
 		srv.logger.Trace("Failed RLPx handshake", "addr", c.fd.RemoteAddr(), "conn", c.flags, "err", err)
 		return err
 	}
@@ -1090,9 +1094,9 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) erro
 	phs, err := c.doProtoHandshake(srv.ourHandshake)
 	if err != nil {
 		errStr := cleanError(err.Error())
-		srv.lock.Lock()
-		srv.errors[errStr] = srv.errors[errStr] + 1
-		srv.lock.Unlock()
+		srv.errorsMu.Lock()
+		srv.errors[errStr]++
+		srv.errorsMu.Unlock()
 		clog.Trace("Failed p2p handshake", "err", err)
 		return err
 	}
