@@ -813,8 +813,8 @@ func TestIterateChanged2(t *testing.T) {
 func TestScanStaticFilesH(t *testing.T) {
 	logger := log.New()
 	h := &History{InvertedIndex: &InvertedIndex{filenameBase: "test", aggregationStep: 1, logger: logger},
-		files:  btree2.NewBTreeG[*filesItem](filesItemLess),
-		logger: logger,
+		dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess),
+		logger:     logger,
 	}
 	files := []string{
 		"test.0-1.v",
@@ -825,11 +825,11 @@ func TestScanStaticFilesH(t *testing.T) {
 		"test.4-5.v",
 	}
 	h.scanStateFiles(files)
-	require.Equal(t, 6, h.files.Len())
+	require.Equal(t, 6, h.dirtyFiles.Len())
 
-	h.files.Clear()
+	h.dirtyFiles.Clear()
 	h.integrityFileExtensions = []string{"kv"}
 	h.scanStateFiles(files)
-	require.Equal(t, 0, h.files.Len())
+	require.Equal(t, 0, h.dirtyFiles.Len())
 
 }
