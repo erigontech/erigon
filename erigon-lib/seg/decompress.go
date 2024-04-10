@@ -28,6 +28,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -272,6 +273,13 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 		}
 	}
 	d.wordsStart = pos + 8 + dictSize
+
+	if d.Count() == 0 && dictSize == 0 && d.size > 32 {
+		d.Close()
+
+		return nil, fmt.Errorf("corrupted file: size %v but no words in it: %v",
+			fName, datasize.ByteSize(d.size).HR())
+	}
 	return d, nil
 }
 
