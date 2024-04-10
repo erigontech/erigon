@@ -533,13 +533,13 @@ func TestScanStaticFiles(t *testing.T) {
 		"v1-test.4-5.ef",
 	}
 	ii.scanStateFiles(files)
-	require.Equal(t, 6, ii.files.Len())
+	require.Equal(t, 6, ii.dirtyFiles.Len())
 
 	//integrity extension case
-	ii.files.Clear()
+	ii.dirtyFiles.Clear()
 	ii.integrityCheck = func(fromStep, toStep uint64) bool { return false }
 	ii.scanStateFiles(files)
-	require.Equal(t, 0, ii.files.Len())
+	require.Equal(t, 0, ii.dirtyFiles.Len())
 }
 
 func TestCtxFiles(t *testing.T) {
@@ -557,14 +557,14 @@ func TestCtxFiles(t *testing.T) {
 		"v1-test.480-512.ef",
 	}
 	ii.scanStateFiles(files)
-	require.Equal(t, 10, ii.files.Len())
-	ii.files.Scan(func(item *filesItem) bool {
+	require.Equal(t, 10, ii.dirtyFiles.Len())
+	ii.dirtyFiles.Scan(func(item *filesItem) bool {
 		fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
 		item.decompressor = &seg.Decompressor{FileName1: fName}
 		return true
 	})
 
-	roFiles := ctxFiles(ii.files, 0, false)
+	roFiles := calcVisibleFiles(ii.dirtyFiles, 0, false)
 	for i, item := range roFiles {
 		if item.src.canDelete.Load() {
 			require.Failf(t, "deleted file", "%d-%d", item.startTxNum, item.endTxNum)

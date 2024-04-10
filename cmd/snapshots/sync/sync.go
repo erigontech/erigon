@@ -20,7 +20,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
-	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"

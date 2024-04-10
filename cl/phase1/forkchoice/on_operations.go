@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -16,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/network/subnets"
 	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"golang.org/x/exp/slices"
 )
 
 // NOTE: This file implements non-official handlers for other types of iterations. what it does is,using the forkchoices

@@ -358,7 +358,7 @@ func (dc *DomainContext) lookupByShortenedKey(shortKey []byte, txFrom uint64, tx
 		}
 	}
 	if item == nil {
-		dc.d.files.Walk(func(files []*filesItem) bool {
+		dc.d.dirtyFiles.Walk(func(files []*filesItem) bool {
 			for _, f := range files {
 				if f.startTxNum == txFrom && f.endTxNum == txTo {
 					item = f
@@ -371,7 +371,7 @@ func (dc *DomainContext) lookupByShortenedKey(shortKey []byte, txFrom uint64, tx
 
 	if item == nil {
 		fileStepsss := ""
-		for _, item := range dc.d.files.Items() {
+		for _, item := range dc.d.dirtyFiles.Items() {
 			fileStepsss += fmt.Sprintf("%d-%d;", item.startTxNum/dc.d.aggregationStep, item.endTxNum/dc.d.aggregationStep)
 		}
 		roFiles := ""
@@ -382,7 +382,7 @@ func (dc *DomainContext) lookupByShortenedKey(shortKey []byte, txFrom uint64, tx
 			"stepFrom", txFrom/dc.d.aggregationStep, "stepTo", txTo/dc.d.aggregationStep,
 			"shortened", fmt.Sprintf("%x", shortKey),
 			"domain", dc.d.keysTable, "files", fileStepsss, "roFiles", roFiles,
-			"roFilesCount", len(dc.files), "filesCount", dc.d.files.Len())
+			"roFilesCount", len(dc.files), "filesCount", dc.d.dirtyFiles.Len())
 		return nil, false
 	}
 
@@ -394,7 +394,7 @@ func (dc *DomainContext) lookupByShortenedKey(shortKey []byte, txFrom uint64, tx
 				"domain", dc.d.keysTable,
 				"short", fmt.Sprintf("%x", shortKey),
 				"stepFrom", txFrom/dc.d.aggregationStep, "stepTo", txTo/dc.d.aggregationStep, "offset", offset,
-				"roFilesCount", len(dc.files), "filesCount", dc.d.files.Len(),
+				"roFilesCount", len(dc.files), "filesCount", dc.d.dirtyFiles.Len(),
 				"fileFound", item != nil)
 		}
 	}()

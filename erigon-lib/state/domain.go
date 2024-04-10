@@ -106,17 +106,17 @@ var (
 type Domain struct {
 	*History
 
-	// files - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
+	// dirtyFiles - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
 	// thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
 	//
-	// roFiles derivative from field `file`, but without garbage:
+	// visibleFiles derivative from field `file`, but without garbage:
 	//  - no files with `canDelete=true`
 	//  - no overlaps
 	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
 	//
 	// MakeContext() using roFiles in zero-copy way
-	files   *btree2.BTreeG[*filesItem]
-	roFiles atomic.Pointer[[]ctxItem]
+	dirtyFiles   *btree2.BTreeG[*filesItem]
+	visibleFiles atomic.Pointer[[]ctxItem]
 
 	// replaceKeysInValues allows to replace commitment branch values with shorter keys.
 	// for commitment domain only
@@ -147,7 +147,7 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, v
 		keysTable:   keysTable,
 		valsTable:   valsTable,
 		compression: cfg.compress,
-		files:       btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		dirtyFiles:  btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		stats:       DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
 
 		indexList:                   withBTree | withExistence,
@@ -155,7 +155,7 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, v
 		restrictSubsetFileDeletions: cfg.restrictSubsetFileDeletions, // to prevent not merged 'garbage' to delete on start
 	}
 
-	d.roFiles.Store(&[]ctxItem{})
+	d.visibleFiles.Store(&[]ctxItem{})
 
 	var err error
 	if d.History, err = NewHistory(cfg.hist, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, nil, logger); err != nil {
@@ -216,7 +216,7 @@ func (d *Domain) openList(names []string, readonly bool) error {
 		return fmt.Errorf("Domain.OpenList: %s, %w", d.filenameBase, err)
 	}
 	d.protectFromHistoryFilesAheadOfDomainFiles(readonly)
-	d.reCalcRoFiles()
+	d.reCalcVisibleFiles()
 	return nil
 }
 
@@ -248,14 +248,14 @@ func (d *Domain) GetAndResetStats() DomainStats {
 
 func (d *Domain) removeFilesAfterStep(lowerBound uint64, readonly bool) {
 	var toDelete []*filesItem
-	d.files.Scan(func(item *filesItem) bool {
+	d.dirtyFiles.Scan(func(item *filesItem) bool {
 		if item.startTxNum/d.aggregationStep >= lowerBound {
 			toDelete = append(toDelete, item)
 		}
 		return true
 	})
 	for _, item := range toDelete {
-		d.files.Delete(item)
+		d.dirtyFiles.Delete(item)
 		if !readonly {
 			log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete). stack: %s", item.decompressor.FileName(), lowerBound, dbg.Stack()))
 			item.closeFilesAndRemove()
@@ -266,14 +266,14 @@ func (d *Domain) removeFilesAfterStep(lowerBound uint64, readonly bool) {
 	}
 
 	toDelete = toDelete[:0]
-	d.History.files.Scan(func(item *filesItem) bool {
+	d.History.dirtyFiles.Scan(func(item *filesItem) bool {
 		if item.startTxNum/d.aggregationStep >= lowerBound {
 			toDelete = append(toDelete, item)
 		}
 		return true
 	})
 	for _, item := range toDelete {
-		d.History.files.Delete(item)
+		d.History.dirtyFiles.Delete(item)
 		if !readonly {
 			log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
 			item.closeFilesAndRemove()
@@ -283,14 +283,14 @@ func (d *Domain) removeFilesAfterStep(lowerBound uint64, readonly bool) {
 	}
 
 	toDelete = toDelete[:0]
-	d.History.InvertedIndex.files.Scan(func(item *filesItem) bool {
+	d.History.InvertedIndex.dirtyFiles.Scan(func(item *filesItem) bool {
 		if item.startTxNum/d.aggregationStep >= lowerBound {
 			toDelete = append(toDelete, item)
 		}
 		return true
 	})
 	for _, item := range toDelete {
-		d.History.InvertedIndex.files.Delete(item)
+		d.History.InvertedIndex.dirtyFiles.Delete(item)
 		if !readonly {
 			log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
 			item.closeFilesAndRemove()
@@ -337,10 +337,10 @@ func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) 
 		var newFile = newFilesItem(startTxNum, endTxNum, d.aggregationStep)
 		newFile.frozen = false
 
-		if _, has := d.files.Get(newFile); has {
+		if _, has := d.dirtyFiles.Get(newFile); has {
 			continue
 		}
-		d.files.Set(newFile)
+		d.dirtyFiles.Set(newFile)
 	}
 	return garbageFiles
 }
@@ -348,7 +348,7 @@ func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) 
 func (d *Domain) openFiles() (err error) {
 	invalidFileItems := make([]*filesItem, 0)
 	invalidFileItemsLock := sync.Mutex{}
-	d.files.Walk(func(items []*filesItem) bool {
+	d.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
 			if item.decompressor == nil {
@@ -408,16 +408,16 @@ func (d *Domain) openFiles() (err error) {
 	})
 
 	for _, item := range invalidFileItems {
-		d.files.Delete(item)
+		d.dirtyFiles.Delete(item)
 	}
 
-	d.reCalcRoFiles()
+	d.reCalcVisibleFiles()
 	return nil
 }
 
 func (d *Domain) closeWhatNotInList(fNames []string) {
 	var toDelete []*filesItem
-	d.files.Walk(func(items []*filesItem) bool {
+	d.dirtyFiles.Walk(func(items []*filesItem) bool {
 	Loop1:
 		for _, item := range items {
 			for _, protectName := range fNames {
@@ -446,19 +446,19 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 			item.existence.Close()
 			item.existence = nil
 		}
-		d.files.Delete(item)
+		d.dirtyFiles.Delete(item)
 	}
 }
 
-func (d *Domain) reCalcRoFiles() {
-	roFiles := ctxFiles(d.files, d.indexList, false)
-	d.roFiles.Store(&roFiles)
+func (d *Domain) reCalcVisibleFiles() {
+	roFiles := calcVisibleFiles(d.dirtyFiles, d.indexList, false)
+	d.visibleFiles.Store(&roFiles)
 }
 
 func (d *Domain) Close() {
 	d.History.Close()
 	d.closeWhatNotInList([]string{})
-	d.reCalcRoFiles()
+	d.reCalcVisibleFiles()
 }
 
 func (w *domainBufferedWriter) PutWithPrev(key1, key2, val, preval []byte, prevStep uint64) error {
@@ -721,7 +721,7 @@ func (dc *DomainContext) DebugKVFilesWithKey(k []byte) (res []string, err error)
 	return res, nil
 }
 func (dc *DomainContext) DebugEFKey(k []byte) error {
-	dc.hc.ic.ii.files.Walk(func(items []*filesItem) bool {
+	dc.hc.ic.ii.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.decompressor == nil {
 				continue
@@ -768,7 +768,7 @@ func (dc *DomainContext) DebugEFKey(k []byte) error {
 }
 
 func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
-	d.History.files.Walk(func(items []*filesItem) bool {
+	d.History.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.index == nil {
 				return false
@@ -781,7 +781,7 @@ func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 		return true
 	})
 
-	d.files.Walk(func(items []*filesItem) bool {
+	d.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.index == nil {
 				return false
@@ -802,7 +802,7 @@ func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 }
 
 func (d *Domain) MakeContext() *DomainContext {
-	files := *d.roFiles.Load()
+	files := *d.visibleFiles.Load()
 	for i := 0; i < len(files); i++ {
 		if !files[i].src.frozen {
 			files[i].src.refcount.Add(1)
@@ -1054,7 +1054,7 @@ func (d *Domain) buildMapIdx(ctx context.Context, fromStep, toStep uint64, data 
 }
 
 func (d *Domain) missedBtreeIdxFiles() (l []*filesItem) {
-	d.files.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
+	d.dirtyFiles.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
 			fPath := d.kvBtFilePath(fromStep, toStep)
@@ -1073,7 +1073,7 @@ func (d *Domain) missedBtreeIdxFiles() (l []*filesItem) {
 	return l
 }
 func (d *Domain) missedKviIdxFiles() (l []*filesItem) {
-	d.files.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
+	d.dirtyFiles.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
 			fPath := d.kvAccessorFilePath(fromStep, toStep)
@@ -1216,7 +1216,7 @@ func buildIndex(ctx context.Context, d *seg.Decompressor, compressed FileCompres
 }
 
 func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
-	defer d.reCalcRoFiles()
+	defer d.reCalcVisibleFiles()
 
 	d.History.integrateFiles(sf.HistoryFiles, txNumFrom, txNumTo)
 
@@ -1226,7 +1226,7 @@ func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
 	fi.index = sf.valuesIdx
 	fi.bindex = sf.valuesBt
 	fi.existence = sf.bloom
-	d.files.Set(fi)
+	d.dirtyFiles.Set(fi)
 }
 
 // unwind is similar to prune but the difference is that it restores domain values from the history as of txFrom
