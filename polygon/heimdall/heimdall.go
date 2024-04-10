@@ -644,8 +644,8 @@ func (h *heimdall) batchFetchCheckpoints(
 
 	h.logger.Debug(
 		heimdallLogPrefix("batch fetch checkpoints done"),
-		"len", len(checkpoints), "duration",
-		time.Since(fetchStartTime),
+		"len", len(checkpoints),
+		"duration", time.Since(fetchStartTime),
 	)
 
 	return checkpoints, nil
