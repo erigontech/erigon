@@ -126,7 +126,6 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	if err := b.processAndStoreBlock(ctx, msg); err != nil {
 		if err == forkchoice.ErrEIP4844DataNotAvailable {
 			b.scheduleBlockForLaterProcessing(msg)
-			log.Info("Block scheduled for later processing", "block", msg.Block.Slot)
 			return ErrIgnore
 		}
 		return err
@@ -154,6 +153,7 @@ func (b *blockService) publishBlockEvent(block *cltypes.SignedBeaconBlock) {
 
 // scheduleBlockForLaterProcessing schedules a block for later processing
 func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeaconBlock) {
+	log.Debug("Block scheduled for later processing", "block", block.Block.Slot)
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
 		log.Debug("Failed to hash block", "block", block, "error", err)
