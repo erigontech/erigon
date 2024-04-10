@@ -118,6 +118,11 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 		return nil, err
 	}
 
+	// [zkevm] - proxy the request if the chainID is ZK and not a sequencer
+	if api.isZkNonSequencer(cc.ChainID) {
+		return api.gasPriceZk(api.l2RpcUrl)
+	}
+
 	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, cc, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache)
 	tipcap, err := oracle.SuggestTipCap(ctx)
 	gasResult := big.NewInt(0)
