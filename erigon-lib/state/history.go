@@ -306,7 +306,7 @@ func (h *History) missedIdxFiles() (l []*filesItem) {
 
 // BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
 func (hc *HistoryContext) BuildOptionalMissedIndices(ctx context.Context) (err error) {
-	return hc.h.localityIndex.BuildMissedIndices(ctx, hc.ic)
+	return nil
 }
 
 func (h *History) buildVi(ctx context.Context, item *filesItem, p *background.Progress) (err error) {
@@ -1199,7 +1199,7 @@ func (hc *HistoryContext) getFile(from, to uint64) (it ctxItem, ok bool) {
 }
 
 func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, error) {
-	exactStep1, exactStep2, lastIndexedTxNum, foundExactShard1, foundExactShard2 := hc.h.localityIndex.lookupIdxFiles(hc.ic.loc, key, txNum)
+	exactStep1, exactStep2, lastIndexedTxNum, foundExactShard1, foundExactShard2 := uint64(0), uint64(0), uint64(0), false, false
 
 	//fmt.Printf("GetNoState [%x] %d\n", key, txNum)
 	var foundTxNum uint64

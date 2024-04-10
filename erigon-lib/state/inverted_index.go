@@ -66,7 +66,6 @@ type InvertedIndex struct {
 
 	integrityFileExtensions []string
 	withLocalityIndex       bool
-	localityIndex           *LocalityIndex
 	tx                      kv.RwTx
 
 	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
@@ -105,13 +104,6 @@ func NewInvertedIndex(
 	}
 	ii.roFiles.Store(&[]ctxItem{})
 
-	if ii.withLocalityIndex {
-		var err error
-		ii.localityIndex, err = NewLocalityIndex(ii.dir, ii.tmpdir, ii.aggregationStep, ii.filenameBase, ii.logger)
-		if err != nil {
-			return nil, fmt.Errorf("NewHistory: %s, %w", ii.filenameBase, err)
-		}
-	}
 	return &ii, nil
 }
 
@@ -131,9 +123,6 @@ func (ii *InvertedIndex) fileNamesOnDisk() ([]string, error) {
 }
 
 func (ii *InvertedIndex) OpenList(fNames []string) error {
-	if err := ii.localityIndex.OpenList(fNames); err != nil {
-		return err
-	}
 	ii.closeWhatNotInList(fNames)
 	ii.garbageFiles = ii.scanStateFiles(fNames)
 	if err := ii.openFiles(); err != nil {
@@ -367,7 +356,6 @@ func (ii *InvertedIndex) closeWhatNotInList(fNames []string) {
 }
 
 func (ii *InvertedIndex) Close() {
-	ii.localityIndex.Close()
 	ii.closeWhatNotInList([]string{})
 	ii.reCalcRoFiles()
 }
@@ -525,7 +513,6 @@ func (ii *InvertedIndex) MakeContext() *InvertedIndexContext {
 	var ic = InvertedIndexContext{
 		ii:    ii,
 		files: *ii.roFiles.Load(),
-		loc:   ii.localityIndex.MakeContext(),
 	}
 	for _, item := range ic.files {
 		if !item.src.frozen {
@@ -549,8 +536,6 @@ func (ic *InvertedIndexContext) Close() {
 	for _, r := range ic.readers {
 		r.Close()
 	}
-
-	ic.loc.Close(ic.ii.logger)
 }
 
 type InvertedIndexContext struct {
@@ -558,7 +543,6 @@ type InvertedIndexContext struct {
 	files   []ctxItem // have no garbage (overlaps, etc...)
 	getters []*seg.Getter
 	readers []*recsplit.IndexReader
-	loc     *ctxLocalityIdx
 }
 
 func (ic *InvertedIndexContext) statelessGetter(i int) *seg.Getter {
