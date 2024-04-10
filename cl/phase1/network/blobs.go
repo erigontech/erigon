@@ -69,7 +69,7 @@ func RequestBlobsFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, req *soli
 	var atomicResp atomic.Value
 
 	atomicResp.Store(&PeerAndSidecars{})
-	reqInterval := time.NewTicker(300 * time.Millisecond)
+	reqInterval := time.NewTicker(100 * time.Millisecond)
 	defer reqInterval.Stop()
 Loop:
 	for {

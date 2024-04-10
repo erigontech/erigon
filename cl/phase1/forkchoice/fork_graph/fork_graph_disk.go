@@ -249,8 +249,8 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		f.blockRewards.Store(libcommon.Hash(blockRoot), blockRewardsCollector)
 		f.balancesStorage.Insert(libcommon.Hash(blockRoot), block.ParentRoot, prevDumpBalances, newState.RawBalances(), epochCross)
 		f.validatorSetStorage.Insert(libcommon.Hash(blockRoot), block.ParentRoot, prevValidatorSetDump, newState.RawValidatorSet(), epochCross)
-
-		f.syncCommittees.Store(libcommon.Hash(blockRoot), syncCommittees{
+		period := f.beaconCfg.SyncCommitteePeriod(newState.Slot())
+		f.syncCommittees.Store(period, syncCommittees{
 			currentSyncCommittee: newState.CurrentSyncCommittee().Copy(),
 			nextSyncCommittee:    newState.NextSyncCommittee().Copy(),
 		})
@@ -423,8 +423,8 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 	return
 }
 
-func (f *forkGraphDisk) GetSyncCommittees(blockRoot libcommon.Hash) (*solid.SyncCommittee, *solid.SyncCommittee, bool) {
-	obj, has := f.syncCommittees.Load(blockRoot)
+func (f *forkGraphDisk) GetSyncCommittees(period uint64) (*solid.SyncCommittee, *solid.SyncCommittee, bool) {
+	obj, has := f.syncCommittees.Load(period)
 	if !has {
 		return nil, nil, false
 	}

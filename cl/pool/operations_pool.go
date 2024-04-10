@@ -30,8 +30,8 @@ type OperationsPool struct {
 	ProposerSlashingsPool          *OperationPool[libcommon.Bytes96, *cltypes.ProposerSlashing]
 	BLSToExecutionChangesPool      *OperationPool[libcommon.Bytes96, *cltypes.SignedBLSToExecutionChange]
 	SignedContributionAndProofPool *OperationPool[libcommon.Bytes96, *cltypes.SignedContributionAndProof]
-
-	VoluntaryExistsPool *OperationPool[uint64, *cltypes.SignedVoluntaryExit]
+	VoluntaryExistsPool            *OperationPool[uint64, *cltypes.SignedVoluntaryExit]
+	ContributionCache              *OperationPool[cltypes.ContributionKey, [][]byte]
 }
 
 func NewOperationsPool(beaconCfg *clparams.BeaconChainConfig) OperationsPool {
@@ -42,6 +42,7 @@ func NewOperationsPool(beaconCfg *clparams.BeaconChainConfig) OperationsPool {
 		BLSToExecutionChangesPool:      NewOperationPool[libcommon.Bytes96, *cltypes.SignedBLSToExecutionChange](int(beaconCfg.MaxBlsToExecutionChanges), "blsExecutionChangesPool"),
 		SignedContributionAndProofPool: NewOperationPool[libcommon.Bytes96, *cltypes.SignedContributionAndProof](int(beaconCfg.MaxAttestations), "signedContributionAndProof"),
 		VoluntaryExistsPool:            NewOperationPool[uint64, *cltypes.SignedVoluntaryExit](int(beaconCfg.MaxBlsToExecutionChanges), "voluntaryExitsPool"),
+		ContributionCache:              NewOperationPool[cltypes.ContributionKey, [][]byte](int(beaconCfg.MaxAttestations), "contributionCache"),
 	}
 }
 

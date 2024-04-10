@@ -8,8 +8,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
-var ErrEmptyBody = errors.New("empty body")
-
 type ErrInvalidFetchHeadersRange struct {
 	start uint64
 	end   uint64

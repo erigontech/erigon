@@ -483,6 +483,7 @@ type MdbxKV struct {
 	leakDetector *dbg.LeakDetector
 }
 
+func (db *MdbxKV) Path() string     { return db.opts.path }
 func (db *MdbxKV) PageSize() uint64 { return db.opts.pageSize }
 func (db *MdbxKV) ReadOnly() bool   { return db.opts.HasFlag(mdbx.Readonly) }
 func (db *MdbxKV) Accede() bool     { return db.opts.HasFlag(mdbx.Accede) }

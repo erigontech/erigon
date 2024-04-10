@@ -190,7 +190,10 @@ func (b *CachingBeaconState) _initializeValidatorsPhase0() error {
 	})
 }
 
-func (b *CachingBeaconState) _refreshActiveBalances() {
+func (b *CachingBeaconState) _refreshActiveBalancesIfNeeded() {
+	if b.totalActiveBalanceCache != nil && *b.totalActiveBalanceCache != 0 {
+		return
+	}
 	epoch := Epoch(b)
 	b.totalActiveBalanceCache = new(uint64)
 	*b.totalActiveBalanceCache = 0
@@ -217,7 +220,8 @@ func (b *CachingBeaconState) initCaches() error {
 }
 
 func (b *CachingBeaconState) InitBeaconState() error {
-	b._refreshActiveBalances()
+	b.totalActiveBalanceCache = nil
+	b._refreshActiveBalancesIfNeeded()
 
 	b.publicKeyIndicies = make(map[[48]byte]uint64)
 

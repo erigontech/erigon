@@ -87,7 +87,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: test-results
-        path: $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/result.json
+        path: ${{ github.workspace }}/result.json
 
     - name: Action for Success
       if: steps.test_step.outputs.TEST_RESULT == 'success'

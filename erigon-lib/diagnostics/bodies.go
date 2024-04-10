@@ -3,29 +3,25 @@ package diagnostics
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 )
 
-func (d *DiagnosticClient) setupBodiesDiagnostics() {
-	d.runBodiesBlockDownloadListener()
-	d.runBodiesBlockWriteListener()
-	d.runBodiesProcessingListener()
-	d.runBodiesProcessedListener()
+func (d *DiagnosticClient) setupBodiesDiagnostics(rootCtx context.Context) {
+	d.runBodiesBlockDownloadListener(rootCtx)
+	d.runBodiesBlockWriteListener(rootCtx)
+	d.runBodiesProcessingListener(rootCtx)
+	d.runBodiesProcessedListener(rootCtx)
 }
 
-func (d *DiagnosticClient) runBodiesBlockDownloadListener() {
+func (d *DiagnosticClient) runBodiesBlockDownloadListener(rootCtx context.Context) {
 	go func() {
-		ctx, ch, cancel := Context[BodiesDownloadBlockUpdate](context.Background(), 1)
-		defer cancel()
-
-		rootCtx, _ := common.RootContext()
+		ctx, ch, closeChannel := Context[BodiesDownloadBlockUpdate](rootCtx, 1)
+		defer closeChannel()
 
 		StartProviders(ctx, TypeOf(BodiesDownloadBlockUpdate{}), log.Root())
 		for {
 			select {
 			case <-rootCtx.Done():
-				cancel()
 				return
 			case info := <-ch:
 				d.bodiesMutex.Lock()
@@ -37,18 +33,15 @@ func (d *DiagnosticClient) runBodiesBlockDownloadListener() {
 	}()
 }
 
-func (d *DiagnosticClient) runBodiesBlockWriteListener() {
+func (d *DiagnosticClient) runBodiesBlockWriteListener(rootCtx context.Context) {
 	go func() {
-		ctx, ch, cancel := Context[BodiesWriteBlockUpdate](context.Background(), 1)
-		defer cancel()
-
-		rootCtx, _ := common.RootContext()
+		ctx, ch, closeChannel := Context[BodiesWriteBlockUpdate](rootCtx, 1)
+		defer closeChannel()
 
 		StartProviders(ctx, TypeOf(BodiesWriteBlockUpdate{}), log.Root())
 		for {
 			select {
 			case <-rootCtx.Done():
-				cancel()
 				return
 			case info := <-ch:
 				d.bodiesMutex.Lock()
@@ -60,18 +53,15 @@ func (d *DiagnosticClient) runBodiesBlockWriteListener() {
 	}()
 }
 
-func (d *DiagnosticClient) runBodiesProcessedListener() {
+func (d *DiagnosticClient) runBodiesProcessedListener(rootCtx context.Context) {
 	go func() {
-		ctx, ch, cancel := Context[BodiesProcessedUpdate](context.Background(), 1)
-		defer cancel()
-
-		rootCtx, _ := common.RootContext()
+		ctx, ch, closeChannel := Context[BodiesProcessedUpdate](rootCtx, 1)
+		defer closeChannel()
 
 		StartProviders(ctx, TypeOf(BodiesProcessedUpdate{}), log.Root())
 		for {
 			select {
 			case <-rootCtx.Done():
-				cancel()
 				return
 			case info := <-ch:
 				d.bodiesMutex.Lock()
@@ -83,18 +73,15 @@ func (d *DiagnosticClient) runBodiesProcessedListener() {
 	}()
 }
 
-func (d *DiagnosticClient) runBodiesProcessingListener() {
+func (d *DiagnosticClient) runBodiesProcessingListener(rootCtx context.Context) {
 	go func() {
-		ctx, ch, cancel := Context[BodiesProcessingUpdate](context.Background(), 1)
-		defer cancel()
-
-		rootCtx, _ := common.RootContext()
+		ctx, ch, closeChannel := Context[BodiesProcessingUpdate](rootCtx, 1)
+		defer closeChannel()
 
 		StartProviders(ctx, TypeOf(BodiesProcessingUpdate{}), log.Root())
 		for {
 			select {
 			case <-rootCtx.Done():
-				cancel()
 				return
 			case info := <-ch:
 				d.bodiesMutex.Lock()

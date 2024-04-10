@@ -19,7 +19,6 @@ package txpoolcfg
 import (
 	"fmt"
 	"math"
-	"math/big"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -41,7 +40,6 @@ type Config struct {
 	TotalBlobPoolLimit  uint64 // Total number of blobs (not txs) allowed within the txpool
 	PriceBump           uint64 // Price bump percentage to replace an already existing transaction
 	BlobPriceBump       uint64 //Price bump percentage to replace an existing 4844 blob tx (type-3)
-	OverrideCancunTime  *big.Int
 
 	// regular batch tasks processing
 	SyncToNewPeersEvery   time.Duration

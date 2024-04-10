@@ -318,6 +318,7 @@ var manifestVerifyCmd = &cobra.Command{
 		logger := debug.SetupCobra(cmd, "downloader")
 		if err := manifestVerify(cmd.Context(), logger); err != nil {
 			log.Error(err.Error())
+			os.Exit(1) // to mark CI as failed
 		}
 		return nil
 	},

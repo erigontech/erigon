@@ -12,6 +12,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/diagnostics"
 )
 
 var ErrorUnsupportedPlatform = errors.New("unsupported platform")
@@ -67,6 +68,13 @@ func LogMemStats(ctx context.Context, logger log.Logger) {
 			v := VirtualMemStat{vm}
 			l := v.Fields()
 			l = append(l, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+
+			diagnostics.Send(diagnostics.MemoryStats{
+				Alloc:       m.Alloc,
+				Sys:         m.Sys,
+				OtherFields: v.Fields(),
+				Timestamp:   time.Now(),
+			})
 
 			logger.Info("[mem] memory stats", l...)
 			UpdatePrometheusVirtualMemStats(vm)
