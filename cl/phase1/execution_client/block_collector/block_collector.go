@@ -153,5 +153,6 @@ func payloadKey(payload *cltypes.Eth1Block) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return append(root[:], dbutils.EncodeBlockNumber(payload.BlockNumber)...), nil
+	numberBytes := dbutils.EncodeBlockNumber(payload.BlockNumber)
+	return append(numberBytes, root[:]...), nil
 }
