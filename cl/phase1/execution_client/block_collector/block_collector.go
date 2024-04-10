@@ -147,7 +147,7 @@ func encodeBlock(payload *cltypes.Eth1Block, parentRoot common.Hash) ([]byte, er
 	return utils.CompressSnappy(append([]byte{byte(payload.Version())}, append(parentRoot[:], encodedPayload...)...)), nil
 }
 
-// payloadKey returns the key for the payload
+// payloadKey returns the key for the payload: number + payload.HashTreeRoot()
 func payloadKey(payload *cltypes.Eth1Block) ([]byte, error) {
 	root, err := payload.HashSSZ()
 	if err != nil {
