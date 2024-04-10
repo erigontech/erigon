@@ -231,7 +231,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 					proofStr := step.Proofs[index]
 					proofBytes := common.Hex2Bytes(proofStr[2:])
 					copy(proof[:], proofBytes)
-					err = blobSidecarService.ProcessMessage(ctx, &cltypes.BlobSidecar{
+					err = blobSidecarService.ProcessMessage(ctx, nil, &cltypes.BlobSidecar{
 						Index:             uint64(index),
 						SignedBlockHeader: blk.SignedBeaconBlockHeader(),
 						Blob:              *value,

@@ -76,7 +76,7 @@ func NewBlockService(
 }
 
 // ProcessMessage processes a block message according to https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#beacon_block
-func (b *blockService) ProcessMessage(ctx context.Context, msg *cltypes.SignedBeaconBlock) error {
+func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltypes.SignedBeaconBlock) error {
 	headState := b.syncedData.HeadState()
 	if headState == nil {
 		b.scheduleBlockForLaterProcessing(msg)

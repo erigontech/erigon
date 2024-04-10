@@ -7,7 +7,7 @@ import (
 )
 
 type Service[T any] interface {
-	ProcessMessage(ctx context.Context, msg T) error
+	ProcessMessage(ctx context.Context, subnet *uint64, msg T) error
 }
 
 type BlockService Service[*cltypes.SignedBeaconBlock]

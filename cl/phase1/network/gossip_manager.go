@@ -114,21 +114,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			return err
 		}
 		log.Debug("Received block via gossip", "slot", obj.Block.Slot)
-		err = g.blockService.ProcessMessage(ctx, obj)
-	// case gossip.TopicNameLightClientFinalityUpdate:
-	// 	obj := &cltypes.LightClientFinalityUpdate{}
-	// 	if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
-	// 		g.sentinel.BanPeer(ctx, data.Peer)
-	// 		l["at"] = "decoding lc finality update"
-	// 		return err
-	// 	}
-	// case gossip.TopicNameLightClientOptimisticUpdate:
-	// 	obj := &cltypes.LightClientOptimisticUpdate{}
-	// 	if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
-	// 		g.sentinel.BanPeer(ctx, data.Peer)
-	// 		l["at"] = "decoding lc optimistic update"
-	// 		return err
-	// 	}
+		err = g.blockService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameSyncCommitteeContributionAndProof:
 		if err := operationsContract[*cltypes.SignedContributionAndProof](ctx, g, l, data, int(version), "contribution and proof", g.forkChoice.OnSignedContributionAndProof); err != nil {
 			return err
@@ -164,34 +150,9 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 				l["at"] = "decoding blob sidecar"
 				return err
 			}
-			// [REJECT] The sidecar's index is consistent with MAX_BLOBS_PER_BLOCK -- i.e. blob_sidecar.index < MAX_BLOBS_PER_BLOCK.
-			if blobSideCar.Index >= g.beaconConfig.MaxBlobsPerBlock {
-				g.sentinel.BanPeer(ctx, data.Peer)
-				return fmt.Errorf("blob index out of range")
-			}
-			sidecarSubnetIndex := blobSideCar.Index % g.beaconConfig.MaxBlobsPerBlock
-			if sidecarSubnetIndex != *data.SubnetId {
-				g.sentinel.BanPeer(ctx, data.Peer)
-				return fmt.Errorf("blob index mismatch")
-			}
-			currentSlot := utils.GetCurrentSlot(g.genesisConfig.GenesisTime, g.beaconConfig.SecondsPerSlot)
-			// [REJECT] The sidecar's slot is consistent with the current slot -- i.e. blob_sidecar.slot == current_slot.
-			if blobSideCar.SignedBlockHeader.Header.Slot > currentSlot+1 {
-				g.sentinel.BanPeer(ctx, data.Peer)
-				return fmt.Errorf("blob slot too far ahead")
-			}
-
-			blockRoot, err := blobSideCar.SignedBlockHeader.Header.HashSSZ()
-			if err != nil {
-				return err
-			}
-			// Do not bother with blocks processed by fork choice already.
-			if _, has := g.forkChoice.GetHeader(blockRoot); has {
-				return nil
-			}
 
 			// The background checks above are enough for now.
-			err = g.blobService.ProcessMessage(ctx, blobSideCar)
+			err = g.blobService.ProcessMessage(ctx, data.SubnetId, blobSideCar)
 			log.Debug("Received blob sidecar via gossip", "index", *data.SubnetId, "size", datasize.ByteSize(len(blobSideCar.Blob)))
 		case gossip.IsTopicSyncCommittee(data.Name):
 			if data.SubnetId == nil {

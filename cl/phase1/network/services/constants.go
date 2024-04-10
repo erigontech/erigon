@@ -20,4 +20,5 @@ var (
 	ErrInvalidCommitmentsCount         = errors.New("invalid commitments count")
 	ErrCommitmentsInclusionProofFailed = errors.New("commitments inclusion proof failed")
 	ErrInvalidSidecarSlot              = errors.New("invalid sidecar slot")
+	ErrBlobIndexOutOfRange             = errors.New("blob index out of range")
 )

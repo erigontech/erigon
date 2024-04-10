@@ -52,13 +52,39 @@ func NewBlobSidecarService(
 }
 
 // ProcessMessage processes a blob sidecar message
-func (b *blobSidecarService) ProcessMessage(ctx context.Context, msg *cltypes.BlobSidecar) error {
+func (b *blobSidecarService) ProcessMessage(ctx context.Context, subnetId *uint64, msg *cltypes.BlobSidecar) error {
 	if b.test {
 		return b.verifyAndStoreBlobSidecar(nil, msg)
 	}
+
 	headState := b.syncedDataManager.HeadState()
 	if headState == nil {
 		b.scheduleBlobSidecarForLaterExecution(msg)
+		return ErrIgnore
+	}
+
+	// [REJECT] The sidecar's index is consistent with MAX_BLOBS_PER_BLOCK -- i.e. blob_sidecar.index < MAX_BLOBS_PER_BLOCK.
+	if msg.Index >= b.beaconCfg.MaxBlobsPerBlock {
+		return fmt.Errorf("blob index out of range")
+	}
+	sidecarSubnetIndex := msg.Index % b.beaconCfg.MaxBlobsPerBlock
+	if sidecarSubnetIndex != *subnetId {
+		return ErrBlobIndexOutOfRange
+	}
+	currentSlot := utils.GetCurrentSlot(headState.GenesisTime(), b.beaconCfg.SecondsPerSlot)
+	sidecarSlot := msg.SignedBlockHeader.Header.Slot
+	// [IGNORE] The block is not from a future slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. validate that
+	//signed_beacon_block.message.slot <= current_slot (a client MAY queue future blocks for processing at the appropriate slot).
+	if currentSlot < sidecarSlot && !utils.IsCurrentSlotWithMaximumClockDisparity(headState.GenesisTime(), b.beaconCfg.SecondsPerSlot, sidecarSlot) {
+		return ErrIgnore
+	}
+
+	blockRoot, err := msg.SignedBlockHeader.Header.HashSSZ()
+	if err != nil {
+		return err
+	}
+	// Do not bother with blocks processed by fork choice already.
+	if _, has := b.forkchoiceStore.GetHeader(blockRoot); has {
 		return ErrIgnore
 	}
 
