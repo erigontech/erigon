@@ -67,12 +67,6 @@ func (b *blockCollector) AddBlock(block *cltypes.BeaconBlock) error {
 	return b.collector.Collect(key, encodedBlock)
 }
 
-func (b *blockCollector) Close() {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.collector.Close()
-}
-
 func (b *blockCollector) Flush(ctx context.Context) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -85,6 +79,7 @@ func (b *blockCollector) Flush(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer tmpTx.Rollback()
 	blocksBatch := []*types.Block{}
 
 	if err := b.collector.Load(tmpTx, kv.Headers, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
