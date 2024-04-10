@@ -77,7 +77,7 @@ func (test heimdallTest) setupCheckpoints(count int) []*Checkpoint {
 
 	client := test.client
 
-	client.EXPECT().FetchCheckpointCount(gomock.Any()).Return(int64(len(expectedCheckpoints)), nil).Times(1)
+	client.EXPECT().FetchCheckpointCount(gomock.Any()).Return(int64(len(expectedCheckpoints)), nil)
 
 	if count < checkpointsBatchFetchThreshold {
 		client.EXPECT().

@@ -12,7 +12,7 @@ var _ Waypoint = Checkpoint{}
 
 type CheckpointId uint64
 
-// checkpoint defines a response object type of bor checkpoint
+// Checkpoint defines a response object type of bor checkpoint
 type Checkpoint struct {
 	Fields WaypointFields
 }
