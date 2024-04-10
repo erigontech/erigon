@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -152,5 +153,5 @@ func payloadKey(payload *cltypes.Eth1Block) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return root[:], nil
+	return append(root[:], dbutils.EncodeBlockNumber(payload.BlockNumber)...), nil
 }

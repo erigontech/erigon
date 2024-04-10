@@ -186,15 +186,13 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 
 // importBlockAttestationsInParallel imports block attestations in parallel
 func (b *blockService) importBlockAttestations(block *cltypes.SignedBeaconBlock) {
-	defer func() {
+	defer func() { // Would prefer this not to crash but rather log the error
 		r := recover()
 		if r != nil {
 			log.Warn("recovered from panic", "err", r)
 		}
 	}()
 	block.Block.Body.Attestations.Range(func(idx int, a *solid.Attestation, total int) bool {
-		// emit attestation
-		b.emitter.Publish("attestation", a)
 		if err := b.forkchoiceStore.OnAttestation(a, true, false); err != nil {
 			log.Debug("bad attestation received", "err", err)
 		}
