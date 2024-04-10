@@ -155,7 +155,8 @@ func (b *blobSidecarService) loop(ctx context.Context) {
 				return true
 			}
 			if err := b.verifyAndStoreBlobSidecar(headState, job.blobSidecar); err != nil {
-				log.Debug("blob sidecar verification failed", "err", err)
+				log.Debug("blob sidecar verification failed", "err", err,
+					"slot", job.blobSidecar.SignedBlockHeader.Header.Slot)
 				return true
 			}
 			b.blobSidecarsScheduledForLaterExecution.Delete(key)
