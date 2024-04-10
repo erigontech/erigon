@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"runtime"
 	"sort"
 	"strconv"
@@ -13,9 +12,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cl/antiquary"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
@@ -30,9 +27,9 @@ import (
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
+	"github.com/ledgerwatch/erigon/cl/phase1/execution_client/block_collector"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/validator/attestation_producer"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 
 	"github.com/ledgerwatch/log/v3"
@@ -58,33 +55,12 @@ type Cfg struct {
 	antiquary               *antiquary.Antiquary
 	syncedData              *synced_data.SyncedDataManager
 	emitter                 *beaconevents.Emitters
-	prebuffer               *etl.Collector
+	blockCollector          block_collector.BlockCollector
 	sn                      *freezeblocks.CaplinSnapshots
 	blobStore               blob_storage.BlobStorage
 	attestationDataProducer attestation_producer.AttestationDataProducer
 
 	hasDownloaded, backfilling, blobBackfilling bool
-}
-
-func generateCommitmentsToSlotMap(blocks []*cltypes.SignedBeaconBlock) map[common.Bytes48]uint64 {
-	out := make(map[common.Bytes48]uint64)
-	for _, block := range blocks {
-		if block.Version() < clparams.DenebVersion {
-			continue
-		}
-		for i := 0; i < block.Block.Body.BlobKzgCommitments.Len(); i++ {
-			out[common.Bytes48(*block.Block.Body.BlobKzgCommitments.Get(i))] = block.Block.Slot
-		}
-	}
-	return out
-}
-
-func getBlobProgress(s map[common.Bytes48]uint64) uint64 {
-	min := uint64(math.MaxUint64)
-	for _, slot := range s {
-		min = utils.Min64(min, slot)
-	}
-	return min
 }
 
 type Args struct {
@@ -135,7 +111,7 @@ func ClStagesCfg(
 		syncedData:              syncedData,
 		emitter:                 emitters,
 		blobStore:               blobStore,
-		prebuffer:               etl.NewCollector("Caplin-blocks", tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root()),
+		blockCollector:          block_collector.NewBlockCollector(log.Root(), executionClient, beaconCfg, tmpdir),
 		blobBackfilling:         blobBackfilling,
 		attestationDataProducer: attestationDataProducer,
 	}
@@ -278,7 +254,7 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(context.Background(), cfg.rpc, cfg.executionClient, cfg.indiciesDB)
 
-					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, cfg.backfilling, cfg.blobBackfilling, false, startingRoot, startingSlot, cfg.tmpdir, 600*time.Millisecond, cfg.prebuffer, cfg.blockReader, cfg.blobStore, logger), context.Background(), logger); err != nil {
+					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, cfg.backfilling, cfg.blobBackfilling, false, startingRoot, startingSlot, cfg.tmpdir, 600*time.Millisecond, cfg.blockCollector, cfg.blockReader, cfg.blobStore, logger), context.Background(), logger); err != nil {
 						cfg.hasDownloaded = false
 						return err
 					}
@@ -319,30 +295,9 @@ func ConsensusClStages(ctx context.Context,
 								break
 							}
 							if shouldInsert && block.Version() >= clparams.BellatrixVersion {
-								if cfg.prebuffer == nil {
-									cfg.prebuffer = etl.NewCollector("Caplin-blocks", cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root())
-									cfg.prebuffer.LogLvl(log.LvlDebug)
-								}
-								executionPayload := block.Block.Body.ExecutionPayload
-								executionPayloadRoot, err := executionPayload.HashSSZ()
-								if err != nil {
+								if err := cfg.blockCollector.AddBlock(block.Block); err != nil {
+									logger.Warn("failed to add block to collector", "err", err)
 									blocks = blocks[i:]
-									logger.Warn("failed to hash execution payload", "err", err)
-									break
-								}
-								versionByte := byte(block.Version())
-								enc, err := executionPayload.EncodeSSZ(nil)
-								if err != nil {
-									blocks = blocks[i:]
-									logger.Warn("failed to encode execution payload", "err", err)
-									break
-								}
-								enc = append([]byte{versionByte}, append(block.Block.ParentRoot[:], enc...)...)
-								enc = utils.CompressSnappy(enc)
-
-								if err := cfg.prebuffer.Collect(dbutils.BlockBodyKey(executionPayload.BlockNumber, executionPayloadRoot), enc); err != nil {
-									blocks = blocks[i:]
-									logger.Warn("failed to collect execution payload", "err", err)
 									break
 								}
 							}
@@ -455,54 +410,10 @@ func ConsensusClStages(ctx context.Context,
 					}
 					defer tx.Rollback()
 
-					blocksBatch := []*types.Block{}
-					blocksBatchLimit := 10_000
-					if cfg.executionClient != nil && cfg.prebuffer != nil && cfg.executionClient.SupportInsertion() {
-						if err := cfg.prebuffer.Load(tx, kv.Headers, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-							if len(v) == 0 {
-								return nil
-							}
-							v, err = utils.DecompressSnappy(v)
-							if err != nil {
-								return err
-							}
-							version := clparams.StateVersion(v[0])
-							parentRoot := common.BytesToHash(v[1:33])
-							v = v[33:]
-							executionPayload := cltypes.NewEth1Block(version, cfg.beaconCfg)
-							if err := executionPayload.DecodeSSZ(v, int(version)); err != nil {
-								return err
-							}
-							body := executionPayload.Body()
-							txs, err := types.DecodeTransactions(body.Transactions)
-							if err != nil {
-								log.Warn("bad blocks segment received", "err", err)
-								return err
-							}
-							header, err := executionPayload.RlpHeader(&parentRoot)
-							if err != nil {
-								log.Warn("bad blocks segment received", "err", err)
-								return err
-							}
-							blocksBatch = append(blocksBatch, types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals))
-							if len(blocksBatch) >= blocksBatchLimit {
-								if err := cfg.executionClient.InsertBlocks(ctx, blocksBatch, true); err != nil {
-									logger.Warn("failed to insert blocks", "err", err)
-								}
-								logger.Info("[Caplin] Inserted blocks", "progress", blocksBatch[len(blocksBatch)-1].NumberU64())
-								blocksBatch = []*types.Block{}
-							}
-							return next(k, nil, nil)
-						}, etl.TransformArgs{}); err != nil {
+					if cfg.executionClient != nil && cfg.executionClient.SupportInsertion() {
+						if err := cfg.blockCollector.Flush(ctx); err != nil {
 							return err
 						}
-						if len(blocksBatch) > 0 {
-							if err := cfg.executionClient.InsertBlocks(ctx, blocksBatch, true); err != nil {
-								logger.Warn("failed to insert blocks", "err", err)
-							}
-						}
-						cfg.prebuffer.Close()
-						cfg.prebuffer = nil
 					}
 					tx.Rollback()
 

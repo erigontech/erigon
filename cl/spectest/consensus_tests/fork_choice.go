@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
+	"github.com/ledgerwatch/erigon/cl/phase1/network/services"
 	"github.com/ledgerwatch/erigon/cl/pool"
 
 	"github.com/stretchr/testify/assert"
@@ -223,18 +224,20 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 						continue
 					}
 				}
+				blobSidecarService := services.NewBlobSidecarService(ctx, &clparams.MainnetBeaconConfig, forkStore, nil, true)
+
 				blobs.Range(func(index int, value *cltypes.Blob, length int) bool {
 					var proof libcommon.Bytes48
 					proofStr := step.Proofs[index]
 					proofBytes := common.Hex2Bytes(proofStr[2:])
 					copy(proof[:], proofBytes)
-					err = forkStore.OnBlobSidecar(&cltypes.BlobSidecar{
+					err = blobSidecarService.ProcessMessage(ctx, &cltypes.BlobSidecar{
 						Index:             uint64(index),
 						SignedBlockHeader: blk.SignedBeaconBlockHeader(),
 						Blob:              *value,
 						KzgCommitment:     common.Bytes48(*blk.Block.Body.BlobKzgCommitments.Get(index)),
 						KzgProof:          proof,
-					}, true)
+					})
 					return true
 				})
 

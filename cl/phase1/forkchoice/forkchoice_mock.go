@@ -252,3 +252,7 @@ func (f *ForkChoiceStorageMock) OnSignedContributionAndProof(signedContribution 
 	f.SyncContributionPool.AddSyncContribution(nil, signedContribution.Message.Contribution)
 	return nil
 }
+
+func (f *ForkChoiceStorageMock) AddPreverifiedBlobSidecar(msg *cltypes.BlobSidecar) error {
+	panic("implement me")
+}

@@ -25,6 +25,7 @@ type blobSidecarService struct {
 	syncedDataManager *synced_data.SyncedDataManager
 
 	blobSidecarsScheduledForLaterExecution sync.Map
+	test                                   bool
 }
 
 type blobSidecarJob struct {
@@ -37,11 +38,14 @@ func NewBlobSidecarService(
 	ctx context.Context,
 	beaconCfg *clparams.BeaconChainConfig,
 	forkchoiceStore forkchoice.ForkChoiceStorage,
-	syncedDataManager *synced_data.SyncedDataManager) BlobSidecarsService {
+	syncedDataManager *synced_data.SyncedDataManager,
+	test bool,
+) BlobSidecarsService {
 	b := &blobSidecarService{
 		beaconCfg:         beaconCfg,
 		forkchoiceStore:   forkchoiceStore,
 		syncedDataManager: syncedDataManager,
+		test:              test,
 	}
 	go b.loop(ctx)
 	return b
@@ -49,6 +53,9 @@ func NewBlobSidecarService(
 
 // ProcessMessage processes a blob sidecar message
 func (b *blobSidecarService) ProcessMessage(ctx context.Context, msg *cltypes.BlobSidecar) error {
+	if b.test {
+		return b.verifyAndStoreBlobSidecar(nil, msg)
+	}
 	headState := b.syncedDataManager.HeadState()
 	if headState == nil {
 		b.scheduleBlobSidecarForLaterExecution(msg)
@@ -63,13 +70,14 @@ func (b *blobSidecarService) ProcessMessage(ctx context.Context, msg *cltypes.Bl
 	if msg.SignedBlockHeader.Header.Slot <= parentHeader.Slot {
 		return ErrInvalidSidecarSlot
 	}
+
 	return b.verifyAndStoreBlobSidecar(headState, msg)
 }
 
 func (b *blobSidecarService) verifyAndStoreBlobSidecar(headState *state.CachingBeaconState, msg *cltypes.BlobSidecar) error {
 	kzgCtx := kzg.Ctx()
 
-	if !cltypes.VerifyCommitmentInclusionProof(msg.KzgCommitment, msg.CommitmentInclusionProof, msg.Index,
+	if !b.test && !cltypes.VerifyCommitmentInclusionProof(msg.KzgCommitment, msg.CommitmentInclusionProof, msg.Index,
 		clparams.DenebVersion, msg.SignedBlockHeader.Header.BodyRoot) {
 		return ErrCommitmentsInclusionProofFailed
 	}
@@ -77,9 +85,10 @@ func (b *blobSidecarService) verifyAndStoreBlobSidecar(headState *state.CachingB
 	if err := kzgCtx.VerifyBlobKZGProof(gokzg4844.Blob(msg.Blob), gokzg4844.KZGCommitment(msg.KzgCommitment), gokzg4844.KZGProof(msg.KzgProof)); err != nil {
 		return fmt.Errorf("blob KZG proof verification failed: %v", err)
 	}
-
-	if err := b.verifySidecarsSignature(headState, msg.SignedBlockHeader); err != nil {
-		return err
+	if !b.test {
+		if err := b.verifySidecarsSignature(headState, msg.SignedBlockHeader); err != nil {
+			return err
+		}
 	}
 	// operation is not thread safe from here.
 	return b.forkchoiceStore.AddPreverifiedBlobSidecar(msg)
@@ -125,7 +134,9 @@ func (b *blobSidecarService) scheduleBlobSidecarForLaterExecution(blobSidecar *c
 func (b *blobSidecarService) loop(ctx context.Context) {
 	ticker := time.NewTicker(blobJobsIntervalTick)
 	defer ticker.Stop()
-
+	if b.test {
+		return
+	}
 	for {
 		select {
 		case <-ctx.Done():
