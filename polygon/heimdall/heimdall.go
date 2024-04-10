@@ -28,8 +28,6 @@ type Heimdall interface {
 	FetchMilestonesFromBlock(ctx context.Context, store MilestoneStore, startBlock uint64) (Waypoints, error)
 	FetchSpansFromBlock(ctx context.Context, store SpanStore, startBlock uint64) ([]*Span, error)
 
-	FetchAllCheckpoints(ctx context.Context, store CheckpointStore) (Checkpoints, error)
-
 	OnCheckpointEvent(ctx context.Context, store CheckpointStore, callback func(*Checkpoint)) error
 	OnMilestoneEvent(ctx context.Context, store MilestoneStore, callback func(*Milestone)) error
 	OnSpanEvent(ctx context.Context, store SpanStore, callback func(*Span)) error
@@ -83,9 +81,10 @@ func (h *heimdall) FetchCheckpointsFromBlock(ctx context.Context, store Checkpoi
 		return nil, err
 	}
 
+	latestCheckpointId := CheckpointId(count)
 	checkpointsToFetch := count - int64(lastStoredCheckpointId)
 	if checkpointsToFetch >= checkpointsBatchFetchThreshold {
-		checkpoints, err := h.fetchAllCheckpoints(ctx, store, count)
+		checkpoints, err := h.batchFetchCheckpoints(ctx, store, lastStoredCheckpointId, latestCheckpointId)
 		if err != nil {
 			return nil, err
 		}
@@ -111,14 +110,14 @@ func (h *heimdall) FetchCheckpointsFromBlock(ctx context.Context, store Checkpoi
 
 	var checkpoints []Waypoint
 	var endBlock uint64
-	for i := CheckpointId(count); i >= 1; i-- {
+	for i := latestCheckpointId; i >= 1; i-- {
 		select {
 		case <-progressLogTicker.C:
 			h.logger.Info(
 				heimdallLogPrefix("fetch checkpoints from block progress (backwards)"),
-				"checkpoint number", i,
-				"start", startBlock,
-				"last", count,
+				"latestCheckpointId", latestCheckpointId,
+				"currentCheckpointId", i,
+				"startBlock", startBlock,
 			)
 		default:
 			// carry on
@@ -207,15 +206,6 @@ func (h *heimdall) FetchCheckpoints(ctx context.Context, store CheckpointStore, 
 	}
 
 	return checkpoints, nil
-}
-
-func (h *heimdall) FetchAllCheckpoints(ctx context.Context, store CheckpointStore) (Checkpoints, error) {
-	count, err := h.client.FetchCheckpointCount(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	return h.fetchAllCheckpoints(ctx, store, count)
 }
 
 func (h *heimdall) LastMilestoneId(ctx context.Context, _ MilestoneStore) (MilestoneId, bool, error) {
@@ -601,20 +591,26 @@ func (h *heimdall) pollMilestones(ctx context.Context, store MilestoneStore, tip
 	}
 }
 
-func (h *heimdall) fetchAllCheckpoints(ctx context.Context, store CheckpointStore, count int64) (Checkpoints, error) {
+func (h *heimdall) batchFetchCheckpoints(
+	ctx context.Context,
+	store CheckpointStore,
+	lastStored CheckpointId,
+	latest CheckpointId,
+) (Checkpoints, error) {
 	// TODO: once heimdall API is fixed to return sorted items in pages we can only fetch
 	//       the new pages after lastStoredCheckpointId using the checkpoints/list paging API
 	//       (for now we have to fetch all of them)
 	//       and also remove sorting we do after fetching
 
-	h.logger.Debug(heimdallLogPrefix("fetching all checkpoints"))
+	h.logger.Debug(heimdallLogPrefix("batch fetching checkpoints"))
 
 	fetchStartTime := time.Now()
 	progressLogTicker := time.NewTicker(30 * time.Second)
 	defer progressLogTicker.Stop()
 
-	checkpoints := make(Checkpoints, 0, count)
 	page := uint64(1)
+	count := int64(latest)
+	checkpoints := make(Checkpoints, 0, count)
 	for count > 0 {
 		checkpointsBatch, err := h.client.FetchCheckpoints(ctx, page, 10_000)
 		if err != nil {
@@ -624,7 +620,7 @@ func (h *heimdall) fetchAllCheckpoints(ctx context.Context, store CheckpointStor
 		select {
 		case <-progressLogTicker.C:
 			h.logger.Debug(
-				heimdallLogPrefix("fetching all checkpoints progress"),
+				heimdallLogPrefix("batch fetch checkpoints progress"),
 				"page", page,
 				"len", len(checkpoints),
 			)
@@ -639,7 +635,7 @@ func (h *heimdall) fetchAllCheckpoints(ctx context.Context, store CheckpointStor
 
 	sort.Sort(&checkpoints)
 
-	for i, checkpoint := range checkpoints {
+	for i, checkpoint := range checkpoints[lastStored:] {
 		err := store.PutCheckpoint(ctx, CheckpointId(i+1), checkpoint)
 		if err != nil {
 			return nil, err
@@ -647,7 +643,7 @@ func (h *heimdall) fetchAllCheckpoints(ctx context.Context, store CheckpointStor
 	}
 
 	h.logger.Debug(
-		heimdallLogPrefix("fetching all checkpoints done"),
+		heimdallLogPrefix("batch fetch checkpoints done"),
 		"len", len(checkpoints), "duration",
 		time.Since(fetchStartTime),
 	)
