@@ -909,10 +909,7 @@ func (srv *Server) listenLoop(ctx context.Context) {
 
 	// The slots limit accepts of new connections.
 	slots := semaphore.NewWeighted(int64(srv.MaxPendingPeers))
-
-	srv.errorsMu.Lock()
-	srv.errors = map[string]uint{}
-	srv.errorsMu.Unlock()
+	srv.resetErrors()
 
 	// Wait for slots to be returned on exit. This ensures all connection goroutines
 	// are down before listenLoop returns.
@@ -1207,7 +1204,16 @@ func (srv *Server) PeersInfo() []*PeerInfo {
 func (srv *Server) addError(err error) {
 	srv.errorsMu.Lock()
 	defer srv.errorsMu.Unlock()
+	if srv.errors == nil {
+		srv.errors = make(map[string]uint)
+	}
 	srv.errors[cleanError(err.Error())]++
+}
+
+func (srv *Server) resetErrors() {
+	srv.errorsMu.Lock()
+	srv.errors = map[string]uint{}
+	srv.errorsMu.Unlock()
 }
 
 func (srv *Server) listErrors() []interface{} {
