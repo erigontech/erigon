@@ -158,6 +158,15 @@ func TestPruneLogIndex(t *testing.T) {
 		require.NoError(err)
 		require.True(total == 3)
 	}
+	{
+		total := 0
+		err = tx.ForEach(kv.Log, nil, func(k, v []byte) error {
+			total++
+			return nil
+		})
+		require.NoError(err)
+		require.True(total == 49) // 51 logs have been pruned
+	}
 }
 
 func TestUnwindLogIndex(t *testing.T) {
