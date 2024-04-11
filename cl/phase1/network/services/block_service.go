@@ -28,7 +28,6 @@ type proposerIndexAndSlot struct {
 
 type blockJob struct {
 	block        *cltypes.SignedBeaconBlock
-	blockRoot    libcomoon.Hash
 	creationTime time.Time
 }
 
@@ -160,11 +159,10 @@ func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeac
 		return
 	}
 
-	b.blocksScheduledForLaterExecution.Store(&blockJob{
+	b.blocksScheduledForLaterExecution.Store(blockRoot, &blockJob{
 		block:        block,
-		blockRoot:    blockRoot,
 		creationTime: time.Now(),
-	}, struct{}{})
+	})
 }
 
 // processAndStoreBlock processes and stores a block
@@ -211,8 +209,8 @@ func (b *blockService) loop(ctx context.Context) {
 			return
 		case <-ticker.C:
 		}
-		b.blocksScheduledForLaterExecution.Range(func(key, _ any) bool {
-			blockJob := key.(*blockJob)
+		b.blocksScheduledForLaterExecution.Range(func(key, value any) bool {
+			blockJob := value.(*blockJob)
 			// check if it has expired
 			if time.Since(blockJob.creationTime) > blockJobExpiry {
 				b.blocksScheduledForLaterExecution.Delete(key)

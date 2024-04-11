@@ -153,7 +153,11 @@ func (b *blobSidecarService) scheduleBlobSidecarForLaterExecution(blobSidecar *c
 		blobSidecar:  blobSidecar,
 		creationTime: time.Now(),
 	}
-	b.blobSidecarsScheduledForLaterExecution.Store(blobSidecarJob, struct{}{})
+	blobSidecarHash, err := blobSidecar.HashSSZ()
+	if err != nil {
+		return
+	}
+	b.blobSidecarsScheduledForLaterExecution.Store(blobSidecarHash, blobSidecarJob)
 }
 
 // loop is the main loop of the block service
@@ -173,8 +177,8 @@ func (b *blobSidecarService) loop(ctx context.Context) {
 		if headState == nil {
 			continue
 		}
-		b.blobSidecarsScheduledForLaterExecution.Range(func(key, _ any) bool {
-			job := key.(*blobSidecarJob)
+		b.blobSidecarsScheduledForLaterExecution.Range(func(key, value any) bool {
+			job := value.(*blobSidecarJob)
 			// check if it has expired
 			if time.Since(job.creationTime) > blobJobExpiry {
 				b.blobSidecarsScheduledForLaterExecution.Delete(key)
@@ -191,7 +195,7 @@ func (b *blobSidecarService) loop(ctx context.Context) {
 			}
 
 			if err := b.verifyAndStoreBlobSidecar(headState, job.blobSidecar); err != nil {
-				log.Debug("blob sidecar verification failed", "err", err,
+				log.Trace("blob sidecar verification failed", "err", err,
 					"slot", job.blobSidecar.SignedBlockHeader.Header.Slot)
 				return true
 			}
