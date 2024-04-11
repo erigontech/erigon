@@ -61,6 +61,22 @@ func (c *Checkpoint) UnmarshalJSON(b []byte) error {
 	return json.Unmarshal(b, &c.Fields)
 }
 
+type Checkpoints []*Checkpoint
+
+func (cs *Checkpoints) Len() int {
+	return len(*cs)
+}
+
+func (cs *Checkpoints) Less(i, j int) bool {
+	v := *cs
+	return v[i].StartBlock().Uint64() < v[j].StartBlock().Uint64()
+}
+
+func (cs *Checkpoints) Swap(i, j int) {
+	v := *cs
+	v[i], v[j] = v[j], v[i]
+}
+
 type CheckpointResponse struct {
 	Height string     `json:"height"`
 	Result Checkpoint `json:"result"`
@@ -73,4 +89,9 @@ type CheckpointCount struct {
 type CheckpointCountResponse struct {
 	Height string          `json:"height"`
 	Result CheckpointCount `json:"result"`
+}
+
+type CheckpointListResponse struct {
+	Height string      `json:"height"`
+	Result Checkpoints `json:"result"`
 }
