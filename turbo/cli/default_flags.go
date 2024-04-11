@@ -184,6 +184,8 @@ var DefaultFlags = []cli.Flag{
 	&utils.DatastreamVersionFlag,
 	&utils.RebuildTreeAfterFlag,
 	&utils.SequencerInitialForkId,
+	&utils.SequencerBlockSealTime,
+	&utils.SequencerBatchSealTime,
 	&utils.ExecutorUrls,
 	&utils.ExecutorStrictMode,
 	&utils.AllowFreeTransactions,

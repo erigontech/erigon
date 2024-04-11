@@ -26,6 +26,8 @@ type Zk struct {
 	RpcRateLimits              int
 	DatastreamVersion          int
 	SequencerInitialForkId     uint64
+	SequencerBlockSealTime     time.Duration
+	SequencerBatchSealTime     time.Duration
 	ExecutorUrls               []string
 	ExecutorStrictMode         bool
 	AllowFreeTransactions      bool

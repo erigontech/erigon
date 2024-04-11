@@ -34,6 +34,18 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		panic(fmt.Sprintf("could not parse l2 datastreamer timeout value %s", l2DataStreamTimeoutVal))
 	}
 
+	sequencerBlockSealTimeVal := ctx.String(utils.SequencerBlockSealTime.Name)
+	sequencerBlockSealTime, err := time.ParseDuration(sequencerBlockSealTimeVal)
+	if err != nil {
+		panic(fmt.Sprintf("could not parse sequencer block seal time timeout value %s", sequencerBlockSealTimeVal))
+	}
+
+	sequencerBatchSealTimeVal := ctx.String(utils.SequencerBatchSealTime.Name)
+	sequencerBatchSealTime, err := time.ParseDuration(sequencerBatchSealTimeVal)
+	if err != nil {
+		panic(fmt.Sprintf("could not parse sequencer batch seal time timeout value %s", sequencerBatchSealTimeVal))
+	}
+
 	cfg.Zk = &ethconfig.Zk{
 		L2ChainId:                  ctx.Uint64(utils.L2ChainIdFlag.Name),
 		L2RpcUrl:                   ctx.String(utils.L2RpcUrlFlag.Name),
@@ -55,6 +67,8 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		DatastreamVersion:          ctx.Int(utils.DatastreamVersionFlag.Name),
 		RebuildTreeAfter:           ctx.Uint64(utils.RebuildTreeAfterFlag.Name),
 		SequencerInitialForkId:     ctx.Uint64(utils.SequencerInitialForkId.Name),
+		SequencerBlockSealTime:     sequencerBlockSealTime,
+		SequencerBatchSealTime:     sequencerBatchSealTime,
 		ExecutorUrls:               strings.Split(ctx.String(utils.ExecutorUrls.Name), ","),
 		ExecutorStrictMode:         ctx.Bool(utils.ExecutorStrictMode.Name),
 		AllowFreeTransactions:      ctx.Bool(utils.AllowFreeTransactions.Name),

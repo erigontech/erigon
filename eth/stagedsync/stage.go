@@ -52,7 +52,11 @@ func (s *StageState) Update(db kv.Putter, newBlockNum uint64) error {
 	if m, ok := Metrics[s.ID]; ok {
 		m.Set(newBlockNum)
 	}
-	return stages.SaveStageProgress(db, s.ID, newBlockNum)
+	err := stages.SaveStageProgress(db, s.ID, newBlockNum)
+	if err == nil {
+		s.BlockNumber = newBlockNum
+	}
+	return err
 }
 func (s *StageState) UpdatePrune(db kv.Putter, blockNum uint64) error {
 	return stages.SaveStagePruneProgress(db, s.ID, blockNum)
