@@ -1000,13 +1000,13 @@ func (a *AggregatorV3) EndTxNumNoCommitment() uint64 {
 func (a *AggregatorV3) EndTxNumMinimax() uint64 { return a.minimaxTxNumInFiles.Load() }
 func (a *AggregatorV3) FilesAmount() (res []int) {
 	for _, d := range a.d {
-		res = append(res, d.files.Len())
+		res = append(res, d.dirtyFiles.Len())
 	}
 	return append(res,
-		a.tracesFrom.files.Len(),
-		a.tracesTo.files.Len(),
-		a.logAddrs.files.Len(),
-		a.logTopics.files.Len(),
+		a.tracesFrom.dirtyFiles.Len(),
+		a.tracesTo.dirtyFiles.Len(),
+		a.logAddrs.dirtyFiles.Len(),
+		a.logTopics.dirtyFiles.Len(),
 	)
 }
 
@@ -1247,9 +1247,9 @@ func (ac *AggregatorV3Context) SqueezeCommitmentFiles() error {
 	storage := ac.d[kv.StorageDomain]
 
 	// oh, again accessing domain.files directly, again and again..
-	accountFiles := accounts.d.files.Items()
-	storageFiles := storage.d.files.Items()
-	commitFiles := commitment.d.files.Items()
+	accountFiles := accounts.d.dirtyFiles.Items()
+	storageFiles := storage.d.dirtyFiles.Items()
+	commitFiles := commitment.d.dirtyFiles.Items()
 
 	getSizeDelta := func(a, b string) (datasize.ByteSize, float32, error) {
 		ai, err := os.Stat(a)

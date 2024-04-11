@@ -54,17 +54,18 @@ import (
 type History struct {
 	*InvertedIndex // indexKeysTable contains mapping txNum -> key1+key2, while index table `key -> {txnums}` is omitted.
 
-	// files - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
+	// dirtyFiles - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
 	// thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
 	//
-	// roFiles derivative from field `file`, but without garbage:
+	// visibleFiles derivative from field `file`, but without garbage:
 	//  - no files with `canDelete=true`
 	//  - no overlaps
 	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
 	//
-	// MakeContext() using roFiles in zero-copy way
-	files     *btree2.BTreeG[*filesItem]
-	roFiles   atomic.Pointer[[]ctxItem]
+	// MakeContext() using visibleFiles in zero-copy way
+	dirtyFiles   *btree2.BTreeG[*filesItem]
+	visibleFiles atomic.Pointer[[]ctxItem]
+
 	indexList idxList
 
 	// Schema:
@@ -108,7 +109,7 @@ type histCfg struct {
 
 func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTable, indexTable, historyValsTable string, integrityCheck func(fromStep, toStep uint64) bool, logger log.Logger) (*History, error) {
 	h := History{
-		files:              btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		dirtyFiles:         btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		historyValsTable:   historyValsTable,
 		compression:        cfg.compression,
 		compressWorkers:    1,
@@ -118,7 +119,7 @@ func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTabl
 		dontProduceFiles:   cfg.dontProduceHistoryFiles,
 		keepTxInDB:         cfg.keepTxInDB,
 	}
-	h.roFiles.Store(&[]ctxItem{})
+	h.visibleFiles.Store(&[]ctxItem{})
 	var err error
 	h.InvertedIndex, err = NewInvertedIndex(cfg.iiCfg, aggregationStep, filenameBase, indexKeysTable, indexTable, cfg.withExistenceIndex, func(fromStep, toStep uint64) bool { return dir.FileExist(h.vFilePath(fromStep, toStep)) }, logger)
 	if err != nil {
@@ -197,10 +198,10 @@ func (h *History) scanStateFiles(fNames []string) (garbageFiles []*filesItem) {
 			continue
 		}
 
-		if _, has := h.files.Get(newFile); has {
+		if _, has := h.dirtyFiles.Get(newFile); has {
 			continue
 		}
-		h.files.Set(newFile)
+		h.dirtyFiles.Set(newFile)
 	}
 	return garbageFiles
 }
@@ -208,7 +209,7 @@ func (h *History) scanStateFiles(fNames []string) (garbageFiles []*filesItem) {
 func (h *History) openFiles() error {
 	var err error
 	invalidFileItems := make([]*filesItem, 0)
-	h.files.Walk(func(items []*filesItem) bool {
+	h.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
 			if item.decompressor == nil {
@@ -246,16 +247,16 @@ func (h *History) openFiles() error {
 		return err
 	}
 	for _, item := range invalidFileItems {
-		h.files.Delete(item)
+		h.dirtyFiles.Delete(item)
 	}
 
-	h.reCalcRoFiles()
+	h.reCalcVisibleFiles()
 	return nil
 }
 
 func (h *History) closeWhatNotInList(fNames []string) {
 	var toDelete []*filesItem
-	h.files.Walk(func(items []*filesItem) bool {
+	h.dirtyFiles.Walk(func(items []*filesItem) bool {
 	Loop1:
 		for _, item := range items {
 			for _, protectName := range fNames {
@@ -276,14 +277,14 @@ func (h *History) closeWhatNotInList(fNames []string) {
 			item.index.Close()
 			item.index = nil
 		}
-		h.files.Delete(item)
+		h.dirtyFiles.Delete(item)
 	}
 }
 
 func (h *History) Close() {
 	h.InvertedIndex.Close()
 	h.closeWhatNotInList([]string{})
-	h.reCalcRoFiles()
+	h.reCalcVisibleFiles()
 }
 
 func (hc *HistoryContext) Files() (res []string) {
@@ -296,7 +297,7 @@ func (hc *HistoryContext) Files() (res []string) {
 }
 
 func (h *History) missedIdxFiles() (l []*filesItem) {
-	h.files.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
+	h.dirtyFiles.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
 			if !dir.FileExist(h.vAccessorFilePath(fromStep, toStep)) {
@@ -314,7 +315,7 @@ func (h *History) buildVi(ctx context.Context, item *filesItem, ps *background.P
 	}
 
 	search := &filesItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum}
-	iiItem, ok := h.InvertedIndex.files.Get(search)
+	iiItem, ok := h.InvertedIndex.dirtyFiles.Get(search)
 	if !ok {
 		return nil
 	}
@@ -726,9 +727,9 @@ func (sf HistoryFiles) CleanupOnError() {
 		sf.efExistence.Close()
 	}
 }
-func (h *History) reCalcRoFiles() {
-	roFiles := ctxFiles(h.files, h.indexList, false)
-	h.roFiles.Store(&roFiles)
+func (h *History) reCalcVisibleFiles() {
+	visibleFiles := calcVisibleFiles(h.dirtyFiles, h.indexList, false)
+	h.visibleFiles.Store(&visibleFiles)
 }
 
 // buildFiles performs potentially resource intensive operations of creating
@@ -925,7 +926,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 }
 
 func (h *History) integrateFiles(sf HistoryFiles, txNumFrom, txNumTo uint64) {
-	defer h.reCalcRoFiles()
+	defer h.reCalcVisibleFiles()
 	if h.dontProduceFiles {
 		return
 	}
@@ -939,7 +940,7 @@ func (h *History) integrateFiles(sf HistoryFiles, txNumFrom, txNumTo uint64) {
 	fi := newFilesItem(txNumFrom, txNumTo, h.aggregationStep)
 	fi.decompressor = sf.historyDecomp
 	fi.index = sf.historyIdx
-	h.files.Set(fi)
+	h.dirtyFiles.Set(fi)
 }
 
 func (h *History) isEmpty(tx kv.Tx) (bool, error) {
@@ -987,7 +988,7 @@ type HistoryContext struct {
 }
 
 func (h *History) MakeContext() *HistoryContext {
-	files := *h.roFiles.Load()
+	files := *h.visibleFiles.Load()
 	for i := 0; i < len(files); i++ {
 		if !files[i].src.frozen {
 			files[i].src.refcount.Add(1)
@@ -1987,7 +1988,7 @@ type HistoryStep struct {
 // MakeSteps [0, toTxNum)
 func (h *History) MakeSteps(toTxNum uint64) []*HistoryStep {
 	var steps []*HistoryStep
-	h.InvertedIndex.files.Walk(func(items []*filesItem) bool {
+	h.InvertedIndex.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.index == nil || !item.frozen || item.startTxNum >= toTxNum {
 				continue
@@ -2008,7 +2009,7 @@ func (h *History) MakeSteps(toTxNum uint64) []*HistoryStep {
 		return true
 	})
 	i := 0
-	h.files.Walk(func(items []*filesItem) bool {
+	h.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.index == nil || !item.frozen || item.startTxNum >= toTxNum {
 				continue

@@ -957,7 +957,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 func TestScanStaticFilesD(t *testing.T) {
 
 	ii := &Domain{History: &History{InvertedIndex: emptyTestInvertedIndex(1)},
-		files: btree2.NewBTreeG[*filesItem](filesItemLess),
+		dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess),
 	}
 	files := []string{
 		"v1-test.0-1.kv",
@@ -969,7 +969,7 @@ func TestScanStaticFilesD(t *testing.T) {
 	}
 	ii.scanStateFiles(files)
 	var found []string
-	ii.files.Walk(func(items []*filesItem) bool {
+	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			found = append(found, fmt.Sprintf("%d-%d", item.startTxNum, item.endTxNum))
 		}
@@ -2456,7 +2456,7 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 
 	findFile := func(start, end uint64) *filesItem {
 		var foundFile *filesItem
-		dc.d.files.Walk(func(items []*filesItem) bool {
+		dc.d.dirtyFiles.Walk(func(items []*filesItem) bool {
 			for _, item := range items {
 				if item.startTxNum == start && item.endTxNum == end {
 					foundFile = item

@@ -66,11 +66,14 @@ type HttpCfg struct {
 	SocketServerEnabled bool
 	SocketListenUrl     string
 
-	JWTSecretPath   string // Engine API Authentication
-	TraceRequests   bool   // Always trace requests in INFO level
-	HTTPTimeouts    rpccfg.HTTPTimeouts
-	AuthRpcTimeouts rpccfg.HTTPTimeouts
-	EvmCallTimeout  time.Duration
+	JWTSecretPath             string // Engine API Authentication
+	TraceRequests             bool   // Always trace requests in INFO level
+	HTTPTimeouts              rpccfg.HTTPTimeouts
+	AuthRpcTimeouts           rpccfg.HTTPTimeouts
+	EvmCallTimeout            time.Duration
+	OverlayGetLogsTimeout     time.Duration
+	OverlayReplayBlockTimeout time.Duration
+
 	LogDirVerbosity string
 	LogDirPath      string
 

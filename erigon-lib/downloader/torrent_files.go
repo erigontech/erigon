@@ -6,13 +6,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"golang.org/x/exp/slices"
 )
 
 // TorrentFiles - does provide thread-safe CRUD operations on .torrent files

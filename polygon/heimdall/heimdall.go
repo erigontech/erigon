@@ -37,14 +37,14 @@ var ErrIncompleteMilestoneRange = errors.New("milestone range doesn't contain th
 var ErrIncompleteCheckpointRange = errors.New("checkpoint range doesn't contain the start block")
 var ErrIncompleteSpanRange = errors.New("span range doesn't contain the start block")
 
-type heimdallImpl struct {
+type heimdall struct {
 	client    HeimdallClient
 	pollDelay time.Duration
 	logger    log.Logger
 }
 
 func NewHeimdall(client HeimdallClient, logger log.Logger) Heimdall {
-	h := heimdallImpl{
+	h := heimdall{
 		client:    client,
 		pollDelay: time.Second,
 		logger:    logger,
@@ -52,7 +52,7 @@ func NewHeimdall(client HeimdallClient, logger log.Logger) Heimdall {
 	return &h
 }
 
-func (h *heimdallImpl) LastCheckpointId(ctx context.Context, store CheckpointStore) (CheckpointId, bool, error) {
+func (h *heimdall) LastCheckpointId(ctx context.Context, _ CheckpointStore) (CheckpointId, bool, error) {
 	// todo get this from store if its likely not changed (need timeout)
 
 	count, err := h.client.FetchCheckpointCount(ctx)
@@ -64,16 +64,33 @@ func (h *heimdallImpl) LastCheckpointId(ctx context.Context, store CheckpointSto
 	return CheckpointId(count), true, nil
 }
 
-func (h *heimdallImpl) FetchCheckpointsFromBlock(ctx context.Context, store CheckpointStore, startBlock uint64) (Waypoints, error) {
-	count, _, err := h.LastCheckpointId(ctx, store)
+func (h *heimdall) FetchCheckpointsFromBlock(ctx context.Context, store CheckpointStore, startBlock uint64) (Waypoints, error) {
+	h.logger.Trace(heimdallLogPrefix("fetching checkpoints from block"), "start", startBlock)
+	startFetchTime := time.Now()
 
+	count, _, err := h.LastCheckpointId(ctx, store)
 	if err != nil {
 		return nil, err
 	}
 
-	var checkpoints []Waypoint
+	progressLogTicker := time.NewTicker(30 * time.Second)
+	defer progressLogTicker.Stop()
 
+	var checkpoints []Waypoint
+	var endBlock uint64
 	for i := count; i >= 1; i-- {
+		select {
+		case <-progressLogTicker.C:
+			h.logger.Info(
+				heimdallLogPrefix("fetch checkpoints from block progress (backwards)"),
+				"checkpoint number", i,
+				"start", startBlock,
+				"last", count,
+			)
+		default:
+			// carry on
+		}
+
 		c, err := h.FetchCheckpoints(ctx, store, i, i)
 		if err != nil {
 			if errors.Is(err, ErrNotInCheckpointList) {
@@ -91,6 +108,7 @@ func (h *heimdallImpl) FetchCheckpointsFromBlock(ctx context.Context, store Chec
 
 		for _, c := range c {
 			checkpoints = append(checkpoints, c)
+			endBlock = c.EndBlock().Uint64()
 		}
 
 		// the checkpoint contains the start block
@@ -100,10 +118,19 @@ func (h *heimdallImpl) FetchCheckpointsFromBlock(ctx context.Context, store Chec
 	}
 
 	common.SliceReverse(checkpoints)
+
+	h.logger.Trace(
+		heimdallLogPrefix("finished fetching checkpoints from block"),
+		"count", len(checkpoints),
+		"start", startBlock,
+		"end", endBlock,
+		"time", time.Since(startFetchTime),
+	)
+
 	return checkpoints, nil
 }
 
-func (h *heimdallImpl) FetchCheckpoints(ctx context.Context, store CheckpointStore, start CheckpointId, end CheckpointId) ([]*Checkpoint, error) {
+func (h *heimdall) FetchCheckpoints(ctx context.Context, store CheckpointStore, start CheckpointId, end CheckpointId) ([]*Checkpoint, error) {
 	var checkpoints []*Checkpoint
 
 	lastCheckpointId, exists, err := store.LastCheckpointId(ctx)
@@ -149,7 +176,7 @@ func (h *heimdallImpl) FetchCheckpoints(ctx context.Context, store CheckpointSto
 	return checkpoints, nil
 }
 
-func (h *heimdallImpl) LastMilestoneId(ctx context.Context, store MilestoneStore) (MilestoneId, bool, error) {
+func (h *heimdall) LastMilestoneId(ctx context.Context, _ MilestoneStore) (MilestoneId, bool, error) {
 	// todo get this from store if its likely not changed (need timeout)
 
 	count, err := h.client.FetchMilestoneCount(ctx)
@@ -161,16 +188,33 @@ func (h *heimdallImpl) LastMilestoneId(ctx context.Context, store MilestoneStore
 	return MilestoneId(count), true, nil
 }
 
-func (h *heimdallImpl) FetchMilestonesFromBlock(ctx context.Context, store MilestoneStore, startBlock uint64) (Waypoints, error) {
-	last, _, err := h.LastMilestoneId(ctx, store)
+func (h *heimdall) FetchMilestonesFromBlock(ctx context.Context, store MilestoneStore, startBlock uint64) (Waypoints, error) {
+	h.logger.Trace(heimdallLogPrefix("fetching milestones from block"), "start", startBlock)
+	startFetchTime := time.Now()
 
+	last, _, err := h.LastMilestoneId(ctx, store)
 	if err != nil {
 		return nil, err
 	}
 
-	var milestones Waypoints
+	progressLogTicker := time.NewTicker(30 * time.Second)
+	defer progressLogTicker.Stop()
 
+	var milestones Waypoints
+	var endBlock uint64
 	for i := last; i >= 1; i-- {
+		select {
+		case <-progressLogTicker.C:
+			h.logger.Info(
+				heimdallLogPrefix("fetching milestones from block progress (backwards)"),
+				"milestone id", i,
+				"last", last,
+				"start", startBlock,
+			)
+		default:
+			// carry on
+		}
+
 		m, err := h.FetchMilestones(ctx, store, i, i)
 		if err != nil {
 			if errors.Is(err, ErrNotInMilestoneList) {
@@ -188,6 +232,7 @@ func (h *heimdallImpl) FetchMilestonesFromBlock(ctx context.Context, store Miles
 
 		for _, m := range m {
 			milestones = append(milestones, m)
+			endBlock = m.EndBlock().Uint64()
 		}
 
 		// the checkpoint contains the start block
@@ -197,10 +242,19 @@ func (h *heimdallImpl) FetchMilestonesFromBlock(ctx context.Context, store Miles
 	}
 
 	common.SliceReverse(milestones)
+
+	h.logger.Trace(
+		heimdallLogPrefix("finished fetching milestones from block"),
+		"count", len(milestones),
+		"start", startBlock,
+		"end", endBlock,
+		"time", time.Since(startFetchTime),
+	)
+
 	return milestones, nil
 }
 
-func (h *heimdallImpl) FetchMilestones(ctx context.Context, store MilestoneStore, start MilestoneId, end MilestoneId) ([]*Milestone, error) {
+func (h *heimdall) FetchMilestones(ctx context.Context, store MilestoneStore, start MilestoneId, end MilestoneId) ([]*Milestone, error) {
 	var milestones []*Milestone
 
 	lastMilestoneId, exists, err := store.LastMilestoneId(ctx)
@@ -246,7 +300,7 @@ func (h *heimdallImpl) FetchMilestones(ctx context.Context, store MilestoneStore
 	return milestones, nil
 }
 
-func (h *heimdallImpl) LastSpanId(ctx context.Context, store SpanStore) (SpanId, bool, error) {
+func (h *heimdall) LastSpanId(ctx context.Context, store SpanStore) (SpanId, bool, error) {
 	span, err := h.FetchLatestSpan(ctx, store)
 
 	if err != nil {
@@ -256,11 +310,11 @@ func (h *heimdallImpl) LastSpanId(ctx context.Context, store SpanStore) (SpanId,
 	return span.Id, true, nil
 }
 
-func (h *heimdallImpl) FetchLatestSpan(ctx context.Context, store SpanStore) (*Span, error) {
+func (h *heimdall) FetchLatestSpan(ctx context.Context, _ SpanStore) (*Span, error) {
 	return h.client.FetchLatestSpan(ctx)
 }
 
-func (h *heimdallImpl) FetchSpansFromBlock(ctx context.Context, store SpanStore, startBlock uint64) ([]*Span, error) {
+func (h *heimdall) FetchSpansFromBlock(ctx context.Context, store SpanStore, startBlock uint64) ([]*Span, error) {
 	last, _, err := h.LastSpanId(ctx, store)
 
 	if err != nil {
@@ -297,7 +351,7 @@ func (h *heimdallImpl) FetchSpansFromBlock(ctx context.Context, store SpanStore,
 	return spans, nil
 }
 
-func (h *heimdallImpl) FetchSpans(ctx context.Context, store SpanStore, start SpanId, end SpanId) ([]*Span, error) {
+func (h *heimdall) FetchSpans(ctx context.Context, store SpanStore, start SpanId, end SpanId) ([]*Span, error) {
 	var spans []*Span
 
 	lastSpanId, exists, err := store.LastSpanId(ctx)
@@ -343,155 +397,175 @@ func (h *heimdallImpl) FetchSpans(ctx context.Context, store SpanStore, start Sp
 	return spans, nil
 }
 
-func (h *heimdallImpl) OnSpanEvent(ctx context.Context, store SpanStore, callback func(*Span)) error {
-	currentCount, ok, err := store.LastSpanId(ctx)
-
+func (h *heimdall) OnSpanEvent(ctx context.Context, store SpanStore, cb func(*Span)) error {
+	tip, ok, err := store.LastSpanId(ctx)
 	if err != nil {
 		return err
 	}
 
 	if !ok {
-		currentCount, _, err = h.LastSpanId(ctx, store)
-
+		tip, _, err = h.LastSpanId(ctx, store)
 		if err != nil {
 			return err
 		}
 	}
 
-	go func() {
-		for {
-			latestSpan, err := h.client.FetchLatestSpan(ctx)
-			if err != nil {
-				if !errors.Is(err, context.Canceled) {
-					h.logger.Error("heimdallImpl.OnSpanEvent FetchSpanCount error", "err", err)
-				}
-				break
-			}
-
-			if latestSpan.Id <= currentCount {
-				pollDelayTimer := time.NewTimer(h.pollDelay)
-				select {
-				case <-ctx.Done():
-					return
-				case <-pollDelayTimer.C:
-				}
-			} else {
-				m, err := h.FetchSpans(ctx, store, currentCount+1, latestSpan.Id)
-				currentCount = latestSpan.Id
-
-				if err != nil {
-					if !errors.Is(err, context.Canceled) {
-						h.logger.Error("heimdallImpl.OnSpanEvent FetchSpan error", "err", err)
-					}
-					break
-				}
-
-				go callback(m[len(m)-1])
-			}
-		}
-	}()
+	go h.pollSpans(ctx, store, tip, cb)
 
 	return nil
 }
 
-func (h *heimdallImpl) OnCheckpointEvent(ctx context.Context, store CheckpointStore, callback func(*Checkpoint)) error {
-	currentCount, ok, err := store.LastCheckpointId(ctx)
+func (h *heimdall) pollSpans(ctx context.Context, store SpanStore, tip SpanId, cb func(*Span)) {
+	for ctx.Err() == nil {
+		latestSpan, err := h.client.FetchLatestSpan(ctx)
+		if err != nil {
+			h.logger.Warn(
+				heimdallLogPrefix("heimdall.OnSpanEvent FetchSpanCount failed"),
+				"err", err,
+			)
 
+			h.waitPollingDelay(ctx)
+			// keep background goroutine alive in case of heimdall errors
+			continue
+		}
+
+		if latestSpan.Id <= tip {
+			h.waitPollingDelay(ctx)
+			continue
+		}
+
+		m, err := h.FetchSpans(ctx, store, tip+1, latestSpan.Id)
+		if err != nil {
+			h.logger.Warn(
+				heimdallLogPrefix("heimdall.OnSpanEvent FetchSpan failed"),
+				"err", err,
+			)
+
+			h.waitPollingDelay(ctx)
+			// keep background goroutine alive in case of heimdall errors
+			continue
+		}
+
+		tip = latestSpan.Id
+		go cb(m[len(m)-1])
+	}
+}
+
+func (h *heimdall) OnCheckpointEvent(ctx context.Context, store CheckpointStore, cb func(*Checkpoint)) error {
+	tip, ok, err := store.LastCheckpointId(ctx)
 	if err != nil {
 		return err
 	}
 
 	if !ok {
-		currentCount, _, err = h.LastCheckpointId(ctx, store)
-
+		tip, _, err = h.LastCheckpointId(ctx, store)
 		if err != nil {
 			return err
 		}
 	}
 
-	go func() {
-		for {
-			count, err := h.client.FetchCheckpointCount(ctx)
-			if err != nil {
-				if !errors.Is(err, context.Canceled) {
-					h.logger.Error("heimdallImpl.OnMilestoneEvent FetchMilestoneCount error", "err", err)
-				}
-				break
-			}
-
-			if count <= int64(currentCount) {
-				pollDelayTimer := time.NewTimer(h.pollDelay)
-				select {
-				case <-ctx.Done():
-					return
-				case <-pollDelayTimer.C:
-				}
-			} else {
-				m, err := h.FetchCheckpoints(ctx, store, currentCount+1, CheckpointId(count))
-				currentCount = CheckpointId(count)
-
-				if err != nil {
-					if !errors.Is(err, context.Canceled) {
-						h.logger.Error("heimdallImpl.OnMilestoneEvent FetchMilestone error", "err", err)
-					}
-					break
-				}
-
-				go callback(m[len(m)-1])
-			}
-		}
-	}()
+	go h.pollCheckpoints(ctx, store, tip, cb)
 
 	return nil
 }
 
-func (h *heimdallImpl) OnMilestoneEvent(ctx context.Context, store MilestoneStore, callback func(*Milestone)) error {
-	currentCount, ok, err := store.LastMilestoneId(ctx)
+func (h *heimdall) pollCheckpoints(ctx context.Context, store CheckpointStore, tip CheckpointId, cb func(*Checkpoint)) {
+	for ctx.Err() == nil {
+		count, err := h.client.FetchCheckpointCount(ctx)
+		if err != nil {
+			h.logger.Warn(
+				heimdallLogPrefix("OnCheckpointEvent.OnCheckpointEvent FetchCheckpointCount failed"),
+				"err", err,
+			)
 
+			h.waitPollingDelay(ctx)
+			// keep background goroutine alive in case of heimdall errors
+			continue
+		}
+
+		if count <= int64(tip) {
+			h.waitPollingDelay(ctx)
+			continue
+		}
+
+		m, err := h.FetchCheckpoints(ctx, store, tip+1, CheckpointId(count))
+		if err != nil {
+			h.logger.Warn(
+				heimdallLogPrefix("heimdall.OnCheckpointEvent FetchCheckpoints failed"),
+				"err", err,
+			)
+
+			h.waitPollingDelay(ctx)
+			// keep background goroutine alive in case of heimdall errors
+			continue
+		}
+
+		tip = CheckpointId(count)
+		go cb(m[len(m)-1])
+	}
+}
+
+func (h *heimdall) OnMilestoneEvent(ctx context.Context, store MilestoneStore, cb func(*Milestone)) error {
+	tip, ok, err := store.LastMilestoneId(ctx)
 	if err != nil {
 		return err
 	}
 
 	if !ok {
-		currentCount, _, err = h.LastMilestoneId(ctx, store)
-
+		tip, _, err = h.LastMilestoneId(ctx, store)
 		if err != nil {
 			return err
 		}
 	}
 
-	go func() {
-		for {
-			count, err := h.client.FetchMilestoneCount(ctx)
-			if err != nil {
-				if !errors.Is(err, context.Canceled) {
-					h.logger.Error("heimdallImpl.OnMilestoneEvent FetchMilestoneCount error", "err", err)
-				}
-				break
-			}
-
-			if count <= int64(currentCount) {
-				pollDelayTimer := time.NewTimer(h.pollDelay)
-				select {
-				case <-ctx.Done():
-					return
-				case <-pollDelayTimer.C:
-				}
-			} else {
-				m, err := h.FetchMilestones(ctx, store, currentCount+1, MilestoneId(count))
-				currentCount = MilestoneId(count)
-
-				if err != nil {
-					if !errors.Is(err, context.Canceled) {
-						h.logger.Error("heimdallImpl.OnMilestoneEvent FetchMilestone error", "err", err)
-					}
-					break
-				}
-
-				go callback(m[len(m)-1])
-			}
-		}
-	}()
+	go h.pollMilestones(ctx, store, tip, cb)
 
 	return nil
+}
+
+func (h *heimdall) pollMilestones(ctx context.Context, store MilestoneStore, tip MilestoneId, cb func(*Milestone)) {
+	for ctx.Err() == nil {
+		count, err := h.client.FetchMilestoneCount(ctx)
+		if err != nil {
+			h.logger.Warn(
+				heimdallLogPrefix("heimdall.OnMilestoneEvent FetchMilestoneCount failed"),
+				"err", err,
+			)
+
+			h.waitPollingDelay(ctx)
+			// keep background goroutine alive in case of heimdall errors
+			continue
+		}
+
+		if count <= int64(tip) {
+			h.waitPollingDelay(ctx)
+			continue
+		}
+
+		m, err := h.FetchMilestones(ctx, store, tip+1, MilestoneId(count))
+		if err != nil {
+			h.logger.Warn(
+				heimdallLogPrefix("heimdall.OnMilestoneEvent FetchMilestone failed"),
+				"err", err,
+			)
+
+			h.waitPollingDelay(ctx)
+			// keep background goroutine alive in case of heimdall errors
+			continue
+		}
+
+		tip = MilestoneId(count)
+		go cb(m[len(m)-1])
+	}
+}
+
+func (h *heimdall) waitPollingDelay(ctx context.Context) {
+	pollDelayTimer := time.NewTimer(h.pollDelay)
+	defer pollDelayTimer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return
+	case <-pollDelayTimer.C:
+	}
 }

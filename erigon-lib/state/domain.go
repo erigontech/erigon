@@ -22,9 +22,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"hash"
 	"math"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -32,7 +30,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	bloomfilter "github.com/holiman/bloomfilter/v2"
 	"github.com/ledgerwatch/erigon-lib/kv/backup"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 	"github.com/ledgerwatch/log/v3"
@@ -45,7 +42,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/metrics"
@@ -100,250 +96,6 @@ var (
 	tracePutWithPrev = dbg.EnvString("AGG_TRACE_PUT_WITH_PREV", "")
 )
 
-// filesItem corresponding to a pair of files (.dat and .idx)
-type filesItem struct {
-	decompressor         *seg.Decompressor
-	index                *recsplit.Index
-	bindex               *BtIndex
-	bm                   *bitmapdb.FixedSizeBitmaps
-	existence            *ExistenceFilter
-	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
-
-	// Frozen: file of size StepsInColdFile. Completely immutable.
-	// Cold: file of size < StepsInColdFile. Immutable, but can be closed/removed after merge to bigger file.
-	// Hot: Stored in DB. Providing Snapshot-Isolation by CopyOnWrite.
-	frozen   bool         // immutable, don't need atomic
-	refcount atomic.Int32 // only for `frozen=false`
-
-	// file can be deleted in 2 cases: 1. when `refcount == 0 && canDelete == true` 2. on app startup when `file.isSubsetOfFrozenFile()`
-	// other processes (which also reading files, may have same logic)
-	canDelete atomic.Bool
-}
-
-type ExistenceFilter struct {
-	filter             *bloomfilter.Filter
-	empty              bool
-	FileName, FilePath string
-	f                  *os.File
-	noFsync            bool // fsync is enabled by default, but tests can manually disable
-}
-
-func NewExistenceFilter(keysCount uint64, filePath string) (*ExistenceFilter, error) {
-
-	m := bloomfilter.OptimalM(keysCount, 0.01)
-	//TODO: make filters compatible by usinig same seed/keys
-	_, fileName := filepath.Split(filePath)
-	e := &ExistenceFilter{FilePath: filePath, FileName: fileName}
-	if keysCount < 2 {
-		e.empty = true
-	} else {
-		var err error
-		e.filter, err = bloomfilter.New(m)
-		if err != nil {
-			return nil, fmt.Errorf("%w, %s", err, fileName)
-		}
-	}
-	return e, nil
-}
-
-func (b *ExistenceFilter) AddHash(hash uint64) {
-	if b.empty {
-		return
-	}
-	b.filter.AddHash(hash)
-}
-func (b *ExistenceFilter) ContainsHash(v uint64) bool {
-	if b.empty {
-		return true
-	}
-	return b.filter.ContainsHash(v)
-}
-func (b *ExistenceFilter) Contains(v hash.Hash64) bool {
-	if b.empty {
-		return true
-	}
-	return b.filter.Contains(v)
-}
-func (b *ExistenceFilter) Build() error {
-	if b.empty {
-		cf, err := os.Create(b.FilePath)
-		if err != nil {
-			return err
-		}
-		defer cf.Close()
-		return nil
-	}
-
-	log.Trace("[agg] write file", "file", b.FileName)
-	tmpFilePath := b.FilePath + ".tmp"
-	cf, err := os.Create(tmpFilePath)
-	if err != nil {
-		return err
-	}
-	defer cf.Close()
-
-	if _, err := b.filter.WriteTo(cf); err != nil {
-		return err
-	}
-	if err = b.fsync(cf); err != nil {
-		return err
-	}
-	if err = cf.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpFilePath, b.FilePath); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (b *ExistenceFilter) DisableFsync() { b.noFsync = true }
-
-// fsync - other processes/goroutines must see only "fully-complete" (valid) files. No partial-writes.
-// To achieve it: write to .tmp file then `rename` when file is ready.
-// Machine may power-off right after `rename` - it means `fsync` must be before `rename`
-func (b *ExistenceFilter) fsync(f *os.File) error {
-	if b.noFsync {
-		return nil
-	}
-	if err := f.Sync(); err != nil {
-		log.Warn("couldn't fsync", "err", err)
-		return err
-	}
-	return nil
-}
-
-func OpenExistenceFilter(filePath string) (*ExistenceFilter, error) {
-	_, fileName := filepath.Split(filePath)
-	f := &ExistenceFilter{FilePath: filePath, FileName: fileName}
-	if !dir.FileExist(filePath) {
-		return nil, fmt.Errorf("file doesn't exists: %s", fileName)
-	}
-	{
-		ff, err := os.Open(filePath)
-		if err != nil {
-			return nil, err
-		}
-		defer ff.Close()
-		stat, err := ff.Stat()
-		if err != nil {
-			return nil, err
-		}
-		f.empty = stat.Size() == 0
-	}
-
-	if !f.empty {
-		var err error
-		f.filter, _, err = bloomfilter.ReadFile(filePath)
-		if err != nil {
-			return nil, fmt.Errorf("OpenExistenceFilter: %w, %s", err, fileName)
-		}
-	}
-	return f, nil
-}
-func (b *ExistenceFilter) Close() {
-	if b.f != nil {
-		b.f.Close()
-		b.f = nil
-	}
-}
-
-func newFilesItem(startTxNum, endTxNum, stepSize uint64) *filesItem {
-	startStep := startTxNum / stepSize
-	endStep := endTxNum / stepSize
-	frozen := endStep-startStep == StepsInColdFile
-	return &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
-}
-
-// isSubsetOf - when `j` covers `i` but not equal `i`
-func (i *filesItem) isSubsetOf(j *filesItem) bool {
-	return (j.startTxNum <= i.startTxNum && i.endTxNum <= j.endTxNum) && (j.startTxNum != i.startTxNum || i.endTxNum != j.endTxNum)
-}
-func (i *filesItem) isBefore(j *filesItem) bool { return i.endTxNum <= j.startTxNum }
-
-func filesItemLess(i, j *filesItem) bool {
-	if i.endTxNum == j.endTxNum {
-		return i.startTxNum > j.startTxNum
-	}
-	return i.endTxNum < j.endTxNum
-}
-func (i *filesItem) closeFilesAndRemove() {
-	if i.decompressor != nil {
-		i.decompressor.Close()
-		// paranoic-mode on: don't delete frozen files
-		if !i.frozen {
-			if err := os.Remove(i.decompressor.FilePath()); err != nil {
-				log.Trace("remove after close", "err", err, "file", i.decompressor.FileName())
-			}
-			if err := os.Remove(i.decompressor.FilePath() + ".torrent"); err != nil {
-				log.Trace("remove after close", "err", err, "file", i.decompressor.FileName()+".torrent")
-			}
-		}
-		i.decompressor = nil
-	}
-	if i.index != nil {
-		i.index.Close()
-		// paranoic-mode on: don't delete frozen files
-		if !i.frozen {
-			if err := os.Remove(i.index.FilePath()); err != nil {
-				log.Trace("remove after close", "err", err, "file", i.index.FileName())
-			}
-		}
-		i.index = nil
-	}
-	if i.bindex != nil {
-		i.bindex.Close()
-		if err := os.Remove(i.bindex.FilePath()); err != nil {
-			log.Trace("remove after close", "err", err, "file", i.bindex.FileName())
-		}
-		i.bindex = nil
-	}
-	if i.bm != nil {
-		i.bm.Close()
-		if err := os.Remove(i.bm.FilePath()); err != nil {
-			log.Trace("remove after close", "err", err, "file", i.bm.FileName())
-		}
-		i.bm = nil
-	}
-	if i.existence != nil {
-		i.existence.Close()
-		if err := os.Remove(i.existence.FilePath); err != nil {
-			log.Trace("remove after close", "err", err, "file", i.existence.FileName)
-		}
-		i.existence = nil
-	}
-}
-
-type DomainStats struct {
-	MergesCount          uint64
-	LastCollationTook    time.Duration
-	LastPruneTook        time.Duration
-	LastPruneHistTook    time.Duration
-	LastFileBuildingTook time.Duration
-	LastCollationSize    uint64
-	LastPruneSize        uint64
-
-	FilesQueries *atomic.Uint64
-	TotalQueries *atomic.Uint64
-	EfSearchTime time.Duration
-	DataSize     uint64
-	IndexSize    uint64
-	FilesCount   uint64
-}
-
-func (ds *DomainStats) Accumulate(other DomainStats) {
-	if other.FilesQueries != nil {
-		ds.FilesQueries.Add(other.FilesQueries.Load())
-	}
-	if other.TotalQueries != nil {
-		ds.TotalQueries.Add(other.TotalQueries.Load())
-	}
-	ds.EfSearchTime += other.EfSearchTime
-	ds.IndexSize += other.IndexSize
-	ds.DataSize += other.DataSize
-	ds.FilesCount += other.FilesCount
-}
-
 // Domain is a part of the state (examples are Accounts, Storage, Code)
 // Domain should not have any go routines or locks
 //
@@ -354,17 +106,17 @@ func (ds *DomainStats) Accumulate(other DomainStats) {
 type Domain struct {
 	*History
 
-	// files - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
+	// dirtyFiles - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
 	// thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
 	//
-	// roFiles derivative from field `file`, but without garbage:
+	// visibleFiles derivative from field `file`, but without garbage:
 	//  - no files with `canDelete=true`
 	//  - no overlaps
 	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
 	//
-	// MakeContext() using roFiles in zero-copy way
-	files   *btree2.BTreeG[*filesItem]
-	roFiles atomic.Pointer[[]ctxItem]
+	// MakeContext() using visibleFiles in zero-copy way
+	dirtyFiles   *btree2.BTreeG[*filesItem]
+	visibleFiles atomic.Pointer[[]ctxItem]
 
 	// replaceKeysInValues allows to replace commitment branch values with shorter keys.
 	// for commitment domain only
@@ -395,7 +147,7 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, v
 		keysTable:   keysTable,
 		valsTable:   valsTable,
 		compression: cfg.compress,
-		files:       btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		dirtyFiles:  btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		stats:       DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
 
 		indexList:                   withBTree | withExistence,
@@ -403,7 +155,7 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, v
 		restrictSubsetFileDeletions: cfg.restrictSubsetFileDeletions, // to prevent not merged 'garbage' to delete on start
 	}
 
-	d.roFiles.Store(&[]ctxItem{})
+	d.visibleFiles.Store(&[]ctxItem{})
 
 	var err error
 	if d.History, err = NewHistory(cfg.hist, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, nil, logger); err != nil {
@@ -464,7 +216,7 @@ func (d *Domain) openList(names []string, readonly bool) error {
 		return fmt.Errorf("Domain.OpenList: %s, %w", d.filenameBase, err)
 	}
 	d.protectFromHistoryFilesAheadOfDomainFiles(readonly)
-	d.reCalcRoFiles()
+	d.reCalcVisibleFiles()
 	return nil
 }
 
@@ -496,14 +248,14 @@ func (d *Domain) GetAndResetStats() DomainStats {
 
 func (d *Domain) removeFilesAfterStep(lowerBound uint64, readonly bool) {
 	var toDelete []*filesItem
-	d.files.Scan(func(item *filesItem) bool {
+	d.dirtyFiles.Scan(func(item *filesItem) bool {
 		if item.startTxNum/d.aggregationStep >= lowerBound {
 			toDelete = append(toDelete, item)
 		}
 		return true
 	})
 	for _, item := range toDelete {
-		d.files.Delete(item)
+		d.dirtyFiles.Delete(item)
 		if !readonly {
 			log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete). stack: %s", item.decompressor.FileName(), lowerBound, dbg.Stack()))
 			item.closeFilesAndRemove()
@@ -514,14 +266,14 @@ func (d *Domain) removeFilesAfterStep(lowerBound uint64, readonly bool) {
 	}
 
 	toDelete = toDelete[:0]
-	d.History.files.Scan(func(item *filesItem) bool {
+	d.History.dirtyFiles.Scan(func(item *filesItem) bool {
 		if item.startTxNum/d.aggregationStep >= lowerBound {
 			toDelete = append(toDelete, item)
 		}
 		return true
 	})
 	for _, item := range toDelete {
-		d.History.files.Delete(item)
+		d.History.dirtyFiles.Delete(item)
 		if !readonly {
 			log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
 			item.closeFilesAndRemove()
@@ -531,14 +283,14 @@ func (d *Domain) removeFilesAfterStep(lowerBound uint64, readonly bool) {
 	}
 
 	toDelete = toDelete[:0]
-	d.History.InvertedIndex.files.Scan(func(item *filesItem) bool {
+	d.History.InvertedIndex.dirtyFiles.Scan(func(item *filesItem) bool {
 		if item.startTxNum/d.aggregationStep >= lowerBound {
 			toDelete = append(toDelete, item)
 		}
 		return true
 	})
 	for _, item := range toDelete {
-		d.History.InvertedIndex.files.Delete(item)
+		d.History.InvertedIndex.dirtyFiles.Delete(item)
 		if !readonly {
 			log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
 			item.closeFilesAndRemove()
@@ -585,10 +337,10 @@ func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) 
 		var newFile = newFilesItem(startTxNum, endTxNum, d.aggregationStep)
 		newFile.frozen = false
 
-		if _, has := d.files.Get(newFile); has {
+		if _, has := d.dirtyFiles.Get(newFile); has {
 			continue
 		}
-		d.files.Set(newFile)
+		d.dirtyFiles.Set(newFile)
 	}
 	return garbageFiles
 }
@@ -596,7 +348,7 @@ func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) 
 func (d *Domain) openFiles() (err error) {
 	invalidFileItems := make([]*filesItem, 0)
 	invalidFileItemsLock := sync.Mutex{}
-	d.files.Walk(func(items []*filesItem) bool {
+	d.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
 			if item.decompressor == nil {
@@ -656,16 +408,16 @@ func (d *Domain) openFiles() (err error) {
 	})
 
 	for _, item := range invalidFileItems {
-		d.files.Delete(item)
+		d.dirtyFiles.Delete(item)
 	}
 
-	d.reCalcRoFiles()
+	d.reCalcVisibleFiles()
 	return nil
 }
 
 func (d *Domain) closeWhatNotInList(fNames []string) {
 	var toDelete []*filesItem
-	d.files.Walk(func(items []*filesItem) bool {
+	d.dirtyFiles.Walk(func(items []*filesItem) bool {
 	Loop1:
 		for _, item := range items {
 			for _, protectName := range fNames {
@@ -694,19 +446,19 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 			item.existence.Close()
 			item.existence = nil
 		}
-		d.files.Delete(item)
+		d.dirtyFiles.Delete(item)
 	}
 }
 
-func (d *Domain) reCalcRoFiles() {
-	roFiles := ctxFiles(d.files, d.indexList, false)
-	d.roFiles.Store(&roFiles)
+func (d *Domain) reCalcVisibleFiles() {
+	visibleFiles := calcVisibleFiles(d.dirtyFiles, d.indexList, false)
+	d.visibleFiles.Store(&visibleFiles)
 }
 
 func (d *Domain) Close() {
 	d.History.Close()
 	d.closeWhatNotInList([]string{})
-	d.reCalcRoFiles()
+	d.reCalcVisibleFiles()
 }
 
 func (w *domainBufferedWriter) PutWithPrev(key1, key2, val, preval []byte, prevStep uint64) error {
@@ -912,20 +664,6 @@ func (ch *CursorHeap) Pop() interface{} {
 	return x
 }
 
-// filesItem corresponding to a pair of files (.dat and .idx)
-type ctxItem struct {
-	getter     *seg.Getter
-	reader     *recsplit.IndexReader
-	startTxNum uint64
-	endTxNum   uint64
-
-	i   int
-	src *filesItem
-}
-
-func (i *ctxItem) isSubSetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) } //nolint
-func (i *ctxItem) isSubsetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) } //nolint
-
 // DomainContext allows accesing the same domain from multiple go-routines
 type DomainContext struct {
 	hc         *HistoryContext
@@ -983,7 +721,7 @@ func (dc *DomainContext) DebugKVFilesWithKey(k []byte) (res []string, err error)
 	return res, nil
 }
 func (dc *DomainContext) DebugEFKey(k []byte) error {
-	dc.hc.ic.ii.files.Walk(func(items []*filesItem) bool {
+	dc.hc.ic.ii.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.decompressor == nil {
 				continue
@@ -1030,7 +768,7 @@ func (dc *DomainContext) DebugEFKey(k []byte) error {
 }
 
 func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
-	d.History.files.Walk(func(items []*filesItem) bool {
+	d.History.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.index == nil {
 				return false
@@ -1043,7 +781,7 @@ func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 		return true
 	})
 
-	d.files.Walk(func(items []*filesItem) bool {
+	d.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.index == nil {
 				return false
@@ -1064,7 +802,7 @@ func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 }
 
 func (d *Domain) MakeContext() *DomainContext {
-	files := *d.roFiles.Load()
+	files := *d.visibleFiles.Load()
 	for i := 0; i < len(files); i++ {
 		if !files[i].src.frozen {
 			files[i].src.refcount.Add(1)
@@ -1316,7 +1054,7 @@ func (d *Domain) buildMapIdx(ctx context.Context, fromStep, toStep uint64, data 
 }
 
 func (d *Domain) missedBtreeIdxFiles() (l []*filesItem) {
-	d.files.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
+	d.dirtyFiles.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
 			fPath := d.kvBtFilePath(fromStep, toStep)
@@ -1335,7 +1073,7 @@ func (d *Domain) missedBtreeIdxFiles() (l []*filesItem) {
 	return l
 }
 func (d *Domain) missedKviIdxFiles() (l []*filesItem) {
-	d.files.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
+	d.dirtyFiles.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
 			fPath := d.kvAccessorFilePath(fromStep, toStep)
@@ -1478,7 +1216,7 @@ func buildIndex(ctx context.Context, d *seg.Decompressor, compressed FileCompres
 }
 
 func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
-	defer d.reCalcRoFiles()
+	defer d.reCalcVisibleFiles()
 
 	d.History.integrateFiles(sf.HistoryFiles, txNumFrom, txNumTo)
 
@@ -1488,7 +1226,7 @@ func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
 	fi.index = sf.valuesIdx
 	fi.bindex = sf.valuesBt
 	fi.existence = sf.bloom
-	d.files.Set(fi)
+	d.dirtyFiles.Set(fi)
 }
 
 // unwind is similar to prune but the difference is that it restores domain values from the history as of txFrom
@@ -2539,4 +2277,34 @@ func (mf MergedFiles) Close() {
 			}
 		}
 	}
+}
+
+type DomainStats struct {
+	MergesCount          uint64
+	LastCollationTook    time.Duration
+	LastPruneTook        time.Duration
+	LastPruneHistTook    time.Duration
+	LastFileBuildingTook time.Duration
+	LastCollationSize    uint64
+	LastPruneSize        uint64
+
+	FilesQueries *atomic.Uint64
+	TotalQueries *atomic.Uint64
+	EfSearchTime time.Duration
+	DataSize     uint64
+	IndexSize    uint64
+	FilesCount   uint64
+}
+
+func (ds *DomainStats) Accumulate(other DomainStats) {
+	if other.FilesQueries != nil {
+		ds.FilesQueries.Add(other.FilesQueries.Load())
+	}
+	if other.TotalQueries != nil {
+		ds.TotalQueries.Add(other.TotalQueries.Load())
+	}
+	ds.EfSearchTime += other.EfSearchTime
+	ds.IndexSize += other.IndexSize
+	ds.DataSize += other.DataSize
+	ds.FilesCount += other.FilesCount
 }

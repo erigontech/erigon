@@ -58,17 +58,17 @@ import (
 type InvertedIndex struct {
 	iiCfg
 
-	// files - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
+	// dirtyFiles - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
 	// thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
 	//
-	// roFiles derivative from field `file`, but without garbage:
+	// visibleFiles derivative from field `file`, but without garbage:
 	//  - no files with `canDelete=true`
 	//  - no overlaps
 	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
 	//
-	// MakeContext() using roFiles in zero-copy way
-	files   *btree2.BTreeG[*filesItem]
-	roFiles atomic.Pointer[[]ctxItem]
+	// MakeContext() using visibleFiles in zero-copy way
+	dirtyFiles   *btree2.BTreeG[*filesItem]
+	visibleFiles atomic.Pointer[[]ctxItem]
 
 	indexKeysTable  string // txnNum_u64 -> key (k+auto_increment)
 	indexTable      string // k -> txnNum_u64 , Needs to be table with DupSort
@@ -102,7 +102,7 @@ func NewInvertedIndex(cfg iiCfg, aggregationStep uint64, filenameBase, indexKeys
 	}
 	ii := InvertedIndex{
 		iiCfg:              cfg,
-		files:              btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		dirtyFiles:         btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		aggregationStep:    aggregationStep,
 		filenameBase:       filenameBase,
 		indexKeysTable:     indexKeysTable,
@@ -118,7 +118,7 @@ func NewInvertedIndex(cfg iiCfg, aggregationStep uint64, filenameBase, indexKeys
 		ii.indexList |= withExistence
 	}
 
-	ii.roFiles.Store(&[]ctxItem{})
+	ii.visibleFiles.Store(&[]ctxItem{})
 
 	return &ii, nil
 }
@@ -213,11 +213,11 @@ func (ii *InvertedIndex) scanStateFiles(fileNames []string) (garbageFiles []*fil
 			continue
 		}
 
-		if _, has := ii.files.Get(newFile); has {
+		if _, has := ii.dirtyFiles.Get(newFile); has {
 			continue
 		}
 
-		ii.files.Set(newFile)
+		ii.dirtyFiles.Set(newFile)
 	}
 	return garbageFiles
 }
@@ -230,80 +230,13 @@ var (
 	withExistence idxList = 0b100
 )
 
-func ctxFiles(files *btree2.BTreeG[*filesItem], l idxList, trace bool) (roItems []ctxItem) {
-	roFiles := make([]ctxItem, 0, files.Len())
-	if trace {
-		log.Warn("[dbg] roFiles01", "amount", files.Len())
-	}
-	files.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			if item.canDelete.Load() {
-				if trace {
-					log.Warn("[dbg] roFiles0", "f", item.decompressor.FileName())
-				}
-				continue
-			}
-
-			// TODO: need somehow handle this case, but indices do not open in tests TestFindMergeRangeCornerCases
-			if item.decompressor == nil {
-				if trace {
-					log.Warn("[dbg] roFiles1", "from", item.startTxNum, "to", item.endTxNum)
-				}
-				continue
-			}
-			if (l&withBTree != 0) && item.bindex == nil {
-				if trace {
-					log.Warn("[dbg] roFiles2", "f", item.decompressor.FileName())
-				}
-				//panic(fmt.Errorf("btindex nil: %s", item.decompressor.FileName()))
-				continue
-			}
-			if (l&withHashMap != 0) && item.index == nil {
-				if trace {
-					log.Warn("[dbg] roFiles3", "f", item.decompressor.FileName())
-				}
-				//panic(fmt.Errorf("index nil: %s", item.decompressor.FileName()))
-				continue
-			}
-			if (l&withExistence != 0) && item.existence == nil {
-				if trace {
-					log.Warn("[dbg] roFiles4", "f", item.decompressor.FileName())
-				}
-				//panic(fmt.Errorf("existence nil: %s", item.decompressor.FileName()))
-				continue
-			}
-
-			// `kill -9` may leave small garbage files, but if big one already exists we assume it's good(fsynced) and no reason to merge again
-			// see super-set file, just drop sub-set files from list
-			for len(roFiles) > 0 && roFiles[len(roFiles)-1].src.isSubsetOf(item) {
-				if trace {
-					log.Warn("[dbg] roFiles5", "f", roFiles[len(roFiles)-1].src.decompressor.FileName())
-				}
-				roFiles[len(roFiles)-1].src = nil
-				roFiles = roFiles[:len(roFiles)-1]
-			}
-			roFiles = append(roFiles, ctxItem{
-				startTxNum: item.startTxNum,
-				endTxNum:   item.endTxNum,
-				i:          len(roFiles),
-				src:        item,
-			})
-		}
-		return true
-	})
-	if roFiles == nil {
-		roFiles = []ctxItem{}
-	}
-	return roFiles
-}
-
-func (ii *InvertedIndex) reCalcRoFiles() {
-	roFiles := ctxFiles(ii.files, ii.indexList, false)
-	ii.roFiles.Store(&roFiles)
+func (ii *InvertedIndex) reCalcVisibleFiles() {
+	visibleFiles := calcVisibleFiles(ii.dirtyFiles, ii.indexList, false)
+	ii.visibleFiles.Store(&visibleFiles)
 }
 
 func (ii *InvertedIndex) missedIdxFiles() (l []*filesItem) {
-	ii.files.Walk(func(items []*filesItem) bool {
+	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
 			if !dir.FileExist(ii.efAccessorFilePath(fromStep, toStep)) {
@@ -315,7 +248,7 @@ func (ii *InvertedIndex) missedIdxFiles() (l []*filesItem) {
 	return l
 }
 func (ii *InvertedIndex) missedExistenceFilterFiles() (l []*filesItem) {
-	ii.files.Walk(func(items []*filesItem) bool {
+	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
 			if !dir.FileExist(ii.efExistenceIdxFilePath(fromStep, toStep)) {
@@ -406,7 +339,7 @@ func (ii *InvertedIndex) openFiles() error {
 	var err error
 	var invalidFileItems []*filesItem
 	invalidFileItemsLock := sync.Mutex{}
-	ii.files.Walk(func(items []*filesItem) bool {
+	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			item := item
 			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
@@ -457,16 +390,16 @@ func (ii *InvertedIndex) openFiles() error {
 		return true
 	})
 	for _, item := range invalidFileItems {
-		ii.files.Delete(item)
+		ii.dirtyFiles.Delete(item)
 	}
 
-	ii.reCalcRoFiles()
+	ii.reCalcVisibleFiles()
 	return nil
 }
 
 func (ii *InvertedIndex) closeWhatNotInList(fNames []string) {
 	var toDelete []*filesItem
-	ii.files.Walk(func(items []*filesItem) bool {
+	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
 	Loop1:
 		for _, item := range items {
 			for _, protectName := range fNames {
@@ -491,13 +424,13 @@ func (ii *InvertedIndex) closeWhatNotInList(fNames []string) {
 			item.existence.Close()
 			item.existence = nil
 		}
-		ii.files.Delete(item)
+		ii.dirtyFiles.Delete(item)
 	}
 }
 
 func (ii *InvertedIndex) Close() {
 	ii.closeWhatNotInList([]string{})
-	ii.reCalcRoFiles()
+	ii.reCalcVisibleFiles()
 }
 
 // DisableFsync - just for tests
@@ -609,7 +542,7 @@ func (w *invertedIndexBufferedWriter) add(key, indexKey []byte) error {
 }
 
 func (ii *InvertedIndex) MakeContext() *InvertedIndexContext {
-	files := *ii.roFiles.Load()
+	files := *ii.visibleFiles.Load()
 	for i := 0; i < len(files); i++ {
 		if !files[i].src.frozen {
 			files[i].src.refcount.Add(1)
@@ -1707,7 +1640,7 @@ func (ii *InvertedIndex) buildMapIdx(ctx context.Context, fromStep, toStep uint6
 }
 
 func (ii *InvertedIndex) integrateFiles(sf InvertedFiles, txNumFrom, txNumTo uint64) {
-	defer ii.reCalcRoFiles()
+	defer ii.reCalcVisibleFiles()
 
 	if asserts && ii.withExistenceIndex && sf.existence == nil {
 		panic(fmt.Errorf("assert: no existence index: %s", sf.decomp.FileName()))
@@ -1717,14 +1650,14 @@ func (ii *InvertedIndex) integrateFiles(sf InvertedFiles, txNumFrom, txNumTo uin
 	fi.decompressor = sf.decomp
 	fi.index = sf.index
 	fi.existence = sf.existence
-	ii.files.Set(fi)
+	ii.dirtyFiles.Set(fi)
 }
 
 func (ii *InvertedIndex) collectFilesStat() (filesCount, filesSize, idxSize uint64) {
-	if ii.files == nil {
+	if ii.dirtyFiles == nil {
 		return 0, 0, 0
 	}
-	ii.files.Walk(func(items []*filesItem) bool {
+	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.index == nil {
 				return false
