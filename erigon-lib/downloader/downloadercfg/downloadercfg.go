@@ -70,6 +70,10 @@ func Default() *torrent.ClientConfig {
 	torrentConfig.MinDialTimeout = 6 * time.Second    //default: 3s
 	torrentConfig.HandshakesTimeout = 8 * time.Second //default: 4s
 
+	// default limit is 1MB, but we have 2MB pieces which brings us to:
+	//   *torrent.PeerConn: waiting for alloc limit reservation: reservation for 1802972 exceeds limiter max 1048576
+	torrentConfig.MaxAllocPeerRequestDataPerConn = int64(DefaultPieceSize)
+
 	// enable dht
 	torrentConfig.NoDHT = true
 	//torrentConfig.DisableTrackers = true
