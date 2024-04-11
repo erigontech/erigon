@@ -27,6 +27,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -117,9 +118,14 @@ type Decompressor struct {
 	filePath, fileName string
 }
 
-// Maximal Huffman tree depth
-// Note: mainnet has patternMaxDepth 31
-const maxAllowedDepth = 50
+const (
+	// Maximal Huffman tree depth
+	// Note: mainnet has patternMaxDepth 31
+	maxAllowedDepth = 50
+
+	compressedHeaderSize = 24
+	compressedMinSize    = compressedHeaderSize + 8
+)
 
 // Tables with bitlen greater than threshold will be condensed.
 // Condensing reduces size of decompression table but leads to slower reads.
@@ -157,7 +163,6 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 		fileName: fName,
 	}
 	defer func() {
-
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("decompressing file: %s, %+v, trace: %s", compressedFilePath, rec, dbg.Stack())
 		}
@@ -173,7 +178,7 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 		return nil, err
 	}
 	d.size = stat.Size()
-	if d.size < 32 {
+	if d.size < compressedMinSize {
 		return nil, fmt.Errorf("compressed file is too short: %d", d.size)
 	}
 	d.modTime = stat.ModTime()
@@ -186,16 +191,16 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 
 	d.wordsCount = binary.BigEndian.Uint64(d.data[:8])
 	d.emptyWordsCount = binary.BigEndian.Uint64(d.data[8:16])
-	dictSize := binary.BigEndian.Uint64(d.data[16:24])
-	data := d.data[24 : 24+dictSize]
+	dictSize := binary.BigEndian.Uint64(d.data[16:compressedHeaderSize])
+	data := d.data[compressedHeaderSize : compressedHeaderSize+dictSize]
 
 	var depths []uint64
 	var patterns [][]byte
-	var i uint64
+	var dictPos uint64
 	var patternMaxDepth uint64
 
-	for i < dictSize {
-		d, ns := binary.Uvarint(data[i:])
+	for dictPos < dictSize {
+		d, ns := binary.Uvarint(data[dictPos:])
 		if d > maxAllowedDepth {
 			return nil, fmt.Errorf("dictionary is invalid: patternMaxDepth=%d", d)
 		}
@@ -203,12 +208,12 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 		if d > patternMaxDepth {
 			patternMaxDepth = d
 		}
-		i += uint64(ns)
-		l, n := binary.Uvarint(data[i:])
-		i += uint64(n)
-		patterns = append(patterns, data[i:i+l])
-		//fmt.Printf("depth = %d, pattern = [%x]\n", d, data[i:i+l])
-		i += l
+		dictPos += uint64(ns)
+		l, n := binary.Uvarint(data[dictPos:])
+		dictPos += uint64(n)
+		patterns = append(patterns, data[dictPos:dictPos+l])
+		//fmt.Printf("depth = %d, pattern = [%x]\n", d, data[dictPos:dictPos+l])
+		dictPos += l
 	}
 
 	if dictSize > 0 {
@@ -226,7 +231,7 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 	}
 
 	// read positions
-	pos := 24 + dictSize
+	pos := compressedHeaderSize + dictSize
 	dictSize = binary.BigEndian.Uint64(d.data[pos : pos+8])
 	data = d.data[pos+8 : pos+8+dictSize]
 
@@ -234,9 +239,9 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 	var poss []uint64
 	var posMaxDepth uint64
 
-	i = 0
-	for i < dictSize {
-		d, ns := binary.Uvarint(data[i:])
+	dictPos = 0
+	for dictPos < dictSize {
+		d, ns := binary.Uvarint(data[dictPos:])
 		if d > maxAllowedDepth {
 			return nil, fmt.Errorf("dictionary is invalid: posMaxDepth=%d", d)
 		}
@@ -244,9 +249,9 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 		if d > posMaxDepth {
 			posMaxDepth = d
 		}
-		i += uint64(ns)
-		pos, n := binary.Uvarint(data[i:])
-		i += uint64(n)
+		dictPos += uint64(ns)
+		pos, n := binary.Uvarint(data[dictPos:])
+		dictPos += uint64(n)
 		poss = append(poss, pos)
 	}
 
@@ -270,6 +275,13 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 		}
 	}
 	d.wordsStart = pos + 8 + dictSize
+
+	if d.Count() == 0 && dictSize == 0 && d.size > compressedMinSize {
+		d.Close()
+
+		return nil, fmt.Errorf("corrupted file: size %v but no words in it: %v",
+			fName, datasize.ByteSize(d.size).HR())
+	}
 	return d, nil
 }
 

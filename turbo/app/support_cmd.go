@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 )
@@ -61,12 +62,19 @@ var supportCommand = cli.Command{
 	Name:      "support",
 	Usage:     "Connect Erigon instance to a diagnostics system for support",
 	ArgsUsage: "--diagnostics.addr <URL for the diagnostics system> --ids <diagnostic session ids allowed to connect> --metrics.urls <http://erigon_host:metrics_port>",
-	Flags: []cli.Flag{
+	Before: func(cliCtx *cli.Context) error {
+		_, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+		if err != nil {
+			return err
+		}
+		return nil
+	},
+	Flags: append([]cli.Flag{
 		&debugURLsFlag,
 		&diagnosticsURLFlag,
 		&sessionsFlag,
 		&insecureFlag,
-	},
+	}, debug.Flags...),
 	//Category: "SUPPORT COMMANDS",
 	Description: `The support command connects a running Erigon instances to a diagnostics system specified by the URL.`,
 }

@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ledgerwatch/erigon-lib/common/disk"
+	"github.com/ledgerwatch/erigon-lib/common/mem"
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	"github.com/ledgerwatch/erigon/cl/phase1/core"
@@ -71,6 +73,10 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cfg.LogLvl), log.StderrHandler))
 	log.Info("[Phase1]", "chain", cliCtx.String(utils.ChainFlag.Name))
 	log.Info("[Phase1] Running Caplin")
+
+	// setup periodic logging and prometheus updates
+	go mem.LogMemStats(cliCtx.Context, log.Root())
+	go disk.UpdateDiskStats(cliCtx.Context, log.Root())
 
 	// Either start from genesis or a checkpoint
 	ctx, cn := context.WithCancel(cliCtx.Context)
@@ -130,5 +136,6 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		LightClientDiscoveryAddr:    cfg.Addr,
 		LightClientDiscoveryPort:    uint64(cfg.Port),
 		LightClientDiscoveryTCPPort: uint64(cfg.ServerTcpPort),
-	}, cfg.NetworkCfg, cfg.BeaconCfg, cfg.GenesisCfg, state, cfg.Dirs, rcfg, nil, nil, false, false, false, indiciesDB, blobStorage, nil)
+		BeaconRouter:                rcfg,
+	}, cfg.NetworkCfg, cfg.BeaconCfg, cfg.GenesisCfg, state, cfg.Dirs, nil, nil, false, false, false, indiciesDB, blobStorage, nil)
 }

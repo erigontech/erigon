@@ -42,9 +42,8 @@ func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint64 {
 
 // GetTotalActiveBalance return the sum of all balances within active validators.
 func (b *CachingBeaconState) GetTotalActiveBalance() uint64 {
-	if b.totalActiveBalanceCache == nil {
-		b._refreshActiveBalances()
-	}
+	b._refreshActiveBalancesIfNeeded()
+
 	return *b.totalActiveBalanceCache
 }
 
@@ -115,18 +114,15 @@ func (b *CachingBeaconState) GetBeaconProposerIndexForSlot(slot uint64) (uint64,
 
 // BaseRewardPerIncrement return base rewards for processing sync committee and duties.
 func (b *CachingBeaconState) BaseRewardPerIncrement() uint64 {
-	if b.totalActiveBalanceCache == nil {
-		b._refreshActiveBalances()
-	}
+	b._refreshActiveBalancesIfNeeded()
+
 	return b.BeaconConfig().EffectiveBalanceIncrement *
 		b.BeaconConfig().BaseRewardFactor / b.totalActiveBalanceRootCache
 }
 
 // BaseReward return base rewards for processing sync committee and duties.
 func (b *CachingBeaconState) BaseReward(index uint64) (uint64, error) {
-	if b.totalActiveBalanceCache == nil {
-		b._refreshActiveBalances()
-	}
+	b._refreshActiveBalancesIfNeeded()
 
 	effectiveBalance, err := b.ValidatorEffectiveBalance(int(index))
 	if err != nil {
@@ -288,9 +284,6 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 // GetAttestingIndicies retrieves attesting indicies for a specific attestation. however some tests will not expect the aggregation bits check.
 // thus, it is a flag now.
 func (b *CachingBeaconState) GetAttestingIndicies(attestation solid.AttestationData, aggregationBits []byte, checkBitsLength bool) ([]uint64, error) {
-	// if cached, ok := cache.LoadAttestatingIndicies(&attestation, aggregationBits); ok {
-	// 	return cached, nil
-	// }
 	committee, err := b.GetBeaconCommitee(attestation.Slot(), attestation.CommitteeIndex())
 	if err != nil {
 		return nil, err
@@ -311,7 +304,6 @@ func (b *CachingBeaconState) GetAttestingIndicies(attestation solid.AttestationD
 			attestingIndices = append(attestingIndices, member)
 		}
 	}
-	// cache.StoreAttestation(&attestation, aggregationBits, attestingIndices)
 	return attestingIndices, nil
 }
 

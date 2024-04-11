@@ -44,7 +44,7 @@ func ReadVirtualMemStats() (process.MemoryMapsStat, error) {
 		field := val.Field(i)
 
 		if field.Kind() == reflect.Uint64 {
-			field.SetUint(field.Interface().(uint64) * 1000)
+			field.SetUint(field.Interface().(uint64) * 1024)
 		}
 	}
 

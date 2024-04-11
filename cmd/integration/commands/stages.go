@@ -47,6 +47,7 @@ import (
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/p2p/sentry"
 	"github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/polygon/bor"
@@ -1601,7 +1602,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 	cfg.Prune = pm
 	cfg.BatchSize = batchSize
 	cfg.DeprecatedTxPool.Disable = true
-	cfg.Genesis = core.GenesisBlockByChainName(chain)
+	cfg.Genesis = genesis
 	if miningConfig != nil {
 		cfg.Miner = *miningConfig
 	}
@@ -1612,20 +1613,24 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 	blockReader, blockWriter := blocksIO(db, logger)
 	engine, heimdallClient := initConsensusEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, blockReader, logger)
 
+	statusDataProvider := sentry.NewStatusDataProvider(
+		db,
+		chainConfig,
+		genesisBlock,
+		chainConfig.ChainID.Uint64(),
+	)
+
 	maxBlockBroadcastPeers := func(header *types.Header) uint { return 0 }
 
 	sentryControlServer, err := sentry_multi_client.NewMultiClient(
 		db,
-		"",
 		chainConfig,
-		genesisBlock.Hash(),
-		genesisBlock.Time(),
 		engine,
-		1,
 		nil,
 		ethconfig.Defaults.Sync,
 		blockReader,
 		blockBufferSize,
+		statusDataProvider,
 		false,
 		maxBlockBroadcastPeers,
 		logger,

@@ -1717,8 +1717,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			bytesCompleted = t.Length()
 			delete(downloading, torrentName)
 		} else {
-			bytesRead := t.Stats().BytesReadData
-			bytesCompleted = bytesRead.Int64()
+			bytesCompleted = t.BytesCompleted()
 		}
 		progress := float32(float64(100) * (float64(bytesCompleted) / float64(tLen)))
 		stats.BytesCompleted += uint64(bytesCompleted)
@@ -1749,10 +1748,10 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 						if fi, err := os.Stat(filepath.Join(d.SnapDir(), t.Name())); err == nil {
 							if torrentComplete = (fi.Size() == *info.Length); torrentComplete {
-								infoRead := t.Stats().BytesReadData
-								if updateStats || infoRead.Int64() == 0 {
-									stats.BytesCompleted += uint64(*info.Length)
-								}
+								//infoRead := t.Stats().BytesReadData
+								//if updateStats || infoRead.Int64() == 0 {
+								//	stats.BytesCompleted += uint64(*info.Length)
+								//}
 								dbComplete++
 								progress = float32(100)
 							}

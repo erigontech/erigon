@@ -51,6 +51,10 @@ func (tf *TorrentFiles) delete(name string) error {
 }
 
 func (tf *TorrentFiles) Create(name string, res []byte) error {
+	if !strings.HasSuffix(name, ".torrent") {
+		name += ".torrent"
+	}
+
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
 	return tf.create(name, res)

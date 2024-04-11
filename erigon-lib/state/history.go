@@ -55,11 +55,11 @@ type History struct {
 	// Files:
 	//  .v - list of values
 	//  .vi - txNum+key -> offset in .v
-	files *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
+	dirtyFiles *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
 
 	// roFiles derivative from field `file`, but without garbage (canDelete=true, overlaps, etc...)
 	// MakeContext() using this field in zero-copy way
-	roFiles atomic.Pointer[[]ctxItem]
+	visibleFiles atomic.Pointer[[]ctxItem]
 
 	historyValsTable        string // key1+key2+txnNum -> oldValue , stores values BEFORE change
 	compressWorkers         int
@@ -84,7 +84,7 @@ func NewHistory(dir, tmpdir string, aggregationStep uint64,
 	filenameBase, indexKeysTable, indexTable, historyValsTable string,
 	compressVals bool, integrityFileExtensions []string, largeValues bool, logger log.Logger) (*History, error) {
 	h := History{
-		files:                   btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		dirtyFiles:              btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		historyValsTable:        historyValsTable,
 		compressVals:            compressVals,
 		compressWorkers:         1,
@@ -92,7 +92,7 @@ func NewHistory(dir, tmpdir string, aggregationStep uint64,
 		largeValues:             largeValues,
 		logger:                  logger,
 	}
-	h.roFiles.Store(&[]ctxItem{})
+	h.visibleFiles.Store(&[]ctxItem{})
 	var err error
 	h.InvertedIndex, err = NewInvertedIndex(dir, tmpdir, aggregationStep, filenameBase, indexKeysTable, indexTable, true, append(slices.Clone(h.integrityFileExtensions), "v"), logger)
 	if err != nil {
@@ -170,13 +170,13 @@ Loop:
 			}
 		}
 
-		if _, has := h.files.Get(newFile); has {
+		if _, has := h.dirtyFiles.Get(newFile); has {
 			continue
 		}
 
 		addNewFile := true
 		var subSets []*filesItem
-		h.files.Walk(func(items []*filesItem) bool {
+		h.dirtyFiles.Walk(func(items []*filesItem) bool {
 			for _, item := range items {
 				if item.isSubsetOf(newFile) {
 					subSets = append(subSets, item)
@@ -194,7 +194,7 @@ Loop:
 			return true
 		})
 		if addNewFile {
-			h.files.Set(newFile)
+			h.dirtyFiles.Set(newFile)
 		}
 	}
 	return garbageFiles
@@ -204,7 +204,7 @@ func (h *History) openFiles() error {
 	var totalKeys uint64
 	var err error
 	invalidFileItems := make([]*filesItem, 0)
-	h.files.Walk(func(items []*filesItem) bool {
+	h.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.decompressor != nil {
 				continue
@@ -238,7 +238,7 @@ func (h *History) openFiles() error {
 		return err
 	}
 	for _, item := range invalidFileItems {
-		h.files.Delete(item)
+		h.dirtyFiles.Delete(item)
 	}
 
 	h.reCalcRoFiles()
@@ -247,7 +247,7 @@ func (h *History) openFiles() error {
 
 func (h *History) closeWhatNotInList(fNames []string) {
 	var toDelete []*filesItem
-	h.files.Walk(func(items []*filesItem) bool {
+	h.dirtyFiles.Walk(func(items []*filesItem) bool {
 	Loop1:
 		for _, item := range items {
 			for _, protectName := range fNames {
@@ -268,7 +268,7 @@ func (h *History) closeWhatNotInList(fNames []string) {
 			item.index.Close()
 			item.index = nil
 		}
-		h.files.Delete(item)
+		h.dirtyFiles.Delete(item)
 	}
 }
 
@@ -279,7 +279,7 @@ func (h *History) Close() {
 }
 
 func (h *History) Files() (res []string) {
-	h.files.Walk(func(items []*filesItem) bool {
+	h.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.decompressor != nil {
 				res = append(res, item.decompressor.FileName())
@@ -292,7 +292,7 @@ func (h *History) Files() (res []string) {
 }
 
 func (h *History) missedIdxFiles() (l []*filesItem) {
-	h.files.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
+	h.dirtyFiles.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
 			if !dir.FileExist(filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, fromStep, toStep))) {
@@ -306,12 +306,12 @@ func (h *History) missedIdxFiles() (l []*filesItem) {
 
 // BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
 func (hc *HistoryContext) BuildOptionalMissedIndices(ctx context.Context) (err error) {
-	return hc.h.localityIndex.BuildMissedIndices(ctx, hc.ic)
+	return nil
 }
 
 func (h *History) buildVi(ctx context.Context, item *filesItem, p *background.Progress) (err error) {
 	search := &filesItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum}
-	iiItem, ok := h.InvertedIndex.files.Get(search)
+	iiItem, ok := h.InvertedIndex.dirtyFiles.Get(search)
 	if !ok {
 		return nil
 	}
@@ -782,8 +782,8 @@ func (sf HistoryFiles) Close() {
 	}
 }
 func (h *History) reCalcRoFiles() {
-	roFiles := ctxFiles(h.files)
-	h.roFiles.Store(&roFiles)
+	roFiles := calcVisibleFiles(h.dirtyFiles)
+	h.visibleFiles.Store(&roFiles)
 }
 
 // buildFiles performs potentially resource intensive operations of creating
@@ -969,7 +969,7 @@ func (h *History) integrateFiles(sf HistoryFiles, txNumFrom, txNumTo uint64) {
 	fi := newFilesItem(txNumFrom, txNumTo, h.aggregationStep)
 	fi.decompressor = sf.historyDecomp
 	fi.index = sf.historyIdx
-	h.files.Set(fi)
+	h.dirtyFiles.Set(fi)
 
 	h.reCalcRoFiles()
 }
@@ -1132,7 +1132,7 @@ func (h *History) MakeContext() *HistoryContext {
 	var hc = HistoryContext{
 		h:     h,
 		ic:    h.InvertedIndex.MakeContext(),
-		files: *h.roFiles.Load(),
+		files: *h.visibleFiles.Load(),
 
 		trace: false,
 	}
@@ -1199,7 +1199,7 @@ func (hc *HistoryContext) getFile(from, to uint64) (it ctxItem, ok bool) {
 }
 
 func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, error) {
-	exactStep1, exactStep2, lastIndexedTxNum, foundExactShard1, foundExactShard2 := hc.h.localityIndex.lookupIdxFiles(hc.ic.loc, key, txNum)
+	exactStep1, exactStep2, lastIndexedTxNum, foundExactShard1, foundExactShard2 := uint64(0), uint64(0), uint64(0), false, false
 
 	//fmt.Printf("GetNoState [%x] %d\n", key, txNum)
 	var foundTxNum uint64
@@ -2040,7 +2040,7 @@ func (hi *HistoryChangesIterDB) Next() ([]byte, []byte, error) {
 
 func (h *History) DisableReadAhead() {
 	h.InvertedIndex.DisableReadAhead()
-	h.files.Walk(func(items []*filesItem) bool {
+	h.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			item.decompressor.DisableReadAhead()
 			if item.index != nil {
@@ -2053,7 +2053,7 @@ func (h *History) DisableReadAhead() {
 
 func (h *History) EnableReadAhead() *History {
 	h.InvertedIndex.EnableReadAhead()
-	h.files.Walk(func(items []*filesItem) bool {
+	h.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			item.decompressor.EnableReadAhead()
 			if item.index != nil {
@@ -2066,7 +2066,7 @@ func (h *History) EnableReadAhead() *History {
 }
 func (h *History) EnableMadvWillNeed() *History {
 	h.InvertedIndex.EnableMadvWillNeed()
-	h.files.Walk(func(items []*filesItem) bool {
+	h.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			item.decompressor.EnableMadvWillNeed()
 			if item.index != nil {
@@ -2079,7 +2079,7 @@ func (h *History) EnableMadvWillNeed() *History {
 }
 func (h *History) EnableMadvNormalReadAhead() *History {
 	h.InvertedIndex.EnableMadvNormalReadAhead()
-	h.files.Walk(func(items []*filesItem) bool {
+	h.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			item.decompressor.EnableMadvNormal()
 			if item.index != nil {
@@ -2103,7 +2103,7 @@ type HistoryStep struct {
 // MakeSteps [0, toTxNum)
 func (h *History) MakeSteps(toTxNum uint64) []*HistoryStep {
 	var steps []*HistoryStep
-	h.InvertedIndex.files.Walk(func(items []*filesItem) bool {
+	h.InvertedIndex.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.index == nil || !item.frozen || item.startTxNum >= toTxNum {
 				continue
@@ -2124,7 +2124,7 @@ func (h *History) MakeSteps(toTxNum uint64) []*HistoryStep {
 		return true
 	})
 	i := 0
-	h.files.Walk(func(items []*filesItem) bool {
+	h.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.index == nil || !item.frozen || item.startTxNum >= toTxNum {
 				continue
