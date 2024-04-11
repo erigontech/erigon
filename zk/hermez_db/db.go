@@ -9,6 +9,7 @@ import (
 	dstypes "github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/ledgerwatch/erigon/zk/types"
 	"github.com/ledgerwatch/log/v3"
+	"encoding/json"
 )
 
 const L1VERIFICATIONS = "hermez_l1Verifications"                       // l1blockno, batchno -> l1txhash
@@ -30,6 +31,7 @@ const BLOCK_L1_BLOCK_HASHES = "block_l1_block_hashes"                  // block 
 const L1_BLOCK_HASH_GER = "l1_block_hash_ger"                          // l1 block hash -> GER
 const INTERMEDIATE_TX_STATEROOTS = "hermez_intermediate_tx_stateRoots" // l2blockno -> stateRoot
 const BATCH_WITNESSES = "hermez_batch_witnesses"                       // batch number -> witness
+const BATCH_COUNTERS = "hermez_batch_counters"                         // batch number -> counters
 
 type HermezDb struct {
 	tx kv.RwTx
@@ -74,6 +76,7 @@ func CreateHermezBuckets(tx kv.RwTx) error {
 		L1_BLOCK_HASH_GER,
 		INTERMEDIATE_TX_STATEROOTS,
 		BATCH_WITNESSES,
+		BATCH_COUNTERS,
 	}
 	for _, t := range tables {
 		if err := tx.CreateBucket(t); err != nil {
@@ -875,4 +878,26 @@ func (db *HermezDbReader) GetWitness(batchNumber uint64) ([]byte, error) {
 		return nil, err
 	}
 	return v, nil
+}
+
+func (db *HermezDb) WriteBatchCounters(batchNumber uint64, counters map[string]int) error {
+	countersJson, err := json.Marshal(counters)
+	if err != nil {
+		return err
+	}
+	return db.tx.Put(BATCH_COUNTERS, Uint64ToBytes(batchNumber), countersJson)
+}
+
+func (db *HermezDbReader) GetBatchCounters(batchNumber uint64) (map[string]int, error) {
+	v, err := db.tx.GetOne(BATCH_COUNTERS, Uint64ToBytes(batchNumber))
+	if err != nil {
+		return nil, err
+	}
+	var countersMap map[string]int
+	err = json.Unmarshal(v, &countersMap)
+	if err != nil {
+		return nil, err
+	}
+
+	return countersMap, nil
 }

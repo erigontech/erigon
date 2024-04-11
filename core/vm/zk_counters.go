@@ -64,6 +64,19 @@ func (c Counters) UsedAsString() string {
 	return res
 }
 
+func (c Counters) UsedAsMap() map[string]int {
+	return map[string]int{
+		"SHA": c[SHA].used,
+		"A":   c[A].used,
+		"B":   c[B].used,
+		"K":   c[K].used,
+		"M":   c[M].used,
+		"P":   c[P].used,
+		"S":   c[S].used,
+		"D":   c[D].used,
+	}
+}
+
 type CounterKey string
 
 var (

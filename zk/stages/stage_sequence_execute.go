@@ -349,6 +349,10 @@ LOOP:
 		return err
 	}
 	log.Info("counters consumed", "counts", counters.UsedAsString())
+	err = hermezDb.WriteBatchCounters(thisBatch, counters.UsedAsMap())
+	if err != nil {
+		return err
+	}
 
 	l1BlockHash := common.Hash{}
 	ger := common.Hash{}

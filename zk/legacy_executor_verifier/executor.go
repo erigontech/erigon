@@ -114,14 +114,16 @@ func (e *Executor) Verify(p *Payload, request *VerifierRequest, oldStateRoot com
 		return false, fmt.Errorf("failed to process stateless batch: %w", err)
 	}
 
-	counters := fmt.Sprintf("[SHA: %v]", resp.CntSha256Hashes)
-	counters += fmt.Sprintf("[A: %v]", resp.CntArithmetics)
-	counters += fmt.Sprintf("[B: %v]", resp.CntBinaries)
-	counters += fmt.Sprintf("[K: %v]", resp.CntKeccakHashes)
-	counters += fmt.Sprintf("[M: %v]", resp.CntMemAligns)
-	counters += fmt.Sprintf("[P: %v]", resp.CntPoseidonHashes)
-	counters += fmt.Sprintf("[S: %v]", resp.CntSteps)
-	counters += fmt.Sprintf("[D: %v]", resp.CntPoseidonPaddings)
+	counters := map[string]int{
+		"SHA": int(resp.CntSha256Hashes),
+		"A":   int(resp.CntArithmetics),
+		"B":   int(resp.CntBinaries),
+		"K":   int(resp.CntKeccakHashes),
+		"M":   int(resp.CntMemAligns),
+		"P":   int(resp.CntPoseidonHashes),
+		"S":   int(resp.CntSteps),
+		"D":   int(resp.CntPoseidonPaddings),
+	}
 
 	log.Info("executor result",
 		"batch", request.BatchNumber,
@@ -130,6 +132,8 @@ func (e *Executor) Verify(p *Payload, request *VerifierRequest, oldStateRoot com
 		"our-root", request.StateRoot,
 		"exec-old-root", common.BytesToHash(resp.OldStateRoot),
 		"our-old-root", oldStateRoot)
+
+	counterUndershootCheck(counters, request.Counters, request.BatchNumber)
 
 	log.Debug("Received response from executor", "grpcUrl", e.grpcUrl, "response", resp)
 
@@ -142,8 +146,8 @@ func responseCheck(resp *executor.ProcessBatchResponseV2, erigonStateRoot common
 	}
 	if resp.Error != executor.ExecutorError_EXECUTOR_ERROR_UNSPECIFIED &&
 		resp.Error != executor.ExecutorError_EXECUTOR_ERROR_NO_ERROR {
-        // prover id here is the only string field in the response and will contain info on what key failed from
-        // the provided witness
+		// prover id here is the only string field in the response and will contain info on what key failed from
+		// the provided witness
 		log.Error("executor error", "detail", resp.ProverId)
 		return false, fmt.Errorf("error in response: %s", resp.Error)
 
@@ -154,4 +158,12 @@ func responseCheck(resp *executor.ProcessBatchResponseV2, erigonStateRoot common
 	}
 
 	return true, nil
+}
+
+func counterUndershootCheck(respCounters, counters map[string]int, batchNo uint64) {
+	for k, legacy := range respCounters {
+		if counters[k] < legacy {
+			log.Warn("Counter undershoot", "counter", k, "erigon", counters[k], "legacy", legacy, "batch", batchNo)
+		}
+	}
 }

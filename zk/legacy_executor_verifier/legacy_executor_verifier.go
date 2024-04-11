@@ -29,6 +29,7 @@ type VerifierRequest struct {
 	BatchNumber uint64
 	StateRoot   common.Hash
 	CheckCount  int
+	Counters    map[string]int
 }
 
 type VerifierResponse struct {
