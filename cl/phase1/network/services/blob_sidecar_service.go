@@ -182,7 +182,6 @@ func (b *blobSidecarService) loop(ctx context.Context) {
 			// check if it has expired
 			fmt.Println(time.Since(job.creationTime), blobJobExpiry)
 			if time.Since(job.creationTime) > blobJobExpiry {
-				fmt.Println("A")
 				b.blobSidecarsScheduledForLaterExecution.Delete(key.([32]byte))
 				return true
 			}

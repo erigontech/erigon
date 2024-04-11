@@ -213,14 +213,14 @@ func (b *blockService) loop(ctx context.Context) {
 			blockJob := value.(*blockJob)
 			// check if it has expired
 			if time.Since(blockJob.creationTime) > blockJobExpiry {
-				b.blocksScheduledForLaterExecution.Delete(key)
+				b.blocksScheduledForLaterExecution.Delete(key.([32]byte))
 				return true
 			}
 			if err := b.processAndStoreBlock(ctx, blockJob.block); err != nil {
 				log.Trace("Failed to process and store block", "block", blockJob.block, "error", err)
 				return true
 			}
-			b.blocksScheduledForLaterExecution.Delete(key)
+			b.blocksScheduledForLaterExecution.Delete(key.([32]byte))
 			return true
 		})
 	}
