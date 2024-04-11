@@ -323,6 +323,98 @@ func TestUncompressed(t *testing.T) {
 	}
 }
 
+func TestDecompressor_OpenCorrupted(t *testing.T) {
+	t.Helper()
+	logger := log.New()
+	tmpDir := t.TempDir()
+
+	t.Run("uncompressed", func(t *testing.T) {
+		file := filepath.Join(tmpDir, "unc")
+		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2, log.LvlDebug, logger)
+		require.NoError(t, err)
+		defer c.Close()
+		for k, w := range loremStrings {
+			if err = c.AddUncompressedWord([]byte(fmt.Sprintf("%s %d", w, k))); err != nil {
+				t.Fatal(err)
+			}
+		}
+		err = c.Compress()
+		require.NoError(t, err)
+
+		d, err := NewDecompressor(file)
+		require.NoError(t, err)
+		d.Close()
+
+	})
+
+	t.Run("uncompressed_empty", func(t *testing.T) {
+		file := filepath.Join(tmpDir, "unc_empty")
+		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2, log.LvlDebug, logger)
+		require.NoError(t, err)
+		defer c.Close()
+		err = c.Compress()
+		require.NoError(t, err)
+
+		// this file is empty and its size will be 32 bytes, it's not corrupted
+		d, err := NewDecompressor(file)
+		require.NoError(t, err)
+		d.Close()
+	})
+
+	t.Run("compressed", func(t *testing.T) {
+		file := filepath.Join(tmpDir, "comp")
+		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2, log.LvlDebug, logger)
+		require.NoError(t, err)
+		defer c.Close()
+		for k, w := range loremStrings {
+			if err = c.AddWord([]byte(fmt.Sprintf("%s %d", w, k))); err != nil {
+				t.Fatal(err)
+			}
+		}
+		err = c.Compress()
+		require.NoError(t, err)
+
+		d, err := NewDecompressor(file)
+		require.NoError(t, err)
+		d.Close()
+
+	})
+
+	t.Run("compressed_empty", func(t *testing.T) {
+		file := filepath.Join(tmpDir, "comp_empty")
+		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2, log.LvlDebug, logger)
+		require.NoError(t, err)
+		defer c.Close()
+		err = c.Compress()
+		require.NoError(t, err)
+
+		d, err := NewDecompressor(file)
+		require.NoError(t, err)
+		d.Close()
+	})
+
+	t.Run("notExist", func(t *testing.T) {
+		file := filepath.Join(tmpDir, "comp_bad")
+		d, err := NewDecompressor(file)
+		require.Error(t, err, "file is not exist")
+		require.Nil(t, d)
+	})
+
+	t.Run("gibberish", func(t *testing.T) {
+		aux := make([]byte, rand.Intn(129))
+		_, err := rand.Read(aux)
+		require.NoError(t, err)
+
+		fpath := filepath.Join(tmpDir, "gibberish")
+		err = os.WriteFile(fpath, aux, 0644)
+		require.NoError(t, err)
+
+		d, err := NewDecompressor(fpath)
+		require.Error(t, err, "file is some garbage or smaller 32 bytes. Or we got exactly 32 zeros from /rand")
+		require.Nil(t, d)
+	})
+}
+
 const lorem = `Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et
 dolore magna aliqua Ut enim ad minim veniam quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo
 consequat Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur

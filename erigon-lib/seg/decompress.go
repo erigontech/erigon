@@ -166,6 +166,10 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("decompressing file: %s, %+v, trace: %s", compressedFilePath, rec, dbg.Stack())
 		}
+		if err != nil && d != nil {
+			d.Close()
+			d = nil
+		}
 	}()
 
 	d.f, err = os.Open(compressedFilePath)
@@ -200,19 +204,19 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 	var patternMaxDepth uint64
 
 	for dictPos < dictSize {
-		d, ns := binary.Uvarint(data[dictPos:])
-		if d > maxAllowedDepth {
-			return nil, fmt.Errorf("dictionary is invalid: patternMaxDepth=%d", d)
+		depth, ns := binary.Uvarint(data[dictPos:])
+		if depth > maxAllowedDepth {
+			return nil, fmt.Errorf("dictionary is invalid: patternMaxDepth=%depth", depth)
 		}
-		depths = append(depths, d)
-		if d > patternMaxDepth {
-			patternMaxDepth = d
+		depths = append(depths, depth)
+		if depth > patternMaxDepth {
+			patternMaxDepth = depth
 		}
 		dictPos += uint64(ns)
 		l, n := binary.Uvarint(data[dictPos:])
 		dictPos += uint64(n)
 		patterns = append(patterns, data[dictPos:dictPos+l])
-		//fmt.Printf("depth = %d, pattern = [%x]\n", d, data[dictPos:dictPos+l])
+		//fmt.Printf("depth = %d, pattern = [%x]\n", depth, data[dictPos:dictPos+l])
 		dictPos += l
 	}
 
@@ -241,13 +245,14 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 
 	dictPos = 0
 	for dictPos < dictSize {
-		d, ns := binary.Uvarint(data[dictPos:])
-		if d > maxAllowedDepth {
-			return nil, fmt.Errorf("dictionary is invalid: posMaxDepth=%d", d)
+		depth, ns := binary.Uvarint(data[dictPos:])
+		if depth > maxAllowedDepth {
+			d.Close()
+			return nil, fmt.Errorf("dictionary is invalid: posMaxDepth=%d", depth)
 		}
-		posDepths = append(posDepths, d)
-		if d > posMaxDepth {
-			posMaxDepth = d
+		posDepths = append(posDepths, depth)
+		if depth > posMaxDepth {
+			posMaxDepth = depth
 		}
 		dictPos += uint64(ns)
 		pos, n := binary.Uvarint(data[dictPos:])
@@ -277,8 +282,6 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 	d.wordsStart = pos + 8 + dictSize
 
 	if d.Count() == 0 && dictSize == 0 && d.size > compressedMinSize {
-		d.Close()
-
 		return nil, fmt.Errorf("corrupted file: size %v but no words in it: %v",
 			fName, datasize.ByteSize(d.size).HR())
 	}
