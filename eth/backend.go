@@ -245,7 +245,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	latestBlockBuiltStore := builder.NewLatestBlockBuiltStore()
 
 	if err := chainKv.Update(context.Background(), func(tx kv.RwTx) error {
-		if err = stagedsync.UpdateMetrics(tx); err != nil {
+		if err = stages.UpdateMetrics(tx); err != nil {
 			return err
 		}
 
@@ -483,17 +483,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 						logItems = append(logItems, eth.ProtocolToString[protocol], strconv.Itoa(count))
 					}
 					logger.Info("[p2p] GoodPeers", logItems...)
-
-					if err := chainKv.Update(context.Background(), func(tx kv.RwTx) error {
-						if err = stagedsync.UpdateMetrics(tx); err != nil {
-							return err
-						}
-
-						return nil
-					}); err != nil {
-						logger.Warn("Could not update metrics", "err", err)
-					}
-
 				}
 			}
 		}()
