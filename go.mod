@@ -81,7 +81,7 @@ require (
 	github.com/spf13/afero v1.9.5
 	github.com/spf13/cobra v1.8.0
 	github.com/spf13/pflag v1.0.5
-	github.com/stretchr/testify v1.8.4
+	github.com/stretchr/testify v1.9.0
 	github.com/thomaso-mirodin/intmath v0.0.0-20160323211736-5dc6d854e46e
 	github.com/tidwall/btree v1.6.0
 	github.com/ugorji/go/codec v1.1.13
