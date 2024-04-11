@@ -18,7 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/log/v3"
 
-	libcomoon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 type proposerIndexAndSlot struct {
@@ -145,7 +145,7 @@ func (b *blockService) publishBlockEvent(block *cltypes.SignedBeaconBlock) {
 	// publish block to event handler
 	b.emitter.Publish("block", map[string]any{
 		"slot":                 strconv.Itoa(int(block.Block.Slot)),
-		"block":                libcomoon.Hash(blockRoot),
+		"block":                libcommon.Hash(blockRoot),
 		"execution_optimistic": false,
 	})
 }
