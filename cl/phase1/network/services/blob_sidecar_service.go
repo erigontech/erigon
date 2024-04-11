@@ -180,6 +180,16 @@ func (b *blobSidecarService) loop(ctx context.Context) {
 				b.blobSidecarsScheduledForLaterExecution.Delete(key)
 				return true
 			}
+			blockRoot, err := job.blobSidecar.SignedBlockHeader.Header.HashSSZ()
+			if err != nil {
+				log.Debug("blob sidecar verification failed", "err", err)
+				return true
+			}
+			if _, has := b.forkchoiceStore.GetHeader(blockRoot); has {
+				b.blobSidecarsScheduledForLaterExecution.Delete(key)
+				return true
+			}
+
 			if err := b.verifyAndStoreBlobSidecar(headState, job.blobSidecar); err != nil {
 				log.Debug("blob sidecar verification failed", "err", err,
 					"slot", job.blobSidecar.SignedBlockHeader.Header.Slot)
