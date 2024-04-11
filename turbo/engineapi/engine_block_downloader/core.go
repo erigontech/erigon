@@ -77,6 +77,7 @@ func (e *EngineBlockDownloader) download(ctx context.Context, hashToDownload lib
 		e.status.Store(headerdownload.Idle)
 		return
 	}
+	memoryMutation.Rollback()
 	tmpTx.Rollback()
 	tmpDb.Close()
 	e.logger.Info("[EngineBlockDownloader] Finished downloading blocks", "from", startBlock-1, "to", endBlock)
