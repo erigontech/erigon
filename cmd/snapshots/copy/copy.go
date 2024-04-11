@@ -244,7 +244,7 @@ func remoteToLocal(ctx context.Context, rcCli *downloader.RCloneClient, src *syn
 		return fmt.Errorf("no remote downloader")
 	}
 
-	session, err := rcCli.NewSession(ctx, dst.Root, src.Src+":"+src.Root)
+	session, err := rcCli.NewSession(ctx, dst.Root, src.Src+":"+src.Root, nil)
 
 	if err != nil {
 		return err

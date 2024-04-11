@@ -119,7 +119,32 @@ type AggStats struct {
 	LocalFileHashTime          time.Duration
 }
 
+type requestHandler struct {
+	http.Transport
+}
+
+var headers = http.Header{
+	"lsjdjwcush6jbnjj3jnjscoscisoc5s": []string{"I%OSJDNFKE783DDHHJD873EFSIVNI7384R78SSJBJBCCJBC32JABBJCBJK45"},
+}
+
+func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err error) {
+	for key, value := range headers {
+		req.Header[key] = value
+	}
+
+	return r.Transport.RoundTrip(req)
+}
+
 func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosity log.Lvl, discover bool) (*Downloader, error) {
+	cfg.ClientConfig.WebTransport = &requestHandler{
+		http.Transport{
+			Proxy:       cfg.ClientConfig.HTTPProxy,
+			DialContext: cfg.ClientConfig.HTTPDialContext,
+			// I think this value was observed from some webseeds. It seems reasonable to extend it
+			// to other uses of HTTP from the client.
+			MaxConnsPerHost: 10,
+		}}
+
 	db, c, m, torrentClient, err := openClient(ctx, cfg.Dirs.Downloader, cfg.Dirs.Snap, cfg.ClientConfig)
 	if err != nil {
 		return nil, fmt.Errorf("openClient: %w", err)
@@ -1382,7 +1407,7 @@ func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *web
 
 	if !ok {
 		var err error
-		session, err = d.webDownloadClient.NewSession(d.ctx, d.SnapDir(), peerUrl)
+		session, err = d.webDownloadClient.NewSession(d.ctx, d.SnapDir(), peerUrl, headers)
 
 		if err != nil {
 			return nil, err
