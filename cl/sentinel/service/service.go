@@ -60,7 +60,11 @@ func extractSubnetIndexByGossipTopic(name string) int {
 	// get the last part of the topic
 	parts := strings.Split(name, "_")
 	// convert it to int
-	index, _ := strconv.Atoi(parts[len(parts)-1])
+	index, err := strconv.Atoi(parts[len(parts)-1])
+	if err != nil {
+		log.Warn("[Sentinel] failed to parse subnet index", "topic", name, "err", err)
+		return -1
+	}
 	return index
 }
 
