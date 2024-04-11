@@ -10,13 +10,15 @@ import (
 	"bufio"
 	"strings"
 	"errors"
+	"os"
 )
 
 type Flags struct {
-	Limit     uint
-	Step      uint
-	StepAfter uint
-	Config    string
+	Limit       uint
+	Step        uint
+	StepAfter   uint
+	Config      string
+	SeedDataDir string
 }
 
 /// EXAMPLE ///
@@ -26,20 +28,22 @@ type Flags struct {
 func main() {
 	var startingBlock, maxBlock uint
 	var step, stepAfter uint
-	var config string
+	var config, seedDataDir string
 
 	flag.UintVar(&startingBlock, "startingBlock", 1, "Starting block number")
 	flag.UintVar(&maxBlock, "maxBlock", 100, "Maximum block number to check")
 	flag.UintVar(&step, "step", 1, "Number of blocks to process each run of the stage loop")
 	flag.UintVar(&stepAfter, "stepAfter", 0, "Start incrementing by debug.step after this block")
 	flag.StringVar(&config, "config", "./hermezconfig-mainnet.yaml", "Path to the config file")
+	flag.StringVar(&seedDataDir, "seedDataDir", "", "Path to the seed data directory")
 	flag.Parse()
 
 	flags := Flags{
-		Limit:     maxBlock,
-		Step:      step,
-		StepAfter: stepAfter,
-		Config:    config,
+		Limit:       maxBlock,
+		Step:        step,
+		StepAfter:   stepAfter,
+		Config:      config,
+		SeedDataDir: seedDataDir,
 	}
 
 	fmt.Println("Starting bisect with the following configuration:")
@@ -103,6 +107,23 @@ func bisect(low, high uint, flags Flags) (uint, error) {
 func runProgram(flags Flags) (bool, uint64, error) {
 	ts := time.Now().UnixMilli()
 	dirName := "/tmp/datadirs/hermez-bisect-" + strconv.Itoa(int(ts)) + "-" + strconv.Itoa(int(flags.Limit))
+
+	if err := os.MkdirAll(dirName, 0755); err != nil {
+		fmt.Printf("Failed to create target directory %s: %v\n", dirName, err)
+		return false, 0, err
+	}
+
+	if flags.SeedDataDir != "" {
+		copyCmd := exec.Command("cp", "-a", flags.SeedDataDir, dirName)
+		fmt.Println("Executing command:", copyCmd.String())
+		if err := copyCmd.Run(); err != nil {
+			fmt.Printf("Failed to copy seed data directory: %v\n", err)
+			return false, 0, err
+		} else {
+			fmt.Println("Seed data directory copied successfully.")
+		}
+	}
+
 	cmd := exec.Command("./build/bin/cdk-erigon",
 		"--config="+flags.Config,
 		"--datadir="+dirName,
