@@ -42,10 +42,6 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli/v2"
 
-	"encoding/json"
-	"os"
-	"path"
-
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadernat"
 	"github.com/ledgerwatch/erigon/common/paths"
@@ -60,6 +56,9 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/netutil"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
+	"os"
+	"encoding/json"
+	"path"
 )
 
 // These are all the command line flags we support.
@@ -440,16 +439,6 @@ var (
 		Name:  "zkevm.sequencer-initial-fork-id",
 		Usage: "The initial fork id to launch the sequencer with",
 		Value: 8,
-	}
-	SequencerBlockSealTime = cli.StringFlag{
-		Name:  "zkevm.sequencer-block-seal-time",
-		Usage: "Block seal time. Defaults to 250ms",
-		Value: "250ms",
-	}
-	SequencerBatchSealTime = cli.StringFlag{
-		Name:  "zkevm.sequencer-batch-seal-time",
-		Usage: "Batch seal time. Defaults to 250ms",
-		Value: "250ms",
 	}
 	ExecutorUrls = cli.StringFlag{
 		Name:  "zkevm.executor-urls",

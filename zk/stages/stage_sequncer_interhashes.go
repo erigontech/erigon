@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -58,85 +59,94 @@ func SpawnSequencerInterhashesStage(
 	eridb := db2.NewEriDb(tx)
 	smt := smt.NewSMT(eridb)
 
-	for bn := s.BlockNumber + 1; bn <= to; bn++ {
-		newRoot, err := zkIncrementIntermediateHashes(s.LogPrefix(), s, tx, eridb, smt, bn, false, nil, ctx.Done())
+	// if we are at block 1 then just regenerate the whole thing otherwise take an incremental approach
+	var newRoot libcommon.Hash
+	if to == 1 {
+		newRoot, err = regenerateIntermediateHashes(s.LogPrefix(), tx, eridb, smt)
 		if err != nil {
 			return err
 		}
-
-		latest, err := rawdb.ReadBlockByNumber(tx, bn)
+	} else {
+		// todo [zkevm] we need to be prepared for multi-block batches at some point so this should really be a loop with a from/to
+		// of the previous stage state and the latest block from execution stage
+		newRoot, err = zkIncrementIntermediateHashes(s.LogPrefix(), s, tx, eridb, smt, to, false, nil, ctx.Done())
 		if err != nil {
 			return err
 		}
-		header := latest.Header()
+	}
 
-		blockNum := header.Number.Uint64()
-		preExecuteHeaderHash := header.Hash()
-		receipts, err := rawdb.ReadReceiptsByHash(tx, preExecuteHeaderHash)
+	latest, err := rawdb.ReadBlockByNumber(tx, to)
+	if err != nil {
+		return err
+	}
+	header := latest.Header()
+
+	blockNum := header.Number.Uint64()
+	preExecuteHeaderHash := header.Hash()
+	receipts, err := rawdb.ReadReceiptsByHash(tx, preExecuteHeaderHash)
+	if err != nil {
+		return err
+	}
+	senders, err := rawdb.ReadSenders(tx, preExecuteHeaderHash, header.Number.Uint64())
+	if err != nil {
+		return err
+	}
+
+	// update the details related to anything that may have changed after figuring out the root
+	header.Root = newRoot
+	header.ReceiptHash = types.DeriveSha(receipts)
+	header.Bloom = types.CreateBloom(receipts)
+	newHash := header.Hash()
+
+	rawdb.WriteHeader(tx, header)
+	if err := rawdb.WriteHeadHeaderHash(tx, newHash); err != nil {
+		return err
+	}
+	if err := rawdb.WriteCanonicalHash(tx, newHash, blockNum); err != nil {
+		return fmt.Errorf("failed to write header: %v", err)
+	}
+
+	err = rawdb.WriteReceipts(tx, blockNum, receipts)
+	if err != nil {
+		return fmt.Errorf("failed to write receipts: %v", err)
+	}
+
+	err = erigonDb.WriteBody(header.Number, newHash, latest.Transactions())
+	if err != nil {
+		return fmt.Errorf("failed to write body: %v", err)
+	}
+
+	if err := rawdb.WriteSenders(tx, newHash, blockNum, senders); err != nil {
+		return fmt.Errorf("failed to write senders: %v", err)
+	}
+
+	if err := rawdbZk.DeleteSenders(tx, preExecuteHeaderHash, blockNum); err != nil {
+		return fmt.Errorf("failed to delete senders: %v", err)
+	}
+
+	if err := rawdbZk.DeleteHeader(tx, preExecuteHeaderHash, blockNum); err != nil {
+		return fmt.Errorf("failed to delete header: %v", err)
+	}
+
+	//TODO: Consider deleting something else rather than only senders and headers
+	//TODO: Consider offloading deleting to a thread that runs in a parallel to stages
+
+	// write the new block lookup entries
+	rawdb.WriteTxLookupEntries(tx, latest)
+
+	if err := s.Update(tx, to); err != nil {
+		return err
+	}
+
+	// inform the accumulator of this new block to update the txpool and anything else that needs to know
+	// we need to do this here instead of execution as the interhashes stage will have updated the block
+	// hashes
+	if cfg.accumulator != nil {
+		txs, err := rawdb.RawTransactionsRange(tx, header.Number.Uint64(), header.Number.Uint64())
 		if err != nil {
 			return err
 		}
-		senders, err := rawdb.ReadSenders(tx, preExecuteHeaderHash, header.Number.Uint64())
-		if err != nil {
-			return err
-		}
-
-		// update the details related to anything that may have changed after figuring out the root
-		header.Root = newRoot
-		header.ReceiptHash = types.DeriveSha(receipts)
-		header.Bloom = types.CreateBloom(receipts)
-		newHash := header.Hash()
-
-		rawdb.WriteHeader(tx, header)
-		if err := rawdb.WriteHeadHeaderHash(tx, newHash); err != nil {
-			return err
-		}
-		if err := rawdb.WriteCanonicalHash(tx, newHash, blockNum); err != nil {
-			return fmt.Errorf("failed to write header: %v", err)
-		}
-
-		err = rawdb.WriteReceipts(tx, blockNum, receipts)
-		if err != nil {
-			return fmt.Errorf("failed to write receipts: %v", err)
-		}
-
-		err = erigonDb.WriteBody(header.Number, newHash, latest.Transactions())
-		if err != nil {
-			return fmt.Errorf("failed to write body: %v", err)
-		}
-
-		if err := rawdb.WriteSenders(tx, newHash, blockNum, senders); err != nil {
-			return fmt.Errorf("failed to write senders: %v", err)
-		}
-
-		if err := rawdbZk.DeleteSenders(tx, preExecuteHeaderHash, blockNum); err != nil {
-			return fmt.Errorf("failed to delete senders: %v", err)
-		}
-
-		if err := rawdbZk.DeleteHeader(tx, preExecuteHeaderHash, blockNum); err != nil {
-			return fmt.Errorf("failed to delete header: %v", err)
-		}
-
-		//TODO: Consider deleting something else rather than only senders and headers
-		//TODO: Consider offloading deleting to a thread that runs in a parallel to stages
-
-		// write the new block lookup entries
-		rawdb.WriteTxLookupEntries(tx, latest)
-
-		if err := s.Update(tx, bn); err != nil {
-			return err
-		}
-
-		// inform the accumulator of this new block to update the txpool and anything else that needs to know
-		// we need to do this here instead of execution as the interhashes stage will have updated the block
-		// hashes
-		if cfg.accumulator != nil {
-			txs, err := rawdb.RawTransactionsRange(tx, header.Number.Uint64(), header.Number.Uint64())
-			if err != nil {
-				return err
-			}
-			cfg.accumulator.StartChange(header.Number.Uint64(), header.Hash(), txs, false)
-		}
+		cfg.accumulator.StartChange(header.Number.Uint64(), header.Hash(), txs, false)
 	}
 
 	if freshTx {
