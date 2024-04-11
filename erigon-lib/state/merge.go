@@ -39,7 +39,7 @@ import (
 
 func (d *Domain) endTxNumMinimax() uint64 {
 	minimax := d.History.endTxNumMinimax()
-	if max, ok := d.files.Max(); ok {
+	if max, ok := d.dirtyFiles.Max(); ok {
 		endTxNum := max.endTxNum
 		if minimax == 0 || endTxNum < minimax {
 			minimax = endTxNum
@@ -50,7 +50,7 @@ func (d *Domain) endTxNumMinimax() uint64 {
 
 func (ii *InvertedIndex) endTxNumMinimax() uint64 {
 	var minimax uint64
-	if max, ok := ii.files.Max(); ok {
+	if max, ok := ii.dirtyFiles.Max(); ok {
 		endTxNum := max.endTxNum
 		if minimax == 0 || endTxNum < minimax {
 			minimax = endTxNum
@@ -60,7 +60,7 @@ func (ii *InvertedIndex) endTxNumMinimax() uint64 {
 }
 func (ii *InvertedIndex) endIndexedTxNumMinimax(needFrozen bool) uint64 {
 	var max uint64
-	ii.files.Walk(func(items []*filesItem) bool {
+	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.index == nil || (needFrozen && !item.frozen) {
 				continue
@@ -74,7 +74,7 @@ func (ii *InvertedIndex) endIndexedTxNumMinimax(needFrozen bool) uint64 {
 
 func (h *History) endTxNumMinimax() uint64 {
 	minimax := h.InvertedIndex.endTxNumMinimax()
-	if max, ok := h.files.Max(); ok {
+	if max, ok := h.dirtyFiles.Max(); ok {
 		endTxNum := max.endTxNum
 		if minimax == 0 || endTxNum < minimax {
 			minimax = endTxNum
@@ -84,7 +84,7 @@ func (h *History) endTxNumMinimax() uint64 {
 }
 func (h *History) endIndexedTxNumMinimax(needFrozen bool) uint64 {
 	var max uint64
-	h.files.Walk(func(items []*filesItem) bool {
+	h.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.index == nil || (needFrozen && !item.frozen) {
 				continue
@@ -144,7 +144,7 @@ func (d *Domain) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 		indexEndTxNum:     hr.indexEndTxNum,
 		index:             hr.index,
 	}
-	d.files.Walk(func(items []*filesItem) bool {
+	d.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.endTxNum > maxEndTxNum {
 				return false
@@ -176,7 +176,7 @@ func (d *Domain) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 func (ii *InvertedIndex) findMergeRange(maxEndTxNum, maxSpan uint64) (bool, uint64, uint64) {
 	var minFound bool
 	var startTxNum, endTxNum uint64
-	ii.files.Walk(func(items []*filesItem) bool {
+	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.endTxNum > maxEndTxNum {
 				continue
@@ -262,7 +262,7 @@ func (r HistoryRanges) any() bool {
 func (h *History) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges {
 	var r HistoryRanges
 	r.index, r.indexStartTxNum, r.indexEndTxNum = h.InvertedIndex.findMergeRange(maxEndTxNum, maxSpan)
-	h.files.Walk(func(items []*filesItem) bool {
+	h.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.endTxNum > maxEndTxNum {
 				continue
@@ -393,7 +393,7 @@ func (hc *HistoryContext) staticFilesInRange(r HistoryRanges) (indexFiles, histo
 			}
 
 			historyFiles = append(historyFiles, item.src)
-			idxFile, ok := hc.h.InvertedIndex.files.Get(item.src)
+			idxFile, ok := hc.h.InvertedIndex.dirtyFiles.Get(item.src)
 			if ok {
 				indexFiles = append(indexFiles, idxFile)
 			} else {
@@ -1017,12 +1017,12 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 func (d *Domain) integrateMergedFiles(valuesOuts, indexOuts, historyOuts []*filesItem, valuesIn, indexIn, historyIn *filesItem) {
 	d.History.integrateMergedFiles(indexOuts, historyOuts, indexIn, historyIn)
 	if valuesIn != nil {
-		d.files.Set(valuesIn)
+		d.dirtyFiles.Set(valuesIn)
 
 		// `kill -9` may leave some garbage
 		// but it still may be useful for merges, until we finish merge frozen file
 		if historyIn != nil && historyIn.frozen {
-			d.files.Walk(func(items []*filesItem) bool {
+			d.dirtyFiles.Walk(func(items []*filesItem) bool {
 				for _, item := range items {
 					if item.frozen || item.endTxNum > valuesIn.endTxNum {
 						continue
@@ -1037,7 +1037,7 @@ func (d *Domain) integrateMergedFiles(valuesOuts, indexOuts, historyOuts []*file
 		if out == nil {
 			panic("must not happen")
 		}
-		d.files.Delete(out)
+		d.dirtyFiles.Delete(out)
 		out.canDelete.Store(true)
 	}
 	d.reCalcRoFiles()
@@ -1045,12 +1045,12 @@ func (d *Domain) integrateMergedFiles(valuesOuts, indexOuts, historyOuts []*file
 
 func (ii *InvertedIndex) integrateMergedFiles(outs []*filesItem, in *filesItem) {
 	if in != nil {
-		ii.files.Set(in)
+		ii.dirtyFiles.Set(in)
 
 		// `kill -9` may leave some garbage
 		// but it still may be useful for merges, until we finish merge frozen file
 		if in.frozen {
-			ii.files.Walk(func(items []*filesItem) bool {
+			ii.dirtyFiles.Walk(func(items []*filesItem) bool {
 				for _, item := range items {
 					if item.frozen || item.endTxNum > in.endTxNum {
 						continue
@@ -1065,22 +1065,22 @@ func (ii *InvertedIndex) integrateMergedFiles(outs []*filesItem, in *filesItem) 
 		if out == nil {
 			panic("must not happen: " + ii.filenameBase)
 		}
-		ii.files.Delete(out)
+		ii.dirtyFiles.Delete(out)
 		out.canDelete.Store(true)
 	}
-	ii.reCalcRoFiles()
+	ii.reCalcVisibleFiles()
 }
 
 func (h *History) integrateMergedFiles(indexOuts, historyOuts []*filesItem, indexIn, historyIn *filesItem) {
 	h.InvertedIndex.integrateMergedFiles(indexOuts, indexIn)
 	//TODO: handle collision
 	if historyIn != nil {
-		h.files.Set(historyIn)
+		h.dirtyFiles.Set(historyIn)
 
 		// `kill -9` may leave some garbage
 		// but it still may be useful for merges, until we finish merge frozen file
 		if historyIn.frozen {
-			h.files.Walk(func(items []*filesItem) bool {
+			h.dirtyFiles.Walk(func(items []*filesItem) bool {
 				for _, item := range items {
 					if item.frozen || item.endTxNum > historyIn.endTxNum {
 						continue
@@ -1095,7 +1095,7 @@ func (h *History) integrateMergedFiles(indexOuts, historyOuts []*filesItem, inde
 		if out == nil {
 			panic("must not happen: " + h.filenameBase)
 		}
-		h.files.Delete(out)
+		h.dirtyFiles.Delete(out)
 		out.canDelete.Store(true)
 	}
 	h.reCalcRoFiles()
@@ -1145,7 +1145,7 @@ func (d *Domain) cleanAfterFreeze(frozenTo uint64) {
 	var outs []*filesItem
 	// `kill -9` may leave some garbage
 	// but it may be useful for merges, until merge `frozen` file
-	d.files.Walk(func(items []*filesItem) bool {
+	d.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.frozen || item.endTxNum > frozenTo {
 				continue
@@ -1159,7 +1159,7 @@ func (d *Domain) cleanAfterFreeze(frozenTo uint64) {
 		if out == nil {
 			panic("must not happen: " + d.filenameBase)
 		}
-		d.files.Delete(out)
+		d.dirtyFiles.Delete(out)
 		if out.refcount.Load() == 0 {
 			// if it has no readers (invisible even for us) - it's safe to remove file right here
 			out.closeFilesAndRemove()
@@ -1180,7 +1180,7 @@ func (h *History) cleanAfterFreeze(frozenTo uint64) {
 	var outs []*filesItem
 	// `kill -9` may leave some garbage
 	// but it may be useful for merges, until merge `frozen` file
-	h.files.Walk(func(items []*filesItem) bool {
+	h.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.frozen || item.endTxNum > frozenTo {
 				continue
@@ -1210,7 +1210,7 @@ func (h *History) cleanAfterFreeze(frozenTo uint64) {
 		if out.refcount.Load() == 0 {
 			out.closeFilesAndRemove()
 		}
-		h.files.Delete(out)
+		h.dirtyFiles.Delete(out)
 	}
 	h.InvertedIndex.cleanAfterFreeze(frozenTo)
 }
@@ -1223,7 +1223,7 @@ func (ii *InvertedIndex) cleanAfterFreeze(frozenTo uint64) {
 	var outs []*filesItem
 	// `kill -9` may leave some garbage
 	// but it may be useful for merges, until merge `frozen` file
-	ii.files.Walk(func(items []*filesItem) bool {
+	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.frozen || item.endTxNum > frozenTo {
 				continue
@@ -1242,7 +1242,7 @@ func (ii *InvertedIndex) cleanAfterFreeze(frozenTo uint64) {
 			// if it has no readers (invisible even for us) - it's safe to remove file right here
 			out.closeFilesAndRemove()
 		}
-		ii.files.Delete(out)
+		ii.dirtyFiles.Delete(out)
 	}
 }
 

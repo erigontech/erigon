@@ -23,7 +23,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -40,102 +39,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/seg"
 )
-
-// filesItem corresponding to a pair of files (.dat and .idx)
-type filesItem struct {
-	decompressor *seg.Decompressor
-	index        *recsplit.Index
-	bindex       *BtIndex
-	startTxNum   uint64
-	endTxNum     uint64
-
-	// Frozen: file of size StepsInBiggestFile. Completely immutable.
-	// Cold: file of size < StepsInBiggestFile. Immutable, but can be closed/removed after merge to bigger file.
-	// Hot: Stored in DB. Providing Snapshot-Isolation by CopyOnWrite.
-	frozen   bool         // immutable, don't need atomic
-	refcount atomic.Int32 // only for `frozen=false`
-
-	// file can be deleted in 2 cases: 1. when `refcount == 0 && canDelete == true` 2. on app startup when `file.isSubsetOfFrozenFile()`
-	// other processes (which also reading files, may have same logic)
-	canDelete atomic.Bool
-}
-
-func newFilesItem(startTxNum, endTxNum uint64, stepSize uint64) *filesItem {
-	startStep := startTxNum / stepSize
-	endStep := endTxNum / stepSize
-	frozen := endStep-startStep == StepsInBiggestFile
-	return &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
-}
-
-func (i *filesItem) isSubsetOf(j *filesItem) bool {
-	return (j.startTxNum <= i.startTxNum && i.endTxNum <= j.endTxNum) && (j.startTxNum != i.startTxNum || i.endTxNum != j.endTxNum)
-}
-
-func filesItemLess(i, j *filesItem) bool {
-	if i.endTxNum == j.endTxNum {
-		return i.startTxNum > j.startTxNum
-	}
-	return i.endTxNum < j.endTxNum
-}
-func (i *filesItem) closeFilesAndRemove() {
-	if i.decompressor != nil {
-		i.decompressor.Close()
-		// paranoic-mode on: don't delete frozen files
-		if !i.frozen {
-			if err := os.Remove(i.decompressor.FilePath()); err != nil {
-				log.Trace("close", "err", err, "file", i.decompressor.FileName())
-			}
-		}
-		i.decompressor = nil
-	}
-	if i.index != nil {
-		i.index.Close()
-		// paranoic-mode on: don't delete frozen files
-		if !i.frozen {
-			if err := os.Remove(i.index.FilePath()); err != nil {
-				log.Trace("close", "err", err, "file", i.index.FileName())
-			}
-		}
-		i.index = nil
-	}
-	if i.bindex != nil {
-		i.bindex.Close()
-		if err := os.Remove(i.bindex.FilePath()); err != nil {
-			log.Trace("close", "err", err, "file", i.bindex.FileName())
-		}
-		i.bindex = nil
-	}
-}
-
-type DomainStats struct {
-	MergesCount          uint64
-	LastCollationTook    time.Duration
-	LastPruneTook        time.Duration
-	LastPruneHistTook    time.Duration
-	LastFileBuildingTook time.Duration
-	LastCollationSize    uint64
-	LastPruneSize        uint64
-
-	HistoryQueries *atomic.Uint64
-	TotalQueries   *atomic.Uint64
-	EfSearchTime   time.Duration
-	DataSize       uint64
-	IndexSize      uint64
-	FilesCount     uint64
-}
-
-func (ds *DomainStats) Accumulate(other DomainStats) {
-	ds.HistoryQueries.Add(other.HistoryQueries.Load())
-	ds.TotalQueries.Add(other.TotalQueries.Load())
-	ds.EfSearchTime += other.EfSearchTime
-	ds.IndexSize += other.IndexSize
-	ds.DataSize += other.DataSize
-	ds.FilesCount += other.FilesCount
-}
 
 // Domain is a part of the state (examples are Accounts, Storage, Code)
 // Domain should not have any go routines or locks
@@ -150,15 +56,15 @@ type Domain struct {
 	*/
 
 	*History
-	files *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
+	dirtyFiles *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
 	// roFiles derivative from field `file`, but without garbage (canDelete=true, overlaps, etc...)
 	// MakeContext() using this field in zero-copy way
-	roFiles     atomic.Pointer[[]ctxItem]
-	defaultDc   *DomainContext
-	keysTable   string // key -> invertedStep , invertedStep = ^(txNum / aggregationStep), Needs to be table with DupSort
-	valsTable   string // key + invertedStep -> values
-	stats       DomainStats
-	mergesCount uint64
+	visibleFiles atomic.Pointer[[]ctxItem]
+	defaultDc    *DomainContext
+	keysTable    string // key -> invertedStep , invertedStep = ^(txNum / aggregationStep), Needs to be table with DupSort
+	valsTable    string // key + invertedStep -> values
+	stats        DomainStats
+	mergesCount  uint64
 
 	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
 	logger       log.Logger
@@ -168,13 +74,13 @@ func NewDomain(dir, tmpdir string, aggregationStep uint64,
 	filenameBase, keysTable, valsTable, indexKeysTable, historyValsTable, indexTable string,
 	compressVals, largeValues bool, logger log.Logger) (*Domain, error) {
 	d := &Domain{
-		keysTable: keysTable,
-		valsTable: valsTable,
-		files:     btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		stats:     DomainStats{HistoryQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
-		logger:    logger,
+		keysTable:  keysTable,
+		valsTable:  valsTable,
+		dirtyFiles: btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		stats:      DomainStats{HistoryQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
+		logger:     logger,
 	}
-	d.roFiles.Store(&[]ctxItem{})
+	d.visibleFiles.Store(&[]ctxItem{})
 
 	var err error
 	if d.History, err = NewHistory(dir, tmpdir, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, compressVals, []string{"kv"}, largeValues, logger); err != nil {
@@ -277,13 +183,13 @@ Loop:
 			}
 		}
 
-		if _, has := d.files.Get(newFile); has {
+		if _, has := d.dirtyFiles.Get(newFile); has {
 			continue
 		}
 
 		addNewFile := true
 		var subSets []*filesItem
-		d.files.Walk(func(items []*filesItem) bool {
+		d.dirtyFiles.Walk(func(items []*filesItem) bool {
 			for _, item := range items {
 				if item.isSubsetOf(newFile) {
 					subSets = append(subSets, item)
@@ -301,7 +207,7 @@ Loop:
 			return true
 		})
 		if addNewFile {
-			d.files.Set(newFile)
+			d.dirtyFiles.Set(newFile)
 		}
 	}
 	return garbageFiles
@@ -311,7 +217,7 @@ func (d *Domain) openFiles() (err error) {
 	var totalKeys uint64
 
 	invalidFileItems := make([]*filesItem, 0)
-	d.files.Walk(func(items []*filesItem) bool {
+	d.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.decompressor != nil {
 				continue
@@ -352,7 +258,7 @@ func (d *Domain) openFiles() (err error) {
 		return err
 	}
 	for _, item := range invalidFileItems {
-		d.files.Delete(item)
+		d.dirtyFiles.Delete(item)
 	}
 
 	d.reCalcRoFiles()
@@ -361,7 +267,7 @@ func (d *Domain) openFiles() (err error) {
 
 func (d *Domain) closeWhatNotInList(fNames []string) {
 	var toDelete []*filesItem
-	d.files.Walk(func(items []*filesItem) bool {
+	d.dirtyFiles.Walk(func(items []*filesItem) bool {
 	Loop1:
 		for _, item := range items {
 			for _, protectName := range fNames {
@@ -386,13 +292,13 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 			item.bindex.Close()
 			item.bindex = nil
 		}
-		d.files.Delete(item)
+		d.dirtyFiles.Delete(item)
 	}
 }
 
 func (d *Domain) reCalcRoFiles() {
-	roFiles := ctxFiles(d.files)
-	d.roFiles.Store(&roFiles)
+	roFiles := calcVisibleFiles(d.dirtyFiles)
+	d.visibleFiles.Store(&roFiles)
 }
 
 func (d *Domain) Close() {
@@ -559,30 +465,6 @@ func (ch *CursorHeap) Pop() interface{} {
 	return x
 }
 
-// filesItem corresponding to a pair of files (.dat and .idx)
-type ctxItem struct {
-	getter     *seg.Getter
-	reader     *recsplit.IndexReader
-	startTxNum uint64
-	endTxNum   uint64
-
-	i   int
-	src *filesItem
-}
-
-type ctxLocalityIdx struct {
-	reader *recsplit.IndexReader
-	bm     *bitmapdb.FixedSizeBitmaps
-	file   *ctxItem
-}
-
-func ctxItemLess(i, j ctxItem) bool { //nolint
-	if i.endTxNum == j.endTxNum {
-		return i.startTxNum > j.startTxNum
-	}
-	return i.endTxNum < j.endTxNum
-}
-
 // DomainContext allows accesing the same domain from multiple go-routines
 type DomainContext struct {
 	d       *Domain
@@ -619,7 +501,7 @@ func (dc *DomainContext) statelessBtree(i int) *BtIndex {
 }
 
 func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
-	d.History.files.Walk(func(items []*filesItem) bool {
+	d.History.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.index == nil {
 				return false
@@ -631,7 +513,7 @@ func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 		return true
 	})
 
-	d.files.Walk(func(items []*filesItem) bool {
+	d.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.index == nil {
 				return false
@@ -655,7 +537,7 @@ func (d *Domain) MakeContext() *DomainContext {
 	dc := &DomainContext{
 		d:     d,
 		hc:    d.History.MakeContext(),
-		files: *d.roFiles.Load(),
+		files: *d.visibleFiles.Load(),
 	}
 	for _, item := range dc.files {
 		if !item.src.frozen {
@@ -1049,7 +931,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 }
 
 func (d *Domain) missedIdxFiles() (l []*filesItem) {
-	d.files.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
+	d.dirtyFiles.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
 			if !dir.FileExist(filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.bt", d.filenameBase, fromStep, toStep))) {
@@ -1161,7 +1043,7 @@ func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
 	fi.decompressor = sf.valuesDecomp
 	fi.index = sf.valuesIdx
 	fi.bindex = sf.valuesBt
-	d.files.Set(fi)
+	d.dirtyFiles.Set(fi)
 
 	d.reCalcRoFiles()
 }
@@ -1571,4 +1453,30 @@ func (dc *DomainContext) IteratePrefix(prefix []byte, it func(k, v []byte)) erro
 		}
 	}
 	return nil
+}
+
+type DomainStats struct {
+	MergesCount          uint64
+	LastCollationTook    time.Duration
+	LastPruneTook        time.Duration
+	LastPruneHistTook    time.Duration
+	LastFileBuildingTook time.Duration
+	LastCollationSize    uint64
+	LastPruneSize        uint64
+
+	HistoryQueries *atomic.Uint64
+	TotalQueries   *atomic.Uint64
+	EfSearchTime   time.Duration
+	DataSize       uint64
+	IndexSize      uint64
+	FilesCount     uint64
+}
+
+func (ds *DomainStats) Accumulate(other DomainStats) {
+	ds.HistoryQueries.Add(other.HistoryQueries.Load())
+	ds.TotalQueries.Add(other.TotalQueries.Load())
+	ds.EfSearchTime += other.EfSearchTime
+	ds.IndexSize += other.IndexSize
+	ds.DataSize += other.DataSize
+	ds.FilesCount += other.FilesCount
 }
