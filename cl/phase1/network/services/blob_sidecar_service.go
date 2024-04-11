@@ -180,7 +180,9 @@ func (b *blobSidecarService) loop(ctx context.Context) {
 		b.blobSidecarsScheduledForLaterExecution.Range(func(key, value any) bool {
 			job := value.(*blobSidecarJob)
 			// check if it has expired
+			fmt.Println(time.Since(job.creationTime), blobJobExpiry)
 			if time.Since(job.creationTime) > blobJobExpiry {
+				fmt.Println("A")
 				b.blobSidecarsScheduledForLaterExecution.Delete(key.([32]byte))
 				return true
 			}
@@ -190,7 +192,7 @@ func (b *blobSidecarService) loop(ctx context.Context) {
 				return true
 			}
 			if _, has := b.forkchoiceStore.GetHeader(blockRoot); has {
-				b.blobSidecarsScheduledForLaterExecution.Delete(key)
+				b.blobSidecarsScheduledForLaterExecution.Delete(key.([32]byte))
 				return true
 			}
 
@@ -199,7 +201,7 @@ func (b *blobSidecarService) loop(ctx context.Context) {
 					"slot", job.blobSidecar.SignedBlockHeader.Header.Slot)
 				return true
 			}
-			b.blobSidecarsScheduledForLaterExecution.Delete(key)
+			b.blobSidecarsScheduledForLaterExecution.Delete(key.([32]byte))
 			return true
 		})
 	}
