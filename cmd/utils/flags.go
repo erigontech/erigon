@@ -491,6 +491,21 @@ var (
 		Usage: "Allow the sequencer to proceed pre-EIP155 transactions",
 		Value: false,
 	}
+	EffectiveGasPriceForTransfer = cli.Float64Flag{
+		Name:  "zkevm.effective-gas-price-transfer",
+		Usage: "Set the effective gas price in percentage for transfers",
+		Value: 1,
+	}
+	EffectiveGasPriceForContractInvocation = cli.Float64Flag{
+		Name:  "zkevm.effective-gas-price-contract-invocation",
+		Usage: "Set the effective gas price in percentage for contract invocation",
+		Value: 1,
+	}
+	EffectiveGasPriceForContractDeployment = cli.Float64Flag{
+		Name:  "zkevm.effective-gas-price-contract-deployment",
+		Usage: "Set the effective gas price in percentage for contract deployment",
+		Value: 1,
+	}
 	WitnessFullFlag = cli.BoolFlag{
 		Name:  "zkevm.witness-full",
 		Usage: "Enable/Diable witness full",

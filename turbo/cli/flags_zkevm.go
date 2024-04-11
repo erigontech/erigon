@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"math"
 
 	"strings"
 
@@ -46,37 +47,53 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		panic(fmt.Sprintf("could not parse sequencer batch seal time timeout value %s", sequencerBatchSealTimeVal))
 	}
 
+	effectiveGasPriceForTransferVal := ctx.Float64(utils.EffectiveGasPriceForTransfer.Name)
+	effectiveGasPriceForContractInvocationVal := ctx.Float64(utils.EffectiveGasPriceForContractInvocation.Name)
+	effectiveGasPriceForContractDeploymentVal := ctx.Float64(utils.EffectiveGasPriceForContractDeployment.Name)
+	if effectiveGasPriceForTransferVal < 0 || effectiveGasPriceForTransferVal > 1 {
+		panic("Effective gas price for transfer must be in interval [0; 1]")
+	}
+	if effectiveGasPriceForContractInvocationVal < 0 || effectiveGasPriceForContractInvocationVal > 1 {
+		panic("Effective gas price for contract invocation must be in interval [0; 1]")
+	}
+	if effectiveGasPriceForContractDeploymentVal < 0 || effectiveGasPriceForContractDeploymentVal > 1 {
+		panic("Effective gas price for contract deployment must be in interval [0; 1]")
+	}
+
 	cfg.Zk = &ethconfig.Zk{
-		L2ChainId:                  ctx.Uint64(utils.L2ChainIdFlag.Name),
-		L2RpcUrl:                   ctx.String(utils.L2RpcUrlFlag.Name),
-		L2DataStreamerUrl:          ctx.String(utils.L2DataStreamerUrlFlag.Name),
-		L2DataStreamerTimeout:      l2DataStreamTimeout,
-		L1ChainId:                  ctx.Uint64(utils.L1ChainIdFlag.Name),
-		L1RpcUrl:                   ctx.String(utils.L1RpcUrlFlag.Name),
-		AddressSequencer:           libcommon.HexToAddress(ctx.String(utils.AddressSequencerFlag.Name)),
-		AddressAdmin:               libcommon.HexToAddress(ctx.String(utils.AddressAdminFlag.Name)),
-		AddressRollup:              libcommon.HexToAddress(ctx.String(utils.AddressRollupFlag.Name)),
-		AddressZkevm:               libcommon.HexToAddress(ctx.String(utils.AddressZkevmFlag.Name)),
-		AddressGerManager:          libcommon.HexToAddress(ctx.String(utils.AddressGerManagerFlag.Name)),
-		L1RollupId:                 ctx.Uint64(utils.L1RollupIdFlag.Name),
-		L1BlockRange:               ctx.Uint64(utils.L1BlockRangeFlag.Name),
-		L1QueryDelay:               ctx.Uint64(utils.L1QueryDelayFlag.Name),
-		L1MaticContractAddress:     libcommon.HexToAddress(ctx.String(utils.L1MaticContractAddressFlag.Name)),
-		L1FirstBlock:               ctx.Uint64(utils.L1FirstBlockFlag.Name),
-		RpcRateLimits:              ctx.Int(utils.RpcRateLimitsFlag.Name),
-		DatastreamVersion:          ctx.Int(utils.DatastreamVersionFlag.Name),
-		RebuildTreeAfter:           ctx.Uint64(utils.RebuildTreeAfterFlag.Name),
-		SequencerInitialForkId:     ctx.Uint64(utils.SequencerInitialForkId.Name),
-		SequencerBlockSealTime:     sequencerBlockSealTime,
-		SequencerBatchSealTime:     sequencerBatchSealTime,
-		ExecutorUrls:               strings.Split(ctx.String(utils.ExecutorUrls.Name), ","),
-		ExecutorStrictMode:         ctx.Bool(utils.ExecutorStrictMode.Name),
-		AllowFreeTransactions:      ctx.Bool(utils.AllowFreeTransactions.Name),
-		AllowPreEIP155Transactions: ctx.Bool(utils.AllowPreEIP155Transactions.Name),
-		WitnessFull:                ctx.Bool(utils.WitnessFullFlag.Name),
-		DebugLimit:                 ctx.Uint64(utils.DebugLimit.Name),
-		DebugStep:                  ctx.Uint64(utils.DebugStep.Name),
-		DebugStepAfter:             ctx.Uint64(utils.DebugStepAfter.Name),
+		L2ChainId:                              ctx.Uint64(utils.L2ChainIdFlag.Name),
+		L2RpcUrl:                               ctx.String(utils.L2RpcUrlFlag.Name),
+		L2DataStreamerUrl:                      ctx.String(utils.L2DataStreamerUrlFlag.Name),
+		L2DataStreamerTimeout:                  l2DataStreamTimeout,
+		L1ChainId:                              ctx.Uint64(utils.L1ChainIdFlag.Name),
+		L1RpcUrl:                               ctx.String(utils.L1RpcUrlFlag.Name),
+		AddressSequencer:                       libcommon.HexToAddress(ctx.String(utils.AddressSequencerFlag.Name)),
+		AddressAdmin:                           libcommon.HexToAddress(ctx.String(utils.AddressAdminFlag.Name)),
+		AddressRollup:                          libcommon.HexToAddress(ctx.String(utils.AddressRollupFlag.Name)),
+		AddressZkevm:                           libcommon.HexToAddress(ctx.String(utils.AddressZkevmFlag.Name)),
+		AddressGerManager:                      libcommon.HexToAddress(ctx.String(utils.AddressGerManagerFlag.Name)),
+		L1RollupId:                             ctx.Uint64(utils.L1RollupIdFlag.Name),
+		L1BlockRange:                           ctx.Uint64(utils.L1BlockRangeFlag.Name),
+		L1QueryDelay:                           ctx.Uint64(utils.L1QueryDelayFlag.Name),
+		L1MaticContractAddress:                 libcommon.HexToAddress(ctx.String(utils.L1MaticContractAddressFlag.Name)),
+		L1FirstBlock:                           ctx.Uint64(utils.L1FirstBlockFlag.Name),
+		RpcRateLimits:                          ctx.Int(utils.RpcRateLimitsFlag.Name),
+		DatastreamVersion:                      ctx.Int(utils.DatastreamVersionFlag.Name),
+		RebuildTreeAfter:                       ctx.Uint64(utils.RebuildTreeAfterFlag.Name),
+		SequencerInitialForkId:                 ctx.Uint64(utils.SequencerInitialForkId.Name),
+		SequencerBlockSealTime:                 sequencerBlockSealTime,
+		SequencerBatchSealTime:                 sequencerBatchSealTime,
+		ExecutorUrls:                           strings.Split(ctx.String(utils.ExecutorUrls.Name), ","),
+		ExecutorStrictMode:                     ctx.Bool(utils.ExecutorStrictMode.Name),
+		AllowFreeTransactions:                  ctx.Bool(utils.AllowFreeTransactions.Name),
+		AllowPreEIP155Transactions:             ctx.Bool(utils.AllowPreEIP155Transactions.Name),
+		EffectiveGasPriceForTransfer:           uint8(math.Round(effectiveGasPriceForTransferVal * 255.0)),
+		EffectiveGasPriceForContractInvocation: uint8(math.Round(effectiveGasPriceForContractInvocationVal * 255.0)),
+		EffectiveGasPriceForContractDeployment: uint8(math.Round(effectiveGasPriceForContractDeploymentVal * 255.0)),
+		WitnessFull:                            ctx.Bool(utils.WitnessFullFlag.Name),
+		DebugLimit:                             ctx.Uint64(utils.DebugLimit.Name),
+		DebugStep:                              ctx.Uint64(utils.DebugStep.Name),
+		DebugStepAfter:                         ctx.Uint64(utils.DebugStepAfter.Name),
 	}
 
 	checkFlag(utils.L2ChainIdFlag.Name, cfg.Zk.L2ChainId)

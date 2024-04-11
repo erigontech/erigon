@@ -12,8 +12,10 @@ import (
 
 	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 
-	db2 "github.com/ledgerwatch/erigon/smt/pkg/db"
 	"net/url"
+
+	"github.com/ledgerwatch/erigon/core/types"
+	db2 "github.com/ledgerwatch/erigon/smt/pkg/db"
 )
 
 func TrimHexString(s string) string {
@@ -125,4 +127,17 @@ func RpcGetHighestTxNo(rpcEndpoint string) (uint64, error) {
 	}
 
 	return val, nil
+}
+
+func DeriveEffectiveGasPrice(cfg SequenceBlockCfg, tx types.Transaction) uint8 {
+	if tx.GetTo() == nil {
+		return cfg.zk.EffectiveGasPriceForContractDeployment
+	}
+
+	data := tx.GetData()
+	if len(data) != 0 {
+		return cfg.zk.EffectiveGasPriceForContractInvocation
+	}
+
+	return cfg.zk.EffectiveGasPriceForTransfer
 }
