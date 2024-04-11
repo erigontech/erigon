@@ -181,7 +181,7 @@ func (b *blobSidecarService) loop(ctx context.Context) {
 			job := value.(*blobSidecarJob)
 			// check if it has expired
 			if time.Since(job.creationTime) > blobJobExpiry {
-				b.blobSidecarsScheduledForLaterExecution.Delete(key)
+				b.blobSidecarsScheduledForLaterExecution.Delete(key.([32]byte))
 				return true
 			}
 			blockRoot, err := job.blobSidecar.SignedBlockHeader.Header.HashSSZ()
