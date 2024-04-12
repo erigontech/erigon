@@ -942,7 +942,7 @@ func AppendReceipts(tx kv.StatelessWriteTx, blockNumber uint64, receipts types.R
 	return nil
 }
 
-// TruncateReceipts removes all receipt for given block number or newer
+// TruncateReceipts removes all receipt for given block number or newer - used for Unwind
 func TruncateReceipts(db kv.RwTx, number uint64) error {
 	if err := db.ForEach(kv.Receipts, hexutility.EncodeTs(number), func(k, _ []byte) error {
 		return db.Delete(kv.Receipts, k)
