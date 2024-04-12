@@ -96,7 +96,7 @@ func NewPeerEventObserver(logger log.Logger, peerTracker PeerTracker) MessageObs
 	return func(message *sentry.PeerEvent) {
 		peerId := PeerIdFromH512(message.PeerId)
 
-		logger.Debug("[p2p.peerTracker] received new peer event", "id", message.EventId, "peerId", peerId)
+		logger.Debug("[p2p.peerEventObserver] received new peer event", "id", message.EventId, "peerId", peerId)
 
 		switch message.EventId {
 		case sentry.PeerEvent_Connect:
