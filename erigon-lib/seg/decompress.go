@@ -285,8 +285,7 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 	d.wordsStart = pos + 8 + dictSize
 
 	if d.Count() == 0 && dictSize == 0 && d.size > compressedMinSize {
-		return nil, fmt.Errorf("corrupted file: size %v but no words in it: %v",
-			fName, datasize.ByteSize(d.size).HR())
+		return nil, fmt.Errorf("corrupted file %v (%v)", fName, datasize.ByteSize(d.size).HR())
 	}
 	return d, nil
 }
