@@ -89,7 +89,6 @@ func GetStageProgress(db kv.Getter, stage SyncStage) (uint64, error) {
 }
 
 func SaveStageProgress(db kv.Putter, stage SyncStage, progress uint64) error {
-	fmt.Println("SaveStageProgress", stage, progress)
 	if m, ok := SyncMetrics[stage]; ok {
 		m.SetUint64(progress)
 	}
