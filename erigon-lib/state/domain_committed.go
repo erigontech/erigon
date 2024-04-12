@@ -72,7 +72,6 @@ type ValueMerger func(prev, current []byte) (merged []byte, err error)
 type DomainCommitted struct {
 	*Domain
 	mode         CommitmentMode
-	trace        bool
 	commTree     *btree.BTreeG[*CommitmentItem]
 	keccak       hash.Hash
 	patriciaTrie commitment.Trie
@@ -213,34 +212,6 @@ func (d *DomainCommitted) hashAndNibblizeKey(key []byte) []byte {
 		nibblized[i*2+1] = b & 0xf
 	}
 	return nibblized
-}
-
-func (d *DomainCommitted) storeCommitmentState(blockNum, txNum uint64) error {
-	var state []byte
-	var err error
-
-	switch trie := (d.patriciaTrie).(type) {
-	case *commitment.HexPatriciaHashed:
-		state, err = trie.EncodeCurrentState(nil)
-		if err != nil {
-			return err
-		}
-	default:
-		return fmt.Errorf("unsupported state storing for patricia trie type: %T", d.patriciaTrie)
-	}
-	cs := &commitmentState{txNum: txNum, trieState: state, blockNum: blockNum}
-	encoded, err := cs.Encode()
-	if err != nil {
-		return err
-	}
-
-	var stepbuf [2]byte
-	step := uint16(txNum / d.aggregationStep)
-	binary.BigEndian.PutUint16(stepbuf[:], step)
-	if err = d.Domain.Put(keyCommitmentState, stepbuf[:], encoded); err != nil {
-		return err
-	}
-	return nil
 }
 
 // Evaluates commitment for processed state. Commit=true - store trie state after evaluation
