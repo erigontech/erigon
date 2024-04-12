@@ -32,7 +32,7 @@ type blockCollector struct {
 	collector      *etl.Collector // simple etl.Collector
 	tmpdir         string
 	beaconChainCfg *clparams.BeaconChainConfig
-	s              uint64
+	size           uint64
 	logger         log.Logger
 	engine         execution_client.ExecutionEngine
 
@@ -63,14 +63,14 @@ func (b *blockCollector) AddBlock(block *cltypes.BeaconBlock) error {
 	if err != nil {
 		return err
 	}
-	b.s++
+	b.size++
 	return b.collector.Collect(key, encodedBlock)
 }
 
 func (b *blockCollector) Flush(ctx context.Context) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.s == 0 {
+	if b.size == 0 {
 		return nil
 	}
 	tmpDB := memdb.New(b.tmpdir)
@@ -125,7 +125,7 @@ func (b *blockCollector) Flush(ctx context.Context) error {
 			b.logger.Warn("failed to insert blocks", "err", err)
 		}
 	}
-	b.s = 0
+	b.size = 0
 	// Create a new collector
 	b.collector = etl.NewCollector(etlPrefix, b.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), b.logger)
 	return nil
