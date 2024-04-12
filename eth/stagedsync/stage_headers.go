@@ -335,7 +335,7 @@ Loop:
 			}
 			defer doms.Close()
 
-			allowedUnwindTo, ok, err := tx.(state.HasAggCtx).AggCtx().(*state.FilesRoTx).CanUnwindBeforeBlockNum(unwindTo, tx)
+			allowedUnwindTo, ok, err := tx.(state.HasAggCtx).AggCtx().(*state.AggregatorRoTx).CanUnwindBeforeBlockNum(unwindTo, tx)
 			if err != nil {
 				return err
 			}

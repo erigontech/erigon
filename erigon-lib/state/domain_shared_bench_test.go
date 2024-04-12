@@ -22,7 +22,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	ac := agg.BeginFilesRo()
+	ac := agg.BeginRo()
 	defer ac.Close()
 
 	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
@@ -70,7 +70,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	ac2 := agg.BeginFilesRo()
+	ac2 := agg.BeginRo()
 	defer ac2.Close()
 
 	latest := make([]byte, 8)

@@ -29,7 +29,7 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 		return nil, err
 	}
 	defer domains.Close()
-	ac := domains.AggCtx().(*state.FilesRoTx)
+	ac := domains.AggCtx().(*state.AggregatorRoTx)
 
 	// has to set this value because it will be used during domain.Commit() call.
 	// If we do not, txNum of block beginning will be used, which will cause invalid txNum on restart following commitment rebuilding

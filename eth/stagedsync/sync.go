@@ -136,7 +136,7 @@ func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error
 	if tx != nil {
 		if casted, ok := tx.(state.HasAggCtx); ok {
 			// protect from too far unwind
-			unwindPointWithCommitment, ok, err := casted.AggCtx().(*state.FilesRoTx).CanUnwindBeforeBlockNum(unwindPoint, tx)
+			unwindPointWithCommitment, ok, err := casted.AggCtx().(*state.AggregatorRoTx).CanUnwindBeforeBlockNum(unwindPoint, tx)
 			if err != nil {
 				return err
 			}

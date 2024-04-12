@@ -54,7 +54,7 @@ func (l *KvList) Swap(i, j int) {
 type SharedDomains struct {
 	noFlush int
 
-	aggCtx *FilesRoTx
+	aggCtx *AggregatorRoTx
 	sdCtx  *SharedDomainsCommitmentContext
 	roTx   kv.Tx
 	logger log.Logger
@@ -84,9 +84,9 @@ type HasAggCtx interface {
 
 func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 
-	var ac *FilesRoTx
+	var ac *AggregatorRoTx
 	if casted, ok := tx.(HasAggCtx); ok {
-		ac = casted.AggCtx().(*FilesRoTx)
+		ac = casted.AggCtx().(*AggregatorRoTx)
 	} else {
 		return nil, fmt.Errorf("type %T need AggCtx method", tx)
 	}

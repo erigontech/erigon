@@ -355,7 +355,7 @@ func doDebugKey(cliCtx *cli.Context) error {
 	defer chainDB.Close()
 	agg := openAgg(ctx, dirs, chainDB, logger)
 
-	view := agg.BeginFilesRo()
+	view := agg.BeginRo()
 	defer view.Close()
 	if err := view.DebugKey(domain, key); err != nil {
 		return err
@@ -579,7 +579,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	borSnaps.LogStat("open")
 	agg = openAgg(ctx, dirs, chainDB, logger)
 	err = chainDB.View(ctx, func(tx kv.Tx) error {
-		ac := agg.BeginFilesRo()
+		ac := agg.BeginRo()
 		defer ac.Close()
 		ac.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
 			_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
@@ -762,7 +762,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		blockReader, _ := br.IO()
-		ac := agg.BeginFilesRo()
+		ac := agg.BeginRo()
 		defer ac.Close()
 		if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), ac.Files()); err != nil {
 			return err
@@ -795,7 +795,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	logger.Info("Prune state history")
 	for hasMoreToPrune := true; hasMoreToPrune; {
 		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-			ac := agg.BeginFilesRo()
+			ac := agg.BeginRo()
 			defer ac.Close()
 
 			hasMoreToPrune, err = ac.PruneSmallBatches(ctx, 2*time.Minute, tx)
@@ -822,7 +822,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 			return err
 		}
 
-		ac := agg.BeginFilesRo()
+		ac := agg.BeginRo()
 		defer ac.Close()
 		return nil
 	}); err != nil {
@@ -835,7 +835,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 
 	if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-		ac := agg.BeginFilesRo()
+		ac := agg.BeginRo()
 		defer ac.Close()
 
 		logEvery := time.NewTicker(30 * time.Second)
@@ -852,7 +852,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 	for hasMoreToPrune := true; hasMoreToPrune; {
 		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-			ac := agg.BeginFilesRo()
+			ac := agg.BeginRo()
 			defer ac.Close()
 
 			hasMoreToPrune, err = ac.PruneSmallBatches(context.Background(), 2*time.Minute, tx)
@@ -873,14 +873,14 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 	if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 		blockReader, _ := br.IO()
-		ac := agg.BeginFilesRo()
+		ac := agg.BeginRo()
 		defer ac.Close()
 		return rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), ac.Files())
 	}); err != nil {
 		return err
 	}
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		ac := agg.BeginFilesRo()
+		ac := agg.BeginRo()
 		defer ac.Close()
 		return rawdb.WriteSnapshots(tx, blockSnaps.Files(), ac.Files())
 	}); err != nil {
