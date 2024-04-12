@@ -38,7 +38,7 @@ var SqueezeCommitmentFiles = Migration{
 			return err
 		}
 
-		ac := agg.BeginRo()
+		ac := agg.BeginFilesRo()
 		defer ac.Close()
 		if err = ac.SqueezeCommitmentFiles(); err != nil {
 			return err

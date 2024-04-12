@@ -109,7 +109,7 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	}
 	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db}
 
-	tx.aggCtx = db.agg.BeginRo()
+	tx.aggCtx = db.agg.BeginFilesRo()
 	return tx, nil
 }
 func (db *DB) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) error {
@@ -141,7 +141,7 @@ func (db *DB) BeginTemporalRw(ctx context.Context) (kv.RwTx, error) {
 	}
 	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db}
 
-	tx.aggCtx = db.agg.BeginRo()
+	tx.aggCtx = db.agg.BeginFilesRo()
 	return tx, nil
 }
 func (db *DB) BeginRw(ctx context.Context) (kv.RwTx, error) {
@@ -166,7 +166,7 @@ func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.RwTx, error) {
 	}
 	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db}
 
-	tx.aggCtx = db.agg.BeginRo()
+	tx.aggCtx = db.agg.BeginFilesRo()
 	return tx, nil
 }
 func (db *DB) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
@@ -193,7 +193,7 @@ type Tx struct {
 
 func (tx *Tx) ForceReopenAggCtx() {
 	tx.aggCtx.Close()
-	tx.aggCtx = tx.Agg().BeginRo()
+	tx.aggCtx = tx.Agg().BeginFilesRo()
 }
 
 func (tx *Tx) WarmupDB(force bool) error { return tx.MdbxTx.WarmupDB(force) }

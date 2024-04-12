@@ -40,7 +40,7 @@ func compareCurrentState(
 }
 
 func compareDomain(t *testing.T, agg *state2.AggregatorV3, db1, db2 kv.Tx, bucketName string) {
-	ac := agg.BeginRo()
+	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
 	var domain kv.Domain

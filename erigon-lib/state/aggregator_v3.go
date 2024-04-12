@@ -346,7 +346,7 @@ func (ac *AggregatorRoTx) Files() []string {
 	return res
 }
 func (a *AggregatorV3) Files() []string {
-	ac := a.BeginRo()
+	ac := a.BeginFilesRo()
 	defer ac.Close()
 	return ac.Files()
 }
@@ -359,7 +359,7 @@ func (a *AggregatorV3) BuildOptionalMissedIndicesInBackground(ctx context.Contex
 	go func() {
 		defer a.wg.Done()
 		defer a.buildingOptionalIndices.Store(false)
-		filesTx := a.BeginRo()
+		filesTx := a.BeginFilesRo()
 		defer filesTx.Close()
 		if err := filesTx.buildOptionalMissedIndices(ctx, workers); err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
@@ -375,7 +375,7 @@ func (a *AggregatorV3) BuildOptionalMissedIndices(ctx context.Context, workers i
 		return nil
 	}
 	defer a.buildingOptionalIndices.Store(false)
-	filesTx := a.BeginRo()
+	filesTx := a.BeginFilesRo()
 	defer filesTx.Close()
 	if err := filesTx.buildOptionalMissedIndices(ctx, workers); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
@@ -632,7 +632,7 @@ Loop:
 func (a *AggregatorV3) mergeLoopStep(ctx context.Context) (somethingDone bool, err error) {
 	a.logger.Debug("[agg] merge", "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].compressWorkers)
 
-	filesTx := a.BeginRo()
+	filesTx := a.BeginFilesRo()
 	defer filesTx.Close()
 	mxRunningMerges.Inc()
 	defer mxRunningMerges.Dec()
@@ -1744,7 +1744,7 @@ type AggregatorRoTx struct {
 	_leakID uint64 // set only if TRACE_AGG=true
 }
 
-func (a *AggregatorV3) BeginRo() *AggregatorRoTx {
+func (a *AggregatorV3) BeginFilesRo() *AggregatorRoTx {
 	ac := &AggregatorRoTx{
 		a:          a,
 		logAddrs:   a.logAddrs.BeginRo(),

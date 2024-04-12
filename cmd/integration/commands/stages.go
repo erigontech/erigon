@@ -730,7 +730,7 @@ func stageSnapshots(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		if err := reset2.ResetBlocks(tx, db, agg, br, bw, dirs, *chainConfig, logger); err != nil {
 			return fmt.Errorf("resetting blocks: %w", err)
 		}
-		ac := agg.BeginRo()
+		ac := agg.BeginFilesRo()
 		defer ac.Close()
 
 		domains, err := libstate.NewSharedDomains(tx, logger)
@@ -1746,7 +1746,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			_allSnapshotsSingleton.LogStat("blocks")
 			_allBorSnapshotsSingleton.LogStat("bor")
 			_ = db.View(context.Background(), func(tx kv.Tx) error {
-				ac := _aggSingleton.BeginRo()
+				ac := _aggSingleton.BeginFilesRo()
 				defer ac.Close()
 				ac.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
 					_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)

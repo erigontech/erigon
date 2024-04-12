@@ -440,7 +440,7 @@ func ExecV3(ctx context.Context,
 						if err != nil {
 							return err
 						}
-						ac := agg.BeginRo()
+						ac := agg.BeginFilesRo()
 						if _, err = ac.PruneSmallBatches(ctx, 10*time.Second, tx); err != nil { // prune part of retired data, before commit
 							return err
 						}

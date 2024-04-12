@@ -404,7 +404,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 					}
 				}
 			}
-			ac := agg.BeginRo()
+			ac := agg.BeginFilesRo()
 			defer ac.Close()
 			if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), ac.Files()); err != nil {
 				return err
@@ -433,7 +433,7 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 		if freezingCfg.Produce {
 			//TODO: initialSync maybe save files progress here
 			if cfg.blockRetire.HasNewFrozenFiles() || cfg.agg.HasNewFrozenFiles() {
-				ac := cfg.agg.BeginRo()
+				ac := cfg.agg.BeginFilesRo()
 				defer ac.Close()
 				aggFiles := ac.Files()
 				ac.Close()

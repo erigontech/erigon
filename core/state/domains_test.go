@@ -83,7 +83,7 @@ func runAggregatorOnActualDatadir(t *testing.T, datadir string) {
 		}
 	}()
 
-	domCtx := agg.BeginRo()
+	domCtx := agg.BeginFilesRo()
 	defer domCtx.Close()
 
 	domains, err := state.NewSharedDomains(tx, log.New())
