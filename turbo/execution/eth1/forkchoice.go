@@ -125,7 +125,11 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
-	defer func() { tx.Rollback() }()
+	defer func() {
+		if tx != nil {
+			tx.Rollback()
+		}
+	}()
 
 	defer e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
 
@@ -319,7 +323,11 @@ TooBigJumpStep:
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
-		defer func() { tx.Rollback() }()
+		defer func() {
+			if tx == nil {
+				tx.Rollback()
+			}
+		}()
 	}
 	finishProgressBefore, err = stages.GetStageProgress(tx, stages.Finish)
 	if err != nil {

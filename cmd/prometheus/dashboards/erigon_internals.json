@@ -999,7 +999,33 @@
           "unit": "s",
           "unitScale": true
         },
-        "overrides": []
+        "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "prune took [index]: mainnet3-1:6061",
+                  "prune took [index]: mainnet3-3:6061"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 6,
@@ -1084,7 +1110,7 @@
           "refId": "F"
         }
       ],
-      "title": "State: timings",
+      "title": "State: timins",
       "type": "timeseries"
     },
     {
@@ -1521,8 +1547,7 @@
               "options": {
                 "mode": "exclude",
                 "names": [
-                  "sync: mainnet3-1:6061",
-                  "sync: mainnet3-3:6061"
+                  "sync: mainnet3-1:6061"
                 ],
                 "prefix": "All except:",
                 "readOnly": true
@@ -1877,7 +1902,7 @@
             "spanNulls": false,
             "stacking": {
               "group": "A",
-              "mode": "normal"
+              "mode": "none"
             },
             "thresholdsStyle": {
               "mode": "off"
@@ -1908,8 +1933,8 @@
               "options": {
                 "mode": "exclude",
                 "names": [
-                  "merge: mainnet3-1:6061",
-                  "merge: mainnet3-3:6061"
+                  "cow: mainnet3-1:6061",
+                  "cow: mainnet3-3:6061"
                 ],
                 "prefix": "All except:",
                 "readOnly": true
@@ -2279,7 +2304,7 @@
             "spanNulls": false,
             "stacking": {
               "group": "A",
-              "mode": "normal"
+              "mode": "none"
             },
             "thresholdsStyle": {
               "mode": "off"
@@ -2310,7 +2335,8 @@
               "options": {
                 "mode": "exclude",
                 "names": [
-                  "exec_steps_in_db: sepolia3-1:6061"
+                  "gc_leaf: mainnet3-3:6061",
+                  "gc_leaf: mainnet3-1:6061"
                 ],
                 "prefix": "All except:",
                 "readOnly": true
@@ -2338,7 +2364,9 @@
       "id": 169,
       "options": {
         "legend": {
-          "calcs": [],
+          "calcs": [
+            "mean"
+          ],
           "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
@@ -2424,7 +2452,7 @@
             "spanNulls": false,
             "stacking": {
               "group": "A",
-              "mode": "normal"
+              "mode": "none"
             },
             "thresholdsStyle": {
               "mode": "off"
@@ -2484,7 +2512,9 @@
       "id": 150,
       "options": {
         "legend": {
-          "calcs": [],
+          "calcs": [
+            "mean"
+          ],
           "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
@@ -3056,8 +3086,8 @@
               "options": {
                 "mode": "exclude",
                 "names": [
-                  "in: mainnet3-3:6061",
-                  "in: mainnet3-1:6061"
+                  "out: mainnet3-1:6061",
+                  "out: mainnet3-3:6061"
                 ],
                 "prefix": "All except:",
                 "readOnly": true
@@ -3265,7 +3295,7 @@
             "spanNulls": false,
             "stacking": {
               "group": "A",
-              "mode": "normal"
+              "mode": "none"
             },
             "thresholdsStyle": {
               "mode": "off"
@@ -3296,8 +3326,8 @@
               "options": {
                 "mode": "exclude",
                 "names": [
-                  "write: mainnet3-1:6061",
-                  "write: mainnet3-3:6061"
+                  "read: mainnet3-3:6061",
+                  "read: mainnet3-1:6061"
                 ],
                 "prefix": "All except:",
                 "readOnly": true
@@ -3326,7 +3356,9 @@
       "links": [],
       "options": {
         "legend": {
-          "calcs": [],
+          "calcs": [
+            "mean"
+          ],
           "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
@@ -3544,7 +3576,9 @@
       "links": [],
       "options": {
         "legend": {
-          "calcs": [],
+          "calcs": [
+            "mean"
+          ],
           "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
@@ -3978,7 +4012,9 @@
       "links": [],
       "options": {
         "legend": {
-          "calcs": [],
+          "calcs": [
+            "mean"
+          ],
           "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
@@ -4036,6 +4072,7 @@
             "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
+            "axisGridShow": true,
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
@@ -4093,7 +4130,9 @@
       "links": [],
       "options": {
         "legend": {
-          "calcs": [],
+          "calcs": [
+            "mean"
+          ],
           "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
@@ -5817,7 +5856,7 @@
       "type": "timeseries"
     }
   ],
-  "refresh": "",
+  "refresh": "10s",
   "revision": 1,
   "schemaVersion": 39,
   "tags": [],
@@ -5877,14 +5916,14 @@
       },
       {
         "current": {
-          "selected": false,
+          "selected": true,
           "text": [
-            "mainnet3-3:6061",
-            "mainnet3-1:6061"
+            "mainnet3-1:6061",
+            "mainnet3-3:6061"
           ],
           "value": [
-            "mainnet3-3:6061",
-            "mainnet3-1:6061"
+            "mainnet3-1:6061",
+            "mainnet3-3:6061"
           ]
         },
         "datasource": {
@@ -5916,15 +5955,15 @@
         "auto_min": "10s",
         "current": {
           "selected": false,
-          "text": "3h",
-          "value": "3h"
+          "text": "1m",
+          "value": "1m"
         },
         "hide": 0,
         "label": "Rate Interval",
         "name": "rate_interval",
         "options": [
           {
-            "selected": false,
+            "selected": true,
             "text": "1m",
             "value": "1m"
           },
@@ -5944,7 +5983,7 @@
             "value": "1h"
           },
           {
-            "selected": true,
+            "selected": false,
             "text": "3h",
             "value": "3h"
           },
@@ -5988,7 +6027,7 @@
     ]
   },
   "time": {
-    "from": "now-1h",
+    "from": "now-30m",
     "to": "now"
   },
   "timeRangeUpdatedDuringEditOrView": false,
@@ -6019,6 +6058,6 @@
   "timezone": "",
   "title": "Erigon Internals",
   "uid": "b42a61d7-02b1-416c-8ab4-b9c864356174",
-  "version": 19,
+  "version": 11,
   "weekStart": ""
 }

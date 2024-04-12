@@ -57,9 +57,37 @@ func (tf *TorrentFiles) Create(name string, res []byte) error {
 
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
-	return tf.create(filepath.Join(tf.dir, name), res)
+	return tf.create(name, res)
 }
-func (tf *TorrentFiles) create(torrentFilePath string, res []byte) error {
+
+func (tf *TorrentFiles) CreateIfNotProhibited(name string, res []byte) (ts *torrent.TorrentSpec, prohibited, created bool, err error) {
+	tf.lock.Lock()
+	defer tf.lock.Unlock()
+	prohibited, err = tf.newDownloadsAreProhibited(name)
+	if err != nil {
+		return nil, false, false, err
+	}
+
+	if !tf.exists(name) && !prohibited {
+		err = tf.create(name, res)
+		if err != nil {
+			return nil, false, false, err
+		}
+	}
+
+	ts, err = tf.load(filepath.Join(tf.dir, name))
+	if err != nil {
+		return nil, false, false, err
+	}
+	return ts, prohibited, false, nil
+}
+
+func (tf *TorrentFiles) create(name string, res []byte) error {
+	if !strings.HasSuffix(name, ".torrent") {
+		name += ".torrent"
+	}
+	torrentFilePath := filepath.Join(tf.dir, name)
+
 	if len(res) == 0 {
 		return fmt.Errorf("try to write 0 bytes to file: %s", torrentFilePath)
 	}
@@ -132,9 +160,13 @@ const ProhibitNewDownloadsFileName = "prohibit_new_downloads.lock"
 // Erigon "download once" - means restart/upgrade/downgrade will not download files (and will be fast)
 // After "download once" - Erigon will produce and seed new files
 // Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
-func (tf *TorrentFiles) prohibitNewDownloads(t string) error {
+func (tf *TorrentFiles) ProhibitNewDownloads(t string) error {
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
+	return tf.prohibitNewDownloads(t)
+}
+
+func (tf *TorrentFiles) prohibitNewDownloads(t string) error {
 	// open or create file ProhibitNewDownloadsFileName
 	f, err := os.OpenFile(filepath.Join(tf.dir, ProhibitNewDownloadsFileName), os.O_CREATE|os.O_RDONLY, 0644)
 	if err != nil {
@@ -174,9 +206,13 @@ func (tf *TorrentFiles) prohibitNewDownloads(t string) error {
 	return f.Sync()
 }
 
-func (tf *TorrentFiles) newDownloadsAreProhibited(name string) (bool, error) {
+func (tf *TorrentFiles) NewDownloadsAreProhibited(name string) (bool, error) {
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
+	return tf.newDownloadsAreProhibited(name)
+}
+
+func (tf *TorrentFiles) newDownloadsAreProhibited(name string) (bool, error) {
 	f, err := os.OpenFile(filepath.Join(tf.dir, ProhibitNewDownloadsFileName), os.O_CREATE|os.O_APPEND|os.O_RDONLY, 0644)
 	if err != nil {
 		return false, err
@@ -185,11 +221,11 @@ func (tf *TorrentFiles) newDownloadsAreProhibited(name string) (bool, error) {
 	var prohibitedList []string
 	torrentListJsonBytes, err := io.ReadAll(f)
 	if err != nil {
-		return false, fmt.Errorf("newDownloadsAreProhibited: read file: %w", err)
+		return false, fmt.Errorf("NewDownloadsAreProhibited: read file: %w", err)
 	}
 	if len(torrentListJsonBytes) > 0 {
 		if err := json.Unmarshal(torrentListJsonBytes, &prohibitedList); err != nil {
-			return false, fmt.Errorf("newDownloadsAreProhibited: unmarshal: %w", err)
+			return false, fmt.Errorf("NewDownloadsAreProhibited: unmarshal: %w", err)
 		}
 	}
 	for _, p := range prohibitedList {
