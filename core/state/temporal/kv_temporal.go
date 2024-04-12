@@ -111,7 +111,7 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	}
 	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db}
 
-	tx.aggCtx = db.agg.MakeContext()
+	tx.aggCtx = db.agg.BeginFilesRoTx()
 	return tx, nil
 }
 func (db *DB) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) error {
@@ -143,7 +143,7 @@ func (db *DB) BeginTemporalRw(ctx context.Context) (kv.RwTx, error) {
 	}
 	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db}
 
-	tx.aggCtx = db.agg.MakeContext()
+	tx.aggCtx = db.agg.BeginFilesRoTx()
 	return tx, nil
 }
 func (db *DB) BeginRw(ctx context.Context) (kv.RwTx, error) {
@@ -168,7 +168,7 @@ func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.RwTx, error) {
 	}
 	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db}
 
-	tx.aggCtx = db.agg.MakeContext()
+	tx.aggCtx = db.agg.BeginFilesRoTx()
 	return tx, nil
 }
 func (db *DB) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
@@ -189,12 +189,12 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error 
 type Tx struct {
 	*mdbx.MdbxTx
 	db               *DB
-	aggCtx           *state.AggregatorV3Context
+	aggCtx           *state.FilesRoTx
 	resourcesToClose []kv.Closer
 }
 
-func (tx *Tx) AggCtx() *state.AggregatorV3Context { return tx.aggCtx }
-func (tx *Tx) Agg() *state.AggregatorV3           { return tx.db.agg }
+func (tx *Tx) AggCtx() *state.FilesRoTx { return tx.aggCtx }
+func (tx *Tx) Agg() *state.AggregatorV3 { return tx.db.agg }
 func (tx *Tx) Rollback() {
 	tx.autoClose()
 	tx.MdbxTx.Rollback()

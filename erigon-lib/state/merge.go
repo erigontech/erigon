@@ -203,7 +203,7 @@ func (ii *InvertedIndex) findMergeRange(maxEndTxNum, maxSpan uint64) (bool, uint
 	return minFound, startTxNum, endTxNum
 }
 
-func (ii *InvertedIndex) mergeRangesUpTo(ctx context.Context, maxTxNum, maxSpan uint64, workers int, ictx *InvertedIndexContext, ps *background.ProgressSet) (err error) {
+func (ii *InvertedIndex) mergeRangesUpTo(ctx context.Context, maxTxNum, maxSpan uint64, workers int, ictx *InvertedIndexRoTx, ps *background.ProgressSet) (err error) {
 	closeAll := true
 	for updated, startTx, endTx := ii.findMergeRange(maxSpan, maxTxNum); updated; updated, startTx, endTx = ii.findMergeRange(maxTxNum, maxSpan) {
 		staticFiles, _ := ictx.staticFilesInRange(startTx, endTx)
@@ -306,10 +306,10 @@ func (h *History) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges {
 
 // staticFilesInRange returns list of static files with txNum in specified range [startTxNum; endTxNum)
 // files are in the descending order of endTxNum
-func (dc *DomainContext) staticFilesInRange(r DomainRanges) (valuesFiles, indexFiles, historyFiles []*filesItem, startJ int) {
+func (dt *DomainRoTx) staticFilesInRange(r DomainRanges) (valuesFiles, indexFiles, historyFiles []*filesItem, startJ int) {
 	if r.index || r.history {
 		var err error
-		indexFiles, historyFiles, startJ, err = dc.hc.staticFilesInRange(HistoryRanges{
+		indexFiles, historyFiles, startJ, err = dt.ht.staticFilesInRange(HistoryRanges{
 			historyStartTxNum: r.historyStartTxNum,
 			historyEndTxNum:   r.historyEndTxNum,
 			history:           r.history,
@@ -322,7 +322,7 @@ func (dc *DomainContext) staticFilesInRange(r DomainRanges) (valuesFiles, indexF
 		}
 	}
 	if r.values {
-		for _, item := range dc.files {
+		for _, item := range dt.files {
 			if item.startTxNum < r.valuesStartTxNum {
 				startJ++
 				continue
@@ -342,14 +342,14 @@ func (dc *DomainContext) staticFilesInRange(r DomainRanges) (valuesFiles, indexF
 }
 
 // nolint
-func (d *Domain) staticFilesInRange(r DomainRanges, dc *DomainContext) (valuesFiles, indexFiles, historyFiles []*filesItem, startJ int) {
-	panic("deprecated: use DomainContext.staticFilesInRange")
+func (d *Domain) staticFilesInRange(r DomainRanges, dc *DomainRoTx) (valuesFiles, indexFiles, historyFiles []*filesItem, startJ int) {
+	panic("deprecated: use DomainRoTx.staticFilesInRange")
 }
-func (ic *InvertedIndexContext) staticFilesInRange(startTxNum, endTxNum uint64) ([]*filesItem, int) {
-	files := make([]*filesItem, 0, len(ic.files))
+func (iit *InvertedIndexRoTx) staticFilesInRange(startTxNum, endTxNum uint64) ([]*filesItem, int) {
+	files := make([]*filesItem, 0, len(iit.files))
 	var startJ int
 
-	for _, item := range ic.files {
+	for _, item := range iit.files {
 		if item.startTxNum < startTxNum {
 			startJ++
 			continue
@@ -369,21 +369,21 @@ func (ic *InvertedIndexContext) staticFilesInRange(startTxNum, endTxNum uint64) 
 }
 
 // nolint
-func (ii *InvertedIndex) staticFilesInRange(startTxNum, endTxNum uint64, ic *InvertedIndexContext) ([]*filesItem, int) {
-	panic("deprecated: use InvertedIndexContext.staticFilesInRange")
+func (ii *InvertedIndex) staticFilesInRange(startTxNum, endTxNum uint64, ic *InvertedIndexRoTx) ([]*filesItem, int) {
+	panic("deprecated: use InvertedIndexRoTx.staticFilesInRange")
 }
 
-func (hc *HistoryContext) staticFilesInRange(r HistoryRanges) (indexFiles, historyFiles []*filesItem, startJ int, err error) {
+func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyFiles []*filesItem, startJ int, err error) {
 	if !r.history && r.index {
-		indexFiles, startJ = hc.ic.staticFilesInRange(r.indexStartTxNum, r.indexEndTxNum)
+		indexFiles, startJ = ht.iit.staticFilesInRange(r.indexStartTxNum, r.indexEndTxNum)
 		return indexFiles, historyFiles, startJ, nil
 	}
 
 	if r.history {
-		// Get history files from HistoryContext (no "garbage/overalps"), but index files not from InvertedIndexContext
-		// because index files may already be merged (before `kill -9`) and it means not visible in InvertedIndexContext
+		// Get history files from HistoryRoTx (no "garbage/overalps"), but index files not from InvertedIndexRoTx
+		// because index files may already be merged (before `kill -9`) and it means not visible in InvertedIndexRoTx
 		startJ = 0
-		for _, item := range hc.files {
+		for _, item := range ht.files {
 			if item.startTxNum < r.historyStartTxNum {
 				startJ++
 				continue
@@ -393,11 +393,11 @@ func (hc *HistoryContext) staticFilesInRange(r HistoryRanges) (indexFiles, histo
 			}
 
 			historyFiles = append(historyFiles, item.src)
-			idxFile, ok := hc.h.InvertedIndex.dirtyFiles.Get(item.src)
+			idxFile, ok := ht.h.InvertedIndex.dirtyFiles.Get(item.src)
 			if ok {
 				indexFiles = append(indexFiles, idxFile)
 			} else {
-				walkErr := fmt.Errorf("History.staticFilesInRange: required file not found: %s.%d-%d.efi", hc.h.filenameBase, item.startTxNum/hc.h.aggregationStep, item.endTxNum/hc.h.aggregationStep)
+				walkErr := fmt.Errorf("History.staticFilesInRange: required file not found: %s.%d-%d.efi", ht.h.filenameBase, item.startTxNum/ht.h.aggregationStep, item.endTxNum/ht.h.aggregationStep)
 				return nil, nil, 0, walkErr
 			}
 		}
@@ -428,8 +428,8 @@ func (hc *HistoryContext) staticFilesInRange(r HistoryRanges) (indexFiles, histo
 }
 
 // nolint
-func (h *History) staticFilesInRange(r HistoryRanges, hc *HistoryContext) (indexFiles, historyFiles []*filesItem, startJ int, err error) {
-	panic("deprecated: use HistoryContext.staticFilesInRange")
+func (h *History) staticFilesInRange(r HistoryRanges, hc *HistoryRoTx) (indexFiles, historyFiles []*filesItem, startJ int, err error) {
+	panic("deprecated: use HistoryRoTx.staticFilesInRange")
 }
 
 func mergeEfs(preval, val, buf []byte) ([]byte, error) {
@@ -1102,36 +1102,36 @@ func (h *History) integrateMergedFiles(indexOuts, historyOuts []*filesItem, inde
 }
 
 // nolint
-func (dc *DomainContext) frozenTo() uint64 {
-	if len(dc.files) == 0 {
+func (dt *DomainRoTx) frozenTo() uint64 {
+	if len(dt.files) == 0 {
 		return 0
 	}
-	for i := len(dc.files) - 1; i >= 0; i-- {
-		if dc.files[i].src.frozen {
-			return cmp.Min(dc.files[i].endTxNum, dc.hc.frozenTo())
+	for i := len(dt.files) - 1; i >= 0; i-- {
+		if dt.files[i].src.frozen {
+			return cmp.Min(dt.files[i].endTxNum, dt.ht.frozenTo())
 		}
 	}
 	return 0
 }
 
-func (hc *HistoryContext) frozenTo() uint64 {
-	if len(hc.files) == 0 {
+func (ht *HistoryRoTx) frozenTo() uint64 {
+	if len(ht.files) == 0 {
 		return 0
 	}
-	for i := len(hc.files) - 1; i >= 0; i-- {
-		if hc.files[i].src.frozen {
-			return cmp.Min(hc.files[i].endTxNum, hc.ic.frozenTo())
+	for i := len(ht.files) - 1; i >= 0; i-- {
+		if ht.files[i].src.frozen {
+			return cmp.Min(ht.files[i].endTxNum, ht.iit.frozenTo())
 		}
 	}
 	return 0
 }
-func (ic *InvertedIndexContext) frozenTo() uint64 {
-	if len(ic.files) == 0 {
+func (iit *InvertedIndexRoTx) frozenTo() uint64 {
+	if len(iit.files) == 0 {
 		return 0
 	}
-	for i := len(ic.files) - 1; i >= 0; i-- {
-		if ic.files[i].src.frozen {
-			return ic.files[i].endTxNum
+	for i := len(iit.files) - 1; i >= 0; i-- {
+		if iit.files[i].src.frozen {
+			return iit.files[i].endTxNum
 		}
 	}
 	return 0

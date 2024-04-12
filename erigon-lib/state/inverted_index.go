@@ -54,7 +54,7 @@ type InvertedIndex struct {
 	dirtyFiles *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
 
 	// roFiles derivative from field `file`, but without garbage (canDelete=true, overlaps, etc...)
-	// MakeContext() using this field in zero-copy way
+	// BeginFilesRoTx() using this field in zero-copy way
 	visibleFiles atomic.Pointer[[]ctxItem]
 
 	indexKeysTable  string // txnNum_u64 -> key (k+auto_increment)
@@ -509,8 +509,8 @@ func (ii *invertedIndexWAL) add(key, indexKey []byte) error {
 	return nil
 }
 
-func (ii *InvertedIndex) MakeContext() *InvertedIndexContext {
-	var ic = InvertedIndexContext{
+func (ii *InvertedIndex) BeginFilesRoTx() *InvertedIndexRoTx {
+	var ic = InvertedIndexRoTx{
 		ii:    ii,
 		files: *ii.visibleFiles.Load(),
 	}
@@ -521,8 +521,8 @@ func (ii *InvertedIndex) MakeContext() *InvertedIndexContext {
 	}
 	return &ic
 }
-func (ic *InvertedIndexContext) Close() {
-	for _, item := range ic.files {
+func (iit *InvertedIndexRoTx) Close() {
+	for _, item := range iit.files {
 		if item.src.frozen {
 			continue
 		}
@@ -533,43 +533,43 @@ func (ic *InvertedIndexContext) Close() {
 		}
 	}
 
-	for _, r := range ic.readers {
+	for _, r := range iit.readers {
 		r.Close()
 	}
 }
 
-type InvertedIndexContext struct {
+type InvertedIndexRoTx struct {
 	ii      *InvertedIndex
 	files   []ctxItem // have no garbage (overlaps, etc...)
 	getters []*seg.Getter
 	readers []*recsplit.IndexReader
 }
 
-func (ic *InvertedIndexContext) statelessGetter(i int) *seg.Getter {
-	if ic.getters == nil {
-		ic.getters = make([]*seg.Getter, len(ic.files))
+func (iit *InvertedIndexRoTx) statelessGetter(i int) *seg.Getter {
+	if iit.getters == nil {
+		iit.getters = make([]*seg.Getter, len(iit.files))
 	}
-	r := ic.getters[i]
+	r := iit.getters[i]
 	if r == nil {
-		r = ic.files[i].src.decompressor.MakeGetter()
-		ic.getters[i] = r
+		r = iit.files[i].src.decompressor.MakeGetter()
+		iit.getters[i] = r
 	}
 	return r
 }
-func (ic *InvertedIndexContext) statelessIdxReader(i int) *recsplit.IndexReader {
-	if ic.readers == nil {
-		ic.readers = make([]*recsplit.IndexReader, len(ic.files))
+func (iit *InvertedIndexRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
+	if iit.readers == nil {
+		iit.readers = make([]*recsplit.IndexReader, len(iit.files))
 	}
-	r := ic.readers[i]
+	r := iit.readers[i]
 	if r == nil {
-		r = ic.files[i].src.index.GetReaderFromPool()
-		ic.readers[i] = r
+		r = iit.files[i].src.index.GetReaderFromPool()
+		iit.readers[i] = r
 	}
 	return r
 }
 
-func (ic *InvertedIndexContext) getFile(from, to uint64) (it ctxItem, ok bool) {
-	for _, item := range ic.files {
+func (iit *InvertedIndexRoTx) getFile(from, to uint64) (it ctxItem, ok bool) {
+	for _, item := range iit.files {
 		if item.startTxNum == from && item.endTxNum == to {
 			return item, true
 		}
@@ -581,27 +581,27 @@ func (ic *InvertedIndexContext) getFile(from, to uint64) (it ctxItem, ok bool) {
 // is to be used in public API, therefore it relies on read-only transaction
 // so that iteration can be done even when the inverted index is being updated.
 // [startTxNum; endNumTx)
-func (ic *InvertedIndexContext) IdxRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.U64, error) {
-	frozenIt, err := ic.iterateRangeFrozen(key, startTxNum, endTxNum, asc, limit)
+func (iit *InvertedIndexRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.U64, error) {
+	frozenIt, err := iit.iterateRangeFrozen(key, startTxNum, endTxNum, asc, limit)
 	if err != nil {
 		return nil, err
 	}
-	recentIt, err := ic.recentIterateRange(key, startTxNum, endTxNum, asc, limit, roTx)
+	recentIt, err := iit.recentIterateRange(key, startTxNum, endTxNum, asc, limit, roTx)
 	if err != nil {
 		return nil, err
 	}
 	return iter.Union[uint64](frozenIt, recentIt, asc, limit), nil
 }
 
-func (ic *InvertedIndexContext) recentIterateRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.U64, error) {
+func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.U64, error) {
 	//optimization: return empty pre-allocated iterator if range is frozen
 	if asc {
-		isFrozenRange := len(ic.files) > 0 && endTxNum >= 0 && ic.files[len(ic.files)-1].endTxNum >= uint64(endTxNum)
+		isFrozenRange := len(iit.files) > 0 && endTxNum >= 0 && iit.files[len(iit.files)-1].endTxNum >= uint64(endTxNum)
 		if isFrozenRange {
 			return iter.EmptyU64, nil
 		}
 	} else {
-		isFrozenRange := len(ic.files) > 0 && startTxNum >= 0 && ic.files[len(ic.files)-1].endTxNum >= uint64(startTxNum)
+		isFrozenRange := len(iit.files) > 0 && startTxNum >= 0 && iit.files[len(iit.files)-1].endTxNum >= uint64(startTxNum)
 		if isFrozenRange {
 			return iter.EmptyU64, nil
 		}
@@ -619,7 +619,7 @@ func (ic *InvertedIndexContext) recentIterateRange(key []byte, startTxNum, endTx
 		binary.BigEndian.PutUint64(to, uint64(endTxNum))
 	}
 
-	it, err := roTx.RangeDupSort(ic.ii.indexTable, key, from, to, asc, limit)
+	it, err := roTx.RangeDupSort(iit.ii.indexTable, key, from, to, asc, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -631,7 +631,7 @@ func (ic *InvertedIndexContext) recentIterateRange(key []byte, startTxNum, endTx
 // IdxRange is to be used in public API, therefore it relies on read-only transaction
 // so that iteration can be done even when the inverted index is being updated.
 // [startTxNum; endNumTx)
-func (ic *InvertedIndexContext) iterateRangeFrozen(key []byte, startTxNum, endTxNum int, asc order.By, limit int) (*FrozenInvertedIdxIter, error) {
+func (iit *InvertedIndexRoTx) iterateRangeFrozen(key []byte, startTxNum, endTxNum int, asc order.By, limit int) (*FrozenInvertedIdxIter, error) {
 	if asc && (startTxNum >= 0 && endTxNum >= 0) && startTxNum > endTxNum {
 		return nil, fmt.Errorf("startTxNum=%d epected to be lower than endTxNum=%d", startTxNum, endTxNum)
 	}
@@ -643,36 +643,36 @@ func (ic *InvertedIndexContext) iterateRangeFrozen(key []byte, startTxNum, endTx
 		key:         key,
 		startTxNum:  startTxNum,
 		endTxNum:    endTxNum,
-		indexTable:  ic.ii.indexTable,
+		indexTable:  iit.ii.indexTable,
 		orderAscend: asc,
 		limit:       limit,
 		ef:          eliasfano32.NewEliasFano(1, 1),
 	}
 	if asc {
-		for i := len(ic.files) - 1; i >= 0; i-- {
+		for i := len(iit.files) - 1; i >= 0; i-- {
 			// [from,to) && from < to
-			if endTxNum >= 0 && int(ic.files[i].startTxNum) >= endTxNum {
+			if endTxNum >= 0 && int(iit.files[i].startTxNum) >= endTxNum {
 				continue
 			}
-			if startTxNum >= 0 && ic.files[i].endTxNum <= uint64(startTxNum) {
+			if startTxNum >= 0 && iit.files[i].endTxNum <= uint64(startTxNum) {
 				break
 			}
-			it.stack = append(it.stack, ic.files[i])
+			it.stack = append(it.stack, iit.files[i])
 			it.stack[len(it.stack)-1].getter = it.stack[len(it.stack)-1].src.decompressor.MakeGetter()
 			it.stack[len(it.stack)-1].reader = it.stack[len(it.stack)-1].src.index.GetReaderFromPool()
 			it.hasNext = true
 		}
 	} else {
-		for i := 0; i < len(ic.files); i++ {
+		for i := 0; i < len(iit.files); i++ {
 			// [from,to) && from > to
-			if endTxNum >= 0 && int(ic.files[i].endTxNum) <= endTxNum {
+			if endTxNum >= 0 && int(iit.files[i].endTxNum) <= endTxNum {
 				continue
 			}
-			if startTxNum >= 0 && ic.files[i].startTxNum > uint64(startTxNum) {
+			if startTxNum >= 0 && iit.files[i].startTxNum > uint64(startTxNum) {
 				break
 			}
 
-			it.stack = append(it.stack, ic.files[i])
+			it.stack = append(it.stack, iit.files[i])
 			it.stack[len(it.stack)-1].getter = it.stack[len(it.stack)-1].src.decompressor.MakeGetter()
 			it.stack[len(it.stack)-1].reader = it.stack[len(it.stack)-1].src.index.GetReaderFromPool()
 			it.hasNext = true
@@ -1064,12 +1064,12 @@ func (it *InvertedIterator1) Next(keyBuf []byte) []byte {
 	return result
 }
 
-func (ic *InvertedIndexContext) IterateChangedKeys(startTxNum, endTxNum uint64, roTx kv.Tx) InvertedIterator1 {
+func (iit *InvertedIndexRoTx) IterateChangedKeys(startTxNum, endTxNum uint64, roTx kv.Tx) InvertedIterator1 {
 	var ii1 InvertedIterator1
 	ii1.hasNextInDb = true
 	ii1.roTx = roTx
-	ii1.indexTable = ic.ii.indexTable
-	for _, item := range ic.files {
+	ii1.indexTable = iit.ii.indexTable
+	for _, item := range iit.files {
 		if item.endTxNum <= startTxNum {
 			continue
 		}

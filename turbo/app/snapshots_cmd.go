@@ -389,7 +389,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	borSnaps.LogStat("open")
 	agg = openAgg(ctx, dirs, chainDB, logger)
 	err = chainDB.View(ctx, func(tx kv.Tx) error {
-		ac := agg.MakeContext()
+		ac := agg.BeginFilesRoTx()
 		defer ac.Close()
 		//ac.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
 		//	_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
