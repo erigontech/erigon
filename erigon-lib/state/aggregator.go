@@ -94,6 +94,39 @@ func (sf SelectedStaticFiles) Close() {
 	}
 }
 
+type MergedFiles struct {
+	accounts                      *filesItem
+	accountsIdx, accountsHist     *filesItem
+	storage                       *filesItem
+	storageIdx, storageHist       *filesItem
+	code                          *filesItem
+	codeIdx, codeHist             *filesItem
+	commitment                    *filesItem
+	commitmentIdx, commitmentHist *filesItem
+}
+
+func (mf MergedFiles) Close() {
+	for _, item := range []*filesItem{
+		mf.accounts, mf.accountsIdx, mf.accountsHist,
+		mf.storage, mf.storageIdx, mf.storageHist,
+		mf.code, mf.codeIdx, mf.codeHist,
+		mf.commitment, mf.commitmentIdx, mf.commitmentHist,
+		//mf.logAddrs, mf.logTopics, mf.tracesFrom, mf.tracesTo,
+	} {
+		if item != nil {
+			if item.decompressor != nil {
+				item.decompressor.Close()
+			}
+			if item.decompressor != nil {
+				item.index.Close()
+			}
+			if item.bindex != nil {
+				item.bindex.Close()
+			}
+		}
+	}
+}
+
 func DecodeAccountBytes(enc []byte) (nonce uint64, balance *uint256.Int, hash []byte) {
 	balance = new(uint256.Int)
 
