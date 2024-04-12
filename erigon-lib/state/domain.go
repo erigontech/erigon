@@ -801,7 +801,7 @@ func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 	return
 }
 
-func (d *Domain) BeginRo() *DomainRoTx {
+func (d *Domain) BeginFilesRo() *DomainRoTx {
 	files := *d.visibleFiles.Load()
 	for i := 0; i < len(files); i++ {
 		if !files[i].src.frozen {
@@ -810,7 +810,7 @@ func (d *Domain) BeginRo() *DomainRoTx {
 	}
 	return &DomainRoTx{
 		d:     d,
-		ht:    d.History.BeginRo(),
+		ht:    d.History.BeginFilesRo(),
 		files: files,
 	}
 }

@@ -978,7 +978,7 @@ type HistoryRoTx struct {
 	_bufTs []byte
 }
 
-func (h *History) BeginRo() *HistoryRoTx {
+func (h *History) BeginFilesRo() *HistoryRoTx {
 	files := *h.visibleFiles.Load()
 	for i := 0; i < len(files); i++ {
 		if !files[i].src.frozen {
@@ -988,7 +988,7 @@ func (h *History) BeginRo() *HistoryRoTx {
 
 	return &HistoryRoTx{
 		h:     h,
-		iit:   h.InvertedIndex.BeginRo(),
+		iit:   h.InvertedIndex.BeginFilesRo(),
 		files: files,
 		trace: false,
 	}

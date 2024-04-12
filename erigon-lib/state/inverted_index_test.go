@@ -69,7 +69,7 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	ic := ii.BeginRo()
+	ic := ii.BeginFilesRo()
 	defer ic.Close()
 	writer := ic.NewWriter()
 	defer writer.close()
@@ -153,7 +153,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 			tx.Rollback()
 		}
 	}()
-	ic := ii.BeginRo()
+	ic := ii.BeginFilesRo()
 	defer ic.Close()
 	writer := ic.NewWriter()
 	defer writer.close()
@@ -195,7 +195,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 		require.Equal(t, "0.1", fmt.Sprintf("%.1f", from))
 		require.Equal(t, "0.4", fmt.Sprintf("%.1f", to))
 
-		ic = ii.BeginRo()
+		ic = ii.BeginFilesRo()
 		defer ic.Close()
 
 		_, err = ic.Prune(ctx, tx, 0, 16, math.MaxUint64, logEvery, false, false, nil)
@@ -237,7 +237,7 @@ func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	ic := ii.BeginRo()
+	ic := ii.BeginFilesRo()
 	defer ic.Close()
 	writer := ic.NewWriter()
 	defer writer.close()
@@ -277,7 +277,7 @@ func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log
 func checkRanges(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 	t.Helper()
 	ctx := context.Background()
-	ic := ii.BeginRo()
+	ic := ii.BeginFilesRo()
 	defer ic.Close()
 
 	// Check the iterator ranges first without roTx
@@ -373,7 +373,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			sf, err := ii.buildFiles(ctx, step, bs, background.NewProgressSet())
 			require.NoError(tb, err)
 			ii.integrateFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
-			ic := ii.BeginRo()
+			ic := ii.BeginFilesRo()
 			defer ic.Close()
 			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, false, nil)
 			require.NoError(tb, err)
@@ -384,7 +384,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 
 			for {
 				if stop := func() bool {
-					ic := ii.BeginRo()
+					ic := ii.BeginFilesRo()
 					defer ic.Close()
 					found, startTxNum, endTxNum = ic.findMergeRange(maxEndTxNum, maxSpan)
 					if !found {
@@ -424,7 +424,7 @@ func TestInvIndexRanges(t *testing.T) {
 			sf, err := ii.buildFiles(ctx, step, bs, background.NewProgressSet())
 			require.NoError(t, err)
 			ii.integrateFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
-			ic := ii.BeginRo()
+			ic := ii.BeginFilesRo()
 			defer ic.Close()
 			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, false, nil)
 			require.NoError(t, err)
@@ -470,7 +470,7 @@ func TestChangedKeysIterator(t *testing.T) {
 	defer func() {
 		roTx.Rollback()
 	}()
-	ic := ii.BeginRo()
+	ic := ii.BeginFilesRo()
 	defer ic.Close()
 	it := ic.IterateChangedKeys(0, 20, roTx)
 	defer func() {

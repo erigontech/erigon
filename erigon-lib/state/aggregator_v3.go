@@ -1747,16 +1747,16 @@ type AggregatorRoTx struct {
 func (a *AggregatorV3) BeginFilesRo() *AggregatorRoTx {
 	ac := &AggregatorRoTx{
 		a:          a,
-		logAddrs:   a.logAddrs.BeginRo(),
-		logTopics:  a.logTopics.BeginRo(),
-		tracesFrom: a.tracesFrom.BeginRo(),
-		tracesTo:   a.tracesTo.BeginRo(),
+		logAddrs:   a.logAddrs.BeginFilesRo(),
+		logTopics:  a.logTopics.BeginFilesRo(),
+		tracesFrom: a.tracesFrom.BeginFilesRo(),
+		tracesTo:   a.tracesTo.BeginFilesRo(),
 
 		id:      a.ctxAutoIncrement.Add(1),
 		_leakID: a.leakDetector.Add(),
 	}
 	for id, d := range a.d {
-		ac.d[id] = d.BeginRo()
+		ac.d[id] = d.BeginFilesRo()
 	}
 
 	return ac
