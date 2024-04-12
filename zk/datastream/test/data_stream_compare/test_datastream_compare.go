@@ -39,7 +39,7 @@ func main() {
 	}
 
 	initialBookmark := &types.Bookmark{
-		Type: types.BookmarkTypeStart,
+		Type: types.BookmarkTypeBlock,
 		From: 0,
 	}
 
