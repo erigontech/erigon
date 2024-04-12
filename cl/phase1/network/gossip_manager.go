@@ -276,7 +276,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 	defer close(blobsCh)
 	defer close(blocksCh)
 
-	// Start a goroutine that listens for new gossip messages and sends them to the operations processor.
+	// Start couple of goroutines that listen for new gossip messages and sends them to the operations processor.
 	goWorker := func(ch <-chan *sentinel.GossipData, workerCount int) {
 		worker := func() {
 			for {
@@ -298,21 +298,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 	goWorker(operationsCh, 1)
 	goWorker(blocksCh, 1)
 	goWorker(blobsCh, 1)
-
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case data := <-syncCommitteesCh:
-				l := log.Ctx{}
-				err := g.onRecv(ctx, data, l)
-				if err != nil {
-					log.Warn("[Beacon Gossip] Recoverable Error", "err", err)
-				}
-			}
-		}
-	}()
+	goWorker(syncCommitteesCh, 1)
 
 Reconnect:
 	for {
