@@ -174,6 +174,12 @@ func SpawnStageBatches(
 	if err != nil {
 		return fmt.Errorf("failed to get last fork id, %w", err)
 	}
+
+	stageExecProgress, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return fmt.Errorf("failed to get stage exec progress, %w", err)
+	}
+
 	lastHash := emptyHash
 	atLeastOneBlockWritten := false
 	startTime := time.Now()
@@ -298,8 +304,9 @@ func SpawnStageBatches(
 				return fmt.Errorf("l2blocks download routine error: %v", err)
 			}
 		default:
-			//wait at least one block to be written, before continuing
-			if atLeastOneBlockWritten {
+			// wait at least one block to be written, before continuing
+			// or if stage_exec is ahead - don't wait here, but rather continue so exec catches up
+			if atLeastOneBlockWritten || stageExecProgress < lastBlockHeight {
 				// if no blocks available should and time since last block written is > 500ms
 				// consider that we are at the tip and blocks come in the datastream as they are produced
 				// stop the current iteration of the stage
