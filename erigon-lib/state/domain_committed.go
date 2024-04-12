@@ -18,25 +18,18 @@ package state
 
 import (
 	"bytes"
-	"container/heap"
-	"context"
 	"encoding/binary"
 	"fmt"
 	"hash"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/google/btree"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ledgerwatch/erigon-lib/common/background"
-
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/seg"
 )
 
 // Defines how to evaluate commitments
@@ -354,203 +347,6 @@ func (d *DomainCommitted) commitmentValTransform(files *SelectedStaticFiles, mer
 	return transValBuf, nil
 }
 
-func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStaticFiles, mergedFiles MergedFiles, r DomainRanges, workers int, ps *background.ProgressSet) (valuesIn, indexIn, historyIn *filesItem, err error) {
-	if !r.any() {
-		return
-	}
-
-	domainFiles := oldFiles.commitment
-	indexFiles := oldFiles.commitmentIdx
-	historyFiles := oldFiles.commitmentHist
-
-	var comp *seg.Compressor
-	var closeItem bool = true
-	defer func() {
-		if closeItem {
-			if comp != nil {
-				comp.Close()
-			}
-			if indexIn != nil {
-				if indexIn.decompressor != nil {
-					indexIn.decompressor.Close()
-				}
-				if indexIn.index != nil {
-					indexIn.index.Close()
-				}
-				if indexIn.bindex != nil {
-					indexIn.bindex.Close()
-				}
-			}
-			if historyIn != nil {
-				if historyIn.decompressor != nil {
-					historyIn.decompressor.Close()
-				}
-				if historyIn.index != nil {
-					historyIn.index.Close()
-				}
-				if historyIn.bindex != nil {
-					historyIn.bindex.Close()
-				}
-			}
-			if valuesIn != nil {
-				if valuesIn.decompressor != nil {
-					valuesIn.decompressor.Close()
-				}
-				if valuesIn.index != nil {
-					valuesIn.index.Close()
-				}
-				if valuesIn.bindex != nil {
-					valuesIn.bindex.Close()
-				}
-			}
-		}
-	}()
-	if indexIn, historyIn, err = d.History.mergeFiles(ctx, indexFiles, historyFiles,
-		HistoryRanges{
-			historyStartTxNum: r.historyStartTxNum,
-			historyEndTxNum:   r.historyEndTxNum,
-			history:           r.history,
-			indexStartTxNum:   r.indexStartTxNum,
-			indexEndTxNum:     r.indexEndTxNum,
-			index:             r.index}, workers, ps); err != nil {
-		return nil, nil, nil, err
-	}
-
-	if r.values {
-		datFileName := fmt.Sprintf("%s.%d-%d.kv", d.filenameBase, r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
-		datPath := filepath.Join(d.dir, datFileName)
-		p := ps.AddNew(datFileName, 1)
-		defer ps.Delete(p)
-
-		if comp, err = seg.NewCompressor(ctx, "merge", datPath, d.dir, seg.MinPatternScore, workers, log.LvlTrace, d.logger); err != nil {
-			return nil, nil, nil, fmt.Errorf("merge %s compressor: %w", d.filenameBase, err)
-		}
-		var cp CursorHeap
-		heap.Init(&cp)
-		for _, item := range domainFiles {
-			g := item.decompressor.MakeGetter()
-			g.Reset(0)
-			if g.HasNext() {
-				key, _ := g.NextUncompressed()
-				var val []byte
-				if d.compressVals {
-					val, _ = g.Next(nil)
-				} else {
-					val, _ = g.NextUncompressed()
-				}
-				if d.trace {
-					fmt.Printf("merge: read value '%x'\n", key)
-				}
-				heap.Push(&cp, &CursorItem{
-					t:        FILE_CURSOR,
-					dg:       g,
-					key:      key,
-					val:      val,
-					endTxNum: item.endTxNum,
-					reverse:  true,
-				})
-			}
-		}
-		keyCount := 0
-		// In the loop below, the pair `keyBuf=>valBuf` is always 1 item behind `lastKey=>lastVal`.
-		// `lastKey` and `lastVal` are taken from the top of the multi-way merge (assisted by the CursorHeap cp), but not processed right away
-		// instead, the pair from the previous iteration is processed first - `keyBuf=>valBuf`. After that, `keyBuf` and `valBuf` are assigned
-		// to `lastKey` and `lastVal` correspondingly, and the next step of multi-way merge happens. Therefore, after the multi-way merge loop
-		// (when CursorHeap cp is empty), there is a need to process the last pair `keyBuf=>valBuf`, because it was one step behind
-		var keyBuf, valBuf []byte
-		for cp.Len() > 0 {
-			lastKey := common.Copy(cp[0].key)
-			lastVal := common.Copy(cp[0].val)
-			// Advance all the items that have this key (including the top)
-			for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
-				ci1 := cp[0]
-				if ci1.dg.HasNext() {
-					ci1.key, _ = ci1.dg.NextUncompressed()
-					if d.compressVals {
-						ci1.val, _ = ci1.dg.Next(ci1.val[:0])
-					} else {
-						ci1.val, _ = ci1.dg.NextUncompressed()
-					}
-					heap.Fix(&cp, 0)
-				} else {
-					heap.Pop(&cp)
-				}
-			}
-			// For the rest of types, empty value means deletion
-			skip := r.valuesStartTxNum == 0 && len(lastVal) == 0
-			if !skip {
-				if keyBuf != nil {
-					if err = comp.AddUncompressedWord(keyBuf); err != nil {
-						return nil, nil, nil, err
-					}
-					keyCount++ // Only counting keys, not values
-					switch d.compressVals {
-					case true:
-						if err = comp.AddWord(valBuf); err != nil {
-							return nil, nil, nil, err
-						}
-					default:
-						if err = comp.AddUncompressedWord(valBuf); err != nil {
-							return nil, nil, nil, err
-						}
-					}
-				}
-				keyBuf = append(keyBuf[:0], lastKey...)
-				valBuf = append(valBuf[:0], lastVal...)
-			}
-		}
-		if keyBuf != nil {
-			if err = comp.AddUncompressedWord(keyBuf); err != nil {
-				return nil, nil, nil, err
-			}
-			keyCount++ // Only counting keys, not values
-			//fmt.Printf("last heap key %x\n", keyBuf)
-			valBuf, err = d.commitmentValTransform(&oldFiles, &mergedFiles, valBuf)
-			if err != nil {
-				return nil, nil, nil, fmt.Errorf("merge: 2valTransform [%x] %w", valBuf, err)
-			}
-			if d.compressVals {
-				if err = comp.AddWord(valBuf); err != nil {
-					return nil, nil, nil, err
-				}
-			} else {
-				if err = comp.AddUncompressedWord(valBuf); err != nil {
-					return nil, nil, nil, err
-				}
-			}
-		}
-		if err = comp.Compress(); err != nil {
-			return nil, nil, nil, err
-		}
-		comp.Close()
-		comp = nil
-		valuesIn = newFilesItem(r.valuesStartTxNum, r.valuesEndTxNum, d.aggregationStep)
-		if valuesIn.decompressor, err = seg.NewDecompressor(datPath); err != nil {
-			return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
-		}
-		ps.Delete(p)
-
-		idxFileName := fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
-		idxPath := filepath.Join(d.dir, idxFileName)
-
-		p = ps.AddNew(datFileName, uint64(keyCount))
-		defer ps.Delete(p)
-		if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, idxPath, d.dir, keyCount, false /* values */, p, d.logger, d.noFsync); err != nil {
-			return nil, nil, nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
-		}
-
-		btPath := strings.TrimSuffix(idxPath, "kvi") + "bt"
-		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, 2048, valuesIn.decompressor, p, d.tmpdir, d.logger)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("create btindex %s [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
-		}
-	}
-	closeItem = false
-	d.stats.MergesCount++
-	d.mergesCount++
-	return
-}
-
 // Evaluates commitment for processed state. Commit=true - store trie state after evaluation
 func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branchNodeUpdates map[string]commitment.BranchData, err error) {
 	defer func(s time.Time) { d.comTook = time.Since(s) }(time.Now())
@@ -682,7 +478,7 @@ func (cs *commitmentState) Encode() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func decodeU64(from []byte) uint64 {
+func decodeU64(from []byte) uint64 { //nolint
 	var i uint64
 	for _, b := range from {
 		i = (i << 8) | uint64(b)
@@ -690,7 +486,7 @@ func decodeU64(from []byte) uint64 {
 	return i
 }
 
-func encodeU64(i uint64, to []byte) []byte {
+func encodeU64(i uint64, to []byte) []byte { //nolintmergeFil
 	// writes i to b in big endian byte order, using the least number of bytes needed to represent i.
 	switch {
 	case i < (1 << 8):

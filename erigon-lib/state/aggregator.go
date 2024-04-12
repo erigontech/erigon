@@ -30,26 +30,26 @@ import (
 const StepsInBiggestFile = 32
 
 var (
-	mxCurrentTx                = metrics.GetOrCreateGauge("domain_tx_processed")
-	mxCurrentBlock             = metrics.GetOrCreateGauge("domain_block_current")
-	mxRunningMerges            = metrics.GetOrCreateGauge("domain_running_merges")
-	mxRunningCollations        = metrics.GetOrCreateGauge("domain_running_collations")
-	mxCollateTook              = metrics.GetOrCreateHistogram("domain_collate_took")
-	mxPruneTook                = metrics.GetOrCreateHistogram("domain_prune_took")
-	mxPruneHistTook            = metrics.GetOrCreateHistogram("domain_prune_hist_took")
-	mxPruningProgress          = metrics.GetOrCreateGauge("domain_pruning_progress")
-	mxCollationSize            = metrics.GetOrCreateGauge("domain_collation_size")
-	mxCollationSizeHist        = metrics.GetOrCreateGauge("domain_collation_hist_size")
-	mxPruneSize                = metrics.GetOrCreateCounter("domain_prune_size")
-	mxBuildTook                = metrics.GetOrCreateSummary("domain_build_files_took")
-	mxStepCurrent              = metrics.GetOrCreateGauge("domain_step_current")
-	mxStepTook                 = metrics.GetOrCreateHistogram("domain_step_took")
-	mxCommitmentKeys           = metrics.GetOrCreateCounter("domain_commitment_keys")
-	mxCommitmentRunning        = metrics.GetOrCreateGauge("domain_running_commitment")
-	mxCommitmentTook           = metrics.GetOrCreateSummary("domain_commitment_took")
-	mxCommitmentWriteTook      = metrics.GetOrCreateHistogram("domain_commitment_write_took")
-	mxCommitmentUpdates        = metrics.GetOrCreateCounter("domain_commitment_updates")
-	mxCommitmentUpdatesApplied = metrics.GetOrCreateCounter("domain_commitment_updates_applied")
+	mxCurrentTx                = metrics.GetOrCreateGauge("domain_tx_processed")                 //nolint
+	mxCurrentBlock             = metrics.GetOrCreateGauge("domain_block_current")                //nolint
+	mxRunningMerges            = metrics.GetOrCreateGauge("domain_running_merges")               //nolint
+	mxRunningCollations        = metrics.GetOrCreateGauge("domain_running_collations")           //nolint
+	mxCollateTook              = metrics.GetOrCreateHistogram("domain_collate_took")             //nolint
+	mxPruneTook                = metrics.GetOrCreateHistogram("domain_prune_took")               //nolint
+	mxPruneHistTook            = metrics.GetOrCreateHistogram("domain_prune_hist_took")          //nolint
+	mxPruningProgress          = metrics.GetOrCreateGauge("domain_pruning_progress")             //nolint
+	mxCollationSize            = metrics.GetOrCreateGauge("domain_collation_size")               //nolint
+	mxCollationSizeHist        = metrics.GetOrCreateGauge("domain_collation_hist_size")          //nolint
+	mxPruneSize                = metrics.GetOrCreateCounter("domain_prune_size")                 //nolint
+	mxBuildTook                = metrics.GetOrCreateSummary("domain_build_files_took")           //nolint
+	mxStepCurrent              = metrics.GetOrCreateGauge("domain_step_current")                 //nolint
+	mxStepTook                 = metrics.GetOrCreateHistogram("domain_step_took")                //nolint
+	mxCommitmentKeys           = metrics.GetOrCreateCounter("domain_commitment_keys")            //nolint
+	mxCommitmentRunning        = metrics.GetOrCreateGauge("domain_running_commitment")           //nolint
+	mxCommitmentTook           = metrics.GetOrCreateSummary("domain_commitment_took")            //nolint
+	mxCommitmentWriteTook      = metrics.GetOrCreateHistogram("domain_commitment_write_took")    //nolint
+	mxCommitmentUpdates        = metrics.GetOrCreateCounter("domain_commitment_updates")         //nolint
+	mxCommitmentUpdatesApplied = metrics.GetOrCreateCounter("domain_commitment_updates_applied") //nolint
 )
 
 type SelectedStaticFiles struct {
