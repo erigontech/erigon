@@ -730,7 +730,7 @@ func stageSnapshots(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		if err := reset2.ResetBlocks(tx, db, agg, br, bw, dirs, *chainConfig, logger); err != nil {
 			return fmt.Errorf("resetting blocks: %w", err)
 		}
-		ac := agg.MakeContext()
+		ac := agg.BeginFilesRo()
 		defer ac.Close()
 
 		domains, err := libstate.NewSharedDomains(tx, logger)
@@ -1119,7 +1119,7 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 	if unwind > 0 && historyV3 {
 		if err := db.View(ctx, func(tx kv.Tx) error {
-			blockNumWithCommitment, ok, err := tx.(libstate.HasAggCtx).AggCtx().(*libstate.AggregatorV3Context).CanUnwindBeforeBlockNum(s.BlockNumber-unwind, tx)
+			blockNumWithCommitment, ok, err := tx.(libstate.HasAggCtx).AggCtx().(*libstate.FilesRoTx).CanUnwindBeforeBlockNum(s.BlockNumber-unwind, tx)
 			if err != nil {
 				return err
 			}
@@ -1226,7 +1226,7 @@ func stageCustomTrace(db kv.RwDB, ctx context.Context, logger log.Logger) error 
 
 	if unwind > 0 && historyV3 {
 		if err := db.View(ctx, func(tx kv.Tx) error {
-			blockNumWithCommitment, ok, err := tx.(libstate.HasAggCtx).AggCtx().(*libstate.AggregatorV3Context).CanUnwindBeforeBlockNum(s.BlockNumber-unwind, tx)
+			blockNumWithCommitment, ok, err := tx.(libstate.HasAggCtx).AggCtx().(*libstate.FilesRoTx).CanUnwindBeforeBlockNum(s.BlockNumber-unwind, tx)
 			if err != nil {
 				return err
 			}
@@ -1746,7 +1746,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			_allSnapshotsSingleton.LogStat("blocks")
 			_allBorSnapshotsSingleton.LogStat("bor")
 			_ = db.View(context.Background(), func(tx kv.Tx) error {
-				ac := _aggSingleton.MakeContext()
+				ac := _aggSingleton.BeginFilesRo()
 				defer ac.Close()
 				ac.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
 					_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)

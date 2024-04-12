@@ -34,8 +34,8 @@ func txDeferRollback(m dsl.Matcher) {
 		`$tx, $err = $db.BeginRw($ctx); $chk; $rollback`,
 		`$tx, $err := $db.Begin($ctx); $chk; $rollback`,
 		`$tx, $err = $db.Begin($ctx); $chk; $rollback`,
-		`$tx, $err := $db.BeginRo($ctx); $chk; $rollback`,
-		`$tx, $err = $db.BeginRo($ctx); $chk; $rollback`,
+		`$tx, $err := $db.BeginFilesRo($ctx); $chk; $rollback`,
+		`$tx, $err = $db.BeginFilesRo($ctx); $chk; $rollback`,
 	).
 		Where(!m["rollback"].Text.Matches(`defer .*\.Rollback()`)).
 		//At(m["rollback"]).

@@ -109,7 +109,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	defer bsn.Close()
 	defer agg.Close()
 
-	ac := agg.MakeContext()
+	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
 	stateTx, err := stateDb.BeginRw(ctx)
