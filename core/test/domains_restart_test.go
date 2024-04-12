@@ -99,7 +99,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 		}
 	}()
 
-	domCtx := agg.MakeContext()
+	domCtx := agg.BeginFilesRo()
 	defer domCtx.Close()
 
 	domains, err := state.NewSharedDomains(tx, log.New())
@@ -176,7 +176,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 
 	//COMS := make(map[string][]byte)
 	//{
-	//	cct := domains.Commitment.MakeContext()
+	//	cct := domains.Commitment.BeginFilesRo()
 	//	err = cct.IteratePrefix(tx, []byte("state"), func(k, v []byte) {
 	//		COMS[string(k)] = v
 	//		//fmt.Printf("k %x v %x\n", k, v)
@@ -213,14 +213,14 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 
 	tx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
-	domCtx = agg.MakeContext()
+	domCtx = agg.BeginFilesRo()
 	defer domCtx.Close()
 	domains, err = state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
 	//{
-	//	cct := domains.Commitment.MakeContext()
+	//	cct := domains.Commitment.BeginFilesRo()
 	//	err = cct.IteratePrefix(tx, []byte("state"), func(k, v []byte) {
 	//		cv, _ := COMS[string(k)]
 	//		if !bytes.Equal(cv, v) {
@@ -247,7 +247,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	tx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	domCtx = agg.MakeContext()
+	domCtx = agg.BeginFilesRo()
 	defer domCtx.Close()
 	domains, err = state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
@@ -306,7 +306,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		}
 	}()
 
-	domCtx := agg.MakeContext()
+	domCtx := agg.BeginFilesRo()
 	defer domCtx.Close()
 
 	domains, err := state.NewSharedDomains(tx, log.New())
@@ -398,7 +398,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domCtx = agg.MakeContext()
+	domCtx = agg.BeginFilesRo()
 	defer domCtx.Close()
 	domains, err = state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
@@ -418,7 +418,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	tx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	domCtx = agg.MakeContext()
+	domCtx = agg.BeginFilesRo()
 	defer domCtx.Close()
 	domains, err = state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
@@ -485,7 +485,7 @@ func TestCommit(t *testing.T) {
 		}
 	}()
 
-	domCtx := agg.MakeContext()
+	domCtx := agg.BeginFilesRo()
 	defer domCtx.Close()
 	domains, err := state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)

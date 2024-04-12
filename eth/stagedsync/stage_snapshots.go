@@ -286,7 +286,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 	{
 		cfg.blockReader.Snapshots().LogStat("download")
-		tx.(state.HasAggCtx).AggCtx().(*state.AggregatorV3Context).LogStats(tx, func(endTxNumMinimax uint64) uint64 {
+		tx.(state.HasAggCtx).AggCtx().(*state.AggregatorRoTx).LogStats(tx, func(endTxNumMinimax uint64) uint64 {
 			_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
 			return histBlockNumProgress
 		})
@@ -405,7 +405,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 					}
 				}
 			}
-			ac := agg.MakeContext()
+			ac := agg.BeginFilesRo()
 			defer ac.Close()
 			if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), ac.Files()); err != nil {
 				return err
@@ -434,7 +434,7 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 		if freezingCfg.Produce {
 			//TODO: initialSync maybe save files progress here
 			if cfg.blockRetire.HasNewFrozenFiles() || cfg.agg.HasNewFrozenFiles() {
-				ac := cfg.agg.MakeContext()
+				ac := cfg.agg.BeginFilesRo()
 				defer ac.Close()
 				aggFiles := ac.Files()
 				ac.Close()

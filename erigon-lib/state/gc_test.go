@@ -32,7 +32,7 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 			// - close view
 			// - open new view
 			// - make sure there is no canDelete file
-			hc := h.MakeContext()
+			hc := h.BeginFilesRo()
 
 			lastOnFs, _ := h.dirtyFiles.Max()
 			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
@@ -51,7 +51,7 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 			}
 
 			require.NotNil(lastOnFs.decompressor)
-			//replace of locality index must not affect current HistoryContext, but expect to be closed after last reader
+			//replace of locality index must not affect current HistoryRoTx, but expect to be closed after last reader
 			hc.Close()
 			require.Nil(lastOnFs.decompressor)
 
@@ -59,7 +59,7 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 			require.False(nonDeletedOnFs.frozen)
 			require.NotNil(nonDeletedOnFs.decompressor) // non-canDelete files are not closed
 
-			hc = h.MakeContext()
+			hc = h.BeginFilesRo()
 			newLastInView := hc.files[len(hc.files)-1]
 			require.False(lastOnFs.frozen)
 			require.False(lastInView.startTxNum == newLastInView.startTxNum && lastInView.endTxNum == newLastInView.endTxNum)
@@ -74,7 +74,7 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 
 			// - del cold file
 			// - new reader must not see canDelete file
-			hc := h.MakeContext()
+			hc := h.BeginFilesRo()
 			lastOnFs, _ := h.dirtyFiles.Max()
 			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
 			h.integrateMergedFiles(nil, []*filesItem{lastOnFs}, nil, nil)
@@ -115,7 +115,7 @@ func TestDomainGCReadAfterRemoveFile(t *testing.T) {
 			// - close view
 			// - open new view
 			// - make sure there is no canDelete file
-			hc := h.MakeContext()
+			hc := h.BeginFilesRo()
 			_ = hc
 			lastOnFs, _ := h.dirtyFiles.Max()
 			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
@@ -141,7 +141,7 @@ func TestDomainGCReadAfterRemoveFile(t *testing.T) {
 			require.False(nonDeletedOnFs.frozen)
 			require.NotNil(nonDeletedOnFs.decompressor) // non-canDelete files are not closed
 
-			hc = h.MakeContext()
+			hc = h.BeginFilesRo()
 			newLastInView := hc.files[len(hc.files)-1]
 			require.False(lastOnFs.frozen)
 			require.False(lastInView.startTxNum == newLastInView.startTxNum && lastInView.endTxNum == newLastInView.endTxNum)
@@ -156,7 +156,7 @@ func TestDomainGCReadAfterRemoveFile(t *testing.T) {
 
 			// - del cold file
 			// - new reader must not see canDelete file
-			hc := h.MakeContext()
+			hc := h.BeginFilesRo()
 			lastOnFs, _ := h.dirtyFiles.Max()
 			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
 			h.integrateMergedFiles([]*filesItem{lastOnFs}, nil, nil, nil, nil, nil)

@@ -27,7 +27,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	ac := agg.MakeContext()
+	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
 	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
@@ -69,7 +69,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 
 	ac.Close()
 
-	ac = agg.MakeContext()
+	ac = agg.BeginFilesRo()
 	rwTx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer rwTx.Rollback()
@@ -100,7 +100,7 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	ac := agg.MakeContext()
+	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
 	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
@@ -120,7 +120,7 @@ Loop:
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	ac = agg.MakeContext()
+	ac = agg.BeginFilesRo()
 	defer ac.Close()
 	domains, err = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
@@ -158,7 +158,7 @@ Loop:
 
 	unwindTo := uint64(commitStep * rnd.Intn(int(maxTx)/commitStep))
 
-	acu := agg.MakeContext()
+	acu := agg.BeginFilesRo()
 	err = domains.Unwind(ctx, rwTx, 0, unwindTo)
 	require.NoError(t, err)
 	acu.Close()
@@ -192,7 +192,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		return len(list)
 	}
 
-	ac := agg.MakeContext()
+	ac := agg.BeginFilesRo()
 	defer ac.Close()
 	ctx := context.Background()
 
@@ -206,7 +206,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 	}
 
-	ac = agg.MakeContext()
+	ac = agg.BeginFilesRo()
 	defer ac.Close()
 	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(err)
@@ -289,7 +289,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(agg.BuildFiles(stepSize * 2))
 		require.Equal(1, agg.d[kv.StorageDomain].dirtyFiles.Len())
 
-		ac = agg.MakeContext()
+		ac = agg.BeginFilesRo()
 		defer ac.Close()
 		rwTx, err = db.BeginRw(ctx)
 		require.NoError(err)
@@ -357,7 +357,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	ac := agg.MakeContext()
+	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
 	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
@@ -423,7 +423,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	require.NoError(t, err)
 
 	ac.Close()
-	ac = agg.MakeContext()
+	ac = agg.BeginFilesRo()
 
 	err = db.Update(ctx, func(tx kv.RwTx) error {
 		_, err = ac.PruneSmallBatches(ctx, 1*time.Minute, tx)
@@ -433,7 +433,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 
 	ac.Close()
 
-	ac = agg.MakeContext()
+	ac = agg.BeginFilesRo()
 	defer ac.Close()
 
 	rwTx, err = db.BeginRw(ctx)
