@@ -64,7 +64,6 @@ type Domain struct {
 	keysTable    string // key -> invertedStep , invertedStep = ^(txNum / aggregationStep), Needs to be table with DupSort
 	valsTable    string // key + invertedStep -> values
 	stats        DomainStats
-	mergesCount  uint64
 
 	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
 	logger       log.Logger
