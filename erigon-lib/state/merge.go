@@ -1170,7 +1170,7 @@ func (d *Domain) cleanAfterFreeze(frozenTo uint64) {
 }
 
 // cleanAfterFreeze - mark all small files before `f` as `canDelete=true`
-func (h *History) cleanAfterFreeze(frozenTo uint64) {
+func (h *History) cleanAfterFreeze(frozenTo uint64) { //nolint
 	if frozenTo == 0 {
 		return
 	}
