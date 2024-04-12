@@ -65,10 +65,10 @@ type SelectedStaticFiles struct {
 	commitment     []*filesItem
 	commitmentIdx  []*filesItem
 	commitmentHist []*filesItem
-	codeI          int
-	storageI       int
-	accountsI      int
-	commitmentI    int
+	codeI          int //nolint
+	storageI       int //nolint
+	accountsI      int //nolint
+	commitmentI    int //nolint
 }
 
 func (sf SelectedStaticFiles) Close() {
