@@ -276,7 +276,7 @@ func (a *AggregatorV3) BuildOptionalMissedIndicesInBackground(ctx context.Contex
 	}()
 }
 
-func (ac *FilesRoTx) BuildOptionalMissedIndices(ctx context.Context, workers int) error {
+func (ac *AggregatorRoTx) BuildOptionalMissedIndices(ctx context.Context, workers int) error {
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(workers)
 	if ac.accounts != nil {
@@ -969,7 +969,7 @@ func (r RangesV3) any() bool {
 	return r.accounts.any() || r.storage.any() || r.code.any() || r.logAddrs || r.logTopics || r.tracesFrom || r.tracesTo
 }
 
-func (ac *FilesRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) RangesV3 {
+func (ac *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) RangesV3 {
 	var r RangesV3
 	r.accounts = ac.a.accounts.findMergeRange(maxEndTxNum, maxSpan)
 	r.storage = ac.a.storage.findMergeRange(maxEndTxNum, maxSpan)
@@ -1018,7 +1018,7 @@ func (sf SelectedStaticFilesV3) Close() {
 	}
 }
 
-func (ac *FilesRoTx) staticFilesInRange(r RangesV3) (sf SelectedStaticFilesV3, err error) {
+func (ac *AggregatorRoTx) staticFilesInRange(r RangesV3) (sf SelectedStaticFilesV3, err error) {
 	if r.accounts.any() {
 		sf.accountsIdx, sf.accountsHist, sf.accountsI, err = ac.accounts.staticFilesInRange(r.accounts)
 		if err != nil {
@@ -1112,7 +1112,7 @@ func (mf MergedFilesV3) Close() {
 	}
 }
 
-func (ac *FilesRoTx) mergeFiles(ctx context.Context, files SelectedStaticFilesV3, r RangesV3, workers int) (MergedFilesV3, error) {
+func (ac *AggregatorRoTx) mergeFiles(ctx context.Context, files SelectedStaticFilesV3, r RangesV3, workers int) (MergedFilesV3, error) {
 	var mf MergedFilesV3
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(workers)
@@ -1358,7 +1358,7 @@ func (a *AggregatorV3) EnableMadvNormal() *AggregatorV3 {
 	return a
 }
 
-func (ac *FilesRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (timestamps iter.U64, err error) {
+func (ac *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (timestamps iter.U64, err error) {
 	switch name {
 	case kv.AccountsHistoryIdx:
 		return ac.accounts.IdxRange(k, fromTs, toTs, asc, limit, tx)
@@ -1381,15 +1381,15 @@ func (ac *FilesRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int,
 
 // -- range end
 
-func (ac *FilesRoTx) ReadAccountDataNoStateWithRecent(addr []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
+func (ac *AggregatorRoTx) ReadAccountDataNoStateWithRecent(addr []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
 	return ac.accounts.GetNoStateWithRecent(addr, txNum, tx)
 }
 
-func (ac *FilesRoTx) ReadAccountDataNoState(addr []byte, txNum uint64) ([]byte, bool, error) {
+func (ac *AggregatorRoTx) ReadAccountDataNoState(addr []byte, txNum uint64) ([]byte, bool, error) {
 	return ac.accounts.GetNoState(addr, txNum)
 }
 
-func (ac *FilesRoTx) ReadAccountStorageNoStateWithRecent(addr []byte, loc []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
+func (ac *AggregatorRoTx) ReadAccountStorageNoStateWithRecent(addr []byte, loc []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
 	if cap(ac.keyBuf) < len(addr)+len(loc) {
 		ac.keyBuf = make([]byte, len(addr)+len(loc))
 	} else if len(ac.keyBuf) != len(addr)+len(loc) {
@@ -1399,11 +1399,11 @@ func (ac *FilesRoTx) ReadAccountStorageNoStateWithRecent(addr []byte, loc []byte
 	copy(ac.keyBuf[len(addr):], loc)
 	return ac.storage.GetNoStateWithRecent(ac.keyBuf, txNum, tx)
 }
-func (ac *FilesRoTx) ReadAccountStorageNoStateWithRecent2(key []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
+func (ac *AggregatorRoTx) ReadAccountStorageNoStateWithRecent2(key []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
 	return ac.storage.GetNoStateWithRecent(key, txNum, tx)
 }
 
-func (ac *FilesRoTx) ReadAccountStorageNoState(addr []byte, loc []byte, txNum uint64) ([]byte, bool, error) {
+func (ac *AggregatorRoTx) ReadAccountStorageNoState(addr []byte, loc []byte, txNum uint64) ([]byte, bool, error) {
 	if cap(ac.keyBuf) < len(addr)+len(loc) {
 		ac.keyBuf = make([]byte, len(addr)+len(loc))
 	} else if len(ac.keyBuf) != len(addr)+len(loc) {
@@ -1414,21 +1414,21 @@ func (ac *FilesRoTx) ReadAccountStorageNoState(addr []byte, loc []byte, txNum ui
 	return ac.storage.GetNoState(ac.keyBuf, txNum)
 }
 
-func (ac *FilesRoTx) ReadAccountCodeNoStateWithRecent(addr []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
+func (ac *AggregatorRoTx) ReadAccountCodeNoStateWithRecent(addr []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
 	return ac.code.GetNoStateWithRecent(addr, txNum, tx)
 }
-func (ac *FilesRoTx) ReadAccountCodeNoState(addr []byte, txNum uint64) ([]byte, bool, error) {
+func (ac *AggregatorRoTx) ReadAccountCodeNoState(addr []byte, txNum uint64) ([]byte, bool, error) {
 	return ac.code.GetNoState(addr, txNum)
 }
 
-func (ac *FilesRoTx) ReadAccountCodeSizeNoStateWithRecent(addr []byte, txNum uint64, tx kv.Tx) (int, bool, error) {
+func (ac *AggregatorRoTx) ReadAccountCodeSizeNoStateWithRecent(addr []byte, txNum uint64, tx kv.Tx) (int, bool, error) {
 	code, noState, err := ac.code.GetNoStateWithRecent(addr, txNum, tx)
 	if err != nil {
 		return 0, false, err
 	}
 	return len(code), noState, nil
 }
-func (ac *FilesRoTx) ReadAccountCodeSizeNoState(addr []byte, txNum uint64) (int, bool, error) {
+func (ac *AggregatorRoTx) ReadAccountCodeSizeNoState(addr []byte, txNum uint64) (int, bool, error) {
 	code, noState, err := ac.code.GetNoState(addr, txNum)
 	if err != nil {
 		return 0, false, err
@@ -1436,27 +1436,27 @@ func (ac *FilesRoTx) ReadAccountCodeSizeNoState(addr []byte, txNum uint64) (int,
 	return len(code), noState, nil
 }
 
-func (ac *FilesRoTx) AccountHistoryRange(startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.KV, error) {
+func (ac *AggregatorRoTx) AccountHistoryRange(startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.KV, error) {
 	return ac.accounts.HistoryRange(startTxNum, endTxNum, asc, limit, tx)
 }
 
-func (ac *FilesRoTx) StorageHistoryRange(startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.KV, error) {
+func (ac *AggregatorRoTx) StorageHistoryRange(startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.KV, error) {
 	return ac.storage.HistoryRange(startTxNum, endTxNum, asc, limit, tx)
 }
 
-func (ac *FilesRoTx) CodeHistoryRange(startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.KV, error) {
+func (ac *AggregatorRoTx) CodeHistoryRange(startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.KV, error) {
 	return ac.code.HistoryRange(startTxNum, endTxNum, asc, limit, tx)
 }
 
-func (ac *FilesRoTx) AccountHistoricalStateRange(startTxNum uint64, from, to []byte, limit int, tx kv.Tx) iter.KV {
+func (ac *AggregatorRoTx) AccountHistoricalStateRange(startTxNum uint64, from, to []byte, limit int, tx kv.Tx) iter.KV {
 	return ac.accounts.WalkAsOf(startTxNum, from, to, tx, limit)
 }
 
-func (ac *FilesRoTx) StorageHistoricalStateRange(startTxNum uint64, from, to []byte, limit int, tx kv.Tx) iter.KV {
+func (ac *AggregatorRoTx) StorageHistoricalStateRange(startTxNum uint64, from, to []byte, limit int, tx kv.Tx) iter.KV {
 	return ac.storage.WalkAsOf(startTxNum, from, to, tx, limit)
 }
 
-func (ac *FilesRoTx) CodeHistoricalStateRange(startTxNum uint64, from, to []byte, limit int, tx kv.Tx) iter.KV {
+func (ac *AggregatorRoTx) CodeHistoricalStateRange(startTxNum uint64, from, to []byte, limit int, tx kv.Tx) iter.KV {
 	return ac.code.WalkAsOf(startTxNum, from, to, tx, limit)
 }
 
@@ -1468,7 +1468,7 @@ func (a *AggregatorV3) Stats() FilesStats22 {
 	return fs
 }
 
-type FilesRoTx struct {
+type AggregatorRoTx struct {
 	a          *AggregatorV3
 	accounts   *HistoryRoTx
 	storage    *HistoryRoTx
@@ -1482,8 +1482,8 @@ type FilesRoTx struct {
 	id uint64 // set only if TRACE_AGG=true
 }
 
-func (a *AggregatorV3) BeginFilesRo() *FilesRoTx {
-	ac := &FilesRoTx{
+func (a *AggregatorV3) BeginFilesRo() *AggregatorRoTx {
+	ac := &AggregatorRoTx{
 		a:          a,
 		accounts:   a.accounts.BeginFilesRo(),
 		storage:    a.storage.BeginFilesRo(),
@@ -1498,7 +1498,7 @@ func (a *AggregatorV3) BeginFilesRo() *FilesRoTx {
 
 	return ac
 }
-func (ac *FilesRoTx) Close() {
+func (ac *AggregatorRoTx) Close() {
 	ac.a.leakDetector.Del(ac.id)
 	ac.accounts.Close()
 	ac.storage.Close()

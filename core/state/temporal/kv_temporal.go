@@ -189,12 +189,12 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error 
 type Tx struct {
 	*mdbx.MdbxTx
 	db               *DB
-	aggCtx           *state.FilesRoTx
+	aggCtx           *state.AggregatorRoTx
 	resourcesToClose []kv.Closer
 }
 
-func (tx *Tx) AggCtx() *state.FilesRoTx { return tx.aggCtx }
-func (tx *Tx) Agg() *state.AggregatorV3 { return tx.db.agg }
+func (tx *Tx) AggCtx() *state.AggregatorRoTx { return tx.aggCtx }
+func (tx *Tx) Agg() *state.AggregatorV3      { return tx.db.agg }
 func (tx *Tx) Rollback() {
 	tx.autoClose()
 	tx.MdbxTx.Rollback()
