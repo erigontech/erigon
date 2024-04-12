@@ -41,6 +41,7 @@ type ForkChoiceStorageMock struct {
 	NewestLCUpdate            *cltypes.LightClientUpdate
 	LCUpdates                 map[uint64]*cltypes.LightClientUpdate
 	SyncContributionPool      sync_contribution_pool.SyncContributionPool
+	Headers                   map[common.Hash]*cltypes.BeaconBlockHeader
 
 	Pool pool.OperationsPool
 }
@@ -65,6 +66,7 @@ func NewForkChoiceStorageMock() *ForkChoiceStorageMock {
 		LightClientBootstraps:     make(map[common.Hash]*cltypes.LightClientBootstrap),
 		LCUpdates:                 make(map[uint64]*cltypes.LightClientUpdate),
 		SyncContributionPool:      sync_contribution_pool.NewSyncContributionPoolMock(),
+		Headers:                   make(map[common.Hash]*cltypes.BeaconBlockHeader),
 	}
 }
 
@@ -144,7 +146,7 @@ func (f *ForkChoiceStorageMock) OnAttesterSlashing(attesterSlashing *cltypes.Att
 }
 
 func (f *ForkChoiceStorageMock) OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload bool, fullValidation bool, checkDataAvaiability bool) error {
-	panic("implement me")
+	return nil
 }
 
 func (f *ForkChoiceStorageMock) OnTick(time uint64) {
@@ -216,7 +218,7 @@ func (f *ForkChoiceStorageMock) GetLightClientUpdate(period uint64) (*cltypes.Li
 }
 
 func (f *ForkChoiceStorageMock) GetHeader(blockRoot libcommon.Hash) (*cltypes.BeaconBlockHeader, bool) {
-	panic("implement me")
+	return f.Headers[blockRoot], f.Headers[blockRoot] != nil
 }
 
 func (f *ForkChoiceStorageMock) GetBalances(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error) {
@@ -253,6 +255,9 @@ func (f *ForkChoiceStorageMock) OnSignedContributionAndProof(signedContribution 
 	return nil
 }
 
+func (f *ForkChoiceStorageMock) AddPreverifiedBlobSidecar(msg *cltypes.BlobSidecar) error {
+	return nil
+}
 func (f *ForkChoiceStorageMock) ValidateOnAttestation(attestation *solid.Attestation) error {
 	panic("implement me")
 }
