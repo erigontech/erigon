@@ -217,7 +217,7 @@ func (a *AggregatorV3) CleanDir() {
 	a.tracesFrom.deleteGarbageFiles()
 	a.tracesTo.deleteGarbageFiles()
 
-	ac := a.BeginFilesRoTx()
+	ac := a.BeginFilesRo()
 	defer ac.Close()
 	ac.a.accounts.cleanAfterFreeze(ac.accounts.frozenTo())
 	ac.a.storage.cleanAfterFreeze(ac.storage.frozenTo())
@@ -265,7 +265,7 @@ func (a *AggregatorV3) BuildOptionalMissedIndicesInBackground(ctx context.Contex
 	go func() {
 		defer a.wg.Done()
 		defer a.buildingOptionalIndices.Store(false)
-		filesTx := a.BeginFilesRoTx()
+		filesTx := a.BeginFilesRo()
 		defer filesTx.Close()
 		if err := filesTx.BuildOptionalMissedIndices(ctx, workers); err != nil {
 			if errors.Is(err, context.Canceled) {
@@ -329,7 +329,7 @@ func (a *AggregatorV3) BuildMissedIndices(ctx context.Context, workers int) erro
 		}
 	}
 
-	ac := a.BeginFilesRoTx()
+	ac := a.BeginFilesRo()
 	defer ac.Close()
 	return ac.BuildOptionalMissedIndices(ctx, workers)
 }
@@ -598,7 +598,7 @@ func (a *AggregatorV3) buildFilesInBackground(ctx context.Context, step uint64) 
 }
 
 func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethingDone bool, err error) {
-	ac := a.BeginFilesRoTx() // this need, to ensure we do all operations on files in "transaction-style", maybe we will ensure it on type-level in future
+	ac := a.BeginFilesRo() // this need, to ensure we do all operations on files in "transaction-style", maybe we will ensure it on type-level in future
 	defer ac.Close()
 
 	closeAll := true
@@ -1482,7 +1482,7 @@ type FilesRoTx struct {
 	id uint64 // set only if TRACE_AGG=true
 }
 
-func (a *AggregatorV3) BeginFilesRoTx() *FilesRoTx {
+func (a *AggregatorV3) BeginFilesRo() *FilesRoTx {
 	ac := &FilesRoTx{
 		a:          a,
 		accounts:   a.accounts.BeginFilesRo(),

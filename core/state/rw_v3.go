@@ -608,7 +608,7 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwi
 	case *temporal.Tx:
 		actx = ttx.AggCtx()
 	default:
-		actx = agg.BeginFilesRoTx()
+		actx = agg.BeginFilesRo()
 	}
 
 	{
