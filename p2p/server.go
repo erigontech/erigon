@@ -907,9 +907,10 @@ func (srv *Server) postHandshakeChecks(peers map[enode.ID]*Peer, inboundCount in
 func (srv *Server) listenLoop(ctx context.Context) {
 	srv.logger.Trace("TCP listener up", "addr", srv.listener.Addr())
 
+	srv.resetErrors()
+
 	// The slots limit accepts of new connections.
 	slots := semaphore.NewWeighted(int64(srv.MaxPendingPeers))
-	srv.resetErrors()
 
 	// Wait for slots to be returned on exit. This ensures all connection goroutines
 	// are down before listenLoop returns.
