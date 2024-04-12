@@ -754,7 +754,6 @@ func (ss *GrpcServer) removePeer(peerID [64]byte, reason *p2p.PeerError) {
 	if value, ok := ss.GoodPeers.LoadAndDelete(peerID); ok {
 		peerInfo := value.(*PeerInfo)
 		if peerInfo != nil {
-			ss.logger.Trace("GrpcServer.removePeer", "peerId", hex.EncodeToString(peerID[:]))
 			peerInfo.Remove(reason)
 		}
 	}
