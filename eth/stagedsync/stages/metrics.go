@@ -1,4 +1,4 @@
-package stagedsync
+package stages
 
 import (
 	"fmt"
@@ -7,14 +7,13 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/metrics"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
 
-var syncMetrics = map[stages.SyncStage]metrics.Gauge{}
+var SyncMetrics = map[SyncStage]metrics.Gauge{}
 
 func init() {
-	for _, v := range stages.AllStages {
-		syncMetrics[v] = metrics.GetOrCreateGauge(
+	for _, v := range AllStages {
+		SyncMetrics[v] = metrics.GetOrCreateGauge(
 			fmt.Sprintf(
 				`sync{stage="%s"}`,
 				xstrings.ToSnakeCase(string(v)),
@@ -26,8 +25,8 @@ func init() {
 // UpdateMetrics - need update metrics manually because current "metrics" package doesn't support labels
 // need to fix it in future
 func UpdateMetrics(tx kv.Tx) error {
-	for id, m := range syncMetrics {
-		progress, err := stages.GetStageProgress(tx, id)
+	for id, m := range SyncMetrics {
+		progress, err := GetStageProgress(tx, id)
 		if err != nil {
 			return err
 		}

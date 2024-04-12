@@ -228,7 +228,7 @@ func ExecV3(ctx context.Context,
 	}
 	agg.SetTxNum(inputTxNum)
 
-	var outputBlockNum = syncMetrics[stages.Execution]
+	var outputBlockNum = stages.SyncMetrics[stages.Execution]
 	inputBlockNum := &atomic.Uint64{}
 	var count uint64
 	var lock sync.RWMutex
@@ -996,7 +996,7 @@ func reconstituteStep(last bool,
 				logger.Info(fmt.Sprintf("[%s] State reconstitution", s.LogPrefix()), "overall progress", fmt.Sprintf("%.2f%%", progress),
 					"step progress", fmt.Sprintf("%.2f%%", stepProgress),
 					"tx/s", fmt.Sprintf("%.1f", speedTx), "workCh", fmt.Sprintf("%d/%d", len(workCh), cap(workCh)),
-					"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio), "queue.len", rs.QueueLen(), "blk", syncMetrics[stages.Execution].GetValueUint64(),
+					"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio), "queue.len", rs.QueueLen(), "blk", stages.SyncMetrics[stages.Execution].GetValueUint64(),
 					"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(commitThreshold)),
 					"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 				if sizeEstimate >= commitThreshold {
@@ -1107,7 +1107,7 @@ func reconstituteStep(last bool,
 				inputTxNum++
 			}
 
-			syncMetrics[stages.Execution].SetUint64(bn)
+			stages.SyncMetrics[stages.Execution].SetUint64(bn)
 		}
 		return err
 	}(); err != nil {
