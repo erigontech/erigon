@@ -933,7 +933,7 @@ func (u *snapshotUploader) start(ctx context.Context, logger log.Logger) {
 		}
 	}
 
-	u.uploadSession, err = u.rclone.NewSession(ctx, u.cfg.dirs.Snap, uploadFs)
+	u.uploadSession, err = u.rclone.NewSession(ctx, u.cfg.dirs.Snap, uploadFs, nil)
 
 	if err != nil {
 		logger.Warn("[uploader] Uploading disabled: rclone session failed", "err", err)

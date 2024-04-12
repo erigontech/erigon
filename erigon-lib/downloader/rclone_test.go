@@ -34,7 +34,7 @@ func TestDownload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rcc, err := cli.NewSession(ctx, tmpDir, remoteDir)
+	rcc, err := cli.NewSession(ctx, tmpDir, remoteDir, nil)
 
 	if err != nil {
 		t.Fatal(err)
