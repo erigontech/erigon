@@ -306,7 +306,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 			continue
 		}
 		for _, subnet := range publishingSubnets {
-			if err := a.forkchoiceStore.OnSyncCommitteeMessage(v, subnet); err != nil {
+			if err := a.syncCommitteeMessagesService.ProcessMessage(r.Context(), &subnet, v); err != nil {
 				failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 				break
 			}

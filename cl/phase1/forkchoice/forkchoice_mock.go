@@ -245,11 +245,6 @@ func (f *ForkChoiceStorageMock) GetPublicKeyForValidator(blockRoot libcommon.Has
 	panic("implement me")
 }
 
-func (f *ForkChoiceStorageMock) OnSyncCommitteeMessage(msg *cltypes.SyncCommitteeMessage, subnetID uint64) error {
-	f.SyncContributionPool.AddSyncCommitteeMessage(nil, 0, msg)
-	return nil
-}
-
 func (f *ForkChoiceStorageMock) OnSignedContributionAndProof(signedContribution *cltypes.SignedContributionAndProof, test bool) error {
 	f.SyncContributionPool.AddSyncContribution(nil, signedContribution.Message.Contribution)
 	return nil

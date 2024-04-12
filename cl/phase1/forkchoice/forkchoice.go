@@ -40,12 +40,6 @@ type ForkNode struct {
 	ExecutionBlock libcommon.Hash `json:"execution_block_hash"`
 }
 
-type seenSyncCommitteeMessage struct {
-	subnet         uint64
-	slot           uint64
-	validatorIndex uint64
-}
-
 type seenSyncCommitteeContribution struct {
 	aggregatorIndex   uint64
 	slot              uint64
@@ -124,7 +118,6 @@ type ForkChoiceStore struct {
 
 	mu sync.RWMutex
 	// sync committees messages processing
-	seenSyncCommitteeMessages      map[seenSyncCommitteeMessage]struct{}
 	seenSyncCommitteeContributions map[seenSyncCommitteeContribution]struct{}
 	muSyncCommitteeMessages        sync.Mutex
 	muSyncContribution             sync.Mutex
@@ -258,7 +251,6 @@ func NewForkChoiceStore(anchorState *state2.CachingBeaconState, engine execution
 		hotSidecars:                    make(map[libcommon.Hash][]*cltypes.BlobSidecar),
 		blobStorage:                    blobStorage,
 		aggregationPool:                aggrPool,
-		seenSyncCommitteeMessages:      make(map[seenSyncCommitteeMessage]struct{}),
 		syncContributionPool:           syncContributionPool,
 		seenSyncCommitteeContributions: make(map[seenSyncCommitteeContribution]struct{}),
 	}

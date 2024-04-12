@@ -37,8 +37,9 @@ type GossipManager struct {
 	committeeSub *committee_subscription.CommitteeSubscribeMgmt
 
 	// Services for processing messages from the network
-	blockService services.BlockService
-	blobService  services.BlobSidecarsService
+	blockService                 services.BlockService
+	blobService                  services.BlobSidecarsService
+	syncCommitteeMessagesService services.SyncCommitteeMessagesService
 }
 
 func NewGossipReceiver(
@@ -50,16 +51,18 @@ func NewGossipReceiver(
 	comitteeSub *committee_subscription.CommitteeSubscribeMgmt,
 	blockService services.BlockService,
 	blobService services.BlobSidecarsService,
+	syncCommitteeMessagesService services.SyncCommitteeMessagesService,
 ) *GossipManager {
 	return &GossipManager{
-		sentinel:      s,
-		forkChoice:    forkChoice,
-		emitters:      emitters,
-		beaconConfig:  beaconConfig,
-		genesisConfig: genesisConfig,
-		committeeSub:  comitteeSub,
-		blockService:  blockService,
-		blobService:   blobService,
+		sentinel:                     s,
+		forkChoice:                   forkChoice,
+		emitters:                     emitters,
+		beaconConfig:                 beaconConfig,
+		genesisConfig:                genesisConfig,
+		committeeSub:                 comitteeSub,
+		blockService:                 blockService,
+		blobService:                  blobService,
+		syncCommitteeMessagesService: syncCommitteeMessagesService,
 	}
 }
 
@@ -152,14 +155,11 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 			// The background checks above are enough for now.
 			return g.blobService.ProcessMessage(ctx, data.SubnetId, blobSideCar)
 		case gossip.IsTopicSyncCommittee(data.Name):
-			if data.SubnetId == nil {
-				return fmt.Errorf("missing subnet id")
-			}
 			msg := &cltypes.SyncCommitteeMessage{}
 			if err := msg.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
 				return err
 			}
-			return g.forkChoice.OnSyncCommitteeMessage(msg, *data.SubnetId)
+			return g.syncCommitteeMessagesService.ProcessMessage(ctx, data.SubnetId, msg)
 		case gossip.IsTopicBeaconAttestation(data.Name):
 			att := &solid.Attestation{}
 			if err := att.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {

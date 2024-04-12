@@ -13,7 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/network/subnets"
 	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"golang.org/x/exp/slices"
@@ -373,30 +372,6 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedContribution *cltyp
 
 }
 
-func verifySyncCommitteeMessageSignature(s *state.CachingBeaconState, msg *cltypes.SyncCommitteeMessage) error {
-	publicKey, err := s.ValidatorPublicKey(int(msg.ValidatorIndex))
-	if err != nil {
-		return err
-	}
-	cfg := s.BeaconConfig()
-	domain, err := s.GetDomain(cfg.DomainSyncCommittee, state.Epoch(s))
-	if err != nil {
-		return err
-	}
-	signingRoot, err := utils.Sha256(msg.BeaconBlockRoot[:], domain), nil
-	if err != nil {
-		return err
-	}
-	valid, err := bls.Verify(msg.Signature[:], signingRoot[:], publicKey[:])
-	if err != nil {
-		return errors.New("invalid signature")
-	}
-	if !valid {
-		return errors.New("invalid signature")
-	}
-	return nil
-}
-
 func verifyAggregatorSignatureForSyncContribution(s *state.CachingBeaconState, signedContributionAndProof *cltypes.SignedContributionAndProof) error {
 	contribution := signedContributionAndProof.Message.Contribution
 	domain, err := s.GetDomain(s.BeaconConfig().DomainContributionAndProof, contribution.Slot/s.BeaconConfig().SlotsPerEpoch)
@@ -420,55 +395,4 @@ func verifyAggregatorSignatureForSyncContribution(s *state.CachingBeaconState, s
 		return errors.New("invalid aggregator signature")
 	}
 	return nil
-}
-
-func (f *ForkChoiceStore) cleanupOldSyncCommitteeMessages() {
-	headSlot := f.syncedDataManager.HeadSlot()
-	for k := range f.seenSyncCommitteeMessages {
-		if headSlot != k.slot {
-			delete(f.seenSyncCommitteeMessages, k)
-		}
-	}
-}
-
-func (f *ForkChoiceStore) OnSyncCommitteeMessage(msg *cltypes.SyncCommitteeMessage, subnetID uint64) error {
-	f.muSyncCommitteeMessages.Lock()
-	defer f.muSyncCommitteeMessages.Unlock()
-	if f.syncedDataManager.Syncing() {
-		return nil
-	}
-	headState := f.syncedDataManager.HeadState()
-	// [IGNORE] The message's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. sync_committee_message.slot == current_slot.
-	if !utils.IsCurrentSlotWithMaximumClockDisparity(headState.GenesisTime(), f.beaconCfg.SecondsPerSlot, msg.Slot) {
-		return nil
-	}
-
-	// [REJECT] The subnet_id is valid for the given validator, i.e. subnet_id in compute_subnets_for_sync_committee(state, sync_committee_message.validator_index).
-	// Note this validation implies the validator is part of the broader current sync committee along with the correct subcommittee.
-	subnets, err := subnets.ComputeSubnetsForSyncCommittee(headState, msg.ValidatorIndex)
-	if err != nil {
-		return err
-	}
-	seenSyncCommitteeMessageIdentifier := seenSyncCommitteeMessage{
-		subnet:         subnetID,
-		slot:           msg.Slot,
-		validatorIndex: msg.ValidatorIndex,
-	}
-
-	if !slices.Contains(subnets, subnetID) {
-		return fmt.Errorf("validator is not into any subnet %d", subnetID)
-	}
-	// [IGNORE] There has been no other valid sync committee message for the declared slot for the validator referenced by sync_committee_message.validator_index.
-	if _, ok := f.seenSyncCommitteeMessages[seenSyncCommitteeMessageIdentifier]; ok {
-		return nil
-	}
-	// [REJECT] The signature is valid for the message beacon_block_root for the validator referenced by validator_index
-
-	if err := verifySyncCommitteeMessageSignature(headState, msg); err != nil {
-		return err
-	}
-	f.seenSyncCommitteeMessages[seenSyncCommitteeMessageIdentifier] = struct{}{}
-	f.cleanupOldSyncCommitteeMessages() // cleanup old messages
-	// Aggregate the message
-	return f.syncContributionPool.AddSyncCommitteeMessage(headState, subnetID, msg)
 }

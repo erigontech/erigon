@@ -176,9 +176,12 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 	}
 	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, genesisConfig)
 	committeeSub := committee_subscription.NewCommitteeSubscribeManagement(ctx, indexDB, beaconConfig, networkConfig, genesisConfig, sentinel, state, aggregationPool, syncedDataManager)
+	// Define gossip services
 	blockService := services.NewBlockService(ctx, indexDB, forkChoice, syncedDataManager, genesisConfig, beaconConfig, emitters)
 	blobService := services.NewBlobSidecarService(ctx, beaconConfig, forkChoice, syncedDataManager, false)
-	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, genesisConfig, emitters, committeeSub, blockService, blobService)
+	syncCommitteeMessagesService := services.NewSyncCommitteeMessagesService(beaconConfig, syncedDataManager, syncContributionPool, false)
+
+	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, genesisConfig, emitters, committeeSub, blockService, blobService, syncCommitteeMessagesService)
 	{ // start ticking forkChoice
 		go func() {
 			tickInterval := time.NewTicker(2 * time.Millisecond)
@@ -282,6 +285,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 			syncContributionPool,
 			committeeSub,
 			aggregationPool,
+			syncCommitteeMessagesService,
 		)
 		go beacon.ListenAndServe(&beacon.LayeredBeaconHandler{
 			ArchiveApi: apiHandler,
