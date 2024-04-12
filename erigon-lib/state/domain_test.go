@@ -768,8 +768,8 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 func TestScanStaticFilesD(t *testing.T) {
 	logger := log.New()
 	ii := &Domain{History: &History{InvertedIndex: &InvertedIndex{filenameBase: "test", aggregationStep: 1, logger: logger}, logger: logger},
-		files:  btree2.NewBTreeG[*filesItem](filesItemLess),
-		logger: logger,
+		dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess),
+		logger:     logger,
 	}
 	files := []string{
 		"test.0-1.kv",
@@ -781,7 +781,7 @@ func TestScanStaticFilesD(t *testing.T) {
 	}
 	ii.scanStateFiles(files)
 	var found []string
-	ii.files.Walk(func(items []*filesItem) bool {
+	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			found = append(found, fmt.Sprintf("%d-%d", item.startTxNum, item.endTxNum))
 		}

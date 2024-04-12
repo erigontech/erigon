@@ -499,8 +499,8 @@ func TestChangedKeysIterator(t *testing.T) {
 func TestScanStaticFiles(t *testing.T) {
 	logger := log.New()
 	ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1,
-		files:  btree2.NewBTreeG[*filesItem](filesItemLess),
-		logger: logger,
+		dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess),
+		logger:     logger,
 	}
 	files := []string{
 		"test.0-1.ef",
@@ -511,20 +511,20 @@ func TestScanStaticFiles(t *testing.T) {
 		"test.4-5.ef",
 	}
 	ii.scanStateFiles(files)
-	require.Equal(t, 6, ii.files.Len())
+	require.Equal(t, 6, ii.dirtyFiles.Len())
 
 	//integrity extension case
-	ii.files.Clear()
+	ii.dirtyFiles.Clear()
 	ii.integrityFileExtensions = []string{"v"}
 	ii.scanStateFiles(files)
-	require.Equal(t, 0, ii.files.Len())
+	require.Equal(t, 0, ii.dirtyFiles.Len())
 }
 
 func TestCtxFiles(t *testing.T) {
 	logger := log.New()
 	ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1,
-		files:  btree2.NewBTreeG[*filesItem](filesItemLess),
-		logger: logger,
+		dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess),
+		logger:     logger,
 	}
 	files := []string{
 		"test.0-1.ef", // overlap with same `endTxNum=4`
@@ -539,9 +539,9 @@ func TestCtxFiles(t *testing.T) {
 		"test.480-512.ef",
 	}
 	ii.scanStateFiles(files)
-	require.Equal(t, 10, ii.files.Len())
+	require.Equal(t, 10, ii.dirtyFiles.Len())
 
-	roFiles := ctxFiles(ii.files)
+	roFiles := calcVisibleFiles(ii.dirtyFiles)
 	for i, item := range roFiles {
 		if item.src.canDelete.Load() {
 			require.Failf(t, "deleted file", "%d-%d", item.src.startTxNum, item.src.endTxNum)

@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/gossip"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/erigon/cl/phase1/network/subnets"
 	"github.com/ledgerwatch/erigon/cl/utils"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -39,7 +40,7 @@ func (f *ForkChoiceStore) OnAttestation(attestation *solid.Attestation, fromBloc
 	defer f.mu.Unlock()
 	f.headHash = libcommon.Hash{}
 	data := attestation.AttestantionData()
-	if err := f.validateOnAttestation(attestation, fromBlock); err != nil {
+	if err := f.ValidateOnAttestation(attestation); err != nil {
 		return err
 	}
 	currentEpoch := f.computeEpochAtSlot(f.Slot())
@@ -357,7 +358,7 @@ func (f *ForkChoiceStore) processAttestingIndicies(attestation *solid.Attestatio
 	}
 }
 
-func (f *ForkChoiceStore) validateOnAttestation(attestation *solid.Attestation, fromBlock bool) error {
+func (f *ForkChoiceStore) ValidateOnAttestation(attestation *solid.Attestation) error {
 	target := attestation.AttestantionData().Target()
 
 	if target.Epoch() != f.computeEpochAtSlot(attestation.AttestantionData().Slot()) {
@@ -406,12 +407,12 @@ func (f *ForkChoiceStore) OnCheckReceivedAttestation(topic string, att *solid.At
 		bits           = att.AggregationBits()
 	)
 	// [REJECT] The committee index is within the expected range
-	committeeCount := f.computeCommitteePerSlot(slot)
+	committeeCount := subnets.ComputeCommitteeCountPerSlot(f.syncedDataManager.HeadState(), slot, f.beaconCfg.SlotsPerEpoch)
 	if committeeIndex >= committeeCount {
 		return fmt.Errorf("committee index out of range")
 	}
 	// [REJECT] The attestation is for the correct subnet -- i.e. compute_subnet_for_attestation(committees_per_slot, attestation.data.slot, index) == subnet_id
-	subnetId := f.computeSubnetId(slot, committeeIndex)
+	subnetId := subnets.ComputeSubnetForAttestation(committeeCount, slot, committeeIndex, f.beaconCfg.SlotsPerEpoch, f.netCfg.AttestationSubnetCount)
 	topicSubnetId, err := gossip.SubnetIdFromTopicBeaconAttestation(topic)
 	if err != nil {
 		return err
@@ -500,20 +501,4 @@ func (f *ForkChoiceStore) OnCheckReceivedAttestation(topic string, att *solid.At
 		return fmt.Errorf("invalid finalized checkpoint %w", ErrIgnore)
 	}
 	return nil
-}
-
-func (f *ForkChoiceStore) computeSubnetId(slot uint64, committeeIndex uint64) uint64 {
-	committeePerSlot := f.computeCommitteePerSlot(slot)
-	// slots_since_epoch_start = uint64(slot % SLOTS_PER_EPOCH)
-	// committees_since_epoch_start = committees_per_slot * slots_since_epoch_start
-	// return SubnetID((committees_since_epoch_start + committee_index) % ATTESTATION_SUBNET_COUNT)
-	slotsSinceEpochStart := slot % f.beaconCfg.SlotsPerEpoch
-	committeesSinceEpochStart := committeePerSlot * slotsSinceEpochStart
-	return (committeesSinceEpochStart + committeeIndex) % f.netCfg.AttestationSubnetCount
-}
-
-func (f *ForkChoiceStore) computeCommitteePerSlot(slot uint64) uint64 {
-	epoch := slot / f.beaconCfg.SlotsPerEpoch
-	//return f.syncedData.HeadState().CommitteeCount(epoch)
-	return f.syncedDataManager.HeadState().CommitteeCount(epoch)
 }

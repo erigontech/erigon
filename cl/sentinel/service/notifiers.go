@@ -3,8 +3,6 @@ package service
 import (
 	"fmt"
 	"sync"
-
-	"github.com/ledgerwatch/erigon/cl/gossip"
 )
 
 const (
@@ -30,64 +28,12 @@ func newGossipNotifier() *gossipNotifier {
 	}
 }
 
-func (g *gossipNotifier) notify(t string, data []byte, pid string) {
+func (g *gossipNotifier) notify(obj *gossipObject) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
 	for _, ch := range g.notifiers {
-		ch <- gossipObject{
-			data: data,
-			t:    t,
-			pid:  pid,
-		}
-	}
-}
-
-func (g *gossipNotifier) notifyBlob(data []byte, pid string, blobIndex int) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	for _, ch := range g.notifiers {
-		sbI := new(uint64)
-		*sbI = uint64(blobIndex)
-		ch <- gossipObject{
-			data:     data,
-			t:        gossip.TopicNameBlobSidecar(uint64(blobIndex)),
-			pid:      pid,
-			subnetId: sbI,
-		}
-	}
-}
-
-func (g *gossipNotifier) notifyAttestation(data []byte, pid string, subnetId int) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	for _, ch := range g.notifiers {
-		sbI := new(uint64)
-		*sbI = uint64(subnetId)
-		ch <- gossipObject{
-			data:     data,
-			t:        gossip.TopicNameBeaconAttestation(uint64(subnetId)),
-			pid:      pid,
-			subnetId: sbI,
-		}
-	}
-}
-
-func (g *gossipNotifier) notifySyncCommittee(data []byte, pid string, subnetIndex int) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	for _, ch := range g.notifiers {
-		sbI := new(uint64)
-		*sbI = uint64(subnetIndex)
-		ch <- gossipObject{
-			data:     data,
-			t:        gossip.TopicNameSyncCommittee(subnetIndex),
-			pid:      pid,
-			subnetId: sbI,
-		}
+		ch <- *obj
 	}
 }
 

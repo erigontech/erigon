@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/ledgerwatch/erigon/cl/gossip"
 	"github.com/ledgerwatch/erigon/cl/sentinel"
@@ -49,18 +50,22 @@ func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel, logger 
 	}
 }
 
-// extractSubnetIndex takes a topic and extract the blob sidecar
-func extractSubnetIndex(topic string) int {
-	// e.g /eth2/d31f6191/blob_sidecar_3/ssz_snappy, we want to extract 3
-	// split them by /
-	parts := strings.Split(topic, "/")
-	name := parts[3]
+// extractSubnetIndexByGossipTopic takes a topic and extract the blob sidecar
+func extractSubnetIndexByGossipTopic(name string) int {
+	// e.g blob_sidecar_3, we want to extract 3
+	// reject if last character is not a number
+	if !unicode.IsNumber(rune(name[len(name)-1])) {
+		return -1
+	}
 	// get the last part of the topic
-	parts = strings.Split(name, "_")
+	parts := strings.Split(name, "_")
 	// convert it to int
-	index, _ := strconv.Atoi(parts[len(parts)-1])
+	index, err := strconv.Atoi(parts[len(parts)-1])
+	if err != nil {
+		log.Warn("[Sentinel] failed to parse subnet index", "topic", name, "err", err)
+		return -1
+	}
 	return index
-
 }
 
 //BanPeer(context.Context, *Peer) (*EmptyMessage, error)
@@ -370,30 +375,39 @@ func (s *SentinelServer) handleGossipPacket(pkt *sentinel.GossipMessage) error {
 		return err
 	}
 
-	msgType, msgCap := parseTopic(topic)
-	trackPeerStatistics(string(textPid), true, msgType, msgCap, len(data))
+	msgType, gossipTopic := parseTopic(topic)
+	trackPeerStatistics(string(textPid), true, msgType, gossipTopic, len(data))
 
-	// Check to which gossip it belongs to.
-	if strings.Contains(topic, string(gossip.TopicNameBeaconBlock)) {
-		s.gossipNotifier.notify(gossip.TopicNameBeaconBlock, data, string(textPid))
-	} else if strings.Contains(topic, string(gossip.TopicNameBeaconAggregateAndProof)) {
-		s.gossipNotifier.notify(gossip.TopicNameBeaconAggregateAndProof, data, string(textPid))
-	} else if strings.Contains(topic, string(gossip.TopicNameVoluntaryExit)) {
-		s.gossipNotifier.notify(gossip.TopicNameVoluntaryExit, data, string(textPid))
-	} else if strings.Contains(topic, string(gossip.TopicNameProposerSlashing)) {
-		s.gossipNotifier.notify(gossip.TopicNameProposerSlashing, data, string(textPid))
-	} else if strings.Contains(topic, string(gossip.TopicNameAttesterSlashing)) {
-		s.gossipNotifier.notify(gossip.TopicNameAttesterSlashing, data, string(textPid))
-	} else if strings.Contains(topic, string(gossip.TopicNameBlsToExecutionChange)) {
-		s.gossipNotifier.notify(gossip.TopicNameBlsToExecutionChange, data, string(textPid))
-	} else if strings.Contains(topic, string(gossip.TopicNameSyncCommitteeContributionAndProof)) {
-		s.gossipNotifier.notify(gossip.TopicNameSyncCommitteeContributionAndProof, data, string(textPid))
-	} else if gossip.IsTopicBlobSidecar(topic) {
-		s.gossipNotifier.notifyBlob(data, string(textPid), extractSubnetIndex(topic))
-	} else if gossip.IsTopicSyncCommittee(topic) {
-		s.gossipNotifier.notifySyncCommittee(data, string(textPid), extractSubnetIndex(topic))
-	} else if gossip.IsTopicBeaconAttestation(topic) {
-		s.gossipNotifier.notifyAttestation(data, string(textPid), extractSubnetIndex(topic))
+	switch gossipTopic {
+	case gossip.TopicNameBeaconBlock,
+		gossip.TopicNameBeaconAggregateAndProof,
+		gossip.TopicNameVoluntaryExit,
+		gossip.TopicNameProposerSlashing,
+		gossip.TopicNameAttesterSlashing,
+		gossip.TopicNameBlsToExecutionChange,
+		gossip.TopicNameSyncCommitteeContributionAndProof:
+		s.gossipNotifier.notify(&gossipObject{
+			data:     data,
+			t:        gossipTopic,
+			pid:      string(textPid),
+			subnetId: nil,
+		})
+	default:
+		// case for:
+		// TopicNamePrefixBlobSidecar
+		// TopicNamePrefixBeaconAttestation
+		// TopicNamePrefixSyncCommittee
+		subnet := extractSubnetIndexByGossipTopic(gossipTopic)
+		if subnet < 0 {
+			break
+		}
+		subnetId := uint64(subnet)
+		s.gossipNotifier.notify(&gossipObject{
+			data:     data,
+			t:        gossipTopic,
+			pid:      string(textPid),
+			subnetId: &subnetId,
+		})
 	}
 	return nil
 }
@@ -413,6 +427,7 @@ func trackPeerStatistics(peerID string, inbound bool, msgType string, msgCap str
 }
 
 func parseTopic(input string) (string, string) {
+	// e.g /eth2/d31f6191/blob_sidecar_3/ssz_snappy
 	parts := strings.Split(input, "/")
 
 	if len(parts) < 4 {

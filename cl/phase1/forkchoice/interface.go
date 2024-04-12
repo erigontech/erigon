@@ -52,6 +52,8 @@ type ForkChoiceStorageReader interface {
 	GetPreviousPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error)
 	GetValidatorSet(blockRoot libcommon.Hash) (*solid.ValidatorSet, error)
 	GetCurrentPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error)
+
+	ValidateOnAttestation(attestation *solid.Attestation) error
 }
 
 type ForkChoiceStorageWriter interface {
