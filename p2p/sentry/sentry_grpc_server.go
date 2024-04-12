@@ -210,6 +210,7 @@ func (pi *PeerInfo) Remove(reason *p2p.PeerError) {
 		pi.removeReason = reason
 		close(pi.removed)
 		pi.ctxCancel()
+		pi.peer.Disconnect(reason)
 	})
 }
 
@@ -620,7 +621,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 			DialCandidates: disc,
 			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) *p2p.PeerError {
 				peerID := peer.Pubkey()
-				printablePeerID := hex.EncodeToString(peerID[:])[:20]
+				printablePeerID := hex.EncodeToString(peerID[:])
 				if ss.getPeer(peerID) != nil {
 					return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscAlreadyConnected, nil, "peer already has connection")
 				}
@@ -646,27 +647,30 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 				// handshake is successful
 				logger.Trace("[p2p] Received status message OK", "peerId", printablePeerID, "name", peer.Name())
 
-				ss.GoodPeers.Store(peerID, peerInfo)
-				ss.sendNewPeerToClients(gointerfaces.ConvertHashToH512(peerID))
 				getBlockHeadersErr := ss.getBlockHeaders(ctx, *peerBestHash, peerID)
 				if getBlockHeadersErr != nil {
 					return p2p.NewPeerError(p2p.PeerErrorFirstMessageSend, p2p.DiscNetworkError, getBlockHeadersErr, "p2p.Protocol.Run getBlockHeaders failure")
 				}
 
-				cap := p2p.Cap{Name: eth.ProtocolName, Version: protocol}
+				capability := p2p.Cap{
+					Name:    eth.ProtocolName,
+					Version: protocol,
+				}
 
-				err = runPeer(
+				ss.GoodPeers.Store(peerID, peerInfo)
+				ss.sendNewPeerToClients(gointerfaces.ConvertHashToH512(peerID))
+				defer ss.sendGonePeerToClients(gointerfaces.ConvertHashToH512(peerID))
+
+				return runPeer(
 					ctx,
 					peerID,
-					cap,
+					capability,
 					rw,
 					peerInfo,
 					ss.send,
 					ss.hasSubscribers,
 					logger,
 				)
-				ss.sendGonePeerToClients(gointerfaces.ConvertHashToH512(peerID))
-				return err
 			},
 			NodeInfo: func() interface{} {
 				return readNodeInfo()
@@ -750,6 +754,7 @@ func (ss *GrpcServer) removePeer(peerID [64]byte, reason *p2p.PeerError) {
 	if value, ok := ss.GoodPeers.LoadAndDelete(peerID); ok {
 		peerInfo := value.(*PeerInfo)
 		if peerInfo != nil {
+			ss.logger.Trace("GrpcServer.removePeer", "peerId", hex.EncodeToString(peerID[:]))
 			peerInfo.Remove(reason)
 		}
 	}
