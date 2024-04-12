@@ -255,7 +255,7 @@ func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log
 func checkRanges(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 	t.Helper()
 	ctx := context.Background()
-	ic := ii.MakeContext()
+	ic := ii.BeginFilesRo()
 	defer ic.Close()
 
 	// Check the iterator ranges first without roTx
@@ -361,7 +361,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 
 			for {
 				if stop := func() bool {
-					ic := ii.MakeContext()
+					ic := ii.BeginFilesRo()
 					defer ic.Close()
 					found, startTxNum, endTxNum = ii.findMergeRange(maxEndTxNum, maxSpan)
 					if !found {
@@ -444,7 +444,7 @@ func TestChangedKeysIterator(t *testing.T) {
 	defer func() {
 		roTx.Rollback()
 	}()
-	ic := ii.MakeContext()
+	ic := ii.BeginFilesRo()
 	defer ic.Close()
 	it := ic.IterateChangedKeys(0, 20, roTx)
 	defer func() {
