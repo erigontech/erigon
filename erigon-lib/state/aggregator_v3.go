@@ -359,9 +359,9 @@ func (a *AggregatorV3) BuildOptionalMissedIndicesInBackground(ctx context.Contex
 	go func() {
 		defer a.wg.Done()
 		defer a.buildingOptionalIndices.Store(false)
-		filesTx := a.BeginFilesRo()
-		defer filesTx.Close()
-		if err := filesTx.buildOptionalMissedIndices(ctx, workers); err != nil {
+		aggTx := a.BeginFilesRo()
+		defer aggTx.Close()
+		if err := aggTx.buildOptionalMissedIndices(ctx, workers); err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
 				return
 			}
@@ -632,19 +632,19 @@ Loop:
 func (a *AggregatorV3) mergeLoopStep(ctx context.Context) (somethingDone bool, err error) {
 	a.logger.Debug("[agg] merge", "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].compressWorkers)
 
-	filesTx := a.BeginFilesRo()
-	defer filesTx.Close()
+	aggTx := a.BeginFilesRo()
+	defer aggTx.Close()
 	mxRunningMerges.Inc()
 	defer mxRunningMerges.Dec()
 
 	closeAll := true
 	maxSpan := StepsInColdFile * a.StepSize()
-	r := filesTx.findMergeRange(a.minimaxTxNumInFiles.Load(), maxSpan)
+	r := aggTx.findMergeRange(a.minimaxTxNumInFiles.Load(), maxSpan)
 	if !r.any() {
 		return false, nil
 	}
 
-	outs, err := filesTx.staticFilesInRange(r)
+	outs, err := aggTx.staticFilesInRange(r)
 	defer func() {
 		if closeAll {
 			outs.Close()
@@ -654,7 +654,7 @@ func (a *AggregatorV3) mergeLoopStep(ctx context.Context) (somethingDone bool, e
 		return false, err
 	}
 
-	in, err := filesTx.mergeFiles(ctx, outs, r)
+	in, err := aggTx.mergeFiles(ctx, outs, r)
 	if err != nil {
 		return true, err
 	}
@@ -663,7 +663,7 @@ func (a *AggregatorV3) mergeLoopStep(ctx context.Context) (somethingDone bool, e
 			in.Close()
 		}
 	}()
-	filesTx.integrateMergedFiles(outs, in)
+	aggTx.integrateMergedFiles(outs, in)
 	a.onFreeze(in.FrozenList())
 	closeAll = false
 	return true, nil

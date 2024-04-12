@@ -158,8 +158,8 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string, log
 		} else {
 			v3db := db.(*temporal.DB)
 			agg := v3db.Agg()
-			ct := agg.BeginFilesRo()
-			defer ct.Close()
+			aggTx := agg.BeginFilesRo()
+			defer aggTx.Close()
 			doms, err := state.NewSharedDomains(tx, logger)
 			if err != nil {
 				return err
