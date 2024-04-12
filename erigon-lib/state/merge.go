@@ -203,39 +203,6 @@ func (ii *InvertedIndex) findMergeRange(maxEndTxNum, maxSpan uint64) (bool, uint
 	return minFound, startTxNum, endTxNum
 }
 
-func (ii *InvertedIndex) mergeRangesUpTo(ctx context.Context, maxTxNum, maxSpan uint64, workers int, ictx *InvertedIndexRoTx, ps *background.ProgressSet) (err error) {
-	closeAll := true
-	for updated, startTx, endTx := ii.findMergeRange(maxSpan, maxTxNum); updated; updated, startTx, endTx = ii.findMergeRange(maxTxNum, maxSpan) {
-		staticFiles, _ := ictx.staticFilesInRange(startTx, endTx)
-		defer func() {
-			if closeAll {
-				for _, i := range staticFiles {
-					i.decompressor.Close()
-					i.index.Close()
-				}
-			}
-		}()
-
-		mergedIndex, err := ii.mergeFiles(ctx, staticFiles, startTx, endTx, workers, ps)
-		if err != nil {
-			return err
-		}
-		defer func() {
-			if closeAll {
-				mergedIndex.decompressor.Close()
-				mergedIndex.index.Close()
-			}
-		}()
-
-		ii.integrateMergedFiles(staticFiles, mergedIndex)
-		if mergedIndex.frozen {
-			ii.cleanAfterFreeze(mergedIndex.endTxNum)
-		}
-	}
-	closeAll = false
-	return nil
-}
-
 type HistoryRanges struct {
 	historyStartTxNum uint64
 	historyEndTxNum   uint64
@@ -1137,7 +1104,7 @@ func (iit *InvertedIndexRoTx) frozenTo() uint64 {
 	return 0
 }
 
-func (d *Domain) cleanAfterFreeze(frozenTo uint64) {
+func (d *Domain) cleanAfterFreeze(frozenTo uint64) { //nolint
 	if frozenTo == 0 {
 		return
 	}
