@@ -567,24 +567,6 @@ func (c Collation) Close() {
 	}
 }
 
-type kvpair struct {
-	k, v []byte
-}
-
-func (d *Domain) writeCollationPair(valuesComp *seg.Compressor, pairs chan kvpair) (count int, err error) {
-	for kv := range pairs {
-		if err = valuesComp.AddUncompressedWord(kv.k); err != nil {
-			return count, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, kv.k, err)
-		}
-		mxCollationSize.Inc()
-		count++ // Only counting keys, not values
-		if err = valuesComp.AddUncompressedWord(kv.v); err != nil {
-			return count, fmt.Errorf("add %s values val [%x]=>[%x]: %w", d.filenameBase, kv.k, kv.v, err)
-		}
-	}
-	return count, nil
-}
-
 // collate gathers domain changes over the specified step, using read-only transaction,
 // and returns compressors, elias fano, and bitmaps
 // [txFrom; txTo)
