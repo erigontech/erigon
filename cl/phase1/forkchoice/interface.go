@@ -53,6 +53,7 @@ type ForkChoiceStorageReader interface {
 	GetValidatorSet(blockRoot libcommon.Hash) (*solid.ValidatorSet, error)
 	GetCurrentPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error)
 	GetPublicKeyForValidator(blockRoot libcommon.Hash, idx uint64) (libcommon.Bytes48, error)
+	ValidateOnAttestation(attestation *solid.Attestation) error
 }
 
 type ForkChoiceStorageWriter interface {

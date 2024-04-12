@@ -7,8 +7,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/gossip"
 	"github.com/ledgerwatch/erigon/cl/phase1/network/subnets"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func (a *ApiHandler) GetEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -52,6 +54,66 @@ func (a *ApiHandler) GetEthV1BeaconPoolAttestations(w http.ResponseWriter, r *ht
 	}
 
 	return newBeaconResponse(ret), nil
+}
+
+func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *http.Request) {
+	req := []*solid.Attestation{}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+		return
+	}
+	failures := []poolingFailure{}
+	for i, attestation := range req {
+		if err := a.forkchoiceStore.ValidateOnAttestation(attestation); err != nil {
+			failures = append(failures, poolingFailure{
+				Index:   i,
+				Message: err.Error(),
+			})
+			continue
+		}
+		if err := a.committeeSub.CheckAggregateAttestation(attestation); err != nil {
+			failures = append(failures, poolingFailure{
+				Index:   i,
+				Message: err.Error(),
+			})
+			continue
+		}
+		if a.sentinel != nil {
+			// broadcast
+			var (
+				slot                  = attestation.AttestantionData().Slot()
+				cIndex                = attestation.AttestantionData().CommitteeIndex()
+				committeeCountPerSlot = subnets.ComputeCommitteeCountPerSlot(a.syncedData.HeadState(), slot, a.beaconChainCfg.SlotsPerEpoch)
+				subnet                = subnets.ComputeSubnetForAttestation(committeeCountPerSlot, slot, cIndex, a.beaconChainCfg.SlotsPerEpoch, a.netConfig.AttestationSubnetCount)
+			)
+			encodedSSZ, err := attestation.EncodeSSZ(nil)
+			if err != nil {
+				beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+				return
+			}
+			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
+				Data:     encodedSSZ,
+				Name:     gossip.TopicNameBeaconAttestation(subnet),
+				SubnetId: &subnet,
+			}); err != nil {
+				beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+				return
+			}
+		}
+	}
+	if len(failures) > 0 {
+		errResp := poolingError{
+			Code:     http.StatusBadRequest,
+			Message:  "some failures",
+			Failures: failures,
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		if err := json.NewEncoder(w).Encode(errResp); err != nil {
+			log.Warn("failed to encode response", "err", err)
+		}
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r *http.Request) {
@@ -150,7 +212,7 @@ type poolingFailure struct {
 type poolingError struct {
 	Code     int              `json:"code"`
 	Message  string           `json:"message"`
-	Failures []poolingFailure `json:"failures"`
+	Failures []poolingFailure `json:"failures,omitempty"`
 }
 
 func (a *ApiHandler) PostEthV1BeaconPoolBlsToExecutionChanges(w http.ResponseWriter, r *http.Request) {

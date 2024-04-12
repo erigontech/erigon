@@ -33,6 +33,7 @@ func (t *validatorTestSuite) SetupTest() {
 		nil,
 		nil,
 		nil,
+		nil,
 		pool.OperationsPool{},
 		nil,
 		nil,

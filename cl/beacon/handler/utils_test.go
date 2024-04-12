@@ -81,6 +81,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	vp = validator_params.NewValidatorParams()
 	h = NewApiHandler(
 		logger,
+		&clparams.NetworkConfig{},
 		&gC,
 		&bcfg,
 		db,
