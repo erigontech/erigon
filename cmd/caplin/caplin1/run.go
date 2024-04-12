@@ -20,7 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/rpc"
 	"github.com/ledgerwatch/erigon/cl/sentinel"
 	"github.com/ledgerwatch/erigon/cl/sentinel/service"
@@ -45,6 +44,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
+	"github.com/ledgerwatch/erigon/cl/phase1/network/services"
 	"github.com/ledgerwatch/erigon/cl/phase1/stages"
 	"github.com/ledgerwatch/erigon/cl/pool"
 
@@ -175,9 +175,10 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 		return err
 	}
 	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, genesisConfig)
-	gossipSource := persistence.NewGossipSource(ctx)
 	committeeSub := committee_subscription.NewCommitteeSubscribeManagement(ctx, indexDB, beaconConfig, networkConfig, genesisConfig, sentinel, state, aggregationPool, syncedDataManager)
-	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, genesisConfig, emitters, gossipSource, committeeSub)
+	blockService := services.NewBlockService(ctx, indexDB, forkChoice, syncedDataManager, genesisConfig, beaconConfig, emitters)
+	blobService := services.NewBlobSidecarService(ctx, beaconConfig, forkChoice, syncedDataManager, false)
+	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, genesisConfig, emitters, committeeSub, blockService, blobService)
 	{ // start ticking forkChoice
 		go func() {
 			tickInterval := time.NewTicker(2 * time.Millisecond)
@@ -290,7 +291,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 
 	forkChoice.StartJobsRTT(ctx)
 
-	stageCfg := stages.ClStagesCfg(beaconRpc, antiq, genesisConfig, beaconConfig, state, engine, gossipManager, forkChoice, indexDB, csn, rcsn, dirs.Tmp, dbConfig, backfilling, blobBackfilling, syncedDataManager, emitters, gossipSource, blobStorage, attestationProducer)
+	stageCfg := stages.ClStagesCfg(beaconRpc, antiq, genesisConfig, beaconConfig, state, engine, gossipManager, forkChoice, indexDB, csn, rcsn, dirs.Tmp, dbConfig, backfilling, blobBackfilling, syncedDataManager, emitters, blobStorage, attestationProducer)
 	sync := stages.ConsensusClStages(ctx, stageCfg)
 
 	logger.Info("[Caplin] starting clstages loop")

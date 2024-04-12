@@ -97,8 +97,6 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	if block.Version() >= clparams.DenebVersion && checkDataAvaiability {
 		if err := f.isDataAvailable(ctx, block.Block.Slot, blockRoot, block.Block.Body.BlobKzgCommitments); err != nil {
 			if err == ErrEIP4844DataNotAvailable {
-				log.Info("Blob data is not available, the block will be scheduled for later processing", "slot", block.Block.Slot, "blockRoot", libcommon.Hash(blockRoot))
-				f.scheduleBlockForLaterProcessing(block)
 				return err
 			}
 			return fmt.Errorf("OnBlock: data is not available for block %x: %v", blockRoot, err)
@@ -106,6 +104,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	}
 
 	var invalidBlock bool
+	startEngine := time.Now()
 	if newPayload && f.engine != nil {
 		if block.Version() >= clparams.DenebVersion {
 			if err := verifyKzgCommitmentsAgainstTransactions(f.beaconCfg, block.Block.Body.ExecutionPayload, block.Block.Body.BlobKzgCommitments); err != nil {
@@ -117,15 +116,14 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			if invalidBlock {
 				f.forkGraph.MarkHeaderAsInvalid(blockRoot)
 			}
-			log.Warn("newPayload failed", "err", err)
-			return err
+			return fmt.Errorf("newPayload failed: %v", err)
 		}
 		if invalidBlock {
 			f.forkGraph.MarkHeaderAsInvalid(blockRoot)
 			return fmt.Errorf("execution client failed")
 		}
 	}
-
+	log.Debug("OnBlock: engine", "elapsed", time.Since(startEngine))
 	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation)
 	if err != nil {
 		return err
@@ -179,11 +177,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		currentJustifiedCheckpoint:  lastProcessedState.CurrentJustifiedCheckpoint().Copy(),
 		previousJustifiedCheckpoint: lastProcessedState.PreviousJustifiedCheckpoint().Copy(),
 	})
-	pks, err := f.deriveNonAnchorPublicKeys(lastProcessedState)
-	if err != nil {
-		return err
-	}
-	f.publicKeysPerState.Store(libcommon.Hash(blockRoot), pks)
+
 	f.totalActiveBalances.Add(blockRoot, lastProcessedState.GetTotalActiveBalance())
 	// Update checkpoints
 	f.updateCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint().Copy(), lastProcessedState.FinalizedCheckpoint().Copy())
