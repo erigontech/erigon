@@ -37,7 +37,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		ii.reCalcVisibleFiles()
 
-		ic := ii.BeginFilesRo()
+		ic := ii.BeginRo()
 		defer ic.Close()
 
 		needMerge, from, to := ic.findMergeRange(4, 32)
@@ -61,7 +61,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			return true
 		})
 		ii.reCalcVisibleFiles()
-		ic = ii.BeginFilesRo()
+		ic = ii.BeginRo()
 		defer ic.Close()
 
 		needMerge, from, to = ic.findMergeRange(4, 32)
@@ -84,7 +84,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		h.reCalcVisibleFiles()
 		ic.Close()
 
-		hc := h.BeginFilesRo()
+		hc := h.BeginRo()
 		defer hc.Close()
 		r := hc.findMergeRange(4, 32)
 		assert.True(t, r.history)
@@ -118,7 +118,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		h.reCalcVisibleFiles()
 
-		hc := h.BeginFilesRo()
+		hc := h.BeginRo()
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
@@ -154,7 +154,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		h.reCalcVisibleFiles()
 
-		hc := h.BeginFilesRo()
+		hc := h.BeginRo()
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
@@ -193,7 +193,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		h.reCalcVisibleFiles()
 
-		hc := h.BeginFilesRo()
+		hc := h.BeginRo()
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
@@ -231,7 +231,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		h.reCalcVisibleFiles()
 
-		hc := h.BeginFilesRo()
+		hc := h.BeginRo()
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
@@ -269,7 +269,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		h.reCalcVisibleFiles()
 
-		hc := h.BeginFilesRo()
+		hc := h.BeginRo()
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
@@ -312,7 +312,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		h.reCalcVisibleFiles()
 
-		hc := h.BeginFilesRo()
+		hc := h.BeginRo()
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
@@ -352,7 +352,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		h.reCalcVisibleFiles()
 
-		hc := h.BeginFilesRo()
+		hc := h.BeginRo()
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
@@ -392,7 +392,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		h.reCalcVisibleFiles()
 
-		hc := h.BeginFilesRo()
+		hc := h.BeginRo()
 		defer hc.Close()
 		r := hc.findMergeRange(4, 32)
 		assert.False(t, r.index)
@@ -413,7 +413,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			return true
 		})
 		ii.reCalcVisibleFiles()
-		ic := ii.BeginFilesRo()
+		ic := ii.BeginRo()
 		defer ic.Close()
 		needMerge, from, to := ic.findMergeRange(4, 32)
 		assert.True(t, needMerge)
@@ -489,7 +489,7 @@ func TestMergeFiles(t *testing.T) {
 	defer db.Close()
 	defer d.Close()
 
-	dc := d.BeginFilesRo()
+	dc := d.BeginRo()
 	defer dc.Close()
 
 	txs := d.aggregationStep * 8
@@ -524,7 +524,7 @@ func TestMergeFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	dc = d.BeginFilesRo()
+	dc = d.BeginRo()
 	defer dc.Close()
 
 	err = dc.IteratePrefix(rwTx, nil, func(key, value []byte) error {
