@@ -34,11 +34,11 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/gateway-fm/cdk-erigon-lib/txpool/txpoolcfg"
 	"github.com/go-stack/stack"
 	"github.com/google/btree"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
-	"github.com/gateway-fm/cdk-erigon-lib/txpool/txpoolcfg"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/log/v3"
 
@@ -139,6 +139,7 @@ const (
 	NotReplaced         DiscardReason = 20 // There was an existing transaction with the same sender and nonce, not enough price bump to replace
 	DuplicateHash       DiscardReason = 21 // There was an existing transaction with the same hash
 	InitCodeTooLarge    DiscardReason = 22 // EIP-3860 - transaction init code is too large
+	UnsupportedTx       DiscardReason = 23 // unsupported transaction type
 )
 
 func (r DiscardReason) String() string {
@@ -189,6 +190,8 @@ func (r DiscardReason) String() string {
 		return "existing tx with same hash"
 	case InitCodeTooLarge:
 		return "initcode too large"
+	case UnsupportedTx:
+		return "unsupported transaction type"
 	default:
 		panic(fmt.Sprintf("discard reason: %d", r))
 	}
@@ -291,6 +294,8 @@ type TxPool struct {
 	started                 atomic.Bool
 	pendingBaseFee          atomic.Uint64
 	blockGasLimit           atomic.Uint64
+	londonBlock             *big.Int
+	isPostLondon            atomic.Bool
 	shanghaiTime            *big.Int
 	isPostShanghai          atomic.Bool
 	allowFreeTransactions   bool
@@ -301,7 +306,7 @@ type TxPool struct {
 	flushMtx *sync.Mutex
 }
 
-func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, zkCfg *ethconfig.Zk, cache kvcache.Cache, chainID uint256.Int, shanghaiTime *big.Int) (*TxPool, error) {
+func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, zkCfg *ethconfig.Zk, cache kvcache.Cache, chainID uint256.Int, shanghaiTime *big.Int, londonBlock *big.Int) (*TxPool, error) {
 	var err error
 	localsHistory, err := simplelru.NewLRU[string, struct{}](10_000, nil)
 	if err != nil {
@@ -339,6 +344,7 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		chainID:                 chainID,
 		unprocessedRemoteTxs:    &types.TxSlots{},
 		unprocessedRemoteByHash: map[string]int{},
+		londonBlock:             londonBlock,
 		shanghaiTime:            shanghaiTime,
 		allowFreeTransactions:   zkCfg.AllowFreeTransactions,
 		flushMtx:                &sync.Mutex{},
@@ -641,6 +647,11 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		}
 	}
 
+	isLondon := p.isLondon()
+	if !isLondon && txn.Type == 0x2 {
+		return UnsupportedTx
+	}
+
 	// Drop non-local transactions under our own minimal accepted gas price or tip
 	if !isLocal && uint256.NewInt(p.cfg.MinFeeCap).Cmp(&txn.FeeCap) == 1 {
 		if txn.Traced {
@@ -715,6 +726,19 @@ func (p *TxPool) isShanghai() bool {
 		p.isPostShanghai.Swap(true)
 	}
 	return is
+}
+
+func (p *TxPool) isLondon() bool {
+	set := p.isPostLondon.Load()
+	if set {
+		return true
+	}
+	lbsBig := big.NewInt(0).SetUint64(p.lastSeenBlock.Load())
+	if p.londonBlock.Cmp(lbsBig) <= 0 {
+		p.isPostLondon.Swap(true)
+		return true
+	}
+	return false
 }
 
 func (p *TxPool) ValidateSerializedTxn(serializedTxn []byte) error {

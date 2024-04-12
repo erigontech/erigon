@@ -154,6 +154,8 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 	}
 
 	isShanghai := p.isShanghai()
+	isLondon := p.isLondon()
+	_ = isLondon
 	best := p.pending.best
 
 	txs.Resize(uint(cmp.Min(int(n), len(best.ms))))
@@ -169,6 +171,13 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 		mt := best.ms[i]
 
 		if toSkip.Contains(mt.Tx.IDHash) {
+			continue
+		}
+
+		if !isLondon && mt.Tx.Type == 0x2 {
+			// remove ldn txs when not in london
+			toRemove = append(toRemove, mt)
+			toSkip.Add(mt.Tx.IDHash)
 			continue
 		}
 

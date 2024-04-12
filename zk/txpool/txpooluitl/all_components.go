@@ -124,7 +124,7 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, zkCfg *ethconfig.Z
 		shanghaiTime = cfg.OverrideShanghaiTime
 	}
 
-	txPool, err := txpool.New(newTxs, chainDB, cfg, zkCfg, cache, *chainID, shanghaiTime)
+	txPool, err := txpool.New(newTxs, chainDB, cfg, zkCfg, cache, *chainID, shanghaiTime, chainConfig.LondonBlock)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
