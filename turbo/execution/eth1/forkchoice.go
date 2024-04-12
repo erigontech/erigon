@@ -126,7 +126,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		return
 	}
 	defer func() {
-		if tx == nil {
+		if tx != nil {
 			tx.Rollback()
 		}
 	}()
