@@ -10,18 +10,18 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/gossip"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/phase1/network/services"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cl/validator/committee_subscription"
 	"google.golang.org/grpc"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -63,16 +63,14 @@ func NewGossipReceiver(
 	}
 }
 
-func operationsContract[T ssz.EncodableSSZ](ctx context.Context, g *GossipManager, l log.Ctx, data *sentinel.GossipData, version int, name string, fn func(T, bool) error) error {
+func operationsContract[T ssz.EncodableSSZ](ctx context.Context, g *GossipManager, data *sentinel.GossipData, version int, name string, fn func(T, bool) error) error {
 	var t T
 	object := t.Clone().(T)
 	if err := object.DecodeSSZ(common.CopyBytes(data.Data), version); err != nil {
 		g.sentinel.BanPeer(ctx, data.Peer)
-		l["at"] = fmt.Sprintf("decoding %s", name)
 		return err
 	}
 	if err := fn(object /*test=*/, false); err != nil {
-		l["at"] = fmt.Sprintf("verify %s", name)
 		return err
 	}
 	if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
@@ -82,12 +80,12 @@ func operationsContract[T ssz.EncodableSSZ](ctx context.Context, g *GossipManage
 }
 
 func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l log.Ctx) (err error) {
-	// defer func() {
-	// 	r := recover()
-	// 	if r != nil {
-	// 		err = fmt.Errorf("%v", r)
-	// 	}
-	// }()
+	defer func() {
+		r := recover()
+		if r != nil {
+			err = fmt.Errorf("%v", r)
+		}
+	}()
 	// Make a copy of the gossip data so that we the received data is not modified.
 	// 1) When we publish and corrupt the data, the peers bans us.
 	// 2) We decode the block wrong
@@ -98,6 +96,23 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 		Data:     common.CopyBytes(data.Data),
 	}
 
+	if err := g.routeAndProcess(ctx, data); err != nil {
+		return err
+	}
+	if errors.Is(err, services.ErrIgnore) {
+		return nil
+	}
+	if err != nil {
+		g.sentinel.BanPeer(ctx, data.Peer)
+		return err
+	}
+	if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
+		log.Debug("failed publish gossip", "err", err)
+	}
+	return nil
+}
+
+func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.GossipData) error {
 	currentEpoch := utils.GetCurrentEpoch(g.genesisConfig.GenesisTime, g.beaconConfig.SecondsPerSlot, g.beaconConfig.SlotsPerEpoch)
 	version := g.beaconConfig.GetCurrentStateVersion(currentEpoch)
 
@@ -109,71 +124,46 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 	case gossip.TopicNameBeaconBlock:
 		obj := cltypes.NewSignedBeaconBlock(g.beaconConfig)
 		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
-			g.sentinel.BanPeer(ctx, data.Peer)
-			l["at"] = "decoding block"
 			return err
 		}
 		log.Debug("Received block via gossip", "slot", obj.Block.Slot)
-		err = g.blockService.ProcessMessage(ctx, data.SubnetId, obj)
+		return g.blockService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameSyncCommitteeContributionAndProof:
-		if err := operationsContract[*cltypes.SignedContributionAndProof](ctx, g, l, data, int(version), "contribution and proof", g.forkChoice.OnSignedContributionAndProof); err != nil {
-			return err
-		}
+		return operationsContract[*cltypes.SignedContributionAndProof](ctx, g, data, int(version), "contribution and proof", g.forkChoice.OnSignedContributionAndProof)
 	case gossip.TopicNameVoluntaryExit:
-		if err := operationsContract[*cltypes.SignedVoluntaryExit](ctx, g, l, data, int(version), "voluntary exit", g.forkChoice.OnVoluntaryExit); err != nil {
-			return err
-		}
+		return operationsContract[*cltypes.SignedVoluntaryExit](ctx, g, data, int(version), "voluntary exit", g.forkChoice.OnVoluntaryExit)
 	case gossip.TopicNameProposerSlashing:
-		if err := operationsContract[*cltypes.ProposerSlashing](ctx, g, l, data, int(version), "proposer slashing", g.forkChoice.OnProposerSlashing); err != nil {
-			return err
-		}
+		return operationsContract[*cltypes.ProposerSlashing](ctx, g, data, int(version), "proposer slashing", g.forkChoice.OnProposerSlashing)
 	case gossip.TopicNameAttesterSlashing:
-		if err := operationsContract[*cltypes.AttesterSlashing](ctx, g, l, data, int(version), "attester slashing", g.forkChoice.OnAttesterSlashing); err != nil {
-			return err
-		}
+		return operationsContract[*cltypes.AttesterSlashing](ctx, g, data, int(version), "attester slashing", g.forkChoice.OnAttesterSlashing)
 	case gossip.TopicNameBlsToExecutionChange:
-		if err := operationsContract[*cltypes.SignedBLSToExecutionChange](ctx, g, l, data, int(version), "bls to execution change", g.forkChoice.OnBlsToExecutionChange); err != nil {
-			return err
-		}
+		return operationsContract[*cltypes.SignedBLSToExecutionChange](ctx, g, data, int(version), "bls to execution change", g.forkChoice.OnBlsToExecutionChange)
 	case gossip.TopicNameBeaconAggregateAndProof:
-		if err := operationsContract[*cltypes.SignedAggregateAndProof](ctx, g, l, data, int(version), "aggregate and proof", g.forkChoice.OnAggregateAndProof); err != nil {
-			return err
-		}
-
+		return operationsContract[*cltypes.SignedAggregateAndProof](ctx, g, data, int(version), "aggregate and proof", g.forkChoice.OnAggregateAndProof)
 	default:
 		switch {
 		case gossip.IsTopicBlobSidecar(data.Name):
 			// decode sidecar
 			blobSideCar := &cltypes.BlobSidecar{}
 			if err := blobSideCar.DecodeSSZ(data.Data, int(version)); err != nil {
-				g.sentinel.BanPeer(ctx, data.Peer)
-				l["at"] = "decoding blob sidecar"
 				return err
 			}
-
+			defer log.Debug("Received blob sidecar via gossip", "index", *data.SubnetId, "size", datasize.ByteSize(len(blobSideCar.Blob)))
 			// The background checks above are enough for now.
-			err = g.blobService.ProcessMessage(ctx, data.SubnetId, blobSideCar)
-			log.Debug("Received blob sidecar via gossip", "index", *data.SubnetId, "size", datasize.ByteSize(len(blobSideCar.Blob)))
+			return g.blobService.ProcessMessage(ctx, data.SubnetId, blobSideCar)
 		case gossip.IsTopicSyncCommittee(data.Name):
 			if data.SubnetId == nil {
 				return fmt.Errorf("missing subnet id")
 			}
 			msg := &cltypes.SyncCommitteeMessage{}
 			if err := msg.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
-				g.sentinel.BanPeer(ctx, data.Peer)
-				l["at"] = "decoding sync committee message"
 				return err
 			}
-			if err := g.forkChoice.OnSyncCommitteeMessage(msg, *data.SubnetId); err != nil {
-				g.sentinel.BanPeer(ctx, data.Peer)
-				l["at"] = "on sync committee message"
-				return err
-			}
+			return g.forkChoice.OnSyncCommitteeMessage(msg, *data.SubnetId)
 		case gossip.IsTopicBeaconAttestation(data.Name):
 			att := &solid.Attestation{}
 			if err := att.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
 				g.sentinel.BanPeer(ctx, data.Peer)
-				l["at"] = "decoding attestation"
 				return err
 			}
 			if err := g.forkChoice.OnCheckReceivedAttestation(data.Name, att); err != nil {
@@ -181,32 +171,14 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 				if errors.Is(err, forkchoice.ErrIgnore) {
 					return nil
 				}
-				g.sentinel.BanPeer(ctx, data.Peer)
 				return err
 			}
 			// check if it needs to be aggregated
-			if err := g.committeeSub.CheckAggregateAttestation(att); err != nil {
-				log.Debug("failed to check aggregate attestation", "err", err)
-			}
-			// publish
-			if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
-				log.Debug("failed publish gossip", "err", err)
-			}
+			return g.committeeSub.CheckAggregateAttestation(att)
 		default:
+			return fmt.Errorf("unknown topic %s", data.Name)
 		}
 	}
-	if errors.Is(err, services.ErrIgnore) {
-		return nil
-	}
-	if err != nil {
-		l["at"] = "block service"
-		g.sentinel.BanPeer(ctx, data.Peer)
-		return err
-	}
-	if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
-		log.Debug("failed publish gossip", "err", err)
-	}
-	return nil
 }
 
 func (g *GossipManager) Start(ctx context.Context) {
