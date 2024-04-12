@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -19,7 +18,6 @@ import (
 	"golang.org/x/exp/slices"
 
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/commitment"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -1499,83 +1497,6 @@ func blocksIO(db kv.RoDB, logger log.Logger) (services.FullBlockReader, *blockio
 		_blockWriterSingleton = blockio.NewBlockWriter(histV3)
 	})
 	return _blockReaderSingleton, _blockWriterSingleton
-}
-
-var openDomainsOnce sync.Once
-var _aggDomainSingleton *libstate.Aggregator
-
-func allDomains(ctx context.Context, db kv.RoDB, stepSize uint64, mode libstate.CommitmentMode, trie commitment.TrieVariant, logger log.Logger) (*freezeblocks.RoSnapshots, *libstate.Aggregator) {
-	openDomainsOnce.Do(func() {
-		var useSnapshots bool
-		_ = db.View(context.Background(), func(tx kv.Tx) error {
-			useSnapshots, _ = snap.Enabled(tx)
-			return nil
-		})
-		dirs := datadir.New(datadirCli)
-		dir.MustExist(dirs.SnapHistory)
-
-		snapCfg := ethconfig.NewSnapCfg(useSnapshots, true, true)
-		_allSnapshotsSingleton = freezeblocks.NewRoSnapshots(snapCfg, dirs.Snap, 0, logger)
-
-		var err error
-		_aggDomainSingleton, err = libstate.NewAggregator(filepath.Join(dirs.DataDir, "state"), dirs.Tmp, stepSize, mode, trie, logger)
-		if err != nil {
-			panic(err)
-		}
-		if err = _aggDomainSingleton.ReopenFolder(); err != nil {
-			panic(err)
-		}
-
-		if useSnapshots {
-			if err := _allSnapshotsSingleton.ReopenFolder(); err != nil {
-				panic(err)
-			}
-			_allSnapshotsSingleton.LogStat("all:singleton")
-			//db.View(context.Background(), func(tx kv.Tx) error {
-			//	_aggSingleton.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
-			//		_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
-			//		return histBlockNumProgress
-			//	})
-			//	return nil
-			//})
-		}
-	})
-	return _allSnapshotsSingleton, _aggDomainSingleton
-}
-
-func newDomains(ctx context.Context, db kv.RwDB, stepSize uint64, mode libstate.CommitmentMode, trie commitment.TrieVariant, logger log.Logger) (consensus.Engine, ethconfig.Config, *freezeblocks.RoSnapshots, *libstate.Aggregator) {
-	historyV3, pm := kvcfg.HistoryV3.FromDB(db), fromdb.PruneMode(db)
-	//events := shards.NewEvents()
-	genesis := core.GenesisBlockByChainName(chain)
-
-	chainConfig, genesisBlock, genesisErr := core.CommitGenesisBlock(db, genesis, "", logger)
-	_ = genesisBlock // TODO apply if needed here
-
-	if _, ok := genesisErr.(*chain2.ConfigCompatError); genesisErr != nil && !ok {
-		panic(genesisErr)
-	}
-	//logger.Info("Initialised chain configuration", "config", chainConfig)
-
-	var batchSize datasize.ByteSize
-	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
-
-	cfg := ethconfig.Defaults
-	cfg.HistoryV3 = historyV3
-	cfg.Prune = pm
-	cfg.BatchSize = batchSize
-	cfg.DeprecatedTxPool.Disable = true
-	cfg.Genesis = core.GenesisBlockByChainName(chain)
-	//if miningConfig != nil {
-	//	cfg.Miner = *miningConfig
-	//}
-	cfg.Dirs = datadir.New(datadirCli)
-
-	allSn, agg := allDomains(ctx, db, stepSize, mode, trie, logger)
-	cfg.Snapshot = allSn.Cfg()
-
-	blockReader, _ := blocksIO(db, logger)
-	engine, _ := initConsensusEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, blockReader, logger)
-	return engine, cfg, allSn, agg
 }
 
 const blockBufferSize = 128
