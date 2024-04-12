@@ -29,6 +29,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"github.com/gballet/go-verkle"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -36,7 +38,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
@@ -146,6 +147,8 @@ func WriteHeaderNumber(db kv.Putter, hash common.Hash, number uint64) error {
 }
 
 // ReadHeadHeaderHash retrieves the hash of the current canonical head header.
+// It is updated in stage_headers, updateForkChoice.
+// See: ReadHeadBlockHash
 func ReadHeadHeaderHash(db kv.Getter) common.Hash {
 	data, err := db.GetOne(kv.HeadHeaderKey, []byte(kv.HeadHeaderKey))
 	if err != nil {
@@ -158,6 +161,8 @@ func ReadHeadHeaderHash(db kv.Getter) common.Hash {
 }
 
 // WriteHeadHeaderHash stores the hash of the current canonical head header.
+// It is updated in stage_headers, updateForkChoice.
+// See: WriteHeadBlockHash
 func WriteHeadHeaderHash(db kv.Putter, hash common.Hash) error {
 	if err := db.Put(kv.HeadHeaderKey, []byte(kv.HeadHeaderKey), hash.Bytes()); err != nil {
 		return fmt.Errorf("failed to store last header's hash: %w", err)
@@ -165,7 +170,9 @@ func WriteHeadHeaderHash(db kv.Putter, hash common.Hash) error {
 	return nil
 }
 
-// ReadHeadBlockHash retrieves the hash of the current canonical head block.
+// ReadHeadBlockHash retrieves the hash of the current canonical head header for which its block body is known.
+// It is updated in stage_finish.
+// See: kv.HeadBlockKey
 func ReadHeadBlockHash(db kv.Getter) common.Hash {
 	data, err := db.GetOne(kv.HeadBlockKey, []byte(kv.HeadBlockKey))
 	if err != nil {
@@ -177,7 +184,9 @@ func ReadHeadBlockHash(db kv.Getter) common.Hash {
 	return common.BytesToHash(data)
 }
 
-// WriteHeadBlockHash stores the head block's hash.
+// WriteHeadBlockHash stores the hash of the current canonical head header for which its block body is known.
+// It is updated in stage_finish.
+// See: kv.HeadBlockKey
 func WriteHeadBlockHash(db kv.Putter, hash common.Hash) {
 	if err := db.Put(kv.HeadBlockKey, []byte(kv.HeadBlockKey), hash.Bytes()); err != nil {
 		log.Crit("Failed to store last block's hash", "err", err)
@@ -275,8 +284,23 @@ func ReadCurrentBlockNumber(db kv.Getter) *uint64 {
 	return ReadHeaderNumber(db, headHash)
 }
 
+// ReadCurrentHeader reads the current canonical head header.
+// It is updated in stage_headers, updateForkChoice.
+// See: ReadHeadHeaderHash, ReadCurrentHeaderHavingBody
 func ReadCurrentHeader(db kv.Getter) *types.Header {
 	headHash := ReadHeadHeaderHash(db)
+	headNumber := ReadHeaderNumber(db, headHash)
+	if headNumber == nil {
+		return nil
+	}
+	return ReadHeader(db, headHash, *headNumber)
+}
+
+// ReadCurrentHeaderHavingBody reads the current canonical head header for which its block body is known.
+// It is updated in stage_finish.
+// See: ReadHeadBlockHash, ReadCurrentHeader
+func ReadCurrentHeaderHavingBody(db kv.Getter) *types.Header {
+	headHash := ReadHeadBlockHash(db)
 	headNumber := ReadHeaderNumber(db, headHash)
 	if headNumber == nil {
 		return nil

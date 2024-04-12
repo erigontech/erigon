@@ -91,6 +91,8 @@ type Sentinel struct {
 	logger               log.Logger
 	forkChoiceReader     forkchoice.ForkChoiceStorageReader
 	pidToEnr             sync.Map
+
+	metadataLock sync.Mutex
 }
 
 func (s *Sentinel) createLocalNode(

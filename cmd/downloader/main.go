@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
+	"github.com/ledgerwatch/erigon-lib/downloader/downloadergrpc"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -250,6 +251,18 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
 	}
+	if seedbox {
+		var downloadItems []*proto_downloader.AddItem
+		for _, it := range snapcfg.KnownCfg(chain).Preverified {
+			downloadItems = append(downloadItems, &proto_downloader.AddItem{
+				Path:        it.Name,
+				TorrentHash: downloadergrpc.String2Proto(it.Hash),
+			})
+		}
+		if _, err := bittorrentServer.Add(ctx, &proto_downloader.AddRequest{Items: downloadItems}); err != nil {
+			return err
+		}
+	}
 
 	grpcServer, err := StartGrpc(bittorrentServer, downloaderApiAddr, nil /* transportCredentials */, logger)
 	if err != nil {
@@ -305,6 +318,7 @@ var manifestVerifyCmd = &cobra.Command{
 		logger := debug.SetupCobra(cmd, "downloader")
 		if err := manifestVerify(cmd.Context(), logger); err != nil {
 			log.Error(err.Error())
+			os.Exit(1) // to mark CI as failed
 		}
 		return nil
 	},

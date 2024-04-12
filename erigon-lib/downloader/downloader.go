@@ -1007,7 +1007,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 				switch {
 				case len(t.PeerConns()) > 0:
-					d.logger.Debug("[snapshots] Downloading from torrent", "file", t.Name(), "peers", len(t.PeerConns()))
+					d.logger.Debug("[snapshots] Downloading from BitTorrent", "file", t.Name(), "peers", len(t.PeerConns()))
 					delete(waiting, t.Name())
 					d.torrentDownload(t, downloadComplete, sem)
 				case len(t.WebseedPeerConns()) > 0:
@@ -2108,7 +2108,7 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	if d.alreadyHaveThisName(name) || !IsSnapNameAllowed(name) {
 		return nil
 	}
-	isProhibited, err := d.torrentFiles.newDownloadsAreProhibited(name)
+	isProhibited, err := d.torrentFiles.NewDownloadsAreProhibited(name)
 	if err != nil {
 		return err
 	}
@@ -2145,12 +2145,8 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 			// TOOD: add `d.webseeds.Complete` chan - to prevent race - Discover is also async
 			// TOOD: maybe run it in goroutine and return channel - to select with p2p
 
-			ok, err := d.webseeds.DownloadAndSaveTorrentFile(ctx, name)
+			ts, ok, err := d.webseeds.DownloadAndSaveTorrentFile(ctx, name)
 			if ok && err == nil {
-				ts, err := d.torrentFiles.LoadByPath(filepath.Join(d.SnapDir(), name+".torrent"))
-				if err != nil {
-					return
-				}
 				_, _, err = addTorrentFile(ctx, ts, d.torrentClient, d.db, d.webseeds)
 				if err != nil {
 					return

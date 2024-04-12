@@ -15,7 +15,6 @@ import (
 	"sync"
 
 	"github.com/anacrolix/torrent"
-
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"golang.org/x/sync/errgroup"
@@ -102,7 +101,7 @@ func (d *WebSeeds) SetTorrent(t *TorrentFiles, whiteList snapcfg.Preverified, do
 	d.torrentFiles = t
 }
 
-func (d *WebSeeds) checkHasTorrents(manifestResponse snaptype.WebSeedsFromProvider, report *webSeedCheckReport) {
+func (d *WebSeeds) checkHasTorrents(manifestResponse snaptype.WebSeedsFromProvider, report *WebSeedCheckReport) {
 	// check that for each file in the manifest, there is a corresponding .torrent file
 	torrentNames := make(map[string]struct{})
 	for name := range manifestResponse {
@@ -172,7 +171,9 @@ func (d *WebSeeds) fetchFileEtags(ctx context.Context, manifestResponse snaptype
 }
 
 func (d *WebSeeds) VerifyManifestedBuckets(ctx context.Context, failFast bool) error {
-	var supErr error
+	supErr := make([]error, 0, len(d.seeds))
+	reports := make([]*WebSeedCheckReport, 0, len(d.seeds))
+
 	for _, webSeedProviderURL := range d.seeds {
 		select {
 		case <-ctx.Done():
@@ -181,19 +182,39 @@ func (d *WebSeeds) VerifyManifestedBuckets(ctx context.Context, failFast bool) e
 		}
 		d.logger.Debug("[snapshots.webseed] verify manifest", "url", webSeedProviderURL.String())
 
-		if err := d.VerifyManifestedBucket(ctx, webSeedProviderURL); err != nil {
+		rep, err := d.VerifyManifestedBucket(ctx, webSeedProviderURL)
+		if err != nil {
 			d.logger.Warn("[snapshots.webseed] verify manifest", "err", err)
 			if failFast {
 				return err
 			} else {
-				supErr = err
+				supErr = append(supErr, err)
 			}
 		}
+
+		reports = append(reports, rep)
 	}
-	return supErr
+
+	failed := len(supErr) > 0
+
+	fmt.Println("-----------------------REPORTS OVERVIEW--------------------------")
+	for _, rep := range reports {
+		if !rep.OK() {
+			failed = true
+		}
+		fmt.Printf("%s\n", rep.ToString(false))
+	}
+	if failed {
+		merr := fmt.Sprintf("error list:\n")
+		for _, err := range supErr {
+			merr += fmt.Sprintf("%s\n", err)
+		}
+		return fmt.Errorf("webseed: some webseeds are not OK, details above| %s", merr)
+	}
+	return nil
 }
 
-type webSeedCheckReport struct {
+type WebSeedCheckReport struct {
 	seed             *url.URL
 	manifestExist    bool
 	torrentsOK       bool
@@ -204,25 +225,38 @@ type webSeedCheckReport struct {
 	etagFetchFailed  []string
 }
 
-func (w *webSeedCheckReport) sort() {
+func (w *WebSeedCheckReport) sort() {
 	sort.Strings(w.missingTorrents)
 	sort.Strings(w.invalidEtags)
 	sort.Strings(w.etagFetchFailed)
 	sort.Strings(w.danglingTorrents)
 }
 
-func (w *webSeedCheckReport) String() string {
+func (w *WebSeedCheckReport) OK() bool {
+	return w.torrentsOK && w.manifestExist && len(w.invalidEtags) == 0 && len(w.etagFetchFailed) == 0
+}
+
+func (w *WebSeedCheckReport) ToString(full bool) string {
+	br := "BAD"
+	if w.OK() {
+		br = "OK"
+	}
+
 	if !w.manifestExist {
-		return fmt.Sprintf("## REPORT on %s: manifest not found\n", w.seed)
+		return fmt.Sprintf("## REPORT [%s] on %s: manifest not found\n", br, w.seed)
 	}
 	w.sort()
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("## REPORT on %s\n", w.seed))
+	b.WriteString(fmt.Sprintf("## REPORT [%s] on %s\n", br, w.seed))
 	b.WriteString(fmt.Sprintf(" - manifest exist: %t\n", w.manifestExist))
 	b.WriteString(fmt.Sprintf(" - missing torrents (files without torrents): %d\n", len(w.missingTorrents)))
 	b.WriteString(fmt.Sprintf(" - dangling (data file not found) torrents: %d\n", len(w.danglingTorrents)))
 	b.WriteString(fmt.Sprintf(" - invalid ETags format: %d/%d\n", len(w.invalidEtags), w.totalEtags))
 	b.WriteString(fmt.Sprintf(" - ETag fetch failed: %d/%d\n", len(w.etagFetchFailed), w.totalEtags))
+
+	if !full {
+		return b.String()
+	}
 
 	titles := []string{
 		"Missing torrents",
@@ -238,7 +272,6 @@ func (w *webSeedCheckReport) String() string {
 		w.etagFetchFailed,
 	}
 
-	var printedAnything bool
 	for ti, names := range fnamess {
 		if len(names) == 0 {
 			continue
@@ -246,7 +279,6 @@ func (w *webSeedCheckReport) String() string {
 		if ti == 0 {
 			b.WriteByte(10)
 		}
-		printedAnything = true
 		b.WriteString(fmt.Sprintf("# %s\n", titles[ti]))
 		for _, name := range names {
 			b.WriteString(fmt.Sprintf("%s\n", name))
@@ -255,33 +287,30 @@ func (w *webSeedCheckReport) String() string {
 			b.WriteByte(10)
 		}
 	}
-	if !printedAnything {
-		b.WriteString(fmt.Sprintf("== OK  %s\n", w.seed.String()))
-	} else {
-		b.WriteString(fmt.Sprintf("== BAD %sn", w.seed.String()))
-	}
+	b.WriteString(fmt.Sprintf("SEED [%s] %s\n", br, w.seed.String()))
 	return b.String()
 }
 
-func (d *WebSeeds) VerifyManifestedBucket(ctx context.Context, webSeedProviderURL *url.URL) error {
-	report := &webSeedCheckReport{seed: webSeedProviderURL}
+func (d *WebSeeds) VerifyManifestedBucket(ctx context.Context, webSeedProviderURL *url.URL) (report *WebSeedCheckReport, err error) {
+	report = &WebSeedCheckReport{seed: webSeedProviderURL}
+	defer func() { fmt.Printf("%s\n", report.ToString(true)) }()
+
 	manifestResponse, err := d.retrieveManifest(ctx, webSeedProviderURL)
 	report.manifestExist = len(manifestResponse) != 0
-	defer func() { fmt.Printf("%s\n", report.String()) }()
 	if err != nil {
-		return err
+		return report, err
 	}
 
 	d.checkHasTorrents(manifestResponse, report)
 	remoteTags, invalidTags, noTags, err := d.fetchFileEtags(ctx, manifestResponse)
 	if err != nil {
-		return err
+		return report, err
 	}
 
 	report.invalidEtags = invalidTags
 	report.etagFetchFailed = noTags
 	report.totalEtags = len(remoteTags) + len(noTags)
-	return nil
+	return report, nil
 }
 
 func (d *WebSeeds) Discover(ctx context.Context, files []string, rootDir string) {
@@ -308,7 +337,7 @@ func (d *WebSeeds) constructListsOfFiles(ctx context.Context, httpProviders []*u
 		}
 		// check if we need to prohibit new downloads for some files
 		for name := range manifestResponse {
-			prohibited, err := d.torrentFiles.newDownloadsAreProhibited(name)
+			prohibited, err := d.torrentFiles.NewDownloadsAreProhibited(name)
 			if prohibited || err != nil {
 				delete(manifestResponse, name)
 			}
@@ -326,7 +355,7 @@ func (d *WebSeeds) constructListsOfFiles(ctx context.Context, httpProviders []*u
 		}
 		// check if we need to prohibit new downloads for some files
 		for name := range response {
-			prohibited, err := d.torrentFiles.newDownloadsAreProhibited(name)
+			prohibited, err := d.torrentFiles.NewDownloadsAreProhibited(name)
 			if prohibited || err != nil {
 				delete(response, name)
 			}
@@ -546,34 +575,34 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 	return webSeedMap
 }
 
-func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) (bool, error) {
+func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) (ts *torrent.TorrentSpec, ok bool, err error) {
 	urls, ok := d.ByFileName(name)
 	if !ok {
-		return false, nil
+		return nil, false, nil
 	}
 	for _, urlStr := range urls {
+		urlStr += ".torrent"
 		parsedUrl, err := url.Parse(urlStr)
 		if err != nil {
-			continue
+			d.logger.Log(d.verbosity, "[snapshots] callTorrentHttpProvider parse url", "err", err)
+			continue // it's ok if some HTTP provider failed - try next one
 		}
 		res, err := d.callTorrentHttpProvider(ctx, parsedUrl, name)
 		if err != nil {
-			return false, err
-		}
-		if d.torrentFiles.Exists(name) {
-			continue
-		}
-		if err := d.torrentFiles.Create(name, res); err != nil {
 			d.logger.Log(d.verbosity, "[snapshots] .torrent from webseed rejected", "name", name, "err", err)
-			continue
+			continue // it's ok if some HTTP provider failed - try next one
 		}
-		return true, nil
+		ts, _, _, err = d.torrentFiles.CreateIfNotProhibited(name, res)
+		return ts, ts != nil, err
 	}
 
-	return false, nil
+	return nil, false, nil
 }
 
 func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL, fileName string) ([]byte, error) {
+	if !strings.HasSuffix(url.Path, ".torrent") {
+		return nil, fmt.Errorf("seems not-torrent url passed: %s", url.String())
+	}
 	request, err := http.NewRequest(http.MethodGet, url.String(), nil)
 	if err != nil {
 		return nil, err
@@ -586,7 +615,7 @@ func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL, fi
 	defer resp.Body.Close()
 	//protect against too small and too big data
 	if resp.ContentLength == 0 || resp.ContentLength > int64(128*datasize.MB) {
-		return nil, nil
+		return nil, fmt.Errorf(".torrent downloading size attack prevention: resp.ContentLength=%d, url=%s", resp.ContentLength, url.EscapedPath())
 	}
 	res, err := io.ReadAll(resp.Body)
 	if err != nil {
