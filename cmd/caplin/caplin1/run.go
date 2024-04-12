@@ -258,7 +258,30 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 	statesReader := historical_states_reader.NewHistoricalStatesReader(beaconConfig, rcsn, vTables, genesisState)
 	validatorParameters := validator_params.NewValidatorParams()
 	if config.BeaconRouter.Active {
-		apiHandler := handler.NewApiHandler(logger, genesisConfig, beaconConfig, indexDB, forkChoice, pool, rcsn, syncedDataManager, statesReader, sentinel, params.GitTag, &config.BeaconRouter, emitters, blobStorage, csn, validatorParameters, attestationProducer, engine, syncContributionPool, committeeSub, aggregationPool)
+		apiHandler := handler.NewApiHandler(
+			logger,
+			networkConfig,
+			genesisConfig,
+			beaconConfig,
+			indexDB,
+			forkChoice,
+			pool,
+			rcsn,
+			syncedDataManager,
+			statesReader,
+			sentinel,
+			params.GitTag,
+			&config.BeaconRouter,
+			emitters,
+			blobStorage,
+			csn,
+			validatorParameters,
+			attestationProducer,
+			engine,
+			syncContributionPool,
+			committeeSub,
+			aggregationPool,
+		)
 		go beacon.ListenAndServe(&beacon.LayeredBeaconHandler{
 			ArchiveApi: apiHandler,
 		}, config.BeaconRouter)

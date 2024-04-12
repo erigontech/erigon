@@ -252,3 +252,7 @@ func (f *ForkChoiceStorageMock) OnSignedContributionAndProof(signedContribution 
 	f.SyncContributionPool.AddSyncContribution(nil, signedContribution.Message.Contribution)
 	return nil
 }
+
+func (f *ForkChoiceStorageMock) ValidateOnAttestation(attestation *solid.Attestation) error {
+	panic("implement me")
+}
