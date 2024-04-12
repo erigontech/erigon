@@ -58,7 +58,7 @@ type Domain struct {
 	*History
 	dirtyFiles *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
 	// roFiles derivative from field `file`, but without garbage (canDelete=true, overlaps, etc...)
-	// MakeContext() using this field in zero-copy way
+	// BeginFilesRo() using this field in zero-copy way
 	visibleFiles atomic.Pointer[[]ctxItem]
 	defaultDc    *DomainRoTx
 	keysTable    string // key -> invertedStep , invertedStep = ^(txNum / aggregationStep), Needs to be table with DupSort
@@ -100,7 +100,7 @@ func (d *Domain) LastStepInDB(tx kv.Tx) (lstInDb uint64) {
 }
 
 func (d *Domain) StartWrites() {
-	d.defaultDc = d.MakeContext()
+	d.defaultDc = d.BeginFilesRo()
 	d.History.StartWrites()
 }
 
@@ -533,10 +533,10 @@ func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 	return
 }
 
-func (d *Domain) MakeContext() *DomainRoTx {
+func (d *Domain) BeginFilesRo() *DomainRoTx {
 	dc := &DomainRoTx{
 		d:     d,
-		ht:    d.History.BeginFilesRoTx(),
+		ht:    d.History.BeginFilesRo(),
 		files: *d.visibleFiles.Load(),
 	}
 	for _, item := range dc.files {

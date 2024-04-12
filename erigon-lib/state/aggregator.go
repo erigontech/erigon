@@ -397,7 +397,7 @@ func (a *Aggregator) mergeDomainSteps(ctx context.Context) error {
 	var upmerges int
 	for {
 		a.defaultCtx.Close()
-		a.defaultCtx = a.MakeContext()
+		a.defaultCtx = a.BeginFilesRo()
 
 		somethingMerged, err := a.mergeLoopStep(ctx, maxEndTxNum, 1)
 		if err != nil {
@@ -527,7 +527,7 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 
 			d.integrateFiles(sf, step*a.aggregationStep, (step+1)*a.aggregationStep)
 
-			icx := d.BeginFilesRoTx()
+			icx := d.BeginFilesRo()
 			mxRunningMerges.Inc()
 
 			if err := d.mergeRangesUpTo(ctx, d.endTxNumMinimax(), maxSpan, workers, icx, a.ps); err != nil {
@@ -1033,10 +1033,10 @@ func (a *Aggregator) StartWrites() *Aggregator {
 		storage:    a.storage.defaultDc,
 		code:       a.code.defaultDc,
 		commitment: a.commitment.defaultDc,
-		logAddrs:   a.logAddrs.BeginFilesRoTx(),
-		logTopics:  a.logTopics.BeginFilesRoTx(),
-		tracesFrom: a.tracesFrom.BeginFilesRoTx(),
-		tracesTo:   a.tracesTo.BeginFilesRoTx(),
+		logAddrs:   a.logAddrs.BeginFilesRo(),
+		logTopics:  a.logTopics.BeginFilesRo(),
+		tracesFrom: a.tracesFrom.BeginFilesRo(),
+		tracesTo:   a.tracesTo.BeginFilesRo(),
 	}
 	a.commitment.patriciaTrie.ResetFns(a.defaultCtx.branchFn, a.defaultCtx.accountFn, a.defaultCtx.storageFn)
 	return a
@@ -1109,17 +1109,17 @@ type AggregatorContext struct {
 	keyBuf     []byte
 }
 
-func (a *Aggregator) MakeContext() *AggregatorContext {
+func (a *Aggregator) BeginFilesRo() *AggregatorContext {
 	return &AggregatorContext{
 		a:          a,
-		accounts:   a.accounts.MakeContext(),
-		storage:    a.storage.MakeContext(),
-		code:       a.code.MakeContext(),
-		commitment: a.commitment.MakeContext(),
-		logAddrs:   a.logAddrs.BeginFilesRoTx(),
-		logTopics:  a.logTopics.BeginFilesRoTx(),
-		tracesFrom: a.tracesFrom.BeginFilesRoTx(),
-		tracesTo:   a.tracesTo.BeginFilesRoTx(),
+		accounts:   a.accounts.BeginFilesRo(),
+		storage:    a.storage.BeginFilesRo(),
+		code:       a.code.BeginFilesRo(),
+		commitment: a.commitment.BeginFilesRo(),
+		logAddrs:   a.logAddrs.BeginFilesRo(),
+		logTopics:  a.logTopics.BeginFilesRo(),
+		tracesFrom: a.tracesFrom.BeginFilesRo(),
+		tracesTo:   a.tracesTo.BeginFilesRo(),
 	}
 }
 

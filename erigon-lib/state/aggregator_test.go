@@ -145,7 +145,7 @@ func TestAggregator_Merge(t *testing.T) {
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	dc := agg.MakeContext()
+	dc := agg.BeginFilesRo()
 
 	v, err := dc.ReadCommitment([]byte("roothash"), roTx)
 	require.NoError(t, err)
@@ -253,7 +253,7 @@ func TestAggregator_RestartOnDatadir(t *testing.T) {
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	dc := anotherAgg.MakeContext()
+	dc := anotherAgg.BeginFilesRo()
 	v, err := dc.ReadCommitment([]byte("key"), roTx)
 	require.NoError(t, err)
 	dc.Close()

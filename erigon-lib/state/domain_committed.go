@@ -604,7 +604,7 @@ func (d *DomainCommitted) SeekCommitment(aggStep, sinceTx uint64) (blockNum, txN
 	)
 
 	d.SetTxNum(latestTxNum)
-	ctx := d.MakeContext()
+	ctx := d.BeginFilesRo()
 	defer ctx.Close()
 
 	for {

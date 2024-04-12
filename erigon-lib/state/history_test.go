@@ -304,7 +304,7 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (string, 
 func checkHistoryHistory(t *testing.T, h *History, txs uint64) {
 	t.Helper()
 	// Check the history
-	hc := h.BeginFilesRoTx()
+	hc := h.BeginFilesRo()
 	defer hc.Close()
 
 	for txNum := uint64(0); txNum <= txs; txNum++ {
@@ -399,7 +399,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
 
 	for {
 		if stop := func() bool {
-			hc := h.BeginFilesRoTx()
+			hc := h.BeginFilesRo()
 			defer hc.Close()
 			r = h.findMergeRange(maxEndTxNum, maxSpan)
 			if !r.any() {
@@ -416,7 +416,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
 		}
 	}
 
-	hc := h.BeginFilesRoTx()
+	hc := h.BeginFilesRo()
 	defer hc.Close()
 	err = hc.BuildOptionalMissedIndices(ctx)
 	require.NoError(err)
@@ -486,7 +486,7 @@ func TestIterateChanged(t *testing.T) {
 		require.NoError(err)
 		defer tx.Rollback()
 		var keys, vals []string
-		ic := h.BeginFilesRoTx()
+		ic := h.BeginFilesRo()
 		defer ic.Close()
 
 		it, err := ic.HistoryRange(2, 20, order.Asc, -1, tx)
@@ -641,7 +641,7 @@ func TestIterateChanged2(t *testing.T) {
 		}
 		var keys, vals []string
 		t.Run("before merge", func(t *testing.T) {
-			hc, require := h.BeginFilesRoTx(), require.New(t)
+			hc, require := h.BeginFilesRo(), require.New(t)
 			defer hc.Close()
 
 			it, err := hc.HistoryRange(2, 20, order.Asc, -1, roTx)
@@ -748,7 +748,7 @@ func TestIterateChanged2(t *testing.T) {
 		})
 		t.Run("after merge", func(t *testing.T) {
 			collateAndMergeHistory(t, db, h, txs)
-			hc, require := h.BeginFilesRoTx(), require.New(t)
+			hc, require := h.BeginFilesRo(), require.New(t)
 			defer hc.Close()
 
 			keys = keys[:0]

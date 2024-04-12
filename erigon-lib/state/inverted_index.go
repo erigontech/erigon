@@ -54,7 +54,7 @@ type InvertedIndex struct {
 	dirtyFiles *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
 
 	// roFiles derivative from field `file`, but without garbage (canDelete=true, overlaps, etc...)
-	// BeginFilesRoTx() using this field in zero-copy way
+	// BeginFilesRo() using this field in zero-copy way
 	visibleFiles atomic.Pointer[[]ctxItem]
 
 	indexKeysTable  string // txnNum_u64 -> key (k+auto_increment)
@@ -509,7 +509,7 @@ func (ii *invertedIndexWAL) add(key, indexKey []byte) error {
 	return nil
 }
 
-func (ii *InvertedIndex) BeginFilesRoTx() *InvertedIndexRoTx {
+func (ii *InvertedIndex) BeginFilesRo() *InvertedIndexRoTx {
 	var ic = InvertedIndexRoTx{
 		ii:    ii,
 		files: *ii.visibleFiles.Load(),

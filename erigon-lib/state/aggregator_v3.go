@@ -1485,13 +1485,13 @@ type FilesRoTx struct {
 func (a *AggregatorV3) BeginFilesRoTx() *FilesRoTx {
 	ac := &FilesRoTx{
 		a:          a,
-		accounts:   a.accounts.BeginFilesRoTx(),
-		storage:    a.storage.BeginFilesRoTx(),
-		code:       a.code.BeginFilesRoTx(),
-		logAddrs:   a.logAddrs.BeginFilesRoTx(),
-		logTopics:  a.logTopics.BeginFilesRoTx(),
-		tracesFrom: a.tracesFrom.BeginFilesRoTx(),
-		tracesTo:   a.tracesTo.BeginFilesRoTx(),
+		accounts:   a.accounts.BeginFilesRo(),
+		storage:    a.storage.BeginFilesRo(),
+		code:       a.code.BeginFilesRo(),
+		logAddrs:   a.logAddrs.BeginFilesRo(),
+		logTopics:  a.logTopics.BeginFilesRo(),
+		tracesFrom: a.tracesFrom.BeginFilesRo(),
+		tracesTo:   a.tracesTo.BeginFilesRo(),
 
 		id: a.leakDetector.Add(),
 	}

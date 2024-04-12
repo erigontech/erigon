@@ -151,7 +151,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 
 	r := ReaderWrapper4{
 		roTx: histTx,
-		ac:   agg.MakeContext(),
+		ac:   agg.BeginFilesRo(),
 	}
 
 	switch readDomain {

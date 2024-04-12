@@ -58,7 +58,7 @@ type History struct {
 	dirtyFiles *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
 
 	// roFiles derivative from field `file`, but without garbage (canDelete=true, overlaps, etc...)
-	// BeginFilesRoTx() using this field in zero-copy way
+	// BeginFilesRo() using this field in zero-copy way
 	visibleFiles atomic.Pointer[[]ctxItem]
 
 	historyValsTable        string // key1+key2+txnNum -> oldValue , stores values BEFORE change
@@ -1127,11 +1127,11 @@ type HistoryRoTx struct {
 	trace bool
 }
 
-func (h *History) BeginFilesRoTx() *HistoryRoTx {
+func (h *History) BeginFilesRo() *HistoryRoTx {
 
 	var hc = HistoryRoTx{
 		h:     h,
-		iit:   h.InvertedIndex.BeginFilesRoTx(),
+		iit:   h.InvertedIndex.BeginFilesRo(),
 		files: *h.visibleFiles.Load(),
 
 		trace: false,
