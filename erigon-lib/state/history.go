@@ -62,7 +62,7 @@ type History struct {
 	//  - no overlaps
 	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
 	//
-	// BeginRo() using visibleFiles in zero-copy way
+	// BeginFilesRo() using visibleFiles in zero-copy way
 	dirtyFiles   *btree2.BTreeG[*filesItem]
 	visibleFiles atomic.Pointer[[]ctxItem]
 
@@ -978,7 +978,7 @@ type HistoryRoTx struct {
 	_bufTs []byte
 }
 
-func (h *History) BeginRo() *HistoryRoTx {
+func (h *History) BeginFilesRo() *HistoryRoTx {
 	files := *h.visibleFiles.Load()
 	for i := 0; i < len(files); i++ {
 		if !files[i].src.frozen {
@@ -988,7 +988,7 @@ func (h *History) BeginRo() *HistoryRoTx {
 
 	return &HistoryRoTx{
 		h:     h,
-		iit:   h.InvertedIndex.BeginRo(),
+		iit:   h.InvertedIndex.BeginFilesRo(),
 		files: files,
 		trace: false,
 	}

@@ -114,7 +114,7 @@ type Domain struct {
 	//  - no overlaps
 	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
 	//
-	// BeginRo() using visibleFiles in zero-copy way
+	// BeginFilesRo() using visibleFiles in zero-copy way
 	dirtyFiles   *btree2.BTreeG[*filesItem]
 	visibleFiles atomic.Pointer[[]ctxItem]
 
@@ -801,7 +801,7 @@ func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 	return
 }
 
-func (d *Domain) BeginRo() *DomainRoTx {
+func (d *Domain) BeginFilesRo() *DomainRoTx {
 	files := *d.visibleFiles.Load()
 	for i := 0; i < len(files); i++ {
 		if !files[i].src.frozen {
@@ -810,7 +810,7 @@ func (d *Domain) BeginRo() *DomainRoTx {
 	}
 	return &DomainRoTx{
 		d:     d,
-		ht:    d.History.BeginRo(),
+		ht:    d.History.BeginFilesRo(),
 		files: files,
 	}
 }

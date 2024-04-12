@@ -66,7 +66,7 @@ type InvertedIndex struct {
 	//  - no overlaps
 	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
 	//
-	// BeginRo() using visibleFiles in zero-copy way
+	// BeginFilesRo() using visibleFiles in zero-copy way
 	dirtyFiles   *btree2.BTreeG[*filesItem]
 	visibleFiles atomic.Pointer[[]ctxItem]
 
@@ -540,7 +540,7 @@ func (w *invertedIndexBufferedWriter) add(key, indexKey []byte) error {
 	return nil
 }
 
-func (ii *InvertedIndex) BeginRo() *InvertedIndexRoTx {
+func (ii *InvertedIndex) BeginFilesRo() *InvertedIndexRoTx {
 	files := *ii.visibleFiles.Load()
 	for i := 0; i < len(files); i++ {
 		if !files[i].src.frozen {
