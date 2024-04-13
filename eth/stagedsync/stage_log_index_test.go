@@ -125,7 +125,7 @@ func TestPruneLogIndex(t *testing.T) {
 	require, tmpDir, ctx := require.New(t), t.TempDir(), context.Background()
 	_, tx := memdb.NewTestTx(t)
 
-	_, _ = genReceipts(t, tx, 100)
+	_, _ = genReceipts(t, tx, 90)
 
 	cfg := StageLogIndexCfg(nil, prune.DefaultMode, "", nil)
 	cfgCopy := cfg
@@ -133,9 +133,18 @@ func TestPruneLogIndex(t *testing.T) {
 	cfgCopy.flushEvery = time.Nanosecond
 	err := promoteLogIndex("logPrefix", tx, 0, 0, 0, cfgCopy, ctx, logger)
 	require.NoError(err)
+	
+	{
+		total := 0
+		err = tx.ForEach(kv.Log, nil, func(k, v []byte) error {
+			total++
+			return nil
+		})
+		require.NoError(err)
+	}
 
 	// Mode test
-	err = pruneLogIndex("", tx, tmpDir, 0, 50, ctx, logger, nil)
+	err = pruneLogIndex("", tx, tmpDir, 0, 162, ctx, logger, map[libcommon.Address]bool{libcommon.Address{1}: true})	// using addr {1} from genReceipts
 	require.NoError(err)
 
 	{
@@ -165,7 +174,7 @@ func TestPruneLogIndex(t *testing.T) {
 			return nil
 		})
 		require.NoError(err)
-		require.True(total == 49) // 51 logs have been pruned
+		require.True(total == 30) // 1/3rd not pruned as it has address "1"
 	}
 }
 
