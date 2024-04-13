@@ -47,6 +47,7 @@ func NewSyncContributionService(syncedDataManager *synced_data.SyncedDataManager
 		beaconCfg:                      beaconCfg,
 		syncContributionPool:           syncContributionPool,
 		seenSyncCommitteeContributions: make(map[seenSyncCommitteeContribution]struct{}),
+		emitters:                       emitters,
 	}
 }
 

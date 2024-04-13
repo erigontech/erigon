@@ -78,8 +78,9 @@ type ApiHandler struct {
 	aggregatePool       aggregation.AggregationPool
 
 	// services
-	syncCommitteeMessagesService services.SyncCommitteeMessagesService
-	syncContributionAndProofs    services.SyncContributionService
+	syncCommitteeMessagesService     services.SyncCommitteeMessagesService
+	syncContributionAndProofsService services.SyncContributionService
+	aggregateAndProofsService        services.AggregateAndProofService
 }
 
 func NewApiHandler(
@@ -107,6 +108,7 @@ func NewApiHandler(
 	aggregatePool aggregation.AggregationPool,
 	syncCommitteeMessagesService services.SyncCommitteeMessagesService,
 	syncContributionAndProofs services.SyncContributionService,
+	aggregateAndProofs services.AggregateAndProofService,
 ) *ApiHandler {
 	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("blobs", maxBlobBundleCacheSize)
 	if err != nil {
@@ -128,20 +130,21 @@ func NewApiHandler(
 		randaoMixesPool: sync.Pool{New: func() interface{} {
 			return solid.NewHashVector(int(beaconChainConfig.EpochsPerHistoricalVector))
 		}},
-		sentinel:                     sentinel,
-		version:                      version,
-		routerCfg:                    routerCfg,
-		emitters:                     emitters,
-		blobStoage:                   blobStoage,
-		caplinSnapshots:              caplinSnapshots,
-		attestationProducer:          attestationProducer,
-		blobBundles:                  blobBundles,
-		engine:                       engine,
-		syncMessagePool:              syncMessagePool,
-		committeeSub:                 committeeSub,
-		aggregatePool:                aggregatePool,
-		syncCommitteeMessagesService: syncCommitteeMessagesService,
-		syncContributionAndProofs:    syncContributionAndProofs,
+		sentinel:                         sentinel,
+		version:                          version,
+		routerCfg:                        routerCfg,
+		emitters:                         emitters,
+		blobStoage:                       blobStoage,
+		caplinSnapshots:                  caplinSnapshots,
+		attestationProducer:              attestationProducer,
+		blobBundles:                      blobBundles,
+		engine:                           engine,
+		syncMessagePool:                  syncMessagePool,
+		committeeSub:                     committeeSub,
+		aggregatePool:                    aggregatePool,
+		syncCommitteeMessagesService:     syncCommitteeMessagesService,
+		syncContributionAndProofsService: syncContributionAndProofs,
+		aggregateAndProofsService:        aggregateAndProofs,
 	}
 }
 

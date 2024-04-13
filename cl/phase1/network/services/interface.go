@@ -23,3 +23,6 @@ type SyncCommitteeMessagesService Service[*cltypes.SyncCommitteeMessage]
 
 //go:generate mockgen -destination=./mock_services/sync_contribution_service_mock.go -package=mock_services . SyncContributionService
 type SyncContributionService Service[*cltypes.SignedContributionAndProof]
+
+//go:generate mockgen -destination=./mock_services/aggregate_and_proof_service_mock.go -package=mock_services . AggregateAndProofService
+type AggregateAndProofService Service[*cltypes.SignedAggregateAndProof]

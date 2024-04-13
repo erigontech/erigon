@@ -57,7 +57,6 @@ type ForkChoiceStorageReader interface {
 }
 
 type ForkChoiceStorageWriter interface {
-	OnAggregateAndProof(aggregateAndProof *cltypes.SignedAggregateAndProof, test bool) error
 	OnAttestation(attestation *solid.Attestation, fromBlock, insert bool) error
 	OnAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing, test bool) error
 	OnVoluntaryExit(signedVoluntaryExit *cltypes.SignedVoluntaryExit, test bool) error

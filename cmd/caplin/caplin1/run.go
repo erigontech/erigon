@@ -181,7 +181,9 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 	blobService := services.NewBlobSidecarService(ctx, beaconConfig, forkChoice, syncedDataManager, false)
 	syncCommitteeMessagesService := services.NewSyncCommitteeMessagesService(beaconConfig, syncedDataManager, syncContributionPool, false)
 	syncContributionService := services.NewSyncContributionService(syncedDataManager, beaconConfig, syncContributionPool, emitters)
-	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, genesisConfig, emitters, committeeSub, blockService, blobService, syncCommitteeMessagesService, syncContributionService)
+	aggregateAndProofService := services.NewAggregateAndProofService(ctx, syncedDataManager, forkChoice, beaconConfig, aggregationPool)
+	// Create the gossip manager
+	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, genesisConfig, emitters, committeeSub, blockService, blobService, syncCommitteeMessagesService, syncContributionService, aggregateAndProofService)
 	{ // start ticking forkChoice
 		go func() {
 			tickInterval := time.NewTicker(2 * time.Millisecond)
@@ -287,14 +289,13 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 			aggregationPool,
 			syncCommitteeMessagesService,
 			syncContributionService,
+			aggregateAndProofService,
 		)
 		go beacon.ListenAndServe(&beacon.LayeredBeaconHandler{
 			ArchiveApi: apiHandler,
 		}, config.BeaconRouter)
 		log.Info("Beacon API started", "addr", config.BeaconRouter.Address)
 	}
-
-	forkChoice.StartJobsRTT(ctx)
 
 	stageCfg := stages.ClStagesCfg(beaconRpc, antiq, genesisConfig, beaconConfig, state, engine, gossipManager, forkChoice, indexDB, csn, rcsn, dirs.Tmp, dbConfig, backfilling, blobBackfilling, syncedDataManager, emitters, blobStorage, attestationProducer)
 	sync := stages.ConsensusClStages(ctx, stageCfg)
