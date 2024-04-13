@@ -223,11 +223,9 @@ func NewTorrentClient(config CreateNewTorrentClientConfig) (*TorrentClient, erro
 	}
 
 	if config.CleanDir {
-		err = os.RemoveAll(torrentDir)
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("can't clean torrent dir: %w", err)
+		if err := os.RemoveAll(torrentDir); err != nil {
+			return nil, fmt.Errorf("can't clean torrent dir: %w", err)
+		}
 	}
 
 	if err := os.MkdirAll(torrentDir, 0755); err != nil {
