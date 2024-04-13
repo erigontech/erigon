@@ -133,18 +133,9 @@ func TestPruneLogIndex(t *testing.T) {
 	cfgCopy.flushEvery = time.Nanosecond
 	err := promoteLogIndex("logPrefix", tx, 0, 0, 0, cfgCopy, ctx, logger)
 	require.NoError(err)
-	
-	{
-		total := 0
-		err = tx.ForEach(kv.Log, nil, func(k, v []byte) error {
-			total++
-			return nil
-		})
-		require.NoError(err)
-	}
 
 	// Mode test
-	err = pruneLogIndex("", tx, tmpDir, 0, 162, ctx, logger, map[libcommon.Address]bool{libcommon.Address{1}: true})	// using addr {1} from genReceipts
+	err = pruneLogIndex("", tx, tmpDir, 0, 90, ctx, logger, map[libcommon.Address]bool{{1}: true}) // using addr {1} from genReceipts
 	require.NoError(err)
 
 	{
