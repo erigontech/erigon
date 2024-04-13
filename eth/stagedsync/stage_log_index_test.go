@@ -135,7 +135,7 @@ func TestPruneLogIndex(t *testing.T) {
 	require.NoError(err)
 
 	// Mode test
-	err = pruneLogIndex("", tx, tmpDir, 0, 90, ctx, logger, map[libcommon.Address]bool{{1}: true}) // using addr {1} from genReceipts
+	err = pruneLogIndex("", tx, tmpDir, 0, 45, ctx, logger, map[libcommon.Address]bool{{1}: true}) // using addr {1} from genReceipts
 	require.NoError(err)
 
 	{
@@ -165,7 +165,7 @@ func TestPruneLogIndex(t *testing.T) {
 			return nil
 		})
 		require.NoError(err)
-		require.True(total == 30) // 1/3rd not pruned as it has address "1"
+		require.Equal(total, 60) // 1/3rd of 45 not pruned as it has address "1", so 30 Pruned in total, remaining 90-30
 	}
 }
 
