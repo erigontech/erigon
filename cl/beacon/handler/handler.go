@@ -79,6 +79,7 @@ type ApiHandler struct {
 
 	// services
 	syncCommitteeMessagesService services.SyncCommitteeMessagesService
+	syncContributionAndProofs    services.SyncContributionService
 }
 
 func NewApiHandler(
@@ -105,6 +106,7 @@ func NewApiHandler(
 	committeeSub *committee_subscription.CommitteeSubscribeMgmt,
 	aggregatePool aggregation.AggregationPool,
 	syncCommitteeMessagesService services.SyncCommitteeMessagesService,
+	syncContributionAndProofs services.SyncContributionService,
 ) *ApiHandler {
 	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("blobs", maxBlobBundleCacheSize)
 	if err != nil {
@@ -139,6 +141,7 @@ func NewApiHandler(
 		committeeSub:                 committeeSub,
 		aggregatePool:                aggregatePool,
 		syncCommitteeMessagesService: syncCommitteeMessagesService,
+		syncContributionAndProofs:    syncContributionAndProofs,
 	}
 }
 

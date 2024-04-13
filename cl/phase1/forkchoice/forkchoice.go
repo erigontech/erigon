@@ -20,7 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
-	"github.com/ledgerwatch/erigon/cl/validator/sync_contribution_pool"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 
@@ -38,12 +37,6 @@ type ForkNode struct {
 	Weight         uint64         `json:"weight,string"`
 	Validity       string         `json:"validity"`
 	ExecutionBlock libcommon.Hash `json:"execution_block_hash"`
-}
-
-type seenSyncCommitteeContribution struct {
-	aggregatorIndex   uint64
-	slot              uint64
-	subCommitteeIndex uint64
 }
 
 type checkpointComparable string
@@ -118,9 +111,8 @@ type ForkChoiceStore struct {
 
 	mu sync.RWMutex
 	// sync committees messages processing
-	seenSyncCommitteeContributions map[seenSyncCommitteeContribution]struct{}
-	muSyncCommitteeMessages        sync.Mutex
-	muSyncContribution             sync.Mutex
+	muSyncCommitteeMessages sync.Mutex
+	muSyncContribution      sync.Mutex
 	// EL
 	engine execution_client.ExecutionEngine
 
@@ -129,8 +121,7 @@ type ForkChoiceStore struct {
 	beaconCfg      *clparams.BeaconChainConfig
 	netCfg         *clparams.NetworkConfig
 
-	syncContributionPool sync_contribution_pool.SyncContributionPool
-	aggregationPool      aggregation.AggregationPool
+	aggregationPool aggregation.AggregationPool
 
 	emitters *beaconevents.Emitters
 	synced   atomic.Bool
@@ -153,7 +144,7 @@ type childrens struct {
 // NewForkChoiceStore initialize a new store from the given anchor state, either genesis or checkpoint sync state.
 func NewForkChoiceStore(anchorState *state2.CachingBeaconState, engine execution_client.ExecutionEngine,
 	operationsPool pool.OperationsPool, forkGraph fork_graph.ForkGraph, emitters *beaconevents.Emitters,
-	syncedDataManager *synced_data.SyncedDataManager, blobStorage blob_storage.BlobStorage, syncContributionPool sync_contribution_pool.SyncContributionPool, netCfg *clparams.NetworkConfig, aggrPool aggregation.AggregationPool) (*ForkChoiceStore, error) {
+	syncedDataManager *synced_data.SyncedDataManager, blobStorage blob_storage.BlobStorage, netCfg *clparams.NetworkConfig, aggrPool aggregation.AggregationPool) (*ForkChoiceStore, error) {
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
 		return nil, err
@@ -226,33 +217,31 @@ func NewForkChoiceStore(anchorState *state2.CachingBeaconState, engine execution
 	headSet := make(map[libcommon.Hash]struct{})
 	headSet[anchorRoot] = struct{}{}
 	f := &ForkChoiceStore{
-		forkGraph:                      forkGraph,
-		equivocatingIndicies:           make([]byte, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
-		latestMessages:                 make([]LatestMessage, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
-		eth2Roots:                      eth2Roots,
-		engine:                         engine,
-		operationsPool:                 operationsPool,
-		anchorPublicKeys:               anchorPublicKeys,
-		beaconCfg:                      anchorState.BeaconConfig(),
-		netCfg:                         netCfg,
-		preverifiedSizes:               preverifiedSizes,
-		finalityCheckpoints:            finalityCheckpoints,
-		totalActiveBalances:            totalActiveBalances,
-		randaoMixesLists:               randaoMixesLists,
-		randaoDeltas:                   randaoDeltas,
-		headSet:                        headSet,
-		weights:                        make(map[libcommon.Hash]uint64),
-		participation:                  participation,
-		emitters:                       emitters,
-		genesisTime:                    anchorState.GenesisTime(),
-		syncedDataManager:              syncedDataManager,
-		nextBlockProposers:             nextBlockProposers,
-		genesisValidatorsRoot:          anchorState.GenesisValidatorsRoot(),
-		hotSidecars:                    make(map[libcommon.Hash][]*cltypes.BlobSidecar),
-		blobStorage:                    blobStorage,
-		aggregationPool:                aggrPool,
-		syncContributionPool:           syncContributionPool,
-		seenSyncCommitteeContributions: make(map[seenSyncCommitteeContribution]struct{}),
+		forkGraph:             forkGraph,
+		equivocatingIndicies:  make([]byte, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
+		latestMessages:        make([]LatestMessage, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
+		eth2Roots:             eth2Roots,
+		engine:                engine,
+		operationsPool:        operationsPool,
+		anchorPublicKeys:      anchorPublicKeys,
+		beaconCfg:             anchorState.BeaconConfig(),
+		netCfg:                netCfg,
+		preverifiedSizes:      preverifiedSizes,
+		finalityCheckpoints:   finalityCheckpoints,
+		totalActiveBalances:   totalActiveBalances,
+		randaoMixesLists:      randaoMixesLists,
+		randaoDeltas:          randaoDeltas,
+		headSet:               headSet,
+		weights:               make(map[libcommon.Hash]uint64),
+		participation:         participation,
+		emitters:              emitters,
+		genesisTime:           anchorState.GenesisTime(),
+		syncedDataManager:     syncedDataManager,
+		nextBlockProposers:    nextBlockProposers,
+		genesisValidatorsRoot: anchorState.GenesisValidatorsRoot(),
+		hotSidecars:           make(map[libcommon.Hash][]*cltypes.BlobSidecar),
+		blobStorage:           blobStorage,
+		aggregationPool:       aggrPool,
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint.Copy())
 	f.finalizedCheckpoint.Store(anchorCheckpoint.Copy())

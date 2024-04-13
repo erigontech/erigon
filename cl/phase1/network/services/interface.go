@@ -20,3 +20,6 @@ type BlobSidecarsService Service[*cltypes.BlobSidecar]
 
 //go:generate mockgen -destination=./mock_services/sync_committee_messages_service_mock.go -package=mock_services . SyncCommitteeMessagesService
 type SyncCommitteeMessagesService Service[*cltypes.SyncCommitteeMessage]
+
+//go:generate mockgen -destination=./mock_services/sync_contribution_service_mock.go -package=mock_services . SyncContributionService
+type SyncContributionService Service[*cltypes.SignedContributionAndProof]

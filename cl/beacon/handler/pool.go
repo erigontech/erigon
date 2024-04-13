@@ -353,7 +353,7 @@ func (a *ApiHandler) PostEthV1ValidatorContributionsAndProofs(w http.ResponseWri
 	}
 	failures := []poolingFailure{}
 	for idx, v := range msgs {
-		if err := a.forkchoiceStore.OnSignedContributionAndProof(v, false); err != nil {
+		if err := a.syncContributionAndProofs.ProcessMessage(r.Context(), nil, v); err != nil {
 			failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 			continue
 		}

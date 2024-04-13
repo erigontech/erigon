@@ -82,10 +82,16 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	})
 	ctrl := gomock.NewController(t)
 	syncCommitteeMessagesService := mock_services.NewMockSyncCommitteeMessagesService(ctrl)
+	syncContributionService := mock_services.NewMockSyncContributionService(ctrl)
 	// ctx context.Context, subnetID *uint64, msg *cltypes.SyncCommitteeMessage) error
 	syncCommitteeMessagesService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SyncCommitteeMessage) error {
 		return h.syncMessagePool.AddSyncCommitteeMessage(postState, *subnetID, msg)
 	}).AnyTimes()
+
+	syncContributionService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedContributionAndProof) error {
+		return h.syncMessagePool.AddSyncContribution(postState, msg.Message.Contribution)
+	}).AnyTimes()
+
 	vp = validator_params.NewValidatorParams()
 	h = NewApiHandler(
 		logger,
@@ -108,7 +114,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 			Events:     true,
 			Validator:  true,
 			Lighthouse: true,
-		}, nil, blobStorage, nil, vp, nil, nil, fcu.SyncContributionPool, nil, nil, syncCommitteeMessagesService) // TODO: add tests
+		}, nil, blobStorage, nil, vp, nil, nil, fcu.SyncContributionPool, nil, nil, syncCommitteeMessagesService, syncContributionService) // TODO: add tests
 	h.Init()
 	return
 }

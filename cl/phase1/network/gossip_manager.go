@@ -40,6 +40,7 @@ type GossipManager struct {
 	blockService                 services.BlockService
 	blobService                  services.BlobSidecarsService
 	syncCommitteeMessagesService services.SyncCommitteeMessagesService
+	syncContributionService      services.SyncContributionService
 }
 
 func NewGossipReceiver(
@@ -52,6 +53,7 @@ func NewGossipReceiver(
 	blockService services.BlockService,
 	blobService services.BlobSidecarsService,
 	syncCommitteeMessagesService services.SyncCommitteeMessagesService,
+	syncContributionService services.SyncContributionService,
 ) *GossipManager {
 	return &GossipManager{
 		sentinel:                     s,
@@ -132,7 +134,11 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		log.Debug("Received block via gossip", "slot", obj.Block.Slot)
 		return g.blockService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameSyncCommitteeContributionAndProof:
-		return operationsContract[*cltypes.SignedContributionAndProof](ctx, g, data, int(version), "contribution and proof", g.forkChoice.OnSignedContributionAndProof)
+		obj := &cltypes.SignedContributionAndProof{}
+		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
+			return err
+		}
+		return g.syncContributionService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameVoluntaryExit:
 		return operationsContract[*cltypes.SignedVoluntaryExit](ctx, g, data, int(version), "voluntary exit", g.forkChoice.OnVoluntaryExit)
 	case gossip.TopicNameProposerSlashing:

@@ -245,10 +245,10 @@ func (f *ForkChoiceStorageMock) GetPublicKeyForValidator(blockRoot libcommon.Has
 	panic("implement me")
 }
 
-func (f *ForkChoiceStorageMock) OnSignedContributionAndProof(signedContribution *cltypes.SignedContributionAndProof, test bool) error {
-	f.SyncContributionPool.AddSyncContribution(nil, signedContribution.Message.Contribution)
-	return nil
-}
+// func (f *ForkChoiceStorageMock) OnSignedContributionAndProof(signedContribution *cltypes.SignedContributionAndProof, test bool) error {
+// 	f.SyncContributionPool.AddSyncContribution(nil, signedContribution.Message.Contribution)
+// 	return nil
+// }
 
 func (f *ForkChoiceStorageMock) AddPreverifiedBlobSidecar(msg *cltypes.BlobSidecar) error {
 	return nil
