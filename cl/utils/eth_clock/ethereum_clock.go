@@ -117,11 +117,9 @@ func (t *ethereumClockImpl) NextForkDigest() (common.Bytes4, error) {
 		}
 		break
 	}
-	nextForkIndex--
-	if nextForkIndex == len(forkList)-1 {
+	if nextForkIndex-1 == len(forkList)-1 {
 		return [4]byte{}, nil
 	}
-	nextForkIndex++
 	return fork.ComputeForkDigestForVersion(forkList[nextForkIndex].version, t.genesisValidatorsRoot)
 }
 
