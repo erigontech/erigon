@@ -183,7 +183,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	blobStorage := blob_storage.NewBlobStore(memdb.New("/tmp"), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, genesisConfig)
 	aggregationPool := aggregation.NewAggregationPool(ctx, genesisConfig, beaconConfig, netConfig)
 
-	forkStore, err := forkchoice.NewForkChoiceStore(anchorState, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig), fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}), emitters, nil, blobStorage, nil, netConfig, aggregationPool)
+	forkStore, err := forkchoice.NewForkChoiceStore(anchorState, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig), fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}), emitters, nil, blobStorage, netConfig, aggregationPool)
 	require.NoError(t, err)
 	forkStore.SetSynced(true)
 
