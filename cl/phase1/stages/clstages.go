@@ -411,7 +411,7 @@ func ConsensusClStages(ctx context.Context,
 					defer tx.Rollback()
 
 					if cfg.executionClient != nil && cfg.executionClient.SupportInsertion() {
-						if err := cfg.blockCollector.Flush(ctx); err != nil {
+						if err := cfg.blockCollector.Flush(context.Background()); err != nil {
 							return err
 						}
 					}
