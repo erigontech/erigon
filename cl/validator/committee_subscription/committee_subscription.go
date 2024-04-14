@@ -16,7 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/gossip"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/network/subnets"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 )
 
 var (
@@ -30,13 +30,13 @@ var (
 )
 
 type CommitteeSubscribeMgmt struct {
-	indiciesDB    kv.RoDB
-	genesisConfig *clparams.GenesisConfig
-	beaconConfig  *clparams.BeaconChainConfig
-	netConfig     *clparams.NetworkConfig
-	sentinel      sentinel.SentinelClient
-	state         *state.CachingBeaconState
-	syncedData    *synced_data.SyncedDataManager
+	indiciesDB   kv.RoDB
+	ethClock     eth_clock.EthereumClock
+	beaconConfig *clparams.BeaconChainConfig
+	netConfig    *clparams.NetworkConfig
+	sentinel     sentinel.SentinelClient
+	state        *state.CachingBeaconState
+	syncedData   *synced_data.SyncedDataManager
 	// subscriptions
 	aggregationPool    aggregation.AggregationPool
 	validatorSubsMutex sync.RWMutex
@@ -48,7 +48,7 @@ func NewCommitteeSubscribeManagement(
 	indiciesDB kv.RoDB,
 	beaconConfig *clparams.BeaconChainConfig,
 	netConfig *clparams.NetworkConfig,
-	genesisConfig *clparams.GenesisConfig,
+	ethClock eth_clock.EthereumClock,
 	sentinel sentinel.SentinelClient,
 	state *state.CachingBeaconState,
 	aggregationPool aggregation.AggregationPool,
@@ -58,7 +58,7 @@ func NewCommitteeSubscribeManagement(
 		indiciesDB:      indiciesDB,
 		beaconConfig:    beaconConfig,
 		netConfig:       netConfig,
-		genesisConfig:   genesisConfig,
+		ethClock:        ethClock,
 		sentinel:        sentinel,
 		state:           state,
 		aggregationPool: aggregationPool,
@@ -146,7 +146,7 @@ func (c *CommitteeSubscribeMgmt) sweepByStaleSlots(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			curSlot := utils.GetCurrentSlot(c.genesisConfig.GenesisTime, c.beaconConfig.SecondsPerSlot)
+			curSlot := c.ethClock.GetCurrentSlot()
 			c.validatorSubsMutex.Lock()
 			for slot := range c.validatorSubs {
 				if slotIsStale(curSlot, slot) {

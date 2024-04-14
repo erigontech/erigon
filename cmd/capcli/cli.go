@@ -30,11 +30,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/downloader"
 
-	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/antiquary"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/clparams/initial_state"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/caplin/caplin1"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
@@ -57,8 +55,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/phase1/stages"
 	"github.com/ledgerwatch/erigon/cl/rpc"
-	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
-	"github.com/ledgerwatch/erigon/cl/transition/machine"
 	"github.com/ledgerwatch/erigon/cl/utils"
 
 	"github.com/ledgerwatch/log/v3"
@@ -69,8 +65,6 @@ import (
 )
 
 var CLI struct {
-	Migrate Migrate `cmd:"" help:"migrate from one state to another"`
-
 	Chain                   Chain                   `cmd:"" help:"download the entire chain from reqresp network"`
 	DumpSnapshots           DumpSnapshots           `cmd:"" help:"generate caplin snapshots"`
 	CheckSnapshots          CheckSnapshots          `cmd:"" help:"check snapshot folder against content of chain data"`
@@ -125,79 +119,6 @@ func openFs(fsName string, path string) (afero.Fs, error) {
 	return afero.NewBasePathFs(afero.NewBasePathFs(afero.NewOsFs(), fsName), path), nil
 }
 
-type Migrate struct {
-	outputFolder
-	chainCfg
-
-	State  string   `arg:"" help:"state to start from (file or later url to checkpoint)"`
-	Blocks []string `arg:"" name:"blocks" help:"blocks to migrate, in order" type:"path"`
-}
-
-func resolveState(source string, chain chainCfg) (abstract.BeaconState, error) {
-	beaconConfig, _, err := chain.configs()
-	if err != nil {
-		return nil, err
-	}
-	s := state.New(beaconConfig)
-	switch {
-	default:
-		var stateByte []byte
-		if _, stateByte, err = clparams.ParseGenesisSSZToGenesisConfig(
-			source,
-			beaconConfig.GetCurrentStateVersion(0)); err != nil {
-			return nil, err
-		}
-		if s.DecodeSSZ(stateByte, int(beaconConfig.GetCurrentStateVersion(0))); err != nil {
-			return nil, err
-		}
-		return s, nil
-	case strings.HasPrefix(strings.ToLower(source), "http://"), strings.HasPrefix(strings.ToLower(source), "https://"):
-	}
-	return nil, fmt.Errorf("unknown state format: '%s'", source)
-}
-
-func (m *Migrate) getBlock(ctx *Context, block string) (*cltypes.SignedBeaconBlock, error) {
-	afs := afero.NewOsFs()
-
-	bts, err := afero.ReadFile(afs, block)
-	if err != nil {
-		return nil, err
-	}
-	b, _, err := m.chainCfg.configs()
-	if err != nil {
-		return nil, err
-	}
-	blk := cltypes.NewSignedBeaconBlock(b)
-	err = blk.DecodeSSZ(bts, 0)
-	if err != nil {
-		return nil, err
-	}
-
-	return blk, nil
-}
-
-func (m *Migrate) Run(ctx *Context) error {
-	state, err := resolveState(m.State, m.chainCfg)
-	if err != nil {
-		return err
-	}
-	// get the machine
-	cl := &eth2.Impl{}
-
-	// TODO: two queues for download and transition
-	for _, v := range m.Blocks {
-		blk, err := m.getBlock(ctx, v)
-		if err != nil {
-			return err
-		}
-		err = machine.TransitionState(cl, state, blk)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 type Chain struct {
 	chainCfg
 	withSentinel
@@ -210,7 +131,7 @@ func (c *Chain) Run(ctx *Context) error {
 		return err
 	}
 
-	genesisConfig, _, beaconConfig, networkType, err := clparams.GetConfigsByNetworkName(c.Chain)
+	_, beaconConfig, networkType, err := clparams.GetConfigsByNetworkName(c.Chain)
 	if err != nil {
 		return err
 	}

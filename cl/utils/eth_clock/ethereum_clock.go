@@ -7,7 +7,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
@@ -25,6 +24,10 @@ type EthereumClock interface {
 	ForkId() ([]byte, error)                                               // ComputeForkId
 	LastFork() (common.Bytes4, error)                                      // GetLastFork
 	StateVersionByForkDigest(common.Bytes4) (clparams.StateVersion, error) // ForkDigestVersion
+	ComputeForkDigestForVersion(currentVersion common.Bytes4) (digest common.Bytes4, err error)
+
+	GenesisValidatorsRoot() common.Hash
+	GenesisTime() uint64
 }
 
 type forkNode struct {
@@ -102,7 +105,7 @@ func (t *ethereumClockImpl) CurrentForkDigest() (common.Bytes4, error) {
 		}
 		break
 	}
-	return fork.ComputeForkDigestForVersion(currentForkVersion, t.genesisValidatorsRoot)
+	return t.ComputeForkDigestForVersion(currentForkVersion)
 }
 
 func (t *ethereumClockImpl) NextForkDigest() (common.Bytes4, error) {
@@ -120,7 +123,7 @@ func (t *ethereumClockImpl) NextForkDigest() (common.Bytes4, error) {
 	if nextForkIndex-1 == len(forkList)-1 {
 		return [4]byte{}, nil
 	}
-	return fork.ComputeForkDigestForVersion(forkList[nextForkIndex].version, t.genesisValidatorsRoot)
+	return t.ComputeForkDigestForVersion(forkList[nextForkIndex].version)
 }
 
 func (t *ethereumClockImpl) ForkId() ([]byte, error) {
@@ -173,42 +176,27 @@ func (t *ethereumClockImpl) StateVersionByForkDigest(digest common.Bytes4) (clpa
 		phase0ForkDigest, altairForkDigest, bellatrixForkDigest, capellaForkDigest, denebForkDigest common.Bytes4
 		err                                                                                         error
 	)
-	phase0ForkDigest, err = fork.ComputeForkDigestForVersion(
-		utils.Uint32ToBytes4(uint32(t.beaconCfg.GenesisForkVersion)),
-		t.genesisValidatorsRoot,
-	)
+	phase0ForkDigest, err = t.ComputeForkDigestForVersion(utils.Uint32ToBytes4(uint32(t.beaconCfg.GenesisForkVersion)))
 	if err != nil {
 		return 0, err
 	}
 
-	altairForkDigest, err = fork.ComputeForkDigestForVersion(
-		utils.Uint32ToBytes4(uint32(t.beaconCfg.AltairForkVersion)),
-		t.genesisValidatorsRoot,
-	)
+	altairForkDigest, err = t.ComputeForkDigestForVersion(utils.Uint32ToBytes4(uint32(t.beaconCfg.AltairForkVersion)))
 	if err != nil {
 		return 0, err
 	}
 
-	bellatrixForkDigest, err = fork.ComputeForkDigestForVersion(
-		utils.Uint32ToBytes4(uint32(t.beaconCfg.BellatrixForkVersion)),
-		t.genesisValidatorsRoot,
-	)
+	bellatrixForkDigest, err = t.ComputeForkDigestForVersion(utils.Uint32ToBytes4(uint32(t.beaconCfg.BellatrixForkVersion)))
 	if err != nil {
 		return 0, err
 	}
 
-	capellaForkDigest, err = fork.ComputeForkDigestForVersion(
-		utils.Uint32ToBytes4(uint32(t.beaconCfg.CapellaForkVersion)),
-		t.genesisValidatorsRoot,
-	)
+	capellaForkDigest, err = t.ComputeForkDigestForVersion(utils.Uint32ToBytes4(uint32(t.beaconCfg.CapellaForkVersion)))
 	if err != nil {
 		return 0, err
 	}
 
-	denebForkDigest, err = fork.ComputeForkDigestForVersion(
-		utils.Uint32ToBytes4(uint32(t.beaconCfg.DenebForkVersion)),
-		t.genesisValidatorsRoot,
-	)
+	denebForkDigest, err = t.ComputeForkDigestForVersion(utils.Uint32ToBytes4(uint32(t.beaconCfg.DenebForkVersion)))
 	if err != nil {
 		return 0, err
 	}
@@ -225,4 +213,21 @@ func (t *ethereumClockImpl) StateVersionByForkDigest(digest common.Bytes4) (clpa
 		return clparams.DenebVersion, nil
 	}
 	return 0, nil
+}
+
+func (t *ethereumClockImpl) ComputeForkDigestForVersion(currentVersion common.Bytes4) (digest common.Bytes4, err error) {
+	var currentVersion32 common.Hash
+	copy(currentVersion32[:], currentVersion[:])
+	dataRoot := utils.Sha256(currentVersion32[:], t.genesisValidatorsRoot[:])
+	// copy first four bytes to output
+	copy(digest[:], dataRoot[:4])
+	return
+}
+
+func (t *ethereumClockImpl) GenesisValidatorsRoot() common.Hash {
+	return t.genesisValidatorsRoot
+}
+
+func (t *ethereumClockImpl) GenesisTime() uint64 {
+	return t.genesisTime
 }
