@@ -13,7 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/antiquary/tests"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
@@ -55,7 +54,8 @@ func TestBlocksByRootHandler(t *testing.T) {
 	expBlocks := populateDatabaseWithBlocks(t, store, tx, startSlot, count)
 	tx.Commit()
 
-	genesisCfg, _, beaconCfg := clparams.GetConfigsByNetwork(1)
+	ethClock := getEthClock(t)
+	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
 		ctx,
 		store,
@@ -65,7 +65,7 @@ func TestBlocksByRootHandler(t *testing.T) {
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,
-		genesisCfg,
+		ethClock,
 		nil, &forkchoice.ForkChoiceStorageMock{}, nil, true,
 	)
 	c.Start()
@@ -121,10 +121,7 @@ func TestBlocksByRootHandler(t *testing.T) {
 			require.NoError(t, fmt.Errorf("null fork digest"))
 		}
 
-		version, err := fork.ForkDigestVersion(utils.Uint32ToBytes4(respForkDigest), beaconCfg, genesisCfg.GenesisValidatorRoot)
-		if err != nil {
-			require.NoError(t, err)
-		}
+		version, err := ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
 
 		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
 		if err = block.DecodeSSZ(raw, int(version)); err != nil {

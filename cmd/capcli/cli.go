@@ -33,6 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/antiquary"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/clparams/initial_state"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/ledgerwatch/erigon/cmd/caplin/caplin1"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
@@ -83,8 +84,8 @@ type chainCfg struct {
 	Chain string `help:"chain" default:"mainnet"`
 }
 
-func (c *chainCfg) configs() (beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, err error) {
-	genesisConfig, _, beaconConfig, _, err = clparams.GetConfigsByNetworkName(c.Chain)
+func (c *chainCfg) configs() (beaconConfig *clparams.BeaconChainConfig, err error) {
+	_, beaconConfig, _, err = clparams.GetConfigsByNetworkName(c.Chain)
 	return
 }
 
@@ -141,19 +142,18 @@ func (c *Chain) Run(ctx *Context) error {
 	dirs := datadir.New(c.Datadir)
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
-
-	db, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, genesisConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
+	bs, err := core.RetrieveBeaconState(ctx, beaconConfig, clparams.GetCheckpointSyncEndpoint(networkType))
+	if err != nil {
+		return err
+	}
+	ethClock := eth_clock.NewEthereumClock(bs.GenesisTime(), bs.GenesisValidatorsRoot(), beaconConfig)
+	db, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, ethClock, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
 
-	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, genesisConfig)
-
-	bs, err := core.RetrieveBeaconState(ctx, beaconConfig, genesisConfig, clparams.GetCheckpointSyncEndpoint(networkType))
-	if err != nil {
-		return err
-	}
+	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, ethClock)
 
 	bRoot, err := bs.BlockRoot()
 	if err != nil {
@@ -167,16 +167,16 @@ func (c *Chain) Run(ctx *Context) error {
 	}
 
 	err = beacon.SetStatus(
-		genesisConfig.GenesisValidatorRoot,
+		ethClock.GenesisValidatorsRoot(),
 		beaconConfig.GenesisEpoch,
-		genesisConfig.GenesisValidatorRoot,
+		ethClock.GenesisValidatorsRoot(),
 		beaconConfig.GenesisSlot)
 	if err != nil {
 		return err
 	}
 
 	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, nil, db)
-	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, false, false, false), csn, db, nil, genesisConfig, beaconConfig, true, false, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root())
+	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, false, false, false), csn, db, nil, beaconConfig, true, false, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root())
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
 }
 
@@ -187,14 +187,19 @@ type ChainEndpoint struct {
 }
 
 func (c *ChainEndpoint) Run(ctx *Context) error {
-	genesisConfig, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
+	_, beaconConfig, ntype, err := clparams.GetConfigsByNetworkName(c.Chain)
 	if err != nil {
 		return err
 	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	bs, err := core.RetrieveBeaconState(ctx, beaconConfig, clparams.GetCheckpointSyncEndpoint(ntype))
+	if err != nil {
+		return err
+	}
+	ethClock := eth_clock.NewEthereumClock(bs.GenesisTime(), bs.GenesisValidatorsRoot(), beaconConfig)
 
 	dirs := datadir.New(c.Datadir)
-	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, genesisConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
+	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, ethClock, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {
 		return err
 	}
@@ -206,7 +211,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 	}
 	log.Info("Hooked", "uri", baseUri)
 	// Let's fetch the head first
-	currentBlock, err := core.RetrieveBlock(ctx, beaconConfig, genesisConfig, fmt.Sprintf("%s/head", baseUri), nil)
+	currentBlock, err := core.RetrieveBlock(ctx, beaconConfig, fmt.Sprintf("%s/head", baseUri), nil)
 	if err != nil {
 		return err
 	}
@@ -242,7 +247,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 
 		stringifiedRoot := common.Bytes2Hex(currentRoot[:])
 		// Let's fetch the head first
-		currentBlock, err := core.RetrieveBlock(ctx, beaconConfig, genesisConfig, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot), (*libcommon.Hash)(&currentRoot))
+		currentBlock, err := core.RetrieveBlock(ctx, beaconConfig, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot), (*libcommon.Hash)(&currentRoot))
 		if err != nil {
 			return false, err
 		}
@@ -305,7 +310,7 @@ type DumpSnapshots struct {
 }
 
 func (c *DumpSnapshots) Run(ctx *Context) error {
-	genesisConfig, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
+	_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
 	if err != nil {
 		return err
 	}
@@ -315,7 +320,7 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
-	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, genesisConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
+	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {
 		return err
 	}
@@ -340,7 +345,7 @@ type CheckSnapshots struct {
 }
 
 func (c *CheckSnapshots) Run(ctx *Context) error {
-	genesisConfig, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
+	_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
 	if err != nil {
 		return err
 	}
@@ -350,7 +355,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
-	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, genesisConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
+	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {
 		return err
 	}
@@ -420,7 +425,7 @@ type LoopSnapshots struct {
 func (c *LoopSnapshots) Run(ctx *Context) error {
 	c.withProfile()
 
-	genesisConfig, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
+	_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
 	if err != nil {
 		return err
 	}
@@ -430,7 +435,7 @@ func (c *LoopSnapshots) Run(ctx *Context) error {
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
-	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, genesisConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
+	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {
 		return err
 	}
@@ -472,14 +477,14 @@ func (d *DownloadSnapshots) Run(ctx *Context) error {
 	webSeeds := snapcfg.KnownWebseeds[d.Chain]
 	dirs := datadir.New(d.Datadir)
 
-	genesisConfig, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(d.Chain)
+	_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(d.Chain)
 	if err != nil {
 		return err
 	}
 
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
 
-	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, genesisConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
+	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {
 		return err
 	}
@@ -534,12 +539,12 @@ type RetrieveHistoricalState struct {
 
 func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	vt := state_accessors.NewStaticValidatorTable()
-	genesisConfig, _, beaconConfig, t, err := clparams.GetConfigsByNetworkName(r.Chain)
+	_, beaconConfig, t, err := clparams.GetConfigsByNetworkName(r.Chain)
 	if err != nil {
 		return err
 	}
 	dirs := datadir.New(r.Datadir)
-	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, genesisConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
+	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {
 		return err
 	}
@@ -705,7 +710,7 @@ func getStateRootAtSlot(beaconApiURL string, slot uint64) (libcommon.Hash, error
 	return libcommon.HexToHash(rootStr), nil
 }
 
-func getBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, uri string, slot uint64) (*state.CachingBeaconState, error) {
+func getBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, uri string, slot uint64) (*state.CachingBeaconState, error) {
 	log.Info("[Checkpoint Sync] Requesting beacon state", "uri", uri)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
 	if err != nil {
@@ -742,7 +747,7 @@ func getBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChainConfi
 }
 
 func (a *ArchiveSanitizer) Run(ctx *Context) error {
-	genesisConfig, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(a.Chain)
+	_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(a.Chain)
 	if err != nil {
 		return err
 	}
@@ -762,7 +767,7 @@ func (a *ArchiveSanitizer) Run(ctx *Context) error {
 		if stateRoot == (libcommon.Hash{}) {
 			continue
 		}
-		state, err := getBeaconState(ctx, beaconConfig, genesisConfig, fmt.Sprintf("%s/eth/v2/debug/beacon/states/%d", a.BeaconApiURL, i), i)
+		state, err := getBeaconState(ctx, beaconConfig, fmt.Sprintf("%s/eth/v2/debug/beacon/states/%d", a.BeaconApiURL, i), i)
 		if err != nil {
 			return err
 		}
@@ -799,7 +804,7 @@ type BenchmarkNode struct {
 }
 
 func (b *BenchmarkNode) Run(ctx *Context) error {
-	_, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(b.Chain)
+	_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(b.Chain)
 	if err != nil {
 		return err
 	}
@@ -878,7 +883,7 @@ type BlobArchiveStoreCheck struct {
 
 func (b *BlobArchiveStoreCheck) Run(ctx *Context) error {
 
-	genesisConfig, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(b.Chain)
+	_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(b.Chain)
 	if err != nil {
 		return err
 	}
@@ -887,7 +892,7 @@ func (b *BlobArchiveStoreCheck) Run(ctx *Context) error {
 
 	dirs := datadir.New(b.Datadir)
 
-	db, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, genesisConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
+	db, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {
 		return err
 	}
@@ -947,7 +952,7 @@ type DumpBlobsSnapshots struct {
 }
 
 func (c *DumpBlobsSnapshots) Run(ctx *Context) error {
-	genesisConfig, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
+	_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
 	if err != nil {
 		return err
 	}
@@ -957,7 +962,7 @@ func (c *DumpBlobsSnapshots) Run(ctx *Context) error {
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
-	db, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, genesisConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
+	db, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {
 		return err
 	}
@@ -983,7 +988,7 @@ type CheckBlobsSnapshots struct {
 }
 
 func (c *CheckBlobsSnapshots) Run(ctx *Context) error {
-	genesisConfig, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
+	_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
 	if err != nil {
 		return err
 	}
@@ -993,7 +998,7 @@ func (c *CheckBlobsSnapshots) Run(ctx *Context) error {
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
-	db, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, genesisConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
+	db, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {
 		return err
 	}
