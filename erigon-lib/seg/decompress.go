@@ -101,45 +101,17 @@ type posTable struct {
 	bitLen int
 }
 
-type ErrCompressedFileInvalidDictionary struct {
+type ErrCompressedFileCorrupted struct {
 	FileName string
 	Reason   string
 }
 
-func (e ErrCompressedFileInvalidDictionary) Error() string {
-	return fmt.Sprintf("compressed file %q dictionary is invalid: %s", e.FileName, e.Reason)
+func (e ErrCompressedFileCorrupted) Error() string {
+	return fmt.Sprintf("compressed file %q dictionary is corrupted: %s", e.FileName, e.Reason)
 }
 
-func (e ErrCompressedFileInvalidDictionary) Is(err error) bool {
-	var e1 *ErrCompressedFileInvalidDictionary
-	return errors.As(err, &e1)
-}
-
-type ErrCompressedFileIsTooShort struct {
-	FileName string
-	Size     int64
-}
-
-func (e ErrCompressedFileIsTooShort) Error() string {
-	return fmt.Sprintf("compressed file %q is too short (%v)", e.FileName, datasize.ByteSize(e.Size).HR())
-}
-
-func (e ErrCompressedFileIsTooShort) Is(err error) bool {
-	var e1 *ErrCompressedFileIsTooShort
-	return errors.As(err, &e1)
-}
-
-type ErrCompressedFileHasNoWords struct {
-	FileName string
-	Size     int64
-}
-
-func (e ErrCompressedFileHasNoWords) Error() string {
-	return fmt.Sprintf("compressed file %q(%s) has no words", e.FileName, datasize.ByteSize(e.Size).HR())
-}
-
-func (e ErrCompressedFileHasNoWords) Is(err error) bool {
-	var e1 *ErrCompressedFileHasNoWords
+func (e ErrCompressedFileCorrupted) Is(err error) bool {
+	var e1 *ErrCompressedFileCorrupted
 	return errors.As(err, &e1)
 }
 
@@ -165,8 +137,7 @@ const (
 	// Note: mainnet has patternMaxDepth 31
 	maxAllowedDepth = 50
 
-	compressedHeaderSize = 24
-	compressedMinSize    = compressedHeaderSize + 8
+	compressedMinSize = 32
 )
 
 // Tables with bitlen greater than threshold will be condensed.
@@ -225,7 +196,10 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 	}
 	d.size = stat.Size()
 	if d.size < compressedMinSize {
-		return nil, &ErrCompressedFileIsTooShort{FileName: fName, Size: d.size}
+		return nil, &ErrCompressedFileCorrupted{
+			FileName: fName,
+			Reason: fmt.Sprintf("invalid file size %s, expected at least %s",
+				datasize.ByteSize(d.size).HR(), datasize.ByteSize(compressedMinSize).HR())}
 	}
 
 	d.modTime = stat.ModTime()
@@ -238,17 +212,19 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 
 	d.wordsCount = binary.BigEndian.Uint64(d.data[:8])
 	d.emptyWordsCount = binary.BigEndian.Uint64(d.data[8:16])
-	dictSize := binary.BigEndian.Uint64(d.data[16:compressedHeaderSize])
 
-	if compressedHeaderSize+dictSize > uint64(d.size) {
-		return nil, &ErrCompressedFileInvalidDictionary{
+	pos := uint64(24)
+	dictSize := binary.BigEndian.Uint64(d.data[16:pos])
+
+	if pos+dictSize > uint64(d.size) {
+		return nil, &ErrCompressedFileCorrupted{
 			FileName: fName,
 			Reason: fmt.Sprintf("invalid patterns dictSize=%s while file size is just %s",
 				datasize.ByteSize(dictSize).HR(), datasize.ByteSize(d.size).HR())}
 	}
 
 	// todo awskii: want to move dictionary reading to separate function?
-	data := d.data[compressedHeaderSize : compressedHeaderSize+dictSize]
+	data := d.data[pos : pos+dictSize]
 
 	var depths []uint64
 	var patterns [][]byte
@@ -258,7 +234,7 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 	for dictPos < dictSize {
 		depth, ns := binary.Uvarint(data[dictPos:])
 		if depth > maxAllowedDepth {
-			return nil, &ErrCompressedFileInvalidDictionary{
+			return nil, &ErrCompressedFileCorrupted{
 				FileName: fName,
 				Reason:   fmt.Sprintf("depth=%d > patternMaxDepth=%d ", depth, maxAllowedDepth)}
 		}
@@ -284,17 +260,20 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 		// fmt.Printf("pattern maxDepth=%d\n", tree.maxDepth)
 		d.dict = newPatternTable(bitLen)
 		if _, err = buildCondensedPatternTable(d.dict, depths, patterns, 0, 0, 0, patternMaxDepth); err != nil {
-			return nil, &ErrCompressedFileInvalidDictionary{FileName: fName, Reason: err.Error()}
+			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: err.Error()}
 		}
 	}
 
+	if pos != 24 {
+		panic("pos != 24")
+	}
+	pos += dictSize // offset patterns
 	// read positions
-	pos := compressedHeaderSize + dictSize
 	dictSize = binary.BigEndian.Uint64(d.data[pos : pos+8])
 	pos += 8
 
 	if pos+dictSize > uint64(d.size) {
-		return nil, &ErrCompressedFileInvalidDictionary{
+		return nil, &ErrCompressedFileCorrupted{
 			FileName: fName,
 			Reason: fmt.Sprintf("invalid dictSize=%s overflows file size of %s",
 				datasize.ByteSize(dictSize).HR(), datasize.ByteSize(d.size).HR())}
@@ -310,7 +289,7 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 	for dictPos < dictSize {
 		depth, ns := binary.Uvarint(data[dictPos:])
 		if depth > maxAllowedDepth {
-			return nil, &ErrCompressedFileInvalidDictionary{FileName: fName, Reason: fmt.Sprintf("posMaxDepth=%d", depth)}
+			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: fmt.Sprintf("posMaxDepth=%d", depth)}
 		}
 		posDepths = append(posDepths, depth)
 		if depth > posMaxDepth {
@@ -338,13 +317,14 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 			ptrs:   make([]*posTable, tableSize),
 		}
 		if _, err = buildPosTable(posDepths, poss, d.posDict, 0, 0, 0, posMaxDepth); err != nil {
-			return nil, &ErrCompressedFileInvalidDictionary{FileName: fName, Reason: err.Error()}
+			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: err.Error()}
 		}
 	}
 	d.wordsStart = pos + dictSize
 
 	if d.Count() == 0 && dictSize == 0 && d.size > compressedMinSize {
-		return nil, &ErrCompressedFileHasNoWords{FileName: fName, Size: d.size}
+		return nil, &ErrCompressedFileCorrupted{
+			FileName: fName, Reason: fmt.Sprintf("size %v but no words in it", datasize.ByteSize(d.size).HR())}
 	}
 	return d, nil
 }

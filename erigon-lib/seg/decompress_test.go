@@ -401,7 +401,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		require.Nil(t, d)
 	})
 
-	t.Run("fileSize<compressedHeaderSize", func(t *testing.T) {
+	t.Run("fileSize<compressedMinSize", func(t *testing.T) {
 		aux := make([]byte, compressedMinSize-1)
 		_, err := rand.Read(aux)
 		require.NoError(t, err)
@@ -411,9 +411,9 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		require.NoError(t, err)
 
 		d, err := NewDecompressor(fpath)
-		e1 := &ErrCompressedFileIsTooShort{}
+		e1 := &ErrCompressedFileCorrupted{}
 		require.Truef(t, e1.Is(err),
-			"file is some garbage or smaller compressedHeaderSize(%d) bytes, got error %v", compressedHeaderSize, err)
+			"file is some garbage or smaller compressedMinSize(%d) bytes, got error %v", compressedMinSize, err)
 		require.Nil(t, d)
 
 		aux = make([]byte, compressedMinSize)
@@ -434,12 +434,12 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		// emptyWordCount=0
 		binary.BigEndian.PutUint64(aux[16:24], 10) // pattern dict size in bytes
 
-		fpath := filepath.Join(tmpDir, "gibberish")
+		fpath := filepath.Join(tmpDir, "invalidPatternDictionarySize")
 		err := os.WriteFile(fpath, aux, 0644)
 		require.NoError(t, err)
 
 		d, err := NewDecompressor(fpath)
-		e1 := &ErrCompressedFileInvalidDictionary{}
+		e1 := &ErrCompressedFileCorrupted{}
 		require.Truef(t, e1.Is(err),
 			"file contains incorrect pattern dictionary size in bytes, got error %v", err)
 		require.Nil(t, d)
@@ -451,12 +451,12 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		// emptyWordCount=0
 		binary.BigEndian.PutUint64(aux[24:32], 10) // dict size in bytes
 
-		fpath := filepath.Join(tmpDir, "gibberish")
+		fpath := filepath.Join(tmpDir, "invalidDictionarySize")
 		err := os.WriteFile(fpath, aux, 0644)
 		require.NoError(t, err)
 
 		d, err := NewDecompressor(fpath)
-		e1 := &ErrCompressedFileInvalidDictionary{}
+		e1 := &ErrCompressedFileCorrupted{}
 		require.Truef(t, e1.Is(err),
 			"file contains incorrect dictionary size in bytes, got error %v", err)
 		require.Nil(t, d)
@@ -469,12 +469,12 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		// pattern dict size in bytes 0
 		// dict size in bytes 0
 
-		fpath := filepath.Join(tmpDir, "gibberish")
+		fpath := filepath.Join(tmpDir, "fileSizeShouldBeMinimal")
 		err := os.WriteFile(fpath, aux, 0644)
 		require.NoError(t, err)
 
 		d, err := NewDecompressor(fpath)
-		e1 := &ErrCompressedFileHasNoWords{}
+		e1 := &ErrCompressedFileCorrupted{}
 		require.Truef(t, e1.Is(err),
 			"file contains incorrect dictionary size in bytes, got error %v", err)
 		require.Nil(t, d)
