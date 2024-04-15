@@ -694,6 +694,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
 	collector := etl.NewCollector(h.historyValsTable, h.iiCfg.dirs.Tmp, etl.NewSortableBuffer(CollateETLRAM), h.logger)
 	defer collector.Close()
+	collector.SortAndFlushInBackground(true)
 
 	for k, v, err := keysCursor.Seek(txKey[:]); err == nil && k != nil; k, v, err = keysCursor.Next() {
 		if err != nil {
