@@ -27,8 +27,9 @@ type GasPool struct {
 	gas, blobGas uint64
 }
 
-func (gp *GasPool) Reset(amount uint64) {
+func (gp *GasPool) Reset(amount, blobGas uint64) {
 	gp.gas = amount
+	gp.blobGas = blobGas
 }
 
 // AddGas makes gas available for execution.
