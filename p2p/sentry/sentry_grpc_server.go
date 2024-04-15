@@ -621,7 +621,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 			DialCandidates: disc,
 			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) *p2p.PeerError {
 				peerID := peer.Pubkey()
-				printablePeerID := hex.EncodeToString(peerID[:])
+				printablePeerID := hex.EncodeToString(peerID[:])[:20]
 				if ss.getPeer(peerID) != nil {
 					return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscAlreadyConnected, nil, "peer already has connection")
 				}
@@ -655,15 +655,12 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 					return p2p.NewPeerError(p2p.PeerErrorFirstMessageSend, p2p.DiscNetworkError, getBlockHeadersErr, "p2p.Protocol.Run getBlockHeaders failure")
 				}
 
-				capability := p2p.Cap{
-					Name:    eth.ProtocolName,
-					Version: protocol,
-				}
+				cap := p2p.Cap{Name: eth.ProtocolName, Version: protocol}
 
 				return runPeer(
 					ctx,
 					peerID,
-					capability,
+					cap,
 					rw,
 					peerInfo,
 					ss.send,
