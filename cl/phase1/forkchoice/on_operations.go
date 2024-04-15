@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"slices"
 
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon/cl/clparams"
