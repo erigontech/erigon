@@ -270,8 +270,8 @@ github.com/envoyproxy/go-control-plane v0.9.4/go.mod h1:6rpuAdCZL397s3pYoYcLgu1m
 github.com/envoyproxy/go-control-plane v0.9.7/go.mod h1:cwu0lG7PUMfa9snN8LXBig5ynNVH9qI8YYLbd1fK2po=
 github.com/envoyproxy/go-control-plane v0.9.9-0.20201210154907-fd9021fe5dad/go.mod h1:cXg6YxExXjJnVBQHBLXeUAgxn2UodCpnH306RInaBQk=
 github.com/envoyproxy/protoc-gen-validate v0.1.0/go.mod h1:iSmxcyjqTsJpI2R4NaDN7+kN2VEUnK/pcBlmesArF7c=
-github.com/erigontech/mdbx-go v0.37.3-0.20240307041505-8334f1d73b4f h1:RsKh5rFw0+nfNbRI7Rl7hrBDYMc+I3X1KtXo9+pwFlY=
-github.com/erigontech/mdbx-go v0.37.3-0.20240307041505-8334f1d73b4f/go.mod h1:FAMxbOgqOnRDx51j8HjuJZIgznbDwjX7LItd+/UWyA4=
+github.com/erigontech/mdbx-go v0.38.0 h1:K64h6YHc2biN081DPEp/KP1TE+X0Jmxu8T+RJadNkXc=
+github.com/erigontech/mdbx-go v0.38.0/go.mod h1:FAMxbOgqOnRDx51j8HjuJZIgznbDwjX7LItd+/UWyA4=
 github.com/erigontech/silkworm-go v0.14.0 h1:X0wzkKuMroE/h8VtAqFKqU65mR7Hk7TrA+jnwgbAo4w=
 github.com/erigontech/silkworm-go v0.14.0/go.mod h1:O50ux0apICEVEGyRWiE488K8qz8lc3PA/SXbQQAc8SU=
 github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c h1:CndMRAH4JIwxbW8KYq6Q+cGWcGHz0FjGR3QqcInWcW0=
