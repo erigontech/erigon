@@ -102,6 +102,17 @@ type posTable struct {
 	bitLen int
 }
 
+func (pt *posTable) release() {
+	for _, pc := range pt.ptrs {
+		if pc != nil {
+			pc.release()
+		}
+	}
+	pt.ptrs = nil
+	pt.pos = nil
+	pt.lens = nil
+}
+
 // Decompressor provides access to the superstrings in a file produced by a compressor
 type Decompressor struct {
 	f               *os.File
@@ -408,6 +419,9 @@ func (d *Decompressor) Close() {
 			log.Log(dbg.FileCloseLogLevel, "close", "err", err, "file", d.FileName(), "stack", dbg.Stack())
 		}
 		d.f = nil
+
+		d.posDict.release()
+
 	}
 }
 
