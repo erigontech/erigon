@@ -21,7 +21,9 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	"github.com/ledgerwatch/erigon/cl/phase1/network/services"
 	"github.com/ledgerwatch/erigon/cl/pool"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/ledgerwatch/erigon/cl/validator/attestation_producer"
 	"github.com/ledgerwatch/erigon/cl/validator/committee_subscription"
 	"github.com/ledgerwatch/erigon/cl/validator/sync_contribution_pool"
@@ -45,7 +47,7 @@ type ApiHandler struct {
 	blockReader     freezeblocks.BeaconSnapshotReader
 	indiciesDB      kv.RwDB
 	netConfig       *clparams.NetworkConfig
-	genesisCfg      *clparams.GenesisConfig
+	ethClock        eth_clock.EthereumClock
 	beaconChainCfg  *clparams.BeaconChainConfig
 	forkchoiceStore forkchoice.ForkChoiceStorage
 	operationsPool  pool.OperationsPool
@@ -75,12 +77,17 @@ type ApiHandler struct {
 	committeeSub        *committee_subscription.CommitteeSubscribeMgmt
 	attestationProducer attestation_producer.AttestationDataProducer
 	aggregatePool       aggregation.AggregationPool
+
+	// services
+	syncCommitteeMessagesService     services.SyncCommitteeMessagesService
+	syncContributionAndProofsService services.SyncContributionService
+	aggregateAndProofsService        services.AggregateAndProofService
 }
 
 func NewApiHandler(
 	logger log.Logger,
 	netConfig *clparams.NetworkConfig,
-	genesisConfig *clparams.GenesisConfig,
+	ethClock eth_clock.EthereumClock,
 	beaconChainConfig *clparams.BeaconChainConfig,
 	indiciesDB kv.RwDB,
 	forkchoiceStore forkchoice.ForkChoiceStorage,
@@ -100,6 +107,9 @@ func NewApiHandler(
 	syncMessagePool sync_contribution_pool.SyncContributionPool,
 	committeeSub *committee_subscription.CommitteeSubscribeMgmt,
 	aggregatePool aggregation.AggregationPool,
+	syncCommitteeMessagesService services.SyncCommitteeMessagesService,
+	syncContributionAndProofs services.SyncContributionService,
+	aggregateAndProofs services.AggregateAndProofService,
 ) *ApiHandler {
 	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("blobs", maxBlobBundleCacheSize)
 	if err != nil {
@@ -110,7 +120,7 @@ func NewApiHandler(
 		validatorParams: validatorParams,
 		o:               sync.Once{},
 		netConfig:       netConfig,
-		genesisCfg:      genesisConfig,
+		ethClock:        ethClock,
 		beaconChainCfg:  beaconChainConfig,
 		indiciesDB:      indiciesDB,
 		forkchoiceStore: forkchoiceStore,
@@ -121,18 +131,21 @@ func NewApiHandler(
 		randaoMixesPool: sync.Pool{New: func() interface{} {
 			return solid.NewHashVector(int(beaconChainConfig.EpochsPerHistoricalVector))
 		}},
-		sentinel:            sentinel,
-		version:             version,
-		routerCfg:           routerCfg,
-		emitters:            emitters,
-		blobStoage:          blobStoage,
-		caplinSnapshots:     caplinSnapshots,
-		attestationProducer: attestationProducer,
-		blobBundles:         blobBundles,
-		engine:              engine,
-		syncMessagePool:     syncMessagePool,
-		committeeSub:        committeeSub,
-		aggregatePool:       aggregatePool,
+		sentinel:                         sentinel,
+		version:                          version,
+		routerCfg:                        routerCfg,
+		emitters:                         emitters,
+		blobStoage:                       blobStoage,
+		caplinSnapshots:                  caplinSnapshots,
+		attestationProducer:              attestationProducer,
+		blobBundles:                      blobBundles,
+		engine:                           engine,
+		syncMessagePool:                  syncMessagePool,
+		committeeSub:                     committeeSub,
+		aggregatePool:                    aggregatePool,
+		syncCommitteeMessagesService:     syncCommitteeMessagesService,
+		syncContributionAndProofsService: syncContributionAndProofs,
+		aggregateAndProofsService:        aggregateAndProofs,
 	}
 }
 

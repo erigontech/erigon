@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 )
 
 var (
@@ -19,21 +20,21 @@ var (
 
 type aggregationPoolImpl struct {
 	// config
-	genesisConfig  *clparams.GenesisConfig
 	beaconConfig   *clparams.BeaconChainConfig
 	netConfig      *clparams.NetworkConfig
+	ethClock       eth_clock.EthereumClock
 	aggregatesLock sync.RWMutex
 	aggregates     map[common.Hash]*solid.Attestation
 }
 
 func NewAggregationPool(
 	ctx context.Context,
-	genesisConfig *clparams.GenesisConfig,
 	beaconConfig *clparams.BeaconChainConfig,
 	netConfig *clparams.NetworkConfig,
+	ethClock eth_clock.EthereumClock,
 ) AggregationPool {
 	p := &aggregationPoolImpl{
-		genesisConfig:  genesisConfig,
+		ethClock:       ethClock,
 		beaconConfig:   beaconConfig,
 		netConfig:      netConfig,
 		aggregatesLock: sync.RWMutex{},
@@ -126,6 +127,6 @@ func (p *aggregationPoolImpl) sweepStaleAtt(ctx context.Context) {
 }
 
 func (p *aggregationPoolImpl) slotIsStale(targetSlot uint64) bool {
-	curSlot := utils.GetCurrentSlot(p.genesisConfig.GenesisTime, p.beaconConfig.SecondsPerSlot)
+	curSlot := p.ethClock.GetCurrentSlot()
 	return curSlot-targetSlot > p.netConfig.AttestationPropagationSlotRange
 }

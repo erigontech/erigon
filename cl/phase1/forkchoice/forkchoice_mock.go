@@ -192,11 +192,6 @@ func (f *ForkChoiceStorageMock) ForkNodes() []ForkNode {
 	return f.WeightsMock
 }
 
-func (f *ForkChoiceStorageMock) OnAggregateAndProof(aggregateAndProof *cltypes.SignedAggregateAndProof, test bool) error {
-	f.Pool.AttestationsPool.Insert(aggregateAndProof.Message.Aggregate.Signature(), aggregateAndProof.Message.Aggregate)
-	return nil
-}
-
 func (f *ForkChoiceStorageMock) Synced() bool {
 	return true
 }
@@ -245,15 +240,10 @@ func (f *ForkChoiceStorageMock) GetPublicKeyForValidator(blockRoot libcommon.Has
 	panic("implement me")
 }
 
-func (f *ForkChoiceStorageMock) OnSyncCommitteeMessage(msg *cltypes.SyncCommitteeMessage, subnetID uint64) error {
-	f.SyncContributionPool.AddSyncCommitteeMessage(nil, 0, msg)
-	return nil
-}
-
-func (f *ForkChoiceStorageMock) OnSignedContributionAndProof(signedContribution *cltypes.SignedContributionAndProof, test bool) error {
-	f.SyncContributionPool.AddSyncContribution(nil, signedContribution.Message.Contribution)
-	return nil
-}
+// func (f *ForkChoiceStorageMock) OnSignedContributionAndProof(signedContribution *cltypes.SignedContributionAndProof, test bool) error {
+// 	f.SyncContributionPool.AddSyncContribution(nil, signedContribution.Message.Contribution)
+// 	return nil
+// }
 
 func (f *ForkChoiceStorageMock) AddPreverifiedBlobSidecar(msg *cltypes.BlobSidecar) error {
 	return nil

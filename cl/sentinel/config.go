@@ -30,7 +30,6 @@ import (
 
 type SentinelConfig struct {
 	NetworkConfig *clparams.NetworkConfig
-	GenesisConfig *clparams.GenesisConfig
 	BeaconConfig  *clparams.BeaconChainConfig
 	IpAddr        string
 	Port          int

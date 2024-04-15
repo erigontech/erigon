@@ -50,6 +50,9 @@ func (t *validatorTestSuite) SetupTest() {
 		nil,
 		nil,
 		t.mockAggrPool,
+		nil,
+		nil,
+		nil,
 	)
 	t.gomockCtrl = gomockCtrl
 }

@@ -10,7 +10,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -26,19 +25,6 @@ import (
 const foreseenProposers = 16
 
 var ErrEIP4844DataNotAvailable = fmt.Errorf("EIP-4844 blob data is not available")
-
-func (f *ForkChoiceStore) deriveNonAnchorPublicKeys(s *state.CachingBeaconState) ([]byte, error) {
-	l := len(f.anchorPublicKeys) / length.Bytes48
-	buf := make([]byte, (s.ValidatorLength()-l)*length.Bytes48)
-	for i := l; i < s.ValidatorLength(); i++ {
-		pk, err := s.ValidatorPublicKey(i)
-		if err != nil {
-			return nil, err
-		}
-		copy(buf[(i-l)*length.Bytes48:], pk[:])
-	}
-	return buf, nil
-}
 
 func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, block *cltypes.Eth1Block, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) error {
 	expectedBlobHashes := []common.Hash{}
@@ -123,7 +109,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			return fmt.Errorf("execution client failed")
 		}
 	}
-	log.Debug("OnBlock: engine", "elapsed", time.Since(startEngine))
+	log.Trace("OnBlock: engine", "elapsed", time.Since(startEngine))
 	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation)
 	if err != nil {
 		return err
