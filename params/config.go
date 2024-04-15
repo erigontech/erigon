@@ -62,7 +62,7 @@ var (
 	ChiadoGenesisHash                  = libcommon.HexToHash("0xada44fd8d2ecab8b08f256af07ad3e777f17fb434f8f8e678b312f576212ba9a")
 	HermezMainnetGenesisHash           = libcommon.HexToHash("0x81005434635456a16f74ff7023fbe0bf423abbc8a8deb093ffff455c0ad3b741")
 	HermezMainnetShadowforkGenesisHash = libcommon.HexToHash("0xe54709058a084845156393707161a7b3347859b1796167ca014354841f68373c")
-	HermezLocalDevnetGenesisHash       = libcommon.HexToHash("0x433043a1b0948d109cd92a6b7e0e5a3f011c761d70eebe3135ec8f7a39815a65")
+	HermezLocalDevnetGenesisHash       = libcommon.HexToHash("0x532abde1baf4157008acf46f17c27624b54cab8e24922dac9ddb63da681e1848")
 	HermezESTestGenesisHash            = libcommon.HexToHash("0x8c630b598fab24a99b59cdd8257f41b35d0aca992f13cd381c7591f5e89eec58")
 	HermezCardonaGenesisHash           = libcommon.HexToHash("0x676c1a76a6c5855a32bdf7c61977a0d1510088a4eeac1330466453b3d08b60b9")
 	HermezCardonaInternalGenesisHash   = libcommon.HexToHash("0x7311011ce6ab98ef0a15e44fe29f7680909588322534d1736361daa678543038")
