@@ -5,7 +5,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -50,10 +49,7 @@ func (c *ConsensusHandlers) blobsSidecarsByRangeHandler(s network.Stream) error 
 		for i := 0; i < int(blobCount) && written < maxBlobsThroughoutputPerRequest; i++ {
 			version := c.beaconConfig.GetCurrentStateVersion(slot / c.beaconConfig.SlotsPerEpoch)
 			// Read the fork digest
-			forkDigest, err := fork.ComputeForkDigestForVersion(
-				utils.Uint32ToBytes4(c.beaconConfig.GetForkVersionByVersion(version)),
-				c.genesisConfig.GenesisValidatorRoot,
-			)
+			forkDigest, err := c.ethClock.ComputeForkDigestForVersion(utils.Uint32ToBytes4(c.beaconConfig.GetForkVersionByVersion(version)))
 			if err != nil {
 				return err
 			}
@@ -104,10 +100,7 @@ func (c *ConsensusHandlers) blobsSidecarsByIdsHandler(s network.Stream) error {
 		}
 		version := c.beaconConfig.GetCurrentStateVersion(*slot / c.beaconConfig.SlotsPerEpoch)
 		// Read the fork digest
-		forkDigest, err := fork.ComputeForkDigestForVersion(
-			utils.Uint32ToBytes4(c.beaconConfig.GetForkVersionByVersion(version)),
-			c.genesisConfig.GenesisValidatorRoot,
-		)
+		forkDigest, err := c.ethClock.ComputeForkDigestForVersion(utils.Uint32ToBytes4(c.beaconConfig.GetForkVersionByVersion(version)))
 		if err != nil {
 			return err
 		}

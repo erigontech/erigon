@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/ledgerwatch/erigon/cl/validator/sync_contribution_pool"
 	"golang.org/x/exp/slices"
 
@@ -36,17 +37,25 @@ type syncContributionService struct {
 	syncContributionPool           sync_contribution_pool.SyncContributionPool
 	seenSyncCommitteeContributions map[seenSyncCommitteeContribution]struct{}
 	emitters                       *beaconevents.Emitters
+	ethClock                       eth_clock.EthereumClock
 
 	mu sync.Mutex
 }
 
 // NewSyncContributionService creates a new sync contribution service
-func NewSyncContributionService(syncedDataManager *synced_data.SyncedDataManager, beaconCfg *clparams.BeaconChainConfig, syncContributionPool sync_contribution_pool.SyncContributionPool, emitters *beaconevents.Emitters) SyncContributionService {
+func NewSyncContributionService(
+	syncedDataManager *synced_data.SyncedDataManager,
+	beaconCfg *clparams.BeaconChainConfig,
+	syncContributionPool sync_contribution_pool.SyncContributionPool,
+	ethClock eth_clock.EthereumClock,
+	emitters *beaconevents.Emitters,
+) SyncContributionService {
 	return &syncContributionService{
 		syncedDataManager:              syncedDataManager,
 		beaconCfg:                      beaconCfg,
 		syncContributionPool:           syncContributionPool,
 		seenSyncCommitteeContributions: make(map[seenSyncCommitteeContribution]struct{}),
+		ethClock:                       ethClock,
 		emitters:                       emitters,
 	}
 }
@@ -75,7 +84,7 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 	}
 
 	// [IGNORE] The contribution's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. contribution.slot == current_slot.
-	if !utils.IsCurrentSlotWithMaximumClockDisparity(headState.GenesisTime(), s.beaconCfg.SecondsPerSlot, contributionAndProof.Contribution.Slot) {
+	if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(contributionAndProof.Contribution.Slot) {
 		return ErrIgnore
 	}
 

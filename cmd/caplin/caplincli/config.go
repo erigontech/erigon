@@ -12,7 +12,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cmd/caplin/caplinflags"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinelcli"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinelflags"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
@@ -57,20 +56,21 @@ func SetupCaplinCli(ctx *cli.Context) (cfg *CaplinCliCfg, err error) {
 
 	cfg.ErigonPrivateApi = ctx.String(caplinflags.ErigonPrivateApiFlag.Name)
 
-	if ctx.String(sentinelflags.BeaconConfigFlag.Name) != "" {
-		var stateByte []byte
-		// Now parse genesis time and genesis fork
-		if *cfg.GenesisCfg, stateByte, err = clparams.ParseGenesisSSZToGenesisConfig(
-			ctx.String(sentinelflags.GenesisSSZFlag.Name),
-			cfg.BeaconCfg.GetCurrentStateVersion(0)); err != nil {
-			return nil, err
-		}
+	//T TODO(Giulio2002): Refactor later
+	// if ctx.String(sentinelflags.BeaconConfigFlag.Name) != "" {
+	// 	var stateByte []byte
+	// 	// Now parse genesis time and genesis fork
+	// 	if *cfg.GenesisCfg, stateByte, err = clparams.ParseGenesisSSZToGenesisConfig(
+	// 		ctx.String(sentinelflags.GenesisSSZFlag.Name),
+	// 		cfg.BeaconCfg.GetCurrentStateVersion(0)); err != nil {
+	// 		return nil, err
+	// 	}
 
-		cfg.InitalState = state.New(cfg.BeaconCfg)
-		if cfg.InitalState.DecodeSSZ(stateByte, int(cfg.BeaconCfg.GetCurrentStateVersion(0))); err != nil {
-			return nil, err
-		}
-	}
+	// 	cfg.InitalState = state.New(cfg.BeaconCfg)
+	// 	if cfg.InitalState.DecodeSSZ(stateByte, int(cfg.BeaconCfg.GetCurrentStateVersion(0))); err != nil {
+	// 		return nil, err
+	// 	}
+	// }
 
 	cfg.AllowedEndpoints = ctx.StringSlice(utils.BeaconAPIFlag.Name)
 

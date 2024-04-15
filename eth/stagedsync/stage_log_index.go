@@ -479,7 +479,8 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneFrom, prune
 
 			notToPrune := false // To identify whether this log key has addr in noPruneContracts
 			for _, l := range logs {
-				if noPruneContracts != nil && noPruneContracts[l.Address] {
+				// If any of the logs have an address in noPruneContracts, then the whole tx is related to it, and must not be pruned, including addr and topic indexes
+				if noPruneContracts != nil && noPruneContracts[l.Address] || notToPrune {
 					notToPrune = true
 					continue
 				}

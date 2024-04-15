@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/log/v3"
@@ -132,7 +131,7 @@ func (s *Sentinel) connectToBootnodes() error {
 func (s *Sentinel) setupENR(
 	node *enode.LocalNode,
 ) (*enode.LocalNode, error) {
-	forkId, err := fork.ComputeForkId(s.cfg.BeaconConfig, s.cfg.GenesisConfig)
+	forkId, err := s.ethClock.ForkId()
 	if err != nil {
 		return nil, err
 	}
