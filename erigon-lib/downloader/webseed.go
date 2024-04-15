@@ -455,10 +455,11 @@ func (d *WebSeeds) retrieveFileEtag(ctx context.Context, file *url.URL) (string,
 	if etag == "" {
 		return "", fmt.Errorf("webseed.http: file has no etag, url=%s", file.String())
 	}
-	etag = strings.Trim(etag, "\"")
-	if strings.Contains(etag, "-") {
-		return etag, ErrInvalidEtag
-	}
+	// Todo(awskii): figure out reason why multipart etags contains "-" and remove this check
+	//etag = strings.Trim(etag, "\"")
+	//if strings.Contains(etag, "-") {
+	//	return etag, ErrInvalidEtag
+	//}
 	return etag, nil
 }
 

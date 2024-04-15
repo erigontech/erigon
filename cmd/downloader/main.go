@@ -403,8 +403,10 @@ var torrentMagnet = &cobra.Command{
 
 func manifestVerify(ctx context.Context, logger log.Logger) error {
 	webseedsList := common.CliString2Array(webseeds)
-	if known, ok := snapcfg.KnownWebseeds[chain]; ok {
-		webseedsList = append(webseedsList, known...)
+	if len(webseedsList) == 0 {
+		if known, ok := snapcfg.KnownWebseeds[chain]; ok {
+			webseedsList = append(webseedsList, known...)
+		}
 	}
 
 	webseedUrlsOrFiles := webseedsList
@@ -438,9 +440,9 @@ func manifestVerify(ctx context.Context, logger log.Logger) error {
 			continue
 		}
 	}
-
-	_ = webseedFileProviders // todo add support of file providers
-	logger.Warn("file providers are not supported yet", "fileProviders", webseedFileProviders)
+	if len(webseedFileProviders) > 0 {
+		logger.Warn("file providers are not supported yet", "fileProviders", webseedFileProviders)
+	}
 
 	wseed := downloader.NewWebSeeds(webseedHttpProviders, log.LvlDebug, logger)
 	return wseed.VerifyManifestedBuckets(ctx, verifyFailfast)
