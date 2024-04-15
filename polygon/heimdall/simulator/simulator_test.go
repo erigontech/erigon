@@ -72,6 +72,7 @@ func setup(t *testing.T, ctx context.Context) simulator.HeimdallSimulator {
 }
 
 func TestSimulatorEvents(t *testing.T) {
+	t.Skip("TODO: e35 do not store Logs")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
