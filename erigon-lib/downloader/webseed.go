@@ -112,18 +112,17 @@ func (d *WebSeeds) checkHasTorrents(manifestResponse snaptype.WebSeedsFromProvid
 	hasTorrents := len(torrentNames) > 0
 	report.missingTorrents = make([]string, 0)
 	for name := range manifestResponse {
-		// todo extract list of extensions which are
-		//  seeded as torrents (kv, ef, v, seg)
-		//  seeded as is (.txt, efi)
-		//  temporarily not seedable (.idx)
-		if !strings.HasSuffix(name, ".torrent") && !strings.HasSuffix(name, ".txt") {
-			tname := name + ".torrent"
-			if _, ok := torrentNames[tname]; !ok {
-				report.missingTorrents = append(report.missingTorrents, name)
-				continue
-			}
-			delete(torrentNames, tname)
+		// skip non-seedable files. maybe will need extend list of seedable files in future.
+		seedable := strings.HasSuffix(name, ".seg") || strings.HasSuffix(name, ".kv") || strings.HasSuffix(name, ".v") || strings.HasSuffix(name, ".ef")
+		if !seedable {
+			continue
 		}
+		tname := name + ".torrent"
+		if _, ok := torrentNames[tname]; !ok {
+			report.missingTorrents = append(report.missingTorrents, name)
+			continue
+		}
+		delete(torrentNames, tname)
 	}
 
 	if len(torrentNames) > 0 {
