@@ -37,8 +37,11 @@ type GossipManager struct {
 	committeeSub *committee_subscription.CommitteeSubscribeMgmt
 
 	// Services for processing messages from the network
-	blockService services.BlockService
-	blobService  services.BlobSidecarsService
+	blockService                 services.BlockService
+	blobService                  services.BlobSidecarsService
+	syncCommitteeMessagesService services.SyncCommitteeMessagesService
+	syncContributionService      services.SyncContributionService
+	aggregateAndProofService     services.AggregateAndProofService
 }
 
 func NewGossipReceiver(
@@ -50,16 +53,22 @@ func NewGossipReceiver(
 	comitteeSub *committee_subscription.CommitteeSubscribeMgmt,
 	blockService services.BlockService,
 	blobService services.BlobSidecarsService,
+	syncCommitteeMessagesService services.SyncCommitteeMessagesService,
+	syncContributionService services.SyncContributionService,
+	aggregateAndProofService services.AggregateAndProofService,
 ) *GossipManager {
 	return &GossipManager{
-		sentinel:      s,
-		forkChoice:    forkChoice,
-		emitters:      emitters,
-		beaconConfig:  beaconConfig,
-		genesisConfig: genesisConfig,
-		committeeSub:  comitteeSub,
-		blockService:  blockService,
-		blobService:   blobService,
+		sentinel:                     s,
+		forkChoice:                   forkChoice,
+		emitters:                     emitters,
+		beaconConfig:                 beaconConfig,
+		genesisConfig:                genesisConfig,
+		committeeSub:                 comitteeSub,
+		blockService:                 blockService,
+		blobService:                  blobService,
+		syncCommitteeMessagesService: syncCommitteeMessagesService,
+		syncContributionService:      syncContributionService,
+		aggregateAndProofService:     aggregateAndProofService,
 	}
 }
 
@@ -80,12 +89,12 @@ func operationsContract[T ssz.EncodableSSZ](ctx context.Context, g *GossipManage
 }
 
 func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l log.Ctx) (err error) {
-	defer func() {
-		r := recover()
-		if r != nil {
-			err = fmt.Errorf("%v", r)
-		}
-	}()
+	// defer func() {
+	// 	r := recover()
+	// 	if r != nil {
+	// 		err = fmt.Errorf("%v", r)
+	// 	}
+	// }()
 	// Make a copy of the gossip data so that we the received data is not modified.
 	// 1) When we publish and corrupt the data, the peers bans us.
 	// 2) We decode the block wrong
@@ -129,7 +138,11 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		log.Debug("Received block via gossip", "slot", obj.Block.Slot)
 		return g.blockService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameSyncCommitteeContributionAndProof:
-		return operationsContract[*cltypes.SignedContributionAndProof](ctx, g, data, int(version), "contribution and proof", g.forkChoice.OnSignedContributionAndProof)
+		obj := &cltypes.SignedContributionAndProof{}
+		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
+			return err
+		}
+		return g.syncContributionService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameVoluntaryExit:
 		return operationsContract[*cltypes.SignedVoluntaryExit](ctx, g, data, int(version), "voluntary exit", g.forkChoice.OnVoluntaryExit)
 	case gossip.TopicNameProposerSlashing:
@@ -139,7 +152,11 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 	case gossip.TopicNameBlsToExecutionChange:
 		return operationsContract[*cltypes.SignedBLSToExecutionChange](ctx, g, data, int(version), "bls to execution change", g.forkChoice.OnBlsToExecutionChange)
 	case gossip.TopicNameBeaconAggregateAndProof:
-		return operationsContract[*cltypes.SignedAggregateAndProof](ctx, g, data, int(version), "aggregate and proof", g.forkChoice.OnAggregateAndProof)
+		obj := &cltypes.SignedAggregateAndProof{}
+		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
+			return err
+		}
+		return g.aggregateAndProofService.ProcessMessage(ctx, data.SubnetId, obj)
 	default:
 		switch {
 		case gossip.IsTopicBlobSidecar(data.Name):
@@ -152,14 +169,11 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 			// The background checks above are enough for now.
 			return g.blobService.ProcessMessage(ctx, data.SubnetId, blobSideCar)
 		case gossip.IsTopicSyncCommittee(data.Name):
-			if data.SubnetId == nil {
-				return fmt.Errorf("missing subnet id")
-			}
 			msg := &cltypes.SyncCommitteeMessage{}
 			if err := msg.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
 				return err
 			}
-			return g.forkChoice.OnSyncCommitteeMessage(msg, *data.SubnetId)
+			return g.syncCommitteeMessagesService.ProcessMessage(ctx, data.SubnetId, msg)
 		case gossip.IsTopicBeaconAttestation(data.Name):
 			att := &solid.Attestation{}
 			if err := att.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {

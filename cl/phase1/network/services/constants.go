@@ -6,12 +6,13 @@ import (
 )
 
 const (
-	SeenBlockCacheSize    = 1000 // SeenBlockCacheSize is the size of the cache for seen blocks.
-	blockJobsIntervalTick = 50 * time.Millisecond
-	blobJobsIntervalTick  = 5 * time.Millisecond
-	blockJobExpiry        = 7 * time.Minute
-	blobJobExpiry         = 7 * time.Minute
-	attestationJobExpiry  = 30 * time.Minute
+	SeenBlockCacheSize          = 1000 // SeenBlockCacheSize is the size of the cache for seen blocks.
+	blockJobsIntervalTick       = 50 * time.Millisecond
+	blobJobsIntervalTick        = 5 * time.Millisecond
+	attestationJobsIntervalTick = 100 * time.Millisecond
+	blockJobExpiry              = 7 * time.Minute
+	blobJobExpiry               = 7 * time.Minute
+	attestationJobExpiry        = 30 * time.Minute
 )
 
 var (
