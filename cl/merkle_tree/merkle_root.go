@@ -69,7 +69,7 @@ func HashTreeRoot(schema ...interface{}) ([32]byte, error) {
 	return common.BytesToHash(leaves[:length.Hash]), nil
 }
 
-// HashByteSlice is gohashtree HashBytSlice but using our hopefully safer header converstion
+// HashByteSlice is gohashtree HashBytSlice but using our hopefully safer header conversion
 func HashByteSlice(out, in []byte) error {
 	if len(in) == 0 {
 		return errors.New("zero leaves provided")
