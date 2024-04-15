@@ -161,7 +161,7 @@ func (rw *TraceWorker2) RunTxTask(txTask *state.TxTask) {
 		}
 	default:
 		txHash := txTask.Tx.Hash()
-		rw.taskGasPool.Reset(txTask.Tx.GetGas())
+		rw.taskGasPool.Reset(txTask.Tx.GetGas(), rw.execArgs.ChainConfig.GetMaxBlobGasPerBlock())
 		if tracer := rw.consumer.NewTracer(); tracer != nil {
 			rw.vmConfig.Debug = true
 			rw.vmConfig.Tracer = tracer
