@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/sentinel/handshake"
 	"github.com/ledgerwatch/erigon/cl/sentinel/httpreqresp"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 
 	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
@@ -91,6 +92,7 @@ type Sentinel struct {
 	logger               log.Logger
 	forkChoiceReader     forkchoice.ForkChoiceStorageReader
 	pidToEnr             sync.Map
+	ethClock             eth_clock.EthereumClock
 
 	metadataLock sync.Mutex
 }
@@ -175,7 +177,7 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	if err != nil {
 		return nil, err
 	}
-	handlers.NewConsensusHandlers(s.ctx, s.blockReader, s.indiciesDB, s.host, s.peers, s.cfg.NetworkConfig, localNode, s.cfg.BeaconConfig, s.cfg.GenesisConfig, s.handshaker, s.forkChoiceReader, s.blobStorage, s.cfg.EnableBlocks).Start()
+	handlers.NewConsensusHandlers(s.ctx, s.blockReader, s.indiciesDB, s.host, s.peers, s.cfg.NetworkConfig, localNode, s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.forkChoiceReader, s.blobStorage, s.cfg.EnableBlocks).Start()
 
 	return net, err
 }
@@ -184,6 +186,7 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 func New(
 	ctx context.Context,
 	cfg *SentinelConfig,
+	ethClock eth_clock.EthereumClock,
 	blockReader freezeblocks.BeaconSnapshotReader,
 	blobStorage blob_storage.BlobStorage,
 	indiciesDB kv.RoDB,
@@ -199,6 +202,7 @@ func New(
 		logger:           logger,
 		forkChoiceReader: forkChoiceReader,
 		blobStorage:      blobStorage,
+		ethClock:         ethClock,
 	}
 
 	// Setup discovery
@@ -254,7 +258,7 @@ func New(
 	mux.Get("/", httpreqresp.NewRequestHandler(host))
 	s.httpApi = mux
 
-	s.handshaker = handshake.New(ctx, cfg.GenesisConfig, cfg.BeaconConfig, s.httpApi)
+	s.handshaker = handshake.New(ctx, s.ethClock, cfg.BeaconConfig, s.httpApi)
 
 	pubsub.TimeCacheDuration = 550 * gossipSubHeartbeatInterval
 	s.pubsub, err = pubsub.NewGossipSub(s.ctx, s.host, s.pubsubOptions()...)

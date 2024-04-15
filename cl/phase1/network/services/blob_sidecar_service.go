@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -25,6 +26,7 @@ type blobSidecarService struct {
 	syncedDataManager *synced_data.SyncedDataManager
 
 	blobSidecarsScheduledForLaterExecution sync.Map
+	ethClock                               eth_clock.EthereumClock
 	test                                   bool
 }
 
@@ -39,6 +41,7 @@ func NewBlobSidecarService(
 	beaconCfg *clparams.BeaconChainConfig,
 	forkchoiceStore forkchoice.ForkChoiceStorage,
 	syncedDataManager *synced_data.SyncedDataManager,
+	ethClock eth_clock.EthereumClock,
 	test bool,
 ) BlobSidecarsService {
 	b := &blobSidecarService{
@@ -46,6 +49,7 @@ func NewBlobSidecarService(
 		forkchoiceStore:   forkchoiceStore,
 		syncedDataManager: syncedDataManager,
 		test:              test,
+		ethClock:          ethClock,
 	}
 	go b.loop(ctx)
 	return b
@@ -71,11 +75,11 @@ func (b *blobSidecarService) ProcessMessage(ctx context.Context, subnetId *uint6
 	if sidecarSubnetIndex != *subnetId {
 		return ErrBlobIndexOutOfRange
 	}
-	currentSlot := utils.GetCurrentSlot(headState.GenesisTime(), b.beaconCfg.SecondsPerSlot)
+	currentSlot := b.ethClock.GetCurrentSlot()
 	sidecarSlot := msg.SignedBlockHeader.Header.Slot
 	// [IGNORE] The block is not from a future slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. validate that
 	//signed_beacon_block.message.slot <= current_slot (a client MAY queue future blocks for processing at the appropriate slot).
-	if currentSlot < sidecarSlot && !utils.IsCurrentSlotWithMaximumClockDisparity(headState.GenesisTime(), b.beaconCfg.SecondsPerSlot, sidecarSlot) {
+	if currentSlot < sidecarSlot && !b.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(sidecarSlot) {
 		return ErrIgnore
 	}
 
@@ -195,7 +199,7 @@ func (b *blobSidecarService) loop(ctx context.Context) {
 			}
 
 			if err := b.verifyAndStoreBlobSidecar(headState, job.blobSidecar); err != nil {
-				log.Debug("blob sidecar verification failed", "err", err,
+				log.Trace("blob sidecar verification failed", "err", err,
 					"slot", job.blobSidecar.SignedBlockHeader.Header.Slot)
 				return true
 			}
