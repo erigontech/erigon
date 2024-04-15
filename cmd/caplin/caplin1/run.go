@@ -181,8 +181,9 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 	syncCommitteeMessagesService := services.NewSyncCommitteeMessagesService(beaconConfig, ethClock, syncedDataManager, syncContributionPool, false)
 	syncContributionService := services.NewSyncContributionService(syncedDataManager, beaconConfig, syncContributionPool, ethClock, emitters)
 	aggregateAndProofService := services.NewAggregateAndProofService(ctx, syncedDataManager, forkChoice, beaconConfig, aggregationPool)
+	attestationService := services.NewAttestationService(forkChoice, committeeSub, ethClock, syncedDataManager, beaconConfig, networkConfig)
 	// Create the gossip manager
-	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, ethClock, emitters, committeeSub, blockService, blobService, syncCommitteeMessagesService, syncContributionService, aggregateAndProofService)
+	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, ethClock, emitters, committeeSub, blockService, blobService, syncCommitteeMessagesService, syncContributionService, aggregateAndProofService, attestationService)
 	{ // start ticking forkChoice
 		go func() {
 			tickInterval := time.NewTicker(2 * time.Millisecond)

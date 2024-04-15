@@ -9,7 +9,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/ledgerwatch/erigon/cl/phase1/network/subnets"
 	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/ledgerwatch/erigon/cl/validator/committee_subscription"
@@ -22,7 +21,6 @@ type attestationService struct {
 	syncedDataManager  *synced_data.SyncedDataManager
 	beaconCfg          *clparams.BeaconChainConfig
 	netCfg             *clparams.NetworkConfig
-	forkGraph          fork_graph.ForkGraph
 	// validatorAttestationSeen maps from epoch to validator index. This is used to ignore duplicate validator attestations in the same epoch.
 	validatorAttestationSeen map[uint64]map[uint64]struct{}
 	validatorAttSeenLock     sync.Mutex
@@ -33,7 +31,6 @@ func NewAttestationService(
 	committeeSubscribe *committee_subscription.CommitteeSubscribeMgmt,
 	ethClock eth_clock.EthereumClock,
 	syncedDataManager *synced_data.SyncedDataManager,
-	forkGraph fork_graph.ForkGraph,
 	beaconCfg *clparams.BeaconChainConfig,
 	netCfg *clparams.NetworkConfig,
 ) AttestationService {
@@ -42,7 +39,6 @@ func NewAttestationService(
 		committeeSubscribe:       committeeSubscribe,
 		ethClock:                 ethClock,
 		syncedDataManager:        syncedDataManager,
-		forkGraph:                forkGraph,
 		beaconCfg:                beaconCfg,
 		netCfg:                   netCfg,
 		validatorAttestationSeen: make(map[uint64]map[uint64]struct{}),
@@ -64,7 +60,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	}
 	// [REJECT] The attestation is for the correct subnet -- i.e. compute_subnet_for_attestation(committees_per_slot, attestation.data.slot, index) == subnet_id
 	subnetId := subnets.ComputeSubnetForAttestation(committeeCount, slot, committeeIndex, s.beaconCfg.SlotsPerEpoch, s.netCfg.AttestationSubnetCount)
-	if subnetId != *subnet {
+	if subnet == nil || subnetId != *subnet {
 		return fmt.Errorf("wrong subnet")
 	}
 	// [IGNORE] attestation.data.slot is within the last ATTESTATION_PROPAGATION_SLOT_RANGE slots (within a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) --
@@ -132,7 +128,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 
 	// [IGNORE] The block being voted for (attestation.data.beacon_block_root) has been seen (via both gossip and non-gossip sources)
 	// (a client MAY queue attestations for processing once block is retrieved).
-	if _, ok := s.forkGraph.GetHeader(root); !ok {
+	if _, ok := s.forkchoiceStore.GetHeader(root); !ok {
 		return fmt.Errorf("block not found %w", ErrIgnore)
 	}
 
@@ -148,5 +144,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if s.forkchoiceStore.Ancestor(root, startSlotAtEpoch) != s.forkchoiceStore.FinalizedCheckpoint().BlockRoot() {
 		return fmt.Errorf("invalid finalized checkpoint %w", ErrIgnore)
 	}
-	return nil
+
+	return s.committeeSubscribe.CheckAggregateAttestation(att)
 }
