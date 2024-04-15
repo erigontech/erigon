@@ -400,8 +400,8 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		require.Nil(t, d)
 	})
 
-	t.Run("gibberish", func(t *testing.T) {
-		aux := make([]byte, rand.Intn(129))
+	t.Run("fileSize<compressedHeaderSize", func(t *testing.T) {
+		aux := make([]byte, 31)
 		_, err := rand.Read(aux)
 		require.NoError(t, err)
 
@@ -410,7 +410,35 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		require.NoError(t, err)
 
 		d, err := NewDecompressor(fpath)
-		require.Error(t, err, "file is some garbage or smaller 32 bytes. Or we got exactly 32 zeros from /rand")
+		e1 := &ErrCompressedFileIsTooShort{}
+		require.Truef(t, e1.Is(err),
+			"file is some garbage or smaller compressedHeaderSize(%d) bytes, got error %v", compressedHeaderSize, err)
+		require.Nil(t, d)
+
+		aux = make([]byte, 32)
+		err = os.Remove(fpath)
+		require.NoError(t, err)
+
+		err = os.WriteFile(fpath, aux, 0644)
+		require.NoError(t, err)
+
+		d, err = NewDecompressor(fpath)
+		require.NoErrorf(t, err, "should read empty but correct file")
+		require.NotNil(t, d)
+	})
+	t.Run("invalidDictionary", func(t *testing.T) {
+		aux := make([]byte, 23)
+		_, err := rand.Read(aux)
+		require.NoError(t, err)
+
+		fpath := filepath.Join(tmpDir, "gibberish")
+		err = os.WriteFile(fpath, aux, 0644)
+		require.NoError(t, err)
+
+		d, err := NewDecompressor(fpath)
+		e1 := &ErrCompressedFileIsTooShort{}
+		require.Truef(t, e1.Is(err),
+			"file is some garbage or smaller compressedHeaderSize(%d) bytes, got error %v", compressedHeaderSize, err)
 		require.Nil(t, d)
 	})
 }
