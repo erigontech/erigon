@@ -771,7 +771,7 @@ Loop:
 						return err
 					}
 					if txTask.Error != nil {
-						return fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, txTask.Error) //same as in stage_exec.go
+						return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, txTask.Error) //same as in stage_exec.go
 					}
 					usedGas += txTask.UsedGas
 					if txTask.Tx != nil {
@@ -780,7 +780,7 @@ Loop:
 					if txTask.Final {
 						if txTask.BlockNum > 0 { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 							if err := core.BlockPostValidation(usedGas, blobGasUsed, txTask.Header); err != nil {
-								return fmt.Errorf("%w, %s", consensus.ErrInvalidBlock, err)
+								return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 							}
 						}
 						usedGas, blobGasUsed = 0, 0
