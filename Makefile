@@ -166,15 +166,9 @@ test-erigon-ext:
 test: test-erigon-lib
 	$(GOTEST) --timeout 10m
 
-test3: test-erigon-lib
-	$(GOTEST) --timeout 10m -tags $(BUILD_TAGS),e4
-
 ## test-integration:                  run integration tests with a 30m timeout
 test-integration: test-erigon-lib
 	$(GOTEST) --timeout 240m -tags $(BUILD_TAGS),integration
-
-test3-integration: test-erigon-lib
-	$(GOTEST) --timeout 240m -tags $(BUILD_TAGS),integration,e4
 
 ## lint-deps:                         install lint dependencies
 lint-deps:

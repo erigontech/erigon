@@ -150,7 +150,7 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:          stages.HashState,
 			Description: "Hash the key in the state",
-			Disabled:    bodies.historyV3 || ethconfig.EnableHistoryV4InTest || dbg.StagesOnlyBlocks,
+			Disabled:    true,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				return SpawnHashStateStage(s, txc.Tx, hashState, ctx, logger)
 			},
