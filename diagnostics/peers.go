@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	diaglib "github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/urfave/cli/v2"
 )
@@ -35,7 +36,7 @@ type PeerResponse struct {
 	Protocols     map[string]interface{} `json:"protocols"` // Sub-protocol specific metadata fields
 }
 
-func SetupPeersAccess(ctxclient *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode, diag *DiagnosticClient) {
+func SetupPeersAccess(ctxclient *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode, diag *diaglib.DiagnosticClient) {
 	metricsMux.HandleFunc("/peers", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
@@ -43,14 +44,14 @@ func SetupPeersAccess(ctxclient *cli.Context, metricsMux *http.ServeMux, node *n
 	})
 }
 
-func writePeers(w http.ResponseWriter, ctx *cli.Context, node *node.ErigonNode, diag *DiagnosticClient) {
+func writePeers(w http.ResponseWriter, ctx *cli.Context, node *node.ErigonNode, diag *diaglib.DiagnosticClient) {
 	allPeers := peers(diag)
 	filteredPeers := filterPeersWithoutBytesIn(allPeers)
 
 	json.NewEncoder(w).Encode(filteredPeers)
 }
 
-func peers(diag *DiagnosticClient) []*PeerResponse {
+func peers(diag *diaglib.DiagnosticClient) []*PeerResponse {
 
 	statisticsArray := diag.Peers()
 	peers := make([]*PeerResponse, 0, len(statisticsArray))

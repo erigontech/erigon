@@ -147,7 +147,6 @@ func (s snapType) IdxFileNames(version Version, from uint64, to uint64) []string
 }
 
 func (s snapType) IdxFileName(version Version, from uint64, to uint64, index ...Index) string {
-
 	if len(index) == 0 {
 		if len(s.indexes) == 0 {
 			return ""
@@ -344,7 +343,7 @@ var (
 
 	BorSnapshotTypes = []Type{BorEvents, BorSpans}
 
-	CaplinSnapshotTypes = []Type{BeaconBlocks}
+	CaplinSnapshotTypes = []Type{BeaconBlocks, BlobSidecars}
 
 	AllTypes = []Type{
 		Headers,
@@ -353,5 +352,6 @@ var (
 		BorEvents,
 		BorSpans,
 		BeaconBlocks,
+		BlobSidecars,
 	}
 )

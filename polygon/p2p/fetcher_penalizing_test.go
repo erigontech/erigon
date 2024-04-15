@@ -123,7 +123,7 @@ func TestPenalizingFetcherFetchHeadersShouldPenalizePeerWhenIncorrectOrigin(t *t
 	})
 }
 
-func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenErrEmptyBody(t *testing.T) {
+func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenErrTooManyBodies(t *testing.T) {
 	t.Parallel()
 
 	peerId := PeerIdFromUint64(1)
@@ -134,7 +134,7 @@ func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenErrEmptyBody(t *testi
 		{
 			Id:     sentry.MessageId_BLOCK_BODIES_66,
 			PeerId: peerId.H512(),
-			Data:   newMockBlockBodiesPacketBytes(t, requestId, &types.Body{}),
+			Data:   newMockBlockBodiesPacketBytes(t, requestId, &types.Body{}, &types.Body{}),
 		},
 	}
 	mockRequestResponse := requestResponseMock{
@@ -149,8 +149,11 @@ func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenErrEmptyBody(t *testi
 	// setup expectation that peer should be penalized
 	mockExpectPenalizePeer(t, test.sentryClient, peerId)
 	test.run(func(ctx context.Context, t *testing.T) {
+		var errTooManyBodies *ErrTooManyBodies
 		bodies, err := test.penalizingFetcher.FetchBodies(ctx, headers, peerId)
-		require.ErrorIs(t, err, ErrEmptyBody)
+		require.ErrorAs(t, err, &errTooManyBodies)
+		require.Equal(t, 1, errTooManyBodies.requested)
+		require.Equal(t, 2, errTooManyBodies.received)
 		require.Nil(t, bodies)
 	})
 }

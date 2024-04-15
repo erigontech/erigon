@@ -1,15 +1,14 @@
 package forkchoice
 
 import (
-	"context"
 	"fmt"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
-
-	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon/cl/gossip"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/erigon/cl/phase1/network/subnets"
+	"github.com/ledgerwatch/erigon/cl/utils"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
@@ -19,22 +18,25 @@ const (
 	maxBlockJobLifetime       = 36 * time.Second // 3 mainnet slots
 )
 
+var (
+	ErrIgnore = fmt.Errorf("ignore")
+)
+
 // OnAttestation processes incoming attestations.
 func (f *ForkChoiceStore) OnAttestation(attestation *solid.Attestation, fromBlock bool, insert bool) error {
 	if !f.synced.Load() {
 		return nil
 	}
 	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.headHash = libcommon.Hash{}
-	f.mu.Unlock()
 	data := attestation.AttestantionData()
-	if err := f.validateOnAttestation(attestation, fromBlock); err != nil {
+	if err := f.ValidateOnAttestation(attestation); err != nil {
 		return err
 	}
 	currentEpoch := f.computeEpochAtSlot(f.Slot())
-	// Schedule for later processing.
+
 	if f.Slot() < attestation.AttestantionData().Slot()+1 || data.Target().Epoch() > currentEpoch {
-		f.scheduleAttestationForLaterProcessing(attestation, fromBlock)
 		return nil
 	}
 
@@ -81,144 +83,6 @@ func (f *ForkChoiceStore) OnAttestation(attestation *solid.Attestation, fromBloc
 	return nil
 }
 
-func (f *ForkChoiceStore) OnAggregateAndProof(aggregateAndProof *cltypes.SignedAggregateAndProof, test bool) error {
-	if !f.synced.Load() {
-		return nil
-	}
-	slot := aggregateAndProof.Message.Aggregate.AttestantionData().Slot()
-	selectionProof := aggregateAndProof.Message.SelectionProof
-	committeeIndex := aggregateAndProof.Message.Aggregate.AttestantionData().ValidatorIndex()
-	epoch := state.GetEpochAtSlot(f.beaconCfg, slot)
-
-	if err := f.validateOnAttestation(aggregateAndProof.Message.Aggregate, false); err != nil {
-		return err
-	}
-
-	target := aggregateAndProof.Message.Aggregate.AttestantionData().Target()
-	// getCheckpointState is non-thread safe, so we need to lock
-	targetState, err := f.getCheckpointState(target)
-	if err != nil {
-		return nil
-	}
-
-	activeIndiciesLength := uint64(len(targetState.shuffledSet))
-
-	count := targetState.committeeCount(epoch, activeIndiciesLength) * f.beaconCfg.SlotsPerEpoch
-	start := (activeIndiciesLength * committeeIndex) / count
-	end := (activeIndiciesLength * (committeeIndex + 1)) / count
-	committeeLength := end - start
-	if !state.IsAggregator(f.beaconCfg, committeeLength, slot, committeeIndex, selectionProof) {
-		log.Warn("invalid aggregate and proof")
-		return fmt.Errorf("invalid aggregate and proof")
-	}
-	return f.OnAttestation(aggregateAndProof.Message.Aggregate, false, false)
-}
-
-type attestationJob struct {
-	attestation *solid.Attestation
-	insert      bool
-	when        time.Time
-}
-
-// scheduleAttestationForLaterProcessing scheudules an attestation for later processing
-func (f *ForkChoiceStore) scheduleAttestationForLaterProcessing(attestation *solid.Attestation, insert bool) {
-	root, err := attestation.HashSSZ()
-	if err != nil {
-		log.Error("failed to hash attestation", "err", err)
-		return
-	}
-	f.attestationSet.Store(root, &attestationJob{
-		attestation: attestation,
-		insert:      insert,
-		when:        time.Now(),
-	})
-}
-
-type blockJob struct {
-	block     *cltypes.SignedBeaconBlock
-	blockRoot libcommon.Hash
-	when      time.Time
-}
-
-// scheduleAttestationForLaterProcessing scheudules an attestation for later processing
-func (f *ForkChoiceStore) scheduleBlockForLaterProcessing(block *cltypes.SignedBeaconBlock) {
-	root, err := block.HashSSZ()
-	if err != nil {
-		log.Error("failed to hash block", "err", err)
-		return
-	}
-	blockRoot, err := block.Block.HashSSZ()
-	if err != nil {
-		log.Error("failed to hash block root", "err", err)
-		return
-	}
-	f.blocksSet.Store(root, &blockJob{
-		block:     block,
-		when:      time.Now(),
-		blockRoot: blockRoot,
-	})
-}
-
-func (f *ForkChoiceStore) StartJobsRTT(ctx context.Context) {
-	go func() {
-		interval := time.NewTicker(500 * time.Millisecond)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-interval.C:
-				f.attestationSet.Range(func(key, value interface{}) bool {
-					job := value.(*attestationJob)
-					if time.Since(job.when) > maxAttestationJobLifetime {
-						f.attestationSet.Delete(key)
-						return true
-					}
-					currentEpoch := f.computeEpochAtSlot(f.Slot())
-					if f.Slot() >= job.attestation.AttestantionData().Slot()+1 && job.attestation.AttestantionData().Target().Epoch() <= currentEpoch {
-						if err := f.OnAttestation(job.attestation, false, job.insert); err != nil {
-							log.Warn("failed to process attestation", "err", err)
-						}
-						f.attestationSet.Delete(key)
-					}
-					return true
-				})
-			}
-		}
-	}()
-
-	go func() {
-		interval := time.NewTicker(50 * time.Millisecond)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-interval.C:
-				f.blocksSet.Range(func(key, value interface{}) bool {
-					job := value.(*blockJob)
-					if time.Since(job.when) > maxBlockJobLifetime {
-						f.blocksSet.Delete(key)
-						return true
-					}
-
-					f.mu.Lock()
-					if err := f.isDataAvailable(ctx, job.block.Block.Slot, job.blockRoot, job.block.Block.Body.BlobKzgCommitments); err != nil {
-						f.mu.Unlock()
-						return true
-					}
-					f.mu.Unlock()
-
-					if err := f.OnBlock(ctx, job.block, true, true, true); err != nil {
-						log.Warn("failed to process attestation", "err", err)
-					}
-					f.blocksSet.Delete(key)
-
-					return true
-				})
-			}
-		}
-	}()
-}
-
 func (f *ForkChoiceStore) setLatestMessage(index uint64, message LatestMessage) {
 	if index >= uint64(len(f.latestMessages)) {
 		if index >= uint64(cap(f.latestMessages)) {
@@ -263,8 +127,6 @@ func (f *ForkChoiceStore) setUnequivocating(validatorIndex uint64) {
 }
 
 func (f *ForkChoiceStore) processAttestingIndicies(attestation *solid.Attestation, indicies []uint64) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
 	beaconBlockRoot := attestation.AttestantionData().BeaconBlockRoot()
 	target := attestation.AttestantionData().Target()
 
@@ -282,7 +144,7 @@ func (f *ForkChoiceStore) processAttestingIndicies(attestation *solid.Attestatio
 	}
 }
 
-func (f *ForkChoiceStore) validateOnAttestation(attestation *solid.Attestation, fromBlock bool) error {
+func (f *ForkChoiceStore) ValidateOnAttestation(attestation *solid.Attestation) error {
 	target := attestation.AttestantionData().Target()
 
 	if target.Epoch() != f.computeEpochAtSlot(attestation.AttestantionData().Slot()) {
@@ -320,4 +182,109 @@ func (f *ForkChoiceStore) validateTargetEpochAgainstCurrentTime(attestation *sol
 		return nil
 	}
 	return fmt.Errorf("verification of attestation against current time failed")
+}
+
+func (f *ForkChoiceStore) OnCheckReceivedAttestation(topic string, att *solid.Attestation) error {
+	var (
+		root           = att.AttestantionData().BeaconBlockRoot()
+		slot           = att.AttestantionData().Slot()
+		committeeIndex = att.AttestantionData().CommitteeIndex()
+		epoch          = att.AttestantionData().Target().Epoch()
+		bits           = att.AggregationBits()
+	)
+	// [REJECT] The committee index is within the expected range
+	committeeCount := subnets.ComputeCommitteeCountPerSlot(f.syncedDataManager.HeadState(), slot, f.beaconCfg.SlotsPerEpoch)
+	if committeeIndex >= committeeCount {
+		return fmt.Errorf("committee index out of range")
+	}
+	// [REJECT] The attestation is for the correct subnet -- i.e. compute_subnet_for_attestation(committees_per_slot, attestation.data.slot, index) == subnet_id
+	subnetId := subnets.ComputeSubnetForAttestation(committeeCount, slot, committeeIndex, f.beaconCfg.SlotsPerEpoch, f.netCfg.AttestationSubnetCount)
+	topicSubnetId, err := gossip.SubnetIdFromTopicBeaconAttestation(topic)
+	if err != nil {
+		return err
+	}
+	if subnetId != topicSubnetId {
+		return fmt.Errorf("wrong subnet")
+	}
+	// [IGNORE] attestation.data.slot is within the last ATTESTATION_PROPAGATION_SLOT_RANGE slots (within a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) --
+	// i.e. attestation.data.slot + ATTESTATION_PROPAGATION_SLOT_RANGE >= current_slot >= attestation.data.slot (a client MAY queue future attestations for processing at the appropriate slot).
+	currentSlot := utils.GetCurrentSlot(f.genesisTime, f.beaconCfg.SecondsPerSlot)
+	if currentSlot < slot || currentSlot > slot+f.netCfg.AttestationPropagationSlotRange {
+		return fmt.Errorf("not in propagation range %w", ErrIgnore)
+	}
+	// [REJECT] The attestation's epoch matches its target -- i.e. attestation.data.target.epoch == compute_epoch_at_slot(attestation.data.slot)
+	if epoch != slot/f.beaconCfg.SlotsPerEpoch {
+		return fmt.Errorf("epoch mismatch")
+	}
+	//[REJECT] The attestation is unaggregated -- that is, it has exactly one participating validator (len([bit for bit in aggregation_bits if bit]) == 1, i.e. exactly 1 bit is set).
+	emptyCount := 0
+	onBitIndex := 0
+	for i := 0; i < len(bits); i++ {
+		if bits[i] == 0 {
+			emptyCount++
+		} else if bits[i]&(bits[i]-1) != 0 {
+			return fmt.Errorf("exactly one bit set")
+		} else {
+			// find the onBit bit index
+			for onBit := uint(0); onBit < 8; onBit++ {
+				if bits[i]&(1<<onBit) != 0 {
+					onBitIndex = i*8 + int(onBit)
+					break
+				}
+			}
+		}
+	}
+	if emptyCount != len(bits)-1 {
+		return fmt.Errorf("exactly one bit set")
+	}
+	// [REJECT] The number of aggregation bits matches the committee size -- i.e. len(aggregation_bits) == len(get_beacon_committee(state, attestation.data.slot, index)).
+	if len(bits)*8 < int(committeeCount) {
+		return fmt.Errorf("aggregation bits mismatch")
+	}
+
+	// [IGNORE] There has been no other valid attestation seen on an attestation subnet that has an identical attestation.data.target.epoch and participating validator index.
+	committees, err := f.syncedDataManager.HeadState().GetBeaconCommitee(slot, committeeIndex)
+	if err != nil {
+		return err
+	}
+	if onBitIndex >= len(committees) {
+		return fmt.Errorf("on bit index out of committee range")
+	}
+	if err := func() error {
+		// mark the validator as seen
+		vIndex := committees[onBitIndex]
+		f.validatorAttSeenLock.Lock()
+		defer f.validatorAttSeenLock.Unlock()
+		if _, ok := f.validatorAttestationSeen[epoch]; !ok {
+			f.validatorAttestationSeen[epoch] = make(map[uint64]struct{})
+		}
+		if _, ok := f.validatorAttestationSeen[epoch][vIndex]; ok {
+			return fmt.Errorf("validator already seen in target epoch %w", ErrIgnore)
+		}
+		f.validatorAttestationSeen[epoch][vIndex] = struct{}{}
+		// always check and delete previous epoch if it exists
+		delete(f.validatorAttestationSeen, epoch-1)
+		return nil
+	}(); err != nil {
+		return err
+	}
+
+	// [IGNORE] The block being voted for (attestation.data.beacon_block_root) has been seen (via both gossip and non-gossip sources)
+	// (a client MAY queue attestations for processing once block is retrieved).
+	if _, ok := f.forkGraph.GetHeader(root); !ok {
+		return fmt.Errorf("block not found %w", ErrIgnore)
+	}
+	// [REJECT] The block being voted for (attestation.data.beacon_block_root) passes validation.
+
+	// [REJECT] The attestation's target block is an ancestor of the block named in the LMD vote -- i.e.
+	// get_checkpoint_block(store, attestation.data.beacon_block_root, attestation.data.target.epoch) == attestation.data.target.root
+	if f.Ancestor(root, f.computeStartSlotAtEpoch(epoch)) != att.AttestantionData().Target().BlockRoot() {
+		return fmt.Errorf("invalid target block")
+	}
+	// [IGNORE] The current finalized_checkpoint is an ancestor of the block defined by attestation.data.beacon_block_root --
+	// i.e. get_checkpoint_block(store, attestation.data.beacon_block_root, store.finalized_checkpoint.epoch) == store.finalized_checkpoint.root
+	if f.Ancestor(root, f.computeStartSlotAtEpoch(f.FinalizedCheckpoint().Epoch())) != f.FinalizedCheckpoint().BlockRoot() {
+		return fmt.Errorf("invalid finalized checkpoint %w", ErrIgnore)
+	}
+	return nil
 }

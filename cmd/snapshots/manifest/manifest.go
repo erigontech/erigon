@@ -118,7 +118,7 @@ func manifest(cliCtx *cli.Context, command string) error {
 
 	if rcCli != nil {
 		if src != nil && src.LType == sync.RemoteFs {
-			srcSession, err = rcCli.NewSession(cliCtx.Context, tempDir, src.Src+":"+src.Root)
+			srcSession, err = rcCli.NewSession(cliCtx.Context, tempDir, src.Src+":"+src.Root, nil)
 
 			if err != nil {
 				return err

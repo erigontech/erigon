@@ -24,6 +24,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/ledgerwatch/erigon-lib/common/disk"
+	"github.com/ledgerwatch/erigon-lib/common/mem"
 	"github.com/ledgerwatch/erigon-lib/metrics"
 
 	"github.com/ledgerwatch/log/v3"
@@ -153,6 +155,10 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
 		log.Error("failed setting config flags from yaml/toml file", "err", err)
 		panic(err)
 	}
+
+	// setup periodic logging and prometheus updates
+	go mem.LogMemStats(cmd.Context(), log.Root())
+	go disk.UpdateDiskStats(cmd.Context(), log.Root())
 
 	var metricsMux *http.ServeMux
 	var metricsAddress string

@@ -109,7 +109,7 @@ func (c *checkpointState) getAttestingIndicies(attestation *solid.AttestationDat
 	lenIndicies := uint64(len(c.shuffledSet))
 	committeesPerSlot := c.committeeCount(epoch, lenIndicies)
 	count := committeesPerSlot * c.beaconConfig.SlotsPerEpoch
-	index := (slot%c.beaconConfig.SlotsPerEpoch)*committeesPerSlot + attestation.ValidatorIndex()
+	index := (slot%c.beaconConfig.SlotsPerEpoch)*committeesPerSlot + attestation.CommitteeIndex()
 	start := (lenIndicies * index) / count
 	end := (lenIndicies * (index + 1)) / count
 	committee := c.shuffledSet[start:end]

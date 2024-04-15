@@ -37,6 +37,8 @@ var emptyCodeHash = crypto.Keccak256Hash(nil)
 func (evm *EVM) precompile(addr libcommon.Address) (PrecompiledContract, bool) {
 	var precompiles map[libcommon.Address]PrecompiledContract
 	switch {
+	case evm.chainRules.IsPrague:
+		precompiles = PrecompiledContractsPrague
 	case evm.chainRules.IsNapoli:
 		precompiles = PrecompiledContractsNapoli
 	case evm.chainRules.IsCancun:
@@ -320,11 +322,19 @@ type codeAndHash struct {
 	hash libcommon.Hash
 }
 
+func NewCodeAndHash(code []byte) *codeAndHash {
+	return &codeAndHash{code: code}
+}
+
 func (c *codeAndHash) Hash() libcommon.Hash {
 	if c.hash == (libcommon.Hash{}) {
 		c.hash = crypto.Keccak256Hash(c.code)
 	}
 	return c.hash
+}
+
+func (evm *EVM) OverlayCreate(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value *uint256.Int, address libcommon.Address, typ OpCode, incrementNonce bool) ([]byte, libcommon.Address, uint64, error) {
+	return evm.create(caller, codeAndHash, gas, value, address, typ, incrementNonce)
 }
 
 // create creates a new contract using code as deployment code.

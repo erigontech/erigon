@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
+	"time"
 
 	"github.com/ledgerwatch/erigon/cl/gossip"
 	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/sentinel"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
@@ -21,8 +24,11 @@ import (
 )
 
 type ServerConfig struct {
-	Network string
-	Addr    string
+	Network       string
+	Addr          string
+	Creds         credentials.TransportCredentials
+	Validator     bool
+	InitialStatus *cltypes.Status
 }
 
 func generateSubnetsTopics(template string, maxIds int) []sentinel.GossipTopic {
@@ -36,7 +42,15 @@ func generateSubnetsTopics(template string, maxIds int) []sentinel.GossipTopic {
 	return topics
 }
 
-func createSentinel(cfg *sentinel.SentinelConfig, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, indiciesDB kv.RwDB, forkChoiceReader forkchoice.ForkChoiceStorageReader, logger log.Logger) (*sentinel.Sentinel, error) {
+func getExpirationForTopic(topic string) time.Time {
+	if strings.Contains(topic, "beacon_attestation") || (strings.Contains(topic, "sync_committee_") && !strings.Contains(topic, gossip.TopicNameSyncCommitteeContributionAndProof)) {
+		return time.Unix(0, 0)
+	}
+
+	return time.Unix(0, math.MaxInt64)
+}
+
+func createSentinel(cfg *sentinel.SentinelConfig, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, indiciesDB kv.RwDB, forkChoiceReader forkchoice.ForkChoiceStorageReader, validatorTopics bool, logger log.Logger) (*sentinel.Sentinel, error) {
 	sent, err := sentinel.New(context.Background(), cfg, blockReader, blobStorage, indiciesDB, logger, forkChoiceReader)
 	if err != nil {
 		return nil, err
@@ -46,50 +60,50 @@ func createSentinel(cfg *sentinel.SentinelConfig, blockReader freezeblocks.Beaco
 	}
 	gossipTopics := []sentinel.GossipTopic{
 		sentinel.BeaconBlockSsz,
-		sentinel.BeaconAggregateAndProofSsz,
-		sentinel.VoluntaryExitSsz,
+		//sentinel.VoluntaryExitSsz,
 		sentinel.ProposerSlashingSsz,
 		sentinel.AttesterSlashingSsz,
 		sentinel.BlsToExecutionChangeSsz,
-		sentinel.SyncCommitteeContributionAndProofSsz,
 		////sentinel.LightClientFinalityUpdateSsz,
 		////sentinel.LightClientOptimisticUpdateSsz,
 	}
+	if validatorTopics {
+		gossipTopics = append(gossipTopics, sentinel.SyncCommitteeContributionAndProofSsz, sentinel.BeaconAggregateAndProofSsz)
+	}
 	gossipTopics = append(gossipTopics, generateSubnetsTopics(gossip.TopicNamePrefixBlobSidecar, int(cfg.BeaconConfig.MaxBlobsPerBlock))...)
-	// gossipTopics = append(gossipTopics, sentinel.GossipSidecarTopics(chain.MaxBlobsPerBlock)...)
+	gossipTopics = append(gossipTopics, generateSubnetsTopics(gossip.TopicNamePrefixBeaconAttestation, int(cfg.NetworkConfig.AttestationSubnetCount))...)
+	gossipTopics = append(gossipTopics, generateSubnetsTopics(gossip.TopicNamePrefixSyncCommittee, int(cfg.BeaconConfig.SyncCommitteeSubnetCount))...)
 
 	for _, v := range gossipTopics {
 		if err := sent.Unsubscribe(v); err != nil {
 			logger.Error("[Sentinel] failed to start sentinel", "err", err)
 			continue
 		}
+
 		// now lets separately connect to the gossip topics. this joins the room
-		subscriber, err := sent.SubscribeGossip(v)
+		subscriber, err := sent.SubscribeGossip(v, getExpirationForTopic(v.Name)) // Listen forever.
 		if err != nil {
 			logger.Error("[Sentinel] failed to start sentinel", "err", err)
 		}
 		// actually start the subscription, aka listening and sending packets to the sentinel recv channel
-		err = subscriber.Listen()
-		if err != nil {
-			logger.Error("[Sentinel] failed to start sentinel", "err", err)
-		}
+		subscriber.Listen()
 	}
 	return sent, nil
 }
 
-func StartSentinelService(cfg *sentinel.SentinelConfig, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, indiciesDB kv.RwDB, srvCfg *ServerConfig, creds credentials.TransportCredentials, initialStatus *cltypes.Status, forkChoiceReader forkchoice.ForkChoiceStorageReader, logger log.Logger) (sentinelrpc.SentinelClient, error) {
+func StartSentinelService(cfg *sentinel.SentinelConfig, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, indiciesDB kv.RwDB, srvCfg *ServerConfig, forkChoiceReader forkchoice.ForkChoiceStorageReader, logger log.Logger) (sentinelrpc.SentinelClient, error) {
 	ctx := context.Background()
-	sent, err := createSentinel(cfg, blockReader, blobStorage, indiciesDB, forkChoiceReader, logger)
+	sent, err := createSentinel(cfg, blockReader, blobStorage, indiciesDB, forkChoiceReader, srvCfg.Validator, logger)
 	if err != nil {
 		return nil, err
 	}
 	// rcmgrObs.MustRegisterWith(prometheus.DefaultRegisterer)
 	logger.Info("[Sentinel] Sentinel started", "enr", sent.String())
-	if initialStatus != nil {
-		sent.SetStatus(initialStatus)
+	if srvCfg.InitialStatus != nil {
+		sent.SetStatus(srvCfg.InitialStatus)
 	}
 	server := NewSentinelServer(ctx, sent, logger)
-	go StartServe(server, srvCfg, creds)
+	go StartServe(server, srvCfg, srvCfg.Creds)
 
 	return direct.NewSentinelClientDirect(server), nil
 }

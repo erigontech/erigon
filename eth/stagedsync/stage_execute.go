@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/common/metrics"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -444,7 +445,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 
 	var readAhead chan uint64
 	if initialCycle && cfg.silkworm == nil { // block read-ahead is not compatible w/ Silkworm one-shot block execution
-		// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
+		// snapshots are often stored on cheaper drives. don't expect low-read-latency and manually read-ahead.
 		// can't use OS-level ReadAhead - because Data >> RAM
 		// it also warmsup state a bit - by touching senders/coninbase accounts and code
 		var clean func()
@@ -484,19 +485,35 @@ Loop:
 		writeReceipts := nextStagesExpectData || blockNum > cfg.prune.Receipts.PruneTo(to)
 		writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
 
+		metrics.UpdateBlockConsumerPreExecutionDelay(block.Time(), blockNum, logger)
+
 		_, isMemoryMutation := txc.Tx.(*membatchwithdb.MemoryMutation)
 		if cfg.silkworm != nil && !isMemoryMutation {
-			blockNum, err = silkworm.ExecuteBlocks(cfg.silkworm, txc.Tx, cfg.chainConfig.ChainID, blockNum, to, uint64(cfg.batchSize), writeChangeSets, writeReceipts, writeCallTraces)
-			// Recreate tx because Silkworm has just done commit or abort on passed one
-			var tx_err error
-			txc.Tx, tx_err = cfg.db.BeginRw(context.Background())
-			if tx_err != nil {
-				return tx_err
+			if useExternalTx {
+				blockNum, err = silkworm.ExecuteBlocksEphemeral(cfg.silkworm, txc.Tx, cfg.chainConfig.ChainID, blockNum, to, uint64(cfg.batchSize), writeChangeSets, writeReceipts, writeCallTraces)
+			} else {
+				// In case of internal tx we close it (no changes, commit not needed): Silkworm will use its own internal tx
+				txc.Tx.Rollback()
+				txc.Tx = nil
+
+				log.Info("Using Silkworm to commit full range", "fromBlock", s.BlockNumber+1, "toBlock", to)
+				blockNum, err = silkworm.ExecuteBlocksPerpetual(cfg.silkworm, cfg.db, cfg.chainConfig.ChainID, blockNum, to, uint64(cfg.batchSize), writeChangeSets, writeReceipts, writeCallTraces)
+
+				var txErr error
+				if txc.Tx, txErr = cfg.db.BeginRw(context.Background()); txErr != nil {
+					return txErr
+				}
+				defer txc.Tx.Rollback()
+
+				// Recreate memory batch because underlying tx has changed
+				batch.Close()
+				batch = membatch.NewHashBatch(txc.Tx, quit, cfg.dirs.Tmp, logger)
 			}
-			defer txc.Tx.Rollback()
-			// Recreate memory batch because underlying tx has changed
-			batch.Close()
-			batch = membatch.NewHashBatch(txc.Tx, quit, cfg.dirs.Tmp, logger)
+
+			// In case of any error we need to increment to have the failed block number
+			if err != nil {
+				blockNum++
+			}
 		} else {
 			err = executeBlock(block, txc.Tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, stateStream, logger)
 		}
@@ -534,10 +551,11 @@ Loop:
 		}
 		stageProgress = blockNum
 
+		metrics.UpdateBlockConsumerPostExecutionDelay(block.Time(), blockNum, logger)
+
 		shouldUpdateProgress := batch.BatchSize() >= int(cfg.batchSize)
 		if shouldUpdateProgress {
-			logger.Info("Committed State", "gas reached", currentStateGas, "gasTarget", gasState, "block", blockNum)
-			currentStateGas = 0
+			commitTime := time.Now()
 			if err = batch.Flush(ctx, txc.Tx); err != nil {
 				return err
 			}
@@ -555,6 +573,8 @@ Loop:
 				// TODO: This creates stacked up deferrals
 				defer txc.Tx.Rollback()
 			}
+			logger.Info("Committed State", "gas reached", currentStateGas, "gasTarget", gasState, "block", blockNum, "time", time.Since(commitTime), "committedToDb", !useExternalTx)
+			currentStateGas = 0
 			batch = membatch.NewHashBatch(txc.Tx, quit, cfg.dirs.Tmp, logger)
 		}
 
@@ -566,7 +586,7 @@ Loop:
 			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, gas, float64(currentStateGas)/float64(gasState), batch, logger, s.BlockNumber, to, startTime)
 			gas = 0
 			txc.Tx.CollectMetrics()
-			syncMetrics[stages.Execution].SetUint64(blockNum)
+			stages.SyncMetrics[stages.Execution].SetUint64(blockNum)
 		}
 	}
 

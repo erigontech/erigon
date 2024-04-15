@@ -9,9 +9,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
+	executionclient "github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/ledgerwatch/erigon/p2p/sentry"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/polygon/p2p"
@@ -30,25 +31,28 @@ type service struct {
 }
 
 func NewService(
-	chainConfig *chain.Config,
-	maxPeers int,
-	borConfig *borcfg.BorConfig,
-	heimdallURL string,
-	engine execution_client.ExecutionEngine,
-	sentryClient direct.SentryClient,
 	logger log.Logger,
+	chainConfig *chain.Config,
+	sentryClient direct.SentryClient,
+	maxPeers int,
+	statusDataProvider *sentry.StatusDataProvider,
+	heimdallUrl string,
+	executionEngine executionclient.ExecutionEngine,
 ) Service {
-	execution := NewExecutionClient(engine)
-	storage := NewStorage(execution, maxPeers)
-	verify := VerifyAccumulatedHeaders
-	p2pService := p2p.NewService(maxPeers, logger, sentryClient)
-	heimdallClient := heimdall.NewHeimdallClient(heimdallURL, logger)
+	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
+	execution := NewExecutionClient(executionEngine)
+	storage := NewStorage(logger, execution, maxPeers)
+	headersVerifier := VerifyAccumulatedHeaders
+	blocksVerifier := VerifyBlocks
+	p2pService := p2p.NewService(maxPeers, logger, sentryClient, statusDataProvider.GetStatusData)
+	heimdallClient := heimdall.NewHeimdallClient(heimdallUrl, logger)
 	heimdallService := heimdall.NewHeimdallNoStore(heimdallClient, logger)
-	downloader := NewHeaderDownloader(
+	blockDownloader := NewBlockDownloader(
 		logger,
 		p2pService,
 		heimdallService,
-		verify,
+		headersVerifier,
+		blocksVerifier,
 		storage,
 	)
 	spansCache := NewSpansCache()
@@ -72,13 +76,14 @@ func NewService(
 			headerValidator,
 			spansCache)
 	}
-	events := NewTipEvents(p2pService, heimdallService)
+	events := NewTipEvents(logger, p2pService, heimdallService)
 	sync := NewSync(
 		storage,
 		execution,
-		verify,
+		headersVerifier,
+		blocksVerifier,
 		p2pService,
-		downloader,
+		blockDownloader,
 		ccBuilderFactory,
 		spansCache,
 		heimdallService.FetchLatestSpan,

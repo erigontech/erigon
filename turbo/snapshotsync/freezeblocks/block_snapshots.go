@@ -20,6 +20,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/tidwall/btree"
+	"golang.org/x/exp/rand"
 	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
 
@@ -259,6 +260,10 @@ type RoSnapshots struct {
 	indicesReady  atomic.Bool
 	segmentsReady atomic.Bool
 
+	// salt for creating RecSplit indices. All nodes will have different salt, but 1 node will use same salt for all files.
+	// it allows using value of `murmur3(key)` to read from all files (importnat for non-existing keys - which require all indices check).
+	Salt uint32
+
 	types    []snaptype.Type
 	segments btree.Map[snaptype.Enum, *segments]
 
@@ -281,14 +286,33 @@ func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, segmentsMin ui
 	return newRoSnapshots(cfg, snapDir, snaptype.BlockSnapshotTypes, segmentsMin, logger)
 }
 
+// GetIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
+// if db is Read-Only (for example remote RPCDaemon or utilities) - we will not create new indices - and existing indices have salt in metadata.
+func GetIndicesSalt(baseDir string) (salt uint32) {
+	fpath := filepath.Join(baseDir, "salt-blocks.txt")
+	if !dir2.FileExist(fpath) {
+		dir2.MustExist(baseDir)
+
+		saltBytes := make([]byte, 4)
+		binary.BigEndian.PutUint32(saltBytes, rand.Uint32())
+		if err := dir2.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
+			panic(err)
+		}
+	}
+	saltBytes, err := os.ReadFile(fpath)
+	if err != nil {
+		panic(err)
+	}
+	return binary.BigEndian.Uint32(saltBytes)
+}
+
 func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, segmentsMin uint64, logger log.Logger) *RoSnapshots {
 	var segs btree.Map[snaptype.Enum, *segments]
-
 	for _, snapType := range types {
 		segs.Set(snapType.Enum(), &segments{})
 	}
 
-	s := &RoSnapshots{dir: snapDir, cfg: cfg, segments: segs, logger: logger, types: types}
+	s := &RoSnapshots{dir: snapDir, cfg: cfg, segments: segs, logger: logger, types: types, Salt: GetIndicesSalt(snapDir)}
 	s.segmentsMin.Store(segmentsMin)
 
 	return s
@@ -591,11 +615,11 @@ func (s *RoSnapshots) Ranges() []Range {
 func (s *RoSnapshots) OptimisticalyReopenFolder()           { _ = s.ReopenFolder() }
 func (s *RoSnapshots) OptimisticalyReopenWithDB(db kv.RoDB) { _ = s.ReopenWithDB(db) }
 func (s *RoSnapshots) ReopenFolder() error {
-	return s.ReopenSegments(s.Types())
+	return s.ReopenSegments(s.Types(), false)
 }
 
-func (s *RoSnapshots) ReopenSegments(types []snaptype.Type) error {
-	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), types)
+func (s *RoSnapshots) ReopenSegments(types []snaptype.Type, allowGaps bool) error {
+	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), types, allowGaps)
 
 	if err != nil {
 		return err
@@ -765,27 +789,27 @@ func (s *RoSnapshots) AddSnapshotsToSilkworm(silkwormInstance *silkworm.Silkworm
 	return nil
 }
 
-func buildIdx(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
+func buildIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
 	//log.Info("[snapshots] build idx", "file", sn.Name())
 	switch sn.Type.Enum() {
 	case snaptype.Enums.Headers:
-		if err := HeadersIdx(ctx, sn, tmpDir, p, lvl, logger); err != nil {
+		if err := HeadersIdx(ctx, sn, salt, tmpDir, p, lvl, logger); err != nil {
 			return err
 		}
 	case snaptype.Enums.Bodies:
-		if err := BodiesIdx(ctx, sn, tmpDir, p, lvl, logger); err != nil {
+		if err := BodiesIdx(ctx, sn, salt, tmpDir, p, lvl, logger); err != nil {
 			return err
 		}
 	case snaptype.Enums.Transactions:
-		if err := TransactionsIdx(ctx, chainConfig, sn, tmpDir, p, lvl, logger); err != nil {
+		if err := TransactionsIdx(ctx, chainConfig, sn, salt, tmpDir, p, lvl, logger); err != nil {
 			return fmt.Errorf("TransactionsIdx: %s", err)
 		}
 	case snaptype.Enums.BorEvents:
-		if err := BorEventsIdx(ctx, sn, tmpDir, p, lvl, logger); err != nil {
+		if err := BorEventsIdx(ctx, sn, salt, tmpDir, p, lvl, logger); err != nil {
 			return err
 		}
 	case snaptype.Enums.BorSpans:
-		if err := BorSpansIdx(ctx, sn, tmpDir, p, lvl, logger); err != nil {
+		if err := BorSpansIdx(ctx, sn, salt, tmpDir, p, lvl, logger); err != nil {
 			return err
 		}
 	}
@@ -838,7 +862,7 @@ func buildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 				ps.Add(p)
 				defer notifySegmentIndexingFinished(info.Name())
 				defer ps.Delete(p)
-				if err := buildIdx(gCtx, info, chainConfig, tmpDir, p, log.LvlInfo, logger); err != nil {
+				if err := buildIdx(gCtx, info, snapshots.Salt, chainConfig, tmpDir, p, log.LvlInfo, logger); err != nil {
 					return fmt.Errorf("%s: %w", info.Name(), err)
 				}
 				return nil
@@ -1020,10 +1044,10 @@ func SegmentsCaplin(dir string, minBlock uint64) (res []snaptype.FileInfo, missi
 }
 
 func Segments(dir string, minBlock uint64) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
-	return typedSegments(dir, minBlock, snaptype.BlockSnapshotTypes)
+	return typedSegments(dir, minBlock, snaptype.BlockSnapshotTypes, false)
 }
 
-func typedSegments(dir string, minBlock uint64, types []snaptype.Type) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
+func typedSegments(dir string, minBlock uint64, types []snaptype.Type, allowGaps bool) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
 	segmentsTypeCheck := func(dir string, in []snaptype.FileInfo) (res []snaptype.FileInfo) {
 		return typeOfSegmentsMustExist(dir, in, types)
 	}
@@ -1044,7 +1068,12 @@ func typedSegments(dir string, minBlock uint64, types []snaptype.Type) (res []sn
 				}
 				l = append(l, f)
 			}
-			l, m = noGaps(noOverlaps(segmentsTypeCheck(dir, l)), minBlock)
+
+			if allowGaps {
+				l = noOverlaps(segmentsTypeCheck(dir, l))
+			} else {
+				l, m = noGaps(noOverlaps(segmentsTypeCheck(dir, l)), minBlock)
+			}
 			if len(m) > 0 {
 				lst := m[len(m)-1]
 				log.Debug("[snapshots] see gap", "type", segType, "from", lst.from)
@@ -1220,7 +1249,7 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 		}
 		logger.Log(lvl, "[snapshots] Retire Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
 		// in future we will do it in background
-		if err := DumpBlocks(ctx, blockFrom, blockTo, br.chainConfig, tmpDir, snapshots.Dir(), db, workers, lvl, logger, blockReader); err != nil {
+		if err := DumpBlocks(ctx, blockFrom, blockTo, snapshots.Salt, br.chainConfig, tmpDir, snapshots.Dir(), db, workers, lvl, logger, blockReader); err != nil {
 			return ok, fmt.Errorf("DumpBlocks: %w", err)
 		}
 
@@ -1235,7 +1264,7 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 		}
 	}
 
-	merger := NewMerger(tmpDir, workers, lvl, db, br.chainConfig, logger)
+	merger := NewMerger(snapshots.Salt, tmpDir, workers, lvl, db, br.chainConfig, logger)
 	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(), snapshots.BlocksAvailable())
 	if len(rangesToMerge) == 0 {
 		return ok, nil
@@ -1395,11 +1424,11 @@ func (br *BlockRetire) buildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 	return nil
 }
 
-func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
+func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, salt uint32, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
 
 	firstTxNum := blockReader.FirstTxnNumNotInSnapshots()
 	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, chainConfig) {
-		lastTxNum, err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, chainConfig), tmpDir, snapDir, firstTxNum, chainDB, chainConfig, workers, lvl, logger)
+		lastTxNum, err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, chainConfig), salt, tmpDir, snapDir, firstTxNum, chainDB, chainConfig, workers, lvl, logger)
 		if err != nil {
 			return err
 		}
@@ -1408,21 +1437,21 @@ func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *cha
 	return nil
 }
 
-func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, chainConfig *chain.Config, workers int, lvl log.Lvl, logger log.Logger) (lastTxNum uint64, err error) {
+func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, salt uint32, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, chainConfig *chain.Config, workers int, lvl log.Lvl, logger log.Logger) (lastTxNum uint64, err error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	if _, err = dumpRange(ctx, snaptype.Headers.FileInfo(snapDir, blockFrom, blockTo),
+	if _, err = dumpRange(ctx, snaptype.Headers.FileInfo(snapDir, blockFrom, blockTo), salt,
 		DumpHeaders, nil, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
 		return 0, err
 	}
 
-	if lastTxNum, err = dumpRange(ctx, snaptype.Bodies.FileInfo(snapDir, blockFrom, blockTo),
+	if lastTxNum, err = dumpRange(ctx, snaptype.Bodies.FileInfo(snapDir, blockFrom, blockTo), salt,
 		DumpBodies, func(context.Context) uint64 { return firstTxNum }, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
 		return lastTxNum, err
 	}
 
-	if _, err = dumpRange(ctx, snaptype.Transactions.FileInfo(snapDir, blockFrom, blockTo),
+	if _, err = dumpRange(ctx, snaptype.Transactions.FileInfo(snapDir, blockFrom, blockTo), salt,
 		DumpTxs, func(context.Context) uint64 { return firstTxNum }, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
 		return lastTxNum, err
 	}
@@ -1433,7 +1462,7 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 type firstKeyGetter func(ctx context.Context) uint64
 type dumpFunc func(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, firstKey firstKeyGetter, collecter func(v []byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error)
 
-func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstKey firstKeyGetter, chainDB kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+func dumpRange(ctx context.Context, f snaptype.FileInfo, salt uint32, dumper dumpFunc, firstKey firstKeyGetter, chainDB kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 	var lastKeyValue uint64
 
 	sn, err := seg.NewCompressor(ctx, "Snapshot "+f.Type.String(), f.Path, tmpDir, seg.MinPatternScore, workers, log.LvlTrace, logger)
@@ -1460,7 +1489,7 @@ func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstK
 
 	p := &background.Progress{}
 
-	if err := buildIdx(ctx, f, chainConfig, tmpDir, p, lvl, logger); err != nil {
+	if err := buildIdx(ctx, f, salt, chainConfig, tmpDir, p, lvl, logger); err != nil {
 		return lastKeyValue, err
 	}
 
@@ -1874,7 +1903,7 @@ func txsAmountBasedOnBodiesSnapshots(bodiesSegment *seg.Decompressor, len uint64
 	return
 }
 
-func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, sn snaptype.FileInfo, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, sn snaptype.FileInfo, salt uint32, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("index panic: at=%s, %v, %s", sn.Name(), rec, dbg.Stack())
@@ -1919,6 +1948,7 @@ func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, sn snaptype
 		TmpDir:     tmpDir,
 		IndexFile:  filepath.Join(sn.Dir(), snaptype.Transactions.IdxFileName(sn.Version, sn.From, sn.To)),
 		BaseDataID: firstTxID,
+		Salt:       salt,
 	}, logger)
 	if err != nil {
 		return err
@@ -1932,6 +1962,7 @@ func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, sn snaptype
 		TmpDir:     tmpDir,
 		IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To, snaptype.Indexes.TxnHash2BlockNum)),
 		BaseDataID: firstBlockNum,
+		Salt:       salt,
 	}, logger)
 	if err != nil {
 		return err
@@ -1988,6 +2019,7 @@ RETRY:
 		firstTxByteAndlengthOfAddress := 21
 		isSystemTx := len(word) == 0
 		if isSystemTx { // system-txs hash:pad32(txnID)
+			slot.IDHash = emptyHash
 			binary.BigEndian.PutUint64(slot.IDHash[:], firstTxID+i)
 		} else {
 			if _, err = parseCtx.ParseTransaction(word[firstTxByteAndlengthOfAddress:], 0, &slot, nil, true /* hasEnvelope */, false /* wrappedWithBlobs */, nil /* validateHash */); err != nil {
@@ -2033,11 +2065,11 @@ RETRY:
 }
 
 // HeadersIdx - headerHash -> offset (analog of kv.HeaderNumber)
-func HeadersIdx(ctx context.Context, info snaptype.FileInfo, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+func HeadersIdx(ctx context.Context, info snaptype.FileInfo, salt uint32, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	hasher := crypto.NewKeccakState()
 	defer cryptopool.ReturnToPoolKeccak256(hasher)
 	var h common2.Hash
-	if err := Idx(ctx, info, info.From, tmpDir, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+	if err := Idx(ctx, info, salt, info.From, tmpDir, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		if p != nil {
 			p.Processed.Add(1)
 		}
@@ -2056,10 +2088,10 @@ func HeadersIdx(ctx context.Context, info snaptype.FileInfo, tmpDir string, p *b
 	return nil
 }
 
-func BodiesIdx(ctx context.Context, info snaptype.FileInfo, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+func BodiesIdx(ctx context.Context, info snaptype.FileInfo, salt uint32, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	num := make([]byte, 8)
 
-	if err := Idx(ctx, info, info.From, tmpDir, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, _ []byte) error {
+	if err := Idx(ctx, info, salt, info.From, tmpDir, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, _ []byte) error {
 		if p != nil {
 			p.Processed.Add(1)
 		}
@@ -2075,7 +2107,7 @@ func BodiesIdx(ctx context.Context, info snaptype.FileInfo, tmpDir string, p *ba
 }
 
 // Idx - iterate over segment and building .idx file
-func Idx(ctx context.Context, info snaptype.FileInfo, firstDataID uint64, tmpDir string, lvl log.Lvl, p *background.Progress, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error, logger log.Logger) (err error) {
+func Idx(ctx context.Context, info snaptype.FileInfo, salt uint32, firstDataID uint64, tmpDir string, lvl log.Lvl, p *background.Progress, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("index panic: at=%s, %v, %s", info.Name(), rec, dbg.Stack())
@@ -2104,6 +2136,7 @@ func Idx(ctx context.Context, info snaptype.FileInfo, firstDataID uint64, tmpDir
 		TmpDir:     tmpDir,
 		IndexFile:  filepath.Join(info.Dir(), info.Type.IdxFileName(info.Version, info.From, info.To)),
 		BaseDataID: firstDataID,
+		Salt:       salt,
 	}, logger)
 	if err != nil {
 		return err
@@ -2179,10 +2212,11 @@ type Merger struct {
 	chainDB         kv.RoDB
 	logger          log.Logger
 	noFsync         bool // fsync is enabled by default, but tests can manually disable
+	salt            uint32
 }
 
-func NewMerger(tmpDir string, compressWorkers int, lvl log.Lvl, chainDB kv.RoDB, chainConfig *chain.Config, logger log.Logger) *Merger {
-	return &Merger{tmpDir: tmpDir, compressWorkers: compressWorkers, lvl: lvl, chainDB: chainDB, chainConfig: chainConfig, logger: logger}
+func NewMerger(salt uint32, tmpDir string, compressWorkers int, lvl log.Lvl, chainDB kv.RoDB, chainConfig *chain.Config, logger log.Logger) *Merger {
+	return &Merger{salt: salt, tmpDir: tmpDir, compressWorkers: compressWorkers, lvl: lvl, chainDB: chainDB, chainConfig: chainConfig, logger: logger}
 }
 func (m *Merger) DisableFsync() { m.noFsync = true }
 
@@ -2263,7 +2297,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 			}
 			if doIndex {
 				p := &background.Progress{}
-				if err := buildIdx(ctx, f, m.chainConfig, m.tmpDir, p, m.lvl, m.logger); err != nil {
+				if err := buildIdx(ctx, f, m.salt, m.chainConfig, m.tmpDir, p, m.lvl, m.logger); err != nil {
 					return err
 				}
 			}

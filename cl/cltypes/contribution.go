@@ -3,6 +3,8 @@ package cltypes
 import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 )
@@ -34,7 +36,7 @@ func (a *ContributionAndProof) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (a *ContributionAndProof) EncodingSizeSSZ() int {
-	return 108 + a.Contribution.EncodingSizeSSZ()
+	return length.BlockNum + length.Bytes96 + a.Contribution.EncodingSizeSSZ()
 }
 
 func (a *ContributionAndProof) HashSSZ() ([32]byte, error) {
@@ -57,48 +59,62 @@ func (a *SignedContributionAndProof) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (a *SignedContributionAndProof) EncodingSizeSSZ() int {
-	return 100 + a.Message.EncodingSizeSSZ()
+	return length.Bytes96 + a.Message.EncodingSizeSSZ()
+	// return 100 + a.Message.EncodingSizeSSZ()
 }
 
 func (a *SignedContributionAndProof) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(a.Message, a.Signature[:])
 }
 
-var syncCommitteeAggregationBitsSize = 8
+var SyncCommitteeAggregationBitsSize = 16
 
 type Contribution struct {
-	Slot              uint64           `json:"slot,string"`
-	BeaconBlockRoot   libcommon.Hash   `json:"beacon_block_root"`
-	SubcommitteeIndex uint64           `json:"subcommittee_index,string"`
-	AggregationBits   hexutility.Bytes `json:"aggregation_bits"`
+	Slot              uint64            `json:"slot,string"`
+	BeaconBlockRoot   libcommon.Hash    `json:"beacon_block_root"`
+	SubcommitteeIndex uint64            `json:"subcommittee_index,string"`
+	AggregationBits   hexutility.Bytes  `json:"aggregation_bits"`
+	Signature         libcommon.Bytes96 `json:"signature"`
+}
+
+type ContributionKey struct {
+	Slot              uint64         `json:"slot,string"`
+	BeaconBlockRoot   libcommon.Hash `json:"beacon_block_root"`
+	SubcommitteeIndex uint64         `json:"subcommittee_index,string"`
 }
 
 func (a *Contribution) EncodeSSZ(dst []byte) ([]byte, error) {
 	if len(a.AggregationBits) == 0 {
-		a.AggregationBits = make([]byte, syncCommitteeAggregationBitsSize)
+		a.AggregationBits = make([]byte, SyncCommitteeAggregationBitsSize)
 	}
-	return ssz2.MarshalSSZ(dst, &a.Slot, a.BeaconBlockRoot[:], &a.SubcommitteeIndex, []byte(a.AggregationBits))
+	return ssz2.MarshalSSZ(dst, &a.Slot, a.BeaconBlockRoot[:], &a.SubcommitteeIndex, []byte(a.AggregationBits), a.Signature[:])
 }
 
 func (a *Contribution) Static() bool {
 	return true
 }
 
+func (a *Contribution) Copy() *Contribution {
+	ret := *a
+	ret.AggregationBits = append([]byte{}, a.AggregationBits...)
+	return &ret
+}
+
 func (a *Contribution) DecodeSSZ(buf []byte, version int) error {
-	a.AggregationBits = make([]byte, syncCommitteeAggregationBitsSize)
-	return ssz2.UnmarshalSSZ(buf, version, &a.Slot, a.BeaconBlockRoot[:], &a.SubcommitteeIndex, []byte(a.AggregationBits))
+	a.AggregationBits = make([]byte, SyncCommitteeAggregationBitsSize)
+	return ssz2.UnmarshalSSZ(buf, version, &a.Slot, a.BeaconBlockRoot[:], &a.SubcommitteeIndex, []byte(a.AggregationBits), a.Signature[:])
 }
 
 func (a *Contribution) EncodingSizeSSZ() int {
-	return 72 + len(a.AggregationBits)
+	return length.BlockNum*2 + length.Hash + length.Bytes96 + len(a.AggregationBits)
 }
 
 func (a *Contribution) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(&a.Slot, a.BeaconBlockRoot[:], &a.SubcommitteeIndex, []byte(a.AggregationBits))
+	return merkle_tree.HashTreeRoot(&a.Slot, a.BeaconBlockRoot[:], &a.SubcommitteeIndex, []byte(a.AggregationBits), a.Signature[:])
 }
 
 /*
- * SyncContribution, Determines successfull committee, bits shows active participants,
+ * SyncContribution, Determines successful committee, bits shows active participants,
  * and signature is the aggregate BLS signature of the committee.
  */
 type SyncContribution struct {
@@ -145,4 +161,35 @@ func (agg *SyncContribution) EncodingSizeSSZ() int {
 func (agg *SyncContribution) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:])
 
+}
+
+type SyncCommitteeMessage struct {
+	Slot            uint64            `json:"slot,string"`
+	BeaconBlockRoot libcommon.Hash    `json:"beacon_block_root"`
+	ValidatorIndex  uint64            `json:"validator_index,string"`
+	Signature       libcommon.Bytes96 `json:"signature"`
+}
+
+func (a *SyncCommitteeMessage) EncodeSSZ(dst []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(dst, &a.Slot, a.BeaconBlockRoot[:], &a.ValidatorIndex, a.Signature[:])
+}
+
+func (a *SyncCommitteeMessage) DecodeSSZ(buf []byte, version int) error {
+	return ssz2.UnmarshalSSZ(buf, version, &a.Slot, a.BeaconBlockRoot[:], &a.ValidatorIndex, a.Signature[:])
+}
+
+func (a *SyncCommitteeMessage) EncodingSizeSSZ() int {
+	return 144
+}
+
+func (a *SyncCommitteeMessage) HashSSZ() ([32]byte, error) {
+	return merkle_tree.HashTreeRoot(&a.Slot, a.BeaconBlockRoot[:], &a.ValidatorIndex, a.Signature[:])
+}
+
+func (a *SyncCommitteeMessage) Static() bool {
+	return true
+}
+
+func (*SyncCommitteeMessage) Clone() clonable.Clonable {
+	return &SyncCommitteeMessage{}
 }

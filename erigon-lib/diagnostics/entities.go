@@ -16,6 +16,8 @@
 
 package diagnostics
 
+import "time"
+
 type PeerStatisticsGetter interface {
 	GetPeersStatistics() map[string]*PeerStatistics
 }
@@ -155,6 +157,118 @@ type CPUInfo struct {
 	Mhz       float64 `json:"mhz"`
 }
 
+type BlockHeadersUpdate struct {
+	CurrentBlockNumber  uint64  `json:"blockNumber"`
+	PreviousBlockNumber uint64  `json:"previousBlockNumber"`
+	Speed               float64 `json:"speed"`
+	Alloc               uint64  `json:"alloc"`
+	Sys                 uint64  `json:"sys"`
+	InvalidHeaders      int     `json:"invalidHeaders"`
+	RejectedBadHeaders  int     `json:"rejectedBadHeaders"`
+}
+
+type HeadersWaitingUpdate struct {
+	From uint64 `json:"from"`
+}
+
+type HeaderCanonicalMarkerUpdate struct {
+	AncestorHeight uint64 `json:"ancestorHeight"`
+	AncestorHash   string `json:"ancestorHash"`
+}
+type HeadersProcessedUpdate struct {
+	Highest   uint64  `json:"highest"`
+	Age       int     `json:"age"`
+	Headers   uint64  `json:"headers"`
+	In        float64 `json:"in"`
+	BlkPerSec uint64  `json:"blkPerSec"`
+}
+
+type Headers struct {
+	WaitingForHeaders uint64                      `json:"waitingForHeaders"`
+	WriteHeaders      BlockHeadersUpdate          `json:"writeHeaders"`
+	CanonicalMarker   HeaderCanonicalMarkerUpdate `json:"canonicalMarker"`
+	Processed         HeadersProcessedUpdate      `json:"processed"`
+}
+type BodiesInfo struct {
+	BlockDownload BodiesDownloadBlockUpdate `json:"blockDownload"`
+	BlockWrite    BodiesWriteBlockUpdate    `json:"blockWrite"`
+	Processed     BodiesProcessedUpdate     `json:"processed"`
+	Processing    BodiesProcessingUpdate    `json:"processing"`
+}
+
+type BodiesDownloadBlockUpdate struct {
+	BlockNumber    uint64 `json:"blockNumber"`
+	DeliveryPerSec uint64 `json:"deliveryPerSec"`
+	WastedPerSec   uint64 `json:"wastedPerSec"`
+	Remaining      uint64 `json:"remaining"`
+	Delivered      uint64 `json:"delivered"`
+	BlockPerSec    uint64 `json:"blockPerSec"`
+	Cache          uint64 `json:"cache"`
+	Alloc          uint64 `json:"alloc"`
+	Sys            uint64 `json:"sys"`
+}
+
+type BodiesWriteBlockUpdate struct {
+	BlockNumber uint64 `json:"blockNumber"`
+	Remaining   uint64 `json:"remaining"`
+	Alloc       uint64 `json:"alloc"`
+	Sys         uint64 `json:"sys"`
+}
+
+type BodiesProcessedUpdate struct {
+	HighestBlock uint64  `json:"highestBlock"`
+	Blocks       uint64  `json:"blocks"`
+	TimeElapsed  float64 `json:"timeElapsed"`
+	BlkPerSec    float64 `json:"blkPerSec"`
+}
+
+type BodiesProcessingUpdate struct {
+	From uint64 `json:"from"`
+	To   uint64 `json:"to"`
+}
+
+type ResourcesUsage struct {
+	MemoryUsage []MemoryStats `json:"memoryUsage"`
+}
+
+type MemoryStats struct {
+	Alloc       uint64 `json:"alloc"`
+	Sys         uint64 `json:"sys"`
+	OtherFields []interface{}
+	Timestamp   time.Time `json:"timestamp"`
+	StageIndex  int       `json:"stageIndex"`
+}
+
+type NetworkSpeedTestResult struct {
+	Latency       time.Duration `json:"latency"`
+	DownloadSpeed float64       `json:"downloadSpeed"`
+	UploadSpeed   float64       `json:"uploadSpeed"`
+}
+
+func (ti MemoryStats) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti BodiesProcessingUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti BodiesProcessedUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti BodiesWriteBlockUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti BodiesDownloadBlockUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti BlockHeadersUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
 func (ti SnapshoFilesList) Type() Type {
 	return TypeOf(ti)
 }
@@ -188,5 +302,17 @@ func (ti CurrentSyncStage) Type() Type {
 }
 
 func (ti PeerStatisticMsgUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti HeadersWaitingUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti HeaderCanonicalMarkerUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti HeadersProcessedUpdate) Type() Type {
 	return TypeOf(ti)
 }

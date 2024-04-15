@@ -421,6 +421,7 @@ $Erigon.BuildFlags += " -ldflags ""-X $($Erigon.Package)/params.GitCommit=$($Eri
 
 $Erigon.BinPath    = [string](Join-Path $MyContext.StartDir "\build\bin")
 $env:CGO_CFLAGS = "-g -O2 -D__BLST_PORTABLE__"
+$env:GOPRIVATE = "github.com/erigontech/silkworm-go"
 
 New-Item -Path $Erigon.BinPath -ItemType Directory -Force | Out-Null
 if(!$?) {

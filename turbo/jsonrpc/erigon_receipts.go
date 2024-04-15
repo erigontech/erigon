@@ -152,6 +152,9 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 			}
 			blockLogs = append(blockLogs, filtered...)
 		}
+		if casted, ok := it.(kv.Closer); ok {
+			casted.Close()
+		}
 		if len(blockLogs) == 0 {
 			continue
 		}
@@ -330,8 +333,11 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			if logOptions.LogCount != 0 && logOptions.LogCount <= logCount {
 				break
 			}
-
 		}
+		if casted, ok := it.(kv.Closer); ok {
+			casted.Close()
+		}
+
 		blockCount++
 		if len(blockLogs) == 0 {
 			continue

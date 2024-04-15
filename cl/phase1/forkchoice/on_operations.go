@@ -97,7 +97,7 @@ func (f *ForkChoiceStore) OnProposerSlashing(proposerSlashing *cltypes.ProposerS
 		return err
 	}
 	if s == nil {
-		return fmt.Errorf("no head state avaible")
+		return nil
 	}
 	proposer, err := s.ValidatorForValidatorIndex(int(h1.ProposerIndex))
 	if err != nil {
@@ -157,7 +157,7 @@ func (f *ForkChoiceStore) OnBlsToExecutionChange(signedChange *cltypes.SignedBLS
 	// Take lock as we interact with state.
 	s := f.syncedDataManager.HeadState()
 	if s == nil {
-		return fmt.Errorf("no head state avaible")
+		return nil
 	}
 	validator, err := s.ValidatorForValidatorIndex(int(change.ValidatorIndex))
 	if err != nil {
@@ -199,20 +199,5 @@ func (f *ForkChoiceStore) OnBlsToExecutionChange(signedChange *cltypes.SignedBLS
 
 	// emit bls_to_execution_change
 	f.emitters.Publish("bls_to_execution_change", signedChange)
-	return nil
-}
-
-func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.SignedContributionAndProof, test bool) error {
-	if f.operationsPool.SignedContributionAndProofPool.Has(signedChange.Signature) {
-		f.emitters.Publish("contribution_and_proof", signedChange)
-		return nil
-	}
-	// TODO: implement the validation logic for the handler
-
-	// Insert in the pool
-	f.operationsPool.SignedContributionAndProofPool.Insert(signedChange.Signature, signedChange)
-
-	// emit contribution_and_proof
-	f.emitters.Publish("contribution_and_proof", signedChange)
 	return nil
 }

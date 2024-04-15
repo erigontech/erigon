@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
+	sentrymulticlient "github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/testlog"
 )
@@ -218,13 +219,16 @@ func newMessageListenerTest(t *testing.T) *messageListenerTest {
 	inboundMessagesStream := make(chan *delayedMessage[*sentry.InboundMessage])
 	peerEventsStream := make(chan *delayedMessage[*sentry.PeerEvent])
 	sentryClient := direct.NewMockSentryClient(ctrl)
+	statusDataFactory := sentrymulticlient.StatusDataFactory(func(ctx context.Context) (*sentry.StatusData, error) {
+		return &sentry.StatusData{}, nil
+	})
 	return &messageListenerTest{
 		ctx:                   ctx,
 		ctxCancel:             cancel,
 		t:                     t,
 		logger:                logger,
 		sentryClient:          sentryClient,
-		messageListener:       newMessageListener(logger, sentryClient, NewPeerPenalizer(sentryClient)),
+		messageListener:       newMessageListener(logger, sentryClient, statusDataFactory, NewPeerPenalizer(sentryClient)),
 		inboundMessagesStream: inboundMessagesStream,
 		peerEventsStream:      peerEventsStream,
 	}

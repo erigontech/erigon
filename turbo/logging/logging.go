@@ -10,6 +10,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/urfave/cli/v2"
 	"gopkg.in/natefinch/lumberjack.v2"
+
+	"github.com/ledgerwatch/erigon-lib/common/metrics"
 )
 
 // SetupLoggerCtx performs the logging setup according to the parameters
@@ -24,6 +26,8 @@ func SetupLoggerCtx(filePrefix string, ctx *cli.Context,
 	consoleDefaultLevel log.Lvl, dirDefaultLevel log.Lvl, rootHandler bool) log.Logger {
 	var consoleJson = ctx.Bool(LogJsonFlag.Name) || ctx.Bool(LogConsoleJsonFlag.Name)
 	var dirJson = ctx.Bool(LogDirJsonFlag.Name)
+
+	metrics.DelayLoggingEnabled = ctx.Bool(LogBlockDelayFlag.Name)
 
 	consoleLevel, lErr := tryGetLogLevel(ctx.String(LogConsoleVerbosityFlag.Name))
 	if lErr != nil {

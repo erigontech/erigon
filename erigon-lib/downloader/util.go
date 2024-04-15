@@ -81,6 +81,7 @@ func seedableSegmentFiles(dir string, chainName string) ([]string, error) {
 	}
 	res := make([]string, 0, len(files))
 	for _, fPath := range files {
+
 		_, name := filepath.Split(fPath)
 		if !snaptype.IsCorrectFileName(name) {
 			continue
@@ -166,7 +167,7 @@ func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs, torrentFile
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	files, err := seedableFiles(dirs, chain)
+	files, err := SeedableFiles(dirs, chain)
 	if err != nil {
 		return err
 	}
@@ -334,8 +335,15 @@ func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient
 			return nil, false, fmt.Errorf("addTorrentFile %s: %w", ts.DisplayName, err)
 		}
 
-		if err := db.Update(ctx, torrentInfoUpdater(ts.DisplayName, ts.InfoHash.Bytes(), 0, nil)); err != nil {
-			return nil, false, fmt.Errorf("addTorrentFile %s: %w", ts.DisplayName, err)
+		if t.Complete.Bool() {
+			if err := db.Update(ctx, torrentInfoUpdater(ts.DisplayName, ts.InfoHash.Bytes(), 0, nil)); err != nil {
+				return nil, false, fmt.Errorf("addTorrentFile %s: update failed: %w", ts.DisplayName, err)
+			}
+		} else {
+			t.AddWebSeeds(ts.Webseeds)
+			if err := db.Update(ctx, torrentInfoReset(ts.DisplayName, ts.InfoHash.Bytes(), 0)); err != nil {
+				return nil, false, fmt.Errorf("addTorrentFile %s: reset failed: %w", ts.DisplayName, err)
+			}
 		}
 
 		return t, true, nil
@@ -455,18 +463,54 @@ func IsLocal(path string) bool {
 }
 
 func ScheduleVerifyFile(ctx context.Context, t *torrent.Torrent, completePieces *atomic.Uint64) error {
-	wg, _ := errgroup.WithContext(ctx)
+	ctx, cancel := context.WithCancel(ctx)
+	wg, wgctx := errgroup.WithContext(ctx)
 	wg.SetLimit(16)
+
+	// piece changes happen asynchronously - we need to wait from them to complete
+	pieceChanges := t.SubscribePieceStateChanges()
+	inprogress := map[int]struct{}{}
+
 	for i := 0; i < t.NumPieces(); i++ {
+		inprogress[i] = struct{}{}
+
 		i := i
 		wg.Go(func() error {
 			t.Piece(i).VerifyData()
-
-			completePieces.Add(1)
 			return nil
 		})
 	}
-	return wg.Wait()
+
+	for {
+		select {
+		case <-wgctx.Done():
+			cancel()
+			return wg.Wait()
+		case change := <-pieceChanges.Values:
+			if !change.Ok {
+				var err error
+
+				if change.Err != nil {
+					err = change.Err
+				} else {
+					err = fmt.Errorf("unexpected piece change error")
+				}
+
+				cancel()
+				return fmt.Errorf("piece %s:%d verify failed: %w", t.Name(), change.Index, err)
+			}
+
+			if change.Complete && !(change.Checking || change.Hashing || change.QueuedForHash || change.Marking) {
+				completePieces.Add(1)
+				delete(inprogress, change.Index)
+			}
+
+			if len(inprogress) == 0 {
+				cancel()
+				return wg.Wait()
+			}
+		}
+	}
 }
 
 func VerifyFileFailFast(ctx context.Context, t *torrent.Torrent, root string, completePieces *atomic.Uint64) error {

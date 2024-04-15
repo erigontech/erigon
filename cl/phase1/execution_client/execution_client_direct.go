@@ -2,12 +2,15 @@ package execution_client
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"math/big"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
 )
 
@@ -41,6 +44,11 @@ func (cc *ExecutionClientDirect) NewPayload(ctx context.Context, payload *cltype
 		return false, err
 	}
 
+	headHeader := cc.chainRW.CurrentHeader(ctx)
+	if headHeader == nil || header.Number.Uint64() > headHeader.Number.Uint64()+1 {
+		return false, nil // import optimistically.
+	}
+
 	status, _, _, err := cc.chainRW.ValidateChain(ctx, payload.BlockHash, payload.BlockNumber)
 	if err != nil {
 		return false, err
@@ -50,18 +58,27 @@ func (cc *ExecutionClientDirect) NewPayload(ctx context.Context, payload *cltype
 	return
 }
 
-func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized libcommon.Hash, head libcommon.Hash) error {
+func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized libcommon.Hash, head libcommon.Hash, attr *engine_types.PayloadAttributes) ([]byte, error) {
 	status, _, _, err := cc.chainRW.UpdateForkChoice(ctx, head, head, finalized)
 	if err != nil {
-		return fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
+		return nil, fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
 	}
 	if status == execution.ExecutionStatus_InvalidForkchoice {
-		return fmt.Errorf("forkchoice was invalid")
+		return nil, fmt.Errorf("forkchoice was invalid")
 	}
 	if status == execution.ExecutionStatus_BadBlock {
-		return fmt.Errorf("bad block as forkchoice")
+		return nil, fmt.Errorf("bad block as forkchoice")
 	}
-	return nil
+	if attr == nil {
+		return nil, nil
+	}
+	idBytes := make([]byte, 8)
+	id, err := cc.chainRW.AssembleBlock(head, attr)
+	if err != nil {
+		return nil, err
+	}
+	binary.LittleEndian.PutUint64(idBytes, id)
+	return idBytes, nil
 }
 
 func (cc *ExecutionClientDirect) SupportInsertion() bool {
@@ -103,4 +120,12 @@ func (cc *ExecutionClientDirect) GetBodiesByHashes(ctx context.Context, hashes [
 
 func (cc *ExecutionClientDirect) FrozenBlocks(ctx context.Context) uint64 {
 	return cc.chainRW.FrozenBlocks(ctx)
+}
+
+func (cc *ExecutionClientDirect) HasBlock(ctx context.Context, hash libcommon.Hash) (bool, error) {
+	return cc.chainRW.HasBlock(ctx, hash)
+}
+
+func (cc *ExecutionClientDirect) GetAssembledBlock(_ context.Context, idBytes []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *big.Int, error) {
+	return cc.chainRW.GetAssembledBlock(binary.LittleEndian.Uint64(idBytes))
 }

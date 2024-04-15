@@ -42,9 +42,8 @@ func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint64 {
 
 // GetTotalActiveBalance return the sum of all balances within active validators.
 func (b *CachingBeaconState) GetTotalActiveBalance() uint64 {
-	if b.totalActiveBalanceCache == nil {
-		b._refreshActiveBalances()
-	}
+	b._refreshActiveBalancesIfNeeded()
+
 	return *b.totalActiveBalanceCache
 }
 
@@ -86,7 +85,7 @@ func (b *CachingBeaconState) GetBeaconProposerIndex() (uint64, error) {
 
 // GetBeaconProposerIndexForSlot compute the proposer index for a specific slot
 func (b *CachingBeaconState) GetBeaconProposerIndexForSlot(slot uint64) (uint64, error) {
-	epoch := Epoch(b)
+	epoch := slot / b.BeaconConfig().SlotsPerEpoch
 
 	hash := sha256.New()
 	beaconConfig := b.BeaconConfig()
@@ -96,7 +95,7 @@ func (b *CachingBeaconState) GetBeaconProposerIndexForSlot(slot uint64) (uint64,
 	mix := b.GetRandaoMix(int(mixPosition))
 	input := shuffling2.GetSeed(b.BeaconConfig(), mix, epoch, b.BeaconConfig().DomainBeaconProposer)
 	slotByteArray := make([]byte, 8)
-	binary.LittleEndian.PutUint64(slotByteArray, b.Slot())
+	binary.LittleEndian.PutUint64(slotByteArray, slot)
 
 	// Add slot to the end of the input.
 	inputWithSlot := append(input[:], slotByteArray...)
@@ -115,18 +114,15 @@ func (b *CachingBeaconState) GetBeaconProposerIndexForSlot(slot uint64) (uint64,
 
 // BaseRewardPerIncrement return base rewards for processing sync committee and duties.
 func (b *CachingBeaconState) BaseRewardPerIncrement() uint64 {
-	if b.totalActiveBalanceCache == nil {
-		b._refreshActiveBalances()
-	}
+	b._refreshActiveBalancesIfNeeded()
+
 	return b.BeaconConfig().EffectiveBalanceIncrement *
 		b.BeaconConfig().BaseRewardFactor / b.totalActiveBalanceRootCache
 }
 
 // BaseReward return base rewards for processing sync committee and duties.
 func (b *CachingBeaconState) BaseReward(index uint64) (uint64, error) {
-	if b.totalActiveBalanceCache == nil {
-		b._refreshActiveBalances()
-	}
+	b._refreshActiveBalancesIfNeeded()
 
 	effectiveBalance, err := b.ValidatorEffectiveBalance(int(index))
 	if err != nil {
@@ -177,16 +173,7 @@ func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(data solid.
 	}
 	// Matching roots
 	if !data.Source().Equal(justifiedCheckpoint) && !skipAssert {
-		// jsonify the data.Source and justifiedCheckpoint
-		jsonSource, err := data.Source().MarshalJSON()
-		if err != nil {
-			return nil, err
-		}
-		jsonJustifiedCheckpoint, err := justifiedCheckpoint.MarshalJSON()
-		if err != nil {
-			return nil, err
-		}
-		return nil, fmt.Errorf("GetAttestationParticipationFlagIndicies: source does not match. source: %s, justifiedCheckpoint: %s", jsonSource, jsonJustifiedCheckpoint)
+		return nil, fmt.Errorf("GetAttestationParticipationFlagIndicies: source does not match")
 	}
 	targetRoot, err := GetBlockRoot(b, data.Target().Epoch())
 	if err != nil {
@@ -297,10 +284,7 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 // GetAttestingIndicies retrieves attesting indicies for a specific attestation. however some tests will not expect the aggregation bits check.
 // thus, it is a flag now.
 func (b *CachingBeaconState) GetAttestingIndicies(attestation solid.AttestationData, aggregationBits []byte, checkBitsLength bool) ([]uint64, error) {
-	// if cached, ok := cache.LoadAttestatingIndicies(&attestation, aggregationBits); ok {
-	// 	return cached, nil
-	// }
-	committee, err := b.GetBeaconCommitee(attestation.Slot(), attestation.ValidatorIndex())
+	committee, err := b.GetBeaconCommitee(attestation.Slot(), attestation.CommitteeIndex())
 	if err != nil {
 		return nil, err
 	}
@@ -320,7 +304,6 @@ func (b *CachingBeaconState) GetAttestingIndicies(attestation solid.AttestationD
 			attestingIndices = append(attestingIndices, member)
 		}
 	}
-	// cache.StoreAttestation(&attestation, aggregationBits, attestingIndices)
 	return attestingIndices, nil
 }
 

@@ -20,13 +20,16 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	"github.com/ledgerwatch/erigon/cl/phase1/network/services/mock_services"
 	"github.com/ledgerwatch/erigon/cl/pool"
+	"github.com/ledgerwatch/erigon/cl/validator/validator_params"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 )
 
-func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logger) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState, h *ApiHandler, opPool pool.OperationsPool, syncedData *synced_data.SyncedDataManager, fcu *forkchoice.ForkChoiceStorageMock) {
+func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logger) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState, h *ApiHandler, opPool pool.OperationsPool, syncedData *synced_data.SyncedDataManager, fcu *forkchoice.ForkChoiceStorageMock, vp *validator_params.ValidatorParams) {
 	bcfg := clparams.MainnetBeaconConfig
 	if v == clparams.Phase0Version {
 		blocks, preState, postState = tests.GetPhase0Random()
@@ -77,7 +80,28 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 			CommitmentInclusionProof: solid.NewHashVector(17),
 		},
 	})
+	ctrl := gomock.NewController(t)
+	syncCommitteeMessagesService := mock_services.NewMockSyncCommitteeMessagesService(ctrl)
+	syncContributionService := mock_services.NewMockSyncContributionService(ctrl)
+	aggregateAndProofsService := mock_services.NewMockAggregateAndProofService(ctrl)
+	// ctx context.Context, subnetID *uint64, msg *cltypes.SyncCommitteeMessage) error
+	syncCommitteeMessagesService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SyncCommitteeMessage) error {
+		return h.syncMessagePool.AddSyncCommitteeMessage(postState, *subnetID, msg)
+	}).AnyTimes()
+
+	syncContributionService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedContributionAndProof) error {
+		return h.syncMessagePool.AddSyncContribution(postState, msg.Message.Contribution)
+	}).AnyTimes()
+
+	aggregateAndProofsService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedAggregateAndProof) error {
+		opPool.AttestationsPool.Insert(msg.Message.Aggregate.Signature(), msg.Message.Aggregate)
+		return nil
+	}).AnyTimes()
+
+	vp = validator_params.NewValidatorParams()
 	h = NewApiHandler(
+		logger,
+		&clparams.NetworkConfig{},
 		&gC,
 		&bcfg,
 		db,
@@ -96,7 +120,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 			Events:     true,
 			Validator:  true,
 			Lighthouse: true,
-		}, nil, blobStorage, nil)
+		}, nil, blobStorage, nil, vp, nil, nil, fcu.SyncContributionPool, nil, nil, syncCommitteeMessagesService, syncContributionService, aggregateAndProofsService) // TODO: add tests
 	h.Init()
 	return
 }

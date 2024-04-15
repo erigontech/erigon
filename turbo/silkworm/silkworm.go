@@ -3,8 +3,9 @@ package silkworm
 import (
 	"errors"
 	"math/big"
+	"unsafe"
 
-	"github.com/erigontech/silkworm-go"
+	silkworm_go "github.com/erigontech/silkworm-go"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/consensus"
 )
@@ -64,8 +65,20 @@ func (service SentryService) Stop() error {
 	return service.silkworm.SentryStop()
 }
 
-func ExecuteBlocks(s *Silkworm, txn kv.Tx, chainID *big.Int, startBlock uint64, maxBlock uint64, batchSize uint64, writeChangeSets, writeReceipts, writeCallTraces bool) (uint64, error) {
-	lastExecutedBlock, err := s.ExecuteBlocks(txn.CHandle(), chainID, startBlock, maxBlock, batchSize, writeChangeSets, writeReceipts, writeCallTraces)
+func ExecuteBlocksEphemeral(s *Silkworm, txn kv.Tx, chainID *big.Int, startBlock uint64, maxBlock uint64, batchSize uint64, writeChangeSets, writeReceipts, writeCallTraces bool) (uint64, error) {
+	var txnHandle unsafe.Pointer
+	if txn != nil {
+		txnHandle = txn.CHandle()
+	}
+	lastExecutedBlock, err := s.ExecuteBlocksEphemeral(txnHandle, chainID, startBlock, maxBlock, batchSize, writeChangeSets, writeReceipts, writeCallTraces)
+	if (err != nil) && errors.Is(err, silkworm_go.ErrInvalidBlock) {
+		return lastExecutedBlock, consensus.ErrInvalidBlock
+	}
+	return lastExecutedBlock, err
+}
+
+func ExecuteBlocksPerpetual(s *Silkworm, db kv.RwDB, chainID *big.Int, startBlock uint64, maxBlock uint64, batchSize uint64, writeChangeSets, writeReceipts, writeCallTraces bool) (uint64, error) {
+	lastExecutedBlock, err := s.ExecuteBlocksPerpetual(db.CHandle(), chainID, startBlock, maxBlock, batchSize, writeChangeSets, writeReceipts, writeCallTraces)
 	if (err != nil) && errors.Is(err, silkworm_go.ErrInvalidBlock) {
 		return lastExecutedBlock, consensus.ErrInvalidBlock
 	}

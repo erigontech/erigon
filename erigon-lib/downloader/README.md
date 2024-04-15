@@ -15,17 +15,17 @@ However this can result in slow or stalled downloads.  When this happens [rclone
 
 To enable [rclone](https://rclone.org/) should be installed on the local machine and its executable added to the `PATH` in the environment so that it can be launched by erigon.
 
-For web downloading no additional configuration is necessary as the downlowder will auto configure rclone to use the webseeds which are discovered via the torrent library.
+For web downloading no additional configuration is necessary as the downloader will auto configure rclone to use the webseeds which are discovered via the torrent library.
 
 # Configuration/Control Files
 
-The sections below describe the roles of the various control structures shown in the diagram above.  They combine to perform the following managemet and control functions:
+The sections below describe the roles of the various control structures shown in the diagram above.  They combine to perform the following management and control functions:
 
 * Definition of verified well know hashes for segment files - which identifies a known trusted universe of files (**chain.toml**)
 
 * Management of the competion state of the local download process (**BittorrentInfo**)
 
-* Definition of the accepted local hash set which are used to ensure that the local snapshots retain a consistent specified view as other defenitions in the evironment changes.  i.e. chain.toml gets re-versioned or BittorentInfo gets reset (**snapshot-lock.json**).  
+* Definition of the accepted local hash set which are used to ensure that the local snapshots retain a consistent specified view as other defenitions in the environment changes.  i.e. chain.toml gets re-versioned or BittorentInfo gets reset (**snapshot-lock.json**).  
 
 * Ability to override downloaded files with locally defined alternatives, for development or to fix errors and omissions (**snapshot-lock.json**)
 

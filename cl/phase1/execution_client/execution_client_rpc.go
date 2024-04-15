@@ -129,7 +129,7 @@ func (cc *ExecutionClientRpc) NewPayload(ctx context.Context, payload *cltypes.E
 	return
 }
 
-func (cc *ExecutionClientRpc) ForkChoiceUpdate(ctx context.Context, finalized libcommon.Hash, head libcommon.Hash) error {
+func (cc *ExecutionClientRpc) ForkChoiceUpdate(ctx context.Context, finalized libcommon.Hash, head libcommon.Hash, attributes *engine_types.PayloadAttributes) ([]byte, error) {
 	forkChoiceRequest := engine_types.ForkChoiceState{
 		HeadHash:           head,
 		SafeBlockHash:      head,
@@ -137,20 +137,27 @@ func (cc *ExecutionClientRpc) ForkChoiceUpdate(ctx context.Context, finalized li
 	}
 	forkChoiceResp := &engine_types.ForkChoiceUpdatedResponse{}
 	log.Debug("[ExecutionClientRpc] Calling EL", "method", rpc_helper.ForkChoiceUpdatedV1)
+	args := []interface{}{forkChoiceRequest}
+	if attributes != nil {
+		args = append(args, attributes)
+	}
 
-	err := cc.client.CallContext(ctx, forkChoiceResp, rpc_helper.ForkChoiceUpdatedV1, forkChoiceRequest)
+	err := cc.client.CallContext(ctx, forkChoiceResp, rpc_helper.ForkChoiceUpdatedV1, args...)
 	if err != nil {
-		return fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
+		return nil, fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
 	}
 	// Ignore timeouts
 	if err != nil && err.Error() == errContextExceeded {
-		return nil
+		return nil, nil
 	}
 	if err != nil {
-		return err
+		return nil, err
+	}
+	if forkChoiceResp.PayloadId == nil {
+		return []byte{}, checkPayloadStatus(forkChoiceResp.PayloadStatus)
 	}
 
-	return checkPayloadStatus(forkChoiceResp.PayloadStatus)
+	return *forkChoiceResp.PayloadId, checkPayloadStatus(forkChoiceResp.PayloadStatus)
 }
 
 func checkPayloadStatus(payloadStatus *engine_types.PayloadStatus) error {
@@ -234,5 +241,16 @@ func (cc *ExecutionClientRpc) GetBodiesByHashes(ctx context.Context, hashes []li
 }
 
 func (cc *ExecutionClientRpc) FrozenBlocks(ctx context.Context) uint64 {
+	panic("unimplemented")
+}
+
+// HasBlock checks if block with given hash is present
+func (cc *ExecutionClientRpc) HasBlock(ctx context.Context, hash libcommon.Hash) (bool, error) {
+	panic("unimplemented")
+}
+
+// Block production
+
+func (cc *ExecutionClientRpc) GetAssembledBlock(ctx context.Context, id []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *big.Int, error) {
 	panic("unimplemented")
 }

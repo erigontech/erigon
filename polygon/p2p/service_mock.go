@@ -66,6 +66,21 @@ func (mr *MockServiceMockRecorder) BlockNumPresent(peerId, blockNum any) *gomock
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BlockNumPresent", reflect.TypeOf((*MockService)(nil).BlockNumPresent), peerId, blockNum)
 }
 
+// FetchBlocks mocks base method.
+func (m *MockService) FetchBlocks(ctx context.Context, start, end uint64, peerId *PeerId) ([]*types.Block, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FetchBlocks", ctx, start, end, peerId)
+	ret0, _ := ret[0].([]*types.Block)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FetchBlocks indicates an expected call of FetchBlocks.
+func (mr *MockServiceMockRecorder) FetchBlocks(ctx, start, end, peerId any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchBlocks", reflect.TypeOf((*MockService)(nil).FetchBlocks), ctx, start, end, peerId)
+}
+
 // FetchBodies mocks base method.
 func (m *MockService) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) ([]*types.Body, error) {
 	m.ctrl.T.Helper()

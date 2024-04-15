@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math/big"
 
 	"github.com/RoaringBitmap/roaring"
 	"github.com/ledgerwatch/log/v3"
@@ -34,8 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
-
-const PendingBlockNumber int64 = -2
 
 func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chain.Config, block *types.Block, senders []common.Address) (types.Receipts, error) {
 	if cached := rawdb.ReadReceipts(tx, block, senders); cached != nil {
@@ -110,10 +107,6 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 
 		begin = latest
 		if crit.FromBlock != nil {
-			if !getLogsIsValidBlockNumber(crit.FromBlock) {
-				return nil, fmt.Errorf("invalid value for FromBlock: %v", crit.FromBlock)
-			}
-
 			fromBlock := crit.FromBlock.Int64()
 			if fromBlock > 0 {
 				begin = uint64(fromBlock)
@@ -128,10 +121,6 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		}
 		end = latest
 		if crit.ToBlock != nil {
-			if !getLogsIsValidBlockNumber(crit.ToBlock) {
-				return nil, fmt.Errorf("invalid value for ToBlock: %v", crit.ToBlock)
-			}
-
 			toBlock := crit.ToBlock.Int64()
 			if toBlock > 0 {
 				end = uint64(toBlock)
@@ -213,6 +202,9 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 			}
 			blockLogs = append(blockLogs, filtered...)
 		}
+		if casted, ok := it.(kv.Closer); ok {
+			casted.Close()
+		}
 		if len(blockLogs) == 0 {
 			continue
 		}
@@ -243,11 +235,6 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	}
 
 	return logs, nil
-}
-
-// getLogsIsValidBlockNumber checks if block number is valid integer or "latest", "pending", "earliest" block number
-func getLogsIsValidBlockNumber(blockNum *big.Int) bool {
-	return blockNum.IsInt64() && blockNum.Int64() >= PendingBlockNumber
 }
 
 // The Topic list restricts matches to particular event topics. Each event has a list

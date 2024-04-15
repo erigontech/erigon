@@ -15,18 +15,20 @@ type PeerTracker interface {
 }
 
 func NewPeerTracker() PeerTracker {
-	return newPeerTracker()
+	return newPeerTracker(RandPeerShuffle)
 }
 
-func newPeerTracker() *peerTracker {
+func newPeerTracker(peerShuffle PeerShuffle) *peerTracker {
 	return &peerTracker{
 		peerSyncProgresses: map[PeerId]*peerSyncProgress{},
+		peerShuffle:        peerShuffle,
 	}
 }
 
 type peerTracker struct {
 	mu                 sync.Mutex
 	peerSyncProgresses map[PeerId]*peerSyncProgress
+	peerShuffle        PeerShuffle
 }
 
 func (pt *peerTracker) ListPeersMayHaveBlockNum(blockNum uint64) []*PeerId {
@@ -39,6 +41,8 @@ func (pt *peerTracker) ListPeersMayHaveBlockNum(blockNum uint64) []*PeerId {
 			peerIds = append(peerIds, peerSyncProgress.peerId)
 		}
 	}
+
+	pt.peerShuffle(peerIds)
 
 	return peerIds
 }

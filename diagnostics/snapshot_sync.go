@@ -3,9 +3,11 @@ package diagnostics
 import (
 	"encoding/json"
 	"net/http"
+
+	diaglib "github.com/ledgerwatch/erigon-lib/diagnostics"
 )
 
-func SetupStagesAccess(metricsMux *http.ServeMux, diag *DiagnosticClient) {
+func SetupStagesAccess(metricsMux *http.ServeMux, diag *diaglib.DiagnosticClient) {
 	metricsMux.HandleFunc("/snapshot-sync", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
@@ -23,16 +25,36 @@ func SetupStagesAccess(metricsMux *http.ServeMux, diag *DiagnosticClient) {
 		w.Header().Set("Content-Type", "application/json")
 		writeHardwareInfo(w, diag)
 	})
+
+	metricsMux.HandleFunc("/resources-usage", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Content-Type", "application/json")
+		writeResourcesUsage(w, diag)
+	})
+
+	metricsMux.HandleFunc("/network-speed", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Content-Type", "application/json")
+		writeNetworkSpeed(w, diag)
+	})
 }
 
-func writeStages(w http.ResponseWriter, diag *DiagnosticClient) {
+func writeNetworkSpeed(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
+	json.NewEncoder(w).Encode(diag.GetNetworkSpeed())
+}
+
+func writeResourcesUsage(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
+	json.NewEncoder(w).Encode(diag.GetResourcesUsage())
+}
+
+func writeStages(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
 	json.NewEncoder(w).Encode(diag.SyncStatistics())
 }
 
-func writeFilesList(w http.ResponseWriter, diag *DiagnosticClient) {
+func writeFilesList(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
 	json.NewEncoder(w).Encode(diag.SnapshotFilesList())
 }
 
-func writeHardwareInfo(w http.ResponseWriter, diag *DiagnosticClient) {
+func writeHardwareInfo(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
 	json.NewEncoder(w).Encode(diag.HardwareInfo())
 }

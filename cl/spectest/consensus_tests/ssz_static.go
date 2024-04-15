@@ -2,6 +2,7 @@ package consensus_tests
 
 import (
 	"bytes"
+	"encoding/json"
 	"io/fs"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
@@ -53,6 +55,7 @@ func getSSZStaticConsensusTest[T unmarshalerMarshalerHashable](ref T) spectest.H
 		if err := object.DecodeSSZ(encoded, int(c.Version())); err != nil && !isBeaconState {
 			return err
 		}
+
 		haveRoot, err := object.HashSSZ()
 		require.NoError(t, err)
 		require.EqualValues(t, expectedRoot, haveRoot)
@@ -81,6 +84,25 @@ func getSSZStaticConsensusTest[T unmarshalerMarshalerHashable](ref T) spectest.H
 			require.NoError(t, err)
 			require.EqualValues(t, expectedRoot, haveRoot)
 		}
+		if _, ok := object.(solid.Checkpoint); ok {
+			return nil
+		}
+		if _, ok := object.(solid.AttestationData); ok {
+			return nil
+		}
+		if _, ok := object.(solid.Validator); ok {
+			return nil
+		}
+
+		obj2 := object.Clone()
+		// test json
+		jsonBlock, err := json.Marshal(object)
+		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal(jsonBlock, obj2))
+
+		haveRoot, err = obj2.(unmarshalerMarshalerHashable).HashSSZ()
+		require.NoError(t, err)
+		require.Equal(t, expectedRoot, libcommon.Hash(haveRoot))
 
 		return nil
 	})

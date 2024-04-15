@@ -23,7 +23,7 @@ import (
 	"github.com/spf13/afero"
 )
 
-const dumpSlotFrequency = 32
+const dumpSlotFrequency = 17
 
 type syncCommittees struct {
 	currentSyncCommittee *solid.SyncCommittee
@@ -190,7 +190,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		return nil, LogisticError, fmt.Errorf("AddChainSegment: %w, parentRoot; %x", err, block.ParentRoot)
 	}
 	if newState == nil {
-		log.Debug("AddChainSegment: missing segment", "block", libcommon.Hash(blockRoot))
+		log.Trace("AddChainSegment: missing segment", "block", libcommon.Hash(blockRoot))
 		return nil, MissingSegment, nil
 	}
 	finalizedBlock, hasFinalized := f.getBlock(newState.FinalizedCheckpoint().BlockRoot())
@@ -232,7 +232,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	// Execute the state
 	if invalidBlockErr := transition.TransitionState(newState, signedBlock, blockRewardsCollector, fullValidation); invalidBlockErr != nil {
 		// Add block to list of invalid blocks
-		log.Debug("Invalid beacon block", "reason", invalidBlockErr)
+		log.Warn("Invalid beacon block", "slot", block.Slot, "blockRoot", blockRoot, "reason", invalidBlockErr)
 		f.badBlocks.Store(libcommon.Hash(blockRoot), struct{}{})
 		f.currentState = nil
 
@@ -249,8 +249,8 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		f.blockRewards.Store(libcommon.Hash(blockRoot), blockRewardsCollector)
 		f.balancesStorage.Insert(libcommon.Hash(blockRoot), block.ParentRoot, prevDumpBalances, newState.RawBalances(), epochCross)
 		f.validatorSetStorage.Insert(libcommon.Hash(blockRoot), block.ParentRoot, prevValidatorSetDump, newState.RawValidatorSet(), epochCross)
-
-		f.syncCommittees.Store(libcommon.Hash(blockRoot), syncCommittees{
+		period := f.beaconCfg.SyncCommitteePeriod(newState.Slot())
+		f.syncCommittees.Store(period, syncCommittees{
 			currentSyncCommittee: newState.CurrentSyncCommittee().Copy(),
 			nextSyncCommittee:    newState.NextSyncCommittee().Copy(),
 		})
@@ -277,7 +277,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		BodyRoot:      bodyRoot,
 	})
 
-	if newState.Slot()%f.beaconCfg.SlotsPerEpoch == 0 {
+	if newState.Slot()%dumpSlotFrequency == 0 {
 		if err := f.dumpBeaconStateOnDisk(newState, blockRoot); err != nil {
 			return nil, LogisticError, err
 		}
@@ -331,13 +331,13 @@ func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*st
 		if !isSegmentPresent {
 			// check if it is in the header
 			bHeader, ok := f.GetHeader(currentIteratorRoot)
-			if ok && bHeader.Slot%f.beaconCfg.SlotsPerEpoch == 0 {
+			if ok && bHeader.Slot%dumpSlotFrequency == 0 {
 				break
 			}
-			log.Debug("Could not retrieve state: Missing header", "missing", currentIteratorRoot)
+			log.Trace("Could not retrieve state: Missing header", "missing", currentIteratorRoot)
 			return nil, nil
 		}
-		if block.Block.Slot%f.beaconCfg.SlotsPerEpoch == 0 {
+		if block.Block.Slot%dumpSlotFrequency == 0 {
 			break
 		}
 		blocksInTheWay = append(blocksInTheWay, block)
@@ -423,8 +423,8 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 	return
 }
 
-func (f *forkGraphDisk) GetSyncCommittees(blockRoot libcommon.Hash) (*solid.SyncCommittee, *solid.SyncCommittee, bool) {
-	obj, has := f.syncCommittees.Load(blockRoot)
+func (f *forkGraphDisk) GetSyncCommittees(period uint64) (*solid.SyncCommittee, *solid.SyncCommittee, bool) {
+	obj, has := f.syncCommittees.Load(period)
 	if !has {
 		return nil, nil, false
 	}

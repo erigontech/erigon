@@ -16,10 +16,11 @@ package fork
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/stretchr/testify/require"
 )
 
 // Testing Fork digest
@@ -30,7 +31,7 @@ func TestMainnetForkDigest(t *testing.T) {
 	require.NoError(t, err)
 	_, err = ComputeForkId(&beaconCfg, &genesisCfg)
 	require.NoError(t, err)
-	require.Equal(t, [4]byte{0xbb, 0xa4, 0xda, 0x96}, digest)
+	require.Equal(t, [4]byte{0x6a, 0x95, 0xa1, 0xa9}, digest)
 }
 
 func TestMainnetForkDigestWithNoGenesisTime(t *testing.T) {

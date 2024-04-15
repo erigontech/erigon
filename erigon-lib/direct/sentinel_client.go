@@ -81,6 +81,10 @@ func (s *SentinelClientDirect) SubscribeGossip(ctx context.Context, in *sentinel
 	return &SentinelSubscribeGossipC{ch: ch, ctx: ctx}, nil
 }
 
+func (s *SentinelClientDirect) SetSubscribeExpiry(ctx context.Context, expiryReq *sentinel.RequestSubscribeExpiry, opts ...grpc.CallOption) (*sentinel.EmptyMessage, error) {
+	return s.server.SetSubscribeExpiry(ctx, expiryReq)
+}
+
 type SentinelSubscribeGossipC struct {
 	ch  chan *gossipReply
 	ctx context.Context

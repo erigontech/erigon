@@ -1,6 +1,8 @@
 package cltypes
 
 import (
+	"encoding/json"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
@@ -50,6 +52,16 @@ type Deposit struct {
 	// Merkle proof is used for deposits
 	Proof solid.HashVectorSSZ `json:"proof"` // 33 X 32 size.
 	Data  *DepositData        `json:"data"`
+}
+
+func (d *Deposit) UnmarshalJSON(buf []byte) error {
+	d.Proof = solid.NewHashVector(33)
+	d.Data = new(DepositData)
+
+	return json.Unmarshal(buf, &struct {
+		Proof solid.HashVectorSSZ `json:"proof"`
+		Data  *DepositData        `json:"data"`
+	}{d.Proof, d.Data})
 }
 
 func (d *Deposit) EncodeSSZ(dst []byte) ([]byte, error) {

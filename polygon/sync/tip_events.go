@@ -3,25 +3,27 @@ package sync
 import (
 	"context"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/polygon/p2p"
 )
 
-const EventTypeNewHeader = "new-header"
-const EventTypeNewHeaderHashes = "new-header-hashes"
+const EventTypeNewBlock = "new-block"
+const EventTypeNewBlockHashes = "new-block-hashes"
 const EventTypeNewMilestone = "new-milestone"
 const EventTypeNewSpan = "new-span"
 
-type EventNewHeader struct {
-	NewHeader *types.Header
-	PeerId    *p2p.PeerId
+type EventNewBlock struct {
+	NewBlock *types.Block
+	PeerId   *p2p.PeerId
 }
 
-type EventNewHeaderHashes struct {
-	NewHeaderHashes eth.NewBlockHashesPacket
-	PeerId          *p2p.PeerId
+type EventNewBlockHashes struct {
+	NewBlockHashes eth.NewBlockHashesPacket
+	PeerId         *p2p.PeerId
 }
 
 type EventNewMilestone = *heimdall.Milestone
@@ -31,24 +33,24 @@ type EventNewSpan = *heimdall.Span
 type Event struct {
 	Type string
 
-	newHeader       EventNewHeader
-	newHeaderHashes EventNewHeaderHashes
-	newMilestone    EventNewMilestone
-	newSpan         EventNewSpan
+	newBlock       EventNewBlock
+	newBlockHashes EventNewBlockHashes
+	newMilestone   EventNewMilestone
+	newSpan        EventNewSpan
 }
 
-func (e Event) AsNewHeader() EventNewHeader {
-	if e.Type != EventTypeNewHeader {
+func (e Event) AsNewBlock() EventNewBlock {
+	if e.Type != EventTypeNewBlock {
 		panic("Event type mismatch")
 	}
-	return e.newHeader
+	return e.newBlock
 }
 
-func (e Event) AsNewHeaderHashes() EventNewHeaderHashes {
-	if e.Type != EventTypeNewHeaderHashes {
+func (e Event) AsNewBlockHashes() EventNewBlockHashes {
+	if e.Type != EventTypeNewBlockHashes {
 		panic("Event type mismatch")
 	}
-	return e.newHeaderHashes
+	return e.newBlockHashes
 }
 
 func (e Event) AsNewMilestone() EventNewMilestone {
@@ -66,21 +68,22 @@ func (e Event) AsNewSpan() EventNewSpan {
 }
 
 type TipEvents struct {
-	events *EventChannel[Event]
-
+	logger          log.Logger
+	events          *EventChannel[Event]
 	p2pService      p2p.Service
 	heimdallService heimdall.HeimdallNoStore
 }
 
 func NewTipEvents(
+	logger log.Logger,
 	p2pService p2p.Service,
 	heimdallService heimdall.HeimdallNoStore,
 ) *TipEvents {
 	eventsCapacity := uint(1000) // more than 3 milestones
 
 	return &TipEvents{
-		events: NewEventChannel[Event](eventsCapacity),
-
+		logger:          logger,
+		events:          NewEventChannel[Event](eventsCapacity),
 		p2pService:      p2pService,
 		heimdallService: heimdallService,
 	}
@@ -91,13 +94,14 @@ func (te *TipEvents) Events() <-chan Event {
 }
 
 func (te *TipEvents) Run(ctx context.Context) error {
+	te.logger.Debug(syncLogPrefix("running tip events component"))
+
 	newBlockObserverCancel := te.p2pService.RegisterNewBlockObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockPacket]) {
-		block := message.Decoded.Block
 		te.events.PushEvent(Event{
-			Type: EventTypeNewHeader,
-			newHeader: EventNewHeader{
-				NewHeader: block.Header(),
-				PeerId:    message.PeerId,
+			Type: EventTypeNewBlock,
+			newBlock: EventNewBlock{
+				NewBlock: message.Decoded.Block,
+				PeerId:   message.PeerId,
 			},
 		})
 	})
@@ -105,10 +109,10 @@ func (te *TipEvents) Run(ctx context.Context) error {
 
 	newBlockHashesObserverCancel := te.p2pService.RegisterNewBlockHashesObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]) {
 		te.events.PushEvent(Event{
-			Type: EventTypeNewHeaderHashes,
-			newHeaderHashes: EventNewHeaderHashes{
-				NewHeaderHashes: *message.Decoded,
-				PeerId:          message.PeerId,
+			Type: EventTypeNewBlockHashes,
+			newBlockHashes: EventNewBlockHashes{
+				NewBlockHashes: *message.Decoded,
+				PeerId:         message.PeerId,
 			},
 		})
 	})

@@ -6,12 +6,13 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"github.com/urfave/cli/v2"
+
 	"github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon/cmd/snapshots/flags"
 	"github.com/ledgerwatch/erigon/cmd/snapshots/sync"
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/urfave/cli/v2"
 )
 
 var (
@@ -99,7 +100,8 @@ func verify(cliCtx *cli.Context) error {
 
 	switch dst.LType {
 	case sync.TorrentFs:
-		torrentCli, err = sync.NewTorrentClient(cliCtx, dst.Chain)
+		config := sync.NewTorrentClientConfigFromCobra(cliCtx, dst.Chain)
+		torrentCli, err = sync.NewTorrentClient(config)
 		if err != nil {
 			return fmt.Errorf("can't create torrent: %w", err)
 		}
@@ -125,7 +127,8 @@ func verify(cliCtx *cli.Context) error {
 	switch src.LType {
 	case sync.TorrentFs:
 		if torrentCli == nil {
-			torrentCli, err = sync.NewTorrentClient(cliCtx, dst.Chain)
+			config := sync.NewTorrentClientConfigFromCobra(cliCtx, dst.Chain)
+			torrentCli, err = sync.NewTorrentClient(config)
 			if err != nil {
 				return fmt.Errorf("can't create torrent: %w", err)
 			}
@@ -203,7 +206,7 @@ func verify(cliCtx *cli.Context) error {
 
 	if rcCli != nil {
 		if src != nil && src.LType == sync.RemoteFs {
-			srcSession, err = rcCli.NewSession(cliCtx.Context, filepath.Join(tempDir, "src"), src.Src+":"+src.Root)
+			srcSession, err = rcCli.NewSession(cliCtx.Context, filepath.Join(tempDir, "src"), src.Src+":"+src.Root, nil)
 
 			if err != nil {
 				return err
@@ -211,7 +214,7 @@ func verify(cliCtx *cli.Context) error {
 		}
 
 		if dst.LType == sync.RemoteFs {
-			dstSession, err = rcCli.NewSession(cliCtx.Context, filepath.Join(tempDir, "dst"), dst.Src+":"+dst.Root)
+			dstSession, err = rcCli.NewSession(cliCtx.Context, filepath.Join(tempDir, "dst"), dst.Src+":"+dst.Root, nil)
 
 			if err != nil {
 				return err

@@ -3,32 +3,32 @@ package sync
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
+	executionclient "github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
 type ExecutionClient interface {
-	InsertBlocks(ctx context.Context, headers []*types.Header) error
+	InsertBlocks(ctx context.Context, blocks []*types.Block) error
 	UpdateForkChoice(ctx context.Context, tip *types.Header, finalizedHeader *types.Header) error
 	CurrentHeader(ctx context.Context) (*types.Header, error)
 }
 
 type executionClient struct {
-	engine execution_client.ExecutionEngine
+	engine executionclient.ExecutionEngine
 }
 
-func NewExecutionClient(engine execution_client.ExecutionEngine) ExecutionClient {
+func NewExecutionClient(engine executionclient.ExecutionEngine) ExecutionClient {
 	return &executionClient{engine}
 }
 
-func (e *executionClient) InsertBlocks(ctx context.Context, headers []*types.Header) error {
-	// TODO: pass in full blocks
-	var blocks []*types.Block
+func (e *executionClient) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
 	return e.engine.InsertBlocks(ctx, blocks, true)
 }
 
-func (e *executionClient) UpdateForkChoice(ctx context.Context, tip *types.Header, finalizedHeader *types.Header) error {
-	return e.engine.ForkChoiceUpdate(ctx, finalizedHeader.Hash(), tip.Hash())
+func (e *executionClient) UpdateForkChoice(_ context.Context, _ *types.Header, _ *types.Header) error {
+	// TODO - not ready for execution - missing state sync event and span data - uncomment once ready
+	//return e.engine.ForkChoiceUpdate(ctx, finalizedHeader.Hash(), tip.Hash())
+	return nil
 }
 
 func (e *executionClient) CurrentHeader(ctx context.Context) (*types.Header, error) {

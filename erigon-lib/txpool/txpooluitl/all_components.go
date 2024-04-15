@@ -140,9 +140,6 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, cache kvcache.Cach
 		agraBlock = chainConfig.Bor.GetAgraBlock()
 	}
 	cancunTime := chainConfig.CancunTime
-	if cfg.OverrideCancunTime != nil {
-		cancunTime = cfg.OverrideCancunTime
-	}
 
 	txPool, err := txpool.New(newTxs, chainDB, cfg, cache, *chainID, shanghaiTime, agraBlock, cancunTime, maxBlobsPerBlock, feeCalculator, logger)
 	if err != nil {

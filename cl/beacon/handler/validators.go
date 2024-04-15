@@ -17,6 +17,7 @@ import (
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/pkg/errors"
 	"golang.org/x/exp/slices"
 )
 
@@ -377,6 +378,9 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidator(w http.ResponseWriter, r *htt
 
 	if blockId.Head() { // Lets see if we point to head, if yes then we need to look at the head state we always keep.
 		s := a.syncedData.HeadState()
+		if s == nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("node is not synced"))
+		}
 		if s.ValidatorLength() <= int(validatorIndex) {
 			return newBeaconResponse([]int{}).WithFinalized(false), nil
 		}
@@ -649,4 +653,31 @@ func shouldStatusBeFiltered(status validatorStatus, statuses []validatorStatus) 
 		}
 	}
 	return true // filter if no filter condition is met
+}
+
+func (a *ApiHandler) GetEthV1ValidatorAggregateAttestation(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	attDataRoot := r.URL.Query().Get("attestation_data_root")
+	if attDataRoot == "" {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("attestation_data_root is required"))
+	}
+	slot := r.URL.Query().Get("slot")
+	if slot == "" {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("slot is required"))
+	}
+	slotNum, err := strconv.ParseUint(slot, 10, 64)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.WithMessage(err, "invalid slot"))
+	}
+
+	attDataRootHash := libcommon.HexToHash(attDataRoot)
+	att := a.aggregatePool.GetAggregatationByRoot(attDataRootHash)
+	if att == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("attestation not found. attestation_data_root"))
+	}
+	if slotNum != att.AttestantionData().Slot() {
+		log.Debug("attestation slot does not match", "attestation_data_root", attDataRoot, "slot_inquire", slot)
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("attestation slot mismatch"))
+	}
+
+	return newBeaconResponse(att), nil
 }
