@@ -63,18 +63,16 @@ func (c *Checkpoint) UnmarshalJSON(b []byte) error {
 
 type Checkpoints []*Checkpoint
 
-func (cs *Checkpoints) Len() int {
-	return len(*cs)
+func (cs Checkpoints) Len() int {
+	return len(cs)
 }
 
-func (cs *Checkpoints) Less(i, j int) bool {
-	v := *cs
-	return v[i].StartBlock().Uint64() < v[j].StartBlock().Uint64()
+func (cs Checkpoints) Less(i, j int) bool {
+	return cs[i].StartBlock().Uint64() < cs[j].StartBlock().Uint64()
 }
 
-func (cs *Checkpoints) Swap(i, j int) {
-	v := *cs
-	v[i], v[j] = v[j], v[i]
+func (cs Checkpoints) Swap(i, j int) {
+	cs[i], cs[j] = cs[j], cs[i]
 }
 
 type CheckpointResponse struct {
