@@ -144,6 +144,12 @@ func responseCheck(resp *executor.ProcessBatchResponseV2, erigonStateRoot common
 	if resp == nil {
 		return false, fmt.Errorf("nil response")
 	}
+
+	if resp.Debug != nil && resp.Debug.ErrorLog != "" {
+		log.Error("executor error", "detail", resp.Debug.ErrorLog)
+		return false, fmt.Errorf("error in response: %s", resp.Debug.ErrorLog)
+	}
+
 	if resp.Error != executor.ExecutorError_EXECUTOR_ERROR_UNSPECIFIED &&
 		resp.Error != executor.ExecutorError_EXECUTOR_ERROR_NO_ERROR {
 		// prover id here is the only string field in the response and will contain info on what key failed from

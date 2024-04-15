@@ -362,6 +362,11 @@ message ProcessBatchResponseV2 {
   uint32 cnt_reserve_steps = 31;
   uint32 cnt_reserve_sha256_hashes = 32;
   bytes old_state_root = 33;
+  ResponseDebug debug = 34;
+}
+
+message ResponseDebug {
+  string error_log = 1;
 }
 
 // Trace configuration request params
@@ -404,9 +409,9 @@ message InfoReadWriteV2 {
   string balance = 2;
   // If sc_code="" then it has not been set; if set, string is in hexa (base 16)
   string sc_code = 3;
-  // Both sc_storage first and second map elements are set in hexa (base 16)
+  // Both sc_storage first (key) and second (value) map elements are set in hexa (base 16)
   map<string, string> sc_storage = 4;
-  // If sc_length="" then it has not been set; if set, string is in hexa (base 16)
+  // If sc_length="" then it has not been set; if set, string is in decimal (base 10)
   string sc_length = 5;
 }
 
@@ -661,6 +666,8 @@ enum RomError {
   ROM_ERROR_INVALID_TX_CHANGE_L2_BLOCK_LIMIT_TIMESTAMP = 33;
   // ROM_ERROR_INVALID_TX_CHANGE_L2_BLOCK_MIN_TIMESTAMP indicates that the change l2 block transaction has trigger an error during while executing
   ROM_ERROR_INVALID_TX_CHANGE_L2_BLOCK_MIN_TIMESTAMP = 34;
+  // ROM_ERROR_INVALID_L1_INFO_TREE_INDEX indicates that the l1 info tree index added is not valid since its value is 0
+  ROM_ERROR_INVALID_L1_INFO_TREE_INDEX = 35;
 }
 
 enum ExecutorError {
