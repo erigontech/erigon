@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
@@ -58,7 +57,8 @@ func TestBlocksByRangeHandler(t *testing.T) {
 	blockRoots, _, _ = beacon_indicies.ReadBeaconBlockRootsInSlotRange(ctx, tx, startSlot, startSlot+count)
 	tx.Commit()
 
-	genesisCfg, _, beaconCfg := clparams.GetConfigsByNetwork(1)
+	ethClock := getEthClock(t)
+	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
 		ctx,
 		store,
@@ -68,7 +68,7 @@ func TestBlocksByRangeHandler(t *testing.T) {
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,
-		genesisCfg,
+		ethClock,
 		nil, &forkchoice.ForkChoiceStorageMock{}, nil, true,
 	)
 	c.Start()
@@ -120,7 +120,7 @@ func TestBlocksByRangeHandler(t *testing.T) {
 		if respForkDigest == 0 {
 			require.NoError(t, fmt.Errorf("null fork digest"))
 		}
-		version, err := fork.ForkDigestVersion(utils.Uint32ToBytes4(respForkDigest), beaconCfg, genesisCfg.GenesisValidatorRoot)
+		version, err := ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
 		if err != nil {
 			require.NoError(t, err)
 		}

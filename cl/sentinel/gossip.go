@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/gossip"
 	"github.com/ledgerwatch/log/v3"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -146,7 +145,7 @@ func (s *GossipManager) unsubscribe(topic string) {
 }
 
 func (s *Sentinel) forkWatcher() {
-	prevDigest, err := fork.ComputeForkDigest(s.cfg.BeaconConfig, s.cfg.GenesisConfig)
+	prevDigest, err := s.ethClock.CurrentForkDigest()
 	if err != nil {
 		log.Error("[Gossip] Failed to calculate fork choice", "err", err)
 		return
@@ -157,7 +156,7 @@ func (s *Sentinel) forkWatcher() {
 		case <-s.ctx.Done():
 			return
 		case <-iterationInterval.C:
-			digest, err := fork.ComputeForkDigest(s.cfg.BeaconConfig, s.cfg.GenesisConfig)
+			digest, err := s.ethClock.CurrentForkDigest()
 			if err != nil {
 				log.Error("[Gossip] Failed to calculate fork choice", "err", err)
 				return
@@ -181,7 +180,7 @@ func (s *Sentinel) forkWatcher() {
 }
 
 func (s *Sentinel) SubscribeGossip(topic GossipTopic, expiration time.Time, opts ...pubsub.TopicOpt) (sub *GossipSubscription, err error) {
-	digest, err := fork.ComputeForkDigest(s.cfg.BeaconConfig, s.cfg.GenesisConfig)
+	digest, err := s.ethClock.CurrentForkDigest()
 	if err != nil {
 		log.Error("[Gossip] Failed to calculate fork choice", "err", err)
 	}
@@ -210,7 +209,7 @@ func (s *Sentinel) SubscribeGossip(topic GossipTopic, expiration time.Time, opts
 }
 
 func (s *Sentinel) Unsubscribe(topic GossipTopic, opts ...pubsub.TopicOpt) (err error) {
-	digest, err := fork.ComputeForkDigest(s.cfg.BeaconConfig, s.cfg.GenesisConfig)
+	digest, err := s.ethClock.CurrentForkDigest()
 	if err != nil {
 		log.Error("[Gossip] Failed to calculate fork choice", "err", err)
 	}

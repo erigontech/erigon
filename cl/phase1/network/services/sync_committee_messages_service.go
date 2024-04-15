@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/network/subnets"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/ledgerwatch/erigon/cl/validator/sync_contribution_pool"
 	"golang.org/x/exp/slices"
 )
@@ -27,13 +28,21 @@ type syncCommitteeMessagesService struct {
 	syncedDataManager         *synced_data.SyncedDataManager
 	beaconChainCfg            *clparams.BeaconChainConfig
 	syncContributionPool      sync_contribution_pool.SyncContributionPool
+	ethClock                  eth_clock.EthereumClock
 	test                      bool
 }
 
 // NewSyncCommitteeMessagesService creates a new sync committee messages service
-func NewSyncCommitteeMessagesService(beaconChainCfg *clparams.BeaconChainConfig, syncedDataManager *synced_data.SyncedDataManager, syncContributionPool sync_contribution_pool.SyncContributionPool, test bool) SyncCommitteeMessagesService {
+func NewSyncCommitteeMessagesService(
+	beaconChainCfg *clparams.BeaconChainConfig,
+	ethClock eth_clock.EthereumClock,
+	syncedDataManager *synced_data.SyncedDataManager,
+	syncContributionPool sync_contribution_pool.SyncContributionPool,
+	test bool,
+) SyncCommitteeMessagesService {
 	return &syncCommitteeMessagesService{
 		seenSyncCommitteeMessages: make(map[seenSyncCommitteeMessage]struct{}),
+		ethClock:                  ethClock,
 		syncedDataManager:         syncedDataManager,
 		beaconChainCfg:            beaconChainCfg,
 		syncContributionPool:      syncContributionPool,
@@ -48,7 +57,7 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 		return ErrIgnore
 	}
 	// [IGNORE] The message's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. sync_committee_message.slot == current_slot.
-	if !s.test && !utils.IsCurrentSlotWithMaximumClockDisparity(headState.GenesisTime(), s.beaconChainCfg.SecondsPerSlot, msg.Slot) {
+	if !s.test && !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.Slot) {
 		return nil
 	}
 
