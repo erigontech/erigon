@@ -221,7 +221,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 		}
 	default:
 		txHash := txTask.Tx.Hash()
-		rw.taskGasPool.Reset(txTask.Tx.GetGas())
+		rw.taskGasPool.Reset(txTask.Tx.GetGas(), rw.chainConfig.GetMaxBlobGasPerBlock())
 		rw.callTracer.Reset()
 		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		ibs.SetTxContext(txHash, txTask.BlockHash, txTask.TxIndex)
