@@ -208,7 +208,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 					logger.Error("Error downloading blobs", "err", err)
 				}
 				// set a timer every 1 hour as a failsafe
-				ticker := time.NewTicker(1 * time.Hour)
+				ticker := time.NewTicker(time.Hour)
 				defer ticker.Stop()
 				for {
 					select {
