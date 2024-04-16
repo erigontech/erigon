@@ -633,7 +633,7 @@ func (h *heimdall) batchFetchCheckpoints(
 		page++
 	}
 
-	sort.Sort(&checkpoints)
+	sort.Sort(checkpoints)
 
 	for i, checkpoint := range checkpoints[lastStored:] {
 		err := store.PutCheckpoint(ctx, CheckpointId(i+1), checkpoint)

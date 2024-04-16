@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/clparams/initial_state"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
@@ -22,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/phase1/network/services/mock_services"
 	"github.com/ledgerwatch/erigon/cl/pool"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/ledgerwatch/erigon/cl/validator/validator_params"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/afero"
@@ -62,8 +64,10 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	opPool = pool.NewOperationsPool(&bcfg)
 	fcu.Pool = opPool
 	syncedData = synced_data.NewSyncedDataManager(true, &bcfg)
-	gC := clparams.GenesisConfigs[clparams.MainnetNetwork]
-	blobStorage := blob_storage.NewBlobStore(blobDb, afero.NewMemMapFs(), math.MaxUint64, &bcfg, &gC)
+	genesis, err := initial_state.GetGenesisState(clparams.MainnetNetwork)
+	require.NoError(t, err)
+	ethClock := eth_clock.NewEthereumClock(genesis.GenesisTime(), genesis.GenesisValidatorsRoot(), &bcfg)
+	blobStorage := blob_storage.NewBlobStore(blobDb, afero.NewMemMapFs(), math.MaxUint64, &bcfg, ethClock)
 	blobStorage.WriteBlobSidecars(ctx, firstBlockRoot, []*cltypes.BlobSidecar{
 		{
 			Index:                    0,
@@ -102,7 +106,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	h = NewApiHandler(
 		logger,
 		&clparams.NetworkConfig{},
-		&gC,
+		ethClock,
 		&bcfg,
 		db,
 		fcu,
