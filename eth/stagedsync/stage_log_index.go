@@ -90,6 +90,7 @@ func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	if startBlock > 0 {
 		startBlock++
 	}
+	logger.Info("Starting Promote log index with ", "startBlock", startBlock, "endBlock", endBlock, "pruneTo", pruneTo)
 	if err = promoteLogIndex(logPrefix, tx, startBlock, endBlock, pruneTo, cfg, ctx, logger); err != nil {
 		return err
 	}
@@ -130,7 +131,7 @@ func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64
 	reader := bytes.NewReader(nil)
 
 	if endBlock != 0 && endBlock-start > 100 {
-		logger.Info(fmt.Sprintf("[%s] processing", logPrefix), "from", start, "to", endBlock)
+		logger.Info(fmt.Sprintf("[%s] processing", logPrefix), "from", start, "to", endBlock, "pruneTo", pruneBlock)
 	}
 
 	for k, v, err := logs.Seek(dbutils.LogKey(start, 0)); k != nil; k, v, err = logs.Next() {
@@ -178,10 +179,26 @@ func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64
 			return fmt.Errorf("receipt unmarshal failed: %w, blocl=%d", err, blockNum)
 		}
 
-		for _, l := range ll {
-			if l.BlockNumber < pruneBlock && cfg.noPruneContracts != nil && !cfg.noPruneContracts[l.Address] {
+		toStore := true
+		// if pruning is enabled, and noPruneContracts isn't configured for the chain, don't index
+		if blockNum < pruneBlock {
+			toStore = false
+			if cfg.noPruneContracts == nil{
 				continue
 			}
+			for _, l := range ll {
+				// if any of the log address is in noPrune, store and index all logs for this txId
+				if cfg.noPruneContracts[l.Address]{
+						toStore = true
+						break
+				}
+			}
+		}
+		
+		if !toStore {
+			continue
+		}
+		for _, l := range ll {
 			for _, topic := range l.Topics {
 				topicStr := string(topic.Bytes())
 				m, ok := topics[topicStr]
@@ -477,25 +494,26 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneFrom, prune
 				return fmt.Errorf("receipt unmarshal failed: %w, block=%d", err, binary.BigEndian.Uint64(k))
 			}
 
-			notToPrune := false // To identify whether this log key has addr in noPruneContracts
+			toPrune := true
 			for _, l := range logs {
-				// If any of the logs have an address in noPruneContracts, then the whole tx is related to it, and must not be pruned, including addr and topic indexes
-				if noPruneContracts != nil && noPruneContracts[l.Address] || notToPrune {
-					notToPrune = true
-					continue
+				// No logs (or sublogs) for this txId should be pruned
+				// if one of the logs belongs to noPruneContracts lis
+				if noPruneContracts != nil && noPruneContracts[l.Address] {
+					toPrune = false
+					break
 				}
-				for _, topic := range l.Topics {
-					if err := topics.Collect(topic.Bytes(), nil); err != nil {
+			}
+			if toPrune{
+				for _, l := range logs {
+					for _, topic := range l.Topics {
+						if err := topics.Collect(topic.Bytes(), nil); err != nil {
+							return err
+						}
+					}
+					if err := addrs.Collect(l.Address.Bytes(), nil); err != nil {
 						return err
 					}
 				}
-				if err := addrs.Collect(l.Address.Bytes(), nil); err != nil {
-					return err
-				}
-			}
-			// No logs (or sublogs) for this txId should be pruned
-			// if one of the logs belongs to noPruneContracts list
-			if !notToPrune {
 				pruneLogKeyCollector.Collect(k, nil)
 			}
 		}
