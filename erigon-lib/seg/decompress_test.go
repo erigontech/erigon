@@ -344,8 +344,8 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 
 		d, err := NewDecompressor(file)
 		require.NoError(t, err)
+		require.NotNil(t, d)
 		d.Close()
-
 	})
 
 	t.Run("uncompressed_empty", func(t *testing.T) {
@@ -359,6 +359,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		// this file is empty and its size will be 32 bytes, it's not corrupted
 		d, err := NewDecompressor(file)
 		require.NoError(t, err)
+		require.NotNil(t, d)
 		d.Close()
 	})
 
@@ -377,6 +378,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 
 		d, err := NewDecompressor(file)
 		require.NoError(t, err)
+		require.NotNil(t, d)
 		d.Close()
 
 	})
@@ -391,6 +393,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 
 		d, err := NewDecompressor(file)
 		require.NoError(t, err)
+		require.NotNil(t, d)
 		d.Close()
 	})
 
@@ -406,7 +409,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		_, err := rand.Read(aux)
 		require.NoError(t, err)
 
-		fpath := filepath.Join(tmpDir, "gibberish")
+		fpath := filepath.Join(tmpDir, "1gibberish")
 		err = os.WriteFile(fpath, aux, 0644)
 		require.NoError(t, err)
 
@@ -426,6 +429,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		d, err = NewDecompressor(fpath)
 		require.NoErrorf(t, err, "should read empty but correct file")
 		require.NotNil(t, d)
+		d.Close()
 	})
 	t.Run("invalidPatternDictionarySize", func(t *testing.T) {
 		aux := make([]byte, 32)
@@ -443,7 +447,6 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		require.Truef(t, e1.Is(err),
 			"file contains incorrect pattern dictionary size in bytes, got error %v", err)
 		require.Nil(t, d)
-		d.Close()
 	})
 	t.Run("invalidDictionarySize", func(t *testing.T) {
 		aux := make([]byte, 32)
@@ -461,7 +464,6 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		require.Truef(t, e1.Is(err),
 			"file contains incorrect dictionary size in bytes, got error %v", err)
 		require.Nil(t, d)
-		d.Close()
 	})
 	t.Run("fileSizeShouldBeMinimal", func(t *testing.T) {
 		aux := make([]byte, 33)
@@ -480,7 +482,6 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		require.Truef(t, e1.Is(err),
 			"file contains incorrect dictionary size in bytes, got error %v", err)
 		require.Nil(t, d)
-		d.Close()
 	})
 }
 
