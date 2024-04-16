@@ -38,7 +38,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
@@ -157,17 +156,16 @@ func TestCreateGas(t *testing.T) {
 
 		var stateReader state.StateReader
 		var stateWriter state.StateWriter
-		var domains *state2.SharedDomains
 		var txc wrap.TxContainer
 		txc.Tx = tx
-		if ethconfig.EnableHistoryV4InTest {
-			domains, err = state2.NewSharedDomains(tx, log.New())
-			require.NoError(t, err)
-			defer domains.Close()
-			txc.Doms = domains
-		}
-		stateReader = rpchelper.NewLatestStateReader(tx, ethconfig.EnableHistoryV4InTest)
-		stateWriter = rpchelper.NewLatestStateWriter(txc, 0, ethconfig.EnableHistoryV4InTest)
+
+		domains, err := state2.NewSharedDomains(tx, log.New())
+		require.NoError(t, err)
+		defer domains.Close()
+		txc.Doms = domains
+
+		stateReader = rpchelper.NewLatestStateReader(tx, true)
+		stateWriter = rpchelper.NewLatestStateWriter(txc, 0, true)
 
 		s := state.New(stateReader)
 		s.CreateAccount(address, true)

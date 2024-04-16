@@ -39,7 +39,7 @@ jobs:
         run: sudo apt update && sudo apt install build-essential
 
       - name: test-integration
-        run: make test3-integration
+        run: make test-integration
 
       - name: Test erigon as a library
         env:

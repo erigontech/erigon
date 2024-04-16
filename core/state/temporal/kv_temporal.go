@@ -296,7 +296,7 @@ func (tx *Tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limi
 
 // TODO: need remove `gspec` param (move SystemContractCodeLookup feature somewhere)
 func NewTestDB(tb testing.TB, dirs datadir.Dirs, gspec *types.Genesis) (histV3 bool, db kv.RwDB, agg *state.AggregatorV3) {
-	historyV3 := ethconfig.EnableHistoryV3InTest
+	historyV3 := true
 	logger := log.New()
 
 	if tb != nil {

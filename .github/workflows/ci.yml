@@ -72,7 +72,7 @@ jobs:
         run: make lint
 
       - name: Test
-        run: make test3
+        run: make test
 
   tests-windows:
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
