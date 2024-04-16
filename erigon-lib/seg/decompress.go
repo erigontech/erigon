@@ -447,6 +447,7 @@ func (d *Decompressor) IsOpen() bool {
 }
 
 func (d *Decompressor) Close() {
+	fmt.Printf("closing decompressor %s f=%p\n", d.fileName, d.f)
 	if d.f != nil {
 		if err := mmap.Munmap(d.mmapHandle1, d.mmapHandle2); err != nil {
 			log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", d.FileName(), "stack", dbg.Stack())
