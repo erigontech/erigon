@@ -309,6 +309,8 @@ func NewMultiClient(
 		if err := hd.RecoverFromDb(db); err != nil {
 			return nil, fmt.Errorf("recovery from DB failed: %w", err)
 		}
+	} else {
+		hd = &headerdownload.HeaderDownload{}
 	}
 
 	// body downloader
@@ -321,6 +323,8 @@ func NewMultiClient(
 		}); err != nil {
 			return nil, err
 		}
+	} else {
+		bd = &bodydownload.BodyDownload{}
 	}
 
 	cs := &MultiClient{
