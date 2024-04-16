@@ -197,4 +197,5 @@ var DefaultFlags = []cli.Flag{
 	&utils.DebugLimit,
 	&utils.DebugStep,
 	&utils.DebugStepAfter,
+	&utils.PoolManagerUrl,
 }

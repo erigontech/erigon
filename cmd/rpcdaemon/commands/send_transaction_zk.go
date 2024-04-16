@@ -4,13 +4,18 @@ import (
 	"fmt"
 	"strings"
 
+	"math/big"
+
 	"github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon/zk/sequencer"
 	"github.com/ledgerwatch/erigon/zk/zkchainconfig"
 	"github.com/ledgerwatch/erigon/zkevm/jsonrpc/client"
-	"math/big"
 )
+
+func (api *APIImpl) isPoolManagerAddressSet() bool {
+	return api.PoolManagerUrl != ""
+}
 
 func (api *APIImpl) isZkNonSequencer(chainId *big.Int) bool {
 	return !sequencer.IsSequencer() && zkchainconfig.IsZk(chainId.Uint64())

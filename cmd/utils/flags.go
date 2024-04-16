@@ -42,6 +42,10 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli/v2"
 
+	"encoding/json"
+	"os"
+	"path"
+
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadernat"
 	"github.com/ledgerwatch/erigon/common/paths"
@@ -56,9 +60,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/netutil"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
-	"os"
-	"encoding/json"
-	"path"
 )
 
 // These are all the command line flags we support.
@@ -499,6 +500,11 @@ var (
 		Name:  "zkevm.witness-full",
 		Usage: "Enable/Diable witness full",
 		Value: true,
+	}
+	PoolManagerUrl = cli.StringFlag{
+		Name:  "zkevm.pool-manager-url",
+		Usage: "The URL of the pool manager. If set, eth_sendRawTransaction will be redirected there.",
+		Value: "",
 	}
 	DebugLimit = cli.UintFlag{
 		Name:  "debug.limit",
