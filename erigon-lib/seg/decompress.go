@@ -197,10 +197,11 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 	}
 	d.size = stat.Size()
 	if d.size < compressedMinSize {
-		return nil, &ErrCompressedFileCorrupted{
+		err = &ErrCompressedFileCorrupted{
 			FileName: fName,
 			Reason: fmt.Sprintf("invalid file size %s, expected at least %s",
 				datasize.ByteSize(d.size).HR(), datasize.ByteSize(compressedMinSize).HR())}
+		return nil, err
 	}
 
 	d.modTime = stat.ModTime()
@@ -218,10 +219,11 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 	dictSize := binary.BigEndian.Uint64(d.data[16:pos])
 
 	if pos+dictSize > uint64(d.size) {
-		return nil, &ErrCompressedFileCorrupted{
+		err = &ErrCompressedFileCorrupted{
 			FileName: fName,
 			Reason: fmt.Sprintf("invalid patterns dictSize=%s while file size is just %s",
 				datasize.ByteSize(dictSize).HR(), datasize.ByteSize(d.size).HR())}
+		return nil, err
 	}
 
 	// todo awskii: want to move dictionary reading to separate function?
@@ -235,9 +237,10 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 	for dictPos < dictSize {
 		depth, ns := binary.Uvarint(data[dictPos:])
 		if depth > maxAllowedDepth {
-			return nil, &ErrCompressedFileCorrupted{
+			err = &ErrCompressedFileCorrupted{
 				FileName: fName,
 				Reason:   fmt.Sprintf("depth=%d > patternMaxDepth=%d ", depth, maxAllowedDepth)}
+			return nil, err
 		}
 		depths = append(depths, depth)
 		if depth > patternMaxDepth {
@@ -261,7 +264,8 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 		// fmt.Printf("pattern maxDepth=%d\n", tree.maxDepth)
 		d.dict = newPatternTable(bitLen)
 		if _, err = buildCondensedPatternTable(d.dict, depths, patterns, 0, 0, 0, patternMaxDepth); err != nil {
-			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: err.Error()}
+			err = &ErrCompressedFileCorrupted{FileName: fName, Reason: err.Error()}
+			return nil, err
 		}
 	}
 
@@ -290,7 +294,8 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 	for dictPos < dictSize {
 		depth, ns := binary.Uvarint(data[dictPos:])
 		if depth > maxAllowedDepth {
-			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: fmt.Sprintf("posMaxDepth=%d", depth)}
+			err = &ErrCompressedFileCorrupted{FileName: fName, Reason: fmt.Sprintf("posMaxDepth=%d", depth)}
+			return nil, err
 		}
 		posDepths = append(posDepths, depth)
 		if depth > posMaxDepth {
@@ -318,14 +323,16 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 			ptrs:   make([]*posTable, tableSize),
 		}
 		if _, err = buildPosTable(posDepths, poss, d.posDict, 0, 0, 0, posMaxDepth); err != nil {
-			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: err.Error()}
+			err = &ErrCompressedFileCorrupted{FileName: fName, Reason: err.Error()}
+			return nil, err
 		}
 	}
 	d.wordsStart = pos + dictSize
 
 	if d.Count() == 0 && dictSize == 0 && d.size > compressedMinSize {
-		return nil, &ErrCompressedFileCorrupted{
+		err = &ErrCompressedFileCorrupted{
 			FileName: fName, Reason: fmt.Sprintf("size %v but no words in it", datasize.ByteSize(d.size).HR())}
+		return nil, err
 	}
 	return d, nil
 }

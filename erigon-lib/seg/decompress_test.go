@@ -414,16 +414,14 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		require.NoError(t, err)
 
 		d, err := NewDecompressor(fpath)
-		e1 := &ErrCompressedFileCorrupted{}
-		require.Truef(t, e1.Is(err),
+		require.Truef(t, errors.Is(err, &ErrCompressedFileCorrupted{}),
 			"file is some garbage or smaller compressedMinSize(%d) bytes, got error %v", compressedMinSize, err)
 		require.Nil(t, d)
 
-		aux = make([]byte, compressedMinSize)
-		d.Close()
 		err = os.Remove(fpath)
 		require.NoError(t, err)
 
+		aux = make([]byte, compressedMinSize)
 		err = os.WriteFile(fpath, aux, 0644)
 		require.NoError(t, err)
 
