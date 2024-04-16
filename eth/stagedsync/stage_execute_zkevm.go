@@ -66,12 +66,10 @@ func SpawnExecuteBlocksStageZk(s *StageState, u Unwinder, tx kv.RwTx, toBlock ui
 		defer tx.Rollback()
 	}
 
-	shouldShortCircuit, noProgressTo, err := utils.ShouldShortCircuitExecution(tx)
+	logPrefix := s.LogPrefix()
+	shouldShortCircuit, noProgressTo, err := utils.ShouldShortCircuitExecution(tx, logPrefix)
 	if err != nil {
 		return err
-	}
-	if shouldShortCircuit && cfg.zk.DebugLimit == 0 {
-		return nil
 	}
 
 	prevStageProgress, errStart := stages.GetStageProgress(tx, stages.Senders)
@@ -84,7 +82,6 @@ func SpawnExecuteBlocksStageZk(s *StageState, u Unwinder, tx kv.RwTx, toBlock ui
 	}
 	nextStagesExpectData := nextStageProgress > 0 // Incremental move of next stages depend on fully written ChangeSets, Receipts, CallTraceSet
 
-	logPrefix := s.LogPrefix()
 	var to = prevStageProgress
 	if toBlock > 0 {
 		to = cmp.Min(prevStageProgress, toBlock)
@@ -119,21 +116,6 @@ func SpawnExecuteBlocksStageZk(s *StageState, u Unwinder, tx kv.RwTx, toBlock ui
 		batch.Rollback()
 	}()
 
-	if s.BlockNumber == 0 {
-		to = noProgressTo
-	}
-
-	// limit execution to 100 blocks at a time for faster sync near tip
-	// [TODO] remove it after Interhashes  incremental is optimized
-	total := to - stageProgress
-	if total > cfg.zk.RebuildTreeAfter && total < 100000 {
-		to = stageProgress + cfg.zk.RebuildTreeAfter
-		total = cfg.zk.RebuildTreeAfter
-	}
-	if !quiet && to > s.BlockNumber+16 {
-		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
-	}
-
 	initialBlock := stageProgress + 1
 	eridb := erigon_db.NewErigonDb(tx)
 
@@ -153,6 +135,23 @@ func SpawnExecuteBlocksStageZk(s *StageState, u Unwinder, tx kv.RwTx, toBlock ui
 	prevBlockRoot := header.Root
 	prevBlockHash := prevheaderHash
 
+	if shouldShortCircuit {
+		to = noProgressTo
+	}
+
+	// if debug limit set, use it
+	if cfg.zk.DebugLimit > 0 {
+		if !quiet {
+			log.Info(fmt.Sprintf("[%s] Debug limit set, switching to it", logPrefix), "regularTo", to, "debugTo", cfg.zk.DebugLimit)
+		}
+		to = cfg.zk.DebugLimit
+	}
+
+	total := to - initialBlock
+
+	if !quiet {
+		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
+	}
 Loop:
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
 		stageProgress = blockNum

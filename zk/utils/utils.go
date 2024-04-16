@@ -9,96 +9,51 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func ShouldShortCircuitExecution(tx kv.RwTx) (bool, uint64, error) {
-	intersProgress, err := stages.GetStageProgress(tx, stages.IntermediateHashes)
-	if err != nil {
-		return false, 0, err
-	}
-
+// if current sync is before verified batch - short circuit to verified batch, otherwise to enx of next batch
+// if there is no new fully downloaded batch - do not short circuit
+// returns (shouldShortCircuit, blockNumber, error)
+func ShouldShortCircuitExecution(tx kv.RwTx, logPrefix string) (bool, uint64, error) {
 	hermezDb := hermez_db.NewHermezDb(tx)
 
-	// if there is no inters progress - i.e. first sync, don't skip exec, and execute to the highest block in the highest verified batch that we did download
-	if intersProgress == 0 {
-		highestVerifiedBatchNo, err := stages.GetStageProgress(tx, stages.L1VerificationsBatchNo)
-		if err != nil {
-			return false, 0, err
-		}
-
-		// checking which is the highest batch we downloaded, in some cases
-		// (e.g. on a bad network), we might have not downloaded the highest verified batch yet...
-		highestDownloadedBatchNo, err := hermezDb.GetLatestDownloadedBatchNo()
-		if err != nil {
-			return false, 0, err
-		}
-
-		// if we have a scenario where the L1 has no verified batches then continue on with the
-		// ones we have access to that have already been downloaded
-		if highestVerifiedBatchNo == 0 {
-			max, err := hermezDb.GetHighestBlockInBatch(highestDownloadedBatchNo)
-			if err != nil {
-				return false, 0, err
-			}
-			return false, max, nil
-		}
-
-		batchToCheck := highestVerifiedBatchNo
-
-		// in that case, we want to check up to the last batch we downloaded
-		// (otherwie we have no blocks to return)
-		if highestDownloadedBatchNo < highestVerifiedBatchNo {
-			batchToCheck = highestDownloadedBatchNo
-		}
-
-		// we could find ourselves with a batch with no blocks here, so we want to go back one batch at
-		// a time until we find a batch with blocks
-		max := uint64(0)
-		killSwitch := 0
-		for {
-			max, err = hermezDb.GetHighestBlockInBatch(batchToCheck)
-			if err != nil {
-				return false, 0, err
-			}
-			if max != 0 {
-				break
-			}
-			if batchToCheck == 0 {
-				return false, 0, fmt.Errorf("ran to batch 0 and could not find a verification on L1")
-			}
-			batchToCheck--
-			killSwitch++
-			if killSwitch > 100 {
-				return false, 0, fmt.Errorf("could not find a batch with blocks when checking short circuit")
-			}
-		}
-
-		return false, max, nil
-	}
-
-	highestHashableL2BlockNo, err := stages.GetStageProgress(tx, stages.HighestHashableL2BlockNo)
-	if err != nil {
-		return false, 0, err
-	}
-	highestHashableBatchNo, err := hermezDb.GetBatchNoByL2Block(highestHashableL2BlockNo)
-	if err != nil {
-		return false, 0, err
-	}
-	intersProgressBatchNo, err := hermezDb.GetBatchNoByL2Block(intersProgress)
+	// get highest verified batch
+	highestVerifiedBatchNo, err := stages.GetStageProgress(tx, stages.L1VerificationsBatchNo)
 	if err != nil {
 		return false, 0, err
 	}
 
-	// check to skip execution: 1. there is inters progress, 2. the inters progress is less than the highest hashable, 3. we're in the tip batch range
-	if intersProgress != 0 && intersProgress < highestHashableL2BlockNo && highestHashableBatchNo-intersProgressBatchNo <= 1 {
-		log.Info("[shortCircuit]",
-			"inters", intersProgress,
-			"highestHashableBlock", highestHashableL2BlockNo,
-			"highestHashableBatch", highestHashableBatchNo)
-		return true, highestHashableL2BlockNo, nil
+	// get highest executed batch
+	executedBlock, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return false, 0, err
 	}
 
-	return false, 0, nil
-}
+	executedBatch, err := hermezDb.GetBatchNoByL2Block(executedBlock)
+	if err != nil {
+		return false, 0, err
+	}
 
-func ShouldIncrementInterHashes(tx kv.RwTx) (bool, uint64, error) {
-	return ShouldShortCircuitExecution(tx)
+	downloadedBatch, err := hermezDb.GetLatestDownloadedBatchNo()
+	if err != nil {
+		return false, 0, err
+	}
+
+	var shortCircuitBatch uint64
+	// if executed lower than verified, short curcuit up to verified
+	if executedBatch < highestVerifiedBatchNo {
+		shortCircuitBatch = highestVerifiedBatchNo
+	} else if executedBatch+1 < downloadedBatch { // else short circuit up to next downloaded batch
+		shortCircuitBatch = executedBatch + 1
+	} else { // if we don't have at least one more full downlaoded batch, don't short circuit and just execute to latest block
+		return false, 0, nil
+	}
+
+	// we've got the highest batch to execute to, now get it's highest block
+	shortCircuitBlock, err := hermezDb.GetHighestBlockInBatch(shortCircuitBatch)
+	if err != nil {
+		return false, 0, err
+	}
+
+	log.Info(fmt.Sprintf("[%s] Short circuit", logPrefix), "batch", shortCircuitBatch, "block", shortCircuitBlock)
+
+	return true, shortCircuitBlock, nil
 }
