@@ -15,6 +15,7 @@ import (
 )
 
 func main() {
+	ctx := context.Background()
 	rpcConfig, err := debug_tools.GetConf()
 	if err != nil {
 		log.Error("RPGCOnfig", "err", err)
@@ -28,20 +29,20 @@ func main() {
 	if err != nil {
 		log.Error("rpcClientRemote.Dial", "err", err)
 	}
-	rpcClientLocal, err := ethclient.Dial("http://localhost:8545")
+	rpcClientLocal, err := ethclient.Dial(rpcConfig.LocalUrl)
 	if err != nil {
 		log.Error("rpcClientLocal.Dial", "err", err)
 	}
 
 	blockNum := big.NewInt(rpcConfig.Block)
 	// get local block
-	blockLocal, err := rpcClientRemote.BlockByNumber(context.Background(), blockNum)
+	blockLocal, err := rpcClientLocal.BlockByNumber(ctx, blockNum)
 	if err != nil {
 		log.Error("rpcClientRemote.BlockByNumber", "err", err)
 	}
 
 	// get remote block
-	blockRemote, err := rpcClientLocal.BlockByNumber(context.Background(), blockNum)
+	blockRemote, err := rpcClientRemote.BlockByNumber(ctx, blockNum)
 	if err != nil {
 		log.Error("rpcClientLocal.BlockByNumber", "err", err)
 	}
@@ -70,10 +71,10 @@ func main() {
 	// use the txs on local node since we might be limiting them for debugging purposes \
 	// and those are the ones we want to check
 	for _, txHash := range txHashesLocal {
-		log.Info("----------------------------------------------")
-		log.Info("Comparing tx", "txHash", txHash)
+		log.Warn("----------------------------------------------")
+		log.Warn("Comparing tx", "txHash", txHash)
 
-		localTrace, err := getRpcTrace("http://localhost:8545", txHash)
+		localTrace, err := getRpcTrace(rpcConfig.LocalUrl, txHash)
 		if err != nil {
 			log.Error("Getting localTrace failed:", "err", err)
 			continue
@@ -88,7 +89,7 @@ func main() {
 		if !compareTraces(localTrace, remoteTrace) {
 			log.Warn("traces don't match", "txHash", txHash)
 		}
-		log.Info("----------------------------------------------")
+		log.Warn("----------------------------------------------")
 		// if err = os.Remove("./traces/" + traceFile); err != nil {
 		// 	fmt.Println(err)
 		// }

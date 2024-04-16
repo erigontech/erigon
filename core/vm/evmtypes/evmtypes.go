@@ -3,9 +3,9 @@ package evmtypes
 import (
 	"math/big"
 
-	"github.com/holiman/uint256"
 	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	types2 "github.com/gateway-fm/cdk-erigon-lib/types"
+	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -108,4 +108,6 @@ type IntraBlockState interface {
 	AddLog(*types.Log)
 	AddLog_zkEvm(*types.Log)
 	GetLogs(hash libcommon.Hash) []*types.Log
+	GetBlockStateRoot(blockNum uint64) libcommon.Hash
+	GetBlockNumber() *uint256.Int
 }

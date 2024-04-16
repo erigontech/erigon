@@ -3,9 +3,9 @@ package state
 import (
 	"errors"
 
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/holiman/uint256"
 	"github.com/iden3/go-iden3-crypto/keccak256"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -121,6 +121,12 @@ func (sdb *IntraBlockState) scalableSetBlockNum(blockNum uint64) {
 	sdb.SetState(ADDRESS_SCALABLE_L2, &LAST_BLOCK_STORAGE_POS, *uint256.NewInt(blockNum))
 }
 
+func (sbd *IntraBlockState) GetBlockNumber() *uint256.Int {
+	blockNum := uint256.NewInt(0)
+	sbd.GetState(ADDRESS_SCALABLE_L2, &LAST_BLOCK_STORAGE_POS, blockNum)
+	return blockNum
+}
+
 func (sdb *IntraBlockState) ScalableSetTimestamp(timestamp uint64) {
 	sdb.SetState(ADDRESS_SCALABLE_L2, &TIMESTAMP_STORAGE_POS, *uint256.NewInt(timestamp))
 }
@@ -135,6 +141,16 @@ func (sdb *IntraBlockState) scalableSetBlockHash(blockNum uint64, blockHash *lib
 	hashAsBigU := uint256.NewInt(0).SetBytes(blockHash.Bytes())
 
 	sdb.SetState(ADDRESS_SCALABLE_L2, &mkh, *hashAsBigU)
+}
+
+func (sdb *IntraBlockState) GetBlockStateRoot(blockNum uint64) libcommon.Hash {
+	d1 := common.LeftPadBytes(uint256.NewInt(blockNum).Bytes(), 32)
+	d2 := common.LeftPadBytes(STATE_ROOT_STORAGE_POS.Bytes(), 32)
+	mapKey := keccak256.Hash(d1, d2)
+	mkh := libcommon.BytesToHash(mapKey)
+	hash := uint256.NewInt(0)
+	sdb.GetState(ADDRESS_SCALABLE_L2, &mkh, hash)
+	return libcommon.BytesToHash(hash.Bytes())
 }
 
 func (sdb *IntraBlockState) ScalableSetSmtRootHash(roHermezDb ReadOnlyHermezDb) error {
