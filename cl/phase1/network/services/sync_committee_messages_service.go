@@ -57,8 +57,8 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 		return ErrIgnore
 	}
 	// [IGNORE] The message's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. sync_committee_message.slot == current_slot.
-	if !s.test && !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.Slot) {
-		return nil
+	if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.Slot) {
+		return ErrIgnore
 	}
 
 	// [REJECT] The subnet_id is valid for the given validator, i.e. subnet_id in compute_subnets_for_sync_committee(state, sync_committee_message.validator_index).
@@ -73,15 +73,16 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 		validatorIndex: msg.ValidatorIndex,
 	}
 
+	fmt.Println(subnets, *subnet)
 	if !slices.Contains(subnets, *subnet) {
 		return fmt.Errorf("validator is not into any subnet %d", *subnet)
 	}
 	// [IGNORE] There has been no other valid sync committee message for the declared slot for the validator referenced by sync_committee_message.validator_index.
 	if _, ok := s.seenSyncCommitteeMessages[seenSyncCommitteeMessageIdentifier]; ok {
-		return nil
+		return ErrIgnore
 	}
 	// [REJECT] The signature is valid for the message beacon_block_root for the validator referenced by validator_index
-	if err := verifySyncCommitteeMessageSignature(headState, msg); err != nil {
+	if err := verifySyncCommitteeMessageSignature(headState, msg); !s.test && err != nil {
 		return err
 	}
 	s.seenSyncCommitteeMessages[seenSyncCommitteeMessageIdentifier] = struct{}{}
