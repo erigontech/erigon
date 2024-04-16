@@ -83,7 +83,7 @@ func FinalityDelay(b abstract.BeaconState) uint64 {
 	return PreviousEpoch(b) - b.FinalizedCheckpoint().Epoch()
 }
 
-// Implementation of is_in_inactivity_leak. tells us if network is in danger pretty much. defined in ETH 2.0 specs.
+// InactivityLeaking Implementation of is_in_inactivity_leak. tells us if network is in danger pretty much. defined in ETH 2.0 specs.
 func InactivityLeaking(b abstract.BeaconState) bool {
 	return FinalityDelay(b) > b.BeaconConfig().MinEpochsToInactivityPenalty
 }
@@ -147,7 +147,7 @@ func IsValidIndexedAttestation(b abstract.BeaconStateBasic, att *cltypes.Indexed
 	return true, nil
 }
 
-// getUnslashedParticipatingIndices returns set of currently unslashed participating indexes
+// GetUnslashedParticipatingIndices returns set of currently unslashed participating indexes
 func GetUnslashedParticipatingIndices(b abstract.BeaconState, flagIndex int, epoch uint64) (validatorSet []uint64, err error) {
 	var participation *solid.BitList
 	// Must be either previous or current epoch
@@ -172,24 +172,24 @@ func GetUnslashedParticipatingIndices(b abstract.BeaconState, flagIndex int, epo
 	return
 }
 
-// Implementation of is_eligible_for_activation_queue. Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#is_eligible_for_activation_queue
+// IsValidatorEligibleForActivationQueue Implementation of is_eligible_for_activation_queue. Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#is_eligible_for_activation_queue
 func IsValidatorEligibleForActivationQueue(b abstract.BeaconState, validator solid.Validator) bool {
 	return validator.ActivationEligibilityEpoch() == b.BeaconConfig().FarFutureEpoch &&
 		validator.EffectiveBalance() == b.BeaconConfig().MaxEffectiveBalance
 }
 
-// Implementation of is_eligible_for_activation. Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#is_eligible_for_activation
+// IsValidatorEligibleForActivation Implementation of is_eligible_for_activation. Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#is_eligible_for_activation
 func IsValidatorEligibleForActivation(b abstract.BeaconState, validator solid.Validator) bool {
 	return validator.ActivationEligibilityEpoch() <= b.FinalizedCheckpoint().Epoch() &&
 		validator.ActivationEpoch() == b.BeaconConfig().FarFutureEpoch
 }
 
-// Check whether a merge transition is complete by verifying the presence of a valid execution payload header.
+// IsMergeTransitionComplete Check whether a merge transition is complete by verifying the presence of a valid execution payload header.
 func IsMergeTransitionComplete(b abstract.BeaconState) bool {
 	return !b.LatestExecutionPayloadHeader().IsZero()
 }
 
-// Compute the Unix timestamp at the specified slot number.
+// ComputeTimestampAtSlot Compute the Unix timestamp at the specified slot number.
 func ComputeTimestampAtSlot(b abstract.BeaconState, slot uint64) uint64 {
 	return b.GenesisTime() + (slot-b.BeaconConfig().GenesisSlot)*b.BeaconConfig().SecondsPerSlot
 }
