@@ -420,6 +420,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		require.Nil(t, d)
 
 		aux = make([]byte, compressedMinSize)
+		d.Close()
 		err = os.Remove(fpath)
 		require.NoError(t, err)
 
