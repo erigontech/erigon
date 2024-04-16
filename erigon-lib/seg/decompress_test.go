@@ -380,7 +380,6 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, d)
 		d.Close()
-
 	})
 
 	t.Run("compressed_empty", func(t *testing.T) {
