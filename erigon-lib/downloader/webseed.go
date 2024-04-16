@@ -59,6 +59,8 @@ func (d *WebSeeds) getWebDownloadInfo(ctx context.Context, t *torrent.Torrent) (
 		downloadUrl := webseed.JoinPath(t.Name())
 
 		if headRequest, err := http.NewRequestWithContext(ctx, http.MethodHead, downloadUrl.String(), nil); err == nil {
+			insertCloudflareHeaders(headRequest)
+
 			headResponse, err := http.DefaultClient.Do(headRequest)
 			if err != nil {
 				continue
@@ -205,7 +207,7 @@ func (d *WebSeeds) VerifyManifestedBuckets(ctx context.Context, failFast bool) e
 		fmt.Printf("%s\n", rep.ToString(false))
 	}
 	if failed {
-		merr := fmt.Sprintf("error list:\n")
+		merr := "error list:\n"
 		for _, err := range supErr {
 			merr += fmt.Sprintf("%s\n", err)
 		}
@@ -471,6 +473,9 @@ func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url
 	}
 	u := webSeedProviderUrl.ResolveReference(ref)
 	request, err := http.NewRequest(http.MethodGet, u.String(), nil)
+
+	insertCloudflareHeaders(request)
+
 	if err != nil {
 		return nil, err
 	}
@@ -495,19 +500,24 @@ func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url
 	response := snaptype.WebSeedsFromProvider{}
 	fileNames := strings.Split(string(b), "\n")
 	for fi, f := range fileNames {
-		if strings.TrimSpace(f) == "" {
+		trimmed := strings.TrimSpace(f)
+		switch trimmed {
+		case "":
 			if fi != len(fileNames)-1 {
 				d.logger.Debug("[snapshots.webseed] empty line in manifest.txt", "webseed", webSeedProviderUrl.String(), "lineNum", fi)
 			}
 			continue
-		}
-
-		response[f], err = url.JoinPath(baseUrl, f)
-		if err != nil {
-			return nil, err
+		case "manifest.txt":
+			continue
+		default:
+			response[trimmed], err = url.JoinPath(baseUrl, trimmed)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
-	d.logger.Debug("[snapshots.webseed] get from HTTP provider", "urls", len(response), "url", webSeedProviderUrl.EscapedPath())
+
+	d.logger.Debug("[snapshots.webseed] get from HTTP provider", "manifest-len", len(response), "url", webSeedProviderUrl.String())
 	return response, nil
 }
 
@@ -608,6 +618,9 @@ func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL, fi
 	if err != nil {
 		return nil, err
 	}
+
+	insertCloudflareHeaders(request)
+
 	request = request.WithContext(ctx)
 	resp, err := http.DefaultClient.Do(request)
 	if err != nil {
