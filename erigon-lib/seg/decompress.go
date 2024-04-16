@@ -197,6 +197,7 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 	}
 	d.size = stat.Size()
 	if d.size < compressedMinSize {
+		d.Close()
 		err = &ErrCompressedFileCorrupted{
 			FileName: fName,
 			Reason: fmt.Sprintf("invalid file size %s, expected at least %s",
