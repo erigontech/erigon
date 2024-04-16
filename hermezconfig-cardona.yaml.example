@@ -14,6 +14,10 @@ zkevm.address-admin: "0x32d33D5137a7cFFb54c5Bf8371172bcEc5f310ff"
 zkevm.address-rollup: "0xA13Ddb14437A8F34897131367ad3ca78416d6bCa"
 zkevm.address-ger-manager: "0xAd1490c248c5d3CbAE399Fd529b79B42984277DF"
 
+zkevm.default-gas-price: 1
+zkevm.max-gas-price: 0
+zkevm.gas-price-factor: 0.12
+
 zkevm.l1-rollup-id: 1
 zkevm.l1-matic-contract-address: "0x1850Dd35dE878238fb1dBa7aF7f929303AB6e8E4"
 zkevm.l1-block-range: 20000

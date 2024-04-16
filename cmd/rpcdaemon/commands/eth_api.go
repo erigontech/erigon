@@ -342,6 +342,11 @@ type APIImpl struct {
 	PoolManagerUrl             string
 	AllowFreeTransactions      bool
 	AllowPreEIP155Transactions bool
+	L1RpcUrl                   string
+	DefaultGasPrice            uint64
+	MaxGasPrice                uint64
+	GasPriceFactor             float64
+	L1GasPrice                 L1GasPrice
 }
 
 // NewEthAPI returns APIImpl instance
@@ -363,6 +368,11 @@ func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpoo
 		PoolManagerUrl:             zkConfig.PoolManagerUrl,
 		AllowFreeTransactions:      zkConfig.AllowFreeTransactions,
 		AllowPreEIP155Transactions: zkConfig.AllowPreEIP155Transactions,
+		L1RpcUrl:                   zkConfig.L1RpcUrl,
+		DefaultGasPrice:            zkConfig.DefaultGasPrice,
+		MaxGasPrice:                zkConfig.MaxGasPrice,
+		GasPriceFactor:             zkConfig.GasPriceFactor,
+		L1GasPrice:                 L1GasPrice{},
 	}
 }
 

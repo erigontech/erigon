@@ -496,6 +496,21 @@ var (
 		Usage: "Set the effective gas price in percentage for contract deployment",
 		Value: 1,
 	}
+	DefaultGasPrice = cli.Uint64Flag{
+		Name:  "zkevm.default-gas-price",
+		Usage: "Set the default/min gas price",
+		Value: 0,
+	}
+	MaxGasPrice = cli.Uint64Flag{
+		Name:  "zkevm.max-gas-price",
+		Usage: "Set the max gas price",
+		Value: 0,
+	}
+	GasPriceFactor = cli.Float64Flag{
+		Name:  "zkevm.gas-price-factor",
+		Usage: "Apply factor to L1 gas price to calculate l2 gasPrice",
+		Value: 1,
+	}
 	WitnessFullFlag = cli.BoolFlag{
 		Name:  "zkevm.witness-full",
 		Usage: "Enable/Diable witness full",

@@ -33,6 +33,9 @@ type Zk struct {
 	EffectiveGasPriceForTransfer           uint8
 	EffectiveGasPriceForContractInvocation uint8
 	EffectiveGasPriceForContractDeployment uint8
+	DefaultGasPrice                        uint64
+	MaxGasPrice                            uint64
+	GasPriceFactor                         float64
 
 	RebuildTreeAfter uint64
 	WitnessFull      bool

@@ -115,8 +115,8 @@ func (sdb *IntraBlockState) scalableSetBlockInfoRoot(l1InfoRoot *libcommon.Hash)
 	l1InfoRootBigU := uint256.NewInt(0).SetBytes(l1InfoRoot.Bytes())
 
 	sdb.SetState(ADDRESS_SCALABLE_L2, &BLOCK_INFO_ROOT_STORAGE_POS, *l1InfoRootBigU)
-
 }
+
 func (sdb *IntraBlockState) scalableSetBlockNum(blockNum uint64) {
 	sdb.SetState(ADDRESS_SCALABLE_L2, &LAST_BLOCK_STORAGE_POS, *uint256.NewInt(blockNum))
 }
