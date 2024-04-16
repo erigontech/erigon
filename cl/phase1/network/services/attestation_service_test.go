@@ -22,9 +22,9 @@ var (
 	mockSlot          = uint64(321)
 	mockEpoch         = uint64(10)
 	mockSlotsPerEpoch = uint64(32)
-	attData           = solid.NewAttestionDataFromParameters(uint64(mockSlot), 2, [32]byte{0, 4, 2, 6},
-		solid.NewCheckpointFromParameters([32]byte{1, 0}, uint64(mockEpoch)),
-		solid.NewCheckpointFromParameters([32]byte{1, 0}, uint64(mockEpoch)))
+	attData           = solid.NewAttestionDataFromParameters(mockSlot, 2, [32]byte{0, 4, 2, 6},
+		solid.NewCheckpointFromParameters([32]byte{1, 0}, mockEpoch),
+		solid.NewCheckpointFromParameters([32]byte{1, 0}, mockEpoch))
 
 	att = solid.NewAttestionFromParameters(
 		[]byte{0b00000001},
@@ -198,11 +198,6 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 					return 1
 				}
 				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
-				/*t.mockForkChoice = &forkchoice.ForkChoiceStorageMock{
-					Headers: map[common.Hash]*cltypes.BeaconBlockHeader{
-						att.AttestantionData().BeaconBlockRoot(): &cltypes.BeaconBlockHeader{},
-					},
-				}*/
 			},
 			args: args{
 				ctx:    context.Background(),
