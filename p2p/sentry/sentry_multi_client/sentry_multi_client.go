@@ -314,7 +314,7 @@ func NewMultiClient(
 	// body downloader
 	var bd *bodydownload.BodyDownload
 	if !disableBlockDownload {
-		bd := bodydownload.NewBodyDownload(engine, blockBufferSize, int(syncCfg.BodyCacheLimit), blockReader, logger)
+		bd = bodydownload.NewBodyDownload(engine, blockBufferSize, int(syncCfg.BodyCacheLimit), blockReader, logger)
 		if err := db.View(context.Background(), func(tx kv.Tx) error {
 			_, _, _, _, err := bd.UpdateFromDb(tx)
 			return err
