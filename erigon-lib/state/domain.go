@@ -230,7 +230,7 @@ func (d *Domain) openFiles() (err error) {
 			}
 			if item.decompressor, err = seg.NewDecompressor(datPath); err != nil {
 				d.logger.Debug("Domain.openFiles: %w, %s", err, datPath)
-				if errors.Is(err, seg.ErrCompressedFileCorrupted{}) {
+				if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
 					continue
 				}
 				return false

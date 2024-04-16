@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -442,8 +443,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		require.NoError(t, err)
 
 		d, err := NewDecompressor(fpath)
-		e1 := &ErrCompressedFileCorrupted{}
-		require.Truef(t, e1.Is(err),
+		require.Truef(t, errors.Is(err, &ErrCompressedFileCorrupted{}),
 			"file contains incorrect pattern dictionary size in bytes, got error %v", err)
 		require.Nil(t, d)
 	})
@@ -459,8 +459,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		require.NoError(t, err)
 
 		d, err := NewDecompressor(fpath)
-		e1 := &ErrCompressedFileCorrupted{}
-		require.Truef(t, e1.Is(err),
+		require.Truef(t, errors.Is(err, &ErrCompressedFileCorrupted{}),
 			"file contains incorrect dictionary size in bytes, got error %v", err)
 		require.Nil(t, d)
 	})
@@ -477,8 +476,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		require.NoError(t, err)
 
 		d, err := NewDecompressor(fpath)
-		e1 := &ErrCompressedFileCorrupted{}
-		require.Truef(t, e1.Is(err),
+		require.Truef(t, errors.Is(err, &ErrCompressedFileCorrupted{}),
 			"file contains incorrect dictionary size in bytes, got error %v", err)
 		require.Nil(t, d)
 	})

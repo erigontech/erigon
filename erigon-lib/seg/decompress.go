@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -264,7 +265,7 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 		}
 	}
 
-	if pos != 24 {
+	if assert.Enable && pos != 24 {
 		panic("pos != 24")
 	}
 	pos += dictSize // offset patterns
