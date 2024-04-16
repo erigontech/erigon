@@ -448,6 +448,8 @@ func (d *Decompressor) Close() {
 		}
 		d.f = nil
 		d.data = nil
+		d.posDict = nil
+		d.dict = nil
 	}
 }
 
