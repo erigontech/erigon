@@ -28,10 +28,46 @@ import (
 	gnark "github.com/consensys/gnark-crypto/ecc/bls12-381"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fp"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
-	"github.com/ledgerwatch/erigon/crypto/bls12381"
+	bls12381 "github.com/kilic/bls12-381"
 )
 
-func FuzzCrossPairing(data []byte) int {
+func FuzzG1SubgroupChecks(data []byte) int {
+	input := bytes.NewReader(data)
+	kpG1, cpG1, blG1, err := getG1Points(input)
+	if err != nil {
+		return 0
+	}
+	inSubGroupKilic := bls12381.NewG1().InCorrectSubgroup(kpG1)
+	inSubGroupGnark := cpG1.IsInSubGroup()
+	inSubGroupBLST := blG1.InG1()
+	if inSubGroupKilic != inSubGroupGnark {
+		panic(fmt.Sprintf("differing subgroup check, kilic %v, gnark %v", inSubGroupKilic, inSubGroupGnark))
+	}
+	if inSubGroupKilic != inSubGroupBLST {
+		panic(fmt.Sprintf("differing subgroup check, kilic %v, blst %v", inSubGroupKilic, inSubGroupBLST))
+	}
+	return 1
+}
+
+func FuzzG2SubgroupChecks(data []byte) int {
+	input := bytes.NewReader(data)
+	kpG2, cpG2, blG2, err := getG2Points(input)
+	if err != nil {
+		return 0
+	}
+	inSubGroupKilic := bls12381.NewG2().InCorrectSubgroup(kpG2)
+	inSubGroupGnark := cpG2.IsInSubGroup()
+	inSubGroupBLST := blG2.InG2()
+	if inSubGroupKilic != inSubGroupGnark {
+		panic(fmt.Sprintf("differing subgroup check, kilic %v, gnark %v", inSubGroupKilic, inSubGroupGnark))
+	}
+	if inSubGroupKilic != inSubGroupBLST {
+		panic(fmt.Sprintf("differing subgroup check, kilic %v, blst %v", inSubGroupKilic, inSubGroupBLST))
+	}
+	return 1
+}
+
+func fuzzCrossPairing(data []byte) int {
 	input := bytes.NewReader(data)
 
 	// get random G1 points
@@ -47,7 +83,7 @@ func FuzzCrossPairing(data []byte) int {
 	}
 
 	// compute pairing using geth
-	engine := bls12381.NewPairingEngine()
+	engine := bls12381.NewEngine()
 	engine.AddPair(kpG1, kpG2)
 	kResult := engine.Result()
 
@@ -134,7 +170,7 @@ func FuzzCrossG2Add(data []byte) int {
 func FuzzCrossG1MultiExp(data []byte) int {
 	var (
 		input        = bytes.NewReader(data)
-		gethScalars  []*big.Int
+		gethScalars  []*bls12381.Fr
 		gnarkScalars []fr.Element
 		gethPoints   []*bls12381.PointG1
 		gnarkPoints  []gnark.G1Affine
@@ -151,7 +187,7 @@ func FuzzCrossG1MultiExp(data []byte) int {
 		if err != nil {
 			break
 		}
-		gethScalars = append(gethScalars, s)
+		gethScalars = append(gethScalars, bls12381.NewFr().FromBytes(s.Bytes()))
 		var gnarkScalar = &fr.Element{}
 		gnarkScalar = gnarkScalar.SetBigInt(s).FromMont()
 		gnarkScalars = append(gnarkScalars, *gnarkScalar)
