@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/gossip"
 	"github.com/ledgerwatch/erigon/cl/phase1/network/subnets"
-	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -44,7 +43,7 @@ func (a *ApiHandler) PostEthV1ValidatorSyncCommitteeSubscriptions(w http.Respons
 	var err error
 	// process each sub request
 	for _, subRequest := range req {
-		expiry := utils.GetSlotTime(headState.GenesisTime(), a.beaconChainCfg.SecondsPerSlot, subRequest.UntilEpoch*a.beaconChainCfg.SlotsPerEpoch)
+		expiry := a.ethClock.GetSlotTime(subRequest.UntilEpoch * a.beaconChainCfg.SlotsPerEpoch)
 		if expiry.Before(time.Now()) {
 			continue
 		}

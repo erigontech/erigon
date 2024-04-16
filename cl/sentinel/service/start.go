@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/sentinel"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 
@@ -50,8 +51,16 @@ func getExpirationForTopic(topic string) time.Time {
 	return time.Unix(0, math.MaxInt64)
 }
 
-func createSentinel(cfg *sentinel.SentinelConfig, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, indiciesDB kv.RwDB, forkChoiceReader forkchoice.ForkChoiceStorageReader, validatorTopics bool, logger log.Logger) (*sentinel.Sentinel, error) {
-	sent, err := sentinel.New(context.Background(), cfg, blockReader, blobStorage, indiciesDB, logger, forkChoiceReader)
+func createSentinel(
+	cfg *sentinel.SentinelConfig,
+	blockReader freezeblocks.BeaconSnapshotReader,
+	blobStorage blob_storage.BlobStorage,
+	indiciesDB kv.RwDB,
+	forkChoiceReader forkchoice.ForkChoiceStorageReader,
+	ethClock eth_clock.EthereumClock,
+	validatorTopics bool,
+	logger log.Logger) (*sentinel.Sentinel, error) {
+	sent, err := sentinel.New(context.Background(), cfg, ethClock, blockReader, blobStorage, indiciesDB, logger, forkChoiceReader)
 	if err != nil {
 		return nil, err
 	}
@@ -91,9 +100,17 @@ func createSentinel(cfg *sentinel.SentinelConfig, blockReader freezeblocks.Beaco
 	return sent, nil
 }
 
-func StartSentinelService(cfg *sentinel.SentinelConfig, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, indiciesDB kv.RwDB, srvCfg *ServerConfig, forkChoiceReader forkchoice.ForkChoiceStorageReader, logger log.Logger) (sentinelrpc.SentinelClient, error) {
+func StartSentinelService(
+	cfg *sentinel.SentinelConfig,
+	blockReader freezeblocks.BeaconSnapshotReader,
+	blobStorage blob_storage.BlobStorage,
+	indiciesDB kv.RwDB,
+	srvCfg *ServerConfig,
+	ethClock eth_clock.EthereumClock,
+	forkChoiceReader forkchoice.ForkChoiceStorageReader,
+	logger log.Logger) (sentinelrpc.SentinelClient, error) {
 	ctx := context.Background()
-	sent, err := createSentinel(cfg, blockReader, blobStorage, indiciesDB, forkChoiceReader, srvCfg.Validator, logger)
+	sent, err := createSentinel(cfg, blockReader, blobStorage, indiciesDB, forkChoiceReader, ethClock, srvCfg.Validator, logger)
 	if err != nil {
 		return nil, err
 	}

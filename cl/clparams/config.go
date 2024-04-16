@@ -24,7 +24,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"gopkg.in/yaml.v2"
 
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -142,11 +141,6 @@ type NetworkConfig struct {
 	ContractDeploymentBlock uint64 // the eth1 block in which the deposit contract is deployed.
 	BootNodes               []string
 	StaticPeers             []string
-}
-
-type GenesisConfig struct {
-	GenesisValidatorRoot libcommon.Hash // Merkle Root at Genesis
-	GenesisTime          uint64         // Unix time at Genesis
 }
 
 var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig{
@@ -268,33 +262,6 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		MinimumPeersInSubnetSearch:      20,
 		ContractDeploymentBlock:         155530,
 		BootNodes:                       HoleskyBootstrapNodes,
-	},
-}
-
-var GenesisConfigs map[NetworkType]GenesisConfig = map[NetworkType]GenesisConfig{
-	MainnetNetwork: {
-		GenesisValidatorRoot: libcommon.HexToHash("4b363db94e286120d76eb905340fdd4e54bfe9f06bf33ff6cf5ad27f511bfe95"),
-		GenesisTime:          1606824023,
-	},
-	SepoliaNetwork: {
-		GenesisValidatorRoot: libcommon.HexToHash("d8ea171f3c94aea21ebc42a1ed61052acf3f9209c00e4efbaaddac09ed9b8078"),
-		GenesisTime:          1655733600,
-	},
-	GoerliNetwork: {
-		GenesisValidatorRoot: libcommon.HexToHash("043db0d9a83813551ee2f33450d23797757d430911a9320530ad8a0eabc43efb"),
-		GenesisTime:          1616508000,
-	},
-	GnosisNetwork: {
-		GenesisValidatorRoot: libcommon.HexToHash("f5dcb5564e829aab27264b9becd5dfaa017085611224cb3036f573368dbb9d47"),
-		GenesisTime:          1638993340,
-	},
-	ChiadoNetwork: {
-		GenesisValidatorRoot: libcommon.HexToHash("9d642dac73058fbf39c0ae41ab1e34e4d889043cb199851ded7095bc99eb4c1e"),
-		GenesisTime:          1665396300,
-	},
-	HoleskyNetwork: {
-		GenesisValidatorRoot: libcommon.HexToHash("9143aa7c615a7f7115e2b6aac319c03529df8242ae705fba9df39b79c59fa8b1"),
-		GenesisTime:          1695902400,
 	},
 }
 
@@ -788,18 +755,6 @@ func CustomConfig(configFile string) (BeaconChainConfig, error) {
 	return cfg, err
 }
 
-func ParseGenesisSSZToGenesisConfig(genesisFile string, genesisVersion StateVersion) (GenesisConfig, []byte, error) {
-	cfg := GenesisConfig{}
-	b, err := os.ReadFile(genesisFile) // just pass the file name
-	if err != nil {
-		return GenesisConfig{}, nil, err
-	}
-	// Read first 2 fields of SSZ
-	cfg.GenesisTime = ssz.UnmarshalUint64SSZ(b)
-	copy(cfg.GenesisValidatorRoot[:], b[8:])
-	return cfg, b, nil
-}
-
 func sepoliaConfig() BeaconChainConfig {
 	cfg := MainnetBeaconConfig
 	cfg.MinGenesisTime = 1655647200
@@ -1049,35 +1004,34 @@ func (b *BeaconChainConfig) GetForkEpochByVersion(v StateVersion) uint64 {
 	panic("invalid version")
 }
 
-func GetConfigsByNetwork(net NetworkType) (*GenesisConfig, *NetworkConfig, *BeaconChainConfig) {
+func GetConfigsByNetwork(net NetworkType) (*NetworkConfig, *BeaconChainConfig) {
 	networkConfig := NetworkConfigs[net]
-	genesisConfig := GenesisConfigs[net]
 	beaconConfig := BeaconConfigs[net]
-	return &genesisConfig, &networkConfig, &beaconConfig
+	return &networkConfig, &beaconConfig
 }
 
-func GetConfigsByNetworkName(net string) (*GenesisConfig, *NetworkConfig, *BeaconChainConfig, NetworkType, error) {
+func GetConfigsByNetworkName(net string) (*NetworkConfig, *BeaconChainConfig, NetworkType, error) {
 	switch net {
 	case networkname.MainnetChainName:
-		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(MainnetNetwork)
-		return genesisCfg, networkCfg, beaconCfg, MainnetNetwork, nil
+		networkCfg, beaconCfg := GetConfigsByNetwork(MainnetNetwork)
+		return networkCfg, beaconCfg, MainnetNetwork, nil
 	case networkname.GoerliChainName:
-		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(GoerliNetwork)
-		return genesisCfg, networkCfg, beaconCfg, GoerliNetwork, nil
+		networkCfg, beaconCfg := GetConfigsByNetwork(GoerliNetwork)
+		return networkCfg, beaconCfg, GoerliNetwork, nil
 	case networkname.SepoliaChainName:
-		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(SepoliaNetwork)
-		return genesisCfg, networkCfg, beaconCfg, SepoliaNetwork, nil
+		networkCfg, beaconCfg := GetConfigsByNetwork(SepoliaNetwork)
+		return networkCfg, beaconCfg, SepoliaNetwork, nil
 	case networkname.GnosisChainName:
-		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(GnosisNetwork)
-		return genesisCfg, networkCfg, beaconCfg, GnosisNetwork, nil
+		networkCfg, beaconCfg := GetConfigsByNetwork(GnosisNetwork)
+		return networkCfg, beaconCfg, GnosisNetwork, nil
 	case networkname.ChiadoChainName:
-		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(ChiadoNetwork)
-		return genesisCfg, networkCfg, beaconCfg, ChiadoNetwork, nil
+		networkCfg, beaconCfg := GetConfigsByNetwork(ChiadoNetwork)
+		return networkCfg, beaconCfg, ChiadoNetwork, nil
 	case networkname.HoleskyChainName:
-		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(HoleskyNetwork)
-		return genesisCfg, networkCfg, beaconCfg, HoleskyNetwork, nil
+		networkCfg, beaconCfg := GetConfigsByNetwork(HoleskyNetwork)
+		return networkCfg, beaconCfg, HoleskyNetwork, nil
 	default:
-		return nil, nil, nil, MainnetNetwork, fmt.Errorf("chain not found")
+		return nil, nil, MainnetNetwork, fmt.Errorf("chain not found")
 	}
 }
 
