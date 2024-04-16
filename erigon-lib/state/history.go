@@ -636,7 +636,7 @@ type HistoryCollation struct {
 	efHistoryComp ArchiveWriter
 	historyPath   string
 	efHistoryPath string
-	historyCount  int
+	historyCount  int // same as historyComp.Count()
 }
 
 func (c HistoryCollation) Close() {

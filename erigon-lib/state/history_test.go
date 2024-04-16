@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"math"
 	"sort"
 	"strings"
@@ -81,6 +82,141 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	tb.Cleanup(db.Close)
 	tb.Cleanup(h.Close)
 	return db, h
+}
+
+func TestHistoryCollationsAndBuilds(t *testing.T) {
+	t.Run("largeValues=true", func(t *testing.T) {
+		totalTx := uint64(1000)
+		values := generateTestData(t, length.Addr, length.Addr+length.Hash, totalTx, 100, 10)
+		db, h := filledHistoryValues(t, true, values, log.New())
+		defer db.Close()
+
+		ctx := context.Background()
+		rwtx, err := db.BeginRw(ctx)
+		require.NoError(t, err)
+		defer rwtx.Rollback()
+
+		for i := uint64(0); i < totalTx; i += h.aggregationStep {
+			collation, err := h.collate(ctx, 0, 0, 1000, rwtx)
+			require.NoError(t, err)
+
+			require.NotEmptyf(t, collation.historyPath, "collation.historyPath is empty")
+			require.NotNil(t, collation.historyComp)
+			require.NotEmptyf(t, collation.efHistoryPath, "collation.efHistoryPath is empty")
+			require.NotNil(t, collation.efHistoryComp)
+
+			sf, err := h.buildFiles(ctx, 0, collation, background.NewProgressSet())
+			require.NoError(t, err)
+			require.NotNil(t, sf)
+
+			efReader := NewArchiveGetter(sf.efHistoryDecomp.MakeGetter(), h.compression)
+			hReader := NewArchiveGetter(sf.historyDecomp.MakeGetter(), h.compression)
+
+			// ef contains all sorted keys
+			// for each key it has a list of txNums
+			// h contains all values for all keys ordered by key + txNum
+
+			var keyBuf, valBuf, hValBuf []byte
+			seenKeys := make([]string, 0)
+
+			for efReader.HasNext() {
+				keyBuf, _ = efReader.Next(nil)
+				valBuf, _ = efReader.Next(nil)
+
+				ef, _ := eliasfano32.ReadEliasFano(valBuf)
+				efIt := ef.Iterator()
+
+				require.Contains(t, values, string(keyBuf), "key not found in values")
+				seenKeys = append(seenKeys, string(keyBuf))
+
+				vi := 0
+				updates, ok := values[string(keyBuf)]
+				require.Truef(t, ok, "key not found in values")
+				require.Len(t, updates, int(ef.Count()), "updates count mismatch")
+
+				for efIt.HasNext() {
+					txNum, err := efIt.Next()
+					require.NoError(t, err)
+					require.EqualValuesf(t, updates[vi].txNum, txNum, "txNum mismatch")
+
+					require.Truef(t, hReader.HasNext(), "hReader has no more values")
+					hValBuf, _ = hReader.Next(nil)
+					if updates[vi].value == nil {
+						require.Emptyf(t, hValBuf, "value at %d is not empty (not nil)", vi)
+					} else {
+						require.EqualValuesf(t, updates[vi].value, hValBuf, "value at %d mismatch", vi)
+					}
+					vi++
+				}
+			}
+		}
+	})
+	t.Run("largeValues=false", func(t *testing.T) {
+		totalTx := uint64(1000)
+		values := generateTestData(t, length.Addr, length.Addr+length.Hash, totalTx, 100, 10)
+		db, h := filledHistoryValues(t, false, values, log.New())
+		defer db.Close()
+
+		ctx := context.Background()
+		rwtx, err := db.BeginRw(ctx)
+		require.NoError(t, err)
+		defer rwtx.Rollback()
+
+		for i := uint64(0); i < totalTx; i += h.aggregationStep {
+			collation, err := h.collate(ctx, 0, 0, 1000, rwtx)
+			require.NoError(t, err)
+
+			require.NotEmptyf(t, collation.historyPath, "collation.historyPath is empty")
+			require.NotNil(t, collation.historyComp)
+			require.NotEmptyf(t, collation.efHistoryPath, "collation.efHistoryPath is empty")
+			require.NotNil(t, collation.efHistoryComp)
+
+			sf, err := h.buildFiles(ctx, 0, collation, background.NewProgressSet())
+			require.NoError(t, err)
+			require.NotNil(t, sf)
+
+			efReader := NewArchiveGetter(sf.efHistoryDecomp.MakeGetter(), h.compression)
+			hReader := NewArchiveGetter(sf.historyDecomp.MakeGetter(), h.compression)
+
+			// ef contains all sorted keys
+			// for each key it has a list of txNums
+			// h contains all values for all keys ordered by key + txNum
+
+			var keyBuf, valBuf, hValBuf []byte
+			seenKeys := make([]string, 0)
+
+			for efReader.HasNext() {
+				keyBuf, _ = efReader.Next(nil)
+				valBuf, _ = efReader.Next(nil)
+
+				ef, _ := eliasfano32.ReadEliasFano(valBuf)
+				efIt := ef.Iterator()
+
+				require.Contains(t, values, string(keyBuf), "key not found in values")
+				seenKeys = append(seenKeys, string(keyBuf))
+
+				vi := 0
+				updates, ok := values[string(keyBuf)]
+				require.Truef(t, ok, "key not found in values")
+				require.Len(t, updates, int(ef.Count()), "updates count mismatch")
+
+				for efIt.HasNext() {
+					txNum, err := efIt.Next()
+					require.NoError(t, err)
+					require.EqualValuesf(t, updates[vi].txNum, txNum, "txNum mismatch")
+
+					require.Truef(t, hReader.HasNext(), "hReader has no more values")
+					hValBuf, _ = hReader.Next(nil)
+					if updates[vi].value == nil {
+						require.Emptyf(t, hValBuf, "value at %d is not empty (not nil)", vi)
+					} else {
+						require.EqualValuesf(t, updates[vi].value, hValBuf, "value at %d mismatch", vi)
+					}
+					vi++
+				}
+			}
+		}
+	})
 }
 
 func TestHistoryCollationBuild(t *testing.T) {
@@ -401,6 +537,60 @@ func TestHistoryCanPrune(t *testing.T) {
 			}
 		}
 	})
+}
+
+func filledHistoryValues(tb testing.TB, largeValues bool, values map[string][]upd, logger log.Logger) (kv.RwDB, *History) {
+	tb.Helper()
+
+	for key, upds := range values {
+		upds[0].value = nil // history starts from nil
+		values[key] = upds
+	}
+
+	db, h := testDbAndHistory(tb, largeValues, logger)
+	ctx := context.Background()
+	tx, err := db.BeginRw(ctx)
+	require.NoError(tb, err)
+	defer tx.Rollback()
+	hc := h.BeginFilesRo()
+	defer hc.Close()
+	writer := hc.NewWriter()
+	defer writer.close()
+
+	// keys are encodings of numbers 1..31
+	// each key changes value on every txNum which is multiple of the key
+	var flusher flusher
+	var keyFlushCount, ps = 0, uint64(0)
+	for key, upds := range values {
+		for i := 0; i < len(upds); i++ {
+			writer.SetTxNum(upds[i].txNum)
+			if i > 0 {
+				ps = upds[i].txNum / hc.h.aggregationStep
+			}
+			err = writer.AddPrevValue([]byte(key), nil, upds[i].value, ps)
+			require.NoError(tb, err)
+		}
+		keyFlushCount++
+		if keyFlushCount%10 == 0 {
+			if flusher != nil {
+				err = flusher.Flush(ctx, tx)
+				require.NoError(tb, err)
+				flusher = nil
+			}
+			flusher = writer
+			writer = hc.NewWriter()
+		}
+	}
+	if flusher != nil {
+		err = flusher.Flush(ctx, tx)
+		require.NoError(tb, err)
+	}
+	err = writer.Flush(ctx, tx)
+	require.NoError(tb, err)
+	err = tx.Commit()
+	require.NoError(tb, err)
+
+	return db, h
 }
 
 func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History, uint64) {

@@ -1495,6 +1495,9 @@ func generateUpdates(r *rand.Rand, totalTx, keyTxsLimit uint64) []upd {
 		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
 		value := make([]byte, 10)
 		r.Read(value)
+		if r.Intn(100) > 85 {
+			value = nil
+		}
 
 		updates = append(updates, upd{txNum: txNum, value: value})
 		usedTxNums[txNum] = true
