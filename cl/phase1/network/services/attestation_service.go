@@ -14,11 +14,16 @@ import (
 	"github.com/ledgerwatch/erigon/cl/validator/committee_subscription"
 )
 
+var (
+	computeCommitteeCountPerSlot = subnets.ComputeCommitteeCountPerSlot
+	computeSubnetForAttestation  = subnets.ComputeSubnetForAttestation
+)
+
 type attestationService struct {
 	forkchoiceStore    forkchoice.ForkChoiceStorage
-	committeeSubscribe *committee_subscription.CommitteeSubscribeMgmt
+	committeeSubscribe committee_subscription.CommitteeSubscribe
 	ethClock           eth_clock.EthereumClock
-	syncedDataManager  *synced_data.SyncedDataManager
+	syncedDataManager  synced_data.SyncedData
 	beaconCfg          *clparams.BeaconChainConfig
 	netCfg             *clparams.NetworkConfig
 	// validatorAttestationSeen maps from epoch to validator index. This is used to ignore duplicate validator attestations in the same epoch.
@@ -28,9 +33,9 @@ type attestationService struct {
 
 func NewAttestationService(
 	forkchoiceStore forkchoice.ForkChoiceStorage,
-	committeeSubscribe *committee_subscription.CommitteeSubscribeMgmt,
+	committeeSubscribe committee_subscription.CommitteeSubscribe,
 	ethClock eth_clock.EthereumClock,
-	syncedDataManager *synced_data.SyncedDataManager,
+	syncedDataManager synced_data.SyncedData,
 	beaconCfg *clparams.BeaconChainConfig,
 	netCfg *clparams.NetworkConfig,
 ) AttestationService {
@@ -54,12 +59,12 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		bits           = att.AggregationBits()
 	)
 	// [REJECT] The committee index is within the expected range
-	committeeCount := subnets.ComputeCommitteeCountPerSlot(s.syncedDataManager.HeadState(), slot, s.beaconCfg.SlotsPerEpoch)
+	committeeCount := computeCommitteeCountPerSlot(s.syncedDataManager.HeadState(), slot, s.beaconCfg.SlotsPerEpoch)
 	if committeeIndex >= committeeCount {
 		return fmt.Errorf("committee index out of range")
 	}
 	// [REJECT] The attestation is for the correct subnet -- i.e. compute_subnet_for_attestation(committees_per_slot, attestation.data.slot, index) == subnet_id
-	subnetId := subnets.ComputeSubnetForAttestation(committeeCount, slot, committeeIndex, s.beaconCfg.SlotsPerEpoch, s.netCfg.AttestationSubnetCount)
+	subnetId := computeSubnetForAttestation(committeeCount, slot, committeeIndex, s.beaconCfg.SlotsPerEpoch, s.netCfg.AttestationSubnetCount)
 	if subnet == nil || subnetId != *subnet {
 		return fmt.Errorf("wrong subnet")
 	}
@@ -80,7 +85,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		if bits[i] == 0 {
 			emptyCount++
 		} else if bits[i]&(bits[i]-1) != 0 {
-			return fmt.Errorf("exactly one bit set")
+			return fmt.Errorf("more than one bit set")
 		} else {
 			// find the onBit bit index
 			for onBit := uint(0); onBit < 8; onBit++ {
@@ -92,15 +97,15 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		}
 	}
 	if emptyCount != len(bits)-1 {
-		return fmt.Errorf("exactly one bit set")
+		return fmt.Errorf("no bit set")
 	}
 	// [REJECT] The number of aggregation bits matches the committee size -- i.e. len(aggregation_bits) == len(get_beacon_committee(state, attestation.data.slot, index)).
 	if len(bits)*8 < int(committeeCount) {
-		return fmt.Errorf("aggregation bits mismatch")
+		return fmt.Errorf("aggregation bits count mismatch")
 	}
 
 	// [IGNORE] There has been no other valid attestation seen on an attestation subnet that has an identical attestation.data.target.epoch and participating validator index.
-	committees, err := s.syncedDataManager.HeadState().GetBeaconCommitee(slot, committeeIndex)
+	committees, err := s.forkchoiceStore.GetBeaconCommitee(slot, committeeIndex)
 	if err != nil {
 		return err
 	}
