@@ -271,6 +271,10 @@ type MultiClient struct {
 	sendHeaderRequestsToMultiplePeers bool
 	maxBlockBroadcastPeers            func(*types.Header) uint
 
+	// disableBlockDownload is meant to be used temporarily for astrid until work to
+	// decouple sentry multi client from header and body downloading logic is done
+	disableBlockDownload bool
+
 	historyV3 bool
 	logger    log.Logger
 }
@@ -286,30 +290,37 @@ func NewMultiClient(
 	statusDataProvider *sentry2.StatusDataProvider,
 	logPeerInfo bool,
 	maxBlockBroadcastPeers func(*types.Header) uint,
+	disableBlockDownload bool,
 	logger log.Logger,
 ) (*MultiClient, error) {
 	// header downloader
-	hd := headerdownload.NewHeaderDownload(
-		512,       /* anchorLimit */
-		1024*1024, /* linkLimit */
-		engine,
-		blockReader,
-		logger,
-	)
-	if chainConfig.TerminalTotalDifficultyPassed {
-		hd.SetPOSSync(true)
-	}
-	if err := hd.RecoverFromDb(db); err != nil {
-		return nil, fmt.Errorf("recovery from DB failed: %w", err)
+	var hd *headerdownload.HeaderDownload
+	if !disableBlockDownload {
+		hd = headerdownload.NewHeaderDownload(
+			512,       /* anchorLimit */
+			1024*1024, /* linkLimit */
+			engine,
+			blockReader,
+			logger,
+		)
+		if chainConfig.TerminalTotalDifficultyPassed {
+			hd.SetPOSSync(true)
+		}
+		if err := hd.RecoverFromDb(db); err != nil {
+			return nil, fmt.Errorf("recovery from DB failed: %w", err)
+		}
 	}
 
 	// body downloader
-	bd := bodydownload.NewBodyDownload(engine, blockBufferSize, int(syncCfg.BodyCacheLimit), blockReader, logger)
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		_, _, _, _, err := bd.UpdateFromDb(tx)
-		return err
-	}); err != nil {
-		return nil, err
+	var bd *bodydownload.BodyDownload
+	if !disableBlockDownload {
+		bd := bodydownload.NewBodyDownload(engine, blockBufferSize, int(syncCfg.BodyCacheLimit), blockReader, logger)
+		if err := db.View(context.Background(), func(tx kv.Tx) error {
+			_, _, _, _, err := bd.UpdateFromDb(tx)
+			return err
+		}); err != nil {
+			return nil, err
+		}
 	}
 
 	cs := &MultiClient{
@@ -325,6 +336,7 @@ func NewMultiClient(
 		sendHeaderRequestsToMultiplePeers: chainConfig.TerminalTotalDifficultyPassed,
 		maxBlockBroadcastPeers:            maxBlockBroadcastPeers,
 		historyV3:                         kvcfg.HistoryV3.FromDB(db),
+		disableBlockDownload:              disableBlockDownload,
 		logger:                            logger,
 	}
 
@@ -334,6 +346,10 @@ func NewMultiClient(
 func (cs *MultiClient) Sentries() []direct.SentryClient { return cs.sentries }
 
 func (cs *MultiClient) newBlockHashes66(ctx context.Context, req *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
+	if cs.disableBlockDownload {
+		return nil
+	}
+
 	if cs.Hd.InitialCycle() && !cs.Hd.FetchingNew() {
 		return nil
 	}
@@ -399,6 +415,10 @@ func (cs *MultiClient) blockHeaders66(ctx context.Context, in *proto_sentry.Inbo
 }
 
 func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPacket, rlpStream *rlp.Stream, peerID *proto_types.H512, sentry direct.SentryClient) error {
+	if cs.disableBlockDownload {
+		return nil
+	}
+
 	if len(pkt) == 0 {
 		// No point processing empty response
 		return nil
@@ -474,6 +494,10 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 }
 
 func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
+	if cs.disableBlockDownload {
+		return nil
+	}
+
 	// Extract header from the block
 	rlpStream := rlp.NewStream(bytes.NewReader(inreq.Data), uint64(len(inreq.Data)))
 	_, err := rlpStream.List() // Now stream is at the beginning of the block record
@@ -548,6 +572,10 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 }
 
 func (cs *MultiClient) blockBodies66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
+	if cs.disableBlockDownload {
+		return nil
+	}
+
 	var request eth.BlockRawBodiesPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return fmt.Errorf("decode BlockBodiesPacket66: %w", err)
