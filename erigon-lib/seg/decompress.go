@@ -182,7 +182,7 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("decompressing file: %s, %+v, trace: %s", compressedFilePath, rec, dbg.Stack())
 		}
-		if err != nil || closeDecompressor {
+		if err != nil || closeDecompressor && d != nil {
 			d.Close()
 			d = nil
 		}
