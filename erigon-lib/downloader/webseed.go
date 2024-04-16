@@ -472,7 +472,7 @@ func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url
 		return nil, err
 	}
 	u := webSeedProviderUrl.ResolveReference(ref)
-	request, err := http.NewRequest(http.MethodGet, u.String(), nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 
 	insertCloudflareHeaders(request)
 
@@ -614,7 +614,7 @@ func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL, fi
 	if !strings.HasSuffix(url.Path, ".torrent") {
 		return nil, fmt.Errorf("seems not-torrent url passed: %s", url.String())
 	}
-	request, err := http.NewRequest(http.MethodGet, url.String(), nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url.String(), nil)
 	if err != nil {
 		return nil, err
 	}
