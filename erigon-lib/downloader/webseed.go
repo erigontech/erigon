@@ -454,20 +454,18 @@ func (d *WebSeeds) retrieveFileEtag(ctx context.Context, file *url.URL) (string,
 	if etag == "" {
 		return "", fmt.Errorf("webseed.http: file has no etag, url=%s", file.String())
 	}
-	etag = strings.Trim(etag, "\"")
-	if strings.Contains(etag, "-") {
-		return etag, ErrInvalidEtag
-	}
+	// Todo(awskii): figure out reason why multipart etags contains "-" and remove this check
+	//etag = strings.Trim(etag, "\"")
+	//if strings.Contains(etag, "-") {
+	//	return etag, ErrInvalidEtag
+	//}
 	return etag, nil
 }
 
 func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url.URL) (snaptype.WebSeedsFromProvider, error) {
 	baseUrl := webSeedProviderUrl.String()
-	ref, err := url.Parse("manifest.txt")
-	if err != nil {
-		return nil, err
-	}
-	u := webSeedProviderUrl.ResolveReference(ref)
+	webSeedProviderUrl.Path += "/manifest.txt" // allow: host.com/v2/manifest.txt
+	u := webSeedProviderUrl
 	request, err := http.NewRequest(http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, err

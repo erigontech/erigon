@@ -8,7 +8,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/gossip"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/network/subnets"
-	"github.com/ledgerwatch/erigon/cl/utils"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
@@ -208,7 +207,7 @@ func (f *ForkChoiceStore) OnCheckReceivedAttestation(topic string, att *solid.At
 	}
 	// [IGNORE] attestation.data.slot is within the last ATTESTATION_PROPAGATION_SLOT_RANGE slots (within a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) --
 	// i.e. attestation.data.slot + ATTESTATION_PROPAGATION_SLOT_RANGE >= current_slot >= attestation.data.slot (a client MAY queue future attestations for processing at the appropriate slot).
-	currentSlot := utils.GetCurrentSlot(f.genesisTime, f.beaconCfg.SecondsPerSlot)
+	currentSlot := f.ethClock.GetCurrentSlot()
 	if currentSlot < slot || currentSlot > slot+f.netCfg.AttestationPropagationSlotRange {
 		return fmt.Errorf("not in propagation range %w", ErrIgnore)
 	}
