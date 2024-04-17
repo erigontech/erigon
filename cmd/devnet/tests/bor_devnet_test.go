@@ -6,7 +6,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
@@ -18,9 +17,6 @@ import (
 
 func TestStateSync(t *testing.T) {
 	t.Skip()
-	if ethconfig.EnableHistoryV3InTest {
-		t.Skip("TODO: support E3")
-	}
 
 	runCtx, err := ContextStart(t, networkname.BorDevnetChainName)
 	require.Nil(t, err)

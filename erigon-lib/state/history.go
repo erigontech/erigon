@@ -21,6 +21,7 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"path/filepath"
@@ -219,9 +220,10 @@ func (h *History) openFiles() error {
 					continue
 				}
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
-					_, fName := filepath.Split(fPath)
-					h.logger.Warn("[agg] History.openFiles", "err", err, "f", fName)
-					invalidFileItems = append(invalidFileItems, item)
+					h.logger.Debug("History.openFiles: %w, %s", err, fPath)
+					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
+						continue
+					}
 					// don't interrupt on error. other files may be good. but skip indices open.
 					continue
 				}
