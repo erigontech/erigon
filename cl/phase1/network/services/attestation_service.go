@@ -88,7 +88,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return err
 	}
 	bits := att.AggregationBits()
-	expectedAggregationBitsLength := (len(beaconCommitte) + 7) / 8
+	expectedAggregationBitsLength := len(beaconCommitte)
 	actualAggregationBitsLength := utils.GetBitlistLength(bits)
 	if actualAggregationBitsLength != expectedAggregationBitsLength {
 		return fmt.Errorf("aggregation bits count mismatch: %d != %d", actualAggregationBitsLength, expectedAggregationBitsLength)
@@ -110,7 +110,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	}
 
 	if setBits == 0 {
-		return ErrIgnore
+		return ErrIgnore // Ignore if it is just an empty bitlist
 	}
 	if setBits != 1 {
 		return fmt.Errorf("attestation does not have exactly one participating validator")
