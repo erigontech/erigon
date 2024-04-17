@@ -90,7 +90,6 @@ func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	if startBlock > 0 {
 		startBlock++
 	}
-	logger.Info("Starting Promote log index with ", "startBlock", startBlock, "endBlock", endBlock, "pruneTo", pruneTo)
 	if err = promoteLogIndex(logPrefix, tx, startBlock, endBlock, pruneTo, cfg, ctx, logger); err != nil {
 		return err
 	}
@@ -183,18 +182,18 @@ func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64
 		// if pruning is enabled, and noPruneContracts isn't configured for the chain, don't index
 		if blockNum < pruneBlock {
 			toStore = false
-			if cfg.noPruneContracts == nil{
+			if cfg.noPruneContracts == nil {
 				continue
 			}
 			for _, l := range ll {
 				// if any of the log address is in noPrune, store and index all logs for this txId
-				if cfg.noPruneContracts[l.Address]{
-						toStore = true
-						break
+				if cfg.noPruneContracts[l.Address] {
+					toStore = true
+					break
 				}
 			}
 		}
-		
+
 		if !toStore {
 			continue
 		}
@@ -503,7 +502,7 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneFrom, prune
 					break
 				}
 			}
-			if toPrune{
+			if toPrune {
 				for _, l := range logs {
 					for _, topic := range l.Topics {
 						if err := topics.Collect(topic.Bytes(), nil); err != nil {
