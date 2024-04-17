@@ -206,7 +206,7 @@ func verify(cliCtx *cli.Context) error {
 
 	if rcCli != nil {
 		if src != nil && src.LType == sync.RemoteFs {
-			srcSession, err = rcCli.NewSession(cliCtx.Context, filepath.Join(tempDir, "src"), src.Src+":"+src.Root)
+			srcSession, err = rcCli.NewSession(cliCtx.Context, filepath.Join(tempDir, "src"), src.Src+":"+src.Root, nil)
 
 			if err != nil {
 				return err
@@ -214,7 +214,7 @@ func verify(cliCtx *cli.Context) error {
 		}
 
 		if dst.LType == sync.RemoteFs {
-			dstSession, err = rcCli.NewSession(cliCtx.Context, filepath.Join(tempDir, "dst"), dst.Src+":"+dst.Root)
+			dstSession, err = rcCli.NewSession(cliCtx.Context, filepath.Join(tempDir, "dst"), dst.Src+":"+dst.Root, nil)
 
 			if err != nil {
 				return err

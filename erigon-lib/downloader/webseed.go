@@ -15,7 +15,6 @@ import (
 	"sync"
 
 	"github.com/anacrolix/torrent"
-
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"golang.org/x/sync/errgroup"
@@ -338,7 +337,7 @@ func (d *WebSeeds) constructListsOfFiles(ctx context.Context, httpProviders []*u
 		}
 		// check if we need to prohibit new downloads for some files
 		for name := range manifestResponse {
-			prohibited, err := d.torrentFiles.newDownloadsAreProhibited(name)
+			prohibited, err := d.torrentFiles.NewDownloadsAreProhibited(name)
 			if prohibited || err != nil {
 				delete(manifestResponse, name)
 			}
@@ -356,7 +355,7 @@ func (d *WebSeeds) constructListsOfFiles(ctx context.Context, httpProviders []*u
 		}
 		// check if we need to prohibit new downloads for some files
 		for name := range response {
-			prohibited, err := d.torrentFiles.newDownloadsAreProhibited(name)
+			prohibited, err := d.torrentFiles.NewDownloadsAreProhibited(name)
 			if prohibited || err != nil {
 				delete(response, name)
 			}
@@ -456,20 +455,18 @@ func (d *WebSeeds) retrieveFileEtag(ctx context.Context, file *url.URL) (string,
 	if etag == "" {
 		return "", fmt.Errorf("webseed.http: file has no etag, url=%s", file.String())
 	}
-	etag = strings.Trim(etag, "\"")
-	if strings.Contains(etag, "-") {
-		return etag, ErrInvalidEtag
-	}
+	// Todo(awskii): figure out reason why multipart etags contains "-" and remove this check
+	//etag = strings.Trim(etag, "\"")
+	//if strings.Contains(etag, "-") {
+	//	return etag, ErrInvalidEtag
+	//}
 	return etag, nil
 }
 
 func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url.URL) (snaptype.WebSeedsFromProvider, error) {
 	baseUrl := webSeedProviderUrl.String()
-	ref, err := url.Parse("manifest.txt")
-	if err != nil {
-		return nil, err
-	}
-	u := webSeedProviderUrl.ResolveReference(ref)
+	webSeedProviderUrl.Path += "/manifest.txt" // allow: host.com/v2/manifest.txt
+	u := webSeedProviderUrl
 	request, err := http.NewRequest(http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, err
@@ -576,34 +573,28 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 	return webSeedMap
 }
 
-func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) (bool, error) {
+func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) (ts *torrent.TorrentSpec, ok bool, err error) {
 	urls, ok := d.ByFileName(name)
 	if !ok {
-		return false, nil
+		return nil, false, nil
 	}
 	for _, urlStr := range urls {
 		urlStr += ".torrent"
 		parsedUrl, err := url.Parse(urlStr)
 		if err != nil {
 			d.logger.Log(d.verbosity, "[snapshots] callTorrentHttpProvider parse url", "err", err)
-			continue
+			continue // it's ok if some HTTP provider failed - try next one
 		}
 		res, err := d.callTorrentHttpProvider(ctx, parsedUrl, name)
 		if err != nil {
-			d.logger.Log(d.verbosity, "[snapshots] callTorrentHttpProvider", "name", name, "err", err)
-			continue
-		}
-		if d.torrentFiles.Exists(name) {
-			continue
-		}
-		if err := d.torrentFiles.Create(name, res); err != nil {
 			d.logger.Log(d.verbosity, "[snapshots] .torrent from webseed rejected", "name", name, "err", err)
-			continue
+			continue // it's ok if some HTTP provider failed - try next one
 		}
-		return true, nil
+		ts, _, _, err = d.torrentFiles.CreateIfNotProhibited(name, res)
+		return ts, ts != nil, err
 	}
 
-	return false, nil
+	return nil, false, nil
 }
 
 func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL, fileName string) ([]byte, error) {

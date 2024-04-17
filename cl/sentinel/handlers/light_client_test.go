@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
@@ -59,7 +58,8 @@ func TestLightClientOptimistic(t *testing.T) {
 		NextSyncCommitteeBranch: solid.NewHashVector(8),
 	}
 
-	genesisCfg, _, beaconCfg := clparams.GetConfigsByNetwork(1)
+	ethClock := getEthClock(t)
+	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
 		ctx,
 		beaconDB,
@@ -69,7 +69,7 @@ func TestLightClientOptimistic(t *testing.T) {
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,
-		genesisCfg,
+		ethClock,
 		nil, f, nil, true,
 	)
 	c.Start()
@@ -87,7 +87,7 @@ func TestLightClientOptimistic(t *testing.T) {
 
 	optimistic := &cltypes.LightClientOptimisticUpdate{}
 
-	err = ssz_snappy.DecodeAndRead(stream, optimistic, &clparams.MainnetBeaconConfig, c.genesisConfig.GenesisValidatorRoot)
+	err = ssz_snappy.DecodeAndRead(stream, optimistic, &clparams.MainnetBeaconConfig, ethClock)
 	require.NoError(t, err)
 
 	require.Equal(t, optimistic.AttestedHeader, f.NewestLCUpdate.AttestedHeader)
@@ -127,8 +127,9 @@ func TestLightClientFinality(t *testing.T) {
 		FinalityBranch:          solid.NewHashVector(cltypes.FinalizedBranchSize),
 		NextSyncCommitteeBranch: solid.NewHashVector(cltypes.SyncCommitteeBranchSize),
 	}
+	ethClock := getEthClock(t)
 
-	genesisCfg, _, beaconCfg := clparams.GetConfigsByNetwork(1)
+	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
 		ctx,
 		beaconDB,
@@ -138,7 +139,7 @@ func TestLightClientFinality(t *testing.T) {
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,
-		genesisCfg,
+		ethClock,
 		nil, f, nil, true,
 	)
 	c.Start()
@@ -156,7 +157,7 @@ func TestLightClientFinality(t *testing.T) {
 
 	got := &cltypes.LightClientFinalityUpdate{}
 
-	err = ssz_snappy.DecodeAndRead(stream, got, &clparams.MainnetBeaconConfig, c.genesisConfig.GenesisValidatorRoot)
+	err = ssz_snappy.DecodeAndRead(stream, got, &clparams.MainnetBeaconConfig, ethClock)
 	require.NoError(t, err)
 
 	require.Equal(t, got.AttestedHeader, f.NewestLCUpdate.AttestedHeader)
@@ -168,6 +169,7 @@ func TestLightClientFinality(t *testing.T) {
 
 func TestLightClientBootstrap(t *testing.T) {
 	ctx := context.Background()
+	ethClock := getEthClock(t)
 
 	listenAddrHost := "/ip4/127.0.0.1/tcp/6007"
 	host, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost))
@@ -204,7 +206,7 @@ func TestLightClientBootstrap(t *testing.T) {
 		CurrentSyncCommittee:       &solid.SyncCommittee{1, 2, 3, 5, 6},
 		CurrentSyncCommitteeBranch: solid.NewHashVector(cltypes.SyncCommitteeBranchSize),
 	}
-	genesisCfg, _, beaconCfg := clparams.GetConfigsByNetwork(1)
+	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
 		ctx,
 		beaconDB,
@@ -214,7 +216,7 @@ func TestLightClientBootstrap(t *testing.T) {
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,
-		genesisCfg,
+		ethClock,
 		nil, f, nil, true,
 	)
 	c.Start()
@@ -239,7 +241,7 @@ func TestLightClientBootstrap(t *testing.T) {
 
 	got := &cltypes.LightClientBootstrap{}
 
-	err = ssz_snappy.DecodeAndRead(stream, got, &clparams.MainnetBeaconConfig, c.genesisConfig.GenesisValidatorRoot)
+	err = ssz_snappy.DecodeAndRead(stream, got, &clparams.MainnetBeaconConfig, ethClock)
 	require.NoError(t, err)
 
 	expected := f.LightClientBootstraps[reqRoot]
@@ -269,6 +271,7 @@ func TestLightClientUpdates(t *testing.T) {
 	beaconDB, indiciesDB := setupStore(t)
 
 	f := forkchoice.NewForkChoiceStorageMock()
+	ethClock := getEthClock(t)
 
 	up := &cltypes.LightClientUpdate{
 		AttestedHeader:    cltypes.NewLightClientHeader(clparams.AltairVersion),
@@ -286,7 +289,7 @@ func TestLightClientUpdates(t *testing.T) {
 		upC.SignatureSlot = uint64(i)
 		f.LCUpdates[uint64(i)] = &upC
 	}
-	genesisCfg, _, beaconCfg := clparams.GetConfigsByNetwork(1)
+	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
 		ctx,
 		beaconDB,
@@ -296,7 +299,7 @@ func TestLightClientUpdates(t *testing.T) {
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,
-		genesisCfg,
+		ethClock,
 		nil, f, nil, true,
 	)
 	c.Start()
@@ -353,7 +356,7 @@ func TestLightClientUpdates(t *testing.T) {
 			require.NoError(t, fmt.Errorf("null fork digest"))
 		}
 
-		version, err := fork.ForkDigestVersion(utils.Uint32ToBytes4(respForkDigest), beaconCfg, genesisCfg.GenesisValidatorRoot)
+		version, err := ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
 		if err != nil {
 			require.NoError(t, err)
 		}

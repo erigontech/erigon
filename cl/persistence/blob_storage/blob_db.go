@@ -19,7 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/spf13/afero"
 )
 
@@ -38,12 +38,12 @@ type BlobStore struct {
 	db                kv.RwDB
 	fs                afero.Fs
 	beaconChainConfig *clparams.BeaconChainConfig
-	genesisConfig     *clparams.GenesisConfig
+	ethClock          eth_clock.EthereumClock
 	slotsKept         uint64
 }
 
-func NewBlobStore(db kv.RwDB, fs afero.Fs, slotsKept uint64, beaconChainConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig) BlobStorage {
-	return &BlobStore{fs: fs, db: db, slotsKept: slotsKept, beaconChainConfig: beaconChainConfig, genesisConfig: genesisConfig}
+func NewBlobStore(db kv.RwDB, fs afero.Fs, slotsKept uint64, beaconChainConfig *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock) BlobStorage {
+	return &BlobStore{fs: fs, db: db, slotsKept: slotsKept, beaconChainConfig: beaconChainConfig, ethClock: ethClock}
 }
 
 func blobSidecarFilePath(slot, index uint64, blockRoot libcommon.Hash) (folderpath, filepath string) {
@@ -140,7 +140,7 @@ func (bs *BlobStore) Prune() error {
 		return nil
 	}
 
-	currentSlot := utils.GetCurrentSlot(bs.genesisConfig.GenesisTime, bs.beaconChainConfig.SecondsPerSlot)
+	currentSlot := bs.ethClock.GetCurrentSlot()
 	currentSlot -= bs.slotsKept
 	currentSlot = (currentSlot / subdivisionSlot) * subdivisionSlot
 	var startPrune uint64
@@ -247,11 +247,12 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 		if !cltypes.VerifyCommitmentInclusionProof(sidecar.KzgCommitment, sidecar.CommitmentInclusionProof, sidecar.Index, clparams.DenebVersion, sidecar.SignedBlockHeader.Header.BodyRoot) {
 			return 0, 0, fmt.Errorf("could not verify blob's inclusion proof")
 		}
-		// verify the signature of the sidecar head, we leave this step up to the caller to define
-		if verifySignatureFn(sidecar.SignedBlockHeader); err != nil {
-			return 0, 0, err
+		if verifySignatureFn != nil {
+			// verify the signature of the sidecar head, we leave this step up to the caller to define
+			if verifySignatureFn(sidecar.SignedBlockHeader); err != nil {
+				return 0, 0, err
+			}
 		}
-
 		// if the sidecar is valid, add it to the current payload of sidecars being built.
 		if identifier.BlockRoot != prevBlockRoot {
 			storableSidecars = append(storableSidecars, currentSidecarsPayload)

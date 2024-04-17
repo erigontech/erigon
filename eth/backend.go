@@ -75,6 +75,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format/getters"
 	clcore "github.com/ledgerwatch/erigon/cl/phase1/core"
 	executionclient "github.com/ledgerwatch/erigon/cl/phase1/execution_client"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/ledgerwatch/erigon/cmd/caplin/caplin1"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/erigon/common/debug"
@@ -245,7 +246,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	latestBlockBuiltStore := builder.NewLatestBlockBuiltStore()
 
 	if err := chainKv.Update(context.Background(), func(tx kv.RwTx) error {
-		if err = stagedsync.UpdateMetrics(tx); err != nil {
+		if err = stages.UpdateMetrics(tx); err != nil {
 			return err
 		}
 
@@ -793,7 +794,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	checkStateRoot := true
 	pipelineStages := stages2.NewPipelineStages(ctx, chainKv, config, p2pConfig, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.agg, backend.silkworm, backend.forkValidator, logger, checkStateRoot)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger)
-	backend.eth1ExecutionServer = eth1.NewEthereumExecutionModule(blockReader, chainKv, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.StateChangesConsumer, logger, backend.engine, config.HistoryV3, config.Sync, ctx)
+	backend.eth1ExecutionServer = eth1.NewEthereumExecutionModule(blockReader, chainKv, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.StateChangesConsumer, logger, backend.engine, config.HistoryV3, ctx)
 	executionRpc := direct.NewExecutionClientDirect(backend.eth1ExecutionServer)
 	engineBackendRPC := engineapi.NewEngineServer(
 		logger,
@@ -829,29 +830,30 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	// If we choose not to run a consensus layer, run our embedded.
 	if config.InternalCL && clparams.EmbeddedSupported(config.NetworkID) {
-		genesisCfg, networkCfg, beaconCfg := clparams.GetConfigsByNetwork(clparams.NetworkType(config.NetworkID))
+		networkCfg, beaconCfg := clparams.GetConfigsByNetwork(clparams.NetworkType(config.NetworkID))
 		if err != nil {
 			return nil, err
 		}
-		state, err := clcore.RetrieveBeaconState(ctx, beaconCfg, genesisCfg,
+		state, err := clcore.RetrieveBeaconState(ctx, beaconCfg,
 			clparams.GetCheckpointSyncEndpoint(clparams.NetworkType(config.NetworkID)))
 		if err != nil {
 			return nil, err
 		}
+		ethClock := eth_clock.NewEthereumClock(state.GenesisTime(), state.GenesisValidatorsRoot(), beaconCfg)
 
 		pruneBlobDistance := uint64(128600)
 		if config.CaplinConfig.BlobBackfilling || config.CaplinConfig.BlobPruningDisabled {
 			pruneBlobDistance = math.MaxUint64
 		}
 
-		indiciesDB, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, beaconCfg, genesisCfg, dirs.CaplinIndexing, dirs.CaplinBlobs, executionEngine, false, pruneBlobDistance)
+		indiciesDB, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, beaconCfg, ethClock, dirs.CaplinIndexing, dirs.CaplinBlobs, executionEngine, false, pruneBlobDistance)
 		if err != nil {
 			return nil, err
 		}
 
 		go func() {
 			eth1Getter := getters.NewExecutionSnapshotReader(ctx, beaconCfg, blockReader, backend.chainDB)
-			if err := caplin1.RunCaplinPhase1(ctx, executionEngine, config, networkCfg, beaconCfg, genesisCfg, state, dirs, eth1Getter, backend.downloaderClient, config.CaplinConfig.Backfilling, config.CaplinConfig.BlobBackfilling, config.CaplinConfig.Archive, indiciesDB, blobStorage, creds); err != nil {
+			if err := caplin1.RunCaplinPhase1(ctx, executionEngine, config, networkCfg, beaconCfg, ethClock, state, dirs, eth1Getter, backend.downloaderClient, config.CaplinConfig.Backfilling, config.CaplinConfig.BlobBackfilling, config.CaplinConfig.Archive, indiciesDB, blobStorage, creds); err != nil {
 				logger.Error("could not start caplin", "err", err)
 			}
 			ctxCancel()

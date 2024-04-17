@@ -15,7 +15,8 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/gossip"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/cl/phase1/network/subnets"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 )
 
 var (
@@ -29,13 +30,13 @@ var (
 )
 
 type CommitteeSubscribeMgmt struct {
-	indiciesDB    kv.RoDB
-	genesisConfig *clparams.GenesisConfig
-	beaconConfig  *clparams.BeaconChainConfig
-	netConfig     *clparams.NetworkConfig
-	sentinel      sentinel.SentinelClient
-	state         *state.CachingBeaconState
-	syncedData    *synced_data.SyncedDataManager
+	indiciesDB   kv.RoDB
+	ethClock     eth_clock.EthereumClock
+	beaconConfig *clparams.BeaconChainConfig
+	netConfig    *clparams.NetworkConfig
+	sentinel     sentinel.SentinelClient
+	state        *state.CachingBeaconState
+	syncedData   *synced_data.SyncedDataManager
 	// subscriptions
 	aggregationPool    aggregation.AggregationPool
 	validatorSubsMutex sync.RWMutex
@@ -47,7 +48,7 @@ func NewCommitteeSubscribeManagement(
 	indiciesDB kv.RoDB,
 	beaconConfig *clparams.BeaconChainConfig,
 	netConfig *clparams.NetworkConfig,
-	genesisConfig *clparams.GenesisConfig,
+	ethClock eth_clock.EthereumClock,
 	sentinel sentinel.SentinelClient,
 	state *state.CachingBeaconState,
 	aggregationPool aggregation.AggregationPool,
@@ -57,7 +58,7 @@ func NewCommitteeSubscribeManagement(
 		indiciesDB:      indiciesDB,
 		beaconConfig:    beaconConfig,
 		netConfig:       netConfig,
-		genesisConfig:   genesisConfig,
+		ethClock:        ethClock,
 		sentinel:        sentinel,
 		state:           state,
 		aggregationPool: aggregationPool,
@@ -81,7 +82,8 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 		vIndex = p.ValidatorIndex
 	)
 
-	subnetId := c.computeSubnetId(slot, cIndex)
+	commiteePerSlot := subnets.ComputeCommitteeCountPerSlot(c.syncedData.HeadState(), slot, c.beaconConfig.SlotsPerEpoch)
+	subnetId := subnets.ComputeSubnetForAttestation(commiteePerSlot, slot, cIndex, c.beaconConfig.SlotsPerEpoch, c.netConfig.AttestationSubnetCount)
 	// add validator to subscription
 	c.validatorSubsMutex.Lock()
 	if _, ok := c.validatorSubs[slot]; !ok {
@@ -144,7 +146,7 @@ func (c *CommitteeSubscribeMgmt) sweepByStaleSlots(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			curSlot := utils.GetCurrentSlot(c.genesisConfig.GenesisTime, c.beaconConfig.SecondsPerSlot)
+			curSlot := c.ethClock.GetCurrentSlot()
 			c.validatorSubsMutex.Lock()
 			for slot := range c.validatorSubs {
 				if slotIsStale(curSlot, slot) {
@@ -154,19 +156,4 @@ func (c *CommitteeSubscribeMgmt) sweepByStaleSlots(ctx context.Context) {
 			c.validatorSubsMutex.Unlock()
 		}
 	}
-}
-
-func (c *CommitteeSubscribeMgmt) computeSubnetId(slot uint64, committeeIndex uint64) uint64 {
-	committeePerSlot := c.computeCommitteePerSlot(slot)
-	// slots_since_epoch_start = uint64(slot % SLOTS_PER_EPOCH)
-	// committees_since_epoch_start = committees_per_slot * slots_since_epoch_start
-	// return SubnetID((committees_since_epoch_start + committee_index) % ATTESTATION_SUBNET_COUNT)
-	slotsSinceEpochStart := slot % c.beaconConfig.SlotsPerEpoch
-	committeesSinceEpochStart := committeePerSlot * slotsSinceEpochStart
-	return (committeesSinceEpochStart + committeeIndex) % c.netConfig.AttestationSubnetCount
-}
-
-func (c *CommitteeSubscribeMgmt) computeCommitteePerSlot(slot uint64) uint64 {
-	epoch := slot / c.beaconConfig.SlotsPerEpoch
-	return c.syncedData.HeadState().CommitteeCount(epoch)
 }

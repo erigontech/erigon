@@ -52,19 +52,18 @@ type ForkChoiceStorageReader interface {
 	GetPreviousPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error)
 	GetValidatorSet(blockRoot libcommon.Hash) (*solid.ValidatorSet, error)
 	GetCurrentPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error)
-	GetPublicKeyForValidator(blockRoot libcommon.Hash, idx uint64) (libcommon.Bytes48, error)
+
+	ValidateOnAttestation(attestation *solid.Attestation) error
 }
 
 type ForkChoiceStorageWriter interface {
-	OnAggregateAndProof(aggregateAndProof *cltypes.SignedAggregateAndProof, test bool) error
 	OnAttestation(attestation *solid.Attestation, fromBlock, insert bool) error
 	OnAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing, test bool) error
 	OnVoluntaryExit(signedVoluntaryExit *cltypes.SignedVoluntaryExit, test bool) error
 	OnProposerSlashing(proposerSlashing *cltypes.ProposerSlashing, test bool) error
 	OnBlsToExecutionChange(signedChange *cltypes.SignedBLSToExecutionChange, test bool) error
 	OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload bool, fullValidation bool, checkDataAvaibility bool) error
-	OnSyncCommitteeMessage(msg *cltypes.SyncCommitteeMessage, subnetID uint64) error
-	OnSignedContributionAndProof(signedContribution *cltypes.SignedContributionAndProof, test bool) error
+	AddPreverifiedBlobSidecar(blobSidecar *cltypes.BlobSidecar) error
 	OnTick(time uint64)
 	SetSynced(synced bool)
 }

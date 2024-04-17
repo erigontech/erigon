@@ -42,7 +42,7 @@ func IsTopicSyncCommittee(d string) bool {
 	return strings.Contains(d, "sync_committee_") && !strings.Contains(d, TopicNameSyncCommitteeContributionAndProof)
 }
 func IsTopicBeaconAttestation(d string) bool {
-	return strings.HasPrefix(d, "beacon_attestation_")
+	return strings.Contains(d, "beacon_attestation_")
 }
 
 func SubnetIdFromTopicBeaconAttestation(d string) (uint64, error) {

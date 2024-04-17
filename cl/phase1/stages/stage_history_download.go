@@ -7,18 +7,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
-
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cl/antiquary"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
+	"github.com/ledgerwatch/erigon/cl/phase1/execution_client/block_collector"
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
-	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 
 	"github.com/ledgerwatch/log/v3"
@@ -28,7 +25,6 @@ import (
 )
 
 type StageHistoryReconstructionCfg struct {
-	genesisCfg               *clparams.GenesisConfig
 	beaconCfg                *clparams.BeaconChainConfig
 	downloader               *network.BackwardBeaconDownloader
 	sn                       *freezeblocks.CaplinSnapshots
@@ -42,7 +38,7 @@ type StageHistoryReconstructionCfg struct {
 	engine                   execution_client.ExecutionEngine
 	antiquary                *antiquary.Antiquary
 	logger                   log.Logger
-	executionBlocksCollector *etl.Collector
+	executionBlocksCollector block_collector.BlockCollector
 	backfillingThrottling    time.Duration
 	blockReader              freezeblocks.BeaconSnapshotReader
 	blobStorage              blob_storage.BlobStorage
@@ -50,9 +46,8 @@ type StageHistoryReconstructionCfg struct {
 
 const logIntervalTime = 30 * time.Second
 
-func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, backfilling, blobsBackfilling, waitForAllRoutines bool, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, backfillingThrottling time.Duration, executionBlocksCollector *etl.Collector, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, logger log.Logger) StageHistoryReconstructionCfg {
+func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, beaconCfg *clparams.BeaconChainConfig, backfilling, blobsBackfilling, waitForAllRoutines bool, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, backfillingThrottling time.Duration, executionBlocksCollector block_collector.BlockCollector, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, logger log.Logger) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
-		genesisCfg:               genesisCfg,
 		beaconCfg:                beaconCfg,
 		downloader:               downloader,
 		startingRoot:             startingRoot,
@@ -122,18 +117,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			}
 
 			if !hasELBlock {
-				payloadRoot, err := payload.HashSSZ()
-				if err != nil {
-					return false, fmt.Errorf("error hashing execution payload during download: %s", err)
-				}
-				encodedPayload, err := payload.EncodeSSZ(nil)
-				if err != nil {
-					return false, fmt.Errorf("error encoding execution payload during download: %s", err)
-				}
-				// Use snappy compression that the temporary files do not take too much disk.
-				encodedPayload = utils.CompressSnappy(append([]byte{byte(blk.Version())}, append(blk.Block.ParentRoot[:], encodedPayload...)...))
-				if err := cfg.executionBlocksCollector.Collect(dbutils.BlockBodyKey(payload.BlockNumber, payloadRoot), encodedPayload); err != nil {
-					return false, fmt.Errorf("error collecting execution payload during download: %s", err)
+				if err := cfg.executionBlocksCollector.AddBlock(blk.Block); err != nil {
+					return false, fmt.Errorf("error adding block to execution blocks collector: %s", err)
 				}
 				if currEth1Progress.Load()%100 == 0 {
 					return false, tx.Commit()

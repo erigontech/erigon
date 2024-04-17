@@ -586,7 +586,7 @@ Loop:
 			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, gas, float64(currentStateGas)/float64(gasState), batch, logger, s.BlockNumber, to, startTime)
 			gas = 0
 			txc.Tx.CollectMetrics()
-			syncMetrics[stages.Execution].SetUint64(blockNum)
+			stages.SyncMetrics[stages.Execution].SetUint64(blockNum)
 		}
 	}
 
