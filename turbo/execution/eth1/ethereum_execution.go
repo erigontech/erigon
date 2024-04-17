@@ -261,7 +261,7 @@ func (e *EthereumExecutionModule) processFrozenBlocks(ctx context.Context) error
 			break
 		}
 
-		log.Warn("[dbg] processFrozenBlocks")
+		log.Debug("[sync] processFrozenBlocks", "finStageProgress", finStageProgress, "frozenBlocks", e.blockReader.FrozenBlocks())
 
 		more, err := e.executionPipeline.Run(e.db, wrap.TxContainer{}, true)
 		if err != nil {
