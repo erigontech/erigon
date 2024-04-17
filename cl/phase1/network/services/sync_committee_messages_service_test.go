@@ -41,7 +41,7 @@ func TestSyncCommitteesServiceUnsynced(t *testing.T) {
 	defer ctrl.Finish()
 
 	s, _, _ := setupSyncCommitteesServiceTest(t, ctrl)
-	require.Error(t, s.ProcessMessage(nil, nil, nil))
+	require.Error(t, s.ProcessMessage(context.TODO(), nil, nil))
 }
 
 func TestSyncCommitteesBadTiming(t *testing.T) {
