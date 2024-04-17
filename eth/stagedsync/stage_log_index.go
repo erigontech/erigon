@@ -513,7 +513,9 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneFrom, prune
 						return err
 					}
 				}
-				pruneLogKeyCollector.Collect(k, nil)
+				if err := pruneLogKeyCollector.Collect(k, nil); err != nil {
+					return err
+				}
 			}
 		}
 	}
