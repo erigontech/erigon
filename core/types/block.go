@@ -109,6 +109,8 @@ type Header struct {
 	Verkle        bool
 	VerkleProof   []byte
 	VerkleKeyVals []verkle.KeyValuePair
+
+	DepositsRoot *libcommon.Hash // EIP-6110
 }
 
 func (h *Header) EncodingSize() int {
@@ -169,6 +171,10 @@ func (h *Header) EncodingSize() int {
 			panic(err)
 		}
 		encodingSize += rlp2.ListPrefixLen(tmpBuffer.Len()) + tmpBuffer.Len()
+	}
+
+	if h.DepositsRoot != nil {
+		encodingSize += 33
 	}
 
 	return encodingSize
@@ -317,6 +323,16 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 
 		if err := rlp.Encode(w, h.VerkleKeyVals); err != nil {
 			return nil
+		}
+	}
+
+	if h.DepositsRoot != nil {
+		b[0] = 128 + 32
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+		if _, err := w.Write(h.DepositsRoot.Bytes()); err != nil {
+			return err
 		}
 	}
 
@@ -508,6 +524,23 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		}
 		rlp.DecodeBytes(rawKv, h.VerkleKeyVals)
 	}
+
+	// DepositsRoot hash
+	if b, err = s.Bytes(); err != nil {
+		if errors.Is(err, rlp.EOL) {
+			h.DepositsRoot = nil
+			if err := s.ListEnd(); err != nil {
+				return fmt.Errorf("error closing RLP header DepositsRoot: %w", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("error reading DepositsRoot: %w", err)
+	}
+	if len(b) != 32 {
+		return fmt.Errorf("wrong size for DepositsRoot: %d != 32", len(b))
+	}
+	h.DepositsRoot = new(libcommon.Hash)
+	h.DepositsRoot.SetBytes(b)
 
 	if err := s.ListEnd(); err != nil {
 		return fmt.Errorf("close header struct: %w", err)

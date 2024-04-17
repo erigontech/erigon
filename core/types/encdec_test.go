@@ -82,6 +82,7 @@ func (tr *TRand) RandDeposit() *Deposit {
 func (tr *TRand) RandHeader() *Header {
 	wHash := tr.RandHash()
 	pHash := tr.RandHash()
+	dHash := tr.RandHash()
 	return &Header{
 		ParentHash:            tr.RandHash(),                              // libcommon.Hash
 		UncleHash:             tr.RandHash(),                              // libcommon.Hash
@@ -103,6 +104,7 @@ func (tr *TRand) RandHeader() *Header {
 		BlobGasUsed:           tr.RandUint64(),                            // *uint64
 		ExcessBlobGas:         tr.RandUint64(),                            // *uint64
 		ParentBeaconBlockRoot: &pHash,                                     //*libcommon.Hash
+		DepositsRoot:          &dHash,
 	}
 }
 
@@ -302,6 +304,7 @@ func compareHeaders(t *testing.T, a, b *Header) {
 	check(t, "Header.BlobGasUsed", a.BlobGasUsed, b.BlobGasUsed)
 	check(t, "Header.ExcessBlobGas", a.ExcessBlobGas, b.ExcessBlobGas)
 	check(t, "Header.ParentBeaconBlockRoot", a.ParentBeaconBlockRoot, b.ParentBeaconBlockRoot)
+	check(t, "Header.DepositsRoot", a.DepositsRoot, b.DepositsRoot)
 }
 
 func compareWithdrawals(t *testing.T, a, b *Withdrawal) {

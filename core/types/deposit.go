@@ -148,3 +148,7 @@ func (s Deposits) Len() int { return len(s) }
 func (s Deposits) EncodeIndex(i int, w *bytes.Buffer) {
 	rlp.Encode(w, s[i])
 }
+
+func ComputeTrieRootFromIndexedData(data Deposits) libcommon.Hash {
+	return DeriveSha(data)
+}

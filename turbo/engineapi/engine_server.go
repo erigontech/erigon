@@ -197,6 +197,8 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}, nil
 	}
 
+	// TODO(racytech): check for req.DepositReceipts (eip-6110)
+
 	for _, txn := range req.Transactions {
 		if types.TypedTransactionMarshalledAsRlpString(txn) {
 			s.logger.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", common.Bytes2Hex(txn))
