@@ -21,6 +21,7 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"path/filepath"
@@ -360,6 +361,13 @@ func (d *Domain) openFiles() (err error) {
 					invalidFileItems = append(invalidFileItems, item)
 					invalidFileItemsLock.Unlock()
 					continue
+				}
+				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
+					d.logger.Debug("Domain.openFiles: %w, %s", err, fPath)
+					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
+						continue
+					}
+					return false
 				}
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
