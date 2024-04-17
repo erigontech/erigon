@@ -66,7 +66,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if committeeIndex >= committeeCount {
 		return fmt.Errorf("committee index out of range")
 	}
-	fmt.Println("received", *subnet)
 	// [REJECT] The attestation is for the correct subnet -- i.e. compute_subnet_for_attestation(committees_per_slot, attestation.data.slot, index) == subnet_id
 	subnetId := computeSubnetForAttestation(committeeCount, slot, committeeIndex, s.beaconCfg.SlotsPerEpoch, s.netCfg.AttestationSubnetCount)
 	if subnet == nil || subnetId != *subnet {
