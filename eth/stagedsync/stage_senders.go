@@ -45,12 +45,16 @@ type SendersCfg struct {
 	hd              *headerdownload.HeaderDownload
 	blockReader     services.FullBlockReader
 	loopBreakCheck  func(int) bool
+	limit           uint
 }
 
-func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, loopBreakCheck func(int) bool) SendersCfg {
+func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, limit uint, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, loopBreakCheck func(int) bool) SendersCfg {
 	const sendersBatchSize = 10000
 	const sendersBlockSize = 4096
 
+	if limit == 0 {
+		limit = math.MaxUint64
+	}
 	return SendersCfg{
 		db:              db,
 		batchSize:       sendersBatchSize,
@@ -65,6 +69,7 @@ func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, badBlockHalt bool, tmpd
 		hd:              hd,
 		blockReader:     blockReader,
 		loopBreakCheck:  loopBreakCheck,
+		limit:           limit,
 	}
 }
 
