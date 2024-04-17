@@ -88,7 +88,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	}
 	// [REJECT] The number of aggregation bits matches the committee size -- i.e. len(aggregation_bits) == len(get_beacon_committee(state, attestation.data.slot, index)).
 	if len(bits) != len(beaconCommitte)/8 {
-		return fmt.Errorf("aggregation bits count mismatch")
+		return fmt.Errorf("aggregation bits count mismatch: %d != %d", len(bits), len(beaconCommitte)/8)
 	}
 	fmt.Println(att.AttestantionData().Target().Epoch())
 	//[REJECT] The attestation is unaggregated -- that is, it has exactly one participating validator (len([bit for bit in aggregation_bits if bit]) == 1, i.e. exactly 1 bit is set).
