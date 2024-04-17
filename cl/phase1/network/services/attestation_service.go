@@ -101,7 +101,11 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 			if bits[i]&(1<<uint(j)) != 0 {
 				setBits++
 				onBitIndex = i*8 + j
-				fmt.Println(beaconCommitte[onBitIndex])
+				if onBitIndex >= len(beaconCommitte) {
+					// turn off the bit
+					bits[i] &= ^(1 << uint(j))
+					continue
+				}
 			}
 		}
 	}
