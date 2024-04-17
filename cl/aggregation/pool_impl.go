@@ -71,7 +71,7 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 	if err != nil {
 		return err
 	}
-	if len(merged) > 96 {
+	if len(merged) != 96 {
 		return fmt.Errorf("merged signature is too long")
 	}
 	var mergedSig [96]byte

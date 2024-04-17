@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
@@ -93,6 +94,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 				beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 				return
 			}
+			fmt.Println(subnet)
 			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
 				Data:     encodedSSZ,
 				Name:     gossip.TopicNameBeaconAttestation(subnet),
