@@ -10,9 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
-	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	stages2 "github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -247,43 +245,11 @@ func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx,
 	return nil
 }
 
-// processFrozenBlocks - withuot global rwtx
-func (e *EthereumExecutionModule) processFrozenBlocks(ctx context.Context) error {
-	for {
-		var finStageProgress uint64
-		if err := e.db.View(ctx, func(tx kv.Tx) (err error) {
-			finStageProgress, err = stages2.GetStageProgress(tx, stages2.Finish)
-			return err
-		}); err != nil {
-			return err
-		}
-		if finStageProgress >= e.blockReader.FrozenBlocks() {
-			break
-		}
-
-		log.Debug("[sync] processFrozenBlocks", "finStageProgress", finStageProgress, "frozenBlocks", e.blockReader.FrozenBlocks())
-
-		more, err := e.executionPipeline.Run(e.db, wrap.TxContainer{}, true)
-		if err != nil {
-			return err
-		}
-
-		if err := e.executionPipeline.RunPrune(e.db, nil, true); err != nil {
-			return err
-		}
-
-		if !more {
-			break
-		}
-	}
-	return nil
-}
-
 func (e *EthereumExecutionModule) Start(ctx context.Context) {
 	e.semaphore.Acquire(ctx, 1)
 	defer e.semaphore.Release(1)
 
-	if err := e.processFrozenBlocks(ctx); err != nil {
+	if err := stages.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			e.logger.Error("Could not start execution service", "err", err)
 		}
