@@ -21,6 +21,7 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"path/filepath"
@@ -216,7 +217,10 @@ func (h *History) openFiles() error {
 				continue
 			}
 			if item.decompressor, err = seg.NewDecompressor(datPath); err != nil {
-				h.logger.Debug("Hisrory.openFiles: %w, %s", err, datPath)
+				h.logger.Debug("History.openFiles: %w, %s", err, datPath)
+				if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
+					continue
+				}
 				return false
 			}
 
