@@ -93,8 +93,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	att.SetAggregationBits(att.AggregationBits()[:len(beaconCommitte)/8])
 
 	bits := att.AggregationBits()
-
-	fmt.Println(att.AttestantionData().Target().Epoch())
 	//[REJECT] The attestation is unaggregated -- that is, it has exactly one participating validator (len([bit for bit in aggregation_bits if bit]) == 1, i.e. exactly 1 bit is set).
 	setBits := 0
 	onBitIndex := 0 // Aggregationbits is []byte, so we need to iterate over all bits.
@@ -102,7 +100,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		for j := 0; j < 8; j++ {
 			if bits[i]&(1<<uint(j)) != 0 {
 				setBits++
-				fmt.Println(i, j)
 				onBitIndex = i*8 + j
 			}
 		}

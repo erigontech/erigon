@@ -66,7 +66,13 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 	}
 	failures := []poolingFailure{}
 	for i, attestation := range req {
-		if err := a.forkchoiceStore.ValidateOnAttestation(attestation); err != nil {
+		var (
+			slot                  = attestation.AttestantionData().Slot()
+			cIndex                = attestation.AttestantionData().CommitteeIndex()
+			committeeCountPerSlot = subnets.ComputeCommitteeCountPerSlot(a.syncedData.HeadState(), slot, a.beaconChainCfg.SlotsPerEpoch)
+			subnet                = subnets.ComputeSubnetForAttestation(committeeCountPerSlot, slot, cIndex, a.beaconChainCfg.SlotsPerEpoch, a.netConfig.AttestationSubnetCount)
+		)
+		if err := a.attestationService.ProcessMessage(r.Context(), &subnet, attestation); err != nil {
 			failures = append(failures, poolingFailure{
 				Index:   i,
 				Message: err.Error(),
@@ -81,13 +87,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 			continue
 		}
 		if a.sentinel != nil {
-			// broadcast
-			var (
-				slot                  = attestation.AttestantionData().Slot()
-				cIndex                = attestation.AttestantionData().CommitteeIndex()
-				committeeCountPerSlot = subnets.ComputeCommitteeCountPerSlot(a.syncedData.HeadState(), slot, a.beaconChainCfg.SlotsPerEpoch)
-				subnet                = subnets.ComputeSubnetForAttestation(committeeCountPerSlot, slot, cIndex, a.beaconChainCfg.SlotsPerEpoch, a.netConfig.AttestationSubnetCount)
-			)
+
 			encodedSSZ, err := attestation.EncodeSSZ(nil)
 			if err != nil {
 				beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
