@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
@@ -61,7 +62,17 @@ func (a *ApiHandler) GetEthV1BeaconPoolAttestations(w http.ResponseWriter, r *ht
 
 func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *http.Request) {
 	req := []*solid.Attestation{}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	buf, err := io.ReadAll(r.Body)
+	if err != nil {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+		return
+	}
+	fmt.Println(string(buf))
+	// if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	// 	beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+	// 	return
+	// }
+	if err := json.Unmarshal(buf, &req); err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
