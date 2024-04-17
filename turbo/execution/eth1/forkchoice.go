@@ -124,7 +124,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				return err
 			}
 			if e.blockReader.FrozenBlocks() > finStageProgress {
-				log.Warn("[dbg] last frozen blocks handle")
 				return e.processAllBlocksInSnapshots(ctx)
 			}
 			return nil

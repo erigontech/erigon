@@ -260,6 +260,8 @@ func (e *EthereumExecutionModule) processAllBlocksInSnapshots(ctx context.Contex
 			break
 		}
 
+		log.Warn("[dbg] processAllBlocksInSnapshots")
+
 		more, err := e.executionPipeline.Run(e.db, wrap.TxContainer{}, true)
 		if err != nil {
 			return err
