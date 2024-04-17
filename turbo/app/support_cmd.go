@@ -37,13 +37,17 @@ var wsBufferPool = new(sync.Pool)
 
 var (
 	diagnosticsURLFlag = cli.StringFlag{
-		Name:  "diagnostics.addr",
-		Usage: "Address of the diagnostics system provided by the support team, include unique session PIN",
+		Name:     "diagnostics.addr",
+		Usage:    "Address of the diagnostics system provided by the support team, include unique session PIN",
+		Required: false,
+		Value:    "localhost:8080",
 	}
 
 	debugURLsFlag = cli.StringSliceFlag{
-		Name:  "debug.addrs",
-		Usage: "Comma separated list of URLs to the debug endpoints thats are being diagnosed",
+		Name:     "debug.addrs",
+		Usage:    "Comma separated list of URLs to the debug endpoints thats are being diagnosed",
+		Required: false,
+		Value:    cli.NewStringSlice("localhost:6060"),
 	}
 
 	insecureFlag = cli.BoolFlag{

@@ -42,6 +42,7 @@ type GossipManager struct {
 	syncCommitteeMessagesService services.SyncCommitteeMessagesService
 	syncContributionService      services.SyncContributionService
 	aggregateAndProofService     services.AggregateAndProofService
+	attestationService           services.AttestationService
 }
 
 func NewGossipReceiver(
@@ -56,6 +57,7 @@ func NewGossipReceiver(
 	syncCommitteeMessagesService services.SyncCommitteeMessagesService,
 	syncContributionService services.SyncContributionService,
 	aggregateAndProofService services.AggregateAndProofService,
+	attestationService services.AttestationService,
 ) *GossipManager {
 	return &GossipManager{
 		sentinel:                     s,
@@ -69,6 +71,7 @@ func NewGossipReceiver(
 		syncCommitteeMessagesService: syncCommitteeMessagesService,
 		syncContributionService:      syncContributionService,
 		aggregateAndProofService:     aggregateAndProofService,
+		attestationService:           attestationService,
 	}
 }
 
@@ -177,18 +180,9 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		case gossip.IsTopicBeaconAttestation(data.Name):
 			att := &solid.Attestation{}
 			if err := att.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
-				g.sentinel.BanPeer(ctx, data.Peer)
 				return err
 			}
-			if err := g.forkChoice.OnCheckReceivedAttestation(data.Name, att); err != nil {
-				log.Debug("failed to check attestation", "err", err)
-				if errors.Is(err, forkchoice.ErrIgnore) {
-					return nil
-				}
-				return err
-			}
-			// check if it needs to be aggregated
-			return g.committeeSub.CheckAggregateAttestation(att)
+			return g.attestationService.ProcessMessage(ctx, data.SubnetId, att)
 		default:
 			return fmt.Errorf("unknown topic %s", data.Name)
 		}
