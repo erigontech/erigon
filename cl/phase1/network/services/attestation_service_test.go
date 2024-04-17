@@ -249,7 +249,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
 				t.mockForkChoice = &forkchoice.ForkChoiceStorageMock{
 					Headers: map[common.Hash]*cltypes.BeaconBlockHeader{
-						att.AttestantionData().BeaconBlockRoot(): &cltypes.BeaconBlockHeader{},
+						att.AttestantionData().BeaconBlockRoot(): {},
 					},
 					Ancestors: map[uint64]common.Hash{
 						10 * mockSlotsPerEpoch: att.AttestantionData().Target().BlockRoot(),
@@ -284,7 +284,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
 				t.mockForkChoice = &forkchoice.ForkChoiceStorageMock{
 					Headers: map[common.Hash]*cltypes.BeaconBlockHeader{
-						att.AttestantionData().BeaconBlockRoot(): &cltypes.BeaconBlockHeader{},
+						att.AttestantionData().BeaconBlockRoot(): {},
 					},
 					Ancestors: map[uint64]common.Hash{
 						10 * mockSlotsPerEpoch: att.AttestantionData().Target().BlockRoot(),
