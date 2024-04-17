@@ -290,6 +290,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 			syncCommitteeMessagesService,
 			syncContributionService,
 			aggregateAndProofService,
+			attestationService,
 		)
 		go beacon.ListenAndServe(&beacon.LayeredBeaconHandler{
 			ArchiveApi: apiHandler,
