@@ -107,8 +107,10 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 			}
 		}
 	}
-	fmt.Println(bits)
-	fmt.Println(setBits)
+
+	if setBits == 0 {
+		return ErrIgnore
+	}
 	if setBits != 1 {
 		return fmt.Errorf("attestation does not have exactly one participating validator")
 	}
