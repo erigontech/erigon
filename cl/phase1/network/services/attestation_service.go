@@ -87,11 +87,10 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if err != nil {
 		return err
 	}
-	if len(att.AggregationBits()) < len(beaconCommitte)/8 {
+	expectedAggregationBitsLength := (len(beaconCommitte) + 7) / 8
+	if len(att.AggregationBits()) < expectedAggregationBitsLength {
 		return fmt.Errorf("aggregation bits count mismatch: %d != %d", len(att.AggregationBits()), len(beaconCommitte)/8)
 	}
-	// we need to ignore all data subsequent to the first bit.
-	att.SetAggregationBits(att.AggregationBits()[:len(beaconCommitte)/8])
 
 	bits := att.AggregationBits()
 	//[REJECT] The attestation is unaggregated -- that is, it has exactly one participating validator (len([bit for bit in aggregation_bits if bit]) == 1, i.e. exactly 1 bit is set).
