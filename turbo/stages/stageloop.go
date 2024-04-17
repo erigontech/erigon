@@ -114,7 +114,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.F
 			break
 		}
 
-		log.Debug("[sync] processFrozenBlocks", "finStageProgress", finStageProgress, "frozenBlocks", e.blockReader.FrozenBlocks())
+		log.Debug("[sync] processFrozenBlocks", "finStageProgress", finStageProgress, "frozenBlocks", blockReader.FrozenBlocks())
 
 		more, err := sync.Run(db, wrap.TxContainer{}, true)
 		if err != nil {
