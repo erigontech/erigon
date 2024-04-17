@@ -81,19 +81,19 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Me
 }
 
 func (stx *BlobTx) Sender(signer Signer) (libcommon.Address, error) {
-	if sc := stx.from.Load(); sc != nil {
+	if sc := stx.LoadFrom(); sc != nil {
 		return sc.(libcommon.Address), nil
 	}
 	addr, err := signer.Sender(stx)
 	if err != nil {
 		return libcommon.Address{}, err
 	}
-	stx.from.Store(addr)
+	stx.StoreFrom(addr)
 	return addr, nil
 }
 
 func (stx *BlobTx) Hash() libcommon.Hash {
-	if hash := stx.hash.Load(); hash != nil {
+	if hash := stx.LoadHash(); hash != nil {
 		return *hash.(*libcommon.Hash)
 	}
 	hash := prefixedRlpHash(BlobTxType, []interface{}{
@@ -110,7 +110,7 @@ func (stx *BlobTx) Hash() libcommon.Hash {
 		stx.BlobVersionedHashes,
 		stx.V, stx.R, stx.S,
 	})
-	stx.hash.Store(&hash)
+	stx.StoreHash(&hash)
 	return hash
 }
 

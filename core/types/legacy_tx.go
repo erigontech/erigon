@@ -33,7 +33,7 @@ import (
 )
 
 type CommonTx struct {
-	TransactionMisc
+	*TransactionMisc
 
 	Nonce   uint64             // nonce of sender account
 	Gas     uint64             // gas limit
@@ -67,15 +67,41 @@ func (ct *CommonTx) GetData() []byte {
 	return ct.Data
 }
 
+func (ct *CommonTx) initializeMisc() {
+	if ct.TransactionMisc == nil {
+		ct.TransactionMisc = &TransactionMisc{}
+	}
+}
+
+func (ct *CommonTx) LoadHash() any {
+	ct.initializeMisc()
+	return ct.hash.Load()
+}
+
+func (ct *CommonTx) StoreHash(val any) {
+	ct.initializeMisc()
+	ct.hash.Store(val)
+}
+
+func (ct *CommonTx) LoadFrom() any {
+	ct.initializeMisc()
+	return ct.from.Load()
+}
+
+func (ct *CommonTx) StoreFrom(val any) {
+	ct.initializeMisc()
+	ct.from.Store(val)
+}
+
 func (ct *CommonTx) GetSender() (libcommon.Address, bool) {
-	if sc := ct.from.Load(); sc != nil {
+	if sc := ct.LoadFrom(); sc != nil {
 		return sc.(libcommon.Address), true
 	}
 	return libcommon.Address{}, false
 }
 
 func (ct *CommonTx) SetSender(addr libcommon.Address) {
-	ct.from.Store(addr)
+	ct.StoreFrom(addr)
 }
 
 func (ct *CommonTx) Protected() bool {
@@ -162,7 +188,7 @@ func NewContractCreation(nonce uint64, amount *uint256.Int, gasLimit uint64, gas
 func (tx *LegacyTx) copy() *LegacyTx {
 	cpy := &LegacyTx{
 		CommonTx: CommonTx{
-			TransactionMisc: TransactionMisc{},
+			TransactionMisc: &TransactionMisc{},
 			Nonce:           tx.Nonce,
 			To:              tx.To, // TODO: copy pointed-to address
 			Data:            libcommon.CopyBytes(tx.Data),
@@ -376,13 +402,13 @@ func (tx *LegacyTx) FakeSign(address libcommon.Address) (Transaction, error) {
 	cpy.R.Set(u256.Num1)
 	cpy.S.Set(u256.Num1)
 	cpy.V.Set(u256.Num4)
-	cpy.from.Store(address)
+	cpy.StoreFrom(address)
 	return cpy, nil
 }
 
 // Hash computes the hash (but not for signatures!)
 func (tx *LegacyTx) Hash() libcommon.Hash {
-	if hash := tx.hash.Load(); hash != nil {
+	if hash := tx.LoadHash(); hash != nil {
 		return *hash.(*libcommon.Hash)
 	}
 	hash := rlpHash([]interface{}{
@@ -394,7 +420,7 @@ func (tx *LegacyTx) Hash() libcommon.Hash {
 		tx.Data,
 		tx.V, tx.R, tx.S,
 	})
-	tx.hash.Store(&hash)
+	tx.StoreHash(&hash)
 	return hash
 }
 
@@ -431,13 +457,13 @@ func (tx *LegacyTx) GetChainID() *uint256.Int {
 }
 
 func (tx *LegacyTx) Sender(signer Signer) (libcommon.Address, error) {
-	if sc := tx.from.Load(); sc != nil {
+	if sc := tx.LoadFrom(); sc != nil {
 		return sc.(libcommon.Address), nil
 	}
 	addr, err := signer.Sender(tx)
 	if err != nil {
 		return libcommon.Address{}, err
 	}
-	tx.from.Store(addr)
+	tx.StoreFrom(addr)
 	return addr, nil
 }

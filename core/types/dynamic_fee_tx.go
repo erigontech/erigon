@@ -69,7 +69,7 @@ func (tx *DynamicFeeTransaction) Unwrap() Transaction {
 func (tx *DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 	cpy := &DynamicFeeTransaction{
 		CommonTx: CommonTx{
-			TransactionMisc: TransactionMisc{},
+			TransactionMisc: &TransactionMisc{},
 			Nonce:           tx.Nonce,
 			To:              tx.To, // TODO: copy pointed-to address
 			Data:            libcommon.CopyBytes(tx.Data),
@@ -172,7 +172,7 @@ func (tx *DynamicFeeTransaction) FakeSign(address libcommon.Address) (Transactio
 	cpy.R.Set(u256.Num1)
 	cpy.S.Set(u256.Num1)
 	cpy.V.Set(u256.Num4)
-	cpy.from.Store(address)
+	cpy.StoreFrom(address)
 	return cpy, nil
 }
 
@@ -380,7 +380,7 @@ func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *ch
 
 // Hash computes the hash (but not for signatures!)
 func (tx *DynamicFeeTransaction) Hash() libcommon.Hash {
-	if hash := tx.hash.Load(); hash != nil {
+	if hash := tx.LoadHash(); hash != nil {
 		return *hash.(*libcommon.Hash)
 	}
 	hash := prefixedRlpHash(DynamicFeeTxType, []interface{}{
@@ -395,7 +395,7 @@ func (tx *DynamicFeeTransaction) Hash() libcommon.Hash {
 		tx.AccessList,
 		tx.V, tx.R, tx.S,
 	})
-	tx.hash.Store(&hash)
+	tx.StoreHash(&hash)
 	return hash
 }
 
@@ -427,14 +427,14 @@ func (tx *DynamicFeeTransaction) GetChainID() *uint256.Int {
 }
 
 func (tx *DynamicFeeTransaction) Sender(signer Signer) (libcommon.Address, error) {
-	if sc := tx.from.Load(); sc != nil {
+	if sc := tx.LoadFrom(); sc != nil {
 		return sc.(libcommon.Address), nil
 	}
 	addr, err := signer.Sender(tx)
 	if err != nil {
 		return libcommon.Address{}, err
 	}
-	tx.from.Store(addr)
+	tx.StoreFrom(addr)
 	return addr, nil
 }
 

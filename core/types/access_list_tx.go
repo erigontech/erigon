@@ -47,7 +47,7 @@ func (tx *AccessListTx) copy() *AccessListTx {
 	cpy := &AccessListTx{
 		LegacyTx: LegacyTx{
 			CommonTx: CommonTx{
-				TransactionMisc: TransactionMisc{},
+				TransactionMisc: &TransactionMisc{},
 				Nonce:           tx.Nonce,
 				To:              tx.To, // TODO: copy pointed-to address
 				Data:            libcommon.CopyBytes(tx.Data),
@@ -455,13 +455,13 @@ func (tx *AccessListTx) FakeSign(address libcommon.Address) (Transaction, error)
 	cpy.R.Set(u256.Num1)
 	cpy.S.Set(u256.Num1)
 	cpy.V.Set(u256.Num4)
-	cpy.from.Store(address)
+	cpy.StoreFrom(address)
 	return cpy, nil
 }
 
 // Hash computes the hash (but not for signatures!)
 func (tx *AccessListTx) Hash() libcommon.Hash {
-	if hash := tx.hash.Load(); hash != nil {
+	if hash := tx.LoadHash(); hash != nil {
 		return *hash.(*libcommon.Hash)
 	}
 	hash := prefixedRlpHash(AccessListTxType, []interface{}{
@@ -475,7 +475,7 @@ func (tx *AccessListTx) Hash() libcommon.Hash {
 		tx.AccessList,
 		tx.V, tx.R, tx.S,
 	})
-	tx.hash.Store(&hash)
+	tx.StoreHash(&hash)
 	return hash
 }
 
@@ -505,13 +505,13 @@ func (tx *AccessListTx) GetChainID() *uint256.Int {
 }
 
 func (tx *AccessListTx) Sender(signer Signer) (libcommon.Address, error) {
-	if sc := tx.from.Load(); sc != nil {
+	if sc := tx.LoadFrom(); sc != nil {
 		return sc.(libcommon.Address), nil
 	}
 	addr, err := signer.Sender(tx)
 	if err != nil {
 		return libcommon.Address{}, err
 	}
-	tx.from.Store(addr)
+	tx.StoreFrom(addr)
 	return addr, nil
 }
