@@ -134,7 +134,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 			s.validatorAttestationSeen[targetEpoch] = make(map[uint64]struct{})
 		}
 		if _, ok := s.validatorAttestationSeen[targetEpoch][vIndex]; ok {
-			return fmt.Errorf("validator already seen in target epoch %w", ErrIgnore)
+			return ErrIgnore
 		}
 		s.validatorAttestationSeen[targetEpoch][vIndex] = struct{}{}
 		// always check and delete previous epoch if it exists
@@ -147,7 +147,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	// [IGNORE] The block being voted for (attestation.data.beacon_block_root) has been seen (via both gossip and non-gossip sources)
 	// (a client MAY queue attestations for processing once block is retrieved).
 	if _, ok := s.forkchoiceStore.GetHeader(root); !ok {
-		return fmt.Errorf("block not found %w", ErrIgnore)
+		return ErrIgnore
 	}
 
 	// [REJECT] The attestation's target block is an ancestor of the block named in the LMD vote -- i.e.
