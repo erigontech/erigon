@@ -148,6 +148,7 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 					}
 					vi++
 				}
+				require.True(t, sort.StringsAreSorted(seenKeys))
 			}
 		}
 	})
@@ -215,6 +216,7 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 					vi++
 				}
 			}
+			require.True(t, sort.StringsAreSorted(seenKeys))
 		}
 	})
 }
@@ -575,7 +577,7 @@ func filledHistoryValues(tb testing.TB, largeValues bool, values map[string][]up
 			if flusher != nil {
 				err = flusher.Flush(ctx, tx)
 				require.NoError(tb, err)
-				flusher = nil
+				flusher = nil //nolint
 			}
 			flusher = writer
 			writer = hc.NewWriter()
