@@ -100,13 +100,48 @@ func StageLoop(
 	}
 }
 
+// ProcessFrozenBlocks - withuot global rwtx
+func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync) error {
+	for {
+		var finStageProgress uint64
+		if err := db.View(ctx, func(tx kv.Tx) (err error) {
+			finStageProgress, err = stages.GetStageProgress(tx, stages.Finish)
+			return err
+		}); err != nil {
+			return err
+		}
+		if finStageProgress >= blockReader.FrozenBlocks() {
+			break
+		}
+
+		log.Debug("[sync] processFrozenBlocks", "finStageProgress", finStageProgress, "frozenBlocks", e.blockReader.FrozenBlocks())
+
+		more, err := sync.Run(db, wrap.TxContainer{}, true)
+		if err != nil {
+			return err
+		}
+
+		if err := sync.RunPrune(db, nil, true); err != nil {
+			return err
+		}
+
+		if !more {
+			break
+		}
+	}
+	return nil
+}
+
 func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, sync *stagedsync.Sync, initialCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (err error) {
-	panic(1)
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things
+
+	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync); err != nil {
+		return err
+	}
 
 	externalTx := txc.Tx != nil
 	finishProgressBefore, borProgressBefore, headersProgressBefore, err := stagesHeadersAndFinish(db, txc.Tx)
@@ -144,7 +179,6 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 		if err = hook.BeforeRun(txc.Tx, isSynced); err != nil {
 			return err
 		}
-
 	}
 	_, err = sync.Run(db, txc, initialCycle)
 	if err != nil {
