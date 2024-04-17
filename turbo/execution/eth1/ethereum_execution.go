@@ -247,7 +247,8 @@ func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx,
 	return nil
 }
 
-func (e *EthereumExecutionModule) processAllBlocksInSnapshots(ctx context.Context) error {
+// processFrozenBlocks - withuot global rwtx
+func (e *EthereumExecutionModule) processFrozenBlocks(ctx context.Context) error {
 	for {
 		var finStageProgress uint64
 		if err := e.db.View(ctx, func(tx kv.Tx) (err error) {
@@ -260,7 +261,7 @@ func (e *EthereumExecutionModule) processAllBlocksInSnapshots(ctx context.Contex
 			break
 		}
 
-		log.Warn("[dbg] processAllBlocksInSnapshots")
+		log.Warn("[dbg] processFrozenBlocks")
 
 		more, err := e.executionPipeline.Run(e.db, wrap.TxContainer{}, true)
 		if err != nil {
@@ -282,7 +283,7 @@ func (e *EthereumExecutionModule) Start(ctx context.Context) {
 	e.semaphore.Acquire(ctx, 1)
 	defer e.semaphore.Release(1)
 
-	if err := e.processAllBlocksInSnapshots(ctx); err != nil {
+	if err := e.processFrozenBlocks(ctx); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			e.logger.Error("Could not start execution service", "err", err)
 		}

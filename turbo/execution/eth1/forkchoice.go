@@ -117,20 +117,9 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	}
 	defer e.semaphore.Release(1)
 
-	{
-		if err := e.db.View(ctx, func(tx kv.Tx) error {
-			finStageProgress, err := stages.GetStageProgress(tx, stages.Finish)
-			if err != nil {
-				return err
-			}
-			if e.blockReader.FrozenBlocks() > finStageProgress {
-				return e.processAllBlocksInSnapshots(ctx)
-			}
-			return nil
-		}); err != nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
+	if err := e.processFrozenBlocks(ctx); err != nil {
+		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+		return
 	}
 
 	var validationError string
