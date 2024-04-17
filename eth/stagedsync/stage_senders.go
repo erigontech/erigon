@@ -45,7 +45,7 @@ type SendersCfg struct {
 	hd              *headerdownload.HeaderDownload
 	blockReader     services.FullBlockReader
 	loopBreakCheck  func(int) bool
-	limit           uint
+	limit           uint64
 }
 
 func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, limit uint, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, loopBreakCheck func(int) bool) SendersCfg {
@@ -69,7 +69,7 @@ func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, limit uint, badBlockHal
 		hd:              hd,
 		blockReader:     blockReader,
 		loopBreakCheck:  loopBreakCheck,
-		limit:           limit,
+		limit:           uint64(limit),
 	}
 }
 
@@ -110,6 +110,9 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	defer logEvery.Stop()
 
 	startFrom := s.BlockNumber + 1
+	if to > startFrom && to-startFrom > cfg.limit { // uint underflow protection. preserve global jump limit.
+		to = startFrom + cfg.limit
+	}
 
 	jobs := make(chan *senderRecoveryJob, cfg.batchSize)
 	out := make(chan *senderRecoveryJob, cfg.batchSize)
