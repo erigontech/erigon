@@ -355,6 +355,7 @@ func (s *Sentinel) defaultAggregateSubnetTopicParams() *pubsub.TopicScoreParams 
 	subnetCount := s.cfg.NetworkConfig.AttestationSubnetCount
 	// Get weight for each specific subnet.
 	topicWeight := float64(attestationTotalWeight) / float64(subnetCount)
+	fmt.Println(s.cfg.ActiveIndicies)
 	subnetWeight := s.cfg.ActiveIndicies / subnetCount
 	if subnetWeight == 0 {
 		log.Warn("Subnet weight is 0, skipping initializing topic scoring")
