@@ -73,7 +73,6 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 		validatorIndex: msg.ValidatorIndex,
 	}
 
-	fmt.Println(subnets, *subnet)
 	if !slices.Contains(subnets, *subnet) {
 		return fmt.Errorf("validator is not into any subnet %d", *subnet)
 	}
