@@ -75,7 +75,7 @@ type torrentInfo struct {
 }
 
 func seedableSegmentFiles(dir string, chainName string) ([]string, error) {
-	files, err := dir2.ListFiles(dir, ".seg")
+	files, err := dir2.ListFiles(dir, snaptype.SeedableV2Extensions()...)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +101,7 @@ func seedableSegmentFiles(dir string, chainName string) ([]string, error) {
 func seedableStateFilesBySubDir(dir, subDir string) ([]string, error) {
 	historyDir := filepath.Join(dir, subDir)
 	dir2.MustExist(historyDir)
-	files, err := dir2.ListFiles(historyDir, ".kv", ".v", ".ef")
+	files, err := dir2.ListFiles(historyDir, snaptype.SeedableV3Extensions()...)
 	if err != nil {
 		return nil, err
 	}
