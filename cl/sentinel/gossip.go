@@ -355,7 +355,6 @@ func (s *Sentinel) defaultAggregateSubnetTopicParams() *pubsub.TopicScoreParams 
 	subnetCount := s.cfg.NetworkConfig.AttestationSubnetCount
 	// Get weight for each specific subnet.
 	topicWeight := float64(attestationTotalWeight) / float64(subnetCount)
-	fmt.Println(s.cfg.ActiveIndicies)
 	subnetWeight := s.cfg.ActiveIndicies / subnetCount
 	if subnetWeight == 0 {
 		log.Warn("Subnet weight is 0, skipping initializing topic scoring", "activeValidatorCount", s.cfg.ActiveIndicies)
@@ -364,7 +363,7 @@ func (s *Sentinel) defaultAggregateSubnetTopicParams() *pubsub.TopicScoreParams 
 	// Determine the amount of validators expected in a subnet in a single slot.
 	numPerSlot := time.Duration(subnetWeight / uint64(s.cfg.BeaconConfig.SlotsPerEpoch))
 	if numPerSlot == 0 {
-		log.Warn("numPerSlot is 0, skipping initializing topic scoring")
+		log.Debug("numPerSlot is 0, skipping initializing topic scoring")
 		return nil
 	}
 	comsPerSlot := s.committeeCountPerSlot()
