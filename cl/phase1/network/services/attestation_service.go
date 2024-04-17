@@ -81,6 +81,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	//[REJECT] The attestation is unaggregated -- that is, it has exactly one participating validator (len([bit for bit in aggregation_bits if bit]) == 1, i.e. exactly 1 bit is set).
 	setBits := 0
 	onBitIndex := 0 // Aggregationbits is []byte, so we need to iterate over all bits.
+	fmt.Println(committeeCount)
 	for i := 0; i < len(bits); i++ {
 		for j := 0; j < 8; j++ {
 			if i*8+j >= int(committeeCount) {
