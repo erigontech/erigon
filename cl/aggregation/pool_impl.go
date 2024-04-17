@@ -14,6 +14,8 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 )
 
+var ErrIsSuperset = fmt.Errorf("attestation is superset of existing attestation")
+
 var (
 	blsAggregate = bls.AggregateSignatures
 )
@@ -55,13 +57,12 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 	defer p.aggregatesLock.Unlock()
 	att, ok := p.aggregates[hashRoot]
 	if !ok {
-		p.aggregates[hashRoot] = inAtt.Clone().(*solid.Attestation)
+		p.aggregates[hashRoot] = inAtt.Copy()
 		return nil
 	}
 
 	if utils.IsSupersetBitlist(att.AggregationBits(), inAtt.AggregationBits()) {
-		// no need to merge existing signatures
-		return nil
+		return ErrIsSuperset
 	}
 
 	// merge signature
@@ -99,7 +100,7 @@ func (p *aggregationPoolImpl) GetAggregatationByRoot(root common.Hash) *solid.At
 	if att == nil {
 		return nil
 	}
-	return att.Clone().(*solid.Attestation)
+	return att.Copy()
 }
 
 func (p *aggregationPoolImpl) sweepStaleAtt(ctx context.Context) {
