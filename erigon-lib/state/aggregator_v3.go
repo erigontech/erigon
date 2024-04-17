@@ -794,7 +794,7 @@ func (ac *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 	aggLogEvery := time.NewTicker(600 * time.Second) // to hide specific domain/idx logging
 	defer aggLogEvery.Stop()
 
-	fullStat := &AggregatorPruneStat{Domains: make(map[string]*DomainPruneStat), Indices: make(map[string]*InvertedIndexPruneStat)}
+	fullStat := newAggregatorPruneStat()
 
 	for {
 		iterationStarted := time.Now()
@@ -863,6 +863,10 @@ type AggregatorPruneStat struct {
 	Indices map[string]*InvertedIndexPruneStat
 }
 
+func newAggregatorPruneStat() *AggregatorPruneStat {
+	return &AggregatorPruneStat{Domains: make(map[string]*DomainPruneStat), Indices: make(map[string]*InvertedIndexPruneStat)}
+}
+
 func (as *AggregatorPruneStat) String() string {
 	if as == nil {
 		return ""
@@ -898,18 +902,22 @@ func (as *AggregatorPruneStat) String() string {
 
 func (as *AggregatorPruneStat) Accumulate(other *AggregatorPruneStat) {
 	for k, v := range other.Domains {
-		if _, ok := as.Domains[k]; !ok {
-			as.Domains[k] = v
+		ds, ok := as.Domains[k]
+		if !ok || ds == nil {
+			ds = v
 		} else {
-			as.Domains[k].Accumulate(v)
+			ds.Accumulate(v)
 		}
+		as.Domains[k] = ds
 	}
 	for k, v := range other.Indices {
-		if _, ok := as.Indices[k]; !ok {
-			as.Indices[k] = v
+		id, ok := as.Indices[k]
+		if !ok || id == nil {
+			id = v
 		} else {
-			as.Indices[k].Accumulate(v)
+			id.Accumulate(v)
 		}
+		as.Indices[k] = id
 	}
 }
 
@@ -938,7 +946,7 @@ func (ac *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, w
 	//ac.a.logger.Info("aggregator prune", "step", step,
 	//	"txn_range", fmt.Sprintf("[%d,%d)", txFrom, txTo), "limit", limit,
 	//	/*"stepsLimit", limit/ac.a.aggregationStep,*/ "stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx))
-	aggStat := &AggregatorPruneStat{Domains: make(map[string]*DomainPruneStat), Indices: make(map[string]*InvertedIndexPruneStat)}
+	aggStat := newAggregatorPruneStat()
 	for id, d := range ac.d {
 		var err error
 		aggStat.Domains[ac.d[id].d.filenameBase], err = d.Prune(ctx, tx, step, txFrom, txTo, limit, withWarmup, logEvery)
