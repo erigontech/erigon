@@ -759,7 +759,7 @@ Golang 1.21
 
 Almost all RPC methods are implemented - if something doesn't work - just drop it on our head.
 
-Supported networks: all (which supported by E2).
+Supported networks: all (except Mumbai).
 
 ### E3 changes from E2:
 
