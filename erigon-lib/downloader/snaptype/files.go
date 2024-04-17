@@ -184,6 +184,23 @@ func IsStateFile(name string) (ok bool) {
 	return true
 }
 
+func SeedableV2Extensions() []string {
+	return []string{".seg"}
+}
+
+func SeedableV3Extensions() []string {
+	return []string{".kv", ".v", ".ef"}
+}
+
+func IsSeedableExtension(name string) bool {
+	for _, ext := range append(SeedableV2Extensions(), SeedableV3Extensions()...) {
+		if strings.HasSuffix(name, ext) {
+			return true
+		}
+	}
+	return false
+}
+
 const Erigon3SeedableSteps = 64
 
 // Use-cases:
