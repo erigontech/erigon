@@ -83,6 +83,9 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	onBitIndex := 0 // Aggregationbits is []byte, so we need to iterate over all bits.
 	for i := 0; i < len(bits); i++ {
 		for j := 0; j < 8; j++ {
+			if i*8+j >= int(committeeCount) {
+				break
+			}
 			if bits[i]&(1<<uint(j)) != 0 {
 				setBits++
 				fmt.Println(i, j)
