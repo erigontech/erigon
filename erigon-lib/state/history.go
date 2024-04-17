@@ -222,7 +222,7 @@ func (h *History) openFiles() error {
 					continue
 				}
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
-					h.logger.Debug("History.openFiles: %w, %s", err, fPath)
+					h.logger.Debug("[agg] History.openFiles", "err", err, "f", fPath)
 					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
 						continue
 					}

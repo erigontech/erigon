@@ -356,7 +356,7 @@ func (ii *InvertedIndex) openFiles() error {
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 					_, fName := filepath.Split(fPath)
-					ii.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
+					ii.logger.Debug("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
 					invalidFileItemsLock.Lock()
 					invalidFileItems = append(invalidFileItems, item)
 					invalidFileItemsLock.Unlock()
