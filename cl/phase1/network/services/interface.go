@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 )
 
 // Note: BlobSidecarService and BlockService are tested in spectests
@@ -26,3 +27,6 @@ type SyncContributionService Service[*cltypes.SignedContributionAndProof]
 
 //go:generate mockgen -destination=./mock_services/aggregate_and_proof_service_mock.go -package=mock_services . AggregateAndProofService
 type AggregateAndProofService Service[*cltypes.SignedAggregateAndProof]
+
+//go:generate mockgen -destination=./mock_services/attestation_service_mock.go -package=mock_services . AttestationService
+type AttestationService Service[*solid.Attestation]
