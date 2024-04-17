@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/consensuschain"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -117,7 +118,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	}
 	defer e.semaphore.Release(1)
 
-	if err := e.processFrozenBlocks(ctx); err != nil {
+	if err := stages2.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline); err != nil {
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
