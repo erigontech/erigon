@@ -253,7 +253,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 					},
 					Ancestors: map[uint64]common.Hash{
 						10 * mockSlotsPerEpoch: att.AttestantionData().Target().BlockRoot(),
-						0:                      common.Hash{},
+						0:                      {},
 					},
 					FinalizedCheckpointVal: solid.NewCheckpointFromParameters([32]byte{1, 0}, 1),
 				}
@@ -288,7 +288,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 					},
 					Ancestors: map[uint64]common.Hash{
 						10 * mockSlotsPerEpoch: att.AttestantionData().Target().BlockRoot(),
-						1 * mockSlotsPerEpoch:  common.Hash{1, 0},
+						1 * mockSlotsPerEpoch:  {1, 0},
 					},
 					FinalizedCheckpointVal: solid.NewCheckpointFromParameters([32]byte{1, 0}, 1),
 				}
