@@ -86,7 +86,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 		var (
 			slot                  = attestation.AttestantionData().Slot()
 			cIndex                = attestation.AttestantionData().CommitteeIndex()
-			committeeCountPerSlot = headState.CommitteeCount(slot / uint64(a.beaconChainCfg.SlotsPerEpoch))
+			committeeCountPerSlot = headState.CommitteeCount(slot / a.beaconChainCfg.SlotsPerEpoch)
 			subnet                = subnets.ComputeSubnetForAttestation(committeeCountPerSlot, slot, cIndex, a.beaconChainCfg.SlotsPerEpoch, a.netConfig.AttestationSubnetCount)
 		)
 		if err := a.attestationService.ProcessMessage(r.Context(), &subnet, attestation); err != nil {
@@ -96,21 +96,15 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 			})
 			continue
 		}
-		if err := a.committeeSub.CheckAggregateAttestation(attestation); err != nil {
-			failures = append(failures, poolingFailure{
-				Index:   i,
-				Message: err.Error(),
-			})
-			continue
-		}
 		if a.sentinel != nil {
-
 			encodedSSZ, err := attestation.EncodeSSZ(nil)
 			if err != nil {
 				beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 				return
 			}
-			fmt.Println(subnet)
+			x, _ := attestation.MarshalJSON()
+			fmt.Println(string(X))
+			fmt.Println(subnet, gossip.TopicNameBeaconAttestation(subnet))
 			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
 				Data:     encodedSSZ,
 				Name:     gossip.TopicNameBeaconAttestation(subnet),
