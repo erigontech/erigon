@@ -30,6 +30,7 @@ type IEtherman interface {
 	BlockByNumber(ctx context.Context, blockNumber *big.Int) (*ethTypes.Block, error)
 	FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]ethTypes.Log, error)
 	CallContract(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error)
+	TransactionByHash(ctx context.Context, hash common.Hash) (ethTypes.Transaction, bool, error)
 }
 
 type fetchJob struct {
@@ -138,6 +139,10 @@ func (s *L1Syncer) Run(lastCheckedBlock uint64) {
 
 func (s *L1Syncer) GetBlock(number uint64) (*ethTypes.Block, error) {
 	return s.em.BlockByNumber(context.Background(), new(big.Int).SetUint64(number))
+}
+
+func (s *L1Syncer) GetTransaction(hash common.Hash) (ethTypes.Transaction, bool, error) {
+	return s.em.TransactionByHash(context.Background(), hash)
 }
 
 func (s *L1Syncer) GetOldAccInputHash(ctx context.Context, addr *common.Address, rollupId, batchNum uint64) (common.Hash, error) {

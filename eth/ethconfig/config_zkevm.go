@@ -11,6 +11,7 @@ type Zk struct {
 	L2RpcUrl                               string
 	L2DataStreamerUrl                      string
 	L2DataStreamerTimeout                  time.Duration
+	L1SyncStartBlock                       uint64
 	L1ChainId                              uint64
 	L1RpcUrl                               string
 	AddressSequencer                       common.Address
@@ -39,6 +40,7 @@ type Zk struct {
 
 	RebuildTreeAfter uint64
 	WitnessFull      bool
+	SyncLimit        uint64
 
 	DebugLimit     uint64
 	DebugStep      uint64

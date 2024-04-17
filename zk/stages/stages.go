@@ -14,6 +14,7 @@ func SequencerZkStages(
 	ctx context.Context,
 	cumulativeIndex stagedsync.CumulativeIndexCfg,
 	l1InfoTreeCfg L1SequencerSyncCfg,
+	sequencerL1BlockSyncCfg SequencerL1BlockSyncCfg,
 	dataStreamCatchupCfg DataStreamCatchupCfg,
 	sequencerInterhashesCfg SequencerInterhashesCfg,
 	exec SequenceBlockCfg,
@@ -56,6 +57,19 @@ func SequencerZkStages(
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
 				return PruneL1SequencerSyncStage(p, tx, l1InfoTreeCfg, ctx)
+			},
+		},
+		{
+			ID:          stages2.L1BlockSync,
+			Description: "L1 Sequencer L1 Block Sync",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, unwinder stages.Unwinder, tx kv.RwTx, quiet bool) error {
+				return SpawnSequencerL1BlockSyncStage(s, unwinder, ctx, tx, sequencerL1BlockSyncCfg, firstCycle, quiet)
+			},
+			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
+				return UnwindSequencerL1BlockSyncStage(u, tx, sequencerL1BlockSyncCfg, ctx)
+			},
+			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
+				return PruneSequencerL1BlockSyncStage(p, tx, sequencerL1BlockSyncCfg, ctx)
 			},
 		},
 		{

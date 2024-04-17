@@ -192,6 +192,7 @@ func SpawnStageBatches(
 	streamingAtomic := cfg.dsClient.GetStreamingAtomic()
 	errChan := cfg.dsClient.GetErrChan()
 
+LOOP:
 	for {
 		// get block
 		// if no blocks available should block
@@ -199,6 +200,10 @@ func SpawnStageBatches(
 		// if both download routine stopped and channel empty - stop loop
 		select {
 		case l2Block := <-l2BlockChan:
+			if cfg.zkCfg.SyncLimit > 0 && l2Block.L2BlockNumber >= cfg.zkCfg.SyncLimit {
+				break LOOP
+			}
+
 			atLeastOneBlockWritten = true
 			// skip if we already have this block
 			if l2Block.L2BlockNumber < lastBlockHeight+1 {

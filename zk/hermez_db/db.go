@@ -32,6 +32,7 @@ const L1_BLOCK_HASH_GER = "l1_block_hash_ger"                          // l1 blo
 const INTERMEDIATE_TX_STATEROOTS = "hermez_intermediate_tx_stateRoots" // l2blockno -> stateRoot
 const BATCH_WITNESSES = "hermez_batch_witnesses"                       // batch number -> witness
 const BATCH_COUNTERS = "hermez_batch_counters"                         // batch number -> counters
+const L1_BATCH_DATA = "l1_batch_data"                                  // batch number -> l1 batch data from transaction call data
 
 type HermezDb struct {
 	tx kv.RwTx
@@ -77,6 +78,7 @@ func CreateHermezBuckets(tx kv.RwTx) error {
 		INTERMEDIATE_TX_STATEROOTS,
 		BATCH_WITNESSES,
 		BATCH_COUNTERS,
+		L1_BATCH_DATA,
 	}
 	for _, t := range tables {
 		if err := tx.CreateBucket(t); err != nil {
@@ -900,4 +902,28 @@ func (db *HermezDbReader) GetBatchCounters(batchNumber uint64) (map[string]int, 
 	}
 
 	return countersMap, nil
+}
+
+func (db *HermezDb) WriteL1BatchData(batchNumber uint64, data []byte) error {
+	k := Uint64ToBytes(batchNumber)
+	return db.tx.Put(L1_BATCH_DATA, k, data)
+}
+
+func (db *HermezDbReader) GetL1BatchData(batchNumber uint64) ([]byte, error) {
+	k := Uint64ToBytes(batchNumber)
+	return db.tx.GetOne(L1_BATCH_DATA, k)
+}
+
+func (db *HermezDbReader) GetLastL1BatchData() (uint64, error) {
+	c, err := db.tx.Cursor(L1_BATCH_DATA)
+	if err != nil {
+		return 0, err
+	}
+
+	k, _, err := c.Last()
+	if err != nil {
+		return 0, err
+	}
+
+	return BytesToUint64(k), nil
 }

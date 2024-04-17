@@ -751,6 +751,12 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		backend.etherMan = newEtherMan(cfg, chainConfig.ChainName)
 
 		isSequencer := sequencer.IsSequencer()
+
+		// if the L1 block sync is set we're in recovery so can't run as a sequencer
+		if cfg.L1SyncStartBlock > 0 && !isSequencer {
+			panic("you cannot launch in l1 sync mode as an RPC node")
+		}
+
 		var l1Topics [][]libcommon.Hash
 		var l1Contracts []libcommon.Address
 		if isSequencer {
@@ -814,6 +820,14 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			// we switch context from being an RPC node to a sequencer
 			backend.txPool2.ForceUpdateLatestBlock(executionProgress)
 
+			l1BlockSyncer := syncer.NewL1Syncer(
+				backend.etherMan.EthClient,
+				[]libcommon.Address{cfg.AddressZkevm},
+				[][]libcommon.Hash{{contracts.SequenceBatchesTopic}},
+				cfg.L1BlockRange,
+				cfg.L1QueryDelay,
+			)
+
 			backend.syncStages = stages2.NewSequencerZkStages(
 				backend.sentryCtx,
 				backend.chainDB,
@@ -827,6 +841,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				backend.engine,
 				backend.dataStream,
 				backend.l1Syncer,
+				l1BlockSyncer,
 				backend.txPool2,
 				backend.txPool2DB,
 				verifier,
@@ -848,7 +863,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 			backend.nodeType = zkStages.NodeTypeSynchronizer
 
-			datastreamClient := initDataStreamClient(cfg)
+			streamClient := initDataStreamClient(cfg)
 
 			backend.syncStages = stages2.NewDefaultZkStages(
 				backend.sentryCtx,
@@ -862,7 +877,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				backend.forkValidator,
 				backend.engine,
 				backend.l1Syncer,
-				datastreamClient,
+				streamClient,
 				backend.dataStream,
 			)
 
