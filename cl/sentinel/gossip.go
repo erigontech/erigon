@@ -358,7 +358,7 @@ func (s *Sentinel) defaultAggregateSubnetTopicParams() *pubsub.TopicScoreParams 
 	fmt.Println(s.cfg.ActiveIndicies)
 	subnetWeight := s.cfg.ActiveIndicies / subnetCount
 	if subnetWeight == 0 {
-		log.Warn("Subnet weight is 0, skipping initializing topic scoring")
+		log.Warn("Subnet weight is 0, skipping initializing topic scoring", "activeValidatorCount", s.cfg.ActiveIndicies)
 		return nil
 	}
 	// Determine the amount of validators expected in a subnet in a single slot.
