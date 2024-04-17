@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -367,6 +368,9 @@ func (a *ApiHandler) PostEthV1ValidatorContributionsAndProofs(w http.ResponseWri
 	}
 	failures := []poolingFailure{}
 	for idx, v := range msgs {
+		if bytes.Equal(v.Message.Contribution.AggregationBits, make([]byte, len(v.Message.Contribution.AggregationBits))) {
+			continue // skip empty contributions
+		}
 		if err := a.syncContributionAndProofsService.ProcessMessage(r.Context(), nil, v); err != nil && !errors.Is(err, services.ErrIgnore) {
 			failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 			continue
