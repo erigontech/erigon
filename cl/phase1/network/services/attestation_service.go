@@ -85,6 +85,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		for j := 0; j < 8; j++ {
 			if bits[i]&(1<<uint(j)) != 0 {
 				setBits++
+				fmt.Println(i, j)
 				onBitIndex = i*8 + j
 			}
 		}
