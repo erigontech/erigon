@@ -65,12 +65,17 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
+	headState := a.syncedData.HeadState()
+	if headState == nil {
+		beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("head state not available")).WriteTo(w)
+		return
+	}
 	failures := []poolingFailure{}
 	for i, attestation := range req {
 		var (
 			slot                  = attestation.AttestantionData().Slot()
 			cIndex                = attestation.AttestantionData().CommitteeIndex()
-			committeeCountPerSlot = subnets.ComputeCommitteeCountPerSlot(a.syncedData.HeadState(), slot, a.beaconChainCfg.SlotsPerEpoch)
+			committeeCountPerSlot = headState.CommitteeCount(slot / uint64(a.beaconChainCfg.SlotsPerEpoch))
 			subnet                = subnets.ComputeSubnetForAttestation(committeeCountPerSlot, slot, cIndex, a.beaconChainCfg.SlotsPerEpoch, a.netConfig.AttestationSubnetCount)
 		)
 		if err := a.attestationService.ProcessMessage(r.Context(), &subnet, attestation); err != nil {

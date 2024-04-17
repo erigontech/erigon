@@ -86,7 +86,7 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 		return fmt.Errorf("head state not available")
 	}
 
-	commiteePerSlot := subnets.ComputeCommitteeCountPerSlot(headState, slot, c.beaconConfig.SlotsPerEpoch)
+	commiteePerSlot := headState.CommitteeCount(p.Slot / c.beaconConfig.SlotsPerEpoch)
 	subnetId := subnets.ComputeSubnetForAttestation(commiteePerSlot, slot, cIndex, c.beaconConfig.SlotsPerEpoch, c.netConfig.AttestationSubnetCount)
 	// add validator to subscription
 	c.validatorSubsMutex.Lock()
