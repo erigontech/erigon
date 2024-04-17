@@ -64,6 +64,7 @@ func (e *EthereumExecutionModule) verifyForkchoiceHashes(ctx context.Context, tx
 		if err != nil {
 			return false, err
 		}
+
 		if !canonical || *headNumber <= *safeNumber {
 			return false, nil
 		}
@@ -115,6 +116,24 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		return
 	}
 	defer e.semaphore.Release(1)
+
+	{
+		if err := e.db.View(ctx, func(tx kv.Tx) error {
+			finStageProgress, err := stages.GetStageProgress(tx, stages.Finish)
+			if err != nil {
+				return err
+			}
+			if e.blockReader.FrozenBlocks() > finStageProgress {
+				log.Warn("[dbg] last frozen blocks handle")
+				return e.processAllBlocksInSnapshots(ctx)
+			}
+			return nil
+		}); err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
+		}
+	}
+
 	var validationError string
 	type canonicalEntry struct {
 		hash   common.Hash
