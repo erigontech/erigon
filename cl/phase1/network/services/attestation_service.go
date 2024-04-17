@@ -15,8 +15,7 @@ import (
 )
 
 var (
-	computeCommitteeCountPerSlot = subnets.ComputeCommitteeCountPerSlot
-	computeSubnetForAttestation  = subnets.ComputeSubnetForAttestation
+	computeSubnetForAttestation = subnets.ComputeSubnetForAttestation
 )
 
 type attestationService struct {
@@ -58,8 +57,13 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		epoch          = att.AttestantionData().Target().Epoch()
 		bits           = att.AggregationBits()
 	)
+	headState := s.syncedDataManager.HeadState()
+	if headState == nil {
+		return ErrIgnore
+	}
+
 	// [REJECT] The committee index is within the expected range
-	committeeCount := computeCommitteeCountPerSlot(s.syncedDataManager.HeadState(), slot, s.beaconCfg.SlotsPerEpoch)
+	committeeCount := headState.CommitteeCount(att.AttestantionData().Target().Epoch())
 	if committeeIndex >= committeeCount {
 		return fmt.Errorf("committee index out of range")
 	}
@@ -94,6 +98,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 			}
 		}
 	}
+	fmt.Println(bits)
 	fmt.Println(setBits)
 	if setBits != 1 {
 		return fmt.Errorf("attestation does not have exactly one participating validator")
