@@ -91,8 +91,6 @@ type ExecuteBlockCfg struct {
 	agg       *libstate.AggregatorV3
 
 	silkworm *silkworm.Silkworm
-
-	limit int
 }
 
 func StageExecuteBlocksCfg(
@@ -135,7 +133,6 @@ func StageExecuteBlocksCfg(
 		syncCfg:       syncCfg,
 		agg:           agg,
 		silkworm:      silkworm,
-		limit:         limit,
 	}
 }
 
