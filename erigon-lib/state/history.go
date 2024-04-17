@@ -118,7 +118,7 @@ func (h *History) openList(fNames []string) error {
 	h.closeWhatNotInList(fNames)
 	h.garbageFiles = h.scanStateFiles(fNames)
 	if err := h.openFiles(); err != nil {
-		return fmt.Errorf("History.OpenList: %s, %w", h.filenameBase, err)
+		return fmt.Errorf("History.OpenList: %w, %s", err, h.filenameBase)
 	}
 	return nil
 }
@@ -217,8 +217,9 @@ func (h *History) openFiles() error {
 				continue
 			}
 			if item.decompressor, err = seg.NewDecompressor(datPath); err != nil {
-				h.logger.Debug("History.openFiles: %w, %s", err, datPath)
+				h.logger.Debug("History.openFiles:", "err", err, "file", datPath)
 				if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
+					err = nil
 					continue
 				}
 				return false
@@ -230,7 +231,7 @@ func (h *History) openFiles() error {
 			idxPath := filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, fromStep, toStep))
 			if dir.FileExist(idxPath) {
 				if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
-					h.logger.Debug(fmt.Errorf("Hisrory.openFiles: %w, %s", err, idxPath).Error())
+					h.logger.Debug("History.openFiles:", "err", err, "file", idxPath)
 					return false
 				}
 				totalKeys += item.index.KeyCount()
