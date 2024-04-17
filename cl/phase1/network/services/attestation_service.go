@@ -89,7 +89,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	}
 	expectedAggregationBitsLength := (len(beaconCommitte) + 7) / 8
 	if len(att.AggregationBits()) < expectedAggregationBitsLength {
-		return fmt.Errorf("aggregation bits count mismatch: %d != %d", len(att.AggregationBits()), len(beaconCommitte)/8)
+		return fmt.Errorf("aggregation bits count mismatch: %d != %d", len(att.AggregationBits()), expectedAggregationBitsLength)
 	}
 
 	bits := att.AggregationBits()
