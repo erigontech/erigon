@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/phase1/network/subnets"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/ledgerwatch/erigon/cl/validator/committee_subscription"
 )
@@ -86,12 +87,13 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if err != nil {
 		return err
 	}
+	bits := att.AggregationBits()
 	expectedAggregationBitsLength := (len(beaconCommitte) + 7) / 8
-	if len(att.AggregationBits()) < expectedAggregationBitsLength {
-		return fmt.Errorf("aggregation bits count mismatch: %d != %d", len(att.AggregationBits()), expectedAggregationBitsLength)
+	actualAggregationBitsLength := utils.GetBitlistLength(bits)
+	if actualAggregationBitsLength != expectedAggregationBitsLength {
+		return fmt.Errorf("aggregation bits count mismatch: %d != %d", actualAggregationBitsLength, expectedAggregationBitsLength)
 	}
 
-	bits := att.AggregationBits()
 	//[REJECT] The attestation is unaggregated -- that is, it has exactly one participating validator (len([bit for bit in aggregation_bits if bit]) == 1, i.e. exactly 1 bit is set).
 	setBits := 0
 	onBitIndex := 0 // Aggregationbits is []byte, so we need to iterate over all bits.
@@ -103,8 +105,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 				}
 				setBits++
 				onBitIndex = i*8 + j
-			} else if i*8+j == len(beaconCommitte) {
-				return fmt.Errorf("aggregation bits count mismatch")
 			}
 		}
 	}
