@@ -103,7 +103,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 				return
 			}
 			x, _ := attestation.MarshalJSON()
-			fmt.Println(string(X))
+			fmt.Println(string(x))
 			fmt.Println(subnet, gossip.TopicNameBeaconAttestation(subnet))
 			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
 				Data:     encodedSSZ,
