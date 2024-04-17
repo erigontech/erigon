@@ -54,8 +54,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		root           = att.AttestantionData().BeaconBlockRoot()
 		slot           = att.AttestantionData().Slot()
 		committeeIndex = att.AttestantionData().CommitteeIndex()
-		epoch          = att.AttestantionData().Target().Epoch()
-		bits           = att.AggregationBits()
+		targetEpoch    = att.AttestantionData().Target().Epoch()
 	)
 	headState := s.syncedDataManager.HeadState()
 	if headState == nil {
@@ -79,17 +78,22 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return fmt.Errorf("not in propagation range %w", ErrIgnore)
 	}
 	// [REJECT] The attestation's epoch matches its target -- i.e. attestation.data.target.epoch == compute_epoch_at_slot(attestation.data.slot)
-	if epoch != slot/s.beaconCfg.SlotsPerEpoch {
+	if targetEpoch != slot/s.beaconCfg.SlotsPerEpoch {
 		return fmt.Errorf("epoch mismatch")
 	}
+	// [REJECT] The number of aggregation bits matches the committee size -- i.e. len(aggregation_bits) == len(get_beacon_committee(state, attestation.data.slot, index)).
 	beaconCommitte, err := headState.GetBeaconCommitee(slot, committeeIndex)
 	if err != nil {
 		return err
 	}
-	// [REJECT] The number of aggregation bits matches the committee size -- i.e. len(aggregation_bits) == len(get_beacon_committee(state, attestation.data.slot, index)).
-	if len(bits) != len(beaconCommitte)/8 {
-		return fmt.Errorf("aggregation bits count mismatch: %d != %d", len(bits), len(beaconCommitte)/8)
+	if len(att.AggregationBits()) < len(beaconCommitte)/8 {
+		return fmt.Errorf("aggregation bits count mismatch: %d != %d", len(att.AggregationBits()), len(beaconCommitte)/8)
 	}
+	// we need to ignore all data subsequent to the first bit.
+	att.SetAggregationBits(att.AggregationBits()[:len(beaconCommitte)/8])
+
+	bits := att.AggregationBits()
+
 	fmt.Println(att.AttestantionData().Target().Epoch())
 	//[REJECT] The attestation is unaggregated -- that is, it has exactly one participating validator (len([bit for bit in aggregation_bits if bit]) == 1, i.e. exactly 1 bit is set).
 	setBits := 0
@@ -122,15 +126,15 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		vIndex := committees[onBitIndex]
 		s.validatorAttSeenLock.Lock()
 		defer s.validatorAttSeenLock.Unlock()
-		if _, ok := s.validatorAttestationSeen[epoch]; !ok {
-			s.validatorAttestationSeen[epoch] = make(map[uint64]struct{})
+		if _, ok := s.validatorAttestationSeen[targetEpoch]; !ok {
+			s.validatorAttestationSeen[targetEpoch] = make(map[uint64]struct{})
 		}
-		if _, ok := s.validatorAttestationSeen[epoch][vIndex]; ok {
+		if _, ok := s.validatorAttestationSeen[targetEpoch][vIndex]; ok {
 			return fmt.Errorf("validator already seen in target epoch %w", ErrIgnore)
 		}
-		s.validatorAttestationSeen[epoch][vIndex] = struct{}{}
+		s.validatorAttestationSeen[targetEpoch][vIndex] = struct{}{}
 		// always check and delete previous epoch if it exists
-		delete(s.validatorAttestationSeen, epoch-1)
+		delete(s.validatorAttestationSeen, targetEpoch-1)
 		return nil
 	}(); err != nil {
 		return err
@@ -144,7 +148,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 
 	// [REJECT] The attestation's target block is an ancestor of the block named in the LMD vote -- i.e.
 	// get_checkpoint_block(store, attestation.data.beacon_block_root, attestation.data.target.epoch) == attestation.data.target.root
-	startSlotAtEpoch := epoch * s.beaconCfg.SlotsPerEpoch
+	startSlotAtEpoch := targetEpoch * s.beaconCfg.SlotsPerEpoch
 	if s.forkchoiceStore.Ancestor(root, startSlotAtEpoch) != att.AttestantionData().Target().BlockRoot() {
 		return fmt.Errorf("invalid target block")
 	}
