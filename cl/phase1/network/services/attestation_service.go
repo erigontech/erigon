@@ -99,13 +99,13 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	for i := 0; i < len(bits); i++ {
 		for j := 0; j < 8; j++ {
 			if bits[i]&(1<<uint(j)) != 0 {
-				setBits++
-				onBitIndex = i*8 + j
-				if onBitIndex >= len(beaconCommitte) {
+				if i*8+j >= len(beaconCommitte) {
 					// turn off the bit
 					bits[i] &= ^(1 << uint(j))
 					continue
 				}
+				setBits++
+				onBitIndex = i*8 + j
 			}
 		}
 	}
