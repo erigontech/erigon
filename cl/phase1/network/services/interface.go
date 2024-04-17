@@ -30,3 +30,6 @@ type AggregateAndProofService Service[*cltypes.SignedAggregateAndProof]
 
 //go:generate mockgen -destination=./mock_services/attestation_service_mock.go -package=mock_services . AttestationService
 type AttestationService Service[*solid.Attestation]
+
+//go:generate mockgen -destination=./mock_services/voluntary_exit_service_mock.go -package=mock_services . VoluntaryExitService
+type VoluntaryExitService Service[*cltypes.SignedVoluntaryExit]

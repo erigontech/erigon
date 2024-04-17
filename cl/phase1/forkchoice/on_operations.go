@@ -2,11 +2,9 @@ package forkchoice
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 
 	"github.com/Giulio2002/bls"
-	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -16,60 +14,6 @@ import (
 
 // NOTE: This file implements non-official handlers for other types of iterations. what it does is,using the forkchoices
 // and verify external operations and eventually push them in the operations pool.
-
-// OnVoluntaryExit is a non-official handler for voluntary exit operations. it pushes the voluntary exit in the pool.
-func (f *ForkChoiceStore) OnVoluntaryExit(signedVoluntaryExit *cltypes.SignedVoluntaryExit, test bool) error {
-	voluntaryExit := signedVoluntaryExit.VoluntaryExit
-	if f.operationsPool.VoluntaryExistsPool.Has(voluntaryExit.ValidatorIndex) {
-		f.emitters.Publish("voluntary_exit", voluntaryExit)
-		return nil
-	}
-
-	s := f.syncedDataManager.HeadState()
-	if s == nil {
-		return nil
-	}
-
-	val, err := s.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
-	if err != nil {
-		return err
-	}
-
-	if val.ExitEpoch() != f.beaconCfg.FarFutureEpoch {
-		return nil
-	}
-
-	pk := val.PublicKey()
-
-	domainType := f.beaconCfg.DomainVoluntaryExit
-	var domain []byte
-
-	if s.Version() < clparams.DenebVersion {
-		domain, err = s.GetDomain(domainType, voluntaryExit.Epoch)
-	} else if s.Version() >= clparams.DenebVersion {
-		domain, err = fork.ComputeDomain(domainType[:], utils.Uint32ToBytes4(uint32(s.BeaconConfig().CapellaForkVersion)), s.GenesisValidatorsRoot())
-	}
-	if err != nil {
-		return err
-	}
-
-	signingRoot, err := fork.ComputeSigningRoot(voluntaryExit, domain)
-	if err != nil {
-		return err
-	}
-	if !test {
-		valid, err := bls.Verify(signedVoluntaryExit.Signature[:], signingRoot[:], pk[:])
-		if err != nil {
-			return err
-		}
-		if !valid {
-			return errors.New("ProcessVoluntaryExit: BLS verification failed")
-		}
-	}
-	f.emitters.Publish("voluntary_exit", voluntaryExit)
-	f.operationsPool.VoluntaryExistsPool.Insert(voluntaryExit.ValidatorIndex, signedVoluntaryExit)
-	return nil
-}
 
 // OnProposerSlashing is a non-official handler for proposer slashing operations. it pushes the proposer slashing in the pool.
 func (f *ForkChoiceStore) OnProposerSlashing(proposerSlashing *cltypes.ProposerSlashing, test bool) (err error) {

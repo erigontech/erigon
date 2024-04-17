@@ -88,6 +88,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	syncCommitteeMessagesService := mock_services.NewMockSyncCommitteeMessagesService(ctrl)
 	syncContributionService := mock_services.NewMockSyncContributionService(ctrl)
 	aggregateAndProofsService := mock_services.NewMockAggregateAndProofService(ctrl)
+	voluntaryExitService := mock_services.NewMockVoluntaryExitService(ctrl)
 	// ctx context.Context, subnetID *uint64, msg *cltypes.SyncCommitteeMessage) error
 	syncCommitteeMessagesService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SyncCommitteeMessage) error {
 		return h.syncMessagePool.AddSyncCommitteeMessage(postState, *subnetID, msg)
@@ -96,9 +97,12 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	syncContributionService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedContributionAndProof) error {
 		return h.syncMessagePool.AddSyncContribution(postState, msg.Message.Contribution)
 	}).AnyTimes()
-
 	aggregateAndProofsService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedAggregateAndProof) error {
 		opPool.AttestationsPool.Insert(msg.Message.Aggregate.Signature(), msg.Message.Aggregate)
+		return nil
+	}).AnyTimes()
+	voluntaryExitService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedVoluntaryExit) error {
+		opPool.VoluntaryExistsPool.Insert(msg.VoluntaryExit.ValidatorIndex, msg)
 		return nil
 	}).AnyTimes()
 
@@ -124,7 +128,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 			Events:     true,
 			Validator:  true,
 			Lighthouse: true,
-		}, nil, blobStorage, nil, vp, nil, nil, fcu.SyncContributionPool, nil, nil, syncCommitteeMessagesService, syncContributionService, aggregateAndProofsService, nil) // TODO: add tests
+		}, nil, blobStorage, nil, vp, nil, nil, fcu.SyncContributionPool, nil, nil, syncCommitteeMessagesService, syncContributionService, aggregateAndProofsService, nil, voluntaryExitService) // TODO: add tests
 	h.Init()
 	return
 }

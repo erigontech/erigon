@@ -43,6 +43,7 @@ type GossipManager struct {
 	syncContributionService      services.SyncContributionService
 	aggregateAndProofService     services.AggregateAndProofService
 	attestationService           services.AttestationService
+	voluntaryExitService         services.VoluntaryExitService
 }
 
 func NewGossipReceiver(
@@ -58,6 +59,7 @@ func NewGossipReceiver(
 	syncContributionService services.SyncContributionService,
 	aggregateAndProofService services.AggregateAndProofService,
 	attestationService services.AttestationService,
+	voluntaryExitService services.VoluntaryExitService,
 ) *GossipManager {
 	return &GossipManager{
 		sentinel:                     s,
@@ -72,6 +74,7 @@ func NewGossipReceiver(
 		syncContributionService:      syncContributionService,
 		aggregateAndProofService:     aggregateAndProofService,
 		attestationService:           attestationService,
+		voluntaryExitService:         voluntaryExitService,
 	}
 }
 
@@ -147,7 +150,12 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		}
 		return g.syncContributionService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameVoluntaryExit:
-		return operationsContract[*cltypes.SignedVoluntaryExit](ctx, g, data, int(version), "voluntary exit", g.forkChoice.OnVoluntaryExit)
+		obj := &cltypes.SignedVoluntaryExit{}
+		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
+			return err
+		}
+		return g.voluntaryExitService.ProcessMessage(ctx, data.SubnetId, obj)
+
 	case gossip.TopicNameProposerSlashing:
 		return operationsContract[*cltypes.ProposerSlashing](ctx, g, data, int(version), "proposer slashing", g.forkChoice.OnProposerSlashing)
 	case gossip.TopicNameAttesterSlashing:

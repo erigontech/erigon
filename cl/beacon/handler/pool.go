@@ -125,10 +125,11 @@ func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r 
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := a.forkchoiceStore.OnVoluntaryExit(&req, false); err != nil {
+	if err := a.voluntaryExitService.ProcessMessage(r.Context(), nil, &req); err != nil && !errors.Is(err, services.ErrIgnore) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
 	// Broadcast to gossip
 	if a.sentinel != nil {
 		encodedSSZ, err := req.EncodeSSZ(nil)
