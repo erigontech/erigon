@@ -115,20 +115,17 @@ issues:
       linters:
         - gosec
         - unused
-        - deadcode
         - gocritic
         - perfsprint
     - path: hack\.go
       linters:
         - gosec
         - unused
-        - deadcode
         - gocritic
     - path: cmd/devp2p
       linters:
         - gosec
         - unused
-        - deadcode
         - gocritic
     - path: metrics/sample\.go
       linters:
