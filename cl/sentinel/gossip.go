@@ -169,7 +169,6 @@ func (s *GossipManager) GetMatchingSubscription(match string) *GossipSubscriptio
 }
 
 func (s *GossipManager) AddSubscription(topic string, sub *GossipSubscription) {
-	fmt.Println(topic)
 	s.subscriptions.Store(topic, sub)
 }
 
@@ -486,7 +485,7 @@ func (sub *GossipSubscription) Listen() {
 					go sub.run(sctx, sub.sub, sub.sub.Topic())
 					sub.subscribed.Store(true)
 					sub.s.updateENROnSubscription(sub.sub.Topic(), true)
-					log.Info("[Gossip] Subscribed to topic", "topic", sub.gossip_topic.Name)
+					log.Info("[Gossip] Subscribed to topic", "topic", sub.sub.Topic())
 				}
 			}
 		}
