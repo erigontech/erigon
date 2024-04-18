@@ -34,15 +34,15 @@ linters:
 #    - stylecheck
 
 linters-settings:
-  gocritic:
-    # Which checks should be enabled; can't be combined with 'disabled-checks';
-    # See https://go-critic.github.io/overview#checks-overview
-    # To check which checks are enabled run `GL_DEBUG=gocritic golangci-lint run`
-    # By default list of stable checks is used.
+  gocritic: # see https://golangci-lint.run/usage/linters/#gocritic and  https://github.com/go-critic/go-critic#usage -> section "Tags"
+    enabled-tags:
+      - performance
+      - diagnostic
+    #      - style
+    #      - experimental
+    #      - opinionated
     enabled-checks:
       - ruleguard
-
-    # Which checks should be disabled; can't be combined with 'enabled-checks'; default is empty
     disabled-checks:
       - regexpMust
       - rangeValCopy
@@ -57,16 +57,6 @@ linters-settings:
       - ifElseChain
       - appendAssign
 
-    # Enable multiple checks by tags, run `GL_DEBUG=gocritic golangci-lint run` to see all tags and checks.
-    # Empty list by default. See https://github.com/go-critic/go-critic#usage -> section "Tags".
-    enabled-tags:
-      - performance
-      - diagnostic
-    #      - style
-    #      - experimental
-    #      - opinionated
-    disabled-tags:
-      - experimental
     settings:
       ruleguard:
         rules: "rules.go"
