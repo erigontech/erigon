@@ -2,7 +2,6 @@ package beacon
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"net/http"
 	"time"
@@ -39,10 +38,11 @@ func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router
 		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, chi.NewRouteContext()))
 		if isNotFound(nfw.code) || nfw.code == 0 {
 			start := time.Now()
-			beaconHandler.ArchiveApi.ServeHTTP(w, r)
+			beaconHandler.ArchiveApi.ServeHTTP(nfw, r)
 			log.Debug("[Beacon API] Request", "uri", r.URL.String(), "path", r.URL.Path, "time", time.Since(start))
-			// get status from w
-			fmt.Println(w.Header())
+			if nfw.code == http.StatusInternalServerError {
+				log.Warn("[Beacon API] Internal server error", "uri", r.URL.String(), "path", r.URL.Path)
+			}
 		} else {
 			log.Warn("[Beacon API] Request to unavaiable endpoint, check --beacon.api flag", "uri", r.URL.String(), "path", r.URL.Path)
 		}
