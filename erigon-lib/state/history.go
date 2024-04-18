@@ -208,9 +208,9 @@ func (h *History) scanStateFiles(fNames []string) (garbageFiles []*filesItem) {
 }
 
 func (h *History) openFiles() error {
-	var err error
 	invalidFileItems := make([]*filesItem, 0)
 	h.dirtyFiles.Walk(func(items []*filesItem) bool {
+		var err error
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
 			if item.decompressor == nil {
@@ -247,9 +247,6 @@ func (h *History) openFiles() error {
 		}
 		return true
 	})
-	if err != nil {
-		return err
-	}
 	for _, item := range invalidFileItems {
 		h.dirtyFiles.Delete(item)
 	}
