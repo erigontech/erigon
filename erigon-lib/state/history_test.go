@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"os"
 	"sort"
 	"strings"
 	"testing"
@@ -1153,4 +1154,25 @@ func Test_HistoryIterate_VariousKeysLen(t *testing.T) {
 		test(t, h, db, keys, txs)
 	})
 
+}
+
+func TestHistory_OpenFolder(t *testing.T) {
+	logger := log.New()
+	db, h, txs := filledHistory(t, true, logger)
+	collateAndMergeHistory(t, db, h, txs, true)
+
+	list := h.visibleFiles.Load()
+	require.NotEmpty(t, list)
+	ff := (*list)[len(*list)-1]
+	fn := ff.src.decompressor.FilePath()
+	h.Close()
+
+	err := os.Remove(fn)
+	require.NoError(t, err)
+	err = os.WriteFile(fn, make([]byte, 33), 0644)
+	require.NoError(t, err)
+
+	err = h.OpenFolder(true)
+	require.NoError(t, err)
+	h.Close()
 }

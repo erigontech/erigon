@@ -214,7 +214,7 @@ func (d *Domain) openList(names []string, readonly bool) error {
 	d.closeWhatNotInList(names)
 	d.scanStateFiles(names)
 	if err := d.openFiles(); err != nil {
-		return fmt.Errorf("Domain.OpenList: %s, %w", d.filenameBase, err)
+		return fmt.Errorf("Domain.openList: %w, %s", err, d.filenameBase)
 	}
 	d.protectFromHistoryFilesAheadOfDomainFiles(readonly)
 	d.reCalcVisibleFiles()
@@ -363,11 +363,13 @@ func (d *Domain) openFiles() (err error) {
 					continue
 				}
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
-					d.logger.Debug("Domain.openFiles: %w, %s", err, fPath)
 					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
+						d.logger.Debug("[agg] Domain.openFiles: %w, %s", err, fPath)
+						err = nil
 						continue
 					}
-					return false
+					d.logger.Warn("[agg] Domain.openFiles: %w, %s", err, fPath)
+					continue
 				}
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
@@ -397,6 +399,7 @@ func (d *Domain) openFiles() (err error) {
 					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, DefaultBtreeM, item.decompressor, d.compression); err != nil {
 						_, fName := filepath.Split(fPath)
 						d.logger.Warn("[agg] Domain.openFiles", "err", err, "f", fName)
+						err = nil
 						// don't interrupt on error. other files may be good
 					}
 				}
@@ -407,6 +410,7 @@ func (d *Domain) openFiles() (err error) {
 					if item.existence, err = OpenExistenceFilter(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						d.logger.Warn("[agg] Domain.openFiles", "err", err, "f", fName)
+						err = nil
 						// don't interrupt on error. other files may be good
 					}
 				}

@@ -152,7 +152,7 @@ func (h *History) openList(fNames []string) error {
 	h.closeWhatNotInList(fNames)
 	h.scanStateFiles(fNames)
 	if err := h.openFiles(); err != nil {
-		return fmt.Errorf("History(%s).openFiles: %w", h.filenameBase, err)
+		return fmt.Errorf("History.OpenList: %w, %s", err, h.filenameBase)
 	}
 	return nil
 }
@@ -222,10 +222,13 @@ func (h *History) openFiles() error {
 					continue
 				}
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
-					h.logger.Debug("[agg] History.openFiles", "err", err, "f", fPath)
 					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
+						h.logger.Debug("[agg] History.openFiles", "err", err, "f", fPath)
+						err = nil
 						continue
 					}
+					h.logger.Warn("[agg] History.openFiles", "err", err, "f", fPath)
+					err = nil
 					// don't interrupt on error. other files may be good. but skip indices open.
 					continue
 				}
@@ -237,6 +240,7 @@ func (h *History) openFiles() error {
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						h.logger.Warn("[agg] History.openFiles", "err", err, "f", fName)
+						err = nil
 						// don't interrupt on error. other files may be good
 					}
 				}

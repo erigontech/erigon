@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -96,6 +97,27 @@ func TestDomain_CollationBuild(t *testing.T) {
 	t.Run("compressDomainVals=false", func(t *testing.T) {
 		testCollationBuild(t, false)
 	})
+}
+
+func TestDomain_OpenFolder(t *testing.T) {
+	db, d, txs := filledDomain(t, log.New())
+
+	collateAndMerge(t, db, nil, d, txs)
+
+	list := d.visibleFiles.Load()
+	require.NotEmpty(t, list)
+	ff := (*list)[len(*list)-1]
+	fn := ff.src.decompressor.FilePath()
+	d.Close()
+
+	err := os.Remove(fn)
+	require.NoError(t, err)
+	err = os.WriteFile(fn, make([]byte, 33), 0644)
+	require.NoError(t, err)
+
+	err = d.OpenFolder(true)
+	require.NoError(t, err)
+	d.Close()
 }
 
 func testCollationBuild(t *testing.T, compressDomainVals bool) {
