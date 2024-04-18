@@ -1363,51 +1363,58 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum
 			defer br.snBuildAllowed.Release(1)
 		}
 
-		for {
-			maxBlockNum := br.maxScheduledBlock.Load()
-
-			log.Warn("[dbg] RetireBlocks1", "maxBlockNum", maxBlockNum, "maxBlockNum", maxBlockNum)
-			err := br.RetireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
-
-			if err != nil {
-				br.logger.Warn("[snapshots] retire blocks", "err", err)
-				return
-			}
-
-			if maxBlockNum == br.maxScheduledBlock.Load() {
-				log.Warn("[dbg] RetireBlocks2", "maxBlockNum", maxBlockNum, "maxBlockNum", maxBlockNum)
-				return
-			}
+		err := br.RetireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+		if err != nil {
+			br.logger.Warn("[snapshots] retire blocks", "err", err)
+			return
 		}
 	}()
 }
 
-func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error) (err error) {
+func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error) error {
+	if maxBlockNum > br.maxScheduledBlock.Load() {
+		br.maxScheduledBlock.Store(maxBlockNum)
+	}
+
+	didRetireSomething := true
+	var err error
+	for didRetireSomething {
+		didRetireSomething, err = br.retireBlocksIteration(ctx, minBlockNum, br.maxScheduledBlock.Load(), lvl, seedNewSnapshots, onDeleteSnapshots)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (br *BlockRetire) retireBlocksIteration(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error) (ok bool, err error) {
+	var okBor bool
+
 	includeBor := br.chainConfig.Bor != nil
 	minBlockNum = cmp.Max(br.blockReader.FrozenBlocks(), minBlockNum)
 	if includeBor {
 		// "bor snaps" can be behind "block snaps", it's ok: for example because of `kill -9` in the middle of merge
-		_, err := br.retireBorBlocks(ctx, br.blockReader.FrozenBorBlocks(), minBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+		okBor, err = br.retireBorBlocks(ctx, br.blockReader.FrozenBorBlocks(), minBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 		if err != nil {
-			return err
+			return ok || okBor, err
 		}
 	}
 
 	log.Warn("[dbg] RetireBlocks8", "maxBlockNum", maxBlockNum)
-	_, err = br.retireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+	ok, err = br.retireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 	if err != nil {
-		return err
+		return ok || okBor, err
 	}
 
 	if includeBor {
 		minBorBlockNum := cmp.Max(br.blockReader.FrozenBorBlocks(), minBlockNum)
-		_, err = br.retireBorBlocks(ctx, minBorBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+		okBor, err = br.retireBorBlocks(ctx, minBorBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 		if err != nil {
-			return err
+			return ok || okBor, err
 		}
 	}
 
-	return nil
+	return ok || okBor, nil
 }
 
 func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier, cc *chain.Config) error {
