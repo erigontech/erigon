@@ -16,11 +16,8 @@ import (
 	"github.com/ledgerwatch/erigon/zk/erigon_db"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 
-	"math/big"
-
 	"os"
 
-	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -128,7 +125,7 @@ func SpawnExecuteBlocksStageZk(s *StageState, u Unwinder, tx kv.RwTx, toBlock ui
 		return err
 	}
 
-	if err := UpdateZkEVMBlockCfg(cfg.chainConfig, hermezDb, logPrefix); err != nil {
+	if err := utils.UpdateZkEVMBlockCfg(cfg.chainConfig, hermezDb, logPrefix); err != nil {
 		return err
 	}
 
@@ -529,43 +526,6 @@ func PruneExecutionStageZk(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx c
 		if err = tx.Commit(); err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-type ForkReader interface {
-	GetForkIdBlock(forkId uint64) (uint64, error)
-}
-
-func UpdateZkEVMBlockCfg(cfg *chain.Config, hermezDb ForkReader, logPrefix string) error {
-	update := func(forkId uint64, forkBlock **big.Int) error {
-		if *forkBlock != nil && *forkBlock != big.NewInt(0) {
-			return nil
-		}
-		blockNum, err := hermezDb.GetForkIdBlock(forkId)
-		if err != nil {
-			log.Error(fmt.Sprintf("[%s] Error getting fork id %v from db: %v", logPrefix, forkId, err))
-			return err
-		}
-		if blockNum != 0 {
-			*forkBlock = big.NewInt(0).SetUint64(blockNum)
-			log.Info(fmt.Sprintf("[%s] Set execute block cfg, fork id %v, block:%v, ", logPrefix, forkId, blockNum))
-		}
-
-		return nil
-	}
-
-	if err := update(chain.ForkID5Dragonfruit, &cfg.ForkID5DragonfruitBlock); err != nil {
-		return err
-	}
-	if err := update(chain.ForkID6IncaBerry, &cfg.ForkID6IncaBerryBlock); err != nil {
-		return err
-	}
-	if err := update(chain.ForkID7Etrog, &cfg.ForkID7EtrogBlock); err != nil {
-		return err
-	}
-	if err := update(chain.ForkID88Elderberry, &cfg.ForkID88ElderberryBlock); err != nil {
-		return err
 	}
 	return nil
 }

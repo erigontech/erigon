@@ -25,6 +25,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	"github.com/ledgerwatch/erigon/zk/utils"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -35,7 +36,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	ethFilters "github.com/ledgerwatch/erigon/eth/filters"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/rpc"
 	ethapi2 "github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
@@ -153,7 +153,7 @@ func (api *BaseAPI) chainConfig(tx kv.Tx) (*chain.Config, error) {
 
 	//[zkevm] get dynamic fork config
 	hermezDb := hermez_db.NewHermezDbReader(tx)
-	if err := stagedsync.UpdateZkEVMBlockCfg(cfg, hermezDb, ""); err != nil {
+	if err := utils.UpdateZkEVMBlockCfg(cfg, hermezDb, ""); err != nil {
 		return cfg, err
 	}
 

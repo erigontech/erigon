@@ -51,6 +51,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/tx"
 	"github.com/ledgerwatch/erigon/zk/txpool"
 	zktypes "github.com/ledgerwatch/erigon/zk/types"
+	"github.com/ledgerwatch/erigon/zk/utils"
 	"github.com/ledgerwatch/secp256k1"
 )
 
@@ -194,10 +195,8 @@ func SpawnSequencingStage(
 		if err := hermezDb.WriteForkId(1, forkId); err != nil {
 			return err
 		}
-		for fId := uint64(chain.ForkID5Dragonfruit); fId <= forkId; fId++ {
-			if err := hermezDb.WriteForkIdBlockOnce(fId, 1); err != nil {
-				return err
-			}
+		if err := hermezDb.WriteForkIdBlockOnce(uint64(forkId), 1); err != nil {
+			return err
 		}
 	} else {
 		forkId, err = hermezDb.GetForkId(lastBatch)
@@ -209,7 +208,7 @@ func SpawnSequencingStage(
 		}
 	}
 
-	if err := stagedsync.UpdateZkEVMBlockCfg(cfg.chainConfig, hermezDb, logPrefix); err != nil {
+	if err := utils.UpdateZkEVMBlockCfg(cfg.chainConfig, hermezDb, logPrefix); err != nil {
 		return err
 	}
 
