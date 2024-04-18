@@ -404,7 +404,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	}
 	st.gas -= gas
 
-	if rules.IsPrague {
+	if rules.IsOsaka {
 		statelessGasOrigin := st.evm.TxContext.Accesses.TouchTxOriginAndComputeGas(msg.From().Bytes())
 		if !tryConsumeGas(&st.gas, statelessGasOrigin) {
 			return nil, fmt.Errorf("%w: Insufficient funds to cover witness access costs for transaction: have %d, want %d", ErrInsufficientFunds, st.gas, gas)

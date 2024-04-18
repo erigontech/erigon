@@ -410,7 +410,7 @@ func gasCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memo
 	if gas, overflow = math.SafeAdd(gas, callGasTemp); overflow {
 		return 0, ErrGasUintOverflow
 	}
-	if evm.chainRules.IsPrague {
+	if evm.chainRules.IsOsaka {
 		if _, isPrecompile := evm.precompile(address); !isPrecompile {
 			gas, overflow = math.SafeAdd(gas, evm.TxContext.Accesses.TouchAndChargeMessageCall(address.Bytes()[:]))
 			if overflow {
@@ -452,7 +452,7 @@ func gasCallCode(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, 
 	if gas, overflow = math.SafeAdd(gas, callGasTemp); overflow {
 		return 0, ErrGasUintOverflow
 	}
-	if evm.chainRules.IsPrague {
+	if evm.chainRules.IsOsaka {
 		address := libcommon.Address(stack.Back(1).Bytes20())
 		if _, isPrecompile := evm.precompile(address); !isPrecompile {
 			gas, overflow = math.SafeAdd(gas, evm.TxContext.Accesses.TouchAndChargeMessageCall(address.Bytes()))
@@ -481,7 +481,7 @@ func gasDelegateCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memo
 	if gas, overflow = math.SafeAdd(gas, callGasTemp); overflow {
 		return 0, ErrGasUintOverflow
 	}
-	if evm.chainRules.IsPrague {
+	if evm.chainRules.IsOsaka {
 		address := libcommon.Address(stack.Back(1).Bytes20())
 		if _, isPrecompile := evm.precompile(address); !isPrecompile {
 			gas, overflow = math.SafeAdd(gas, evm.TxContext.Accesses.TouchAndChargeMessageCall(address.Bytes()))
@@ -510,7 +510,7 @@ func gasStaticCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory
 	if gas, overflow = math.SafeAdd(gas, callGasTemp); overflow {
 		return 0, ErrGasUintOverflow
 	}
-	if evm.chainRules.IsPrague {
+	if evm.chainRules.IsOsaka {
 		address := libcommon.Address(stack.Back(1).Bytes20())
 		if _, isPrecompile := evm.precompile(address); !isPrecompile {
 			gas, overflow = math.SafeAdd(gas, evm.TxContext.Accesses.TouchAndChargeMessageCall(address.Bytes()))
@@ -539,7 +539,7 @@ func gasSelfdestruct(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memo
 		}
 	}
 
-	if evm.chainRules.IsPrague {
+	if evm.chainRules.IsOsaka {
 		// verkle witness accumulation not supported for selfdestruct
 		// TODO @somnathb1 custom error or panic
 		return 0, ErrOutOfGas
@@ -554,7 +554,7 @@ func gasSelfdestruct(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memo
 func gasExtCodeSize(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	usedGas := uint64(0)
 	slot := stack.Back(0)
-	if evm.chainRules.IsPrague {
+	if evm.chainRules.IsOsaka {
 		usedGas += evm.TxContext.Accesses.TouchAddressOnReadAndComputeGas(slot.Bytes(), uint256.Int{}, vkutils.CodeSizeLeafKey)
 	}
 
@@ -564,7 +564,7 @@ func gasExtCodeSize(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memor
 func gasSLoad(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	usedGas := uint64(0)
 
-	if evm.chainRules.IsPrague {
+	if evm.chainRules.IsOsaka {
 		where := stack.Back(0)
 		treeIndex, subIndex := vkutils.GetTreeKeyStorageSlotTreeIndexes(where.Bytes())
 		usedGas += evm.TxContext.Accesses.TouchAddressOnReadAndComputeGas(contract.Address().Bytes(), *treeIndex, subIndex)

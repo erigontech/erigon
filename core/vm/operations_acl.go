@@ -50,7 +50,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		var value uint256.Int
 		value.Set(y)
 
-		if evm.chainRules.IsPrague {
+		if evm.chainRules.IsOsaka {
 			treeIndex, subIndex := vkutils.GetTreeKeyStorageSlotTreeIndexes(x.Bytes())
 			cost += evm.TxContext.Accesses.TouchAddressOnWriteAndComputeGas(contract.Address().Bytes(), *treeIndex, subIndex)
 		}
@@ -110,7 +110,7 @@ func gasSLoadEIP2929(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memo
 	loc := stack.Peek()
 	var gasUsed uint64
 
-	if evm.chainRules.IsPrague {
+	if evm.chainRules.IsOsaka {
 		where := stack.Back(0)
 		treeIndex, subIndex := vkutils.GetTreeKeyStorageSlotTreeIndexes(where.Bytes())
 		addr := contract.Address()

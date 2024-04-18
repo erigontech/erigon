@@ -39,7 +39,7 @@ var emptyCodeHash = crypto.Keccak256Hash(nil)
 func (evm *EVM) precompile(addr libcommon.Address) (PrecompiledContract, bool) {
 	var precompiles map[libcommon.Address]PrecompiledContract
 	switch {
-	case evm.chainRules.IsPrague:
+	case evm.chainRules.IsOsaka:
 		precompiles = PrecompiledContractsPrague
 	case evm.chainRules.IsNapoli:
 		precompiles = PrecompiledContractsNapoli
@@ -111,7 +111,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 		chainConfig:     chainConfig,
 		chainRules:      chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time),
 	}
-	if txCtx.Accesses == nil && chainConfig.IsPrague(blockCtx.Time) {
+	if txCtx.Accesses == nil && chainConfig.IsOsaka(blockCtx.Time) {
 		evm.TxContext.Accesses = statedb.NewAccessWitness(vkutils.NewPointCache())
 	}
 	evm.interpreter = NewEVMInterpreter(evm, vmConfig)
@@ -124,7 +124,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState) {
 	evm.TxContext = txCtx
 	evm.intraBlockState = ibs
-	if txCtx.Accesses == nil && evm.chainRules.IsPrague {
+	if txCtx.Accesses == nil && evm.chainRules.IsOsaka {
 		evm.TxContext.Accesses = statedb.NewAccessWitness(vkutils.NewPointCache())
 	}
 	// ensure the evm is reset to be used again
@@ -213,7 +213,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 	if typ == CALL {
 		if !evm.intraBlockState.Exist(addr) {
 			if !isPrecompile && evm.chainRules.IsEIP158 && value.Sign() == 0 {
-				if evm.chainRules.IsPrague {
+				if evm.chainRules.IsOsaka {
 					// proof of absence
 					tryConsumeGas(&gas, evm.TxContext.Accesses.TouchAndChargeProofOfAbsence(caller.Address().Bytes()))
 				}
@@ -473,7 +473,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		}
 	}
 
-	if err == nil && evm.chainRules.IsPrague {
+	if err == nil && evm.chainRules.IsOsaka {
 		if !contract.UseGas(evm.TxContext.Accesses.TouchAndChargeContractCreateCompleted(address.Bytes()[:])) {
 			evm.intraBlockState.RevertToSnapshot(snapshot)
 			err = ErrOutOfGas

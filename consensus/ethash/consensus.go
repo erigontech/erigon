@@ -669,7 +669,7 @@ func accumulateRewards(config *chain.Config, state *state.IntraBlockState, heade
 			state.AddBalance(uncle.Coinbase, &uncleRewards[i])
 		}
 	}
-	if config.IsPrague(header.Time) {
+	if config.IsOsaka(header.Time) {
 		state.Witness().TouchAddressOnReadAndComputeGas(header.Coinbase.Bytes(), uint256.Int{}, vkutils.BalanceLeafKey)
 		state.Witness().TouchAddressOnReadAndComputeGas(header.Coinbase.Bytes(), uint256.Int{}, vkutils.VersionLeafKey)
 		state.Witness().TouchAddressOnReadAndComputeGas(header.Coinbase.Bytes(), uint256.Int{}, vkutils.NonceLeafKey)
