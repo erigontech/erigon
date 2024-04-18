@@ -91,7 +91,7 @@ linters-settings:
     min-len: 2
     min-occurrences: 2
   gofmt:
-    auto-fix: false
+    simplify: false
 
 issues:
   exclude-rules:
