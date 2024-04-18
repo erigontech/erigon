@@ -1332,50 +1332,61 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum
 	}
 
 	go func() {
-
 		defer br.working.Store(false)
 
-		for {
-			maxBlockNum := br.maxScheduledBlock.Load()
-
-			err := br.RetireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
-
-			if err != nil {
-				br.logger.Warn("[snapshots] retire blocks", "err", err)
-				return
-			}
-
-			if maxBlockNum == br.maxScheduledBlock.Load() {
-				return
-			}
+		err := br.RetireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+		if err != nil {
+			br.logger.Warn("[snapshots] retire blocks", "err", err)
+			return
 		}
 	}()
 }
 
-func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error) (err error) {
+func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error) error {
+	if maxBlockNum > br.maxScheduledBlock.Load() {
+		br.maxScheduledBlock.Store(maxBlockNum)
+	}
 	includeBor := br.chainConfig.Bor != nil
-	minBlockNum = cmp.Max(br.blockReader.FrozenBlocks(), minBlockNum)
+
+	var err error
 	if includeBor {
 		// "bor snaps" can be behind "block snaps", it's ok: for example because of `kill -9` in the middle of merge
-		_, err := br.retireBorBlocks(ctx, br.blockReader.FrozenBorBlocks(), minBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
-		if err != nil {
-			return err
+		// just build everything until `FrozenBlocks()`
+		for {
+			var okBor bool
+			minBlockNum = cmp.Max(br.blockReader.FrozenBlocks(), minBlockNum)
+			okBor, err = br.retireBorBlocks(ctx, br.blockReader.FrozenBorBlocks(), minBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+			if err != nil {
+				return err
+			}
+			if !okBor {
+				break
+			}
 		}
 	}
 
-	_, err = br.retireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
-	if err != nil {
-		return err
-	}
+	for {
+		var ok, okBor bool
 
-	if includeBor {
-		minBorBlockNum := cmp.Max(br.blockReader.FrozenBorBlocks(), minBlockNum)
-		_, err = br.retireBorBlocks(ctx, minBorBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+		minBlockNum = cmp.Max(br.blockReader.FrozenBlocks(), minBlockNum)
+		maxBlockNum = br.maxScheduledBlock.Load()
+		ok, err = br.retireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 		if err != nil {
 			return err
 		}
-	}
 
+		if includeBor {
+			minBorBlockNum := cmp.Max(br.blockReader.FrozenBorBlocks(), minBlockNum)
+			okBor, err = br.retireBorBlocks(ctx, minBorBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+			if err != nil {
+				return err
+			}
+		}
+
+		if !(ok || okBor) {
+			break
+		}
+	}
 	return nil
 }
 
