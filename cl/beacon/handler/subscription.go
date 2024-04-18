@@ -55,7 +55,6 @@ func (a *ApiHandler) PostEthV1ValidatorSyncCommitteeSubscriptions(w http.Respons
 			}
 		} else {
 			syncnets, err = subnets.ComputeSubnetsForSyncCommittee(headState, subRequest.ValidatorIndex)
-			fmt.Println(syncnets)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
@@ -65,7 +64,7 @@ func (a *ApiHandler) PostEthV1ValidatorSyncCommitteeSubscriptions(w http.Respons
 		// subscribe to subnets
 		for _, subnet := range syncnets {
 			if _, err := a.sentinel.SetSubscribeExpiry(r.Context(), &sentinel.RequestSubscribeExpiry{
-				Topic:          fmt.Sprintf(gossip.TopicNamePrefixSyncCommittee, subnet),
+				Topic:          gossip.TopicNameSyncCommittee(int(subnet)),
 				ExpiryUnixSecs: uint64(expiry.Unix()),
 			}); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
