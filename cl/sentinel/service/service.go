@@ -110,7 +110,7 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 			if msg.SubnetId == nil {
 				return nil, fmt.Errorf("subnetId is required for sync_committee")
 			}
-			subscription = manager.GetMatchingSubscription(gossip.TopicNameBlobSidecar(*msg.SubnetId))
+			subscription = manager.GetMatchingSubscription(gossip.TopicNameSyncCommittee(int(*msg.SubnetId)))
 		case gossip.IsTopicBeaconAttestation(msg.Name):
 			if msg.SubnetId == nil {
 				return nil, fmt.Errorf("subnetId is required for beacon attestation")

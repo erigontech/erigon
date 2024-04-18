@@ -317,22 +317,22 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 				break
 			}
 			// Broadcast to gossip
-			// if a.sentinel != nil {
-			// 	encodedSSZ, err := v.EncodeSSZ(nil)
-			// 	if err != nil {
-			// 		http.Error(w, err.Error(), http.StatusInternalServerError)
-			// 		return
-			// 	}
-			// 	subnetId := subnet // this effectively makes a copy
-			// 	if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
-			// 		Data:     encodedSSZ,
-			// 		Name:     gossip.TopicNamePrefixSyncCommittee,
-			// 		SubnetId: &subnetId,
-			// 	}); err != nil {
-			// 		http.Error(w, err.Error(), http.StatusInternalServerError)
-			// 		return
-			// 	}
-			// }
+			if a.sentinel != nil {
+				encodedSSZ, err := v.EncodeSSZ(nil)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				subnetId := subnet // this effectively makes a copy
+				if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
+					Data:     encodedSSZ,
+					Name:     gossip.TopicNamePrefixSyncCommittee,
+					SubnetId: &subnetId,
+				}); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+			}
 		}
 	}
 	if len(failures) > 0 {
