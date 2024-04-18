@@ -2315,7 +2315,7 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	}
 
 	// if we don't have the torrent file we build it if we have the .seg file
-	err := BuildTorrentIfNeed(ctx, name, d.SnapDir(), d.torrentFiles)
+	_, err := BuildTorrentIfNeed(ctx, name, d.SnapDir(), d.torrentFiles)
 	if err != nil {
 		return fmt.Errorf("AddNewSeedableFile: %w", err)
 	}
@@ -2526,7 +2526,8 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 	return eg.Wait()
 }
 func (d *Downloader) BuildTorrentFilesIfNeed(ctx context.Context, chain string, ignore snapcfg.Preverified) error {
-	return BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs, d.torrentFiles, chain, ignore)
+	_, err := BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs, d.torrentFiles, chain, ignore)
+	return err
 }
 func (d *Downloader) Stats() AggStats {
 	d.lock.RLock()
