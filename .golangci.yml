@@ -65,6 +65,7 @@ linters-settings:
       - paramTypeCombine
       - builtinShadow
       - typeUnparen
+      - sprintfQuotedString
 
     settings:
       ruleguard:
