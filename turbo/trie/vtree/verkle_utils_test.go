@@ -1,9 +1,9 @@
 package vtree
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"math/big"
-	"math/rand"
 	"testing"
 )
 
@@ -16,7 +16,7 @@ func BenchmarkPedersenHash(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		rand.Read(v[:])
 		rand.Read(addr[:])
-		GetTreeKeyCodeSize(addr[:])
+		CodeSizeKey(addr[:])
 	}
 }
 

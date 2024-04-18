@@ -27,7 +27,7 @@ import (
 	"reflect"
 	"sync/atomic"
 
-	"github.com/gballet/go-verkle"
+	"github.com/ethereum/go-verkle"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
@@ -108,7 +108,7 @@ type Header struct {
 	// The verkle proof is ignored in legacy headers
 	Verkle        bool
 	VerkleProof   []byte
-	VerkleKeyVals []verkle.KeyValuePair
+	VerkleKeyVals []verkle.StateDiff
 }
 
 func (h *Header) EncodingSize() int {

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/anacrolix/sync"
-	"github.com/gballet/go-verkle"
+	"github.com/ethereum/go-verkle"
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -31,7 +31,7 @@ func int256ToVerkleFormat(x *uint256.Int, buffer []byte) {
 func flushVerkleNode(db kv.RwTx, node verkle.VerkleNode, logInterval *time.Ticker, key []byte, logger log.Logger) error {
 	var err error
 	totalInserted := 0
-	node.(*verkle.InternalNode).Flush(func(node verkle.VerkleNode) {
+	node.(*verkle.InternalNode).Flush(func(_ []byte, node verkle.VerkleNode) {
 		if err != nil {
 			return
 		}
@@ -53,7 +53,7 @@ func flushVerkleNode(db kv.RwTx, node verkle.VerkleNode, logInterval *time.Ticke
 func collectVerkleNode(collector *etl.Collector, node verkle.VerkleNode, logInterval *time.Ticker, key []byte, logger log.Logger) error {
 	var err error
 	totalInserted := 0
-	node.(*verkle.InternalNode).Flush(func(node verkle.VerkleNode) {
+	node.(*verkle.InternalNode).Flush(func(_ []byte, node verkle.VerkleNode) {
 		if err != nil {
 			return
 		}
@@ -198,21 +198,7 @@ func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() (libcommon.Hash, error)
 		if len(val) == 0 {
 			return next(k, nil, nil)
 		}
-		if err := root.InsertOrdered(libcommon.CopyBytes(k), libcommon.CopyBytes(val), func(node verkle.VerkleNode) {
-			rootHash := node.Commitment().Bytes()
-			encodedNode, err := node.Serialize()
-			if err != nil {
-				panic(err)
-			}
-			if err := verkleCollector.Collect(rootHash[:], encodedNode); err != nil {
-				panic(err)
-			}
-			select {
-			case <-logInterval.C:
-				v.logger.Info("[Verkle] Assembling Verkle Tree", "key", common.Bytes2Hex(k))
-			default:
-			}
-		}); err != nil {
+		if err := root.Insert(libcommon.CopyBytes(k), libcommon.CopyBytes(val), nil); err != nil {
 			return err
 		}
 		return next(k, nil, nil)

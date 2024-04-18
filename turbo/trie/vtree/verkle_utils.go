@@ -1,12 +1,18 @@
 package vtree
 
 import (
+	"encoding/binary"
+	"sync"
+
 	"github.com/crate-crypto/go-ipa/bandersnatch/fr"
-	"github.com/gballet/go-verkle"
+	"github.com/ethereum/go-verkle"
+	lru "github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
 )
 
 const (
+	// The spec of verkle key encoding can be found here.
+	// https://notes.ethereum.org/@vbuterin/verkle_tree_eip#Tree-embedding
 	VersionLeafKey    = 0
 	BalanceLeafKey    = 1
 	NonceLeafKey      = 2
@@ -15,22 +21,63 @@ const (
 )
 
 var (
-	zero                = uint256.NewInt(0)
-	HeaderStorageOffset = uint256.NewInt(64)
-	CodeOffset          = uint256.NewInt(128)
-	MainStorageOffset   = new(uint256.Int).Lsh(uint256.NewInt(256), 31)
-	VerkleNodeWidth     = uint256.NewInt(256)
-	codeStorageDelta    = uint256.NewInt(0).Sub(CodeOffset, HeaderStorageOffset)
+	zero                                = uint256.NewInt(0)
+	verkleNodeWidthLog2                 = 8
+	headerStorageOffset                 = uint256.NewInt(64)
+	mainStorageOffsetLshVerkleNodeWidth = new(uint256.Int).Lsh(uint256.NewInt(256), 31-uint(verkleNodeWidthLog2))
+	codeOffset                          = uint256.NewInt(128)
+	verkleNodeWidth                     = uint256.NewInt(256)
+	codeStorageDelta                    = uint256.NewInt(0).Sub(codeOffset, headerStorageOffset)
 
-	getTreePolyIndex0Point *verkle.Point
+	index0Point *verkle.Point // pre-computed commitment of polynomial [2+256*64]getTreePolyIndex0Point *verkle.Point
 )
 
 func init() {
-	getTreePolyIndex0Point = new(verkle.Point)
-	err := getTreePolyIndex0Point.SetBytes([]byte{34, 25, 109, 242, 193, 5, 144, 224, 76, 52, 189, 92, 197, 126, 9, 145, 27, 152, 199, 130, 165, 3, 210, 27, 193, 131, 142, 28, 110, 26, 16, 191})
+	// The byte array is the Marshalled output of the point computed as such:
+	//
+	// 	var (
+	//		config = verkle.GetConfig()
+	//		fr     verkle.Fr
+	//	)
+	//	verkle.FromLEBytes(&fr, []byte{2, 64})
+	//	point := config.CommitToPoly([]verkle.Fr{fr}, 1)
+	index0Point = new(verkle.Point)
+	err := index0Point.SetBytes([]byte{34, 25, 109, 242, 193, 5, 144, 224, 76, 52, 189, 92, 197, 126, 9, 145, 27, 152, 199, 130, 165, 3, 210, 27, 193, 131, 142, 28, 110, 26, 16, 191})
 	if err != nil {
 		panic(err)
 	}
+}
+
+// PointCache is the LRU cache for storing evaluated address commitment.
+type PointCache struct {
+	lru  *lru.LRU[string, *verkle.Point]
+	lock sync.RWMutex
+}
+
+// NewPointCache returns the cache with specified size.
+func NewPointCache(maxItems int) *PointCache {
+	pointcache, err := lru.NewLRU[string, *verkle.Point](maxItems, nil)
+	if err != nil {
+		panic(err)
+	}
+	return &PointCache{
+		lru: pointcache,
+	}
+}
+
+// Get returns the cached commitment for the specified address, or computing
+// it on the flight.
+func (c *PointCache) Get(addr []byte) *verkle.Point {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	p, ok := c.lru.Get(string(addr))
+	if ok {
+		return p
+	}
+	p = evaluateAddressPoint(addr)
+	c.lru.Add(string(addr), p)
+	return p
 }
 
 // GetTreeKey performs both the work of the spec's get_tree_key function, and that
@@ -43,19 +90,52 @@ func GetTreeKey(address []byte, treeIndex *uint256.Int, subIndex byte) []byte {
 		var aligned [32]byte
 		address = append(aligned[:32-len(address)], address...)
 	}
+	// poly = [2+256*64, address_le_low, address_le_high, tree_index_le_low, tree_index_le_high]
 	var poly [5]fr.Element
-
-	poly[0].SetZero()
 
 	// 32-byte address, interpreted as two little endian
 	// 16-byte numbers.
 	verkle.FromLEBytes(&poly[1], address[:16])
 	verkle.FromLEBytes(&poly[2], address[16:])
 
+	// treeIndex must be interpreted as a 32-byte aligned little-endian integer.
+	// e.g: if treeIndex is 0xAABBCC, we need the byte representation to be 0xCCBBAA00...00.
+	// poly[3] = LE({CC,BB,AA,00...0}) (16 bytes), poly[4]=LE({00,00,...}) (16 bytes).
+	//
+	// To avoid unnecessary endianness conversions for go-ipa, we do some trick:
+	// - poly[3]'s byte representation is the same as the *top* 16 bytes (trieIndexBytes[16:]) of
+	//   32-byte aligned big-endian representation (BE({00,...,AA,BB,CC})).
+	// - poly[4]'s byte representation is the same as the *low* 16 bytes (trieIndexBytes[:16]) of
+	//   the 32-byte aligned big-endian representation (BE({00,00,...}).
+	trieIndexBytes := treeIndex.Bytes32()
+	verkle.FromBytes(&poly[3], trieIndexBytes[16:])
+	verkle.FromBytes(&poly[4], trieIndexBytes[:16])
+
+	cfg := verkle.GetConfig()
+	ret := cfg.CommitToPoly(poly[:], 0)
+
+	// add a constant point corresponding to poly[0]=[2+256*64].
+	ret.Add(ret, index0Point)
+
+	return pointToHash(ret, subIndex)
+}
+
+// GetTreeKeyWithEvaluatedAddress is basically identical to GetTreeKey, the only
+// difference is a part of polynomial is already evaluated.
+//
+// Specifically, poly = [2+256*64, address_le_low, address_le_high] is already
+// evaluated.
+func GetTreeKeyWithEvaluatedAddress(evaluated *verkle.Point, treeIndex *uint256.Int, subIndex byte) []byte {
+	var poly [5]fr.Element
+
+	poly[0].SetZero()
+	poly[1].SetZero()
+	poly[2].SetZero()
+
 	// little-endian, 32-byte aligned treeIndex
 	var index [32]byte
-	for i, b := range treeIndex.Bytes() {
-		index[len(treeIndex.Bytes())-1-i] = b
+	for i := 0; i < len(treeIndex); i++ {
+		binary.LittleEndian.PutUint64(index[i*8:(i+1)*8], treeIndex[i])
 	}
 	verkle.FromLEBytes(&poly[3], index[:16])
 	verkle.FromLEBytes(&poly[4], index[16:])
@@ -63,96 +143,71 @@ func GetTreeKey(address []byte, treeIndex *uint256.Int, subIndex byte) []byte {
 	cfg := verkle.GetConfig()
 	ret := cfg.CommitToPoly(poly[:], 0)
 
-	// add a constant point
-	ret.Add(ret, getTreePolyIndex0Point)
+	// add the pre-evaluated address
+	ret.Add(ret, evaluated)
 
-	return PointToHash(ret, subIndex)
-
+	return pointToHash(ret, subIndex)
 }
 
-func GetTreeKeyAccountLeaf(address []byte, leaf byte) []byte {
-	return GetTreeKey(address, zero, leaf)
-}
-
-func GetTreeKeyVersion(address []byte) []byte {
+// VersionKey returns the verkle tree key of the version field for the specified account.
+func VersionKey(address []byte) []byte {
 	return GetTreeKey(address, zero, VersionLeafKey)
 }
 
-func GetTreeKeyBalance(address []byte) []byte {
+// BalanceKey returns the verkle tree key of the balance field for the specified account.
+func BalanceKey(address []byte) []byte {
 	return GetTreeKey(address, zero, BalanceLeafKey)
 }
 
-func GetTreeKeyNonce(address []byte) []byte {
+// NonceKey returns the verkle tree key of the nonce field for the specified account.
+func NonceKey(address []byte) []byte {
 	return GetTreeKey(address, zero, NonceLeafKey)
 }
 
-func GetTreeKeyCodeKeccak(address []byte) []byte {
+// CodeKeccakKey returns the verkle tree key of the code keccak field for
+// the specified account.
+func CodeKeccakKey(address []byte) []byte {
 	return GetTreeKey(address, zero, CodeKeccakLeafKey)
 }
 
-func GetTreeKeyCodeSize(address []byte) []byte {
+// CodeSizeKey returns the verkle tree key of the code size field for the
+// specified account.
+func CodeSizeKey(address []byte) []byte {
 	return GetTreeKey(address, zero, CodeSizeLeafKey)
 }
 
-func GetTreeKeyCodeChunk(address []byte, chunk *uint256.Int) []byte {
-	chunkOffset := new(uint256.Int).Add(CodeOffset, chunk)
-	treeIndex := new(uint256.Int).Div(chunkOffset, VerkleNodeWidth)
-	subIndexMod := new(uint256.Int).Mod(chunkOffset, VerkleNodeWidth).Bytes()
+func codeChunkIndex(chunk *uint256.Int) (*uint256.Int, byte) {
+	var (
+		chunkOffset = new(uint256.Int).Add(codeOffset, chunk)
+		treeIndex   = new(uint256.Int).Div(chunkOffset, verkleNodeWidth)
+		subIndexMod = new(uint256.Int).Mod(chunkOffset, verkleNodeWidth)
+	)
 	var subIndex byte
 	if len(subIndexMod) != 0 {
-		subIndex = subIndexMod[0]
+		subIndex = byte(subIndexMod[0])
 	}
+	return treeIndex, subIndex
+}
+
+// CodeChunkKey returns the verkle tree key of the code chunk for the
+// specified account.
+func CodeChunkKey(address []byte, chunk *uint256.Int) []byte {
+	treeIndex, subIndex := codeChunkIndex(chunk)
 	return GetTreeKey(address, treeIndex, subIndex)
 }
 
-func GetTreeKeyStorageSlot(address []byte, storageKey *uint256.Int) []byte {
-	pos := storageKey.Clone()
-	if storageKey.Cmp(codeStorageDelta) < 0 {
-		pos.Add(HeaderStorageOffset, storageKey)
-	} else {
-		pos.Add(MainStorageOffset, storageKey)
-	}
-	treeIndex := new(uint256.Int).Div(pos, VerkleNodeWidth)
+// ChunkedCode represents a sequence of 32-bytes chunks of code (31 bytes of which
+// are actual code, and 1 byte is the pushdata offset).
+type ChunkedCode []byte
 
-	// calculate the sub_index, i.e. the index in the stem tree.
-	// Because the modulus is 256, it's the last byte of treeIndex
-	subIndexMod := new(uint256.Int).Mod(pos, VerkleNodeWidth).Bytes()
-	var subIndex byte
-	if len(subIndexMod) != 0 {
-		// uint256 is broken into 4 little-endian quads,
-		// each with native endianness. Extract the least
-		// significant byte.
-		subIndex = subIndexMod[0] & 0xFF
-	}
-	return GetTreeKey(address, treeIndex, subIndex)
-}
-
-func PointToHash(evaluated *verkle.Point, suffix byte) []byte {
-	// The output of Byte() is big engian for banderwagon. This
-	// introduces an imbalance in the tree, because hashes are
-	// elements of a 253-bit field. This means more than half the
-	// tree would be empty. To avoid this problem, use a little
-	// endian commitment and chop the MSB.
-	retb := evaluated.Bytes()
-	for i := 0; i < 16; i++ {
-		retb[31-i], retb[i] = retb[i], retb[31-i]
-	}
-	retb[31] = suffix
-	return retb[:]
-}
-
+// Copy the values here so as to avoid an import cycle
 const (
 	PUSH1  = byte(0x60)
-	PUSH3  = byte(0x62)
-	PUSH4  = byte(0x63)
-	PUSH7  = byte(0x66)
-	PUSH21 = byte(0x74)
-	PUSH30 = byte(0x7d)
 	PUSH32 = byte(0x7f)
 )
 
 // ChunkifyCode generates the chunked version of an array representing EVM bytecode
-func ChunkifyCode(code []byte) []byte {
+func ChunkifyCode(code []byte) ChunkedCode {
 	var (
 		chunkOffset = 0 // offset in the chunk
 		chunkCount  = len(code) / 31
@@ -163,21 +218,16 @@ func ChunkifyCode(code []byte) []byte {
 	}
 	chunks := make([]byte, chunkCount*32)
 	for i := 0; i < chunkCount; i++ {
-		// number of bytes to copy, 31 unless
-		// the end of the code has been reached.
+		// number of bytes to copy, 31 unless the end of the code has been reached.
 		end := 31 * (i + 1)
 		if len(code) < end {
 			end = len(code)
 		}
+		copy(chunks[i*32+1:], code[31*i:end]) // copy the code itself
 
-		// Copy the code itself
-		copy(chunks[i*32+1:], code[31*i:end])
-
-		// chunk offset = taken from the
-		// last chunk.
+		// chunk offset = taken from the last chunk.
 		if chunkOffset > 31 {
-			// skip offset calculation if push
-			// data covers the whole chunk
+			// skip offset calculation if push data covers the whole chunk
 			chunks[i*32] = 31
 			chunkOffset = 1
 			continue
@@ -185,8 +235,8 @@ func ChunkifyCode(code []byte) []byte {
 		chunks[32*i] = byte(chunkOffset)
 		chunkOffset = 0
 
-		// Check each instruction and update the offset
-		// it should be 0 unless a PUSHn overflows.
+		// Check each instruction and update the offset it should be 0 unless
+		// a PUSH-N overflows.
 		for ; codeOffset < end; codeOffset++ {
 			if code[codeOffset] >= PUSH1 && code[codeOffset] <= PUSH32 {
 				codeOffset += int(code[codeOffset] - PUSH1 + 1)
@@ -198,6 +248,122 @@ func ChunkifyCode(code []byte) []byte {
 			}
 		}
 	}
-
 	return chunks
+}
+
+func StorageIndex(bytes []byte) (*uint256.Int, byte) {
+	// If the storage slot is in the header, we need to add the header offset.
+	var key uint256.Int
+	key.SetBytes(bytes)
+	if key.Cmp(codeStorageDelta) < 0 {
+		// This addition is always safe; it can't ever overflow since pos<codeStorageDelta.
+		key.Add(headerStorageOffset, &key)
+
+		// In this branch, the tree-index is zero since we're in the account header,
+		// and the sub-index is the LSB of the modified storage key.
+		return zero, byte(key[0] & 0xFF)
+	}
+	// We first divide by VerkleNodeWidth to create room to avoid an overflow next.
+	key.Rsh(&key, uint(verkleNodeWidthLog2))
+
+	// We add mainStorageOffset/VerkleNodeWidth which can't overflow.
+	key.Add(&key, mainStorageOffsetLshVerkleNodeWidth)
+
+	// The sub-index is the LSB of the original storage key, since mainStorageOffset
+	// doesn't affect this byte, so we can avoid masks or shifts.
+	return &key, byte(key[0] & 0xFF)
+}
+
+// StorageSlotKey returns the verkle tree key of the storage slot for the
+// specified account.
+func StorageSlotKey(address []byte, storageKey []byte) []byte {
+	treeIndex, subIndex := StorageIndex(storageKey)
+	return GetTreeKey(address, treeIndex, subIndex)
+}
+
+// VersionKeyWithEvaluatedAddress returns the verkle tree key of the version
+// field for the specified account. The difference between VersionKey is the
+// address evaluation is already computed to minimize the computational overhead.
+func VersionKeyWithEvaluatedAddress(evaluated *verkle.Point) []byte {
+	return GetTreeKeyWithEvaluatedAddress(evaluated, zero, VersionLeafKey)
+}
+
+// BalanceKeyWithEvaluatedAddress returns the verkle tree key of the balance
+// field for the specified account. The difference between BalanceKey is the
+// address evaluation is already computed to minimize the computational overhead.
+func BalanceKeyWithEvaluatedAddress(evaluated *verkle.Point) []byte {
+	return GetTreeKeyWithEvaluatedAddress(evaluated, zero, BalanceLeafKey)
+}
+
+// NonceKeyWithEvaluatedAddress returns the verkle tree key of the nonce
+// field for the specified account. The difference between NonceKey is the
+// address evaluation is already computed to minimize the computational overhead.
+func NonceKeyWithEvaluatedAddress(evaluated *verkle.Point) []byte {
+	return GetTreeKeyWithEvaluatedAddress(evaluated, zero, NonceLeafKey)
+}
+
+// CodeKeccakKeyWithEvaluatedAddress returns the verkle tree key of the code
+// keccak for the specified account. The difference between CodeKeccakKey is the
+// address evaluation is already computed to minimize the computational overhead.
+func CodeKeccakKeyWithEvaluatedAddress(evaluated *verkle.Point) []byte {
+	return GetTreeKeyWithEvaluatedAddress(evaluated, zero, CodeKeccakLeafKey)
+}
+
+// CodeSizeKeyWithEvaluatedAddress returns the verkle tree key of the code
+// size for the specified account. The difference between CodeSizeKey is the
+// address evaluation is already computed to minimize the computational overhead.
+func CodeSizeKeyWithEvaluatedAddress(evaluated *verkle.Point) []byte {
+	return GetTreeKeyWithEvaluatedAddress(evaluated, zero, CodeSizeLeafKey)
+}
+
+// CodeChunkKeyWithEvaluatedAddress returns the verkle tree key of the code
+// chunk for the specified account. The difference between CodeChunkKey is the
+// address evaluation is already computed to minimize the computational overhead.
+func CodeChunkKeyWithEvaluatedAddress(addressPoint *verkle.Point, chunk *uint256.Int) []byte {
+	treeIndex, subIndex := codeChunkIndex(chunk)
+	return GetTreeKeyWithEvaluatedAddress(addressPoint, treeIndex, subIndex)
+}
+
+// StorageSlotKeyWithEvaluatedAddress returns the verkle tree key of the storage
+// slot for the specified account. The difference between StorageSlotKey is the
+// address evaluation is already computed to minimize the computational overhead.
+func StorageSlotKeyWithEvaluatedAddress(evaluated *verkle.Point, storageKey []byte) []byte {
+	treeIndex, subIndex := StorageIndex(storageKey)
+	return GetTreeKeyWithEvaluatedAddress(evaluated, treeIndex, subIndex)
+}
+
+func pointToHash(evaluated *verkle.Point, suffix byte) []byte {
+	// The output of Byte() is big endian for banderwagon. This
+	// introduces an imbalance in the tree, because hashes are
+	// elements of a 253-bit field. This means more than half the
+	// tree would be empty. To avoid this problem, use a little
+	// endian commitment and chop the MSB.
+	bytes := evaluated.Bytes()
+	for i := 0; i < 16; i++ {
+		bytes[31-i], bytes[i] = bytes[i], bytes[31-i]
+	}
+	bytes[31] = suffix
+	return bytes[:]
+}
+
+func evaluateAddressPoint(address []byte) *verkle.Point {
+	if len(address) < 32 {
+		var aligned [32]byte
+		address = append(aligned[:32-len(address)], address...)
+	}
+	var poly [3]fr.Element
+
+	poly[0].SetZero()
+
+	// 32-byte address, interpreted as two little endian
+	// 16-byte numbers.
+	verkle.FromLEBytes(&poly[1], address[:16])
+	verkle.FromLEBytes(&poly[2], address[16:])
+
+	cfg := verkle.GetConfig()
+	ret := cfg.CommitToPoly(poly[:], 0)
+
+	// add a constant point
+	ret.Add(ret, index0Point)
+	return ret
 }

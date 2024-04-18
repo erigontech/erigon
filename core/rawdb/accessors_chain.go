@@ -28,7 +28,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
-	"github.com/gballet/go-verkle"
+	"github.com/ethereum/go-verkle"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -1503,7 +1503,7 @@ func ReadVerkleNode(tx kv.RwTx, root common.Hash) (verkle.VerkleNode, error) {
 	if len(encoded) == 0 {
 		return verkle.New(), nil
 	}
-	return verkle.ParseNode(encoded, 0, root[:])
+	return verkle.ParseNode(encoded, 0)
 }
 func WriteDBSchemaVersion(tx kv.RwTx) error {
 	var version [12]byte
