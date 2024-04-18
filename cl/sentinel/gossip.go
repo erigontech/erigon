@@ -153,13 +153,13 @@ func (s *GossipManager) GetMatchingSubscription(match string) *GossipSubscriptio
 	var sub *GossipSubscription
 	s.subscriptions.Range(func(topic, value interface{}) bool {
 		topicStr := topic.(string)
-		fmt.Println("topicStr", topicStr)
 		// take out third part of the topic by splitting on "/"
 		// reference: eth2/d31f6191/beacon_attestation_45/ssz_snappy
 		parts := strings.Split(topicStr, "/")
 		if len(parts) < 3 {
 			return true
 		}
+		fmt.Println("parts[2]", parts[2], match)
 		if parts[2] == match {
 			sub = value.(*GossipSubscription)
 			return false
