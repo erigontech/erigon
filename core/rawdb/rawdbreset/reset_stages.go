@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string, logger log.Logger) error {
