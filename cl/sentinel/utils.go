@@ -167,14 +167,15 @@ func (s *Sentinel) updateENROnSubscription(topicName string, subscribe bool) {
 	}
 	part := parts[3]
 	for i := 0; i < int(s.cfg.NetworkConfig.AttestationSubnetCount); i++ {
-
 		if part == fmt.Sprintf(gossip.TopicNamePrefixBeaconAttestation, i) {
+			log.Debug("[Sentinel] Update ENR on subscription", "subnet", i, "subscribe", subscribe, "type", "attestation")
 			s.updateENRAttSubnets(i, subscribe)
 			return
 		}
 	}
 	for i := 0; i < int(s.cfg.BeaconConfig.SyncCommitteeSubnetCount); i++ {
 		if part == fmt.Sprintf(gossip.TopicNamePrefixSyncCommittee, i) {
+			log.Debug("[Sentinel] Update ENR on subscription", "subnet", i, "subscribe", subscribe, "type", "syncnets")
 			s.updateENRSyncNets(i, subscribe)
 			return
 		}
