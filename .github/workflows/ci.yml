@@ -72,6 +72,13 @@ jobs:
       - name: Test
         run: make test
 
+      - name: SonarCloud
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        continue-on-error: true
+
   tests-windows:
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     strategy:
