@@ -97,6 +97,7 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 		gossip.TopicNameBeaconAggregateAndProof,
 		gossip.TopicNameVoluntaryExit,
 		gossip.TopicNameProposerSlashing,
+		gossip.TopicNameSyncCommitteeContributionAndProof,
 		gossip.TopicNameAttesterSlashing:
 		subscription = manager.GetMatchingSubscription(msg.Name)
 	default:
