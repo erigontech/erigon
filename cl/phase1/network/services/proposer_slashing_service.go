@@ -30,7 +30,13 @@ func NewProposerSlashingService(
 	beaconCfg *clparams.BeaconChainConfig,
 	ethClock eth_clock.EthereumClock,
 ) *proposerSlashingService {
-	return &proposerSlashingService{}
+	return &proposerSlashingService{
+		operationsPool:    operationsPool,
+		emitters:          emitters,
+		syncedDataManager: syncedDataManager,
+		beaconCfg:         beaconCfg,
+		ethClock:          ethClock,
+	}
 }
 
 func (s *proposerSlashingService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.ProposerSlashing) error {
