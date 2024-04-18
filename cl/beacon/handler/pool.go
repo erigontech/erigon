@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
@@ -62,20 +61,11 @@ func (a *ApiHandler) GetEthV1BeaconPoolAttestations(w http.ResponseWriter, r *ht
 
 func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *http.Request) {
 	req := []*solid.Attestation{}
-	// buf, err := io.ReadAll(r.Body)
-	// if err != nil {
-	// 	beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
-	// 	return
-	// }
-	// fmt.Println(string(buf))
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
-	// if err := json.Unmarshal(buf, &req); err != nil {
-	// 	beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
-	// 	return
-	// }
+
 	headState := a.syncedData.HeadState()
 	if headState == nil {
 		beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("head state not available")).WriteTo(w)
@@ -326,7 +316,6 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 				failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 				break
 			}
-			fmt.Println("sync_committees", err)
 			// Broadcast to gossip
 			if a.sentinel != nil {
 				encodedSSZ, err := v.EncodeSSZ(nil)
@@ -379,7 +368,6 @@ func (a *ApiHandler) PostEthV1ValidatorContributionsAndProofs(w http.ResponseWri
 			failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 			continue
 		}
-		fmt.Println("sync contribution", err)
 		// Broadcast to gossip
 		if a.sentinel != nil {
 			encodedSSZ, err := v.EncodeSSZ(nil)
