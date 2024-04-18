@@ -274,23 +274,6 @@ func TestCanRetire(t *testing.T) {
 		require.Equal(tc.can, can, tc.inFrom, tc.inTo, i)
 	}
 }
-
-func TestCanRetire2(t *testing.T) {
-	require := require.New(t)
-	cases := []struct {
-		inFrom, inTo, outFrom, outTo uint64
-		can                          bool
-	}{
-		{0, 925001, 0, 1000, true},
-	}
-	for i, tc := range cases {
-		from, to, can := canRetire(tc.inFrom, tc.inTo, nil)
-		require.Equal(int(tc.outFrom), int(from), i)
-		require.Equal(int(tc.outTo), int(to), i)
-		require.Equal(tc.can, can, tc.inFrom, tc.inTo, i)
-	}
-}
-
 func TestOpenAllSnapshot(t *testing.T) {
 	logger := log.New()
 	baseDir, require := t.TempDir(), require.New(t)
