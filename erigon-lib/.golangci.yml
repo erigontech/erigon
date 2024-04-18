@@ -41,12 +41,10 @@ linters-settings:
     # By default list of stable checks is used.
     enabled-checks:
       - ruleguard
-    #      - defaultCaseOrder
 
     # Which checks should be disabled; can't be combined with 'enabled-checks'; default is empty
     disabled-checks:
       - regexpMust
-      #      - hugeParam
       - rangeValCopy
       - exitAfterDefer
       - elseif
@@ -69,9 +67,9 @@ linters-settings:
     #      - opinionated
     disabled-tags:
       - experimental
-    ruleguard:
-      rules: "rules.go"
     settings:
+      ruleguard:
+        rules: "rules.go"
       hugeParam:
         # size in bytes that makes the warning trigger (default 80)
         sizeThreshold: 1000

@@ -48,7 +48,6 @@ linters-settings:
     # By default list of stable checks is used.
     enabled-checks:
       - ruleguard
-      # - defaultCaseOrder
 
     # Which checks should be disabled; can't be combined with 'enabled-checks'; default is empty
     disabled-checks:
