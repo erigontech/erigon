@@ -516,7 +516,7 @@ type Rules struct {
 	IsByzantium, IsConstantinople, IsPetersburg       bool
 	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
 	IsCancun, IsNapoli                                bool
-	IsPrague, isOsaka                                 bool
+	IsPrague, IsOsaka                                 bool
 	IsAura                                            bool
 }
 
@@ -543,7 +543,7 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsCancun:           c.IsCancun(time),
 		IsNapoli:           c.IsNapoli(num),
 		IsPrague:           c.IsPrague(time),
-		isOsaka:            c.IsOsaka(time),
+		IsOsaka:            c.IsOsaka(time),
 		IsAura:             c.Aura != nil,
 	}
 }
