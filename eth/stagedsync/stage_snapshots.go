@@ -429,7 +429,6 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 		defer tx.Rollback()
 	}
 
-	log.Warn("[dbg] SnapshotsPrune0")
 	freezingCfg := cfg.blockReader.FreezingCfg()
 	if freezingCfg.Enabled {
 		if freezingCfg.Produce {
@@ -456,7 +455,6 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 			} else {
 				cfg.blockRetire.SetWorkers(1)
 			}
-			log.Warn("[dbg] SnapshotsPrune1")
 
 			cfg.blockRetire.RetireBlocksInBackground(ctx, minBlockNumber, s.ForwardProgress, log.LvlDebug, func(downloadRequest []services.DownloadRequest) error {
 				if cfg.snapshotDownloader != nil && !reflect.ValueOf(cfg.snapshotDownloader).IsNil() {

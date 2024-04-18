@@ -1353,14 +1353,11 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum
 		defer br.working.Store(false)
 
 		if br.snBuildAllowed != nil {
-			log.Warn("[dbg] ack blocks")
 			//we are inside own goroutine - it's fine to block here
 			if err := br.snBuildAllowed.Acquire(ctx, 1); err != nil {
-				log.Warn("[dbg] ack blocks", "err", err)
 				br.logger.Warn("[snapshots] retire blocks", "err", err)
 				return
 			}
-			log.Warn("[dbg] ack blocks success")
 			defer br.snBuildAllowed.Release(1)
 		}
 
