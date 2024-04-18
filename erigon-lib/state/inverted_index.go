@@ -337,10 +337,10 @@ func (ii *InvertedIndex) BuildMissedIndices(ctx context.Context, g *errgroup.Gro
 }
 
 func (ii *InvertedIndex) openFiles() error {
-	var err error
 	var invalidFileItems []*filesItem
 	invalidFileItemsLock := sync.Mutex{}
 	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
+		var err error
 		for _, item := range items {
 			item := item
 			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep

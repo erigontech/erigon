@@ -330,11 +330,10 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 	}
 	d.wordsStart = pos + dictSize
 
-	//TODO: seems always failing. Example: my v1-storage.1344-1408.v has d.Count()=169365, dictSize=17146, d.size=121067938, compressedMinSize=32
-	//if d.Count() == 0 && dictSize == 0 && d.size > compressedMinSize {
-	//	return nil, &ErrCompressedFileCorrupted{
-	//		FileName: fName, Reason: fmt.Sprintf("size %v but no words in it", datasize.ByteSize(d.size).HR())}
-	//}
+	if d.Count() == 0 && dictSize == 0 && d.size > compressedMinSize {
+		return nil, &ErrCompressedFileCorrupted{
+			FileName: fName, Reason: fmt.Sprintf("size %v but no words in it", datasize.ByteSize(d.size).HR())}
+	}
 	closeDecompressor = false
 	return d, nil
 }
