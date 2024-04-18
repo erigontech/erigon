@@ -16,7 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/pkg/errors"
 	"golang.org/x/exp/slices"
 )
@@ -31,17 +30,19 @@ type aggregateAndProofServiceImpl struct {
 	forkchoiceStore   forkchoice.ForkChoiceStorage
 	beaconCfg         *clparams.BeaconChainConfig
 	aggregationPool   aggregation.AggregationPool
+	test              bool
 
 	// set of aggregates that are scheduled for later processing
 	aggregatesScheduledForLaterExecution sync.Map
 }
 
-func NewAggregateAndProofService(ctx context.Context, syncedDataManager *synced_data.SyncedDataManager, forkchoiceStore forkchoice.ForkChoiceStorage, beaconCfg *clparams.BeaconChainConfig, aggregationPool aggregation.AggregationPool) AggregateAndProofService {
+func NewAggregateAndProofService(ctx context.Context, syncedDataManager *synced_data.SyncedDataManager, forkchoiceStore forkchoice.ForkChoiceStorage, beaconCfg *clparams.BeaconChainConfig, aggregationPool aggregation.AggregationPool, test bool) AggregateAndProofService {
 	a := &aggregateAndProofServiceImpl{
 		syncedDataManager: syncedDataManager,
 		forkchoiceStore:   forkchoiceStore,
 		beaconCfg:         beaconCfg,
 		aggregationPool:   aggregationPool,
+		test:              test,
 	}
 	go a.loop(ctx)
 	return a
@@ -50,7 +51,7 @@ func NewAggregateAndProofService(ctx context.Context, syncedDataManager *synced_
 func (a *aggregateAndProofServiceImpl) ProcessMessage(ctx context.Context, subnet *uint64, aggregateAndProof *cltypes.SignedAggregateAndProof) error {
 	headState := a.syncedDataManager.HeadState()
 	if headState == nil {
-		return nil
+		return ErrIgnore
 	}
 	selectionProof := aggregateAndProof.Message.SelectionProof
 	aggregateData := aggregateAndProof.Message.Aggregate.AttestantionData()
@@ -93,23 +94,26 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(ctx context.Context, subne
 		return err
 	}
 
+	// [REJECT] The aggregator's validator index is within the committee -- i.e. aggregate_and_proof.aggregator_index in get_beacon_committee(state, aggregate.data.slot, index).
+	if !slices.Contains(committee, aggregateAndProof.Message.AggregatorIndex) {
+		return fmt.Errorf("committee index not in committee")
+	}
+	// [REJECT] The aggregate attestation's target block is an ancestor of the block named in the LMD vote -- i.e. get_checkpoint_block(store, aggregate.data.beacon_block_root, aggregate.data.target.epoch) == aggregate.data.target.root
+	if a.forkchoiceStore.Ancestor(aggregateData.BeaconBlockRoot(), epoch*a.beaconCfg.SlotsPerEpoch) != target.BlockRoot() {
+		return fmt.Errorf("invalid target block")
+	}
+	if a.test {
+		return nil
+	}
+
 	// [REJECT] aggregate_and_proof.selection_proof selects the validator as an aggregator for the slot -- i.e. is_aggregator(state, aggregate.data.slot, index, aggregate_and_proof.selection_proof) returns True.
 	if !state.IsAggregator(a.beaconCfg, uint64(len(committee)), committeeIndex, selectionProof) {
 		log.Warn("receveived aggregate and proof from invalid aggregator")
 		return fmt.Errorf("invalid aggregate and proof")
 	}
-	// [REJECT] The aggregator's validator index is within the committee -- i.e. aggregate_and_proof.aggregator_index in get_beacon_committee(state, aggregate.data.slot, index).
-	if !slices.Contains(committee, aggregateAndProof.Message.AggregatorIndex) {
-		return fmt.Errorf("committee index not in committee")
-	}
 
 	if err := verifySignaturesOnAggregate(headState, aggregateAndProof); err != nil {
 		return err
-	}
-
-	// [REJECT] The aggregate attestation's target block is an ancestor of the block named in the LMD vote -- i.e. get_checkpoint_block(store, aggregate.data.beacon_block_root, aggregate.data.target.epoch) == aggregate.data.target.root
-	if a.forkchoiceStore.Ancestor(aggregateData.BeaconBlockRoot(), epoch*a.beaconCfg.SlotsPerEpoch) != target.BlockRoot() {
-		return fmt.Errorf("invalid target block")
 	}
 
 	// Add to aggregation pool

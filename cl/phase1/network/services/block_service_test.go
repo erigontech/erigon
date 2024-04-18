@@ -24,7 +24,6 @@ func setupBlockService(t *testing.T, ctrl *gomock.Controller) (BlockService, *sy
 	forkchoiceMock := forkchoice.NewForkChoiceStorageMock()
 	blockService := NewBlockService(context.Background(), db, forkchoiceMock, syncedDataManager, ethClock, cfg, nil)
 	return blockService, syncedDataManager, ethClock, forkchoiceMock
-
 }
 
 func TestBlockServiceUnsynced(t *testing.T) {

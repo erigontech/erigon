@@ -39,7 +39,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon/eth/consensuschain"
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -592,6 +591,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
+	sentryMcDisableBlockDownload := config.PolygonSync
 	backend.sentriesClient, err = sentry_multi_client.NewMultiClient(
 		backend.chainDB,
 		chainConfig,
@@ -603,6 +603,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		statusDataProvider,
 		stack.Config().SentryLogPeerInfo,
 		maxBlockBroadcastPeers,
+		sentryMcDisableBlockDownload,
 		logger,
 	)
 	if err != nil {
