@@ -1375,8 +1375,8 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, max
 	}
 	includeBor := br.chainConfig.Bor != nil
 
+	var err error
 	for {
-		var err error
 		var ok, okBor bool
 
 		minBlockNum = cmp.Max(br.blockReader.FrozenBlocks(), minBlockNum)
