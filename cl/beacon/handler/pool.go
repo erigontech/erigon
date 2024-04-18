@@ -326,7 +326,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 				failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 				break
 			}
-			fmt.Println(err)
+			fmt.Println("sync_committees", err)
 			// Broadcast to gossip
 			if a.sentinel != nil {
 				encodedSSZ, err := v.EncodeSSZ(nil)
@@ -363,13 +363,11 @@ func (a *ApiHandler) PostEthV1ValidatorContributionsAndProofs(w http.ResponseWri
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	fmt.Println("A")
 	s := a.syncedData.HeadState()
 	if s == nil {
 		http.Error(w, "node is not synced", http.StatusServiceUnavailable)
 		return
 	}
-	fmt.Println("B")
 	failures := []poolingFailure{}
 	var err error
 	for idx, v := range msgs {
@@ -381,7 +379,7 @@ func (a *ApiHandler) PostEthV1ValidatorContributionsAndProofs(w http.ResponseWri
 			failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 			continue
 		}
-		fmt.Println(err)
+		fmt.Println("sync contribution", err)
 		// Broadcast to gossip
 		if a.sentinel != nil {
 			encodedSSZ, err := v.EncodeSSZ(nil)
@@ -400,7 +398,6 @@ func (a *ApiHandler) PostEthV1ValidatorContributionsAndProofs(w http.ResponseWri
 			}
 		}
 	}
-	fmt.Println("D")
 
 	if len(failures) > 0 {
 		w.WriteHeader(http.StatusBadRequest)
