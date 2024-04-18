@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/Giulio2002/bls"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -37,15 +38,14 @@ func NewBLSToExecutionChangeService(
 }
 
 func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SignedBLSToExecutionChange) error {
+	// https://github.com/ethereum/consensus-specs/blob/dev/specs/capella/p2p-interface.md#bls_to_execution_change
 	defer s.emitters.Publish("bls_to_execution_change", msg)
-
 	// [IGNORE] The signed_bls_to_execution_change is the first valid signed bls to execution change received
 	// for the validator with index signed_bls_to_execution_change.message.validator_index.
 	if s.operationsPool.BLSToExecutionChangesPool.Has(msg.Signature) {
 		return nil
 	}
 	change := msg.Message
-
 	state := s.syncedDataManager.HeadState()
 	if state == nil {
 		return nil
@@ -55,7 +55,6 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 	if !(state.Version() >= clparams.CapellaVersion) {
 		return ErrIgnore
 	}
-
 	// ref: https://github.com/ethereum/consensus-specs/blob/dev/specs/capella/beacon-chain.md#new-process_bls_to_execution_change
 	// assert address_change.validator_index < len(state.validators)
 	validator, err := state.ValidatorForValidatorIndex(int(change.ValidatorIndex))
@@ -94,6 +93,18 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 	if !valid {
 		return fmt.Errorf("invalid signature")
 	}
+
+	// validator.withdrawal_credentials = (
+	//    ETH1_ADDRESS_WITHDRAWAL_PREFIX
+	//    + b'\x00' * 11
+	//    + address_change.to_execution_address
+	// )
+	newWc := libcommon.Hash{}
+	newWc[0] = byte(s.beaconCfg.ETH1AddressWithdrawalPrefixByte)
+	copy(wc[1:], make([]byte, 11))
+	copy(wc[12:], change.To[:])
+	state.SetWithdrawalCredentialForValidatorAtIndex(int(change.ValidatorIndex), newWc)
+
 	s.operationsPool.BLSToExecutionChangesPool.Insert(msg.Signature, msg)
 	return nil
 }
