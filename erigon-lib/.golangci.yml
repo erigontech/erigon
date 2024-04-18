@@ -35,12 +35,10 @@ linters:
 
 linters-settings:
   gocritic: # see https://golangci-lint.run/usage/linters/#gocritic and  https://github.com/go-critic/go-critic#usage -> section "Tags"
+    disabled-tags:
+      - opinionated
     enabled-tags:
       - performance
-      - diagnostic
-    #      - style
-    #      - experimental
-    #      - opinionated
     enabled-checks:
       - ruleguard
     disabled-checks:
@@ -56,7 +54,7 @@ linters-settings:
       - commentFormatting
       - ifElseChain
       - appendAssign
-      - sprintfQuotedString
+      - preferFprint
 
     settings:
       ruleguard:

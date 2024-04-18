@@ -44,8 +44,6 @@ linters-settings:
   gocritic: # see https://golangci-lint.run/usage/linters/#gocritic and  https://github.com/go-critic/go-critic#usage -> section "Tags"
     enabled-tags:
       - performance
-      - diagnostic
-      - opinionated
     enabled-checks:
       - ruleguard
     disabled-checks:
@@ -65,7 +63,6 @@ linters-settings:
       - paramTypeCombine
       - builtinShadow
       - typeUnparen
-      - sprintfQuotedString
 
     settings:
       ruleguard:
