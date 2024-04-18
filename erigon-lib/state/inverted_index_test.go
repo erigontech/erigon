@@ -633,3 +633,27 @@ func TestInvIndex_OpenFolder(t *testing.T) {
 	require.NoError(t, err)
 	ii.Close()
 }
+
+func TestInvIndex_OpenFolder(t *testing.T) {
+	fp, db, ii, txs := filledInvIndex(t, log.New())
+	defer db.Close()
+	defer ii.Close()
+	defer os.RemoveAll(fp)
+
+	mergeInverted(t, db, ii, txs)
+
+	list := ii.visibleFiles.Load()
+	require.NotEmpty(t, list)
+	ff := (*list)[len(*list)-1]
+	fn := ff.src.decompressor.FilePath()
+	ii.Close()
+
+	err := os.Remove(fn)
+	require.NoError(t, err)
+	err = os.WriteFile(fn, make([]byte, 33), 0644)
+	require.NoError(t, err)
+
+	err = ii.OpenFolder()
+	require.NoError(t, err)
+	ii.Close()
+}
