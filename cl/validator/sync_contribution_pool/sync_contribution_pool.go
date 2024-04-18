@@ -61,7 +61,7 @@ func (s *syncContributionPoolImpl) AddSyncContribution(headState *state.CachingB
 	}
 	// Time to aggregate the giga aggregatable.
 	if utils.IsSupersetBitlist(baseContribution.AggregationBits, contribution.AggregationBits) {
-		return nil // Skip it if it is just a superset.
+		return Err // Skip it if it is just a superset.
 	}
 	// Aggregate the bits.
 	utils.MergeBitlists(baseContribution.AggregationBits, contribution.AggregationBits)

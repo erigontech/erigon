@@ -111,6 +111,7 @@ func verifySyncCommitteeMessageSignature(s *state.CachingBeaconState, msg *cltyp
 	if err != nil {
 		return err
 	}
+	fmt.Println("verifyCommitteeMessage", msg.ValidatorIndex)
 	cfg := s.BeaconConfig()
 	domain, err := s.GetDomain(cfg.DomainSyncCommittee, state.Epoch(s))
 	if err != nil {
