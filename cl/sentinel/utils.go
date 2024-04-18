@@ -162,10 +162,10 @@ func (s *Sentinel) updateENROnSubscription(topicName string, subscribe bool) {
 	///eth2/d31f6191/beacon_attestation_45/ssz_snappy
 	// extract third part of the topic name
 	parts := strings.Split(topicName, "/")
-	if len(parts) < 3 {
+	if len(parts) < 4 {
 		return
 	}
-	part := parts[2]
+	part := parts[3]
 	for i := 0; i < int(s.cfg.NetworkConfig.AttestationSubnetCount); i++ {
 
 		if part == fmt.Sprintf(gossip.TopicNamePrefixBeaconAttestation, i) {
