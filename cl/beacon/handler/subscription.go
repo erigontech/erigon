@@ -55,6 +55,7 @@ func (a *ApiHandler) PostEthV1ValidatorSyncCommitteeSubscriptions(w http.Respons
 			}
 		} else {
 			syncnets, err = subnets.ComputeSubnetsForSyncCommittee(headState, subRequest.ValidatorIndex)
+			fmt.Println(syncnets)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
