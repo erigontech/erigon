@@ -34,9 +34,7 @@ linters:
 #    - stylecheck
 
 linters-settings:
-  gocritic: # see https://golangci-lint.run/usage/linters/#gocritic and  https://github.com/go-critic/go-critic#usage -> section "Tags"
-    disabled-tags:
-      - opinionated
+  gocritic: # see https://golangci-lint.run/usage/linters/#gocritic and https://go-critic.github.io/overview#checks-overview
     enabled-tags:
       - performance
     enabled-checks:
