@@ -112,7 +112,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 		chainRules:      chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time),
 	}
 	if txCtx.Accesses == nil && chainConfig.IsPrague(blockCtx.Time) {
-		evm.txContext.Accesses = statedb.NewAccessWitness(vkutils.NewPointCache())
+		evm.TxContext.Accesses = statedb.NewAccessWitness(vkutils.NewPointCache())
 	}
 	evm.interpreter = NewEVMInterpreter(evm, vmConfig)
 
@@ -125,7 +125,7 @@ func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState) {
 	evm.TxContext = txCtx
 	evm.intraBlockState = ibs
 	if txCtx.Accesses == nil && evm.chainRules.IsPrague {
-		evm.txContext.Accesses = statedb.NewAccessWitness(vkutils.NewPointCache())
+		evm.TxContext.Accesses = statedb.NewAccessWitness(vkutils.NewPointCache())
 	}
 	// ensure the evm is reset to be used again
 	atomic.StoreInt32(&evm.abort, 0)
@@ -215,7 +215,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 			if !isPrecompile && evm.chainRules.IsEIP158 && value.Sign() == 0 {
 				if evm.chainRules.IsPrague {
 					// proof of absence
-					tryConsumeGas(&gas, evm.txContext.Accesses.TouchAndChargeProofOfAbsence(caller.Address().Bytes()))
+					tryConsumeGas(&gas, evm.TxContext.Accesses.TouchAndChargeProofOfAbsence(caller.Address().Bytes()))
 				}
 			}
 			if !isPrecompile && evm.chainRules.IsSpuriousDragon && value.IsZero() {
@@ -474,7 +474,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	}
 
 	if err == nil && evm.chainRules.IsPrague {
-		if !contract.UseGas(evm.txContext.Accesses.TouchAndChargeContractCreateCompleted(address.Bytes()[:])) {
+		if !contract.UseGas(evm.TxContext.Accesses.TouchAndChargeContractCreateCompleted(address.Bytes()[:])) {
 			evm.intraBlockState.RevertToSnapshot(snapshot)
 			err = ErrOutOfGas
 		}

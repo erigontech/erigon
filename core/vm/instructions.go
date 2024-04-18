@@ -22,7 +22,7 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/math"
+	libmath "github.com/ledgerwatch/erigon-lib/common/math"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/log/v3"
@@ -380,7 +380,7 @@ func opExtCodeSize(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 	slot := scope.Stack.Peek()
 	slot.SetUint64(uint64(interpreter.evm.IntraBlockState().GetCodeSize(slot.Bytes20())))
 	if interpreter.evm.chainRules.IsPrague {
-		statelessGas := interpreter.evm.txContext.Accesses.TouchAddressOnReadAndComputeGas(slot.Bytes(), uint256.Int{}, vkutils.CodeSizeLeafKey)
+		statelessGas := interpreter.evm.TxContext.Accesses.TouchAddressOnReadAndComputeGas(slot.Bytes(), uint256.Int{}, vkutils.CodeSizeLeafKey)
 		scope.Contract.UseGas(statelessGas)
 	}
 	return nil, nil
@@ -406,7 +406,7 @@ func opCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	// codeCopy := getData(scope.Contract.Code, uint64CodeOffset, length.Uint64())
 	paddedCodeCopy, copyOffset, nonPaddedCopyLength := getDataAndAdjustedBounds(scope.Contract.Code, uint64CodeOffset, length.Uint64())
 	if interpreter.evm.chainRules.IsPrague {
-		scope.Contract.UseGas(touchCodeChunksRangeOnReadAndChargeGas(scope.Contract.Address().Bytes(), copyOffset, nonPaddedCopyLength, uint64(len(scope.Contract.Code)), interpreter.evm.txContext.Accesses.(*state.AccessWitness)))
+		scope.Contract.UseGas(touchCodeChunksRangeOnReadAndChargeGas(scope.Contract.Address().Bytes(), copyOffset, nonPaddedCopyLength, uint64(len(scope.Contract.Code)), interpreter.evm.TxContext.Accesses.(*state.AccessWitness)))
 	}
 	scope.Memory.Set(memOffset.Uint64(), uint64(len(paddedCodeCopy)), paddedCodeCopy)
 	return nil, nil
@@ -429,7 +429,7 @@ func opExtCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 			self: addr,
 		}
 		paddedCodeCopy, copyOffset, nonPaddedCopyLength := getDataAndAdjustedBounds(code, codeOffset.Uint64(), length.Uint64())
-		gas := touchCodeChunksRangeOnReadAndChargeGas(addr[:], copyOffset, nonPaddedCopyLength, uint64(len(contract.Code)), interpreter.evm.txContext.Accesses.(*state.AccessWitness))
+		gas := touchCodeChunksRangeOnReadAndChargeGas(addr[:], copyOffset, nonPaddedCopyLength, uint64(len(contract.Code)), interpreter.evm.TxContext.Accesses.(*state.AccessWitness))
 		scope.Contract.UseGas(gas)
 		scope.Memory.Set(memOffset.Uint64(), length.Uint64(), paddedCodeCopy)
 	} else {
@@ -675,7 +675,7 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 	)
 	if interpreter.evm.chainRules.IsPrague {
 		contractAddress := crypto.CreateAddress(scope.Contract.Address(), interpreter.evm.intraBlockState.GetNonce(scope.Contract.Address()))
-		statelessGas := interpreter.evm.txContext.Accesses.TouchAndChargeContractCreateInit(contractAddress.Bytes()[:], value.Sign() != 0)
+		statelessGas := interpreter.evm.TxContext.Accesses.TouchAndChargeContractCreateInit(contractAddress.Bytes()[:], value.Sign() != 0)
 		if !tryConsumeGas(&gas, statelessGas) {
 			return nil, ErrExecutionReverted
 		}
@@ -725,7 +725,7 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 	if interpreter.evm.chainRules.IsPrague {
 		codeAndHash := &codeAndHash{code: input}
 		contractAddress := crypto.CreateAddress2(scope.Contract.Address(), salt.Bytes32(), codeAndHash.Hash().Bytes())
-		statelessGas := interpreter.evm.txContext.Accesses.TouchAndChargeContractCreateInit(contractAddress.Bytes()[:], endowment.Sign() != 0)
+		statelessGas := interpreter.evm.TxContext.Accesses.TouchAndChargeContractCreateInit(contractAddress.Bytes()[:], endowment.Sign() != 0)
 		if !tryConsumeGas(&gas, statelessGas) {
 			return nil, ErrExecutionReverted
 		}
@@ -992,7 +992,7 @@ func opPush1(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 			// touch next chunk if PUSH1 is at the boundary. if so, *pc has
 			// advanced past this boundary.
 			contractAddr := scope.Contract.Address()
-			statelessGas := touchCodeChunksRangeOnReadAndChargeGas(contractAddr[:], *pc+1, uint64(1), uint64(len(scope.Contract.Code)), interpreter.evm.txContext.Accesses.(*state.AccessWitness))
+			statelessGas := touchCodeChunksRangeOnReadAndChargeGas(contractAddr[:], *pc+1, uint64(1), uint64(len(scope.Contract.Code)), interpreter.evm.TxContext.Accesses.(*state.AccessWitness))
 			scope.Contract.UseGas(statelessGas)
 		}
 	} else {
@@ -1017,7 +1017,7 @@ func makePush(size uint64, pushByteSize int) executionFunc {
 
 		if interpreter.evm.chainRules.IsPrague {
 			contractAddr := scope.Contract.Address()
-			statelessGas := touchCodeChunksRangeOnReadAndChargeGas(contractAddr[:], uint64(startMin), uint64(pushByteSize), uint64(len(scope.Contract.Code)), interpreter.evm.txContext.Accesses.(*state.AccessWitness))
+			statelessGas := touchCodeChunksRangeOnReadAndChargeGas(contractAddr[:], uint64(startMin), uint64(pushByteSize), uint64(len(scope.Contract.Code)), interpreter.evm.TxContext.Accesses.(*state.AccessWitness))
 			scope.Contract.UseGas(statelessGas)
 		}
 
@@ -1073,7 +1073,7 @@ func touchCodeChunksRangeOnReadAndChargeGas(contractAddr []byte, startPC, size u
 		subIndex := byte((chunkNumber + 128) % 256)
 		gas := accesses.TouchAddressOnReadAndComputeGas(contractAddr, treeIndex, subIndex)
 		var overflow bool
-		statelessGasCharged, overflow = math.SafeAdd(statelessGasCharged, gas)
+		statelessGasCharged, overflow = libmath.SafeAdd(statelessGasCharged, gas)
 		if overflow {
 			panic("overflow when adding gas")
 		}

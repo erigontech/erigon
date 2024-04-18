@@ -28,7 +28,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
-	"github.com/gballet/go-verkle"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"

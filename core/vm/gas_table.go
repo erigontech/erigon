@@ -412,13 +412,13 @@ func gasCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memo
 	}
 	if evm.chainRules.IsPrague {
 		if _, isPrecompile := evm.precompile(address); !isPrecompile {
-			gas, overflow = math.SafeAdd(gas, evm.txContext.Accesses.TouchAndChargeMessageCall(address.Bytes()[:]))
+			gas, overflow = math.SafeAdd(gas, evm.TxContext.Accesses.TouchAndChargeMessageCall(address.Bytes()[:]))
 			if overflow {
 				return 0, ErrGasUintOverflow
 			}
 		}
 		if transfersValue {
-			gas, overflow = math.SafeAdd(gas, evm.txContext.Accesses.TouchAndChargeValueTransfer(contract.Address().Bytes()[:], address.Bytes()[:]))
+			gas, overflow = math.SafeAdd(gas, evm.TxContext.Accesses.TouchAndChargeValueTransfer(contract.Address().Bytes()[:], address.Bytes()[:]))
 			if overflow {
 				return 0, ErrGasUintOverflow
 			}
@@ -455,7 +455,7 @@ func gasCallCode(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, 
 	if evm.chainRules.IsPrague {
 		address := libcommon.Address(stack.Back(1).Bytes20())
 		if _, isPrecompile := evm.precompile(address); !isPrecompile {
-			gas, overflow = math.SafeAdd(gas, evm.txContext.Accesses.TouchAndChargeMessageCall(address.Bytes()))
+			gas, overflow = math.SafeAdd(gas, evm.TxContext.Accesses.TouchAndChargeMessageCall(address.Bytes()))
 			if overflow {
 				return 0, ErrGasUintOverflow
 			}
@@ -484,7 +484,7 @@ func gasDelegateCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memo
 	if evm.chainRules.IsPrague {
 		address := libcommon.Address(stack.Back(1).Bytes20())
 		if _, isPrecompile := evm.precompile(address); !isPrecompile {
-			gas, overflow = math.SafeAdd(gas, evm.txContext.Accesses.TouchAndChargeMessageCall(address.Bytes()))
+			gas, overflow = math.SafeAdd(gas, evm.TxContext.Accesses.TouchAndChargeMessageCall(address.Bytes()))
 			if overflow {
 				return 0, ErrGasUintOverflow
 			}
@@ -513,7 +513,7 @@ func gasStaticCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory
 	if evm.chainRules.IsPrague {
 		address := libcommon.Address(stack.Back(1).Bytes20())
 		if _, isPrecompile := evm.precompile(address); !isPrecompile {
-			gas, overflow = math.SafeAdd(gas, evm.txContext.Accesses.TouchAndChargeMessageCall(address.Bytes()))
+			gas, overflow = math.SafeAdd(gas, evm.TxContext.Accesses.TouchAndChargeMessageCall(address.Bytes()))
 			if overflow {
 				return 0, ErrGasUintOverflow
 			}
@@ -555,7 +555,7 @@ func gasExtCodeSize(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memor
 	usedGas := uint64(0)
 	slot := stack.Back(0)
 	if evm.chainRules.IsPrague {
-		usedGas += evm.txContext.Accesses.TouchAddressOnReadAndComputeGas(slot.Bytes(), uint256.Int{}, vkutils.CodeSizeLeafKey)
+		usedGas += evm.TxContext.Accesses.TouchAddressOnReadAndComputeGas(slot.Bytes(), uint256.Int{}, vkutils.CodeSizeLeafKey)
 	}
 
 	return usedGas, nil
@@ -567,7 +567,7 @@ func gasSLoad(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, mem
 	if evm.chainRules.IsPrague {
 		where := stack.Back(0)
 		treeIndex, subIndex := vkutils.GetTreeKeyStorageSlotTreeIndexes(where.Bytes())
-		usedGas += evm.txContext.Accesses.TouchAddressOnReadAndComputeGas(contract.Address().Bytes(), *treeIndex, subIndex)
+		usedGas += evm.TxContext.Accesses.TouchAddressOnReadAndComputeGas(contract.Address().Bytes(), *treeIndex, subIndex)
 	}
 
 	return usedGas, nil

@@ -27,7 +27,7 @@ import (
 	"sync"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/gballet/go-verkle"
+	// "github.com/ethereum/go-verkle"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
@@ -52,7 +52,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/trie"
-	"github.com/ledgerwatch/erigon/turbo/trie/vkutils"
+	// "github.com/ledgerwatch/erigon/turbo/trie/vkutils"
 )
 
 // CommitGenesisBlock writes or updates the genesis block in db.
@@ -510,9 +510,10 @@ func DeveloperGenesisBlock(period uint64, faucet libcommon.Address) *types.Genes
 // to the given database (or discards it if nil).
 func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
 	_ = g.Alloc //nil-check
-	// TODO @somnathb1
 
-	return GenesisToVerkleBlock(g, tmpDir, tx)
+	if g.Config.IsOsaka(0) {
+		return GenesisToVerkleBlock(g, tmpDir)
+	}
 
 	head := &types.Header{
 		Number:        new(big.Int).SetUint64(g.Number),
@@ -648,7 +649,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 
 // ToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
-func GenesisToVerkleBlock(g *types.Genesis, tmpDir string, dbTx kv.RwTx) (*types.Block, *state.IntraBlockState, error) {
+func GenesisToVerkleBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.IntraBlockState, error) {
 	_ = g.Alloc //nil-check
 
 	// Construct header
@@ -727,7 +728,7 @@ func GenesisToVerkleBlock(g *types.Genesis, tmpDir string, dbTx kv.RwTx) (*types
 		// --(Todo @somnathb1 - don't) Skip Aura constructor allocaton--
 
 		//Create in-memory instance of verkle trie
-		vTrie := trie.NewVerkleTrie(verkle.New(), nil, dbTx, vkutils.NewPointCache(), true)
+		// vTrie := trie.NewVerkleTrie(verkle.New(), nil, dbTx, vkutils.NewPointCache(), true)
 
 		// Loop through alloc keys
 		keys := sortedAllocKeys(g.Alloc)
@@ -742,10 +743,10 @@ func GenesisToVerkleBlock(g *types.Genesis, tmpDir string, dbTx kv.RwTx) (*types
 			}
 
 			// Update account in verkle trie
-				vTrie.UpdateAccount(addr, coreAcc)
-			if account.Code != nil && len(account.Code) > 0 {
-				vTrie.UpdateContractCode(addr, crypto.Keccak256Hash(account.Code), account.Code)
-			}
+			// vTrie.UpdateAccount(addr, coreAcc)
+			// if account.Code != nil && len(account.Code) > 0 {
+			// 	vTrie.UpdateContractCode(addr, crypto.Keccak256Hash(account.Code), account.Code)
+			// }
 
 			//Update account bits to (temp) statedb
 			statedb.AddBalance(addr, &coreAcc.Balance)
@@ -754,7 +755,7 @@ func GenesisToVerkleBlock(g *types.Genesis, tmpDir string, dbTx kv.RwTx) (*types
 
 			// Add storage bits to verkle trie and statedb
 			for storageKey, storageItem := range account.Storage {
-				vTrie.UpdateStorage(addr, storageKey.Bytes(), storageItem.Bytes())
+				// vTrie.UpdateStorage(addr, storageKey.Bytes(), storageItem.Bytes())
 				statedb.SetState(addr, &storageKey, *uint256.NewInt(0).SetBytes(storageItem.Bytes()))
 			}
 
@@ -773,12 +774,12 @@ func GenesisToVerkleBlock(g *types.Genesis, tmpDir string, dbTx kv.RwTx) (*types
 			return
 		}
 
-		head.Root, err = vTrie.Commit(true)
+		// head.Root, err = vTrie.Commit(true)
 		if err != nil {
 			log.Error("Error calculating verkle trie root", "Msg", err)
 			return
 		}
-		rawdb.WriteVerkleRoot(dbTx, 0, head.Root)
+		// rawdb.WriteVerkleRoot(dbTx, 0, head.Root)
 	}()
 	// wg.Wait()
 

@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	// "github.com/gballet/go-verkle"
+	// "github.com/ethereum/go-verkle"
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
@@ -63,7 +63,7 @@ func SpawnVerkleTrie(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ctx con
 	}
 
 	var (
-		// rootVerkleNode verkle.VerkleNode
+	// rootVerkleNode verkle.VerkleNode
 	)
 
 	logPrefix := s.LogPrefix()
@@ -89,7 +89,7 @@ func SpawnVerkleTrie(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ctx con
 	defer accChangesCursor.Close()
 
 	for k, v, err := accChangesCursor.Seek(hexutility.EncodeTs(from)); k != nil; k, v, err = accChangesCursor.Next() {
-	// for k, v, err := accChangesCursor.Seek(hexutility.EncodeTs(from)); k != nil; k, v, err = accChangesCursor.Next() {
+		// for k, v, err := accChangesCursor.Seek(hexutility.EncodeTs(from)); k != nil; k, v, err = accChangesCursor.Next() {
 		if err != nil {
 			return libcommon.Hash{}, err
 		}
@@ -196,7 +196,7 @@ func SpawnVerkleTrie(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ctx con
 		return newRoot, tx.Commit()
 	}
 	rawdb.WriteVerkleRoot(tx, to, newRoot)
-	
+
 	logger.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", to, "Verkle Root", newRoot)
 	return newRoot, nil
 }

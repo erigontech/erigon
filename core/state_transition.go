@@ -405,13 +405,13 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	st.gas -= gas
 
 	if rules.IsPrague {
-		statelessGasOrigin := st.evm.TxContext().Accesses.TouchTxOriginAndComputeGas(msg.From().Bytes())
+		statelessGasOrigin := st.evm.TxContext.Accesses.TouchTxOriginAndComputeGas(msg.From().Bytes())
 		if !tryConsumeGas(&st.gas, statelessGasOrigin) {
 			return nil, fmt.Errorf("%w: Insufficient funds to cover witness access costs for transaction: have %d, want %d", ErrInsufficientFunds, st.gas, gas)
 		}
 		originNonce := st.state.GetNonce(msg.From())
 
-		txCtxAcc := st.evm.TxContext().Accesses
+		txCtxAcc := st.evm.TxContext.Accesses
 		if txCtxAcc == nil {
 			return nil, fmt.Errorf("%s", "Dude initialize txctx with accesses list")
 		}

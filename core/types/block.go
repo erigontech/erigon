@@ -27,7 +27,7 @@ import (
 	"reflect"
 	"sync/atomic"
 
-	"github.com/gballet/go-verkle"
+	"github.com/ethereum/go-verkle"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"

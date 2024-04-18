@@ -52,7 +52,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 
 		if evm.chainRules.IsPrague {
 			treeIndex, subIndex := vkutils.GetTreeKeyStorageSlotTreeIndexes(x.Bytes())
-			cost += evm.TxContext().Accesses.TouchAddressOnWriteAndComputeGas(contract.Address().Bytes(), *treeIndex, subIndex)
+			cost += evm.TxContext.Accesses.TouchAddressOnWriteAndComputeGas(contract.Address().Bytes(), *treeIndex, subIndex)
 		}
 
 		if current.Eq(&value) { // noop (1)
@@ -114,7 +114,7 @@ func gasSLoadEIP2929(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memo
 		where := stack.Back(0)
 		treeIndex, subIndex := vkutils.GetTreeKeyStorageSlotTreeIndexes(where.Bytes())
 		addr := contract.Address()
-		gasUsed += evm.TxContext().Accesses.TouchAddressOnReadAndComputeGas(addr.Bytes(), *treeIndex, subIndex)
+		gasUsed += evm.TxContext.Accesses.TouchAddressOnReadAndComputeGas(addr.Bytes(), *treeIndex, subIndex)
 	}
 	// If the caller cannot afford the cost, this change will be rolled back
 	// If he does afford it, we can skip checking the same thing later on, during execution

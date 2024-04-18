@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/gballet/go-verkle"
+	"github.com/ethereum/go-verkle"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -62,7 +62,7 @@ func (vt *VerkleTrie) DbNodeResolver(path []byte) ([]byte, error) {
 	fullPath := make([]byte, 0, len(VerkleDBPathKeyPrefix)+32)
 	fullPath = append(fullPath, VerkleDBPathKeyPrefix...)
 	fullPath = append(fullPath[:len(VerkleDBPathKeyPrefix)], path...)
-	
+
 	if vt.tx != nil {
 		return vt.tx.GetOne(kv.VerkleTrie, fullPath)
 	}
@@ -168,7 +168,7 @@ func (t *VerkleTrie) UpdateAccount(addr common.Address, acc *accounts.Account) e
 		err = root.InsertValuesAtStem(stem, values, t.DbNodeResolver)
 	default:
 		return errInvalidRootType
-	}  
+	}
 	if err != nil {
 		return fmt.Errorf("UpdateAccount (%x) error: %v", addr, err)
 	}
@@ -241,8 +241,7 @@ func (vt *VerkleTrie) Hash() common.Hash {
 	return vt.root.Commit().Bytes()
 }
 
-
-//NOT USED
+// NOT USED
 func nodeToDBKey(n verkle.VerkleNode) []byte {
 	ret := n.Commitment().Bytes()
 	return ret[:]

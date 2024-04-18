@@ -512,6 +512,7 @@ func borKeyValueConfigHelper[T uint64 | common.Address](field map[string]T, numb
 type Rules struct {
 	ChainID                                           *big.Int
 	IsHomestead, IsTangerineWhistle, IsSpuriousDragon bool
+	IsEIP158										  bool
 	IsByzantium, IsConstantinople, IsPetersburg       bool
 	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
 	IsCancun, IsNapoli                                bool
