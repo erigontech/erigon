@@ -118,11 +118,11 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 			}
 			subscription = manager.GetMatchingSubscription(gossip.TopicNameBeaconAttestation(*msg.SubnetId))
 		default:
-			return &sentinelrpc.EmptyMessage{}, nil
+			return &sentinelrpc.EmptyMessage{}, fmt.Errorf("unknown topic %s", msg.Name)
 		}
 	}
 	if subscription == nil {
-		return &sentinelrpc.EmptyMessage{}, nil
+		return &sentinelrpc.EmptyMessage{}, fmt.Errorf("unknown topic %s", msg.Name)
 	}
 	return &sentinelrpc.EmptyMessage{}, subscription.Publish(compressedData)
 }
