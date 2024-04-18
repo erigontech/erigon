@@ -104,7 +104,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		return nil
 	}).AnyTimes()
 	voluntaryExitService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedVoluntaryExit) error {
-		opPool.VoluntaryExistsPool.Insert(msg.VoluntaryExit.ValidatorIndex, msg)
+		opPool.VoluntaryExitPool.Insert(msg.VoluntaryExit.ValidatorIndex, msg)
 		return nil
 	}).AnyTimes()
 	blsToExecutionChangeService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedBLSToExecutionChange) error {

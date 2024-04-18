@@ -183,7 +183,7 @@ func (f *ForkChoiceStorageMock) Partecipation(epoch uint64) (*solid.BitList, boo
 }
 
 func (f *ForkChoiceStorageMock) OnVoluntaryExit(signedVoluntaryExit *cltypes.SignedVoluntaryExit, test bool) error {
-	f.Pool.VoluntaryExistsPool.Insert(signedVoluntaryExit.VoluntaryExit.ValidatorIndex, signedVoluntaryExit)
+	f.Pool.VoluntaryExitPool.Insert(signedVoluntaryExit.VoluntaryExit.ValidatorIndex, signedVoluntaryExit)
 	return nil
 }
 
