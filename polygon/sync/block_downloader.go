@@ -127,9 +127,9 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 
 	var lastBlock *types.Block
 	batchFetchStartTime := time.Now()
-	logStartTime := time.Now()
-	sum := 0
-	totalSize := float64(0)
+	fetchStartTime := time.Now()
+	blockCount := 0
+	blocksTotalSize := float64(0)
 
 	for len(waypoints) > 0 {
 		select {
@@ -166,13 +166,9 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 				"kind", reflect.TypeOf(waypointsBatch[0]),
 				"peerCount", len(peers),
 				"maxWorkers", d.maxWorkers,
-				"blk/s", fmt.Sprintf("%.2f", float64(sum)/time.Since(logStartTime).Seconds()),
-				"bytes/s", fmt.Sprintf("%s", common.ByteCount(uint64(totalSize/time.Since(logStartTime).Seconds()))),
+				"blk/s", fmt.Sprintf("%.2f", float64(blockCount)/time.Since(fetchStartTime).Seconds()),
+				"bytes/s", fmt.Sprintf("%s", common.ByteCount(uint64(blocksTotalSize/time.Since(fetchStartTime).Seconds()))),
 			)
-
-			sum = 0
-			totalSize = 0
-			logStartTime = time.Now()
 
 		default:
 			// carry on
@@ -249,9 +245,9 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 
 		d.logger.Debug(syncLogPrefix("fetched blocks"), "len", len(blocks), "duration", time.Since(batchFetchStartTime))
 
-		sum += len(blocks)
+		blockCount += len(blocks)
 		for _, block := range blocks {
-			totalSize += float64(block.Size())
+			blocksTotalSize += float64(block.Size())
 		}
 		batchFetchStartTime = time.Now() // reset for next time
 
