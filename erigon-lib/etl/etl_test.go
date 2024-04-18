@@ -17,11 +17,14 @@ package etl
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"testing"
 
@@ -512,6 +515,38 @@ func TestReuseCollectorAfterLoad(t *testing.T) {
 	}, TransformArgs{})
 	require.NoError(t, err)
 	require.Equal(t, 1, see)
+}
+
+func TestAppendAndSortPrefixes(t *testing.T) {
+	collector := NewCollector(t.Name(), "", NewAppendBuffer(4), log.New())
+	defer collector.Close()
+	require := require.New(t)
+
+	key := common.FromHex("ed7229d50cde8de174cc64a882a0833ca5f11669")
+	key1 := append(common.Copy(key), make([]byte, 16)...)
+
+	keys := make([]string, 0)
+	for i := 10; i >= 0; i-- {
+		binary.BigEndian.PutUint64(key1[len(key):], uint64(i))
+		binary.BigEndian.PutUint64(key1[len(key)+8:], uint64(i))
+		kl := len(key1)
+		if i%5 == 0 && i != 0 {
+			kl = len(key) + 8
+		}
+		keys = append(keys, fmt.Sprintf("%x", key1[:kl]))
+		require.NoError(collector.Collect(key1[:kl], key1[len(key):]))
+	}
+
+	sort.Strings(keys)
+	i := 0
+
+	err := collector.Load(nil, "", func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error {
+		t.Logf("collated %x %x\n", k, v)
+		require.EqualValuesf(keys[i], fmt.Sprintf("%x", k), "i=%d", i)
+		i++
+		return nil
+	}, TransformArgs{})
+	require.NoError(err)
 }
 
 func TestAppend(t *testing.T) {
