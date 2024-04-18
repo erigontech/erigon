@@ -85,6 +85,7 @@ type ApiHandler struct {
 	attestationService               services.AttestationService
 	voluntaryExitService             services.VoluntaryExitService
 	blsToExecutionChangeService      services.BLSToExecutionChangeService
+	proposerSlashingService          services.ProposerSlashingService
 }
 
 func NewApiHandler(
@@ -116,7 +117,7 @@ func NewApiHandler(
 	attestationService services.AttestationService,
 	voluntaryExitService services.VoluntaryExitService,
 	blsToExecutionChangeService services.BLSToExecutionChangeService,
-
+	proposerSlashingService services.ProposerSlashingService,
 ) *ApiHandler {
 	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("blobs", maxBlobBundleCacheSize)
 	if err != nil {
@@ -156,6 +157,7 @@ func NewApiHandler(
 		attestationService:               attestationService,
 		voluntaryExitService:             voluntaryExitService,
 		blsToExecutionChangeService:      blsToExecutionChangeService,
+		proposerSlashingService:          proposerSlashingService,
 	}
 }
 

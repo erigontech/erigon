@@ -186,10 +186,11 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 	aggregateAndProofService := services.NewAggregateAndProofService(ctx, syncedDataManager, forkChoice, beaconConfig, aggregationPool, false)
 	voluntaryExitService := services.NewVoluntaryExitService(pool, emitters, syncedDataManager, beaconConfig, ethClock)
 	blsToExecutionChangeService := services.NewBLSToExecutionChangeService(pool, emitters, syncedDataManager, beaconConfig)
+	proposerSlashingService := services.NewProposerSlashingService(pool, emitters, syncedDataManager, beaconConfig, ethClock)
 	// Create the gossip manager
 	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, ethClock, emitters, committeeSub,
 		blockService, blobService, syncCommitteeMessagesService, syncContributionService, aggregateAndProofService,
-		attestationService, voluntaryExitService, blsToExecutionChangeService)
+		attestationService, voluntaryExitService, blsToExecutionChangeService, proposerSlashingService)
 	{ // start ticking forkChoice
 		go func() {
 			tickInterval := time.NewTicker(2 * time.Millisecond)
@@ -299,6 +300,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 			attestationService,
 			voluntaryExitService,
 			blsToExecutionChangeService,
+			proposerSlashingService,
 		)
 		go beacon.ListenAndServe(&beacon.LayeredBeaconHandler{
 			ArchiveApi: apiHandler,

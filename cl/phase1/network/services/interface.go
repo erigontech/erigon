@@ -36,3 +36,6 @@ type VoluntaryExitService Service[*cltypes.SignedVoluntaryExit]
 
 //go:generate mockgen -destination=./mock_services/bls_to_execution_change_service_mock.go -package=mock_services . BLSToExecutionChangeService
 type BLSToExecutionChangeService Service[*cltypes.SignedBLSToExecutionChange]
+
+//go:generate mockgen -destination=./mock_services/proposer_slashing_service_mock.go -package=mock_services . ProposerSlashingService
+type ProposerSlashingService Service[*cltypes.ProposerSlashing]

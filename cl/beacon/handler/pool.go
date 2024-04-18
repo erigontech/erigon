@@ -185,7 +185,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolProposerSlashings(w http.ResponseWriter,
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := a.forkchoiceStore.OnProposerSlashing(&req, false); err != nil {
+	if err := a.proposerSlashingService.ProcessMessage(r.Context(), nil, &req); err != nil && !errors.Is(err, services.ErrIgnore) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}

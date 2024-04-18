@@ -182,21 +182,6 @@ func (f *ForkChoiceStorageMock) Partecipation(epoch uint64) (*solid.BitList, boo
 	return f.ParticipationVal, f.ParticipationVal != nil
 }
 
-func (f *ForkChoiceStorageMock) OnVoluntaryExit(signedVoluntaryExit *cltypes.SignedVoluntaryExit, test bool) error {
-	f.Pool.VoluntaryExitPool.Insert(signedVoluntaryExit.VoluntaryExit.ValidatorIndex, signedVoluntaryExit)
-	return nil
-}
-
-func (f *ForkChoiceStorageMock) OnProposerSlashing(proposerSlashing *cltypes.ProposerSlashing, test bool) error {
-	f.Pool.ProposerSlashingsPool.Insert(pool.ComputeKeyForProposerSlashing(proposerSlashing), proposerSlashing)
-	return nil
-}
-
-func (f *ForkChoiceStorageMock) OnBlsToExecutionChange(signedChange *cltypes.SignedBLSToExecutionChange, test bool) error {
-	f.Pool.BLSToExecutionChangesPool.Insert(signedChange.Signature, signedChange)
-	return nil
-}
-
 func (f *ForkChoiceStorageMock) ForkNodes() []ForkNode {
 	return f.WeightsMock
 }
