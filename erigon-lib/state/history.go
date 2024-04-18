@@ -222,13 +222,12 @@ func (h *History) openFiles() error {
 					continue
 				}
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
+					_, fName := filepath.Split(fPath)
 					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
-						h.logger.Debug("[agg] History.openFiles", "err", err, "f", fPath)
-						err = nil
-						continue
+						h.logger.Debug("[agg] History.openFiles", "err", err, "f", fName)
+					} else {
+						h.logger.Warn("[agg] History.openFiles", "err", err, "f", fName)
 					}
-					h.logger.Warn("[agg] History.openFiles", "err", err, "f", fPath)
-					err = nil
 					// don't interrupt on error. other files may be good. but skip indices open.
 					continue
 				}
@@ -240,7 +239,6 @@ func (h *History) openFiles() error {
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						h.logger.Warn("[agg] History.openFiles", "err", err, "f", fName)
-						err = nil
 						// don't interrupt on error. other files may be good
 					}
 				}

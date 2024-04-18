@@ -375,11 +375,7 @@ func (ii *InvertedIndex) openFiles() error {
 				if dir.FileExist(fPath) {
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
-						if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
-							ii.logger.Debug("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
-						} else {
-							ii.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
-						}
+						ii.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
 					}
 				}
