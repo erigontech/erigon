@@ -55,18 +55,18 @@ func TestNoEscape(t *testing.T) {
 
 	tf := NewAtomicTorrentFiles(dirs.Snap)
 	// allow adding files only if they are inside snapshots dir
-	err := BuildTorrentIfNeed(ctx, "a.seg", dirs.Snap, tf)
+	_, err := BuildTorrentIfNeed(ctx, "a.seg", dirs.Snap, tf)
 	require.NoError(err)
-	err = BuildTorrentIfNeed(ctx, "b/a.seg", dirs.Snap, tf)
+	_, err = BuildTorrentIfNeed(ctx, "b/a.seg", dirs.Snap, tf)
 	require.NoError(err)
-	err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Snap, "a.seg"), dirs.Snap, tf)
+	_, err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Snap, "a.seg"), dirs.Snap, tf)
 	require.NoError(err)
-	err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Snap, "b", "a.seg"), dirs.Snap, tf)
+	_, err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Snap, "b", "a.seg"), dirs.Snap, tf)
 	require.NoError(err)
 
 	// reject escaping snapshots dir
-	err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Chaindata, "b", "a.seg"), dirs.Snap, tf)
+	_, err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Chaindata, "b", "a.seg"), dirs.Snap, tf)
 	require.Error(err)
-	err = BuildTorrentIfNeed(ctx, "./../a.seg", dirs.Snap, tf)
+	_, err = BuildTorrentIfNeed(ctx, "./../a.seg", dirs.Snap, tf)
 	require.Error(err)
 }
