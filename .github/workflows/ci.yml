@@ -25,7 +25,10 @@ jobs:
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     strategy:
       matrix:
-        os: [ ubuntu-20.04, macos-11 ] # list of os: https://github.com/actions/virtual-environments
+        # list of os: https://github.com/actions/virtual-environments
+        os:
+          - ubuntu-22.04
+          - macos-13
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -52,9 +55,9 @@ jobs:
 
       - name: Install golangci-lint
         if: runner.os == 'Linux'
-        uses: golangci/golangci-lint-action@v3
+        uses: golangci/golangci-lint-action@v4
         with:
-          version: v1.55.2
+          version: v1.56.1
           skip-build-cache: true
           args: --help
 
@@ -94,8 +97,8 @@ jobs:
           key: chocolatey-${{ matrix.os }}
       - name: Install dependencies
         run: |
-          choco upgrade mingw -y --no-progress --version 11.2.0.07112021
-          choco install cmake -y --no-progress --version 3.23.1
+          choco upgrade mingw -y --no-progress --version 13.2.0
+          choco install cmake -y --no-progress --version 3.27.8
 
       - name: Build
         run: .\wmake.ps1 all
@@ -109,7 +112,8 @@ jobs:
   docker-build-check:
     # don't run this on devel - the PR must have run it to be merged and it misleads that this pushes the docker image
     if: (${{ github.event_name == 'push' || !github.event.pull_request.draft }}) && ${{ github.ref != 'refs/heads/devel' }}
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+
     steps:
       - uses: AutoModality/action-clean@v1
       - uses: actions/checkout@v3
@@ -125,7 +129,7 @@ jobs:
 
 #  automated-tests:
 #    runs-on:
-#      ubuntu-20.04
+#      ubuntu-22.04
 #    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
 #    steps:
 #      - uses: actions/checkout@v3

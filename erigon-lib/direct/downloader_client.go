@@ -32,8 +32,12 @@ func NewDownloaderClient(server proto_downloader.DownloaderServer) *DownloaderCl
 	return &DownloaderClient{server: server}
 }
 
-func (c *DownloaderClient) Download(ctx context.Context, in *proto_downloader.DownloadRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-	return c.server.Download(ctx, in)
+func (c *DownloaderClient) Add(ctx context.Context, in *proto_downloader.AddRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	return c.server.Add(ctx, in)
+}
+
+func (c *DownloaderClient) ProhibitNewDownloads(ctx context.Context, in *proto_downloader.ProhibitNewDownloadsRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	return c.server.ProhibitNewDownloads(ctx, in)
 }
 func (c *DownloaderClient) Delete(ctx context.Context, in *proto_downloader.DeleteRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	return c.server.Delete(ctx, in)

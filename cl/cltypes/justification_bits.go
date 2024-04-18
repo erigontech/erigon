@@ -12,6 +12,9 @@ const JustificationBitsLength = 4
 
 type JustificationBits [JustificationBitsLength]bool // Bit vector of size 4
 
+func (j JustificationBits) Clone() clonable.Clonable {
+	return JustificationBits{}
+}
 func (j JustificationBits) Byte() (out byte) {
 	for i, bit := range j {
 		if !bit {
@@ -30,19 +33,15 @@ func (j *JustificationBits) DecodeSSZ(b []byte, _ int) error {
 	return nil
 }
 
-func (j *JustificationBits) EncodeSSZ(buf []byte) ([]byte, error) {
+func (j JustificationBits) EncodeSSZ(buf []byte) ([]byte, error) {
 	return append(buf, j.Byte()), nil
 }
 
-func (j *JustificationBits) Clone() clonable.Clonable {
-	return &JustificationBits{}
-}
-
-func (*JustificationBits) EncodingSizeSSZ() int {
+func (JustificationBits) EncodingSizeSSZ() int {
 	return 1
 }
 
-func (*JustificationBits) Static() bool {
+func (JustificationBits) Static() bool {
 	return true
 }
 

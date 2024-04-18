@@ -25,7 +25,7 @@ About "key-value-style": Modern key-value databases don't provide Get/Put/Delete
                                       v                                      v
                     +-----------------------------------+   +-----------------------------------+
                     |       ethdb/kv_mdbx.go            |   |       ethdb/kv_remote.go          |                
-                    |  (tg-specific MDBX implementaion) |   |   (tg-specific remote DB access)  |              
+                    |  (tg-specific MDBX implementation) |   |   (tg-specific remote DB access)  |              
                     +-----------------------------------+   +-----------------------------------+
                                       |                                      |
                                       |                                      |
@@ -35,7 +35,7 @@ About "key-value-style": Modern key-value databases don't provide Get/Put/Delete
             |         (Common KV interface. DB-friendly, disk-friendly, cpu-cache-friendly.                |
             |           Same app code can work with local or remote database.                              |
             |           Allows experiment with another database implementations.                           |
-            |          Supports context.Context for cancelation. Any operation can return error)           |
+            |          Supports context.Context for cancellation. Any operation can return error)           |
             +----------------------------------------------------------------------------------------------+
                  |                                        |                                      |
                  |                                        |                                      |
@@ -127,7 +127,7 @@ for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 - method Begin DOESN'T create new TxDb object, it means this object can be passed into other objects by pointer,
   and high-level app code can start/commit transactions when it needs without re-creating all objects which holds
   TxDb pointer.
-- This is the reason why txDb.CommitAndBegin() method works: inside it creating new transaction object, pinter to TxDb stays valid.
+- This is the reason why txDb.CommitAndBegin() method works: inside it creating new transaction object, pointer to TxDb stays valid.
 
 ## How to dump/load table
 

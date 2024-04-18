@@ -1,7 +1,8 @@
 {
-    "000-fork=Cancun-tload": {
+    "tests/cancun/eip1153_tstore/test_tstorage.py::test_gas_usage[fork_Cancun-blockchain_test-tload]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -56,6 +57,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x3d9cad55bf2ff8e3e4712c080301b0f074e9e139b953e2d1db1e93d085d65090"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -129,9 +131,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "001-fork=Cancun-tstore_tload": {
+    "tests/cancun/eip1153_tstore/test_tstorage.py::test_gas_usage[fork_Cancun-blockchain_test-tstore_tload]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -186,6 +189,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x02900c9ff38d91789083db1f88090887b40cc3d1033a89bad4b2cedce882fbe8"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -259,9 +263,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "002-fork=Cancun-tstore_cold": {
+    "tests/cancun/eip1153_tstore/test_tstorage.py::test_gas_usage[fork_Cancun-blockchain_test-tstore_cold]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -316,6 +321,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xe673355caefee60d1f379961ac9fe80956a66eedc5b8754c6f5ec4a1577183a2"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -389,9 +395,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "003-fork=Cancun-tstore_warm": {
+    "tests/cancun/eip1153_tstore/test_tstorage.py::test_gas_usage[fork_Cancun-blockchain_test-tstore_warm]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -446,6 +453,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x5bc07f1e1f728f4b566422c92356ecf3b02a47943d63ec2ab9e412a4d7d2b23c"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",

@@ -17,10 +17,14 @@
   "terminalTotalDifficulty": 231707791542740786049188744689299064356246512,
   "terminalTotalDifficultyPassed": true,
   "shanghaiTime": 1684934220,
+  "cancunTime": 1706724940,
   "minBlobGasPrice": 1000000000,
   "maxBlobGasPerBlock": 262144,
   "targetBlobGasPerBlock": 131072,
   "blobGasPriceUpdateFraction": 1112826,
+  "noPruneContracts": {
+    "0xb97036A26259B7147018913bD58a774cf91acf25": true
+  },
   "aura": {
     "stepDuration": 5,
     "blockReward": 0,

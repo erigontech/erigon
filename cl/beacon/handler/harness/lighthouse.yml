@@ -1,0 +1,15 @@
+tests:
+- name: inclusion_global
+  actual:
+    handler: i
+    path: /lighthouse/validator_inclusion/4/global
+  expect:
+    file: "harness_inclusion_global_1"
+    fs: td
+- name: inclusion_local
+  actual:
+    handler: i
+    path: /lighthouse/validator_inclusion/4/1
+  expect:
+    file: "harness_inclusion_local_1"
+    fs: td

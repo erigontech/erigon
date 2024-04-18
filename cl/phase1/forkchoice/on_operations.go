@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/Giulio2002/bls"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -20,39 +21,38 @@ import (
 func (f *ForkChoiceStore) OnVoluntaryExit(signedVoluntaryExit *cltypes.SignedVoluntaryExit, test bool) error {
 	voluntaryExit := signedVoluntaryExit.VoluntaryExit
 	if f.operationsPool.VoluntaryExistsPool.Has(voluntaryExit.ValidatorIndex) {
+		f.emitters.Publish("voluntary_exit", voluntaryExit)
 		return nil
 	}
-	f.mu.Lock()
 
-	headHash, _, err := f.getHead()
-	if err != nil {
-		f.mu.Unlock()
-		return err
-	}
-	s, err := f.forkGraph.GetState(headHash, false)
-	if err != nil {
-		f.mu.Unlock()
-		return err
+	s := f.syncedDataManager.HeadState()
+	if s == nil {
+		return nil
 	}
 
 	val, err := s.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
 	if err != nil {
-		f.mu.Unlock()
 		return err
 	}
 
 	if val.ExitEpoch() != f.beaconCfg.FarFutureEpoch {
-		f.mu.Unlock()
 		return nil
 	}
 
 	pk := val.PublicKey()
-	f.mu.Unlock()
 
-	domain, err := s.GetDomain(s.BeaconConfig().DomainVoluntaryExit, voluntaryExit.Epoch)
+	domainType := f.beaconCfg.DomainVoluntaryExit
+	var domain []byte
+
+	if s.Version() < clparams.DenebVersion {
+		domain, err = s.GetDomain(domainType, voluntaryExit.Epoch)
+	} else if s.Version() >= clparams.DenebVersion {
+		domain, err = fork.ComputeDomain(domainType[:], utils.Uint32ToBytes4(uint32(s.BeaconConfig().CapellaForkVersion)), s.GenesisValidatorsRoot())
+	}
 	if err != nil {
 		return err
 	}
+
 	signingRoot, err := fork.ComputeSigningRoot(voluntaryExit, domain)
 	if err != nil {
 		return err
@@ -66,6 +66,7 @@ func (f *ForkChoiceStore) OnVoluntaryExit(signedVoluntaryExit *cltypes.SignedVol
 			return errors.New("ProcessVoluntaryExit: BLS verification failed")
 		}
 	}
+	f.emitters.Publish("voluntary_exit", voluntaryExit)
 	f.operationsPool.VoluntaryExistsPool.Insert(voluntaryExit.ValidatorIndex, signedVoluntaryExit)
 	return nil
 }
@@ -91,24 +92,18 @@ func (f *ForkChoiceStore) OnProposerSlashing(proposerSlashing *cltypes.ProposerS
 	}
 
 	// Take lock as we interact with state.
-	f.mu.Lock()
-	headHash, _, err := f.getHead()
+	s := f.syncedDataManager.HeadState()
 	if err != nil {
-		f.mu.Unlock()
 		return err
 	}
-	s, err := f.forkGraph.GetState(headHash, false)
-	if err != nil {
-		f.mu.Unlock()
-		return err
+	if s == nil {
+		return nil
 	}
 	proposer, err := s.ValidatorForValidatorIndex(int(h1.ProposerIndex))
 	if err != nil {
-		f.mu.Unlock()
 		return fmt.Errorf("unable to retrieve state: %v", err)
 	}
 	if !proposer.IsSlashable(state.Epoch(s)) {
-		f.mu.Unlock()
 		return fmt.Errorf("proposer is not slashable: %v", proposer)
 	}
 	domain1, err := s.GetDomain(s.BeaconConfig().DomainBeaconProposer, state.GetEpochAtSlot(s.BeaconConfig(), h1.Slot))
@@ -120,7 +115,6 @@ func (f *ForkChoiceStore) OnProposerSlashing(proposerSlashing *cltypes.ProposerS
 		return fmt.Errorf("unable to get domain: %v", err)
 	}
 	pk := proposer.PublicKey()
-	f.mu.Unlock()
 	if test {
 		f.operationsPool.ProposerSlashingsPool.Insert(pool.ComputeKeyForProposerSlashing(proposerSlashing), proposerSlashing)
 		return nil
@@ -155,36 +149,26 @@ func (f *ForkChoiceStore) OnProposerSlashing(proposerSlashing *cltypes.ProposerS
 
 func (f *ForkChoiceStore) OnBlsToExecutionChange(signedChange *cltypes.SignedBLSToExecutionChange, test bool) error {
 	if f.operationsPool.BLSToExecutionChangesPool.Has(signedChange.Signature) {
+		f.emitters.Publish("bls_to_execution_change", signedChange)
 		return nil
 	}
 	change := signedChange.Message
 
 	// Take lock as we interact with state.
-	f.mu.Lock()
-
-	headHash, _, err := f.getHead()
-	if err != nil {
-		f.mu.Unlock()
-		return err
-	}
-	s, err := f.forkGraph.GetState(headHash, false)
-	if err != nil {
-		f.mu.Unlock()
-		return err
+	s := f.syncedDataManager.HeadState()
+	if s == nil {
+		return nil
 	}
 	validator, err := s.ValidatorForValidatorIndex(int(change.ValidatorIndex))
 	if err != nil {
-		f.mu.Unlock()
 		return fmt.Errorf("unable to retrieve state: %v", err)
 	}
 	wc := validator.WithdrawalCredentials()
 
-	if wc[0] != f.beaconCfg.BLSWithdrawalPrefixByte {
-		f.mu.Unlock()
+	if wc[0] != byte(f.beaconCfg.BLSWithdrawalPrefixByte) {
 		return fmt.Errorf("invalid withdrawal credentials prefix")
 	}
 	genesisValidatorRoot := s.GenesisValidatorsRoot()
-	f.mu.Unlock()
 	// Perform full validation if requested.
 	if !test {
 		// Check the validator's withdrawal credentials against the provided message.
@@ -194,7 +178,7 @@ func (f *ForkChoiceStore) OnBlsToExecutionChange(signedChange *cltypes.SignedBLS
 		}
 
 		// Compute the signing domain and verify the message signature.
-		domain, err := fork.ComputeDomain(f.beaconCfg.DomainBLSToExecutionChange[:], utils.Uint32ToBytes4(f.beaconCfg.GenesisForkVersion), genesisValidatorRoot)
+		domain, err := fork.ComputeDomain(f.beaconCfg.DomainBLSToExecutionChange[:], utils.Uint32ToBytes4(uint32(f.beaconCfg.GenesisForkVersion)), genesisValidatorRoot)
 		if err != nil {
 			return err
 		}
@@ -212,5 +196,8 @@ func (f *ForkChoiceStore) OnBlsToExecutionChange(signedChange *cltypes.SignedBLS
 	}
 
 	f.operationsPool.BLSToExecutionChangesPool.Insert(signedChange.Signature, signedChange)
+
+	// emit bls_to_execution_change
+	f.emitters.Publish("bls_to_execution_change", signedChange)
 	return nil
 }

@@ -16,15 +16,16 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/edsrzf/mmap-go"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 
 	"github.com/ledgerwatch/erigon-lib/common/background"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon-lib/seg"
 )
 
 func logBase(n, base uint64) uint64 {
@@ -823,8 +824,8 @@ type BtIndex struct {
 	bytesPerRec  int
 	dataoffset   uint64
 	auxBuf       []byte
-	decompressor *compress.Decompressor
-	getter       *compress.Getter
+	decompressor *seg.Decompressor
+	getter       *seg.Getter
 }
 
 func CreateBtreeIndex(indexPath, dataPath string, M uint64, logger log.Logger) (*BtIndex, error) {
@@ -837,7 +838,7 @@ func CreateBtreeIndex(indexPath, dataPath string, M uint64, logger log.Logger) (
 
 var DefaultBtreeM = uint64(2048)
 
-func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *compress.Decompressor, p *background.Progress, tmpdir string, logger log.Logger) (*BtIndex, error) {
+func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *seg.Decompressor, p *background.Progress, tmpdir string, logger log.Logger) (*BtIndex, error) {
 	err := BuildBtreeIndexWithDecompressor(indexPath, decompressor, p, tmpdir, logger)
 	if err != nil {
 		return nil, err
@@ -845,7 +846,7 @@ func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *
 	return OpenBtreeIndexWithDecompressor(indexPath, M, decompressor)
 }
 
-func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor, p *background.Progress, tmpdir string, logger log.Logger) error {
+func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, p *background.Progress, tmpdir string, logger log.Logger) error {
 	defer kv.EnableReadAhead().DisableReadAhead()
 
 	args := BtIndexWriterArgs{
@@ -891,7 +892,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 
 // Opens .kv at dataPath and generates index over it to file 'indexPath'
 func BuildBtreeIndex(dataPath, indexPath string, logger log.Logger) error {
-	decomp, err := compress.NewDecompressor(dataPath)
+	decomp, err := seg.NewDecompressor(dataPath)
 	if err != nil {
 		return err
 	}
@@ -934,7 +935,7 @@ func BuildBtreeIndex(dataPath, indexPath string, logger log.Logger) error {
 	return nil
 }
 
-func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *compress.Decompressor) (*BtIndex, error) {
+func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompressor) (*BtIndex, error) {
 	s, err := os.Stat(indexPath)
 	if err != nil {
 		return nil, err
@@ -1021,7 +1022,7 @@ func OpenBtreeIndex(indexPath, dataPath string, M uint64) (*BtIndex, error) {
 	//p := (*[]byte)(unsafe.Pointer(&idx.data[pos]))
 	//l := int(idx.keyCount)*idx.bytesPerRec + (16 * int(idx.keyCount))
 
-	idx.decompressor, err = compress.NewDecompressor(dataPath)
+	idx.decompressor, err = seg.NewDecompressor(dataPath)
 	if err != nil {
 		idx.Close()
 		return nil, err

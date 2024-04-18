@@ -2,12 +2,13 @@ package state
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"github.com/holiman/uint256"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	historyv22 "github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -69,6 +70,8 @@ func accountsEqual(a1, a2 *accounts.Account) bool {
 	} else if !a2.Initialised {
 		return false
 	} else if a1.Balance.Cmp(&a2.Balance) != 0 {
+		return false
+	} else if a1.Incarnation != a2.Incarnation {
 		return false
 	}
 	if a1.IsEmptyCodeHash() {

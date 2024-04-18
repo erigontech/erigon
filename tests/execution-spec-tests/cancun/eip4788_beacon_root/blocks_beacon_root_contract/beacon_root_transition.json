@@ -1,7 +1,8 @@
 {
-    "000-fork=ShanghaiToCancunAtTime15k-block_count=20-fork_transition": {
+    "tests/cancun/eip4788_beacon_root/test_blocks_beacon_root_contract.py::test_beacon_root_transition[fork_ShanghaiToCancunAtTime15k-blockchain_test-block_count_20-fork_transition]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4788.md",
             "reference-spec-version": "e7608fe8ac8a60934ca874f5aab7d5c1f4ff7782"
         },

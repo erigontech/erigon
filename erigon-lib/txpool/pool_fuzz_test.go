@@ -314,8 +314,12 @@ func FuzzOnNewBlocks(f *testing.F) {
 
 		cfg := txpoolcfg.DefaultConfig
 		sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-		pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, log.New())
+		pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, log.New())
 		assert.NoError(err)
+
+		err = pool.Start(ctx, db)
+		assert.NoError(err)
+
 		pool.senders.senderIDs = senderIDs
 		for addr, id := range senderIDs {
 			pool.senders.senderID2Addr[id] = addr
@@ -481,7 +485,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 		}
 		// go to first fork
 		txs1, txs2, p2pReceived, txs3 := splitDataset(txs)
-		err = pool.OnNewBlock(ctx, change, txs1, types.TxSlots{}, tx)
+		err = pool.OnNewBlock(ctx, change, txs1, types.TxSlots{}, types.TxSlots{}, tx)
 		assert.NoError(err)
 		check(txs1, types.TxSlots{}, "fork1")
 		checkNotify(txs1, types.TxSlots{}, "fork1")
@@ -494,7 +498,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 				{BlockHeight: 1, BlockHash: h0},
 			},
 		}
-		err = pool.OnNewBlock(ctx, change, types.TxSlots{}, txs2, tx)
+		err = pool.OnNewBlock(ctx, change, types.TxSlots{}, types.TxSlots{}, txs2, tx)
 		assert.NoError(err)
 		check(types.TxSlots{}, txs2, "fork1 mined")
 		checkNotify(types.TxSlots{}, txs2, "fork1 mined")
@@ -507,7 +511,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 				{BlockHeight: 0, BlockHash: h0, Direction: remote.Direction_UNWIND},
 			},
 		}
-		err = pool.OnNewBlock(ctx, change, txs2, types.TxSlots{}, tx)
+		err = pool.OnNewBlock(ctx, change, txs2, types.TxSlots{}, types.TxSlots{}, tx)
 		assert.NoError(err)
 		check(txs2, types.TxSlots{}, "fork2")
 		checkNotify(txs2, types.TxSlots{}, "fork2")
@@ -519,7 +523,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 				{BlockHeight: 1, BlockHash: h22},
 			},
 		}
-		err = pool.OnNewBlock(ctx, change, types.TxSlots{}, txs3, tx)
+		err = pool.OnNewBlock(ctx, change, types.TxSlots{}, types.TxSlots{}, txs3, tx)
 		assert.NoError(err)
 		check(types.TxSlots{}, txs3, "fork2 mined")
 		checkNotify(types.TxSlots{}, txs3, "fork2 mined")
@@ -536,8 +540,9 @@ func FuzzOnNewBlocks(f *testing.F) {
 		check(p2pReceived, types.TxSlots{}, "after_flush")
 		checkNotify(p2pReceived, types.TxSlots{}, "after_flush")
 
-		p2, err := New(ch, coreDB, txpoolcfg.DefaultConfig, sendersCache, *u256.N1, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, log.New())
+		p2, err := New(ch, coreDB, txpoolcfg.DefaultConfig, sendersCache, *u256.N1, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, log.New())
 		assert.NoError(err)
+
 		p2.senders = pool.senders // senders are not persisted
 		err = coreDB.View(ctx, func(coreTx kv.Tx) error { return p2.fromDB(ctx, tx, coreTx) })
 		require.NoError(err)

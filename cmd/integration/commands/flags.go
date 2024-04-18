@@ -17,12 +17,12 @@ var (
 	unwindEvery                    uint64
 	batchSizeStr                   string
 	reset, warmup, noCommit        bool
+	resetPruneAt                   bool
 	bucket                         string
 	datadirCli, toChaindata        string
 	migration                      string
 	integrityFast, integritySlow   bool
 	file                           string
-	HeimdallgRPCAddress            string
 	HeimdallURL                    string
 	txtrace                        bool // Whether to trace the execution (should only be used together with `block`)
 	pruneFlag                      string
@@ -101,6 +101,10 @@ func withUnwindEvery(cmd *cobra.Command) {
 func withReset(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&reset, "reset", false, "reset given stage")
 	cmd.Flags().BoolVar(&warmup, "warmup", false, "warmup relevant tables by parallel random reads")
+}
+
+func withResetPruneAt(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&resetPruneAt, "resetPruneAt", false, "reset prune_at to 0 for a given stage")
 }
 
 func withBucket(cmd *cobra.Command) {

@@ -51,7 +51,14 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 	var prevRandDao *libcommon.Hash
 	if header.Difficulty.Cmp(merge.ProofOfStakeDifficulty) == 0 {
 		// EIP-4399. We use ProofOfStakeDifficulty (i.e. 0) as a telltale of Proof-of-Stake blocks.
-		prevRandDao = &header.MixDigest
+		prevRandDao = new(libcommon.Hash)
+		*prevRandDao = header.MixDigest
+	}
+
+	var excessBlobGas *uint64
+	if header.ExcessBlobGas != nil {
+		excessBlobGas = new(uint64)
+		*excessBlobGas = *header.ExcessBlobGas
 	}
 
 	var transferFunc evmtypes.TransferFunc
@@ -71,7 +78,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 		BaseFee:       &baseFee,
 		GasLimit:      header.GasLimit,
 		PrevRanDao:    prevRandDao,
-		ExcessBlobGas: header.ExcessBlobGas,
+		ExcessBlobGas: excessBlobGas,
 	}
 }
 

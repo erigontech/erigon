@@ -34,16 +34,13 @@ var _ Pool = &PoolMock{}
 //			FilterKnownIdHashesFunc: func(tx kv.Tx, hashes types2.Hashes) (types2.Hashes, error) {
 //				panic("mock out the FilterKnownIdHashes method")
 //			},
-//			GetKnownBlobTxnFunc: func(tx kv.Tx, hash []byte) (*metaTx, error) {
-//				panic("mock out the GetKnownBlobTxn method")
-//			},
 //			GetRlpFunc: func(tx kv.Tx, hash []byte) ([]byte, error) {
 //				panic("mock out the GetRlp method")
 //			},
 //			IdHashKnownFunc: func(tx kv.Tx, hash []byte) (bool, error) {
 //				panic("mock out the IdHashKnown method")
 //			},
-//			OnNewBlockFunc: func(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs types2.TxSlots, minedTxs types2.TxSlots, tx kv.Tx) error {
+//			OnNewBlockFunc: func(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs types2.TxSlots, unwindBlobTxs types2.TxSlots, minedTxs types2.TxSlots, tx kv.Tx) error {
 //				panic("mock out the OnNewBlock method")
 //			},
 //			StartedFunc: func() bool {
@@ -71,9 +68,6 @@ type PoolMock struct {
 	// FilterKnownIdHashesFunc mocks the FilterKnownIdHashes method.
 	FilterKnownIdHashesFunc func(tx kv.Tx, hashes types2.Hashes) (types2.Hashes, error)
 
-	// GetKnownBlobTxnFunc mocks the GetKnownBlobTxn method.
-	GetKnownBlobTxnFunc func(tx kv.Tx, hash []byte) (*metaTx, error)
-
 	// GetRlpFunc mocks the GetRlp method.
 	GetRlpFunc func(tx kv.Tx, hash []byte) ([]byte, error)
 
@@ -81,7 +75,7 @@ type PoolMock struct {
 	IdHashKnownFunc func(tx kv.Tx, hash []byte) (bool, error)
 
 	// OnNewBlockFunc mocks the OnNewBlock method.
-	OnNewBlockFunc func(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs types2.TxSlots, minedTxs types2.TxSlots, tx kv.Tx) error
+	OnNewBlockFunc func(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs types2.TxSlots, unwindBlobTxs types2.TxSlots, minedTxs types2.TxSlots, tx kv.Tx) error
 
 	// StartedFunc mocks the Started method.
 	StartedFunc func() bool
@@ -119,13 +113,6 @@ type PoolMock struct {
 			// Hashes is the hashes argument value.
 			Hashes types2.Hashes
 		}
-		// GetKnownBlobTxn holds details about calls to the GetKnownBlobTxn method.
-		GetKnownBlobTxn []struct {
-			// Tx is the tx argument value.
-			Tx kv.Tx
-			// Hash is the hash argument value.
-			Hash []byte
-		}
 		// GetRlp holds details about calls to the GetRlp method.
 		GetRlp []struct {
 			// Tx is the tx argument value.
@@ -148,6 +135,8 @@ type PoolMock struct {
 			StateChanges *remote.StateChangeBatch
 			// UnwindTxs is the unwindTxs argument value.
 			UnwindTxs types2.TxSlots
+			// UnwindBlobTxs is the unwindBlobTxs argument value.
+			UnwindBlobTxs types2.TxSlots
 			// MinedTxs is the minedTxs argument value.
 			MinedTxs types2.TxSlots
 			// Tx is the tx argument value.
@@ -166,7 +155,6 @@ type PoolMock struct {
 	lockAddNewGoodPeer        sync.RWMutex
 	lockAddRemoteTxs          sync.RWMutex
 	lockFilterKnownIdHashes   sync.RWMutex
-	lockGetKnownBlobTxn       sync.RWMutex
 	lockGetRlp                sync.RWMutex
 	lockIdHashKnown           sync.RWMutex
 	lockOnNewBlock            sync.RWMutex
@@ -326,46 +314,6 @@ func (mock *PoolMock) FilterKnownIdHashesCalls() []struct {
 	return calls
 }
 
-// GetKnownBlobTxn calls GetKnownBlobTxnFunc.
-func (mock *PoolMock) GetKnownBlobTxn(tx kv.Tx, hash []byte) (*metaTx, error) {
-	callInfo := struct {
-		Tx   kv.Tx
-		Hash []byte
-	}{
-		Tx:   tx,
-		Hash: hash,
-	}
-	mock.lockGetKnownBlobTxn.Lock()
-	mock.calls.GetKnownBlobTxn = append(mock.calls.GetKnownBlobTxn, callInfo)
-	mock.lockGetKnownBlobTxn.Unlock()
-	if mock.GetKnownBlobTxnFunc == nil {
-		var (
-			metaTxMoqParamOut *metaTx
-			errOut            error
-		)
-		return metaTxMoqParamOut, errOut
-	}
-	return mock.GetKnownBlobTxnFunc(tx, hash)
-}
-
-// GetKnownBlobTxnCalls gets all the calls that were made to GetKnownBlobTxn.
-// Check the length with:
-//
-//	len(mockedPool.GetKnownBlobTxnCalls())
-func (mock *PoolMock) GetKnownBlobTxnCalls() []struct {
-	Tx   kv.Tx
-	Hash []byte
-} {
-	var calls []struct {
-		Tx   kv.Tx
-		Hash []byte
-	}
-	mock.lockGetKnownBlobTxn.RLock()
-	calls = mock.calls.GetKnownBlobTxn
-	mock.lockGetKnownBlobTxn.RUnlock()
-	return calls
-}
-
 // GetRlp calls GetRlpFunc.
 func (mock *PoolMock) GetRlp(tx kv.Tx, hash []byte) ([]byte, error) {
 	callInfo := struct {
@@ -447,19 +395,21 @@ func (mock *PoolMock) IdHashKnownCalls() []struct {
 }
 
 // OnNewBlock calls OnNewBlockFunc.
-func (mock *PoolMock) OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs types2.TxSlots, minedTxs types2.TxSlots, tx kv.Tx) error {
+func (mock *PoolMock) OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs types2.TxSlots, unwindBlobTxs types2.TxSlots, minedTxs types2.TxSlots, tx kv.Tx) error {
 	callInfo := struct {
-		Ctx          context.Context
-		StateChanges *remote.StateChangeBatch
-		UnwindTxs    types2.TxSlots
-		MinedTxs     types2.TxSlots
-		Tx           kv.Tx
+		Ctx           context.Context
+		StateChanges  *remote.StateChangeBatch
+		UnwindTxs     types2.TxSlots
+		UnwindBlobTxs types2.TxSlots
+		MinedTxs      types2.TxSlots
+		Tx            kv.Tx
 	}{
-		Ctx:          ctx,
-		StateChanges: stateChanges,
-		UnwindTxs:    unwindTxs,
-		MinedTxs:     minedTxs,
-		Tx:           tx,
+		Ctx:           ctx,
+		StateChanges:  stateChanges,
+		UnwindTxs:     unwindTxs,
+		UnwindBlobTxs: unwindBlobTxs,
+		MinedTxs:      minedTxs,
+		Tx:            tx,
 	}
 	mock.lockOnNewBlock.Lock()
 	mock.calls.OnNewBlock = append(mock.calls.OnNewBlock, callInfo)
@@ -470,7 +420,7 @@ func (mock *PoolMock) OnNewBlock(ctx context.Context, stateChanges *remote.State
 		)
 		return errOut
 	}
-	return mock.OnNewBlockFunc(ctx, stateChanges, unwindTxs, minedTxs, tx)
+	return mock.OnNewBlockFunc(ctx, stateChanges, unwindTxs, unwindBlobTxs, minedTxs, tx)
 }
 
 // OnNewBlockCalls gets all the calls that were made to OnNewBlock.
@@ -478,18 +428,20 @@ func (mock *PoolMock) OnNewBlock(ctx context.Context, stateChanges *remote.State
 //
 //	len(mockedPool.OnNewBlockCalls())
 func (mock *PoolMock) OnNewBlockCalls() []struct {
-	Ctx          context.Context
-	StateChanges *remote.StateChangeBatch
-	UnwindTxs    types2.TxSlots
-	MinedTxs     types2.TxSlots
-	Tx           kv.Tx
+	Ctx           context.Context
+	StateChanges  *remote.StateChangeBatch
+	UnwindTxs     types2.TxSlots
+	UnwindBlobTxs types2.TxSlots
+	MinedTxs      types2.TxSlots
+	Tx            kv.Tx
 } {
 	var calls []struct {
-		Ctx          context.Context
-		StateChanges *remote.StateChangeBatch
-		UnwindTxs    types2.TxSlots
-		MinedTxs     types2.TxSlots
-		Tx           kv.Tx
+		Ctx           context.Context
+		StateChanges  *remote.StateChangeBatch
+		UnwindTxs     types2.TxSlots
+		UnwindBlobTxs types2.TxSlots
+		MinedTxs      types2.TxSlots
+		Tx            kv.Tx
 	}
 	mock.lockOnNewBlock.RLock()
 	calls = mock.calls.OnNewBlock

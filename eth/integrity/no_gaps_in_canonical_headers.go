@@ -5,24 +5,24 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/ledgerwatch/log/v3"
 )
 
-func NoGapsInCanonicalHeaders(tx kv.Tx, ctx context.Context, br services.BlockReader) {
+func NoGapsInCanonicalHeaders(tx kv.Tx, ctx context.Context, br services.FullBlockReader) {
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
-	if err := br.(*freezeblocks.BlockReader).Integrity(ctx); err != nil {
+	if err := br.Integrity(ctx); err != nil {
 		panic(err)
 	}
 
-	firstBlockInDB := br.(*freezeblocks.BlockReader).FrozenBlocks() + 1
+	firstBlockInDB := br.FrozenBlocks() + 1
 	lastBlockNum, err := stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
 		panic(err)

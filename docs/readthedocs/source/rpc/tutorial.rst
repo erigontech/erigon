@@ -47,7 +47,7 @@ our daemon will only contain one method: `myNamespace_getBlockNumberByHash` whic
 
 The type `Api` is the type that is going to contain the methods for our custom daemon. This type has one member: `db` object used to interact with the Erigon node remotely. Member `db` behave like normal db object and can be used alongside with the rawdb package.
 
-In our example we are making an rpcdaemon call that by receiving a certain block hash, it give the block number associated as an output. this is all done in `GetBlockNumberByHash`.
+In our example we are making an rpcdaemon call that by receiving a certain block hash, it gives the block number associated as an output. this is all done in `GetBlockNumberByHash`.
 
 Now we are going to make our `main.go` where we are going to serve the api we made in `api.go`.
 

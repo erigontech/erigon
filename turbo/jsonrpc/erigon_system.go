@@ -7,9 +7,9 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 
-	borfinality "github.com/ledgerwatch/erigon/consensus/bor/finality"
-	"github.com/ledgerwatch/erigon/consensus/bor/finality/whitelist"
 	"github.com/ledgerwatch/erigon/core/forkid"
+	borfinality "github.com/ledgerwatch/erigon/polygon/bor/finality"
+	"github.com/ledgerwatch/erigon/polygon/bor/finality/whitelist"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )

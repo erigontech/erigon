@@ -17,9 +17,11 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cl/fork"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/cl/gossip"
 	"github.com/ledgerwatch/log/v3"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -28,73 +30,78 @@ import (
 var (
 	// maxInMeshScore describes the max score a peer can attain from being in the mesh.
 	maxInMeshScore = 10.
-	// beaconBlockWeight specifies the scoring weight that we apply to
-	// our beacon block topic.
-	beaconBlockWeight = 0.8
+
+	// p2p weights
+	beaconBlockWeight   = 0.8
+	voluntaryExitWeight = 0.05
 )
 
 const SSZSnappyCodec = "ssz_snappy"
 
-type TopicName string
-
-const (
-	BeaconBlockTopic             TopicName = "beacon_block"
-	BeaconAggregateAndProofTopic TopicName = "beacon_aggregate_and_proof"
-	VoluntaryExitTopic           TopicName = "voluntary_exit"
-	ProposerSlashingTopic        TopicName = "proposer_slashing"
-	AttesterSlashingTopic        TopicName = "attester_slashing"
-	BlsToExecutionChangeTopic    TopicName = "bls_to_execution_change"
-	BlobSidecarTopic             TopicName = "blob_sidecar_%d" // This topic needs an index
-)
-
 type GossipTopic struct {
-	Name     TopicName
+	Name     string
 	CodecStr string
 }
 
 var BeaconBlockSsz = GossipTopic{
-	Name:     BeaconBlockTopic,
+	Name:     gossip.TopicNameBeaconBlock,
 	CodecStr: SSZSnappyCodec,
 }
 
 var BeaconAggregateAndProofSsz = GossipTopic{
-	Name:     BeaconAggregateAndProofTopic,
+	Name:     gossip.TopicNameBeaconAggregateAndProof,
 	CodecStr: SSZSnappyCodec,
 }
 
 var VoluntaryExitSsz = GossipTopic{
-	Name:     VoluntaryExitTopic,
+	Name:     gossip.TopicNameVoluntaryExit,
 	CodecStr: SSZSnappyCodec,
 }
 
 var ProposerSlashingSsz = GossipTopic{
-	Name:     ProposerSlashingTopic,
+	Name:     gossip.TopicNameProposerSlashing,
 	CodecStr: SSZSnappyCodec,
 }
 
 var AttesterSlashingSsz = GossipTopic{
-	Name:     AttesterSlashingTopic,
+	Name:     gossip.TopicNameAttesterSlashing,
 	CodecStr: SSZSnappyCodec,
 }
 
 var BlsToExecutionChangeSsz = GossipTopic{
-	Name:     BlsToExecutionChangeTopic,
+	Name:     gossip.TopicNameBlsToExecutionChange,
+	CodecStr: SSZSnappyCodec,
+}
+
+var SyncCommitteeContributionAndProofSsz = GossipTopic{
+	Name:     gossip.TopicNameSyncCommitteeContributionAndProof,
+	CodecStr: SSZSnappyCodec,
+}
+
+var LightClientFinalityUpdateSsz = GossipTopic{
+	Name:     gossip.TopicNameLightClientFinalityUpdate,
+	CodecStr: SSZSnappyCodec,
+}
+
+var LightClientOptimisticUpdateSsz = GossipTopic{
+	Name:     gossip.TopicNameLightClientOptimisticUpdate,
 	CodecStr: SSZSnappyCodec,
 }
 
 type GossipManager struct {
-	ch            chan *pubsub.Message
-	subscriptions map[string]*GossipSubscription
-	mu            sync.RWMutex
+	ch            chan *GossipMessage
+	subscriptions sync.Map // map from topic string to *GossipSubscription
 }
+
+const maxIncomingGossipMessages = 1 << 16
 
 // construct a new gossip manager that will handle packets with the given handlerfunc
 func NewGossipManager(
 	ctx context.Context,
 ) *GossipManager {
 	g := &GossipManager{
-		ch:            make(chan *pubsub.Message, 1),
-		subscriptions: map[string]*GossipSubscription{},
+		ch:            make(chan *GossipMessage, maxIncomingGossipMessages),
+		subscriptions: sync.Map{},
 	}
 	return g
 }
@@ -102,62 +109,97 @@ func NewGossipManager(
 func GossipSidecarTopics(maxBlobs uint64) (ret []GossipTopic) {
 	for i := uint64(0); i < maxBlobs; i++ {
 		ret = append(ret, GossipTopic{
-			Name:     TopicName(fmt.Sprintf(string(BlobSidecarTopic), i)),
+			Name:     gossip.TopicNameBlobSidecar(i),
 			CodecStr: SSZSnappyCodec,
 		})
 	}
 	return
 }
 
-func (s *GossipManager) Recv() <-chan *pubsub.Message {
+func (s *GossipManager) Recv() <-chan *GossipMessage {
 	return s.ch
 }
 
 func (s *GossipManager) GetMatchingSubscription(match string) *GossipSubscription {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	var sub *GossipSubscription
-	for topic, currSub := range s.subscriptions {
-		if strings.Contains(topic, match) {
-			sub = currSub
+	s.subscriptions.Range(func(topic, value interface{}) bool {
+		if strings.Contains(topic.(string), match) {
+			sub = value.(*GossipSubscription)
+			return false
 		}
-	}
+		return true
+	})
 	return sub
 }
 
 func (s *GossipManager) AddSubscription(topic string, sub *GossipSubscription) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.subscriptions[topic] = sub
+	s.subscriptions.Store(topic, sub)
 }
 
 func (s *GossipManager) unsubscribe(topic string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.subscriptions[topic]; !ok {
+	sub, ok := s.subscriptions.LoadAndDelete(topic)
+	if !ok || sub == nil {
 		return
 	}
-	s.subscriptions[topic].Close()
-	delete(s.subscriptions, topic)
+	sub.(*GossipSubscription).Close()
 }
 
-func (s *Sentinel) SubscribeGossip(topic GossipTopic, opts ...pubsub.TopicOpt) (sub *GossipSubscription, err error) {
-	digest, err := fork.ComputeForkDigest(s.cfg.BeaconConfig, s.cfg.GenesisConfig)
+func (s *Sentinel) forkWatcher() {
+	prevDigest, err := s.ethClock.CurrentForkDigest()
+	if err != nil {
+		log.Error("[Gossip] Failed to calculate fork choice", "err", err)
+		return
+	}
+	iterationInterval := time.NewTicker(30 * time.Millisecond)
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-iterationInterval.C:
+			digest, err := s.ethClock.CurrentForkDigest()
+			if err != nil {
+				log.Error("[Gossip] Failed to calculate fork choice", "err", err)
+				return
+			}
+			if prevDigest != digest {
+				// unsubscribe and resubscribe to all topics
+				s.subManager.subscriptions.Range(func(key, value interface{}) bool {
+					sub := value.(*GossipSubscription)
+					s.subManager.unsubscribe(key.(string))
+					newSub, err := s.SubscribeGossip(sub.gossip_topic, sub.expiration.Load().(time.Time))
+					if err != nil {
+						log.Warn("[Gossip] Failed to resubscribe to topic", "err", err)
+					}
+					newSub.Listen()
+					return true
+				})
+				prevDigest = digest
+			}
+		}
+	}
+}
+
+func (s *Sentinel) SubscribeGossip(topic GossipTopic, expiration time.Time, opts ...pubsub.TopicOpt) (sub *GossipSubscription, err error) {
+	digest, err := s.ethClock.CurrentForkDigest()
 	if err != nil {
 		log.Error("[Gossip] Failed to calculate fork choice", "err", err)
 	}
+	var exp atomic.Value
+	exp.Store(expiration)
 	sub = &GossipSubscription{
 		gossip_topic: topic,
 		ch:           s.subManager.ch,
 		host:         s.host.ID(),
 		ctx:          s.ctx,
+		expiration:   exp,
+		s:            s,
 	}
 	path := fmt.Sprintf("/eth2/%x/%s/%s", digest, topic.Name, topic.CodecStr)
 	sub.topic, err = s.pubsub.Join(path, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to join topic %s, err=%w", path, err)
 	}
-	topicScoreParams := s.topicScoreParams(string(topic.Name))
+	topicScoreParams := s.topicScoreParams(topic.Name)
 	if topicScoreParams != nil {
 		sub.topic.SetScoreParams(topicScoreParams)
 	}
@@ -167,7 +209,7 @@ func (s *Sentinel) SubscribeGossip(topic GossipTopic, opts ...pubsub.TopicOpt) (
 }
 
 func (s *Sentinel) Unsubscribe(topic GossipTopic, opts ...pubsub.TopicOpt) (err error) {
-	digest, err := fork.ComputeForkDigest(s.cfg.BeaconConfig, s.cfg.GenesisConfig)
+	digest, err := s.ethClock.CurrentForkDigest()
 	if err != nil {
 		log.Error("[Gossip] Failed to calculate fork choice", "err", err)
 	}
@@ -178,8 +220,10 @@ func (s *Sentinel) Unsubscribe(topic GossipTopic, opts ...pubsub.TopicOpt) (err 
 
 func (s *Sentinel) topicScoreParams(topic string) *pubsub.TopicScoreParams {
 	switch {
-	case strings.Contains(topic, string(BeaconBlockTopic)):
+	case strings.Contains(topic, gossip.TopicNameBeaconBlock) || gossip.IsTopicBlobSidecar(topic):
 		return s.defaultBlockTopicParams()
+	case strings.Contains(topic, gossip.TopicNameVoluntaryExit):
+		return s.defaultVoluntaryExitTopicParams()
 	/*case strings.Contains(topic, GossipAggregateAndProofMessage):
 	return defaultAggregateTopicParams(activeValidators), nil
 	case strings.Contains(topic, GossipAttestationMessage):
@@ -188,8 +232,7 @@ func (s *Sentinel) topicScoreParams(topic string) *pubsub.TopicScoreParams {
 	return defaultSyncSubnetTopicParams(activeValidators), nil
 	case strings.Contains(topic, GossipContributionAndProofMessage):
 	return defaultSyncContributionTopicParams(), nil
-	case strings.Contains(topic, GossipExitMessage):
-	return defaultVoluntaryExitTopicParams(), nil
+
 	case strings.Contains(topic, GossipProposerSlashingMessage):
 	return defaultProposerSlashingTopicParams(), nil
 	case strings.Contains(topic, GossipAttesterSlashingMessage):
@@ -201,7 +244,7 @@ func (s *Sentinel) topicScoreParams(topic string) *pubsub.TopicScoreParams {
 	}
 }
 
-// Based on the lighthouse parameters.
+// Based on the prysm parameters.
 // https://gist.github.com/blacktemplar/5c1862cb3f0e32a1a7fb0b25e79e6e2c
 func (s *Sentinel) defaultBlockTopicParams() *pubsub.TopicScoreParams {
 	blocksPerEpoch := s.cfg.BeaconConfig.SlotsPerEpoch
@@ -227,20 +270,45 @@ func (s *Sentinel) defaultBlockTopicParams() *pubsub.TopicScoreParams {
 	}
 }
 
-func (g *GossipManager) Close() {
-	for _, topic := range g.subscriptions {
-		if topic != nil {
-			topic.Close()
-		}
+func (s *Sentinel) defaultVoluntaryExitTopicParams() *pubsub.TopicScoreParams {
+	return &pubsub.TopicScoreParams{
+		TopicWeight:                     voluntaryExitWeight,
+		TimeInMeshWeight:                maxInMeshScore / s.inMeshCap(),
+		TimeInMeshQuantum:               s.oneSlotDuration(),
+		TimeInMeshCap:                   s.inMeshCap(),
+		FirstMessageDeliveriesWeight:    2,
+		FirstMessageDeliveriesDecay:     s.scoreDecay(100 * s.oneEpochDuration()),
+		FirstMessageDeliveriesCap:       5,
+		MeshMessageDeliveriesWeight:     0,
+		MeshMessageDeliveriesDecay:      0,
+		MeshMessageDeliveriesCap:        0,
+		MeshMessageDeliveriesThreshold:  0,
+		MeshMessageDeliveriesWindow:     0,
+		MeshMessageDeliveriesActivation: 0,
+		MeshFailurePenaltyWeight:        0,
+		MeshFailurePenaltyDecay:         0,
+		InvalidMessageDeliveriesWeight:  -2000,
+		InvalidMessageDeliveriesDecay:   s.scoreDecay(50 * s.oneEpochDuration()),
 	}
+}
+
+func (g *GossipManager) Close() {
+	g.subscriptions.Range(func(key, value interface{}) bool {
+		if value != nil {
+			value.(*GossipSubscription).Close()
+		}
+		return true
+	})
 }
 
 // GossipSubscription abstracts a gossip subscription to write decoded structs.
 type GossipSubscription struct {
 	gossip_topic GossipTopic
 	host         peer.ID
-	ch           chan *pubsub.Message
+	ch           chan *GossipMessage
 	ctx          context.Context
+	expiration   atomic.Value // Unix nano for how much we should listen to this topic
+	subscribed   atomic.Bool
 
 	topic *pubsub.Topic
 	sub   *pubsub.Subscription
@@ -248,47 +316,90 @@ type GossipSubscription struct {
 	cf context.CancelFunc
 	rf pubsub.RelayCancelFunc
 
-	setup  sync.Once
-	stopCh chan struct{}
+	s *Sentinel
+
+	stopCh    chan struct{}
+	closeOnce sync.Once
 }
 
-func (sub *GossipSubscription) Listen() (err error) {
-	sub.setup.Do(func() {
-		sub.stopCh = make(chan struct{}, 3)
-		sub.sub, err = sub.topic.Subscribe()
-		if err != nil {
-			err = fmt.Errorf("failed to begin topic %s subscription, err=%w", sub.topic.String(), err)
-			return
+func (sub *GossipSubscription) Listen() {
+	go func() {
+		var err error
+		checkingInterval := time.NewTicker(100 * time.Millisecond)
+		for {
+			select {
+			case <-sub.ctx.Done():
+				return
+			case <-checkingInterval.C:
+
+				expirationTime := sub.expiration.Load().(time.Time)
+				if sub.subscribed.Load() && time.Now().After(expirationTime) {
+					sub.stopCh <- struct{}{}
+					if cancelFunc := sub.cf; cancelFunc != nil {
+						cancelFunc() // stop pubsub.Subscription.Next
+					}
+					sub.topic.Close()
+					sub.subscribed.Store(false)
+					log.Info("[Gossip] Unsubscribed from topic", "topic", sub.gossip_topic.Name)
+					sub.s.updateENROnSubscription(sub.gossip_topic.Name, false)
+					continue
+				}
+				if !sub.subscribed.Load() && time.Now().Before(expirationTime) {
+					sub.stopCh = make(chan struct{}, 3)
+					sub.sub, err = sub.topic.Subscribe()
+					if err != nil {
+						log.Warn("[Gossip] failed to begin topic subscription", "err", err)
+						time.Sleep(30 * time.Second)
+						continue
+					}
+					var sctx context.Context
+					sctx, sub.cf = context.WithCancel(sub.ctx)
+					go sub.run(sctx, sub.sub, sub.sub.Topic())
+					sub.subscribed.Store(true)
+					sub.s.updateENROnSubscription(sub.gossip_topic.Name, true)
+					log.Info("[Gossip] Subscribed to topic", "topic", sub.gossip_topic.Name)
+				}
+			}
 		}
-		var sctx context.Context
-		sctx, sub.cf = context.WithCancel(sub.ctx)
-		go sub.run(sctx, sub.sub, sub.sub.Topic())
-	})
-	return nil
+	}()
+}
+
+func (sub *GossipSubscription) OverwriteSubscriptionExpiry(expiry time.Time) {
+	if expiry.After(sub.expiration.Load().(time.Time)) {
+		sub.expiration.Store(expiry)
+	}
 }
 
 // calls the cancel func for the subscriber and closes the topic and sub
 func (s *GossipSubscription) Close() {
-	s.stopCh <- struct{}{}
-	if s.cf != nil {
-		s.cf()
-	}
-	if s.rf != nil {
-		s.rf()
-	}
-	if s.sub != nil {
-		s.sub.Cancel()
-		s.sub = nil
-	}
-	if s.topic != nil {
-		s.topic.Close()
-		s.topic = nil
-	}
+	s.closeOnce.Do(func() {
+		close(s.stopCh)
+		if s.cf != nil {
+			s.cf()
+		}
+		if s.rf != nil {
+			s.rf()
+		}
+		if s.sub != nil {
+			s.sub.Cancel()
+			s.sub = nil
+		}
+		if s.topic != nil {
+			s.topic.Close()
+			s.topic = nil
+		}
+	})
+}
+
+type GossipMessage struct {
+	From      peer.ID
+	TopicName string
+	Data      []byte
 }
 
 // this is a helper to begin running the gossip subscription.
 // function should not be used outside of the constructor for gossip subscription
-func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, topic string) {
+func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, topicName string) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Error("[Sentinel Gossip] Message Handler Crashed", "err", r)
@@ -306,13 +417,18 @@ func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, 
 				if errors.Is(err, context.Canceled) {
 					return
 				}
-				log.Warn("[Sentinel] fail to decode gossip packet", "err", err, "topic", topic)
+				log.Warn("[Sentinel] fail to decode gossip packet", "err", err, "topicName", topicName)
 				return
 			}
-			if msg.GetFrom() == s.host {
+
+			if msg.ReceivedFrom == s.host {
 				continue
 			}
-			s.ch <- msg
+			s.ch <- &GossipMessage{
+				From:      msg.ReceivedFrom,
+				TopicName: topicName,
+				Data:      common.Copy(msg.Data),
+			}
 		}
 	}
 }

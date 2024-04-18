@@ -40,7 +40,7 @@ func TestGeneratedDebugApi(t *testing.T) {
 		t.Errorf("debug_traceBlock %d: %v", 0, err)
 	}
 	if err = stream.Flush(); err != nil {
-		t.Fatalf("error flusing: %v", err)
+		t.Fatalf("error flushing: %v", err)
 	}
 	var result interface{}
 	if err = json.Unmarshal(buf.Bytes(), &result); err != nil {
@@ -49,6 +49,7 @@ func TestGeneratedDebugApi(t *testing.T) {
 	expectedJSON := `
 	[
 		{
+		  "txHash": "0xb42edc1d46932ef34be0ba49402dc94e3d2319c066f02945f6828cd344fcfa7b",
 		  "result": {
 			"calls": [
 			  {
@@ -95,7 +96,7 @@ func TestGeneratedDebugApi(t *testing.T) {
 			  }
 			],
 			"from": "0x71562b71999873db5b286df957af199ec94617f7",
-			"gas": "0x7120",
+			"gas": "0xc350",
 			"gasUsed": "0x684c",
 			"input": "0x01000100",
 			"to": "0x00000000000000000000000000000000000002ff",

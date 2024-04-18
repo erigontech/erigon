@@ -52,6 +52,21 @@ func NewValidatorSet(c int) *ValidatorSet {
 	}
 }
 
+func NewValidatorSetWithLength(c int, l int) *ValidatorSet {
+	return &ValidatorSet{
+		c:               c,
+		l:               l,
+		buffer:          make([]byte, l*validatorSize),
+		treeCacheBuffer: make([]byte, getTreeCacheSize(l, validatorTreeCacheGroupLayer)*length.Hash),
+		phase0Data:      make([]Phase0Data, l),
+		attesterBits:    make([]byte, l),
+	}
+}
+
+func (v *ValidatorSet) Bytes() []byte {
+	return v.buffer[:v.l*validatorSize]
+}
+
 func (v *ValidatorSet) expandBuffer(newValidatorSetLength int) {
 	size := newValidatorSetLength * validatorSize
 	treeCacheSize := getTreeCacheSize(newValidatorSetLength, validatorTreeCacheGroupLayer) * length.Hash

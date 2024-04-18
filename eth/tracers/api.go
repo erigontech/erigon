@@ -19,6 +19,5 @@ type TraceConfig struct {
 	StateOverrides *ethapi.StateOverrides
 
 	BorTraceEnabled *bool
-	BorTx           *bool
 	TxIndex         *hexutil.Uint
 }

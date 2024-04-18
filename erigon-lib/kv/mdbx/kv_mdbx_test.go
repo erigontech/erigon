@@ -18,14 +18,17 @@ package mdbx
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 )
 
 func BaseCase(t *testing.T) (kv.RwDB, kv.RwTx, kv.RwCursorDupSort) {
@@ -772,4 +775,125 @@ func TestAutoConversionSeekBothRange(t *testing.T) {
 	v, err = c.SeekBothRange([]byte("X..........................."), []byte("_______________________________Y"))
 	require.NoError(t, err)
 	assert.Nil(t, v)
+}
+
+func TestBeginRoAfterClose(t *testing.T) {
+	db := NewMDBX(log.New()).InMem(t.TempDir()).MustOpen()
+	db.Close()
+	_, err := db.BeginRo(context.Background())
+	require.ErrorContains(t, err, "closed")
+}
+
+func TestBeginRwAfterClose(t *testing.T) {
+	db := NewMDBX(log.New()).InMem(t.TempDir()).MustOpen()
+	db.Close()
+	_, err := db.BeginRw(context.Background())
+	require.ErrorContains(t, err, "closed")
+}
+
+func TestBeginRoWithDoneContext(t *testing.T) {
+	db := NewMDBX(log.New()).InMem(t.TempDir()).MustOpen()
+	defer db.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := db.BeginRo(ctx)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestBeginRwWithDoneContext(t *testing.T) {
+	db := NewMDBX(log.New()).InMem(t.TempDir()).MustOpen()
+	defer db.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := db.BeginRw(ctx)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func testCloseWaitsAfterTxBegin(
+	t *testing.T,
+	count int,
+	txBeginFunc func(kv.RwDB) (kv.StatelessReadTx, error),
+	txEndFunc func(kv.StatelessReadTx) error,
+) {
+	t.Helper()
+	db := NewMDBX(log.New()).InMem(t.TempDir()).MustOpen()
+	var txs []kv.StatelessReadTx
+	for i := 0; i < count; i++ {
+		tx, err := txBeginFunc(db)
+		require.Nil(t, err)
+		txs = append(txs, tx)
+	}
+
+	isClosed := &atomic.Bool{}
+	closeDone := make(chan struct{})
+
+	go func() {
+		db.Close()
+		isClosed.Store(true)
+		close(closeDone)
+	}()
+
+	for _, tx := range txs {
+		// arbitrary delay to give db.Close() a chance to exit prematurely
+		time.Sleep(time.Millisecond * 20)
+		assert.False(t, isClosed.Load())
+
+		err := txEndFunc(tx)
+		require.Nil(t, err)
+	}
+
+	<-closeDone
+	assert.True(t, isClosed.Load())
+}
+
+func TestCloseWaitsAfterTxBegin(t *testing.T) {
+	ctx := context.Background()
+	t.Run("BeginRoAndCommit", func(t *testing.T) {
+		testCloseWaitsAfterTxBegin(
+			t,
+			1,
+			func(db kv.RwDB) (kv.StatelessReadTx, error) { return db.BeginRo(ctx) },
+			func(tx kv.StatelessReadTx) error { return tx.Commit() },
+		)
+	})
+	t.Run("BeginRoAndCommit3", func(t *testing.T) {
+		testCloseWaitsAfterTxBegin(
+			t,
+			3,
+			func(db kv.RwDB) (kv.StatelessReadTx, error) { return db.BeginRo(ctx) },
+			func(tx kv.StatelessReadTx) error { return tx.Commit() },
+		)
+	})
+	t.Run("BeginRoAndRollback", func(t *testing.T) {
+		testCloseWaitsAfterTxBegin(
+			t,
+			1,
+			func(db kv.RwDB) (kv.StatelessReadTx, error) { return db.BeginRo(ctx) },
+			func(tx kv.StatelessReadTx) error { tx.Rollback(); return nil },
+		)
+	})
+	t.Run("BeginRoAndRollback3", func(t *testing.T) {
+		testCloseWaitsAfterTxBegin(
+			t,
+			3,
+			func(db kv.RwDB) (kv.StatelessReadTx, error) { return db.BeginRo(ctx) },
+			func(tx kv.StatelessReadTx) error { tx.Rollback(); return nil },
+		)
+	})
+	t.Run("BeginRwAndCommit", func(t *testing.T) {
+		testCloseWaitsAfterTxBegin(
+			t,
+			1,
+			func(db kv.RwDB) (kv.StatelessReadTx, error) { return db.BeginRw(ctx) },
+			func(tx kv.StatelessReadTx) error { return tx.Commit() },
+		)
+	})
+	t.Run("BeginRwAndRollback", func(t *testing.T) {
+		testCloseWaitsAfterTxBegin(
+			t,
+			1,
+			func(db kv.RwDB) (kv.StatelessReadTx, error) { return db.BeginRw(ctx) },
+			func(tx kv.StatelessReadTx) error { tx.Rollback(); return nil },
+		)
+	})
 }

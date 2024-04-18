@@ -99,12 +99,12 @@ func TestPromoteLogIndex(t *testing.T) {
 
 	expectAddrs, expectTopics := genReceipts(t, tx, 100)
 
-	cfg := StageLogIndexCfg(nil, prune.DefaultMode, "")
+	cfg := StageLogIndexCfg(nil, prune.DefaultMode, "", nil)
 	cfgCopy := cfg
 	cfgCopy.bufLimit = 10
 	cfgCopy.flushEvery = time.Nanosecond
 
-	err := promoteLogIndex("logPrefix", tx, 0, 0, cfgCopy, ctx, logger)
+	err := promoteLogIndex("logPrefix", tx, 0, 0, 0, cfgCopy, ctx, logger)
 	require.NoError(err)
 
 	// Check indices GetCardinality (in how many blocks they meet)
@@ -125,17 +125,17 @@ func TestPruneLogIndex(t *testing.T) {
 	require, tmpDir, ctx := require.New(t), t.TempDir(), context.Background()
 	_, tx := memdb.NewTestTx(t)
 
-	_, _ = genReceipts(t, tx, 100)
+	_, _ = genReceipts(t, tx, 90)
 
-	cfg := StageLogIndexCfg(nil, prune.DefaultMode, "")
+	cfg := StageLogIndexCfg(nil, prune.DefaultMode, "", nil)
 	cfgCopy := cfg
 	cfgCopy.bufLimit = 10
 	cfgCopy.flushEvery = time.Nanosecond
-	err := promoteLogIndex("logPrefix", tx, 0, 0, cfgCopy, ctx, logger)
+	err := promoteLogIndex("logPrefix", tx, 0, 0, 0, cfgCopy, ctx, logger)
 	require.NoError(err)
 
 	// Mode test
-	err = pruneLogIndex("", tx, tmpDir, 50, ctx, logger)
+	err = pruneLogIndex("", tx, tmpDir, 0, 45, ctx, logger, map[libcommon.Address]bool{{1}: true}) // using addr {1} from genReceipts
 	require.NoError(err)
 
 	{
@@ -158,6 +158,15 @@ func TestPruneLogIndex(t *testing.T) {
 		require.NoError(err)
 		require.True(total == 3)
 	}
+	{
+		total := 0
+		err = tx.ForEach(kv.Log, nil, func(k, v []byte) error {
+			total++
+			return nil
+		})
+		require.NoError(err)
+		require.Equal(total, 60) // 1/3rd of 45 not pruned as it has address "1", so 30 Pruned in total, remaining 90-30
+	}
 }
 
 func TestUnwindLogIndex(t *testing.T) {
@@ -167,15 +176,15 @@ func TestUnwindLogIndex(t *testing.T) {
 
 	expectAddrs, expectTopics := genReceipts(t, tx, 100)
 
-	cfg := StageLogIndexCfg(nil, prune.DefaultMode, "")
+	cfg := StageLogIndexCfg(nil, prune.DefaultMode, "", nil)
 	cfgCopy := cfg
 	cfgCopy.bufLimit = 10
 	cfgCopy.flushEvery = time.Nanosecond
-	err := promoteLogIndex("logPrefix", tx, 0, 0, cfgCopy, ctx, logger)
+	err := promoteLogIndex("logPrefix", tx, 0, 0, 0, cfgCopy, ctx, logger)
 	require.NoError(err)
 
 	// Mode test
-	err = pruneLogIndex("", tx, tmpDir, 50, ctx, logger)
+	err = pruneLogIndex("", tx, tmpDir, 0, 50, ctx, logger, nil)
 	require.NoError(err)
 
 	// Unwind test

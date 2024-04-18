@@ -115,7 +115,7 @@ return err
 - method Begin DOESN'T create new TxDb object, it means this object can be passed into other objects by pointer,
   and high-level app code can start/commit transactions when it needs without re-creating all objects which holds
   TxDb pointer.
-- This is reason why txDb.CommitAndBegin() method works: inside it creating new transaction object, pinter to TxDb stays
+- This is reason why txDb.CommitAndBegin() method works: inside it creating new transaction object, pointer to TxDb stays
   valid.
 
 ## How to dump/load table

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"strconv"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -79,9 +80,9 @@ func (arr *byteBasedUint64Slice) CopyTo(target *byteBasedUint64Slice) {
 }
 
 func (arr *byteBasedUint64Slice) MarshalJSON() ([]byte, error) {
-	list := make([]uint64, arr.l)
+	list := make([]string, arr.l)
 	for i := 0; i < arr.l; i++ {
-		list[0] = arr.Get(i)
+		list[i] = strconv.FormatInt(int64(arr.Get(i)), 10)
 	}
 	return json.Marshal(list)
 }

@@ -2,7 +2,6 @@ package state
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"math/rand"
 	"os"
@@ -14,84 +13,10 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/compress"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
+	"github.com/ledgerwatch/erigon-lib/seg"
 )
-
-func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (string, kv.RwDB, *Aggregator) {
-	b.Helper()
-	logger := log.New()
-	path := b.TempDir()
-	b.Cleanup(func() { os.RemoveAll(path) })
-	db := mdbx.NewMDBX(logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		return kv.ChaindataTablesCfg
-	}).MustOpen()
-	b.Cleanup(db.Close)
-	agg, err := NewAggregator(path, path, aggStep, CommitmentModeDirect, commitment.VariantHexPatriciaTrie, logger)
-	require.NoError(b, err)
-	b.Cleanup(agg.Close)
-	return path, db, agg
-}
-
-func BenchmarkAggregator_Processing(b *testing.B) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	longKeys := queueKeys(ctx, 64, length.Addr+length.Hash)
-	vals := queueKeys(ctx, 53, length.Hash)
-
-	aggStep := uint64(100_00)
-	_, db, agg := testDbAndAggregatorBench(b, aggStep)
-
-	tx, err := db.BeginRw(ctx)
-	require.NoError(b, err)
-	defer func() {
-		if tx != nil {
-			tx.Rollback()
-		}
-	}()
-
-	agg.SetTx(tx)
-	defer agg.StartWrites().FinishWrites()
-	require.NoError(b, err)
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		key := <-longKeys
-		val := <-vals
-		txNum := uint64(i)
-		agg.SetTxNum(txNum)
-		err := agg.WriteAccountStorage(key[:length.Addr], key[length.Addr:], val)
-		require.NoError(b, err)
-		err = agg.FinishTx()
-		require.NoError(b, err)
-	}
-}
-
-func queueKeys(ctx context.Context, seed, ofSize uint64) <-chan []byte {
-	rnd := rand.New(rand.NewSource(int64(seed)))
-	keys := make(chan []byte, 1)
-	go func() {
-		for {
-			if ctx.Err() != nil {
-				break
-			}
-			bb := make([]byte, ofSize)
-			rnd.Read(bb)
-
-			keys <- bb
-		}
-		close(keys)
-	}()
-	return keys
-}
 
 func Benchmark_BtreeIndex_Allocation(b *testing.B) {
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -223,7 +148,7 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 	require.NoError(b, err)
 	idxr := recsplit.NewIndexReader(idx)
 
-	decomp, err := compress.NewDecompressor(dataPath)
+	decomp, err := seg.NewDecompressor(dataPath)
 	require.NoError(b, err)
 	defer decomp.Close()
 
@@ -235,7 +160,7 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		p := rnd.Intn(len(keys))
 
-		offset := idxr.Lookup(keys[p])
+		offset, _ := idxr.Lookup(keys[p])
 		getter.Reset(offset)
 
 		require.True(b, getter.HasNext())

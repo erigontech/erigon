@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 
 	"github.com/ledgerwatch/erigon/common/paths"
 )
@@ -39,12 +40,23 @@ func readChainSpec(filename string) *chain.Config {
 		panic(fmt.Sprintf("Could not open chainspec for %s: %v", filename, err))
 	}
 	defer f.Close()
+
 	decoder := json.NewDecoder(f)
 	spec := &chain.Config{}
 	err = decoder.Decode(&spec)
 	if err != nil {
 		panic(fmt.Sprintf("Could not parse chainspec for %s: %v", filename, err))
 	}
+
+	if spec.BorJSON != nil {
+		borConfig := &borcfg.BorConfig{}
+		err = json.Unmarshal(spec.BorJSON, borConfig)
+		if err != nil {
+			panic(fmt.Sprintf("Could not parse 'bor' chainspec for %s: %v", filename, err))
+		}
+		spec.Bor = borConfig
+	}
+
 	return spec
 }
 
@@ -124,6 +136,8 @@ var (
 	}
 
 	MumbaiChainConfig = readChainSpec("chainspecs/mumbai.json")
+
+	AmoyChainConfig = readChainSpec("chainspecs/amoy.json")
 
 	BorMainnetChainConfig = readChainSpec("chainspecs/bor-mainnet.json")
 
@@ -209,6 +223,8 @@ func ChainConfigByChainName(chain string) *chain.Config {
 		return GoerliChainConfig
 	case networkname.MumbaiChainName:
 		return MumbaiChainConfig
+	case networkname.AmoyChainName:
+		return AmoyChainConfig
 	case networkname.BorMainnetChainName:
 		return BorMainnetChainConfig
 	case networkname.BorDevnetChainName:
@@ -236,6 +252,8 @@ func GenesisHashByChainName(chain string) *libcommon.Hash {
 		return &GoerliGenesisHash
 	case networkname.MumbaiChainName:
 		return &MumbaiGenesisHash
+	case networkname.AmoyChainName:
+		return &AmoyGenesisHash
 	case networkname.BorMainnetChainName:
 		return &BorMainnetGenesisHash
 	case networkname.BorDevnetChainName:
@@ -263,6 +281,8 @@ func ChainConfigByGenesisHash(genesisHash libcommon.Hash) *chain.Config {
 		return GoerliChainConfig
 	case genesisHash == MumbaiGenesisHash:
 		return MumbaiChainConfig
+	case genesisHash == AmoyGenesisHash:
+		return AmoyChainConfig
 	case genesisHash == BorMainnetGenesisHash:
 		return BorMainnetChainConfig
 	case genesisHash == BorDevnetGenesisHash:

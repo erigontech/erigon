@@ -2,33 +2,34 @@ package execution_client
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"math/big"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
 )
 
 type ExecutionClientDirect struct {
 	chainRW eth1_chain_reader.ChainReaderWriterEth1
-	ctx     context.Context
 }
 
-func NewExecutionClientDirect(ctx context.Context, chainRW eth1_chain_reader.ChainReaderWriterEth1) (*ExecutionClientDirect, error) {
+func NewExecutionClientDirect(chainRW eth1_chain_reader.ChainReaderWriterEth1) (*ExecutionClientDirect, error) {
 	return &ExecutionClientDirect{
 		chainRW: chainRW,
-		ctx:     ctx,
 	}, nil
 }
 
-func (cc *ExecutionClientDirect) NewPayload(payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash) (invalid bool, err error) {
+func (cc *ExecutionClientDirect) NewPayload(ctx context.Context, payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash, versionedHashes []libcommon.Hash) (invalid bool, err error) {
 	if payload == nil {
 		return
 	}
 
-	header, err := payload.RlpHeader()
+	header, err := payload.RlpHeader(beaconParentRoot)
 	if err != nil {
 		return true, err
 	}
@@ -39,11 +40,16 @@ func (cc *ExecutionClientDirect) NewPayload(payload *cltypes.Eth1Block, beaconPa
 		return true, err
 	}
 
-	if err := cc.chainRW.InsertBlockAndWait(types.NewBlockFromStorage(payload.BlockHash, header, txs, nil, body.Withdrawals)); err != nil {
+	if err := cc.chainRW.InsertBlockAndWait(ctx, types.NewBlockFromStorage(payload.BlockHash, header, txs, nil, body.Withdrawals)); err != nil {
 		return false, err
 	}
 
-	status, _, err := cc.chainRW.ValidateChain(payload.BlockHash, payload.BlockNumber)
+	headHeader := cc.chainRW.CurrentHeader(ctx)
+	if headHeader == nil || header.Number.Uint64() > headHeader.Number.Uint64()+1 {
+		return false, nil // import optimistically.
+	}
+
+	status, _, _, err := cc.chainRW.ValidateChain(ctx, payload.BlockHash, payload.BlockNumber)
 	if err != nil {
 		return false, err
 	}
@@ -52,50 +58,74 @@ func (cc *ExecutionClientDirect) NewPayload(payload *cltypes.Eth1Block, beaconPa
 	return
 }
 
-func (cc *ExecutionClientDirect) ForkChoiceUpdate(finalized libcommon.Hash, head libcommon.Hash) error {
-	status, _, err := cc.chainRW.UpdateForkChoice(head, head, finalized)
+func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized libcommon.Hash, head libcommon.Hash, attr *engine_types.PayloadAttributes) ([]byte, error) {
+	status, _, _, err := cc.chainRW.UpdateForkChoice(ctx, head, head, finalized)
 	if err != nil {
-		return fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
+		return nil, fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
 	}
 	if status == execution.ExecutionStatus_InvalidForkchoice {
-		return fmt.Errorf("forkchoice was invalid")
+		return nil, fmt.Errorf("forkchoice was invalid")
 	}
 	if status == execution.ExecutionStatus_BadBlock {
-		return fmt.Errorf("bad block as forkchoice")
+		return nil, fmt.Errorf("bad block as forkchoice")
 	}
-	return nil
+	if attr == nil {
+		return nil, nil
+	}
+	idBytes := make([]byte, 8)
+	id, err := cc.chainRW.AssembleBlock(head, attr)
+	if err != nil {
+		return nil, err
+	}
+	binary.LittleEndian.PutUint64(idBytes, id)
+	return idBytes, nil
 }
 
 func (cc *ExecutionClientDirect) SupportInsertion() bool {
 	return true
 }
 
-func (cc *ExecutionClientDirect) InsertBlocks(blks []*types.Block) error {
-	return cc.chainRW.InsertBlocksAndWait(blks)
+func (cc *ExecutionClientDirect) InsertBlocks(ctx context.Context, blocks []*types.Block, wait bool) error {
+	if wait {
+		return cc.chainRW.InsertBlocksAndWait(ctx, blocks)
+	}
+	return cc.chainRW.InsertBlocks(ctx, blocks)
 }
 
-func (cc *ExecutionClientDirect) InsertBlock(blk *types.Block) error {
-	return cc.chainRW.InsertBlockAndWait(blk)
+func (cc *ExecutionClientDirect) InsertBlock(ctx context.Context, blk *types.Block) error {
+	return cc.chainRW.InsertBlockAndWait(ctx, blk)
 }
 
-func (cc *ExecutionClientDirect) IsCanonicalHash(hash libcommon.Hash) (bool, error) {
-	return cc.chainRW.IsCanonicalHash(hash)
+func (cc *ExecutionClientDirect) CurrentHeader(ctx context.Context) (*types.Header, error) {
+	return cc.chainRW.CurrentHeader(ctx), nil
 }
 
-func (cc *ExecutionClientDirect) Ready() (bool, error) {
-	return cc.chainRW.Ready()
+func (cc *ExecutionClientDirect) IsCanonicalHash(ctx context.Context, hash libcommon.Hash) (bool, error) {
+	return cc.chainRW.IsCanonicalHash(ctx, hash)
+}
+
+func (cc *ExecutionClientDirect) Ready(ctx context.Context) (bool, error) {
+	return cc.chainRW.Ready(ctx)
 }
 
 // GetBodiesByRange gets block bodies in given block range
-func (cc *ExecutionClientDirect) GetBodiesByRange(start, count uint64) ([]*types.RawBody, error) {
-	return cc.chainRW.GetBodiesByRange(start, count)
+func (cc *ExecutionClientDirect) GetBodiesByRange(ctx context.Context, start, count uint64) ([]*types.RawBody, error) {
+	return cc.chainRW.GetBodiesByRange(ctx, start, count)
 }
 
 // GetBodiesByHashes gets block bodies with given hashes
-func (cc *ExecutionClientDirect) GetBodiesByHashes(hashes []libcommon.Hash) ([]*types.RawBody, error) {
-	return cc.chainRW.GetBodiesByHashes(hashes)
+func (cc *ExecutionClientDirect) GetBodiesByHashes(ctx context.Context, hashes []libcommon.Hash) ([]*types.RawBody, error) {
+	return cc.chainRW.GetBodiesByHashes(ctx, hashes)
 }
 
-func (cc *ExecutionClientDirect) FrozenBlocks() uint64 {
-	return cc.chainRW.FrozenBlocks()
+func (cc *ExecutionClientDirect) FrozenBlocks(ctx context.Context) uint64 {
+	return cc.chainRW.FrozenBlocks(ctx)
+}
+
+func (cc *ExecutionClientDirect) HasBlock(ctx context.Context, hash libcommon.Hash) (bool, error) {
+	return cc.chainRW.HasBlock(ctx, hash)
+}
+
+func (cc *ExecutionClientDirect) GetAssembledBlock(_ context.Context, idBytes []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *big.Int, error) {
+	return cc.chainRW.GetAssembledBlock(binary.LittleEndian.Uint64(idBytes))
 }

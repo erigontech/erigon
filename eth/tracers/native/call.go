@@ -19,13 +19,15 @@ package native
 import (
 	"encoding/json"
 	"errors"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/tracers"
@@ -137,7 +139,7 @@ func (t *callTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcom
 		From:  from,
 		To:    to,
 		Input: libcommon.CopyBytes(input),
-		Gas:   gas,
+		Gas:   t.gasLimit, // gas has intrinsicGas already subtracted
 	}
 	if value != nil {
 		t.callstack[0].Value = value.ToBig()
@@ -246,8 +248,8 @@ func (t *callTracer) CaptureTxEnd(restGas uint64) {
 	t.callstack[0].GasUsed = t.gasLimit - restGas
 	if t.config.WithLog {
 		// Logs are not emitted when the call fails
-		clearFailedLogs(&t.callstack[0], false, 0, t.logGaps)
-		fixLogIndexGap(&t.callstack[0], t.logGaps)
+		clearFailedLogs(&t.callstack[0], false, t.logGaps)
+		fixLogIndexGap(&t.callstack[0], addCumulativeGaps(t.logIndex, t.logGaps))
 	}
 	t.logIndex = 0
 	t.logGaps = nil
@@ -274,35 +276,50 @@ func (t *callTracer) Stop(err error) {
 
 // clearFailedLogs clears the logs of a callframe and all its children
 // in case of execution failure.
-func clearFailedLogs(cf *callFrame, parentFailed bool, gap int, logGaps map[uint64]int) {
+func clearFailedLogs(cf *callFrame, parentFailed bool, logGaps map[uint64]int) {
 	failed := cf.failed() || parentFailed
-	// Clear own logs
 	if failed {
-		gap += len(cf.Logs)
-		if gap > 0 {
-			lastIdx := len(cf.Logs) - 1
-			if lastIdx > 0 && logGaps != nil {
-				idx := cf.Logs[lastIdx].Index
-				logGaps[idx] = gap
-			}
+		lastIdx := len(cf.Logs) - 1
+		if lastIdx >= 0 && logGaps != nil {
+			idx := cf.Logs[lastIdx].Index
+			logGaps[idx] = len(cf.Logs)
 		}
+		// Clear own logs
 		cf.Logs = nil
 	}
 	for i := range cf.Calls {
-		clearFailedLogs(&cf.Calls[i], failed, gap, logGaps)
+		clearFailedLogs(&cf.Calls[i], failed, logGaps)
 	}
 }
 
-func fixLogIndexGap(cf *callFrame, logGaps map[uint64]int) {
+// Find the shift position of each potential logIndex
+func addCumulativeGaps(h uint64, logGaps map[uint64]int) []uint64 {
+	if len(logGaps) == 0 || logGaps == nil {
+		return nil
+	}
+	cumulativeGaps := make([]uint64, h)
+	for idx, gap := range logGaps {
+		if idx+1 < h {
+			cumulativeGaps[idx+1] = uint64(gap) // Next index of the last failed index
+		}
+	}
+	for i := 1; i < int(h); i++ {
+		cumulativeGaps[i] += cumulativeGaps[i-1]
+	}
+	return cumulativeGaps
+}
+
+// Recursively shift log indices of callframe - self and children
+func fixLogIndexGap(cf *callFrame, cumulativeGaps []uint64) {
+	if cumulativeGaps == nil {
+		return
+	}
 	if len(cf.Logs) > 0 {
-		gap := logGaps[cf.Logs[0].Index-1]
-		if gap > 0 {
-			for _, log := range cf.Logs {
-				log.Index -= uint64(gap)
-			}
+		for i := range cf.Logs {
+			cf.Logs[i].Index -= cumulativeGaps[cf.Logs[i].Index]
 		}
 	}
 	for i := range cf.Calls {
-		fixLogIndexGap(&cf.Calls[i], logGaps)
+		fixLogIndexGap(&cf.Calls[i], cumulativeGaps)
 	}
 }

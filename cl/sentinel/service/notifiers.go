@@ -3,8 +3,6 @@ package service
 import (
 	"fmt"
 	"sync"
-
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 )
 
 const (
@@ -12,10 +10,10 @@ const (
 )
 
 type gossipObject struct {
-	data      []byte              // gossip data
-	t         sentinel.GossipType // determine which gossip message we are notifying of
-	pid       string              // pid is the peer id of the sender
-	blobIndex *uint32             // index of the blob
+	data     []byte // gossip data
+	t        string // determine which gossip message we are notifying of
+	pid      string // pid is the peer id of the sender
+	subnetId *uint64
 }
 
 type gossipNotifier struct {
@@ -30,32 +28,12 @@ func newGossipNotifier() *gossipNotifier {
 	}
 }
 
-func (g *gossipNotifier) notify(t sentinel.GossipType, data []byte, pid string) {
+func (g *gossipNotifier) notify(obj *gossipObject) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
 	for _, ch := range g.notifiers {
-		ch <- gossipObject{
-			data: data,
-			t:    t,
-			pid:  pid,
-		}
-	}
-}
-
-func (g *gossipNotifier) notifyBlob(t sentinel.GossipType, data []byte, pid string, blobIndex int) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	index := new(uint32)
-	*index = uint32(blobIndex)
-	for _, ch := range g.notifiers {
-		ch <- gossipObject{
-			data:      data,
-			t:         t,
-			pid:       pid,
-			blobIndex: index,
-		}
+		ch <- *obj
 	}
 }
 
@@ -66,7 +44,7 @@ func (g *gossipNotifier) addSubscriber() (chan gossipObject, int, error) {
 	if len(g.notifiers) >= maxSubscribers {
 		return nil, -1, fmt.Errorf("too many subsribers, try again later")
 	}
-	ch := make(chan gossipObject)
+	ch := make(chan gossipObject, 1<<16)
 	g.notifiers = append(g.notifiers, ch)
 	return ch, len(g.notifiers) - 1, nil
 }

@@ -356,13 +356,15 @@ const (
 	StateCommitment = "StateCommitment"
 
 	// BOR
-	BorReceipts  = "BorReceipt"
-	BorFinality  = "BorFinality"
-	BorTxLookup  = "BlockBorTransactionLookup" // transaction_hash -> block_num_u64
-	BorSeparate  = "BorSeparate"               // persisted snapshots of the Validator Sets, with their proposer priorities
-	BorEvents    = "BorEvents"                 // event_id -> event_payload
-	BorEventNums = "BorEventNums"              // block_num -> event_id (first event_id in that block)
-	BorSpans     = "BorSpans"                  // span_id -> span (in JSON encoding)
+	BorReceipts    = "BorReceipt"
+	BorFinality    = "BorFinality"
+	BorTxLookup    = "BlockBorTransactionLookup" // transaction_hash -> block_num_u64
+	BorSeparate    = "BorSeparate"               // persisted snapshots of the Validator Sets, with their proposer priorities
+	BorEvents      = "BorEvents"                 // event_id -> event_payload
+	BorEventNums   = "BorEventNums"              // block_num -> event_id (first event_id in that block)
+	BorSpans       = "BorSpans"                  // span_id -> span (in JSON encoding)
+	BorMilestones  = "BorMilestones"             // milestone_id -> checkpoint (in JSON encoding)
+	BorCheckpoints = "BorCheckpoints"            // checkpoint_id -> checkpoint (in JSON encoding)
 
 	// Downloader
 	BittorrentCompletion = "BittorrentCompletion"
@@ -428,6 +430,9 @@ const (
 	BeaconState = "BeaconState"
 	// [slot] => [signature + block without execution payload]
 	BeaconBlocks = "BeaconBlock"
+
+	EffectiveBalancesDump = "EffectiveBalancesDump"
+	BalancesDump          = "BalancesDump"
 	// [slot] => [attestation list (custom encoding)]
 	Attestetations = "Attestetations"
 
@@ -445,6 +450,9 @@ const (
 	LastBeaconSnapshot    = "LastBeaconSnapshot"
 	LastBeaconSnapshotKey = "LastBeaconSnapshotKey"
 
+	BlockRootToKzgCommitments = "BlockRootToKzgCommitments"
+	KzgCommitmentToBlob       = "KzgCommitmentToBlob"
+
 	// [Block Root] => [Parent Root]
 	BlockRootToParentRoot = "BlockRootToParentRoot"
 
@@ -453,15 +461,41 @@ const (
 	// BlockRoot => Beacon Block Header
 	BeaconBlockHeaders = "BeaconBlockHeaders"
 
-	// LightClientStore => LightClientStore object
-	// LightClientFinalityUpdate => latest finality update
-	// LightClientOptimisticUpdate => latest optimistic update
-	LightClient = "LightClient"
 	// Period (one every 27 hours) => LightClientUpdate
 	LightClientUpdates = "LightClientUpdates"
 	// Beacon historical data
-	// ValidatorIndex => [Public Key]
-	ValidatorPublicKeys = "ValidatorPublickeys"
+	// ValidatorIndex => [Field]
+	ValidatorPublicKeys         = "ValidatorPublickeys"
+	InvertedValidatorPublicKeys = "InvertedValidatorPublickeys"
+	// ValidatorIndex + Slot => [Field]
+	ValidatorEffectiveBalance = "ValidatorEffectiveBalance"
+	ValidatorSlashings        = "ValidatorSlashings"
+	ValidatorBalance          = "ValidatorBalance"
+	StaticValidators          = "StaticValidators"
+	StateEvents               = "StateEvents"
+	ActiveValidatorIndicies   = "ActiveValidatorIndicies"
+
+	// External data
+	StateRoot = "StateRoot"
+	BlockRoot = "BlockRoot"
+	// Differentiate data stored per-slot vs per-epoch
+	SlotData  = "SlotData"
+	EpochData = "EpochData"
+	// State fields
+	InactivityScores           = "InactivityScores"
+	PreviousEpochParticipation = "PreviousEpochParticipation"
+	CurrentEpochParticipation  = "CurrentEpochParticipation"
+	NextSyncCommittee          = "NextSyncCommittee"
+	CurrentSyncCommittee       = "CurrentSyncCommittee"
+	HistoricalRoots            = "HistoricalRoots"
+	HistoricalSummaries        = "HistoricalSummaries"
+	Eth1DataVotes              = "Eth1DataVotes"
+
+	IntraRandaoMixes = "IntraRandaoMixes" // [validator_index+slot] => [randao_mix]
+	RandaoMixes      = "RandaoMixes"      // [validator_index+slot] => [randao_mix]
+	Proposers        = "BlockProposers"   // epoch => proposers indicies
+
+	StatesProcessingProgress = "StatesProcessingProgress"
 )
 
 // Keys
@@ -494,6 +528,8 @@ var (
 	LightClientStore            = []byte("LightClientStore")
 	LightClientFinalityUpdate   = []byte("LightClientFinalityUpdate")
 	LightClientOptimisticUpdate = []byte("LightClientOptimisticUpdate")
+
+	StatesProcessingKey = []byte("StatesProcessing")
 )
 
 // ChaindataTables - list of all buckets. App will panic if some bucket is not in this list.
@@ -559,6 +595,8 @@ var ChaindataTables = []string{
 	BorEvents,
 	BorEventNums,
 	BorSpans,
+	BorMilestones,
+	BorCheckpoints,
 	TblAccountKeys,
 	TblAccountVals,
 	TblAccountHistoryKeys,
@@ -616,17 +654,46 @@ var ChaindataTables = []string{
 	BeaconBlockHeaders,
 	HighestFinalized,
 	Attestetations,
-	LightClient,
 	LightClientUpdates,
 	BlockRootToBlockHash,
 	BlockRootToBlockNumber,
 	LastBeaconSnapshot,
+	// Blob Storage
+	BlockRootToKzgCommitments,
+	KzgCommitmentToBlob,
+	// State Reconstitution
 	ValidatorPublicKeys,
+	InvertedValidatorPublicKeys,
+	ValidatorEffectiveBalance,
+	ValidatorBalance,
+	ValidatorSlashings,
+	StaticValidators,
+	StateEvents,
+	// Other stuff (related to state reconstitution)
+	BlockRoot,
+	StateRoot,
+	SlotData,
+	EpochData,
+	RandaoMixes,
+	Proposers,
+	StatesProcessingProgress,
+	PreviousEpochParticipation,
+	CurrentEpochParticipation,
+	InactivityScores,
+	NextSyncCommittee,
+	CurrentSyncCommittee,
+	HistoricalRoots,
+	HistoricalSummaries,
+	Eth1DataVotes,
+	IntraRandaoMixes,
+	ActiveValidatorIndicies,
+	EffectiveBalancesDump,
+	BalancesDump,
 }
 
 const (
 	RecentLocalTransaction = "RecentLocalTransaction" // sequence_u64 -> tx_hash
-	PoolTransaction        = "PoolTransaction"        // txHash -> sender_id_u64+tx_rlp
+	PoolTransaction        = "PoolTransaction"        // txHash -> sender+tx_rlp
 	PoolInfo               = "PoolInfo"               // option_key -> option_value
 )
 
@@ -737,12 +804,14 @@ var ChaindataTablesCfg = TableCfg{
 }
 
 var BorTablesCfg = TableCfg{
-	BorReceipts:  {Flags: DupSort},
-	BorFinality:  {Flags: DupSort},
-	BorTxLookup:  {Flags: DupSort},
-	BorEvents:    {Flags: DupSort},
-	BorEventNums: {Flags: DupSort},
-	BorSpans:     {Flags: DupSort},
+	BorReceipts:    {Flags: DupSort},
+	BorFinality:    {Flags: DupSort},
+	BorTxLookup:    {Flags: DupSort},
+	BorEvents:      {Flags: DupSort},
+	BorEventNums:   {Flags: DupSort},
+	BorSpans:       {Flags: DupSort},
+	BorCheckpoints: {Flags: DupSort},
+	BorMilestones:  {Flags: DupSort},
 }
 
 var TxpoolTablesCfg = TableCfg{}

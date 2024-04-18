@@ -27,13 +27,13 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
-
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
@@ -42,6 +42,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rpc"
 )
 
 // AggregationStep number of transactions in smallest static file
@@ -77,6 +78,7 @@ var Defaults = Config{
 		ReconWorkerCount:           estimate.ReconstituteState.Workers(),
 		BodyCacheLimit:             256 * 1024 * 1024,
 		BodyDownloadTimeoutSeconds: 2,
+		PruneLimit:                 100,
 	},
 	Ethash: ethashcfg.Config{
 		CachesInMem:      2,
@@ -93,19 +95,17 @@ var Defaults = Config{
 		Recommit: 3 * time.Second,
 	},
 	DeprecatedTxPool: DeprecatedDefaultTxPoolConfig,
+	TxPool:           txpoolcfg.DefaultConfig,
 	RPCGasCap:        50000000,
 	GPO:              FullNodeGPO,
 	RPCTxFeeCap:      1, // 1 ether
 
 	ImportMode: false,
 	Snapshot: BlocksFreezing{
-		Enabled:    false,
+		Enabled:    true,
 		KeepBlocks: false,
 		Produce:    true,
 	},
-
-	// applies if SilkwormLibraryPath is set
-	SilkwormExecution: true,
 }
 
 func init() {
@@ -210,7 +210,6 @@ type Config struct {
 
 	Clique params.ConsensusSnapshotConfig
 	Aura   chain.AuRaConfig
-	Bor    chain.BorConfig
 
 	// Transaction pool options
 	DeprecatedTxPool DeprecatedTxPoolConfig
@@ -231,16 +230,14 @@ type Config struct {
 	//  New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
 	HistoryV3 bool
 
-	// gRPC Address to connect to Heimdall node
-	HeimdallgRPCAddress string
-
 	// URL to connect to Heimdall node
 	HeimdallURL string
-
 	// No heimdall service
 	WithoutHeimdall bool
 	// Heimdall services active
 	WithHeimdallMilestones bool
+	PolygonSync            bool
+
 	// Ethstats service
 	Ethstats string
 	// Consensus layer
@@ -251,15 +248,14 @@ type Config struct {
 	SentinelAddr                string
 	SentinelPort                uint64
 
-	OverrideCancunTime *big.Int `toml:",omitempty"`
+	OverridePragueTime *big.Int `toml:",omitempty"`
 
 	ForcePartialCommit bool
 
 	// Embedded Silkworm support
-	SilkwormLibraryPath string
-	SilkwormExecution   bool
-	SilkwormRpcDaemon   bool
-	SilkwormSentry      bool
+	SilkwormExecution bool
+	SilkwormRpcDaemon bool
+	SilkwormSentry    bool
 
 	DisableTxPoolGossip bool
 }
@@ -273,6 +269,13 @@ type Sync struct {
 
 	BodyCacheLimit             datasize.ByteSize
 	BodyDownloadTimeoutSeconds int // TODO: change to duration
+	PruneLimit                 int //the maximum records to delete from the DB during pruning
+	BreakAfterStage            string
+	LoopBlockLimit             uint
+
+	UploadLocation   string
+	UploadFrom       rpc.BlockNumber
+	FrozenBlockLimit uint64
 }
 
 // Chains where snapshots are enabled by default
@@ -281,6 +284,7 @@ var ChainsWithSnapshots = map[string]struct{}{
 	networkname.SepoliaChainName:    {},
 	networkname.GoerliChainName:     {},
 	networkname.MumbaiChainName:     {},
+	networkname.AmoyChainName:       {},
 	networkname.BorMainnetChainName: {},
 	networkname.GnosisChainName:     {},
 	networkname.ChiadoChainName:     {},

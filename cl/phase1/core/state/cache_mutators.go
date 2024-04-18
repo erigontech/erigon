@@ -16,45 +16,46 @@ func (b *CachingBeaconState) getSlashingProposerReward(whistleBlowerReward uint6
 	return whistleBlowerReward * b.BeaconConfig().ProposerWeight / b.BeaconConfig().WeightDenominator
 }
 
-func (b *CachingBeaconState) SlashValidator(slashedInd uint64, whistleblowerInd *uint64) error {
+func (b *CachingBeaconState) SlashValidator(slashedInd uint64, whistleblowerInd *uint64) (uint64, error) {
 	epoch := Epoch(b)
 	if err := b.InitiateValidatorExit(slashedInd); err != nil {
-		return err
+		return 0, err
 	}
 	// Record changes in changeset
 	slashingsIndex := int(epoch % b.BeaconConfig().EpochsPerSlashingsVector)
 
 	// Change the validator to be slashed
 	if err := b.SetValidatorSlashed(int(slashedInd), true); err != nil {
-		return err
+		return 0, err
 	}
 
 	currentWithdrawableEpoch, err := b.ValidatorWithdrawableEpoch(int(slashedInd))
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	newWithdrawableEpoch := utils.Max64(currentWithdrawableEpoch, epoch+b.BeaconConfig().EpochsPerSlashingsVector)
 	if err := b.SetWithdrawableEpochForValidatorAtIndex(int(slashedInd), newWithdrawableEpoch); err != nil {
-		return err
+		return 0, err
 	}
 
 	// Update slashings vector
 	currentEffectiveBalance, err := b.ValidatorEffectiveBalance(int(slashedInd))
 	if err != nil {
-		return err
+		return 0, err
 	}
-	b.IncrementSlashingSegmentAt(slashingsIndex, currentEffectiveBalance)
+
+	b.SetSlashingSegmentAt(slashingsIndex, b.SlashingSegmentAt(slashingsIndex)+currentEffectiveBalance)
 	newEffectiveBalance, err := b.ValidatorEffectiveBalance(int(slashedInd))
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if err := DecreaseBalance(b, slashedInd, newEffectiveBalance/b.BeaconConfig().GetMinSlashingPenaltyQuotient(b.Version())); err != nil {
-		return err
+		return 0, err
 	}
 	proposerInd, err := b.GetBeaconProposerIndex()
 	if err != nil {
-		return fmt.Errorf("unable to get beacon proposer index: %v", err)
+		return 0, fmt.Errorf("unable to get beacon proposer index: %v", err)
 	}
 	if whistleblowerInd == nil {
 		whistleblowerInd = new(uint64)
@@ -63,9 +64,13 @@ func (b *CachingBeaconState) SlashValidator(slashedInd uint64, whistleblowerInd 
 	whistleBlowerReward := newEffectiveBalance / b.BeaconConfig().WhistleBlowerRewardQuotient
 	proposerReward := b.getSlashingProposerReward(whistleBlowerReward)
 	if err := IncreaseBalance(b, proposerInd, proposerReward); err != nil {
-		return err
+		return 0, err
 	}
-	return IncreaseBalance(b, *whistleblowerInd, whistleBlowerReward-proposerReward)
+	rewardWhist := whistleBlowerReward - proposerReward
+	if whistleblowerInd == nil {
+		proposerReward += rewardWhist
+	}
+	return proposerReward, IncreaseBalance(b, *whistleblowerInd, whistleBlowerReward-proposerReward)
 }
 
 func (b *CachingBeaconState) InitiateValidatorExit(index uint64) error {

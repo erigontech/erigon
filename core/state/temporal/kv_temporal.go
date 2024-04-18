@@ -28,10 +28,10 @@ import (
 
 //Variables Naming:
 //  tx - Database Transaction
-//  txn - Ethereum Transaction (and TxNum - is also number of Etherum Transaction)
+//  txn - Ethereum Transaction (and TxNum - is also number of Ethereum Transaction)
 //  RoTx - Read-Only Database Transaction. RwTx - read-write
 //  k, v - key, value
-//  ts - TimeStamp. Usually it's Etherum's TransactionNumber (auto-increment ID). Or BlockNumber.
+//  ts - TimeStamp. Usually it's Ethereum's TransactionNumber (auto-increment ID). Or BlockNumber.
 //  Cursor - low-level mdbx-tide api to navigate over Table
 //  Iter - high-level iterator-like api over Table/InvertedIndex/History/Domain. Has less features than Cursor. See package `iter`
 
@@ -47,7 +47,7 @@ import (
 //              start or auto-generate by moving old data from DB to Snapshots.
 // MediumLevel:
 //      1. TemporalDB - abstracting DB+Snapshots. Target is:
-//              - provide 'time-travel' API for data: consistan snapshot of data as of given Timestamp.
+//              - provide 'time-travel' API for data: consistent snapshot of data as of given Timestamp.
 //              - to keep DB small - only for Hot/Recent data (can be update/delete by re-org).
 //              - using next entities:
 //                      - InvertedIndex: supports range-scans
@@ -111,7 +111,7 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	}
 	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db}
 
-	tx.aggCtx = db.agg.MakeContext()
+	tx.aggCtx = db.agg.BeginFilesRo()
 	return tx, nil
 }
 func (db *DB) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) error {
@@ -143,7 +143,7 @@ func (db *DB) BeginTemporalRw(ctx context.Context) (kv.RwTx, error) {
 	}
 	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db}
 
-	tx.aggCtx = db.agg.MakeContext()
+	tx.aggCtx = db.agg.BeginFilesRo()
 	return tx, nil
 }
 func (db *DB) BeginRw(ctx context.Context) (kv.RwTx, error) {
@@ -168,7 +168,7 @@ func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.RwTx, error) {
 	}
 	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db}
 
-	tx.aggCtx = db.agg.MakeContext()
+	tx.aggCtx = db.agg.BeginFilesRo()
 	return tx, nil
 }
 func (db *DB) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
@@ -189,12 +189,12 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error 
 type Tx struct {
 	*mdbx.MdbxTx
 	db               *DB
-	aggCtx           *state.AggregatorV3Context
+	aggCtx           *state.AggregatorRoTx
 	resourcesToClose []kv.Closer
 }
 
-func (tx *Tx) AggCtx() *state.AggregatorV3Context { return tx.aggCtx }
-func (tx *Tx) Agg() *state.AggregatorV3           { return tx.db.agg }
+func (tx *Tx) AggCtx() *state.AggregatorRoTx { return tx.aggCtx }
+func (tx *Tx) Agg() *state.AggregatorV3      { return tx.db.agg }
 func (tx *Tx) Rollback() {
 	tx.autoClose()
 	tx.MdbxTx.Rollback()

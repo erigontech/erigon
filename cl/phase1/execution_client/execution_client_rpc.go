@@ -3,11 +3,14 @@ package execution_client
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+
+	"github.com/ledgerwatch/log/v3"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -16,19 +19,17 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
-	"github.com/ledgerwatch/log/v3"
 )
 
 const DefaultRPCHTTPTimeout = time.Second * 30
 
 type ExecutionClientRpc struct {
 	client    *rpc.Client
-	ctx       context.Context
 	addr      string
 	jwtSecret []byte
 }
 
-func NewExecutionClientRPC(ctx context.Context, jwtSecret []byte, addr string, port int) (*ExecutionClientRpc, error) {
+func NewExecutionClientRPC(jwtSecret []byte, addr string, port int) (*ExecutionClientRpc, error) {
 	roundTripper := rpc_helper.NewJWTRoundTripper(jwtSecret)
 	client := &http.Client{Timeout: DefaultRPCHTTPTimeout, Transport: roundTripper}
 
@@ -47,13 +48,12 @@ func NewExecutionClientRPC(ctx context.Context, jwtSecret []byte, addr string, p
 
 	return &ExecutionClientRpc{
 		client:    rpcClient,
-		ctx:       ctx,
 		addr:      addr,
 		jwtSecret: jwtSecret,
 	}, nil
 }
 
-func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash) (invalid bool, err error) {
+func (cc *ExecutionClientRpc) NewPayload(ctx context.Context, payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash, versionedHashes []libcommon.Hash) (invalid bool, err error) {
 	if payload == nil {
 		return
 	}
@@ -111,7 +111,11 @@ func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block, beaconParen
 
 	payloadStatus := &engine_types.PayloadStatus{} // As it is done in the rpcdaemon
 	log.Debug("[ExecutionClientRpc] Calling EL", "method", engineMethod)
-	err = cc.client.CallContext(cc.ctx, &payloadStatus, engineMethod, request)
+	args := []interface{}{request}
+	if versionedHashes != nil {
+		args = append(args, versionedHashes, *beaconParentRoot)
+	}
+	err = cc.client.CallContext(ctx, &payloadStatus, engineMethod, args...)
 	if err != nil {
 		err = fmt.Errorf("execution Client RPC failed to retrieve the NewPayload status response, err: %w", err)
 		return
@@ -125,7 +129,7 @@ func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block, beaconParen
 	return
 }
 
-func (cc *ExecutionClientRpc) ForkChoiceUpdate(finalized libcommon.Hash, head libcommon.Hash) error {
+func (cc *ExecutionClientRpc) ForkChoiceUpdate(ctx context.Context, finalized libcommon.Hash, head libcommon.Hash, attributes *engine_types.PayloadAttributes) ([]byte, error) {
 	forkChoiceRequest := engine_types.ForkChoiceState{
 		HeadHash:           head,
 		SafeBlockHash:      head,
@@ -133,20 +137,27 @@ func (cc *ExecutionClientRpc) ForkChoiceUpdate(finalized libcommon.Hash, head li
 	}
 	forkChoiceResp := &engine_types.ForkChoiceUpdatedResponse{}
 	log.Debug("[ExecutionClientRpc] Calling EL", "method", rpc_helper.ForkChoiceUpdatedV1)
+	args := []interface{}{forkChoiceRequest}
+	if attributes != nil {
+		args = append(args, attributes)
+	}
 
-	err := cc.client.CallContext(cc.ctx, forkChoiceResp, rpc_helper.ForkChoiceUpdatedV1, forkChoiceRequest)
+	err := cc.client.CallContext(ctx, forkChoiceResp, rpc_helper.ForkChoiceUpdatedV1, args...)
 	if err != nil {
-		return fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
+		return nil, fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
 	}
 	// Ignore timeouts
 	if err != nil && err.Error() == errContextExceeded {
-		return nil
+		return nil, nil
 	}
 	if err != nil {
-		return err
+		return nil, err
+	}
+	if forkChoiceResp.PayloadId == nil {
+		return []byte{}, checkPayloadStatus(forkChoiceResp.PayloadStatus)
 	}
 
-	return checkPayloadStatus(forkChoiceResp.PayloadStatus)
+	return *forkChoiceResp.PayloadId, checkPayloadStatus(forkChoiceResp.PayloadStatus)
 }
 
 func checkPayloadStatus(payloadStatus *engine_types.PayloadStatus) error {
@@ -169,29 +180,33 @@ func (cc *ExecutionClientRpc) SupportInsertion() bool {
 	return false
 }
 
-func (cc *ExecutionClientRpc) InsertBlocks([]*types.Block) error {
+func (cc *ExecutionClientRpc) InsertBlocks(ctx context.Context, blocks []*types.Block, wait bool) error {
 	panic("unimplemented")
 }
 
-func (cc *ExecutionClientRpc) InsertBlock(*types.Block) error {
+func (cc *ExecutionClientRpc) InsertBlock(ctx context.Context, block *types.Block) error {
 	panic("unimplemented")
 }
 
-func (cc *ExecutionClientRpc) IsCanonicalHash(libcommon.Hash) (bool, error) {
+func (cc *ExecutionClientRpc) CurrentHeader(ctx context.Context) (*types.Header, error) {
 	panic("unimplemented")
 }
 
-func (cc *ExecutionClientRpc) Ready() (bool, error) {
+func (cc *ExecutionClientRpc) IsCanonicalHash(ctx context.Context, hash libcommon.Hash) (bool, error) {
+	panic("unimplemented")
+}
+
+func (cc *ExecutionClientRpc) Ready(ctx context.Context) (bool, error) {
 	return true, nil // Engine API is always ready
 }
 
 // Range methods
 
 // GetBodiesByRange gets block bodies in given block range
-func (cc *ExecutionClientRpc) GetBodiesByRange(start, count uint64) ([]*types.RawBody, error) {
+func (cc *ExecutionClientRpc) GetBodiesByRange(ctx context.Context, start, count uint64) ([]*types.RawBody, error) {
 	result := []*engine_types.ExecutionPayloadBodyV1{}
 
-	if err := cc.client.CallContext(cc.ctx, &result, rpc_helper.GetPayloadBodiesByRangeV1, hexutil.Uint64(start), hexutil.Uint64(count)); err != nil {
+	if err := cc.client.CallContext(ctx, &result, rpc_helper.GetPayloadBodiesByRangeV1, hexutil.Uint64(start), hexutil.Uint64(count)); err != nil {
 		return nil, err
 	}
 	ret := make([]*types.RawBody, len(result))
@@ -207,10 +222,10 @@ func (cc *ExecutionClientRpc) GetBodiesByRange(start, count uint64) ([]*types.Ra
 }
 
 // GetBodiesByHashes gets block bodies with given hashes
-func (cc *ExecutionClientRpc) GetBodiesByHashes(hashes []libcommon.Hash) ([]*types.RawBody, error) {
+func (cc *ExecutionClientRpc) GetBodiesByHashes(ctx context.Context, hashes []libcommon.Hash) ([]*types.RawBody, error) {
 	result := []*engine_types.ExecutionPayloadBodyV1{}
 
-	if err := cc.client.CallContext(cc.ctx, &result, rpc_helper.GetPayloadBodiesByHashV1, hashes); err != nil {
+	if err := cc.client.CallContext(ctx, &result, rpc_helper.GetPayloadBodiesByHashV1, hashes); err != nil {
 		return nil, err
 	}
 	ret := make([]*types.RawBody, len(result))
@@ -225,6 +240,17 @@ func (cc *ExecutionClientRpc) GetBodiesByHashes(hashes []libcommon.Hash) ([]*typ
 	return ret, nil
 }
 
-func (cc *ExecutionClientRpc) FrozenBlocks() uint64 {
+func (cc *ExecutionClientRpc) FrozenBlocks(ctx context.Context) uint64 {
+	panic("unimplemented")
+}
+
+// HasBlock checks if block with given hash is present
+func (cc *ExecutionClientRpc) HasBlock(ctx context.Context, hash libcommon.Hash) (bool, error) {
+	panic("unimplemented")
+}
+
+// Block production
+
+func (cc *ExecutionClientRpc) GetAssembledBlock(ctx context.Context, id []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *big.Int, error) {
 	panic("unimplemented")
 }

@@ -653,4 +653,7 @@ func (cr *FakeChainReader) FrozenBlocks() uint64                                
 func (cr *FakeChainReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
 	return nil
 }
+func (cr *FakeChainReader) BorStartEventID(hash libcommon.Hash, number uint64) uint64 {
+	return 0
+}
 func (cr *FakeChainReader) BorSpan(spanId uint64) []byte { return nil }

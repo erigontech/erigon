@@ -20,6 +20,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.TxPoolBlobPriceBumpFlag,
 	&utils.TxPoolAccountSlotsFlag,
 	&utils.TxPoolBlobSlotsFlag,
+	&utils.TxPoolTotalBlobPoolLimit,
 	&utils.TxPoolGlobalSlotsFlag,
 	&utils.TxPoolGlobalBaseFeeSlotsFlag,
 	&utils.TxPoolAccountQueueFlag,
@@ -63,6 +64,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.HTTPVirtualHostsFlag,
 	&utils.AuthRpcVirtualHostsFlag,
 	&utils.HTTPApiFlag,
+	&utils.WSPortFlag,
 	&utils.WSEnabledFlag,
 	&utils.WsCompressionFlag,
 	&utils.HTTPTraceFlag,
@@ -87,6 +89,8 @@ var DefaultFlags = []cli.Flag{
 	&AuthRpcWriteTimeoutFlag,
 	&AuthRpcIdleTimeoutFlag,
 	&EvmCallTimeoutFlag,
+	&OverlayGetLogsFlag,
+	&OverlayReplayBlockFlag,
 
 	&utils.SnapKeepBlocksFlag,
 	&utils.SnapStopFlag,
@@ -137,6 +141,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.MinerExtraDataFlag,
 	&utils.MinerNoVerfiyFlag,
 	&utils.MinerSigningKeyFileFlag,
+	&utils.MinerRecommitIntervalFlag,
 	&utils.SentryAddrFlag,
 	&utils.SentryLogPeerInfoFlag,
 	&utils.DownloaderAddrFlag,
@@ -148,14 +153,12 @@ var DefaultFlags = []cli.Flag{
 	&utils.HeimdallURLFlag,
 	&utils.WebSeedsFlag,
 	&utils.WithoutHeimdallFlag,
-	&utils.HeimdallgRPCAddressFlag,
 	&utils.BorBlockPeriodFlag,
 	&utils.BorBlockSizeFlag,
 	&utils.WithHeimdallMilestones,
+	&utils.PolygonSyncFlag,
 	&utils.EthStatsURLFlag,
-	&utils.OverrideCancunFlag,
-
-	&utils.ConfigFlag,
+	&utils.OverridePragueFlag,
 
 	&utils.LightClientDiscoveryAddrFlag,
 	&utils.LightClientDiscoveryPortFlag,
@@ -165,21 +168,31 @@ var DefaultFlags = []cli.Flag{
 
 	&utils.OtsSearchMaxCapFlag,
 
-	&utils.SilkwormLibraryPathFlag,
 	&utils.SilkwormExecutionFlag,
 	&utils.SilkwormRpcDaemonFlag,
 	&utils.SilkwormSentryFlag,
 
 	&utils.BeaconAPIFlag,
 	&utils.BeaconApiAddrFlag,
+	&utils.BeaconApiAllowMethodsFlag,
+	&utils.BeaconApiAllowOriginsFlag,
+	&utils.BeaconApiAllowCredentialsFlag,
 	&utils.BeaconApiPortFlag,
 	&utils.BeaconApiReadTimeoutFlag,
 	&utils.BeaconApiWriteTimeoutFlag,
 	&utils.BeaconApiProtocolFlag,
 	&utils.BeaconApiIdleTimeoutFlag,
 
+	&utils.CaplinBackfillingFlag,
+	&utils.CaplinBlobBackfillingFlag,
+	&utils.CaplinDisableBlobPruningFlag,
+	&utils.CaplinArchiveFlag,
+
 	&utils.TrustedSetupFile,
 	&utils.RPCSlowFlag,
 
 	&utils.TxPoolGossipDisableFlag,
+	&SyncLoopBlockLimitFlag,
+	&SyncLoopBreakAfterFlag,
+	&SyncLoopPruneLimitFlag,
 }

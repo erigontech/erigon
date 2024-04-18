@@ -3,6 +3,7 @@ package jsonrpc
 import (
 	"context"
 	"fmt"
+
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -14,9 +15,10 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
-// NetAPI the interface for the net_ RPC commands
+// TxPoolAPI the interface for the txpool_ RPC commands
 type TxPoolAPI interface {
 	Content(ctx context.Context) (map[string]map[string]map[string]*RPCTransaction, error)
+	ContentFrom(ctx context.Context, addr libcommon.Address) (map[string]map[string]*RPCTransaction, error)
 }
 
 // TxPoolAPIImpl data structure to store things needed for net_ commands
@@ -113,6 +115,76 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 		}
 		content["queued"][account.Hex()] = dump
 	}
+	return content, nil
+}
+
+func (api *TxPoolAPIImpl) ContentFrom(ctx context.Context, addr libcommon.Address) (map[string]map[string]*RPCTransaction, error) {
+	reply, err := api.pool.All(ctx, &proto_txpool.AllRequest{})
+	if err != nil {
+		return nil, err
+	}
+
+	content := map[string]map[string]*RPCTransaction{
+		"pending": make(map[string]*RPCTransaction),
+		"baseFee": make(map[string]*RPCTransaction),
+		"queued":  make(map[string]*RPCTransaction),
+	}
+
+	pending := make([]types.Transaction, 0, 4)
+	baseFee := make([]types.Transaction, 0, 4)
+	queued := make([]types.Transaction, 0, 4)
+	for i := range reply.Txs {
+		txn, err := types.DecodeWrappedTransaction(reply.Txs[i].RlpTx)
+		if err != nil {
+			return nil, fmt.Errorf("decoding transaction from: %x: %w", reply.Txs[i].RlpTx, err)
+		}
+		sender := gointerfaces.ConvertH160toAddress(reply.Txs[i].Sender)
+		if sender != addr {
+			continue
+		}
+
+		switch reply.Txs[i].TxnType {
+		case proto_txpool.AllReply_PENDING:
+			pending = append(pending, txn)
+		case proto_txpool.AllReply_BASE_FEE:
+			baseFee = append(baseFee, txn)
+		case proto_txpool.AllReply_QUEUED:
+			queued = append(queued, txn)
+		}
+	}
+
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	cc, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	curHeader := rawdb.ReadCurrentHeader(tx)
+	if curHeader == nil {
+		return nil, nil
+	}
+	// Flatten the pending transactions
+	dump := make(map[string]*RPCTransaction)
+	for _, txn := range pending {
+		dump[fmt.Sprintf("%d", txn.GetNonce())] = newRPCPendingTransaction(txn, curHeader, cc)
+	}
+	content["pending"] = dump
+	// Flatten the baseFee transactions
+	dump = make(map[string]*RPCTransaction)
+	for _, txn := range baseFee {
+		dump[fmt.Sprintf("%d", txn.GetNonce())] = newRPCPendingTransaction(txn, curHeader, cc)
+	}
+	content["baseFee"] = dump
+	// Flatten the queued transactions
+	dump = make(map[string]*RPCTransaction)
+	for _, txn := range queued {
+		dump[fmt.Sprintf("%d", txn.GetNonce())] = newRPCPendingTransaction(txn, curHeader, cc)
+	}
+	content["queued"] = dump
 	return content, nil
 }
 

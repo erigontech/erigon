@@ -13,15 +13,15 @@ import (
 
 func TestFindMergeRangeCornerCases(t *testing.T) {
 	t.Run("> 2 unmerged files", func(t *testing.T) {
-		ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		ii.scanStateFiles([]string{
 			"test.0-2.ef",
 			"test.2-3.ef",
 			"test.3-4.ef",
 		})
-		ii.reCalcRoFiles()
+		ii.reCalcVisibleFiles()
 
-		ic := ii.MakeContext()
+		ic := ii.BeginFilesRo()
 		defer ic.Close()
 
 		needMerge, from, to := ii.findMergeRange(4, 32)
@@ -32,15 +32,15 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		idxF, _ := ic.staticFilesInRange(from, to)
 		assert.Equal(t, 3, len(idxF))
 
-		ii = &InvertedIndex{filenameBase: "test", aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		ii = &InvertedIndex{filenameBase: "test", aggregationStep: 1, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		ii.scanStateFiles([]string{
 			"test.0-1.ef",
 			"test.1-2.ef",
 			"test.2-3.ef",
 			"test.3-4.ef",
 		})
-		ii.reCalcRoFiles()
-		ic = ii.MakeContext()
+		ii.reCalcVisibleFiles()
+		ic = ii.BeginFilesRo()
 		defer ic.Close()
 
 		needMerge, from, to = ii.findMergeRange(4, 32)
@@ -48,7 +48,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.Equal(t, 0, int(from))
 		assert.Equal(t, 2, int(to))
 
-		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		h.scanStateFiles([]string{
 			"test.0-1.v",
 			"test.1-2.v",
@@ -56,7 +56,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"test.3-4.v",
 		})
 		h.reCalcRoFiles()
-		ic = ii.MakeContext()
+		ic = ii.BeginFilesRo()
 		defer ic.Close()
 
 		r := h.findMergeRange(4, 32)
@@ -65,23 +65,23 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.Equal(t, 2, int(r.indexEndTxNum))
 	})
 	t.Run("not equal amount of files", func(t *testing.T) {
-		ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		ii.scanStateFiles([]string{
 			"test.0-1.ef",
 			"test.1-2.ef",
 			"test.2-3.ef",
 			"test.3-4.ef",
 		})
-		ii.reCalcRoFiles()
+		ii.reCalcVisibleFiles()
 
-		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		h.scanStateFiles([]string{
 			"test.0-1.v",
 			"test.1-2.v",
 		})
 		h.reCalcRoFiles()
 
-		hc := h.MakeContext()
+		hc := h.BeginFilesRo()
 		defer hc.Close()
 
 		r := h.findMergeRange(4, 32)
@@ -92,22 +92,22 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.Equal(t, 2, int(r.indexEndTxNum))
 	})
 	t.Run("idx merged, history not yet", func(t *testing.T) {
-		ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		ii.scanStateFiles([]string{
 			"test.0-2.ef",
 			"test.2-3.ef",
 			"test.3-4.ef",
 		})
-		ii.reCalcRoFiles()
+		ii.reCalcVisibleFiles()
 
-		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		h.scanStateFiles([]string{
 			"test.0-1.v",
 			"test.1-2.v",
 		})
 		h.reCalcRoFiles()
 
-		hc := h.MakeContext()
+		hc := h.BeginFilesRo()
 		defer hc.Close()
 
 		r := h.findMergeRange(4, 32)
@@ -117,7 +117,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.Equal(t, 2, int(r.historyEndTxNum))
 	})
 	t.Run("idx merged, history not yet, 2", func(t *testing.T) {
-		ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		ii.scanStateFiles([]string{
 			"test.0-1.ef",
 			"test.1-2.ef",
@@ -125,9 +125,9 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"test.3-4.ef",
 			"test.0-4.ef",
 		})
-		ii.reCalcRoFiles()
+		ii.reCalcVisibleFiles()
 
-		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		h.scanStateFiles([]string{
 			"test.0-1.v",
 			"test.1-2.v",
@@ -136,7 +136,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		h.reCalcRoFiles()
 
-		hc := h.MakeContext()
+		hc := h.BeginFilesRo()
 		defer hc.Close()
 
 		r := h.findMergeRange(4, 32)
@@ -149,13 +149,13 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		require.Equal(t, 2, len(histFiles))
 	})
 	t.Run("idx merged and small files lost", func(t *testing.T) {
-		ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		ii.scanStateFiles([]string{
 			"test.0-4.ef",
 		})
-		ii.reCalcRoFiles()
+		ii.reCalcVisibleFiles()
 
-		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		h.scanStateFiles([]string{
 			"test.0-1.v",
 			"test.1-2.v",
@@ -164,7 +164,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		h.reCalcRoFiles()
 
-		hc := h.MakeContext()
+		hc := h.BeginFilesRo()
 		defer hc.Close()
 
 		r := h.findMergeRange(4, 32)
@@ -176,15 +176,15 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	})
 
 	t.Run("history merged, but index not and history garbage left", func(t *testing.T) {
-		ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		ii.scanStateFiles([]string{
 			"test.0-1.ef",
 			"test.1-2.ef",
 		})
-		ii.reCalcRoFiles()
+		ii.reCalcVisibleFiles()
 
 		// `kill -9` may leave small garbage files, but if big one already exists we assume it's good(fsynced) and no reason to merge again
-		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		h.scanStateFiles([]string{
 			"test.0-1.v",
 			"test.1-2.v",
@@ -192,7 +192,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		h.reCalcRoFiles()
 
-		hc := h.MakeContext()
+		hc := h.BeginFilesRo()
 		defer hc.Close()
 
 		r := h.findMergeRange(4, 32)
@@ -205,7 +205,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		require.Equal(t, 0, len(histFiles))
 	})
 	t.Run("history merge progress ahead of idx", func(t *testing.T) {
-		ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		ii.scanStateFiles([]string{
 			"test.0-1.ef",
 			"test.1-2.ef",
@@ -213,9 +213,9 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"test.2-3.ef",
 			"test.3-4.ef",
 		})
-		ii.reCalcRoFiles()
+		ii.reCalcVisibleFiles()
 
-		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		h.scanStateFiles([]string{
 			"test.0-1.v",
 			"test.1-2.v",
@@ -225,7 +225,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		h.reCalcRoFiles()
 
-		hc := h.MakeContext()
+		hc := h.BeginFilesRo()
 		defer hc.Close()
 
 		r := h.findMergeRange(4, 32)
@@ -238,16 +238,16 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		require.Equal(t, 3, len(histFiles))
 	})
 	t.Run("idx merge progress ahead of history", func(t *testing.T) {
-		ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		ii.scanStateFiles([]string{
 			"test.0-1.ef",
 			"test.1-2.ef",
 			"test.0-2.ef",
 			"test.2-3.ef",
 		})
-		ii.reCalcRoFiles()
+		ii.reCalcVisibleFiles()
 
-		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		h.scanStateFiles([]string{
 			"test.0-1.v",
 			"test.1-2.v",
@@ -255,7 +255,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		h.reCalcRoFiles()
 
-		hc := h.MakeContext()
+		hc := h.BeginFilesRo()
 		defer hc.Close()
 
 		r := h.findMergeRange(4, 32)
@@ -268,15 +268,15 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		require.Equal(t, 2, len(histFiles))
 	})
 	t.Run("idx merged, but garbage left", func(t *testing.T) {
-		ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		ii.scanStateFiles([]string{
 			"test.0-1.ef",
 			"test.1-2.ef",
 			"test.0-2.ef",
 		})
-		ii.reCalcRoFiles()
+		ii.reCalcVisibleFiles()
 
-		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		h.scanStateFiles([]string{
 			"test.0-1.v",
 			"test.1-2.v",
@@ -285,14 +285,14 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		h.reCalcRoFiles()
 
-		hc := h.MakeContext()
+		hc := h.BeginFilesRo()
 		defer hc.Close()
 		r := h.findMergeRange(4, 32)
 		assert.False(t, r.index)
 		assert.False(t, r.history)
 	})
 	t.Run("idx merged, but garbage left2", func(t *testing.T) {
-		ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		ii.scanStateFiles([]string{
 			"test.0-1.ef",
 			"test.1-2.ef",
@@ -300,8 +300,8 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"test.2-3.ef",
 			"test.3-4.ef",
 		})
-		ii.reCalcRoFiles()
-		ic := ii.MakeContext()
+		ii.reCalcVisibleFiles()
+		ic := ii.BeginFilesRo()
 		defer ic.Close()
 		needMerge, from, to := ii.findMergeRange(4, 32)
 		assert.True(t, needMerge)

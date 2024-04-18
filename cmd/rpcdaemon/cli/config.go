@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"math/big"
 	"net"
 	"net/http"
 	"net/url"
@@ -13,39 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/bor"
-	"github.com/ledgerwatch/erigon/consensus/bor/contract"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/rpc/rpccfg"
-	"github.com/ledgerwatch/erigon/turbo/debug"
-	"github.com/ledgerwatch/erigon/turbo/logging"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
-
-	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/kv/remotedb"
-	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
@@ -53,6 +21,24 @@ import (
 	grpcHealth "google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/direct"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
+	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/kv/remotedb"
+	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/graphql"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/health"
@@ -61,12 +47,26 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/utils/flags"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/paths"
+	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
+	"github.com/ledgerwatch/erigon/polygon/bor"
+	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
+	"github.com/ledgerwatch/erigon/turbo/debug"
+	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 
 	// Force-load native and js packages, to trigger registration
 	_ "github.com/ledgerwatch/erigon/eth/tracers/js"
@@ -137,6 +137,8 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().DurationVar(&cfg.HTTPTimeouts.WriteTimeout, "http.timeouts.write", rpccfg.DefaultHTTPTimeouts.WriteTimeout, "Maximum duration before timing out writes of the response. It is reset whenever a new request's header is read")
 	rootCmd.PersistentFlags().DurationVar(&cfg.HTTPTimeouts.IdleTimeout, "http.timeouts.idle", rpccfg.DefaultHTTPTimeouts.IdleTimeout, "Maximum amount of time to wait for the next request when keep-alives are enabled. If http.timeouts.idle is zero, the value of http.timeouts.read is used")
 	rootCmd.PersistentFlags().DurationVar(&cfg.EvmCallTimeout, "rpc.evmtimeout", rpccfg.DefaultEvmCallTimeout, "Maximum amount of time to wait for the answer from EVM call.")
+	rootCmd.PersistentFlags().DurationVar(&cfg.OverlayGetLogsTimeout, "rpc.overlay.getlogstimeout", rpccfg.DefaultOverlayGetLogsTimeout, "Maximum amount of time to wait for the answer from the overlay_getLogs call.")
+	rootCmd.PersistentFlags().DurationVar(&cfg.OverlayReplayBlockTimeout, "rpc.overlay.replayblocktimeout", rpccfg.DefaultOverlayReplayBlockTimeout, "Maximum amount of time to wait for the answer to replay a single block when called from an overlay_getLogs call.")
 	rootCmd.PersistentFlags().IntVar(&cfg.BatchLimit, utils.RpcBatchLimit.Name, utils.RpcBatchLimit.Value, utils.RpcBatchLimit.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.ReturnDataLimit, utils.RpcReturnDataLimit.Name, utils.RpcReturnDataLimit.Value, utils.RpcReturnDataLimit.Usage)
 	rootCmd.PersistentFlags().BoolVar(&cfg.AllowUnprotectedTxs, utils.AllowUnprotectedTxs.Name, utils.AllowUnprotectedTxs.Value, utils.AllowUnprotectedTxs.Usage)
@@ -204,7 +206,7 @@ func subscribeToStateChangesLoop(ctx context.Context, client StateChangesClient,
 					time.Sleep(3 * time.Second)
 					continue
 				}
-				log.Warn("[txpool.handleStateChanges]", "err", err)
+				log.Warn("[rpcdaemon subscribeToStateChanges]", "err", err)
 			}
 		}
 	}()
@@ -373,14 +375,14 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		}
 
 		// Configure sapshots
-		allSnapshots = freezeblocks.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, logger)
-		allBorSnapshots = freezeblocks.NewBorRoSnapshots(cfg.Snap, cfg.Dirs.Snap, logger)
+		allSnapshots = freezeblocks.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
+		allBorSnapshots = freezeblocks.NewBorRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
 		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
 		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
 		allSnapshots.OptimisticReopenWithDB(db)
 		allBorSnapshots.OptimisticalyReopenWithDB(db)
-		allSnapshots.LogStat()
-		allBorSnapshots.LogStat()
+		allSnapshots.LogStat("remote")
+		allBorSnapshots.LogStat("remote")
 
 		if agg, err = libstate.NewAggregatorV3(ctx, cfg.Dirs.SnapHistory, cfg.Dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger); err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("create aggregator: %w", err)
@@ -404,12 +406,12 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 				if err := allSnapshots.ReopenList(reply.BlocksFiles, true); err != nil {
 					logger.Error("[snapshots] reopen", "err", err)
 				} else {
-					allSnapshots.LogStat()
+					allSnapshots.LogStat("reopen")
 				}
 				if err := allBorSnapshots.ReopenList(reply.BlocksFiles, true); err != nil {
 					logger.Error("[bor snapshots] reopen", "err", err)
 				} else {
-					allSnapshots.LogStat()
+					allBorSnapshots.LogStat("reopen")
 				}
 
 				_ = reply.HistoryFiles
@@ -499,9 +501,11 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 				}
 				// Skip the compatibility check, until we have a schema in erigon-lib
 
+				borConfig := cc.Bor.(*borcfg.BorConfig)
+
 				engine = bor.NewRo(cc, borKv, blockReader,
-					span.NewChainSpanner(contract.ValidatorSet(), cc, true, logger),
-					contract.NewGenesisContractsClient(cc, cc.Bor.ValidatorContract, cc.Bor.StateReceiverContract, logger), logger)
+					bor.NewChainSpanner(bor.GenesisContractValidatorSetABI(), cc, true, logger),
+					bor.NewGenesisContractsClient(cc, borConfig.ValidatorContract, borConfig.StateReceiverContract, logger), logger)
 
 			default:
 				engine = ethash.NewFaker()
@@ -630,6 +634,27 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		return err
 	}
 
+	// Separate Websocket handler if websocket port flag specified
+	if cfg.WebsocketEnabled && cfg.WebsocketPort != cfg.HttpPort {
+		wsEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.HttpListenAddress, cfg.WebsocketPort)
+		wsApiHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if isWebsocket(r) {
+				wsHandler.ServeHTTP(w, r)
+			}
+		})
+		wsListener, wsAddr, err := node.StartHTTPEndpoint(wsEndpoint, &node.HttpEndpointConfig{Timeouts: cfg.HTTPTimeouts}, wsApiHandler)
+		if err != nil {
+			return fmt.Errorf("could not start separate Websocket RPC api at port %d: %w", cfg.WebsocketPort, err)
+		}
+		info = append(info, "websocket.url", wsAddr)
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = wsListener.Shutdown(shutdownCtx)
+			logger.Info("HTTP endpoint closed", "url", wsAddr)
+		}()
+	}
+
 	if cfg.HttpServerEnabled {
 		httpEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.HttpListenAddress, cfg.HttpPort)
 		if cfg.HttpURL != "" {
@@ -756,10 +781,10 @@ func isWebsocket(r *http.Request) bool {
 		strings.Contains(strings.ToLower(r.Header.Get("Connection")), "upgrade")
 }
 
-// obtainJWTSecret loads the jwt-secret, either from the provided config,
+// ObtainJWTSecret loads the jwt-secret, either from the provided config,
 // or from the default location. If neither of those are present, it generates
 // a new secret and stores to the default location.
-func obtainJWTSecret(cfg *httpcfg.HttpCfg, logger log.Logger) ([]byte, error) {
+func ObtainJWTSecret(cfg *httpcfg.HttpCfg, logger log.Logger) ([]byte, error) {
 	// try reading from file
 	logger.Info("Reading JWT secret", "path", cfg.JWTSecretPath)
 	// If we run the rpcdaemon and datadir is not specified we just use jwt.hex in current directory.
@@ -819,7 +844,7 @@ func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.
 		return nil, nil, "", fmt.Errorf("could not start register RPC engine api: %w", err)
 	}
 
-	jwtSecret, err := obtainJWTSecret(cfg, logger)
+	jwtSecret, err := ObtainJWTSecret(cfg, logger)
 	if err != nil {
 		return nil, nil, "", err
 	}
@@ -848,8 +873,10 @@ func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.
 	return engineListener, engineSrv, engineAddr.String(), nil
 }
 
+var remoteConsensusEngineNotReadyErr = errors.New("remote consensus engine not ready")
+
 type remoteConsensusEngine struct {
-	engine consensus.EngineReader
+	engine consensus.Engine
 }
 
 func (e *remoteConsensusEngine) HasEngine() bool {
@@ -860,6 +887,18 @@ func (e *remoteConsensusEngine) Engine() consensus.EngineReader {
 	return e.engine
 }
 
+func (e *remoteConsensusEngine) validateEngineReady() error {
+	if !e.HasEngine() {
+		return remoteConsensusEngineNotReadyErr
+	}
+
+	return nil
+}
+
+// init - reasoning behind init is that we would like to initialise the remote consensus engine either post rpcdaemon
+// service startup or in a background goroutine, so that we do not depend on the liveness of other services when
+// starting up rpcdaemon and do not block startup (avoiding "cascade outage" scenario). In this case the DB dependency
+// can be a remote DB service running on another machine.
 func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockReader, remoteKV remote.KVClient, logger log.Logger) bool {
 	var cc *chain.Config
 
@@ -886,9 +925,11 @@ func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockR
 			return false
 		}
 
+		borConfig := cc.Bor.(*borcfg.BorConfig)
+
 		e.engine = bor.NewRo(cc, borKv, blockReader,
-			span.NewChainSpanner(contract.ValidatorSet(), cc, true, logger),
-			contract.NewGenesisContractsClient(cc, cc.Bor.ValidatorContract, cc.Bor.StateReceiverContract, logger), logger)
+			bor.NewChainSpanner(bor.GenesisContractValidatorSetABI(), cc, true, logger),
+			bor.NewGenesisContractsClient(cc, borConfig.ValidatorContract, borConfig.StateReceiverContract, logger), logger)
 	} else {
 		e.engine = ethash.NewFaker()
 	}
@@ -897,41 +938,89 @@ func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockR
 }
 
 func (e *remoteConsensusEngine) Author(header *types.Header) (libcommon.Address, error) {
-	if e.engine != nil {
-		return e.engine.Author(header)
+	if err := e.validateEngineReady(); err != nil {
+		return libcommon.Address{}, err
 	}
 
-	return libcommon.Address{}, fmt.Errorf("remote consensus engine not iinitialized")
+	return e.engine.Author(header)
 }
 
 func (e *remoteConsensusEngine) IsServiceTransaction(sender libcommon.Address, syscall consensus.SystemCall) bool {
-	if e.engine != nil {
-		return e.engine.IsServiceTransaction(sender, syscall)
+	if err := e.validateEngineReady(); err != nil {
+		panic(err)
 	}
 
-	return false
+	return e.engine.IsServiceTransaction(sender, syscall)
 }
 
 func (e *remoteConsensusEngine) Type() chain.ConsensusName {
-	if e.engine != nil {
-		return e.engine.Type()
+	if err := e.validateEngineReady(); err != nil {
+		panic(err)
 	}
 
-	return ""
+	return e.engine.Type()
 }
 
 func (e *remoteConsensusEngine) CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall consensus.SystemCall) ([]consensus.Reward, error) {
-	if e.engine != nil {
-		return e.engine.CalculateRewards(config, header, uncles, syscall)
+	if err := e.validateEngineReady(); err != nil {
+		return nil, err
 	}
 
-	return nil, fmt.Errorf("remote consensus engine not iinitialized")
+	return e.engine.CalculateRewards(config, header, uncles, syscall)
 }
 
 func (e *remoteConsensusEngine) Close() error {
-	if e.engine != nil {
-		return e.engine.Close()
+	if err := e.validateEngineReady(); err != nil {
+		return err
 	}
 
-	return nil
+	return e.engine.Close()
+}
+
+func (e *remoteConsensusEngine) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger) {
+	if err := e.validateEngineReady(); err != nil {
+		panic(err)
+	}
+
+	e.engine.Initialize(config, chain, header, state, syscall, logger)
+}
+
+func (e *remoteConsensusEngine) VerifyHeader(_ consensus.ChainHeaderReader, _ *types.Header, _ bool) error {
+	panic("remoteConsensusEngine.VerifyHeader not supported")
+}
+
+func (e *remoteConsensusEngine) VerifyUncles(_ consensus.ChainReader, _ *types.Header, _ []*types.Header) error {
+	panic("remoteConsensusEngine.VerifyUncles not supported")
+}
+
+func (e *remoteConsensusEngine) Prepare(_ consensus.ChainHeaderReader, _ *types.Header, _ *state.IntraBlockState) error {
+	panic("remoteConsensusEngine.Prepare not supported")
+}
+
+func (e *remoteConsensusEngine) Finalize(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ types.Transactions, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ consensus.ChainReader, _ consensus.SystemCall, _ log.Logger) (types.Transactions, types.Receipts, error) {
+	panic("remoteConsensusEngine.Finalize not supported")
+}
+
+func (e *remoteConsensusEngine) FinalizeAndAssemble(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ types.Transactions, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ consensus.ChainReader, _ consensus.SystemCall, _ consensus.Call, _ log.Logger) (*types.Block, types.Transactions, types.Receipts, error) {
+	panic("remoteConsensusEngine.FinalizeAndAssemble not supported")
+}
+
+func (e *remoteConsensusEngine) Seal(_ consensus.ChainHeaderReader, _ *types.Block, _ chan<- *types.Block, _ <-chan struct{}) error {
+	panic("remoteConsensusEngine.Seal not supported")
+}
+
+func (e *remoteConsensusEngine) SealHash(_ *types.Header) libcommon.Hash {
+	panic("remoteConsensusEngine.SealHash not supported")
+}
+
+func (e *remoteConsensusEngine) CalcDifficulty(_ consensus.ChainHeaderReader, _ uint64, _ uint64, _ *big.Int, _ uint64, _ libcommon.Hash, _ libcommon.Hash, _ uint64) *big.Int {
+	panic("remoteConsensusEngine.CalcDifficulty not supported")
+}
+
+func (e *remoteConsensusEngine) GenerateSeal(_ consensus.ChainHeaderReader, _ *types.Header, _ *types.Header, _ consensus.Call) []byte {
+	panic("remoteConsensusEngine.GenerateSeal not supported")
+}
+
+func (e *remoteConsensusEngine) APIs(_ consensus.ChainHeaderReader) []rpc.API {
+	panic("remoteConsensusEngine.APIs not supported")
 }

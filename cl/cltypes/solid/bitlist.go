@@ -42,6 +42,10 @@ func BitlistFromBytes(xs []byte, c int) *BitList {
 	}
 }
 
+func (u *BitList) Bytes() []byte {
+	return u.u[:u.l]
+}
+
 // Clear wipes the BitList clean, just like the memory wipe spell from a particularly forgetful wizard.
 func (u *BitList) Clear() {
 	u.u = u.u[:0]
@@ -59,6 +63,13 @@ func (u *BitList) CopyTo(target IterableSSZ[byte]) {
 	for i := 0; i < u.l; i++ {
 		target.Append(u.u[i])
 	}
+}
+
+func (u *BitList) Copy() *BitList {
+	n := NewBitList(u.l, u.c)
+	n.u = make([]byte, len(u.u), cap(u.u))
+	copy(n.u, u.u)
+	return n
 }
 
 // Range allows us to do something to each bit in the list, just like a Power Rangers roll call.

@@ -103,3 +103,38 @@ func GetBitlistLength(b []byte) int {
 	// bit. Subtract this value by 1 to determine the length of the bitlist.
 	return 8*(len(b)-1) + msb - 1
 }
+
+func ReverseOfByteSlice(b []byte) (out []byte) {
+	out = make([]byte, len(b))
+	for i := range b {
+		out[i] = b[len(b)-1-i]
+	}
+	return
+}
+
+func FlipBitOn(b []byte, i int) {
+	b[i/8] |= 1 << (i % 8)
+}
+
+func IsBitOn(b []byte, idx int) bool {
+	i := uint8(1 << (idx % 8))
+	return b[idx/8]&i == i
+}
+
+func IsSupersetBitlist(a, b []byte) bool {
+	if len(a) < len(b) {
+		return false
+	}
+	for i := range b {
+		if a[i]&b[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func MergeBitlists(a, b []byte) {
+	for i := range b {
+		a[i] |= b[i]
+	}
+}

@@ -154,6 +154,11 @@ func (v Validator) SetWithdrawalCredentials(o common.Hash) {
 func (v Validator) SetEffectiveBalance(i uint64) {
 	binary.LittleEndian.PutUint64(v[80:88], i)
 }
+
+func (v Validator) SetEffectiveBalanceFromBytes(b []byte) {
+	copy(v[80:88], b)
+}
+
 func (v Validator) SetSlashed(b bool) {
 	if b {
 		v[88] = 1
@@ -190,12 +195,12 @@ func (v Validator) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		PublicKey                  common.Bytes48 `json:"public_key"`
 		WithdrawalCredentials      common.Hash    `json:"withdrawal_credentials"`
-		EffectiveBalance           uint64         `json:"effective_balance"`
+		EffectiveBalance           uint64         `json:"effective_balance,string"`
 		Slashed                    bool           `json:"slashed"`
-		ActivationEligibilityEpoch uint64         `json:"activation_eligibility_epoch"`
-		ActivationEpoch            uint64         `json:"activation_epoch"`
-		ExitEpoch                  uint64         `json:"exit_epoch"`
-		WithdrawableEpoch          uint64         `json:"withdrawable_epoch"`
+		ActivationEligibilityEpoch uint64         `json:"activation_eligibility_epoch,string"`
+		ActivationEpoch            uint64         `json:"activation_epoch,string"`
+		ExitEpoch                  uint64         `json:"exit_epoch,string"`
+		WithdrawableEpoch          uint64         `json:"withdrawable_epoch,string"`
 	}{
 		PublicKey:                  v.PublicKey(),
 		WithdrawalCredentials:      v.WithdrawalCredentials(),
@@ -213,12 +218,12 @@ func (v *Validator) UnmarshalJSON(input []byte) error {
 	var tmp struct {
 		PublicKey                  common.Bytes48 `json:"public_key"`
 		WithdrawalCredentials      common.Hash    `json:"withdrawal_credentials"`
-		EffectiveBalance           uint64         `json:"effective_balance"`
+		EffectiveBalance           uint64         `json:"effective_balance,string"`
 		Slashed                    bool           `json:"slashed"`
-		ActivationEligibilityEpoch uint64         `json:"activation_eligibility_epoch"`
-		ActivationEpoch            uint64         `json:"activation_epoch"`
-		ExitEpoch                  uint64         `json:"exit_epoch"`
-		WithdrawableEpoch          uint64         `json:"withdrawable_epoch"`
+		ActivationEligibilityEpoch uint64         `json:"activation_eligibility_epoch,string"`
+		ActivationEpoch            uint64         `json:"activation_epoch,string"`
+		ExitEpoch                  uint64         `json:"exit_epoch,string"`
+		WithdrawableEpoch          uint64         `json:"withdrawable_epoch,string"`
 	}
 	if err = json.Unmarshal(input, &tmp); err != nil {
 		return err

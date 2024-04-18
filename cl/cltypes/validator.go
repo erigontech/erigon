@@ -1,6 +1,8 @@
 package cltypes
 
 import (
+	"encoding/json"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
@@ -18,7 +20,7 @@ const (
 type DepositData struct {
 	PubKey                libcommon.Bytes48 `json:"pubkey"`
 	WithdrawalCredentials libcommon.Hash    `json:"withdrawal_credentials"`
-	Amount                uint64            `json:"amount"`
+	Amount                uint64            `json:"amount,string"`
 	Signature             libcommon.Bytes96 `json:"signature"`
 }
 
@@ -52,6 +54,16 @@ type Deposit struct {
 	Data  *DepositData        `json:"data"`
 }
 
+func (d *Deposit) UnmarshalJSON(buf []byte) error {
+	d.Proof = solid.NewHashVector(33)
+	d.Data = new(DepositData)
+
+	return json.Unmarshal(buf, &struct {
+		Proof solid.HashVectorSSZ `json:"proof"`
+		Data  *DepositData        `json:"data"`
+	}{d.Proof, d.Data})
+}
+
 func (d *Deposit) EncodeSSZ(dst []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(dst, d.Proof, d.Data)
 }
@@ -72,8 +84,8 @@ func (d *Deposit) HashSSZ() ([32]byte, error) {
 }
 
 type VoluntaryExit struct {
-	Epoch          uint64 `json:"epoch"`
-	ValidatorIndex uint64 `json:"validator_index"`
+	Epoch          uint64 `json:"epoch,string"`
+	ValidatorIndex uint64 `json:"validator_index,string"`
 }
 
 func (e *VoluntaryExit) EncodeSSZ(buf []byte) ([]byte, error) {

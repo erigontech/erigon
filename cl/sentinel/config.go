@@ -30,7 +30,6 @@ import (
 
 type SentinelConfig struct {
 	NetworkConfig *clparams.NetworkConfig
-	GenesisConfig *clparams.GenesisConfig
 	BeaconConfig  *clparams.BeaconChainConfig
 	IpAddr        string
 	Port          int
@@ -44,6 +43,8 @@ type SentinelConfig struct {
 	NoDiscovery    bool
 	TmpDir         string
 	LocalDiscovery bool
+
+	EnableBlocks bool
 }
 
 func convertToCryptoPrivkey(privkey *ecdsa.PrivateKey) (crypto.PrivKey, error) {

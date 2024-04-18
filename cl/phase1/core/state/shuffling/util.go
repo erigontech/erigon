@@ -63,9 +63,8 @@ func GetSeed(beaconConfig *clparams.BeaconChainConfig, mix common.Hash, epoch ui
 	return utils.Sha256(input)
 }
 
-func ComputeShuffledIndicies(beaconConfig *clparams.BeaconChainConfig, mix common.Hash, indicies []uint64, slot uint64) []uint64 {
-	shuffledIndicies := make([]uint64, len(indicies))
-	copy(shuffledIndicies, indicies)
+func ComputeShuffledIndicies(beaconConfig *clparams.BeaconChainConfig, mix common.Hash, out, indicies []uint64, slot uint64) []uint64 {
+	copy(out, indicies)
 	hashFunc := utils.OptimizedSha256NotThreadSafe()
 	epoch := slot / beaconConfig.SlotsPerEpoch
 	seed := GetSeed(beaconConfig, mix, epoch, beaconConfig.DomainBeaconAttester)
@@ -73,6 +72,6 @@ func ComputeShuffledIndicies(beaconConfig *clparams.BeaconChainConfig, mix commo
 		hashed := hashFunc(data)
 		return hashed[:]
 	}
-	eth2shuffle.UnshuffleList(eth2ShuffleHashFunc, shuffledIndicies, uint8(beaconConfig.ShuffleRoundCount), seed)
-	return shuffledIndicies
+	eth2shuffle.UnshuffleList(eth2ShuffleHashFunc, out, uint8(beaconConfig.ShuffleRoundCount), seed)
+	return out
 }

@@ -2,12 +2,15 @@ package eth1
 
 import (
 	"context"
+	"errors"
 	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -31,6 +34,7 @@ const maxBlocksLookBehind = 32
 
 // EthereumExecutionModule describes ethereum execution logic and indexing.
 type EthereumExecutionModule struct {
+	bacgroundCtx context.Context
 	// Snapshots + MDBX
 	blockReader services.FullBlockReader
 
@@ -61,8 +65,14 @@ type EthereumExecutionModule struct {
 	execution.UnimplementedExecutionServer
 }
 
-func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB, executionPipeline *stagedsync.Sync, forkValidator *engine_helpers.ForkValidator,
-	config *chain.Config, builderFunc builder.BlockBuilderFunc, hook *stages.Hook, accumulator *shards.Accumulator, stateChangeConsumer shards.StateChangeConsumer, logger log.Logger, engine consensus.Engine, historyV3 bool) *EthereumExecutionModule {
+func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB,
+	executionPipeline *stagedsync.Sync, forkValidator *engine_helpers.ForkValidator,
+	config *chain.Config, builderFunc builder.BlockBuilderFunc,
+	hook *stages.Hook, accumulator *shards.Accumulator,
+	stateChangeConsumer shards.StateChangeConsumer,
+	logger log.Logger, engine consensus.Engine,
+	historyV3 bool, ctx context.Context,
+) *EthereumExecutionModule {
 	return &EthereumExecutionModule{
 		blockReader:         blockReader,
 		db:                  db,
@@ -77,6 +87,7 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB
 		accumulator:         accumulator,
 		stateChangeConsumer: stateChangeConsumer,
 		engine:              engine,
+		bacgroundCtx:        ctx,
 	}
 }
 
@@ -182,7 +193,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	extendingHash := e.forkValidator.ExtendingForkHeadHash()
 	extendCanonical := extendingHash == libcommon.Hash{} && header.ParentHash == currentHeadHash
 
-	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), extendCanonical)
+	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), extendCanonical, e.logger)
 	if criticalError != nil {
 		return nil, criticalError
 	}
@@ -202,10 +213,14 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain is invalid", "hash", libcommon.Hash(blockHash))
 		validationStatus = execution.ExecutionStatus_BadBlock
 	}
-	return &execution.ValidationReceipt{
+	validationReceipt := &execution.ValidationReceipt{
 		ValidationStatus: validationStatus,
 		LatestValidHash:  gointerfaces.ConvertHashToH256(lvh),
-	}, tx.Commit()
+	}
+	if validationError != nil {
+		validationReceipt.ValidationError = validationError.Error()
+	}
+	return validationReceipt, tx.Commit()
 }
 
 func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash libcommon.Hash) error {
@@ -228,14 +243,25 @@ func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx,
 func (e *EthereumExecutionModule) Start(ctx context.Context) {
 	e.semaphore.Acquire(ctx, 1)
 	defer e.semaphore.Release(1)
-	// Run the forkchoice
-	if err := e.executionPipeline.Run(e.db, nil, true); err != nil {
-		e.logger.Error("Could not start execution service", "err", err)
-		return
-	}
-	if err := e.executionPipeline.RunPrune(e.db, nil, true); err != nil {
-		e.logger.Error("Could not start execution service", "err", err)
-		return
+
+	more := true
+
+	for more {
+		var err error
+
+		if more, err = e.executionPipeline.Run(e.db, wrap.TxContainer{}, true); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				e.logger.Error("Could not start execution service", "err", err)
+			}
+			continue
+		}
+
+		if err := e.executionPipeline.RunPrune(e.db, nil, true); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				e.logger.Error("Could not start execution service", "err", err)
+			}
+			continue
+		}
 	}
 }
 
@@ -245,4 +271,36 @@ func (e *EthereumExecutionModule) Ready(context.Context, *emptypb.Empty) (*execu
 	}
 	defer e.semaphore.Release(1)
 	return &execution.ReadyResponse{Ready: true}, nil
+}
+
+func (e *EthereumExecutionModule) HasBlock(ctx context.Context, in *execution.GetSegmentRequest) (*execution.HasBlockResponse, error) {
+	tx, err := e.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if in.BlockHash == nil {
+		return nil, errors.New("block hash is nil, hasBlock support only by hash")
+	}
+	blockHash := gointerfaces.ConvertH256ToHash(in.BlockHash)
+
+	num := rawdb.ReadHeaderNumber(tx, blockHash)
+	if num == nil {
+		return &execution.HasBlockResponse{HasBlock: false}, nil
+	}
+	if *num <= e.blockReader.FrozenBlocks() {
+		return &execution.HasBlockResponse{HasBlock: true}, nil
+	}
+	has, err := tx.Has(kv.Headers, dbutils.HeaderKey(*num, blockHash))
+	if err != nil {
+		return nil, err
+	}
+	if !has {
+		return &execution.HasBlockResponse{HasBlock: false}, nil
+	}
+	has, err = tx.Has(kv.BlockBody, dbutils.HeaderKey(*num, blockHash))
+	if err != nil {
+		return nil, err
+	}
+	return &execution.HasBlockResponse{HasBlock: has}, nil
 }

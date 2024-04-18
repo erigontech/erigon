@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	shuffledSetsCacheSize     = 3
-	activeValidatorsCacheSize = 3
+	shuffledSetsCacheSize     = 5
+	activeValidatorsCacheSize = 5
 )
 
 type HashFunc func([]byte) ([32]byte, error)
@@ -32,8 +32,9 @@ type CachingBeaconState struct {
 	// Internals
 	publicKeyIndicies map[[48]byte]uint64
 	// Caches
-	activeValidatorsCache       *lru.Cache[uint64, []uint64]
-	shuffledSetsCache           *lru.Cache[common.Hash, []uint64]
+	activeValidatorsCache *lru.Cache[uint64, []uint64]
+	shuffledSetsCache     *lru.Cache[common.Hash, []uint64]
+
 	totalActiveBalanceCache     *uint64
 	totalActiveBalanceRootCache uint64
 	proposerIndex               *uint64
@@ -44,7 +45,7 @@ func New(cfg *clparams.BeaconChainConfig) *CachingBeaconState {
 	state := &CachingBeaconState{
 		BeaconState: raw.New(cfg),
 	}
-	state.initBeaconState()
+	state.InitBeaconState()
 	return state
 }
 
@@ -52,7 +53,7 @@ func NewFromRaw(r *raw.BeaconState) *CachingBeaconState {
 	state := &CachingBeaconState{
 		BeaconState: r,
 	}
-	state.initBeaconState()
+	state.InitBeaconState()
 	return state
 }
 
@@ -81,7 +82,6 @@ func (b *CachingBeaconState) _updateProposerIndex() (err error) {
 	seed := hash.Sum(nil)
 
 	indices := b.GetActiveValidatorsIndices(epoch)
-
 	// Write the seed to an array.
 	seedArray := [32]byte{}
 	copy(seedArray[:], seed)
@@ -190,7 +190,10 @@ func (b *CachingBeaconState) _initializeValidatorsPhase0() error {
 	})
 }
 
-func (b *CachingBeaconState) _refreshActiveBalances() {
+func (b *CachingBeaconState) _refreshActiveBalancesIfNeeded() {
+	if b.totalActiveBalanceCache != nil && *b.totalActiveBalanceCache != 0 {
+		return
+	}
 	epoch := Epoch(b)
 	b.totalActiveBalanceCache = new(uint64)
 	*b.totalActiveBalanceCache = 0
@@ -212,11 +215,13 @@ func (b *CachingBeaconState) initCaches() error {
 	if b.shuffledSetsCache, err = lru.New[common.Hash, []uint64]("beacon_shuffled_sets_cache", shuffledSetsCacheSize); err != nil {
 		return err
 	}
+
 	return nil
 }
 
-func (b *CachingBeaconState) initBeaconState() error {
-	b._refreshActiveBalances()
+func (b *CachingBeaconState) InitBeaconState() error {
+	b.totalActiveBalanceCache = nil
+	b._refreshActiveBalancesIfNeeded()
 
 	b.publicKeyIndicies = make(map[[48]byte]uint64)
 
@@ -333,11 +338,16 @@ func readUint64WithBuffer(r io.Reader, buf []byte, out *uint64) error {
 
 // internal encoding/decoding algos
 func (b *CachingBeaconState) encodeActiveValidatorsCache(w io.Writer, num []byte) error {
-	keys := b.activeValidatorsCache.Keys()
-	lists := make([][]uint64, len(keys))
-
-	for i, key := range keys {
-		lists[i], _ = b.activeValidatorsCache.Get(key)
+	keysA := b.activeValidatorsCache.Keys()
+	keys := make([]uint64, 0, len(keysA))
+	lists := make([][]uint64, 0, len(keys))
+	for _, key := range keysA {
+		l, ok := b.activeValidatorsCache.Get(key)
+		if !ok || len(l) == 0 {
+			continue
+		}
+		keys = append(keys, key)
+		lists = append(lists, l)
 	}
 	// Write the total length
 	if err := writeUint64WithBuffer(w, uint64(len(keys)), num); err != nil {
@@ -395,11 +405,17 @@ func (b *CachingBeaconState) decodeActiveValidatorsCache(r io.Reader, num []byte
 
 // internal encoding/decoding algos
 func (b *CachingBeaconState) encodeShuffledSetsCache(w io.Writer, num []byte) error {
-	keys := b.shuffledSetsCache.Keys()
-	lists := make([][]uint64, len(keys))
+	keysA := b.shuffledSetsCache.Keys()
+	keys := make([]common.Hash, 0, len(keysA))
+	lists := make([][]uint64, 0, len(keys))
 
-	for i, key := range keys {
-		lists[i], _ = b.shuffledSetsCache.Get(key)
+	for _, key := range keysA {
+		l, ok := b.shuffledSetsCache.Get(key)
+		if !ok || len(l) == 0 {
+			continue
+		}
+		keys = append(keys, key)
+		lists = append(lists, l)
 	}
 	// Write the total length
 	if err := writeUint64WithBuffer(w, uint64(len(keys)), num); err != nil {

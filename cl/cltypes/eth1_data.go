@@ -10,7 +10,7 @@ import (
 
 type Eth1Data struct {
 	Root         libcommon.Hash `json:"deposit_root"`
-	DepositCount uint64         `json:"deposit_count"`
+	DepositCount uint64         `json:"deposit_count,string"`
 	BlockHash    libcommon.Hash `json:"block_hash"`
 }
 

@@ -11,7 +11,7 @@ import (
 
 // Change to EL engine
 type BLSToExecutionChange struct {
-	ValidatorIndex uint64            `json:"validator_index"`
+	ValidatorIndex uint64            `json:"validator_index,string"`
 	From           libcommon.Bytes48 `json:"from"`
 	To             libcommon.Address `json:"to"`
 }
