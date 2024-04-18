@@ -1259,6 +1259,8 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 
 	blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum, br.chainConfig)
 
+	log.Warn("[dbg] RetireBlocks3", "blockFrom", blockFrom, "blockTo", blockTo, "ok", ok)
+
 	if ok {
 		if has, err := br.dbHasEnoughDataForBlocksRetire(ctx); err != nil {
 			return false, err
@@ -1364,6 +1366,7 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum
 		for {
 			maxBlockNum := br.maxScheduledBlock.Load()
 
+			log.Warn("[dbg] RetireBlocks1", "maxBlockNum", maxBlockNum, "maxBlockNum", maxBlockNum)
 			err := br.RetireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 
 			if err != nil {
@@ -1372,6 +1375,7 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum
 			}
 
 			if maxBlockNum == br.maxScheduledBlock.Load() {
+				log.Warn("[dbg] RetireBlocks2", "maxBlockNum", maxBlockNum, "maxBlockNum", maxBlockNum)
 				return
 			}
 		}
