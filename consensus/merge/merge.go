@@ -282,6 +282,9 @@ func (s *Merge) Initialize(config *chain.Config, chain consensus.ChainHeaderRead
 			return syscall(addr, data, state, header, false /* constCall */)
 		})
 	}
+	if chain.Config().IsPrague(header.Time) {
+		misc.StoreBlockHash2935(header, state)
+	}
 }
 
 func (s *Merge) APIs(chain consensus.ChainHeaderReader) []rpc.API {

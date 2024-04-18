@@ -473,6 +473,17 @@ func opBlockhash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 	}
 	var upper, lower uint64
 	upper = interpreter.evm.Context.BlockNumber
+	if interpreter.evm.chainRules.IsPrague {
+		if !num.Lt(uint256.MustFromBig(interpreter.evm.chainConfig.PragueTime))  && num.Lt(uint256.NewInt(upper)){
+			var out *uint256.Int
+			interpreter.evm.intraBlockState.GetState(params.HistoryStorageAddress, (*libcommon.Hash)(num.Bytes()), out)
+			scope.Stack.Push(out)
+		} else {
+			scope.Stack.Push(uint256.NewInt(0))
+		}
+		return nil, nil
+	}
+
 	if upper < 257 {
 		lower = 0
 	} else {
