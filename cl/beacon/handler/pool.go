@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
@@ -361,16 +362,19 @@ func (a *ApiHandler) PostEthV1ValidatorContributionsAndProofs(w http.ResponseWri
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	fmt.Println("A")
 	s := a.syncedData.HeadState()
 	if s == nil {
 		http.Error(w, "node is not synced", http.StatusServiceUnavailable)
 		return
 	}
+	fmt.Println("B")
 	failures := []poolingFailure{}
 	for idx, v := range msgs {
 		if bytes.Equal(v.Message.Contribution.AggregationBits, make([]byte, len(v.Message.Contribution.AggregationBits))) {
 			continue // skip empty contributions
 		}
+		fmt.Println("C")
 		if err := a.syncContributionAndProofsService.ProcessMessage(r.Context(), nil, v); err != nil && !errors.Is(err, services.ErrIgnore) {
 			log.Warn("[Beacon REST] failed to process sync contribution", "err", err)
 			failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
@@ -394,6 +398,7 @@ func (a *ApiHandler) PostEthV1ValidatorContributionsAndProofs(w http.ResponseWri
 			}
 		}
 	}
+	fmt.Println("D")
 
 	if len(failures) > 0 {
 		w.WriteHeader(http.StatusBadRequest)
