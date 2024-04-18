@@ -152,7 +152,14 @@ func (s *GossipManager) Recv() <-chan *GossipMessage {
 func (s *GossipManager) GetMatchingSubscription(match string) *GossipSubscription {
 	var sub *GossipSubscription
 	s.subscriptions.Range(func(topic, value interface{}) bool {
-		if strings.Contains(topic.(string), match) {
+		topicStr := topic.(string)
+		// take out third part of the topic by splitting on "/"
+		// reference: eth2/d31f6191/beacon_attestation_45/ssz_snappy
+		parts := strings.Split(topicStr, "/")
+		if len(parts) < 3 {
+			return true
+		}
+		if parts[2] == match {
 			sub = value.(*GossipSubscription)
 			return false
 		}
@@ -162,6 +169,7 @@ func (s *GossipManager) GetMatchingSubscription(match string) *GossipSubscriptio
 }
 
 func (s *GossipManager) AddSubscription(topic string, sub *GossipSubscription) {
+	fmt.Println(topic)
 	s.subscriptions.Store(topic, sub)
 }
 
@@ -461,8 +469,8 @@ func (sub *GossipSubscription) Listen() {
 					}
 					sub.topic.Close()
 					sub.subscribed.Store(false)
-					log.Info("[Gossip] Unsubscribed from topic", "topic", sub.gossip_topic.Name)
-					sub.s.updateENROnSubscription(sub.gossip_topic.Name, false)
+					log.Info("[Gossip] Unsubscribed from topic", "topic", sub.sub.Topic())
+					sub.s.updateENROnSubscription(sub.sub.Topic(), false)
 					continue
 				}
 				if !sub.subscribed.Load() && time.Now().Before(expirationTime) {
@@ -477,7 +485,7 @@ func (sub *GossipSubscription) Listen() {
 					sctx, sub.cf = context.WithCancel(sub.ctx)
 					go sub.run(sctx, sub.sub, sub.sub.Topic())
 					sub.subscribed.Store(true)
-					sub.s.updateENROnSubscription(sub.gossip_topic.Name, true)
+					sub.s.updateENROnSubscription(sub.sub.Topic(), true)
 					log.Info("[Gossip] Subscribed to topic", "topic", sub.gossip_topic.Name)
 				}
 			}

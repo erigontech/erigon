@@ -159,14 +159,22 @@ func (s *Sentinel) updateENRSyncNets(subnetIndex int, on bool) {
 func (s *Sentinel) updateENROnSubscription(topicName string, subscribe bool) {
 	s.metadataLock.Lock()
 	defer s.metadataLock.Unlock()
+	///eth2/d31f6191/beacon_attestation_45/ssz_snappy
+	// extract third part of the topic name
+	parts := strings.Split(topicName, "/")
+	if len(parts) < 3 {
+		return
+	}
+	part := parts[2]
 	for i := 0; i < int(s.cfg.NetworkConfig.AttestationSubnetCount); i++ {
-		if strings.Contains(topicName, fmt.Sprintf(gossip.TopicNamePrefixBeaconAttestation, i)) {
+
+		if part == fmt.Sprintf(gossip.TopicNamePrefixBeaconAttestation, i) {
 			s.updateENRAttSubnets(i, subscribe)
 			return
 		}
 	}
 	for i := 0; i < int(s.cfg.BeaconConfig.SyncCommitteeSubnetCount); i++ {
-		if strings.Contains(topicName, fmt.Sprintf(gossip.TopicNamePrefixSyncCommittee, i)) {
+		if part == fmt.Sprintf(gossip.TopicNamePrefixSyncCommittee, i) {
 			s.updateENRSyncNets(i, subscribe)
 			return
 		}
