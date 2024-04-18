@@ -74,6 +74,7 @@ linters-settings:
       - uncheckedInlineErr
       - preferStringWriter
       - commentedOutCode
+      - preferFprint
 
     settings:
       ruleguard:
