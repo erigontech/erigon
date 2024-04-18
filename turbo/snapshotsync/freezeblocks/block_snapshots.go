@@ -1393,6 +1393,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, max
 		}
 	}
 
+	log.Warn("[dbg] RetireBlocks8", "maxBlockNum", maxBlockNum)
 	_, err = br.retireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 	if err != nil {
 		return err
