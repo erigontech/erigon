@@ -531,6 +531,11 @@ var (
 		Usage: "The URL of the pool manager. If set, eth_sendRawTransaction will be redirected there.",
 		Value: "",
 	}
+  DisableVirtualCounters = cli.BoolFlag{
+		Name:  "zkevm.disable-virtual-counters",
+		Usage: "Disable the virtual counters. This has an effect on on sequencer node and when external executor is not enabled.",
+		Value: false,
+	}
 	SupportGasless = cli.BoolFlag{
 		Name:  "zkevm.gasless",
 		Usage: "Support gasless transactions",

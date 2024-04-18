@@ -11,13 +11,14 @@ import (
 	"github.com/ledgerwatch/erigon/zkevm/log"
 )
 
-const dataStreamUrl = "datastream.cardona.zkevm-rpc.com:6900"
+const dataStreamCardona = "datastream.cardona.zkevm-rpc.com:6900"
+const datastreamMainnet = "stream.zkevm-rpc.com:6900"
 const estest = "34.175.214.161:6900"
 
 // This code downloads headers and blocks from a datastream server.
 func main() {
 	// Create client
-	c := client.NewClient(estest, 0, 0)
+	c := client.NewClient(datastreamMainnet, 0, 0)
 
 	// Start client (connect to the server)
 	defer c.Stop()
@@ -26,18 +27,19 @@ func main() {
 	}
 
 	// create bookmark
-	bookmark := types.NewL2BlockBookmark(229268)
+	bookmark := types.NewL2BlockBookmark(63500)
 
 	// Read all entries from server
-	blocksRead, _, _, entriesReadAmount, err := c.ReadEntries(bookmark, 1)
+	blocksRead, _, _, entriesReadAmount, err := c.ReadEntries(bookmark, 200)
 	if err != nil {
 		panic(err)
 	}
 	fmt.Println("Entries read amount: ", entriesReadAmount)
 	fmt.Println("Blocks read amount: ", len(*blocksRead))
 
+	// forkId := uint16(0)
 	for _, dsBlock := range *blocksRead {
-		fmt.Println(dsBlock)
+		fmt.Println(dsBlock.L2BlockNumber)
 	}
 }
 

@@ -276,7 +276,7 @@ func runTest(t *testing.T, test vector, err error, fileName string, idx int) {
 			}
 			blockStarted = true
 		}
-		txCounters := vm.NewTransactionCounter(transaction, test.SmtDepths[i])
+		txCounters := vm.NewTransactionCounter(transaction, test.SmtDepths[i], false)
 		overflow, err := batchCollector.AddNewTransactionCounters(txCounters)
 		if err != nil {
 			t.Fatal(err)

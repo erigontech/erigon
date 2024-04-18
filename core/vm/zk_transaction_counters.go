@@ -18,16 +18,28 @@ type TransactionCounter struct {
 	smtLevels          int
 }
 
-func NewTransactionCounter(transaction types.Transaction, smtMaxLevel int) *TransactionCounter {
+func NewTransactionCounter(transaction types.Transaction, smtMaxLevel int, shouldCountersBeUnlimited bool) *TransactionCounter {
 	totalLevel := calculateSmtLevels(smtMaxLevel, 32)
-	tc := &TransactionCounter{
-		transaction:        transaction,
-		rlpCounters:        NewCounterCollector(totalLevel),
-		executionCounters:  NewCounterCollector(totalLevel),
-		processingCounters: NewCounterCollector(totalLevel),
-		smtLevels:          totalLevel,
-	}
 
+	var tc *TransactionCounter
+
+	if shouldCountersBeUnlimited {
+		tc = &TransactionCounter{
+			transaction:        transaction,
+			rlpCounters:        NewUnlimitedCounterCollector(),
+			executionCounters:  NewUnlimitedCounterCollector(),
+			processingCounters: NewUnlimitedCounterCollector(),
+			smtLevels:          1, // max depth of the tree anyways
+		}
+	} else {
+		tc = &TransactionCounter{
+			transaction:        transaction,
+			rlpCounters:        NewCounterCollector(totalLevel),
+			executionCounters:  NewCounterCollector(totalLevel),
+			processingCounters: NewCounterCollector(totalLevel),
+			smtLevels:          totalLevel,
+		}
+	}
 	tc.executionCounters.SetTransaction(transaction)
 
 	return tc

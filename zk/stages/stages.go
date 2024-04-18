@@ -5,27 +5,26 @@ import (
 
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
 
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	stages "github.com/ledgerwatch/erigon/eth/stagedsync"
 	stages2 "github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
 
 func SequencerZkStages(
 	ctx context.Context,
-	cumulativeIndex stagedsync.CumulativeIndexCfg,
+	cumulativeIndex stages.CumulativeIndexCfg,
 	l1InfoTreeCfg L1SequencerSyncCfg,
 	sequencerL1BlockSyncCfg SequencerL1BlockSyncCfg,
 	dataStreamCatchupCfg DataStreamCatchupCfg,
 	sequencerInterhashesCfg SequencerInterhashesCfg,
 	exec SequenceBlockCfg,
-	hashState stagedsync.HashStateCfg,
+	hashState stages.HashStateCfg,
 	zkInterHashesCfg ZkInterHashesCfg,
 	sequencerExecutorVerifyCfg SequencerExecutorVerifyCfg,
-	history stagedsync.HistoryCfg,
-	logIndex stagedsync.LogIndexCfg,
-	callTraces stagedsync.CallTracesCfg,
-	txLookup stagedsync.TxLookupCfg,
-	finish stagedsync.FinishCfg,
+	history stages.HistoryCfg,
+	logIndex stages.LogIndexCfg,
+	callTraces stages.CallTracesCfg,
+	txLookup stages.TxLookupCfg,
+	finish stages.FinishCfg,
 	test bool,
 ) []*stages.Stage {
 	return []*stages.Stage{
@@ -36,13 +35,13 @@ func SequencerZkStages(
 				ID:          stages.CumulativeIndex,
 				Description: "Write Cumulative Index",
 				Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
-					return stagedsync.SpawnStageCumulativeIndex(cumulativeIndex, s, tx, ctx)
+					return stages.SpawnStageCumulativeIndex(cumulativeIndex, s, tx, ctx)
 				},
 				Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
-					return stagedsync.UnwindCumulativeIndexStage(u, cumulativeIndex, tx, ctx)
+					return stages.UnwindCumulativeIndexStage(u, cumulativeIndex, tx, ctx)
 				},
 				Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
-					return stagedsync.PruneCumulativeIndexStage(p, tx, ctx)
+					return stages.PruneCumulativeIndexStage(p, tx, ctx)
 				},
 			},
 		*/
@@ -139,13 +138,13 @@ func SequencerZkStages(
 			Description: "Hash the key in the state",
 			Disabled:    false,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return stagedsync.SpawnHashStateStage(s, tx, hashState, ctx, quiet)
+				return stages.SpawnHashStateStage(s, tx, hashState, ctx, quiet)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
-				return stagedsync.UnwindHashStateStage(u, s, tx, hashState, ctx)
+				return stages.UnwindHashStateStage(u, s, tx, hashState, ctx)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
-				return stagedsync.PruneHashStateStage(p, tx, hashState, ctx)
+				return stages.PruneHashStateStage(p, tx, hashState, ctx)
 			},
 		},
 		{
@@ -154,13 +153,13 @@ func SequencerZkStages(
 			DisabledDescription: "Work In Progress",
 			Disabled:            false,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return stagedsync.SpawnCallTraces(s, tx, callTraces, ctx)
+				return stages.SpawnCallTraces(s, tx, callTraces, ctx)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
-				return stagedsync.UnwindCallTraces(u, s, tx, callTraces, ctx)
+				return stages.UnwindCallTraces(u, s, tx, callTraces, ctx)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
-				return stagedsync.PruneCallTraces(p, tx, callTraces, ctx)
+				return stages.PruneCallTraces(p, tx, callTraces, ctx)
 			},
 		},
 		{
@@ -168,13 +167,13 @@ func SequencerZkStages(
 			Description: "Generate account history index",
 			Disabled:    false,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return stagedsync.SpawnAccountHistoryIndex(s, tx, history, ctx)
+				return stages.SpawnAccountHistoryIndex(s, tx, history, ctx)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
-				return stagedsync.UnwindAccountHistoryIndex(u, s, tx, history, ctx)
+				return stages.UnwindAccountHistoryIndex(u, s, tx, history, ctx)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
-				return stagedsync.PruneAccountHistoryIndex(p, tx, history, ctx)
+				return stages.PruneAccountHistoryIndex(p, tx, history, ctx)
 			},
 		},
 		{
@@ -182,13 +181,13 @@ func SequencerZkStages(
 			Description: "Generate storage history index",
 			Disabled:    false,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return stagedsync.SpawnStorageHistoryIndex(s, tx, history, ctx)
+				return stages.SpawnStorageHistoryIndex(s, tx, history, ctx)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
-				return stagedsync.UnwindStorageHistoryIndex(u, s, tx, history, ctx)
+				return stages.UnwindStorageHistoryIndex(u, s, tx, history, ctx)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
-				return stagedsync.PruneStorageHistoryIndex(p, tx, history, ctx)
+				return stages.PruneStorageHistoryIndex(p, tx, history, ctx)
 			},
 		},
 		{
@@ -196,26 +195,26 @@ func SequencerZkStages(
 			Description: "Generate receipt logs index",
 			Disabled:    false,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return stagedsync.SpawnLogIndex(s, tx, logIndex, ctx, 0)
+				return stages.SpawnLogIndex(s, tx, logIndex, ctx, 0)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
-				return stagedsync.UnwindLogIndex(u, s, tx, logIndex, ctx)
+				return stages.UnwindLogIndex(u, s, tx, logIndex, ctx)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
-				return stagedsync.PruneLogIndex(p, tx, logIndex, ctx)
+				return stages.PruneLogIndex(p, tx, logIndex, ctx)
 			},
 		},
 		{
 			ID:          stages2.TxLookup,
 			Description: "Generate tx lookup index",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return stagedsync.SpawnTxLookup(s, tx, 0 /* toBlock */, txLookup, ctx)
+				return stages.SpawnTxLookup(s, tx, 0 /* toBlock */, txLookup, ctx)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
-				return stagedsync.UnwindTxLookup(u, s, tx, txLookup, ctx)
+				return stages.UnwindTxLookup(u, s, tx, txLookup, ctx)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
-				return stagedsync.PruneTxLookup(p, tx, txLookup, ctx, firstCycle)
+				return stages.PruneTxLookup(p, tx, txLookup, ctx, firstCycle)
 			},
 		},
 		/*
@@ -239,13 +238,13 @@ func SequencerZkStages(
 			ID:          stages2.Finish,
 			Description: "Final: update current block for the RPC API",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, _ stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return stagedsync.FinishForward(s, tx, finish, firstCycle)
+				return stages.FinishForward(s, tx, finish, firstCycle)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
-				return stagedsync.UnwindFinish(u, tx, finish, ctx)
+				return stages.UnwindFinish(u, tx, finish, ctx)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
-				return stagedsync.PruneFinish(p, tx, finish, ctx)
+				return stages.PruneFinish(p, tx, finish, ctx)
 			},
 		},
 	}
@@ -256,17 +255,17 @@ func DefaultZkStages(
 	l1SyncerCfg L1SyncerCfg,
 	batchesCfg BatchesCfg,
 	dataStreamCatchupCfg DataStreamCatchupCfg,
-	cumulativeIndex stagedsync.CumulativeIndexCfg,
-	blockHashCfg stagedsync.BlockHashesCfg,
-	senders stagedsync.SendersCfg,
-	exec stagedsync.ExecuteBlockCfg,
-	hashState stagedsync.HashStateCfg,
+	cumulativeIndex stages.CumulativeIndexCfg,
+	blockHashCfg stages.BlockHashesCfg,
+	senders stages.SendersCfg,
+	exec stages.ExecuteBlockCfg,
+	hashState stages.HashStateCfg,
 	zkInterHashesCfg ZkInterHashesCfg,
-	history stagedsync.HistoryCfg,
-	logIndex stagedsync.LogIndexCfg,
-	callTraces stagedsync.CallTracesCfg,
-	txLookup stagedsync.TxLookupCfg,
-	finish stagedsync.FinishCfg,
+	history stages.HistoryCfg,
+	logIndex stages.LogIndexCfg,
+	callTraces stages.CallTracesCfg,
+	txLookup stages.TxLookupCfg,
+	finish stages.FinishCfg,
 	test bool,
 ) []*stages.Stage {
 	return []*stages.Stage{
@@ -306,51 +305,51 @@ func DefaultZkStages(
 			ID:          stages2.BlockHashes,
 			Description: "Write block hashes",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return stagedsync.SpawnBlockHashStage(s, tx, blockHashCfg, ctx)
+				return stages.SpawnBlockHashStage(s, tx, blockHashCfg, ctx)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
-				return stagedsync.UnwindBlockHashStage(u, tx, blockHashCfg, ctx)
+				return stages.UnwindBlockHashStage(u, tx, blockHashCfg, ctx)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
-				return stagedsync.PruneBlockHashStage(p, tx, blockHashCfg, ctx)
+				return stages.PruneBlockHashStage(p, tx, blockHashCfg, ctx)
 			},
 		},
 		{
 			ID:          stages2.Senders,
 			Description: "Recover senders from tx signatures",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return stagedsync.SpawnRecoverSendersStage(senders, s, u, tx, 0, ctx, quiet)
+				return stages.SpawnRecoverSendersStage(senders, s, u, tx, 0, ctx, quiet)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
-				return stagedsync.UnwindSendersStage(u, tx, senders, ctx)
+				return stages.UnwindSendersStage(u, tx, senders, ctx)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
-				return stagedsync.PruneSendersStage(p, tx, senders, ctx)
+				return stages.PruneSendersStage(p, tx, senders, ctx)
 			},
 		},
 		{
 			ID:          stages2.Execution,
 			Description: "Execute blocks w/o hash checks",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return stagedsync.SpawnExecuteBlocksStageZk(s, u, tx, 0, ctx, exec, firstCycle, quiet)
+				return stages.SpawnExecuteBlocksStageZk(s, u, tx, 0, ctx, exec, firstCycle, quiet)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
-				return stagedsync.UnwindExecutionStageZk(u, s, tx, ctx, exec, firstCycle)
+				return stages.UnwindExecutionStageZk(u, s, tx, ctx, exec, firstCycle)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
-				return stagedsync.PruneExecutionStageZk(p, tx, exec, ctx, firstCycle)
+				return stages.PruneExecutionStageZk(p, tx, exec, ctx, firstCycle)
 			},
 		}, {
 			ID:          stages2.CumulativeIndex,
 			Description: "Write Cumulative Index",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return stagedsync.SpawnStageCumulativeIndex(cumulativeIndex, s, tx, ctx)
+				return stages.SpawnStageCumulativeIndex(cumulativeIndex, s, tx, ctx)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
-				return stagedsync.UnwindCumulativeIndexStage(u, cumulativeIndex, tx, ctx)
+				return stages.UnwindCumulativeIndexStage(u, cumulativeIndex, tx, ctx)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
-				return stagedsync.PruneCumulativeIndexStage(p, tx, ctx)
+				return stages.PruneCumulativeIndexStage(p, tx, ctx)
 			},
 		},
 		{
@@ -358,13 +357,13 @@ func DefaultZkStages(
 			Description: "Hash the key in the state",
 			Disabled:    false,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return stagedsync.SpawnHashStateStage(s, tx, hashState, ctx, quiet)
+				return stages.SpawnHashStateStage(s, tx, hashState, ctx, quiet)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
-				return stagedsync.UnwindHashStateStage(u, s, tx, hashState, ctx)
+				return stages.UnwindHashStateStage(u, s, tx, hashState, ctx)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
-				return stagedsync.PruneHashStateStage(p, tx, hashState, ctx)
+				return stages.PruneHashStateStage(p, tx, hashState, ctx)
 			},
 		},
 		{
@@ -389,13 +388,13 @@ func DefaultZkStages(
 			DisabledDescription: "Work In Progress",
 			Disabled:            false,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return stagedsync.SpawnCallTraces(s, tx, callTraces, ctx)
+				return stages.SpawnCallTraces(s, tx, callTraces, ctx)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
-				return stagedsync.UnwindCallTraces(u, s, tx, callTraces, ctx)
+				return stages.UnwindCallTraces(u, s, tx, callTraces, ctx)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
-				return stagedsync.PruneCallTraces(p, tx, callTraces, ctx)
+				return stages.PruneCallTraces(p, tx, callTraces, ctx)
 			},
 		},
 		{
@@ -404,13 +403,13 @@ func DefaultZkStages(
 			Disabled:    false,
 
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return stagedsync.SpawnAccountHistoryIndex(s, tx, history, ctx)
+				return stages.SpawnAccountHistoryIndex(s, tx, history, ctx)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
-				return stagedsync.UnwindAccountHistoryIndex(u, s, tx, history, ctx)
+				return stages.UnwindAccountHistoryIndex(u, s, tx, history, ctx)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
-				return stagedsync.PruneAccountHistoryIndex(p, tx, history, ctx)
+				return stages.PruneAccountHistoryIndex(p, tx, history, ctx)
 			},
 		},
 		{
@@ -418,13 +417,13 @@ func DefaultZkStages(
 			Description: "Generate storage history index",
 			Disabled:    false,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return stagedsync.SpawnStorageHistoryIndex(s, tx, history, ctx)
+				return stages.SpawnStorageHistoryIndex(s, tx, history, ctx)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
-				return stagedsync.UnwindStorageHistoryIndex(u, s, tx, history, ctx)
+				return stages.UnwindStorageHistoryIndex(u, s, tx, history, ctx)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
-				return stagedsync.PruneStorageHistoryIndex(p, tx, history, ctx)
+				return stages.PruneStorageHistoryIndex(p, tx, history, ctx)
 			},
 		},
 		{
@@ -432,26 +431,26 @@ func DefaultZkStages(
 			Description: "Generate receipt logs index",
 			Disabled:    false,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return stagedsync.SpawnLogIndex(s, tx, logIndex, ctx, 0)
+				return stages.SpawnLogIndex(s, tx, logIndex, ctx, 0)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
-				return stagedsync.UnwindLogIndex(u, s, tx, logIndex, ctx)
+				return stages.UnwindLogIndex(u, s, tx, logIndex, ctx)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
-				return stagedsync.PruneLogIndex(p, tx, logIndex, ctx)
+				return stages.PruneLogIndex(p, tx, logIndex, ctx)
 			},
 		},
 		{
 			ID:          stages2.TxLookup,
 			Description: "Generate tx lookup index",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return stagedsync.SpawnTxLookup(s, tx, 0 /* toBlock */, txLookup, ctx)
+				return stages.SpawnTxLookup(s, tx, 0 /* toBlock */, txLookup, ctx)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
-				return stagedsync.UnwindTxLookup(u, s, tx, txLookup, ctx)
+				return stages.UnwindTxLookup(u, s, tx, txLookup, ctx)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
-				return stagedsync.PruneTxLookup(p, tx, txLookup, ctx, firstCycle)
+				return stages.PruneTxLookup(p, tx, txLookup, ctx, firstCycle)
 			},
 		},
 		{
@@ -471,13 +470,13 @@ func DefaultZkStages(
 			ID:          stages2.Finish,
 			Description: "Final: update current block for the RPC API",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, _ stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return stagedsync.FinishForward(s, tx, finish, firstCycle)
+				return stages.FinishForward(s, tx, finish, firstCycle)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
-				return stagedsync.UnwindFinish(u, tx, finish, ctx)
+				return stages.UnwindFinish(u, tx, finish, ctx)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
-				return stagedsync.PruneFinish(p, tx, finish, ctx)
+				return stages.PruneFinish(p, tx, finish, ctx)
 			},
 		},
 	}

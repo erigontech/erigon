@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/gateway-fm/cdk-erigon-lib/common"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/common/length"
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/gateway-fm/cdk-erigon-lib/state"
@@ -28,6 +27,8 @@ import (
 
 	"net/url"
 
+	"os"
+
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -39,7 +40,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/erigon/zk"
 	"github.com/status-im/keycard-go/hexutils"
-	"os"
 )
 
 type ZkInterHashesCfg struct {
@@ -81,7 +81,7 @@ func StageZkInterHashesCfg(
 	}
 }
 
-func SpawnZkIntermediateHashesStage(s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, cfg ZkInterHashesCfg, ctx context.Context, quiet bool) (root libcommon.Hash, err error) {
+func SpawnZkIntermediateHashesStage(s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, cfg ZkInterHashesCfg, ctx context.Context, quiet bool) (root common.Hash, err error) {
 	logPrefix := s.LogPrefix()
 
 	quit := ctx.Done()
@@ -121,8 +121,8 @@ func SpawnZkIntermediateHashesStage(s *stagedsync.StageState, u stagedsync.Unwin
 		return trie.EmptyRoot, nil
 	}
 
-	var expectedRootHash libcommon.Hash
-	var headerHash libcommon.Hash
+	var expectedRootHash common.Hash
+	var headerHash common.Hash
 	var syncHeadHeader *types.Header
 	if cfg.checkRoot {
 		syncHeadHeader, err = cfg.blockReader.HeaderByNumber(ctx, tx, to)
@@ -239,7 +239,7 @@ func UnwindZkIntermediateHashesStage(u *stagedsync.UnwindState, s *stagedsync.St
 	return nil
 }
 
-func regenerateIntermediateHashes(logPrefix string, db kv.RwTx, eridb *db2.EriDb, smtIn *smt.SMT) (libcommon.Hash, error) {
+func regenerateIntermediateHashes(logPrefix string, db kv.RwTx, eridb *db2.EriDb, smtIn *smt.SMT) (common.Hash, error) {
 	log.Info(fmt.Sprintf("[%s] Regeneration trie hashes started", logPrefix))
 	defer log.Info(fmt.Sprintf("[%s] Regeneration ended", logPrefix))
 
@@ -248,7 +248,7 @@ func regenerateIntermediateHashes(logPrefix string, db kv.RwTx, eridb *db2.EriDb
 	}
 
 	var a *accounts.Account
-	var addr libcommon.Address
+	var addr common.Address
 	var as map[string]string
 	var inc uint64
 
@@ -289,7 +289,7 @@ func regenerateIntermediateHashes(logPrefix string, db kv.RwTx, eridb *db2.EriDb
 				as = make(map[string]string)
 				return nil
 			}
-			addr = libcommon.BytesToAddress(k)
+			addr = common.BytesToAddress(k)
 			inc = a.Incarnation
 			// empty storage of previous account
 			as = make(map[string]string)
@@ -338,10 +338,10 @@ func regenerateIntermediateHashes(logPrefix string, db kv.RwTx, eridb *db2.EriDb
 		return trie.EmptyRoot, err
 	}
 
-	return libcommon.BigToHash(root), nil
+	return common.BigToHash(root), nil
 }
 
-func zkIncrementIntermediateHashes(logPrefix string, s *stagedsync.StageState, db kv.RwTx, eridb *db2.EriDb, dbSmt *smt.SMT, to uint64, checkRoot bool, expectedRootHash *libcommon.Hash, quit <-chan struct{}) (libcommon.Hash, error) {
+func zkIncrementIntermediateHashes(logPrefix string, s *stagedsync.StageState, db kv.RwTx, eridb *db2.EriDb, dbSmt *smt.SMT, to uint64, checkRoot bool, expectedRootHash *common.Hash, quit <-chan struct{}) (common.Hash, error) {
 	log.Info(fmt.Sprintf("[%s] Increment trie hashes started", logPrefix), "previousRootHeight", s.BlockNumber, "calculatingRootHeight", to)
 	defer log.Info(fmt.Sprintf("[%s] Increment ended", logPrefix))
 
@@ -360,9 +360,9 @@ func zkIncrementIntermediateHashes(logPrefix string, s *stagedsync.StageState, d
 	defer sc.Close()
 
 	// progress printer
-	accChanges := make(map[libcommon.Address]*accounts.Account)
-	codeChanges := make(map[libcommon.Address]string)
-	storageChanges := make(map[libcommon.Address]map[string]string)
+	accChanges := make(map[common.Address]*accounts.Account)
+	codeChanges := make(map[common.Address]string)
+	storageChanges := make(map[common.Address]map[string]string)
 
 	// case when we are incrementing from block 1
 	// we chould include the 0 block which is the genesis data
@@ -381,7 +381,7 @@ func zkIncrementIntermediateHashes(logPrefix string, s *stagedsync.StageState, d
 
 		// collect changes to accounts and code
 		for _, v, err := ac.SeekExact(dupSortKey); err == nil && v != nil; _, v, err = ac.NextDup() {
-			addr := libcommon.BytesToAddress(v[:length.Addr])
+			addr := common.BytesToAddress(v[:length.Addr])
 
 			currAcc, err := psr.ReadAccountData(addr)
 			if err != nil {
@@ -411,7 +411,7 @@ func zkIncrementIntermediateHashes(logPrefix string, s *stagedsync.StageState, d
 			address, incarnation := dbutils.PlainParseStoragePrefix(changesetKey)
 
 			sstorageKey := sv[:length.Hash]
-			stk := libcommon.BytesToHash(sstorageKey)
+			stk := common.BytesToHash(sstorageKey)
 
 			value, err := psr.ReadAccountStorage(address, incarnation, &stk)
 			if err != nil {
@@ -419,7 +419,7 @@ func zkIncrementIntermediateHashes(logPrefix string, s *stagedsync.StageState, d
 			}
 
 			stkk := fmt.Sprintf("0x%032x", stk)
-			v := fmt.Sprintf("0x%032x", libcommon.BytesToHash(value))
+			v := fmt.Sprintf("0x%032x", common.BytesToHash(value))
 
 			m := make(map[string]string)
 			m[stkk] = v
@@ -458,18 +458,18 @@ func zkIncrementIntermediateHashes(logPrefix string, s *stagedsync.StageState, d
 
 	lr := dbSmt.LastRoot()
 
-	hash := libcommon.BigToHash(lr)
+	hash := common.BigToHash(lr)
 	return hash, nil
 }
 
-func unwindZkSMT(logPrefix string, from, to uint64, db kv.RwTx, checkRoot bool, expectedRootHash *libcommon.Hash, quit <-chan struct{}) (libcommon.Hash, error) {
+func unwindZkSMT(logPrefix string, from, to uint64, db kv.RwTx, checkRoot bool, expectedRootHash *common.Hash, quit <-chan struct{}) (common.Hash, error) {
 	log.Info(fmt.Sprintf("[%s] Unwind trie hashes started", logPrefix))
 	defer log.Info(fmt.Sprintf("[%s] Unwind ended", logPrefix))
 
 	eridb := db2.NewEriDb(db)
 	dbSmt := smt.NewSMT(eridb)
 
-	log.Info(fmt.Sprintf("[%s]", logPrefix), "last root", libcommon.BigToHash(dbSmt.LastRoot()))
+	log.Info(fmt.Sprintf("[%s]", logPrefix), "last root", common.BigToHash(dbSmt.LastRoot()))
 
 	eridb.OpenBatch(quit)
 
@@ -494,18 +494,18 @@ func unwindZkSMT(logPrefix string, from, to uint64, db kv.RwTx, checkRoot bool, 
 	// walk backwards through the blocks, applying state changes, and deletes
 	// PlainState contains data AT the block
 	// History tables contain data BEFORE the block - so need a +1 offset
-	accDeletes := make([]libcommon.Address, 0)
+	accDeletes := make([]common.Address, 0)
 
 	for i := from; i >= to+1; i-- {
 
-		accChanges := make(map[libcommon.Address]*accounts.Account)
-		codeChanges := make(map[libcommon.Address]string)
-		storageChanges := make(map[libcommon.Address]map[string]string)
+		accChanges := make(map[common.Address]*accounts.Account)
+		codeChanges := make(map[common.Address]string)
+		storageChanges := make(map[common.Address]map[string]string)
 		dupSortKey := dbutils.EncodeBlockNumber(i)
 
 		// collect changes to accounts and code
 		for _, v, err2 := ac.SeekExact(dupSortKey); err2 == nil && v != nil; _, v, err2 = ac.NextDup() {
-			addr := libcommon.BytesToAddress(v[:length.Addr])
+			addr := common.BytesToAddress(v[:length.Addr])
 
 			// if the account was created in this changeset we should delete it
 			if len(v[length.Addr:]) == 0 {
@@ -558,7 +558,7 @@ func unwindZkSMT(logPrefix string, from, to uint64, db kv.RwTx, checkRoot bool, 
 			address, _ := dbutils.PlainParseStoragePrefix(changesetKey)
 
 			sstorageKey := sv[:length.Hash]
-			stk := libcommon.BytesToHash(sstorageKey)
+			stk := common.BytesToHash(sstorageKey)
 
 			value := []byte{0}
 			if len(sv[length.Hash:]) != 0 {
@@ -566,7 +566,7 @@ func unwindZkSMT(logPrefix string, from, to uint64, db kv.RwTx, checkRoot bool, 
 			}
 
 			stkk := fmt.Sprintf("0x%032x", stk)
-			v := fmt.Sprintf("0x%032x", libcommon.BytesToHash(value))
+			v := fmt.Sprintf("0x%032x", common.BytesToHash(value))
 
 			m := make(map[string]string)
 			m[stkk] = v
@@ -620,12 +620,12 @@ func unwindZkSMT(logPrefix string, from, to uint64, db kv.RwTx, checkRoot bool, 
 
 	lr := dbSmt.LastRoot()
 
-	hash := libcommon.BigToHash(lr)
+	hash := common.BigToHash(lr)
 	return hash, nil
 }
 
-func verifyLastHash(dbSmt *smt.SMT, expectedRootHash *libcommon.Hash, checkRoot bool, logPrefix string) error {
-	hash := libcommon.BigToHash(dbSmt.LastRoot())
+func verifyLastHash(dbSmt *smt.SMT, expectedRootHash *common.Hash, checkRoot bool, logPrefix string) error {
+	hash := common.BigToHash(dbSmt.LastRoot())
 
 	if checkRoot && hash != *expectedRootHash {
 		log.Warn(fmt.Sprintf("[%s] Wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash))
@@ -635,7 +635,7 @@ func verifyLastHash(dbSmt *smt.SMT, expectedRootHash *libcommon.Hash, checkRoot 
 	return nil
 }
 
-func processAccount(db smt.DB, a *accounts.Account, as map[string]string, inc uint64, psr *state2.PlainStateReader, addr libcommon.Address, keys []utils.NodeKey) ([]utils.NodeKey, error) {
+func processAccount(db smt.DB, a *accounts.Account, as map[string]string, inc uint64, psr *state2.PlainStateReader, addr common.Address, keys []utils.NodeKey) ([]utils.NodeKey, error) {
 	// get the account balance and nonce
 	keys, err := insertAccountStateToKV(db, keys, addr.String(), a.Balance.ToBig(), new(big.Int).SetUint64(a.Nonce))
 	if err != nil {
@@ -803,8 +803,8 @@ func insertAccountStateToKV(db smt.DB, keys []utils.NodeKey, ethAddr string, bal
 }
 
 // RPC Debug
-func verifyStateRoot(dbSmt *smt.SMT, expectedRootHash *libcommon.Hash, cfg *ZkInterHashesCfg, logPrefix string, blockNo uint64, tx kv.RwTx) error {
-	hash := libcommon.BigToHash(dbSmt.LastRoot())
+func verifyStateRoot(dbSmt *smt.SMT, expectedRootHash *common.Hash, cfg *ZkInterHashesCfg, logPrefix string, blockNo uint64, tx kv.RwTx) error {
+	hash := common.BigToHash(dbSmt.LastRoot())
 	//psr := state2.NewPlainStateReader(tx)
 
 	if cfg.checkRoot && hash != *expectedRootHash {
@@ -830,7 +830,7 @@ func verifyStateRoot(dbSmt *smt.SMT, expectedRootHash *libcommon.Hash, cfg *ZkIn
 	return nil
 }
 
-func stateRootByTxNo(txNo *big.Int, l2RpcUrl string) (*libcommon.Hash, error) {
+func stateRootByTxNo(txNo *big.Int, l2RpcUrl string) (*common.Hash, error) {
 	requestBody := map[string]interface{}{
 		"jsonrpc": "2.0",
 		"method":  "eth_getBlockByNumber",
@@ -873,7 +873,7 @@ func stateRootByTxNo(txNo *big.Int, l2RpcUrl string) (*libcommon.Hash, error) {
 	if !ok {
 		return nil, err
 	}
-	h := libcommon.HexToHash(stateRoot)
+	h := common.HexToHash(stateRoot)
 
 	return &h, nil
 }

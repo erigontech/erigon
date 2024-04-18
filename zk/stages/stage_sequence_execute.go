@@ -343,7 +343,7 @@ LOOP:
 
 			// if there were no transactions in this check, and we have some transactions to process, and we've waited long enough for
 			// more to arrive then close the batch
-			sinceLastTx := time.Now().Sub(lastTxTime)
+			sinceLastTx := time.Since(lastTxTime)
 			if len(transactions) > 0 {
 				lastTxTime = time.Now()
 			} else if len(addedTransactions) > 0 && sinceLastTx > 250*time.Millisecond {
@@ -818,7 +818,7 @@ func attemptAddTransaction(
 	smt *smt.SMT,
 	effectiveGasPrice uint8,
 ) (*types.Receipt, bool, error) {
-	txCounters := vm.NewTransactionCounter(transaction, smt.GetDepth()-1)
+	txCounters := vm.NewTransactionCounter(transaction, smt.GetDepth()-1, cfg.zk.ShouldCountersBeUnlimited())
 	overflow, err := batchCounters.AddNewTransactionCounters(txCounters)
 	if err != nil {
 		return nil, false, err

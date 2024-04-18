@@ -123,6 +123,13 @@ func calculateSmtLevels(smtMaxLevel int, minValue int) int {
 	return binaryLength
 }
 
+func NewUnlimitedCounterCollector() *CounterCollector {
+	return &CounterCollector{
+		counters:  unlimitedCounters(),
+		smtLevels: math.MaxInt32,
+	}
+}
+
 func NewCounterCollector(smtLevels int) *CounterCollector {
 	return &CounterCollector{
 		counters:  defaultCounters(),
@@ -176,6 +183,51 @@ func defaultCounters() Counters {
 			remaining:     int(math.Floor(totalSteps-1)/31488) * 7,
 			name:          "sha256",
 			initialAmount: int(math.Floor(totalSteps-1)/31488) * 7,
+		},
+	}
+}
+
+func unlimitedCounters() Counters {
+	return Counters{
+		S: {
+			remaining:     math.MaxInt32,
+			name:          "totalSteps",
+			initialAmount: math.MaxInt32,
+		},
+		A: {
+			remaining:     math.MaxInt32,
+			name:          "arith",
+			initialAmount: math.MaxInt32,
+		},
+		B: {
+			remaining:     math.MaxInt32,
+			name:          "binary",
+			initialAmount: math.MaxInt32,
+		},
+		M: {
+			remaining:     math.MaxInt32,
+			name:          "memAlign",
+			initialAmount: math.MaxInt32,
+		},
+		K: {
+			remaining:     math.MaxInt32,
+			name:          "keccaks",
+			initialAmount: math.MaxInt32,
+		},
+		D: {
+			remaining:     math.MaxInt32,
+			name:          "padding",
+			initialAmount: math.MaxInt32,
+		},
+		P: {
+			remaining:     math.MaxInt32,
+			name:          "poseidon",
+			initialAmount: math.MaxInt32,
+		},
+		SHA: {
+			remaining:     math.MaxInt32,
+			name:          "sha256",
+			initialAmount: math.MaxInt32,
 		},
 	}
 }

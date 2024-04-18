@@ -32,6 +32,7 @@ const (
 	forkId7BlockGasLimit    = 18446744073709551615 // 0xffffffffffffffff
 	forkId8BlockGasLimit    = 1125899906842624     // 0x4000000000000
 	HIGHEST_KNOWN_FORK      = 9
+	newBlockTimeout         = 500
 )
 
 type ErigonDb interface {
@@ -218,15 +219,15 @@ LOOP:
 			/////// DEBUG BISECTION ///////
 			// exit stage when debug bisection flags set and we're at the limit block
 			if cfg.zkCfg.DebugLimit > 0 && l2Block.L2BlockNumber > cfg.zkCfg.DebugLimit {
-				fmt.Println(fmt.Sprintf("[%s] Debug limit reached, stopping stage", logPrefix))
+				fmt.Printf("[%s] Debug limit reached, stopping stage\n", logPrefix)
 				endLoop = true
 			}
 
 			// if we're above StepAfter, and we're at a step, move the stages on
 			if cfg.zkCfg.DebugStep > 0 && cfg.zkCfg.DebugStepAfter > 0 && l2Block.L2BlockNumber > cfg.zkCfg.DebugStepAfter {
-				fmt.Println(fmt.Sprintf("[%s] Debug step after reached, continuing stage", logPrefix))
+				fmt.Printf("[%s] Debug step after reached, continuing stage\n", logPrefix)
 				if l2Block.L2BlockNumber%cfg.zkCfg.DebugStep == 0 {
-					fmt.Println(fmt.Sprintf("[%s] Debug step reached, stopping stage", logPrefix))
+					fmt.Printf("[%s] Debug step reached, stopping stage\n", logPrefix)
 					endLoop = true
 				}
 			}
@@ -292,7 +293,7 @@ LOOP:
 			progressChan <- blocksWritten
 
 			if endLoop && cfg.zkCfg.DebugLimit > 0 {
-				break
+				break LOOP
 			}
 		case gerUpdate := <-gerUpdateChan:
 			if gerUpdate.GlobalExitRoot == emptyHash {
@@ -317,7 +318,7 @@ LOOP:
 				// stop the current iteration of the stage
 				lastWrittenTs := lastWrittenTimeAtomic.Load()
 				timePassedAfterlastBlock := time.Since(time.Unix(0, lastWrittenTs))
-				if streamingAtomic.Load() && timePassedAfterlastBlock.Milliseconds() > 500 {
+				if streamingAtomic.Load() && timePassedAfterlastBlock.Milliseconds() > newBlockTimeout {
 					log.Info(fmt.Sprintf("[%s] No new blocks in %d miliseconds. Ending the stage.", logPrefix, timePassedAfterlastBlock.Milliseconds()), "lastBlockHeight", lastBlockHeight)
 					endLoop = true
 				}
