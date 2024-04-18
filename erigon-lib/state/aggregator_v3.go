@@ -276,8 +276,6 @@ func (a *AggregatorV3) OpenFolder(readonly bool) error {
 }
 
 func (a *AggregatorV3) OpenList(files []string, readonly bool) error {
-	//log.Warn("[dbg] OpenList", "l", files)
-
 	a.filesMutationLock.Lock()
 	defer a.filesMutationLock.Unlock()
 	eg := &errgroup.Group{}
