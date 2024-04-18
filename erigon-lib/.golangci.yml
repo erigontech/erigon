@@ -52,7 +52,6 @@ linters-settings:
       - ifElseChain
       - appendAssign
       - preferFprint
-      - commentedOutCode
 
       # diagnostigs tag: possible bugs. need enable checks in future
       - sloppyReassign
