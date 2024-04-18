@@ -156,11 +156,10 @@ func (s *GossipManager) GetMatchingSubscription(match string) *GossipSubscriptio
 		// take out third part of the topic by splitting on "/"
 		// reference: eth2/d31f6191/beacon_attestation_45/ssz_snappy
 		parts := strings.Split(topicStr, "/")
-		if len(parts) < 3 {
+		if len(parts) < 4 {
 			return true
 		}
-		fmt.Println("parts[2]", parts[2], match)
-		if parts[2] == match {
+		if parts[3] == match {
 			sub = value.(*GossipSubscription)
 			return false
 		}
