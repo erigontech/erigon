@@ -29,7 +29,6 @@ import (
 	"github.com/c2h5oh/datasize"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
@@ -75,7 +74,7 @@ var LightClientGPO = gaspricecfg.Config{
 // Defaults contains default settings for use on the Ethereum main net.
 var Defaults = Config{
 	Sync: Sync{
-		UseSnapshots:               false,
+		UseSnapshots:               true,
 		ExecWorkerCount:            estimate.ReconstituteState.WorkersHalf(), //only half of CPU, other half will spend for snapshots build/merge/prune
 		ReconWorkerCount:           estimate.ReconstituteState.Workers(),
 		BodyCacheLimit:             256 * 1024 * 1024,
@@ -279,19 +278,4 @@ type Sync struct {
 	FrozenBlockLimit uint64
 }
 
-// Chains where snapshots are enabled by default
-var ChainsWithSnapshots = map[string]struct{}{
-	networkname.MainnetChainName:    {},
-	networkname.SepoliaChainName:    {},
-	networkname.GoerliChainName:     {},
-	networkname.MumbaiChainName:     {},
-	networkname.AmoyChainName:       {},
-	networkname.BorMainnetChainName: {},
-	networkname.GnosisChainName:     {},
-	networkname.ChiadoChainName:     {},
-}
-
-func UseSnapshotsByChainName(chain string) bool {
-	_, ok := ChainsWithSnapshots[chain]
-	return ok
-}
+func UseSnapshotsByChainName(chain string) bool { return true }

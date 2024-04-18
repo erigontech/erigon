@@ -7,6 +7,7 @@ import (
 	"path"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc/credentials"
 
 	"golang.org/x/sync/semaphore"

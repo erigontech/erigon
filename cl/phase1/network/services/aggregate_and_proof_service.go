@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/pkg/errors"
 	"golang.org/x/exp/slices"
 )
