@@ -241,7 +241,7 @@ func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, s
 		return headBlockHash, err
 	}
 	if notifications != nil && notifications.Accumulator != nil && currentHeder != nil {
-		pendingBaseFee := misc.CalcBaseFee(chainConfig, currentHeder)
+		pendingBaseFee := misc.CalcBaseFeeZk(chainConfig, currentHeder)
 		if currentHeder.Number.Uint64() == 0 {
 			notifications.Accumulator.StartChange(0, currentHeder.Hash(), nil, false)
 		}

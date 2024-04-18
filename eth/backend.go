@@ -748,6 +748,10 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 		// entering ZK territory!
 		cfg := backend.config.Zk
+
+		// update the chain config with the zero gas from the flags
+		backend.chainConfig.SupportGasless = cfg.Gasless
+
 		backend.etherMan = newEtherMan(cfg, chainConfig.ChainName)
 
 		isSequencer := sequencer.IsSequencer()

@@ -89,6 +89,8 @@ type Config struct {
 	ForkID6IncaBerryBlock   *big.Int `json:"forkID6IncaBerryBlock,omitempty"`
 	ForkID7EtrogBlock       *big.Int `json:"forkID7EtrogBlock,omitempty"`
 	ForkID88ElderberryBlock *big.Int `json:"forkID88ElderberryBlock,omitempty"`
+
+	SupportGasless bool `json:"supportGasless,omitempty"`
 }
 
 func (c *Config) String() string {

@@ -41,6 +41,7 @@ type Zk struct {
 	RebuildTreeAfter uint64
 	WitnessFull      bool
 	SyncLimit        uint64
+	Gasless          bool
 
 	DebugLimit     uint64
 	DebugStep      uint64

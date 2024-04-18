@@ -20,6 +20,11 @@ type L1GasPrice struct {
 }
 
 func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
+	if api.BaseAPI.gasless {
+		var price hexutil.Big
+		return &price, nil
+	}
+
 	// if gas price timestamp is older than 3 seconds, update it
 	if time.Since(api.L1GasPrice.timestamp) > 3*time.Second || api.L1GasPrice.gasPrice == nil {
 		l1GasPrice, err := api.l1GasPrice()
