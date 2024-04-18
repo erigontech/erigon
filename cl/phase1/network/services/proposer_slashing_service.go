@@ -5,42 +5,51 @@ import (
 	"fmt"
 
 	"github.com/Giulio2002/bls"
-	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	st "github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 )
 
 type proposerSlashingService struct {
 	operationsPool    pool.OperationsPool
-	emitters          *beaconevents.Emitters
 	syncedDataManager *synced_data.SyncedDataManager
 	beaconCfg         *clparams.BeaconChainConfig
 	ethClock          eth_clock.EthereumClock
+	cache             *lru.Cache[uint64, struct{}]
 }
 
 func NewProposerSlashingService(
 	operationsPool pool.OperationsPool,
-	emitters *beaconevents.Emitters,
 	syncedDataManager *synced_data.SyncedDataManager,
 	beaconCfg *clparams.BeaconChainConfig,
 	ethClock eth_clock.EthereumClock,
 ) *proposerSlashingService {
+	cache, err := lru.New[uint64, struct{}]("proposer_slashing", proposerSlashingCacheSize)
+	if err != nil {
+		panic(err)
+	}
 	return &proposerSlashingService{
 		operationsPool:    operationsPool,
-		emitters:          emitters,
 		syncedDataManager: syncedDataManager,
 		beaconCfg:         beaconCfg,
 		ethClock:          ethClock,
+		cache:             cache,
 	}
 }
 
 func (s *proposerSlashingService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.ProposerSlashing) error {
 	// https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#proposer_slashing
+
+	// [IGNORE] The proposer slashing is the first valid proposer slashing received for the proposer with index proposer_slashing.signed_header_1.message.proposer_index
+	pIndex := msg.Header1.Header.ProposerIndex
+	if _, ok := s.cache.Get(pIndex); ok {
+		return ErrIgnore
+	}
 
 	if s.operationsPool.ProposerSlashingsPool.Has(pool.ComputeKeyForProposerSlashing(msg)) {
 		return nil
@@ -97,5 +106,6 @@ func (s *proposerSlashingService) ProcessMessage(ctx context.Context, subnet *ui
 	}
 
 	s.operationsPool.ProposerSlashingsPool.Insert(pool.ComputeKeyForProposerSlashing(msg), msg)
+	s.cache.Add(pIndex, struct{}{})
 	return nil
 }

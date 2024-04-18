@@ -44,6 +44,8 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 	// ref: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#voluntary_exit
 	voluntaryExit := msg.VoluntaryExit
 	defer s.emitters.Publish("voluntary_exit", voluntaryExit)
+
+	// [IGNORE] The voluntary exit is the first valid voluntary exit received for the validator with index signed_voluntary_exit.message.validator_index.
 	if s.operationsPool.VoluntaryExitPool.Has(voluntaryExit.ValidatorIndex) {
 		return ErrIgnore
 	}
