@@ -90,8 +90,6 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 
 	var subscription *sentinel.GossipSubscription
 
-	// TODO: this is still wrong... we should build a subscription here to match exactly, meaning that downstream consumers should be
-	// in charge of keeping track of fork id.
 	switch msg.Name {
 	case gossip.TopicNameBeaconBlock,
 		gossip.TopicNameBeaconAggregateAndProof,
