@@ -84,6 +84,7 @@ type ApiHandler struct {
 	aggregateAndProofsService        services.AggregateAndProofService
 	attestationService               services.AttestationService
 	voluntaryExitService             services.VoluntaryExitService
+	blsToExecutionChangeService      services.BLSToExecutionChangeService
 }
 
 func NewApiHandler(
@@ -114,6 +115,8 @@ func NewApiHandler(
 	aggregateAndProofs services.AggregateAndProofService,
 	attestationService services.AttestationService,
 	voluntaryExitService services.VoluntaryExitService,
+	blsToExecutionChangeService services.BLSToExecutionChangeService,
+
 ) *ApiHandler {
 	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("blobs", maxBlobBundleCacheSize)
 	if err != nil {
@@ -152,6 +155,7 @@ func NewApiHandler(
 		aggregateAndProofsService:        aggregateAndProofs,
 		attestationService:               attestationService,
 		voluntaryExitService:             voluntaryExitService,
+		blsToExecutionChangeService:      blsToExecutionChangeService,
 	}
 }
 

@@ -33,3 +33,6 @@ type AttestationService Service[*solid.Attestation]
 
 //go:generate mockgen -destination=./mock_services/voluntary_exit_service_mock.go -package=mock_services . VoluntaryExitService
 type VoluntaryExitService Service[*cltypes.SignedVoluntaryExit]
+
+//go:generate mockgen -destination=./mock_services/bls_to_execution_change_service_mock.go -package=mock_services . BLSToExecutionChangeService
+type BLSToExecutionChangeService Service[*cltypes.SignedBLSToExecutionChange]

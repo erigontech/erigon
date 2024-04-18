@@ -227,7 +227,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolBlsToExecutionChanges(w http.ResponseWri
 	}
 	failures := []poolingFailure{}
 	for _, v := range req {
-		if err := a.forkchoiceStore.OnBlsToExecutionChange(v, false); err != nil {
+		if err := a.blsToExecutionChangeService.ProcessMessage(r.Context(), nil, v); err != nil && !errors.Is(err, services.ErrIgnore) {
 			failures = append(failures, poolingFailure{Index: len(failures), Message: err.Error()})
 			continue
 		}

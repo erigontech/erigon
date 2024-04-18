@@ -89,6 +89,8 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	syncContributionService := mock_services.NewMockSyncContributionService(ctrl)
 	aggregateAndProofsService := mock_services.NewMockAggregateAndProofService(ctrl)
 	voluntaryExitService := mock_services.NewMockVoluntaryExitService(ctrl)
+	blsToExecutionChangeService := mock_services.NewMockBLSToExecutionChangeService(ctrl)
+
 	// ctx context.Context, subnetID *uint64, msg *cltypes.SyncCommitteeMessage) error
 	syncCommitteeMessagesService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SyncCommitteeMessage) error {
 		return h.syncMessagePool.AddSyncCommitteeMessage(postState, *subnetID, msg)
@@ -103,6 +105,10 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	}).AnyTimes()
 	voluntaryExitService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedVoluntaryExit) error {
 		opPool.VoluntaryExistsPool.Insert(msg.VoluntaryExit.ValidatorIndex, msg)
+		return nil
+	}).AnyTimes()
+	blsToExecutionChangeService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedBLSToExecutionChange) error {
+		opPool.BLSToExecutionChangesPool.Insert(msg.Signature, msg)
 		return nil
 	}).AnyTimes()
 
@@ -128,7 +134,14 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 			Events:     true,
 			Validator:  true,
 			Lighthouse: true,
-		}, nil, blobStorage, nil, vp, nil, nil, fcu.SyncContributionPool, nil, nil, syncCommitteeMessagesService, syncContributionService, aggregateAndProofsService, nil, voluntaryExitService) // TODO: add tests
+		}, nil, blobStorage, nil, vp, nil, nil, fcu.SyncContributionPool, nil, nil,
+		syncCommitteeMessagesService,
+		syncContributionService,
+		aggregateAndProofsService,
+		nil,
+		voluntaryExitService,
+		blsToExecutionChangeService,
+	) // TODO: add tests
 	h.Init()
 	return
 }

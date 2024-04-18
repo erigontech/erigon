@@ -107,12 +107,6 @@ func TestForkChoiceBasic(t *testing.T) {
 	for sd.HeadState() == nil {
 		time.Sleep(time.Millisecond)
 	}
-	// Try processing a bls execution change exit
-	err = store.OnBlsToExecutionChange(&cltypes.SignedBLSToExecutionChange{
-		Message: &cltypes.BLSToExecutionChange{
-			ValidatorIndex: 0,
-		},
-	}, true)
 	require.NoError(t, err)
 	require.Equal(t, len(pool.VoluntaryExistsPool.Raw()), 1)
 }

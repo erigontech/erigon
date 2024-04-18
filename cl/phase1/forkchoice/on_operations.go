@@ -1,7 +1,6 @@
 package forkchoice
 
 import (
-	"bytes"
 	"fmt"
 
 	"github.com/Giulio2002/bls"
@@ -9,7 +8,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/pool"
-	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
 // NOTE: This file implements non-official handlers for other types of iterations. what it does is,using the forkchoices
@@ -88,60 +86,5 @@ func (f *ForkChoiceStore) OnProposerSlashing(proposerSlashing *cltypes.ProposerS
 	}
 	f.operationsPool.ProposerSlashingsPool.Insert(pool.ComputeKeyForProposerSlashing(proposerSlashing), proposerSlashing)
 
-	return nil
-}
-
-func (f *ForkChoiceStore) OnBlsToExecutionChange(signedChange *cltypes.SignedBLSToExecutionChange, test bool) error {
-	if f.operationsPool.BLSToExecutionChangesPool.Has(signedChange.Signature) {
-		f.emitters.Publish("bls_to_execution_change", signedChange)
-		return nil
-	}
-	change := signedChange.Message
-
-	// Take lock as we interact with state.
-	s := f.syncedDataManager.HeadState()
-	if s == nil {
-		return nil
-	}
-	validator, err := s.ValidatorForValidatorIndex(int(change.ValidatorIndex))
-	if err != nil {
-		return fmt.Errorf("unable to retrieve state: %v", err)
-	}
-	wc := validator.WithdrawalCredentials()
-
-	if wc[0] != byte(f.beaconCfg.BLSWithdrawalPrefixByte) {
-		return fmt.Errorf("invalid withdrawal credentials prefix")
-	}
-	genesisValidatorRoot := s.GenesisValidatorsRoot()
-	// Perform full validation if requested.
-	if !test {
-		// Check the validator's withdrawal credentials against the provided message.
-		hashedFrom := utils.Sha256(change.From[:])
-		if !bytes.Equal(hashedFrom[1:], wc[1:]) {
-			return fmt.Errorf("invalid withdrawal credentials")
-		}
-
-		// Compute the signing domain and verify the message signature.
-		domain, err := fork.ComputeDomain(f.beaconCfg.DomainBLSToExecutionChange[:], utils.Uint32ToBytes4(uint32(f.beaconCfg.GenesisForkVersion)), genesisValidatorRoot)
-		if err != nil {
-			return err
-		}
-		signedRoot, err := fork.ComputeSigningRoot(change, domain)
-		if err != nil {
-			return err
-		}
-		valid, err := bls.Verify(signedChange.Signature[:], signedRoot[:], change.From[:])
-		if err != nil {
-			return err
-		}
-		if !valid {
-			return fmt.Errorf("invalid signature")
-		}
-	}
-
-	f.operationsPool.BLSToExecutionChangesPool.Insert(signedChange.Signature, signedChange)
-
-	// emit bls_to_execution_change
-	f.emitters.Publish("bls_to_execution_change", signedChange)
 	return nil
 }

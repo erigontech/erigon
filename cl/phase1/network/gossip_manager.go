@@ -44,6 +44,7 @@ type GossipManager struct {
 	aggregateAndProofService     services.AggregateAndProofService
 	attestationService           services.AttestationService
 	voluntaryExitService         services.VoluntaryExitService
+	blsToExecutionChangeService  services.BLSToExecutionChangeService
 }
 
 func NewGossipReceiver(
@@ -60,6 +61,7 @@ func NewGossipReceiver(
 	aggregateAndProofService services.AggregateAndProofService,
 	attestationService services.AttestationService,
 	voluntaryExitService services.VoluntaryExitService,
+	blsToExecutionChangeService services.BLSToExecutionChangeService,
 ) *GossipManager {
 	return &GossipManager{
 		sentinel:                     s,
@@ -75,6 +77,7 @@ func NewGossipReceiver(
 		aggregateAndProofService:     aggregateAndProofService,
 		attestationService:           attestationService,
 		voluntaryExitService:         voluntaryExitService,
+		blsToExecutionChangeService:  blsToExecutionChangeService,
 	}
 }
 
@@ -161,7 +164,11 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 	case gossip.TopicNameAttesterSlashing:
 		return operationsContract[*cltypes.AttesterSlashing](ctx, g, data, int(version), "attester slashing", g.forkChoice.OnAttesterSlashing)
 	case gossip.TopicNameBlsToExecutionChange:
-		return operationsContract[*cltypes.SignedBLSToExecutionChange](ctx, g, data, int(version), "bls to execution change", g.forkChoice.OnBlsToExecutionChange)
+		obj := &cltypes.SignedBLSToExecutionChange{}
+		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
+			return err
+		}
+		return g.blsToExecutionChangeService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameBeaconAggregateAndProof:
 		obj := &cltypes.SignedAggregateAndProof{}
 		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
