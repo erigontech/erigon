@@ -1351,9 +1351,9 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 			allBorSnapshots.ReopenFolder()
 		}
 	} else {
-		allSnapshots.OptimisticalyReopenWithDB(db)
+		allSnapshots.OptimisticalyReopenFolder()
 		if isBor {
-			allBorSnapshots.OptimisticalyReopenWithDB(db)
+			allBorSnapshots.OptimisticalyReopenFolder()
 		}
 	}
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
