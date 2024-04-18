@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"os"
 	"testing"
 	"time"
 
@@ -610,4 +611,25 @@ func TestIsBefore(t *testing.T) {
 	assert.False((&filesItem{startTxNum: 0, endTxNum: 2}).isBefore(&filesItem{startTxNum: 1, endTxNum: 2}))
 	assert.True((&filesItem{startTxNum: 0, endTxNum: 1}).isBefore(&filesItem{startTxNum: 2, endTxNum: 4}))
 	assert.True((&filesItem{startTxNum: 0, endTxNum: 2}).isBefore(&filesItem{startTxNum: 2, endTxNum: 4}))
+}
+
+func TestInvIndex_OpenFolder(t *testing.T) {
+	db, ii, txs := filledInvIndex(t, log.New())
+
+	mergeInverted(t, db, ii, txs)
+
+	list := ii.visibleFiles.Load()
+	require.NotEmpty(t, list)
+	ff := (*list)[len(*list)-1]
+	fn := ff.src.decompressor.FilePath()
+	ii.Close()
+
+	err := os.Remove(fn)
+	require.NoError(t, err)
+	err = os.WriteFile(fn, make([]byte, 33), 0644)
+	require.NoError(t, err)
+
+	err = ii.OpenFolder(true)
+	require.NoError(t, err)
+	ii.Close()
 }

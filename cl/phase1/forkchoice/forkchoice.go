@@ -6,7 +6,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/ledgerwatch/erigon/cl/aggregation"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -72,10 +71,7 @@ type ForkChoiceStore struct {
 	unrealizedJustifiedCheckpoint atomic.Value
 	unrealizedFinalizedCheckpoint atomic.Value
 
-	proposerBoostRoot atomic.Value
-	// messages that are not yet processed but can be processable in the future.
-	aggregatesSet sync.Map
-	// head data
+	proposerBoostRoot     atomic.Value
 	headHash              libcommon.Hash
 	headSlot              uint64
 	genesisTime           uint64
@@ -117,16 +113,9 @@ type ForkChoiceStore struct {
 	// operations pool
 	operationsPool pool.OperationsPool
 	beaconCfg      *clparams.BeaconChainConfig
-	netCfg         *clparams.NetworkConfig
-
-	aggregationPool aggregation.AggregationPool
 
 	emitters *beaconevents.Emitters
 	synced   atomic.Bool
-
-	// validatorAttestationSeen maps from epoch to validator index. This is used to ignore duplicate validator attestations in the same epoch.
-	validatorAttestationSeen map[uint64]map[uint64]struct{}
-	validatorAttSeenLock     sync.Mutex
 
 	ethClock eth_clock.EthereumClock
 }
@@ -151,8 +140,6 @@ func NewForkChoiceStore(
 	emitters *beaconevents.Emitters,
 	syncedDataManager *synced_data.SyncedDataManager,
 	blobStorage blob_storage.BlobStorage,
-	netCfg *clparams.NetworkConfig,
-	aggrPool aggregation.AggregationPool,
 ) (*ForkChoiceStore, error) {
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
@@ -234,7 +221,6 @@ func NewForkChoiceStore(
 		operationsPool:        operationsPool,
 		anchorPublicKeys:      anchorPublicKeys,
 		beaconCfg:             anchorState.BeaconConfig(),
-		netCfg:                netCfg,
 		preverifiedSizes:      preverifiedSizes,
 		finalityCheckpoints:   finalityCheckpoints,
 		totalActiveBalances:   totalActiveBalances,
@@ -250,7 +236,6 @@ func NewForkChoiceStore(
 		genesisValidatorsRoot: anchorState.GenesisValidatorsRoot(),
 		hotSidecars:           make(map[libcommon.Hash][]*cltypes.BlobSidecar),
 		blobStorage:           blobStorage,
-		aggregationPool:       aggrPool,
 		ethClock:              ethClock,
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint.Copy())
@@ -382,6 +367,10 @@ func (f *ForkChoiceStore) GetFinalityCheckpoints(blockRoot libcommon.Hash) (bool
 
 func (f *ForkChoiceStore) GetSyncCommittees(period uint64) (*solid.SyncCommittee, *solid.SyncCommittee, bool) {
 	return f.forkGraph.GetSyncCommittees(period)
+}
+
+func (f *ForkChoiceStore) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, error) {
+	return f.syncedDataManager.HeadState().GetBeaconCommitee(slot, committeeIndex)
 }
 
 func (f *ForkChoiceStore) BlockRewards(root libcommon.Hash) (*eth2.BlockRewardsCollector, bool) {

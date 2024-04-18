@@ -59,6 +59,8 @@ func (d *WebSeeds) getWebDownloadInfo(ctx context.Context, t *torrent.Torrent) (
 		downloadUrl := webseed.JoinPath(t.Name())
 
 		if headRequest, err := http.NewRequestWithContext(ctx, http.MethodHead, downloadUrl.String(), nil); err == nil {
+			insertCloudflareHeaders(headRequest)
+
 			headResponse, err := http.DefaultClient.Do(headRequest)
 			if err != nil {
 				continue
@@ -112,9 +114,7 @@ func (d *WebSeeds) checkHasTorrents(manifestResponse snaptype.WebSeedsFromProvid
 	hasTorrents := len(torrentNames) > 0
 	report.missingTorrents = make([]string, 0)
 	for name := range manifestResponse {
-		// skip non-seedable files. maybe will need extend list of seedable files in future.
-		seedable := strings.HasSuffix(name, ".seg") || strings.HasSuffix(name, ".kv") || strings.HasSuffix(name, ".v") || strings.HasSuffix(name, ".ef")
-		if !seedable {
+		if !snaptype.IsSeedableExtension(name) {
 			continue
 		}
 		tname := name + ".torrent"
@@ -204,7 +204,7 @@ func (d *WebSeeds) VerifyManifestedBuckets(ctx context.Context, failFast bool) e
 		fmt.Printf("%s\n", rep.ToString(false))
 	}
 	if failed {
-		merr := fmt.Sprintf("error list:\n")
+		merr := "error list:\n"
 		for _, err := range supErr {
 			merr += fmt.Sprintf("%s\n", err)
 		}
@@ -464,12 +464,15 @@ func (d *WebSeeds) retrieveFileEtag(ctx context.Context, file *url.URL) (string,
 
 func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url.URL) (snaptype.WebSeedsFromProvider, error) {
 	baseUrl := webSeedProviderUrl.String()
+
 	webSeedProviderUrl.Path += "/manifest.txt" // allow: host.com/v2/manifest.txt
 	u := webSeedProviderUrl
-	request, err := http.NewRequest(http.MethodGet, u.String(), nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, err
 	}
+
+	insertCloudflareHeaders(request)
 
 	request = request.WithContext(ctx)
 	resp, err := http.DefaultClient.Do(request)
@@ -491,19 +494,24 @@ func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url
 	response := snaptype.WebSeedsFromProvider{}
 	fileNames := strings.Split(string(b), "\n")
 	for fi, f := range fileNames {
-		if strings.TrimSpace(f) == "" {
+		trimmed := strings.TrimSpace(f)
+		switch trimmed {
+		case "":
 			if fi != len(fileNames)-1 {
 				d.logger.Debug("[snapshots.webseed] empty line in manifest.txt", "webseed", webSeedProviderUrl.String(), "lineNum", fi)
 			}
 			continue
-		}
-
-		response[f], err = url.JoinPath(baseUrl, f)
-		if err != nil {
-			return nil, err
+		case "manifest.txt":
+			continue
+		default:
+			response[trimmed], err = url.JoinPath(baseUrl, trimmed)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
-	d.logger.Debug("[snapshots.webseed] get from HTTP provider", "urls", len(response), "url", webSeedProviderUrl.String())
+
+	d.logger.Debug("[snapshots.webseed] get from HTTP provider", "manifest-len", len(response), "url", webSeedProviderUrl.String())
 	return response, nil
 }
 
@@ -613,10 +621,13 @@ func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL, fi
 	if !strings.HasSuffix(url.Path, ".torrent") {
 		return nil, fmt.Errorf("seems not-torrent url passed: %s", url.String())
 	}
-	request, err := http.NewRequest(http.MethodGet, url.String(), nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url.String(), nil)
 	if err != nil {
 		return nil, err
 	}
+
+	insertCloudflareHeaders(request)
+
 	request = request.WithContext(ctx)
 	resp, err := http.DefaultClient.Do(request)
 	if err != nil {

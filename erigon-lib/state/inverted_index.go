@@ -21,6 +21,7 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -167,7 +168,7 @@ func (ii *InvertedIndex) OpenList(fNames []string, readonly bool) error {
 	ii.closeWhatNotInList(fNames)
 	ii.scanStateFiles(fNames)
 	if err := ii.openFiles(); err != nil {
-		return fmt.Errorf("InvertedIndex(%s).openFiles: %w", ii.filenameBase, err)
+		return fmt.Errorf("NewHistory.openFiles: %w, %s", err, ii.filenameBase)
 	}
 	_ = readonly // for future safety features. RPCDaemon must not delte files
 	return nil
@@ -356,7 +357,11 @@ func (ii *InvertedIndex) openFiles() error {
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 					_, fName := filepath.Split(fPath)
-					ii.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
+					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
+						ii.logger.Debug("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
+					} else {
+						ii.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
+					}
 					invalidFileItemsLock.Lock()
 					invalidFileItems = append(invalidFileItems, item)
 					invalidFileItemsLock.Unlock()

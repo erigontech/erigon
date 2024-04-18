@@ -7,9 +7,9 @@ import (
 	"path"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc/credentials"
 
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
 
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
@@ -132,7 +132,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 	syncContributionPool := sync_contribution_pool.NewSyncContributionPool()
 	emitters := beaconevents.NewEmitters()
 	aggregationPool := aggregation.NewAggregationPool(ctx, beaconConfig, networkConfig, ethClock)
-	forkChoice, err := forkchoice.NewForkChoiceStore(ethClock, state, engine, pool, fork_graph.NewForkGraphDisk(state, fcuFs, config.BeaconRouter), emitters, syncedDataManager, blobStorage, networkConfig, aggregationPool)
+	forkChoice, err := forkchoice.NewForkChoiceStore(ethClock, state, engine, pool, fork_graph.NewForkGraphDisk(state, fcuFs, config.BeaconRouter), emitters, syncedDataManager, blobStorage)
 	if err != nil {
 		logger.Error("Could not create forkchoice", "err", err)
 		return err
@@ -181,10 +181,11 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 	blockService := services.NewBlockService(ctx, indexDB, forkChoice, syncedDataManager, ethClock, beaconConfig, emitters)
 	blobService := services.NewBlobSidecarService(ctx, beaconConfig, forkChoice, syncedDataManager, ethClock, false)
 	syncCommitteeMessagesService := services.NewSyncCommitteeMessagesService(beaconConfig, ethClock, syncedDataManager, syncContributionPool, false)
-	syncContributionService := services.NewSyncContributionService(syncedDataManager, beaconConfig, syncContributionPool, ethClock, emitters)
-	aggregateAndProofService := services.NewAggregateAndProofService(ctx, syncedDataManager, forkChoice, beaconConfig, aggregationPool)
+	attestationService := services.NewAttestationService(forkChoice, committeeSub, ethClock, syncedDataManager, beaconConfig, networkConfig)
+	syncContributionService := services.NewSyncContributionService(syncedDataManager, beaconConfig, syncContributionPool, ethClock, emitters, false)
+	aggregateAndProofService := services.NewAggregateAndProofService(ctx, syncedDataManager, forkChoice, beaconConfig, aggregationPool, false)
 	// Create the gossip manager
-	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, ethClock, emitters, committeeSub, blockService, blobService, syncCommitteeMessagesService, syncContributionService, aggregateAndProofService)
+	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, ethClock, emitters, committeeSub, blockService, blobService, syncCommitteeMessagesService, syncContributionService, aggregateAndProofService, attestationService)
 	{ // start ticking forkChoice
 		go func() {
 			tickInterval := time.NewTicker(2 * time.Millisecond)

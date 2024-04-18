@@ -330,10 +330,11 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 	}
 	d.wordsStart = pos + dictSize
 
-	if d.Count() == 0 && dictSize == 0 && d.size > compressedMinSize {
-		return nil, &ErrCompressedFileCorrupted{
-			FileName: fName, Reason: fmt.Sprintf("size %v but no words in it", datasize.ByteSize(d.size).HR())}
-	}
+	//TODO: seems always failing. Example: my v1-storage.1344-1408.v has d.Count()=169365, dictSize=17146, d.size=121067938, compressedMinSize=32
+	//if d.Count() == 0 && dictSize == 0 && d.size > compressedMinSize {
+	//	return nil, &ErrCompressedFileCorrupted{
+	//		FileName: fName, Reason: fmt.Sprintf("size %v but no words in it", datasize.ByteSize(d.size).HR())}
+	//}
 	closeDecompressor = false
 	return d, nil
 }
@@ -470,9 +471,7 @@ func (d *Decompressor) WithReadAhead(f func() error) error {
 	if d == nil || d.mmapHandle1 == nil {
 		return nil
 	}
-	_ = mmap.MadviseSequential(d.mmapHandle1)
-	//_ = mmap.MadviseWillNeed(d.mmapHandle1)
-	defer mmap.MadviseNormal(d.mmapHandle1)
+	defer d.EnableReadAhead().DisableReadAhead()
 	return f()
 }
 

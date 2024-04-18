@@ -186,17 +186,6 @@ func ExecV3(ctx context.Context,
 			defer func() { // need callback - because tx may be committed
 				applyTx.Rollback()
 			}()
-
-			if casted, ok := applyTx.(kv.CanWarmupDB); ok {
-				if err := casted.WarmupDB(false); err != nil {
-					return err
-				}
-				if dbg.MdbxLockInRam() {
-					if err := casted.LockDBInRam(); err != nil {
-						return err
-					}
-				}
-			}
 		}
 	}
 
@@ -873,17 +862,9 @@ Loop:
 					commitStart = time.Now()
 					tt          = time.Now()
 
-					t1, t2, t3, t4 time.Duration
+					t1, t2, t3 time.Duration
 				)
 
-				if casted, ok := applyTx.(kv.CanWarmupDB); ok {
-					if err := casted.WarmupDB(false); err != nil {
-						return err
-					}
-					t4 = time.Since(tt)
-				}
-
-				tt = time.Now()
 				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
 					return err
 				} else if !ok {
@@ -952,7 +933,7 @@ Loop:
 				logger.Info("Committed", "time", time.Since(commitStart),
 					"block", doms.BlockNum(), "txNum", doms.TxNum(),
 					"step", fmt.Sprintf("%.1f", float64(doms.TxNum())/float64(agg.StepSize())),
-					"flush+commitment", t1, "tx.commit", t2, "prune", t3, "warmup", t4)
+					"flush+commitment", t1, "tx.commit", t2, "prune", t3)
 			default:
 			}
 		}

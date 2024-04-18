@@ -209,11 +209,20 @@ func executeBlock(
 func gatherNoPruneReceipts(receipts *types.Receipts, chainCfg *chain.Config) bool {
 	cr := types.Receipts{}
 	for _, r := range *receipts {
-		for _, l := range r.Logs {
-			if chainCfg.NoPruneContracts[l.Address] {
-				cr = append(cr, r)
-				break
+		toStore := false
+		if chainCfg.NoPruneContracts != nil && chainCfg.NoPruneContracts[r.ContractAddress] {
+			toStore = true
+		} else {
+			for _, l := range r.Logs {
+				if chainCfg.NoPruneContracts != nil && chainCfg.NoPruneContracts[l.Address] {
+					toStore = true
+					break
+				}
 			}
+		}
+
+		if toStore {
+			cr = append(cr, r)
 		}
 	}
 	receipts = &cr

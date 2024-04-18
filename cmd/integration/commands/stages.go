@@ -636,6 +636,7 @@ func init() {
 	withConfig(cmdLogIndex)
 	withDataDir(cmdLogIndex)
 	withReset(cmdLogIndex)
+	withResetPruneAt(cmdLogIndex)
 	withBlock(cmdLogIndex)
 	withUnwind(cmdLogIndex)
 	withPruneTo(cmdLogIndex)
@@ -1042,7 +1043,7 @@ func stageSenders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		return err
 	}
 
-	cfg := stagedsync.StageSendersCfg(db, chainConfig, false, tmpdir, pm, br, nil, nil)
+	cfg := stagedsync.StageSendersCfg(db, chainConfig, 0, false, tmpdir, pm, br, nil, nil)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber)
 		if err = stagedsync.UnwindSendersStage(u, tx, cfg, ctx); err != nil {
@@ -1441,6 +1442,9 @@ func stageLogIndex(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	if reset {
 		return reset2.Reset(ctx, db, stages.LogIndex)
 	}
+	if resetPruneAt {
+		return reset2.ResetPruneAt(ctx, db, stages.LogIndex)
+	}
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -1828,6 +1832,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 		statusDataProvider,
 		false,
 		maxBlockBroadcastPeers,
+		false, /* disableBlockDownload */
 		logger,
 	)
 	if err != nil {

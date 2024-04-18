@@ -592,6 +592,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
+	sentryMcDisableBlockDownload := config.PolygonSync
 	backend.sentriesClient, err = sentry_multi_client.NewMultiClient(
 		backend.chainDB,
 		chainConfig,
@@ -603,6 +604,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		statusDataProvider,
 		stack.Config().SentryLogPeerInfo,
 		maxBlockBroadcastPeers,
+		sentryMcDisableBlockDownload,
 		logger,
 	)
 	if err != nil {
