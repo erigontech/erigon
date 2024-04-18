@@ -214,7 +214,7 @@ func (d *Domain) openList(names []string, readonly bool) error {
 	d.closeWhatNotInList(names)
 	d.scanStateFiles(names)
 	if err := d.openFiles(); err != nil {
-		return fmt.Errorf("Domain.OpenList: %s, %w", d.filenameBase, err)
+		return fmt.Errorf("Domain.openList: %w, %s", err, d.filenameBase)
 	}
 	d.protectFromHistoryFilesAheadOfDomainFiles(readonly)
 	d.reCalcVisibleFiles()
@@ -362,17 +362,14 @@ func (d *Domain) openFiles() (err error) {
 					invalidFileItemsLock.Unlock()
 					continue
 				}
-				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
-					d.logger.Debug("Domain.openFiles: %w, %s", err, fPath)
-					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
-						continue
-					}
-					return false
-				}
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 					_, fName := filepath.Split(fPath)
-					d.logger.Warn("[agg] Domain.openFiles", "err", err, "f", fName)
+					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
+						d.logger.Debug("[agg] Domain.openFiles", "err", err, "f", fName)
+					} else {
+						d.logger.Warn("[agg] Domain.openFiles", "err", err, "f", fName)
+					}
 					invalidFileItemsLock.Lock()
 					invalidFileItems = append(invalidFileItems, item)
 					invalidFileItemsLock.Unlock()
