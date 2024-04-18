@@ -37,22 +37,36 @@ linters-settings:
   gocritic: # see https://golangci-lint.run/usage/linters/#gocritic and https://go-critic.github.io/overview#checks-overview
     enabled-tags:
       - performance
+      - diagnostic
     enabled-checks:
       - ruleguard
     disabled-checks:
-      - regexpMust
       - rangeValCopy
       - exitAfterDefer
       - elseif
       - dupBranchBody
       - assignOp
       - singleCaseSwitch
-      - unlambda
       - captLocal
       - commentFormatting
       - ifElseChain
       - appendAssign
       - preferFprint
+      - commentedOutCode
+
+      # diagnostigs tag: possible bugs. need enable checks in future
+      - sloppyReassign
+      - sprintfQuotedString
+      - deferInLoop
+      - nilValReturn
+      - evalOrder
+      - commentedOutCode
+      - returnAfterHttpError
+      - weakCond
+      - builtinShadowDecl
+      - unnecessaryDefer
+      - uncheckedInlineErr
+      - preferStringWriter
 
     settings:
       ruleguard:
