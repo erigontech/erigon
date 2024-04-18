@@ -284,12 +284,14 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 			encodedSSZ, err := v.EncodeSSZ(nil)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
+				log.Warn("[Beacon REST] failed to encode aggregate and proof", "err", err)
 				return
 			}
 			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
 				Data: encodedSSZ,
 				Name: gossip.TopicNameBeaconAggregateAndProof,
 			}); err != nil {
+				log.Warn("[Beacon REST] failed to publish gossip", "err", err)
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
