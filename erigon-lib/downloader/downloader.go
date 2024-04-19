@@ -1833,13 +1833,8 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			continue
 		}
 
-		var torrentComplete bool
 		torrentName := t.Name()
-
-		if _, ok := downloading[torrentName]; ok {
-			torrentComplete = t.Complete.Bool()
-		}
-
+		torrentComplete := t.Complete.Bool()
 		torrentInfo++
 		stats.MetadataReady++
 
