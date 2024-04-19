@@ -671,7 +671,7 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 	case networkname.HermezCardonaChainName:
 		return HermezCardonaGenesisBlock()
 	case networkname.HermezBaliChainName:
-		return HermezCardonaInternalGenesisBlock()
+		return HermezBaliGenesisBlock()
 	case networkname.XLayerTestnetChainName:
 		return XLayerTestnetGenesisBlock()
 	case networkname.XLayerMainnetChainName:

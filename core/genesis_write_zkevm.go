@@ -54,7 +54,7 @@ func HermezCardonaGenesisBlock() *types.Genesis {
 	}
 }
 
-func HermezCardonaInternalGenesisBlock() *types.Genesis {
+func HermezBaliGenesisBlock() *types.Genesis {
 	return &types.Genesis{
 		Config:     params.HermezBaliChainConfig,
 		Timestamp:  1701336708,

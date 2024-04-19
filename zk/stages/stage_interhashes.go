@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/gateway-fm/cdk-erigon-lib/common"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/common/length"
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/gateway-fm/cdk-erigon-lib/state"
@@ -30,6 +31,7 @@ import (
 	"os"
 
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -109,6 +111,7 @@ func SpawnZkIntermediateHashesStage(s *stagedsync.StageState, u stagedsync.Unwin
 				log.Error("Hashing Failed", "block", to, "err", err)
 				os.Exit(1)
 			} else if to >= cfg.zk.DebugLimit {
+				tx.Commit()
 				os.Exit(0)
 			}
 		}
@@ -212,15 +215,19 @@ func UnwindZkIntermediateHashesStage(u *stagedsync.UnwindState, s *stagedsync.St
 		}
 		defer tx.Rollback()
 	}
+	log.Debug(fmt.Sprintf("[%s] Unwinding intermediate hashes", s.LogPrefix()), "from", s.BlockNumber, "to", u.UnwindPoint)
 
-	syncHeadHeader, err := cfg.blockReader.HeaderByNumber(ctx, tx, u.UnwindPoint)
+	var expectedRootHash libcommon.Hash
+	syncHeadHeader := rawdb.ReadHeaderByNumber(tx, u.UnwindPoint)
 	if err != nil {
 		return err
 	}
 	if syncHeadHeader == nil {
-		return fmt.Errorf("header not found for block number %d", u.UnwindPoint)
+		//return fmt.Errorf("header not found for block number %d", u.UnwindPoint)
+		log.Warn("header not found for block number", "block", u.UnwindPoint)
+	} else {
+		expectedRootHash = syncHeadHeader.Root
 	}
-	expectedRootHash := syncHeadHeader.Root
 
 	root, err := unwindZkSMT(s.LogPrefix(), s.BlockNumber, u.UnwindPoint, tx, false, &expectedRootHash, quit)
 	if err != nil {
@@ -470,6 +477,11 @@ func unwindZkSMT(logPrefix string, from, to uint64, db kv.RwTx, checkRoot bool, 
 	dbSmt := smt.NewSMT(eridb)
 
 	log.Info(fmt.Sprintf("[%s]", logPrefix), "last root", common.BigToHash(dbSmt.LastRoot()))
+
+	if quit == nil {
+		log.Warn("quit channel is nil, creating a new one")
+		quit = make(chan struct{})
+	}
 
 	eridb.OpenBatch(quit)
 

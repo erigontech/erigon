@@ -290,6 +290,75 @@ func TestGetL2BlockNosByBatch(t *testing.T) {
 	}
 }
 
+func TestTruncateSequences(t *testing.T) {
+	tx, cleanup := GetDbTx()
+	defer cleanup()
+
+	db := NewHermezDb(tx)
+
+	for i := 0; i < 1000; i++ {
+		err := db.WriteSequence(uint64(i), uint64(i), common.HexToHash("0xabc"), common.HexToHash("0xabc"))
+		require.NoError(t, err)
+		err = db.WriteBlockBatch(uint64(i), uint64(i))
+		require.NoError(t, err)
+	}
+
+	err := db.TruncateSequences(500)
+	require.NoError(t, err)
+
+	batchNo, err := db.GetBatchNoByL2Block(500)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(500), batchNo)
+}
+
+func TestTruncateVerifications(t *testing.T) {
+	tx, cleanup := GetDbTx()
+	defer cleanup()
+
+	db := NewHermezDb(tx)
+
+	for i := 0; i < 1000; i++ {
+		err := db.WriteVerification(uint64(i), uint64(i), common.HexToHash("0xabc"), common.HexToHash("0xabc"))
+		require.NoError(t, err)
+		err = db.WriteBlockBatch(uint64(i), uint64(i))
+		require.NoError(t, err)
+	}
+
+	err := db.TruncateVerifications(500)
+	require.NoError(t, err)
+
+	batchNo, err := db.GetBatchNoByL2Block(500)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(500), batchNo)
+}
+
+func TestTruncateBlockBatches(t *testing.T) {
+	tx, cleanup := GetDbTx()
+	defer cleanup()
+
+	db := NewHermezDb(tx)
+
+	for i := uint64(1); i <= 1000; i++ {
+		err := db.WriteBlockBatch(i, i)
+		require.NoError(t, err)
+	}
+
+	l2BlockNo := uint64(500)
+	err := db.TruncateBlockBatches(l2BlockNo)
+	require.NoError(t, err)
+
+	for i := l2BlockNo + 1; i <= 1000; i++ {
+		_, err := db.GetBatchNoByL2Block(i)
+		require.Equal(t, err, nil)
+	}
+
+	for i := uint64(1); i <= l2BlockNo; i++ {
+		batchNo, err := db.GetBatchNoByL2Block(i)
+		require.NoError(t, err)
+		assert.Equal(t, i, batchNo)
+	}
+}
+
 // Benchmarks
 
 func BenchmarkWriteSequence(b *testing.B) {
