@@ -176,15 +176,10 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 			if err := msg.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
 				return err
 			}
-			fmt.Println("Received sync committee message via gossip", "slot", msg.Slot, "validator", msg.ValidatorIndex)
-			var err error
-			if err = g.syncCommitteeMessagesService.ProcessMessage(ctx, data.SubnetId, msg); err != nil {
-				fmt.Println("Error processing sync committee message", "err", err)
-			}
-			return err
+			return g.syncCommitteeMessagesService.ProcessMessage(ctx, data.SubnetId, msg)
 		case gossip.IsTopicBeaconAttestation(data.Name):
 			att := &solid.Attestation{}
-			if err := att.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
+			if err := att.DecodeSSZ(data.Data, int(version)); err != nil {
 				return err
 			}
 			return g.attestationService.ProcessMessage(ctx, data.SubnetId, att)

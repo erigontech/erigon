@@ -79,14 +79,15 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 			committeeCountPerSlot = headState.CommitteeCount(slot / a.beaconChainCfg.SlotsPerEpoch)
 			subnet                = subnets.ComputeSubnetForAttestation(committeeCountPerSlot, slot, cIndex, a.beaconChainCfg.SlotsPerEpoch, a.netConfig.AttestationSubnetCount)
 		)
-		if err := a.attestationService.ProcessMessage(r.Context(), &subnet, attestation); err != nil {
-			log.Warn("[Beacon REST] failed to process attestation", "err", err)
-			failures = append(failures, poolingFailure{
-				Index:   i,
-				Message: err.Error(),
-			})
-			continue
-		}
+		_ = i
+		// if err := a.attestationService.ProcessMessage(r.Context(), &subnet, attestation); err != nil {
+		// 	log.Warn("[Beacon REST] failed to process attestation", "err", err)
+		// 	failures = append(failures, poolingFailure{
+		// 		Index:   i,
+		// 		Message: err.Error(),
+		// 	})
+		// 	continue
+		// }
 		if a.sentinel != nil {
 			encodedSSZ, err := attestation.EncodeSSZ(nil)
 			if err != nil {
