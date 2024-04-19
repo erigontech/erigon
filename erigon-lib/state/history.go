@@ -23,7 +23,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"math"
 	"path/filepath"
 	"regexp"
@@ -697,8 +696,6 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	collector := etl.NewCollector(h.historyValsTable, h.iiCfg.dirs.Tmp, etl.NewSortableBuffer(CollateETLRAM), h.logger)
 	defer collector.Close()
 
-	var collateCount uint64
-
 	for txnmb, k, err := keysCursor.Seek(txKey[:]); err == nil && txnmb != nil; txnmb, k, err = keysCursor.Next() {
 		if err != nil {
 			return HistoryCollation{}, fmt.Errorf("iterate over %s history cursor: %w", h.filenameBase, err)
@@ -710,7 +707,6 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 		if err := collector.Collect(k, txnmb); err != nil {
 			return HistoryCollation{}, fmt.Errorf("collect %s history key [%x]=>txn %d [%x]: %w", h.filenameBase, k, txNum, txnmb, err)
 		}
-		collateCount++
 
 		select {
 		case <-ctx.Done():
@@ -816,9 +812,6 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 		prevKey = append(prevKey[:0], k...)
 		txNum = binary.BigEndian.Uint64(v)
 		bitmap.Add(txNum)
-
-		if assert.Enable {
-		}
 
 		return nil
 	}
