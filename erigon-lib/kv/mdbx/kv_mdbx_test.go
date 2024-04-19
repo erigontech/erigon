@@ -977,7 +977,7 @@ func TestDB_Batch_Panic(t *testing.T) {
 	}()
 
 	// Verify there is no error.
-	if g, e := err, error(nil); errors.Is(g, e) {
+	if g, e := err, error(nil); !errors.Is(g, e) {
 		t.Fatalf("wrong error: %v != %v", g, e)
 	}
 	// Verify the panic was captured.
