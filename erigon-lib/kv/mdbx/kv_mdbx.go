@@ -607,10 +607,10 @@ func safelyCall(fn func(tx kv.RwTx) error, tx kv.RwTx) (err error) {
 // take permanent effect only after a successful return is seen in
 // caller.
 //
+// Example of bad side-effects: print messages, mutate external counters `i++`
+//
 // The maximum batch size and delay can be adjusted with DB.MaxBatchSize
 // and DB.MaxBatchDelay, respectively.
-//
-// Batch
 func (db *MdbxKV) Batch(fn func(tx kv.RwTx) error) error {
 	errCh := make(chan error, 1)
 
