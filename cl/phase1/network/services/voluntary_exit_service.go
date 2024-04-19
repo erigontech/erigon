@@ -64,16 +64,8 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 
 	// Verify the validator is active
 	// assert is_active_validator(validator, get_current_epoch(state))
-	if err := func() error {
-		validators := state.GetActiveValidatorsIndices(curEpoch)
-		for _, v := range validators {
-			if v == voluntaryExit.ValidatorIndex {
-				return nil
-			}
-		}
+	if !val.Active(curEpoch) {
 		return fmt.Errorf("validator is not active")
-	}(); err != nil {
-		return err
 	}
 
 	// Verify exit has not been initiated
