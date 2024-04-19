@@ -118,7 +118,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 		g.sentinel.BanPeer(ctx, data.Peer)
 		return err
 	}
-	if gossip.IsTopicBeaconAttestation(data.Name) {
+	if gossip.IsTopicBeaconAttestation(data.Name) || gossip.IsTopicSyncCommittee(data.Name) {
 		fmt.Println("skipping beacon attestation", data.Name)
 		return nil
 	}
