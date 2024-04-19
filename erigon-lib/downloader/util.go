@@ -468,6 +468,7 @@ func IsLocal(path string) bool {
 }
 
 func ScheduleVerifyFile(ctx context.Context, t *torrent.Torrent, completePieces *atomic.Uint64) error {
+	defer func(t time.Time) { fmt.Printf("ScheduleVerifyFile util.go:471: %s\n", time.Since(t)) }(time.Now())
 	ctx, cancel := context.WithCancel(ctx)
 	wg, wgctx := errgroup.WithContext(ctx)
 	wg.SetLimit(16)
