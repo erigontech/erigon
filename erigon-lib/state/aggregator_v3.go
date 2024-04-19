@@ -436,6 +436,25 @@ func (a *AggregatorV3) BuildMissedIndices(ctx context.Context, workers int) erro
 	return nil
 }
 
+func (a *AggregatorV3) BuildMissedIndicesInBackground(ctx context.Context, workers int) {
+	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
+		return
+	}
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+		defer a.buildingFiles.Store(false)
+		aggTx := a.BeginFilesRo()
+		defer aggTx.Close()
+		if err := a.BuildMissedIndices(ctx, workers); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
+				return
+			}
+			log.Warn("[snapshots] BuildOptionalMissedIndicesInBackground", "err", err)
+		}
+	}()
+}
+
 type AggV3Collation struct {
 	logAddrs   map[string]*roaring64.Bitmap
 	logTopics  map[string]*roaring64.Bitmap
