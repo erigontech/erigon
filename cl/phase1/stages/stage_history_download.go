@@ -25,7 +25,6 @@ import (
 )
 
 type StageHistoryReconstructionCfg struct {
-	genesisCfg               *clparams.GenesisConfig
 	beaconCfg                *clparams.BeaconChainConfig
 	downloader               *network.BackwardBeaconDownloader
 	sn                       *freezeblocks.CaplinSnapshots
@@ -47,9 +46,8 @@ type StageHistoryReconstructionCfg struct {
 
 const logIntervalTime = 30 * time.Second
 
-func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, backfilling, blobsBackfilling, waitForAllRoutines bool, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, backfillingThrottling time.Duration, executionBlocksCollector block_collector.BlockCollector, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, logger log.Logger) StageHistoryReconstructionCfg {
+func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, beaconCfg *clparams.BeaconChainConfig, backfilling, blobsBackfilling, waitForAllRoutines bool, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, backfillingThrottling time.Duration, executionBlocksCollector block_collector.BlockCollector, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, logger log.Logger) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
-		genesisCfg:               genesisCfg,
 		beaconCfg:                beaconCfg,
 		downloader:               downloader,
 		startingRoot:             startingRoot,
@@ -209,6 +207,19 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				if err := downloadBlobHistoryWorker(cfg, ctx, logger); err != nil {
 					logger.Error("Error downloading blobs", "err", err)
 				}
+				// set a timer every 1 hour as a failsafe
+				ticker := time.NewTicker(time.Hour)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-ticker.C:
+						if err := downloadBlobHistoryWorker(cfg, ctx, logger); err != nil {
+							logger.Error("Error downloading blobs", "err", err)
+						}
+					}
+				}
 			}()
 		}
 	}()
@@ -239,7 +250,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 // downloadBlobHistoryWorker is a worker that downloads the blob history by using the already downloaded beacon blocks
 func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Context, logger log.Logger) error {
-	currentSlot := cfg.startingSlot
+	currentSlot := cfg.startingSlot + 1
 	blocksBatchSize := uint64(8) // requests 8 blocks worth of blobs at a time
 	tx, err := cfg.indiciesDB.BeginRo(ctx)
 	if err != nil {

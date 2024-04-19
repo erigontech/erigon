@@ -15,7 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/gossip"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/phase1/network/services"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/ledgerwatch/erigon/cl/validator/committee_subscription"
 	"google.golang.org/grpc"
 
@@ -30,8 +30,8 @@ type GossipManager struct {
 	forkChoice *forkchoice.ForkChoiceStore
 	sentinel   sentinel.SentinelClient
 	// configs
-	beaconConfig  *clparams.BeaconChainConfig
-	genesisConfig *clparams.GenesisConfig
+	beaconConfig *clparams.BeaconChainConfig
+	ethClock     eth_clock.EthereumClock
 
 	emitters     *beaconevents.Emitters
 	committeeSub *committee_subscription.CommitteeSubscribeMgmt
@@ -42,13 +42,14 @@ type GossipManager struct {
 	syncCommitteeMessagesService services.SyncCommitteeMessagesService
 	syncContributionService      services.SyncContributionService
 	aggregateAndProofService     services.AggregateAndProofService
+	attestationService           services.AttestationService
 }
 
 func NewGossipReceiver(
 	s sentinel.SentinelClient,
 	forkChoice *forkchoice.ForkChoiceStore,
 	beaconConfig *clparams.BeaconChainConfig,
-	genesisConfig *clparams.GenesisConfig,
+	ethClock eth_clock.EthereumClock,
 	emitters *beaconevents.Emitters,
 	comitteeSub *committee_subscription.CommitteeSubscribeMgmt,
 	blockService services.BlockService,
@@ -56,19 +57,21 @@ func NewGossipReceiver(
 	syncCommitteeMessagesService services.SyncCommitteeMessagesService,
 	syncContributionService services.SyncContributionService,
 	aggregateAndProofService services.AggregateAndProofService,
+	attestationService services.AttestationService,
 ) *GossipManager {
 	return &GossipManager{
 		sentinel:                     s,
 		forkChoice:                   forkChoice,
 		emitters:                     emitters,
 		beaconConfig:                 beaconConfig,
-		genesisConfig:                genesisConfig,
+		ethClock:                     ethClock,
 		committeeSub:                 comitteeSub,
 		blockService:                 blockService,
 		blobService:                  blobService,
 		syncCommitteeMessagesService: syncCommitteeMessagesService,
 		syncContributionService:      syncContributionService,
 		aggregateAndProofService:     aggregateAndProofService,
+		attestationService:           attestationService,
 	}
 }
 
@@ -122,7 +125,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 }
 
 func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.GossipData) error {
-	currentEpoch := utils.GetCurrentEpoch(g.genesisConfig.GenesisTime, g.beaconConfig.SecondsPerSlot, g.beaconConfig.SlotsPerEpoch)
+	currentEpoch := g.ethClock.GetCurrentEpoch()
 	version := g.beaconConfig.GetCurrentStateVersion(currentEpoch)
 
 	// Depending on the type of the received data, we create an instance of a specific type that implements the ObjectSSZ interface,
@@ -177,18 +180,9 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		case gossip.IsTopicBeaconAttestation(data.Name):
 			att := &solid.Attestation{}
 			if err := att.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
-				g.sentinel.BanPeer(ctx, data.Peer)
 				return err
 			}
-			if err := g.forkChoice.OnCheckReceivedAttestation(data.Name, att); err != nil {
-				log.Debug("failed to check attestation", "err", err)
-				if errors.Is(err, forkchoice.ErrIgnore) {
-					return nil
-				}
-				return err
-			}
-			// check if it needs to be aggregated
-			return g.committeeSub.CheckAggregateAttestation(att)
+			return g.attestationService.ProcessMessage(ctx, data.SubnetId, att)
 		default:
 			return fmt.Errorf("unknown topic %s", data.Name)
 		}
@@ -213,7 +207,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 					return
 				case data := <-ch:
 					l := log.Ctx{}
-					if err := g.onRecv(ctx, data, l); err != nil {
+					if err := g.onRecv(ctx, data, l); err != nil && !errors.Is(err, services.ErrIgnore) {
 						log.Debug("[Beacon Gossip] Recoverable Error", "err", err)
 					}
 				}

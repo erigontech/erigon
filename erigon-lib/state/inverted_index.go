@@ -21,6 +21,7 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -126,7 +127,7 @@ func (ii *InvertedIndex) OpenList(fNames []string) error {
 	ii.closeWhatNotInList(fNames)
 	ii.garbageFiles = ii.scanStateFiles(fNames)
 	if err := ii.openFiles(); err != nil {
-		return fmt.Errorf("NewHistory.openFiles: %s, %w", ii.filenameBase, err)
+		return fmt.Errorf("NewHistory.openFiles: %w, %s", err, ii.filenameBase)
 	}
 	return nil
 }
@@ -299,7 +300,10 @@ func (ii *InvertedIndex) openFiles() error {
 			}
 
 			if item.decompressor, err = seg.NewDecompressor(datPath); err != nil {
-				ii.logger.Debug("InvertedIndex.openFiles: %w, %s", err, datPath)
+				ii.logger.Debug("InvertedIndex.openFiles:", "err", err, "file", datPath)
+				if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
+					err = nil
+				}
 				continue
 			}
 
@@ -309,7 +313,7 @@ func (ii *InvertedIndex) openFiles() error {
 			idxPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, fromStep, toStep))
 			if dir.FileExist(idxPath) {
 				if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
-					ii.logger.Debug("InvertedIndex.openFiles: %w, %s", err, idxPath)
+					ii.logger.Debug("InvertedIndex.openFiles:", "err", err, "file", idxPath)
 					return false
 				}
 				totalKeys += item.index.KeyCount()

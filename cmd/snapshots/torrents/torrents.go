@@ -382,7 +382,7 @@ func updateTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 
 			defer os.Remove(filepath.Join(srcSession.LocalFsRoot(), file))
 
-			err = downloader.BuildTorrentIfNeed(gctx, file, srcSession.LocalFsRoot(), torrentFiles)
+			_, err = downloader.BuildTorrentIfNeed(gctx, file, srcSession.LocalFsRoot(), torrentFiles)
 
 			if err != nil {
 				return err
@@ -475,7 +475,7 @@ func verifyTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 
 			defer os.Remove(filepath.Join(srcSession.LocalFsRoot(), file))
 
-			err = downloader.BuildTorrentIfNeed(gctx, file, srcSession.LocalFsRoot(), torrentFiles)
+			_, err = downloader.BuildTorrentIfNeed(gctx, file, srcSession.LocalFsRoot(), torrentFiles)
 
 			if err != nil {
 				return err

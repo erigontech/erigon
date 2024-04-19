@@ -75,6 +75,7 @@ func (b *blockCollector) Flush(ctx context.Context) error {
 	}
 	tmpDB := memdb.New(b.tmpdir)
 	defer tmpDB.Close()
+	defer b.collector.Close()
 	tmpTx, err := tmpDB.BeginRw(ctx)
 	if err != nil {
 		return err

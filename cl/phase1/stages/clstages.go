@@ -29,6 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client/block_collector"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/ledgerwatch/erigon/cl/validator/attestation_producer"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 
@@ -37,12 +38,11 @@ import (
 	network2 "github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/rpc"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
-	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
 type Cfg struct {
 	rpc                     *rpc.BeaconRpcP2P
-	genesisCfg              *clparams.GenesisConfig
+	ethClock                eth_clock.EthereumClock
 	beaconCfg               *clparams.BeaconChainConfig
 	executionClient         execution_client.ExecutionEngine
 	state                   *state.CachingBeaconState
@@ -75,7 +75,7 @@ type Args struct {
 func ClStagesCfg(
 	rpc *rpc.BeaconRpcP2P,
 	antiquary *antiquary.Antiquary,
-	genesisCfg *clparams.GenesisConfig,
+	ethClock eth_clock.EthereumClock,
 	beaconCfg *clparams.BeaconChainConfig,
 	state *state.CachingBeaconState,
 	executionClient execution_client.ExecutionEngine,
@@ -96,7 +96,7 @@ func ClStagesCfg(
 	return &Cfg{
 		rpc:                     rpc,
 		antiquary:               antiquary,
-		genesisCfg:              genesisCfg,
+		ethClock:                ethClock,
 		beaconCfg:               beaconCfg,
 		state:                   state,
 		executionClient:         executionClient,
@@ -230,9 +230,9 @@ func ConsensusClStages(ctx context.Context,
 			args.hasDownloaded = cfg.hasDownloaded
 			args.seenSlot = cfg.forkChoice.HighestSeen()
 			args.seenEpoch = args.seenSlot / cfg.beaconCfg.SlotsPerEpoch
-			args.targetSlot = utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
+			args.targetSlot = cfg.ethClock.GetCurrentSlot()
 			// Note that the target epoch is always one behind. this is because we are always behind in the current epoch, so it would not be very useful
-			args.targetEpoch = utils.GetCurrentEpoch(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, cfg.beaconCfg.SlotsPerEpoch) - 1
+			args.targetEpoch = cfg.ethClock.GetCurrentEpoch() - 1
 			return
 		},
 		Stages: map[string]clstages.Stage[*Cfg, Args]{
@@ -254,7 +254,7 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(context.Background(), cfg.rpc, cfg.executionClient, cfg.indiciesDB)
 
-					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, cfg.backfilling, cfg.blobBackfilling, false, startingRoot, startingSlot, cfg.tmpdir, 600*time.Millisecond, cfg.blockCollector, cfg.blockReader, cfg.blobStore, logger), context.Background(), logger); err != nil {
+					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.beaconCfg, cfg.backfilling, cfg.blobBackfilling, false, startingRoot, startingSlot, cfg.tmpdir, 600*time.Millisecond, cfg.blockCollector, cfg.blockReader, cfg.blobStore, logger), context.Background(), logger); err != nil {
 						cfg.hasDownloaded = false
 						return err
 					}
@@ -342,7 +342,7 @@ func ConsensusClStages(ctx context.Context,
 						}
 						return highestProcessed - 1, highestBlockRootProcessed, err
 					})
-					chainTipSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
+					chainTipSlot := cfg.ethClock.GetCurrentSlot()
 					logger.Info("[Caplin] Forward Sync", "from", currentSlot.Load(), "to", chainTipSlot)
 					prevProgress := currentSlot.Load()
 					for downloader.GetHighestProcessedSlot() < chainTipSlot {
@@ -411,7 +411,7 @@ func ConsensusClStages(ctx context.Context,
 					defer tx.Rollback()
 
 					if cfg.executionClient != nil && cfg.executionClient.SupportInsertion() {
-						if err := cfg.blockCollector.Flush(ctx); err != nil {
+						if err := cfg.blockCollector.Flush(context.Background()); err != nil {
 							return err
 						}
 					}
@@ -440,7 +440,7 @@ func ConsensusClStages(ctx context.Context,
 							var blocks *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]
 							var err error
 							from := cfg.forkChoice.HighestSeen() - 2
-							currentSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
+							currentSlot := cfg.ethClock.GetCurrentSlot()
 							count := (currentSlot - from) + 4
 							if cfg.forkChoice.HighestSeen() >= args.targetSlot {
 								return
@@ -717,37 +717,7 @@ func ConsensusClStages(ctx context.Context,
 
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
-					slotTime := utils.GetSlotTime(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, args.targetSlot).Add(
-						time.Duration(cfg.beaconCfg.SecondsPerSlot) * (time.Second / 3),
-					)
-					waitDur := slotTime.Sub(time.Now())
-					ctx, cn := context.WithTimeout(ctx, waitDur)
-					defer cn()
-					tx, err := cfg.indiciesDB.BeginRw(ctx)
-					if err != nil {
-						return err
-					}
-					defer tx.Rollback()
-					// try to get the current block TODO: Completely remove
-					// blocks, err := cfg.gossipSource.GetRange(ctx, tx, args.seenSlot, 1)
-					// if err != nil {
-					// 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-					// 		return nil
-					// 	}
-					// 	return err
-					// }
-
-					// for _, block := range blocks.Data {
-					// 	err := processBlock(tx, block, true, true)
-					// 	if err != nil {
-					// 		// its okay if block processing fails
-					// 		logger.Warn("extra block failed validation", "err", err)
-					// 		return nil
-					// 	}
-					// 	shouldForkChoiceSinceReorg = true
-					// 	logger.Debug("extra block received", "slot", args.seenSlot)
-					// }
-					return tx.Commit()
+					return nil // Remove completely in a subsequent refactor
 				},
 			},
 			CleanupAndPruning: {
@@ -789,7 +759,7 @@ func ConsensusClStages(ctx context.Context,
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 					nextSlot := args.seenSlot + 1
-					nextSlotTime := utils.GetSlotTime(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, nextSlot)
+					nextSlotTime := cfg.ethClock.GetSlotTime(nextSlot)
 					nextSlotDur := nextSlotTime.Sub(time.Now())
 					logger.Debug("sleeping until next slot", "slot", nextSlot, "time", nextSlotTime, "dur", nextSlotDur)
 					time.Sleep(nextSlotDur)
