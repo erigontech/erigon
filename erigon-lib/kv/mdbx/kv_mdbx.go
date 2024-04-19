@@ -631,7 +631,7 @@ func (db *MdbxKV) Batch(fn func(tx kv.RwTx) error) error {
 	db.batchMu.Unlock()
 
 	err := <-errCh
-	if err == trySolo {
+	if errors.Is(err, trySolo) {
 		err = db.Update(context.Background(), fn)
 	}
 	return err
