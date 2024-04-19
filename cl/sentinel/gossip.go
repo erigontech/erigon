@@ -315,6 +315,64 @@ func (s *Sentinel) defaultVoluntaryExitTopicParams() *pubsub.TopicScoreParams {
 	}
 }
 
+func (s *Sentinel) defaultSyncSubnetTopicParams(activeValidators uint64) *pubsub.TopicScoreParams {
+	subnetCount := s.cfg.BeaconConfig.SyncCommitteeSubnetCount
+	// Get weight for each specific subnet.
+	topicWeight := syncCommitteesTotalWeight / float64(subnetCount)
+	syncComSize := s.cfg.BeaconConfig.SyncCommitteeSize
+	// Set the max as the sync committee size
+	if activeValidators > syncComSize {
+		activeValidators = syncComSize
+	}
+	subnetWeight := activeValidators / subnetCount
+	if subnetWeight == 0 {
+		log.Warn("Subnet weight is 0, skipping initializing topic scoring")
+		return nil
+	}
+	firstDecay := time.Duration(1)
+	meshDecay := time.Duration(4)
+
+	rate := subnetWeight * 2 / gossipSubD
+	if rate == 0 {
+		log.Warn("rate is 0, skipping initializing topic scoring")
+		return nil
+	}
+	// Determine expected first deliveries based on the message rate.
+	firstMessageCap, err := decayLimit(s.scoreDecay(firstDecay*s.oneEpochDuration()), float64(rate))
+	if err != nil {
+		log.Warn("Skipping initializing topic scoring")
+		return nil
+	}
+	firstMessageWeight := maxFirstDeliveryScore / firstMessageCap
+	// Determine expected mesh deliveries based on message rate applied with a dampening factor.
+	meshThreshold, err := decayThreshold(s.scoreDecay(meshDecay*s.oneEpochDuration()), float64(subnetWeight)/dampeningFactor)
+	if err != nil {
+		log.Warn("Skipping initializing topic scoring")
+		return nil
+	}
+	meshCap := 4 * meshThreshold
+
+	return &pubsub.TopicScoreParams{
+		TopicWeight:                     topicWeight,
+		TimeInMeshWeight:                maxInMeshScore / s.inMeshCap(),
+		TimeInMeshQuantum:               s.oneSlotDuration(),
+		TimeInMeshCap:                   s.inMeshCap(),
+		FirstMessageDeliveriesWeight:    firstMessageWeight,
+		FirstMessageDeliveriesDecay:     s.scoreDecay(firstDecay * s.oneEpochDuration()),
+		FirstMessageDeliveriesCap:       firstMessageCap,
+		MeshMessageDeliveriesWeight:     0,
+		MeshMessageDeliveriesDecay:      s.scoreDecay(meshDecay * s.oneEpochDuration()),
+		MeshMessageDeliveriesCap:        meshCap,
+		MeshMessageDeliveriesThreshold:  meshThreshold,
+		MeshMessageDeliveriesWindow:     2 * time.Second,
+		MeshMessageDeliveriesActivation: s.oneEpochDuration(),
+		MeshFailurePenaltyWeight:        0,
+		MeshFailurePenaltyDecay:         s.scoreDecay(meshDecay * s.oneEpochDuration()),
+		InvalidMessageDeliveriesWeight:  -maxScore() / topicWeight,
+		InvalidMessageDeliveriesDecay:   s.scoreDecay(50 * s.oneEpochDuration()),
+	}
+}
+
 // decayLimit provides the value till which a decay process will
 // limit till provided with an expected growth rate.
 func decayLimit(decayRate, rate float64) (float64, error) {
