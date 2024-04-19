@@ -573,6 +573,8 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	blockSnaps *freezeblocks.RoSnapshots, borSnaps *freezeblocks.BorRoSnapshots, csn *freezeblocks.CaplinSnapshots,
 	br *freezeblocks.BlockRetire, agg *libstate.AggregatorV3, err error,
 ) {
+	chainConfig := fromdb.ChainConfig(chainDB)
+
 	blockSnaps = freezeblocks.NewRoSnapshots(cfg, dirs.Snap, 0, logger)
 	if err = blockSnaps.ReopenFolder(); err != nil {
 		return
@@ -583,8 +585,6 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	if err = borSnaps.ReopenFolder(); err != nil {
 		return
 	}
-
-	chainConfig := fromdb.ChainConfig(chainDB)
 
 	var beaconConfig *clparams.BeaconChainConfig
 	_, beaconConfig, _, err = clparams.GetConfigsByNetworkName(chainConfig.ChainName)
