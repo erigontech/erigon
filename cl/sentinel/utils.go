@@ -134,6 +134,7 @@ func (s *Sentinel) updateENRAttSubnets(subnetIndex int, on bool) {
 	} else {
 		subnetField[subnetIndex/8] &^= 1 << (subnetIndex % 8)
 	}
+	fmt.Println(subnetField)
 	s.listener.LocalNode().Set(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, subnetField))
 }
 
