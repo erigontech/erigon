@@ -2373,7 +2373,7 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 		}
 
 		mi := t.Metainfo()
-		if err := CreateTorrentFileIfNotExists(d.SnapDir(), t.Info(), &mi, d.torrentFiles); err != nil {
+		if _, err := d.torrentFiles.CreateWithMetaInfo(t.Info(), &mi); err != nil {
 			d.logger.Warn("[snapshots] create torrent file", "err", err)
 			return
 		}
