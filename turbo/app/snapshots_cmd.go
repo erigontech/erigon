@@ -398,7 +398,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(chainConfig.ChainName)
 
 	csn = freezeblocks.NewCaplinSnapshots(cfg, beaconConfig, dirs, logger)
-	if err := csn.ReopenFolder(); err != nil {
+	if err = csn.ReopenFolder(); err != nil {
 		return
 	}
 
