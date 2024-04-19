@@ -269,7 +269,7 @@ func (a *AggregatorV3) OpenFolder(readonly bool) error {
 	eg.Go(func() error { return a.tracesFrom.OpenFolder(readonly) })
 	eg.Go(func() error { return a.tracesTo.OpenFolder(readonly) })
 	if err := eg.Wait(); err != nil {
-		return err
+		return fmt.Errorf("OpenFolder: %w", err)
 	}
 	a.recalcMaxTxNum()
 	return nil
@@ -288,7 +288,7 @@ func (a *AggregatorV3) OpenList(files []string, readonly bool) error {
 	eg.Go(func() error { return a.tracesFrom.OpenFolder(readonly) })
 	eg.Go(func() error { return a.tracesTo.OpenFolder(readonly) })
 	if err := eg.Wait(); err != nil {
-		return err
+		return fmt.Errorf("OpenList: %w", err)
 	}
 	a.recalcMaxTxNum()
 	return nil

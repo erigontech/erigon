@@ -604,7 +604,10 @@ func (s *RoSnapshots) Ranges() []Range {
 func (s *RoSnapshots) OptimisticalyReopenFolder()           { _ = s.ReopenFolder() }
 func (s *RoSnapshots) OptimisticalyReopenWithDB(db kv.RoDB) { _ = s.ReopenWithDB(db) }
 func (s *RoSnapshots) ReopenFolder() error {
-	return s.ReopenSegments(s.Types(), false)
+	if err := s.ReopenSegments(s.Types(), false); err != nil {
+		return fmt.Errorf("ReopenSegments: %w", err)
+	}
+	return nil
 }
 
 func (s *RoSnapshots) ReopenSegments(types []snaptype.Type, allowGaps bool) error {
@@ -629,7 +632,7 @@ func (s *RoSnapshots) ReopenWithDB(db kv.RoDB) error {
 		}
 		return s.ReopenList(snList, true)
 	}); err != nil {
-		return err
+		return fmt.Errorf("ReopenWithDB: %w", err)
 	}
 	return nil
 }
