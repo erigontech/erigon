@@ -1791,7 +1791,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	}
 
 	var dbInfo int
-	var dbComplete int
 	var tComplete int
 	var torrentInfo int
 
@@ -1969,7 +1968,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			"torrent", torrentInfo,
 			"db", dbInfo,
 			"t-complete", tComplete,
-			"db-complete", dbComplete,
 			"webseed-trips", stats.WebseedTripCount.Load(),
 			"webseed-discards", stats.WebseedDiscardCount.Load(),
 			"webseed-fails", stats.WebseedServerFails.Load(),
