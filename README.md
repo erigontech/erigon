@@ -26,7 +26,10 @@ To use chains other than the defaults above, a set of configuration files can be
    - `dynamic-{network}-allocs.json` - the allocs file
    - `dynamic-{network}-chainspec.json` - the chainspec file
    - `dynamic-{network}-conf.json` - an additional configuration file
-- Ensure to create a run configuration to set flags, with the network name beginning dynamic
+- Ensure to create a run configuration to set flags, with the network name beginning dynamic, this will be the flag `chain: dynamic-{network}`
+
+**Tip**: if you have allocs in the format from Polygon from originally launching the network you can save this file to the root of the cdk-erigon code
+base and run `go run cmd/hack/allocs/main.go [your-file-name]` to convert it to the format needed by erigon.
 
 This could be more concise, however we are attempting to retain upstream compatibility where possible.
 
@@ -93,6 +96,12 @@ Depending on the RPC provider you are using, you may wish to alter `zkevm.rpc-ra
 
 NB: `--externalcl` flag is removed in upstream erigon so beware of re-using commands/config
 
+### Run modes
+cdk-erigon can be run as an RPC node which will use the data stream to fetch new block/batch information and track a 
+remote sequencer (the default behaviour).  It can also run as a sequencer. To enable the sequencer, set the `CDK_ERIGON_SEQUENCER` environment variable to `1` and start the node.
+cdk-erigon supports migrating a node from being an RPC node to a sequencer and vice versa.  To do this, stop the node, set the `CDK_ERIGON_SEQUENCER` environment variable to the desired value and restart the node.
+Please ensure that you do include the sequencer specific flags found below when running as a sequencer.  You can include these flags when running as an RPC to keep a consistent configuration between the two run modes.
+
 ### Docker ([DockerHub](https://hub.docker.com/r/hermeznetwork/cdk-erigon))
 The image comes with 3 preinstalled default configs which you may wish to edit according to the config section below, otherwise you can mount your own config to the container as necessary.
 
@@ -124,7 +133,7 @@ to increase performance, e.g. `zkevm.l1-rpc-url` as the provided RPCs may have r
 
 For a full explanation of the config options, see below:
 - `datadir`: Path to your node's data directory.
-- `chain`: Specifies the L2 network to connect with, e.g., hermez-mainnet.
+- `chain`: Specifies the L2 network to connect with, e.g., hermez-mainnet.  For dynamic configs this should always be in the format `dynamic-{network}`
 - `http`: Enables HTTP RPC server (set to true).
 - `private.api.addr`: Address for the private API, typically localhost:9091, change this to run multiple instances on the same machine
 - `zkevm.l2-chain-id`: Chain ID for the L2 network, e.g., 1101.
@@ -132,11 +141,27 @@ For a full explanation of the config options, see below:
 - `zkevm.l2-datastreamer-url`: URL for the L2 data streamer.
 - `zkevm.l1-chain-id`: Chain ID for the L1 network.
 - `zkevm.l1-rpc-url`: L1 Ethereum RPC URL.
-- `zkevm.l1-polygon-rollup-manager`, `zkevm.l1-rollup`, `zkevm.l1-matic-contract-address`: Addresses and topics for smart contracts and event listening.
+- `zkevm.address-sequencer`: The contract address for the sequencer
+- `zkevm.address-zkevm`: The address for the zkevm contract
+- `zkevm.address-admin`: The address for the admin contract
+- `zkevm.address-rollup`: The address for the rollup contract
+- `zkevm.address-ger-manager`: The address for the GER manager contract
+- `zkevm.l1-matic-contract-address`: The address for the Matic/POL contract
 - `zkevm.rpc-ratelimit`: Rate limit for RPC calls.
+- `zkevm.data-stream-port`: Port for the data stream.  This needs to be set to enable the datastream server
+- `zkevm.data-stream-host`: The host for the data stream i.e. `localhost`.  This must be set to enable the datastream server
 - `zkevm.datastream-version:` Version of the data stream protocol.
 - `externalcl`: External consensus layer flag.
 - `http.api`: List of enabled HTTP API modules.
+
+Sequencer specific config:
+- `zkevm.executor-urls`: A csv list of the executor URLs.  These will be used in a round robbin fashion by the sequencer
+- `zkevm.executor-strict`: Defaulted to true, but can be set to false when running the sequencer without verifications (use with extreme caution)
+- `zkevm.witness-full`: Defaulted to true.  Controls whether the full or partial witness is used with the executor.
+- `zkevm.sequencer-initial-fork-id`: The fork id to start the network with.
+
+Useful config entries:
+- `zkevm.sync-limit`: This will ensure the network only syncs to a given block height.
 
 ***
 
