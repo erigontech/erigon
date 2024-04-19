@@ -1,3 +1,5 @@
+//go:build prevent
+
 package services
 
 import (

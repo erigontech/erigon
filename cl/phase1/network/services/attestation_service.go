@@ -16,7 +16,8 @@ import (
 )
 
 var (
-	computeSubnetForAttestation = subnets.ComputeSubnetForAttestation
+	computeSubnetForAttestation  = subnets.ComputeSubnetForAttestation
+	computeCommitteeCountPerSlot = subnets.ComputeCommitteeCountPerSlot
 )
 
 type attestationService struct {
@@ -63,7 +64,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	}
 
 	// [REJECT] The committee index is within the expected range
-	committeeCount := headState.CommitteeCount(att.AttestantionData().Target().Epoch())
+	committeeCount := computeCommitteeCountPerSlot(headState, slot, s.beaconCfg.SlotsPerEpoch)
 	if committeeIndex >= committeeCount {
 		return fmt.Errorf("committee index out of range")
 	}

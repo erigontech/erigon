@@ -63,3 +63,8 @@ func ComputeSubnetForAttestation(committeePerSlot, slot, committeeIndex, slotsPe
 	committeesSinceEpochStart := committeePerSlot * slotsSinceEpochStart
 	return (committeesSinceEpochStart + committeeIndex) % attSubnetCount
 }
+
+func ComputeCommitteeCountPerSlot(s *state.CachingBeaconState, slot uint64, slotsPerEpoch uint64) uint64 {
+	epoch := slot / slotsPerEpoch
+	return s.CommitteeCount(epoch)
+}
