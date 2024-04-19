@@ -80,14 +80,14 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 			subnet                = subnets.ComputeSubnetForAttestation(committeeCountPerSlot, slot, cIndex, a.beaconChainCfg.SlotsPerEpoch, a.netConfig.AttestationSubnetCount)
 		)
 		_ = i
-		// if err := a.attestationService.ProcessMessage(r.Context(), &subnet, attestation); err != nil {
-		// 	log.Warn("[Beacon REST] failed to process attestation", "err", err)
-		// 	failures = append(failures, poolingFailure{
-		// 		Index:   i,
-		// 		Message: err.Error(),
-		// 	})
-		// 	continue
-		// }
+		if err := a.attestationService.ProcessMessage(r.Context(), &subnet, attestation); err != nil {
+			log.Warn("[Beacon REST] failed to process attestation", "err", err)
+			failures = append(failures, poolingFailure{
+				Index:   i,
+				Message: err.Error(),
+			})
+			continue
+		}
 		if a.sentinel != nil {
 			encodedSSZ, err := attestation.EncodeSSZ(nil)
 			if err != nil {
@@ -96,7 +96,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 			}
 			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
 				Data:     encodedSSZ,
-				Name:     gossip.TopicNameBeaconAttestation(subnet),
+				Name:     gossip.TopicNamePrefixBeaconAttestation,
 				SubnetId: &subnet,
 			}); err != nil {
 				beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
@@ -327,7 +327,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 				subnetId := subnet // this effectively makes a copy
 				if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
 					Data:     encodedSSZ,
-					Name:     gossip.TopicNameSyncCommittee(int(subnet)),
+					Name:     gossip.TopicNamePrefixSyncCommittee,
 					SubnetId: &subnetId,
 				}); err != nil {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
