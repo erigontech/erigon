@@ -100,6 +100,7 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 		for i := uint64(0); i < totalTx; i += h.aggregationStep {
 			collation, err := h.collate(ctx, 0, 0, 1000, rwtx)
 			require.NoError(t, err)
+			defer collation.Close()
 
 			require.NotEmptyf(t, collation.historyPath, "collation.historyPath is empty")
 			require.NotNil(t, collation.historyComp)
@@ -109,6 +110,7 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 			sf, err := h.buildFiles(ctx, 0, collation, background.NewProgressSet())
 			require.NoError(t, err)
 			require.NotNil(t, sf)
+			defer sf.CleanupOnError()
 
 			efReader := NewArchiveGetter(sf.efHistoryDecomp.MakeGetter(), h.compression)
 			hReader := NewArchiveGetter(sf.historyDecomp.MakeGetter(), h.compression)
@@ -167,6 +169,7 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 		for i := uint64(0); i < totalTx; i += h.aggregationStep {
 			collation, err := h.collate(ctx, 0, 0, 1000, rwtx)
 			require.NoError(t, err)
+			defer collation.Close()
 
 			require.NotEmptyf(t, collation.historyPath, "collation.historyPath is empty")
 			require.NotNil(t, collation.historyComp)
@@ -174,6 +177,7 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 			require.NotNil(t, collation.efHistoryComp)
 
 			sf, err := h.buildFiles(ctx, 0, collation, background.NewProgressSet())
+			defer sf.CleanupOnError()
 			require.NoError(t, err)
 			require.NotNil(t, sf)
 

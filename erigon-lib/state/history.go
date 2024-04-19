@@ -23,6 +23,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"math"
 	"path/filepath"
 	"regexp"
@@ -753,27 +754,6 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	efHistoryComp = NewArchiveWriter(efComp, CompressNone)
 	collector.SortAndFlushInBackground(true)
 
-	//indexAddKV := func() error {
-	//	fmt.Printf("indexAddKV(%d) | %x %p\n", bitmap.GetCardinality(), prevKey, bitmap)
-	//	ef := eliasfano32.NewEliasFano(bitmap.GetCardinality(), bitmap.Maximum())
-	//	it := bitmap.Iterator()
-	//	for it.HasNext() {
-	//		ef.AddOffset(it.Next())
-	//	}
-	//	bitmap.Clear()
-	//	ef.Build()
-	//
-	//	prevEf = ef.AppendBytes(prevEf[:0])
-	//
-	//	if err = efHistoryComp.AddWord(prevKey); err != nil {
-	//		return fmt.Errorf("add %s ef history key [%x]: %w", h.filenameBase, prevKey, err)
-	//	}
-	//	if err = efHistoryComp.AddWord(prevEf); err != nil {
-	//		return fmt.Errorf("add %s ef history val: %w", h.filenameBase, err)
-	//	}
-	//	return nil
-	//}
-
 	loadBitmapsFunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		txNum := binary.BigEndian.Uint64(v)
 		if initialized.CompareAndSwap(false, true) {
@@ -837,53 +817,11 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 		txNum = binary.BigEndian.Uint64(v)
 		bitmap.Add(txNum)
 
+		if assert.Enable {
+		}
+
 		return nil
 	}
-
-	//loadCollatedFunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-	//	fmt.Printf("loadCollatedFunc %x -> %x\n", k, v)
-	//	txNum := binary.BigEndian.Uint64(v)
-	//	if h.historyLargeValues {
-	//		keyBuf = append(append(keyBuf[:0], k...), v...)
-	//		key, val, err := c.SeekExact(keyBuf)
-	//		if err != nil {
-	//			return fmt.Errorf("seekExact %s history val [%x]: %w", h.filenameBase, key, err)
-	//		}
-	//		if len(val) == 0 {
-	//			val = nil
-	//		}
-	//		if err = historyComp.AddWord(val); err != nil {
-	//			return fmt.Errorf("add %s history val [%x]=>[%x]: %w", h.filenameBase, key, val, err)
-	//		}
-	//	} else {
-	//		val, err := cd.SeekBothRange(k, v)
-	//		if err != nil {
-	//			return fmt.Errorf("seekBothRange %s history val [%x]: %w", h.filenameBase, k, err)
-	//		}
-	//		if val != nil && binary.BigEndian.Uint64(val) == txNum {
-	//			val = val[8:]
-	//		} else {
-	//			val = nil
-	//		}
-	//		if err = historyComp.AddWord(val); err != nil {
-	//			return fmt.Errorf("add %s history val [%x]=>[%x]: %w", h.filenameBase, k, val, err)
-	//		}
-	//	}
-	//
-	//	if !bytes.Equal(prevKey, k) {
-	//		if bitmap.IsEmpty() {
-	//			bitmap.Add(txNum)
-	//		}
-	//		if err := indexAddKV(); err != nil {
-	//			return err
-	//		}
-	//		prevKey = append(prevKey[:0], k...)
-	//	}
-	//	bitmap.Add(txNum)
-	//
-	//	return nil
-	//}
-	//_ = loadCollatedFunc
 
 	err = collector.Load(nil, "", loadBitmapsFunc, etl.TransformArgs{Quit: ctx.Done()})
 	if err != nil {
