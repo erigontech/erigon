@@ -1574,9 +1574,9 @@ func (a *AggregatorV3) KeepStepsInDB(steps uint64) *AggregatorV3 {
 		if d == nil {
 			continue
 		}
-		if d.History.dontProduceFiles {
-			d.History.keepTxInDB = a.keepInDB
-		}
+		//if d.History.dontProduceFiles {
+		d.History.keepTxInDB = a.keepInDB
+		//}
 	}
 
 	return a
