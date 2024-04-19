@@ -407,7 +407,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		leakDetector: dbg.NewLeakDetector("db."+opts.label.String(), dbg.SlowTx()),
 
 		MaxBatchSize:  DefaultMaxBatchSize,
-		MaxBatchDelay: DefaultMaxBatchSize,
+		MaxBatchDelay: DefaultMaxBatchDelay,
 	}
 
 	customBuckets := opts.bucketsCfg(kv.ChaindataTablesCfg)
