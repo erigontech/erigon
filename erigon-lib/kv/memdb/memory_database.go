@@ -50,7 +50,7 @@ func NewTestDB(tb testing.TB) kv.RwDB {
 
 func BeginRw(tb testing.TB, db kv.RwDB) kv.RwTx {
 	tb.Helper()
-	tx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(context.Background()) //nolint:gocritic
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func BeginRw(tb testing.TB, db kv.RwDB) kv.RwTx {
 
 func BeginRo(tb testing.TB, db kv.RoDB) kv.Tx {
 	tb.Helper()
-	tx, err := db.BeginRo(context.Background())
+	tx, err := db.BeginRo(context.Background()) //nolint:gocritic
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func NewTestTx(tb testing.TB) (kv.RwDB, kv.RwTx) {
 	tmpDir := tb.TempDir()
 	db := New(tmpDir)
 	tb.Cleanup(db.Close)
-	tx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(context.Background()) //nolint:gocritic
 	if err != nil {
 		tb.Fatal(err)
 	}

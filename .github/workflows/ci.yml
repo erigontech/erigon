@@ -59,7 +59,7 @@ jobs:
         if: runner.os == 'Linux'
         uses: golangci/golangci-lint-action@v4
         with:
-          version: v1.56.1
+          version: v1.57.2
           skip-build-cache: true
           args: --help
 

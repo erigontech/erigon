@@ -130,7 +130,7 @@ func init() {
 		if xdgDataDir := os.Getenv("XDG_DATA_HOME"); xdgDataDir != "" {
 			Defaults.Ethash.DatasetDir = filepath.Join(xdgDataDir, "erigon-ethash")
 		}
-		Defaults.Ethash.DatasetDir = filepath.Join(home, ".local/share/erigon-ethash")
+		Defaults.Ethash.DatasetDir = filepath.Join(home, ".local/share/erigon-ethash") //nolint:gocritic
 	}
 }
 
