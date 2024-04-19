@@ -110,6 +110,17 @@ func (s *CaplinSnapshots) BlocksAvailable() uint64 {
 	return cmp.Min(s.segmentsMax.Load(), s.idxMax.Load())
 }
 
+func (s *CaplinSnapshots) Close() {
+	if s == nil {
+		return
+	}
+	s.BeaconBlocks.lock.Lock()
+	defer s.BeaconBlocks.lock.Unlock()
+	s.BlobSidecars.lock.Lock()
+	defer s.BlobSidecars.lock.Unlock()
+	s.closeWhatNotInList(nil)
+}
+
 // ReopenList stops on optimistic=false, continue opening files on optimistic=true
 func (s *CaplinSnapshots) ReopenList(fileNames []string, optimistic bool) error {
 	s.BeaconBlocks.lock.Lock()
@@ -501,7 +512,10 @@ func DumpBlobsSidecar(ctx context.Context, blobStorage blob_storage.BlobStorage,
 	return nil
 }
 
-func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Logger, lvl log.Lvl) error {
+func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Logger) error {
+	if s == nil {
+		return nil
+	}
 	// if !s.segmentsReady.Load() {
 	// 	return fmt.Errorf("not all snapshot segments are available")
 	// }
