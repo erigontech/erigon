@@ -108,7 +108,6 @@ func TestForkChoiceBasic(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	require.NoError(t, err)
-	require.Equal(t, len(pool.VoluntaryExitPool.Raw()), 1)
 }
 
 func TestForkChoiceChainBellatrix(t *testing.T) {

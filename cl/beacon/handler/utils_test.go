@@ -112,6 +112,10 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		opPool.BLSToExecutionChangesPool.Insert(msg.Signature, msg)
 		return nil
 	}).AnyTimes()
+	proposerSlashingService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.ProposerSlashing) error {
+		opPool.ProposerSlashingsPool.Insert(pool.ComputeKeyForProposerSlashing(msg), msg)
+		return nil
+	}).AnyTimes()
 
 	vp = validator_params.NewValidatorParams()
 	h = NewApiHandler(
