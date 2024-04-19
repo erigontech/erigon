@@ -50,13 +50,7 @@ func (tf *TorrentFiles) delete(name string) error {
 	return os.Remove(filepath.Join(tf.dir, name))
 }
 
-func (tf *TorrentFiles) Create(name string, res []byte) error {
-	tf.lock.Lock()
-	defer tf.lock.Unlock()
-	return tf.create(name, res)
-}
-
-func (tf *TorrentFiles) CreateIfNotProhibited(name string, res []byte) (ts *torrent.TorrentSpec, prohibited, created bool, err error) {
+func (tf *TorrentFiles) Create(name string, res []byte) (ts *torrent.TorrentSpec, prohibited, created bool, err error) {
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
 	prohibited, err = tf.newDownloadsAreProhibited(name)
@@ -82,12 +76,12 @@ func (tf *TorrentFiles) create(name string, res []byte) error {
 	if !strings.HasSuffix(name, ".torrent") {
 		name += ".torrent"
 	}
-	torrentFilePath := filepath.Join(tf.dir, name)
-
 	if len(res) == 0 {
-		return fmt.Errorf("try to write 0 bytes to file: %s", torrentFilePath)
+		return fmt.Errorf("try to write 0 bytes to file: %s", name)
 	}
-	f, err := os.Create(torrentFilePath)
+
+	fPath := filepath.Join(tf.dir, name)
+	f, err := os.Create(fPath + ".tmp")
 	if err != nil {
 		return err
 	}
@@ -98,15 +92,17 @@ func (tf *TorrentFiles) create(name string, res []byte) error {
 	if err = f.Sync(); err != nil {
 		return err
 	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(fPath+".tmp", fPath); err != nil {
+		return err
+	}
+
 	return nil
 }
 
-func (tf *TorrentFiles) CreateTorrentFromMetaInfo(fPath string, mi *metainfo.MetaInfo) error {
-	tf.lock.Lock()
-	defer tf.lock.Unlock()
-	return tf.createTorrentFromMetaInfo(fPath, mi)
-}
-func (tf *TorrentFiles) createTorrentFromMetaInfo(fPath string, mi *metainfo.MetaInfo) error {
+func (tf *TorrentFiles) createFromMetaInfo(fPath string, mi *metainfo.MetaInfo) error {
 	file, err := os.Create(fPath + ".tmp")
 	if err != nil {
 		return err
@@ -125,6 +121,35 @@ func (tf *TorrentFiles) createTorrentFromMetaInfo(fPath string, mi *metainfo.Met
 		return err
 	}
 	return nil
+}
+
+func (tf *TorrentFiles) CreateWithMetaInfo(info *metainfo.Info, additionalMetaInfo *metainfo.MetaInfo) (created bool, err error) {
+	name := info.Name
+	if !strings.HasSuffix(name, ".torrent") {
+		name += ".torrent"
+	}
+	mi, err := CreateMetaInfo(info, additionalMetaInfo)
+	if err != nil {
+		return false, err
+	}
+
+	tf.lock.Lock()
+	defer tf.lock.Unlock()
+
+	prohibited, err := tf.newDownloadsAreProhibited(name)
+	if err != nil {
+		return false, err
+	}
+	if prohibited {
+		return false, nil
+	}
+	if tf.exists(name) {
+		return false, nil
+	}
+	if err = tf.createFromMetaInfo(filepath.Join(tf.dir, name), mi); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (tf *TorrentFiles) LoadByName(name string) (*torrent.TorrentSpec, error) {
