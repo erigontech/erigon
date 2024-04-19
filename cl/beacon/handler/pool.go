@@ -327,7 +327,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 				subnetId := subnet // this effectively makes a copy
 				if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
 					Data:     encodedSSZ,
-					Name:     gossip.TopicNamePrefixSyncCommittee,
+					Name:     gossip.TopicNameSyncCommittee(int(subnet)),
 					SubnetId: &subnetId,
 				}); err != nil {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
