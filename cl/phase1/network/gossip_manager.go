@@ -118,6 +118,10 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 		g.sentinel.BanPeer(ctx, data.Peer)
 		return err
 	}
+	if gossip.IsTopicBeaconAttestation(data.Name) {
+		fmt.Println("skipping beacon attestation", data.Name)
+		return nil
+	}
 	if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
 		log.Warn("failed publish gossip", "err", err)
 	}
