@@ -143,7 +143,7 @@ func SpawnZkIntermediateHashesStage(s *stagedsync.StageState, u stagedsync.Unwin
 	}
 
 	shouldRegenerate := to > s.BlockNumber && to-s.BlockNumber > cfg.zk.RebuildTreeAfter
-
+	shouldRegenerate = false
 	eridb := db2.NewEriDb(tx)
 	smt := smt.NewSMT(eridb)
 
@@ -152,13 +152,7 @@ func SpawnZkIntermediateHashesStage(s *stagedsync.StageState, u stagedsync.Unwin
 			return trie.EmptyRoot, err
 		}
 	} else {
-		// increment to latest executed block
-		incrementTo, err := stages.GetStageProgress(tx, stages.Execution)
-		if err != nil {
-			return trie.EmptyRoot, err
-		}
-
-		syncHeadHeader, err = cfg.blockReader.HeaderByNumber(ctx, tx, incrementTo)
+		syncHeadHeader, err = cfg.blockReader.HeaderByNumber(ctx, tx, to)
 		if err != nil {
 			return trie.EmptyRoot, err
 		}
@@ -167,7 +161,7 @@ func SpawnZkIntermediateHashesStage(s *stagedsync.StageState, u stagedsync.Unwin
 		}
 		expectedRootHash = syncHeadHeader.Root
 		headerHash = syncHeadHeader.Hash()
-		if root, err = zkIncrementIntermediateHashes(logPrefix, s, tx, eridb, smt, incrementTo, cfg.checkRoot, &expectedRootHash, quit); err != nil {
+		if root, err = zkIncrementIntermediateHashes(logPrefix, s, tx, eridb, smt, to, cfg.checkRoot, &expectedRootHash, quit); err != nil {
 			return trie.EmptyRoot, err
 		}
 	}
