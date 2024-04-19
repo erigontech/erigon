@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,6 +20,13 @@ var (
 		Name:  "diagnostics.print.downloader",
 		Usage: "Prints details about downloader status to console",
 	}
+
+	debugURLFlag = cli.StringFlag{
+		Name:     "debug.addr",
+		Usage:    "URL to the debug endpoint",
+		Required: false,
+		Value:    "localhost:6060",
+	}
 )
 
 var diagnosticsCommand = cli.Command{
@@ -35,6 +43,7 @@ var diagnosticsCommand = cli.Command{
 	},
 	Flags: append([]cli.Flag{
 		&diagnosticsPrintDownloader,
+		&debugURLFlag,
 	}, debug.Flags...),
 
 	Description: `The diagnostics command prints diagnostics data to console.`,
@@ -45,74 +54,101 @@ func printDiagnostics(cliCtx *cli.Context) error {
 }
 
 func PrintDiagnostics(cliCtx *cli.Context, logger log.Logger) error {
-	logger.Info("[!!!!Starting diagnostics]")
-	MakeHttpGetCall()
+	url := "http://" + cliCtx.String(debugURLFlag.Name) + "/debug/"
+	PrintCurentStage(url)
+	PrintSnapshotDownload(url)
 	return nil
 }
 
-func MakeHttpGetCall() {
+func PrintCurentStage(url string) {
+	data, err := GetSyncStats(url)
+	if err != nil {
+		log.Error("Error:", err)
+		return
+	}
+
+	fmt.Println("-------------------Stages-------------------")
+
+	for idx, stage := range data.SyncStages.StagesList {
+		if idx == int(data.SyncStages.CurrentStage) {
+			fmt.Println("[" + stage + "]" + " - Running")
+		} else if idx < int(data.SyncStages.CurrentStage) {
+			fmt.Println("[" + stage + "]" + " - Completed")
+		} else {
+			fmt.Println("[" + stage + "]" + " - Queued")
+		}
+	}
+}
+
+func GetSyncStats(url string) (diagnostics.SyncStatistics, error) {
+	data, err := MakeHttpGetCall(url + "snapshot-sync")
+	if err != nil {
+		return diagnostics.SyncStatistics{}, err
+	}
+
+	if myValue, ok := data.(diagnostics.SyncStatistics); ok {
+		return myValue, nil
+	} else {
+		return diagnostics.SyncStatistics{}, errors.New("conversion failed: interface is not of type sync statistics")
+	}
+}
+
+func PrintSnapshotDownload(url string) {
+	data, err := GetSyncStats(url)
+	if err != nil {
+		log.Error("Error:", err)
+		return
+	}
+
+	fmt.Println("-------------------Snapshot Download-------------------")
+
+	snapDownload := data.SnapshotDownload
+	var remainingBytes uint64
+	percent := 50
+	if snapDownload.Total > snapDownload.Downloaded {
+		remainingBytes = snapDownload.Total - snapDownload.Downloaded
+		percent = int((snapDownload.Downloaded*100)/snapDownload.Total) / 2
+	}
+
+	logstr := "["
+
+	for i := 1; i < 50; i++ {
+		if i < percent {
+			logstr += "#"
+		} else {
+			logstr += "."
+		}
+	}
+
+	logstr += "]"
+
+	fmt.Println("Download:", logstr, common.ByteCount(snapDownload.Downloaded), "/", common.ByteCount(snapDownload.Total))
+	downloadTimeLeft := calculateTime(remainingBytes, snapDownload.DownloadRate)
+
+	fmt.Println("Time left:", downloadTimeLeft)
+}
+
+func MakeHttpGetCall(url string) (any, error) {
 	// Make a GET request
 
-	resp, err := http.Get("http://localhost:6060/debug/snapshot-sync")
+	resp, err := http.Get(url)
 	if err != nil {
-		fmt.Println("Error: ", err)
+		return nil, err
 	}
+
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Println("Error: ", err)
+		return nil, err
 	}
 
 	var data diagnostics.SyncStatistics
-	marshalErr := json.Unmarshal(body, &data)
-	if marshalErr == nil {
-
-		/*fmt.Println("Current stage:", data.SyncStages.StagesList[data.SyncStages.CurrentStage])
-		fmt.Println("Snapshot download progress:", data.SnapshotDownload.Downloaded)
-		fmt.Println("Snapshot download total:", data.SnapshotDownload.Total)
-		fmt.Println("Snapshot download speed:", data.SnapshotDownload.DownloadRate)
-		fmt.Println("Snapshot download time:", data.SnapshotDownload.TotalTime)
-		fmt.Println("Snapshot Upload speed:", data.SnapshotDownload.UploadRate)
-		fmt.Println("Peers count:", data.SnapshotDownload.Peers)*/
-
-		var remainingBytes uint64
-		percent := 50
-		if data.SnapshotDownload.Total > data.SnapshotDownload.Downloaded {
-			remainingBytes = data.SnapshotDownload.Total - data.SnapshotDownload.Downloaded
-			percent = int((data.SnapshotDownload.Downloaded*100)/data.SnapshotDownload.Total) / 2
-		}
-
-		logstr := "["
-
-		for i := 1; i < 50; i++ {
-			if i < percent {
-				logstr += "#"
-			} else {
-				logstr += "."
-			}
-		}
-
-		logstr += "]"
-
-		fmt.Println("Download:", logstr, common.ByteCount(data.SnapshotDownload.Downloaded), "/", common.ByteCount(data.SnapshotDownload.Total))
-		downloadTimeLeft := calculateTime(remainingBytes, data.SnapshotDownload.DownloadRate)
-
-		fmt.Println("Time left:", downloadTimeLeft)
-
-		/*log.Info(fmt.Sprintf("[%s] %s", logPrefix, logReason),
-			"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, common.ByteCount(stats.BytesCompleted), common.ByteCount(stats.BytesTotal)),
-			"time-left", downloadTimeLeft,
-			"total-time", time.Since(startTime).Round(time.Second).String(),
-			"download", common.ByteCount(stats.DownloadRate)+"/s",
-			"upload", common.ByteCount(stats.UploadRate)+"/s",
-			"peers", stats.PeersUnique,
-			"files", stats.FilesTotal,
-			"metadata", fmt.Sprintf("%d/%d", stats.MetadataReady, stats.FilesTotal),
-			"connections", stats.ConnectionsTotal,
-			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-		)*/
+	err = json.Unmarshal(body, &data)
+	if err != nil {
+		return nil, err
 	}
 
+	return data, nil
 }
 
 func calculateTime(amountLeft, rate uint64) string {
