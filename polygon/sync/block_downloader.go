@@ -170,6 +170,9 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 				"bytes/s", fmt.Sprintf("%s", common.ByteCount(uint64(blocksTotalSize/time.Since(fetchStartTime).Seconds()))),
 			)
 
+			blockCount = 0
+			blocksTotalSize = float64(0)
+
 		default:
 			// carry on
 		}
@@ -247,7 +250,7 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 
 		blockCount += len(blocks)
 		for _, block := range blocks {
-			blocksTotalSize += float64(block.Size())
+			blocksTotalSize += float64(block.EncodingSize())
 		}
 		batchFetchStartTime = time.Now() // reset for next time
 
