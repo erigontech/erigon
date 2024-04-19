@@ -17,7 +17,7 @@ import (
 
 var (
 	diagnosticsPrintDownloader = cli.BoolFlag{
-		Name:  "diagnostics.print.downloader",
+		Name:  "print.downloader",
 		Usage: "Prints details about downloader status to console",
 	}
 
@@ -33,7 +33,7 @@ var diagnosticsCommand = cli.Command{
 	Action:    MigrateFlags(printDiagnostics),
 	Name:      "diagnostics",
 	Usage:     "Print diagnostics data to console",
-	ArgsUsage: "--diagnostics.print.snapshot.download",
+	ArgsUsage: "--print.downloader",
 	Before: func(cliCtx *cli.Context) error {
 		_, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 		if err != nil {
@@ -56,7 +56,10 @@ func printDiagnostics(cliCtx *cli.Context) error {
 func PrintDiagnostics(cliCtx *cli.Context, logger log.Logger) error {
 	url := "http://" + cliCtx.String(debugURLFlag.Name) + "/debug/"
 	PrintCurentStage(url)
-	PrintSnapshotDownload(url)
+	if cliCtx.Bool(diagnosticsPrintDownloader.Name) {
+		PrintSnapshotDownload(url)
+	}
+
 	return nil
 }
 
@@ -129,8 +132,6 @@ func PrintSnapshotDownload(url string) {
 }
 
 func MakeHttpGetCall(url string) (any, error) {
-	// Make a GET request
-
 	resp, err := http.Get(url)
 	if err != nil {
 		return nil, err
