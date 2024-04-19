@@ -87,21 +87,21 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 			})
 			continue
 		}
-		// if a.sentinel != nil {
-		// 	encodedSSZ, err := attestation.EncodeSSZ(nil)
-		// 	if err != nil {
-		// 		beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
-		// 		return
-		// 	}
-		// 	if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
-		// 		Data:     encodedSSZ,
-		// 		Name:     gossip.TopicNameBeaconAttestation(subnet),
-		// 		SubnetId: &subnet,
-		// 	}); err != nil {
-		// 		beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
-		// 		return
-		// 	}
-		// }
+		if a.sentinel != nil {
+			encodedSSZ, err := attestation.EncodeSSZ(nil)
+			if err != nil {
+				beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+				return
+			}
+			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
+				Data:     encodedSSZ,
+				Name:     gossip.TopicNameBeaconAttestation(subnet),
+				SubnetId: &subnet,
+			}); err != nil {
+				beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+				return
+			}
+		}
 	}
 	if len(failures) > 0 {
 		errResp := poolingError{

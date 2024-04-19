@@ -370,7 +370,7 @@ func (s *Sentinel) defaultAggregateSubnetTopicParams() *pubsub.TopicScoreParams 
 	// Determine the amount of validators expected in a subnet in a single slot.
 	numPerSlot := time.Duration(subnetWeight / uint64(s.cfg.BeaconConfig.SlotsPerEpoch))
 	if numPerSlot == 0 {
-		log.Debug("numPerSlot is 0, skipping initializing topic scoring")
+		log.Trace("numPerSlot is 0, skipping initializing topic scoring")
 		return nil
 	}
 	comsPerSlot := s.committeeCountPerSlot()
@@ -383,20 +383,20 @@ func (s *Sentinel) defaultAggregateSubnetTopicParams() *pubsub.TopicScoreParams 
 	}
 	rate := numPerSlot * 2 / gossipSubD
 	if rate == 0 {
-		log.Error("rate is 0, skipping initializing topic scoring")
+		log.Trace("rate is 0, skipping initializing topic scoring")
 		return nil
 	}
 	// Determine expected first deliveries based on the message rate.
 	firstMessageCap, err := decayLimit(s.scoreDecay(firstDecay*s.oneEpochDuration()), float64(rate))
 	if err != nil {
-		log.Error("skipping initializing topic scoring", "err", err)
+		log.Trace("skipping initializing topic scoring", "err", err)
 		return nil
 	}
 	firstMessageWeight := float64(maxFirstDeliveryScore) / firstMessageCap
 	// Determine expected mesh deliveries based on message rate applied with a dampening factor.
 	meshThreshold, err := decayThreshold(s.scoreDecay(meshDecay*s.oneEpochDuration()), float64(numPerSlot)/float64(dampeningFactor))
 	if err != nil {
-		log.Error("skipping initializing topic scoring", "err", err)
+		log.Trace("skipping initializing topic scoring", "err", err)
 		return nil
 	}
 	meshCap := 4 * meshThreshold
