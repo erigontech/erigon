@@ -595,11 +595,10 @@ func safelyCall(fn func(tx kv.RwTx) error, tx kv.RwTx) (err error) {
 	return fn(tx)
 }
 
-// Batch calls fn as part of a batch. It behaves similar to Update,
-// except:
+// Batch is only useful when there are multiple goroutines calling it.
+// It behaves similar to Update, except:
 //
-// 1. concurrent Batch calls can be combined into a single Bolt
-// transaction.
+// 1. concurrent Batch calls can be combined into a single RwTx.
 //
 // 2. the function passed to Batch may be called multiple times,
 // regardless of whether it returns error or not.
@@ -611,7 +610,7 @@ func safelyCall(fn func(tx kv.RwTx) error, tx kv.RwTx) (err error) {
 // The maximum batch size and delay can be adjusted with DB.MaxBatchSize
 // and DB.MaxBatchDelay, respectively.
 //
-// Batch is only useful when there are multiple goroutines calling it.
+// Batch
 func (db *MdbxKV) Batch(fn func(tx kv.RwTx) error) error {
 	errCh := make(chan error, 1)
 
