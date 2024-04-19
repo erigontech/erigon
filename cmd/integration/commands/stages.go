@@ -13,7 +13,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
-	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
 	"github.com/spf13/cobra"
@@ -1082,7 +1081,6 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	if warmup {
 		return reset2.WarmupExec(ctx, db)
 	}
-	agg.BuildMissedIndicesInBackground(ctx, estimate.IndexSnapshot.Workers())
 	if reset {
 		if err := reset2.ResetExec(ctx, db, chain, "", logger); err != nil {
 			return err
