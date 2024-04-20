@@ -387,7 +387,7 @@ func decayLimit(decayRate, rate float64) (float64, error) {
 func (s *Sentinel) committeeCountPerSlot() uint64 {
 	activeValidatorCount := s.cfg.ActiveIndicies
 	cfg := s.cfg.BeaconConfig
-	var committeesPerSlot = activeValidatorCount / uint64(cfg.SlotsPerEpoch) / cfg.TargetCommitteeSize
+	var committeesPerSlot = activeValidatorCount / cfg.SlotsPerEpoch / cfg.TargetCommitteeSize
 
 	if committeesPerSlot > cfg.MaxCommitteesPerSlot {
 		return cfg.MaxCommitteesPerSlot
@@ -428,13 +428,13 @@ func (s *Sentinel) defaultAggregateSubnetTopicParams() *pubsub.TopicScoreParams 
 		return nil
 	}
 	// Determine the amount of validators expected in a subnet in a single slot.
-	numPerSlot := time.Duration(subnetWeight / uint64(s.cfg.BeaconConfig.SlotsPerEpoch))
+	numPerSlot := time.Duration(subnetWeight / s.cfg.BeaconConfig.SlotsPerEpoch)
 	if numPerSlot == 0 {
 		log.Trace("numPerSlot is 0, skipping initializing topic scoring")
 		return nil
 	}
 	comsPerSlot := s.committeeCountPerSlot()
-	exceedsThreshold := comsPerSlot >= 2*subnetCount/uint64(s.cfg.BeaconConfig.SlotsPerEpoch)
+	exceedsThreshold := comsPerSlot >= 2*subnetCount/s.cfg.BeaconConfig.SlotsPerEpoch
 	firstDecay := time.Duration(1)
 	meshDecay := time.Duration(4)
 	if exceedsThreshold {
