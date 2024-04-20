@@ -36,15 +36,19 @@ func TestFSProhibitBackwardCompat(t *testing.T) {
 		require.True(prohibited)
 	})
 	t.Run("prev version .lock upgrade", func(t *testing.T) {
+		//old lock
 		err := os.WriteFile(filepath.Join(dirs.Snap, ProhibitNewDownloadsFileName), nil, 0644)
 		require.NoError(err)
 
 		tf := NewAtomicTorrentFiles(dirs.Snap)
+		err = tf.prohibitNewDownloads("transactions") //upgrade
+		require.NoError(err)
+
 		prohibited, err := tf.NewDownloadsAreProhibited("v1-004900-005000-headers.seg")
 		require.NoError(err)
-		require.True(prohibited)
+		require.False(prohibited)
 		prohibited, err = tf.NewDownloadsAreProhibited("v1-004900-005000-headers.seg.torrent")
 		require.NoError(err)
-		require.True(prohibited)
+		require.False(prohibited)
 	})
 }
