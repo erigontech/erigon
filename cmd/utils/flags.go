@@ -652,7 +652,7 @@ var (
 		Value: metrics.DefaultConfig.Port,
 	}
 	HistoryV3Flag = cli.BoolFlag{
-		Name:  "experimental.history.v3",
+		Name:  "history.v3",
 		Value: true,
 		Usage: "(Also known as Erigon3) Not recommended yet: Can't change this flag after node creation. New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
 	}
