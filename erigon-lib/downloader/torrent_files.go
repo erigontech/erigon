@@ -50,26 +50,22 @@ func (tf *TorrentFiles) delete(name string) error {
 	return os.Remove(filepath.Join(tf.dir, name))
 }
 
-func (tf *TorrentFiles) Create(name string, res []byte) (ts *torrent.TorrentSpec, prohibited, created bool, err error) {
+func (tf *TorrentFiles) Create(name string, res []byte) (ts *torrent.TorrentSpec, created bool, err error) {
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
-	prohibited, err = tf.newDownloadsAreProhibited(name)
-	if err != nil {
-		return nil, false, false, err
-	}
 
-	if !tf.exists(name) && !prohibited {
+	if !tf.exists(name) {
 		err = tf.create(name, res)
 		if err != nil {
-			return nil, false, false, err
+			return nil, false, err
 		}
 	}
 
 	ts, err = tf.load(filepath.Join(tf.dir, name))
 	if err != nil {
-		return nil, false, false, err
+		return nil, false, err
 	}
-	return ts, prohibited, false, nil
+	return ts, false, nil
 }
 
 func (tf *TorrentFiles) create(name string, res []byte) error {
@@ -136,13 +132,6 @@ func (tf *TorrentFiles) CreateWithMetaInfo(info *metainfo.Info, additionalMetaIn
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
 
-	prohibited, err := tf.newDownloadsAreProhibited(name)
-	if err != nil {
-		return false, err
-	}
-	if prohibited {
-		return false, nil
-	}
 	if tf.exists(name) {
 		return false, nil
 	}
