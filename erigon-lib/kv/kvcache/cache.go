@@ -175,7 +175,7 @@ var DefaultCoherentConfig = CoherentConfig{
 	MetricsLabel:    "default",
 	WithStorage:     true,
 	WaitForNewBlock: true,
-	StateV3:         false,
+	StateV3:         true,
 }
 
 func New(cfg CoherentConfig) *Coherent {
