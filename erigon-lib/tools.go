@@ -17,7 +17,6 @@ package tools
 // build tag 'trick_go_mod_tidy' - is used to hide warnings of IDEA (because we can't import `main` packages in go)
 
 import (
-	_ "github.com/golang/mock/mockgen/model"
 	_ "github.com/ledgerwatch/interfaces"
 	_ "github.com/ledgerwatch/interfaces/downloader"
 	_ "github.com/ledgerwatch/interfaces/execution"
@@ -28,5 +27,6 @@ import (
 	_ "github.com/ledgerwatch/interfaces/types"
 	_ "github.com/ledgerwatch/interfaces/web3"
 	_ "github.com/matryer/moq"
+	_ "go.uber.org/mock/mockgen/model"
 	_ "google.golang.org/grpc/cmd/protoc-gen-go-grpc"
 )
