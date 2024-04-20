@@ -87,7 +87,7 @@ type Downloader struct {
 	logger    log.Logger
 	verbosity log.Lvl
 
-	torrentFiles    *AtomicTorrentFS
+	torrentFS       *AtomicTorrentFS
 	snapshotLock    *snapshotLock
 	webDownloadInfo map[string]webDownloadInfo
 	downloading     map[string]struct{}
@@ -263,14 +263,14 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		webseeds:            NewWebSeeds(cfg.WebSeedUrls, verbosity, logger),
 		logger:              logger,
 		verbosity:           verbosity,
-		torrentFiles:        &AtomicTorrentFS{dir: cfg.Dirs.Snap},
+		torrentFS:           &AtomicTorrentFS{dir: cfg.Dirs.Snap},
 		snapshotLock:        lock,
 		webDownloadInfo:     map[string]webDownloadInfo{},
 		webDownloadSessions: map[string]*RCloneSession{},
 		downloading:         map[string]struct{}{},
 		webseedsDiscover:    discover,
 	}
-	d.webseeds.SetTorrent(d.torrentFiles, lock.Downloads, cfg.DownloadTorrentFilesFromWebseed)
+	d.webseeds.SetTorrent(d.torrentFS, lock.Downloads, cfg.DownloadTorrentFilesFromWebseed)
 
 	requestHandler.downloader = d
 
@@ -2276,11 +2276,11 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	}
 
 	// if we don't have the torrent file we build it if we have the .seg file
-	_, err := BuildTorrentIfNeed(ctx, name, d.SnapDir(), d.torrentFiles)
+	_, err := BuildTorrentIfNeed(ctx, name, d.SnapDir(), d.torrentFS)
 	if err != nil {
 		return fmt.Errorf("AddNewSeedableFile: %w", err)
 	}
-	ts, err := d.torrentFiles.LoadByName(name)
+	ts, err := d.torrentFS.LoadByName(name)
 	if err != nil {
 		return fmt.Errorf("AddNewSeedableFile: %w", err)
 	}
@@ -2309,12 +2309,12 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	if d.alreadyHaveThisName(name) || !IsSnapNameAllowed(name) {
 		return nil
 	}
-	isProhibited, err := d.torrentFiles.NewDownloadsAreProhibited(name)
+	isProhibited, err := d.torrentFS.NewDownloadsAreProhibited(name)
 	if err != nil {
 		return err
 	}
 
-	if isProhibited && !d.torrentFiles.Exists(name) {
+	if isProhibited && !d.torrentFS.Exists(name) {
 		return nil
 	}
 
@@ -2364,7 +2364,7 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 		}
 
 		mi := t.Metainfo()
-		if _, err := d.torrentFiles.CreateWithMetaInfo(t.Info(), &mi); err != nil {
+		if _, err := d.torrentFS.CreateWithMetaInfo(t.Info(), &mi); err != nil {
 			d.logger.Warn("[snapshots] create torrent file", "err", err)
 			return
 		}
@@ -2408,7 +2408,7 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 	eg, ctx := errgroup.WithContext(d.ctx)
 	eg.SetLimit(ParallelVerifyFiles)
 
-	files, err := AllTorrentSpecs(d.cfg.Dirs, d.torrentFiles)
+	files, err := AllTorrentSpecs(d.cfg.Dirs, d.torrentFS)
 	if err != nil {
 		return err
 	}
@@ -2480,7 +2480,7 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 	return eg.Wait()
 }
 func (d *Downloader) BuildTorrentFilesIfNeed(ctx context.Context, chain string, ignore snapcfg.Preverified) error {
-	_, err := BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs, d.torrentFiles, chain, ignore)
+	_, err := BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs, d.torrentFS, chain, ignore)
 	return err
 }
 func (d *Downloader) Stats() AggStats {
