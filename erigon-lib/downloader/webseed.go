@@ -598,7 +598,7 @@ func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) 
 			d.logger.Log(d.verbosity, "[snapshots] .torrent from webseed rejected", "name", name, "err", err)
 			continue // it's ok if some HTTP provider failed - try next one
 		}
-		ts, _, _, err = d.torrentFiles.Create(name, res)
+		ts, _, err = d.torrentFiles.Create(name, res)
 		return ts, ts != nil, err
 	}
 
