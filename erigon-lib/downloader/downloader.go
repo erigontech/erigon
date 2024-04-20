@@ -183,6 +183,11 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 		case http.StatusInternalServerError, http.StatusBadGateway:
 			r.downloader.stats.WebseedServerFails.Add(1)
 
+			if resp.Body != nil {
+				resp.Body.Close()
+				resp.Body = nil
+			}
+
 			attempts++
 			delayTimer := time.NewTimer(delay)
 
