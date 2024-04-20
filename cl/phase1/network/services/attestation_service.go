@@ -84,12 +84,12 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return fmt.Errorf("epoch mismatch")
 	}
 	// [REJECT] The number of aggregation bits matches the committee size -- i.e. len(aggregation_bits) == len(get_beacon_committee(state, attestation.data.slot, index)).
-	beaconCommitte, err := headState.GetBeaconCommitee(slot, committeeIndex)
+	beaconCommittee, err := s.forkchoiceStore.GetBeaconCommitee(slot, committeeIndex)
 	if err != nil {
 		return err
 	}
 	bits := att.AggregationBits()
-	expectedAggregationBitsLength := len(beaconCommitte)
+	expectedAggregationBitsLength := len(beaconCommittee)
 	actualAggregationBitsLength := utils.GetBitlistLength(bits)
 	if actualAggregationBitsLength != expectedAggregationBitsLength {
 		return fmt.Errorf("aggregation bits count mismatch: %d != %d", actualAggregationBitsLength, expectedAggregationBitsLength)
@@ -101,7 +101,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	for i := 0; i < len(bits); i++ {
 		for j := 0; j < 8; j++ {
 			if bits[i]&(1<<uint(j)) != 0 {
-				if i*8+j >= len(beaconCommitte) {
+				if i*8+j >= len(beaconCommittee) {
 					continue
 				}
 				setBits++
@@ -118,16 +118,15 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	}
 
 	// [IGNORE] There has been no other valid attestation seen on an attestation subnet that has an identical attestation.data.target.epoch and participating validator index.
-	committees, err := s.forkchoiceStore.GetBeaconCommitee(slot, committeeIndex)
 	if err != nil {
 		return err
 	}
-	if onBitIndex >= len(committees) {
+	if onBitIndex >= len(beaconCommittee) {
 		return fmt.Errorf("on bit index out of committee range")
 	}
 	if err := func() error {
 		// mark the validator as seen
-		vIndex := committees[onBitIndex]
+		vIndex := beaconCommittee[onBitIndex]
 		s.validatorAttSeenLock.Lock()
 		defer s.validatorAttSeenLock.Unlock()
 		if _, ok := s.validatorAttestationSeen[targetEpoch]; !ok {
