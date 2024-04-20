@@ -1555,7 +1555,7 @@ func hasIdxFile(sn snaptype.FileInfo, logger log.Logger) bool {
 		}
 		defer idx.Close()
 
-		return idx.ModTime().After(segment.ModTime())
+		return true //idx.ModTime().After(segment.ModTime())
 	case snaptype.Enums.Transactions:
 		idx, err := recsplit.OpenIndex(filepath.Join(dir, fName))
 		if err != nil {
@@ -1563,9 +1563,9 @@ func hasIdxFile(sn snaptype.FileInfo, logger log.Logger) bool {
 		}
 		defer idx.Close()
 
-		if !idx.ModTime().After(segment.ModTime()) {
-			return false
-		}
+		//if !idx.ModTime().After(segment.ModTime()) {
+		//	return false
+		//}
 
 		fName = snaptype.IdxFileName(sn.Version, sn.From, sn.To, snaptype.Indexes.TxnHash2BlockNum.String())
 		idx, err = recsplit.OpenIndex(filepath.Join(dir, fName))
@@ -1574,7 +1574,7 @@ func hasIdxFile(sn snaptype.FileInfo, logger log.Logger) bool {
 		}
 		defer idx.Close()
 
-		return idx.ModTime().After(segment.ModTime())
+		return true //idx.ModTime().After(segment.ModTime())
 	}
 
 	return result
