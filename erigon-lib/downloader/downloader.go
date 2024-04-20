@@ -87,7 +87,7 @@ type Downloader struct {
 	logger    log.Logger
 	verbosity log.Lvl
 
-	torrentFiles    *TorrentFiles
+	torrentFiles    *AtomicTorrentFS
 	snapshotLock    *snapshotLock
 	webDownloadInfo map[string]webDownloadInfo
 	downloading     map[string]struct{}
@@ -263,7 +263,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		webseeds:            NewWebSeeds(cfg.WebSeedUrls, verbosity, logger),
 		logger:              logger,
 		verbosity:           verbosity,
-		torrentFiles:        &TorrentFiles{dir: cfg.Dirs.Snap},
+		torrentFiles:        &AtomicTorrentFS{dir: cfg.Dirs.Snap},
 		snapshotLock:        lock,
 		webDownloadInfo:     map[string]webDownloadInfo{},
 		webDownloadSessions: map[string]*RCloneSession{},
