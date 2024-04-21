@@ -24,7 +24,7 @@ func main() {
 	logging.LogConsoleVerbosityFlag.Value = log.LvlError.String()
 
 	app := cli.NewApp()
-	app.Name = "diagnostics"
+	app.Name = "diag"
 	app.Version = params.VersionWithCommit(params.GitCommit)
 	app.EnableBashCompletion = true
 
@@ -38,14 +38,12 @@ func main() {
 	app.UsageText = app.Name + ` [command] [flags]`
 
 	app.Action = func(context *cli.Context) error {
-		if context.Args().Present() {
-			var goodNames []string
-			for _, c := range app.VisibleCommands() {
-				goodNames = append(goodNames, c.Name)
-			}
-			_, _ = fmt.Fprintf(os.Stderr, "Command '%s' not found. Available commands: %s\n", context.Args().First(), goodNames)
-			cli.ShowAppHelpAndExit(context, 1)
+		var goodNames []string
+		for _, c := range app.VisibleCommands() {
+			goodNames = append(goodNames, c.Name)
 		}
+		_, _ = fmt.Fprintf(os.Stderr, "Command '%s' not found. Available commands: %s\n", context.Args().First(), goodNames)
+		cli.ShowAppHelpAndExit(context, 1)
 
 		return nil
 	}
