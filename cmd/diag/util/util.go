@@ -1,14 +1,25 @@
 package util
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
 
-func MakeHttpGetCall(url string, data interface{}) error {
-	resp, err := http.Get(url)
+func MakeHttpGetCall(ctx context.Context, url string, data interface{}) error {
+	var client = &http.Client{
+		Timeout: time.Second * 20,
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
