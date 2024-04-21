@@ -154,7 +154,7 @@ func (s *GossipManager) GetMatchingSubscription(match string) *GossipSubscriptio
 	s.subscriptions.Range(func(topic, value interface{}) bool {
 		topicStr := topic.(string)
 		// take out third part of the topic by splitting on "/"
-		// reference: eth2/d31f6191/beacon_attestation_45/ssz_snappy
+		// reference: /eth2/d31f6191/beacon_attestation_45/ssz_snappy
 		parts := strings.Split(topicStr, "/")
 		if len(parts) < 4 {
 			return true
