@@ -30,7 +30,7 @@ func MakeHttpGetCall(ctx context.Context, url string, data interface{}) error {
 		return err
 	}
 
-	err = json.Unmarshal(body, data)
+	err = json.Unmarshal(body, &data)
 	if err != nil {
 		return err
 	}
