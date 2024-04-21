@@ -1,7 +1,9 @@
 package sync_contribution_pool
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/Giulio2002/bls"
@@ -211,10 +213,13 @@ func (s *syncContributionPoolImpl) GetSyncAggregate(slot uint64, beaconBlockRoot
 	}
 	aggregate := &cltypes.SyncAggregate{}
 	signatures := [][]byte{}
-	syncSubCommitteeIndex := cltypes.SyncCommitteeSize / s.beaconCfg.SyncCommitteeSubnetCount
+	syncSubCommitteeIndex := s.beaconCfg.SyncCommitteeSize / s.beaconCfg.SyncCommitteeSubnetCount
 	// triple for-loop for the win.
 	for _, contribution := range contributions {
-		for i, _ := range contribution.AggregationBits {
+		if bytes.Equal(contribution.AggregationBits, make([]byte, cltypes.SyncCommitteeAggregationBitsSize)) {
+			continue
+		}
+		for i := range contribution.AggregationBits {
 			for j := 0; j < 8; j++ {
 				bitIndex := i*8 + j
 				partecipated := utils.IsBitOn(contribution.AggregationBits, bitIndex)
@@ -224,7 +229,13 @@ func (s *syncContributionPoolImpl) GetSyncAggregate(slot uint64, beaconBlockRoot
 				}
 			}
 		}
+		fmt.Println(aggregate.SyncCommiteeBits)
 		signatures = append(signatures, contribution.Signature[:])
+	}
+	if len(signatures) == 0 {
+		return &cltypes.SyncAggregate{ // return an empty aggregate.
+			SyncCommiteeSignature: bls.InfiniteSignature,
+		}, nil
 	}
 	// Aggregate the signatures.
 	aggregateSignature, err := bls.AggregateSignatures(signatures)
