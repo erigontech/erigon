@@ -67,12 +67,14 @@ func (s *syncContributionPoolImpl) AddSyncContribution(headState *state.CachingB
 	if val, ok := s.syncContributionPool[key]; ok {
 		baseContribution = val.Copy()
 	}
-	// Time to aggregate the giga aggregatable.
-	if utils.IsSupersetBitlist(baseContribution.AggregationBits, contribution.AggregationBits) {
-		return ErrIsSuperset // Skip it if it is just a superset.
+	before := common.Copy(baseContribution.AggregationBits)
+
+	utils.MergeBitlists(baseContribution.AggregationBits, contribution.AggregationBits)
+	// If nothing changed, return.
+	if bytes.Equal(before, baseContribution.AggregationBits) {
+		return ErrIsSuperset
 	}
 	// Aggregate the bits.
-	utils.MergeBitlists(baseContribution.AggregationBits, contribution.AggregationBits)
 	// Aggregate the signature.
 	aggregatedSignature, err := bls.AggregateSignatures([][]byte{
 		baseContribution.Signature[:],
