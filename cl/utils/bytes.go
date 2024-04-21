@@ -121,12 +121,12 @@ func IsBitOn(b []byte, idx int) bool {
 	return b[idx/8]&i == i
 }
 
-func IsSupersetBitlist(a, b []byte) bool {
-	if len(a) < len(b) {
+func IsStrictSupersetBitlist(a, b []byte) bool {
+	if len(a) != len(b) {
 		return false
 	}
-	for i := range b {
-		if a[i]&b[i] != b[i] {
+	for i := range a {
+		if a[i]&^b[i] != 0 {
 			return false
 		}
 	}
