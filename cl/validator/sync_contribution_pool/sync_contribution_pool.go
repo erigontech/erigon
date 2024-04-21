@@ -69,7 +69,7 @@ func (s *syncContributionPoolImpl) AddSyncContribution(headState *state.CachingB
 	if val, ok := s.syncContributionPoolForBlocks[key]; ok {
 		baseContribution = val.Copy()
 	}
-	if utils.IsNonStrictSupersetBitlist(baseContribution.AggregationBits, contribution.AggregationBits) {
+	if !utils.IsNonStrictSupersetBitlist(baseContribution.AggregationBits, contribution.AggregationBits) {
 		fmt.Println(contribution.AggregationBits, baseContribution.AggregationBits)
 		return ErrIsSuperset
 	}
