@@ -6,6 +6,7 @@ import (
 
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -21,6 +22,7 @@ type syncContributionKey struct {
 type syncContributionPoolImpl struct {
 	// syncContributionPool is a map of sync contributions, indexed by slot, subcommittee index and block root.
 	syncContributionPool map[syncContributionKey]*cltypes.Contribution
+	beaconCfg            *clparams.BeaconChainConfig
 
 	mu sync.Mutex
 }
@@ -170,4 +172,66 @@ func (s *syncContributionPoolImpl) AddSyncCommitteeMessage(headState *state.Cach
 	s.syncContributionPool[key] = contribution
 	s.cleanupOldContributions(headState)
 	return nil
+}
+
+// GetSyncAggregate computes and returns the sync aggregate for the sync messages pointing to a given beacon block root.
+/*
+def process_sync_committee_contributions(block: BeaconBlock,
+	contributions: Set[SyncCommitteeContribution]) -> None:
+	sync_aggregate = SyncAggregate()
+	signatures = []
+	sync_subcommittee_size = SYNC_COMMITTEE_SIZE // SYNC_COMMITTEE_SUBNET_COUNT
+
+	for contribution in contributions:
+		subcommittee_index = contribution.subcommittee_index
+		for index, participated in enumerate(contribution.aggregation_bits):
+			if participated:
+				participant_index = sync_subcommittee_size * subcommittee_index + index
+				sync_aggregate.sync_committee_bits[participant_index] = True
+		signatures.append(contribution.signature)
+
+	sync_aggregate.sync_committee_signature = bls.Aggregate(signatures)
+	block.body.sync_aggregate = sync_aggregate
+*/
+func (s *syncContributionPoolImpl) GetSyncAggregate(slot uint64, beaconBlockRoot common.Hash) (*cltypes.SyncAggregate, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// find all contributions for the given beacon block root.
+	contributions := []*cltypes.Contribution{}
+	for key, contribution := range s.syncContributionPool {
+		if key.beaconBlockRoot == beaconBlockRoot && slot == key.slot {
+			contributions = append(contributions, contribution)
+		}
+	}
+	if len(contributions) == 0 {
+		return &cltypes.SyncAggregate{ // return an empty aggregate.
+			SyncCommiteeSignature: bls.InfiniteSignature,
+		}, nil
+	}
+	aggregate := &cltypes.SyncAggregate{}
+	signatures := [][]byte{}
+	syncSubCommitteeIndex := cltypes.SyncCommitteeSize / s.beaconCfg.SyncCommitteeSubnetCount
+	// triple for-loop for the win.
+	for _, contribution := range contributions {
+		for i, _ := range contribution.AggregationBits {
+			for j := 0; j < 8; j++ {
+				bitIndex := i*8 + j
+				partecipated := utils.IsBitOn(contribution.AggregationBits, bitIndex)
+				if partecipated {
+					participantIndex := syncSubCommitteeIndex*contribution.SubcommitteeIndex + uint64(bitIndex)
+					utils.FlipBitOn(aggregate.SyncCommiteeBits[:], int(participantIndex))
+				}
+			}
+		}
+		signatures = append(signatures, contribution.Signature[:])
+	}
+	// Aggregate the signatures.
+	aggregateSignature, err := bls.AggregateSignatures(signatures)
+	if err != nil {
+		return &cltypes.SyncAggregate{ // return an empty aggregate.
+			SyncCommiteeSignature: bls.InfiniteSignature,
+		}, err
+	}
+	copy(aggregate.SyncCommiteeSignature[:], aggregateSignature)
+	return aggregate, nil
 }

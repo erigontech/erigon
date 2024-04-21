@@ -66,7 +66,6 @@ func NewForkChoiceStorageMock() *ForkChoiceStorageMock {
 		GetFinalityCheckpointsVal: make(map[common.Hash][3]solid.Checkpoint),
 		LightClientBootstraps:     make(map[common.Hash]*cltypes.LightClientBootstrap),
 		LCUpdates:                 make(map[uint64]*cltypes.LightClientUpdate),
-		SyncContributionPool:      sync_contribution_pool.NewSyncContributionPoolMock(),
 		Headers:                   make(map[common.Hash]*cltypes.BeaconBlockHeader),
 		GetBeaconCommitteeMock:    nil,
 	}
