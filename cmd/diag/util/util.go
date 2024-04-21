@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/diagnostics"
 )
 
 func MakeHttpGetCall(ctx context.Context, url string, data interface{}) error {
@@ -28,6 +30,12 @@ func MakeHttpGetCall(ctx context.Context, url string, data interface{}) error {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
+	}
+
+	var dataaaa diagnostics.SyncStatistics
+	numerr := json.Unmarshal(body, &dataaaa)
+	if numerr != nil {
+		return numerr
 	}
 
 	err = json.Unmarshal(body, &data)

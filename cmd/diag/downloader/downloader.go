@@ -28,7 +28,7 @@ func print(cliCtx *cli.Context) error {
 	var data diagnostics.SyncStatistics
 	url := "http://" + cliCtx.String(flags.DebugURLFlag.Name) + "/debug/snapshot-sync"
 
-	err := util.MakeHttpGetCall(cliCtx.Context, url, data)
+	err := util.MakeHttpGetCall(cliCtx.Context, url, &data)
 
 	if err != nil {
 		return err
