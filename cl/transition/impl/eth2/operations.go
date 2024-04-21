@@ -330,6 +330,7 @@ func (I *impl) ProcessSyncAggregate(s abstract.BeaconState, sync *cltypes.SyncAg
 	if err != nil {
 		return err
 	}
+	fmt.Println(blockRoot)
 	msg := utils.Sha256(blockRoot[:], domain)
 	isValid, err := bls.VerifyAggregate(sync.SyncCommiteeSignature[:], msg[:], votedKeys)
 	if err != nil {
