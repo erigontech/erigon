@@ -139,6 +139,14 @@ func IsNonStrictSupersetBitlist(a, b []byte) bool {
 	return true
 }
 
+func BitsOnCount(b []byte) int {
+	count := 0
+	for _, v := range b {
+		count += bits.OnesCount8(v)
+	}
+	return count
+}
+
 func MergeBitlists(a, b []byte) {
 	for i := range b {
 		a[i] |= b[i]

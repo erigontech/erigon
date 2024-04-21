@@ -58,37 +58,16 @@ func (s *syncContributionPoolImpl) AddSyncContribution(headState *state.CachingB
 		subcommitteeIndex: contribution.SubcommitteeIndex,
 		beaconBlockRoot:   contribution.BeaconBlockRoot,
 	}
-	baseContribution := &cltypes.Contribution{
-		Slot:              contribution.Slot,
-		SubcommitteeIndex: contribution.SubcommitteeIndex,
-		BeaconBlockRoot:   contribution.BeaconBlockRoot,
-		AggregationBits:   make([]byte, cltypes.SyncCommitteeAggregationBitsSize),
-		Signature:         bls.InfiniteSignature,
-	}
 
-	if val, ok := s.syncContributionPoolForBlocks[key]; ok {
-		baseContribution = val.Copy()
+	baseContribution, ok := s.syncContributionPoolForBlocks[key]
+	if !ok {
+		s.syncContributionPoolForBlocks[key] = contribution.Copy()
+		return nil
 	}
-	if !utils.IsNonStrictSupersetBitlist(baseContribution.AggregationBits, contribution.AggregationBits) {
-		fmt.Println(contribution.AggregationBits, baseContribution.AggregationBits)
+	if utils.BitsOnCount(baseContribution.AggregationBits) >= utils.BitsOnCount(contribution.AggregationBits) {
 		return ErrIsSuperset
 	}
-	// aggregate the aggregation bits.
-	utils.MergeBitlists(baseContribution.AggregationBits, contribution.AggregationBits)
-
-	// Aggregate the signature.
-	aggregatedSignature, err := bls.AggregateSignatures([][]byte{
-		baseContribution.Signature[:],
-		contribution.Signature[:],
-	})
-	if err != nil {
-		return err
-	}
-	copy(baseContribution.Signature[:], aggregatedSignature)
-
-	// Make a copy.
-	s.syncContributionPoolForBlocks[key] = baseContribution.Copy()
-	s.cleanupOldContributions(headState)
+	s.syncContributionPoolForBlocks[key] = contribution.Copy()
 	return nil
 }
 
