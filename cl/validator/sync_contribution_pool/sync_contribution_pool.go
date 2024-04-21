@@ -199,6 +199,7 @@ def process_sync_committee_contributions(block: BeaconBlock,
 func (s *syncContributionPoolImpl) GetSyncAggregate(slot uint64, beaconBlockRoot common.Hash) (*cltypes.SyncAggregate, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	fmt.Println(slot, beaconBlockRoot)
 	// find all contributions for the given beacon block root.
 	contributions := []*cltypes.Contribution{}
 	for key, contribution := range s.syncContributionPool {
@@ -229,7 +230,7 @@ func (s *syncContributionPoolImpl) GetSyncAggregate(slot uint64, beaconBlockRoot
 				}
 			}
 		}
-		fmt.Println(aggregate.SyncCommiteeBits)
+		fmt.Println(contribution.SubcommitteeIndex, contribution.BeaconBlockRoot, contribution.Slot, aggregate.SyncCommiteeBits)
 		signatures = append(signatures, contribution.Signature[:])
 	}
 	if len(signatures) == 0 {
