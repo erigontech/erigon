@@ -29,9 +29,10 @@ type syncContributionPoolImpl struct {
 
 var ErrIsSuperset = errors.New("sync contribution is a superset of existing attestation")
 
-func NewSyncContributionPool() SyncContributionPool {
+func NewSyncContributionPool(beaconCfg *clparams.BeaconChainConfig) SyncContributionPool {
 	return &syncContributionPoolImpl{
 		syncContributionPool: make(map[syncContributionKey]*cltypes.Contribution),
+		beaconCfg:            beaconCfg,
 	}
 }
 
