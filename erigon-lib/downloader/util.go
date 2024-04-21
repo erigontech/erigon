@@ -133,7 +133,7 @@ func ensureCantLeaveDir(fName, root string) (string, error) {
 	return fName, nil
 }
 
-func BuildTorrentIfNeed(ctx context.Context, fName, root string, torrentFiles *TorrentFiles) (ok bool, err error) {
+func BuildTorrentIfNeed(ctx context.Context, fName, root string, torrentFiles *AtomicTorrentFS) (ok bool, err error) {
 	select {
 	case <-ctx.Done():
 		return false, ctx.Err()
@@ -163,7 +163,7 @@ func BuildTorrentIfNeed(ctx context.Context, fName, root string, torrentFiles *T
 }
 
 // BuildTorrentFilesIfNeed - create .torrent files from .seg files (big IO) - if .seg files were added manually
-func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs, torrentFiles *TorrentFiles, chain string, ignore snapcfg.Preverified) (int, error) {
+func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs, torrentFiles *AtomicTorrentFS, chain string, ignore snapcfg.Preverified) (int, error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -258,7 +258,7 @@ func AllTorrentPaths(dirs datadir.Dirs) ([]string, error) {
 	return files, nil
 }
 
-func AllTorrentSpecs(dirs datadir.Dirs, torrentFiles *TorrentFiles) (res []*torrent.TorrentSpec, err error) {
+func AllTorrentSpecs(dirs datadir.Dirs, torrentFiles *AtomicTorrentFS) (res []*torrent.TorrentSpec, err error) {
 	files, err := AllTorrentPaths(dirs)
 	if err != nil {
 		return nil, err
