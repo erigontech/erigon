@@ -164,7 +164,7 @@ func (s *Sentinel) updateENRSyncNets(subnetIndex int, on bool) {
 func (s *Sentinel) updateENROnSubscription(topicName string, subscribe bool) {
 	s.metadataLock.Lock()
 	defer s.metadataLock.Unlock()
-	///eth2/d31f6191/beacon_attestation_45/ssz_snappy
+	//. topic: /eth2/d31f6191/beacon_attestation_45/ssz_snappy
 	// extract third part of the topic name
 	parts := strings.Split(topicName, "/")
 	if len(parts) < 4 {
