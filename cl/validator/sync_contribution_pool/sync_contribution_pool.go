@@ -128,52 +128,52 @@ func (s *syncContributionPoolImpl) AddSyncCommitteeMessage(headState *state.Cach
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	cfg := headState.BeaconConfig()
+	// cfg := headState.BeaconConfig()
 
-	key := syncContributionKey{
-		slot:              message.Slot,
-		subcommitteeIndex: subCommittee,
-		beaconBlockRoot:   message.BeaconBlockRoot,
-	}
+	// key := syncContributionKey{
+	// 	slot:              message.Slot,
+	// 	subcommitteeIndex: subCommittee,
+	// 	beaconBlockRoot:   message.BeaconBlockRoot,
+	// }
 
-	// We retrieve a base contribution
-	contribution, ok := s.syncContributionPool[key]
-	if !ok {
-		contribution = &cltypes.Contribution{
-			Slot:              message.Slot,
-			SubcommitteeIndex: subCommittee,
-			BeaconBlockRoot:   message.BeaconBlockRoot,
-			AggregationBits:   make([]byte, cltypes.SyncCommitteeAggregationBitsSize),
-			Signature:         bls.InfiniteSignature,
-		}
-	}
-	// We use the a copy of this contribution
-	contribution = contribution.Copy() // make a copy
-	// First we find the aggregation bits to which this validator needs to be turned on.
-	publicKey, err := headState.ValidatorPublicKey(int(message.ValidatorIndex))
-	if err != nil {
-		return err
-	}
+	// // We retrieve a base contribution
+	// contribution, ok := s.syncContributionPool[key]
+	// if !ok {
+	// 	contribution = &cltypes.Contribution{
+	// 		Slot:              message.Slot,
+	// 		SubcommitteeIndex: subCommittee,
+	// 		BeaconBlockRoot:   message.BeaconBlockRoot,
+	// 		AggregationBits:   make([]byte, cltypes.SyncCommitteeAggregationBitsSize),
+	// 		Signature:         bls.InfiniteSignature,
+	// 	}
+	// }
+	// // We use the a copy of this contribution
+	// contribution = contribution.Copy() // make a copy
+	// // First we find the aggregation bits to which this validator needs to be turned on.
+	// publicKey, err := headState.ValidatorPublicKey(int(message.ValidatorIndex))
+	// if err != nil {
+	// 	return err
+	// }
 
-	committee := getSyncCommitteeFromState(headState).GetCommittee()
-	subCommitteeSize := cfg.SyncCommitteeSize / cfg.SyncCommitteeSubnetCount
-	startSubCommittee := subCommittee * subCommitteeSize
-	for i := startSubCommittee; i < startSubCommittee+subCommitteeSize; i++ {
-		if committee[i] == publicKey { // turn on this bit
-			utils.FlipBitOn(contribution.AggregationBits, int(i-startSubCommittee))
-		}
-	}
-	// Compute the aggregated signature.
-	aggregatedSignature, err := bls.AggregateSignatures([][]byte{
-		contribution.Signature[:],
-		message.Signature[:],
-	})
-	if err != nil {
-		return err
-	}
-	copy(contribution.Signature[:], aggregatedSignature)
-	s.syncContributionPool[key] = contribution
-	s.cleanupOldContributions(headState)
+	// committee := getSyncCommitteeFromState(headState).GetCommittee()
+	// subCommitteeSize := cfg.SyncCommitteeSize / cfg.SyncCommitteeSubnetCount
+	// startSubCommittee := subCommittee * subCommitteeSize
+	// for i := startSubCommittee; i < startSubCommittee+subCommitteeSize; i++ {
+	// 	if committee[i] == publicKey { // turn on this bit
+	// 		utils.FlipBitOn(contribution.AggregationBits, int(i-startSubCommittee))
+	// 	}
+	// }
+	// // Compute the aggregated signature.
+	// aggregatedSignature, err := bls.AggregateSignatures([][]byte{
+	// 	contribution.Signature[:],
+	// 	message.Signature[:],
+	// })
+	// if err != nil {
+	// 	return err
+	// }
+	// copy(contribution.Signature[:], aggregatedSignature)
+	// s.syncContributionPool[key] = contribution
+	// s.cleanupOldContributions(headState)
 	return nil
 }
 
