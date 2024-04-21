@@ -170,7 +170,6 @@ func (s *syncContributionPoolImpl) AddSyncCommitteeMessage(headState *state.Cach
 				return nil
 			}
 			utils.FlipBitOn(contribution.AggregationBits, int(i-startSubCommittee))
-			break
 		}
 	}
 
