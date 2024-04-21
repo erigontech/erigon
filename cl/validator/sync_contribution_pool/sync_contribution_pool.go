@@ -69,13 +69,11 @@ func (s *syncContributionPoolImpl) AddSyncContribution(headState *state.CachingB
 	if val, ok := s.syncContributionPoolForBlocks[key]; ok {
 		baseContribution = val.Copy()
 	}
-	before := common.Copy(baseContribution.AggregationBits)
-
-	utils.MergeBitlists(baseContribution.AggregationBits, contribution.AggregationBits)
-	// If nothing changed, return.
-	if bytes.Equal(before, baseContribution.AggregationBits) {
+	if utils.IsStrictSupersetBitlist(baseContribution.AggregationBits, contribution.AggregationBits) {
 		return ErrIsSuperset
 	}
+	utils.MergeBitlists(baseContribution.AggregationBits, contribution.AggregationBits)
+
 	// Aggregate the bits.
 	// Aggregate the signature.
 	aggregatedSignature, err := bls.AggregateSignatures([][]byte{
