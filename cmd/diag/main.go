@@ -24,7 +24,7 @@ func main() {
 	logging.LogConsoleVerbosityFlag.Value = log.LvlError.String()
 
 	app := cli.NewApp()
-	app.Name = "diag"
+	app.Name = "diagnostics"
 	app.Version = params.VersionWithCommit(params.GitCommit)
 	app.EnableBashCompletion = true
 
@@ -35,7 +35,8 @@ func main() {
 
 	app.Flags = []cli.Flag{}
 
-	app.UsageText = app.Name + ` [command] [flags]`
+	app.HelpName = `erigon diagnostics`
+	app.UsageText = `diag [command] [flags]`
 
 	app.Action = func(context *cli.Context) error {
 		var goodNames []string
