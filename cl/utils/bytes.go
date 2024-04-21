@@ -121,6 +121,7 @@ func IsBitOn(b []byte, idx int) bool {
 	return b[idx/8]&i == i
 }
 
+// IsStrictSupersetBitlist returns true if a is a strict superset of b.
 func IsStrictSupersetBitlist(a, b []byte) bool {
 	if len(a) != len(b) {
 		return false

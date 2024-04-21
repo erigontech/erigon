@@ -69,7 +69,7 @@ func (s *syncContributionPoolImpl) AddSyncContribution(headState *state.CachingB
 	if val, ok := s.syncContributionPoolForBlocks[key]; ok {
 		baseContribution = val.Copy()
 	}
-	if utils.IsStrictSupersetBitlist(baseContribution.AggregationBits, contribution.AggregationBits) {
+	if utils.IsStrictSupersetBitlist(contribution.AggregationBits, baseContribution.AggregationBits) {
 		return ErrIsSuperset
 	}
 	utils.MergeBitlists(baseContribution.AggregationBits, contribution.AggregationBits)
