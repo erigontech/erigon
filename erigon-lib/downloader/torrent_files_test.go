@@ -15,7 +15,7 @@ func TestFSProhibitBackwardCompat(t *testing.T) {
 
 	//prev version of .lock - is empty .lock file which exitence prohibiting everything
 	t.Run("no prev version .lock", func(t *testing.T) {
-		tf := NewAtomicTorrentFiles(dirs.Snap)
+		tf := NewAtomicTorrentFS(dirs.Snap)
 		prohibited, err := tf.NewDownloadsAreProhibited("v1-004900-005000-headers.seg")
 		require.NoError(err)
 		require.False(prohibited)
@@ -27,7 +27,7 @@ func TestFSProhibitBackwardCompat(t *testing.T) {
 		err := os.WriteFile(filepath.Join(dirs.Snap, ProhibitNewDownloadsFileName), nil, 0644)
 		require.NoError(err)
 
-		tf := NewAtomicTorrentFiles(dirs.Snap)
+		tf := NewAtomicTorrentFS(dirs.Snap)
 		prohibited, err := tf.NewDownloadsAreProhibited("v1-004900-005000-headers.seg")
 		require.NoError(err)
 		require.True(prohibited)
@@ -40,7 +40,7 @@ func TestFSProhibitBackwardCompat(t *testing.T) {
 		err := os.WriteFile(filepath.Join(dirs.Snap, ProhibitNewDownloadsFileName), nil, 0644)
 		require.NoError(err)
 
-		tf := NewAtomicTorrentFiles(dirs.Snap)
+		tf := NewAtomicTorrentFS(dirs.Snap)
 		err = tf.prohibitNewDownloads("transactions") //upgrade
 		require.NoError(err)
 
