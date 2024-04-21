@@ -340,7 +340,7 @@ func (s *Sentinel) defaultSyncSubnetTopicParams(activeValidators uint64) *pubsub
 		return nil
 	}
 	// Determine expected first deliveries based on the message rate.
-	firstMessageCap, err := decayLimit(s.scoreDecay(time.Duration(firstDecayDuration)), float64(rate))
+	firstMessageCap, err := decayLimit(s.scoreDecay(firstDecayDuration), float64(rate))
 	if err != nil {
 		log.Warn("Skipping initializing topic scoring")
 		return nil
