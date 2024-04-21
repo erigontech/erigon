@@ -319,27 +319,26 @@ func (I *impl) ProcessSyncAggregate(s abstract.BeaconState, sync *cltypes.SyncAg
 	if err != nil {
 		return err
 	}
-	//if I.FullValidation {
-	previousSlot := s.PreviousSlot()
+	if I.FullValidation {
+		previousSlot := s.PreviousSlot()
 
-	domain, err := fork.Domain(s.Fork(), state.GetEpochAtSlot(s.BeaconConfig(), previousSlot), s.BeaconConfig().DomainSyncCommittee, s.GenesisValidatorsRoot())
-	if err != nil {
-		return nil
+		domain, err := fork.Domain(s.Fork(), state.GetEpochAtSlot(s.BeaconConfig(), previousSlot), s.BeaconConfig().DomainSyncCommittee, s.GenesisValidatorsRoot())
+		if err != nil {
+			return nil
+		}
+		blockRoot, err := s.GetBlockRootAtSlot(previousSlot)
+		if err != nil {
+			return err
+		}
+		msg := utils.Sha256(blockRoot[:], domain)
+		isValid, err := bls.VerifyAggregate(sync.SyncCommiteeSignature[:], msg[:], votedKeys)
+		if err != nil {
+			return err
+		}
+		if !isValid {
+			return errors.New("ProcessSyncAggregate: cannot validate sync committee signature")
+		}
 	}
-	blockRoot, err := s.GetBlockRootAtSlot(previousSlot)
-	if err != nil {
-		return err
-	}
-	fmt.Println(blockRoot)
-	msg := utils.Sha256(blockRoot[:], domain)
-	isValid, err := bls.VerifyAggregate(sync.SyncCommiteeSignature[:], msg[:], votedKeys)
-	if err != nil {
-		return err
-	}
-	if !isValid {
-		return errors.New("ProcessSyncAggregate: cannot validate sync committee signature")
-	}
-	//}
 	return nil
 }
 
