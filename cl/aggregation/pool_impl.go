@@ -61,7 +61,7 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 		return nil
 	}
 
-	if utils.IsStrictSupersetBitlist(att.AggregationBits(), inAtt.AggregationBits()) {
+	if utils.IsNonStrictSupersetBitlist(inAtt.AggregationBits(), att.AggregationBits()) {
 		return ErrIsSuperset
 	}
 
