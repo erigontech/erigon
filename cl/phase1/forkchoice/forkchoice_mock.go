@@ -75,8 +75,7 @@ func makeSyncContributionPoolMock(t *testing.T) sync_contribution_pool.SyncContr
 		}
 		v, ok := u[key]
 		return v, ok
-	})
-
+	}).AnyTimes()
 	pool.EXPECT().AddSyncCommitteeMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(headState *state.CachingBeaconState, subCommitee uint64, message *cltypes.SyncCommitteeMessage) error {
 		key := syncContributionKey{
 			slot:              message.Slot,
