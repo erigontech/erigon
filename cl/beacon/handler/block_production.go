@@ -141,7 +141,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(w http.ResponseWriter, r *http.Reque
 	// compute the state root now
 	if err := transition.TransitionState(baseState, &cltypes.SignedBeaconBlock{
 		Block: block,
-	}, rewardsCollector, true); err != nil {
+	}, rewardsCollector, false); err != nil {
 		return nil, err
 	}
 	block.StateRoot, err = baseState.HashSSZ()
