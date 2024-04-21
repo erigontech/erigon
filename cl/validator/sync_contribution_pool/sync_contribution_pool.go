@@ -1,6 +1,7 @@
 package sync_contribution_pool
 
 import (
+	"errors"
 	"sync"
 
 	"github.com/Giulio2002/bls"
@@ -23,6 +24,8 @@ type syncContributionPoolImpl struct {
 
 	mu sync.Mutex
 }
+
+var ErrIsSuperset = errors.New("sync contribution is a superset of existing attestation")
 
 func NewSyncContributionPool() SyncContributionPool {
 	return &syncContributionPoolImpl{
@@ -61,7 +64,7 @@ func (s *syncContributionPoolImpl) AddSyncContribution(headState *state.CachingB
 	}
 	// Time to aggregate the giga aggregatable.
 	if utils.IsSupersetBitlist(baseContribution.AggregationBits, contribution.AggregationBits) {
-		return nil // Skip it if it is just a superset.
+		return ErrIsSuperset // Skip it if it is just a superset.
 	}
 	// Aggregate the bits.
 	utils.MergeBitlists(baseContribution.AggregationBits, contribution.AggregationBits)
