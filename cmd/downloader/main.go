@@ -279,7 +279,7 @@ var createTorrent = &cobra.Command{
 	Example: "go run ./cmd/downloader torrent_create --datadir=<your_datadir> --file=<relative_file_path>",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dirs := datadir.New(datadirCli)
-		createdAmount, err := downloader.BuildTorrentFilesIfNeed(cmd.Context(), dirs, downloader.NewAtomicTorrentFiles(dirs.Snap), chain, nil)
+		createdAmount, err := downloader.BuildTorrentFilesIfNeed(cmd.Context(), dirs, downloader.NewAtomicTorrentFS(dirs.Snap), chain, nil)
 		if err != nil {
 			return err
 		}
@@ -505,7 +505,7 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 
-	tf := downloader.NewAtomicTorrentFiles(dirs.Snap)
+	tf := downloader.NewAtomicTorrentFS(dirs.Snap)
 
 	if forceRebuild { // remove and create .torrent files (will re-read all snapshots)
 		//removePieceCompletionStorage(snapDir)

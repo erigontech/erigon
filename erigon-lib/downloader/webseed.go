@@ -41,7 +41,7 @@ type WebSeeds struct {
 	logger    log.Logger
 	verbosity log.Lvl
 
-	torrentFiles *TorrentFiles
+	torrentFiles *AtomicTorrentFS
 }
 
 func NewWebSeeds(seeds []*url.URL, verbosity log.Lvl, logger log.Logger) *WebSeeds {
@@ -97,7 +97,7 @@ func (d *WebSeeds) getWebDownloadInfo(ctx context.Context, t *torrent.Torrent) (
 	return infos, seedHashMismatches, nil
 }
 
-func (d *WebSeeds) SetTorrent(t *TorrentFiles, whiteList snapcfg.Preverified, downloadTorrentFile bool) {
+func (d *WebSeeds) SetTorrent(t *AtomicTorrentFS, whiteList snapcfg.Preverified, downloadTorrentFile bool) {
 	d.downloadTorrentFile = downloadTorrentFile
 	d.torrentsWhitelist = whiteList
 	d.torrentFiles = t
