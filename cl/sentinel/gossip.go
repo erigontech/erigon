@@ -331,8 +331,8 @@ func (s *Sentinel) defaultSyncSubnetTopicParams(activeValidators uint64) *pubsub
 		log.Warn("Subnet weight is 0, skipping initializing topic scoring")
 		return nil
 	}
-	firstDecay := time.Duration(1)
-	meshDecay := time.Duration(4)
+	firstDecayDuration := 1 * s.oneEpochDuration()
+	meshDecayDuration := 4 * s.oneEpochDuration()
 
 	rate := subnetWeight * 2 / gossipSubD
 	if rate == 0 {
@@ -340,14 +340,14 @@ func (s *Sentinel) defaultSyncSubnetTopicParams(activeValidators uint64) *pubsub
 		return nil
 	}
 	// Determine expected first deliveries based on the message rate.
-	firstMessageCap, err := decayLimit(s.scoreDecay(firstDecay*s.oneEpochDuration()), float64(rate))
+	firstMessageCap, err := decayLimit(s.scoreDecay(time.Duration(firstDecayDuration)), float64(rate))
 	if err != nil {
 		log.Warn("Skipping initializing topic scoring")
 		return nil
 	}
 	firstMessageWeight := maxFirstDeliveryScore / firstMessageCap
 	// Determine expected mesh deliveries based on message rate applied with a dampening factor.
-	meshThreshold, err := decayThreshold(s.scoreDecay(meshDecay*s.oneEpochDuration()), float64(subnetWeight)/dampeningFactor)
+	meshThreshold, err := decayThreshold(s.scoreDecay(meshDecayDuration), float64(subnetWeight)/dampeningFactor)
 	if err != nil {
 		log.Warn("Skipping initializing topic scoring")
 		return nil
@@ -360,16 +360,16 @@ func (s *Sentinel) defaultSyncSubnetTopicParams(activeValidators uint64) *pubsub
 		TimeInMeshQuantum:               s.oneSlotDuration(),
 		TimeInMeshCap:                   s.inMeshCap(),
 		FirstMessageDeliveriesWeight:    firstMessageWeight,
-		FirstMessageDeliveriesDecay:     s.scoreDecay(firstDecay * s.oneEpochDuration()),
+		FirstMessageDeliveriesDecay:     s.scoreDecay(firstDecayDuration),
 		FirstMessageDeliveriesCap:       firstMessageCap,
 		MeshMessageDeliveriesWeight:     0,
-		MeshMessageDeliveriesDecay:      s.scoreDecay(meshDecay * s.oneEpochDuration()),
+		MeshMessageDeliveriesDecay:      s.scoreDecay(meshDecayDuration),
 		MeshMessageDeliveriesCap:        meshCap,
 		MeshMessageDeliveriesThreshold:  meshThreshold,
 		MeshMessageDeliveriesWindow:     2 * time.Second,
 		MeshMessageDeliveriesActivation: s.oneEpochDuration(),
 		MeshFailurePenaltyWeight:        0,
-		MeshFailurePenaltyDecay:         s.scoreDecay(meshDecay * s.oneEpochDuration()),
+		MeshFailurePenaltyDecay:         s.scoreDecay(meshDecayDuration),
 		InvalidMessageDeliveriesWeight:  -maxScore() / topicWeight,
 		InvalidMessageDeliveriesDecay:   s.scoreDecay(50 * s.oneEpochDuration()),
 	}
@@ -435,11 +435,11 @@ func (s *Sentinel) defaultAggregateSubnetTopicParams() *pubsub.TopicScoreParams 
 	}
 	comsPerSlot := s.committeeCountPerSlot()
 	exceedsThreshold := comsPerSlot >= 2*subnetCount/s.cfg.BeaconConfig.SlotsPerEpoch
-	firstDecay := time.Duration(1)
-	meshDecay := time.Duration(4)
+	firstDecayDuration := 1 * s.oneEpochDuration()
+	meshDecayDuration := 4 * s.oneEpochDuration()
 	if exceedsThreshold {
-		firstDecay = 4
-		meshDecay = 16
+		firstDecayDuration = 4 * s.oneEpochDuration()
+		meshDecayDuration = 16 * s.oneEpochDuration()
 	}
 	rate := numPerSlot * 2 / gossipSubD
 	if rate == 0 {
@@ -447,14 +447,14 @@ func (s *Sentinel) defaultAggregateSubnetTopicParams() *pubsub.TopicScoreParams 
 		return nil
 	}
 	// Determine expected first deliveries based on the message rate.
-	firstMessageCap, err := decayLimit(s.scoreDecay(firstDecay*s.oneEpochDuration()), float64(rate))
+	firstMessageCap, err := decayLimit(s.scoreDecay(firstDecayDuration), float64(rate))
 	if err != nil {
 		log.Trace("skipping initializing topic scoring", "err", err)
 		return nil
 	}
 	firstMessageWeight := float64(maxFirstDeliveryScore) / firstMessageCap
 	// Determine expected mesh deliveries based on message rate applied with a dampening factor.
-	meshThreshold, err := decayThreshold(s.scoreDecay(meshDecay*s.oneEpochDuration()), float64(numPerSlot)/float64(dampeningFactor))
+	meshThreshold, err := decayThreshold(s.scoreDecay(meshDecayDuration), float64(numPerSlot)/float64(dampeningFactor))
 	if err != nil {
 		log.Trace("skipping initializing topic scoring", "err", err)
 		return nil
@@ -467,14 +467,14 @@ func (s *Sentinel) defaultAggregateSubnetTopicParams() *pubsub.TopicScoreParams 
 		TimeInMeshQuantum:               s.oneSlotDuration(),
 		TimeInMeshCap:                   s.inMeshCap(),
 		FirstMessageDeliveriesWeight:    firstMessageWeight,
-		FirstMessageDeliveriesDecay:     s.scoreDecay(firstDecay * s.oneEpochDuration()),
+		FirstMessageDeliveriesDecay:     s.scoreDecay(firstDecayDuration),
 		FirstMessageDeliveriesCap:       firstMessageCap,
-		MeshMessageDeliveriesDecay:      s.scoreDecay(meshDecay * s.oneEpochDuration()),
+		MeshMessageDeliveriesDecay:      s.scoreDecay(meshDecayDuration),
 		MeshMessageDeliveriesCap:        meshCap,
 		MeshMessageDeliveriesThreshold:  meshThreshold,
 		MeshMessageDeliveriesWindow:     2 * time.Second,
 		MeshMessageDeliveriesActivation: 1 * s.oneEpochDuration(),
-		MeshFailurePenaltyDecay:         s.scoreDecay(meshDecay * s.oneEpochDuration()),
+		MeshFailurePenaltyDecay:         s.scoreDecay(meshDecayDuration),
 		InvalidMessageDeliveriesWeight:  -maxScore() / topicWeight,
 		InvalidMessageDeliveriesDecay:   s.scoreDecay(50 * s.oneEpochDuration()),
 	}
