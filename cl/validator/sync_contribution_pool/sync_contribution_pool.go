@@ -161,6 +161,7 @@ func (s *syncContributionPoolImpl) AddSyncCommitteeMessage(headState *state.Cach
 	subCommitteeSize := cfg.SyncCommitteeSize / cfg.SyncCommitteeSubnetCount
 	startSubCommittee := subCommittee * subCommitteeSize
 	found := false
+	before := common.Copy(contribution.AggregationBits)
 	for i := startSubCommittee; i < startSubCommittee+subCommitteeSize; i++ {
 		if committee[i] == publicKey { // turn on this bit
 			found = true
@@ -170,6 +171,9 @@ func (s *syncContributionPoolImpl) AddSyncCommitteeMessage(headState *state.Cach
 	}
 	if !found {
 		return errors.New("validator not in the subcommittee")
+	}
+	if bytes.Equal(before, contribution.AggregationBits) {
+		return nil // if nothing changed, return.
 	}
 	// Compute the aggregated signature.
 	aggregatedSignature, err := bls.AggregateSignatures([][]byte{

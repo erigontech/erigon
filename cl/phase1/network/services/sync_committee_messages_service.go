@@ -99,7 +99,7 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 func (s *syncCommitteeMessagesService) cleanupOldSyncCommitteeMessages() {
 	headSlot := s.syncedDataManager.HeadSlot()
 	for k := range s.seenSyncCommitteeMessages {
-		if headSlot != k.slot {
+		if headSlot > k.slot+1 {
 			delete(s.seenSyncCommitteeMessages, k)
 		}
 	}
