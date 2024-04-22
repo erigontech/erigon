@@ -19,7 +19,7 @@ var SqueezeCommitmentFiles = Migration{
 	Name: "squeeze_commit_files",
 	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 		ctx := context.Background()
-		if !EnableSqueezeCommitmentFiles || !libstate.AggregatorV3SqueezeCommitmentValues || !kvcfg.HistoryV3.FromDB(db) { //nolint:staticcheck
+		if !EnableSqueezeCommitmentFiles || !libstate.AggregatorSqueezeCommitmentValues || !kvcfg.HistoryV3.FromDB(db) { //nolint:staticcheck
 			return db.Update(ctx, func(tx kv.RwTx) error {
 				return BeforeCommit(tx, nil, true)
 			})
@@ -29,7 +29,7 @@ var SqueezeCommitmentFiles = Migration{
 		logEvery := time.NewTicker(10 * time.Second)
 		defer logEvery.Stop()
 
-		agg, err := libstate.NewAggregatorV3(ctx, dirs, ethconfig.HistoryV3AggregationStep, db, logger)
+		agg, err := libstate.NewAggregator(ctx, dirs, ethconfig.HistoryV3AggregationStep, db, logger)
 		if err != nil {
 			return err
 		}

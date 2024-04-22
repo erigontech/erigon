@@ -106,9 +106,9 @@ type Aggregator struct {
 
 type OnFreezeFunc func(frozenFileNames []string)
 
-const AggregatorV3SqueezeCommitmentValues = true
+const AggregatorSqueezeCommitmentValues = true
 
-func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
+func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
 	tmpdir := dirs.Tmp
 	salt, err := getStateIndicesSalt(dirs.Snap)
 	if err != nil {
@@ -131,7 +131,7 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 		collateAndBuildWorkers: 1,
 		mergeWorkers:           1,
 
-		commitmentValuesTransform: AggregatorV3SqueezeCommitmentValues,
+		commitmentValuesTransform: AggregatorSqueezeCommitmentValues,
 	}
 	cfg := domainCfg{
 		hist: histCfg{

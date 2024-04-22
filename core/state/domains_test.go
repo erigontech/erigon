@@ -53,7 +53,7 @@ func dbAggregatorOnDatadir(t *testing.T, ddir string) (kv.RwDB, *state.Aggregato
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 
-	agg, err := state.NewAggregatorV3(context.Background(), dirs, ethconfig.HistoryV3AggregationStep, db, logger)
+	agg, err := state.NewAggregator(context.Background(), dirs, ethconfig.HistoryV3AggregationStep, db, logger)
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 	err = agg.OpenFolder(false)

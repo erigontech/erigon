@@ -310,7 +310,7 @@ func NewTestDB(tb testing.TB, dirs datadir.Dirs, gspec *types.Genesis) (histV3 b
 	})
 
 	var err error
-	agg, err = state.NewAggregatorV3(context.Background(), dirs, ethconfig.HistoryV3AggregationStep, db, logger)
+	agg, err = state.NewAggregator(context.Background(), dirs, ethconfig.HistoryV3AggregationStep, db, logger)
 	if err != nil {
 		panic(err)
 	}
