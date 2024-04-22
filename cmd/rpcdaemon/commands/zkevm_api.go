@@ -60,7 +60,7 @@ type ZkEvmAPIImpl struct {
 
 	db              kv.RoDB
 	ReturnDataLimit int
-	config          *ethconfig.Zk
+	config          *ethconfig.Config
 	l1Syncer        *syncer.L1Syncer
 }
 
@@ -69,7 +69,7 @@ func NewZkEvmAPI(
 	base *APIImpl,
 	db kv.RoDB,
 	returnDataLimit int,
-	zkConfig *ethconfig.Zk,
+	zkConfig *ethconfig.Config,
 	l1Syncer *syncer.L1Syncer,
 ) *ZkEvmAPIImpl {
 	return &ZkEvmAPIImpl{

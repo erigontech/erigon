@@ -157,7 +157,7 @@ func doTxpool(ctx context.Context) error {
 
 	newTxs := make(chan types.Announcements, 1024)
 	defer close(newTxs)
-	txPoolDB, txPool, fetch, send, txpoolGrpcServer, err := txpooluitl.AllComponents(ctx, cfg, ethconfig.DefaultZkConfig,
+	txPoolDB, txPool, fetch, send, txpoolGrpcServer, err := txpooluitl.AllComponents(ctx, cfg, &ethconfig.Defaults,
 		kvcache.New(cacheConfig), newTxs, coreDB, sentryClients, kvClient)
 	if err != nil {
 		return err

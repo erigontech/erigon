@@ -306,7 +306,7 @@ type TxPool struct {
 	flushMtx *sync.Mutex
 }
 
-func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, zkCfg *ethconfig.Zk, cache kvcache.Cache, chainID uint256.Int, shanghaiTime *big.Int, londonBlock *big.Int) (*TxPool, error) {
+func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, ethCfg *ethconfig.Config, cache kvcache.Cache, chainID uint256.Int, shanghaiTime *big.Int, londonBlock *big.Int) (*TxPool, error) {
 	var err error
 	localsHistory, err := simplelru.NewLRU[string, struct{}](10_000, nil)
 	if err != nil {
@@ -346,7 +346,7 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		unprocessedRemoteByHash: map[string]int{},
 		londonBlock:             londonBlock,
 		shanghaiTime:            shanghaiTime,
-		allowFreeTransactions:   zkCfg.AllowFreeTransactions,
+		allowFreeTransactions:   ethCfg.AllowFreeTransactions,
 		flushMtx:                &sync.Mutex{},
 	}, nil
 }

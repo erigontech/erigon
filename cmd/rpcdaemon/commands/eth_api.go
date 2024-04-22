@@ -355,7 +355,7 @@ type APIImpl struct {
 }
 
 // NewEthAPI returns APIImpl instance
-func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64, returnDataLimit int, zkConfig *ethconfig.Zk) *APIImpl {
+func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64, returnDataLimit int, ethCfg *ethconfig.Config) *APIImpl {
 	if gascap == 0 {
 		gascap = uint64(math.MaxUint64 / 2)
 	}
@@ -369,14 +369,14 @@ func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpoo
 		gasCache:                   NewGasPriceCache(),
 		GasCap:                     gascap,
 		ReturnDataLimit:            returnDataLimit,
-		ZkRpcUrl:                   zkConfig.L2RpcUrl,
-		PoolManagerUrl:             zkConfig.PoolManagerUrl,
-		AllowFreeTransactions:      zkConfig.AllowFreeTransactions,
-		AllowPreEIP155Transactions: zkConfig.AllowPreEIP155Transactions,
-		L1RpcUrl:                   zkConfig.L1RpcUrl,
-		DefaultGasPrice:            zkConfig.DefaultGasPrice,
-		MaxGasPrice:                zkConfig.MaxGasPrice,
-		GasPriceFactor:             zkConfig.GasPriceFactor,
+		ZkRpcUrl:                   ethCfg.L2RpcUrl,
+		PoolManagerUrl:             ethCfg.PoolManagerUrl,
+		AllowFreeTransactions:      ethCfg.AllowFreeTransactions,
+		AllowPreEIP155Transactions: ethCfg.AllowPreEIP155Transactions,
+		L1RpcUrl:                   ethCfg.L1RpcUrl,
+		DefaultGasPrice:            ethCfg.DefaultGasPrice,
+		MaxGasPrice:                ethCfg.MaxGasPrice,
+		GasPriceFactor:             ethCfg.GasPriceFactor,
 		L1GasPrice:                 L1GasPrice{},
 	}
 }

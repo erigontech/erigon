@@ -317,7 +317,7 @@ func MockWithEverything(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKe
 		chainID, _ := uint256.FromBig(mock.ChainConfig.ChainID)
 		londonBlock := mock.ChainConfig.LondonBlock
 		shanghaiTime := mock.ChainConfig.ShanghaiTime
-		mock.TxPool, err = txpool.New(newTxs, mock.DB, txpoolcfg.DefaultConfig, ethconfig.DefaultZkConfig, kvcache.NewDummy(), *chainID, shanghaiTime, londonBlock)
+		mock.TxPool, err = txpool.New(newTxs, mock.DB, txpoolcfg.DefaultConfig, &ethconfig.Defaults, kvcache.NewDummy(), *chainID, shanghaiTime, londonBlock)
 		if err != nil {
 			t.Fatal(err)
 		}

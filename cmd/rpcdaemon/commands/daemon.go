@@ -12,27 +12,27 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/zk/syncer"
 	"github.com/ledgerwatch/erigon/zk/sequencer"
+	"github.com/ledgerwatch/erigon/zk/syncer"
 )
 
 // APIList describes the list of available RPC apis
 func APIList(db kv.RoDB, borDb kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
 	filters *rpchelper.Filters, stateCache kvcache.Cache,
 	blockReader services.FullBlockReader, agg *libstate.AggregatorV3, cfg httpcfg.HttpCfg, engine consensus.EngineReader,
-	zkConfig *ethconfig.Zk, l1Syncer *syncer.L1Syncer,
+	ethCfg *ethconfig.Config, l1Syncer *syncer.L1Syncer,
 ) (list []rpc.API) {
 
 	// non-sequencer nodes should forward on requests to the sequencer
 	rpcUrl := ""
 	if !sequencer.IsSequencer() {
-		rpcUrl = zkConfig.L2RpcUrl
+		rpcUrl = ethCfg.L2RpcUrl
 	}
 
 	base := NewBaseApi(filters, stateCache, blockReader, agg, cfg.WithDatadir, cfg.EvmCallTimeout, engine, cfg.Dirs)
-	base.SetL2RpcUrl(zkConfig.L2RpcUrl)
-	base.SetGasless(zkConfig.Gasless)
-	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap, cfg.ReturnDataLimit, zkConfig)
+	base.SetL2RpcUrl(ethCfg.L2RpcUrl)
+	base.SetGasless(ethCfg.Gasless)
+	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap, cfg.ReturnDataLimit, ethCfg)
 	erigonImpl := NewErigonAPI(base, db, eth)
 	txpoolImpl := NewTxPoolAPI(base, db, txPool, rpcUrl)
 	netImpl := NewNetAPIImpl(eth)
@@ -45,7 +45,7 @@ func APIList(db kv.RoDB, borDb kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.
 	borImpl := NewBorAPI(base, db, borDb) // bor (consensus) specific
 	otsImpl := NewOtterscanAPI(base, db)
 	gqlImpl := NewGraphQLAPI(base, db)
-	zkEvmImpl := NewZkEvmAPI(ethImpl, db, cfg.ReturnDataLimit, zkConfig, l1Syncer)
+	zkEvmImpl := NewZkEvmAPI(ethImpl, db, cfg.ReturnDataLimit, ethCfg, l1Syncer)
 
 	if cfg.GraphQLEnabled {
 		list = append(list, rpc.API{
@@ -159,13 +159,13 @@ func AuthAPIList(db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClien
 	filters *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader,
 	agg *libstate.AggregatorV3,
 	cfg httpcfg.HttpCfg, engine consensus.EngineReader,
-	zkConfig *ethconfig.Zk,
+	ethCfg *ethconfig.Config,
 ) (list []rpc.API) {
 	base := NewBaseApi(filters, stateCache, blockReader, agg, cfg.WithDatadir, cfg.EvmCallTimeout, engine, cfg.Dirs)
-	base.SetL2RpcUrl(zkConfig.L2RpcUrl)
-	base.SetGasless(zkConfig.Gasless)
+	base.SetL2RpcUrl(ethCfg.L2RpcUrl)
+	base.SetGasless(ethCfg.Gasless)
 
-	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap, cfg.ReturnDataLimit, zkConfig)
+	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap, cfg.ReturnDataLimit, ethCfg)
 	engineImpl := NewEngineAPI(base, db, eth, cfg.InternalCL)
 
 	list = append(list, rpc.API{

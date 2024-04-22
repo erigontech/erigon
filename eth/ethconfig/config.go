@@ -102,6 +102,7 @@ var Defaults = Config{
 		Produce:    true,
 	},
 	DropUselessPeers: false,
+	Zk:               &Zk{},
 }
 
 func init() {
@@ -253,7 +254,7 @@ type Config struct {
 	DropUselessPeers bool
 
 	//[zkevm]
-	Zk *Zk
+	*Zk
 }
 
 type Sync struct {
