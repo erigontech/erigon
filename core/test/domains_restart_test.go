@@ -69,7 +69,6 @@ func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.RwDB,
 	})
 	require.NoError(t, err)
 
-	chain := networkname.Test
 	tdb, err := temporal.New(db, agg)
 	require.NoError(t, err)
 	db = tdb
