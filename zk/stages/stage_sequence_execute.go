@@ -466,7 +466,7 @@ func getNextL1BatchTransactions(batchNumber uint64, forkId uint64, hermezDb *her
 	}
 	if len(batchL2Data) == 0 {
 		// end of the line for batch recovery so return empty
-		return []types.Transaction{}, []uint8{}, true, nil
+		return []types.Transaction{}, []uint8{}, false, nil
 	}
 
 	transactions, _, effectiveGases, err := tx.DecodeTxs(batchL2Data, forkId)
