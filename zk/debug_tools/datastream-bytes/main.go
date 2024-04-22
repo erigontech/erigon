@@ -1,15 +1,16 @@
 package main
 
 import (
-	"flag"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/mdbx"
 	"context"
-	"github.com/ledgerwatch/erigon/zk/hermez_db"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	dstypes "github.com/ledgerwatch/erigon/zk/datastream/types"
-	"github.com/ledgerwatch/erigon/zk/datastream/server"
+	"flag"
 	"fmt"
+
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/zk/datastream/server"
+	dstypes "github.com/ledgerwatch/erigon/zk/datastream/types"
+	"github.com/ledgerwatch/erigon/zk/hermez_db"
 )
 
 var dataDir = ""
@@ -55,8 +56,9 @@ func main() {
 			}
 
 			gerUpdates := []dstypes.GerUpdate{}
+			l1InfoTreeIndexes := make(map[uint64]uint64)
 
-			sBytes, err := streamServer.CreateAndBuildStreamEntryBytes(block, hermezDb, lastBlock, uint64(batchNum), uint64(previousBatch), true, &gerUpdates)
+			sBytes, err := streamServer.CreateAndBuildStreamEntryBytes(block, hermezDb, lastBlock, uint64(batchNum), uint64(previousBatch), true, &gerUpdates, l1InfoTreeIndexes)
 			if err != nil {
 				return err
 			}

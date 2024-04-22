@@ -7,8 +7,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/gateway-fm/cdk-erigon-lib/common"
+	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/log/v3"
 
 	"encoding/binary"
@@ -119,16 +119,15 @@ func (s *L1Syncer) Run(lastCheckedBlock uint64) {
 			latestL1Block, err := s.getLatestL1Block()
 			if err != nil {
 				log.Error("Error getting latest L1 block", "err", err)
-				continue
-			}
-
-			if latestL1Block > s.lastCheckedL1Block.Load() {
-				s.isDownloading.Store(true)
-				if err := s.queryBlocks(); err != nil {
-					log.Error("Error querying blocks", "err", err)
-					continue
+			} else {
+				if latestL1Block > s.lastCheckedL1Block.Load() {
+					s.isDownloading.Store(true)
+					if err := s.queryBlocks(); err != nil {
+						log.Error("Error querying blocks", "err", err)
+					} else {
+						s.lastCheckedL1Block.Store(latestL1Block)
+					}
 				}
-				s.lastCheckedL1Block.Store(latestL1Block)
 			}
 
 			s.isDownloading.Store(false)
