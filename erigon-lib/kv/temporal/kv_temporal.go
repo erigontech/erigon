@@ -3,22 +3,15 @@ package temporal
 import (
 	"context"
 	"fmt"
-	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/log/v3"
 )
 
 //Variables Naming:
@@ -248,7 +241,7 @@ func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 	return it, nil
 }
 func (tx *Tx) DomainGet(name kv.Domain, key, key2 []byte) (v []byte, ok bool, err error) {
-	if ethconfig.EnableHistoryV4InTest {
+	if config3.EnableHistoryV4InTest {
 		panic("implement me")
 	}
 	switch name {
@@ -266,49 +259,52 @@ func (tx *Tx) DomainGet(name kv.Domain, key, key2 []byte) (v []byte, ok bool, er
 	}
 }
 func (tx *Tx) DomainGetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, ok bool, err error) {
-	if ethconfig.EnableHistoryV4InTest {
+	if config3.EnableHistoryV4InTest {
 		panic("implement me")
 	}
-	switch name {
-	case kv.AccountsDomain:
-		v, ok, err = tx.HistoryGet(kv.AccountsHistory, key, ts)
-		if err != nil {
-			return nil, false, err
-		}
-		if ok {
-			return v, true, nil
-		}
-		v, err = tx.GetOne(kv.PlainState, key)
-		if len(v) > 0 {
-			v, err = accounts.ConvertV2toV3(v)
+	/*
+		switch name {
+		case kv.AccountsDomain:
+			v, ok, err = tx.HistoryGet(kv.AccountsHistory, key, ts)
 			if err != nil {
 				return nil, false, err
 			}
+			if ok {
+				return v, true, nil
+			}
+			v, err = tx.GetOne(kv.PlainState, key)
+			if len(v) > 0 {
+				v, err = accounts.ConvertV2toV3(v)
+				if err != nil {
+					return nil, false, err
+				}
+			}
+			return v, v != nil, err
+		case kv.StorageDomain:
+			v, ok, err = tx.HistoryGet(kv.StorageHistory, append(key[:20], key2...), ts)
+			if err != nil {
+				return nil, false, err
+			}
+			if ok {
+				return v, true, nil
+			}
+			v, err = tx.GetOne(kv.PlainState, append(key, key2...))
+			return v, v != nil, err
+		case kv.CodeDomain:
+			v, ok, err = tx.HistoryGet(kv.CodeHistory, key, ts)
+			if err != nil {
+				return nil, false, err
+			}
+			if ok {
+				return v, true, nil
+			}
+			v, err = tx.GetOne(kv.Code, key2)
+			return v, v != nil, err
+		default:
+			panic(fmt.Sprintf("unexpected: %s", name))
 		}
-		return v, v != nil, err
-	case kv.StorageDomain:
-		v, ok, err = tx.HistoryGet(kv.StorageHistory, append(key[:20], key2...), ts)
-		if err != nil {
-			return nil, false, err
-		}
-		if ok {
-			return v, true, nil
-		}
-		v, err = tx.GetOne(kv.PlainState, append(key, key2...))
-		return v, v != nil, err
-	case kv.CodeDomain:
-		v, ok, err = tx.HistoryGet(kv.CodeHistory, key, ts)
-		if err != nil {
-			return nil, false, err
-		}
-		if ok {
-			return v, true, nil
-		}
-		v, err = tx.GetOne(kv.Code, key2)
-		return v, v != nil, err
-	default:
-		panic(fmt.Sprintf("unexpected: %s", name))
-	}
+	*/
+	panic("not implemented yet")
 }
 
 func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok bool, err error) {
@@ -392,39 +388,4 @@ func (tx *Tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limi
 		tx.resourcesToClose = append(tx.resourcesToClose, closer)
 	}
 	return it, err
-}
-
-// TODO: need remove `gspec` param (move SystemContractCodeLookup feature somewhere)
-func NewTestDB(tb testing.TB, dirs datadir.Dirs, gspec *types.Genesis) (histV3 bool, db kv.RwDB, agg *state.AggregatorV3) {
-	historyV3 := ethconfig.EnableHistoryV3InTest
-	logger := log.New()
-	ctx := context.Background()
-
-	if tb != nil {
-		db = memdb.NewTestDB(tb)
-	} else {
-		db = memdb.New(dirs.DataDir)
-	}
-	_ = db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
-		_, _ = kvcfg.HistoryV3.WriteOnce(tx, historyV3)
-		return nil
-	})
-
-	if historyV3 {
-		var err error
-		dir.MustExist(dirs.SnapHistory)
-		agg, err = state.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger)
-		if err != nil {
-			panic(err)
-		}
-		if err := agg.OpenFolder(); err != nil {
-			panic(err)
-		}
-
-		db, err = New(db, agg)
-		if err != nil {
-			panic(err)
-		}
-	}
-	return historyV3, db, agg
 }
