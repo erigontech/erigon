@@ -512,7 +512,6 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneFrom, prune
 						return err
 					}
 				}
-				log.Info("[SPIDERMAN] Deleting kv.Log", "key", k)
 				c.DeleteCurrent()
 			}
 		}
