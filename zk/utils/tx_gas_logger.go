@@ -56,7 +56,9 @@ func (g *TxGasLogger) Start() {
 			g.logBlock = g.currentBlockNum
 			g.logTime = time.Now()
 			g.gas = 0
-			g.tx.CollectMetrics()
+			if g.tx != nil {
+				g.tx.CollectMetrics()
+			}
 			g.metric.Set(g.logBlock)
 		}
 	}()
@@ -65,6 +67,10 @@ func (g *TxGasLogger) Start() {
 
 func (g *TxGasLogger) Stop() {
 	g.logEvery.Stop()
+}
+
+func (g *TxGasLogger) SetTx(tx kv.RwTx) {
+	g.tx = tx
 }
 
 func (g *TxGasLogger) AddBlock(blockTxCount, gas, currentStateGas, currentBlockNum uint64) {

@@ -22,29 +22,19 @@ import (
 
 	"github.com/gateway-fm/cdk-erigon-lib/chain"
 	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/ledgerwatch/erigon/zk/constants"
 	"github.com/ledgerwatch/erigon/zk/zkchainconfig"
-)
-
-type ForkId uint64
-
-const (
-	ForkID4            ForkId = 4
-	ForkID5Dragonfruit ForkId = 5
-	ForkID6IncaBerry   ForkId = 6
-	ForkID7Etrog       ForkId = 7
-	ForkID8Elderberry  ForkId = 8
-	ForkID9Elderberry2 ForkId = 9
 )
 
 // this needs to always be in descending order
 // add new forkIds at the beginning of the array
-var ForkIdsOrdered = []ForkId{
-	ForkID9Elderberry2,
-	ForkID8Elderberry,
-	ForkID7Etrog,
-	ForkID6IncaBerry,
-	ForkID5Dragonfruit,
-	ForkID4,
+var ForkIdsOrdered = []constants.ForkId{
+	constants.ForkID9Elderberry2,
+	constants.ForkID8Elderberry,
+	constants.ForkID7Etrog,
+	constants.ForkID6IncaBerry,
+	constants.ForkID5Dragonfruit,
+	constants.ForkID4,
 }
 
 // Config is the core config which determines the blockchain settings.
@@ -136,19 +126,19 @@ func (c *Config) String() string {
 	)
 }
 
-func (c *Config) SetForkIdBlock(forkIdNumber ForkId, blockNum uint64) error {
+func (c *Config) SetForkIdBlock(forkIdNumber constants.ForkId, blockNum uint64) error {
 	switch forkIdNumber {
-	case ForkID4:
+	case constants.ForkID4:
 		c.ForkID4Block = new(big.Int).SetUint64(blockNum)
-	case ForkID5Dragonfruit:
+	case constants.ForkID5Dragonfruit:
 		c.ForkID5DragonfruitBlock = new(big.Int).SetUint64(blockNum)
-	case ForkID6IncaBerry:
+	case constants.ForkID6IncaBerry:
 		c.ForkID6IncaBerryBlock = new(big.Int).SetUint64(blockNum)
-	case ForkID7Etrog:
+	case constants.ForkID7Etrog:
 		c.ForkID7EtrogBlock = new(big.Int).SetUint64(blockNum)
-	case ForkID8Elderberry:
+	case constants.ForkID8Elderberry:
 		c.ForkID88ElderberryBlock = new(big.Int).SetUint64(blockNum)
-	case ForkID9Elderberry2:
+	case constants.ForkID9Elderberry2:
 		c.ForkID9Elderberry2Block = new(big.Int).SetUint64(blockNum)
 	default:
 		return fmt.Errorf("unknown fork id number %d", forkIdNumber)

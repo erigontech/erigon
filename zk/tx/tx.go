@@ -13,8 +13,8 @@ import (
 
 	"encoding/binary"
 
-	"github.com/holiman/uint256"
 	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/smt/pkg/utils"
@@ -95,7 +95,7 @@ func DecodeTxs(txsData []byte, forkID uint64) ([]types.Transaction, []byte, []ui
 
 		endPos := pos + length + rLength + sLength + vLength + headerByteLength
 
-		if forkID >= constants.ForkDragonfruitId5 {
+		if forkID >= uint64(constants.ForkID5Dragonfruit) {
 			endPos += efficiencyPercentageByteLength
 		}
 
@@ -124,7 +124,7 @@ func DecodeTxs(txsData []byte, forkID uint64) ([]types.Transaction, []byte, []ui
 		sData := txsData[dataStart+rLength : dataStart+rLength+sLength]
 		vData := txsData[dataStart+rLength+sLength : dataStart+rLength+sLength+vLength]
 
-		if forkID >= constants.ForkDragonfruitId5 {
+		if forkID >= uint64(constants.ForkID5Dragonfruit) {
 			efficiencyPercentage := txsData[dataStart+rLength+sLength+vLength : endPos]
 			efficiencyPercentages = append(efficiencyPercentages, efficiencyPercentage[0])
 		}
@@ -152,7 +152,7 @@ func DecodeTxs(txsData []byte, forkID uint64) ([]types.Transaction, []byte, []ui
 
 func DecodeTx(encodedTx []byte, efficiencyPercentage byte, forkId uint16) (types.Transaction, uint8, error) {
 	// efficiencyPercentage := uint8(0)
-	if forkId >= constants.ForkDragonfruitId5 {
+	if forkId >= uint16(constants.ForkID5Dragonfruit) {
 		encodedTx = append(encodedTx, efficiencyPercentage)
 	}
 
@@ -309,7 +309,7 @@ func TransactionToL2Data(tx types.Transaction, forkId uint16, efficiencyPercenta
 	encoded = append(encoded, sBytes[:]...)
 	encoded = append(encoded, vBytes...)
 
-	if forkId >= constants.ForkDragonfruitId5 {
+	if forkId >= uint16(constants.ForkID5Dragonfruit) {
 		ep := hermez_db.Uint8ToBytes(efficiencyPercentage)
 		encoded = append(encoded, ep...)
 	}

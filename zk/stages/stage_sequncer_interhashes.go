@@ -69,7 +69,7 @@ func SpawnSequencerInterhashesStage(
 	} else {
 		// todo [zkevm] we need to be prepared for multi-block batches at some point so this should really be a loop with a from/to
 		// of the previous stage state and the latest block from execution stage
-		newRoot, err = zkIncrementIntermediateHashes(s.LogPrefix(), s, tx, eridb, smt, to, false, nil, ctx.Done())
+		newRoot, err = zkIncrementIntermediateHashes(s.LogPrefix(), s, tx, eridb, smt, to)
 		if err != nil {
 			return err
 		}
