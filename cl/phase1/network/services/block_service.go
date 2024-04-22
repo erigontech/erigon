@@ -176,15 +176,15 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 	if err := b.forkchoiceStore.OnBlock(ctx, block, true, true, true); err != nil {
 		return err
 	}
-	go b.importBlockAttestations(block)
+	go b.importBlockOperations(block)
 	return b.db.Update(ctx, func(tx kv.RwTx) error {
 		return beacon_indicies.WriteHighestFinalized(tx, b.forkchoiceStore.FinalizedSlot())
 	})
 
 }
 
-// importBlockAttestationsInParallel imports block attestations in parallel
-func (b *blockService) importBlockAttestations(block *cltypes.SignedBeaconBlock) {
+// importBlockOperations imports block operations in parallel
+func (b *blockService) importBlockOperations(block *cltypes.SignedBeaconBlock) {
 	defer func() { // Would prefer this not to crash but rather log the error
 		r := recover()
 		if r != nil {
@@ -199,7 +199,13 @@ func (b *blockService) importBlockAttestations(block *cltypes.SignedBeaconBlock)
 
 		return true
 	})
-	log.Debug("import attestation", "time", time.Since(start))
+	block.Block.Body.AttesterSlashings.Range(func(idx int, a *cltypes.AttesterSlashing, total int) bool {
+		if err := b.forkchoiceStore.OnAttesterSlashing(a, false); err != nil {
+			log.Debug("bad attester slashing received", "err", err)
+		}
+		return true
+	})
+	log.Debug("import operations", "time", time.Since(start))
 }
 
 // loop is the main loop of the block service
