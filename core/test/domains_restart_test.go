@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/holiman/uint256"
@@ -34,8 +35,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/state"
 	reset2 "github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
 	state2 "github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -71,7 +70,7 @@ func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.RwDB,
 	require.NoError(t, err)
 
 	chain := networkname.Test
-	tdb, err := temporal.New(db, agg, systemcontracts.SystemContractCodeLookup[chain])
+	tdb, err := temporal.New(db, agg)
 	require.NoError(t, err)
 	db = tdb
 	return db, agg, path

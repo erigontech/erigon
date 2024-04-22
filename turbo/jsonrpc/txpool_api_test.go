@@ -3,15 +3,16 @@ package jsonrpc
 import (
 	"bytes"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"testing"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/etconfig2"
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	txPoolProto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
@@ -24,7 +25,7 @@ import (
 )
 
 func TestTxPoolContent(t *testing.T) {
-	if ethconfig.EnableHistoryV4InTest {
+	if etconfig2.EnableHistoryV4InTest {
 		t.Skip("TODO: [e4] implement me")
 	}
 

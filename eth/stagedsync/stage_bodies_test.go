@@ -3,10 +3,11 @@ package stagedsync_test
 import (
 	"bytes"
 	"errors"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"math/big"
 	"testing"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/etconfig2"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
@@ -71,7 +72,7 @@ func TestBodiesCanonical(t *testing.T) {
 	var e1 rawdbv3.ErrTxNumsAppendWithGap
 	require.True(errors.As(err, &e1))
 
-	if ethconfig.EnableHistoryV4InTest {
+	if etconfig2.EnableHistoryV4InTest {
 		// this should see same error inside then retry from last block available, therefore return no error
 		err = bw.MakeBodiesCanonical(tx, 5)
 		require.NoError(err)

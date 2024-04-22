@@ -154,7 +154,6 @@ func InitMiner(ctx context.Context, genesis *types.Genesis, privKey *ecdsa.Priva
 		RPCTxFeeCap:      1, // 1 ether
 		Snapshot:         ethconfig.BlocksFreezing{NoDownloader: true},
 		StateStream:      true,
-		HistoryV3:        ethconfig.EnableHistoryV4InTest,
 	}
 	ethCfg.TxPool.DBDir = nodeCfg.Dirs.TxPool
 	ethCfg.DeprecatedTxPool.CommitEvery = 15 * time.Second

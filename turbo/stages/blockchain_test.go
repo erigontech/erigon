@@ -26,13 +26,12 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/etconfig2"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 
 	libchain "github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -317,7 +316,7 @@ func testReorgShort(t *testing.T) {
 }
 
 func testReorg(t *testing.T, first, second []int64, td int64) {
-	if ethconfig.EnableHistoryV4InTest {
+	if etconfig2.EnableHistoryV4InTest {
 		t.Skip("TODO: [e4] implement me")
 	}
 

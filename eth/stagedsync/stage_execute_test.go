@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/etconfig2"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
@@ -12,7 +13,6 @@ import (
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -58,7 +58,7 @@ func apply(tx kv.RwTx, logger log.Logger) (beforeBlock, afterBlock testGenHook, 
 func newAgg(t *testing.T, logger log.Logger) *libstate.Aggregator {
 	t.Helper()
 	dirs, ctx := datadir.New(t.TempDir()), context.Background()
-	agg, err := libstate.NewAggregator(ctx, dirs, ethconfig.HistoryV3AggregationStep, nil, logger)
+	agg, err := libstate.NewAggregator(ctx, dirs, etconfig2.HistoryV3AggregationStep, nil, logger)
 	require.NoError(t, err)
 	err = agg.OpenFolder(false)
 	require.NoError(t, err)
