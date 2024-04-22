@@ -161,6 +161,23 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		header.WithdrawalsHash = &wh
 	}
 
+	/* TODO(racytech):
+	- try getting deposits from execution_payload
+	deposits := req.DepositsReceipts
+
+	- should we validate deposits here? -> unclear
+	DeriveSha(deposits) == req.DepositsRoot? -> unlikely
+	*/
+	// var deposits []*types.Deposit
+	// if version >= clparams.DenebVersion {
+	// 	deposits = req.DepositReceipts
+	// }
+
+	// if deposits != nil {
+	// 	dh := types.DeriveSha(types.Deposits(deposits))
+	// 	header.DepositsRoot = &dh
+	// }
+
 	if err := s.checkWithdrawalsPresence(header.Time, withdrawals); err != nil {
 		return nil, err
 	}
@@ -196,8 +213,6 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			ValidationError: engine_types.NewStringifiedErrorFromString("invalid block hash"),
 		}, nil
 	}
-
-	// TODO(racytech): check for req.DepositReceipts (eip-6110)
 
 	for _, txn := range req.Transactions {
 		if types.TypedTransactionMarshalledAsRlpString(txn) {
@@ -254,7 +269,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	defer s.lock.Unlock()
 
 	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
-	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
+	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals, nil /* deposits */)
 
 	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes)
 	if err != nil {

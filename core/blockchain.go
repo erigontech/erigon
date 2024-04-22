@@ -134,7 +134,7 @@ func ExecuteBlockEphemerally(
 				receipts = append(receipts, receipt)
 			}
 		}
-	}
+	}/*  */
 
 	receiptSha := types.DeriveSha(receipts)
 	if !vmConfig.StatelessExec && chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts && receiptSha != block.ReceiptHash() {

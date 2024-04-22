@@ -90,6 +90,9 @@ type Config struct {
 	// For deposit contract logs are needed by CL to validate/produce blocks.
 	// All logs should be available to a validating node through eth_getLogs
 	NoPruneContracts map[common.Address]bool `json:"noPruneContracts,omitempty"`
+
+	// DepositContractAddress common.Address // EIP-6110: mainnet = 0x00000000219ab540356cbb839cbe05303d7705fa
+	// TODO(racytech): do we add this to chainspecs json files or hardcode it to every network config?
 }
 
 type BorConfig interface {
