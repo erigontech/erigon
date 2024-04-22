@@ -431,7 +431,6 @@ func PruneLogIndex(s *PruneState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	}
 
 	pruneTo := cfg.prune.Receipts.PruneTo(s.ForwardProgress)
-	// s.PruneProgress
 	if err = pruneLogIndex(logPrefix, tx, cfg.tmpdir, s.PruneProgress, pruneTo, ctx, logger, cfg.noPruneContracts); err != nil {
 		return err
 	}
@@ -466,20 +465,17 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneFrom, prune
 		}
 		defer c.Close()
 
-		log.Info("pruneLogIndex running", "pruneFrom", pruneFrom, "pruneTo", pruneTo)
-
 		for k, v, err := c.Seek(dbutils.LogKey(pruneFrom, 0)); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
 			}
 			blockNum := binary.BigEndian.Uint64(k)
-			log.Info("Pruneloop", "key", k, "blockNum", blockNum)
 			if blockNum >= pruneTo {
 				break
 			}
 			select {
 			case <-logEvery.C:
-				logger.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.Log, "block", blockNum)
+				logger.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.Log, "block", blockNum, "pruneFrom", pruneFrom, "pruneTo", pruneTo)
 			case <-ctx.Done():
 				return libcommon.ErrStopped
 			default:
