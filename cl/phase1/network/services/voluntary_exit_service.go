@@ -54,11 +54,11 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 	// def process_voluntary_exit(state: BeaconState, signed_voluntary_exit: SignedVoluntaryExit) -> None:
 	state := s.syncedDataManager.HeadState()
 	if state == nil {
-		return nil
+		return ErrIgnore
 	}
 	val, err := state.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
 	if err != nil {
-		return err
+		return ErrIgnore
 	}
 	curEpoch := s.ethClock.GetCurrentEpoch()
 

@@ -43,12 +43,12 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 	// [IGNORE] The signed_bls_to_execution_change is the first valid signed bls to execution change received
 	// for the validator with index signed_bls_to_execution_change.message.validator_index.
 	if s.operationsPool.BLSToExecutionChangesPool.Has(msg.Signature) {
-		return nil
+		return ErrIgnore
 	}
 	change := msg.Message
 	state := s.syncedDataManager.HeadState()
 	if state == nil {
-		return nil
+		return ErrIgnore
 	}
 
 	// [IGNORE] current_epoch >= CAPELLA_FORK_EPOCH, where current_epoch is defined by the current wall-clock time.

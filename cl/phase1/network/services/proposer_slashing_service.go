@@ -52,7 +52,7 @@ func (s *proposerSlashingService) ProcessMessage(ctx context.Context, subnet *ui
 	}
 
 	if s.operationsPool.ProposerSlashingsPool.Has(pool.ComputeKeyForProposerSlashing(msg)) {
-		return nil
+		return ErrIgnore
 	}
 	h1 := msg.Header1.Header
 	h2 := msg.Header2.Header
@@ -75,7 +75,7 @@ func (s *proposerSlashingService) ProcessMessage(ctx context.Context, subnet *ui
 	// Verify the proposer is slashable
 	state := s.syncedDataManager.HeadState()
 	if state == nil {
-		return nil
+		return ErrIgnore
 	}
 	proposer, err := state.ValidatorForValidatorIndex(int(h1.ProposerIndex))
 	if err != nil {
