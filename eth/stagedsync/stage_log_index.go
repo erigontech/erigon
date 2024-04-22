@@ -395,11 +395,8 @@ func pruneOldLogChunks(tx kv.RwTx, bucket string, inMem *etl.Collector, pruneTo 
 				return err
 			}
 			var blockNum uint64
-			// if bucket == kv.Log {
-			// 	blockNum = binary.BigEndian.Uint64(k)
-			// } else {
-				blockNum = uint64(binary.BigEndian.Uint32(k[len(key):]))
-			// }
+			blockNum = uint64(binary.BigEndian.Uint32(k[len(key):]))
+
 			if !bytes.HasPrefix(k, key) || blockNum >= pruneTo {
 				break
 			}
@@ -460,8 +457,6 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneFrom, prune
 	defer topics.Close()
 	addrs := etl.NewCollector(logPrefix, tmpDir, etl.NewOldestEntryBuffer(bufferSize), logger)
 	defer addrs.Close()
-	// pruneLogKeyCollector := etl.NewCollector(logPrefix, tmpDir, etl.NewOldestEntryBuffer(bufferSize), logger)
-	// defer pruneLogKeyCollector.Close()
 
 	reader := bytes.NewReader(nil)
 	{
@@ -505,7 +500,6 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneFrom, prune
 					break
 				}
 			}
-			log.Info("[SPIDERMAN] Pruneloop", "toPrune", toPrune)
 
 			if toPrune {
 				for _, l := range logs {
@@ -518,10 +512,6 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneFrom, prune
 						return err
 					}
 				}
-
-				// if err := pruneLogKeyCollector.Collect(k, nil); err != nil {
-				// 	return err
-				// }
 				log.Info("[SPIDERMAN] Deleting kv.Log", "key", k)
 				c.DeleteCurrent()
 			}
@@ -534,8 +524,5 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneFrom, prune
 	if err := pruneOldLogChunks(tx, kv.LogAddressIndex, addrs, pruneTo, ctx); err != nil {
 		return err
 	}
-	// if err := pruneOldLogChunks(tx, kv.Log, pruneLogKeyCollector, pruneTo, ctx); err != nil {
-	// 	return err
-	// }
 	return nil
 }
