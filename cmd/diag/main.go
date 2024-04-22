@@ -35,7 +35,8 @@ func main() {
 
 	app.Flags = []cli.Flag{}
 
-	app.HelpName = `erigon diagnostics`
+	app.HelpName = `Erigon Diagnostics`
+	app.Usage = "Display diagnostic output for a running erigon node"
 	app.UsageText = `diag [command] [flags]`
 
 	app.Action = func(context *cli.Context) error {
