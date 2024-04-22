@@ -52,7 +52,6 @@ func TestNonceFromAddress(t *testing.T) {
 	ch := make(chan types.Announcements, 100)
 
 	coreDB := memdb.NewTestPoolDB(t)
-
 	_, db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 
 	cfg := txpoolcfg.DefaultConfig
