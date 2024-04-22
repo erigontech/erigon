@@ -2,24 +2,19 @@ package temporal
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/core/state/historyv2read"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -59,47 +54,16 @@ import (
 // HighLevel:
 //      1. Application - rely on TemporalDB (Ex: ExecutionLayer) or just DB (Ex: TxPool, Sentry, Downloader).
 
-type tRestoreCodeHash func(tx kv.Getter, key, v []byte, force *common.Hash) ([]byte, error)
-type tConvertAccount func(v []byte) ([]byte, error)
-type tParseIncarnation func(v []byte) (uint64, error)
-
 type DB struct {
 	kv.RwDB
 	agg *state.AggregatorV3
-
-	convertV3toV2        tConvertAccount
-	convertV2toV3        tConvertAccount
-	restoreCodeHash      tRestoreCodeHash
-	parseInc             tParseIncarnation
-	systemContractLookup map[common.Address][]common.CodeRecord
 }
 
-func New(db kv.RwDB, agg *state.AggregatorV3, systemContractLookup map[common.Address][]common.CodeRecord) (*DB, error) {
+func New(db kv.RwDB, agg *state.AggregatorV3) (*DB, error) {
 	if !kvcfg.HistoryV3.FromDB(db) {
 		panic("not supported")
 	}
-	if systemContractLookup != nil {
-		if err := db.View(context.Background(), func(tx kv.Tx) error {
-			var err error
-			for _, list := range systemContractLookup {
-				for i := range list {
-					list[i].TxNumber, err = rawdbv3.TxNums.Min(tx, list[i].BlockNumber)
-					if err != nil {
-						return err
-					}
-				}
-			}
-			return nil
-		}); err != nil {
-			return nil, err
-		}
-	}
-
-	return &DB{RwDB: db, agg: agg,
-		convertV3toV2: accounts.ConvertV3toV2, convertV2toV3: accounts.ConvertV2toV3,
-		restoreCodeHash: historyv2read.RestoreCodeHash, parseInc: accounts.DecodeIncarnationFromStorage,
-		systemContractLookup: systemContractLookup,
-	}, nil
+	return &DB{RwDB: db, agg: agg}, nil
 }
 func (db *DB) Agg() *state.AggregatorV3 { return db.agg }
 func (db *DB) InternalDB() kv.RwDB      { return db.RwDB }
@@ -225,26 +189,10 @@ func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 			if len(v) == 0 {
 				return k[:20], v, nil
 			}
-			v, err = tx.db.convertV3toV2(v)
-			if err != nil {
-				return nil, nil, err
-			}
-			/*
-				var force *common.Hash
-				if tx.db.systemContractLookup != nil {
-					if records, ok := tx.db.systemContractLookup[common.BytesToAddress(k)]; ok {
-						p := sort.Search(len(records), func(i int) bool {
-							return records[i].TxNumber > asOfTs
-						})
-						hash := records[p-1].CodeHash
-						force = &hash
-					}
-				}
-				v, err = tx.db.restoreCodeHash(tx.MdbxTx, k, v, force)
-				if err != nil {
-					return nil, nil, err
-				}
-			*/
+			//v, err = tx.db.convertV3toV2(v)
+			//if err != nil {
+			//	return nil, nil, err
+			//}
 			return k[:20], common.Copy(v), nil
 		})
 		lastestStateIt, err := tx.RangeAscend(kv.PlainState, fromKey, toKey, -1) // don't apply limit, because need filter
@@ -257,36 +205,36 @@ func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 		})
 		it = iter.UnionKV(histStateIt2, latestStateIt2, limit)
 	case kv.StorageDomain:
-		storageIt := tx.aggCtx.StorageHistoricalStateRange(asOfTs, fromKey, toKey, limit, tx)
-		storageIt1 := iter.TransformKV(storageIt, func(k, v []byte) ([]byte, []byte, error) {
-			return k, v, nil
-		})
+		//storageIt := tx.aggCtx.StorageHistoricalStateRange(asOfTs, fromKey, toKey, limit, tx)
+		//storageIt1 := iter.TransformKV(storageIt, func(k, v []byte) ([]byte, []byte, error) {
+		//	return k, v, nil
+		//})
 
-		accData, err := tx.GetOne(kv.PlainState, fromKey[:20])
-		if err != nil {
-			return nil, err
-		}
-		inc, err := tx.db.parseInc(accData)
-		if err != nil {
-			return nil, err
-		}
-		startkey := make([]byte, length.Addr+length.Incarnation+length.Hash)
-		copy(startkey, fromKey[:20])
-		binary.BigEndian.PutUint64(startkey[length.Addr:], inc)
-		copy(startkey[length.Addr+length.Incarnation:], fromKey[20:])
+		//accData, err := tx.GetOne(kv.PlainState, fromKey[:20])
+		//if err != nil {
+		//	return nil, err
+		//}
+		//inc, err := tx.db.parseInc(accData)
+		//if err != nil {
+		//	return nil, err
+		//}
+		//startkey := make([]byte, length.Addr+length.Incarnation+length.Hash)
+		//copy(startkey, fromKey[:20])
+		//binary.BigEndian.PutUint64(startkey[length.Addr:], inc)
+		//copy(startkey[length.Addr+length.Incarnation:], fromKey[20:])
+		//
+		//toPrefix := make([]byte, length.Addr+length.Incarnation)
+		//copy(toPrefix, fromKey[:20])
+		//binary.BigEndian.PutUint64(toPrefix[length.Addr:], inc+1)
 
-		toPrefix := make([]byte, length.Addr+length.Incarnation)
-		copy(toPrefix, fromKey[:20])
-		binary.BigEndian.PutUint64(toPrefix[length.Addr:], inc+1)
-
-		it2, err := tx.RangeAscend(kv.PlainState, startkey, toPrefix, limit)
-		if err != nil {
-			return nil, err
-		}
-		it3 := iter.TransformKV(it2, func(k, v []byte) ([]byte, []byte, error) {
-			return append(append([]byte{}, k[:20]...), k[28:]...), v, nil
-		})
-		it = iter.UnionKV(storageIt1, it3, limit)
+		//it2, err := tx.RangeAscend(kv.PlainState, startkey, toPrefix, limit)
+		//if err != nil {
+		//	return nil, err
+		//}
+		//it3 := iter.TransformKV(it2, func(k, v []byte) ([]byte, []byte, error) {
+		//	return append(append([]byte{}, k[:20]...), k[28:]...), v, nil
+		//})
+		//it = iter.UnionKV(storageIt1, it3, limit)
 	case kv.CodeDomain:
 		panic("not implemented yet")
 	default:
@@ -473,12 +421,7 @@ func NewTestDB(tb testing.TB, dirs datadir.Dirs, gspec *types.Genesis) (histV3 b
 			panic(err)
 		}
 
-		var sc map[common.Address][]common.CodeRecord
-		if gspec != nil {
-			sc = systemcontracts.SystemContractCodeLookup[gspec.Config.ChainName]
-		}
-
-		db, err = New(db, agg, sc)
+		db, err = New(db, agg)
 		if err != nil {
 			panic(err)
 		}
