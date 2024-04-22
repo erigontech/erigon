@@ -27,7 +27,7 @@ var (
 		solid.NewCheckpointFromParameters([32]byte{1, 0}, mockEpoch))
 
 	att = solid.NewAttestionFromParameters(
-		[]byte{0b00000001},
+		[]byte{0b00000001, 1},
 		attData,
 		[96]byte{'a', 'b', 'c', 'd', 'e', 'f'},
 	)
@@ -55,7 +55,7 @@ func (t *attestationTestSuite) SetupTest() {
 }
 
 func (t *attestationTestSuite) TearDownTest() {
-	//t.gomockCtrl.Finish()
+	t.gomockCtrl.Finish()
 }
 
 func (t *attestationTestSuite) TestAttestationProcessMessage() {
@@ -138,7 +138,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				ctx:    context.Background(),
 				subnet: uint64Ptr(1),
 				msg: solid.NewAttestionFromParameters(
-					[]byte{0b00111111, 0b00000011, 0, 0},
+					[]byte{0b10000001, 1 /*msb*/},
 					attData,
 					[96]byte{0, 1, 2, 3, 4, 5},
 				),
@@ -161,29 +161,10 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				ctx:    context.Background(),
 				subnet: uint64Ptr(1),
 				msg: solid.NewAttestionFromParameters(
-					[]byte{0, 0, 0, 0},
+					[]byte{0b0, 1},
 					attData,
 					[96]byte{0, 1, 2, 3, 4, 5},
 				),
-			},
-			wantErr: true,
-		},
-		{
-			name: "aggregation bits count mismatch",
-			mock: func() {
-				t.syncedData.EXPECT().HeadState().Return(&state.CachingBeaconState{}).Times(1)
-				computeCommitteeCountPerSlot = func(_ *state.CachingBeaconState, _, _ uint64) uint64 {
-					return 100000
-				}
-				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
-					return 1
-				}
-				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
-			},
-			args: args{
-				ctx:    context.Background(),
-				subnet: uint64Ptr(1),
-				msg:    att,
 			},
 			wantErr: true,
 		},
@@ -192,7 +173,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 			mock: func() {
 				t.syncedData.EXPECT().HeadState().Return(&state.CachingBeaconState{}).Times(1)
 				computeCommitteeCountPerSlot = func(_ *state.CachingBeaconState, _, _ uint64) uint64 {
-					return 8
+					return 5
 				}
 				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
 					return 1
@@ -217,17 +198,9 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 					return 1
 				}
 				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
-				t.mockForkChoice = &forkchoice.ForkChoiceStorageMock{
-					Headers: map[common.Hash]*cltypes.BeaconBlockHeader{
-						att.AttestantionData().BeaconBlockRoot(): {},
-					},
+				t.mockForkChoice.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{
+					att.AttestantionData().BeaconBlockRoot(): {}, // wrong block root
 				}
-				t.attService = NewAttestationService(
-					t.mockForkChoice,
-					t.committeeSubscibe,
-					t.ethClock, t.syncedData,
-					&clparams.BeaconChainConfig{SlotsPerEpoch: mockSlotsPerEpoch},
-					&clparams.NetworkConfig{})
 			},
 			args: args{
 				ctx:    context.Background(),
@@ -247,22 +220,17 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 					return 1
 				}
 				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
-				t.mockForkChoice = &forkchoice.ForkChoiceStorageMock{
-					Headers: map[common.Hash]*cltypes.BeaconBlockHeader{
-						att.AttestantionData().BeaconBlockRoot(): {},
-					},
-					Ancestors: map[uint64]common.Hash{
-						10 * mockSlotsPerEpoch: att.AttestantionData().Target().BlockRoot(),
-						0:                      {},
-					},
-					FinalizedCheckpointVal: solid.NewCheckpointFromParameters([32]byte{1, 0}, 1),
+				t.mockForkChoice.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{
+					att.AttestantionData().BeaconBlockRoot(): {},
 				}
-				t.attService = NewAttestationService(
-					t.mockForkChoice,
-					t.committeeSubscibe,
-					t.ethClock, t.syncedData,
-					&clparams.BeaconChainConfig{SlotsPerEpoch: mockSlotsPerEpoch},
-					&clparams.NetworkConfig{})
+				mockFinalizedCheckPoint := solid.NewCheckpointFromParameters([32]byte{1, 0}, 1)
+				t.mockForkChoice.Ancestors = map[uint64]common.Hash{
+					mockEpoch * mockSlotsPerEpoch:                       att.AttestantionData().Target().BlockRoot(),
+					mockFinalizedCheckPoint.Epoch() * mockSlotsPerEpoch: {}, // wrong block root
+				}
+				t.mockForkChoice.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(
+					mockFinalizedCheckPoint.BlockRoot(),
+					mockFinalizedCheckPoint.Epoch())
 			},
 			args: args{
 				ctx:    context.Background(),
@@ -282,22 +250,18 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 					return 1
 				}
 				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
-				t.mockForkChoice = &forkchoice.ForkChoiceStorageMock{
-					Headers: map[common.Hash]*cltypes.BeaconBlockHeader{
-						att.AttestantionData().BeaconBlockRoot(): {},
-					},
-					Ancestors: map[uint64]common.Hash{
-						10 * mockSlotsPerEpoch: att.AttestantionData().Target().BlockRoot(),
-						1 * mockSlotsPerEpoch:  {1, 0},
-					},
-					FinalizedCheckpointVal: solid.NewCheckpointFromParameters([32]byte{1, 0}, 1),
+				t.mockForkChoice.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{
+					att.AttestantionData().BeaconBlockRoot(): {},
 				}
-				t.attService = NewAttestationService(
-					t.mockForkChoice,
-					t.committeeSubscibe,
-					t.ethClock, t.syncedData,
-					&clparams.BeaconChainConfig{SlotsPerEpoch: mockSlotsPerEpoch},
-					&clparams.NetworkConfig{})
+
+				mockFinalizedCheckPoint := solid.NewCheckpointFromParameters([32]byte{1, 0}, 1)
+				t.mockForkChoice.Ancestors = map[uint64]common.Hash{
+					mockEpoch * mockSlotsPerEpoch:                       att.AttestantionData().Target().BlockRoot(),
+					mockFinalizedCheckPoint.Epoch() * mockSlotsPerEpoch: mockFinalizedCheckPoint.BlockRoot(),
+				}
+				t.mockForkChoice.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(
+					mockFinalizedCheckPoint.BlockRoot(),
+					mockFinalizedCheckPoint.Epoch())
 				t.committeeSubscibe.EXPECT().CheckAggregateAttestation(att).Return(nil).Times(1)
 			},
 			args: args{

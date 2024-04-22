@@ -148,15 +148,17 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 	if err != nil {
 		return err
 	}
+	activeIndicies := state.GetActiveValidatorsIndices(state.Slot() / beaconConfig.SlotsPerEpoch)
 
 	sentinel, err := service.StartSentinelService(&sentinel.SentinelConfig{
-		IpAddr:        config.LightClientDiscoveryAddr,
-		Port:          int(config.LightClientDiscoveryPort),
-		TCPPort:       uint(config.LightClientDiscoveryTCPPort),
-		NetworkConfig: networkConfig,
-		BeaconConfig:  beaconConfig,
-		TmpDir:        dirs.Tmp,
-		EnableBlocks:  true,
+		IpAddr:         config.LightClientDiscoveryAddr,
+		Port:           int(config.LightClientDiscoveryPort),
+		TCPPort:        uint(config.LightClientDiscoveryTCPPort),
+		NetworkConfig:  networkConfig,
+		BeaconConfig:   beaconConfig,
+		TmpDir:         dirs.Tmp,
+		EnableBlocks:   true,
+		ActiveIndicies: uint64(len(activeIndicies)),
 	}, rcsn, blobStorage, indexDB, &service.ServerConfig{
 		Network:   "tcp",
 		Addr:      fmt.Sprintf("%s:%d", config.SentinelAddr, config.SentinelPort),
@@ -290,6 +292,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 			syncCommitteeMessagesService,
 			syncContributionService,
 			aggregateAndProofService,
+			attestationService,
 		)
 		go beacon.ListenAndServe(&beacon.LayeredBeaconHandler{
 			ArchiveApi: apiHandler,
