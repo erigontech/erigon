@@ -133,7 +133,7 @@ func ensureCantLeaveDir(fName, root string) (string, error) {
 	return fName, nil
 }
 
-func BuildTorrentIfNeed(ctx context.Context, fName, root string, torrentFiles *TorrentFiles) (ok bool, err error) {
+func BuildTorrentIfNeed(ctx context.Context, fName, root string, torrentFiles *AtomicTorrentFS) (ok bool, err error) {
 	select {
 	case <-ctx.Done():
 		return false, ctx.Err()
@@ -159,11 +159,11 @@ func BuildTorrentIfNeed(ctx context.Context, fName, root string, torrentFiles *T
 	}
 	info.Name = fName
 
-	return true, CreateTorrentFileFromInfo(root, info, nil, torrentFiles)
+	return torrentFiles.CreateWithMetaInfo(info, nil)
 }
 
 // BuildTorrentFilesIfNeed - create .torrent files from .seg files (big IO) - if .seg files were added manually
-func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs, torrentFiles *TorrentFiles, chain string, ignore snapcfg.Preverified) (int, error) {
+func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs, torrentFiles *AtomicTorrentFS, chain string, ignore snapcfg.Preverified) (int, error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -216,16 +216,6 @@ Loop:
 	return int(createdAmount.Load()), nil
 }
 
-func CreateTorrentFileIfNotExists(root string, info *metainfo.Info, mi *metainfo.MetaInfo, torrentFiles *TorrentFiles) error {
-	if torrentFiles.Exists(info.Name) {
-		return nil
-	}
-	if err := CreateTorrentFileFromInfo(root, info, mi, torrentFiles); err != nil {
-		return err
-	}
-	return nil
-}
-
 func CreateMetaInfo(info *metainfo.Info, mi *metainfo.MetaInfo) (*metainfo.MetaInfo, error) {
 	if mi == nil {
 		infoBytes, err := bencode.Marshal(info)
@@ -243,14 +233,6 @@ func CreateMetaInfo(info *metainfo.Info, mi *metainfo.MetaInfo) (*metainfo.MetaI
 	}
 	return mi, nil
 }
-func CreateTorrentFileFromInfo(root string, info *metainfo.Info, mi *metainfo.MetaInfo, torrentFiles *TorrentFiles) (err error) {
-	mi, err = CreateMetaInfo(info, mi)
-	if err != nil {
-		return err
-	}
-	fPath := filepath.Join(root, info.Name+".torrent")
-	return torrentFiles.CreateTorrentFromMetaInfo(fPath, mi)
-}
 
 func AllTorrentPaths(dirs datadir.Dirs) ([]string, error) {
 	files, err := dir2.ListFiles(dirs.Snap, ".torrent")
@@ -265,7 +247,7 @@ func AllTorrentPaths(dirs datadir.Dirs) ([]string, error) {
 	return files, nil
 }
 
-func AllTorrentSpecs(dirs datadir.Dirs, torrentFiles *TorrentFiles) (res []*torrent.TorrentSpec, err error) {
+func AllTorrentSpecs(dirs datadir.Dirs, torrentFiles *AtomicTorrentFS) (res []*torrent.TorrentSpec, err error) {
 	files, err := AllTorrentPaths(dirs)
 	if err != nil {
 		return nil, err

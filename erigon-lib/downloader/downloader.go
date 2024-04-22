@@ -87,7 +87,7 @@ type Downloader struct {
 	logger    log.Logger
 	verbosity log.Lvl
 
-	torrentFiles    *TorrentFiles
+	torrentFS       *AtomicTorrentFS
 	snapshotLock    *snapshotLock
 	webDownloadInfo map[string]webDownloadInfo
 	downloading     map[string]struct{}
@@ -263,14 +263,14 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		webseeds:            NewWebSeeds(cfg.WebSeedUrls, verbosity, logger),
 		logger:              logger,
 		verbosity:           verbosity,
-		torrentFiles:        &TorrentFiles{dir: cfg.Dirs.Snap},
+		torrentFS:           &AtomicTorrentFS{dir: cfg.Dirs.Snap},
 		snapshotLock:        lock,
 		webDownloadInfo:     map[string]webDownloadInfo{},
 		webDownloadSessions: map[string]*RCloneSession{},
 		downloading:         map[string]struct{}{},
 		webseedsDiscover:    discover,
 	}
-	d.webseeds.SetTorrent(d.torrentFiles, lock.Downloads, cfg.DownloadTorrentFilesFromWebseed)
+	d.webseeds.SetTorrent(d.torrentFS, lock.Downloads, cfg.DownloadTorrentFilesFromWebseed)
 
 	requestHandler.downloader = d
 
@@ -760,6 +760,23 @@ type seedHash struct {
 	reported bool
 }
 
+// fsyncDB - to not loose results of downloading on power-off
+// See `erigon-lib/downloader/mdbx_piece_completion.go` for explanation
+func (d *Downloader) fsyncDB() error {
+	return d.db.Update(d.ctx, func(tx kv.RwTx) error {
+		v, err := tx.GetOne(kv.BittorrentInfo, []byte("_fsync"))
+		if err != nil {
+			return err
+		}
+		if len(v) == 0 || v[0] == 0 {
+			v = []byte{1}
+		} else {
+			v = []byte{0}
+		}
+		return tx.Put(kv.BittorrentInfo, []byte("_fsync"), v)
+	})
+}
+
 func (d *Downloader) mainLoop(silent bool) error {
 	if d.webseedsDiscover {
 		// CornerCase: no peers -> no anoncments to trackers -> no magnetlink resolution (but magnetlink has filename)
@@ -916,7 +933,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 					if err := d.db.Update(d.ctx,
 						torrentInfoUpdater(t.Info().Name, nil, t.Info().Length, completionTime)); err != nil {
-						d.logger.Warn("Failed to update file info", "file", t.Info().Name, "err", err)
+						d.logger.Warn("[snapshots] Failed to update file info", "file", t.Info().Name, "err", err)
 					}
 
 					d.lock.Lock()
@@ -982,9 +999,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 						}
 					}
 
-					if err := d.db.Update(d.ctx,
+					if err := d.db.Update(context.Background(),
 						torrentInfoUpdater(status.name, status.infoHash.Bytes(), status.length, completionTime)); err != nil {
-						d.logger.Warn("Failed to update file info", "file", status.name, "err", err)
+						d.logger.Warn("[snapshots] Failed to update file info", "file", status.name, "err", err)
 					}
 
 					complete[status.name] = struct{}{}
@@ -1271,8 +1288,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 			if stats.Completed {
 				if justCompleted {
 					justCompleted = false
-					// force fsync of db. to not loose results of downloading on power-off
-					_ = d.db.Update(d.ctx, func(tx kv.RwTx) error { return nil })
+					_ = d.fsyncDB()
 				}
 
 				d.logger.Info("[snapshots] Seeding",
@@ -1791,7 +1807,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	}
 
 	var dbInfo int
-	var dbComplete int
 	var tComplete int
 	var torrentInfo int
 
@@ -1849,30 +1864,8 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 		if !torrentComplete {
 			if info, err := d.torrentInfo(torrentName); err == nil {
-				updateStats := t.Info() == nil
-
-				if updateStats {
+				if info != nil {
 					dbInfo++
-				}
-
-				if info.Completed != nil && info.Completed.Before(time.Now()) {
-					if info.Length != nil {
-						if updateStats {
-							stats.MetadataReady++
-							stats.BytesTotal += uint64(*info.Length)
-						}
-
-						if fi, err := os.Stat(filepath.Join(d.SnapDir(), t.Name())); err == nil {
-							if torrentComplete = (fi.Size() == *info.Length); torrentComplete {
-								//infoRead := t.Stats().BytesReadData
-								//if updateStats || infoRead.Int64() == 0 {
-								//	stats.BytesCompleted += uint64(*info.Length)
-								//}
-								dbComplete++
-								progress = float32(100)
-							}
-						}
-					}
 				}
 			} else if _, ok := d.webDownloadInfo[torrentName]; ok {
 				stats.MetadataReady++
@@ -1986,7 +1979,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			"torrent", torrentInfo,
 			"db", dbInfo,
 			"t-complete", tComplete,
-			"db-complete", dbComplete,
 			"webseed-trips", stats.WebseedTripCount.Load(),
 			"webseed-discards", stats.WebseedDiscardCount.Load(),
 			"webseed-fails", stats.WebseedServerFails.Load(),
@@ -2263,8 +2255,7 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 	if err := g.Wait(); err != nil {
 		return err
 	}
-	// force fsync of db. to not loose results of validation on power-off
-	return d.db.Update(context.Background(), func(tx kv.RwTx) error { return nil })
+	return d.fsyncDB()
 }
 
 // AddNewSeedableFile decides what we do depending on wether we have the .seg file or the .torrent file
@@ -2285,11 +2276,11 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	}
 
 	// if we don't have the torrent file we build it if we have the .seg file
-	_, err := BuildTorrentIfNeed(ctx, name, d.SnapDir(), d.torrentFiles)
+	_, err := BuildTorrentIfNeed(ctx, name, d.SnapDir(), d.torrentFS)
 	if err != nil {
 		return fmt.Errorf("AddNewSeedableFile: %w", err)
 	}
-	ts, err := d.torrentFiles.LoadByName(name)
+	ts, err := d.torrentFS.LoadByName(name)
 	if err != nil {
 		return fmt.Errorf("AddNewSeedableFile: %w", err)
 	}
@@ -2318,12 +2309,12 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	if d.alreadyHaveThisName(name) || !IsSnapNameAllowed(name) {
 		return nil
 	}
-	isProhibited, err := d.torrentFiles.NewDownloadsAreProhibited(name)
+	isProhibited, err := d.torrentFS.NewDownloadsAreProhibited(name)
 	if err != nil {
 		return err
 	}
 
-	if isProhibited && !d.torrentFiles.Exists(name) {
+	if isProhibited && !d.torrentFS.Exists(name) {
 		return nil
 	}
 
@@ -2336,7 +2327,6 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	}
 
 	t, ok, err := addTorrentFile(ctx, spec, d.torrentClient, d.db, d.webseeds)
-
 	if err != nil {
 		return err
 	}
@@ -2373,7 +2363,7 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 		}
 
 		mi := t.Metainfo()
-		if err := CreateTorrentFileIfNotExists(d.SnapDir(), t.Info(), &mi, d.torrentFiles); err != nil {
+		if _, err := d.torrentFS.CreateWithMetaInfo(t.Info(), &mi); err != nil {
 			d.logger.Warn("[snapshots] create torrent file", "err", err)
 			return
 		}
@@ -2417,7 +2407,7 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 	eg, ctx := errgroup.WithContext(d.ctx)
 	eg.SetLimit(ParallelVerifyFiles)
 
-	files, err := AllTorrentSpecs(d.cfg.Dirs, d.torrentFiles)
+	files, err := AllTorrentSpecs(d.cfg.Dirs, d.torrentFS)
 	if err != nil {
 		return err
 	}
@@ -2489,7 +2479,7 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 	return eg.Wait()
 }
 func (d *Downloader) BuildTorrentFilesIfNeed(ctx context.Context, chain string, ignore snapcfg.Preverified) error {
-	_, err := BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs, d.torrentFiles, chain, ignore)
+	_, err := BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs, d.torrentFS, chain, ignore)
 	return err
 }
 func (d *Downloader) Stats() AggStats {
@@ -2549,6 +2539,7 @@ func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientC
 		return nil, nil, nil, nil, fmt.Errorf("torrentcfg.openClient: %w", err)
 	}
 	c, err = NewMdbxPieceCompletion(db)
+	//c, err = NewMdbxPieceCompletionBatch(db)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("torrentcfg.NewMdbxPieceCompletion: %w", err)
 	}

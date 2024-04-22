@@ -119,6 +119,9 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(ctx context.Context, subne
 
 	// Add to aggregation pool
 	if err := a.aggregationPool.AddAttestation(aggregateAndProof.Message.Aggregate); err != nil {
+		if errors.Is(err, aggregation.ErrIsSuperset) {
+			return ErrIgnore
+		}
 		return errors.WithMessagef(err, "failed to add attestation to pool")
 	}
 

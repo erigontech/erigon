@@ -42,6 +42,7 @@ type ForkChoiceStorageMock struct {
 	LCUpdates                 map[uint64]*cltypes.LightClientUpdate
 	SyncContributionPool      sync_contribution_pool.SyncContributionPool
 	Headers                   map[common.Hash]*cltypes.BeaconBlockHeader
+	GetBeaconCommitteeMock    func(slot, committeeIndex uint64) ([]uint64, error)
 
 	Pool pool.OperationsPool
 }
@@ -67,6 +68,7 @@ func NewForkChoiceStorageMock() *ForkChoiceStorageMock {
 		LCUpdates:                 make(map[uint64]*cltypes.LightClientUpdate),
 		SyncContributionPool:      sync_contribution_pool.NewSyncContributionPoolMock(),
 		Headers:                   make(map[common.Hash]*cltypes.BeaconBlockHeader),
+		GetBeaconCommitteeMock:    nil,
 	}
 }
 
@@ -128,6 +130,9 @@ func (f *ForkChoiceStorageMock) GetSyncCommittees(period uint64) (*solid.SyncCom
 }
 
 func (f *ForkChoiceStorageMock) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, error) {
+	if f.GetBeaconCommitteeMock != nil {
+		return f.GetBeaconCommitteeMock(slot, committeeIndex)
+	}
 	return []uint64{1, 2, 3, 4, 5, 6, 7, 8}, nil
 }
 
