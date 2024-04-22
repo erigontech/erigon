@@ -191,6 +191,7 @@ func (b *blockService) importBlockAttestations(block *cltypes.SignedBeaconBlock)
 			log.Warn("recovered from panic", "err", r)
 		}
 	}()
+	start := time.Now()
 	block.Block.Body.Attestations.Range(func(idx int, a *solid.Attestation, total int) bool {
 		if err := b.forkchoiceStore.OnAttestation(a, true, false); err != nil {
 			log.Debug("bad attestation received", "err", err)
@@ -198,6 +199,7 @@ func (b *blockService) importBlockAttestations(block *cltypes.SignedBeaconBlock)
 
 		return true
 	})
+	log.Debug("import attestation", "time", time.Since(start))
 }
 
 // loop is the main loop of the block service

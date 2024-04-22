@@ -2,17 +2,11 @@ package forkchoice
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-)
-
-const (
-	maxAttestationJobLifetime = 30 * time.Minute
-	maxBlockJobLifetime       = 36 * time.Second // 3 mainnet slots
 )
 
 var (
@@ -50,6 +44,7 @@ func (f *ForkChoiceStore) OnAttestation(attestation *solid.Attestation, fromBloc
 	if headState == nil {
 		attestationIndicies, err = f.verifyAttestationWithCheckpointState(target, attestation, fromBlock)
 	} else {
+		fmt.Println("A")
 		attestationIndicies, err = f.verifyAttestationWithState(headState, attestation, fromBlock)
 	}
 	if err != nil {
@@ -58,10 +53,7 @@ func (f *ForkChoiceStore) OnAttestation(attestation *solid.Attestation, fromBloc
 
 	// Lastly update latest messages.
 	f.processAttestingIndicies(attestation, attestationIndicies)
-	if !fromBlock && insert {
-		// Add to the pool when verified.
-		f.operationsPool.AttestationsPool.Insert(attestation.Signature(), attestation)
-	}
+
 	return nil
 }
 
