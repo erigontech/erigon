@@ -113,7 +113,5 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 
 	s.operationsPool.VoluntaryExitPool.Insert(voluntaryExit.ValidatorIndex, msg)
 
-	// Initiate exit
-	// initiate_validator_exit(state, voluntary_exit.validator_index)
-	return state.InitiateValidatorExit(voluntaryExit.ValidatorIndex)
+	return nil
 }
