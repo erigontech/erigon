@@ -2,8 +2,10 @@ package lru
 
 import (
 	"fmt"
+	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/ledgerwatch/erigon-lib/metrics"
 )
 
@@ -36,6 +38,26 @@ func (c *Cache[K, V]) Get(k K) (V, bool) {
 		metrics.GetOrCreateCounter(fmt.Sprintf(`golang_lru_cache_hit{%s="%s"}`, "cache", c.metricName)).Inc()
 	} else {
 		metrics.GetOrCreateCounter(fmt.Sprintf(`golang_lru_cache_miss{%s="%s"}`, "cache", c.metricName)).Inc()
+	}
+	return v, ok
+}
+
+type CacheWithTTL[K comparable, V any] struct {
+	*expirable.LRU[K, V]
+	metric string
+}
+
+func NewWithTTL[K comparable, V any](metricName string, size int, ttl time.Duration) *CacheWithTTL[K, V] {
+	cache := expirable.NewLRU[K, V](size, nil, ttl)
+	return &CacheWithTTL[K, V]{LRU: cache, metric: metricName}
+}
+
+func (c *CacheWithTTL[K, V]) Get(k K) (V, bool) {
+	v, ok := c.LRU.Get(k)
+	if ok {
+		metrics.GetOrCreateCounter(fmt.Sprintf(`golang_ttl_lru_cache_hit{%s="%s"}`, "cache", c.metric)).Inc()
+	} else {
+		metrics.GetOrCreateCounter(fmt.Sprintf(`golang_ttl_lru_cache_miss{%s="%s"}`, "cache", c.metric)).Inc()
 	}
 	return v, ok
 }

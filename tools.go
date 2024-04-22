@@ -21,5 +21,6 @@ import (
 	_ "github.com/erigontech/mdbx-go/mdbxdist"
 	_ "github.com/fjl/gencodec"
 	_ "github.com/ugorji/go/codec/codecgen"
+	_ "go.uber.org/mock/mockgen/model"
 	_ "google.golang.org/grpc/cmd/protoc-gen-go-grpc"
 )

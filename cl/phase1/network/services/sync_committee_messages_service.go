@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
@@ -30,6 +31,8 @@ type syncCommitteeMessagesService struct {
 	syncContributionPool      sync_contribution_pool.SyncContributionPool
 	ethClock                  eth_clock.EthereumClock
 	test                      bool
+
+	mu sync.Mutex
 }
 
 // NewSyncCommitteeMessagesService creates a new sync committee messages service
@@ -52,13 +55,15 @@ func NewSyncCommitteeMessagesService(
 
 // ProcessMessage processes a sync committee message
 func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SyncCommitteeMessage) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	headState := s.syncedDataManager.HeadState()
 	if headState == nil {
 		return ErrIgnore
 	}
 	// [IGNORE] The message's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. sync_committee_message.slot == current_slot.
-	if !s.test && !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.Slot) {
-		return nil
+	if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.Slot) {
+		return ErrIgnore
 	}
 
 	// [REJECT] The subnet_id is valid for the given validator, i.e. subnet_id in compute_subnets_for_sync_committee(state, sync_committee_message.validator_index).
@@ -78,10 +83,10 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 	}
 	// [IGNORE] There has been no other valid sync committee message for the declared slot for the validator referenced by sync_committee_message.validator_index.
 	if _, ok := s.seenSyncCommitteeMessages[seenSyncCommitteeMessageIdentifier]; ok {
-		return nil
+		return ErrIgnore
 	}
 	// [REJECT] The signature is valid for the message beacon_block_root for the validator referenced by validator_index
-	if err := verifySyncCommitteeMessageSignature(headState, msg); err != nil {
+	if err := verifySyncCommitteeMessageSignature(headState, msg); !s.test && err != nil {
 		return err
 	}
 	s.seenSyncCommitteeMessages[seenSyncCommitteeMessageIdentifier] = struct{}{}

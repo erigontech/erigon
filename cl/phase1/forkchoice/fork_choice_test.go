@@ -62,7 +62,7 @@ func TestForkChoiceBasic(t *testing.T) {
 	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchorStateEncoded, int(clparams.AltairVersion)))
 	pool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
 	emitters := beaconevents.NewEmitters()
-	store, err := forkchoice.NewForkChoiceStore(nil, anchorState, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}), emitters, sd, nil, nil, nil)
+	store, err := forkchoice.NewForkChoiceStore(nil, anchorState, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}), emitters, sd, nil)
 	require.NoError(t, err)
 	// first steps
 	store.OnTick(0)
@@ -107,22 +107,7 @@ func TestForkChoiceBasic(t *testing.T) {
 	for sd.HeadState() == nil {
 		time.Sleep(time.Millisecond)
 	}
-	// Try processing a voluntary exit
-	err = store.OnVoluntaryExit(&cltypes.SignedVoluntaryExit{
-		VoluntaryExit: &cltypes.VoluntaryExit{
-			Epoch:          0,
-			ValidatorIndex: 0,
-		},
-	}, true)
 	require.NoError(t, err)
-	// Try processing a bls execution change exit
-	err = store.OnBlsToExecutionChange(&cltypes.SignedBLSToExecutionChange{
-		Message: &cltypes.BLSToExecutionChange{
-			ValidatorIndex: 0,
-		},
-	}, true)
-	require.NoError(t, err)
-	require.Equal(t, len(pool.VoluntaryExistsPool.Raw()), 1)
 }
 
 func TestForkChoiceChainBellatrix(t *testing.T) {
@@ -145,7 +130,7 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 	sd := synced_data.NewSyncedDataManager(true, &clparams.MainnetBeaconConfig)
 	store, err := forkchoice.NewForkChoiceStore(nil, anchorState, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{
 		Beacon: true,
-	}), emitters, sd, nil, nil, nil)
+	}), emitters, sd, nil)
 	store.OnTick(2000)
 	require.NoError(t, err)
 	for _, block := range blocks {
