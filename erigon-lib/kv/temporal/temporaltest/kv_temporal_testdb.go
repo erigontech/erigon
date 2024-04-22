@@ -14,7 +14,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-// TODO: need remove `gspec` param (move SystemContractCodeLookup feature somewhere)
+// nolint:thelper
 func NewTestDB(tb testing.TB, dirs datadir.Dirs) (histV3 bool, db kv.RwDB, agg *state.Aggregator) {
 	historyV3 := true
 	logger := log.New()
