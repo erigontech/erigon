@@ -204,14 +204,14 @@ var (
 			MinSupported: 1,
 		},
 		snaptype.RangeExtractorFunc(
-			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 				spanFrom := uint64(heimdall.SpanIdAt(blockFrom))
 				spanTo := uint64(heimdall.SpanIdAt(blockTo))
-				return extractValueRange(ctx, kv.BorSpans, spanFrom, spanTo, db, chainConfig, collect, workers, lvl, logger)
+				return extractValueRange(ctx, kv.BorSpans, spanFrom, spanTo, db, collect, workers, lvl, logger)
 			}),
 		[]snaptype.Index{snaptype.Indexes.BorSpanId},
 		snaptype.IndexBuilderFunc(
-			func(ctx context.Context, sn snaptype.FileInfo, salt uint32, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+			func(ctx context.Context, sn snaptype.FileInfo, salt uint32, _ *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 				d, err := seg.NewDecompressor(sn.Path)
 
 				if err != nil {
@@ -221,7 +221,7 @@ var (
 
 				baseSpanId := uint64(heimdall.SpanIdAt(sn.From))
 
-				return buildValueIndex(ctx, sn, salt, d, baseSpanId, chainConfig, tmpDir, p, lvl, logger)
+				return buildValueIndex(ctx, sn, salt, d, baseSpanId, tmpDir, p, lvl, logger)
 			}),
 	)
 
@@ -232,7 +232,7 @@ var (
 			MinSupported: 1,
 		},
 		snaptype.RangeExtractorFunc(
-			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 				var checkpointTo, checkpointFrom heimdall.CheckpointId
 
 				err := db.View(ctx, func(tx kv.Tx) (err error) {
@@ -268,11 +268,11 @@ var (
 					return 0, err
 				}
 
-				return extractValueRange(ctx, kv.BorCheckpoints, uint64(checkpointFrom), uint64(checkpointTo), db, chainConfig, collect, workers, lvl, logger)
+				return extractValueRange(ctx, kv.BorCheckpoints, uint64(checkpointFrom), uint64(checkpointTo), db, collect, workers, lvl, logger)
 			}),
 		[]snaptype.Index{snaptype.Indexes.BorCheckpointId},
 		snaptype.IndexBuilderFunc(
-			func(ctx context.Context, sn snaptype.FileInfo, salt uint32, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+			func(ctx context.Context, sn snaptype.FileInfo, salt uint32, _ *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 				d, err := seg.NewDecompressor(sn.Path)
 
 				if err != nil {
@@ -295,7 +295,7 @@ var (
 					firstCheckpointId = uint64(firstCheckpoint.Id)
 				}
 
-				return buildValueIndex(ctx, sn, salt, d, firstCheckpointId, chainConfig, tmpDir, p, lvl, logger)
+				return buildValueIndex(ctx, sn, salt, d, firstCheckpointId, tmpDir, p, lvl, logger)
 			}),
 	)
 
@@ -306,7 +306,7 @@ var (
 			MinSupported: 1,
 		},
 		snaptype.RangeExtractorFunc(
-			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 				var milestoneFrom, milestoneTo heimdall.MilestoneId
 
 				err := db.View(ctx, func(tx kv.Tx) (err error) {
@@ -342,11 +342,11 @@ var (
 					return 0, err
 				}
 
-				return extractValueRange(ctx, kv.BorMilestones, uint64(milestoneFrom), uint64(milestoneTo), db, chainConfig, collect, workers, lvl, logger)
+				return extractValueRange(ctx, kv.BorMilestones, uint64(milestoneFrom), uint64(milestoneTo), db, collect, workers, lvl, logger)
 			}),
 		[]snaptype.Index{snaptype.Indexes.BorMilestoneId},
 		snaptype.IndexBuilderFunc(
-			func(ctx context.Context, sn snaptype.FileInfo, salt uint32, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+			func(ctx context.Context, sn snaptype.FileInfo, salt uint32, _ *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 				d, err := seg.NewDecompressor(sn.Path)
 
 				if err != nil {
@@ -369,14 +369,14 @@ var (
 					}
 				}
 
-				return buildValueIndex(ctx, sn, salt, d, firstMilestoneId, chainConfig, tmpDir, p, lvl, logger)
+				return buildValueIndex(ctx, sn, salt, d, firstMilestoneId, tmpDir, p, lvl, logger)
 			}),
 	)
 
 	BorSnapshotTypes = []snaptype.Type{BorEvents, BorSpans, BorCheckpoints, BorMilestones}
 )
 
-func extractValueRange(ctx context.Context, table string, valueFrom, valueTo uint64, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+func extractValueRange(ctx context.Context, table string, valueFrom, valueTo uint64, db kv.RoDB, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -408,7 +408,7 @@ func extractValueRange(ctx context.Context, table string, valueFrom, valueTo uin
 	return valueTo, nil
 }
 
-func buildValueIndex(ctx context.Context, sn snaptype.FileInfo, salt uint32, d *seg.Decompressor, baseId uint64, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+func buildValueIndex(ctx context.Context, sn snaptype.FileInfo, salt uint32, d *seg.Decompressor, baseId uint64, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("BorSpansIdx: at=%d-%d, %v, %s", sn.From, sn.To, rec, dbg.Stack())

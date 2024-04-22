@@ -155,25 +155,23 @@ func SentryReconnectAndPumpStreamLoop[TMessage interface{}](
 
 		statusData, err := statusDataFactory(ctx)
 
-		if err != nil && !errors.Is(err, sentry.ErrNoChainHead) {
+		if err != nil {
 			logger.Error("SentryReconnectAndPumpStreamLoop: statusDataFactory error", "stream", streamName, "err", err)
 			time.Sleep(time.Second)
 			continue
 		}
 
-		if statusData != nil {
-			if _, err := sentryClient.SetStatus(ctx, statusData); err != nil {
-				if errors.Is(err, context.Canceled) {
-					continue
-				}
-				if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-					time.Sleep(3 * time.Second)
-					continue
-				}
-				logger.Warn("Status error, sentry not ready yet", "stream", streamName, "err", err)
-				time.Sleep(time.Second)
+		if _, err := sentryClient.SetStatus(ctx, statusData); err != nil {
+			if errors.Is(err, context.Canceled) {
 				continue
 			}
+			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
+				time.Sleep(3 * time.Second)
+				continue
+			}
+			logger.Warn("Status error, sentry not ready yet", "stream", streamName, "err", err)
+			time.Sleep(time.Second)
+			continue
 		}
 
 		if err := pumpStreamLoop(ctx, sentryClient, streamName, streamFactory, messageFactory, handleInboundMessage, wg, logger); err != nil {

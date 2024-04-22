@@ -45,7 +45,7 @@ var (
 		nil,
 		[]snaptype.Index{snaptype.Indexes.HeaderHash},
 		snaptype.IndexBuilderFunc(
-			func(ctx context.Context, info snaptype.FileInfo, salt uint32, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+			func(ctx context.Context, info snaptype.FileInfo, salt uint32, _ *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 				hasher := crypto.NewKeccakState()
 				defer cryptopool.ReturnToPoolKeccak256(hasher)
 				var h common.Hash
@@ -78,7 +78,7 @@ var (
 		nil,
 		[]snaptype.Index{snaptype.Indexes.BodyHash},
 		snaptype.IndexBuilderFunc(
-			func(ctx context.Context, info snaptype.FileInfo, salt uint32, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+			func(ctx context.Context, info snaptype.FileInfo, salt uint32, _ *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 				num := make([]byte, 8)
 
 				if err := snaptype.BuildIndex(ctx, info, salt, info.From, tmpDir, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, _ []byte) error {
