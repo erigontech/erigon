@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/config3"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
@@ -21,8 +23,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
@@ -173,7 +173,7 @@ func apply(tx kv.RwTx, agg *libstate.AggregatorV3, logger log.Logger) (beforeBlo
 func newAgg(t *testing.T, logger log.Logger) *libstate.AggregatorV3 {
 	t.Helper()
 	dir, ctx := t.TempDir(), context.Background()
-	agg, err := libstate.NewAggregatorV3(ctx, dir, dir, ethconfig.HistoryV3AggregationStep, nil, logger)
+	agg, err := libstate.NewAggregatorV3(ctx, dir, dir, config3.HistoryV3AggregationStep, nil, logger)
 	require.NoError(t, err)
 	err = agg.OpenFolder()
 	require.NoError(t, err)
