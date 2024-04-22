@@ -116,9 +116,9 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.F
 				break
 			}
 		} else {
-			// having 0 frozen blocks - also may mean we didn't download them. so run several iteration then
+			// having 0 frozen blocks - also may mean we didn't download them. so stages. 1 time is enough.
 			sawZeroBlocksTimes++
-			if sawZeroBlocksTimes > 10 {
+			if sawZeroBlocksTimes > 2 {
 				break
 			}
 		}
