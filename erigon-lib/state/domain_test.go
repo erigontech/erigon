@@ -2436,6 +2436,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 
 func TestDomainContext_findShortenedKey(t *testing.T) {
 	db, d := testDbAndDomain(t, log.New())
+	defer d.Close()
 
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
