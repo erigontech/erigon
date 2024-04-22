@@ -65,7 +65,7 @@ type tParseIncarnation func(v []byte) (uint64, error)
 
 type DB struct {
 	kv.RwDB
-	agg *state.AggregatorV3
+	agg *state.Aggregator
 
 	convertV3toV2        tConvertAccount
 	convertV2toV3        tConvertAccount
@@ -74,7 +74,7 @@ type DB struct {
 	systemContractLookup map[common.Address][]common.CodeRecord
 }
 
-func New(db kv.RwDB, agg *state.AggregatorV3, systemContractLookup map[common.Address][]common.CodeRecord) (*DB, error) {
+func New(db kv.RwDB, agg *state.Aggregator, systemContractLookup map[common.Address][]common.CodeRecord) (*DB, error) {
 	if !kvcfg.HistoryV3.FromDB(db) {
 		panic("not supported")
 	}
@@ -101,8 +101,8 @@ func New(db kv.RwDB, agg *state.AggregatorV3, systemContractLookup map[common.Ad
 		systemContractLookup: systemContractLookup,
 	}, nil
 }
-func (db *DB) Agg() *state.AggregatorV3 { return db.agg }
-func (db *DB) InternalDB() kv.RwDB      { return db.RwDB }
+func (db *DB) Agg() *state.Aggregator { return db.agg }
+func (db *DB) InternalDB() kv.RwDB    { return db.RwDB }
 
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	kvTx, err := db.RwDB.BeginRo(ctx) //nolint:gocritic
@@ -194,7 +194,7 @@ type Tx struct {
 }
 
 func (tx *Tx) AggCtx() *state.AggregatorRoTx { return tx.aggCtx }
-func (tx *Tx) Agg() *state.AggregatorV3      { return tx.db.agg }
+func (tx *Tx) Agg() *state.Aggregator        { return tx.db.agg }
 func (tx *Tx) Rollback() {
 	tx.autoClose()
 	tx.MdbxTx.Rollback()
@@ -447,7 +447,7 @@ func (tx *Tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limi
 }
 
 // TODO: need remove `gspec` param (move SystemContractCodeLookup feature somewhere)
-func NewTestDB(tb testing.TB, dirs datadir.Dirs, gspec *types.Genesis) (histV3 bool, db kv.RwDB, agg *state.AggregatorV3) {
+func NewTestDB(tb testing.TB, dirs datadir.Dirs, gspec *types.Genesis) (histV3 bool, db kv.RwDB, agg *state.Aggregator) {
 	historyV3 := ethconfig.EnableHistoryV3InTest
 	logger := log.New()
 	ctx := context.Background()
@@ -465,7 +465,7 @@ func NewTestDB(tb testing.TB, dirs datadir.Dirs, gspec *types.Genesis) (histV3 b
 	if historyV3 {
 		var err error
 		dir.MustExist(dirs.SnapHistory)
-		agg, err = state.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger)
+		agg, err = state.NewAggregator(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger)
 		if err != nil {
 			panic(err)
 		}
