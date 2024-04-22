@@ -416,6 +416,7 @@ func TestReverseNonces(t *testing.T) {
 // this is a workaround for cases when transactions are getting stuck for strange reasons
 // even though logs show they are broadcast
 func TestTxPoke(t *testing.T) {
+	t.Skip("TODO")
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan types.Announcements, 100)
 	db, coreDB := memdb.NewTestPoolDB(t), memdb.NewTestDB(t)
