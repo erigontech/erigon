@@ -42,35 +42,20 @@ func (f *ForkChoiceStore) OnAttestation(attestation *solid.Attestation, fromBloc
 			return err
 		}
 	}
+	headState := f.syncedDataManager.HeadState()
+	var attestationIndicies []uint64
+	var err error
 	target := data.Target()
 
-	targetState, err := f.getCheckpointState(target)
-	if err != nil {
-		return nil
+	if headState == nil {
+		attestationIndicies, err = f.verifyAttestationWithCheckpointState(target, attestation, fromBlock)
+	} else {
+		attestationIndicies, err = f.verifyAttestationWithState(headState, attestation, fromBlock)
 	}
-	// Verify attestation signature.
-	if targetState == nil {
-		return fmt.Errorf("target state does not exist")
-	}
-	// Now we need to find the attesting indicies.
-	attestationIndicies, err := targetState.getAttestingIndicies(&data, attestation.AggregationBits())
 	if err != nil {
 		return err
 	}
-	if !fromBlock {
-		indexedAttestation := state.GetIndexedAttestation(attestation, attestationIndicies)
-		if err != nil {
-			return err
-		}
 
-		valid, err := targetState.isValidIndexedAttestation(indexedAttestation)
-		if err != nil {
-			return err
-		}
-		if !valid {
-			return fmt.Errorf("invalid attestation")
-		}
-	}
 	// Lastly update latest messages.
 	f.processAttestingIndicies(attestation, attestationIndicies)
 	if !fromBlock && insert {
@@ -78,6 +63,64 @@ func (f *ForkChoiceStore) OnAttestation(attestation *solid.Attestation, fromBloc
 		f.operationsPool.AttestationsPool.Insert(attestation.Signature(), attestation)
 	}
 	return nil
+}
+
+func (f *ForkChoiceStore) verifyAttestationWithCheckpointState(target solid.Checkpoint, attestation *solid.Attestation, fromBlock bool) (attestationIndicies []uint64, err error) {
+	data := attestation.AttestantionData()
+	targetState, err := f.getCheckpointState(target)
+	if err != nil {
+		return nil, err
+	}
+	// Verify attestation signature.
+	if targetState == nil {
+		return nil, fmt.Errorf("target state does not exist")
+	}
+	// Now we need to find the attesting indicies.
+	attestationIndicies, err = targetState.getAttestingIndicies(&data, attestation.AggregationBits())
+	if err != nil {
+		return nil, err
+	}
+	if !fromBlock {
+		indexedAttestation := state.GetIndexedAttestation(attestation, attestationIndicies)
+		if err != nil {
+			return nil, err
+		}
+
+		valid, err := targetState.isValidIndexedAttestation(indexedAttestation)
+		if err != nil {
+			return nil, err
+		}
+		if !valid {
+			return nil, fmt.Errorf("invalid attestation")
+		}
+	}
+	return attestationIndicies, nil
+}
+
+func (f *ForkChoiceStore) verifyAttestationWithState(s *state.CachingBeaconState, attestation *solid.Attestation, fromBlock bool) (attestationIndicies []uint64, err error) {
+	data := attestation.AttestantionData()
+	if err != nil {
+		return nil, err
+	}
+
+	attestationIndicies, err = s.GetAttestingIndicies(data, attestation.AggregationBits(), true)
+	if err != nil {
+		return nil, err
+	}
+	if !fromBlock {
+		indexedAttestation := state.GetIndexedAttestation(attestation, attestationIndicies)
+		if err != nil {
+			return nil, err
+		}
+		valid, err := state.IsValidIndexedAttestation(s, indexedAttestation)
+		if err != nil {
+			return nil, err
+		}
+		if !valid {
+			return nil, fmt.Errorf("invalid attestation")
+		}
+	}
+	return attestationIndicies, nil
 }
 
 func (f *ForkChoiceStore) setLatestMessage(index uint64, message LatestMessage) {
