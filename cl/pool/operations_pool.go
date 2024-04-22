@@ -8,6 +8,8 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 )
 
+const operationsPerPool = 512
+
 // DoubleSignatureKey uses blake2b algorithm to merge two signatures together. blake2 is faster than sha3.
 func doubleSignatureKey(one, two libcommon.Bytes96) (out libcommon.Bytes96) {
 	res := blake2b.Sum256(append(one[:], two[:]...))
@@ -25,24 +27,20 @@ func ComputeKeyForAttesterSlashing(slashing *cltypes.AttesterSlashing) libcommon
 
 // OperationsPool is the collection of all gossip-collectable operations.
 type OperationsPool struct {
-	AttestationsPool               *OperationPool[libcommon.Bytes96, *solid.Attestation]
-	AttesterSlashingsPool          *OperationPool[libcommon.Bytes96, *cltypes.AttesterSlashing]
-	ProposerSlashingsPool          *OperationPool[libcommon.Bytes96, *cltypes.ProposerSlashing]
-	BLSToExecutionChangesPool      *OperationPool[libcommon.Bytes96, *cltypes.SignedBLSToExecutionChange]
-	SignedContributionAndProofPool *OperationPool[libcommon.Bytes96, *cltypes.SignedContributionAndProof]
-	VoluntaryExistsPool            *OperationPool[uint64, *cltypes.SignedVoluntaryExit]
-	ContributionCache              *OperationPool[cltypes.ContributionKey, [][]byte]
+	AttestationsPool          *OperationPool[libcommon.Bytes96, *solid.Attestation]
+	AttesterSlashingsPool     *OperationPool[libcommon.Bytes96, *cltypes.AttesterSlashing]
+	ProposerSlashingsPool     *OperationPool[libcommon.Bytes96, *cltypes.ProposerSlashing]
+	BLSToExecutionChangesPool *OperationPool[libcommon.Bytes96, *cltypes.SignedBLSToExecutionChange]
+	VoluntaryExistsPool       *OperationPool[uint64, *cltypes.SignedVoluntaryExit]
 }
 
 func NewOperationsPool(beaconCfg *clparams.BeaconChainConfig) OperationsPool {
 	return OperationsPool{
-		AttestationsPool:               NewOperationPool[libcommon.Bytes96, *solid.Attestation](int(beaconCfg.MaxAttestations), "attestationsPool"),
-		AttesterSlashingsPool:          NewOperationPool[libcommon.Bytes96, *cltypes.AttesterSlashing](int(beaconCfg.MaxAttestations), "attesterSlashingsPool"),
-		ProposerSlashingsPool:          NewOperationPool[libcommon.Bytes96, *cltypes.ProposerSlashing](int(beaconCfg.MaxAttestations), "proposerSlashingsPool"),
-		BLSToExecutionChangesPool:      NewOperationPool[libcommon.Bytes96, *cltypes.SignedBLSToExecutionChange](int(beaconCfg.MaxBlsToExecutionChanges), "blsExecutionChangesPool"),
-		SignedContributionAndProofPool: NewOperationPool[libcommon.Bytes96, *cltypes.SignedContributionAndProof](int(beaconCfg.MaxAttestations), "signedContributionAndProof"),
-		VoluntaryExistsPool:            NewOperationPool[uint64, *cltypes.SignedVoluntaryExit](int(beaconCfg.MaxBlsToExecutionChanges), "voluntaryExitsPool"),
-		ContributionCache:              NewOperationPool[cltypes.ContributionKey, [][]byte](int(beaconCfg.MaxAttestations), "contributionCache"),
+		AttestationsPool:          NewOperationPool[libcommon.Bytes96, *solid.Attestation](operationsPerPool, "attestationsPool"),
+		AttesterSlashingsPool:     NewOperationPool[libcommon.Bytes96, *cltypes.AttesterSlashing](operationsPerPool, "attesterSlashingsPool"),
+		ProposerSlashingsPool:     NewOperationPool[libcommon.Bytes96, *cltypes.ProposerSlashing](operationsPerPool, "proposerSlashingsPool"),
+		BLSToExecutionChangesPool: NewOperationPool[libcommon.Bytes96, *cltypes.SignedBLSToExecutionChange](operationsPerPool, "blsExecutionChangesPool"),
+		VoluntaryExistsPool:       NewOperationPool[uint64, *cltypes.SignedVoluntaryExit](operationsPerPool, "voluntaryExitsPool"),
 	}
 }
 
