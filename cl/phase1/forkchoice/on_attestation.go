@@ -44,7 +44,6 @@ func (f *ForkChoiceStore) OnAttestation(attestation *solid.Attestation, fromBloc
 	if headState == nil {
 		attestationIndicies, err = f.verifyAttestationWithCheckpointState(target, attestation, fromBlock)
 	} else {
-		fmt.Println("A")
 		attestationIndicies, err = f.verifyAttestationWithState(headState, attestation, fromBlock)
 	}
 	if err != nil {
