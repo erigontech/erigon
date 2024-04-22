@@ -53,7 +53,7 @@ func TestNoEscape(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	ctx := context.Background()
 
-	tf := NewAtomicTorrentFiles(dirs.Snap)
+	tf := NewAtomicTorrentFS(dirs.Snap)
 	// allow adding files only if they are inside snapshots dir
 	_, err := BuildTorrentIfNeed(ctx, "a.seg", dirs.Snap, tf)
 	require.NoError(err)

@@ -10,7 +10,6 @@ import (
 var DefaultFlags = []cli.Flag{
 	&utils.DataDirFlag,
 	&utils.EthashDatasetDirFlag,
-	&utils.SnapshotFlag,
 	&utils.InternalConsensusFlag,
 	&utils.TxPoolDisableFlag,
 	&utils.TxPoolLocalsFlag,
@@ -126,7 +125,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.GpoBlocksFlag,
 	&utils.GpoPercentileFlag,
 	&utils.InsecureUnlockAllowedFlag,
-	&utils.HistoryV3Flag,
 	&utils.IdentityFlag,
 	&utils.CliqueSnapshotCheckpointIntervalFlag,
 	&utils.CliqueSnapshotInmemorySnapshotsFlag,

@@ -105,7 +105,7 @@ func StageSnapshotsCfg(db kv.RwDB,
 		cfg.snapshotUploader = &snapshotUploader{
 			cfg:          &cfg,
 			uploadFs:     uploadFs,
-			torrentFiles: downloader.NewAtomicTorrentFiles(cfg.dirs.Snap),
+			torrentFiles: downloader.NewAtomicTorrentFS(cfg.dirs.Snap),
 		}
 
 		cfg.blockRetire.SetWorkers(estimate.CompressSnapshot.Workers())
@@ -546,7 +546,7 @@ type snapshotUploader struct {
 	uploadScheduled atomic.Bool
 	uploading       atomic.Bool
 	manifestMutex   sync.Mutex
-	torrentFiles    *downloader.TorrentFiles
+	torrentFiles    *downloader.AtomicTorrentFS
 }
 
 func (u *snapshotUploader) init(ctx context.Context, logger log.Logger) {

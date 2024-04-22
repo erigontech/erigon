@@ -34,6 +34,14 @@ func (*Attestation) Static() bool {
 	return false
 }
 
+func (a *Attestation) Copy() *Attestation {
+	new := &Attestation{}
+	copy(new.staticBuffer[:], a.staticBuffer[:])
+	new.aggregationBitsBuffer = make([]byte, len(a.aggregationBitsBuffer))
+	copy(new.aggregationBitsBuffer, a.aggregationBitsBuffer)
+	return new
+}
+
 // NewAttestionFromParameters creates a new Attestation instance using provided parameters
 func NewAttestionFromParameters(
 	aggregationBits []byte,

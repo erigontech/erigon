@@ -163,12 +163,6 @@ func ExecV3(ctx context.Context,
 			agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
 		}
 		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
-		if err := agg.BuildOptionalMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
-			return err
-		}
-		if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
-			return err
-		}
 	} else {
 		agg.SetCompressWorkers(1)
 		agg.SetCollateAndBuildWorkers(1)
@@ -564,7 +558,7 @@ func ExecV3(ctx context.Context,
 		})
 	}
 
-	if blockNum < cfg.blockReader.FrozenBlocks() {
+	if useExternalTx && blockNum < cfg.blockReader.FrozenBlocks() {
 		defer agg.KeepStepsInDB(0).KeepStepsInDB(1)
 	}
 
@@ -609,16 +603,11 @@ func ExecV3(ctx context.Context,
 		defer clean()
 	}
 
-	blocksInSnapshots := cfg.blockReader.FrozenBlocks()
 	//fmt.Printf("exec blocks: %d -> %d\n", blockNum, maxBlockNum)
 
 	var b *types.Block
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
-		if blockNum >= blocksInSnapshots {
-			agg.KeepStepsInDB(1)
-		}
-
 		//time.Sleep(50 * time.Microsecond)
 		if !parallel {
 			select {

@@ -70,10 +70,9 @@ type AggregatorV3 struct {
 	aggregationStep  uint64
 	keepInDB         uint64
 
-	minimaxTxNumInFiles atomic.Uint64
-
-	filesMutationLock sync.Mutex
-	snapshotBuildSema *semaphore.Weighted
+	dirtyFilesLock         sync.Mutex
+	dirtyFilesMinimaxTxNum atomic.Uint64
+	snapshotBuildSema      *semaphore.Weighted
 
 	collateAndBuildWorkers int // minimize amount of background workers by default
 	mergeWorkers           int // usually 1
@@ -202,7 +201,7 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 		return nil, err
 	}
 	a.KeepStepsInDB(1)
-	a.recalcMaxTxNum()
+	a.recalcDirtyFilesMinimaxTxNum()
 
 	if dbg.NoSync() {
 		a.DisableFsync()
@@ -250,8 +249,8 @@ func (a *AggregatorV3) DisableFsync() {
 }
 
 func (a *AggregatorV3) OpenFolder(readonly bool) error {
-	a.filesMutationLock.Lock()
-	defer a.filesMutationLock.Unlock()
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
 	eg := &errgroup.Group{}
 	for _, d := range a.d {
 		d := d
@@ -269,15 +268,15 @@ func (a *AggregatorV3) OpenFolder(readonly bool) error {
 	eg.Go(func() error { return a.tracesFrom.OpenFolder(readonly) })
 	eg.Go(func() error { return a.tracesTo.OpenFolder(readonly) })
 	if err := eg.Wait(); err != nil {
-		return err
+		return fmt.Errorf("OpenFolder: %w", err)
 	}
-	a.recalcMaxTxNum()
+	a.recalcDirtyFilesMinimaxTxNum()
 	return nil
 }
 
 func (a *AggregatorV3) OpenList(files []string, readonly bool) error {
-	a.filesMutationLock.Lock()
-	defer a.filesMutationLock.Unlock()
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
 	eg := &errgroup.Group{}
 	for _, d := range a.d {
 		d := d
@@ -288,9 +287,9 @@ func (a *AggregatorV3) OpenList(files []string, readonly bool) error {
 	eg.Go(func() error { return a.tracesFrom.OpenFolder(readonly) })
 	eg.Go(func() error { return a.tracesTo.OpenFolder(readonly) })
 	if err := eg.Wait(); err != nil {
-		return err
+		return fmt.Errorf("OpenList: %w", err)
 	}
-	a.recalcMaxTxNum()
+	a.recalcDirtyFilesMinimaxTxNum()
 	return nil
 }
 
@@ -302,8 +301,8 @@ func (a *AggregatorV3) Close() {
 	a.ctxCancel = nil
 	a.wg.Wait()
 
-	a.filesMutationLock.Lock()
-	defer a.filesMutationLock.Unlock()
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
 
 	for _, d := range a.d {
 		d.Close()
@@ -436,6 +435,25 @@ func (a *AggregatorV3) BuildMissedIndices(ctx context.Context, workers int) erro
 	return nil
 }
 
+func (a *AggregatorV3) BuildMissedIndicesInBackground(ctx context.Context, workers int) {
+	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
+		return
+	}
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+		defer a.buildingFiles.Store(false)
+		aggTx := a.BeginFilesRo()
+		defer aggTx.Close()
+		if err := a.BuildMissedIndices(ctx, workers); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
+				return
+			}
+			log.Warn("[snapshots] BuildOptionalMissedIndicesInBackground", "err", err)
+		}
+	}()
+}
+
 type AggV3Collation struct {
 	logAddrs   map[string]*roaring64.Bitmap
 	logTopics  map[string]*roaring64.Bitmap
@@ -503,7 +521,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 
 	defer logEvery.Stop()
 	defer a.needSaveFilesListInDB.Store(true)
-	defer a.recalcMaxTxNum()
+	defer a.recalcDirtyFilesMinimaxTxNum()
 	defer func() {
 		if !closeCollations {
 			return
@@ -637,7 +655,7 @@ func (a *AggregatorV3) mergeLoopStep(ctx context.Context) (somethingDone bool, e
 
 	closeAll := true
 	maxSpan := StepsInColdFile * a.StepSize()
-	r := aggTx.findMergeRange(a.minimaxTxNumInFiles.Load(), maxSpan)
+	r := aggTx.findMergeRange(a.dirtyFilesMinimaxTxNum.Load(), maxSpan)
 	if !r.any() {
 		return false, nil
 	}
@@ -680,10 +698,10 @@ func (a *AggregatorV3) MergeLoop(ctx context.Context) error {
 }
 
 func (a *AggregatorV3) integrateFiles(sf AggV3StaticFiles, txNumFrom, txNumTo uint64) {
-	a.filesMutationLock.Lock()
-	defer a.filesMutationLock.Unlock()
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
 	defer a.needSaveFilesListInDB.Store(true)
-	defer a.recalcMaxTxNum()
+	defer a.recalcDirtyFilesMinimaxTxNum()
 
 	for id, d := range a.d {
 		d.integrateFiles(sf.d[id], txNumFrom, txNumTo)
@@ -928,7 +946,7 @@ func (ac *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, w
 	}
 
 	var txFrom, step uint64 // txFrom is always 0 to avoid dangling keys in indices/hist
-	txTo := ac.a.minimaxTxNumInFiles.Load()
+	txTo := ac.a.dirtyFilesMinimaxTxNum.Load()
 	if txTo > 0 {
 		// txTo is first txNum in next step, has to go 1 tx behind to get correct step number
 		step = (txTo - 1) / ac.a.StepSize()
@@ -1007,7 +1025,7 @@ func (ac *AggregatorRoTx) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint6
 	dbg.ReadMemStats(&m)
 	log.Info("[snapshots] History Stat",
 		"blocks", fmt.Sprintf("%dk", (domainBlockNumProgress+1)/1000),
-		"txs", fmt.Sprintf("%dm", ac.a.minimaxTxNumInFiles.Load()/1_000_000),
+		"txs", fmt.Sprintf("%dm", ac.a.dirtyFilesMinimaxTxNum.Load()/1_000_000),
 		"txNum2blockNum", strings.Join(str, ","),
 		"first_history_idx_in_db", firstHistoryIndexBlockInDB,
 		"last_comitment_block", lastCommitmentBlockNum,
@@ -1025,7 +1043,7 @@ func (a *AggregatorV3) EndTxNumNoCommitment() uint64 {
 		a.d[kv.CodeDomain].endTxNumMinimax())
 }
 
-func (a *AggregatorV3) EndTxNumMinimax() uint64 { return a.minimaxTxNumInFiles.Load() }
+func (a *AggregatorV3) EndTxNumMinimax() uint64 { return a.dirtyFilesMinimaxTxNum.Load() }
 func (a *AggregatorV3) FilesAmount() (res []int) {
 	for _, d := range a.d {
 		res = append(res, d.dirtyFiles.Len())
@@ -1062,7 +1080,7 @@ func (a *AggregatorV3) EndTxNumDomainsFrozen() uint64 {
 	)
 }
 
-func (a *AggregatorV3) recalcMaxTxNum() {
+func (a *AggregatorV3) recalcDirtyFilesMinimaxTxNum() {
 	min := a.d[kv.AccountsDomain].endTxNumMinimax()
 	if txNum := a.d[kv.StorageDomain].endTxNumMinimax(); txNum < min {
 		min = txNum
@@ -1085,7 +1103,7 @@ func (a *AggregatorV3) recalcMaxTxNum() {
 	if txNum := a.tracesTo.endTxNumMinimax(); txNum < min {
 		min = txNum
 	}
-	a.minimaxTxNumInFiles.Store(min)
+	a.dirtyFilesMinimaxTxNum.Store(min)
 }
 
 type RangesV3 struct {
@@ -1523,10 +1541,10 @@ func (ac *AggregatorRoTx) mergeFiles(ctx context.Context, files SelectedStaticFi
 }
 
 func (ac *AggregatorRoTx) integrateMergedFiles(outs SelectedStaticFilesV3, in MergedFilesV3) (frozen []string) {
-	ac.a.filesMutationLock.Lock()
-	defer ac.a.filesMutationLock.Unlock()
+	ac.a.dirtyFilesLock.Lock()
+	defer ac.a.dirtyFilesLock.Unlock()
 	defer ac.a.needSaveFilesListInDB.Store(true)
-	defer ac.a.recalcMaxTxNum()
+	defer ac.a.recalcDirtyFilesMinimaxTxNum()
 
 	for id, d := range ac.a.d {
 		d.integrateMergedFiles(outs.d[id], outs.dIdx[id], outs.dHist[id], in.d[id], in.dIdx[id], in.dHist[id])
@@ -1573,7 +1591,7 @@ func (a *AggregatorV3) SetSnapshotBuildSema(semaphore *semaphore.Weighted) {
 func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 	fin := make(chan struct{})
 
-	if (txNum + 1) <= a.minimaxTxNumInFiles.Load()+a.keepInDB {
+	if (txNum + 1) <= a.dirtyFilesMinimaxTxNum.Load()+a.keepInDB {
 		close(fin)
 		return fin
 	}
@@ -1583,7 +1601,7 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 		return fin
 	}
 
-	step := a.minimaxTxNumInFiles.Load() / a.StepSize()
+	step := a.dirtyFilesMinimaxTxNum.Load() / a.StepSize()
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()

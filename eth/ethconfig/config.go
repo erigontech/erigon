@@ -75,6 +75,7 @@ var LightClientGPO = gaspricecfg.Config{
 var Defaults = Config{
 	Sync: Sync{
 		UseSnapshots:               true,
+		HistoryV3:                  true,
 		ExecWorkerCount:            estimate.ReconstituteState.WorkersHalf(), //only half of CPU, other half will spend for snapshots build/merge/prune
 		ReconWorkerCount:           estimate.ReconstituteState.Workers(),
 		BodyCacheLimit:             256 * 1024 * 1024,
@@ -229,9 +230,6 @@ type Config struct {
 
 	StateStream bool
 
-	//  New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
-	HistoryV3 bool
-
 	// URL to connect to Heimdall node
 	HeimdallURL string
 	// No heimdall service
@@ -262,6 +260,10 @@ type Config struct {
 
 type Sync struct {
 	UseSnapshots bool
+
+	//  New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
+	HistoryV3 bool
+
 	// LoopThrottle sets a minimum time between staged loop iterations
 	LoopThrottle     time.Duration
 	ExecWorkerCount  int

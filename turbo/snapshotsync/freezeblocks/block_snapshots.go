@@ -604,7 +604,10 @@ func (s *RoSnapshots) Ranges() []Range {
 func (s *RoSnapshots) OptimisticalyReopenFolder()           { _ = s.ReopenFolder() }
 func (s *RoSnapshots) OptimisticalyReopenWithDB(db kv.RoDB) { _ = s.ReopenWithDB(db) }
 func (s *RoSnapshots) ReopenFolder() error {
-	return s.ReopenSegments(s.Types(), false)
+	if err := s.ReopenSegments(s.Types(), false); err != nil {
+		return fmt.Errorf("ReopenSegments: %w", err)
+	}
+	return nil
 }
 
 func (s *RoSnapshots) ReopenSegments(types []snaptype.Type, allowGaps bool) error {
@@ -629,7 +632,7 @@ func (s *RoSnapshots) ReopenWithDB(db kv.RoDB) error {
 		}
 		return s.ReopenList(snList, true)
 	}); err != nil {
-		return err
+		return fmt.Errorf("ReopenWithDB: %w", err)
 	}
 	return nil
 }
@@ -1375,6 +1378,10 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, max
 	}
 	includeBor := br.chainConfig.Bor != nil
 
+	if err := br.BuildMissedIndicesIfNeed(ctx, "RetireBlocks", br.notifier, br.chainConfig); err != nil {
+		return err
+	}
+
 	var err error
 	for {
 		var ok, okBor bool
@@ -1548,7 +1555,7 @@ func hasIdxFile(sn snaptype.FileInfo, logger log.Logger) bool {
 		}
 		defer idx.Close()
 
-		return idx.ModTime().After(segment.ModTime())
+		return true //idx.ModTime().After(segment.ModTime())
 	case snaptype.Enums.Transactions:
 		idx, err := recsplit.OpenIndex(filepath.Join(dir, fName))
 		if err != nil {
@@ -1556,9 +1563,9 @@ func hasIdxFile(sn snaptype.FileInfo, logger log.Logger) bool {
 		}
 		defer idx.Close()
 
-		if !idx.ModTime().After(segment.ModTime()) {
-			return false
-		}
+		//if !idx.ModTime().After(segment.ModTime()) {
+		//	return false
+		//}
 
 		fName = snaptype.IdxFileName(sn.Version, sn.From, sn.To, snaptype.Indexes.TxnHash2BlockNum.String())
 		idx, err = recsplit.OpenIndex(filepath.Join(dir, fName))
@@ -1567,7 +1574,7 @@ func hasIdxFile(sn snaptype.FileInfo, logger log.Logger) bool {
 		}
 		defer idx.Close()
 
-		return idx.ModTime().After(segment.ModTime())
+		return true //idx.ModTime().After(segment.ModTime())
 	}
 
 	return result
@@ -2117,7 +2124,7 @@ func HeadersIdx(ctx context.Context, info snaptype.FileInfo, salt uint32, tmpDir
 }
 
 func BodiesIdx(ctx context.Context, info snaptype.FileInfo, salt uint32, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
-	num := make([]byte, 8)
+	num := make([]byte, binary.MaxVarintLen64)
 
 	if err := Idx(ctx, info, salt, info.From, tmpDir, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, _ []byte) error {
 		if p != nil {
@@ -2143,11 +2150,9 @@ func Idx(ctx context.Context, info snaptype.FileInfo, salt uint32, firstDataID u
 	}()
 
 	d, err := seg.NewDecompressor(info.Path)
-
 	if err != nil {
 		return fmt.Errorf("can't open %s for indexing: %w", info.Name(), err)
 	}
-
 	defer d.Close()
 
 	if p != nil {

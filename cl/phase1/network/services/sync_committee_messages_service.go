@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
@@ -30,6 +31,8 @@ type syncCommitteeMessagesService struct {
 	syncContributionPool      sync_contribution_pool.SyncContributionPool
 	ethClock                  eth_clock.EthereumClock
 	test                      bool
+
+	mu sync.Mutex
 }
 
 // NewSyncCommitteeMessagesService creates a new sync committee messages service
@@ -52,6 +55,8 @@ func NewSyncCommitteeMessagesService(
 
 // ProcessMessage processes a sync committee message
 func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SyncCommitteeMessage) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	headState := s.syncedDataManager.HeadState()
 	if headState == nil {
 		return ErrIgnore

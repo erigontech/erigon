@@ -119,7 +119,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 		return err
 	}
 	if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
-		log.Debug("failed publish gossip", "err", err)
+		log.Warn("failed publish gossip", "err", err)
 	}
 	return nil
 }
@@ -179,7 +179,7 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 			return g.syncCommitteeMessagesService.ProcessMessage(ctx, data.SubnetId, msg)
 		case gossip.IsTopicBeaconAttestation(data.Name):
 			att := &solid.Attestation{}
-			if err := att.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
+			if err := att.DecodeSSZ(data.Data, int(version)); err != nil {
 				return err
 			}
 			return g.attestationService.ProcessMessage(ctx, data.SubnetId, att)
