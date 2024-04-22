@@ -11,7 +11,7 @@ import (
 	"sync"
 
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	bor_types "github.com/ledgerwatch/erigon/polygon/bor/types"
+	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
@@ -265,7 +265,7 @@ type receiptProof struct {
 }
 
 func getReceiptProof(ctx context.Context, node requests.RequestGenerator, receipt *types.Receipt, block *requests.Block, receipts []*types.Receipt) (*receiptProof, error) {
-	stateSyncTxHash := bor_types.ComputeBorTxHash(block.Number.Uint64(), block.Hash)
+	stateSyncTxHash := bortypes.ComputeBorTxHash(block.Number.Uint64(), block.Hash)
 	receiptsTrie := trie.New(trie.EmptyRoot)
 
 	if len(receipts) == 0 {

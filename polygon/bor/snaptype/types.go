@@ -25,7 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/seg"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	core_snaptype "github.com/ledgerwatch/erigon/core/snaptype"
-	bor_types "github.com/ledgerwatch/erigon/polygon/bor/types"
+	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -466,7 +466,7 @@ func buildValueIndex(ctx context.Context, sn snaptype.FileInfo, salt uint32, d *
 func extractEventRange(startEventId, endEventId uint64, tx kv.Tx, blockNum uint64, blockHash common.Hash, collect func([]byte) error) error {
 	var blockNumBuf [8]byte
 	var eventIdBuf [8]byte
-	txnHash := bor_types.ComputeBorTxHash(blockNum, blockHash)
+	txnHash := bortypes.ComputeBorTxHash(blockNum, blockHash)
 	binary.BigEndian.PutUint64(blockNumBuf[:], blockNum)
 	for eventId := startEventId; eventId < endEventId; eventId++ {
 		binary.BigEndian.PutUint64(eventIdBuf[:], eventId)

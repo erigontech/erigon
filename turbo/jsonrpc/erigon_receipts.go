@@ -7,7 +7,7 @@ import (
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring"
-	bor_types "github.com/ledgerwatch/erigon/polygon/bor/types"
+	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
@@ -182,7 +182,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 			erigonLog.BlockNumber = blockNumber
 			erigonLog.BlockHash = blockHash
 			if log.TxIndex == uint(len(body.Transactions)) {
-				erigonLog.TxHash = bor_types.ComputeBorTxHash(blockNumber, blockHash)
+				erigonLog.TxHash = bortypes.ComputeBorTxHash(blockNumber, blockHash)
 			} else {
 				erigonLog.TxHash = body.Transactions[log.TxIndex].Hash()
 			}
@@ -367,7 +367,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			erigonLog.BlockNumber = blockNumber
 			erigonLog.BlockHash = blockHash
 			if log.TxIndex == uint(len(body.Transactions)) {
-				erigonLog.TxHash = bor_types.ComputeBorTxHash(blockNumber, blockHash)
+				erigonLog.TxHash = bortypes.ComputeBorTxHash(blockNumber, blockHash)
 			} else {
 				erigonLog.TxHash = body.Transactions[log.TxIndex].Hash()
 			}
