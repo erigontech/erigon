@@ -55,7 +55,7 @@ func apply(tx kv.RwTx, logger log.Logger) (beforeBlock, afterBlock testGenHook, 
 		}, stateWriter
 }
 
-func newAgg(t *testing.T, logger log.Logger) *libstate.AggregatorV3 {
+func newAgg(t *testing.T, logger log.Logger) *libstate.Aggregator {
 	t.Helper()
 	dirs, ctx := datadir.New(t.TempDir()), context.Background()
 	agg, err := libstate.NewAggregatorV3(ctx, dirs, ethconfig.HistoryV3AggregationStep, nil, logger)

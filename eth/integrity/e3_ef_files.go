@@ -10,7 +10,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func E3EfFiles(ctx context.Context, chainDB kv.RwDB, agg *state.AggregatorV3) error {
+func E3EfFiles(ctx context.Context, chainDB kv.RwDB, agg *state.Aggregator) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	db, err := temporal.New(chainDB, agg, nil)

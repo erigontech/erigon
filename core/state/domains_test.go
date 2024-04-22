@@ -46,7 +46,7 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 	//
 	return opts
 }
-func dbAggregatorOnDatadir(t *testing.T, ddir string) (kv.RwDB, *state.AggregatorV3) {
+func dbAggregatorOnDatadir(t *testing.T, ddir string) (kv.RwDB, *state.Aggregator) {
 	t.Helper()
 	logger := log.New()
 	dirs := datadir2.New(ddir)

@@ -25,7 +25,7 @@ const (
 
 func compareCurrentState(
 	t *testing.T,
-	agg *state2.AggregatorV3,
+	agg *state2.Aggregator,
 	db1 kv.Tx,
 	db2 kv.Tx,
 	buckets ...string,
@@ -39,7 +39,7 @@ func compareCurrentState(
 	}
 }
 
-func compareDomain(t *testing.T, agg *state2.AggregatorV3, db1, db2 kv.Tx, bucketName string) {
+func compareDomain(t *testing.T, agg *state2.Aggregator, db1, db2 kv.Tx, bucketName string) {
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 

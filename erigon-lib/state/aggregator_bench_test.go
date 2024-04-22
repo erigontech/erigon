@@ -24,7 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/seg"
 )
 
-func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.RwDB, *AggregatorV3) {
+func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.RwDB, *Aggregator) {
 	b.Helper()
 	logger := log.New()
 	dirs := datadir.New(b.TempDir())
