@@ -102,16 +102,25 @@ func StageLoop(
 
 // ProcessFrozenBlocks - withuot global rwtx
 func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync) error {
+	sawZeroBlocksTimes := 0
 	for {
 		var finStageProgress uint64
-		if err := db.View(ctx, func(tx kv.Tx) (err error) {
-			finStageProgress, err = stages.GetStageProgress(tx, stages.Finish)
-			return err
-		}); err != nil {
-			return err
-		}
-		if finStageProgress >= blockReader.FrozenBlocks() {
-			break
+		if blockReader.FrozenBlocks() > 0 {
+			if err := db.View(ctx, func(tx kv.Tx) (err error) {
+				finStageProgress, err = stages.GetStageProgress(tx, stages.Finish)
+				return err
+			}); err != nil {
+				return err
+			}
+			if finStageProgress >= blockReader.FrozenBlocks() {
+				break
+			}
+		} else {
+			// having 0 frozen blocks - also may mean we didn't download them. so run several iteration then
+			sawZeroBlocksTimes++
+			if sawZeroBlocksTimes > 10 {
+				break
+			}
 		}
 
 		log.Debug("[sync] processFrozenBlocks", "finStageProgress", finStageProgress, "frozenBlocks", blockReader.FrozenBlocks())
