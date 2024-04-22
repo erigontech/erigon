@@ -49,17 +49,17 @@ import (
 
 type DB struct {
 	kv.RwDB
-	agg *state.AggregatorV3
+	agg *state.Aggregator
 }
 
-func New(db kv.RwDB, agg *state.AggregatorV3) (*DB, error) {
+func New(db kv.RwDB, agg *state.Aggregator) (*DB, error) {
 	if !kvcfg.HistoryV3.FromDB(db) {
 		panic("not supported")
 	}
 	return &DB{RwDB: db, agg: agg}, nil
 }
-func (db *DB) Agg() *state.AggregatorV3 { return db.agg }
-func (db *DB) InternalDB() kv.RwDB      { return db.RwDB }
+func (db *DB) Agg() *state.Aggregator { return db.agg }
+func (db *DB) InternalDB() kv.RwDB    { return db.RwDB }
 
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	kvTx, err := db.RwDB.BeginRo(ctx) //nolint:gocritic
@@ -151,7 +151,7 @@ type Tx struct {
 }
 
 func (tx *Tx) AggCtx() *state.AggregatorRoTx { return tx.aggCtx }
-func (tx *Tx) Agg() *state.AggregatorV3      { return tx.db.agg }
+func (tx *Tx) Agg() *state.Aggregator        { return tx.db.agg }
 func (tx *Tx) Rollback() {
 	tx.autoClose()
 	tx.MdbxTx.Rollback()
