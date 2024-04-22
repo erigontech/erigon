@@ -135,9 +135,7 @@ COMMANDS += evm
 COMMANDS += sentinel
 COMMANDS += caplin
 COMMANDS += snapshots
-
-
-
+COMMANDS += diag
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd
