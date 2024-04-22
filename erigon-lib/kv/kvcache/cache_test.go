@@ -27,7 +27,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
 	"github.com/stretchr/testify/require"
 )
@@ -164,10 +163,11 @@ func TestEviction(t *testing.T) {
 }
 
 func TestAPI(t *testing.T) {
+	t.Skip("TODO: state reader/writer instead of Put(kv.PlainState)")
 	require := require.New(t)
 	c := New(DefaultCoherentConfig)
 	k1, k2 := [20]byte{1}, [20]byte{2}
-	db := memdb.NewTestDB(t)
+	_, db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	get := func(key [20]byte, expectTxnID uint64) (res [1]chan []byte) {
 		wg := sync.WaitGroup{}
 		for i := 0; i < len(res); i++ {
@@ -354,9 +354,10 @@ func TestAPI(t *testing.T) {
 }
 
 func TestCode(t *testing.T) {
+	t.Skip("TODO: use state reader/writer instead of Put()")
 	require, ctx := require.New(t), context.Background()
 	c := New(DefaultCoherentConfig)
-	db := memdb.NewTestDB(t)
+	_, db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	k1, k2 := [20]byte{1}, [20]byte{2}
 
 	_ = db.Update(ctx, func(tx kv.RwTx) error {

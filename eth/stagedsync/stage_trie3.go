@@ -189,8 +189,7 @@ func RebuildPatriciaTrieBasedOnFiles(rwTx kv.RwTx, cfg TrieCfg, ctx context.Cont
 	}
 
 	var foundHash bool
-	agg := rwTx.(*temporal.Tx).Agg()
-	toTxNum := agg.EndTxNumNoCommitment()
+	toTxNum := rwTx.(*temporal.Tx).AggCtx().(*state.AggregatorRoTx).EndTxNumNoCommitment()
 	ok, blockNum, err := rawdbv3.TxNums.FindBlockNum(rwTx, toTxNum)
 	if err != nil {
 		return libcommon.Hash{}, err

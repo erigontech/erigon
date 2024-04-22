@@ -644,7 +644,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 		require.NoError(t, err)
 	}
 	var r DomainRanges
-	maxEndTxNum := d.endTxNumMinimax()
+	maxEndTxNum := d.dirtyFilesEndTxNumMinimax()
 	maxSpan := d.aggregationStep * StepsInColdFile
 
 	for {
@@ -695,7 +695,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64, prune
 		dc.Close()
 	}
 
-	maxEndTxNum := d.endTxNumMinimax()
+	maxEndTxNum := d.dirtyFilesEndTxNumMinimax()
 	maxSpan := d.aggregationStep * StepsInColdFile
 	for {
 		dc := d.BeginFilesRo()
