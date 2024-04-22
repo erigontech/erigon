@@ -21,6 +21,8 @@ import (
 var (
 	computeSubnetForAttestation  = subnets.ComputeSubnetForAttestation
 	computeCommitteeCountPerSlot = subnets.ComputeCommitteeCountPerSlot
+	computeSigningRoot           = fork.ComputeSigningRoot
+	blsVerify                    = bls.Verify
 )
 
 type attestationService struct {
@@ -61,7 +63,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		committeeIndex = att.AttestantionData().CommitteeIndex()
 		targetEpoch    = att.AttestantionData().Target().Epoch()
 	)
-	headState := s.syncedDataManager.HeadState()
+	headState := s.syncedDataManager.HeadStateReader()
 	if headState == nil {
 		return ErrIgnore
 	}
@@ -144,11 +146,11 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if err != nil {
 		return fmt.Errorf("unable to get the domain: %v", err)
 	}
-	signingRoot, err := fork.ComputeSigningRoot(att.AttestantionData(), domain)
+	signingRoot, err := computeSigningRoot(att.AttestantionData(), domain)
 	if err != nil {
 		return fmt.Errorf("unable to get signing root: %v", err)
 	}
-	if valid, err := bls.Verify(signature[:], signingRoot[:], pubKey[:]); err != nil {
+	if valid, err := blsVerify(signature[:], signingRoot[:], pubKey[:]); err != nil {
 		return err
 	} else if !valid {
 		return fmt.Errorf("invalid signature")

@@ -43,6 +43,10 @@ func (s *SyncedDataManager) HeadState() *state.CachingBeaconState {
 	return nil
 }
 
+func (s *SyncedDataManager) HeadStateReader() state.BeaconStateReader {
+	return s.HeadState()
+}
+
 func (s *SyncedDataManager) Syncing() bool {
 	if !s.enabled {
 		return false

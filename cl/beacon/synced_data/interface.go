@@ -6,6 +6,7 @@ import "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 type SyncedData interface {
 	OnHeadState(newState *state.CachingBeaconState) (err error)
 	HeadState() *state.CachingBeaconState
+	HeadStateReader() state.BeaconStateReader
 	Syncing() bool
 	HeadSlot() uint64
 }
