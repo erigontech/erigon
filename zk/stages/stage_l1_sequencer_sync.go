@@ -74,6 +74,7 @@ func SpawnL1SequencerSyncStage(
 
 	logChan := cfg.syncer.GetLogsChan()
 	progressChan := cfg.syncer.GetProgressMessageChan()
+	infoTreeUpdates := 0
 
 Loop:
 	for {
@@ -86,6 +87,7 @@ Loop:
 					return err
 				}
 				found = true
+				infoTreeUpdates++
 			case contracts.InitialSequenceBatchesTopic:
 				if err := HandleInitialSequenceBatches(cfg.syncer, hermezDb, l); err != nil {
 					return err
@@ -108,6 +110,8 @@ Loop:
 	if err = stages.SaveStageProgress(tx, stages.L1InfoTree, progress); err != nil {
 		return err
 	}
+
+	log.Info(fmt.Sprintf("[%s] new l1 data", logPrefix), "info_tree_updates", infoTreeUpdates)
 
 	if freshTx {
 		if err = tx.Commit(); err != nil {

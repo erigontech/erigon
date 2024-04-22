@@ -188,7 +188,8 @@ func CatchupDatastream(logPrefix string, tx kv.RwTx, stream *datastreamer.Stream
 			return 0, err
 		}
 
-		blockEntries, err := srv.CreateStreamEntries(block, reader, lastBlock, batchNum, prevBatchNum, gersInBetween)
+		l1InfoMinTimestamps := make(map[uint64]uint64)
+		blockEntries, err := srv.CreateStreamEntries(block, reader, lastBlock, batchNum, prevBatchNum, gersInBetween, l1InfoMinTimestamps)
 		if err != nil {
 			return 0, err
 		}

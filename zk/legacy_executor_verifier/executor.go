@@ -23,10 +23,11 @@ type Payload struct {
 	Coinbase        string // sequencer address
 	OldAccInputHash []byte // 0 for executor, required for the prover
 	// Used by injected/first batches (do not use it for regular batches)
-	L1InfoRoot        []byte // 0 for executor, required for the prover
-	TimestampLimit    uint64 // if 0, replace by now + 10 min internally
-	ForcedBlockhashL1 []byte // we need it, 0 in regular batches, hash in forced batches, also used in injected/first batches, 0 by now
-	ContextId         string // batch ID to be shown in the executor traces, for your convenience: "Erigon_candidate_batch_N"
+	L1InfoRoot              []byte            // 0 for executor, required for the prover
+	TimestampLimit          uint64            // if 0, replace by now + 10 min internally
+	ForcedBlockhashL1       []byte            // we need it, 0 in regular batches, hash in forced batches, also used in injected/first batches, 0 by now
+	ContextId               string            // batch ID to be shown in the executor traces, for your convenience: "Erigon_candidate_batch_N"
+	L1InfoTreeMinTimestamps map[uint64]uint64 // info tree index to min timestamp mappings
 }
 
 type RpcPayload struct {
@@ -94,14 +95,15 @@ func (e *Executor) Verify(p *Payload, request *VerifierRequest, oldStateRoot com
 
 	size := 1024 * 1024 * 256 // 256mb maximum size - hack for now until trimmed witness is proved off
 	resp, err := e.client.ProcessStatelessBatchV2(ctx, &executor.ProcessStatelessBatchRequestV2{
-		Witness:           p.Witness,
-		DataStream:        p.DataStream,
-		Coinbase:          p.Coinbase,
-		OldAccInputHash:   p.OldAccInputHash,
-		L1InfoRoot:        p.L1InfoRoot,
-		TimestampLimit:    p.TimestampLimit,
-		ForcedBlockhashL1: p.ForcedBlockhashL1,
-		ContextId:         p.ContextId,
+		Witness:                     p.Witness,
+		DataStream:                  p.DataStream,
+		Coinbase:                    p.Coinbase,
+		OldAccInputHash:             p.OldAccInputHash,
+		L1InfoRoot:                  p.L1InfoRoot,
+		TimestampLimit:              p.TimestampLimit,
+		ForcedBlockhashL1:           p.ForcedBlockhashL1,
+		ContextId:                   p.ContextId,
+		L1InfoTreeIndexMinTimestamp: p.L1InfoTreeMinTimestamps,
 		//TraceConfig: &executor.TraceConfigV2{
 		//	DisableStorage:            0,
 		//	DisableStack:              0,

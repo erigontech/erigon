@@ -174,7 +174,8 @@ func (v *LegacyExecutorVerifier) handleRequest(ctx context.Context, request *Ver
 		return nil
 	}
 
-	streamBytes, err := v.GetStreamBytes(request, tx, blocks, hermezDb)
+	l1InfoTreeMinTimestamps := make(map[uint64]uint64)
+	streamBytes, err := v.GetStreamBytes(request, tx, blocks, hermezDb, l1InfoTreeMinTimestamps)
 	if err != nil {
 		return err
 	}
@@ -202,14 +203,15 @@ func (v *LegacyExecutorVerifier) handleRequest(ctx context.Context, request *Ver
 	timestampLimit := lastBlock.Time()
 
 	payload := &Payload{
-		Witness:           witness,
-		DataStream:        streamBytes,
-		Coinbase:          v.cfg.AddressSequencer.String(),
-		OldAccInputHash:   oldAccInputHash.Bytes(),
-		L1InfoRoot:        nil,
-		TimestampLimit:    timestampLimit,
-		ForcedBlockhashL1: []byte{0},
-		ContextId:         strconv.Itoa(int(request.BatchNumber)),
+		Witness:                 witness,
+		DataStream:              streamBytes,
+		Coinbase:                v.cfg.AddressSequencer.String(),
+		OldAccInputHash:         oldAccInputHash.Bytes(),
+		L1InfoRoot:              nil,
+		TimestampLimit:          timestampLimit,
+		ForcedBlockhashL1:       []byte{0},
+		ContextId:               strconv.Itoa(int(request.BatchNumber)),
+		L1InfoTreeMinTimestamps: l1InfoTreeMinTimestamps,
 	}
 
 	previousBlock, _ := rawdb.ReadBlockByNumber(tx, blocks[0]-1)
@@ -229,7 +231,7 @@ func (v *LegacyExecutorVerifier) handleRequest(ctx context.Context, request *Ver
 	return nil
 }
 
-func (v *LegacyExecutorVerifier) GetStreamBytes(request *VerifierRequest, tx kv.Tx, blocks []uint64, hermezDb *hermez_db.HermezDbReader) ([]byte, error) {
+func (v *LegacyExecutorVerifier) GetStreamBytes(request *VerifierRequest, tx kv.Tx, blocks []uint64, hermezDb *hermez_db.HermezDbReader, l1InfoTreeMinTimestamps map[uint64]uint64) ([]byte, error) {
 	lastBlock, err := rawdb.ReadBlockByNumber(tx, blocks[0]-1)
 	if err != nil {
 		return nil, err
@@ -250,7 +252,7 @@ func (v *LegacyExecutorVerifier) GetStreamBytes(request *VerifierRequest, tx kv.
 		//TODO: get ger updates between blocks
 		gerUpdates := []dstypes.GerUpdate{}
 
-		sBytes, err := v.streamServer.CreateAndBuildStreamEntryBytes(block, hermezDb, lastBlock, request.BatchNumber, previousBatch, true, &gerUpdates)
+		sBytes, err := v.streamServer.CreateAndBuildStreamEntryBytes(block, hermezDb, lastBlock, request.BatchNumber, previousBatch, true, &gerUpdates, l1InfoTreeMinTimestamps)
 		if err != nil {
 			return nil, err
 		}
@@ -259,6 +261,7 @@ func (v *LegacyExecutorVerifier) GetStreamBytes(request *VerifierRequest, tx kv.
 		// we only put in the batch bookmark at the start of the stream data once
 		previousBatch = request.BatchNumber
 	}
+
 	return streamBytes, nil
 }
 

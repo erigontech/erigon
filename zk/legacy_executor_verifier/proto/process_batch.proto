@@ -311,6 +311,9 @@ message ProcessStatelessBatchRequestV2 {
   // Debug
   string context_id = 8; // batch ID to be shown in the executor traces, for your convenience: "Erigon_candidate_batch_N"
   TraceConfigV2 trace_config = 9;
+
+  // Mapping to provide minTimestamp for each l1InfoTreeIndex in a batch
+  map<uint64, uint64> l1_info_tree_index_min_timestamp = 10;
 }
 
 message L1DataV2 {

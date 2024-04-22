@@ -301,6 +301,10 @@ hive:
 automated-tests:
 	./tests/automated-testing/run.sh
 
+.PHONY: protobuf
+protobuf:
+	protoc -I=zk/legacy_executor_verifier/proto --go_out=zk/legacy_executor_verifier/proto zk/legacy_executor_verifier/proto/process_batch.proto
+
 ## help:                              print commands help
 help	:	Makefile
 	@sed -n 's/^##//p' $<
