@@ -134,7 +134,20 @@ func ExecuteBlockEphemerally(
 				receipts = append(receipts, receipt)
 			}
 		}
-	}/*  */
+	}
+
+	/* TODO(racytech):
+	# Retrieve all deposits made in the block
+	expected_deposits = []
+	for receipt in receipts:
+		for log in receipt.logs:
+			if log.address == DEPOSIT_CONTRACT_ADDRESS:
+				deposit = event_data_to_deposit(log.data) --> How?
+				expected_deposits.append(deposit)
+
+	# Compare retrieved deposits to the list in the block body
+	assert block.body.deposits == expected_deposits
+	*/
 
 	receiptSha := types.DeriveSha(receipts)
 	if !vmConfig.StatelessExec && chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts && receiptSha != block.ReceiptHash() {
