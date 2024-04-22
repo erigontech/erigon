@@ -23,10 +23,12 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -105,7 +107,8 @@ func TestEviction(t *testing.T) {
 	cfg.NewBlockWait = 0
 	c := New(cfg)
 
-	db := memdb.NewTestDB(t)
+	dirs := datadir.New(t.TempDir())
+	_, db, _ := temporaltest.NewTestDB(t, dirs)
 	k1, k2 := [20]byte{1}, [20]byte{2}
 
 	var id uint64
