@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/etconfig2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -14,7 +15,6 @@ import (
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 )
 
 const (
@@ -25,13 +25,13 @@ const (
 
 func compareCurrentState(
 	t *testing.T,
-	agg *state2.AggregatorV3,
+	agg *state2.Aggregator,
 	db1 kv.Tx,
 	db2 kv.Tx,
 	buckets ...string,
 ) {
 	for _, bucket := range buckets {
-		if ethconfig.EnableHistoryV4InTest {
+		if etconfig2.EnableHistoryV4InTest {
 			compareDomain(t, agg, db1, db2, bucket)
 			continue
 		}
@@ -39,7 +39,7 @@ func compareCurrentState(
 	}
 }
 
-func compareDomain(t *testing.T, agg *state2.AggregatorV3, db1, db2 kv.Tx, bucketName string) {
+func compareDomain(t *testing.T, agg *state2.Aggregator, db1, db2 kv.Tx, bucketName string) {
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 

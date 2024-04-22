@@ -124,7 +124,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 			Events:     true,
 			Validator:  true,
 			Lighthouse: true,
-		}, nil, blobStorage, nil, vp, nil, nil, fcu.SyncContributionPool, nil, nil, syncCommitteeMessagesService, syncContributionService, aggregateAndProofsService) // TODO: add tests
+		}, nil, blobStorage, nil, vp, nil, nil, fcu.SyncContributionPool, nil, nil, syncCommitteeMessagesService, syncContributionService, aggregateAndProofsService, nil) // TODO: add tests
 	h.Init()
 	return
 }

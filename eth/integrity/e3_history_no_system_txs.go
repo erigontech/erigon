@@ -10,18 +10,18 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 )
 
 // E3 History - usually don't have anything attributed to 1-st system txs (except genesis)
-func E3HistoryNoSystemTxs(ctx context.Context, chainDB kv.RwDB, agg *state.AggregatorV3) error {
+func E3HistoryNoSystemTxs(ctx context.Context, chainDB kv.RwDB, agg *state.Aggregator) error {
 	count := atomic.Uint64{}
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	db, err := temporal.New(chainDB, agg, nil)
+	db, err := temporal.New(chainDB, agg)
 	if err != nil {
 		return err
 	}

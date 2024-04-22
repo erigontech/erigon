@@ -20,6 +20,8 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common/disk"
 	"github.com/ledgerwatch/erigon-lib/common/mem"
+	"github.com/ledgerwatch/erigon-lib/etconfig2"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
@@ -41,8 +43,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/diagnostics"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
@@ -571,7 +571,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 
 func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (
 	blockSnaps *freezeblocks.RoSnapshots, borSnaps *freezeblocks.BorRoSnapshots, csn *freezeblocks.CaplinSnapshots,
-	br *freezeblocks.BlockRetire, agg *libstate.AggregatorV3, err error,
+	br *freezeblocks.BlockRetire, agg *libstate.Aggregator, err error,
 ) {
 	chainConfig := fromdb.ChainConfig(chainDB)
 
@@ -811,7 +811,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		return nil
 	}
 
-	db, err = temporal.New(db, agg, systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
+	db, err = temporal.New(db, agg)
 	if err != nil {
 		return err
 	}
@@ -1060,8 +1060,8 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 	opts = opts.Accede()
 	return opts
 }
-func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *libstate.AggregatorV3 {
-	agg, err := libstate.NewAggregatorV3(ctx, dirs, ethconfig.HistoryV3AggregationStep, chainDB, logger)
+func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *libstate.Aggregator {
+	agg, err := libstate.NewAggregator(ctx, dirs, etconfig2.HistoryV3AggregationStep, chainDB, logger)
 	if err != nil {
 		panic(err)
 	}

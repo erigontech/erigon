@@ -108,16 +108,19 @@ type Domain struct {
 	*History
 
 	// dirtyFiles - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
-	// thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
+	// thread-safe, but maybe need 1 RWLock for all trees in Aggregator
 	//
-	// visibleFiles derivative from field `file`, but without garbage:
+	// _visibleFiles derivative from field `file`, but without garbage:
 	//  - no files with `canDelete=true`
 	//  - no overlaps
 	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
 	//
-	// BeginRo() using visibleFiles in zero-copy way
-	dirtyFiles   *btree2.BTreeG[*filesItem]
-	visibleFiles atomic.Pointer[[]ctxItem]
+	// BeginRo() using _visibleFiles in zero-copy way
+	dirtyFiles *btree2.BTreeG[*filesItem]
+
+	// _visibleFiles - underscore in name means: don't use this field directly, use BeginFilesRo()
+	// underlying array is immutable - means it's ready for zero-copy use
+	_visibleFiles atomic.Pointer[[]ctxItem]
 
 	// replaceKeysInValues allows to replace commitment branch values with shorter keys.
 	// for commitment domain only
@@ -156,7 +159,7 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, v
 		restrictSubsetFileDeletions: cfg.restrictSubsetFileDeletions, // to prevent not merged 'garbage' to delete on start
 	}
 
-	d.visibleFiles.Store(&[]ctxItem{})
+	d._visibleFiles.Store(&[]ctxItem{})
 
 	var err error
 	if d.History, err = NewHistory(cfg.hist, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, nil, logger); err != nil {
@@ -225,7 +228,7 @@ func (d *Domain) openList(names []string, readonly bool) error {
 //   - `kill -9` in the middle of `buildFiles()`, then `rm -f db` (restore from backup)
 //   - `kill -9` in the middle of `buildFiles()`, then `stage_exec --reset` (drop progress - as a hot-fix)
 func (d *Domain) protectFromHistoryFilesAheadOfDomainFiles(readonly bool) {
-	d.removeFilesAfterStep(d.endTxNumMinimax()/d.aggregationStep, readonly)
+	d.removeFilesAfterStep(d.dirtyFilesEndTxNumMinimax()/d.aggregationStep, readonly)
 }
 
 func (d *Domain) OpenFolder(readonly bool) error {
@@ -457,7 +460,7 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 
 func (d *Domain) reCalcVisibleFiles() {
 	visibleFiles := calcVisibleFiles(d.dirtyFiles, d.indexList, false)
-	d.visibleFiles.Store(&visibleFiles)
+	d._visibleFiles.Store(&visibleFiles)
 }
 
 func (d *Domain) Close() {
@@ -807,7 +810,7 @@ func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 }
 
 func (d *Domain) BeginFilesRo() *DomainRoTx {
-	files := *d.visibleFiles.Load()
+	files := *d._visibleFiles.Load()
 	for i := 0; i < len(files); i++ {
 		if !files[i].src.frozen {
 			files[i].src.refcount.Add(1)

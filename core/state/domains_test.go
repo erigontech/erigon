@@ -7,6 +7,8 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	datadir2 "github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/etconfig2"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/semaphore"
@@ -15,9 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 )
 
 func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
@@ -46,14 +45,14 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 	//
 	return opts
 }
-func dbAggregatorOnDatadir(t *testing.T, ddir string) (kv.RwDB, *state.AggregatorV3) {
+func dbAggregatorOnDatadir(t *testing.T, ddir string) (kv.RwDB, *state.Aggregator) {
 	t.Helper()
 	logger := log.New()
 	dirs := datadir2.New(ddir)
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 
-	agg, err := state.NewAggregatorV3(context.Background(), dirs, ethconfig.HistoryV3AggregationStep, db, logger)
+	agg, err := state.NewAggregator(context.Background(), dirs, etconfig2.HistoryV3AggregationStep, db, logger)
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 	err = agg.OpenFolder(false)
@@ -72,7 +71,7 @@ func runAggregatorOnActualDatadir(t *testing.T, datadir string) {
 	ctx := context.Background()
 	db, agg := dbAggregatorOnDatadir(t, datadir)
 
-	tdb, err := temporal.New(db, agg, systemcontracts.SystemContractCodeLookup["sepolia"])
+	tdb, err := temporal.New(db, agg)
 	require.NoError(t, err)
 
 	tx, err := tdb.BeginTemporalRw(context.Background())

@@ -142,8 +142,10 @@ type CoherentView struct {
 	stateVersionID uint64
 }
 
-func (c *CoherentView) StateV3() bool                { return c.cache.cfg.StateV3 }
-func (c *CoherentView) Get(k []byte) ([]byte, error) { return c.cache.Get(k, c.tx, c.stateVersionID) }
+func (c *CoherentView) StateV3() bool { return c.cache.cfg.StateV3 }
+func (c *CoherentView) Get(k []byte) ([]byte, error) {
+	return c.cache.Get(k, c.tx, c.stateVersionID)
+}
 func (c *CoherentView) GetCode(k []byte) ([]byte, error) {
 	return c.cache.GetCode(k, c.tx, c.stateVersionID)
 }
@@ -175,7 +177,7 @@ var DefaultCoherentConfig = CoherentConfig{
 	MetricsLabel:    "default",
 	WithStorage:     true,
 	WaitForNewBlock: true,
-	StateV3:         false,
+	StateV3:         true,
 }
 
 func New(cfg CoherentConfig) *Coherent {

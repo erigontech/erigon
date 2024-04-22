@@ -3,25 +3,14 @@ package temporal
 import (
 	"context"
 	"fmt"
-	"testing"
-
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/core/state/historyv2read"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 )
 
 //Variables Naming:
@@ -57,50 +46,19 @@ import (
 // HighLevel:
 //      1. Application - rely on TemporalDB (Ex: ExecutionLayer) or just DB (Ex: TxPool, Sentry, Downloader).
 
-type tRestoreCodeHash func(tx kv.Getter, key, v []byte, force *common.Hash) ([]byte, error)
-type tConvertAccount func(v []byte) ([]byte, error)
-type tParseIncarnation func(v []byte) (uint64, error)
-
 type DB struct {
 	kv.RwDB
-	agg *state.AggregatorV3
-
-	convertV3toV2        tConvertAccount
-	convertV2toV3        tConvertAccount
-	restoreCodeHash      tRestoreCodeHash
-	parseInc             tParseIncarnation
-	systemContractLookup map[common.Address][]common.CodeRecord
+	agg *state.Aggregator
 }
 
-func New(db kv.RwDB, agg *state.AggregatorV3, systemContractLookup map[common.Address][]common.CodeRecord) (*DB, error) {
+func New(db kv.RwDB, agg *state.Aggregator) (*DB, error) {
 	if !kvcfg.HistoryV3.FromDB(db) {
 		panic("not supported")
 	}
-	if systemContractLookup != nil {
-		if err := db.View(context.Background(), func(tx kv.Tx) error {
-			var err error
-			for _, list := range systemContractLookup {
-				for i := range list {
-					list[i].TxNumber, err = rawdbv3.TxNums.Min(tx, list[i].BlockNumber)
-					if err != nil {
-						return err
-					}
-				}
-			}
-			return nil
-		}); err != nil {
-			return nil, err
-		}
-	}
-
-	return &DB{RwDB: db, agg: agg,
-		convertV3toV2: accounts.ConvertV3toV2, convertV2toV3: accounts.ConvertV2toV3,
-		restoreCodeHash: historyv2read.RestoreCodeHash, parseInc: accounts.DecodeIncarnationFromStorage,
-		systemContractLookup: systemContractLookup,
-	}, nil
+	return &DB{RwDB: db, agg: agg}, nil
 }
-func (db *DB) Agg() *state.AggregatorV3 { return db.agg }
-func (db *DB) InternalDB() kv.RwDB      { return db.RwDB }
+func (db *DB) Agg() *state.Aggregator { return db.agg }
+func (db *DB) InternalDB() kv.RwDB    { return db.RwDB }
 
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	kvTx, err := db.RwDB.BeginRo(ctx) //nolint:gocritic
@@ -199,7 +157,7 @@ func (tx *Tx) ForceReopenAggCtx() {
 func (tx *Tx) WarmupDB(force bool) error { return tx.MdbxTx.WarmupDB(force) }
 func (tx *Tx) LockDBInRam() error        { return tx.MdbxTx.LockDBInRam() }
 func (tx *Tx) AggCtx() interface{}       { return tx.aggCtx }
-func (tx *Tx) Agg() *state.AggregatorV3  { return tx.db.agg }
+func (tx *Tx) Agg() *state.Aggregator    { return tx.db.agg }
 func (tx *Tx) Rollback() {
 	tx.autoClose()
 	if tx.MdbxTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
@@ -292,42 +250,4 @@ func (tx *Tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limi
 		tx.resourcesToClose = append(tx.resourcesToClose, closer)
 	}
 	return it, err
-}
-
-// TODO: need remove `gspec` param (move SystemContractCodeLookup feature somewhere)
-func NewTestDB(tb testing.TB, dirs datadir.Dirs, gspec *types.Genesis) (histV3 bool, db kv.RwDB, agg *state.AggregatorV3) {
-	historyV3 := true
-	logger := log.New()
-
-	if tb != nil {
-		db = memdb.NewTestDB(tb)
-	} else {
-		db = memdb.New(dirs.DataDir)
-	}
-	_ = db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
-		_, _ = kvcfg.HistoryV3.WriteOnce(tx, historyV3)
-		return nil
-	})
-
-	var err error
-	agg, err = state.NewAggregatorV3(context.Background(), dirs, ethconfig.HistoryV3AggregationStep, db, logger)
-	if err != nil {
-		panic(err)
-	}
-	if err := agg.OpenFolder(false); err != nil {
-		panic(err)
-	}
-
-	var sc map[common.Address][]common.CodeRecord
-	if gspec != nil {
-		sc = systemcontracts.SystemContractCodeLookup[gspec.Config.ChainName]
-	}
-
-	if historyV3 {
-		db, err = New(db, agg, sc)
-		if err != nil {
-			panic(err)
-		}
-	}
-	return historyV3, db, agg
 }

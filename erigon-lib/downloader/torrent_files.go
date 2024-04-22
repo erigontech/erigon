@@ -15,64 +15,60 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 )
 
-// TorrentFiles - does provide thread-safe CRUD operations on .torrent files
-type TorrentFiles struct {
+// AtomicTorrentFS - does provide thread-safe CRUD operations on .torrent files
+type AtomicTorrentFS struct {
 	lock sync.Mutex
 	dir  string
 }
 
-func NewAtomicTorrentFiles(dir string) *TorrentFiles {
-	return &TorrentFiles{dir: dir}
+func NewAtomicTorrentFS(dir string) *AtomicTorrentFS {
+	return &AtomicTorrentFS{dir: dir}
 }
 
-func (tf *TorrentFiles) Exists(name string) bool {
+func (tf *AtomicTorrentFS) Exists(name string) bool {
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
 	return tf.exists(name)
 }
 
-func (tf *TorrentFiles) exists(name string) bool {
+func (tf *AtomicTorrentFS) exists(name string) bool {
 	if !strings.HasSuffix(name, ".torrent") {
 		name += ".torrent"
 	}
 	return dir.FileExist(filepath.Join(tf.dir, name))
 }
-func (tf *TorrentFiles) Delete(name string) error {
+func (tf *AtomicTorrentFS) Delete(name string) error {
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
 	return tf.delete(name)
 }
 
-func (tf *TorrentFiles) delete(name string) error {
+func (tf *AtomicTorrentFS) delete(name string) error {
 	if !strings.HasSuffix(name, ".torrent") {
 		name += ".torrent"
 	}
 	return os.Remove(filepath.Join(tf.dir, name))
 }
 
-func (tf *TorrentFiles) Create(name string, res []byte) (ts *torrent.TorrentSpec, prohibited, created bool, err error) {
+func (tf *AtomicTorrentFS) Create(name string, res []byte) (ts *torrent.TorrentSpec, created bool, err error) {
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
-	prohibited, err = tf.newDownloadsAreProhibited(name)
-	if err != nil {
-		return nil, false, false, err
-	}
 
-	if !tf.exists(name) && !prohibited {
+	if !tf.exists(name) {
 		err = tf.create(name, res)
 		if err != nil {
-			return nil, false, false, err
+			return nil, false, err
 		}
 	}
 
 	ts, err = tf.load(filepath.Join(tf.dir, name))
 	if err != nil {
-		return nil, false, false, err
+		return nil, false, err
 	}
-	return ts, prohibited, false, nil
+	return ts, false, nil
 }
 
-func (tf *TorrentFiles) create(name string, res []byte) error {
+func (tf *AtomicTorrentFS) create(name string, res []byte) error {
 	if !strings.HasSuffix(name, ".torrent") {
 		name += ".torrent"
 	}
@@ -102,7 +98,7 @@ func (tf *TorrentFiles) create(name string, res []byte) error {
 	return nil
 }
 
-func (tf *TorrentFiles) createFromMetaInfo(fPath string, mi *metainfo.MetaInfo) error {
+func (tf *AtomicTorrentFS) createFromMetaInfo(fPath string, mi *metainfo.MetaInfo) error {
 	file, err := os.Create(fPath + ".tmp")
 	if err != nil {
 		return err
@@ -123,7 +119,7 @@ func (tf *TorrentFiles) createFromMetaInfo(fPath string, mi *metainfo.MetaInfo) 
 	return nil
 }
 
-func (tf *TorrentFiles) CreateWithMetaInfo(info *metainfo.Info, additionalMetaInfo *metainfo.MetaInfo) (created bool, err error) {
+func (tf *AtomicTorrentFS) CreateWithMetaInfo(info *metainfo.Info, additionalMetaInfo *metainfo.MetaInfo) (created bool, err error) {
 	name := info.Name
 	if !strings.HasSuffix(name, ".torrent") {
 		name += ".torrent"
@@ -136,13 +132,6 @@ func (tf *TorrentFiles) CreateWithMetaInfo(info *metainfo.Info, additionalMetaIn
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
 
-	prohibited, err := tf.newDownloadsAreProhibited(name)
-	if err != nil {
-		return false, err
-	}
-	if prohibited {
-		return false, nil
-	}
 	if tf.exists(name) {
 		return false, nil
 	}
@@ -152,19 +141,19 @@ func (tf *TorrentFiles) CreateWithMetaInfo(info *metainfo.Info, additionalMetaIn
 	return true, nil
 }
 
-func (tf *TorrentFiles) LoadByName(name string) (*torrent.TorrentSpec, error) {
+func (tf *AtomicTorrentFS) LoadByName(name string) (*torrent.TorrentSpec, error) {
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
 	return tf.load(filepath.Join(tf.dir, name))
 }
 
-func (tf *TorrentFiles) LoadByPath(fPath string) (*torrent.TorrentSpec, error) {
+func (tf *AtomicTorrentFS) LoadByPath(fPath string) (*torrent.TorrentSpec, error) {
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
 	return tf.load(fPath)
 }
 
-func (tf *TorrentFiles) load(fPath string) (*torrent.TorrentSpec, error) {
+func (tf *AtomicTorrentFS) load(fPath string) (*torrent.TorrentSpec, error) {
 	if !strings.HasSuffix(fPath, ".torrent") {
 		fPath += ".torrent"
 	}
@@ -181,13 +170,13 @@ const ProhibitNewDownloadsFileName = "prohibit_new_downloads.lock"
 // Erigon "download once" - means restart/upgrade/downgrade will not download files (and will be fast)
 // After "download once" - Erigon will produce and seed new files
 // Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
-func (tf *TorrentFiles) ProhibitNewDownloads(t string) error {
+func (tf *AtomicTorrentFS) ProhibitNewDownloads(t string) error {
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
 	return tf.prohibitNewDownloads(t)
 }
 
-func (tf *TorrentFiles) prohibitNewDownloads(t string) error {
+func (tf *AtomicTorrentFS) prohibitNewDownloads(t string) error {
 	// open or create file ProhibitNewDownloadsFileName
 	f, err := os.OpenFile(filepath.Join(tf.dir, ProhibitNewDownloadsFileName), os.O_CREATE|os.O_RDONLY, 0644)
 	if err != nil {
@@ -227,13 +216,13 @@ func (tf *TorrentFiles) prohibitNewDownloads(t string) error {
 	return f.Sync()
 }
 
-func (tf *TorrentFiles) NewDownloadsAreProhibited(name string) (bool, error) {
+func (tf *AtomicTorrentFS) NewDownloadsAreProhibited(name string) (bool, error) {
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
 	return tf.newDownloadsAreProhibited(name)
 }
 
-func (tf *TorrentFiles) newDownloadsAreProhibited(name string) (bool, error) {
+func (tf *AtomicTorrentFS) newDownloadsAreProhibited(name string) (bool, error) {
 	f, err := os.OpenFile(filepath.Join(tf.dir, ProhibitNewDownloadsFileName), os.O_CREATE|os.O_APPEND|os.O_RDONLY, 0644)
 	if err != nil {
 		return false, err

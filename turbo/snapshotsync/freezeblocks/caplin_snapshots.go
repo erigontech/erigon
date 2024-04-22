@@ -37,12 +37,12 @@ import (
 var sidecarSSZSize = (&cltypes.BlobSidecar{}).EncodingSizeSSZ()
 
 func BeaconSimpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+	num := make([]byte, binary.MaxVarintLen64)
 	if err := Idx(ctx, sn, salt, sn.From, tmpDir, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		if i%20_000 == 0 {
 			logger.Log(lvl, fmt.Sprintf("Generating idx for %s", sn.Type.String()), "progress", i)
 		}
 		p.Processed.Add(1)
-		num := make([]byte, 8)
 		n := binary.PutUvarint(num, i)
 		if err := idx.AddKey(num[:n], offset); err != nil {
 			return err
@@ -496,7 +496,7 @@ func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, fromSlot, toSlot uint64, 
 	return nil
 }
 
-func DumpBlobsSidecar(ctx context.Context, blobStorage blob_storage.BlobStorage, db kv.RoDB, fromSlot, toSlot uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
+func DumpBlobsSidecar(ctx context.Context, blobStorage blob_storage.BlobStorage, db kv.RoDB, fromSlot, toSlot uint64, salt uint32, dirs datadir.Dirs, compressWorkers int, lvl log.Lvl, logger log.Logger) error {
 	for i := fromSlot; i < toSlot; i = chooseSegmentEnd(i, toSlot, nil) {
 		blocksPerFile := snapcfg.MergeLimit("", i)
 
@@ -505,7 +505,7 @@ func DumpBlobsSidecar(ctx context.Context, blobStorage blob_storage.BlobStorage,
 		}
 		to := chooseSegmentEnd(i, toSlot, nil)
 		logger.Log(lvl, "Dumping blobs sidecars", "from", i, "to", to)
-		if err := dumpBlobSidecarsRange(ctx, db, blobStorage, i, to, salt, dirs, workers, lvl, logger); err != nil {
+		if err := dumpBlobSidecarsRange(ctx, db, blobStorage, i, to, salt, dirs, compressWorkers, lvl, logger); err != nil {
 			return err
 		}
 	}

@@ -56,16 +56,19 @@ type History struct {
 	*InvertedIndex // indexKeysTable contains mapping txNum -> key1+key2, while index table `key -> {txnums}` is omitted.
 
 	// dirtyFiles - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
-	// thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
+	// thread-safe, but maybe need 1 RWLock for all trees in Aggregator
 	//
-	// visibleFiles derivative from field `file`, but without garbage:
+	// _visibleFiles derivative from field `file`, but without garbage:
 	//  - no files with `canDelete=true`
 	//  - no overlaps
 	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
 	//
-	// BeginRo() using visibleFiles in zero-copy way
-	dirtyFiles   *btree2.BTreeG[*filesItem]
-	visibleFiles atomic.Pointer[[]ctxItem]
+	// BeginRo() using _visibleFiles in zero-copy way
+	dirtyFiles *btree2.BTreeG[*filesItem]
+
+	// _visibleFiles - underscore in name means: don't use this field directly, use BeginFilesRo()
+	// underlying array is immutable - means it's ready for zero-copy use
+	_visibleFiles atomic.Pointer[[]ctxItem]
 
 	indexList idxList
 
@@ -120,7 +123,7 @@ func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTabl
 		dontProduceFiles:   cfg.dontProduceHistoryFiles,
 		keepTxInDB:         cfg.keepTxInDB,
 	}
-	h.visibleFiles.Store(&[]ctxItem{})
+	h._visibleFiles.Store(&[]ctxItem{})
 	var err error
 	h.InvertedIndex, err = NewInvertedIndex(cfg.iiCfg, aggregationStep, filenameBase, indexKeysTable, indexTable, cfg.withExistenceIndex, func(fromStep, toStep uint64) bool { return dir.FileExist(h.vFilePath(fromStep, toStep)) }, logger)
 	if err != nil {
@@ -721,7 +724,7 @@ func (sf HistoryFiles) CleanupOnError() {
 }
 func (h *History) reCalcVisibleFiles() {
 	visibleFiles := calcVisibleFiles(h.dirtyFiles, h.indexList, false)
-	h.visibleFiles.Store(&visibleFiles)
+	h._visibleFiles.Store(&visibleFiles)
 }
 
 // buildFiles performs potentially resource intensive operations of creating
@@ -980,7 +983,7 @@ type HistoryRoTx struct {
 }
 
 func (h *History) BeginFilesRo() *HistoryRoTx {
-	files := *h.visibleFiles.Load()
+	files := *h._visibleFiles.Load()
 	for i := 0; i < len(files); i++ {
 		if !files[i].src.frozen {
 			files[i].src.refcount.Add(1)

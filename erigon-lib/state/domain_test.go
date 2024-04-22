@@ -104,7 +104,7 @@ func TestDomain_OpenFolder(t *testing.T) {
 
 	collateAndMerge(t, db, nil, d, txs)
 
-	list := d.visibleFiles.Load()
+	list := d._visibleFiles.Load()
 	require.NotEmpty(t, list)
 	ff := (*list)[len(*list)-1]
 	fn := ff.src.decompressor.FilePath()
@@ -644,7 +644,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 		require.NoError(t, err)
 	}
 	var r DomainRanges
-	maxEndTxNum := d.endTxNumMinimax()
+	maxEndTxNum := d.dirtyFilesEndTxNumMinimax()
 	maxSpan := d.aggregationStep * StepsInColdFile
 
 	for {
@@ -695,7 +695,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64, prune
 		dc.Close()
 	}
 
-	maxEndTxNum := d.endTxNumMinimax()
+	maxEndTxNum := d.dirtyFilesEndTxNumMinimax()
 	maxSpan := d.aggregationStep * StepsInColdFile
 	for {
 		dc := d.BeginFilesRo()

@@ -38,6 +38,8 @@ import (
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/etconfig2"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/erigon/eth/consensuschain"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
@@ -90,8 +92,6 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -197,7 +197,7 @@ type Ethereum struct {
 	forkValidator           *engine_helpers.ForkValidator
 	downloader              *downloader.Downloader
 
-	agg            *libstate.AggregatorV3
+	agg            *libstate.Aggregator
 	blockSnapshots *freezeblocks.RoSnapshots
 	blockReader    services.FullBlockReader
 	blockWriter    *blockio.BlockWriter
@@ -341,7 +341,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.agg, backend.blockSnapshots, backend.blockReader, backend.blockWriter = agg, allSnapshots, blockReader, blockWriter
 
 	if config.HistoryV3 {
-		backend.chainDB, err = temporal.New(backend.chainDB, agg, systemcontracts.SystemContractCodeLookup[config.Genesis.Config.ChainName])
+		backend.chainDB, err = temporal.New(backend.chainDB, agg)
 		if err != nil {
 			return nil, err
 		}
@@ -1328,7 +1328,7 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 	return err
 }
 
-func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, histV3 bool, isBor bool, logger log.Logger) (services.FullBlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *freezeblocks.BorRoSnapshots, *libstate.AggregatorV3, error) {
+func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, histV3 bool, isBor bool, logger log.Logger) (services.FullBlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *freezeblocks.BorRoSnapshots, *libstate.Aggregator, error) {
 	var minFrozenBlock uint64
 
 	if frozenLimit := snConfig.Sync.FrozenBlockLimit; frozenLimit != 0 {
@@ -1359,7 +1359,7 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 	blockWriter := blockio.NewBlockWriter(histV3)
 
-	agg, err := libstate.NewAggregatorV3(ctx, dirs, ethconfig.HistoryV3AggregationStep, db, logger)
+	agg, err := libstate.NewAggregator(ctx, dirs, etconfig2.HistoryV3AggregationStep, db, logger)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
@@ -1422,6 +1422,7 @@ func (s *Ethereum) Start() error {
 		s.waitForStageLoopStop = nil // TODO: Ethereum.Stop should wait for execution_server shutdown
 		go s.eth1ExecutionServer.Start(s.sentryCtx)
 	} else if s.config.PolygonSync {
+		s.waitForStageLoopStop = nil // Shutdown is handled by context
 		go func() {
 			ctx := s.sentryCtx
 			err := s.polygonSyncService.Run(ctx)

@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -234,7 +233,7 @@ func NewTorrentClient(config CreateNewTorrentClientConfig) (*TorrentClient, erro
 
 	cfg.ClientConfig.DataDir = torrentDir
 
-	cfg.ClientConfig.PieceHashersPerTorrent = 32 * runtime.NumCPU()
+	cfg.ClientConfig.PieceHashersPerTorrent = 32
 	cfg.ClientConfig.DisableIPv6 = config.DisableIPv6
 	cfg.ClientConfig.DisableIPv4 = config.DisableIPv4
 
