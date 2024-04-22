@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
+	"google.golang.org/grpc"
 	"math/big"
 	"os"
 	"sync"
@@ -407,9 +408,13 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 
 	var (
 		snapDb         kv.RwDB
-		snapDownloader = &proto_downloader.DownloaderClientMock{}
-		recents        *lru.ARCCache[libcommon.Hash, *bor.Snapshot]
-		signatures     *lru.ARCCache[libcommon.Hash, libcommon.Address]
+		snapDownloader = &proto_downloader.DownloaderClientMock{
+			StatsFunc: func(ctx context.Context, in *proto_downloader.StatsRequest, opts ...grpc.CallOption) (*proto_downloader.StatsReply, error) {
+				return &proto_downloader.StatsReply{Completed: true}, nil
+			}}
+
+		recents    *lru.ARCCache[libcommon.Hash, *bor.Snapshot]
+		signatures *lru.ARCCache[libcommon.Hash, libcommon.Address]
 	)
 	if bor, ok := engine.(*bor.Bor); ok {
 		snapDb = bor.DB
