@@ -650,10 +650,6 @@ func (c HistoryCollation) Close() {
 	if c.efHistoryComp != nil {
 		c.efHistoryComp.Close()
 	}
-	//for _, b := range c.indexBitmaps {
-	//	bitmapdb.ReturnToPool64(b)
-	//}
-	//c.indexBitmaps = nil //nolint
 }
 
 // [txFrom; txTo)
@@ -921,9 +917,6 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		if err = collation.efHistoryComp.Compress(); err != nil {
 			return HistoryFiles{}, fmt.Errorf("compress %s .ef history: %w", h.filenameBase, err)
 		}
-		collation.efHistoryComp.Close()
-		collation.efHistoryComp = nil
-
 		ps.Delete(p)
 	}
 
@@ -934,11 +927,9 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		if err = collation.historyComp.Compress(); err != nil {
 			return HistoryFiles{}, fmt.Errorf("compress %s .v history: %w", h.filenameBase, err)
 		}
-		collation.historyComp.Close()
-		collation.historyComp = nil
-
 		ps.Delete(p)
 	}
+	collation.Close()
 
 	efHistoryDecomp, err = seg.NewDecompressor(collation.efHistoryPath)
 	if err != nil {
