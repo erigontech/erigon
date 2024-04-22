@@ -51,8 +51,8 @@ func TestNonceFromAddress(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan types.Announcements, 100)
 
-	coreDB := memdb.NewTestPoolDB(t)
-	_, db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	_, coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db := memdb.NewTestPoolDB(t)
 
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
