@@ -381,7 +381,7 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, txFrom uint64, txTo 
 		dt.d.logger.Warn("lookupByShortenedKey file not found",
 			"stepFrom", txFrom/dt.d.aggregationStep, "stepTo", txTo/dt.d.aggregationStep,
 			"shortened", fmt.Sprintf("%x", shortKey),
-			"domain", dt.d.keysTable, "files", fileStepsss, "visibleFiles", visibleFiles,
+			"domain", dt.d.keysTable, "files", fileStepsss, "_visibleFiles", visibleFiles,
 			"visibleFilesCount", len(dt.files), "filesCount", dt.d.dirtyFiles.Len())
 		return nil, false
 	}
