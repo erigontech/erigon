@@ -46,14 +46,14 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 	//
 	return opts
 }
-func dbAggregatorOnDatadir(t *testing.T, ddir string) (kv.RwDB, *state.AggregatorV3) {
+func dbAggregatorOnDatadir(t *testing.T, ddir string) (kv.RwDB, *state.Aggregator) {
 	t.Helper()
 	logger := log.New()
 	dirs := datadir2.New(ddir)
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 
-	agg, err := state.NewAggregatorV3(context.Background(), dirs, ethconfig.HistoryV3AggregationStep, db, logger)
+	agg, err := state.NewAggregator(context.Background(), dirs, ethconfig.HistoryV3AggregationStep, db, logger)
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 	err = agg.OpenFolder(false)

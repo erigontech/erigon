@@ -17,7 +17,7 @@ import (
 )
 
 // E3 History - usually don't have anything attributed to 1-st system txs (except genesis)
-func E3HistoryNoSystemTxs(ctx context.Context, chainDB kv.RwDB, agg *state.AggregatorV3) error {
+func E3HistoryNoSystemTxs(ctx context.Context, chainDB kv.RwDB, agg *state.Aggregator) error {
 	count := atomic.Uint64{}
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
