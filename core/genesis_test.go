@@ -10,8 +10,8 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
@@ -28,7 +28,7 @@ import (
 func TestGenesisBlockHashes(t *testing.T) {
 	t.Parallel()
 	logger := log.New()
-	_, db, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
+	_, db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	check := func(network string) {
 		genesis := core.GenesisBlockByChainName(network)
 		tx, err := db.BeginRw(context.Background())
@@ -88,7 +88,7 @@ func TestGenesisBlockRoots(t *testing.T) {
 func TestCommitGenesisIdempotency(t *testing.T) {
 	t.Parallel()
 	logger := log.New()
-	_, db, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
+	_, db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()

@@ -228,7 +228,7 @@ func (d *Domain) openList(names []string, readonly bool) error {
 //   - `kill -9` in the middle of `buildFiles()`, then `rm -f db` (restore from backup)
 //   - `kill -9` in the middle of `buildFiles()`, then `stage_exec --reset` (drop progress - as a hot-fix)
 func (d *Domain) protectFromHistoryFilesAheadOfDomainFiles(readonly bool) {
-	d.removeFilesAfterStep(d.endTxNumMinimax()/d.aggregationStep, readonly)
+	d.removeFilesAfterStep(d.dirtyFilesEndTxNumMinimax()/d.aggregationStep, readonly)
 }
 
 func (d *Domain) OpenFolder(readonly bool) error {
