@@ -29,7 +29,6 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
@@ -294,7 +293,7 @@ func Main(ctx *cli.Context) error {
 		return h
 	}
 
-	_, db, _ := temporal.NewTestDB(nil, datadir.New(""), nil)
+	_, db, _ := temporaltest.NewTestDB(nil, datadir.New(""))
 	defer db.Close()
 
 	tx, err := db.BeginRw(context.Background())

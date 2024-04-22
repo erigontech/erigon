@@ -27,7 +27,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -176,7 +176,7 @@ func TestSetupGenesis(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			dirs := datadir.New(tmpdir)
-			_, db, _ := temporal.NewTestDB(t, dirs, nil)
+			_, db, _ := temporaltest.NewTestDB(t, dirs)
 			blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, dirs.Snap, 0, log.New()), freezeblocks.NewBorRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, dirs.Snap, 0, log.New()))
 			config, genesis, err := test.fn(db)
 			// Check the return values.

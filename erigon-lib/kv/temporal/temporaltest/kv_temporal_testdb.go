@@ -1,4 +1,4 @@
-package temporal
+package temporaltest
 
 import (
 	"context"

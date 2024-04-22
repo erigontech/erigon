@@ -24,7 +24,6 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
 
@@ -37,7 +36,7 @@ import (
 )
 
 func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir string, logger log.Logger) *types.Block {
-	_, db, _ := temporal.NewTestDB(tb, datadir.New(tmpDir), nil)
+	_, db, _ := temporaltest.NewTestDB(tb, datadir.New(tmpDir))
 	var (
 		aa = libcommon.HexToAddress("0x000000000000000000000000000000000000aaaa")
 		// Generate a canonical chain to act as the main dataset
