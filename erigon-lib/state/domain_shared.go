@@ -368,7 +368,7 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 
 	if !sd.aggCtx.a.commitmentValuesTransform ||
 		len(branch) == 0 ||
-		sd.aggCtx.maxTxNumInDomainFiles(false) == 0 ||
+		sd.aggCtx.minimaxTxNumInDomainFiles(false) == 0 ||
 		bytes.Equal(prefix, keyCommitmentState) {
 
 		return branch, nil // do not transform, return as is

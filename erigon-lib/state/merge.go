@@ -40,7 +40,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/seg"
 )
 
-func (d *Domain) endTxNumMinimax() uint64 {
+func (d *Domain) dirtyFilesEndTxNumMinimax() uint64 {
 	minimax := d.History.endTxNumMinimax()
 	if max, ok := d.dirtyFiles.Max(); ok {
 		endTxNum := max.endTxNum
