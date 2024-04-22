@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon/core/state/temporaltest"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
 

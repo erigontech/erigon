@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
-	"github.com/ledgerwatch/erigon/core/state/temporaltest"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 

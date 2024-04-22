@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/core/state/temporaltest"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 

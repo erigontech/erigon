@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/core/state/temporaltest"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
