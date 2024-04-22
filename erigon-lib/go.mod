@@ -50,6 +50,8 @@ require (
 	google.golang.org/protobuf v1.33.0
 )
 
+require github.com/cespare/xxhash v1.1.0 // indirect
+
 require (
 	github.com/ajwerner/btree v0.0.0-20211221152037-f427b3e689c0 // indirect
 	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
