@@ -104,6 +104,7 @@ func TestEviction(t *testing.T) {
 	cfg.CacheSize = 21
 	cfg.NewBlockWait = 0
 	c := New(cfg)
+
 	db := memdb.NewTestDB(t)
 	k1, k2 := [20]byte{1}, [20]byte{2}
 

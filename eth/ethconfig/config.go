@@ -44,11 +44,7 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
-// AggregationStep number of transactions in smalest static file
-const HistoryV3AggregationStep = 1_562_500 // = 100M / 64. Dividers: 2, 5, 10, 20, 50, 100, 500
 //const HistoryV3AggregationStep = 1_562_500 / 10 // use this to reduce step size for dev/debug
-
-const EnableHistoryV4InTest = true
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gaspricecfg.Config{

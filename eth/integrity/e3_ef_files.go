@@ -5,15 +5,15 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"golang.org/x/sync/errgroup"
 )
 
 func E3EfFiles(ctx context.Context, chainDB kv.RwDB, agg *state.Aggregator) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	db, err := temporal.New(chainDB, agg, nil)
+	db, err := temporal.New(chainDB, agg)
 	if err != nil {
 		return err
 	}
