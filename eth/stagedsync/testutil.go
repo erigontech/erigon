@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/etconfig2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -14,7 +15,6 @@ import (
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 )
 
 const (
@@ -31,7 +31,7 @@ func compareCurrentState(
 	buckets ...string,
 ) {
 	for _, bucket := range buckets {
-		if ethconfig.EnableHistoryV4InTest {
+		if etconfig2.EnableHistoryV4InTest {
 			compareDomain(t, agg, db1, db2, bucket)
 			continue
 		}
