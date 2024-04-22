@@ -1041,7 +1041,7 @@ func (u *snapshotUploader) removeBefore(before uint64) {
 	var toReopen []string
 	var borToReopen []string
 
-	var toRemove []string //nolint:prealloc
+	toRemove := make([]string, 0, len(list))
 
 	for _, f := range list {
 		if f.To > before {

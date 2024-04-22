@@ -69,7 +69,9 @@ type InvertedIndex struct {
 	//
 	// BeginRo() using _visibleFiles in zero-copy way
 	dirtyFiles *btree2.BTreeG[*filesItem]
-	// _visibleFiles - has `_` underscore in name - to signal that this field better don't use directly. Use .BeginFilesRo()
+
+	// _visibleFiles - underscore in name means: don't use this field directly, use BeginFilesRo()
+	// underlying array is immutable - means it's ready for zero-copy use
 	_visibleFiles atomic.Pointer[[]ctxItem]
 
 	indexKeysTable  string // txnNum_u64 -> key (k+auto_increment)

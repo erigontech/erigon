@@ -104,7 +104,7 @@ func TestDomain_OpenFolder(t *testing.T) {
 
 	collateAndMerge(t, db, nil, d, txs)
 
-	list := d.visibleFiles.Load()
+	list := d._visibleFiles.Load()
 	require.NotEmpty(t, list)
 	ff := (*list)[len(*list)-1]
 	fn := ff.src.decompressor.FilePath()

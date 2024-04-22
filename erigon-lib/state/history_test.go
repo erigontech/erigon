@@ -1357,7 +1357,7 @@ func TestHistory_OpenFolder(t *testing.T) {
 	db, h, txs := filledHistory(t, true, logger)
 	collateAndMergeHistory(t, db, h, txs, true)
 
-	list := h.visibleFiles.Load()
+	list := h._visibleFiles.Load()
 	require.NotEmpty(t, list)
 	ff := (*list)[len(*list)-1]
 	fn := ff.src.decompressor.FilePath()
