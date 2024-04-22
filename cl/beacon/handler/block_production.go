@@ -28,7 +28,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/transition"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
-	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/log/v3"
@@ -187,7 +186,7 @@ func (a *ApiHandler) produceBeaconBody(ctx context.Context, apiVersion int, base
 	if err != nil {
 		return nil, 0, err
 	}
-	currEpoch := utils.GetCurrentEpoch(a.genesisCfg.GenesisTime, a.beaconChainCfg.SecondsPerSlot, a.beaconChainCfg.SlotsPerEpoch)
+	currEpoch := a.ethClock.GetCurrentEpoch()
 	random := baseState.GetRandaoMixes(currEpoch)
 
 	var executionPayload *cltypes.Eth1Block
@@ -361,7 +360,7 @@ func (a *ApiHandler) parseEthConsensusVersion(str string, apiVersion int) (clpar
 		return 0, fmt.Errorf("Eth-Consensus-Version header is required")
 	}
 	if str == "" && apiVersion == 1 {
-		currentEpoch := utils.GetCurrentEpoch(a.genesisCfg.GenesisTime, a.beaconChainCfg.SecondsPerSlot, a.beaconChainCfg.SlotsPerEpoch)
+		currentEpoch := a.ethClock.GetCurrentEpoch()
 		return a.beaconChainCfg.GetCurrentStateVersion(currentEpoch), nil
 	}
 	return clparams.StringToClVersion(str)

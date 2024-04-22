@@ -255,7 +255,7 @@ func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log
 func checkRanges(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 	t.Helper()
 	ctx := context.Background()
-	ic := ii.MakeContext()
+	ic := ii.BeginFilesRo()
 	defer ic.Close()
 
 	// Check the iterator ranges first without roTx
@@ -361,7 +361,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 
 			for {
 				if stop := func() bool {
-					ic := ii.MakeContext()
+					ic := ii.BeginFilesRo()
 					defer ic.Close()
 					found, startTxNum, endTxNum = ii.findMergeRange(maxEndTxNum, maxSpan)
 					if !found {
@@ -444,7 +444,7 @@ func TestChangedKeysIterator(t *testing.T) {
 	defer func() {
 		roTx.Rollback()
 	}()
-	ic := ii.MakeContext()
+	ic := ii.BeginFilesRo()
 	defer ic.Close()
 	it := ic.IterateChangedKeys(0, 20, roTx)
 	defer func() {
@@ -499,8 +499,8 @@ func TestChangedKeysIterator(t *testing.T) {
 func TestScanStaticFiles(t *testing.T) {
 	logger := log.New()
 	ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1,
-		files:  btree2.NewBTreeG[*filesItem](filesItemLess),
-		logger: logger,
+		dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess),
+		logger:     logger,
 	}
 	files := []string{
 		"test.0-1.ef",
@@ -511,20 +511,20 @@ func TestScanStaticFiles(t *testing.T) {
 		"test.4-5.ef",
 	}
 	ii.scanStateFiles(files)
-	require.Equal(t, 6, ii.files.Len())
+	require.Equal(t, 6, ii.dirtyFiles.Len())
 
 	//integrity extension case
-	ii.files.Clear()
+	ii.dirtyFiles.Clear()
 	ii.integrityFileExtensions = []string{"v"}
 	ii.scanStateFiles(files)
-	require.Equal(t, 0, ii.files.Len())
+	require.Equal(t, 0, ii.dirtyFiles.Len())
 }
 
 func TestCtxFiles(t *testing.T) {
 	logger := log.New()
 	ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1,
-		files:  btree2.NewBTreeG[*filesItem](filesItemLess),
-		logger: logger,
+		dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess),
+		logger:     logger,
 	}
 	files := []string{
 		"test.0-1.ef", // overlap with same `endTxNum=4`
@@ -539,9 +539,9 @@ func TestCtxFiles(t *testing.T) {
 		"test.480-512.ef",
 	}
 	ii.scanStateFiles(files)
-	require.Equal(t, 10, ii.files.Len())
+	require.Equal(t, 10, ii.dirtyFiles.Len())
 
-	roFiles := ctxFiles(ii.files)
+	roFiles := calcVisibleFiles(ii.dirtyFiles)
 	for i, item := range roFiles {
 		if item.src.canDelete.Load() {
 			require.Failf(t, "deleted file", "%d-%d", item.src.startTxNum, item.src.endTxNum)
@@ -563,4 +563,28 @@ func TestCtxFiles(t *testing.T) {
 
 	require.Equal(t, 480, int(roFiles[2].startTxNum))
 	require.Equal(t, 512, int(roFiles[2].endTxNum))
+}
+
+func TestInvIndex_OpenFolder(t *testing.T) {
+	fp, db, ii, txs := filledInvIndex(t, log.New())
+	defer db.Close()
+	defer ii.Close()
+	defer os.RemoveAll(fp)
+
+	mergeInverted(t, db, ii, txs)
+
+	list := ii.visibleFiles.Load()
+	require.NotEmpty(t, list)
+	ff := (*list)[len(*list)-1]
+	fn := ff.src.decompressor.FilePath()
+	ii.Close()
+
+	err := os.Remove(fn)
+	require.NoError(t, err)
+	err = os.WriteFile(fn, make([]byte, 33), 0644)
+	require.NoError(t, err)
+
+	err = ii.OpenFolder()
+	require.NoError(t, err)
+	ii.Close()
 }

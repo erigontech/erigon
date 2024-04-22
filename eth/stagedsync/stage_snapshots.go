@@ -63,7 +63,7 @@ type SnapshotsCfg struct {
 	historyV3        bool
 	caplin           bool
 	blobs            bool
-	agg              *state.AggregatorV3
+	agg              *state.Aggregator
 	silkworm         *silkworm.Silkworm
 	snapshotUploader *snapshotUploader
 	syncConfig       ethconfig.Sync
@@ -78,7 +78,7 @@ func StageSnapshotsCfg(db kv.RwDB,
 	blockReader services.FullBlockReader,
 	notifier *shards.Notifications,
 	historyV3 bool,
-	agg *state.AggregatorV3,
+	agg *state.Aggregator,
 	caplin bool,
 	blobs bool,
 	silkworm *silkworm.Silkworm,
@@ -104,7 +104,7 @@ func StageSnapshotsCfg(db kv.RwDB,
 		cfg.snapshotUploader = &snapshotUploader{
 			cfg:          &cfg,
 			uploadFs:     uploadFs,
-			torrentFiles: downloader.NewAtomicTorrentFiles(cfg.dirs.Snap),
+			torrentFiles: downloader.NewAtomicTorrentFS(cfg.dirs.Snap),
 		}
 
 		cfg.blockRetire.SetWorkers(estimate.CompressSnapshot.Workers())
@@ -287,7 +287,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	return nil
 }
 
-func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, blockReader services.FullBlockReader, agg *state.AggregatorV3, logger log.Logger) error {
+func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, blockReader services.FullBlockReader, agg *state.Aggregator, logger log.Logger) error {
 	blocksAvailable := blockReader.FrozenBlocks()
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
@@ -304,6 +304,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 		if err = stages.SaveStageProgress(tx, stage, blocksAvailable); err != nil {
 			return fmt.Errorf("advancing %s stage: %w", stage, err)
 		}
+
 		switch stage {
 		case stages.Headers:
 			h2n := etl.NewCollector(logPrefix, dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
@@ -515,7 +516,7 @@ type snapshotUploader struct {
 	uploadScheduled atomic.Bool
 	uploading       atomic.Bool
 	manifestMutex   sync.Mutex
-	torrentFiles    *downloader.TorrentFiles
+	torrentFiles    *downloader.AtomicTorrentFS
 }
 
 func (u *snapshotUploader) init(ctx context.Context, logger log.Logger) {
@@ -932,7 +933,7 @@ func (u *snapshotUploader) start(ctx context.Context, logger log.Logger) {
 		}
 	}
 
-	u.uploadSession, err = u.rclone.NewSession(ctx, u.cfg.dirs.Snap, uploadFs)
+	u.uploadSession, err = u.rclone.NewSession(ctx, u.cfg.dirs.Snap, uploadFs, nil)
 
 	if err != nil {
 		logger.Warn("[uploader] Uploading disabled: rclone session failed", "err", err)
@@ -1153,7 +1154,7 @@ func (u *snapshotUploader) upload(ctx context.Context, logger log.Logger) {
 				g.Go(func() error {
 					defer i.Add(1)
 
-					err := downloader.BuildTorrentIfNeed(gctx, state.file, u.cfg.dirs.Snap, u.torrentFiles)
+					_, err := downloader.BuildTorrentIfNeed(gctx, state.file, u.cfg.dirs.Snap, u.torrentFiles)
 
 					state.Lock()
 					state.buildingTorrent = false

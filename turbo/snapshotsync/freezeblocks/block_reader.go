@@ -1278,10 +1278,7 @@ func (r *BlockReader) EventsByIdFromSnapshot(from uint64, to time.Time, limit in
 	for _, sn := range segments {
 		idxBorTxnHash := sn.Index()
 
-		if idxBorTxnHash == nil {
-			continue
-		}
-		if idxBorTxnHash.KeyCount() == 0 {
+		if idxBorTxnHash == nil || idxBorTxnHash.KeyCount() == 0 {
 			continue
 		}
 

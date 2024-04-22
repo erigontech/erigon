@@ -53,3 +53,18 @@ func ComputeSubnetsForSyncCommittee(s *state.CachingBeaconState, validatorIndex 
 	}
 	return subnets, nil
 }
+
+func ComputeSubnetForAttestation(committeePerSlot, slot, committeeIndex, slotsPerEpoch, attSubnetCount uint64) uint64 {
+	// ref: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/validator.md#broadcast-attestation
+	// slots_since_epoch_start = uint64(slot % SLOTS_PER_EPOCH)
+	// committees_since_epoch_start = committees_per_slot * slots_since_epoch_start
+	// return SubnetID((committees_since_epoch_start + committee_index) % ATTESTATION_SUBNET_COUNT)
+	slotsSinceEpochStart := slot % slotsPerEpoch
+	committeesSinceEpochStart := committeePerSlot * slotsSinceEpochStart
+	return (committeesSinceEpochStart + committeeIndex) % attSubnetCount
+}
+
+func ComputeCommitteeCountPerSlot(s *state.CachingBeaconState, slot uint64, slotsPerEpoch uint64) uint64 {
+	epoch := slot / slotsPerEpoch
+	return s.CommitteeCount(epoch)
+}

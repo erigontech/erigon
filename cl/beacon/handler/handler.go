@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cl/aggregation"
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
@@ -20,7 +21,9 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	"github.com/ledgerwatch/erigon/cl/phase1/network/services"
 	"github.com/ledgerwatch/erigon/cl/pool"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/ledgerwatch/erigon/cl/validator/attestation_producer"
 	"github.com/ledgerwatch/erigon/cl/validator/committee_subscription"
 	"github.com/ledgerwatch/erigon/cl/validator/sync_contribution_pool"
@@ -43,7 +46,8 @@ type ApiHandler struct {
 
 	blockReader     freezeblocks.BeaconSnapshotReader
 	indiciesDB      kv.RwDB
-	genesisCfg      *clparams.GenesisConfig
+	netConfig       *clparams.NetworkConfig
+	ethClock        eth_clock.EthereumClock
 	beaconChainCfg  *clparams.BeaconChainConfig
 	forkchoiceStore forkchoice.ForkChoiceStorage
 	operationsPool  pool.OperationsPool
@@ -72,11 +76,19 @@ type ApiHandler struct {
 	syncMessagePool     sync_contribution_pool.SyncContributionPool
 	committeeSub        *committee_subscription.CommitteeSubscribeMgmt
 	attestationProducer attestation_producer.AttestationDataProducer
+	aggregatePool       aggregation.AggregationPool
+
+	// services
+	syncCommitteeMessagesService     services.SyncCommitteeMessagesService
+	syncContributionAndProofsService services.SyncContributionService
+	aggregateAndProofsService        services.AggregateAndProofService
+	attestationService               services.AttestationService
 }
 
 func NewApiHandler(
 	logger log.Logger,
-	genesisConfig *clparams.GenesisConfig,
+	netConfig *clparams.NetworkConfig,
+	ethClock eth_clock.EthereumClock,
 	beaconChainConfig *clparams.BeaconChainConfig,
 	indiciesDB kv.RwDB,
 	forkchoiceStore forkchoice.ForkChoiceStorage,
@@ -95,6 +107,11 @@ func NewApiHandler(
 	engine execution_client.ExecutionEngine,
 	syncMessagePool sync_contribution_pool.SyncContributionPool,
 	committeeSub *committee_subscription.CommitteeSubscribeMgmt,
+	aggregatePool aggregation.AggregationPool,
+	syncCommitteeMessagesService services.SyncCommitteeMessagesService,
+	syncContributionAndProofs services.SyncContributionService,
+	aggregateAndProofs services.AggregateAndProofService,
+	attestationService services.AttestationService,
 ) *ApiHandler {
 	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("blobs", maxBlobBundleCacheSize)
 	if err != nil {
@@ -104,7 +121,8 @@ func NewApiHandler(
 		logger:          logger,
 		validatorParams: validatorParams,
 		o:               sync.Once{},
-		genesisCfg:      genesisConfig,
+		netConfig:       netConfig,
+		ethClock:        ethClock,
 		beaconChainCfg:  beaconChainConfig,
 		indiciesDB:      indiciesDB,
 		forkchoiceStore: forkchoiceStore,
@@ -115,17 +133,22 @@ func NewApiHandler(
 		randaoMixesPool: sync.Pool{New: func() interface{} {
 			return solid.NewHashVector(int(beaconChainConfig.EpochsPerHistoricalVector))
 		}},
-		sentinel:            sentinel,
-		version:             version,
-		routerCfg:           routerCfg,
-		emitters:            emitters,
-		blobStoage:          blobStoage,
-		caplinSnapshots:     caplinSnapshots,
-		attestationProducer: attestationProducer,
-		blobBundles:         blobBundles,
-		engine:              engine,
-		syncMessagePool:     syncMessagePool,
-		committeeSub:        committeeSub,
+		sentinel:                         sentinel,
+		version:                          version,
+		routerCfg:                        routerCfg,
+		emitters:                         emitters,
+		blobStoage:                       blobStoage,
+		caplinSnapshots:                  caplinSnapshots,
+		attestationProducer:              attestationProducer,
+		blobBundles:                      blobBundles,
+		engine:                           engine,
+		syncMessagePool:                  syncMessagePool,
+		committeeSub:                     committeeSub,
+		aggregatePool:                    aggregatePool,
+		syncCommitteeMessagesService:     syncCommitteeMessagesService,
+		syncContributionAndProofsService: syncContributionAndProofs,
+		aggregateAndProofsService:        aggregateAndProofs,
+		attestationService:               attestationService,
 	}
 }
 
@@ -205,7 +228,7 @@ func (a *ApiHandler) init() {
 						r.Get("/bls_to_execution_changes", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconPoolBLSExecutionChanges))
 						r.Post("/bls_to_execution_changes", a.PostEthV1BeaconPoolBlsToExecutionChanges)
 						r.Get("/attestations", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconPoolAttestations))
-						r.Post("/attestations", http.NotFound) // TODO
+						r.Post("/attestations", a.PostEthV1BeaconPoolAttestations)
 						r.Post("/sync_committees", a.PostEthV1BeaconPoolSyncCommittees)
 					})
 					r.Route("/light_client", func(r chi.Router) {
@@ -239,7 +262,7 @@ func (a *ApiHandler) init() {
 					})
 					r.Get("/blinded_blocks/{slot}", http.NotFound)
 					r.Get("/attestation_data", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorAttestationData))
-					r.Get("/aggregate_attestation", http.NotFound)
+					r.Get("/aggregate_attestation", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorAggregateAttestation))
 					r.Post("/aggregate_and_proofs", a.PostEthV1ValidatorAggregatesAndProof)
 					r.Post("/beacon_committee_subscriptions", a.PostEthV1ValidatorBeaconCommitteeSubscription)
 					r.Post("/sync_committee_subscriptions", a.PostEthV1ValidatorSyncCommitteeSubscriptions)

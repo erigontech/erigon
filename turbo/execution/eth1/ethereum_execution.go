@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon-lib/wrap"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -59,7 +58,6 @@ type EthereumExecutionModule struct {
 
 	// configuration
 	config    *chain.Config
-	syncCfg   ethconfig.Sync
 	historyV3 bool
 	// consensus
 	engine consensus.Engine
@@ -73,8 +71,7 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB
 	hook *stages.Hook, accumulator *shards.Accumulator,
 	stateChangeConsumer shards.StateChangeConsumer,
 	logger log.Logger, engine consensus.Engine,
-	historyV3 bool, syncCfg ethconfig.Sync,
-	ctx context.Context,
+	historyV3 bool, ctx context.Context,
 ) *EthereumExecutionModule {
 	return &EthereumExecutionModule{
 		blockReader:         blockReader,
@@ -90,10 +87,7 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB
 		accumulator:         accumulator,
 		stateChangeConsumer: stateChangeConsumer,
 		engine:              engine,
-
-		historyV3:    historyV3,
-		syncCfg:      syncCfg,
-		bacgroundCtx: ctx,
+		bacgroundCtx:        ctx,
 	}
 }
 

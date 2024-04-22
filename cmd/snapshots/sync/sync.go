@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -143,6 +142,7 @@ type CreateNewTorrentClientConfig struct {
 	NatFlag      string
 	Logger       log.Logger
 	TempDir      string
+	CleanDir     bool
 }
 
 func NewTorrentClientConfigFromCobra(cliCtx *cli.Context, chain string) CreateNewTorrentClientConfig {
@@ -159,6 +159,7 @@ func NewTorrentClientConfigFromCobra(cliCtx *cli.Context, chain string) CreateNe
 		NatFlag:      cliCtx.String(utils.NATFlag.Name),
 		Logger:       Logger(cliCtx.Context),
 		TempDir:      TempDir(cliCtx.Context),
+		CleanDir:     true,
 	}
 }
 
@@ -176,6 +177,7 @@ func NewDefaultTorrentClientConfig(chain string, torrentDir string, logger log.L
 		NatFlag:      utils.NATFlag.Value,
 		Logger:       logger,
 		TempDir:      torrentDir,
+		CleanDir:     false,
 	}
 }
 
@@ -219,10 +221,10 @@ func NewTorrentClient(config CreateNewTorrentClientConfig) (*TorrentClient, erro
 		return nil, err
 	}
 
-	err = os.RemoveAll(torrentDir)
-
-	if err != nil {
-		return nil, fmt.Errorf("can't clean torrent dir: %w", err)
+	if config.CleanDir {
+		if err := os.RemoveAll(torrentDir); err != nil {
+			return nil, fmt.Errorf("can't clean torrent dir: %w", err)
+		}
 	}
 
 	if err := os.MkdirAll(torrentDir, 0755); err != nil {
@@ -231,7 +233,7 @@ func NewTorrentClient(config CreateNewTorrentClientConfig) (*TorrentClient, erro
 
 	cfg.ClientConfig.DataDir = torrentDir
 
-	cfg.ClientConfig.PieceHashersPerTorrent = 32 * runtime.NumCPU()
+	cfg.ClientConfig.PieceHashersPerTorrent = 32
 	cfg.ClientConfig.DisableIPv6 = config.DisableIPv6
 	cfg.ClientConfig.DisableIPv4 = config.DisableIPv4
 

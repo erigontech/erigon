@@ -19,6 +19,8 @@ package seg
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -321,6 +323,162 @@ func TestUncompressed(t *testing.T) {
 		}
 		i++
 	}
+}
+
+func TestDecompressor_OpenCorrupted(t *testing.T) {
+	t.Helper()
+	logger := log.New()
+	tmpDir := t.TempDir()
+
+	t.Run("uncompressed", func(t *testing.T) {
+		file := filepath.Join(tmpDir, "unc")
+		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2, log.LvlDebug, logger)
+		require.NoError(t, err)
+		defer c.Close()
+		for k, w := range loremStrings {
+			if err = c.AddUncompressedWord([]byte(fmt.Sprintf("%s %d", w, k))); err != nil {
+				t.Fatal(err)
+			}
+		}
+		err = c.Compress()
+		require.NoError(t, err)
+
+		d, err := NewDecompressor(file)
+		require.NoError(t, err)
+		require.NotNil(t, d)
+		d.Close()
+	})
+
+	t.Run("uncompressed_empty", func(t *testing.T) {
+		file := filepath.Join(tmpDir, "unc_empty")
+		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2, log.LvlDebug, logger)
+		require.NoError(t, err)
+		defer c.Close()
+		err = c.Compress()
+		require.NoError(t, err)
+
+		// this file is empty and its size will be 32 bytes, it's not corrupted
+		d, err := NewDecompressor(file)
+		require.NoError(t, err)
+		require.NotNil(t, d)
+		d.Close()
+	})
+
+	t.Run("compressed", func(t *testing.T) {
+		file := filepath.Join(tmpDir, "comp")
+		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2, log.LvlDebug, logger)
+		require.NoError(t, err)
+		defer c.Close()
+		for k, w := range loremStrings {
+			if err = c.AddWord([]byte(fmt.Sprintf("%s %d", w, k))); err != nil {
+				t.Fatal(err)
+			}
+		}
+		err = c.Compress()
+		require.NoError(t, err)
+
+		d, err := NewDecompressor(file)
+		require.NoError(t, err)
+		require.NotNil(t, d)
+		d.Close()
+	})
+
+	t.Run("compressed_empty", func(t *testing.T) {
+		file := filepath.Join(tmpDir, "comp_empty")
+		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2, log.LvlDebug, logger)
+		require.NoError(t, err)
+		defer c.Close()
+		err = c.Compress()
+		require.NoError(t, err)
+
+		d, err := NewDecompressor(file)
+		require.NoError(t, err)
+		require.NotNil(t, d)
+		d.Close()
+	})
+
+	t.Run("notExist", func(t *testing.T) {
+		file := filepath.Join(tmpDir, "comp_bad")
+		d, err := NewDecompressor(file)
+		require.Error(t, err, "file is not exist")
+		require.Nil(t, d)
+	})
+
+	t.Run("fileSize<compressedMinSize", func(t *testing.T) {
+		aux := make([]byte, compressedMinSize-1)
+		_, err := rand.Read(aux)
+		require.NoError(t, err)
+
+		fpath := filepath.Join(tmpDir, "1gibberish")
+		err = os.WriteFile(fpath, aux, 0644)
+		require.NoError(t, err)
+
+		d, err := NewDecompressor(fpath)
+		require.Truef(t, errors.Is(err, &ErrCompressedFileCorrupted{}),
+			"file is some garbage or smaller compressedMinSize(%d) bytes, got error %v", compressedMinSize, err)
+		require.Nil(t, d)
+
+		err = os.Remove(fpath)
+		require.NoError(t, err)
+
+		aux = make([]byte, compressedMinSize)
+		err = os.WriteFile(fpath, aux, 0644)
+		require.NoError(t, err)
+
+		d, err = NewDecompressor(fpath)
+		require.NoErrorf(t, err, "should read empty but correct file")
+		require.NotNil(t, d)
+		d.Close()
+	})
+	t.Run("invalidPatternDictionarySize", func(t *testing.T) {
+		aux := make([]byte, 32)
+
+		// wordCount=0
+		// emptyWordCount=0
+		binary.BigEndian.PutUint64(aux[16:24], 10) // pattern dict size in bytes
+
+		fpath := filepath.Join(tmpDir, "invalidPatternDictionarySize")
+		err := os.WriteFile(fpath, aux, 0644)
+		require.NoError(t, err)
+
+		d, err := NewDecompressor(fpath)
+		require.Truef(t, errors.Is(err, &ErrCompressedFileCorrupted{}),
+			"file contains incorrect pattern dictionary size in bytes, got error %v", err)
+		require.Nil(t, d)
+	})
+	t.Run("invalidDictionarySize", func(t *testing.T) {
+		aux := make([]byte, 32)
+
+		// wordCount=0
+		// emptyWordCount=0
+		binary.BigEndian.PutUint64(aux[24:32], 10) // dict size in bytes
+
+		fpath := filepath.Join(tmpDir, "invalidDictionarySize")
+		err := os.WriteFile(fpath, aux, 0644)
+		require.NoError(t, err)
+
+		d, err := NewDecompressor(fpath)
+		require.Truef(t, errors.Is(err, &ErrCompressedFileCorrupted{}),
+			"file contains incorrect dictionary size in bytes, got error %v", err)
+		require.Nil(t, d)
+	})
+	t.Run("fileSizeShouldBeMinimal", func(t *testing.T) {
+		aux := make([]byte, 33)
+
+		// wordCount=0
+		// emptyWordCount=0
+		// pattern dict size in bytes 0
+		// dict size in bytes 0
+
+		fpath := filepath.Join(tmpDir, "fileSizeShouldBeMinimal")
+		err := os.WriteFile(fpath, aux, 0644)
+		require.NoError(t, err)
+
+		d, err := NewDecompressor(fpath)
+		require.Truef(t, errors.Is(err, &ErrCompressedFileCorrupted{}),
+			"file contains incorrect dictionary size in bytes, got error %v", err)
+		require.Nil(t, d)
+	})
 }
 
 const lorem = `Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et

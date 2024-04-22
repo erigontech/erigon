@@ -184,7 +184,7 @@ func (db *DB) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	return &tx{ctx: ctx, db: db, stream: stream, streamCancelFn: streamCancelFn, viewID: msg.ViewId, id: msg.TxId}, nil
 }
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
-	t, err := db.BeginRo(ctx)
+	t, err := db.BeginRo(ctx) //nolint:gocritic
 	if err != nil {
 		return nil, err
 	}

@@ -177,7 +177,7 @@ func cmp(cliCtx *cli.Context) error {
 
 	if rcCli != nil {
 		if loc1.LType == sync.RemoteFs {
-			session1, err = rcCli.NewSession(cliCtx.Context, filepath.Join(tempDir, "l1"), loc1.Src+":"+loc1.Root)
+			session1, err = rcCli.NewSession(cliCtx.Context, filepath.Join(tempDir, "l1"), loc1.Src+":"+loc1.Root, nil)
 
 			if err != nil {
 				return err
@@ -185,7 +185,7 @@ func cmp(cliCtx *cli.Context) error {
 		}
 
 		if loc2.LType == sync.RemoteFs {
-			session2, err = rcCli.NewSession(cliCtx.Context, filepath.Join(tempDir, "l2"), loc2.Src+":"+loc2.Root)
+			session2, err = rcCli.NewSession(cliCtx.Context, filepath.Join(tempDir, "l2"), loc2.Src+":"+loc2.Root, nil)
 
 			if err != nil {
 				return err

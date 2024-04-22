@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
+
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon/turbo/logging"
+	enode "github.com/ledgerwatch/erigon/turbo/node"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/node"
@@ -147,24 +149,28 @@ func doMigrateFlags(ctx *cli.Context) {
 	}
 }
 
-func NewNodeConfig(ctx *cli.Context) *nodecfg.Config {
-	nodeConfig := nodecfg.DefaultConfig
+func NewNodeConfig(ctx *cli.Context, logger log.Logger) *nodecfg.Config {
+	nodeConfig := enode.NewNodConfigUrfave(ctx, logger)
+
 	// see simiar changes in `cmd/geth/config.go#defaultNodeConfig`
 	if commit := params.GitCommit; commit != "" {
 		nodeConfig.Version = params.VersionWithCommit(commit)
 	} else {
 		nodeConfig.Version = params.Version
 	}
+
 	nodeConfig.IPCPath = "" // force-disable IPC endpoint
 	nodeConfig.Name = "erigon"
+
 	if ctx.IsSet(utils.DataDirFlag.Name) {
 		nodeConfig.Dirs = datadir.New(ctx.String(utils.DataDirFlag.Name))
 	}
-	return &nodeConfig
+
+	return nodeConfig
 }
 
 func MakeConfigNodeDefault(cliCtx *cli.Context, logger log.Logger) *node.Node {
-	return makeConfigNode(cliCtx.Context, NewNodeConfig(cliCtx), logger)
+	return makeConfigNode(cliCtx.Context, NewNodeConfig(cliCtx, logger), logger)
 }
 
 func makeConfigNode(ctx context.Context, config *nodecfg.Config, logger log.Logger) *node.Node {

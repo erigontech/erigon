@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -304,7 +305,7 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (string, 
 func checkHistoryHistory(t *testing.T, h *History, txs uint64) {
 	t.Helper()
 	// Check the history
-	hc := h.MakeContext()
+	hc := h.BeginFilesRo()
 	defer hc.Close()
 
 	for txNum := uint64(0); txNum <= txs; txNum++ {
@@ -399,7 +400,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
 
 	for {
 		if stop := func() bool {
-			hc := h.MakeContext()
+			hc := h.BeginFilesRo()
 			defer hc.Close()
 			r = h.findMergeRange(maxEndTxNum, maxSpan)
 			if !r.any() {
@@ -416,7 +417,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
 		}
 	}
 
-	hc := h.MakeContext()
+	hc := h.BeginFilesRo()
 	defer hc.Close()
 	err = hc.BuildOptionalMissedIndices(ctx)
 	require.NoError(err)
@@ -486,7 +487,7 @@ func TestIterateChanged(t *testing.T) {
 		require.NoError(err)
 		defer tx.Rollback()
 		var keys, vals []string
-		ic := h.MakeContext()
+		ic := h.BeginFilesRo()
 		defer ic.Close()
 
 		it, err := ic.HistoryRange(2, 20, order.Asc, -1, tx)
@@ -641,7 +642,7 @@ func TestIterateChanged2(t *testing.T) {
 		}
 		var keys, vals []string
 		t.Run("before merge", func(t *testing.T) {
-			hc, require := h.MakeContext(), require.New(t)
+			hc, require := h.BeginFilesRo(), require.New(t)
 			defer hc.Close()
 
 			it, err := hc.HistoryRange(2, 20, order.Asc, -1, roTx)
@@ -748,7 +749,7 @@ func TestIterateChanged2(t *testing.T) {
 		})
 		t.Run("after merge", func(t *testing.T) {
 			collateAndMergeHistory(t, db, h, txs)
-			hc, require := h.MakeContext(), require.New(t)
+			hc, require := h.BeginFilesRo(), require.New(t)
 			defer hc.Close()
 
 			keys = keys[:0]
@@ -813,8 +814,8 @@ func TestIterateChanged2(t *testing.T) {
 func TestScanStaticFilesH(t *testing.T) {
 	logger := log.New()
 	h := &History{InvertedIndex: &InvertedIndex{filenameBase: "test", aggregationStep: 1, logger: logger},
-		files:  btree2.NewBTreeG[*filesItem](filesItemLess),
-		logger: logger,
+		dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess),
+		logger:     logger,
 	}
 	files := []string{
 		"test.0-1.v",
@@ -825,11 +826,35 @@ func TestScanStaticFilesH(t *testing.T) {
 		"test.4-5.v",
 	}
 	h.scanStateFiles(files)
-	require.Equal(t, 6, h.files.Len())
+	require.Equal(t, 6, h.dirtyFiles.Len())
 
-	h.files.Clear()
+	h.dirtyFiles.Clear()
 	h.integrityFileExtensions = []string{"kv"}
 	h.scanStateFiles(files)
-	require.Equal(t, 0, h.files.Len())
+	require.Equal(t, 0, h.dirtyFiles.Len())
 
+}
+
+func TestHistory_OpenFolder(t *testing.T) {
+	fp, db, h, txs := filledHistory(t, false, log.New())
+	defer db.Close()
+	defer h.Close()
+	defer os.RemoveAll(fp)
+
+	collateAndMergeHistory(t, db, h, txs)
+
+	list := h.visibleFiles.Load()
+	require.NotEmpty(t, list)
+	ff := (*list)[len(*list)-1]
+	fn := ff.src.decompressor.FilePath()
+	h.Close()
+
+	err := os.Remove(fn)
+	require.NoError(t, err)
+	err = os.WriteFile(fn, make([]byte, 33), 0644)
+	require.NoError(t, err)
+
+	err = h.OpenFolder()
+	require.NoError(t, err)
+	h.Close()
 }

@@ -9,7 +9,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
-	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
 /*
@@ -169,15 +168,12 @@ func (a *ApiHandler) GetEthV1NodeIdentity(w http.ResponseWriter, r *http.Request
 }
 
 func (a *ApiHandler) GetEthV1NodeSyncing(w http.ResponseWriter, r *http.Request) {
-	currentSlot := utils.GetCurrentSlot(a.genesisCfg.GenesisTime, a.beaconChainCfg.SecondsPerSlot)
-	var syncDistance uint64
-	if a.syncedData.Syncing() {
-		syncDistance = currentSlot - a.syncedData.HeadSlot()
-	}
+	currentSlot := a.ethClock.GetCurrentSlot()
+
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"data": map[string]interface{}{
 			"head_slot":     strconv.FormatUint(a.syncedData.HeadSlot(), 10),
-			"sync_distance": strconv.FormatUint(syncDistance, 10),
+			"sync_distance": strconv.FormatUint(currentSlot-a.syncedData.HeadSlot(), 10),
 			"is_syncing":    a.syncedData.Syncing(),
 			"is_optimistic": false, // needs to change
 			"el_offline":    false,

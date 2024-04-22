@@ -47,6 +47,7 @@ type HeimdallClient interface {
 
 	FetchCheckpoint(ctx context.Context, number int64) (*Checkpoint, error)
 	FetchCheckpointCount(ctx context.Context) (int64, error)
+	FetchCheckpoints(ctx context.Context, page uint64, limit uint64) (Checkpoints, error)
 	FetchMilestone(ctx context.Context, number int64) (*Milestone, error)
 	FetchMilestoneCount(ctx context.Context) (int64, error)
 
@@ -108,8 +109,10 @@ const (
 	fetchStateSyncEventsPath   = "clerk/event-record/list"
 	fetchStateSyncEvent        = "clerk/event-record/%s"
 
-	fetchCheckpoint      = "/checkpoints/%s"
-	fetchCheckpointCount = "/checkpoints/count"
+	fetchCheckpoint                = "/checkpoints/%s"
+	fetchCheckpointCount           = "/checkpoints/count"
+	fetchCheckpointList            = "/checkpoints/list"
+	fetchCheckpointListQueryFormat = "page=%d&limit=%d"
 
 	fetchMilestoneAt     = "/milestone/%d"
 	fetchMilestoneLatest = "/milestone/latest"
@@ -245,6 +248,22 @@ func (c *Client) FetchCheckpoint(ctx context.Context, number int64) (*Checkpoint
 	}
 
 	return &response.Result, nil
+}
+
+func (c *Client) FetchCheckpoints(ctx context.Context, page uint64, limit uint64) (Checkpoints, error) {
+	url, err := checkpointListURL(c.urlString, page, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx = withRequestType(ctx, checkpointListRequest)
+
+	response, err := FetchWithRetry[CheckpointListResponse](ctx, c, url, c.logger)
+	if err != nil {
+		return nil, err
+	}
+
+	return response.Result, nil
 }
 
 func isInvalidMilestoneIndexError(err error) bool {
@@ -490,6 +509,10 @@ func checkpointURL(urlString string, number int64) (*url.URL, error) {
 
 func checkpointCountURL(urlString string) (*url.URL, error) {
 	return makeURL(urlString, fetchCheckpointCount, "")
+}
+
+func checkpointListURL(urlString string, page uint64, limit uint64) (*url.URL, error) {
+	return makeURL(urlString, fetchCheckpointList, fmt.Sprintf(fetchCheckpointListQueryFormat, page, limit))
 }
 
 func milestoneURL(urlString string, number int64) (*url.URL, error) {

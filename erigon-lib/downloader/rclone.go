@@ -361,6 +361,7 @@ type RCloneSession struct {
 	syncScheduled   atomic.Bool
 	activeSyncCount atomic.Int32
 	cancel          context.CancelFunc
+	headers         http.Header
 }
 
 var rcClient RCloneClient
@@ -393,7 +394,7 @@ func freePort() (port int, err error) {
 	}
 }
 
-func (c *RCloneClient) NewSession(ctx context.Context, localFs string, remoteFs string) (*RCloneSession, error) {
+func (c *RCloneClient) NewSession(ctx context.Context, localFs string, remoteFs string, headers http.Header) (*RCloneSession, error) {
 	ctx, cancel := context.WithCancel(ctx)
 
 	session := &RCloneSession{
@@ -403,6 +404,7 @@ func (c *RCloneClient) NewSession(ctx context.Context, localFs string, remoteFs 
 		localFs:      localFs,
 		cancel:       cancel,
 		syncQueue:    make(chan syncRequest, 100),
+		headers:      headers,
 	}
 
 	go func() {
@@ -505,6 +507,16 @@ func (c *RCloneSession) Download(ctx context.Context, files ...string) error {
 	var fileRequests []*rcloneRequest
 
 	if strings.HasPrefix(c.remoteFs, "http") {
+		var headers string
+		var comma string
+
+		for header, values := range c.headers {
+			for _, value := range values {
+				headers += fmt.Sprintf("%s%s=%s", comma, header, value)
+				comma = ","
+			}
+		}
+
 		for _, file := range files {
 			reqInfo[file] = &rcloneInfo{
 				file: file,
@@ -513,8 +525,9 @@ func (c *RCloneSession) Download(ctx context.Context, files ...string) error {
 				&rcloneRequest{
 					Group: c.remoteFs,
 					SrcFs: rcloneFs{
-						Type: "http",
-						Url:  c.remoteFs,
+						Type:    "http",
+						Url:     c.remoteFs,
+						Headers: headers,
 					},
 					SrcRemote: file,
 					DstFs:     c.localFs,
@@ -787,8 +800,9 @@ type rcloneFilter struct {
 }
 
 type rcloneFs struct {
-	Type string `json:"type"`
-	Url  string `json:"url,omitempty"`
+	Type    string `json:"type"`
+	Url     string `json:"url,omitempty"`
+	Headers string `json:"headers,omitempty"` //comma separated list of key,value pairs, standard CSV encoding may be used.
 }
 
 type rcloneRequest struct {

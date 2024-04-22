@@ -182,17 +182,16 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	// -- send notifications END
 
 	// -- Prune+commit(sync)
-	if err := stageLoopStepPrune(ctx, db, txc.Tx, sync, initialCycle); err != nil {
+	if externalTx {
+		err = sync.RunPrune(db, txc.Tx, initialCycle)
+	} else {
+		err = db.Update(ctx, func(tx kv.RwTx) error { return sync.RunPrune(db, tx, initialCycle) })
+	}
+	if err != nil {
 		return err
 	}
 
 	return nil
-}
-func stageLoopStepPrune(ctx context.Context, db kv.RwDB, tx kv.RwTx, sync *stagedsync.Sync, initialCycle bool) (err error) {
-	if tx != nil {
-		return sync.RunPrune(db, tx, initialCycle)
-	}
-	return db.Update(ctx, func(tx kv.RwTx) error { return sync.RunPrune(db, tx, initialCycle) })
 }
 
 func stagesHeadersAndFinish(db kv.RoDB, tx kv.Tx) (head, bor, fin uint64, err error) {
@@ -454,7 +453,7 @@ func NewDefaultStages(ctx context.Context,
 	snapDownloader proto_downloader.DownloaderClient,
 	blockReader services.FullBlockReader,
 	blockRetire services.BlockRetire,
-	agg *state.AggregatorV3,
+	agg *state.Aggregator,
 	silkworm *silkworm.Silkworm,
 	forkValidator *engine_helpers.ForkValidator,
 	heimdallClient heimdall.HeimdallClient,
@@ -543,7 +542,7 @@ func NewPipelineStages(ctx context.Context,
 	snapDownloader proto_downloader.DownloaderClient,
 	blockReader services.FullBlockReader,
 	blockRetire services.BlockRetire,
-	agg *state.AggregatorV3,
+	agg *state.Aggregator,
 	silkworm *silkworm.Silkworm,
 	forkValidator *engine_helpers.ForkValidator,
 	logger log.Logger,
@@ -651,7 +650,7 @@ func NewPipelineStages(ctx context.Context,
 }
 
 func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config, controlServer *sentry_multi_client.MultiClient,
-	dirs datadir.Dirs, notifications *shards.Notifications, blockReader services.FullBlockReader, blockWriter *blockio.BlockWriter, agg *state.AggregatorV3,
+	dirs datadir.Dirs, notifications *shards.Notifications, blockReader services.FullBlockReader, blockWriter *blockio.BlockWriter, agg *state.Aggregator,
 	silkworm *silkworm.Silkworm, logger log.Logger) *stagedsync.Sync {
 	return stagedsync.New(
 		cfg.Sync,

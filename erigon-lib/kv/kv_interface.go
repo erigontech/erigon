@@ -62,9 +62,9 @@ import (
 //    1. TemporalDB - abstracting DB+Snapshots. Target is:
 //         - provide 'time-travel' API for data: consistent snapshot of data as of given Timestamp.
 //         - auto-close iterators on Commit/Rollback
-//         - auto-open/close agg.MakeContext() on Begin/Commit/Rollback
+//         - auto-open/close agg.BeginFilesRo() on Begin/Commit/Rollback
 //         - to keep DB small - only for Hot/Recent data (can be update/delete by re-org).
-//         - And TemporalRoTx/TemporalRwTx actually open Read-Only files view (MakeContext) - no concept of "Read-Write view of snapshot files".
+//         - And TemporalRoTx/TemporalRwTx actually open Read-Only files view (BeginFilesRo) - no concept of "Read-Write view of snapshot files".
 //         - using next entities:
 //               - InvertedIndex: supports range-scans
 //               - History: can return value of key K as of given TimeStamp. Doesn't know about latest/current

@@ -94,6 +94,20 @@ func (c *Checkpoint) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+type Checkpoints []*Checkpoint
+
+func (cs Checkpoints) Len() int {
+	return len(cs)
+}
+
+func (cs Checkpoints) Less(i, j int) bool {
+	return cs[i].StartBlock().Uint64() < cs[j].StartBlock().Uint64()
+}
+
+func (cs Checkpoints) Swap(i, j int) {
+	cs[i], cs[j] = cs[j], cs[i]
+}
+
 type CheckpointResponse struct {
 	Height string     `json:"height"`
 	Result Checkpoint `json:"result"`
@@ -106,6 +120,11 @@ type CheckpointCount struct {
 type CheckpointCountResponse struct {
 	Height string          `json:"height"`
 	Result CheckpointCount `json:"result"`
+}
+
+type CheckpointListResponse struct {
+	Height string      `json:"height"`
+	Result Checkpoints `json:"result"`
 }
 
 var ErrCheckpointNotFound = fmt.Errorf("checkpoint not found")
