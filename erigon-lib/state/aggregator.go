@@ -1035,10 +1035,12 @@ func (ac *AggregatorRoTx) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint6
 
 }
 
-func (a *Aggregator) EndTxNumNoCommitment() uint64 {
-	accTx := a.BeginFilesRo()
-	defer accTx.Close()
-	return accTx.minimaxTxNumInDomainFiles(false)
+func (ac *AggregatorRoTx) EndTxNumNoCommitment() uint64 {
+	return min(
+		ac.d[kv.AccountsDomain].maxTxNumInDomainFiles(false),
+		ac.d[kv.CodeDomain].maxTxNumInDomainFiles(false),
+		ac.d[kv.StorageDomain].maxTxNumInDomainFiles(false),
+	)
 }
 
 func (a *Aggregator) EndTxNumMinimax() uint64 { return a.visibleFilesMinimaxTxNum.Load() }
