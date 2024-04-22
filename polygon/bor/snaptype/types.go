@@ -24,14 +24,14 @@ import (
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/seg"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	core_snaptype "github.com/ledgerwatch/erigon/core/snaptype"
+	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
 	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/log/v3"
 )
 
 func init() {
-	borTypes := append(core_snaptype.BlockSnapshotTypes, BorSnapshotTypes...)
+	borTypes := append(coresnaptype.BlockSnapshotTypes, BorSnapshotTypes...)
 
 	snapcfg.RegisterKnownTypes(networkname.MumbaiChainName, borTypes)
 	snapcfg.RegisterKnownTypes(networkname.AmoyChainName, borTypes)

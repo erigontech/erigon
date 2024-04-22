@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	bor_snaptype "github.com/ledgerwatch/erigon/polygon/bor/snaptype"
+	borsnaptype "github.com/ledgerwatch/erigon/polygon/bor/snaptype"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -101,7 +101,7 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 		return nil
 	}
 
-	err := merger.Merge(ctx, &snapshots.RoSnapshots, bor_snaptype.BorSnapshotTypes, rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete)
+	err := merger.Merge(ctx, &snapshots.RoSnapshots, borsnaptype.BorSnapshotTypes, rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete)
 
 	if err != nil {
 		return blocksRetired, err
@@ -127,7 +127,7 @@ type BorRoSnapshots struct {
 //   - gaps are not allowed
 //   - segment have [from:to] semantic
 func NewBorRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, segmentsMin uint64, logger log.Logger) *BorRoSnapshots {
-	return &BorRoSnapshots{*newRoSnapshots(cfg, snapDir, bor_snaptype.BorSnapshotTypes, segmentsMin, logger)}
+	return &BorRoSnapshots{*newRoSnapshots(cfg, snapDir, borsnaptype.BorSnapshotTypes, segmentsMin, logger)}
 }
 
 func (s *BorRoSnapshots) Ranges() []Range {
@@ -199,7 +199,7 @@ func removeBorOverlaps(dir string, active []snaptype.FileInfo, max uint64) {
 }
 
 func (s *BorRoSnapshots) ReopenFolder() error {
-	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), bor_snaptype.BorSnapshotTypes, false)
+	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), borsnaptype.BorSnapshotTypes, false)
 	if err != nil {
 		return err
 	}
@@ -225,7 +225,7 @@ type BorView struct {
 
 func (s *BorRoSnapshots) View() *BorView {
 	v := &BorView{base: s.RoSnapshots.View()}
-	v.base.baseSegType = bor_snaptype.BorSpans
+	v.base.baseSegType = borsnaptype.BorSpans
 	return v
 }
 
@@ -233,15 +233,15 @@ func (v *BorView) Close() {
 	v.base.Close()
 }
 
-func (v *BorView) Events() []*Segment      { return v.base.Segments(bor_snaptype.BorEvents) }
-func (v *BorView) Spans() []*Segment       { return v.base.Segments(bor_snaptype.BorSpans) }
-func (v *BorView) Checkpoints() []*Segment { return v.base.Segments(bor_snaptype.BorCheckpoints) }
-func (v *BorView) Milestones() []*Segment  { return v.base.Segments(bor_snaptype.BorMilestones) }
+func (v *BorView) Events() []*Segment      { return v.base.Segments(borsnaptype.BorEvents) }
+func (v *BorView) Spans() []*Segment       { return v.base.Segments(borsnaptype.BorSpans) }
+func (v *BorView) Checkpoints() []*Segment { return v.base.Segments(borsnaptype.BorCheckpoints) }
+func (v *BorView) Milestones() []*Segment  { return v.base.Segments(borsnaptype.BorMilestones) }
 
 func (v *BorView) EventsSegment(blockNum uint64) (*Segment, bool) {
-	return v.base.Segment(bor_snaptype.BorEvents, blockNum)
+	return v.base.Segment(borsnaptype.BorEvents, blockNum)
 }
 
 func (v *BorView) SpansSegment(blockNum uint64) (*Segment, bool) {
-	return v.base.Segment(bor_snaptype.BorSpans, blockNum)
+	return v.base.Segment(borsnaptype.BorSpans, blockNum)
 }
