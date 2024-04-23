@@ -7,10 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/etconfig2"
-
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/stretchr/testify/require"
@@ -72,7 +71,7 @@ func TestBodiesCanonical(t *testing.T) {
 	var e1 rawdbv3.ErrTxNumsAppendWithGap
 	require.True(errors.As(err, &e1))
 
-	if etconfig2.EnableHistoryV4InTest {
+	if config3.EnableHistoryV4InTest {
 		// this should see same error inside then retry from last block available, therefore return no error
 		err = bw.MakeBodiesCanonical(tx, 5)
 		require.NoError(err)

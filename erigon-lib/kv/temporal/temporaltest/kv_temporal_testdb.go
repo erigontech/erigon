@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/etconfig2"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
@@ -36,7 +36,7 @@ func NewTestDB(tb testing.TB, dirs datadir.Dirs) (histV3 bool, db kv.RwDB, agg *
 		panic(err)
 	}
 
-	agg, err = state.NewAggregator(context.Background(), dirs, etconfig2.HistoryV3AggregationStep, db, logger)
+	agg, err = state.NewAggregator(context.Background(), dirs, config3.HistoryV3AggregationStep, db, logger)
 	if err != nil {
 		panic(err)
 	}

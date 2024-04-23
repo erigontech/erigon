@@ -70,7 +70,7 @@ func RequestSnapshotsDownload(ctx context.Context, downloadRequest []services.Do
 func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool, caplin CaplinMode, agg *state.Aggregator, tx kv.RwTx, blockReader services.FullBlockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient, stagesIdsList []string) error {
 	snapshots := blockReader.Snapshots()
 	borSnapshots := blockReader.BorSnapshots()
-	if blockReader.FreezingCfg().NoDownloader {
+	if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
 		if err := snapshots.ReopenFolder(); err != nil {
 			return err
 		}

@@ -117,6 +117,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.F
 			}
 		} else {
 			// having 0 frozen blocks - also may mean we didn't download them. so stages. 1 time is enough.
+			// during testing we may have 0 frozen blocks and firstCycle expected to be false
 			sawZeroBlocksTimes++
 			if sawZeroBlocksTimes > 2 {
 				break
