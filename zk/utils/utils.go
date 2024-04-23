@@ -38,24 +38,29 @@ func ShouldShortCircuitExecution(tx kv.RwTx, logPrefix string) (bool, uint64, er
 		return false, 0, err
 	}
 
-	var shortCircuitBatch uint64
-	// if executed lower than verified, short curcuit up to verified
-	if executedBatch < highestVerifiedBatchNo {
-		if downloadedBatch < highestVerifiedBatchNo {
-			shortCircuitBatch = downloadedBatch
-		} else {
-			shortCircuitBatch = highestVerifiedBatchNo
-		}
-	} else if executedBatch+1 <= downloadedBatch { // else short circuit up to next downloaded batch
-		shortCircuitBatch = executedBatch + 1
-	} else { // if we don't have at least one more full downlaoded batch, don't short circuit and just execute to latest block
-		return false, 0, nil
-	}
+	var shortCircuitBatch, shortCircuitBlock, cycle uint64
 
-	// we've got the highest batch to execute to, now get it's highest block
-	shortCircuitBlock, err := hermezDb.GetHighestBlockInBatch(shortCircuitBatch)
-	if err != nil {
-		return false, 0, err
+	// this is so empty batches work
+	for shortCircuitBlock == 0 {
+		cycle++
+		// if executed lower than verified, short curcuit up to verified
+		if executedBatch < highestVerifiedBatchNo {
+			if downloadedBatch < highestVerifiedBatchNo {
+				shortCircuitBatch = downloadedBatch
+			} else {
+				shortCircuitBatch = highestVerifiedBatchNo
+			}
+		} else if executedBatch+cycle <= downloadedBatch { // else short circuit up to next downloaded batch
+			shortCircuitBatch = executedBatch + cycle
+		} else { // if we don't have at least one more full downlaoded batch, don't short circuit and just execute to latest block
+			return false, 0, nil
+		}
+
+		// we've got the highest batch to execute to, now get it's highest block
+		shortCircuitBlock, err = hermezDb.GetHighestBlockInBatch(shortCircuitBatch)
+		if err != nil {
+			return false, 0, err
+		}
 	}
 
 	log.Info(fmt.Sprintf("[%s] Short circuit", logPrefix), "batch", shortCircuitBatch, "block", shortCircuitBlock)

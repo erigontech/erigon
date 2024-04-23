@@ -271,7 +271,7 @@ func getExecRange(cfg ExecuteBlockCfg, tx kv.RwTx, stageProgress, toBlock uint64
 		to = cfg.zk.DebugLimit
 	}
 
-	total := to - stageProgress + 1
+	total := to - stageProgress
 
 	return to, total, nil
 }
