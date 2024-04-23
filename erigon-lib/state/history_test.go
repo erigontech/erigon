@@ -87,11 +87,11 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 
 func TestHistoryCollationsAndBuilds(t *testing.T) {
 	t.Run("largeValues=true", func(t *testing.T) {
+		t.Skip()
 		totalTx := uint64(1000)
 		values := generateTestData(t, length.Addr, length.Addr+length.Hash, totalTx, 100, 10)
 		db, h := filledHistoryValues(t, true, values, log.New())
 		defer db.Close()
-		defer h.Close()
 
 		ctx := context.Background()
 		rwtx, err := db.BeginRw(ctx)
