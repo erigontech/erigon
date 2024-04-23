@@ -512,7 +512,7 @@ func (d *DownloadSnapshots) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	s, err := state2.NewAggregatorV3(ctx, dirs.Tmp, dirs.Tmp, 200000, db, log.Root())
+	s, err := state2.NewAggregator(ctx, dirs.Tmp, dirs.Tmp, 200000, db, log.Root())
 	if err != nil {
 		return err
 	}

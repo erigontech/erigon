@@ -350,7 +350,7 @@ func updateTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(16)
 
-	torrentFiles := downloader.NewAtomicTorrentFiles(srcSession.LocalFsRoot())
+	torrentFiles := downloader.NewAtomicTorrentFS(srcSession.LocalFsRoot())
 
 	for _, fi := range entries {
 		if filepath.Ext(fi.Name()) != ".torrent" {
@@ -407,7 +407,7 @@ func verifyTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(16)
 
-	torrentFiles := downloader.NewAtomicTorrentFiles(srcSession.LocalFsRoot())
+	torrentFiles := downloader.NewAtomicTorrentFS(srcSession.LocalFsRoot())
 
 	for _, fi := range entries {
 		if filepath.Ext(fi.Name()) != ".torrent" {
