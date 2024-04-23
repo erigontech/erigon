@@ -263,8 +263,8 @@ github.com/envoyproxy/go-control-plane v0.9.9-0.20201210154907-fd9021fe5dad/go.m
 github.com/envoyproxy/protoc-gen-validate v0.1.0/go.mod h1:iSmxcyjqTsJpI2R4NaDN7+kN2VEUnK/pcBlmesArF7c=
 github.com/erigontech/mdbx-go v0.27.24 h1:jNsRE/4jC1F3S5SpAbmgT5jrEkfrdFk2MKEL9toVPxo=
 github.com/erigontech/mdbx-go v0.27.24/go.mod h1:FAMxbOgqOnRDx51j8HjuJZIgznbDwjX7LItd+/UWyA4=
-github.com/erigontech/silkworm-go v0.17.0 h1:HFWfqTaJYlahUyq608TqpXdHIy14G1aOVGmt06WvLyg=
-github.com/erigontech/silkworm-go v0.17.0/go.mod h1:O50ux0apICEVEGyRWiE488K8qz8lc3PA/SXbQQAc8SU=
+github.com/erigontech/silkworm-go v0.18.0 h1:j56p61xZHBFhZGH1OixlGU8KcfjHzcw9pjAfjmVsOZA=
+github.com/erigontech/silkworm-go v0.18.0/go.mod h1:O50ux0apICEVEGyRWiE488K8qz8lc3PA/SXbQQAc8SU=
 github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c h1:CndMRAH4JIwxbW8KYq6Q+cGWcGHz0FjGR3QqcInWcW0=
 github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c/go.mod h1:AzA8Lj6YtixmJWL+wkKoBGsLWy9gFrAzi4g+5bCKwpY=
 github.com/flynn/go-shlex v0.0.0-20150515145356-3f9db97f8568/go.mod h1:xEzjJPgXI435gkrCt3MPfRiAkVrwSbHsst4LCFVfpJc=
