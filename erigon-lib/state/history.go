@@ -249,6 +249,7 @@ func (h *History) openFiles() error {
 		return true
 	})
 	for _, item := range invalidFileItems {
+		item.closeFiles()
 		h.dirtyFiles.Delete(item)
 	}
 
@@ -271,14 +272,7 @@ func (h *History) closeWhatNotInList(fNames []string) {
 		return true
 	})
 	for _, item := range toDelete {
-		if item.decompressor != nil {
-			item.decompressor.Close()
-			item.decompressor = nil
-		}
-		if item.index != nil {
-			item.index.Close()
-			item.index = nil
-		}
+		item.closeFiles()
 		h.dirtyFiles.Delete(item)
 	}
 }

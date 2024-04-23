@@ -398,6 +398,7 @@ func (ii *InvertedIndex) openFiles() error {
 		return true
 	})
 	for _, item := range invalidFileItems {
+		item.closeFiles()
 		ii.dirtyFiles.Delete(item)
 	}
 
@@ -420,18 +421,7 @@ func (ii *InvertedIndex) closeWhatNotInList(fNames []string) {
 		return true
 	})
 	for _, item := range toDelete {
-		if item.decompressor != nil {
-			item.decompressor.Close()
-			item.decompressor = nil
-		}
-		if item.index != nil {
-			item.index.Close()
-			item.index = nil
-		}
-		if item.existence != nil {
-			item.existence.Close()
-			item.existence = nil
-		}
+		item.closeFiles()
 		ii.dirtyFiles.Delete(item)
 	}
 }
