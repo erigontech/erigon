@@ -26,7 +26,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/core/vm/stack"
 	"github.com/ledgerwatch/erigon/params"
-	// "github.com/ledgerwatch/erigon/turbo/trie/vkutils"
 )
 
 // memoryGasCost calculates the quadratic gas for memory expansion. It does so
@@ -388,7 +387,7 @@ func gasCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memo
 	} else if !evm.IntraBlockState().Exist(address) {
 		gas += params.CallNewAccountGas
 	}
-	if transfersValue {
+	if transfersValue && !evm.chainRules.IsOsaka {
 		gas += params.CallValueTransferGas
 	}
 	memoryGas, err := memoryGasCost(mem, memorySize)
@@ -410,15 +409,10 @@ func gasCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memo
 	if gas, overflow = math.SafeAdd(gas, callGasTemp); overflow {
 		return 0, ErrGasUintOverflow
 	}
+
 	if evm.chainRules.IsOsaka {
-		// if _, isPrecompile := evm.precompile(address); !isPrecompile {
-		// 	gas, overflow = math.SafeAdd(gas, evm.TxContext.Accesses.TouchAndChargeMessageCall(address.Bytes()[:]))
-		// 	if overflow {
-		// 		return 0, ErrGasUintOverflow
-		// 	}
-		// }
 		if transfersValue {
-			gas, overflow = math.SafeAdd(gas, evm.TxContext.Accesses.TouchAndChargeValueTransfer(contract.Address().Bytes()[:], address.Bytes()[:]))
+			gas, overflow = math.SafeAdd(gas, evm.Accesses.TouchAndChargeValueTransfer(contract.Address().Bytes()[:], address.Bytes()[:]))
 			if overflow {
 				return 0, ErrGasUintOverflow
 			}
@@ -436,7 +430,7 @@ func gasCallCode(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, 
 		gas      uint64
 		overflow bool
 	)
-	if !stack.Back(2).IsZero() {
+	if !stack.Back(2).IsZero() && !evm.chainRules.IsOsaka {
 		gas += params.CallValueTransferGas
 	}
 	if gas, overflow = math.SafeAdd(gas, memoryGas); overflow {
@@ -454,9 +448,9 @@ func gasCallCode(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, 
 	}
 	if evm.chainRules.IsOsaka {
 		address := libcommon.Address(stack.Back(1).Bytes20())
-		transferValue := !stack.Back(2).IsZero()
-		if transferValue{
-			gas, overflow = math.SafeAdd(gas, evm.TxContext.Accesses.TouchAndChargeValueTransfer(contract.Address().Bytes()[:], address.Bytes()[:]))
+		transfersValue := !stack.Back(2).IsZero()
+		if transfersValue {
+			gas, overflow = math.SafeAdd(gas, evm.Accesses.TouchAndChargeValueTransfer(contract.Address().Bytes()[:], address.Bytes()[:]))
 			if overflow {
 				return 0, ErrGasUintOverflow
 			}
@@ -482,15 +476,6 @@ func gasDelegateCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memo
 	if gas, overflow = math.SafeAdd(gas, callGasTemp); overflow {
 		return 0, ErrGasUintOverflow
 	}
-	// if evm.chainRules.IsOsaka {
-	// 	address := libcommon.Address(stack.Back(1).Bytes20())
-	// 	if _, isPrecompile := evm.precompile(address); !isPrecompile {
-	// 		gas, overflow = math.SafeAdd(gas, evm.TxContext.Accesses.TouchAndChargeMessageCall(address.Bytes()))
-	// 		if overflow {
-	// 			return 0, ErrGasUintOverflow
-	// 		}
-	// 	}
-	// }
 	return gas, nil
 }
 
@@ -511,15 +496,6 @@ func gasStaticCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory
 	if gas, overflow = math.SafeAdd(gas, callGasTemp); overflow {
 		return 0, ErrGasUintOverflow
 	}
-	// if evm.chainRules.IsOsaka {
-	// 	address := libcommon.Address(stack.Back(1).Bytes20())
-	// 	if _, isPrecompile := evm.precompile(address); !isPrecompile {
-	// 		gas, overflow = math.SafeAdd(gas, evm.TxContext.Accesses.TouchAndChargeMessageCall(address.Bytes()))
-	// 		if overflow {
-	// 			return 0, ErrGasUintOverflow
-	// 		}
-	// 	}
-	// }
 	return gas, nil
 }
 
@@ -540,36 +516,8 @@ func gasSelfdestruct(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memo
 		}
 	}
 
-	if evm.chainRules.IsOsaka {
-		// verkle witness accumulation not supported for selfdestruct
-		// TODO @somnathb1 custom error or panic
-		return 0, ErrOutOfGas
-	}
-
 	if !evm.IntraBlockState().HasSelfdestructed(contract.Address()) {
 		evm.IntraBlockState().AddRefund(params.SelfdestructRefundGas)
 	}
 	return gas, nil
-}
-
-func gasExtCodeSize(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
-	usedGas := uint64(0)
-	// slot := stack.Back(0)
-	// if evm.chainRules.IsOsaka {
-	// 	usedGas += evm.TxContext.Accesses.TouchAddressOnReadAndComputeGas(slot.Bytes(), uint256.Int{}, vkutils.CodeSizeLeafKey)
-	// }
-
-	return usedGas, nil
-}
-
-func gasSLoad(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
-	usedGas := uint64(0)
-
-	// if evm.chainRules.IsOsaka {
-	// 	where := stack.Back(0)
-	// 	treeIndex, subIndex := vkutils.GetTreeKeyStorageSlotTreeIndexes(where.Bytes())
-	// 	usedGas += evm.TxContext.Accesses.TouchAddressOnReadAndComputeGas(contract.Address().Bytes(), *treeIndex, subIndex)
-	// }
-
-	return usedGas, nil
 }
