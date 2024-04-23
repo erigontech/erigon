@@ -4,18 +4,18 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
-	"google.golang.org/grpc"
 	"math/big"
 	"os"
 	"sync"
 	"testing"
 	"time"
 
+	"google.golang.org/grpc"
+
 	"github.com/c2h5oh/datasize"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
 	"golang.org/x/sync/semaphore"
-	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
