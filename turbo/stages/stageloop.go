@@ -69,7 +69,7 @@ func StageLoop(
 		}
 
 		// Estimate the current top height seen from the peer
-		err := StageLoopIteration(ctx, db, wrap.TxContainer{}, sync, initialCycle, logger, blockReader, hook)
+		err := StageLoopIteration(ctx, db, wrap.TxContainer{}, sync, initialCycle, false, logger, blockReader, hook)
 
 		if err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
@@ -102,16 +102,26 @@ func StageLoop(
 
 // ProcessFrozenBlocks - withuot global rwtx
 func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync) error {
+	sawZeroBlocksTimes := 0
 	for {
 		var finStageProgress uint64
-		if err := db.View(ctx, func(tx kv.Tx) (err error) {
-			finStageProgress, err = stages.GetStageProgress(tx, stages.Finish)
-			return err
-		}); err != nil {
-			return err
-		}
-		if finStageProgress >= blockReader.FrozenBlocks() {
-			break
+		if blockReader.FrozenBlocks() > 0 {
+			if err := db.View(ctx, func(tx kv.Tx) (err error) {
+				finStageProgress, err = stages.GetStageProgress(tx, stages.Finish)
+				return err
+			}); err != nil {
+				return err
+			}
+			if finStageProgress >= blockReader.FrozenBlocks() {
+				break
+			}
+		} else {
+			// having 0 frozen blocks - also may mean we didn't download them. so stages. 1 time is enough.
+			// during testing we may have 0 frozen blocks and firstCycle expected to be false
+			sawZeroBlocksTimes++
+			if sawZeroBlocksTimes > 2 {
+				break
+			}
 		}
 
 		log.Debug("[sync] processFrozenBlocks", "finStageProgress", finStageProgress, "frozenBlocks", blockReader.FrozenBlocks())
@@ -132,15 +142,17 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.F
 	return nil
 }
 
-func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, sync *stagedsync.Sync, initialCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (err error) {
+func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, sync *stagedsync.Sync, initialCycle bool, skipFrozenBlocks bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things
 
-	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync); err != nil {
-		return err
+	if !skipFrozenBlocks {
+		if err := ProcessFrozenBlocks(ctx, db, blockReader, sync); err != nil {
+			return err
+		}
 	}
 
 	externalTx := txc.Tx != nil

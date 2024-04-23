@@ -17,7 +17,7 @@ import (
 )
 
 func (a *ApiHandler) GetEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	return newBeaconResponse(a.operationsPool.VoluntaryExistsPool.Raw()), nil
+	return newBeaconResponse(a.operationsPool.VoluntaryExitPool.Raw()), nil
 }
 
 func (a *ApiHandler) GetEthV1BeaconPoolAttesterSlashings(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -125,10 +125,11 @@ func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r 
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := a.forkchoiceStore.OnVoluntaryExit(&req, false); err != nil {
+	if err := a.voluntaryExitService.ProcessMessage(r.Context(), nil, &req); err != nil && !errors.Is(err, services.ErrIgnore) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
 	// Broadcast to gossip
 	if a.sentinel != nil {
 		encodedSSZ, err := req.EncodeSSZ(nil)
@@ -143,7 +144,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r 
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		a.operationsPool.VoluntaryExistsPool.Insert(req.VoluntaryExit.ValidatorIndex, &req)
+		a.operationsPool.VoluntaryExitPool.Insert(req.VoluntaryExit.ValidatorIndex, &req)
 	}
 	// Only write 200
 	w.WriteHeader(http.StatusOK)
@@ -184,7 +185,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolProposerSlashings(w http.ResponseWriter,
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := a.forkchoiceStore.OnProposerSlashing(&req, false); err != nil {
+	if err := a.proposerSlashingService.ProcessMessage(r.Context(), nil, &req); err != nil && !errors.Is(err, services.ErrIgnore) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -226,7 +227,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolBlsToExecutionChanges(w http.ResponseWri
 	}
 	failures := []poolingFailure{}
 	for _, v := range req {
-		if err := a.forkchoiceStore.OnBlsToExecutionChange(v, false); err != nil {
+		if err := a.blsToExecutionChangeService.ProcessMessage(r.Context(), nil, v); err != nil && !errors.Is(err, services.ErrIgnore) {
 			failures = append(failures, poolingFailure{Index: len(failures), Message: err.Error()})
 			continue
 		}
