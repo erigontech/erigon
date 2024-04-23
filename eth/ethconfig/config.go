@@ -256,7 +256,6 @@ type Config struct {
 	SilkwormExecution            bool
 	SilkwormRpcDaemon            bool
 	SilkwormSentry               bool
-
 	SilkwormVerbosity            string
 	SilkwormNumContexts          uint32
 	SilkwormRpcLogEnabled        bool

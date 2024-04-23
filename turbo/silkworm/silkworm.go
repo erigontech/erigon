@@ -30,7 +30,7 @@ var ErrInterrupted = silkworm_go.ErrInterrupted
 
 func New(dataDirPath string, libMdbxVersion string, numIOContexts uint32, logLevel log.Lvl) (*Silkworm, error) {
 	var logVerbosity SilkwormLogLevel
-	switch (logLevel) {
+	switch logLevel {
 	case log.LvlCrit:
 		logVerbosity = silkworm_go.LogLevelCritical
 	case log.LvlError:

@@ -952,7 +952,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		interface_log_settings := silkworm.RpcInterfaceLogSettings{
 			Enabled:         config.SilkwormRpcLogEnabled,
 			ContainerFolder: config.SilkwormRpcLogDirPath,
-			MaxFileSizeMB :  config.SilkwormRpcLogMaxFileSize,
+			MaxFileSizeMB:   config.SilkwormRpcLogMaxFileSize,
 			MaxFiles:        config.SilkwormRpcLogMaxFiles,
 			DumpResponse:    config.SilkwormRpcLogDumpResponse,
 		}
