@@ -67,7 +67,7 @@ type FetcherResponseTypes interface {
 	*types.Header | *types.Body
 }
 
-type FetcherResponse[T any] struct {
+type FetcherResponse[T FetcherResponseTypes] struct {
 	Data      []T
 	TotalSize int
 }
