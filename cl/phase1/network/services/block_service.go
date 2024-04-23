@@ -57,7 +57,7 @@ func NewBlockService(
 	beaconCfg *clparams.BeaconChainConfig,
 	emitter *beaconevents.Emitters,
 ) Service[*cltypes.SignedBeaconBlock] {
-	seenBlocksCache, err := lru.New[proposerIndexAndSlot, struct{}]("seenblocks", SeenBlockCacheSize)
+	seenBlocksCache, err := lru.New[proposerIndexAndSlot, struct{}]("seenblocks", seenBlockCacheSize)
 	if err != nil {
 		panic(err)
 	}

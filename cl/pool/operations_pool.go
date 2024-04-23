@@ -46,7 +46,7 @@ func NewOperationsPool(beaconCfg *clparams.BeaconChainConfig) OperationsPool {
 
 func (o *OperationsPool) NotifyBlock(blk *cltypes.BeaconBlock) {
 	blk.Body.VoluntaryExits.Range(func(_ int, exit *cltypes.SignedVoluntaryExit, _ int) bool {
-		o.VoluntaryExistsPool.DeleteIfExist(exit.VoluntaryExit.ValidatorIndex)
+		o.VoluntaryExitPool.DeleteIfExist(exit.VoluntaryExit.ValidatorIndex)
 		return true
 	})
 	blk.Body.AttesterSlashings.Range(func(_ int, att *cltypes.AttesterSlashing, _ int) bool {

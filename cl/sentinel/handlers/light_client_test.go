@@ -45,7 +45,7 @@ func TestLightClientOptimistic(t *testing.T) {
 	peersPool := peers.NewPool()
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := forkchoice.NewForkChoiceStorageMock()
+	f := forkchoice.NewForkChoiceStorageMock(t)
 
 	f.NewestLCUpdate = &cltypes.LightClientUpdate{
 		AttestedHeader:    cltypes.NewLightClientHeader(clparams.AltairVersion),
@@ -115,7 +115,7 @@ func TestLightClientFinality(t *testing.T) {
 	peersPool := peers.NewPool()
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := forkchoice.NewForkChoiceStorageMock()
+	f := forkchoice.NewForkChoiceStorageMock(t)
 
 	f.NewestLCUpdate = &cltypes.LightClientUpdate{
 		AttestedHeader:    cltypes.NewLightClientHeader(clparams.AltairVersion),
@@ -188,7 +188,7 @@ func TestLightClientBootstrap(t *testing.T) {
 	peersPool := peers.NewPool()
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := forkchoice.NewForkChoiceStorageMock()
+	f := forkchoice.NewForkChoiceStorageMock(t)
 
 	f.NewestLCUpdate = &cltypes.LightClientUpdate{
 		AttestedHeader:    cltypes.NewLightClientHeader(clparams.AltairVersion),
@@ -270,7 +270,7 @@ func TestLightClientUpdates(t *testing.T) {
 	peersPool := peers.NewPool()
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := forkchoice.NewForkChoiceStorageMock()
+	f := forkchoice.NewForkChoiceStorageMock(t)
 	ethClock := getEthClock(t)
 
 	up := &cltypes.LightClientUpdate{

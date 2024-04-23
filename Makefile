@@ -135,9 +135,7 @@ COMMANDS += evm
 COMMANDS += sentinel
 COMMANDS += caplin
 COMMANDS += snapshots
-
-
-
+COMMANDS += diag
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd
@@ -164,7 +162,7 @@ test-erigon-ext:
 
 ## test:                              run unit tests with a 100s timeout
 test: test-erigon-lib
-	$(GOTEST) --timeout 10m
+	$(GOTEST) --timeout 10m -coverprofile=coverage-erigon.out
 
 test3: test-erigon-lib
 	$(GOTEST) --timeout 10m -tags $(BUILD_TAGS),e3
