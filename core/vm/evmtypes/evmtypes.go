@@ -43,7 +43,7 @@ type TxContext struct {
 	Origin     common.Address // Provides information for ORIGIN
 	GasPrice   *uint256.Int   // Provides information for GASPRICE
 	BlobHashes []common.Hash  // Provides versioned blob hashes for BLOBHASH
-	Accesses   AccessWitness // Capture all state accesses for this tx
+	Accesses   AccessWitness  // Capture all state accesses for this tx
 }
 
 type (
