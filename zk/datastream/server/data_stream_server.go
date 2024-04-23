@@ -213,11 +213,11 @@ func (srv *DataStreamServer) CreateStreamEntries(
 		if err != nil {
 			return nil, err
 		}
-		stateRoot, err := reader.GetStateRoot(block.NumberU64())
+		intermediateRoot, err := reader.GetIntermediateTxStateRoot(block.NumberU64(), tx.Hash())
 		if err != nil {
 			return nil, err
 		}
-		transaction, err := srv.CreateTransactionEntry(effectiveGasPricePercentage, stateRoot, uint16(fork), tx)
+		transaction, err := srv.CreateTransactionEntry(effectiveGasPricePercentage, intermediateRoot, uint16(fork), tx)
 		if err != nil {
 			return nil, err
 		}
