@@ -58,7 +58,7 @@ func TestTrackingFetcherFetchHeadersUpdatesPeerTracker(t *testing.T) {
 			return len(peerIds) == 2
 		}, time.Second, 100*time.Millisecond, "expected number of initial peers never satisfied: want=2, have=%d", len(peerIds))
 
-		headers, err := test.trackingFetcher.FetchHeaders(ctx, 1, 3, peerId1) // fetch headers 1 and 2
+		headers, _, err := test.trackingFetcher.FetchHeaders(ctx, 1, 3, peerId1) // fetch headers 1 and 2
 		require.NoError(t, err)
 		require.Len(t, headers, 2)
 		require.Equal(t, uint64(1), headers[0].Number.Uint64())
@@ -68,8 +68,8 @@ func TestTrackingFetcherFetchHeadersUpdatesPeerTracker(t *testing.T) {
 		require.Len(t, peerIds, 2)
 
 		var errIncompleteHeaders *ErrIncompleteHeaders
-		headers, err = test.trackingFetcher.FetchHeaders(ctx, 3, 5, peerId1) // fetch headers 3 and 4
-		require.ErrorAs(t, err, &errIncompleteHeaders)                       // peer 1 does not have headers 3 and 4
+		headers, _, err = test.trackingFetcher.FetchHeaders(ctx, 3, 5, peerId1) // fetch headers 3 and 4
+		require.ErrorAs(t, err, &errIncompleteHeaders)                          // peer 1 does not have headers 3 and 4
 		require.Equal(t, uint64(3), errIncompleteHeaders.start)
 		require.Equal(t, uint64(2), errIncompleteHeaders.requested)
 		require.Equal(t, uint64(0), errIncompleteHeaders.received)
@@ -143,14 +143,14 @@ func TestTrackingFetcherFetchBodiesUpdatesPeerTracker(t *testing.T) {
 			return len(peerIds) == 2
 		}, time.Second, 100*time.Millisecond, "expected number of initial peers never satisfied: want=2, have=%d", len(peerIds))
 
-		bodies, err := test.trackingFetcher.FetchBodies(ctx, mockHeaders, peerId1)
+		bodies, _, err := test.trackingFetcher.FetchBodies(ctx, mockHeaders, peerId1)
 		require.ErrorIs(t, err, &ErrMissingBodies{})
 		require.Nil(t, bodies)
 
 		peerIds = test.peerTracker.ListPeersMayHaveBlockNum(1) // only peerId2 may have block 1, peerId does not
 		require.Len(t, peerIds, 1)
 
-		bodies, err = test.trackingFetcher.FetchBodies(ctx, mockHeaders, peerId2)
+		bodies, _, err = test.trackingFetcher.FetchBodies(ctx, mockHeaders, peerId2)
 		require.ErrorIs(t, err, context.DeadlineExceeded)
 		require.Nil(t, bodies)
 

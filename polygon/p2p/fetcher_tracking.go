@@ -23,8 +23,8 @@ type trackingFetcher struct {
 	peerTracker PeerTracker
 }
 
-func (tf *trackingFetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) ([]*types.Header, error) {
-	res, err := tf.Fetcher.FetchHeaders(ctx, start, end, peerId)
+func (tf *trackingFetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) ([]*types.Header, int, error) {
+	res, size, err := tf.Fetcher.FetchHeaders(ctx, start, end, peerId)
 	if err != nil {
 		var errIncompleteHeaders *ErrIncompleteHeaders
 		if errors.As(err, &errIncompleteHeaders) {
@@ -33,15 +33,15 @@ func (tf *trackingFetcher) FetchHeaders(ctx context.Context, start uint64, end u
 			tf.peerTracker.BlockNumMissing(peerId, start)
 		}
 
-		return nil, err
+		return nil, 0, err
 	}
 
 	tf.peerTracker.BlockNumPresent(peerId, res[len(res)-1].Number.Uint64())
-	return res, nil
+	return res, size, nil
 }
 
-func (tf *trackingFetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) ([]*types.Body, error) {
-	bodies, err := tf.Fetcher.FetchBodies(ctx, headers, peerId)
+func (tf *trackingFetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) ([]*types.Body, int, error) {
+	bodies, size, err := tf.Fetcher.FetchBodies(ctx, headers, peerId)
 	if err != nil {
 		var errMissingBodies *ErrMissingBodies
 		if errors.As(err, &errMissingBodies) {
@@ -56,8 +56,8 @@ func (tf *trackingFetcher) FetchBodies(ctx context.Context, headers []*types.Hea
 			}
 		}
 
-		return nil, err
+		return nil, 0, err
 	}
 
-	return bodies, nil
+	return bodies, size, nil
 }

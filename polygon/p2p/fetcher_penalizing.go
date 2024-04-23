@@ -28,22 +28,22 @@ type penalizingFetcher struct {
 	peerPenalizer PeerPenalizer
 }
 
-func (pf *penalizingFetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) ([]*types.Header, error) {
-	headers, err := pf.Fetcher.FetchHeaders(ctx, start, end, peerId)
+func (pf *penalizingFetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) ([]*types.Header, int, error) {
+	headers, size, err := pf.Fetcher.FetchHeaders(ctx, start, end, peerId)
 	if err != nil {
-		return nil, pf.maybePenalize(ctx, peerId, err, &ErrTooManyHeaders{}, &ErrNonSequentialHeaderNumbers{})
+		return nil, 0, pf.maybePenalize(ctx, peerId, err, &ErrTooManyHeaders{}, &ErrNonSequentialHeaderNumbers{})
 	}
 
-	return headers, nil
+	return headers, size, nil
 }
 
-func (pf *penalizingFetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) ([]*types.Body, error) {
-	bodies, err := pf.Fetcher.FetchBodies(ctx, headers, peerId)
+func (pf *penalizingFetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) ([]*types.Body, int, error) {
+	bodies, size, err := pf.Fetcher.FetchBodies(ctx, headers, peerId)
 	if err != nil {
-		return nil, pf.maybePenalize(ctx, peerId, err, &ErrTooManyBodies{})
+		return nil, 0, pf.maybePenalize(ctx, peerId, err, &ErrTooManyBodies{})
 	}
 
-	return bodies, nil
+	return bodies, size, nil
 }
 
 func (pf *penalizingFetcher) maybePenalize(ctx context.Context, peerId *PeerId, err error, penalizeErrs ...error) error {

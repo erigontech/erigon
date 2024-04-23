@@ -25,12 +25,12 @@ type FetcherConfig struct {
 
 type Fetcher interface {
 	// FetchHeaders fetches [start,end) headers from a peer. Blocks until data is received.
-	FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) ([]*types.Header, error)
+	FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) ([]*types.Header, int, error)
 	// FetchBodies fetches block bodies for the given headers from a peer. Blocks until data is received.
-	FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) ([]*types.Body, error)
+	FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) ([]*types.Body, int, error)
 	// FetchBlocks fetches headers and bodies for a given [start, end) range from a peer and
 	// assembles them into blocks. Blocks until data is received.
-	FetchBlocks(ctx context.Context, start uint64, end uint64, peerId *PeerId) ([]*types.Block, error)
+	FetchBlocks(ctx context.Context, start uint64, end uint64, peerId *PeerId) ([]*types.Block, int, error)
 }
 
 func NewFetcher(
@@ -63,9 +63,18 @@ type fetcher struct {
 	requestIdGenerator RequestIdGenerator
 }
 
-func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) ([]*types.Header, error) {
+type FetcherResponseTypes interface {
+	*types.Header | *types.Body
+}
+
+type FetcherResponse[T any] struct {
+	Data      []T
+	TotalSize int
+}
+
+func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) ([]*types.Header, int, error) {
 	if start >= end {
-		return nil, &ErrInvalidFetchHeadersRange{
+		return nil, 0, &ErrInvalidFetchHeadersRange{
 			start: start,
 			end:   end,
 		}
@@ -82,6 +91,7 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 	if amount%eth.MaxHeadersServe > 0 {
 		numChunks++
 	}
+	size := 0
 
 	headers := make([]*types.Header, 0, amount)
 	for chunkNum := uint64(0); chunkNum < numChunks; chunkNum++ {
@@ -91,30 +101,32 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 			// a node may not respond with all MaxHeadersServe in 1 response,
 			// so we keep on consuming from last received number (akin to consuming a paging api)
 			// until we have all headers of the chunk or the peer stopped returning headers
-			headersChunk, err := fetchWithRetry(f.config, func() ([]*types.Header, error) {
+			headersChunk, err := fetchWithRetry(f.config, func() (*FetcherResponse[*types.Header], error) {
 				return f.fetchHeaders(ctx, chunkStart, chunkEnd, peerId)
 			})
 			if err != nil {
-				return nil, err
+				return nil, 0, err
 			}
-			if len(headersChunk) == 0 {
+			if len(headersChunk.Data) == 0 {
 				break
 			}
 
-			headers = append(headers, headersChunk...)
-			chunkStart += uint64(len(headersChunk))
+			headers = append(headers, headersChunk.Data...)
+			chunkStart += uint64(len(headersChunk.Data))
+			size += headersChunk.TotalSize
 		}
 	}
 
 	if err := f.validateHeadersResponse(headers, start, amount); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	return headers, nil
+	return headers, size, nil
 }
 
-func (f *fetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) ([]*types.Body, error) {
+func (f *fetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) ([]*types.Body, int, error) {
 	var bodies []*types.Body
+	size := 0
 
 	for len(headers) > 0 {
 		// Note: we always request MaxBodiesServe for optimal response sizes (fully utilising the 2 MB soft limit).
@@ -128,32 +140,33 @@ func (f *fetcher) FetchBodies(ctx context.Context, headers []*types.Header, peer
 			headersChunk = headers
 		}
 
-		bodiesChunk, err := fetchWithRetry(f.config, func() ([]*types.Body, error) {
+		bodiesChunk, err := fetchWithRetry(f.config, func() (*FetcherResponse[*types.Body], error) {
 			return f.fetchBodies(ctx, headersChunk, peerId)
 		})
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
-		if len(bodiesChunk) == 0 {
-			return nil, NewErrMissingBodies(headers)
+		if len(bodiesChunk.Data) == 0 {
+			return nil, 0, NewErrMissingBodies(headers)
 		}
 
-		bodies = append(bodies, bodiesChunk...)
-		headers = headers[len(bodiesChunk):]
+		bodies = append(bodies, bodiesChunk.Data...)
+		headers = headers[len(bodiesChunk.Data):]
+		size += bodiesChunk.TotalSize
 	}
 
-	return bodies, nil
+	return bodies, size, nil
 }
 
-func (f *fetcher) FetchBlocks(ctx context.Context, start, end uint64, peerId *PeerId) ([]*types.Block, error) {
-	headers, err := f.FetchHeaders(ctx, start, end, peerId)
+func (f *fetcher) FetchBlocks(ctx context.Context, start, end uint64, peerId *PeerId) ([]*types.Block, int, error) {
+	headers, headerSize, err := f.FetchHeaders(ctx, start, end, peerId)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	bodies, err := f.FetchBodies(ctx, headers, peerId)
+	bodies, bodiesSize, err := f.FetchBodies(ctx, headers, peerId)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	blocks := make([]*types.Block, len(headers))
@@ -161,10 +174,10 @@ func (f *fetcher) FetchBlocks(ctx context.Context, start, end uint64, peerId *Pe
 		blocks[i] = types.NewBlockFromNetwork(header, bodies[i])
 	}
 
-	return blocks, nil
+	return blocks, headerSize + bodiesSize, nil
 }
 
-func (f *fetcher) fetchHeaders(ctx context.Context, start, end uint64, peerId *PeerId) ([]*types.Header, error) {
+func (f *fetcher) fetchHeaders(ctx context.Context, start, end uint64, peerId *PeerId) (*FetcherResponse[*types.Header], error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -195,12 +208,12 @@ func (f *fetcher) fetchHeaders(ctx context.Context, start, end uint64, peerId *P
 		return nil, err
 	}
 
-	message, err := awaitResponse(ctx, f.config.responseTimeout, messages, filterBlockHeaders(peerId, requestId))
+	message, size, err := awaitResponse(ctx, f.config.responseTimeout, messages, filterBlockHeaders(peerId, requestId))
 	if err != nil {
 		return nil, err
 	}
 
-	return message.BlockHeadersPacket, nil
+	return &FetcherResponse[*types.Header]{message.BlockHeadersPacket, size}, nil
 }
 
 func (f *fetcher) validateHeadersResponse(headers []*types.Header, start, amount uint64) error {
@@ -234,7 +247,7 @@ func (f *fetcher) validateHeadersResponse(headers []*types.Header, start, amount
 	return nil
 }
 
-func (f *fetcher) fetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) ([]*types.Body, error) {
+func (f *fetcher) fetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) (*FetcherResponse[*types.Body], error) {
 	// cleanup for the chan message observer
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -266,7 +279,7 @@ func (f *fetcher) fetchBodies(ctx context.Context, headers []*types.Header, peer
 		return nil, err
 	}
 
-	message, err := awaitResponse(ctx, f.config.responseTimeout, messages, filterBlockBodies(peerId, requestId))
+	message, size, err := awaitResponse(ctx, f.config.responseTimeout, messages, filterBlockBodies(peerId, requestId))
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +288,7 @@ func (f *fetcher) fetchBodies(ctx context.Context, headers []*types.Header, peer
 		return nil, err
 	}
 
-	return message.BlockBodiesPacket, nil
+	return &FetcherResponse[*types.Body]{message.BlockBodiesPacket, size}, nil
 }
 
 func (f *fetcher) validateBodies(bodies []*types.Body, headers []*types.Header) error {
@@ -318,7 +331,7 @@ func awaitResponse[TPacket any](
 	timeout time.Duration,
 	messages chan *DecodedInboundMessage[TPacket],
 	filter func(*DecodedInboundMessage[TPacket]) bool,
-) (TPacket, error) {
+) (TPacket, int, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -326,13 +339,13 @@ func awaitResponse[TPacket any](
 		select {
 		case <-ctx.Done():
 			var nilPacket TPacket
-			return nilPacket, fmt.Errorf("await %v response interrupted: %w", reflect.TypeOf(nilPacket), ctx.Err())
+			return nilPacket, 0, fmt.Errorf("await %v response interrupted: %w", reflect.TypeOf(nilPacket), ctx.Err())
 		case message := <-messages:
 			if filter(message) {
 				continue
 			}
 
-			return message.Decoded, nil
+			return message.Decoded, len(message.Data), nil
 		}
 	}
 }

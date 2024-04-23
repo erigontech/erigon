@@ -53,7 +53,7 @@ func TestFetcherFetchHeaders(t *testing.T) {
 	test := newFetcherTest(t, newMockRequestGenerator(requestId))
 	test.mockSentryStreams(mockRequestResponse)
 	test.run(func(ctx context.Context, t *testing.T) {
-		headers, err := test.fetcher.FetchHeaders(ctx, 1, 3, peerId)
+		headers, _, err := test.fetcher.FetchHeaders(ctx, 1, 3, peerId)
 		require.NoError(t, err)
 		require.Len(t, headers, 2)
 		require.Equal(t, uint64(1), headers[0].Number.Uint64())
@@ -102,7 +102,7 @@ func TestFetcherFetchHeadersWithChunking(t *testing.T) {
 	test := newFetcherTest(t, newMockRequestGenerator(requestId1, requestId2))
 	test.mockSentryStreams(mockRequestResponse1, mockRequestResponse2)
 	test.run(func(ctx context.Context, t *testing.T) {
-		headers, err := test.fetcher.FetchHeaders(ctx, 1, 2000, peerId)
+		headers, _, err := test.fetcher.FetchHeaders(ctx, 1, 2000, peerId)
 		require.NoError(t, err)
 		require.Len(t, headers, 1999)
 		require.Equal(t, uint64(1), headers[0].Number.Uint64())
@@ -154,7 +154,7 @@ func TestFetcherFetchHeadersResponseTimeout(t *testing.T) {
 	test := newFetcherTest(t, newMockRequestGenerator(requestId1, requestId2))
 	test.mockSentryStreams(mockRequestResponse1, mockRequestResponse2)
 	test.run(func(ctx context.Context, t *testing.T) {
-		headers, err := test.fetcher.FetchHeaders(ctx, 1, 11, peerId)
+		headers, _, err := test.fetcher.FetchHeaders(ctx, 1, 11, peerId)
 		require.ErrorIs(t, err, context.DeadlineExceeded)
 		require.Nil(t, headers)
 	})
@@ -219,7 +219,7 @@ func TestFetcherFetchHeadersResponseTimeoutRetrySuccess(t *testing.T) {
 	test := newFetcherTest(t, newMockRequestGenerator(requestId1, requestId2, requestId3))
 	test.mockSentryStreams(mockRequestResponse1, mockRequestResponse2, mockRequestResponse3)
 	test.run(func(ctx context.Context, t *testing.T) {
-		headers, err := test.fetcher.FetchHeaders(ctx, 1, 2000, peerId)
+		headers, _, err := test.fetcher.FetchHeaders(ctx, 1, 2000, peerId)
 		require.NoError(t, err)
 		require.Len(t, headers, 1999)
 		require.Equal(t, uint64(1), headers[0].Number.Uint64())
@@ -233,7 +233,7 @@ func TestFetcherErrInvalidFetchHeadersRange(t *testing.T) {
 	test := newFetcherTest(t, newMockRequestGenerator(1))
 	test.mockSentryStreams()
 	test.run(func(ctx context.Context, t *testing.T) {
-		headers, err := test.fetcher.FetchHeaders(ctx, 3, 1, PeerIdFromUint64(1))
+		headers, _, err := test.fetcher.FetchHeaders(ctx, 3, 1, PeerIdFromUint64(1))
 		var errInvalidFetchHeadersRange *ErrInvalidFetchHeadersRange
 		require.ErrorAs(t, err, &errInvalidFetchHeadersRange)
 		require.Equal(t, uint64(3), errInvalidFetchHeadersRange.start)
@@ -281,7 +281,7 @@ func TestFetcherFetchHeadersErrIncompleteResponse(t *testing.T) {
 	test.mockSentryStreams(mockRequestResponse1, mockRequestResponse2)
 	test.run(func(ctx context.Context, t *testing.T) {
 		var errIncompleteHeaders *ErrIncompleteHeaders
-		headers, err := test.fetcher.FetchHeaders(ctx, 1, 4, peerId)
+		headers, _, err := test.fetcher.FetchHeaders(ctx, 1, 4, peerId)
 		require.ErrorAs(t, err, &errIncompleteHeaders)
 		require.Equal(t, uint64(3), errIncompleteHeaders.LowestMissingBlockNum())
 		require.Nil(t, headers)
@@ -363,7 +363,7 @@ func TestFetcherFetchBodies(t *testing.T) {
 	test := newFetcherTest(t, newMockRequestGenerator(requestId1, requestId2))
 	test.mockSentryStreams(mockRequestResponse1, mockRequestResponse2)
 	test.run(func(ctx context.Context, t *testing.T) {
-		bodies, err := test.fetcher.FetchBodies(ctx, mockHeaders, peerId)
+		bodies, _, err := test.fetcher.FetchBodies(ctx, mockHeaders, peerId)
 		require.NoError(t, err)
 		require.Len(t, bodies, 2)
 	})
@@ -402,7 +402,7 @@ func TestFetcherFetchBodiesResponseTimeout(t *testing.T) {
 	test := newFetcherTest(t, newMockRequestGenerator(requestId1, requestId2))
 	test.mockSentryStreams(mockRequestResponse1, mockRequestResponse2)
 	test.run(func(ctx context.Context, t *testing.T) {
-		bodies, err := test.fetcher.FetchBodies(ctx, mockHeaders, peerId)
+		bodies, _, err := test.fetcher.FetchBodies(ctx, mockHeaders, peerId)
 		require.ErrorIs(t, err, context.DeadlineExceeded)
 		require.Nil(t, bodies)
 	})
@@ -461,7 +461,7 @@ func TestFetcherFetchBodiesResponseTimeoutRetrySuccess(t *testing.T) {
 	test := newFetcherTest(t, newMockRequestGenerator(requestId1, requestId2))
 	test.mockSentryStreams(mockRequestResponse1, mockRequestResponse2)
 	test.run(func(ctx context.Context, t *testing.T) {
-		bodies, err := test.fetcher.FetchBodies(ctx, mockHeaders, peerId)
+		bodies, _, err := test.fetcher.FetchBodies(ctx, mockHeaders, peerId)
 		require.NoError(t, err)
 		require.Len(t, bodies, 1)
 	})
@@ -492,7 +492,7 @@ func TestFetcherFetchBodiesErrMissingBodies(t *testing.T) {
 	test.mockSentryStreams(mockRequestResponse)
 	test.run(func(ctx context.Context, t *testing.T) {
 		var errMissingBlocks *ErrMissingBodies
-		bodies, err := test.fetcher.FetchBodies(ctx, mockHeaders, peerId)
+		bodies, _, err := test.fetcher.FetchBodies(ctx, mockHeaders, peerId)
 		require.ErrorAs(t, err, &errMissingBlocks)
 		lowest, exists := errMissingBlocks.LowestMissingBlockNum()
 		require.Equal(t, uint64(1), lowest)

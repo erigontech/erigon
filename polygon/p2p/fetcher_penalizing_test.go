@@ -39,7 +39,7 @@ func TestPenalizingFetcherFetchHeadersShouldPenalizePeerWhenErrTooManyHeaders(t 
 	mockExpectPenalizePeer(t, test.sentryClient, peerId)
 	test.run(func(ctx context.Context, t *testing.T) {
 		var errTooManyHeaders *ErrTooManyHeaders
-		headers, err := test.penalizingFetcher.FetchHeaders(ctx, 1, 3, peerId)
+		headers, _, err := test.penalizingFetcher.FetchHeaders(ctx, 1, 3, peerId)
 		require.ErrorAs(t, err, &errTooManyHeaders)
 		require.Equal(t, 2, errTooManyHeaders.requested)
 		require.Equal(t, 5, errTooManyHeaders.received)
@@ -78,7 +78,7 @@ func TestPenalizingFetcherFetchHeadersShouldPenalizePeerWhenErrNonSequentialHead
 	mockExpectPenalizePeer(t, test.sentryClient, peerId)
 	test.run(func(ctx context.Context, t *testing.T) {
 		var errNonSequentialHeaderNumbers *ErrNonSequentialHeaderNumbers
-		headers, err := test.penalizingFetcher.FetchHeaders(ctx, 1, 4, peerId)
+		headers, _, err := test.penalizingFetcher.FetchHeaders(ctx, 1, 4, peerId)
 		require.ErrorAs(t, err, &errNonSequentialHeaderNumbers)
 		require.Equal(t, uint64(3), errNonSequentialHeaderNumbers.current)
 		require.Equal(t, uint64(2), errNonSequentialHeaderNumbers.expected)
@@ -115,7 +115,7 @@ func TestPenalizingFetcherFetchHeadersShouldPenalizePeerWhenIncorrectOrigin(t *t
 	mockExpectPenalizePeer(t, test.sentryClient, peerId)
 	test.run(func(ctx context.Context, t *testing.T) {
 		var errNonSequentialHeaderNumbers *ErrNonSequentialHeaderNumbers
-		headers, err := test.penalizingFetcher.FetchHeaders(ctx, 1, 3, peerId)
+		headers, _, err := test.penalizingFetcher.FetchHeaders(ctx, 1, 3, peerId)
 		require.ErrorAs(t, err, &errNonSequentialHeaderNumbers)
 		require.Equal(t, uint64(2), errNonSequentialHeaderNumbers.current)
 		require.Equal(t, uint64(1), errNonSequentialHeaderNumbers.expected)
@@ -150,7 +150,7 @@ func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenErrTooManyBodies(t *t
 	mockExpectPenalizePeer(t, test.sentryClient, peerId)
 	test.run(func(ctx context.Context, t *testing.T) {
 		var errTooManyBodies *ErrTooManyBodies
-		bodies, err := test.penalizingFetcher.FetchBodies(ctx, headers, peerId)
+		bodies, _, err := test.penalizingFetcher.FetchBodies(ctx, headers, peerId)
 		require.ErrorAs(t, err, &errTooManyBodies)
 		require.Equal(t, 1, errTooManyBodies.requested)
 		require.Equal(t, 2, errTooManyBodies.received)
