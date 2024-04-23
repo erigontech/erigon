@@ -13,6 +13,8 @@ import (
 	reflect "reflect"
 
 	common "github.com/ledgerwatch/erigon-lib/common"
+	clparams "github.com/ledgerwatch/erigon/cl/clparams"
+	solid "github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -77,6 +79,20 @@ func (c *MockBeaconStateReaderCommitteeCountCall) DoAndReturn(f func(uint64) uin
 	return c
 }
 
+// GenesisValidatorsRoot mocks base method.
+func (m *MockBeaconStateReader) GenesisValidatorsRoot() common.Hash {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GenesisValidatorsRoot")
+	ret0, _ := ret[0].(common.Hash)
+	return ret0
+}
+
+// GenesisValidatorsRoot indicates an expected call of GenesisValidatorsRoot.
+func (mr *MockBeaconStateReaderMockRecorder) GenesisValidatorsRoot() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GenesisValidatorsRoot", reflect.TypeOf((*MockBeaconStateReader)(nil).GenesisValidatorsRoot))
+}
+
 // GetDomain mocks base method.
 func (m *MockBeaconStateReader) GetDomain(arg0 [4]byte, arg1 uint64) ([]byte, error) {
 	m.ctrl.T.Helper()
@@ -116,6 +132,21 @@ func (c *MockBeaconStateReaderGetDomainCall) DoAndReturn(f func([4]byte, uint64)
 	return c
 }
 
+// ValidatorForValidatorIndex mocks base method.
+func (m *MockBeaconStateReader) ValidatorForValidatorIndex(arg0 int) (solid.Validator, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ValidatorForValidatorIndex", arg0)
+	ret0, _ := ret[0].(solid.Validator)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ValidatorForValidatorIndex indicates an expected call of ValidatorForValidatorIndex.
+func (mr *MockBeaconStateReaderMockRecorder) ValidatorForValidatorIndex(arg0 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ValidatorForValidatorIndex", reflect.TypeOf((*MockBeaconStateReader)(nil).ValidatorForValidatorIndex), arg0)
+}
+
 // ValidatorPublicKey mocks base method.
 func (m *MockBeaconStateReader) ValidatorPublicKey(arg0 int) (common.Bytes48, error) {
 	m.ctrl.T.Helper()
@@ -153,4 +184,18 @@ func (c *MockBeaconStateReaderValidatorPublicKeyCall) Do(f func(int) (common.Byt
 func (c *MockBeaconStateReaderValidatorPublicKeyCall) DoAndReturn(f func(int) (common.Bytes48, error)) *MockBeaconStateReaderValidatorPublicKeyCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
+}
+
+// Version mocks base method.
+func (m *MockBeaconStateReader) Version() clparams.StateVersion {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Version")
+	ret0, _ := ret[0].(clparams.StateVersion)
+	return ret0
+}
+
+// Version indicates an expected call of Version.
+func (mr *MockBeaconStateReaderMockRecorder) Version() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Version", reflect.TypeOf((*MockBeaconStateReader)(nil).Version))
 }
