@@ -333,9 +333,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				if err := rawdb.WriteCanonicalHash(tx, blockHash, blockNum); err != nil {
 					return err
 				}
-				if err := rawdb.WriteHeader(tx, header); err != nil {
-					return err
-				}
 				binary.BigEndian.PutUint64(blockNumBytes, blockNum)
 				if err := h2n.Collect(blockHash[:], blockNumBytes); err != nil {
 					return err
