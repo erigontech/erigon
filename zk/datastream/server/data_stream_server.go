@@ -161,8 +161,8 @@ func (srv *DataStreamServer) CreateStreamEntries(
 
 	//gerUpdates are before the bookmark for this block and are gottne by previous ones bookmark
 	if gerUpdates != nil {
-		for _, gerUpdate := range *gerUpdates {
-			entries[index] = &gerUpdate
+		for i := range *gerUpdates {
+			entries[index] = &(*gerUpdates)[i]
 			index++
 		}
 	}
