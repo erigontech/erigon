@@ -459,7 +459,7 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneFrom, prune
 
 	reader := bytes.NewReader(nil)
 	{
-		c, err := tx.RwCursor(kv.Log)
+		c, err := tx.Cursor(kv.Log)
 		if err != nil {
 			return err
 		}
