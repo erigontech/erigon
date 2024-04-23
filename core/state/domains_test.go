@@ -7,7 +7,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	datadir2 "github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/etconfig2"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
@@ -52,7 +52,7 @@ func dbAggregatorOnDatadir(t *testing.T, ddir string) (kv.RwDB, *state.Aggregato
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 
-	agg, err := state.NewAggregator(context.Background(), dirs, etconfig2.HistoryV3AggregationStep, db, logger)
+	agg, err := state.NewAggregator(context.Background(), dirs, config3.HistoryV3AggregationStep, db, logger)
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 	err = agg.OpenFolder(false)
