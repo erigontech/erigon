@@ -67,6 +67,20 @@ func (mr *MockSyncedDataMockRecorder) HeadState() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HeadState", reflect.TypeOf((*MockSyncedData)(nil).HeadState))
 }
 
+// HeadStateReader mocks base method.
+func (m *MockSyncedData) HeadStateReader() state.BeaconStateReader {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "HeadStateReader")
+	ret0, _ := ret[0].(state.BeaconStateReader)
+	return ret0
+}
+
+// HeadStateReader indicates an expected call of HeadStateReader.
+func (mr *MockSyncedDataMockRecorder) HeadStateReader() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HeadStateReader", reflect.TypeOf((*MockSyncedData)(nil).HeadStateReader))
+}
+
 // OnHeadState mocks base method.
 func (m *MockSyncedData) OnHeadState(arg0 *state.CachingBeaconState) error {
 	m.ctrl.T.Helper()
