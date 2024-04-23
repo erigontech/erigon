@@ -240,7 +240,6 @@ func BorHeimdallForward(
 			snap := loadSnapshot(blockNum, header.Hash(), cfg.borConfig, recents, signatures, cfg.snapDb, logger)
 
 			lastPersistedBlockNum, err := lastPersistedSnapshotBlock(ctx, cfg.snapDb)
-
 			if err != nil {
 				return err
 			}
