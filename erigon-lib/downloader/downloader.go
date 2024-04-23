@@ -248,7 +248,7 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 			case <-req.Context().Done():
 				err = req.Context().Err()
 			}
-			retry = attempts > maxAttempts
+			retry = attempts < maxAttempts
 
 		default:
 			r.downloader.stats.WebseedBytesDownload.Add(resp.ContentLength)
