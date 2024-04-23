@@ -194,9 +194,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		require.Equal(t, 2, c.valuesCount)
 		require.True(t, strings.HasSuffix(c.historyPath, "v1-accounts.0-1.v"))
 		require.Equal(t, 3, c.historyComp.Count())
-		//require.Equal(t, 2*, c.) c.efHistoryComp.Count()
-		//require.Equal(t, []uint64{3}, c.indexBitmaps["key2"].ToArray())
-		//require.Equal(t, []uint64{2, 6}, c.indexBitmaps["key1"].ToArray())
+		require.Equal(t, 2*c.valuesCount, c.efHistoryComp.Count())
 
 		sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
 		require.NoError(t, err)
