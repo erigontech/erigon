@@ -41,7 +41,7 @@ type WebSeeds struct {
 	logger    log.Logger
 	verbosity log.Lvl
 
-	torrentFiles *TorrentFiles
+	torrentFiles *AtomicTorrentFS
 }
 
 func NewWebSeeds(seeds []*url.URL, verbosity log.Lvl, logger log.Logger) *WebSeeds {
@@ -97,7 +97,7 @@ func (d *WebSeeds) getWebDownloadInfo(ctx context.Context, t *torrent.Torrent) (
 	return infos, seedHashMismatches, nil
 }
 
-func (d *WebSeeds) SetTorrent(t *TorrentFiles, whiteList snapcfg.Preverified, downloadTorrentFile bool) {
+func (d *WebSeeds) SetTorrent(t *AtomicTorrentFS, whiteList snapcfg.Preverified, downloadTorrentFile bool) {
 	d.downloadTorrentFile = downloadTorrentFile
 	d.torrentsWhitelist = whiteList
 	d.torrentFiles = t
@@ -114,18 +114,16 @@ func (d *WebSeeds) checkHasTorrents(manifestResponse snaptype.WebSeedsFromProvid
 	hasTorrents := len(torrentNames) > 0
 	report.missingTorrents = make([]string, 0)
 	for name := range manifestResponse {
-		// todo extract list of extensions which are
-		//  seeded as torrents (kv, ef, v, seg)
-		//  seeded as is (.txt, efi)
-		//  temporarily not seedable (.idx)
-		if !strings.HasSuffix(name, ".torrent") && !strings.HasSuffix(name, ".txt") {
-			tname := name + ".torrent"
-			if _, ok := torrentNames[tname]; !ok {
-				report.missingTorrents = append(report.missingTorrents, name)
-				continue
-			}
-			delete(torrentNames, tname)
+		// skip non-seedable files. maybe will need extend list of seedable files in future.
+		if !snaptype.IsSeedableExtension(name) {
+			continue
 		}
+		tname := name + ".torrent"
+		if _, ok := torrentNames[tname]; !ok {
+			report.missingTorrents = append(report.missingTorrents, name)
+			continue
+		}
+		delete(torrentNames, tname)
 	}
 
 	if len(torrentNames) > 0 {
@@ -600,7 +598,7 @@ func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) 
 			d.logger.Log(d.verbosity, "[snapshots] .torrent from webseed rejected", "name", name, "err", err)
 			continue // it's ok if some HTTP provider failed - try next one
 		}
-		ts, _, _, err = d.torrentFiles.CreateIfNotProhibited(name, res)
+		ts, _, err = d.torrentFiles.Create(name, res)
 		return ts, ts != nil, err
 	}
 

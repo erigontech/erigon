@@ -135,9 +135,7 @@ COMMANDS += evm
 COMMANDS += sentinel
 COMMANDS += caplin
 COMMANDS += snapshots
-
-
-
+COMMANDS += diag
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd
@@ -164,7 +162,7 @@ test-erigon-ext:
 
 ## test:                              run unit tests with a 100s timeout
 test: test-erigon-lib
-	$(GOTEST) --timeout 10m
+	$(GOTEST) --timeout 10m -coverprofile=coverage-erigon.out
 
 test3: test-erigon-lib
 	$(GOTEST) --timeout 10m -tags $(BUILD_TAGS),e3
@@ -203,6 +201,7 @@ clean:
 devtools:
 	# Notice! If you adding new binary - add it also to cmd/hack/binary-deps/main.go file
 	$(GOBUILD) -o $(GOBIN)/gencodec github.com/fjl/gencodec
+	$(GOBUILD) -o $(GOBIN)/mockgen go.uber.org/mock/mockgen
 	$(GOBUILD) -o $(GOBIN)/abigen ./cmd/abigen
 	$(GOBUILD) -o $(GOBIN)/codecgen github.com/ugorji/go/codec/codecgen
 	PATH=$(GOBIN):$(PATH) go generate ./common

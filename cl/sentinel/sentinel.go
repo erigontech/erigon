@@ -84,15 +84,14 @@ type Sentinel struct {
 
 	indiciesDB kv.RoDB
 
-	discoverConfig       discover.Config
-	pubsub               *pubsub.PubSub
-	subManager           *GossipManager
-	metrics              bool
-	listenForPeersDoneCh chan struct{}
-	logger               log.Logger
-	forkChoiceReader     forkchoice.ForkChoiceStorageReader
-	pidToEnr             sync.Map
-	ethClock             eth_clock.EthereumClock
+	discoverConfig   discover.Config
+	pubsub           *pubsub.PubSub
+	subManager       *GossipManager
+	metrics          bool
+	logger           log.Logger
+	forkChoiceReader forkchoice.ForkChoiceStorageReader
+	pidToEnr         sync.Map
+	ethClock         eth_clock.EthereumClock
 
 	metadataLock sync.Mutex
 }
@@ -307,7 +306,6 @@ func (s *Sentinel) Start() error {
 }
 
 func (s *Sentinel) Stop() {
-	s.listenForPeersDoneCh <- struct{}{}
 	s.listener.Close()
 	s.subManager.Close()
 	s.host.Close()

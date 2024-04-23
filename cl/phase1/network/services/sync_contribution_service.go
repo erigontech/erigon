@@ -38,6 +38,7 @@ type syncContributionService struct {
 	seenSyncCommitteeContributions map[seenSyncCommitteeContribution]struct{}
 	emitters                       *beaconevents.Emitters
 	ethClock                       eth_clock.EthereumClock
+	test                           bool
 
 	mu sync.Mutex
 }
@@ -49,6 +50,7 @@ func NewSyncContributionService(
 	syncContributionPool sync_contribution_pool.SyncContributionPool,
 	ethClock eth_clock.EthereumClock,
 	emitters *beaconevents.Emitters,
+	test bool,
 ) SyncContributionService {
 	return &syncContributionService{
 		syncedDataManager:              syncedDataManager,
@@ -57,6 +59,7 @@ func NewSyncContributionService(
 		seenSyncCommitteeContributions: make(map[seenSyncCommitteeContribution]struct{}),
 		ethClock:                       ethClock,
 		emitters:                       emitters,
+		test:                           test,
 	}
 }
 
@@ -71,7 +74,12 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 
 	headState := s.syncedDataManager.HeadState()
 	if headState == nil {
-		return nil
+		return ErrIgnore
+	}
+
+	// [REJECT] The subcommittee index is in the allowed range, i.e. contribution.subcommittee_index < SYNC_COMMITTEE_SUBNET_COUNT.
+	if contributionAndProof.Contribution.SubcommitteeIndex >= clparams.MainnetBeaconConfig.SyncCommitteeSubnetCount {
+		return fmt.Errorf("subcommittee index is out of range")
 	}
 
 	aggregatorPubKey, err := headState.ValidatorPublicKey(int(contributionAndProof.AggregatorIndex))
@@ -88,23 +96,14 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 		return ErrIgnore
 	}
 
-	// [REJECT] The subcommittee index is in the allowed range, i.e. contribution.subcommittee_index < SYNC_COMMITTEE_SUBNET_COUNT.
-	if contributionAndProof.Contribution.SubcommitteeIndex >= clparams.MainnetBeaconConfig.SyncCommitteeSubnetCount {
-		return fmt.Errorf("subcommittee index is out of range")
-	}
-
 	// [REJECT] The contribution has participants -- that is, any(contribution.aggregation_bits).
 	if bytes.Equal(aggregationBits, make([]byte, len(aggregationBits))) { // check if the aggregation bits are all zeros
 		return fmt.Errorf("contribution has no participants")
 	}
 
-	// [REJECT] contribution_and_proof.selection_proof selects the validator as an aggregator for the slot -- i.e. is_sync_committee_aggregator(contribution_and_proof.selection_proof) returns True.
-	if len(selectionProof) != 96 {
-		return fmt.Errorf("incorrect signiture length")
-	}
 	modulo := utils.Max64(1, s.beaconCfg.SyncCommitteeSize/s.beaconCfg.SyncCommitteeSubnetCount/s.beaconCfg.TargetAggregatorsPerSyncSubcommittee)
 	hashSignature := utils.Sha256(selectionProof[:])
-	if binary.LittleEndian.Uint64(hashSignature[:8])%modulo != 0 {
+	if !s.test && binary.LittleEndian.Uint64(hashSignature[:8])%modulo != 0 {
 		return fmt.Errorf("selects the validator as an aggregator")
 	}
 
@@ -119,16 +118,16 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 	}
 
 	// [REJECT] The contribution_and_proof.selection_proof is a valid signature of the SyncAggregatorSelectionData derived from the contribution by the validator with index contribution_and_proof.aggregator_index.
-	if err := verifySyncContributionSelectionProof(headState, contributionAndProof); err != nil {
+	if err := verifySyncContributionSelectionProof(headState, contributionAndProof); !s.test && err != nil {
 		return err
 	}
 	// [REJECT] The aggregator signature, signed_contribution_and_proof.signature, is valid.
-	if err := verifyAggregatorSignatureForSyncContribution(headState, signedContribution); err != nil {
+	if err := verifyAggregatorSignatureForSyncContribution(headState, signedContribution); !s.test && err != nil {
 		return err
 	}
 	// [REJECT] The aggregate signature is valid for the message beacon_block_root and aggregate pubkey derived
 	// from the participation info in aggregation_bits for the subcommittee specified by the contribution.subcommittee_index.
-	if err := verifySyncContributionProofAggregatedSignature(headState, contributionAndProof.Contribution, subcommiteePubsKeys); err != nil {
+	if err := verifySyncContributionProofAggregatedSignature(headState, contributionAndProof.Contribution, subcommiteePubsKeys); !s.test && err != nil {
 		return err
 	}
 	// mark the valid contribution as seen
@@ -137,7 +136,11 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 	// emit contribution_and_proof
 	s.emitters.Publish("contribution_and_proof", signedContribution)
 	// add the contribution to the pool
-	return s.syncContributionPool.AddSyncContribution(headState, contributionAndProof.Contribution)
+	err = s.syncContributionPool.AddSyncContribution(headState, contributionAndProof.Contribution)
+	if errors.Is(err, sync_contribution_pool.ErrIsSuperset) {
+		return ErrIgnore
+	}
+	return err
 }
 
 // def get_sync_subcommittee_pubkeys(state: BeaconState, subcommittee_index: uint64) -> Sequence[BLSPubkey]:
