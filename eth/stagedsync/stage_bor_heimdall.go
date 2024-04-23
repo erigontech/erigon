@@ -599,7 +599,7 @@ func initValidatorSets(
 
 	var err error
 
-	for i := uint64(firstBlockNum); i <= blockNum; i++ {
+	for i := firstBlockNum; i <= blockNum; i++ {
 		header := chain.GetHeaderByNumber(i)
 		{
 			// `snap.apply` bottleneck - is recover of signer.
