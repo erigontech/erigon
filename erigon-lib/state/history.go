@@ -818,6 +818,17 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 			return HistoryCollation{}, err
 		}
 	}
+	{
+		ps := background.NewProgressSet()
+		_, efHistoryFileName := filepath.Split(efHistoryPath)
+		p := ps.AddNew(efHistoryFileName, 1)
+		defer ps.Delete(p)
+
+		if err = efComp.Compress(); err != nil {
+			return HistoryCollation{}, fmt.Errorf("compress %s .ef history: %w", h.filenameBase, err)
+		}
+		ps.Delete(p)
+	}
 
 	closeComp = false
 	mxCollationSizeHist.SetUint64(uint64(historyComp.Count()))
@@ -901,17 +912,6 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	if h.noFsync {
 		collation.historyComp.DisableFsync()
 		collation.efHistoryComp.DisableFsync()
-	}
-
-	{
-		_, efHistoryFileName := filepath.Split(collation.efHistoryPath)
-		p := ps.AddNew(efHistoryFileName, 1)
-		defer ps.Delete(p)
-
-		if err = collation.efHistoryComp.Compress(); err != nil {
-			return HistoryFiles{}, fmt.Errorf("compress %s .ef history: %w", h.filenameBase, err)
-		}
-		ps.Delete(p)
 	}
 
 	{
