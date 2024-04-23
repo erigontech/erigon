@@ -243,11 +243,11 @@ func (d *Domain) removeFilesAfterStep(lowerBound uint64, readonly bool) {
 	for _, item := range toDelete {
 		d.History.dirtyFiles.Delete(item)
 		if !readonly {
-			log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
+			log.Debug(fmt.Sprintf("[snapshots] deleting some histor files - because step %d has not enough files (was not complete)", lowerBound))
 			item.closeFilesAndRemove()
 		} else {
-			log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
-			item.closeFiles()
+			log.Debug(fmt.Sprintf("[snapshots] closing some histor files - because step %d has not enough files (was not complete)", lowerBound))
+      item.closeFiles()
 		}
 	}
 
