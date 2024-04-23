@@ -3,11 +3,12 @@ package services
 import (
 	"context"
 	"fmt"
-	"sync"
+	"time"
 
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/phase1/network/subnets"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -28,8 +29,7 @@ type attestationService struct {
 	beaconCfg          *clparams.BeaconChainConfig
 	netCfg             *clparams.NetworkConfig
 	// validatorAttestationSeen maps from epoch to validator index. This is used to ignore duplicate validator attestations in the same epoch.
-	validatorAttestationSeen map[uint64]map[uint64]struct{}
-	validatorAttSeenLock     sync.Mutex
+	validatorAttestationSeen *lru.CacheWithTTL[uint64, uint64] // validator index -> epoch
 }
 
 func NewAttestationService(
@@ -40,6 +40,7 @@ func NewAttestationService(
 	beaconCfg *clparams.BeaconChainConfig,
 	netCfg *clparams.NetworkConfig,
 ) AttestationService {
+	epochDuration := beaconCfg.SlotsPerEpoch * beaconCfg.SecondsPerSlot
 	return &attestationService{
 		forkchoiceStore:          forkchoiceStore,
 		committeeSubscribe:       committeeSubscribe,
@@ -47,7 +48,7 @@ func NewAttestationService(
 		syncedDataManager:        syncedDataManager,
 		beaconCfg:                beaconCfg,
 		netCfg:                   netCfg,
-		validatorAttestationSeen: make(map[uint64]map[uint64]struct{}),
+		validatorAttestationSeen: lru.NewWithTTL[uint64, uint64]("validator_attestation_seen", validatorAttestationCacheSize, time.Duration(epochDuration)),
 	}
 }
 
@@ -124,24 +125,13 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if onBitIndex >= len(beaconCommittee) {
 		return fmt.Errorf("on bit index out of committee range")
 	}
-	if err := func() error {
-		// mark the validator as seen
-		vIndex := beaconCommittee[onBitIndex]
-		s.validatorAttSeenLock.Lock()
-		defer s.validatorAttSeenLock.Unlock()
-		if _, ok := s.validatorAttestationSeen[targetEpoch]; !ok {
-			s.validatorAttestationSeen[targetEpoch] = make(map[uint64]struct{})
-		}
-		if _, ok := s.validatorAttestationSeen[targetEpoch][vIndex]; ok {
-			return ErrIgnore
-		}
-		s.validatorAttestationSeen[targetEpoch][vIndex] = struct{}{}
-		// always check and delete previous epoch if it exists
-		delete(s.validatorAttestationSeen, targetEpoch-1)
-		return nil
-	}(); err != nil {
-		return err
+	// mark the validator as seen
+	vIndex := beaconCommittee[onBitIndex]
+	epochLastTime, ok := s.validatorAttestationSeen.Get(vIndex)
+	if ok && epochLastTime == targetEpoch {
+		return fmt.Errorf("validator already seen in target epoch %w", ErrIgnore)
 	}
+	s.validatorAttestationSeen.Add(vIndex, targetEpoch)
 
 	// [IGNORE] The block being voted for (attestation.data.beacon_block_root) has been seen (via both gossip and non-gossip sources)
 	// (a client MAY queue attestations for processing once block is retrieved).

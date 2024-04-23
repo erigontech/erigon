@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
@@ -34,7 +35,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
@@ -316,7 +316,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 
 	var stateReader state.StateReader
 	var stateWriter state.StateWriter
-	if ethconfig.EnableHistoryV4InTest {
+	if config3.EnableHistoryV4InTest {
 		panic("implement me")
 		//agg := tx.(*temporal.Tx).Agg()
 		//sd := agg.SharedDomains()
@@ -332,7 +332,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	}
 	txNum := -1
 	setBlockNum := func(blockNum uint64) {
-		if ethconfig.EnableHistoryV4InTest {
+		if config3.EnableHistoryV4InTest {
 			panic("implement me")
 			//stateReader.(*state.StateReaderV4).SetBlockNum(blockNum)
 			//stateWriter.(*state.StateWriterV4).SetBlockNum(blockNum)
@@ -343,7 +343,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	}
 	txNumIncrement := func() {
 		txNum++
-		if ethconfig.EnableHistoryV4InTest {
+		if config3.EnableHistoryV4InTest {
 			panic("implement me")
 			//tx.(*temporal.Tx).Agg().SetTxNum(uint64(txNum))
 			//stateReader.(*state.StateReaderV4).SetTxNum(uint64(txNum))
@@ -386,7 +386,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			}
 
 			var err error
-			b.header.Root, err = CalcHashRootForTests(tx, b.header, ethconfig.EnableHistoryV4InTest)
+			b.header.Root, err = CalcHashRootForTests(tx, b.header, config3.EnableHistoryV4InTest)
 			if err != nil {
 				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
 			}
