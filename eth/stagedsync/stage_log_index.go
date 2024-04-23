@@ -508,7 +508,7 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneFrom, prune
 						return err
 					}
 				}
-				if err := c.DeleteCurrent(); err != nil {
+				if err := tx.Delete(kv.Log, k); err != nil {
 					return err
 				}
 			}
