@@ -247,7 +247,7 @@ func (d *Domain) removeFilesAfterStep(lowerBound uint64, readonly bool) {
 			item.closeFilesAndRemove()
 		} else {
 			log.Debug(fmt.Sprintf("[snapshots] closing some histor files - because step %d has not enough files (was not complete)", lowerBound))
-      item.closeFiles()
+			item.closeFiles()
 		}
 	}
 
