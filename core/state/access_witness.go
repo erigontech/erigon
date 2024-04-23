@@ -1,8 +1,25 @@
+// Copyright 2021 The go-ethereum Authors
+// This file is part of the go-ethereum library.
+//
+// The go-ethereum library is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// The go-ethereum library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/math"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/trie/vkutils"
 )
@@ -71,27 +88,25 @@ func (aw *AccessWitness) Copy() *AccessWitness {
 	return naw
 }
 
-func (aw *AccessWitness) TouchAndChargeProofOfAbsence(addr []byte) uint64 {
+func (aw *AccessWitness) TouchFullAccount(addr []byte, isWrite bool) uint64 {
 	var gas uint64
-	gas += aw.TouchAddressOnReadAndComputeGas(addr, zeroTreeIndex, vkutils.VersionLeafKey)
-	gas += aw.TouchAddressOnReadAndComputeGas(addr, zeroTreeIndex, vkutils.BalanceLeafKey)
-	gas += aw.TouchAddressOnReadAndComputeGas(addr, zeroTreeIndex, vkutils.CodeSizeLeafKey)
-	gas += aw.TouchAddressOnReadAndComputeGas(addr, zeroTreeIndex, vkutils.CodeKeccakLeafKey)
-	gas += aw.TouchAddressOnReadAndComputeGas(addr, zeroTreeIndex, vkutils.NonceLeafKey)
+	for i := vkutils.VersionLeafKey; i <= vkutils.CodeSizeLeafKey; i++ {
+		gas += aw.touchAddressAndChargeGas(addr, zeroTreeIndex, byte(i), isWrite)
+	}
 	return gas
 }
 
 func (aw *AccessWitness) TouchAndChargeMessageCall(addr []byte) uint64 {
 	var gas uint64
-	gas += aw.TouchAddressOnReadAndComputeGas(addr, zeroTreeIndex, vkutils.VersionLeafKey)
-	gas += aw.TouchAddressOnReadAndComputeGas(addr, zeroTreeIndex, vkutils.CodeSizeLeafKey)
+	gas += aw.touchAddressAndChargeGas(addr, zeroTreeIndex, vkutils.VersionLeafKey, false)
+	gas += aw.touchAddressAndChargeGas(addr, zeroTreeIndex, vkutils.CodeSizeLeafKey, false)
 	return gas
 }
 
 func (aw *AccessWitness) TouchAndChargeValueTransfer(callerAddr, targetAddr []byte) uint64 {
 	var gas uint64
-	gas += aw.TouchAddressOnWriteAndComputeGas(callerAddr, zeroTreeIndex, vkutils.BalanceLeafKey)
-	gas += aw.TouchAddressOnWriteAndComputeGas(targetAddr, zeroTreeIndex, vkutils.BalanceLeafKey)
+	gas += aw.touchAddressAndChargeGas(callerAddr, zeroTreeIndex, vkutils.BalanceLeafKey, true)
+	gas += aw.touchAddressAndChargeGas(targetAddr, zeroTreeIndex, vkutils.BalanceLeafKey, true)
 	return gas
 }
 
@@ -99,11 +114,10 @@ func (aw *AccessWitness) TouchAndChargeValueTransfer(callerAddr, targetAddr []by
 // a contract creation
 func (aw *AccessWitness) TouchAndChargeContractCreateInit(addr []byte, createSendsValue bool) uint64 {
 	var gas uint64
-	gas += aw.TouchAddressOnWriteAndComputeGas(addr, zeroTreeIndex, vkutils.VersionLeafKey)
-	gas += aw.TouchAddressOnWriteAndComputeGas(addr, zeroTreeIndex, vkutils.NonceLeafKey)
-	gas += aw.TouchAddressOnWriteAndComputeGas(addr, zeroTreeIndex, vkutils.CodeKeccakLeafKey)
+	gas += aw.touchAddressAndChargeGas(addr, zeroTreeIndex, vkutils.VersionLeafKey, true)
+	gas += aw.touchAddressAndChargeGas(addr, zeroTreeIndex, vkutils.NonceLeafKey, true)
 	if createSendsValue {
-		gas += aw.TouchAddressOnWriteAndComputeGas(addr, zeroTreeIndex, vkutils.BalanceLeafKey)
+		gas += aw.touchAddressAndChargeGas(addr, zeroTreeIndex, vkutils.BalanceLeafKey, true)
 	}
 	return gas
 }
@@ -116,41 +130,44 @@ func (aw *AccessWitness) TouchAndChargeContractCreateCompleted(addr []byte) uint
 	gas += aw.TouchAddressOnWriteAndComputeGas(addr, zeroTreeIndex, vkutils.VersionLeafKey)
 	gas += aw.TouchAddressOnWriteAndComputeGas(addr, zeroTreeIndex, vkutils.BalanceLeafKey)
 	gas += aw.TouchAddressOnWriteAndComputeGas(addr, zeroTreeIndex, vkutils.CodeSizeLeafKey)
-	gas += aw.TouchAddressOnWriteAndComputeGas(addr, zeroTreeIndex, vkutils.CodeKeccakLeafKey)
+	gas += aw.TouchAddressOnWriteAndComputeGas(addr, zeroTreeIndex, vkutils.CodeHashLeafKey)
 	gas += aw.TouchAddressOnWriteAndComputeGas(addr, zeroTreeIndex, vkutils.NonceLeafKey)
 	return gas
 }
 
 func (aw *AccessWitness) TouchTxOriginAndComputeGas(originAddr []byte) uint64 {
-	var gas uint64
-	gas += aw.TouchAddressOnReadAndComputeGas(originAddr, zeroTreeIndex, vkutils.VersionLeafKey)
-	gas += aw.TouchAddressOnReadAndComputeGas(originAddr, zeroTreeIndex, vkutils.CodeSizeLeafKey)
-	gas += aw.TouchAddressOnReadAndComputeGas(originAddr, zeroTreeIndex, vkutils.CodeKeccakLeafKey)
-	gas += aw.TouchAddressOnWriteAndComputeGas(originAddr, zeroTreeIndex, vkutils.NonceLeafKey)
-	gas += aw.TouchAddressOnWriteAndComputeGas(originAddr, zeroTreeIndex, vkutils.BalanceLeafKey)
-	return gas
+	for i := vkutils.VersionLeafKey; i <= vkutils.CodeSizeLeafKey; i++ {
+		aw.touchAddressAndChargeGas(originAddr, zeroTreeIndex, byte(i), i == vkutils.BalanceLeafKey || i == vkutils.NonceLeafKey)
+	}
+
+	// Kaustinen note: we're currently experimenting with stop chargin gas for the origin address
+	// so simple transfer still take 21000 gas. This is to potentially avoid breaking existing tooling.
+	// This is the reason why we return 0 instead of `gas`.
+	// Note that we still have to touch the addresses to make sure the witness is correct.
+	return 0
 }
 
 func (aw *AccessWitness) TouchTxExistingAndComputeGas(targetAddr []byte, sendsValue bool) uint64 {
-	var gas uint64
-	gas += aw.TouchAddressOnReadAndComputeGas(targetAddr, zeroTreeIndex, vkutils.VersionLeafKey)
-	gas += aw.TouchAddressOnReadAndComputeGas(targetAddr, zeroTreeIndex, vkutils.CodeSizeLeafKey)
-	gas += aw.TouchAddressOnReadAndComputeGas(targetAddr, zeroTreeIndex, vkutils.CodeKeccakLeafKey)
-	gas += aw.TouchAddressOnReadAndComputeGas(targetAddr, zeroTreeIndex, vkutils.NonceLeafKey)
+	aw.touchAddressAndChargeGas(targetAddr, zeroTreeIndex, vkutils.VersionLeafKey, false)
+	aw.touchAddressAndChargeGas(targetAddr, zeroTreeIndex, vkutils.CodeSizeLeafKey, false)
+	aw.touchAddressAndChargeGas(targetAddr, zeroTreeIndex, vkutils.CodeHashLeafKey, false)
+	aw.touchAddressAndChargeGas(targetAddr, zeroTreeIndex, vkutils.NonceLeafKey, false)
 	if sendsValue {
-		gas += aw.TouchAddressOnWriteAndComputeGas(targetAddr, zeroTreeIndex, vkutils.BalanceLeafKey)
+		aw.touchAddressAndChargeGas(targetAddr, zeroTreeIndex, vkutils.BalanceLeafKey, true)
 	} else {
-		gas += aw.TouchAddressOnReadAndComputeGas(targetAddr, zeroTreeIndex, vkutils.BalanceLeafKey)
+		aw.touchAddressAndChargeGas(targetAddr, zeroTreeIndex, vkutils.BalanceLeafKey, false)
 	}
-	return gas
+
+	// Kaustinen note: we're currently experimenting with stop chargin gas for the origin address
+	// so simple transfer still take 21000 gas. This is to potentially avoid breaking existing tooling.
+	// This is the reason why we return 0 instead of `gas`.
+	// Note that we still have to touch the addresses to make sure the witness is correct.
+	return 0
 }
 
-func (aw *AccessWitness) TouchAddressOnWriteAndComputeGas(addr []byte, treeIndex uint256.Int, subIndex byte) uint64 {
-	return aw.touchAddressAndChargeGas(addr, treeIndex, subIndex, true)
-}
-
-func (aw *AccessWitness) TouchAddressOnReadAndComputeGas(addr []byte, treeIndex uint256.Int, subIndex byte) uint64 {
-	return aw.touchAddressAndChargeGas(addr, treeIndex, subIndex, false)
+func (aw *AccessWitness) TouchSlotAndChargeGas(addr []byte, slot common.Hash, isWrite bool) uint64 {
+	treeIndex, subIndex := vkutils.GetTreeKeyStorageSlotTreeIndexes(slot.Bytes())
+	return aw.touchAddressAndChargeGas(addr, *treeIndex, subIndex, isWrite)
 }
 
 func (aw *AccessWitness) touchAddressAndChargeGas(addr []byte, treeIndex uint256.Int, subIndex byte, isWrite bool) uint64 {
@@ -219,7 +236,7 @@ type branchAccessKey struct {
 
 func newBranchAccessKey(addr []byte, treeIndex uint256.Int) branchAccessKey {
 	var sk branchAccessKey
-	copy(sk.addr[:], addr)
+	copy(sk.addr[20-len(addr):], addr)
 	sk.treeIndex = treeIndex
 	return sk
 }
@@ -234,4 +251,77 @@ func newChunkAccessKey(branchKey branchAccessKey, leafKey byte) chunkAccessKey {
 	lk.branchAccessKey = branchKey
 	lk.leafKey = leafKey
 	return lk
+}
+
+// touchCodeChunksRangeOnReadAndChargeGas is a helper function to touch every chunk in a code range and charge witness gas costs
+func (aw *AccessWitness) TouchCodeChunksRangeAndChargeGas(contractAddr []byte, startPC, size uint64, codeLen uint64, isWrite bool) uint64 {
+	// note that in the case where the copied code is outside the range of the
+	// contract code but touches the last leaf with contract code in it,
+	// we don't include the last leaf of code in the AccessWitness.  The
+	// reason that we do not need the last leaf is the account's code size
+	// is already in the AccessWitness so a stateless verifier can see that
+	// the code from the last leaf is not needed.
+	if (codeLen == 0 && size == 0) || startPC > codeLen {
+		return 0
+	}
+
+	endPC := startPC + size
+	if endPC > codeLen {
+		endPC = codeLen
+	}
+	if endPC > 0 {
+		endPC -= 1 // endPC is the last bytecode that will be touched.
+	}
+
+	var statelessGasCharged uint64
+	for chunkNumber := startPC / 31; chunkNumber <= endPC/31; chunkNumber++ {
+		treeIndex := *uint256.NewInt((chunkNumber + 128) / 256)
+		subIndex := byte((chunkNumber + 128) % 256)
+		gas := aw.touchAddressAndChargeGas(contractAddr, treeIndex, subIndex, isWrite)
+		var overflow bool
+		statelessGasCharged, overflow = math.SafeAdd(statelessGasCharged, gas)
+		if overflow {
+			panic("overflow when adding gas")
+		}
+	}
+
+	return statelessGasCharged
+}
+
+func (aw *AccessWitness) TouchVersion(addr []byte, isWrite bool) uint64 {
+	return aw.touchAddressAndChargeGas(addr, zeroTreeIndex, vkutils.VersionLeafKey, isWrite)
+}
+
+func (aw *AccessWitness) TouchBalance(addr []byte, isWrite bool) uint64 {
+	return aw.touchAddressAndChargeGas(addr, zeroTreeIndex, vkutils.BalanceLeafKey, isWrite)
+}
+
+func (aw *AccessWitness) TouchNonce(addr []byte, isWrite bool) uint64 {
+	return aw.touchAddressAndChargeGas(addr, zeroTreeIndex, vkutils.NonceLeafKey, isWrite)
+}
+
+func (aw *AccessWitness) TouchCodeSize(addr []byte, isWrite bool) uint64 {
+	return aw.touchAddressAndChargeGas(addr, zeroTreeIndex, vkutils.CodeSizeLeafKey, isWrite)
+}
+
+func (aw *AccessWitness) TouchCodeHash(addr []byte, isWrite bool) uint64 {
+	return aw.touchAddressAndChargeGas(addr, zeroTreeIndex, vkutils.CodeHashLeafKey, isWrite)
+}
+
+func (aw *AccessWitness) TouchAndChargeProofOfAbsence(addr []byte) uint64 {
+	var gas uint64
+	gas += aw.TouchAddressOnReadAndComputeGas(addr, zeroTreeIndex, vkutils.VersionLeafKey)
+	gas += aw.TouchAddressOnReadAndComputeGas(addr, zeroTreeIndex, vkutils.BalanceLeafKey)
+	gas += aw.TouchAddressOnReadAndComputeGas(addr, zeroTreeIndex, vkutils.CodeSizeLeafKey)
+	gas += aw.TouchAddressOnReadAndComputeGas(addr, zeroTreeIndex, vkutils.CodeHashLeafKey)
+	gas += aw.TouchAddressOnReadAndComputeGas(addr, zeroTreeIndex, vkutils.NonceLeafKey)
+	return gas
+}
+
+func (aw *AccessWitness) TouchAddressOnWriteAndComputeGas(addr []byte, treeIndex uint256.Int, subIndex byte) uint64 {
+	return aw.touchAddressAndChargeGas(addr, treeIndex, subIndex, true)
+}
+
+func (aw *AccessWitness) TouchAddressOnReadAndComputeGas(addr []byte, treeIndex uint256.Int, subIndex byte) uint64 {
+	return aw.touchAddressAndChargeGas(addr, treeIndex, subIndex, false)
 }
