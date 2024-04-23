@@ -68,7 +68,7 @@ func TestPing(t *testing.T) {
 	peersPool := peers.NewPool()
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := forkchoice.NewForkChoiceStorageMock()
+	f := forkchoice.NewForkChoiceStorageMock(t)
 	ethClock := getEthClock(t)
 
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
@@ -123,7 +123,7 @@ func TestGoodbye(t *testing.T) {
 	peersPool := peers.NewPool()
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := forkchoice.NewForkChoiceStorageMock()
+	f := forkchoice.NewForkChoiceStorageMock(t)
 	ethClock := getEthClock(t)
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
@@ -183,7 +183,7 @@ func TestMetadataV2(t *testing.T) {
 	peersPool := peers.NewPool()
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := forkchoice.NewForkChoiceStorageMock()
+	f := forkchoice.NewForkChoiceStorageMock(t)
 	ethClock := getEthClock(t)
 	nc := clparams.NetworkConfigs[clparams.MainnetNetwork]
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
@@ -241,7 +241,7 @@ func TestMetadataV1(t *testing.T) {
 	peersPool := peers.NewPool()
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := forkchoice.NewForkChoiceStorageMock()
+	f := forkchoice.NewForkChoiceStorageMock(t)
 
 	nc := clparams.NetworkConfigs[clparams.MainnetNetwork]
 	ethClock := getEthClock(t)
@@ -299,7 +299,7 @@ func TestStatus(t *testing.T) {
 	peersPool := peers.NewPool()
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := forkchoice.NewForkChoiceStorageMock()
+	f := forkchoice.NewForkChoiceStorageMock(t)
 
 	hs := handshake.New(ctx, getEthClock(t), &clparams.MainnetBeaconConfig, nil)
 	s := &cltypes.Status{

@@ -18,4 +18,6 @@ type SyncContributionPool interface {
 
 	// GetSyncContribution retrieves a sync contribution from the pool.
 	GetSyncContribution(slot, subcommitteeIndex uint64, beaconBlockRoot common.Hash) *cltypes.Contribution
+	// Obtain the sync aggregate for the sync messages pointing to a given beacon block root.
+	GetSyncAggregate(slot uint64, beaconBlockRoot common.Hash) (*cltypes.SyncAggregate, error)
 }
