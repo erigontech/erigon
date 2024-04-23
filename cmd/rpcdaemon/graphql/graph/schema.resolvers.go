@@ -161,7 +161,6 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 
 // Blocks is the resolver for the blocks field.
 func (r *queryResolver) Blocks(ctx context.Context, from *uint64, to *uint64) ([]*model.Block, error) {
-
 	var blocks []*model.Block
 
 	const maxBlocks = 25

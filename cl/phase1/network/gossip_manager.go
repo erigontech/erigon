@@ -43,6 +43,9 @@ type GossipManager struct {
 	syncContributionService      services.SyncContributionService
 	aggregateAndProofService     services.AggregateAndProofService
 	attestationService           services.AttestationService
+	voluntaryExitService         services.VoluntaryExitService
+	blsToExecutionChangeService  services.BLSToExecutionChangeService
+	proposerSlashingService      services.ProposerSlashingService
 }
 
 func NewGossipReceiver(
@@ -58,6 +61,9 @@ func NewGossipReceiver(
 	syncContributionService services.SyncContributionService,
 	aggregateAndProofService services.AggregateAndProofService,
 	attestationService services.AttestationService,
+	voluntaryExitService services.VoluntaryExitService,
+	blsToExecutionChangeService services.BLSToExecutionChangeService,
+	proposerSlashingService services.ProposerSlashingService,
 ) *GossipManager {
 	return &GossipManager{
 		sentinel:                     s,
@@ -72,6 +78,9 @@ func NewGossipReceiver(
 		syncContributionService:      syncContributionService,
 		aggregateAndProofService:     aggregateAndProofService,
 		attestationService:           attestationService,
+		voluntaryExitService:         voluntaryExitService,
+		blsToExecutionChangeService:  blsToExecutionChangeService,
+		proposerSlashingService:      proposerSlashingService,
 	}
 }
 
@@ -147,13 +156,26 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		}
 		return g.syncContributionService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameVoluntaryExit:
-		return operationsContract[*cltypes.SignedVoluntaryExit](ctx, g, data, int(version), "voluntary exit", g.forkChoice.OnVoluntaryExit)
+		obj := &cltypes.SignedVoluntaryExit{}
+		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
+			return err
+		}
+		return g.voluntaryExitService.ProcessMessage(ctx, data.SubnetId, obj)
+
 	case gossip.TopicNameProposerSlashing:
-		return operationsContract[*cltypes.ProposerSlashing](ctx, g, data, int(version), "proposer slashing", g.forkChoice.OnProposerSlashing)
+		obj := &cltypes.ProposerSlashing{}
+		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
+			return err
+		}
+		return g.proposerSlashingService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameAttesterSlashing:
 		return operationsContract[*cltypes.AttesterSlashing](ctx, g, data, int(version), "attester slashing", g.forkChoice.OnAttesterSlashing)
 	case gossip.TopicNameBlsToExecutionChange:
-		return operationsContract[*cltypes.SignedBLSToExecutionChange](ctx, g, data, int(version), "bls to execution change", g.forkChoice.OnBlsToExecutionChange)
+		obj := &cltypes.SignedBLSToExecutionChange{}
+		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
+			return err
+		}
+		return g.blsToExecutionChangeService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameBeaconAggregateAndProof:
 		obj := &cltypes.SignedAggregateAndProof{}
 		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
