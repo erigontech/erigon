@@ -108,7 +108,7 @@ func SpawnExecuteBlocksStageZk(s *StageState, u Unwinder, tx kv.RwTx, toBlock ui
 	logger.Start()
 	defer logger.Stop()
 
-	var stageProgress uint64
+	stageProgress := s.BlockNumber
 	var stoppedErr error
 Loop:
 	for blockNum := s.BlockNumber + 1; blockNum <= to; blockNum++ {

@@ -88,7 +88,7 @@ func (e *Executor) Close() {
 }
 
 func (e *Executor) Verify(p *Payload, request *VerifierRequest, oldStateRoot common.Hash) (bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*2)
 	defer cancel()
 
 	log.Debug("Sending request to grpc server", "grpcUrl", e.grpcUrl)

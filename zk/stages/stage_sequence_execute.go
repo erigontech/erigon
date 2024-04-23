@@ -48,11 +48,11 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/zk/erigon_db"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
-	"github.com/ledgerwatch/erigon/zk/tx"
 	"github.com/ledgerwatch/erigon/zk/txpool"
 	zktypes "github.com/ledgerwatch/erigon/zk/types"
 	"github.com/ledgerwatch/erigon/zk/utils"
 	"github.com/ledgerwatch/secp256k1"
+	zktx "github.com/ledgerwatch/erigon/zk/tx"
 )
 
 const (
@@ -170,6 +170,8 @@ func SpawnSequencingStage(
 		defer tx.Rollback()
 	}
 
+	l1Recovery := cfg.zk.L1SyncStartBlock > 0
+
 	hermezDb := hermez_db.NewHermezDb(tx)
 
 	executionAt, err := s.ExecutionAt(tx)
@@ -215,10 +217,25 @@ func SpawnSequencingStage(
 	nextBlockNum := executionAt + 1
 	thisBatch := lastBatch + 1
 	newBlockTimestamp := uint64(time.Now().Unix())
+	coinbase := cfg.zk.AddressSequencer
+
+	var decodedBlock zktx.DecodedBatchL2Data
+	var transactions []types.Transaction
+	var effectiveGases []uint8
+	workRemaining := true
+	if l1Recovery {
+		decodedBlock, coinbase, workRemaining, err = getNextL1BatchData(thisBatch, forkId, hermezDb)
+		if err != nil {
+			return err
+		}
+		transactions = decodedBlock.Transactions
+		newBlockTimestamp = parentBlock.Time() + uint64(decodedBlock.DeltaTimestamp)
+		effectiveGases = decodedBlock.EffectiveGasPricePercentages
+	}
 
 	header := &types.Header{
 		ParentHash: parentBlock.Hash(),
-		Coinbase:   cfg.zk.AddressSequencer,
+		Coinbase:   coinbase,
 		Difficulty: blockDifficulty,
 		Number:     new(big.Int).SetUint64(nextBlockNum),
 		GasLimit:   getGasLimit(uint16(forkId)),
@@ -253,15 +270,40 @@ func SpawnSequencingStage(
 	batchCounters.StartNewBlock()
 
 	// calculate and store the l1 info tree index used for this block
-	l1TreeUpdateIndex, l1TreeUpdate, err := calculateNextL1TreeUpdateToUse(tx, hermezDb)
+	infoTreeIndexProgress, err := stages.GetStageProgress(tx, stages.HighestUsedL1InfoIndex)
 	if err != nil {
 		return err
 	}
+
+	// if we are in a recovery state and recognise that a l1 info tree index has been reused
+	// then we need to not include the GER and L1 block hash into the block info root calculation, so
+	// we keep track of this here
+	includeGerInBlockInfoRoot := true
+
+	var l1TreeUpdateIndex uint64
+	var l1TreeUpdate *zktypes.L1InfoTreeUpdate
+	if l1Recovery {
+		l1TreeUpdateIndex = uint64(decodedBlock.L1InfoTreeIndex)
+		l1TreeUpdate, err = hermezDb.GetL1InfoTreeUpdate(l1TreeUpdateIndex)
+		if err != nil {
+			return err
+		}
+		if infoTreeIndexProgress >= l1TreeUpdateIndex {
+			includeGerInBlockInfoRoot = false
+		}
+	} else {
+		l1TreeUpdateIndex, l1TreeUpdate, err = calculateNextL1TreeUpdateToUse(infoTreeIndexProgress, hermezDb)
+		if err != nil {
+			return err
+		}
+		if l1TreeUpdateIndex > 0 {
+			infoTreeIndexProgress = l1TreeUpdateIndex
+		}
+	}
+
 	if err = hermezDb.WriteBlockL1InfoTreeIndex(nextBlockNum, l1TreeUpdateIndex); err != nil {
 		return err
 	}
-
-	l1Recovery := cfg.zk.L1SyncStartBlock > 0
 
 	parentRoot := parentBlock.Root()
 	if err = handleStateForNewBlockStarting(cfg.chainConfig, nextBlockNum, newBlockTimestamp, &parentRoot, l1TreeUpdate, ibs, hermezDb); err != nil {
@@ -286,12 +328,8 @@ LOOP:
 		case <-ticker.C:
 			log.Info(fmt.Sprintf("[%s] Waiting some more for txs from the pool...", logPrefix))
 		default:
-			var transactions []types.Transaction
-			var effectiveGases []uint8
-			workRemaining := true
-			if l1Recovery {
-				transactions, effectiveGases, workRemaining, err = getNextL1BatchTransactions(thisBatch, forkId, hermezDb)
-			} else {
+			if !l1Recovery {
+				transactions = make([]types.Transaction, 0)
 				cfg.txPool.LockFlusher()
 				transactions, err = getNextPoolTransactions(cfg, executionAt, forkId, yielded)
 				if err != nil {
@@ -395,7 +433,7 @@ LOOP:
 
 	l1BlockHash := common.Hash{}
 	ger := common.Hash{}
-	if l1TreeUpdate != nil {
+	if l1TreeUpdate != nil && includeGerInBlockInfoRoot {
 		l1BlockHash = l1TreeUpdate.ParentHash
 		ger = l1TreeUpdate.GER
 	}
@@ -404,7 +442,7 @@ LOOP:
 		return err
 	}
 
-	if err = updateSequencerProgress(tx, nextBlockNum, thisBatch, l1TreeUpdateIndex); err != nil {
+	if err = updateSequencerProgress(tx, nextBlockNum, thisBatch, infoTreeIndexProgress); err != nil {
 		return err
 	}
 
@@ -457,34 +495,49 @@ LOOP:
 	return transactions, err
 }
 
-func getNextL1BatchTransactions(batchNumber uint64, forkId uint64, hermezDb *hermez_db.HermezDb) ([]types.Transaction, []uint8, bool, error) {
+func getNextL1BatchData(batchNumber uint64, forkId uint64, hermezDb *hermez_db.HermezDb) (zktx.DecodedBatchL2Data, common.Address, bool, error) {
 	// we expect that the batch we're going to load in next should be in the db already because of the l1 block sync
 	// stage, if it is not there we need to panic as we're in a bad state
 	batchL2Data, err := hermezDb.GetL1BatchData(batchNumber)
 	if err != nil {
-		return nil, nil, true, err
+		return zktx.DecodedBatchL2Data{}, common.Address{}, true, err
 	}
+
 	if len(batchL2Data) == 0 {
 		// end of the line for batch recovery so return empty
-		return []types.Transaction{}, []uint8{}, false, nil
+		return zktx.DecodedBatchL2Data{}, common.Address{}, false, nil
 	}
 
-	transactions, _, effectiveGases, err := tx.DecodeTxs(batchL2Data, forkId)
+	coinbase := common.BytesToAddress(batchL2Data[:length.Addr])
+	batchL2Data = batchL2Data[length.Addr:]
+
+	decodedData, err := zktx.DecodeBatchL2Blocks(batchL2Data, forkId)
+	if err != nil {
+		return zktx.DecodedBatchL2Data{}, common.Address{}, true, err
+	}
+
+	if len(decodedData) == 0 {
+		return zktx.DecodedBatchL2Data{}, common.Address{}, false, nil
+	}
+
+	// todo - right now we only handle single block batches until multi block sequencing is in place so always
+	// take the first element
+	firstDecoded := decodedData[0]
 
 	isWorkRemaining := true
-	if len(transactions) == 0 {
+	if len(firstDecoded.Transactions) == 0 {
 		// we need to check if this batch should simply be empty or not so we need to check against the
 		// highest known batch number to see if we have work to do still
 		highestKnown, err := hermezDb.GetLastL1BatchData()
 		if err != nil {
-			return nil, nil, true, err
+			return zktx.DecodedBatchL2Data{}, common.Address{}, true, err
 		}
 		if batchNumber >= highestKnown {
 			isWorkRemaining = false
 		}
 	}
 
-	return transactions, effectiveGases, isWorkRemaining, err
+	return firstDecoded, coinbase, isWorkRemaining, err
 }
 
 const (
@@ -572,7 +625,7 @@ func postBlockStateHandling(
 			}
 		}
 
-		l2TxHash, err := tx.ComputeL2TxHash(
+		l2TxHash, err := zktx.ComputeL2TxHash(
 			t.GetChainID().ToBig(),
 			t.GetValue(),
 			t.GetPrice(),
@@ -618,24 +671,27 @@ func handleInjectedBatch(
 	forkId uint64,
 	smt *smt.SMT,
 ) (*types.Transaction, *types.Receipt, error) {
-	txs, _, _, err := tx.DecodeTxs(injected.Transaction, 5)
+	decodedBlocks, err := zktx.DecodeBatchL2Blocks(injected.Transaction, 5)
 	if err != nil {
 		return nil, nil, err
 	}
-	if len(txs) == 0 || len(txs) > 1 {
+	if len(decodedBlocks) == 0 || len(decodedBlocks) > 1 {
+		return nil, nil, errors.New("expected 1 block for the injected batch")
+	}
+	if len(decodedBlocks[0].Transactions) == 0 {
 		return nil, nil, errors.New("expected 1 transaction in the injected batch")
 	}
 
 	batchCounters := vm.NewBatchCounterCollector(smt.GetDepth()-1, uint16(forkId))
 
 	// process the tx and we can ignore the counters as an overflow at this stage means no network anyway
-	effectiveGas := DeriveEffectiveGasPrice(cfg, txs[0])
-	receipt, _, err := attemptAddTransaction(dbTx, cfg, batchCounters, header, parentBlock.Header(), txs[0], ibs, hermezDb, smt, effectiveGas)
+	effectiveGas := DeriveEffectiveGasPrice(cfg, decodedBlocks[0].Transactions[0])
+	receipt, _, err := attemptAddTransaction(dbTx, cfg, batchCounters, header, parentBlock.Header(), decodedBlocks[0].Transactions[0], ibs, hermezDb, smt, effectiveGas)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	return &txs[0], receipt, nil
+	return &decodedBlocks[0].Transactions[0], receipt, nil
 }
 
 func finaliseBlock(
@@ -875,15 +931,11 @@ func attemptAddTransaction(
 // will be called at the start of every new block created within a batch to figure out if there is a new GER
 // we can use or not.  In the special case that this is the first block we just return 0 as we need to use the
 // 0 index first before we can use 1+
-func calculateNextL1TreeUpdateToUse(tx kv.RwTx, hermezDb *hermez_db.HermezDb) (uint64, *zktypes.L1InfoTreeUpdate, error) {
+func calculateNextL1TreeUpdateToUse(lastInfoIndex uint64, hermezDb *hermez_db.HermezDb) (uint64, *zktypes.L1InfoTreeUpdate, error) {
 	// always default to 0 and only update this if the next available index has reached finality
 	var nextL1Index uint64 = 0
 
 	// check which was the last used index
-	lastInfoIndex, err := stages.GetStageProgress(tx, stages.HighestUsedL1InfoIndex)
-	if err != nil {
-		return 0, nil, err
-	}
 
 	// check if the next index is there and if it has reached finality or not
 	l1Info, err := hermezDb.GetL1InfoTreeUpdate(lastInfoIndex + 1)

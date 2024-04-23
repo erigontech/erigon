@@ -772,8 +772,9 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				contracts.SequencedBatchTopicEtrog,
 				contracts.VerificationTopicPreEtrog,
 				contracts.VerificationTopicEtrog,
+				contracts.UpdateL1InfoTreeTopic,
 			}}
-			l1Contracts = []libcommon.Address{cfg.AddressRollup, cfg.AddressAdmin}
+			l1Contracts = []libcommon.Address{cfg.AddressRollup, cfg.AddressAdmin, cfg.AddressGerManager}
 		}
 
 		backend.l1Syncer = syncer.NewL1Syncer(

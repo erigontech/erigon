@@ -199,7 +199,9 @@ func (srv *DataStreamServer) CreateStreamEntries(
 		if err != nil {
 			return nil, err
 		}
-		l1InfoTreeMinTimestamps[l1InfoIndex] = l1Info.Timestamp
+		if l1Info != nil {
+			l1InfoTreeMinTimestamps[l1InfoIndex] = l1Info.Timestamp
+		}
 	}
 
 	blockStart := srv.CreateBlockStartEntry(block, batchNumber, uint16(fork), ger, uint32(deltaTimestamp), uint32(l1InfoIndex), l1BlockHash)

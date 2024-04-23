@@ -48,23 +48,38 @@ var (
 	ErrInvalidData = errors.New("invalid data")
 )
 
-func DecodeTxs(txsData []byte, forkID uint64) ([]types.Transaction, []byte, []uint8, error) {
+type DecodedBatchL2Data struct {
+	Transactions                 []types.Transaction
+	EffectiveGasPricePercentages []uint8
+	DeltaTimestamp               uint32
+	L1InfoTreeIndex              uint32
+}
+
+func DecodeBatchL2Blocks(txsData []byte, forkID uint64) ([]DecodedBatchL2Data, error) {
+	var result []DecodedBatchL2Data
 	var pos uint64
-	var txs []types.Transaction
-	var efficiencyPercentages []uint8
 	txDataLength := uint64(len(txsData))
 	if txDataLength == 0 {
-		return txs, txsData, nil, nil
+		return result, nil
 	}
+	currentData := DecodedBatchL2Data{}
 	for pos < txDataLength {
 		num, err := strconv.ParseUint(hex.EncodeToString(txsData[pos:pos+1]), hex.Base, hex.BitSize64)
 		if err != nil {
 			log.Debug("error parsing header length: ", err)
-			return []types.Transaction{}, txsData, []uint8{}, err
+			return result, err
 		}
 
-		// if num is 11 then we are trying to parse a `changeL2Block` transaction so skip it
+		// if num is 11 then we are trying to parse a `changeL2Block` transaction
 		if num == changeL2BlockTxType {
+			if len(result) > 0 {
+				// we already have some data here so capture it and reset ready for the
+				// next block
+				result = append(result, currentData)
+				currentData = DecodedBatchL2Data{}
+			}
+			currentData.DeltaTimestamp = binary.BigEndian.Uint32(txsData[pos+1 : pos+5])
+			currentData.L1InfoTreeIndex = binary.BigEndian.Uint32(txsData[pos+5 : pos+9])
 			pos += 9
 			continue
 		}
@@ -72,23 +87,23 @@ func DecodeTxs(txsData []byte, forkID uint64) ([]types.Transaction, []byte, []ui
 		// First byte is the length and must be ignored
 		if num < c0 {
 			log.Debug("error num < c0 : %d, %d", num, c0)
-			return []types.Transaction{}, txsData, []uint8{}, ErrInvalidData
+			return result, ErrInvalidData
 		}
 		length := num - c0
 		if length > shortRlp { // If rlp is bigger than length 55
 			// n is the length of the rlp data without the header (1 byte) for example "0xf7"
 			if (pos + 1 + num - f7) > txDataLength {
 				log.Debug("error parsing length: ", err)
-				return []types.Transaction{}, txsData, []uint8{}, err
+				return result, err
 			}
 			n, err := strconv.ParseUint(hex.EncodeToString(txsData[pos+1:pos+1+num-f7]), hex.Base, hex.BitSize64) // +1 is the header. For example 0xf7
 			if err != nil {
 				log.Debug("error parsing length: ", err)
-				return []types.Transaction{}, txsData, []uint8{}, err
+				return result, err
 			}
 			if n+num < f7 {
 				log.Debug("error n + num < f7: ", err)
-				return []types.Transaction{}, txsData, []uint8{}, ErrInvalidData
+				return result, ErrInvalidData
 			}
 			length = n + num - f7 // num - f7 is the header. For example 0xf7
 		}
@@ -102,19 +117,19 @@ func DecodeTxs(txsData []byte, forkID uint64) ([]types.Transaction, []byte, []ui
 		if endPos > txDataLength {
 			err := fmt.Errorf("endPos %d is bigger than txDataLength %d", endPos, txDataLength)
 			log.Debug("error parsing header: ", err)
-			return []types.Transaction{}, txsData, []uint8{}, ErrInvalidData
+			return result, ErrInvalidData
 		}
 
 		if endPos < pos {
 			err := fmt.Errorf("endPos %d is smaller than pos %d", endPos, pos)
 			log.Debug("error parsing header: ", err)
-			return []types.Transaction{}, txsData, []uint8{}, ErrInvalidData
+			return result, ErrInvalidData
 		}
 
 		if endPos < pos {
 			err := fmt.Errorf("endPos %d is smaller than pos %d", endPos, pos)
 			log.Debug("error parsing header: ", err)
-			return []types.Transaction{}, txsData, []uint8{}, ErrInvalidData
+			return result, ErrInvalidData
 		}
 
 		fullDataTx := txsData[pos:endPos]
@@ -126,7 +141,7 @@ func DecodeTxs(txsData []byte, forkID uint64) ([]types.Transaction, []byte, []ui
 
 		if forkID >= uint64(constants.ForkID5Dragonfruit) {
 			efficiencyPercentage := txsData[dataStart+rLength+sLength+vLength : endPos]
-			efficiencyPercentages = append(efficiencyPercentages, efficiencyPercentage[0])
+			currentData.EffectiveGasPricePercentages = append(currentData.EffectiveGasPricePercentages, efficiencyPercentage[0])
 		}
 
 		pos = endPos
@@ -135,19 +150,23 @@ func DecodeTxs(txsData []byte, forkID uint64) ([]types.Transaction, []byte, []ui
 		var rlpFields [][]byte
 		err = rlp.DecodeBytes(txInfo, &rlpFields)
 		if err != nil {
-			log.Error("error decoding tx Bytes: ", err, ". fullDataTx: ", hex.EncodeToString(fullDataTx), "\n tx: ", hex.EncodeToString(txInfo), "\n Txs received: ", hex.EncodeToString(txsData))
-			return []types.Transaction{}, txsData, []uint8{}, ErrInvalidData
+			log.Error("error decoding tx Bytes: ", err, ". fullDataTx: ", hex.EncodeToString(fullDataTx), "\n tx: ", hex.EncodeToString(txInfo), "\n Transactions received: ", hex.EncodeToString(txsData))
+			return result, ErrInvalidData
 		}
 
 		legacyTx, err := rlpFieldsToLegacyTx(rlpFields, vData, rData, sData)
 		if err != nil {
-			log.Debug("error creating tx from rlp fields: ", err, ". fullDataTx: ", hex.EncodeToString(fullDataTx), "\n tx: ", hex.EncodeToString(txInfo), "\n Txs received: ", hex.EncodeToString(txsData))
-			return []types.Transaction{}, txsData, []uint8{}, err
+			log.Debug("error creating tx from rlp fields: ", err, ". fullDataTx: ", hex.EncodeToString(fullDataTx), "\n tx: ", hex.EncodeToString(txInfo), "\n Transactions received: ", hex.EncodeToString(txsData))
+			return result, err
 		}
 
-		txs = append(txs, legacyTx)
+		currentData.Transactions = append(currentData.Transactions, legacyTx)
 	}
-	return txs, txsData, efficiencyPercentages, nil
+
+	// capture the last blocks transactions before exiting
+	result = append(result, currentData)
+
+	return result, nil
 }
 
 func DecodeTx(encodedTx []byte, efficiencyPercentage byte, forkId uint16) (types.Transaction, uint8, error) {

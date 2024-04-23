@@ -84,7 +84,7 @@ LOOP:
 				return err
 			}
 
-			initBatch, transactions, err := l1_data.DecodeL1BatchData(transaction.GetData())
+			initBatch, transactions, coinbase, err := l1_data.DecodeL1BatchData(transaction.GetData())
 			if err != nil {
 				return err
 			}
@@ -92,7 +92,8 @@ LOOP:
 			for idx, trx := range transactions {
 				// add 1 here to have the batches line up, on the L1 they start at 1
 				b := initBatch + uint64(idx) + 1
-				if err := hermezDb.WriteL1BatchData(b, trx); err != nil {
+				data := append(coinbase.Bytes(), trx...)
+				if err := hermezDb.WriteL1BatchData(b, data); err != nil {
 					return err
 				}
 			}

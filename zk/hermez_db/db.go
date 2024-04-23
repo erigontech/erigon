@@ -33,6 +33,7 @@ const INTERMEDIATE_TX_STATEROOTS = "hermez_intermediate_tx_stateRoots" // l2bloc
 const BATCH_WITNESSES = "hermez_batch_witnesses"                       // batch number -> witness
 const BATCH_COUNTERS = "hermez_batch_counters"                         // batch number -> counters
 const L1_BATCH_DATA = "l1_batch_data"                                  // batch number -> l1 batch data from transaction call data
+const L1_INFO_TREE_HIGHEST_BLOCK = "l1_info_tree_highest_block"        // highest l1 block number found with L1 info tree updates
 
 type HermezDb struct {
 	tx kv.RwTx
@@ -79,6 +80,7 @@ func CreateHermezBuckets(tx kv.RwTx) error {
 		BATCH_WITNESSES,
 		BATCH_COUNTERS,
 		L1_BATCH_DATA,
+		L1_INFO_TREE_HIGHEST_BLOCK,
 	}
 	for _, t := range tables {
 		if err := tx.CreateBucket(t); err != nil {
@@ -1007,11 +1009,17 @@ func (db *HermezDbReader) GetBatchCounters(batchNumber uint64) (map[string]int, 
 	return countersMap, nil
 }
 
+// WriteL1BatchData stores the data for a given L1 batch number
+// coinbase = 20 bytes
+// batchL2Data = remaining
 func (db *HermezDb) WriteL1BatchData(batchNumber uint64, data []byte) error {
 	k := Uint64ToBytes(batchNumber)
 	return db.tx.Put(L1_BATCH_DATA, k, data)
 }
 
+// GetL1BatchData returns the data stored for a given L1 batch number
+// coinbase = 20 bytes
+// batchL2Data = remaining
 func (db *HermezDbReader) GetL1BatchData(batchNumber uint64) ([]byte, error) {
 	k := Uint64ToBytes(batchNumber)
 	return db.tx.GetOne(L1_BATCH_DATA, k)
@@ -1029,4 +1037,16 @@ func (db *HermezDbReader) GetLastL1BatchData() (uint64, error) {
 	}
 
 	return BytesToUint64(k), nil
+}
+
+func (db *HermezDb) WriteL1InfoTreeHighestBlock(blockNumber uint64) error {
+	return db.tx.Put(L1_INFO_TREE_HIGHEST_BLOCK, []byte{}, Uint64ToBytes(blockNumber))
+}
+
+func (db *HermezDbReader) GetL1InfoTreeHighestBlock() (uint64, error) {
+	data, err := db.tx.GetOne(L1_INFO_TREE_HIGHEST_BLOCK, []byte{})
+	if err != nil {
+		return 0, err
+	}
+	return BytesToUint64(data), nil
 }

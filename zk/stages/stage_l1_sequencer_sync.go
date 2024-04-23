@@ -4,17 +4,17 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/iden3/go-iden3-crypto/keccak256"
-	"github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	ethTypes "github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/zk/contracts"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
-	"github.com/ledgerwatch/erigon/zk/types"
 	"github.com/ledgerwatch/log/v3"
+	ethTypes "github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/zk/types"
+	"github.com/iden3/go-iden3-crypto/keccak256"
+	"github.com/gateway-fm/cdk-erigon-lib/common"
 )
 
 type L1SequencerSyncCfg struct {
@@ -68,6 +68,14 @@ func SpawnL1SequencerSyncStage(
 		return err
 	}
 
+	// because the info tree updates are used by the RPC node and the sequencer, and we can switch between
+	// the two, we need to ensure consistency when migrating from RPC to sequencer modes of operation,
+	// so we keep track of these block numbers outside of the usual stage progress
+	latestL1InfoTreeBlockNumber, err := hermezDb.GetL1InfoTreeHighestBlock()
+	if err != nil {
+		return err
+	}
+
 	if !cfg.syncer.IsSyncStarted() {
 		cfg.syncer.Run(progress)
 	}
@@ -82,17 +90,20 @@ Loop:
 		case l := <-logChan:
 			switch l.Topics[0] {
 			case contracts.UpdateL1InfoTreeTopic:
+				if latestL1InfoTreeBlockNumber > 0 && l.BlockNumber <= latestL1InfoTreeBlockNumber {
+					continue
+				}
 				latestUpdate, err = HandleL1InfoTreeUpdate(cfg.syncer, hermezDb, l, latestUpdate, found)
 				if err != nil {
 					return err
 				}
 				found = true
 				infoTreeUpdates++
+				latestL1InfoTreeBlockNumber = l.BlockNumber
 			case contracts.InitialSequenceBatchesTopic:
 				if err := HandleInitialSequenceBatches(cfg.syncer, hermezDb, l); err != nil {
 					return err
 				}
-				// todo: [zkevm] handle the writing of this information for use in execution
 			default:
 				log.Warn("received unexpected topic from l1 sync stage", "topic", l.Topics[0])
 			}
@@ -106,12 +117,16 @@ Loop:
 		}
 	}
 
+	if err = hermezDb.WriteL1InfoTreeHighestBlock(latestL1InfoTreeBlockNumber); err != nil {
+		return err
+	}
+
 	progress = cfg.syncer.GetLastCheckedL1Block()
 	if err = stages.SaveStageProgress(tx, stages.L1InfoTree, progress); err != nil {
 		return err
 	}
 
-	log.Info(fmt.Sprintf("[%s] new l1 data", logPrefix), "info_tree_updates", infoTreeUpdates)
+	log.Info(fmt.Sprintf("[%s] Info tree updates", logPrefix), "count", infoTreeUpdates)
 
 	if freshTx {
 		if err = tx.Commit(); err != nil {

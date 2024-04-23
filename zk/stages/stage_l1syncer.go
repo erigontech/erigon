@@ -107,6 +107,20 @@ func SpawnStageL1Syncer(
 		cfg.syncer.Run(l1BlockProgress)
 	}
 
+	latestL1InfoTreeUpdate, found, err := hermezDb.GetLatestL1InfoTreeUpdate()
+	if err != nil {
+		return err
+	}
+	infoTreeUpdates := 0
+
+	// because the info tree updates are used by the RPC node and the sequencer, and we can switch between
+	// the two, we need to ensure consistency when migrating from RPC to sequencer modes of operation,
+	// so we keep track of these block numbers outside of the usual stage progress
+	latestL1InfoTreeBlockNumber, err := hermezDb.GetL1InfoTreeHighestBlock()
+	if err != nil {
+		return err
+	}
+
 	logsChan := cfg.syncer.GetLogsChan()
 	progressMessageChan := cfg.syncer.GetProgressMessageChan()
 	highestVerification := types.L1BatchInfo{}
@@ -132,6 +146,17 @@ Loop:
 					return fmt.Errorf("failed to write verification for block %d, %w", info.L1BlockNo, err)
 				}
 				newVerificationsCount++
+			case logL1InfoTreeUpdate:
+				if latestL1InfoTreeBlockNumber > 0 && l.BlockNumber <= latestL1InfoTreeBlockNumber {
+					continue
+				}
+				latestL1InfoTreeUpdate, err = HandleL1InfoTreeUpdate(cfg.syncer, hermezDb, l, latestL1InfoTreeUpdate, found)
+				if err != nil {
+					return err
+				}
+				found = true
+				infoTreeUpdates++
+				latestL1InfoTreeBlockNumber = l.BlockNumber
 			case logIncompatible:
 				continue
 			default:
@@ -146,6 +171,10 @@ Loop:
 		}
 	}
 
+	if err = hermezDb.WriteL1InfoTreeHighestBlock(latestL1InfoTreeBlockNumber); err != nil {
+		return err
+	}
+
 	latestCheckedBlock := cfg.syncer.GetLastCheckedL1Block()
 	if latestCheckedBlock > l1BlockProgress {
 		log.Info(fmt.Sprintf("[%s] Saving L1 syncer progress", logPrefix), "latestCheckedBlock", latestCheckedBlock, "newVerificationsCount", newVerificationsCount, "newSequencesCount", newSequencesCount)
@@ -158,6 +187,10 @@ Loop:
 			if err := stages.SaveStageProgress(tx, stages.L1VerificationsBatchNo, highestVerification.BatchNo); err != nil {
 				return fmt.Errorf("failed to save stage progress, %w", err)
 			}
+		}
+
+		if infoTreeUpdates > 0 {
+			log.Info(fmt.Sprintf("[%s] Info tree updates", logPrefix), "count", infoTreeUpdates)
 		}
 
 		// State Root Verifications Check
@@ -185,9 +218,10 @@ Loop:
 type BatchLogType byte
 
 var (
-	logUnknown  BatchLogType = 0
-	logSequence BatchLogType = 1
-	logVerify   BatchLogType = 2
+	logUnknown          BatchLogType = 0
+	logSequence         BatchLogType = 1
+	logVerify           BatchLogType = 2
+	logL1InfoTreeUpdate BatchLogType = 4
 
 	logIncompatible BatchLogType = 100
 )
@@ -219,6 +253,8 @@ func parseLogType(l1RollupId uint64, log *ethTypes.Log) (l1BatchInfo types.L1Bat
 		} else {
 			batchLogType = logIncompatible
 		}
+	case contracts.UpdateL1InfoTreeTopic:
+		batchLogType = logL1InfoTreeUpdate
 	default:
 		batchLogType = logUnknown
 		batchNum = 0
