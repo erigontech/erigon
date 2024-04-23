@@ -147,13 +147,6 @@ func (g *Generator) GenerateWitness(tx kv.Tx, ctx context.Context, startBlock, e
 			return nil, err
 		}
 
-		var prevBlockHash libcommon.Hash
-		prevBlock, err := rawdb.ReadBlockByNumber(tx, blockNum-1)
-		if err != nil {
-			return nil, err
-		}
-		prevBlockHash = prevBlock.Hash()
-
 		reader := state.NewPlainState(tx, blockNum, systemcontracts.SystemContractCodeLookup[g.chainCfg.ChainName])
 
 		tds.SetStateReader(reader)
@@ -216,7 +209,7 @@ func (g *Generator) GenerateWitness(tx kv.Tx, ctx context.Context, startBlock, e
 
 		chainReader := stagedsync.NewChainReaderImpl(g.chainCfg, tx, nil)
 
-		_, err = core.ExecuteBlockEphemerallyZk(g.chainCfg, &vmConfig, getHashFn, engine, &prevBlockHash, block, tds, trieStateWriter, chainReader, nil, nil, hermezDb)
+		_, err = core.ExecuteBlockEphemerallyZk(g.chainCfg, &vmConfig, getHashFn, engine, block, tds, trieStateWriter, chainReader, nil, hermezDb)
 
 		if err != nil {
 			return nil, err

@@ -22,11 +22,9 @@ import (
 	"math/big"
 	"time"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/chain"
-
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -43,15 +41,13 @@ import (
 func ExecuteBlockEphemerallyZk(
 	chainConfig *chain.Config,
 	vmConfig *vm.Config,
-	blockHashFunc func(n uint64) libcommon.Hash,
+	blockHashFunc func(n uint64) common.Hash,
 	engine consensus.Engine,
-	prevBlockHash *libcommon.Hash,
 	block *types.Block,
 	stateReader state.StateReader,
 	stateWriter state.WriterWithChangeSets,
 	chainReader consensus.ChainHeaderReader,
-	getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error),
-	dbTx kv.RwTx,
+	getTracer func(txIndex int, txHash common.Hash) (vm.EVMLogger, error),
 	roHermezDb state.ReadOnlyHermezDb,
 ) (*EphemeralExecResult, error) {
 
@@ -76,85 +72,12 @@ func ExecuteBlockEphemerallyZk(
 		receipts    types.Receipts
 	)
 
-	var excessDataGas *big.Int
-	if chainReader != nil {
-		// TODO(eip-4844): understand why chainReader is sometimes nil (e.g. certain test cases)
-		ph := chainReader.GetHeaderByHash(block.ParentHash())
-		if ph != nil {
-			excessDataGas = ph.ExcessDataGas
-		}
-	}
-
-	if !vmConfig.ReadOnly {
-		if err := InitializeBlockExecution(engine, chainReader, header, blockTransactions, block.Uncles(), chainConfig, ibs, excessDataGas); err != nil {
-			return nil, err
-		}
-	}
-
-	if chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
-		misc.ApplyDAOHardFork(ibs)
+	blockInfoTree, excessDataGas, err := PrepareBlockTxExecution(chainConfig, engine, chainReader, block, ibs, roHermezDb, blockGasLimit, vmConfig.ReadOnly)
+	if err != nil {
+		return nil, err
 	}
 
 	blockNum := block.NumberU64()
-
-	//[zkevm] - get the last batch number so we can check for empty batches in between it and the new one
-	lastBatchInserted, err := roHermezDb.GetBatchNoByL2Block(blockNum - 1)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get last batch inserted: %v", err)
-	}
-
-	// write batches between last block and this if they exist
-	currentBatch, err := roHermezDb.GetBatchNoByL2Block(blockNum)
-	if err != nil {
-		return nil, err
-	}
-
-	//[zkevm] get batches between last block and this one
-	// plus this blocks ger
-	gersInBetween, err := roHermezDb.GetBatchGlobalExitRoots(lastBatchInserted, currentBatch)
-	if err != nil {
-		return nil, err
-	}
-
-	blockGer, err := roHermezDb.GetBlockGlobalExitRoot(blockNum)
-	if err != nil {
-		return nil, err
-	}
-	l1BlockHash, err := roHermezDb.GetBlockL1BlockHash(blockNum)
-	if err != nil {
-		return nil, err
-	}
-
-	blockTime := block.Time()
-	ibs.SyncerPreExecuteStateSet(chainConfig, blockNum, blockTime, prevBlockHash, &blockGer, &l1BlockHash, gersInBetween)
-	blockInfoTree := blockinfo.NewBlockInfoTree()
-	if chainConfig.IsForkID7Etrog(blockNum) {
-		coinbase := block.Coinbase()
-
-		// this is a case when we have injected batches
-		// we have to save the l1block hash and in this case we have to add
-		// the ger in that l1 bloc k into the block info tree
-		// even though it is previously added to the state
-		if l1BlockHash != (libcommon.Hash{}) && blockGer == (libcommon.Hash{}) {
-			blockGer, err = roHermezDb.GetGerForL1BlockHash(l1BlockHash)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		if err := blockInfoTree.InitBlockHeader(
-			prevBlockHash,
-			&coinbase,
-			blockNum,
-			blockGasLimit,
-			blockTime,
-			&blockGer,
-			&l1BlockHash,
-		); err != nil {
-			return nil, err
-		}
-	}
-
 	noop := state.NewNoopWriter()
 	logIndex := int64(0)
 	usedGas := new(uint64)
@@ -203,7 +126,7 @@ func ExecuteBlockEphemerallyZk(
 			return nil, err
 		}
 
-		// forkid8 tje poststate is empty
+		// forkid8 the poststate is empty
 		// forkid8 also fixed the bugs with logs and cumulative gas used
 		if !chainConfig.IsForkID8Elderberry(blockNum) {
 			// the stateroot in the transactions that comes from the datastream
@@ -280,14 +203,14 @@ func ExecuteBlockEphemerallyZk(
 		logIndex += int64(len(localReceipt.Logs))
 	}
 
-	var l2InfoRoot libcommon.Hash
+	var l2InfoRoot common.Hash
 	if chainConfig.IsForkID7Etrog(blockNum) {
 		// [zkevm] - set the block info tree root
 		root, err := blockInfoTree.SetBlockGasUsed(*usedGas)
 		if err != nil {
 			return nil, err
 		}
-		l2InfoRoot = libcommon.BigToHash(root)
+		l2InfoRoot = common.BigToHash(root)
 	}
 
 	ibs.PostExecuteStateSet(chainConfig, block.NumberU64(), &l2InfoRoot)
@@ -330,4 +253,107 @@ func ExecuteBlockEphemerallyZk(
 	}
 
 	return execRs, nil
+}
+
+func PrepareBlockTxExecution(
+	chainConfig *chain.Config,
+	engine consensus.Engine,
+	chainReader consensus.ChainHeaderReader,
+	block *types.Block,
+	ibs *state.IntraBlockState,
+	roHermezDb state.ReadOnlyHermezDb,
+	blockGasLimit uint64,
+	readOnly bool,
+) (blockInfoTree *blockinfo.BlockInfoTree, excessDataGas *big.Int, err error) {
+	var blockNum uint64
+	if block != nil {
+		blockNum = block.NumberU64()
+	}
+
+	prevBlockheader := chainReader.GetHeaderByNumber(blockNum - 1)
+	// TODO(eip-4844): understand why chainReader is sometimes nil (e.g. certain test cases)
+	if prevBlockheader != nil {
+		excessDataGas = prevBlockheader.ExcessDataGas
+	}
+
+	if !readOnly {
+		if err := InitializeBlockExecution(engine, chainReader, block.Header(), block.Transactions(), block.Uncles(), chainConfig, ibs, excessDataGas); err != nil {
+			return nil, nil, err
+		}
+	}
+
+	if chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
+		misc.ApplyDAOHardFork(ibs)
+	}
+
+	///////////////////////////////////////////
+	// [zkevm] set preexecution state 		 //
+	///////////////////////////////////////////
+	//[zkevm] - get the last batch number so we can check for empty batches in between it and the new one
+	lastBatchInserted, err := roHermezDb.GetBatchNoByL2Block(blockNum - 1)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get last batch inserted: %v", err)
+	}
+
+	// write batches between last block and this if they exist
+	currentBatch, err := roHermezDb.GetBatchNoByL2Block(blockNum)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	//[zkevm] get batches between last block and this one
+	// plus this blocks ger
+	gersInBetween, err := roHermezDb.GetBatchGlobalExitRoots(lastBatchInserted, currentBatch)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	blockGer, err := roHermezDb.GetBlockGlobalExitRoot(blockNum)
+	if err != nil {
+		return nil, nil, err
+	}
+	l1BlockHash, err := roHermezDb.GetBlockL1BlockHash(blockNum)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	blockTime := block.Time()
+	prevBlockRoot := prevBlockheader.Root
+	ibs.SyncerPreExecuteStateSet(chainConfig, blockNum, blockTime, &prevBlockRoot, &blockGer, &l1BlockHash, gersInBetween)
+	///////////////////////////////////////////
+	// [zkevm] finish set preexecution state //
+	///////////////////////////////////////////
+
+	///////////////////////////////////////////
+	// [zkevm] initiate block info tree		 //
+	///////////////////////////////////////////
+	blockInfoTree = blockinfo.NewBlockInfoTree()
+	if chainConfig.IsForkID7Etrog(blockNum) {
+		coinbase := block.Coinbase()
+
+		// this is a case when we have injected batches
+		// we have to save the l1block hash and in this case we have to add
+		// the ger in that l1 bloc k into the block info tree
+		// even though it is previously added to the state
+		if l1BlockHash != (common.Hash{}) && blockGer == (common.Hash{}) {
+			blockGer, err = roHermezDb.GetGerForL1BlockHash(l1BlockHash)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+
+		if err := blockInfoTree.InitBlockHeader(
+			&prevBlockRoot,
+			&coinbase,
+			blockNum,
+			blockGasLimit,
+			blockTime,
+			&blockGer,
+			&l1BlockHash,
+		); err != nil {
+			return nil, nil, err
+		}
+	}
+
+	return blockInfoTree, excessDataGas, nil
 }

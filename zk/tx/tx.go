@@ -504,9 +504,7 @@ func formatL2TxHashParam(param interface{}, paramLength int) (string, error) {
 		return "", fmt.Errorf("unsupported parameter type")
 	}
 
-	if strings.HasPrefix(paramStr, "0x") {
-		paramStr = paramStr[2:]
-	}
+	paramStr = strings.TrimPrefix(paramStr, "0x")
 
 	if len(paramStr)%2 == 1 {
 		paramStr = "0" + paramStr

@@ -12,7 +12,6 @@ import (
 
 	"github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/zk/constants"
 	"github.com/stretchr/testify/assert"
@@ -134,35 +133,6 @@ func TestDecodePre155BatchL2DataForkID5(t *testing.T) {
 	assert.Equal(t, "15927819", hex.EncodeToString(txs[0].GetData()))
 	assert.Equal(t, uint64(100000), txs[0].GetGas())
 	assert.Equal(t, uint256.NewInt(1000000000), txs[0].GetPrice())
-}
-
-func createTx(nonce, gasPrice, gasLimit, from, to, value, data string, chainID uint64) types.LegacyTx {
-	nonceUint, _ := hexutil.DecodeUint64(nonce)
-	gasPriceInt, _ := uint256.FromHex(gasPrice)
-	gasLimitUint, _ := hexutil.DecodeUint64(gasLimit)
-	valueInt, _ := uint256.FromHex(value)
-	fromAddr := common.HexToAddress(from)
-
-	var toAddress *common.Address
-	if to != "" {
-		addr := common.HexToAddress(to)
-		toAddress = &addr
-	}
-
-	tx := types.LegacyTx{
-		CommonTx: types.CommonTx{
-			ChainID: uint256.NewInt(chainID),
-			Nonce:   nonceUint,
-			Gas:     gasLimitUint,
-			To:      toAddress,
-			Value:   valueInt,
-			Data:    hexutil.MustDecode(data),
-		},
-		GasPrice: gasPriceInt,
-	}
-	tx.SetSender(fromAddr)
-
-	return tx
 }
 
 func TestComputeL2TxHashScenarios(t *testing.T) {
