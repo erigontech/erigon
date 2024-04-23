@@ -78,6 +78,8 @@ go.work*
 docker-compose.*.yml
 .env
 coverage.out
+coverage-erigon.out
+coverage-erigon-lib.out
 
 dist
 __debug_bin
