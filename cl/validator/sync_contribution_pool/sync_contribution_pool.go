@@ -202,7 +202,7 @@ func (s *syncContributionPoolImpl) GetSyncAggregate(slot uint64, beaconBlockRoot
 	}
 	aggregate := &cltypes.SyncAggregate{}
 	signatures := [][]byte{}
-	syncSubCommitteeIndex := s.beaconCfg.SyncCommitteeSize / s.beaconCfg.SyncCommitteeSubnetCount
+	syncSubCommitteeSize := s.beaconCfg.SyncCommitteeSize / s.beaconCfg.SyncCommitteeSubnetCount
 	// triple for-loop for the win.
 	for _, contribution := range contributions {
 		if bytes.Equal(contribution.AggregationBits, make([]byte, cltypes.SyncCommitteeAggregationBitsSize)) {
@@ -213,7 +213,7 @@ func (s *syncContributionPoolImpl) GetSyncAggregate(slot uint64, beaconBlockRoot
 				bitIndex := i*8 + j
 				partecipated := utils.IsBitOn(contribution.AggregationBits, bitIndex)
 				if partecipated {
-					participantIndex := syncSubCommitteeIndex*contribution.SubcommitteeIndex + uint64(bitIndex)
+					participantIndex := syncSubCommitteeSize*contribution.SubcommitteeIndex + uint64(bitIndex)
 					utils.FlipBitOn(aggregate.SyncCommiteeBits[:], int(participantIndex))
 				}
 			}
