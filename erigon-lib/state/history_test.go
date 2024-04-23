@@ -91,6 +91,7 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 		values := generateTestData(t, length.Addr, length.Addr+length.Hash, totalTx, 100, 10)
 		db, h := filledHistoryValues(t, true, values, log.New())
 		defer db.Close()
+		defer h.Close()
 
 		ctx := context.Background()
 		rwtx, err := db.BeginRw(ctx)
@@ -160,6 +161,7 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 		values := generateTestData(t, length.Addr, length.Addr+length.Hash, totalTx, 100, 10)
 		db, h := filledHistoryValues(t, false, values, log.New())
 		defer db.Close()
+		defer h.Close()
 
 		ctx := context.Background()
 		rwtx, err := db.BeginRw(ctx)
