@@ -24,6 +24,7 @@ import (
 	"github.com/anacrolix/torrent/storage"
 	"github.com/anacrolix/torrent/types/infohash"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 )
 
 const (
@@ -112,6 +113,62 @@ func (m mdbxPieceCompletion) Set(pk metainfo.PieceKey, b bool) error {
 }
 
 func (m *mdbxPieceCompletion) Close() error {
+	m.db.Close()
+	return nil
+}
+
+type mdbxPieceCompletionBatch struct {
+	db *mdbx.MdbxKV
+}
+
+var _ storage.PieceCompletion = (*mdbxPieceCompletionBatch)(nil)
+
+func NewMdbxPieceCompletionBatch(db kv.RwDB) (ret storage.PieceCompletion, err error) {
+	ret = &mdbxPieceCompletionBatch{db: db.(*mdbx.MdbxKV)}
+	return
+}
+
+func (m *mdbxPieceCompletionBatch) Get(pk metainfo.PieceKey) (cn storage.Completion, err error) {
+	err = m.db.View(context.Background(), func(tx kv.Tx) error {
+		var key [infohash.Size + 4]byte
+		copy(key[:], pk.InfoHash[:])
+		binary.BigEndian.PutUint32(key[infohash.Size:], uint32(pk.Index))
+		cn.Ok = true
+		v, err := tx.GetOne(kv.BittorrentCompletion, key[:])
+		if err != nil {
+			return err
+		}
+		switch string(v) {
+		case complete:
+			cn.Complete = true
+		case incomplete:
+			cn.Complete = false
+		default:
+			cn.Ok = false
+		}
+		return nil
+	})
+	return
+}
+
+func (m *mdbxPieceCompletionBatch) Set(pk metainfo.PieceKey, b bool) error {
+	if c, err := m.Get(pk); err == nil && c.Ok && c.Complete == b {
+		return nil
+	}
+	var key [infohash.Size + 4]byte
+	copy(key[:], pk.InfoHash[:])
+	binary.BigEndian.PutUint32(key[infohash.Size:], uint32(pk.Index))
+
+	v := []byte(incomplete)
+	if b {
+		v = []byte(complete)
+	}
+	return m.db.Batch(func(tx kv.RwTx) error {
+		return tx.Put(kv.BittorrentCompletion, key[:], v)
+	})
+}
+
+func (m *mdbxPieceCompletionBatch) Close() error {
 	m.db.Close()
 	return nil
 }

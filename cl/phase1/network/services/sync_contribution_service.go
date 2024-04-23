@@ -136,7 +136,11 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 	// emit contribution_and_proof
 	s.emitters.Publish("contribution_and_proof", signedContribution)
 	// add the contribution to the pool
-	return s.syncContributionPool.AddSyncContribution(headState, contributionAndProof.Contribution)
+	err = s.syncContributionPool.AddSyncContribution(headState, contributionAndProof.Contribution)
+	if errors.Is(err, sync_contribution_pool.ErrIsSuperset) {
+		return ErrIgnore
+	}
+	return err
 }
 
 // def get_sync_subcommittee_pubkeys(state: BeaconState, subcommittee_index: uint64) -> Sequence[BLSPubkey]:

@@ -56,7 +56,7 @@ type History struct {
 	// Files:
 	//  .v - list of values
 	//  .vi - txNum+key -> offset in .v
-	dirtyFiles *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
+	dirtyFiles *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in Aggregator
 
 	// roFiles derivative from field `file`, but without garbage (canDelete=true, overlaps, etc...)
 	// BeginFilesRo() using this field in zero-copy way

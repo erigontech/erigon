@@ -29,6 +29,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	// "github.com/ethereum/go-verkle"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 
@@ -49,7 +50,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	// "github.com/ledgerwatch/erigon/turbo/trie/vkutils"
@@ -194,7 +194,7 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string, logger log.L
 	}
 
 	var stateWriter state.StateWriter
-	if ethconfig.EnableHistoryV4InTest {
+	if config3.EnableHistoryV4InTest {
 		panic("implement me")
 		//tx.(*temporal.Tx).Agg().SetTxNum(0)
 		//stateWriter = state.NewWriterV4(tx.(kv.TemporalTx))
