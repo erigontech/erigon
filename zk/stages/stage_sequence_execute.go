@@ -306,7 +306,7 @@ func SpawnSequencingStage(
 	}
 
 	parentRoot := parentBlock.Root()
-	if err = handleStateForNewBlockStarting(cfg.chainConfig, nextBlockNum, newBlockTimestamp, &parentRoot, l1TreeUpdate, ibs, hermezDb); err != nil {
+	if err = handleStateForNewBlockStarting(cfg.chainConfig, nextBlockNum, newBlockTimestamp, &parentRoot, l1TreeUpdate, ibs, hermezDb, !includeGerInBlockInfoRoot); err != nil {
 		return err
 	}
 
@@ -570,7 +570,7 @@ func processInjectedInitialBatch(
 	header.Time = injected.Timestamp
 
 	parentRoot := parentBlock.Root()
-	if err = handleStateForNewBlockStarting(cfg.chainConfig, 1, injected.Timestamp, &parentRoot, fakeL1TreeUpdate, ibs, hermezDb); err != nil {
+	if err = handleStateForNewBlockStarting(cfg.chainConfig, 1, injected.Timestamp, &parentRoot, fakeL1TreeUpdate, ibs, hermezDb, false); err != nil {
 		return err
 	}
 
@@ -794,8 +794,13 @@ func handleStateForNewBlockStarting(
 	l1info *zktypes.L1InfoTreeUpdate,
 	ibs *state.IntraBlockState,
 	hermezDb *hermez_db.HermezDb,
+	forceSkipGerManagerWrite bool,
 ) error {
 	ibs.PreExecuteStateSet(chainConfig, blockNumber, timestamp, stateRoot)
+
+	if forceSkipGerManagerWrite {
+		return nil
+	}
 
 	// handle writing to the ger manager contract
 	if l1info != nil {
