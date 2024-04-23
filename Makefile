@@ -162,7 +162,7 @@ test-erigon-ext:
 
 ## test:                              run unit tests with a 100s timeout
 test: test-erigon-lib
-	$(GOTEST) --timeout 10m -coverprofile=coverage-erigon.out
+	$(GOTEST) --timeout 10m -coverprofile=coverage.out
 
 test3: test-erigon-lib
 	$(GOTEST) --timeout 10m -tags $(BUILD_TAGS),e3
@@ -313,7 +313,7 @@ user_macos:
 ## coverage:                          run code coverage report and output total coverage %
 .PHONY: coverage
 coverage:
-	@go test -coverprofile=coverage.out ./... > /dev/null 2>&1 && go tool cover -func coverage.out | grep total | awk '{print substr($$3, 1, length($$3)-1)}'
+	@go test -coverprofile=coverage-total.out ./... > /dev/null 2>&1 && go tool cover -func coverage-total.out | grep total | awk '{print substr($$3, 1, length($$3)-1)}'
 
 ## hive:                              run hive test suite locally using docker e.g. OUTPUT_DIR=~/results/hive SIM=ethereum/engine make hive
 .PHONY: hive
