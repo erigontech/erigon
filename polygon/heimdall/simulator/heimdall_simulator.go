@@ -96,6 +96,7 @@ func NewHeimdall(ctx context.Context, chain string, snapshotLocation string, log
 		lastAvailableBlockNum = 0
 	} else {
 		lastAvailableBlockNum = iterations[0]
+		iterations = iterations[1:]
 	}
 
 	s := HeimdallSimulator{
@@ -136,8 +137,8 @@ func (h *HeimdallSimulator) FetchSpan(ctx context.Context, spanID uint64) (*heim
 		if len(h.iterations) == 0 {
 			h.lastAvailableBlockNumber++
 		} else {
-			h.iterations = h.iterations[1:]
 			h.lastAvailableBlockNumber = h.iterations[0]
+			h.iterations = h.iterations[1:]
 		}
 	}
 
