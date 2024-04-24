@@ -169,7 +169,14 @@ func (h *HeimdallSimulator) FetchStateSyncEvents(ctx context.Context, fromId uin
 				return nil, err
 			}
 		}
-		h.lastAvailableBlockNumber += 500000
+
+		if len(h.iterations) == 0 {
+			// we increment by 500k because the events we need are not in this snapshot file
+			h.lastAvailableBlockNumber += 500000
+		} else {
+			h.lastAvailableBlockNumber = h.iterations[0]
+			h.iterations = h.iterations[1:]
+		}
 
 		events, maxTime, err = h.blockReader.EventsByIdFromSnapshot(fromId, to, limit)
 		if err != nil {
