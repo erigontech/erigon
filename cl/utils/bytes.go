@@ -152,3 +152,12 @@ func MergeBitlists(a, b []byte) {
 		a[i] |= b[i]
 	}
 }
+
+func IsDisjoint(a, b []byte) bool {
+	for i := range a {
+		if a[i]&b[i] != 0 {
+			return false
+		}
+	}
+	return true
+}

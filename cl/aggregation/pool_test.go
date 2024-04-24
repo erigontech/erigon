@@ -2,7 +2,6 @@ package aggregation
 
 import (
 	"context"
-	"log"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
@@ -32,7 +31,7 @@ var (
 		[96]byte{'g', 'h', 'i', 'j', 'k', 'l'},
 	)
 	att1_4 = solid.NewAttestionFromParameters(
-		[]byte{0b00111010, 0, 0, 0},
+		[]byte{0b00110000, 0, 0, 0b00000011},
 		attData1,
 		[96]byte{'m', 'n', 'o', 'p', 'q', 'r'},
 	)
@@ -99,14 +98,13 @@ func (t *PoolTestSuite) TestAddAttestation() {
 			},
 			hashRoot: attData1Root,
 			expect: solid.NewAttestionFromParameters(
-				[]byte{0b00111111, 0b00000011, 0, 0}, // merge of att1_2, att1_3 and att1_4
+				[]byte{0b00111111, 0b00000011, 0, 0b00000011}, // merge of att1_2, att1_3 and att1_4
 				attData1,
 				mockAggrResult),
 		},
 	}
 
 	for _, tc := range testcases {
-		log.Printf("test case: %s", tc.name)
 		pool := NewAggregationPool(context.Background(), nil, nil, nil)
 		for _, att := range tc.atts {
 			pool.AddAttestation(att)
