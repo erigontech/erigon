@@ -201,6 +201,8 @@ LOOP:
 		select {
 		case l2Block := <-l2BlockChan:
 			if cfg.zkCfg.SyncLimit > 0 && l2Block.L2BlockNumber >= cfg.zkCfg.SyncLimit {
+				// stop the node going into a crazy loop
+				time.Sleep(2 * time.Second)
 				break LOOP
 			}
 
