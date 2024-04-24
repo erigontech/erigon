@@ -57,7 +57,7 @@ type Domain struct {
 	*/
 
 	*History
-	dirtyFiles *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
+	dirtyFiles *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in Aggregator
 	// roFiles derivative from field `file`, but without garbage (canDelete=true, overlaps, etc...)
 	// BeginFilesRo() using this field in zero-copy way
 	visibleFiles atomic.Pointer[[]ctxItem]
@@ -124,7 +124,7 @@ func (d *Domain) openList(fNames []string) error {
 	d.closeWhatNotInList(fNames)
 	d.garbageFiles = d.scanStateFiles(fNames)
 	if err := d.openFiles(); err != nil {
-		return fmt.Errorf("History.OpenList: %s, %w", d.filenameBase, err)
+		return fmt.Errorf("Domain.openList: %w, %s", err, d.filenameBase)
 	}
 	return nil
 }
@@ -229,8 +229,9 @@ func (d *Domain) openFiles() (err error) {
 				continue
 			}
 			if item.decompressor, err = seg.NewDecompressor(datPath); err != nil {
-				d.logger.Debug("Domain.openFiles: %w, %s", err, datPath)
+				d.logger.Debug("Domain.openFiles:", "err", err, "file", datPath)
 				if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
+					err = nil
 					continue
 				}
 				return false
@@ -242,7 +243,7 @@ func (d *Domain) openFiles() (err error) {
 			idxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, fromStep, toStep))
 			if dir.FileExist(idxPath) {
 				if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
-					d.logger.Debug("InvertedIndex.openFiles: %w, %s", err, idxPath)
+					d.logger.Debug("InvertedIndex.openFiles:", "err", err, "file", idxPath)
 					return false
 				}
 				totalKeys += item.index.KeyCount()
@@ -250,7 +251,11 @@ func (d *Domain) openFiles() (err error) {
 			if item.bindex == nil {
 				bidxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.bt", d.filenameBase, fromStep, toStep))
 				if item.bindex, err = OpenBtreeIndexWithDecompressor(bidxPath, 2048, item.decompressor); err != nil {
-					d.logger.Debug("InvertedIndex.openFiles: %w, %s", err, bidxPath)
+					d.logger.Debug("InvertedIndex.openFiles:", "err", err, "file", bidxPath)
+					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
+						err = nil
+						continue
+					}
 					return false
 				}
 				//totalKeys += item.bindex.KeyCount()

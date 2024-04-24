@@ -290,13 +290,15 @@ func TestPoolSyncCommittees(t *testing.T) {
 }
 
 func TestPoolSyncContributionAndProofs(t *testing.T) {
+	aggrBits := make([]byte, cltypes.SyncCommitteeAggregationBitsSize)
+	aggrBits[0] = 1
 	msgs := []*cltypes.SignedContributionAndProof{
 		{
 			Message: &cltypes.ContributionAndProof{
 				Contribution: &cltypes.Contribution{
 					Slot:            1,
 					BeaconBlockRoot: libcommon.Hash{1, 2, 3, 4, 5, 6, 7, 8},
-					AggregationBits: make([]byte, cltypes.SyncCommitteeAggregationBitsSize),
+					AggregationBits: aggrBits,
 				},
 			},
 		},
@@ -332,6 +334,6 @@ func TestPoolSyncContributionAndProofs(t *testing.T) {
 		Slot:              1,
 		BeaconBlockRoot:   libcommon.Hash{1, 2, 3, 4, 5, 6, 7, 8},
 		SubcommitteeIndex: 0,
-		AggregationBits:   make([]byte, cltypes.SyncCommitteeAggregationBitsSize),
+		AggregationBits:   aggrBits,
 	})
 }

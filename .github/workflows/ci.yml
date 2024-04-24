@@ -33,6 +33,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v4
         with:
           go-version: '1.20'
@@ -57,7 +59,7 @@ jobs:
         if: runner.os == 'Linux'
         uses: golangci/golangci-lint-action@v4
         with:
-          version: v1.56.1
+          version: v1.57.2
           skip-build-cache: true
           args: --help
 
@@ -71,6 +73,14 @@ jobs:
 
       - name: Test
         run: make test
+
+      - name: SonarCloud
+        if: runner.os == 'Linux'
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        continue-on-error: true
 
   tests-windows:
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}

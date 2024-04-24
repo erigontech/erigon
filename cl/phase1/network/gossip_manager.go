@@ -42,6 +42,10 @@ type GossipManager struct {
 	syncCommitteeMessagesService services.SyncCommitteeMessagesService
 	syncContributionService      services.SyncContributionService
 	aggregateAndProofService     services.AggregateAndProofService
+	attestationService           services.AttestationService
+	voluntaryExitService         services.VoluntaryExitService
+	blsToExecutionChangeService  services.BLSToExecutionChangeService
+	proposerSlashingService      services.ProposerSlashingService
 }
 
 func NewGossipReceiver(
@@ -56,6 +60,10 @@ func NewGossipReceiver(
 	syncCommitteeMessagesService services.SyncCommitteeMessagesService,
 	syncContributionService services.SyncContributionService,
 	aggregateAndProofService services.AggregateAndProofService,
+	attestationService services.AttestationService,
+	voluntaryExitService services.VoluntaryExitService,
+	blsToExecutionChangeService services.BLSToExecutionChangeService,
+	proposerSlashingService services.ProposerSlashingService,
 ) *GossipManager {
 	return &GossipManager{
 		sentinel:                     s,
@@ -69,6 +77,10 @@ func NewGossipReceiver(
 		syncCommitteeMessagesService: syncCommitteeMessagesService,
 		syncContributionService:      syncContributionService,
 		aggregateAndProofService:     aggregateAndProofService,
+		attestationService:           attestationService,
+		voluntaryExitService:         voluntaryExitService,
+		blsToExecutionChangeService:  blsToExecutionChangeService,
+		proposerSlashingService:      proposerSlashingService,
 	}
 }
 
@@ -116,7 +128,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 		return err
 	}
 	if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
-		log.Debug("failed publish gossip", "err", err)
+		log.Warn("failed publish gossip", "err", err)
 	}
 	return nil
 }
@@ -144,13 +156,26 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		}
 		return g.syncContributionService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameVoluntaryExit:
-		return operationsContract[*cltypes.SignedVoluntaryExit](ctx, g, data, int(version), "voluntary exit", g.forkChoice.OnVoluntaryExit)
+		obj := &cltypes.SignedVoluntaryExit{}
+		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
+			return err
+		}
+		return g.voluntaryExitService.ProcessMessage(ctx, data.SubnetId, obj)
+
 	case gossip.TopicNameProposerSlashing:
-		return operationsContract[*cltypes.ProposerSlashing](ctx, g, data, int(version), "proposer slashing", g.forkChoice.OnProposerSlashing)
+		obj := &cltypes.ProposerSlashing{}
+		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
+			return err
+		}
+		return g.proposerSlashingService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameAttesterSlashing:
 		return operationsContract[*cltypes.AttesterSlashing](ctx, g, data, int(version), "attester slashing", g.forkChoice.OnAttesterSlashing)
 	case gossip.TopicNameBlsToExecutionChange:
-		return operationsContract[*cltypes.SignedBLSToExecutionChange](ctx, g, data, int(version), "bls to execution change", g.forkChoice.OnBlsToExecutionChange)
+		obj := &cltypes.SignedBLSToExecutionChange{}
+		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
+			return err
+		}
+		return g.blsToExecutionChangeService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameBeaconAggregateAndProof:
 		obj := &cltypes.SignedAggregateAndProof{}
 		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
@@ -176,19 +201,10 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 			return g.syncCommitteeMessagesService.ProcessMessage(ctx, data.SubnetId, msg)
 		case gossip.IsTopicBeaconAttestation(data.Name):
 			att := &solid.Attestation{}
-			if err := att.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
-				g.sentinel.BanPeer(ctx, data.Peer)
+			if err := att.DecodeSSZ(data.Data, int(version)); err != nil {
 				return err
 			}
-			if err := g.forkChoice.OnCheckReceivedAttestation(data.Name, att); err != nil {
-				log.Debug("failed to check attestation", "err", err)
-				if errors.Is(err, forkchoice.ErrIgnore) {
-					return nil
-				}
-				return err
-			}
-			// check if it needs to be aggregated
-			return g.committeeSub.CheckAggregateAttestation(att)
+			return g.attestationService.ProcessMessage(ctx, data.SubnetId, att)
 		default:
 			return fmt.Errorf("unknown topic %s", data.Name)
 		}
