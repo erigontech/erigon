@@ -826,8 +826,7 @@ func (ac *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 			if fstat := fullStat.String(); fstat != "" {
 				ac.a.logger.Info("[snapshots] PruneSmallBatches finished", "took", time.Since(started).String(), "stat", fstat)
 			}
-			// state may have change while we were pruning
-			return ac.CanPrune(tx, ac.minimaxTxNumInDomainFiles(false)), nil
+			return false, nil
 		}
 		fullStat.Accumulate(stat)
 

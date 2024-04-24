@@ -1049,9 +1049,6 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	require.True(t, strings.HasSuffix(c.historyPath, "v1-accounts.0-1.v"))
 	require.EqualValues(t, 3*maxTx, c.historyCount)
 	require.Equal(t, 3, c.efHistoryComp.Count()/2)
-	//require.Len(t, c.indexBitmaps["key2"].ToArray(), int(maxTx))
-	//require.Len(t, c.indexBitmaps["key1"].ToArray(), int(maxTx))
-	//require.Len(t, c.indexBitmaps["key3"+string(l)].ToArray(), int(maxTx))
 
 	sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
 	require.NoError(t, err)
@@ -1515,10 +1512,6 @@ func generateUpdates(r *rand.Rand, totalTx, keyTxsLimit uint64) []upd {
 		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
 		value := make([]byte, 10)
 		r.Read(value)
-		// TODO (awskii) this should be fixed in separate PR
-		//if r.Intn(100) > 85 {
-		//	value = value[:0]
-		//}
 
 		updates = append(updates, upd{txNum: txNum, value: value})
 		usedTxNums[txNum] = true
