@@ -318,10 +318,6 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		downloading:         map[string]struct{}{},
 		webseedsDiscover:    discover,
 	}
-	if dbg.DownloaderOff() {
-		return d, nil
-	}
-
 	d.webseeds.SetTorrent(d.torrentFS, snapLock.Downloads, cfg.DownloadTorrentFilesFromWebseed)
 
 	requestHandler.downloader = d
@@ -2573,9 +2569,6 @@ func (d *Downloader) Stats() AggStats {
 }
 
 func (d *Downloader) Close() {
-	if dbg.DownloaderOff() {
-		return
-	}
 	d.logger.Debug("[snapshots] stopping downloader")
 	d.stopMainLoop()
 	d.wg.Wait()
