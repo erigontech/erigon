@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	mock_aggregation "github.com/ledgerwatch/erigon/cl/aggregation/mock"
+	mock_aggregation "github.com/ledgerwatch/erigon/cl/aggregation/mock_services"
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/pool"
