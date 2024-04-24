@@ -448,7 +448,6 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 
 			return true
 		}(),
-		DebugEnabled:      ctx.Bool(utils.RpcDbgFlag.Name),
 		HttpServerEnabled: ctx.Bool(utils.HTTPServerEnabledFlag.Name),
 		Dirs:              cfg.Dirs,
 
@@ -463,6 +462,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		AuthRpcPort:              ctx.Int(utils.AuthRpcPort.Name),
 		JWTSecretPath:            jwtSecretPath,
 		TraceRequests:            ctx.Bool(utils.HTTPTraceFlag.Name),
+		DebugSingleRequest:       ctx.Bool(utils.HTTPTraceSingleFlag.Name),
 		HttpCORSDomain:           libcommon.CliString2Array(ctx.String(utils.HTTPCORSDomainFlag.Name)),
 		HttpVirtualHost:          libcommon.CliString2Array(ctx.String(utils.HTTPVirtualHostsFlag.Name)),
 		AuthRpcVirtualHost:       libcommon.CliString2Array(ctx.String(utils.AuthRpcVirtualHostsFlag.Name)),

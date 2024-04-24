@@ -246,8 +246,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if origin := r.Header.Get("Origin"); origin != "" {
 		ctx = context.WithValue(ctx, "Origin", origin)
 	}
-	if v := r.Header.Get(dbg.HTTPHeader); v == "true" {
-		ctx = dbg.ToContext(ctx, true)
+	if s.debugSingleRequest {
+		if v := r.Header.Get(dbg.HTTPHeader); v == "true" {
+			ctx = dbg.ToContext(ctx, true)
+		}
 	}
 
 	w.Header().Set("content-type", contentType)

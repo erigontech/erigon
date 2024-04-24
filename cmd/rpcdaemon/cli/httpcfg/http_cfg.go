@@ -10,8 +10,7 @@ import (
 )
 
 type HttpCfg struct {
-	Enabled      bool
-	DebugEnabled bool
+	Enabled bool
 
 	GraphQLEnabled           bool
 	WithDatadir              bool // Erigon's database can be read by separated processes on same machine - in read-only mode - with full support of transactions. It will share same "OS PageCache" with Erigon process.
@@ -68,7 +67,8 @@ type HttpCfg struct {
 	SocketListenUrl     string
 
 	JWTSecretPath             string // Engine API Authentication
-	TraceRequests             bool   // Always trace requests in INFO level
+	TraceRequests             bool   // Print requests to logs at INFO level
+	DebugSingleRequest        bool   // Print single-request-related debugging info to logs at INFO level
 	HTTPTimeouts              rpccfg.HTTPTimeouts
 	AuthRpcTimeouts           rpccfg.HTTPTimeouts
 	EvmCallTimeout            time.Duration

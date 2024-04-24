@@ -175,7 +175,7 @@ to test the RPC.
 
 ### Debugging
 
-Add `--rpc.dbg=true` flag, then can send header "dbg: true":
+To print more detailed logs for 1 request - add `--rpc.dbg.single=true` flag. Then can send HTTP header `"dbg: true"`:
 
 ```
 curl -X POST -H "dbg: true" -H "Content-Type: application/json" --data '{"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id":1}' localhost:8545
@@ -515,15 +515,9 @@ Then update your `app.json` for ethstats-client like that:
       "RPC_PORT": "8545",
       "LISTENING_PORT": "30303",
       "INSTANCE_NAME": "Erigon node",
-      "CONTACT_DETAILS": <your
-      twitter
-      handle>,
+      "CONTACT_DETAILS": "<your twitter handle>",
       "WS_SERVER": "wss://ethstats.net/api",
-      "WS_SECRET": <put
-      your
-      secret
-      key
-      here>,
+      "WS_SECRET": "<put your secret key here>",
       "VERBOSITY": 2
     }
   }
