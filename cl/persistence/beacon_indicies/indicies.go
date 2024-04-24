@@ -50,7 +50,7 @@ func ReadHighestFinalized(tx kv.Tx) (uint64, error) {
 	return base_encoding.Decode64FromBytes4(val), nil
 }
 
-// WriteBlockRootSlot writes the slot associated with a block root.
+// WriteHeaderSlot writes the slot associated with a block root.
 func WriteHeaderSlot(tx kv.RwTx, blockRoot libcommon.Hash, slot uint64) error {
 	return tx.Put(kv.BlockRootToSlot, blockRoot[:], base_encoding.Encode64ToBytes4(slot))
 }
@@ -68,7 +68,7 @@ func ReadBlockSlotByBlockRoot(tx kv.Tx, blockRoot libcommon.Hash) (*uint64, erro
 	return slot, nil
 }
 
-// WriteBlockRootSlot writes the slot associated with a block root.
+// WriteStateRoot writes the slot associated with a block root.
 func WriteStateRoot(tx kv.RwTx, blockRoot libcommon.Hash, stateRoot libcommon.Hash) error {
 	if err := tx.Put(kv.BlockRootToStateRoot, blockRoot[:], stateRoot[:]); err != nil {
 		return err

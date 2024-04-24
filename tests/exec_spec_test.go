@@ -6,12 +6,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/log/v3"
 )
 
 func TestExecutionSpec(t *testing.T) {
-	if ethconfig.EnableHistoryV3InTest {
+	if config3.EnableHistoryV3InTest {
 		t.Skip("fix me in e3 please")
 	}
 

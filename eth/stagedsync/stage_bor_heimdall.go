@@ -282,7 +282,6 @@ func BorHeimdallForward(
 			snap := loadSnapshot(blockNum, header.Hash(), cfg.borConfig, recents, signatures, cfg.snapDb, logger)
 
 			lastPersistedBlockNum, err := lastPersistedSnapshotBlock(ctx, cfg.snapDb)
-
 			if err != nil {
 				return err
 			}
@@ -329,6 +328,8 @@ func BorHeimdallForward(
 				return fmt.Errorf("can't persist validator sets: %w", err)
 			}
 		}
+
+		snapTime = snapTime + time.Since(snapStart)
 
 		if err := checkBorHeaderExtraDataIfRequired(chain, header, cfg.borConfig); err != nil {
 			return err
@@ -709,7 +710,7 @@ func initValidatorSets(
 
 	var err error
 
-	for i := uint64(firstBlockNum); i <= blockNum; i++ {
+	for i := firstBlockNum; i <= blockNum; i++ {
 		header := chain.GetHeaderByNumber(i)
 		{
 			// `snap.apply` bottleneck - is recover of signer.

@@ -69,6 +69,21 @@ func (mr *MockSyncContributionPoolMockRecorder) AddSyncContribution(headState, c
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddSyncContribution", reflect.TypeOf((*MockSyncContributionPool)(nil).AddSyncContribution), headState, contribution)
 }
 
+// GetSyncAggregate mocks base method.
+func (m *MockSyncContributionPool) GetSyncAggregate(slot uint64, beaconBlockRoot common.Hash) (*cltypes.SyncAggregate, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetSyncAggregate", slot, beaconBlockRoot)
+	ret0, _ := ret[0].(*cltypes.SyncAggregate)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetSyncAggregate indicates an expected call of GetSyncAggregate.
+func (mr *MockSyncContributionPoolMockRecorder) GetSyncAggregate(slot, beaconBlockRoot any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSyncAggregate", reflect.TypeOf((*MockSyncContributionPool)(nil).GetSyncAggregate), slot, beaconBlockRoot)
+}
+
 // GetSyncContribution mocks base method.
 func (m *MockSyncContributionPool) GetSyncContribution(slot, subcommitteeIndex uint64, beaconBlockRoot common.Hash) *cltypes.Contribution {
 	m.ctrl.T.Helper()
