@@ -139,8 +139,8 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 	return &BaseAPI{filters: f, stateCache: stateCache, blocksLRU: blocksLRU, _blockReader: blockReader, _txnReader: blockReader, _agg: agg, evmCallTimeout: evmCallTimeout, _engine: engine, dirs: dirs}
 }
 
-func (api *BaseAPI) chainConfig(tx kv.Tx) (*chain.Config, error) {
-	cfg, _, err := api.chainConfigWithGenesis(tx)
+func (api *BaseAPI) chainConfig(ctx context.Context, tx kv.Tx) (*chain.Config, error) {
+	cfg, _, err := api.chainConfigWithGenesis(ctx, tx)
 	return cfg, err
 }
 
@@ -149,8 +149,8 @@ func (api *BaseAPI) engine() consensus.EngineReader {
 }
 
 // nolint:unused
-func (api *BaseAPI) genesis(tx kv.Tx) (*types.Block, error) {
-	_, genesis, err := api.chainConfigWithGenesis(tx)
+func (api *BaseAPI) genesis(ctx context.Context, tx kv.Tx) (*types.Block, error) {
+	_, genesis, err := api.chainConfigWithGenesis(ctx, tx)
 	return genesis, err
 }
 
@@ -158,15 +158,15 @@ func (api *BaseAPI) txnLookup(tx kv.Tx, txnHash common.Hash) (uint64, bool, erro
 	return api._txnReader.TxnLookup(context.Background(), tx, txnHash)
 }
 
-func (api *BaseAPI) blockByNumberWithSenders(tx kv.Tx, number uint64) (*types.Block, error) {
+func (api *BaseAPI) blockByNumberWithSenders(ctx context.Context, tx kv.Tx, number uint64) (*types.Block, error) {
 	hash, hashErr := api._blockReader.CanonicalHash(context.Background(), tx, number)
 	if hashErr != nil {
 		return nil, hashErr
 	}
-	return api.blockWithSenders(tx, hash, number)
+	return api.blockWithSenders(ctx, tx, hash, number)
 }
 
-func (api *BaseAPI) blockByHashWithSenders(tx kv.Tx, hash common.Hash) (*types.Block, error) {
+func (api *BaseAPI) blockByHashWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash) (*types.Block, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
 			return it, nil
@@ -177,16 +177,16 @@ func (api *BaseAPI) blockByHashWithSenders(tx kv.Tx, hash common.Hash) (*types.B
 		return nil, nil
 	}
 
-	return api.blockWithSenders(tx, hash, *number)
+	return api.blockWithSenders(ctx, tx, hash, *number)
 }
 
-func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) (*types.Block, error) {
+func (api *BaseAPI) blockWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash, number uint64) (*types.Block, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
 			return it, nil
 		}
 	}
-	block, _, err := api._blockReader.BlockWithSenders(context.Background(), tx, hash, number)
+	block, _, err := api._blockReader.BlockWithSenders(ctx, tx, hash, number)
 	if err != nil {
 		return nil, err
 	}
@@ -223,13 +223,13 @@ func (api *BaseAPI) historyV3(tx kv.Tx) bool {
 	return enabled
 }
 
-func (api *BaseAPI) chainConfigWithGenesis(tx kv.Tx) (*chain.Config, *types.Block, error) {
+func (api *BaseAPI) chainConfigWithGenesis(ctx context.Context, tx kv.Tx) (*chain.Config, *types.Block, error) {
 	cc, genesisBlock := api._chainConfig.Load(), api._genesis.Load()
 	if cc != nil && genesisBlock != nil {
 		return cc, genesisBlock, nil
 	}
 
-	genesisBlock, err := api.blockByRPCNumber(0, tx)
+	genesisBlock, err := api.blockByRPCNumber(ctx, 0, tx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -251,14 +251,14 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 	return api.filters.LastPendingBlock()
 }
 
-func (api *BaseAPI) blockByRPCNumber(number rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
+func (api *BaseAPI) blockByRPCNumber(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
 	n, h, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
 
 	// it's ok to use context.Background(), because in "Remote RPCDaemon" `tx` already contains internal ctx
-	block, err := api.blockWithSenders(tx, h, n)
+	block, err := api.blockWithSenders(ctx, tx, h, n)
 	return block, err
 }
 

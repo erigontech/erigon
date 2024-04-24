@@ -249,6 +249,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if s.debugSingleRequest {
 		if v := r.Header.Get(dbg.HTTPHeader); v == "true" {
 			ctx = dbg.ToContext(ctx, true)
+
 		}
 	}
 

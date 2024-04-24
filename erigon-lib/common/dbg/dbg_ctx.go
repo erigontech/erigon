@@ -7,15 +7,15 @@ import (
 type debugContextKey struct{}
 
 // Enabling detailed debugging logs for given context
-func ToContext(ctx context.Context, val bool) context.Context {
-	return context.WithValue(ctx, debugContextKey{}, val)
+func ToContext(ctx context.Context, v bool) context.Context {
+	return context.WithValue(ctx, debugContextKey{}, v)
 }
 func Enabled(ctx context.Context) bool {
-	t := ctx.Value(debugContextKey{})
-	if t == nil {
+	v := ctx.Value(debugContextKey{})
+	if v == nil {
 		return false
 	}
-	return t.(bool)
+	return v.(bool)
 }
 
 // https://stackoverflow.com/a/3561399 -> https://www.rfc-editor.org/rfc/rfc6648
