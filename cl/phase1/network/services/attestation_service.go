@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/phase1/network/subnets"
@@ -19,6 +21,8 @@ import (
 var (
 	computeSubnetForAttestation  = subnets.ComputeSubnetForAttestation
 	computeCommitteeCountPerSlot = subnets.ComputeCommitteeCountPerSlot
+	computeSigningRoot           = fork.ComputeSigningRoot
+	blsVerify                    = bls.Verify
 )
 
 type attestationService struct {
@@ -59,7 +63,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		committeeIndex = att.AttestantionData().CommitteeIndex()
 		targetEpoch    = att.AttestantionData().Target().Epoch()
 	)
-	headState := s.syncedDataManager.HeadState()
+	headState := s.syncedDataManager.HeadStateReader()
 	if headState == nil {
 		return ErrIgnore
 	}
@@ -117,7 +121,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if setBits != 1 {
 		return fmt.Errorf("attestation does not have exactly one participating validator")
 	}
-
 	// [IGNORE] There has been no other valid attestation seen on an attestation subnet that has an identical attestation.data.target.epoch and participating validator index.
 	if err != nil {
 		return err
@@ -132,6 +135,26 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return fmt.Errorf("validator already seen in target epoch %w", ErrIgnore)
 	}
 	s.validatorAttestationSeen.Add(vIndex, targetEpoch)
+
+	// [REJECT] The signature of attestation is valid.
+	signature := att.Signature()
+	pubKey, err := headState.ValidatorPublicKey(int(beaconCommittee[onBitIndex]))
+	if err != nil {
+		return fmt.Errorf("unable to get public key: %v", err)
+	}
+	domain, err := headState.GetDomain(s.beaconCfg.DomainBeaconAttester, targetEpoch)
+	if err != nil {
+		return fmt.Errorf("unable to get the domain: %v", err)
+	}
+	signingRoot, err := computeSigningRoot(att.AttestantionData(), domain)
+	if err != nil {
+		return fmt.Errorf("unable to get signing root: %v", err)
+	}
+	if valid, err := blsVerify(signature[:], signingRoot[:], pubKey[:]); err != nil {
+		return err
+	} else if !valid {
+		return fmt.Errorf("invalid signature")
+	}
 
 	// [IGNORE] The block being voted for (attestation.data.beacon_block_root) has been seen (via both gossip and non-gossip sources)
 	// (a client MAY queue attestations for processing once block is retrieved).

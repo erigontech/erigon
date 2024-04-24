@@ -43,7 +43,7 @@ func setupAggregateAndProofTest(t *testing.T) (AggregateAndProofService, *synced
 	cn()
 	cfg := &clparams.MainnetBeaconConfig
 	syncedDataManager := synced_data.NewSyncedDataManager(true, cfg)
-	forkchoiceMock := forkchoice.NewForkChoiceStorageMock()
+	forkchoiceMock := forkchoice.NewForkChoiceStorageMock(t)
 	blockService := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, cfg, nil, true)
 	return blockService, syncedDataManager, forkchoiceMock
 }

@@ -45,7 +45,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		bcfg.CapellaForkEpoch = 1
 		blocks, preState, postState = tests.GetCapellaRandom()
 	}
-	fcu = forkchoice.NewForkChoiceStorageMock()
+	fcu = forkchoice.NewForkChoiceStorageMock(t)
 	db = memdb.NewTestDB(t)
 	blobDb := memdb.NewTestDB(t)
 	var reader *tests.MockBlockReader
