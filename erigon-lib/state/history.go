@@ -305,6 +305,30 @@ func (h *History) missedIdxFiles() (l []*filesItem) {
 	return l
 }
 
+func (h *History) buildVi(ctx context.Context, item *filesItem, ps *background.ProgressSet) (err error) {
+	if item.decompressor == nil {
+		return fmt.Errorf("buildVI: passed item with nil decompressor %s %d-%d", h.filenameBase, item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep)
+	}
+
+	search := &filesItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum}
+	iiItem, ok := h.InvertedIndex.dirtyFiles.Get(search)
+	if !ok {
+		return nil
+	}
+
+	if iiItem.decompressor == nil {
+		return fmt.Errorf("buildVI: got iiItem with nil decompressor %s %d-%d", h.filenameBase, item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep)
+	}
+	fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
+	idxPath := h.vAccessorFilePath(fromStep, toStep)
+
+	_, err = h.buildVI(ctx, idxPath, item.decompressor, iiItem.decompressor, ps)
+	if err != nil {
+		return fmt.Errorf("buildVI: %w", err)
+	}
+	return nil
+}
+
 func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHist *seg.Decompressor, ps *background.ProgressSet) (string, error) {
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   hist.Count(),
@@ -385,30 +409,6 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		}
 	}
 	return historyIdxPath, nil
-}
-
-func (h *History) buildVi(ctx context.Context, item *filesItem, ps *background.ProgressSet) (err error) {
-	if item.decompressor == nil {
-		return fmt.Errorf("buildVI: passed item with nil decompressor %s %d-%d", h.filenameBase, item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep)
-	}
-
-	search := &filesItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum}
-	iiItem, ok := h.InvertedIndex.dirtyFiles.Get(search)
-	if !ok {
-		return nil
-	}
-
-	if iiItem.decompressor == nil {
-		return fmt.Errorf("buildVI: got iiItem with nil decompressor %s %d-%d", h.filenameBase, item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep)
-	}
-	fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
-	idxPath := h.vAccessorFilePath(fromStep, toStep)
-
-	_, err = h.buildVI(ctx, idxPath, item.decompressor, iiItem.decompressor, ps)
-	if err != nil {
-		return fmt.Errorf("buildVI: %w", err)
-	}
-	return nil
 }
 
 func (h *History) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {

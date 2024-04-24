@@ -86,7 +86,6 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 }
 
 func TestHistoryCollationsAndBuilds(t *testing.T) {
-	t.Skip()
 	t.Run("largeValues=true", func(t *testing.T) {
 		totalTx := uint64(1000)
 		values := generateTestData(t, length.Addr, length.Addr+length.Hash, totalTx, 100, 10)
@@ -98,8 +97,9 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 		require.NoError(t, err)
 		defer rwtx.Rollback()
 
-		for i := uint64(0); i < totalTx; i += h.aggregationStep {
-			collation, err := h.collate(ctx, 0, 0, 1000, rwtx)
+		var lastAggergatedTx uint64
+		for i := uint64(0); i+h.aggregationStep < totalTx; i += h.aggregationStep {
+			collation, err := h.collate(ctx, i/h.aggregationStep, i, i+h.aggregationStep, rwtx)
 			require.NoError(t, err)
 			defer collation.Close()
 
@@ -108,7 +108,7 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 			require.NotEmptyf(t, collation.efHistoryPath, "collation.efHistoryPath is empty")
 			require.NotNil(t, collation.efHistoryComp)
 
-			sf, err := h.buildFiles(ctx, 0, collation, background.NewProgressSet())
+			sf, err := h.buildFiles(ctx, i/h.aggregationStep, collation, background.NewProgressSet())
 			require.NoError(t, err)
 			require.NotNil(t, sf)
 			defer sf.CleanupOnError()
@@ -136,7 +136,7 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 				vi := 0
 				updates, ok := values[string(keyBuf)]
 				require.Truef(t, ok, "key not found in values")
-				require.Len(t, updates, int(ef.Count()), "updates count mismatch")
+				//require.Len(t, updates, int(ef.Count()), "updates count mismatch")
 
 				for efIt.HasNext() {
 					txNum, err := efIt.Next()
@@ -152,11 +152,21 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 					}
 					vi++
 				}
+				values[string(keyBuf)] = updates[vi:]
 				require.True(t, sort.StringsAreSorted(seenKeys))
+			}
+			h.integrateFiles(sf, i, i+h.aggregationStep)
+			lastAggergatedTx = i + h.aggregationStep
+		}
+
+		for _, updates := range values {
+			for _, upd := range updates {
+				require.GreaterOrEqual(t, upd.txNum, lastAggergatedTx, "txNum %d is less than lastAggregatedTx %d", upd.txNum, lastAggergatedTx)
 			}
 		}
 	})
 	t.Run("largeValues=false", func(t *testing.T) {
+		t.Skip()
 		totalTx := uint64(1000)
 		values := generateTestData(t, length.Addr, length.Addr+length.Hash, totalTx, 100, 10)
 		db, h := filledHistoryValues(t, false, values, log.New())
