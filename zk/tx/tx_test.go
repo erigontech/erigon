@@ -451,3 +451,18 @@ func Test_BlockBatchL2DataEncode(t *testing.T) {
 	expectedInfoTreeBytes = binary.BigEndian.AppendUint32(expectedInfoTreeBytes, 2)
 	require.Equal(t, expectedInfoTreeBytes, batchL2Data[5:9], "mismatch in l1 info tree")
 }
+
+func Test_BatchL2DataWithMultipleEmptyBlocks(t *testing.T) {
+	testData := "0b000001f4000000000b000001f400000000"
+	decoded, err := hex.DecodeString(testData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks, err := DecodeBatchL2Blocks(decoded, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocks) != 2 {
+		t.Fatalf("expected 2 blocks but found %v", len(blocks))
+	}
+}

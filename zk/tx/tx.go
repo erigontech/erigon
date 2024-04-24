@@ -63,7 +63,9 @@ func DecodeBatchL2Blocks(txsData []byte, forkID uint64) ([]DecodedBatchL2Data, e
 		return result, nil
 	}
 	currentData := DecodedBatchL2Data{}
+	lastProcessWasChangeBlock := false
 	for pos < txDataLength {
+		lastProcessWasChangeBlock = false
 		num, err := strconv.ParseUint(hex.EncodeToString(txsData[pos:pos+1]), hex.Base, hex.BitSize64)
 		if err != nil {
 			log.Debug("error parsing header length: ", err)
@@ -72,15 +74,13 @@ func DecodeBatchL2Blocks(txsData []byte, forkID uint64) ([]DecodedBatchL2Data, e
 
 		// if num is 11 then we are trying to parse a `changeL2Block` transaction
 		if num == changeL2BlockTxType {
-			if len(result) > 0 {
-				// we already have some data here so capture it and reset ready for the
-				// next block
-				result = append(result, currentData)
-				currentData = DecodedBatchL2Data{}
-			}
+			// we already have some data here so capture it and reset ready for the next block
+			result = append(result, currentData)
+			currentData = DecodedBatchL2Data{}
 			currentData.DeltaTimestamp = binary.BigEndian.Uint32(txsData[pos+1 : pos+5])
 			currentData.L1InfoTreeIndex = binary.BigEndian.Uint32(txsData[pos+5 : pos+9])
 			pos += 9
+			lastProcessWasChangeBlock = true
 			continue
 		}
 
@@ -163,8 +163,11 @@ func DecodeBatchL2Blocks(txsData []byte, forkID uint64) ([]DecodedBatchL2Data, e
 		currentData.Transactions = append(currentData.Transactions, legacyTx)
 	}
 
-	// capture the last blocks transactions before exiting
-	result = append(result, currentData)
+	// capture the last blocks transactions before exiting but only if we have something to add
+	// if the last part of the loop was an empty block then we don't want to re-add it
+	if !lastProcessWasChangeBlock {
+		result = append(result, currentData)
+	}
 
 	return result, nil
 }

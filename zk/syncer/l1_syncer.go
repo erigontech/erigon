@@ -331,7 +331,6 @@ func (s *L1Syncer) callGetRollupSequencedBatches(ctx context.Context, addr *comm
 		return common.Hash{}, 0, errorShortResponseLT32
 	}
 	h := common.BytesToHash(resp[:32])
-	fmt.Printf("hash: %s\n", h.String())
 
 	if len(resp) < 96 {
 		return common.Hash{}, 0, errorShortResponseLT96
