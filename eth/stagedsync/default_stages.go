@@ -135,12 +135,21 @@ func DefaultStages(ctx context.Context,
 			Description: "Hash the key in the state",
 			Disabled:    bodies.historyV3 || config3.EnableHistoryV4InTest || dbg.StagesOnlyBlocks,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+				if exec.chainConfig.IsOsaka(1700825701) {
+					return nil
+				}
 				return SpawnHashStateStage(s, txc.Tx, hashState, ctx, logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
+				if exec.chainConfig.IsOsaka(1700825701) {
+					return nil
+				}
 				return UnwindHashStateStage(u, s, txc.Tx, hashState, ctx, logger)
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
+				if exec.chainConfig.IsOsaka(1700825701) {
+					return nil
+				}
 				return PruneHashStateStage(p, tx, hashState, ctx)
 			},
 		},
