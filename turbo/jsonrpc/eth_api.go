@@ -159,7 +159,7 @@ func (api *BaseAPI) txnLookup(tx kv.Tx, txnHash common.Hash) (uint64, bool, erro
 }
 
 func (api *BaseAPI) blockByNumberWithSenders(ctx context.Context, tx kv.Tx, number uint64) (*types.Block, error) {
-	hash, hashErr := api._blockReader.CanonicalHash(context.Background(), tx, number)
+	hash, hashErr := api._blockReader.CanonicalHash(ctx, tx, number)
 	if hashErr != nil {
 		return nil, hashErr
 	}

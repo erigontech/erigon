@@ -374,7 +374,7 @@ func (api *PrivateDebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash 
 	if err != nil {
 		return nil, err
 	}
-	header, err := api._blockReader.Header(context.Background(), tx, h, n)
+	header, err := api._blockReader.Header(ctx, tx, h, n)
 	if err != nil {
 		return nil, err
 	}
