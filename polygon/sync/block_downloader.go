@@ -172,6 +172,7 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 
 			blockCount = 0
 			blocksTotalSize = 0
+			fetchStartTime = time.Now()
 
 		default:
 			// carry on
