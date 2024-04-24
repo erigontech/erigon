@@ -23,7 +23,7 @@ func ComputeShuffledIndex(conf *clparams.BeaconChainConfig, ind, ind_count uint6
 		// Read hash value.
 		hashValue := binary.LittleEndian.Uint64(preInputs[i][:8])
 
-		// Caclulate pivot and flip.
+		// Calculate pivot and flip.
 		pivot := hashValue % ind_count
 		flip := (pivot + ind_count - ind) % ind_count
 
