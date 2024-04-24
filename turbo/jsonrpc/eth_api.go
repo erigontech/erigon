@@ -262,12 +262,12 @@ func (api *BaseAPI) blockByRPCNumber(ctx context.Context, number rpc.BlockNumber
 	return block, err
 }
 
-func (api *BaseAPI) headerByRPCNumber(number rpc.BlockNumber, tx kv.Tx) (*types.Header, error) {
+func (api *BaseAPI) headerByRPCNumber(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Header, error) {
 	n, h, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
-	return api._blockReader.Header(context.Background(), tx, h, n)
+	return api._blockReader.Header(ctx, tx, h, n)
 }
 
 // checks the pruning state to see if we would hold information about this

@@ -191,7 +191,7 @@ func TestGetProof(t *testing.T) {
 			tx, err := m.DB.BeginRo(context.Background())
 			assert.NoError(t, err)
 			defer tx.Rollback()
-			header, err := api.headerByRPCNumber(rpc.BlockNumber(tt.blockNum), tx)
+			header, err := api.headerByRPCNumber(context.Background(), rpc.BlockNumber(tt.blockNum), tx)
 			require.NoError(t, err)
 
 			require.Equal(t, tt.addr, proof.Address)
