@@ -83,7 +83,6 @@ type HasAggCtx interface {
 }
 
 func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
-	panic(1)
 	var ac *AggregatorRoTx
 	if casted, ok := tx.(HasAggCtx); ok {
 		ac = casted.AggCtx().(*AggregatorRoTx)
