@@ -50,6 +50,7 @@ func NewAttestionFromParameters(
 	signature [96]byte,
 ) *Attestation {
 	a := &Attestation{}
+	binary.LittleEndian.PutUint32(a.staticBuffer[:4], aggregationBitsOffset)
 	a.SetAttestationData(attestationData)
 	a.SetSignature(signature)
 	a.SetAggregationBits(aggregationBits)
