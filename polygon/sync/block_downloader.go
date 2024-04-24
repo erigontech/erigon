@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -128,8 +129,7 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 	var lastBlock *types.Block
 	batchFetchStartTime := time.Now()
 	fetchStartTime := time.Now()
-	blockCount := 0
-	blocksTotalSize := 0
+	var blockCount, blocksTotalSize atomic.Uint64
 
 	for len(waypoints) > 0 {
 		select {
@@ -166,12 +166,12 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 				"kind", reflect.TypeOf(waypointsBatch[0]),
 				"peerCount", len(peers),
 				"maxWorkers", d.maxWorkers,
-				"blk/s", fmt.Sprintf("%.2f", float64(blockCount)/time.Since(fetchStartTime).Seconds()),
-				"bytes/s", fmt.Sprintf("%s", common.ByteCount(uint64(float64(blocksTotalSize)/time.Since(fetchStartTime).Seconds()))),
+				"blk/s", fmt.Sprintf("%.2f", float64(blockCount.Load())/time.Since(fetchStartTime).Seconds()),
+				"bytes/s", fmt.Sprintf("%s", common.ByteCount(uint64(float64(blocksTotalSize.Load())/time.Since(fetchStartTime).Seconds()))),
 			)
 
-			blockCount = 0
-			blocksTotalSize = 0
+			blockCount.Store(0)
+			blocksTotalSize.Store(0)
 			fetchStartTime = time.Now()
 
 		default:
@@ -207,8 +207,8 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 					return
 				}
 
-				blocksTotalSize += totalSize
-				blockCount += len(blocks)
+				blocksTotalSize.Add(uint64(totalSize))
+				blockCount.Add(uint64(len(blocks)))
 
 				waypointBlocksMemo.Add(waypoint.RootHash(), blocks)
 				blockBatches[i] = blocks
