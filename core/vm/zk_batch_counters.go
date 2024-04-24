@@ -29,6 +29,29 @@ func NewBatchCounterCollector(smtMaxLevel int, forkId uint16) *BatchCounterColle
 	}
 }
 
+func (bcc *BatchCounterCollector) Clone() *BatchCounterCollector {
+	var l2DataCollector *CounterCollector
+	txSize := len(bcc.transactions)
+	clonedTransactions := make([]*TransactionCounter, txSize)
+
+	for i, tc := range bcc.transactions {
+		clonedTransactions[i] = tc.Clone()
+	}
+
+	if bcc.l2DataCollector != nil {
+		l2DataCollector = bcc.l2DataCollector.Clone()
+	}
+
+	return &BatchCounterCollector{
+		l2DataCollector:         l2DataCollector,
+		transactions:            clonedTransactions,
+		smtLevels:               bcc.smtLevels,
+		smtLevelsForTransaction: bcc.smtLevelsForTransaction,
+		blockCount:              bcc.blockCount,
+		forkId:                  bcc.forkId,
+	}
+}
+
 // AddNewTransactionCounters makes the collector aware that a new transaction is attempting to be added to the collector
 // here we check the batchL2Data length and ensure that it doesn't cause an overflow.  This will be re-calculated
 // every time a new transaction is added as it needs to take into account all the transactions in a batch.

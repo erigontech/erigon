@@ -54,6 +54,7 @@ type LegacyExecutorVerifier struct {
 	executorNumber     int
 
 	requestChan   chan *VerifierRequest
+	requestsMap   map[uint64]uint64
 	responseChan  chan *VerifierResponse
 	responses     []*VerifierResponse
 	responseMutex *sync.Mutex
@@ -87,6 +88,7 @@ func NewLegacyExecutorVerifier(
 		executorNumberLock: &sync.Mutex{},
 		executorNumber:     0,
 		requestChan:        make(chan *VerifierRequest, maximumInflightRequests),
+		requestsMap:        make(map[uint64]uint64),
 		responseChan:       make(chan *VerifierResponse, maximumInflightRequests),
 		responses:          make([]*VerifierResponse, 0),
 		responseMutex:      &sync.Mutex{},
@@ -111,16 +113,13 @@ func (v *LegacyExecutorVerifier) StartWork() {
 			case <-v.quit:
 				break LOOP
 			case request := <-v.requestChan:
-				go func() {
-					ctx := context.Background()
-					err := v.handleRequest(ctx, request)
-					if err != nil {
-						log.Error("[Verifier] error handling request", "err", err)
-
-						// requeue the request, could be a transient error
-						v.requestChan <- request
-					}
-				}()
+				ctx := context.Background()
+				err := v.handleRequest(ctx, request)
+				if err != nil {
+					log.Error("[Verifier] error handling request", "err", err)
+					// requeue the request, could be a transient error
+					v.requestChan <- request
+				}
 			case response := <-v.responseChan:
 				v.handleResponse(response)
 			}
@@ -271,18 +270,26 @@ func (v *LegacyExecutorVerifier) handleResponse(response *VerifierResponse) {
 	v.responses = append(v.responses, response)
 }
 
-func (v *LegacyExecutorVerifier) AddRequest(request *VerifierRequest) {
-	v.responseMutex.Lock()
-	defer v.responseMutex.Unlock()
+// not thread safe
+func (v *LegacyExecutorVerifier) IsRequestAdded(batchNumber uint64) bool {
+	_, exists := v.requestsMap[batchNumber]
+	return exists
+}
 
-	// check we don't already have a response for this to save doubling up work
-	for _, response := range v.responses {
-		if response.BatchNumber == request.BatchNumber {
-			return
-		}
+// not thread safe
+func (v *LegacyExecutorVerifier) AddRequest(request *VerifierRequest) {
+	_, exists := v.requestsMap[request.BatchNumber]
+	if exists {
+		return
 	}
 
+	v.requestsMap[request.BatchNumber] = request.BatchNumber
 	v.requestChan <- request
+}
+
+// not thread safe
+func (v *LegacyExecutorVerifier) MarkRequestAsHandled(batchNumber uint64) {
+	delete(v.requestsMap, batchNumber)
 }
 
 func (v *LegacyExecutorVerifier) GetAllResponses() []*VerifierResponse {

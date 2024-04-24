@@ -4,12 +4,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"time"
+
 	"github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/ledgerwatch/erigon/zk/legacy_executor_verifier/proto/github.com/0xPolygonHermez/zkevm-node/state/runtime/executor"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"time"
 )
 
 type Config struct {
@@ -88,7 +89,7 @@ func (e *Executor) Close() {
 }
 
 func (e *Executor) Verify(p *Payload, request *VerifierRequest, oldStateRoot common.Hash) (bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*2)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	log.Debug("Sending request to grpc server", "grpcUrl", e.grpcUrl)
@@ -133,7 +134,33 @@ func (e *Executor) Verify(p *Payload, request *VerifierRequest, oldStateRoot com
 		"exec-root", common.BytesToHash(resp.NewStateRoot),
 		"our-root", request.StateRoot,
 		"exec-old-root", common.BytesToHash(resp.OldStateRoot),
-		"our-old-root", oldStateRoot)
+		"our-old-root", oldStateRoot,
+		"blocks-count", len(resp.BlockResponses))
+
+	for addr, all := range resp.ReadWriteAddresses {
+		log.Debug("executor result",
+			"addr", addr,
+			"nonce", all.Nonce,
+			"balance", all.Balance,
+			"sc-code", all.ScCode,
+			"sc-storage", all.ScStorage,
+			"sc-length", all.ScLength)
+	}
+
+	for i, bResp := range resp.BlockResponses {
+		log.Debug("executor result",
+			"index", i,
+			"parent-hash", common.BytesToHash(bResp.ParentHash),
+			"coinbase", bResp.Coinbase,
+			"gas-limit", bResp.GasLimit,
+			"block-number", bResp.BlockNumber,
+			"timestamp", bResp.Timestamp,
+			"ger", common.BytesToHash(bResp.Ger),
+			"block-hash-l1", common.BytesToHash(bResp.BlockHashL1),
+			"gas-used", bResp.GasUsed,
+			"block-info-root", common.BytesToHash(bResp.BlockInfoRoot),
+			"block-hash", common.BytesToHash(bResp.BlockHash))
+	}
 
 	counterUndershootCheck(counters, request.Counters, request.BatchNumber)
 

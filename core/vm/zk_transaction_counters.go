@@ -45,6 +45,16 @@ func NewTransactionCounter(transaction types.Transaction, smtMaxLevel int, shoul
 	return tc
 }
 
+func (tc *TransactionCounter) Clone() *TransactionCounter {
+	return &TransactionCounter{
+		transaction:        tc.transaction,
+		rlpCounters:        tc.rlpCounters.Clone(),
+		executionCounters:  tc.executionCounters.Clone(),
+		processingCounters: tc.processingCounters.Clone(),
+		smtLevels:          tc.smtLevels,
+	}
+}
+
 func (tc *TransactionCounter) CalculateRlp() error {
 	raw, err := tx.TransactionToL2Data(tc.transaction, 8, tx.MaxEffectivePercentage)
 	if err != nil {
@@ -108,8 +118,8 @@ func (tc *TransactionCounter) CalculateRlp() error {
 	collector.getLenBytes(nonceLength)
 
 	collector.divArith()
-	collector.multiCall(collector.addHashTx, 9+int(math.Floor(float64(txDataLen)/32)))
-	collector.multiCall(collector.addL2HashTx, 8+int(math.Floor(float64(txDataLen)/32)))
+	collector.multiCall(collector.addHashTx, 9+(txDataLen>>5)) //txDataLen>>5 equals to int(math.Floor(float64(txDataLen)/32))
+	collector.multiCall(collector.addL2HashTx, 8+(txDataLen>>5))
 	collector.multiCall(collector.addBatchHashByteByByte, txDataLen)
 	collector.SHLarith()
 

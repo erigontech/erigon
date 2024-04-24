@@ -2,6 +2,8 @@ package stages
 
 import (
 	"context"
+	"sort"
+
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
@@ -9,7 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zk/legacy_executor_verifier"
 	"github.com/ledgerwatch/erigon/zk/txpool"
-	"sort"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -122,6 +123,7 @@ func SpawnSequencerExecutorVerifyStage(
 
 		// now let the verifier know we have got this message, so it can release it
 		cfg.verifier.RemoveResponse(response.BatchNumber)
+		cfg.verifier.MarkRequestAsHandled(response.BatchNumber)
 		progress = response.BatchNumber
 	}
 
@@ -133,6 +135,10 @@ func SpawnSequencerExecutorVerifyStage(
 				return err
 			}
 		} else {
+			if cfg.verifier.IsRequestAdded(batch) {
+				continue
+			}
+
 			// we need the state root of the last block in the batch to send to the executor
 			blocks, err := hermezDb.GetL2BlockNosByBatch(batch)
 			if err != nil {
