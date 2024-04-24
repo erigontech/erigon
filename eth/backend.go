@@ -42,6 +42,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/erigon/eth/consensuschain"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -1343,6 +1344,10 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	if isBor {
 		allBorSnapshots = freezeblocks.NewBorRoSnapshots(snConfig.Snapshot, dirs.Snap, minFrozenBlock, logger)
 	}
+	agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, logger)
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
 
 	var err error
 	//if snConfig.Snapshot.NoDownloader {
@@ -1351,22 +1356,25 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	//		allBorSnapshots.OptimisticalyReopenFolder()
 	//	}
 	//} else {
-	allSnapshots.OptimisticalyReopenFolder()
-	if isBor {
-		allBorSnapshots.OptimisticalyReopenFolder()
-	}
+	g := &errgroup.Group{}
+	g.Go(func() error {
+		allSnapshots.OptimisticalyReopenFolder()
+		return nil
+	})
+	g.Go(func() error {
+		if isBor {
+			allBorSnapshots.OptimisticalyReopenFolder()
+		}
+		return nil
+	})
+	g.Go(func() error {
+		return agg.OpenFolder(false)
+	})
 	//}
-	allSnapshots.LogStat("start")
+
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 	blockWriter := blockio.NewBlockWriter(histV3)
 
-	agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, logger)
-	if err != nil {
-		return nil, nil, nil, nil, nil, err
-	}
-	if err = agg.OpenFolder(false); err != nil {
-		return nil, nil, nil, nil, nil, err
-	}
 	return blockReader, blockWriter, allSnapshots, allBorSnapshots, agg, nil
 }
 
