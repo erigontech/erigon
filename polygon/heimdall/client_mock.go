@@ -200,6 +200,21 @@ func (mr *MockHeimdallClientMockRecorder) FetchSpan(arg0, arg1 any) *gomock.Call
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchSpan", reflect.TypeOf((*MockHeimdallClient)(nil).FetchSpan), arg0, arg1)
 }
 
+// FetchStateSyncEvent mocks base method.
+func (m *MockHeimdallClient) FetchStateSyncEvent(arg0 context.Context, arg1 uint64) (*EventRecordWithTime, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FetchStateSyncEvent", arg0, arg1)
+	ret0, _ := ret[0].(*EventRecordWithTime)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FetchStateSyncEvent indicates an expected call of FetchStateSyncEvent.
+func (mr *MockHeimdallClientMockRecorder) FetchStateSyncEvent(arg0, arg1 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchStateSyncEvent", reflect.TypeOf((*MockHeimdallClient)(nil).FetchStateSyncEvent), arg0, arg1)
+}
+
 // FetchStateSyncEvents mocks base method.
 func (m *MockHeimdallClient) FetchStateSyncEvents(arg0 context.Context, arg1 uint64, arg2 time.Time, arg3 int) ([]*EventRecordWithTime, error) {
 	m.ctrl.T.Helper()
