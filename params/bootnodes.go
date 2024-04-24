@@ -137,6 +137,11 @@ var ChiadoBootnodes = []string{
 	"enode://f7e62226a64a2ccc0ada8b032b33c4389464562f87135a3e0d5bdb814fab717d58db5d142c453b071d08b4e0ffd9c5aff4a6d4441c2041401634f10d7962f885@35.210.126.23:30303",
 }
 
+var SparkBootnodes = []string{
+	"enode://008870748a938f4a6599d83c1238f719b0a67e4ae2d32e7542628c43f8af4185bd54124a0a4b80ec54a95098f8ae08174c5bc7fadb0349c0b70332dff22af061@35.205.144.49:30303",
+	"enode://d377e5a6fb2d0b44b98e1382c9c16633bdd407843f83f21d17b09fdfa5f79175eb55113c6789fa50b7717d08cb3b24b7485951afa0fe9ca696919202e35170a6@34.34.138.246:30303",
+}
+
 const dnsPrefix = "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@"
 
 // KnownDNSNetwork returns the address of a public DNS-based node list for the given
@@ -177,6 +182,8 @@ func BootnodeURLsOfChain(chain string) []string {
 		return GnosisBootnodes
 	case networkname.ChiadoChainName:
 		return ChiadoBootnodes
+	case networkname.SparkChainName:
+		return SparkBootnodes
 	default:
 		return []string{}
 	}

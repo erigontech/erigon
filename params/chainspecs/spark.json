@@ -1,0 +1,82 @@
+{
+  "config": {
+    "ChainName": "spark",
+    "chainId": 123,
+    "consensus": "aura",
+    "homesteadBlock": 0,
+    "eip150Block": 0,
+    "eip155Block": 0,
+    "byzantiumBlock": 0,
+    "constantinopleBlock": 442212,
+    "petersburgBlock": 1300000,
+    "istanbulBlock": 1300000,
+    "berlinBlock": 1300000,
+    "londonBlock": 14707000,
+    "burntContract": {
+      "0": "0x1559000000000000000000000000000000000000"
+    }
+  },
+  "nonce": "0x0",
+  "seal": {
+    "authorityRound": {
+      "step": 0,
+      "signature": "0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+    }
+  },
+  "difficulty": "0x20000",
+  "gasLimit": "0x5F5E100",
+  "baseFeePerGas": "0x3b9aca00",
+  "aura": {
+    "stepDuration": 5,
+    "blockReward": 0,
+    "maximumUncleCountTransition": 0,
+    "maximumUncleCount": 0,
+    "validators": {
+      "multi": {
+        "0": {
+          "list": ["0xba7829b381f07cca0d186bdf619fdc6c7f756d0a"]
+        },
+        "1000": {
+          "safeContract": "0xC8c3a332f9e4CE6bfFFcf967026cB006Db2311c7"
+        },
+        "6905799": {
+          "list": [
+            "0x379e81df609e8235c9026f25a379d49a27b10d30",
+            "0xba7829b381f07cca0d186bdf619fdc6c7f756d0a",
+            "0xe4cc9b2836ba373c3ccf473cbb15ed07007963ee",
+            "0xbc048d3064fd912b40a9aadcf67a14fd4601db77"
+          ]
+        },
+        "6910120": {
+          "safeContract": "0xC8c3a332f9e4CE6bfFFcf967026cB006Db2311c7"
+        },
+        "6925000": {
+          "list": [
+            "0x379e81df609e8235c9026f25a379d49a27b10d30",
+            "0xba7829b381f07cca0d186bdf619fdc6c7f756d0a",
+            "0xe4cc9b2836ba373c3ccf473cbb15ed07007963ee",
+            "0xbc048d3064fd912b40a9aadcf67a14fd4601db77"
+          ]
+        },
+        "13608000": {
+          "list": [
+            "0xba7829b381f07cca0d186bdf619fdc6c7f756d0a",
+            "0xe4cc9b2836ba373c3ccf473cbb15ed07007963ee",
+            "0xbc048d3064fd912b40a9aadcf67a14fd4601db77"
+          ]
+        },
+        "13639200": {
+          "safeContract": "0x8C682051D70301A0ca913Ce0A0e71539702E1122"
+        }
+      }
+    },
+    "blockRewardContractTransitions": {
+      "13639200": "0xEa2151b6095CB76ECc57A57DE166728dd9b53Ed9"
+    }
+  },
+  "alloc": {
+    "0xba7829b381f07cca0d186bdf619fdc6c7f756d0a": {
+      "balance": "300000000000000000000000000"
+    }
+  }
+}

@@ -45,6 +45,7 @@ const (
 	SepoliaNetwork NetworkType = 11155111
 	GnosisNetwork  NetworkType = 100
 	ChiadoNetwork  NetworkType = 10200
+	SparkNetwork   NetworkType = 123
 )
 
 const (
@@ -908,6 +909,41 @@ func chiadoConfig() BeaconChainConfig {
 	return cfg
 }
 
+func sparkConfig() BeaconChainConfig {
+	cfg := MainnetBeaconConfig
+	cfg.MinGenesisTime = 1638968400
+	cfg.MinGenesisActiveValidatorCount = 4096
+	cfg.GenesisDelay = 6000
+	cfg.SecondsPerSlot = 5
+	cfg.Eth1FollowDistance = 1024
+	cfg.ConfigName = "spark"
+	cfg.ChurnLimitQuotient = 1 << 12
+	cfg.GenesisForkVersion = 0x00000064
+	cfg.SecondsPerETH1Block = 6
+	cfg.DepositChainID = uint64(SparkNetwork)
+	cfg.DepositNetworkID = uint64(SparkNetwork)
+	cfg.AltairForkEpoch = 512
+	cfg.AltairForkVersion = 0x01000064
+	cfg.BellatrixForkEpoch = 385536
+	cfg.BellatrixForkVersion = 0x02000064
+	cfg.CapellaForkEpoch = 648704
+	cfg.CapellaForkVersion = 0x03000064
+	cfg.TerminalTotalDifficulty = "8626000000000000000000058750000000000000000000"
+	cfg.DepositContractAddress = "0x0B98057eA310F4d31F2a452B414647007d1645d9"
+	cfg.BaseRewardFactor = 25
+	cfg.SlotsPerEpoch = 16
+	cfg.EpochsPerSyncCommitteePeriod = 512
+	cfg.DenebForkEpoch = 889856
+	cfg.DenebForkVersion = 0x04000064
+	cfg.InactivityScoreRecoveryRate = 16
+	cfg.InactivityScoreBias = 4
+	cfg.MaxWithdrawalsPerPayload = 8
+	cfg.MaxValidatorsPerWithdrawalsSweep = 8192
+	cfg.MaxPerEpochActivationChurnLimit = 2
+	cfg.InitializeForkSchedule()
+	return cfg
+}
+
 func (b *BeaconChainConfig) GetMinSlashingPenaltyQuotient(version StateVersion) uint64 {
 	switch version {
 	case Phase0Version:
@@ -950,6 +986,7 @@ var BeaconConfigs map[NetworkType]BeaconChainConfig = map[NetworkType]BeaconChai
 	HoleskyNetwork: holeskyConfig(),
 	GnosisNetwork:  gnosisConfig(),
 	ChiadoNetwork:  chiadoConfig(),
+	SparkNetwork:   sparkConfig(),
 }
 
 // Eth1DataVotesLength returns the maximum length of the votes on the Eth1 data,
@@ -1030,6 +1067,9 @@ func GetConfigsByNetworkName(net string) (*NetworkConfig, *BeaconChainConfig, Ne
 	case networkname.HoleskyChainName:
 		networkCfg, beaconCfg := GetConfigsByNetwork(HoleskyNetwork)
 		return networkCfg, beaconCfg, HoleskyNetwork, nil
+	case networkname.SparkChainName:
+		networkCfg, beaconCfg := GetConfigsByNetwork(SparkNetwork)
+		return networkCfg, beaconCfg, SparkNetwork, nil
 	default:
 		return nil, nil, MainnetNetwork, fmt.Errorf("chain not found")
 	}
@@ -1061,6 +1101,7 @@ func EmbeddedSupported(id uint64) bool {
 		id == 5 ||
 		id == 17000 ||
 		id == 11155111 ||
+		id == 123 ||
 		id == 100 // ||
 	//id == 10200
 }

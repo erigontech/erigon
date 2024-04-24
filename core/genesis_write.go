@@ -457,6 +457,17 @@ func ChiadoGenesisBlock() *types.Genesis {
 	}
 }
 
+func SparkGenesisBlock() *types.Genesis {
+	return &types.Genesis{
+		Config:     params.SparkChainConfig,
+		Timestamp:  0,
+		AuRaSeal:   common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+		GasLimit:   0x989680,
+		Difficulty: big.NewInt(0x20000),
+		Alloc:      readPrealloc("allocs/spark.json"),
+	}
+}
+
 // Pre-calculated version of:
 //
 //	DevnetSignPrivateKey = crypto.HexToECDSA(sha256.Sum256([]byte("erigon devnet key")))
@@ -675,6 +686,8 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 		return GnosisGenesisBlock()
 	case networkname.ChiadoChainName:
 		return ChiadoGenesisBlock()
+	case networkname.SparkChainName:
+		return SparkGenesisBlock()
 	default:
 		return nil
 	}
