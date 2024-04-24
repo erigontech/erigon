@@ -15,7 +15,7 @@ require (
 	github.com/anacrolix/dht/v2 v2.21.0
 	github.com/anacrolix/go-libutp v1.3.1
 	github.com/anacrolix/log v0.15.2
-	github.com/anacrolix/torrent v1.54.2-0.20240424091750-7447b8c08e8e
+	github.com/anacrolix/torrent v1.54.2-0.20240424124100-1ef0afe9d44b
 	github.com/c2h5oh/datasize v0.0.0-20220606134207-859f65c6625b
 	github.com/containerd/cgroups/v3 v3.0.3
 	github.com/crate-crypto/go-kzg-4844 v0.7.0
