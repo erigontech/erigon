@@ -1345,17 +1345,18 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	}
 
 	var err error
-	if snConfig.Snapshot.NoDownloader {
-		allSnapshots.ReopenFolder()
-		if isBor {
-			allBorSnapshots.ReopenFolder()
-		}
-	} else {
-		allSnapshots.OptimisticalyReopenFolder()
-		if isBor {
-			allBorSnapshots.OptimisticalyReopenFolder()
-		}
+	//if snConfig.Snapshot.NoDownloader {
+	//	allSnapshots.OptimisticalyReopenFolder()
+	//	if isBor {
+	//		allBorSnapshots.OptimisticalyReopenFolder()
+	//	}
+	//} else {
+	allSnapshots.OptimisticalyReopenFolder()
+	if isBor {
+		allBorSnapshots.OptimisticalyReopenFolder()
 	}
+	//}
+	allSnapshots.LogStat("start")
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 	blockWriter := blockio.NewBlockWriter(histV3)
 
