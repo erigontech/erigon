@@ -1068,7 +1068,7 @@ func (tx *MdbxTx) Commit() error {
 
 	latency, err := tx.tx.Commit()
 	if err != nil {
-		return fmt.Errorf("lable: %s, %w", tx.db.opts.label, err)
+		return fmt.Errorf("label: %s, %w", tx.db.opts.label, err)
 	}
 
 	if tx.db.opts.label == kv.ChainDB {
