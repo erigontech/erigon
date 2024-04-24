@@ -48,7 +48,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 	}
 
 	var isBorStateSyncTxn bool
-	blockNumber, ok, err := api.txnLookup(tx, txHash)
+	blockNumber, ok, err := api.txnLookup(ctx, tx, txHash)
 	if err != nil {
 		return nil, err
 	}

@@ -100,7 +100,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		return nil, err
 	}
 
-	blockNum, ok, err := api.txnLookup(tx, creationData.Tx)
+	blockNum, ok, err := api.txnLookup(ctx, tx, creationData.Tx)
 	if err != nil {
 		return nil, err
 	}
