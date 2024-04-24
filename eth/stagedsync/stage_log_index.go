@@ -395,11 +395,8 @@ func pruneOldLogChunks(tx kv.RwTx, bucket string, inMem *etl.Collector, pruneTo 
 				return err
 			}
 			var blockNum uint64
-			if bucket == kv.Log {
-				blockNum = binary.BigEndian.Uint64(k)
-			} else {
-				blockNum = uint64(binary.BigEndian.Uint32(k[len(key):]))
-			}
+			blockNum = uint64(binary.BigEndian.Uint32(k[len(key):]))
+
 			if !bytes.HasPrefix(k, key) || blockNum >= pruneTo {
 				break
 			}
@@ -434,11 +431,10 @@ func PruneLogIndex(s *PruneState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	}
 
 	pruneTo := cfg.prune.Receipts.PruneTo(s.ForwardProgress)
-	// s.PruneProgress
 	if err = pruneLogIndex(logPrefix, tx, cfg.tmpdir, s.PruneProgress, pruneTo, ctx, logger, cfg.noPruneContracts); err != nil {
 		return err
 	}
-	if err = s.Done(tx); err != nil {
+	if err = s.DoneAt(tx, pruneTo); err != nil {
 		return err
 	}
 
@@ -460,8 +456,6 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneFrom, prune
 	defer topics.Close()
 	addrs := etl.NewCollector(logPrefix, tmpDir, etl.NewOldestEntryBuffer(bufferSize), logger)
 	defer addrs.Close()
-	pruneLogKeyCollector := etl.NewCollector(logPrefix, tmpDir, etl.NewOldestEntryBuffer(bufferSize), logger)
-	defer pruneLogKeyCollector.Close()
 
 	reader := bytes.NewReader(nil)
 	{
@@ -481,7 +475,7 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneFrom, prune
 			}
 			select {
 			case <-logEvery.C:
-				logger.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.Log, "block", blockNum)
+				logger.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.Log, "block", blockNum, "pruneFrom", pruneFrom, "pruneTo", pruneTo)
 			case <-ctx.Done():
 				return libcommon.ErrStopped
 			default:
@@ -502,6 +496,7 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneFrom, prune
 					break
 				}
 			}
+
 			if toPrune {
 				for _, l := range logs {
 					for _, topic := range l.Topics {
@@ -513,7 +508,7 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneFrom, prune
 						return err
 					}
 				}
-				if err := pruneLogKeyCollector.Collect(k, nil); err != nil {
+				if err := tx.Delete(kv.Log, k); err != nil {
 					return err
 				}
 			}
@@ -524,9 +519,6 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneFrom, prune
 		return err
 	}
 	if err := pruneOldLogChunks(tx, kv.LogAddressIndex, addrs, pruneTo, ctx); err != nil {
-		return err
-	}
-	if err := pruneOldLogChunks(tx, kv.Log, pruneLogKeyCollector, pruneTo, ctx); err != nil {
 		return err
 	}
 	return nil
