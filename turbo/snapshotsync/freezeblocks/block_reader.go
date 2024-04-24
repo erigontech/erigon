@@ -548,11 +548,8 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 	}
 
 	maxBlockNumInFiles := r.sn.BlocksAvailable()
-	fmt.Printf("b0: %d\n", blockHeight)
 	if tx != nil && (maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles) {
-		fmt.Printf("b1: %d\n", blockHeight)
 		if forceCanonical {
-			fmt.Printf("b2: %d\n", blockHeight)
 			canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
 			if err != nil {
 				return nil, nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
@@ -565,7 +562,6 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 			}
 		}
 
-		fmt.Printf("b21: %d\n", blockHeight)
 		block, senders, err = rawdb.ReadBlockWithSenders(tx, hash, blockHeight)
 		if err != nil {
 			return nil, nil, err
@@ -573,10 +569,8 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		if dbgLogs {
 			log.Info(dbgPrefix + fmt.Sprintf("found in db %t", block != nil))
 		}
-		fmt.Printf("b22: %d,%t,%t\n", blockHeight, block == nil, dbgLogs)
 		return block, senders, nil
 	}
-	fmt.Printf("b3: %d\n", blockHeight)
 
 	if r.sn == nil {
 		if dbgLogs {

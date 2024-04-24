@@ -6,7 +6,6 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -197,7 +196,6 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 
 // GetBlockByNumber implements eth_getBlockByNumber. Returns information about a block given the block's number.
 func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error) {
-	fmt.Printf("alex3: %t\n", dbg.Enabled(ctx))
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err

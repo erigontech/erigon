@@ -25,7 +25,6 @@ import (
 
 	mapset "github.com/deckarep/golang-set"
 	jsoniter "github.com/json-iterator/go"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -120,8 +119,6 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 	if atomic.LoadInt32(&s.run) == 0 {
 		return
 	}
-
-	fmt.Printf("alex1: %t", dbg.Enabled(ctx))
 
 	h := newHandler(ctx, codec, s.idgen, &s.services, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold)
 	h.allowSubscribe = false
