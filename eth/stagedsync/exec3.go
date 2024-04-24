@@ -191,9 +191,6 @@ func ExecV3(ctx context.Context,
 		var err error
 		doms, err = state2.NewSharedDomains(applyTx, log.New())
 		if err != nil {
-			if errors.Is(err, state2.ErrStateIsAheadOfBlocks) {
-				return nil
-			}
 			return err
 		}
 		defer doms.Close()
