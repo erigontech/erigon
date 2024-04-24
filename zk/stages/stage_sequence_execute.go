@@ -77,6 +77,9 @@ func SpawnSequencingStage(
 			return err
 		}
 	} else {
+		var header *types.Header
+		var parentBlock *types.Block
+
 		var addedTransactions []types.Transaction
 		var addedReceipts []*types.Receipt
 		var clonedBatchCounters *vm.BatchCounterCollector
@@ -119,15 +122,25 @@ func SpawnSequencingStage(
 				clonedBatchCounters = batchCounters.Clone()
 				addedTransactions = []types.Transaction{}
 				addedReceipts = []*types.Receipt{}
+				header, parentBlock, err = prepareHeader(tx, bn, deltaTimestamp, forkId, coinbase)
+				if err != nil {
+					return err
+				}
 			} else {
 				batchCounters = clonedBatchCounters
+
+				// create a copy of the header otherwise the executor will return "state root mismatch error"
+				header = &types.Header{
+					ParentHash: header.ParentHash,
+					Coinbase:   header.Coinbase,
+					Difficulty: header.Difficulty,
+					Number:     header.Number,
+					GasLimit:   header.GasLimit,
+					Time:       header.Time,
+				}
 			}
 
-			header, parentBlock, err := prepareHeader(tx, bn, deltaTimestamp, forkId, coinbase)
 			thisBlockNumber := header.Number.Uint64()
-			if err != nil {
-				return err
-			}
 
 			infoTreeIndexProgress, l1TreeUpdate, l1TreeUpdateIndex, l1BlockHash, ger, includeGerInBlockInfoRoot, err := prepareL1AndInfoTreeRelatedStuff(sdb, &decodedBlock, l1Recovery)
 			if err != nil {
