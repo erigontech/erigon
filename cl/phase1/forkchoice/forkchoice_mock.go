@@ -13,7 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
 	"github.com/ledgerwatch/erigon/cl/validator/sync_contribution_pool"
-	syncPoolMock "github.com/ledgerwatch/erigon/cl/validator/sync_contribution_pool/mock_services"
+	syncpoolmock "github.com/ledgerwatch/erigon/cl/validator/sync_contribution_pool/mock_services"
 	"go.uber.org/mock/gomock"
 )
 
@@ -58,7 +58,7 @@ func makeSyncContributionPoolMock(t *testing.T) sync_contribution_pool.SyncContr
 		beaconBlockRoot   common.Hash
 	}
 	u := map[syncContributionKey]*cltypes.Contribution{}
-	pool := syncPoolMock.NewMockSyncContributionPool(ctrl)
+	pool := syncpoolmock.NewMockSyncContributionPool(ctrl)
 	pool.EXPECT().AddSyncContribution(gomock.Any(), gomock.Any()).DoAndReturn(func(headState *state.CachingBeaconState, contribution *cltypes.Contribution) error {
 		key := syncContributionKey{
 			slot:              contribution.Slot,
