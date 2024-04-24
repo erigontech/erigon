@@ -82,6 +82,8 @@ type HasAggCtx interface {
 	AggCtx() interface{}
 }
 
+var ErrStateIsAheadOfBlocks = fmt.Errorf("`domain snaps` are ahead of `block snaps`")
+
 func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 	var ac *AggregatorRoTx
 	if casted, ok := tx.(HasAggCtx); ok {
@@ -204,7 +206,7 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 				return 0, err
 			}
 			if lastBn < bn {
-				return 0, fmt.Errorf("TxNums index is at block %d and behind commitment %d. Likely it means that `domain snaps` are ahead of `block snaps`", lastBn, bn)
+				return 0, fmt.Errorf("TxNums index is at block %d and behind commitment %d. %w", lastBn, bn, ErrStateIsAheadOfBlocks)
 			}
 		}
 		sd.SetBlockNum(bn)
