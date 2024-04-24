@@ -19,10 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
-	"github.com/ledgerwatch/erigon/polygon/bor/finality"
-
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -35,7 +31,9 @@ import (
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/ledgerwatch/erigon/polygon/bor"
+	"github.com/ledgerwatch/erigon/polygon/bor/finality"
 	"github.com/ledgerwatch/erigon/polygon/bor/finality/flags"
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -531,7 +529,7 @@ func NewDefaultStages(ctx context.Context,
 	// Hence we run it in the test mode.
 	runInTestMode := cfg.ImportMode
 
-	var loopBreakCheck func(int) bool
+	loopBreakCheck := newLoopBreakCheck(cfg, heimdallClient)
 
 	if heimdallClient != nil && flags.Milestone {
 		loopBreakCheck = func(int) bool {
@@ -617,23 +615,7 @@ func NewPipelineStages(ctx context.Context,
 	// During Import we don't want other services like header requests, body requests etc. to be running.
 	// Hence we run it in the test mode.
 	runInTestMode := cfg.ImportMode
-
-	var loopBreakCheck func(int) bool
-
-	if cfg.Sync.LoopBlockLimit > 0 {
-		previousBreakCheck := loopBreakCheck
-		loopBreakCheck = func(loopCount int) bool {
-			if loopCount > int(cfg.Sync.LoopBlockLimit) {
-				return true
-			}
-
-			if previousBreakCheck != nil {
-				return previousBreakCheck(loopCount)
-			}
-
-			return false
-		}
-	}
+	loopBreakCheck := newLoopBreakCheck(cfg, nil)
 
 	var noPruneContracts map[libcommon.Address]bool
 	if cfg.Genesis != nil {
@@ -748,4 +730,116 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 		nil, /* pruneOrder */
 		logger,
 	)
+}
+
+func NewPolygonSyncStages(
+	ctx context.Context,
+	db kv.RwDB,
+	config *ethconfig.Config,
+	chainConfig *chain.Config,
+	consensusEngine consensus.Engine,
+	notifications *shards.Notifications,
+	snapDownloader proto_downloader.DownloaderClient,
+	blockReader services.FullBlockReader,
+	blockRetire services.BlockRetire,
+	agg *state.Aggregator,
+	silkworm *silkworm.Silkworm,
+	forkValidator *engine_helpers.ForkValidator,
+	heimdallClient heimdall.HeimdallClient,
+) []*stagedsync.Stage {
+	loopBreakCheck := newLoopBreakCheck(config, heimdallClient)
+	return stagedsync.PolygonSyncStages(
+		ctx,
+		stagedsync.StageSnapshotsCfg(
+			db,
+			*chainConfig,
+			config.Sync,
+			config.Dirs,
+			blockRetire,
+			snapDownloader,
+			blockReader,
+			notifications,
+			config.HistoryV3,
+			agg,
+			config.InternalCL && config.CaplinConfig.Backfilling,
+			config.CaplinConfig.BlobBackfilling,
+			silkworm,
+		),
+		stagedsync.StageBlockHashesCfg(
+			db,
+			config.Dirs.Tmp,
+			chainConfig,
+			blockio.NewBlockWriter(config.HistoryV3),
+		),
+		stagedsync.StageSendersCfg(
+			db,
+			chainConfig,
+			config.LoopBlockLimit,
+			false, /* badBlockHalt */
+			config.Dirs.Tmp,
+			config.Prune,
+			blockReader,
+			nil, /* hd */
+			loopBreakCheck,
+		),
+		stagedsync.StageExecuteBlocksCfg(
+			db,
+			config.Prune,
+			config.BatchSize,
+			nil, /* changeSetHook */
+			chainConfig,
+			consensusEngine,
+			&vm.Config{},
+			notifications.Accumulator,
+			config.StateStream,
+			false, /* badBlockHalt */
+			config.HistoryV3,
+			config.Dirs,
+			blockReader,
+			nil, /* hd */
+			config.Genesis,
+			config.Sync,
+			agg,
+			silkwormForExecutionStage(silkworm, config),
+		),
+		stagedsync.StageTxLookupCfg(
+			db,
+			config.Prune,
+			config.Dirs.Tmp,
+			chainConfig.Bor,
+			blockReader,
+		),
+		stagedsync.StageFinishCfg(
+			db,
+			config.Dirs.Tmp,
+			forkValidator,
+		),
+	)
+}
+
+func newLoopBreakCheck(cfg *ethconfig.Config, heimdallClient heimdall.HeimdallClient) func(int) bool {
+	var loopBreakCheck func(int) bool
+
+	if heimdallClient != nil && flags.Milestone {
+		loopBreakCheck = func(int) bool {
+			return finality.IsMilestoneRewindPending()
+		}
+	}
+
+	if cfg.Sync.LoopBlockLimit == 0 {
+		return loopBreakCheck
+	}
+
+	previousBreakCheck := loopBreakCheck
+	return func(loopCount int) bool {
+		if loopCount > int(cfg.Sync.LoopBlockLimit) {
+			return true
+		}
+
+		if previousBreakCheck != nil {
+			return previousBreakCheck(loopCount)
+		}
+
+		return false
+	}
 }
