@@ -567,7 +567,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 			return nil, nil, err
 		}
 		if dbgLogs {
-			log.Info(dbgPrefix + fmt.Sprintf("found in db %t", block != nil))
+			log.Info(dbgPrefix + fmt.Sprintf("found_in_db=%t", block != nil))
 		}
 		return block, senders, nil
 	}
