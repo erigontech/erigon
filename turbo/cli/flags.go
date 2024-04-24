@@ -448,6 +448,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 
 			return true
 		}(),
+		DebugEnabled:      ctx.Bool(utils.RpcDbgFlag.Name),
 		HttpServerEnabled: ctx.Bool(utils.HTTPServerEnabledFlag.Name),
 		Dirs:              cfg.Dirs,
 

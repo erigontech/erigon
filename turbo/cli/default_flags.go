@@ -71,6 +71,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.StateCacheFlag,
 	&utils.RpcBatchConcurrencyFlag,
 	&utils.RpcStreamingDisableFlag,
+	&utils.RpcDbgFlag,
 	&utils.DBReadConcurrencyFlag,
 	&utils.RpcAccessListFlag,
 	&utils.RpcTraceCompatFlag,

@@ -390,6 +390,10 @@ var (
 		Name:  "rpc.streaming.disable",
 		Usage: "Erigon has enabled json streaming for some heavy endpoints (like trace_*). It's a trade-off: greatly reduce amount of RAM (in some cases from 30GB to 30mb), but it produce invalid json format if error happened in the middle of streaming (because json is not streaming-friendly format)",
 	}
+	RpcDbgFlag = cli.BoolFlag{
+		Name:  "rpc.dbg",
+		Usage: "Allow sending debug HTTP header - to print more detailed logs for given RPC. For security reasons - better debug it",
+	}
 	RpcBatchLimit = cli.IntFlag{
 		Name:  "rpc.batch.limit",
 		Usage: "Maximum number of requests in a batch",
