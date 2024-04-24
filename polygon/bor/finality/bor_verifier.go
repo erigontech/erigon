@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/metrics"
@@ -90,8 +89,7 @@ func borVerify(ctx context.Context, config *config, start uint64, end uint64, ha
 			return hash, errEndBlock
 		}
 		if block == nil {
-			hh, _ := config.blockReader.(services.FullBlockReader).CanonicalHash(ctx, roTx, end)
-			err := fmt.Errorf("[bor] block not found: %d; frozenBlocks=%d, lastCanonicalHash=%x", end, config.blockReader.(services.FullBlockReader).FrozenBlocks(), hh)
+			err := fmt.Errorf("[bor] block not found: %d", end)
 			log.Debug("[bor] Failed to get end block hash while whitelisting milestone", "number", end, "err", err)
 			return hash, err
 		}
