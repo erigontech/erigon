@@ -374,13 +374,20 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 		return branch, nil // do not transform, return as is
 	}
 
+	sto := sd.aggCtx.d[kv.StorageDomain]
+	acc := sd.aggCtx.d[kv.AccountsDomain]
+	storageItem := sto.lookupFileByItsRange(fStartTxNum, fEndTxNum)
+	accountItem := acc.lookupFileByItsRange(fStartTxNum, fEndTxNum)
+	storageGetter := NewArchiveGetter(storageItem.decompressor.MakeGetter(), sto.d.compression)
+	accountGetter := NewArchiveGetter(accountItem.decompressor.MakeGetter(), acc.d.compression)
+
 	return branch.ReplacePlainKeys(sd.aux[:0], func(key []byte, isStorage bool) ([]byte, error) {
 		if isStorage {
 			if len(key) == length.Addr+length.Hash {
 				return nil, nil // save storage key as is
 			}
 			// Optimised key referencing a state file record (file number and offset within the file)
-			storagePlainKey, found := sd.aggCtx.d[kv.StorageDomain].lookupByShortenedKey(key, fStartTxNum, fEndTxNum)
+			storagePlainKey, found := sd.aggCtx.d[kv.StorageDomain].lookupByShortenedKey(key, storageGetter)
 			if !found {
 				s0, s1 := fStartTxNum/sd.aggCtx.a.StepSize(), fEndTxNum/sd.aggCtx.a.StepSize()
 				oft := decodeShorterKey(key)
@@ -395,7 +402,7 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 			return nil, nil // save account key as is
 		}
 
-		apkBuf, found := sd.aggCtx.d[kv.AccountsDomain].lookupByShortenedKey(key, fStartTxNum, fEndTxNum)
+		apkBuf, found := sd.aggCtx.d[kv.AccountsDomain].lookupByShortenedKey(key, accountGetter)
 		if !found {
 			oft := decodeShorterKey(key)
 			s0, s1 := fStartTxNum/sd.aggCtx.a.StepSize(), fEndTxNum/sd.aggCtx.a.StepSize()

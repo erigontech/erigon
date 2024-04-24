@@ -344,12 +344,7 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, item *filesItem) (shorten
 	return nil, false
 }
 
-// searches in given list of files for a key or searches in domain files if list is empty
-func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, txFrom uint64, txTo uint64) (fullKey []byte, found bool) {
-	if len(shortKey) < 1 {
-		return nil, false
-	}
-
+func (dt *DomainRoTx) lookupFileByItsRange(txFrom uint64, txTo uint64) *filesItem {
 	var item *filesItem
 	for _, f := range dt.files {
 		if f.startTxNum == txFrom && f.endTxNum == txTo {
@@ -378,46 +373,46 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, txFrom uint64, txTo 
 		for _, f := range dt.files {
 			visibleFiles += fmt.Sprintf("%d-%d;", f.startTxNum/dt.d.aggregationStep, f.endTxNum/dt.d.aggregationStep)
 		}
-		dt.d.logger.Warn("lookupByShortenedKey file not found",
+		dt.d.logger.Warn("lookupFileByItsRange: file not found",
 			"stepFrom", txFrom/dt.d.aggregationStep, "stepTo", txTo/dt.d.aggregationStep,
-			"shortened", fmt.Sprintf("%x", shortKey),
+			//"shortened", fmt.Sprintf("%x", shortKey),
 			"domain", dt.d.keysTable, "files", fileStepsss, "_visibleFiles", visibleFiles,
 			"visibleFilesCount", len(dt.files), "filesCount", dt.d.dirtyFiles.Len())
+		return nil
+	}
+	return item
+}
+
+// searches in given list of files for a key or searches in domain files if list is empty
+func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter ArchiveGetter) (fullKey []byte, found bool) {
+	if len(shortKey) < 1 {
 		return nil, false
 	}
-
 	offset := decodeShorterKey(shortKey)
 	defer func() {
 		if r := recover(); r != nil {
 			dt.d.logger.Crit("lookupByShortenedKey panics",
 				"err", r,
 				"domain", dt.d.keysTable,
-				"short", fmt.Sprintf("%x", shortKey),
-				"stepFrom", txFrom/dt.d.aggregationStep, "stepTo", txTo/dt.d.aggregationStep, "offset", offset,
-				"visibleFilesCount", len(dt.files), "filesCount", dt.d.dirtyFiles.Len(),
-				"fileFound", item != nil)
+				"offset", offset, "short", fmt.Sprintf("%x", shortKey),
+				//"stepFrom", item.startTxNum/dt.d.aggregationStep, "stepTo", item.endTxNum/dt.d.aggregationStep,
+				"cleanFilesCount", len(dt.files), "dirtyFilesCount", dt.d.dirtyFiles.Len(),
+				"file", getter.FileName())
 		}
 	}()
 
-	g := NewArchiveGetter(item.decompressor.MakeGetter(), dt.d.compression)
-	g.Reset(offset)
-	if !g.HasNext() || uint64(g.Size()) <= offset {
+	//getter := NewArchiveGetter(item.decompressor.MakeGetter(), dt.d.compression)
+	getter.Reset(offset)
+	if !getter.HasNext() || uint64(getter.Size()) <= offset {
 		dt.d.logger.Warn("lookupByShortenedKey failed",
-			"stepFrom", txFrom/dt.d.aggregationStep, "stepTo", txTo/dt.d.aggregationStep, "offset", offset,
-			"size", g.Size(), "short", shortKey, "file", item.decompressor.FileName())
+			//"stepFrom", item.startTxNum/dt.d.aggregationStep, "stepTo", item.endTxNum/dt.d.aggregationStep,
+			"short", shortKey, "offset", offset, "file", getter.FileName())
 		return nil, false
 	}
 
-	fullKey, _ = g.Next(nil)
-	// dt.d.logger.Debug(fmt.Sprintf("lookupByShortenedKey [%x]=>{%x}", shortKey, fullKey),
-	// 	"stepFrom", stepFrom, "stepTo", stepTo, "offset", offset, "file", item.decompressor.FileName())
+	fullKey, _ = getter.Next(nil)
 	return fullKey, true
 }
-
-//func (dc *DomainRoTx) SqueezeExistingCommitmentFile() {
-//	dc.commitmentValTransformDomain()
-//
-//}
 
 // commitmentValTransform parses the value of the commitment record to extract references
 // to accounts and storage items, then looks them up in the new, merged files, and replaces them with
@@ -436,6 +431,11 @@ func (dt *DomainRoTx) commitmentValTransformDomain(accounts, storage *DomainRoTx
 		if !dt.d.replaceKeysInValues || len(valBuf) == 0 {
 			return valBuf, nil
 		}
+		si := storage.lookupFileByItsRange(keyFromTxNum, keyEndTxNum)
+		ai := accounts.lookupFileByItsRange(keyFromTxNum, keyEndTxNum)
+
+		sig := NewArchiveGetter(si.decompressor.MakeGetter(), storage.d.compression)
+		aig := NewArchiveGetter(ai.decompressor.MakeGetter(), accounts.d.compression)
 
 		return commitment.BranchData(valBuf).
 			ReplacePlainKeys(dt.comBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
@@ -447,7 +447,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(accounts, storage *DomainRoTx
 						buf = append(buf[:0], key...)
 					} else {
 						// Optimised key referencing a state file record (file number and offset within the file)
-						buf, found = storage.lookupByShortenedKey(key, keyFromTxNum, keyEndTxNum)
+						buf, found = storage.lookupByShortenedKey(key, sig)
 						if !found {
 							dt.d.logger.Crit("valTransform: lost storage full key",
 								"shortened", fmt.Sprintf("%x", key),
@@ -477,7 +477,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(accounts, storage *DomainRoTx
 					// Non-optimised key originating from a database record
 					buf = append(buf[:0], key...)
 				} else {
-					buf, found = accounts.lookupByShortenedKey(key, keyFromTxNum, keyEndTxNum)
+					buf, found = accounts.lookupByShortenedKey(key, aig)
 					if !found {
 						dt.d.logger.Crit("valTransform: lost account full key",
 							"shortened", fmt.Sprintf("%x", key),
