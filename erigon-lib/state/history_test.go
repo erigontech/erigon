@@ -86,10 +86,10 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 }
 
 func TestHistoryCollationsAndBuilds(t *testing.T) {
-	t.Run("largeValues=true", func(t *testing.T) {
+	runTest := func(t *testing.T, largeValues bool) {
 		totalTx := uint64(1000)
 		values := generateTestData(t, length.Addr, length.Addr+length.Hash, totalTx, 100, 10)
-		db, h := filledHistoryValues(t, true, values, log.New())
+		db, h := filledHistoryValues(t, largeValues, values, log.New())
 		defer db.Close()
 
 		ctx := context.Background()
@@ -164,76 +164,13 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 				require.GreaterOrEqual(t, upd.txNum, lastAggergatedTx, "txNum %d is less than lastAggregatedTx %d", upd.txNum, lastAggergatedTx)
 			}
 		}
+	}
+
+	t.Run("largeValues=true", func(t *testing.T) {
+		runTest(t, true)
 	})
 	t.Run("largeValues=false", func(t *testing.T) {
-		t.Skip()
-		totalTx := uint64(1000)
-		values := generateTestData(t, length.Addr, length.Addr+length.Hash, totalTx, 100, 10)
-		db, h := filledHistoryValues(t, false, values, log.New())
-		defer db.Close()
-
-		ctx := context.Background()
-		rwtx, err := db.BeginRw(ctx)
-		require.NoError(t, err)
-		defer rwtx.Rollback()
-
-		for i := uint64(0); i < totalTx; i += h.aggregationStep {
-			collation, err := h.collate(ctx, 0, 0, 1000, rwtx)
-			require.NoError(t, err)
-			defer collation.Close()
-
-			require.NotEmptyf(t, collation.historyPath, "collation.historyPath is empty")
-			require.NotNil(t, collation.historyComp)
-			require.NotEmptyf(t, collation.efHistoryPath, "collation.efHistoryPath is empty")
-			require.NotNil(t, collation.efHistoryComp)
-
-			sf, err := h.buildFiles(ctx, 0, collation, background.NewProgressSet())
-			defer sf.CleanupOnError()
-			require.NoError(t, err)
-			require.NotNil(t, sf)
-
-			efReader := NewArchiveGetter(sf.efHistoryDecomp.MakeGetter(), h.compression)
-			hReader := NewArchiveGetter(sf.historyDecomp.MakeGetter(), h.compression)
-
-			// ef contains all sorted keys
-			// for each key it has a list of txNums
-			// h contains all values for all keys ordered by key + txNum
-
-			var keyBuf, valBuf, hValBuf []byte
-			seenKeys := make([]string, 0)
-
-			for efReader.HasNext() {
-				keyBuf, _ = efReader.Next(nil)
-				valBuf, _ = efReader.Next(nil)
-
-				ef, _ := eliasfano32.ReadEliasFano(valBuf)
-				efIt := ef.Iterator()
-
-				require.Contains(t, values, string(keyBuf), "key not found in values")
-				seenKeys = append(seenKeys, string(keyBuf))
-
-				vi := 0
-				updates, ok := values[string(keyBuf)]
-				require.Truef(t, ok, "key not found in values")
-				require.Len(t, updates, int(ef.Count()), "updates count mismatch")
-
-				for efIt.HasNext() {
-					txNum, err := efIt.Next()
-					require.NoError(t, err)
-					require.EqualValuesf(t, updates[vi].txNum, txNum, "txNum mismatch")
-
-					require.Truef(t, hReader.HasNext(), "hReader has no more values")
-					hValBuf, _ = hReader.Next(nil)
-					if updates[vi].value == nil {
-						require.Emptyf(t, hValBuf, "value at %d is not empty (not nil)", vi)
-					} else {
-						require.EqualValuesf(t, updates[vi].value, hValBuf, "value at %d mismatch", vi)
-					}
-					vi++
-				}
-			}
-			require.True(t, sort.StringsAreSorted(seenKeys))
-		}
+		runTest(t, false)
 	})
 }
 
