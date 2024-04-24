@@ -82,6 +82,6 @@ func (api *OtterscanAPIImpl) getBlockDetailsImpl(ctx context.Context, tx kv.Tx, 
 	response := map[string]interface{}{}
 	response["block"] = getBlockRes
 	response["issuance"] = getIssuanceRes
-	response["totalFees"] = hexutil.Uint64(feesRes)
+	response["totalFees"] = (*hexutil.Big)(feesRes)
 	return response, nil
 }
