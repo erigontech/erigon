@@ -3,6 +3,7 @@ package jsonrpc
 import (
 	"context"
 	"fmt"
+
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -65,7 +66,7 @@ func (api *OtterscanAPIImpl) getBlockDetailsImpl(ctx context.Context, tx kv.Tx, 
 	if err != nil {
 		return nil, err
 	}
-	getIssuanceRes, err := delegateIssuance(tx, b, chainConfig)
+	getIssuanceRes, err := delegateIssuance(tx, b, chainConfig, api.engine())
 	if err != nil {
 		return nil, err
 	}
