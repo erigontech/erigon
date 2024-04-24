@@ -19,7 +19,6 @@ zkevm.max-gas-price: 0
 zkevm.gas-price-factor: 0.12
 
 zkevm.l1-rollup-id: 1
-zkevm.l1-matic-contract-address: "0x1850Dd35dE878238fb1dBa7aF7f929303AB6e8E4"
 zkevm.l1-block-range: 20000
 zkevm.l1-query-delay: 6000
 zkevm.l1-first-block: 4789190

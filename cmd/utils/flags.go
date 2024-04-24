@@ -429,7 +429,7 @@ var (
 	L1MaticContractAddressFlag = cli.StringFlag{
 		Name:  "zkevm.l1-matic-contract-address",
 		Usage: "Ethereum L1 Matic contract address",
-		Value: "",
+		Value: "0x0",
 	}
 	L1FirstBlockFlag = cli.Uint64Flag{
 		Name:  "zkevm.l1-first-block",
@@ -531,7 +531,7 @@ var (
 		Usage: "The URL of the pool manager. If set, eth_sendRawTransaction will be redirected there.",
 		Value: "",
 	}
-  DisableVirtualCounters = cli.BoolFlag{
+	DisableVirtualCounters = cli.BoolFlag{
 		Name:  "zkevm.disable-virtual-counters",
 		Usage: "Disable the virtual counters. This has an effect on on sequencer node and when external executor is not enabled.",
 		Value: false,

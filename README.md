@@ -146,7 +146,6 @@ For a full explanation of the config options, see below:
 - `zkevm.address-admin`: The address for the admin contract
 - `zkevm.address-rollup`: The address for the rollup contract
 - `zkevm.address-ger-manager`: The address for the GER manager contract
-- `zkevm.l1-matic-contract-address`: The address for the Matic/POL contract
 - `zkevm.rpc-ratelimit`: Rate limit for RPC calls.
 - `zkevm.data-stream-port`: Port for the data stream.  This needs to be set to enable the datastream server
 - `zkevm.data-stream-host`: The host for the data stream i.e. `localhost`.  This must be set to enable the datastream server

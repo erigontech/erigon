@@ -14,7 +14,6 @@ zkevm.address-admin: "0x9EA9db6af0FEfd30d22F813bE32E4E17A3189E6a"
 zkevm.address-rollup: "0x9fB0B4A5d4d60aaCfa8DC20B8DF5528Ab26848d3"
 zkevm.address-ger-manager: "0x76216E45Bdd20022eEcC07999e50228d7829534B"
 
-zkevm.l1-matic-contract-address: "0x7cD0BAb63E3FE6a61D902d7bD8795C933A511BF8"
 zkevm.l1-block-range: 20000
 zkevm.l1-query-delay: 6000
 zkevm.l1-first-block: 5192000
