@@ -647,6 +647,7 @@ type DomainRoTx struct {
 
 	keyBuf [60]byte // 52b key and 8b for inverted step
 	valBuf [128]byte
+	comBuf []byte
 
 	keysC kv.CursorDupSort
 	valsC kv.Cursor

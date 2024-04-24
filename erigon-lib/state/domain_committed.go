@@ -438,7 +438,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(accounts, storage *DomainRoTx
 		}
 
 		return commitment.BranchData(valBuf).
-			ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+			ReplacePlainKeys(dt.comBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
 				var found bool
 				var buf []byte
 				if isStorage {

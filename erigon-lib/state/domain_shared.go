@@ -65,6 +65,7 @@ type SharedDomains struct {
 	trace    bool //nolint
 	//muMaps   sync.RWMutex
 	//walLock sync.RWMutex
+	aux []byte
 
 	account    map[string][]byte
 	code       map[string][]byte
@@ -373,7 +374,7 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 		return branch, nil // do not transform, return as is
 	}
 
-	return branch.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+	return branch.ReplacePlainKeys(sd.aux[:0], func(key []byte, isStorage bool) ([]byte, error) {
 		if isStorage {
 			if len(key) == length.Addr+length.Hash {
 				return nil, nil // save storage key as is
