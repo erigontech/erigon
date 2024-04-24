@@ -31,7 +31,7 @@ type OperationsPool struct {
 	AttesterSlashingsPool     *OperationPool[libcommon.Bytes96, *cltypes.AttesterSlashing]
 	ProposerSlashingsPool     *OperationPool[libcommon.Bytes96, *cltypes.ProposerSlashing]
 	BLSToExecutionChangesPool *OperationPool[libcommon.Bytes96, *cltypes.SignedBLSToExecutionChange]
-	VoluntaryExistsPool       *OperationPool[uint64, *cltypes.SignedVoluntaryExit]
+	VoluntaryExitsPool        *OperationPool[uint64, *cltypes.SignedVoluntaryExit]
 }
 
 func NewOperationsPool(beaconCfg *clparams.BeaconChainConfig) OperationsPool {
@@ -40,13 +40,13 @@ func NewOperationsPool(beaconCfg *clparams.BeaconChainConfig) OperationsPool {
 		AttesterSlashingsPool:     NewOperationPool[libcommon.Bytes96, *cltypes.AttesterSlashing](operationsPerPool, "attesterSlashingsPool"),
 		ProposerSlashingsPool:     NewOperationPool[libcommon.Bytes96, *cltypes.ProposerSlashing](operationsPerPool, "proposerSlashingsPool"),
 		BLSToExecutionChangesPool: NewOperationPool[libcommon.Bytes96, *cltypes.SignedBLSToExecutionChange](operationsPerPool, "blsExecutionChangesPool"),
-		VoluntaryExistsPool:       NewOperationPool[uint64, *cltypes.SignedVoluntaryExit](operationsPerPool, "voluntaryExitsPool"),
+		VoluntaryExitsPool:        NewOperationPool[uint64, *cltypes.SignedVoluntaryExit](operationsPerPool, "voluntaryExitsPool"),
 	}
 }
 
 func (o *OperationsPool) NotifyBlock(blk *cltypes.BeaconBlock) {
 	blk.Body.VoluntaryExits.Range(func(_ int, exit *cltypes.SignedVoluntaryExit, _ int) bool {
-		o.VoluntaryExistsPool.DeleteIfExist(exit.VoluntaryExit.ValidatorIndex)
+		o.VoluntaryExitsPool.DeleteIfExist(exit.VoluntaryExit.ValidatorIndex)
 		return true
 	})
 	blk.Body.AttesterSlashings.Range(func(_ int, att *cltypes.AttesterSlashing, _ int) bool {
