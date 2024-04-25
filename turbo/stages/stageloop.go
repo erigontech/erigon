@@ -703,7 +703,7 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 			stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, cfg.Sync, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, false, blockReader, blockWriter, dirs.Tmp, cfg.HistoryV3, nil, nil),
 			stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, *controlServer.ChainConfig, blockReader, cfg.HistoryV3, blockWriter, nil),
 			stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
-			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, cfg.Sync, 0, true, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd, nil),
+			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, cfg.Sync, -1, true, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd, nil),
 			stagedsync.StageExecuteBlocksCfg(
 				db,
 				cfg.Prune,
