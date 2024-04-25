@@ -352,7 +352,11 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 		return err
 	}
 	if u.UnwindPoint < unwindToLimit {
+		log.Warn("[dbg] ")
 		return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, unwindToLimit)
+	}
+	if s.BlockNumber < unwindToLimit {
+		return nil //nothing to unwind
 	}
 
 	var domains *libstate.SharedDomains
