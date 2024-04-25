@@ -362,9 +362,19 @@ var cmdPrintTableSizes = &cobra.Command{
 			return
 		}
 
+		var sb strings.Builder
+		sb.WriteString("Table")
+		sb.WriteRune(',')
+		sb.WriteString("Size")
+		sb.WriteRune('\n')
 		for i := 0; i < len(tableSizes)/2; i++ {
-			logger.Info(fmt.Sprintf("%d", i+1), tableSizes[i*2], tableSizes[i*2+1])
+			sb.WriteString(tableSizes[i*2].(string))
+			sb.WriteRune(',')
+			sb.WriteString(tableSizes[i*2+1].(string))
+			sb.WriteRune('\n')
 		}
+
+		fmt.Print(sb.String())
 	},
 }
 
