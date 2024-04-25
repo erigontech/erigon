@@ -774,7 +774,7 @@ func NewPolygonSyncStages(
 		stagedsync.StageSendersCfg(
 			db,
 			chainConfig,
-			config.LoopBlockLimit,
+			config.Sync,
 			false, /* badBlockHalt */
 			config.Dirs.Tmp,
 			config.Prune,
