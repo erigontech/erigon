@@ -198,6 +198,7 @@ func (tf *AtomicTorrentFS) prohibitNewDownloads(whitelistAdd, whitelistRemove []
 	}
 
 	whiteList := make([]string, 0, len(_currentWhiteList))
+	// copy all item except delted
 	for _, it := range _currentWhiteList {
 		if slices.Contains(whitelistRemove, it) {
 			continue
@@ -205,10 +206,10 @@ func (tf *AtomicTorrentFS) prohibitNewDownloads(whitelistAdd, whitelistRemove []
 		whiteList = append(whiteList, it)
 	}
 
+	// add all new whitelisted items
 	for _, it := range whitelistAdd {
-		if slices.Contains(whiteList, it) {
+		if !slices.Contains(whiteList, it) {
 			whiteList = append(whiteList, it)
-			continue
 		}
 	}
 	slices.Sort(whiteList)
