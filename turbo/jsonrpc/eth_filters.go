@@ -162,7 +162,7 @@ func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 }
 
 // NewPendingTransactions send a notification each time when a transaction had added into mempool.
-func (api *APIImpl) NewPendingTransactions(ctx context.Context) (*rpc.Subscription, error) {
+func (api *APIImpl) NewPendingTransactions(ctx context.Context, fullTx *bool) (*rpc.Subscription, error) {
 	if api.filters == nil {
 		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
 	}
@@ -183,7 +183,13 @@ func (api *APIImpl) NewPendingTransactions(ctx context.Context) (*rpc.Subscripti
 			case txs, ok := <-txsCh:
 				for _, t := range txs {
 					if t != nil {
-						err := notifier.Notify(rpcSub.ID, t.Hash())
+						var err error
+						if fullTx != nil && *fullTx {
+							err = notifier.Notify(rpcSub.ID, t)
+						} else {
+							err = notifier.Notify(rpcSub.ID, t.Hash())
+						}
+
 						if err != nil {
 							log.Warn("[rpc] error while notifying subscription", "err", err)
 						}
