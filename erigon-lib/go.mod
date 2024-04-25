@@ -11,8 +11,8 @@ require (
 )
 
 require (
-	github.com/RoaringBitmap/roaring v1.9.2
-	github.com/anacrolix/dht/v2 v2.21.0
+	github.com/RoaringBitmap/roaring v1.9.3
+	github.com/anacrolix/dht/v2 v2.21.1
 	github.com/anacrolix/go-libutp v1.3.1
 	github.com/anacrolix/log v0.15.2
 	github.com/anacrolix/torrent v1.54.2-0.20240424124100-1ef0afe9d44b
