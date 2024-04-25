@@ -49,7 +49,7 @@ func getTestCommitteesMessages(n int) (privateKeys [][]byte, messages []cltypes.
 
 func TestSyncContributionPool(t *testing.T) {
 	_, msgs, s := getTestCommitteesMessages(16)
-	pool := NewSyncContributionPool()
+	pool := NewSyncContributionPool(&clparams.MainnetBeaconConfig)
 	require.NoError(t, pool.AddSyncCommitteeMessage(s, 0, &msgs[0]))
 	require.NoError(t, pool.AddSyncCommitteeMessage(s, 0, &msgs[1]))
 	require.NoError(t, pool.AddSyncCommitteeMessage(s, 0, &msgs[2]))
@@ -59,9 +59,4 @@ func TestSyncContributionPool(t *testing.T) {
 
 	contribution.SubcommitteeIndex = 1
 	require.NoError(t, pool.AddSyncContribution(s, contribution))
-
-	contribution2 := pool.GetSyncContribution(0, 1, testHash)
-	require.Equal(t, contribution2.Signature, contribution.Signature)
-	require.Equal(t, contribution, contribution2)
-
 }

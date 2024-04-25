@@ -3,6 +3,7 @@ package simulator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -30,12 +31,13 @@ type HeimdallSimulator struct {
 	downloader         *sync.TorrentClient
 	chain              string
 
-	lastDownloadedBlockNumber uint64
+	iterations               []uint64 // list of final block numbers for an iteration
+	lastAvailableBlockNumber uint64
 }
 
 type IndexFnType func(context.Context, snaptype.FileInfo, uint32, string, *background.Progress, log.Lvl, log.Logger) error
 
-func NewHeimdall(ctx context.Context, chain string, snapshotLocation string, logger log.Logger) (HeimdallSimulator, error) {
+func NewHeimdall(ctx context.Context, chain string, snapshotLocation string, logger log.Logger, iterations []uint64) (HeimdallSimulator, error) {
 	cfg := snapcfg.KnownCfg(chain)
 	torrentDir := filepath.Join(snapshotLocation, "torrents", chain)
 
@@ -89,15 +91,25 @@ func NewHeimdall(ctx context.Context, chain string, snapshotLocation string, log
 		return HeimdallSimulator{}, err
 	}
 
+	var lastAvailableBlockNum uint64
+	if len(iterations) == 0 {
+		lastAvailableBlockNum = 0
+	} else {
+		lastAvailableBlockNum = iterations[0]
+		iterations = iterations[1:]
+	}
+
 	s := HeimdallSimulator{
-		ctx:                       ctx,
-		knownBorSnapshots:         knownBorSnapshots,
-		activeBorSnapshots:        activeBorSnapshots,
-		blockReader:               freezeblocks.NewBlockReader(nil, activeBorSnapshots),
-		logger:                    logger,
-		downloader:                downloader,
-		chain:                     chain,
-		lastDownloadedBlockNumber: 0,
+		ctx:                ctx,
+		knownBorSnapshots:  knownBorSnapshots,
+		activeBorSnapshots: activeBorSnapshots,
+		blockReader:        freezeblocks.NewBlockReader(nil, activeBorSnapshots),
+		logger:             logger,
+		downloader:         downloader,
+		chain:              chain,
+
+		iterations:               iterations,
+		lastAvailableBlockNumber: lastAvailableBlockNum,
 	}
 
 	go func() {
@@ -109,7 +121,7 @@ func NewHeimdall(ctx context.Context, chain string, snapshotLocation string, log
 }
 
 func (h *HeimdallSimulator) FetchLatestSpan(ctx context.Context) (*heimdall.Span, error) {
-	latestSpan := h.blockReader.LastFrozenSpanId()
+	latestSpan := uint64(heimdall.SpanIdAt(h.lastAvailableBlockNumber))
 
 	span, err := h.getSpan(h.ctx, latestSpan)
 	if err != nil {
@@ -120,6 +132,20 @@ func (h *HeimdallSimulator) FetchLatestSpan(ctx context.Context) (*heimdall.Span
 }
 
 func (h *HeimdallSimulator) FetchSpan(ctx context.Context, spanID uint64) (*heimdall.Span, error) {
+	// move to next iteration
+	if spanID == uint64(heimdall.SpanIdAt(h.lastAvailableBlockNumber)) {
+		if len(h.iterations) == 0 {
+			h.lastAvailableBlockNumber++
+		} else {
+			h.lastAvailableBlockNumber = h.iterations[0]
+			h.iterations = h.iterations[1:]
+		}
+	}
+
+	if spanID > uint64(heimdall.SpanIdAt(h.lastAvailableBlockNumber)) {
+		return nil, errors.New("span not found")
+	}
+
 	span, err := h.getSpan(h.ctx, spanID)
 	if err != nil {
 		return nil, err
@@ -138,12 +164,19 @@ func (h *HeimdallSimulator) FetchStateSyncEvents(ctx context.Context, fromId uin
 	defer view.Close()
 
 	for !maxTime && len(events) != limit {
-		if seg, ok := view.EventsSegment(h.lastDownloadedBlockNumber); ok {
+		if seg, ok := view.EventsSegment(h.lastAvailableBlockNumber); ok {
 			if err := h.downloadData(ctx, seg, snaptype.BorEvents, freezeblocks.BorEventsIdx); err != nil {
 				return nil, err
 			}
 		}
-		h.lastDownloadedBlockNumber += 500000
+
+		if len(h.iterations) == 0 {
+			// we increment by 500k because the events we need are not in this snapshot file
+			h.lastAvailableBlockNumber += 500000
+		} else {
+			h.lastAvailableBlockNumber = h.iterations[0]
+			h.iterations = h.iterations[1:]
+		}
 
 		events, maxTime, err = h.blockReader.EventsByIdFromSnapshot(fromId, to, limit)
 		if err != nil {

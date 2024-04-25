@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
@@ -381,7 +382,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 
 func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (
 	blockSnaps *freezeblocks.RoSnapshots, borSnaps *freezeblocks.BorRoSnapshots, csn *freezeblocks.CaplinSnapshots,
-	br *freezeblocks.BlockRetire, agg *libstate.AggregatorV3, err error,
+	br *freezeblocks.BlockRetire, agg *libstate.Aggregator, err error,
 ) {
 	blockSnaps = freezeblocks.NewRoSnapshots(cfg, dirs.Snap, 0, logger)
 	if err = blockSnaps.ReopenFolder(); err != nil {
@@ -615,7 +616,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	for i := 0; i < 1024; i++ {
 		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 			agg.SetTx(tx)
-			if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/2); err != nil {
+			if err = agg.Prune(ctx, config3.HistoryV3AggregationStep/2); err != nil {
 				return err
 			}
 			return err
@@ -661,7 +662,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	for i := 0; i < 1024; i++ {
 		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 			agg.SetTx(tx)
-			if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil {
+			if err = agg.Prune(ctx, config3.HistoryV3AggregationStep/10); err != nil {
 				return err
 			}
 			return err
@@ -816,8 +817,8 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 	opts = opts.Accede()
 	return opts
 }
-func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *libstate.AggregatorV3 {
-	agg, err := libstate.NewAggregatorV3(ctx, dirs.Snap, dirs.Tmp, ethconfig.HistoryV3AggregationStep, chainDB, logger)
+func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *libstate.Aggregator {
+	agg, err := libstate.NewAggregator(ctx, dirs.Snap, dirs.Tmp, config3.HistoryV3AggregationStep, chainDB, logger)
 	if err != nil {
 		panic(err)
 	}

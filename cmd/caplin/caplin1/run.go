@@ -127,7 +127,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 	fcuFs := afero.NewBasePathFs(afero.NewOsFs(), caplinFcuPath)
 	syncedDataManager := synced_data.NewSyncedDataManager(true, beaconConfig)
 
-	syncContributionPool := sync_contribution_pool.NewSyncContributionPool()
+	syncContributionPool := sync_contribution_pool.NewSyncContributionPool(beaconConfig)
 	emitters := beaconevents.NewEmitters()
 	aggregationPool := aggregation.NewAggregationPool(ctx, beaconConfig, networkConfig, ethClock)
 	forkChoice, err := forkchoice.NewForkChoiceStore(ethClock, state, engine, pool, fork_graph.NewForkGraphDisk(state, fcuFs, config.BeaconRouter), emitters, syncedDataManager, blobStorage)
@@ -184,8 +184,13 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 	attestationService := services.NewAttestationService(forkChoice, committeeSub, ethClock, syncedDataManager, beaconConfig, networkConfig)
 	syncContributionService := services.NewSyncContributionService(syncedDataManager, beaconConfig, syncContributionPool, ethClock, emitters, false)
 	aggregateAndProofService := services.NewAggregateAndProofService(ctx, syncedDataManager, forkChoice, beaconConfig, aggregationPool, false)
+	voluntaryExitService := services.NewVoluntaryExitService(pool, emitters, syncedDataManager, beaconConfig, ethClock)
+	blsToExecutionChangeService := services.NewBLSToExecutionChangeService(pool, emitters, syncedDataManager, beaconConfig)
+	proposerSlashingService := services.NewProposerSlashingService(pool, syncedDataManager, beaconConfig, ethClock)
 	// Create the gossip manager
-	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, ethClock, emitters, committeeSub, blockService, blobService, syncCommitteeMessagesService, syncContributionService, aggregateAndProofService, attestationService)
+	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, ethClock, emitters, committeeSub,
+		blockService, blobService, syncCommitteeMessagesService, syncContributionService, aggregateAndProofService,
+		attestationService, voluntaryExitService, blsToExecutionChangeService, proposerSlashingService)
 	{ // start ticking forkChoice
 		go func() {
 			tickInterval := time.NewTicker(2 * time.Millisecond)
@@ -293,6 +298,9 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 			syncContributionService,
 			aggregateAndProofService,
 			attestationService,
+			voluntaryExitService,
+			blsToExecutionChangeService,
+			proposerSlashingService,
 		)
 		go beacon.ListenAndServe(&beacon.LayeredBeaconHandler{
 			ArchiveApi: apiHandler,
