@@ -46,7 +46,7 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 	defer s.emitters.Publish("voluntary_exit", voluntaryExit)
 
 	// [IGNORE] The voluntary exit is the first valid voluntary exit received for the validator with index signed_voluntary_exit.message.validator_index.
-	if s.operationsPool.VoluntaryExitPool.Has(voluntaryExit.ValidatorIndex) {
+	if s.operationsPool.VoluntaryExitsPool.Has(voluntaryExit.ValidatorIndex) {
 		return ErrIgnore
 	}
 
@@ -111,7 +111,7 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 		return errors.New("ProcessVoluntaryExit: BLS verification failed")
 	}
 
-	s.operationsPool.VoluntaryExitPool.Insert(voluntaryExit.ValidatorIndex, msg)
+	s.operationsPool.VoluntaryExitsPool.Insert(voluntaryExit.ValidatorIndex, msg)
 
 	return nil
 }

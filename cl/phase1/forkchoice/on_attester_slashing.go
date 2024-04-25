@@ -24,13 +24,17 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 	if !cltypes.IsSlashableAttestationData(attestation1.Data, attestation2.Data) {
 		return fmt.Errorf("attestation data is not slashable")
 	}
-	// Retrieve justified state
-	s, err := f.forkGraph.GetState(f.justifiedCheckpoint.Load().(solid.Checkpoint).BlockRoot(), false)
-	if err != nil {
-		return err
+	var err error
+	s := f.syncedDataManager.HeadState()
+	if s == nil {
+		// Retrieve justified state
+		s, err = f.forkGraph.GetState(f.justifiedCheckpoint.Load().(solid.Checkpoint).BlockRoot(), false)
+		if err != nil {
+			return err
+		}
 	}
 	if s == nil {
-		return fmt.Errorf("justified checkpoint state not accessible")
+		return fmt.Errorf("no state accessible")
 	}
 	attestation1PublicKeys, err := getIndexedAttestationPublicKeys(s, attestation1)
 	if err != nil {
