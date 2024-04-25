@@ -790,6 +790,7 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 }
 
 func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, logger log.Logger) (err error) {
+	log.Warn("[unwind] UnwindExecutionStage", "u.UnwindPoint", u.UnwindPoint, "s.BlockNumber", s.BlockNumber)
 	//fmt.Printf("unwind: %d -> %d\n", u.CurrentBlockNumber, u.UnwindPoint)
 	if u.UnwindPoint >= s.BlockNumber {
 		return nil
