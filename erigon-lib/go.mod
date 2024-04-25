@@ -4,18 +4,18 @@ go 1.21.7
 
 require (
 	github.com/erigontech/mdbx-go v0.37.2
-	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240420054828-08148fbfe2a3
-	github.com/ledgerwatch/interfaces v0.0.0-20240320062914-b57f05746087
+	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240423054729-9f0135b508b2
+	github.com/ledgerwatch/interfaces v0.0.0-20240425034152-dda221776f08
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 )
 
 require (
-	github.com/RoaringBitmap/roaring v1.9.2
-	github.com/anacrolix/dht/v2 v2.21.0
+	github.com/RoaringBitmap/roaring v1.9.3
+	github.com/anacrolix/dht/v2 v2.21.1
 	github.com/anacrolix/go-libutp v1.3.1
 	github.com/anacrolix/log v0.15.2
-	github.com/anacrolix/torrent v1.54.1
+	github.com/anacrolix/torrent v1.54.2-0.20240424124100-1ef0afe9d44b
 	github.com/c2h5oh/datasize v0.0.0-20220606134207-859f65c6625b
 	github.com/containerd/cgroups/v3 v3.0.3
 	github.com/crate-crypto/go-kzg-4844 v0.7.0
@@ -129,22 +129,23 @@ require (
 	go.etcd.io/bbolt v1.3.6 // indirect
 	go.opentelemetry.io/otel v1.8.0 // indirect
 	go.opentelemetry.io/otel/trace v1.8.0 // indirect
-	go.uber.org/goleak v1.2.0 // indirect
-	golang.org/x/mod v0.14.0 // indirect
-	golang.org/x/net v0.22.0 // indirect
+	go.uber.org/goleak v1.3.0 // indirect
+	golang.org/x/mod v0.17.0 // indirect
+	golang.org/x/net v0.24.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
-	golang.org/x/tools v0.17.0 // indirect
+	golang.org/x/tools v0.20.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240227224415-6ceb2ff114de // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/libc v1.41.0 // indirect
 	modernc.org/mathutil v1.6.0 // indirect
 	modernc.org/memory v1.7.2 // indirect
-	modernc.org/sqlite v1.29.5 // indirect
+	modernc.org/sqlite v1.29.6 // indirect
 	rsc.io/tmplfunc v0.0.3 // indirect
 	zombiezen.com/go/sqlite v0.13.1 // indirect
 )
 
 replace (
+	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha
 	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.8
 	github.com/tidwall/btree => github.com/AskAlexSharov/btree v1.6.2
 )

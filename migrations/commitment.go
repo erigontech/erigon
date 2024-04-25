@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/etconfig2"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -29,7 +29,7 @@ var SqueezeCommitmentFiles = Migration{
 		logEvery := time.NewTicker(10 * time.Second)
 		defer logEvery.Stop()
 
-		agg, err := libstate.NewAggregator(ctx, dirs, etconfig2.HistoryV3AggregationStep, db, logger)
+		agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, logger)
 		if err != nil {
 			return err
 		}

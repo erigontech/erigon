@@ -45,44 +45,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/seg"
-)
-
-var (
-	//LatestStateReadWarm          = metrics.GetOrCreateSummary(`latest_state_read{type="warm",found="yes"}`)  //nolint
-	//LatestStateReadWarmNotFound  = metrics.GetOrCreateSummary(`latest_state_read{type="warm",found="no"}`)   //nolint
-	//LatestStateReadGrind         = metrics.GetOrCreateSummary(`latest_state_read{type="grind",found="yes"}`) //nolint
-	//LatestStateReadGrindNotFound = metrics.GetOrCreateSummary(`latest_state_read{type="grind",found="no"}`)  //nolint
-	//LatestStateReadCold          = metrics.GetOrCreateSummary(`latest_state_read{type="cold",found="yes"}`)  //nolint
-	//LatestStateReadColdNotFound  = metrics.GetOrCreateSummary(`latest_state_read{type="cold",found="no"}`)   //nolint
-	mxPrunableDAcc  = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="account"}`)
-	mxPrunableDSto  = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="storage"}`)
-	mxPrunableDCode = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="code"}`)
-	mxPrunableDComm = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="commitment"}`)
-	mxPrunableHAcc  = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="account"}`)
-	mxPrunableHSto  = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="storage"}`)
-	mxPrunableHCode = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="code"}`)
-	mxPrunableHComm = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="commitment"}`)
-
-	mxRunningMerges        = metrics.GetOrCreateGauge("domain_running_merges")
-	mxRunningFilesBuilding = metrics.GetOrCreateGauge("domain_running_files_building")
-	mxCollateTook          = metrics.GetOrCreateHistogram("domain_collate_took")
-	mxPruneTookDomain      = metrics.GetOrCreateHistogram(`domain_prune_took{type="domain"}`)
-	mxPruneTookHistory     = metrics.GetOrCreateHistogram(`domain_prune_took{type="history"}`)
-	mxPruneTookIndex       = metrics.GetOrCreateHistogram(`domain_prune_took{type="index"}`)
-	mxPruneInProgress      = metrics.GetOrCreateGauge("domain_pruning_progress")
-	mxCollationSize        = metrics.GetOrCreateGauge("domain_collation_size")
-	mxCollationSizeHist    = metrics.GetOrCreateGauge("domain_collation_hist_size")
-	mxPruneSizeDomain      = metrics.GetOrCreateCounter(`domain_prune_size{type="domain"}`)
-	mxPruneSizeHistory     = metrics.GetOrCreateCounter(`domain_prune_size{type="history"}`)
-	mxPruneSizeIndex       = metrics.GetOrCreateCounter(`domain_prune_size{type="index"}`)
-	mxBuildTook            = metrics.GetOrCreateSummary("domain_build_files_took")
-	mxStepTook             = metrics.GetOrCreateHistogram("domain_step_took")
-	mxFlushTook            = metrics.GetOrCreateSummary("domain_flush_took")
-	mxCommitmentRunning    = metrics.GetOrCreateGauge("domain_running_commitment")
-	mxCommitmentTook       = metrics.GetOrCreateSummary("domain_commitment_took")
 )
 
 // StepsInColdFile - files of this size are completely frozen/immutable.
@@ -265,7 +229,7 @@ func (d *Domain) removeFilesAfterStep(lowerBound uint64, readonly bool) {
 			item.closeFilesAndRemove()
 		} else {
 			log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d has not enough files (was not complete). stack: %s", item.decompressor.FileName(), lowerBound, dbg.Stack()))
-
+			item.closeFiles()
 		}
 	}
 
@@ -279,10 +243,11 @@ func (d *Domain) removeFilesAfterStep(lowerBound uint64, readonly bool) {
 	for _, item := range toDelete {
 		d.History.dirtyFiles.Delete(item)
 		if !readonly {
-			log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
+			log.Debug(fmt.Sprintf("[snapshots] deleting some histor files - because step %d has not enough files (was not complete)", lowerBound))
 			item.closeFilesAndRemove()
 		} else {
-			log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
+			log.Debug(fmt.Sprintf("[snapshots] closing some histor files - because step %d has not enough files (was not complete)", lowerBound))
+			item.closeFiles()
 		}
 	}
 
@@ -300,6 +265,7 @@ func (d *Domain) removeFilesAfterStep(lowerBound uint64, readonly bool) {
 			item.closeFilesAndRemove()
 		} else {
 			log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
+			item.closeFiles()
 		}
 	}
 }
@@ -416,6 +382,7 @@ func (d *Domain) openFiles() (err error) {
 	})
 
 	for _, item := range invalidFileItems {
+		item.closeFiles() // just close, not remove from disk
 		d.dirtyFiles.Delete(item)
 	}
 
@@ -438,22 +405,7 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 		return true
 	})
 	for _, item := range toDelete {
-		if item.decompressor != nil {
-			item.decompressor.Close()
-			item.decompressor = nil
-		}
-		if item.index != nil {
-			item.index.Close()
-			item.index = nil
-		}
-		if item.bindex != nil {
-			item.bindex.Close()
-			item.bindex = nil
-		}
-		if item.existence != nil {
-			item.existence.Close()
-			item.existence = nil
-		}
+		item.closeFiles()
 		d.dirtyFiles.Delete(item)
 	}
 }
@@ -1451,9 +1403,6 @@ func (dt *DomainRoTx) Close() {
 			files[i].src.closeFilesAndRemove()
 		}
 	}
-	//for _, r := range dt.readers {
-	//	r.Close()
-	//}
 	dt.ht.Close()
 }
 
@@ -2246,37 +2195,6 @@ func (sf SelectedStaticFiles) Close() {
 					item.decompressor.Close()
 				}
 				if item.index != nil {
-					item.index.Close()
-				}
-				if item.bindex != nil {
-					item.bindex.Close()
-				}
-			}
-		}
-	}
-}
-
-type MergedFiles struct {
-	d     [kv.DomainLen]*filesItem
-	dHist [kv.DomainLen]*filesItem
-	dIdx  [kv.DomainLen]*filesItem
-}
-
-func (mf MergedFiles) FillV3(m *MergedFilesV3) MergedFiles {
-	for id := range m.d {
-		mf.d[id], mf.dHist[id], mf.dIdx[id] = m.d[id], m.dHist[id], m.dIdx[id]
-	}
-	return mf
-}
-
-func (mf MergedFiles) Close() {
-	for id := range mf.d {
-		for _, item := range []*filesItem{mf.d[id], mf.dHist[id], mf.dIdx[id]} {
-			if item != nil {
-				if item.decompressor != nil {
-					item.decompressor.Close()
-				}
-				if item.decompressor != nil {
 					item.index.Close()
 				}
 				if item.bindex != nil {

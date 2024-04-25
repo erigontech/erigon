@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/etconfig2"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
@@ -380,7 +380,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		allSnapshots.LogStat("remote")
 		allBorSnapshots.LogStat("remote")
 
-		if agg, err = libstate.NewAggregator(ctx, cfg.Dirs, etconfig2.HistoryV3AggregationStep, db, logger); err != nil {
+		if agg, err = libstate.NewAggregator(ctx, cfg.Dirs, config3.HistoryV3AggregationStep, db, logger); err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("create aggregator: %w", err)
 		}
 		_ = agg.OpenFolder(true) //TODO: must use analog of `OptimisticReopenWithDB`
@@ -412,7 +412,8 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 					allBorSnapshots.LogStat("reopen")
 				}
 
-				if err = agg.OpenList(reply.HistoryFiles, true); err != nil {
+				//if err = agg.OpenList(reply.HistoryFiles, true); err != nil {
+				if err = agg.OpenFolder(true); err != nil {
 					logger.Error("[snapshots] reopen", "err", err)
 				} else {
 					db.View(context.Background(), func(tx kv.Tx) error {

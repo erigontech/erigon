@@ -15,7 +15,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
-	"github.com/ledgerwatch/erigon-lib/etconfig2"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
@@ -89,7 +89,7 @@ func (p *Progress) Log(rs *state.StateV3, in *state.QueueWithRetry, rws *state.R
 		//"workers", p.workersCount,
 		"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(p.commitThreshold)),
 		"stepsInDB", fmt.Sprintf("%.2f", idxStepsAmountInDB),
-		"step", fmt.Sprintf("%.1f", float64(outTxNum)/float64(etconfig2.HistoryV3AggregationStep)),
+		"step", fmt.Sprintf("%.1f", float64(outTxNum)/float64(config3.HistoryV3AggregationStep)),
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 	)
 

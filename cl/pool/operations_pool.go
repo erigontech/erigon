@@ -30,7 +30,7 @@ type OperationsPool struct {
 	ProposerSlashingsPool          *OperationPool[libcommon.Bytes96, *cltypes.ProposerSlashing]
 	BLSToExecutionChangesPool      *OperationPool[libcommon.Bytes96, *cltypes.SignedBLSToExecutionChange]
 	SignedContributionAndProofPool *OperationPool[libcommon.Bytes96, *cltypes.SignedContributionAndProof]
-	VoluntaryExistsPool            *OperationPool[uint64, *cltypes.SignedVoluntaryExit]
+	VoluntaryExitPool              *OperationPool[uint64, *cltypes.SignedVoluntaryExit]
 	ContributionCache              *OperationPool[cltypes.ContributionKey, [][]byte]
 }
 
@@ -41,14 +41,14 @@ func NewOperationsPool(beaconCfg *clparams.BeaconChainConfig) OperationsPool {
 		ProposerSlashingsPool:          NewOperationPool[libcommon.Bytes96, *cltypes.ProposerSlashing](int(beaconCfg.MaxAttestations), "proposerSlashingsPool"),
 		BLSToExecutionChangesPool:      NewOperationPool[libcommon.Bytes96, *cltypes.SignedBLSToExecutionChange](int(beaconCfg.MaxBlsToExecutionChanges), "blsExecutionChangesPool"),
 		SignedContributionAndProofPool: NewOperationPool[libcommon.Bytes96, *cltypes.SignedContributionAndProof](int(beaconCfg.MaxAttestations), "signedContributionAndProof"),
-		VoluntaryExistsPool:            NewOperationPool[uint64, *cltypes.SignedVoluntaryExit](int(beaconCfg.MaxBlsToExecutionChanges), "voluntaryExitsPool"),
+		VoluntaryExitPool:              NewOperationPool[uint64, *cltypes.SignedVoluntaryExit](int(beaconCfg.MaxBlsToExecutionChanges), "voluntaryExitsPool"),
 		ContributionCache:              NewOperationPool[cltypes.ContributionKey, [][]byte](int(beaconCfg.MaxAttestations), "contributionCache"),
 	}
 }
 
 func (o *OperationsPool) NotifyBlock(blk *cltypes.BeaconBlock) {
 	blk.Body.VoluntaryExits.Range(func(_ int, exit *cltypes.SignedVoluntaryExit, _ int) bool {
-		o.VoluntaryExistsPool.DeleteIfExist(exit.VoluntaryExit.ValidatorIndex)
+		o.VoluntaryExitPool.DeleteIfExist(exit.VoluntaryExit.ValidatorIndex)
 		return true
 	})
 	blk.Body.AttesterSlashings.Range(func(_ int, att *cltypes.AttesterSlashing, _ int) bool {
