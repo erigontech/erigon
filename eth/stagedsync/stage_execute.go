@@ -337,6 +337,11 @@ func reconstituteBlock(agg *libstate.Aggregator, db kv.RoDB, tx kv.Tx) (n uint64
 var ErrTooDeepUnwind = fmt.Errorf("too deep unwind")
 
 func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, accumulator *shards.Accumulator, logger log.Logger) (err error) {
+	if s.BlockNumber < u.UnwindPoint {
+		log.Warn("[dbg] unw2 nothing to unwind")
+		return nil //nothing to unwind
+	}
+
 	unwindToLimit, err := txc.Tx.(libstate.HasAggCtx).AggCtx().(*libstate.AggregatorRoTx).CanUnwindDomainsToBlockNum(txc.Tx)
 	if err != nil {
 		return err
@@ -344,10 +349,6 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	if u.UnwindPoint < unwindToLimit {
 		log.Warn("[dbg] unw1")
 		return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, unwindToLimit)
-	}
-	if s.BlockNumber < unwindToLimit {
-		log.Warn("[dbg] unw2")
-		return nil //nothing to unwind
 	}
 
 	var domains *libstate.SharedDomains
