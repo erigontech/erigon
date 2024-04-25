@@ -251,6 +251,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	var err error
 
 	cfg := ethconfig.Defaults
+	cfg.Sync.LoopBlockLimit = 1
 	cfg.StateStream = true
 	cfg.BatchSize = 1 * datasize.MB
 	cfg.Sync.BodyDownloadTimeoutSeconds = 10
