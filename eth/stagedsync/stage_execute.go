@@ -352,10 +352,11 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 		return err
 	}
 	if u.UnwindPoint < unwindToLimit {
-		log.Warn("[dbg] ")
+		log.Warn("[dbg] unw1")
 		return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, unwindToLimit)
 	}
 	if s.BlockNumber < unwindToLimit {
+		log.Warn("[dbg] unw2")
 		return nil //nothing to unwind
 	}
 
