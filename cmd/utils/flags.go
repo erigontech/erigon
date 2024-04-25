@@ -489,6 +489,11 @@ var (
 		Usage: "HTTP path prefix on which JSON-RPC is served. Use '/' to serve on all paths.",
 		Value: "",
 	}
+	WSSubscribeLogsChannelSize = cli.IntFlag{
+		Name:  "ws.api.subscribelogs.channelsize",
+		Usage: "Size of the channel used for websocket logs subscriptions",
+		Value: 8192,
+	}
 	ExecFlag = cli.StringFlag{
 		Name:  "exec",
 		Usage: "Execute JavaScript statement",
