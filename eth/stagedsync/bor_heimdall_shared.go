@@ -178,7 +178,7 @@ func fetchAndWriteHeimdallStateSyncEvents(
 	/* TODO
 	// we want to get as many historical events as we can in
 	// each call to heimdall - but we need to make sure we
-	// don't type to get too recent a sync othewise it will
+	// don't type to get too recent a sync otherwise it will
 	// return a nil response
 
 	// to implement this we need to do block processing vs the

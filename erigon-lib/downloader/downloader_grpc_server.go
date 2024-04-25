@@ -58,6 +58,10 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
+	s.d.lock.Lock()
+	s.d.stats.Requested += len(request.Items)
+	s.d.lock.Unlock()
+
 	for i, it := range request.Items {
 		if it.Path == "" {
 			return nil, fmt.Errorf("field 'path' is required")

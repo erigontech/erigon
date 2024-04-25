@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -45,10 +46,11 @@ type SendersCfg struct {
 	hd              *headerdownload.HeaderDownload
 	blockReader     services.FullBlockReader
 	loopBreakCheck  func(int) bool
+	syncCfg         ethconfig.Sync
 	limit           uint64
 }
 
-func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, limit uint, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, loopBreakCheck func(int) bool) SendersCfg {
+func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, syncCfg ethconfig.Sync, limit uint, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, loopBreakCheck func(int) bool) SendersCfg {
 	const sendersBatchSize = 10000
 	const sendersBlockSize = 4096
 
@@ -69,6 +71,7 @@ func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, limit uint, badBlockHal
 		hd:              hd,
 		blockReader:     blockReader,
 		loopBreakCheck:  loopBreakCheck,
+		syncCfg:         syncCfg,
 		limit:           uint64(limit),
 	}
 }
@@ -112,6 +115,10 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	startFrom := s.BlockNumber + 1
 	if to > startFrom && to-startFrom > cfg.limit { // uint underflow protection. preserve global jump limit.
 		to = startFrom + cfg.limit
+	}
+
+	if to > startFrom && cfg.syncCfg.LoopBlockLimit > 0 && to-startFrom > uint64(cfg.syncCfg.LoopBlockLimit) { // uint underflow protection. preserve global jump limit.
+		to = startFrom + uint64(cfg.syncCfg.LoopBlockLimit)
 	}
 
 	jobs := make(chan *senderRecoveryJob, cfg.batchSize)
