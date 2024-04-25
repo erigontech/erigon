@@ -183,7 +183,7 @@ func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64
 		}
 
 		toStore := true
-		// if pruning is enabled, and depositContract isn't configured for the chain, don't index
+		// if pruning is enabled, and noPruneContracts isn't configured for the chain, don't index
 		if blockNum < pruneBlock {
 			toStore = false
 			if cfg.noPruneContracts == nil {
