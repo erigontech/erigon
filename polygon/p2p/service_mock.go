@@ -67,13 +67,12 @@ func (mr *MockServiceMockRecorder) BlockNumPresent(peerId, blockNum any) *gomock
 }
 
 // FetchBlocks mocks base method.
-func (m *MockService) FetchBlocks(ctx context.Context, start, end uint64, peerId *PeerId) ([]*types.Block, int, error) {
+func (m *MockService) FetchBlocks(ctx context.Context, start, end uint64, peerId *PeerId) (FetcherResponse[[]*types.Block], error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "FetchBlocks", ctx, start, end, peerId)
-	ret0, _ := ret[0].([]*types.Block)
-	ret1, _ := ret[1].(int)
-	ret2, _ := ret[2].(error)
-	return ret0, ret1, ret2
+	ret0, _ := ret[0].(FetcherResponse[[]*types.Block])
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // FetchBlocks indicates an expected call of FetchBlocks.
@@ -83,13 +82,12 @@ func (mr *MockServiceMockRecorder) FetchBlocks(ctx, start, end, peerId any) *gom
 }
 
 // FetchBodies mocks base method.
-func (m *MockService) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) ([]*types.Body, int, error) {
+func (m *MockService) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) (FetcherResponse[[]*types.Body], error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "FetchBodies", ctx, headers, peerId)
-	ret0, _ := ret[0].([]*types.Body)
-	ret1, _ := ret[1].(int)
-	ret2, _ := ret[2].(error)
-	return ret0, ret1, ret2
+	ret0, _ := ret[0].(FetcherResponse[[]*types.Body])
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // FetchBodies indicates an expected call of FetchBodies.
@@ -99,13 +97,12 @@ func (mr *MockServiceMockRecorder) FetchBodies(ctx, headers, peerId any) *gomock
 }
 
 // FetchHeaders mocks base method.
-func (m *MockService) FetchHeaders(ctx context.Context, start, end uint64, peerId *PeerId) ([]*types.Header, int, error) {
+func (m *MockService) FetchHeaders(ctx context.Context, start, end uint64, peerId *PeerId) (FetcherResponse[[]*types.Header], error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "FetchHeaders", ctx, start, end, peerId)
-	ret0, _ := ret[0].([]*types.Header)
-	ret1, _ := ret[1].(int)
-	ret2, _ := ret[2].(error)
-	return ret0, ret1, ret2
+	ret0, _ := ret[0].(FetcherResponse[[]*types.Header])
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // FetchHeaders indicates an expected call of FetchHeaders.

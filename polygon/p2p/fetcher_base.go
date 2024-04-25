@@ -25,12 +25,12 @@ type FetcherConfig struct {
 
 type Fetcher interface {
 	// FetchHeaders fetches [start,end) headers from a peer. Blocks until data is received.
-	FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) ([]*types.Header, int, error)
+	FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) (FetcherResponse[[]*types.Header], error)
 	// FetchBodies fetches block bodies for the given headers from a peer. Blocks until data is received.
-	FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) ([]*types.Body, int, error)
+	FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) (FetcherResponse[[]*types.Body], error)
 	// FetchBlocks fetches headers and bodies for a given [start, end) range from a peer and
 	// assembles them into blocks. Blocks until data is received.
-	FetchBlocks(ctx context.Context, start uint64, end uint64, peerId *PeerId) ([]*types.Block, int, error)
+	FetchBlocks(ctx context.Context, start uint64, end uint64, peerId *PeerId) (FetcherResponse[[]*types.Block], error)
 }
 
 func NewFetcher(
@@ -68,9 +68,9 @@ type FetcherResponse[T any] struct {
 	TotalSize int
 }
 
-func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) ([]*types.Header, int, error) {
+func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) (FetcherResponse[[]*types.Header], error) {
 	if start >= end {
-		return nil, 0, &ErrInvalidFetchHeadersRange{
+		return FetcherResponse[[]*types.Header]{}, &ErrInvalidFetchHeadersRange{
 			start: start,
 			end:   end,
 		}
@@ -101,7 +101,7 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 				return f.fetchHeaders(ctx, chunkStart, chunkEnd, peerId)
 			})
 			if err != nil {
-				return nil, 0, err
+				return FetcherResponse[[]*types.Header]{}, err
 			}
 			if len(headersChunk.Data) == 0 {
 				break
@@ -114,13 +114,13 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 	}
 
 	if err := f.validateHeadersResponse(headers, start, amount); err != nil {
-		return nil, 0, err
+		return FetcherResponse[[]*types.Header]{}, err
 	}
 
-	return headers, totalHeadersSize, nil
+	return FetcherResponse[[]*types.Header]{headers, totalHeadersSize}, nil
 }
 
-func (f *fetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) ([]*types.Body, int, error) {
+func (f *fetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) (FetcherResponse[[]*types.Body], error) {
 	var bodies []*types.Body
 	totalBodiesSize := 0
 
@@ -140,10 +140,10 @@ func (f *fetcher) FetchBodies(ctx context.Context, headers []*types.Header, peer
 			return f.fetchBodies(ctx, headersChunk, peerId)
 		})
 		if err != nil {
-			return nil, 0, err
+			return FetcherResponse[[]*types.Body]{}, err
 		}
 		if len(bodiesChunk.Data) == 0 {
-			return nil, 0, NewErrMissingBodies(headers)
+			return FetcherResponse[[]*types.Body]{}, NewErrMissingBodies(headers)
 		}
 
 		bodies = append(bodies, bodiesChunk.Data...)
@@ -151,26 +151,26 @@ func (f *fetcher) FetchBodies(ctx context.Context, headers []*types.Header, peer
 		totalBodiesSize += bodiesChunk.TotalSize
 	}
 
-	return bodies, totalBodiesSize, nil
+	return FetcherResponse[[]*types.Body]{bodies, totalBodiesSize}, nil
 }
 
-func (f *fetcher) FetchBlocks(ctx context.Context, start, end uint64, peerId *PeerId) ([]*types.Block, int, error) {
-	headers, headerSize, err := f.FetchHeaders(ctx, start, end, peerId)
+func (f *fetcher) FetchBlocks(ctx context.Context, start, end uint64, peerId *PeerId) (FetcherResponse[[]*types.Block], error) {
+	headers, err := f.FetchHeaders(ctx, start, end, peerId)
 	if err != nil {
-		return nil, 0, err
+		return FetcherResponse[[]*types.Block]{}, err
 	}
 
-	bodies, bodiesSize, err := f.FetchBodies(ctx, headers, peerId)
+	bodies, err := f.FetchBodies(ctx, headers.Data, peerId)
 	if err != nil {
-		return nil, 0, err
+		return FetcherResponse[[]*types.Block]{}, err
 	}
 
-	blocks := make([]*types.Block, len(headers))
-	for i, header := range headers {
-		blocks[i] = types.NewBlockFromNetwork(header, bodies[i])
+	blocks := make([]*types.Block, len(headers.Data))
+	for i, header := range headers.Data {
+		blocks[i] = types.NewBlockFromNetwork(header, bodies.Data[i])
 	}
 
-	return blocks, headerSize + bodiesSize, nil
+	return FetcherResponse[[]*types.Block]{blocks, headers.TotalSize + bodies.TotalSize}, nil
 }
 
 func (f *fetcher) fetchHeaders(ctx context.Context, start, end uint64, peerId *PeerId) (*FetcherResponse[[]*types.Header], error) {

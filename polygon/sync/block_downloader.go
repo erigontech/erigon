@@ -274,13 +274,13 @@ func (d *blockDownloader) fetchVerifiedBlocks(
 	// 1. Fetch headers in waypoint from a peer
 	start := waypoint.StartBlock().Uint64()
 	end := waypoint.EndBlock().Uint64() + 1 // waypoint end is inclusive, fetch headers is [start, end)
-	headers, headersTotalSize, err := d.p2pService.FetchHeaders(ctx, start, end, peerId)
+	headers, err := d.p2pService.FetchHeaders(ctx, start, end, peerId)
 	if err != nil {
 		return nil, 0, err
 	}
 
 	// 2. Verify headers match waypoint root hash
-	if err = d.headersVerifier(waypoint, headers); err != nil {
+	if err = d.headersVerifier(waypoint, headers.Data); err != nil {
 		d.logger.Debug(syncLogPrefix("penalizing peer - invalid headers"), "peerId", peerId, "err", err)
 
 		if penalizeErr := d.p2pService.Penalize(ctx, peerId); penalizeErr != nil {
@@ -291,7 +291,7 @@ func (d *blockDownloader) fetchVerifiedBlocks(
 	}
 
 	// 3. Fetch bodies for the verified waypoint headers
-	bodies, bodiesTotalSize, err := d.p2pService.FetchBodies(ctx, headers, peerId)
+	bodies, err := d.p2pService.FetchBodies(ctx, headers.Data, peerId)
 	if err != nil {
 		if errors.Is(err, &p2p.ErrMissingBodies{}) {
 			d.logger.Debug(syncLogPrefix("penalizing peer - missing bodies"), "peerId", peerId, "err", err)
@@ -305,9 +305,9 @@ func (d *blockDownloader) fetchVerifiedBlocks(
 	}
 
 	// 4. Assemble blocks
-	blocks := make([]*types.Block, len(headers))
-	for i, header := range headers {
-		blocks[i] = types.NewBlockFromNetwork(header, bodies[i])
+	blocks := make([]*types.Block, len(headers.Data))
+	for i, header := range headers.Data {
+		blocks[i] = types.NewBlockFromNetwork(header, bodies.Data[i])
 	}
 
 	// 5. Verify blocks
@@ -321,5 +321,5 @@ func (d *blockDownloader) fetchVerifiedBlocks(
 		return nil, 0, err
 	}
 
-	return blocks, headersTotalSize + bodiesTotalSize, nil
+	return blocks, headers.TotalSize + bodies.TotalSize, nil
 }
