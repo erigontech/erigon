@@ -778,6 +778,9 @@ func (ac *AggregatorRoTx) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx) (ui
 		_minBlockNum, _ := ac.MinUnwindDomainsBlockNum(tx)
 		return _minBlockNum, false, nil //nolint
 	}
+	if blockNumWithCommitment < blockNum {
+		return blockNum, true, nil
+	}
 	return blockNumWithCommitment, true, nil
 }
 
