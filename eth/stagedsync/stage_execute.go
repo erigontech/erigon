@@ -790,11 +790,13 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 }
 
 func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, logger log.Logger) (err error) {
-	log.Warn("[unwind] UnwindExecutionStage", "u.UnwindPoint", u.UnwindPoint, "s.BlockNumber", s.BlockNumber)
+	log.Warn("[unwind] UnwindExecutionStage1", "u.UnwindPoint", u.UnwindPoint, "s.BlockNumber", s.BlockNumber)
 	//fmt.Printf("unwind: %d -> %d\n", u.CurrentBlockNumber, u.UnwindPoint)
 	if u.UnwindPoint >= s.BlockNumber {
+		log.Warn("[unwind] UnwindExecutionStage2", "u.UnwindPoint", u.UnwindPoint, "s.BlockNumber", s.BlockNumber)
 		return nil
 	}
+	log.Warn("[unwind] UnwindExecutionStage3", "u.UnwindPoint", u.UnwindPoint, "s.BlockNumber", s.BlockNumber)
 	useExternalTx := txc.Tx != nil
 	if !useExternalTx {
 		txc.Tx, err = cfg.db.BeginRw(context.Background())
