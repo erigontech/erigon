@@ -698,8 +698,10 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 	initialCycle := MockInsertAsInitialCycle
 	hook := stages2.NewHook(ms.Ctx, ms.DB, ms.Notifications, ms.Sync, ms.BlockReader, ms.ChainConfig, ms.Log, nil)
 
-	if err = stages2.StageLoopIteration(ms.Ctx, ms.DB, wrap.TxContainer{}, ms.Sync, initialCycle, true, ms.Log, ms.BlockReader, hook); err != nil {
-		return err
+	for i := 0; i < len(chain.Blocks); i++ {
+		if err = stages2.StageLoopIteration(ms.Ctx, ms.DB, wrap.TxContainer{}, ms.Sync, initialCycle, true, ms.Log, ms.BlockReader, hook); err != nil {
+			return err
+		}
 	}
 	if ms.TxPool != nil {
 		ms.ReceiveWg.Wait() // Wait for TxPool notification
@@ -727,19 +729,20 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 
 	tipHash := chain.TopBlock.Hash()
 
-	status, _, lvh, err := wr.UpdateForkChoice(ctx, tipHash, tipHash, tipHash)
-
-	if err != nil {
-		return err
-	}
-	if err := ms.DB.UpdateNosync(ms.Ctx, func(tx kv.RwTx) error {
-		rawdb.WriteHeadBlockHash(tx, lvh)
-		return nil
-	}); err != nil {
-		return err
-	}
-	if status != execution.ExecutionStatus_Success {
-		return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[chain.Length()-1].NumberU64(), status.String())
+	for i := 0; i < len(chain.Blocks); i++ {
+		status, _, lvh, err := wr.UpdateForkChoice(ctx, tipHash, tipHash, tipHash)
+		if err != nil {
+			return err
+		}
+		if err := ms.DB.UpdateNosync(ms.Ctx, func(tx kv.RwTx) error {
+			rawdb.WriteHeadBlockHash(tx, lvh)
+			return nil
+		}); err != nil {
+			return err
+		}
+		if status != execution.ExecutionStatus_Success {
+			return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[chain.Length()-1].NumberU64(), status.String())
+		}
 	}
 
 	return nil
