@@ -348,9 +348,15 @@ var cmdPrintTableSizes = &cobra.Command{
 		}
 		defer db.Close()
 
+		allTablesCfg := db.AllTables()
+		allTables := make([]string, 0, len(allTablesCfg))
+		for table := range allTablesCfg {
+			allTables = append(allTables, table)
+		}
+
 		var tableSizes []interface{}
 		err = db.View(cmd.Context(), func(tx kv.Tx) error {
-			tableSizes = stagedsync.CollectTableSizes(db, tx, kv.ChaindataTables)
+			tableSizes = stagedsync.CollectTableSizes(db, tx, allTables)
 			return nil
 		})
 		if err != nil {
