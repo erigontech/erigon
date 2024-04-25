@@ -2,10 +2,12 @@ package aggregation
 
 import (
 	"context"
+	"log"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/mock/gomock"
 )
 
 var (
@@ -48,24 +50,38 @@ var (
 	mockAggrResult = [96]byte{'m', 'o', 'c', 'k'}
 )
 
+type mockFuncs struct {
+	ctrl *gomock.Controller
+}
+
+func (m *mockFuncs) BlsAggregate(sigs [][]byte) ([]byte, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "BlsAggregate", sigs)
+	ret0, _ := ret[0].([]byte)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
 type PoolTestSuite struct {
 	suite.Suite
+	gomockCtrl *gomock.Controller
+	mockFuncs  *mockFuncs
 }
 
 func (t *PoolTestSuite) SetupTest() {
-	blsAggregate = func(sigs [][]byte) ([]byte, error) {
-		ret := make([]byte, 96)
-		copy(ret, mockAggrResult[:])
-		return ret, nil
-	}
+	t.gomockCtrl = gomock.NewController(t.T())
+	t.mockFuncs = &mockFuncs{ctrl: t.gomockCtrl}
+	blsAggregate = t.mockFuncs.BlsAggregate
 }
 
 func (t *PoolTestSuite) TearDownTest() {
+	t.gomockCtrl.Finish()
 }
 
 func (t *PoolTestSuite) TestAddAttestation() {
 	testcases := []struct {
 		name     string
+		mock     func()
 		atts     []*solid.Attestation
 		hashRoot [32]byte
 		expect   *solid.Attestation
@@ -91,10 +107,14 @@ func (t *PoolTestSuite) TestAddAttestation() {
 		},
 		{
 			name: "merge att1_2, att1_3, att1_4",
+			mock: func() {
+				t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "BlsAggregate", gomock.Any()).Return(mockAggrResult[:], nil).Times(3)
+			},
 			atts: []*solid.Attestation{
-				att1_2,
-				att1_3,
-				att1_4,
+				att1_1, // no merge
+				att1_2, // no merge becasue overlapped with att1_1
+				att1_3, // merge with att1_2
+				att1_4, // merge with att1_2 and att1_3
 			},
 			hashRoot: attData1Root,
 			expect: solid.NewAttestionFromParameters(
@@ -105,12 +125,18 @@ func (t *PoolTestSuite) TestAddAttestation() {
 	}
 
 	for _, tc := range testcases {
+		log.Printf("test case: %s", tc.name)
+		t.SetupTest()
+		if tc.mock != nil {
+			tc.mock()
+		}
 		pool := NewAggregationPool(context.Background(), nil, nil, nil)
 		for _, att := range tc.atts {
 			pool.AddAttestation(att)
 		}
 		att := pool.GetAggregatationByRoot(tc.hashRoot)
 		t.Equal(tc.expect, att, tc.name)
+		t.gomockCtrl.Satisfied()
 	}
 }
 

@@ -126,6 +126,8 @@ func findBestAggregation(attestations []*solid.Attestation) (*solid.Attestation,
 				return nil, fmt.Errorf("merged signature is too long")
 			}
 			copy(bestSig[:], mergedSig)
+
+			// update best aggregation
 			bestAggregation.SetAggregationBits(bits)
 			bestAggregation.SetSignature(bestSig)
 		}
@@ -140,7 +142,7 @@ func (p *aggregationPoolImpl) GetAggregatationByRoot(root common.Hash) *solid.At
 	if !ok {
 		return nil
 	}
-	return agg.bestAggregation
+	return agg.bestAggregation.Copy()
 }
 
 func (p *aggregationPoolImpl) sweepStaleAtt(ctx context.Context) {
