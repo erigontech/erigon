@@ -466,3 +466,43 @@ func Test_BatchL2DataWithMultipleEmptyBlocks(t *testing.T) {
 		t.Fatalf("expected 2 blocks but found %v", len(blocks))
 	}
 }
+
+func Test_OnlyOneBlockReturnedWithOneBlockInData(t *testing.T) {
+	testData := "0b0000005b00000001ed0985119a1c74008252089451c06a3e11b3b9540dbd3d1697508af105a4dd15880de0b6b3a76400008081ea80805949d75c266f9ac75b829c9cc0d5ce6519f7ef042c3f230589d56a43ca89c8240d69ce59e021384ad6c0c3c44c9008ea6a7e041a475364e5ec7c253e3bf4840b1bff"
+	decoded, err := hex.DecodeString(testData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks, err := DecodeBatchL2Blocks(decoded, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocks) != 1 {
+		t.Fatalf("expected 1 blocks but found %v", len(blocks))
+	}
+}
+
+func Test_ComplexMixOfBlocks(t *testing.T) {
+	testData := "0b00000001000000010b00000002000000020b0000000300000003ed0985119a1c74008252089451c06a3e11b3b9540dbd3d1697508af105a4dd15880de0b6b3a76400008081ea80805949d75c266f9ac75b829c9cc0d5ce6519f7ef042c3f230589d56a43ca89c8240d69ce59e021384ad6c0c3c44c9008ea6a7e041a475364e5ec7c253e3bf4840b1bff0b0000000400000004"
+	decoded, err := hex.DecodeString(testData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks, err := DecodeBatchL2Blocks(decoded, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocks) != 4 {
+		t.Fatalf("expected 4 blocks but found %v", len(blocks))
+	}
+
+	// test data increments the l1 info index and delta for each block
+	for idx, block := range blocks {
+		if block.L1InfoTreeIndex != uint32(idx)+1 {
+			t.Errorf("block %v expected l1 info tree index %v but got %v", idx, idx+1, block.L1InfoTreeIndex)
+		}
+		if block.DeltaTimestamp != uint32(idx)+1 {
+			t.Errorf("block %v expected delta timestamp %v but got %v", idx, idx+1, block.DeltaTimestamp)
+		}
+	}
+}

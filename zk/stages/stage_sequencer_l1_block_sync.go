@@ -11,7 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/syncer"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zk/l1_data"
-	"os"
+	"time"
 )
 
 type SequencerL1BlockSyncCfg struct {
@@ -69,8 +69,8 @@ func SpawnSequencerL1BlockSyncStage(
 	}
 	highestKnownBatch, err := hermezDb.GetLastL1BatchData()
 	if highestKnownBatch == highestBatch {
-		log.Info("L1 block sync recovery has completed", "batch", highestBatch)
-		os.Exit(0)
+		log.Info("L1 block sync recovery has completed!", "batch", highestBatch)
+		time.Sleep(5 * time.Second)
 	}
 
 	l1BlockHeight, err := stages.GetStageProgress(tx, stages.L1BlockSync)
