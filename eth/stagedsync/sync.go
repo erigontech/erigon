@@ -136,6 +136,7 @@ func (s *Sync) IsAfter(stage1, stage2 stages.SyncStage) bool {
 
 func (s *Sync) HasUnwindPoint() bool { return s.unwindPoint != nil }
 func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error {
+	log.Warn("[dbg] called UnwindTo", "unwindPoint", unwindPoint, "reason", reason, "stack", dbg.Stack())
 	if tx != nil {
 		if casted, ok := tx.(state.HasAggCtx); ok {
 			// protect from too far unwind
