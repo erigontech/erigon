@@ -279,16 +279,17 @@ func commitmentItemLessPlain(i, j *commitmentItem) bool {
 
 // Finds shorter replacement for full key in given file item. filesItem -- result of merging of multiple files.
 // If item is nil, or shorter key was not found, or anything else goes wrong, nil key and false returned.
-func (dt *DomainRoTx) findShortenedKey(fullKey []byte, item *filesItem) (shortened []byte, found bool) {
+func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter ArchiveGetter, item *filesItem) (shortened []byte, found bool) {
 	if item == nil {
 		return nil, false
 	}
-
 	if !strings.Contains(item.decompressor.FileName(), dt.d.filenameBase) {
 		panic(fmt.Sprintf("findShortenedKeyEasier of %s called with merged file %s", dt.d.filenameBase, item.decompressor.FileName()))
 	}
-
-	g := NewArchiveGetter(item.decompressor.MakeGetter(), dt.d.compression)
+	if /*assert.Enable && */ itemGetter.FileName() != item.decompressor.FileName() {
+		panic(fmt.Sprintf("findShortenedKey of %s itemGetter (%s) is different to item.decompressor (%s)",
+			dt.d.filenameBase, itemGetter.FileName(), item.decompressor.FileName()))
+	}
 
 	//if idxList&withExistence != 0 {
 	//	hi, _ := dt.ht.iit.hashKey(fullKey)
@@ -306,14 +307,14 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, item *filesItem) (shorten
 			return nil, false
 		}
 
-		g.Reset(offset)
-		if !g.HasNext() {
+		itemGetter.Reset(offset)
+		if !itemGetter.HasNext() {
 			dt.d.logger.Warn("commitment branch key replacement seek failed",
 				"key", fmt.Sprintf("%x", fullKey), "idx", "hash", "file", item.decompressor.FileName())
 			return nil, false
 		}
 
-		k, _ := g.Next(nil)
+		k, _ := itemGetter.Next(nil)
 		if !bytes.Equal(fullKey, k) {
 			dt.d.logger.Warn("commitment branch key replacement seek invalid key",
 				"key", fmt.Sprintf("%x", fullKey), "idx", "hash", "file", item.decompressor.FileName())
@@ -323,7 +324,7 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, item *filesItem) (shorten
 		return encodeShorterKey(nil, offset), true
 	}
 	if dt.d.indexList&withBTree != 0 {
-		cur, err := item.bindex.Seek(g, fullKey)
+		cur, err := item.bindex.Seek(itemGetter, fullKey)
 		if err != nil {
 			dt.d.logger.Warn("commitment branch key replacement seek failed",
 				"key", fmt.Sprintf("%x", fullKey), "idx", "bt", "err", err, "file", item.decompressor.FileName())
@@ -334,9 +335,9 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, item *filesItem) (shorten
 		}
 
 		offset := cur.offsetInFile()
-		if uint64(g.Size()) <= offset {
+		if uint64(itemGetter.Size()) <= offset {
 			dt.d.logger.Warn("commitment branch key replacement seek gone too far",
-				"key", fmt.Sprintf("%x", fullKey), "offset", offset, "size", g.Size(), "file", item.decompressor.FileName())
+				"key", fmt.Sprintf("%x", fullKey), "offset", offset, "size", itemGetter.Size(), "file", item.decompressor.FileName())
 			return nil, false
 		}
 		return encodeShorterKey(nil, offset), true
@@ -437,6 +438,9 @@ func (dt *DomainRoTx) commitmentValTransformDomain(accounts, storage *DomainRoTx
 		sig := NewArchiveGetter(si.decompressor.MakeGetter(), storage.d.compression)
 		aig := NewArchiveGetter(ai.decompressor.MakeGetter(), accounts.d.compression)
 
+		ms := NewArchiveGetter(mergedStorage.decompressor.MakeGetter(), storage.d.compression)
+		ma := NewArchiveGetter(mergedAccount.decompressor.MakeGetter(), storage.d.compression)
+
 		return commitment.BranchData(valBuf).
 			ReplacePlainKeys(dt.comBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
 				var found bool
@@ -458,7 +462,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(accounts, storage *DomainRoTx
 						}
 					}
 
-					shortened, found := storage.findShortenedKey(buf, mergedStorage)
+					shortened, found := storage.findShortenedKey(buf, ms, mergedStorage)
 					if !found {
 						if len(buf) == length.Addr+length.Hash {
 							return buf, nil // if plain key is lost, we can save original fullkey
@@ -488,7 +492,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(accounts, storage *DomainRoTx
 					}
 				}
 
-				shortened, found := accounts.findShortenedKey(buf, mergedAccount)
+				shortened, found := accounts.findShortenedKey(buf, ma, mergedAccount)
 				if !found {
 					if len(buf) == length.Addr {
 						return buf, nil // if plain key is lost, we can save original fullkey
