@@ -110,7 +110,7 @@ func TestLastUpdated(t *testing.T) {
 		peerStats.AddOrUpdatePeer(pid, testUpdMsg)
 	}
 
-	require.True(t, peerStats.GetLastUpdate("test2").After(peerStats.GetLastUpdate("test1")))
+	require.True(t, peerStats.GetLastUpdate("test50").After(peerStats.GetLastUpdate("test1")))
 
 	oldestPeers := peerStats.GetOldestUpdatedPeersWithSize(10)
 
