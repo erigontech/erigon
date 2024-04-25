@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
@@ -22,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
+
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -181,7 +182,11 @@ func executeBlock(
 	stateSyncReceipt = execRs.StateSyncReceipt
 
 	// If writeReceipts is false here, append the not to be pruned receipts anyways
-	if writeReceipts || gatherNoPruneReceipts(&receipts, cfg.chainConfig) {
+	var noPruneContracts map[common.Address]bool
+	if cfg.chainConfig.DepositContract != nil {
+		noPruneContracts = map[common.Address]bool{*cfg.chainConfig.DepositContract: true}
+	}
+	if writeReceipts || gatherNoPruneReceipts(&receipts, noPruneContracts) {
 		if err = rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {
 			return err
 		}
@@ -204,16 +209,16 @@ func executeBlock(
 	return nil
 }
 
-// Filters out and keeps receipts of the contracts that may be needed by CL, namely of the deposit contract.
-func gatherNoPruneReceipts(receipts *types.Receipts, chainCfg *chain.Config) bool {
+// Filters out and keeps receipts of contracts that may be needed by CL, such as deposit contract
+func gatherNoPruneReceipts(receipts *types.Receipts, noPruneContracts map[common.Address]bool) bool {
 	cr := types.Receipts{}
 	for _, r := range *receipts {
 		toStore := false
-		if chainCfg.DepositContract != nil && *chainCfg.DepositContract == r.ContractAddress {
+		if noPruneContracts != nil && noPruneContracts[r.ContractAddress] {
 			toStore = true
 		} else {
 			for _, l := range r.Logs {
-				if chainCfg.DepositContract != nil && *chainCfg.DepositContract == l.Address {
+				if noPruneContracts != nil && noPruneContracts[l.Address] {
 					toStore = true
 					break
 				}
