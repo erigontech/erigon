@@ -350,7 +350,11 @@ var cmdPrintTableSizes = &cobra.Command{
 
 		allTablesCfg := db.AllTables()
 		allTables := make([]string, 0, len(allTablesCfg))
-		for table := range allTablesCfg {
+		for table, cfg := range allTablesCfg {
+			if cfg.IsDeprecated {
+				continue
+			}
+
 			allTables = append(allTables, table)
 		}
 
