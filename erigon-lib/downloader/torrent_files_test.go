@@ -47,8 +47,12 @@ func TestFSProhibitBackwardCompat(t *testing.T) {
 
 		prohibited, err := tf.NewDownloadsAreProhibited("v1-004900-005000-headers.seg")
 		require.NoError(err)
-		require.False(prohibited)
+		require.True(prohibited)
 		prohibited, err = tf.NewDownloadsAreProhibited("v1-004900-005000-headers.seg.torrent")
+		require.NoError(err)
+		require.True(prohibited)
+
+		prohibited, err = tf.NewDownloadsAreProhibited("v1-004900-005000-transactions.seg")
 		require.NoError(err)
 		require.False(prohibited)
 	})
