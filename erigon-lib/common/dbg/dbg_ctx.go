@@ -7,7 +7,7 @@ import (
 type debugContextKey struct{}
 
 // Enabling detailed debugging logs for given context
-func ToContext(ctx context.Context, v bool) context.Context {
+func ContextWithDebug(ctx context.Context, v bool) context.Context {
 	return context.WithValue(ctx, debugContextKey{}, v)
 }
 func Enabled(ctx context.Context) bool {
