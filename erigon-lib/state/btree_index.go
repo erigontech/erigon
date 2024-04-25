@@ -732,12 +732,10 @@ type BtIndex struct {
 	size     int64
 	modTime  time.Time
 	filePath string
-
-	// TODO do not sotre decompressor ptr in index, pass ArchiveGetter always instead of decomp directly
-	compressed   FileCompression
-	decompressor *seg.Decompressor
+	kvGetter ArchiveGetter
 }
 
+// todo remove
 func CreateBtreeIndex(indexPath, dataPath string, M uint64, compressed FileCompression, seed uint32, logger log.Logger, noFsync bool) (*BtIndex, error) {
 	err := BuildBtreeIndex(dataPath, indexPath, compressed, seed, logger, noFsync)
 	if err != nil {
@@ -764,6 +762,7 @@ func BuildBtreeIndex(dataPath, indexPath string, compressed FileCompression, see
 	return BuildBtreeIndexWithDecompressor(indexPath, decomp, compressed, background.NewProgressSet(), filepath.Dir(indexPath), seed, logger, noFsync)
 }
 
+// todo remove
 func OpenBtreeIndex(indexPath, dataPath string, M uint64, compressed FileCompression, trace bool) (*BtIndex, error) {
 	kv, err := seg.NewDecompressor(dataPath)
 	if err != nil {
@@ -850,9 +849,6 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 		filePath: indexPath,
 		size:     s.Size(),
 		modTime:  s.ModTime(),
-
-		decompressor: kv,
-		compressed:   compress,
 	}
 
 	idx.file, err = os.Open(indexPath)
@@ -873,20 +869,20 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 	if len(idx.data[pos:]) == 0 {
 		return idx, nil
 	}
-	defer idx.decompressor.EnableReadAhead().DisableReadAhead()
 
 	idx.ef, _ = eliasfano32.ReadEliasFano(idx.data[pos:])
 
-	getter := NewArchiveGetter(idx.decompressor.MakeGetter(), idx.compressed)
+	defer kv.EnableReadAhead().DisableReadAhead()
+	idx.kvGetter = NewArchiveGetter(kv.MakeGetter(), compress)
 
 	//fmt.Printf("open btree index %s with %d keys b+=%t data compressed %t\n", indexPath, idx.ef.Count(), UseBpsTree, idx.compressed)
 	switch UseBpsTree {
 	case true:
-		idx.bplus = NewBpsTree(getter, idx.ef, M, idx.dataLookup, idx.keyCmp)
+		idx.bplus = NewBpsTree(idx.kvGetter, idx.ef, M, idx.dataLookup, idx.keyCmp)
 	default:
 		idx.alloc = newBtAlloc(idx.ef.Count(), M, false, idx.dataLookup, idx.keyCmp)
 		if idx.alloc != nil {
-			idx.alloc.WarmUp(getter)
+			idx.alloc.WarmUp(idx.kvGetter)
 		}
 	}
 
@@ -968,22 +964,17 @@ func (b *BtIndex) Close() {
 	if b == nil {
 		return
 	}
-	if b.file != nil {
-		if b.m != nil {
-			if err := b.m.Unmap(); err != nil {
-				log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", b.FileName(), "stack", dbg.Stack())
-			}
+	if b.m != nil {
+		if err := b.m.Unmap(); err != nil {
+			log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", b.FileName(), "stack", dbg.Stack())
 		}
-		b.m = nil
+	}
+	b.m = nil
+	if b.file != nil {
 		if err := b.file.Close(); err != nil {
 			log.Log(dbg.FileCloseLogLevel, "close", "err", err, "file", b.FileName(), "stack", dbg.Stack())
 		}
 		b.file = nil
-	}
-
-	if b.decompressor != nil {
-		b.decompressor.Close()
-		b.decompressor = nil
 	}
 }
 
@@ -1044,15 +1035,19 @@ func (b *BtIndex) Get(lookup []byte, gr ArchiveGetter) (k, v []byte, found bool,
 // Then if x == nil - first key returned
 //
 //	if x is larger than any other key in index, nil cursor is returned.
+//
+// Uses innver kv Getter to fetch key and value.
 func (b *BtIndex) SeekDeprecated(x []byte) (*Cursor, error) {
-	g := NewArchiveGetter(b.decompressor.MakeGetter(), b.compressed)
-	return b.Seek(g, x)
+	//g := NewArchiveGetter(b.decompressor.MakeGetter(), b.compressed)
+	return b.Seek(b.kvGetter, x)
 }
 
 // Seek moves cursor to position where key >= x.
 // Then if x == nil - first key returned
 //
 //	if x is larger than any other key in index, nil cursor is returned.
+//
+// Uses external kv Getter to fetch key and value.
 func (b *BtIndex) Seek(g ArchiveGetter, x []byte) (*Cursor, error) {
 	if b.Empty() {
 		return nil, nil
@@ -1095,13 +1090,13 @@ func (b *BtIndex) Seek(g ArchiveGetter, x []byte) (*Cursor, error) {
 }
 
 func (b *BtIndex) OrdinalLookup(i uint64) *Cursor {
-	getter := NewArchiveGetter(b.decompressor.MakeGetter(), b.compressed)
-	k, v, err := b.dataLookup(i, getter)
+	//getter := NewArchiveGetter(b.decompressor.MakeGetter(), b.compressed)
+	k, v, err := b.dataLookup(i, b.kvGetter)
 	if err != nil {
 		return nil
 	}
 
-	return b.newCursor(context.Background(), k, v, i, getter)
+	return b.newCursor(context.Background(), k, v, i, b.kvGetter)
 }
 func (b *BtIndex) Offsets() *eliasfano32.EliasFano { return b.bplus.Offsets() }
 func (b *BtIndex) Distances() (map[int]int, error) { return b.bplus.Distances() }

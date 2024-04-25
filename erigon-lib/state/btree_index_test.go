@@ -83,7 +83,8 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	keys, err := pivotKeysFromKV(dataPath)
 	require.NoError(t, err)
 
-	getter := NewArchiveGetter(bt.decompressor.MakeGetter(), compressFlags)
+	//getter := NewArchiveGetter(bt.decompressor.MakeGetter(), compressFlags)
+	getter := bt.kvGetter
 
 	t.Run("seek beyond the last key", func(t *testing.T) {
 		_, _, err := bt.dataLookup(bt.ef.Count()+1, getter)
@@ -189,7 +190,8 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 	keys, err := pivotKeysFromKV(dataPath)
 	require.NoError(t, err)
 
-	getter := NewArchiveGetter(bt.decompressor.MakeGetter(), compressFlags)
+	//getter := NewArchiveGetter(bt.decompressor.MakeGetter(), compressFlags)
+	getter := bt.kvGetter
 
 	t.Run("seek beyond the last key", func(t *testing.T) {
 		_, _, err := bt.dataLookup(bt.ef.Count()+1, getter)
