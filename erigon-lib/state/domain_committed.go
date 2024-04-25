@@ -441,8 +441,10 @@ func (dt *DomainRoTx) commitmentValTransformDomain(accounts, storage *DomainRoTx
 		ms := NewArchiveGetter(mergedStorage.decompressor.MakeGetter(), storage.d.compression)
 		ma := NewArchiveGetter(mergedAccount.decompressor.MakeGetter(), storage.d.compression)
 
-		return commitment.BranchData(valBuf).
-			ReplacePlainKeys(dt.comBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
+		buf := dt.cvPool.Get().([]byte)[:0]
+
+		buf, err = commitment.BranchData(valBuf).
+			ReplacePlainKeys(buf, func(key []byte, isStorage bool) ([]byte, error) {
 				var found bool
 				var buf []byte
 				if isStorage {
@@ -504,5 +506,17 @@ func (dt *DomainRoTx) commitmentValTransformDomain(accounts, storage *DomainRoTx
 				}
 				return shortened, nil
 			})
+
+		if err != nil {
+			buf = buf[:0]
+			dt.cvPool.Put(buf)
+			return nil, err
+		}
+
+		vt := common.Copy(buf)
+		buf = buf[:0]
+		dt.cvPool.Put(buf)
+
+		return vt, nil
 	}
 }
