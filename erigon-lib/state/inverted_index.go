@@ -398,6 +398,7 @@ func (ii *InvertedIndex) openFiles() error {
 		return true
 	})
 	for _, item := range invalidFileItems {
+		item.closeFiles()
 		ii.dirtyFiles.Delete(item)
 	}
 
@@ -420,18 +421,7 @@ func (ii *InvertedIndex) closeWhatNotInList(fNames []string) {
 		return true
 	})
 	for _, item := range toDelete {
-		if item.decompressor != nil {
-			item.decompressor.Close()
-			item.decompressor = nil
-		}
-		if item.index != nil {
-			item.index.Close()
-			item.index = nil
-		}
-		if item.existence != nil {
-			item.existence.Close()
-			item.existence = nil
-		}
+		item.closeFiles()
 		ii.dirtyFiles.Delete(item)
 	}
 }
@@ -514,6 +504,7 @@ func (w *invertedIndexBufferedWriter) close() {
 
 // 3_domains * 2 + 3_history * 1 + 4_indices * 2 = 17 etl collectors, 17*(256Mb/8) = 512Mb - for all collectros
 var WALCollectorRAM = dbg.EnvDataSize("AGG_WAL_RAM", etl.BufferOptimalSize/8)
+var CollateETLRAM = dbg.EnvDataSize("AGG_COLLATE_RAM", etl.BufferOptimalSize/4)
 
 func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *invertedIndexBufferedWriter {
 	w := &invertedIndexBufferedWriter{

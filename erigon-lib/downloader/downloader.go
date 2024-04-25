@@ -109,6 +109,7 @@ type downloadProgress struct {
 }
 
 type AggStats struct {
+	Requested                 int
 	MetadataReady, FilesTotal int32
 	LastMetadataUpdate        *time.Time
 	PeersUnique               int32
@@ -357,10 +358,10 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 						fileHash := hex.EncodeToString(fileHashBytes)
 
 						if fileHash != download.Hash && fileHash != hash {
-							d.logger.Error("[snapshots] download db mismatch", "file", download.Name, "snapLock", download.Hash, "db", hash, "disk", fileHash, "downloaded", *info.Completed)
+							d.logger.Error("[snapshots] download db mismatch", "file", download.Name, "snapshotLock", download.Hash, "db", hash, "disk", fileHash, "downloaded", *info.Completed)
 							downloadMismatches = append(downloadMismatches, download.Name)
 						} else {
-							d.logger.Warn("[snapshots] snapLock hash does not match completed download", "file", download.Name, "snapLock", hash, "download", download.Hash, "downloaded", *info.Completed)
+							d.logger.Warn("[snapshots] snapshotLock hash does not match completed download", "file", download.Name, "snapshotLock", hash, "download", download.Hash, "downloaded", *info.Completed)
 						}
 					}
 				}
@@ -1852,7 +1853,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 	prevStats, stats := d.stats, d.stats
 
-	stats.Completed = true
+	stats.Completed = len(torrents) == stats.Requested
 	stats.BytesDownload = uint64(connStats.BytesReadUsefulIntendedData.Int64())
 	stats.BytesUpload = uint64(connStats.BytesWrittenData.Int64())
 
@@ -1952,11 +1953,8 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		}
 
 		// more detailed statistic: download rate of each peer (for each file)
-		if !torrentComplete && progress != 0 {
-			if _, ok := downloading[torrentName]; ok {
-				downloading[torrentName] = progress
-			}
-
+		if _, ok := downloading[torrentName]; ok {
+			downloading[torrentName] = progress
 			d.logger.Log(d.verbosity, "[snapshots] progress", "file", torrentName, "progress", fmt.Sprintf("%.2f%%", progress), "peers", len(peersOfThisFile), "webseeds", len(weebseedPeersOfThisFile))
 			d.logger.Log(d.verbosity, "[snapshots] webseed peers", webseedRates...)
 			d.logger.Log(d.verbosity, "[snapshots] bittorrent peers", rates...)

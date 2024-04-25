@@ -193,10 +193,8 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		require.True(t, strings.HasSuffix(c.valuesPath, "v1-accounts.0-1.kv"))
 		require.Equal(t, 2, c.valuesCount)
 		require.True(t, strings.HasSuffix(c.historyPath, "v1-accounts.0-1.v"))
-		require.Equal(t, 3, c.historyCount)
-		require.Equal(t, 2, len(c.indexBitmaps))
-		require.Equal(t, []uint64{3}, c.indexBitmaps["key2"].ToArray())
-		require.Equal(t, []uint64{2, 6}, c.indexBitmaps["key1"].ToArray())
+		require.Equal(t, 3, c.historyComp.Count())
+		require.Equal(t, 2*c.valuesCount, c.efHistoryComp.Count())
 
 		sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
 		require.NoError(t, err)
@@ -1050,10 +1048,7 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	require.Equal(t, 3, c.valuesCount)
 	require.True(t, strings.HasSuffix(c.historyPath, "v1-accounts.0-1.v"))
 	require.EqualValues(t, 3*maxTx, c.historyCount)
-	require.Equal(t, 3, len(c.indexBitmaps))
-	require.Len(t, c.indexBitmaps["key2"].ToArray(), int(maxTx))
-	require.Len(t, c.indexBitmaps["key1"].ToArray(), int(maxTx))
-	require.Len(t, c.indexBitmaps["key3"+string(l)].ToArray(), int(maxTx))
+	require.Equal(t, 3, c.efHistoryComp.Count()/2)
 
 	sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
 	require.NoError(t, err)
@@ -2436,7 +2431,6 @@ func TestDomain_PruneSimple(t *testing.T) {
 
 func TestDomainContext_findShortenedKey(t *testing.T) {
 	db, d := testDbAndDomain(t, log.New())
-
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
