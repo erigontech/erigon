@@ -45,7 +45,7 @@ type GrpcServer struct {
 	d *Downloader
 }
 
-func (s *GrpcServer) ProhibitNewDownloads(ctx context.Context, req *proto_downloader.ProhibitRequest) (*proto_downloader.ProhibitReply, error) {
+func (s *GrpcServer) Prohibit(ctx context.Context, req *proto_downloader.ProhibitRequest) (*proto_downloader.ProhibitReply, error) {
 	whitelist, err := s.d.torrentFS.ProhibitNewDownloads(req.WhitelistAdd, req.WhitelistRemove)
 	return &proto_downloader.ProhibitReply{Whitelist: whitelist}, err
 }
@@ -58,10 +58,6 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-
-	s.d.lock.Lock()
-	s.d.stats.Requested += len(request.Items)
-	s.d.lock.Unlock()
 
 	for i, it := range request.Items {
 		if it.Path == "" {
