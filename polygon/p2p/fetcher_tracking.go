@@ -33,7 +33,10 @@ func (tf *trackingFetcher) FetchHeaders(ctx context.Context, start uint64, end u
 			tf.peerTracker.BlockNumMissing(peerId, start)
 		}
 
-		return FetcherResponse[[]*types.Header]{}, err
+		return FetcherResponse[[]*types.Header]{
+			Data:      nil,
+			TotalSize: 0,
+		}, err
 	}
 
 	tf.peerTracker.BlockNumPresent(peerId, res.Data[len(res.Data)-1].Number.Uint64())
@@ -56,7 +59,10 @@ func (tf *trackingFetcher) FetchBodies(ctx context.Context, headers []*types.Hea
 			}
 		}
 
-		return FetcherResponse[[]*types.Body]{}, err
+		return FetcherResponse[[]*types.Body]{
+			Data:      nil,
+			TotalSize: 0,
+		}, err
 	}
 
 	return bodies, nil
