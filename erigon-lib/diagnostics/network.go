@@ -147,7 +147,7 @@ type PeerUpdTime struct {
 }
 
 func (p *PeerStats) GetOldestUpdatedPeersWithSize(size int) []PeerUpdTime {
-	var timeArray []PeerUpdTime
+	timeArray := make([]PeerUpdTime, 0, p.GetPeersCount())
 	for k, v := range p.lastUpdateMap {
 		timeArray = append(timeArray, PeerUpdTime{k, v})
 	}
