@@ -209,41 +209,41 @@ func prepareL1AndInfoTreeRelatedStuff(sdb *stageDb, decodedBlock *zktx.DecodedBa
 	// if we are in a recovery state and recognise that a l1 info tree index has been reused
 	// then we need to not include the GER and L1 block hash into the block info root calculation, so
 	// we keep track of this here
-	includeGerInBlockInfoRoot := true
+	shouldWriteGerToContract := true
 
 	l1BlockHash := common.Hash{}
 	ger := common.Hash{}
 
 	infoTreeIndexProgress, err := stages.GetStageProgress(sdb.tx, stages.HighestUsedL1InfoIndex)
 	if err != nil {
-		return infoTreeIndexProgress, l1TreeUpdate, l1TreeUpdateIndex, l1BlockHash, ger, includeGerInBlockInfoRoot, err
+		return infoTreeIndexProgress, l1TreeUpdate, l1TreeUpdateIndex, l1BlockHash, ger, shouldWriteGerToContract, err
 	}
 
 	if l1Recovery {
 		l1TreeUpdateIndex = uint64(decodedBlock.L1InfoTreeIndex)
 		l1TreeUpdate, err = sdb.hermezDb.GetL1InfoTreeUpdate(l1TreeUpdateIndex)
 		if err != nil {
-			return infoTreeIndexProgress, l1TreeUpdate, l1TreeUpdateIndex, l1BlockHash, ger, includeGerInBlockInfoRoot, err
+			return infoTreeIndexProgress, l1TreeUpdate, l1TreeUpdateIndex, l1BlockHash, ger, shouldWriteGerToContract, err
 		}
 		if infoTreeIndexProgress >= l1TreeUpdateIndex {
-			includeGerInBlockInfoRoot = false
+			shouldWriteGerToContract = false
 		}
 	} else {
 		l1TreeUpdateIndex, l1TreeUpdate, err = calculateNextL1TreeUpdateToUse(infoTreeIndexProgress, sdb.hermezDb)
 		if err != nil {
-			return infoTreeIndexProgress, l1TreeUpdate, l1TreeUpdateIndex, l1BlockHash, ger, includeGerInBlockInfoRoot, err
+			return infoTreeIndexProgress, l1TreeUpdate, l1TreeUpdateIndex, l1BlockHash, ger, shouldWriteGerToContract, err
 		}
 		if l1TreeUpdateIndex > 0 {
 			infoTreeIndexProgress = l1TreeUpdateIndex
 		}
 	}
 
-	if l1TreeUpdate != nil && includeGerInBlockInfoRoot {
+	if l1TreeUpdate != nil {
 		l1BlockHash = l1TreeUpdate.ParentHash
 		ger = l1TreeUpdate.GER
 	}
 
-	return infoTreeIndexProgress, l1TreeUpdate, l1TreeUpdateIndex, l1BlockHash, ger, includeGerInBlockInfoRoot, nil
+	return infoTreeIndexProgress, l1TreeUpdate, l1TreeUpdateIndex, l1BlockHash, ger, shouldWriteGerToContract, nil
 }
 
 // will be called at the start of every new block created within a batch to figure out if there is a new GER

@@ -163,7 +163,7 @@ func SpawnSequencingStage(
 
 		thisBlockNumber := header.Number.Uint64()
 
-		infoTreeIndexProgress, l1TreeUpdate, l1TreeUpdateIndex, l1BlockHash, ger, includeGerInBlockInfoRoot, err := prepareL1AndInfoTreeRelatedStuff(sdb, &decodedBlock, l1Recovery)
+		infoTreeIndexProgress, l1TreeUpdate, l1TreeUpdateIndex, l1BlockHash, ger, shouldWriteGerToContract, err := prepareL1AndInfoTreeRelatedStuff(sdb, &decodedBlock, l1Recovery)
 		if err != nil {
 			return err
 		}
@@ -173,7 +173,7 @@ func SpawnSequencingStage(
 		ibs := state.New(sdb.stateReader)
 
 		parentRoot := parentBlock.Root()
-		if err = handleStateForNewBlockStarting(cfg.chainConfig, sdb.hermezDb, ibs, thisBlockNumber, header.Time, &parentRoot, l1TreeUpdate, !includeGerInBlockInfoRoot); err != nil {
+		if err = handleStateForNewBlockStarting(cfg.chainConfig, sdb.hermezDb, ibs, thisBlockNumber, header.Time, &parentRoot, l1TreeUpdate, shouldWriteGerToContract); err != nil {
 			return err
 		}
 

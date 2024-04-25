@@ -31,28 +31,28 @@ func handleStateForNewBlockStarting(
 	timestamp uint64,
 	stateRoot *common.Hash,
 	l1info *zktypes.L1InfoTreeUpdate,
-	forceSkipGerManagerWrite bool,
+	shouldWriteGerToContract bool,
 ) error {
 	ibs.PreExecuteStateSet(chainConfig, blockNumber, timestamp, stateRoot)
 
-	if forceSkipGerManagerWrite {
-		return nil
-	}
-
 	// handle writing to the ger manager contract
 	if l1info != nil {
-		// first check if this ger has already been written
-		l1BlockHash := ibs.ReadGerManagerL1BlockHash(l1info.GER)
-		if l1BlockHash == (common.Hash{}) {
-			// not in the contract so let's write it!
-			ibs.WriteGerManagerL1BlockHash(l1info.GER, l1info.ParentHash)
+		// store it so we can retrieve for the data stream
+		if err := hermezDb.WriteBlockGlobalExitRoot(blockNumber, l1info.GER); err != nil {
+			return err
+		}
+		if err := hermezDb.WriteBlockL1BlockHash(blockNumber, l1info.ParentHash); err != nil {
+			return err
+		}
 
-			// store it so we can retrieve for the data stream
-			if err := hermezDb.WriteBlockGlobalExitRoot(blockNumber, l1info.GER); err != nil {
-				return err
-			}
-			if err := hermezDb.WriteBlockL1BlockHash(blockNumber, l1info.ParentHash); err != nil {
-				return err
+		// in the case of a re-used l1 info tree index we don't want to write the ger to the contract
+		if shouldWriteGerToContract {
+			// first check if this ger has already been written
+			l1BlockHash := ibs.ReadGerManagerL1BlockHash(l1info.GER)
+			if l1BlockHash == (common.Hash{}) {
+				// not in the contract so let's write it!
+				ibs.WriteGerManagerL1BlockHash(l1info.GER, l1info.ParentHash)
+
 			}
 		}
 	}
