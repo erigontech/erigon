@@ -17,7 +17,7 @@ import (
 )
 
 func (a *ApiHandler) GetEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	return newBeaconResponse(a.operationsPool.VoluntaryExitPool.Raw()), nil
+	return newBeaconResponse(a.operationsPool.VoluntaryExitsPool.Raw()), nil
 }
 
 func (a *ApiHandler) GetEthV1BeaconPoolAttesterSlashings(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -144,7 +144,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r 
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		a.operationsPool.VoluntaryExitPool.Insert(req.VoluntaryExit.ValidatorIndex, &req)
+		a.operationsPool.VoluntaryExitsPool.Insert(req.VoluntaryExit.ValidatorIndex, &req)
 	}
 	// Only write 200
 	w.WriteHeader(http.StatusOK)
