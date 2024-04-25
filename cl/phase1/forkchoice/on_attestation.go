@@ -2,17 +2,11 @@ package forkchoice
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-)
-
-const (
-	maxAttestationJobLifetime = 30 * time.Minute
-	maxBlockJobLifetime       = 36 * time.Second // 3 mainnet slots
 )
 
 var (
@@ -42,42 +36,82 @@ func (f *ForkChoiceStore) OnAttestation(attestation *solid.Attestation, fromBloc
 			return err
 		}
 	}
+	headState := f.syncedDataManager.HeadState()
+	var attestationIndicies []uint64
+	var err error
 	target := data.Target()
 
+	if headState == nil {
+		attestationIndicies, err = f.verifyAttestationWithCheckpointState(target, attestation, fromBlock)
+	} else {
+		attestationIndicies, err = f.verifyAttestationWithState(headState, attestation, fromBlock)
+	}
+	if err != nil {
+		return err
+	}
+
+	// Lastly update latest messages.
+	f.processAttestingIndicies(attestation, attestationIndicies)
+
+	return nil
+}
+
+func (f *ForkChoiceStore) verifyAttestationWithCheckpointState(target solid.Checkpoint, attestation *solid.Attestation, fromBlock bool) (attestationIndicies []uint64, err error) {
+	data := attestation.AttestantionData()
 	targetState, err := f.getCheckpointState(target)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	// Verify attestation signature.
 	if targetState == nil {
-		return fmt.Errorf("target state does not exist")
+		return nil, fmt.Errorf("target state does not exist")
 	}
 	// Now we need to find the attesting indicies.
-	attestationIndicies, err := targetState.getAttestingIndicies(&data, attestation.AggregationBits())
+	attestationIndicies, err = targetState.getAttestingIndicies(&data, attestation.AggregationBits())
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !fromBlock {
 		indexedAttestation := state.GetIndexedAttestation(attestation, attestationIndicies)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		valid, err := targetState.isValidIndexedAttestation(indexedAttestation)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if !valid {
-			return fmt.Errorf("invalid attestation")
+			return nil, fmt.Errorf("invalid attestation")
 		}
 	}
-	// Lastly update latest messages.
-	f.processAttestingIndicies(attestation, attestationIndicies)
-	if !fromBlock && insert {
-		// Add to the pool when verified.
-		f.operationsPool.AttestationsPool.Insert(attestation.Signature(), attestation)
+	return attestationIndicies, nil
+}
+
+func (f *ForkChoiceStore) verifyAttestationWithState(s *state.CachingBeaconState, attestation *solid.Attestation, fromBlock bool) (attestationIndicies []uint64, err error) {
+	data := attestation.AttestantionData()
+	if err != nil {
+		return nil, err
 	}
-	return nil
+
+	attestationIndicies, err = s.GetAttestingIndicies(data, attestation.AggregationBits(), true)
+	if err != nil {
+		return nil, err
+	}
+	if !fromBlock {
+		indexedAttestation := state.GetIndexedAttestation(attestation, attestationIndicies)
+		if err != nil {
+			return nil, err
+		}
+		valid, err := state.IsValidIndexedAttestation(s, indexedAttestation)
+		if err != nil {
+			return nil, err
+		}
+		if !valid {
+			return nil, fmt.Errorf("invalid attestation")
+		}
+	}
+	return attestationIndicies, nil
 }
 
 func (f *ForkChoiceStore) setLatestMessage(index uint64, message LatestMessage) {
