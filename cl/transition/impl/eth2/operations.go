@@ -192,11 +192,8 @@ func (I *impl) ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) 
 	return state.IncreaseBalance(s, validatorIndex, amount)
 }
 
-// ProcessVoluntaryExit takes a voluntary exit and applies state transition.
-func (I *impl) ProcessVoluntaryExit(s abstract.BeaconState, signedVoluntaryExit *cltypes.SignedVoluntaryExit) error {
-	// Sanity checks so that we know it is good.
-	voluntaryExit := signedVoluntaryExit.VoluntaryExit
-	currentEpoch := state.Epoch(s)
+func IsVoluntaryExitApplicable(s abstract.BeaconState, voluntaryExit *cltypes.VoluntaryExit) error {
+  currentEpoch := state.Epoch(s)
 	validator, err := s.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
 	if err != nil {
 		return err
@@ -213,8 +210,23 @@ func (I *impl) ProcessVoluntaryExit(s abstract.BeaconState, signedVoluntaryExit 
 	if currentEpoch < validator.ActivationEpoch()+s.BeaconConfig().ShardCommitteePeriod {
 		return errors.New("ProcessVoluntaryExit: exit is happening too fast")
 	}
+  return nil
+}
 
-	// We can skip it in some instances if we want to optimistically sync up.
+// ProcessVoluntaryExit takes a voluntary exit and applies state transition.
+func (I *impl) ProcessVoluntaryExit(s abstract.BeaconState, signedVoluntaryExit *cltypes.SignedVoluntaryExit) error {
+	// Sanity checks so that we know it is good.
+	voluntaryExit := signedVoluntaryExit.VoluntaryExit
+  err := IsVoluntaryExitApplicable(s, voluntaryExit)
+  if err != nil {
+    return err
+  }
+  validator, err := s.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
+	if err != nil {
+		return err
+	}
+
+  // We can skip it in some instances if we want to optimistically sync up.
 	if I.FullValidation {
 		var domain []byte
 		if s.Version() < clparams.DenebVersion {
