@@ -778,7 +778,7 @@ func (ac *AggregatorRoTx) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx) (ui
 		_minBlockNum, _ := ac.MinUnwindDomainsBlockNum(tx)
 		return _minBlockNum, false, nil //nolint
 	}
-	if blockNumWithCommitment < blockNum {
+	if blockNumWithCommitment < blockNum { // if unwind happening in future, then just allow it - we don't need re-org state
 		return blockNum, true, nil
 	}
 	return blockNumWithCommitment, true, nil
