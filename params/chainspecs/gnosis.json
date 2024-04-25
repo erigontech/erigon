@@ -11,9 +11,6 @@
   "istanbulBlock": 7298030,
   "berlinBlock": 16101500,
   "londonBlock": 19040000,
-  "burntContract": {
-    "19040000": "0x6BBe78ee9e474842Dbd4AB4987b3CeFE88426A92"
-  },
   "terminalTotalDifficulty": 8626000000000000000000058750000000000000000000,
   "terminalTotalDifficultyPassed": true,
   "shanghaiTime": 1690889660,
@@ -22,9 +19,10 @@
   "maxBlobGasPerBlock": 262144,
   "targetBlobGasPerBlock": 131072,
   "blobGasPriceUpdateFraction": 1112826,
-  "noPruneContracts": {
-    "0x0B98057eA310F4d31F2a452B414647007d1645d9": true
+  "burntContract": {
+    "19040000": "0x6BBe78ee9e474842Dbd4AB4987b3CeFE88426A92"
   },
+  "depositContract": "0x0B98057eA310F4d31F2a452B414647007d1645d9",
   "aura": {
     "stepDuration": 5,
     "blockReward": 0,
