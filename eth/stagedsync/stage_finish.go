@@ -143,8 +143,8 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 			heightSpan = 1024
 		}
 		notifyFrom = finishStageAfterSync - heightSpan
-		notifyFrom++
 	}
+	notifyFrom++
 
 	var notifyTo = notifyFrom
 	var notifyToHash libcommon.Hash
