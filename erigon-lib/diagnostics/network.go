@@ -146,7 +146,7 @@ type PeerUpdTime struct {
 	Time   time.Time
 }
 
-func (p *PeerStats) GetOldestPeersWithAmountOfPeers(size int) []PeerUpdTime {
+func (p *PeerStats) GetOldestUpdatedPeersWithSize(size int) []PeerUpdTime {
 	var timeArray []PeerUpdTime
 	for k, v := range p.lastUpdateMap {
 		timeArray = append(timeArray, PeerUpdTime{k, v})
@@ -166,7 +166,7 @@ func (p *PeerStats) GetOldestPeersWithAmountOfPeers(size int) []PeerUpdTime {
 func (p *PeerStats) RemovePeersWhichExceedLimit(limit int) {
 	peersToRemove := p.GetPeersCount() - limit
 	if peersToRemove > 0 {
-		peers := p.GetOldestPeersWithAmountOfPeers(peersToRemove)
+		peers := p.GetOldestUpdatedPeersWithSize(peersToRemove)
 		for _, peer := range peers {
 			p.RemovePeer(peer.PeerID)
 		}

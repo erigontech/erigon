@@ -112,7 +112,7 @@ func TestLastUpdated(t *testing.T) {
 
 	require.True(t, peerStats.GetLastUpdate("test2").After(peerStats.GetLastUpdate("test1")))
 
-	oldestPeers := peerStats.GetOldestPeersWithAmountOfPeers(10)
+	oldestPeers := peerStats.GetOldestUpdatedPeersWithSize(10)
 
 	// we have 100 peers, but we should get only 10 oldest
 	require.Equal(t, len(oldestPeers), 10)
@@ -121,7 +121,7 @@ func TestLastUpdated(t *testing.T) {
 
 	// update test1 to
 	peerStats.AddOrUpdatePeer("test1", testUpdMsg)
-	oldestPeers = peerStats.GetOldestPeersWithAmountOfPeers(10)
+	oldestPeers = peerStats.GetOldestUpdatedPeersWithSize(10)
 
 	// the oldest peer should not be test1
 	require.NotEqual(t, "test1", oldestPeers[0].PeerID)
