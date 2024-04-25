@@ -186,8 +186,10 @@ func ExecV3(ctx context.Context,
 	inMemExec := txc.Doms != nil
 	var doms *state2.SharedDomains
 	if inMemExec {
+		log.Warn("[dbg] Exec31", "maxBlockNum", maxBlockNum)
 		doms = txc.Doms
 	} else {
+		log.Warn("[dbg] Exec32", "maxBlockNum", maxBlockNum)
 		var err error
 		doms, err = state2.NewSharedDomains(applyTx, log.New())
 		if err != nil {

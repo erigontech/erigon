@@ -544,6 +544,7 @@ func (s *Sync) unwindStage(firstCycle bool, stage *Stage, db kv.RwDB, txc wrap.T
 	if err != nil {
 		return err
 	}
+	log.Warn("[unwind] UnwindExecutionStage311", "stage.ID", stage.ID, "stageState", stageState, "*s.unwindPoint", *s.unwindPoint)
 
 	unwind := s.NewUnwindState(stage.ID, *s.unwindPoint, stageState.BlockNumber)
 	unwind.Reason = s.unwindReason
