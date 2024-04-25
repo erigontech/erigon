@@ -20,7 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/mem"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/phase1/core"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/sentinel"
 	"github.com/ledgerwatch/erigon/cl/sentinel/service"
 	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
@@ -69,7 +68,7 @@ func runSentinelNode(cliCtx *cli.Context) error {
 		NoDiscovery:    cfg.NoDiscovery,
 		LocalDiscovery: cfg.LocalDiscovery,
 		EnableBlocks:   false,
-	}, nil, nil, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, eth_clock.NewEthereumClock(bs.GenesisTime(), bs.GenesisValidatorsRoot(), cfg.BeaconCfg), forkchoice.NewForkChoiceStorageMock(), log.Root())
+	}, nil, nil, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, eth_clock.NewEthereumClock(bs.GenesisTime(), bs.GenesisValidatorsRoot(), cfg.BeaconCfg), nil, log.Root())
 	if err != nil {
 		log.Error("[Sentinel] Could not start sentinel", "err", err)
 		return err

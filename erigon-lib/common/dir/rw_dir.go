@@ -78,15 +78,16 @@ func WriteFileWithFsync(name string, data []byte, perm os.FileMode) error {
 		return err
 	}
 	defer f.Close()
-	_, err = f.Write(data)
-	if err != nil {
+	if _, err = f.Write(data); err != nil {
 		return err
 	}
-	err = f.Sync()
-	if err != nil {
+	if err = f.Sync(); err != nil {
 		return err
 	}
-	return err
+	if err = f.Close(); err != nil {
+		return err
+	}
+	return nil
 }
 
 func Recreate(dir string) {

@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Giulio2002/bls"
 	"github.com/go-chi/chi/v5"
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -170,10 +169,6 @@ func (a *ApiHandler) produceBeaconBody(ctx context.Context, apiVersion int, base
 	beaconBody.RandaoReveal = randaoReveal
 	beaconBody.Graffiti = graffiti
 	beaconBody.Version = stateVersion
-	// Sync aggregate is empty for now.
-	beaconBody.SyncAggregate = &cltypes.SyncAggregate{
-		SyncCommiteeSignature: bls.InfiniteSignature,
-	}
 
 	// Build execution payload
 	latestExecutionPayload := baseState.LatestExecutionPayloadHeader()
@@ -306,6 +301,15 @@ func (a *ApiHandler) produceBeaconBody(ctx context.Context, apiVersion int, base
 
 				return
 			}
+		}
+	}()
+	// process the sync aggregate in parallel
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		beaconBody.SyncAggregate, err = a.syncMessagePool.GetSyncAggregate(targetSlot-1, blockRoot)
+		if err != nil {
+			log.Error("BlockProduction: Failed to get sync aggregate", "err", err)
 		}
 	}()
 	wg.Wait()

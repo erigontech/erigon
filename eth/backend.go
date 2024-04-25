@@ -37,11 +37,8 @@ import (
 	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/config3"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal"
-	"github.com/ledgerwatch/erigon/eth/consensuschain"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -52,13 +49,14 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/disk"
 	"github.com/ledgerwatch/erigon-lib/common/mem"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadergrpc"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	protodownloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -70,6 +68,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
@@ -95,6 +94,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/eth/consensuschain"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
 	"github.com/ledgerwatch/erigon/eth/ethutils"
@@ -359,7 +359,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
 
 	if config.SilkwormExecution || config.SilkwormRpcDaemon || config.SilkwormSentry {
-		backend.silkworm, err = silkworm.New(config.Dirs.DataDir, mdbx.Version())
+		logLevel, err := log.LvlFromString(config.SilkwormVerbosity)
+		if err != nil {
+			return nil, err
+		}
+		backend.silkworm, err = silkworm.New(config.Dirs.DataDir, mdbx.Version(), config.SilkwormNumContexts, logLevel)
 		if err != nil {
 			return nil, err
 		}
@@ -793,20 +797,37 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	backend.ethBackendRPC, backend.miningRPC, backend.stateChangesClient = ethBackendRPC, miningRPC, stateDiffClient
 
-	backend.syncStages = stages2.NewDefaultStages(backend.sentryCtx, backend.chainDB, snapDb, p2pConfig, config, backend.sentriesClient, backend.notifications, backend.downloaderClient,
-		blockReader, blockRetire, backend.agg, backend.silkworm, backend.forkValidator, heimdallClient, recents, signatures, logger)
-	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
-	backend.syncPruneOrder = stagedsync.DefaultPruneOrder
+	if config.PolygonSyncStage {
+		backend.syncStages = stages2.NewPolygonSyncStages(
+			backend.sentryCtx,
+			backend.chainDB,
+			config,
+			backend.chainConfig,
+			backend.engine,
+			backend.notifications,
+			backend.downloaderClient,
+			blockReader,
+			blockRetire,
+			backend.agg,
+			backend.silkworm,
+			backend.forkValidator,
+			heimdallClient,
+		)
+		backend.syncUnwindOrder = stagedsync.PolygonSyncUnwindOrder
+		backend.syncPruneOrder = stagedsync.PolygonSyncPruneOrder
+	} else {
+		backend.syncStages = stages2.NewDefaultStages(backend.sentryCtx, backend.chainDB, snapDb, p2pConfig, config, backend.sentriesClient, backend.notifications, backend.downloaderClient,
+			blockReader, blockRetire, backend.agg, backend.silkworm, backend.forkValidator, heimdallClient, recents, signatures, logger)
+		backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
+		backend.syncPruneOrder = stagedsync.DefaultPruneOrder
+	}
+
 	backend.stagedSync = stagedsync.New(config.Sync, backend.syncStages, backend.syncUnwindOrder, backend.syncPruneOrder, logger)
 
 	hook := stages2.NewHook(backend.sentryCtx, backend.chainDB, backend.notifications, backend.stagedSync, backend.blockReader, backend.chainConfig, backend.logger, backend.sentriesClient.SetStatus)
 
 	if !config.Sync.UseSnapshots && backend.downloaderClient != nil {
-		for _, p := range snaptype.AllTypes {
-			backend.downloaderClient.ProhibitNewDownloads(ctx, &protodownloader.ProhibitNewDownloadsRequest{
-				Type: p.String(),
-			})
-		}
+		_, _ = backend.downloaderClient.Prohibit(ctx, &protodownloader.ProhibitRequest{})
 	}
 
 	checkStateRoot := true
@@ -960,7 +981,27 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	s.apiList = jsonrpc.APIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, s.agg, &httpRpcCfg, s.engine, s.logger)
 
 	if config.SilkwormRpcDaemon && httpRpcCfg.Enabled {
-		silkwormRPCDaemonService := silkworm.NewRpcDaemonService(s.silkworm, chainKv)
+		interface_log_settings := silkworm.RpcInterfaceLogSettings{
+			Enabled:         config.SilkwormRpcLogEnabled,
+			ContainerFolder: config.SilkwormRpcLogDirPath,
+			MaxFileSizeMB:   config.SilkwormRpcLogMaxFileSize,
+			MaxFiles:        config.SilkwormRpcLogMaxFiles,
+			DumpResponse:    config.SilkwormRpcLogDumpResponse,
+		}
+		settings := silkworm.RpcDaemonSettings{
+			EthLogSettings:       interface_log_settings,
+			EthAPIHost:           httpRpcCfg.HttpListenAddress,
+			EthAPIPort:           httpRpcCfg.HttpPort,
+			EthAPISpec:           httpRpcCfg.API,
+			NumWorkers:           config.SilkwormRpcNumWorkers,
+			CORSDomains:          httpRpcCfg.HttpCORSDomain,
+			JWTFilePath:          httpRpcCfg.JWTSecretPath,
+			JSONRPCCompatibility: config.SilkwormRpcJsonCompatibility,
+			WebSocketEnabled:     httpRpcCfg.WebsocketEnabled,
+			WebSocketCompression: httpRpcCfg.WebsocketCompression,
+			HTTPCompression:      httpRpcCfg.HttpCompression,
+		}
+		silkwormRPCDaemonService := silkworm.NewRpcDaemonService(s.silkworm, chainKv, settings)
 		s.silkwormRPCDaemonService = &silkwormRPCDaemonService
 	} else {
 		go func() {
@@ -1343,29 +1384,32 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	if isBor {
 		allBorSnapshots = freezeblocks.NewBorRoSnapshots(snConfig.Snapshot, dirs.Snap, minFrozenBlock, logger)
 	}
-
-	var err error
-	if snConfig.Snapshot.NoDownloader {
-		allSnapshots.ReopenFolder()
-		if isBor {
-			allBorSnapshots.ReopenFolder()
-		}
-	} else {
-		allSnapshots.OptimisticalyReopenFolder()
-		if isBor {
-			allBorSnapshots.OptimisticalyReopenFolder()
-		}
-	}
-	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
-	blockWriter := blockio.NewBlockWriter(histV3)
-
 	agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, logger)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
-	if err = agg.OpenFolder(false); err != nil {
+
+	g := &errgroup.Group{}
+	g.Go(func() error {
+		allSnapshots.OptimisticalyReopenFolder()
+		return nil
+	})
+	g.Go(func() error {
+		if isBor {
+			allBorSnapshots.OptimisticalyReopenFolder()
+		}
+		return nil
+	})
+	g.Go(func() error {
+		return agg.OpenFolder(false)
+	})
+	if err = g.Wait(); err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
+
+	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
+	blockWriter := blockio.NewBlockWriter(histV3)
+
 	return blockReader, blockWriter, allSnapshots, allBorSnapshots, agg, nil
 }
 

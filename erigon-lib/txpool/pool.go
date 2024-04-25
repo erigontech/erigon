@@ -1054,7 +1054,7 @@ func (p *TxPool) isCancun() bool {
 	return activated
 }
 
-// Check that that the serialized txn should not exceed a certain max size
+// Check that the serialized txn should not exceed a certain max size
 func (p *TxPool) ValidateSerializedTxn(serializedTxn []byte) error {
 	const (
 		// txSlotSize is used to calculate how many data slots a single transaction

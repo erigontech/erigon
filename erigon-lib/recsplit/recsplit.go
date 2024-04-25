@@ -580,7 +580,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return fmt.Errorf("already built")
 	}
 	if rs.keysAdded != rs.keyExpectedCount {
-		return fmt.Errorf("expected keys %d, got %d", rs.keyExpectedCount, rs.keysAdded)
+		return fmt.Errorf("rs %s expected keys %d, got %d", rs.indexFileName, rs.keyExpectedCount, rs.keysAdded)
 	}
 	var err error
 	if rs.indexF, err = os.Create(rs.tmpFilePath); err != nil {

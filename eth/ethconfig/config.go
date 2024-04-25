@@ -233,6 +233,7 @@ type Config struct {
 	// Heimdall services active
 	WithHeimdallMilestones bool
 	PolygonSync            bool
+	PolygonSyncStage       bool
 
 	// Ethstats service
 	Ethstats string
@@ -247,9 +248,18 @@ type Config struct {
 	OverridePragueTime *big.Int `toml:",omitempty"`
 
 	// Embedded Silkworm support
-	SilkwormExecution bool
-	SilkwormRpcDaemon bool
-	SilkwormSentry    bool
+	SilkwormExecution            bool
+	SilkwormRpcDaemon            bool
+	SilkwormSentry               bool
+	SilkwormVerbosity            string
+	SilkwormNumContexts          uint32
+	SilkwormRpcLogEnabled        bool
+	SilkwormRpcLogDirPath        string
+	SilkwormRpcLogMaxFileSize    uint16
+	SilkwormRpcLogMaxFiles       uint16
+	SilkwormRpcLogDumpResponse   bool
+	SilkwormRpcNumWorkers        uint32
+	SilkwormRpcJsonCompatibility bool
 
 	DisableTxPoolGossip bool
 }

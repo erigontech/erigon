@@ -588,13 +588,11 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 
 	var beaconConfig *clparams.BeaconChainConfig
 	_, beaconConfig, _, err = clparams.GetConfigsByNetworkName(chainConfig.ChainName)
-	if err != nil {
-		return
-	}
-
-	csn = freezeblocks.NewCaplinSnapshots(cfg, beaconConfig, dirs, logger)
-	if err = csn.ReopenFolder(); err != nil {
-		return
+	if err == nil {
+		csn = freezeblocks.NewCaplinSnapshots(cfg, beaconConfig, dirs, logger)
+		if err = csn.ReopenFolder(); err != nil {
+			return
+		}
 	}
 
 	borSnaps.LogStat("open")

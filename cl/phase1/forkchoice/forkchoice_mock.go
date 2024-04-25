@@ -2,6 +2,7 @@ package forkchoice
 
 import (
 	"context"
+	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -12,6 +13,8 @@ import (
 	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
 	"github.com/ledgerwatch/erigon/cl/validator/sync_contribution_pool"
+	syncpoolmock "github.com/ledgerwatch/erigon/cl/validator/sync_contribution_pool/mock_services"
+	"go.uber.org/mock/gomock"
 )
 
 // Make mocks with maps and simple setters and getters, panic on methods from ForkChoiceStorageWriter
@@ -47,7 +50,51 @@ type ForkChoiceStorageMock struct {
 	Pool pool.OperationsPool
 }
 
-func NewForkChoiceStorageMock() *ForkChoiceStorageMock {
+func makeSyncContributionPoolMock(t *testing.T) sync_contribution_pool.SyncContributionPool {
+	ctrl := gomock.NewController(t)
+	type syncContributionKey struct {
+		slot              uint64
+		subcommitteeIndex uint64
+		beaconBlockRoot   common.Hash
+	}
+	u := map[syncContributionKey]*cltypes.Contribution{}
+	pool := syncpoolmock.NewMockSyncContributionPool(ctrl)
+	pool.EXPECT().AddSyncContribution(gomock.Any(), gomock.Any()).DoAndReturn(func(headState *state.CachingBeaconState, contribution *cltypes.Contribution) error {
+		key := syncContributionKey{
+			slot:              contribution.Slot,
+			subcommitteeIndex: contribution.SubcommitteeIndex,
+			beaconBlockRoot:   contribution.BeaconBlockRoot,
+		}
+		u[key] = contribution
+		return nil
+	}).AnyTimes()
+	pool.EXPECT().GetSyncContribution(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(slot uint64, subcommitteeIndex uint64, beaconBlockRoot common.Hash) (*cltypes.Contribution, bool) {
+		key := syncContributionKey{
+			slot:              slot,
+			subcommitteeIndex: subcommitteeIndex,
+			beaconBlockRoot:   beaconBlockRoot,
+		}
+		v, ok := u[key]
+		return v, ok
+	}).AnyTimes()
+	pool.EXPECT().AddSyncCommitteeMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(headState *state.CachingBeaconState, subCommitee uint64, message *cltypes.SyncCommitteeMessage) error {
+		key := syncContributionKey{
+			slot:              message.Slot,
+			subcommitteeIndex: subCommitee,
+			beaconBlockRoot:   message.BeaconBlockRoot,
+		}
+		u[key] = &cltypes.Contribution{
+			Slot:              message.Slot,
+			SubcommitteeIndex: subCommitee,
+			BeaconBlockRoot:   message.BeaconBlockRoot,
+			AggregationBits:   make([]byte, cltypes.SyncCommitteeAggregationBitsSize),
+		}
+		return nil
+	}).AnyTimes()
+	return pool
+}
+
+func NewForkChoiceStorageMock(t *testing.T) *ForkChoiceStorageMock {
 	return &ForkChoiceStorageMock{
 		Ancestors:                 make(map[uint64]common.Hash),
 		AnchorSlotVal:             0,
@@ -66,9 +113,9 @@ func NewForkChoiceStorageMock() *ForkChoiceStorageMock {
 		GetFinalityCheckpointsVal: make(map[common.Hash][3]solid.Checkpoint),
 		LightClientBootstraps:     make(map[common.Hash]*cltypes.LightClientBootstrap),
 		LCUpdates:                 make(map[uint64]*cltypes.LightClientUpdate),
-		SyncContributionPool:      sync_contribution_pool.NewSyncContributionPoolMock(),
 		Headers:                   make(map[common.Hash]*cltypes.BeaconBlockHeader),
 		GetBeaconCommitteeMock:    nil,
+		SyncContributionPool:      makeSyncContributionPoolMock(t),
 	}
 }
 
