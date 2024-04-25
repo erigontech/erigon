@@ -419,28 +419,6 @@ AttLoop:
 	return attesterSlashings, proposerSlashings, voluntaryExits, blsToExecutionChanges
 }
 
-func (a *ApiHandler) getValidProposerSlashingsInPool(s *state.CachingBeaconState, targetSlot uint64) *solid.ListSSZ[*cltypes.ProposerSlashing] {
-	includedIndicies := []uint64{} // Keep track of indicies which we included already
-	candidates := a.operationsPool.ProposerSlashingsPool.Raw()
-	ret := solid.NewStaticListSSZ[*cltypes.ProposerSlashing](int(a.beaconChainCfg.MaxProposerSlashings), 16)
-	for _, slashing := range candidates {
-		proposerIndex := slashing.Header1.Header.ProposerIndex
-		if slices.Contains(includedIndicies, proposerIndex) {
-			continue
-		}
-		v := s.ValidatorSet().Get(int(proposerIndex))
-		if !v.IsSlashable(targetSlot / a.beaconChainCfg.SlotsPerEpoch) {
-			continue
-		}
-		ret.Append(slashing)
-		includedIndicies = append(includedIndicies, proposerIndex)
-		if ret.Len() >= int(a.beaconChainCfg.MaxProposerSlashings) {
-			break
-		}
-	}
-	return ret
-}
-
 func (a *ApiHandler) setupHeaderReponseForBlockProduction(w http.ResponseWriter, consensusVersion clparams.StateVersion, blinded bool, executionBlockValue, consensusBlockValue uint64) {
 	w.Header().Set("Eth-Execution-Payload-Value", strconv.FormatUint(executionBlockValue, 10))
 	w.Header().Set("Eth-Consensus-Block-Value", strconv.FormatUint(consensusBlockValue, 10))
