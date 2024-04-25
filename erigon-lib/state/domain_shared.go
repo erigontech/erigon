@@ -677,16 +677,24 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 	}
 
 	sctx := sd.aggCtx.d[kv.StorageDomain]
-	for _, item := range sctx.files {
-		gg := NewArchiveGetter(item.src.decompressor.MakeGetter(), sd.aggCtx.a.d[kv.StorageDomain].compression)
-		cursor, err := item.src.bindex.Seek(gg, prefix)
+	btCursors := make([]*Cursor, len(sctx.files))
+	defer func() {
+		for _, c := range btCursors {
+			if c != nil {
+				c.Release()
+			}
+		}
+	}()
+
+	for i, item := range sctx.files {
+		cursor, err := item.src.bindex.Seek(sctx.statelessGetter(i), prefix)
 		if err != nil {
 			return err
 		}
 		if cursor == nil {
 			continue
 		}
-		cursor.getter = gg
+		btCursors[i] = cursor
 
 		key := cursor.Key()
 		if key != nil && bytes.HasPrefix(key, prefix) {

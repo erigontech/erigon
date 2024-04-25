@@ -7,12 +7,14 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"math"
 	"os"
 	"path"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -20,7 +22,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spaolacci/murmur3"
 
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -84,6 +85,11 @@ type Cursor struct {
 //		d:      d,
 //	}
 //}
+
+func (c *Cursor) Release() {
+	//c.key, c.value = c.key[:0], c.value[:0]
+	c.btt.cursorPool.Put(c)
+}
 
 func (c *Cursor) Key() []byte {
 	return c.key
@@ -733,6 +739,8 @@ type BtIndex struct {
 	modTime  time.Time
 	filePath string
 
+	cursorPool *sync.Pool
+
 	// TODO do not sotre decompressor ptr in index, pass ArchiveGetter always instead of decomp directly
 	compressed   FileCompression
 	decompressor *seg.Decompressor
@@ -854,6 +862,11 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 		decompressor: kv,
 		compressed:   compress,
 	}
+	idx.cursorPool = &sync.Pool{
+		New: func() interface{} {
+			return &Cursor{btt: idx, key: make([]byte, 0, 64), value: make([]byte, 0, 64)}
+		},
+	}
 
 	idx.file, err = os.Open(indexPath)
 	if err != nil {
@@ -937,14 +950,14 @@ func (b *BtIndex) keyCmp(k []byte, di uint64, g ArchiveGetter) (int, []byte, err
 // getter should be alive all the time of cursor usage
 // Key and value is valid until cursor.Next is called
 func (b *BtIndex) newCursor(ctx context.Context, k, v []byte, d uint64, g ArchiveGetter) *Cursor {
-	return &Cursor{
-		btt:    b,
-		ctx:    ctx,
-		getter: g,
-		key:    common.Copy(k),
-		value:  common.Copy(v),
-		d:      d,
-	}
+	c := b.cursorPool.Get().(*Cursor)
+	c.ctx = ctx
+	c.getter = g
+	c.key = common.Copy(k)
+	c.value = common.Copy(v)
+	c.d = d
+	c.btt = b
+	return c
 }
 
 func (b *BtIndex) Size() int64 { return b.size }
