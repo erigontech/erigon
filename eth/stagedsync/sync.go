@@ -45,8 +45,6 @@ func (s *Sync) Len() int {
 	return len(s.stages)
 }
 
-func (s *Sync) Cfg() ethconfig.Sync { return s.cfg }
-
 func (s *Sync) UnwindPoint() uint64 {
 	return *s.unwindPoint
 }
