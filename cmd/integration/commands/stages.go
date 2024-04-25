@@ -12,7 +12,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
-	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
 	"github.com/spf13/cobra"
@@ -24,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
@@ -313,6 +313,7 @@ var cmdStageTxLookup = &cobra.Command{
 		}
 	},
 }
+
 var cmdPrintStages = &cobra.Command{
 	Use:   "print_stages",
 	Short: "",
@@ -330,6 +331,39 @@ var cmdPrintStages = &cobra.Command{
 				logger.Error(err.Error())
 			}
 			return
+		}
+	},
+}
+
+var cmdPrintTableSizes = &cobra.Command{
+	Use:   "print_table_sizes",
+	Short: "",
+	Run: func(cmd *cobra.Command, args []string) {
+		logger := debug.SetupCobra(cmd, "integration")
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), false, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		var tableSizes []interface{}
+		err = db.View(cmd.Context(), func(tx kv.Tx) error {
+			tableSizes = stagedsync.CollectTableSizes(db, tx, kv.ChaindataTables)
+			return nil
+		})
+		if err != nil {
+			logger.Error("error while collecting table sizes", "err", err)
+			return
+		}
+
+		if len(tableSizes)%2 != 0 {
+			logger.Error("table sizes len not even", "len", len(tableSizes))
+			return
+		}
+
+		for i := 0; i < len(tableSizes)/2; i++ {
+			logger.Info(fmt.Sprintf("%d", i+1), tableSizes[i*2], tableSizes[i*2+1])
 		}
 	},
 }
@@ -475,6 +509,9 @@ func init() {
 	withChain(cmdPrintStages)
 	withHeimdall(cmdPrintStages)
 	rootCmd.AddCommand(cmdPrintStages)
+
+	withDataDir(cmdPrintTableSizes)
+	rootCmd.AddCommand(cmdPrintTableSizes)
 
 	withConfig(cmdStageSenders)
 	withIntegrityChecks(cmdStageSenders)
