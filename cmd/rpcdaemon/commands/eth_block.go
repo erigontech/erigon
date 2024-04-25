@@ -217,7 +217,9 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 		return nil, err
 	}
 
-	if executedBlock < uint64(number.Int64()) {
+	// return null if requested block  is higher than executed
+	// made for consistency with zkevm
+	if number > 0 && executedBlock < uint64(number.Int64()) {
 		return nil, nil
 	}
 

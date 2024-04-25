@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/zk/hermez_db"
 )
 
 var UnknownBlockError = &rpc.CustomError{
@@ -25,9 +26,27 @@ func GetLatestBlockNumber(tx kv.Tx) (uint64, error) {
 		}
 	}
 
-	blockNum, err := stages.GetStageProgress(tx, stages.Execution)
+	// get highest verified batch
+	highestVerifiedBatchNo, err := stages.GetStageProgress(tx, stages.L1VerificationsBatchNo)
+	if err != nil {
+		return 0, err
+	}
+
+	hermezDb := hermez_db.NewHermezDbReader(tx)
+	// we've got the highest batch to execute to, now get it's highest block
+	highestVerifiedBlock, err := hermezDb.GetHighestBlockInBatch(highestVerifiedBatchNo)
+	if err != nil {
+		return 0, err
+	}
+
+	execBlockNum, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
 		return 0, fmt.Errorf("getting latest block number: %w", err)
+	}
+
+	blockNum := highestVerifiedBlock
+	if execBlockNum < blockNum {
+		blockNum = execBlockNum
 	}
 
 	return blockNum, nil
