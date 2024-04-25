@@ -50,11 +50,12 @@ type SendersCfg struct {
 	limit           uint64
 }
 
-func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, syncCfg ethconfig.Sync, limit uint, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, loopBreakCheck func(int) bool) SendersCfg {
+func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, syncCfg ethconfig.Sync, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, loopBreakCheck func(int) bool) SendersCfg {
 	const sendersBatchSize = 10000
 	const sendersBlockSize = 4096
 
-	if limit == 0 {
+	limit := syncCfg.LoopBlockLimit
+	if limit <= 0 {
 		limit = math.MaxUint64
 	}
 	return SendersCfg{
