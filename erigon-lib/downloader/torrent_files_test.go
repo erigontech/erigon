@@ -41,8 +41,9 @@ func TestFSProhibitBackwardCompat(t *testing.T) {
 		require.NoError(err)
 
 		tf := NewAtomicTorrentFS(dirs.Snap)
-		err = tf.prohibitNewDownloads("transactions") //upgrade
+		wl, err := tf.prohibitNewDownloads([]string{"transactions"}, nil) //upgrade
 		require.NoError(err)
+		require.Equal(err, []string{"transactions"}, wl)
 
 		prohibited, err := tf.NewDownloadsAreProhibited("v1-004900-005000-headers.seg")
 		require.NoError(err)
