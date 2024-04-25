@@ -70,7 +70,7 @@ type FetcherResponse[T any] struct {
 
 func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) (FetcherResponse[[]*types.Header], error) {
 	if start >= end {
-		return FetcherResponse[[]*types.Header]{}, &ErrInvalidFetchHeadersRange{
+		return FetcherResponse[[]*types.Header]{nil, 0}, &ErrInvalidFetchHeadersRange{
 			start: start,
 			end:   end,
 		}
@@ -97,11 +97,11 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 			// a node may not respond with all MaxHeadersServe in 1 response,
 			// so we keep on consuming from last received number (akin to consuming a paging api)
 			// until we have all headers of the chunk or the peer stopped returning headers
-			headersChunk, err := fetchWithRetry(f.config, func() (*FetcherResponse[[]*types.Header], error) {
+			headersChunk, err := fetchWithRetry(f.config, func() (FetcherResponse[[]*types.Header], error) {
 				return f.fetchHeaders(ctx, chunkStart, chunkEnd, peerId)
 			})
 			if err != nil {
-				return FetcherResponse[[]*types.Header]{}, err
+				return FetcherResponse[[]*types.Header]{nil, 0}, err
 			}
 			if len(headersChunk.Data) == 0 {
 				break
@@ -114,7 +114,7 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 	}
 
 	if err := f.validateHeadersResponse(headers, start, amount); err != nil {
-		return FetcherResponse[[]*types.Header]{}, err
+		return FetcherResponse[[]*types.Header]{nil, 0}, err
 	}
 
 	return FetcherResponse[[]*types.Header]{headers, totalHeadersSize}, nil
@@ -173,7 +173,7 @@ func (f *fetcher) FetchBlocks(ctx context.Context, start, end uint64, peerId *Pe
 	return FetcherResponse[[]*types.Block]{blocks, headers.TotalSize + bodies.TotalSize}, nil
 }
 
-func (f *fetcher) fetchHeaders(ctx context.Context, start, end uint64, peerId *PeerId) (*FetcherResponse[[]*types.Header], error) {
+func (f *fetcher) fetchHeaders(ctx context.Context, start, end uint64, peerId *PeerId) (FetcherResponse[[]*types.Header], error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -201,15 +201,15 @@ func (f *fetcher) fetchHeaders(ctx context.Context, start, end uint64, peerId *P
 		},
 	})
 	if err != nil {
-		return nil, err
+		return FetcherResponse[[]*types.Header]{nil, 0}, err
 	}
 
 	message, messageSize, err := awaitResponse(ctx, f.config.responseTimeout, messages, filterBlockHeaders(peerId, requestId))
 	if err != nil {
-		return nil, err
+		return FetcherResponse[[]*types.Header]{nil, 0}, err
 	}
 
-	return &FetcherResponse[[]*types.Header]{message.BlockHeadersPacket, messageSize}, nil
+	return FetcherResponse[[]*types.Header]{message.BlockHeadersPacket, messageSize}, nil
 }
 
 func (f *fetcher) validateHeadersResponse(headers []*types.Header, start, amount uint64) error {

@@ -158,7 +158,7 @@ func TestFetcherFetchHeadersResponseTimeout(t *testing.T) {
 	test.run(func(ctx context.Context, t *testing.T) {
 		headers, err := test.fetcher.FetchHeaders(ctx, 1, 11, peerId)
 		require.ErrorIs(t, err, context.DeadlineExceeded)
-		require.Nil(t, headers)
+		require.Nil(t, headers.Data)
 	})
 }
 
@@ -241,7 +241,7 @@ func TestFetcherErrInvalidFetchHeadersRange(t *testing.T) {
 		require.ErrorAs(t, err, &errInvalidFetchHeadersRange)
 		require.Equal(t, uint64(3), errInvalidFetchHeadersRange.start)
 		require.Equal(t, uint64(1), errInvalidFetchHeadersRange.end)
-		require.Nil(t, headers)
+		require.Nil(t, headers.Data)
 	})
 }
 
@@ -287,7 +287,7 @@ func TestFetcherFetchHeadersErrIncompleteResponse(t *testing.T) {
 		headers, err := test.fetcher.FetchHeaders(ctx, 1, 4, peerId)
 		require.ErrorAs(t, err, &errIncompleteHeaders)
 		require.Equal(t, uint64(3), errIncompleteHeaders.LowestMissingBlockNum())
-		require.Nil(t, headers)
+		require.Nil(t, headers.Data)
 	})
 }
 
@@ -407,7 +407,7 @@ func TestFetcherFetchBodiesResponseTimeout(t *testing.T) {
 	test.run(func(ctx context.Context, t *testing.T) {
 		bodies, err := test.fetcher.FetchBodies(ctx, mockHeaders, peerId)
 		require.ErrorIs(t, err, context.DeadlineExceeded)
-		require.Nil(t, bodies)
+		require.Nil(t, bodies.Data)
 	})
 }
 
@@ -500,7 +500,7 @@ func TestFetcherFetchBodiesErrMissingBodies(t *testing.T) {
 		lowest, exists := errMissingBlocks.LowestMissingBlockNum()
 		require.Equal(t, uint64(1), lowest)
 		require.True(t, exists)
-		require.Nil(t, bodies)
+		require.Nil(t, bodies.Data)
 	})
 }
 

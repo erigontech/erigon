@@ -75,7 +75,7 @@ func TestTrackingFetcherFetchHeadersUpdatesPeerTracker(t *testing.T) {
 		require.Equal(t, uint64(2), errIncompleteHeaders.requested)
 		require.Equal(t, uint64(0), errIncompleteHeaders.received)
 		require.Equal(t, uint64(3), errIncompleteHeaders.LowestMissingBlockNum())
-		require.Nil(t, headers)
+		require.Nil(t, headers.Data)
 
 		// should be one peer less now given that we know that peer 1 does not have block num 4
 		peerIds = test.peerTracker.ListPeersMayHaveBlockNum(4)
@@ -146,14 +146,14 @@ func TestTrackingFetcherFetchBodiesUpdatesPeerTracker(t *testing.T) {
 
 		bodies, err := test.trackingFetcher.FetchBodies(ctx, mockHeaders, peerId1)
 		require.ErrorIs(t, err, &ErrMissingBodies{})
-		require.Nil(t, bodies)
+		require.Nil(t, bodies.Data)
 
 		peerIds = test.peerTracker.ListPeersMayHaveBlockNum(1) // only peerId2 may have block 1, peerId does not
 		require.Len(t, peerIds, 1)
 
 		bodies, err = test.trackingFetcher.FetchBodies(ctx, mockHeaders, peerId2)
 		require.ErrorIs(t, err, context.DeadlineExceeded)
-		require.Nil(t, bodies)
+		require.Nil(t, bodies.Data)
 
 		peerIds = test.peerTracker.ListPeersMayHaveBlockNum(1) // neither peerId1 nor peerId2 have block num 1
 		require.Len(t, peerIds, 0)
