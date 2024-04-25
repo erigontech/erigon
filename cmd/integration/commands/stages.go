@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -374,7 +375,24 @@ var cmdPrintTableSizes = &cobra.Command{
 			sb.WriteRune('\n')
 		}
 
-		fmt.Print(sb.String())
+		if outputCsvFile == "" {
+			logger.Info("table sizes", "csv", sb.String())
+			return
+		}
+
+		f, err := os.Create(outputCsvFile)
+		if err != nil {
+			logger.Error("issue creating file", "file", outputCsvFile, "err", err)
+			return
+		}
+
+		_, err = f.WriteString(sb.String())
+		if err != nil {
+			logger.Error("issue writing output to file", "file", outputCsvFile, "err", err)
+			return
+		}
+
+		logger.Info("wrote table sizes to csv output file", "file", outputCsvFile)
 	},
 }
 
@@ -521,6 +539,7 @@ func init() {
 	rootCmd.AddCommand(cmdPrintStages)
 
 	withDataDir(cmdPrintTableSizes)
+	withOutputCsvFile(cmdPrintTableSizes)
 	rootCmd.AddCommand(cmdPrintTableSizes)
 
 	withConfig(cmdStageSenders)
