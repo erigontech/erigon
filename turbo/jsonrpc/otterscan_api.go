@@ -18,7 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -508,24 +508,32 @@ type internalIssuance struct {
 	Issuance    string `json:"issuance,omitempty"`
 }
 
-func delegateIssuance(tx kv.Tx, block *types.Block, chainConfig *chain.Config) (internalIssuance, error) {
-	if chainConfig.Ethash == nil {
-		// Clique for example has no issuance
-		return internalIssuance{}, nil
+func delegateIssuance(tx kv.Tx, block *types.Block, chainConfig *chain.Config, engine consensus.EngineReader) (internalIssuance, error) {
+	// TODO: aura seems to be already broken in the original version of this RPC method
+	rewards, err := engine.CalculateRewards(chainConfig, block.HeaderNoCopy(), block.Uncles(), func(contract common.Address, data []byte) ([]byte, error) {
+		return nil, nil
+	})
+	if err != nil {
+		return internalIssuance{}, err
 	}
 
-	minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
-	issuance := minerReward
-	for _, r := range uncleRewards {
-		p := r // avoids warning?
-		issuance.Add(&issuance, &p)
+	blockReward := uint256.NewInt(0)
+	uncleReward := uint256.NewInt(0)
+	for _, r := range rewards {
+		if r.Kind == consensus.RewardAuthor {
+			blockReward.Add(blockReward, &r.Amount)
+		}
+		if r.Kind == consensus.RewardUncle {
+			uncleReward.Add(uncleReward, &r.Amount)
+		}
 	}
 
 	var ret internalIssuance
-	ret.BlockReward = hexutil2.EncodeBig(minerReward.ToBig())
-	ret.Issuance = hexutil2.EncodeBig(issuance.ToBig())
-	issuance.Sub(&issuance, &minerReward)
-	ret.UncleReward = hexutil2.EncodeBig(issuance.ToBig())
+	ret.BlockReward = hexutil2.EncodeBig(blockReward.ToBig())
+	ret.UncleReward = hexutil2.EncodeBig(uncleReward.ToBig())
+
+	blockReward.Add(blockReward, uncleReward)
+	ret.Issuance = hexutil2.EncodeBig(blockReward.ToBig())
 	return ret, nil
 }
 
