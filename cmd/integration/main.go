@@ -6,9 +6,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/integration/commands"
-
-	// needed so that erigon-lib/kv init func is run
-	_ "github.com/ledgerwatch/erigon-lib/kv"
 )
 
 func main() {
