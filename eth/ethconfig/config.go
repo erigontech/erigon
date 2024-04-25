@@ -233,6 +233,7 @@ type Config struct {
 	// Heimdall services active
 	WithHeimdallMilestones bool
 	PolygonSync            bool
+	PolygonSyncStage       bool
 
 	// Ethstats service
 	Ethstats string
