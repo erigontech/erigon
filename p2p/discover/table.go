@@ -30,6 +30,7 @@ import (
 	"net"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -88,8 +89,8 @@ type Table struct {
 
 	// diagnostics
 	errors      map[string]uint
-	dbseeds     int
-	revalidates int
+	dbseeds     atomic.Int32
+	revalidates atomic.Int32
 	protocol    string
 }
 
@@ -304,7 +305,7 @@ loop:
 			live := tab.live()
 
 			vals := []interface{}{"protocol", tab.protocol, "version", tab.net.Version(),
-				"len", tab.len(), "live", tab.live(), "unsol", tab.net.LenUnsolicited(), "ips", tab.ips.Len(), "db", tab.dbseeds, "reval", tab.revalidates}
+				"len", tab.len(), "live", tab.live(), "unsol", tab.net.LenUnsolicited(), "ips", tab.ips.Len(), "db", tab.dbseeds.Load(), "reval", tab.revalidates.Load()}
 
 			func() {
 				tab.mutex.Lock()
@@ -373,7 +374,7 @@ func (tab *Table) doRefresh(done chan struct{}) {
 
 func (tab *Table) loadSeedNodes() {
 	dbseeds := tab.db.QuerySeeds(seedCount, seedMaxAge)
-	tab.dbseeds = len(dbseeds)
+	tab.dbseeds.Store(int32(len(dbseeds)))
 
 	seeds := wrapNodes(dbseeds)
 	tab.log.Debug("QuerySeeds read nodes from the node DB", "count", len(seeds))
@@ -392,7 +393,7 @@ func (tab *Table) doRevalidate(done chan<- struct{}) {
 	defer debug.LogPanic()
 	defer func() { done <- struct{}{} }()
 
-	tab.revalidates++
+	tab.revalidates.Add(1)
 
 	last, bi := tab.nodeToRevalidate()
 	if last == nil {

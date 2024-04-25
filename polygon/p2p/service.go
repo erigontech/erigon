@@ -45,9 +45,9 @@ func newService(
 	peerTracker := NewPeerTracker()
 	peerPenalizer := NewPeerPenalizer(sentryClient)
 	messageListener := NewMessageListener(logger, sentryClient, statusDataFactory, peerPenalizer)
-	messageListener.RegisterPeerEventObserver(NewPeerEventObserver(peerTracker))
+	messageListener.RegisterPeerEventObserver(NewPeerEventObserver(logger, peerTracker))
 	messageSender := NewMessageSender(sentryClient)
-	fetcher := NewFetcher(fetcherConfig, logger, messageListener, messageSender, requestIdGenerator)
+	fetcher := NewFetcher(fetcherConfig, messageListener, messageSender, requestIdGenerator)
 	fetcher = NewPenalizingFetcher(logger, fetcher, peerPenalizer)
 	fetcher = NewTrackingFetcher(fetcher, peerTracker)
 	return &service{

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -45,12 +46,18 @@ type SendersCfg struct {
 	hd              *headerdownload.HeaderDownload
 	blockReader     services.FullBlockReader
 	loopBreakCheck  func(int) bool
+	syncCfg         ethconfig.Sync
+	limit           uint64
 }
 
-func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, loopBreakCheck func(int) bool) SendersCfg {
+func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, syncCfg ethconfig.Sync, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, loopBreakCheck func(int) bool) SendersCfg {
 	const sendersBatchSize = 10000
 	const sendersBlockSize = 4096
 
+	limit := syncCfg.LoopBlockLimit
+	if limit <= 0 {
+		limit = math.MaxUint64
+	}
 	return SendersCfg{
 		db:              db,
 		batchSize:       sendersBatchSize,
@@ -65,6 +72,8 @@ func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, badBlockHalt bool, tmpd
 		hd:              hd,
 		blockReader:     blockReader,
 		loopBreakCheck:  loopBreakCheck,
+		syncCfg:         syncCfg,
+		limit:           uint64(limit),
 	}
 }
 
@@ -105,6 +114,13 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	defer logEvery.Stop()
 
 	startFrom := s.BlockNumber + 1
+	if to > startFrom && to-startFrom > cfg.limit { // uint underflow protection. preserve global jump limit.
+		to = startFrom + cfg.limit
+	}
+
+	if to > startFrom && cfg.syncCfg.LoopBlockLimit > 0 && to-startFrom > uint64(cfg.syncCfg.LoopBlockLimit) { // uint underflow protection. preserve global jump limit.
+		to = startFrom + uint64(cfg.syncCfg.LoopBlockLimit)
+	}
 
 	jobs := make(chan *senderRecoveryJob, cfg.batchSize)
 	out := make(chan *senderRecoveryJob, cfg.batchSize)

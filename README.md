@@ -54,13 +54,13 @@ in `erigon --help`). We don't allow change this flag after first start.
 System Requirements
 ===================
 
-* For an Archive node of Ethereum Mainnet we recommend >=3.5TB storage space: 2.2TB state (as of December 2023),
-  470GB snapshots (can symlink or mount folder `<datadir>/snapshots` to another disk), 200GB temp files (can symlink or mount folder `<datadir>/temp` to another disk). Ethereum Mainnet Full node (
-  see `--prune*` flags): 400Gb (April 2022).
+* For an Archive node of Ethereum Mainnet we recommend >=3.5TB storage space: 2.3TiB state (as of March 2024),
+  643GiB snapshots (can symlink or mount folder `<datadir>/snapshots` to another disk), 200GB temp files (can symlink or mount folder `<datadir>/temp` to another disk). Ethereum Mainnet Full node (
+  see `--prune*` flags): 1.1TiB (March 2024).
 
 * Goerli Full node (see `--prune*` flags): 189GB on Beta, 114GB on Alpha (April 2022).
 
-* Gnosis Chain Archive: 600GB (October 2023).
+* Gnosis Chain Archive: 1.7TiB (March 2024). Gnosis Chain Full node (`--prune=hrtc` flag): 530GiB (March 2024).
 
 * Polygon Mainnet Archive: 8.5TiB (December 2023). `--prune.*.older 15768000`: 5.1Tb (September 2023). Polygon Mumbai Archive:
   1TB. (April 2022).
@@ -70,7 +70,7 @@ Bear in mind that SSD performance deteriorates when close to capacity.
 
 RAM: >=16GB, 64-bit architecture.
 
-[Golang version >= 1.20](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4
+[Golang version >= 1.21](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4
 
 <code>🔬 more details on disk storage [here](https://erigon.substack.com/p/disk-footprint-changes-in-new-erigon?s=r)
 and [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space).</code>
@@ -213,7 +213,7 @@ Windows users may run erigon in 3 possible ways:
   build on windows :
     * [Git](https://git-scm.com/downloads) for Windows must be installed. If you're cloning this repository is very
       likely you already have it
-    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.20
+    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.21
     * GNU CC Compiler at least version 13 (is highly suggested that you install `chocolatey` package manager - see
       following point)
     * If you need to build MDBX tools (i.e. `.\wmake.ps1 db-tools`)
@@ -744,6 +744,80 @@ For example: btrfs's autodefrag option - may increase write IO 100x times
 
 For anyone else that was getting the BuildKit error when trying to start Erigon the old way you can use the below...
 
-```
+```sh
 XDG_DATA_HOME=/preferred/data/folder DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
 ```
+
+---------
+## Erigon3 user's guide
+
+Git branch `e35`. Just start erigon as you usually do.
+
+RAM requirement is higher: 32gb and better 64gb. We will work on this topic a bit later.
+
+Golang 1.21
+
+Almost all RPC methods are implemented - if something doesn't work - just drop it on our head.
+
+Supported networks: all (except Mumbai).
+
+### E3 changes from E2:
+
+- Sync from scratch doesn't require re-exec all history. Latest state and it's history are in snapshots - can download.
+- ExecutionStage - now including many E2 stages: stage_hash_state, stage_trie, stage_log_index, stage_history_index,
+  stage_trace_index
+- E3 can execute 1 historical transaction - without executing it's block - because history/indices have
+  transaction-granularity, instead of block-granularity.
+- Doesn't store Receipts/Logs - it always re-executing historical transactions - but re-execution is cheaper (see point
+  above). We would like to see how it will impact users - welcome feedback. Likely we will try add some small LRU-cache
+  here. Likely later we will add optional flag "to persist receipts".
+- More cold-start-friendly and os-pre-fetch-friendly.
+- datadir/chaindata is small now - to prevent it's grow: we recommend set --batchSize <= 1G. Probably 512mb is
+  enough.
+
+### E3 datadir structure
+
+```sh
+datadir        
+    chaindata   # "Recently-updated Latest State" and "Recent History"
+    snapshots   
+        domain    # Latest State: link to fast disk
+        history   # Historical values 
+        idx       # InvertedIndices: can search/filtering/union/intersect them - to find historical data. like eth_getLogs or trace_transaction
+        accessors # Additional (generated) indices of history - have "random-touch" read-pattern. They can serve only `Get` requests (no search/filters).
+    temp # buffers to sort data >> RAM. sequential-buffered IO - is slow-disk-friendly
+   
+# There is 4 domains: account, storage, code, commitment 
+```
+
+### E3 can store state on fast disk and history on slow disk
+
+If you can afford store datadir on 1 nvme-raid - great. If can't - it's possible to store history on cheap drive.
+
+```sh
+# place (or ln -s) `datadir` on slow disk. link some sub-folders to fast disk.
+# Example: what need link to fast disk to speedup execution
+datadir        
+    chaindata   # link to fast disk
+    snapshots   
+        domain    # link to fast disk
+        history   
+        idx       
+        accessors 
+    temp   
+
+# Example: how to speedup history access: 
+#   - go step-by-step - first try store `accessors` on fast disk
+#   - if speed is not good enough: `idx`
+#   - if still not enough: `history` 
+```
+
+### E3 public test goals
+
+- to gather RPC-usability feedback:
+  - E3 doesn't store receipts, using totally different indices, etc...
+  - It may behave different on warious stress-tests
+- to gather datadadir-usability feedback
+- discover bad data
+  - re-gen of snapshts takes much time, better fix data-bugs in-advance
+

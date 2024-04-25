@@ -15,8 +15,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+	"github.com/ledgerwatch/log/v3"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -832,6 +834,9 @@ func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *type
 	}
 	if ch == header.ParentHash {
 		forkingPoint = blockHeight - 1
+		if forkingPoint == 0 {
+			log.Warn("[dbg] HeaderInserter.ForkPoint1", "blockHeight", blockHeight)
+		}
 	} else {
 		// Going further back
 		ancestorHash := parent.ParentHash
@@ -867,6 +872,9 @@ func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *type
 		}
 		// Loop above terminates when either err != nil (handled already) or ch == ancestorHash, therefore ancestorHeight is our forking point
 		forkingPoint = ancestorHeight
+		if forkingPoint == 0 {
+			log.Warn("[dbg] HeaderInserter.ForkPoint2", "blockHeight", blockHeight)
+		}
 	}
 	return
 }
@@ -928,7 +936,7 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader servic
 			hi.canonicalCache.Add(blockHeight, hash)
 			// See if the forking point affects the unwindPoint (the block number to which other stages will need to unwind before the new canonical chain is applied)
 			if forkingPoint < hi.unwindPoint {
-				hi.unwindPoint = forkingPoint
+				hi.SetUnwindPoint(forkingPoint)
 				hi.unwind = true
 			}
 			// This makes sure we end up choosing the chain with the max total difficulty
@@ -988,6 +996,11 @@ func (hi *HeaderInserter) GetHighestTimestamp() uint64 {
 
 func (hi *HeaderInserter) UnwindPoint() uint64 {
 	return hi.unwindPoint
+}
+
+func (hi *HeaderInserter) SetUnwindPoint(v uint64) {
+	log.Warn("[dbg] HeaderInserter: set unwind point", "v", v, "stack", dbg.Stack())
+	hi.unwindPoint = v
 }
 
 func (hi *HeaderInserter) Unwind() bool {
@@ -1223,8 +1236,14 @@ func (hd *HeaderDownload) AddMinedHeader(header *types.Header) error {
 	peerID := [64]byte{'m', 'i', 'n', 'e', 'r'} // "miner"
 
 	_ = hd.ProcessHeaders(segments, false /* newBlock */, peerID)
-	hd.latestMinedBlockNumber = header.Number.Uint64()
+	hd.setLatestMinedBlockNumber(header.Number.Uint64())
 	return nil
+}
+
+func (hd *HeaderDownload) setLatestMinedBlockNumber(num uint64) {
+	hd.lock.Lock()
+	hd.latestMinedBlockNumber = num
+	hd.lock.Unlock()
 }
 
 func (hd *HeaderDownload) AddHeadersFromSnapshot(tx kv.Tx, r services.FullBlockReader) error {

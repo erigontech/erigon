@@ -161,7 +161,8 @@ func torrents(cliCtx *cli.Context, command string) error {
 
 	if rcCli != nil {
 		if src != nil && src.LType == sync.RemoteFs {
-			srcSession, err = rcCli.NewSession(cliCtx.Context, filepath.Join(tempDir, "src"), src.Src+":"+src.Root)
+			ctx := cliCtx.Context // avoiding sonar dup complaint
+			srcSession, err = rcCli.NewSession(ctx, filepath.Join(tempDir, "src"), src.Src+":"+src.Root, nil)
 
 			if err != nil {
 				return err
@@ -348,7 +349,7 @@ func updateTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(16)
 
-	torrentFiles := downloader.NewAtomicTorrentFiles(srcSession.LocalFsRoot())
+	torrentFiles := downloader.NewAtomicTorrentFS(srcSession.LocalFsRoot())
 
 	for _, fi := range entries {
 		if filepath.Ext(fi.Name()) != ".torrent" {
@@ -380,7 +381,7 @@ func updateTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 
 			defer os.Remove(filepath.Join(srcSession.LocalFsRoot(), file))
 
-			err = downloader.BuildTorrentIfNeed(gctx, file, srcSession.LocalFsRoot(), torrentFiles)
+			_, err = downloader.BuildTorrentIfNeed(gctx, file, srcSession.LocalFsRoot(), torrentFiles)
 
 			if err != nil {
 				return err
@@ -405,7 +406,7 @@ func verifyTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(16)
 
-	torrentFiles := downloader.NewAtomicTorrentFiles(srcSession.LocalFsRoot())
+	torrentFiles := downloader.NewAtomicTorrentFS(srcSession.LocalFsRoot())
 
 	for _, fi := range entries {
 		if filepath.Ext(fi.Name()) != ".torrent" {
@@ -473,7 +474,7 @@ func verifyTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 
 			defer os.Remove(filepath.Join(srcSession.LocalFsRoot(), file))
 
-			err = downloader.BuildTorrentIfNeed(gctx, file, srcSession.LocalFsRoot(), torrentFiles)
+			_, err = downloader.BuildTorrentIfNeed(gctx, file, srcSession.LocalFsRoot(), torrentFiles)
 
 			if err != nil {
 				return err

@@ -13,36 +13,32 @@ import (
 	"testing"
 	"time"
 
-	types2 "github.com/ledgerwatch/erigon-lib/types"
-
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	"github.com/ledgerwatch/erigon/params"
-
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon/core"
-
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/erigon-lib/state"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/erigon/core"
 	reset2 "github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
 	state2 "github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 // if fpath is empty, tempDir is used, otherwise fpath is reused
-func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.RwDB, *state.AggregatorV3, string) {
+func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.RwDB, *state.Aggregator, string) {
 	t.Helper()
 
 	path := t.TempDir()
@@ -57,7 +53,7 @@ func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.RwDB,
 	}).MustOpen()
 	t.Cleanup(db.Close)
 
-	agg, err := state.NewAggregatorV3(context.Background(), dirs, aggStep, db, logger)
+	agg, err := state.NewAggregator(context.Background(), dirs, aggStep, db, logger)
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 	err = agg.OpenFolder(false)
@@ -70,8 +66,7 @@ func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.RwDB,
 	})
 	require.NoError(t, err)
 
-	chain := networkname.Test
-	tdb, err := temporal.New(db, agg, systemcontracts.SystemContractCodeLookup[chain])
+	tdb, err := temporal.New(db, agg)
 	require.NoError(t, err)
 	db = tdb
 	return db, agg, path
@@ -99,7 +94,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 		}
 	}()
 
-	domCtx := agg.MakeContext()
+	domCtx := agg.BeginFilesRo()
 	defer domCtx.Close()
 
 	domains, err := state.NewSharedDomains(tx, log.New())
@@ -176,7 +171,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 
 	//COMS := make(map[string][]byte)
 	//{
-	//	cct := domains.Commitment.MakeContext()
+	//	cct := domains.Commitment.BeginFilesRo()
 	//	err = cct.IteratePrefix(tx, []byte("state"), func(k, v []byte) {
 	//		COMS[string(k)] = v
 	//		//fmt.Printf("k %x v %x\n", k, v)
@@ -213,14 +208,14 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 
 	tx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
-	domCtx = agg.MakeContext()
+	domCtx = agg.BeginFilesRo()
 	defer domCtx.Close()
 	domains, err = state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
 	//{
-	//	cct := domains.Commitment.MakeContext()
+	//	cct := domains.Commitment.BeginFilesRo()
 	//	err = cct.IteratePrefix(tx, []byte("state"), func(k, v []byte) {
 	//		cv, _ := COMS[string(k)]
 	//		if !bytes.Equal(cv, v) {
@@ -247,7 +242,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	tx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	domCtx = agg.MakeContext()
+	domCtx = agg.BeginFilesRo()
 	defer domCtx.Close()
 	domains, err = state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
@@ -306,7 +301,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		}
 	}()
 
-	domCtx := agg.MakeContext()
+	domCtx := agg.BeginFilesRo()
 	defer domCtx.Close()
 
 	domains, err := state.NewSharedDomains(tx, log.New())
@@ -398,7 +393,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domCtx = agg.MakeContext()
+	domCtx = agg.BeginFilesRo()
 	defer domCtx.Close()
 	domains, err = state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
@@ -418,7 +413,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	tx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	domCtx = agg.MakeContext()
+	domCtx = agg.BeginFilesRo()
 	defer domCtx.Close()
 	domains, err = state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
@@ -485,7 +480,7 @@ func TestCommit(t *testing.T) {
 		}
 	}()
 
-	domCtx := agg.MakeContext()
+	domCtx := agg.BeginFilesRo()
 	defer domCtx.Close()
 	domains, err := state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)

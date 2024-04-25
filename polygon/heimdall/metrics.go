@@ -22,6 +22,7 @@ const (
 	spanRequest               requestType = "span"
 	checkpointRequest         requestType = "checkpoint"
 	checkpointCountRequest    requestType = "checkpoint-count"
+	checkpointListRequest     requestType = "checkpoint-list"
 	milestoneRequest          requestType = "milestone"
 	milestoneCountRequest     requestType = "milestone-count"
 	milestoneNoAckRequest     requestType = "milestone-no-ack"

@@ -21,10 +21,9 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
-	"hash"
 	"math"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -32,7 +31,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	bloomfilter "github.com/holiman/bloomfilter/v2"
 	"github.com/ledgerwatch/erigon-lib/kv/backup"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 	"github.com/ledgerwatch/log/v3"
@@ -45,47 +43,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/seg"
-)
-
-var (
-	//LatestStateReadWarm          = metrics.GetOrCreateSummary(`latest_state_read{type="warm",found="yes"}`)  //nolint
-	//LatestStateReadWarmNotFound  = metrics.GetOrCreateSummary(`latest_state_read{type="warm",found="no"}`)   //nolint
-	//LatestStateReadGrind         = metrics.GetOrCreateSummary(`latest_state_read{type="grind",found="yes"}`) //nolint
-	//LatestStateReadGrindNotFound = metrics.GetOrCreateSummary(`latest_state_read{type="grind",found="no"}`)  //nolint
-	//LatestStateReadCold          = metrics.GetOrCreateSummary(`latest_state_read{type="cold",found="yes"}`)  //nolint
-	//LatestStateReadColdNotFound  = metrics.GetOrCreateSummary(`latest_state_read{type="cold",found="no"}`)   //nolint
-	mxPrunableDAcc  = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="account"}`)
-	mxPrunableDSto  = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="storage"}`)
-	mxPrunableDCode = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="code"}`)
-	mxPrunableDComm = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="commitment"}`)
-	mxPrunableHAcc  = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="account"}`)
-	mxPrunableHSto  = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="storage"}`)
-	mxPrunableHCode = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="code"}`)
-	mxPrunableHComm = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="commitment"}`)
-
-	mxRunningMerges        = metrics.GetOrCreateGauge("domain_running_merges")
-	mxRunningFilesBuilding = metrics.GetOrCreateGauge("domain_running_files_building")
-	mxCollateTook          = metrics.GetOrCreateHistogram("domain_collate_took")
-	mxPruneTookDomain      = metrics.GetOrCreateHistogram(`domain_prune_took{type="domain"}`)
-	mxPruneTookHistory     = metrics.GetOrCreateHistogram(`domain_prune_took{type="history"}`)
-	mxPruneTookIndex       = metrics.GetOrCreateHistogram(`domain_prune_took{type="index"}`)
-	mxPruneInProgress      = metrics.GetOrCreateGauge("domain_pruning_progress")
-	mxCollationSize        = metrics.GetOrCreateGauge("domain_collation_size")
-	mxCollationSizeHist    = metrics.GetOrCreateGauge("domain_collation_hist_size")
-	mxPruneSizeDomain      = metrics.GetOrCreateCounter(`domain_prune_size{type="domain"}`)
-	mxPruneSizeHistory     = metrics.GetOrCreateCounter(`domain_prune_size{type="history"}`)
-	mxPruneSizeIndex       = metrics.GetOrCreateCounter(`domain_prune_size{type="index"}`)
-	mxBuildTook            = metrics.GetOrCreateSummary("domain_build_files_took")
-	mxStepTook             = metrics.GetOrCreateHistogram("domain_step_took")
-	mxFlushTook            = metrics.GetOrCreateSummary("domain_flush_took")
-	mxCommitmentRunning    = metrics.GetOrCreateGauge("domain_running_commitment")
-	mxCommitmentTook       = metrics.GetOrCreateSummary("domain_commitment_took")
 )
 
 // StepsInColdFile - files of this size are completely frozen/immutable.
@@ -100,250 +61,6 @@ var (
 	tracePutWithPrev = dbg.EnvString("AGG_TRACE_PUT_WITH_PREV", "")
 )
 
-// filesItem corresponding to a pair of files (.dat and .idx)
-type filesItem struct {
-	decompressor         *seg.Decompressor
-	index                *recsplit.Index
-	bindex               *BtIndex
-	bm                   *bitmapdb.FixedSizeBitmaps
-	existence            *ExistenceFilter
-	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
-
-	// Frozen: file of size StepsInColdFile. Completely immutable.
-	// Cold: file of size < StepsInColdFile. Immutable, but can be closed/removed after merge to bigger file.
-	// Hot: Stored in DB. Providing Snapshot-Isolation by CopyOnWrite.
-	frozen   bool         // immutable, don't need atomic
-	refcount atomic.Int32 // only for `frozen=false`
-
-	// file can be deleted in 2 cases: 1. when `refcount == 0 && canDelete == true` 2. on app startup when `file.isSubsetOfFrozenFile()`
-	// other processes (which also reading files, may have same logic)
-	canDelete atomic.Bool
-}
-
-type ExistenceFilter struct {
-	filter             *bloomfilter.Filter
-	empty              bool
-	FileName, FilePath string
-	f                  *os.File
-	noFsync            bool // fsync is enabled by default, but tests can manually disable
-}
-
-func NewExistenceFilter(keysCount uint64, filePath string) (*ExistenceFilter, error) {
-
-	m := bloomfilter.OptimalM(keysCount, 0.01)
-	//TODO: make filters compatible by usinig same seed/keys
-	_, fileName := filepath.Split(filePath)
-	e := &ExistenceFilter{FilePath: filePath, FileName: fileName}
-	if keysCount < 2 {
-		e.empty = true
-	} else {
-		var err error
-		e.filter, err = bloomfilter.New(m)
-		if err != nil {
-			return nil, fmt.Errorf("%w, %s", err, fileName)
-		}
-	}
-	return e, nil
-}
-
-func (b *ExistenceFilter) AddHash(hash uint64) {
-	if b.empty {
-		return
-	}
-	b.filter.AddHash(hash)
-}
-func (b *ExistenceFilter) ContainsHash(v uint64) bool {
-	if b.empty {
-		return true
-	}
-	return b.filter.ContainsHash(v)
-}
-func (b *ExistenceFilter) Contains(v hash.Hash64) bool {
-	if b.empty {
-		return true
-	}
-	return b.filter.Contains(v)
-}
-func (b *ExistenceFilter) Build() error {
-	if b.empty {
-		cf, err := os.Create(b.FilePath)
-		if err != nil {
-			return err
-		}
-		defer cf.Close()
-		return nil
-	}
-
-	log.Trace("[agg] write file", "file", b.FileName)
-	tmpFilePath := b.FilePath + ".tmp"
-	cf, err := os.Create(tmpFilePath)
-	if err != nil {
-		return err
-	}
-	defer cf.Close()
-
-	if _, err := b.filter.WriteTo(cf); err != nil {
-		return err
-	}
-	if err = b.fsync(cf); err != nil {
-		return err
-	}
-	if err = cf.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpFilePath, b.FilePath); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (b *ExistenceFilter) DisableFsync() { b.noFsync = true }
-
-// fsync - other processes/goroutines must see only "fully-complete" (valid) files. No partial-writes.
-// To achieve it: write to .tmp file then `rename` when file is ready.
-// Machine may power-off right after `rename` - it means `fsync` must be before `rename`
-func (b *ExistenceFilter) fsync(f *os.File) error {
-	if b.noFsync {
-		return nil
-	}
-	if err := f.Sync(); err != nil {
-		log.Warn("couldn't fsync", "err", err)
-		return err
-	}
-	return nil
-}
-
-func OpenExistenceFilter(filePath string) (*ExistenceFilter, error) {
-	_, fileName := filepath.Split(filePath)
-	f := &ExistenceFilter{FilePath: filePath, FileName: fileName}
-	if !dir.FileExist(filePath) {
-		return nil, fmt.Errorf("file doesn't exists: %s", fileName)
-	}
-	{
-		ff, err := os.Open(filePath)
-		if err != nil {
-			return nil, err
-		}
-		defer ff.Close()
-		stat, err := ff.Stat()
-		if err != nil {
-			return nil, err
-		}
-		f.empty = stat.Size() == 0
-	}
-
-	if !f.empty {
-		var err error
-		f.filter, _, err = bloomfilter.ReadFile(filePath)
-		if err != nil {
-			return nil, fmt.Errorf("OpenExistenceFilter: %w, %s", err, fileName)
-		}
-	}
-	return f, nil
-}
-func (b *ExistenceFilter) Close() {
-	if b.f != nil {
-		b.f.Close()
-		b.f = nil
-	}
-}
-
-func newFilesItem(startTxNum, endTxNum, stepSize uint64) *filesItem {
-	startStep := startTxNum / stepSize
-	endStep := endTxNum / stepSize
-	frozen := endStep-startStep == StepsInColdFile
-	return &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
-}
-
-// isSubsetOf - when `j` covers `i` but not equal `i`
-func (i *filesItem) isSubsetOf(j *filesItem) bool {
-	return (j.startTxNum <= i.startTxNum && i.endTxNum <= j.endTxNum) && (j.startTxNum != i.startTxNum || i.endTxNum != j.endTxNum)
-}
-func (i *filesItem) isBefore(j *filesItem) bool { return i.endTxNum <= j.startTxNum }
-
-func filesItemLess(i, j *filesItem) bool {
-	if i.endTxNum == j.endTxNum {
-		return i.startTxNum > j.startTxNum
-	}
-	return i.endTxNum < j.endTxNum
-}
-func (i *filesItem) closeFilesAndRemove() {
-	if i.decompressor != nil {
-		i.decompressor.Close()
-		// paranoic-mode on: don't delete frozen files
-		if !i.frozen {
-			if err := os.Remove(i.decompressor.FilePath()); err != nil {
-				log.Trace("remove after close", "err", err, "file", i.decompressor.FileName())
-			}
-			if err := os.Remove(i.decompressor.FilePath() + ".torrent"); err != nil {
-				log.Trace("remove after close", "err", err, "file", i.decompressor.FileName()+".torrent")
-			}
-		}
-		i.decompressor = nil
-	}
-	if i.index != nil {
-		i.index.Close()
-		// paranoic-mode on: don't delete frozen files
-		if !i.frozen {
-			if err := os.Remove(i.index.FilePath()); err != nil {
-				log.Trace("remove after close", "err", err, "file", i.index.FileName())
-			}
-		}
-		i.index = nil
-	}
-	if i.bindex != nil {
-		i.bindex.Close()
-		if err := os.Remove(i.bindex.FilePath()); err != nil {
-			log.Trace("remove after close", "err", err, "file", i.bindex.FileName())
-		}
-		i.bindex = nil
-	}
-	if i.bm != nil {
-		i.bm.Close()
-		if err := os.Remove(i.bm.FilePath()); err != nil {
-			log.Trace("remove after close", "err", err, "file", i.bm.FileName())
-		}
-		i.bm = nil
-	}
-	if i.existence != nil {
-		i.existence.Close()
-		if err := os.Remove(i.existence.FilePath); err != nil {
-			log.Trace("remove after close", "err", err, "file", i.existence.FileName)
-		}
-		i.existence = nil
-	}
-}
-
-type DomainStats struct {
-	MergesCount          uint64
-	LastCollationTook    time.Duration
-	LastPruneTook        time.Duration
-	LastPruneHistTook    time.Duration
-	LastFileBuildingTook time.Duration
-	LastCollationSize    uint64
-	LastPruneSize        uint64
-
-	FilesQueries *atomic.Uint64
-	TotalQueries *atomic.Uint64
-	EfSearchTime time.Duration
-	DataSize     uint64
-	IndexSize    uint64
-	FilesCount   uint64
-}
-
-func (ds *DomainStats) Accumulate(other DomainStats) {
-	if other.FilesQueries != nil {
-		ds.FilesQueries.Add(other.FilesQueries.Load())
-	}
-	if other.TotalQueries != nil {
-		ds.TotalQueries.Add(other.TotalQueries.Load())
-	}
-	ds.EfSearchTime += other.EfSearchTime
-	ds.IndexSize += other.IndexSize
-	ds.DataSize += other.DataSize
-	ds.FilesCount += other.FilesCount
-}
-
 // Domain is a part of the state (examples are Accounts, Storage, Code)
 // Domain should not have any go routines or locks
 //
@@ -354,30 +71,40 @@ func (ds *DomainStats) Accumulate(other DomainStats) {
 type Domain struct {
 	*History
 
-	// files - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
-	// thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
+	// dirtyFiles - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
+	// thread-safe, but maybe need 1 RWLock for all trees in Aggregator
 	//
-	// roFiles derivative from field `file`, but without garbage:
+	// _visibleFiles derivative from field `file`, but without garbage:
 	//  - no files with `canDelete=true`
 	//  - no overlaps
 	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
 	//
-	// MakeContext() using roFiles in zero-copy way
-	files   *btree2.BTreeG[*filesItem]
-	roFiles atomic.Pointer[[]ctxItem]
+	// BeginRo() using _visibleFiles in zero-copy way
+	dirtyFiles *btree2.BTreeG[*filesItem]
 
-	keysTable string // key -> invertedStep , invertedStep = ^(txNum / aggregationStep), Needs to be table with DupSort
-	valsTable string // key + invertedStep -> values
-	stats     DomainStats
+	// _visibleFiles - underscore in name means: don't use this field directly, use BeginFilesRo()
+	// underlying array is immutable - means it's ready for zero-copy use
+	_visibleFiles atomic.Pointer[[]ctxItem]
 
-	compression        FileCompression
-	indexList          idxList
-	withExistenceIndex bool
+	// replaceKeysInValues allows to replace commitment branch values with shorter keys.
+	// for commitment domain only
+	replaceKeysInValues bool
+	// restricts subset file deletions on open/close. Needed to hold files until commitment is merged
+	restrictSubsetFileDeletions bool
+
+	keysTable   string // key -> invertedStep , invertedStep = ^(txNum / aggregationStep), Needs to be table with DupSort
+	valsTable   string // key + invertedStep -> values
+	stats       DomainStats
+	compression FileCompression
+	indexList   idxList
 }
 
 type domainCfg struct {
 	hist     histCfg
 	compress FileCompression
+
+	replaceKeysInValues         bool
+	restrictSubsetFileDeletions bool
 }
 
 func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, valsTable, indexKeysTable, historyValsTable, indexTable string, logger log.Logger) (*Domain, error) {
@@ -388,13 +115,15 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, v
 		keysTable:   keysTable,
 		valsTable:   valsTable,
 		compression: cfg.compress,
-		files:       btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		dirtyFiles:  btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		stats:       DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
 
-		indexList:          withBTree | withExistence,
-		withExistenceIndex: true,
+		indexList:                   withBTree | withExistence,
+		replaceKeysInValues:         cfg.replaceKeysInValues,         // for commitment domain only
+		restrictSubsetFileDeletions: cfg.restrictSubsetFileDeletions, // to prevent not merged 'garbage' to delete on start
 	}
-	d.roFiles.Store(&[]ctxItem{})
+
+	d._visibleFiles.Store(&[]ctxItem{})
 
 	var err error
 	if d.History, err = NewHistory(cfg.hist, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, nil, logger); err != nil {
@@ -432,7 +161,7 @@ func (d *Domain) FirstStepInDB(tx kv.Tx) (lstInDb uint64) {
 	return binary.BigEndian.Uint64(lstIdx) / d.aggregationStep
 }
 
-func (dc *DomainContext) NewWriter() *domainBufferedWriter { return dc.newWriter(dc.d.dirs.Tmp, false) }
+func (dt *DomainRoTx) NewWriter() *domainBufferedWriter { return dt.newWriter(dt.d.dirs.Tmp, false) }
 
 // OpenList - main method to open list of files.
 // It's ok if some files was open earlier.
@@ -452,10 +181,10 @@ func (d *Domain) openList(names []string, readonly bool) error {
 	d.closeWhatNotInList(names)
 	d.scanStateFiles(names)
 	if err := d.openFiles(); err != nil {
-		return fmt.Errorf("Domain.OpenList: %s, %w", d.filenameBase, err)
+		return fmt.Errorf("Domain.openList: %w, %s", err, d.filenameBase)
 	}
 	d.protectFromHistoryFilesAheadOfDomainFiles(readonly)
-	d.reCalcRoFiles()
+	d.reCalcVisibleFiles()
 	return nil
 }
 
@@ -463,7 +192,7 @@ func (d *Domain) openList(names []string, readonly bool) error {
 //   - `kill -9` in the middle of `buildFiles()`, then `rm -f db` (restore from backup)
 //   - `kill -9` in the middle of `buildFiles()`, then `stage_exec --reset` (drop progress - as a hot-fix)
 func (d *Domain) protectFromHistoryFilesAheadOfDomainFiles(readonly bool) {
-	d.removeFilesAfterStep(d.endTxNumMinimax()/d.aggregationStep, readonly)
+	d.removeFilesAfterStep(d.dirtyFilesEndTxNumMinimax()/d.aggregationStep, readonly)
 }
 
 func (d *Domain) OpenFolder(readonly bool) error {
@@ -487,54 +216,56 @@ func (d *Domain) GetAndResetStats() DomainStats {
 
 func (d *Domain) removeFilesAfterStep(lowerBound uint64, readonly bool) {
 	var toDelete []*filesItem
-	d.files.Scan(func(item *filesItem) bool {
+	d.dirtyFiles.Scan(func(item *filesItem) bool {
 		if item.startTxNum/d.aggregationStep >= lowerBound {
 			toDelete = append(toDelete, item)
 		}
 		return true
 	})
 	for _, item := range toDelete {
-		d.files.Delete(item)
+		d.dirtyFiles.Delete(item)
 		if !readonly {
 			log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete). stack: %s", item.decompressor.FileName(), lowerBound, dbg.Stack()))
 			item.closeFilesAndRemove()
 		} else {
 			log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d has not enough files (was not complete). stack: %s", item.decompressor.FileName(), lowerBound, dbg.Stack()))
-
+			item.closeFiles()
 		}
 	}
 
 	toDelete = toDelete[:0]
-	d.History.files.Scan(func(item *filesItem) bool {
+	d.History.dirtyFiles.Scan(func(item *filesItem) bool {
 		if item.startTxNum/d.aggregationStep >= lowerBound {
 			toDelete = append(toDelete, item)
 		}
 		return true
 	})
 	for _, item := range toDelete {
-		d.History.files.Delete(item)
+		d.History.dirtyFiles.Delete(item)
 		if !readonly {
-			log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
+			log.Debug(fmt.Sprintf("[snapshots] deleting some histor files - because step %d has not enough files (was not complete)", lowerBound))
 			item.closeFilesAndRemove()
 		} else {
-			log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
+			log.Debug(fmt.Sprintf("[snapshots] closing some histor files - because step %d has not enough files (was not complete)", lowerBound))
+			item.closeFiles()
 		}
 	}
 
 	toDelete = toDelete[:0]
-	d.History.InvertedIndex.files.Scan(func(item *filesItem) bool {
+	d.History.InvertedIndex.dirtyFiles.Scan(func(item *filesItem) bool {
 		if item.startTxNum/d.aggregationStep >= lowerBound {
 			toDelete = append(toDelete, item)
 		}
 		return true
 	})
 	for _, item := range toDelete {
-		d.History.InvertedIndex.files.Delete(item)
+		d.History.InvertedIndex.dirtyFiles.Delete(item)
 		if !readonly {
 			log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
 			item.closeFilesAndRemove()
 		} else {
 			log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
+			item.closeFiles()
 		}
 	}
 }
@@ -576,10 +307,10 @@ func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) 
 		var newFile = newFilesItem(startTxNum, endTxNum, d.aggregationStep)
 		newFile.frozen = false
 
-		if _, has := d.files.Get(newFile); has {
+		if _, has := d.dirtyFiles.Get(newFile); has {
 			continue
 		}
-		d.files.Set(newFile)
+		d.dirtyFiles.Set(newFile)
 	}
 	return garbageFiles
 }
@@ -587,7 +318,7 @@ func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) 
 func (d *Domain) openFiles() (err error) {
 	invalidFileItems := make([]*filesItem, 0)
 	invalidFileItemsLock := sync.Mutex{}
-	d.files.Walk(func(items []*filesItem) bool {
+	d.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
 			if item.decompressor == nil {
@@ -603,7 +334,11 @@ func (d *Domain) openFiles() (err error) {
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 					_, fName := filepath.Split(fPath)
-					d.logger.Warn("[agg] Domain.openFiles", "err", err, "f", fName)
+					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
+						d.logger.Debug("[agg] Domain.openFiles", "err", err, "f", fName)
+					} else {
+						d.logger.Warn("[agg] Domain.openFiles", "err", err, "f", fName)
+					}
 					invalidFileItemsLock.Lock()
 					invalidFileItems = append(invalidFileItems, item)
 					invalidFileItemsLock.Unlock()
@@ -647,16 +382,17 @@ func (d *Domain) openFiles() (err error) {
 	})
 
 	for _, item := range invalidFileItems {
-		d.files.Delete(item)
+		item.closeFiles() // just close, not remove from disk
+		d.dirtyFiles.Delete(item)
 	}
 
-	d.reCalcRoFiles()
+	d.reCalcVisibleFiles()
 	return nil
 }
 
 func (d *Domain) closeWhatNotInList(fNames []string) {
 	var toDelete []*filesItem
-	d.files.Walk(func(items []*filesItem) bool {
+	d.dirtyFiles.Walk(func(items []*filesItem) bool {
 	Loop1:
 		for _, item := range items {
 			for _, protectName := range fNames {
@@ -669,35 +405,20 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 		return true
 	})
 	for _, item := range toDelete {
-		if item.decompressor != nil {
-			item.decompressor.Close()
-			item.decompressor = nil
-		}
-		if item.index != nil {
-			item.index.Close()
-			item.index = nil
-		}
-		if item.bindex != nil {
-			item.bindex.Close()
-			item.bindex = nil
-		}
-		if item.existence != nil {
-			item.existence.Close()
-			item.existence = nil
-		}
-		d.files.Delete(item)
+		item.closeFiles()
+		d.dirtyFiles.Delete(item)
 	}
 }
 
-func (d *Domain) reCalcRoFiles() {
-	roFiles := ctxFiles(d.files, d.indexList, false)
-	d.roFiles.Store(&roFiles)
+func (d *Domain) reCalcVisibleFiles() {
+	visibleFiles := calcVisibleFiles(d.dirtyFiles, d.indexList, false)
+	d._visibleFiles.Store(&visibleFiles)
 }
 
 func (d *Domain) Close() {
 	d.History.Close()
 	d.closeWhatNotInList([]string{})
-	d.reCalcRoFiles()
+	d.reCalcVisibleFiles()
 }
 
 func (w *domainBufferedWriter) PutWithPrev(key1, key2, val, preval []byte, prevStep uint64) error {
@@ -728,16 +449,21 @@ func (w *domainBufferedWriter) SetTxNum(v uint64) {
 	binary.BigEndian.PutUint64(w.stepBytes[:], ^(v / w.h.ii.aggregationStep))
 }
 
-func (dc *DomainContext) newWriter(tmpdir string, discard bool) *domainBufferedWriter {
+func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *domainBufferedWriter {
+	discardHistory := discard
+	if dbg.DiscardCommitmentHistory && dt.d.filenameBase == "commitment" {
+		discardHistory = true
+	}
+
 	w := &domainBufferedWriter{
 		discard:   discard,
 		aux:       make([]byte, 0, 128),
-		keysTable: dc.d.keysTable,
-		valsTable: dc.d.valsTable,
-		keys:      etl.NewCollector(dc.d.keysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), dc.d.logger),
-		values:    etl.NewCollector(dc.d.valsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), dc.d.logger),
+		keysTable: dt.d.keysTable,
+		valsTable: dt.d.valsTable,
+		keys:      etl.NewCollector(dt.d.keysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), dt.d.logger),
+		values:    etl.NewCollector(dt.d.valsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), dt.d.logger),
 
-		h: dc.hc.newWriter(tmpdir, discard),
+		h: dt.ht.newWriter(tmpdir, discardHistory),
 	}
 	w.keys.LogLvl(log.LvlTrace)
 	w.values.LogLvl(log.LvlTrace)
@@ -856,6 +582,7 @@ type CursorItem struct {
 	key          []byte
 	val          []byte
 	step         uint64
+	startTxNum   uint64
 	endTxNum     uint64
 	latestOffset uint64     // offset of the latest value in the file
 	t            CursorType // Whether this item represents state file or DB record, or tree
@@ -897,40 +624,26 @@ func (ch *CursorHeap) Pop() interface{} {
 	return x
 }
 
-// filesItem corresponding to a pair of files (.dat and .idx)
-type ctxItem struct {
-	getter     *seg.Getter
-	reader     *recsplit.IndexReader
-	startTxNum uint64
-	endTxNum   uint64
-
-	i   int
-	src *filesItem
-}
-
-func (i *ctxItem) isSubSetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) } //nolint
-func (i *ctxItem) isSubsetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) } //nolint
-
-// DomainContext allows accesing the same domain from multiple go-routines
-type DomainContext struct {
-	hc         *HistoryContext
+// DomainRoTx allows accesing the same domain from multiple go-routines
+type DomainRoTx struct {
+	ht         *HistoryRoTx
 	d          *Domain
 	files      []ctxItem
 	getters    []ArchiveGetter
 	readers    []*BtIndex
 	idxReaders []*recsplit.IndexReader
 
-	keyBuf    [60]byte // 52b key and 8b for inverted step
-	valKeyBuf [60]byte // 52b key and 8b for inverted step
+	keyBuf [60]byte // 52b key and 8b for inverted step
+	valBuf [128]byte
 
 	keysC kv.CursorDupSort
 	valsC kv.Cursor
 }
 
-func (dc *DomainContext) getFromFile(i int, filekey []byte) ([]byte, bool, error) {
-	g := dc.statelessGetter(i)
+func (dt *DomainRoTx) getFromFile(i int, filekey []byte) ([]byte, bool, error) {
+	g := dt.statelessGetter(i)
 	if !(UseBtree || UseBpsTree) {
-		reader := dc.statelessIdxReader(i)
+		reader := dt.statelessIdxReader(i)
 		if reader.Empty() {
 			return nil, false, nil
 		}
@@ -948,40 +661,40 @@ func (dc *DomainContext) getFromFile(i int, filekey []byte) ([]byte, bool, error
 		return v, true, nil
 	}
 
-	_, v, ok, err := dc.statelessBtree(i).Get(filekey, g)
+	_, v, ok, err := dt.statelessBtree(i).Get(filekey, g)
 	if err != nil || !ok {
 		return nil, false, err
 	}
 	//fmt.Printf("getLatestFromBtreeColdFiles key %x shard %d %x\n", filekey, exactColdShard, v)
 	return v, true, nil
 }
-func (dc *DomainContext) DebugKVFilesWithKey(k []byte) (res []string, err error) {
-	for i := len(dc.files) - 1; i >= 0; i-- {
-		_, ok, err := dc.getFromFile(i, k)
+func (dt *DomainRoTx) DebugKVFilesWithKey(k []byte) (res []string, err error) {
+	for i := len(dt.files) - 1; i >= 0; i-- {
+		_, ok, err := dt.getFromFile(i, k)
 		if err != nil {
 			return res, err
 		}
 		if ok {
-			res = append(res, dc.files[i].src.decompressor.FileName())
+			res = append(res, dt.files[i].src.decompressor.FileName())
 		}
 	}
 	return res, nil
 }
-func (dc *DomainContext) DebugEFKey(k []byte) error {
-	dc.hc.ic.ii.files.Walk(func(items []*filesItem) bool {
+func (dt *DomainRoTx) DebugEFKey(k []byte) error {
+	dt.ht.iit.ii.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.decompressor == nil {
 				continue
 			}
 			idx := item.index
 			if idx == nil {
-				fPath := dc.d.efAccessorFilePath(item.startTxNum/dc.d.aggregationStep, item.endTxNum/dc.d.aggregationStep)
+				fPath := dt.d.efAccessorFilePath(item.startTxNum/dt.d.aggregationStep, item.endTxNum/dt.d.aggregationStep)
 				if dir.FileExist(fPath) {
 					var err error
 					idx, err = recsplit.OpenIndex(fPath)
 					if err != nil {
 						_, fName := filepath.Split(fPath)
-						dc.d.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
+						dt.d.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
 						continue
 					}
 					defer idx.Close()
@@ -1015,7 +728,7 @@ func (dc *DomainContext) DebugEFKey(k []byte) error {
 }
 
 func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
-	d.History.files.Walk(func(items []*filesItem) bool {
+	d.History.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.index == nil {
 				return false
@@ -1028,7 +741,7 @@ func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 		return true
 	})
 
-	d.files.Walk(func(items []*filesItem) bool {
+	d.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.index == nil {
 				return false
@@ -1048,16 +761,16 @@ func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 	return
 }
 
-func (d *Domain) MakeContext() *DomainContext {
-	files := *d.roFiles.Load()
+func (d *Domain) BeginFilesRo() *DomainRoTx {
+	files := *d._visibleFiles.Load()
 	for i := 0; i < len(files); i++ {
 		if !files[i].src.frozen {
 			files[i].src.refcount.Add(1)
 		}
 	}
-	return &DomainContext{
+	return &DomainRoTx{
 		d:     d,
-		hc:    d.History.MakeContext(),
+		ht:    d.History.BeginFilesRo(),
 		files: files,
 	}
 }
@@ -1301,7 +1014,7 @@ func (d *Domain) buildMapIdx(ctx context.Context, fromStep, toStep uint64, data 
 }
 
 func (d *Domain) missedBtreeIdxFiles() (l []*filesItem) {
-	d.files.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
+	d.dirtyFiles.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
 			fPath := d.kvBtFilePath(fromStep, toStep)
@@ -1320,7 +1033,7 @@ func (d *Domain) missedBtreeIdxFiles() (l []*filesItem) {
 	return l
 }
 func (d *Domain) missedKviIdxFiles() (l []*filesItem) {
-	d.files.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
+	d.dirtyFiles.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
 			fPath := d.kvAccessorFilePath(fromStep, toStep)
@@ -1463,7 +1176,7 @@ func buildIndex(ctx context.Context, d *seg.Decompressor, compressed FileCompres
 }
 
 func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
-	defer d.reCalcRoFiles()
+	defer d.reCalcVisibleFiles()
 
 	d.History.integrateFiles(sf.HistoryFiles, txNumFrom, txNumTo)
 
@@ -1473,21 +1186,21 @@ func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
 	fi.index = sf.valuesIdx
 	fi.bindex = sf.valuesBt
 	fi.existence = sf.bloom
-	d.files.Set(fi)
+	d.dirtyFiles.Set(fi)
 }
 
 // unwind is similar to prune but the difference is that it restores domain values from the history as of txFrom
 // context Flush should be managed by caller.
-func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwindTo uint64) error {
-	d := dc.d
+func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwindTo uint64) error {
+	d := dt.d
 	//fmt.Printf("[domain][%s] unwinding domain to txNum=%d, step %d\n", d.filenameBase, txNumUnwindTo, step)
-	histRng, err := dc.hc.HistoryRange(int(txNumUnwindTo), -1, order.Asc, -1, rwTx)
+	histRng, err := dt.ht.HistoryRange(int(txNumUnwindTo), -1, order.Asc, -1, rwTx)
 	if err != nil {
-		return fmt.Errorf("historyRange %s: %w", dc.hc.h.filenameBase, err)
+		return fmt.Errorf("historyRange %s: %w", dt.ht.h.filenameBase, err)
 	}
 
 	seen := make(map[string]struct{})
-	restored := dc.NewWriter()
+	restored := dt.NewWriter()
 
 	for histRng.HasNext() && txNumUnwindTo > 0 {
 		k, v, _, err := histRng.Next()
@@ -1495,7 +1208,7 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 			return err
 		}
 
-		ic, err := dc.hc.IdxRange(k, int(txNumUnwindTo)-1, 0, order.Desc, -1, rwTx)
+		ic, err := dt.ht.IdxRange(k, int(txNumUnwindTo)-1, 0, order.Desc, -1, rwTx)
 		if err != nil {
 			return err
 		}
@@ -1508,14 +1221,14 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 		} else {
 			restored.SetTxNum(txNumUnwindTo - 1)
 		}
-		//fmt.Printf("[%s] unwinding %x ->'%x'\n", dc.d.filenameBase, k, v)
+		//fmt.Printf("[%s] unwinding %x ->'%x'\n", dt.d.filenameBase, k, v)
 		if err := restored.addValue(k, nil, v); err != nil {
 			return err
 		}
 		seen[string(k)] = struct{}{}
 	}
 
-	keysCursor, err := dc.keysCursor(rwTx)
+	keysCursor, err := dt.keysCursor(rwTx)
 	if err != nil {
 		return err
 	}
@@ -1569,8 +1282,8 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 
 	logEvery := time.NewTicker(time.Second * 30)
 	defer logEvery.Stop()
-	if _, err := dc.hc.Prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, false, logEvery); err != nil {
-		return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dc.d.filenameBase, txNumUnwindTo, step, err)
+	if _, err := dt.ht.Prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, false, logEvery); err != nil {
+		return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dt.d.filenameBase, txNumUnwindTo, step, err)
 	}
 	return restored.Flush(ctx, rwTx)
 }
@@ -1595,61 +1308,61 @@ var (
 	UseBtree = true // if true, will use btree for all files
 )
 
-func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found bool, err error) {
-	hi, _ := dc.hc.ic.hashKey(filekey)
+func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
+	hi, _ := dt.ht.iit.hashKey(filekey)
 
-	for i := len(dc.files) - 1; i >= 0; i-- {
-		if dc.d.withExistenceIndex {
-			//if dc.files[i].src.existence == nil {
-			//	panic(dc.files[i].src.decompressor.FileName())
+	for i := len(dt.files) - 1; i >= 0; i-- {
+		if dt.d.indexList&withExistence != 0 {
+			//if dt.files[i].src.existence == nil {
+			//	panic(dt.files[i].src.decompressor.FileName())
 			//}
-			if dc.files[i].src.existence != nil {
-				if !dc.files[i].src.existence.ContainsHash(hi) {
-					if traceGetLatest == dc.d.filenameBase {
-						fmt.Printf("GetLatest(%s, %x) -> existence index %s -> false\n", dc.d.filenameBase, filekey, dc.files[i].src.existence.FileName)
+			if dt.files[i].src.existence != nil {
+				if !dt.files[i].src.existence.ContainsHash(hi) {
+					if traceGetLatest == dt.d.filenameBase {
+						fmt.Printf("GetLatest(%s, %x) -> existence index %s -> false\n", dt.d.filenameBase, filekey, dt.files[i].src.existence.FileName)
 					}
 					continue
 				} else {
-					if traceGetLatest == dc.d.filenameBase {
-						fmt.Printf("GetLatest(%s, %x) -> existence index %s -> true\n", dc.d.filenameBase, filekey, dc.files[i].src.existence.FileName)
+					if traceGetLatest == dt.d.filenameBase {
+						fmt.Printf("GetLatest(%s, %x) -> existence index %s -> true\n", dt.d.filenameBase, filekey, dt.files[i].src.existence.FileName)
 					}
 				}
 			} else {
-				if traceGetLatest == dc.d.filenameBase {
-					fmt.Printf("GetLatest(%s, %x) -> existence index is nil %s\n", dc.d.filenameBase, filekey, dc.files[i].src.decompressor.FileName())
+				if traceGetLatest == dt.d.filenameBase {
+					fmt.Printf("GetLatest(%s, %x) -> existence index is nil %s\n", dt.d.filenameBase, filekey, dt.files[i].src.decompressor.FileName())
 				}
 			}
 		}
 
 		//t := time.Now()
-		v, found, err = dc.getFromFile(i, filekey)
+		v, found, err = dt.getFromFile(i, filekey)
 		if err != nil {
-			return nil, false, err
+			return nil, false, 0, 0, err
 		}
 		if !found {
-			if traceGetLatest == dc.d.filenameBase {
-				fmt.Printf("GetLatest(%s, %x) -> not found in file %s\n", dc.d.filenameBase, filekey, dc.files[i].src.decompressor.FileName())
+			if traceGetLatest == dt.d.filenameBase {
+				fmt.Printf("GetLatest(%s, %x) -> not found in file %s\n", dt.d.filenameBase, filekey, dt.files[i].src.decompressor.FileName())
 			}
 			//	LatestStateReadGrindNotFound.ObserveDuration(t)
 			continue
 		}
-		if traceGetLatest == dc.d.filenameBase {
-			fmt.Printf("GetLatest(%s, %x) -> found in file %s\n", dc.d.filenameBase, filekey, dc.files[i].src.decompressor.FileName())
+		if traceGetLatest == dt.d.filenameBase {
+			fmt.Printf("GetLatest(%s, %x) -> found in file %s\n", dt.d.filenameBase, filekey, dt.files[i].src.decompressor.FileName())
 		}
 		//LatestStateReadGrind.ObserveDuration(t)
-		return v, true, nil
+		return v, true, dt.files[i].startTxNum, dt.files[i].endTxNum, nil
 	}
-	if traceGetLatest == dc.d.filenameBase {
-		fmt.Printf("GetLatest(%s, %x) -> not found in %d files\n", dc.d.filenameBase, filekey, len(dc.files))
+	if traceGetLatest == dt.d.filenameBase {
+		fmt.Printf("GetLatest(%s, %x) -> not found in %d files\n", dt.d.filenameBase, filekey, len(dt.files))
 	}
 
-	return nil, false, nil
+	return nil, false, 0, 0, nil
 }
 
 // GetAsOf does not always require usage of roTx. If it is possible to determine
 // historical value based only on static files, roTx will not be used.
-func (dc *DomainContext) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
-	v, hOk, err := dc.hc.GetNoStateWithRecent(key, txNum, roTx)
+func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
+	v, hOk, err := dt.ht.GetNoStateWithRecent(key, txNum, roTx)
 	if err != nil {
 		return nil, err
 	}
@@ -1657,29 +1370,29 @@ func (dc *DomainContext) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, 
 		// if history returned marker of key creation
 		// domain must return nil
 		if len(v) == 0 {
-			if traceGetAsOf == dc.d.filenameBase {
-				fmt.Printf("GetAsOf(%s, %x, %d) -> not found in history\n", dc.d.filenameBase, key, txNum)
+			if traceGetAsOf == dt.d.filenameBase {
+				fmt.Printf("GetAsOf(%s, %x, %d) -> not found in history\n", dt.d.filenameBase, key, txNum)
 			}
 			return nil, nil
 		}
-		if traceGetAsOf == dc.d.filenameBase {
-			fmt.Printf("GetAsOf(%s, %x, %d) -> found in history\n", dc.d.filenameBase, key, txNum)
+		if traceGetAsOf == dt.d.filenameBase {
+			fmt.Printf("GetAsOf(%s, %x, %d) -> found in history\n", dt.d.filenameBase, key, txNum)
 		}
 		return v, nil
 	}
-	v, _, _, err = dc.GetLatest(key, nil, roTx)
+	v, _, _, err = dt.GetLatest(key, nil, roTx)
 	if err != nil {
 		return nil, err
 	}
 	return v, nil
 }
 
-func (dc *DomainContext) Close() {
-	if dc.files == nil { // invariant: it's safe to call Close multiple times
+func (dt *DomainRoTx) Close() {
+	if dt.files == nil { // invariant: it's safe to call Close multiple times
 		return
 	}
-	files := dc.files
-	dc.files = nil
+	files := dt.files
+	dt.files = nil
 	for i := 0; i < len(files); i++ {
 		if files[i].src.frozen {
 			continue
@@ -1690,141 +1403,151 @@ func (dc *DomainContext) Close() {
 			files[i].src.closeFilesAndRemove()
 		}
 	}
-	//for _, r := range dc.readers {
-	//	r.Close()
+	dt.ht.Close()
+}
+
+func (dt *DomainRoTx) statelessGetter(i int) ArchiveGetter {
+	if dt.getters == nil {
+		dt.getters = make([]ArchiveGetter, len(dt.files))
+	}
+	r := dt.getters[i]
+	if r == nil {
+		r = NewArchiveGetter(dt.files[i].src.decompressor.MakeGetter(), dt.d.compression)
+		dt.getters[i] = r
+	}
+	return r
+}
+
+func (dt *DomainRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
+	if dt.idxReaders == nil {
+		dt.idxReaders = make([]*recsplit.IndexReader, len(dt.files))
+	}
+	r := dt.idxReaders[i]
+	if r == nil {
+		r = dt.files[i].src.index.GetReaderFromPool()
+		dt.idxReaders[i] = r
+	}
+	return r
+}
+
+func (dt *DomainRoTx) statelessBtree(i int) *BtIndex {
+	if dt.readers == nil {
+		dt.readers = make([]*BtIndex, len(dt.files))
+	}
+	r := dt.readers[i]
+	if r == nil {
+		r = dt.files[i].src.bindex
+		dt.readers[i] = r
+	}
+	return r
+}
+
+func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
+	if dt.valsC != nil {
+		return dt.valsC, nil
+	}
+	dt.valsC, err = tx.Cursor(dt.d.valsTable)
+	if err != nil {
+		return nil, err
+	}
+	return dt.valsC, nil
+}
+
+func (dt *DomainRoTx) keysCursor(tx kv.Tx) (c kv.CursorDupSort, err error) {
+	if dt.keysC != nil {
+		return dt.keysC, nil
+	}
+	dt.keysC, err = tx.CursorDupSort(dt.d.keysTable)
+	if err != nil {
+		return nil, err
+	}
+	return dt.keysC, nil
+}
+
+func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, bool, error) {
+	keysC, err := dt.keysCursor(roTx)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	var v, foundInvStep []byte
+	_, foundInvStep, err = keysC.SeekExact(key)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	if foundInvStep != nil {
+		foundStep := ^binary.BigEndian.Uint64(foundInvStep)
+		if LastTxNumOfStep(foundStep, dt.d.aggregationStep) >= dt.maxTxNumInDomainFiles(false) {
+			valsC, err := dt.valsCursor(roTx)
+			if err != nil {
+				return nil, foundStep, false, err
+			}
+			_, v, err = valsC.SeekExact(append(append(dt.valBuf[:0], key...), foundInvStep...))
+			if err != nil {
+				return nil, foundStep, false, fmt.Errorf("GetLatest value: %w", err)
+			}
+			return v, foundStep, true, nil
+		}
+	}
+	//if traceGetLatest == dt.d.filenameBase {
+	//	it, err := dt.ht.IdxRange(common.FromHex("0x105083929bF9bb22C26cB1777Ec92661170D4285"), 1390000, -1, order.Asc, -1, roTx) //[from, to)
+	//	if err != nil {
+	//		panic(err)
+	//	}
+	//	l := iter.ToArrU64Must(it)
+	//	fmt.Printf("L: %d\n", l)
+	//	it2, err := dt.ht.IdxRange(common.FromHex("0x105083929bF9bb22C26cB1777Ec92661170D4285"), -1, 1390000, order.Desc, -1, roTx) //[from, to)
+	//	if err != nil {
+	//		panic(err)
+	//	}
+	//	l2 := iter.ToArrU64Must(it2)
+	//	fmt.Printf("K: %d\n", l2)
+	//	panic(1)
+	//
+	//	fmt.Printf("GetLatest(%s, %x) -> not found in db\n", dt.d.filenameBase, key)
 	//}
-	dc.hc.Close()
-}
-
-func (dc *DomainContext) statelessGetter(i int) ArchiveGetter {
-	if dc.getters == nil {
-		dc.getters = make([]ArchiveGetter, len(dc.files))
-	}
-	r := dc.getters[i]
-	if r == nil {
-		r = NewArchiveGetter(dc.files[i].src.decompressor.MakeGetter(), dc.d.compression)
-		dc.getters[i] = r
-	}
-	return r
-}
-
-func (dc *DomainContext) statelessIdxReader(i int) *recsplit.IndexReader {
-	if dc.idxReaders == nil {
-		dc.idxReaders = make([]*recsplit.IndexReader, len(dc.files))
-	}
-	r := dc.idxReaders[i]
-	if r == nil {
-		r = dc.files[i].src.index.GetReaderFromPool()
-		dc.idxReaders[i] = r
-	}
-	return r
-}
-
-func (dc *DomainContext) statelessBtree(i int) *BtIndex {
-	if dc.readers == nil {
-		dc.readers = make([]*BtIndex, len(dc.files))
-	}
-	r := dc.readers[i]
-	if r == nil {
-		r = dc.files[i].src.bindex
-		dc.readers[i] = r
-	}
-	return r
-}
-
-func (dc *DomainContext) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
-	if dc.valsC != nil {
-		return dc.valsC, nil
-	}
-	dc.valsC, err = tx.Cursor(dc.d.valsTable)
-	if err != nil {
-		return nil, err
-	}
-	return dc.valsC, nil
-}
-
-func (dc *DomainContext) keysCursor(tx kv.Tx) (c kv.CursorDupSort, err error) {
-	if dc.keysC != nil {
-		return dc.keysC, nil
-	}
-	dc.keysC, err = tx.CursorDupSort(dc.d.keysTable)
-	if err != nil {
-		return nil, err
-	}
-	return dc.keysC, nil
+	return nil, 0, false, nil
 }
 
 // GetLatest returns value, step in which the value last changed, and bool value which is true if the value
 // is present, and false if it is not present (not set or deleted)
-func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint64, bool, error) {
+func (dt *DomainRoTx) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint64, bool, error) {
 	key := key1
 	if len(key2) > 0 {
-		key = append(append(dc.keyBuf[:0], key1...), key2...)
+		key = append(append(dt.keyBuf[:0], key1...), key2...)
 	}
 
-	keysC, err := dc.keysCursor(roTx)
-	if err != nil {
-		return nil, 0, false, err
-	}
+	var v []byte
+	var foundStep uint64
+	var found bool
+	var err error
 
-	var v, foundInvStep []byte
-	if traceGetLatest == dc.d.filenameBase {
+	if traceGetLatest == dt.d.filenameBase {
 		defer func() {
 			fmt.Printf("GetLatest(%s, '%x' -> '%x') (from db=%t; istep=%x stepInFiles=%d)\n",
-				dc.d.filenameBase, key, v, foundInvStep != nil, foundInvStep, dc.maxTxNumInDomainFiles(false)/dc.d.aggregationStep)
+				dt.d.filenameBase, key, v, found, foundStep, dt.maxTxNumInDomainFiles(false)/dt.d.aggregationStep)
 		}()
 	}
 
-	_, foundInvStep, err = keysC.SeekExact(key) // reads first DupSort value -- biggest available step
+	v, foundStep, found, err = dt.getLatestFromDb(key, roTx)
 	if err != nil {
 		return nil, 0, false, err
 	}
-
-	if foundInvStep != nil {
-		foundStep := ^binary.BigEndian.Uint64(foundInvStep)
-		if LastTxNumOfStep(foundStep, dc.d.aggregationStep) >= dc.maxTxNumInDomainFiles(false) {
-			copy(dc.valKeyBuf[:], key)
-			copy(dc.valKeyBuf[len(key):], foundInvStep)
-
-			valsC, err := dc.valsCursor(roTx)
-			if err != nil {
-				return nil, foundStep, false, err
-			}
-			_, v, err = valsC.SeekExact(dc.valKeyBuf[:len(key)+8])
-			if err != nil {
-				return nil, foundStep, false, fmt.Errorf("GetLatest value: %w", err)
-			}
-			//LatestStateReadDB.ObserveDuration(t)
-			return v, foundStep, true, nil
-		}
-		//if traceGetLatest == dc.d.filenameBase {
-		//	it, err := dc.hc.IdxRange(common.FromHex("0x105083929bF9bb22C26cB1777Ec92661170D4285"), 1390000, -1, order.Asc, -1, roTx) //[from, to)
-		//	if err != nil {
-		//		panic(err)
-		//	}
-		//	l := iter.ToArrU64Must(it)
-		//	fmt.Printf("L: %d\n", l)
-		//	it2, err := dc.hc.IdxRange(common.FromHex("0x105083929bF9bb22C26cB1777Ec92661170D4285"), -1, 1390000, order.Desc, -1, roTx) //[from, to)
-		//	if err != nil {
-		//		panic(err)
-		//	}
-		//	l2 := iter.ToArrU64Must(it2)
-		//	fmt.Printf("K: %d\n", l2)
-		//	panic(1)
-		//
-		//	fmt.Printf("GetLatest(%s, %x) -> not found in db\n", dc.d.filenameBase, key)
-		//}
+	if found {
+		return v, foundStep, true, nil
 	}
-	//LatestStateReadDBNotFound.ObserveDuration(t)
 
-	v, found, err := dc.getLatestFromFiles(key)
+	v, foundInFile, _, endTxNum, err := dt.getFromFiles(key)
 	if err != nil {
 		return nil, 0, false, err
 	}
-	return v, 0, found, nil
+	return v, endTxNum / dt.d.aggregationStep, foundInFile, nil
 }
 
-func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []byte, v []byte) error) error {
+func (dt *DomainRoTx) GetLatestFromFiles(key []byte) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
+	return dt.getFromFiles(key)
+}
+
+func (dt *DomainRoTx) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []byte, v []byte) error) error {
 	// Implementation:
 	//     File endTxNum  = last txNum of file step
 	//     DB endTxNum    = first txNum of step in db
@@ -1839,7 +1562,7 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []by
 	var k, v []byte
 	var err error
 
-	keysCursor, err := roTx.CursorDupSort(dc.d.keysTable)
+	keysCursor, err := roTx.CursorDupSort(dt.d.keysTable)
 	if err != nil {
 		return err
 	}
@@ -1849,45 +1572,45 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []by
 	}
 	if k != nil && bytes.HasPrefix(k, prefix) {
 		step := ^binary.BigEndian.Uint64(v)
-		endTxNum := step * dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+		endTxNum := step * dt.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
 
 		keySuffix := make([]byte, len(k)+8)
 		copy(keySuffix, k)
 		copy(keySuffix[len(k):], v)
-		if v, err = roTx.GetOne(dc.d.valsTable, keySuffix); err != nil {
+		if v, err = roTx.GetOne(dt.d.valsTable, keySuffix); err != nil {
 			return err
 		}
 		heap.Push(&cp, &CursorItem{t: DB_CURSOR, key: k, val: v, c: keysCursor, endTxNum: endTxNum, reverse: true})
 	}
 
-	for i, item := range dc.files {
+	for i, item := range dt.files {
 		if UseBtree || UseBpsTree {
-			cursor, err := dc.statelessBtree(i).Seek(dc.statelessGetter(i), prefix)
+			cursor, err := dt.statelessBtree(i).Seek(dt.statelessGetter(i), prefix)
 			if err != nil {
 				return err
 			}
 			if cursor == nil {
 				continue
 			}
-			dc.d.stats.FilesQueries.Add(1)
+			dt.d.stats.FilesQueries.Add(1)
 			key := cursor.Key()
 			if key != nil && bytes.HasPrefix(key, prefix) {
 				val := cursor.Value()
 				txNum := item.endTxNum - 1 // !important: .kv files have semantic [from, t)
-				heap.Push(&cp, &CursorItem{t: FILE_CURSOR, dg: dc.statelessGetter(i), key: key, val: val, btCursor: cursor, endTxNum: txNum, reverse: true})
+				heap.Push(&cp, &CursorItem{t: FILE_CURSOR, dg: dt.statelessGetter(i), key: key, val: val, btCursor: cursor, endTxNum: txNum, reverse: true})
 			}
 		} else {
-			offset, ok := dc.statelessIdxReader(i).Lookup(prefix)
+			offset, ok := dt.statelessIdxReader(i).Lookup(prefix)
 			if !ok {
 				continue
 			}
-			g := dc.statelessGetter(i)
+			g := dt.statelessGetter(i)
 			g.Reset(offset)
 			if !g.HasNext() {
 				continue
 			}
 			key, _ := g.Next(nil)
-			dc.d.stats.FilesQueries.Add(1)
+			dt.d.stats.FilesQueries.Add(1)
 			if key != nil && bytes.HasPrefix(key, prefix) {
 				val, lofft := g.Next(nil)
 				txNum := item.endTxNum - 1 // !important: .kv files have semantic [from, t)
@@ -1941,13 +1664,13 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []by
 				if k != nil && bytes.HasPrefix(k, prefix) {
 					ci1.key = k
 					step := ^binary.BigEndian.Uint64(v)
-					endTxNum := step * dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+					endTxNum := step * dt.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
 					ci1.endTxNum = endTxNum
 
 					keySuffix := make([]byte, len(k)+8)
 					copy(keySuffix, k)
 					copy(keySuffix[len(k):], v)
-					if v, err = roTx.GetOne(dc.d.valsTable, keySuffix); err != nil {
+					if v, err = roTx.GetOne(dt.d.valsTable, keySuffix); err != nil {
 						return err
 					}
 					ci1.val = v
@@ -1964,7 +1687,7 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []by
 	return nil
 }
 
-func (dc *DomainContext) DomainRange(tx kv.Tx, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error) {
+func (dt *DomainRoTx) DomainRange(tx kv.Tx, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error) {
 	if !asc {
 		panic("implement me")
 	}
@@ -1976,55 +1699,55 @@ func (dc *DomainContext) DomainRange(tx kv.Tx, fromKey, toKey []byte, ts uint64,
 	//if err != nil {
 	//	return nil, err
 	//}
-	histStateIt, err := dc.hc.WalkAsOf(ts, fromKey, toKey, tx, limit)
+	histStateIt, err := dt.ht.WalkAsOf(ts, fromKey, toKey, tx, limit)
 	if err != nil {
 		return nil, err
 	}
-	lastestStateIt, err := dc.DomainRangeLatest(tx, fromKey, toKey, limit)
+	lastestStateIt, err := dt.DomainRangeLatest(tx, fromKey, toKey, limit)
 	if err != nil {
 		return nil, err
 	}
 	return iter.UnionKV(histStateIt, lastestStateIt, limit), nil
 }
 
-func (dc *DomainContext) IteratePrefix2(roTx kv.Tx, fromKey, toKey []byte, limit int) (iter.KV, error) {
-	return dc.DomainRangeLatest(roTx, fromKey, toKey, limit)
+func (dt *DomainRoTx) IteratePrefix2(roTx kv.Tx, fromKey, toKey []byte, limit int) (iter.KV, error) {
+	return dt.DomainRangeLatest(roTx, fromKey, toKey, limit)
 }
 
-func (dc *DomainContext) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit int) (iter.KV, error) {
-	fit := &DomainLatestIterFile{from: fromKey, to: toKey, limit: limit, dc: dc,
+func (dt *DomainRoTx) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit int) (iter.KV, error) {
+	fit := &DomainLatestIterFile{from: fromKey, to: toKey, limit: limit, dc: dt,
 		roTx:         roTx,
-		idxKeysTable: dc.d.keysTable,
+		idxKeysTable: dt.d.keysTable,
 		h:            &CursorHeap{},
 	}
-	if err := fit.init(dc); err != nil {
+	if err := fit.init(dt); err != nil {
 		return nil, err
 	}
 	return fit, nil
 }
 
 // CanPruneUntil returns true if domain OR history tables can be pruned until txNum
-func (dc *DomainContext) CanPruneUntil(tx kv.Tx, untilTx uint64) bool {
-	canDomain, _ := dc.canPruneDomainTables(tx, untilTx)
-	canHistory, _ := dc.hc.canPruneUntil(tx, untilTx)
+func (dt *DomainRoTx) CanPruneUntil(tx kv.Tx, untilTx uint64) bool {
+	canDomain, _ := dt.canPruneDomainTables(tx, untilTx)
+	canHistory, _ := dt.ht.canPruneUntil(tx, untilTx)
 	return canHistory || canDomain
 }
 
 // checks if there is anything to prune in DOMAIN tables.
 // everything that aggregated is prunable.
 // history.CanPrune should be called separately because it responsible for different tables
-func (dc *DomainContext) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, maxStepToPrune uint64) {
-	if m := dc.maxTxNumInDomainFiles(false); m > 0 {
-		maxStepToPrune = (m - 1) / dc.d.aggregationStep
+func (dt *DomainRoTx) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, maxStepToPrune uint64) {
+	if m := dt.maxTxNumInDomainFiles(false); m > 0 {
+		maxStepToPrune = (m - 1) / dt.d.aggregationStep
 	}
 	var untilStep uint64
 	if untilTx > 0 {
-		untilStep = (untilTx - 1) / dc.d.aggregationStep
+		untilStep = (untilTx - 1) / dt.d.aggregationStep
 	}
-	sm := dc.smallestStepForPruning(tx)
+	sm := dt.smallestStepForPruning(tx)
 
 	delta := float64(max(maxStepToPrune, sm) - min(maxStepToPrune, sm)) // maxStep could be 0
-	switch dc.d.filenameBase {
+	switch dt.d.filenameBase {
 	case "account":
 		mxPrunableDAcc.Set(delta)
 	case "storage":
@@ -2034,20 +1757,20 @@ func (dc *DomainContext) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can boo
 	case "commitment":
 		mxPrunableDComm.Set(delta)
 	}
-	//fmt.Printf("smallestToPrune[%s] minInDB %d inFiles %d until %d\n", dc.d.filenameBase, sm, maxStepToPrune, untilStep)
+	//fmt.Printf("smallestToPrune[%s] minInDB %d inFiles %d until %d\n", dt.d.filenameBase, sm, maxStepToPrune, untilStep)
 	return sm <= min(maxStepToPrune, untilStep), maxStepToPrune
 }
 
-func (dc *DomainContext) smallestStepForPruning(tx kv.Tx) uint64 {
-	pkr, err := GetExecV3PruneProgress(tx, dc.d.keysTable)
+func (dt *DomainRoTx) smallestStepForPruning(tx kv.Tx) uint64 {
+	pkr, err := GetExecV3PruneProgress(tx, dt.d.keysTable)
 	if err != nil {
-		dc.d.logger.Warn("smallestStepForPruning: failed to get progress", "domain", dc.d.filenameBase, "error", err)
+		dt.d.logger.Warn("smallestStepForPruning: failed to get progress", "domain", dt.d.filenameBase, "error", err)
 		return math.MaxUint64
 	}
 
-	c, err := tx.CursorDupSort(dc.d.keysTable)
+	c, err := tx.CursorDupSort(dt.d.keysTable)
 	if err != nil {
-		dc.d.logger.Warn("smallestStepForPruning: failed to open cursor", "domain", dc.d.filenameBase, "error", err)
+		dt.d.logger.Warn("smallestStepForPruning: failed to open cursor", "domain", dt.d.filenameBase, "error", err)
 		return math.MaxUint64
 	}
 	defer c.Close()
@@ -2070,7 +1793,7 @@ func (dc *DomainContext) smallestStepForPruning(tx kv.Tx) uint64 {
 		return math.MaxUint64
 	}
 	if err != nil {
-		dc.d.logger.Warn("smallestStepForPruning: failed to seek", "domain", dc.d.filenameBase, "error", err)
+		dt.d.logger.Warn("smallestStepForPruning: failed to seek", "domain", dt.d.filenameBase, "error", err)
 		return math.MaxUint64
 	}
 
@@ -2123,15 +1846,15 @@ func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {
 
 // history prunes keys in range [txFrom; txTo), domain prunes any records with rStep <= step.
 // In case of context cancellation pruning stops and returns error, but simply could be started again straight away.
-func (dc *DomainContext) Warmup(ctx context.Context) (cleanup func()) {
+func (dt *DomainRoTx) Warmup(ctx context.Context) (cleanup func()) {
 	ctx, cancel := context.WithCancel(ctx)
 	wg := &errgroup.Group{}
 	wg.Go(func() error {
-		backup.WarmupTable(ctx, dc.d.db, dc.d.keysTable, log.LvlDebug, 4)
+		backup.WarmupTable(ctx, dt.d.db, dt.d.keysTable, log.LvlDebug, 4)
 		return nil
 	})
 	wg.Go(func() error {
-		backup.WarmupTable(ctx, dc.d.db, dc.d.valsTable, log.LvlDebug, 4)
+		backup.WarmupTable(ctx, dt.d.db, dt.d.valsTable, log.LvlDebug, 4)
 		return nil
 	})
 	return func() {
@@ -2140,16 +1863,16 @@ func (dc *DomainContext) Warmup(ctx context.Context) (cleanup func()) {
 	}
 }
 
-func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txTo, limit uint64, withWarmup bool, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
+func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txTo, limit uint64, withWarmup bool, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
 	if limit == 0 {
 		limit = math.MaxUint64
 	}
 
 	stat = &DomainPruneStat{MinStep: math.MaxUint64}
-	if stat.History, err = dc.hc.Prune(ctx, rwTx, txFrom, txTo, limit, false, withWarmup, logEvery); err != nil {
+	if stat.History, err = dt.ht.Prune(ctx, rwTx, txFrom, txTo, limit, false, withWarmup, logEvery); err != nil {
 		return nil, fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
 	}
-	canPrune, maxPrunableStep := dc.canPruneDomainTables(rwTx, txTo)
+	canPrune, maxPrunableStep := dt.canPruneDomainTables(rwTx, txTo)
 	if !canPrune {
 		return stat, nil
 	}
@@ -2162,32 +1885,32 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 	defer mxPruneInProgress.Dec()
 
 	if withWarmup {
-		cleanup := dc.Warmup(ctx)
+		cleanup := dt.Warmup(ctx)
 		defer cleanup()
 	}
 
-	keysCursorForDeletes, err := rwTx.RwCursorDupSort(dc.d.keysTable)
+	keysCursorForDeletes, err := rwTx.RwCursorDupSort(dt.d.keysTable)
 	if err != nil {
-		return stat, fmt.Errorf("create %s domain cursor: %w", dc.d.filenameBase, err)
+		return stat, fmt.Errorf("create %s domain cursor: %w", dt.d.filenameBase, err)
 	}
 	defer keysCursorForDeletes.Close()
-	keysCursor, err := rwTx.RwCursorDupSort(dc.d.keysTable)
+	keysCursor, err := rwTx.RwCursorDupSort(dt.d.keysTable)
 	if err != nil {
-		return stat, fmt.Errorf("create %s domain cursor: %w", dc.d.filenameBase, err)
+		return stat, fmt.Errorf("create %s domain cursor: %w", dt.d.filenameBase, err)
 	}
 	defer keysCursor.Close()
 
-	//fmt.Printf("prune domain %s from %d to %d step %d limit %d\n", dc.d.filenameBase, txFrom, txTo, step, limit)
+	//fmt.Printf("prune domain %s from %d to %d step %d limit %d\n", dt.d.filenameBase, txFrom, txTo, step, limit)
 	//defer func() {
-	//	dc.d.logger.Info("[snapshots] prune domain",
-	//		"name", dc.d.filenameBase,
+	//	dt.d.logger.Info("[snapshots] prune domain",
+	//		"name", dt.d.filenameBase,
 	//		"pruned keys", stat.Values,
 	//		"from", txFrom, "to", txTo, "step", step,
 	//		"keys until limit", limit)
 	//}()
-	prunedKey, err := GetExecV3PruneProgress(rwTx, dc.d.keysTable)
+	prunedKey, err := GetExecV3PruneProgress(rwTx, dt.d.keysTable)
 	if err != nil {
-		dc.d.logger.Error("get domain pruning progress", "name", dc.d.filenameBase, "error", err)
+		dt.d.logger.Error("get domain pruning progress", "name", dt.d.filenameBase, "error", err)
 	}
 
 	var k, v []byte
@@ -2208,7 +1931,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 	seek := make([]byte, 0, 256)
 	for k != nil {
 		if err != nil {
-			return stat, fmt.Errorf("iterate over %s domain keys: %w", dc.d.filenameBase, err)
+			return stat, fmt.Errorf("iterate over %s domain keys: %w", dt.d.filenameBase, err)
 		}
 
 		is := ^binary.BigEndian.Uint64(v)
@@ -2217,15 +1940,15 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 			continue
 		}
 		if limit == 0 {
-			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, k); err != nil {
-				return stat, fmt.Errorf("save domain pruning progress: %s, %w", dc.d.filenameBase, err)
+			if err := SaveExecV3PruneProgress(rwTx, dt.d.keysTable, k); err != nil {
+				return stat, fmt.Errorf("save domain pruning progress: %s, %w", dt.d.filenameBase, err)
 			}
 			return stat, nil
 		}
 		limit--
 
 		seek = append(append(seek[:0], k...), v...)
-		err = rwTx.Delete(dc.d.valsTable, seek)
+		err = rwTx.Delete(dt.d.valsTable, seek)
 		if err != nil {
 			return stat, fmt.Errorf("prune domain value: %w", err)
 		}
@@ -2249,21 +1972,21 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 			// consider ctx exiting as incorrect outcome, error is returned
 			return stat, ctx.Err()
 		case <-logEvery.C:
-			dc.d.logger.Info("[snapshots] prune domain", "name", dc.d.filenameBase,
+			dt.d.logger.Info("[snapshots] prune domain", "name", dt.d.filenameBase,
 				"pruned keys", stat.Values,
-				"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(dc.d.aggregationStep), float64(txTo)/float64(dc.d.aggregationStep)))
+				"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(dt.d.aggregationStep), float64(txTo)/float64(dt.d.aggregationStep)))
 		default:
 		}
 	}
-	if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, nil); err != nil {
-		return stat, fmt.Errorf("save domain pruning progress: %s, %w", dc.d.filenameBase, err)
+	if err := SaveExecV3PruneProgress(rwTx, dt.d.keysTable, nil); err != nil {
+		return stat, fmt.Errorf("save domain pruning progress: %s, %w", dt.d.filenameBase, err)
 	}
 	mxPruneTookDomain.ObserveDuration(st)
 	return stat, nil
 }
 
 type DomainLatestIterFile struct {
-	dc *DomainContext
+	dc *DomainRoTx
 
 	roTx         kv.Tx
 	idxKeysTable string
@@ -2281,7 +2004,7 @@ type DomainLatestIterFile struct {
 
 func (hi *DomainLatestIterFile) Close() {
 }
-func (hi *DomainLatestIterFile) init(dc *DomainContext) error {
+func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 	// Implementation:
 	//     File endTxNum  = last txNum of file step
 	//     DB endTxNum    = first txNum of step in db
@@ -2422,13 +2145,13 @@ func (d *Domain) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 	return from, to
 }
 
-func (dc *DomainContext) Files() (res []string) {
-	for _, item := range dc.files {
+func (dt *DomainRoTx) Files() (res []string) {
+	for _, item := range dt.files {
 		if item.src.decompressor != nil {
 			res = append(res, item.src.decompressor.FileName())
 		}
 	}
-	return append(res, dc.hc.Files()...)
+	return append(res, dt.ht.Files()...)
 }
 
 type SelectedStaticFiles struct {
@@ -2482,33 +2205,32 @@ func (sf SelectedStaticFiles) Close() {
 	}
 }
 
-type MergedFiles struct {
-	d     [kv.DomainLen]*filesItem
-	dHist [kv.DomainLen]*filesItem
-	dIdx  [kv.DomainLen]*filesItem
+type DomainStats struct {
+	MergesCount          uint64
+	LastCollationTook    time.Duration
+	LastPruneTook        time.Duration
+	LastPruneHistTook    time.Duration
+	LastFileBuildingTook time.Duration
+	LastCollationSize    uint64
+	LastPruneSize        uint64
+
+	FilesQueries *atomic.Uint64
+	TotalQueries *atomic.Uint64
+	EfSearchTime time.Duration
+	DataSize     uint64
+	IndexSize    uint64
+	FilesCount   uint64
 }
 
-func (mf MergedFiles) FillV3(m *MergedFilesV3) MergedFiles {
-	for id := range m.d {
-		mf.d[id], mf.dHist[id], mf.dIdx[id] = m.d[id], m.dHist[id], m.dIdx[id]
+func (ds *DomainStats) Accumulate(other DomainStats) {
+	if other.FilesQueries != nil {
+		ds.FilesQueries.Add(other.FilesQueries.Load())
 	}
-	return mf
-}
-
-func (mf MergedFiles) Close() {
-	for id := range mf.d {
-		for _, item := range []*filesItem{mf.d[id], mf.dHist[id], mf.dIdx[id]} {
-			if item != nil {
-				if item.decompressor != nil {
-					item.decompressor.Close()
-				}
-				if item.decompressor != nil {
-					item.index.Close()
-				}
-				if item.bindex != nil {
-					item.bindex.Close()
-				}
-			}
-		}
+	if other.TotalQueries != nil {
+		ds.TotalQueries.Add(other.TotalQueries.Load())
 	}
+	ds.EfSearchTime += other.EfSearchTime
+	ds.IndexSize += other.IndexSize
+	ds.DataSize += other.DataSize
+	ds.FilesCount += other.FilesCount
 }

@@ -135,9 +135,7 @@ COMMANDS += evm
 COMMANDS += sentinel
 COMMANDS += caplin
 COMMANDS += snapshots
-
-
-
+COMMANDS += diag
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd
@@ -164,17 +162,11 @@ test-erigon-ext:
 
 ## test:                              run unit tests with a 100s timeout
 test: test-erigon-lib
-	$(GOTEST) --timeout 10m
-
-test3: test-erigon-lib
-	$(GOTEST) --timeout 10m -tags $(BUILD_TAGS),e4
+	$(GOTEST) --timeout 10m -coverprofile=coverage.out
 
 ## test-integration:                  run integration tests with a 30m timeout
 test-integration: test-erigon-lib
 	$(GOTEST) --timeout 240m -tags $(BUILD_TAGS),integration
-
-test3-integration: test-erigon-lib
-	$(GOTEST) --timeout 240m -tags $(BUILD_TAGS),integration,e4
 
 ## lint-deps:                         install lint dependencies
 lint-deps:
@@ -203,6 +195,7 @@ clean:
 devtools:
 	# Notice! If you adding new binary - add it also to cmd/hack/binary-deps/main.go file
 	$(GOBUILD) -o $(GOBIN)/gencodec github.com/fjl/gencodec
+	$(GOBUILD) -o $(GOBIN)/mockgen go.uber.org/mock/mockgen
 	$(GOBUILD) -o $(GOBIN)/abigen ./cmd/abigen
 	$(GOBUILD) -o $(GOBIN)/codecgen github.com/ugorji/go/codec/codecgen
 	PATH=$(GOBIN):$(PATH) go generate ./common
@@ -314,7 +307,7 @@ user_macos:
 ## coverage:                          run code coverage report and output total coverage %
 .PHONY: coverage
 coverage:
-	@go test -coverprofile=coverage.out ./... > /dev/null 2>&1 && go tool cover -func coverage.out | grep total | awk '{print substr($$3, 1, length($$3)-1)}'
+	@go test -coverprofile=coverage-total.out ./... > /dev/null 2>&1 && go tool cover -func coverage-total.out | grep total | awk '{print substr($$3, 1, length($$3)-1)}'
 
 ## hive:                              run hive test suite locally using docker e.g. OUTPUT_DIR=~/results/hive SIM=ethereum/engine make hive
 .PHONY: hive

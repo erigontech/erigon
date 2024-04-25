@@ -27,5 +27,6 @@ import (
 	_ "github.com/ledgerwatch/interfaces/types"
 	_ "github.com/ledgerwatch/interfaces/web3"
 	_ "github.com/matryer/moq"
+	_ "go.uber.org/mock/mockgen/model"
 	_ "google.golang.org/grpc/cmd/protoc-gen-go-grpc"
 )

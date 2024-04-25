@@ -13,19 +13,18 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/common/assert"
-
-	"github.com/ledgerwatch/log/v3"
-
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // KvList sort.Interface to sort write list by keys
@@ -55,7 +54,7 @@ func (l *KvList) Swap(i, j int) {
 type SharedDomains struct {
 	noFlush int
 
-	aggCtx *AggregatorV3Context
+	aggCtx *AggregatorRoTx
 	sdCtx  *SharedDomainsCommitmentContext
 	roTx   kv.Tx
 	logger log.Logger
@@ -84,10 +83,9 @@ type HasAggCtx interface {
 }
 
 func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
-
-	var ac *AggregatorV3Context
+	var ac *AggregatorRoTx
 	if casted, ok := tx.(HasAggCtx); ok {
-		ac = casted.AggCtx().(*AggregatorV3Context)
+		ac = casted.AggCtx().(*AggregatorRoTx)
 	} else {
 		return nil, fmt.Errorf("type %T need AggCtx method", tx)
 	}
@@ -190,7 +188,7 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Tx, bloc
 	}
 
 	sd.sdCtx.Reset()
-	return sd.ComputeCommitment(ctx, true, blockNum, "")
+	return sd.ComputeCommitment(ctx, true, blockNum, "rebuild commit")
 }
 
 // SeekCommitment lookups latest available commitment and sets it as current
@@ -330,13 +328,82 @@ func (sd *SharedDomains) SizeEstimate() uint64 {
 
 func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error) {
 	if v, ok := sd.Get(kv.CommitmentDomain, prefix); ok {
+		// sd cache values as is (without transformation) so safe to return
 		return v, 0, nil
 	}
-	v, step, _, err := sd.aggCtx.GetLatest(kv.CommitmentDomain, prefix, nil, sd.roTx)
+	v, step, found, err := sd.aggCtx.d[kv.CommitmentDomain].getLatestFromDb(prefix, sd.roTx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
 	}
-	return v, step, nil
+	if found {
+		// db store values as is (without transformation) so safe to return
+		return v, step, nil
+	}
+
+	// GetfromFiles doesn't provide same semantics as getLatestFromDB - it returns start/end tx
+	// of file where the value is stored (not exact step when kv has been set)
+	v, _, startTx, endTx, err := sd.aggCtx.d[kv.CommitmentDomain].getFromFiles(prefix)
+	if err != nil {
+		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
+	}
+
+	if !sd.aggCtx.a.commitmentValuesTransform || bytes.Equal(prefix, keyCommitmentState) {
+		return v, endTx, nil
+	}
+
+	// replace shortened keys in the branch with full keys to allow HPH work seamlessly
+	rv, err := sd.replaceShortenedKeysInBranch(prefix, commitment.BranchData(v), startTx, endTx)
+	if err != nil {
+		return nil, 0, err
+	}
+	return rv, endTx / sd.aggCtx.a.StepSize(), nil
+}
+
+// replaceShortenedKeysInBranch replaces shortened keys in the branch with full keys
+func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch commitment.BranchData, fStartTxNum uint64, fEndTxNum uint64) (commitment.BranchData, error) {
+	if !sd.aggCtx.d[kv.CommitmentDomain].d.replaceKeysInValues && sd.aggCtx.a.commitmentValuesTransform {
+		panic("domain.replaceKeysInValues is disabled, but agg.commitmentValuesTransform is enabled")
+	}
+
+	if !sd.aggCtx.a.commitmentValuesTransform ||
+		len(branch) == 0 ||
+		sd.aggCtx.minimaxTxNumInDomainFiles(false) == 0 ||
+		bytes.Equal(prefix, keyCommitmentState) {
+
+		return branch, nil // do not transform, return as is
+	}
+
+	return branch.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+		if isStorage {
+			if len(key) == length.Addr+length.Hash {
+				return nil, nil // save storage key as is
+			}
+			// Optimised key referencing a state file record (file number and offset within the file)
+			storagePlainKey, found := sd.aggCtx.d[kv.StorageDomain].lookupByShortenedKey(key, fStartTxNum, fEndTxNum)
+			if !found {
+				s0, s1 := fStartTxNum/sd.aggCtx.a.StepSize(), fEndTxNum/sd.aggCtx.a.StepSize()
+				oft := decodeShorterKey(key)
+				sd.logger.Crit("replace back lost storage full key", "shortened", fmt.Sprintf("%x", key),
+					"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, oft))
+				return nil, fmt.Errorf("replace back lost storage full key: %x", key)
+			}
+			return storagePlainKey, nil
+		}
+
+		if len(key) == length.Addr {
+			return nil, nil // save account key as is
+		}
+
+		apkBuf, found := sd.aggCtx.d[kv.AccountsDomain].lookupByShortenedKey(key, fStartTxNum, fEndTxNum)
+		if !found {
+			oft := decodeShorterKey(key)
+			s0, s1 := fStartTxNum/sd.aggCtx.a.StepSize(), fEndTxNum/sd.aggCtx.a.StepSize()
+			sd.logger.Crit("replace back lost account full key", "shortened", fmt.Sprintf("%x", key),
+				"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, oft))
+			return nil, fmt.Errorf("replace back lost account full key: %x", key)
+		}
+		return apkBuf, nil
+	})
 }
 
 func (sd *SharedDomains) LatestCode(addr []byte) ([]byte, uint64, error) {
@@ -897,6 +964,7 @@ type SharedDomainsCommitmentContext struct {
 	discard      bool
 	updates      *UpdateTree
 	mode         CommitmentMode
+	branchCache  map[string]cachedBranch
 	patriciaTrie commitment.Trie
 	justRestored atomic.Bool
 }
@@ -908,23 +976,44 @@ func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode CommitmentMode, t
 		updates:      NewUpdateTree(mode),
 		discard:      dbg.DiscardCommitment(),
 		patriciaTrie: commitment.InitializeTrie(trieVariant),
+		branchCache:  make(map[string]cachedBranch),
 	}
 
 	ctx.patriciaTrie.ResetContext(ctx)
 	return ctx
 }
 
+type cachedBranch struct {
+	data []byte
+	step uint64
+}
+
+// Cache should ResetBranchCache after each commitment computation
+func (sdc *SharedDomainsCommitmentContext) ResetBranchCache() {
+	sdc.branchCache = make(map[string]cachedBranch)
+}
+
 func (sdc *SharedDomainsCommitmentContext) GetBranch(pref []byte) ([]byte, uint64, error) {
+	cached, ok := sdc.branchCache[string(pref)]
+	if ok {
+		// cached value is already transformed/clean to read.
+		// Cache should ResetBranchCache after each commitment computation
+		return cached.data, cached.step, nil
+	}
+
 	v, step, err := sdc.sd.LatestCommitment(pref)
 	if err != nil {
-		return nil, step, fmt.Errorf("GetBranch failed: %w", err)
+		return nil, 0, fmt.Errorf("GetBranch failed: %w", err)
 	}
 	if sdc.sd.trace {
 		fmt.Printf("[SDC] GetBranch: %x: %x\n", pref, v)
 	}
 	if len(v) == 0 {
-		return nil, step, nil
+		return nil, 0, nil
 	}
+	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update, if any, so
+	// cache branch until ResetBranchCache called
+	sdc.branchCache[string(pref)] = cachedBranch{data: v, step: step}
 	return v, step, nil
 }
 
@@ -932,6 +1021,7 @@ func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte,
 	if sdc.sd.trace {
 		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
 	}
+	sdc.branchCache[string(prefix)] = cachedBranch{data: data, step: prevStep}
 	return sdc.sd.updateCommitmentData(prefix, data, prevData, prevStep)
 }
 
@@ -1025,6 +1115,7 @@ func (sdc *SharedDomainsCommitmentContext) TouchCode(c *commitmentItem, val []by
 
 // Evaluates commitment for processed state.
 func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctext context.Context, saveState bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
+	defer sdc.ResetBranchCache()
 	if dbg.DiscardCommitment() {
 		sdc.updates.List(true)
 		return nil, nil
@@ -1094,7 +1185,7 @@ func (sdc *SharedDomainsCommitmentContext) storeCommitmentState(blockNum uint64,
 	// We do skip only full matches
 	if bytes.Equal(prevState, encodedState) {
 		//fmt.Printf("[commitment] skip store txn %d block %d (prev b=%d t=%d) rh %x\n",
-		//	binary.BigEndian.Uint64(prevState[8:16]), binary.BigEndian.Uint64(prevState[:8]), dc.hc.ic.txNum, blockNum, rh)
+		//	binary.BigEndian.Uint64(prevState[8:16]), binary.BigEndian.Uint64(prevState[:8]), dc.ht.iit.txNum, blockNum, rh)
 		return nil
 	}
 	if sdc.sd.trace {
@@ -1138,7 +1229,7 @@ func _decodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
 
 // LatestCommitmentState [sinceTx, untilTx] searches for last encoded state for CommitmentContext.
 // Found value does not become current state.
-func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(tx kv.Tx, cd *DomainContext, sinceTx, untilTx uint64) (blockNum, txNum uint64, state []byte, err error) {
+func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(tx kv.Tx, cd *DomainRoTx, sinceTx, untilTx uint64) (blockNum, txNum uint64, state []byte, err error) {
 	if dbg.DiscardCommitment() {
 		return 0, 0, nil, nil
 	}
@@ -1148,7 +1239,7 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(tx kv.Tx, cd *D
 
 	// Domain storing only 1 latest commitment (for each step). Erigon can unwind behind this - it means we must look into History (instead of Domain)
 	// IdxRange: looking into DB and Files (.ef). Using `order.Desc` to find latest txNum with commitment
-	it, err := cd.hc.IdxRange(keyCommitmentState, int(untilTx), int(sinceTx)-1, order.Desc, -1, tx) //[from, to)
+	it, err := cd.ht.IdxRange(keyCommitmentState, int(untilTx), int(sinceTx)-1, order.Desc, -1, tx) //[from, to)
 	if err != nil {
 		return 0, 0, nil, fmt.Errorf("IdxRange: %w", err)
 	}
@@ -1196,7 +1287,7 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(tx kv.Tx, cd *D
 
 // SeekCommitment [sinceTx, untilTx] searches for last encoded state from DomainCommitted
 // and if state found, sets it up to current domain
-func (sdc *SharedDomainsCommitmentContext) SeekCommitment(tx kv.Tx, cd *DomainContext, sinceTx, untilTx uint64) (blockNum, txNum uint64, ok bool, err error) {
+func (sdc *SharedDomainsCommitmentContext) SeekCommitment(tx kv.Tx, cd *DomainRoTx, sinceTx, untilTx uint64) (blockNum, txNum uint64, ok bool, err error) {
 	_, _, state, err := sdc.LatestCommitmentState(tx, cd, sinceTx, untilTx)
 	if err != nil {
 		return 0, 0, false, err

@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"sync/atomic"
 
+	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/turbo/services"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -29,7 +29,7 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 		return nil, err
 	}
 	defer domains.Close()
-	ac := domains.AggCtx().(*state.AggregatorV3Context)
+	ac := domains.AggCtx().(*state.AggregatorRoTx)
 
 	// has to set this value because it will be used during domain.Commit() call.
 	// If we do not, txNum of block beginning will be used, which will cause invalid txNum on restart following commitment rebuilding
@@ -189,8 +189,7 @@ func RebuildPatriciaTrieBasedOnFiles(rwTx kv.RwTx, cfg TrieCfg, ctx context.Cont
 	}
 
 	var foundHash bool
-	agg := rwTx.(*temporal.Tx).Agg()
-	toTxNum := agg.EndTxNumNoCommitment()
+	toTxNum := rwTx.(*temporal.Tx).AggCtx().(*state.AggregatorRoTx).EndTxNumNoCommitment()
 	ok, blockNum, err := rawdbv3.TxNums.FindBlockNum(rwTx, toTxNum)
 	if err != nil {
 		return libcommon.Hash{}, err

@@ -27,6 +27,7 @@ import (
 	"strings"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -45,7 +46,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/trie"
@@ -194,7 +194,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	readBlockNr := block.NumberU64()
 	writeBlockNr := readBlockNr + 1
 
-	_, err = MakePreState(&chain.Rules{}, tx, t.json.Pre, readBlockNr, ethconfig.EnableHistoryV4InTest)
+	_, err = MakePreState(&chain.Rules{}, tx, t.json.Pre, readBlockNr, config3.EnableHistoryV4InTest)
 	if err != nil {
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
@@ -204,7 +204,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	var domains *state2.SharedDomains
 	var txc wrap.TxContainer
 	txc.Tx = tx
-	if ethconfig.EnableHistoryV4InTest {
+	if config3.EnableHistoryV4InTest {
 		domains, err = state2.NewSharedDomains(tx, log.New())
 		if err != nil {
 			return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
@@ -212,8 +212,8 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 		defer domains.Close()
 		txc.Doms = domains
 	}
-	r = rpchelper.NewLatestStateReader(tx, ethconfig.EnableHistoryV4InTest)
-	w = rpchelper.NewLatestStateWriter(txc, writeBlockNr, ethconfig.EnableHistoryV4InTest)
+	r = rpchelper.NewLatestStateReader(tx, config3.EnableHistoryV4InTest)
+	w = rpchelper.NewLatestStateWriter(txc, writeBlockNr, config3.EnableHistoryV4InTest)
 	statedb := state.New(r)
 
 	var baseFee *big.Int
@@ -271,7 +271,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 		return nil, libcommon.Hash{}, err
 	}
 
-	if ethconfig.EnableHistoryV4InTest {
+	if config3.EnableHistoryV4InTest {
 		var root libcommon.Hash
 		rootBytes, err := domains.ComputeCommitment(context2.Background(), false, header.Number.Uint64(), "")
 		if err != nil {
@@ -358,7 +358,7 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, b
 	var domains *state2.SharedDomains
 	var txc wrap.TxContainer
 	txc.Tx = tx
-	if ethconfig.EnableHistoryV4InTest {
+	if config3.EnableHistoryV4InTest {
 		var err error
 		domains, err = state2.NewSharedDomains(tx, log.New())
 		if err != nil {

@@ -9,11 +9,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/backup"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -50,7 +50,7 @@ func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string, lo
 	return nil
 }
 
-func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.AggregatorV3, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, cc chain.Config, logger log.Logger) error {
+func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, cc chain.Config, logger log.Logger) error {
 	// keep Genesis
 	if err := rawdb.TruncateBlocks(context.Background(), tx, 1); err != nil {
 		return err
@@ -158,8 +158,8 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string, log
 		} else {
 			v3db := db.(*temporal.DB)
 			agg := v3db.Agg()
-			ct := agg.MakeContext()
-			defer ct.Close()
+			aggTx := agg.BeginFilesRo()
+			defer aggTx.Close()
 			doms, err := state.NewSharedDomains(tx, logger)
 			if err != nil {
 				return err
@@ -254,6 +254,13 @@ func Reset(ctx context.Context, db kv.RwDB, stagesList ...stages.SyncStage) erro
 		return nil
 	})
 }
+
+func ResetPruneAt(ctx context.Context, db kv.RwDB, stage stages.SyncStage) error {
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		return stages.SaveStagePruneProgress(tx, stage, 0)
+	})
+}
+
 func Warmup(ctx context.Context, db kv.RwDB, lvl log.Lvl, stList ...stages.SyncStage) error {
 	for _, st := range stList {
 		for _, tbl := range Tables[st] {

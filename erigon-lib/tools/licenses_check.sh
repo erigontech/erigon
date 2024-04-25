@@ -21,11 +21,15 @@ fi
 # enable build tags to cover maximum .go files
 export GOFLAGS="-tags=gorules,linux,tools"
 
+# github.com/pion/transport  - MIT + asm files
+# github.com/shirou/gopsutil - BSD-3-Clause +c files
+
 output=$(find "$projectDir" -maxdepth 1 -type 'd' \
     -not -name ".*" \
     -not -name tools \
     -not -name build \
-    | xargs go-licenses report 2>&1 \
+    | xargs go-licenses report --ignore github.com/pion/transport/v2/utils/xor \
+    --ignore github.com/shirou/gopsutil/v3/disk 2>&1  \
     `# exceptions` \
     | grep -v "erigon-lib has empty version"        `# self` \
     | grep -v "golang.org/x/"                       `# a part of Go` \
@@ -34,6 +38,7 @@ output=$(find "$projectDir" -maxdepth 1 -type 'd' \
     | grep -v "github.com/anacrolix/go-libutp"      `# MIT` \
     | grep -v "github.com/cespare/xxhash"           `# MIT` \
     | grep -v "github.com/cespare/xxhash/v2"        `# MIT` \
+    | grep -v "github.com/cespare/xxhash"           `# MIT` \
     | grep -v "github.com/anacrolix/mmsg"           `# MPL-2.0` \
     | grep -v "github.com/anacrolix/multiless"      `# MPL-2.0` \
     | grep -v "github.com/anacrolix/sync"           `# MPL-2.0` \

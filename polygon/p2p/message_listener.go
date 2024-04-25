@@ -79,6 +79,8 @@ type messageListener struct {
 }
 
 func (ml *messageListener) Run(ctx context.Context) {
+	ml.logger.Debug(messageListenerLogPrefix("running p2p message listener component"))
+
 	backgroundLoops := []func(ctx context.Context){
 		ml.listenInboundMessages,
 		ml.listenPeerEvents,
@@ -168,7 +170,18 @@ func (ml *messageListener) notifyPeerEventObservers(peerEvent *sentry.PeerEvent)
 	ml.observersMu.Lock()
 	defer ml.observersMu.Unlock()
 
-	notifyObservers(ml.peerEventObservers, peerEvent)
+	// wait on all observers to finish processing the peer event before notifying them
+	// with subsequent events in order to preserve the ordering of the sentry messages
+	var wg sync.WaitGroup
+	for _, observer := range ml.peerEventObservers {
+		wg.Add(1)
+		go func(observer MessageObserver[*sentry.PeerEvent]) {
+			defer wg.Done()
+			observer(peerEvent)
+		}(observer)
+	}
+
+	wg.Wait()
 	return nil
 }
 
@@ -238,7 +251,7 @@ func notifyInboundMessageObservers[TPacket any](
 	var decodedData TPacket
 	if err := rlp.DecodeBytes(message.Data, &decodedData); err != nil {
 		if rlp.IsInvalidRLPError(err) {
-			logger.Debug("penalizing peer - invalid rlp", "peerId", peerId, "err", err)
+			logger.Debug(messageListenerLogPrefix("penalizing peer - invalid rlp"), "peerId", peerId, "err", err)
 
 			if penalizeErr := peerPenalizer.Penalize(ctx, peerId); penalizeErr != nil {
 				err = fmt.Errorf("%w: %w", penalizeErr, err)
@@ -261,4 +274,8 @@ func notifyObservers[TMessage any](observers map[uint64]MessageObserver[TMessage
 	for _, observer := range observers {
 		go observer(message)
 	}
+}
+
+func messageListenerLogPrefix(message string) string {
+	return fmt.Sprintf("[p2p.message.listener] %s", message)
 }

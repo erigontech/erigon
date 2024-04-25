@@ -23,7 +23,7 @@ import (
 	"github.com/spf13/afero"
 )
 
-const dumpSlotFrequency = 17
+const dumpSlotFrequency = 4
 
 type syncCommittees struct {
 	currentSyncCommittee *solid.SyncCommittee
@@ -190,7 +190,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		return nil, LogisticError, fmt.Errorf("AddChainSegment: %w, parentRoot; %x", err, block.ParentRoot)
 	}
 	if newState == nil {
-		log.Debug("AddChainSegment: missing segment", "block", libcommon.Hash(blockRoot))
+		log.Trace("AddChainSegment: missing segment", "block", libcommon.Hash(blockRoot))
 		return nil, MissingSegment, nil
 	}
 	finalizedBlock, hasFinalized := f.getBlock(newState.FinalizedCheckpoint().BlockRoot())
@@ -249,8 +249,8 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		f.blockRewards.Store(libcommon.Hash(blockRoot), blockRewardsCollector)
 		f.balancesStorage.Insert(libcommon.Hash(blockRoot), block.ParentRoot, prevDumpBalances, newState.RawBalances(), epochCross)
 		f.validatorSetStorage.Insert(libcommon.Hash(blockRoot), block.ParentRoot, prevValidatorSetDump, newState.RawValidatorSet(), epochCross)
-
-		f.syncCommittees.Store(libcommon.Hash(blockRoot), syncCommittees{
+		period := f.beaconCfg.SyncCommitteePeriod(newState.Slot())
+		f.syncCommittees.Store(period, syncCommittees{
 			currentSyncCommittee: newState.CurrentSyncCommittee().Copy(),
 			nextSyncCommittee:    newState.NextSyncCommittee().Copy(),
 		})
@@ -334,7 +334,7 @@ func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*st
 			if ok && bHeader.Slot%dumpSlotFrequency == 0 {
 				break
 			}
-			log.Debug("Could not retrieve state: Missing header", "missing", currentIteratorRoot)
+			log.Trace("Could not retrieve state: Missing header", "missing", currentIteratorRoot)
 			return nil, nil
 		}
 		if block.Block.Slot%dumpSlotFrequency == 0 {
@@ -409,7 +409,6 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		f.currentJustifiedCheckpoints.Delete(root)
 		f.finalizedCheckpoints.Delete(root)
 		f.headers.Delete(root)
-		f.syncCommittees.Delete(root)
 		f.blockRewards.Delete(root)
 		f.fs.Remove(getBeaconStateFilename(root))
 		f.fs.Remove(getBeaconStateCacheFilename(root))
@@ -423,8 +422,8 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 	return
 }
 
-func (f *forkGraphDisk) GetSyncCommittees(blockRoot libcommon.Hash) (*solid.SyncCommittee, *solid.SyncCommittee, bool) {
-	obj, has := f.syncCommittees.Load(blockRoot)
+func (f *forkGraphDisk) GetSyncCommittees(period uint64) (*solid.SyncCommittee, *solid.SyncCommittee, bool) {
+	obj, has := f.syncCommittees.Load(period)
 	if !has {
 		return nil, nil, false
 	}

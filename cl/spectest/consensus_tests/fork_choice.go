@@ -14,12 +14,16 @@ import (
 	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
+	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/clparams/initial_state"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
+	"github.com/ledgerwatch/erigon/cl/phase1/network/services"
 	"github.com/ledgerwatch/erigon/cl/pool"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -176,10 +180,15 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	anchorState, err := spectest.ReadBeaconState(root, c.Version(), "anchor_state.ssz_snappy")
 	require.NoError(t, err)
 
+	genesisState, err := initial_state.GetGenesisState(clparams.MainnetNetwork)
+	require.NoError(t, err)
+
 	emitters := beaconevents.NewEmitters()
-	genesisConfig, _, _ := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
-	blobStorage := blob_storage.NewBlobStore(memdb.New("/tmp"), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, genesisConfig)
-	forkStore, err := forkchoice.NewForkChoiceStore(anchorState, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig), fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}), emitters, nil, blobStorage)
+	_, beaconConfig := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
+	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), beaconConfig)
+	blobStorage := blob_storage.NewBlobStore(memdb.New("/tmp"), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
+
+	forkStore, err := forkchoice.NewForkChoiceStore(ethClock, anchorState, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig), fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}), emitters, synced_data.NewSyncedDataManager(true, &clparams.MainnetBeaconConfig), blobStorage)
 	require.NoError(t, err)
 	forkStore.SetSynced(true)
 
@@ -220,18 +229,20 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 						continue
 					}
 				}
+				blobSidecarService := services.NewBlobSidecarService(ctx, &clparams.MainnetBeaconConfig, forkStore, nil, ethClock, true)
+
 				blobs.Range(func(index int, value *cltypes.Blob, length int) bool {
 					var proof libcommon.Bytes48
 					proofStr := step.Proofs[index]
 					proofBytes := common.Hex2Bytes(proofStr[2:])
 					copy(proof[:], proofBytes)
-					err = forkStore.OnBlobSidecar(&cltypes.BlobSidecar{
+					err = blobSidecarService.ProcessMessage(ctx, nil, &cltypes.BlobSidecar{
 						Index:             uint64(index),
 						SignedBlockHeader: blk.SignedBeaconBlockHeader(),
 						Blob:              *value,
 						KzgCommitment:     common.Bytes48(*blk.Block.Body.BlobKzgCommitments.Get(index)),
 						KzgProof:          proof,
-					}, true)
+					})
 					return true
 				})
 

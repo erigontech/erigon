@@ -61,6 +61,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/netutil"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
+	"github.com/ledgerwatch/erigon/turbo/logging"
 )
 
 // These are all the command line flags we support.
@@ -108,9 +109,9 @@ var (
 		Name:  "whitelist",
 		Usage: "Comma separated block number-to-hash mappings to enforce (<number>=<hash>)",
 	}
-	OverrideCancunFlag = flags.BigFlag{
-		Name:  "override.cancun",
-		Usage: "Manually specify the Cancun fork time, overriding the bundled setting",
+	OverridePragueFlag = flags.BigFlag{
+		Name:  "override.prague",
+		Usage: "Manually specify the Prague fork time, overriding the bundled setting",
 	}
 	TrustedSetupFile = cli.StringFlag{
 		Name:  "trusted-setup-file",
@@ -134,11 +135,6 @@ var (
 	EthashDatasetsLockMmapFlag = cli.BoolFlag{
 		Name:  "ethash.dagslockmmap",
 		Usage: "Lock memory maps for recent ethash mining DAGs",
-	}
-	SnapshotFlag = cli.BoolFlag{
-		Name:  "snapshots",
-		Usage: `Default: use snapshots "true" for Mainnet, Goerli, Gnosis Chain and Chiado. use snapshots "false" in all other cases`,
-		Value: true,
 	}
 	InternalConsensusFlag = cli.BoolFlag{
 		Name:  "internalcl",
@@ -651,11 +647,6 @@ var (
 		Usage: "Metrics HTTP server listening port",
 		Value: metrics.DefaultConfig.Port,
 	}
-	HistoryV3Flag = cli.BoolFlag{
-		Name:  "experimental.history.v3",
-		Value: true,
-		Usage: "(Also known as Erigon3) Not recommended yet: Can't change this flag after node creation. New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
-	}
 
 	CliqueSnapshotCheckpointIntervalFlag = cli.UintFlag{
 		Name:  "clique.checkpoint",
@@ -795,6 +786,16 @@ var (
 		Value: true,
 	}
 
+	PolygonSyncFlag = cli.BoolFlag{
+		Name:  "polygon.sync",
+		Usage: "Enabling syncing using the new polygon sync component",
+	}
+
+	PolygonSyncStageFlag = cli.BoolFlag{
+		Name:  "polygon.sync.stage",
+		Usage: "Enabling syncing with a stage that uses the polygon sync component",
+	}
+
 	ConfigFlag = cli.StringFlag{
 		Name:  "config",
 		Usage: "Sets erigon flags from YAML/TOML file",
@@ -855,11 +856,51 @@ var (
 	}
 	SilkwormRpcDaemonFlag = cli.BoolFlag{
 		Name:  "silkworm.rpc",
-		Usage: "Enable embedded Silkworm RPC daemon",
+		Usage: "Enable embedded Silkworm RPC service",
 	}
 	SilkwormSentryFlag = cli.BoolFlag{
 		Name:  "silkworm.sentry",
 		Usage: "Enable embedded Silkworm Sentry service",
+	}
+	SilkwormVerbosityFlag = cli.StringFlag{
+		Name:  "silkworm.verbosity",
+		Usage: "Set the log level for Silkworm console logs",
+		Value: log.LvlInfo.String(),
+	}
+	SilkwormNumContextsFlag = cli.UintFlag{
+		Name:  "silkworm.contexts",
+		Usage: "Number of I/O contexts used in embedded Silkworm RPC and Sentry services (zero means use default in Silkworm)",
+		Value: 0,
+	}
+	SilkwormRpcLogEnabledFlag = cli.BoolFlag{
+		Name:  "silkworm.rpc.log",
+		Usage: "Enable interface log for embedded Silkworm RPC service",
+		Value: false,
+	}
+	SilkwormRpcLogMaxFileSizeFlag = cli.UintFlag{
+		Name:  "silkworm.rpc.log.maxsize",
+		Usage: "Max interface log file size in MB for embedded Silkworm RPC service",
+		Value: 1,
+	}
+	SilkwormRpcLogMaxFilesFlag = cli.UintFlag{
+		Name:  "silkworm.rpc.log.maxfiles",
+		Usage: "Max interface log files for embedded Silkworm RPC service",
+		Value: 100,
+	}
+	SilkwormRpcLogDumpResponseFlag = cli.BoolFlag{
+		Name:  "silkworm.rpc.log.response",
+		Usage: "Dump responses in interface logs for embedded Silkworm RPC service",
+		Value: false,
+	}
+	SilkwormRpcNumWorkersFlag = cli.UintFlag{
+		Name:  "silkworm.rpc.workers",
+		Usage: "Number of worker threads used in embedded Silkworm RPC service (zero means use default in Silkworm)",
+		Value: 0,
+	}
+	SilkwormRpcJsonCompatibilityFlag = cli.BoolFlag{
+		Name:  "silkworm.rpc.compatibility",
+		Usage: "Preserve JSON-RPC compatibility using embedded Silkworm RPC service",
+		Value: true,
 	}
 
 	BeaconAPIFlag = cli.StringSliceFlag{
@@ -1506,6 +1547,8 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.HeimdallURL = ctx.String(HeimdallURLFlag.Name)
 	cfg.WithoutHeimdall = ctx.Bool(WithoutHeimdallFlag.Name)
 	cfg.WithHeimdallMilestones = ctx.Bool(WithHeimdallMilestones.Name)
+	cfg.PolygonSync = ctx.Bool(PolygonSyncFlag.Name)
+	cfg.PolygonSyncStage = ctx.Bool(PolygonSyncStageFlag.Name)
 }
 
 func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
@@ -1588,6 +1631,15 @@ func setSilkworm(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.SilkwormExecution = ctx.Bool(SilkwormExecutionFlag.Name)
 	cfg.SilkwormRpcDaemon = ctx.Bool(SilkwormRpcDaemonFlag.Name)
 	cfg.SilkwormSentry = ctx.Bool(SilkwormSentryFlag.Name)
+	cfg.SilkwormVerbosity = ctx.String(SilkwormVerbosityFlag.Name)
+	cfg.SilkwormNumContexts = uint32(ctx.Uint64(SilkwormNumContextsFlag.Name))
+	cfg.SilkwormRpcLogEnabled = ctx.Bool(SilkwormRpcLogEnabledFlag.Name)
+	cfg.SilkwormRpcLogDirPath = logging.LogDirPath(ctx)
+	cfg.SilkwormRpcLogMaxFileSize = uint16(ctx.Uint64(SilkwormRpcLogMaxFileSizeFlag.Name))
+	cfg.SilkwormRpcLogMaxFiles = uint16(ctx.Uint(SilkwormRpcLogMaxFilesFlag.Name))
+	cfg.SilkwormRpcLogDumpResponse = ctx.Bool(SilkwormRpcLogDumpResponseFlag.Name)
+	cfg.SilkwormRpcNumWorkers = uint32(ctx.Uint64(SilkwormRpcNumWorkersFlag.Name))
+	cfg.SilkwormRpcJsonCompatibility = ctx.Bool(SilkwormRpcJsonCompatibilityFlag.Name)
 }
 
 // CheckExclusive verifies that only a single instance of the provided flags was
@@ -1649,11 +1701,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		cfg.NetworkID = params.NetworkIDByChainName(chain)
 	}
 
-	cfg.Sync.UseSnapshots = ethconfig.UseSnapshotsByChainName(chain)
-	if ctx.IsSet(SnapshotFlag.Name) { //force override default by cli
-		cfg.Sync.UseSnapshots = ctx.Bool(SnapshotFlag.Name)
-	}
-
 	cfg.Dirs = nodeConfig.Dirs
 	cfg.Snapshot.KeepBlocks = ctx.Bool(SnapKeepBlocksFlag.Name)
 	cfg.Snapshot.Produce = !ctx.Bool(SnapStopFlag.Name)
@@ -1712,7 +1759,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setCaplin(ctx, cfg)
 
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
-	cfg.HistoryV3 = ctx.Bool(HistoryV3Flag.Name)
 
 	if ctx.IsSet(RPCGlobalGasCapFlag.Name) {
 		cfg.RPCGasCap = ctx.Uint64(RPCGlobalGasCapFlag.Name)
@@ -1767,9 +1813,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		}
 	}
 
-	if ctx.IsSet(OverrideCancunFlag.Name) {
-		cfg.OverrideCancunTime = flags.GlobalBig(ctx, OverrideCancunFlag.Name)
-		cfg.TxPool.OverrideCancunTime = cfg.OverrideCancunTime
+	if ctx.IsSet(OverridePragueFlag.Name) {
+		cfg.OverridePragueTime = flags.GlobalBig(ctx, OverridePragueFlag.Name)
 	}
 
 	if ctx.IsSet(InternalConsensusFlag.Name) && clparams.EmbeddedSupported(cfg.NetworkID) {

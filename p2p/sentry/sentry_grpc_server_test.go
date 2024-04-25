@@ -10,17 +10,16 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/kv"
-
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/log/v3"
@@ -84,8 +83,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 			SpuriousDragonBlock:   big.NewInt(2),
 			ByzantiumBlock:        big.NewInt(3),
 		}
-		_, dbNoFork, _  = temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
-		_, dbProFork, _ = temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
+		_, dbNoFork, _  = temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+		_, dbProFork, _ = temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 
 		gspecNoFork  = &types.Genesis{Config: configNoFork}
 		gspecProFork = &types.Genesis{Config: configProFork}
@@ -177,7 +176,7 @@ func TestSentryServerImpl_SetStatusInitPanic(t *testing.T) {
 	}()
 
 	configNoFork := &chain.Config{HomesteadBlock: big.NewInt(1), ChainID: big.NewInt(1)}
-	_, dbNoFork, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
+	_, dbNoFork, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	gspecNoFork := &types.Genesis{Config: configNoFork}
 	genesisNoFork := core.MustCommitGenesis(gspecNoFork, dbNoFork, "", log.Root())
 	ss := &GrpcServer{p2p: &p2p.Config{}}

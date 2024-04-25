@@ -12,11 +12,17 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/log/v3"
 )
 
-func RetrieveBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, uri string) (*state.CachingBeaconState, error) {
+func extractSlotFromSerializedBeaconState(beaconState []byte) (uint64, error) {
+	if len(beaconState) < 48 {
+		return 0, fmt.Errorf("checkpoint sync read failed, too short")
+	}
+	return binary.LittleEndian.Uint64(beaconState[40:48]), nil
+}
+
+func RetrieveBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, uri string) (*state.CachingBeaconState, error) {
 	log.Info("[Checkpoint Sync] Requesting beacon state", "uri", uri)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
 	if err != nil {
@@ -42,7 +48,10 @@ func RetrieveBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChain
 		return nil, fmt.Errorf("checkpoint sync read failed %s", err)
 	}
 
-	epoch := utils.GetCurrentEpoch(genesisConfig.GenesisTime, beaconConfig.SecondsPerSlot, beaconConfig.SlotsPerEpoch)
+	epoch, err := extractSlotFromSerializedBeaconState(marshaled)
+	if err != nil {
+		return nil, fmt.Errorf("checkpoint sync read failed %s", err)
+	}
 
 	beaconState := state.New(beaconConfig)
 	err = beaconState.DecodeSSZ(marshaled, int(beaconConfig.GetCurrentStateVersion(epoch)))
@@ -52,7 +61,7 @@ func RetrieveBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChain
 	return beaconState, nil
 }
 
-func RetrieveBlock(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, uri string, expectedBlockRoot *libcommon.Hash) (*cltypes.SignedBeaconBlock, error) {
+func RetrieveBlock(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, uri string, expectedBlockRoot *libcommon.Hash) (*cltypes.SignedBeaconBlock, error) {
 	log.Debug("[Checkpoint Sync] Requesting beacon block", "uri", uri)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
 	if err != nil {

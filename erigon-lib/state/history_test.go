@@ -22,10 +22,13 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"os"
 	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/common/length"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -83,6 +86,97 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	return db, h
 }
 
+func TestHistoryCollationsAndBuilds(t *testing.T) {
+	runTest := func(t *testing.T, largeValues bool) {
+		t.Helper()
+
+		totalTx := uint64(1000)
+		values := generateTestData(t, length.Addr, length.Addr+length.Hash, totalTx, 100, 10)
+		db, h := filledHistoryValues(t, largeValues, values, log.New())
+		defer db.Close()
+
+		ctx := context.Background()
+		rwtx, err := db.BeginRw(ctx)
+		require.NoError(t, err)
+		defer rwtx.Rollback()
+
+		var lastAggergatedTx uint64
+		for i := uint64(0); i+h.aggregationStep < totalTx; i += h.aggregationStep {
+			collation, err := h.collate(ctx, i/h.aggregationStep, i, i+h.aggregationStep, rwtx)
+			require.NoError(t, err)
+			defer collation.Close()
+
+			require.NotEmptyf(t, collation.historyPath, "collation.historyPath is empty")
+			require.NotNil(t, collation.historyComp)
+			require.NotEmptyf(t, collation.efHistoryPath, "collation.efHistoryPath is empty")
+			require.NotNil(t, collation.efHistoryComp)
+
+			sf, err := h.buildFiles(ctx, i/h.aggregationStep, collation, background.NewProgressSet())
+			require.NoError(t, err)
+			require.NotNil(t, sf)
+			defer sf.CleanupOnError()
+
+			efReader := NewArchiveGetter(sf.efHistoryDecomp.MakeGetter(), h.compression)
+			hReader := NewArchiveGetter(sf.historyDecomp.MakeGetter(), h.compression)
+
+			// ef contains all sorted keys
+			// for each key it has a list of txNums
+			// h contains all values for all keys ordered by key + txNum
+
+			var keyBuf, valBuf, hValBuf []byte
+			seenKeys := make([]string, 0)
+
+			for efReader.HasNext() {
+				keyBuf, _ = efReader.Next(nil)
+				valBuf, _ = efReader.Next(nil)
+
+				ef, _ := eliasfano32.ReadEliasFano(valBuf)
+				efIt := ef.Iterator()
+
+				require.Contains(t, values, string(keyBuf), "key not found in values")
+				seenKeys = append(seenKeys, string(keyBuf))
+
+				vi := 0
+				updates, ok := values[string(keyBuf)]
+				require.Truef(t, ok, "key not found in values")
+				//require.Len(t, updates, int(ef.Count()), "updates count mismatch")
+
+				for efIt.HasNext() {
+					txNum, err := efIt.Next()
+					require.NoError(t, err)
+					require.EqualValuesf(t, updates[vi].txNum, txNum, "txNum mismatch")
+
+					require.Truef(t, hReader.HasNext(), "hReader has no more values")
+					hValBuf, _ = hReader.Next(nil)
+					if updates[vi].value == nil {
+						require.Emptyf(t, hValBuf, "value at %d is not empty (not nil)", vi)
+					} else {
+						require.EqualValuesf(t, updates[vi].value, hValBuf, "value at %d mismatch", vi)
+					}
+					vi++
+				}
+				values[string(keyBuf)] = updates[vi:]
+				require.True(t, sort.StringsAreSorted(seenKeys))
+			}
+			h.integrateFiles(sf, i, i+h.aggregationStep)
+			lastAggergatedTx = i + h.aggregationStep
+		}
+
+		for _, updates := range values {
+			for _, upd := range updates {
+				require.GreaterOrEqual(t, upd.txNum, lastAggergatedTx, "txNum %d is less than lastAggregatedTx %d", upd.txNum, lastAggergatedTx)
+			}
+		}
+	}
+
+	t.Run("largeValues=true", func(t *testing.T) {
+		runTest(t, true)
+	})
+	t.Run("largeValues=false", func(t *testing.T) {
+		runTest(t, false)
+	})
+}
+
 func TestHistoryCollationBuild(t *testing.T) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
@@ -95,7 +189,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 		tx, err := db.BeginRw(ctx)
 		require.NoError(err)
 		defer tx.Rollback()
-		hc := h.MakeContext()
+		hc := h.BeginFilesRo()
 		defer hc.Close()
 		writer := hc.NewWriter()
 		defer writer.close()
@@ -133,10 +227,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 		require.NoError(err)
 		require.True(strings.HasSuffix(c.historyPath, "v1-hist.0-1.v"))
 		require.Equal(6, c.historyCount)
-		require.Equal(3, len(c.indexBitmaps))
-		require.Equal([]uint64{7}, c.indexBitmaps["key3"].ToArray())
-		require.Equal([]uint64{3, 6, 7}, c.indexBitmaps["key2"].ToArray())
-		require.Equal([]uint64{2, 6}, c.indexBitmaps["key1"].ToArray())
+		require.Equal(3, c.efHistoryComp.Count()/2)
 
 		sf, err := h.buildFiles(ctx, 0, c, background.NewProgressSet())
 		require.NoError(err)
@@ -215,7 +306,7 @@ func TestHistoryAfterPrune(t *testing.T) {
 		tx, err := db.BeginRw(ctx)
 		require.NoError(err)
 		defer tx.Rollback()
-		hc := h.MakeContext()
+		hc := h.BeginFilesRo()
 		defer hc.Close()
 		writer := hc.NewWriter()
 		defer writer.close()
@@ -252,7 +343,7 @@ func TestHistoryAfterPrune(t *testing.T) {
 		h.integrateFiles(sf, 0, 16)
 		hc.Close()
 
-		hc = h.MakeContext()
+		hc = h.BeginFilesRo()
 		_, err = hc.Prune(ctx, tx, 0, 16, math.MaxUint64, false, false, logEvery)
 		hc.Close()
 
@@ -296,7 +387,7 @@ func TestHistoryCanPrune(t *testing.T) {
 		require.NoError(err)
 		defer tx.Rollback()
 
-		hc := h.MakeContext()
+		hc := h.BeginFilesRo()
 		defer hc.Close()
 		writer := hc.NewWriter()
 		defer writer.close()
@@ -341,7 +432,7 @@ func TestHistoryCanPrune(t *testing.T) {
 		defer rwTx.Rollback()
 		require.NoError(t, err)
 
-		hc := h.MakeContext()
+		hc := h.BeginFilesRo()
 		defer hc.Close()
 
 		maxTxInSnaps := hc.maxTxNumInFiles(false)
@@ -378,7 +469,7 @@ func TestHistoryCanPrune(t *testing.T) {
 		defer rwTx.Rollback()
 		require.NoError(t, err)
 
-		hc := h.MakeContext()
+		hc := h.BeginFilesRo()
 		defer hc.Close()
 
 		for i := uint64(0); i < stepsTotal; i++ {
@@ -403,6 +494,61 @@ func TestHistoryCanPrune(t *testing.T) {
 	})
 }
 
+func filledHistoryValues(tb testing.TB, largeValues bool, values map[string][]upd, logger log.Logger) (kv.RwDB, *History) {
+	tb.Helper()
+
+	for key, upds := range values {
+		upds[0].value = nil // history starts from nil
+		values[key] = upds
+	}
+
+	// history closed inside tb.Cleanup
+	db, h := testDbAndHistory(tb, largeValues, logger)
+	ctx := context.Background()
+	tx, err := db.BeginRw(ctx)
+	require.NoError(tb, err)
+	defer tx.Rollback()
+	hc := h.BeginFilesRo()
+	defer hc.Close()
+	writer := hc.NewWriter()
+	defer writer.close()
+
+	// keys are encodings of numbers 1..31
+	// each key changes value on every txNum which is multiple of the key
+	var flusher flusher
+	var keyFlushCount, ps = 0, uint64(0)
+	for key, upds := range values {
+		for i := 0; i < len(upds); i++ {
+			writer.SetTxNum(upds[i].txNum)
+			if i > 0 {
+				ps = upds[i].txNum / hc.h.aggregationStep
+			}
+			err = writer.AddPrevValue([]byte(key), nil, upds[i].value, ps)
+			require.NoError(tb, err)
+		}
+		keyFlushCount++
+		if keyFlushCount%10 == 0 {
+			if flusher != nil {
+				err = flusher.Flush(ctx, tx)
+				require.NoError(tb, err)
+				flusher = nil //nolint
+			}
+			flusher = writer
+			writer = hc.NewWriter()
+		}
+	}
+	if flusher != nil {
+		err = flusher.Flush(ctx, tx)
+		require.NoError(tb, err)
+	}
+	err = writer.Flush(ctx, tx)
+	require.NoError(tb, err)
+	err = tx.Commit()
+	require.NoError(tb, err)
+
+	return db, h
+}
+
 func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History, uint64) {
 	tb.Helper()
 	db, h := testDbAndHistory(tb, largeValues, logger)
@@ -410,7 +556,7 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 	tx, err := db.BeginRw(ctx)
 	require.NoError(tb, err)
 	defer tx.Rollback()
-	hc := h.MakeContext()
+	hc := h.BeginFilesRo()
 	defer hc.Close()
 	writer := hc.NewWriter()
 	defer writer.close()
@@ -461,7 +607,7 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 func checkHistoryHistory(t *testing.T, h *History, txs uint64) {
 	t.Helper()
 	// Check the history
-	hc := h.MakeContext()
+	hc := h.BeginFilesRo()
 	defer hc.Close()
 
 	for txNum := uint64(0); txNum <= txs; txNum++ {
@@ -509,7 +655,7 @@ func TestHistoryHistory(t *testing.T) {
 				require.NoError(err)
 				h.integrateFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
 
-				hc := h.MakeContext()
+				hc := h.BeginFilesRo()
 				_, err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, false, logEvery)
 				hc.Close()
 				require.NoError(err)
@@ -548,7 +694,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 		h.integrateFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
 
 		if doPrune {
-			hc := h.MakeContext()
+			hc := h.BeginFilesRo()
 			_, err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, false, logEvery)
 			hc.Close()
 			require.NoError(err)
@@ -562,7 +708,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 
 	for {
 		if stop := func() bool {
-			hc := h.MakeContext()
+			hc := h.BeginFilesRo()
 			defer hc.Close()
 			r = hc.findMergeRange(maxEndTxNum, maxSpan)
 			if !r.any() {
@@ -579,9 +725,9 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 		}
 	}
 
-	hc := h.MakeContext()
+	hc := h.BeginFilesRo()
 	defer hc.Close()
-	err = hc.ic.BuildOptionalMissedIndices(ctx, background.NewProgressSet())
+	err = hc.iit.BuildOptionalMissedIndices(ctx, background.NewProgressSet())
 	require.NoError(err)
 
 	err = tx.Commit()
@@ -615,7 +761,7 @@ func TestHistoryScanFiles(t *testing.T) {
 		require := require.New(t)
 
 		collateAndMergeHistory(t, db, h, txs, true)
-		hc := h.MakeContext()
+		hc := h.BeginFilesRo()
 		defer hc.Close()
 		// Recreate domain and re-scan the files
 		require.NoError(h.OpenFolder(false))
@@ -652,7 +798,7 @@ func TestIterateChanged(t *testing.T) {
 		defer tx.Rollback()
 		var keys, vals []string
 		var steps []uint64
-		ic := h.MakeContext()
+		ic := h.BeginFilesRo()
 		defer ic.Close()
 
 		it, err := ic.HistoryRange(2, 20, order.Asc, -1, tx)
@@ -825,7 +971,7 @@ func TestIterateChanged2(t *testing.T) {
 		var keys, vals []string
 		var steps []uint64
 		t.Run("before merge", func(t *testing.T) {
-			hc, require := h.MakeContext(), require.New(t)
+			hc, require := h.BeginFilesRo(), require.New(t)
 			defer hc.Close()
 
 			{ //check IdxRange
@@ -953,7 +1099,7 @@ func TestIterateChanged2(t *testing.T) {
 		})
 		t.Run("after merge", func(t *testing.T) {
 			collateAndMergeHistory(t, db, h, txs, true)
-			hc, require := h.MakeContext(), require.New(t)
+			hc, require := h.BeginFilesRo(), require.New(t)
 			defer hc.Close()
 
 			keys = keys[:0]
@@ -1017,7 +1163,7 @@ func TestIterateChanged2(t *testing.T) {
 
 func TestScanStaticFilesH(t *testing.T) {
 	h := &History{InvertedIndex: emptyTestInvertedIndex(1),
-		files: btree2.NewBTreeG[*filesItem](filesItemLess),
+		dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess),
 	}
 	files := []string{
 		"v1-test.0-1.v",
@@ -1028,12 +1174,12 @@ func TestScanStaticFilesH(t *testing.T) {
 		"v1-test.4-5.v",
 	}
 	h.scanStateFiles(files)
-	require.Equal(t, 6, h.files.Len())
+	require.Equal(t, 6, h.dirtyFiles.Len())
 
-	h.files.Clear()
+	h.dirtyFiles.Clear()
 	h.integrityCheck = func(fromStep, toStep uint64) bool { return false }
 	h.scanStateFiles(files)
-	require.Equal(t, 0, h.files.Len())
+	require.Equal(t, 0, h.dirtyFiles.Len())
 
 }
 
@@ -1044,7 +1190,7 @@ func writeSomeHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	tx, err := db.BeginRw(ctx)
 	require.NoError(tb, err)
 	defer tx.Rollback()
-	hc := h.MakeContext()
+	hc := h.BeginFilesRo()
 	defer hc.Close()
 	writer := hc.NewWriter()
 	defer writer.close()
@@ -1119,7 +1265,7 @@ func Test_HistoryIterate_VariousKeysLen(t *testing.T) {
 		tx, err := db.BeginRo(ctx)
 		require.NoError(err)
 		defer tx.Rollback()
-		ic := h.MakeContext()
+		ic := h.BeginFilesRo()
 		defer ic.Close()
 
 		iter, err := ic.HistoryRange(1, -1, order.Asc, -1, tx)
@@ -1153,4 +1299,25 @@ func Test_HistoryIterate_VariousKeysLen(t *testing.T) {
 		test(t, h, db, keys, txs)
 	})
 
+}
+
+func TestHistory_OpenFolder(t *testing.T) {
+	logger := log.New()
+	db, h, txs := filledHistory(t, true, logger)
+	collateAndMergeHistory(t, db, h, txs, true)
+
+	list := h._visibleFiles.Load()
+	require.NotEmpty(t, list)
+	ff := (*list)[len(*list)-1]
+	fn := ff.src.decompressor.FilePath()
+	h.Close()
+
+	err := os.Remove(fn)
+	require.NoError(t, err)
+	err = os.WriteFile(fn, make([]byte, 33), 0644)
+	require.NoError(t, err)
+
+	err = h.OpenFolder(true)
+	require.NoError(t, err)
+	h.Close()
 }

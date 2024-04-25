@@ -24,7 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/seg"
 )
 
-func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.RwDB, *AggregatorV3) {
+func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.RwDB, *Aggregator) {
 	b.Helper()
 	logger := log.New()
 	dirs := datadir.New(b.TempDir())
@@ -32,7 +32,7 @@ func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.RwDB, *Aggregato
 		return kv.ChaindataTablesCfg
 	}).MustOpen()
 	b.Cleanup(db.Close)
-	agg, err := NewAggregatorV3(context.Background(), dirs, aggStep, db, logger)
+	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, logger)
 	require.NoError(b, err)
 	b.Cleanup(agg.Close)
 	return db, agg
@@ -40,11 +40,11 @@ func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.RwDB, *Aggregato
 
 type txWithCtx struct {
 	kv.Tx
-	ac *AggregatorV3Context
+	ac *AggregatorRoTx
 }
 
-func WrapTxWithCtx(tx kv.Tx, ctx *AggregatorV3Context) *txWithCtx { return &txWithCtx{Tx: tx, ac: ctx} }
-func (tx *txWithCtx) AggCtx() interface{}                         { return tx.ac }
+func WrapTxWithCtx(tx kv.Tx, ctx *AggregatorRoTx) *txWithCtx { return &txWithCtx{Tx: tx, ac: ctx} }
+func (tx *txWithCtx) AggCtx() interface{}                    { return tx.ac }
 
 func BenchmarkAggregator_Processing(b *testing.B) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -65,7 +65,7 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 	}()
 
 	require.NoError(b, err)
-	ac := agg.MakeContext()
+	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
 	domains, err := NewSharedDomains(WrapTxWithCtx(tx, ac), log.New())

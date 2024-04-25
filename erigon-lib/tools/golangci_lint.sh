@@ -2,7 +2,7 @@
 
 scriptDir=$(dirname "${BASH_SOURCE[0]}")
 scriptName=$(basename "${BASH_SOURCE[0]}")
-version="v1.56.1"
+version="v1.57.2"
 
 if [[ "$1" == "--install-deps" ]]
 then
@@ -13,7 +13,7 @@ fi
 if ! which golangci-lint > /dev/null
 then
 	echo "golangci-lint tool is not found, install it with:"
-	echo "    make lintci-deps"
+	echo "    make lint-deps"
 	echo "or follow https://golangci-lint.run/usage/install/"
 	exit 2
 fi

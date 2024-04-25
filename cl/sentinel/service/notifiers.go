@@ -3,8 +3,6 @@ package service
 import (
 	"fmt"
 	"sync"
-
-	"github.com/ledgerwatch/erigon/cl/gossip"
 )
 
 const (
@@ -30,32 +28,12 @@ func newGossipNotifier() *gossipNotifier {
 	}
 }
 
-func (g *gossipNotifier) notify(t string, data []byte, pid string) {
+func (g *gossipNotifier) notify(obj *gossipObject) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
 	for _, ch := range g.notifiers {
-		ch <- gossipObject{
-			data: data,
-			t:    t,
-			pid:  pid,
-		}
-	}
-}
-
-func (g *gossipNotifier) notifyBlob(data []byte, pid string, blobIndex int) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	for _, ch := range g.notifiers {
-		sbI := new(uint64)
-		*sbI = uint64(blobIndex)
-		ch <- gossipObject{
-			data:     data,
-			t:        gossip.TopicNameBlobSidecar(blobIndex),
-			pid:      pid,
-			subnetId: sbI,
-		}
+		ch <- *obj
 	}
 }
 

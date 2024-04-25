@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 )
@@ -36,13 +37,17 @@ var wsBufferPool = new(sync.Pool)
 
 var (
 	diagnosticsURLFlag = cli.StringFlag{
-		Name:  "diagnostics.addr",
-		Usage: "Address of the diagnostics system provided by the support team, include unique session PIN",
+		Name:     "diagnostics.addr",
+		Usage:    "Address of the diagnostics system provided by the support team, include unique session PIN",
+		Required: false,
+		Value:    "localhost:8080",
 	}
 
 	debugURLsFlag = cli.StringSliceFlag{
-		Name:  "debug.addrs",
-		Usage: "Comma separated list of URLs to the debug endpoints thats are being diagnosed",
+		Name:     "debug.addrs",
+		Usage:    "Comma separated list of URLs to the debug endpoints thats are being diagnosed",
+		Required: false,
+		Value:    cli.NewStringSlice("localhost:6060"),
 	}
 
 	insecureFlag = cli.BoolFlag{
@@ -61,12 +66,19 @@ var supportCommand = cli.Command{
 	Name:      "support",
 	Usage:     "Connect Erigon instance to a diagnostics system for support",
 	ArgsUsage: "--diagnostics.addr <URL for the diagnostics system> --ids <diagnostic session ids allowed to connect> --metrics.urls <http://erigon_host:metrics_port>",
-	Flags: []cli.Flag{
+	Before: func(cliCtx *cli.Context) error {
+		_, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+		if err != nil {
+			return err
+		}
+		return nil
+	},
+	Flags: append([]cli.Flag{
 		&debugURLsFlag,
 		&diagnosticsURLFlag,
 		&sessionsFlag,
 		&insecureFlag,
-	},
+	}, debug.Flags...),
 	//Category: "SUPPORT COMMANDS",
 	Description: `The support command connects a running Erigon instances to a diagnostics system specified by the URL.`,
 }

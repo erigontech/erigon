@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"os"
 	"testing"
 	"time"
 
@@ -69,7 +70,7 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	ic := ii.MakeContext()
+	ic := ii.BeginFilesRo()
 	defer ic.Close()
 	writer := ic.NewWriter()
 	defer writer.close()
@@ -153,7 +154,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 			tx.Rollback()
 		}
 	}()
-	ic := ii.MakeContext()
+	ic := ii.BeginFilesRo()
 	defer ic.Close()
 	writer := ic.NewWriter()
 	defer writer.close()
@@ -195,7 +196,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 		require.Equal(t, "0.1", fmt.Sprintf("%.1f", from))
 		require.Equal(t, "0.4", fmt.Sprintf("%.1f", to))
 
-		ic = ii.MakeContext()
+		ic = ii.BeginFilesRo()
 		defer ic.Close()
 
 		_, err = ic.Prune(ctx, tx, 0, 16, math.MaxUint64, logEvery, false, false, nil)
@@ -237,7 +238,7 @@ func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	ic := ii.MakeContext()
+	ic := ii.BeginFilesRo()
 	defer ic.Close()
 	writer := ic.NewWriter()
 	defer writer.close()
@@ -277,7 +278,7 @@ func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log
 func checkRanges(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 	t.Helper()
 	ctx := context.Background()
-	ic := ii.MakeContext()
+	ic := ii.BeginFilesRo()
 	defer ic.Close()
 
 	// Check the iterator ranges first without roTx
@@ -373,7 +374,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			sf, err := ii.buildFiles(ctx, step, bs, background.NewProgressSet())
 			require.NoError(tb, err)
 			ii.integrateFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
-			ic := ii.MakeContext()
+			ic := ii.BeginFilesRo()
 			defer ic.Close()
 			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, false, nil)
 			require.NoError(tb, err)
@@ -384,7 +385,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 
 			for {
 				if stop := func() bool {
-					ic := ii.MakeContext()
+					ic := ii.BeginFilesRo()
 					defer ic.Close()
 					found, startTxNum, endTxNum = ic.findMergeRange(maxEndTxNum, maxSpan)
 					if !found {
@@ -424,7 +425,7 @@ func TestInvIndexRanges(t *testing.T) {
 			sf, err := ii.buildFiles(ctx, step, bs, background.NewProgressSet())
 			require.NoError(t, err)
 			ii.integrateFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
-			ic := ii.MakeContext()
+			ic := ii.BeginFilesRo()
 			defer ic.Close()
 			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, false, nil)
 			require.NoError(t, err)
@@ -470,7 +471,7 @@ func TestChangedKeysIterator(t *testing.T) {
 	defer func() {
 		roTx.Rollback()
 	}()
-	ic := ii.MakeContext()
+	ic := ii.BeginFilesRo()
 	defer ic.Close()
 	it := ic.IterateChangedKeys(0, 20, roTx)
 	defer func() {
@@ -533,13 +534,13 @@ func TestScanStaticFiles(t *testing.T) {
 		"v1-test.4-5.ef",
 	}
 	ii.scanStateFiles(files)
-	require.Equal(t, 6, ii.files.Len())
+	require.Equal(t, 6, ii.dirtyFiles.Len())
 
 	//integrity extension case
-	ii.files.Clear()
+	ii.dirtyFiles.Clear()
 	ii.integrityCheck = func(fromStep, toStep uint64) bool { return false }
 	ii.scanStateFiles(files)
-	require.Equal(t, 0, ii.files.Len())
+	require.Equal(t, 0, ii.dirtyFiles.Len())
 }
 
 func TestCtxFiles(t *testing.T) {
@@ -557,35 +558,35 @@ func TestCtxFiles(t *testing.T) {
 		"v1-test.480-512.ef",
 	}
 	ii.scanStateFiles(files)
-	require.Equal(t, 10, ii.files.Len())
-	ii.files.Scan(func(item *filesItem) bool {
+	require.Equal(t, 10, ii.dirtyFiles.Len())
+	ii.dirtyFiles.Scan(func(item *filesItem) bool {
 		fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
 		item.decompressor = &seg.Decompressor{FileName1: fName}
 		return true
 	})
 
-	roFiles := ctxFiles(ii.files, 0, false)
-	for i, item := range roFiles {
+	visibleFiles := calcVisibleFiles(ii.dirtyFiles, 0, false)
+	for i, item := range visibleFiles {
 		if item.src.canDelete.Load() {
 			require.Failf(t, "deleted file", "%d-%d", item.startTxNum, item.endTxNum)
 		}
 		if i == 0 {
 			continue
 		}
-		if item.src.isSubsetOf(roFiles[i-1].src) || roFiles[i-1].src.isSubsetOf(item.src) {
-			require.Failf(t, "overlaping files", "%d-%d, %d-%d", item.startTxNum, item.endTxNum, roFiles[i-1].startTxNum, roFiles[i-1].endTxNum)
+		if item.src.isSubsetOf(visibleFiles[i-1].src) || visibleFiles[i-1].src.isSubsetOf(item.src) {
+			require.Failf(t, "overlaping files", "%d-%d, %d-%d", item.startTxNum, item.endTxNum, visibleFiles[i-1].startTxNum, visibleFiles[i-1].endTxNum)
 		}
 	}
-	require.Equal(t, 3, len(roFiles))
+	require.Equal(t, 3, len(visibleFiles))
 
-	require.Equal(t, 0, int(roFiles[0].startTxNum))
-	require.Equal(t, 4, int(roFiles[0].endTxNum))
+	require.Equal(t, 0, int(visibleFiles[0].startTxNum))
+	require.Equal(t, 4, int(visibleFiles[0].endTxNum))
 
-	require.Equal(t, 4, int(roFiles[1].startTxNum))
-	require.Equal(t, 5, int(roFiles[1].endTxNum))
+	require.Equal(t, 4, int(visibleFiles[1].startTxNum))
+	require.Equal(t, 5, int(visibleFiles[1].endTxNum))
 
-	require.Equal(t, 480, int(roFiles[2].startTxNum))
-	require.Equal(t, 512, int(roFiles[2].endTxNum))
+	require.Equal(t, 480, int(visibleFiles[2].startTxNum))
+	require.Equal(t, 512, int(visibleFiles[2].endTxNum))
 }
 
 func TestIsSubset(t *testing.T) {
@@ -610,4 +611,25 @@ func TestIsBefore(t *testing.T) {
 	assert.False((&filesItem{startTxNum: 0, endTxNum: 2}).isBefore(&filesItem{startTxNum: 1, endTxNum: 2}))
 	assert.True((&filesItem{startTxNum: 0, endTxNum: 1}).isBefore(&filesItem{startTxNum: 2, endTxNum: 4}))
 	assert.True((&filesItem{startTxNum: 0, endTxNum: 2}).isBefore(&filesItem{startTxNum: 2, endTxNum: 4}))
+}
+
+func TestInvIndex_OpenFolder(t *testing.T) {
+	db, ii, txs := filledInvIndex(t, log.New())
+
+	mergeInverted(t, db, ii, txs)
+
+	list := ii._visibleFiles.Load()
+	require.NotEmpty(t, list)
+	ff := (*list)[len(*list)-1]
+	fn := ff.src.decompressor.FilePath()
+	ii.Close()
+
+	err := os.Remove(fn)
+	require.NoError(t, err)
+	err = os.WriteFile(fn, make([]byte, 33), 0644)
+	require.NoError(t, err)
+
+	err = ii.OpenFolder(true)
+	require.NoError(t, err)
+	ii.Close()
 }

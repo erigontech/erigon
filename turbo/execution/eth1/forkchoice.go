@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/consensuschain"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -64,6 +65,7 @@ func (e *EthereumExecutionModule) verifyForkchoiceHashes(ctx context.Context, tx
 		if err != nil {
 			return false, err
 		}
+
 		if !canonical || *headNumber <= *safeNumber {
 			return false, nil
 		}
@@ -115,6 +117,12 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		return
 	}
 	defer e.semaphore.Release(1)
+
+	if err := stages2.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline); err != nil {
+		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+		return
+	}
+
 	var validationError string
 	type canonicalEntry struct {
 		hash   common.Hash
@@ -125,7 +133,11 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
-	defer tx.Rollback()
+	defer func() {
+		if tx != nil {
+			tx.Rollback()
+		}
+	}()
 
 	defer e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
 
@@ -319,7 +331,11 @@ TooBigJumpStep:
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
-		defer tx.Rollback()
+		defer func() {
+			if tx == nil {
+				tx.Rollback()
+			}
+		}()
 	}
 	finishProgressBefore, err = stages.GetStageProgress(tx, stages.Finish)
 	if err != nil {

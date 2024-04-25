@@ -10,7 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
-	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
@@ -250,23 +249,9 @@ func (e *EthereumExecutionModule) Start(ctx context.Context) {
 	e.semaphore.Acquire(ctx, 1)
 	defer e.semaphore.Release(1)
 
-	more := true
-
-	for more {
-		var err error
-
-		if more, err = e.executionPipeline.Run(e.db, wrap.TxContainer{}, true); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				e.logger.Error("Could not start execution service", "err", err)
-			}
-			continue
-		}
-
-		if err := e.executionPipeline.RunPrune(e.db, nil, true); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				e.logger.Error("Could not start execution service", "err", err)
-			}
-			continue
+	if err := stages.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline); err != nil {
+		if !errors.Is(err, context.Canceled) {
+			e.logger.Error("Could not start execution service", "err", err)
 		}
 	}
 }

@@ -26,13 +26,12 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 
 	libchain "github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -317,7 +316,7 @@ func testReorgShort(t *testing.T) {
 }
 
 func testReorg(t *testing.T, first, second []int64, td int64) {
-	if ethconfig.EnableHistoryV4InTest {
+	if config3.EnableHistoryV4InTest {
 		t.Skip("TODO: [e4] implement me")
 	}
 
@@ -2095,7 +2094,7 @@ func TestEIP2718Transition(t *testing.T) {
 
 // TestEIP1559Transition tests the following:
 //
-//  1. A tranaction whose feeCap is greater than the baseFee is valid.
+//  1. A transaction whose feeCap is greater than the baseFee is valid.
 //  2. Gas accounting for access lists on EIP-1559 transactions is correct.
 //  3. Only the transaction's tip will be received by the coinbase.
 //  4. The transaction sender pays for both the tip and baseFee.

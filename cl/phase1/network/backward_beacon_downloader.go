@@ -23,12 +23,12 @@ type OnNewBlock func(blk *cltypes.SignedBeaconBlock) (finished bool, err error)
 
 type BackwardBeaconDownloader struct {
 	ctx            context.Context
-	slotToDownload uint64
+	slotToDownload atomic.Uint64
 	expectedRoot   libcommon.Hash
 	rpc            *rpc.BeaconRpcP2P
 	engine         execution_client.ExecutionEngine
 	onNewBlock     OnNewBlock
-	finished       bool
+	finished       atomic.Bool
 	reqInterval    *time.Ticker
 	db             kv.RwDB
 	neverSkip      bool
@@ -56,9 +56,7 @@ func (b *BackwardBeaconDownloader) SetThrottle(throttle time.Duration) {
 
 // SetSlotToDownload sets slot to download.
 func (b *BackwardBeaconDownloader) SetSlotToDownload(slot uint64) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.slotToDownload = slot
+	b.slotToDownload.Store(slot)
 }
 
 // SetExpectedRoot sets the expected root we expect to download.
@@ -87,18 +85,12 @@ func (b *BackwardBeaconDownloader) RPC() *rpc.BeaconRpcP2P {
 }
 
 // HighestProcessedRoot returns the highest processed block root so far.
-func (b *BackwardBeaconDownloader) Finished() bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.finished
-}
+func (b *BackwardBeaconDownloader) Finished() bool { return b.finished.Load() }
 
 // Progress current progress.
 func (b *BackwardBeaconDownloader) Progress() uint64 {
 	// Skip if it is not downloading or limit was reached
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.slotToDownload
+	return b.slotToDownload.Load()
 }
 
 // Peers returns the current number of peers connected to the BackwardBeaconDownloader.
@@ -113,9 +105,9 @@ func (b *BackwardBeaconDownloader) Peers() (uint64, error) {
 // If the block's root hash does not match the expected root hash, it will be rejected and the function will continue to the next block.
 func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 	count := uint64(64)
-	start := b.slotToDownload - count + 1
+	start := b.slotToDownload.Load() - count + 1
 	// Overflow? round to 0.
-	if start > b.slotToDownload {
+	if start > b.slotToDownload.Load() {
 		start = 0
 	}
 	var atomicResp atomic.Value
@@ -154,7 +146,7 @@ Loop:
 	responses := atomicResp.Load().([]*cltypes.SignedBeaconBlock)
 	// Import new blocks, order is forward so reverse the whole packet
 	for i := len(responses) - 1; i >= 0; i-- {
-		if b.finished {
+		if b.finished.Load() {
 			return nil
 		}
 		segment := responses[i]
@@ -166,18 +158,19 @@ Loop:
 		}
 		// No? Reject.
 		if blockRoot != b.expectedRoot {
-			log.Debug("Gotten unexpected root", "got", blockRoot, "expected", b.expectedRoot)
+			log.Debug("Gotten unexpected root", "got", libcommon.Hash(blockRoot), "expected", b.expectedRoot)
 			continue
 		}
 		// Yes? then go for the callback.
-		b.finished, err = b.onNewBlock(segment)
+		finished, err := b.onNewBlock(segment)
+		b.finished.Store(finished)
 		if err != nil {
 			log.Warn("Found error while processing packet", "err", err)
 			continue
 		}
 		// set expected root to the segment parent root
 		b.expectedRoot = segment.Block.ParentRoot
-		b.slotToDownload = segment.Block.Slot - 1 // update slot (might be inexact but whatever)
+		b.slotToDownload.Store(segment.Block.Slot - 1) // update slot (might be inexact but whatever)
 	}
 	if !b.neverSkip {
 		return nil
@@ -215,7 +208,7 @@ Loop:
 				}
 			}
 		}
-		b.slotToDownload = *slot - 1
+		b.slotToDownload.Store(*slot - 1)
 		if err := beacon_indicies.MarkRootCanonical(b.ctx, tx, *slot, b.expectedRoot); err != nil {
 			return err
 		}

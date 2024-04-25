@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
+	"github.com/ledgerwatch/erigon-lib/downloader/downloadergrpc"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -250,6 +251,18 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
 	}
+	if seedbox {
+		var downloadItems []*proto_downloader.AddItem
+		for _, it := range snapcfg.KnownCfg(chain).Preverified {
+			downloadItems = append(downloadItems, &proto_downloader.AddItem{
+				Path:        it.Name,
+				TorrentHash: downloadergrpc.String2Proto(it.Hash),
+			})
+		}
+		if _, err := bittorrentServer.Add(ctx, &proto_downloader.AddRequest{Items: downloadItems}); err != nil {
+			return err
+		}
+	}
 
 	grpcServer, err := StartGrpc(bittorrentServer, downloaderApiAddr, nil /* transportCredentials */, logger)
 	if err != nil {
@@ -266,10 +279,11 @@ var createTorrent = &cobra.Command{
 	Example: "go run ./cmd/downloader torrent_create --datadir=<your_datadir> --file=<relative_file_path>",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dirs := datadir.New(datadirCli)
-		err := downloader.BuildTorrentFilesIfNeed(cmd.Context(), dirs, downloader.NewAtomicTorrentFiles(dirs.Snap), chain, nil)
+		createdAmount, err := downloader.BuildTorrentFilesIfNeed(cmd.Context(), dirs, downloader.NewAtomicTorrentFS(dirs.Snap), chain, nil)
 		if err != nil {
 			return err
 		}
+		log.Info("created .torent files", "amount", createdAmount)
 		return nil
 	},
 }
@@ -300,11 +314,12 @@ var manifestCmd = &cobra.Command{
 
 var manifestVerifyCmd = &cobra.Command{
 	Use:     "manifest-verify",
-	Example: "go run ./cmd/downloader manifest-verify --chain <chain> [--webseeds 'a','b','c']",
+	Example: "go run ./cmd/downloader manifest-verify --chain <chain> [--webseed 'a','b','c']",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "downloader")
 		if err := manifestVerify(cmd.Context(), logger); err != nil {
 			log.Error(err.Error())
+			os.Exit(1) // to mark CI as failed
 		}
 		return nil
 	},
@@ -389,8 +404,10 @@ var torrentMagnet = &cobra.Command{
 
 func manifestVerify(ctx context.Context, logger log.Logger) error {
 	webseedsList := common.CliString2Array(webseeds)
-	if known, ok := snapcfg.KnownWebseeds[chain]; ok {
-		webseedsList = append(webseedsList, known...)
+	if len(webseedsList) == 0 { // fallback to default if exact list not passed
+		if known, ok := snapcfg.KnownWebseeds[chain]; ok {
+			webseedsList = append(webseedsList, known...)
+		}
 	}
 
 	webseedUrlsOrFiles := webseedsList
@@ -424,9 +441,9 @@ func manifestVerify(ctx context.Context, logger log.Logger) error {
 			continue
 		}
 	}
-
-	_ = webseedFileProviders // todo add support of file providers
-	logger.Warn("file providers are not supported yet", "fileProviders", webseedFileProviders)
+	if len(webseedFileProviders) > 0 {
+		logger.Warn("file providers are not supported yet", "fileProviders", webseedFileProviders)
+	}
 
 	wseed := downloader.NewWebSeeds(webseedHttpProviders, log.LvlDebug, logger)
 	return wseed.VerifyManifestedBuckets(ctx, verifyFailfast)
@@ -488,7 +505,7 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 
-	tf := downloader.NewAtomicTorrentFiles(dirs.Snap)
+	tf := downloader.NewAtomicTorrentFS(dirs.Snap)
 
 	if forceRebuild { // remove and create .torrent files (will re-read all snapshots)
 		//removePieceCompletionStorage(snapDir)
@@ -501,9 +518,11 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 				return err
 			}
 		}
-		if err := downloader.BuildTorrentFilesIfNeed(ctx, dirs, tf, chain, nil); err != nil {
+		createdAmount, err := downloader.BuildTorrentFilesIfNeed(ctx, dirs, tf, chain, nil)
+		if err != nil {
 			return fmt.Errorf("BuildTorrentFilesIfNeed: %w", err)
 		}
+		log.Info("created .torent files", "amount", createdAmount)
 	}
 
 	res := map[string]string{}

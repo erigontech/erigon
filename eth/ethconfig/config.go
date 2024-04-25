@@ -29,7 +29,6 @@ import (
 	"github.com/c2h5oh/datasize"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
@@ -45,8 +44,6 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
-// AggregationStep number of transactions in smalest static file
-const HistoryV3AggregationStep = 1_562_500 // = 100M / 64. Dividers: 2, 5, 10, 20, 50, 100, 500
 //const HistoryV3AggregationStep = 1_562_500 / 10 // use this to reduce step size for dev/debug
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
@@ -73,7 +70,8 @@ var LightClientGPO = gaspricecfg.Config{
 // Defaults contains default settings for use on the Ethereum main net.
 var Defaults = Config{
 	Sync: Sync{
-		UseSnapshots:               false,
+		UseSnapshots:               true,
+		HistoryV3:                  true,
 		ExecWorkerCount:            estimate.ReconstituteState.WorkersHalf(), //only half of CPU, other half will spend for snapshots build/merge/prune
 		ReconWorkerCount:           estimate.ReconstituteState.Workers(),
 		BodyCacheLimit:             256 * 1024 * 1024,
@@ -129,7 +127,7 @@ func init() {
 		if xdgDataDir := os.Getenv("XDG_DATA_HOME"); xdgDataDir != "" {
 			Defaults.Ethash.DatasetDir = filepath.Join(xdgDataDir, "erigon-ethash")
 		}
-		Defaults.Ethash.DatasetDir = filepath.Join(home, ".local/share/erigon-ethash")
+		Defaults.Ethash.DatasetDir = filepath.Join(home, ".local/share/erigon-ethash") //nolint:gocritic
 	}
 }
 
@@ -228,16 +226,15 @@ type Config struct {
 
 	StateStream bool
 
-	//  New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
-	HistoryV3 bool
-
 	// URL to connect to Heimdall node
 	HeimdallURL string
-
 	// No heimdall service
 	WithoutHeimdall bool
 	// Heimdall services active
 	WithHeimdallMilestones bool
+	PolygonSync            bool
+	PolygonSyncStage       bool
+
 	// Ethstats service
 	Ethstats string
 	// Consensus layer
@@ -248,18 +245,31 @@ type Config struct {
 	SentinelAddr                string
 	SentinelPort                uint64
 
-	OverrideCancunTime *big.Int `toml:",omitempty"`
+	OverridePragueTime *big.Int `toml:",omitempty"`
 
 	// Embedded Silkworm support
-	SilkwormExecution bool
-	SilkwormRpcDaemon bool
-	SilkwormSentry    bool
+	SilkwormExecution            bool
+	SilkwormRpcDaemon            bool
+	SilkwormSentry               bool
+	SilkwormVerbosity            string
+	SilkwormNumContexts          uint32
+	SilkwormRpcLogEnabled        bool
+	SilkwormRpcLogDirPath        string
+	SilkwormRpcLogMaxFileSize    uint16
+	SilkwormRpcLogMaxFiles       uint16
+	SilkwormRpcLogDumpResponse   bool
+	SilkwormRpcNumWorkers        uint32
+	SilkwormRpcJsonCompatibility bool
 
 	DisableTxPoolGossip bool
 }
 
 type Sync struct {
 	UseSnapshots bool
+
+	//  New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
+	HistoryV3 bool
+
 	// LoopThrottle sets a minimum time between staged loop iterations
 	LoopThrottle     time.Duration
 	ExecWorkerCount  int
@@ -276,19 +286,4 @@ type Sync struct {
 	FrozenBlockLimit uint64
 }
 
-// Chains where snapshots are enabled by default
-var ChainsWithSnapshots = map[string]struct{}{
-	networkname.MainnetChainName:    {},
-	networkname.SepoliaChainName:    {},
-	networkname.GoerliChainName:     {},
-	networkname.MumbaiChainName:     {},
-	networkname.AmoyChainName:       {},
-	networkname.BorMainnetChainName: {},
-	networkname.GnosisChainName:     {},
-	networkname.ChiadoChainName:     {},
-}
-
-func UseSnapshotsByChainName(chain string) bool {
-	_, ok := ChainsWithSnapshots[chain]
-	return ok
-}
+func UseSnapshotsByChainName(chain string) bool { return true }

@@ -18,6 +18,7 @@ package rawdbv3
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -26,6 +27,27 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 )
+
+type ErrTxNumsAppendWithGap struct {
+	appendBlockNum uint64
+	lastBlockNum   uint64
+}
+
+func (e ErrTxNumsAppendWithGap) LastBlock() uint64 {
+	return e.lastBlockNum
+}
+
+func (e ErrTxNumsAppendWithGap) Error() string {
+	return fmt.Sprintf(
+		"append with gap blockNum=%d, but current height=%d, stack: %s",
+		e.appendBlockNum, e.lastBlockNum, dbg.Stack(),
+	)
+}
+
+func (e ErrTxNumsAppendWithGap) Is(err error) bool {
+	var target ErrTxNumsAppendWithGap
+	return errors.As(err, &target)
+}
 
 type txNums struct{}
 
@@ -93,7 +115,7 @@ func (txNums) Append(tx kv.RwTx, blockNum, maxTxNum uint64) (err error) {
 	if len(lastK) != 0 {
 		lastBlockNum := binary.BigEndian.Uint64(lastK)
 		if lastBlockNum > 1 && lastBlockNum+1 != blockNum { //allow genesis
-			return fmt.Errorf("append with gap blockNum=%d, but current heigh=%d, stack: %s", blockNum, lastBlockNum, dbg.Stack())
+			return ErrTxNumsAppendWithGap{appendBlockNum: blockNum, lastBlockNum: lastBlockNum}
 		}
 	}
 

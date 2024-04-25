@@ -35,7 +35,7 @@ func (a *WaypointFields) CmpRange(n uint64) int {
 	if num.Cmp(a.StartBlock) < 0 {
 		return -1
 	}
-	if num.Cmp(a.StartBlock) > 0 {
+	if num.Cmp(a.EndBlock) > 0 {
 		return 1
 	}
 	return 0

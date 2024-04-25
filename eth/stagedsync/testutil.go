@@ -10,11 +10,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 )
 
 const (
@@ -25,13 +25,13 @@ const (
 
 func compareCurrentState(
 	t *testing.T,
-	agg *state2.AggregatorV3,
+	agg *state2.Aggregator,
 	db1 kv.Tx,
 	db2 kv.Tx,
 	buckets ...string,
 ) {
 	for _, bucket := range buckets {
-		if ethconfig.EnableHistoryV4InTest {
+		if config3.EnableHistoryV4InTest {
 			compareDomain(t, agg, db1, db2, bucket)
 			continue
 		}
@@ -39,8 +39,8 @@ func compareCurrentState(
 	}
 }
 
-func compareDomain(t *testing.T, agg *state2.AggregatorV3, db1, db2 kv.Tx, bucketName string) {
-	ac := agg.MakeContext()
+func compareDomain(t *testing.T, agg *state2.Aggregator, db1, db2 kv.Tx, bucketName string) {
+	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
 	var domain kv.Domain

@@ -3,6 +3,7 @@ package blockio
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv/backup"
@@ -60,6 +61,11 @@ func (w *BlockWriter) FillHeaderNumberIndex(logPrefix string, tx kv.RwTx, tmpDir
 func (w *BlockWriter) MakeBodiesCanonical(tx kv.RwTx, from uint64) error {
 	if w.historyV3 {
 		if err := rawdb.AppendCanonicalTxNums(tx, from); err != nil {
+			var e1 rawdbv3.ErrTxNumsAppendWithGap
+			if ok := errors.As(err, &e1); ok {
+				// try again starting from latest available  block
+				return rawdb.AppendCanonicalTxNums(tx, e1.LastBlock()+1)
+			}
 			return err
 		}
 	}

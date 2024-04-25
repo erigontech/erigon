@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/config3"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
@@ -37,7 +39,6 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -88,7 +89,7 @@ type ExecuteBlockCfg struct {
 	historyV3 bool
 	syncCfg   ethconfig.Sync
 	genesis   *types.Genesis
-	agg       *libstate.AggregatorV3
+	agg       *libstate.Aggregator
 
 	silkworm *silkworm.Silkworm
 }
@@ -111,7 +112,7 @@ func StageExecuteBlocksCfg(
 	hd headerDownloader,
 	genesis *types.Genesis,
 	syncCfg ethconfig.Sync,
-	agg *libstate.AggregatorV3,
+	agg *libstate.Aggregator,
 	silkworm *silkworm.Silkworm,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
@@ -209,11 +210,20 @@ func executeBlock(
 func gatherNoPruneReceipts(receipts *types.Receipts, chainCfg *chain.Config) bool {
 	cr := types.Receipts{}
 	for _, r := range *receipts {
-		for _, l := range r.Logs {
-			if chainCfg.NoPruneContracts[l.Address] {
-				cr = append(cr, r)
-				break
+		toStore := false
+		if chainCfg.NoPruneContracts != nil && chainCfg.NoPruneContracts[r.ContractAddress] {
+			toStore = true
+		} else {
+			for _, l := range r.Logs {
+				if chainCfg.NoPruneContracts != nil && chainCfg.NoPruneContracts[l.Address] {
+					toStore = true
+					break
+				}
 			}
+		}
+
+		if toStore {
+			cr = append(cr, r)
 		}
 	}
 	receipts = &cr
@@ -305,7 +315,7 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 }
 
 // reconstituteBlock - First block which is not covered by the history snapshot files
-func reconstituteBlock(agg *libstate.AggregatorV3, db kv.RoDB, tx kv.Tx) (n uint64, ok bool, err error) {
+func reconstituteBlock(agg *libstate.Aggregator, db kv.RoDB, tx kv.Tx) (n uint64, ok bool, err error) {
 	sendersProgress, err := senderStageProgress(tx, db)
 	if err != nil {
 		return 0, false, err
@@ -337,7 +347,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	//	return fmt.Errorf("commitment can unwind only to block: %d, requested: %d. UnwindTo was called with wrong value", bn, u.UnwindPoint)
 	//}
 
-	unwindToLimit, err := txc.Tx.(libstate.HasAggCtx).AggCtx().(*libstate.AggregatorV3Context).CanUnwindDomainsToBlockNum(txc.Tx)
+	unwindToLimit, err := txc.Tx.(libstate.HasAggCtx).AggCtx().(*libstate.AggregatorRoTx).CanUnwindDomainsToBlockNum(txc.Tx)
 	if err != nil {
 		return err
 	}
@@ -409,7 +419,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 		}
 		return nil
 	}
-	if ethconfig.EnableHistoryV4InTest {
+	if config3.EnableHistoryV4InTest {
 		panic("must use ExecBlockV3")
 	}
 
@@ -474,7 +484,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 
 	var readAhead chan uint64
 	if initialCycle && cfg.silkworm == nil { // block read-ahead is not compatible w/ Silkworm one-shot block execution
-		// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
+		// snapshots are often stored on cheaper drives. don't expect low-read-latency and manually read-ahead.
 		// can't use OS-level ReadAhead - because Data >> RAM
 		// it also warmsup state a bit - by touching senders/coninbase accounts and code
 		var clean func()
@@ -520,30 +530,30 @@ Loop:
 
 		_, isMemoryMutation := txc.Tx.(*membatchwithdb.MemoryMutation)
 		if cfg.silkworm != nil && !isMemoryMutation {
-			if !useExternalTx {
+			if useExternalTx {
+				blockNum, err = silkworm.ExecuteBlocksEphemeral(cfg.silkworm, txc.Tx, cfg.chainConfig.ChainID, blockNum, to, uint64(cfg.batchSize), writeChangeSets, writeReceipts, writeCallTraces)
+			} else {
 				// In case of internal tx we close it (no changes, commit not needed): Silkworm will use its own internal tx
 				txc.Tx.Rollback()
 				txc.Tx = nil
-			}
-			// Possible scenarios:
-			// - external tx i.e. txc.Tx != nil: Silkworm will use but not commit/abort the passed tx
-			// - internal tx i.e. txc.Tx == nil: Silkworm will use its own internal tx calling commit/abort
-			// In both cases Silkworm will use its own state batch and update the Execution stage progess
-			blockNum, err = silkworm.ExecuteBlocks(cfg.silkworm, cfg.db, txc.Tx, cfg.chainConfig.ChainID, blockNum, to, uint64(cfg.batchSize), writeChangeSets, writeReceipts, writeCallTraces)
-			if err != nil {
-				// In case of any error we need to increment to have the failed block number
-				blockNum++
-			}
-			if !useExternalTx {
-				// Recreate internal tx after Silkworm has finished
+
+				log.Info("Using Silkworm to commit full range", "fromBlock", s.BlockNumber+1, "toBlock", to)
+				blockNum, err = silkworm.ExecuteBlocksPerpetual(cfg.silkworm, cfg.db, cfg.chainConfig.ChainID, blockNum, to, uint64(cfg.batchSize), writeChangeSets, writeReceipts, writeCallTraces)
+
 				var txErr error
 				if txc.Tx, txErr = cfg.db.BeginRw(context.Background()); txErr != nil {
 					return txErr
 				}
 				defer txc.Tx.Rollback()
+
 				// Recreate memory batch because underlying tx has changed
 				batch.Close()
 				batch = membatch.NewHashBatch(txc.Tx, quit, cfg.dirs.Tmp, logger)
+			}
+
+			// In case of any error we need to increment to have the failed block number
+			if err != nil {
+				blockNum++
 			}
 		} else {
 			err = executeBlock(block, txc.Tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, stateStream, logger)
@@ -590,8 +600,7 @@ Loop:
 
 		shouldUpdateProgress := batch.BatchSize() >= int(cfg.batchSize)
 		if shouldUpdateProgress {
-			logger.Info("Committed State", "gas reached", currentStateGas, "gasTarget", gasState, "block", blockNum)
-			currentStateGas = 0
+			commitTime := time.Now()
 			if err = batch.Flush(ctx, txc.Tx); err != nil {
 				return err
 			}
@@ -610,6 +619,8 @@ Loop:
 				// TODO: This creates stacked up deferrals
 				defer txc.Tx.Rollback()
 			}
+			logger.Info("Committed State", "gas reached", currentStateGas, "gasTarget", gasState, "block", blockNum, "time", time.Since(commitTime), "committedToDb", !useExternalTx)
+			currentStateGas = 0
 			batch = membatch.NewHashBatch(txc.Tx, quit, cfg.dirs.Tmp, logger)
 		}
 
@@ -621,7 +632,7 @@ Loop:
 			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, gas, float64(currentStateGas)/float64(gasState), batch, logger, s.BlockNumber, to, startTime)
 			gas = 0
 			txc.Tx.CollectMetrics()
-			syncMetrics[stages.Execution].SetUint64(blockNum)
+			stages.SyncMetrics[stages.Execution].SetUint64(blockNum)
 		}
 	}
 
@@ -981,7 +992,7 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		if initialCycle {
 			pruneTimeout = 12 * time.Hour
 		}
-		if _, err = tx.(*temporal.Tx).AggCtx().(*libstate.AggregatorV3Context).PruneSmallBatches(ctx, pruneTimeout, tx); err != nil { // prune part of retired data, before commit
+		if _, err = tx.(*temporal.Tx).AggCtx().(*libstate.AggregatorRoTx).PruneSmallBatches(ctx, pruneTimeout, tx); err != nil { // prune part of retired data, before commit
 			return err
 		}
 	} else {
