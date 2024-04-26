@@ -13,7 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/stretchr/testify/require"
-	gomock "go.uber.org/mock/gomock"
+	"go.uber.org/mock/gomock"
 )
 
 func getAggregateAndProofAndState(t *testing.T) (*cltypes.SignedAggregateAndProof, *state.CachingBeaconState) {
