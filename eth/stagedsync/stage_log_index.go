@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"runtime"
+	"slices"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
@@ -19,7 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
@@ -414,7 +414,7 @@ func pruneOldLogChunks(tx kv.RwTx, bucket string, inMem *etl.Collector, pruneTo 
 	return nil
 }
 
-// Call pruneLogIndex with the current current sync progresses and commit the data to db
+// Call pruneLogIndex with the current sync progresses and commit the data to db
 func PruneLogIndex(s *PruneState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Context, logger log.Logger) (err error) {
 	if !cfg.prune.Receipts.Enabled() {
 		return nil

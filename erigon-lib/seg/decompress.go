@@ -21,12 +21,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"os"
 	"path/filepath"
 	"strconv"
 	"time"
 	"unsafe"
+
+	"github.com/ledgerwatch/erigon-lib/common/assert"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/log/v3"

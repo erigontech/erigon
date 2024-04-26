@@ -33,6 +33,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v4"
 	jsoniter "github.com/json-iterator/go"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -244,6 +245,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if origin := r.Header.Get("Origin"); origin != "" {
 		ctx = context.WithValue(ctx, "Origin", origin)
+	}
+	if s.debugSingleRequest {
+		if v := r.Header.Get(dbg.HTTPHeader); v == "true" {
+			ctx = dbg.ContextWithDebug(ctx, true)
+
+		}
 	}
 
 	w.Header().Set("content-type", contentType)
