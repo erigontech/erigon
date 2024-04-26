@@ -43,7 +43,7 @@ func runErigon(cliCtx *cli.Context) error {
 	var logger log.Logger
 	var err error
 
-	if logger, _, err = debug.Setup(cliCtx, true /* root logger */); err != nil {
+	if logger, err = debug.Setup(cliCtx, true /* root logger */); err != nil {
 		return err
 	}
 

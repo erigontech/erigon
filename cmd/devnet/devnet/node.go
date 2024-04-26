@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math/big"
-	"net/http"
 	"sync"
 
 	"github.com/c2h5oh/datasize"
@@ -139,7 +138,6 @@ func (n *devnetNode) EnableMetrics(int) {
 func (n *devnetNode) run(ctx *cli.Context) error {
 	var logger log.Logger
 	var err error
-	var metricsMux *http.ServeMux
 
 	defer n.done()
 	defer func() {
@@ -152,7 +150,7 @@ func (n *devnetNode) run(ctx *cli.Context) error {
 		n.Unlock()
 	}()
 
-	if logger, metricsMux, err = debug.Setup(ctx, false /* rootLogger */); err != nil {
+	if logger, err = debug.Setup(ctx, false /* rootLogger */); err != nil {
 		return err
 	}
 
@@ -184,9 +182,7 @@ func (n *devnetNode) run(ctx *cli.Context) error {
 
 	n.ethNode, err = enode.New(ctx.Context, n.nodeCfg, n.ethCfg, logger)
 
-	if metricsMux != nil {
-		diagnostics.Setup(ctx, n.ethNode)
-	}
+	diagnostics.Setup(ctx, n.ethNode)
 
 	n.Lock()
 	if n.startErr != nil {
