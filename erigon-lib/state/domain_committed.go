@@ -427,7 +427,6 @@ func (dt *DomainRoTx) commitmentValTransformDomain(accounts, storage *DomainRoTx
 	if mergedStorage != nil {
 		stoMerged = fmt.Sprintf("%d-%d", mergedStorage.startTxNum/dt.d.aggregationStep, mergedStorage.endTxNum/dt.d.aggregationStep)
 	}
-	auxBuf := make([]byte, 0, length.Hash)
 
 	return func(valBuf []byte, keyFromTxNum, keyEndTxNum uint64) (transValBuf []byte, err error) {
 		if !dt.d.replaceKeysInValues || len(valBuf) == 0 {
@@ -448,6 +447,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(accounts, storage *DomainRoTx
 
 		replacer := func(key []byte, isStorage bool) ([]byte, error) {
 			var found bool
+			auxBuf := dt.keyBuf[:0]
 			if isStorage {
 				if len(key) == length.Addr+length.Hash {
 					// Non-optimised key originating from a database record
