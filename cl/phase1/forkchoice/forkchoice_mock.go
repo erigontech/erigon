@@ -59,38 +59,47 @@ func makeSyncContributionPoolMock(t *testing.T) sync_contribution_pool.SyncContr
 	}
 	u := map[syncContributionKey]*cltypes.Contribution{}
 	pool := syncpoolmock.NewMockSyncContributionPool(ctrl)
-	pool.EXPECT().AddSyncContribution(gomock.Any(), gomock.Any()).DoAndReturn(func(headState *state.CachingBeaconState, contribution *cltypes.Contribution) error {
-		key := syncContributionKey{
-			slot:              contribution.Slot,
-			subcommitteeIndex: contribution.SubcommitteeIndex,
-			beaconBlockRoot:   contribution.BeaconBlockRoot,
-		}
-		u[key] = contribution
-		return nil
-	}).AnyTimes()
-	pool.EXPECT().GetSyncContribution(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(slot uint64, subcommitteeIndex uint64, beaconBlockRoot common.Hash) (*cltypes.Contribution, bool) {
-		key := syncContributionKey{
-			slot:              slot,
-			subcommitteeIndex: subcommitteeIndex,
-			beaconBlockRoot:   beaconBlockRoot,
-		}
-		v, ok := u[key]
-		return v, ok
-	}).AnyTimes()
-	pool.EXPECT().AddSyncCommitteeMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(headState *state.CachingBeaconState, subCommitee uint64, message *cltypes.SyncCommitteeMessage) error {
-		key := syncContributionKey{
-			slot:              message.Slot,
-			subcommitteeIndex: subCommitee,
-			beaconBlockRoot:   message.BeaconBlockRoot,
-		}
-		u[key] = &cltypes.Contribution{
-			Slot:              message.Slot,
-			SubcommitteeIndex: subCommitee,
-			BeaconBlockRoot:   message.BeaconBlockRoot,
-			AggregationBits:   make([]byte, cltypes.SyncCommitteeAggregationBitsSize),
-		}
-		return nil
-	}).AnyTimes()
+	pool.EXPECT().
+		AddSyncContribution(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(headState *state.CachingBeaconState, contribution *cltypes.Contribution) error {
+			key := syncContributionKey{
+				slot:              contribution.Slot,
+				subcommitteeIndex: contribution.SubcommitteeIndex,
+				beaconBlockRoot:   contribution.BeaconBlockRoot,
+			}
+			u[key] = contribution
+			return nil
+		}).
+		AnyTimes()
+	pool.EXPECT().
+		GetSyncContribution(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(slot uint64, subcommitteeIndex uint64, beaconBlockRoot common.Hash) (*cltypes.Contribution, bool) {
+			key := syncContributionKey{
+				slot:              slot,
+				subcommitteeIndex: subcommitteeIndex,
+				beaconBlockRoot:   beaconBlockRoot,
+			}
+			v, ok := u[key]
+			return v, ok
+		}).
+		AnyTimes()
+	pool.EXPECT().
+		AddSyncCommitteeMessage(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(headState *state.CachingBeaconState, subCommitee uint64, message *cltypes.SyncCommitteeMessage) error {
+			key := syncContributionKey{
+				slot:              message.Slot,
+				subcommitteeIndex: subCommitee,
+				beaconBlockRoot:   message.BeaconBlockRoot,
+			}
+			u[key] = &cltypes.Contribution{
+				Slot:              message.Slot,
+				SubcommitteeIndex: subCommitee,
+				BeaconBlockRoot:   message.BeaconBlockRoot,
+				AggregationBits:   make([]byte, cltypes.SyncCommitteeAggregationBitsSize),
+			}
+			return nil
+		}).
+		AnyTimes()
 	return pool
 }
 
@@ -163,17 +172,27 @@ func (f *ForkChoiceStorageMock) ProposerBoostRoot() common.Hash {
 	return f.ProposerBoostRootVal
 }
 
-func (f *ForkChoiceStorageMock) GetStateAtBlockRoot(blockRoot common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+func (f *ForkChoiceStorageMock) GetStateAtBlockRoot(
+	blockRoot common.Hash,
+	alwaysCopy bool,
+) (*state.CachingBeaconState, error) {
 	return f.StateAtBlockRootVal[blockRoot], nil
 }
 
-func (f *ForkChoiceStorageMock) GetFinalityCheckpoints(blockRoot common.Hash) (bool, solid.Checkpoint, solid.Checkpoint, solid.Checkpoint) {
-	oneNil := f.GetFinalityCheckpointsVal[blockRoot][0] != nil && f.GetFinalityCheckpointsVal[blockRoot][1] != nil && f.GetFinalityCheckpointsVal[blockRoot][2] != nil
+func (f *ForkChoiceStorageMock) GetFinalityCheckpoints(
+	blockRoot common.Hash,
+) (bool, solid.Checkpoint, solid.Checkpoint, solid.Checkpoint) {
+	oneNil := f.GetFinalityCheckpointsVal[blockRoot][0] != nil &&
+		f.GetFinalityCheckpointsVal[blockRoot][1] != nil &&
+		f.GetFinalityCheckpointsVal[blockRoot][2] != nil
 	return oneNil, f.GetFinalityCheckpointsVal[blockRoot][0], f.GetFinalityCheckpointsVal[blockRoot][1], f.GetFinalityCheckpointsVal[blockRoot][2]
 }
 
-func (f *ForkChoiceStorageMock) GetSyncCommittees(period uint64) (*solid.SyncCommittee, *solid.SyncCommittee, bool) {
-	return f.GetSyncCommitteesVal[period][0], f.GetSyncCommitteesVal[period][1], f.GetSyncCommitteesVal[period][0] != nil && f.GetSyncCommitteesVal[period][1] != nil
+func (f *ForkChoiceStorageMock) GetSyncCommittees(
+	period uint64,
+) (*solid.SyncCommittee, *solid.SyncCommittee, bool) {
+	return f.GetSyncCommitteesVal[period][0], f.GetSyncCommitteesVal[period][1], f.GetSyncCommitteesVal[period][0] != nil &&
+		f.GetSyncCommitteesVal[period][1] != nil
 }
 
 func (f *ForkChoiceStorageMock) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, error) {
@@ -191,17 +210,32 @@ func (f *ForkChoiceStorageMock) Time() uint64 {
 	return f.TimeVal
 }
 
-func (f *ForkChoiceStorageMock) OnAttestation(attestation *solid.Attestation, fromBlock, insert bool) error {
+func (f *ForkChoiceStorageMock) OnAttestation(
+	attestation *solid.Attestation,
+	fromBlock, insert bool,
+) error {
 	f.Pool.AttestationsPool.Insert(attestation.Signature(), attestation)
 	return nil
 }
 
-func (f *ForkChoiceStorageMock) OnAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing, test bool) error {
-	f.Pool.AttesterSlashingsPool.Insert(pool.ComputeKeyForAttesterSlashing(attesterSlashing), attesterSlashing)
+func (f *ForkChoiceStorageMock) OnAttesterSlashing(
+	attesterSlashing *cltypes.AttesterSlashing,
+	test bool,
+) error {
+	f.Pool.AttesterSlashingsPool.Insert(
+		pool.ComputeKeyForAttesterSlashing(attesterSlashing),
+		attesterSlashing,
+	)
 	return nil
 }
 
-func (f *ForkChoiceStorageMock) OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload bool, fullValidation bool, checkDataAvaiability bool) error {
+func (f *ForkChoiceStorageMock) OnBlock(
+	ctx context.Context,
+	block *cltypes.SignedBeaconBlock,
+	newPayload bool,
+	fullValidation bool,
+	checkDataAvaiability bool,
+) error {
 	return nil
 }
 
@@ -241,7 +275,9 @@ func (f *ForkChoiceStorageMock) SetSynced(synced bool) {
 	panic("implement me")
 }
 
-func (f *ForkChoiceStorageMock) GetLightClientBootstrap(blockRoot common.Hash) (*cltypes.LightClientBootstrap, bool) {
+func (f *ForkChoiceStorageMock) GetLightClientBootstrap(
+	blockRoot common.Hash,
+) (*cltypes.LightClientBootstrap, bool) {
 	return f.LightClientBootstraps[blockRoot], f.LightClientBootstraps[blockRoot] != nil
 }
 
@@ -249,11 +285,15 @@ func (f *ForkChoiceStorageMock) NewestLightClientUpdate() *cltypes.LightClientUp
 	return f.NewestLCUpdate
 }
 
-func (f *ForkChoiceStorageMock) GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool) {
+func (f *ForkChoiceStorageMock) GetLightClientUpdate(
+	period uint64,
+) (*cltypes.LightClientUpdate, bool) {
 	return f.LCUpdates[period], f.LCUpdates[period] != nil
 }
 
-func (f *ForkChoiceStorageMock) GetHeader(blockRoot libcommon.Hash) (*cltypes.BeaconBlockHeader, bool) {
+func (f *ForkChoiceStorageMock) GetHeader(
+	blockRoot libcommon.Hash,
+) (*cltypes.BeaconBlockHeader, bool) {
 	return f.Headers[blockRoot], f.Headers[blockRoot] != nil
 }
 
@@ -261,23 +301,34 @@ func (f *ForkChoiceStorageMock) GetBalances(blockRoot libcommon.Hash) (solid.Uin
 	panic("implement me")
 }
 
-func (f *ForkChoiceStorageMock) GetInactivitiesScores(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error) {
+func (f *ForkChoiceStorageMock) GetInactivitiesScores(
+	blockRoot libcommon.Hash,
+) (solid.Uint64ListSSZ, error) {
 	panic("implement me")
 }
 
-func (f *ForkChoiceStorageMock) GetPreviousPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error) {
+func (f *ForkChoiceStorageMock) GetPreviousPartecipationIndicies(
+	blockRoot libcommon.Hash,
+) (*solid.BitList, error) {
 	panic("implement me")
 }
 
-func (f *ForkChoiceStorageMock) GetValidatorSet(blockRoot libcommon.Hash) (*solid.ValidatorSet, error) {
+func (f *ForkChoiceStorageMock) GetValidatorSet(
+	blockRoot libcommon.Hash,
+) (*solid.ValidatorSet, error) {
 	panic("implement me")
 }
 
-func (f *ForkChoiceStorageMock) GetCurrentPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error) {
+func (f *ForkChoiceStorageMock) GetCurrentPartecipationIndicies(
+	blockRoot libcommon.Hash,
+) (*solid.BitList, error) {
 	panic("implement me")
 }
 
-func (f *ForkChoiceStorageMock) GetPublicKeyForValidator(blockRoot libcommon.Hash, idx uint64) (libcommon.Bytes48, error) {
+func (f *ForkChoiceStorageMock) GetPublicKeyForValidator(
+	blockRoot libcommon.Hash,
+	idx uint64,
+) (libcommon.Bytes48, error) {
 	panic("implement me")
 }
 
@@ -291,4 +342,10 @@ func (f *ForkChoiceStorageMock) AddPreverifiedBlobSidecar(msg *cltypes.BlobSidec
 }
 func (f *ForkChoiceStorageMock) ValidateOnAttestation(attestation *solid.Attestation) error {
 	panic("implement me")
+}
+
+func (f *ForkChoiceStorageMock) ProcessAttestingIndicies(
+	attestation *solid.Attestation,
+	attestionIndicies []uint64,
+) {
 }
