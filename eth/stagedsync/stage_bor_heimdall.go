@@ -319,7 +319,7 @@ func BorHeimdallForward(
 		if nextEventRecord == nil || header.Time > uint64(nextEventRecord.Time.Unix()) {
 			var records int
 
-			if lastStateSyncEventID != endStateSyncEventId {
+			if lastStateSyncEventID == 0 || lastStateSyncEventID != endStateSyncEventId {
 				lastStateSyncEventID, records, callTime, err = fetchRequiredHeimdallStateSyncEventsIfNeeded(
 					ctx,
 					header,
