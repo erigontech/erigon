@@ -58,14 +58,14 @@ func SpawnSequencerExecutorVerifyStage(
 	}
 
 	// progress here is at the block level
-	intersProgress, err := stages.GetStageProgress(tx, stages.IntermediateHashes)
+	executeProgress, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
 		return err
 	}
 
 	// we need to get the batch number for the latest block, so we can search for new batches to send for
 	// verification
-	intersBatch, err := hermezDb.GetBatchNoByL2Block(intersProgress)
+	intersBatch, err := hermezDb.GetBatchNoByL2Block(executeProgress)
 	if err != nil {
 		return err
 	}
