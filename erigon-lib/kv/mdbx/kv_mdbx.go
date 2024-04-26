@@ -2057,6 +2057,9 @@ func (s *cursor2iter) Next() (k, v []byte, err error) {
 		return nil, nil, s.ctx.Err()
 	default:
 	}
+	if s.err != nil {
+		return nil, nil, s.err
+	}
 	s.limit--
 	k, v, err = s.nextK, s.nextV, s.err
 	if s.orderAscend {
