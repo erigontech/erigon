@@ -9,9 +9,7 @@ import (
 
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/pkg/errors"
 
-	"github.com/ledgerwatch/erigon/cl/aggregation"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -19,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
@@ -31,19 +30,19 @@ type aggregateAndProofServiceImpl struct {
 	syncedDataManager *synced_data.SyncedDataManager
 	forkchoiceStore   forkchoice.ForkChoiceStorage
 	beaconCfg         *clparams.BeaconChainConfig
-	aggregationPool   aggregation.AggregationPool
+	opPool            pool.OperationsPool
 	test              bool
 
 	// set of aggregates that are scheduled for later processing
 	aggregatesScheduledForLaterExecution sync.Map
 }
 
-func NewAggregateAndProofService(ctx context.Context, syncedDataManager *synced_data.SyncedDataManager, forkchoiceStore forkchoice.ForkChoiceStorage, beaconCfg *clparams.BeaconChainConfig, aggregationPool aggregation.AggregationPool, test bool) AggregateAndProofService {
+func NewAggregateAndProofService(ctx context.Context, syncedDataManager *synced_data.SyncedDataManager, forkchoiceStore forkchoice.ForkChoiceStorage, beaconCfg *clparams.BeaconChainConfig, opPool pool.OperationsPool, test bool) AggregateAndProofService {
 	a := &aggregateAndProofServiceImpl{
 		syncedDataManager: syncedDataManager,
 		forkchoiceStore:   forkchoiceStore,
 		beaconCfg:         beaconCfg,
-		aggregationPool:   aggregationPool,
+		opPool:            opPool,
 		test:              test,
 	}
 	go a.loop(ctx)
@@ -119,12 +118,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(ctx context.Context, subne
 	}
 
 	// Add to aggregation pool
-	if err := a.aggregationPool.AddAttestation(aggregateAndProof.Message.Aggregate); err != nil {
-		if errors.Is(err, aggregation.ErrIsSuperset) {
-			return ErrIgnore
-		}
-		return errors.WithMessagef(err, "failed to add attestation to pool")
-	}
+	a.opPool.AttestationsPool.Insert(aggregateAndProof.Message.Aggregate.Signature(), aggregateAndProof.Message.Aggregate)
 
 	return nil
 }
