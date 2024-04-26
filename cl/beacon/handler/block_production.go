@@ -751,11 +751,35 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 			reward:      expectedReward,
 		})
 	}
-	// Sort in descending order
+	// Rank by reward in descending order.
 	sort.Slice(attestationCandidates, func(i, j int) bool {
 		return attestationCandidates[i].reward > attestationCandidates[j].reward
 	})
+	// Some aggregates can be supersets of existing ones so let's filter out the supersets
+	// this MAP is HashTreeRoot(AttestationData) => AggregationBits
+	aggregationBitsByAttestationData := make(map[libcommon.Hash][]byte)
 	for _, candidate := range attestationCandidates {
+		// Check if it is a superset of a pre-included attestation with higher reward
+		attestationDataRoot, err := candidate.attestation.AttestantionData().HashSSZ()
+		if err != nil {
+			log.Warn("[Block Production] Cannot compute attestation data root", "err", err)
+			continue
+		}
+		currAggregationBits, exists := aggregationBitsByAttestationData[attestationDataRoot]
+		if exists {
+			if utils.IsNonStrictSupersetBitlist(
+				currAggregationBits,
+				candidate.attestation.AggregationBits(),
+			) {
+				continue
+			}
+			utils.MergeBitlists(currAggregationBits, candidate.attestation.AggregationBits())
+		} else {
+			currAggregationBits = candidate.attestation.AggregationBits()
+		}
+		// Update the currently built superset
+		aggregationBitsByAttestationData[attestationDataRoot] = currAggregationBits
+
 		ret.Append(candidate.attestation)
 		if ret.Len() >= int(a.beaconChainCfg.MaxAttestations) {
 			break
