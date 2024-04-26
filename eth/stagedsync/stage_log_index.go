@@ -414,7 +414,7 @@ func pruneOldLogChunks(tx kv.RwTx, bucket string, inMem *etl.Collector, pruneTo 
 	return nil
 }
 
-// Call pruneLogIndex with the current current sync progresses and commit the data to db
+// Call pruneLogIndex with the current sync progresses and commit the data to db
 func PruneLogIndex(s *PruneState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Context, logger log.Logger) (err error) {
 	if !cfg.prune.Receipts.Enabled() {
 		return nil
