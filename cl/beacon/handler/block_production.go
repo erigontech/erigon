@@ -180,7 +180,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println(proposerIndex)
 
 	rewardsCollector := &eth2.BlockRewardsCollector{}
 	block := &cltypes.BeaconBlock{
