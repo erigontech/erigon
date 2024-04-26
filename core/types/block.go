@@ -1051,7 +1051,7 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 // NewBlockFromStorage like NewBlock but used to create Block object when read it from DB
 // in this case no reason to copy parts, or re-calculate headers fields - they are all stored in DB
 func NewBlockFromStorage(hash libcommon.Hash, header *Header, transactions []Transaction, uncles []*Header, withdrawals []*Withdrawal, deposits []*Deposit) *Block {
-	b := &Block{header: header, uncles: uncles, transactions: transactions, withdrawals: withdrawals} // TODO(racytech): add deposits to it
+	b := &Block{header: header, uncles: uncles, transactions: transactions, withdrawals: withdrawals, deposits: deposits}
 	b.hash.Store(hash)
 	return b
 }

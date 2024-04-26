@@ -80,6 +80,11 @@ var (
 )
 
 var (
+	// temporary solution, this should be added into the chain cfg
+	DepositContractAddress = libcommon.HexToAddress("0x00000000219ab540356cbb839cbe05303d7705fa") // TODO(racytech): do not forget to move this to chain cfg
+)
+
+var (
 	// MainnetChainConfig is the chain parameters to run a node on the main network.
 	MainnetChainConfig = readChainSpec("chainspecs/mainnet.json")
 

@@ -18,6 +18,8 @@ const (
 	sLen = 96 // signature size
 )
 
+var DepositRequestType byte = 0
+
 //go:generate go run github.com/fjl/gencodec -type Deposit -field-override depositMarshaling -out gen_deposit_json.go
 
 type Deposit struct {

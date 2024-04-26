@@ -681,13 +681,12 @@ func WriteBody(db kv.RwTx, hash common.Hash, number uint64, body *types.Body) (e
 	if err != nil {
 		return err
 	}
-	// TODO(racytech): add deposits here
 	data := types.BodyForStorage{
 		BaseTxId:    baseTxId,
 		TxAmount:    uint32(len(body.Transactions)) + 2,
 		Uncles:      body.Uncles,
 		Withdrawals: body.Withdrawals,
-		// Deposits:    body.Deposits,
+		Deposits:    body.Deposits,
 	}
 	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return fmt.Errorf("failed to write body: %w", err)

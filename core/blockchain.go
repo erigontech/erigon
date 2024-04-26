@@ -138,15 +138,17 @@ func ExecuteBlockEphemerally(
 
 	/* TODO(racytech):
 	# Retrieve all deposits made in the block
-	expected_deposits = []
+	expected_deposit_requests = []
 	for receipt in receipts:
 		for log in receipt.logs:
 			if log.address == DEPOSIT_CONTRACT_ADDRESS:
-				deposit = event_data_to_deposit(log.data) --> How?
-				expected_deposits.append(deposit)
+				deposit_request_rlp = event_data_to_deposit_request_rlp(log.data)
+				expected_deposit_requests.append(deposit_request_rlp)
 
-	# Compare retrieved deposits to the list in the block body
-	assert block.body.deposits == expected_deposits
+	deposit_requests = [req for req in block.body.requests if req[:1] == DEPOSIT_REQUEST_TYPE]
+
+	# Compare retrieved deposits to the list of deposit operations in the block
+	assert deposit_requests == expected_deposit_requests
 	*/
 
 	receiptSha := types.DeriveSha(receipts)
