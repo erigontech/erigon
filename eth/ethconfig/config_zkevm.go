@@ -33,7 +33,8 @@ type Zk struct {
 	ExecutorStrictMode                     bool
 	AllowFreeTransactions                  bool
 	AllowPreEIP155Transactions             bool
-	EffectiveGasPriceForTransfer           uint8
+	EffectiveGasPriceForEthTransfer        uint8
+	EffectiveGasPriceForErc20Transfer      uint8
 	EffectiveGasPriceForContractInvocation uint8
 	EffectiveGasPriceForContractDeployment uint8
 	DefaultGasPrice                        uint64

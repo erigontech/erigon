@@ -47,11 +47,15 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		panic(fmt.Sprintf("could not parse sequencer batch seal time timeout value %s", sequencerBatchSealTimeVal))
 	}
 
-	effectiveGasPriceForTransferVal := ctx.Float64(utils.EffectiveGasPriceForTransfer.Name)
+	effectiveGasPriceForEthTransferVal := ctx.Float64(utils.EffectiveGasPriceForEthTransfer.Name)
+	effectiveGasPriceForErc20TransferVal := ctx.Float64(utils.EffectiveGasPriceForErc20Transfer.Name)
 	effectiveGasPriceForContractInvocationVal := ctx.Float64(utils.EffectiveGasPriceForContractInvocation.Name)
 	effectiveGasPriceForContractDeploymentVal := ctx.Float64(utils.EffectiveGasPriceForContractDeployment.Name)
-	if effectiveGasPriceForTransferVal < 0 || effectiveGasPriceForTransferVal > 1 {
-		panic("Effective gas price for transfer must be in interval [0; 1]")
+	if effectiveGasPriceForEthTransferVal < 0 || effectiveGasPriceForEthTransferVal > 1 {
+		panic("Effective gas price for eth transfer must be in interval [0; 1]")
+	}
+	if effectiveGasPriceForErc20TransferVal < 0 || effectiveGasPriceForErc20TransferVal > 1 {
+		panic("Effective gas price for erc20 transfer must be in interval [0; 1]")
 	}
 	if effectiveGasPriceForContractInvocationVal < 0 || effectiveGasPriceForContractInvocationVal > 1 {
 		panic("Effective gas price for contract invocation must be in interval [0; 1]")
@@ -88,7 +92,8 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		ExecutorStrictMode:                     ctx.Bool(utils.ExecutorStrictMode.Name),
 		AllowFreeTransactions:                  ctx.Bool(utils.AllowFreeTransactions.Name),
 		AllowPreEIP155Transactions:             ctx.Bool(utils.AllowPreEIP155Transactions.Name),
-		EffectiveGasPriceForTransfer:           uint8(math.Round(effectiveGasPriceForTransferVal * 255.0)),
+		EffectiveGasPriceForEthTransfer:        uint8(math.Round(effectiveGasPriceForEthTransferVal * 255.0)),
+		EffectiveGasPriceForErc20Transfer:      uint8(math.Round(effectiveGasPriceForErc20TransferVal * 255.0)),
 		EffectiveGasPriceForContractInvocation: uint8(math.Round(effectiveGasPriceForContractInvocationVal * 255.0)),
 		EffectiveGasPriceForContractDeployment: uint8(math.Round(effectiveGasPriceForContractDeploymentVal * 255.0)),
 		DefaultGasPrice:                        ctx.Uint64(utils.DefaultGasPrice.Name),

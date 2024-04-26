@@ -496,8 +496,13 @@ var (
 		Usage: "Allow the sequencer to proceed pre-EIP155 transactions",
 		Value: false,
 	}
-	EffectiveGasPriceForTransfer = cli.Float64Flag{
-		Name:  "zkevm.effective-gas-price-transfer",
+	EffectiveGasPriceForEthTransfer = cli.Float64Flag{
+		Name:  "zkevm.effective-gas-price-eth-transfer",
+		Usage: "Set the effective gas price in percentage for transfers",
+		Value: 1,
+	}
+	EffectiveGasPriceForErc20Transfer = cli.Float64Flag{
+		Name:  "zkevm.effective-gas-price-erc20-transfer",
 		Usage: "Set the effective gas price in percentage for transfers",
 		Value: 1,
 	}
