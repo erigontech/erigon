@@ -1,6 +1,7 @@
 package solid
 
 import (
+	"encoding/binary"
 	"encoding/json"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -49,6 +50,7 @@ func NewAttestionFromParameters(
 	signature [96]byte,
 ) *Attestation {
 	a := &Attestation{}
+	binary.LittleEndian.PutUint32(a.staticBuffer[:4], aggregationBitsOffset)
 	a.SetAttestationData(attestationData)
 	a.SetSignature(signature)
 	a.SetAggregationBits(aggregationBits)
@@ -77,6 +79,7 @@ func (a *Attestation) UnmarshalJSON(buf []byte) error {
 	if err := json.Unmarshal(buf, &tmp); err != nil {
 		return err
 	}
+	binary.LittleEndian.PutUint32(a.staticBuffer[:4], aggregationBitsOffset)
 	a.SetAggregationBits(tmp.AggregationBits)
 	a.SetSignature(tmp.Signature)
 	a.SetAttestationData(tmp.Data)
