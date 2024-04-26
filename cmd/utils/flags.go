@@ -403,7 +403,11 @@ var (
 	}
 	HTTPTraceFlag = cli.BoolFlag{
 		Name:  "http.trace",
-		Usage: "Trace HTTP requests with INFO level",
+		Usage: "Print all HTTP requests to logs with INFO level",
+	}
+	HTTPDebugSingleFlag = cli.BoolFlag{
+		Name:  "http.dbg.single",
+		Usage: "Allow pass HTTP header 'dbg: true' to printt more detailed logs - how this request was executed",
 	}
 	DBReadConcurrencyFlag = cli.IntFlag{
 		Name:  "db.read.concurrency",
