@@ -185,7 +185,7 @@ func (n *devnetNode) run(ctx *cli.Context) error {
 	n.ethNode, err = enode.New(ctx.Context, n.nodeCfg, n.ethCfg, logger)
 
 	if metricsMux != nil {
-		diagnostics.Setup(ctx, metricsMux, n.ethNode)
+		diagnostics.Setup(ctx, n.ethNode)
 	}
 
 	n.Lock()
