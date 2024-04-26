@@ -158,7 +158,12 @@ func SpawnSequencerExecutorVerifyStage(
 				return err
 			}
 
-			cfg.verifier.AddRequest(&legacy_executor_verifier.VerifierRequest{BatchNumber: batch, StateRoot: block.Root(), Counters: counters})
+			forkId, err := hermezDb.GetForkId(batch)
+			if err != nil {
+				return err
+			}
+
+			cfg.verifier.AddRequest(&legacy_executor_verifier.VerifierRequest{BatchNumber: batch, ForkId: forkId, StateRoot: block.Root(), Counters: counters})
 		}
 	}
 

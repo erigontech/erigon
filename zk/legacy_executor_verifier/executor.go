@@ -166,12 +166,16 @@ func (e *Executor) Verify(p *Payload, request *VerifierRequest, oldStateRoot com
 
 	log.Debug("Received response from executor", "grpcUrl", e.grpcUrl, "response", resp)
 
-	return responseCheck(resp, request.StateRoot)
+	return responseCheck(resp, request)
 }
 
-func responseCheck(resp *executor.ProcessBatchResponseV2, erigonStateRoot common.Hash) (bool, error) {
+func responseCheck(resp *executor.ProcessBatchResponseV2, request *VerifierRequest) (bool, error) {
 	if resp == nil {
 		return false, fmt.Errorf("nil response")
+	}
+
+	if resp.ForkId != request.ForkId {
+		panic("Executor's fork.id does not match our fork.id. Please use different executor.")
 	}
 
 	if resp.Debug != nil && resp.Debug.ErrorLog != "" {
@@ -188,6 +192,7 @@ func responseCheck(resp *executor.ProcessBatchResponseV2, erigonStateRoot common
 
 	}
 
+	erigonStateRoot := request.StateRoot
 	if !bytes.Equal(resp.NewStateRoot, erigonStateRoot.Bytes()) {
 		return false, fmt.Errorf("erigon state root mismatch: expected %s, got %s", erigonStateRoot, common.BytesToHash(resp.NewStateRoot))
 	}

@@ -27,6 +27,7 @@ const (
 
 type VerifierRequest struct {
 	BatchNumber uint64
+	ForkId      uint64
 	StateRoot   common.Hash
 	CheckCount  int
 	Counters    map[string]int
