@@ -13,21 +13,13 @@ import (
 )
 
 var (
-	diagnosticsDisabledFlag = cli.BoolFlag{
-		Name: "diagnostics.disabled",
-	}
-	diagnosticsAddrFlag = cli.StringFlag{
-		Name:  "diagnostics.addr",
-		Value: "127.0.0.1",
-	}
-	diagnosticsPortFlag = cli.UintFlag{
-		Name:  "diagnostics.port",
-		Value: 6059,
-	}
+	diagnosticsDisabledFlag = "diagnostics.disabled"
+	diagnosticsAddrFlag     = "diagnostics.addr"
+	diagnosticsPortFlag     = "diagnostics.port"
 )
 
 func Setup(ctx *cli.Context, node *node.ErigonNode) {
-	if ctx.Bool(diagnosticsDisabledFlag.Name) {
+	if ctx.Bool(diagnosticsDisabledFlag) {
 		return
 	}
 
@@ -39,27 +31,20 @@ func Setup(ctx *cli.Context, node *node.ErigonNode) {
 }
 
 func SetupDiagnosticsEndpoint(ctx *cli.Context) *http.ServeMux {
-	address := diagnosticsAddrFlag.Value
-	if ctx.String(diagnosticsAddrFlag.Name) != "" {
-		address = ctx.String(diagnosticsAddrFlag.Name)
-	}
-
-	port := diagnosticsPortFlag.Value
-	if ctx.Uint(diagnosticsPortFlag.Name) != 0 {
-		port = ctx.Uint(diagnosticsPortFlag.Name)
-	}
+	address := ctx.String(diagnosticsAddrFlag)
+	port := ctx.Uint(diagnosticsPortFlag)
 
 	diagnosticsAddress := fmt.Sprintf("%s:%d", address, port)
 
 	diagMux := http.NewServeMux()
 
-	promServer := &http.Server{
+	diagServer := &http.Server{
 		Addr:    diagnosticsAddress,
 		Handler: diagMux,
 	}
 
 	go func() {
-		if err := promServer.ListenAndServe(); err != nil {
+		if err := diagServer.ListenAndServe(); err != nil {
 			log.Error("[Diagnostics] Failure in running diagnostics server", "err", err)
 		}
 	}()
