@@ -171,9 +171,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	if err != nil {
 		return nil, err
 	}
-	if err := transition.DefaultMachine.ProcessSlots(baseState, targetSlot); err != nil {
-		return nil, err
-	}
 
 	proposerIndex, err := baseState.GetBeaconProposerIndexForSlot(targetSlot)
 	if err != nil {
@@ -197,9 +194,11 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		proposerIndex,
 	)
 
-	cvm := &eth2.Impl{}
+	if err := transition.DefaultMachine.ProcessSlots(baseState, targetSlot); err != nil {
+		return nil, err
+	}
 	// compute the state root now
-	if err := machine.ProcessBlock(cvm, baseState, &cltypes.SignedBeaconBlock{Block: block}); err != nil {
+	if err := machine.ProcessBlock(transition.DefaultMachine, baseState, &cltypes.SignedBeaconBlock{Block: block}); err != nil {
 		return nil, err
 	}
 	block.StateRoot, err = baseState.HashSSZ()
