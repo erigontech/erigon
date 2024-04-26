@@ -30,7 +30,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/transition"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
-	"github.com/ledgerwatch/erigon/cl/transition/machine"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
@@ -159,10 +158,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			fmt.Errorf("state not found %x", baseBlockRoot),
 		)
 	}
-	if err := transition.DefaultMachine.ProcessSlots(baseState, targetSlot); err != nil {
-		return nil, err
-	}
-
 	beaconBody, executionValue, err := a.produceBeaconBody(
 		ctx,
 		3,
@@ -176,11 +171,10 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		return nil, err
 	}
 
-	proposerIndex, err := baseState.GetBeaconProposerIndex()
+	proposerIndex, err := baseState.GetBeaconProposerIndexForSlot(targetSlot)
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println(proposerIndex)
 
 	rewardsCollector := &eth2.BlockRewardsCollector{}
 	block := &cltypes.BeaconBlock{
@@ -200,7 +194,9 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	)
 
 	// compute the state root now
-	if err := machine.ProcessBlock(transition.DefaultMachine, baseState, &cltypes.SignedBeaconBlock{Block: block}); err != nil {
+	if err := transition.TransitionState(baseState, &cltypes.SignedBeaconBlock{
+		Block: block,
+	}, rewardsCollector, false); err != nil {
 		return nil, err
 	}
 	block.StateRoot, err = baseState.HashSSZ()
@@ -414,7 +410,6 @@ func (a *ApiHandler) produceBeaconBody(
 			baseState,
 			targetSlot,
 		)
-		beaconBody.Attestations = a.findBestAttestationsForBlockProduction(baseState)
 	}()
 
 	wg.Wait()
@@ -726,7 +721,7 @@ type attestationCandidate struct {
 
 func (a *ApiHandler) findBestAttestationsForBlockProduction(
 	s abstract.BeaconState,
-) *solid.ListSSZ[*solid.Attestation] {
+) (*solid.ListSSZ[*solid.Attestation], error) {
 
 	ret := solid.NewDynamicListSSZ[*solid.Attestation](int(a.beaconChainCfg.MaxAttestations))
 	attestationCandidates := []attestationCandidate{}
@@ -737,11 +732,7 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 		}
 		expectedReward, err := computeAttestationReward(s, attestation)
 		if err != nil {
-			log.Warn(
-				"[Block Production] Could not compute expected attestation reward",
-				"reason",
-				err,
-			)
+			log.Warn("[Block Production] Could not compute expected attestation reward", "reason", err)
 			continue
 		}
 		if expectedReward == 0 {
@@ -754,15 +745,15 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 	}
 	// Sort in descending order
 	sort.Slice(attestationCandidates, func(i, j int) bool {
-		return attestationCandidates[i].reward > attestationCandidates[j].reward
+		return attestationCandidates[i] > attestationCandidates[j]
 	})
-	for _, candidate := range attestationCandidates {
-		ret.Append(candidate.attestation)
+	for _, candidate := range attestationCandidate {
+		ret.Append(candidate)
 		if ret.Len() >= int(a.beaconChainCfg.MaxAttestations) {
 			break
 		}
 	}
-	return ret
+	return ret, nil
 }
 
 // computeAttestationReward computes the reward for a specific attestation.
