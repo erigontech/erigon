@@ -427,82 +427,87 @@ func (dt *DomainRoTx) commitmentValTransformDomain(accounts, storage *DomainRoTx
 	if mergedStorage != nil {
 		stoMerged = fmt.Sprintf("%d-%d", mergedStorage.startTxNum/dt.d.aggregationStep, mergedStorage.endTxNum/dt.d.aggregationStep)
 	}
+	auxBuf := make([]byte, 0, length.Hash)
 
 	return func(valBuf []byte, keyFromTxNum, keyEndTxNum uint64) (transValBuf []byte, err error) {
 		if !dt.d.replaceKeysInValues || len(valBuf) == 0 {
 			return valBuf, nil
 		}
 		si := storage.lookupFileByItsRange(keyFromTxNum, keyEndTxNum)
+		if si == nil {
+			return nil, fmt.Errorf("storage file not found for %d-%d", keyFromTxNum, keyEndTxNum)
+		}
 		ai := accounts.lookupFileByItsRange(keyFromTxNum, keyEndTxNum)
-
+		if ai == nil {
+			return nil, fmt.Errorf("account file not found for %d-%d", keyFromTxNum, keyEndTxNum)
+		}
 		sig := NewArchiveGetter(si.decompressor.MakeGetter(), storage.d.compression)
 		aig := NewArchiveGetter(ai.decompressor.MakeGetter(), accounts.d.compression)
-
 		ms := NewArchiveGetter(mergedStorage.decompressor.MakeGetter(), storage.d.compression)
 		ma := NewArchiveGetter(mergedAccount.decompressor.MakeGetter(), storage.d.compression)
 
-		return commitment.BranchData(valBuf).
-			ReplacePlainKeys(dt.comBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
-				var found bool
-				var buf []byte
-				if isStorage {
-					if len(key) == length.Addr+length.Hash {
-						// Non-optimised key originating from a database record
-						buf = append(buf[:0], key...)
-					} else {
-						// Optimised key referencing a state file record (file number and offset within the file)
-						buf, found = storage.lookupByShortenedKey(key, sig)
-						if !found {
-							dt.d.logger.Crit("valTransform: lost storage full key",
-								"shortened", fmt.Sprintf("%x", key),
-								"merging", stoMerged,
-								"valBuf", fmt.Sprintf("l=%d %x", len(valBuf), valBuf),
-							)
-							return nil, fmt.Errorf("lookup lost storage full key %x", key)
-						}
-					}
-
-					shortened, found := storage.findShortenedKey(buf, ms, mergedStorage)
-					if !found {
-						if len(buf) == length.Addr+length.Hash {
-							return buf, nil // if plain key is lost, we can save original fullkey
-						}
-						// if shortened key lost, we can't continue
-						dt.d.logger.Crit("valTransform: replacement for full storage key was not found",
-							"step", fmt.Sprintf("%d-%d", keyFromTxNum/dt.d.aggregationStep, keyEndTxNum/dt.d.aggregationStep),
-							"shortened", fmt.Sprintf("%x", shortened), "toReplace", fmt.Sprintf("%x", buf))
-
-						return nil, fmt.Errorf("replacement not found for storage %x", buf)
-					}
-					return shortened, nil
-				}
-
-				if len(key) == length.Addr {
+		replacer := func(key []byte, isStorage bool) ([]byte, error) {
+			var found bool
+			if isStorage {
+				if len(key) == length.Addr+length.Hash {
 					// Non-optimised key originating from a database record
-					buf = append(buf[:0], key...)
+					auxBuf = append(auxBuf[:0], key...)
 				} else {
-					buf, found = accounts.lookupByShortenedKey(key, aig)
+					// Optimised key referencing a state file record (file number and offset within the file)
+					auxBuf, found = storage.lookupByShortenedKey(key, sig)
 					if !found {
-						dt.d.logger.Crit("valTransform: lost account full key",
+						dt.d.logger.Crit("valTransform: lost storage full key",
 							"shortened", fmt.Sprintf("%x", key),
-							"merging", accMerged,
+							"merging", stoMerged,
 							"valBuf", fmt.Sprintf("l=%d %x", len(valBuf), valBuf),
 						)
-						return nil, fmt.Errorf("lookup account full key: %x", key)
+						return nil, fmt.Errorf("lookup lost storage full key %x", key)
 					}
 				}
 
-				shortened, found := accounts.findShortenedKey(buf, ma, mergedAccount)
+				shortened, found := storage.findShortenedKey(auxBuf, ms, mergedStorage)
 				if !found {
-					if len(buf) == length.Addr {
-						return buf, nil // if plain key is lost, we can save original fullkey
+					if len(auxBuf) == length.Addr+length.Hash {
+						return auxBuf, nil // if plain key is lost, we can save original fullkey
 					}
-					dt.d.logger.Crit("valTransform: replacement for full account key was not found",
+					// if shortened key lost, we can't continue
+					dt.d.logger.Crit("valTransform: replacement for full storage key was not found",
 						"step", fmt.Sprintf("%d-%d", keyFromTxNum/dt.d.aggregationStep, keyEndTxNum/dt.d.aggregationStep),
-						"shortened", fmt.Sprintf("%x", shortened), "toReplace", fmt.Sprintf("%x", buf))
-					return nil, fmt.Errorf("replacement not found for account  %x", buf)
+						"shortened", fmt.Sprintf("%x", shortened), "toReplace", fmt.Sprintf("%x", auxBuf))
+
+					return nil, fmt.Errorf("replacement not found for storage %x", auxBuf)
 				}
 				return shortened, nil
-			})
+			}
+
+			if len(key) == length.Addr {
+				// Non-optimised key originating from a database record
+				auxBuf = append(auxBuf[:0], key...)
+			} else {
+				auxBuf, found = accounts.lookupByShortenedKey(key, aig)
+				if !found {
+					dt.d.logger.Crit("valTransform: lost account full key",
+						"shortened", fmt.Sprintf("%x", key),
+						"merging", accMerged,
+						"valBuf", fmt.Sprintf("l=%d %x", len(valBuf), valBuf),
+					)
+					return nil, fmt.Errorf("lookup account full key: %x", key)
+				}
+			}
+
+			shortened, found := accounts.findShortenedKey(auxBuf, ma, mergedAccount)
+			if !found {
+				if len(auxBuf) == length.Addr {
+					return auxBuf, nil // if plain key is lost, we can save original fullkey
+				}
+				dt.d.logger.Crit("valTransform: replacement for full account key was not found",
+					"step", fmt.Sprintf("%d-%d", keyFromTxNum/dt.d.aggregationStep, keyEndTxNum/dt.d.aggregationStep),
+					"shortened", fmt.Sprintf("%x", shortened), "toReplace", fmt.Sprintf("%x", auxBuf))
+				return nil, fmt.Errorf("replacement not found for account  %x", auxBuf)
+			}
+			return shortened, nil
+		}
+
+		return commitment.BranchData(valBuf).ReplacePlainKeys(dt.comBuf[:0], replacer)
 	}
 }

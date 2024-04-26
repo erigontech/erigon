@@ -65,7 +65,6 @@ type SharedDomains struct {
 	trace    bool //nolint
 	//muMaps   sync.RWMutex
 	//walLock sync.RWMutex
-	aux []byte
 
 	account    map[string][]byte
 	code       map[string][]byte
@@ -381,18 +380,18 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 	storageGetter := NewArchiveGetter(storageItem.decompressor.MakeGetter(), sto.d.compression)
 	accountGetter := NewArchiveGetter(accountItem.decompressor.MakeGetter(), acc.d.compression)
 
-	return branch.ReplacePlainKeys(sd.aux[:0], func(key []byte, isStorage bool) ([]byte, error) {
+	aux := make([]byte, 0, 512)
+	return branch.ReplacePlainKeys(aux, func(key []byte, isStorage bool) ([]byte, error) {
 		if isStorage {
 			if len(key) == length.Addr+length.Hash {
 				return nil, nil // save storage key as is
 			}
 			// Optimised key referencing a state file record (file number and offset within the file)
-			storagePlainKey, found := sd.aggCtx.d[kv.StorageDomain].lookupByShortenedKey(key, storageGetter)
+			storagePlainKey, found := sto.lookupByShortenedKey(key, storageGetter)
 			if !found {
 				s0, s1 := fStartTxNum/sd.aggCtx.a.StepSize(), fEndTxNum/sd.aggCtx.a.StepSize()
-				oft := decodeShorterKey(key)
 				sd.logger.Crit("replace back lost storage full key", "shortened", fmt.Sprintf("%x", key),
-					"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, oft))
+					"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, decodeShorterKey(key)))
 				return nil, fmt.Errorf("replace back lost storage full key: %x", key)
 			}
 			return storagePlainKey, nil
@@ -402,12 +401,11 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 			return nil, nil // save account key as is
 		}
 
-		apkBuf, found := sd.aggCtx.d[kv.AccountsDomain].lookupByShortenedKey(key, accountGetter)
+		apkBuf, found := acc.lookupByShortenedKey(key, accountGetter)
 		if !found {
-			oft := decodeShorterKey(key)
 			s0, s1 := fStartTxNum/sd.aggCtx.a.StepSize(), fEndTxNum/sd.aggCtx.a.StepSize()
 			sd.logger.Crit("replace back lost account full key", "shortened", fmt.Sprintf("%x", key),
-				"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, oft))
+				"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, decodeShorterKey(key)))
 			return nil, fmt.Errorf("replace back lost account full key: %x", key)
 		}
 		return apkBuf, nil
