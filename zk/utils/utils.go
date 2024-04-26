@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon/zk/constants"
 )
 
 // if current sync is before verified batch - short circuit to verified batch, otherwise to enx of next batch
@@ -69,25 +70,36 @@ func ShouldShortCircuitExecution(tx kv.RwTx, logPrefix string) (bool, uint64, er
 }
 
 type ForkReader interface {
-	GetForkIdBlock(forkId uint64) (uint64, error)
+	GetForkIdBlock(forkId uint64) (uint64, bool, error)
 }
 
-func UpdateZkEVMBlockCfg(cfg *chain.Config, hermezDb ForkReader, logPrefix string) error {
-	var higherForkIdBlockNum uint64
+type ForkConfigWriter interface {
+	SetForkIdBlock(forkId constants.ForkId, blockNum uint64) error
+}
+
+func UpdateZkEVMBlockCfg(cfg ForkConfigWriter, hermezDb ForkReader, logPrefix string) error {
+	var lastSetBlockNum uint64 = 0
+	var foundAny bool = false
+
 	for _, forkId := range chain.ForkIdsOrdered {
-		blockNum, err := hermezDb.GetForkIdBlock(uint64(forkId))
+		blockNum, found, err := hermezDb.GetForkIdBlock(uint64(forkId))
 		if err != nil {
 			log.Error(fmt.Sprintf("[%s] Error getting fork id %v from db: %v", logPrefix, forkId, err))
 			return err
 		}
-		if blockNum == 0 && higherForkIdBlockNum != 0 {
-			blockNum = higherForkIdBlockNum
+
+		if found {
+			lastSetBlockNum = blockNum
+			foundAny = true
+		} else if !foundAny {
+			log.Info(fmt.Sprintf("[%s] No block number found for fork id %v and no previous block number set", logPrefix, forkId))
+			continue
+		} else {
+			log.Info(fmt.Sprintf("[%s] No block number found for fork id %v, using last set block number: %v", logPrefix, forkId, lastSetBlockNum))
 		}
 
-		higherForkIdBlockNum = blockNum
-
-		if err := cfg.SetForkIdBlock(forkId, blockNum); err != nil {
-			log.Error(fmt.Sprintf("[%s] Error setting fork id %v to block %v", logPrefix, forkId, blockNum))
+		if err := cfg.SetForkIdBlock(forkId, lastSetBlockNum); err != nil {
+			log.Error(fmt.Sprintf("[%s] Error setting fork id %v to block %v", logPrefix, forkId, lastSetBlockNum))
 			return err
 		}
 	}
