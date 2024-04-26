@@ -168,15 +168,15 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	- should we validate deposits here? -> unclear
 	DeriveSha(deposits) == req.DepositsRoot? -> unlikely
 	*/
-	// var deposits []*types.Deposit
-	// if version >= clparams.DenebVersion {
-	// 	deposits = req.DepositReceipts
-	// }
+	var deposits []*types.Deposit
+	if version >= clparams.DenebVersion {
+		deposits = req.DepositReceipts // TODO(racytech): add DepositsReceipts into gointeraces types (erigon-lib/gointerfaces/types)
+	}
 
-	// if deposits != nil {
-	// 	dh := types.DeriveSha(types.Deposits(deposits))
-	// 	header.DepositsRoot = &dh
-	// }
+	if deposits != nil {
+		dh := types.DeriveSha(types.Deposits(deposits))
+		header.DepositsRoot = &dh
+	}
 
 	if err := s.checkWithdrawalsPresence(header.Time, withdrawals); err != nil {
 		return nil, err
