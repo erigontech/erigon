@@ -63,28 +63,29 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	t.Run("empty index", func(t *testing.T) {
 		dataPath := generateKV(t, tmp, 52, 180, 0, logger, 0)
 		indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
-		err := BuildBtreeIndex(dataPath, indexPath, compressFlags, 1, logger, true)
-		require.NoError(t, err)
+		buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 
-		bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M), compressFlags, false)
+		kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)
 		require.NoError(t, err)
 		require.EqualValues(t, 0, bt.KeyCount())
+		bt.Close()
+		kv.Close()
 	})
 	dataPath := generateKV(t, tmp, 52, 180, keyCount, logger, 0)
 
 	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
-	err := BuildBtreeIndex(dataPath, indexPath, compressFlags, 1, logger, true)
-	require.NoError(t, err)
+	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 
-	bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M), compressFlags, false)
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)
 	require.NoError(t, err)
 	require.EqualValues(t, bt.KeyCount(), keyCount)
+	defer bt.Close()
+	defer kv.Close()
 
 	keys, err := pivotKeysFromKV(dataPath)
 	require.NoError(t, err)
 
-	//getter := NewArchiveGetter(bt.decompressor.MakeGetter(), compressFlags)
-	getter := bt.kvGetter
+	getter := NewArchiveGetter(kv.MakeGetter(), compressFlags)
 
 	t.Run("seek beyond the last key", func(t *testing.T) {
 		_, _, err := bt.dataLookup(bt.ef.Count()+1, getter)
@@ -97,12 +98,12 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 		_, _, err = bt.dataLookup(bt.ef.Count()-1, getter)
 		require.NoError(t, err)
 
-		cur, err := bt.SeekDeprecated(common.FromHex("0xffffffffffffff")) //seek beyeon the last key
+		cur, err := bt.Seek(getter, common.FromHex("0xffffffffffffff")) //seek beyeon the last key
 		require.NoError(t, err)
 		require.Nil(t, cur)
 	})
 
-	c, err := bt.SeekDeprecated(nil)
+	c, err := bt.Seek(getter, nil)
 	require.NoError(t, err)
 	for i := 0; i < len(keys); i++ {
 		k := c.Key()
@@ -114,7 +115,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	}
 
 	for i := 0; i < len(keys); i++ {
-		cur, err := bt.SeekDeprecated(keys[i])
+		cur, err := bt.Seek(getter, keys[i])
 		require.NoErrorf(t, err, "i=%d", i)
 		require.EqualValues(t, keys[i], cur.key)
 		require.NotEmptyf(t, cur.Value(), "i=%d", i)
@@ -128,12 +129,10 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 				break
 			}
 		}
-		cur, err := bt.SeekDeprecated(keys[i])
+		cur, err := bt.Seek(getter, keys[i])
 		require.NoError(t, err)
 		require.EqualValues(t, keys[i], cur.Key())
 	}
-
-	bt.Close()
 }
 
 func Test_BtreeIndex_Build(t *testing.T) {
@@ -147,14 +146,18 @@ func Test_BtreeIndex_Build(t *testing.T) {
 	require.NoError(t, err)
 
 	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
-	err = BuildBtreeIndex(dataPath, indexPath, compressFlags, 1, logger, true)
+	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 	require.NoError(t, err)
 
-	bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M), compressFlags, false)
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)
 	require.NoError(t, err)
 	require.EqualValues(t, bt.KeyCount(), keyCount)
+	defer bt.Close()
+	defer kv.Close()
 
-	c, err := bt.SeekDeprecated(nil)
+	getter := NewArchiveGetter(kv.MakeGetter(), compressFlags)
+
+	c, err := bt.Seek(getter, nil)
 	require.NoError(t, err)
 	for i := 0; i < len(keys); i++ {
 		k := c.Key()
@@ -164,11 +167,21 @@ func Test_BtreeIndex_Build(t *testing.T) {
 		c.Next()
 	}
 	for i := 0; i < 10000; i++ {
-		c, err := bt.SeekDeprecated(keys[i])
+		c, err := bt.Seek(getter, keys[i])
 		require.NoError(t, err)
 		require.EqualValues(t, keys[i], c.Key())
 	}
-	defer bt.Close()
+}
+
+// Opens .kv at dataPath and generates index over it to file 'indexPath'
+func buildBtreeIndex(tb testing.TB, dataPath, indexPath string, compressed FileCompression, seed uint32, logger log.Logger, noFsync bool) {
+	tb.Helper()
+	decomp, err := seg.NewDecompressor(dataPath)
+	require.NoError(tb, err)
+	defer decomp.Close()
+
+	err = BuildBtreeIndexWithDecompressor(indexPath, decomp, compressed, background.NewProgressSet(), filepath.Dir(indexPath), seed, logger, noFsync)
+	require.NoError(tb, err)
 }
 
 func Test_BtreeIndex_Seek2(t *testing.T) {
@@ -180,18 +193,18 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 	dataPath := generateKV(t, tmp, 52, 48, keyCount, logger, compressFlags)
 
 	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
-	err := BuildBtreeIndex(dataPath, indexPath, compressFlags, 1, logger, true)
-	require.NoError(t, err)
+	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 
-	bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M), compressFlags, false)
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)
 	require.NoError(t, err)
 	require.EqualValues(t, bt.KeyCount(), keyCount)
+	defer bt.Close()
+	defer kv.Close()
 
 	keys, err := pivotKeysFromKV(dataPath)
 	require.NoError(t, err)
 
-	//getter := NewArchiveGetter(bt.decompressor.MakeGetter(), compressFlags)
-	getter := bt.kvGetter
+	getter := NewArchiveGetter(kv.MakeGetter(), compressFlags)
 
 	t.Run("seek beyond the last key", func(t *testing.T) {
 		_, _, err := bt.dataLookup(bt.ef.Count()+1, getter)
@@ -204,12 +217,12 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 		_, _, err = bt.dataLookup(bt.ef.Count()-1, getter)
 		require.NoError(t, err)
 
-		cur, err := bt.SeekDeprecated(common.FromHex("0xffffffffffffff")) //seek beyeon the last key
+		cur, err := bt.Seek(getter, common.FromHex("0xffffffffffffff")) //seek beyeon the last key
 		require.NoError(t, err)
 		require.Nil(t, cur)
 	})
 
-	c, err := bt.SeekDeprecated(nil)
+	c, err := bt.Seek(getter, nil)
 	require.NoError(t, err)
 	for i := 0; i < len(keys); i++ {
 		k := c.Key()
@@ -220,7 +233,7 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 	}
 
 	for i := 0; i < len(keys); i++ {
-		cur, err := bt.SeekDeprecated(keys[i])
+		cur, err := bt.Seek(getter, keys[i])
 		require.NoErrorf(t, err, "i=%d", i)
 		require.EqualValues(t, keys[i], cur.key)
 		require.NotEmptyf(t, cur.Value(), "i=%d", i)
@@ -234,12 +247,10 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 				break
 			}
 		}
-		cur, err := bt.SeekDeprecated(keys[i])
+		cur, err := bt.Seek(getter, keys[i])
 		require.NoError(t, err)
 		require.EqualValues(t, keys[i], cur.Key())
 	}
-
-	bt.Close()
 }
 
 func TestBpsTree_Seek(t *testing.T) {
