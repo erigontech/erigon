@@ -131,6 +131,12 @@ func SpawnStageBatches(
 		return fmt.Errorf("save stage progress error: %v", err)
 	}
 
+	// get batch for batches progress
+	batchesProgressBatch, err := hermezDb.GetBatchNoByL2Block(batchesProgress)
+	if err != nil {
+		return fmt.Errorf("get batch no by l2 block error: %v", err)
+	}
+
 	//// BISECT ////
 	if cfg.zkCfg.DebugLimit > 0 && batchesProgress > cfg.zkCfg.DebugLimit {
 		return nil
@@ -162,10 +168,9 @@ func SpawnStageBatches(
 	defer stopProgressPrinter()
 
 	lastBlockHeight := batchesProgress
+	highestSeenBatchNo := batchesProgressBatch
 	endLoop := false
 	blocksWritten := uint64(0)
-
-	highestSeenBatchNo := uint64(0)
 	highestHashableL2BlockNo := uint64(0)
 	highestL1InfoTreeIndex := uint32(0)
 
@@ -212,6 +217,21 @@ LOOP:
 				continue
 			}
 
+			// check for sequential block numbers
+			if l2Block.L2BlockNumber != lastBlockHeight+1 {
+				return fmt.Errorf("block number is not sequential, expected %d, got %d", lastBlockHeight+1, l2Block.L2BlockNumber)
+			}
+
+			// batch boundary - record the highest hashable block number (last block in last full batch)
+			if l2Block.BatchNumber > highestSeenBatchNo {
+				// check for sequential batch numbers
+				if l2Block.BatchNumber != highestSeenBatchNo+1 {
+					return fmt.Errorf("batch number is not sequential, expected %d, got %d", highestSeenBatchNo+1, l2Block.BatchNumber)
+				}
+				highestHashableL2BlockNo = l2Block.L2BlockNumber - 1
+			}
+			highestSeenBatchNo = l2Block.BatchNumber
+
 			if l2Block.ForkId > HIGHEST_KNOWN_FORK {
 				message := fmt.Sprintf("unsupported fork id %v received from the data stream", l2Block.ForkId)
 				panic(message)
@@ -247,12 +267,6 @@ LOOP:
 					return fmt.Errorf("write fork id block once error: %v", err)
 				}
 			}
-
-			// batch boundary - record the highest hashable block number (last block in last full batch)
-			if l2Block.BatchNumber > highestSeenBatchNo {
-				highestHashableL2BlockNo = l2Block.L2BlockNumber - 1
-			}
-			highestSeenBatchNo = l2Block.BatchNumber
 
 			// store our finalized state if this batch matches the highest verified batch number on the L1
 			if l2Block.BatchNumber == highestVerifiedBatch {
