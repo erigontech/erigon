@@ -3,6 +3,7 @@ package diagnostics_test
 import (
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/stretchr/testify/require"
@@ -102,12 +103,14 @@ func TestLastUpdated(t *testing.T) {
 	peerStats.AddOrUpdatePeer("test1", testUpdMsg)
 	require.NotEmpty(t, peerStats.GetLastUpdate("test1"))
 
-	for i := 1; i < 100; i++ {
+	for i := 1; i < 20; i++ {
 		pid := "test" + strconv.Itoa(i)
 		peerStats.AddOrUpdatePeer(pid, testUpdMsg)
+		//wait for 1 milisecond to make sure that the last update time is different
+		time.Sleep(10 * time.Millisecond)
 	}
 
-	require.True(t, peerStats.GetLastUpdate("test50").After(peerStats.GetLastUpdate("test1")))
+	require.True(t, peerStats.GetLastUpdate("test2").After(peerStats.GetLastUpdate("test1")))
 
 	oldestPeers := peerStats.GetOldestUpdatedPeersWithSize(10)
 
