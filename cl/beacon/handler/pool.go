@@ -17,7 +17,7 @@ import (
 )
 
 func (a *ApiHandler) GetEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	return newBeaconResponse(a.operationsPool.VoluntaryExitPool.Raw()), nil
+	return newBeaconResponse(a.operationsPool.VoluntaryExitsPool.Raw()), nil
 }
 
 func (a *ApiHandler) GetEthV1BeaconPoolAttesterSlashings(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -88,21 +88,21 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 			})
 			continue
 		}
-		// if a.sentinel != nil {
-		// 	encodedSSZ, err := attestation.EncodeSSZ(nil)
-		// 	if err != nil {
-		// 		beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
-		// 		return
-		// 	}
-		// 	if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
-		// 		Data:     encodedSSZ,
-		// 		Name:     gossip.TopicNamePrefixBeaconAttestation,
-		// 		SubnetId: &subnet,
-		// 	}); err != nil {
-		// 		beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
-		// 		return
-		// 	}
-		// }
+		if a.sentinel != nil {
+			encodedSSZ, err := attestation.EncodeSSZ(nil)
+			if err != nil {
+				beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+				return
+			}
+			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
+				Data:     encodedSSZ,
+				Name:     gossip.TopicNamePrefixBeaconAttestation,
+				SubnetId: &subnet,
+			}); err != nil {
+				beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+				return
+			}
+		}
 	}
 	if len(failures) > 0 {
 		errResp := poolingError{
@@ -144,7 +144,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r 
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		a.operationsPool.VoluntaryExitPool.Insert(req.VoluntaryExit.ValidatorIndex, &req)
+		a.operationsPool.VoluntaryExitsPool.Insert(req.VoluntaryExit.ValidatorIndex, &req)
 	}
 	// Only write 200
 	w.WriteHeader(http.StatusOK)

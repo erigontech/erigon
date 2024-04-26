@@ -27,6 +27,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -39,7 +40,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -55,7 +55,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadergrpc"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	protodownloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -352,7 +351,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
 
 	if config.SilkwormExecution || config.SilkwormRpcDaemon || config.SilkwormSentry {
-		backend.silkworm, err = silkworm.New(config.Dirs.DataDir, mdbx.Version())
+		logLevel, err := log.LvlFromString(config.SilkwormVerbosity)
+		if err != nil {
+			return nil, err
+		}
+		backend.silkworm, err = silkworm.New(config.Dirs.DataDir, mdbx.Version(), config.SilkwormNumContexts, logLevel)
 		if err != nil {
 			return nil, err
 		}
@@ -786,11 +789,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	hook := stages2.NewHook(backend.sentryCtx, backend.chainDB, backend.notifications, backend.stagedSync, backend.blockReader, backend.chainConfig, backend.logger, backend.sentriesClient.SetStatus)
 
 	if !config.Sync.UseSnapshots && backend.downloaderClient != nil {
-		for _, p := range snaptype.AllTypes {
-			backend.downloaderClient.ProhibitNewDownloads(ctx, &protodownloader.ProhibitNewDownloadsRequest{
-				Type: p.String(),
-			})
-		}
+		_, _ = backend.downloaderClient.Prohibit(ctx, &protodownloader.ProhibitRequest{})
 	}
 
 	checkStateRoot := true
@@ -945,7 +944,27 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	s.apiList = jsonrpc.APIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, s.agg, &httpRpcCfg, s.engine, s.logger)
 
 	if config.SilkwormRpcDaemon && httpRpcCfg.Enabled {
-		silkwormRPCDaemonService := silkworm.NewRpcDaemonService(s.silkworm, chainKv)
+		interface_log_settings := silkworm.RpcInterfaceLogSettings{
+			Enabled:         config.SilkwormRpcLogEnabled,
+			ContainerFolder: config.SilkwormRpcLogDirPath,
+			MaxFileSizeMB:   config.SilkwormRpcLogMaxFileSize,
+			MaxFiles:        config.SilkwormRpcLogMaxFiles,
+			DumpResponse:    config.SilkwormRpcLogDumpResponse,
+		}
+		settings := silkworm.RpcDaemonSettings{
+			EthLogSettings:       interface_log_settings,
+			EthAPIHost:           httpRpcCfg.HttpListenAddress,
+			EthAPIPort:           httpRpcCfg.HttpPort,
+			EthAPISpec:           httpRpcCfg.API,
+			NumWorkers:           config.SilkwormRpcNumWorkers,
+			CORSDomains:          httpRpcCfg.HttpCORSDomain,
+			JWTFilePath:          httpRpcCfg.JWTSecretPath,
+			JSONRPCCompatibility: config.SilkwormRpcJsonCompatibility,
+			WebSocketEnabled:     httpRpcCfg.WebsocketEnabled,
+			WebSocketCompression: httpRpcCfg.WebsocketCompression,
+			HTTPCompression:      httpRpcCfg.HttpCompression,
+		}
+		silkwormRPCDaemonService := silkworm.NewRpcDaemonService(s.silkworm, chainKv, settings)
 		s.silkwormRPCDaemonService = &silkwormRPCDaemonService
 	} else {
 		go func() {

@@ -1,7 +1,8 @@
 package services
 
 import (
-	context "context"
+	"context"
+	_ "embed"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -14,9 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/stretchr/testify/require"
-	gomock "go.uber.org/mock/gomock"
-
-	_ "embed"
+	"go.uber.org/mock/gomock"
 )
 
 //go:embed test_data/blob_sidecar_service_blob.ssz_snappy
@@ -56,7 +55,7 @@ func setupBlobSidecarService(t *testing.T, ctrl *gomock.Controller, test bool) (
 	cfg := &clparams.MainnetBeaconConfig
 	syncedDataManager := synced_data.NewSyncedDataManager(true, cfg)
 	ethClock := eth_clock.NewMockEthereumClock(ctrl)
-	forkchoiceMock := forkchoice.NewForkChoiceStorageMock()
+	forkchoiceMock := forkchoice.NewForkChoiceStorageMock(t)
 	blockService := NewBlobSidecarService(ctx2, cfg, forkchoiceMock, syncedDataManager, ethClock, test)
 	return blockService, syncedDataManager, ethClock, forkchoiceMock
 }

@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/rand"
 	"net/http"
 	"net/url"
@@ -32,7 +33,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -45,7 +48,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/tidwall/btree"
-	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 	"golang.org/x/time/rate"
@@ -148,15 +150,52 @@ func insertCloudflareHeaders(req *http.Request) {
 	}
 }
 
+// retryBackoff performs exponential backoff based on the attempt number and limited
+// by the provided minimum and maximum durations.
+//
+// It also tries to parse Retry-After response header when a http.StatusTooManyRequests
+// (HTTP Code 429) is found in the resp parameter. Hence it will return the number of
+// seconds the server states it may be ready to process more requests from this client.
+func calcBackoff(min, max time.Duration, attemptNum int, resp *http.Response) time.Duration {
+	if resp != nil {
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable {
+			if s, ok := resp.Header["Retry-After"]; ok {
+				if sleep, err := strconv.ParseInt(s[0], 10, 64); err == nil {
+					return time.Second * time.Duration(sleep)
+				}
+			}
+		}
+	}
+
+	mult := math.Pow(2, float64(attemptNum)) * float64(min)
+	sleep := time.Duration(mult)
+	if float64(sleep) != mult || sleep > max {
+		sleep = max
+	}
+
+	return sleep
+}
+
 func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			if resp != nil && resp.Body != nil {
+				resp.Body.Close()
+				resp.Body = nil
+			}
+
+			err = fmt.Errorf("http client panic: %s", r)
+		}
+	}()
+
 	insertCloudflareHeaders(req)
 
 	resp, err = r.Transport.RoundTrip(req)
 
-	delay := 500 * time.Millisecond
 	attempts := 1
 	retry := true
 
+	const minDelay = 500 * time.Millisecond
 	const maxDelay = 5 * time.Second
 	const maxAttempts = 10
 
@@ -180,11 +219,24 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 			r.downloader.stats.WebseedBytesDownload.Add(resp.ContentLength)
 			retry = false
 
-		case http.StatusInternalServerError, http.StatusBadGateway:
+		// the first two statuses here have been observed from cloudflare
+		// during testing.  The remainder are generally understood to be
+		// retriable http responses, calcBackoff will use the Retry-After
+		// header if its availible
+		case http.StatusInternalServerError, http.StatusBadGateway,
+			http.StatusRequestTimeout, http.StatusTooEarly,
+			http.StatusTooManyRequests, http.StatusServiceUnavailable,
+			http.StatusGatewayTimeout:
+
 			r.downloader.stats.WebseedServerFails.Add(1)
 
+			if resp.Body != nil {
+				resp.Body.Close()
+				resp.Body = nil
+			}
+
 			attempts++
-			delayTimer := time.NewTimer(delay)
+			delayTimer := time.NewTimer(calcBackoff(minDelay, maxDelay, attempts, resp))
 
 			select {
 			case <-delayTimer.C:
@@ -192,14 +244,10 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 				resp, err = r.Transport.RoundTrip(req)
 				r.downloader.stats.WebseedTripCount.Add(1)
 
-				if err == nil && delay < maxDelay {
-					delay = delay + (time.Duration(rand.Intn(200-75)+75)*delay)/100
-				}
-
 			case <-req.Context().Done():
 				err = req.Context().Err()
 			}
-			retry = attempts > maxAttempts
+			retry = attempts < maxAttempts
 
 		default:
 			r.downloader.stats.WebseedBytesDownload.Add(resp.ContentLength)
@@ -760,23 +808,6 @@ type seedHash struct {
 	reported bool
 }
 
-// fsyncDB - to not loose results of downloading on power-off
-// See `erigon-lib/downloader/mdbx_piece_completion.go` for explanation
-func (d *Downloader) fsyncDB() error {
-	return d.db.Update(d.ctx, func(tx kv.RwTx) error {
-		v, err := tx.GetOne(kv.BittorrentInfo, []byte("_fsync"))
-		if err != nil {
-			return err
-		}
-		if len(v) == 0 || v[0] == 0 {
-			v = []byte{1}
-		} else {
-			v = []byte{0}
-		}
-		return tx.Put(kv.BittorrentInfo, []byte("_fsync"), v)
-	})
-}
-
 func (d *Downloader) mainLoop(silent bool) error {
 	if d.webseedsDiscover {
 		// CornerCase: no peers -> no anoncments to trackers -> no magnetlink resolution (but magnetlink has filename)
@@ -1269,7 +1300,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 	defer statEvery.Stop()
 
 	var m runtime.MemStats
-	justCompleted := true
 	for {
 		select {
 		case <-d.ctx.Done():
@@ -1286,11 +1316,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 			dbg.ReadMemStats(&m)
 			if stats.Completed {
-				if justCompleted {
-					justCompleted = false
-					_ = d.fsyncDB()
-				}
-
 				d.logger.Info("[snapshots] Seeding",
 					"up", common.ByteCount(stats.UploadRate)+"/s",
 					"peers", stats.PeersUnique,
@@ -2255,7 +2280,7 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 	if err := g.Wait(); err != nil {
 		return err
 	}
-	return d.fsyncDB()
+	return nil
 }
 
 // AddNewSeedableFile decides what we do depending on wether we have the .seg file or the .torrent file
@@ -2538,8 +2563,8 @@ func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientC
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("torrentcfg.openClient: %w", err)
 	}
-	c, err = NewMdbxPieceCompletion(db)
-	//c, err = NewMdbxPieceCompletionBatch(db)
+	//c, err = NewMdbxPieceCompletion(db)
+	c, err = NewMdbxPieceCompletionBatch(db)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("torrentcfg.NewMdbxPieceCompletion: %w", err)
 	}

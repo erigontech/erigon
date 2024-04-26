@@ -21,7 +21,7 @@ func (api *OtterscanAPIImpl) HasCode(ctx context.Context, address common.Address
 	if err != nil {
 		return false, err
 	}
-	chainConfig, err := api.chainConfig(tx)
+	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return false, err
 	}

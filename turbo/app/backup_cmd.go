@@ -55,7 +55,7 @@ var (
 		Required: true,
 	}
 	BackupLabelsFlag = cli.StringFlag{
-		Name:  "lables",
+		Name:  "labels",
 		Usage: "Name of component to backup. Example: chaindata,txpool,downloader",
 	}
 	BackupTablesFlag = cli.StringFlag{
