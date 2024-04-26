@@ -2,13 +2,15 @@ package fork_graph
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/golang/snappy"
+	"github.com/klauspost/compress/zstd"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/pierrec/lz4"
 	"github.com/spf13/afero"
 )
 
@@ -31,35 +33,38 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash) (bs *s
 	// Read the version
 	v := []byte{0}
 	if _, err := file.Read(v); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read hard fork version: %w, root: %x", err, blockRoot)
 	}
 	// Read the length
 	lengthBytes := make([]byte, 8)
-	_, err = file.Read(lengthBytes)
+	var n int
+	n, err = io.ReadFull(file, lengthBytes)
 	if err != nil {
-		return
+		return nil, fmt.Errorf("failed to read length: %w, root: %x", err, blockRoot)
+	}
+	if n != 8 {
+		return nil, fmt.Errorf("failed to read length: %d, want 8, root: %x", n, blockRoot)
 	}
 	// Grow the snappy buffer
 	f.sszSnappyBuffer.Grow(int(binary.BigEndian.Uint64(lengthBytes)))
 	// Read the snappy buffer
 	sszSnappyBuffer := f.sszSnappyBuffer.Bytes()
 	sszSnappyBuffer = sszSnappyBuffer[:cap(sszSnappyBuffer)]
-	var n int
-	n, err = file.Read(sszSnappyBuffer)
-	if err != nil {
-		return
+	n, err = io.ReadFull(file, sszSnappyBuffer)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return nil, fmt.Errorf("failed to read snappy buffer: %w, root: %x", err, blockRoot)
 	}
 
 	decLen, err := snappy.DecodedLen(sszSnappyBuffer[:n])
 	if err != nil {
-		return
+		return nil, fmt.Errorf("failed to get decoded length: %w, root: %x, len: %d", err, blockRoot, n)
 	}
 	// Grow the plain ssz buffer
 	f.sszBuffer.Grow(decLen)
 	sszBuffer := f.sszBuffer.Bytes()
 	sszBuffer, err = snappy.Decode(sszBuffer, sszSnappyBuffer[:n])
 	if err != nil {
-		return
+		return nil, fmt.Errorf("failed to decode snappy buffer: %w, root: %x, len: %d, decLen: %d", err, blockRoot, n, decLen)
 	}
 	bs = state.New(f.beaconCfg)
 	err = bs.DecodeSSZ(sszBuffer, int(v[0]))
@@ -70,12 +75,12 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash) (bs *s
 	}
 	defer cacheFile.Close()
 
-	lz4Reader := lz4PoolReaderPool.Get().(*lz4.Reader)
-	defer lz4PoolReaderPool.Put(lz4Reader)
+	reader := decompressPool.Get().(*zstd.Decoder)
+	defer decompressPool.Put(reader)
 
-	lz4Reader.Reset(cacheFile)
+	reader.Reset(cacheFile)
 
-	if err := bs.DecodeCaches(lz4Reader); err != nil {
+	if err := bs.DecodeCaches(reader); err != nil {
 		return nil, err
 	}
 
@@ -135,16 +140,16 @@ func (f *forkGraphDisk) dumpBeaconStateOnDisk(bs *state.CachingBeaconState, bloc
 	}
 	defer cacheFile.Close()
 
-	lz4Writer := lz4PoolWriterPool.Get().(*lz4.Writer)
-	defer lz4PoolWriterPool.Put(lz4Writer)
+	writer := compressorPool.Get().(*zstd.Encoder)
+	defer compressorPool.Put(writer)
 
-	lz4Writer.CompressionLevel = 5
-	lz4Writer.Reset(cacheFile)
+	writer.Reset(cacheFile)
+	defer writer.Close()
 
-	if err := bs.EncodeCaches(lz4Writer); err != nil {
+	if err := bs.EncodeCaches(writer); err != nil {
 		return err
 	}
-	if err = lz4Writer.Flush(); err != nil {
+	if err = writer.Close(); err != nil {
 		return
 	}
 	err = cacheFile.Sync()

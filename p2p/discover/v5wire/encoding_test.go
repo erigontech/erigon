@@ -537,7 +537,7 @@ func (t *handshakeTest) close() {
 }
 
 func (n *handshakeTestNode) init(key *ecdsa.PrivateKey, ip net.IP, clock mclock.Clock, tmpDir string, logger log.Logger) {
-	db, err := enode.OpenDB(context.Background(), "", tmpDir)
+	db, err := enode.OpenDB(context.Background(), "", tmpDir, logger)
 	if err != nil {
 		panic(err)
 	}

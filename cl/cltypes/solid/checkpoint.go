@@ -35,14 +35,14 @@ func NewCheckpoint() Checkpoint {
 
 func (c Checkpoint) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Epoch uint64         `json:"epoch"`
+		Epoch uint64         `json:"epoch,string"`
 		Root  libcommon.Hash `json:"root"`
 	}{Epoch: c.Epoch(), Root: c.BlockRoot()})
 }
 
-func (c Checkpoint) UnmarshalJSON(buf []byte) error {
+func (c *Checkpoint) UnmarshalJSON(buf []byte) error {
 	var tmp struct {
-		Epoch uint64         `json:"epoch"`
+		Epoch uint64         `json:"epoch,string"`
 		Root  libcommon.Hash `json:"root"`
 	}
 	if err := json.Unmarshal(buf, &tmp); err != nil {

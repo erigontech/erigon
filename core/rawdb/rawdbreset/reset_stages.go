@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/backup"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -15,12 +18,10 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/turbo/backup"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
 )
 
-func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string) error {
+func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string, logger log.Logger) error {
 	// don't reset senders here
 	if err := Reset(ctx, db, stages.HashState); err != nil {
 		return err
@@ -44,13 +45,13 @@ func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string) er
 		return err
 	}
 
-	if err := ResetExec(ctx, db, chain, tmpDir); err != nil {
+	if err := ResetExec(ctx, db, chain, tmpDir, logger); err != nil {
 		return err
 	}
 	return nil
 }
 
-func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.AggregatorV3,
+func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator,
 	br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, cc chain.Config, engine consensus.Engine, logger log.Logger) error {
 	// keep Genesis
 	if err := rawdb.TruncateBlocks(context.Background(), tx, 1); err != nil {
@@ -87,7 +88,7 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.AggregatorV3,
 	}
 
 	if br.FreezingCfg().Enabled && br.FrozenBlocks() > 0 {
-		if err := stagedsync.FillDBFromSnapshots("fillind_db_from_snapshots", context.Background(), tx, dirs, br, agg, logger); err != nil {
+		if err := stagedsync.FillDBFromSnapshots("filling_db_from_snapshots", context.Background(), tx, dirs, br, agg, logger); err != nil {
 			return err
 		}
 		_ = stages.SaveStageProgress(tx, stages.Snapshots, br.FrozenBlocks())
@@ -130,7 +131,7 @@ func WarmupExec(ctx context.Context, db kv.RwDB) (err error) {
 	return
 }
 
-func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string) (err error) {
+func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string, logger log.Logger) (err error) {
 	historyV3 := kvcfg.HistoryV3.FromDB(db)
 	if historyV3 {
 		stateHistoryBuckets = append(stateHistoryBuckets, stateHistoryV3Buckets...)
@@ -156,7 +157,7 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string) (er
 		}
 		if !historyV3 {
 			genesis := core.GenesisBlockByChainName(chain)
-			if _, _, err := core.WriteGenesisState(genesis, tx, tmpDir); err != nil {
+			if _, _, err := core.WriteGenesisState(genesis, tx, tmpDir, logger); err != nil {
 				return err
 			}
 		}
@@ -241,6 +242,13 @@ func Reset(ctx context.Context, db kv.RwDB, stagesList ...stages.SyncStage) erro
 		return nil
 	})
 }
+
+func ResetPruneAt(ctx context.Context, db kv.RwDB, stage stages.SyncStage) error {
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		return stages.SaveStagePruneProgress(tx, stage, 0)
+	})
+}
+
 func Warmup(ctx context.Context, db kv.RwDB, lvl log.Lvl, stList ...stages.SyncStage) error {
 	for _, st := range stList {
 		for _, tbl := range Tables[st] {

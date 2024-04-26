@@ -101,7 +101,7 @@ Downloader does:
 
 - Read .torrent files, download everything described by .torrent files
 - Use https://github.com/ngosang/trackerslist
-  see [./trackers/embed.go](../../../erigon-lib/downloader/trackers/embed.go)
+  see [./downloader/util.go](../../erigon-lib/downloader/util.go)
 - automatically seeding
 
 Technical details:
@@ -153,6 +153,14 @@ downloader --datadir=<your> --chain=mainnet --webseed=<webseed_url>
 downloader torrent_cat /path/to.torrent
 
 downloader torrent_magnet /path/to.torrent
+
+downloader torrent_clean --datadir <datadir> # remote all .torrent files in datadir
+```
+
+## Remote manifest verify
+To check that remote webseeds has available manifest and all manifested files are available, has correct format of ETag, does not have dangling torrents etc.
+```
+downloader manifest-verify --chain <chain> [--webseeds 'a','b','c']
 ```
 
 ## Faster rsync

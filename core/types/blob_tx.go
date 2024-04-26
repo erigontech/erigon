@@ -1,6 +1,7 @@
 package types
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -23,7 +24,7 @@ type BlobTx struct {
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.
-func (stx BlobTx) copy() *BlobTx {
+func (stx *BlobTx) copy() *BlobTx {
 	cpy := &BlobTx{
 		DynamicFeeTransaction: *stx.DynamicFeeTransaction.copy(),
 		MaxFeePerBlobGas:      new(uint256.Int),
@@ -36,27 +37,62 @@ func (stx BlobTx) copy() *BlobTx {
 	return cpy
 }
 
-func (stx BlobTx) Type() byte { return BlobTxType }
+func (stx *BlobTx) Type() byte { return BlobTxType }
 
-func (stx BlobTx) GetBlobHashes() []libcommon.Hash {
+func (stx *BlobTx) GetBlobHashes() []libcommon.Hash {
 	return stx.BlobVersionedHashes
 }
 
-func (stx BlobTx) GetBlobGas() uint64 {
+func (stx *BlobTx) GetBlobGas() uint64 {
 	return fixedgas.BlobGasPerBlob * uint64(len(stx.BlobVersionedHashes))
 }
 
-func (stx BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
-	msg, err := stx.DynamicFeeTransaction.AsMessage(s, baseFee, rules)
-	if err != nil {
-		return Message{}, err
+func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
+	msg := Message{
+		nonce:      stx.Nonce,
+		gasLimit:   stx.Gas,
+		gasPrice:   *stx.FeeCap,
+		tip:        *stx.Tip,
+		feeCap:     *stx.FeeCap,
+		to:         stx.To,
+		amount:     *stx.Value,
+		data:       stx.Data,
+		accessList: stx.AccessList,
+		checkNonce: true,
 	}
+	if !rules.IsCancun {
+		return msg, errors.New("BlobTx transactions require Cancun")
+	}
+	if baseFee != nil {
+		overflow := msg.gasPrice.SetFromBig(baseFee)
+		if overflow {
+			return msg, fmt.Errorf("gasPrice higher than 2^256-1")
+		}
+	}
+	msg.gasPrice.Add(&msg.gasPrice, stx.Tip)
+	if msg.gasPrice.Gt(stx.FeeCap) {
+		msg.gasPrice.Set(stx.FeeCap)
+	}
+	var err error
+	msg.from, err = stx.Sender(s)
 	msg.maxFeePerBlobGas = *stx.MaxFeePerBlobGas
 	msg.blobHashes = stx.BlobVersionedHashes
 	return msg, err
 }
 
-func (stx BlobTx) Hash() libcommon.Hash {
+func (stx *BlobTx) Sender(signer Signer) (libcommon.Address, error) {
+	if sc := stx.from.Load(); sc != nil {
+		return sc.(libcommon.Address), nil
+	}
+	addr, err := signer.Sender(stx)
+	if err != nil {
+		return libcommon.Address{}, err
+	}
+	stx.from.Store(addr)
+	return addr, nil
+}
+
+func (stx *BlobTx) Hash() libcommon.Hash {
 	if hash := stx.hash.Load(); hash != nil {
 		return *hash.(*libcommon.Hash)
 	}
@@ -78,7 +114,7 @@ func (stx BlobTx) Hash() libcommon.Hash {
 	return hash
 }
 
-func (stx BlobTx) SigningHash(chainID *big.Int) libcommon.Hash {
+func (stx *BlobTx) SigningHash(chainID *big.Int) libcommon.Hash {
 	return prefixedRlpHash(
 		BlobTxType,
 		[]interface{}{
@@ -96,7 +132,13 @@ func (stx BlobTx) SigningHash(chainID *big.Int) libcommon.Hash {
 		})
 }
 
-func (stx BlobTx) payloadSize() (payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen int) {
+func (stx *BlobTx) EncodingSize() int {
+	payloadSize, _, _, _, _ := stx.payloadSize()
+	// Add envelope size and type size
+	return 1 + rlp2.ListPrefixLen(payloadSize) + payloadSize
+}
+
+func (stx *BlobTx) payloadSize() (payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen int) {
 	payloadSize, nonceLen, gasLen, accessListLen = stx.DynamicFeeTransaction.payloadSize()
 	// size of MaxFeePerBlobGas
 	payloadSize++
@@ -120,7 +162,7 @@ func encodeBlobVersionedHashes(hashes []libcommon.Hash, w io.Writer, b []byte) e
 	return nil
 }
 
-func (stx BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen int) error {
+func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen int) error {
 	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
@@ -181,7 +223,7 @@ func (stx BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, ga
 	if err := encodeBlobVersionedHashes(stx.BlobVersionedHashes, w, b); err != nil {
 		return err
 	}
-	// encode y_parity
+	// encode V
 	if err := stx.V.EncodeRLP(w); err != nil {
 		return err
 	}
@@ -196,7 +238,7 @@ func (stx BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, ga
 	return nil
 }
 
-func (stx BlobTx) EncodeRLP(w io.Writer) error {
+func (stx *BlobTx) EncodeRLP(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen := stx.payloadSize()
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp2.ListPrefixLen(payloadSize) + payloadSize
@@ -216,7 +258,7 @@ func (stx BlobTx) EncodeRLP(w io.Writer) error {
 	return nil
 }
 
-func (stx BlobTx) MarshalBinary(w io.Writer) error {
+func (stx *BlobTx) MarshalBinary(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen := stx.payloadSize()
 	var b [33]byte
 	// encode TxType
@@ -281,19 +323,19 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	if err = decodeAccessList(&stx.AccessList, s); err != nil {
 		return err
 	}
-
 	// decode MaxFeePerBlobGas
 	if b, err = s.Uint256Bytes(); err != nil {
 		return err
 	}
 	stx.MaxFeePerBlobGas = new(uint256.Int).SetBytes(b)
-
 	// decode BlobVersionedHashes
 	stx.BlobVersionedHashes = []libcommon.Hash{}
 	if err = decodeBlobVersionedHashes(&stx.BlobVersionedHashes, s); err != nil {
 		return err
 	}
-
+	if len(stx.BlobVersionedHashes) == 0 {
+		return fmt.Errorf("a blob stx must contain at least one blob")
+	}
 	// decode V
 	if b, err = s.Uint256Bytes(); err != nil {
 		return err

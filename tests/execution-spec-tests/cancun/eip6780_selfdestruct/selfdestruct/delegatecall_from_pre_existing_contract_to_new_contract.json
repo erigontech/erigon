@@ -1,7 +1,8 @@
 {
-    "000-fork=Shanghai-selfdestruct_contract_initial_balance=0-call_times=1-call_opcode=DELEGATECALL-create_opcode=CREATE": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_delegatecall_from_pre_existing_contract_to_new_contract[fork_Shanghai-blockchain_test-selfdestruct_contract_initial_balance_0-call_times_1-call_opcode_DELEGATECALL-create_opcode_CREATE]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -50,6 +51,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0xcfaf4e75582fadc780c44fb886890ee881d89c694b5b8fd8898ee3648d1ed639"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -160,9 +162,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "001-fork=Shanghai-selfdestruct_contract_initial_balance=0-call_times=1-call_opcode=DELEGATECALL-create_opcode=CREATE2": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_delegatecall_from_pre_existing_contract_to_new_contract[fork_Shanghai-blockchain_test-selfdestruct_contract_initial_balance_0-call_times_1-call_opcode_DELEGATECALL-create_opcode_CREATE2]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -211,6 +214,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0x605c59eb9b95c83563426b219105c62be11d5b9ee6c9f1b4b3e6f90fff7453e2"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -321,9 +325,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "002-fork=Shanghai-selfdestruct_contract_initial_balance=0-call_times=1-call_opcode=CALLCODE-create_opcode=CREATE": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_delegatecall_from_pre_existing_contract_to_new_contract[fork_Shanghai-blockchain_test-selfdestruct_contract_initial_balance_0-call_times_1-call_opcode_CALLCODE-create_opcode_CREATE]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -372,6 +377,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0xe22bf40529ae73634e8db7fc728ef21cb1c1bc1a1dba412e701be15877585b3f"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -482,9 +488,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "003-fork=Shanghai-selfdestruct_contract_initial_balance=0-call_times=1-call_opcode=CALLCODE-create_opcode=CREATE2": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_delegatecall_from_pre_existing_contract_to_new_contract[fork_Shanghai-blockchain_test-selfdestruct_contract_initial_balance_0-call_times_1-call_opcode_CALLCODE-create_opcode_CREATE2]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -533,6 +540,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0x57b00d8d7fb6458b1e4e62985b5e7fae25a7a224b2517ee234cfa5bd25e31de5"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -643,9 +651,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "004-fork=Shanghai-selfdestruct_contract_initial_balance=1-call_times=1-call_opcode=DELEGATECALL-create_opcode=CREATE": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_delegatecall_from_pre_existing_contract_to_new_contract[fork_Shanghai-blockchain_test-selfdestruct_contract_initial_balance_1-call_times_1-call_opcode_DELEGATECALL-create_opcode_CREATE]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -694,6 +703,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0x21b942b7ee1805a0688c972b31d231d50d4571ea6a972049e056d9279f9dd703"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -810,9 +820,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "005-fork=Shanghai-selfdestruct_contract_initial_balance=1-call_times=1-call_opcode=DELEGATECALL-create_opcode=CREATE2": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_delegatecall_from_pre_existing_contract_to_new_contract[fork_Shanghai-blockchain_test-selfdestruct_contract_initial_balance_1-call_times_1-call_opcode_DELEGATECALL-create_opcode_CREATE2]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -861,6 +872,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0x3c43c64536b52c0579bb64016144758342ca0959a68555a5eb2cd9f43cdb17c7"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -977,9 +989,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "006-fork=Shanghai-selfdestruct_contract_initial_balance=1-call_times=1-call_opcode=CALLCODE-create_opcode=CREATE": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_delegatecall_from_pre_existing_contract_to_new_contract[fork_Shanghai-blockchain_test-selfdestruct_contract_initial_balance_1-call_times_1-call_opcode_CALLCODE-create_opcode_CREATE]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -1028,6 +1041,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0x5cd69b263a7a824d065d3533f17826967494778d4bfb86d5cb5a556173a08b8e"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -1144,9 +1158,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "007-fork=Shanghai-selfdestruct_contract_initial_balance=1-call_times=1-call_opcode=CALLCODE-create_opcode=CREATE2": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_delegatecall_from_pre_existing_contract_to_new_contract[fork_Shanghai-blockchain_test-selfdestruct_contract_initial_balance_1-call_times_1-call_opcode_CALLCODE-create_opcode_CREATE2]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -1195,6 +1210,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0x4582e7837f34517f2ba57bb2fb6faa3f0777fb497e7fd808f0a4ddb12b68faae"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -1311,9 +1327,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "008-fork=Cancun-selfdestruct_contract_initial_balance=0-call_times=1-call_opcode=DELEGATECALL-create_opcode=CREATE": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_delegatecall_from_pre_existing_contract_to_new_contract[fork_Cancun-blockchain_test-selfdestruct_contract_initial_balance_0-call_times_1-call_opcode_DELEGATECALL-create_opcode_CREATE]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -1368,6 +1385,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x1a1ebc3a84c3aee8882720b790ae4956ca8caca99418df3d053bd25be8fb7412"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -1500,9 +1518,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "009-fork=Cancun-selfdestruct_contract_initial_balance=0-call_times=1-call_opcode=DELEGATECALL-create_opcode=CREATE2": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_delegatecall_from_pre_existing_contract_to_new_contract[fork_Cancun-blockchain_test-selfdestruct_contract_initial_balance_0-call_times_1-call_opcode_DELEGATECALL-create_opcode_CREATE2]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -1557,6 +1576,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x227b5c00651ae1a0e8bfc29a103a6b4b07f4b2347bfa66a8a780ddfcb9113ce2"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -1689,9 +1709,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "010-fork=Cancun-selfdestruct_contract_initial_balance=0-call_times=1-call_opcode=CALLCODE-create_opcode=CREATE": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_delegatecall_from_pre_existing_contract_to_new_contract[fork_Cancun-blockchain_test-selfdestruct_contract_initial_balance_0-call_times_1-call_opcode_CALLCODE-create_opcode_CREATE]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -1746,6 +1767,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x646f32411953d314a1b732850d5ce91f62c7ae9e98e404e73f07511ab0e2b8ef"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -1878,9 +1900,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "011-fork=Cancun-selfdestruct_contract_initial_balance=0-call_times=1-call_opcode=CALLCODE-create_opcode=CREATE2": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_delegatecall_from_pre_existing_contract_to_new_contract[fork_Cancun-blockchain_test-selfdestruct_contract_initial_balance_0-call_times_1-call_opcode_CALLCODE-create_opcode_CREATE2]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -1935,6 +1958,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x8df812675b791630ebd5effd8737d97e05dee1cd9f0b14be3f9f43f076b90cc7"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -2067,9 +2091,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "012-fork=Cancun-selfdestruct_contract_initial_balance=1-call_times=1-call_opcode=DELEGATECALL-create_opcode=CREATE": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_delegatecall_from_pre_existing_contract_to_new_contract[fork_Cancun-blockchain_test-selfdestruct_contract_initial_balance_1-call_times_1-call_opcode_DELEGATECALL-create_opcode_CREATE]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -2124,6 +2149,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xc0cb4ff7a35344c378c602200d6c9750469b5d33b6367460e9e0f1d9c8fa9a25"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -2262,9 +2288,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "013-fork=Cancun-selfdestruct_contract_initial_balance=1-call_times=1-call_opcode=DELEGATECALL-create_opcode=CREATE2": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_delegatecall_from_pre_existing_contract_to_new_contract[fork_Cancun-blockchain_test-selfdestruct_contract_initial_balance_1-call_times_1-call_opcode_DELEGATECALL-create_opcode_CREATE2]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -2319,6 +2346,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x0c5656b96bdb97f3b852de8e710d5cac99bec248b019fd5917e95e3ce9d767ab"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -2457,9 +2485,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "014-fork=Cancun-selfdestruct_contract_initial_balance=1-call_times=1-call_opcode=CALLCODE-create_opcode=CREATE": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_delegatecall_from_pre_existing_contract_to_new_contract[fork_Cancun-blockchain_test-selfdestruct_contract_initial_balance_1-call_times_1-call_opcode_CALLCODE-create_opcode_CREATE]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -2514,6 +2543,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xd6dfcf54bab17c48c70923d25b5d32f50d73924b8268f92085862188caa9e261"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -2652,9 +2682,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "015-fork=Cancun-selfdestruct_contract_initial_balance=1-call_times=1-call_opcode=CALLCODE-create_opcode=CREATE2": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_delegatecall_from_pre_existing_contract_to_new_contract[fork_Cancun-blockchain_test-selfdestruct_contract_initial_balance_1-call_times_1-call_opcode_CALLCODE-create_opcode_CREATE2]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -2709,6 +2740,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xfd58b6d65be79b03e49a38f1716807036e4da285604372d8bcb0ef2d42ca8776"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",

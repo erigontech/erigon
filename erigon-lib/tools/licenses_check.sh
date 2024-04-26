@@ -21,7 +21,7 @@ fi
 # enable build tags to cover maximum .go files
 export GOFLAGS="-tags=gorules,linux,tools"
 
-output=$(find "$projectDir" -type 'd' -maxdepth 1 \
+output=$(find "$projectDir" -maxdepth 1 -type 'd' \
     -not -name ".*" \
     -not -name tools \
     -not -name build \
@@ -30,9 +30,10 @@ output=$(find "$projectDir" -type 'd' -maxdepth 1 \
     | grep -v "erigon-lib has empty version"        `# self` \
     | grep -v "golang.org/x/"                       `# a part of Go` \
     | grep -v "crawshaw.io/sqlite"                  `# ISC` \
-    | grep -v "erigon-lib/sais"                     `# MIT` \
+    | grep -v "erigon-lib/seg/sais"                 `# MIT` \
     | grep -v "github.com/anacrolix/go-libutp"      `# MIT` \
     | grep -v "github.com/cespare/xxhash/v2"        `# MIT` \
+    | grep -v "github.com/cespare/xxhash"           `# MIT` \
     | grep -v "github.com/anacrolix/mmsg"           `# MPL-2.0` \
     | grep -v "github.com/anacrolix/multiless"      `# MPL-2.0` \
     | grep -v "github.com/anacrolix/sync"           `# MPL-2.0` \

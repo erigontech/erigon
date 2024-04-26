@@ -9,16 +9,16 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 )
 
-func (a *ApiHandler) getHeaders(r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getHeaders(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 
-	querySlot, err := uint64FromQueryParams(r, "slot")
+	querySlot, err := beaconhttp.Uint64FromQueryParams(r, "slot")
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
-	queryParentHash, err := hashFromQueryParams(r, "parent_root")
+	queryParentHash, err := beaconhttp.HashFromQueryParams(r, "parent_root")
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -89,16 +89,16 @@ func (a *ApiHandler) getHeaders(r *http.Request) (*beaconResponse, error) {
 	return newBeaconResponse(headers), nil
 }
 
-func (a *ApiHandler) getHeader(r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getHeader(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	blockId, err := blockIdFromRequest(r)
+	blockId, err := beaconhttp.BlockIdFromRequest(r)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	root, err := a.rootFromBlockId(ctx, tx, blockId)
 	if err != nil {
@@ -111,7 +111,7 @@ func (a *ApiHandler) getHeader(r *http.Request) (*beaconResponse, error) {
 	}
 
 	if signedHeader == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Sprintf("block not found %x", root))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("block not found %x", root))
 	}
 	var canonicalRoot libcommon.Hash
 	canonicalRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, signedHeader.Header.Slot)
@@ -125,5 +125,5 @@ func (a *ApiHandler) getHeader(r *http.Request) (*beaconResponse, error) {
 		Root:      root,
 		Canonical: canonicalRoot == root,
 		Header:    signedHeader,
-	}).withFinalized(canonicalRoot == root && signedHeader.Header.Slot <= a.forkchoiceStore.FinalizedSlot()).withVersion(version), nil
+	}).WithFinalized(canonicalRoot == root && signedHeader.Header.Slot <= a.forkchoiceStore.FinalizedSlot()).WithVersion(version), nil
 }

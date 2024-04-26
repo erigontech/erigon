@@ -1,15 +1,18 @@
 package cltypes
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/big"
 
+	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -22,18 +25,18 @@ type Eth1Block struct {
 	ReceiptsRoot  libcommon.Hash    `json:"receipts_root"`
 	LogsBloom     types.Bloom       `json:"logs_bloom"`
 	PrevRandao    libcommon.Hash    `json:"prev_randao"`
-	BlockNumber   uint64            `json:"block_number"`
-	GasLimit      uint64            `json:"gas_limit"`
-	GasUsed       uint64            `json:"gas_used"`
-	Time          uint64            `json:"timestamp"`
+	BlockNumber   uint64            `json:"block_number,string"`
+	GasLimit      uint64            `json:"gas_limit,string"`
+	GasUsed       uint64            `json:"gas_used,string"`
+	Time          uint64            `json:"timestamp,string"`
 	Extra         *solid.ExtraData  `json:"extra_data"`
 	BaseFeePerGas libcommon.Hash    `json:"base_fee_per_gas"`
 	// Extra fields
 	BlockHash     libcommon.Hash              `json:"block_hash"`
 	Transactions  *solid.TransactionsSSZ      `json:"transactions"`
 	Withdrawals   *solid.ListSSZ[*Withdrawal] `json:"withdrawals,omitempty"`
-	BlobGasUsed   uint64                      `json:"blob_gas_used,omitempty"`
-	ExcessBlobGas uint64                      `json:"excess_blob_gas,omitempty"`
+	BlobGasUsed   uint64                      `json:"blob_gas_used,string"`
+	ExcessBlobGas uint64                      `json:"excess_blob_gas,string"`
 	// internals
 	version   clparams.StateVersion
 	beaconCfg *clparams.BeaconChainConfig
@@ -88,6 +91,96 @@ func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody, be
 
 func (*Eth1Block) Static() bool {
 	return false
+}
+
+func (b *Eth1Block) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		ParentHash    libcommon.Hash              `json:"parent_hash"`
+		FeeRecipient  libcommon.Address           `json:"fee_recipient"`
+		StateRoot     libcommon.Hash              `json:"state_root"`
+		ReceiptsRoot  libcommon.Hash              `json:"receipts_root"`
+		LogsBloom     types.Bloom                 `json:"logs_bloom"`
+		PrevRandao    libcommon.Hash              `json:"prev_randao"`
+		BlockNumber   uint64                      `json:"block_number,string"`
+		GasLimit      uint64                      `json:"gas_limit,string"`
+		GasUsed       uint64                      `json:"gas_used,string"`
+		Time          uint64                      `json:"timestamp,string"`
+		Extra         *solid.ExtraData            `json:"extra_data"`
+		BaseFeePerGas string                      `json:"base_fee_per_gas"`
+		BlockHash     libcommon.Hash              `json:"block_hash"`
+		Transactions  *solid.TransactionsSSZ      `json:"transactions"`
+		Withdrawals   *solid.ListSSZ[*Withdrawal] `json:"withdrawals,omitempty"`
+		BlobGasUsed   uint64                      `json:"blob_gas_used,string"`
+		ExcessBlobGas uint64                      `json:"excess_blob_gas,string"`
+	}{
+		ParentHash:    b.ParentHash,
+		FeeRecipient:  b.FeeRecipient,
+		StateRoot:     b.StateRoot,
+		ReceiptsRoot:  b.ReceiptsRoot,
+		LogsBloom:     b.LogsBloom,
+		PrevRandao:    b.PrevRandao,
+		BlockNumber:   b.BlockNumber,
+		GasLimit:      b.GasLimit,
+		GasUsed:       b.GasUsed,
+		Time:          b.Time,
+		Extra:         b.Extra,
+		BaseFeePerGas: uint256.NewInt(0).SetBytes32(utils.ReverseOfByteSlice(b.BaseFeePerGas[:])).Dec(),
+		BlockHash:     b.BlockHash,
+		Transactions:  b.Transactions,
+		Withdrawals:   b.Withdrawals,
+		BlobGasUsed:   b.BlobGasUsed,
+		ExcessBlobGas: b.ExcessBlobGas,
+	})
+}
+
+func (b *Eth1Block) UnmarshalJSON(data []byte) error {
+	var aux struct {
+		ParentHash    libcommon.Hash              `json:"parent_hash"`
+		FeeRecipient  libcommon.Address           `json:"fee_recipient"`
+		StateRoot     libcommon.Hash              `json:"state_root"`
+		ReceiptsRoot  libcommon.Hash              `json:"receipts_root"`
+		LogsBloom     types.Bloom                 `json:"logs_bloom"`
+		PrevRandao    libcommon.Hash              `json:"prev_randao"`
+		BlockNumber   uint64                      `json:"block_number,string"`
+		GasLimit      uint64                      `json:"gas_limit,string"`
+		GasUsed       uint64                      `json:"gas_used,string"`
+		Time          uint64                      `json:"timestamp,string"`
+		Extra         *solid.ExtraData            `json:"extra_data"`
+		BaseFeePerGas string                      `json:"base_fee_per_gas"`
+		BlockHash     libcommon.Hash              `json:"block_hash"`
+		Transactions  *solid.TransactionsSSZ      `json:"transactions"`
+		Withdrawals   *solid.ListSSZ[*Withdrawal] `json:"withdrawals,omitempty"`
+		BlobGasUsed   uint64                      `json:"blob_gas_used,string"`
+		ExcessBlobGas uint64                      `json:"excess_blob_gas,string"`
+	}
+	aux.Withdrawals = solid.NewStaticListSSZ[*Withdrawal](int(b.beaconCfg.MaxWithdrawalsPerPayload), 44)
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	b.ParentHash = aux.ParentHash
+	b.FeeRecipient = aux.FeeRecipient
+	b.StateRoot = aux.StateRoot
+	b.ReceiptsRoot = aux.ReceiptsRoot
+	b.LogsBloom = aux.LogsBloom
+	b.PrevRandao = aux.PrevRandao
+	b.BlockNumber = aux.BlockNumber
+	b.GasLimit = aux.GasLimit
+	b.GasUsed = aux.GasUsed
+	b.Time = aux.Time
+	b.Extra = aux.Extra
+	tmp := uint256.NewInt(0)
+	if err := tmp.SetFromDecimal(aux.BaseFeePerGas); err != nil {
+		return err
+	}
+	tmpBaseFee := tmp.Bytes32()
+	b.BaseFeePerGas = libcommon.Hash{}
+	copy(b.BaseFeePerGas[:], utils.ReverseOfByteSlice(tmpBaseFee[:]))
+	b.BlockHash = aux.BlockHash
+	b.Transactions = aux.Transactions
+	b.Withdrawals = aux.Withdrawals
+	b.BlobGasUsed = aux.BlobGasUsed
+	b.ExcessBlobGas = aux.ExcessBlobGas
+	return nil
 }
 
 // PayloadHeader returns the equivalent ExecutionPayloadHeader object.
@@ -192,7 +285,7 @@ func (b *Eth1Block) getSchema() []interface{} {
 }
 
 // RlpHeader returns the equivalent types.Header struct with RLP-based fields.
-func (b *Eth1Block) RlpHeader() (*types.Header, error) {
+func (b *Eth1Block) RlpHeader(parentRoot *libcommon.Hash) (*types.Header, error) {
 	// Reverse the order of the bytes in the BaseFeePerGas array and convert it to a big integer.
 	reversedBaseFeePerGas := libcommon.Copy(b.BaseFeePerGas[:])
 	for i, j := 0, len(reversedBaseFeePerGas)-1; i < j; i, j = i+1, j-1 {
@@ -211,25 +304,29 @@ func (b *Eth1Block) RlpHeader() (*types.Header, error) {
 		})
 		*withdrawalsHash = types.DeriveSha(types.Withdrawals(withdrawals))
 	}
+	if b.version < clparams.DenebVersion {
+		parentRoot = nil
+	}
 
 	header := &types.Header{
-		ParentHash:      b.ParentHash,
-		UncleHash:       types.EmptyUncleHash,
-		Coinbase:        b.FeeRecipient,
-		Root:            b.StateRoot,
-		TxHash:          types.DeriveSha(types.BinaryTransactions(b.Transactions.UnderlyngReference())),
-		ReceiptHash:     b.ReceiptsRoot,
-		Bloom:           b.LogsBloom,
-		Difficulty:      merge.ProofOfStakeDifficulty,
-		Number:          big.NewInt(int64(b.BlockNumber)),
-		GasLimit:        b.GasLimit,
-		GasUsed:         b.GasUsed,
-		Time:            b.Time,
-		Extra:           b.Extra.Bytes(),
-		MixDigest:       b.PrevRandao,
-		Nonce:           merge.ProofOfStakeNonce,
-		BaseFee:         baseFee,
-		WithdrawalsHash: withdrawalsHash,
+		ParentHash:            b.ParentHash,
+		UncleHash:             types.EmptyUncleHash,
+		Coinbase:              b.FeeRecipient,
+		Root:                  b.StateRoot,
+		TxHash:                types.DeriveSha(types.BinaryTransactions(b.Transactions.UnderlyngReference())),
+		ReceiptHash:           b.ReceiptsRoot,
+		Bloom:                 b.LogsBloom,
+		Difficulty:            merge.ProofOfStakeDifficulty,
+		Number:                big.NewInt(int64(b.BlockNumber)),
+		GasLimit:              b.GasLimit,
+		GasUsed:               b.GasUsed,
+		Time:                  b.Time,
+		Extra:                 b.Extra.Bytes(),
+		MixDigest:             b.PrevRandao,
+		Nonce:                 merge.ProofOfStakeNonce,
+		BaseFee:               baseFee,
+		WithdrawalsHash:       withdrawalsHash,
+		ParentBeaconBlockRoot: parentRoot,
 	}
 
 	if b.version >= clparams.DenebVersion {

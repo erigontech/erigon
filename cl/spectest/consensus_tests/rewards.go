@@ -1,9 +1,10 @@
 package consensus_tests
 
 import (
-	"github.com/ledgerwatch/erigon/spectest"
 	"io/fs"
 	"testing"
+
+	"github.com/ledgerwatch/erigon/spectest"
 )
 
 type RewardsCore struct {
@@ -11,7 +12,6 @@ type RewardsCore struct {
 
 func (b *RewardsCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
 	t.Skipf("Skippinf attestation reward calculation tests for now")
-	//TODO: we should find some way to pass these
 	//preState, err := spectest.ReadBeaconState(root, c.Version(), spectest.PreSsz)
 	//require.NoError(t, err)
 

@@ -405,7 +405,7 @@ if (!Test-Path -Path [string](Join-Path $MyContext.Directory "\.git") -PathType 
 if(!(Test-Git-Installed)) { exit 1 }
     
 ## Test GO language is installed AND min version
-if(!(Test-GO-Installed "1.20")) { exit 1 }
+if(!(Test-GO-Installed "1.21")) { exit 1 }
 
 # Build erigon binaries
 Set-Variable -Name "Erigon" -Value ([hashtable]::Synchronized(@{})) -Scope Script
@@ -421,6 +421,7 @@ $Erigon.BuildFlags += " -ldflags ""-X $($Erigon.Package)/params.GitCommit=$($Eri
 
 $Erigon.BinPath    = [string](Join-Path $MyContext.StartDir "\build\bin")
 $env:CGO_CFLAGS = "-g -O2 -D__BLST_PORTABLE__"
+$env:GOPRIVATE = "github.com/erigontech/silkworm-go"
 
 New-Item -Path $Erigon.BinPath -ItemType Directory -Force | Out-Null
 if(!$?) {

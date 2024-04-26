@@ -2,6 +2,7 @@ package network
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -66,21 +67,62 @@ func (f *ForwardBeaconDownloader) HighestProcessedRoot() libcommon.Hash {
 	return f.highestBlockRootProcessed
 }
 
+type peerAndBlocks struct {
+	peerId string
+	blocks []*cltypes.SignedBeaconBlock
+}
+
 func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
-	count := uint64(16) // dont need many
-	responses, pid, err := f.rpc.SendBeaconBlocksByRangeReq(ctx, f.highestSlotProcessed+1, count)
-	if err != nil {
-		f.rpc.BanPeer(pid)
-		// Wait a bit in this case (we do not need to be super performant here).
-		time.Sleep(time.Second)
-		return
+	count := uint64(16)
+	var atomicResp atomic.Value
+	atomicResp.Store(peerAndBlocks{})
+	reqInterval := time.NewTicker(300 * time.Millisecond)
+	defer reqInterval.Stop()
+Loop:
+	for {
+		select {
+		case <-reqInterval.C:
+			go func() {
+				if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
+					return
+				}
+				// this is so we do not get stuck on a side-fork
+				responses, peerId, err := f.rpc.SendBeaconBlocksByRangeReq(ctx, f.highestSlotProcessed-2, count)
+
+				if err != nil {
+					return
+				}
+				if responses == nil {
+					return
+				}
+				if len(responses) == 0 {
+					f.rpc.BanPeer(peerId)
+					return
+				}
+				if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
+					return
+				}
+				atomicResp.Store(peerAndBlocks{peerId, responses})
+			}()
+		case <-ctx.Done():
+			return
+		default:
+			if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
+				break Loop
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
+
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
 	var highestBlockRootProcessed libcommon.Hash
 	var highestSlotProcessed uint64
-	if highestSlotProcessed, highestBlockRootProcessed, err = f.process(f.highestSlotProcessed, f.highestBlockRootProcessed, responses); err != nil {
+	var err error
+	blocks := atomicResp.Load().(peerAndBlocks).blocks
+	pid := atomicResp.Load().(peerAndBlocks).peerId
+	if highestSlotProcessed, highestBlockRootProcessed, err = f.process(f.highestSlotProcessed, f.highestBlockRootProcessed, blocks); err != nil {
 		f.rpc.BanPeer(pid)
 		return
 	}

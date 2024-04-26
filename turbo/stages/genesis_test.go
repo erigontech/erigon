@@ -27,8 +27,8 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -87,7 +87,7 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "custom block in DB, genesis == nil",
 			fn: func(db kv.RwDB) (*chain.Config, *types.Block, error) {
-				core.MustCommitGenesis(&customg, db, tmpdir)
+				core.MustCommitGenesis(&customg, db, tmpdir, logger)
 				return core.CommitGenesisBlock(db, nil, tmpdir, logger)
 			},
 			wantHash:   customghash,
@@ -96,7 +96,7 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "custom block in DB, genesis == sepolia",
 			fn: func(db kv.RwDB) (*chain.Config, *types.Block, error) {
-				core.MustCommitGenesis(&customg, db, tmpdir)
+				core.MustCommitGenesis(&customg, db, tmpdir, logger)
 				return core.CommitGenesisBlock(db, core.SepoliaGenesisBlock(), tmpdir, logger)
 			},
 			wantErr:    &types.GenesisMismatchError{Stored: customghash, New: params.SepoliaGenesisHash},
@@ -106,7 +106,7 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "custom block in DB, genesis == bor-mainnet",
 			fn: func(db kv.RwDB) (*chain.Config, *types.Block, error) {
-				core.MustCommitGenesis(&customg, db, tmpdir)
+				core.MustCommitGenesis(&customg, db, tmpdir, logger)
 				return core.CommitGenesisBlock(db, core.BorMainnetGenesisBlock(), tmpdir, logger)
 			},
 			wantErr:    &types.GenesisMismatchError{Stored: customghash, New: params.BorMainnetGenesisHash},
@@ -116,7 +116,7 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "custom block in DB, genesis == mumbai",
 			fn: func(db kv.RwDB) (*chain.Config, *types.Block, error) {
-				core.MustCommitGenesis(&customg, db, tmpdir)
+				core.MustCommitGenesis(&customg, db, tmpdir, logger)
 				return core.CommitGenesisBlock(db, core.MumbaiGenesisBlock(), tmpdir, logger)
 			},
 			wantErr:    &types.GenesisMismatchError{Stored: customghash, New: params.MumbaiGenesisHash},
@@ -126,7 +126,7 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "custom block in DB, genesis == amoy",
 			fn: func(db kv.RwDB) (*chain.Config, *types.Block, error) {
-				core.MustCommitGenesis(&customg, db, tmpdir)
+				core.MustCommitGenesis(&customg, db, tmpdir, logger)
 				return core.CommitGenesisBlock(db, core.AmoyGenesisBlock(), tmpdir, logger)
 			},
 			wantErr:    &types.GenesisMismatchError{Stored: customghash, New: params.AmoyGenesisHash},
@@ -136,7 +136,7 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "compatible config in DB",
 			fn: func(db kv.RwDB) (*chain.Config, *types.Block, error) {
-				core.MustCommitGenesis(&oldcustomg, db, tmpdir)
+				core.MustCommitGenesis(&oldcustomg, db, tmpdir, logger)
 				return core.CommitGenesisBlock(db, &customg, tmpdir, logger)
 			},
 			wantHash:   customghash,
@@ -175,8 +175,9 @@ func TestSetupGenesis(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			_, db, _ := temporal.NewTestDB(t, datadir.New(tmpdir), nil)
-			blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", log.New()), freezeblocks.NewBorRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", log.New()))
+			dirs := datadir.New(tmpdir)
+			_, db, _ := temporaltest.NewTestDB(t, dirs)
+			blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, dirs.Snap, 0, log.New()), freezeblocks.NewBorRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, dirs.Snap, 0, log.New()))
 			config, genesis, err := test.fn(db)
 			// Check the return values.
 			if !reflect.DeepEqual(err, test.wantErr) {

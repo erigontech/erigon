@@ -16,8 +16,13 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ledgerwatch/erigon-lib/common/disk"
+	"github.com/ledgerwatch/erigon-lib/common/mem"
+	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/phase1/core"
 	"github.com/ledgerwatch/erigon/cl/sentinel"
 	"github.com/ledgerwatch/erigon/cl/sentinel/service"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinelcli"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinelflags"
 
@@ -45,16 +50,25 @@ func runSentinelNode(cliCtx *cli.Context) error {
 	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cfg.LogLvl), log.StderrHandler))
 	log.Info("[Sentinel] running sentinel with configuration", "cfg", cfg)
+
+	// setup periodic logging and prometheus updates
+	go mem.LogMemStats(cliCtx.Context, log.Root())
+	go disk.UpdateDiskStats(cliCtx.Context, log.Root())
+
+	bs, err := core.RetrieveBeaconState(context.Background(), cfg.BeaconCfg, clparams.GetCheckpointSyncEndpoint(cfg.NetworkType))
+	if err != nil {
+		return err
+	}
 	_, err = service.StartSentinelService(&sentinel.SentinelConfig{
 		IpAddr:         cfg.Addr,
 		Port:           int(cfg.Port),
 		TCPPort:        cfg.ServerTcpPort,
-		GenesisConfig:  cfg.GenesisCfg,
 		NetworkConfig:  cfg.NetworkCfg,
 		BeaconConfig:   cfg.BeaconCfg,
 		NoDiscovery:    cfg.NoDiscovery,
 		LocalDiscovery: cfg.LocalDiscovery,
-	}, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, nil, nil, log.Root())
+		EnableBlocks:   false,
+	}, nil, nil, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, eth_clock.NewEthereumClock(bs.GenesisTime(), bs.GenesisValidatorsRoot(), cfg.BeaconCfg), nil, log.Root())
 	if err != nil {
 		log.Error("[Sentinel] Could not start sentinel", "err", err)
 		return err

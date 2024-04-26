@@ -9,7 +9,7 @@ The devnet code performs 3 main functions:
 * It allows for the specification of a series of scenarios which will be run against the nodes on that internal network
 * It can optionally run a `support` connection which allows the nodes on the network to be connected to the Erigon diagnostic system
 
-The specification of both nodes and scenarios for the devenet is done by specifying configuration objects.  These objects are currently build in code using go `structs` but are capable of being read as configuration.
+The specification of both nodes and scenarios for the devnet is done by specifying configuration objects.  These objects are currently built in code using go `structs` but are capable of being read as configuration.
 
 ## Devnet runtime start-up
 
@@ -85,7 +85,7 @@ func init() {
 	)
 }
 ```
-Each step method will be called with a `context.Context` as its initial argument. This context provides access to the underlying devnet - so the sptep handler can use it for processing.
+Each step method will be called with a `context.Context` as its initial argument. This context provides access to the underlying devnet - so the step handler can use it for processing.
 
 ```go
 func PingErigonRpc(ctx context.Context) error {

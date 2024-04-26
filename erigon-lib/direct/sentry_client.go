@@ -100,6 +100,7 @@ var ProtoIds = map[uint]map[sentry.MessageId]struct{}{
 	},
 }
 
+//go:generate mockgen -destination=./sentry_client_mock.go -package=direct . SentryClient
 type SentryClient interface {
 	sentry.SentryClient
 	Protocol() uint

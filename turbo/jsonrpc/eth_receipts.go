@@ -5,11 +5,8 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"math/big"
 
 	"github.com/RoaringBitmap/roaring"
-	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -20,9 +17,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon/eth/ethutils"
 
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -36,8 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
-
-const PendingBlockNumber int64 = -2
 
 func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chain.Config, block *types.Block, senders []common.Address) (types.Receipts, error) {
 	if cached := rawdb.ReadReceipts(tx, block, senders); cached != nil {
@@ -112,10 +107,6 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 
 		begin = latest
 		if crit.FromBlock != nil {
-			if !getLogsIsValidBlockNumber(crit.FromBlock) {
-				return nil, fmt.Errorf("invalid value for FromBlock: %v", crit.FromBlock)
-			}
-
 			fromBlock := crit.FromBlock.Int64()
 			if fromBlock > 0 {
 				begin = uint64(fromBlock)
@@ -130,10 +121,6 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		}
 		end = latest
 		if crit.ToBlock != nil {
-			if !getLogsIsValidBlockNumber(crit.ToBlock) {
-				return nil, fmt.Errorf("invalid value for ToBlock: %v", crit.ToBlock)
-			}
-
 			toBlock := crit.ToBlock.Int64()
 			if toBlock > 0 {
 				end = uint64(toBlock)
@@ -164,7 +151,6 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	if api.historyV3(tx) {
 		return api.getLogsV3(ctx, tx.(kv.TemporalTx), begin, end, crit)
 	}
-
 	blockNumbers := bitmapdb.NewBitmap()
 	defer bitmapdb.ReturnToPool(blockNumbers)
 	if err := applyFilters(blockNumbers, tx, begin, end, crit); err != nil {
@@ -216,6 +202,9 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 			}
 			blockLogs = append(blockLogs, filtered...)
 		}
+		if casted, ok := it.(kv.Closer); ok {
+			casted.Close()
+		}
 		if len(blockLogs) == 0 {
 			continue
 		}
@@ -246,11 +235,6 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	}
 
 	return logs, nil
-}
-
-// getLogsIsValidBlockNumber checks if block number is valid integer or "latest", "pending", "earliest" block number
-func getLogsIsValidBlockNumber(blockNum *big.Int) bool {
-	return blockNum.IsInt64() && blockNum.Int64() >= PendingBlockNumber
 }
 
 // The Topic list restricts matches to particular event topics. Each event has a list
@@ -420,7 +404,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		addrMap[v] = struct{}{}
 	}
 
-	chainConfig, err := api.chainConfig(tx)
+	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -618,12 +602,12 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	var blockNum uint64
 	var ok bool
 
-	blockNum, ok, err = api.txnLookup(tx, txnHash)
+	blockNum, ok, err = api.txnLookup(ctx, tx, txnHash)
 	if err != nil {
 		return nil, err
 	}
 
-	cc, err := api.chainConfig(tx)
+	cc, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -639,7 +623,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, nil
 	}
 
-	block, err := api.blockByNumberWithSenders(tx, blockNum)
+	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -677,14 +661,14 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		if borReceipt == nil {
 			return nil, nil
 		}
-		return marshalReceipt(borReceipt, borTx, cc, block.HeaderNoCopy(), txnHash, false), nil
+		return ethutils.MarshalReceipt(borReceipt, borTx, cc, block.HeaderNoCopy(), txnHash, false), nil
 	}
 
 	if len(receipts) <= int(txnIndex) {
 		return nil, fmt.Errorf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txnIndex), blockNum)
 	}
 
-	return marshalReceipt(receipts[txnIndex], block.Transactions()[txnIndex], cc, block.HeaderNoCopy(), txnHash, true), nil
+	return ethutils.MarshalReceipt(receipts[txnIndex], block.Transactions()[txnIndex], cc, block.HeaderNoCopy(), txnHash, true), nil
 }
 
 // GetBlockReceipts - receipts for individual block
@@ -699,14 +683,14 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	if err != nil {
 		return nil, err
 	}
-	block, err := api.blockWithSenders(tx, blockHash, blockNum)
+	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
 	if block == nil {
 		return nil, nil
 	}
-	chainConfig, err := api.chainConfig(tx)
+	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -717,7 +701,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	result := make([]map[string]interface{}, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
-		result = append(result, marshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true))
+		result = append(result, ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true))
 	}
 
 	if chainConfig.Bor != nil {
@@ -728,77 +712,12 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 				return nil, err
 			}
 			if borReceipt != nil {
-				result = append(result, marshalReceipt(borReceipt, borTx, chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false))
+				result = append(result, ethutils.MarshalReceipt(borReceipt, borTx, chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false))
 			}
 		}
 	}
 
 	return result, nil
-}
-
-func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *chain.Config, header *types.Header, txnHash common.Hash, signed bool) map[string]interface{} {
-	var chainId *big.Int
-	switch t := txn.(type) {
-	case *types.LegacyTx:
-		if t.Protected() {
-			chainId = types.DeriveChainId(&t.V).ToBig()
-		}
-	default:
-		chainId = txn.GetChainID().ToBig()
-	}
-
-	var from common.Address
-	if signed {
-		signer := types.LatestSignerForChainID(chainId)
-		from, _ = txn.Sender(*signer)
-	}
-
-	fields := map[string]interface{}{
-		"blockHash":         receipt.BlockHash,
-		"blockNumber":       hexutil.Uint64(receipt.BlockNumber.Uint64()),
-		"transactionHash":   txnHash,
-		"transactionIndex":  hexutil.Uint64(receipt.TransactionIndex),
-		"from":              from,
-		"to":                txn.GetTo(),
-		"type":              hexutil.Uint(txn.Type()),
-		"gasUsed":           hexutil.Uint64(receipt.GasUsed),
-		"cumulativeGasUsed": hexutil.Uint64(receipt.CumulativeGasUsed),
-		"contractAddress":   nil,
-		"logs":              receipt.Logs,
-		"logsBloom":         types.CreateBloom(types.Receipts{receipt}),
-	}
-
-	if !chainConfig.IsLondon(header.Number.Uint64()) {
-		fields["effectiveGasPrice"] = hexutil.Uint64(txn.GetPrice().Uint64())
-	} else {
-		baseFee, _ := uint256.FromBig(header.BaseFee)
-		gasPrice := new(big.Int).Add(header.BaseFee, txn.GetEffectiveGasTip(baseFee).ToBig())
-		fields["effectiveGasPrice"] = hexutil.Uint64(gasPrice.Uint64())
-	}
-	// Assign receipt status.
-	fields["status"] = hexutil.Uint64(receipt.Status)
-	if receipt.Logs == nil {
-		fields["logs"] = [][]*types.Log{}
-	}
-	// If the ContractAddress is 20 0x0 bytes, assume it is not a contract creation
-	if receipt.ContractAddress != (common.Address{}) {
-		fields["contractAddress"] = receipt.ContractAddress
-	}
-	// Set derived blob related fields
-	numBlobs := len(txn.GetBlobHashes())
-	if numBlobs > 0 {
-		if header.ExcessBlobGas == nil {
-			log.Warn("excess blob gas not set when trying to marshal blob tx")
-		} else {
-			blobGasPrice, err := misc.GetBlobGasPrice(chainConfig, *header.ExcessBlobGas)
-			if err != nil {
-				log.Error(err.Error())
-			}
-			fields["blobGasPrice"] = blobGasPrice
-			fields["blobGasUsed"] = hexutil.Uint64(misc.GetBlobGasUsed(numBlobs))
-		}
-	}
-	return fields
 }
 
 // MapTxNum2BlockNumIter - enrich iterator by TxNumbers, adding more info:

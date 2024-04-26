@@ -3,7 +3,6 @@ package logging
 import (
 	"flag"
 	"os"
-	"path"
 	"path/filepath"
 	"strconv"
 
@@ -11,7 +10,24 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/urfave/cli/v2"
 	"gopkg.in/natefinch/lumberjack.v2"
+
+	"github.com/ledgerwatch/erigon-lib/common/metrics"
 )
+
+// Determine the log dir path based on the given urfave context
+func LogDirPath(ctx *cli.Context) string {
+	dirPath := ""
+	if !ctx.Bool(LogDirDisableFlag.Name) {
+		dirPath = ctx.String(LogDirPathFlag.Name)
+		if dirPath == "" {
+			datadir := ctx.String("datadir")
+			if datadir != "" {
+				dirPath = filepath.Join(datadir, "logs")
+			}
+		}
+	}
+	return dirPath
+}
 
 // SetupLoggerCtx performs the logging setup according to the parameters
 // containted in the given urfave context. It returns either root logger,
@@ -21,22 +37,25 @@ import (
 // This function which is used in Erigon itself.
 // Note: urfave and cobra are two CLI frameworks/libraries for the same functionalities
 // and it would make sense to choose one over another
-func SetupLoggerCtx(filePrefix string, ctx *cli.Context, rootHandler bool) log.Logger {
+func SetupLoggerCtx(filePrefix string, ctx *cli.Context,
+	consoleDefaultLevel log.Lvl, dirDefaultLevel log.Lvl, rootHandler bool) log.Logger {
 	var consoleJson = ctx.Bool(LogJsonFlag.Name) || ctx.Bool(LogConsoleJsonFlag.Name)
 	var dirJson = ctx.Bool(LogDirJsonFlag.Name)
+
+	metrics.DelayLoggingEnabled = ctx.Bool(LogBlockDelayFlag.Name)
 
 	consoleLevel, lErr := tryGetLogLevel(ctx.String(LogConsoleVerbosityFlag.Name))
 	if lErr != nil {
 		// try verbosity flag
 		consoleLevel, lErr = tryGetLogLevel(ctx.String(LogVerbosityFlag.Name))
 		if lErr != nil {
-			consoleLevel = log.LvlInfo
+			consoleLevel = consoleDefaultLevel
 		}
 	}
 
 	dirLevel, dErr := tryGetLogLevel(ctx.String(LogDirVerbosityFlag.Name))
 	if dErr != nil {
-		dirLevel = log.LvlInfo
+		dirLevel = dirDefaultLevel
 	}
 
 	dirPath := ""
@@ -202,7 +221,7 @@ func initSeparatedLogging(
 	}
 
 	lumberjack := &lumberjack.Logger{
-		Filename:   path.Join(dirPath, filePrefix+".log"),
+		Filename:   filepath.Join(dirPath, filePrefix+".log"),
 		MaxSize:    100, // megabytes
 		MaxBackups: 3,
 		MaxAge:     28, //days
@@ -212,7 +231,6 @@ func initSeparatedLogging(
 	mux := log.MultiHandler(consoleHandler, log.LvlFilterHandler(dirLevel, userLog))
 	logger.SetHandler(mux)
 	logger.Info("logging to file system", "log dir", dirPath, "file prefix", filePrefix, "log level", dirLevel, "json", dirJson)
-	return
 }
 
 func tryGetLogLevel(s string) (log.Lvl, error) {

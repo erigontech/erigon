@@ -49,6 +49,7 @@ var (
 	Finish              SyncStage = "Finish"              // Nominal stage after all other stages
 
 	MiningCreateBlock SyncStage = "MiningCreateBlock"
+	MiningBorHeimdall SyncStage = "MiningBorHeimdall"
 	MiningExecution   SyncStage = "MiningExecution"
 	MiningFinish      SyncStage = "MiningFinish"
 	// Beacon chain stages
@@ -88,6 +89,9 @@ func GetStageProgress(db kv.Getter, stage SyncStage) (uint64, error) {
 }
 
 func SaveStageProgress(db kv.Putter, stage SyncStage, progress uint64) error {
+	if m, ok := SyncMetrics[stage]; ok {
+		m.SetUint64(progress)
+	}
 	return db.Put(kv.SyncStageProgress, []byte(stage), marshalData(progress))
 }
 

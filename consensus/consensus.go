@@ -21,19 +21,20 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // ChainHeaderReader defines a small collection of methods needed to access the local
 // blockchain during header verification.
+//
+//go:generate mockgen -destination=./chain_header_reader_mock.go -package=consensus . ChainHeaderReader
 type ChainHeaderReader interface {
 	// Config retrieves the blockchain's chain configuration.
 	Config() *chain.Config
@@ -71,6 +72,7 @@ type ChainReader interface {
 	HasBlock(hash libcommon.Hash, number uint64) bool
 
 	BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue
+	BorStartEventID(hash libcommon.Hash, number uint64) uint64
 }
 
 type SystemCall func(contract libcommon.Address, data []byte) ([]byte, error)

@@ -5,8 +5,9 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
@@ -148,18 +149,18 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 	var notifyTo = notifyFrom
 	var notifyToHash libcommon.Hash
 	var headersRlp [][]byte
-	if err := tx.ForEach(kv.Headers, hexutility.EncodeTs(notifyFrom), func(k, headerRLP []byte) error {
-		if len(headerRLP) == 0 {
+	if err := tx.ForEach(kv.HeaderCanonical, hexutility.EncodeTs(notifyFrom), func(k, hash []byte) (err error) {
+		if len(hash) == 0 {
 			return nil
 		}
-		notifyTo = binary.BigEndian.Uint64(k)
-		var err error
-		if notifyToHash, err = blockReader.CanonicalHash(ctx, tx, notifyTo); err != nil {
-			logger.Warn("[Finish] failed checking if header is cannonical")
+		blockNum := binary.BigEndian.Uint64(k)
+		if blockNum > finishStageAfterSync { //[from,to)
+			return nil
 		}
-
-		headerHash := libcommon.BytesToHash(k[8:])
-		if notifyToHash == headerHash {
+		notifyTo = blockNum
+		notifyToHash = libcommon.BytesToHash(hash)
+		headerRLP := rawdb.ReadHeaderRLP(tx, notifyToHash, notifyTo)
+		if headerRLP != nil {
 			headersRlp = append(headersRlp, libcommon.CopyBytes(headerRLP))
 		}
 
@@ -182,7 +183,7 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 			notifier.OnLogs(logs)
 		}
 		logTiming := time.Since(t)
-		logger.Info("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo, "hash", notifyToHash, "header sending", headerTiming, "log sending", logTiming)
+		logger.Info("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo, "amount", len(headersRlp), "hash", notifyToHash, "header sending", headerTiming, "log sending", logTiming)
 	}
 	return nil
 }

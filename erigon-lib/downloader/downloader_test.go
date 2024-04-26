@@ -16,9 +16,9 @@ import (
 func TestChangeInfoHashOfSameFile(t *testing.T) {
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
-	cfg, err := downloadercfg2.New(dirs, "", lg.Info, 0, 0, 0, 0, 0, nil, nil, "testnet")
+	cfg, err := downloadercfg2.New(dirs, "", lg.Info, 0, 0, 0, 0, 0, nil, nil, "testnet", false)
 	require.NoError(err)
-	d, err := New(context.Background(), cfg, dirs, log.New(), log.LvlInfo, true)
+	d, err := New(context.Background(), cfg, log.New(), log.LvlInfo, true)
 	require.NoError(err)
 	defer d.Close()
 	err = d.AddMagnetLink(d.ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
@@ -48,19 +48,20 @@ func TestNoEscape(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	ctx := context.Background()
 
+	tf := NewAtomicTorrentFS(dirs.Snap)
 	// allow adding files only if they are inside snapshots dir
-	_, err := BuildTorrentIfNeed(ctx, "a.seg", dirs.Snap)
+	_, err := BuildTorrentIfNeed(ctx, "a.seg", dirs.Snap, tf)
 	require.NoError(err)
-	_, err = BuildTorrentIfNeed(ctx, "b/a.seg", dirs.Snap)
+	_, err = BuildTorrentIfNeed(ctx, "b/a.seg", dirs.Snap, tf)
 	require.NoError(err)
-	_, err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Snap, "a.seg"), dirs.Snap)
+	_, err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Snap, "a.seg"), dirs.Snap, tf)
 	require.NoError(err)
-	_, err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Snap, "b", "a.seg"), dirs.Snap)
+	_, err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Snap, "b", "a.seg"), dirs.Snap, tf)
 	require.NoError(err)
 
 	// reject escaping snapshots dir
-	_, err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Chaindata, "b", "a.seg"), dirs.Snap)
+	_, err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Chaindata, "b", "a.seg"), dirs.Snap, tf)
 	require.Error(err)
-	_, err = BuildTorrentIfNeed(ctx, "./../a.seg", dirs.Snap)
+	_, err = BuildTorrentIfNeed(ctx, "./../a.seg", dirs.Snap, tf)
 	require.Error(err)
 }

@@ -8,8 +8,12 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/config3"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon-lib/wrap"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
@@ -19,8 +23,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
@@ -42,7 +44,7 @@ func TestExec(t *testing.T) {
 
 		u := &UnwindState{ID: stages.Execution, UnwindPoint: 25}
 		s := &StageState{ID: stages.Execution, BlockNumber: 50}
-		err = UnwindExecutionStage(u, s, tx2, ctx, cfg, false, logger)
+		err = UnwindExecutionStage(u, s, wrap.TxContainer{Tx: tx2}, ctx, cfg, false, logger)
 		require.NoError(err)
 
 		compareCurrentState(t, newAgg(t, logger), tx1, tx2, kv.PlainState, kv.PlainContractCode, kv.ContractTEVMCode)
@@ -58,7 +60,7 @@ func TestExec(t *testing.T) {
 
 		u := &UnwindState{ID: stages.Execution, UnwindPoint: 25}
 		s := &StageState{ID: stages.Execution, BlockNumber: 50}
-		err = UnwindExecutionStage(u, s, tx2, ctx, cfg, false, logger)
+		err = UnwindExecutionStage(u, s, wrap.TxContainer{Tx: tx2}, ctx, cfg, false, logger)
 		require.NoError(err)
 
 		compareCurrentState(t, newAgg(t, logger), tx1, tx2, kv.PlainState, kv.PlainContractCode)
@@ -76,7 +78,7 @@ func TestExec(t *testing.T) {
 		}
 		u := &UnwindState{ID: stages.Execution, UnwindPoint: 25}
 		s := &StageState{ID: stages.Execution, BlockNumber: 50}
-		err = UnwindExecutionStage(u, s, tx2, ctx, cfg, false, logger)
+		err = UnwindExecutionStage(u, s, wrap.TxContainer{Tx: tx2}, ctx, cfg, false, logger)
 		require.NoError(err)
 
 		compareCurrentState(t, newAgg(t, logger), tx1, tx2, kv.PlainState, kv.PlainContractCode)
@@ -131,7 +133,7 @@ func TestExec(t *testing.T) {
 	})
 }
 
-func apply(tx kv.RwTx, agg *libstate.AggregatorV3, logger log.Logger) (beforeBlock, afterBlock testGenHook, w state.StateWriter) {
+func apply(tx kv.RwTx, agg *libstate.Aggregator, logger log.Logger) (beforeBlock, afterBlock testGenHook, w state.StateWriter) {
 	agg.SetTx(tx)
 	agg.StartWrites()
 
@@ -168,10 +170,10 @@ func apply(tx kv.RwTx, agg *libstate.AggregatorV3, logger log.Logger) (beforeBlo
 		}, stateWriter
 }
 
-func newAgg(t *testing.T, logger log.Logger) *libstate.AggregatorV3 {
+func newAgg(t *testing.T, logger log.Logger) *libstate.Aggregator {
 	t.Helper()
 	dir, ctx := t.TempDir(), context.Background()
-	agg, err := libstate.NewAggregatorV3(ctx, dir, dir, ethconfig.HistoryV3AggregationStep, nil, logger)
+	agg, err := libstate.NewAggregator(ctx, dir, dir, config3.HistoryV3AggregationStep, nil, logger)
 	require.NoError(t, err)
 	err = agg.OpenFolder()
 	require.NoError(t, err)
@@ -181,8 +183,8 @@ func newAgg(t *testing.T, logger log.Logger) *libstate.AggregatorV3 {
 func TestExec22(t *testing.T) {
 	logger := log.New()
 	ctx := context.Background()
-	_, db1, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
-	_, db2, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
+	_, db1, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	_, db2, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	agg := newAgg(t, logger)
 	cfg := ExecuteBlockCfg{historyV3: true, agg: agg}
 
@@ -204,7 +206,7 @@ func TestExec22(t *testing.T) {
 
 		u := &UnwindState{ID: stages.Execution, UnwindPoint: 25}
 		s := &StageState{ID: stages.Execution, BlockNumber: 50}
-		err = UnwindExecutionStage(u, s, tx2, ctx, cfg, false, logger)
+		err = UnwindExecutionStage(u, s, wrap.TxContainer{Tx: tx2}, ctx, cfg, false, logger)
 		require.NoError(err)
 
 		compareCurrentState(t, agg, tx1, tx2, kv.PlainState, kv.PlainContractCode)
@@ -228,7 +230,7 @@ func TestExec22(t *testing.T) {
 
 		u := &UnwindState{ID: stages.Execution, UnwindPoint: 25}
 		s := &StageState{ID: stages.Execution, BlockNumber: 50}
-		err = UnwindExecutionStage(u, s, tx2, ctx, cfg, false, logger)
+		err = UnwindExecutionStage(u, s, wrap.TxContainer{Tx: tx2}, ctx, cfg, false, logger)
 		require.NoError(err)
 
 		tx1.ForEach(kv.PlainState, nil, func(k, v []byte) error {

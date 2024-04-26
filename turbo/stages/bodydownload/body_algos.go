@@ -7,11 +7,12 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+	"golang.org/x/exp/maps"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"golang.org/x/exp/maps"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -64,7 +65,7 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, hea
 	headTime = 0
 	headHeader, err := bd.br.Header(context.Background(), db, headHash, headHeight)
 	if err != nil {
-		return 0, 0, libcommon.Hash{}, nil, fmt.Errorf("reading total difficulty for head height %d and hash %x: %d, %w", headHeight, headHash, headTd, err)
+		return 0, 0, libcommon.Hash{}, nil, fmt.Errorf("reading header for head height %d and hash %x: %d, %w", headHeight, headHash, headTd, err)
 	}
 	if headHeader != nil {
 		headTime = headHeader.Time

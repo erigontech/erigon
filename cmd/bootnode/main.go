@@ -120,7 +120,7 @@ func main() {
 	ctx, cancel := common.RootContext()
 	defer cancel()
 
-	db, err := enode.OpenDB(ctx, "" /* path */, "" /* tmpDir */)
+	db, err := enode.OpenDB(ctx, "" /* path */, "" /* tmpDir */, logger)
 	if err != nil {
 		panic(err)
 	}

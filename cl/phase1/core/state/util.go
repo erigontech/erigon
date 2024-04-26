@@ -24,7 +24,7 @@ func copyLRU[K comparable, V any](dst *lru.Cache[K, V], src *lru.Cache[K, V]) *l
 }
 
 func GetIndexedAttestation(attestation *solid.Attestation, attestingIndicies []uint64) *cltypes.IndexedAttestation {
-	// Sort the the attestation indicies.
+	// Sort the attestation indicies.
 	sort.Slice(attestingIndicies, func(i, j int) bool {
 		return attestingIndicies[i] < attestingIndicies[j]
 	})
@@ -53,14 +53,14 @@ func ValidatorFromDeposit(conf *clparams.BeaconChainConfig, deposit *cltypes.Dep
 // Check whether a validator is fully withdrawable at the given epoch.
 func isFullyWithdrawableValidator(conf *clparams.BeaconChainConfig, validator solid.Validator, balance uint64, epoch uint64) bool {
 	withdrawalCredentials := validator.WithdrawalCredentials()
-	return withdrawalCredentials[0] == conf.ETH1AddressWithdrawalPrefixByte &&
+	return withdrawalCredentials[0] == byte(conf.ETH1AddressWithdrawalPrefixByte) &&
 		validator.WithdrawableEpoch() <= epoch && balance > 0
 }
 
 // Check whether a validator is partially withdrawable.
 func isPartiallyWithdrawableValidator(conf *clparams.BeaconChainConfig, validator solid.Validator, balance uint64) bool {
 	withdrawalCredentials := validator.WithdrawalCredentials()
-	return withdrawalCredentials[0] == conf.ETH1AddressWithdrawalPrefixByte &&
+	return withdrawalCredentials[0] == byte(conf.ETH1AddressWithdrawalPrefixByte) &&
 		validator.EffectiveBalance() == conf.MaxEffectiveBalance && balance > conf.MaxEffectiveBalance
 }
 

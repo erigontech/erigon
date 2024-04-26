@@ -78,6 +78,7 @@ go.work*
 docker-compose.*.yml
 .env
 coverage.out
+coverage-total.out
 
 dist
 __debug_bin
@@ -98,3 +99,5 @@ node_modules
 /config.toml
 /config.yaml
 /config.yml
+
+vendor

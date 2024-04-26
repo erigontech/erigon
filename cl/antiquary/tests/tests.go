@@ -5,14 +5,17 @@ import (
 	"embed"
 	_ "embed"
 	"strconv"
+	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
+	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/stretchr/testify/require"
 )
 
 //go:embed test_data/capella/blocks_0.ssz_snappy
@@ -45,49 +48,67 @@ var phase0_post_state_ssz_snappy []byte
 var bellatrixFS embed.FS
 
 type MockBlockReader struct {
-	u map[uint64]*cltypes.SignedBeaconBlock
+	U map[uint64]*cltypes.SignedBeaconBlock
 }
 
 func NewMockBlockReader() *MockBlockReader {
-	return &MockBlockReader{u: make(map[uint64]*cltypes.SignedBeaconBlock)}
+	return &MockBlockReader{U: make(map[uint64]*cltypes.SignedBeaconBlock)}
 }
 
 func (m *MockBlockReader) ReadBlockBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error) {
-	return m.u[slot], nil
+	return m.U[slot], nil
+}
+
+func (m *MockBlockReader) ReadBlindedBlockBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBlindedBeaconBlock, error) {
+	if m.U[slot] == nil {
+		return nil, nil
+	}
+	return m.U[slot].Blinded()
 }
 
 func (m *MockBlockReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, blockRoot libcommon.Hash) (*cltypes.SignedBeaconBlock, error) {
-	panic("implement me")
+	// do a linear search
+	for _, v := range m.U {
+		r, err := v.Block.HashSSZ()
+		if err != nil {
+			return nil, err
+		}
+
+		if r == blockRoot {
+			return v, nil
+		}
+	}
+	return nil, nil
 }
 func (m *MockBlockReader) ReadHeaderByRoot(ctx context.Context, tx kv.Tx, blockRoot libcommon.Hash) (*cltypes.SignedBeaconBlockHeader, error) {
-	panic("implement me")
+	block, err := m.ReadBlockByRoot(ctx, tx, blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, nil
+	}
+	return block.SignedBeaconBlockHeader(), nil
 }
 
 func (m *MockBlockReader) FrozenSlots() uint64 {
 	panic("implement me")
 }
 
-func LoadChain(blocks []*cltypes.SignedBeaconBlock, db kv.RwDB) *MockBlockReader {
+func LoadChain(blocks []*cltypes.SignedBeaconBlock, s *state.CachingBeaconState, db kv.RwDB, t *testing.T) *MockBlockReader {
 	tx, err := db.BeginRw(context.Background())
-	if err != nil {
-		panic(err)
-	}
+	require.NoError(t, err)
 	defer tx.Rollback()
 
 	m := NewMockBlockReader()
 	for _, block := range blocks {
-		m.u[block.Block.Slot] = block
-		h := block.SignedBeaconBlockHeader()
-		if err := beacon_indicies.WriteBeaconBlockHeaderAndIndicies(context.Background(), tx, h, true); err != nil {
-			panic(err)
-		}
-		if err := beacon_indicies.WriteHighestFinalized(tx, block.Block.Slot+64); err != nil {
-			panic(err)
-		}
+		m.U[block.Block.Slot] = block
+		require.NoError(t, beacon_indicies.WriteBeaconBlockAndIndicies(context.Background(), tx, block, true))
+		require.NoError(t, beacon_indicies.WriteHighestFinalized(tx, block.Block.Slot+64))
 	}
-	if err := tx.Commit(); err != nil {
-		panic(err)
-	}
+	require.NoError(t, state_accessors.InitializeStaticTables(tx, s))
+
+	require.NoError(t, tx.Commit())
 	return m
 }
 

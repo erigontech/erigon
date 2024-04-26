@@ -5,9 +5,10 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"runtime"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"github.com/RoaringBitmap/roaring"
 	"github.com/c2h5oh/datasize"
@@ -31,20 +32,22 @@ const (
 )
 
 type LogIndexCfg struct {
-	tmpdir     string
-	db         kv.RwDB
-	prune      prune.Mode
-	bufLimit   datasize.ByteSize
-	flushEvery time.Duration
+	tmpdir           string
+	db               kv.RwDB
+	prune            prune.Mode
+	bufLimit         datasize.ByteSize
+	flushEvery       time.Duration
+	noPruneContracts map[libcommon.Address]bool
 }
 
-func StageLogIndexCfg(db kv.RwDB, prune prune.Mode, tmpDir string) LogIndexCfg {
+func StageLogIndexCfg(db kv.RwDB, prune prune.Mode, tmpDir string, noPruneContracts map[libcommon.Address]bool) LogIndexCfg {
 	return LogIndexCfg{
-		db:         db,
-		prune:      prune,
-		bufLimit:   bitmapsBufLimit,
-		flushEvery: bitmapsFlushEvery,
-		tmpdir:     tmpDir,
+		db:               db,
+		prune:            prune,
+		bufLimit:         bitmapsBufLimit,
+		flushEvery:       bitmapsFlushEvery,
+		tmpdir:           tmpDir,
+		noPruneContracts: noPruneContracts,
 	}
 }
 
@@ -80,14 +83,14 @@ func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	}
 
 	startBlock := s.BlockNumber
-	pruneTo := cfg.prune.Receipts.PruneTo(endBlock)
-	if startBlock < pruneTo {
-		startBlock = pruneTo
-	}
+	pruneTo := cfg.prune.Receipts.PruneTo(endBlock) //endBlock - prune.r.older
+	// if startBlock < pruneTo {
+	// 	startBlock = pruneTo
+	// }
 	if startBlock > 0 {
 		startBlock++
 	}
-	if err = promoteLogIndex(logPrefix, tx, startBlock, endBlock, cfg, ctx, logger); err != nil {
+	if err = promoteLogIndex(logPrefix, tx, startBlock, endBlock, pruneTo, cfg, ctx, logger); err != nil {
 		return err
 	}
 	if err = s.Update(tx, endBlock); err != nil {
@@ -103,7 +106,8 @@ func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	return nil
 }
 
-func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64, cfg LogIndexCfg, ctx context.Context, logger log.Logger) error {
+// Add the topics and address index for logs, if not in prune range or addr in noPruneContracts
+func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64, pruneBlock uint64, cfg LogIndexCfg, ctx context.Context, logger log.Logger) error {
 	quit := ctx.Done()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -126,7 +130,7 @@ func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64
 	reader := bytes.NewReader(nil)
 
 	if endBlock != 0 && endBlock-start > 100 {
-		logger.Info(fmt.Sprintf("[%s] processing", logPrefix), "from", start, "to", endBlock)
+		logger.Info(fmt.Sprintf("[%s] processing", logPrefix), "from", start, "to", endBlock, "pruneTo", pruneBlock)
 	}
 
 	for k, v, err := logs.Seek(dbutils.LogKey(start, 0)); k != nil; k, v, err = logs.Next() {
@@ -174,6 +178,25 @@ func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64
 			return fmt.Errorf("receipt unmarshal failed: %w, blocl=%d", err, blockNum)
 		}
 
+		toStore := true
+		// if pruning is enabled, and noPruneContracts isn't configured for the chain, don't index
+		if blockNum < pruneBlock {
+			toStore = false
+			if cfg.noPruneContracts == nil {
+				continue
+			}
+			for _, l := range ll {
+				// if any of the log address is in noPrune, store and index all logs for this txId
+				if cfg.noPruneContracts[l.Address] {
+					toStore = true
+					break
+				}
+			}
+		}
+
+		if !toStore {
+			continue
+		}
 		for _, l := range ll {
 			for _, topic := range l.Topics {
 				topicStr := string(topic.Bytes())
@@ -371,13 +394,15 @@ func pruneOldLogChunks(tx kv.RwTx, bucket string, inMem *etl.Collector, pruneTo 
 			if err != nil {
 				return err
 			}
-			blockNum := uint64(binary.BigEndian.Uint32(k[len(key):]))
+			var blockNum uint64
+			blockNum = uint64(binary.BigEndian.Uint32(k[len(key):]))
+
 			if !bytes.HasPrefix(k, key) || blockNum >= pruneTo {
 				break
 			}
 
 			if err = c.DeleteCurrent(); err != nil {
-				return fmt.Errorf("failed delete, block=%d: %w", blockNum, err)
+				return fmt.Errorf("failed delete log/index, bucket=%v block=%d: %w", bucket, blockNum, err)
 			}
 		}
 		return nil
@@ -389,6 +414,7 @@ func pruneOldLogChunks(tx kv.RwTx, bucket string, inMem *etl.Collector, pruneTo 
 	return nil
 }
 
+// Call pruneLogIndex with the current current sync progresses and commit the data to db
 func PruneLogIndex(s *PruneState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Context, logger log.Logger) (err error) {
 	if !cfg.prune.Receipts.Enabled() {
 		return nil
@@ -405,10 +431,10 @@ func PruneLogIndex(s *PruneState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	}
 
 	pruneTo := cfg.prune.Receipts.PruneTo(s.ForwardProgress)
-	if err = pruneLogIndex(logPrefix, tx, cfg.tmpdir, pruneTo, ctx, logger); err != nil {
+	if err = pruneLogIndex(logPrefix, tx, cfg.tmpdir, s.PruneProgress, pruneTo, ctx, logger, cfg.noPruneContracts); err != nil {
 		return err
 	}
-	if err = s.Done(tx); err != nil {
+	if err = s.DoneAt(tx, pruneTo); err != nil {
 		return err
 	}
 
@@ -420,7 +446,8 @@ func PruneLogIndex(s *PruneState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	return nil
 }
 
-func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneTo uint64, ctx context.Context, logger log.Logger) error {
+// Prune log indexes as well as logs within the prune range
+func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneFrom, pruneTo uint64, ctx context.Context, logger log.Logger, noPruneContracts map[libcommon.Address]bool) error {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
@@ -438,7 +465,7 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneTo uint64, 
 		}
 		defer c.Close()
 
-		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		for k, v, err := c.Seek(dbutils.LogKey(pruneFrom, 0)); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
 			}
@@ -448,7 +475,7 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneTo uint64, 
 			}
 			select {
 			case <-logEvery.C:
-				logger.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.Log, "block", blockNum)
+				logger.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.Log, "block", blockNum, "pruneFrom", pruneFrom, "pruneTo", pruneTo)
 			case <-ctx.Done():
 				return libcommon.ErrStopped
 			default:
@@ -460,13 +487,28 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneTo uint64, 
 				return fmt.Errorf("receipt unmarshal failed: %w, block=%d", err, binary.BigEndian.Uint64(k))
 			}
 
+			toPrune := true
 			for _, l := range logs {
-				for _, topic := range l.Topics {
-					if err := topics.Collect(topic.Bytes(), nil); err != nil {
+				// No logs (or sublogs) for this txId should be pruned
+				// if one of the logs belongs to noPruneContracts lis
+				if noPruneContracts != nil && noPruneContracts[l.Address] {
+					toPrune = false
+					break
+				}
+			}
+
+			if toPrune {
+				for _, l := range logs {
+					for _, topic := range l.Topics {
+						if err := topics.Collect(topic.Bytes(), nil); err != nil {
+							return err
+						}
+					}
+					if err := addrs.Collect(l.Address.Bytes(), nil); err != nil {
 						return err
 					}
 				}
-				if err := addrs.Collect(l.Address.Bytes(), nil); err != nil {
+				if err := tx.Delete(kv.Log, k); err != nil {
 					return err
 				}
 			}

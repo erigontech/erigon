@@ -1,7 +1,8 @@
 {
-    "000-fork=Cancun-tx_type=0": {
+    "tests/cancun/eip4844_blobs/test_blobhash_opcode.py::test_blobhash_gas_cost[fork_Cancun-blockchain_test-tx_type_0]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4844.md",
             "reference-spec-version": "f0eb6a364aaf5ccb43516fa2c269a54fb881ecfd"
         },
@@ -490,9 +491,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "001-fork=Cancun-tx_type=1": {
+    "tests/cancun/eip4844_blobs/test_blobhash_opcode.py::test_blobhash_gas_cost[fork_Cancun-blockchain_test-tx_type_1]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4844.md",
             "reference-spec-version": "f0eb6a364aaf5ccb43516fa2c269a54fb881ecfd"
         },
@@ -988,9 +990,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "002-fork=Cancun-tx_type=2": {
+    "tests/cancun/eip4844_blobs/test_blobhash_opcode.py::test_blobhash_gas_cost[fork_Cancun-blockchain_test-tx_type_2]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4844.md",
             "reference-spec-version": "f0eb6a364aaf5ccb43516fa2c269a54fb881ecfd"
         },
@@ -1493,9 +1496,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "003-fork=Cancun-tx_type=3": {
+    "tests/cancun/eip4844_blobs/test_blobhash_opcode.py::test_blobhash_gas_cost[fork_Cancun-blockchain_test-tx_type_3]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4844.md",
             "reference-spec-version": "f0eb6a364aaf5ccb43516fa2c269a54fb881ecfd"
         },

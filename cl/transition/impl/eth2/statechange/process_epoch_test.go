@@ -91,7 +91,11 @@ var startingSlashingsResetState []byte
 
 func TestProcessRewardsAndPenalties(t *testing.T) {
 	runEpochTransitionConsensusTest(t, startingRewardsPenaltyState, expectedRewardsPenaltyState, func(s abstract.BeaconState) error {
-		return ProcessRewardsAndPenalties(s, state.EligibleValidatorsIndicies(s), GetUnslashedIndiciesSet(s))
+		var unslashedIndiciesSet [][]bool
+		if s.Version() >= clparams.AltairVersion {
+			unslashedIndiciesSet = GetUnslashedIndiciesSet(s.BeaconConfig(), state.PreviousEpoch(s), s.ValidatorSet(), s.PreviousEpochParticipation())
+		}
+		return ProcessRewardsAndPenalties(s, state.EligibleValidatorsIndicies(s), unslashedIndiciesSet)
 	})
 }
 
@@ -161,6 +165,11 @@ var startingInactivityScoresState []byte
 
 func TestInactivityScores(t *testing.T) {
 	runEpochTransitionConsensusTest(t, startingInactivityScoresState, expectedInactivityScoresState, func(s abstract.BeaconState) error {
-		return ProcessInactivityScores(s, state.EligibleValidatorsIndicies(s), GetUnslashedIndiciesSet(s))
+		var unslashedIndiciesSet [][]bool
+		if s.Version() >= clparams.AltairVersion {
+			unslashedIndiciesSet = GetUnslashedIndiciesSet(s.BeaconConfig(), state.PreviousEpoch(s), s.ValidatorSet(), s.PreviousEpochParticipation())
+		}
+
+		return ProcessInactivityScores(s, state.EligibleValidatorsIndicies(s), unslashedIndiciesSet)
 	})
 }

@@ -15,7 +15,6 @@ package utils
 
 import (
 	"encoding/binary"
-	"io"
 	"math/bits"
 
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
@@ -105,16 +104,51 @@ func GetBitlistLength(b []byte) int {
 	return 8*(len(b)-1) + msb - 1
 }
 
-func ReadZSTD(r io.Reader, out []byte) (int, error) {
-	n := 0
-	var err error
-	for n != len(out) {
-		var m int
-		m, err = r.Read(out[n:])
-		n += m
-		if err != nil {
-			return n, err
+func ReverseOfByteSlice(b []byte) (out []byte) {
+	out = make([]byte, len(b))
+	for i := range b {
+		out[i] = b[len(b)-1-i]
+	}
+	return
+}
+
+func FlipBitOn(b []byte, i int) {
+	b[i/8] |= 1 << (i % 8)
+}
+
+func IsBitOn(b []byte, idx int) bool {
+	i := uint8(1 << (idx % 8))
+	return b[idx/8]&i == i
+}
+
+// IsNonStrictSupersetBitlist checks if bitlist 'a' is a non-strict superset of bitlist 'b'
+func IsNonStrictSupersetBitlist(a, b []byte) bool {
+	// Ensure 'a' is at least as long as 'b'
+	if len(a) < len(b) {
+		return false
+	}
+
+	// Check each bit in 'b' to ensure it is also set in 'a'
+	for i := 0; i < len(b); i++ {
+		if (a[i] & b[i]) != b[i] {
+			return false
 		}
 	}
-	return n, nil
+
+	// If all bits required by 'b' are present in 'a', return true
+	return true
+}
+
+func BitsOnCount(b []byte) int {
+	count := 0
+	for _, v := range b {
+		count += bits.OnesCount8(v)
+	}
+	return count
+}
+
+func MergeBitlists(a, b []byte) {
+	for i := range b {
+		a[i] |= b[i]
+	}
 }

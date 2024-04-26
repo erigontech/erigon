@@ -18,17 +18,22 @@ package mdbx
 
 import (
 	"context"
+	"encoding/binary"
+	"errors"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 )
 
-func BaseCase(t *testing.T) (kv.RwDB, kv.RwTx, kv.RwCursorDupSort) {
+func BaseCaseDB(t *testing.T) kv.RwDB {
 	t.Helper()
 	path := t.TempDir()
 	logger := log.New()
@@ -40,6 +45,13 @@ func BaseCase(t *testing.T) (kv.RwDB, kv.RwTx, kv.RwCursorDupSort) {
 		}
 	}).MapSize(128 * datasize.MB).MustOpen()
 	t.Cleanup(db.Close)
+	return db
+}
+
+func BaseCase(t *testing.T) (kv.RwDB, kv.RwTx, kv.RwCursorDupSort) {
+	t.Helper()
+	db := BaseCaseDB(t)
+	table := "Table"
 
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
@@ -772,4 +784,306 @@ func TestAutoConversionSeekBothRange(t *testing.T) {
 	v, err = c.SeekBothRange([]byte("X..........................."), []byte("_______________________________Y"))
 	require.NoError(t, err)
 	assert.Nil(t, v)
+}
+
+func TestBeginRoAfterClose(t *testing.T) {
+	db := NewMDBX(log.New()).InMem(t.TempDir()).MustOpen()
+	db.Close()
+	_, err := db.BeginRo(context.Background())
+	require.ErrorContains(t, err, "closed")
+}
+
+func TestBeginRwAfterClose(t *testing.T) {
+	db := NewMDBX(log.New()).InMem(t.TempDir()).MustOpen()
+	db.Close()
+	_, err := db.BeginRw(context.Background())
+	require.ErrorContains(t, err, "closed")
+}
+
+func TestBeginRoWithDoneContext(t *testing.T) {
+	db := NewMDBX(log.New()).InMem(t.TempDir()).MustOpen()
+	defer db.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := db.BeginRo(ctx)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestBeginRwWithDoneContext(t *testing.T) {
+	db := NewMDBX(log.New()).InMem(t.TempDir()).MustOpen()
+	defer db.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := db.BeginRw(ctx)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func testCloseWaitsAfterTxBegin(
+	t *testing.T,
+	count int,
+	txBeginFunc func(kv.RwDB) (kv.StatelessReadTx, error),
+	txEndFunc func(kv.StatelessReadTx) error,
+) {
+	t.Helper()
+	db := NewMDBX(log.New()).InMem(t.TempDir()).MustOpen()
+	var txs []kv.StatelessReadTx
+	for i := 0; i < count; i++ {
+		tx, err := txBeginFunc(db)
+		require.Nil(t, err)
+		txs = append(txs, tx)
+	}
+
+	isClosed := &atomic.Bool{}
+	closeDone := make(chan struct{})
+
+	go func() {
+		db.Close()
+		isClosed.Store(true)
+		close(closeDone)
+	}()
+
+	for _, tx := range txs {
+		// arbitrary delay to give db.Close() a chance to exit prematurely
+		time.Sleep(time.Millisecond * 20)
+		assert.False(t, isClosed.Load())
+
+		err := txEndFunc(tx)
+		require.Nil(t, err)
+	}
+
+	<-closeDone
+	assert.True(t, isClosed.Load())
+}
+
+func TestCloseWaitsAfterTxBegin(t *testing.T) {
+	ctx := context.Background()
+	t.Run("BeginRoAndCommit", func(t *testing.T) {
+		testCloseWaitsAfterTxBegin(
+			t,
+			1,
+			func(db kv.RwDB) (kv.StatelessReadTx, error) { return db.BeginRo(ctx) },
+			func(tx kv.StatelessReadTx) error { return tx.Commit() },
+		)
+	})
+	t.Run("BeginRoAndCommit3", func(t *testing.T) {
+		testCloseWaitsAfterTxBegin(
+			t,
+			3,
+			func(db kv.RwDB) (kv.StatelessReadTx, error) { return db.BeginRo(ctx) },
+			func(tx kv.StatelessReadTx) error { return tx.Commit() },
+		)
+	})
+	t.Run("BeginRoAndRollback", func(t *testing.T) {
+		testCloseWaitsAfterTxBegin(
+			t,
+			1,
+			func(db kv.RwDB) (kv.StatelessReadTx, error) { return db.BeginRo(ctx) },
+			func(tx kv.StatelessReadTx) error { tx.Rollback(); return nil },
+		)
+	})
+	t.Run("BeginRoAndRollback3", func(t *testing.T) {
+		testCloseWaitsAfterTxBegin(
+			t,
+			3,
+			func(db kv.RwDB) (kv.StatelessReadTx, error) { return db.BeginRo(ctx) },
+			func(tx kv.StatelessReadTx) error { tx.Rollback(); return nil },
+		)
+	})
+	t.Run("BeginRwAndCommit", func(t *testing.T) {
+		testCloseWaitsAfterTxBegin(
+			t,
+			1,
+			func(db kv.RwDB) (kv.StatelessReadTx, error) { return db.BeginRw(ctx) },
+			func(tx kv.StatelessReadTx) error { return tx.Commit() },
+		)
+	})
+	t.Run("BeginRwAndRollback", func(t *testing.T) {
+		testCloseWaitsAfterTxBegin(
+			t,
+			1,
+			func(db kv.RwDB) (kv.StatelessReadTx, error) { return db.BeginRw(ctx) },
+			func(tx kv.StatelessReadTx) error { tx.Rollback(); return nil },
+		)
+	})
+}
+
+// u64tob converts a uint64 into an 8-byte slice.
+func u64tob(v uint64) []byte {
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint64(b, v)
+	return b
+}
+
+// Ensure two functions can perform updates in a single batch.
+func TestDB_Batch(t *testing.T) {
+	_db := BaseCaseDB(t)
+	table := "Table"
+	db := _db.(*MdbxKV)
+
+	// Iterate over multiple updates in separate goroutines.
+	n := 2
+	ch := make(chan error, n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			ch <- db.Batch(func(tx kv.RwTx) error {
+				return tx.Put(table, u64tob(uint64(i)), []byte{})
+			})
+		}(i)
+	}
+
+	// Check all responses to make sure there's no error.
+	for i := 0; i < n; i++ {
+		if err := <-ch; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Ensure data is correct.
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		for i := 0; i < n; i++ {
+			v, err := tx.GetOne(table, u64tob(uint64(i)))
+			if err != nil {
+				panic(err)
+			}
+			if v == nil {
+				t.Errorf("key not found: %d", i)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDB_Batch_Panic(t *testing.T) {
+	_db := BaseCaseDB(t)
+	db := _db.(*MdbxKV)
+
+	var sentinel int
+	var bork = &sentinel
+	var problem interface{}
+	var err error
+
+	// Execute a function inside a batch that panics.
+	func() {
+		defer func() {
+			if p := recover(); p != nil {
+				problem = p
+			}
+		}()
+		err = db.Batch(func(tx kv.RwTx) error {
+			panic(bork)
+		})
+	}()
+
+	// Verify there is no error.
+	if g, e := err, error(nil); !errors.Is(g, e) {
+		t.Fatalf("wrong error: %v != %v", g, e)
+	}
+	// Verify the panic was captured.
+	if g, e := problem, bork; g != e {
+		t.Fatalf("wrong error: %v != %v", g, e)
+	}
+}
+
+func TestDB_BatchFull(t *testing.T) {
+	_db := BaseCaseDB(t)
+	table := "Table"
+	db := _db.(*MdbxKV)
+
+	const size = 3
+	// buffered so we never leak goroutines
+	ch := make(chan error, size)
+	put := func(i int) {
+		ch <- db.Batch(func(tx kv.RwTx) error {
+			return tx.Put(table, u64tob(uint64(i)), []byte{})
+		})
+	}
+
+	db.MaxBatchSize = size
+	// high enough to never trigger here
+	db.MaxBatchDelay = 1 * time.Hour
+
+	go put(1)
+	go put(2)
+
+	// Give the batch a chance to exhibit bugs.
+	time.Sleep(10 * time.Millisecond)
+
+	// not triggered yet
+	select {
+	case <-ch:
+		t.Fatalf("batch triggered too early")
+	default:
+	}
+
+	go put(3)
+
+	// Check all responses to make sure there's no error.
+	for i := 0; i < size; i++ {
+		if err := <-ch; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Ensure data is correct.
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		for i := 1; i <= size; i++ {
+			v, err := tx.GetOne(table, u64tob(uint64(i)))
+			if err != nil {
+				panic(err)
+			}
+			if v == nil {
+				t.Errorf("key not found: %d", i)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDB_BatchTime(t *testing.T) {
+	_db := BaseCaseDB(t)
+	table := "Table"
+	db := _db.(*MdbxKV)
+
+	const size = 1
+	// buffered so we never leak goroutines
+	ch := make(chan error, size)
+	put := func(i int) {
+		ch <- db.Batch(func(tx kv.RwTx) error {
+			return tx.Put(table, u64tob(uint64(i)), []byte{})
+		})
+	}
+
+	db.MaxBatchSize = 1000
+	db.MaxBatchDelay = 0
+
+	go put(1)
+
+	// Batch must trigger by time alone.
+
+	// Check all responses to make sure there's no error.
+	for i := 0; i < size; i++ {
+		if err := <-ch; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Ensure data is correct.
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		for i := 1; i <= size; i++ {
+			v, err := tx.GetOne(table, u64tob(uint64(i)))
+			if err != nil {
+				return err
+			}
+			if v == nil {
+				t.Errorf("key not found: %d", i)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 }

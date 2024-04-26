@@ -12,7 +12,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cmd/caplin/caplinflags"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinelcli"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinelflags"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
@@ -27,7 +26,7 @@ type CaplinCliCfg struct {
 	ErigonPrivateApi      string        `json:"erigon_private_api"`
 	TransitionChain       bool          `json:"transition_chain"`
 	InitialSync           bool          `json:"initial_sync"`
-	NoBeaconApi           bool          `json:"no_beacon_api"`
+	AllowedEndpoints      []string      `json:"endpoints"`
 	BeaconApiReadTimeout  time.Duration `json:"beacon_api_read_timeout"`
 	BeaconApiWriteTimeout time.Duration `json:"beacon_api_write_timeout"`
 	BeaconAddr            string        `json:"beacon_addr"`
@@ -39,6 +38,10 @@ type CaplinCliCfg struct {
 	EngineAPIAddr         string        `json:"engine_api_addr"`
 	EngineAPIPort         int           `json:"engine_api_port"`
 	JwtSecret             []byte
+
+	AllowedMethods   []string `json:"allowed_methods"`
+	AllowedOrigins   []string `json:"allowed_origins"`
+	AllowCredentials bool     `json:"allow_credentials"`
 
 	InitalState *state.CachingBeaconState
 	Dirs        datadir.Dirs
@@ -53,25 +56,30 @@ func SetupCaplinCli(ctx *cli.Context) (cfg *CaplinCliCfg, err error) {
 
 	cfg.ErigonPrivateApi = ctx.String(caplinflags.ErigonPrivateApiFlag.Name)
 
-	if ctx.String(sentinelflags.BeaconConfigFlag.Name) != "" {
-		var stateByte []byte
-		// Now parse genesis time and genesis fork
-		if *cfg.GenesisCfg, stateByte, err = clparams.ParseGenesisSSZToGenesisConfig(
-			ctx.String(sentinelflags.GenesisSSZFlag.Name),
-			cfg.BeaconCfg.GetCurrentStateVersion(0)); err != nil {
-			return nil, err
-		}
+	//T TODO(Giulio2002): Refactor later
+	// if ctx.String(sentinelflags.BeaconConfigFlag.Name) != "" {
+	// 	var stateByte []byte
+	// 	// Now parse genesis time and genesis fork
+	// 	if *cfg.GenesisCfg, stateByte, err = clparams.ParseGenesisSSZToGenesisConfig(
+	// 		ctx.String(sentinelflags.GenesisSSZFlag.Name),
+	// 		cfg.BeaconCfg.GetCurrentStateVersion(0)); err != nil {
+	// 		return nil, err
+	// 	}
 
-		cfg.InitalState = state.New(cfg.BeaconCfg)
-		if cfg.InitalState.DecodeSSZ(stateByte, int(cfg.BeaconCfg.GetCurrentStateVersion(0))); err != nil {
-			return nil, err
-		}
-	}
+	// 	cfg.InitalState = state.New(cfg.BeaconCfg)
+	// 	if cfg.InitalState.DecodeSSZ(stateByte, int(cfg.BeaconCfg.GetCurrentStateVersion(0))); err != nil {
+	// 		return nil, err
+	// 	}
+	// }
 
-	cfg.NoBeaconApi = ctx.Bool(caplinflags.NoBeaconApi.Name)
+	cfg.AllowedEndpoints = ctx.StringSlice(utils.BeaconAPIFlag.Name)
+
 	cfg.BeaconApiReadTimeout = time.Duration(ctx.Uint64(caplinflags.BeaconApiReadTimeout.Name)) * time.Second
 	cfg.BeaconApiWriteTimeout = time.Duration(ctx.Uint(caplinflags.BeaconApiWriteTimeout.Name)) * time.Second
 	cfg.BeaconAddr = fmt.Sprintf("%s:%d", ctx.String(caplinflags.BeaconApiAddr.Name), ctx.Int(caplinflags.BeaconApiPort.Name))
+	cfg.AllowCredentials = ctx.Bool(utils.BeaconApiAllowCredentialsFlag.Name)
+	cfg.AllowedMethods = ctx.StringSlice(utils.BeaconApiAllowMethodsFlag.Name)
+	cfg.AllowedOrigins = ctx.StringSlice(utils.BeaconApiAllowOriginsFlag.Name)
 	cfg.BeaconProtocol = "tcp"
 	cfg.RecordMode = ctx.Bool(caplinflags.RecordModeFlag.Name)
 	cfg.RecordDir = ctx.String(caplinflags.RecordModeDir.Name)

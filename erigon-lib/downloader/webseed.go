@@ -3,26 +3,24 @@ package downloader
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/anacrolix/torrent"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pelletier/go-toml/v2"
@@ -38,45 +36,316 @@ type WebSeeds struct {
 	downloadTorrentFile bool
 	torrentsWhitelist   snapcfg.Preverified
 
+	seeds []*url.URL
+
 	logger    log.Logger
 	verbosity log.Lvl
+
+	torrentFiles *AtomicTorrentFS
 }
 
-func (d *WebSeeds) Discover(ctx context.Context, s3tokens []string, urls []*url.URL, files []string, rootDir string) {
-	d.downloadWebseedTomlFromProviders(ctx, s3tokens, urls, files)
-	d.downloadTorrentFilesFromProviders(ctx, rootDir)
+func NewWebSeeds(seeds []*url.URL, verbosity log.Lvl, logger log.Logger) *WebSeeds {
+	return &WebSeeds{
+		seeds:     seeds,
+		logger:    logger,
+		verbosity: verbosity,
+	}
 }
 
-func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, s3Providers []string, httpProviders []*url.URL, diskProviders []string) {
-	log.Debug("[snapshots] webseed providers", "http", len(httpProviders), "s3", len(s3Providers), "disk", len(diskProviders))
-	list := make([]snaptype.WebSeedsFromProvider, 0, len(httpProviders)+len(diskProviders))
+func (d *WebSeeds) getWebDownloadInfo(ctx context.Context, t *torrent.Torrent) (infos []webDownloadInfo, seedHashMismatches []*seedHash, err error) {
+	torrentHash := t.InfoHash().Bytes()
+
+	for _, webseed := range d.seeds {
+		downloadUrl := webseed.JoinPath(t.Name())
+
+		if headRequest, err := http.NewRequestWithContext(ctx, http.MethodHead, downloadUrl.String(), nil); err == nil {
+			insertCloudflareHeaders(headRequest)
+
+			headResponse, err := http.DefaultClient.Do(headRequest)
+			if err != nil {
+				continue
+			}
+			headResponse.Body.Close()
+
+			if headResponse.StatusCode != http.StatusOK {
+				d.logger.Debug("[snapshots.webseed] getWebDownloadInfo: HEAD request failed",
+					"webseed", webseed.String(), "name", t.Name(), "status", headResponse.Status)
+				continue
+			}
+			if meta, err := getWebpeerTorrentInfo(ctx, downloadUrl); err == nil {
+				if bytes.Equal(torrentHash, meta.HashInfoBytes().Bytes()) {
+					md5tag := headResponse.Header.Get("Etag")
+					if md5tag != "" {
+						md5tag = strings.Trim(md5tag, "\"")
+					}
+
+					infos = append(infos, webDownloadInfo{
+						url:     downloadUrl,
+						length:  headResponse.ContentLength,
+						md5:     md5tag,
+						torrent: t,
+					})
+				} else {
+					hash := meta.HashInfoBytes()
+					seedHashMismatches = append(seedHashMismatches, &seedHash{url: webseed, hash: &hash})
+				}
+			}
+		}
+		seedHashMismatches = append(seedHashMismatches, &seedHash{url: webseed})
+	}
+
+	return infos, seedHashMismatches, nil
+}
+
+func (d *WebSeeds) SetTorrent(t *AtomicTorrentFS, whiteList snapcfg.Preverified, downloadTorrentFile bool) {
+	d.downloadTorrentFile = downloadTorrentFile
+	d.torrentsWhitelist = whiteList
+	d.torrentFiles = t
+}
+
+func (d *WebSeeds) checkHasTorrents(manifestResponse snaptype.WebSeedsFromProvider, report *WebSeedCheckReport) {
+	// check that for each file in the manifest, there is a corresponding .torrent file
+	torrentNames := make(map[string]struct{})
+	for name := range manifestResponse {
+		if strings.HasSuffix(name, ".torrent") {
+			torrentNames[name] = struct{}{}
+		}
+	}
+	hasTorrents := len(torrentNames) > 0
+	report.missingTorrents = make([]string, 0)
+	for name := range manifestResponse {
+		// skip non-seedable files. maybe will need extend list of seedable files in future.
+		if !snaptype.IsSeedableExtension(name) {
+			continue
+		}
+		tname := name + ".torrent"
+		if _, ok := torrentNames[tname]; !ok {
+			report.missingTorrents = append(report.missingTorrents, name)
+			continue
+		}
+		delete(torrentNames, tname)
+	}
+
+	if len(torrentNames) > 0 {
+		report.danglingTorrents = make([]string, 0, len(torrentNames))
+		for file := range torrentNames {
+			report.danglingTorrents = append(report.danglingTorrents, file)
+		}
+	}
+	report.torrentsOK = len(report.missingTorrents) == 0 && len(report.danglingTorrents) == 0 && hasTorrents
+}
+
+func (d *WebSeeds) fetchFileEtags(ctx context.Context, manifestResponse snaptype.WebSeedsFromProvider) (tags map[string]string, invalidTags, etagFetchFailed []string, err error) {
+	etagFetchFailed = make([]string, 0)
+	tags = make(map[string]string)
+	invalidTagsMap := make(map[string]string)
+
+	for name, wurl := range manifestResponse {
+		u, err := url.Parse(wurl)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("webseed.fetchFileEtags: %w", err)
+		}
+		md5Tag, err := d.retrieveFileEtag(ctx, u)
+		if err != nil {
+			if errors.Is(err, ErrInvalidEtag) {
+				invalidTagsMap[name] = md5Tag
+				continue
+			}
+			if errors.Is(err, ErrEtagNotFound) {
+				etagFetchFailed = append(etagFetchFailed, name)
+				continue
+			}
+			d.logger.Debug("[snapshots.webseed] get file ETag", "err", err, "url", u.String())
+			return nil, nil, nil, fmt.Errorf("webseed.fetchFileEtags: %w", err)
+		}
+		tags[name] = md5Tag
+	}
+
+	invalidTags = make([]string, 0)
+	if len(invalidTagsMap) > 0 {
+		for name, tag := range invalidTagsMap {
+			invalidTags = append(invalidTags, fmt.Sprintf("%-50s %s", name, tag))
+		}
+	}
+	return tags, invalidTags, etagFetchFailed, nil
+}
+
+func (d *WebSeeds) VerifyManifestedBuckets(ctx context.Context, failFast bool) error {
+	supErr := make([]error, 0, len(d.seeds))
+	reports := make([]*WebSeedCheckReport, 0, len(d.seeds))
+
+	for _, webSeedProviderURL := range d.seeds {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		d.logger.Debug("[snapshots.webseed] verify manifest", "url", webSeedProviderURL.String())
+
+		rep, err := d.VerifyManifestedBucket(ctx, webSeedProviderURL)
+		if err != nil {
+			d.logger.Warn("[snapshots.webseed] verify manifest", "err", err)
+			if failFast {
+				return err
+			} else {
+				supErr = append(supErr, err)
+			}
+		}
+
+		reports = append(reports, rep)
+	}
+
+	failed := len(supErr) > 0
+
+	fmt.Println("-----------------------REPORTS OVERVIEW--------------------------")
+	for _, rep := range reports {
+		if !rep.OK() {
+			failed = true
+		}
+		fmt.Printf("%s\n", rep.ToString(false))
+	}
+	if failed {
+		merr := "error list:\n"
+		for _, err := range supErr {
+			merr += fmt.Sprintf("%s\n", err)
+		}
+		return fmt.Errorf("webseed: some webseeds are not OK, details above| %s", merr)
+	}
+	return nil
+}
+
+type WebSeedCheckReport struct {
+	seed             *url.URL
+	manifestExist    bool
+	torrentsOK       bool
+	missingTorrents  []string
+	danglingTorrents []string
+	totalEtags       int
+	invalidEtags     []string
+	etagFetchFailed  []string
+}
+
+func (w *WebSeedCheckReport) sort() {
+	sort.Strings(w.missingTorrents)
+	sort.Strings(w.invalidEtags)
+	sort.Strings(w.etagFetchFailed)
+	sort.Strings(w.danglingTorrents)
+}
+
+func (w *WebSeedCheckReport) OK() bool {
+	return w.torrentsOK && w.manifestExist && len(w.invalidEtags) == 0 && len(w.etagFetchFailed) == 0
+}
+
+func (w *WebSeedCheckReport) ToString(full bool) string {
+	br := "BAD"
+	if w.OK() {
+		br = "OK"
+	}
+
+	if !w.manifestExist {
+		return fmt.Sprintf("## REPORT [%s] on %s: manifest not found\n", br, w.seed)
+	}
+	w.sort()
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("## REPORT [%s] on %s\n", br, w.seed))
+	b.WriteString(fmt.Sprintf(" - manifest exist: %t\n", w.manifestExist))
+	b.WriteString(fmt.Sprintf(" - missing torrents (files without torrents): %d\n", len(w.missingTorrents)))
+	b.WriteString(fmt.Sprintf(" - dangling (data file not found) torrents: %d\n", len(w.danglingTorrents)))
+	b.WriteString(fmt.Sprintf(" - invalid ETags format: %d/%d\n", len(w.invalidEtags), w.totalEtags))
+	b.WriteString(fmt.Sprintf(" - ETag fetch failed: %d/%d\n", len(w.etagFetchFailed), w.totalEtags))
+
+	if !full {
+		return b.String()
+	}
+
+	titles := []string{
+		"Missing torrents",
+		"Dangling torrents",
+		"Invalid ETags format",
+		"ETag fetch failed",
+	}
+
+	fnamess := [][]string{
+		w.missingTorrents,
+		w.danglingTorrents,
+		w.invalidEtags,
+		w.etagFetchFailed,
+	}
+
+	for ti, names := range fnamess {
+		if len(names) == 0 {
+			continue
+		}
+		if ti == 0 {
+			b.WriteByte(10)
+		}
+		b.WriteString(fmt.Sprintf("# %s\n", titles[ti]))
+		for _, name := range names {
+			b.WriteString(fmt.Sprintf("%s\n", name))
+		}
+		if ti != len(fnamess)-1 {
+			b.WriteByte(10)
+		}
+	}
+	b.WriteString(fmt.Sprintf("SEED [%s] %s\n", br, w.seed.String()))
+	return b.String()
+}
+
+func (d *WebSeeds) VerifyManifestedBucket(ctx context.Context, webSeedProviderURL *url.URL) (report *WebSeedCheckReport, err error) {
+	report = &WebSeedCheckReport{seed: webSeedProviderURL}
+	defer func() { fmt.Printf("%s\n", report.ToString(true)) }()
+
+	manifestResponse, err := d.retrieveManifest(ctx, webSeedProviderURL)
+	report.manifestExist = len(manifestResponse) != 0
+	if err != nil {
+		return report, err
+	}
+
+	d.checkHasTorrents(manifestResponse, report)
+	remoteTags, invalidTags, noTags, err := d.fetchFileEtags(ctx, manifestResponse)
+	if err != nil {
+		return report, err
+	}
+
+	report.invalidEtags = invalidTags
+	report.etagFetchFailed = noTags
+	report.totalEtags = len(remoteTags) + len(noTags)
+	return report, nil
+}
+
+func (d *WebSeeds) Discover(ctx context.Context, files []string, rootDir string) {
+	listsOfFiles := d.constructListsOfFiles(ctx, d.seeds, files)
+	torrentMap := d.makeTorrentUrls(listsOfFiles)
+	webSeedMap := d.downloadTorrentFilesFromProviders(ctx, rootDir, torrentMap)
+	d.makeWebSeedUrls(listsOfFiles, webSeedMap)
+}
+
+func (d *WebSeeds) constructListsOfFiles(ctx context.Context, httpProviders []*url.URL, diskProviders []string) []snaptype.WebSeedsFromProvider {
+	log.Debug("[snapshots.webseed] providers", "http", len(httpProviders), "disk", len(diskProviders))
+	listsOfFiles := make([]snaptype.WebSeedsFromProvider, 0, len(httpProviders)+len(diskProviders))
+
 	for _, webSeedProviderURL := range httpProviders {
 		select {
 		case <-ctx.Done():
-			break
+			return listsOfFiles
 		default:
 		}
-		response, err := d.callHttpProvider(ctx, webSeedProviderURL)
+		manifestResponse, err := d.retrieveManifest(ctx, webSeedProviderURL)
 		if err != nil { // don't fail on error
 			d.logger.Debug("[snapshots.webseed] get from HTTP provider", "err", err, "url", webSeedProviderURL.EscapedPath())
 			continue
 		}
-		list = append(list, response)
+		// check if we need to prohibit new downloads for some files
+		for name := range manifestResponse {
+			prohibited, err := d.torrentFiles.NewDownloadsAreProhibited(name)
+			if prohibited || err != nil {
+				delete(manifestResponse, name)
+			}
+		}
+
+		listsOfFiles = append(listsOfFiles, manifestResponse)
 	}
 
-	for _, webSeedProviderURL := range s3Providers {
-		select {
-		case <-ctx.Done():
-			break
-		default:
-		}
-		response, err := d.callS3Provider(ctx, webSeedProviderURL)
-		if err != nil { // don't fail on error
-			d.logger.Debug("[snapshots.webseed] get from S3 provider", "err", err)
-			continue
-		}
-		list = append(list, response)
-	}
 	// add to list files from disk
 	for _, webSeedFile := range diskProviders {
 		response, err := d.readWebSeedsFile(webSeedFile)
@@ -84,14 +353,24 @@ func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, s3Provi
 			d.logger.Debug("[snapshots.webseed] get from File provider", "err", err)
 			continue
 		}
-		list = append(list, response)
+		// check if we need to prohibit new downloads for some files
+		for name := range response {
+			prohibited, err := d.torrentFiles.NewDownloadsAreProhibited(name)
+			if prohibited || err != nil {
+				delete(response, name)
+			}
+		}
+		listsOfFiles = append(listsOfFiles, response)
 	}
+	return listsOfFiles
+}
 
-	webSeedUrls, torrentUrls := snaptype.WebSeedUrls{}, snaptype.TorrentUrls{}
-	for _, urls := range list {
+func (d *WebSeeds) makeTorrentUrls(listsOfFiles []snaptype.WebSeedsFromProvider) map[url.URL]string {
+	torrentMap := map[url.URL]string{}
+	torrentUrls := snaptype.TorrentUrls{}
+	for _, urls := range listsOfFiles {
 		for name, wUrl := range urls {
 			if !strings.HasSuffix(name, ".torrent") {
-				webSeedUrls[name] = append(webSeedUrls[name], wUrl)
 				continue
 			}
 			if !nameWhitelisted(name, d.torrentsWhitelist) {
@@ -103,13 +382,32 @@ func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, s3Provi
 				continue
 			}
 			torrentUrls[name] = append(torrentUrls[name], uri)
+			torrentMap[*uri] = strings.TrimSuffix(name, ".torrent")
+		}
+	}
+
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	d.torrentUrls = torrentUrls
+	return torrentMap
+}
+
+func (d *WebSeeds) makeWebSeedUrls(listsOfFiles []snaptype.WebSeedsFromProvider, webSeedMap map[string]struct{}) {
+	webSeedUrls := snaptype.WebSeedUrls{}
+	for _, urls := range listsOfFiles {
+		for name, wUrl := range urls {
+			if strings.HasSuffix(name, ".torrent") {
+				continue
+			}
+			if _, ok := webSeedMap[name]; ok {
+				webSeedUrls[name] = append(webSeedUrls[name], wUrl)
+			}
 		}
 	}
 
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	d.byFileName = webSeedUrls
-	d.torrentUrls = torrentUrls
 }
 
 func (d *WebSeeds) TorrentUrls() snaptype.TorrentUrls {
@@ -130,86 +428,94 @@ func (d *WebSeeds) ByFileName(name string) (metainfo.UrlList, bool) {
 	v, ok := d.byFileName[name]
 	return v, ok
 }
-func (d *WebSeeds) callHttpProvider(ctx context.Context, webSeedProviderUrl *url.URL) (snaptype.WebSeedsFromProvider, error) {
-	baseUrl := webSeedProviderUrl.String()
-	ref, err := url.Parse("manifest.txt")
+
+var ErrInvalidEtag = fmt.Errorf("invalid etag")
+var ErrEtagNotFound = fmt.Errorf("not found")
+
+func (d *WebSeeds) retrieveFileEtag(ctx context.Context, file *url.URL) (string, error) {
+	request, err := http.NewRequest(http.MethodHead, file.String(), nil)
 	if err != nil {
-		return nil, err
-	}
-	u := webSeedProviderUrl.ResolveReference(ref)
-	request, err := http.NewRequest(http.MethodGet, u.String(), nil)
-	if err != nil {
-		return nil, err
+		return "", err
 	}
 
 	request = request.WithContext(ctx)
 	resp, err := http.DefaultClient.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("webseed.http: %w, host=%s, url=%s", err, webSeedProviderUrl.Hostname(), webSeedProviderUrl.EscapedPath())
+		return "", fmt.Errorf("webseed.http: %w, url=%s", err, file.String())
 	}
 	defer resp.Body.Close()
-	b, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("webseed.http: %w, host=%s, url=%s, ", err, webSeedProviderUrl.Hostname(), webSeedProviderUrl.EscapedPath())
-	}
-	response := snaptype.WebSeedsFromProvider{}
-	fileNames := strings.Split(string(b), "\n")
-	for _, f := range fileNames {
-		response[f], err = url.JoinPath(baseUrl, f)
-		if err != nil {
-			return nil, err
+	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusNotFound {
+			return "", ErrEtagNotFound
 		}
+		return "", fmt.Errorf("webseed.http: status code %d, url=%s", resp.StatusCode, file.String())
 	}
-	d.logger.Debug("[snapshots.webseed] get from HTTP provider", "urls", len(response), "host", webSeedProviderUrl.Hostname(), "url", webSeedProviderUrl.EscapedPath())
-	return response, nil
-}
-func (d *WebSeeds) callS3Provider(ctx context.Context, token string) (snaptype.WebSeedsFromProvider, error) {
-	//v1:bucketName:accID:accessKeyID:accessKeySecret
-	l := strings.Split(token, ":")
-	if len(l) != 5 {
-		return nil, fmt.Errorf("token has invalid format, exepcing 'v1:tokenInBase64'")
-	}
-	version, bucketName, accountId, accessKeyId, accessKeySecret := strings.TrimSpace(l[0]), strings.TrimSpace(l[1]), strings.TrimSpace(l[2]), strings.TrimSpace(l[3]), strings.TrimSpace(l[4])
-	if version != "v1" {
-		return nil, fmt.Errorf("not supported version: %s", version)
-	}
-	var fileName = "webseeds.toml"
 
-	r2Resolver := aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
-		return aws.Endpoint{
-			URL: fmt.Sprintf("https://%s.r2.cloudflarestorage.com", accountId),
-		}, nil
-	})
-	cfg, err := config.LoadDefaultConfig(ctx,
-		config.WithEndpointResolverWithOptions(r2Resolver),
-		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKeyId, accessKeySecret, "")),
-	)
+	etag := resp.Header.Get("Etag") // file md5
+	if etag == "" {
+		return "", fmt.Errorf("webseed.http: file has no etag, url=%s", file.String())
+	}
+	// Todo(awskii): figure out reason why multipart etags contains "-" and remove this check
+	//etag = strings.Trim(etag, "\"")
+	//if strings.Contains(etag, "-") {
+	//	return etag, ErrInvalidEtag
+	//}
+	return etag, nil
+}
+
+func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url.URL) (snaptype.WebSeedsFromProvider, error) {
+	baseUrl := webSeedProviderUrl.String()
+
+	webSeedProviderUrl.Path += "/manifest.txt" // allow: host.com/v2/manifest.txt
+	u := webSeedProviderUrl
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, err
 	}
 
-	client := s3.NewFromConfig(cfg)
-	//  {
-	//  	"ChecksumAlgorithm": null,
-	//  	"ETag": "\"eb2b891dc67b81755d2b726d9110af16\"",
-	//  	"Key": "ferriswasm.png",
-	//  	"LastModified": "2022-05-18T17:20:21.67Z",
-	//  	"Owner": null,
-	//  	"Size": 87671,
-	//  	"StorageClass": "STANDARD"
-	//  }
-	resp, err := client.GetObject(ctx, &s3.GetObjectInput{Bucket: &bucketName, Key: &fileName})
+	insertCloudflareHeaders(request)
+
+	request = request.WithContext(ctx)
+	resp, err := http.DefaultClient.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("webseed.s3: bucket=%s, %w", bucketName, err)
+		return nil, fmt.Errorf("webseed.http: make request: %w, url=%s", err, u.String())
 	}
 	defer resp.Body.Close()
-	response := snaptype.WebSeedsFromProvider{}
-	if err := toml.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return nil, fmt.Errorf("webseed.s3: bucket=%s, %w", bucketName, err)
+	if resp.StatusCode != http.StatusOK {
+		d.logger.Debug("[snapshots.webseed] /manifest.txt retrieval failed, no downloads from this webseed",
+			"webseed", webSeedProviderUrl.String(), "status", resp.Status)
+		return nil, fmt.Errorf("webseed.http: status=%d, url=%s", resp.StatusCode, u.String())
 	}
-	d.logger.Debug("[snapshots.webseed] get from S3 provider", "urls", len(response), "bucket", bucketName)
+
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("webseed.http: read: %w, url=%s, ", err, u.String())
+	}
+
+	response := snaptype.WebSeedsFromProvider{}
+	fileNames := strings.Split(string(b), "\n")
+	for fi, f := range fileNames {
+		trimmed := strings.TrimSpace(f)
+		switch trimmed {
+		case "":
+			if fi != len(fileNames)-1 {
+				d.logger.Debug("[snapshots.webseed] empty line in manifest.txt", "webseed", webSeedProviderUrl.String(), "lineNum", fi)
+			}
+			continue
+		case "manifest.txt":
+			continue
+		default:
+			response[trimmed], err = url.JoinPath(baseUrl, trimmed)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	d.logger.Debug("[snapshots.webseed] get from HTTP provider", "manifest-len", len(response), "url", webSeedProviderUrl.String())
 	return response, nil
 }
+
 func (d *WebSeeds) readWebSeedsFile(webSeedProviderPath string) (snaptype.WebSeedsFromProvider, error) {
 	_, fileName := filepath.Split(webSeedProviderPath)
 	data, err := os.ReadFile(webSeedProviderPath)
@@ -225,46 +531,45 @@ func (d *WebSeeds) readWebSeedsFile(webSeedProviderPath string) (snaptype.WebSee
 }
 
 // downloadTorrentFilesFromProviders - if they are not exist on file-system
-func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDir string) {
+func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDir string, torrentMap map[url.URL]string) map[string]struct{} {
 	// TODO: need more tests, need handle more forward-compatibility and backward-compatibility case
 	//  - now, if add new type of .torrent files to S3 bucket - existing nodes will start downloading it. maybe need whitelist of file types
 	//  - maybe need download new files if --snap.stop=true
+	webSeedMap := map[string]struct{}{}
+	var webSeeMapLock sync.RWMutex
 	if !d.downloadTorrentFile {
-		return
+		return webSeedMap
 	}
 	if len(d.TorrentUrls()) == 0 {
-		return
+		return webSeedMap
 	}
 	var addedNew int
 	e, ctx := errgroup.WithContext(ctx)
+	e.SetLimit(1024)
 	urlsByName := d.TorrentUrls()
-	//TODO:
-	// - what to do if node already synced?
-	for name, tUrls := range urlsByName {
-		tPath := filepath.Join(rootDir, name)
-		if dir.FileExist(tPath) {
-			continue
-		}
+
+	for fileName, tUrls := range urlsByName {
+		name := fileName
 		addedNew++
 		if !strings.HasSuffix(name, ".seg.torrent") {
 			_, fName := filepath.Split(name)
 			d.logger.Log(d.verbosity, "[snapshots] webseed has .torrent, but we skip it because this file-type not supported yet", "name", fName)
 			continue
 		}
-		name := name
+
 		tUrls := tUrls
 		e.Go(func() error {
 			for _, url := range tUrls {
-				res, err := d.callTorrentHttpProvider(ctx, url, name)
+				//validation happens inside
+				_, err := d.callTorrentHttpProvider(ctx, url, name)
 				if err != nil {
-					d.logger.Log(d.verbosity, "[snapshots] got from webseed", "name", name, "err", err)
+					d.logger.Log(d.verbosity, "[snapshots] got from webseed", "name", name, "err", err, "url", url)
 					continue
 				}
-				d.logger.Log(d.verbosity, "[snapshots] got from webseed", "name", name)
-				if err := saveTorrent(tPath, res); err != nil {
-					d.logger.Debug("[snapshots] saveTorrent", "err", err)
-					continue
-				}
+				//don't save .torrent here - do it inside downloader.Add
+				webSeeMapLock.Lock()
+				webSeedMap[torrentMap[*url]] = struct{}{}
+				webSeeMapLock.Unlock()
 				return nil
 			}
 			return nil
@@ -273,13 +578,44 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 	if err := e.Wait(); err != nil {
 		d.logger.Debug("[snapshots] webseed discover", "err", err)
 	}
+	return webSeedMap
+}
+
+func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) (ts *torrent.TorrentSpec, ok bool, err error) {
+	urls, ok := d.ByFileName(name)
+	if !ok {
+		return nil, false, nil
+	}
+	for _, urlStr := range urls {
+		urlStr += ".torrent"
+		parsedUrl, err := url.Parse(urlStr)
+		if err != nil {
+			d.logger.Log(d.verbosity, "[snapshots] callTorrentHttpProvider parse url", "err", err)
+			continue // it's ok if some HTTP provider failed - try next one
+		}
+		res, err := d.callTorrentHttpProvider(ctx, parsedUrl, name)
+		if err != nil {
+			d.logger.Log(d.verbosity, "[snapshots] .torrent from webseed rejected", "name", name, "err", err)
+			continue // it's ok if some HTTP provider failed - try next one
+		}
+		ts, _, err = d.torrentFiles.Create(name, res)
+		return ts, ts != nil, err
+	}
+
+	return nil, false, nil
 }
 
 func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL, fileName string) ([]byte, error) {
-	request, err := http.NewRequest(http.MethodGet, url.String(), nil)
+	if !strings.HasSuffix(url.Path, ".torrent") {
+		return nil, fmt.Errorf("seems not-torrent url passed: %s", url.String())
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url.String(), nil)
 	if err != nil {
 		return nil, err
 	}
+
+	insertCloudflareHeaders(request)
+
 	request = request.WithContext(ctx)
 	resp, err := http.DefaultClient.Do(request)
 	if err != nil {
@@ -288,7 +624,7 @@ func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL, fi
 	defer resp.Body.Close()
 	//protect against too small and too big data
 	if resp.ContentLength == 0 || resp.ContentLength > int64(128*datasize.MB) {
-		return nil, nil
+		return nil, fmt.Errorf(".torrent downloading size attack prevention: resp.ContentLength=%d, url=%s", resp.ContentLength, url.EscapedPath())
 	}
 	res, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -314,17 +650,12 @@ func validateTorrentBytes(fileName string, b []byte, whitelist snapcfg.Preverifi
 }
 
 func nameWhitelisted(fileName string, whitelist snapcfg.Preverified) bool {
-	fileName = strings.TrimSuffix(fileName, ".torrent")
-	for i := 0; i < len(whitelist); i++ {
-		if whitelist[i].Name == fileName {
-			return true
-		}
-	}
-	return false
+	return whitelist.Contains(strings.TrimSuffix(fileName, ".torrent"))
 }
 
 func nameAndHashWhitelisted(fileName, fileHash string, whitelist snapcfg.Preverified) bool {
 	fileName = strings.TrimSuffix(fileName, ".torrent")
+
 	for i := 0; i < len(whitelist); i++ {
 		if whitelist[i].Name == fileName && whitelist[i].Hash == fileHash {
 			return true

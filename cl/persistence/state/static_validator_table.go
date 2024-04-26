@@ -203,6 +203,51 @@ func (s *StaticValidator) ToValidator(v solid.Validator, slot uint64) {
 	v.SetWithdrawableEpoch(s.WithdrawableEpoch(slot))
 }
 
+func (s *StaticValidator) Reset(slot uint64) {
+	for i := 0; i < len(s.publicKeys); i++ {
+		if s.publicKeys[i].Slot > slot {
+			s.publicKeys = s.publicKeys[:i]
+			break
+		}
+	}
+	for i := 0; i < len(s.withdrawalCredentials); i++ {
+		if s.withdrawalCredentials[i].Slot > slot {
+			s.withdrawalCredentials = s.withdrawalCredentials[:i]
+			break
+		}
+	}
+	for i := 0; i < len(s.slashed); i++ {
+		if s.slashed[i].Slot > slot {
+			s.slashed = s.slashed[:i]
+			break
+		}
+	}
+	for i := 0; i < len(s.activationEligibility); i++ {
+		if s.activationEligibility[i].Slot > slot {
+			s.activationEligibility = s.activationEligibility[:i]
+			break
+		}
+	}
+	for i := 0; i < len(s.activationEpoch); i++ {
+		if s.activationEpoch[i].Slot > slot {
+			s.activationEpoch = s.activationEpoch[:i]
+			break
+		}
+	}
+	for i := 0; i < len(s.exitEpoch); i++ {
+		if s.exitEpoch[i].Slot > slot {
+			s.exitEpoch = s.exitEpoch[:i]
+			break
+		}
+	}
+	for i := 0; i < len(s.withdrawableEpoch); i++ {
+		if s.withdrawableEpoch[i].Slot > slot {
+			s.withdrawableEpoch = s.withdrawableEpoch[:i]
+			break
+		}
+	}
+}
+
 type staticValidatorField[V any] struct {
 	Slot  uint64
 	Field V
@@ -230,7 +275,7 @@ func (s *StaticValidatorTable) AddValidator(v solid.Validator, validatorIndex, s
 		return nil
 	}
 	s.validatorTable = append(s.validatorTable, NewStaticValidatorFromValidator(v, slot))
-	if validatorIndex >= uint64(len(s.validatorTable)) {
+	if validatorIndex != uint64(len(s.validatorTable))-1 {
 		return fmt.Errorf("validator index mismatch")
 	}
 	return nil
@@ -376,10 +421,19 @@ func (s *StaticValidatorTable) GetStaticValidator(validatorIndex uint64) *Static
 func (s *StaticValidatorTable) SetSlot(slot uint64) {
 	s.sync.Lock()
 	defer s.sync.Unlock()
-	if slot <= s.slot && s.slot != 0 {
-		return
-	}
+	s.resetTable(slot)
 	s.slot = slot
+}
+
+func (s *StaticValidatorTable) resetTable(slot uint64) {
+	for i, v := range s.validatorTable {
+		v.Reset(slot)
+		// if we remove all public keys, we can remove all subsequent fields
+		if len(v.publicKeys) == 0 {
+			s.validatorTable = s.validatorTable[:i]
+			break
+		}
+	}
 }
 
 func (s *StaticValidatorTable) Slot() uint64 {

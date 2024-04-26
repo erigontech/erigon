@@ -1,20 +1,20 @@
 package beacon
 
 import (
+	"context"
 	"net"
 	"net/http"
-	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/cors"
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/beacon/handler"
-	"github.com/ledgerwatch/erigon/cl/beacon/validatorapi"
 	"github.com/ledgerwatch/log/v3"
 )
 
 type LayeredBeaconHandler struct {
-	ValidatorApi *validatorapi.ValidatorApiHandler
-	ArchiveApi   *handler.ApiHandler
+	ArchiveApi *handler.ApiHandler
 }
 
 func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router_configuration.RouterConfiguration) error {
@@ -24,31 +24,31 @@ func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router
 	}
 	defer listener.Close()
 	mux := chi.NewRouter()
-	// enforce json content type
-	mux.Use(func(h http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			contentType := r.Header.Get("Content-Type")
-			if len(contentType) > 0 && !strings.EqualFold(contentType, "application/json") {
-				http.Error(w, "Content-Type header must be application/json", http.StatusUnsupportedMediaType)
-				return
-			}
-			h.ServeHTTP(w, r)
-		})
-	})
-	// layered handling - 404 on first handler falls back to the second
-	mux.HandleFunc("/eth/*", func(w http.ResponseWriter, r *http.Request) {
-		nfw := &notFoundNoWriter{rw: w}
-		beaconHandler.ValidatorApi.ServeHTTP(nfw, r)
-		if nfw.code == 404 || nfw.code == 0 {
+
+	mux.Use(cors.Handler(
+		cors.Options{
+			AllowedOrigins:   routerCfg.AllowedOrigins,
+			AllowedMethods:   routerCfg.AllowedMethods,
+			AllowCredentials: routerCfg.AllowCredentials,
+			MaxAge:           4,
+		}))
+
+	mux.HandleFunc("/*", func(w http.ResponseWriter, r *http.Request) {
+		nfw := &notFoundNoWriter{ResponseWriter: w, r: r}
+		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, chi.NewRouteContext()))
+		if isNotFound(nfw.code) || nfw.code == 0 {
+			start := time.Now()
 			beaconHandler.ArchiveApi.ServeHTTP(w, r)
+			log.Debug("[Beacon API] Request", "uri", r.URL.String(), "path", r.URL.Path, "time", time.Since(start))
+		} else {
+			log.Warn("[Beacon API] Request to unavaiable endpoint, check --beacon.api flag", "uri", r.URL.String(), "path", r.URL.Path)
 		}
 	})
-	mux.HandleFunc("/validator/*", func(w http.ResponseWriter, r *http.Request) {
-		http.StripPrefix("/validator", beaconHandler.ValidatorApi).ServeHTTP(w, r)
+	mux.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		log.Warn("[Beacon API] Not found", "method", r.Method, "path", r.URL.Path)
+		http.Error(w, "Not found", http.StatusNotFound)
 	})
-	mux.HandleFunc("/archive/*", func(w http.ResponseWriter, r *http.Request) {
-		http.StripPrefix("/archive", beaconHandler.ArchiveApi).ServeHTTP(w, r)
-	})
+
 	server := &http.Server{
 		Handler:      mux,
 		ReadTimeout:  routerCfg.ReadTimeTimeout,
@@ -63,16 +63,6 @@ func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router
 		log.Warn("[Beacon API] failed to start serving", "addr", routerCfg.Address, "err", err)
 		return err
 	}
+	log.Info("[Beacon API] Listening", "addr", routerCfg.Address)
 	return nil
-}
-
-func newBeaconMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		contentType := r.Header.Get("Content-Type")
-		if contentType != "application/json" && contentType != "" {
-			http.Error(w, "Content-Type header must be application/json", http.StatusUnsupportedMediaType)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }

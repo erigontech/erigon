@@ -102,6 +102,7 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 		block.TransactionCount = convertDataToIntP(blk, "transactionCount")
 		block.TransactionsRoot = *convertDataToStringP(blk, "transactionsRoot")
 		block.TotalDifficulty = *convertDataToStringP(blk, "totalDifficulty")
+		block.BaseFeePerGas = convertDataToStringP(blk, "baseFeePerGas")
 		block.Transactions = []*model.Transaction{}
 
 		block.LogsBloom = "0x" + *convertDataToStringP(blk, "logsBloom")
@@ -161,7 +162,6 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 
 // Blocks is the resolver for the blocks field.
 func (r *queryResolver) Blocks(ctx context.Context, from *uint64, to *uint64) ([]*model.Block, error) {
-
 	var blocks []*model.Block
 
 	const maxBlocks = 25

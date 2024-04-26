@@ -66,12 +66,15 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 	}
 
 	// First check if we're already building a block with the requested parameters
-	if reflect.DeepEqual(e.lastParameters, &param) {
-		e.logger.Info("[ForkChoiceUpdated] duplicate build request")
-		return &execution.AssembleBlockResponse{
-			Id:   e.nextPayloadId,
-			Busy: false,
-		}, nil
+	if e.lastParameters != nil {
+		param.PayloadId = e.lastParameters.PayloadId
+		if reflect.DeepEqual(e.lastParameters, &param) {
+			e.logger.Info("[ForkChoiceUpdated] duplicate build request")
+			return &execution.AssembleBlockResponse{
+				Id:   e.lastParameters.PayloadId,
+				Busy: false,
+			}, nil
+		}
 	}
 
 	// Initiate payload building

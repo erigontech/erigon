@@ -29,12 +29,13 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/discover/v4wire"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/netutil"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // Errors
@@ -96,6 +97,8 @@ type UDPv4 struct {
 	errors              map[string]uint
 	unsolicitedNodes    *lru.Cache[enode.ID, *enode.Node]
 	privateKeyGenerator func() (*ecdsa.PrivateKey, error)
+
+	trace bool
 }
 
 // replyMatcher represents a pending reply.
@@ -610,74 +613,30 @@ func (t *UDPv4) loop() {
 			}()
 
 		case r := <-t.gotreply:
-
-			type matchCandidate struct {
-				el   *list.Element
-				errc chan error
-			}
-
-			var matchCandidates []matchCandidate
-
-			mutex.Lock()
-			for el := plist.Front(); el != nil; el = el.Next() {
-				p := el.Value.(*replyMatcher)
-				if p.from == r.from && p.ptype == r.data.Kind() && p.ip.Equal(r.ip) {
-					candidate := matchCandidate{el, p.errc}
-					p.errc = make(chan error, 1)
-					matchCandidates = append(matchCandidates, candidate)
-				}
-			}
-			mutex.Unlock()
-
-			if len(matchCandidates) == 0 {
-				// if there are no matched candidates try again matching against
-				// ip & port to handle node key changes
+			func() {
 				mutex.Lock()
+				defer mutex.Unlock()
+
+				var matched bool // whether any replyMatcher considered the reply acceptable.
 				for el := plist.Front(); el != nil; el = el.Next() {
 					p := el.Value.(*replyMatcher)
-					if p.ptype == r.data.Kind() && p.ip.Equal(r.ip) && p.port == r.port {
-						candidate := matchCandidate{el, p.errc}
-						p.errc = make(chan error, 1)
-						matchCandidates = append(matchCandidates, candidate)
-					}
-				}
-				mutex.Unlock()
-
-				if len(matchCandidates) == 0 {
-					r.matched <- false
-				}
-			}
-
-			go func(r reply) {
-				var matched bool // whether any replyMatcher considered the reply acceptable.
-				for _, candidate := range matchCandidates {
-					p := candidate.el.Value.(*replyMatcher)
-					ok, requestDone := p.callback(r.data)
-					matched = matched || ok
-					p.reply = r.data
-
-					// Remove the matcher if callback indicates that all replies have been received.
-					if requestDone {
-						mutex.Lock()
-						plist.Remove(candidate.el)
-						mutex.Unlock()
-						candidate.errc <- nil
-						listUpdate <- candidate.el
-					} else {
-						select {
-						case err := <-p.errc:
-							candidate.errc <- err
-						default:
-							p.errc = candidate.errc
+					if (p.ptype == r.data.Kind()) && p.ip.Equal(r.ip) && (p.port == r.port) {
+						ok, requestDone := p.callback(r.data)
+						matched = matched || ok
+						p.reply = r.data
+						// Remove the matcher if callback indicates that all replies have been received.
+						if requestDone {
+							p.errc <- nil
+							plist.Remove(el)
+							listUpdate <- el
 						}
+						// Reset the continuous timeout counter (time drift detection)
+						contTimeouts = 0
 					}
 				}
-
 				r.matched <- matched
-			}(r)
+			}()
 
-			// Reset the continuous timeout counter (time drift detection)
-			contTimeouts = 0
 		case key := <-t.gotkey:
 			go func() {
 				if key, err := v4wire.DecodePubkey(crypto.S256(), key); err == nil {
@@ -720,7 +679,9 @@ func (t *UDPv4) send(toaddr *net.UDPAddr, toid enode.ID, req v4wire.Packet) ([]b
 
 func (t *UDPv4) write(toaddr *net.UDPAddr, toid enode.ID, what string, packet []byte) error {
 	_, err := t.conn.WriteToUDP(packet, toaddr)
-	t.log.Trace(">> "+what, "id", toid, "addr", toaddr, "err", err)
+	if t.trace {
+		t.log.Trace(">> "+what, "id", toid, "addr", toaddr, "err", err)
+	}
 	return err
 }
 
@@ -794,7 +755,9 @@ func (t *UDPv4) handlePacket(from *net.UDPAddr, buf []byte) error {
 	if packet.preverify != nil {
 		err = packet.preverify(packet, from, fromID, fromKey)
 	}
-	t.log.Trace("<< "+packet.Name(), "id", fromID, "addr", from, "err", err)
+	if t.trace {
+		t.log.Trace("<< "+packet.Name(), "id", fromID, "addr", from, "err", err)
+	}
 	if err == nil && packet.handle != nil {
 		packet.handle(packet, from, fromID, hash)
 	}

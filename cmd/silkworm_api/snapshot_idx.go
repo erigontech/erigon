@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/background"
@@ -37,7 +36,7 @@ func main() {
 			},
 		},
 		Action: func(cCtx *cli.Context) error {
-			return buildIndex(cCtx, cCtx.String("datadir"), cCtx.StringSlice("snapshot_path"))
+			return buildIndex(cCtx, cCtx.String("datadir"), cCtx.StringSlice("snapshot_path"), 0)
 		},
 	}
 
@@ -55,7 +54,7 @@ func FindIf(segments []snaptype.FileInfo, predicate func(snaptype.FileInfo) bool
 	return snaptype.FileInfo{}, false // Return zero value and false if not found
 }
 
-func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string) error {
+func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string, minBlock uint64) error {
 	logger, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
@@ -69,13 +68,14 @@ func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string) err
 	g.SetLimit(workers)
 
 	dirs := datadir.New(dataDir)
+	salt := freezeblocks.GetIndicesSalt(dirs.Snap)
 
 	chainDB := mdbx.NewMDBX(logger).Path(dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
 	chainConfig := fromdb.ChainConfig(chainDB)
 
-	segments, _, err := freezeblocks.Segments(dirs.Snap)
+	segments, _, err := freezeblocks.Segments(dirs.Snap, minBlock)
 	if err != nil {
 		return err
 	}
@@ -91,28 +91,27 @@ func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string) err
 			return fmt.Errorf("segment %s not found", snapshotPath)
 		}
 
-		switch segment.T {
-		case snaptype.Headers:
+		switch segment.Type.Enum() {
+		case snaptype.Enums.Headers:
 			g.Go(func() error {
 				jobProgress := &background.Progress{}
 				ps.Add(jobProgress)
 				defer ps.Delete(jobProgress)
-				return freezeblocks.HeadersIdx(ctx, chainConfig, segment.Path, segment.From, dirs.Tmp, jobProgress, logLevel, logger)
+				return freezeblocks.HeadersIdx(ctx, segment, salt, dirs.Tmp, jobProgress, logLevel, logger)
 			})
-		case snaptype.Bodies:
+		case snaptype.Enums.Bodies:
 			g.Go(func() error {
 				jobProgress := &background.Progress{}
 				ps.Add(jobProgress)
 				defer ps.Delete(jobProgress)
-				return freezeblocks.BodiesIdx(ctx, segment.Path, segment.From, dirs.Tmp, jobProgress, logLevel, logger)
+				return freezeblocks.BodiesIdx(ctx, segment, salt, dirs.Tmp, jobProgress, logLevel, logger)
 			})
-		case snaptype.Transactions:
+		case snaptype.Enums.Transactions:
 			g.Go(func() error {
 				jobProgress := &background.Progress{}
 				ps.Add(jobProgress)
 				defer ps.Delete(jobProgress)
-				dir, _ := filepath.Split(segment.Path)
-				return freezeblocks.TransactionsIdx(ctx, chainConfig, segment.From, segment.To, dir, dirs.Tmp, jobProgress, logLevel, logger)
+				return freezeblocks.TransactionsIdx(ctx, chainConfig, segment, salt, dirs.Tmp, jobProgress, logLevel, logger)
 			})
 		}
 	}

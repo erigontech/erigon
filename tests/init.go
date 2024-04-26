@@ -221,7 +221,23 @@ var Forks = map[string]*chain.Config{
 		GrayGlacierBlock:        big.NewInt(0),
 		TerminalTotalDifficulty: big.NewInt(0),
 	},
-	"ArrowGlacierToMergeAtDiffC0000": {
+	"Paris": {
+		ChainID:                 big.NewInt(1),
+		HomesteadBlock:          big.NewInt(0),
+		TangerineWhistleBlock:   big.NewInt(0),
+		SpuriousDragonBlock:     big.NewInt(0),
+		ByzantiumBlock:          big.NewInt(0),
+		ConstantinopleBlock:     big.NewInt(0),
+		PetersburgBlock:         big.NewInt(0),
+		IstanbulBlock:           big.NewInt(0),
+		MuirGlacierBlock:        big.NewInt(0),
+		BerlinBlock:             big.NewInt(0),
+		LondonBlock:             big.NewInt(0),
+		ArrowGlacierBlock:       big.NewInt(0),
+		GrayGlacierBlock:        big.NewInt(0),
+		TerminalTotalDifficulty: big.NewInt(0),
+	},
+	"ArrowGlacierToParisAtDiffC0000": {
 		ChainID:                 big.NewInt(1),
 		HomesteadBlock:          big.NewInt(0),
 		TangerineWhistleBlock:   big.NewInt(0),
@@ -254,7 +270,7 @@ var Forks = map[string]*chain.Config{
 		TerminalTotalDifficultyPassed: true,
 		ShanghaiTime:                  big.NewInt(0),
 	},
-	"MergeToShanghaiAtTime15k": {
+	"ParisToShanghaiAtTime15k": {
 		ChainID:                       big.NewInt(1),
 		HomesteadBlock:                big.NewInt(0),
 		TangerineWhistleBlock:         big.NewInt(0),

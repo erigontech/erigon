@@ -1,5 +1,5 @@
 # syntax = docker/dockerfile:1.2
-FROM docker.io/library/golang:1.20-alpine3.17 AS builder
+FROM docker.io/library/golang:1.21-alpine3.17 AS builder
 
 RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++
 
@@ -18,7 +18,7 @@ RUN --mount=type=cache,target=/root/.cache \
     make BUILD_TAGS=nosqlite,noboltdb,nosilkworm all
 
 
-FROM docker.io/library/golang:1.20-alpine3.17 AS tools-builder
+FROM docker.io/library/golang:1.21-alpine3.17 AS tools-builder
 RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++
 WORKDIR /app
 
@@ -79,7 +79,6 @@ COPY --from=builder /app/build/bin/state /usr/local/bin/state
 COPY --from=builder /app/build/bin/txpool /usr/local/bin/txpool
 COPY --from=builder /app/build/bin/verkle /usr/local/bin/verkle
 COPY --from=builder /app/build/bin/caplin /usr/local/bin/caplin
-COPY --from=builder /app/build/bin/caplin-regression /usr/local/bin/caplin-regression
 
 
 EXPOSE 8545 \

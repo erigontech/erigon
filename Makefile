@@ -40,14 +40,16 @@ ifneq ($(shell "$(CURDIR)/turbo/silkworm/silkworm_compat_check.sh"),)
 	BUILD_TAGS := $(BUILD_TAGS),nosilkworm
 endif
 
+GOPRIVATE = github.com/erigontech/silkworm-go
+
 PACKAGE = github.com/ledgerwatch/erigon
 
 GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false
 GO_FLAGS += -ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/params.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/params.GitTag=${GIT_TAG}"
 
-GOBUILD = CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" $(GO) build $(GO_FLAGS)
-GO_DBG_BUILD = CGO_CFLAGS="$(CGO_CFLAGS) -DMDBX_DEBUG=1" CGO_LDFLAGS="$(CGO_LDFLAGS)" $(GO) build -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
-GOTEST = CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GODEBUG=cgocheck=0 $(GO) test $(GO_FLAGS) ./... -p 2
+GOBUILD = CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" $(GO) build $(GO_FLAGS)
+GO_DBG_BUILD = CGO_CFLAGS="$(CGO_CFLAGS) -DMDBX_DEBUG=1" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" $(GO) build -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
+GOTEST = CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" GODEBUG=cgocheck=0 $(GO) test $(GO_FLAGS) ./... -p 2
 
 default: all
 
@@ -132,10 +134,8 @@ COMMANDS += verkle
 COMMANDS += evm
 COMMANDS += sentinel
 COMMANDS += caplin
-COMMANDS += caplin-regression
-COMMANDS += tooling
-
-
+COMMANDS += snapshots
+COMMANDS += diag
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd
@@ -162,7 +162,7 @@ test-erigon-ext:
 
 ## test:                              run unit tests with a 100s timeout
 test: test-erigon-lib
-	$(GOTEST) --timeout 10m
+	$(GOTEST) --timeout 10m -coverprofile=coverage.out
 
 test3: test-erigon-lib
 	$(GOTEST) --timeout 10m -tags $(BUILD_TAGS),e3
@@ -201,6 +201,7 @@ clean:
 devtools:
 	# Notice! If you adding new binary - add it also to cmd/hack/binary-deps/main.go file
 	$(GOBUILD) -o $(GOBIN)/gencodec github.com/fjl/gencodec
+	$(GOBUILD) -o $(GOBIN)/mockgen go.uber.org/mock/mockgen
 	$(GOBUILD) -o $(GOBIN)/abigen ./cmd/abigen
 	$(GOBUILD) -o $(GOBIN)/codecgen github.com/ugorji/go/codec/codecgen
 	PATH=$(GOBIN):$(PATH) go generate ./common
@@ -234,8 +235,18 @@ git-submodules:
 	@git submodule sync --quiet --recursive || true
 	@git submodule update --quiet --init --recursive --force || true
 
+## install:                            copies binaries and libraries to DIST
+DIST ?= $(CURDIR)/build/dist
+.PHONY: install
+install:
+	mkdir -p "$(DIST)"
+	cp -f "$$($(CURDIR)/turbo/silkworm/silkworm_lib_path.sh)" "$(DIST)"
+	cp -f "$(GOBIN)/"* "$(DIST)"
+	@echo "Copied files to $(DIST):"
+	@ls -al "$(DIST)"
+
 PACKAGE_NAME          := github.com/ledgerwatch/erigon
-GOLANG_CROSS_VERSION  ?= v1.20.7
+GOLANG_CROSS_VERSION  ?= v1.21.6
 
 .PHONY: release-dry-run
 release-dry-run: git-submodules
@@ -302,7 +313,7 @@ user_macos:
 ## coverage:                          run code coverage report and output total coverage %
 .PHONY: coverage
 coverage:
-	@go test -coverprofile=coverage.out ./... > /dev/null 2>&1 && go tool cover -func coverage.out | grep total | awk '{print substr($$3, 1, length($$3)-1)}'
+	@go test -coverprofile=coverage-total.out ./... > /dev/null 2>&1 && go tool cover -func coverage-total.out | grep total | awk '{print substr($$3, 1, length($$3)-1)}'
 
 ## hive:                              run hive test suite locally using docker e.g. OUTPUT_DIR=~/results/hive SIM=ethereum/engine make hive
 .PHONY: hive

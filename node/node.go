@@ -27,8 +27,9 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"golang.org/x/sync/semaphore"
+
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
@@ -347,6 +348,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 			if config.MdbxGrowthStep > 0 {
 				opts = opts.GrowthStep(config.MdbxGrowthStep)
 			}
+			opts = opts.DirtySpace(uint64(128 * datasize.MB))
 		case kv.ConsensusDB:
 			if config.MdbxPageSize.Bytes() > 0 {
 				opts = opts.PageSize(config.MdbxPageSize.Bytes())

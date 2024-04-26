@@ -32,7 +32,7 @@ jobs:
           fetch-depth: 0 # fetch git tags for "git describe"
       - uses: actions/setup-go@v4
         with:
-          go-version: '1.20'
+          go-version: '1.21'
 
       - name: Install deps
         if: matrix.os == 'ubuntu-20.04'
@@ -46,9 +46,9 @@ jobs:
 
       - name: Lint
         if: matrix.os == 'ubuntu-20.04'
-        uses: golangci/golangci-lint-action@v3
+        uses: golangci/golangci-lint-action@v4
         with:
-          version: v1.54
+          version: v1.57.2
           skip-build-cache: true
 
       - name: Lint source code licenses

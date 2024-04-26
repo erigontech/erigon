@@ -81,7 +81,7 @@ func CheckChangeSets(ctx context.Context, genesis *types.Genesis, blockNum uint6
 	if err != nil {
 		return err
 	}
-	allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadirCli, "snapshots"), logger)
+	allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadirCli, "snapshots"), 0, logger)
 	defer allSnapshots.Close()
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
@@ -287,7 +287,7 @@ func initConsensusEngine(ctx context.Context, cc *chain2.Config, snapshots *free
 	} else if cc.Aura != nil {
 		consensusConfig = &config.Aura
 	} else if cc.Bor != nil {
-		consensusConfig = &config.Bor
+		consensusConfig = cc.Bor
 	} else {
 		consensusConfig = &config.Ethash
 	}

@@ -297,7 +297,7 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) error {
 	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
 		//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 		// Genesis block
-		_, ibs, err = core.GenesisToBlock(rw.genesis, "")
+		_, ibs, err = core.GenesisToBlock(rw.genesis, "", logger)
 		if err != nil {
 			return err
 		}

@@ -46,7 +46,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHa
 	}
 	defer tx.Rollback()
 
-	chainConfig, err := api.chainConfig(tx)
+	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +60,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHa
 	if err != nil {
 		return nil, err
 	}
-	block, err := api.blockWithSenders(tx, hash, blockNumber)
+	block, err := api.blockWithSenders(ctx, tx, hash, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -221,7 +221,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 	gasCap = hi
 
-	chainConfig, err := api.chainConfig(dbtx)
+	chainConfig, err := api.chainConfig(ctx, dbtx)
 	if err != nil {
 		return 0, err
 	}
@@ -235,7 +235,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	// try and get the block from the lru cache first then try DB before failing
 	block := api.tryBlockFromLru(latestCanHash)
 	if block == nil {
-		block, err = api.blockWithSenders(dbtx, latestCanHash, latestCanBlockNumber)
+		block, err = api.blockWithSenders(ctx, dbtx, latestCanHash, latestCanBlockNumber)
 		if err != nil {
 			return 0, err
 		}
@@ -355,7 +355,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 		if latestBlock-blockNr > uint64(api.MaxGetProofRewindBlockCount) {
 			return nil, fmt.Errorf("requested block is too old, block must be within %d blocks of the head block number (currently %d)", uint64(api.MaxGetProofRewindBlockCount), latestBlock)
 		}
-		batch := membatchwithdb.NewMemoryBatch(tx, api.dirs.Tmp)
+		batch := membatchwithdb.NewMemoryBatch(tx, api.dirs.Tmp, api.logger)
 		defer batch.Rollback()
 
 		unwindState := &stagedsync.UnwindState{UnwindPoint: blockNr}
@@ -438,7 +438,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	}
 	defer tx.Rollback()
 
-	chainConfig, err := api.chainConfig(tx)
+	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -448,7 +448,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	if err != nil {
 		return nil, err
 	}
-	block, err := api.blockWithSenders(tx, hash, blockNumber)
+	block, err := api.blockWithSenders(ctx, tx, hash, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -489,7 +489,14 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 			}
 			if reply.Found {
 				nonce = reply.Nonce + 1
+			} else {
+				a, err := stateReader.ReadAccountData(*args.From)
+				if err != nil {
+					return nil, err
+				}
+				nonce = a.Nonce + 1
 			}
+
 			args.Nonce = (*hexutil.Uint64)(&nonce)
 		}
 		to = crypto.CreateAddress(*args.From, uint64(*args.Nonce))

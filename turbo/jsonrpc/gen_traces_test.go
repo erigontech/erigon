@@ -49,6 +49,7 @@ func TestGeneratedDebugApi(t *testing.T) {
 	expectedJSON := `
 	[
 		{
+		  "txHash": "0xb42edc1d46932ef34be0ba49402dc94e3d2319c066f02945f6828cd344fcfa7b",
 		  "result": {
 			"calls": [
 			  {

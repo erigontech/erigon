@@ -18,7 +18,7 @@ func TestAttestationData(t *testing.T) {
 
 	// Ensure that the data was set correctly
 	assert.Equal(t, slot, attData.Slot())
-	assert.Equal(t, validatorIndex, attData.ValidatorIndex())
+	assert.Equal(t, validatorIndex, attData.CommitteeIndex())
 	assert.Equal(t, beaconBlockRoot, attData.BeaconBlockRoot())
 	assert.Equal(t, source, attData.Source())
 	assert.Equal(t, target, attData.Target())

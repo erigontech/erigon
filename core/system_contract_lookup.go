@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -23,7 +24,8 @@ func init() {
 		allocToCodeRecords(genesisBlock.Alloc, byChain, 0)
 		// Process upgrades
 		chainConfig := params.ChainConfigByChainName(chainName)
-		for blockNumStr, genesisAlloc := range chainConfig.Bor.BlockAlloc {
+		borConfig := chainConfig.Bor.(*borcfg.BorConfig)
+		for blockNumStr, genesisAlloc := range borConfig.BlockAlloc {
 			blockNum, err := strconv.ParseUint(blockNumStr, 10, 64)
 			if err != nil {
 				panic(fmt.Errorf("failed to parse block number in BlockAlloc: %s", err.Error()))

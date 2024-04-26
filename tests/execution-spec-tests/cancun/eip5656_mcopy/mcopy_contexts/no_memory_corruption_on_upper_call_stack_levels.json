@@ -1,7 +1,8 @@
 {
-    "000-fork=Cancun-opcode=CALL": {
+    "tests/cancun/eip5656_mcopy/test_mcopy_contexts.py::test_no_memory_corruption_on_upper_call_stack_levels[fork_Cancun-blockchain_test-opcode_CALL]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5656.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },
@@ -56,6 +57,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x61f8162bc764a89d4de3a8268d0cc308f0d65c9a5d57c27e66b0de462353ec1d"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -175,9 +177,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "001-fork=Cancun-opcode=DELEGATECALL": {
+    "tests/cancun/eip5656_mcopy/test_mcopy_contexts.py::test_no_memory_corruption_on_upper_call_stack_levels[fork_Cancun-blockchain_test-opcode_DELEGATECALL]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5656.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },
@@ -232,6 +235,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x8a23179805c1b77f2019485854776f624d7a8cce41883c26af5b99945484f3e1"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -350,9 +354,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "002-fork=Cancun-opcode=STATICCALL": {
+    "tests/cancun/eip5656_mcopy/test_mcopy_contexts.py::test_no_memory_corruption_on_upper_call_stack_levels[fork_Cancun-blockchain_test-opcode_STATICCALL]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5656.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },
@@ -407,6 +412,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xd3c05cdc323092b9345097b0268565ec9959a46341b347523c7cf598b076e203"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -524,9 +530,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "003-fork=Cancun-opcode=CALLCODE": {
+    "tests/cancun/eip5656_mcopy/test_mcopy_contexts.py::test_no_memory_corruption_on_upper_call_stack_levels[fork_Cancun-blockchain_test-opcode_CALLCODE]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5656.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },
@@ -581,6 +588,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x01ec6a8ac26ae3b90a667c64e86731f324e552e2273f38eed2b6dd252b582042"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -699,9 +707,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "004-fork=Cancun-opcode=CREATE": {
+    "tests/cancun/eip5656_mcopy/test_mcopy_contexts.py::test_no_memory_corruption_on_upper_call_stack_levels[fork_Cancun-blockchain_test-opcode_CREATE]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5656.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },
@@ -756,6 +765,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x1e44682d716b5a6066bce6cd90f1e7bdc84bea239ae078c204d7471b8e2b8fa7"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -881,9 +891,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "005-fork=Cancun-opcode=CREATE2": {
+    "tests/cancun/eip5656_mcopy/test_mcopy_contexts.py::test_no_memory_corruption_on_upper_call_stack_levels[fork_Cancun-blockchain_test-opcode_CREATE2]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5656.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },
@@ -938,6 +949,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xfaf5014f8f97979f71dfa4c1aa767b5d5846d7a4e748dcb29429d14347d03f90"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",

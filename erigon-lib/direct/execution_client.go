@@ -45,6 +45,10 @@ func (s *ExecutionClientDirect) GetBodiesByRange(ctx context.Context, in *execut
 	return s.server.GetBodiesByRange(ctx, in)
 }
 
+func (s *ExecutionClientDirect) HasBlock(ctx context.Context, in *execution.GetSegmentRequest, opts ...grpc.CallOption) (*execution.HasBlockResponse, error) {
+	return s.server.HasBlock(ctx, in)
+}
+
 func (s *ExecutionClientDirect) GetAssembledBlock(ctx context.Context, in *execution.GetAssembledBlockRequest, opts ...grpc.CallOption) (*execution.GetAssembledBlockResponse, error) {
 	return s.server.GetAssembledBlock(ctx, in)
 }
