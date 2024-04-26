@@ -51,9 +51,6 @@ func TestAddPeer(t *testing.T) {
 	require.Equal(t, 1, peerStats.GetPeersCount())
 
 	require.Equal(t, testPeerStats, peerStats.GetPeerStatistics("test1"))
-
-	peerStats.Reset()
-	require.Equal(t, 0, peerStats.GetPeersCount())
 }
 
 func TestUpdatePeer(t *testing.T) {

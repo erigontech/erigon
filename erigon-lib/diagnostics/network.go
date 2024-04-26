@@ -129,12 +129,6 @@ func (p *PeerStats) GetLastUpdate(peerID string) time.Time {
 	return time.Time{}
 }
 
-func (p *PeerStats) Reset() {
-	p.peersInfo = sync.Map{}
-	p.recordsCount = 0
-	p.lastUpdateMap = make(map[string]time.Time)
-}
-
 func (p *PeerStats) RemovePeer(peerID string) {
 	p.peersInfo.Delete(peerID)
 	p.recordsCount--
@@ -195,7 +189,5 @@ func (d *DiagnosticClient) runCollectPeersStatistics(rootCtx context.Context) {
 }
 
 func (d *DiagnosticClient) Peers() map[string]*PeerStatistics {
-	peers := d.peersStats.GetPeers()
-	d.peersStats.Reset()
-	return peers
+	return d.peersStats.GetPeers()
 }
