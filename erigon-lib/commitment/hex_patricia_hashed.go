@@ -1295,8 +1295,8 @@ func (hph *HexPatriciaHashed) collectBranchUpdate(
 	// this updates ensures that if commitment is present, each branch are also present in commitment state at that moment with costs of storage
 	//fmt.Printf("commitment branch encoder merge prefix [%x] [%x]->[%x]\n%update\n", prefix, stateValue, update, BranchData(update).String())
 
-	//cp, cu := common.Copy(prefix), common.Copy(update) // has to copy :(
-	if err = hph.ctx.PutBranch(prefix, update, prev, prevStep); err != nil {
+	cp, cu := common.Copy(prefix), common.Copy(update) // has to copy :(
+	if err = hph.ctx.PutBranch(cp, cu, prev, prevStep); err != nil {
 		return 0, err
 	}
 	mxCommitmentBranchUpdates.Inc()

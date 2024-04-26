@@ -8,7 +8,6 @@ import (
 	"hash"
 	"math/bits"
 	"strings"
-	"sync"
 
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
@@ -145,7 +144,6 @@ func (branchData BranchData) String() string {
 
 type BranchEncoder struct {
 	buf       *bytes.Buffer
-	pool      *sync.Pool
 	bitmapBuf [binary.MaxVarintLen64]byte
 	updates   *etl.Collector
 	tmpdir    string
@@ -155,11 +153,6 @@ func NewBranchEncoder(sz uint64, tmpdir string) *BranchEncoder {
 	be := &BranchEncoder{
 		buf:    bytes.NewBuffer(make([]byte, sz)),
 		tmpdir: tmpdir,
-	}
-	be.pool = &sync.Pool{
-		New: func() interface{} {
-			return make([]byte, 0, sz/4)
-		},
 	}
 	be.initCollector()
 	return be
@@ -215,37 +208,31 @@ func (be *BranchEncoder) CollectUpdate(
 
 // Encoded result should be copied before next call to EncodeBranch, underlying slice is reused
 func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCell func(nibble int, skip bool) (*Cell, error)) (BranchData, int, error) {
-	//be.buf.Reset()
-	buf := be.pool.Get().([]byte)[:0]
+	be.buf.Reset()
 
-	binary.BigEndian.PutUint16(be.bitmapBuf[:2], touchMap)
-	binary.BigEndian.PutUint16(be.bitmapBuf[2:4], afterMap)
-	buf = append(buf, be.bitmapBuf[:4]...)
-
-	//if err := binary.Write(be.buf, binary.BigEndian, touchMap); err != nil {
-	//	return nil, 0, err
-	//}
-	//if err := binary.Write(be.buf, binary.BigEndian, afterMap); err != nil {
-	//	return nil, 0, err
-	//}
+	if err := binary.Write(be.buf, binary.BigEndian, touchMap); err != nil {
+		return nil, 0, err
+	}
+	if err := binary.Write(be.buf, binary.BigEndian, afterMap); err != nil {
+		return nil, 0, err
+	}
 
 	putUvarAndVal := func(size uint64, val []byte) error {
 		n := binary.PutUvarint(be.bitmapBuf[:], size)
-		//wn, err := be.buf.Write(be.bitmapBuf[:n])
-		//if err != nil {
-		//	return err
-		//}
-		//if n != wn {
-		//	return fmt.Errorf("n != wn size")
-		//}
-		buf = append(append(buf, be.bitmapBuf[:n]...), val...)
-		//wn, err = be.buf.Write(val)
-		//if err != nil {
-		//	return err
-		//}
-		//if len(val) != wn {
-		//	return fmt.Errorf("wn != value size")
-		//}
+		wn, err := be.buf.Write(be.bitmapBuf[:n])
+		if err != nil {
+			return err
+		}
+		if n != wn {
+			return fmt.Errorf("n != wn size")
+		}
+		wn, err = be.buf.Write(val)
+		if err != nil {
+			return err
+		}
+		if len(val) != wn {
+			return fmt.Errorf("wn != value size")
+		}
 		return nil
 	}
 
@@ -279,11 +266,9 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 			if cell.hl > 0 {
 				fieldBits |= HashPart
 			}
-			//if err := be.buf.WriteByte(byte(fieldBits)); err != nil {
-			//	return nil, 0, err
-			//}
-			buf = append(buf, byte(fieldBits))
-
+			if err := be.buf.WriteByte(byte(fieldBits)); err != nil {
+				return nil, 0, err
+			}
 			if fieldBits&HashedKeyPart != 0 {
 				if err := putUvarAndVal(uint64(cell.extLen), cell.extension[:cell.extLen]); err != nil {
 					return nil, 0, err
@@ -308,10 +293,7 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 		bitset ^= bit
 	}
 	//fmt.Printf("EncodeBranch [%x] size: %d\n", be.buf.Bytes(), be.buf.Len())
-	res := common.Copy(buf)
-	be.pool.Put(buf)
-
-	return res, lastNibble, nil
+	return be.buf.Bytes(), lastNibble, nil
 }
 
 func RetrieveCellNoop(nibble int, skip bool) (*Cell, error) { return nil, nil }
