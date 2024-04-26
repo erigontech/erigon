@@ -40,7 +40,7 @@ func (t *voluntaryExitTestSuite) SetupTest() {
 	t.gomockCtrl = gomock.NewController(t.T())
 	t.emitters = beaconevents.NewEmitters()
 	t.operationsPool = &pool.OperationsPool{
-		VoluntaryExitPool: pool.NewOperationPool[uint64, *cltypes.SignedVoluntaryExit](10, "voluntaryExitsPool"),
+		VoluntaryExitsPool: pool.NewOperationPool[uint64, *cltypes.SignedVoluntaryExit](10, "voluntaryExitsPool"),
 	}
 	t.syncedData = mockSync.NewMockSyncedData(t.gomockCtrl)
 	t.ethClock = eth_clock.NewMockEthereumClock(t.gomockCtrl)
@@ -72,7 +72,7 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 		{
 			name: "validator already in pool",
 			mock: func() {
-				t.operationsPool.VoluntaryExitPool.Insert(mockValidatorIndex, mockMsg)
+				t.operationsPool.VoluntaryExitsPool.Insert(mockValidatorIndex, mockMsg)
 			},
 			msg:     mockMsg,
 			wantErr: true,
