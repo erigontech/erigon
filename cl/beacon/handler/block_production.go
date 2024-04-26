@@ -159,9 +159,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			fmt.Errorf("state not found %x", baseBlockRoot),
 		)
 	}
-	if err := transition.DefaultMachine.ProcessSlots(baseState, targetSlot); err != nil {
-		return nil, err
-	}
 	beaconBody, executionValue, err := a.produceBeaconBody(
 		ctx,
 		3,
@@ -172,6 +169,9 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		graffiti,
 	)
 	if err != nil {
+		return nil, err
+	}
+	if err := transition.DefaultMachine.ProcessSlots(baseState, targetSlot); err != nil {
 		return nil, err
 	}
 
