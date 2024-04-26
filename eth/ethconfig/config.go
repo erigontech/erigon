@@ -45,8 +45,6 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
-// AggregationStep number of transactions in smallest static file
-const HistoryV3AggregationStep = 3_125_000 // 100M / 32
 //const HistoryV3AggregationStep = 3_125_000 / 100 // use this to reduce step size for dev/debug
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
@@ -128,7 +126,7 @@ func init() {
 		if xdgDataDir := os.Getenv("XDG_DATA_HOME"); xdgDataDir != "" {
 			Defaults.Ethash.DatasetDir = filepath.Join(xdgDataDir, "erigon-ethash")
 		}
-		Defaults.Ethash.DatasetDir = filepath.Join(home, ".local/share/erigon-ethash")
+		Defaults.Ethash.DatasetDir = filepath.Join(home, ".local/share/erigon-ethash") //nolint:gocritic
 	}
 }
 
@@ -232,11 +230,12 @@ type Config struct {
 
 	// URL to connect to Heimdall node
 	HeimdallURL string
-
 	// No heimdall service
 	WithoutHeimdall bool
 	// Heimdall services active
 	WithHeimdallMilestones bool
+	PolygonSync            bool
+
 	// Ethstats service
 	Ethstats string
 	// Consensus layer
@@ -252,9 +251,18 @@ type Config struct {
 	ForcePartialCommit bool
 
 	// Embedded Silkworm support
-	SilkwormExecution bool
-	SilkwormRpcDaemon bool
-	SilkwormSentry    bool
+	SilkwormExecution            bool
+	SilkwormRpcDaemon            bool
+	SilkwormSentry               bool
+	SilkwormVerbosity            string
+	SilkwormNumContexts          uint32
+	SilkwormRpcLogEnabled        bool
+	SilkwormRpcLogDirPath        string
+	SilkwormRpcLogMaxFileSize    uint16
+	SilkwormRpcLogMaxFiles       uint16
+	SilkwormRpcLogDumpResponse   bool
+	SilkwormRpcNumWorkers        uint32
+	SilkwormRpcJsonCompatibility bool
 
 	DisableTxPoolGossip bool
 }

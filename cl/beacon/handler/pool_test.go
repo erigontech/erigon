@@ -245,3 +245,95 @@ func TestPoolAggregatesAndProofs(t *testing.T) {
 	require.Equal(t, msg[0].Message.Aggregate, out.Data[0])
 	require.Equal(t, msg[1].Message.Aggregate, out.Data[1])
 }
+
+func TestPoolSyncCommittees(t *testing.T) {
+	msgs := []*cltypes.SyncCommitteeMessage{
+		{
+			Slot:            1,
+			BeaconBlockRoot: libcommon.Hash{1, 2, 3, 4, 5, 6, 7, 8},
+			ValidatorIndex:  3,
+		},
+	}
+	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root())
+
+	sd.OnHeadState(s)
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+	// json
+	req, err := json.Marshal(msgs)
+	require.NoError(t, err)
+	// post attester slashing
+	resp, err := server.Client().Post(server.URL+"/eth/v1/beacon/pool/sync_committees", "application/json", bytes.NewBuffer(req))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	require.Equal(t, 200, resp.StatusCode)
+	// get attester slashings
+	resp, err = server.Client().Get(server.URL + "/eth/v1/validator/sync_committee_contribution?slot=1&subcommittee_index=0&beacon_block_root=0x0102030405060708000000000000000000000000000000000000000000000000")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	require.Equal(t, 200, resp.StatusCode)
+	out := struct {
+		Data *cltypes.Contribution `json:"data"`
+	}{}
+
+	err = json.NewDecoder(resp.Body).Decode(&out)
+	require.NoError(t, err)
+
+	require.Equal(t, out.Data, &cltypes.Contribution{
+		Slot:              1,
+		BeaconBlockRoot:   libcommon.Hash{1, 2, 3, 4, 5, 6, 7, 8},
+		SubcommitteeIndex: 0,
+		AggregationBits:   make([]byte, cltypes.SyncCommitteeAggregationBitsSize),
+	})
+}
+
+func TestPoolSyncContributionAndProofs(t *testing.T) {
+	aggrBits := make([]byte, cltypes.SyncCommitteeAggregationBitsSize)
+	aggrBits[0] = 1
+	msgs := []*cltypes.SignedContributionAndProof{
+		{
+			Message: &cltypes.ContributionAndProof{
+				Contribution: &cltypes.Contribution{
+					Slot:            1,
+					BeaconBlockRoot: libcommon.Hash{1, 2, 3, 4, 5, 6, 7, 8},
+					AggregationBits: aggrBits,
+				},
+			},
+		},
+	}
+	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root())
+
+	sd.OnHeadState(s)
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+	// json
+	req, err := json.Marshal(msgs)
+	require.NoError(t, err)
+	// post attester slashing
+	resp, err := server.Client().Post(server.URL+"/eth/v1/validator/contribution_and_proofs", "application/json", bytes.NewBuffer(req))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	require.Equal(t, 200, resp.StatusCode)
+	// get attester slashings
+	resp, err = server.Client().Get(server.URL + "/eth/v1/validator/sync_committee_contribution?slot=1&subcommittee_index=0&beacon_block_root=0x0102030405060708000000000000000000000000000000000000000000000000")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	require.Equal(t, 200, resp.StatusCode)
+	out := struct {
+		Data *cltypes.Contribution `json:"data"`
+	}{}
+
+	err = json.NewDecoder(resp.Body).Decode(&out)
+	require.NoError(t, err)
+
+	require.Equal(t, out.Data, &cltypes.Contribution{
+		Slot:              1,
+		BeaconBlockRoot:   libcommon.Hash{1, 2, 3, 4, 5, 6, 7, 8},
+		SubcommitteeIndex: 0,
+		AggregationBits:   aggrBits,
+	})
+}

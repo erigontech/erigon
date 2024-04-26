@@ -20,7 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/ledgerwatch/erigon/cl/transition"
 
-	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/stretchr/testify/require"
@@ -63,7 +62,7 @@ func TestForkChoiceBasic(t *testing.T) {
 	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchorStateEncoded, int(clparams.AltairVersion)))
 	pool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
 	emitters := beaconevents.NewEmitters()
-	store, err := forkchoice.NewForkChoiceStore(anchorState, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}), emitters, sd, nil)
+	store, err := forkchoice.NewForkChoiceStore(nil, anchorState, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}), emitters, sd, nil)
 	require.NoError(t, err)
 	// first steps
 	store.OnTick(0)
@@ -108,27 +107,13 @@ func TestForkChoiceBasic(t *testing.T) {
 	for sd.HeadState() == nil {
 		time.Sleep(time.Millisecond)
 	}
-	// Try processing a voluntary exit
-	err = store.OnVoluntaryExit(&cltypes.SignedVoluntaryExit{
-		VoluntaryExit: &cltypes.VoluntaryExit{
-			Epoch:          0,
-			ValidatorIndex: 0,
-		},
-	}, true)
 	require.NoError(t, err)
-	// Try processing a bls execution change exit
-	err = store.OnBlsToExecutionChange(&cltypes.SignedBLSToExecutionChange{
-		Message: &cltypes.BLSToExecutionChange{
-			ValidatorIndex: 0,
-		},
-	}, true)
-	require.NoError(t, err)
-	require.Equal(t, len(pool.VoluntaryExistsPool.Raw()), 1)
 }
 
 func TestForkChoiceChainBellatrix(t *testing.T) {
 	ctx := context.Background()
 	blocks, anchorState, _ := tests.GetBellatrixRandom()
+	cfg := clparams.MainnetBeaconConfig
 
 	intermediaryState, err := anchorState.Copy()
 	require.NoError(t, err)
@@ -143,7 +128,7 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 	pool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
 	emitters := beaconevents.NewEmitters()
 	sd := synced_data.NewSyncedDataManager(true, &clparams.MainnetBeaconConfig)
-	store, err := forkchoice.NewForkChoiceStore(anchorState, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{
+	store, err := forkchoice.NewForkChoiceStore(nil, anchorState, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{
 		Beacon: true,
 	}), emitters, sd, nil)
 	store.OnTick(2000)
@@ -163,7 +148,7 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 	for i := 0; i < mixes.Length(); i++ {
 		require.Equal(t, mixes.Get(i), intermediaryState.RandaoMixes().Get(i), fmt.Sprintf("mixes mismatch at index %d, have: %x, expected: %x", i, mixes.Get(i), intermediaryState.RandaoMixes().Get(i)))
 	}
-	currentIntermediarySyncCommittee, nextIntermediarySyncCommittee, ok := store.GetSyncCommittees(intermediaryBlockRoot)
+	currentIntermediarySyncCommittee, nextIntermediarySyncCommittee, ok := store.GetSyncCommittees(cfg.SyncCommitteePeriod(store.HighestSeen()))
 	require.True(t, ok)
 
 	require.Equal(t, intermediaryState.CurrentSyncCommittee(), currentIntermediarySyncCommittee)
@@ -173,5 +158,5 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 	require.True(t, has)
 	bsRoot, err := bs.HashSSZ()
 	require.NoError(t, err)
-	require.Equal(t, libcommon.Hash(bsRoot), common.HexToHash("0x58a3f366bcefe6c30fb3a6506bed726f9a51bb272c77a8a3ed88c34435d44cb7"))
+	require.Equal(t, libcommon.Hash(bsRoot), libcommon.HexToHash("0x58a3f366bcefe6c30fb3a6506bed726f9a51bb272c77a8a3ed88c34435d44cb7"))
 }

@@ -13,6 +13,8 @@ import (
 	"github.com/c2h5oh/datasize"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/config3"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -40,7 +42,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -109,7 +110,7 @@ type MockSentry struct {
 	txPoolDB         kv.RwDB
 
 	HistoryV3      bool
-	agg            *libstate.AggregatorV3
+	agg            *libstate.Aggregator
 	BlockSnapshots *freezeblocks.RoSnapshots
 	BlockReader    services.FullBlockReader
 	posStagedSync  *stagedsync.Sync
@@ -256,7 +257,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	logger := log.New()
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
-	histV3, db, agg := temporal.NewTestDB(nil, dirs, nil)
+	histV3, db, agg := temporaltest.NewTestDB(nil, dirs)
 	cfg.HistoryV3 = histV3
 
 	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db, nil, nil, nil, logger)
@@ -385,6 +386,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		statusDataProvider,
 		false,
 		maxBlockBroadcastPeers,
+		false, /* disableBlockDownload */
 		logger,
 	)
 	if err != nil {
@@ -479,7 +481,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		snapshotsDownloader, mock.BlockReader, blockRetire, mock.agg, nil, forkValidator, logger, checkStateRoot)
 	mock.posStagedSync = stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger)
 
-	mock.Eth1ExecutionService = eth1.NewEthereumExecutionModule(mock.BlockReader, mock.DB, mock.posStagedSync, forkValidator, mock.ChainConfig, assembleBlockPOS, nil, mock.Notifications.Accumulator, mock.Notifications.StateChangesConsumer, logger, engine, histV3, cfg.Sync, ctx)
+	mock.Eth1ExecutionService = eth1.NewEthereumExecutionModule(mock.BlockReader, mock.DB, mock.posStagedSync, forkValidator, mock.ChainConfig, assembleBlockPOS, nil, mock.Notifications.Accumulator, mock.Notifications.StateChangesConsumer, logger, engine, histV3, ctx)
 
 	mock.sentriesClient.Hd.StartPoSDownloader(mock.Ctx, sendHeaderRequest, penalize)
 
@@ -776,21 +778,21 @@ func (ms *MockSentry) NewHistoryStateReader(blockNum uint64, tx kv.Tx) state.Sta
 }
 
 func (ms *MockSentry) NewStateReader(tx kv.Tx) state.StateReader {
-	if ethconfig.EnableHistoryV4InTest {
+	if config3.EnableHistoryV4InTest {
 		panic("implement me")
 	}
 	return state.NewPlainStateReader(tx)
 }
 
 func (ms *MockSentry) NewStateWriter(tx kv.RwTx, blockNum uint64) state.StateWriter {
-	if ethconfig.EnableHistoryV4InTest {
+	if config3.EnableHistoryV4InTest {
 		panic("implement me")
 	}
 	return state.NewPlainStateWriter(tx, tx, blockNum)
 }
 
 func (ms *MockSentry) CalcStateRoot(tx kv.Tx) libcommon.Hash {
-	if ethconfig.EnableHistoryV4InTest {
+	if config3.EnableHistoryV4InTest {
 		panic("implement me")
 	}
 
@@ -800,7 +802,7 @@ func (ms *MockSentry) CalcStateRoot(tx kv.Tx) libcommon.Hash {
 	}
 	return h
 }
-func (ms *MockSentry) HistoryV3Components() *libstate.AggregatorV3 {
+func (ms *MockSentry) HistoryV3Components() *libstate.Aggregator {
 	return ms.agg
 }
 

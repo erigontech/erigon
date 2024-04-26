@@ -3,7 +3,6 @@ package downloader
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,51 +14,69 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 )
 
-// TorrentFiles - does provide thread-safe CRUD operations on .torrent files
-type TorrentFiles struct {
+// AtomicTorrentFS - does provide thread-safe CRUD operations on .torrent files
+type AtomicTorrentFS struct {
 	lock sync.Mutex
 	dir  string
 }
 
-func NewAtomicTorrentFiles(dir string) *TorrentFiles {
-	return &TorrentFiles{dir: dir}
+func NewAtomicTorrentFS(dir string) *AtomicTorrentFS {
+	return &AtomicTorrentFS{dir: dir}
 }
 
-func (tf *TorrentFiles) Exists(name string) bool {
+func (tf *AtomicTorrentFS) Exists(name string) bool {
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
 	return tf.exists(name)
 }
 
-func (tf *TorrentFiles) exists(name string) bool {
+func (tf *AtomicTorrentFS) exists(name string) bool {
 	if !strings.HasSuffix(name, ".torrent") {
 		name += ".torrent"
 	}
 	return dir.FileExist(filepath.Join(tf.dir, name))
 }
-func (tf *TorrentFiles) Delete(name string) error {
+func (tf *AtomicTorrentFS) Delete(name string) error {
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
 	return tf.delete(name)
 }
 
-func (tf *TorrentFiles) delete(name string) error {
+func (tf *AtomicTorrentFS) delete(name string) error {
 	if !strings.HasSuffix(name, ".torrent") {
 		name += ".torrent"
 	}
 	return os.Remove(filepath.Join(tf.dir, name))
 }
 
-func (tf *TorrentFiles) Create(name string, res []byte) error {
+func (tf *AtomicTorrentFS) Create(name string, res []byte) (ts *torrent.TorrentSpec, created bool, err error) {
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
-	return tf.create(filepath.Join(tf.dir, name), res)
-}
-func (tf *TorrentFiles) create(torrentFilePath string, res []byte) error {
-	if len(res) == 0 {
-		return fmt.Errorf("try to write 0 bytes to file: %s", torrentFilePath)
+
+	if !tf.exists(name) {
+		err = tf.create(name, res)
+		if err != nil {
+			return nil, false, err
+		}
 	}
-	f, err := os.Create(torrentFilePath)
+
+	ts, err = tf.load(filepath.Join(tf.dir, name))
+	if err != nil {
+		return nil, false, err
+	}
+	return ts, false, nil
+}
+
+func (tf *AtomicTorrentFS) create(name string, res []byte) error {
+	if !strings.HasSuffix(name, ".torrent") {
+		name += ".torrent"
+	}
+	if len(res) == 0 {
+		return fmt.Errorf("try to write 0 bytes to file: %s", name)
+	}
+
+	fPath := filepath.Join(tf.dir, name)
+	f, err := os.Create(fPath + ".tmp")
 	if err != nil {
 		return err
 	}
@@ -70,15 +87,17 @@ func (tf *TorrentFiles) create(torrentFilePath string, res []byte) error {
 	if err = f.Sync(); err != nil {
 		return err
 	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(fPath+".tmp", fPath); err != nil {
+		return err
+	}
+
 	return nil
 }
 
-func (tf *TorrentFiles) CreateTorrentFromMetaInfo(fPath string, mi *metainfo.MetaInfo) error {
-	tf.lock.Lock()
-	defer tf.lock.Unlock()
-	return tf.createTorrentFromMetaInfo(fPath, mi)
-}
-func (tf *TorrentFiles) createTorrentFromMetaInfo(fPath string, mi *metainfo.MetaInfo) error {
+func (tf *AtomicTorrentFS) createFromMetaInfo(fPath string, mi *metainfo.MetaInfo) error {
 	file, err := os.Create(fPath + ".tmp")
 	if err != nil {
 		return err
@@ -99,19 +118,41 @@ func (tf *TorrentFiles) createTorrentFromMetaInfo(fPath string, mi *metainfo.Met
 	return nil
 }
 
-func (tf *TorrentFiles) LoadByName(name string) (*torrent.TorrentSpec, error) {
+func (tf *AtomicTorrentFS) CreateWithMetaInfo(info *metainfo.Info, additionalMetaInfo *metainfo.MetaInfo) (created bool, err error) {
+	name := info.Name
+	if !strings.HasSuffix(name, ".torrent") {
+		name += ".torrent"
+	}
+	mi, err := CreateMetaInfo(info, additionalMetaInfo)
+	if err != nil {
+		return false, err
+	}
+
+	tf.lock.Lock()
+	defer tf.lock.Unlock()
+
+	if tf.exists(name) {
+		return false, nil
+	}
+	if err = tf.createFromMetaInfo(filepath.Join(tf.dir, name), mi); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (tf *AtomicTorrentFS) LoadByName(name string) (*torrent.TorrentSpec, error) {
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
 	return tf.load(filepath.Join(tf.dir, name))
 }
 
-func (tf *TorrentFiles) LoadByPath(fPath string) (*torrent.TorrentSpec, error) {
+func (tf *AtomicTorrentFS) LoadByPath(fPath string) (*torrent.TorrentSpec, error) {
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
 	return tf.load(fPath)
 }
 
-func (tf *TorrentFiles) load(fPath string) (*torrent.TorrentSpec, error) {
+func (tf *AtomicTorrentFS) load(fPath string) (*torrent.TorrentSpec, error) {
 	if !strings.HasSuffix(fPath, ".torrent") {
 		fPath += ".torrent"
 	}
@@ -127,71 +168,90 @@ const ProhibitNewDownloadsFileName = "prohibit_new_downloads.lock"
 
 // Erigon "download once" - means restart/upgrade/downgrade will not download files (and will be fast)
 // After "download once" - Erigon will produce and seed new files
-// Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
-func (tf *TorrentFiles) prohibitNewDownloads(t string) error {
+// After `Prohibit` call - downloader stil will able:
+//   - seed new (generated by Erigon) files
+//   - seed existing on Disk files
+//   - download uncomplete parts of existing on Disk files (if Verify found some bad parts)
+//
+// `Prohibit` has `whitelist` feature - based on file-type
+func (tf *AtomicTorrentFS) ProhibitNewDownloads(whitelistAdd, whitelistRemove []string) (whitelist []string, err error) {
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
-	// open or create file ProhibitNewDownloadsFileName
-	f, err := os.OpenFile(filepath.Join(tf.dir, ProhibitNewDownloadsFileName), os.O_CREATE|os.O_RDONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("open file: %w", err)
-	}
-	defer f.Close()
-	var prohibitedList []string
-	torrentListJsonBytes, err := io.ReadAll(f)
-	if err != nil {
-		return fmt.Errorf("read file: %w", err)
-	}
-	if len(torrentListJsonBytes) > 0 {
-		if err := json.Unmarshal(torrentListJsonBytes, &prohibitedList); err != nil {
-			return fmt.Errorf("unmarshal: %w", err)
-		}
-	}
-	if slices.Contains(prohibitedList, t) {
-		return nil
-	}
-	prohibitedList = append(prohibitedList, t)
-	f.Close()
-
-	// write new prohibited list by opening the file in truncate mode
-	f, err = os.OpenFile(filepath.Join(tf.dir, ProhibitNewDownloadsFileName), os.O_TRUNC|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("open file for writing: %w", err)
-	}
-	defer f.Close()
-	prohibitedListJsonBytes, err := json.Marshal(prohibitedList)
-	if err != nil {
-		return fmt.Errorf("marshal: %w", err)
-	}
-	if _, err := f.Write(prohibitedListJsonBytes); err != nil {
-		return fmt.Errorf("write: %w", err)
-	}
-
-	return f.Sync()
+	return tf.prohibitNewDownloads(whitelistAdd, whitelistRemove)
 }
 
-func (tf *TorrentFiles) newDownloadsAreProhibited(name string) (bool, error) {
+func (tf *AtomicTorrentFS) prohibitNewDownloads(whitelistAdd, whitelistRemove []string) (whitelist []string, err error) {
+	fPath := filepath.Join(tf.dir, ProhibitNewDownloadsFileName)
+	exist := dir.FileExist(fPath)
+
+	var _currentWhiteList []string
+	if exist {
+		torrentListJsonBytes, err := os.ReadFile(fPath)
+		if err != nil {
+			return nil, fmt.Errorf("read file: %w", err)
+		}
+		if len(torrentListJsonBytes) > 0 {
+			if err := json.Unmarshal(torrentListJsonBytes, &_currentWhiteList); err != nil {
+				return nil, fmt.Errorf("unmarshal: %w", err)
+			}
+		}
+	}
+
+	whiteList := make([]string, 0, len(_currentWhiteList))
+	// copy all item except delted
+	for _, it := range _currentWhiteList {
+		if slices.Contains(whitelistRemove, it) {
+			continue
+		}
+		whiteList = append(whiteList, it)
+	}
+
+	// add all new whitelisted items
+	for _, it := range whitelistAdd {
+		if !slices.Contains(whiteList, it) {
+			whiteList = append(whiteList, it)
+		}
+	}
+	slices.Sort(whiteList)
+
+	whiteListBytes, err := json.Marshal(whiteList)
+	if err != nil {
+		return _currentWhiteList, fmt.Errorf("marshal: %w", err)
+	}
+	if err := dir.WriteFileWithFsync(fPath, whiteListBytes, 0644); err != nil {
+		return _currentWhiteList, fmt.Errorf("write: %w", err)
+	}
+	return whiteList, nil
+}
+
+func (tf *AtomicTorrentFS) NewDownloadsAreProhibited(name string) (prohibited bool, err error) {
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
-	f, err := os.OpenFile(filepath.Join(tf.dir, ProhibitNewDownloadsFileName), os.O_CREATE|os.O_APPEND|os.O_RDONLY, 0644)
-	if err != nil {
-		return false, err
+	return tf.newDownloadsAreProhibited(name)
+}
+
+func (tf *AtomicTorrentFS) newDownloadsAreProhibited(name string) (prohibited bool, err error) {
+	fPath := filepath.Join(tf.dir, ProhibitNewDownloadsFileName)
+	exists := dir.FileExist(fPath)
+	if !exists { // no .lock - means all allowed
+		return false, nil
 	}
-	defer f.Close()
-	var prohibitedList []string
-	torrentListJsonBytes, err := io.ReadAll(f)
+
+	var whiteList []string
+	whiteListBytes, err := os.ReadFile(fPath)
 	if err != nil {
-		return false, fmt.Errorf("newDownloadsAreProhibited: read file: %w", err)
+		return false, fmt.Errorf("NewDownloadsAreProhibited: read file: %w", err)
 	}
-	if len(torrentListJsonBytes) > 0 {
-		if err := json.Unmarshal(torrentListJsonBytes, &prohibitedList); err != nil {
-			return false, fmt.Errorf("newDownloadsAreProhibited: unmarshal: %w", err)
+	if len(whiteListBytes) > 0 {
+		if err := json.Unmarshal(whiteListBytes, &whiteList); err != nil {
+			return false, fmt.Errorf("NewDownloadsAreProhibited: unmarshal: %w", err)
 		}
 	}
-	for _, p := range prohibitedList {
-		if strings.Contains(name, p) {
-			return true, nil
+
+	for _, whiteListedItem := range whiteList {
+		if strings.Contains(name, whiteListedItem) {
+			return false, nil
 		}
 	}
-	return false, nil
+	return true, nil
 }

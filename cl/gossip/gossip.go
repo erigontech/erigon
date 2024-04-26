@@ -22,10 +22,34 @@ const (
 	TopicNamePrefixSyncCommittee     = "sync_committee_%d"
 )
 
-func TopicNameBlobSidecar(d int) string {
+func TopicNameBlobSidecar(d uint64) string {
 	return fmt.Sprintf(TopicNamePrefixBlobSidecar, d)
+}
+
+func TopicNameBeaconAttestation(d uint64) string {
+	return fmt.Sprintf(TopicNamePrefixBeaconAttestation, d)
+}
+
+func TopicNameSyncCommittee(d int) string {
+	return fmt.Sprintf(TopicNamePrefixSyncCommittee, d)
 }
 
 func IsTopicBlobSidecar(d string) bool {
 	return strings.Contains(d, "blob_sidecar_")
+}
+
+func IsTopicSyncCommittee(d string) bool {
+	return strings.Contains(d, "sync_committee_") && !strings.Contains(d, TopicNameSyncCommitteeContributionAndProof)
+}
+func IsTopicBeaconAttestation(d string) bool {
+	return strings.Contains(d, "beacon_attestation_")
+}
+
+func SubnetIdFromTopicBeaconAttestation(d string) (uint64, error) {
+	if !IsTopicBeaconAttestation(d) {
+		return 0, fmt.Errorf("not a beacon attestation topic")
+	}
+	var id uint64
+	_, err := fmt.Sscanf(d, TopicNamePrefixBeaconAttestation, &id)
+	return id, err
 }

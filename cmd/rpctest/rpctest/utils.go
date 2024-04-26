@@ -290,6 +290,66 @@ func requestAndCompare(request string, methodName string, errCtx string, reqGen 
 	return nil
 }
 
+func requestAndCompareErigon(requestA, requestB string, methodNameA, methodNameB string, errCtx string, reqGen *RequestGenerator, needCompare bool, rec *bufio.Writer, errs *bufio.Writer, channel chan CallResult, insertOnlyIfSuccess bool) error {
+	recording := rec != nil
+	res := reqGen.Erigon2(methodNameA, requestA)
+	if res.Err != nil {
+		return fmt.Errorf("could not invoke %s (Erigon): %w", methodNameA, res.Err)
+	}
+	errVal := res.Result.Get("error")
+	if errVal != nil {
+		if !needCompare && channel == nil {
+			return fmt.Errorf("error invoking %s (Erigon): %d %s", methodNameA, errVal.GetInt("code"), errVal.GetStringBytes("message"))
+		}
+	}
+	if needCompare {
+		resg := reqGen.Erigon2(methodNameB, requestB)
+		if resg.Err != nil {
+			return fmt.Errorf("could not invoke %s (Geth/OE): %w", methodNameB, res.Err)
+		}
+		errValg := resg.Result.Get("error")
+		if errVal == nil && errValg == nil {
+			if err := compareResults(res.Result, resg.Result); err != nil {
+				recording = false
+				if errs != nil {
+					fmt.Printf("different results for methods %s, %s, errCtx: %s: %v\n", methodNameA, methodNameB, errCtx, err)
+					fmt.Fprintf(errs, "\nDifferent results for methods %s, %s, errCtx %s: %v\n", methodNameA, methodNameB, errCtx, err)
+					fmt.Fprintf(errs, "Request=====================================\n%s\n", requestA)
+					fmt.Fprintf(errs, "%s response=================================\n%s\n", methodNameA, res.Response)
+					fmt.Fprintf(errs, "%s response=================================\n%s\n", methodNameB, resg.Response)
+					errs.Flush() // nolint:errcheck
+					// Keep going
+				} else {
+					reqFile, _ := os.Create("request.json")                //nolint:errcheck
+					reqFile.Write([]byte(requestA))                        //nolint:errcheck
+					reqFile.Close()                                        //nolint:errcheck
+					erigonRespFile, _ := os.Create("erigon-response.json") //nolint:errcheck
+					erigonRespFile.Write(res.Response)                     //nolint:errcheck
+					erigonRespFile.Close()                                 //nolint:errcheck
+					oeRespFile, _ := os.Create("oe-response.json")         //nolint:errcheck
+					oeRespFile.Write(resg.Response)                        //nolint:errcheck
+					oeRespFile.Close()                                     //nolint:errcheck
+					return fmt.Errorf("different results for methods %s, %s, errCtx %s: %v\nRequest in file request.json, Erigon response in file erigon-response.json, Geth/OE response in file oe-response.json", methodNameA, methodNameB, errCtx, err)
+				}
+			}
+		} else {
+			//TODO fix for two methods
+			return compareErrors(errVal, errValg, methodNameA, errCtx, errs)
+		}
+	} else {
+		if channel != nil {
+			if insertOnlyIfSuccess == false || (insertOnlyIfSuccess && errVal == nil) {
+				channel <- res
+			}
+		}
+	}
+
+	if recording {
+		fmt.Fprintf(rec, "%s\n%s\n\n", requestA, res.Response)
+	}
+	return nil
+}
+
 func compareBalances(balance, balanceg *EthBalance) bool {
 	if balance.Balance.ToInt().Cmp(balanceg.Balance.ToInt()) != 0 {
 		fmt.Printf("Different balance: %d %d\n", balance.Balance.ToInt(), balanceg.Balance.ToInt())

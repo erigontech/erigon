@@ -5,7 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -19,12 +19,12 @@ import (
 	"github.com/spf13/cobra"
 
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/commitment"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
@@ -314,6 +314,7 @@ var cmdStageTxLookup = &cobra.Command{
 		}
 	},
 }
+
 var cmdPrintStages = &cobra.Command{
 	Use:   "print_stages",
 	Short: "",
@@ -332,6 +333,76 @@ var cmdPrintStages = &cobra.Command{
 			}
 			return
 		}
+	},
+}
+
+var cmdPrintTableSizes = &cobra.Command{
+	Use:   "print_table_sizes",
+	Short: "",
+	Run: func(cmd *cobra.Command, args []string) {
+		logger := debug.SetupCobra(cmd, "integration")
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), false, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		allTablesCfg := db.AllTables()
+		allTables := make([]string, 0, len(allTablesCfg))
+		for table, cfg := range allTablesCfg {
+			if cfg.IsDeprecated {
+				continue
+			}
+
+			allTables = append(allTables, table)
+		}
+
+		var tableSizes []interface{}
+		err = db.View(cmd.Context(), func(tx kv.Tx) error {
+			tableSizes = stagedsync.CollectTableSizes(db, tx, allTables)
+			return nil
+		})
+		if err != nil {
+			logger.Error("error while collecting table sizes", "err", err)
+			return
+		}
+
+		if len(tableSizes)%2 != 0 {
+			logger.Error("table sizes len not even", "len", len(tableSizes))
+			return
+		}
+
+		var sb strings.Builder
+		sb.WriteString("Table")
+		sb.WriteRune(',')
+		sb.WriteString("Size")
+		sb.WriteRune('\n')
+		for i := 0; i < len(tableSizes)/2; i++ {
+			sb.WriteString(tableSizes[i*2].(string))
+			sb.WriteRune(',')
+			sb.WriteString(tableSizes[i*2+1].(string))
+			sb.WriteRune('\n')
+		}
+
+		if outputCsvFile == "" {
+			logger.Info("table sizes", "csv", sb.String())
+			return
+		}
+
+		f, err := os.Create(outputCsvFile)
+		if err != nil {
+			logger.Error("issue creating file", "file", outputCsvFile, "err", err)
+			return
+		}
+
+		_, err = f.WriteString(sb.String())
+		if err != nil {
+			logger.Error("issue writing output to file", "file", outputCsvFile, "err", err)
+			return
+		}
+
+		logger.Info("wrote table sizes to csv output file", "file", outputCsvFile)
 	},
 }
 
@@ -477,6 +548,10 @@ func init() {
 	withHeimdall(cmdPrintStages)
 	rootCmd.AddCommand(cmdPrintStages)
 
+	withDataDir(cmdPrintTableSizes)
+	withOutputCsvFile(cmdPrintTableSizes)
+	rootCmd.AddCommand(cmdPrintTableSizes)
+
 	withConfig(cmdStageSenders)
 	withIntegrityChecks(cmdStageSenders)
 	withReset(cmdStageSenders)
@@ -565,6 +640,7 @@ func init() {
 	withConfig(cmdLogIndex)
 	withDataDir(cmdLogIndex)
 	withReset(cmdLogIndex)
+	withResetPruneAt(cmdLogIndex)
 	withBlock(cmdLogIndex)
 	withUnwind(cmdLogIndex)
 	withPruneTo(cmdLogIndex)
@@ -1170,6 +1246,9 @@ func stageLogIndex(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	if reset {
 		return reset2.Reset(ctx, db, stages.LogIndex)
 	}
+	if resetPruneAt {
+		return reset2.ResetPruneAt(ctx, db, stages.LogIndex)
+	}
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -1440,9 +1519,9 @@ func removeMigration(db kv.RwDB, ctx context.Context) error {
 var openSnapshotOnce sync.Once
 var _allSnapshotsSingleton *freezeblocks.RoSnapshots
 var _allBorSnapshotsSingleton *freezeblocks.BorRoSnapshots
-var _aggSingleton *libstate.AggregatorV3
+var _aggSingleton *libstate.Aggregator
 
-func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezeblocks.RoSnapshots, *freezeblocks.BorRoSnapshots, *libstate.AggregatorV3) {
+func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezeblocks.RoSnapshots, *freezeblocks.BorRoSnapshots, *libstate.Aggregator) {
 	openSnapshotOnce.Do(func() {
 		var useSnapshots bool
 		_ = db.View(context.Background(), func(tx kv.Tx) error {
@@ -1457,7 +1536,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		_allBorSnapshotsSingleton = freezeblocks.NewBorRoSnapshots(snapCfg, dirs.Snap, 0, logger)
 
 		var err error
-		_aggSingleton, err = libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger)
+		_aggSingleton, err = libstate.NewAggregator(ctx, dirs.SnapHistory, dirs.Tmp, config3.HistoryV3AggregationStep, db, logger)
 		if err != nil {
 			panic(err)
 		}
@@ -1499,83 +1578,6 @@ func blocksIO(db kv.RoDB, logger log.Logger) (services.FullBlockReader, *blockio
 		_blockWriterSingleton = blockio.NewBlockWriter(histV3)
 	})
 	return _blockReaderSingleton, _blockWriterSingleton
-}
-
-var openDomainsOnce sync.Once
-var _aggDomainSingleton *libstate.Aggregator
-
-func allDomains(ctx context.Context, db kv.RoDB, stepSize uint64, mode libstate.CommitmentMode, trie commitment.TrieVariant, logger log.Logger) (*freezeblocks.RoSnapshots, *libstate.Aggregator) {
-	openDomainsOnce.Do(func() {
-		var useSnapshots bool
-		_ = db.View(context.Background(), func(tx kv.Tx) error {
-			useSnapshots, _ = snap.Enabled(tx)
-			return nil
-		})
-		dirs := datadir.New(datadirCli)
-		dir.MustExist(dirs.SnapHistory)
-
-		snapCfg := ethconfig.NewSnapCfg(useSnapshots, true, true)
-		_allSnapshotsSingleton = freezeblocks.NewRoSnapshots(snapCfg, dirs.Snap, 0, logger)
-
-		var err error
-		_aggDomainSingleton, err = libstate.NewAggregator(filepath.Join(dirs.DataDir, "state"), dirs.Tmp, stepSize, mode, trie, logger)
-		if err != nil {
-			panic(err)
-		}
-		if err = _aggDomainSingleton.ReopenFolder(); err != nil {
-			panic(err)
-		}
-
-		if useSnapshots {
-			if err := _allSnapshotsSingleton.ReopenFolder(); err != nil {
-				panic(err)
-			}
-			_allSnapshotsSingleton.LogStat("all:singleton")
-			//db.View(context.Background(), func(tx kv.Tx) error {
-			//	_aggSingleton.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
-			//		_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
-			//		return histBlockNumProgress
-			//	})
-			//	return nil
-			//})
-		}
-	})
-	return _allSnapshotsSingleton, _aggDomainSingleton
-}
-
-func newDomains(ctx context.Context, db kv.RwDB, stepSize uint64, mode libstate.CommitmentMode, trie commitment.TrieVariant, logger log.Logger) (consensus.Engine, ethconfig.Config, *freezeblocks.RoSnapshots, *libstate.Aggregator) {
-	historyV3, pm := kvcfg.HistoryV3.FromDB(db), fromdb.PruneMode(db)
-	//events := shards.NewEvents()
-	genesis := core.GenesisBlockByChainName(chain)
-
-	chainConfig, genesisBlock, genesisErr := core.CommitGenesisBlock(db, genesis, "", logger)
-	_ = genesisBlock // TODO apply if needed here
-
-	if _, ok := genesisErr.(*chain2.ConfigCompatError); genesisErr != nil && !ok {
-		panic(genesisErr)
-	}
-	//logger.Info("Initialised chain configuration", "config", chainConfig)
-
-	var batchSize datasize.ByteSize
-	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
-
-	cfg := ethconfig.Defaults
-	cfg.HistoryV3 = historyV3
-	cfg.Prune = pm
-	cfg.BatchSize = batchSize
-	cfg.DeprecatedTxPool.Disable = true
-	cfg.Genesis = core.GenesisBlockByChainName(chain)
-	//if miningConfig != nil {
-	//	cfg.Miner = *miningConfig
-	//}
-	cfg.Dirs = datadir.New(datadirCli)
-
-	allSn, agg := allDomains(ctx, db, stepSize, mode, trie, logger)
-	cfg.Snapshot = allSn.Cfg()
-
-	blockReader, _ := blocksIO(db, logger)
-	engine, _ := initConsensusEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, blockReader, logger)
-	return engine, cfg, allSn, agg
 }
 
 const blockBufferSize = 128
@@ -1633,6 +1635,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 		statusDataProvider,
 		false,
 		maxBlockBroadcastPeers,
+		false, /* disableBlockDownload */
 		logger,
 	)
 	if err != nil {

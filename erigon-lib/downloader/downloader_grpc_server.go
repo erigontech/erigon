@@ -45,8 +45,9 @@ type GrpcServer struct {
 	d *Downloader
 }
 
-func (s *GrpcServer) ProhibitNewDownloads(ctx context.Context, req *proto_downloader.ProhibitNewDownloadsRequest) (*emptypb.Empty, error) {
-	return &emptypb.Empty{}, s.d.torrentFiles.prohibitNewDownloads(req.Type)
+func (s *GrpcServer) Prohibit(ctx context.Context, req *proto_downloader.ProhibitRequest) (*proto_downloader.ProhibitReply, error) {
+	whitelist, err := s.d.torrentFS.ProhibitNewDownloads(req.WhitelistAdd, req.WhitelistRemove)
+	return &proto_downloader.ProhibitReply{Whitelist: whitelist}, err
 }
 
 // Erigon "download once" - means restart/upgrade/downgrade will not download files (and will be fast)
@@ -107,7 +108,7 @@ func (s *GrpcServer) Delete(ctx context.Context, request *proto_downloader.Delet
 
 		fPath := filepath.Join(s.d.SnapDir(), name)
 		_ = os.Remove(fPath)
-		s.d.torrentFiles.Delete(name)
+		s.d.torrentFS.Delete(name)
 	}
 	return &emptypb.Empty{}, nil
 }

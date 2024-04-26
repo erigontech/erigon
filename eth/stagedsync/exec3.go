@@ -15,6 +15,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
@@ -38,7 +39,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb/rawdbhelpers"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -88,7 +88,7 @@ func (p *Progress) Log(rs *state.StateV3, in *exec22.QueueWithRetry, rws *exec22
 		"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(p.commitThreshold)),
 		"idxStepsInDB", fmt.Sprintf("%.2f", idxStepsAmountInDB),
 		//"inBlk", inputBlockNum,
-		"step", fmt.Sprintf("%.1f", float64(outTxNum)/float64(ethconfig.HistoryV3AggregationStep)),
+		"step", fmt.Sprintf("%.1f", float64(outTxNum)/float64(config3.HistoryV3AggregationStep)),
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 	)
 	//var txNums []string
@@ -228,7 +228,7 @@ func ExecV3(ctx context.Context,
 	}
 	agg.SetTxNum(inputTxNum)
 
-	var outputBlockNum = syncMetrics[stages.Execution]
+	var outputBlockNum = stages.SyncMetrics[stages.Execution]
 	inputBlockNum := &atomic.Uint64{}
 	var count uint64
 	var lock sync.RWMutex
@@ -342,7 +342,7 @@ func ExecV3(ctx context.Context,
 				case <-pruneEvery.C:
 					if rs.SizeEstimate() < commitThreshold {
 						if agg.CanPrune(tx) {
-							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*10); err != nil { // prune part of retired data, before commit
+							if err = agg.Prune(ctx, config3.HistoryV3AggregationStep*10); err != nil { // prune part of retired data, before commit
 								return err
 							}
 						} else {
@@ -473,7 +473,7 @@ func ExecV3(ctx context.Context,
 
 	if block < cfg.blockReader.FrozenBlocks() {
 		agg.KeepInDB(0)
-		defer agg.KeepInDB(ethconfig.HistoryV3AggregationStep)
+		defer agg.KeepInDB(config3.HistoryV3AggregationStep)
 	}
 
 	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {
@@ -761,7 +761,7 @@ func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, bl
 	return blockReader.BlockByNumber(context.Background(), tx, blockNum)
 }
 
-func processResultQueue(in *exec22.QueueWithRetry, rws *exec22.ResultsQueue, outputTxNumIn uint64, rs *state.StateV3, agg *libstate.AggregatorV3, applyTx kv.Tx, backPressure chan struct{}, applyWorker *exec3.Worker, canRetry, forceStopAtBlockEnd bool) (outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, stopedAtBlockEnd bool, err error) {
+func processResultQueue(in *exec22.QueueWithRetry, rws *exec22.ResultsQueue, outputTxNumIn uint64, rs *state.StateV3, agg *libstate.Aggregator, applyTx kv.Tx, backPressure chan struct{}, applyWorker *exec3.Worker, canRetry, forceStopAtBlockEnd bool) (outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, stopedAtBlockEnd bool, err error) {
 	rwsIt := rws.Iter()
 	defer rwsIt.Close()
 
@@ -996,7 +996,7 @@ func reconstituteStep(last bool,
 				logger.Info(fmt.Sprintf("[%s] State reconstitution", s.LogPrefix()), "overall progress", fmt.Sprintf("%.2f%%", progress),
 					"step progress", fmt.Sprintf("%.2f%%", stepProgress),
 					"tx/s", fmt.Sprintf("%.1f", speedTx), "workCh", fmt.Sprintf("%d/%d", len(workCh), cap(workCh)),
-					"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio), "queue.len", rs.QueueLen(), "blk", syncMetrics[stages.Execution].GetValueUint64(),
+					"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio), "queue.len", rs.QueueLen(), "blk", stages.SyncMetrics[stages.Execution].GetValueUint64(),
 					"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(commitThreshold)),
 					"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 				if sizeEstimate >= commitThreshold {
@@ -1107,7 +1107,7 @@ func reconstituteStep(last bool,
 				inputTxNum++
 			}
 
-			syncMetrics[stages.Execution].SetUint64(bn)
+			stages.SyncMetrics[stages.Execution].SetUint64(bn)
 		}
 		return err
 	}(); err != nil {
@@ -1335,7 +1335,7 @@ func safeCloseTxTaskCh(ch chan *exec22.TxTask) {
 
 func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount int, batchSize datasize.ByteSize, chainDb kv.RwDB,
 	blockReader services.FullBlockReader,
-	logger log.Logger, agg *libstate.AggregatorV3, engine consensus.Engine,
+	logger log.Logger, agg *libstate.Aggregator, engine consensus.Engine,
 	chainConfig *chain.Config, genesis *types.Genesis) (err error) {
 	startTime := time.Now()
 	defer agg.EnableMadvNormal().DisableReadAhead()

@@ -46,18 +46,7 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 		}
 		return true
 	})
-	f.publicKeysPerState.Range(func(k, v any) bool {
-		h := k.(libcommon.Hash)
-		header, ok := f.GetHeader(h)
-		if !ok {
-			log.Debug("onNewFinalized: header not found", "hash", h)
-			return true
-		}
-		if header.Slot <= newFinalized.Epoch()*f.beaconCfg.SlotsPerEpoch {
-			f.publicKeysPerState.Delete(k)
-		}
-		return true
-	})
+
 	f.forkGraph.Prune(newFinalized.Epoch() * f.beaconCfg.SlotsPerEpoch)
 }
 
@@ -141,18 +130,4 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 	// Cache in memory what we are left with.
 	f.checkpointStates.Store(checkpointComparable(checkpoint), checkpointState)
 	return checkpointState, nil
-}
-
-func (f *ForkChoiceStore) getSyncSubcommitteePubkeys(pubkeys []libcommon.Bytes48, subcommitteeIndex uint64) ([][]byte, error) {
-	var syncSubcommitteePubkeys [][]byte
-	subcommitteeSize := f.beaconCfg.SyncCommitteeSize / f.beaconCfg.SyncCommitteeSubnetCount
-	left := subcommitteeIndex * subcommitteeSize
-	right := left + subcommitteeSize
-	if right > uint64(len(pubkeys)) {
-		return nil, fmt.Errorf("getSyncSubcommitteePubkeys: index out of range")
-	}
-	for i := left; i < right; i++ {
-		syncSubcommitteePubkeys = append(syncSubcommitteePubkeys, pubkeys[i][:])
-	}
-	return syncSubcommitteePubkeys, nil
 }

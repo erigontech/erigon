@@ -63,6 +63,30 @@ func testDbAndDomain(t *testing.T, logger log.Logger) (string, kv.RwDB, *Domain)
 	return path, db, d
 }
 
+func TestDomain_OpenFolder(t *testing.T) {
+	fp, db, d, txs := filledDomain(t, log.New())
+	defer db.Close()
+	defer d.Close()
+	defer os.RemoveAll(fp)
+
+	collateAndMerge(t, db, nil, d, txs)
+
+	list := d.visibleFiles.Load()
+	require.NotEmpty(t, list)
+	ff := (*list)[len(*list)-1]
+	fn := ff.src.decompressor.FilePath()
+	d.Close()
+
+	err := os.Remove(fn)
+	require.NoError(t, err)
+	err = os.WriteFile(fn, make([]byte, 33), 0644)
+	require.NoError(t, err)
+
+	err = d.OpenFolder()
+	require.NoError(t, err)
+	d.Close()
+}
+
 // btree index should work correctly if K < m
 func TestCollationBuild(t *testing.T) {
 	logger := log.New()
@@ -161,7 +185,7 @@ func TestIterationBasic(t *testing.T) {
 	require.NoError(t, err)
 
 	var keys, vals []string
-	dc := d.MakeContext()
+	dc := d.BeginFilesRo()
 	defer dc.Close()
 	err = dc.IteratePrefix([]byte("addr2"), func(k, v []byte) {
 		keys = append(keys, string(k))
@@ -217,7 +241,7 @@ func TestAfterPrune(t *testing.T) {
 
 	d.integrateFiles(sf, 0, 16)
 	var v []byte
-	dc := d.MakeContext()
+	dc := d.BeginFilesRo()
 	defer dc.Close()
 	v, err = dc.Get([]byte("key1"), nil, tx)
 	require.NoError(t, err)
@@ -286,7 +310,7 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 	var err error
 	// Check the history
 	var roTx kv.Tx
-	dc := d.MakeContext()
+	dc := d.BeginFilesRo()
 	defer dc.Close()
 	for txNum := uint64(0); txNum <= txs; txNum++ {
 		if txNum == 976 {
@@ -408,7 +432,7 @@ func TestIterationMultistep(t *testing.T) {
 
 	var keys []string
 	var vals []string
-	dc := d.MakeContext()
+	dc := d.BeginFilesRo()
 	defer dc.Close()
 	err = dc.IteratePrefix([]byte("addr2"), func(k, v []byte) {
 		keys = append(keys, string(k))
@@ -449,7 +473,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 
 	for {
 		if stop := func() bool {
-			dc := d.MakeContext()
+			dc := d.BeginFilesRo()
 			defer dc.Close()
 			r = d.findMergeRange(maxEndTxNum, maxSpan)
 			if !r.any() {
@@ -491,7 +515,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, step uint64) {
 	maxEndTxNum := d.endTxNumMinimax()
 	maxSpan := d.aggregationStep * StepsInBiggestFile
 	for r = d.findMergeRange(maxEndTxNum, maxSpan); r.any(); r = d.findMergeRange(maxEndTxNum, maxSpan) {
-		dc := d.MakeContext()
+		dc := d.BeginFilesRo()
 		valuesOuts, indexOuts, historyOuts, _ := dc.staticFilesInRange(r)
 		valuesIn, indexIn, historyIn, err := d.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, 1, background.NewProgressSet())
 		require.NoError(t, err)
@@ -549,7 +573,7 @@ func TestDomain_Delete(t *testing.T) {
 	require.NoError(err)
 	collateAndMerge(t, db, tx, d, 1000)
 	// Check the history
-	dc := d.MakeContext()
+	dc := d.BeginFilesRo()
 	defer dc.Close()
 	for txNum := uint64(0); txNum < 1000; txNum++ {
 		label := fmt.Sprintf("txNum=%d", txNum)
@@ -630,7 +654,7 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 	defer roTx.Rollback()
 
 	// Check the history
-	dc := dom.MakeContext()
+	dc := dom.BeginFilesRo()
 	defer dc.Close()
 	for txNum := uint64(1); txNum <= txCount; txNum++ {
 		for keyNum := uint64(1); keyNum <= keyCount; keyNum++ {
@@ -723,7 +747,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 	require.NoError(t, err)
 
 	// Check the history
-	dc := d.MakeContext()
+	dc := d.BeginFilesRo()
 	defer dc.Close()
 	for txNum := uint64(1); txNum <= txCount; txNum++ {
 		for keyNum := uint64(1); keyNum <= keysCount; keyNum++ {
@@ -768,8 +792,8 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 func TestScanStaticFilesD(t *testing.T) {
 	logger := log.New()
 	ii := &Domain{History: &History{InvertedIndex: &InvertedIndex{filenameBase: "test", aggregationStep: 1, logger: logger}, logger: logger},
-		files:  btree2.NewBTreeG[*filesItem](filesItemLess),
-		logger: logger,
+		dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess),
+		logger:     logger,
 	}
 	files := []string{
 		"test.0-1.kv",
@@ -781,7 +805,7 @@ func TestScanStaticFilesD(t *testing.T) {
 	}
 	ii.scanStateFiles(files)
 	var found []string
-	ii.files.Walk(func(items []*filesItem) bool {
+	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			found = append(found, fmt.Sprintf("%d-%d", item.startTxNum, item.endTxNum))
 		}

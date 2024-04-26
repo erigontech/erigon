@@ -3,6 +3,9 @@ package sync
 import (
 	"context"
 	"sync"
+	"time"
+
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -18,13 +21,15 @@ type Storage interface {
 }
 
 type executionClientStorage struct {
+	logger    log.Logger
 	execution ExecutionClient
 	queue     chan []*types.Block
 	waitGroup sync.WaitGroup
 }
 
-func NewStorage(execution ExecutionClient, queueCapacity int) Storage {
+func NewStorage(logger log.Logger, execution ExecutionClient, queueCapacity int) Storage {
 	return &executionClientStorage{
+		logger:    logger,
 		execution: execution,
 		queue:     make(chan []*types.Block, queueCapacity),
 	}
@@ -54,16 +59,30 @@ func (s *executionClientStorage) Flush(ctx context.Context) error {
 }
 
 func (s *executionClientStorage) Run(ctx context.Context) error {
+	s.logger.Debug(syncLogPrefix("running execution client storage component"))
+
 	for {
 		select {
 		case blocks := <-s.queue:
-			err := s.execution.InsertBlocks(ctx, blocks)
-			s.waitGroup.Done()
-			if err != nil {
+			if err := s.insertBlocks(ctx, blocks); err != nil {
 				return err
 			}
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 	}
+}
+
+func (s *executionClientStorage) insertBlocks(ctx context.Context, blocks []*types.Block) error {
+	defer s.waitGroup.Done()
+
+	insertStartTime := time.Now()
+	err := s.execution.InsertBlocks(ctx, blocks)
+	if err != nil {
+		return err
+	}
+
+	s.logger.Debug(syncLogPrefix("inserted blocks"), "len", len(blocks), "duration", time.Since(insertStartTime))
+
+	return nil
 }

@@ -203,8 +203,8 @@ type Server struct {
 	newPeerHook  func(*Peer)
 	listenFunc   func(network, addr string) (net.Listener, error)
 
-	lock    sync.Mutex // protects running
-	running bool
+	lock    sync.Mutex // protects whole bunch of stuff
+	running atomic.Bool
 
 	listener     net.Listener
 	ourHandshake *protoHandshake
@@ -234,7 +234,9 @@ type Server struct {
 
 	// State of run loop and listenLoop.
 	inboundHistory expHeap
-	errors         map[string]uint
+
+	errorsMu sync.Mutex
+	errors   map[string]uint
 }
 
 type peerOpFunc func(map[enode.ID]*Peer)
@@ -418,29 +420,25 @@ func (srv *Server) SubscribeEvents(ch chan *PeerEvent) event.Subscription {
 }
 
 // Self returns the local node's endpoint information.
-func (srv *Server) Self() *enode.Node {
-	srv.lock.Lock()
-	ln := srv.localnode
-	srv.lock.Unlock()
-
-	if ln == nil {
-		return enode.NewV4(&srv.PrivateKey.PublicKey, net.ParseIP("0.0.0.0"), 0, 0)
+func (srv *Server) Self() (ln *enode.Node) {
+	if srv.localnode != nil {
+		return srv.localnode.Node()
 	}
-	return ln.Node()
+	return enode.NewV4(&srv.PrivateKey.PublicKey, net.ParseIP("0.0.0.0"), 0, 0)
 }
 
 // Stop terminates the server and all active peer connections.
 // It blocks until all active connections have been closed.
 func (srv *Server) Stop() {
 	srv.lock.Lock()
-	if !srv.running {
+	if !srv.running.Load() {
 		if srv.nodedb != nil {
 			srv.nodedb.Close()
 		}
 		srv.lock.Unlock()
 		return
 	}
-	srv.running = false
+	srv.running.Store(false)
 	srv.quitFunc()
 	if srv.listener != nil {
 		// this unblocks listener Accept
@@ -478,20 +476,15 @@ func (s *sharedUDPConn) ReadFromUDP(b []byte) (n int, addr *net.UDPAddr, err err
 func (s *sharedUDPConn) Close() error {
 	return nil
 }
-func (srv *Server) Running() bool {
-	srv.lock.Lock()
-	defer srv.lock.Unlock()
-	return srv.running
-}
 
 // Start starts running the server.
 // Servers can not be re-used after stopping.
 func (srv *Server) Start(ctx context.Context, logger log.Logger) error {
-	srv.lock.Lock()
-	defer srv.lock.Unlock()
-	if srv.running {
+	if srv.running.Load() {
 		return errors.New("server already running")
 	}
+	srv.lock.Lock()
+	defer srv.lock.Unlock()
 
 	srv.logger = logger
 	if srv.clock == nil {
@@ -537,7 +530,7 @@ func (srv *Server) Start(ctx context.Context, logger log.Logger) error {
 	}
 	srv.setupDialScheduler()
 
-	srv.running = true
+	srv.running.Store(true)
 	srv.loopWG.Add(1)
 	go srv.run()
 	return nil
@@ -863,14 +856,7 @@ running:
 			}
 		case <-logTimer.C:
 			vals := []interface{}{"protocol", srv.Config.Protocols[0].Version, "peers", len(peers), "trusted", len(trusted), "inbound", inboundCount}
-
-			func() {
-				srv.lock.Lock()
-				defer srv.lock.Unlock()
-				for err, count := range srv.errors {
-					vals = append(vals, err, count)
-				}
-			}()
+			vals = append(vals, srv.listErrors()...)
 
 			srv.logger.Debug("[p2p] Server", vals...)
 		}
@@ -921,10 +907,10 @@ func (srv *Server) postHandshakeChecks(peers map[enode.ID]*Peer, inboundCount in
 func (srv *Server) listenLoop(ctx context.Context) {
 	srv.logger.Trace("TCP listener up", "addr", srv.listener.Addr())
 
+	srv.resetErrors()
+
 	// The slots limit accepts of new connections.
 	slots := semaphore.NewWeighted(int64(srv.MaxPendingPeers))
-
-	srv.errors = map[string]uint{}
 
 	// Wait for slots to be returned on exit. This ensures all connection goroutines
 	// are down before listenLoop returns.
@@ -1028,27 +1014,9 @@ func (srv *Server) SetupConn(fd net.Conn, flags connFlag, dialDest *enode.Node) 
 	return err
 }
 
-func cleanError(err string) string {
-	switch {
-	case strings.HasSuffix(err, "i/o timeout"):
-		return "i/o timeout"
-	case strings.HasSuffix(err, "closed by the remote host."):
-		return "closed by remote"
-	case strings.HasSuffix(err, "connection reset by peer"):
-		return "closed by remote"
-	default:
-		return err
-	}
-}
-
 func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) error {
 	// Prevent leftover pending conns from entering the handshake.
-	srv.lock.Lock()
-	running := srv.running
-	// reset error counts
-	srv.errors = map[string]uint{}
-	srv.lock.Unlock()
-	if !running {
+	if !srv.running.Load() {
 		return errServerStopped
 	}
 
@@ -1066,10 +1034,7 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) erro
 	// Run the RLPx handshake.
 	remotePubkey, err := c.doEncHandshake(srv.PrivateKey)
 	if err != nil {
-		errStr := cleanError(err.Error())
-		srv.lock.Lock()
-		srv.errors[errStr] = srv.errors[errStr] + 1
-		srv.lock.Unlock()
+		srv.addError(err)
 		srv.logger.Trace("Failed RLPx handshake", "addr", c.fd.RemoteAddr(), "conn", c.flags, "err", err)
 		return err
 	}
@@ -1089,10 +1054,7 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) erro
 	// Run the capability negotiation handshake.
 	phs, err := c.doProtoHandshake(srv.ourHandshake)
 	if err != nil {
-		errStr := cleanError(err.Error())
-		srv.lock.Lock()
-		srv.errors[errStr] = srv.errors[errStr] + 1
-		srv.lock.Unlock()
+		srv.addError(err)
 		clog.Trace("Failed p2p handshake", "err", err)
 		return err
 	}
@@ -1238,4 +1200,43 @@ func (srv *Server) PeersInfo() []*PeerInfo {
 		}
 	}
 	return infos
+}
+
+func (srv *Server) addError(err error) {
+	srv.errorsMu.Lock()
+	defer srv.errorsMu.Unlock()
+	if srv.errors == nil {
+		srv.errors = make(map[string]uint)
+	}
+	srv.errors[cleanError(err.Error())]++
+}
+
+func (srv *Server) resetErrors() {
+	srv.errorsMu.Lock()
+	srv.errors = map[string]uint{}
+	srv.errorsMu.Unlock()
+}
+
+func (srv *Server) listErrors() []interface{} {
+	srv.errorsMu.Lock()
+	defer srv.errorsMu.Unlock()
+
+	list := make([]interface{}, len(srv.errors)*2)
+	for err, count := range srv.errors {
+		list = append(list, err, count)
+	}
+	return list
+}
+
+func cleanError(err string) string {
+	switch {
+	case strings.HasSuffix(err, "i/o timeout"):
+		return "i/o timeout"
+	case strings.HasSuffix(err, "closed by the remote host."):
+		return "closed by remote"
+	case strings.HasSuffix(err, "connection reset by peer"):
+		return "closed by remote"
+	default:
+		return err
+	}
 }

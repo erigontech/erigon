@@ -61,6 +61,7 @@ func (s *Sync) NewUnwindState(id stages.SyncStage, unwindPoint, currentProgress 
 	return &UnwindState{id, unwindPoint, currentProgress, UnwindReason{nil, nil}, s}
 }
 
+// Get the current prune status from the DB
 func (s *Sync) PruneStageState(id stages.SyncStage, forwardProgress uint64, tx kv.Tx, db kv.RwDB) (*PruneState, error) {
 	var pruneProgress uint64
 	var err error
@@ -419,6 +420,7 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, firstCycle bool) (bool, err
 	return hasMore, nil
 }
 
+// Run pruning for stages as per the defined pruning order, if enabled for that stage
 func (s *Sync) RunPrune(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 	s.timings = s.timings[:0]
 	for i := 0; i < len(s.pruningOrder); i++ {
@@ -458,16 +460,23 @@ func (s *Sync) PrintTimings() []interface{} {
 	return logCtx
 }
 
-func PrintTables(db kv.RoDB, tx kv.RwTx) []interface{} {
-	if tx == nil {
-		return nil
-	}
-	buckets := []string{
+func CollectDBMetrics(db kv.RoDB, tx kv.RwTx) []interface{} {
+	res := CollectTableSizes(db, tx, []string{
 		kv.PlainState,
 		kv.AccountChangeSet,
 		kv.StorageChangeSet,
 		kv.EthTx,
 		kv.Log,
+	})
+
+	tx.CollectMetrics()
+
+	return res
+}
+
+func CollectTableSizes(db kv.RoDB, tx kv.Tx, buckets []string) []interface{} {
+	if tx == nil {
+		return nil
 	}
 	bucketSizes := make([]interface{}, 0, 2*(len(buckets)+2))
 	for _, bucket := range buckets {
@@ -487,7 +496,7 @@ func PrintTables(db kv.RoDB, tx kv.RwTx) []interface{} {
 	if db != nil {
 		bucketSizes = append(bucketSizes, "ReclaimableSpace", libcommon.ByteCount(amountOfFreePagesInDb*db.PageSize()))
 	}
-	tx.CollectMetrics()
+
 	return bucketSizes
 }
 
@@ -548,16 +557,17 @@ func (s *Sync) unwindStage(firstCycle bool, stage *Stage, db kv.RwDB, txc wrap.T
 	return nil
 }
 
+// Run the pruning function for the given stage
 func (s *Sync) pruneStage(firstCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx) error {
 	start := time.Now()
-	s.logger.Trace("Prune...", "stage", stage.ID)
+	s.logger.Debug("Prune...", "stage", stage.ID)
 
 	stageState, err := s.StageState(stage.ID, tx, db)
 	if err != nil {
 		return err
 	}
 
-	prune, err := s.PruneStageState(stage.ID, stageState.BlockNumber, tx, db)
+	pruneState, err := s.PruneStageState(stage.ID, stageState.BlockNumber, tx, db)
 	if err != nil {
 		return err
 	}
@@ -565,17 +575,18 @@ func (s *Sync) pruneStage(firstCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx)
 		return err
 	}
 
-	err = stage.Prune(firstCycle, prune, tx, s.logger)
+	err = stage.Prune(firstCycle, pruneState, tx, s.logger)
 	if err != nil {
 		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
 	}
 
 	took := time.Since(start)
-	if took > 60*time.Second {
+	if took > 30*time.Second {
 		logPrefix := s.LogPrefix()
 		s.logger.Info(fmt.Sprintf("[%s] Prune done", logPrefix), "in", took)
 	}
 	s.timings = append(s.timings, Timing{isPrune: true, stage: stage.ID, took: took})
+	s.logger.Debug("Prune DONE", "stage", stage.ID)
 	return nil
 }
 

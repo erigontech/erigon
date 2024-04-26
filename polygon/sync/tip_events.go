@@ -3,6 +3,8 @@ package sync
 import (
 	"context"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
@@ -66,21 +68,22 @@ func (e Event) AsNewSpan() EventNewSpan {
 }
 
 type TipEvents struct {
-	events *EventChannel[Event]
-
+	logger          log.Logger
+	events          *EventChannel[Event]
 	p2pService      p2p.Service
 	heimdallService heimdall.HeimdallNoStore
 }
 
 func NewTipEvents(
+	logger log.Logger,
 	p2pService p2p.Service,
 	heimdallService heimdall.HeimdallNoStore,
 ) *TipEvents {
 	eventsCapacity := uint(1000) // more than 3 milestones
 
 	return &TipEvents{
-		events: NewEventChannel[Event](eventsCapacity),
-
+		logger:          logger,
+		events:          NewEventChannel[Event](eventsCapacity),
 		p2pService:      p2pService,
 		heimdallService: heimdallService,
 	}
@@ -91,6 +94,8 @@ func (te *TipEvents) Events() <-chan Event {
 }
 
 func (te *TipEvents) Run(ctx context.Context) error {
+	te.logger.Debug(syncLogPrefix("running tip events component"))
+
 	newBlockObserverCancel := te.p2pService.RegisterNewBlockObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockPacket]) {
 		te.events.PushEvent(Event{
 			Type: EventTypeNewBlock,

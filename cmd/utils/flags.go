@@ -61,6 +61,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/netutil"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
+	"github.com/ledgerwatch/erigon/turbo/logging"
 )
 
 // These are all the command line flags we support.
@@ -402,7 +403,11 @@ var (
 	}
 	HTTPTraceFlag = cli.BoolFlag{
 		Name:  "http.trace",
-		Usage: "Trace HTTP requests with INFO level",
+		Usage: "Print all HTTP requests to logs with INFO level",
+	}
+	HTTPDebugSingleFlag = cli.BoolFlag{
+		Name:  "http.dbg.single",
+		Usage: "Allow pass HTTP header 'dbg: true' to printt more detailed logs - how this request was executed",
 	}
 	DBReadConcurrencyFlag = cli.IntFlag{
 		Name:  "db.read.concurrency",
@@ -487,6 +492,11 @@ var (
 		Name:  "ws.rpcprefix",
 		Usage: "HTTP path prefix on which JSON-RPC is served. Use '/' to serve on all paths.",
 		Value: "",
+	}
+	WSSubscribeLogsChannelSize = cli.IntFlag{
+		Name:  "ws.api.subscribelogs.channelsize",
+		Usage: "Size of the channel used for websocket logs subscriptions",
+		Value: 8192,
 	}
 	ExecFlag = cli.StringFlag{
 		Name:  "exec",
@@ -799,6 +809,11 @@ var (
 		Value: true,
 	}
 
+	PolygonSyncFlag = cli.BoolFlag{
+		Name:  "polygon.sync",
+		Usage: "Enabling syncing using the new polygon sync component",
+	}
+
 	ConfigFlag = cli.StringFlag{
 		Name:  "config",
 		Usage: "Sets erigon flags from YAML/TOML file",
@@ -859,11 +874,51 @@ var (
 	}
 	SilkwormRpcDaemonFlag = cli.BoolFlag{
 		Name:  "silkworm.rpc",
-		Usage: "Enable embedded Silkworm RPC daemon",
+		Usage: "Enable embedded Silkworm RPC service",
 	}
 	SilkwormSentryFlag = cli.BoolFlag{
 		Name:  "silkworm.sentry",
 		Usage: "Enable embedded Silkworm Sentry service",
+	}
+	SilkwormVerbosityFlag = cli.StringFlag{
+		Name:  "silkworm.verbosity",
+		Usage: "Set the log level for Silkworm console logs",
+		Value: log.LvlInfo.String(),
+	}
+	SilkwormNumContextsFlag = cli.UintFlag{
+		Name:  "silkworm.contexts",
+		Usage: "Number of I/O contexts used in embedded Silkworm RPC and Sentry services (zero means use default in Silkworm)",
+		Value: 0,
+	}
+	SilkwormRpcLogEnabledFlag = cli.BoolFlag{
+		Name:  "silkworm.rpc.log",
+		Usage: "Enable interface log for embedded Silkworm RPC service",
+		Value: false,
+	}
+	SilkwormRpcLogMaxFileSizeFlag = cli.UintFlag{
+		Name:  "silkworm.rpc.log.maxsize",
+		Usage: "Max interface log file size in MB for embedded Silkworm RPC service",
+		Value: 1,
+	}
+	SilkwormRpcLogMaxFilesFlag = cli.UintFlag{
+		Name:  "silkworm.rpc.log.maxfiles",
+		Usage: "Max interface log files for embedded Silkworm RPC service",
+		Value: 100,
+	}
+	SilkwormRpcLogDumpResponseFlag = cli.BoolFlag{
+		Name:  "silkworm.rpc.log.response",
+		Usage: "Dump responses in interface logs for embedded Silkworm RPC service",
+		Value: false,
+	}
+	SilkwormRpcNumWorkersFlag = cli.UintFlag{
+		Name:  "silkworm.rpc.workers",
+		Usage: "Number of worker threads used in embedded Silkworm RPC service (zero means use default in Silkworm)",
+		Value: 0,
+	}
+	SilkwormRpcJsonCompatibilityFlag = cli.BoolFlag{
+		Name:  "silkworm.rpc.compatibility",
+		Usage: "Preserve JSON-RPC compatibility using embedded Silkworm RPC service",
+		Value: true,
 	}
 
 	BeaconAPIFlag = cli.StringSliceFlag{
@@ -1510,6 +1565,7 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.HeimdallURL = ctx.String(HeimdallURLFlag.Name)
 	cfg.WithoutHeimdall = ctx.Bool(WithoutHeimdallFlag.Name)
 	cfg.WithHeimdallMilestones = ctx.Bool(WithHeimdallMilestones.Name)
+	cfg.PolygonSync = ctx.Bool(PolygonSyncFlag.Name)
 }
 
 func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
@@ -1592,6 +1648,15 @@ func setSilkworm(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.SilkwormExecution = ctx.Bool(SilkwormExecutionFlag.Name)
 	cfg.SilkwormRpcDaemon = ctx.Bool(SilkwormRpcDaemonFlag.Name)
 	cfg.SilkwormSentry = ctx.Bool(SilkwormSentryFlag.Name)
+	cfg.SilkwormVerbosity = ctx.String(SilkwormVerbosityFlag.Name)
+	cfg.SilkwormNumContexts = uint32(ctx.Uint64(SilkwormNumContextsFlag.Name))
+	cfg.SilkwormRpcLogEnabled = ctx.Bool(SilkwormRpcLogEnabledFlag.Name)
+	cfg.SilkwormRpcLogDirPath = logging.LogDirPath(ctx)
+	cfg.SilkwormRpcLogMaxFileSize = uint16(ctx.Uint64(SilkwormRpcLogMaxFileSizeFlag.Name))
+	cfg.SilkwormRpcLogMaxFiles = uint16(ctx.Uint(SilkwormRpcLogMaxFilesFlag.Name))
+	cfg.SilkwormRpcLogDumpResponse = ctx.Bool(SilkwormRpcLogDumpResponseFlag.Name)
+	cfg.SilkwormRpcNumWorkers = uint32(ctx.Uint64(SilkwormRpcNumWorkersFlag.Name))
+	cfg.SilkwormRpcJsonCompatibility = ctx.Bool(SilkwormRpcJsonCompatibilityFlag.Name)
 }
 
 // CheckExclusive verifies that only a single instance of the provided flags was

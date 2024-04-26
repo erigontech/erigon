@@ -17,6 +17,7 @@ var (
 	unwindEvery                    uint64
 	batchSizeStr                   string
 	reset, warmup, noCommit        bool
+	resetPruneAt                   bool
 	bucket                         string
 	datadirCli, toChaindata        string
 	migration                      string
@@ -30,6 +31,7 @@ var (
 	pruneTBefore, pruneCBefore     uint64
 	experiments                    []string
 	chain                          string // Which chain to use (mainnet, goerli, sepolia, etc.)
+	outputCsvFile                  string
 
 	commitmentMode string
 	commitmentTrie string
@@ -102,6 +104,10 @@ func withReset(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&warmup, "warmup", false, "warmup relevant tables by parallel random reads")
 }
 
+func withResetPruneAt(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&resetPruneAt, "resetPruneAt", false, "reset prune_at to 0 for a given stage")
+}
+
 func withBucket(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&bucket, "bucket", "", "reset given stage")
 }
@@ -162,6 +168,10 @@ func withStartTx(cmd *cobra.Command) {
 
 func withTraceFromTx(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&traceFromTx, "txtrace.from", 0, "start tracing from tx number")
+}
+
+func withOutputCsvFile(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&outputCsvFile, "output.csv.file", "", "location to output csv data")
 }
 
 func withCommitment(cmd *cobra.Command) {

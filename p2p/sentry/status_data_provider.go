@@ -75,7 +75,7 @@ func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*proto_sentry.S
 }
 
 func ReadChainHeadWithTx(tx kv.Tx) (ChainHead, error) {
-	header := rawdb.ReadCurrentHeader(tx)
+	header := rawdb.ReadCurrentHeaderHavingBody(tx)
 	if header == nil {
 		return ChainHead{}, errors.New("ReadChainHead: ReadCurrentHeader error")
 	}

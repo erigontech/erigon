@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
@@ -87,7 +88,7 @@ type ExecuteBlockCfg struct {
 	historyV3 bool
 	syncCfg   ethconfig.Sync
 	genesis   *types.Genesis
-	agg       *libstate.AggregatorV3
+	agg       *libstate.Aggregator
 
 	silkworm *silkworm.Silkworm
 }
@@ -110,7 +111,7 @@ func StageExecuteBlocksCfg(
 	hd headerDownloader,
 	genesis *types.Genesis,
 	syncCfg ethconfig.Sync,
-	agg *libstate.AggregatorV3,
+	agg *libstate.Aggregator,
 	silkworm *silkworm.Silkworm,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
@@ -208,11 +209,20 @@ func executeBlock(
 func gatherNoPruneReceipts(receipts *types.Receipts, chainCfg *chain.Config) bool {
 	cr := types.Receipts{}
 	for _, r := range *receipts {
-		for _, l := range r.Logs {
-			if chainCfg.NoPruneContracts[l.Address] {
-				cr = append(cr, r)
-				break
+		toStore := false
+		if chainCfg.NoPruneContracts != nil && chainCfg.NoPruneContracts[r.ContractAddress] {
+			toStore = true
+		} else {
+			for _, l := range r.Logs {
+				if chainCfg.NoPruneContracts != nil && chainCfg.NoPruneContracts[l.Address] {
+					toStore = true
+					break
+				}
 			}
+		}
+
+		if toStore {
+			cr = append(cr, r)
 		}
 	}
 	receipts = &cr
@@ -306,7 +316,7 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 }
 
 // reconstituteBlock - First block which is not covered by the history snapshot files
-func reconstituteBlock(agg *libstate.AggregatorV3, db kv.RoDB, tx kv.Tx) (n uint64, ok bool, err error) {
+func reconstituteBlock(agg *libstate.Aggregator, db kv.RoDB, tx kv.Tx) (n uint64, ok bool, err error) {
 	sendersProgress, err := senderStageProgress(tx, db)
 	if err != nil {
 		return 0, false, err
@@ -586,7 +596,7 @@ Loop:
 			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, gas, float64(currentStateGas)/float64(gasState), batch, logger, s.BlockNumber, to, startTime)
 			gas = 0
 			txc.Tx.CollectMetrics()
-			syncMetrics[stages.Execution].SetUint64(blockNum)
+			stages.SyncMetrics[stages.Execution].SetUint64(blockNum)
 		}
 	}
 
@@ -937,7 +947,7 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	if cfg.historyV3 {
 		cfg.agg.SetTx(tx)
 		if initialCycle {
-			if err = cfg.agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil { // prune part of retired data, before commit
+			if err = cfg.agg.Prune(ctx, config3.HistoryV3AggregationStep/10); err != nil { // prune part of retired data, before commit
 				return err
 			}
 		} else {

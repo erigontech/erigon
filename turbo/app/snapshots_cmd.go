@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/config3"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
@@ -206,12 +208,13 @@ func doIntegrity(cliCtx *cli.Context) error {
 
 	cfg := ethconfig.NewSnapCfg(true, false, true)
 
-	blockSnaps, borSnaps, blockRetire, agg, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	blockSnaps, borSnaps, caplinSnaps, blockRetire, agg, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
 	defer blockSnaps.Close()
 	defer borSnaps.Close()
+	defer caplinSnaps.Close()
 	defer agg.Close()
 
 	blockReader, _ := blockRetire.IO()
@@ -354,15 +357,19 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 
 	cfg := ethconfig.NewSnapCfg(true, false, true)
 	chainConfig := fromdb.ChainConfig(chainDB)
-	blockSnaps, borSnaps, br, agg, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
-
+	blockSnaps, borSnaps, caplinSnaps, br, agg, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
 	defer blockSnaps.Close()
 	defer borSnaps.Close()
+	defer caplinSnaps.Close()
 	defer agg.Close()
+
 	if err := br.BuildMissedIndicesIfNeed(ctx, "Indexing", nil, chainConfig); err != nil {
+		return err
+	}
+	if err := caplinSnaps.BuildMissingIndices(ctx, logger); err != nil {
 		return err
 	}
 	err = agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers())
@@ -374,7 +381,8 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 }
 
 func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (
-	blockSnaps *freezeblocks.RoSnapshots, borSnaps *freezeblocks.BorRoSnapshots, br *freezeblocks.BlockRetire, agg *libstate.AggregatorV3, err error,
+	blockSnaps *freezeblocks.RoSnapshots, borSnaps *freezeblocks.BorRoSnapshots, csn *freezeblocks.CaplinSnapshots,
+	br *freezeblocks.BlockRetire, agg *libstate.Aggregator, err error,
 ) {
 	blockSnaps = freezeblocks.NewRoSnapshots(cfg, dirs.Snap, 0, logger)
 	if err = blockSnaps.ReopenFolder(); err != nil {
@@ -386,10 +394,24 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	if err = borSnaps.ReopenFolder(); err != nil {
 		return
 	}
+
+	chainConfig := fromdb.ChainConfig(chainDB)
+
+	var beaconConfig *clparams.BeaconChainConfig
+	_, beaconConfig, _, err = clparams.GetConfigsByNetworkName(chainConfig.ChainName)
+	if err != nil {
+		return
+	}
+
+	csn = freezeblocks.NewCaplinSnapshots(cfg, beaconConfig, dirs, logger)
+	if err = csn.ReopenFolder(); err != nil {
+		return
+	}
+
 	borSnaps.LogStat("open")
 	agg = openAgg(ctx, dirs, chainDB, logger)
 	err = chainDB.View(ctx, func(tx kv.Tx) error {
-		ac := agg.MakeContext()
+		ac := agg.BeginFilesRo()
 		defer ac.Close()
 		//ac.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
 		//	_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
@@ -403,7 +425,6 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 
 	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps)
 	blockWriter := blockio.NewBlockWriter(fromdb.HistV3(chainDB))
-	chainConfig := fromdb.ChainConfig(chainDB)
 	br = freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, chainConfig, nil, logger)
 	return
 }
@@ -529,16 +550,20 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	defer db.Close()
 
 	cfg := ethconfig.NewSnapCfg(true, false, true)
-	blockSnaps, borSnaps, br, agg, err := openSnaps(ctx, cfg, dirs, db, logger)
+	blockSnaps, borSnaps, caplinSnaps, br, agg, err := openSnaps(ctx, cfg, dirs, db, logger)
 	if err != nil {
 		return err
 	}
 	defer blockSnaps.Close()
 	defer borSnaps.Close()
+	defer caplinSnaps.Close()
 	defer agg.Close()
 
 	chainConfig := fromdb.ChainConfig(db)
 	if err := br.BuildMissedIndicesIfNeed(ctx, "retire", nil, chainConfig); err != nil {
+		return err
+	}
+	if err := caplinSnaps.BuildMissingIndices(ctx, logger); err != nil {
 		return err
 	}
 
@@ -591,7 +616,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	for i := 0; i < 1024; i++ {
 		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 			agg.SetTx(tx)
-			if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/2); err != nil {
+			if err = agg.Prune(ctx, config3.HistoryV3AggregationStep/2); err != nil {
 				return err
 			}
 			return err
@@ -637,7 +662,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	for i := 0; i < 1024; i++ {
 		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 			agg.SetTx(tx)
-			if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil {
+			if err = agg.Prune(ctx, config3.HistoryV3AggregationStep/10); err != nil {
 				return err
 			}
 			return err
@@ -792,8 +817,8 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 	opts = opts.Accede()
 	return opts
 }
-func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *libstate.AggregatorV3 {
-	agg, err := libstate.NewAggregatorV3(ctx, dirs.Snap, dirs.Tmp, ethconfig.HistoryV3AggregationStep, chainDB, logger)
+func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *libstate.Aggregator {
+	agg, err := libstate.NewAggregator(ctx, dirs.Snap, dirs.Tmp, config3.HistoryV3AggregationStep, chainDB, logger)
 	if err != nil {
 		panic(err)
 	}

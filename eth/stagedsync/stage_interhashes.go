@@ -5,10 +5,11 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"math/bits"
 	"slices"
 	"sync/atomic"
+
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
@@ -40,10 +41,10 @@ type TrieCfg struct {
 	hd                *headerdownload.HeaderDownload
 
 	historyV3 bool
-	agg       *state.AggregatorV3
+	agg       *state.Aggregator
 }
 
-func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, tmpDir string, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, historyV3 bool, agg *state.AggregatorV3) TrieCfg {
+func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, tmpDir string, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, historyV3 bool, agg *state.Aggregator) TrieCfg {
 	return TrieCfg{
 		db:                db,
 		checkRoot:         checkRoot,

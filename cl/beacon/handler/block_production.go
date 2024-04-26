@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Giulio2002/bls"
 	"github.com/go-chi/chi/v5"
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -28,7 +27,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/transition"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
-	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/log/v3"
@@ -171,10 +169,6 @@ func (a *ApiHandler) produceBeaconBody(ctx context.Context, apiVersion int, base
 	beaconBody.RandaoReveal = randaoReveal
 	beaconBody.Graffiti = graffiti
 	beaconBody.Version = stateVersion
-	// Sync aggregate is empty for now.
-	beaconBody.SyncAggregate = &cltypes.SyncAggregate{
-		SyncCommiteeSignature: bls.InfiniteSignature,
-	}
 
 	// Build execution payload
 	latestExecutionPayload := baseState.LatestExecutionPayloadHeader()
@@ -187,7 +181,7 @@ func (a *ApiHandler) produceBeaconBody(ctx context.Context, apiVersion int, base
 	if err != nil {
 		return nil, 0, err
 	}
-	currEpoch := utils.GetCurrentEpoch(a.genesisCfg.GenesisTime, a.beaconChainCfg.SecondsPerSlot, a.beaconChainCfg.SlotsPerEpoch)
+	currEpoch := a.ethClock.GetCurrentEpoch()
 	random := baseState.GetRandaoMixes(currEpoch)
 
 	var executionPayload *cltypes.Eth1Block
@@ -309,6 +303,15 @@ func (a *ApiHandler) produceBeaconBody(ctx context.Context, apiVersion int, base
 			}
 		}
 	}()
+	// process the sync aggregate in parallel
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		beaconBody.SyncAggregate, err = a.syncMessagePool.GetSyncAggregate(targetSlot-1, blockRoot)
+		if err != nil {
+			log.Error("BlockProduction: Failed to get sync aggregate", "err", err)
+		}
+	}()
 	wg.Wait()
 	if executionPayload == nil {
 		return nil, 0, fmt.Errorf("failed to produce execution payload")
@@ -361,7 +364,7 @@ func (a *ApiHandler) parseEthConsensusVersion(str string, apiVersion int) (clpar
 		return 0, fmt.Errorf("Eth-Consensus-Version header is required")
 	}
 	if str == "" && apiVersion == 1 {
-		currentEpoch := utils.GetCurrentEpoch(a.genesisCfg.GenesisTime, a.beaconChainCfg.SecondsPerSlot, a.beaconChainCfg.SlotsPerEpoch)
+		currentEpoch := a.ethClock.GetCurrentEpoch()
 		return a.beaconChainCfg.GetCurrentStateVersion(currentEpoch), nil
 	}
 	return clparams.StringToClVersion(str)

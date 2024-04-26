@@ -210,6 +210,7 @@ func (pi *PeerInfo) Remove(reason *p2p.PeerError) {
 		pi.removeReason = reason
 		close(pi.removed)
 		pi.ctxCancel()
+		pi.peer.Disconnect(reason)
 	})
 }
 
@@ -648,6 +649,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 
 				ss.GoodPeers.Store(peerID, peerInfo)
 				ss.sendNewPeerToClients(gointerfaces.ConvertHashToH512(peerID))
+				defer ss.sendGonePeerToClients(gointerfaces.ConvertHashToH512(peerID))
 				getBlockHeadersErr := ss.getBlockHeaders(ctx, *peerBestHash, peerID)
 				if getBlockHeadersErr != nil {
 					return p2p.NewPeerError(p2p.PeerErrorFirstMessageSend, p2p.DiscNetworkError, getBlockHeadersErr, "p2p.Protocol.Run getBlockHeaders failure")
@@ -655,7 +657,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 
 				cap := p2p.Cap{Name: eth.ProtocolName, Version: protocol}
 
-				err = runPeer(
+				return runPeer(
 					ctx,
 					peerID,
 					cap,
@@ -665,8 +667,6 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 					ss.hasSubscribers,
 					logger,
 				)
-				ss.sendGonePeerToClients(gointerfaces.ConvertHashToH512(peerID))
-				return err
 			},
 			NodeInfo: func() interface{} {
 				return readNodeInfo()
@@ -713,10 +713,11 @@ type GrpcServer struct {
 	Protocols            []p2p.Protocol
 	discoveryDNS         []string
 	GoodPeers            sync.Map
-	statusData           *proto_sentry.StatusData
-	P2pServer            *p2p.Server
 	TxSubscribed         uint32 // Set to non-zero if downloader is subscribed to transaction messages
-	lock                 sync.RWMutex
+	p2pServer            *p2p.Server
+	p2pServerLock        sync.RWMutex
+	statusData           *proto_sentry.StatusData
+	statusDataLock       sync.RWMutex
 	messageStreams       map[proto_sentry.MessageId]map[uint64]chan *proto_sentry.InboundMessage
 	messagesSubscriberID uint64
 	messageStreamsLock   sync.RWMutex
@@ -906,6 +907,7 @@ func (ss *GrpcServer) SendMessageById(_ context.Context, inreq *proto_sentry.Sen
 	msgcode := eth.FromProto[ss.Protocols[0].Version][inreq.Data.Id]
 	if msgcode != eth.GetBlockHeadersMsg &&
 		msgcode != eth.BlockHeadersMsg &&
+		msgcode != eth.GetBlockBodiesMsg &&
 		msgcode != eth.BlockBodiesMsg &&
 		msgcode != eth.GetReceiptsMsg &&
 		msgcode != eth.ReceiptsMsg &&
@@ -996,44 +998,60 @@ func (ss *GrpcServer) HandShake(context.Context, *emptypb.Empty) (*proto_sentry.
 	return reply, nil
 }
 
+func (ss *GrpcServer) startP2PServer(genesisHash libcommon.Hash) (*p2p.Server, error) {
+	if !ss.p2p.NoDiscovery {
+		if len(ss.discoveryDNS) == 0 {
+			if url := params.KnownDNSNetwork(genesisHash, "all"); url != "" {
+				ss.discoveryDNS = []string{url}
+			}
+		}
+		for _, p := range ss.Protocols {
+			dialCandidates, err := setupDiscovery(ss.discoveryDNS)
+			if err != nil {
+				return nil, err
+			}
+			p.DialCandidates = dialCandidates
+		}
+	}
+
+	srv, err := makeP2PServer(*ss.p2p, genesisHash, ss.Protocols)
+	if err != nil {
+		return nil, err
+	}
+
+	if err = srv.Start(ss.ctx, ss.logger); err != nil {
+		srv.Stop()
+		return nil, fmt.Errorf("could not start server: %w", err)
+	}
+
+	return srv, nil
+}
+
+func (ss *GrpcServer) getP2PServer() *p2p.Server {
+	ss.p2pServerLock.RLock()
+	defer ss.p2pServerLock.RUnlock()
+	return ss.p2pServer
+}
+
 func (ss *GrpcServer) SetStatus(ctx context.Context, statusData *proto_sentry.StatusData) (*proto_sentry.SetStatusReply, error) {
 	genesisHash := gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
 
-	ss.lock.Lock()
-	defer ss.lock.Unlock()
 	reply := &proto_sentry.SetStatusReply{}
 
-	if ss.P2pServer == nil {
-		var err error
-		if !ss.p2p.NoDiscovery {
-			if len(ss.discoveryDNS) == 0 {
-				if url := params.KnownDNSNetwork(genesisHash, "all"); url != "" {
-					ss.discoveryDNS = []string{url}
-				}
-			}
-			for _, p := range ss.Protocols {
-				p.DialCandidates, err = setupDiscovery(ss.discoveryDNS)
-				if err != nil {
-					return nil, err
-				}
-			}
-		}
-
-		srv, err := makeP2PServer(*ss.p2p, genesisHash, ss.Protocols)
+	ss.p2pServerLock.Lock()
+	defer ss.p2pServerLock.Unlock()
+	if ss.p2pServer == nil {
+		srv, err := ss.startP2PServer(genesisHash)
 		if err != nil {
 			return reply, err
 		}
-
-		// Add protocol
-		if err = srv.Start(ss.ctx, ss.logger); err != nil {
-			srv.Stop()
-			return reply, fmt.Errorf("could not start server: %w", err)
-		}
-
-		ss.P2pServer = srv
+		ss.p2pServer = srv
 	}
 
-	ss.P2pServer.LocalNode().Set(eth.CurrentENREntryFromForks(statusData.ForkData.HeightForks, statusData.ForkData.TimeForks, genesisHash, statusData.MaxBlockHeight, statusData.MaxBlockTime))
+	ss.statusDataLock.Lock()
+	defer ss.statusDataLock.Unlock()
+
+	ss.p2pServer.LocalNode().Set(eth.CurrentENREntryFromForks(statusData.ForkData.HeightForks, statusData.ForkData.TimeForks, genesisHash, statusData.MaxBlockHeight, statusData.MaxBlockTime))
 	if ss.statusData == nil || statusData.MaxBlockHeight != 0 {
 		// Not overwrite statusData if the message contains zero MaxBlock (comes from standalone transaction pool)
 		ss.statusData = statusData
@@ -1042,11 +1060,12 @@ func (ss *GrpcServer) SetStatus(ctx context.Context, statusData *proto_sentry.St
 }
 
 func (ss *GrpcServer) Peers(_ context.Context, _ *emptypb.Empty) (*proto_sentry.PeersReply, error) {
-	if ss.P2pServer == nil {
+	p2pServer := ss.getP2PServer()
+	if p2pServer == nil {
 		return nil, errors.New("p2p server was not started")
 	}
 
-	peers := ss.P2pServer.PeersInfo()
+	peers := p2pServer.PeersInfo()
 
 	var reply proto_sentry.PeersReply
 	reply.Peers = make([]*proto_types.PeerInfo, 0, len(peers))
@@ -1125,8 +1144,8 @@ func setupDiscovery(urls []string) (enode.Iterator, error) {
 }
 
 func (ss *GrpcServer) GetStatus() *proto_sentry.StatusData {
-	ss.lock.RLock()
-	defer ss.lock.RUnlock()
+	ss.statusDataLock.RLock()
+	defer ss.statusDataLock.RUnlock()
 	return ss.statusData
 }
 
@@ -1213,8 +1232,9 @@ func (ss *GrpcServer) Messages(req *proto_sentry.MessagesRequest, server proto_s
 
 // Close performs cleanup operations for the sentry
 func (ss *GrpcServer) Close() {
-	if ss.P2pServer != nil {
-		ss.P2pServer.Stop()
+	p2pServer := ss.getP2PServer()
+	if p2pServer != nil {
+		p2pServer.Stop()
 	}
 }
 
@@ -1246,16 +1266,23 @@ func (ss *GrpcServer) AddPeer(_ context.Context, req *proto_sentry.AddPeerReques
 	if err != nil {
 		return nil, err
 	}
-	ss.P2pServer.AddPeer(node)
+
+	p2pServer := ss.getP2PServer()
+	if p2pServer == nil {
+		return nil, errors.New("p2p server was not started")
+	}
+	p2pServer.AddPeer(node)
+
 	return &proto_sentry.AddPeerReply{Success: true}, nil
 }
 
 func (ss *GrpcServer) NodeInfo(_ context.Context, _ *emptypb.Empty) (*proto_types.NodeInfoReply, error) {
-	if ss.P2pServer == nil {
+	p2pServer := ss.getP2PServer()
+	if p2pServer == nil {
 		return nil, errors.New("p2p server was not started")
 	}
 
-	info := ss.P2pServer.NodeInfo()
+	info := p2pServer.NodeInfo()
 	ret := &proto_types.NodeInfoReply{
 		Id:    info.ID,
 		Name:  info.Name,

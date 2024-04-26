@@ -81,7 +81,7 @@ func (e *EngineServer) Start(
 	blockReader services.FullBlockReader,
 	filters *rpchelper.Filters,
 	stateCache kvcache.Cache,
-	agg *libstate.AggregatorV3,
+	agg *libstate.Aggregator,
 	engineReader consensus.EngineReader,
 	eth rpchelper.ApiBackend,
 	txPool txpool.TxpoolClient,
@@ -89,7 +89,7 @@ func (e *EngineServer) Start(
 ) {
 	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, agg, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader, httpConfig.Dirs)
 
-	ethImpl := jsonrpc.NewEthAPI(base, db, eth, txPool, mining, httpConfig.Gascap, httpConfig.ReturnDataLimit, httpConfig.AllowUnprotectedTxs, httpConfig.MaxGetProofRewindBlockCount, e.logger)
+	ethImpl := jsonrpc.NewEthAPI(base, db, eth, txPool, mining, httpConfig.Gascap, httpConfig.ReturnDataLimit, httpConfig.AllowUnprotectedTxs, httpConfig.MaxGetProofRewindBlockCount, httpConfig.WebsocketSubscribeLogsChannelSize, e.logger)
 
 	// engineImpl := NewEngineAPI(base, db, engineBackend)
 	// e.startEngineMessageHandler()

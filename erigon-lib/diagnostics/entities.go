@@ -167,6 +167,28 @@ type BlockHeadersUpdate struct {
 	RejectedBadHeaders  int     `json:"rejectedBadHeaders"`
 }
 
+type HeadersWaitingUpdate struct {
+	From uint64 `json:"from"`
+}
+
+type HeaderCanonicalMarkerUpdate struct {
+	AncestorHeight uint64 `json:"ancestorHeight"`
+	AncestorHash   string `json:"ancestorHash"`
+}
+type HeadersProcessedUpdate struct {
+	Highest   uint64  `json:"highest"`
+	Age       int     `json:"age"`
+	Headers   uint64  `json:"headers"`
+	In        float64 `json:"in"`
+	BlkPerSec uint64  `json:"blkPerSec"`
+}
+
+type Headers struct {
+	WaitingForHeaders uint64                      `json:"waitingForHeaders"`
+	WriteHeaders      BlockHeadersUpdate          `json:"writeHeaders"`
+	CanonicalMarker   HeaderCanonicalMarkerUpdate `json:"canonicalMarker"`
+	Processed         HeadersProcessedUpdate      `json:"processed"`
+}
 type BodiesInfo struct {
 	BlockDownload BodiesDownloadBlockUpdate `json:"blockDownload"`
 	BlockWrite    BodiesWriteBlockUpdate    `json:"blockWrite"`
@@ -215,6 +237,12 @@ type MemoryStats struct {
 	OtherFields []interface{}
 	Timestamp   time.Time `json:"timestamp"`
 	StageIndex  int       `json:"stageIndex"`
+}
+
+type NetworkSpeedTestResult struct {
+	Latency       time.Duration `json:"latency"`
+	DownloadSpeed float64       `json:"downloadSpeed"`
+	UploadSpeed   float64       `json:"uploadSpeed"`
 }
 
 func (ti MemoryStats) Type() Type {
@@ -274,5 +302,17 @@ func (ti CurrentSyncStage) Type() Type {
 }
 
 func (ti PeerStatisticMsgUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti HeadersWaitingUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti HeaderCanonicalMarkerUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti HeadersProcessedUpdate) Type() Type {
 	return TypeOf(ti)
 }

@@ -48,7 +48,7 @@ type MemoryMutation struct {
 // batch.Commit()
 func NewMemoryBatch(tx kv.Tx, tmpDir string, logger log.Logger) *MemoryMutation {
 	tmpDB := mdbx.NewMDBX(logger).InMem(tmpDir).GrowthStep(64 * datasize.MB).MapSize(512 * datasize.GB).MustOpen()
-	memTx, err := tmpDB.BeginRw(context.Background())
+	memTx, err := tmpDB.BeginRw(context.Background()) // nolint:gocritic
 	if err != nil {
 		panic(err)
 	}
@@ -507,37 +507,47 @@ func (m *MemoryMutation) Flush(tx kv.RwTx) error {
 	// Iterate over each bucket and apply changes accordingly.
 	for _, bucket := range buckets {
 		if isTablePurelyDupsort(bucket) {
-			cbucket, err := m.memTx.CursorDupSort(bucket)
-			if err != nil {
-				return err
-			}
-			defer cbucket.Close()
-			dbCursor, err := tx.RwCursorDupSort(bucket)
-			if err != nil {
-				return err
-			}
-			defer dbCursor.Close()
-			for k, v, err := cbucket.First(); k != nil; k, v, err = cbucket.Next() {
+			if err := func() error {
+				cbucket, err := m.memTx.CursorDupSort(bucket)
 				if err != nil {
 					return err
 				}
-				if err := dbCursor.Put(k, v); err != nil {
+				defer cbucket.Close()
+				dbCursor, err := tx.RwCursorDupSort(bucket)
+				if err != nil {
 					return err
 				}
+				defer dbCursor.Close()
+				for k, v, err := cbucket.First(); k != nil; k, v, err = cbucket.Next() {
+					if err != nil {
+						return err
+					}
+					if err := dbCursor.Put(k, v); err != nil {
+						return err
+					}
+				}
+				return nil
+			}(); err != nil {
+				return err
 			}
 		} else {
-			cbucket, err := m.memTx.Cursor(bucket)
-			if err != nil {
-				return err
-			}
-			defer cbucket.Close()
-			for k, v, err := cbucket.First(); k != nil; k, v, err = cbucket.Next() {
+			if err := func() error {
+				cbucket, err := m.memTx.Cursor(bucket)
 				if err != nil {
 					return err
 				}
-				if err := tx.Put(bucket, k, v); err != nil {
-					return err
+				defer cbucket.Close()
+				for k, v, err := cbucket.First(); k != nil; k, v, err = cbucket.Next() {
+					if err != nil {
+						return err
+					}
+					if err := tx.Put(bucket, k, v); err != nil {
+						return err
+					}
 				}
+				return nil
+			}(); err != nil {
+				return err
 			}
 		}
 	}
