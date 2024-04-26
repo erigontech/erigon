@@ -1,5 +1,5 @@
 {
-  "ChainName": "goerli",
+  "chainName": "goerli",
   "chainId": 5,
   "consensus": "clique",
   "homesteadBlock": 0,

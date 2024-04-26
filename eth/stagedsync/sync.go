@@ -45,8 +45,6 @@ func (s *Sync) Len() int {
 	return len(s.stages)
 }
 
-func (s *Sync) Cfg() ethconfig.Sync { return s.cfg }
-
 func (s *Sync) UnwindPoint() uint64 {
 	return *s.unwindPoint
 }
@@ -462,16 +460,23 @@ func (s *Sync) PrintTimings() []interface{} {
 	return logCtx
 }
 
-func PrintTables(db kv.RoDB, tx kv.RwTx) []interface{} {
-	if tx == nil {
-		return nil
-	}
-	buckets := []string{
+func CollectDBMetrics(db kv.RoDB, tx kv.RwTx) []interface{} {
+	res := CollectTableSizes(db, tx, []string{
 		kv.PlainState,
 		kv.AccountChangeSet,
 		kv.StorageChangeSet,
 		kv.EthTx,
 		kv.Log,
+	})
+
+	tx.CollectMetrics()
+
+	return res
+}
+
+func CollectTableSizes(db kv.RoDB, tx kv.Tx, buckets []string) []interface{} {
+	if tx == nil {
+		return nil
 	}
 	bucketSizes := make([]interface{}, 0, 2*(len(buckets)+2))
 	for _, bucket := range buckets {
@@ -491,7 +496,7 @@ func PrintTables(db kv.RoDB, tx kv.RwTx) []interface{} {
 	if db != nil {
 		bucketSizes = append(bucketSizes, "ReclaimableSpace", libcommon.ByteCount(amountOfFreePagesInDb*db.PageSize()))
 	}
-	tx.CollectMetrics()
+
 	return bucketSizes
 }
 

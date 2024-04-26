@@ -6,12 +6,12 @@ import (
 	"encoding/binary"
 	"fmt"
 	"runtime"
+	"slices"
 	"time"
 
 	"github.com/RoaringBitmap/roaring"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"

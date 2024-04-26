@@ -1,11 +1,10 @@
 package forkchoice
 
 import (
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
-
-	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"

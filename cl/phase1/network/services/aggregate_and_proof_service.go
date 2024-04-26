@@ -3,10 +3,14 @@ package services
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
 	"github.com/Giulio2002/bls"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/pkg/errors"
+
 	"github.com/ledgerwatch/erigon/cl/aggregation"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -16,9 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/pkg/errors"
-	"golang.org/x/exp/slices"
 )
 
 type aggregateJob struct {

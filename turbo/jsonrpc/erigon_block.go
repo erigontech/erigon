@@ -5,8 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"sort"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -103,7 +104,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	firstHeaderTime := firstHeader.Time
 
 	if currentHeaderTime <= uintTimestamp {
-		blockResponse, err := buildBlockResponse(api._blockReader, tx, highestNumber, fullTx)
+		blockResponse, err := buildBlockResponse(ctx, api._blockReader, tx, highestNumber, fullTx)
 		if err != nil {
 			return nil, err
 		}
@@ -112,7 +113,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	}
 
 	if firstHeaderTime >= uintTimestamp {
-		blockResponse, err := buildBlockResponse(api._blockReader, tx, 0, fullTx)
+		blockResponse, err := buildBlockResponse(ctx, api._blockReader, tx, 0, fullTx)
 		if err != nil {
 			return nil, err
 		}
@@ -156,7 +157,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 		resultingHeader = beforeHeader
 	}
 
-	response, err := buildBlockResponse(api._blockReader, tx, uint64(blockNum), fullTx)
+	response, err := buildBlockResponse(ctx, api._blockReader, tx, uint64(blockNum), fullTx)
 	if err != nil {
 		return nil, err
 	}
@@ -164,8 +165,8 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	return response, nil
 }
 
-func buildBlockResponse(br services.FullBlockReader, db kv.Tx, blockNum uint64, fullTx bool) (map[string]interface{}, error) {
-	header, err := br.HeaderByNumber(context.Background(), db, blockNum)
+func buildBlockResponse(ctx context.Context, br services.FullBlockReader, db kv.Tx, blockNum uint64, fullTx bool) (map[string]interface{}, error) {
+	header, err := br.HeaderByNumber(ctx, db, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +174,7 @@ func buildBlockResponse(br services.FullBlockReader, db kv.Tx, blockNum uint64, 
 		return nil, nil
 	}
 
-	block, _, err := br.BlockWithSenders(context.Background(), db, header.Hash(), blockNum)
+	block, _, err := br.BlockWithSenders(ctx, db, header.Hash(), blockNum)
 	if err != nil {
 		return nil, err
 	}

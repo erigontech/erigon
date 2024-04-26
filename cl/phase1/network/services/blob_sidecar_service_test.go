@@ -1,7 +1,8 @@
 package services
 
 import (
-	context "context"
+	"context"
+	_ "embed"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -14,9 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/stretchr/testify/require"
-	gomock "go.uber.org/mock/gomock"
-
-	_ "embed"
+	"go.uber.org/mock/gomock"
 )
 
 //go:embed test_data/blob_sidecar_service_blob.ssz_snappy

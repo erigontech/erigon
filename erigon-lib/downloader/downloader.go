@@ -33,6 +33,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -47,7 +48,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/tidwall/btree"
-	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 	"golang.org/x/time/rate"
@@ -808,23 +808,6 @@ type seedHash struct {
 	reported bool
 }
 
-// fsyncDB - to not loose results of downloading on power-off
-// See `erigon-lib/downloader/mdbx_piece_completion.go` for explanation
-func (d *Downloader) fsyncDB() error {
-	return d.db.Update(d.ctx, func(tx kv.RwTx) error {
-		v, err := tx.GetOne(kv.BittorrentInfo, []byte("_fsync"))
-		if err != nil {
-			return err
-		}
-		if len(v) == 0 || v[0] == 0 {
-			v = []byte{1}
-		} else {
-			v = []byte{0}
-		}
-		return tx.Put(kv.BittorrentInfo, []byte("_fsync"), v)
-	})
-}
-
 func (d *Downloader) mainLoop(silent bool) error {
 	if d.webseedsDiscover {
 		// CornerCase: no peers -> no anoncments to trackers -> no magnetlink resolution (but magnetlink has filename)
@@ -1317,7 +1300,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 	defer statEvery.Stop()
 
 	var m runtime.MemStats
-	justCompleted := true
 	for {
 		select {
 		case <-d.ctx.Done():
@@ -1334,11 +1316,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 			dbg.ReadMemStats(&m)
 			if stats.Completed {
-				if justCompleted {
-					justCompleted = false
-					_ = d.fsyncDB()
-				}
-
 				d.logger.Info("[snapshots] Seeding",
 					"up", common.ByteCount(stats.UploadRate)+"/s",
 					"peers", stats.PeersUnique,
@@ -2303,7 +2280,7 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 	if err := g.Wait(); err != nil {
 		return err
 	}
-	return d.fsyncDB()
+	return nil
 }
 
 // AddNewSeedableFile decides what we do depending on wether we have the .seg file or the .torrent file
