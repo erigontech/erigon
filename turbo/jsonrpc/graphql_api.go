@@ -41,7 +41,7 @@ func (api *GraphQLAPIImpl) GetChainID(ctx context.Context) (*big.Int, error) {
 	}
 	defer tx.Rollback()
 
-	response, err := api.chainConfig(tx)
+	response, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +69,7 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 		return nil, err
 	}
 
-	chainConfig, err := api.chainConfig(tx)
+	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
