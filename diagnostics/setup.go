@@ -14,17 +14,14 @@ import (
 
 var (
 	diagnosticsDisabledFlag = cli.BoolFlag{
-		Name:  "diagnostics.disabled",
-		Usage: "Disable diagnostics",
+		Name: "diagnostics.disabled",
 	}
 	diagnosticsAddrFlag = cli.StringFlag{
 		Name:  "diagnostics.addr",
-		Usage: "Diagnostics HTTP server listening interface",
 		Value: "127.0.0.1",
 	}
 	diagnosticsPortFlag = cli.UintFlag{
 		Name:  "diagnostics.port",
-		Usage: "Diagnostics HTTP server listening port",
 		Value: 6059,
 	}
 )
