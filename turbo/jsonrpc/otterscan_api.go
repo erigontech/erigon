@@ -537,8 +537,11 @@ func delegateIssuance(tx kv.Tx, block *types.Block, chainConfig *chain.Config, e
 	return ret, nil
 }
 
-func delegateBlockFees(ctx context.Context, tx kv.Tx, block *types.Block, senders []common.Address, chainConfig *chain.Config, receipts types.Receipts) (uint64, error) {
-	fees := uint64(0)
+func delegateBlockFees(ctx context.Context, tx kv.Tx, block *types.Block, senders []common.Address, chainConfig *chain.Config, receipts types.Receipts) (*big.Int, error) {
+	fee := big.NewInt(0)
+	gasUsed := big.NewInt(0)
+
+	totalFees := big.NewInt(0)
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
 		effectiveGasPrice := uint64(0)
@@ -549,10 +552,15 @@ func delegateBlockFees(ctx context.Context, tx kv.Tx, block *types.Block, sender
 			gasPrice := new(big.Int).Add(block.BaseFee(), txn.GetEffectiveGasTip(baseFee).ToBig())
 			effectiveGasPrice = gasPrice.Uint64()
 		}
-		fees += effectiveGasPrice * receipt.GasUsed
+
+		fee.SetUint64(effectiveGasPrice)
+		gasUsed.SetUint64(receipt.GasUsed)
+		fee.Mul(fee, gasUsed)
+
+		totalFees.Add(totalFees, fee)
 	}
 
-	return fees, nil
+	return totalFees, nil
 }
 
 func (api *OtterscanAPIImpl) getBlockWithSenders(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Block, []common.Address, error) {
