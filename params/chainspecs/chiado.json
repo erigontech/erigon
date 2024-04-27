@@ -1,5 +1,5 @@
 {
-  "ChainName": "chiado",
+  "chainName": "chiado",
   "chainId": 10200,
   "consensus": "aura",
   "homesteadBlock": 0,
