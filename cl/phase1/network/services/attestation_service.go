@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/ledgerwatch/erigon/cl/validator/committee_subscription"
+	"github.com/ledgerwatch/log/v3"
 )
 
 var (
@@ -47,6 +48,7 @@ func NewAttestationService(
 	netCfg *clparams.NetworkConfig,
 ) AttestationService {
 	epochDuration := beaconCfg.SlotsPerEpoch * beaconCfg.SecondsPerSlot
+	log.Warn("[dbg] epochDuration", "beaconCfg.SlotsPerEpoch", beaconCfg.SlotsPerEpoch, "beaconCfg.SecondsPerSlot", beaconCfg.SecondsPerSlot)
 	return &attestationService{
 		forkchoiceStore:          forkchoiceStore,
 		committeeSubscribe:       committeeSubscribe,
