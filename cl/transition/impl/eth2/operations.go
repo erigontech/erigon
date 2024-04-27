@@ -963,9 +963,7 @@ func (I *impl) ProcessEth1Data(state abstract.BeaconState, eth1Data *cltypes.Eth
 		return true
 	})
 
-	if uint64(
-		numVotes*2,
-	) > state.BeaconConfig().EpochsPerEth1VotingPeriod*state.BeaconConfig().SlotsPerEpoch {
+	if uint64(numVotes*2) > state.BeaconConfig().EpochsPerEth1VotingPeriod*state.BeaconConfig().SlotsPerEpoch {
 		state.SetEth1Data(eth1Data)
 	}
 	return nil
