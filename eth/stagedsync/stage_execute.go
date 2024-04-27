@@ -226,10 +226,7 @@ func gatherNoPruneReceipts(receipts *types.Receipts, chainCfg *chain.Config) boo
 		}
 	}
 	receipts = &cr
-	if receipts.Len() > 0 {
-		return true
-	}
-	return false
+	return receipts.Len() > 0
 }
 
 func newStateReaderWriter(

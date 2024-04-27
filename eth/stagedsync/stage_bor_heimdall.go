@@ -45,8 +45,8 @@ const (
 type BorHeimdallCfg struct {
 	db               kv.RwDB
 	snapDb           kv.RwDB // Database to store and retrieve snapshot checkpoints
-	miningState      MiningState
-	chainConfig      chain.Config
+	miningState      *MiningState
+	chainConfig      *chain.Config
 	borConfig        *borcfg.BorConfig
 	heimdallClient   heimdall.HeimdallClient
 	blockReader      services.FullBlockReader
@@ -83,8 +83,8 @@ func StageBorHeimdallCfg(
 	return BorHeimdallCfg{
 		db:               db,
 		snapDb:           snapDb,
-		miningState:      miningState,
-		chainConfig:      chainConfig,
+		miningState:      &miningState,
+		chainConfig:      &chainConfig,
 		borConfig:        borConfig,
 		heimdallClient:   heimdallClient,
 		blockReader:      blockReader,
@@ -215,7 +215,7 @@ func BorHeimdallForward(
 		return err
 	}
 
-	chain := NewChainReaderImpl(&cfg.chainConfig, tx, cfg.blockReader, logger)
+	chain := NewChainReaderImpl(cfg.chainConfig, tx, cfg.blockReader, logger)
 	logTimer := time.NewTicker(logInterval)
 	defer logTimer.Stop()
 

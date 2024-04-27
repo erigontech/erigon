@@ -422,7 +422,7 @@ func buildValueIndex(ctx context.Context, sn snaptype.FileInfo, salt uint32, d *
 		LeafSize:   8,
 		TmpDir:     tmpDir,
 		IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To)),
-		BaseDataID: uint64(baseId),
+		BaseDataID: baseId,
 		Salt:       salt,
 	}, logger)
 	if err != nil {

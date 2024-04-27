@@ -69,7 +69,7 @@ func fetchRequiredHeimdallSpansIfNeeded(
 		return 0, err
 	}
 
-	if exists && heimdall.SpanId(requiredSpanID) <= heimdall.SpanId(lastSpanID) {
+	if exists && requiredSpanID <= heimdall.SpanId(lastSpanID) {
 		return lastSpanID, nil
 	}
 
@@ -79,7 +79,7 @@ func fetchRequiredHeimdallSpansIfNeeded(
 	} // else fetch from span 0
 
 	logger.Info(fmt.Sprintf("[%s] Processing spans...", logPrefix), "from", from, "to", requiredSpanID)
-	for spanID := from; spanID <= heimdall.SpanId(requiredSpanID); spanID++ {
+	for spanID := from; spanID <= requiredSpanID; spanID++ {
 		if _, err = fetchAndWriteHeimdallSpan(ctx, uint64(spanID), tx, cfg.heimdallClient, logPrefix, logger); err != nil {
 			return 0, err
 		}

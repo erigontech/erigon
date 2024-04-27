@@ -39,7 +39,7 @@ import (
 	btree2 "github.com/tidwall/btree"
 )
 
-func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (string, kv.RwDB, *History) {
+func testDbAndHistory(tb testing.TB, _ bool, logger log.Logger) (string, kv.RwDB, *History) {
 	tb.Helper()
 	path := tb.TempDir()
 	keysTable := "AccountKeys"

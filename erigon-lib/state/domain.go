@@ -354,7 +354,7 @@ func (dt *DomainRoTx) Get(key1, key2 []byte, roTx kv.Tx) ([]byte, error) {
 	return v, err
 }
 
-func (d *Domain) update(key, original []byte) error {
+func (d *Domain) update(key, _ []byte) error {
 	var invertedStep [8]byte
 	binary.BigEndian.PutUint64(invertedStep[:], ^(d.txNum / d.aggregationStep))
 	if err := d.tx.Put(d.keysTable, key, invertedStep[:]); err != nil {
@@ -580,7 +580,7 @@ func (c Collation) Close() {
 // collate gathers domain changes over the specified step, using read-only transaction,
 // and returns compressors, elias fano, and bitmaps
 // [txFrom; txTo)
-func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv.Tx, logEvery *time.Ticker) (Collation, error) {
+func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv.Tx, _ *time.Ticker) (Collation, error) {
 	started := time.Now()
 	defer func() {
 		d.stats.LastCollationTook = time.Since(started)
