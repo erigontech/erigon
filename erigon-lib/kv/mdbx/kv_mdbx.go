@@ -1968,7 +1968,6 @@ type cursor2iter struct {
 	tx *MdbxTx
 
 	fromPrefix, toPrefix, nextK, nextV []byte
-	err                                error
 	orderAscend                        order.By
 	limit                              int64
 	ctx                                context.Context
@@ -1998,38 +1997,38 @@ func (s *cursor2iter) init(table string, tx kv.Tx) (*cursor2iter, error) {
 
 	if s.fromPrefix == nil { // no initial position
 		if s.orderAscend {
-			s.nextK, s.nextV, s.err = s.c.First()
+			s.nextK, s.nextV, err = s.c.First()
 		} else {
-			s.nextK, s.nextV, s.err = s.c.Last()
+			s.nextK, s.nextV, err = s.c.Last()
 		}
-		return s, s.err
+		return s, err
 	}
 
 	if s.orderAscend {
-		s.nextK, s.nextV, s.err = s.c.Seek(s.fromPrefix)
-		return s, s.err
+		s.nextK, s.nextV, err = s.c.Seek(s.fromPrefix)
+		return s, err
 	} else {
 		// seek exactly to given key or previous one
-		s.nextK, s.nextV, s.err = s.c.SeekExact(s.fromPrefix)
-		if s.err != nil {
-			return s, s.err
+		s.nextK, s.nextV, err = s.c.SeekExact(s.fromPrefix)
+		if err != nil {
+			return s, err
 		}
 		if s.nextK != nil { // go to last value of this key
 			if casted, ok := s.c.(kv.CursorDupSort); ok {
-				s.nextV, s.err = casted.LastDup()
+				s.nextV, err = casted.LastDup()
 			}
 		} else { // key not found, go to prev one
-			s.nextK, s.nextV, s.err = s.c.Prev()
+			s.nextK, s.nextV, err = s.c.Prev()
 		}
-		return s, s.err
+		return s, err
 	}
 }
 
 func (s *cursor2iter) advance() (err error) {
 	if s.orderAscend {
-		s.nextK, s.nextV, s.err = s.c.Next()
+		s.nextK, s.nextV, err = s.c.Next()
 	} else {
-		s.nextK, s.nextV, s.err = s.c.Prev()
+		s.nextK, s.nextV, err = s.c.Prev()
 	}
 	return err
 }
@@ -2043,9 +2042,6 @@ func (s *cursor2iter) Close() {
 }
 
 func (s *cursor2iter) HasNext() bool {
-	if s.err != nil { // always true, then .Next() call will return this error
-		return true
-	}
 	if s.limit == 0 { // limit reached
 		return false
 	}
@@ -2067,9 +2063,6 @@ func (s *cursor2iter) Next() (k, v []byte, err error) {
 	case <-s.ctx.Done():
 		return nil, nil, s.ctx.Err()
 	default:
-	}
-	if s.err != nil {
-		return nil, nil, s.err
 	}
 	s.limit--
 	k, v = s.nextK, s.nextV
@@ -2096,7 +2089,6 @@ type cursorDup2iter struct {
 
 	key                         []byte
 	fromPrefix, toPrefix, nextV []byte
-	err                         error
 	orderAscend                 bool
 	limit                       int64
 	ctx                         context.Context
@@ -2124,23 +2116,23 @@ func (s *cursorDup2iter) init(table string, tx kv.Tx) (*cursorDup2iter, error) {
 
 	if s.fromPrefix == nil { // no initial position
 		if s.orderAscend {
-			s.nextV, s.err = s.c.FirstDup()
+			s.nextV, err = s.c.FirstDup()
 		} else {
-			s.nextV, s.err = s.c.LastDup()
+			s.nextV, err = s.c.LastDup()
 		}
-		return s, s.err
+		return s, err
 	}
 
 	if s.orderAscend {
-		s.nextV, s.err = s.c.SeekBothRange(s.key, s.fromPrefix)
-		return s, s.err
+		s.nextV, err = s.c.SeekBothRange(s.key, s.fromPrefix)
+		return s, err
 	} else {
 		// seek exactly to given key or previous one
-		_, s.nextV, s.err = s.c.SeekBothExact(s.key, s.fromPrefix)
+		_, s.nextV, err = s.c.SeekBothExact(s.key, s.fromPrefix)
 		if s.nextV == nil { // no such key
-			_, s.nextV, s.err = s.c.PrevDup()
+			_, s.nextV, err = s.c.PrevDup()
 		}
-		return s, s.err
+		return s, err
 	}
 }
 
@@ -2161,9 +2153,6 @@ func (s *cursorDup2iter) Close() {
 	}
 }
 func (s *cursorDup2iter) HasNext() bool {
-	if s.err != nil { // always true, then .Next() call will return this error
-		return true
-	}
 	if s.limit == 0 { // limit reached
 		return false
 	}
