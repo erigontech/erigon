@@ -2570,7 +2570,7 @@ func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientC
 	}
 
 	//Reasons why using MMAP instead of files-API:
-	// - i see "10K threads exchaused" error earlier (on --torrent.download.slots=500)
+	// - i see "10K threads exchaused" error earlier (on `--torrent.download.slots=500` and `pd-ssd`)
 	// - "sig-bus" at disk-full - may happen anyway, because DB is mmap
 	// - MMAP - means less GC pressure, more zero-copy
 	// - MMAP files are pre-allocated - which is not cool, but: 1. we can live with it 2. maybe can just resize MMAP in future
