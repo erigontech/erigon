@@ -51,19 +51,10 @@ func SetupDiagnosticsEndpoint(metricsMux *http.ServeMux, addres string) *http.Se
 	diagMux := http.NewServeMux()
 
 	if metricsMux != nil {
-		metricsMux.HandleFunc("/debug/diag/", func(w http.ResponseWriter, r *http.Request) {
-			r.URL.Path = strings.TrimPrefix(r.URL.Path, "/debug/diag")
-			r.URL.RawPath = strings.TrimPrefix(r.URL.RawPath, "/debug/diag")
-			diagMux.ServeHTTP(w, r)
-		})
+		SetupMiddleMuxHandler(diagMux, metricsMux, "/debug/diag")
 	} else {
 		middleMux := http.NewServeMux()
-
-		middleMux.HandleFunc("/debug/diag/", func(w http.ResponseWriter, r *http.Request) {
-			r.URL.Path = strings.TrimPrefix(r.URL.Path, "/debug/diag")
-			r.URL.RawPath = strings.TrimPrefix(r.URL.RawPath, "/debug/diag")
-			diagMux.ServeHTTP(w, r)
-		})
+		SetupMiddleMuxHandler(diagMux, middleMux, "/debug/diag")
 
 		diagServer := &http.Server{
 			Addr:    addres,
@@ -79,6 +70,14 @@ func SetupDiagnosticsEndpoint(metricsMux *http.ServeMux, addres string) *http.Se
 	}
 
 	return diagMux
+}
+
+func SetupMiddleMuxHandler(mux *http.ServeMux, middleMux *http.ServeMux, path string) {
+	middleMux.HandleFunc(path+"/", func(w http.ResponseWriter, r *http.Request) {
+		r.URL.Path = strings.TrimPrefix(r.URL.Path, path)
+		r.URL.RawPath = strings.TrimPrefix(r.URL.RawPath, path)
+		mux.ServeHTTP(w, r)
+	})
 }
 
 func SetupEndpoints(ctx *cli.Context, node *node.ErigonNode, diagMux *http.ServeMux, diagnostic *diaglib.DiagnosticClient) {
