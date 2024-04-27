@@ -46,7 +46,7 @@ func NewAttestationService(
 	beaconCfg *clparams.BeaconChainConfig,
 	netCfg *clparams.NetworkConfig,
 ) AttestationService {
-	epochDuration := beaconCfg.SlotsPerEpoch * beaconCfg.SecondsPerSlot
+	epochDuration := time.Duration(beaconCfg.SlotsPerEpoch*beaconCfg.SecondsPerSlot) * time.Second
 	return &attestationService{
 		forkchoiceStore:          forkchoiceStore,
 		committeeSubscribe:       committeeSubscribe,
@@ -54,7 +54,7 @@ func NewAttestationService(
 		syncedDataManager:        syncedDataManager,
 		beaconCfg:                beaconCfg,
 		netCfg:                   netCfg,
-		validatorAttestationSeen: lru.NewWithTTL[uint64, uint64]("validator_attestation_seen", validatorAttestationCacheSize, time.Duration(epochDuration)),
+		validatorAttestationSeen: lru.NewWithTTL[uint64, uint64]("validator_attestation_seen", validatorAttestationCacheSize, epochDuration),
 	}
 }
 
