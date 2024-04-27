@@ -23,7 +23,7 @@ type attesterDutyResponse struct {
 }
 
 func (a *ApiHandler) getDependentRoot(s *state.CachingBeaconState, epoch uint64) libcommon.Hash {
-	dependentRootSlot := ((epoch - 1) * a.beaconChainCfg.SlotsPerEpoch) - 1
+	dependentRootSlot := ((epoch - 1) * a.beaconChainCfg.SlotsPerEpoch) - 3
 	for {
 		if dependentRootSlot > epoch*a.beaconChainCfg.SlotsPerEpoch {
 			dependentRootSlot = 0
