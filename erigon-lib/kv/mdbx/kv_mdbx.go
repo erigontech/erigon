@@ -2025,6 +2025,15 @@ func (s *cursor2iter) init(table string, tx kv.Tx) (*cursor2iter, error) {
 	}
 }
 
+func (s *cursor2iter) advance() (err error) {
+	if s.orderAscend {
+		s.nextK, s.nextV, s.err = s.c.Next()
+	} else {
+		s.nextK, s.nextV, s.err = s.c.Prev()
+	}
+	return err
+}
+
 func (s *cursor2iter) Close() {
 	if s.c != nil {
 		s.c.Close()
@@ -2032,6 +2041,7 @@ func (s *cursor2iter) Close() {
 		s.c = nil
 	}
 }
+
 func (s *cursor2iter) HasNext() bool {
 	if s.err != nil { // always true, then .Next() call will return this error
 		return true
@@ -2051,6 +2061,7 @@ func (s *cursor2iter) HasNext() bool {
 	cmp := bytes.Compare(s.nextK, s.toPrefix)
 	return (bool(s.orderAscend) && cmp < 0) || (!bool(s.orderAscend) && cmp > 0)
 }
+
 func (s *cursor2iter) Next() (k, v []byte, err error) {
 	select {
 	case <-s.ctx.Done():
@@ -2062,10 +2073,8 @@ func (s *cursor2iter) Next() (k, v []byte, err error) {
 	}
 	s.limit--
 	k, v = s.nextK, s.nextV
-	if s.orderAscend {
-		s.nextK, s.nextV, s.err = s.c.Next()
-	} else {
-		s.nextK, s.nextV, s.err = s.c.Prev()
+	if err = s.advance(); err != nil {
+		return nil, nil, err
 	}
 	return k, v, nil
 }
@@ -2135,6 +2144,15 @@ func (s *cursorDup2iter) init(table string, tx kv.Tx) (*cursorDup2iter, error) {
 	}
 }
 
+func (s *cursorDup2iter) advance() (err error) {
+	if s.orderAscend {
+		_, s.nextV, err = s.c.NextDup()
+	} else {
+		_, s.nextV, err = s.c.PrevDup()
+	}
+	return err
+}
+
 func (s *cursorDup2iter) Close() {
 	if s.c != nil {
 		s.c.Close()
@@ -2167,15 +2185,10 @@ func (s *cursorDup2iter) Next() (k, v []byte, err error) {
 		return nil, nil, s.ctx.Err()
 	default:
 	}
-	if s.err != nil {
-		return nil, nil, s.err
-	}
 	s.limit--
 	v = s.nextV
-	if s.orderAscend {
-		_, s.nextV, s.err = s.c.NextDup()
-	} else {
-		_, s.nextV, s.err = s.c.PrevDup()
+	if err = s.advance(); err != nil {
+		return nil, nil, err
 	}
 	return s.key, v, nil
 }
