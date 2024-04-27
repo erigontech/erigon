@@ -54,7 +54,7 @@ func NewAttestationService(
 		syncedDataManager:        syncedDataManager,
 		beaconCfg:                beaconCfg,
 		netCfg:                   netCfg,
-		validatorAttestationSeen: lru.NewWithTTL[uint64, uint64]("validator_attestation_seen", validatorAttestationCacheSize, time.Duration(epochDuration)),
+		validatorAttestationSeen: lru.NewWithTTL[uint64, uint64]("validator_attestation_seen", validatorAttestationCacheSize, epochDuration),
 	}
 }
 
