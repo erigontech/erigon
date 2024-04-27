@@ -10,7 +10,7 @@ import (
 )
 
 type PeerStats struct {
-	peersInfo     sync.Map
+	peersInfo     *sync.Map
 	recordsCount  int
 	lastUpdateMap map[string]time.Time
 	limit         int
@@ -18,7 +18,7 @@ type PeerStats struct {
 
 func NewPeerStats(peerLimit int) *PeerStats {
 	return &PeerStats{
-		peersInfo:     sync.Map{},
+		peersInfo:     &sync.Map{},
 		recordsCount:  0,
 		lastUpdateMap: make(map[string]time.Time),
 		limit:         peerLimit,
