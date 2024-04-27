@@ -300,11 +300,13 @@ func doBtSearch(cliCtx *cli.Context) error {
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	logger.Info("before open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-	idx, err := libstate.OpenBtreeIndex(srcF, dataFilePath, libstate.DefaultBtreeM, libstate.CompressKeys|libstate.CompressVals, false)
+	compress := libstate.CompressKeys | libstate.CompressVals
+	kv, idx, err := libstate.OpenBtreeIndexAndDataFile(srcF, dataFilePath, libstate.DefaultBtreeM, compress, false)
 	if err != nil {
 		return err
 	}
 	defer idx.Close()
+	defer kv.Close()
 
 	runtime.GC()
 	dbg.ReadMemStats(&m)
@@ -312,7 +314,9 @@ func doBtSearch(cliCtx *cli.Context) error {
 
 	seek := common.FromHex(cliCtx.String("key"))
 
-	cur, err := idx.SeekDeprecated(seek)
+	getter := libstate.NewArchiveGetter(kv.MakeGetter(), compress)
+
+	cur, err := idx.Seek(getter, seek)
 	if err != nil {
 		return err
 	}
