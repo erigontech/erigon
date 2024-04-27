@@ -5,17 +5,18 @@ import (
 	_ "embed"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
-	"github.com/stretchr/testify/require"
-	"go.uber.org/mock/gomock"
 )
 
 //go:embed test_data/blob_sidecar_service_blob.ssz_snappy
@@ -48,14 +49,14 @@ func getObjectsForBlobSidecarServiceTests(t *testing.T) (*state.CachingBeaconSta
 	return stateObj, block, sidecar
 }
 
-func setupBlobSidecarService(t *testing.T, ctrl *gomock.Controller, test bool) (BlobSidecarsService, *synced_data.SyncedDataManager, *eth_clock.MockEthereumClock, *forkchoice.ForkChoiceStorageMock) {
+func setupBlobSidecarService(t *testing.T, ctrl *gomock.Controller, test bool) (BlobSidecarsService, *synced_data.SyncedDataManager, *eth_clock.MockEthereumClock, *mock_services.ForkChoiceStorageMock) {
 	ctx := context.Background()
 	ctx2, cn := context.WithTimeout(ctx, 1)
 	cn()
 	cfg := &clparams.MainnetBeaconConfig
 	syncedDataManager := synced_data.NewSyncedDataManager(true, cfg)
 	ethClock := eth_clock.NewMockEthereumClock(ctrl)
-	forkchoiceMock := forkchoice.NewForkChoiceStorageMock(t)
+	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	blockService := NewBlobSidecarService(ctx2, cfg, forkchoiceMock, syncedDataManager, ethClock, test)
 	return blockService, syncedDataManager, ethClock, forkchoiceMock
 }
