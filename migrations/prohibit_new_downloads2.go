@@ -17,7 +17,7 @@ import (
 
 // Switch to the second version of download.lock.
 var ProhibitNewDownloadsLock2 = Migration{
-	Name: "prohibit_new_downloads_lock",
+	Name: "prohibit_new_downloads_lock2",
 	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 		tx, err := db.BeginRw(context.Background())
 		if err != nil {
