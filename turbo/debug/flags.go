@@ -274,20 +274,6 @@ func StartPProf(address string, metricsMux *http.ServeMux) *http.ServeMux {
 
 		return metricsMux
 	}
-
-	/*if metricsMux == nil {
-		go func() {
-			if err := http.ListenAndServe(address, nil); err != nil { // nolint:gosec
-				log.Error("Failure in running pprof server", "err", err)
-			}
-		}()
-	} else {
-		metricsMux.HandleFunc("/debug/pprof/", pprof.Index)
-		metricsMux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-		metricsMux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-		metricsMux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-		metricsMux.HandleFunc("/debug/pprof/trace", pprof.Trace)
-	}*/
 }
 
 // Exit stops all running profiles, flushing their output to the
