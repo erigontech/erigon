@@ -26,6 +26,23 @@ func GetLatestBlockNumber(tx kv.Tx) (uint64, error) {
 		}
 	}
 
+	blockNum, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return 0, fmt.Errorf("getting latest block number: %w", err)
+	}
+
+	return blockNum, nil
+}
+
+func GetFinalizedBlockNumber(tx kv.Tx) (uint64, error) {
+	forkchoiceFinalizedHash := rawdb.ReadForkchoiceFinalized(tx)
+	if forkchoiceFinalizedHash != (libcommon.Hash{}) {
+		forkchoiceFinalizedNum := rawdb.ReadHeaderNumber(tx, forkchoiceFinalizedHash)
+		if forkchoiceFinalizedNum != nil {
+			return *forkchoiceFinalizedNum, nil
+		}
+	}
+
 	// get highest verified batch
 	highestVerifiedBatchNo, err := stages.GetStageProgress(tx, stages.L1VerificationsBatchNo)
 	if err != nil {
@@ -50,18 +67,6 @@ func GetLatestBlockNumber(tx kv.Tx) (uint64, error) {
 	}
 
 	return blockNum, nil
-}
-
-func GetFinalizedBlockNumber(tx kv.Tx) (uint64, error) {
-	forkchoiceFinalizedHash := rawdb.ReadForkchoiceFinalized(tx)
-	if forkchoiceFinalizedHash != (libcommon.Hash{}) {
-		forkchoiceFinalizedNum := rawdb.ReadHeaderNumber(tx, forkchoiceFinalizedHash)
-		if forkchoiceFinalizedNum != nil {
-			return *forkchoiceFinalizedNum, nil
-		}
-	}
-
-	return 0, UnknownBlockError
 }
 
 func GetSafeBlockNumber(tx kv.Tx) (uint64, error) {

@@ -224,10 +224,6 @@ LOOP:
 
 			// batch boundary - record the highest hashable block number (last block in last full batch)
 			if l2Block.BatchNumber > highestSeenBatchNo {
-				// check for sequential batch numbers
-				if l2Block.BatchNumber != highestSeenBatchNo+1 {
-					return fmt.Errorf("batch number is not sequential, expected %d, got %d", highestSeenBatchNo+1, l2Block.BatchNumber)
-				}
 				highestHashableL2BlockNo = l2Block.L2BlockNumber - 1
 			}
 			highestSeenBatchNo = l2Block.BatchNumber
