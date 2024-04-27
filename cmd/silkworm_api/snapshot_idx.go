@@ -55,7 +55,7 @@ func FindIf(segments []snaptype.FileInfo, predicate func(snaptype.FileInfo) bool
 }
 
 func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string, minBlock uint64) error {
-	logger, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}

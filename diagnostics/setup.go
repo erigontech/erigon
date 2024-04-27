@@ -14,46 +14,69 @@ import (
 
 var (
 	diagnosticsDisabledFlag = "diagnostics.disabled"
-	diagnosticsAddrFlag     = "diagnostics.addr"
-	diagnosticsPortFlag     = "diagnostics.port"
+	diagnosticsAddrFlag     = "diagnostics.endpoint.addr"
+	diagnosticsPortFlag     = "diagnostics.endpoint.port"
+	metricsHTTPFlag         = "metrics.addr"
+	metricsPortFlag         = "metrics.port"
 )
 
-func Setup(ctx *cli.Context, node *node.ErigonNode) {
+func Setup(ctx *cli.Context, node *node.ErigonNode, metricsMux *http.ServeMux) {
 	if ctx.Bool(diagnosticsDisabledFlag) {
 		return
 	}
 
-	diagMux := SetupDiagnosticsEndpoint(ctx)
+	var diagMux *http.ServeMux
+
+	diagHost := ctx.String(diagnosticsAddrFlag)
+	diagPort := ctx.Int(diagnosticsPortFlag)
+	diagAddress := fmt.Sprintf("%s:%d", diagHost, diagPort)
+
+	metricsHost := ctx.String(metricsHTTPFlag)
+	metricsPort := ctx.Int(metricsPortFlag)
+	metricsAddress := fmt.Sprintf("%s:%d", metricsHost, metricsPort)
+
+	if diagAddress == metricsAddress {
+		diagMux = SetupDiagnosticsEndpoint(metricsMux, diagAddress)
+	} else {
+		diagMux = SetupDiagnosticsEndpoint(nil, diagAddress)
+	}
+
 	diagnostic := diaglib.NewDiagnosticClient(diagMux, node.Backend().DataDir())
 	diagnostic.Setup()
 
 	SetupEndpoints(ctx, node, diagMux, diagnostic)
 }
 
-func SetupDiagnosticsEndpoint(ctx *cli.Context) *http.ServeMux {
-	address := ctx.String(diagnosticsAddrFlag)
-	port := ctx.Uint(diagnosticsPortFlag)
-
-	diagnosticsAddress := fmt.Sprintf("%s:%d", address, port)
-
+func SetupDiagnosticsEndpoint(metricsMux *http.ServeMux, addres string) *http.ServeMux {
 	diagMux := http.NewServeMux()
 
-	diagServer := &http.Server{
-		Addr:    diagnosticsAddress,
-		Handler: diagMux,
-	}
+	if metricsMux != nil {
+		metricsMux.HandleFunc("/debug/diag/", func(w http.ResponseWriter, r *http.Request) {
+			r.URL.Path = strings.TrimPrefix(r.URL.Path, "/debug/diag")
+			r.URL.RawPath = strings.TrimPrefix(r.URL.RawPath, "/debug/diag")
+			diagMux.ServeHTTP(w, r)
+		})
+	} else {
+		middleMux := http.NewServeMux()
 
-	go func() {
-		if err := diagServer.ListenAndServe(); err != nil {
-			log.Error("[Diagnostics] Failure in running diagnostics server", "err", err)
+		middleMux.HandleFunc("/debug/diag/", func(w http.ResponseWriter, r *http.Request) {
+			r.URL.Path = strings.TrimPrefix(r.URL.Path, "/debug/diag")
+			r.URL.RawPath = strings.TrimPrefix(r.URL.RawPath, "/debug/diag")
+			diagMux.ServeHTTP(w, r)
+		})
+
+		diagServer := &http.Server{
+			Addr:    addres,
+			Handler: middleMux,
 		}
-	}()
 
-	diagMux.HandleFunc("/diag/", func(w http.ResponseWriter, r *http.Request) {
-		r.URL.Path = strings.TrimPrefix(r.URL.Path, "/diag")
-		r.URL.RawPath = strings.TrimPrefix(r.URL.RawPath, "/diag")
-		diagMux.ServeHTTP(w, r)
-	})
+		go func() {
+			if err := diagServer.ListenAndServe(); err != nil {
+				log.Error("[Diagnostics] Failure in running diagnostics server", "err", err)
+			}
+		}()
+
+	}
 
 	return diagMux
 }

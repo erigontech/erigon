@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -61,7 +62,7 @@ var snapshotCommand = cli.Command{
 	Name:  "snapshots",
 	Usage: `Managing snapshots (historical data partitions)`,
 	Before: func(context *cli.Context) error {
-		_, err := debug.Setup(context, true /* rootLogger */)
+		_, _, err := debug.Setup(context, true /* rootLogger */)
 		if err != nil {
 			return err
 		}
@@ -195,7 +196,7 @@ var (
 )
 
 func doIntegrity(cliCtx *cli.Context) error {
-	logger, err := debug.Setup(cliCtx, true /* root logger */)
+	logger, _, err := debug.Setup(cliCtx, true /* root logger */)
 	if err != nil {
 		return err
 	}
@@ -266,7 +267,7 @@ func doDiff(cliCtx *cli.Context) error {
 }
 
 func doDecompressSpeed(cliCtx *cli.Context) error {
-	logger, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -308,7 +309,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 func doRam(cliCtx *cli.Context) error {
 	var logger log.Logger
 	var err error
-	if logger, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+	if logger, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
 	defer logger.Info("Done")
@@ -332,7 +333,7 @@ func doRam(cliCtx *cli.Context) error {
 }
 
 func doIndicesCommand(cliCtx *cli.Context) error {
-	logger, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -431,7 +432,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 func doUncompress(cliCtx *cli.Context) error {
 	var logger log.Logger
 	var err error
-	if logger, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+	if logger, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
 	ctx := cliCtx.Context
@@ -484,7 +485,7 @@ func doUncompress(cliCtx *cli.Context) error {
 func doCompress(cliCtx *cli.Context) error {
 	var err error
 	var logger log.Logger
-	if logger, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+	if logger, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
 	ctx := cliCtx.Context
@@ -534,7 +535,7 @@ func doCompress(cliCtx *cli.Context) error {
 func doRetireCommand(cliCtx *cli.Context) error {
 	var logger log.Logger
 	var err error
-	if logger, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+	if logger, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
 	defer logger.Info("Done")
@@ -682,8 +683,9 @@ func doRetireCommand(cliCtx *cli.Context) error {
 func doUploaderCommand(cliCtx *cli.Context) error {
 	var logger log.Logger
 	var err error
+	var metricsMux *http.ServeMux
 
-	if logger, err = debug.Setup(cliCtx, true /* root logger */); err != nil {
+	if logger, metricsMux, err = debug.Setup(cliCtx, true /* root logger */); err != nil {
 		return err
 	}
 
@@ -706,7 +708,7 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 		return err
 	}
 
-	diagnostics.Setup(cliCtx, ethNode)
+	diagnostics.Setup(cliCtx, ethNode, metricsMux)
 
 	err = ethNode.Serve()
 	if err != nil {

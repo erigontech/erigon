@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 
 	"github.com/ledgerwatch/log/v3"
@@ -42,8 +43,9 @@ func main() {
 func runErigon(cliCtx *cli.Context) error {
 	var logger log.Logger
 	var err error
+	var metricsMux *http.ServeMux
 
-	if logger, err = debug.Setup(cliCtx, true /* root logger */); err != nil {
+	if logger, metricsMux, err = debug.Setup(cliCtx, true /* root logger */); err != nil {
 		return err
 	}
 
@@ -66,7 +68,7 @@ func runErigon(cliCtx *cli.Context) error {
 		return err
 	}
 
-	diagnostics.Setup(cliCtx, ethNode)
+	diagnostics.Setup(cliCtx, ethNode, metricsMux)
 
 	err = ethNode.Serve()
 	if err != nil {

@@ -23,6 +23,7 @@ import (
 	"net/http/pprof" //nolint:gosec
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/ledgerwatch/erigon-lib/common/disk"
 	"github.com/ledgerwatch/erigon-lib/common/mem"
@@ -182,7 +183,7 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
 
 // Setup initializes profiling and logging based on the CLI flags.
 // It should be called as early as possible in the program.
-func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, error) {
+func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *http.ServeMux, error) {
 	// ensure we've read in config file details before setting up metrics etc.
 	if err := SetFlagsFromConfigFile(ctx); err != nil {
 		log.Warn("failed setting config flags from yaml/toml file", "err", err)
@@ -194,13 +195,13 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, error) {
 
 	if traceFile := ctx.String(traceFlag.Name); traceFile != "" {
 		if err := Handler.StartGoTrace(traceFile); err != nil {
-			return logger, err
+			return logger, nil, err
 		}
 	}
 
 	if cpuFile := ctx.String(cpuprofileFlag.Name); cpuFile != "" {
 		if err := Handler.StartCPUProfile(cpuFile); err != nil {
-			return logger, err
+			return logger, nil, err
 		}
 	}
 	pprofEnabled := ctx.Bool(pprofFlag.Name)
@@ -222,21 +223,59 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, error) {
 		pprofPort := ctx.Int(pprofPortFlag.Name)
 		address := fmt.Sprintf("%s:%d", pprofHost, pprofPort)
 		if address == metricsAddress {
-			StartPProf(address, metricsMux)
+			metricsMux = StartPProf(address, metricsMux)
 		} else {
-			StartPProf(address, nil)
+			metricsMux = StartPProf(address, nil)
 		}
 	}
 
-	return logger, nil
+	return logger, metricsMux, nil
 }
 
-func StartPProf(address string, metricsMux *http.ServeMux) {
+func StartPProf(address string, metricsMux *http.ServeMux) *http.ServeMux {
 	cpuMsg := fmt.Sprintf("go tool pprof -lines -http=: http://%s/%s", address, "debug/pprof/profile?seconds=20")
 	heapMsg := fmt.Sprintf("go tool pprof -lines -http=: http://%s/%s", address, "debug/pprof/heap")
 	log.Info("Starting pprof server", "cpu", cpuMsg, "heap", heapMsg)
 
+	pprofMux := http.NewServeMux()
+
+	pprofMux.HandleFunc("/", pprof.Index)
+	pprofMux.HandleFunc("/cmdline", pprof.Cmdline)
+	pprofMux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	pprofMux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	pprofMux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+
 	if metricsMux == nil {
+		middleMux := http.NewServeMux()
+		middleMux.HandleFunc("/debug/pprof/", func(w http.ResponseWriter, r *http.Request) {
+			r.URL.Path = strings.TrimPrefix(r.URL.Path, "/debug/pprof")
+			r.URL.RawPath = strings.TrimPrefix(r.URL.RawPath, "/debug/pprof")
+			pprofMux.ServeHTTP(w, r)
+		})
+
+		pprofServer := &http.Server{
+			Addr:    address,
+			Handler: middleMux,
+		}
+
+		go func() {
+			if err := pprofServer.ListenAndServe(); err != nil {
+				log.Error("Failure in running pprof server", "err", err)
+			}
+		}()
+
+		return middleMux
+	} else {
+		metricsMux.HandleFunc("/debug/pprof/", func(w http.ResponseWriter, r *http.Request) {
+			r.URL.Path = strings.TrimPrefix(r.URL.Path, "/debug/pprof")
+			r.URL.RawPath = strings.TrimPrefix(r.URL.RawPath, "/debug/pprof")
+			pprofMux.ServeHTTP(w, r)
+		})
+
+		return metricsMux
+	}
+
+	/*if metricsMux == nil {
 		go func() {
 			if err := http.ListenAndServe(address, nil); err != nil { // nolint:gosec
 				log.Error("Failure in running pprof server", "err", err)
@@ -248,7 +287,7 @@ func StartPProf(address string, metricsMux *http.ServeMux) {
 		metricsMux.HandleFunc("/debug/pprof/profile", pprof.Profile)
 		metricsMux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 		metricsMux.HandleFunc("/debug/pprof/trace", pprof.Trace)
-	}
+	}*/
 }
 
 // Exit stops all running profiles, flushing their output to the
