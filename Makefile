@@ -199,7 +199,7 @@ clean:
 
 ## devtools:                          installs dev tools (and checks for npm installation etc.)
 devtools:
-	# Notice! If you adding new binary - add it also to cmd/hack/binary-deps/main.go file
+	# Notice! If you adding new binary - add it also to tools.go file
 	$(GOBUILD) -o $(GOBIN)/gencodec github.com/fjl/gencodec
 	$(GOBUILD) -o $(GOBIN)/mockgen go.uber.org/mock/mockgen
 	$(GOBUILD) -o $(GOBIN)/abigen ./cmd/abigen
