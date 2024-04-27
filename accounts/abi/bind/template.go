@@ -90,8 +90,21 @@ package {{.Package}}
 import (
 	"math/big"
 	"strings"
-	"fmt"
-	"reflect"
+
+{{range .Contracts}}
+	{{$stop := false}}
+	{{range .Transacts}}
+		{{if ne (len .Normalized.Inputs) 0}}
+			"fmt"
+			"reflect"
+			{{$stop = true}}
+			{{break}}
+		{{end}}
+	{{end}}
+	{{if $stop}}
+		{{break}}
+	{{end}}
+{{end}}
 
 	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon/accounts/abi"
