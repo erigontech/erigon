@@ -22,6 +22,23 @@ type attesterDutyResponse struct {
 	Slot                    uint64            `json:"slot,string"`
 }
 
+func (a *ApiHandler) getDependentRoot(s *state.CachingBeaconState, epoch uint64) libcommon.Hash {
+	dependentRootSlot := ((epoch - 1) * a.beaconChainCfg.SlotsPerEpoch) - 1
+	for {
+		if dependentRootSlot > epoch*a.beaconChainCfg.SlotsPerEpoch {
+			dependentRootSlot = 0
+		}
+
+		dependentRoot, err := s.GetBlockRootAtSlot(dependentRootSlot)
+		if err != nil {
+			dependentRootSlot--
+			continue
+		}
+		return dependentRoot
+	}
+
+}
+
 func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	epoch, err := beaconhttp.EpochFromRequest(r)
 	if err != nil {
@@ -31,15 +48,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	if s == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("node is syncing"))
 	}
-	dependentRootSlot := ((epoch - 1) * a.beaconChainCfg.SlotsPerEpoch) - 1
-	if dependentRootSlot > epoch*a.beaconChainCfg.SlotsPerEpoch {
-		dependentRootSlot = 0
-	}
-
-	dependentRoot, err := s.GetBlockRootAtSlot(dependentRootSlot)
-	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("could not get dependent root: %w", err))
-	}
+	dependentRoot := a.getDependentRoot(s, epoch)
 
 	var idxsStr []string
 	if err := json.NewDecoder(r.Body).Decode(&idxsStr); err != nil {
