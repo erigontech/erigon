@@ -462,7 +462,7 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 }
 
 func (api *OtterscanAPIImpl) searchTransactionsAfterV3(tx kv.TemporalTx, ctx context.Context, addr common.Address, fromBlockNum uint64, pageSize uint16) (*TransactionsWithReceipts, error) {
-	chainConfig, err := api.chainConfig(tx)
+	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -494,7 +494,7 @@ func (api *OtterscanAPIImpl) searchTransactionsAfterV3(tx kv.TemporalTx, ctx con
 	txNums := iter.Union[uint64](itFrom, itTo, order.Asc, lookupSize)
 	txNumsIter := rawdbv3.TxNums2BlockNums(tx, txNums, order.Asc)
 
-	exec := txnExecutor(tx, chainConfig, api.engine(), api._blockReader, nil)
+	exec := exec3.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, nil)
 	var blockHash common.Hash
 	var header *types.Header
 	txs := make([]*RPCTransaction, 0, pageSize)
@@ -519,7 +519,7 @@ func (api *OtterscanAPIImpl) searchTransactionsAfterV3(tx kv.TemporalTx, ctx con
 				continue
 			}
 			blockHash = header.Hash()
-			exec.changeBlock(header)
+			exec.ChangeBlock(header)
 		}
 
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
@@ -530,10 +530,11 @@ func (api *OtterscanAPIImpl) searchTransactionsAfterV3(tx kv.TemporalTx, ctx con
 		if txn == nil {
 			continue
 		}
-		rawLogs, res, err := exec.execTx(txNum, txIndex, txn)
+		res, err := exec.ExecTxn(txNum, txIndex, txn)
 		if err != nil {
 			return nil, err
 		}
+		rawLogs := exec.GetLogs(txIndex, txn)
 		rpcTx := NewRPCTransaction(txn, blockHash, blockNum, uint64(txIndex), header.BaseFee)
 		txs = append(txs, rpcTx)
 		receipt := &types.Receipt{
