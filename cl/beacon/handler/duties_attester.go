@@ -1,3 +1,35 @@
+package handler
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strconv"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
+	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+)
+
+type attesterDutyResponse struct {
+	Pubkey                  libcommon.Bytes48 `json:"pubkey"`
+	ValidatorIndex          uint64            `json:"validator_index,string"`
+	CommitteeIndex          uint64            `json:"committee_index,string"`
+	CommitteeLength         uint64            `json:"committee_length,string"`
+	ValidatorCommitteeIndex uint64            `json:"validator_committee_index,string"`
+	CommitteesAtSlot        uint64            `json:"committees_at_slot,string"`
+	Slot                    uint64            `json:"slot,string"`
+}
+
+func (a *ApiHandler) getDependentRoot(s *state.CachingBeaconState, epoch uint64) libcommon.Hash {
+	dependentRootSlot := ((epoch - 1) * a.beaconChainCfg.SlotsPerEpoch) - 1
+	for {
+		if dependentRootSlot > epoch*a.beaconChainCfg.SlotsPerEpoch {
+			dependentRootSlot = 0
+		}
+
+		dependentRoot, err := s.GetBlockRootAtSlot(dependentRootSlot)
 		if err != nil {
 			dependentRootSlot--
 			continue
