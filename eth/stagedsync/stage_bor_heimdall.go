@@ -17,7 +17,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/accounts/abi"
@@ -354,7 +353,7 @@ func BorHeimdallForward(
 		if nextEventRecord == nil || header.Time > uint64(nextEventRecord.Time.Unix()) {
 			var records int
 
-			if lastStateSyncEventID != endStateSyncEventId {
+			if lastStateSyncEventID == 0 || lastStateSyncEventID != endStateSyncEventId {
 				lastStateSyncEventID, records, callTime, err = fetchRequiredHeimdallStateSyncEventsIfNeeded(
 					ctx,
 					header,
@@ -566,7 +565,7 @@ func persistValidatorSets(
 		var err error
 		if snap, err = snap.Apply(parent, headers, logger); err != nil {
 			if snap != nil {
-				var badHash common.Hash
+				var badHash libcommon.Hash
 				for _, header := range headers {
 					if header.Number.Uint64() == snap.Number+1 {
 						badHash = header.Hash()

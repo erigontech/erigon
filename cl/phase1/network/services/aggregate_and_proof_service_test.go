@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/antiquary/tests"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -12,8 +13,9 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/stretchr/testify/require"
-	gomock "go.uber.org/mock/gomock"
+	"go.uber.org/mock/gomock"
 )
 
 func getAggregateAndProofAndState(t *testing.T) (*cltypes.SignedAggregateAndProof, *state.CachingBeaconState) {
@@ -44,7 +46,9 @@ func setupAggregateAndProofTest(t *testing.T) (AggregateAndProofService, *synced
 	cfg := &clparams.MainnetBeaconConfig
 	syncedDataManager := synced_data.NewSyncedDataManager(true, cfg)
 	forkchoiceMock := forkchoice.NewForkChoiceStorageMock(t)
-	blockService := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, cfg, nil, true)
+	p := pool.OperationsPool{}
+	p.AttestationsPool = pool.NewOperationPool[libcommon.Bytes96, *solid.Attestation](100, "test")
+	blockService := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, cfg, p, true)
 	return blockService, syncedDataManager, forkchoiceMock
 }
 

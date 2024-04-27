@@ -125,7 +125,7 @@ func (s *Sync) onNewBlockEvent(
 	if ccBuilder.ContainsHash(newBlockHeader.ParentHash) {
 		newBlocks = []*types.Block{event.NewBlock}
 	} else {
-		newBlocks, err = s.p2pService.FetchBlocks(ctx, rootNum, newBlockHeaderNum+1, event.PeerId)
+		blocks, err := s.p2pService.FetchBlocks(ctx, rootNum, newBlockHeaderNum+1, event.PeerId)
 		if err != nil {
 			if (p2p.ErrIncompleteHeaders{}).Is(err) || (p2p.ErrMissingBodies{}).Is(err) {
 				s.logger.Debug(
@@ -140,6 +140,8 @@ func (s *Sync) onNewBlockEvent(
 
 			return err
 		}
+
+		newBlocks = blocks.Data
 	}
 
 	if err := s.blocksVerifier(newBlocks); err != nil {
@@ -204,7 +206,7 @@ func (s *Sync) onNewBlockHashesEvent(
 		}
 
 		newBlockEvent := EventNewBlock{
-			NewBlock: newBlocks[0],
+			NewBlock: newBlocks.Data[0],
 			PeerId:   event.PeerId,
 		}
 

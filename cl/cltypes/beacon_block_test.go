@@ -1,11 +1,10 @@
 package cltypes
 
 import (
+	_ "embed"
 	"encoding/json"
 	"math/big"
 	"testing"
-
-	_ "embed"
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"

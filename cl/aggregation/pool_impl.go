@@ -47,6 +47,11 @@ func NewAggregationPool(
 }
 
 func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
+	// check if it's single attestation
+	if utils.BitsOnCount(inAtt.AggregationBits()) != 1 {
+		return fmt.Errorf("exactly one aggregation bit should be set")
+	}
+
 	// use hash of attestation data as key
 	hashRoot, err := inAtt.AttestantionData().HashSSZ()
 	if err != nil {
@@ -62,6 +67,7 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 	}
 
 	if utils.IsNonStrictSupersetBitlist(att.AggregationBits(), inAtt.AggregationBits()) {
+		// the on bit is already set, so ignore
 		return ErrIsSuperset
 	}
 
