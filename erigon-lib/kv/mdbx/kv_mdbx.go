@@ -2168,6 +2168,9 @@ func (s *cursorDup2iter) Next() (k, v []byte, err error) {
 	default:
 	}
 	s.limit--
+	if s.err != nil {
+		return nil, nil, s.err
+	}
 	v, err = s.nextV, s.err
 	if s.orderAscend {
 		_, s.nextV, s.err = s.c.NextDup()
