@@ -285,7 +285,7 @@ func (c Cfg) Seedable(info snaptype.FileInfo) bool {
 }
 
 func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
-	hasType := false
+	hasType := t == snaptype.Enums.Headers
 
 	for _, p := range c.Preverified {
 		info, _, ok := snaptype.ParseFileName("", p.Name)
