@@ -2067,7 +2067,7 @@ func (s *cursor2iter) Next() (k, v []byte, err error) {
 	} else {
 		s.nextK, s.nextV, s.err = s.c.Prev()
 	}
-	return k, v, s.err
+	return k, v, nil
 }
 
 func (tx *MdbxTx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (iter.KV, error) {
@@ -2177,7 +2177,7 @@ func (s *cursorDup2iter) Next() (k, v []byte, err error) {
 	} else {
 		_, s.nextV, s.err = s.c.PrevDup()
 	}
-	return s.key, v, s.err
+	return s.key, v, nil
 }
 
 func (tx *MdbxTx) ForAmount(bucket string, fromPrefix []byte, amount uint32, walker func(k, v []byte) error) error {
