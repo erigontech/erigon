@@ -30,10 +30,24 @@ package iter
 //		- 1 value used by User and 1 value used internally by iter.Union
 //   3. No `Close` method: all streams produced by TemporalTx will be closed inside `tx.Rollback()` (by casting to `kv.Closer`)
 //   4. automatically checks cancelation of `ctx` passed to `db.Begin(ctx)`, can skip this
-//     check in loops on stream. Dual has very limited API - user has no way to
+//     check in loops on stream. Duo has very limited API - user has no way to
 //     terminate it - but user can specify more strict conditions when creating stream (then server knows better when to stop)
 
-// Dual - return 2 items - usually called Key and Value (or `k` and `v`)
+// Uno - return 1 item. Example:
+//
+//	for s.HasNext() {
+//		v, err := s.Next()
+//		if err != nil {
+//			return err
+//		}
+//	}
+type Uno[V any] interface {
+	Next() (V, error)
+	//NextBatch() ([]V, error)
+	HasNext() bool
+}
+
+// Duo - return 2 items - usually called Key and Value (or `k` and `v`)
 // Example:
 //
 //	for s.HasNext() {
@@ -42,80 +56,27 @@ package iter
 //			return err
 //		}
 //	}
-type Dual[K, V any] interface {
+type Duo[K, V any] interface {
 	Next() (K, V, error)
 	HasNext() bool
 }
 
+// Trio - return 3 items - usually called Key and Value (or `k` and `v`)
+// Example:
+//
+//	for s.HasNext() {
+//		k, v1, v2, err := s.Next()
+//		if err != nil {
+//			return err
+//		}
+//	}
+type Trio[K, V1, V2 any] interface {
+	Next() (K, V1, V2, error)
+	HasNext() bool
+}
+
+// Deprecated - use Trio
 type DualS[K, V any] interface {
 	Next() (K, V, uint64, error)
 	HasNext() bool
-}
-
-// Unary - return 1 item. Example:
-//
-//	for s.HasNext() {
-//		v, err := s.Next()
-//		if err != nil {
-//			return err
-//		}
-//	}
-type Unary[V any] interface {
-	Next() (V, error)
-	//NextBatch() ([]V, error)
-	HasNext() bool
-}
-
-// KV - return 2 items of type []byte - usually called Key and Value (or `k` and `v`). Example:
-//
-//	for s.HasNext() {
-//		k, v, err := s.Next()
-//		if err != nil {
-//			return err
-//		}
-//	}
-
-// often used shortcuts
-type (
-	U64 Unary[uint64]
-	KV  Dual[[]byte, []byte]
-	KVS DualS[[]byte, []byte]
-)
-
-func ToU64Arr(s U64) ([]uint64, error)           { return ToArr[uint64](s) }
-func ToKVArray(s KV) ([][]byte, [][]byte, error) { return ToDualArray[[]byte, []byte](s) }
-
-func ToArrU64Must(s U64) []uint64 {
-	arr, err := ToArr[uint64](s)
-	if err != nil {
-		panic(err)
-	}
-	return arr
-}
-func ToArrKVMust(s KV) ([][]byte, [][]byte) {
-	keys, values, err := ToDualArray[[]byte, []byte](s)
-	if err != nil {
-		panic(err)
-	}
-	return keys, values
-}
-
-func CountU64(s U64) (int, error) { return Count[uint64](s) }
-func CountKV(s KV) (int, error)   { return CountDual[[]byte, []byte](s) }
-
-func TransformKV(it KV, transform func(k, v []byte) ([]byte, []byte, error)) *TransformDualIter[[]byte, []byte] {
-	return TransformDual[[]byte, []byte](it, transform)
-}
-
-// internal types
-type (
-	NextPageUnary[T any]   func(pageToken string) (arr []T, nextPageToken string, err error)
-	NextPageDual[K, V any] func(pageToken string) (keys []K, values []V, nextPageToken string, err error)
-)
-
-func PaginateKV(f NextPageDual[[]byte, []byte]) *PaginatedDual[[]byte, []byte] {
-	return PaginateDual[[]byte, []byte](f)
-}
-func PaginateU64(f NextPageUnary[uint64]) *Paginated[uint64] {
-	return Paginate[uint64](f)
 }

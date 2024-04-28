@@ -87,7 +87,7 @@ func NewMDBX(log log.Logger) MdbxOpts {
 
 		mapSize:         DefaultMapSize,
 		growthStep:      DefaultGrowthStep,
-		mergeThreshold:  2 * 8192,
+		mergeThreshold:  3 * 8192,
 		shrinkThreshold: -1, // default
 		label:           kv.InMem,
 	}
@@ -459,6 +459,12 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	}
 	db.path = opts.path
 	addToPathDbMap(opts.path, db)
+	if dbg.MdbxLockInRam() && opts.label == kv.ChainDB {
+		log.Info("[dbg] locking db in mem", "lable", opts.label)
+		if err := db.View(ctx, func(tx kv.Tx) error { return tx.(*MdbxTx).LockDBInRam() }); err != nil {
+			return nil, err
+		}
+	}
 	return db, nil
 }
 
@@ -2087,6 +2093,9 @@ func (s *cursor2iter) advance() (err error) {
 }
 
 func (s *cursor2iter) Close() {
+	if s == nil {
+		return
+	}
 	if s.c != nil {
 		s.c.Close()
 		delete(s.tx.streams, s.id)

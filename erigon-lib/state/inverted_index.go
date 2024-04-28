@@ -1062,7 +1062,7 @@ type FrozenInvertedIdxIter struct {
 	limit                int
 	orderAscend          order.By
 
-	efIt       iter.Unary[uint64]
+	efIt       iter.Uno[uint64]
 	indexTable string
 	stack      []ctxItem
 
