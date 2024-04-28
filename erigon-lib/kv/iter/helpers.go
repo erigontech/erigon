@@ -23,7 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func ToArr[T any](s Unary[T]) (res []T, err error) {
+func ToArr[T any](s Uno[T]) (res []T, err error) {
 	for s.HasNext() {
 		k, err := s.Next()
 		if err != nil {
@@ -34,7 +34,7 @@ func ToArr[T any](s Unary[T]) (res []T, err error) {
 	return res, nil
 }
 
-func ToDualArray[K, V any](s Dual[K, V]) (keys []K, values []V, err error) {
+func ToDualArray[K, V any](s Duo[K, V]) (keys []K, values []V, err error) {
 	for s.HasNext() {
 		k, v, err := s.Next()
 		if err != nil {
@@ -46,11 +46,11 @@ func ToDualArray[K, V any](s Dual[K, V]) (keys []K, values []V, err error) {
 	return keys, values, nil
 }
 
-func ExpectEqualU64(tb testing.TB, s1, s2 Unary[uint64]) {
+func ExpectEqualU64(tb testing.TB, s1, s2 Uno[uint64]) {
 	tb.Helper()
 	ExpectEqual[uint64](tb, s1, s2)
 }
-func ExpectEqual[V comparable](tb testing.TB, s1, s2 Unary[V]) {
+func ExpectEqual[V comparable](tb testing.TB, s1, s2 Uno[V]) {
 	tb.Helper()
 	for s1.HasNext() && s2.HasNext() {
 		k1, e1 := s1.Next()
@@ -91,7 +91,7 @@ func (m *PairsWithErrorIter) Next() ([]byte, []byte, error) {
 	return []byte(fmt.Sprintf("%x", m.i)), []byte(fmt.Sprintf("%x", m.i)), nil
 }
 
-func Count[T any](s Unary[T]) (cnt int, err error) {
+func Count[T any](s Uno[T]) (cnt int, err error) {
 	for s.HasNext() {
 		_, err := s.Next()
 		if err != nil {
@@ -102,7 +102,7 @@ func Count[T any](s Unary[T]) (cnt int, err error) {
 	return cnt, err
 }
 
-func CountDual[K, V any](s Dual[K, V]) (cnt int, err error) {
+func CountDual[K, V any](s Duo[K, V]) (cnt int, err error) {
 	for s.HasNext() {
 		_, _, err := s.Next()
 		if err != nil {

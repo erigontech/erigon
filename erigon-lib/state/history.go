@@ -1433,7 +1433,7 @@ func (hi *StateAsOfIterF) Next() ([]byte, []byte, error) {
 	hi.limit--
 	hi.k, hi.v = append(hi.k[:0], hi.nextKey...), append(hi.v[:0], hi.nextVal...)
 
-	// Satisfy iter.Dual Invariant 2
+	// Satisfy iter.Duo Invariant 2
 	hi.k, hi.kBackup, hi.v, hi.vBackup = hi.kBackup, hi.k, hi.vBackup, hi.v
 	if err := hi.advanceInFiles(); err != nil {
 		return nil, nil, err
@@ -1574,7 +1574,7 @@ func (hi *StateAsOfIterDB) Next() ([]byte, []byte, error) {
 	hi.limit--
 	hi.k, hi.v = hi.nextKey, hi.nextVal
 
-	// Satisfy iter.Dual Invariant 2
+	// Satisfy iter.Duo Invariant 2
 	hi.k, hi.kBackup, hi.v, hi.vBackup = hi.kBackup, hi.k, hi.vBackup, hi.v
 	if err := hi.advance(); err != nil {
 		return nil, nil, err
@@ -1753,7 +1753,7 @@ func (hi *HistoryChangesIterFiles) Next() ([]byte, []byte, error) {
 	hi.limit--
 	hi.k, hi.v = append(hi.k[:0], hi.nextKey...), append(hi.v[:0], hi.nextVal...)
 
-	// Satisfy iter.Dual Invariant 2
+	// Satisfy iter.Duo Invariant 2
 	hi.k, hi.kBackup, hi.v, hi.vBackup = hi.kBackup, hi.k, hi.vBackup, hi.v
 	if err := hi.advance(); err != nil {
 		return nil, nil, err

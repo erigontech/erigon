@@ -29,23 +29,23 @@ type Closer interface {
 }
 
 var (
-	EmptyU64 = &EmptyUnary[uint64]{}
-	EmptyKV  = &EmptyDual[[]byte, []byte]{}
-	EmptyKVS = &EmptyDualS[[]byte, []byte]{}
+	EmptyU64 = &EmptyUno[uint64]{}
+	EmptyKV  = &EmptyDuo[[]byte, []byte]{}
+	EmptyKVS = &EmptyTrio[[]byte, []byte, uint64]{}
 )
 
 type (
-	EmptyUnary[T any]    struct{}
-	EmptyDual[K, V any]  struct{}
-	EmptyDualS[K, V any] struct{}
+	EmptyUno[T any]          struct{}
+	EmptyDuo[K, V any]       struct{}
+	EmptyTrio[K, V1, V2 any] struct{}
 )
 
-func (EmptyUnary[T]) HasNext() bool                               { return false }
-func (EmptyUnary[T]) Next() (v T, err error)                      { return v, err }
-func (EmptyDual[K, V]) HasNext() bool                             { return false }
-func (EmptyDual[K, V]) Next() (k K, v V, err error)               { return k, v, err }
-func (EmptyDualS[K, V]) HasNext() bool                            { return false }
-func (EmptyDualS[K, V]) Next() (k K, v V, step uint64, err error) { return k, v, step, err }
+func (EmptyUno[T]) HasNext() bool                                 { return false }
+func (EmptyUno[T]) Next() (v T, err error)                        { return v, err }
+func (EmptyDuo[K, V]) HasNext() bool                              { return false }
+func (EmptyDuo[K, V]) Next() (k K, v V, err error)                { return k, v, err }
+func (EmptyTrio[K, V1, v2]) HasNext() bool                        { return false }
+func (EmptyTrio[K, V1, V2]) Next() (k K, v1 V1, v2 V2, err error) { return k, v1, v2, err }
 
 type ArrStream[V any] struct {
 	arr []V
@@ -355,9 +355,9 @@ func (m *MergeKVIter) Close() {
 	}
 }
 
-// UnionUnary
-type UnionUnary[T constraints.Ordered] struct {
-	x, y           Unary[T]
+// UnionUno
+type UnionUno[T constraints.Ordered] struct {
+	x, y           Uno[T]
 	asc            bool
 	xHas, yHas     bool
 	xNextK, yNextK T
@@ -365,9 +365,9 @@ type UnionUnary[T constraints.Ordered] struct {
 	limit          int
 }
 
-func Union[T constraints.Ordered](x, y Unary[T], asc order.By, limit int) Unary[T] {
+func Union[T constraints.Ordered](x, y Uno[T], asc order.By, limit int) Uno[T] {
 	if x == nil && y == nil {
-		return &EmptyUnary[T]{}
+		return &EmptyUno[T]{}
 	}
 	if x == nil {
 		return y
@@ -381,16 +381,16 @@ func Union[T constraints.Ordered](x, y Unary[T], asc order.By, limit int) Unary[
 	if !y.HasNext() {
 		return x
 	}
-	m := &UnionUnary[T]{x: x, y: y, asc: bool(asc), limit: limit}
+	m := &UnionUno[T]{x: x, y: y, asc: bool(asc), limit: limit}
 	m.advanceX()
 	m.advanceY()
 	return m
 }
 
-func (m *UnionUnary[T]) HasNext() bool {
+func (m *UnionUno[T]) HasNext() bool {
 	return m.err != nil || (m.limit != 0 && m.xHas) || (m.limit != 0 && m.yHas)
 }
-func (m *UnionUnary[T]) advanceX() {
+func (m *UnionUno[T]) advanceX() {
 	if m.err != nil {
 		return
 	}
@@ -399,7 +399,7 @@ func (m *UnionUnary[T]) advanceX() {
 		m.xNextK, m.err = m.x.Next()
 	}
 }
-func (m *UnionUnary[T]) advanceY() {
+func (m *UnionUno[T]) advanceY() {
 	if m.err != nil {
 		return
 	}
@@ -409,11 +409,11 @@ func (m *UnionUnary[T]) advanceY() {
 	}
 }
 
-func (m *UnionUnary[T]) less() bool {
+func (m *UnionUno[T]) less() bool {
 	return (m.asc && m.xNextK < m.yNextK) || (!m.asc && m.xNextK > m.yNextK)
 }
 
-func (m *UnionUnary[T]) Next() (res T, err error) {
+func (m *UnionUno[T]) Next() (res T, err error) {
 	if m.err != nil {
 		return res, m.err
 	}
@@ -442,7 +442,7 @@ func (m *UnionUnary[T]) Next() (res T, err error) {
 	m.advanceY()
 	return k, err
 }
-func (m *UnionUnary[T]) Close() {
+func (m *UnionUno[T]) Close() {
 	if x, ok := m.x.(Closer); ok {
 		x.Close()
 	}
@@ -453,16 +453,16 @@ func (m *UnionUnary[T]) Close() {
 
 // IntersectIter
 type IntersectIter[T constraints.Ordered] struct {
-	x, y               Unary[T]
+	x, y               Uno[T]
 	xHasNext, yHasNext bool
 	xNextK, yNextK     T
 	limit              int
 	err                error
 }
 
-func Intersect[T constraints.Ordered](x, y Unary[T], limit int) Unary[T] {
+func Intersect[T constraints.Ordered](x, y Uno[T], limit int) Uno[T] {
 	if x == nil || y == nil || !x.HasNext() || !y.HasNext() {
-		return &EmptyUnary[T]{}
+		return &EmptyUno[T]{}
 	}
 	m := &IntersectIter[T]{x: x, y: y, limit: limit}
 	m.advance()
@@ -527,24 +527,24 @@ func (m *IntersectIter[T]) Close() {
 	}
 }
 
-// TransformDualIter - analog `map` (in terms of map-filter-reduce pattern)
-type TransformDualIter[K, V any] struct {
-	it        Dual[K, V]
+// TransformDuoIter - analog `map` (in terms of map-filter-reduce pattern)
+type TransformDuoIter[K, V any] struct {
+	it        Duo[K, V]
 	transform func(K, V) (K, V, error)
 }
 
-func TransformDual[K, V any](it Dual[K, V], transform func(K, V) (K, V, error)) *TransformDualIter[K, V] {
-	return &TransformDualIter[K, V]{it: it, transform: transform}
+func TransformDuo[K, V any](it Duo[K, V], transform func(K, V) (K, V, error)) *TransformDuoIter[K, V] {
+	return &TransformDuoIter[K, V]{it: it, transform: transform}
 }
-func (m *TransformDualIter[K, V]) HasNext() bool { return m.it.HasNext() }
-func (m *TransformDualIter[K, V]) Next() (K, V, error) {
+func (m *TransformDuoIter[K, V]) HasNext() bool { return m.it.HasNext() }
+func (m *TransformDuoIter[K, V]) Next() (K, V, error) {
 	k, v, err := m.it.Next()
 	if err != nil {
 		return k, v, err
 	}
 	return m.transform(k, v)
 }
-func (m *TransformDualIter[K, v]) Close() {
+func (m *TransformDuoIter[K, v]) Close() {
 	if x, ok := m.it.(Closer); ok {
 		x.Close()
 	}
@@ -572,11 +572,11 @@ func (m *TransformKV2U64Iter[K, v]) Close() {
 	}
 }
 
-// FilterDualIter - analog `map` (in terms of map-filter-reduce pattern)
+// FilterDuoIter - analog `map` (in terms of map-filter-reduce pattern)
 // please avoid reading from Disk/DB more elements and then filter them. Better
 // push-down filter conditions to lower-level iterator to reduce disk reads amount.
-type FilterDualIter[K, V any] struct {
-	it      Dual[K, V]
+type FilterDuoIter[K, V any] struct {
+	it      Duo[K, V]
 	filter  func(K, V) bool
 	hasNext bool
 	err     error
@@ -584,15 +584,15 @@ type FilterDualIter[K, V any] struct {
 	nextV   V
 }
 
-func FilterKV(it KV, filter func(k, v []byte) bool) *FilterDualIter[[]byte, []byte] {
-	return FilterDual[[]byte, []byte](it, filter)
+func FilterKV(it KV, filter func(k, v []byte) bool) *FilterDuoIter[[]byte, []byte] {
+	return FilterDuo[[]byte, []byte](it, filter)
 }
-func FilterDual[K, V any](it Dual[K, V], filter func(K, V) bool) *FilterDualIter[K, V] {
-	i := &FilterDualIter[K, V]{it: it, filter: filter}
+func FilterDuo[K, V any](it Duo[K, V], filter func(K, V) bool) *FilterDuoIter[K, V] {
+	i := &FilterDuoIter[K, V]{it: it, filter: filter}
 	i.advance()
 	return i
 }
-func (m *FilterDualIter[K, V]) advance() {
+func (m *FilterDuoIter[K, V]) advance() {
 	if m.err != nil {
 		return
 	}
@@ -611,38 +611,38 @@ func (m *FilterDualIter[K, V]) advance() {
 		}
 	}
 }
-func (m *FilterDualIter[K, V]) HasNext() bool { return m.err != nil || m.hasNext }
-func (m *FilterDualIter[K, V]) Next() (k K, v V, err error) {
+func (m *FilterDuoIter[K, V]) HasNext() bool { return m.err != nil || m.hasNext }
+func (m *FilterDuoIter[K, V]) Next() (k K, v V, err error) {
 	k, v, err = m.nextK, m.nextV, m.err
 	m.advance()
 	return k, v, err
 }
-func (m *FilterDualIter[K, v]) Close() {
+func (m *FilterDuoIter[K, v]) Close() {
 	if x, ok := m.it.(Closer); ok {
 		x.Close()
 	}
 }
 
-// FilterUnaryIter - analog `map` (in terms of map-filter-reduce pattern)
+// FilterUnoIter - analog `map` (in terms of map-filter-reduce pattern)
 // please avoid reading from Disk/DB more elements and then filter them. Better
 // push-down filter conditions to lower-level iterator to reduce disk reads amount.
-type FilterUnaryIter[T any] struct {
-	it      Unary[T]
+type FilterUnoIter[T any] struct {
+	it      Uno[T]
 	filter  func(T) bool
 	hasNext bool
 	err     error
 	nextK   T
 }
 
-func FilterU64(it U64, filter func(k uint64) bool) *FilterUnaryIter[uint64] {
-	return FilterUnary[uint64](it, filter)
+func FilterU64(it U64, filter func(k uint64) bool) *FilterUnoIter[uint64] {
+	return FilterUno[uint64](it, filter)
 }
-func FilterUnary[T any](it Unary[T], filter func(T) bool) *FilterUnaryIter[T] {
-	i := &FilterUnaryIter[T]{it: it, filter: filter}
+func FilterUno[T any](it Uno[T], filter func(T) bool) *FilterUnoIter[T] {
+	i := &FilterUnoIter[T]{it: it, filter: filter}
 	i.advance()
 	return i
 }
-func (m *FilterUnaryIter[T]) advance() {
+func (m *FilterUnoIter[T]) advance() {
 	if m.err != nil {
 		return
 	}
@@ -660,13 +660,13 @@ func (m *FilterUnaryIter[T]) advance() {
 		}
 	}
 }
-func (m *FilterUnaryIter[T]) HasNext() bool { return m.err != nil || m.hasNext }
-func (m *FilterUnaryIter[T]) Next() (k T, err error) {
+func (m *FilterUnoIter[T]) HasNext() bool { return m.err != nil || m.hasNext }
+func (m *FilterUnoIter[T]) Next() (k T, err error) {
 	k, err = m.nextK, m.err
 	m.advance()
 	return k, err
 }
-func (m *FilterUnaryIter[T]) Close() {
+func (m *FilterUnoIter[T]) Close() {
 	if x, ok := m.it.(Closer); ok {
 		x.Close()
 	}
@@ -686,12 +686,12 @@ type Paginated[T any] struct {
 	arr           []T
 	i             int
 	err           error
-	nextPage      NextPageUnary[T]
+	nextPage      NextPageUno[T]
 	nextPageToken string
 	initialized   bool
 }
 
-func Paginate[T any](f NextPageUnary[T]) *Paginated[T] { return &Paginated[T]{nextPage: f} }
+func Paginate[T any](f NextPageUno[T]) *Paginated[T] { return &Paginated[T]{nextPage: f} }
 func (it *Paginated[T]) HasNext() bool {
 	if it.err != nil || it.i < len(it.arr) {
 		return true
@@ -714,20 +714,20 @@ func (it *Paginated[T]) Next() (v T, err error) {
 	return v, nil
 }
 
-type PaginatedDual[K, V any] struct {
+type PaginatedDuo[K, V any] struct {
 	keys          []K
 	values        []V
 	i             int
 	err           error
-	nextPage      NextPageDual[K, V]
+	nextPage      NextPageDuo[K, V]
 	nextPageToken string
 	initialized   bool
 }
 
-func PaginateDual[K, V any](f NextPageDual[K, V]) *PaginatedDual[K, V] {
-	return &PaginatedDual[K, V]{nextPage: f}
+func PaginateDuo[K, V any](f NextPageDuo[K, V]) *PaginatedDuo[K, V] {
+	return &PaginatedDuo[K, V]{nextPage: f}
 }
-func (it *PaginatedDual[K, V]) HasNext() bool {
+func (it *PaginatedDuo[K, V]) HasNext() bool {
 	if it.err != nil || it.i < len(it.keys) {
 		return true
 	}
@@ -739,8 +739,8 @@ func (it *PaginatedDual[K, V]) HasNext() bool {
 	it.keys, it.values, it.nextPageToken, it.err = it.nextPage(it.nextPageToken)
 	return it.err != nil || it.i < len(it.keys)
 }
-func (it *PaginatedDual[K, V]) Close() {}
-func (it *PaginatedDual[K, V]) Next() (k K, v V, err error) {
+func (it *PaginatedDuo[K, V]) Close() {}
+func (it *PaginatedDuo[K, V]) Next() (k K, v V, err error) {
 	if it.err != nil {
 		return k, v, it.err
 	}

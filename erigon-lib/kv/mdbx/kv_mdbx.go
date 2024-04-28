@@ -2093,6 +2093,9 @@ func (s *cursor2iter) advance() (err error) {
 }
 
 func (s *cursor2iter) Close() {
+	if s == nil {
+		return
+	}
 	if s.c != nil {
 		s.c.Close()
 		delete(s.tx.streams, s.id)
