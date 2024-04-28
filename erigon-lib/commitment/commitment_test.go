@@ -3,9 +3,10 @@ package commitment
 import (
 	"encoding/binary"
 	"encoding/hex"
-	"github.com/ledgerwatch/erigon-lib/common"
 	"math/rand"
 	"testing"
+
+	"github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/stretchr/testify/require"
 )

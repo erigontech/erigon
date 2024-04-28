@@ -87,7 +87,7 @@ func NewMDBX(log log.Logger) MdbxOpts {
 
 		mapSize:         DefaultMapSize,
 		growthStep:      DefaultGrowthStep,
-		mergeThreshold:  2 * 8192,
+		mergeThreshold:  3 * 8192,
 		shrinkThreshold: -1, // default
 		label:           kv.InMem,
 	}
