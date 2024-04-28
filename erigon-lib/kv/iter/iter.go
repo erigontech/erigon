@@ -81,8 +81,8 @@ func (it *RangeIter[T]) Next() (T, error) {
 	return v, nil
 }
 
-// UnionUno
-type UnionUno[T constraints.Ordered] struct {
+// Union1
+type Union1[T constraints.Ordered] struct {
 	x, y           Uno[T]
 	asc            bool
 	xHas, yHas     bool
@@ -107,16 +107,16 @@ func Union[T constraints.Ordered](x, y Uno[T], asc order.By, limit int) Uno[T] {
 	if !y.HasNext() {
 		return x
 	}
-	m := &UnionUno[T]{x: x, y: y, asc: bool(asc), limit: limit}
+	m := &Union1[T]{x: x, y: y, asc: bool(asc), limit: limit}
 	m.advanceX()
 	m.advanceY()
 	return m
 }
 
-func (m *UnionUno[T]) HasNext() bool {
+func (m *Union1[T]) HasNext() bool {
 	return m.err != nil || (m.limit != 0 && m.xHas) || (m.limit != 0 && m.yHas)
 }
-func (m *UnionUno[T]) advanceX() {
+func (m *Union1[T]) advanceX() {
 	if m.err != nil {
 		return
 	}
@@ -125,7 +125,7 @@ func (m *UnionUno[T]) advanceX() {
 		m.xNextK, m.err = m.x.Next()
 	}
 }
-func (m *UnionUno[T]) advanceY() {
+func (m *Union1[T]) advanceY() {
 	if m.err != nil {
 		return
 	}
@@ -135,11 +135,11 @@ func (m *UnionUno[T]) advanceY() {
 	}
 }
 
-func (m *UnionUno[T]) less() bool {
+func (m *Union1[T]) less() bool {
 	return (m.asc && m.xNextK < m.yNextK) || (!m.asc && m.xNextK > m.yNextK)
 }
 
-func (m *UnionUno[T]) Next() (res T, err error) {
+func (m *Union1[T]) Next() (res T, err error) {
 	if m.err != nil {
 		return res, m.err
 	}
@@ -168,7 +168,7 @@ func (m *UnionUno[T]) Next() (res T, err error) {
 	m.advanceY()
 	return k, err
 }
-func (m *UnionUno[T]) Close() {
+func (m *Union1[T]) Close() {
 	if x, ok := m.x.(Closer); ok {
 		x.Close()
 	}
@@ -177,8 +177,8 @@ func (m *UnionUno[T]) Close() {
 	}
 }
 
-// IntersectIter
-type IntersectIter[T constraints.Ordered] struct {
+// Intersected
+type Intersected[T constraints.Ordered] struct {
 	x, y               Uno[T]
 	xHasNext, yHasNext bool
 	xNextK, yNextK     T
@@ -190,14 +190,14 @@ func Intersect[T constraints.Ordered](x, y Uno[T], limit int) Uno[T] {
 	if x == nil || y == nil || !x.HasNext() || !y.HasNext() {
 		return &Empty[T]{}
 	}
-	m := &IntersectIter[T]{x: x, y: y, limit: limit}
+	m := &Intersected[T]{x: x, y: y, limit: limit}
 	m.advance()
 	return m
 }
-func (m *IntersectIter[T]) HasNext() bool {
+func (m *Intersected[T]) HasNext() bool {
 	return m.err != nil || (m.limit != 0 && m.xHasNext && m.yHasNext)
 }
-func (m *IntersectIter[T]) advance() {
+func (m *Intersected[T]) advance() {
 	m.advanceX()
 	m.advanceY()
 	for m.xHasNext && m.yHasNext {
@@ -217,7 +217,7 @@ func (m *IntersectIter[T]) advance() {
 	m.xHasNext = false
 }
 
-func (m *IntersectIter[T]) advanceX() {
+func (m *Intersected[T]) advanceX() {
 	if m.err != nil {
 		return
 	}
@@ -226,7 +226,7 @@ func (m *IntersectIter[T]) advanceX() {
 		m.xNextK, m.err = m.x.Next()
 	}
 }
-func (m *IntersectIter[T]) advanceY() {
+func (m *Intersected[T]) advanceY() {
 	if m.err != nil {
 		return
 	}
@@ -235,7 +235,7 @@ func (m *IntersectIter[T]) advanceY() {
 		m.yNextK, m.err = m.y.Next()
 	}
 }
-func (m *IntersectIter[T]) Next() (T, error) {
+func (m *Intersected[T]) Next() (T, error) {
 	if m.err != nil {
 		return m.xNextK, m.err
 	}
@@ -244,7 +244,7 @@ func (m *IntersectIter[T]) Next() (T, error) {
 	m.advance()
 	return k, err
 }
-func (m *IntersectIter[T]) Close() {
+func (m *Intersected[T]) Close() {
 	if x, ok := m.x.(Closer); ok {
 		x.Close()
 	}
