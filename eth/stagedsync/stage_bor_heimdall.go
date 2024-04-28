@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"runtime"
 	"sort"
@@ -16,10 +17,11 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/accounts/abi"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/dataflow"
@@ -91,6 +93,8 @@ func StageBorHeimdallCfg(
 		signatures:       signatures,
 	}
 }
+
+var lastMumbaiEventRecord *heimdall.EventRecordWithTime
 
 func BorHeimdallForward(
 	s *StageState,
@@ -172,6 +176,8 @@ func BorHeimdallForward(
 	var fetchTime time.Duration
 	var snapTime time.Duration
 	var snapInitTime time.Duration
+	var syncEventTime time.Duration
+
 	var eventRecords int
 
 	lastSpanID, err := fetchRequiredHeimdallSpansIfNeeded(ctx, headNumber, tx, cfg, s.LogPrefix(), logger)
@@ -189,6 +195,9 @@ func BorHeimdallForward(
 	defer logTimer.Stop()
 
 	logger.Info(fmt.Sprintf("[%s] Processing sync events...", s.LogPrefix()), "from", lastBlockNum+1, "to", headNumber)
+
+	var nextEventRecord *heimdall.EventRecordWithTime
+
 	for blockNum = lastBlockNum + 1; blockNum <= headNumber; blockNum++ {
 		select {
 		default:
@@ -199,7 +208,8 @@ func BorHeimdallForward(
 				"lastSpanID", lastSpanID,
 				"lastStateSyncEventID", lastStateSyncEventID,
 				"total records", eventRecords,
-				"fetch time", fetchTime,
+				"sync-events", syncEventTime,
+				"sync-event-fetch", fetchTime,
 				"snaps", snapTime,
 				"snap-init", snapInitTime,
 				"process time", time.Since(processStart),
@@ -298,23 +308,70 @@ func BorHeimdallForward(
 			return err
 		}
 
+		syncEventStart := time.Now()
+
 		var callTime time.Duration
-		var records int
-		lastStateSyncEventID, records, callTime, err = fetchRequiredHeimdallStateSyncEventsIfNeeded(
-			ctx,
-			header,
-			tx,
-			cfg,
-			s.LogPrefix(),
-			logger,
-			lastStateSyncEventID,
-		)
-		if err != nil {
-			return err
+
+		var endStateSyncEventId uint64
+
+		// mumbai event records have stopped being produced as of march 2024
+		// as part of the goerli decom - so there is no point trying to
+		// fetch them
+		if cfg.chainConfig.ChainName == networkname.MumbaiChainName {
+			if nextEventRecord == nil {
+				nextEventRecord = lastMumbaiEventRecord
+			}
 		}
 
-		eventRecords += records
+		if nextEventRecord == nil || header.Time > uint64(nextEventRecord.Time.Unix()) {
+			var records int
+
+			if lastStateSyncEventID == 0 || lastStateSyncEventID != endStateSyncEventId {
+				lastStateSyncEventID, records, callTime, err = fetchRequiredHeimdallStateSyncEventsIfNeeded(
+					ctx,
+					header,
+					tx,
+					cfg,
+					s.LogPrefix(),
+					logger,
+					lastStateSyncEventID,
+				)
+
+				if err != nil {
+					return err
+				}
+			}
+
+			if records != 0 {
+				nextEventRecord = nil
+				eventRecords += records
+			} else {
+				if nextEventRecord == nil || nextEventRecord.ID <= lastStateSyncEventID {
+					if eventRecord, err := cfg.heimdallClient.FetchStateSyncEvent(ctx, lastStateSyncEventID+1); err == nil {
+						nextEventRecord = eventRecord
+						endStateSyncEventId = 0
+					} else {
+						if !errors.Is(err, heimdall.ErrEventRecordNotFound) {
+							return err
+						}
+
+						if cfg.chainConfig.ChainName == networkname.MumbaiChainName && lastStateSyncEventID == 276850 {
+							lastMumbaiEventRecord = &heimdall.EventRecordWithTime{
+								EventRecord: heimdall.EventRecord{
+									ID: 276851,
+								},
+								Time: time.Unix(math.MaxInt64, 0),
+							}
+						}
+
+						endStateSyncEventId = lastStateSyncEventID
+					}
+				}
+			}
+		}
+
 		fetchTime += callTime
+		syncEventTime = syncEventTime + time.Since(syncEventStart)
 
 		if cfg.loopBreakCheck != nil && cfg.loopBreakCheck(int(blockNum-lastBlockNum)) {
 			headNumber = blockNum
@@ -338,6 +395,7 @@ func BorHeimdallForward(
 		"lastSpanID", lastSpanID,
 		"lastStateSyncEventID", lastStateSyncEventID,
 		"total records", eventRecords,
+		"sync event time", syncEventTime,
 		"fetch time", fetchTime,
 		"snap time", snapTime,
 		"process time", time.Since(processStart),
@@ -466,7 +524,7 @@ func persistValidatorSets(
 		var err error
 		if snap, err = snap.Apply(parent, headers, logger); err != nil {
 			if snap != nil {
-				var badHash common.Hash
+				var badHash libcommon.Hash
 				for _, header := range headers {
 					if header.Number.Uint64() == snap.Number+1 {
 						badHash = header.Hash()
