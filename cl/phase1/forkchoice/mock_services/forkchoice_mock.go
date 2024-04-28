@@ -61,38 +61,45 @@ func makeSyncContributionPoolMock(t *testing.T) sync_contribution_pool.SyncContr
 	}
 	u := map[syncContributionKey]*cltypes.Contribution{}
 	pool := syncpoolmock.NewMockSyncContributionPool(ctrl)
-	pool.EXPECT().AddSyncContribution(gomock.Any(), gomock.Any()).DoAndReturn(func(headState *state.CachingBeaconState, contribution *cltypes.Contribution) error {
-		key := syncContributionKey{
-			slot:              contribution.Slot,
-			subcommitteeIndex: contribution.SubcommitteeIndex,
-			beaconBlockRoot:   contribution.BeaconBlockRoot,
-		}
-		u[key] = contribution
-		return nil
-	}).AnyTimes()
-	pool.EXPECT().GetSyncContribution(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(slot uint64, subcommitteeIndex uint64, beaconBlockRoot common.Hash) (*cltypes.Contribution, bool) {
-		key := syncContributionKey{
-			slot:              slot,
-			subcommitteeIndex: subcommitteeIndex,
-			beaconBlockRoot:   beaconBlockRoot,
-		}
-		v, ok := u[key]
-		return v, ok
-	}).AnyTimes()
-	pool.EXPECT().AddSyncCommitteeMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(headState *state.CachingBeaconState, subCommitee uint64, message *cltypes.SyncCommitteeMessage) error {
-		key := syncContributionKey{
-			slot:              message.Slot,
-			subcommitteeIndex: subCommitee,
-			beaconBlockRoot:   message.BeaconBlockRoot,
-		}
-		u[key] = &cltypes.Contribution{
-			Slot:              message.Slot,
-			SubcommitteeIndex: subCommitee,
-			BeaconBlockRoot:   message.BeaconBlockRoot,
-			AggregationBits:   make([]byte, cltypes.SyncCommitteeAggregationBitsSize),
-		}
-		return nil
-	}).AnyTimes()
+	pool.EXPECT().
+		AddSyncContribution(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(headState *state.CachingBeaconState, contribution *cltypes.Contribution) error {
+			key := syncContributionKey{
+				slot:              contribution.Slot,
+				subcommitteeIndex: contribution.SubcommitteeIndex,
+				beaconBlockRoot:   contribution.BeaconBlockRoot,
+			}
+			u[key] = contribution
+			return nil
+		}).
+		AnyTimes()
+	pool.EXPECT().
+		GetSyncContribution(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(slot uint64, subcommitteeIndex uint64, beaconBlockRoot common.Hash) *cltypes.Contribution {
+			key := syncContributionKey{
+				slot:              slot,
+				subcommitteeIndex: subcommitteeIndex,
+				beaconBlockRoot:   beaconBlockRoot,
+			}
+			return u[key]
+		}).
+		AnyTimes()
+	pool.EXPECT().
+		AddSyncCommitteeMessage(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(headState *state.CachingBeaconState, subCommitee uint64, message *cltypes.SyncCommitteeMessage) error {
+			key := syncContributionKey{
+				slot:              message.Slot,
+				subcommitteeIndex: subCommitee,
+				beaconBlockRoot:   message.BeaconBlockRoot,
+			}
+			u[key] = &cltypes.Contribution{
+				Slot:              message.Slot,
+				SubcommitteeIndex: subCommitee,
+				BeaconBlockRoot:   message.BeaconBlockRoot,
+				AggregationBits:   make([]byte, cltypes.SyncCommitteeAggregationBitsSize),
+			}
+			return nil
+		}).AnyTimes()
 	return pool
 }
 
