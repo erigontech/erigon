@@ -30,7 +30,7 @@ func (api *ErigonImpl) Forks(ctx context.Context) (Forks, error) {
 	}
 	defer tx.Rollback()
 
-	chainConfig, genesis, err := api.chainConfigWithGenesis(tx)
+	chainConfig, genesis, err := api.chainConfigWithGenesis(ctx, tx)
 	if err != nil {
 		return Forks{}, err
 	}

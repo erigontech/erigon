@@ -806,23 +806,6 @@ type seedHash struct {
 	reported bool
 }
 
-// fsyncDB - to not loose results of downloading on power-off
-// See `erigon-lib/downloader/mdbx_piece_completion.go` for explanation
-func (d *Downloader) fsyncDB() error {
-	return d.db.Update(d.ctx, func(tx kv.RwTx) error {
-		v, err := tx.GetOne(kv.BittorrentInfo, []byte("_fsync"))
-		if err != nil {
-			return err
-		}
-		if len(v) == 0 || v[0] == 0 {
-			v = []byte{1}
-		} else {
-			v = []byte{0}
-		}
-		return tx.Put(kv.BittorrentInfo, []byte("_fsync"), v)
-	})
-}
-
 func (d *Downloader) mainLoop(silent bool) error {
 	if d.webseedsDiscover {
 		// CornerCase: no peers -> no anoncments to trackers -> no magnetlink resolution (but magnetlink has filename)
@@ -1315,7 +1298,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 	defer statEvery.Stop()
 
 	var m runtime.MemStats
-	justCompleted := true
 	for {
 		select {
 		case <-d.ctx.Done():
@@ -1332,11 +1314,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 			dbg.ReadMemStats(&m)
 			if stats.Completed {
-				if justCompleted {
-					justCompleted = false
-					_ = d.fsyncDB()
-				}
-
 				d.logger.Info("[snapshots] Seeding",
 					"up", common.ByteCount(stats.UploadRate)+"/s",
 					"peers", stats.PeersUnique,
@@ -2328,7 +2305,7 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 	if err := g.Wait(); err != nil {
 		return err
 	}
-	return d.fsyncDB()
+	return nil
 }
 
 // AddNewSeedableFile decides what we do depending on wether we have the .seg file or the .torrent file
@@ -2623,7 +2600,18 @@ func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientC
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("torrentcfg.NewMdbxPieceCompletion: %w", err)
 	}
+
+	//Reasons why using MMAP instead of files-API:
+	// - i see "10K threads exchaused" error earlier (on `--torrent.download.slots=500` and `pd-ssd`)
+	// - "sig-bus" at disk-full - may happen anyway, because DB is mmap
+	// - MMAP - means less GC pressure, more zero-copy
+	// - MMAP files are pre-allocated - which is not cool, but: 1. we can live with it 2. maybe can just resize MMAP in future
+	// See also: https://github.com/ledgerwatch/erigon/pull/10074
 	m = storage.NewMMapWithCompletion(snapDir, c)
+	//m = storage.NewFileOpts(storage.NewFileClientOpts{
+	//	ClientBaseDir:   snapDir,
+	//	PieceCompletion: c,
+	//})
 	cfg.DefaultStorage = m
 
 	err = func() error {
