@@ -186,7 +186,7 @@ func printDBsInfo(data []DBInfo) {
 }
 
 func AllDBsInfo(cliCtx *cli.Context) ([]DBInfo, error) {
-	var data []DBInfo = make([]DBInfo, 0)
+	data := make([]DBInfo, 0)
 
 	dbsNames, err := getAllDbsNames(cliCtx)
 	if err != nil {
