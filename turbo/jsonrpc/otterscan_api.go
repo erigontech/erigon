@@ -283,18 +283,17 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 		fromTxNum = int(_txNum)
 	}
 
-	// ensure result union will always have at least pageSize+1 results in order to determine
-	// there is more results or this is the last page, at the same time avoiding unbounded
-	lookupSize := int(pageSize) + 1
-	itTo, err := tx.IndexRange(kv.TracesToIdx, addr[:], fromTxNum, -1, order.Desc, lookupSize)
+	// unbounded limit on purpose, since there could be e.g. block rewards system txs, we limit
+	// results later
+	itTo, err := tx.IndexRange(kv.TracesToIdx, addr[:], fromTxNum, -1, order.Desc, kv.Unlim)
 	if err != nil {
 		return nil, err
 	}
-	itFrom, err := tx.IndexRange(kv.TracesFromIdx, addr[:], fromTxNum, -1, order.Desc, lookupSize)
+	itFrom, err := tx.IndexRange(kv.TracesFromIdx, addr[:], fromTxNum, -1, order.Desc, kv.Unlim)
 	if err != nil {
 		return nil, err
 	}
-	txNums := iter.Union[uint64](itFrom, itTo, order.Desc, lookupSize)
+	txNums := iter.Union[uint64](itFrom, itTo, order.Desc, kv.Unlim)
 	txNumsIter := rawdbv3.TxNums2BlockNums(tx, txNums, order.Desc)
 
 	exec := exec3.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, nil)
@@ -304,16 +303,18 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 	receipts := make([]map[string]interface{}, 0, pageSize)
 	resultCount := uint16(0)
 
+	mustReadHeader := true
 	for txNumsIter.HasNext() {
 		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := txNumsIter.Next()
 		if err != nil {
 			return nil, err
 		}
+		mustReadHeader = mustReadHeader || blockNumChanged
 		if isFinalTxn {
 			continue
 		}
 
-		if blockNumChanged { // things which not changed within 1 block
+		if mustReadHeader {
 			if header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {
 				return nil, err
 			}
@@ -323,9 +324,9 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 			}
 			blockHash = header.Hash()
 			exec.ChangeBlock(header)
+			mustReadHeader = false
 		}
 
-		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 		if err != nil {
 			return nil, err
@@ -480,18 +481,17 @@ func (api *OtterscanAPIImpl) searchTransactionsAfterV3(tx kv.TemporalTx, ctx con
 		fromTxNum = int(_txNum)
 	}
 
-	// ensure result union will always have at least pageSize+1 results in order to determine
-	// there is more results or this is the last page, at the same time avoiding unbounded
-	lookupSize := int(pageSize) + 1
-	itTo, err := tx.IndexRange(kv.TracesToIdx, addr[:], fromTxNum, -1, order.Asc, lookupSize)
+	// unbounded limit on purpose, since there could be e.g. block rewards system txs, we limit
+	// results later
+	itTo, err := tx.IndexRange(kv.TracesToIdx, addr[:], fromTxNum, -1, order.Asc, kv.Unlim)
 	if err != nil {
 		return nil, err
 	}
-	itFrom, err := tx.IndexRange(kv.TracesFromIdx, addr[:], fromTxNum, -1, order.Asc, lookupSize)
+	itFrom, err := tx.IndexRange(kv.TracesFromIdx, addr[:], fromTxNum, -1, order.Asc, kv.Unlim)
 	if err != nil {
 		return nil, err
 	}
-	txNums := iter.Union[uint64](itFrom, itTo, order.Asc, lookupSize)
+	txNums := iter.Union[uint64](itFrom, itTo, order.Asc, kv.Unlim)
 	txNumsIter := rawdbv3.TxNums2BlockNums(tx, txNums, order.Asc)
 
 	exec := exec3.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, nil)
@@ -522,7 +522,6 @@ func (api *OtterscanAPIImpl) searchTransactionsAfterV3(tx kv.TemporalTx, ctx con
 			exec.ChangeBlock(header)
 		}
 
-		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 		if err != nil {
 			return nil, err
