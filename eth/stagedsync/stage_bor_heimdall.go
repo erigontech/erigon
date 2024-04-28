@@ -504,7 +504,7 @@ func persistValidatorSets(
 			logger.Info(
 				fmt.Sprintf("[%s] Gathering headers for validator proposer prorities (backwards)", logPrefix),
 				"blockNum", blockNum,
-				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
+				"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
 			)
 		default:
 		}
