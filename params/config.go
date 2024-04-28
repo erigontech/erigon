@@ -80,8 +80,7 @@ var (
 )
 
 var (
-	// temporary solution, this should be added into the chain cfg
-	DepositContractAddress = libcommon.HexToAddress("0x00000000219ab540356cbb839cbe05303d7705fa") // TODO(racytech): do not forget to move this to chain cfg
+	MainnetDepositContractAddress = libcommon.HexToAddress("0x00000000219ab540356cbb839cbe05303d7705fa")
 )
 
 var (
@@ -335,4 +334,23 @@ func hasChainPassedTerminalTD(chainConfig *chain.Config, currentTDProvider func(
 
 	currentTD := currentTDProvider()
 	return (currentTD != nil) && (terminalTD.Cmp(currentTD) <= 0)
+}
+
+func SetDepositContractAddress(cfg *chain.Config) {
+	// TODO(racytech): revisit this function after merge to e35, re-do this if required
+	//				   will genesis include depositContractAddress filed in devnets (for example)?
+
+	if cfg.PragueTime == nil { // no deposit contracts before pectra
+		return
+	}
+	a := libcommon.Address{}
+	if cfg.DepositContractAddress != a {
+		// is already set, when for example init genesis is called if we assume that genesis has this field in its cfg
+		return
+	}
+	chainID := cfg.ChainID.Uint64()
+	switch chainID {
+	default: // defaults to mainnet
+		cfg.DepositContractAddress = MainnetDepositContractAddress
+	}
 }

@@ -993,7 +993,7 @@ func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
 	if body == nil {
 		return nil
 	}
-	return types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals, nil) // TODO(racytech): where are deposits?
+	return types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals, body.Deposits) // TODO(racytech): make sure deposits are stored and retrieved from DB
 }
 
 // HasBlock - is more efficient than ReadBlock because doesn't read transactions.

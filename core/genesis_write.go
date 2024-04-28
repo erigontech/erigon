@@ -491,7 +491,7 @@ func DeveloperGenesisBlock(period uint64, faucet libcommon.Address) *types.Genes
 // to the given database (or discards it if nil).
 func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
 	_ = g.Alloc //nil-check
-
+	// TODO(racytech): add deposits_root if needed
 	head := &types.Header{
 		Number:        new(big.Int).SetUint64(g.Number),
 		Nonce:         types.EncodeNonce(g.Nonce),

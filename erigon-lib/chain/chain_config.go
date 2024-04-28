@@ -91,8 +91,7 @@ type Config struct {
 	// All logs should be available to a validating node through eth_getLogs
 	NoPruneContracts map[common.Address]bool `json:"noPruneContracts,omitempty"`
 
-	// DepositContractAddress common.Address // EIP-6110: mainnet = 0x00000000219ab540356cbb839cbe05303d7705fa
-	// TODO(racytech): do we add this to chainspecs json files or hardcode it to every network config?
+	DepositContractAddress common.Address `json:"depositContractAddress,omitempty"` // EIP-6110
 }
 
 type BorConfig interface {
@@ -106,7 +105,7 @@ type BorConfig interface {
 func (c *Config) String() string {
 	engine := c.getEngine()
 
-	return fmt.Sprintf("{ChainID: %v, Homestead: %v, DAO: %v, Tangerine Whistle: %v, Spurious Dragon: %v, Byzantium: %v, Constantinople: %v, Petersburg: %v, Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Gray Glacier: %v, Terminal Total Difficulty: %v, Merge Netsplit: %v, Shanghai: %v, Cancun: %v, Prague: %v, Osaka: %v, Engine: %v, NoPruneContracts: %v}",
+	return fmt.Sprintf("{ChainID: %v, Homestead: %v, DAO: %v, Tangerine Whistle: %v, Spurious Dragon: %v, Byzantium: %v, Constantinople: %v, Petersburg: %v, Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Gray Glacier: %v, Terminal Total Difficulty: %v, Merge Netsplit: %v, Shanghai: %v, Cancun: %v, Prague: %v, Osaka: %v, Engine: %v, NoPruneContracts: %v, DepositContractAddress: %v}",
 		c.ChainID,
 		c.HomesteadBlock,
 		c.DAOForkBlock,
@@ -129,6 +128,7 @@ func (c *Config) String() string {
 		c.OsakaTime,
 		engine,
 		c.NoPruneContracts,
+		c.DepositContractAddress,
 	)
 }
 

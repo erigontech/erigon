@@ -104,13 +104,11 @@ type Header struct {
 	ExcessBlobGas *uint64 `json:"excessBlobGas"`
 
 	ParentBeaconBlockRoot *libcommon.Hash `json:"parentBeaconBlockRoot"` // EIP-4788
-
+	DepositsRoot          *libcommon.Hash `json:"depositsRoot"`          // EIP-6110
 	// The verkle proof is ignored in legacy headers
 	Verkle        bool
 	VerkleProof   []byte
 	VerkleKeyVals []verkle.KeyValuePair
-
-	DepositsRoot *libcommon.Hash // EIP-6110
 }
 
 func (h *Header) EncodingSize() int {
