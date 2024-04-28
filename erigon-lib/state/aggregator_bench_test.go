@@ -130,29 +130,28 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 
 	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
 	comp := CompressKeys | CompressVals
-	err := BuildBtreeIndex(dataPath, indexPath, comp, 1, logger, true)
-	require.NoError(b, err)
+	buildBtreeIndex(b, dataPath, indexPath, comp, 1, logger, true)
 
 	M := 1024
-	bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M), comp, false)
-
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), comp, false)
 	require.NoError(b, err)
+	defer bt.Close()
+	defer kv.Close()
 
 	keys, err := pivotKeysFromKV(dataPath)
 	require.NoError(b, err)
+	getter := NewArchiveGetter(kv.MakeGetter(), comp)
 
 	for i := 0; i < b.N; i++ {
 		p := rnd.Intn(len(keys))
-		cur, err := bt.SeekDeprecated(keys[p])
+		cur, err := bt.Seek(getter, keys[p])
 		require.NoErrorf(b, err, "i=%d", i)
 		require.EqualValues(b, keys[p], cur.Key())
 		require.NotEmptyf(b, cur.Value(), "i=%d", i)
 	}
-
-	bt.Close()
 }
 
-func benchInitBtreeIndex(b *testing.B, M uint64) (*BtIndex, [][]byte, string) {
+func benchInitBtreeIndex(b *testing.B, M uint64, compression FileCompression) (*seg.Decompressor, *BtIndex, [][]byte, string) {
 	b.Helper()
 
 	logger := log.New()
@@ -161,26 +160,31 @@ func benchInitBtreeIndex(b *testing.B, M uint64) (*BtIndex, [][]byte, string) {
 
 	dataPath := generateKV(b, tmp, 52, 10, 1000000, logger, 0)
 	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bt")
-	bt, err := CreateBtreeIndex(indexPath, dataPath, M, CompressNone, 1, logger, true)
+
+	buildBtreeIndex(b, dataPath, indexPath, compression, 1, logger, true)
+
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, M, compression, false)
 	require.NoError(b, err)
+	b.Cleanup(func() { bt.Close() })
+	b.Cleanup(func() { kv.Close() })
 
 	keys, err := pivotKeysFromKV(dataPath)
 	require.NoError(b, err)
-	return bt, keys, dataPath
+	return kv, bt, keys, dataPath
 }
 
 func Benchmark_BTree_Seek(b *testing.B) {
 	M := uint64(1024)
-	bt, keys, _ := benchInitBtreeIndex(b, M)
-	defer bt.Close()
-
+	compress := CompressNone
+	kv, bt, keys, _ := benchInitBtreeIndex(b, M, compress)
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+	getter := NewArchiveGetter(kv.MakeGetter(), compress)
 
 	b.Run("seek_only", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			p := rnd.Intn(len(keys))
 
-			cur, err := bt.SeekDeprecated(keys[p])
+			cur, err := bt.Seek(getter, keys[p])
 			require.NoError(b, err)
 
 			require.EqualValues(b, keys[p], cur.key)
@@ -191,7 +195,7 @@ func Benchmark_BTree_Seek(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			p := rnd.Intn(len(keys))
 
-			cur, err := bt.SeekDeprecated(keys[p])
+			cur, err := bt.Seek(getter, keys[p])
 			require.NoError(b, err)
 
 			require.EqualValues(b, keys[p], cur.key)

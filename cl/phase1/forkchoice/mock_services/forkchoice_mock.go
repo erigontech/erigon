@@ -1,8 +1,10 @@
-package forkchoice
+package mock_services
 
 import (
 	"context"
 	"testing"
+
+	"go.uber.org/mock/gomock"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -10,11 +12,11 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
 	"github.com/ledgerwatch/erigon/cl/validator/sync_contribution_pool"
 	syncpoolmock "github.com/ledgerwatch/erigon/cl/validator/sync_contribution_pool/mock_services"
-	"go.uber.org/mock/gomock"
 )
 
 // Make mocks with maps and simple setters and getters, panic on methods from ForkChoiceStorageWriter
@@ -39,7 +41,7 @@ type ForkChoiceStorageMock struct {
 	StateAtSlotVal            map[uint64]*state.CachingBeaconState
 	GetSyncCommitteesVal      map[uint64][2]*solid.SyncCommittee
 	GetFinalityCheckpointsVal map[common.Hash][3]solid.Checkpoint
-	WeightsMock               []ForkNode
+	WeightsMock               []forkchoice.ForkNode
 	LightClientBootstraps     map[common.Hash]*cltypes.LightClientBootstrap
 	NewestLCUpdate            *cltypes.LightClientUpdate
 	LCUpdates                 map[uint64]*cltypes.LightClientUpdate
@@ -229,7 +231,7 @@ func (f *ForkChoiceStorageMock) Partecipation(epoch uint64) (*solid.BitList, boo
 	return f.ParticipationVal, f.ParticipationVal != nil
 }
 
-func (f *ForkChoiceStorageMock) ForkNodes() []ForkNode {
+func (f *ForkChoiceStorageMock) ForkNodes() []forkchoice.ForkNode {
 	return f.WeightsMock
 }
 
