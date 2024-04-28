@@ -450,10 +450,7 @@ func (w *domainBufferedWriter) SetTxNum(v uint64) {
 }
 
 func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *domainBufferedWriter {
-	discardHistory := discard
-	if dbg.DiscardCommitmentHistory && dt.d.filenameBase == "commitment" {
-		discardHistory = true
-	}
+	discardHistory := discard || dt.d.historyDisabled
 
 	w := &domainBufferedWriter{
 		discard:   discard,

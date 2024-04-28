@@ -21,13 +21,14 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/length"
 	"math"
 	"os"
 	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/common/length"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -422,7 +423,7 @@ func TestHistoryCanPrune(t *testing.T) {
 	}
 	t.Run("withFiles", func(t *testing.T) {
 		db, h := testDbAndHistory(t, true, logger)
-		h.dontProduceFiles = false
+		h.dontProduceHistoryFiles = false
 
 		defer db.Close()
 		writeKey(t, h, db)
@@ -457,7 +458,7 @@ func TestHistoryCanPrune(t *testing.T) {
 	})
 	t.Run("withoutFiles", func(t *testing.T) {
 		db, h := testDbAndHistory(t, false, logger)
-		h.dontProduceFiles = true
+		h.dontProduceHistoryFiles = true
 		h.keepTxInDB = stepKeepInDB * h.aggregationStep
 
 		defer db.Close()

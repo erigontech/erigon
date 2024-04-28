@@ -163,6 +163,7 @@ func ExecV3(ctx context.Context,
 			agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
 		}
 		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+		defer agg.DiscardHistory(kv.CommitmentDomain).EnableHistory(kv.CommitmentDomain)
 	} else {
 		agg.SetCompressWorkers(1)
 		agg.SetCollateAndBuildWorkers(1)
