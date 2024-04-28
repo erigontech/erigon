@@ -1801,7 +1801,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		Flags(func(u uint) uint {
 			return mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.NoMemInit | mdbx.LifoReclaim | mdbx.WriteMap
 		}).
-		PageSize(uint64(8 * datasize.KB)).
+		PageSize(uint64(4 * datasize.KB)).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).
 		Open(ctx)
 	if err != nil {

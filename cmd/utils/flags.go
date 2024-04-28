@@ -748,12 +748,12 @@ var (
 	DbPageSizeFlag = cli.StringFlag{
 		Name:  "db.pagesize",
 		Usage: "DB is splitted to 'pages' of fixed size. Can't change DB creation. Must be power of 2 and '256b <= pagesize <= 64kb'. Default: equal to OperationSystem's pageSize. Bigger pageSize causing: 1. More writes to disk during commit 2. Smaller b-tree high 3. Less fragmentation 4. Less overhead on 'free-pages list' maintainance (a bit faster Put/Commit) 5. If expecting DB-size > 8Tb then set pageSize >= 8Kb",
-		Value: "8KB",
+		Value: "4KB",
 	}
 	DbSizeLimitFlag = cli.StringFlag{
 		Name:  "db.size.limit",
 		Usage: "Runtime limit of chaindata db size. You can change value of this flag at any time.",
-		Value: (12 * datasize.TB).String(),
+		Value: (1 * datasize.TB).String(),
 	}
 
 	HealthCheckFlag = cli.BoolFlag{
