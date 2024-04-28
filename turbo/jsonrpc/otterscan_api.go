@@ -259,6 +259,21 @@ func (api *OtterscanAPIImpl) SearchTransactionsBefore(ctx context.Context, addr 
 	return &TransactionsWithReceipts{txs, receipts, isFirstPage, !hasMore}, nil
 }
 
+func (api *OtterscanAPIImpl) createBackwardTxNumIter(tx kv.TemporalTx, addr common.Address, fromTxNum int) (*rawdbv3.MapTxNum2BlockNumIter, error) {
+	// unbounded limit on purpose, since there could be e.g. block rewards system txs, we limit
+	// results later
+	itTo, err := tx.IndexRange(kv.TracesToIdx, addr[:], fromTxNum, -1, order.Desc, kv.Unlim)
+	if err != nil {
+		return nil, err
+	}
+	itFrom, err := tx.IndexRange(kv.TracesFromIdx, addr[:], fromTxNum, -1, order.Desc, kv.Unlim)
+	if err != nil {
+		return nil, err
+	}
+	txNums := iter.Union[uint64](itFrom, itTo, order.Desc, kv.Unlim)
+	return rawdbv3.TxNums2BlockNums(tx, txNums, order.Desc), nil
+}
+
 func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx context.Context, addr common.Address, fromBlockNum uint64, pageSize uint16) (*TransactionsWithReceipts, error) {
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
@@ -283,89 +298,16 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 		fromTxNum = int(_txNum)
 	}
 
-	// unbounded limit on purpose, since there could be e.g. block rewards system txs, we limit
-	// results later
-	itTo, err := tx.IndexRange(kv.TracesToIdx, addr[:], fromTxNum, -1, order.Desc, kv.Unlim)
+	txNumsIter, err := api.createBackwardTxNumIter(tx, addr, fromTxNum)
 	if err != nil {
 		return nil, err
 	}
-	itFrom, err := tx.IndexRange(kv.TracesFromIdx, addr[:], fromTxNum, -1, order.Desc, kv.Unlim)
+
+	txs, receipts, hasMore, err := api.buildSearchResults(ctx, tx, txNumsIter, chainConfig, pageSize)
 	if err != nil {
 		return nil, err
 	}
-	txNums := iter.Union[uint64](itFrom, itTo, order.Desc, kv.Unlim)
-	txNumsIter := rawdbv3.TxNums2BlockNums(tx, txNums, order.Desc)
 
-	exec := exec3.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, nil)
-	var blockHash common.Hash
-	var header *types.Header
-	txs := make([]*RPCTransaction, 0, pageSize)
-	receipts := make([]map[string]interface{}, 0, pageSize)
-	resultCount := uint16(0)
-
-	mustReadHeader := true
-	for txNumsIter.HasNext() {
-		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := txNumsIter.Next()
-		if err != nil {
-			return nil, err
-		}
-		mustReadHeader = mustReadHeader || blockNumChanged
-		if isFinalTxn {
-			continue
-		}
-
-		if mustReadHeader {
-			if header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {
-				return nil, err
-			}
-			if header == nil {
-				log.Warn("[rpc] header is nil", "blockNum", blockNum)
-				continue
-			}
-			blockHash = header.Hash()
-			exec.ChangeBlock(header)
-			mustReadHeader = false
-		}
-
-		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
-		if err != nil {
-			return nil, err
-		}
-		if txn == nil {
-			continue
-		}
-		res, err := exec.ExecTxn(txNum, txIndex, txn)
-		if err != nil {
-			return nil, err
-		}
-		rawLogs := exec.GetLogs(txIndex, txn)
-		rpcTx := NewRPCTransaction(txn, blockHash, blockNum, uint64(txIndex), header.BaseFee)
-		txs = append(txs, rpcTx)
-		receipt := &types.Receipt{
-			Type:              txn.Type(),
-			GasUsed:           res.UsedGas,
-			CumulativeGasUsed: res.UsedGas, // TODO: cumulative gas is wrong, wait for cumulative gas index fix
-			TransactionIndex:  uint(txIndex),
-			BlockNumber:       header.Number,
-			BlockHash:         blockHash,
-			Logs:              rawLogs,
-		}
-		if res.Failed() {
-			receipt.Status = types.ReceiptStatusFailed
-		} else {
-			receipt.Status = types.ReceiptStatusSuccessful
-		}
-
-		mReceipt := marshalReceipt(receipt, txn, chainConfig, header, txn.Hash(), true)
-		mReceipt["timestamp"] = header.Time
-		receipts = append(receipts, mReceipt)
-
-		resultCount++
-		if resultCount >= pageSize {
-			break
-		}
-	}
-	hasMore := txNumsIter.HasNext()
 	return &TransactionsWithReceipts{txs, receipts, isFirstPage, !hasMore}, nil
 }
 
@@ -462,6 +404,22 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 	return &TransactionsWithReceipts{txs, receipts, !hasMore, isLastPage}, nil
 }
 
+func (api *OtterscanAPIImpl) createForwardTxNumIter(tx kv.TemporalTx, addr common.Address, fromTxNum int) (*rawdbv3.MapTxNum2BlockNumIter, error) {
+	// unbounded limit on purpose, since there could be e.g. block rewards system txs, we limit
+	// results later
+	itTo, err := tx.IndexRange(kv.TracesToIdx, addr[:], fromTxNum, -1, order.Asc, kv.Unlim)
+	if err != nil {
+		return nil, err
+	}
+	itFrom, err := tx.IndexRange(kv.TracesFromIdx, addr[:], fromTxNum, -1, order.Asc, kv.Unlim)
+	if err != nil {
+		return nil, err
+	}
+	txNums := iter.Union[uint64](itFrom, itTo, order.Asc, kv.Unlim)
+	return rawdbv3.TxNums2BlockNums(tx, txNums, order.Asc), nil
+
+}
+
 func (api *OtterscanAPIImpl) searchTransactionsAfterV3(tx kv.TemporalTx, ctx context.Context, addr common.Address, fromBlockNum uint64, pageSize uint16) (*TransactionsWithReceipts, error) {
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
@@ -481,19 +439,22 @@ func (api *OtterscanAPIImpl) searchTransactionsAfterV3(tx kv.TemporalTx, ctx con
 		fromTxNum = int(_txNum)
 	}
 
-	// unbounded limit on purpose, since there could be e.g. block rewards system txs, we limit
-	// results later
-	itTo, err := tx.IndexRange(kv.TracesToIdx, addr[:], fromTxNum, -1, order.Asc, kv.Unlim)
+	txNumsIter, err := api.createForwardTxNumIter(tx, addr, fromTxNum)
 	if err != nil {
 		return nil, err
 	}
-	itFrom, err := tx.IndexRange(kv.TracesFromIdx, addr[:], fromTxNum, -1, order.Asc, kv.Unlim)
-	if err != nil {
-		return nil, err
-	}
-	txNums := iter.Union[uint64](itFrom, itTo, order.Asc, kv.Unlim)
-	txNumsIter := rawdbv3.TxNums2BlockNums(tx, txNums, order.Asc)
 
+	txs, receipts, hasMore, err := api.buildSearchResults(ctx, tx, txNumsIter, chainConfig, pageSize)
+	if err != nil {
+		return nil, err
+	}
+	slices.Reverse(txs)
+	slices.Reverse(receipts)
+
+	return &TransactionsWithReceipts{txs, receipts, !hasMore, isLastPage}, nil
+}
+
+func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.TemporalTx, txNumsIter *rawdbv3.MapTxNum2BlockNumIter, chainConfig *chain.Config, pageSize uint16) ([]*RPCTransaction, []map[string]interface{}, bool, error) {
 	exec := exec3.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, nil)
 	var blockHash common.Hash
 	var header *types.Header
@@ -501,18 +462,20 @@ func (api *OtterscanAPIImpl) searchTransactionsAfterV3(tx kv.TemporalTx, ctx con
 	receipts := make([]map[string]interface{}, 0, pageSize)
 	resultCount := uint16(0)
 
+	mustReadHeader := true
 	for txNumsIter.HasNext() {
 		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := txNumsIter.Next()
 		if err != nil {
-			return nil, err
+			return nil, nil, false, err
 		}
+		mustReadHeader = mustReadHeader || blockNumChanged
 		if isFinalTxn {
 			continue
 		}
 
-		if blockNumChanged { // things which not changed within 1 block
+		if mustReadHeader {
 			if header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {
-				return nil, err
+				return nil, nil, false, err
 			}
 			if header == nil {
 				log.Warn("[rpc] header is nil", "blockNum", blockNum)
@@ -520,18 +483,19 @@ func (api *OtterscanAPIImpl) searchTransactionsAfterV3(tx kv.TemporalTx, ctx con
 			}
 			blockHash = header.Hash()
 			exec.ChangeBlock(header)
+			mustReadHeader = false
 		}
 
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 		if err != nil {
-			return nil, err
+			return nil, nil, false, err
 		}
 		if txn == nil {
 			continue
 		}
 		res, err := exec.ExecTxn(txNum, txIndex, txn)
 		if err != nil {
-			return nil, err
+			return nil, nil, false, err
 		}
 		rawLogs := exec.GetLogs(txIndex, txn)
 		rpcTx := NewRPCTransaction(txn, blockHash, blockNum, uint64(txIndex), header.BaseFee)
@@ -560,10 +524,9 @@ func (api *OtterscanAPIImpl) searchTransactionsAfterV3(tx kv.TemporalTx, ctx con
 			break
 		}
 	}
+
 	hasMore := txNumsIter.HasNext()
-	slices.Reverse(txs)
-	slices.Reverse(receipts)
-	return &TransactionsWithReceipts{txs, receipts, !hasMore, isLastPage}, nil
+	return txs, receipts, hasMore, nil
 }
 
 func (api *OtterscanAPIImpl) traceBlocks(ctx context.Context, addr common.Address, chainConfig *chain.Config, pageSize, resultCount uint16, callFromToProvider BlockProvider) ([]*TransactionsWithReceipts, bool, error) {
