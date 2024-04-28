@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 )
 
@@ -191,46 +192,49 @@ func TestRangeDupSort(t *testing.T) {
 		require.False(t, it.HasNext())
 
 		// [from, nil) means [from, INF)
-		it, err = tx.Range("Table", []byte("key1"), nil)
+		it, err = tx.RangeDupSort("Table", []byte("key1"), []byte("value1"), nil, order.Asc, -1)
 		require.NoError(t, err)
-		cnt := 0
-		for it.HasNext() {
-			_, _, err := it.Next()
-			require.NoError(t, err)
-			cnt++
-		}
-		require.Equal(t, 4, cnt)
+		_, vals, err := iter.ToKVArray(it)
+		require.NoError(t, err)
+		require.Equal(t, 2, len(vals))
+
+		it, err = tx.RangeDupSort("Table", []byte("key1"), []byte("value1"), []byte("value1.3"), order.Asc, -1)
+		require.NoError(t, err)
+		_, vals, err = iter.ToKVArray(it)
+		require.NoError(t, err)
+		require.Equal(t, 1, len(vals))
 	})
 	t.Run("Desc", func(t *testing.T) {
 		_, tx, _ := BaseCase(t)
 
 		//[from, to)
-		it, err := tx.RangeDupSort("Table", []byte("key3"), nil, nil, order.Desc, -1)
+		it, err := tx.RangeDupSort("Table", []byte("key1"), nil, nil, order.Desc, -1)
 		require.NoError(t, err)
 		require.True(t, it.HasNext())
 		k, v, err := it.Next()
 		require.NoError(t, err)
-		require.Equal(t, "key3", string(k))
-		require.Equal(t, "value3.3", string(v))
+		require.Equal(t, "key1", string(k))
+		require.Equal(t, "value1.3", string(v))
 
 		require.True(t, it.HasNext())
 		k, v, err = it.Next()
 		require.NoError(t, err)
-		require.Equal(t, "key3", string(k))
-		require.Equal(t, "value3.1", string(v))
+		require.Equal(t, "key1", string(k))
+		require.Equal(t, "value1.1", string(v))
 
 		require.False(t, it.HasNext())
 
-		it, err = tx.RangeDescend("Table", nil, nil, 2)
+		it, err = tx.RangeDupSort("Table", []byte("key1"), []byte("value1"), []byte("value0"), order.Desc, -1)
 		require.NoError(t, err)
+		_, vals, err := iter.ToKVArray(it)
+		require.NoError(t, err)
+		require.Equal(t, 2, len(vals))
 
-		cnt := 0
-		for it.HasNext() {
-			_, _, err := it.Next()
-			require.NoError(t, err)
-			cnt++
-		}
-		require.Equal(t, 2, cnt)
+		it, err = tx.RangeDupSort("Table", []byte("key1"), []byte("value1.3"), []byte("value1.1"), order.Desc, -1)
+		require.NoError(t, err)
+		_, vals, err = iter.ToKVArray(it)
+		require.NoError(t, err)
+		require.Equal(t, 1, len(vals))
 	})
 }
 

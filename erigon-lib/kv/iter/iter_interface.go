@@ -30,10 +30,10 @@ package iter
 //		- 1 value used by User and 1 value used internally by iter.Union
 //   3. No `Close` method: all streams produced by TemporalTx will be closed inside `tx.Rollback()` (by casting to `kv.Closer`)
 //   4. automatically checks cancelation of `ctx` passed to `db.Begin(ctx)`, can skip this
-//     check in loops on stream. Dual has very limited API - user has no way to
+//     check in loops on stream. Duo has very limited API - user has no way to
 //     terminate it - but user can specify more strict conditions when creating stream (then server knows better when to stop)
 
-// Dual - return 2 items - usually called Key and Value (or `k` and `v`)
+// Duo - return 2 items - usually called Key and Value (or `k` and `v`)
 // Example:
 //
 //	for s.HasNext() {
@@ -42,12 +42,12 @@ package iter
 //			return err
 //		}
 //	}
-type Dual[K, V any] interface {
+type Duo[K, V any] interface {
 	Next() (K, V, error)
 	HasNext() bool
 }
 
-// Unary - return 1 item. Example:
+// Uno - return 1 item. Example:
 //
 //	for s.HasNext() {
 //		v, err := s.Next()
@@ -55,7 +55,7 @@ type Dual[K, V any] interface {
 //			return err
 //		}
 //	}
-type Unary[V any] interface {
+type Uno[V any] interface {
 	Next() (V, error)
 	//NextBatch() ([]V, error)
 	HasNext() bool
@@ -72,8 +72,8 @@ type Unary[V any] interface {
 
 // often used shortcuts
 type (
-	U64 Unary[uint64]
-	KV  Dual[[]byte, []byte]
+	U64 Uno[uint64]
+	KV  Duo[[]byte, []byte]
 )
 
 func ToU64Arr(s U64) ([]uint64, error)           { return ToArr[uint64](s) }

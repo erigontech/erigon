@@ -178,7 +178,7 @@ func (m *UnionKVIter) Close() {
 
 // UnionUnary
 type UnionUnary[T constraints.Ordered] struct {
-	x, y           Unary[T]
+	x, y           Uno[T]
 	asc            bool
 	xHas, yHas     bool
 	xNextK, yNextK T
@@ -186,7 +186,7 @@ type UnionUnary[T constraints.Ordered] struct {
 	limit          int
 }
 
-func Union[T constraints.Ordered](x, y Unary[T], asc order.By, limit int) Unary[T] {
+func Union[T constraints.Ordered](x, y Uno[T], asc order.By, limit int) Uno[T] {
 	if x == nil && y == nil {
 		return &EmptyUnary[T]{}
 	}
@@ -274,14 +274,14 @@ func (m *UnionUnary[T]) Close() {
 
 // IntersectIter
 type IntersectIter[T constraints.Ordered] struct {
-	x, y               Unary[T]
+	x, y               Uno[T]
 	xHasNext, yHasNext bool
 	xNextK, yNextK     T
 	limit              int
 	err                error
 }
 
-func Intersect[T constraints.Ordered](x, y Unary[T], limit int) Unary[T] {
+func Intersect[T constraints.Ordered](x, y Uno[T], limit int) Uno[T] {
 	if x == nil || y == nil || !x.HasNext() || !y.HasNext() {
 		return &EmptyUnary[T]{}
 	}
@@ -350,11 +350,11 @@ func (m *IntersectIter[T]) Close() {
 
 // TransformDualIter - analog `map` (in terms of map-filter-reduce pattern)
 type TransformDualIter[K, V any] struct {
-	it        Dual[K, V]
+	it        Duo[K, V]
 	transform func(K, V) (K, V, error)
 }
 
-func TransformDual[K, V any](it Dual[K, V], transform func(K, V) (K, V, error)) *TransformDualIter[K, V] {
+func TransformDual[K, V any](it Duo[K, V], transform func(K, V) (K, V, error)) *TransformDualIter[K, V] {
 	return &TransformDualIter[K, V]{it: it, transform: transform}
 }
 func (m *TransformDualIter[K, V]) HasNext() bool { return m.it.HasNext() }
@@ -397,7 +397,7 @@ func (m *TransformKV2U64Iter[K, v]) Close() {
 // please avoid reading from Disk/DB more elements and then filter them. Better
 // push-down filter conditions to lower-level iterator to reduce disk reads amount.
 type FilterDualIter[K, V any] struct {
-	it      Dual[K, V]
+	it      Duo[K, V]
 	filter  func(K, V) bool
 	hasNext bool
 	err     error
@@ -408,7 +408,7 @@ type FilterDualIter[K, V any] struct {
 func FilterKV(it KV, filter func(k, v []byte) bool) *FilterDualIter[[]byte, []byte] {
 	return FilterDual[[]byte, []byte](it, filter)
 }
-func FilterDual[K, V any](it Dual[K, V], filter func(K, V) bool) *FilterDualIter[K, V] {
+func FilterDual[K, V any](it Duo[K, V], filter func(K, V) bool) *FilterDualIter[K, V] {
 	i := &FilterDualIter[K, V]{it: it, filter: filter}
 	i.advance()
 	return i
@@ -448,7 +448,7 @@ func (m *FilterDualIter[K, v]) Close() {
 // please avoid reading from Disk/DB more elements and then filter them. Better
 // push-down filter conditions to lower-level iterator to reduce disk reads amount.
 type FilterUnaryIter[T any] struct {
-	it      Unary[T]
+	it      Uno[T]
 	filter  func(T) bool
 	hasNext bool
 	err     error
@@ -458,7 +458,7 @@ type FilterUnaryIter[T any] struct {
 func FilterU64(it U64, filter func(k uint64) bool) *FilterUnaryIter[uint64] {
 	return FilterUnary[uint64](it, filter)
 }
-func FilterUnary[T any](it Unary[T], filter func(T) bool) *FilterUnaryIter[T] {
+func FilterUnary[T any](it Uno[T], filter func(T) bool) *FilterUnaryIter[T] {
 	i := &FilterUnaryIter[T]{it: it, filter: filter}
 	i.advance()
 	return i
