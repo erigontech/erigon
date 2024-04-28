@@ -459,11 +459,6 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	}
 	db.path = opts.path
 	addToPathDbMap(opts.path, db)
-	if dbg.MdbxLockInRam() {
-		if err := db.View(ctx, func(tx kv.Tx) error { return tx.(*MdbxTx).LockDBInRam() }); err != nil {
-			return nil, err
-		}
-	}
 	return db, nil
 }
 
