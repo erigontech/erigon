@@ -286,11 +286,14 @@ func (db *DB) fetchUint64(key []byte) uint64 {
 
 // storeUint64 stores an integer in the given key.
 func (db *DB) storeUint64(key []byte, n uint64) error {
+	return db.kv.Update(db.ctx, func(tx kv.RwTx) error {
+		return db._storeUint64(tx, key, n)
+	})
+}
+func (db *DB) _storeUint64(tx kv.RwTx, key []byte, n uint64) error {
 	blob := make([]byte, binary.MaxVarintLen64)
 	blob = blob[:binary.PutUvarint(blob, n)]
-	return db.kv.Update(db.ctx, func(tx kv.RwTx) error {
-		return tx.Put(kv.Inodes, libcommon.CopyBytes(key), blob)
-	})
+	return tx.Put(kv.Inodes, key, blob)
 }
 
 // Node retrieves a node with a given id from the database.
@@ -335,11 +338,19 @@ func (db *DB) UpdateNode(node *Node) error {
 		return err
 	}
 	if err := db.kv.Update(db.ctx, func(tx kv.RwTx) error {
-		return tx.Put(kv.NodeRecords, nodeKey(node.ID()), blob)
+		err = tx.Put(kv.NodeRecords, nodeKey(node.ID()), blob)
+		if err != nil {
+			return err
+		}
+		err = db._storeUint64(tx, nodeItemKey(node.ID(), zeroIP, dbNodeSeq), node.Seq())
+		if err != nil {
+			return err
+		}
+		return nil
 	}); err != nil {
 		return err
 	}
-	return db.storeUint64(nodeItemKey(node.ID(), zeroIP, dbNodeSeq), node.Seq())
+	return nil
 }
 
 // NodeSeq returns the stored record sequence number of the given node.
