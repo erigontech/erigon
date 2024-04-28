@@ -259,7 +259,7 @@ func (api *OtterscanAPIImpl) SearchTransactionsBefore(ctx context.Context, addr 
 	return &TransactionsWithReceipts{txs, receipts, isFirstPage, !hasMore}, nil
 }
 
-func (api *OtterscanAPIImpl) createBackwardTxNumIter(tx kv.TemporalTx, addr common.Address, fromTxNum int) (*rawdbv3.MapTxNum2BlockNumIter, error) {
+func createBackwardTxNumIter(tx kv.TemporalTx, addr common.Address, fromTxNum int) (*rawdbv3.MapTxNum2BlockNumIter, error) {
 	// unbounded limit on purpose, since there could be e.g. block rewards system txs, we limit
 	// results later
 	itTo, err := tx.IndexRange(kv.TracesToIdx, addr[:], fromTxNum, -1, order.Desc, kv.Unlim)
@@ -275,11 +275,6 @@ func (api *OtterscanAPIImpl) createBackwardTxNumIter(tx kv.TemporalTx, addr comm
 }
 
 func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx context.Context, addr common.Address, fromBlockNum uint64, pageSize uint16) (*TransactionsWithReceipts, error) {
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-
 	isFirstPage := false
 	if fromBlockNum == 0 {
 		isFirstPage = true
@@ -298,12 +293,7 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 		fromTxNum = int(_txNum)
 	}
 
-	txNumsIter, err := api.createBackwardTxNumIter(tx, addr, fromTxNum)
-	if err != nil {
-		return nil, err
-	}
-
-	txs, receipts, hasMore, err := api.buildSearchResults(ctx, tx, txNumsIter, chainConfig, pageSize)
+	txs, receipts, hasMore, err := api.buildSearchResults(ctx, tx, createBackwardTxNumIter, addr, fromTxNum, pageSize)
 	if err != nil {
 		return nil, err
 	}
@@ -404,7 +394,7 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 	return &TransactionsWithReceipts{txs, receipts, !hasMore, isLastPage}, nil
 }
 
-func (api *OtterscanAPIImpl) createForwardTxNumIter(tx kv.TemporalTx, addr common.Address, fromTxNum int) (*rawdbv3.MapTxNum2BlockNumIter, error) {
+func createForwardTxNumIter(tx kv.TemporalTx, addr common.Address, fromTxNum int) (*rawdbv3.MapTxNum2BlockNumIter, error) {
 	// unbounded limit on purpose, since there could be e.g. block rewards system txs, we limit
 	// results later
 	itTo, err := tx.IndexRange(kv.TracesToIdx, addr[:], fromTxNum, -1, order.Asc, kv.Unlim)
@@ -421,11 +411,6 @@ func (api *OtterscanAPIImpl) createForwardTxNumIter(tx kv.TemporalTx, addr commo
 }
 
 func (api *OtterscanAPIImpl) searchTransactionsAfterV3(tx kv.TemporalTx, ctx context.Context, addr common.Address, fromBlockNum uint64, pageSize uint16) (*TransactionsWithReceipts, error) {
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-
 	isLastPage := false
 	fromTxNum := -1
 	if fromBlockNum == 0 {
@@ -439,12 +424,7 @@ func (api *OtterscanAPIImpl) searchTransactionsAfterV3(tx kv.TemporalTx, ctx con
 		fromTxNum = int(_txNum)
 	}
 
-	txNumsIter, err := api.createForwardTxNumIter(tx, addr, fromTxNum)
-	if err != nil {
-		return nil, err
-	}
-
-	txs, receipts, hasMore, err := api.buildSearchResults(ctx, tx, txNumsIter, chainConfig, pageSize)
+	txs, receipts, hasMore, err := api.buildSearchResults(ctx, tx, createForwardTxNumIter, addr, fromTxNum, pageSize)
 	if err != nil {
 		return nil, err
 	}
@@ -454,7 +434,19 @@ func (api *OtterscanAPIImpl) searchTransactionsAfterV3(tx kv.TemporalTx, ctx con
 	return &TransactionsWithReceipts{txs, receipts, !hasMore, isLastPage}, nil
 }
 
-func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.TemporalTx, txNumsIter *rawdbv3.MapTxNum2BlockNumIter, chainConfig *chain.Config, pageSize uint16) ([]*RPCTransaction, []map[string]interface{}, bool, error) {
+type txNumsIterFactory func(tx kv.TemporalTx, addr common.Address, fromTxNum int) (*rawdbv3.MapTxNum2BlockNumIter, error)
+
+func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.TemporalTx, iterFactory txNumsIterFactory, addr common.Address, fromTxNum int, pageSize uint16) ([]*RPCTransaction, []map[string]interface{}, bool, error) {
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, nil, false, err
+	}
+
+	txNumsIter, err := iterFactory(tx, addr, fromTxNum)
+	if err != nil {
+		return nil, nil, false, err
+	}
+
 	exec := exec3.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, nil)
 	var blockHash common.Hash
 	var header *types.Header
@@ -491,6 +483,7 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 			return nil, nil, false, err
 		}
 		if txn == nil {
+			log.Warn("[rpc] txn not found", "blockNum", blockNum, "txIndex", txIndex)
 			continue
 		}
 		res, err := exec.ExecTxn(txNum, txIndex, txn)
