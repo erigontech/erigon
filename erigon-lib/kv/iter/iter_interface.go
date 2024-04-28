@@ -120,7 +120,7 @@ type (
 )
 
 func PaginateKV(f NextPageDuo[[]byte, []byte]) *PaginatedDuo[[]byte, []byte] {
-	return PaginateDual[[]byte, []byte](f)
+	return PaginateDuo[[]byte, []byte](f)
 }
 func PaginateU64(f NextPageUno[uint64]) *Paginated[uint64] {
 	return Paginate[uint64](f)
