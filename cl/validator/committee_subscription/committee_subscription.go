@@ -70,16 +70,14 @@ func NewCommitteeSubscribeManagement(
 }
 
 type validatorSub struct {
-	subnetId      uint64
-	aggregate     bool
-	validatorIdxs map[uint64]struct{}
+	subnetId  uint64
+	aggregate bool
 }
 
 func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context, p *cltypes.BeaconCommitteeSubscription) error {
 	var (
 		slot   = p.Slot
 		cIndex = p.CommitteeIndex
-		vIndex = p.ValidatorIndex
 	)
 	headState := c.syncedData.HeadState()
 	if headState == nil {
@@ -95,16 +93,11 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 		c.validatorSubs[cIndex] = &validatorSub{
 			subnetId:  subnetId,
 			aggregate: p.IsAggregator,
-			validatorIdxs: map[uint64]struct{}{
-				vIndex: {},
-			},
 		}
-	} else {
-		if p.IsAggregator {
-			c.validatorSubs[cIndex].aggregate = true
-		}
-		c.validatorSubs[cIndex].validatorIdxs[vIndex] = struct{}{}
+	} else if p.IsAggregator {
+		c.validatorSubs[cIndex].aggregate = true
 	}
+
 	c.validatorSubsMutex.Unlock()
 
 	// set sentinel gossip expiration by subnet id
