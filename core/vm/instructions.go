@@ -465,34 +465,38 @@ func opGasprice(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 }
 
 func opBlockhash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	num := scope.Stack.Peek()
-	num64, overflow := num.Uint64WithOverflow()
+	arg := scope.Stack.Peek()
+	arg64, overflow := arg.Uint64WithOverflow()
 	if overflow {
-		num.Clear()
+		arg.Clear()
 		return nil, nil
 	}
 	var upper, lower uint64
 	upper = interpreter.evm.Context.BlockNumber
 	if interpreter.evm.chainRules.IsPrague {
-		if !num.Lt(uint256.MustFromBig(interpreter.evm.chainConfig.PragueTime))  && num.Lt(uint256.NewInt(upper)){
-			var out *uint256.Int
-			interpreter.evm.intraBlockState.GetState(params.HistoryStorageAddress, (*libcommon.Hash)(num.Bytes()), out)
-			scope.Stack.Push(out)
-		} else {
+		if arg64 >= upper || arg64+params.HISTORY_SERVE_WINDOW < upper {
 			scope.Stack.Push(uint256.NewInt(0))
+		} else {
+			var out *uint256.Int
+			interpreter.evm.intraBlockState.GetState(
+				params.HistoryStorageAddress,
+				(*libcommon.Hash)(uint256.NewInt(arg64%params.HISTORY_SERVE_WINDOW).Bytes()),
+				out,
+			)
+			scope.Stack.Push(out)
 		}
 		return nil, nil
 	}
 
-	if upper < 257 {
+	if upper <= params.BLOCKHASH_OLD_WINDOW {
 		lower = 0
 	} else {
-		lower = upper - 256
+		lower = upper - params.BLOCKHASH_OLD_WINDOW
 	}
-	if num64 >= lower && num64 < upper {
-		num.SetBytes(interpreter.evm.Context.GetHash(num64).Bytes())
+	if arg64 >= lower && arg64 < upper {
+		arg.SetBytes(interpreter.evm.Context.GetHash(arg64).Bytes())
 	} else {
-		num.Clear()
+		arg.Clear()
 	}
 	return nil, nil
 }
