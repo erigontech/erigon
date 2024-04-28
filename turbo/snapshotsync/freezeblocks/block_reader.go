@@ -343,6 +343,10 @@ func (r *BlockReader) HeadersRange(ctx context.Context, walker func(header *type
 	return ForEachHeader(ctx, r.sn, walker)
 }
 
+func (r *BlockReader) LastNonCanonicalHeaderNumber(ctx context.Context, tx kv.Getter) {
+
+}
+
 func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (h *types.Header, err error) {
 	if tx != nil {
 		blockHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)

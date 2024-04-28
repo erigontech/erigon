@@ -325,6 +325,15 @@ func (a *Aggregator) SetCompressWorkers(i int) {
 	a.tracesTo.compressWorkers = i
 }
 
+func (a *Aggregator) DiscardHistory(name kv.Domain) *Aggregator {
+	a.d[name].historyDisabled = true
+	return a
+}
+func (a *Aggregator) EnableHistory(name kv.Domain) *Aggregator {
+	a.d[name].historyDisabled = false
+	return a
+}
+
 func (a *Aggregator) HasBackgroundFilesBuild() bool { return a.ps.Has() }
 func (a *Aggregator) BackgroundProgress() string    { return a.ps.String() }
 
@@ -1439,7 +1448,7 @@ func (a *Aggregator) KeepStepsInDB(steps uint64) *Aggregator {
 		if d == nil {
 			continue
 		}
-		//if d.History.dontProduceFiles {
+		//if d.History.dontProduceHistoryFiles {
 		d.History.keepTxInDB = a.keepInDB
 		//}
 	}
