@@ -35,11 +35,23 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 	resultCount := uint16(0)
 
 	mustReadHeader := true
+	reachedPageSize := false
 	for txNumsIter.HasNext() {
 		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := txNumsIter.Next()
 		if err != nil {
 			return nil, nil, false, err
 		}
+
+		// Even if the desired page size is reached, drain the entire matching
+		// txs inside the block; reproduces e2 behavior. An e3/paginated-aware
+		// ots spec could improve in this area.
+		if blockNumChanged && reachedPageSize {
+			break
+		}
+
+		// it is necessary to track dirty/lazy-must-read block headers
+		// because we skip system txs like rewards (which are not "real" txs
+		// for this rpc purposes)
 		mustReadHeader = mustReadHeader || blockNumChanged
 		if isFinalTxn {
 			continue
@@ -94,7 +106,7 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 
 		resultCount++
 		if resultCount >= pageSize {
-			break
+			reachedPageSize = true
 		}
 	}
 
