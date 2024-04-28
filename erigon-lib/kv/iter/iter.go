@@ -348,24 +348,24 @@ func (m *IntersectIter[T]) Close() {
 	}
 }
 
-// TransformDualIter - analog `map` (in terms of map-filter-reduce pattern)
-type TransformDualIter[K, V any] struct {
+// TransformDuoIter - analog `map` (in terms of map-filter-reduce pattern)
+type TransformDuoIter[K, V any] struct {
 	it        Duo[K, V]
 	transform func(K, V) (K, V, error)
 }
 
-func TransformDual[K, V any](it Duo[K, V], transform func(K, V) (K, V, error)) *TransformDualIter[K, V] {
-	return &TransformDualIter[K, V]{it: it, transform: transform}
+func TransformDuo[K, V any](it Duo[K, V], transform func(K, V) (K, V, error)) *TransformDuoIter[K, V] {
+	return &TransformDuoIter[K, V]{it: it, transform: transform}
 }
-func (m *TransformDualIter[K, V]) HasNext() bool { return m.it.HasNext() }
-func (m *TransformDualIter[K, V]) Next() (K, V, error) {
+func (m *TransformDuoIter[K, V]) HasNext() bool { return m.it.HasNext() }
+func (m *TransformDuoIter[K, V]) Next() (K, V, error) {
 	k, v, err := m.it.Next()
 	if err != nil {
 		return k, v, err
 	}
 	return m.transform(k, v)
 }
-func (m *TransformDualIter[K, v]) Close() {
+func (m *TransformDuoIter[K, v]) Close() {
 	if x, ok := m.it.(Closer); ok {
 		x.Close()
 	}
@@ -507,12 +507,12 @@ type Paginated[T any] struct {
 	arr           []T
 	i             int
 	err           error
-	nextPage      NextPageUnary[T]
+	nextPage      NextPageUno[T]
 	nextPageToken string
 	initialized   bool
 }
 
-func Paginate[T any](f NextPageUnary[T]) *Paginated[T] { return &Paginated[T]{nextPage: f} }
+func Paginate[T any](f NextPageUno[T]) *Paginated[T] { return &Paginated[T]{nextPage: f} }
 func (it *Paginated[T]) HasNext() bool {
 	if it.err != nil || it.i < len(it.arr) {
 		return true
@@ -535,20 +535,20 @@ func (it *Paginated[T]) Next() (v T, err error) {
 	return v, nil
 }
 
-type PaginatedDual[K, V any] struct {
+type PaginatedDuo[K, V any] struct {
 	keys          []K
 	values        []V
 	i             int
 	err           error
-	nextPage      NextPageDual[K, V]
+	nextPage      NextPageDuo[K, V]
 	nextPageToken string
 	initialized   bool
 }
 
-func PaginateDual[K, V any](f NextPageDual[K, V]) *PaginatedDual[K, V] {
-	return &PaginatedDual[K, V]{nextPage: f}
+func PaginateDual[K, V any](f NextPageDuo[K, V]) *PaginatedDuo[K, V] {
+	return &PaginatedDuo[K, V]{nextPage: f}
 }
-func (it *PaginatedDual[K, V]) HasNext() bool {
+func (it *PaginatedDuo[K, V]) HasNext() bool {
 	if it.err != nil || it.i < len(it.keys) {
 		return true
 	}
@@ -560,8 +560,8 @@ func (it *PaginatedDual[K, V]) HasNext() bool {
 	it.keys, it.values, it.nextPageToken, it.err = it.nextPage(it.nextPageToken)
 	return it.err != nil || it.i < len(it.keys)
 }
-func (it *PaginatedDual[K, V]) Close() {}
-func (it *PaginatedDual[K, V]) Next() (k K, v V, err error) {
+func (it *PaginatedDuo[K, V]) Close() {}
+func (it *PaginatedDuo[K, V]) Next() (k K, v V, err error) {
 	if it.err != nil {
 		return k, v, it.err
 	}

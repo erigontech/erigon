@@ -33,20 +33,6 @@ package iter
 //     check in loops on stream. Duo has very limited API - user has no way to
 //     terminate it - but user can specify more strict conditions when creating stream (then server knows better when to stop)
 
-// Duo - return 2 items - usually called Key and Value (or `k` and `v`)
-// Example:
-//
-//	for s.HasNext() {
-//		k, v, err := s.Next()
-//		if err != nil {
-//			return err
-//		}
-//	}
-type Duo[K, V any] interface {
-	Next() (K, V, error)
-	HasNext() bool
-}
-
 // Uno - return 1 item. Example:
 //
 //	for s.HasNext() {
@@ -61,7 +47,8 @@ type Uno[V any] interface {
 	HasNext() bool
 }
 
-// KV - return 2 items of type []byte - usually called Key and Value (or `k` and `v`). Example:
+// Duo - return 2 items - usually called Key and Value (or `k` and `v`)
+// Example:
 //
 //	for s.HasNext() {
 //		k, v, err := s.Next()
@@ -69,11 +56,36 @@ type Uno[V any] interface {
 //			return err
 //		}
 //	}
+type Duo[K, V any] interface {
+	Next() (K, V, error)
+	HasNext() bool
+}
+
+// Trio - return 3 items - usually called Key and Value (or `k` and `v`)
+// Example:
+//
+//	for s.HasNext() {
+//		k, v1, v2, err := s.Next()
+//		if err != nil {
+//			return err
+//		}
+//	}
+type Trio[K, V1, V2 any] interface {
+	Next() (K, V1, V2, error)
+	HasNext() bool
+}
+
+// Deprecated - use Trio
+type DualS[K, V any] interface {
+	Next() (K, V, uint64, error)
+	HasNext() bool
+}
 
 // often used shortcuts
 type (
 	U64 Uno[uint64]
-	KV  Duo[[]byte, []byte]
+	KV  Duo[[]byte, []byte]          // key,  value
+	KVS Trio[[]byte, []byte, uint64] // key, value, step
 )
 
 func ToU64Arr(s U64) ([]uint64, error)           { return ToArr[uint64](s) }
@@ -97,19 +109,19 @@ func ToArrKVMust(s KV) ([][]byte, [][]byte) {
 func CountU64(s U64) (int, error) { return Count[uint64](s) }
 func CountKV(s KV) (int, error)   { return CountDual[[]byte, []byte](s) }
 
-func TransformKV(it KV, transform func(k, v []byte) ([]byte, []byte, error)) *TransformDualIter[[]byte, []byte] {
-	return TransformDual[[]byte, []byte](it, transform)
+func TransformKV(it KV, transform func(k, v []byte) ([]byte, []byte, error)) *TransformDuoIter[[]byte, []byte] {
+	return TransformDuo[[]byte, []byte](it, transform)
 }
 
 // internal types
 type (
-	NextPageUnary[T any]   func(pageToken string) (arr []T, nextPageToken string, err error)
-	NextPageDual[K, V any] func(pageToken string) (keys []K, values []V, nextPageToken string, err error)
+	NextPageUno[T any]    func(pageToken string) (arr []T, nextPageToken string, err error)
+	NextPageDuo[K, V any] func(pageToken string) (keys []K, values []V, nextPageToken string, err error)
 )
 
-func PaginateKV(f NextPageDual[[]byte, []byte]) *PaginatedDual[[]byte, []byte] {
+func PaginateKV(f NextPageDuo[[]byte, []byte]) *PaginatedDuo[[]byte, []byte] {
 	return PaginateDual[[]byte, []byte](f)
 }
-func PaginateU64(f NextPageUnary[uint64]) *Paginated[uint64] {
+func PaginateU64(f NextPageUno[uint64]) *Paginated[uint64] {
 	return Paginate[uint64](f)
 }
