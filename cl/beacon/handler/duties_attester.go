@@ -27,7 +27,7 @@ func (a *ApiHandler) getDependentRoot(s *state.CachingBeaconState, epoch uint64)
 	maxIterations := 2048
 	for i := 0; i < maxIterations; i++ {
 		if dependentRootSlot > epoch*a.beaconChainCfg.SlotsPerEpoch {
-			dependentRootSlot = 0
+			return libcommon.Hash{}
 		}
 
 		dependentRoot, err := s.GetBlockRootAtSlot(dependentRootSlot)
@@ -35,7 +35,6 @@ func (a *ApiHandler) getDependentRoot(s *state.CachingBeaconState, epoch uint64)
 			dependentRootSlot--
 			continue
 		}
-		fmt.Println(dependentRoot)
 		return dependentRoot
 	}
 	return libcommon.Hash{}
