@@ -89,8 +89,9 @@ type History struct {
 	//   vals: key1+key2+txNum -> value (not DupSort)
 	historyLargeValues bool // can't use DupSort optimization (aka. prefix-compression) if values size > 4kb
 
-	dontProduceFiles bool   // don't produce .v and .ef files. old data will be pruned anyway.
-	keepTxInDB       uint64 // When dontProduceFiles=true, keepTxInDB is used to keep this amount of tx in db before pruning
+	dontProduceHistoryFiles bool   // don't produce .v and .ef files. old data will be pruned anyway.
+	historyDisabled         bool   // skip all write operations to this History (even in DB)
+	keepTxInDB              uint64 // When dontProduceHistoryFiles=true, keepTxInDB is used to keep this amount of tx in db before pruning
 }
 
 type histCfg struct {
@@ -111,15 +112,15 @@ type histCfg struct {
 
 func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTable, indexTable, historyValsTable string, integrityCheck func(fromStep, toStep uint64) bool, logger log.Logger) (*History, error) {
 	h := History{
-		dirtyFiles:         btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		historyValsTable:   historyValsTable,
-		compression:        cfg.compression,
-		compressWorkers:    1,
-		indexList:          withHashMap,
-		integrityCheck:     integrityCheck,
-		historyLargeValues: cfg.historyLargeValues,
-		dontProduceFiles:   cfg.dontProduceHistoryFiles,
-		keepTxInDB:         cfg.keepTxInDB,
+		dirtyFiles:              btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		historyValsTable:        historyValsTable,
+		compression:             cfg.compression,
+		compressWorkers:         1,
+		indexList:               withHashMap,
+		integrityCheck:          integrityCheck,
+		historyLargeValues:      cfg.historyLargeValues,
+		dontProduceHistoryFiles: cfg.dontProduceHistoryFiles,
+		keepTxInDB:              cfg.keepTxInDB,
 	}
 	h._visibleFiles.Store(&[]ctxItem{})
 	var err error
@@ -559,7 +560,7 @@ func (c HistoryCollation) Close() {
 
 // [txFrom; txTo)
 func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollation, error) {
-	if h.dontProduceFiles {
+	if h.dontProduceHistoryFiles {
 		return HistoryCollation{}, nil
 	}
 
@@ -775,7 +776,7 @@ func (h *History) reCalcVisibleFiles() {
 // buildFiles performs potentially resource intensive operations of creating
 // static files and their indices
 func (h *History) buildFiles(ctx context.Context, step uint64, collation HistoryCollation, ps *background.ProgressSet) (HistoryFiles, error) {
-	if h.dontProduceFiles {
+	if h.dontProduceHistoryFiles {
 		return HistoryFiles{}, nil
 	}
 	var (
@@ -881,7 +882,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 
 func (h *History) integrateFiles(sf HistoryFiles, txNumFrom, txNumTo uint64) {
 	defer h.reCalcVisibleFiles()
-	if h.dontProduceFiles {
+	if h.dontProduceHistoryFiles {
 		return
 	}
 
@@ -996,7 +997,7 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 	//		ht.h.filenameBase, untilTx, ht.h.dontProduceHistoryFiles, txTo, minIdxTx, maxIdxTx, ht.h.keepTxInDB, minIdxTx < txTo)
 	//}()
 
-	if ht.h.dontProduceFiles {
+	if ht.h.dontProduceHistoryFiles {
 		if ht.h.keepTxInDB >= maxIdxTx {
 			return false, 0
 		}
@@ -1093,7 +1094,7 @@ func (ht *HistoryRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 		return nil
 	}
 
-	if !forced && ht.h.dontProduceFiles {
+	if !forced && ht.h.dontProduceHistoryFiles {
 		forced = true // or index.CanPrune will return false cuz no snapshots made
 	}
 
