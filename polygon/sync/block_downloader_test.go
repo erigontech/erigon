@@ -134,33 +134,38 @@ func (hdt blockDownloaderTest) fakeMilestones(count int) heimdall.Waypoints {
 	return milestones
 }
 
-type fetchHeadersMock func(ctx context.Context, start uint64, end uint64, peerId *p2p.PeerId) ([]*types.Header, error)
+type fetchHeadersMock func(ctx context.Context, start uint64, end uint64, peerId *p2p.PeerId) (p2p.FetcherResponse[[]*types.Header], error)
 
 func (hdt blockDownloaderTest) defaultFetchHeadersMock() fetchHeadersMock {
 	// p2p.Service.FetchHeaders interface is using [start, end) so we stick to that
-	return func(ctx context.Context, start uint64, end uint64, _ *p2p.PeerId) ([]*types.Header, error) {
+	return func(ctx context.Context, start uint64, end uint64, _ *p2p.PeerId) (p2p.FetcherResponse[[]*types.Header], error) {
 		if start >= end {
-			return nil, fmt.Errorf("unexpected start >= end in test: start=%d, end=%d", start, end)
+			return p2p.FetcherResponse[[]*types.Header]{Data: nil, TotalSize: 0}, fmt.Errorf("unexpected start >= end in test: start=%d, end=%d", start, end)
 		}
 
 		res := make([]*types.Header, end-start)
+		size := 0
 		for num := start; num < end; num++ {
-			res[num-start] = &types.Header{
+			header := &types.Header{
 				Number: new(big.Int).SetUint64(num),
 			}
+			res[num-start] = header
+			size += header.EncodingSize()
 		}
 
-		return res, nil
+		return p2p.FetcherResponse[[]*types.Header]{Data: res, TotalSize: size}, nil
 	}
 }
 
-type fetchBodiesMock func(context.Context, []*types.Header, *p2p.PeerId) ([]*types.Body, error)
+type fetchBodiesMock func(context.Context, []*types.Header, *p2p.PeerId) (p2p.FetcherResponse[[]*types.Body], error)
 
 func (hdt blockDownloaderTest) defaultFetchBodiesMock() fetchBodiesMock {
-	return func(ctx context.Context, headers []*types.Header, _ *p2p.PeerId) ([]*types.Body, error) {
+	return func(ctx context.Context, headers []*types.Header, _ *p2p.PeerId) (p2p.FetcherResponse[[]*types.Body], error) {
 		bodies := make([]*types.Body, len(headers))
+		size := 0
+
 		for i := range headers {
-			bodies[i] = &types.Body{
+			body := &types.Body{
 				Transactions: []types.Transaction{
 					types.NewEIP1559Transaction(
 						*uint256.NewInt(1),
@@ -175,9 +180,11 @@ func (hdt blockDownloaderTest) defaultFetchBodiesMock() fetchBodiesMock {
 					),
 				},
 			}
+			bodies[i] = body
+			size += body.EncodingSize()
 		}
 
-		return bodies, nil
+		return p2p.FetcherResponse[[]*types.Body]{Data: bodies, TotalSize: size}, nil
 	}
 }
 
@@ -438,9 +445,9 @@ func TestBlockDownloaderDownloadBlocksWhenMissingBodiesThenPenalizePeerAndReDown
 		Times(1)
 	test.p2pService.EXPECT().
 		FetchBodies(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(ctx context.Context, headers []*types.Header, peerId *p2p.PeerId) ([]*types.Body, error) {
+		DoAndReturn(func(ctx context.Context, headers []*types.Header, peerId *p2p.PeerId) (p2p.FetcherResponse[[]*types.Body], error) {
 			if peerId.Equal(p2p.PeerIdFromUint64(2)) {
-				return nil, p2p.NewErrMissingBodies(headers)
+				return p2p.FetcherResponse[[]*types.Body]{Data: nil, TotalSize: 0}, p2p.NewErrMissingBodies(headers)
 			}
 
 			return test.defaultFetchBodiesMock()(ctx, headers, peerId)
