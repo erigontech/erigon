@@ -1578,15 +1578,6 @@ func (dt *DomainRoTx) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []byte,
 		heap.Push(&cp, &CursorItem{t: DB_CURSOR, key: k, val: v, c: keysCursor, endTxNum: endTxNum, reverse: true})
 	}
 
-	btCursors := make([]*Cursor, len(dt.files))
-	defer func() {
-		for _, c := range btCursors {
-			if c != nil {
-				c.Release()
-			}
-		}
-	}()
-
 	for i, item := range dt.files {
 		if UseBtree || UseBpsTree {
 			cursor, err := dt.statelessBtree(i).Seek(dt.statelessGetter(i), prefix)
@@ -1596,7 +1587,6 @@ func (dt *DomainRoTx) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []byte,
 			if cursor == nil {
 				continue
 			}
-			btCursors[i] = cursor
 			dt.d.stats.FilesQueries.Add(1)
 			key := cursor.Key()
 			if key != nil && bytes.HasPrefix(key, prefix) {

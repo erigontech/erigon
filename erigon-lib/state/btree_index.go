@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -85,11 +84,6 @@ type Cursor struct {
 //		d:      d,
 //	}
 //}
-
-func (c *Cursor) Release() {
-	//c.key, c.value = c.key[:0], c.value[:0]
-	c.btt.cursorPool.Put(c)
-}
 
 func (c *Cursor) Key() []byte {
 	return c.key
@@ -729,16 +723,15 @@ func (btw *BtIndexWriter) Close() {
 }
 
 type BtIndex struct {
-	m          mmap.MMap
-	data       []byte
-	ef         *eliasfano32.EliasFano
-	file       *os.File
-	alloc      *btAlloc // pointless?
-	bplus      *BpsTree
-	size       int64
-	modTime    time.Time
-	filePath   string
-	cursorPool *sync.Pool
+	m        mmap.MMap
+	data     []byte
+	ef       *eliasfano32.EliasFano
+	file     *os.File
+	alloc    *btAlloc // pointless?
+	bplus    *BpsTree
+	size     int64
+	modTime  time.Time
+	filePath string
 }
 
 // Decompressor should be managed by caller (could be closed after index is built). When index is built, external getter should be passed to Seek function
@@ -837,11 +830,6 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 		filePath: indexPath,
 		size:     s.Size(),
 		modTime:  s.ModTime(),
-		cursorPool: &sync.Pool{
-			New: func() interface{} {
-				return &Cursor{key: make([]byte, 0, 64), value: make([]byte, 0, 64)}
-			},
-		},
 	}
 
 	idx.file, err = os.Open(indexPath)
@@ -926,14 +914,14 @@ func (b *BtIndex) keyCmp(k []byte, di uint64, g ArchiveGetter) (int, []byte, err
 // getter should be alive all the time of cursor usage
 // Key and value is valid until cursor.Next is called
 func (b *BtIndex) newCursor(ctx context.Context, k, v []byte, d uint64, g ArchiveGetter) *Cursor {
-	c := b.cursorPool.Get().(*Cursor)
-	c.ctx = ctx
-	c.getter = g
-	c.key = common.Copy(k)
-	c.value = common.Copy(v)
-	c.d = d
-	c.btt = b
-	return c
+	return &Cursor{
+		ctx:    ctx,
+		getter: g,
+		key:    common.Copy(k),
+		value:  common.Copy(v),
+		d:      d,
+		btt:    b,
+	}
 }
 
 func (b *BtIndex) Size() int64 { return b.size }

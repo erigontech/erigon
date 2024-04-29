@@ -675,16 +675,6 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 	}
 
 	sctx := sd.aggCtx.d[kv.StorageDomain]
-
-	btCursors := make([]*Cursor, len(sctx.files))
-	defer func() {
-		for _, c := range btCursors {
-			if c != nil {
-				c.Release()
-			}
-		}
-	}()
-
 	for i, item := range sctx.files {
 		cursor, err := item.src.bindex.Seek(sctx.statelessGetter(i), prefix)
 		if err != nil {
@@ -693,7 +683,6 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 		if cursor == nil {
 			continue
 		}
-		btCursors[i] = cursor
 
 		key := cursor.Key()
 		if key != nil && bytes.HasPrefix(key, prefix) {
