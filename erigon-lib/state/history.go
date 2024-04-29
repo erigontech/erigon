@@ -886,7 +886,7 @@ func (h *History) integrateFiles(sf HistoryFiles, txNumFrom, txNumTo uint64) {
 		return
 	}
 
-	h.InvertedIndex.integrateFiles(InvertedFiles{
+	h.InvertedIndex.integrateDirtyFiles(InvertedFiles{
 		decomp:    sf.efHistoryDecomp,
 		index:     sf.efHistoryIdx,
 		existence: sf.efExistence,
