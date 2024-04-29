@@ -142,7 +142,8 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, ctx cont
 				}
 				defer domains.Close()
 				simStateReader = state.NewReaderV4(domains)
-			} else {
+			  simStateWriter = state.NewWriterV4(domains)
+      } else {
 				m := membatch.NewHashBatch(tx, ctx.Done(), cfg.tmpdir, logger)
 				defer m.Close()
 				simStateReader = state.NewPlainStateReader(tx)
