@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -23,8 +24,8 @@ func checkTime(
 	}
 	timestamp := 0
 	if ts, ok := i["timestamp"]; ok {
-		if cs, ok := ts.(uint64); ok {
-			timestamp = int(cs)
+		if cs, ok := ts.(hexutil.Uint64); ok {
+			timestamp = int(uint64(cs))
 		}
 	}
 	if timestamp < seconds {
