@@ -19,6 +19,10 @@ import (
 )
 
 func SetupLogsAccess(ctx *cli.Context, metricsMux *http.ServeMux) {
+	if metricsMux == nil {
+		return
+	}
+
 	dirPath := ctx.String(logging.LogDirPathFlag.Name)
 	if dirPath == "" {
 		datadir := ctx.String("datadir")

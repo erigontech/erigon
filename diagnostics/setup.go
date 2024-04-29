@@ -1,6 +1,7 @@
 package diagnostics
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -8,33 +9,90 @@ import (
 
 	diaglib "github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon/turbo/node"
+	"github.com/ledgerwatch/log/v3"
 )
 
-func Setup(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode) {
-	debugMux := http.NewServeMux()
+var (
+	diagnosticsDisabledFlag = "diagnostics.disabled"
+	diagnosticsAddrFlag     = "diagnostics.endpoint.addr"
+	diagnosticsPortFlag     = "diagnostics.endpoint.port"
+	metricsHTTPFlag         = "metrics.addr"
+	metricsPortFlag         = "metrics.port"
+)
 
-	diagnostic := diaglib.NewDiagnosticClient(debugMux, node.Backend().DataDir())
+func Setup(ctx *cli.Context, node *node.ErigonNode, metricsMux *http.ServeMux) {
+	if ctx.Bool(diagnosticsDisabledFlag) {
+		return
+	}
+
+	var diagMux *http.ServeMux
+
+	diagHost := ctx.String(diagnosticsAddrFlag)
+	diagPort := ctx.Int(diagnosticsPortFlag)
+	diagAddress := fmt.Sprintf("%s:%d", diagHost, diagPort)
+
+	metricsHost := ctx.String(metricsHTTPFlag)
+	metricsPort := ctx.Int(metricsPortFlag)
+	metricsAddress := fmt.Sprintf("%s:%d", metricsHost, metricsPort)
+
+	if diagAddress == metricsAddress {
+		diagMux = SetupDiagnosticsEndpoint(metricsMux, diagAddress)
+	} else {
+		diagMux = SetupDiagnosticsEndpoint(nil, diagAddress)
+	}
+
+	diagnostic := diaglib.NewDiagnosticClient(diagMux, node.Backend().DataDir())
 	diagnostic.Setup()
 
-	metricsMux.HandleFunc("/debug/", func(w http.ResponseWriter, r *http.Request) {
-		r.URL.Path = strings.TrimPrefix(r.URL.Path, "/debug")
-		r.URL.RawPath = strings.TrimPrefix(r.URL.RawPath, "/debug")
-		debugMux.ServeHTTP(w, r)
+	SetupEndpoints(ctx, node, diagMux, diagnostic)
+}
+
+func SetupDiagnosticsEndpoint(metricsMux *http.ServeMux, addres string) *http.ServeMux {
+	diagMux := http.NewServeMux()
+
+	if metricsMux != nil {
+		SetupMiddleMuxHandler(diagMux, metricsMux, "/debug/diag")
+	} else {
+		middleMux := http.NewServeMux()
+		SetupMiddleMuxHandler(diagMux, middleMux, "/debug/diag")
+
+		diagServer := &http.Server{
+			Addr:    addres,
+			Handler: middleMux,
+		}
+
+		go func() {
+			if err := diagServer.ListenAndServe(); err != nil {
+				log.Error("[Diagnostics] Failure in running diagnostics server", "err", err)
+			}
+		}()
+
+	}
+
+	return diagMux
+}
+
+func SetupMiddleMuxHandler(mux *http.ServeMux, middleMux *http.ServeMux, path string) {
+	middleMux.HandleFunc(path+"/", func(w http.ResponseWriter, r *http.Request) {
+		r.URL.Path = strings.TrimPrefix(r.URL.Path, path)
+		r.URL.RawPath = strings.TrimPrefix(r.URL.RawPath, path)
+		mux.ServeHTTP(w, r)
 	})
+}
 
-	SetupLogsAccess(ctx, debugMux)
-	SetupDbAccess(ctx, debugMux)
-	SetupCmdLineAccess(debugMux)
-	SetupFlagsAccess(ctx, debugMux)
-	SetupVersionAccess(debugMux)
-	SetupBlockBodyDownload(debugMux)
-	SetupHeaderDownloadStats(debugMux)
-	SetupNodeInfoAccess(debugMux, node)
-	SetupPeersAccess(ctx, debugMux, node, diagnostic)
-	SetupBootnodesAccess(debugMux, node)
-	SetupStagesAccess(debugMux, diagnostic)
-	SetupMemAccess(debugMux)
-	SetupHeadersAccess(debugMux, diagnostic)
-	SetupBodiesAccess(debugMux, diagnostic)
-
+func SetupEndpoints(ctx *cli.Context, node *node.ErigonNode, diagMux *http.ServeMux, diagnostic *diaglib.DiagnosticClient) {
+	SetupLogsAccess(ctx, diagMux)
+	SetupDbAccess(ctx, diagMux)
+	SetupCmdLineAccess(diagMux)
+	SetupFlagsAccess(ctx, diagMux)
+	SetupVersionAccess(diagMux)
+	SetupBlockBodyDownload(diagMux)
+	SetupHeaderDownloadStats(diagMux)
+	SetupNodeInfoAccess(diagMux, node)
+	SetupPeersAccess(ctx, diagMux, node, diagnostic)
+	SetupBootnodesAccess(diagMux, node)
+	SetupStagesAccess(diagMux, diagnostic)
+	SetupMemAccess(diagMux)
+	SetupHeadersAccess(diagMux, diagnostic)
+	SetupBodiesAccess(diagMux, diagnostic)
 }

@@ -995,9 +995,24 @@ var (
 		Usage: "set the cors' allow origins",
 		Value: cli.NewStringSlice(),
 	}
+	DiagDisabledFlag = cli.BoolFlag{
+		Name:  "diagnostics.disabled",
+		Usage: "Disable diagnostics",
+		Value: false,
+	}
+	DiagEndpointAddrFlag = cli.StringFlag{
+		Name:  "diagnostics.endpoint.addr",
+		Usage: "Diagnostics HTTP server listening interface",
+		Value: "0.0.0.0",
+	}
+	DiagEndpointPortFlag = cli.UintFlag{
+		Name:  "diagnostics.endpoint.port",
+		Usage: "Diagnostics HTTP server listening port",
+		Value: 6060,
+	}
 )
 
-var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag}
+var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag, &DiagDisabledFlag, &DiagEndpointAddrFlag, &DiagEndpointPortFlag}
 
 var DiagnosticsFlags = []cli.Flag{&DiagnosticsURLFlag, &DiagnosticsURLFlag, &DiagnosticsSessionsFlag}
 
