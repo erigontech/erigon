@@ -320,21 +320,6 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 			}
 		}
 
-		if dir.FileExist(filepath.Join(opts.path, "mdbx.dat")) {
-			env, err := mdbx.NewEnv()
-			if err != nil {
-				return nil, err
-			}
-			if err = env.Open(opts.path, mdbx.Accede|mdbx.Readonly, 0644); err != nil {
-				return nil, err
-			}
-			in, err := env.Info(nil)
-			if err != nil {
-				return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label.String(), stack2.Trace().String())
-			}
-			opts.pageSize = uint64(in.PageSize)
-			env.Close()
-		}
 		// before env.Open() we don't know real pageSize. but will be implemented soon: https://gitflic.ru/project/erthink/libmdbx/issue/15
 		// but we want call all `SetOption` before env.Open(), because:
 		//   - after they will require rwtx-lock, which is not acceptable in ACCEDEE mode.
