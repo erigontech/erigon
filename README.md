@@ -812,9 +812,11 @@ datadir
 #   - if still not enough: `history` 
 ```
 
-### E3 eth-mainnet datadir size (April 2024)
+### E3 eth-mainnet datadir size 
 
 ```
+# April 2024
+
 du -hsc /erigon/* 
 6G  	/erigon/caplin
 80G 	/erigon/chaindata
