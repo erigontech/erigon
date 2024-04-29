@@ -794,11 +794,18 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	hook := stages2.NewHook(backend.sentryCtx, backend.chainDB, backend.notifications, backend.stagedSync, backend.blockReader, backend.chainConfig, backend.logger, backend.sentriesClient.SetStatus)
 
 	if !config.Sync.UseSnapshots && backend.downloaderClient != nil {
-		for _, p := range snaptype.AllTypes {
+		for _, p := range blockReader.AllTypes() {
 			backend.downloaderClient.ProhibitNewDownloads(ctx, &protodownloader.ProhibitNewDownloadsRequest{
 				Type: p.String(),
 			})
 		}
+
+		for _, p := range snaptype.CaplinSnapshotTypes {
+			backend.downloaderClient.ProhibitNewDownloads(ctx, &protodownloader.ProhibitNewDownloadsRequest{
+				Type: p.String(),
+			})
+		}
+
 	}
 
 	checkStateRoot := true

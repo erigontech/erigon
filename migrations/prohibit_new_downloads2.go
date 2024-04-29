@@ -12,6 +12,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
+	borsnaptype "github.com/ledgerwatch/erigon/polygon/bor/snaptype"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -38,12 +40,21 @@ var ProhibitNewDownloadsLock2 = Migration{
 		}
 		if len(content) == 0 { // old format, need to change to all snaptypes except blob sidecars
 			locked := []string{}
-			ts := snaptype.AllTypes
-			for _, t := range ts {
+
+			for _, t := range coresnaptype.BlockSnapshotTypes {
+				locked = append(locked, t.String())
+			}
+
+			for _, t := range borsnaptype.BorSnapshotTypes {
+				locked = append(locked, t.String())
+			}
+
+			for _, t := range snaptype.CaplinSnapshotTypes {
 				if t.String() != snaptype.BlobSidecars.String() {
 					locked = append(locked, t.String())
 				}
 			}
+
 			newContent, err := json.Marshal(locked)
 			if err != nil {
 				return err
