@@ -342,6 +342,7 @@ func TestHistoryAfterPrune(t *testing.T) {
 		require.NoError(err)
 
 		h.integrateDirtyFiles(sf, 0, 16)
+		h.reCalcVisibleFiles()
 		hc.Close()
 
 		hc = h.BeginFilesRo()
@@ -655,6 +656,7 @@ func TestHistoryHistory(t *testing.T) {
 				sf, err := h.buildFiles(ctx, step, c, background.NewProgressSet())
 				require.NoError(err)
 				h.integrateDirtyFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
+				h.reCalcVisibleFiles()
 
 				hc := h.BeginFilesRo()
 				_, err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, false, logEvery)
@@ -693,6 +695,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 		sf, err := h.buildFiles(ctx, step, c, background.NewProgressSet())
 		require.NoError(err)
 		h.integrateDirtyFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
+		h.reCalcVisibleFiles()
 
 		if doPrune {
 			hc := h.BeginFilesRo()
@@ -720,6 +723,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 			indexIn, historyIn, err := hc.mergeFiles(ctx, indexOuts, historyOuts, r, background.NewProgressSet())
 			require.NoError(err)
 			h.integrateMergedFiles(indexOuts, historyOuts, indexIn, historyIn)
+			h.reCalcVisibleFiles()
 			return false
 		}(); stop {
 			break
