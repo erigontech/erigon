@@ -1,14 +1,16 @@
 package txpool
 
 import (
+	"bytes"
 	"fmt"
 
 	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/holiman/uint256"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/common/cmp"
 	"github.com/gateway-fm/cdk-erigon-lib/common/fixedgas"
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/gateway-fm/cdk-erigon-lib/types"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -226,4 +228,35 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 
 func (p *TxPool) ForceUpdateLatestBlock(blockNumber uint64) {
 	p.lastSeenBlock.Store(blockNumber)
+}
+
+// This function is invoked if a single tx overflow entire zk-counters.
+// In this case there is nothing we can do but to mark is as such
+// and on next "pool iteration" it will be discard
+func (p *TxPool) MarkForDiscardFromPendingBest(txHash libcommon.Hash) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	best := p.pending.best
+
+	for i := 0; i < len(best.ms); i++ {
+		mt := best.ms[i]
+		if bytes.Equal(mt.Tx.IDHash[:], txHash[:]) {
+			mt.overflowZkCountersDuringExecution = true
+			break
+		}
+	}
+}
+
+// Discard a metaTx from the best pending pool if it has overflow the zk-counters during execution
+func promoteZk(pending *PendingPool, baseFee, queued *SubPool, pendingBaseFee uint64, discard func(*metaTx, DiscardReason), announcements *types.Announcements) {
+	for i := 0; i < len(pending.best.ms); i++ {
+		mt := pending.best.ms[i]
+		if mt.overflowZkCountersDuringExecution {
+			pending.Remove(mt)
+			discard(mt, OverflowZkCounters)
+		}
+	}
+
+	promote(pending, baseFee, queued, pendingBaseFee, discard, announcements)
 }

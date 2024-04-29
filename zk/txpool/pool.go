@@ -140,6 +140,7 @@ const (
 	DuplicateHash       DiscardReason = 21 // There was an existing transaction with the same hash
 	InitCodeTooLarge    DiscardReason = 22 // EIP-3860 - transaction init code is too large
 	UnsupportedTx       DiscardReason = 23 // unsupported transaction type
+	OverflowZkCounters  DiscardReason = 24 // unsupported transaction type
 )
 
 func (r DiscardReason) String() string {
@@ -192,6 +193,8 @@ func (r DiscardReason) String() string {
 		return "initcode too large"
 	case UnsupportedTx:
 		return "unsupported transaction type"
+	case OverflowZkCounters:
+		return "overflow zk-counters"
 	default:
 		panic(fmt.Sprintf("discard reason: %d", r))
 	}
@@ -199,17 +202,18 @@ func (r DiscardReason) String() string {
 
 // metaTx holds transaction and some metadata
 type metaTx struct {
-	Tx                        *types.TxSlot
-	minFeeCap                 uint256.Int
-	nonceDistance             uint64 // how far their nonces are from the state's nonce for the sender
-	cumulativeBalanceDistance uint64 // how far their cumulativeRequiredBalance are from the state's balance for the sender
-	minTip                    uint64
-	bestIndex                 int
-	worstIndex                int
-	timestamp                 uint64 // when it was added to pool
-	subPool                   SubPoolMarker
-	currentSubPool            SubPoolType
-	alreadyYielded            bool
+	Tx                                *types.TxSlot
+	minFeeCap                         uint256.Int
+	nonceDistance                     uint64 // how far their nonces are from the state's nonce for the sender
+	cumulativeBalanceDistance         uint64 // how far their cumulativeRequiredBalance are from the state's balance for the sender
+	minTip                            uint64
+	bestIndex                         int
+	worstIndex                        int
+	timestamp                         uint64 // when it was added to pool
+	subPool                           SubPoolMarker
+	currentSubPool                    SubPoolType
+	alreadyYielded                    bool
+	overflowZkCountersDuringExecution bool
 }
 
 func newMetaTx(slot *types.TxSlot, isLocal bool, timestmap uint64) *metaTx {
@@ -442,7 +446,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	p.pending.EnforceWorstInvariants()
 	p.baseFee.EnforceInvariants()
 	p.queued.EnforceInvariants()
-	promote(p.pending, p.baseFee, p.queued, pendingBaseFee, p.discardLocked, &announcements)
+	promoteZk(p.pending, p.baseFee, p.queued, pendingBaseFee, p.discardLocked, &announcements)
 	p.pending.EnforceBestInvariants()
 	p.promoted.Reset()
 	p.promoted.AppendOther(announcements)
@@ -960,7 +964,7 @@ func addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
 			protocolBaseFee, blockGasLimit, pending, baseFee, queued, discard)
 	}
 
-	promote(pending, baseFee, queued, pendingBaseFee, discard, &announcements)
+	promoteZk(pending, baseFee, queued, pendingBaseFee, discard, &announcements)
 	pending.EnforceBestInvariants()
 
 	return announcements, discardReasons, nil
