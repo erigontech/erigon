@@ -800,6 +800,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	if config.PolygonSyncStage {
 		backend.syncStages = stages2.NewPolygonSyncStages(
 			backend.sentryCtx,
+			logger,
 			backend.chainDB,
 			config,
 			backend.chainConfig,
@@ -812,6 +813,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			backend.silkworm,
 			backend.forkValidator,
 			heimdallClient,
+			polygonSyncSentry(sentries),
+			p2pConfig.MaxPeers,
 		)
 		backend.syncUnwindOrder = stagedsync.PolygonSyncUnwindOrder
 		backend.syncPruneOrder = stagedsync.PolygonSyncPruneOrder
@@ -900,25 +903,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	if config.PolygonSync {
-		// TODO - pending sentry multi client refactor
-		//      - sentry multi client should conform to the SentryClient interface and internally
-		//        multiplex
-		//      - for now we just use 1 sentry
-		var sentryClient direct.SentryClient
-		for _, client := range sentries {
-			if client.Protocol() == direct.ETH68 {
-				sentryClient = client
-				break
-			}
-		}
-		if sentryClient == nil {
-			return nil, errors.New("nil sentryClient for polygon sync")
-		}
-
 		backend.polygonSyncService = polygonsync.NewService(
 			logger,
 			chainConfig,
-			sentryClient,
+			polygonSyncSentry(sentries),
 			p2pConfig.MaxPeers,
 			statusDataProvider,
 			config.HeimdallURL,
@@ -1656,4 +1644,24 @@ func (s *Ethereum) Sentinel() rpcsentinel.SentinelClient {
 
 func (s *Ethereum) DataDir() string {
 	return s.config.Dirs.DataDir
+}
+
+func polygonSyncSentry(sentries []direct.SentryClient) direct.SentryClient {
+	// TODO - pending sentry multi client refactor
+	//      - sentry multi client should conform to the SentryClient interface and internally
+	//        multiplex
+	//      - for now we just use 1 sentry
+	var sentryClient direct.SentryClient
+	for _, client := range sentries {
+		if client.Protocol() == direct.ETH68 {
+			sentryClient = client
+			break
+		}
+	}
+
+	if sentryClient == nil {
+		panic("nil sentryClient for polygon sync")
+	}
+
+	return sentryClient
 }

@@ -740,6 +740,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 func PolygonSyncStages(
 	ctx context.Context,
 	snapshots SnapshotsCfg,
+	polygonSyncStageCfg PolygonSyncStageCfg,
 	blockHashCfg BlockHashesCfg,
 	senders SendersCfg,
 	exec ExecuteBlockCfg,
@@ -767,7 +768,7 @@ func PolygonSyncStages(
 			ID:          stages.PolygonSync,
 			Description: "Use polygon sync component to sync headers, bodies and heimdall data",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, unwinder Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnPolygonSyncStage()
+				return SpawnPolygonSyncStage(ctx, txc.Tx, polygonSyncStageCfg)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
 				return UnwindPolygonSyncStage()

@@ -14,6 +14,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/direct"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
@@ -734,6 +735,7 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 
 func NewPolygonSyncStages(
 	ctx context.Context,
+	logger log.Logger,
 	db kv.RwDB,
 	config *ethconfig.Config,
 	chainConfig *chain.Config,
@@ -746,6 +748,8 @@ func NewPolygonSyncStages(
 	silkworm *silkworm.Silkworm,
 	forkValidator *engine_helpers.ForkValidator,
 	heimdallClient heimdall.HeimdallClient,
+	sentry direct.SentryClient,
+	maxPeers uint64,
 ) []*stagedsync.Stage {
 	loopBreakCheck := newLoopBreakCheck(config, heimdallClient)
 	return stagedsync.PolygonSyncStages(
@@ -765,6 +769,7 @@ func NewPolygonSyncStages(
 			config.CaplinConfig.BlobBackfilling,
 			silkworm,
 		),
+		stagedsync.NewPolygonSyncStageCfg(logger, db, sentry, maxPeers),
 		stagedsync.StageBlockHashesCfg(
 			db,
 			config.Dirs.Tmp,
