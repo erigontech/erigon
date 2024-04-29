@@ -219,7 +219,8 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, sendersC
 
 	// This flag will skip checking the state root
 	execCfg.blockProduction = true
-	if err := ExecBlockV3(s, nil, wrap.TxContainer{Tx: tx}, current.Header.Number.Uint64(), context.Background(), execCfg, false, logger); err != nil {
+	execS := &StageState{state: s.state, ID: stages.Execution, BlockNumber: current.Header.Number.Uint64()}
+	if err := ExecBlockV3(execS, nil, wrap.TxContainer{Tx: tx}, current.Header.Number.Uint64(), context.Background(), execCfg, false, logger); err != nil {
 		return err
 	}
 
