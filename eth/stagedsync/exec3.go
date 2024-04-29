@@ -225,7 +225,7 @@ func ExecV3(ctx context.Context,
 		if err != nil {
 			return err
 		}
-
+		fmt.Println(maxTxNum)
 		ok, _blockNum, err := rawdbv3.TxNums.FindBlockNum(applyTx, doms.TxNum())
 		if err != nil {
 			return err
@@ -264,6 +264,7 @@ func ExecV3(ctx context.Context,
 		if _nothing, err := nothingToExec(applyTx); err != nil {
 			return err
 		} else if _nothing {
+			fmt.Println("nothing to exec")
 			return nil
 		}
 

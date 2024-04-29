@@ -204,8 +204,14 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, sendersC
 	if err := rawdb.WriteHeader(tx, block.Header()); err != nil {
 		return fmt.Errorf("cannot write header: %s", err)
 	}
-	if _, err := rawdb.WriteRawBodyIfNotExists(tx, block.Hash(), block.NumberU64(), block.RawBody()); err != nil {
+	var ok bool
+	if ok, err = rawdb.WriteRawBodyIfNotExists(tx, block.Hash(), block.NumberU64(), block.RawBody()); err != nil {
 		return fmt.Errorf("cannot write body: %s", err)
+	}
+	if histV3 && ok {
+		if err := rawdb.AppendCanonicalTxNums(tx, block.NumberU64()); err != nil {
+			return err
+		}
 	}
 	if err := stages.SaveStageProgress(tx, kv.Headers, block.NumberU64()); err != nil {
 		return err
