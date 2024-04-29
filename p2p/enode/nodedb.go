@@ -336,20 +336,13 @@ func (db *DB) UpdateNode(node *Node) error {
 	if err != nil {
 		return err
 	}
-	if err := db.kv.Update(db.ctx, func(tx kv.RwTx) error {
+	return db.kv.Update(db.ctx, func(tx kv.RwTx) error {
 		err = tx.Put(kv.NodeRecords, nodeKey(node.ID()), blob)
 		if err != nil {
 			return err
 		}
-		err = db._storeUint64(tx, nodeItemKey(node.ID(), zeroIP, dbNodeSeq), node.Seq())
-		if err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	return nil
+		return db._storeUint64(tx, nodeItemKey(node.ID(), zeroIP, dbNodeSeq), node.Seq())
+	})
 }
 
 // NodeSeq returns the stored record sequence number of the given node.
