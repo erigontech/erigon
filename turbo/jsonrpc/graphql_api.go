@@ -73,7 +73,7 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 		return nil, err
 	}
 
-	receipts, err := api.getReceipts(ctx, tx, chainConfig, block, senders)
+	receipts, err := api.getReceipts(ctx, tx, block, senders)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}

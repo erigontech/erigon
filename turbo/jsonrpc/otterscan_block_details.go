@@ -70,7 +70,7 @@ func (api *OtterscanAPIImpl) getBlockDetailsImpl(ctx context.Context, tx kv.Tx, 
 	if err != nil {
 		return nil, err
 	}
-	receipts, err := api.getReceipts(ctx, tx, chainConfig, b, senders)
+	receipts, err := api.getReceipts(ctx, tx, b, senders)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %v", err)
 	}

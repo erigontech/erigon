@@ -603,7 +603,7 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 	}
 
 	// Receipts
-	receipts, err := api.getReceipts(ctx, tx, chainConfig, b, senders)
+	receipts, err := api.getReceipts(ctx, tx, b, senders)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %v", err)
 	}
