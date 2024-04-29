@@ -10,7 +10,6 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/kv/membatch"
 	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
