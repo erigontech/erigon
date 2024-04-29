@@ -223,7 +223,7 @@ func (tf *AtomicTorrentFS) NewDownloadsAreProhibited(name string) (bool, error) 
 }
 
 func (tf *AtomicTorrentFS) newDownloadsAreProhibited(name string) (bool, error) {
-	f, err := os.OpenFile(filepath.Join(tf.dir, ProhibitNewDownloadsFileName), os.O_CREATE|os.O_APPEND|os.O_RDONLY, 0644)
+	f, err := os.OpenFile(filepath.Join(tf.dir, ProhibitNewDownloadsFileName), os.O_CREATE|os.O_RDONLY, 0644)
 	if err != nil {
 		return false, err
 	}
