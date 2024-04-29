@@ -1003,7 +1003,7 @@ var (
 	DiagEndpointAddrFlag = cli.StringFlag{
 		Name:  "diagnostics.endpoint.addr",
 		Usage: "Diagnostics HTTP server listening interface",
-		Value: "127.0.0.1",
+		Value: "0.0.0.0",
 	}
 	DiagEndpointPortFlag = cli.UintFlag{
 		Name:  "diagnostics.endpoint.port",
