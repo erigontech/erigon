@@ -1302,6 +1302,266 @@ func (c *MockStorePutSpanCall) DoAndReturn(f func(context.Context, *Span) error)
 	return c
 }
 
+// MockRoStore is a mock of RoStore interface.
+type MockRoStore struct {
+	ctrl     *gomock.Controller
+	recorder *MockRoStoreMockRecorder
+}
+
+// MockRoStoreMockRecorder is the mock recorder for MockRoStore.
+type MockRoStoreMockRecorder struct {
+	mock *MockRoStore
+}
+
+// NewMockRoStore creates a new mock instance.
+func NewMockRoStore(ctrl *gomock.Controller) *MockRoStore {
+	mock := &MockRoStore{ctrl: ctrl}
+	mock.recorder = &MockRoStoreMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockRoStore) EXPECT() *MockRoStoreMockRecorder {
+	return m.recorder
+}
+
+// GetCheckpoint mocks base method.
+func (m *MockRoStore) GetCheckpoint(ctx context.Context, checkpointId CheckpointId) (*Checkpoint, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetCheckpoint", ctx, checkpointId)
+	ret0, _ := ret[0].(*Checkpoint)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetCheckpoint indicates an expected call of GetCheckpoint.
+func (mr *MockRoStoreMockRecorder) GetCheckpoint(ctx, checkpointId any) *MockRoStoreGetCheckpointCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCheckpoint", reflect.TypeOf((*MockRoStore)(nil).GetCheckpoint), ctx, checkpointId)
+	return &MockRoStoreGetCheckpointCall{Call: call}
+}
+
+// MockRoStoreGetCheckpointCall wrap *gomock.Call
+type MockRoStoreGetCheckpointCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockRoStoreGetCheckpointCall) Return(arg0 *Checkpoint, arg1 error) *MockRoStoreGetCheckpointCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockRoStoreGetCheckpointCall) Do(f func(context.Context, CheckpointId) (*Checkpoint, error)) *MockRoStoreGetCheckpointCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockRoStoreGetCheckpointCall) DoAndReturn(f func(context.Context, CheckpointId) (*Checkpoint, error)) *MockRoStoreGetCheckpointCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// GetMilestone mocks base method.
+func (m *MockRoStore) GetMilestone(ctx context.Context, milestoneId MilestoneId) (*Milestone, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetMilestone", ctx, milestoneId)
+	ret0, _ := ret[0].(*Milestone)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetMilestone indicates an expected call of GetMilestone.
+func (mr *MockRoStoreMockRecorder) GetMilestone(ctx, milestoneId any) *MockRoStoreGetMilestoneCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetMilestone", reflect.TypeOf((*MockRoStore)(nil).GetMilestone), ctx, milestoneId)
+	return &MockRoStoreGetMilestoneCall{Call: call}
+}
+
+// MockRoStoreGetMilestoneCall wrap *gomock.Call
+type MockRoStoreGetMilestoneCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockRoStoreGetMilestoneCall) Return(arg0 *Milestone, arg1 error) *MockRoStoreGetMilestoneCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockRoStoreGetMilestoneCall) Do(f func(context.Context, MilestoneId) (*Milestone, error)) *MockRoStoreGetMilestoneCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockRoStoreGetMilestoneCall) DoAndReturn(f func(context.Context, MilestoneId) (*Milestone, error)) *MockRoStoreGetMilestoneCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// GetSpan mocks base method.
+func (m *MockRoStore) GetSpan(ctx context.Context, spanId SpanId) (*Span, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetSpan", ctx, spanId)
+	ret0, _ := ret[0].(*Span)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetSpan indicates an expected call of GetSpan.
+func (mr *MockRoStoreMockRecorder) GetSpan(ctx, spanId any) *MockRoStoreGetSpanCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSpan", reflect.TypeOf((*MockRoStore)(nil).GetSpan), ctx, spanId)
+	return &MockRoStoreGetSpanCall{Call: call}
+}
+
+// MockRoStoreGetSpanCall wrap *gomock.Call
+type MockRoStoreGetSpanCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockRoStoreGetSpanCall) Return(arg0 *Span, arg1 error) *MockRoStoreGetSpanCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockRoStoreGetSpanCall) Do(f func(context.Context, SpanId) (*Span, error)) *MockRoStoreGetSpanCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockRoStoreGetSpanCall) DoAndReturn(f func(context.Context, SpanId) (*Span, error)) *MockRoStoreGetSpanCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// LastCheckpointId mocks base method.
+func (m *MockRoStore) LastCheckpointId(ctx context.Context) (CheckpointId, bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LastCheckpointId", ctx)
+	ret0, _ := ret[0].(CheckpointId)
+	ret1, _ := ret[1].(bool)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// LastCheckpointId indicates an expected call of LastCheckpointId.
+func (mr *MockRoStoreMockRecorder) LastCheckpointId(ctx any) *MockRoStoreLastCheckpointIdCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LastCheckpointId", reflect.TypeOf((*MockRoStore)(nil).LastCheckpointId), ctx)
+	return &MockRoStoreLastCheckpointIdCall{Call: call}
+}
+
+// MockRoStoreLastCheckpointIdCall wrap *gomock.Call
+type MockRoStoreLastCheckpointIdCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockRoStoreLastCheckpointIdCall) Return(arg0 CheckpointId, arg1 bool, arg2 error) *MockRoStoreLastCheckpointIdCall {
+	c.Call = c.Call.Return(arg0, arg1, arg2)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockRoStoreLastCheckpointIdCall) Do(f func(context.Context) (CheckpointId, bool, error)) *MockRoStoreLastCheckpointIdCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockRoStoreLastCheckpointIdCall) DoAndReturn(f func(context.Context) (CheckpointId, bool, error)) *MockRoStoreLastCheckpointIdCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// LastMilestoneId mocks base method.
+func (m *MockRoStore) LastMilestoneId(ctx context.Context) (MilestoneId, bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LastMilestoneId", ctx)
+	ret0, _ := ret[0].(MilestoneId)
+	ret1, _ := ret[1].(bool)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// LastMilestoneId indicates an expected call of LastMilestoneId.
+func (mr *MockRoStoreMockRecorder) LastMilestoneId(ctx any) *MockRoStoreLastMilestoneIdCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LastMilestoneId", reflect.TypeOf((*MockRoStore)(nil).LastMilestoneId), ctx)
+	return &MockRoStoreLastMilestoneIdCall{Call: call}
+}
+
+// MockRoStoreLastMilestoneIdCall wrap *gomock.Call
+type MockRoStoreLastMilestoneIdCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockRoStoreLastMilestoneIdCall) Return(arg0 MilestoneId, arg1 bool, arg2 error) *MockRoStoreLastMilestoneIdCall {
+	c.Call = c.Call.Return(arg0, arg1, arg2)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockRoStoreLastMilestoneIdCall) Do(f func(context.Context) (MilestoneId, bool, error)) *MockRoStoreLastMilestoneIdCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockRoStoreLastMilestoneIdCall) DoAndReturn(f func(context.Context) (MilestoneId, bool, error)) *MockRoStoreLastMilestoneIdCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// LastSpanId mocks base method.
+func (m *MockRoStore) LastSpanId(ctx context.Context) (SpanId, bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LastSpanId", ctx)
+	ret0, _ := ret[0].(SpanId)
+	ret1, _ := ret[1].(bool)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// LastSpanId indicates an expected call of LastSpanId.
+func (mr *MockRoStoreMockRecorder) LastSpanId(ctx any) *MockRoStoreLastSpanIdCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LastSpanId", reflect.TypeOf((*MockRoStore)(nil).LastSpanId), ctx)
+	return &MockRoStoreLastSpanIdCall{Call: call}
+}
+
+// MockRoStoreLastSpanIdCall wrap *gomock.Call
+type MockRoStoreLastSpanIdCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockRoStoreLastSpanIdCall) Return(arg0 SpanId, arg1 bool, arg2 error) *MockRoStoreLastSpanIdCall {
+	c.Call = c.Call.Return(arg0, arg1, arg2)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockRoStoreLastSpanIdCall) Do(f func(context.Context) (SpanId, bool, error)) *MockRoStoreLastSpanIdCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockRoStoreLastSpanIdCall) DoAndReturn(f func(context.Context) (SpanId, bool, error)) *MockRoStoreLastSpanIdCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // Mockreader is a mock of reader interface.
 type Mockreader struct {
 	ctrl     *gomock.Controller

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
-	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -61,6 +60,12 @@ type Store interface {
 	CheckpointStore
 }
 
+type RoStore interface {
+	SpanReader
+	CheckpointReader
+	MilestoneReader
+}
+
 type reader interface {
 	services.BorEventReader
 	services.BorSpanReader
@@ -68,31 +73,30 @@ type reader interface {
 	services.BorMilestoneReader
 }
 
-type blockReaderStore struct {
+func NewRoTxStore(reader reader, tx kv.Tx) RoStore {
+	return &roTxStore{
+		reader: reader,
+		tx:     tx,
+	}
+}
+
+type roTxStore struct {
 	reader reader
 	tx     kv.Tx
 }
 
-var _ Store = blockReaderStore{}
-
-func NewBlockReaderStore(reader reader, tx kv.Tx) blockReaderStore {
-	return blockReaderStore{reader: reader, tx: tx}
-}
-
-func (io blockReaderStore) LastSpanId(ctx context.Context) (SpanId, bool, error) {
-	spanId, ok, err := io.reader.LastSpanId(ctx, io.tx)
+func (s roTxStore) LastSpanId(ctx context.Context) (SpanId, bool, error) {
+	spanId, ok, err := s.reader.LastSpanId(ctx, s.tx)
 	return SpanId(spanId), ok, err
 }
 
-func (io blockReaderStore) GetSpan(ctx context.Context, spanId SpanId) (*Span, error) {
-	spanBytes, err := io.reader.Span(ctx, io.tx, uint64(spanId))
-
+func (s roTxStore) GetSpan(ctx context.Context, spanId SpanId) (*Span, error) {
+	spanBytes, err := s.reader.Span(ctx, s.tx, uint64(spanId))
 	if err != nil {
 		return nil, err
 	}
 
 	var span Span
-
 	if err := json.Unmarshal(spanBytes, &span); err != nil {
 		return nil, err
 	}
@@ -100,13 +104,57 @@ func (io blockReaderStore) GetSpan(ctx context.Context, spanId SpanId) (*Span, e
 	return &span, nil
 }
 
-func (io blockReaderStore) PutSpan(ctx context.Context, span *Span) error {
-	tx, ok := io.tx.(kv.RwTx)
+func (s roTxStore) LastMilestoneId(ctx context.Context) (MilestoneId, bool, error) {
+	id, ok, err := s.reader.LastMilestoneId(ctx, s.tx)
+	return MilestoneId(id), ok, err
+}
 
-	if !ok {
-		return fmt.Errorf("span writer failed: tx is read only")
+func (s roTxStore) GetMilestone(ctx context.Context, milestoneId MilestoneId) (*Milestone, error) {
+	milestoneBytes, err := s.reader.Milestone(ctx, s.tx, uint64(milestoneId))
+	if err != nil {
+		return nil, err
 	}
 
+	var milestone Milestone
+	if err := json.Unmarshal(milestoneBytes, &milestone); err != nil {
+		return nil, err
+	}
+
+	return &milestone, nil
+}
+
+func (s roTxStore) LastCheckpointId(ctx context.Context) (CheckpointId, bool, error) {
+	id, ok, err := s.reader.LastCheckpointId(ctx, s.tx)
+	return CheckpointId(id), ok, err
+}
+
+func (s roTxStore) GetCheckpoint(ctx context.Context, checkpointId CheckpointId) (*Checkpoint, error) {
+	checkpointBytes, err := s.reader.Milestone(ctx, s.tx, uint64(checkpointId))
+	if err != nil {
+		return nil, err
+	}
+
+	var checkpoint Checkpoint
+	if err := json.Unmarshal(checkpointBytes, &checkpoint); err != nil {
+		return nil, err
+	}
+
+	return &checkpoint, nil
+}
+
+func NewRwTxStore(reader reader, tx kv.RwTx) Store {
+	return &rwTxStore{
+		RoStore: NewRoTxStore(reader, tx),
+		tx:      tx,
+	}
+}
+
+type rwTxStore struct {
+	RoStore
+	tx kv.RwTx
+}
+
+func (s rwTxStore) PutSpan(_ context.Context, span *Span) error {
 	spanBytes, err := json.Marshal(span)
 
 	if err != nil {
@@ -116,79 +164,11 @@ func (io blockReaderStore) PutSpan(ctx context.Context, span *Span) error {
 	var spanIdBytes [8]byte
 	binary.BigEndian.PutUint64(spanIdBytes[:], uint64(span.Id))
 
-	return tx.Put(kv.BorSpans, spanIdBytes[:], spanBytes)
+	return s.tx.Put(kv.BorSpans, spanIdBytes[:], spanBytes)
 }
 
-func (io blockReaderStore) LastMilestoneId(ctx context.Context) (MilestoneId, bool, error) {
-	id, ok, err := io.reader.LastMilestoneId(ctx, io.tx)
-	return MilestoneId(id), ok, err
-}
-
-func (io blockReaderStore) GetMilestone(ctx context.Context, milestoneId MilestoneId) (*Milestone, error) {
-	milestoneBytes, err := io.reader.Milestone(ctx, io.tx, uint64(milestoneId))
-
-	if err != nil {
-		return nil, err
-	}
-
-	var milestone Milestone
-
-	if err := json.Unmarshal(milestoneBytes, &milestone); err != nil {
-		return nil, err
-	}
-
-	return &milestone, nil
-}
-
-func (io blockReaderStore) PutMilestone(ctx context.Context, milestoneId MilestoneId, milestone *Milestone) error {
-	tx, ok := io.tx.(kv.RwTx)
-
-	if !ok {
-		return fmt.Errorf("span writer failed: tx is read only")
-	}
-
-	spanBytes, err := json.Marshal(milestone)
-
-	if err != nil {
-		return err
-	}
-
-	var spanIdBytes [8]byte
-	binary.BigEndian.PutUint64(spanIdBytes[:], uint64(milestoneId))
-
-	return tx.Put(kv.BorMilestones, spanIdBytes[:], spanBytes)
-}
-
-func (io blockReaderStore) LastCheckpointId(ctx context.Context) (CheckpointId, bool, error) {
-	id, ok, err := io.reader.LastCheckpointId(ctx, io.tx)
-	return CheckpointId(id), ok, err
-}
-
-func (io blockReaderStore) GetCheckpoint(ctx context.Context, checkpointId CheckpointId) (*Checkpoint, error) {
-	checkpointBytes, err := io.reader.Milestone(ctx, io.tx, uint64(checkpointId))
-
-	if err != nil {
-		return nil, err
-	}
-
-	var checkpoint Checkpoint
-
-	if err := json.Unmarshal(checkpointBytes, &checkpoint); err != nil {
-		return nil, err
-	}
-
-	return &checkpoint, nil
-}
-
-func (io blockReaderStore) PutCheckpoint(ctx context.Context, checkpointId CheckpointId, checkpoint *Checkpoint) error {
-	tx, ok := io.tx.(kv.RwTx)
-
-	if !ok {
-		return fmt.Errorf("span writer failed: tx is read only")
-	}
-
+func (s rwTxStore) PutCheckpoint(_ context.Context, checkpointId CheckpointId, checkpoint *Checkpoint) error {
 	spanBytes, err := json.Marshal(checkpoint)
-
 	if err != nil {
 		return err
 	}
@@ -196,7 +176,19 @@ func (io blockReaderStore) PutCheckpoint(ctx context.Context, checkpointId Check
 	var spanIdBytes [8]byte
 	binary.BigEndian.PutUint64(spanIdBytes[:], uint64(checkpointId))
 
-	return tx.Put(kv.BorCheckpoints, spanIdBytes[:], spanBytes)
+	return s.tx.Put(kv.BorCheckpoints, spanIdBytes[:], spanBytes)
+}
+
+func (s rwTxStore) PutMilestone(_ context.Context, milestoneId MilestoneId, milestone *Milestone) error {
+	spanBytes, err := json.Marshal(milestone)
+	if err != nil {
+		return err
+	}
+
+	var spanIdBytes [8]byte
+	binary.BigEndian.PutUint64(spanIdBytes[:], uint64(milestoneId))
+
+	return s.tx.Put(kv.BorMilestones, spanIdBytes[:], spanBytes)
 }
 
 func NewNoopStore() Store {
