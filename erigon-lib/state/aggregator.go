@@ -691,7 +691,12 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context) (somethingDone bool, err
 			in.Close()
 		}
 	}()
-	aggTx.integrateMergedDirtyFiles(outs, in)
+	a.integrateMergedDirtyFiles(outs, in)
+	a.recalcVisibleFiles()
+	a.cleanAfterMerge(in)
+
+	a.needSaveFilesListInDB.Store(true)
+
 	a.onFreeze(in.FrozenList())
 	closeAll = false
 	return true, nil
@@ -710,7 +715,6 @@ func (a *Aggregator) MergeLoop(ctx context.Context) error {
 }
 
 func (a *Aggregator) integrateDirtyFiles(sf AggV3StaticFiles, txNumFrom, txNumTo uint64) {
-	defer a.needSaveFilesListInDB.Store(true)
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 
@@ -1430,34 +1434,35 @@ func (ac *AggregatorRoTx) mergeFiles(ctx context.Context, files SelectedStaticFi
 	return mf, err
 }
 
-func (ac *AggregatorRoTx) integrateMergedDirtyFiles(outs SelectedStaticFilesV3, in MergedFilesV3) (frozen []string) {
-	defer ac.cleanAfterMerge(in)
-	defer ac.a.needSaveFilesListInDB.Store(true)
-	defer ac.a.recalcVisibleFiles()
-	ac.a.dirtyFilesLock.Lock()
-	defer ac.a.dirtyFilesLock.Unlock()
+func (a *Aggregator) integrateMergedDirtyFiles(outs SelectedStaticFilesV3, in MergedFilesV3) (frozen []string) {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
 
-	ac.a.dirtyFilesLock.Lock()
-	defer ac.a.dirtyFilesLock.Unlock()
-
-	for id, d := range ac.a.d {
+	for id, d := range a.d {
 		d.integrateMergedDirtyFiles(outs.d[id], outs.dIdx[id], outs.dHist[id], in.d[id], in.dIdx[id], in.dHist[id])
 	}
 
-	ac.a.logAddrs.integrateMergedDirtyFiles(outs.logAddrs, in.logAddrs)
-	ac.a.logTopics.integrateMergedDirtyFiles(outs.logTopics, in.logTopics)
-	ac.a.tracesFrom.integrateMergedDirtyFiles(outs.tracesFrom, in.tracesFrom)
-	ac.a.tracesTo.integrateMergedDirtyFiles(outs.tracesTo, in.tracesTo)
+	a.logAddrs.integrateMergedDirtyFiles(outs.logAddrs, in.logAddrs)
+	a.logTopics.integrateMergedDirtyFiles(outs.logTopics, in.logTopics)
+	a.tracesFrom.integrateMergedDirtyFiles(outs.tracesFrom, in.tracesFrom)
+	a.tracesTo.integrateMergedDirtyFiles(outs.tracesTo, in.tracesTo)
 	return frozen
 }
-func (ac *AggregatorRoTx) cleanAfterMerge(in MergedFilesV3) {
-	for id, d := range ac.d {
+
+func (a *Aggregator) cleanAfterMerge(in MergedFilesV3) {
+	at := a.BeginFilesRo()
+	defer at.Close()
+
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+
+	for id, d := range at.d {
 		d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])
 	}
-	ac.logAddrs.cleanAfterMerge(in.logAddrs)
-	ac.logTopics.cleanAfterMerge(in.logTopics)
-	ac.tracesFrom.cleanAfterMerge(in.tracesFrom)
-	ac.tracesTo.cleanAfterMerge(in.tracesTo)
+	at.logAddrs.cleanAfterMerge(in.logAddrs)
+	at.logTopics.cleanAfterMerge(in.logTopics)
+	at.tracesFrom.cleanAfterMerge(in.tracesFrom)
+	at.tracesTo.cleanAfterMerge(in.tracesTo)
 }
 
 // KeepStepsInDB - usually equal to one a.aggregationStep, but when we exec blocks from snapshots
