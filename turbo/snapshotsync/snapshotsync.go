@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/state"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -36,7 +37,7 @@ const (
 )
 
 func BuildProtoRequest(downloadRequest []services.DownloadRequest) *proto_downloader.AddRequest {
-	req := &proto_downloader.AddRequest{Items: make([]*proto_downloader.AddItem, 0, len(snaptype.BlockSnapshotTypes))}
+	req := &proto_downloader.AddRequest{Items: make([]*proto_downloader.AddItem, 0, len(coresnaptype.BlockSnapshotTypes))}
 	for _, r := range downloadRequest {
 		if r.Path == "" {
 			continue

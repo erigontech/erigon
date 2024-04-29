@@ -1016,7 +1016,8 @@ func (u *snapshotUploader) removeBefore(before uint64) {
 	for _, f := range list {
 		if f.To > before {
 			switch f.Type.Enum() {
-			case snaptype.Enums.BorEvents, snaptype.Enums.BorSpans:
+			case snaptype.Enums.BorEvents, snaptype.Enums.BorSpans,
+				snaptype.Enums.BorCheckpoints, snaptype.Enums.BorMilestones:
 				borToReopen = append(borToReopen, filepath.Base(f.Path))
 			default:
 				toReopen = append(toReopen, filepath.Base(f.Path))

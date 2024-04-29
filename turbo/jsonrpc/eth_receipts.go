@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/eth/ethutils"
+	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
@@ -237,7 +238,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 			log.BlockHash = blockHash
 			// bor transactions are at the end of the bodies transactions (added manually but not actually part of the block)
 			if log.TxIndex == uint(len(body.Transactions)) {
-				log.TxHash = types.ComputeBorTxHash(blockNumber, blockHash)
+				log.TxHash = bortypes.ComputeBorTxHash(blockNumber, blockHash)
 			} else {
 				log.TxHash = body.Transactions[log.TxIndex].Hash()
 			}
@@ -656,7 +657,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	if txn == nil && cc.Bor != nil {
 		borTx = rawdb.ReadBorTransactionForBlock(tx, blockNum)
 		if borTx == nil {
-			borTx = types.NewBorTransaction()
+			borTx = bortypes.NewBorTransaction()
 		}
 	}
 	receipts, err := api.getReceipts(ctx, tx, block, block.Body().SendersFromTxs())

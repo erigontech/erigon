@@ -15,6 +15,7 @@ import (
 
 	"github.com/urfave/cli/v2"
 
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon/turbo/logging"
 )
 
@@ -44,7 +45,7 @@ func SetupLogsAccess(ctx *cli.Context, metricsMux *http.ServeMux) {
 }
 
 func writeLogsList(w http.ResponseWriter, dirPath string) {
-	entries, err := os.ReadDir(dirPath)
+	entries, err := dir.ReadDir(dirPath)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to list directory %s: %v", dirPath, err), http.StatusInternalServerError)
 		return

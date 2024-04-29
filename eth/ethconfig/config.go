@@ -234,7 +234,10 @@ type Config struct {
 	WithoutHeimdall bool
 	// Heimdall services active
 	WithHeimdallMilestones bool
-	PolygonSync            bool
+	// Heimdall waypoint recording active
+	WithHeimdallWaypointRecording bool
+	// Use polygon checkpoint sync in preference to POW downloader
+	PolygonSync bool
 
 	// Ethstats service
 	Ethstats string

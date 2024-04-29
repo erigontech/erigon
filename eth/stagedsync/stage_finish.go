@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
@@ -219,7 +220,7 @@ func ReadLogs(tx kv.Tx, from uint64, isUnwind bool, blockReader services.FullBlo
 
 		// bor transactions are at the end of the bodies transactions (added manually but not actually part of the block)
 		if txIndex == uint64(len(block.Transactions())) {
-			txHash = types.ComputeBorTxHash(blockNum, block.Hash())
+			txHash = bortypes.ComputeBorTxHash(blockNum, block.Hash())
 		} else {
 			txHash = block.Transactions()[txIndex].Hash()
 		}
