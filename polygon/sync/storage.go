@@ -2,7 +2,8 @@ package sync
 
 import (
 	"context"
-	"sync"
+	"errors"
+	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
@@ -24,7 +25,12 @@ type executionClientStorage struct {
 	logger    log.Logger
 	execution ExecutionClient
 	queue     chan []*types.Block
-	waitGroup sync.WaitGroup
+
+	// tasksCount includes both tasks pending in the queue and a task that was taken and hasn't finished yet
+	tasksCount atomic.Int32
+
+	// tasksDoneSignal gets sent a value when tasksCount becomes 0
+	tasksDoneSignal chan bool
 }
 
 func NewStorage(logger log.Logger, execution ExecutionClient, queueCapacity int) Storage {
@@ -32,30 +38,36 @@ func NewStorage(logger log.Logger, execution ExecutionClient, queueCapacity int)
 		logger:    logger,
 		execution: execution,
 		queue:     make(chan []*types.Block, queueCapacity),
+
+		tasksDoneSignal: make(chan bool, 1),
 	}
 }
 
 func (s *executionClientStorage) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
-	s.waitGroup.Add(1)
+	s.tasksCount.Add(1)
 	select {
 	case s.queue <- blocks:
 		return nil
 	case <-ctx.Done():
+		// compensate since a task has not enqueued
+		s.tasksCount.Add(-1)
 		return ctx.Err()
 	}
 }
 
 func (s *executionClientStorage) Flush(ctx context.Context) error {
-	waitCtx, waitCancel := context.WithCancel(ctx)
-	defer waitCancel()
+	for s.tasksCount.Load() > 0 {
+		select {
+		case _, ok := <-s.tasksDoneSignal:
+			if !ok {
+				return errors.New("executionClientStorage.Flush failed because ExecutionClient.InsertBlocks failed")
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 
-	go func() {
-		s.waitGroup.Wait()
-		waitCancel()
-	}()
-
-	<-waitCtx.Done()
-	return ctx.Err()
+	return nil
 }
 
 func (s *executionClientStorage) Run(ctx context.Context) error {
@@ -65,7 +77,14 @@ func (s *executionClientStorage) Run(ctx context.Context) error {
 		select {
 		case blocks := <-s.queue:
 			if err := s.insertBlocks(ctx, blocks); err != nil {
+				close(s.tasksDoneSignal)
 				return err
+			}
+			if s.tasksCount.Load() == 0 {
+				select {
+				case s.tasksDoneSignal <- true:
+				default:
+				}
 			}
 		case <-ctx.Done():
 			return ctx.Err()
@@ -74,7 +93,7 @@ func (s *executionClientStorage) Run(ctx context.Context) error {
 }
 
 func (s *executionClientStorage) insertBlocks(ctx context.Context, blocks []*types.Block) error {
-	defer s.waitGroup.Done()
+	defer s.tasksCount.Add(-1)
 
 	insertStartTime := time.Now()
 	err := s.execution.InsertBlocks(ctx, blocks)

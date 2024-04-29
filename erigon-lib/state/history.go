@@ -66,7 +66,7 @@ type History struct {
 
 	// _visibleFiles - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
-	_visibleFiles atomic.Pointer[[]ctxItem]
+	_visibleFiles []ctxItem
 
 	indexList idxList
 
@@ -122,7 +122,7 @@ func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTabl
 		dontProduceHistoryFiles: cfg.dontProduceHistoryFiles,
 		keepTxInDB:              cfg.keepTxInDB,
 	}
-	h._visibleFiles.Store(&[]ctxItem{})
+	h._visibleFiles = []ctxItem{}
 	var err error
 	h.InvertedIndex, err = NewInvertedIndex(cfg.iiCfg, aggregationStep, filenameBase, indexKeysTable, indexTable, cfg.withExistenceIndex, func(fromStep, toStep uint64) bool { return dir.FileExist(h.vFilePath(fromStep, toStep)) }, logger)
 	if err != nil {
@@ -151,6 +151,7 @@ func (h *History) OpenList(idxFiles, histNames []string, readonly bool) error {
 
 }
 func (h *History) openList(fNames []string) error {
+	defer h.reCalcVisibleFiles()
 	h.closeWhatNotInList(fNames)
 	h.scanStateFiles(fNames)
 	if err := h.openFiles(); err != nil {
@@ -254,7 +255,6 @@ func (h *History) openFiles() error {
 		h.dirtyFiles.Delete(item)
 	}
 
-	h.reCalcVisibleFiles()
 	return nil
 }
 
@@ -281,7 +281,6 @@ func (h *History) closeWhatNotInList(fNames []string) {
 func (h *History) Close() {
 	h.InvertedIndex.Close()
 	h.closeWhatNotInList([]string{})
-	h.reCalcVisibleFiles()
 }
 
 func (ht *HistoryRoTx) Files() (res []string) {
@@ -769,8 +768,8 @@ func (sf HistoryFiles) CleanupOnError() {
 	}
 }
 func (h *History) reCalcVisibleFiles() {
-	visibleFiles := calcVisibleFiles(h.dirtyFiles, h.indexList, false)
-	h._visibleFiles.Store(&visibleFiles)
+	h._visibleFiles = calcVisibleFiles(h.dirtyFiles, h.indexList, false)
+	h.InvertedIndex.reCalcVisibleFiles()
 }
 
 // buildFiles performs potentially resource intensive operations of creating
@@ -880,8 +879,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	}, nil
 }
 
-func (h *History) integrateFiles(sf HistoryFiles, txNumFrom, txNumTo uint64) {
-	defer h.reCalcVisibleFiles()
+func (h *History) integrateDirtyFiles(sf HistoryFiles, txNumFrom, txNumTo uint64) {
 	if h.dontProduceHistoryFiles {
 		return
 	}
@@ -943,7 +941,7 @@ type HistoryRoTx struct {
 }
 
 func (h *History) BeginFilesRo() *HistoryRoTx {
-	files := *h._visibleFiles.Load()
+	files := h._visibleFiles
 	for i := 0; i < len(files); i++ {
 		if !files[i].src.frozen {
 			files[i].src.refcount.Add(1)
