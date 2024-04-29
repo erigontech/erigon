@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func generateCellRow(t *testing.T, size int) (row []*Cell, bitmap uint16) {
+func generateCellRow(t testing.TB, size int) (row []*Cell, bitmap uint16) {
 	t.Helper()
 
 	row = make([]*Cell, size)
@@ -81,6 +81,39 @@ func TestBranchData_MergeHexBranches2(t *testing.T) {
 	}
 }
 
+func TestBranchData_MergeHexBranches_ValueAliveAfterNewMerges(t *testing.T) {
+	row, bm := generateCellRow(t, 16)
+
+	be := NewBranchEncoder(1024, t.TempDir())
+	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*Cell, error) {
+		return row[i], nil
+	})
+	require.NoError(t, err)
+
+	copies := make([][]byte, 16)
+	values := make([][]byte, len(copies))
+
+	merger := NewHexBranchMerger(8192)
+
+	tm, am := bm, bm
+	for i := 15; i >= 0; i-- {
+		row[i] = nil
+		tm, bm, am = uint16(1<<i), bm>>1, am>>1
+		enc1, _, err := be.EncodeBranch(bm, tm, am, func(i int, skip bool) (*Cell, error) {
+			return row[i], nil
+		})
+		require.NoError(t, err)
+		merged, err := merger.Merge(enc, enc1)
+		require.NoError(t, err)
+
+		copies[i] = common.Copy(merged)
+		values[i] = merged
+	}
+	for i := 0; i < len(copies); i++ {
+		require.EqualValues(t, copies[i], values[i])
+	}
+}
+
 func TestBranchData_MergeHexBranchesEmptyBranches(t *testing.T) {
 	// Create a BranchMerger instance with sufficient capacity for testing.
 	merger := NewHexBranchMerger(1024)
@@ -115,7 +148,7 @@ func TestBranchData_MergeHexBranches3(t *testing.T) {
 }
 
 // helper to decode row of cells from string
-func unfoldBranchDataFromString(t *testing.T, encs string) (row []*Cell, am uint16) {
+func unfoldBranchDataFromString(t testing.TB, encs string) (row []*Cell, am uint16) {
 	t.Helper()
 
 	//encs := "0405040b04080f0b080d030204050b0502090805050d01060e060d070f0903090c04070a0d0a000e090b060b0c040c0700020e0b0c060b0106020c0607050a0b0209070d06040808"

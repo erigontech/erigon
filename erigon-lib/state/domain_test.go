@@ -1435,8 +1435,10 @@ func generateTestDataForDomainCommitment(tb testing.TB, keySize1, keySize2, tota
 		key1 := generateRandomKey(r, keySize1)
 		accs[key1] = generateAccountUpdates(r, totalTx, keyTxsLimit)
 		key2 := key1 + generateRandomKey(r, keySize2-keySize1)
-		stor[key2] = generateStorageUpdates(r, totalTx, keyTxsLimit)
+		stor[key2] = generateArbitraryValueUpdates(r, totalTx, keyTxsLimit, 32)
 	}
+	doms["accounts"] = accs
+	doms["storage"] = stor
 
 	return doms
 }
@@ -1494,14 +1496,15 @@ func generateAccountUpdates(r *rand.Rand, totalTx, keyTxsLimit uint64) []upd {
 	return updates
 }
 
-func generateStorageUpdates(r *rand.Rand, totalTx, keyTxsLimit uint64) []upd {
+func generateArbitraryValueUpdates(r *rand.Rand, totalTx, keyTxsLimit, maxSize uint64) []upd {
 	updates := make([]upd, 0)
 	usedTxNums := make(map[uint64]bool)
+	//maxStorageSize := 24 * (1 << 10) // limit on contract code
 
 	for i := uint64(0); i < keyTxsLimit; i++ {
 		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
 
-		value := make([]byte, r.Intn(24*(1<<10)))
+		value := make([]byte, r.Intn(int(maxSize)))
 		r.Read(value)
 
 		updates = append(updates, upd{txNum: txNum, value: value})

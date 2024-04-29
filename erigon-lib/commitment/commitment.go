@@ -193,7 +193,7 @@ func (be *BranchEncoder) CollectUpdate(
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
 	readCell func(nibble int, skip bool) (*Cell, error),
-) (lastNibble int, err error) {
+) (lastNibbe int, err error) {
 
 	v, ln, err := be.EncodeBranch(bitmap, touchMap, afterMap, readCell)
 	if err != nil {
