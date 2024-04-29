@@ -127,52 +127,9 @@ func newPolygonSyncStageStorage(logger log.Logger) *polygonSyncStageStorage {
 
 type polygonSyncStageStorage struct {
 	logger log.Logger
-	tx     kv.RwTx
-}
 
-func (s *polygonSyncStageStorage) LastSpanId(ctx context.Context) (heimdall.SpanId, bool, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (s *polygonSyncStageStorage) GetSpan(ctx context.Context, spanId heimdall.SpanId) (*heimdall.Span, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (s *polygonSyncStageStorage) PutSpan(ctx context.Context, span *heimdall.Span) error {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (s *polygonSyncStageStorage) LastMilestoneId(ctx context.Context) (heimdall.MilestoneId, bool, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (s *polygonSyncStageStorage) GetMilestone(ctx context.Context, milestoneId heimdall.MilestoneId) (*heimdall.Milestone, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (s *polygonSyncStageStorage) PutMilestone(ctx context.Context, milestoneId heimdall.MilestoneId, milestone *heimdall.Milestone) error {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (s *polygonSyncStageStorage) LastCheckpointId(ctx context.Context) (heimdall.CheckpointId, bool, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (s *polygonSyncStageStorage) GetCheckpoint(ctx context.Context, checkpointId heimdall.CheckpointId) (*heimdall.Checkpoint, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (s *polygonSyncStageStorage) PutCheckpoint(ctx context.Context, checkpointId heimdall.CheckpointId, checkpoint *heimdall.Checkpoint) error {
-	//TODO implement me
-	panic("implement me")
+	heimdall.Store
+	tx kv.RwTx
 }
 
 func (s *polygonSyncStageStorage) InsertBlocks(_ context.Context, blocks []*types.Block) error {
@@ -229,6 +186,8 @@ func (s *polygonSyncStageStorage) Run(context.Context) error {
 
 func (s *polygonSyncStageStorage) use(tx kv.RwTx) {
 	s.tx = tx
+	// TODO pass in reader
+	s.Store = heimdall.NewRwTxStore(nil, tx)
 }
 
 type noopExecutionClient struct{}
@@ -242,5 +201,6 @@ func (ec noopExecutionClient) UpdateForkChoice(context.Context, *types.Header, *
 }
 
 func (ec noopExecutionClient) CurrentHeader(context.Context) (*types.Header, error) {
+	// TODO need to change sync.Run to use some other func for getting current persisted header instead of canonical/executed?
 	panic("should not be used")
 }
