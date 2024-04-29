@@ -24,8 +24,6 @@ func MiningStages(
 	createBlockCfg MiningCreateBlockCfg,
 	borHeimdallCfg BorHeimdallCfg,
 	execCfg MiningExecCfg,
-	hashStateCfg HashStateCfg,
-	trieCfg TrieCfg,
 	finish MiningFinishCfg,
 ) []*Stage {
 	return []*Stage{
