@@ -712,6 +712,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64, prune
 		require.NoError(t, err)
 
 		d.integrateMergedDirtyFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
+		d.reCalcVisibleFiles()
 		dc.Close()
 	}
 }
