@@ -9,7 +9,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	execution_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
+	executionproto "github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
 
 	"github.com/ledgerwatch/erigon/core/types"
@@ -22,15 +22,15 @@ type ExecutionClient interface {
 }
 
 type executionClient struct {
-	client execution_proto.ExecutionClient
+	client executionproto.ExecutionClient
 }
 
-func NewExecutionClient(client execution_proto.ExecutionClient) ExecutionClient {
+func NewExecutionClient(client executionproto.ExecutionClient) ExecutionClient {
 	return &executionClient{client}
 }
 
 func (e *executionClient) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
-	request := &execution_proto.InsertBlocksRequest{
+	request := &executionproto.InsertBlocksRequest{
 		Blocks: eth1_utils.ConvertBlocksToRPC(blocks),
 	}
 
@@ -42,9 +42,9 @@ func (e *executionClient) InsertBlocks(ctx context.Context, blocks []*types.Bloc
 
 		status := response.Result
 		switch status {
-		case execution_proto.ExecutionStatus_Success:
+		case executionproto.ExecutionStatus_Success:
 			return nil
-		case execution_proto.ExecutionStatus_Busy:
+		case executionproto.ExecutionStatus_Busy:
 			// retry after sleep
 			delayTimer := time.NewTimer(time.Second)
 			defer delayTimer.Stop()
@@ -68,7 +68,7 @@ func (e *executionClient) UpdateForkChoice(ctx context.Context, tip *types.Heade
 	tipHash := tip.Hash()
 	const timeout = 5 * time.Second
 
-	request := execution_proto.ForkChoice{
+	request := executionproto.ForkChoice{
 		HeadBlockHash:      gointerfaces.ConvertHashToH256(tipHash),
 		SafeBlockHash:      gointerfaces.ConvertHashToH256(tipHash),
 		FinalizedBlockHash: gointerfaces.ConvertHashToH256(finalizedHeader.Hash()),
