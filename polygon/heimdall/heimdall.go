@@ -13,7 +13,7 @@ import (
 
 // Heimdall is a wrapper of Heimdall HTTP API
 //
-//go:generate mockgen -destination=./heimdall_mock.go -package=heimdall . Heimdall
+//go:generate mockgen -typed=true -destination=./heimdall_mock.go -package=heimdall . Heimdall
 type Heimdall interface {
 	LastCheckpointId(ctx context.Context, store CheckpointStore) (CheckpointId, bool, error)
 	LastMilestoneId(ctx context.Context, store MilestoneStore) (MilestoneId, bool, error)

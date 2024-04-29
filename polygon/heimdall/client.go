@@ -37,7 +37,7 @@ const (
 	maxRetries         = 5
 )
 
-//go:generate mockgen -destination=./client_mock.go -package=heimdall . HeimdallClient
+//go:generate mockgen -typed=true -destination=./client_mock.go -package=heimdall . HeimdallClient
 type HeimdallClient interface {
 	FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*EventRecordWithTime, error)
 	FetchStateSyncEvent(ctx context.Context, id uint64) (*EventRecordWithTime, error)
@@ -80,7 +80,7 @@ type Request struct {
 	start  time.Time
 }
 
-//go:generate mockgen -destination=./http_client_mock.go -package=heimdall . HttpClient
+//go:generate mockgen -typed=true -destination=./http_client_mock.go -package=heimdall . HttpClient
 type HttpClient interface {
 	Do(req *http.Request) (*http.Response, error)
 	CloseIdleConnections()
