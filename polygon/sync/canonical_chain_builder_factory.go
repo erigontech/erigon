@@ -6,10 +6,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 )
+
+const InMemorySignatures = 4096 // Number of recent block signatures to keep in memory
 
 type CanonicalChainBuilderFactory func(root *types.Header, span *heimdall.Span) CanonicalChainBuilder
 
@@ -18,7 +19,7 @@ func NewCanonicalChainBuilderFactory(
 	borConfig *borcfg.BorConfig,
 	spansCache *SpansCache,
 ) CanonicalChainBuilderFactory {
-	signaturesCache, err := lru.NewARC[common.Hash, common.Address](stagedsync.InMemorySignatures)
+	signaturesCache, err := lru.NewARC[common.Hash, common.Address](InMemorySignatures)
 	if err != nil {
 		panic(err)
 	}

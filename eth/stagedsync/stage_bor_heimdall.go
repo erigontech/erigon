@@ -12,7 +12,10 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
+
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon/polygon/sync"
+
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
@@ -38,7 +41,6 @@ import (
 )
 
 const (
-	InMemorySignatures      = 4096 // Number of recent block signatures to keep in memory
 	inmemorySnapshots       = 128  // Number of recent vote snapshots to keep in memory
 	snapshotPersistInterval = 1024 // Number of blocks after which to persist the vote snapshot to the database
 )
@@ -167,7 +169,7 @@ func BorHeimdallForward(
 		return err
 	}
 
-	signatures, err := lru.NewARC[libcommon.Hash, libcommon.Address](InMemorySignatures)
+	signatures, err := lru.NewARC[libcommon.Hash, libcommon.Address](sync.InMemorySignatures)
 	if err != nil {
 		return err
 	}
