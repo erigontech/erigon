@@ -53,7 +53,7 @@ func NewHeimdall(client HeimdallClient, logger log.Logger, options ...Option) He
 		logger:    logger,
 		client:    client,
 		pollDelay: time.Second,
-		store:     NewNoopStore(),
+		store:     NewNoopStore(), // TODO change default store to one which manages its own MDBX
 	}
 
 	for _, option := range options {
