@@ -573,8 +573,14 @@ func (api *OtterscanAPIImpl) getBlockWithSenders(ctx context.Context, number rpc
 		return nil, nil, err
 	}
 
-	block, senders, err := api._blockReader.BlockWithSenders(ctx, tx, hash, n)
-	return block, senders, err
+	block, err := api.blockWithSenders(ctx, tx, hash, n)
+	if err != nil {
+		return nil, nil, err
+	}
+	if block == nil {
+		return nil, nil, nil
+	}
+	return block, block.Body().SendersFromTxs(), nil
 }
 
 func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rpc.BlockNumber, pageNumber uint8, pageSize uint8) (map[string]interface{}, error) {
