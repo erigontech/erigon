@@ -156,7 +156,6 @@ type rwTxStore struct {
 
 func (s rwTxStore) PutSpan(_ context.Context, span *Span) error {
 	spanBytes, err := json.Marshal(span)
-
 	if err != nil {
 		return err
 	}
