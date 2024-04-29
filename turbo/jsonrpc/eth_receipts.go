@@ -34,9 +34,15 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
 
+// getReceipts - checking in-mem cache, or else fallback to db, or else fallback to re-exec of block to re-gen receipts
 func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chain.Config, block *types.Block, senders []common.Address) (types.Receipts, error) {
-	if cached := rawdb.ReadReceipts(tx, block, senders); cached != nil {
-		return cached, nil
+	if receipts, ok := api.receiptsCache.Get(block.Hash()); ok {
+		return receipts, nil
+	}
+
+	if receipts := rawdb.ReadReceipts(tx, block, senders); receipts != nil {
+		api.receiptsCache.Add(block.Hash(), receipts)
+		return receipts, nil
 	}
 	engine := api.engine()
 
@@ -71,6 +77,7 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chai
 		receipts[i] = receipt
 	}
 
+	api.receiptsCache.Add(block.Hash(), receipts)
 	return receipts, nil
 }
 
