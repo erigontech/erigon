@@ -134,6 +134,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		blocksLRUSize      = 128 // ~32Mb
 		receiptsCacheLimit = 32
 	)
+	// if RPCDaemon deployed as independent process: increase cache sizes
 	if !singleNodeMode {
 		blocksLRUSize *= 5
 		receiptsCacheLimit *= 5
