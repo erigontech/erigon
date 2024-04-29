@@ -11,6 +11,7 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv/membatch"
+	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/net/context"
@@ -135,10 +136,9 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, ctx cont
 			var simStateReader state.StateReader
 			var simStateWriter state.StateWriter
 			
-				m := membatch.NewHashBatch(tx, ctx.Done(), cfg.tmpdir, logger)
-				defer m.Close()
-
-      if histV3 {
+	m := membatchwithdb.NewMemoryBatch(tx, cfg.tmpdir, logger)
+	defer m.Rollback()
+	      if histV3 {
 				var err error
 				domains, err = state2.NewSharedDomains(m, logger)
 				if err != nil {
