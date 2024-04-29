@@ -320,9 +320,9 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		// before env.Open() we don't know real pageSize. but will be implemented soon: https://gitflic.ru/project/erthink/libmdbx/issue/15
 		// but we want call all `SetOption` before env.Open(), because:
 		//   - after they will require rwtx-lock, which is not acceptable in ACCEDEE mode.
-		pageSize := opts.pageSize
-		if pageSize == 0 {
-			pageSize = kv.DefaultPageSize()
+		opts.pageSize, err = preOpenPageSize(opts)
+		if err != nil {
+			return nil, err
 		}
 
 		var dirtySpace uint64
@@ -341,7 +341,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 			}
 		}
 		//can't use real pagesize here - it will be known only after env.Open()
-		if err = env.SetOption(mdbx.OptTxnDpLimit, dirtySpace/pageSize); err != nil {
+		if err = env.SetOption(mdbx.OptTxnDpLimit, dirtySpace/opts.pageSize); err != nil {
 			return nil, err
 		}
 
@@ -457,6 +457,33 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	db.path = opts.path
 	addToPathDbMap(opts.path, db)
 	return db, nil
+}
+
+func preOpenPageSize(opts MdbxOpts) (uint64, error) {
+	// before env.Open() we don't know real pageSize. but will be implemented soon: https://gitflic.ru/project/erthink/libmdbx/issue/15
+	// but we want call all `SetOption` before env.Open(), because:
+	//   - after they will require rwtx-lock, which is not acceptable in ACCEDEE mode.
+	if !dir.FileExist(filepath.Join(opts.path, "mdbx.dat")) {
+		pageSize := opts.pageSize
+		if pageSize == 0 {
+			pageSize = kv.DefaultPageSize()
+		}
+		return pageSize, nil
+	}
+
+	env, err := mdbx.NewEnv()
+	if err != nil {
+		return 0, err
+	}
+	if err = env.Open(opts.path, mdbx.Accede|mdbx.Readonly, 0644); err != nil {
+		return 0, err
+	}
+	defer env.Close()
+	in, err := env.Info(nil)
+	if err != nil {
+		return 0, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label.String(), stack2.Trace().String())
+	}
+	return uint64(in.PageSize), nil
 }
 
 func (opts MdbxOpts) MustOpen() kv.RwDB {
