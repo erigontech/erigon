@@ -1437,6 +1437,9 @@ func (ac *AggregatorRoTx) integrateMergedDirtyFiles(outs SelectedStaticFilesV3, 
 	ac.a.dirtyFilesLock.Lock()
 	defer ac.a.dirtyFilesLock.Unlock()
 
+	ac.a.dirtyFilesLock.Lock()
+	defer ac.a.dirtyFilesLock.Unlock()
+
 	for id, d := range ac.a.d {
 		d.integrateMergedDirtyFiles(outs.d[id], outs.dIdx[id], outs.dHist[id], in.d[id], in.dIdx[id], in.dHist[id])
 	}
@@ -1445,7 +1448,6 @@ func (ac *AggregatorRoTx) integrateMergedDirtyFiles(outs SelectedStaticFilesV3, 
 	ac.a.logTopics.integrateMergedDirtyFiles(outs.logTopics, in.logTopics)
 	ac.a.tracesFrom.integrateMergedDirtyFiles(outs.tracesFrom, in.tracesFrom)
 	ac.a.tracesTo.integrateMergedDirtyFiles(outs.tracesTo, in.tracesTo)
-
 	return frozen
 }
 func (ac *AggregatorRoTx) cleanAfterMerge(in MergedFilesV3) {

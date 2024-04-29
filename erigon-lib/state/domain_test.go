@@ -391,7 +391,6 @@ func TestDomain_AfterPrune(t *testing.T) {
 
 	d.integrateDirtyFiles(sf, 0, 16)
 	d.reCalcVisibleFiles()
-
 	var v []byte
 	dc = d.BeginFilesRo()
 	defer dc.Close()
