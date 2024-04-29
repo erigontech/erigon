@@ -34,11 +34,22 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
 
-func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chain.Config, block *types.Block, senders []common.Address) (types.Receipts, error) {
-	if cached := rawdb.ReadReceipts(tx, block, senders); cached != nil {
-		return cached, nil
+// getReceipts - checking in-mem cache, or else fallback to db, or else fallback to re-exec of block to re-gen receipts
+func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, block *types.Block, senders []common.Address) (types.Receipts, error) {
+	if receipts, ok := api.receiptsCache.Get(block.Hash()); ok {
+		return receipts, nil
 	}
+
+	if receipts := rawdb.ReadReceipts(tx, block, senders); receipts != nil {
+		api.receiptsCache.Add(block.Hash(), receipts)
+		return receipts, nil
+	}
+
 	engine := api.engine()
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 
 	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, 0, api.historyV3(tx))
 	if err != nil {
@@ -71,6 +82,7 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chai
 		receipts[i] = receipt
 	}
 
+	api.receiptsCache.Add(block.Hash(), receipts)
 	return receipts, nil
 }
 
@@ -86,11 +98,10 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	defer tx.Rollback()
 
 	if crit.BlockHash != nil {
-		block, err := api._blockReader.BlockByHash(ctx, tx, *crit.BlockHash)
+		block, err := api.blockByHashWithSenders(ctx, tx, *crit.BlockHash)
 		if err != nil {
 			return nil, err
 		}
-
 		if block == nil {
 			return nil, fmt.Errorf("block not found: %x", *crit.BlockHash)
 		}
@@ -648,7 +659,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 			borTx = types.NewBorTransaction()
 		}
 	}
-	receipts, err := api.getReceipts(ctx, tx, cc, block, block.Body().SendersFromTxs())
+	receipts, err := api.getReceipts(ctx, tx, block, block.Body().SendersFromTxs())
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
@@ -694,7 +705,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	if err != nil {
 		return nil, err
 	}
-	receipts, err := api.getReceipts(ctx, tx, chainConfig, block, block.Body().SendersFromTxs())
+	receipts, err := api.getReceipts(ctx, tx, block, block.Body().SendersFromTxs())
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}

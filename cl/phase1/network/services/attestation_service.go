@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/Giulio2002/bls"
@@ -35,10 +36,12 @@ type attestationService struct {
 	beaconCfg          *clparams.BeaconChainConfig
 	netCfg             *clparams.NetworkConfig
 	// validatorAttestationSeen maps from epoch to validator index. This is used to ignore duplicate validator attestations in the same epoch.
-	validatorAttestationSeen *lru.CacheWithTTL[uint64, uint64] // validator index -> epoch
+	validatorAttestationSeen       *lru.CacheWithTTL[uint64, uint64] // validator index -> epoch
+	attestationsToBeLaterProcessed sync.Map
 }
 
 func NewAttestationService(
+	ctx context.Context,
 	forkchoiceStore forkchoice.ForkChoiceStorage,
 	committeeSubscribe committee_subscription.CommitteeSubscribe,
 	ethClock eth_clock.EthereumClock,
@@ -47,7 +50,7 @@ func NewAttestationService(
 	netCfg *clparams.NetworkConfig,
 ) AttestationService {
 	epochDuration := time.Duration(beaconCfg.SlotsPerEpoch*beaconCfg.SecondsPerSlot) * time.Second
-	return &attestationService{
+	a := &attestationService{
 		forkchoiceStore:          forkchoiceStore,
 		committeeSubscribe:       committeeSubscribe,
 		ethClock:                 ethClock,
@@ -56,6 +59,8 @@ func NewAttestationService(
 		netCfg:                   netCfg,
 		validatorAttestationSeen: lru.NewWithTTL[uint64, uint64]("validator_attestation_seen", validatorAttestationCacheSize, epochDuration),
 	}
+	go a.loop(ctx)
+	return a
 }
 
 func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64, att *solid.Attestation) error {
@@ -161,6 +166,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	// [IGNORE] The block being voted for (attestation.data.beacon_block_root) has been seen (via both gossip and non-gossip sources)
 	// (a client MAY queue attestations for processing once block is retrieved).
 	if _, ok := s.forkchoiceStore.GetHeader(root); !ok {
+		s.scheduleAttestationForLaterProcessing(att)
 		return ErrIgnore
 	}
 
@@ -182,4 +188,49 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return ErrIgnore
 	}
 	return err
+}
+
+type attestationJob struct {
+	att          *solid.Attestation
+	creationTime time.Time
+	subnet       uint64
+}
+
+func (a *attestationService) scheduleAttestationForLaterProcessing(att *solid.Attestation) {
+	key, err := att.HashSSZ()
+	if err != nil {
+		return
+	}
+	a.attestationsToBeLaterProcessed.Store(key, &attestationJob{
+		att:          att,
+		creationTime: time.Now(),
+	})
+}
+
+func (a *attestationService) loop(ctx context.Context) {
+	ticker := time.NewTicker(singleAttestationIntervalTick)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		a.attestationsToBeLaterProcessed.Range(func(key, value any) bool {
+			k := key.([32]byte)
+			v := value.(*attestationJob)
+			if time.Now().After(v.creationTime.Add(singleAttestationJobExpiry)) {
+				a.attestationsToBeLaterProcessed.Delete(k)
+				return true
+			}
+
+			root := v.att.AttestantionData().BeaconBlockRoot()
+			if _, ok := a.forkchoiceStore.GetHeader(root); !ok {
+				return true
+			}
+			a.ProcessMessage(ctx, &v.subnet, v.att)
+			return true
+		})
+	}
 }
