@@ -188,7 +188,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	sf, err := ii.buildFiles(ctx, 0, bs, background.NewProgressSet())
 	require.NoError(t, err)
 
-	ii.integrateFiles(sf, 0, 16)
+	ii.integrateDirtyFiles(sf, 0, 16)
 
 	ic.Close()
 	err = db.Update(ctx, func(tx kv.RwTx) error {
@@ -373,7 +373,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			require.NoError(tb, err)
 			sf, err := ii.buildFiles(ctx, step, bs, background.NewProgressSet())
 			require.NoError(tb, err)
-			ii.integrateFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
+			ii.integrateDirtyFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
 			ic := ii.BeginFilesRo()
 			defer ic.Close()
 			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, false, nil)
@@ -394,7 +394,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 					outs, _ := ic.staticFilesInRange(startTxNum, endTxNum)
 					in, err := ic.mergeFiles(ctx, outs, startTxNum, endTxNum, background.NewProgressSet())
 					require.NoError(tb, err)
-					ii.integrateMergedFiles(outs, in)
+					ii.integrateMergedDirtyFiles(outs, in)
 					require.NoError(tb, err)
 					return false
 				}(); stop {
@@ -424,7 +424,7 @@ func TestInvIndexRanges(t *testing.T) {
 			require.NoError(t, err)
 			sf, err := ii.buildFiles(ctx, step, bs, background.NewProgressSet())
 			require.NoError(t, err)
-			ii.integrateFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
+			ii.integrateDirtyFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
 			ic := ii.BeginFilesRo()
 			defer ic.Close()
 			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, false, nil)

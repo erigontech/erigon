@@ -389,7 +389,7 @@ func TestDomain_AfterPrune(t *testing.T) {
 	sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
 	require.NoError(t, err)
 
-	d.integrateFiles(sf, 0, 16)
+	d.integrateDirtyFiles(sf, 0, 16)
 	var v []byte
 	dc = d.BeginFilesRo()
 	defer dc.Close()
@@ -576,7 +576,7 @@ func TestIterationMultistep(t *testing.T) {
 			require.NoError(t, err)
 			sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
 			require.NoError(t, err)
-			d.integrateFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
+			d.integrateDirtyFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
 
 			dc := d.BeginFilesRo()
 			_, err = dc.Prune(ctx, tx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64, false, logEvery)
@@ -634,7 +634,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 		require.NoError(t, err)
 		sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
 		require.NoError(t, err)
-		d.integrateFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
+		d.integrateDirtyFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
 
 		dc := d.BeginFilesRo()
 		_, err = dc.Prune(ctx, tx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64, false, logEvery)
@@ -659,7 +659,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 			if valuesIn != nil && valuesIn.decompressor != nil {
 				fmt.Printf("merge: %s\n", valuesIn.decompressor.FileName())
 			}
-			d.integrateMergedFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
+			d.integrateMergedDirtyFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
 			return false
 		}(); stop {
 			break
@@ -683,7 +683,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64, prune
 
 	sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
 	require.NoError(t, err)
-	d.integrateFiles(sf, txFrom, txTo)
+	d.integrateDirtyFiles(sf, txFrom, txTo)
 
 	if prune {
 		dc := d.BeginFilesRo()
@@ -706,7 +706,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64, prune
 		valuesIn, indexIn, historyIn, err := dc.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
 		require.NoError(t, err)
 
-		d.integrateMergedFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
+		d.integrateMergedDirtyFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
 		dc.Close()
 	}
 }
@@ -1292,7 +1292,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		sf, err := d.buildFiles(ctx, step, collation, ps)
 		require.NoError(t, err)
 
-		d.integrateFiles(sf, txFrom, txTo)
+		d.integrateDirtyFiles(sf, txFrom, txTo)
 		collation.Close()
 
 		logEvery := time.NewTicker(time.Second * 30)
@@ -1306,7 +1306,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		dv, di, dh, err := dc.mergeFiles(ctx, vl, il, hl, ranges, nil, ps)
 		require.NoError(t, err)
 
-		d.integrateMergedFiles(vl, il, hl, dv, di, dh)
+		d.integrateMergedDirtyFiles(vl, il, hl, dv, di, dh)
 
 		logEvery.Stop()
 
@@ -1908,7 +1908,7 @@ func TestDomain_PruneProgress(t *testing.T) {
 
 		sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
 		require.NoError(t, err)
-		d.integrateFiles(sf, txFrom, txTo)
+		d.integrateDirtyFiles(sf, txFrom, txTo)
 	}
 	require.NoError(t, rwTx.Commit())
 
@@ -2390,7 +2390,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 		require.NoError(t, err)
 		sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
 		require.NoError(t, err)
-		d.integrateFiles(sf, pruneFrom, pruneTo)
+		d.integrateDirtyFiles(sf, pruneFrom, pruneTo)
 		rotx.Rollback()
 
 		dc = d.BeginFilesRo()
