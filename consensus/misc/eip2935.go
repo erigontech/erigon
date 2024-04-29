@@ -14,25 +14,27 @@ import (
 )
 
 func StoreBlockHashesEip2935(header *types.Header, state *state.IntraBlockState, config *chain.Config, headerReader consensus.ChainHeaderReader) {
-	parent := headerReader.GetHeaderByHash(header.ParentHash)
-	if parent == nil && header.Number.Cmp(big.NewInt(0)) == 0 { // Only Genesis block shouldn't have a parent
+	if header.Number.Cmp(big.NewInt(0)) == 0 { // Activation of fork at Genesis
 		return
 	}
-	_setStorage(parent.Number, parent.Hash(), state)
+	parent := headerReader.GetHeaderByHash(header.ParentHash)
+	_setStorage(parent.Number, header.ParentHash, state)
 	// If this is the fork block, add the parent's direct `HISTORY_SERVE_WINDOW - 1` ancestors as well
 	if parent.Time < config.OsakaTime.Uint64() {
-		for i := params.BlockHashServeWindow - 1; i > 0; i-- {
+		p := parent.Number.Uint64()
+		window := params.BlockHashHistoryServeWindow - 1
+		if p < window {
+			window = p
+		}
+		for i := window - 1; i >= 0; i-- {
+			_setStorage(big.NewInt(0).Sub(parent.Number, big.NewInt(1)), parent.ParentHash, state)
 			parent = headerReader.GetHeaderByHash(parent.ParentHash)
-			_setStorage(parent.Number, parent.Hash(), state)
-			if parent.Number.Cmp(big.NewInt(0)) == 0 { // Genesis
-				break
-			}
 		}
 	}
 }
 
 func _setStorage(num *big.Int, hash libcommon.Hash, state *state.IntraBlockState) {
-	storageSlot := libcommon.BigToHash(big.NewInt(0).Mod(num, big.NewInt(8192)))
+	storageSlot := libcommon.BigToHash(big.NewInt(0).Mod(num, big.NewInt(int64(params.BlockHashHistoryServeWindow))))
 	parentHashInt := uint256.MustFromHex(hash.String())
 	state.SetState(params.HistoryStorageAddress, &storageSlot, *parentHashInt)
 }
