@@ -28,6 +28,8 @@ type EventRecordWithTime struct {
 	Time time.Time `json:"record_time" yaml:"record_time"`
 }
 
+var ErrEventRecordNotFound = fmt.Errorf("event record not found")
+
 // String returns the string representatin of a state record
 func (e *EventRecordWithTime) String() string {
 	return fmt.Sprintf(
@@ -77,4 +79,9 @@ func UnpackEventRecordWithTime(stateContract abi.ABI, encodedEvent rlp.RawValue)
 type StateSyncEventsResponse struct {
 	Height string                 `json:"height"`
 	Result []*EventRecordWithTime `json:"result"`
+}
+
+type StateSyncEventResponse struct {
+	Height string              `json:"height"`
+	Result EventRecordWithTime `json:"result"`
 }

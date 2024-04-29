@@ -675,6 +675,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 	}
 
 	sctx := sd.aggCtx.d[kv.StorageDomain]
+
 	btCursors := make([]*Cursor, len(sctx.files))
 	defer func() {
 		for _, c := range btCursors {

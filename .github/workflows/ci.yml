@@ -34,7 +34,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: actions/setup-go@v4
@@ -96,7 +96,7 @@ jobs:
         uses: al-cheb/configure-pagefile-action@v1.4
         with:
           minimum-size: 8GB
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: actions/setup-go@v4
         with:
           go-version: '1.21'
@@ -144,7 +144,7 @@ jobs:
 #      ubuntu-22.04
 #    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
 #    steps:
-#      - uses: actions/checkout@v3
+#      - uses: actions/checkout@v4
 #
 #      - name: run automated testing
 #        run: BUILD_ERIGON=1 ./tests/automated-testing/run.sh

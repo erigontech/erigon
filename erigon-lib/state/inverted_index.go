@@ -1062,7 +1062,7 @@ type FrozenInvertedIdxIter struct {
 	limit                int
 	orderAscend          order.By
 
-	efIt       iter.Unary[uint64]
+	efIt       iter.Uno[uint64]
 	indexTable string
 	stack      []ctxItem
 
@@ -1637,7 +1637,7 @@ func (ii *InvertedIndex) buildMapIdx(ctx context.Context, fromStep, toStep uint6
 	return buildIndex(ctx, data, ii.compression, idxPath, false, cfg, ps, ii.logger, ii.noFsync)
 }
 
-func (ii *InvertedIndex) integrateFiles(sf InvertedFiles, txNumFrom, txNumTo uint64) {
+func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumTo uint64) {
 	defer ii.reCalcVisibleFiles()
 
 	if asserts && ii.withExistenceIndex && sf.existence == nil {

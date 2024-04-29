@@ -837,10 +837,9 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 		filePath: indexPath,
 		size:     s.Size(),
 		modTime:  s.ModTime(),
-	}
-	idx.cursorPool = &sync.Pool{
-		New: func() interface{} {
-			return &Cursor{btt: idx, key: make([]byte, 0, 64), value: make([]byte, 0, 64)}
+    idx.cursorPool = &sync.Pool{
+		  New: func() interface{} {
+			  return &Cursor{btt: idx, key: make([]byte, 0, 64), value: make([]byte, 0, 64)}
 		},
 	}
 

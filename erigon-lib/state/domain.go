@@ -450,10 +450,7 @@ func (w *domainBufferedWriter) SetTxNum(v uint64) {
 }
 
 func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *domainBufferedWriter {
-	discardHistory := discard
-	if dbg.DiscardCommitmentHistory && dt.d.filenameBase == "commitment" {
-		discardHistory = true
-	}
+	discardHistory := discard || dt.d.historyDisabled
 
 	w := &domainBufferedWriter{
 		discard:   discard,
@@ -1176,7 +1173,7 @@ func buildIndex(ctx context.Context, d *seg.Decompressor, compressed FileCompres
 	return nil
 }
 
-func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
+func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
 	defer d.reCalcVisibleFiles()
 
 	d.History.integrateFiles(sf.HistoryFiles, txNumFrom, txNumTo)

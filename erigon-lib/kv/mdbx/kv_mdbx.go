@@ -87,7 +87,7 @@ func NewMDBX(log log.Logger) MdbxOpts {
 
 		mapSize:         DefaultMapSize,
 		growthStep:      DefaultGrowthStep,
-		mergeThreshold:  2 * 8192,
+		mergeThreshold:  3 * 8192,
 		shrinkThreshold: -1, // default
 		label:           kv.InMem,
 	}
@@ -323,11 +323,10 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		// before env.Open() we don't know real pageSize. but will be implemented soon: https://gitflic.ru/project/erthink/libmdbx/issue/15
 		// but we want call all `SetOption` before env.Open(), because:
 		//   - after they will require rwtx-lock, which is not acceptable in ACCEDEE mode.
-		pageSize := opts.pageSize
-		if pageSize == 0 {
-			pageSize = kv.DefaultPageSize()
+		opts.pageSize, err = preOpenPageSize(opts)
+		if err != nil {
+			return nil, err
 		}
-
 		var dirtySpace uint64
 		if opts.dirtySpace > 0 {
 			dirtySpace = opts.dirtySpace
@@ -344,7 +343,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 			}
 		}
 		//can't use real pagesize here - it will be known only after env.Open()
-		if err = env.SetOption(mdbx.OptTxnDpLimit, dirtySpace/pageSize); err != nil {
+		if err = env.SetOption(mdbx.OptTxnDpLimit, dirtySpace/opts.pageSize); err != nil {
 			return nil, err
 		}
 
@@ -459,7 +458,40 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	}
 	db.path = opts.path
 	addToPathDbMap(opts.path, db)
+	if dbg.MdbxLockInRam() && opts.label == kv.ChainDB {
+		log.Info("[dbg] locking db in mem", "lable", opts.label)
+		if err := db.View(ctx, func(tx kv.Tx) error { return tx.(*MdbxTx).LockDBInRam() }); err != nil {
+			return nil, err
+		}
+	}
 	return db, nil
+}
+
+func preOpenPageSize(opts MdbxOpts) (uint64, error) {
+	// before env.Open() we don't know real pageSize. but will be implemented soon: https://gitflic.ru/project/erthink/libmdbx/issue/15
+	// but we want call all `SetOption` before env.Open(), because:
+	//   - after they will require rwtx-lock, which is not acceptable in ACCEDEE mode.
+	if !dir.FileExist(filepath.Join(opts.path, "mdbx.dat")) {
+		pageSize := opts.pageSize
+		if pageSize == 0 {
+			pageSize = kv.DefaultPageSize()
+		}
+		return pageSize, nil
+	}
+
+	env, err := mdbx.NewEnv()
+	if err != nil {
+		return 0, err
+	}
+	if err = env.Open(opts.path, mdbx.Accede|mdbx.Readonly, 0644); err != nil {
+		return 0, err
+	}
+	defer env.Close()
+	in, err := env.Info(nil)
+	if err != nil {
+		return 0, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label.String(), stack2.Trace().String())
+	}
+	return uint64(in.PageSize), nil
 }
 
 func (opts MdbxOpts) MustOpen() kv.RwDB {
@@ -1980,7 +2012,6 @@ type cursor2iter struct {
 	tx *MdbxTx
 
 	fromPrefix, toPrefix, nextK, nextV []byte
-	err                                error
 	orderAscend                        order.By
 	limit                              int64
 	ctx                                context.Context
@@ -1993,79 +2024,112 @@ func (tx *MdbxTx) rangeOrderLimit(table string, fromPrefix, toPrefix []byte, ord
 		tx.streams = map[int]kv.Closer{}
 	}
 	tx.streams[s.id] = s
-	return s.init(table, tx)
+	if err := s.init(table, tx); err != nil {
+		s.Close()
+		return nil, err
+	}
+	return s, nil
 }
-func (s *cursor2iter) init(table string, tx kv.Tx) (*cursor2iter, error) {
+func (s *cursor2iter) init(table string, tx kv.Tx) error {
 	if s.orderAscend && s.fromPrefix != nil && s.toPrefix != nil && bytes.Compare(s.fromPrefix, s.toPrefix) >= 0 {
-		return s, fmt.Errorf("tx.Dual: %x must be lexicographicaly before %x", s.fromPrefix, s.toPrefix)
+		return fmt.Errorf("tx.Dual: %x must be lexicographicaly before %x", s.fromPrefix, s.toPrefix)
 	}
 	if !s.orderAscend && s.fromPrefix != nil && s.toPrefix != nil && bytes.Compare(s.fromPrefix, s.toPrefix) <= 0 {
-		return s, fmt.Errorf("tx.Dual: %x must be lexicographicaly before %x", s.toPrefix, s.fromPrefix)
+		return fmt.Errorf("tx.Dual: %x must be lexicographicaly before %x", s.toPrefix, s.fromPrefix)
 	}
 	c, err := tx.Cursor(table)
 	if err != nil {
-		return s, err
+		return err
 	}
 	s.c = c
 
 	if s.fromPrefix == nil { // no initial position
 		if s.orderAscend {
-			s.nextK, s.nextV, s.err = s.c.First()
+			s.nextK, s.nextV, err = s.c.First()
+			if err != nil {
+				return err
+			}
 		} else {
-			s.nextK, s.nextV, s.err = s.c.Last()
+			s.nextK, s.nextV, err = s.c.Last()
+			if err != nil {
+				return err
+			}
+
 		}
-		return s, s.err
+		return nil
 	}
 
 	if s.orderAscend {
-		s.nextK, s.nextV, s.err = s.c.Seek(s.fromPrefix)
-		return s, s.err
-	} else {
-		// to find LAST key with given prefix:
-		nextSubtree, ok := kv.NextSubtree(s.fromPrefix)
-		if ok {
-			s.nextK, s.nextV, s.err = s.c.SeekExact(nextSubtree)
-			s.nextK, s.nextV, s.err = s.c.Prev()
-			if s.nextK != nil { // go to last value of this key
-				if casted, ok := s.c.(kv.CursorDupSort); ok {
-					s.nextV, s.err = casted.LastDup()
-				}
-			}
-		} else {
-			s.nextK, s.nextV, s.err = s.c.Last()
-			if s.nextK != nil { // go to last value of this key
-				if casted, ok := s.c.(kv.CursorDupSort); ok {
-					s.nextV, s.err = casted.LastDup()
+		s.nextK, s.nextV, err = s.c.Seek(s.fromPrefix)
+		if err != nil {
+			return err
+		}
+		return err
+	}
+
+	// to find LAST key with given prefix:
+	nextSubtree, ok := kv.NextSubtree(s.fromPrefix)
+	if ok {
+		s.nextK, s.nextV, err = s.c.SeekExact(nextSubtree)
+		if err != nil {
+			return err
+		}
+		s.nextK, s.nextV, err = s.c.Prev()
+		if err != nil {
+			return err
+		}
+		if s.nextK != nil { // go to last value of this key
+			if casted, ok := s.c.(kv.CursorDupSort); ok {
+				s.nextV, err = casted.LastDup()
+				if err != nil {
+					return err
 				}
 			}
 		}
-		//// seek exactly to given key or previous one
-		//s.nextK, s.nextV, s.err = s.c.SeekExact(s.fromPrefix)
-		//if s.err != nil {
-		//	return s, s.err
-		//}
-		//if s.nextK != nil { // go to last value of this key
-		//	if casted, ok := s.c.(kv.CursorDupSort); ok {
-		//		s.nextV, s.err = casted.LastDup()
-		//	}
-		//} else { // key not found, go to prev one
-		//	s.nextK, s.nextV, s.err = s.c.Prev()
-		//}
-		return s, s.err
+	} else {
+		s.nextK, s.nextV, err = s.c.Last()
+		if err != nil {
+			return err
+		}
+		if s.nextK != nil { // go to last value of this key
+			if casted, ok := s.c.(kv.CursorDupSort); ok {
+				s.nextV, err = casted.LastDup()
+				if err != nil {
+					return err
+				}
+			}
+		}
 	}
+	return nil
+}
+
+func (s *cursor2iter) advance() (err error) {
+	if s.orderAscend {
+		s.nextK, s.nextV, err = s.c.Next()
+		if err != nil {
+			return err
+		}
+	} else {
+		s.nextK, s.nextV, err = s.c.Prev()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *cursor2iter) Close() {
+	if s == nil {
+		return
+	}
 	if s.c != nil {
 		s.c.Close()
 		delete(s.tx.streams, s.id)
 		s.c = nil
 	}
 }
+
 func (s *cursor2iter) HasNext() bool {
-	if s.err != nil { // always true, then .Next() call will return this error
-		return true
-	}
 	if s.limit == 0 { // limit reached
 		return false
 	}
@@ -2081,6 +2145,7 @@ func (s *cursor2iter) HasNext() bool {
 	cmp := bytes.Compare(s.nextK, s.toPrefix)
 	return (bool(s.orderAscend) && cmp < 0) || (!bool(s.orderAscend) && cmp > 0)
 }
+
 func (s *cursor2iter) Next() (k, v []byte, err error) {
 	select {
 	case <-s.ctx.Done():
@@ -2088,13 +2153,11 @@ func (s *cursor2iter) Next() (k, v []byte, err error) {
 	default:
 	}
 	s.limit--
-	k, v, err = s.nextK, s.nextV, s.err
-	if s.orderAscend {
-		s.nextK, s.nextV, s.err = s.c.Next()
-	} else {
-		s.nextK, s.nextV, s.err = s.c.Prev()
+	k, v = s.nextK, s.nextV
+	if err = s.advance(); err != nil {
+		return nil, nil, err
 	}
-	return k, v, err
+	return k, v, nil
 }
 
 func (tx *MdbxTx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (iter.KV, error) {
@@ -2104,7 +2167,11 @@ func (tx *MdbxTx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []
 		tx.streams = map[int]kv.Closer{}
 	}
 	tx.streams[s.id] = s
-	return s.init(table, tx)
+	if err := s.init(table, tx); err != nil {
+		s.Close()
+		return nil, err
+	}
+	return s, nil
 }
 
 type cursorDup2iter struct {
@@ -2114,58 +2181,93 @@ type cursorDup2iter struct {
 
 	key                         []byte
 	fromPrefix, toPrefix, nextV []byte
-	err                         error
 	orderAscend                 bool
 	limit                       int64
 	ctx                         context.Context
 }
 
-func (s *cursorDup2iter) init(table string, tx kv.Tx) (*cursorDup2iter, error) {
+func (s *cursorDup2iter) init(table string, tx kv.Tx) error {
 	if s.orderAscend && s.fromPrefix != nil && s.toPrefix != nil && bytes.Compare(s.fromPrefix, s.toPrefix) >= 0 {
-		return s, fmt.Errorf("tx.Dual: %x must be lexicographicaly before %x", s.fromPrefix, s.toPrefix)
+		return fmt.Errorf("tx.Dual: %x must be lexicographicaly before %x", s.fromPrefix, s.toPrefix)
 	}
 	if !s.orderAscend && s.fromPrefix != nil && s.toPrefix != nil && bytes.Compare(s.fromPrefix, s.toPrefix) <= 0 {
-		return s, fmt.Errorf("tx.Dual: %x must be lexicographicaly before %x", s.toPrefix, s.fromPrefix)
+		return fmt.Errorf("tx.Dual: %x must be lexicographicaly before %x", s.toPrefix, s.fromPrefix)
 	}
 	c, err := tx.CursorDupSort(table)
 	if err != nil {
-		return s, err
+		return err
 	}
 	s.c = c
 	k, _, err := c.SeekExact(s.key)
 	if err != nil {
-		return s, err
+		return err
 	}
 	if k == nil {
-		return s, nil
+		return nil
 	}
 
 	if s.fromPrefix == nil { // no initial position
 		if s.orderAscend {
-			s.nextV, s.err = s.c.FirstDup()
+			s.nextV, err = s.c.FirstDup()
+			if err != nil {
+				return err
+			}
 		} else {
-			s.nextV, s.err = s.c.LastDup()
+			s.nextV, err = s.c.LastDup()
+			if err != nil {
+				return err
+			}
 		}
-		return s, s.err
+		return nil
 	}
 
 	if s.orderAscend {
-		s.nextV, s.err = s.c.SeekBothRange(s.key, s.fromPrefix)
-		return s, s.err
-	} else {
-		// to find LAST key with given prefix:
-		nextSubtree, ok := kv.NextSubtree(s.fromPrefix)
-		if ok {
-			_, s.nextV, s.err = s.c.SeekBothExact(s.key, nextSubtree)
-			_, s.nextV, s.err = s.c.PrevDup()
-		} else {
-			s.nextV, s.err = s.c.LastDup()
+		s.nextV, err = s.c.SeekBothRange(s.key, s.fromPrefix)
+		if err != nil {
+			return err
 		}
-		return s, s.err
+		return nil
 	}
+
+	// to find LAST key with given prefix:
+	nextSubtree, ok := kv.NextSubtree(s.fromPrefix)
+	if ok {
+		_, s.nextV, err = s.c.SeekBothExact(s.key, nextSubtree)
+		if err != nil {
+			return err
+		}
+		_, s.nextV, err = s.c.PrevDup()
+		if err != nil {
+			return err
+		}
+	} else {
+		s.nextV, err = s.c.LastDup()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *cursorDup2iter) advance() (err error) {
+	if s.orderAscend {
+		_, s.nextV, err = s.c.NextDup()
+		if err != nil {
+			return err
+		}
+	} else {
+		_, s.nextV, err = s.c.PrevDup()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *cursorDup2iter) Close() {
+	if s == nil {
+		return
+	}
 	if s.c != nil {
 		s.c.Close()
 		delete(s.tx.streams, s.id)
@@ -2173,9 +2275,6 @@ func (s *cursorDup2iter) Close() {
 	}
 }
 func (s *cursorDup2iter) HasNext() bool {
-	if s.err != nil { // always true, then .Next() call will return this error
-		return true
-	}
 	if s.limit == 0 { // limit reached
 		return false
 	}
@@ -2198,13 +2297,11 @@ func (s *cursorDup2iter) Next() (k, v []byte, err error) {
 	default:
 	}
 	s.limit--
-	v, err = s.nextV, s.err
-	if s.orderAscend {
-		_, s.nextV, s.err = s.c.NextDup()
-	} else {
-		_, s.nextV, s.err = s.c.PrevDup()
+	v = s.nextV
+	if err = s.advance(); err != nil {
+		return nil, nil, err
 	}
-	return s.key, v, err
+	return s.key, v, nil
 }
 
 func (tx *MdbxTx) ForAmount(bucket string, fromPrefix []byte, amount uint32, walker func(k, v []byte) error) error {

@@ -76,7 +76,7 @@ func (ii *InvertedIndex) endIndexedTxNumMinimax(needFrozen bool) uint64 {
 }
 
 func (h *History) endTxNumMinimax() uint64 {
-	if h.dontProduceFiles {
+	if h.dontProduceHistoryFiles {
 		return math.MaxUint64
 	}
 	minimax := h.InvertedIndex.endTxNumMinimax()
@@ -90,7 +90,7 @@ func (h *History) endTxNumMinimax() uint64 {
 }
 func (h *History) endIndexedTxNumMinimax(needFrozen bool) uint64 {
 	var max uint64
-	if h.dontProduceFiles && h.dirtyFiles.Len() == 0 {
+	if h.dontProduceHistoryFiles && h.dirtyFiles.Len() == 0 {
 		max = math.MaxUint64
 	}
 	h.dirtyFiles.Walk(func(items []*filesItem) bool {
@@ -1028,7 +1028,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 	return
 }
 
-func (d *Domain) integrateMergedFiles(valuesOuts, indexOuts, historyOuts []*filesItem, valuesIn, indexIn, historyIn *filesItem) {
+func (d *Domain) integrateMergedDirtyFiles(valuesOuts, indexOuts, historyOuts []*filesItem, valuesIn, indexIn, historyIn *filesItem) {
 	d.History.integrateMergedFiles(indexOuts, historyOuts, indexIn, historyIn)
 	if valuesIn != nil {
 		d.dirtyFiles.Set(valuesIn)
@@ -1064,7 +1064,7 @@ func (d *Domain) integrateMergedFiles(valuesOuts, indexOuts, historyOuts []*file
 	d.reCalcVisibleFiles()
 }
 
-func (ii *InvertedIndex) integrateMergedFiles(outs []*filesItem, in *filesItem) {
+func (ii *InvertedIndex) integrateMergedDirtyFiles(outs []*filesItem, in *filesItem) {
 	if in != nil {
 		ii.dirtyFiles.Set(in)
 
@@ -1097,7 +1097,7 @@ func (ii *InvertedIndex) integrateMergedFiles(outs []*filesItem, in *filesItem) 
 }
 
 func (h *History) integrateMergedFiles(indexOuts, historyOuts []*filesItem, indexIn, historyIn *filesItem) {
-	h.InvertedIndex.integrateMergedFiles(indexOuts, indexIn)
+	h.InvertedIndex.integrateMergedDirtyFiles(indexOuts, indexIn)
 	//TODO: handle collision
 	if historyIn != nil {
 		h.dirtyFiles.Set(historyIn)
