@@ -388,9 +388,9 @@ func filterBadTransactions(transactions []types.Transaction, config chain.Config
 		account.Balance.Sub(&account.Balance, want)
 		accountBuffer := make([]byte, account.EncodingLengthForStorage())
 		account.EncodeForStorage(accountBuffer)
-		if err := simStateWriter.UpdateAccountData(sender, account, nil); err != nil {
+		/*if err := simStateWriter.UpdateAccountData(sender, account, nil); err != nil {
 			return nil, err
-		}
+		}*/
 		// Mark transaction as valid
 		filtered = append(filtered, transaction)
 		transactions = transactions[1:]
