@@ -29,6 +29,8 @@ var (
 	// errEndBlock is returned when we're unable to fetch a block locally.
 	errEndBlock = errors.New("failed to get end block")
 
+	errEndBlockNotFound = errors.New("end block not found")
+
 	//Metrics for collecting the rewindLength
 	rewindLengthMeter = metrics.GetOrCreateGauge("chain_autorewind_length")
 )
@@ -89,9 +91,8 @@ func borVerify(ctx context.Context, config *config, start uint64, end uint64, ha
 			return hash, errEndBlock
 		}
 		if block == nil {
-			err := fmt.Errorf("[bor] block not found: %d", end)
-			log.Debug("[bor] Failed to get end block hash while whitelisting milestone", "number", end, "err", err)
-			return hash, err
+			log.Debug("[bor] Failed to get end block hash while whitelisting milestone", "number", end, "err", errEndBlockNotFound)
+			return hash, errEndBlockNotFound
 		}
 
 		localHash = fmt.Sprintf("%v", block.Hash())[2:]
