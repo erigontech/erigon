@@ -31,7 +31,6 @@ import (
 	"slices"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
@@ -72,7 +71,7 @@ type InvertedIndex struct {
 
 	// _visibleFiles - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
-	_visibleFiles atomic.Pointer[[]ctxItem]
+	_visibleFiles []ctxItem
 
 	indexKeysTable  string // txnNum_u64 -> key (k+auto_increment)
 	indexTable      string // k -> txnNum_u64 , Needs to be table with DupSort
@@ -122,7 +121,7 @@ func NewInvertedIndex(cfg iiCfg, aggregationStep uint64, filenameBase, indexKeys
 		ii.indexList |= withExistence
 	}
 
-	ii._visibleFiles.Store(&[]ctxItem{})
+	ii._visibleFiles = []ctxItem{}
 
 	return &ii, nil
 }
@@ -235,8 +234,7 @@ var (
 )
 
 func (ii *InvertedIndex) reCalcVisibleFiles() {
-	visibleFiles := calcVisibleFiles(ii.dirtyFiles, ii.indexList, false)
-	ii._visibleFiles.Store(&visibleFiles)
+	ii._visibleFiles = calcVisibleFiles(ii.dirtyFiles, ii.indexList, false)
 }
 
 func (ii *InvertedIndex) missedIdxFiles() (l []*filesItem) {
@@ -402,7 +400,6 @@ func (ii *InvertedIndex) openFiles() error {
 		ii.dirtyFiles.Delete(item)
 	}
 
-	ii.reCalcVisibleFiles()
 	return nil
 }
 
@@ -428,7 +425,6 @@ func (ii *InvertedIndex) closeWhatNotInList(fNames []string) {
 
 func (ii *InvertedIndex) Close() {
 	ii.closeWhatNotInList([]string{})
-	ii.reCalcVisibleFiles()
 }
 
 // DisableFsync - just for tests
@@ -540,7 +536,7 @@ func (w *invertedIndexBufferedWriter) add(key, indexKey []byte) error {
 }
 
 func (ii *InvertedIndex) BeginFilesRo() *InvertedIndexRoTx {
-	files := *ii._visibleFiles.Load()
+	files := ii._visibleFiles
 	for i := 0; i < len(files); i++ {
 		if !files[i].src.frozen {
 			files[i].src.refcount.Add(1)
@@ -1638,8 +1634,6 @@ func (ii *InvertedIndex) buildMapIdx(ctx context.Context, fromStep, toStep uint6
 }
 
 func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumTo uint64) {
-	defer ii.reCalcVisibleFiles()
-
 	if asserts && ii.withExistenceIndex && sf.existence == nil {
 		panic(fmt.Errorf("assert: no existence index: %s", sf.decomp.FileName()))
 	}
