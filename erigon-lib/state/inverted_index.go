@@ -425,7 +425,6 @@ func (ii *InvertedIndex) closeWhatNotInList(fNames []string) {
 
 func (ii *InvertedIndex) Close() {
 	ii.closeWhatNotInList([]string{})
-	ii.reCalcVisibleFiles()
 }
 
 // DisableFsync - just for tests

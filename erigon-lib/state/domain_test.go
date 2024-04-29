@@ -1314,6 +1314,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		require.NoError(t, err)
 
 		d.integrateMergedDirtyFiles(vl, il, hl, dv, di, dh)
+		d.reCalcVisibleFiles()
 
 		logEvery.Stop()
 

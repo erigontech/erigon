@@ -281,7 +281,6 @@ func (h *History) closeWhatNotInList(fNames []string) {
 func (h *History) Close() {
 	h.InvertedIndex.Close()
 	h.closeWhatNotInList([]string{})
-	h.reCalcVisibleFiles()
 }
 
 func (ht *HistoryRoTx) Files() (res []string) {
