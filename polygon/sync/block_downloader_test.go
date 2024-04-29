@@ -27,7 +27,7 @@ func newBlockDownloaderTest(t *testing.T) *blockDownloaderTest {
 
 func newBlockDownloaderTestWithOpts(t *testing.T, opts blockDownloaderTestOpts) *blockDownloaderTest {
 	ctrl := gomock.NewController(t)
-	heimdallService := heimdall.NewMockHeimdallNoStore(ctrl)
+	heimdallService := heimdall.NewMockHeimdall(ctrl)
 	p2pService := p2p.NewMockService(ctrl)
 	p2pService.EXPECT().MaxPeers().Return(100).Times(1)
 	logger := testlog.Logger(t, log.LvlDebug)
@@ -87,7 +87,7 @@ func (opts blockDownloaderTestOpts) getOrCreateDefaultMaxWorkers() int {
 }
 
 type blockDownloaderTest struct {
-	heimdall        *heimdall.MockHeimdallNoStore
+	heimdall        *heimdall.MockHeimdall
 	p2pService      *p2p.MockService
 	blockDownloader *blockDownloader
 	storage         *MockStorage

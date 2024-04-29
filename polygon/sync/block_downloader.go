@@ -36,7 +36,7 @@ type BlockDownloader interface {
 func NewBlockDownloader(
 	logger log.Logger,
 	p2pService p2p.Service,
-	heimdall heimdall.HeimdallNoStore,
+	heimdall heimdall.Heimdall,
 	headersVerifier AccumulatedHeadersVerifier,
 	blocksVerifier BlocksVerifier,
 	storage Storage,
@@ -56,7 +56,7 @@ func NewBlockDownloader(
 func newBlockDownloader(
 	logger log.Logger,
 	p2pService p2p.Service,
-	heimdall heimdall.HeimdallNoStore,
+	heimdall heimdall.Heimdall,
 	headersVerifier AccumulatedHeadersVerifier,
 	blocksVerifier BlocksVerifier,
 	storage Storage,
@@ -78,7 +78,7 @@ func newBlockDownloader(
 type blockDownloader struct {
 	logger                        log.Logger
 	p2pService                    p2p.Service
-	heimdall                      heimdall.HeimdallNoStore
+	heimdall                      heimdall.Heimdall
 	headersVerifier               AccumulatedHeadersVerifier
 	blocksVerifier                BlocksVerifier
 	storage                       Storage
