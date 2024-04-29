@@ -199,6 +199,12 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, ctx cont
 		return err
 	}
 
+  rh, err := domains.ComputeCommitment(ctx, true, current.Header.Number.Uint64(), s.LogPrefix())
+	if err != nil {
+		return fmt.Errorf("StateV3.Apply: %w", err)
+	}
+  current.Header.Root = libcommon.BytesToHash(rh)
+
 	logger.Debug("FinalizeBlockExecution", "block", current.Header.Number, "txn", current.Txs.Len(), "gas", current.Header.GasUsed, "receipt", current.Receipts.Len(), "payload", cfg.payloadId)
 
 	if histV3 {
