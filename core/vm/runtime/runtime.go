@@ -73,8 +73,8 @@ func setDefaults(cfg *Config) {
 			GrayGlacierBlock:      new(big.Int),
 			ShanghaiTime:          new(big.Int),
 			CancunTime:            new(big.Int),
-			PragueTime:            new(big.Int),
-			OsakaTime:             new(big.Int),
+			PragueTime:            big.NewInt(1),
+			OsakaTime:             big.NewInt(2),
 		}
 	}
 

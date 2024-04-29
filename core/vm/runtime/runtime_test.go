@@ -313,10 +313,12 @@ func TestBlockhash(t *testing.T) {
 	// The method call to 'test()'
 	input := libcommon.Hex2Bytes("f8a8fd6d")
 	chain := &dummyChain{}
-	ret, _, err := Execute(data, input, &Config{
+	cfg := &Config{
 		GetHashFn:   core.GetHashFn(header, chain.GetHeader),
 		BlockNumber: new(big.Int).Set(header.Number),
-	}, header.Number.Uint64())
+		Time: new(big.Int),
+	}
+	ret, _, err := Execute(data, input, cfg, header.Number.Uint64())
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
