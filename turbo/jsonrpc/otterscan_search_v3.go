@@ -36,6 +36,7 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 
 	mustReadHeader := true
 	reachedPageSize := false
+	hasMore := false
 	for txNumsIter.HasNext() {
 		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := txNumsIter.Next()
 		if err != nil {
@@ -46,6 +47,7 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 		// txs inside the block; reproduces e2 behavior. An e3/paginated-aware
 		// ots spec could improve in this area.
 		if blockNumChanged && reachedPageSize {
+			hasMore = true
 			break
 		}
 
@@ -110,7 +112,6 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 		}
 	}
 
-	hasMore := txNumsIter.HasNext()
 	return txs, receipts, hasMore, nil
 }
 
