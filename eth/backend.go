@@ -653,12 +653,34 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		recents = bor.Recents
 		signatures = bor.Signatures
 	}
+	loopBreakCheck := stages2.NewLoopBreakCheck(config, nil)
 	// proof-of-work mining
 	mining := stagedsync.New(
 		config.Sync,
 		stagedsync.MiningStages(backend.sentryCtx,
 			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPoolDB, nil, tmpdir, backend.blockReader),
 			stagedsync.StageBorHeimdallCfg(backend.chainDB, snapDb, miner, *backend.chainConfig, heimdallClient, backend.blockReader, nil, nil, nil, recents, signatures),
+			stagedsync.StageExecuteBlocksCfg(
+				backend.chainDB,
+				config.Prune,
+				config.BatchSize,
+				nil,
+				chainConfig,
+				backend.engine,
+				&vm.Config{},
+				backend.notifications.Accumulator,
+				config.StateStream,
+				/*stateStream=*/ false,
+				config.HistoryV3,
+				dirs,
+				blockReader,
+				backend.sentriesClient.Hd,
+				config.Genesis,
+				config.Sync,
+				agg,
+				stages2.SilkwormForExecutionStage(backend.silkworm, config),
+			),
+			stagedsync.StageSendersCfg(backend.chainDB, chainConfig, config.Sync, false, dirs.Tmp, config.Prune, blockReader, backend.sentriesClient.Hd, loopBreakCheck),
 			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, nil, 0, backend.txPool, backend.txPoolDB, blockReader),
 			stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore),
 		), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder,
@@ -678,10 +700,29 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			stagedsync.MiningStages(backend.sentryCtx,
 				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, backend.txPoolDB, param, tmpdir, backend.blockReader),
 				stagedsync.StageBorHeimdallCfg(backend.chainDB, snapDb, miningStatePos, *backend.chainConfig, heimdallClient, backend.blockReader, nil, nil, nil, recents, signatures),
+				stagedsync.StageExecuteBlocksCfg(
+					backend.chainDB,
+					config.Prune,
+					config.BatchSize,
+					nil,
+					chainConfig,
+					backend.engine,
+					&vm.Config{},
+					backend.notifications.Accumulator,
+					config.StateStream,
+					/*stateStream=*/ false,
+					config.HistoryV3,
+					dirs,
+					blockReader,
+					backend.sentriesClient.Hd,
+					config.Genesis,
+					config.Sync,
+					agg,
+					stages2.SilkwormForExecutionStage(backend.silkworm, config),
+				),
+				stagedsync.StageSendersCfg(backend.chainDB, chainConfig, config.Sync, false, dirs.Tmp, config.Prune, blockReader, backend.sentriesClient.Hd, loopBreakCheck),
 				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, backend.txPool, backend.txPoolDB, blockReader),
-				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore),
-			), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder,
-			logger)
+				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore)), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder, logger)
 		// We start the mining step
 		if err := stages2.MiningStep(ctx, backend.chainDB, proposingSync, tmpdir, logger); err != nil {
 			return nil, err

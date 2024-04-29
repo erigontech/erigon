@@ -23,6 +23,8 @@ func MiningStages(
 	ctx context.Context,
 	createBlockCfg MiningCreateBlockCfg,
 	borHeimdallCfg BorHeimdallCfg,
+	executeBlockCfg ExecuteBlockCfg,
+	sendersCfg SendersCfg,
 	execCfg MiningExecCfg,
 	finish MiningFinishCfg,
 ) []*Stage {
@@ -58,7 +60,7 @@ func MiningStages(
 			ID:          stages.MiningExecution,
 			Description: "Mining: execute new block from tx pool",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnMiningExecStage(s, txc.Tx, execCfg, ctx, logger)
+				return SpawnMiningExecStage(s, txc.Tx, execCfg, sendersCfg, executeBlockCfg, ctx, logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
 				return nil

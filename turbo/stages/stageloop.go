@@ -497,7 +497,7 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 	return nil
 }
 
-func silkwormForExecutionStage(silkworm *silkworm.Silkworm, cfg *ethconfig.Config) *silkworm.Silkworm {
+func SilkwormForExecutionStage(silkworm *silkworm.Silkworm, cfg *ethconfig.Config) *silkworm.Silkworm {
 	if cfg.SilkwormExecution {
 		return silkworm
 	}
@@ -529,7 +529,7 @@ func NewDefaultStages(ctx context.Context,
 	// Hence we run it in the test mode.
 	runInTestMode := cfg.ImportMode
 
-	loopBreakCheck := newLoopBreakCheck(cfg, heimdallClient)
+	loopBreakCheck := NewLoopBreakCheck(cfg, heimdallClient)
 
 	if heimdallClient != nil && flags.Milestone {
 		loopBreakCheck = func(int) bool {
@@ -582,7 +582,7 @@ func NewDefaultStages(ctx context.Context,
 			cfg.Genesis,
 			cfg.Sync,
 			agg,
-			silkwormForExecutionStage(silkworm, cfg),
+			SilkwormForExecutionStage(silkworm, cfg),
 		),
 		stagedsync.StageHashStateCfg(db, dirs, cfg.HistoryV3),
 		stagedsync.StageTrieCfg(db, true, true, false, dirs.Tmp, blockReader, controlServer.Hd, cfg.HistoryV3, agg),
@@ -615,7 +615,7 @@ func NewPipelineStages(ctx context.Context,
 	// During Import we don't want other services like header requests, body requests etc. to be running.
 	// Hence we run it in the test mode.
 	runInTestMode := cfg.ImportMode
-	loopBreakCheck := newLoopBreakCheck(cfg, nil)
+	loopBreakCheck := NewLoopBreakCheck(cfg, nil)
 
 	var noPruneContracts map[libcommon.Address]bool
 	if cfg.Genesis != nil {
@@ -645,7 +645,7 @@ func NewPipelineStages(ctx context.Context,
 				cfg.Genesis,
 				cfg.Sync,
 				agg,
-				silkwormForExecutionStage(silkworm, cfg),
+				SilkwormForExecutionStage(silkworm, cfg),
 			),
 			stagedsync.StageHashStateCfg(db, dirs, cfg.HistoryV3),
 			stagedsync.StageTrieCfg(db, checkStateRoot, true, false, dirs.Tmp, blockReader, controlServer.Hd, cfg.HistoryV3, agg),
@@ -681,7 +681,7 @@ func NewPipelineStages(ctx context.Context,
 			cfg.Genesis,
 			cfg.Sync,
 			agg,
-			silkwormForExecutionStage(silkworm, cfg),
+			SilkwormForExecutionStage(silkworm, cfg),
 		),
 		stagedsync.StageHashStateCfg(db, dirs, cfg.HistoryV3),
 		stagedsync.StageTrieCfg(db, checkStateRoot, true, false, dirs.Tmp, blockReader, controlServer.Hd, cfg.HistoryV3, agg),
@@ -722,7 +722,7 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 				cfg.Genesis,
 				cfg.Sync,
 				agg,
-				silkwormForExecutionStage(silkworm, cfg),
+				SilkwormForExecutionStage(silkworm, cfg),
 			),
 			stagedsync.StageHashStateCfg(db, dirs, cfg.HistoryV3),
 			stagedsync.StageTrieCfg(db, true, true, true, dirs.Tmp, blockReader, controlServer.Hd, cfg.HistoryV3, agg)),
@@ -747,7 +747,7 @@ func NewPolygonSyncStages(
 	forkValidator *engine_helpers.ForkValidator,
 	heimdallClient heimdall.HeimdallClient,
 ) []*stagedsync.Stage {
-	loopBreakCheck := newLoopBreakCheck(config, heimdallClient)
+	loopBreakCheck := NewLoopBreakCheck(config, heimdallClient)
 	return stagedsync.PolygonSyncStages(
 		ctx,
 		stagedsync.StageSnapshotsCfg(
@@ -800,7 +800,7 @@ func NewPolygonSyncStages(
 			config.Genesis,
 			config.Sync,
 			agg,
-			silkwormForExecutionStage(silkworm, config),
+			SilkwormForExecutionStage(silkworm, config),
 		),
 		stagedsync.StageTxLookupCfg(
 			db,
@@ -817,7 +817,7 @@ func NewPolygonSyncStages(
 	)
 }
 
-func newLoopBreakCheck(cfg *ethconfig.Config, heimdallClient heimdall.HeimdallClient) func(int) bool {
+func NewLoopBreakCheck(cfg *ethconfig.Config, heimdallClient heimdall.HeimdallClient) func(int) bool {
 	var loopBreakCheck func(int) bool
 
 	if heimdallClient != nil && flags.Milestone {
