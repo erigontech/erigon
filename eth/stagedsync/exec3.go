@@ -1060,6 +1060,9 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
 
 // flushAndCheckCommitmentV3 - does write state to db and then check commitment
 func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.RwTx, doms *state2.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, inMemExec bool) (bool, error) {
+	if cfg.blockProduction {
+		return true, nil
+	}
 	// E2 state root check was in another stage - means we did flush state even if state root will not match
 	// And Unwind expecting it
 	if !parallel {

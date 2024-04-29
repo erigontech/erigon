@@ -12,6 +12,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/net/context"
 
@@ -78,7 +79,7 @@ func StageMiningExecCfg(
 // SpawnMiningExecStage
 // TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, ctx context.Context, logger log.Logger) error {
+func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, sendersCfg SendersCfg, execCfg ExecuteBlockCfg, ctx context.Context, logger log.Logger) error {
 	cfg.vmConfig.NoReceipts = false
 	chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 	logPrefix := s.LogPrefix()
@@ -90,7 +91,6 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, ctx cont
 	var domains *state2.SharedDomains
 	var (
 		stateReader state.StateReader
-		stateWriter state.StateWriter
 	)
 	if histV3 {
 		var err error
@@ -99,11 +99,9 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, ctx cont
 			return err
 		}
 		defer domains.Close()
-		stateWriter = state.NewWriterV4(domains)
 		stateReader = state.NewReaderV4(domains)
 	} else {
 		stateReader = state.NewPlainStateReader(tx)
-		stateWriter = state.NewPlainStateWriter(tx, tx, current.Header.Number.Uint64())
 	}
 	ibs := state.New(stateReader)
 
@@ -134,10 +132,10 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, ctx cont
 			yielded := mapset.NewSet[[32]byte]()
 			var simStateReader state.StateReader
 			var simStateWriter state.StateWriter
-			
-	m := membatchwithdb.NewMemoryBatch(tx, cfg.tmpdir, logger)
-	defer m.Rollback()
-	      if histV3 {
+
+			m := membatchwithdb.NewMemoryBatch(tx, cfg.tmpdir, logger)
+			defer m.Rollback()
+			if histV3 {
 				var err error
 				domains, err = state2.NewSharedDomains(m, logger)
 				if err != nil {
@@ -145,9 +143,9 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, ctx cont
 				}
 				defer domains.Close()
 				simStateReader = state.NewReaderV4(domains)
-			  simStateWriter = state.NewWriterV4(domains)
-      } else {
-        simStateReader = state.NewPlainStateReader(m)
+				simStateWriter = state.NewWriterV4(domains)
+			} else {
+				simStateReader = state.NewPlainStateReader(m)
 				simStateWriter = state.NewPlainStateWriterNoHistory(m)
 			}
 			executionAt, err := s.ExecutionAt(tx)
@@ -196,17 +194,40 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, ctx cont
 	}
 
 	var err error
-	_, current.Txs, current.Receipts, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txs, current.Uncles, stateWriter, &cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, ChainReaderImpl{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader, logger: logger}, true, logger)
+	_, current.Txs, current.Receipts, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txs, current.Uncles, &state.NoopWriter{}, &cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, ChainReaderImpl{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader, logger: logger}, true, logger)
 	if err != nil {
 		return err
 	}
 
-  rh, err := domains.ComputeCommitment(ctx, true, current.Header.Number.Uint64(), s.LogPrefix())
+	block := types.NewBlock(current.Header, current.Txs, current.Uncles, current.Receipts, current.Withdrawals)
+	// Simulate the block execution to get the final state root
+	if err := rawdb.WriteHeader(tx, block.Header()); err != nil {
+		return fmt.Errorf("cannot write header: %s", err)
+	}
+	if _, err := rawdb.WriteRawBodyIfNotExists(tx, block.Hash(), block.NumberU64(), block.RawBody()); err != nil {
+		return fmt.Errorf("cannot write body: %s", err)
+	}
+	if err := stages.SaveStageProgress(tx, kv.Headers, block.NumberU64()); err != nil {
+		return err
+	}
+	if err := stages.SaveStageProgress(tx, stages.Bodies, block.NumberU64()); err != nil {
+		return err
+	}
+	if err := SpawnRecoverSendersStage(sendersCfg, s, nil, tx, current.Header.Number.Uint64(), ctx, logger); err != nil {
+		return err
+	}
+
+	// This flag will skip checking the state root
+	execCfg.blockProduction = true
+	if err := ExecBlockV3(s, nil, wrap.TxContainer{Tx: tx}, current.Header.Number.Uint64(), context.Background(), execCfg, false, logger); err != nil {
+		return err
+	}
+
+	rh, err := domains.ComputeCommitment(ctx, true, current.Header.Number.Uint64(), s.LogPrefix())
 	if err != nil {
 		return fmt.Errorf("StateV3.Apply: %w", err)
 	}
-  fmt.Println(rh)
-  current.Header.Root = libcommon.BytesToHash(rh)
+	current.Header.Root = libcommon.BytesToHash(rh)
 
 	logger.Debug("FinalizeBlockExecution", "block", current.Header.Number, "txn", current.Txs.Len(), "gas", current.Header.GasUsed, "receipt", current.Receipts.Len(), "payload", cfg.payloadId)
 
