@@ -18,8 +18,9 @@ func BenchmarkBranchMerger_Merge(b *testing.B) {
 	require.NoError(b, err)
 
 	var copies [16][]byte
+	var tm uint16
+	am := bm
 
-	tm, am := bm, bm
 	for i := 15; i >= 0; i-- {
 		row[i] = nil
 		tm, bm, am = uint16(1<<i), bm>>1, am>>1

@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func generateCellRow(t testing.TB, size int) (row []*Cell, bitmap uint16) {
-	t.Helper()
+func generateCellRow(tb testing.TB, size int) (row []*Cell, bitmap uint16) {
+	tb.Helper()
 
 	row = make([]*Cell, size)
 	var bm uint16
@@ -20,24 +20,24 @@ func generateCellRow(t testing.TB, size int) (row []*Cell, bitmap uint16) {
 		row[i] = new(Cell)
 		row[i].hl = 32
 		n, err := rand.Read(row[i].h[:])
-		require.NoError(t, err)
-		require.EqualValues(t, row[i].hl, n)
+		require.NoError(tb, err)
+		require.EqualValues(tb, row[i].hl, n)
 
 		th := rand.Intn(120)
 		switch {
 		case th > 70:
 			n, err = rand.Read(row[i].apk[:])
-			require.NoError(t, err)
+			require.NoError(tb, err)
 			row[i].apl = n
 		case th > 20 && th <= 70:
 			n, err = rand.Read(row[i].spk[:])
-			require.NoError(t, err)
+			require.NoError(tb, err)
 			row[i].spl = n
 		case th <= 20:
 			n, err = rand.Read(row[i].extension[:th])
 			row[i].extLen = n
-			require.NoError(t, err)
-			require.EqualValues(t, th, n)
+			require.NoError(tb, err)
+			require.EqualValues(tb, th, n)
 		}
 		bm |= uint16(1 << i)
 	}
@@ -95,7 +95,9 @@ func TestBranchData_MergeHexBranches_ValueAliveAfterNewMerges(t *testing.T) {
 
 	merger := NewHexBranchMerger(8192)
 
-	tm, am := bm, bm
+	var tm uint16
+	am := bm
+
 	for i := 15; i >= 0; i-- {
 		row[i] = nil
 		tm, bm, am = uint16(1<<i), bm>>1, am>>1
@@ -148,20 +150,20 @@ func TestBranchData_MergeHexBranches3(t *testing.T) {
 }
 
 // helper to decode row of cells from string
-func unfoldBranchDataFromString(t testing.TB, encs string) (row []*Cell, am uint16) {
-	t.Helper()
+func unfoldBranchDataFromString(tb testing.TB, encs string) (row []*Cell, am uint16) {
+	tb.Helper()
 
 	//encs := "0405040b04080f0b080d030204050b0502090805050d01060e060d070f0903090c04070a0d0a000e090b060b0c040c0700020e0b0c060b0106020c0607050a0b0209070d06040808"
 	//encs := "37ad10eb75ea0fc1c363db0dda0cd2250426ee2c72787155101ca0e50804349a94b649deadcc5cddc0d2fd9fb358c2edc4e7912d165f88877b1e48c69efacf418e923124506fbb2fd64823fd41cbc10427c423"
 	enc, err := hex.DecodeString(encs)
-	require.NoError(t, err)
+	require.NoError(tb, err)
 
 	tm, am, origins, err := BranchData(enc).DecodeCells()
-	require.NoError(t, err)
+	require.NoError(tb, err)
 	_, _ = tm, am
 
-	t.Logf("%s", BranchData(enc).String())
-	//require.EqualValues(t, tm, am)
+	tb.Logf("%s", BranchData(enc).String())
+	//require.EqualValues(tb, tm, am)
 	//for i, c := range origins {
 	//	if c == nil {
 	//		continue
