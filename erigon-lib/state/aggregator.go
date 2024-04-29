@@ -537,8 +537,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 	)
 
 	defer logEvery.Stop()
-	defer a.needSaveFilesListInDB.Store(true)
-	defer a.recalcVisibleFiles()
 	defer func() {
 		if !closeCollations {
 			return
@@ -697,7 +695,6 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context) (somethingDone bool, err
 		}
 	}()
 	a.integrateMergedDirtyFiles(outs, in)
-	a.recalcVisibleFiles()
 	a.cleanAfterMerge(in)
 
 	a.needSaveFilesListInDB.Store(true)
@@ -720,6 +717,9 @@ func (a *Aggregator) MergeLoop(ctx context.Context) error {
 }
 
 func (a *Aggregator) integrateDirtyFiles(sf AggV3StaticFiles, txNumFrom, txNumTo uint64) {
+	defer a.needSaveFilesListInDB.Store(true)
+	defer a.recalcVisibleFiles()
+
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 
@@ -1440,6 +1440,9 @@ func (ac *AggregatorRoTx) mergeFiles(ctx context.Context, files SelectedStaticFi
 }
 
 func (a *Aggregator) integrateMergedDirtyFiles(outs SelectedStaticFilesV3, in MergedFilesV3) (frozen []string) {
+	defer a.needSaveFilesListInDB.Store(true)
+	defer a.recalcVisibleFiles()
+
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 
