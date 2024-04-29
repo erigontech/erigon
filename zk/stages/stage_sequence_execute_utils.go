@@ -238,7 +238,8 @@ func prepareL1AndInfoTreeRelatedStuff(sdb *stageDb, decodedBlock *zktx.DecodedBa
 		}
 	}
 
-	if l1TreeUpdate != nil {
+	// we only want GER and l1 block hash for indexes above 0 - 0 is a special case
+	if l1TreeUpdate != nil && l1TreeUpdateIndex > 0 {
 		l1BlockHash = l1TreeUpdate.ParentHash
 		ger = l1TreeUpdate.GER
 	}
@@ -303,11 +304,12 @@ func doFinishBlockAndUpdateState(
 	l1BlockHash common.Hash,
 	transactions []types.Transaction,
 	receipts types.Receipts,
+	effectiveGasPrices []uint8,
 	l1InfoIndex uint64,
 ) error {
 	thisBlockNumber := header.Number.Uint64()
 
-	if err := finaliseBlock(ctx, cfg, s, sdb, ibs, header, parentBlock, forkId, thisBatch, ger, l1BlockHash, transactions, receipts); err != nil {
+	if err := finaliseBlock(ctx, cfg, s, sdb, ibs, header, parentBlock, forkId, thisBatch, ger, l1BlockHash, transactions, receipts, effectiveGasPrices); err != nil {
 		return err
 	}
 

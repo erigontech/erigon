@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zk/l1_data"
 	"time"
+	zktx "github.com/ledgerwatch/erigon/zk/tx"
 )
 
 type SequencerL1BlockSyncCfg struct {
@@ -87,28 +88,52 @@ func SpawnSequencerL1BlockSyncStage(
 
 	logChan := cfg.syncer.GetLogsChan()
 	progressChan := cfg.syncer.GetProgressMessageChan()
+	totalBlocks := 0
+	if highestKnownBatch == 0 {
+		// if we don't have any batches, we need to start from the beginning, and we know batch 1 won't be
+		// in the contract data, so we can start at block 1 for reporting purposes as this will always be added
+		// in the first batch
+		totalBlocks = 1
+	}
 
 LOOP:
 	for {
 		select {
-		case log := <-logChan:
-			transaction, _, err := cfg.syncer.GetTransaction(log.TxHash)
+		case l := <-logChan:
+			transaction, _, err := cfg.syncer.GetTransaction(l.TxHash)
 			if err != nil {
 				return err
 			}
 
-			initBatch, transactions, coinbase, err := l1_data.DecodeL1BatchData(transaction.GetData())
+			initBatch, batches, coinbase, err := l1_data.DecodeL1BatchData(transaction.GetData())
 			if err != nil {
 				return err
 			}
 
-			for idx, trx := range transactions {
+			log.Debug(fmt.Sprintf("[%s] Processing L1 sequence transaction", logPrefix),
+				"hash", transaction.Hash().String(),
+				"initBatch", initBatch,
+				"batches", len(batches),
+			)
+
+			// iterate over the batches in reverse order to ensure that the batches are written in the correct order
+			// this is important because the batches are written in reverse order
+
+			for idx, batch := range batches {
 				// add 1 here to have the batches line up, on the L1 they start at 1
 				b := initBatch + uint64(idx) + 1
-				data := append(coinbase.Bytes(), trx...)
+				data := append(coinbase.Bytes(), batch...)
 				if err := hermezDb.WriteL1BatchData(b, data); err != nil {
 					return err
 				}
+
+				decoded, err := zktx.DecodeBatchL2Blocks(batch, cfg.zkCfg.SequencerInitialForkId)
+				if err != nil {
+					return err
+				}
+				totalBlocks += len(decoded)
+				log.Debug(fmt.Sprintf("[%s] Wrote L1 batch", logPrefix), "batch", b, "blocks", len(decoded), "totalBlocks", totalBlocks)
+
 			}
 		case msg := <-progressChan:
 			log.Info(fmt.Sprintf("[%s] %s", logPrefix, msg))

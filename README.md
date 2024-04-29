@@ -57,6 +57,18 @@ Due to dependency requirements Go 1.19 is required to build.
 
 Enable Sequencer: `CDK_ERIGON_SEQUENCER=1 ./build/bin/cdk-erigon <flags>`
 
+### Special mode - L1 recovery
+The sequencer supports a special recovery mode which allows it to continue the chain using data from the L1.  To enable
+this add the flag `zkevm.l1-sync-start-block: [first l1 block with sequencer data]`.  It is important to find the first block
+on the L1 from the sequencer contract that contains the `sequenceBatches` event.  When the node starts up it will pull of
+the L1 data into the cdk-erigon database and use this during execution rather than waiting for transactions from the txpool, effectively
+rebuilding the chain from the L1 data.  This can be used in tandem with unwinding the chain, or using the `zkevm.sync-limit` flag
+to limit the chain to a certain block height before starting the L1 recovery (useful if you have an RPC node available to speed up the process).
+
+**Important Note:**
+**If using the `zkevm.sync-limit` flag you need to go to the boundary of a batch+1 block so if batch 41 ends at block 99
+then set the sync limit flag to 100.**
+
 ## zkEVM-specific API Support
 
 In order to enable the zkevm_ namespace, please add 'zkevm' to the http.api flag (see the example config below).

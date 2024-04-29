@@ -147,7 +147,7 @@ func attemptAddTransaction(
 	if err != nil {
 		return nil, false, err
 	}
-	if overflow {
+	if overflow && !l1Recovery {
 		return nil, true, nil
 	}
 

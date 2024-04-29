@@ -23,19 +23,16 @@ func TestDecodeRandomBatchL2Data(t *testing.T) {
 	blocks, err := DecodeBatchL2Blocks(randomData, uint64(constants.ForkID5Dragonfruit))
 	require.Error(t, err)
 	assert.Equal(t, 0, len(blocks))
-	t.Log("Txs decoded 1: ", blocks)
 
 	randomData = []byte("Esto es autentica basura")
 	blocks, err = DecodeBatchL2Blocks(randomData, uint64(constants.ForkID5Dragonfruit))
 	require.Error(t, err)
 	assert.Equal(t, 0, len(blocks))
-	t.Log("Txs decoded 2: ", blocks)
 
 	randomData = []byte("beef")
 	blocks, err = DecodeBatchL2Blocks(randomData, uint64(constants.ForkID5Dragonfruit))
 	require.Error(t, err)
 	assert.Equal(t, 0, len(blocks))
-	t.Log("Txs decoded 3: ", blocks)
 }
 
 func TestDecodePre155BatchL2DataPreForkID5(t *testing.T) {
@@ -43,7 +40,6 @@ func TestDecodePre155BatchL2DataPreForkID5(t *testing.T) {
 	require.NoError(t, err)
 	blocks, err := DecodeBatchL2Blocks(pre155, uint64(constants.ForkID4))
 	require.NoError(t, err)
-	t.Log("Txs decoded: ", blocks, len(blocks))
 	assert.Equal(t, 1, len(blocks))
 	v, r, s := blocks[0].Transactions[0].RawSignatureValues()
 	assert.Equal(t, "0x1275fbb540c8efC58b812ba83B0D0B8b9917AE98", blocks[0].Transactions[0].GetTo().String())
@@ -59,7 +55,6 @@ func TestDecodePre155BatchL2DataPreForkID5(t *testing.T) {
 	require.NoError(t, err)
 	blocks, err = DecodeBatchL2Blocks(pre155, uint64(constants.ForkID4))
 	require.NoError(t, err)
-	t.Log("Txs decoded: ", blocks)
 	assert.Equal(t, 1, len(blocks))
 	assert.Equal(t, "0x1275fbb540c8efC58b812ba83B0D0B8b9917AE98", blocks[0].Transactions[0].GetTo().String())
 	assert.Equal(t, uint64(0), blocks[0].Transactions[0].GetNonce())
@@ -109,7 +104,6 @@ func TestDecodePre155BatchL2DataForkID5(t *testing.T) {
 	require.NoError(t, err)
 	blocks, err := DecodeBatchL2Blocks(pre155, uint64(constants.ForkID5Dragonfruit))
 	require.NoError(t, err)
-	t.Log("Txs decoded: ", blocks, len(blocks))
 	assert.Equal(t, 1, len(blocks))
 	v, r, s := blocks[0].Transactions[0].RawSignatureValues()
 	assert.Equal(t, "0x1275fbb540c8efC58b812ba83B0D0B8b9917AE98", blocks[0].Transactions[0].GetTo().String())
@@ -125,7 +119,6 @@ func TestDecodePre155BatchL2DataForkID5(t *testing.T) {
 	require.NoError(t, err)
 	blocks, err = DecodeBatchL2Blocks(pre155, uint64(constants.ForkID4))
 	require.NoError(t, err)
-	t.Log("Txs decoded: ", blocks)
 	assert.Equal(t, 1, len(blocks))
 	assert.Equal(t, "0x1275fbb540c8efC58b812ba83B0D0B8b9917AE98", blocks[0].Transactions[0].GetTo().String())
 	assert.Equal(t, uint64(0), blocks[0].Transactions[0].GetNonce())

@@ -35,8 +35,10 @@ func handleStateForNewBlockStarting(
 ) error {
 	ibs.PreExecuteStateSet(chainConfig, blockNumber, timestamp, stateRoot)
 
-	// handle writing to the ger manager contract
-	if l1info != nil {
+	// handle writing to the ger manager contract but only if the index is above 0
+	// block 1 is a special case as it's the injected batch, so we always need to check the GER/L1 block hash
+	// as these will be force-fed from the event from L1
+	if l1info != nil && l1info.Index > 0 || blockNumber == 1 {
 		// store it so we can retrieve for the data stream
 		if err := hermezDb.WriteBlockGlobalExitRoot(blockNumber, l1info.GER); err != nil {
 			return err
@@ -74,6 +76,7 @@ func finaliseBlock(
 	l1BlockHash common.Hash,
 	transactions []types.Transaction,
 	receipts types.Receipts,
+	effectiveGasPrices []uint8,
 ) error {
 	stateWriter := state.NewPlainStateWriter(sdb.tx, sdb.tx, newHeader.Number.Uint64())
 	chainReader := stagedsync.ChainReader{
@@ -86,7 +89,7 @@ func finaliseBlock(
 		excessDataGas = parentBlock.ExcessDataGas()
 	}
 
-	if err := postBlockStateHandling(cfg, ibs, sdb.hermezDb, newHeader, ger, l1BlockHash, parentBlock.Root(), transactions, receipts); err != nil {
+	if err := postBlockStateHandling(cfg, ibs, sdb.hermezDb, newHeader, ger, l1BlockHash, parentBlock.Root(), transactions, receipts, effectiveGasPrices); err != nil {
 		return err
 	}
 
@@ -171,10 +174,12 @@ func postBlockStateHandling(
 	parentHash common.Hash,
 	transactions types.Transactions,
 	receipts []*types.Receipt,
+	effectiveGasPrices []uint8,
 ) error {
 	infoTree := blockinfo.NewBlockInfoTree()
 	coinbase := header.Coinbase
-	if err := infoTree.InitBlockHeader(&parentHash, &coinbase, header.Number.Uint64(), header.GasLimit, header.Time, &ger, &l1BlockHash); err != nil {
+	blockNo := header.Number.Uint64()
+	if err := infoTree.InitBlockHeader(&parentHash, &coinbase, blockNo, header.GasLimit, header.Time, &ger, &l1BlockHash); err != nil {
 		return err
 	}
 	var err error
@@ -209,8 +214,7 @@ func postBlockStateHandling(
 			return err
 		}
 
-		// TODO: calculate l2 tx hash
-		effectiveGasPrice := DeriveEffectiveGasPrice(cfg, t)
+		effectiveGasPrice := effectiveGasPrices[i]
 		_, err = infoTree.SetBlockTx(&l2TxHash, i, receipt, logIndex, receipt.CumulativeGasUsed, effectiveGasPrice)
 		if err != nil {
 			return err

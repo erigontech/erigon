@@ -44,7 +44,7 @@ func processInjectedInitialBatch(
 	header.Time = injected.Timestamp
 
 	parentRoot := parentBlock.Root()
-	if err = handleStateForNewBlockStarting(cfg.chainConfig, sdb.hermezDb, ibs, injectedBatchBlockNumber, injected.Timestamp, &parentRoot, fakeL1TreeUpdate, false); err != nil {
+	if err = handleStateForNewBlockStarting(cfg.chainConfig, sdb.hermezDb, ibs, injectedBatchBlockNumber, injected.Timestamp, &parentRoot, fakeL1TreeUpdate, true); err != nil {
 		return err
 	}
 
@@ -55,7 +55,7 @@ func processInjectedInitialBatch(
 
 	txns := types.Transactions{*txn}
 	receipts := types.Receipts{receipt}
-	return doFinishBlockAndUpdateState(ctx, cfg, s, sdb, ibs, header, parentBlock, forkId, injectedBatchNumber, injected.LastGlobalExitRoot, injected.L1ParentHash, txns, receipts, 0)
+	return doFinishBlockAndUpdateState(ctx, cfg, s, sdb, ibs, header, parentBlock, forkId, injectedBatchNumber, injected.LastGlobalExitRoot, injected.L1ParentHash, txns, receipts, []uint8{255}, 0)
 }
 
 func handleInjectedBatch(
