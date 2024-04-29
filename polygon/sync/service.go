@@ -9,7 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/direct"
-	executionclient "github.com/ledgerwatch/erigon/cl/phase1/execution_client"
+	executionproto "github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/p2p/sentry"
@@ -37,10 +37,10 @@ func NewService(
 	maxPeers int,
 	statusDataProvider *sentry.StatusDataProvider,
 	heimdallUrl string,
-	executionEngine executionclient.ExecutionEngine,
+	executionClient executionproto.ExecutionClient,
 ) Service {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
-	execution := NewExecutionClient(executionEngine)
+	execution := NewExecutionClient(executionClient)
 	storage := NewStorage(logger, execution, maxPeers)
 	headersVerifier := VerifyAccumulatedHeaders
 	blocksVerifier := VerifyBlocks

@@ -922,7 +922,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			p2pConfig.MaxPeers,
 			statusDataProvider,
 			config.HeimdallURL,
-			executionEngine,
+			executionRpc,
 		)
 	}
 
