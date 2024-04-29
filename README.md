@@ -812,12 +812,20 @@ datadir
 #   - if still not enough: `history` 
 ```
 
-### E3 public test goals
+### E3 eth-mainnet datadir size (April 2024)
 
-- to gather RPC-usability feedback:
-  - E3 doesn't store receipts, using totally different indices, etc...
-  - It may behave different on warious stress-tests
-- to gather datadadir-usability feedback
-- discover bad data
-  - re-gen of snapshts takes much time, better fix data-bugs in-advance
+```
+du -hsc /erigon/* 
+6G  	/erigon/caplin
+80G 	/erigon/chaindata
+1.7T	/erigon/snapshots
+1.8T	total
+
+du -hsc /erigon/snapshots/* 
+100G 	/erigon/snapshots/accessor
+230G	/erigon/snapshots/domain
+250G	/erigon/snapshots/history
+400G	/erigon/snapshots/idx
+1.7T	total
+```
 
