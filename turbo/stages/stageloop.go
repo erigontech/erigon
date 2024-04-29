@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/p2p/sentry"
 	"github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/polygon/bor/finality"
@@ -749,7 +750,8 @@ func NewPolygonSyncStages(
 	forkValidator *engine_helpers.ForkValidator,
 	heimdallClient heimdall.HeimdallClient,
 	sentry direct.SentryClient,
-	maxPeers uint64,
+	maxPeers int,
+	statusDataProvider *sentry.StatusDataProvider,
 ) []*stagedsync.Stage {
 	loopBreakCheck := newLoopBreakCheck(config, heimdallClient)
 	return stagedsync.PolygonSyncStages(
@@ -769,7 +771,15 @@ func NewPolygonSyncStages(
 			config.CaplinConfig.BlobBackfilling,
 			silkworm,
 		),
-		stagedsync.NewPolygonSyncStageCfg(logger, db, sentry, maxPeers),
+		stagedsync.NewPolygonSyncStageCfg(
+			logger,
+			chainConfig,
+			db,
+			heimdallClient,
+			sentry,
+			maxPeers,
+			statusDataProvider,
+		),
 		stagedsync.StageBlockHashesCfg(
 			db,
 			config.Dirs.Tmp,

@@ -25,16 +25,17 @@ func NewPolygonSyncStageCfg(
 	logger log.Logger,
 	chainConfig *chain.Config,
 	db kv.RwDB,
+	heimdallClient heimdall.HeimdallClient,
 	sentry direct.SentryClient,
-	statusDataProvider *sentry.StatusDataProvider,
 	maxPeers int,
+	statusDataProvider *sentry.StatusDataProvider,
 ) PolygonSyncStageCfg {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	storage := newPolygonSyncStageStorage(logger)
 	p2pService := p2p.NewService(maxPeers, logger, sentry, statusDataProvider.GetStatusData)
 	headersVerifier := sync.VerifyAccumulatedHeaders
 	blocksVerifier := sync.VerifyBlocks
-	heimdallService := &polygonSyncStageHeimdall{}
+	heimdallService := heimdall.NewHeimdall(heimdallClient, logger, heimdall.WithStore(storage))
 	blockDownloader := sync.NewBlockDownloader(
 		logger,
 		p2pService,
@@ -118,83 +119,6 @@ func (s polygonSyncStageService) Run(ctx context.Context) error {
 	return nil
 }
 
-func newPolygonSyncStageHeimdall(client heimdall.HeimdallClient, storage heimdall.Store) *polygonSyncStageHeimdall {
-	return &polygonSyncStageHeimdall{
-		client:  client,
-		storage: storage,
-	}
-}
-
-type polygonSyncStageHeimdall struct {
-	client  heimdall.HeimdallClient
-	storage heimdall.Store
-}
-
-func (p polygonSyncStageHeimdall) LastCheckpointId(ctx context.Context) (heimdall.CheckpointId, bool, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (p polygonSyncStageHeimdall) LastMilestoneId(ctx context.Context) (heimdall.MilestoneId, bool, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (p polygonSyncStageHeimdall) LastSpanId(ctx context.Context) (heimdall.SpanId, bool, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (p polygonSyncStageHeimdall) FetchLatestSpan(ctx context.Context) (*heimdall.Span, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (p polygonSyncStageHeimdall) FetchCheckpoints(ctx context.Context, start heimdall.CheckpointId, end heimdall.CheckpointId) ([]*heimdall.Checkpoint, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (p polygonSyncStageHeimdall) FetchMilestones(ctx context.Context, start heimdall.MilestoneId, end heimdall.MilestoneId) ([]*heimdall.Milestone, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (p polygonSyncStageHeimdall) FetchSpans(ctx context.Context, start heimdall.SpanId, end heimdall.SpanId) ([]*heimdall.Span, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (p polygonSyncStageHeimdall) FetchCheckpointsFromBlock(ctx context.Context, startBlock uint64) (heimdall.Waypoints, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (p polygonSyncStageHeimdall) FetchMilestonesFromBlock(ctx context.Context, startBlock uint64) (heimdall.Waypoints, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (p polygonSyncStageHeimdall) FetchSpansFromBlock(ctx context.Context, startBlock uint64) ([]*heimdall.Span, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (p polygonSyncStageHeimdall) OnCheckpointEvent(ctx context.Context, callback func(*heimdall.Checkpoint)) error {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (p polygonSyncStageHeimdall) OnMilestoneEvent(ctx context.Context, callback func(*heimdall.Milestone)) error {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (p polygonSyncStageHeimdall) OnSpanEvent(ctx context.Context, callback func(*heimdall.Span)) error {
-	//TODO implement me
-	panic("implement me")
-}
-
 func newPolygonSyncStageStorage(logger log.Logger) *polygonSyncStageStorage {
 	return &polygonSyncStageStorage{
 		logger: logger,
@@ -204,6 +128,51 @@ func newPolygonSyncStageStorage(logger log.Logger) *polygonSyncStageStorage {
 type polygonSyncStageStorage struct {
 	logger log.Logger
 	tx     kv.RwTx
+}
+
+func (s *polygonSyncStageStorage) LastSpanId(ctx context.Context) (heimdall.SpanId, bool, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *polygonSyncStageStorage) GetSpan(ctx context.Context, spanId heimdall.SpanId) (*heimdall.Span, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *polygonSyncStageStorage) PutSpan(ctx context.Context, span *heimdall.Span) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *polygonSyncStageStorage) LastMilestoneId(ctx context.Context) (heimdall.MilestoneId, bool, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *polygonSyncStageStorage) GetMilestone(ctx context.Context, milestoneId heimdall.MilestoneId) (*heimdall.Milestone, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *polygonSyncStageStorage) PutMilestone(ctx context.Context, milestoneId heimdall.MilestoneId, milestone *heimdall.Milestone) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *polygonSyncStageStorage) LastCheckpointId(ctx context.Context) (heimdall.CheckpointId, bool, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *polygonSyncStageStorage) GetCheckpoint(ctx context.Context, checkpointId heimdall.CheckpointId) (*heimdall.Checkpoint, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *polygonSyncStageStorage) PutCheckpoint(ctx context.Context, checkpointId heimdall.CheckpointId, checkpoint *heimdall.Checkpoint) error {
+	//TODO implement me
+	panic("implement me")
 }
 
 func (s *polygonSyncStageStorage) InsertBlocks(_ context.Context, blocks []*types.Block) error {

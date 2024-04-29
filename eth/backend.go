@@ -815,6 +815,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			heimdallClient,
 			polygonSyncSentry(sentries),
 			p2pConfig.MaxPeers,
+			statusDataProvider,
 		)
 		backend.syncUnwindOrder = stagedsync.PolygonSyncUnwindOrder
 		backend.syncPruneOrder = stagedsync.PolygonSyncPruneOrder
