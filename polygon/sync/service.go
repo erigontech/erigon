@@ -26,7 +26,7 @@ type service struct {
 	sync *Sync
 
 	p2pService p2p.Service
-	storage    Storage
+	store      Store
 	events     *TipEvents
 }
 
@@ -41,7 +41,7 @@ func NewService(
 ) Service {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	execution := NewExecutionClient(executionClient)
-	storage := NewStorage(logger, execution, maxPeers)
+	store := NewStore(logger, execution)
 	headersVerifier := VerifyAccumulatedHeaders
 	blocksVerifier := VerifyBlocks
 	p2pService := p2p.NewService(maxPeers, logger, sentryClient, statusDataProvider.GetStatusData)
@@ -53,7 +53,7 @@ func NewService(
 		heimdallService,
 		headersVerifier,
 		blocksVerifier,
-		storage,
+		store,
 	)
 	spansCache := NewSpansCache()
 	signaturesCache, err := lru.NewARC[common.Hash, common.Address](stagedsync.InMemorySignatures)
@@ -78,7 +78,7 @@ func NewService(
 	}
 	events := NewTipEvents(logger, p2pService, heimdallService)
 	sync := NewSync(
-		storage,
+		store,
 		execution,
 		headersVerifier,
 		blocksVerifier,
@@ -93,7 +93,7 @@ func NewService(
 	return &service{
 		sync:       sync,
 		p2pService: p2pService,
-		storage:    storage,
+		store:      store,
 		events:     events,
 	}
 }
@@ -109,7 +109,7 @@ func (s *service) Run(ctx context.Context) error {
 	}()
 
 	go func() {
-		err := s.storage.Run(ctx)
+		err := s.store.Run(ctx)
 		if (err != nil) && (ctx.Err() == nil) {
 			serviceErr = err
 			cancel()

@@ -11,8 +11,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
-//go:generate mockgen -typed=true -destination=./storage_mock.go -package=sync . Storage
-type Storage interface {
+//go:generate mockgen -typed=true -destination=./store_mock.go -package=sync . Store
+type Store interface {
 	// InsertBlocks queues blocks for writing into the local canonical chain.
 	InsertBlocks(ctx context.Context, blocks []*types.Block) error
 	// Flush makes sure that all queued blocks have been written.
@@ -21,7 +21,7 @@ type Storage interface {
 	Run(ctx context.Context) error
 }
 
-type executionClientStorage struct {
+type executionClientStore struct {
 	logger    log.Logger
 	execution ExecutionClient
 	queue     chan []*types.Block
@@ -33,17 +33,16 @@ type executionClientStorage struct {
 	tasksDoneSignal chan bool
 }
 
-func NewStorage(logger log.Logger, execution ExecutionClient, queueCapacity int) Storage {
-	return &executionClientStorage{
-		logger:    logger,
-		execution: execution,
-		queue:     make(chan []*types.Block, queueCapacity),
-
+func NewStore(logger log.Logger, execution ExecutionClient) Store {
+	return &executionClientStore{
+		logger:          logger,
+		execution:       execution,
+		queue:           make(chan []*types.Block),
 		tasksDoneSignal: make(chan bool, 1),
 	}
 }
 
-func (s *executionClientStorage) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
+func (s *executionClientStore) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
 	s.tasksCount.Add(1)
 	select {
 	case s.queue <- blocks:
@@ -55,12 +54,12 @@ func (s *executionClientStorage) InsertBlocks(ctx context.Context, blocks []*typ
 	}
 }
 
-func (s *executionClientStorage) Flush(ctx context.Context) error {
+func (s *executionClientStore) Flush(ctx context.Context) error {
 	for s.tasksCount.Load() > 0 {
 		select {
 		case _, ok := <-s.tasksDoneSignal:
 			if !ok {
-				return errors.New("executionClientStorage.Flush failed because ExecutionClient.InsertBlocks failed")
+				return errors.New("executionClientStore.Flush failed because ExecutionClient.InsertBlocks failed")
 			}
 		case <-ctx.Done():
 			return ctx.Err()
@@ -70,8 +69,8 @@ func (s *executionClientStorage) Flush(ctx context.Context) error {
 	return nil
 }
 
-func (s *executionClientStorage) Run(ctx context.Context) error {
-	s.logger.Debug(syncLogPrefix("running execution client storage component"))
+func (s *executionClientStore) Run(ctx context.Context) error {
+	s.logger.Debug(syncLogPrefix("running execution client store component"))
 
 	for {
 		select {
@@ -92,7 +91,7 @@ func (s *executionClientStorage) Run(ctx context.Context) error {
 	}
 }
 
-func (s *executionClientStorage) insertBlocks(ctx context.Context, blocks []*types.Block) error {
+func (s *executionClientStore) insertBlocks(ctx context.Context, blocks []*types.Block) error {
 	defer s.tasksCount.Add(-1)
 
 	insertStartTime := time.Now()
