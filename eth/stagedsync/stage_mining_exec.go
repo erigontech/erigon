@@ -203,6 +203,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, ctx cont
 	if err != nil {
 		return fmt.Errorf("StateV3.Apply: %w", err)
 	}
+  fmt.Println(rh)
   current.Header.Root = libcommon.BytesToHash(rh)
 
 	logger.Debug("FinalizeBlockExecution", "block", current.Header.Number, "txn", current.Txs.Len(), "gas", current.Header.GasUsed, "receipt", current.Receipts.Len(), "payload", cfg.payloadId)
