@@ -21,7 +21,7 @@ func StoreBlockHashesEip2935(header *types.Header, state *state.IntraBlockState,
 	_setStorage(parent.Number, parent.Hash(), state)
 	// If this is the fork block, add the parent's direct `HISTORY_SERVE_WINDOW - 1` ancestors as well
 	if parent.Time < config.OsakaTime.Uint64() {
-		for i := params.HISTORY_SERVE_WINDOW - 1; i > 0; i-- {
+		for i := params.BlockHashServeWindow - 1; i > 0; i-- {
 			parent = headerReader.GetHeaderByHash(parent.ParentHash)
 			_setStorage(parent.Number, parent.Hash(), state)
 			if parent.Number.Cmp(big.NewInt(0)) == 0 { // Genesis

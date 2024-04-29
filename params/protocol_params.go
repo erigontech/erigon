@@ -173,8 +173,8 @@ const (
 	P256VerifyGas uint64 = 3450
 
 	// EIP-2935
-	HISTORY_SERVE_WINDOW uint64 = 8192
-	BLOCKHASH_OLD_WINDOW uint64 = 256
+	BlockHashServeWindow uint64 = 8192
+	BlockHashOldWindow   uint64 = 256
 )
 
 // EIP-4788: Beacon block root in the EVM

@@ -316,7 +316,7 @@ func TestBlockhash(t *testing.T) {
 	cfg := &Config{
 		GetHashFn:   core.GetHashFn(header, chain.GetHeader),
 		BlockNumber: new(big.Int).Set(header.Number),
-		Time: new(big.Int),
+		Time:        new(big.Int),
 	}
 	ret, _, err := Execute(data, input, cfg, header.Number.Uint64())
 	if err != nil {
