@@ -396,7 +396,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 					outs, _ := ic.staticFilesInRange(startTxNum, endTxNum)
 					in, err := ic.mergeFiles(ctx, outs, startTxNum, endTxNum, background.NewProgressSet())
 					require.NoError(tb, err)
-					ii.integrateMergedFiles(outs, in)
+					ii.integrateMergedDirtyFiles(outs, in)
 					require.NoError(tb, err)
 					ii.reCalcVisibleFiles()
 					return false

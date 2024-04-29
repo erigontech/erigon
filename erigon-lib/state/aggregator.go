@@ -250,6 +250,8 @@ func (a *Aggregator) DisableFsync() {
 }
 
 func (a *Aggregator) OpenFolder(readonly bool) error {
+	defer a.recalcVisibleFiles()
+
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	eg := &errgroup.Group{}
@@ -271,12 +273,12 @@ func (a *Aggregator) OpenFolder(readonly bool) error {
 	if err := eg.Wait(); err != nil {
 		return fmt.Errorf("OpenFolder: %w", err)
 	}
-
-	a.recalcVisibleFiles()
 	return nil
 }
 
 func (a *Aggregator) OpenList(files []string, readonly bool) error {
+	defer a.recalcVisibleFiles()
+
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	eg := &errgroup.Group{}
@@ -291,7 +293,6 @@ func (a *Aggregator) OpenList(files []string, readonly bool) error {
 	if err := eg.Wait(); err != nil {
 		return fmt.Errorf("OpenList: %w", err)
 	}
-	a.recalcVisibleFiles()
 	return nil
 }
 
@@ -690,7 +691,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context) (somethingDone bool, err
 			in.Close()
 		}
 	}()
-	aggTx.integrateMergedFiles(outs, in)
+	aggTx.integrateMergedDirtyFiles(outs, in)
 	a.onFreeze(in.FrozenList())
 	closeAll = false
 	return true, nil
@@ -1429,22 +1430,22 @@ func (ac *AggregatorRoTx) mergeFiles(ctx context.Context, files SelectedStaticFi
 	return mf, err
 }
 
-func (ac *AggregatorRoTx) integrateMergedFiles(outs SelectedStaticFilesV3, in MergedFilesV3) (frozen []string) {
+func (ac *AggregatorRoTx) integrateMergedDirtyFiles(outs SelectedStaticFilesV3, in MergedFilesV3) (frozen []string) {
+	defer ac.cleanAfterMerge(in)
 	defer ac.a.needSaveFilesListInDB.Store(true)
 	defer ac.a.recalcVisibleFiles()
 	ac.a.dirtyFilesLock.Lock()
 	defer ac.a.dirtyFilesLock.Unlock()
 
 	for id, d := range ac.a.d {
-		d.integrateMergedFiles(outs.d[id], outs.dIdx[id], outs.dHist[id], in.d[id], in.dIdx[id], in.dHist[id])
+		d.integrateMergedDirtyFiles(outs.d[id], outs.dIdx[id], outs.dHist[id], in.d[id], in.dIdx[id], in.dHist[id])
 	}
 
-	ac.a.logAddrs.integrateMergedFiles(outs.logAddrs, in.logAddrs)
-	ac.a.logTopics.integrateMergedFiles(outs.logTopics, in.logTopics)
-	ac.a.tracesFrom.integrateMergedFiles(outs.tracesFrom, in.tracesFrom)
-	ac.a.tracesTo.integrateMergedFiles(outs.tracesTo, in.tracesTo)
+	ac.a.logAddrs.integrateMergedDirtyFiles(outs.logAddrs, in.logAddrs)
+	ac.a.logTopics.integrateMergedDirtyFiles(outs.logTopics, in.logTopics)
+	ac.a.tracesFrom.integrateMergedDirtyFiles(outs.tracesFrom, in.tracesFrom)
+	ac.a.tracesTo.integrateMergedDirtyFiles(outs.tracesTo, in.tracesTo)
 
-	ac.cleanAfterMerge(in)
 	return frozen
 }
 func (ac *AggregatorRoTx) cleanAfterMerge(in MergedFilesV3) {
