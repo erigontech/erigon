@@ -440,6 +440,14 @@ func (dt *DomainRoTx) commitmentValTransformDomain(accounts, storage *DomainRoTx
 		if ai == nil {
 			return nil, fmt.Errorf("account file not found for %d-%d", keyFromTxNum, keyEndTxNum)
 		}
+
+		if si.decompressor == nil || ai.decompressor == nil {
+			return nil, fmt.Errorf("decompressor is nil for existing storage or account")
+		}
+		if mergedStorage == nil || mergedAccount == nil {
+			return nil, fmt.Errorf("mergedStorage or mergedAccount is nil")
+		}
+
 		sig := NewArchiveGetter(si.decompressor.MakeGetter(), storage.d.compression)
 		aig := NewArchiveGetter(ai.decompressor.MakeGetter(), accounts.d.compression)
 		ms := NewArchiveGetter(mergedStorage.decompressor.MakeGetter(), storage.d.compression)
