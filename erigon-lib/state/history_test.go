@@ -158,7 +158,8 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 				values[string(keyBuf)] = updates[vi:]
 				require.True(t, sort.StringsAreSorted(seenKeys))
 			}
-			h.integrateFiles(sf, i, i+h.aggregationStep)
+			h.integrateDirtyFiles(sf, i, i+h.aggregationStep)
+			h.reCalcVisibleFiles()
 			lastAggergatedTx = i + h.aggregationStep
 		}
 
@@ -340,7 +341,7 @@ func TestHistoryAfterPrune(t *testing.T) {
 		sf, err := h.buildFiles(ctx, 0, c, background.NewProgressSet())
 		require.NoError(err)
 
-		h.integrateFiles(sf, 0, 16)
+		h.integrateDirtyFiles(sf, 0, 16)
 		hc.Close()
 
 		hc = h.BeginFilesRo()
@@ -653,7 +654,7 @@ func TestHistoryHistory(t *testing.T) {
 				require.NoError(err)
 				sf, err := h.buildFiles(ctx, step, c, background.NewProgressSet())
 				require.NoError(err)
-				h.integrateFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
+				h.integrateDirtyFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
 
 				hc := h.BeginFilesRo()
 				_, err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, false, logEvery)
@@ -691,7 +692,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 		require.NoError(err)
 		sf, err := h.buildFiles(ctx, step, c, background.NewProgressSet())
 		require.NoError(err)
-		h.integrateFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
+		h.integrateDirtyFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
 
 		if doPrune {
 			hc := h.BeginFilesRo()
@@ -1306,9 +1307,9 @@ func TestHistory_OpenFolder(t *testing.T) {
 	db, h, txs := filledHistory(t, true, logger)
 	collateAndMergeHistory(t, db, h, txs, true)
 
-	list := h._visibleFiles.Load()
+	list := h._visibleFiles
 	require.NotEmpty(t, list)
-	ff := (*list)[len(*list)-1]
+	ff := list[len(list)-1]
 	fn := ff.src.decompressor.FilePath()
 	h.Close()
 

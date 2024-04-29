@@ -1061,7 +1061,6 @@ func (d *Domain) integrateMergedFiles(valuesOuts, indexOuts, historyOuts []*file
 		d.dirtyFiles.Delete(out)
 		out.canDelete.Store(true)
 	}
-	d.reCalcVisibleFiles()
 }
 
 func (ii *InvertedIndex) integrateMergedFiles(outs []*filesItem, in *filesItem) {
@@ -1093,7 +1092,6 @@ func (ii *InvertedIndex) integrateMergedFiles(outs []*filesItem, in *filesItem) 
 		}
 		out.canDelete.Store(true)
 	}
-	ii.reCalcVisibleFiles()
 }
 
 func (h *History) integrateMergedFiles(indexOuts, historyOuts []*filesItem, indexIn, historyIn *filesItem) {
@@ -1123,7 +1121,6 @@ func (h *History) integrateMergedFiles(indexOuts, historyOuts []*filesItem, inde
 		h.dirtyFiles.Delete(out)
 		out.canDelete.Store(true)
 	}
-	h.reCalcVisibleFiles()
 }
 
 func (dt *DomainRoTx) cleanAfterMerge(mergedDomain, mergedHist, mergedIdx *filesItem) {

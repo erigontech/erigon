@@ -71,6 +71,7 @@ type Aggregator struct {
 	keepInDB         uint64
 
 	dirtyFilesLock           sync.Mutex
+	visibleFilesLock         sync.RWMutex
 	visibleFilesMinimaxTxNum atomic.Uint64
 	snapshotBuildSema        *semaphore.Weighted
 
@@ -201,7 +202,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		return nil, err
 	}
 	a.KeepStepsInDB(1)
-	a.recalcVisibleFilesMinimaxTxNum()
+	a.recalcVisibleFiles()
 
 	if dbg.NoSync() {
 		a.DisableFsync()
@@ -270,7 +271,8 @@ func (a *Aggregator) OpenFolder(readonly bool) error {
 	if err := eg.Wait(); err != nil {
 		return fmt.Errorf("OpenFolder: %w", err)
 	}
-	a.recalcVisibleFilesMinimaxTxNum()
+
+	a.recalcVisibleFiles()
 	return nil
 }
 
@@ -289,7 +291,7 @@ func (a *Aggregator) OpenList(files []string, readonly bool) error {
 	if err := eg.Wait(); err != nil {
 		return fmt.Errorf("OpenList: %w", err)
 	}
-	a.recalcVisibleFilesMinimaxTxNum()
+	a.recalcVisibleFiles()
 	return nil
 }
 
@@ -530,7 +532,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 
 	defer logEvery.Stop()
 	defer a.needSaveFilesListInDB.Store(true)
-	defer a.recalcVisibleFilesMinimaxTxNum()
+	defer a.recalcVisibleFiles()
 	defer func() {
 		if !closeCollations {
 			return
@@ -619,7 +621,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 		return fmt.Errorf("domain collate-build: %w", err)
 	}
 	mxStepTook.ObserveDuration(stepStartedAt)
-	a.integrateFiles(static, txFrom, txTo)
+	a.integrateDirtyFiles(static, txFrom, txTo)
 	a.logger.Info("[snapshots] aggregated", "step", step, "took", time.Since(stepStartedAt))
 
 	return nil
@@ -706,19 +708,18 @@ func (a *Aggregator) MergeLoop(ctx context.Context) error {
 	}
 }
 
-func (a *Aggregator) integrateFiles(sf AggV3StaticFiles, txNumFrom, txNumTo uint64) {
+func (a *Aggregator) integrateDirtyFiles(sf AggV3StaticFiles, txNumFrom, txNumTo uint64) {
+	defer a.needSaveFilesListInDB.Store(true)
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
-	defer a.needSaveFilesListInDB.Store(true)
-	defer a.recalcVisibleFilesMinimaxTxNum()
 
 	for id, d := range a.d {
-		d.integrateFiles(sf.d[id], txNumFrom, txNumTo)
+		d.integrateDirtyFiles(sf.d[id], txNumFrom, txNumTo)
 	}
-	a.logAddrs.integrateFiles(sf.logAddrs, txNumFrom, txNumTo)
-	a.logTopics.integrateFiles(sf.logTopics, txNumFrom, txNumTo)
-	a.tracesFrom.integrateFiles(sf.tracesFrom, txNumFrom, txNumTo)
-	a.tracesTo.integrateFiles(sf.tracesTo, txNumFrom, txNumTo)
+	a.logAddrs.integrateDirtyFiles(sf.logAddrs, txNumFrom, txNumTo)
+	a.logTopics.integrateDirtyFiles(sf.logTopics, txNumFrom, txNumTo)
+	a.tracesFrom.integrateDirtyFiles(sf.tracesFrom, txNumFrom, txNumTo)
+	a.tracesTo.integrateDirtyFiles(sf.tracesTo, txNumFrom, txNumTo)
 }
 
 func (a *Aggregator) HasNewFrozenFiles() bool {
@@ -1089,6 +1090,21 @@ func (a *Aggregator) EndTxNumDomainsFrozen() uint64 {
 	)
 }
 
+func (a *Aggregator) recalcVisibleFiles() {
+	defer a.recalcVisibleFilesMinimaxTxNum()
+
+	a.visibleFilesLock.Lock()
+	defer a.visibleFilesLock.Unlock()
+
+	for _, domain := range a.d {
+		domain.reCalcVisibleFiles()
+	}
+	a.logTopics.reCalcVisibleFiles()
+	a.logAddrs.reCalcVisibleFiles()
+	a.tracesFrom.reCalcVisibleFiles()
+	a.tracesTo.reCalcVisibleFiles()
+}
+
 func (a *Aggregator) recalcVisibleFilesMinimaxTxNum() {
 	aggTx := a.BeginFilesRo()
 	defer aggTx.Close()
@@ -1414,10 +1430,10 @@ func (ac *AggregatorRoTx) mergeFiles(ctx context.Context, files SelectedStaticFi
 }
 
 func (ac *AggregatorRoTx) integrateMergedFiles(outs SelectedStaticFilesV3, in MergedFilesV3) (frozen []string) {
+	defer ac.a.needSaveFilesListInDB.Store(true)
+	defer ac.a.recalcVisibleFiles()
 	ac.a.dirtyFilesLock.Lock()
 	defer ac.a.dirtyFilesLock.Unlock()
-	defer ac.a.needSaveFilesListInDB.Store(true)
-	defer ac.a.recalcVisibleFilesMinimaxTxNum()
 
 	for id, d := range ac.a.d {
 		d.integrateMergedFiles(outs.d[id], outs.dIdx[id], outs.dHist[id], in.d[id], in.dIdx[id], in.dHist[id])
@@ -1427,6 +1443,7 @@ func (ac *AggregatorRoTx) integrateMergedFiles(outs SelectedStaticFilesV3, in Me
 	ac.a.logTopics.integrateMergedFiles(outs.logTopics, in.logTopics)
 	ac.a.tracesFrom.integrateMergedFiles(outs.tracesFrom, in.tracesFrom)
 	ac.a.tracesTo.integrateMergedFiles(outs.tracesTo, in.tracesTo)
+
 	ac.cleanAfterMerge(in)
 	return frozen
 }
@@ -1643,6 +1660,7 @@ type AggregatorRoTx struct {
 }
 
 func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
+	a.visibleFilesLock.RLock()
 	ac := &AggregatorRoTx{
 		a:          a,
 		logAddrs:   a.logAddrs.BeginFilesRo(),
@@ -1656,6 +1674,7 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 	for id, d := range a.d {
 		ac.d[id] = d.BeginFilesRo()
 	}
+	a.visibleFilesLock.RUnlock()
 
 	return ac
 }
