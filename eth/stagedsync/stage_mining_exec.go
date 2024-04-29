@@ -134,9 +134,13 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, ctx cont
 			yielded := mapset.NewSet[[32]byte]()
 			var simStateReader state.StateReader
 			var simStateWriter state.StateWriter
-			if histV3 {
+			
+				m := membatch.NewHashBatch(tx, ctx.Done(), cfg.tmpdir, logger)
+				defer m.Close()
+
+      if histV3 {
 				var err error
-				domains, err = state2.NewSharedDomains(tx, logger)
+				domains, err = state2.NewSharedDomains(m, logger)
 				if err != nil {
 					return err
 				}
@@ -144,10 +148,8 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, ctx cont
 				simStateReader = state.NewReaderV4(domains)
 			  simStateWriter = state.NewWriterV4(domains)
       } else {
-				m := membatch.NewHashBatch(tx, ctx.Done(), cfg.tmpdir, logger)
-				defer m.Close()
-				simStateReader = state.NewPlainStateReader(tx)
-				simStateWriter = state.NewPlainStateWriterNoHistory(tx)
+        simStateReader = state.NewPlainStateReader(m)
+				simStateWriter = state.NewPlainStateWriterNoHistory(m)
 			}
 			executionAt, err := s.ExecutionAt(tx)
 			if err != nil {
@@ -388,9 +390,9 @@ func filterBadTransactions(transactions []types.Transaction, config chain.Config
 		account.Balance.Sub(&account.Balance, want)
 		accountBuffer := make([]byte, account.EncodingLengthForStorage())
 		account.EncodeForStorage(accountBuffer)
-		/*if err := simStateWriter.UpdateAccountData(sender, account, nil); err != nil {
+		if err := simStateWriter.UpdateAccountData(sender, account, nil); err != nil {
 			return nil, err
-		}*/
+		}
 		// Mark transaction as valid
 		filtered = append(filtered, transaction)
 		transactions = transactions[1:]
