@@ -474,13 +474,13 @@ func opBlockhash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 	var upper, lower uint64
 	upper = interpreter.evm.Context.BlockNumber
 	if interpreter.evm.chainRules.IsPrague {
-		if arg64 >= upper || arg64+params.BlockHashServeWindow < upper {
+		if arg64 >= upper || arg64+params.BlockHashHistoryServeWindow < upper {
 			scope.Stack.Push(uint256.NewInt(0))
 		} else {
 			var out *uint256.Int
 			interpreter.evm.intraBlockState.GetState(
 				params.HistoryStorageAddress,
-				(*libcommon.Hash)(uint256.NewInt(arg64%params.BlockHashServeWindow).Bytes()),
+				(*libcommon.Hash)(uint256.NewInt(arg64%params.BlockHashHistoryServeWindow).Bytes()),
 				out,
 			)
 			scope.Stack.Push(out)
