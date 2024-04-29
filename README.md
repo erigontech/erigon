@@ -849,14 +849,14 @@ du -hsc /erigon/snapshots/*
 
 du -hsc /erigon/* 
 160M	/erigon/bor
-66G 	/erigon/chaindata
+60G 	/erigon/chaindata
 3.7T	/erigon/snapshots
 3.8T	total
 
 du -hsc /erigon/snapshots/* 
-239G	/erigon/snapshots/accessor
-682G	/erigon/snapshots/domain
-578G	/erigon/snapshots/history
+24G	/erigon/snapshots/accessor
+680G	/erigon/snapshots/domain
+580G	/erigon/snapshots/history
 1.3T	/erigon/snapshots/idx
 3.7T	total
 ```
