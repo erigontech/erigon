@@ -175,7 +175,7 @@ func responseCheck(resp *executor.ProcessBatchResponseV2, request *VerifierReque
 	}
 
 	if resp.ForkId != request.ForkId {
-		panic("Executor's fork.id does not match our fork.id. Please use different executor.")
+		log.Warn("Executor fork id mismatch", "executor", resp.ForkId, "our", request.ForkId)
 	}
 
 	if resp.Debug != nil && resp.Debug.ErrorLog != "" {
