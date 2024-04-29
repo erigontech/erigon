@@ -74,517 +74,609 @@ import (
 var (
 	// General settings
 	DataDirFlag = flags.DirectoryFlag{
-		Name:  "datadir",
-		Usage: "Data directory for the databases",
-		Value: flags.DirectoryString(paths.DefaultDataDir()),
+		Name:     "datadir",
+		Usage:    "Data directory for the databases",
+		Value:    flags.DirectoryString(paths.DefaultDataDir()),
+		Category: "General",
 	}
-
 	AncientFlag = flags.DirectoryFlag{
-		Name:  "datadir.ancient",
-		Usage: "Data directory for ancient chain segments (default = inside chaindata)",
+		Name:     "datadir.ancient",
+		Usage:    "Data directory for ancient chain segments (default = inside chaindata)",
+		Category: "General",
 	}
 	MinFreeDiskSpaceFlag = flags.DirectoryFlag{
-		Name:  "datadir.minfreedisk",
-		Usage: "Minimum free disk space in MB, once reached triggers auto shut down (default = --cache.gc converted to MB, 0 = disabled)",
+		Name:     "datadir.minfreedisk",
+		Usage:    "Minimum free disk space in MB, once reached triggers auto shut down (default = --cache.gc converted to MB, 0 = disabled)",
+		Category: "General",
 	}
 	NetworkIdFlag = cli.Uint64Flag{
-		Name:  "networkid",
-		Usage: "Explicitly set network id (integer)(For testnets: use --chain <testnet_name> instead)",
-		Value: ethconfig.Defaults.NetworkID,
+		Name:     "networkid",
+		Usage:    "Explicitly set network id (integer)(For testnets: use --chain <testnet_name> instead)",
+		Value:    ethconfig.Defaults.NetworkID,
+		Category: "General",
 	}
 	DeveloperPeriodFlag = cli.IntFlag{
-		Name:  "dev.period",
-		Usage: "Block period to use in developer mode (0 = mine only if transaction pending)",
+		Name:     "dev.period",
+		Usage:    "Block period to use in developer mode (0 = mine only if transaction pending)",
+		Category: "General",
 	}
 	ChainFlag = cli.StringFlag{
-		Name:  "chain",
-		Usage: "name of the network to join",
-		Value: networkname.MainnetChainName,
+		Name:     "chain",
+		Usage:    "name of the network to join",
+		Value:    networkname.MainnetChainName,
+		Category: "General",
 	}
 	IdentityFlag = cli.StringFlag{
-		Name:  "identity",
-		Usage: "Custom node name",
+		Name:     "identity",
+		Usage:    "Custom node name",
+		Category: "General",
 	}
 	WhitelistFlag = cli.StringFlag{
-		Name:  "whitelist",
-		Usage: "Comma separated block number-to-hash mappings to enforce (<number>=<hash>)",
+		Name:     "whitelist",
+		Usage:    "Comma separated block number-to-hash mappings to enforce (<number>=<hash>)",
+		Category: "General",
 	}
 	OverridePragueFlag = flags.BigFlag{
-		Name:  "override.prague",
-		Usage: "Manually specify the Prague fork time, overriding the bundled setting",
+		Name:     "override.prague",
+		Usage:    "Manually specify the Prague fork time, overriding the bundled setting",
+		Category: "General",
 	}
 	TrustedSetupFile = cli.StringFlag{
-		Name:  "trusted-setup-file",
-		Usage: "Absolute path to trusted_setup.json file",
-	}
-	// Ethash settings
-	EthashCachesInMemoryFlag = cli.IntFlag{
-		Name:  "ethash.cachesinmem",
-		Usage: "Number of recent ethash caches to keep in memory (16MB each)",
-		Value: ethconfig.Defaults.Ethash.CachesInMem,
-	}
-	EthashCachesLockMmapFlag = cli.BoolFlag{
-		Name:  "ethash.cacheslockmmap",
-		Usage: "Lock memory maps of recent ethash caches",
-	}
-	EthashDatasetDirFlag = flags.DirectoryFlag{
-		Name:  "ethash.dagdir",
-		Usage: "Directory to store the ethash mining DAGs",
-		Value: flags.DirectoryString(ethconfig.Defaults.Ethash.DatasetDir),
-	}
-	EthashDatasetsLockMmapFlag = cli.BoolFlag{
-		Name:  "ethash.dagslockmmap",
-		Usage: "Lock memory maps for recent ethash mining DAGs",
-	}
-	SnapshotFlag = cli.BoolFlag{
-		Name:  "snapshots",
-		Usage: `Default: use snapshots "true" for Mainnet, Goerli, Gnosis Chain and Chiado. use snapshots "false" in all other cases`,
-		Value: true,
+		Name:     "trusted-setup-file",
+		Usage:    "Absolute path to trusted_setup.json file",
+		Category: "General",
 	}
 	InternalConsensusFlag = cli.BoolFlag{
-		Name:  "internalcl",
-		Usage: "Enables internal consensus",
-	}
-	// Transaction pool settings
-	TxPoolDisableFlag = cli.BoolFlag{
-		Name:  "txpool.disable",
-		Usage: "Experimental external pool and block producer, see ./cmd/txpool/readme.md for more info. Disabling internal txpool and block producer.",
-		Value: false,
-	}
-	TxPoolGossipDisableFlag = cli.BoolFlag{
-		Name:  "txpool.gossip.disable",
-		Usage: "Disabling p2p gossip of txs. Any txs received by p2p - will be dropped. Some networks like 'Optimism execution engine'/'Optimistic Rollup' - using it to protect against MEV attacks",
-		Value: txpoolcfg.DefaultConfig.NoGossip,
-	}
-	TxPoolLocalsFlag = cli.StringFlag{
-		Name:  "txpool.locals",
-		Usage: "Comma separated accounts to treat as locals (no flush, priority inclusion)",
-	}
-	TxPoolNoLocalsFlag = cli.BoolFlag{
-		Name:  "txpool.nolocals",
-		Usage: "Disables price exemptions for locally submitted transactions",
-	}
-	TxPoolPriceLimitFlag = cli.Uint64Flag{
-		Name:  "txpool.pricelimit",
-		Usage: "Minimum gas price (fee cap) limit to enforce for acceptance into the pool",
-		Value: ethconfig.Defaults.DeprecatedTxPool.PriceLimit,
-	}
-	TxPoolPriceBumpFlag = cli.Uint64Flag{
-		Name:  "txpool.pricebump",
-		Usage: "Price bump percentage to replace an already existing transaction",
-		Value: txpoolcfg.DefaultConfig.PriceBump,
-	}
-	TxPoolBlobPriceBumpFlag = cli.Uint64Flag{
-		Name:  "txpool.blobpricebump",
-		Usage: "Price bump percentage to replace existing (type-3) blob transaction",
-		Value: txpoolcfg.DefaultConfig.BlobPriceBump,
-	}
-	TxPoolAccountSlotsFlag = cli.Uint64Flag{
-		Name:  "txpool.accountslots",
-		Usage: "Minimum number of executable transaction slots guaranteed per account",
-		Value: ethconfig.Defaults.DeprecatedTxPool.AccountSlots,
-	}
-	TxPoolBlobSlotsFlag = cli.Uint64Flag{
-		Name:  "txpool.blobslots",
-		Usage: "Max allowed total number of blobs (within type-3 txs) per account",
-		Value: txpoolcfg.DefaultConfig.BlobSlots,
-	}
-	TxPoolTotalBlobPoolLimit = cli.Uint64Flag{
-		Name:  "txpool.totalblobpoollimit",
-		Usage: "Total limit of number of all blobs in txs within the txpool",
-		Value: txpoolcfg.DefaultConfig.TotalBlobPoolLimit,
-	}
-	TxPoolGlobalSlotsFlag = cli.Uint64Flag{
-		Name:  "txpool.globalslots",
-		Usage: "Maximum number of executable transaction slots for all accounts",
-		Value: ethconfig.Defaults.DeprecatedTxPool.GlobalSlots,
-	}
-	TxPoolGlobalBaseFeeSlotsFlag = cli.Uint64Flag{
-		Name:  "txpool.globalbasefeeslots",
-		Usage: "Maximum number of non-executable transactions where only not enough baseFee",
-		Value: ethconfig.Defaults.DeprecatedTxPool.GlobalQueue,
-	}
-	TxPoolAccountQueueFlag = cli.Uint64Flag{
-		Name:  "txpool.accountqueue",
-		Usage: "Maximum number of non-executable transaction slots permitted per account",
-		Value: ethconfig.Defaults.DeprecatedTxPool.AccountQueue,
-	}
-	TxPoolGlobalQueueFlag = cli.Uint64Flag{
-		Name:  "txpool.globalqueue",
-		Usage: "Maximum number of non-executable transaction slots for all accounts",
-		Value: ethconfig.Defaults.DeprecatedTxPool.GlobalQueue,
-	}
-	TxPoolLifetimeFlag = cli.DurationFlag{
-		Name:  "txpool.lifetime",
-		Usage: "Maximum amount of time non-executable transaction are queued",
-		Value: ethconfig.Defaults.DeprecatedTxPool.Lifetime,
-	}
-	TxPoolTraceSendersFlag = cli.StringFlag{
-		Name:  "txpool.trace.senders",
-		Usage: "Comma separated list of addresses, whose transactions will traced in transaction pool with debug printing",
-		Value: "",
-	}
-	TxPoolCommitEveryFlag = cli.DurationFlag{
-		Name:  "txpool.commit.every",
-		Usage: "How often transactions should be committed to the storage",
-		Value: txpoolcfg.DefaultConfig.CommitEvery,
-	}
-	// Miner settings
-	MiningEnabledFlag = cli.BoolFlag{
-		Name:  "mine",
-		Usage: "Enable mining",
-	}
-	ProposingDisableFlag = cli.BoolFlag{
-		Name:  "proposer.disable",
-		Usage: "Disables PoS proposer",
-	}
-	MinerNotifyFlag = cli.StringFlag{
-		Name:  "miner.notify",
-		Usage: "Comma separated HTTP URL list to notify of new work packages",
-	}
-	MinerGasLimitFlag = cli.Uint64Flag{
-		Name:  "miner.gaslimit",
-		Usage: "Target gas limit for mined blocks",
-		Value: ethconfig.Defaults.Miner.GasLimit,
-	}
-	MinerGasPriceFlag = flags.BigFlag{
-		Name:  "miner.gasprice",
-		Usage: "Minimum gas price for mining a transaction",
-		Value: ethconfig.Defaults.Miner.GasPrice,
-	}
-	MinerEtherbaseFlag = cli.StringFlag{
-		Name:  "miner.etherbase",
-		Usage: "Public address for block mining rewards",
-		Value: "0",
-	}
-	MinerSigningKeyFileFlag = cli.StringFlag{
-		Name:  "miner.sigfile",
-		Usage: "Private key to sign blocks with",
-		Value: "",
-	}
-	MinerExtraDataFlag = cli.StringFlag{
-		Name:  "miner.extradata",
-		Usage: "Block extra data set by the miner (default = client version)",
-	}
-	MinerRecommitIntervalFlag = cli.DurationFlag{
-		Name:  "miner.recommit",
-		Usage: "Time interval to recreate the block being mined",
-		Value: ethconfig.Defaults.Miner.Recommit,
-	}
-	MinerNoVerfiyFlag = cli.BoolFlag{
-		Name:  "miner.noverify",
-		Usage: "Disable remote sealing verification",
-	}
-	VMEnableDebugFlag = cli.BoolFlag{
-		Name:  "vmdebug",
-		Usage: "Record information useful for VM and contract debugging",
-	}
-	InsecureUnlockAllowedFlag = cli.BoolFlag{
-		Name:  "allow-insecure-unlock",
-		Usage: "Allow insecure account unlocking when account-related RPCs are exposed by http",
-	}
-	RPCGlobalGasCapFlag = cli.Uint64Flag{
-		Name:  "rpc.gascap",
-		Usage: "Sets a cap on gas that can be used in eth_call/estimateGas (0=infinite)",
-		Value: ethconfig.Defaults.RPCGasCap,
-	}
-	RPCGlobalTxFeeCapFlag = cli.Float64Flag{
-		Name:  "rpc.txfeecap",
-		Usage: "Sets a cap on transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap)",
-		Value: ethconfig.Defaults.RPCTxFeeCap,
-	}
-	// Logging and debug settings
-	EthStatsURLFlag = cli.StringFlag{
-		Name:  "ethstats",
-		Usage: "Reporting URL of a ethstats service (nodename:secret@host:port)",
-		Value: "",
+		Name:     "internalcl",
+		Usage:    "Enables internal consensus",
+		Category: "General",
 	}
 	FakePoWFlag = cli.BoolFlag{
 		Name:  "fakepow",
 		Usage: "Disables proof-of-work verification",
 	}
+	// Ethash settings
+	EthashCachesInMemoryFlag = cli.IntFlag{
+		Name:     "ethash.cachesinmem",
+		Usage:    "Number of recent ethash caches to keep in memory (16MB each)",
+		Value:    ethconfig.Defaults.Ethash.CachesInMem,
+		Category: "Ethash settings",
+	}
+	EthashCachesLockMmapFlag = cli.BoolFlag{
+		Name:     "ethash.cacheslockmmap",
+		Usage:    "Lock memory maps of recent ethash caches",
+		Category: "Ethash settings",
+	}
+	EthashDatasetDirFlag = flags.DirectoryFlag{
+		Name:     "ethash.dagdir",
+		Usage:    "Directory to store the ethash mining DAGs",
+		Value:    flags.DirectoryString(ethconfig.Defaults.Ethash.DatasetDir),
+		Category: "Ethash settings",
+	}
+	EthashDatasetsLockMmapFlag = cli.BoolFlag{
+		Name:     "ethash.dagslockmmap",
+		Usage:    "Lock memory maps for recent ethash mining DAGs",
+		Category: "Ethash settings",
+	}
+	// Transaction pool settings
+	TxPoolDisableFlag = cli.BoolFlag{
+		Name:     "txpool.disable",
+		Usage:    "Experimental external pool and block producer, see ./cmd/txpool/readme.md for more info. Disabling internal txpool and block producer.",
+		Value:    false,
+		Category: "Transaction pool settings",
+	}
+	TxPoolGossipDisableFlag = cli.BoolFlag{
+		Name:     "txpool.gossip.disable",
+		Usage:    "Disabling p2p gossip of txs. Any txs received by p2p - will be dropped. Some networks like 'Optimism execution engine'/'Optimistic Rollup' - using it to protect against MEV attacks",
+		Value:    txpoolcfg.DefaultConfig.NoGossip,
+		Category: "Transaction pool settings",
+	}
+	TxPoolLocalsFlag = cli.StringFlag{
+		Name:     "txpool.locals",
+		Usage:    "Comma separated accounts to treat as locals (no flush, priority inclusion)",
+		Category: "Transaction pool settings",
+	}
+	TxPoolNoLocalsFlag = cli.BoolFlag{
+		Name:     "txpool.nolocals",
+		Usage:    "Disables price exemptions for locally submitted transactions",
+		Category: "Transaction pool settings",
+	}
+	TxPoolPriceLimitFlag = cli.Uint64Flag{
+		Name:     "txpool.pricelimit",
+		Usage:    "Minimum gas price (fee cap) limit to enforce for acceptance into the pool",
+		Value:    ethconfig.Defaults.DeprecatedTxPool.PriceLimit,
+		Category: "Transaction pool settings",
+	}
+	TxPoolPriceBumpFlag = cli.Uint64Flag{
+		Name:     "txpool.pricebump",
+		Usage:    "Price bump percentage to replace an already existing transaction",
+		Value:    txpoolcfg.DefaultConfig.PriceBump,
+		Category: "Transaction pool settings",
+	}
+	TxPoolBlobPriceBumpFlag = cli.Uint64Flag{
+		Name:     "txpool.blobpricebump",
+		Usage:    "Price bump percentage to replace existing (type-3) blob transaction",
+		Value:    txpoolcfg.DefaultConfig.BlobPriceBump,
+		Category: "Transaction pool settings",
+	}
+	TxPoolAccountSlotsFlag = cli.Uint64Flag{
+		Name:     "txpool.accountslots",
+		Usage:    "Minimum number of executable transaction slots guaranteed per account",
+		Value:    ethconfig.Defaults.DeprecatedTxPool.AccountSlots,
+		Category: "Transaction pool settings",
+	}
+	TxPoolBlobSlotsFlag = cli.Uint64Flag{
+		Name:     "txpool.blobslots",
+		Usage:    "Max allowed total number of blobs (within type-3 txs) per account",
+		Value:    txpoolcfg.DefaultConfig.BlobSlots,
+		Category: "Transaction pool settings",
+	}
+	TxPoolTotalBlobPoolLimit = cli.Uint64Flag{
+		Name:     "txpool.totalblobpoollimit",
+		Usage:    "Total limit of number of all blobs in txs within the txpool",
+		Value:    txpoolcfg.DefaultConfig.TotalBlobPoolLimit,
+		Category: "Transaction pool settings",
+	}
+	TxPoolGlobalSlotsFlag = cli.Uint64Flag{
+		Name:     "txpool.globalslots",
+		Usage:    "Maximum number of executable transaction slots for all accounts",
+		Value:    ethconfig.Defaults.DeprecatedTxPool.GlobalSlots,
+		Category: "Transaction pool settings",
+	}
+	TxPoolGlobalBaseFeeSlotsFlag = cli.Uint64Flag{
+		Name:     "txpool.globalbasefeeslots",
+		Usage:    "Maximum number of non-executable transactions where only not enough baseFee",
+		Value:    ethconfig.Defaults.DeprecatedTxPool.GlobalQueue,
+		Category: "Transaction pool settings",
+	}
+	TxPoolAccountQueueFlag = cli.Uint64Flag{
+		Name:     "txpool.accountqueue",
+		Usage:    "Maximum number of non-executable transaction slots permitted per account",
+		Value:    ethconfig.Defaults.DeprecatedTxPool.AccountQueue,
+		Category: "Transaction pool settings",
+	}
+	TxPoolGlobalQueueFlag = cli.Uint64Flag{
+		Name:     "txpool.globalqueue",
+		Usage:    "Maximum number of non-executable transaction slots for all accounts",
+		Value:    ethconfig.Defaults.DeprecatedTxPool.GlobalQueue,
+		Category: "Transaction pool settings",
+	}
+	TxPoolLifetimeFlag = cli.DurationFlag{
+		Name:     "txpool.lifetime",
+		Usage:    "Maximum amount of time non-executable transaction are queued",
+		Value:    ethconfig.Defaults.DeprecatedTxPool.Lifetime,
+		Category: "Transaction pool settings",
+	}
+	TxPoolTraceSendersFlag = cli.StringFlag{
+		Name:     "txpool.trace.senders",
+		Usage:    "Comma separated list of addresses, whose transactions will traced in transaction pool with debug printing",
+		Value:    "",
+		Category: "Transaction pool settings",
+	}
+	TxPoolCommitEveryFlag = cli.DurationFlag{
+		Name:     "txpool.commit.every",
+		Usage:    "How often transactions should be committed to the storage",
+		Value:    txpoolcfg.DefaultConfig.CommitEvery,
+		Category: "Transaction pool settings",
+	}
+	TxpoolApiAddrFlag = cli.StringFlag{
+		Name:     "txpool.api.addr",
+		Usage:    "TxPool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)",
+		Category: "Transaction pool settings",
+	}
+	// Miner settings
+	MiningEnabledFlag = cli.BoolFlag{
+		Name:     "mine",
+		Usage:    "Enable mining",
+		Category: "Miner settings",
+	}
+	ProposingDisableFlag = cli.BoolFlag{
+		Name:     "proposer.disable",
+		Usage:    "Disables PoS proposer",
+		Category: "Miner settings",
+	}
+	MinerNotifyFlag = cli.StringFlag{
+		Name:     "miner.notify",
+		Usage:    "Comma separated HTTP URL list to notify of new work packages",
+		Category: "Miner settings",
+	}
+	MinerGasLimitFlag = cli.Uint64Flag{
+		Name:     "miner.gaslimit",
+		Usage:    "Target gas limit for mined blocks",
+		Value:    ethconfig.Defaults.Miner.GasLimit,
+		Category: "Miner settings",
+	}
+	MinerGasPriceFlag = flags.BigFlag{
+		Name:     "miner.gasprice",
+		Usage:    "Minimum gas price for mining a transaction",
+		Value:    ethconfig.Defaults.Miner.GasPrice,
+		Category: "Miner settings",
+	}
+	MinerEtherbaseFlag = cli.StringFlag{
+		Name:     "miner.etherbase",
+		Usage:    "Public address for block mining rewards",
+		Value:    "0",
+		Category: "Miner settings",
+	}
+	MinerSigningKeyFileFlag = cli.StringFlag{
+		Name:     "miner.sigfile",
+		Usage:    "Private key to sign blocks with",
+		Value:    "",
+		Category: "Miner settings",
+	}
+	MinerExtraDataFlag = cli.StringFlag{
+		Name:     "miner.extradata",
+		Usage:    "Block extra data set by the miner (default = client version)",
+		Category: "Miner settings",
+	}
+	MinerRecommitIntervalFlag = cli.DurationFlag{
+		Name:     "miner.recommit",
+		Usage:    "Time interval to recreate the block being mined",
+		Value:    ethconfig.Defaults.Miner.Recommit,
+		Category: "Miner settings",
+	}
+	MinerNoVerfiyFlag = cli.BoolFlag{
+		Name:     "miner.noverify",
+		Usage:    "Disable remote sealing verification",
+		Category: "Miner settings",
+	}
+	VMEnableDebugFlag = cli.BoolFlag{
+		Name:     "vmdebug",
+		Usage:    "Record information useful for VM and contract debugging",
+		Category: "Miner settings",
+	}
+	InsecureUnlockAllowedFlag = cli.BoolFlag{
+		Name:     "allow-insecure-unlock",
+		Usage:    "Allow insecure account unlocking when account-related RPCs are exposed by http",
+		Category: "Miner settings",
+	}
+	RPCGlobalGasCapFlag = cli.Uint64Flag{
+		Name:     "rpc.gascap",
+		Usage:    "Sets a cap on gas that can be used in eth_call/estimateGas (0=infinite)",
+		Value:    ethconfig.Defaults.RPCGasCap,
+		Category: "Miner settings",
+	}
+	RPCGlobalTxFeeCapFlag = cli.Float64Flag{
+		Name:     "rpc.txfeecap",
+		Usage:    "Sets a cap on transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap)",
+		Value:    ethconfig.Defaults.RPCTxFeeCap,
+		Category: "Miner settings",
+	}
+	// Logging and debug settings
+	EthStatsURLFlag = cli.StringFlag{
+		Name:     "ethstats",
+		Usage:    "Reporting URL of a ethstats service (nodename:secret@host:port)",
+		Value:    "",
+		Category: "Logging and debug settings",
+	}
 	// RPC settings
 	IPCDisabledFlag = cli.BoolFlag{
-		Name:  "ipcdisable",
-		Usage: "Disable the IPC-RPC server",
+		Name:     "ipcdisable",
+		Usage:    "Disable the IPC-RPC server",
+		Category: "RPC settings",
 	}
 	IPCPathFlag = flags.DirectoryFlag{
-		Name:  "ipcpath",
-		Usage: "Filename for IPC socket/pipe within the datadir (explicit paths escape it)",
+		Name:     "ipcpath",
+		Usage:    "Filename for IPC socket/pipe within the datadir (explicit paths escape it)",
+		Category: "RPC settings",
 	}
 	GraphQLEnabledFlag = cli.BoolFlag{
-		Name:  "graphql",
-		Usage: "Enable the graphql endpoint",
-		Value: nodecfg.DefaultConfig.GraphQLEnabled,
+		Name:     "graphql",
+		Usage:    "Enable the graphql endpoint",
+		Value:    nodecfg.DefaultConfig.GraphQLEnabled,
+		Category: "RPC settings",
 	}
 	HTTPEnabledFlag = cli.BoolFlag{
-		Name:  "http",
-		Usage: "JSON-RPC server (enabled by default). Use --http=false to disable it",
-		Value: true,
+		Name:     "http",
+		Usage:    "JSON-RPC server (enabled by default). Use --http=false to disable it",
+		Value:    true,
+		Category: "RPC settings",
 	}
 	HTTPServerEnabledFlag = cli.BoolFlag{
-		Name:  "http.enabled",
-		Usage: "JSON-RPC HTTP server (enabled by default). Use --http.enabled=false to disable it",
-		Value: true,
+		Name:     "http.enabled",
+		Usage:    "JSON-RPC HTTP server (enabled by default). Use --http.enabled=false to disable it",
+		Value:    true,
+		Category: "RPC settings",
 	}
 	HTTPListenAddrFlag = cli.StringFlag{
-		Name:  "http.addr",
-		Usage: "HTTP-RPC server listening interface",
-		Value: nodecfg.DefaultHTTPHost,
+		Name:     "http.addr",
+		Usage:    "HTTP-RPC server listening interface",
+		Value:    nodecfg.DefaultHTTPHost,
+		Category: "RPC settings",
 	}
 	HTTPPortFlag = cli.IntFlag{
-		Name:  "http.port",
-		Usage: "HTTP-RPC server listening port",
-		Value: nodecfg.DefaultHTTPPort,
+		Name:     "http.port",
+		Usage:    "HTTP-RPC server listening port",
+		Value:    nodecfg.DefaultHTTPPort,
+		Category: "RPC settings",
 	}
 	AuthRpcAddr = cli.StringFlag{
-		Name:  "authrpc.addr",
-		Usage: "HTTP-RPC server listening interface for the Engine API",
-		Value: nodecfg.DefaultHTTPHost,
+		Name:     "authrpc.addr",
+		Usage:    "HTTP-RPC server listening interface for the Engine API",
+		Value:    nodecfg.DefaultHTTPHost,
+		Category: "RPC settings",
 	}
 	AuthRpcPort = cli.UintFlag{
-		Name:  "authrpc.port",
-		Usage: "HTTP-RPC server listening port for the Engine API",
-		Value: nodecfg.DefaultAuthRpcPort,
+		Name:     "authrpc.port",
+		Usage:    "HTTP-RPC server listening port for the Engine API",
+		Value:    nodecfg.DefaultAuthRpcPort,
+		Category: "RPC settings",
 	}
-
 	JWTSecretPath = cli.StringFlag{
-		Name:  "authrpc.jwtsecret",
-		Usage: "Path to the token that ensures safe connection between CL and EL",
-		Value: "",
+		Name:     "authrpc.jwtsecret",
+		Usage:    "Path to the token that ensures safe connection between CL and EL",
+		Value:    "",
+		Category: "RPC settings",
 	}
-
 	HttpCompressionFlag = cli.BoolFlag{
-		Name:  "http.compression",
-		Usage: "Enable compression over HTTP-RPC",
+		Name:     "http.compression",
+		Usage:    "Enable compression over HTTP-RPC",
+		Category: "RPC settings",
 	}
 	WsCompressionFlag = cli.BoolFlag{
-		Name:  "ws.compression",
-		Usage: "Enable compression over WebSocket",
+		Name:     "ws.compression",
+		Usage:    "Enable compression over WebSocket",
+		Category: "RPC settings",
 	}
 	HTTPCORSDomainFlag = cli.StringFlag{
-		Name:  "http.corsdomain",
-		Usage: "Comma separated list of domains from which to accept cross origin requests (browser enforced)",
-		Value: "",
+		Name:     "http.corsdomain",
+		Usage:    "Comma separated list of domains from which to accept cross origin requests (browser enforced)",
+		Value:    "",
+		Category: "RPC settings",
 	}
 	HTTPVirtualHostsFlag = cli.StringFlag{
-		Name:  "http.vhosts",
-		Usage: "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts 'any' or '*' as wildcard.",
-		Value: strings.Join(nodecfg.DefaultConfig.HTTPVirtualHosts, ","),
+		Name:     "http.vhosts",
+		Usage:    "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts 'any' or '*' as wildcard.",
+		Value:    strings.Join(nodecfg.DefaultConfig.HTTPVirtualHosts, ","),
+		Category: "RPC settings",
 	}
 	AuthRpcVirtualHostsFlag = cli.StringFlag{
-		Name:  "authrpc.vhosts",
-		Usage: "Comma separated list of virtual hostnames from which to accept Engine API requests (server enforced). Accepts 'any' or '*' as wildcard.",
-		Value: strings.Join(nodecfg.DefaultConfig.HTTPVirtualHosts, ","),
+		Name:     "authrpc.vhosts",
+		Usage:    "Comma separated list of virtual hostnames from which to accept Engine API requests (server enforced). Accepts 'any' or '*' as wildcard.",
+		Value:    strings.Join(nodecfg.DefaultConfig.HTTPVirtualHosts, ","),
+		Category: "RPC settings",
 	}
 	HTTPApiFlag = cli.StringFlag{
-		Name:  "http.api",
-		Usage: "API's offered over the HTTP-RPC interface",
-		Value: "eth,erigon,engine",
+		Name:     "http.api",
+		Usage:    "API's offered over the HTTP-RPC interface",
+		Value:    "eth,erigon,engine",
+		Category: "RPC settings",
 	}
 	RpcBatchConcurrencyFlag = cli.UintFlag{
-		Name:  "rpc.batch.concurrency",
-		Usage: "Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request",
-		Value: 2,
+		Name:     "rpc.batch.concurrency",
+		Usage:    "Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request",
+		Value:    2,
+		Category: "RPC settings",
 	}
 	RpcStreamingDisableFlag = cli.BoolFlag{
-		Name:  "rpc.streaming.disable",
-		Usage: "Erigon has enabled json streaming for some heavy endpoints (like trace_*). It's a trade-off: greatly reduce amount of RAM (in some cases from 30GB to 30mb), but it produce invalid json format if error happened in the middle of streaming (because json is not streaming-friendly format)",
+		Name:     "rpc.streaming.disable",
+		Usage:    "Erigon has enabled json streaming for some heavy endpoints (like trace_*). It's a trade-off: greatly reduce amount of RAM (in some cases from 30GB to 30mb), but it produce invalid json format if error happened in the middle of streaming (because json is not streaming-friendly format)",
+		Category: "RPC settings",
 	}
 	RpcBatchLimit = cli.IntFlag{
-		Name:  "rpc.batch.limit",
-		Usage: "Maximum number of requests in a batch",
-		Value: 100,
+		Name:     "rpc.batch.limit",
+		Usage:    "Maximum number of requests in a batch",
+		Value:    100,
+		Category: "RPC settings",
 	}
 	RpcReturnDataLimit = cli.IntFlag{
-		Name:  "rpc.returndata.limit",
-		Usage: "Maximum number of bytes returned from eth_call or similar invocations",
-		Value: 100_000,
+		Name:     "rpc.returndata.limit",
+		Usage:    "Maximum number of bytes returned from eth_call or similar invocations",
+		Value:    100_000,
+		Category: "RPC settings",
 	}
 	HTTPTraceFlag = cli.BoolFlag{
-		Name:  "http.trace",
-		Usage: "Print all HTTP requests to logs with INFO level",
+		Name:     "http.trace",
+		Usage:    "Print all HTTP requests to logs with INFO level",
+		Category: "RPC settings",
 	}
 	HTTPDebugSingleFlag = cli.BoolFlag{
-		Name:  "http.dbg.single",
-		Usage: "Allow pass HTTP header 'dbg: true' to printt more detailed logs - how this request was executed",
+		Name:     "http.dbg.single",
+		Usage:    "Allow pass HTTP header 'dbg: true' to printt more detailed logs - how this request was executed",
+		Category: "RPC settings",
 	}
-	DBReadConcurrencyFlag = cli.IntFlag{
-		Name:  "db.read.concurrency",
-		Usage: "Does limit amount of parallel db reads. Default: equal to GOMAXPROCS (or number of CPU)",
-		Value: cmp.Min(cmp.Max(10, runtime.GOMAXPROCS(-1)*64), 9_000),
+	DBReadConcurrencyFlag = cli.IntFlag{ // Should it be int RPC category?
+		Name:     "db.read.concurrency",
+		Usage:    "Does limit amount of parallel db reads. Default: equal to GOMAXPROCS (or number of CPU)",
+		Value:    cmp.Min(cmp.Max(10, runtime.GOMAXPROCS(-1)*64), 9_000),
+		Category: "RPC settings",
 	}
 	RpcAccessListFlag = cli.StringFlag{
-		Name:  "rpc.accessList",
-		Usage: "Specify granular (method-by-method) API allowlist",
+		Name:     "rpc.accessList",
+		Usage:    "Specify granular (method-by-method) API allowlist",
+		Category: "RPC settings",
 	}
-
 	RpcGasCapFlag = cli.UintFlag{
-		Name:  "rpc.gascap",
-		Usage: "Sets a cap on gas that can be used in eth_call/estimateGas",
-		Value: 50000000,
+		Name:     "rpc.gascap",
+		Usage:    "Sets a cap on gas that can be used in eth_call/estimateGas",
+		Value:    50000000,
+		Category: "RPC settings",
 	}
 	RpcTraceCompatFlag = cli.BoolFlag{
-		Name:  "trace.compat",
-		Usage: "Bug for bug compatibility with OE for trace_ routines",
+		Name:     "trace.compat",
+		Usage:    "Bug for bug compatibility with OE for trace_ routines",
+		Category: "RPC settings",
 	}
-
-	TxpoolApiAddrFlag = cli.StringFlag{
-		Name:  "txpool.api.addr",
-		Usage: "TxPool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)",
-	}
-
 	TraceMaxtracesFlag = cli.UintFlag{
-		Name:  "trace.maxtraces",
-		Usage: "Sets a limit on traces that can be returned in trace_filter",
-		Value: 200,
+		Name:     "trace.maxtraces",
+		Usage:    "Sets a limit on traces that can be returned in trace_filter",
+		Value:    200,
+		Category: "RPC settings",
 	}
-
 	HTTPPathPrefixFlag = cli.StringFlag{
-		Name:  "http.rpcprefix",
-		Usage: "HTTP path prefix on which JSON-RPC is served. Use '/' to serve on all paths.",
-		Value: "",
+		Name:     "http.rpcprefix",
+		Usage:    "HTTP path prefix on which JSON-RPC is served. Use '/' to serve on all paths.",
+		Value:    "",
+		Category: "RPC settings",
 	}
 	TLSFlag = cli.BoolFlag{
-		Name:  "tls",
-		Usage: "Enable TLS handshake",
+		Name:     "tls",
+		Usage:    "Enable TLS handshake",
+		Category: "RPC settings",
 	}
 	TLSCertFlag = cli.StringFlag{
-		Name:  "tls.cert",
-		Usage: "Specify certificate",
-		Value: "",
+		Name:     "tls.cert",
+		Usage:    "Specify certificate",
+		Value:    "",
+		Category: "RPC settings",
 	}
 	TLSKeyFlag = cli.StringFlag{
-		Name:  "tls.key",
-		Usage: "Specify key file",
-		Value: "",
+		Name:     "tls.key",
+		Usage:    "Specify key file",
+		Value:    "",
+		Category: "RPC settings",
 	}
 	TLSCACertFlag = cli.StringFlag{
-		Name:  "tls.cacert",
-		Usage: "Specify certificate authority",
-		Value: "",
+		Name:     "tls.cacert",
+		Usage:    "Specify certificate authority",
+		Value:    "",
+		Category: "RPC settings",
 	}
 	WSEnabledFlag = cli.BoolFlag{
-		Name:  "ws",
-		Usage: "Enable the WS-RPC server",
+		Name:     "ws",
+		Usage:    "Enable the WS-RPC server",
+		Category: "RPC settings",
 	}
 	WSListenAddrFlag = cli.StringFlag{
-		Name:  "ws.addr",
-		Usage: "WS-RPC server listening interface",
-		Value: nodecfg.DefaultWSHost,
+		Name:     "ws.addr",
+		Usage:    "WS-RPC server listening interface",
+		Value:    nodecfg.DefaultWSHost,
+		Category: "RPC settings",
 	}
 	WSPortFlag = cli.IntFlag{
-		Name:  "ws.port",
-		Usage: "WS-RPC server listening port",
-		Value: nodecfg.DefaultWSPort,
+		Name:     "ws.port",
+		Usage:    "WS-RPC server listening port",
+		Value:    nodecfg.DefaultWSPort,
+		Category: "RPC settings",
 	}
 	WSApiFlag = cli.StringFlag{
-		Name:  "ws.api",
-		Usage: "API's offered over the WS-RPC interface",
-		Value: "",
+		Name:     "ws.api",
+		Usage:    "API's offered over the WS-RPC interface",
+		Value:    "",
+		Category: "RPC settings",
 	}
 	WSAllowedOriginsFlag = cli.StringFlag{
-		Name:  "ws.origins",
-		Usage: "Origins from which to accept websockets requests",
-		Value: "",
+		Name:     "ws.origins",
+		Usage:    "Origins from which to accept websockets requests",
+		Value:    "",
+		Category: "RPC settings",
 	}
 	WSPathPrefixFlag = cli.StringFlag{
-		Name:  "ws.rpcprefix",
-		Usage: "HTTP path prefix on which JSON-RPC is served. Use '/' to serve on all paths.",
-		Value: "",
+		Name:     "ws.rpcprefix",
+		Usage:    "HTTP path prefix on which JSON-RPC is served. Use '/' to serve on all paths.",
+		Value:    "",
+		Category: "RPC settings",
 	}
 	WSSubscribeLogsChannelSize = cli.IntFlag{
-		Name:  "ws.api.subscribelogs.channelsize",
-		Usage: "Size of the channel used for websocket logs subscriptions",
-		Value: 8192,
+		Name:     "ws.api.subscribelogs.channelsize",
+		Usage:    "Size of the channel used for websocket logs subscriptions",
+		Value:    8192,
+		Category: "RPC settings",
 	}
 	ExecFlag = cli.StringFlag{
-		Name:  "exec",
-		Usage: "Execute JavaScript statement",
+		Name:     "exec",
+		Usage:    "Execute JavaScript statement",
+		Category: "RPC settings",
 	}
 	PreloadJSFlag = cli.StringFlag{
-		Name:  "preload",
-		Usage: "Comma separated list of JavaScript files to preload into the console",
+		Name:     "preload",
+		Usage:    "Comma separated list of JavaScript files to preload into the console",
+		Category: "RPC settings",
 	}
 	AllowUnprotectedTxs = cli.BoolFlag{
-		Name:  "rpc.allow-unprotected-txs",
-		Usage: "Allow for unprotected (non-EIP155 signed) transactions to be submitted via RPC",
+		Name:     "rpc.allow-unprotected-txs",
+		Usage:    "Allow for unprotected (non-EIP155 signed) transactions to be submitted via RPC",
+		Category: "RPC settings",
 	}
 	// Careful! Because we must rewind the hash state
 	// and re-compute the state trie, the further back in time the request, the more
 	// computationally intensive the operation becomes.
 	// The current default has been chosen arbitrarily as 'useful' without likely being overly computationally intense.
 	RpcMaxGetProofRewindBlockCount = cli.IntFlag{
-		Name:  "rpc.maxgetproofrewindblockcount.limit",
-		Usage: "Max GetProof rewind block count",
-		Value: 100_000,
+		Name:     "rpc.maxgetproofrewindblockcount.limit",
+		Usage:    "Max GetProof rewind block count",
+		Value:    100_000,
+		Category: "RPC settings",
 	}
 	StateCacheFlag = cli.StringFlag{
-		Name:  "state.cache",
-		Value: "0MB",
-		Usage: "Amount of data to store in StateCache (enabled if no --datadir set). Set 0 to disable StateCache. Defaults to 0MB",
+		Name:     "state.cache",
+		Value:    "0MB",
+		Usage:    "Amount of data to store in StateCache (enabled if no --datadir set). Set 0 to disable StateCache. Defaults to 0MB",
+		Category: "RPC settings",
 	}
-
 	// Network Settings
 	MaxPeersFlag = cli.IntFlag{
-		Name:  "maxpeers",
-		Usage: "Maximum number of network peers (network disabled if set to 0)",
-		Value: nodecfg.DefaultConfig.P2P.MaxPeers,
+		Name:     "maxpeers",
+		Usage:    "Maximum number of network peers (network disabled if set to 0)",
+		Value:    nodecfg.DefaultConfig.P2P.MaxPeers,
+		Category: "Network settings",
 	}
 	MaxPendingPeersFlag = cli.IntFlag{
-		Name:  "maxpendpeers",
-		Usage: "Maximum number of TCP connections pending to become connected peers",
-		Value: nodecfg.DefaultConfig.P2P.MaxPendingPeers,
+		Name:     "maxpendpeers",
+		Usage:    "Maximum number of TCP connections pending to become connected peers",
+		Value:    nodecfg.DefaultConfig.P2P.MaxPendingPeers,
+		Category: "Network settings",
 	}
 	ListenPortFlag = cli.IntFlag{
-		Name:  "port",
-		Usage: "Network listening port",
-		Value: 30303,
+		Name:     "port",
+		Usage:    "Network listening port",
+		Value:    30303,
+		Category: "Network settings",
 	}
 	P2pProtocolVersionFlag = cli.UintSliceFlag{
-		Name:  "p2p.protocol",
-		Usage: "Version of eth p2p protocol",
-		Value: cli.NewUintSlice(nodecfg.DefaultConfig.P2P.ProtocolVersion...),
+		Name:     "p2p.protocol",
+		Usage:    "Version of eth p2p protocol",
+		Value:    cli.NewUintSlice(nodecfg.DefaultConfig.P2P.ProtocolVersion...),
+		Category: "Network settings",
 	}
 	P2pProtocolAllowedPorts = cli.UintSliceFlag{
-		Name:  "p2p.allowed-ports",
-		Usage: "Allowed ports to pick for different eth p2p protocol versions as follows <porta>,<portb>,..,<porti>",
-		Value: cli.NewUintSlice(uint(ListenPortFlag.Value), 30304, 30305, 30306, 30307),
+		Name:     "p2p.allowed-ports",
+		Usage:    "Allowed ports to pick for different eth p2p protocol versions as follows <porta>,<portb>,..,<porti>",
+		Value:    cli.NewUintSlice(uint(ListenPortFlag.Value), 30304, 30305, 30306, 30307),
+		Category: "Network settings",
 	}
 	SentryAddrFlag = cli.StringFlag{
-		Name:  "sentry.api.addr",
-		Usage: "Comma separated sentry addresses '<host>:<port>,<host>:<port>'",
+		Name:     "sentry.api.addr",
+		Usage:    "Comma separated sentry addresses '<host>:<port>,<host>:<port>'",
+		Category: "Network settings",
 	}
 	SentryLogPeerInfoFlag = cli.BoolFlag{
-		Name:  "sentry.log-peer-info",
-		Usage: "Log detailed peer info when a peer connects or disconnects. Enable to integrate with observer.",
+		Name:     "sentry.log-peer-info",
+		Usage:    "Log detailed peer info when a peer connects or disconnects. Enable to integrate with observer.",
+		Category: "Network settings",
 	}
 	DownloaderAddrFlag = cli.StringFlag{
-		Name:  "downloader.api.addr",
-		Usage: "downloader address '<host>:<port>'",
+		Name:     "downloader.api.addr",
+		Usage:    "downloader address '<host>:<port>'",
+		Category: "Network settings",
 	}
 	BootnodesFlag = cli.StringFlag{
-		Name:  "bootnodes",
-		Usage: "Comma separated enode URLs for P2P discovery bootstrap",
-		Value: "",
+		Name:     "bootnodes",
+		Usage:    "Comma separated enode URLs for P2P discovery bootstrap",
+		Value:    "",
+		Category: "Network settings",
 	}
 	StaticPeersFlag = cli.StringFlag{
-		Name:  "staticpeers",
-		Usage: "Comma separated enode URLs to connect to",
-		Value: "",
+		Name:     "staticpeers",
+		Usage:    "Comma separated enode URLs to connect to",
+		Value:    "",
+		Category: "Network settings",
 	}
 	TrustedPeersFlag = cli.StringFlag{
-		Name:  "trustedpeers",
-		Usage: "Comma separated enode URLs which are always allowed to connect, even above the peer limit",
-		Value: "",
+		Name:     "trustedpeers",
+		Usage:    "Comma separated enode URLs which are always allowed to connect, even above the peer limit",
+		Value:    "",
+		Category: "Network settings",
 	}
 	NodeKeyFileFlag = cli.StringFlag{
-		Name:  "nodekey",
-		Usage: "P2P node key file",
+		Name:     "nodekey",
+		Usage:    "P2P node key file",
+		Category: "Network settings",
 	}
 	NodeKeyHexFlag = cli.StringFlag{
-		Name:  "nodekeyhex",
-		Usage: "P2P node key as hex (for testing)",
+		Name:     "nodekeyhex",
+		Usage:    "P2P node key as hex (for testing)",
+		Category: "Network settings",
 	}
 	NATFlag = cli.StringFlag{
 		Name: "nat",
@@ -598,27 +690,32 @@ var (
 			 "stun"               Uses STUN to detect an external IP using a default server
 			 "stun:<server>"      Uses STUN to detect an external IP using the given server (host:port)
 `,
-		Value: "",
+		Value:    "",
+		Category: "Network settings",
 	}
 	NoDiscoverFlag = cli.BoolFlag{
-		Name:  "nodiscover",
-		Usage: "Disables the peer discovery mechanism (manual peer addition)",
+		Name:     "nodiscover",
+		Usage:    "Disables the peer discovery mechanism (manual peer addition)",
+		Category: "Network settings",
 	}
 	DiscoveryV5Flag = cli.BoolFlag{
-		Name:  "v5disc",
-		Usage: "Enables the experimental RLPx V5 (Topic Discovery) mechanism",
+		Name:     "v5disc",
+		Usage:    "Enables the experimental RLPx V5 (Topic Discovery) mechanism",
+		Category: "Network settings",
 	}
 	NetrestrictFlag = cli.StringFlag{
-		Name:  "netrestrict",
-		Usage: "Restricts network communication to the given IP networks (CIDR masks)",
+		Name:     "netrestrict",
+		Usage:    "Restricts network communication to the given IP networks (CIDR masks)",
+		Category: "Network settings",
 	}
 	DNSDiscoveryFlag = cli.StringFlag{
-		Name:  "discovery.dns",
-		Usage: "Sets DNS discovery entry points (use \"\" to disable DNS)",
+		Name:     "discovery.dns",
+		Usage:    "Sets DNS discovery entry points (use \"\" to disable DNS)",
+		Category: "Network settings",
 	}
 
 	// ATM the url is left to the user and deployment to
-	JSpathFlag = cli.StringFlag{
+	JSpathFlag = cli.StringFlag{ // What category is that?
 		Name:  "jspath",
 		Usage: "JavaScript root path for `loadScript`",
 		Value: ".",
@@ -626,25 +723,29 @@ var (
 
 	// Gas price oracle settings
 	GpoBlocksFlag = cli.IntFlag{
-		Name:  "gpo.blocks",
-		Usage: "Number of recent blocks to check for gas prices",
-		Value: ethconfig.Defaults.GPO.Blocks,
+		Name:     "gpo.blocks",
+		Usage:    "Number of recent blocks to check for gas prices",
+		Value:    ethconfig.Defaults.GPO.Blocks,
+		Category: "Gas price oracle settings",
 	}
 	GpoPercentileFlag = cli.IntFlag{
-		Name:  "gpo.percentile",
-		Usage: "Suggested gas price is the given percentile of a set of recent transaction gas prices",
-		Value: ethconfig.Defaults.GPO.Percentile,
+		Name:     "gpo.percentile",
+		Usage:    "Suggested gas price is the given percentile of a set of recent transaction gas prices",
+		Value:    ethconfig.Defaults.GPO.Percentile,
+		Category: "Gas price oracle settings",
 	}
 	GpoMaxGasPriceFlag = cli.Int64Flag{
-		Name:  "gpo.maxprice",
-		Usage: "Maximum gas price will be recommended by gpo",
-		Value: ethconfig.Defaults.GPO.MaxPrice.Int64(),
+		Name:     "gpo.maxprice",
+		Usage:    "Maximum gas price will be recommended by gpo",
+		Value:    ethconfig.Defaults.GPO.MaxPrice.Int64(),
+		Category: "Gas price oracle settings",
 	}
 
 	// Metrics flags
 	MetricsEnabledFlag = cli.BoolFlag{
-		Name:  "metrics",
-		Usage: "Enable metrics collection and reporting",
+		Name:     "metrics",
+		Usage:    "Enable metrics collection and reporting",
+		Category: "Metrics flags",
 	}
 
 	// MetricsHTTPFlag defines the endpoint for a stand-alone metrics HTTP endpoint.
@@ -652,122 +753,153 @@ var (
 	// to enable a public-OK metrics endpoint without having to worry about ALSO exposing
 	// other profiling behavior or information.
 	MetricsHTTPFlag = cli.StringFlag{
-		Name:  "metrics.addr",
-		Usage: "Enable stand-alone metrics HTTP server listening interface",
-		Value: metrics.DefaultConfig.HTTP,
+		Name:     "metrics.addr",
+		Usage:    "Enable stand-alone metrics HTTP server listening interface",
+		Value:    metrics.DefaultConfig.HTTP,
+		Category: "Metrics flags",
 	}
 	MetricsPortFlag = cli.IntFlag{
-		Name:  "metrics.port",
-		Usage: "Metrics HTTP server listening port",
-		Value: metrics.DefaultConfig.Port,
+		Name:     "metrics.port",
+		Usage:    "Metrics HTTP server listening port",
+		Value:    metrics.DefaultConfig.Port,
+		Category: "Metrics flags",
 	}
 	HistoryV3Flag = cli.BoolFlag{
-		Name:  "experimental.history.v3",
-		Usage: "(Also known as Erigon3) Not recommended yet: Can't change this flag after node creation. New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
+		Name:     "experimental.history.v3",
+		Usage:    "(Also known as Erigon3) Not recommended yet: Can't change this flag after node creation. New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
+		Category: "Metrics flags",
 	}
-
+	// Clique settings
 	CliqueSnapshotCheckpointIntervalFlag = cli.UintFlag{
-		Name:  "clique.checkpoint",
-		Usage: "Number of blocks after which to save the vote snapshot to the database",
-		Value: 10,
+		Name:     "clique.checkpoint",
+		Usage:    "Number of blocks after which to save the vote snapshot to the database",
+		Value:    10,
+		Category: "Clique settings",
 	}
 	CliqueSnapshotInmemorySnapshotsFlag = cli.IntFlag{
-		Name:  "clique.snapshots",
-		Usage: "Number of recent vote snapshots to keep in memory",
-		Value: 1024,
+		Name:     "clique.snapshots",
+		Usage:    "Number of recent vote snapshots to keep in memory",
+		Value:    1024,
+		Category: "Clique settings",
 	}
 	CliqueSnapshotInmemorySignaturesFlag = cli.IntFlag{
-		Name:  "clique.signatures",
-		Usage: "Number of recent block signatures to keep in memory",
-		Value: 16384,
+		Name:     "clique.signatures",
+		Usage:    "Number of recent block signatures to keep in memory",
+		Value:    16384,
+		Category: "Clique settings",
 	}
 	CliqueDataDirFlag = flags.DirectoryFlag{
-		Name:  "clique.datadir",
-		Usage: "Path to clique db folder",
-		Value: "",
+		Name:     "clique.datadir",
+		Usage:    "Path to clique db folder",
+		Value:    "",
+		Category: "Clique settings",
 	}
-
+	// Snapshot settings
+	SnapshotFlag = cli.BoolFlag{
+		Name:     "snapshots",
+		Usage:    `Default: use snapshots "true" for Mainnet, Goerli, Gnosis Chain and Chiado. use snapshots "false" in all other cases`,
+		Value:    true,
+		Category: "Snapshot settings",
+	}
 	SnapKeepBlocksFlag = cli.BoolFlag{
-		Name:  ethconfig.FlagSnapKeepBlocks,
-		Usage: "Keep ancient blocks in db (useful for debug)",
+		Name:     ethconfig.FlagSnapKeepBlocks,
+		Usage:    "Keep ancient blocks in db (useful for debug)",
+		Category: "Snapshot settings",
 	}
 	SnapStopFlag = cli.BoolFlag{
-		Name:  ethconfig.FlagSnapStop,
-		Usage: "Workaround to stop producing new snapshots, if you meet some snapshots-related critical bug. It will stop move historical data from DB to new immutable snapshots. DB will grow and may slightly slow-down - and removing this flag in future will not fix this effect (db size will not greatly reduce).",
+		Name:     ethconfig.FlagSnapStop,
+		Usage:    "Workaround to stop producing new snapshots, if you meet some snapshots-related critical bug. It will stop move historical data from DB to new immutable snapshots. DB will grow and may slightly slow-down - and removing this flag in future will not fix this effect (db size will not greatly reduce).",
+		Category: "Snapshot settings",
 	}
+	// Torrent settings
 	TorrentVerbosityFlag = cli.IntFlag{
-		Name:  "torrent.verbosity",
-		Value: 2,
-		Usage: "0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set --verbosity to equal or higher level and has default: 2)",
+		Name:     "torrent.verbosity",
+		Value:    2,
+		Usage:    "0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set --verbosity to equal or higher level and has default: 2)",
+		Category: "Torrent settings",
 	}
 	TorrentDownloadRateFlag = cli.StringFlag{
-		Name:  "torrent.download.rate",
-		Value: "16mb",
-		Usage: "Bytes per second, example: 32mb",
+		Name:     "torrent.download.rate",
+		Value:    "16mb",
+		Usage:    "Bytes per second, example: 32mb",
+		Category: "Torrent settings",
 	}
 	TorrentUploadRateFlag = cli.StringFlag{
-		Name:  "torrent.upload.rate",
-		Value: "4mb",
-		Usage: "Bytes per second, example: 32mb",
+		Name:     "torrent.upload.rate",
+		Value:    "4mb",
+		Usage:    "Bytes per second, example: 32mb",
+		Category: "Torrent settings",
 	}
 	TorrentDownloadSlotsFlag = cli.IntFlag{
-		Name:  "torrent.download.slots",
-		Value: 3,
-		Usage: "Amount of files to download in parallel. If network has enough seeders 1-3 slot enough, if network has lack of seeders increase to 5-7 (too big value will slow down everything).",
+		Name:     "torrent.download.slots",
+		Value:    3,
+		Usage:    "Amount of files to download in parallel. If network has enough seeders 1-3 slot enough, if network has lack of seeders increase to 5-7 (too big value will slow down everything).",
+		Category: "Torrent settings",
 	}
 	TorrentStaticPeersFlag = cli.StringFlag{
-		Name:  "torrent.staticpeers",
-		Usage: "Comma separated enode URLs to connect to",
-		Value: "",
+		Name:     "torrent.staticpeers",
+		Usage:    "Comma separated enode URLs to connect to",
+		Value:    "",
+		Category: "Torrent settings",
 	}
 	NoDownloaderFlag = cli.BoolFlag{
-		Name:  "no-downloader",
-		Usage: "Disables downloader component",
+		Name:     "no-downloader",
+		Usage:    "Disables downloader component",
+		Category: "Torrent settings",
 	}
 	DownloaderVerifyFlag = cli.BoolFlag{
-		Name:  "downloader.verify",
-		Usage: "Verify snapshots on startup. It will not report problems found, but re-download broken pieces.",
+		Name:     "downloader.verify",
+		Usage:    "Verify snapshots on startup. It will not report problems found, but re-download broken pieces.",
+		Category: "Torrent settings",
 	}
 	DisableIPV6 = cli.BoolFlag{
-		Name:  "downloader.disable.ipv6",
-		Usage: "Turns off ipv6 for the downloader",
-		Value: false,
+		Name:     "downloader.disable.ipv6",
+		Usage:    "Turns off ipv6 for the downloader",
+		Value:    false,
+		Category: "Torrent settings",
 	}
-
 	DisableIPV4 = cli.BoolFlag{
-		Name:  "downloader.disable.ipv4",
-		Usage: "Turns off ipv4 for the downloader",
-		Value: false,
+		Name:     "downloader.disable.ipv4",
+		Usage:    "Turns off ipv4 for the downloader",
+		Value:    false,
+		Category: "Torrent settings",
 	}
 	TorrentPortFlag = cli.IntFlag{
-		Name:  "torrent.port",
-		Value: 42069,
-		Usage: "Port to listen and serve BitTorrent protocol",
+		Name:     "torrent.port",
+		Value:    42069,
+		Usage:    "Port to listen and serve BitTorrent protocol",
+		Category: "Torrent settings",
 	}
 	TorrentMaxPeersFlag = cli.IntFlag{
-		Name:  "torrent.maxpeers",
-		Value: 100,
-		Usage: "Unused parameter (reserved for future use)",
+		Name:     "torrent.maxpeers",
+		Value:    100,
+		Usage:    "Unused parameter (reserved for future use)",
+		Category: "Torrent settings",
 	}
 	TorrentConnsPerFileFlag = cli.IntFlag{
-		Name:  "torrent.conns.perfile",
-		Value: 10,
-		Usage: "Number of connections per file",
+		Name:     "torrent.conns.perfile",
+		Value:    10,
+		Usage:    "Number of connections per file",
+		Category: "Torrent settings",
 	}
+	// Database settings
 	DbPageSizeFlag = cli.StringFlag{
-		Name:  "db.pagesize",
-		Usage: "DB is splitted to 'pages' of fixed size. Can't change DB creation. Must be power of 2 and '256b <= pagesize <= 64kb'. Default: equal to OperationSystem's pageSize. Bigger pageSize causing: 1. More writes to disk during commit 2. Smaller b-tree high 3. Less fragmentation 4. Less overhead on 'free-pages list' maintainance (a bit faster Put/Commit) 5. If expecting DB-size > 8Tb then set pageSize >= 8Kb",
-		Value: "8KB",
+		Name:     "db.pagesize",
+		Usage:    "DB is splitted to 'pages' of fixed size. Can't change DB creation. Must be power of 2 and '256b <= pagesize <= 64kb'. Default: equal to OperationSystem's pageSize. Bigger pageSize causing: 1. More writes to disk during commit 2. Smaller b-tree high 3. Less fragmentation 4. Less overhead on 'free-pages list' maintainance (a bit faster Put/Commit) 5. If expecting DB-size > 8Tb then set pageSize >= 8Kb",
+		Value:    "8KB",
+		Category: "Database settings",
 	}
 	DbSizeLimitFlag = cli.StringFlag{
-		Name:  "db.size.limit",
-		Usage: "Runtime limit of chaindata db size. You can change value of this flag at any time.",
-		Value: (12 * datasize.TB).String(),
+		Name:     "db.size.limit",
+		Usage:    "Runtime limit of chaindata db size. You can change value of this flag at any time.",
+		Value:    (12 * datasize.TB).String(),
+		Category: "Database settings",
 	}
 	ForcePartialCommitFlag = cli.BoolFlag{
-		Name:  "force.partial.commit",
-		Usage: "Force data commit after each stage (or even do multiple commits per 1 stage - to save it's progress). Don't use this flag if node is synced. Meaning: readers (users of RPC) would like to see 'fully consistent' data (block is executed and all indices are updated). Erigon guarantee this level of data-consistency. But 1 downside: after restore node from backup - it can't save partial progress (non-committed progress will be lost at restart). This flag will be removed in future if we can find automatic way to detect corner-cases.",
-		Value: false,
+		Name:     "force.partial.commit",
+		Usage:    "Force data commit after each stage (or even do multiple commits per 1 stage - to save it's progress). Don't use this flag if node is synced. Meaning: readers (users of RPC) would like to see 'fully consistent' data (block is executed and all indices are updated). Erigon guarantee this level of data-consistency. But 1 downside: after restore node from backup - it can't save partial progress (non-committed progress will be lost at restart). This flag will be removed in future if we can find automatic way to detect corner-cases.",
+		Value:    false,
+		Category: "Database settings",
 	}
 
 	HealthCheckFlag = cli.BoolFlag{
@@ -867,133 +999,159 @@ var (
 		Name:  "diagnostics.ids",
 		Usage: "Comma separated list of support session ids to connect to",
 	}
-
+	// Silkworm settings
 	SilkwormExecutionFlag = cli.BoolFlag{
-		Name:  "silkworm.exec",
-		Usage: "Enable Silkworm block execution",
+		Name:     "silkworm.exec",
+		Usage:    "Enable Silkworm block execution",
+		Category: "Silkworm settings",
 	}
 	SilkwormRpcDaemonFlag = cli.BoolFlag{
-		Name:  "silkworm.rpc",
-		Usage: "Enable embedded Silkworm RPC service",
+		Name:     "silkworm.rpc",
+		Usage:    "Enable embedded Silkworm RPC service",
+		Category: "Silkworm settings",
 	}
 	SilkwormSentryFlag = cli.BoolFlag{
-		Name:  "silkworm.sentry",
-		Usage: "Enable embedded Silkworm Sentry service",
+		Name:     "silkworm.sentry",
+		Usage:    "Enable embedded Silkworm Sentry service",
+		Category: "Silkworm settings",
 	}
 	SilkwormVerbosityFlag = cli.StringFlag{
-		Name:  "silkworm.verbosity",
-		Usage: "Set the log level for Silkworm console logs",
-		Value: log.LvlInfo.String(),
+		Name:     "silkworm.verbosity",
+		Usage:    "Set the log level for Silkworm console logs",
+		Value:    log.LvlInfo.String(),
+		Category: "Silkworm settings",
 	}
 	SilkwormNumContextsFlag = cli.UintFlag{
-		Name:  "silkworm.contexts",
-		Usage: "Number of I/O contexts used in embedded Silkworm RPC and Sentry services (zero means use default in Silkworm)",
-		Value: 0,
+		Name:     "silkworm.contexts",
+		Usage:    "Number of I/O contexts used in embedded Silkworm RPC and Sentry services (zero means use default in Silkworm)",
+		Value:    0,
+		Category: "Silkworm settings",
 	}
 	SilkwormRpcLogEnabledFlag = cli.BoolFlag{
-		Name:  "silkworm.rpc.log",
-		Usage: "Enable interface log for embedded Silkworm RPC service",
-		Value: false,
+		Name:     "silkworm.rpc.log",
+		Usage:    "Enable interface log for embedded Silkworm RPC service",
+		Value:    false,
+		Category: "Silkworm settings",
 	}
 	SilkwormRpcLogMaxFileSizeFlag = cli.UintFlag{
-		Name:  "silkworm.rpc.log.maxsize",
-		Usage: "Max interface log file size in MB for embedded Silkworm RPC service",
-		Value: 1,
+		Name:     "silkworm.rpc.log.maxsize",
+		Usage:    "Max interface log file size in MB for embedded Silkworm RPC service",
+		Value:    1,
+		Category: "Silkworm settings",
 	}
 	SilkwormRpcLogMaxFilesFlag = cli.UintFlag{
-		Name:  "silkworm.rpc.log.maxfiles",
-		Usage: "Max interface log files for embedded Silkworm RPC service",
-		Value: 100,
+		Name:     "silkworm.rpc.log.maxfiles",
+		Usage:    "Max interface log files for embedded Silkworm RPC service",
+		Value:    100,
+		Category: "Silkworm settings",
 	}
 	SilkwormRpcLogDumpResponseFlag = cli.BoolFlag{
-		Name:  "silkworm.rpc.log.response",
-		Usage: "Dump responses in interface logs for embedded Silkworm RPC service",
-		Value: false,
+		Name:     "silkworm.rpc.log.response",
+		Usage:    "Dump responses in interface logs for embedded Silkworm RPC service",
+		Value:    false,
+		Category: "Silkworm settings",
 	}
 	SilkwormRpcNumWorkersFlag = cli.UintFlag{
-		Name:  "silkworm.rpc.workers",
-		Usage: "Number of worker threads used in embedded Silkworm RPC service (zero means use default in Silkworm)",
-		Value: 0,
+		Name:     "silkworm.rpc.workers",
+		Usage:    "Number of worker threads used in embedded Silkworm RPC service (zero means use default in Silkworm)",
+		Value:    0,
+		Category: "Silkworm settings",
 	}
 	SilkwormRpcJsonCompatibilityFlag = cli.BoolFlag{
-		Name:  "silkworm.rpc.compatibility",
-		Usage: "Preserve JSON-RPC compatibility using embedded Silkworm RPC service",
-		Value: true,
+		Name:     "silkworm.rpc.compatibility",
+		Usage:    "Preserve JSON-RPC compatibility using embedded Silkworm RPC service",
+		Category: "Silkworm settings",
+		Value:    true,
 	}
-
+	// Caplin settings
 	BeaconAPIFlag = cli.StringSliceFlag{
-		Name:  "beacon.api",
-		Usage: "Enable beacon API (avaiable endpoints: beacon, builder, config, debug, events, node, validator, rewards, lighthouse)",
+		Name:     "beacon.api",
+		Usage:    "Enable beacon API (avaiable endpoints: beacon, builder, config, debug, events, node, validator, rewards, lighthouse)",
+		Category: "Caplin settings",
 	}
 	BeaconApiProtocolFlag = cli.StringFlag{
-		Name:  "beacon.api.protocol",
-		Usage: "Protocol for beacon API",
-		Value: "tcp",
+		Name:     "beacon.api.protocol",
+		Usage:    "Protocol for beacon API",
+		Value:    "tcp",
+		Category: "Caplin settings",
 	}
 	BeaconApiReadTimeoutFlag = cli.Uint64Flag{
-		Name:  "beacon.api.read.timeout",
-		Usage: "Sets the seconds for a read time out in the beacon api",
-		Value: 5,
+		Name:     "beacon.api.read.timeout",
+		Usage:    "Sets the seconds for a read time out in the beacon api",
+		Value:    5,
+		Category: "Caplin settings",
 	}
 	BeaconApiWriteTimeoutFlag = cli.Uint64Flag{
-		Name:  "beacon.api.write.timeout",
-		Usage: "Sets the seconds for a write time out in the beacon api",
-		Value: 5,
+		Name:     "beacon.api.write.timeout",
+		Usage:    "Sets the seconds for a write time out in the beacon api",
+		Value:    5,
+		Category: "Caplin settings",
 	}
 	BeaconApiIdleTimeoutFlag = cli.Uint64Flag{
-		Name:  "beacon.api.ide.timeout",
-		Usage: "Sets the seconds for a write time out in the beacon api",
-		Value: 25,
+		Name:     "beacon.api.ide.timeout",
+		Usage:    "Sets the seconds for a write time out in the beacon api",
+		Value:    25,
+		Category: "Caplin settings",
 	}
 	BeaconApiAddrFlag = cli.StringFlag{
-		Name:  "beacon.api.addr",
-		Usage: "sets the host to listen for beacon api requests",
-		Value: "localhost",
+		Name:     "beacon.api.addr",
+		Usage:    "sets the host to listen for beacon api requests",
+		Value:    "localhost",
+		Category: "Caplin settings",
 	}
 	BeaconApiPortFlag = cli.UintFlag{
-		Name:  "beacon.api.port",
-		Usage: "sets the port to listen for beacon api requests",
-		Value: 5555,
+		Name:     "beacon.api.port",
+		Usage:    "sets the port to listen for beacon api requests",
+		Value:    5555,
+		Category: "Caplin settings",
 	}
 	RPCSlowFlag = cli.DurationFlag{
-		Name:  "rpc.slow",
-		Usage: "Print in logs RPC requests slower than given threshold: 100ms, 1s, 1m. Exluded methods: " + strings.Join(rpccfg.SlowLogBlackList, ","),
-		Value: 0,
+		Name:     "rpc.slow",
+		Usage:    "Print in logs RPC requests slower than given threshold: 100ms, 1s, 1m. Exluded methods: " + strings.Join(rpccfg.SlowLogBlackList, ","),
+		Value:    0,
+		Category: "Caplin settings",
 	}
 	CaplinBackfillingFlag = cli.BoolFlag{
-		Name:  "caplin.backfilling",
-		Usage: "sets whether backfilling is enabled for caplin",
-		Value: false,
+		Name:     "caplin.backfilling",
+		Usage:    "sets whether backfilling is enabled for caplin",
+		Value:    false,
+		Category: "Caplin settings",
 	}
 	CaplinBlobBackfillingFlag = cli.BoolFlag{
-		Name:  "caplin.backfilling.blob",
-		Usage: "sets whether backfilling is enabled for caplin",
-		Value: false,
+		Name:     "caplin.backfilling.blob",
+		Usage:    "sets whether backfilling is enabled for caplin",
+		Value:    false,
+		Category: "Caplin settings",
 	}
 	CaplinDisableBlobPruningFlag = cli.BoolFlag{
-		Name:  "caplin.backfilling.blob.no-pruning",
-		Usage: "disable blob pruning in caplin",
-		Value: false,
+		Name:     "caplin.backfilling.blob.no-pruning",
+		Usage:    "disable blob pruning in caplin",
+		Value:    false,
+		Category: "Caplin settings",
 	}
 	CaplinArchiveFlag = cli.BoolFlag{
-		Name:  "caplin.archive",
-		Usage: "enables archival node in caplin",
-		Value: false,
+		Name:     "caplin.archive",
+		Usage:    "enables archival node in caplin",
+		Value:    false,
+		Category: "Caplin settings",
 	}
 	BeaconApiAllowCredentialsFlag = cli.BoolFlag{
-		Name:  "beacon.api.cors.allow-credentials",
-		Usage: "set the cors' allow credentials",
-		Value: false,
+		Name:     "beacon.api.cors.allow-credentials",
+		Usage:    "set the cors' allow credentials",
+		Value:    false,
+		Category: "Caplin settings",
 	}
 	BeaconApiAllowMethodsFlag = cli.StringSliceFlag{
-		Name:  "beacon.api.cors.allow-methods",
-		Usage: "set the cors' allow methods",
-		Value: cli.NewStringSlice("GET", "POST", "PUT", "DELETE", "OPTIONS"),
+		Name:     "beacon.api.cors.allow-methods",
+		Usage:    "set the cors' allow methods",
+		Value:    cli.NewStringSlice("GET", "POST", "PUT", "DELETE", "OPTIONS"),
+		Category: "Caplin settings",
 	}
 	BeaconApiAllowOriginsFlag = cli.StringSliceFlag{
-		Name:  "beacon.api.cors.allow-origins",
-		Usage: "set the cors' allow origins",
-		Value: cli.NewStringSlice(),
+		Name:     "beacon.api.cors.allow-origins",
+		Usage:    "set the cors' allow origins",
+		Value:    cli.NewStringSlice(),
+		Category: "Caplin settings",
 	}
 )
 

@@ -30,14 +30,16 @@ import (
 
 var (
 	DatabaseVerbosityFlag = cli.IntFlag{
-		Name:  "database.verbosity",
-		Usage: "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning.",
-		Value: 2,
+		Name:     "database.verbosity",
+		Usage:    "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning.",
+		Value:    2,
+		Category: "Database settings",
 	}
 	BatchSizeFlag = cli.StringFlag{
-		Name:  "batchSize",
-		Usage: "Batch size for the execution stage",
-		Value: "256M",
+		Name:     "batchSize",
+		Usage:    "Batch size for the execution stage",
+		Value:    "256M",
+		Category: "Database settings",
 	}
 	EtlBufferSizeFlag = cli.StringFlag{
 		Name:  "etl.bufferSize",
@@ -51,15 +53,16 @@ var (
 	}
 
 	PrivateApiAddr = cli.StringFlag{
-		Name:  "private.api.addr",
-		Usage: "Erigon's components (txpool, rpcdaemon, sentry, downloader, ...) can be deployed as independent Processes on same/another server. Then components will connect to erigon by this internal grpc API. example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface",
-		Value: "127.0.0.1:9090",
+		Name:     "private.api.addr",
+		Usage:    "Erigon's components (txpool, rpcdaemon, sentry, downloader, ...) can be deployed as independent Processes on same/another server. Then components will connect to erigon by this internal grpc API. example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface",
+		Value:    "127.0.0.1:9090",
+		Category: "Network settings",
 	}
-
 	PrivateApiRateLimit = cli.IntFlag{
-		Name:  "private.api.ratelimit",
-		Usage: "Amount of requests server handle simultaneously - requests over this limit will wait. Increase it - if clients see 'request timeout' while server load is low - it means your 'hot data' is small or have much RAM. ",
-		Value: kv.ReadersLimit - 128,
+		Name:     "private.api.ratelimit",
+		Usage:    "Amount of requests server handle simultaneously - requests over this limit will wait. Increase it - if clients see 'request timeout' while server load is low - it means your 'hot data' is small or have much RAM. ",
+		Value:    kv.ReadersLimit - 128,
+		Category: "Network settings",
 	}
 
 	PruneFlag = cli.StringFlag{
@@ -74,40 +77,49 @@ var (
 	However, --prune=r means to prune receipts before the Beacon Chain genesis (Consensus Layer might need receipts after that).
 	If an item is NOT on the list - means NO pruning for this data.
 	Example: --prune=htc`,
-		Value: "disabled",
+		Value:    "disabled",
+		Category: "Prune settings",
 	}
 	PruneHistoryFlag = cli.Uint64Flag{
-		Name:  "prune.h.older",
-		Usage: `Prune data older than this number of blocks from the tip of the chain (if --prune flag has 'h', then default is 90K)`,
+		Name:     "prune.h.older",
+		Usage:    `Prune data older than this number of blocks from the tip of the chain (if --prune flag has 'h', then default is 90K)`,
+		Category: "Prune settings",
 	}
 	PruneReceiptFlag = cli.Uint64Flag{
-		Name:  "prune.r.older",
-		Usage: `Prune data older than this number of blocks from the tip of the chain`,
+		Name:     "prune.r.older",
+		Usage:    `Prune data older than this number of blocks from the tip of the chain`,
+		Category: "Prune settings",
 	}
 	PruneTxIndexFlag = cli.Uint64Flag{
-		Name:  "prune.t.older",
-		Usage: `Prune data older than this number of blocks from the tip of the chain (if --prune flag has 't', then default is 90K)`,
+		Name:     "prune.t.older",
+		Usage:    `Prune data older than this number of blocks from the tip of the chain (if --prune flag has 't', then default is 90K)`,
+		Category: "Prune settings",
 	}
 	PruneCallTracesFlag = cli.Uint64Flag{
-		Name:  "prune.c.older",
-		Usage: `Prune data older than this number of blocks from the tip of the chain (if --prune flag has 'c', then default is 90K)`,
+		Name:     "prune.c.older",
+		Usage:    `Prune data older than this number of blocks from the tip of the chain (if --prune flag has 'c', then default is 90K)`,
+		Category: "Prune settings",
 	}
 
 	PruneHistoryBeforeFlag = cli.Uint64Flag{
-		Name:  "prune.h.before",
-		Usage: `Prune data before this block`,
+		Name:     "prune.h.before",
+		Usage:    `Prune data before this block`,
+		Category: "Prune settings",
 	}
 	PruneReceiptBeforeFlag = cli.Uint64Flag{
-		Name:  "prune.r.before",
-		Usage: `Prune data before this block`,
+		Name:     "prune.r.before",
+		Usage:    `Prune data before this block`,
+		Category: "Prune settings",
 	}
 	PruneTxIndexBeforeFlag = cli.Uint64Flag{
-		Name:  "prune.t.before",
-		Usage: `Prune data before this block`,
+		Name:     "prune.t.before",
+		Usage:    `Prune data before this block`,
+		Category: "Prune settings",
 	}
 	PruneCallTracesBeforeFlag = cli.Uint64Flag{
-		Name:  "prune.c.before",
-		Usage: `Prune data before this block`,
+		Name:     "prune.c.before",
+		Usage:    `Prune data before this block`,
+		Category: "Prune settings",
 	}
 
 	ExperimentsFlag = cli.StringFlag{
@@ -119,52 +131,58 @@ var (
 
 	// mTLS flags
 	TLSFlag = cli.BoolFlag{
-		Name:  "tls",
-		Usage: "Enable TLS handshake",
+		Name:     "tls",
+		Usage:    "Enable TLS handshake",
+		Category: "Network settings",
 	}
 	TLSCertFlag = cli.StringFlag{
-		Name:  "tls.cert",
-		Usage: "Specify certificate",
-		Value: "",
+		Name:     "tls.cert",
+		Usage:    "Specify certificate",
+		Value:    "",
+		Category: "Network settings",
 	}
 	TLSKeyFlag = cli.StringFlag{
-		Name:  "tls.key",
-		Usage: "Specify key file",
-		Value: "",
+		Name:     "tls.key",
+		Usage:    "Specify key file",
+		Value:    "",
+		Category: "Network settings",
 	}
 	TLSCACertFlag = cli.StringFlag{
-		Name:  "tls.cacert",
-		Usage: "Specify certificate authority",
-		Value: "",
+		Name:     "tls.cacert",
+		Usage:    "Specify certificate authority",
+		Value:    "",
+		Category: "Network settings",
 	}
 	StateStreamDisableFlag = cli.BoolFlag{
-		Name:  "state.stream.disable",
-		Usage: "Disable streaming of state changes from core to RPC daemon",
+		Name:     "state.stream.disable",
+		Usage:    "Disable streaming of state changes from core to RPC daemon",
+		Category: "Network settings",
 	}
 
 	// Throttling Flags
 	SyncLoopThrottleFlag = cli.StringFlag{
-		Name:  "sync.loop.throttle",
-		Usage: "Sets the minimum time between sync loop starts (e.g. 1h30m, default is none)",
-		Value: "",
+		Name:     "sync.loop.throttle",
+		Usage:    "Sets the minimum time between sync loop starts (e.g. 1h30m, default is none)",
+		Value:    "",
+		Category: "Sync flags",
 	}
-
 	SyncLoopPruneLimitFlag = cli.UintFlag{
-		Name:  "sync.loop.prune.limit",
-		Usage: "Sets the maximum number of block to prune per loop iteration",
-		Value: 100,
+		Name:     "sync.loop.prune.limit",
+		Usage:    "Sets the maximum number of block to prune per loop iteration",
+		Value:    100,
+		Category: "Sync flags",
 	}
-
 	SyncLoopBreakAfterFlag = cli.StringFlag{
-		Name:  "sync.loop.break.after",
-		Usage: "Sets the last stage of the sync loop to run",
-		Value: "",
+		Name:     "sync.loop.break.after",
+		Usage:    "Sets the last stage of the sync loop to run",
+		Value:    "",
+		Category: "Sync flags",
 	}
-
 	SyncLoopBlockLimitFlag = cli.UintFlag{
-		Name:  "sync.loop.block.limit",
-		Usage: "Sets the maximum number of blocks to process per loop iteration",
-		Value: 0, // unlimited
+		Name:     "sync.loop.block.limit",
+		Usage:    "Sets the maximum number of blocks to process per loop iteration",
+		Value:    0, // unlimited
+		Category: "Sync flags",
 	}
 
 	UploadLocationFlag = cli.StringFlag{
@@ -197,47 +215,55 @@ var (
 	}
 
 	HTTPReadTimeoutFlag = cli.DurationFlag{
-		Name:  "http.timeouts.read",
-		Usage: "Maximum duration for reading the entire request, including the body.",
-		Value: rpccfg.DefaultHTTPTimeouts.ReadTimeout,
+		Name:     "http.timeouts.read",
+		Usage:    "Maximum duration for reading the entire request, including the body.",
+		Value:    rpccfg.DefaultHTTPTimeouts.ReadTimeout,
+		Category: "Network settings",
 	}
 	HTTPWriteTimeoutFlag = cli.DurationFlag{
-		Name:  "http.timeouts.write",
-		Usage: "Maximum duration before timing out writes of the response. It is reset whenever a new request's header is read.",
-		Value: rpccfg.DefaultHTTPTimeouts.WriteTimeout,
+		Name:     "http.timeouts.write",
+		Usage:    "Maximum duration before timing out writes of the response. It is reset whenever a new request's header is read.",
+		Value:    rpccfg.DefaultHTTPTimeouts.WriteTimeout,
+		Category: "Network settings",
 	}
 	HTTPIdleTimeoutFlag = cli.DurationFlag{
-		Name:  "http.timeouts.idle",
-		Usage: "Maximum amount of time to wait for the next request when keep-alives are enabled. If http.timeouts.idle is zero, the value of http.timeouts.read is used.",
-		Value: rpccfg.DefaultHTTPTimeouts.IdleTimeout,
+		Name:     "http.timeouts.idle",
+		Usage:    "Maximum amount of time to wait for the next request when keep-alives are enabled. If http.timeouts.idle is zero, the value of http.timeouts.read is used.",
+		Value:    rpccfg.DefaultHTTPTimeouts.IdleTimeout,
+		Category: "Network settings",
 	}
 
 	AuthRpcReadTimeoutFlag = cli.DurationFlag{
-		Name:  "authrpc.timeouts.read",
-		Usage: "Maximum duration for reading the entire request, including the body.",
-		Value: rpccfg.DefaultHTTPTimeouts.ReadTimeout,
+		Name:     "authrpc.timeouts.read",
+		Usage:    "Maximum duration for reading the entire request, including the body.",
+		Value:    rpccfg.DefaultHTTPTimeouts.ReadTimeout,
+		Category: "Network settings",
 	}
 	AuthRpcWriteTimeoutFlag = cli.DurationFlag{
-		Name:  "authrpc.timeouts.write",
-		Usage: "Maximum duration before timing out writes of the response. It is reset whenever a new request's header is read.",
-		Value: rpccfg.DefaultHTTPTimeouts.WriteTimeout,
+		Name:     "authrpc.timeouts.write",
+		Usage:    "Maximum duration before timing out writes of the response. It is reset whenever a new request's header is read.",
+		Value:    rpccfg.DefaultHTTPTimeouts.WriteTimeout,
+		Category: "Network settings",
 	}
 	AuthRpcIdleTimeoutFlag = cli.DurationFlag{
-		Name:  "authrpc.timeouts.idle",
-		Usage: "Maximum amount of time to wait for the next request when keep-alives are enabled. If authrpc.timeouts.idle is zero, the value of authrpc.timeouts.read is used.",
-		Value: rpccfg.DefaultHTTPTimeouts.IdleTimeout,
+		Name:     "authrpc.timeouts.idle",
+		Usage:    "Maximum amount of time to wait for the next request when keep-alives are enabled. If authrpc.timeouts.idle is zero, the value of authrpc.timeouts.read is used.",
+		Value:    rpccfg.DefaultHTTPTimeouts.IdleTimeout,
+		Category: "Network settings",
 	}
 
 	EvmCallTimeoutFlag = cli.DurationFlag{
-		Name:  "rpc.evmtimeout",
-		Usage: "Maximum amount of time to wait for the answer from EVM call.",
-		Value: rpccfg.DefaultEvmCallTimeout,
+		Name:     "rpc.evmtimeout",
+		Usage:    "Maximum amount of time to wait for the answer from EVM call.",
+		Value:    rpccfg.DefaultEvmCallTimeout,
+		Category: "Network settings",
 	}
 
 	OverlayGetLogsFlag = cli.DurationFlag{
-		Name:  "rpc.overlay.getlogstimeout",
-		Usage: "Maximum amount of time to wait for the answer from the overlay_getLogs call.",
-		Value: rpccfg.DefaultOverlayGetLogsTimeout,
+		Name:     "rpc.overlay.getlogstimeout",
+		Usage:    "Maximum amount of time to wait for the answer from the overlay_getLogs call.",
+		Value:    rpccfg.DefaultOverlayGetLogsTimeout,
+		Category: "Network settings",
 	}
 
 	OverlayReplayBlockFlag = cli.DurationFlag{
@@ -247,9 +273,10 @@ var (
 	}
 
 	TxPoolCommitEvery = cli.DurationFlag{
-		Name:  "txpool.commit.every",
-		Usage: "How often transactions should be committed to the storage",
-		Value: txpoolcfg.DefaultConfig.CommitEvery,
+		Name:     "txpool.commit.every",
+		Usage:    "How often transactions should be committed to the storage",
+		Value:    txpoolcfg.DefaultConfig.CommitEvery,
+		Category: "Transaction pool settings",
 	}
 )
 
