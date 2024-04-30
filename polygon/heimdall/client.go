@@ -292,6 +292,8 @@ func (c *Client) FetchMilestone(ctx context.Context, number int64) (*Milestone, 
 		return nil, err
 	}
 
+	response.Result.Id = MilestoneId(number)
+
 	return &response.Result, nil
 }
 
@@ -487,7 +489,6 @@ func latestSpanURL(urlString string) (*url.URL, error) {
 
 func stateSyncListURL(urlString string, fromID uint64, to int64) (*url.URL, error) {
 	queryParams := fmt.Sprintf(fetchStateSyncEventsFormat, fromID, to, stateFetchLimit)
-
 	return makeURL(urlString, fetchStateSyncEventsPath, queryParams)
 }
 

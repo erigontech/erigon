@@ -86,8 +86,8 @@ func seedableSegmentFiles(dir string, chainName string) ([]string, error) {
 		if !snaptype.IsCorrectFileName(name) {
 			continue
 		}
-		ff, _, ok := snaptype.ParseFileName(dir, name)
-		if !ok {
+		ff, isStateFile, ok := snaptype.ParseFileName(dir, name)
+		if !ok || isStateFile {
 			continue
 		}
 		if !snapcfg.Seedable(chainName, ff) {

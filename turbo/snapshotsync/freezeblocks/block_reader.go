@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -104,6 +105,7 @@ func (r *RemoteBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, bl
 }
 func (r *RemoteBlockReader) Snapshots() services.BlockSnapshots    { panic("not implemented") }
 func (r *RemoteBlockReader) BorSnapshots() services.BlockSnapshots { panic("not implemented") }
+func (r *RemoteBlockReader) AllTypes() []snaptype.Type             { panic("not implemented") }
 func (r *RemoteBlockReader) FrozenBlocks() uint64                  { panic("not supported") }
 func (r *RemoteBlockReader) FrozenBorBlocks() uint64               { panic("not supported") }
 func (r *RemoteBlockReader) FrozenFiles() (list []string)          { panic("not supported") }
@@ -251,7 +253,7 @@ func (r *RemoteBlockReader) EventLookup(ctx context.Context, tx kv.Getter, txnHa
 }
 
 func (r *RemoteBlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
-	borTxnHash := types.ComputeBorTxHash(blockHeight, hash)
+	borTxnHash := bortypes.ComputeBorTxHash(blockHeight, hash)
 	reply, err := r.client.BorEvent(ctx, &remote.BorEventRequest{BorTxHash: gointerfaces.ConvertHashToH256(borTxnHash)})
 	if err != nil {
 		return nil, err
@@ -320,6 +322,15 @@ func (r *BlockReader) BorSnapshots() services.BlockSnapshots {
 	}
 
 	return nil
+}
+
+func (r *BlockReader) AllTypes() []snaptype.Type {
+	var types []snaptype.Type
+	types = append(types, r.sn.Types()...)
+	if r.borSn != nil {
+		types = append(types, r.borSn.Types()...)
+	}
+	return types
 }
 
 func (r *BlockReader) FrozenBlocks() uint64 { return r.sn.BlocksAvailable() }
@@ -1177,7 +1188,7 @@ func (r *BlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, hash common
 		return startEventId, nil
 	}
 
-	borTxHash := types.ComputeBorTxHash(blockHeight, hash)
+	borTxHash := bortypes.ComputeBorTxHash(blockHeight, hash)
 	view := r.borSn.View()
 	defer view.Close()
 
@@ -1255,7 +1266,7 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 		}
 		return result, nil
 	}
-	borTxHash := types.ComputeBorTxHash(blockHeight, hash)
+	borTxHash := bortypes.ComputeBorTxHash(blockHeight, hash)
 	view := r.borSn.View()
 	defer view.Close()
 	segments := view.Events()
@@ -1557,7 +1568,15 @@ func (r *BlockReader) Milestone(ctx context.Context, tx kv.Getter, milestoneId u
 }
 
 func (r *BlockReader) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	return lastId(ctx, tx, kv.BorCheckpoints)
+	lastCheckpointId, ok, err := lastId(ctx, tx, kv.BorCheckpoints)
+
+	snapshotLastCheckpointId := r.LastFrozenCheckpointId()
+
+	if snapshotLastCheckpointId > lastCheckpointId {
+		return snapshotLastCheckpointId, true, nil
+	}
+
+	return lastCheckpointId, ok, err
 }
 
 func (r *BlockReader) Checkpoint(ctx context.Context, tx kv.Getter, checkpointId uint64) ([]byte, error) {
@@ -1569,11 +1588,58 @@ func (r *BlockReader) Checkpoint(ctx context.Context, tx kv.Getter, checkpointId
 		return nil, err
 	}
 
-	if v == nil {
-		return nil, fmt.Errorf("milestone %d not found (db)", checkpointId)
+	if v != nil {
+		return common.Copy(v), nil
 	}
 
-	return common.Copy(v), nil
+	view := r.borSn.View()
+	defer view.Close()
+	segments := view.Checkpoints()
+	for i := len(segments) - 1; i >= 0; i-- {
+		sn := segments[i]
+		index := sn.Index()
+
+		if index == nil || index.KeyCount() == 0 || checkpointId < index.BaseDataID() {
+			continue
+		}
+
+		offset := index.OrdinalLookup(checkpointId - index.BaseDataID())
+		gg := sn.MakeGetter()
+		gg.Reset(offset)
+		result, _ := gg.Next(nil)
+		return common.Copy(result), nil
+	}
+
+	return nil, fmt.Errorf("checkpoint %d not found (db)", checkpointId)
+}
+
+func (r *BlockReader) LastFrozenCheckpointId() uint64 {
+	if r.borSn == nil {
+		return 0
+	}
+
+	view := r.borSn.View()
+	defer view.Close()
+	segments := view.Checkpoints()
+	if len(segments) == 0 {
+		return 0
+	}
+	// find the last segment which has a built index
+	var lastSegment *Segment
+	for i := len(segments) - 1; i >= 0; i-- {
+		if segments[i].Index() != nil {
+			lastSegment = segments[i]
+			break
+		}
+	}
+
+	if lastSegment == nil {
+		return 0
+	}
+
+	index := lastSegment.Index()
+
+	return index.BaseDataID() + index.KeyCount() - 1
 }
 
 // ---- Data Integrity part ----
