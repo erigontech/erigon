@@ -736,7 +736,6 @@ func AppendCanonicalTxNums(tx kv.RwTx, from uint64) (err error) {
 		if err != nil {
 			return err
 		}
-		fmt.Println(blockNum, nextBaseTxNum-1)
 	}
 	return nil
 }
