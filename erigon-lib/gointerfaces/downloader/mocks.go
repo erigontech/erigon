@@ -26,8 +26,8 @@ var _ DownloaderClient = &DownloaderClientMock{}
 //			DeleteFunc: func(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 //				panic("mock out the Delete method")
 //			},
-//			ProhibitFunc: func(ctx context.Context, in *ProhibitRequest, opts ...grpc.CallOption) (*ProhibitReply, error) {
-//				panic("mock out the Prohibit method")
+//			ProhibitNewDownloadsFunc: func(ctx context.Context, in *ProhibitNewDownloadsRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+//				panic("mock out the ProhibitNewDownloads method")
 //			},
 //			StatsFunc: func(ctx context.Context, in *StatsRequest, opts ...grpc.CallOption) (*StatsReply, error) {
 //				panic("mock out the Stats method")
@@ -48,8 +48,8 @@ type DownloaderClientMock struct {
 	// DeleteFunc mocks the Delete method.
 	DeleteFunc func(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 
-	// ProhibitFunc mocks the Prohibit method.
-	ProhibitFunc func(ctx context.Context, in *ProhibitRequest, opts ...grpc.CallOption) (*ProhibitReply, error)
+	// ProhibitNewDownloadsFunc mocks the ProhibitNewDownloads method.
+	ProhibitNewDownloadsFunc func(ctx context.Context, in *ProhibitNewDownloadsRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 
 	// StatsFunc mocks the Stats method.
 	StatsFunc func(ctx context.Context, in *StatsRequest, opts ...grpc.CallOption) (*StatsReply, error)
@@ -77,12 +77,12 @@ type DownloaderClientMock struct {
 			// Opts is the opts argument value.
 			Opts []grpc.CallOption
 		}
-		// Prohibit holds details about calls to the Prohibit method.
-		Prohibit []struct {
+		// ProhibitNewDownloads holds details about calls to the ProhibitNewDownloads method.
+		ProhibitNewDownloads []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// In is the in argument value.
-			In *ProhibitRequest
+			In *ProhibitNewDownloadsRequest
 			// Opts is the opts argument value.
 			Opts []grpc.CallOption
 		}
@@ -105,11 +105,11 @@ type DownloaderClientMock struct {
 			Opts []grpc.CallOption
 		}
 	}
-	lockAdd      sync.RWMutex
-	lockDelete   sync.RWMutex
-	lockProhibit sync.RWMutex
-	lockStats    sync.RWMutex
-	lockVerify   sync.RWMutex
+	lockAdd                  sync.RWMutex
+	lockDelete               sync.RWMutex
+	lockProhibitNewDownloads sync.RWMutex
+	lockStats                sync.RWMutex
+	lockVerify               sync.RWMutex
 }
 
 // Add calls AddFunc.
@@ -200,47 +200,47 @@ func (mock *DownloaderClientMock) DeleteCalls() []struct {
 	return calls
 }
 
-// Prohibit calls ProhibitFunc.
-func (mock *DownloaderClientMock) Prohibit(ctx context.Context, in *ProhibitRequest, opts ...grpc.CallOption) (*ProhibitReply, error) {
+// ProhibitNewDownloads calls ProhibitNewDownloadsFunc.
+func (mock *DownloaderClientMock) ProhibitNewDownloads(ctx context.Context, in *ProhibitNewDownloadsRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	callInfo := struct {
 		Ctx  context.Context
-		In   *ProhibitRequest
+		In   *ProhibitNewDownloadsRequest
 		Opts []grpc.CallOption
 	}{
 		Ctx:  ctx,
 		In:   in,
 		Opts: opts,
 	}
-	mock.lockProhibit.Lock()
-	mock.calls.Prohibit = append(mock.calls.Prohibit, callInfo)
-	mock.lockProhibit.Unlock()
-	if mock.ProhibitFunc == nil {
+	mock.lockProhibitNewDownloads.Lock()
+	mock.calls.ProhibitNewDownloads = append(mock.calls.ProhibitNewDownloads, callInfo)
+	mock.lockProhibitNewDownloads.Unlock()
+	if mock.ProhibitNewDownloadsFunc == nil {
 		var (
-			prohibitReplyOut *ProhibitReply
-			errOut           error
+			emptyOut *emptypb.Empty
+			errOut   error
 		)
-		return prohibitReplyOut, errOut
+		return emptyOut, errOut
 	}
-	return mock.ProhibitFunc(ctx, in, opts...)
+	return mock.ProhibitNewDownloadsFunc(ctx, in, opts...)
 }
 
-// ProhibitCalls gets all the calls that were made to Prohibit.
+// ProhibitNewDownloadsCalls gets all the calls that were made to ProhibitNewDownloads.
 // Check the length with:
 //
-//	len(mockedDownloaderClient.ProhibitCalls())
-func (mock *DownloaderClientMock) ProhibitCalls() []struct {
+//	len(mockedDownloaderClient.ProhibitNewDownloadsCalls())
+func (mock *DownloaderClientMock) ProhibitNewDownloadsCalls() []struct {
 	Ctx  context.Context
-	In   *ProhibitRequest
+	In   *ProhibitNewDownloadsRequest
 	Opts []grpc.CallOption
 } {
 	var calls []struct {
 		Ctx  context.Context
-		In   *ProhibitRequest
+		In   *ProhibitNewDownloadsRequest
 		Opts []grpc.CallOption
 	}
-	mock.lockProhibit.RLock()
-	calls = mock.calls.Prohibit
-	mock.lockProhibit.RUnlock()
+	mock.lockProhibitNewDownloads.RLock()
+	calls = mock.calls.ProhibitNewDownloads
+	mock.lockProhibitNewDownloads.RUnlock()
 	return calls
 }
 
@@ -348,8 +348,8 @@ var _ DownloaderServer = &DownloaderServerMock{}
 //			DeleteFunc: func(contextMoqParam context.Context, deleteRequest *DeleteRequest) (*emptypb.Empty, error) {
 //				panic("mock out the Delete method")
 //			},
-//			ProhibitFunc: func(contextMoqParam context.Context, prohibitRequest *ProhibitRequest) (*ProhibitReply, error) {
-//				panic("mock out the Prohibit method")
+//			ProhibitNewDownloadsFunc: func(contextMoqParam context.Context, prohibitNewDownloadsRequest *ProhibitNewDownloadsRequest) (*emptypb.Empty, error) {
+//				panic("mock out the ProhibitNewDownloads method")
 //			},
 //			StatsFunc: func(contextMoqParam context.Context, statsRequest *StatsRequest) (*StatsReply, error) {
 //				panic("mock out the Stats method")
@@ -373,8 +373,8 @@ type DownloaderServerMock struct {
 	// DeleteFunc mocks the Delete method.
 	DeleteFunc func(contextMoqParam context.Context, deleteRequest *DeleteRequest) (*emptypb.Empty, error)
 
-	// ProhibitFunc mocks the Prohibit method.
-	ProhibitFunc func(contextMoqParam context.Context, prohibitRequest *ProhibitRequest) (*ProhibitReply, error)
+	// ProhibitNewDownloadsFunc mocks the ProhibitNewDownloads method.
+	ProhibitNewDownloadsFunc func(contextMoqParam context.Context, prohibitNewDownloadsRequest *ProhibitNewDownloadsRequest) (*emptypb.Empty, error)
 
 	// StatsFunc mocks the Stats method.
 	StatsFunc func(contextMoqParam context.Context, statsRequest *StatsRequest) (*StatsReply, error)
@@ -401,12 +401,12 @@ type DownloaderServerMock struct {
 			// DeleteRequest is the deleteRequest argument value.
 			DeleteRequest *DeleteRequest
 		}
-		// Prohibit holds details about calls to the Prohibit method.
-		Prohibit []struct {
+		// ProhibitNewDownloads holds details about calls to the ProhibitNewDownloads method.
+		ProhibitNewDownloads []struct {
 			// ContextMoqParam is the contextMoqParam argument value.
 			ContextMoqParam context.Context
-			// ProhibitRequest is the prohibitRequest argument value.
-			ProhibitRequest *ProhibitRequest
+			// ProhibitNewDownloadsRequest is the prohibitNewDownloadsRequest argument value.
+			ProhibitNewDownloadsRequest *ProhibitNewDownloadsRequest
 		}
 		// Stats holds details about calls to the Stats method.
 		Stats []struct {
@@ -428,7 +428,7 @@ type DownloaderServerMock struct {
 	}
 	lockAdd                                    sync.RWMutex
 	lockDelete                                 sync.RWMutex
-	lockProhibit                               sync.RWMutex
+	lockProhibitNewDownloads                   sync.RWMutex
 	lockStats                                  sync.RWMutex
 	lockVerify                                 sync.RWMutex
 	lockmustEmbedUnimplementedDownloaderServer sync.RWMutex
@@ -514,43 +514,43 @@ func (mock *DownloaderServerMock) DeleteCalls() []struct {
 	return calls
 }
 
-// Prohibit calls ProhibitFunc.
-func (mock *DownloaderServerMock) Prohibit(contextMoqParam context.Context, prohibitRequest *ProhibitRequest) (*ProhibitReply, error) {
+// ProhibitNewDownloads calls ProhibitNewDownloadsFunc.
+func (mock *DownloaderServerMock) ProhibitNewDownloads(contextMoqParam context.Context, prohibitNewDownloadsRequest *ProhibitNewDownloadsRequest) (*emptypb.Empty, error) {
 	callInfo := struct {
-		ContextMoqParam context.Context
-		ProhibitRequest *ProhibitRequest
+		ContextMoqParam             context.Context
+		ProhibitNewDownloadsRequest *ProhibitNewDownloadsRequest
 	}{
-		ContextMoqParam: contextMoqParam,
-		ProhibitRequest: prohibitRequest,
+		ContextMoqParam:             contextMoqParam,
+		ProhibitNewDownloadsRequest: prohibitNewDownloadsRequest,
 	}
-	mock.lockProhibit.Lock()
-	mock.calls.Prohibit = append(mock.calls.Prohibit, callInfo)
-	mock.lockProhibit.Unlock()
-	if mock.ProhibitFunc == nil {
+	mock.lockProhibitNewDownloads.Lock()
+	mock.calls.ProhibitNewDownloads = append(mock.calls.ProhibitNewDownloads, callInfo)
+	mock.lockProhibitNewDownloads.Unlock()
+	if mock.ProhibitNewDownloadsFunc == nil {
 		var (
-			prohibitReplyOut *ProhibitReply
-			errOut           error
+			emptyOut *emptypb.Empty
+			errOut   error
 		)
-		return prohibitReplyOut, errOut
+		return emptyOut, errOut
 	}
-	return mock.ProhibitFunc(contextMoqParam, prohibitRequest)
+	return mock.ProhibitNewDownloadsFunc(contextMoqParam, prohibitNewDownloadsRequest)
 }
 
-// ProhibitCalls gets all the calls that were made to Prohibit.
+// ProhibitNewDownloadsCalls gets all the calls that were made to ProhibitNewDownloads.
 // Check the length with:
 //
-//	len(mockedDownloaderServer.ProhibitCalls())
-func (mock *DownloaderServerMock) ProhibitCalls() []struct {
-	ContextMoqParam context.Context
-	ProhibitRequest *ProhibitRequest
+//	len(mockedDownloaderServer.ProhibitNewDownloadsCalls())
+func (mock *DownloaderServerMock) ProhibitNewDownloadsCalls() []struct {
+	ContextMoqParam             context.Context
+	ProhibitNewDownloadsRequest *ProhibitNewDownloadsRequest
 } {
 	var calls []struct {
-		ContextMoqParam context.Context
-		ProhibitRequest *ProhibitRequest
+		ContextMoqParam             context.Context
+		ProhibitNewDownloadsRequest *ProhibitNewDownloadsRequest
 	}
-	mock.lockProhibit.RLock()
-	calls = mock.calls.Prohibit
-	mock.lockProhibit.RUnlock()
+	mock.lockProhibitNewDownloads.RLock()
+	calls = mock.calls.ProhibitNewDownloads
+	mock.lockProhibitNewDownloads.RUnlock()
 	return calls
 }
 

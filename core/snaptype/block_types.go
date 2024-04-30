@@ -178,8 +178,8 @@ var (
 				slot := types2.TxSlot{}
 				bodyBuf, word := make([]byte, 0, 4096), make([]byte, 0, 4096)
 
-				defer d.EnableMadvNormal().DisableReadAhead()
-				defer bodiesSegment.EnableMadvNormal().DisableReadAhead()
+				defer d.EnableReadAhead().DisableReadAhead()
+				defer bodiesSegment.EnableReadAhead().DisableReadAhead()
 
 				for {
 					g, bodyGetter := d.MakeGetter(), bodiesSegment.MakeGetter()

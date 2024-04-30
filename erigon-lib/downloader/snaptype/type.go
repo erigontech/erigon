@@ -465,14 +465,14 @@ func BuildIndex(ctx context.Context, info FileInfo, salt uint32, firstDataId uin
 		TmpDir:     tmpDir,
 		IndexFile:  filepath.Join(info.Dir(), info.Type.IdxFileName(info.Version, info.From, info.To)),
 		BaseDataID: firstDataId,
-		Salt:       salt,
+		Salt:       &salt,
 	}, logger)
 	if err != nil {
 		return err
 	}
 	rs.LogLvl(log.LvlDebug)
 
-	defer d.EnableMadvNormal().DisableReadAhead()
+	defer d.EnableReadAhead().DisableReadAhead()
 
 	for {
 		g := d.MakeGetter()

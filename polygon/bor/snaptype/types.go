@@ -159,7 +159,7 @@ var (
 				}
 				rs.LogLvl(log.LvlDebug)
 
-				defer d.EnableMadvNormal().DisableReadAhead()
+				defer d.EnableReadAhead().DisableReadAhead()
 
 				for {
 					g.Reset(0)
@@ -423,14 +423,14 @@ func buildValueIndex(ctx context.Context, sn snaptype.FileInfo, salt uint32, d *
 		TmpDir:     tmpDir,
 		IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To)),
 		BaseDataID: baseId,
-		Salt:       salt,
+		Salt:       &salt,
 	}, logger)
 	if err != nil {
 		return err
 	}
 	rs.LogLvl(log.LvlDebug)
 
-	defer d.EnableMadvNormal().DisableReadAhead()
+	defer d.EnableReadAhead().DisableReadAhead()
 
 	for {
 		g := d.MakeGetter()
