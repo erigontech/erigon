@@ -196,7 +196,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 		}
 	}
 
-	if err := agg.OpenFolder(false); err != nil {
+	if err := agg.OpenFolder(true); err != nil {
 		return err
 	}
 
