@@ -113,7 +113,7 @@ func SpawnSequencingStage(
 	yielded := mapset.NewSet[[32]byte]()
 	coinbase := cfg.zk.AddressSequencer
 	workRemaining := true
-	blockTracking := 0
+	decodedBlocksSize := uint64(0)
 
 	if l1Recovery {
 		// let's check if we have any L1 data to recover
@@ -121,7 +121,8 @@ func SpawnSequencingStage(
 		if err != nil {
 			return err
 		}
-		if len(decodedBlocks) == 0 {
+		decodedBlocksSize = uint64(len(decodedBlocks))
+		if decodedBlocksSize == 0 {
 			log.Info(fmt.Sprintf("[%s] L1 recovery has completed!", logPrefix), "batch", thisBatch)
 			time.Sleep(1 * time.Second)
 			return nil
@@ -132,7 +133,13 @@ func SpawnSequencingStage(
 
 	for bn := executionAt; runLoopBlocks; bn++ {
 		if l1Recovery {
-			decodedBlock = decodedBlocks[blockTracking]
+			decodedBlocksIndex := bn - executionAt
+			if decodedBlocksIndex == decodedBlocksSize {
+				runLoopBlocks = false
+				break
+			}
+
+			decodedBlock = decodedBlocks[decodedBlocksIndex]
 			deltaTimestamp = uint64(decodedBlock.DeltaTimestamp)
 			effectiveGases = decodedBlock.EffectiveGasPricePercentages
 			blockTransactions = decodedBlock.Transactions
@@ -326,16 +333,6 @@ func SpawnSequencingStage(
 		}
 
 		log.Info(fmt.Sprintf("[%s] Finish block %d with %d transactions...", logPrefix, thisBlockNumber, len(addedTransactions)))
-
-		// reset the slices for added transactions
-		addedTransactions = addedTransactions[:0]
-		addedReceipts = addedReceipts[:0]
-
-		if l1Recovery && blockTracking == len(decodedBlocks)-1 {
-			runLoopBlocks = false
-			break
-		}
-		blockTracking++
 	}
 
 	counters, err := batchCounters.CombineCollectors()
