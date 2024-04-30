@@ -5,14 +5,11 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"hash"
 	"math/bits"
 	"strings"
 
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/crypto/sha3"
-
 	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -145,6 +142,7 @@ func (branchData BranchData) String() string {
 type BranchEncoder struct {
 	buf       *bytes.Buffer
 	bitmapBuf [binary.MaxVarintLen64]byte
+	merger    *BranchMerger
 	updates   *etl.Collector
 	tmpdir    string
 }
@@ -153,6 +151,7 @@ func NewBranchEncoder(sz uint64, tmpdir string) *BranchEncoder {
 	be := &BranchEncoder{
 		buf:    bytes.NewBuffer(make([]byte, sz)),
 		tmpdir: tmpdir,
+		merger: NewHexBranchMerger(sz / 2),
 	}
 	be.initCollector()
 	return be
@@ -190,20 +189,35 @@ func (be *BranchEncoder) Load(load etl.LoadFunc, args etl.TransformArgs) error {
 }
 
 func (be *BranchEncoder) CollectUpdate(
+	ctx PatriciaContext,
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
 	readCell func(nibble int, skip bool) (*Cell, error),
-) (lastNibbe int, err error) {
+) (lastNibble int, err error) {
 
-	v, ln, err := be.EncodeBranch(bitmap, touchMap, afterMap, readCell)
+	var update []byte
+	update, lastNibble, err = be.EncodeBranch(bitmap, touchMap, afterMap, readCell)
 	if err != nil {
 		return 0, err
 	}
-	//fmt.Printf("collectBranchUpdate [%x] -> [%x]\n", prefix, []byte(v))
-	if err := be.updates.Collect(prefix, v); err != nil {
+
+	prev, prevStep, err := ctx.GetBranch(prefix)
+	_ = prevStep
+	if err != nil {
 		return 0, err
 	}
-	return ln, nil
+	if len(prev) > 0 {
+		//update, err = BranchData(prev).MergeHexBranches(update, merged)
+		update, err = be.merger.Merge(prev, update)
+		if err != nil {
+			return 0, err
+		}
+	}
+	//fmt.Printf("collectBranchUpdate [%x] -> [%x]\n", prefix, update)
+	if err = be.updates.Collect(prefix, common.Copy(update)); err != nil {
+		return 0, err
+	}
+	return lastNibble, nil
 }
 
 // Encoded result should be copied before next call to EncodeBranch, underlying slice is reused
@@ -453,7 +467,7 @@ func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []
 	var bitmapBuf [4]byte
 	binary.BigEndian.PutUint16(bitmapBuf[0:], touchMap1|touchMap2)
 	binary.BigEndian.PutUint16(bitmapBuf[2:], afterMap2)
-	newData = append(newData, bitmapBuf[:]...)
+	newData = append(newData[:0], bitmapBuf[:]...)
 	for bitset, j := bitmap1|bitmap2, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
 		if bitmap2&bit != 0 {
@@ -535,13 +549,12 @@ func (branchData BranchData) DecodeCells() (touchMap, afterMap uint16, row [16]*
 }
 
 type BranchMerger struct {
-	buf    *bytes.Buffer
-	num    [4]byte
-	keccak hash.Hash
+	buf []byte
+	num [4]byte
 }
 
 func NewHexBranchMerger(capacity uint64) *BranchMerger {
-	return &BranchMerger{buf: bytes.NewBuffer(make([]byte, capacity)), keccak: sha3.NewLegacyKeccak256()}
+	return &BranchMerger{buf: make([]byte, capacity)}
 }
 
 // MergeHexBranches combines two branchData, number 2 coming after (and potentially shadowing) number 1
@@ -567,19 +580,14 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 	binary.BigEndian.PutUint16(m.num[2:], afterMap2)
 	dataPos := 4
 
-	m.buf.Reset()
-	if _, err := m.buf.Write(m.num[:]); err != nil {
-		return nil, err
-	}
+	m.buf = append(m.buf[:0], m.num[:]...)
 
 	for bitset, j := bitmap1|bitmap2, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
 		if bitmap2&bit != 0 {
 			// Add fields from branch2
 			fieldBits := PartFlags(branch2[pos2])
-			if err := m.buf.WriteByte(byte(fieldBits)); err != nil {
-				return nil, err
-			}
+			m.buf = append(m.buf, byte(fieldBits))
 			pos2++
 
 			for i := 0; i < bits.OnesCount8(byte(fieldBits)); i++ {
@@ -590,19 +598,14 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 					return nil, fmt.Errorf("MergeHexBranches branch2: size overflow for length")
 				}
 
-				_, err := m.buf.Write(branch2[pos2 : pos2+n])
-				if err != nil {
-					return nil, err
-				}
+				m.buf = append(m.buf, branch2[pos2:pos2+n]...)
 				pos2 += n
 				dataPos += n
 				if len(branch2) < pos2+int(l) {
 					return nil, fmt.Errorf("MergeHexBranches branch2 is too small: expected at least %d got %d bytes", pos2+int(l), len(branch2))
 				}
 				if l > 0 {
-					if _, err := m.buf.Write(branch2[pos2 : pos2+int(l)]); err != nil {
-						return nil, err
-					}
+					m.buf = append(m.buf, branch2[pos2:pos2+int(l)]...)
 					pos2 += int(l)
 					dataPos += int(l)
 				}
@@ -612,9 +615,7 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 			add := (touchMap2&bit == 0) && (afterMap2&bit != 0) // Add fields from branchData1
 			fieldBits := PartFlags(branch1[pos1])
 			if add {
-				if err := m.buf.WriteByte(byte(fieldBits)); err != nil {
-					return nil, err
-				}
+				m.buf = append(m.buf, byte(fieldBits))
 			}
 			pos1++
 			for i := 0; i < bits.OnesCount8(byte(fieldBits)); i++ {
@@ -624,10 +625,9 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 				} else if n < 0 {
 					return nil, fmt.Errorf("MergeHexBranches branch1: size overflow for length")
 				}
+
 				if add {
-					if _, err := m.buf.Write(branch1[pos1 : pos1+n]); err != nil {
-						return nil, err
-					}
+					m.buf = append(m.buf, branch1[pos1:pos1+n]...)
 				}
 				pos1 += n
 				if len(branch1) < pos1+int(l) {
@@ -637,9 +637,7 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 				}
 				if l > 0 {
 					if add {
-						if _, err := m.buf.Write(branch1[pos1 : pos1+int(l)]); err != nil {
-							return nil, err
-						}
+						m.buf = append(m.buf, branch1[pos1:pos1+int(l)]...)
 					}
 					pos1 += int(l)
 				}
@@ -647,9 +645,7 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 		}
 		bitset ^= bit
 	}
-	target := make([]byte, m.buf.Len())
-	copy(target, m.buf.Bytes())
-	return target, nil
+	return m.buf, nil
 }
 
 func ParseTrieVariant(s string) TrieVariant {

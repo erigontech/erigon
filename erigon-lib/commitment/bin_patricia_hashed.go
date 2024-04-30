@@ -1059,7 +1059,7 @@ func (bph *BinPatriciaHashed) fold() (err error) {
 		upBinaryCell.extLen = 0
 		upBinaryCell.downHashedLen = 0
 		if bph.branchBefore[row] {
-			_, err = bph.branchEncoder.CollectUpdate(updateKey, 0, bph.touchMap[row], 0, RetrieveCellNoop)
+			_, err = bph.branchEncoder.CollectUpdate(bph.ctx, updateKey, 0, bph.touchMap[row], 0, RetrieveCellNoop)
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
 			}
@@ -1087,7 +1087,7 @@ func (bph *BinPatriciaHashed) fold() (err error) {
 		upBinaryCell.fillFromLowerBinaryCell(cell, depth, bph.currentKey[upDepth:bph.currentKeyLen], nibble)
 		// Delete if it existed
 		if bph.branchBefore[row] {
-			_, err = bph.branchEncoder.CollectUpdate(updateKey, 0, bph.touchMap[row], 0, RetrieveCellNoop)
+			_, err = bph.branchEncoder.CollectUpdate(bph.ctx, updateKey, 0, bph.touchMap[row], 0, RetrieveCellNoop)
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
 			}
@@ -1162,7 +1162,7 @@ func (bph *BinPatriciaHashed) fold() (err error) {
 		var err error
 		_ = cellGetter
 
-		lastNibble, err = bph.branchEncoder.CollectUpdate(updateKey, bitmap, bph.touchMap[row], bph.afterMap[row], cellGetter)
+		lastNibble, err = bph.branchEncoder.CollectUpdate(bph.ctx, updateKey, bitmap, bph.touchMap[row], bph.afterMap[row], cellGetter)
 		if err != nil {
 			return fmt.Errorf("failed to encode branch update: %w", err)
 		}

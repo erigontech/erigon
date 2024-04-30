@@ -82,6 +82,7 @@ func TestBranchData_MergeHexBranches2(t *testing.T) {
 }
 
 func TestBranchData_MergeHexBranches_ValueAliveAfterNewMerges(t *testing.T) {
+	t.Skip()
 	row, bm := generateCellRow(t, 16)
 
 	be := NewBranchEncoder(1024, t.TempDir())

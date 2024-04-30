@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"hash"
 	"io"
 	"math/bits"
@@ -81,7 +82,6 @@ type HexPatriciaHashed struct {
 	ctx           PatriciaContext
 	hashAuxBuffer [128]byte     // buffer to compute cell hash or write hash-related things
 	auxBuffer     *bytes.Buffer // auxiliary buffer used during branch updates encoding
-	branchMerger  *BranchMerger
 	branchEncoder *BranchEncoder
 }
 
@@ -92,7 +92,6 @@ func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext) *HexPatriciaHa
 		keccak2:       sha3.NewLegacyKeccak256().(keccakState),
 		accountKeyLen: accountKeyLen,
 		auxBuffer:     bytes.NewBuffer(make([]byte, 8192)),
-		branchMerger:  NewHexBranchMerger(1024),
 	}
 	tdir := os.TempDir()
 	if ctx != nil {
@@ -1276,31 +1275,32 @@ func (hph *HexPatriciaHashed) collectBranchUpdate(
 	readCell func(nibble int, skip bool) (*Cell, error),
 ) (lastNibble int, err error) {
 
-	update, ln, err := hph.branchEncoder.EncodeBranch(bitmap, touchMap, afterMap, readCell)
-	if err != nil {
-		return 0, err
-	}
-	prev, prevStep, err := hph.ctx.GetBranch(prefix) // prefix already compacted by fold
-	if err != nil {
-		return 0, err
-	}
-	if len(prev) > 0 {
-		previous := BranchData(prev)
-		merged, err := hph.branchMerger.Merge(previous, update)
-		if err != nil {
-			return 0, err
-		}
-		update = merged
-	}
-	// this updates ensures that if commitment is present, each branch are also present in commitment state at that moment with costs of storage
-	//fmt.Printf("commitment branch encoder merge prefix [%x] [%x]->[%x]\n%update\n", prefix, stateValue, update, BranchData(update).String())
-
-	cp, cu := common.Copy(prefix), common.Copy(update) // has to copy :(
-	if err = hph.ctx.PutBranch(cp, cu, prev, prevStep); err != nil {
-		return 0, err
-	}
 	mxCommitmentBranchUpdates.Inc()
-	return ln, nil
+	return hph.branchEncoder.CollectUpdate(hph.ctx, prefix, bitmap, touchMap, afterMap, readCell)
+	//update, ln, err := hph.branchEncoder.EncodeBranch(bitmap, touchMap, afterMap, readCell)
+	//if err != nil {
+	//	return 0, err
+	//}
+	//prev, prevStep, err := hph.ctx.GetBranch(prefix) // prefix already compacted by fold
+	//if err != nil {
+	//	return 0, err
+	//}
+	//if len(prev) > 0 {
+	//	//merged, err = BranchData(prev).MergeHexBranches(update, merged)
+	//	update, err = hph.branchMerger.Merge(prev, update)
+	//	if err != nil {
+	//		return 0, err
+	//	}
+	//}
+	//// this updates ensures that if commitment is present, each branch are also present in commitment state at that moment with costs of storage
+	////fmt.Printf("commitment branch encoder merge prefix [%x] [%x]->[%x]\n%update\n", prefix, stateValue, update, BranchData(update).String())
+	//
+	////cp, cu := common.Copy(prefix), common.Copy(update) // has to copy :(
+	//if err = hph.ctx.PutBranch(prefix, update, prev, prevStep); err != nil {
+	//	return 0, err
+	//}
+	//mxCommitmentBranchUpdates.Inc()
+	//return ln, nil
 }
 
 func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
@@ -1403,6 +1403,10 @@ func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byt
 	if hph.trace {
 		fmt.Printf("root hash %x updates %d\n", rootHash, len(plainKeys))
 	}
+	err = hph.branchEncoder.Load(loadToPatriciaContextFunc(hph.ctx), etl.TransformArgs{Quit: ctx.Done()})
+	if err != nil {
+		return nil, fmt.Errorf("branch update failed: %w", err)
+	}
 	return rootHash, nil
 }
 
@@ -1491,6 +1495,10 @@ func (hph *HexPatriciaHashed) ProcessUpdates(ctx context.Context, plainKeys [][]
 	rootHash, err = hph.RootHash()
 	if err != nil {
 		return nil, fmt.Errorf("root hash evaluation failed: %w", err)
+	}
+	err = hph.branchEncoder.Load(loadToPatriciaContextFunc(hph.ctx), etl.TransformArgs{Quit: ctx.Done()})
+	if err != nil {
+		return nil, fmt.Errorf("branch update failed: %w", err)
 	}
 	return rootHash, nil
 }
