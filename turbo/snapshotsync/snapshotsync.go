@@ -210,17 +210,25 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 	//
 
 	// prohibits further downloads, except some exceptions
-	for _, p := range snaptype.AllTypes {
-		if (p.Enum() == snaptype.BeaconBlocks.Enum() || p.Enum() == snaptype.BlobSidecars.Enum()) && caplin == NoCaplin {
-			continue
-		}
-		if p.Enum() == snaptype.BlobSidecars.Enum() && !blobs {
-			continue
-		}
+	for _, p := range blockReader.AllTypes() {
 		if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
 			Type: p.String(),
 		}); err != nil {
 			return err
+		}
+	}
+
+	if caplin != NoCaplin {
+		for _, p := range snaptype.CaplinSnapshotTypes {
+			if p.Enum() == snaptype.BlobSidecars.Enum() && !blobs {
+				continue
+			}
+
+			if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
+				Type: p.String(),
+			}); err != nil {
+				return err
+			}
 		}
 	}
 
