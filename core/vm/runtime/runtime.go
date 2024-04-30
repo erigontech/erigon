@@ -111,6 +111,7 @@ func setDefaults(cfg *Config) {
 func Execute(code, input []byte, cfg *Config, bn uint64) ([]byte, *state.IntraBlockState, error) {
 	if cfg == nil {
 		cfg = new(Config)
+		setDefaults(cfg)
 	}
 
 	externalState := cfg.State != nil
