@@ -396,6 +396,12 @@ func MiningStep(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, tmpDir
 	miningBatch = mb
 	//}
 	txc := wrap.TxContainer{Tx: miningBatch}
+	sd, err := state.NewSharedDomains(mb, logger)
+	if err != nil {
+		return err
+	}
+	defer sd.Close()
+	txc.Doms = sd
 
 	if _, err = mining.Run(nil, txc, false /* firstCycle */); err != nil {
 		return err
