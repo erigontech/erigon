@@ -318,7 +318,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		downloading:         map[string]struct{}{},
 		webseedsDiscover:    discover,
 	}
-	d.webseeds.SetTorrent(d.torrentFS, lock.Downloads, cfg.DownloadTorrentFilesFromWebseed)
+	d.webseeds.SetTorrent(d, lock.Downloads, cfg.DownloadTorrentFilesFromWebseed)
 
 	requestHandler.downloader = d
 
@@ -1852,6 +1852,10 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		// call methods once - to reduce internal mutex contention
 		peersOfThisFile := t.PeerConns()
 		weebseedPeersOfThisFile := t.WebseedPeerConns()
+
+		if len(weebseedPeersOfThisFile) == 0 {
+			t.WebseedPeerConns()
+		}
 
 		tLen := t.Length()
 
