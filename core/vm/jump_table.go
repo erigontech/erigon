@@ -93,6 +93,7 @@ func validateAndFillMaxStack(jt *JumpTable) {
 func newPragueInstructionSet() JumpTable {
 	instructionSet := newCancunInstructionSet()
 	enable2935(&instructionSet)
+	enable3074(&instructionSet) // AUTH, AUTHCALL opcodes
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }

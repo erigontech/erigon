@@ -151,6 +151,30 @@ func gasEip2929AccountCheck(evm *EVM, contract *Contract, stack *stack.Stack, me
 	return 0, nil
 }
 
+func gasAuth(EVM *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+	// dynamic gas calculation for AUTH opcode
+
+	// 2. memory expansion
+	gas, err := memoryGasCost(mem, memorySize)
+	if err != nil {
+		return 0, err
+	}
+
+	// 3. charge for authority account access (warm/cold)
+	authority := libcommon.Address(stack.Peek().Bytes20())
+	accessCost := params.WarmStorageReadCostEIP2929
+	if EVM.IntraBlockState().AddAddressToAccessList(authority) {
+		accessCost = params.ColdAccountAccessCostEIP2929
+	}
+
+	var overflow bool
+	if gas, overflow = math.SafeAdd(gas, accessCost); overflow {
+		return 0, ErrGasUintOverflow
+	}
+
+	return gas, nil
+}
+
 func makeCallVariantGasCallEIP2929(oldCalculator gasFunc) gasFunc {
 	return func(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 		addr := libcommon.Address(stack.Back(1).Bytes20())

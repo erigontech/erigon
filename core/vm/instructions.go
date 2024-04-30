@@ -500,8 +500,7 @@ func opBlockhash2935(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContex
 	}
 
 	// Check if arg is within allowed window
-	var upper uint64
-	upper = interpreter.evm.Context.BlockNumber
+	upper := interpreter.evm.Context.BlockNumber
 	if arg64 >= upper || arg64+params.BlockHashHistoryServeWindow < upper {
 		arg.Clear()
 		return nil, nil
