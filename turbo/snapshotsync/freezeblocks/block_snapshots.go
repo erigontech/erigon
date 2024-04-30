@@ -83,7 +83,7 @@ func (s Segment) Version() snaptype.Version {
 
 func (s Segment) Index(index ...snaptype.Index) *recsplit.Index {
 	if len(index) == 0 {
-		index = []snaptype.Index{}
+		index = []snaptype.Index{{}}
 	}
 
 	if len(s.indexes) <= index[0].Offset {
