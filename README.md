@@ -826,7 +826,7 @@ datadir
 ### E3 datadir size
 
 ```
-# eth-mainnet - April 2024
+# eth-mainnet - archive - April 2024
 
 du -hsc /erigon/* 
 6G  	/erigon/caplin
@@ -843,7 +843,7 @@ du -hsc /erigon/snapshots/*
 ```
 
 ```
-# bor-mainnet - April 2024
+# bor-mainnet - archive - April 2024
 
 du -hsc /erigon/* 
 160M	/erigon/bor
