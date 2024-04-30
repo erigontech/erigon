@@ -213,6 +213,7 @@ func ExecV3(ctx context.Context,
 		if err != nil {
 			return false, err
 		}
+		fmt.Println(lastTxNum, inputTxNum)
 		return lastTxNum == inputTxNum, nil
 	}
 
