@@ -171,6 +171,9 @@ const (
 
 	// PIP-27: secp256r1 elliptic curve signature verifier gas price
 	P256VerifyGas uint64 = 3450
+
+	// EIP-3074
+	AuthFixedGas uint64 = 3100
 )
 
 // EIP-4788: Beacon block root in the EVM

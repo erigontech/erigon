@@ -213,6 +213,8 @@ const (
 	RETURN
 	DELEGATECALL
 	CREATE2
+	AUTH
+	AUTHCALL
 	STATICCALL   OpCode = 0xfa
 	REVERT       OpCode = 0xfd
 	INVALID      OpCode = 0xfe

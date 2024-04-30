@@ -327,3 +327,27 @@ func enable7516(jt *JumpTable) {
 		numPush:     1,
 	}
 }
+
+func opAuth(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	return nil, nil
+}
+
+func opAuthCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	return nil, nil
+}
+
+func enable3074(jt *JumpTable) {
+	jt[AUTH] = &operation{
+		execute:     opAuth,
+		constantGas: params.AuthFixedGas,
+		dynamicGas:  gasAuth,
+		numPop:      3,
+		numPush:     1,
+	}
+	jt[AUTHCALL] = &operation{
+		execute:     opAuthCall,
+		constantGas: GasFastStep,
+		numPop:      0,
+		numPush:     0,
+	}
+}
