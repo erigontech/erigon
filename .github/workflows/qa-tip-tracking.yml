@@ -18,11 +18,6 @@ jobs:
     - name: Check out repository
       uses: actions/checkout@v4
 
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: '1.21'
-
     - name: Clean Erigon Build Directory
       run: |
         make clean
@@ -38,7 +33,6 @@ jobs:
 
     - name: Restore Erigon Testbed Data Directory
       run: |
-        rm -rf $ERIGON_TESTBED_DATA_DIR/chaindata
         rsync -a --delete $ERIGON_REFERENCE_DATA_DIR/ $ERIGON_TESTBED_DATA_DIR/
 
     - name: Run Erigon, wait sync and check ability to maintain sync
@@ -71,6 +65,10 @@ jobs:
           echo "Error detected during tests"
           echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
         fi
+
+    - name: Delete Erigon Testbed Data Directory
+      run: |
+        rm -rf $ERIGON_TESTBED_DATA_DIR
 
     - name: Resume the Erigon instance dedicated to db maintenance
       run: |
