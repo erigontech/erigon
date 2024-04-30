@@ -213,7 +213,6 @@ func ExecV3(ctx context.Context,
 		if err != nil {
 			return false, err
 		}
-		fmt.Println(lastTxNum, inputTxNum)
 		return lastTxNum == inputTxNum, nil
 	}
 
@@ -226,7 +225,6 @@ func ExecV3(ctx context.Context,
 		if err != nil {
 			return err
 		}
-		fmt.Println(maxTxNum)
 		ok, _blockNum, err := rawdbv3.TxNums.FindBlockNum(applyTx, doms.TxNum())
 		if err != nil {
 			return err
@@ -265,7 +263,6 @@ func ExecV3(ctx context.Context,
 		if _nothing, err := nothingToExec(applyTx); err != nil {
 			return err
 		} else if _nothing {
-			fmt.Println("nothing to exec1")
 			return nil
 		}
 
@@ -278,7 +275,6 @@ func ExecV3(ctx context.Context,
 			if _nothing, err = nothingToExec(applyTx); err != nil {
 				return err
 			} else if _nothing {
-				fmt.Println("nothing to exec2")
 				return nil
 			}
 
@@ -1084,7 +1080,6 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	if err != nil {
 		return false, fmt.Errorf("StateV3.Apply: %w", err)
 	}
-	fmt.Println(common.BytesToHash(rh))
 	if cfg.blockProduction {
 		return true, nil
 	}
