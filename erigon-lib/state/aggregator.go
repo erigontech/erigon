@@ -103,6 +103,8 @@ type Aggregator struct {
 	logger       log.Logger
 
 	ctxAutoIncrement atomic.Uint64
+
+	reopoenNonReadonlyOnce atomic.Bool
 }
 
 type OnFreezeFunc func(frozenFileNames []string)
@@ -251,6 +253,10 @@ func (a *Aggregator) DisableFsync() {
 
 func (a *Aggregator) OpenFolder(readonly bool) error {
 	defer a.recalcVisibleFiles()
+
+	if !a.reopoenNonReadonlyOnce.CompareAndSwap(false, true) {
+		panic("can open agg in non-readonly mode only once - at Erigon startup")
+	}
 
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
