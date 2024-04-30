@@ -282,30 +282,6 @@ func (a *Aggregator) OpenFolder(readonly bool) error {
 	return nil
 }
 
-func (a *Aggregator) OpenList(files []string, readonly bool) error {
-	if !a.reopoenNonReadonlyOnce.CompareAndSwap(false, true) {
-		panic("can open agg in non-readonly mode only once - at Erigon startup")
-	}
-
-	defer a.recalcVisibleFiles()
-
-	a.dirtyFilesLock.Lock()
-	defer a.dirtyFilesLock.Unlock()
-	eg := &errgroup.Group{}
-	for _, d := range a.d {
-		d := d
-		eg.Go(func() error { return d.OpenFolder(readonly) })
-	}
-	eg.Go(func() error { return a.logAddrs.OpenFolder(readonly) })
-	eg.Go(func() error { return a.logTopics.OpenFolder(readonly) })
-	eg.Go(func() error { return a.tracesFrom.OpenFolder(readonly) })
-	eg.Go(func() error { return a.tracesTo.OpenFolder(readonly) })
-	if err := eg.Wait(); err != nil {
-		return fmt.Errorf("OpenList: %w", err)
-	}
-	return nil
-}
-
 func (a *Aggregator) Close() {
 	if a.ctxCancel == nil { // invariant: it's safe to call Close multiple times
 		return
