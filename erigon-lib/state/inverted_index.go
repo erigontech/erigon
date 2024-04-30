@@ -1612,8 +1612,6 @@ type InvertedIndexCollation struct {
 func (ic InvertedIndexCollation) Close() {
 	if ic.writer != nil {
 		ic.writer.Close()
-		ic.writer = nil
-		ic.iiPath = ""
 	}
 }
 
