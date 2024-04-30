@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto/cryptopool"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
+	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -226,7 +227,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	if chainConfig.Bor != nil {
 		borTx = rawdb.ReadBorTransactionForBlock(tx, b.NumberU64())
 		if borTx != nil {
-			borTxHash = types.ComputeBorTxHash(b.NumberU64(), b.Hash())
+			borTxHash = bortypes.ComputeBorTxHash(b.NumberU64(), b.Hash())
 		}
 	}
 
@@ -285,7 +286,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	if chainConfig.Bor != nil {
 		borTx = rawdb.ReadBorTransactionForBlock(tx, number)
 		if borTx != nil {
-			borTxHash = types.ComputeBorTxHash(number, block.Hash())
+			borTxHash = bortypes.ComputeBorTxHash(number, block.Hash())
 		}
 	}
 
@@ -349,7 +350,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 	}
 
 	if chainConfig.Bor != nil {
-		borStateSyncTxHash := types.ComputeBorTxHash(blockNum, blockHash)
+		borStateSyncTxHash := bortypes.ComputeBorTxHash(blockNum, blockHash)
 		_, ok, err := api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)
 		if err != nil {
 			return nil, err
@@ -390,7 +391,7 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 	}
 
 	if chainConfig.Bor != nil {
-		borStateSyncTxHash := types.ComputeBorTxHash(blockNum, blockHash)
+		borStateSyncTxHash := bortypes.ComputeBorTxHash(blockNum, blockHash)
 		_, ok, err := api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)
 		if err != nil {
 			return nil, err

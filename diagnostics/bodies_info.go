@@ -8,6 +8,10 @@ import (
 )
 
 func SetupBodiesAccess(metricsMux *http.ServeMux, diag *diaglib.DiagnosticClient) {
+	if metricsMux == nil {
+		return
+	}
+
 	metricsMux.HandleFunc("/bodies", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")

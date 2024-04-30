@@ -185,7 +185,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 	nodes := map[string]*node{}
 
 	for _, debugURL := range debugURLs {
-		debugResponse, err := metricsClient.Get(debugURL + "/debug/nodeinfo")
+		debugResponse, err := metricsClient.Get(debugURL + "/debug/diag/nodeinfo")
 
 		if err != nil {
 			return err
@@ -326,7 +326,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 					queryString = "?" + nodeRequest.QueryParams.Encode()
 				}
 
-				debugURL := node.debugURL + "/debug/" + requests[0].Method + queryString
+				debugURL := node.debugURL + "/debug/diag/" + requests[0].Method + queryString
 				debugResponse, err := metricsClient.Get(debugURL)
 
 				if err != nil {

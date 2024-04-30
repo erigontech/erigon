@@ -11,7 +11,7 @@ import (
 )
 
 // Generate all mocks in file
-//go:generate mockgen -destination=./storage_mock.go -package=heimdall -source=./storage.go
+//go:generate mockgen -typed=true -destination=./storage_mock.go -package=heimdall -source=./storage.go
 
 type SpanReader interface {
 	LastSpanId(ctx context.Context) (SpanId, bool, error)
@@ -187,14 +187,14 @@ func (io blockReaderStore) PutCheckpoint(ctx context.Context, checkpointId Check
 		return fmt.Errorf("span writer failed: tx is read only")
 	}
 
-	spanBytes, err := json.Marshal(checkpoint)
+	bytes, err := json.Marshal(checkpoint)
 
 	if err != nil {
 		return err
 	}
 
-	var spanIdBytes [8]byte
-	binary.BigEndian.PutUint64(spanIdBytes[:], uint64(checkpointId))
+	var idBytes [8]byte
+	binary.BigEndian.PutUint64(idBytes[:], uint64(checkpointId))
 
-	return tx.Put(kv.BorCheckpoints, spanIdBytes[:], spanBytes)
+	return tx.Put(kv.BorCheckpoints, idBytes[:], bytes)
 }

@@ -32,7 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	sentry2 "github.com/ledgerwatch/erigon/p2p/sentry"
+	"github.com/ledgerwatch/erigon/p2p/sentry"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
@@ -130,7 +130,7 @@ func (cs *MultiClient) PeerEventsLoop(
 
 func SentryReconnectAndPumpStreamLoop[TMessage interface{}](
 	ctx context.Context,
-	sentry direct.SentryClient,
+	sentryClient direct.SentryClient,
 	statusDataFactory StatusDataFactory,
 	streamName string,
 	streamFactory SentryMessageStreamFactory,
@@ -140,7 +140,7 @@ func SentryReconnectAndPumpStreamLoop[TMessage interface{}](
 	logger log.Logger,
 ) {
 	for ctx.Err() == nil {
-		if _, err := sentry.HandShake(ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
+		if _, err := sentryClient.HandShake(ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
 			if errors.Is(err, context.Canceled) {
 				continue
 			}
@@ -154,13 +154,14 @@ func SentryReconnectAndPumpStreamLoop[TMessage interface{}](
 		}
 
 		statusData, err := statusDataFactory(ctx)
+
 		if err != nil {
 			logger.Error("SentryReconnectAndPumpStreamLoop: statusDataFactory error", "stream", streamName, "err", err)
 			time.Sleep(time.Second)
 			continue
 		}
 
-		if _, err := sentry.SetStatus(ctx, statusData); err != nil {
+		if _, err := sentryClient.SetStatus(ctx, statusData); err != nil {
 			if errors.Is(err, context.Canceled) {
 				continue
 			}
@@ -173,7 +174,7 @@ func SentryReconnectAndPumpStreamLoop[TMessage interface{}](
 			continue
 		}
 
-		if err := pumpStreamLoop(ctx, sentry, streamName, streamFactory, messageFactory, handleInboundMessage, wg, logger); err != nil {
+		if err := pumpStreamLoop(ctx, sentryClient, streamName, streamFactory, messageFactory, handleInboundMessage, wg, logger); err != nil {
 			if errors.Is(err, context.Canceled) {
 				continue
 			}
@@ -266,7 +267,7 @@ type MultiClient struct {
 	db                                kv.RwDB
 	Engine                            consensus.Engine
 	blockReader                       services.FullBlockReader
-	statusDataProvider                *sentry2.StatusDataProvider
+	statusDataProvider                *sentry.StatusDataProvider
 	logPeerInfo                       bool
 	sendHeaderRequestsToMultiplePeers bool
 	maxBlockBroadcastPeers            func(*types.Header) uint
@@ -287,7 +288,7 @@ func NewMultiClient(
 	syncCfg ethconfig.Sync,
 	blockReader services.FullBlockReader,
 	blockBufferSize int,
-	statusDataProvider *sentry2.StatusDataProvider,
+	statusDataProvider *sentry.StatusDataProvider,
 	logPeerInfo bool,
 	maxBlockBroadcastPeers func(*types.Header) uint,
 	disableBlockDownload bool,
@@ -418,7 +419,7 @@ func (cs *MultiClient) blockHeaders66(ctx context.Context, in *proto_sentry.Inbo
 	return cs.blockHeaders(ctx, pkt.BlockHeadersPacket, rlpStream, in.PeerId, sentry)
 }
 
-func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPacket, rlpStream *rlp.Stream, peerID *proto_types.H512, sentry direct.SentryClient) error {
+func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPacket, rlpStream *rlp.Stream, peerID *proto_types.H512, sentryClient direct.SentryClient) error {
 	if cs.disableBlockDownload {
 		return nil
 	}
@@ -462,7 +463,7 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 			return err
 		}
 		defer tx.Rollback()
-		penalties, err := cs.Hd.ProcessHeadersPOS(csHeaders, tx, sentry2.ConvertH512ToPeerID(peerID))
+		penalties, err := cs.Hd.ProcessHeadersPOS(csHeaders, tx, sentry.ConvertH512ToPeerID(peerID))
 		if err != nil {
 			return err
 		}
@@ -471,7 +472,7 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 		}
 	} else {
 		sort.Sort(headerdownload.HeadersSort(csHeaders)) // Sorting by order of block heights
-		canRequestMore := cs.Hd.ProcessHeaders(csHeaders, false /* newBlock */, sentry2.ConvertH512ToPeerID(peerID))
+		canRequestMore := cs.Hd.ProcessHeaders(csHeaders, false /* newBlock */, sentry.ConvertH512ToPeerID(peerID))
 
 		if canRequestMore {
 			currentTime := time.Now()
@@ -491,13 +492,13 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 		PeerId:   peerID,
 		MinBlock: highestBlock,
 	}
-	if _, err1 := sentry.PeerMinBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
+	if _, err1 := sentryClient.PeerMinBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
 		cs.logger.Error("Could not send min block for peer", "err", err1)
 	}
 	return nil
 }
 
-func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
+func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient direct.SentryClient) error {
 	if cs.disableBlockDownload {
 		return nil
 	}
@@ -545,7 +546,7 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 				})
 			}
 
-			cs.Hd.ProcessHeaders(segments, true /* newBlock */, sentry2.ConvertH512ToPeerID(inreq.PeerId)) // There is only one segment in this case
+			cs.Hd.ProcessHeaders(segments, true /* newBlock */, sentry.ConvertH512ToPeerID(inreq.PeerId)) // There is only one segment in this case
 		} else {
 			outreq := proto_sentry.PenalizePeerRequest{
 				PeerId:  inreq.PeerId,
@@ -568,14 +569,14 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 		PeerId:   inreq.PeerId,
 		MinBlock: request.Block.NumberU64(),
 	}
-	if _, err1 := sentry.PeerMinBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
+	if _, err1 := sentryClient.PeerMinBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
 		cs.logger.Error("Could not send min block for peer", "err", err1)
 	}
-	cs.logger.Trace(fmt.Sprintf("NewBlockMsg{blockNumber: %d} from [%s]", request.Block.NumberU64(), sentry2.ConvertH512ToPeerID(inreq.PeerId)))
+	cs.logger.Trace(fmt.Sprintf("NewBlockMsg{blockNumber: %d} from [%s]", request.Block.NumberU64(), sentry.ConvertH512ToPeerID(inreq.PeerId)))
 	return nil
 }
 
-func (cs *MultiClient) blockBodies66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
+func (cs *MultiClient) blockBodies66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient direct.SentryClient) error {
 	if cs.disableBlockDownload {
 		return nil
 	}
@@ -589,7 +590,7 @@ func (cs *MultiClient) blockBodies66(ctx context.Context, inreq *proto_sentry.In
 		// No point processing empty response
 		return nil
 	}
-	cs.Bd.DeliverBodies(txs, uncles, withdrawals, uint64(len(inreq.Data)), sentry2.ConvertH512ToPeerID(inreq.PeerId))
+	cs.Bd.DeliverBodies(txs, uncles, withdrawals, uint64(len(inreq.Data)), sentry.ConvertH512ToPeerID(inreq.PeerId))
 	return nil
 }
 
@@ -778,9 +779,9 @@ func (cs *MultiClient) handleInboundMessage(ctx context.Context, inreq *proto_se
 	}
 }
 
-func (cs *MultiClient) HandlePeerEvent(ctx context.Context, event *proto_sentry.PeerEvent, sentry direct.SentryClient) error {
+func (cs *MultiClient) HandlePeerEvent(ctx context.Context, event *proto_sentry.PeerEvent, sentryClient direct.SentryClient) error {
 	eventID := event.EventId.String()
-	peerID := sentry2.ConvertH512ToPeerID(event.PeerId)
+	peerID := sentry.ConvertH512ToPeerID(event.PeerId)
 	peerIDStr := hex.EncodeToString(peerID[:])
 
 	if !cs.logPeerInfo {
@@ -792,7 +793,7 @@ func (cs *MultiClient) HandlePeerEvent(ctx context.Context, event *proto_sentry.
 	var clientID string
 	var capabilities []string
 	if event.EventId == proto_sentry.PeerEvent_Connect {
-		reply, err := sentry.PeerById(ctx, &proto_sentry.PeerByIdRequest{PeerId: event.PeerId})
+		reply, err := sentryClient.PeerById(ctx, &proto_sentry.PeerByIdRequest{PeerId: event.PeerId})
 		if err != nil {
 			cs.logger.Debug("sentry.PeerById failed", "err", err)
 		}

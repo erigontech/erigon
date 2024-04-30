@@ -1053,7 +1053,7 @@ func (h *History) isEmpty(tx kv.Tx) (bool, error) {
 	return k == nil && k2 == nil, nil
 }
 
-func (h *History) prune(ctx context.Context, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
+func (h *History) prune(ctx context.Context, txFrom, txTo, limit uint64, _ *time.Ticker) error {
 	historyKeysCursorForDeletes, err := h.tx.RwCursorDupSort(h.indexKeysTable)
 	if err != nil {
 		return fmt.Errorf("create %s history cursor: %w", h.filenameBase, err)
