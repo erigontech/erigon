@@ -124,7 +124,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 			var simStateReader state.StateReader
 			var simStateWriter state.StateWriter
 
-			m := membatchwithdb.NewMemoryBatch(txc.Ttx, cfg.tmpdir, logger)
+			m := membatchwithdb.NewMemoryBatch(txc.Tx, cfg.tmpdir, logger)
 			defer m.Rollback()
 			if histV3 {
 				var err error
