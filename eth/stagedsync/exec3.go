@@ -264,7 +264,6 @@ func ExecV3(ctx context.Context,
 		if _nothing, err := nothingToExec(applyTx); err != nil {
 			return err
 		} else if _nothing {
-			fmt.Println("nothing to exec")
 			return nil
 		}
 
