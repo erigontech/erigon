@@ -390,37 +390,20 @@ func TestBlockhash(t *testing.T) {
 func TestBlockHashEip2935(t *testing.T) {
 	t.Parallel()
 
-	// This is the contract we're using. It requests the blockhash for current num (should be all zeroes),
-	// then iteratively fetches all blockhashes back to n - params.HISTORY_SERVE_WINDOW.
-	// It returns
-	// 1. the first (should be zero)
-	// 2. the second (should be the parent hash)
-	// 3. the last non-zero hash
-	// By making the chain reader return hashes which correlate to the number, we can
-	// verify that it obtained the right hashes where it should
+	// This is the contract we're using. It requests the blockhash for current num (should be all zeroes), We are fetching BlockHash for current block (should be zer0), parent block, last block which is supposed to be there (head - HISTORY_SERVE_WINDOW) and also one block before that (should be zero)
 
 	/*
-
-		pragma solidity ^0.5.3;
-		contract Hasher{
-
-			function test() public view returns (bytes32, bytes32, bytes32){
-				uint256 x = block.number;
-				bytes32 first;
-				bytes32 last;
-				bytes32 zero;
-				zero = blockhash(x); // Should be zeroes
-				first = blockhash(x-1);
-				for(uint256 i = 2 ; i < 260; i++){
-					bytes32 hash = blockhash(x - i);
-					if (uint256(hash) != 0){
-						last = hash;
-					}
-				}
-				return (zero, first, last);
+		pragma solidity ^0.8.25;
+		contract BlockHashTestPrague{
+			function test() public view returns (bytes32, bytes32, bytes32, bytes32){
+				uint256 head = block.number;
+				bytes32 zero = blockhash(head);
+				bytes32 first = blockhash(head-1);
+				bytes32 last = blockhash(head - 8192);
+				bytes32 beyond = blockhash(head - 8193);
+				return (zero, first, last, beyond);
 			}
 		}
-
 	*/
 	// The contract above
 	data := libcommon.Hex2Bytes("608060405234801561000f575f80fd5b5060043610610029575f3560e01c8063f8a8fd6d1461002d575b5f80fd5b61003561004e565b60405161004594939291906100bf565b60405180910390f35b5f805f805f4390505f814090505f6001836100699190610138565b4090505f6120008461007b9190610138565b4090505f6120018561008d9190610138565b409050838383839850985098509850505050505090919293565b5f819050919050565b6100b9816100a7565b82525050565b5f6080820190506100d25f8301876100b0565b6100df60208301866100b0565b6100ec60408301856100b0565b6100f960608301846100b0565b95945050505050565b5f819050919050565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52601160045260245ffd5b5f61014282610102565b915061014d83610102565b92508282039050818111156101655761016461010b565b5b9291505056fea2646970667358221220bac67d00c05154c1dca13fe3c1493172d44692d312cb3fd72a3d7457874d595464736f6c63430008190033")

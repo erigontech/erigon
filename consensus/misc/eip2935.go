@@ -30,7 +30,6 @@ func StoreBlockHashesEip2935(header *types.Header, state *state.IntraBlockState,
 		for i := window; i > 0; i-- {
 			_storeHash(big.NewInt(0).Sub(parent.Number, big.NewInt(1)), parent.ParentHash, state)
 			parent = headerReader.GetHeaderByHash(parent.ParentHash)
-			// fmt.Println("Storing parent %x, for i=%d", parent.ParentHash, i)
 		}
 	}
 }

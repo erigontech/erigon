@@ -19,7 +19,6 @@ package vm
 import (
 	"fmt"
 	"math"
-	"math/big"
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -476,21 +475,14 @@ func opBlockhash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 	upper = interpreter.evm.Context.BlockNumber
 	if interpreter.evm.chainRules.IsPrague {
 		if arg64 >= upper || arg64+params.BlockHashHistoryServeWindow < upper {
-			// scope.Stack.Push(uint256.NewInt(0))
 			arg.Clear()
 		} else {
-			// out := uint256.NewInt(0)
-			storageSlot := libcommon.BigToHash(big.NewInt(0).Mod(big.NewInt(int64(arg64)), big.NewInt(int64(params.BlockHashHistoryServeWindow))))
-
-			// storageSlot := libcommon.BytesToHash(uint256.NewInt(arg64%params.BlockHashHistoryServeWindow).Bytes())
+			storageSlot := libcommon.BytesToHash(uint256.NewInt(arg64 % params.BlockHashHistoryServeWindow).Bytes())
 			interpreter.evm.intraBlockState.GetState(
 				params.HistoryStorageAddress,
 				&storageSlot,
-				// (*libcommon.Hash)(uint256.NewInt(arg64%params.BlockHashHistoryServeWindow).Bytes()),
 				arg,
 			)
-			// arg.SetBytes(out.Bytes())
-			// scope.Stack.Push(out)
 		}
 		return nil, nil
 	}
