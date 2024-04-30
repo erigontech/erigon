@@ -49,7 +49,7 @@ require (
 
 require (
 	github.com/cespare/xxhash v1.1.0 // indirect
-	github.com/opencontainers/runtime-spec v1.0.2 // indirect
+	github.com/opencontainers/runtime-spec v1.2.0 // indirect
 	golang.org/x/mod v0.17.0 // indirect
 	golang.org/x/tools v0.20.0 // indirect
 	modernc.org/libc v1.50.4 // indirect
@@ -59,6 +59,7 @@ require (
 
 require (
 	github.com/ajwerner/btree v0.0.0-20211221152037-f427b3e689c0 // indirect
+	github.com/alecthomas/assert/v2 v2.8.1 // indirect
 	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
 	github.com/anacrolix/chansync v0.3.0 // indirect
 	github.com/anacrolix/envpprof v1.3.0 // indirect
@@ -75,15 +76,15 @@ require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/benbjohnson/immutable v0.4.1-0.20221220213129-8932b999621d // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/bits-and-blooms/bitset v1.7.0 // indirect
+	github.com/bits-and-blooms/bitset v1.12.0 // indirect
 	github.com/bradfitz/iter v0.0.0-20191230175014-e8f45d346db8 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/cilium/ebpf v0.11.0 // indirect
 	github.com/consensys/bavard v0.1.13 // indirect
 	github.com/consensys/gnark-crypto v0.12.1 // indirect
-	github.com/coreos/go-systemd/v22 v22.3.2 // indirect
+	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/docker/go-units v0.4.0 // indirect
+	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-llsqlite/adapter v0.0.0-20230927005056-7f5ce7f0c916 // indirect
 	github.com/go-llsqlite/crawshaw v0.4.0 // indirect
