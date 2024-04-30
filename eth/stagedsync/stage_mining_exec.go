@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
@@ -402,12 +403,15 @@ func filterBadTransactions(transactions []types.Transaction, config chain.Config
 				continue
 			}
 		}
+
+		newAccount := new(accounts.Account)
+		*newAccount = *account
 		// Updates account in the simulation
-		account.Nonce++
-		account.Balance.Sub(&account.Balance, want)
+		newAccount.Nonce++
+		newAccount.Balance.Sub(&account.Balance, want)
 		accountBuffer := make([]byte, account.EncodingLengthForStorage())
-		account.EncodeForStorage(accountBuffer)
-		if err := simStateWriter.UpdateAccountData(sender, account, nil); err != nil {
+		newAccount.EncodeForStorage(accountBuffer)
+		if err := simStateWriter.UpdateAccountData(sender, account, newAccount); err != nil {
 			return nil, err
 		}
 		// Mark transaction as valid
