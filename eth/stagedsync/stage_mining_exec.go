@@ -195,34 +195,33 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	if err := rawdb.WriteHeader(txc.Tx, block.Header()); err != nil {
 		return fmt.Errorf("cannot write header: %s", err)
 	}
-	fmt.Println(block.NumberU64())
-	var ok bool
-	if ok, err = rawdb.WriteRawBodyIfNotExists(txc.Tx, block.Hash(), block.NumberU64(), block.RawBody()); err != nil {
+	blockHeight := block.NumberU64()
+	if _, err = rawdb.WriteRawBodyIfNotExists(txc.Tx, block.Hash(), blockHeight, block.RawBody()); err != nil {
 		return fmt.Errorf("cannot write body: %s", err)
 	}
-	if histV3 && ok {
-		if err := rawdb.AppendCanonicalTxNums(txc.Tx, block.NumberU64()); err != nil {
+	if histV3 {
+		if err := rawdb.AppendCanonicalTxNums(txc.Tx, blockHeight); err != nil {
 			return err
 		}
 	}
-	if err := stages.SaveStageProgress(txc.Tx, kv.Headers, block.NumberU64()); err != nil {
+	if err := stages.SaveStageProgress(txc.Tx, kv.Headers, blockHeight); err != nil {
 		return err
 	}
-	if err := stages.SaveStageProgress(txc.Tx, stages.Bodies, block.NumberU64()); err != nil {
+	if err := stages.SaveStageProgress(txc.Tx, stages.Bodies, blockHeight); err != nil {
 		return err
 	}
-	if err := SpawnRecoverSendersStage(sendersCfg, s, nil, txc.Tx, current.Header.Number.Uint64(), ctx, logger); err != nil {
+	if err := SpawnRecoverSendersStage(sendersCfg, s, nil, txc.Tx, blockHeight, ctx, logger); err != nil {
 		return err
 	}
 
 	// This flag will skip checking the state root
 	execCfg.blockProduction = true
-	execS := &StageState{state: s.state, ID: stages.Execution, BlockNumber: current.Header.Number.Uint64() - 1}
-	if err := ExecBlockV3(execS, nil, txc, current.Header.Number.Uint64(), context.Background(), execCfg, false, logger); err != nil {
+	execS := &StageState{state: s.state, ID: stages.Execution, BlockNumber: blockHeight - 1}
+	if err := ExecBlockV3(execS, nil, txc, blockHeight, context.Background(), execCfg, false, logger); err != nil {
 		return err
 	}
 
-	rh, err := domains.ComputeCommitment(ctx, true, current.Header.Number.Uint64(), s.LogPrefix())
+	rh, err := domains.ComputeCommitment(ctx, true, blockHeight, s.LogPrefix())
 	if err != nil {
 		return fmt.Errorf("StateV3.Apply: %w", err)
 	}
