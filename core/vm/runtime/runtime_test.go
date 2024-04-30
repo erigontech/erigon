@@ -30,12 +30,15 @@ import (
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/asm"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
 )
 
 func TestDefaults(t *testing.T) {
@@ -235,7 +238,7 @@ func fakeHeader(n uint64, parentHash libcommon.Hash) *types.Header {
 		Coinbase:   libcommon.HexToAddress("0x00000000000000000000000000000000deadbeef"),
 		Number:     big.NewInt(int64(n)),
 		ParentHash: parentHash,
-		Time:       1000,
+		Time:       n,
 		Nonce:      types.BlockNonce{0x1},
 		Extra:      []byte{},
 		Difficulty: big.NewInt(0),
@@ -243,6 +246,46 @@ func fakeHeader(n uint64, parentHash libcommon.Hash) *types.Header {
 	}
 	return &header
 }
+
+type FakeChainHeaderReader struct {
+	// Cfg     *chain.Config
+	// current *types.Block
+}
+
+func (cr *FakeChainHeaderReader) GetHeaderByHash(hash libcommon.Hash) *types.Header {
+	num := hash.Big()
+	return &types.Header{
+		Coinbase:   libcommon.HexToAddress("0x00000000000000000000000000000000deadbeef"),
+		Number:     num,
+		ParentHash: libcommon.BigToHash(big.NewInt(0).Sub(num, big.NewInt(1))),
+		Time:       num.Uint64(),
+		Nonce:      types.BlockNonce{0x1},
+		Extra:      []byte{},
+		Difficulty: big.NewInt(0),
+		GasLimit:   100000,
+	}
+}
+func (cr *FakeChainHeaderReader) GetHeaderByNumber(number uint64) *types.Header {
+	return cr.GetHeaderByHash(libcommon.BigToHash(big.NewInt(int64(number))))
+}
+func (cr *FakeChainHeaderReader) Config() *chain.Config        { return nil }
+func (cr *FakeChainHeaderReader) CurrentHeader() *types.Header { return nil }
+func (cr *FakeChainHeaderReader) GetHeader(hash libcommon.Hash, number uint64) *types.Header {
+	return nil
+}
+func (cr *FakeChainHeaderReader) GetBlock(hash libcommon.Hash, number uint64) *types.Block {
+	return nil
+}
+func (cr *FakeChainHeaderReader) HasBlock(hash libcommon.Hash, number uint64) bool  { return false }
+func (cr *FakeChainHeaderReader) GetTd(hash libcommon.Hash, number uint64) *big.Int { return nil }
+func (cr *FakeChainHeaderReader) FrozenBlocks() uint64                              { return 0 }
+func (cr *FakeChainHeaderReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
+	return nil
+}
+func (cr *FakeChainHeaderReader) BorStartEventID(hash libcommon.Hash, number uint64) uint64 {
+	return 0
+}
+func (cr *FakeChainHeaderReader) BorSpan(spanId uint64) []byte { return nil }
 
 type dummyChain struct {
 	counter int
@@ -309,7 +352,7 @@ func TestBlockhash(t *testing.T) {
 
 	*/
 	// The contract above
-	data := libcommon.Hex2Bytes("6080604052348015600f57600080fd5b50600436106045576000357c010000000000000000000000000000000000000000000000000000000090048063f8a8fd6d14604a575b600080fd5b60506074565b60405180848152602001838152602001828152602001935050505060405180910390f35b600080600080439050600080600083409050600184034092506000600290505b61010481101560c35760008186034090506000816001900414151560b6578093505b5080806001019150506094565b508083839650965096505050505090919256fea165627a7a72305820462d71b510c1725ff35946c20b415b0d50b468ea157c8c77dff9466c9cb85f560029")
+	data := libcommon.Hex2Bytes("6080604052348015600f57600080fd5b50600436106045576000357c010000000000000000000000000000000000000000000000000000000090048063f8a8fd6d14604a575b600080fd5b60506074565b60405180848152602001838152602001828152602001935050505060405180910390f35b600080600080439050600080600083409050600184034092506000600290505b61010481101560c35760008186034090506000816001900414151560b6578093505b5080806001019150506094565b508083839650965096505050505090919256fea165627a7a72305820dfe2458cc086a06042239d07ce304746e65c88f8a42a9b5dfb0ac053c287d8380029")
 	// The method call to 'test()'
 	input := libcommon.Hex2Bytes("f8a8fd6d")
 	chain := &dummyChain{}
@@ -318,6 +361,7 @@ func TestBlockhash(t *testing.T) {
 		BlockNumber: new(big.Int).Set(header.Number),
 		Time:        new(big.Int),
 	}
+	setDefaults(cfg)
 	ret, _, err := Execute(data, input, cfg, header.Number.Uint64())
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -340,6 +384,90 @@ func TestBlockhash(t *testing.T) {
 	}
 	if exp, got := 255, chain.counter; exp != got {
 		t.Errorf("suboptimal; too much chain iteration, expected %d, got %d", exp, got)
+	}
+}
+
+func TestBlockHashEip2935(t *testing.T) {
+	t.Parallel()
+
+	// This is the contract we're using. It requests the blockhash for current num (should be all zeroes),
+	// then iteratively fetches all blockhashes back to n - params.HISTORY_SERVE_WINDOW.
+	// It returns
+	// 1. the first (should be zero)
+	// 2. the second (should be the parent hash)
+	// 3. the last non-zero hash
+	// By making the chain reader return hashes which correlate to the number, we can
+	// verify that it obtained the right hashes where it should
+
+	/*
+
+		pragma solidity ^0.5.3;
+		contract Hasher{
+
+			function test() public view returns (bytes32, bytes32, bytes32){
+				uint256 x = block.number;
+				bytes32 first;
+				bytes32 last;
+				bytes32 zero;
+				zero = blockhash(x); // Should be zeroes
+				first = blockhash(x-1);
+				for(uint256 i = 2 ; i < 260; i++){
+					bytes32 hash = blockhash(x - i);
+					if (uint256(hash) != 0){
+						last = hash;
+					}
+				}
+				return (zero, first, last);
+			}
+		}
+
+	*/
+	// The contract above
+	data := libcommon.Hex2Bytes("608060405234801561000f575f80fd5b5060043610610029575f3560e01c8063f8a8fd6d1461002d575b5f80fd5b61003561004e565b60405161004594939291906100bf565b60405180910390f35b5f805f805f4390505f814090505f6001836100699190610138565b4090505f6120008461007b9190610138565b4090505f6120018561008d9190610138565b409050838383839850985098509850505050505090919293565b5f819050919050565b6100b9816100a7565b82525050565b5f6080820190506100d25f8301876100b0565b6100df60208301866100b0565b6100ec60408301856100b0565b6100f960608301846100b0565b95945050505050565b5f819050919050565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52601160045260245ffd5b5f61014282610102565b915061014d83610102565b92508282039050818111156101655761016461010b565b5b9291505056fea2646970667358221220bac67d00c05154c1dca13fe3c1493172d44692d312cb3fd72a3d7457874d595464736f6c63430008190033")
+	// The method call to 'test()'
+	input := libcommon.Hex2Bytes("f8a8fd6d")
+
+	// Current head
+	n := uint64(10000)
+	parentHash := libcommon.Hash{}
+	s := common.LeftPadBytes(big.NewInt(int64(n-1)).Bytes(), 32)
+	copy(parentHash[:], s)
+	fakeHeaderReader := &FakeChainHeaderReader{}
+	header := fakeHeaderReader.GetHeaderByNumber(n)
+
+	chain := &dummyChain{}
+	cfg := &Config{
+		GetHashFn:   core.GetHashFn(header, chain.GetHeader),
+		BlockNumber: new(big.Int).Set(header.Number),
+		Time:        big.NewInt(10000),
+	}
+	setDefaults(cfg)
+	cfg.ChainConfig.PragueTime = big.NewInt(10000)
+	_, tx := memdb.NewTestTx(t)
+	cfg.State = state.New(state.NewPlainStateReader(tx))
+	cfg.State.CreateAccount(params.HistoryStorageAddress, true)
+	misc.StoreBlockHashesEip2935(header, cfg.State, cfg.ChainConfig, &FakeChainHeaderReader{})
+
+	ret, _, err := Execute(data, input, cfg, header.Number.Uint64())
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(ret) != 128 {
+		t.Fatalf("expected returndata to be 128 bytes, got %d", len(ret))
+	}
+
+	zero := new(big.Int).SetBytes(ret[0:32])
+	first := new(big.Int).SetBytes(ret[32:64])
+	last := new(big.Int).SetBytes(ret[64:96])
+	beyond := new(big.Int).SetBytes(ret[96:128])
+	if zero.Sign() != 0 || beyond.Sign() != 0 {
+		t.Fatalf("expected zeroes, got %x %x", ret[0:32], ret[96:128])
+	}
+	if first.Uint64() != 9999 {
+		t.Fatalf("second block should be 9999, got %d (%x)", first, ret[32:64])
+	}
+	if last.Uint64() != 1808 {
+		t.Fatalf("last block should be 1808, got %d (%x)", last, ret[64:96])
 	}
 }
 

@@ -1,6 +1,7 @@
 package misc
 
 import (
+	// "fmt"
 	"math/big"
 
 	"github.com/holiman/uint256"
@@ -18,23 +19,25 @@ func StoreBlockHashesEip2935(header *types.Header, state *state.IntraBlockState,
 		return
 	}
 	parent := headerReader.GetHeaderByHash(header.ParentHash)
-	_setStorage(parent.Number, header.ParentHash, state)
+	_storeHash(parent.Number, header.ParentHash, state)
 	// If this is the fork block, add the parent's direct `HISTORY_SERVE_WINDOW - 1` ancestors as well
-	if parent.Time < config.OsakaTime.Uint64() {
+	if parent.Time < config.PragueTime.Uint64() {
 		p := parent.Number.Uint64()
 		window := params.BlockHashHistoryServeWindow - 1
 		if p < window {
 			window = p
 		}
-		for i := window - 1; i >= 0; i-- {
-			_setStorage(big.NewInt(0).Sub(parent.Number, big.NewInt(1)), parent.ParentHash, state)
+		for i := window; i > 0; i-- {
+			_storeHash(big.NewInt(0).Sub(parent.Number, big.NewInt(1)), parent.ParentHash, state)
 			parent = headerReader.GetHeaderByHash(parent.ParentHash)
+			// fmt.Println("Storing parent %x, for i=%d", parent.ParentHash, i)
 		}
 	}
 }
 
-func _setStorage(num *big.Int, hash libcommon.Hash, state *state.IntraBlockState) {
+func _storeHash(num *big.Int, hash libcommon.Hash, state *state.IntraBlockState) {
 	storageSlot := libcommon.BigToHash(big.NewInt(0).Mod(num, big.NewInt(int64(params.BlockHashHistoryServeWindow))))
-	parentHashInt := uint256.MustFromHex(hash.String())
+	hh := hash.Big()
+	parentHashInt := uint256.MustFromBig(hh)
 	state.SetState(params.HistoryStorageAddress, &storageSlot, *parentHashInt)
 }
