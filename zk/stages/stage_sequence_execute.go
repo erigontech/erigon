@@ -162,14 +162,20 @@ func SpawnSequencingStage(
 			}
 		}
 
+		overflowOnNewBlock, err := batchCounters.StartNewBlock()
+		if err != nil {
+			return err
+		}
+		if !l1Recovery && overflowOnNewBlock {
+			break
+		}
+
 		thisBlockNumber := header.Number.Uint64()
 
 		infoTreeIndexProgress, l1TreeUpdate, l1TreeUpdateIndex, l1BlockHash, ger, shouldWriteGerToContract, err := prepareL1AndInfoTreeRelatedStuff(sdb, &decodedBlock, l1Recovery)
 		if err != nil {
 			return err
 		}
-
-		batchCounters.StartNewBlock()
 
 		ibs := state.New(sdb.stateReader)
 
