@@ -1853,10 +1853,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		peersOfThisFile := t.PeerConns()
 		weebseedPeersOfThisFile := t.WebseedPeerConns()
 
-		if len(weebseedPeersOfThisFile) == 0 {
-			t.WebseedPeerConns()
-		}
-
 		tLen := t.Length()
 
 		var bytesCompleted int64
