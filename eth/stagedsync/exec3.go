@@ -951,7 +951,7 @@ Loop:
 		waitWorkers()
 	}
 
-	if !u.HasUnwindPoint() {
+	if u != nil && !u.HasUnwindPoint() {
 		if b != nil {
 			_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
 			if err != nil {
