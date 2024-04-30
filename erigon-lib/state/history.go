@@ -571,8 +571,10 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 
 		historyPath   = h.vFilePath(step, step+1)
 		efHistoryPath = h.efFilePath(step, step+1)
+		startAt       = time.Now()
 	)
 	defer func() {
+		mxCollateTookHistory.ObserveDuration(startAt)
 		if closeComp {
 			if historyComp != nil {
 				historyComp.Close()
