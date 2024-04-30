@@ -5,7 +5,11 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/google/btree"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cryptozerocopy"
+	"github.com/ledgerwatch/erigon-lib/types"
+	"golang.org/x/crypto/sha3"
 	"math/bits"
 	"strings"
 
@@ -37,6 +41,8 @@ type Trie interface {
 
 	// Set context for state IO
 	ResetContext(ctx PatriciaContext)
+
+	ProcessTree(ctx context.Context, tree *UpdateTree, logPrefix string) (rootHash []byte, err error)
 
 	// Reads updates from storage
 	ProcessKeys(ctx context.Context, pk [][]byte, logPrefix string) (rootHash []byte, err error)
@@ -169,8 +175,6 @@ func loadToPatriciaContextFunc(pc PatriciaContext) etl.LoadFunc {
 		if err != nil {
 			return err
 		}
-		// this updates ensures that if commitment is present, each branch are also present in commitment state at that moment with costs of storage
-		//fmt.Printf("commitment branch encoder merge prefix [%x] [%x]->[%x]\n%v\n", prefix, stateValue, update, BranchData(update).String())
 
 		cp, cu := common.Copy(prefix), common.Copy(update) // has to copy :(
 		if err = pc.PutBranch(cp, cu, stateValue, stateStep); err != nil {
@@ -753,4 +757,231 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 		}
 	}
 	return stat
+}
+
+// Defines how to evaluate commitments
+type Mode uint
+
+const (
+	ModeDisabled Mode = 0
+	ModeDirect   Mode = 1
+	ModeUpdate   Mode = 2
+)
+
+func (m Mode) String() string {
+	switch m {
+	case ModeDisabled:
+		return "disabled"
+	case ModeDirect:
+		return "direct"
+	case ModeUpdate:
+		return "update"
+	default:
+		return "unknown"
+	}
+}
+
+func ParseCommitmentMode(s string) Mode {
+	var mode Mode
+	switch s {
+	case "off":
+		mode = ModeDisabled
+	case "update":
+		mode = ModeUpdate
+	default:
+		mode = ModeDirect
+	}
+	return mode
+}
+
+type UpdateTree struct {
+	tree   *btree.BTreeG[*KeyUpdate]
+	keccak cryptozerocopy.KeccakState
+	keys   map[string]struct{}
+	mode   Mode
+}
+
+func NewUpdateTree(m Mode) *UpdateTree {
+	return &UpdateTree{
+		tree:   btree.NewG[*KeyUpdate](64, keyUpdateLessFn),
+		keccak: sha3.NewLegacyKeccak256().(cryptozerocopy.KeccakState),
+		keys:   map[string]struct{}{},
+		mode:   m,
+	}
+}
+
+func (t *UpdateTree) get(key []byte) (*KeyUpdate, bool) {
+	c := &KeyUpdate{plainKey: key, update: Update{CodeHashOrStorage: EmptyCodeHashArray}}
+	el, ok := t.tree.Get(c)
+	if ok {
+		return el, true
+	}
+	c.plainKey = common.Copy(c.plainKey)
+	return c, false
+}
+
+// TouchPlainKey marks plainKey as updated and applies different fn for different key types
+// (different behaviour for Code, Account and Storage key modifications).
+func (t *UpdateTree) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, val []byte)) {
+	switch t.mode {
+	case ModeUpdate:
+		item, _ := t.get([]byte(key))
+		fn(item, val)
+		t.tree.ReplaceOrInsert(item)
+	case ModeDirect:
+		t.keys[key] = struct{}{}
+	default:
+	}
+}
+
+func (t *UpdateTree) Size() uint64 {
+	return uint64(len(t.keys))
+}
+
+func (t *UpdateTree) TouchAccount(c *KeyUpdate, val []byte) {
+	if len(val) == 0 {
+		c.update.Flags = DeleteUpdate
+		return
+	}
+	if c.update.Flags&DeleteUpdate != 0 {
+		c.update.Flags ^= DeleteUpdate
+	}
+	nonce, balance, chash := types.DecodeAccountBytesV3(val)
+	if c.update.Nonce != nonce {
+		c.update.Nonce = nonce
+		c.update.Flags |= NonceUpdate
+	}
+	if !c.update.Balance.Eq(balance) {
+		c.update.Balance.Set(balance)
+		c.update.Flags |= BalanceUpdate
+	}
+	if !bytes.Equal(chash, c.update.CodeHashOrStorage[:]) {
+		if len(chash) == 0 {
+			c.update.ValLength = length.Hash
+			copy(c.update.CodeHashOrStorage[:], EmptyCodeHash)
+		} else {
+			copy(c.update.CodeHashOrStorage[:], chash)
+			c.update.ValLength = length.Hash
+			c.update.Flags |= CodeUpdate
+		}
+	}
+}
+
+func (t *UpdateTree) UpdatePrefix(prefix, val []byte, fn func(c *KeyUpdate, val []byte)) {
+	t.tree.AscendGreaterOrEqual(&KeyUpdate{}, func(item *KeyUpdate) bool {
+		if !bytes.HasPrefix(item.plainKey, prefix) {
+			return false
+		}
+		fn(item, val)
+		return true
+	})
+}
+
+func (t *UpdateTree) TouchStorage(c *KeyUpdate, val []byte) {
+	c.update.ValLength = len(val)
+	if len(val) == 0 {
+		c.update.Flags = DeleteUpdate
+	} else {
+		c.update.Flags |= StorageUpdate
+		copy(c.update.CodeHashOrStorage[:], val)
+	}
+}
+
+func (t *UpdateTree) TouchCode(c *KeyUpdate, val []byte) {
+	t.keccak.Reset()
+	t.keccak.Write(val)
+	t.keccak.Read(c.update.CodeHashOrStorage[:])
+	if c.update.Flags == DeleteUpdate && len(val) == 0 {
+		c.update.Flags = DeleteUpdate
+		c.update.ValLength = 0
+		return
+	}
+	c.update.ValLength = length.Hash
+	if len(val) != 0 {
+		c.update.Flags |= CodeUpdate
+	}
+}
+
+func (t *UpdateTree) Close() {
+	t.keys = nil
+	t.tree.Clear(true)
+}
+
+func (t *UpdateTree) HashSort(ctx context.Context, hasher func(key []byte) []byte, collect func(k []byte, v []byte) error) error {
+	switch t.mode {
+	case ModeDirect:
+		for key := range t.keys {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+			if err := collect(hasher([]byte(key)), []byte(key)); err != nil {
+				return err
+			}
+		}
+		t.keys = make(map[string]struct{}, len(t.keys))
+	case ModeUpdate:
+		t.tree.Ascend(func(item *KeyUpdate) bool {
+			select {
+			case <-ctx.Done():
+				return false
+			default:
+			}
+			if err := collect(hasher(item.plainKey), item.plainKey); err != nil {
+				return false
+			}
+			return true
+		})
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		t.tree.Clear(true)
+	default:
+		return nil
+	}
+	return nil
+}
+
+// Returns list of both plain and hashed keys. If .mode is ModeUpdate, updates also returned.
+// No ordering guarantees is provided.
+func (t *UpdateTree) List(clear bool) ([][]byte, []Update) {
+	switch t.mode {
+	case ModeDirect:
+		plainKeys := make([][]byte, len(t.keys))
+		i := 0
+		for key := range t.keys {
+			plainKeys[i] = []byte(key)
+			i++
+		}
+		if clear {
+			t.keys = make(map[string]struct{}, len(t.keys)/8)
+		}
+
+		return plainKeys, nil
+	case ModeUpdate:
+		plainKeys := make([][]byte, t.tree.Len())
+		updates := make([]Update, t.tree.Len())
+		i := 0
+		t.tree.Ascend(func(item *KeyUpdate) bool {
+			plainKeys[i], updates[i] = item.plainKey, item.update
+			i++
+			return true
+		})
+		if clear {
+			t.tree.Clear(true)
+		}
+		return plainKeys, updates
+	default:
+		return nil, nil
+	}
+}
+
+type KeyUpdate struct {
+	plainKey []byte
+	update   Update
+}
+
+func keyUpdateLessFn(i, j *KeyUpdate) bool {
+	return bytes.Compare(i.plainKey, j.plainKey) < 0
 }

@@ -626,26 +626,7 @@ func (btw *BtIndexWriter) AddKey(key []byte, offset uint64) error {
 
 // loadFuncBucket is required to satisfy the type etl.LoadFunc type, to use with collector.Load
 func (btw *BtIndexWriter) loadFuncBucket(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-	// k is the BigEndian encoding of the bucket number, and the v is the key that is assigned into that bucket
-	//if uint64(len(btw.vals)) >= btw.batchSizeLimit {
-	//	if err := btw.drainBatch(); err != nil {
-	//		return err
-	//	}
-	//}
-
-	// if _, err := btw.indexW.Write(k); err != nil {
-	// 	return err
-	// }
-	//if _, err := btw.indexW.Write(v); err != nil {
-	//	return err
-	//}
-	//copy(btw.numBuf[8-btw.bytesPerRec:], v)
-	//btw.ef.AddOffset(binary.BigEndian.Uint64(btw.numBuf[:]))
-
 	btw.ef.AddOffset(binary.BigEndian.Uint64(v))
-
-	//btw.keys = append(btw.keys, binary.BigEndian.Uint64(k), binary.BigEndian.Uint64(k[8:]))
-	//btw.vals = append(btw.vals, binary.BigEndian.Uint64(v))
 	return nil
 }
 

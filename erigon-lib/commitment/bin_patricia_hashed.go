@@ -1530,6 +1530,10 @@ func (bph *BinPatriciaHashed) SetState(buf []byte) error {
 	return nil
 }
 
+func (bph *BinPatriciaHashed) ProcessTree(ctx context.Context, t *UpdateTree, lp string) (rootHash []byte, err error) {
+	panic("not implemented")
+}
+
 func (bph *BinPatriciaHashed) ProcessUpdates(ctx context.Context, plainKeys [][]byte, updates []Update) (rootHash []byte, err error) {
 	for i, pk := range plainKeys {
 		updates[i].hashedKey = hexToBin(pk)

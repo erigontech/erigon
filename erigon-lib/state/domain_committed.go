@@ -20,199 +20,14 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"slices"
 	"strings"
 
-	"github.com/google/btree"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/types"
-	"golang.org/x/crypto/sha3"
-
 	"github.com/ledgerwatch/erigon-lib/commitment"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cryptozerocopy"
 	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/recsplit"
 )
-
-// Defines how to evaluate commitments
-type CommitmentMode uint
-
-const (
-	CommitmentModeDisabled CommitmentMode = 0
-	CommitmentModeDirect   CommitmentMode = 1
-	CommitmentModeUpdate   CommitmentMode = 2
-)
-
-func (m CommitmentMode) String() string {
-	switch m {
-	case CommitmentModeDisabled:
-		return "disabled"
-	case CommitmentModeDirect:
-		return "direct"
-	case CommitmentModeUpdate:
-		return "update"
-	default:
-		return "unknown"
-	}
-}
-
-func ParseCommitmentMode(s string) CommitmentMode {
-	var mode CommitmentMode
-	switch s {
-	case "off":
-		mode = CommitmentModeDisabled
-	case "update":
-		mode = CommitmentModeUpdate
-	default:
-		mode = CommitmentModeDirect
-	}
-	return mode
-}
 
 type ValueMerger func(prev, current []byte) (merged []byte, err error)
-
-type UpdateTree struct {
-	tree   *btree.BTreeG[*commitmentItem]
-	keccak cryptozerocopy.KeccakState
-	keys   map[string]struct{}
-	mode   CommitmentMode
-}
-
-func NewUpdateTree(m CommitmentMode) *UpdateTree {
-	return &UpdateTree{
-		tree:   btree.NewG[*commitmentItem](64, commitmentItemLessPlain),
-		keccak: sha3.NewLegacyKeccak256().(cryptozerocopy.KeccakState),
-		keys:   map[string]struct{}{},
-		mode:   m,
-	}
-}
-
-func (t *UpdateTree) get(key []byte) (*commitmentItem, bool) {
-	c := &commitmentItem{plainKey: key, update: commitment.Update{CodeHashOrStorage: commitment.EmptyCodeHashArray}}
-	el, ok := t.tree.Get(c)
-	if ok {
-		return el, true
-	}
-	c.plainKey = common.Copy(c.plainKey)
-	return c, false
-}
-
-// TouchPlainKey marks plainKey as updated and applies different fn for different key types
-// (different behaviour for Code, Account and Storage key modifications).
-func (t *UpdateTree) TouchPlainKey(key string, val []byte, fn func(c *commitmentItem, val []byte)) {
-	switch t.mode {
-	case CommitmentModeUpdate:
-		item, _ := t.get([]byte(key))
-		fn(item, val)
-		t.tree.ReplaceOrInsert(item)
-	case CommitmentModeDirect:
-		t.keys[key] = struct{}{}
-	default:
-	}
-}
-
-func (t *UpdateTree) Size() uint64 {
-	return uint64(len(t.keys))
-}
-
-func (t *UpdateTree) TouchAccount(c *commitmentItem, val []byte) {
-	if len(val) == 0 {
-		c.update.Flags = commitment.DeleteUpdate
-		return
-	}
-	if c.update.Flags&commitment.DeleteUpdate != 0 {
-		c.update.Flags ^= commitment.DeleteUpdate
-	}
-	nonce, balance, chash := types.DecodeAccountBytesV3(val)
-	if c.update.Nonce != nonce {
-		c.update.Nonce = nonce
-		c.update.Flags |= commitment.NonceUpdate
-	}
-	if !c.update.Balance.Eq(balance) {
-		c.update.Balance.Set(balance)
-		c.update.Flags |= commitment.BalanceUpdate
-	}
-	if !bytes.Equal(chash, c.update.CodeHashOrStorage[:]) {
-		if len(chash) == 0 {
-			c.update.ValLength = length.Hash
-			copy(c.update.CodeHashOrStorage[:], commitment.EmptyCodeHash)
-		} else {
-			copy(c.update.CodeHashOrStorage[:], chash)
-			c.update.ValLength = length.Hash
-			c.update.Flags |= commitment.CodeUpdate
-		}
-	}
-}
-
-func (t *UpdateTree) UpdatePrefix(prefix, val []byte, fn func(c *commitmentItem, val []byte)) {
-	t.tree.AscendGreaterOrEqual(&commitmentItem{}, func(item *commitmentItem) bool {
-		if !bytes.HasPrefix(item.plainKey, prefix) {
-			return false
-		}
-		fn(item, val)
-		return true
-	})
-}
-
-func (t *UpdateTree) TouchStorage(c *commitmentItem, val []byte) {
-	c.update.ValLength = len(val)
-	if len(val) == 0 {
-		c.update.Flags = commitment.DeleteUpdate
-	} else {
-		c.update.Flags |= commitment.StorageUpdate
-		copy(c.update.CodeHashOrStorage[:], val)
-	}
-}
-
-func (t *UpdateTree) TouchCode(c *commitmentItem, val []byte) {
-	t.keccak.Reset()
-	t.keccak.Write(val)
-	t.keccak.Read(c.update.CodeHashOrStorage[:])
-	if c.update.Flags == commitment.DeleteUpdate && len(val) == 0 {
-		c.update.Flags = commitment.DeleteUpdate
-		c.update.ValLength = 0
-		return
-	}
-	c.update.ValLength = length.Hash
-	if len(val) != 0 {
-		c.update.Flags |= commitment.CodeUpdate
-	}
-}
-
-// Returns list of both plain and hashed keys. If .mode is CommitmentModeUpdate, updates also returned.
-// No ordering guarantees is provided.
-func (t *UpdateTree) List(clear bool) ([][]byte, []commitment.Update) {
-	switch t.mode {
-	case CommitmentModeDirect:
-		plainKeys := make([][]byte, len(t.keys))
-		i := 0
-		for key := range t.keys {
-			plainKeys[i] = []byte(key)
-			i++
-		}
-		slices.SortFunc(plainKeys, bytes.Compare)
-		if clear {
-			t.keys = make(map[string]struct{}, len(t.keys)/8)
-		}
-
-		return plainKeys, nil
-	case CommitmentModeUpdate:
-		plainKeys := make([][]byte, t.tree.Len())
-		updates := make([]commitment.Update, t.tree.Len())
-		i := 0
-		t.tree.Ascend(func(item *commitmentItem) bool {
-			plainKeys[i], updates[i] = item.plainKey, item.update
-			i++
-			return true
-		})
-		if clear {
-			t.tree.Clear(true)
-		}
-		return plainKeys, updates
-	default:
-		return nil, nil
-	}
-}
 
 type commitmentState struct {
 	txNum     uint64
@@ -266,15 +81,6 @@ func encodeShorterKey(buf []byte, offset uint64) []byte {
 		buf = make([]byte, 0, 8)
 	}
 	return binary.AppendUvarint(buf, offset)
-}
-
-type commitmentItem struct {
-	plainKey []byte
-	update   commitment.Update
-}
-
-func commitmentItemLessPlain(i, j *commitmentItem) bool {
-	return bytes.Compare(i.plainKey, j.plainKey) < 0
 }
 
 // Finds shorter replacement for full key in given file item. filesItem -- result of merging of multiple files.

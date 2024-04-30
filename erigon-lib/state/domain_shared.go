@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/cryptozerocopy"
+	"golang.org/x/crypto/sha3"
 	"math"
 	"path/filepath"
 	"runtime"
@@ -113,7 +115,7 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 	}
 
 	sd.SetTxNum(0)
-	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, CommitmentModeDirect, commitment.VariantHexPatriciaTrie)
+	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, commitment.VariantHexPatriciaTrie)
 
 	if _, err := sd.SeekCommitment(context.Background(), tx); err != nil {
 		return nil, fmt.Errorf("SeekCommitment: %w", err)
@@ -171,7 +173,7 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Tx, bloc
 		if err != nil {
 			return nil, err
 		}
-		sd.sdCtx.TouchPlainKey(string(k), nil, sd.sdCtx.TouchAccount)
+		sd.sdCtx.TouchKey(kv.AccountsDomain, string(k), nil)
 	}
 
 	it, err = sd.aggCtx.StorageHistoryRange(int(sd.TxNum()), math.MaxInt64, order.Asc, -1, roTx)
@@ -184,7 +186,7 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Tx, bloc
 		if err != nil {
 			return nil, err
 		}
-		sd.sdCtx.TouchPlainKey(string(k), nil, sd.sdCtx.TouchStorage)
+		sd.sdCtx.TouchKey(kv.StorageDomain, string(k), nil)
 	}
 
 	sd.sdCtx.Reset()
@@ -499,14 +501,14 @@ func (sd *SharedDomains) LatestStorage(addrLoc []byte) ([]byte, uint64, error) {
 
 func (sd *SharedDomains) updateAccountData(addr []byte, account, prevAccount []byte, prevStep uint64) error {
 	addrS := string(addr)
-	sd.sdCtx.TouchPlainKey(addrS, account, sd.sdCtx.TouchAccount)
+	sd.sdCtx.TouchKey(kv.AccountsDomain, addrS, account)
 	sd.put(kv.AccountsDomain, addrS, account)
 	return sd.dWriter[kv.AccountsDomain].PutWithPrev(addr, nil, account, prevAccount, prevStep)
 }
 
 func (sd *SharedDomains) updateAccountCode(addr, code, prevCode []byte, prevStep uint64) error {
 	addrS := string(addr)
-	sd.sdCtx.TouchPlainKey(addrS, code, sd.sdCtx.TouchCode)
+	sd.sdCtx.TouchKey(kv.CodeDomain, addrS, code)
 	sd.put(kv.CodeDomain, addrS, code)
 	if len(code) == 0 {
 		return sd.dWriter[kv.CodeDomain].DeleteWithPrev(addr, nil, prevCode, prevStep)
@@ -530,7 +532,7 @@ func (sd *SharedDomains) deleteAccount(addr, prev []byte, prevStep uint64) error
 		return err
 	}
 
-	sd.sdCtx.TouchPlainKey(addrS, nil, sd.sdCtx.TouchAccount)
+	sd.sdCtx.TouchKey(kv.AccountsDomain, addrS, nil)
 	sd.put(kv.AccountsDomain, addrS, nil)
 	if err := sd.dWriter[kv.AccountsDomain].DeleteWithPrev(addr, nil, prev, prevStep); err != nil {
 		return err
@@ -546,7 +548,7 @@ func (sd *SharedDomains) writeAccountStorage(addr, loc []byte, value, preVal []b
 		composite = append(append(composite, addr...), loc...)
 	}
 	compositeS := string(composite)
-	sd.sdCtx.TouchPlainKey(compositeS, value, sd.sdCtx.TouchStorage)
+	sd.sdCtx.TouchKey(kv.StorageDomain, compositeS, value)
 	sd.put(kv.StorageDomain, compositeS, value)
 	return sd.dWriter[kv.StorageDomain].PutWithPrev(composite, nil, value, preVal, prevStep)
 }
@@ -557,7 +559,7 @@ func (sd *SharedDomains) delAccountStorage(addr, loc []byte, preVal []byte, prev
 		composite = append(append(composite, addr...), loc...)
 	}
 	compositeS := string(composite)
-	sd.sdCtx.TouchPlainKey(compositeS, nil, sd.sdCtx.TouchStorage)
+	sd.sdCtx.TouchKey(kv.StorageDomain, compositeS, nil)
 	sd.put(kv.StorageDomain, compositeS, nil)
 	return sd.dWriter[kv.StorageDomain].DeleteWithPrev(composite, nil, preVal, prevStep)
 }
@@ -783,8 +785,7 @@ func (sd *SharedDomains) Close() {
 	}
 
 	if sd.sdCtx != nil {
-		sd.sdCtx.updates.keys = nil
-		sd.sdCtx.updates.tree.Clear(true)
+		sd.sdCtx.Close()
 	}
 }
 
@@ -966,25 +967,31 @@ func (sd *SharedDomains) Tx() kv.Tx { return sd.roTx }
 type SharedDomainsCommitmentContext struct {
 	sd           *SharedDomains
 	discard      bool
-	updates      *UpdateTree
-	mode         CommitmentMode
+	updates      *commitment.UpdateTree
+	mode         commitment.Mode
 	branchCache  map[string]cachedBranch
 	patriciaTrie commitment.Trie
 	justRestored atomic.Bool
+	keccak       cryptozerocopy.KeccakState
 }
 
-func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode CommitmentMode, trieVariant commitment.TrieVariant) *SharedDomainsCommitmentContext {
+func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode commitment.Mode, trieVariant commitment.TrieVariant) *SharedDomainsCommitmentContext {
 	ctx := &SharedDomainsCommitmentContext{
 		sd:           sd,
 		mode:         mode,
-		updates:      NewUpdateTree(mode),
+		updates:      commitment.NewUpdateTree(mode),
 		discard:      dbg.DiscardCommitment(),
 		patriciaTrie: commitment.InitializeTrie(trieVariant),
 		branchCache:  make(map[string]cachedBranch),
+		keccak:       sha3.NewLegacyKeccak256().(cryptozerocopy.KeccakState),
 	}
 
 	ctx.patriciaTrie.ResetContext(ctx)
 	return ctx
+}
+
+func (sdc *SharedDomainsCommitmentContext) Close() {
+	sdc.updates.Close()
 }
 
 type cachedBranch struct {
@@ -1052,9 +1059,9 @@ func (sdc *SharedDomainsCommitmentContext) GetAccount(plainKey []byte, cell *com
 	}
 	if len(code) > 0 {
 		//fmt.Printf("GetAccount: code %x - %x\n", plainKey, code)
-		sdc.updates.keccak.Reset()
-		sdc.updates.keccak.Write(code)
-		sdc.updates.keccak.Read(cell.CodeHash[:])
+		sdc.keccak.Reset()
+		sdc.keccak.Write(code)
+		sdc.keccak.Read(cell.CodeHash[:])
 	} else {
 		cell.CodeHash = commitment.EmptyCodeHashArray
 	}
@@ -1087,54 +1094,47 @@ func (sdc *SharedDomainsCommitmentContext) TempDir() string {
 	return sdc.sd.aggCtx.a.dirs.Tmp
 }
 
-//func (ctx *SharedDomainsCommitmentContext) Hasher() hash.Hash { return ctx.updates.keccak }
-//
-//func (ctx *SharedDomainsCommitmentContext) SetCommitmentMode(m CommitmentMode) { ctx.mode = m }
-//
-
-// TouchPlainKey marks plainKey as updated and applies different fn for different key types
-// (different behaviour for Code, Account and Storage key modifications).
-func (sdc *SharedDomainsCommitmentContext) TouchPlainKey(key string, val []byte, fn func(c *commitmentItem, val []byte)) {
-	if sdc.discard {
-		return
-	}
-	sdc.updates.TouchPlainKey(key, val, fn)
-}
-
 func (sdc *SharedDomainsCommitmentContext) KeysCount() uint64 {
 	return sdc.updates.Size()
 }
 
-func (sdc *SharedDomainsCommitmentContext) TouchAccount(c *commitmentItem, val []byte) {
-	sdc.updates.TouchAccount(c, val)
-}
-
-func (sdc *SharedDomainsCommitmentContext) TouchStorage(c *commitmentItem, val []byte) {
-	sdc.updates.TouchStorage(c, val)
-}
-
-func (sdc *SharedDomainsCommitmentContext) TouchCode(c *commitmentItem, val []byte) {
-	sdc.updates.TouchCode(c, val)
+// TouchPlainKey marks plainKey as updated and applies different fn for different key types
+// (different behaviour for Code, Account and Storage key modifications).
+func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val []byte) {
+	if sdc.discard {
+		return
+	}
+	switch d {
+	case kv.AccountsDomain:
+		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchAccount)
+	case kv.CodeDomain:
+		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchCode)
+	case kv.StorageDomain:
+		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchStorage)
+	default:
+		panic(fmt.Errorf("TouchKey: unknown domain %s", d))
+	}
 }
 
 // Evaluates commitment for processed state.
-func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctext context.Context, saveState bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
+func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, saveState bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
 	defer sdc.ResetBranchCache()
 	if dbg.DiscardCommitment() {
 		sdc.updates.List(true)
 		return nil, nil
 	}
+
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
 	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
 
-	touchedKeys, updates := sdc.updates.List(true)
+	updateCount := sdc.updates.Size()
 	if sdc.sd.trace {
 		defer func() {
-			fmt.Printf("[SDC] rootHash %x block %d keys %d mode %s\n", rootHash, blockNum, len(touchedKeys), sdc.mode)
+			fmt.Printf("[SDC] rootHash %x block %d keys %d mode %s\n", rootHash, blockNum, updateCount, sdc.mode)
 		}()
 	}
-	if len(touchedKeys) == 0 {
+	if updateCount == 0 {
 		rootHash, err = sdc.patriciaTrie.RootHash()
 		return rootHash, err
 	}
@@ -1144,17 +1144,18 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctext context.Conte
 	sdc.Reset()
 
 	switch sdc.mode {
-	case CommitmentModeDirect:
-		rootHash, err = sdc.patriciaTrie.ProcessKeys(ctext, touchedKeys, logPrefix)
+	case commitment.ModeDirect:
+		rootHash, err = sdc.patriciaTrie.ProcessTree(ctx, sdc.updates, logPrefix)
 		if err != nil {
 			return nil, err
 		}
-	case CommitmentModeUpdate:
-		rootHash, err = sdc.patriciaTrie.ProcessUpdates(ctext, touchedKeys, updates)
+	case commitment.ModeUpdate:
+		touchedKeys, updates := sdc.updates.List(true)
+		rootHash, err = sdc.patriciaTrie.ProcessUpdates(ctx, touchedKeys, updates)
 		if err != nil {
 			return nil, err
 		}
-	case CommitmentModeDisabled:
+	case commitment.ModeDisabled:
 		return nil, nil
 	default:
 		return nil, fmt.Errorf("invalid commitment mode: %s", sdc.mode)
