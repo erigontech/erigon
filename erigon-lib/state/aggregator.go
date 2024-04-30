@@ -252,11 +252,11 @@ func (a *Aggregator) DisableFsync() {
 }
 
 func (a *Aggregator) OpenFolder(readonly bool) error {
-	defer a.recalcVisibleFiles()
-
 	if !a.reopoenNonReadonlyOnce.CompareAndSwap(false, true) {
 		panic("can open agg in non-readonly mode only once - at Erigon startup")
 	}
+
+	defer a.recalcVisibleFiles()
 
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
@@ -283,6 +283,10 @@ func (a *Aggregator) OpenFolder(readonly bool) error {
 }
 
 func (a *Aggregator) OpenList(files []string, readonly bool) error {
+	if !a.reopoenNonReadonlyOnce.CompareAndSwap(false, true) {
+		panic("can open agg in non-readonly mode only once - at Erigon startup")
+	}
+
 	defer a.recalcVisibleFiles()
 
 	a.dirtyFilesLock.Lock()
