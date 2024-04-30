@@ -1053,7 +1053,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		upCell.extLen = 0
 		upCell.downHashedLen = 0
 		if hph.branchBefore[row] {
-			_, err := hph.collectBranchUpdate(updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
+			_, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
 			}
@@ -1081,7 +1081,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		upCell.fillFromLowerCell(cell, depth, hph.currentKey[upDepth:hph.currentKeyLen], nibble)
 		// Delete if it existed
 		if hph.branchBefore[row] {
-			_, err := hph.collectBranchUpdate(updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
+			_, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
 			}
@@ -1154,7 +1154,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		var lastNibble int
 		var err error
 
-		lastNibble, err = hph.collectBranchUpdate(updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], cellGetter)
+		lastNibble, err = hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], cellGetter)
 		if err != nil {
 			return fmt.Errorf("failed to encode branch update: %w", err)
 		}
@@ -1267,40 +1267,6 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte) *Cell {
 		copy(cell.spk[:], plainKey)
 	}
 	return cell
-}
-
-func (hph *HexPatriciaHashed) collectBranchUpdate(
-	prefix []byte,
-	bitmap, touchMap, afterMap uint16,
-	readCell func(nibble int, skip bool) (*Cell, error),
-) (lastNibble int, err error) {
-
-	mxCommitmentBranchUpdates.Inc()
-	return hph.branchEncoder.CollectUpdate(hph.ctx, prefix, bitmap, touchMap, afterMap, readCell)
-	//update, ln, err := hph.branchEncoder.EncodeBranch(bitmap, touchMap, afterMap, readCell)
-	//if err != nil {
-	//	return 0, err
-	//}
-	//prev, prevStep, err := hph.ctx.GetBranch(prefix) // prefix already compacted by fold
-	//if err != nil {
-	//	return 0, err
-	//}
-	//if len(prev) > 0 {
-	//	//merged, err = BranchData(prev).MergeHexBranches(update, merged)
-	//	update, err = hph.branchMerger.Merge(prev, update)
-	//	if err != nil {
-	//		return 0, err
-	//	}
-	//}
-	//// this updates ensures that if commitment is present, each branch are also present in commitment state at that moment with costs of storage
-	////fmt.Printf("commitment branch encoder merge prefix [%x] [%x]->[%x]\n%update\n", prefix, stateValue, update, BranchData(update).String())
-	//
-	////cp, cu := common.Copy(prefix), common.Copy(update) // has to copy :(
-	//if err = hph.ctx.PutBranch(prefix, update, prev, prevStep); err != nil {
-	//	return 0, err
-	//}
-	//mxCommitmentBranchUpdates.Inc()
-	//return ln, nil
 }
 
 func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {

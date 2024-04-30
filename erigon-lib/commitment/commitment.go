@@ -207,17 +207,16 @@ func (be *BranchEncoder) CollectUpdate(
 		return 0, err
 	}
 	if len(prev) > 0 {
-		//update, err = BranchData(prev).MergeHexBranches(update, merged)
 		update, err = be.merger.Merge(prev, update)
 		if err != nil {
 			return 0, err
 		}
 	}
 	//fmt.Printf("collectBranchUpdate [%x] -> [%x]\n", prefix, update)
-	//if err = be.updates.Collect(common.Copy(prefix), common.Copy(update)); err != nil {
 	if err = be.updates.Collect(prefix, update); err != nil {
 		return 0, err
 	}
+	mxCommitmentBranchUpdates.Inc()
 	return lastNibble, nil
 }
 
