@@ -264,6 +264,7 @@ func ExecV3(ctx context.Context,
 		if _nothing, err := nothingToExec(applyTx); err != nil {
 			return err
 		} else if _nothing {
+			fmt.Println("nothing to exec1")
 			return nil
 		}
 
@@ -276,6 +277,7 @@ func ExecV3(ctx context.Context,
 			if _nothing, err = nothingToExec(applyTx); err != nil {
 				return err
 			} else if _nothing {
+				fmt.Println("nothing to exec2")
 				return nil
 			}
 
