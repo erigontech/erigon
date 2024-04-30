@@ -210,7 +210,9 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	if err := stages.SaveStageProgress(txc.Tx, stages.Bodies, blockHeight); err != nil {
 		return err
 	}
-	if err := SpawnRecoverSendersStage(sendersCfg, s, nil, txc.Tx, blockHeight, ctx, logger); err != nil {
+	senderS := &StageState{state: s.state, ID: stages.Senders, BlockNumber: blockHeight - 1}
+
+	if err := SpawnRecoverSendersStage(sendersCfg, senderS, nil, txc.Tx, blockHeight, ctx, logger); err != nil {
 		return err
 	}
 
