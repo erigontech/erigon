@@ -112,73 +112,22 @@ func GetIndexSalt(baseDir string) (uint32, error) {
 	return salt, nil
 }
 
-type Index int
+type Index struct {
+	Name   string
+	Offset int
+}
 
-var Indexes = struct {
-	Unknown,
-	HeaderHash,
-	BodyHash,
-	TxnHash,
-	TxnHash2BlockNum,
-	BorTxnHash,
-	BorSpanId,
-	BorCheckpointId,
-	BorMilestoneId,
+var CaplinIndexes = struct {
 	BeaconBlockSlot,
 	BlobSidecarSlot Index
 }{
-	Unknown:          -1,
-	HeaderHash:       0,
-	BodyHash:         1,
-	TxnHash:          2,
-	TxnHash2BlockNum: 3,
-	BorTxnHash:       4,
-	BorSpanId:        5,
-	BorCheckpointId:  6,
-	BorMilestoneId:   7,
-	BeaconBlockSlot:  8,
-	BlobSidecarSlot:  9,
-}
-
-func (i Index) Offset() int {
-	switch i {
-	case Indexes.TxnHash2BlockNum:
-		return 1
-	default:
-		return 0
-	}
-}
-
-func (i Index) String() string {
-	switch i {
-	case Indexes.HeaderHash:
-		return Enums.Headers.String()
-	case Indexes.BodyHash:
-		return Enums.Bodies.String()
-	case Indexes.TxnHash:
-		return Enums.Transactions.String()
-	case Indexes.TxnHash2BlockNum:
-		return "transactions-to-block"
-	case Indexes.BorTxnHash:
-		return Enums.BorEvents.String()
-	case Indexes.BorSpanId:
-		return Enums.BorSpans.String()
-	case Indexes.BorCheckpointId:
-		return Enums.BorCheckpoints.String()
-	case Indexes.BorMilestoneId:
-		return Enums.BorMilestones.String()
-	case Indexes.BeaconBlockSlot:
-		return Enums.BeaconBlocks.String()
-	case Indexes.BlobSidecarSlot:
-		return Enums.BlobSidecars.String()
-	default:
-		panic(fmt.Sprintf("unknown index: %d", i))
-	}
+	BeaconBlockSlot: Index{Name: "beaconblocks"},
+	BlobSidecarSlot: Index{Name: "blocksidecars"},
 }
 
 func (i Index) HasFile(info FileInfo, logger log.Logger) bool {
 	dir := info.Dir()
-	fName := IdxFileName(info.Version, info.From, info.To, i.String())
+	fName := IdxFileName(info.Version, info.From, info.To, i.Name)
 
 	segment, err := seg.NewDecompressor(info.Path)
 
@@ -202,7 +151,7 @@ func (i Index) HasFile(info FileInfo, logger log.Logger) bool {
 type Type interface {
 	Enum() Enum
 	Versions() Versions
-	String() string
+	Name() string
 	FileName(version Version, from uint64, to uint64) string
 	FileInfo(dir string, from uint64, to uint64) FileInfo
 	IdxFileName(version Version, from uint64, to uint64, index ...Index) string
@@ -215,20 +164,26 @@ type Type interface {
 
 type snapType struct {
 	enum           Enum
+	name           string
 	versions       Versions
 	indexes        []Index
 	indexBuilder   IndexBuilder
 	rangeExtractor RangeExtractor
 }
 
+// These are raw maps with no mutex protection becuase they are
+// expected to be written to once during program initialization
+// and them be readonly
 var registeredTypes = map[Enum]Type{}
+var namedTypes = map[string]Type{}
 
-func RegisterType(enum Enum, versions Versions, rangeExtractor RangeExtractor, indexes []Index, indexBuilder IndexBuilder) Type {
+func RegisterType(enum Enum, name string, versions Versions, rangeExtractor RangeExtractor, indexes []Index, indexBuilder IndexBuilder) Type {
 	t := snapType{
-		enum: enum, versions: versions, indexes: indexes, rangeExtractor: rangeExtractor, indexBuilder: indexBuilder,
+		enum: enum, name: name, versions: versions, indexes: indexes, rangeExtractor: rangeExtractor, indexBuilder: indexBuilder,
 	}
 
 	registeredTypes[enum] = t
+	namedTypes[strings.ToLower(name)] = t
 
 	return t
 }
@@ -241,8 +196,12 @@ func (s snapType) Versions() Versions {
 	return s.versions
 }
 
+func (s snapType) Name() string {
+	return s.name
+}
+
 func (s snapType) String() string {
-	return s.enum.String()
+	return s.Name()
 }
 
 func (s snapType) FileName(version Version, from uint64, to uint64) string {
@@ -289,7 +248,7 @@ func (s snapType) HasIndexFiles(info FileInfo, logger log.Logger) bool {
 func (s snapType) IdxFileNames(version Version, from uint64, to uint64) []string {
 	fileNames := make([]string, len(s.indexes))
 	for i, index := range s.indexes {
-		fileNames[i] = IdxFileName(version, from, to, index.String())
+		fileNames[i] = IdxFileName(version, from, to, index.Name)
 	}
 
 	return fileNames
@@ -318,7 +277,7 @@ func (s snapType) IdxFileName(version Version, from uint64, to uint64, index ...
 		}
 	}
 
-	return IdxFileName(version, from, to, index[0].String())
+	return IdxFileName(version, from, to, index[0].Name)
 }
 
 func ParseFileType(s string) (Type, bool) {
@@ -333,60 +292,46 @@ func ParseFileType(s string) (Type, bool) {
 
 type Enum int
 
-var Enums = struct {
-	Unknown,
-	Headers,
-	Bodies,
-	Transactions,
-	BorEvents,
-	BorSpans,
-	BorCheckpoints,
-	BorMilestones,
+const Unknown Enum = 0
+
+type Enums struct {
+	Unknown Enum
+}
+
+const MinCoreEnum = 1
+const MinBorEnum = 4
+const MinCaplinEnum = 8
+
+var CaplinEnums = struct {
+	Enums
 	BeaconBlocks,
 	BlobSidecars Enum
 }{
-	Unknown:        -1,
-	Headers:        0,
-	Bodies:         1,
-	Transactions:   2,
-	BorEvents:      3,
-	BorSpans:       4,
-	BorCheckpoints: 5,
-	BorMilestones:  6,
-	BeaconBlocks:   7,
-	BlobSidecars:   8,
+	Enums:        Enums{},
+	BeaconBlocks: MinCaplinEnum,
+	BlobSidecars: MinCaplinEnum + 1,
 }
 
 func (ft Enum) String() string {
 	switch ft {
-	case Enums.Headers:
-		return "headers"
-	case Enums.Bodies:
-		return "bodies"
-	case Enums.Transactions:
-		return "transactions"
-	case Enums.BorEvents:
-		return "borevents"
-	case Enums.BorSpans:
-		return "borspans"
-	case Enums.BorCheckpoints:
-		return "borcheckpoints"
-	case Enums.BorMilestones:
-		return "bormilestones"
-	case Enums.BeaconBlocks:
+	case CaplinEnums.BeaconBlocks:
 		return "beaconblocks"
-	case Enums.BlobSidecars:
+	case CaplinEnums.BlobSidecars:
 		return "blobsidecars"
 	default:
+		if t, ok := registeredTypes[ft]; ok {
+			return t.Name()
+		}
+
 		panic(fmt.Sprintf("unknown file type: %d", ft))
 	}
 }
 
 func (ft Enum) Type() Type {
 	switch ft {
-	case Enums.BeaconBlocks:
+	case CaplinEnums.BeaconBlocks:
 		return BeaconBlocks
-	case Enums.BlobSidecars:
+	case CaplinEnums.BlobSidecars:
 		return BlobSidecars
 	default:
 		return registeredTypes[ft]
@@ -411,27 +356,17 @@ func (e Enum) BuildIndexes(ctx context.Context, info FileInfo, chainConfig *chai
 }
 
 func ParseEnum(s string) (Enum, bool) {
+	s = strings.ToLower(s)
 	switch s {
-	case "headers":
-		return Enums.Headers, true
-	case "bodies":
-		return Enums.Bodies, true
-	case "transactions":
-		return Enums.Transactions, true
-	case "borevents":
-		return Enums.BorEvents, true
-	case "borspans":
-		return Enums.BorSpans, true
-	case "borcheckpoints":
-		return Enums.BorCheckpoints, true
-	case "bormilestones":
-		return Enums.BorMilestones, true
 	case "beaconblocks":
-		return Enums.BeaconBlocks, true
+		return CaplinEnums.BeaconBlocks, true
 	case "blobsidecars":
-		return Enums.BlobSidecars, true
+		return CaplinEnums.BlobSidecars, true
 	default:
-		return Enums.Unknown, false
+		if t, ok := namedTypes[s]; ok {
+			return t.Enum(), true
+		}
+		return Enums{}.Unknown, false
 	}
 }
 
@@ -510,7 +445,7 @@ func BuildIndex(ctx context.Context, info FileInfo, salt uint32, firstDataId uin
 func ExtractRange(ctx context.Context, f FileInfo, extractor RangeExtractor, firstKey FirstKeyGetter, chainDB kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 	var lastKeyValue uint64
 
-	sn, err := seg.NewCompressor(ctx, "Snapshot "+f.Type.String(), f.Path, tmpDir, seg.MinPatternScore, workers, log.LvlTrace, logger)
+	sn, err := seg.NewCompressor(ctx, "Snapshot "+f.Type.Name(), f.Path, tmpDir, seg.MinPatternScore, workers, log.LvlTrace, logger)
 
 	if err != nil {
 		return lastKeyValue, err

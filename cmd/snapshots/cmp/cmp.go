@@ -260,13 +260,13 @@ func cmp(cliCtx *cli.Context) error {
 		})
 	} else {
 		for _, snapType := range snapTypes {
-			if snapType.Enum() == snaptype.Enums.Headers {
+			if snapType.Enum() == coresnaptype.Enums.Headers {
 				funcs = append(funcs, func(ctx context.Context) (time.Duration, time.Duration, time.Duration, error) {
 					return c.compareHeaders(ctx, h1ents, h2ents, headerWorkers, logger)
 				})
 			}
 
-			if snapType.Enum() == snaptype.Enums.Bodies {
+			if snapType.Enum() == coresnaptype.Enums.Bodies {
 				funcs = append(funcs, func(ctx context.Context) (time.Duration, time.Duration, time.Duration, error) {
 					return c.compareBodies(ctx, b1ents, b2ents, bodyWorkers, logger)
 				})
@@ -325,11 +325,11 @@ func splitEntries(files []fs.DirEntry, version snaptype.Version, firstBlock, las
 					(firstBlock == 0 || snapInfo.From() >= firstBlock) &&
 					(lastBlock == 0 || snapInfo.From() < lastBlock) {
 
-					if snapInfo.Type().Enum() == snaptype.Enums.Headers {
+					if snapInfo.Type().Enum() == coresnaptype.Enums.Headers {
 						hents = append(hents, ent)
 					}
 
-					if snapInfo.Type().Enum() == snaptype.Enums.Bodies {
+					if snapInfo.Type().Enum() == coresnaptype.Enums.Bodies {
 						found := false
 
 						for _, bent := range bents {
@@ -345,7 +345,7 @@ func splitEntries(files []fs.DirEntry, version snaptype.Version, firstBlock, las
 						}
 					}
 
-					if snapInfo.Type().Enum() == snaptype.Enums.Transactions {
+					if snapInfo.Type().Enum() == coresnaptype.Enums.Transactions {
 						found := false
 
 						for _, bent := range bents {
