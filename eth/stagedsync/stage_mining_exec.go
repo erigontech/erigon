@@ -409,8 +409,6 @@ func filterBadTransactions(transactions []types.Transaction, config chain.Config
 		// Updates account in the simulation
 		newAccount.Nonce++
 		newAccount.Balance.Sub(&account.Balance, want)
-		accountBuffer := make([]byte, account.EncodingLengthForStorage())
-		newAccount.EncodeForStorage(accountBuffer)
 		if err := simStateWriter.UpdateAccountData(sender, account, newAccount); err != nil {
 			return nil, err
 		}
