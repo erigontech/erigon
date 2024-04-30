@@ -29,6 +29,7 @@ type Zk struct {
 	SequencerInitialForkId                 uint64
 	SequencerBlockSealTime                 time.Duration
 	SequencerBatchSealTime                 time.Duration
+	SequencerNonEmptyBatchSealTime         time.Duration
 	ExecutorUrls                           []string
 	ExecutorStrictMode                     bool
 	AllowFreeTransactions                  bool

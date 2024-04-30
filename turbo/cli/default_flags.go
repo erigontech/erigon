@@ -187,6 +187,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.SequencerInitialForkId,
 	&utils.SequencerBlockSealTime,
 	&utils.SequencerBatchSealTime,
+	&utils.SequencerNonEmptyBatchSealTime,
 	&utils.ExecutorUrls,
 	&utils.ExecutorStrictMode,
 	&utils.AllowFreeTransactions,
