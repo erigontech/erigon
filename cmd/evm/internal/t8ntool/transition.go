@@ -205,6 +205,7 @@ func Main(ctx *cli.Context) error {
 	}
 	// Set the chain id
 	chainConfig.ChainID = big.NewInt(ctx.Int64(ChainIDFlag.Name))
+	rules := chainConfig.Rules(inputData.Env.Number, inputData.Env.Timestamp)
 
 	var txsWithKeys []*txWithKey
 	if txStr != stdinSelector {
@@ -227,7 +228,7 @@ func Main(ctx *cli.Context) error {
 		return NewError(ErrorJson, fmt.Errorf("failed signing transactions: %v", err))
 	}
 
-	eip1559 := chainConfig.IsLondon(prestate.Env.Number)
+	eip1559 := rules.IsLondon
 	// Sanity check, to not `panic` in state_transition
 	if eip1559 {
 		if prestate.Env.BaseFee == nil {
@@ -237,7 +238,7 @@ func Main(ctx *cli.Context) error {
 		prestate.Env.Random = nil
 	}
 
-	if chainConfig.IsShanghai(prestate.Env.Timestamp) && prestate.Env.Withdrawals == nil {
+	if rules.IsShanghai && prestate.Env.Withdrawals == nil {
 		return NewError(ErrorVMConfig, errors.New("Shanghai config but missing 'withdrawals' in env section"))
 	}
 
@@ -303,7 +304,7 @@ func Main(ctx *cli.Context) error {
 	}
 	defer tx.Rollback()
 
-	reader, writer := MakePreState(chainConfig.Rules(0, 0), tx, prestate.Pre)
+	reader, writer := MakePreState(rules, tx, prestate.Pre)
 	// Merge engine can be used for pre-merge blocks as well, as it
 	// redirects to the ethash engine based on the block number
 	engine := merge.New(&ethash.FakeEthash{})
