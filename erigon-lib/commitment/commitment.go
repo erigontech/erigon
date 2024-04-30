@@ -5,13 +5,13 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"math/bits"
 	"strings"
 
 	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 )
@@ -214,7 +214,8 @@ func (be *BranchEncoder) CollectUpdate(
 		}
 	}
 	//fmt.Printf("collectBranchUpdate [%x] -> [%x]\n", prefix, update)
-	if err = be.updates.Collect(prefix, common.Copy(update)); err != nil {
+	//if err = be.updates.Collect(common.Copy(prefix), common.Copy(update)); err != nil {
+	if err = be.updates.Collect(prefix, update); err != nil {
 		return 0, err
 	}
 	return lastNibble, nil
