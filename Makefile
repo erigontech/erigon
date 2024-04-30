@@ -336,11 +336,6 @@ user_macos:
 	sudo dscl . -append /Groups/admin GroupMembership $(ERIGON_USER)
 	sudo -u $(ERIGON_USER) mkdir -p /Users/$(ERIGON_USER)/.local/share
 
-## coverage:                          run code coverage report and output total coverage %
-.PHONY: coverage
-coverage:
-	@go test -coverprofile=coverage-total.out ./... > /dev/null 2>&1 && go tool cover -func coverage-total.out | grep total | awk '{print substr($$3, 1, length($$3)-1)}'
-
 ## hive:                              run hive test suite locally using docker e.g. OUTPUT_DIR=~/results/hive SIM=ethereum/engine make hive
 .PHONY: hive
 hive:

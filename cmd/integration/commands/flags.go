@@ -31,6 +31,7 @@ var (
 	pruneHBefore, pruneRBefore     uint64
 	pruneTBefore, pruneCBefore     uint64
 	experiments                    []string
+	unwindTypes                    []string
 	chain                          string // Which chain to use (mainnet, goerli, sepolia, etc.)
 	outputCsvFile                  string
 

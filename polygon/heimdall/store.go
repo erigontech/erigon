@@ -167,27 +167,27 @@ func (s rwTxStore) PutSpan(_ context.Context, span *Span) error {
 }
 
 func (s rwTxStore) PutCheckpoint(_ context.Context, checkpointId CheckpointId, checkpoint *Checkpoint) error {
-	spanBytes, err := json.Marshal(checkpoint)
+	checkpointBytes, err := json.Marshal(checkpoint)
 	if err != nil {
 		return err
 	}
 
-	var spanIdBytes [8]byte
-	binary.BigEndian.PutUint64(spanIdBytes[:], uint64(checkpointId))
+	var checkpointIdBytes [8]byte
+	binary.BigEndian.PutUint64(checkpointIdBytes[:], uint64(checkpointId))
 
-	return s.tx.Put(kv.BorCheckpoints, spanIdBytes[:], spanBytes)
+	return s.tx.Put(kv.BorCheckpoints, checkpointIdBytes[:], checkpointBytes)
 }
 
 func (s rwTxStore) PutMilestone(_ context.Context, milestoneId MilestoneId, milestone *Milestone) error {
-	spanBytes, err := json.Marshal(milestone)
+	milestoneBytes, err := json.Marshal(milestone)
 	if err != nil {
 		return err
 	}
 
-	var spanIdBytes [8]byte
-	binary.BigEndian.PutUint64(spanIdBytes[:], uint64(milestoneId))
+	var milestoneIdBytes [8]byte
+	binary.BigEndian.PutUint64(milestoneIdBytes[:], uint64(milestoneId))
 
-	return s.tx.Put(kv.BorMilestones, spanIdBytes[:], spanBytes)
+	return s.tx.Put(kv.BorMilestones, milestoneIdBytes[:], milestoneBytes)
 }
 
 func NewNoopStore() Store {
