@@ -195,6 +195,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	if err := rawdb.WriteHeader(txc.Tx, block.Header()); err != nil {
 		return fmt.Errorf("cannot write header: %s", err)
 	}
+	fmt.Println(block.NumberU64())
 	var ok bool
 	if ok, err = rawdb.WriteRawBodyIfNotExists(txc.Tx, block.Hash(), block.NumberU64(), block.RawBody()); err != nil {
 		return fmt.Errorf("cannot write body: %s", err)
