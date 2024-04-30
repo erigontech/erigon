@@ -44,7 +44,8 @@ func generateSubnetsTopics(template string, maxIds int) []sentinel.GossipTopic {
 }
 
 func getExpirationForTopic(topic string) time.Time {
-	if strings.Contains(topic, "beacon_attestation") || (strings.Contains(topic, "sync_committee_") && !strings.Contains(topic, gossip.TopicNameSyncCommitteeContributionAndProof)) {
+	if strings.Contains(topic, "beacon_attestation") ||
+		(strings.Contains(topic, "sync_committee_") && !strings.Contains(topic, gossip.TopicNameSyncCommitteeContributionAndProof)) {
 		return time.Unix(0, 0)
 	}
 
@@ -60,7 +61,16 @@ func createSentinel(
 	ethClock eth_clock.EthereumClock,
 	validatorTopics bool,
 	logger log.Logger) (*sentinel.Sentinel, error) {
-	sent, err := sentinel.New(context.Background(), cfg, ethClock, blockReader, blobStorage, indiciesDB, logger, forkChoiceReader)
+	sent, err := sentinel.New(
+		context.Background(),
+		cfg,
+		ethClock,
+		blockReader,
+		blobStorage,
+		indiciesDB,
+		logger,
+		forkChoiceReader,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -75,13 +85,27 @@ func createSentinel(
 		sentinel.BlsToExecutionChangeSsz,
 		////sentinel.LightClientFinalityUpdateSsz,
 		////sentinel.LightClientOptimisticUpdateSsz,
+		sentinel.SyncCommitteeContributionAndProofSsz,
+		sentinel.BeaconAggregateAndProofSsz,
 	}
-	if validatorTopics {
-		gossipTopics = append(gossipTopics, sentinel.SyncCommitteeContributionAndProofSsz, sentinel.BeaconAggregateAndProofSsz)
-	}
-	gossipTopics = append(gossipTopics, generateSubnetsTopics(gossip.TopicNamePrefixBlobSidecar, int(cfg.BeaconConfig.MaxBlobsPerBlock))...)
-	gossipTopics = append(gossipTopics, generateSubnetsTopics(gossip.TopicNamePrefixBeaconAttestation, int(cfg.NetworkConfig.AttestationSubnetCount))...)
-	gossipTopics = append(gossipTopics, generateSubnetsTopics(gossip.TopicNamePrefixSyncCommittee, int(cfg.BeaconConfig.SyncCommitteeSubnetCount))...)
+	gossipTopics = append(
+		gossipTopics,
+		generateSubnetsTopics(
+			gossip.TopicNamePrefixBlobSidecar,
+			int(cfg.BeaconConfig.MaxBlobsPerBlock),
+		)...)
+	gossipTopics = append(
+		gossipTopics,
+		generateSubnetsTopics(
+			gossip.TopicNamePrefixBeaconAttestation,
+			int(cfg.NetworkConfig.AttestationSubnetCount),
+		)...)
+	gossipTopics = append(
+		gossipTopics,
+		generateSubnetsTopics(
+			gossip.TopicNamePrefixSyncCommittee,
+			int(cfg.BeaconConfig.SyncCommitteeSubnetCount),
+		)...)
 
 	for _, v := range gossipTopics {
 		if err := sent.Unsubscribe(v); err != nil {
@@ -110,7 +134,16 @@ func StartSentinelService(
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
 	logger log.Logger) (sentinelrpc.SentinelClient, error) {
 	ctx := context.Background()
-	sent, err := createSentinel(cfg, blockReader, blobStorage, indiciesDB, forkChoiceReader, ethClock, srvCfg.Validator, logger)
+	sent, err := createSentinel(
+		cfg,
+		blockReader,
+		blobStorage,
+		indiciesDB,
+		forkChoiceReader,
+		ethClock,
+		srvCfg.Validator,
+		logger,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +158,11 @@ func StartSentinelService(
 	return direct.NewSentinelClientDirect(server), nil
 }
 
-func StartServe(server *SentinelServer, srvCfg *ServerConfig, creds credentials.TransportCredentials) {
+func StartServe(
+	server *SentinelServer,
+	srvCfg *ServerConfig,
+	creds credentials.TransportCredentials,
+) {
 	lis, err := net.Listen(srvCfg.Network, srvCfg.Addr)
 	if err != nil {
 		log.Warn("[Sentinel] could not serve service", "reason", err)

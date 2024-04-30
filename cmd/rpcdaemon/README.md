@@ -1,21 +1,21 @@
 - [Introduction](#introduction)
 - [Getting Started](#getting-started)
-  - [Running locally](#running-locally)
-  - [Running remotely](#running-remotely)
-  - [Healthcheck](#healthcheck)
-  - [Testing](#testing)
+    - [Running locally](#running-locally)
+    - [Running remotely](#running-remotely)
+    - [Healthcheck](#healthcheck)
+    - [Testing](#testing)
 - [FAQ](#faq)
-  - [Relations between prune options and rpc methods](#relations-between-prune-options-and-rpc-method)
-  - [RPC Implementation Status](#rpc-implementation-status)
-  - [Securing the communication between RPC daemon and Erigon instance via TLS and authentication](#securing-the-communication-between-rpc-daemon-and-erigon-instance-via-tls-and-authentication)
-  - [Ethstats](#ethstats)
-  - [Allowing only specific methods (Allowlist)](#allowing-only-specific-methods--allowlist-)
-  - [Trace transactions progress](#trace-transactions-progress)
-  - [Clients getting timeout, but server load is low](#clients-getting-timeout--but-server-load-is-low)
-  - [Server load too high](#server-load-too-high)
-  - [Faster Batch requests](#faster-batch-requests)
+    - [Relations between prune options and rpc methods](#relations-between-prune-options-and-rpc-method)
+    - [RPC Implementation Status](#rpc-implementation-status)
+    - [Securing the communication between RPC daemon and Erigon instance via TLS and authentication](#securing-the-communication-between-rpc-daemon-and-erigon-instance-via-tls-and-authentication)
+    - [Ethstats](#ethstats)
+    - [Allowing only specific methods (Allowlist)](#allowing-only-specific-methods--allowlist-)
+    - [Trace transactions progress](#trace-transactions-progress)
+    - [Clients getting timeout, but server load is low](#clients-getting-timeout--but-server-load-is-low)
+    - [Server load too high](#server-load-too-high)
+    - [Faster Batch requests](#faster-batch-requests)
 - [For Developers](#for-developers)
-  - [Code generation](#code-generation)
+    - [Code generation](#code-generation)
 
 ## Introduction
 
@@ -72,7 +72,8 @@ it may scale well for some workloads that are heavy on the current state queries
 
 ### Healthcheck
 
-There are 2 options for running healtchecks, POST request, or GET request with custom headers. Both options are available
+There are 2 options for running healtchecks, POST request, or GET request with custom headers. Both options are
+available
 at the `/health` endpoint.
 
 #### POST request
@@ -172,6 +173,14 @@ Also, there
 are [extensive instructions for using Postman](https://github.com/ledgerwatch/erigon/wiki/Using-Postman-to-Test-TurboGeth-RPC)
 to test the RPC.
 
+### Debugging
+
+To print more detailed logs for 1 request - add `--rpc.dbg.single=true` flag. Then can send HTTP header `"dbg: true"`:
+
+```
+curl -X POST -H "dbg: true" -H "Content-Type: application/json" --data '{"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id":1}' localhost:8545
+```
+
 ## FAQ
 
 ### Relations between prune options and RPC methods
@@ -191,7 +200,8 @@ Some methods, if not found historical data in DB, can fallback to old blocks re-
 
 ### The --http.url flag
 
-the `--http.url` flag is an optional flag which allows one to bind the HTTP server to a socket, for example, `tcp6://:8545` or `unix:///erigon_http.socket`
+the `--http.url` flag is an optional flag which allows one to bind the HTTP server to a socket, for
+example, `tcp6://:8545` or `unix:///erigon_http.socket`
 
 If the `--http.url` flag is set, then `--http.addr` and `--http.port` with both be ignored.
 
@@ -201,11 +211,13 @@ note that this is NOT geth-style IPC. for that, read the next section, IPC endpo
 
 Erigon supports HTTPS, HTTP2, and H2C out of the box. H2C is served by the default HTTP handler.
 
-To enable the HTTPS+HTTP2 server, add flag `--https.enabled`, along with providing flags `-https.cert="/path/to.cert"` and `--https.key=/path/to.key`
+To enable the HTTPS+HTTP2 server, add flag `--https.enabled`, along with providing flags `-https.cert="/path/to.cert"`
+and `--https.key=/path/to.key`
 
 By default, the HTTPS server will run on the HTTP port + 363. use flag `--https.port` to set the port
 
-The HTTPS server will inherit all other configuration parameters from http, for instance, enabling the websocket server, cors domains, or enabled namespaces
+The HTTPS server will inherit all other configuration parameters from http, for instance, enabling the websocket server,
+cors domains, or enabled namespaces
 
 If the `--https.url` flag is set, then `--https.addr` and `--https.port` with both be ignored.
 
@@ -226,7 +238,7 @@ Label "remote" means: `--private.api.addr` flag is required.
 The following table shows the current implementation status of Erigon's RPC daemon.
 
 | Command                                    | Avail   | Notes                                |
-| ------------------------------------------ | ------- | ------------------------------------ |
+|--------------------------------------------|---------|--------------------------------------|
 | admin_nodeInfo                             | Yes     |                                      |
 | admin_peers                                | Yes     |                                      |
 | admin_addPeer                              | Yes     |                                      |
@@ -374,7 +386,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 ### GraphQL
 
 | Command         | Avail | Notes |
-| --------------- | ----- | ----- |
+|-----------------|-------|-------|
 | GetBlockDetails | Yes   |       |
 | GetChainID      | Yes   |       |
 
@@ -503,9 +515,9 @@ Then update your `app.json` for ethstats-client like that:
       "RPC_PORT": "8545",
       "LISTENING_PORT": "30303",
       "INSTANCE_NAME": "Erigon node",
-      "CONTACT_DETAILS": <your twitter handle>,
+      "CONTACT_DETAILS": "<your twitter handle>",
       "WS_SERVER": "wss://ethstats.net/api",
-      "WS_SECRET": <put your secret key here>,
+      "WS_SECRET": "<put your secret key here>",
       "VERBOSITY": 2
     }
   }
@@ -532,7 +544,10 @@ with `rpc.accessList` flag.
 
 ```json
 {
-  "allow": ["net_version", "web3_eth_getBlockByHash"]
+  "allow": [
+    "net_version",
+    "web3_eth_getBlockByHash"
+  ]
 }
 ```
 

@@ -5,17 +5,20 @@ import (
 	"log"
 	"testing"
 
+	"github.com/stretchr/testify/suite"
+	"go.uber.org/mock/gomock"
+
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	mockSync "github.com/ledgerwatch/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	mockState "github.com/ledgerwatch/erigon/cl/phase1/core/state/mock_services"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	mockCommittee "github.com/ledgerwatch/erigon/cl/validator/committee_subscription/mock_services"
-	"github.com/stretchr/testify/suite"
-	"go.uber.org/mock/gomock"
 )
 
 var (
@@ -36,22 +39,29 @@ var (
 type attestationTestSuite struct {
 	suite.Suite
 	gomockCtrl        *gomock.Controller
-	mockForkChoice    *forkchoice.ForkChoiceStorageMock
+	mockForkChoice    *mock_services.ForkChoiceStorageMock
 	syncedData        *mockSync.MockSyncedData
+	beaconStateReader *mockState.MockBeaconStateReader
 	committeeSubscibe *mockCommittee.MockCommitteeSubscribe
 	ethClock          *eth_clock.MockEthereumClock
 	attService        AttestationService
+	beaconConfig      *clparams.BeaconChainConfig
 }
 
 func (t *attestationTestSuite) SetupTest() {
 	t.gomockCtrl = gomock.NewController(t.T())
-	t.mockForkChoice = &forkchoice.ForkChoiceStorageMock{}
+	t.mockForkChoice = &mock_services.ForkChoiceStorageMock{}
 	t.syncedData = mockSync.NewMockSyncedData(t.gomockCtrl)
+	t.beaconStateReader = mockState.NewMockBeaconStateReader(t.gomockCtrl)
 	t.committeeSubscibe = mockCommittee.NewMockCommitteeSubscribe(t.gomockCtrl)
 	t.ethClock = eth_clock.NewMockEthereumClock(t.gomockCtrl)
-	beaconConfig := &clparams.BeaconChainConfig{SlotsPerEpoch: mockSlotsPerEpoch}
+	t.beaconConfig = &clparams.BeaconChainConfig{SlotsPerEpoch: mockSlotsPerEpoch}
 	netConfig := &clparams.NetworkConfig{}
-	t.attService = NewAttestationService(t.mockForkChoice, t.committeeSubscibe, t.ethClock, t.syncedData, beaconConfig, netConfig)
+	computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) { return [32]byte{}, nil }
+	blsVerify = func(sig []byte, msg []byte, pubKeys []byte) (bool, error) { return true, nil }
+	ctx, cn := context.WithCancel(context.Background())
+	cn()
+	t.attService = NewAttestationService(ctx, t.mockForkChoice, t.committeeSubscibe, t.ethClock, t.syncedData, t.beaconConfig, netConfig)
 }
 
 func (t *attestationTestSuite) TearDownTest() {
@@ -73,8 +83,8 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 		{
 			name: "Test attestation with committee index out of range",
 			mock: func() {
-				t.syncedData.EXPECT().HeadState().Return(&state.CachingBeaconState{}).Times(1)
-				computeCommitteeCountPerSlot = func(_ *state.CachingBeaconState, _, _ uint64) uint64 {
+				t.syncedData.EXPECT().HeadStateReader().Return(t.beaconStateReader).Times(1)
+				computeCommitteeCountPerSlot = func(_ state.BeaconStateReader, _, _ uint64) uint64 {
 					return 1
 				}
 			},
@@ -88,8 +98,8 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 		{
 			name: "Test attestation with wrong subnet",
 			mock: func() {
-				t.syncedData.EXPECT().HeadState().Return(&state.CachingBeaconState{}).Times(1)
-				computeCommitteeCountPerSlot = func(_ *state.CachingBeaconState, _, _ uint64) uint64 {
+				t.syncedData.EXPECT().HeadStateReader().Return(t.beaconStateReader).Times(1)
+				computeCommitteeCountPerSlot = func(_ state.BeaconStateReader, _, _ uint64) uint64 {
 					return 5
 				}
 				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
@@ -106,8 +116,8 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 		{
 			name: "Test attestation with wrong slot (current_slot < slot)",
 			mock: func() {
-				t.syncedData.EXPECT().HeadState().Return(&state.CachingBeaconState{}).Times(1)
-				computeCommitteeCountPerSlot = func(_ *state.CachingBeaconState, _, _ uint64) uint64 {
+				t.syncedData.EXPECT().HeadStateReader().Return(t.beaconStateReader).Times(1)
+				computeCommitteeCountPerSlot = func(_ state.BeaconStateReader, _, _ uint64) uint64 {
 					return 5
 				}
 				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
@@ -125,8 +135,8 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 		{
 			name: "Attestation is aggregated",
 			mock: func() {
-				t.syncedData.EXPECT().HeadState().Return(&state.CachingBeaconState{}).Times(1)
-				computeCommitteeCountPerSlot = func(_ *state.CachingBeaconState, _, _ uint64) uint64 {
+				t.syncedData.EXPECT().HeadStateReader().Return(t.beaconStateReader).Times(1)
+				computeCommitteeCountPerSlot = func(_ state.BeaconStateReader, _, _ uint64) uint64 {
 					return 5
 				}
 				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
@@ -148,8 +158,8 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 		{
 			name: "Attestation is empty",
 			mock: func() {
-				t.syncedData.EXPECT().HeadState().Return(&state.CachingBeaconState{}).Times(1)
-				computeCommitteeCountPerSlot = func(_ *state.CachingBeaconState, _, _ uint64) uint64 {
+				t.syncedData.EXPECT().HeadStateReader().Return(t.beaconStateReader).Times(1)
+				computeCommitteeCountPerSlot = func(_ state.BeaconStateReader, _, _ uint64) uint64 {
 					return 5
 				}
 				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
@@ -169,16 +179,51 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 			wantErr: true,
 		},
 		{
-			name: "block header not found",
+			name: "invalid signature",
 			mock: func() {
-				t.syncedData.EXPECT().HeadState().Return(&state.CachingBeaconState{}).Times(1)
-				computeCommitteeCountPerSlot = func(_ *state.CachingBeaconState, _, _ uint64) uint64 {
+				t.syncedData.EXPECT().HeadStateReader().Return(t.beaconStateReader).Times(1)
+				computeCommitteeCountPerSlot = func(_ state.BeaconStateReader, _, _ uint64) uint64 {
 					return 5
 				}
 				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
 					return 1
 				}
 				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
+				t.beaconStateReader.EXPECT().ValidatorPublicKey(gomock.Any()).Return(common.Bytes48{}, nil).Times(1)
+				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.AttestantionData().Target().Epoch()).Return([]byte{}, nil).Times(1)
+				computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) {
+					return [32]byte{}, nil
+				}
+				blsVerify = func(sig []byte, msg []byte, pubKeys []byte) (bool, error) {
+					return false, nil
+				}
+			},
+			args: args{
+				ctx:    context.Background(),
+				subnet: uint64Ptr(1),
+				msg:    att,
+			},
+			wantErr: true,
+		},
+		{
+			name: "block header not found",
+			mock: func() {
+				t.syncedData.EXPECT().HeadStateReader().Return(t.beaconStateReader).Times(1)
+				computeCommitteeCountPerSlot = func(_ state.BeaconStateReader, _, _ uint64) uint64 {
+					return 8
+				}
+				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
+					return 1
+				}
+				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
+				t.beaconStateReader.EXPECT().ValidatorPublicKey(gomock.Any()).Return(common.Bytes48{}, nil).Times(1)
+				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.AttestantionData().Target().Epoch()).Return([]byte{}, nil).Times(1)
+				computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) {
+					return [32]byte{}, nil
+				}
+				blsVerify = func(sig []byte, msg []byte, pubKeys []byte) (bool, error) {
+					return true, nil
+				}
 			},
 			args: args{
 				ctx:    context.Background(),
@@ -190,14 +235,22 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 		{
 			name: "invalid target block",
 			mock: func() {
-				t.syncedData.EXPECT().HeadState().Return(&state.CachingBeaconState{}).Times(1)
-				computeCommitteeCountPerSlot = func(_ *state.CachingBeaconState, _, _ uint64) uint64 {
+				t.syncedData.EXPECT().HeadStateReader().Return(t.beaconStateReader).Times(1)
+				computeCommitteeCountPerSlot = func(_ state.BeaconStateReader, _, _ uint64) uint64 {
 					return 8
 				}
 				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
 					return 1
 				}
 				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
+				t.beaconStateReader.EXPECT().ValidatorPublicKey(gomock.Any()).Return(common.Bytes48{}, nil).Times(1)
+				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.AttestantionData().Target().Epoch()).Return([]byte{}, nil).Times(1)
+				computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) {
+					return [32]byte{}, nil
+				}
+				blsVerify = func(sig []byte, msg []byte, pubKeys []byte) (bool, error) {
+					return true, nil
+				}
 				t.mockForkChoice.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{
 					att.AttestantionData().BeaconBlockRoot(): {}, // wrong block root
 				}
@@ -212,14 +265,22 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 		{
 			name: "invalid finality checkpoint",
 			mock: func() {
-				t.syncedData.EXPECT().HeadState().Return(&state.CachingBeaconState{}).Times(1)
-				computeCommitteeCountPerSlot = func(_ *state.CachingBeaconState, _, _ uint64) uint64 {
+				t.syncedData.EXPECT().HeadStateReader().Return(t.beaconStateReader).Times(1)
+				computeCommitteeCountPerSlot = func(_ state.BeaconStateReader, _, _ uint64) uint64 {
 					return 8
 				}
 				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
 					return 1
 				}
 				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
+				t.beaconStateReader.EXPECT().ValidatorPublicKey(gomock.Any()).Return(common.Bytes48{}, nil).Times(1)
+				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.AttestantionData().Target().Epoch()).Return([]byte{}, nil).Times(1)
+				computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) {
+					return [32]byte{}, nil
+				}
+				blsVerify = func(sig []byte, msg []byte, pubKeys []byte) (bool, error) {
+					return true, nil
+				}
 				t.mockForkChoice.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{
 					att.AttestantionData().BeaconBlockRoot(): {},
 				}
@@ -242,14 +303,22 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 		{
 			name: "success",
 			mock: func() {
-				t.syncedData.EXPECT().HeadState().Return(&state.CachingBeaconState{}).Times(1)
-				computeCommitteeCountPerSlot = func(_ *state.CachingBeaconState, _, _ uint64) uint64 {
+				t.syncedData.EXPECT().HeadStateReader().Return(t.beaconStateReader).Times(1)
+				computeCommitteeCountPerSlot = func(_ state.BeaconStateReader, _, _ uint64) uint64 {
 					return 8
 				}
 				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
 					return 1
 				}
 				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
+				t.beaconStateReader.EXPECT().ValidatorPublicKey(gomock.Any()).Return(common.Bytes48{}, nil).Times(1)
+				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.AttestantionData().Target().Epoch()).Return([]byte{}, nil).Times(1)
+				computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) {
+					return [32]byte{}, nil
+				}
+				blsVerify = func(sig []byte, msg []byte, pubKeys []byte) (bool, error) {
+					return true, nil
+				}
 				t.mockForkChoice.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{
 					att.AttestantionData().BeaconBlockRoot(): {},
 				}
@@ -278,8 +347,8 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 		tt.mock()
 		err := t.attService.ProcessMessage(tt.args.ctx, tt.args.subnet, tt.args.msg)
 		if tt.wantErr {
-			log.Printf("%v", err)
-			t.Require().Error(err)
+			log.Printf("err msg: %v", err)
+			t.Require().Error(err, err.Error())
 		} else {
 			t.Require().NoError(err)
 		}

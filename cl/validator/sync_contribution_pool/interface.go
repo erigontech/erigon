@@ -9,7 +9,7 @@ import (
 // SyncContributionPool is an interface for managing sync committee contributions and messages.
 // it keeps a store of sync committee contributions, if new messages are received they are aggregated with pre-existing contributions.
 
-//go:generate mockgen -source=interface.go -destination=mock.go -package=sync_contribution_pool
+//go:generate mockgen -typed=true -destination=mock_services/sync_contribution_pool_mock.go -package=mock_services . SyncContributionPool
 type SyncContributionPool interface {
 	// AddSyncContribution adds a sync committee contribution to the pool.
 	AddSyncContribution(headState *state.CachingBeaconState, contribution *cltypes.Contribution) error
@@ -18,4 +18,6 @@ type SyncContributionPool interface {
 
 	// GetSyncContribution retrieves a sync contribution from the pool.
 	GetSyncContribution(slot, subcommitteeIndex uint64, beaconBlockRoot common.Hash) *cltypes.Contribution
+	// Obtain the sync aggregate for the sync messages pointing to a given beacon block root.
+	GetSyncAggregate(slot uint64, beaconBlockRoot common.Hash) (*cltypes.SyncAggregate, error)
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/state"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -36,7 +37,7 @@ const (
 )
 
 func BuildProtoRequest(downloadRequest []services.DownloadRequest) *proto_downloader.AddRequest {
-	req := &proto_downloader.AddRequest{Items: make([]*proto_downloader.AddItem, 0, len(snaptype.BlockSnapshotTypes))}
+	req := &proto_downloader.AddRequest{Items: make([]*proto_downloader.AddItem, 0, len(coresnaptype.BlockSnapshotTypes))}
 	for _, r := range downloadRequest {
 		if r.Path == "" {
 			continue
@@ -206,17 +207,25 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 	//
 
 	// prohibits further downloads, except some exceptions
-	for _, p := range snaptype.AllTypes {
-		if (p.Enum() == snaptype.BeaconBlocks.Enum() || p.Enum() == snaptype.BlobSidecars.Enum()) && caplin == NoCaplin {
-			continue
-		}
-		if p.Enum() == snaptype.BlobSidecars.Enum() && !blobs {
-			continue
-		}
+	for _, p := range blockReader.AllTypes() {
 		if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
 			Type: p.String(),
 		}); err != nil {
 			return err
+		}
+	}
+
+	if caplin != NoCaplin {
+		for _, p := range snaptype.CaplinSnapshotTypes {
+			if p.Enum() == snaptype.BlobSidecars.Enum() && !blobs {
+				continue
+			}
+
+			if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
+				Type: p.String(),
+			}); err != nil {
+				return err
+			}
 		}
 	}
 

@@ -30,7 +30,9 @@ var (
 	pruneHBefore, pruneRBefore     uint64
 	pruneTBefore, pruneCBefore     uint64
 	experiments                    []string
+	unwindTypes                    []string
 	chain                          string // Which chain to use (mainnet, goerli, sepolia, etc.)
+	outputCsvFile                  string
 
 	commitmentMode string
 	commitmentTrie string
@@ -167,6 +169,10 @@ func withStartTx(cmd *cobra.Command) {
 
 func withTraceFromTx(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&traceFromTx, "txtrace.from", 0, "start tracing from tx number")
+}
+
+func withOutputCsvFile(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&outputCsvFile, "output.csv.file", "", "location to output csv data")
 }
 
 func withCommitment(cmd *cobra.Command) {

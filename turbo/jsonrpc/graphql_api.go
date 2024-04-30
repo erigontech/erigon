@@ -40,7 +40,7 @@ func (api *GraphQLAPIImpl) GetChainID(ctx context.Context) (*big.Int, error) {
 	}
 	defer tx.Rollback()
 
-	response, err := api.chainConfig(tx)
+	response, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -68,12 +68,12 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 		return nil, err
 	}
 
-	chainConfig, err := api.chainConfig(tx)
+	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
 
-	receipts, err := api.getReceipts(ctx, tx, chainConfig, block, senders)
+	receipts, err := api.getReceipts(ctx, tx, block, senders)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
@@ -107,8 +107,14 @@ func (api *GraphQLAPIImpl) getBlockWithSenders(ctx context.Context, number rpc.B
 		return nil, nil, err
 	}
 
-	block, senders, err := api._blockReader.BlockWithSenders(ctx, tx, blockHash, blockHeight)
-	return block, senders, err
+	block, err := api.blockWithSenders(ctx, tx, blockHash, blockHeight)
+	if err != nil {
+		return nil, nil, err
+	}
+	if block == nil {
+		return nil, nil, nil
+	}
+	return block, block.Body().SendersFromTxs(), nil
 }
 
 func (api *GraphQLAPIImpl) delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (map[string]interface{}, error) {

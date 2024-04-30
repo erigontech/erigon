@@ -6,7 +6,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-//go:generate mockgen -destination=./heimdall_no_store_mock.go -package=heimdall . HeimdallNoStore
+//go:generate mockgen -typed=true -destination=./heimdall_no_store_mock.go -package=heimdall . HeimdallNoStore
 type HeimdallNoStore interface {
 	LastCheckpointId(ctx context.Context) (CheckpointId, bool, error)
 	LastMilestoneId(ctx context.Context) (MilestoneId, bool, error)

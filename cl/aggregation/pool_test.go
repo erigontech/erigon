@@ -22,17 +22,17 @@ var (
 		[96]byte{'a', 'b', 'c', 'd', 'e', 'f'},
 	)
 	att1_2 = solid.NewAttestionFromParameters(
-		[]byte{0b00001011, 0, 0, 0},
+		[]byte{0b00000001, 0, 0, 0},
 		attData1,
 		[96]byte{'d', 'e', 'f', 'g', 'h', 'i'},
 	)
 	att1_3 = solid.NewAttestionFromParameters(
-		[]byte{0b00000100, 0b00000011, 0, 0},
+		[]byte{0b00000100, 0, 0, 0},
 		attData1,
 		[96]byte{'g', 'h', 'i', 'j', 'k', 'l'},
 	)
 	att1_4 = solid.NewAttestionFromParameters(
-		[]byte{0b00111010, 0, 0, 0},
+		[]byte{0b00100000, 0, 0, 0},
 		attData1,
 		[96]byte{'m', 'n', 'o', 'p', 'q', 'r'},
 	)
@@ -99,7 +99,7 @@ func (t *PoolTestSuite) TestAddAttestation() {
 			},
 			hashRoot: attData1Root,
 			expect: solid.NewAttestionFromParameters(
-				[]byte{0b00111111, 0b00000011, 0, 0}, // merge of att1_2, att1_3 and att1_4
+				[]byte{0b00100101, 0, 0, 0}, // merge of att1_2, att1_3 and att1_4
 				attData1,
 				mockAggrResult),
 		},

@@ -3,11 +3,13 @@ package services
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
 	"github.com/Giulio2002/bls"
-	"github.com/ledgerwatch/erigon/cl/aggregation"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -15,10 +17,8 @@ import (
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/pkg/errors"
-	"golang.org/x/exp/slices"
 )
 
 type aggregateJob struct {
@@ -30,26 +30,37 @@ type aggregateAndProofServiceImpl struct {
 	syncedDataManager *synced_data.SyncedDataManager
 	forkchoiceStore   forkchoice.ForkChoiceStorage
 	beaconCfg         *clparams.BeaconChainConfig
-	aggregationPool   aggregation.AggregationPool
+	opPool            pool.OperationsPool
 	test              bool
 
 	// set of aggregates that are scheduled for later processing
 	aggregatesScheduledForLaterExecution sync.Map
 }
 
-func NewAggregateAndProofService(ctx context.Context, syncedDataManager *synced_data.SyncedDataManager, forkchoiceStore forkchoice.ForkChoiceStorage, beaconCfg *clparams.BeaconChainConfig, aggregationPool aggregation.AggregationPool, test bool) AggregateAndProofService {
+func NewAggregateAndProofService(
+	ctx context.Context,
+	syncedDataManager *synced_data.SyncedDataManager,
+	forkchoiceStore forkchoice.ForkChoiceStorage,
+	beaconCfg *clparams.BeaconChainConfig,
+	opPool pool.OperationsPool,
+	test bool,
+) AggregateAndProofService {
 	a := &aggregateAndProofServiceImpl{
 		syncedDataManager: syncedDataManager,
 		forkchoiceStore:   forkchoiceStore,
 		beaconCfg:         beaconCfg,
-		aggregationPool:   aggregationPool,
+		opPool:            opPool,
 		test:              test,
 	}
 	go a.loop(ctx)
 	return a
 }
 
-func (a *aggregateAndProofServiceImpl) ProcessMessage(ctx context.Context, subnet *uint64, aggregateAndProof *cltypes.SignedAggregateAndProof) error {
+func (a *aggregateAndProofServiceImpl) ProcessMessage(
+	ctx context.Context,
+	subnet *uint64,
+	aggregateAndProof *cltypes.SignedAggregateAndProof,
+) error {
 	headState := a.syncedDataManager.HeadState()
 	if headState == nil {
 		return ErrIgnore
@@ -72,7 +83,10 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(ctx context.Context, subne
 	finalizedCheckpoint := a.forkchoiceStore.FinalizedCheckpoint()
 	finalizedSlot := finalizedCheckpoint.Epoch() * a.beaconCfg.SlotsPerEpoch
 	// [IGNORE] The current finalized_checkpoint is an ancestor of the block defined by aggregate.data.beacon_block_root -- i.e. get_checkpoint_block(store, aggregate.data.beacon_block_root, finalized_checkpoint.epoch) == store.finalized_checkpoint.root
-	if a.forkchoiceStore.Ancestor(aggregateData.BeaconBlockRoot(), finalizedSlot) != finalizedCheckpoint.BlockRoot() {
+	if a.forkchoiceStore.Ancestor(
+		aggregateData.BeaconBlockRoot(),
+		finalizedSlot,
+	) != finalizedCheckpoint.BlockRoot() {
 		return ErrIgnore
 	}
 
@@ -100,7 +114,10 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(ctx context.Context, subne
 		return fmt.Errorf("committee index not in committee")
 	}
 	// [REJECT] The aggregate attestation's target block is an ancestor of the block named in the LMD vote -- i.e. get_checkpoint_block(store, aggregate.data.beacon_block_root, aggregate.data.target.epoch) == aggregate.data.target.root
-	if a.forkchoiceStore.Ancestor(aggregateData.BeaconBlockRoot(), epoch*a.beaconCfg.SlotsPerEpoch) != target.BlockRoot() {
+	if a.forkchoiceStore.Ancestor(
+		aggregateData.BeaconBlockRoot(),
+		epoch*a.beaconCfg.SlotsPerEpoch,
+	) != target.BlockRoot() {
 		return fmt.Errorf("invalid target block")
 	}
 	if a.test {
@@ -112,26 +129,39 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(ctx context.Context, subne
 		log.Warn("receveived aggregate and proof from invalid aggregator")
 		return fmt.Errorf("invalid aggregate and proof")
 	}
-
-	if err := verifySignaturesOnAggregate(headState, aggregateAndProof); err != nil {
+	attestingIndicies, err := headState.GetAttestingIndicies(
+		aggregateAndProof.Message.Aggregate.AttestantionData(),
+		aggregateAndProof.Message.Aggregate.AggregationBits(),
+		true,
+	)
+	if err != nil {
 		return err
 	}
-
-	// Add to aggregation pool
-	if err := a.aggregationPool.AddAttestation(aggregateAndProof.Message.Aggregate); err != nil {
-		if errors.Is(err, aggregation.ErrIsSuperset) {
-			return ErrIgnore
-		}
-		return errors.WithMessagef(err, "failed to add attestation to pool")
-	}
-
+	if err := verifySignaturesOnAggregate(headState, aggregateAndProof); err != nil {
+		return err
+	} // Add to aggregation pool
+	a.opPool.AttestationsPool.Insert(
+		aggregateAndProof.Message.Aggregate.Signature(),
+		aggregateAndProof.Message.Aggregate,
+	)
+	a.forkchoiceStore.ProcessAttestingIndicies(
+		aggregateAndProof.Message.Aggregate,
+		attestingIndicies,
+	)
 	return nil
 }
 
-func verifySignaturesOnAggregate(s *state.CachingBeaconState, aggregateAndProof *cltypes.SignedAggregateAndProof) error {
+func verifySignaturesOnAggregate(
+	s *state.CachingBeaconState,
+	aggregateAndProof *cltypes.SignedAggregateAndProof,
+) error {
 	aggregationBits := aggregateAndProof.Message.Aggregate.AggregationBits()
 	// [REJECT] The aggregate attestation has participants -- that is, len(get_attesting_indices(state, aggregate)) >= 1.
-	attestingIndicies, err := s.GetAttestingIndicies(aggregateAndProof.Message.Aggregate.AttestantionData(), aggregationBits, true)
+	attestingIndicies, err := s.GetAttestingIndicies(
+		aggregateAndProof.Message.Aggregate.AttestantionData(),
+		aggregationBits,
+		true,
+	)
 	if err != nil {
 		return err
 	}
@@ -151,13 +181,19 @@ func verifySignaturesOnAggregate(s *state.CachingBeaconState, aggregateAndProof 
 	return verifyAggregateMessageSignature(s, aggregateAndProof, attestingIndicies)
 }
 
-func verifyAggregateAndProofSignature(state *state.CachingBeaconState, aggregate *cltypes.AggregateAndProof) error {
+func verifyAggregateAndProofSignature(
+	state *state.CachingBeaconState,
+	aggregate *cltypes.AggregateAndProof,
+) error {
 	slot := aggregate.Aggregate.AttestantionData().Slot()
 	publicKey, err := state.ValidatorPublicKey(int(aggregate.AggregatorIndex))
 	if err != nil {
 		return err
 	}
-	domain, err := state.GetDomain(state.BeaconConfig().DomainSelectionProof, slot*state.BeaconConfig().SlotsPerEpoch)
+	domain, err := state.GetDomain(
+		state.BeaconConfig().DomainSelectionProof,
+		slot*state.BeaconConfig().SlotsPerEpoch,
+	)
 	if err != nil {
 		return err
 	}
@@ -172,7 +208,10 @@ func verifyAggregateAndProofSignature(state *state.CachingBeaconState, aggregate
 	return nil
 }
 
-func verifyAggregatorSignature(state *state.CachingBeaconState, aggregate *cltypes.SignedAggregateAndProof) error {
+func verifyAggregatorSignature(
+	state *state.CachingBeaconState,
+	aggregate *cltypes.SignedAggregateAndProof,
+) error {
 	publicKey, err := state.ValidatorPublicKey(int(aggregate.Message.AggregatorIndex))
 	if err != nil {
 		return err
@@ -195,8 +234,15 @@ func verifyAggregatorSignature(state *state.CachingBeaconState, aggregate *cltyp
 	return nil
 }
 
-func verifyAggregateMessageSignature(s *state.CachingBeaconState, aggregateAndProof *cltypes.SignedAggregateAndProof, attestingIndicies []uint64) error {
-	indexedAttestation := state.GetIndexedAttestation(aggregateAndProof.Message.Aggregate, attestingIndicies)
+func verifyAggregateMessageSignature(
+	s *state.CachingBeaconState,
+	aggregateAndProof *cltypes.SignedAggregateAndProof,
+	attestingIndicies []uint64,
+) error {
+	indexedAttestation := state.GetIndexedAttestation(
+		aggregateAndProof.Message.Aggregate,
+		attestingIndicies,
+	)
 
 	valid, err := state.IsValidIndexedAttestation(s, indexedAttestation)
 	if err != nil {
@@ -208,7 +254,9 @@ func verifyAggregateMessageSignature(s *state.CachingBeaconState, aggregateAndPr
 	return nil
 }
 
-func (a *aggregateAndProofServiceImpl) scheduleAggregateForLaterProcessing(aggregateAndProof *cltypes.SignedAggregateAndProof) {
+func (a *aggregateAndProofServiceImpl) scheduleAggregateForLaterProcessing(
+	aggregateAndProof *cltypes.SignedAggregateAndProof,
+) {
 	key, err := aggregateAndProof.HashSSZ()
 	if err != nil {
 		panic(err)
