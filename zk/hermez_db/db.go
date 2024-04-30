@@ -34,6 +34,7 @@ const BATCH_WITNESSES = "hermez_batch_witnesses"                       // batch 
 const BATCH_COUNTERS = "hermez_batch_counters"                         // batch number -> counters
 const L1_BATCH_DATA = "l1_batch_data"                                  // batch number -> l1 batch data from transaction call data
 const L1_INFO_TREE_HIGHEST_BLOCK = "l1_info_tree_highest_block"        // highest l1 block number found with L1 info tree updates
+const REUSED_L1_INFO_TREE_INDEX = "reused_l1_info_tree_index"          // block number => const 1
 
 type HermezDb struct {
 	tx kv.RwTx
@@ -81,6 +82,7 @@ func CreateHermezBuckets(tx kv.RwTx) error {
 		BATCH_COUNTERS,
 		L1_BATCH_DATA,
 		L1_INFO_TREE_HIGHEST_BLOCK,
+		REUSED_L1_INFO_TREE_INDEX,
 	}
 	for _, t := range tables {
 		if err := tx.CreateBucket(t); err != nil {
@@ -461,6 +463,40 @@ func (db *HermezDb) TruncateBlockBatches(l2BlockNo uint64) error {
 
 	return nil
 }
+func (db *HermezDb) WriteGlobalExitRoot(ger common.Hash) error {
+	return db.tx.Put(GLOBAL_EXIT_ROOTS, ger.Bytes(), []byte{1})
+}
+
+func (db *HermezDbReader) CheckGlobalExitRootWritten(ger common.Hash) (bool, error) {
+	bytes, err := db.tx.GetOne(GLOBAL_EXIT_ROOTS, ger.Bytes())
+	if err != nil {
+		return false, err
+	}
+	return len(bytes) > 0, nil
+}
+
+func (db *HermezDb) DeleteGlobalExitRoots(gers *[]common.Hash) error {
+	for _, ger := range *gers {
+		err := db.tx.Delete(GLOBAL_EXIT_ROOTS, ger.Bytes())
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (db *HermezDb) WriteReusedL1InfoTreeIndex(blockNo uint64) error {
+	return db.tx.Put(REUSED_L1_INFO_TREE_INDEX, Uint64ToBytes(blockNo), []byte{1})
+}
+
+func (db *HermezDbReader) GetReusedL1InfoTreeIndex(blockNo uint64) (bool, error) {
+	bytes, err := db.tx.GetOne(REUSED_L1_INFO_TREE_INDEX, Uint64ToBytes(blockNo))
+	if err != nil {
+		return false, err
+	}
+	return len(bytes) > 0, nil
+}
 
 func (db *HermezDb) WriteGerForL1BlockHash(l1BlockHash common.Hash, ger common.Hash) error {
 	return db.tx.Put(L1_BLOCK_HASH_GER, l1BlockHash.Bytes(), ger.Bytes())
@@ -478,6 +514,29 @@ func (db *HermezDbReader) GetGerForL1BlockHash(l1BlockHash common.Hash) (common.
 func (db *HermezDb) DeleteL1BlockHashGers(l1BlockHashes *[]common.Hash) error {
 	for _, l1BlockHash := range *l1BlockHashes {
 		err := db.tx.Delete(L1_BLOCK_HASH_GER, l1BlockHash.Bytes())
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (db *HermezDb) WriteL1BlockHash(l1BlockHash common.Hash) error {
+	return db.tx.Put(L1_BLOCK_HASHES, l1BlockHash.Bytes(), []byte{1})
+}
+
+func (db *HermezDbReader) CheckL1BlockHashWritten(l1BlockHash common.Hash) (bool, error) {
+	bytes, err := db.tx.GetOne(L1_BLOCK_HASHES, l1BlockHash.Bytes())
+	if err != nil {
+		return false, err
+	}
+	return len(bytes) > 0, nil
+}
+
+func (db *HermezDb) DeleteL1BlockHashes(l1BlockHashes *[]common.Hash) error {
+	for _, l1BlockHash := range *l1BlockHashes {
+		err := db.tx.Delete(L1_BLOCK_HASHES, l1BlockHash.Bytes())
 		if err != nil {
 			return err
 		}

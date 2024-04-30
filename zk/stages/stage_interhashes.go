@@ -155,7 +155,7 @@ func SpawnZkIntermediateHashesStage(s *stagedsync.StageState, u stagedsync.Unwin
 
 		if root != expectedRootHash {
 			eridb.RollbackBatch()
-			log.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", logPrefix, to, root, expectedRootHash, headerHash))
+			panic(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", logPrefix, to, root, expectedRootHash, headerHash))
 
 			if cfg.badBlockHalt {
 				return trie.EmptyRoot, fmt.Errorf("wrong trie root")
@@ -589,8 +589,7 @@ func verifyLastHash(dbSmt *smt.SMT, expectedRootHash *common.Hash, checkRoot boo
 	hash := common.BigToHash(dbSmt.LastRoot())
 
 	if checkRoot && hash != *expectedRootHash {
-		log.Warn(fmt.Sprintf("[%s] Wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash))
-		return nil
+		panic(fmt.Sprintf("[%s] Wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash))
 	}
 	log.Info(fmt.Sprintf("[%s] Trie root matches", logPrefix), "hash", hash.Hex())
 	return nil

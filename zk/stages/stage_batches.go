@@ -51,11 +51,18 @@ type HermezDb interface {
 	DeleteForkIds(fromBatchNum, toBatchNum uint64) error
 	DeleteBlockBatches(fromBlockNum, toBlockNum uint64) error
 
+	CheckGlobalExitRootWritten(ger common.Hash) (bool, error)
 	WriteBlockGlobalExitRoot(l2BlockNo uint64, ger common.Hash) error
+	WriteGlobalExitRoot(ger common.Hash) error
 	DeleteBlockGlobalExitRoots(fromBlockNum, toBlockNum uint64) error
+	DeleteGlobalExitRoots(l1BlockHashes *[]common.Hash) error
 
+	WriteReusedL1InfoTreeIndex(l2BlockNo uint64) error
 	WriteBlockL1BlockHash(l2BlockNo uint64, l1BlockHash common.Hash) error
 	DeleteBlockL1BlockHashes(fromBlockNum, toBlockNum uint64) error
+	WriteL1BlockHash(l1BlockHash common.Hash) error
+	CheckL1BlockHashWritten(l1BlockHash common.Hash) (bool, error)
+	DeleteL1BlockHashes(l1BlockHashes *[]common.Hash) error
 	WriteGerForL1BlockHash(l1BlockHash, ger common.Hash) error
 	DeleteL1BlockHashGers(l1BlockHashes *[]common.Hash) error
 	WriteBatchGlobalExitRoot(batchNumber uint64, ger types.GerUpdate) error
@@ -166,7 +173,11 @@ func SpawnStageBatches(
 	endLoop := false
 	blocksWritten := uint64(0)
 	highestHashableL2BlockNo := uint64(0)
-	highestL1InfoTreeIndex := uint32(0)
+
+	highestL1InfoTreeIndex, err := stages.GetStageProgress(tx, stages.HighestUsedL1InfoIndex)
+	if err != nil {
+		return fmt.Errorf("failed to get highest used l1 info index, %w", err)
+	}
 
 	lastForkId64, err := stages.GetStageProgress(tx, stages.ForkId)
 	lastForkId := uint16(lastForkId64)
@@ -263,11 +274,6 @@ LOOP:
 				rawdb.WriteForkchoiceFinalized(tx, l2Block.L2Blockhash)
 			}
 
-			// make sure to capture the l1 info tree index changes so we can store progress
-			if l2Block.L1InfoTreeIndex > highestL1InfoTreeIndex {
-				highestL1InfoTreeIndex = l2Block.L1InfoTreeIndex
-			}
-
 			if lastHash != emptyHash {
 				l2Block.ParentHash = lastHash
 			} else {
@@ -279,8 +285,13 @@ LOOP:
 				l2Block.ParentHash = previousHash
 			}
 
-			if err := writeL2Block(eriDb, hermezDb, &l2Block); err != nil {
+			if err := writeL2Block(eriDb, hermezDb, &l2Block, highestL1InfoTreeIndex); err != nil {
 				return fmt.Errorf("writeL2Block error: %v", err)
+			}
+
+			// make sure to capture the l1 info tree index changes, so we can store progress
+			if uint64(l2Block.L1InfoTreeIndex) > highestL1InfoTreeIndex {
+				highestL1InfoTreeIndex = uint64(l2Block.L1InfoTreeIndex)
 			}
 
 			lastHash = l2Block.L2Blockhash
@@ -490,13 +501,26 @@ func UnwindBatchesStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg BatchesCfg, c
 	// get gers and l1BlockHashes before deleting them				    //
 	// so we can delete them in the other table as well //
 	//////////////////////////////////////////////////////
+	gers, err := hermezDb.GetBlockGlobalExitRoots(fromBlock, toBlock)
+	if err != nil {
+		return fmt.Errorf("get block global exit roots error: %v", err)
+	}
+
 	l1BlockHashes, err := hermezDb.GetBlockL1BlockHashes(fromBlock, toBlock)
 	if err != nil {
 		return fmt.Errorf("get block l1 block hashes error: %v", err)
 	}
 
+	if err := hermezDb.DeleteGlobalExitRoots(&gers); err != nil {
+		return fmt.Errorf("delete global exit roots error: %v", err)
+	}
+
 	if err := hermezDb.DeleteBlockGlobalExitRoots(fromBlock, toBlock); err != nil {
 		return fmt.Errorf("delete block global exit roots error: %v", err)
+	}
+
+	if err := hermezDb.DeleteL1BlockHashes(&l1BlockHashes); err != nil {
+		return fmt.Errorf("delete l1 block hashes error: %v", err)
 	}
 
 	if err := hermezDb.DeleteL1BlockHashGers(&l1BlockHashes); err != nil {
@@ -635,7 +659,7 @@ func getGasLimit(forkId uint16) uint64 {
 
 // writeL2Block writes L2Block to ErigonDb and HermezDb
 // writes header, body, forkId and blockBatch
-func writeL2Block(eriDb ErigonDb, hermezDb HermezDb, l2Block *types.FullL2Block) error {
+func writeL2Block(eriDb ErigonDb, hermezDb HermezDb, l2Block *types.FullL2Block, highestL1InfoTreeIndex uint64) error {
 	bn := new(big.Int).SetUint64(l2Block.L2BlockNumber)
 	txs := make([]ethTypes.Transaction, 0, len(l2Block.L2Txs))
 	for _, transaction := range l2Block.L2Txs {
@@ -668,19 +692,41 @@ func writeL2Block(eriDb ErigonDb, hermezDb HermezDb, l2Block *types.FullL2Block)
 	}
 
 	if l2Block.GlobalExitRoot != emptyHash {
-		if err := hermezDb.WriteBlockGlobalExitRoot(l2Block.L2BlockNumber, l2Block.GlobalExitRoot); err != nil {
-			return fmt.Errorf("write block global exit root error: %v", err)
+		gerWritten, err := hermezDb.CheckGlobalExitRootWritten(l2Block.GlobalExitRoot)
+		if err != nil {
+			return fmt.Errorf("get global exit root error: %v", err)
+		}
+
+		if !gerWritten {
+			if err := hermezDb.WriteBlockGlobalExitRoot(l2Block.L2BlockNumber, l2Block.GlobalExitRoot); err != nil {
+				return fmt.Errorf("write block global exit root error: %v", err)
+			}
+
+			if err := hermezDb.WriteGlobalExitRoot(l2Block.GlobalExitRoot); err != nil {
+				return fmt.Errorf("write global exit root error: %v", err)
+			}
 		}
 	}
 
 	if l2Block.L1BlockHash != emptyHash {
-		if err := hermezDb.WriteBlockL1BlockHash(l2Block.L2BlockNumber, l2Block.L1BlockHash); err != nil {
-			return fmt.Errorf("write block global exit root error: %v", err)
+		l1BlockHashWritten, err := hermezDb.CheckL1BlockHashWritten(l2Block.L1BlockHash)
+		if err != nil {
+			return fmt.Errorf("get global exit root error: %v", err)
 		}
 
-		if l2Block.GlobalExitRoot != emptyHash {
-			if err := hermezDb.WriteGerForL1BlockHash(l2Block.L1BlockHash, l2Block.GlobalExitRoot); err != nil {
-				return fmt.Errorf("write ger for l1 block hash error: %v", err)
+		if !l1BlockHashWritten {
+			if err := hermezDb.WriteBlockL1BlockHash(l2Block.L2BlockNumber, l2Block.L1BlockHash); err != nil {
+				return fmt.Errorf("write block global exit root error: %v", err)
+			}
+
+			if err := hermezDb.WriteL1BlockHash(l2Block.L1BlockHash); err != nil {
+				return fmt.Errorf("write global exit root error: %v", err)
+			}
+
+			if l2Block.GlobalExitRoot != emptyHash {
+				if err := hermezDb.WriteGerForL1BlockHash(l2Block.L1BlockHash, l2Block.GlobalExitRoot); err != nil {
+					return fmt.Errorf("write ger for l1 block hash error: %v", err)
+				}
 			}
 		}
 	}
@@ -688,6 +734,22 @@ func writeL2Block(eriDb ErigonDb, hermezDb HermezDb, l2Block *types.FullL2Block)
 	if l2Block.L1InfoTreeIndex != 0 {
 		if err = hermezDb.WriteBlockL1InfoTreeIndex(l2Block.L2BlockNumber, uint64(l2Block.L1InfoTreeIndex)); err != nil {
 			return err
+		}
+
+		// if the info tree index of this block is lower than the highest we've seen
+		// we need to write the GER and l1 block hash regardless of the logic above.
+		// this can only happen in post etrog blocks, and we need the GER/L1 block hash
+		// for the stream and also for the block info root to be correct
+		if uint64(l2Block.L1InfoTreeIndex) <= highestL1InfoTreeIndex {
+			if err = hermezDb.WriteBlockGlobalExitRoot(l2Block.L2BlockNumber, l2Block.GlobalExitRoot); err != nil {
+				return fmt.Errorf("write block global exit root error: %w", err)
+			}
+			if err = hermezDb.WriteBlockL1BlockHash(l2Block.L2BlockNumber, l2Block.L1BlockHash); err != nil {
+				return fmt.Errorf("write block global exit root error: %w", err)
+			}
+			if err = hermezDb.WriteReusedL1InfoTreeIndex(l2Block.L2BlockNumber); err != nil {
+				return fmt.Errorf("write reused l1 info tree index error: %w", err)
+			}
 		}
 	}
 

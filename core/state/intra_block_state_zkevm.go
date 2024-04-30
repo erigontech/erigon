@@ -32,6 +32,7 @@ type ReadOnlyHermezDb interface {
 	GetBlockL1BlockHash(l2BlockNo uint64) (libcommon.Hash, error)
 	GetGerForL1BlockHash(l1BlockHash libcommon.Hash) (libcommon.Hash, error)
 	GetIntermediateTxStateRoot(blockNum uint64, txhash libcommon.Hash) (libcommon.Hash, error)
+	GetReusedL1InfoTreeIndex(blockNum uint64) (bool, error)
 }
 
 func (sdb *IntraBlockState) GetTxCount() (uint64, error) {
@@ -70,7 +71,14 @@ func (sdb *IntraBlockState) PreExecuteStateSet(chainConfig *chain.Config, blockN
 	}
 }
 
-func (sdb *IntraBlockState) SyncerPreExecuteStateSet(chainConfig *chain.Config, blockNumber uint64, blockTimestamp uint64, prevBlockHash, blockGer, l1BlockHash *libcommon.Hash, gerUpdates *[]dstypes.GerUpdate) {
+func (sdb *IntraBlockState) SyncerPreExecuteStateSet(
+	chainConfig *chain.Config,
+	blockNumber uint64,
+	blockTimestamp uint64,
+	prevBlockHash, blockGer, l1BlockHash *libcommon.Hash,
+	gerUpdates *[]dstypes.GerUpdate,
+	reUsedL1InfoTreeIndex bool,
+) {
 	if !sdb.Exist(ADDRESS_SCALABLE_L2) {
 		// create account if not exists
 		sdb.CreateAccount(ADDRESS_SCALABLE_L2, true)
@@ -90,8 +98,9 @@ func (sdb *IntraBlockState) SyncerPreExecuteStateSet(chainConfig *chain.Config, 
 		//save prev block hash
 		sdb.scalableSetBlockHash(blockNumber-1, prevBlockHash)
 
-		//save ger with l1blockhash
-		if blockGer != nil && *blockGer != emptyHash {
+		//save ger with l1blockhash - but only in the case that the l1 info tree index hasn't been
+		// re-used.  If it has been re-used we never write this to the contract storage
+		if !reUsedL1InfoTreeIndex && blockGer != nil && *blockGer != emptyHash {
 			sdb.WriteGerManagerL1BlockHash(*blockGer, *l1BlockHash)
 		}
 	} else {
