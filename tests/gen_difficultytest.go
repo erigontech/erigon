@@ -16,7 +16,7 @@ func (d DifficultyTest) MarshalJSON() ([]byte, error) {
 	type DifficultyTest struct {
 		ParentTimestamp    math.HexOrDecimal64   `json:"parentTimestamp"`
 		ParentDifficulty   *math.HexOrDecimal256 `json:"parentDifficulty"`
-		ParentUncles       math.HexOrDecimal64   `json:"parentUncles"`
+		ParentUncles       uint64                `json:"parentUncles"`
 		CurrentTimestamp   math.HexOrDecimal64   `json:"currentTimestamp"`
 		CurrentBlockNumber math.HexOrDecimal64   `json:"currentBlockNumber"`
 		CurrentDifficulty  *math.HexOrDecimal256 `json:"currentDifficulty"`
@@ -24,7 +24,7 @@ func (d DifficultyTest) MarshalJSON() ([]byte, error) {
 	var enc DifficultyTest
 	enc.ParentTimestamp = math.HexOrDecimal64(d.ParentTimestamp)
 	enc.ParentDifficulty = (*math.HexOrDecimal256)(d.ParentDifficulty)
-	enc.ParentUncles = math.HexOrDecimal64(d.ParentUncles)
+	enc.ParentUncles = d.ParentUncles
 	enc.CurrentTimestamp = math.HexOrDecimal64(d.CurrentTimestamp)
 	enc.CurrentBlockNumber = math.HexOrDecimal64(d.CurrentBlockNumber)
 	enc.CurrentDifficulty = (*math.HexOrDecimal256)(d.CurrentDifficulty)
@@ -36,7 +36,7 @@ func (d *DifficultyTest) UnmarshalJSON(input []byte) error {
 	type DifficultyTest struct {
 		ParentTimestamp    *math.HexOrDecimal64  `json:"parentTimestamp"`
 		ParentDifficulty   *math.HexOrDecimal256 `json:"parentDifficulty"`
-		ParentUncles       *math.HexOrDecimal64  `json:"parentUncles"`
+		ParentUncles       *uint64               `json:"parentUncles"`
 		CurrentTimestamp   *math.HexOrDecimal64  `json:"currentTimestamp"`
 		CurrentBlockNumber *math.HexOrDecimal64  `json:"currentBlockNumber"`
 		CurrentDifficulty  *math.HexOrDecimal256 `json:"currentDifficulty"`
@@ -52,7 +52,7 @@ func (d *DifficultyTest) UnmarshalJSON(input []byte) error {
 		d.ParentDifficulty = (*big.Int)(dec.ParentDifficulty)
 	}
 	if dec.ParentUncles != nil {
-		d.ParentUncles = uint64(*dec.ParentUncles)
+		d.ParentUncles = *dec.ParentUncles
 	}
 	if dec.CurrentTimestamp != nil {
 		d.CurrentTimestamp = uint64(*dec.CurrentTimestamp)
