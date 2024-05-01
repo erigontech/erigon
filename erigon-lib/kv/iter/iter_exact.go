@@ -23,18 +23,18 @@ func FilterKV(it KV, filter func(k, v []byte) bool) *FilteredDuo[[]byte, []byte]
 	return FilterDuo[[]byte, []byte](it, filter)
 }
 
-func ToU64Arr(s U64) ([]uint64, error)           { return ToArr[uint64](s) }
-func ToKVArray(s KV) ([][]byte, [][]byte, error) { return ToDualArray[[]byte, []byte](s) }
+func ToU64Arr(s U64) ([]uint64, error)           { return ToArray[uint64](s) }
+func ToKVArray(s KV) ([][]byte, [][]byte, error) { return ToArrayDuo[[]byte, []byte](s) }
 
 func ToArrU64Must(s U64) []uint64 {
-	arr, err := ToArr[uint64](s)
+	arr, err := ToArray[uint64](s)
 	if err != nil {
 		panic(err)
 	}
 	return arr
 }
 func ToArrKVMust(s KV) ([][]byte, [][]byte) {
-	keys, values, err := ToDualArray[[]byte, []byte](s)
+	keys, values, err := ToArrayDuo[[]byte, []byte](s)
 	if err != nil {
 		panic(err)
 	}
@@ -42,7 +42,7 @@ func ToArrKVMust(s KV) ([][]byte, [][]byte) {
 }
 
 func CountU64(s U64) (int, error) { return Count[uint64](s) }
-func CountKV(s KV) (int, error)   { return CountDual[[]byte, []byte](s) }
+func CountKV(s KV) (int, error)   { return CountDuo[[]byte, []byte](s) }
 
 func TransformKV(it KV, transform func(k, v []byte) ([]byte, []byte, error)) *TransformedDuo[[]byte, []byte] {
 	return TransformDuo[[]byte, []byte](it, transform)

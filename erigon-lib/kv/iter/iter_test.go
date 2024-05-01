@@ -34,21 +34,21 @@ func TestUnion(t *testing.T) {
 		s1 := iter.Array[uint64]([]uint64{1, 3, 6, 7})
 		s2 := iter.Array[uint64]([]uint64{2, 3, 7, 8})
 		s3 := iter.Union[uint64](s1, s2, order.Asc, -1)
-		res, err := iter.ToArr[uint64](s3)
+		res, err := iter.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Equal(t, []uint64{1, 2, 3, 6, 7, 8}, res)
 
 		s1 = iter.ReverseArray[uint64]([]uint64{1, 3, 6, 7})
 		s2 = iter.ReverseArray[uint64]([]uint64{2, 3, 7, 8})
 		s3 = iter.Union[uint64](s1, s2, order.Desc, -1)
-		res, err = iter.ToArr[uint64](s3)
+		res, err = iter.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Equal(t, []uint64{8, 7, 6, 3, 2, 1}, res)
 
 		s1 = iter.ReverseArray[uint64]([]uint64{1, 3, 6, 7})
 		s2 = iter.ReverseArray[uint64]([]uint64{2, 3, 7, 8})
 		s3 = iter.Union[uint64](s1, s2, order.Desc, 2)
-		res, err = iter.ToArr[uint64](s3)
+		res, err = iter.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Equal(t, []uint64{8, 7}, res)
 
@@ -57,7 +57,7 @@ func TestUnion(t *testing.T) {
 		s1 := iter.EmptyU64
 		s2 := iter.Array[uint64]([]uint64{2, 3, 7, 8})
 		s3 := iter.Union[uint64](s1, s2, order.Asc, -1)
-		res, err := iter.ToArr[uint64](s3)
+		res, err := iter.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Equal(t, []uint64{2, 3, 7, 8}, res)
 	})
@@ -65,7 +65,7 @@ func TestUnion(t *testing.T) {
 		s1 := iter.Array[uint64]([]uint64{1, 3, 4, 5, 6, 7})
 		s2 := iter.EmptyU64
 		s3 := iter.Union[uint64](s1, s2, order.Asc, -1)
-		res, err := iter.ToArr[uint64](s3)
+		res, err := iter.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Equal(t, []uint64{1, 3, 4, 5, 6, 7}, res)
 	})
@@ -73,7 +73,7 @@ func TestUnion(t *testing.T) {
 		s1 := iter.EmptyU64
 		s2 := iter.EmptyU64
 		s3 := iter.Union[uint64](s1, s2, order.Asc, -1)
-		res, err := iter.ToArr[uint64](s3)
+		res, err := iter.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Nil(t, res)
 	})
@@ -148,14 +148,14 @@ func TestIntersect(t *testing.T) {
 		s1 := iter.Array[uint64]([]uint64{1, 3, 4, 5, 6, 7})
 		s2 := iter.Array[uint64]([]uint64{2, 3, 7})
 		s3 := iter.Intersect[uint64](s1, s2, -1)
-		res, err := iter.ToArr[uint64](s3)
+		res, err := iter.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Equal(t, []uint64{3, 7}, res)
 
 		s1 = iter.Array[uint64]([]uint64{1, 3, 4, 5, 6, 7})
 		s2 = iter.Array[uint64]([]uint64{2, 3, 7})
 		s3 = iter.Intersect[uint64](s1, s2, 1)
-		res, err = iter.ToArr[uint64](s3)
+		res, err = iter.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Equal(t, []uint64{3}, res)
 	})
@@ -163,13 +163,13 @@ func TestIntersect(t *testing.T) {
 		s1 := iter.EmptyU64
 		s2 := iter.Array[uint64]([]uint64{2, 3, 7, 8})
 		s3 := iter.Intersect[uint64](s1, s2, -1)
-		res, err := iter.ToArr[uint64](s3)
+		res, err := iter.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Nil(t, res)
 
 		s2 = iter.Array[uint64]([]uint64{2, 3, 7, 8})
 		s3 = iter.Intersect[uint64](nil, s2, -1)
-		res, err = iter.ToArr[uint64](s3)
+		res, err = iter.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Nil(t, res)
 	})
@@ -177,13 +177,13 @@ func TestIntersect(t *testing.T) {
 		s1 := iter.Array[uint64]([]uint64{1, 3, 4, 5, 6, 7})
 		s2 := iter.EmptyU64
 		s3 := iter.Intersect[uint64](s1, s2, -1)
-		res, err := iter.ToArr[uint64](s3)
+		res, err := iter.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Nil(t, nil, res)
 
 		s1 = iter.Array[uint64]([]uint64{1, 3, 4, 5, 6, 7})
 		s3 = iter.Intersect[uint64](s1, nil, -1)
-		res, err = iter.ToArr[uint64](s3)
+		res, err = iter.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Nil(t, res)
 	})
@@ -191,12 +191,12 @@ func TestIntersect(t *testing.T) {
 		s1 := iter.EmptyU64
 		s2 := iter.EmptyU64
 		s3 := iter.Intersect[uint64](s1, s2, -1)
-		res, err := iter.ToArr[uint64](s3)
+		res, err := iter.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Nil(t, res)
 
 		s3 = iter.Intersect[uint64](nil, nil, -1)
-		res, err = iter.ToArr[uint64](s3)
+		res, err = iter.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Nil(t, res)
 	})
@@ -205,13 +205,13 @@ func TestIntersect(t *testing.T) {
 func TestRange(t *testing.T) {
 	t.Run("range", func(t *testing.T) {
 		s1 := iter.Range[uint64](1, 4)
-		res, err := iter.ToArr[uint64](s1)
+		res, err := iter.ToArray[uint64](s1)
 		require.NoError(t, err)
 		require.Equal(t, []uint64{1, 2, 3}, res)
 	})
 	t.Run("empty", func(t *testing.T) {
 		s1 := iter.Range[uint64](1, 1)
-		res, err := iter.ToArr[uint64](s1)
+		res, err := iter.ToArray[uint64](s1)
 		require.NoError(t, err)
 		require.Equal(t, []uint64{1}, res)
 	})
@@ -234,7 +234,7 @@ func TestPaginated(t *testing.T) {
 			}
 			return
 		})
-		res, err := iter.ToArr[uint64](s1)
+		res, err := iter.ToArray[uint64](s1)
 		require.NoError(t, err)
 		require.Equal(t, []uint64{1, 2, 3, 4, 5, 6, 7}, res)
 
@@ -257,7 +257,7 @@ func TestPaginated(t *testing.T) {
 			}
 			return
 		})
-		res, err := iter.ToArr[uint64](s1)
+		res, err := iter.ToArray[uint64](s1)
 		require.ErrorIs(t, err, testErr)
 		require.Equal(t, []uint64{1, 2, 3}, res)
 
@@ -271,7 +271,7 @@ func TestPaginated(t *testing.T) {
 		s1 := iter.Paginate[uint64](func(pageToken string) (arr []uint64, nextPageToken string, err error) {
 			return []uint64{}, "", nil
 		})
-		res, err := iter.ToArr[uint64](s1)
+		res, err := iter.ToArray[uint64](s1)
 		require.NoError(t, err)
 		require.Nil(t, res)
 
