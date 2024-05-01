@@ -217,6 +217,11 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 			return err
 		}
 	}
+	for _, p := range snaptype.SeedableV3Extensions() {
+		snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
+			Type: p,
+		})
+	}
 
 	if caplin != NoCaplin {
 		for _, p := range snaptype.CaplinSnapshotTypes {
