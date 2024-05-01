@@ -90,21 +90,8 @@ package {{.Package}}
 import (
 	"math/big"
 	"strings"
-
-{{range .Contracts}}
-	{{$stop := false}}
-	{{range .Transacts}}
-		{{if ne (len .Normalized.Inputs) 0}}
-			"fmt"
-			"reflect"
-			{{$stop = true}}
-			{{break}}
-		{{end}}
-	{{end}}
-	{{if $stop}}
-		{{break}}
-	{{end}}
-{{end}}
+	"fmt"
+	"reflect"
 
 	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon/accounts/abi"
@@ -123,6 +110,8 @@ var (
 	_ = libcommon.Big1
 	_ = types.BloomLookup
 	_ = event.NewSubscription
+	_ = fmt.Errorf
+	_ = reflect.ValueOf
 )
 
 {{$structs := .Structs}}
@@ -379,16 +368,16 @@ var (
 	{{range .Transacts}}
 		{{if ne (len .Normalized.Inputs) 0}}
 
-		// {{.Normalized.Name}}Params is an auto generated read-only Go binding of transcaction calldata params
-		type {{.Normalized.Name}}Params struct {
+		// {{.Type}}{{.Normalized.Name}}Params is an auto generated read-only Go binding of transcaction calldata params
+		type {{.Type}}{{.Normalized.Name}}Params struct {
 			{{range $i, $_ := .Normalized.Inputs}} Param_{{.Name}} {{bindtype .Type $structs}}
 			{{end}}
 		}
 
-		// Parse {{.Normalized.Name}} method from calldata of a transaction
+		// Parse {{.Type}}{{.Normalized.Name}} method from calldata of a transaction
 		// 
 		// Solidity: {{.Original.String}}
-		func Parse{{.Normalized.Name}}(calldata []byte) (*{{.Normalized.Name}}Params, error) {
+		func Parse{{.Type}}{{.Normalized.Name}}(calldata []byte) (*{{.Type}}{{.Normalized.Name}}Params, error) {
 			if len(calldata) <= 4 {
 				return nil, fmt.Errorf("invalid calldata input")
 			}
@@ -403,7 +392,7 @@ var (
 				return nil, fmt.Errorf("failed to unpack {{.Original.Name}} params data: %w", err)
 			}		
 
-			var paramsResult = new({{.Normalized.Name}}Params)
+			var paramsResult = new({{.Type}}{{.Normalized.Name}}Params)
 			value := reflect.ValueOf(paramsResult).Elem()
 
 			if value.NumField() != len(out) {
@@ -413,7 +402,7 @@ var (
 			{{range $i, $t := .Normalized.Inputs}}
 			out{{$i}} := *abi.ConvertType(out[{{$i}}], new({{bindtype .Type $structs}})).(*{{bindtype .Type $structs}}){{end}}
 
-			return &{{.Normalized.Name}}Params{
+			return &{{.Type}}{{.Normalized.Name}}Params{
 				{{range $i, $_ := .Normalized.Inputs}} Param_{{.Name}} : out{{$i}},{{end}} 
 			}, nil 
 		}
