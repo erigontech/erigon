@@ -3,7 +3,6 @@ package snapshotsync
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"runtime"
 	"strings"
@@ -126,9 +125,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 		default:
 		}
 		if err := RequestSnapshotsDownload(ctx, downloadRequest, snapshotDownloader); err != nil {
-			if errors.Is(err, context.Canceled) {
-				return err
-			}
 			log.Error(fmt.Sprintf("[%s] call downloader", logPrefix), "err", err)
 			time.Sleep(10 * time.Second)
 			continue
