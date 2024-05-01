@@ -141,20 +141,19 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, blockPrune uint, prever
 			// e.g 'v1-000000-000100-beaconblocks.seg'
 			// parse "from" (000000) and "to" (000100) from the name. 100 is 100'000 blocks
 			minusSplit := strings.Split(name, "-")
-			fmt.Println(minusSplit)
-			rangeNums := []string{}
 			// convert the range to uint64
-			from, err = strconv.ParseUint(rangeNums[0], 10, 64)
+			from, err = strconv.ParseUint(minusSplit[1], 10, 64)
 			if err != nil {
 				return nil, err
 			}
-			to, err = strconv.ParseUint(rangeNums[1], 10, 64)
+			to, err = strconv.ParseUint(minusSplit[2], 10, 64)
 			if err != nil {
 				return nil, err
 			}
 			from *= 1000
 			to *= 1000
-			kind = strings.Split(name, "-")[2]
+			kind = minusSplit[3]
+			fmt.Println(minusSplit, kind)
 		}
 		blackList[p.Name] = struct{}{} // Add all of them to the blacklist and remove the ones that are not blacklisted later.
 		snapshotKindToNames[kind] = append(snapshotKindToNames[kind], snapshotFileData{
