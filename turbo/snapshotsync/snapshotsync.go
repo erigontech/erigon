@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -66,9 +68,113 @@ func RequestSnapshotsDownload(ctx context.Context, downloadRequest []services.Do
 	return nil
 }
 
+const (
+	MinPruneStep   = 64
+	MinPruneBlocks = snaptype.Erigon2MergeLimit
+)
+
+func adjustStepPrune(steps uint) uint {
+	if steps%MinPruneStep == 0 {
+		return steps
+	}
+	ret := steps + MinPruneStep
+	// round to nearest multiple of 64. if less than 64, round to 64
+	return ret - ret%MinPruneStep
+}
+
+func adjustBlockPrune(blocks uint) uint {
+	if blocks%MinPruneBlocks == 0 {
+		return blocks
+	}
+	ret := blocks + MinPruneBlocks
+	// round to nearest multiple of 64. if less than 64, round to 64
+	return ret - ret%MinPruneBlocks
+}
+
+func shouldUseStepsForPruning(name string) bool {
+	return strings.HasPrefix(name, "history") || strings.HasPrefix(name, "idx")
+}
+
+func canSnapshotBePruned(name string) bool {
+	return strings.HasPrefix(name, "history") || strings.HasPrefix(name, "idx") || strings.Contains(name, "transactions")
+}
+
+func buildBlackListForPruning(pruneMode bool, stepPrune, blockPrune uint, preverified snapcfg.Preverified) (map[string]struct{}, error) {
+	type snapshotFileData struct {
+		from, to  uint64
+		stepBased bool
+		name      string
+	}
+	blackList := make(map[string]struct{})
+	if !pruneMode {
+		return blackList, nil
+	}
+	stepPrune = adjustStepPrune(stepPrune)
+	blockPrune = adjustBlockPrune(blockPrune)
+	snapshotKindToNames := make(map[string][]snapshotFileData)
+	for _, p := range preverified {
+		name := p.Name
+		// Dont prune unprunable files
+		if !canSnapshotBePruned(name) {
+			continue
+		}
+		// parse the snapshot "kind". e.g kind of 'idx/v1-accounts.0-64.ef' is "idx/v1-accounts"
+		// parse "from" (0) and "to" (64) from the name
+		rangeString := strings.Split(name, ".")[1]
+		rangeNums := strings.Split(rangeString, "-")
+		// convert the range to uint64
+		from, err := strconv.ParseUint(rangeNums[0], 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		to, err := strconv.ParseUint(rangeNums[1], 10, 64)
+		if err != nil {
+			return nil, err
+		}
+
+		kind := strings.Split(name, ".")[0]
+		blackList[p.Name] = struct{}{} // Add all of them to the blacklist and remove the ones that are not blacklisted later.
+		snapshotKindToNames[kind] = append(snapshotKindToNames[kind], snapshotFileData{
+			from:      from,
+			to:        to,
+			stepBased: shouldUseStepsForPruning(name),
+			name:      name,
+		})
+	}
+	// sort the snapshots by "from" and "to" in ascending order
+	for _, snapshots := range snapshotKindToNames {
+		prunedDistance := uint64(0) // keep track of pruned distance for snapshots
+		// sort the snapshots by "from" and "to" in descending order
+		sort.Slice(snapshots, func(i, j int) bool {
+			if snapshots[i].from == snapshots[j].from {
+				return snapshots[i].to > snapshots[j].to
+			}
+			return snapshots[i].from > snapshots[j].from
+		})
+		for _, snapshot := range snapshots {
+			if snapshot.stepBased {
+				if prunedDistance >= uint64(stepPrune) {
+					break
+				}
+			} else if prunedDistance >= uint64(blockPrune) {
+				break
+			}
+
+			if snapshot.stepBased {
+				delete(blackList, snapshot.name)
+				prunedDistance += uint64(snapshot.to - snapshot.from)
+			} else {
+				delete(blackList, snapshot.name)
+				prunedDistance += snapshot.to - snapshot.from
+			}
+		}
+	}
+	return blackList, nil
+}
+
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool, caplin CaplinMode, agg *state.Aggregator, tx kv.RwTx, blockReader services.FullBlockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient, stagesIdsList []string) error {
+func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs, pruneMode bool, stepPrune, blockPrune uint, caplin CaplinMode, agg *state.Aggregator, tx kv.RwTx, blockReader services.FullBlockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient, stagesIdsList []string) error {
 	snapshots := blockReader.Snapshots()
 	borSnapshots := blockReader.BorSnapshots()
 	if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
@@ -98,6 +204,10 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 	preverifiedBlockSnapshots := snapCfg.Preverified
 	downloadRequest := make([]services.DownloadRequest, 0, len(preverifiedBlockSnapshots))
 
+	blackListForPruning, err := buildBlackListForPruning(pruneMode, stepPrune, blockPrune, preverifiedBlockSnapshots)
+	if err != nil {
+		return err
+	}
 	// build all download requests
 	for _, p := range preverifiedBlockSnapshots {
 		if !histV3 {
@@ -114,6 +224,10 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 		if !blobs && strings.Contains(p.Name, "blobsidecars") {
 			continue
 		}
+		if _, ok := blackListForPruning[p.Name]; ok {
+			continue
+		}
+
 		downloadRequest = append(downloadRequest, services.NewDownloadRequest(p.Name, p.Hash))
 	}
 
