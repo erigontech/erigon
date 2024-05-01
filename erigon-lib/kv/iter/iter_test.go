@@ -281,7 +281,7 @@ func TestPaginated(t *testing.T) {
 	})
 }
 
-func TestPaginatedDual(t *testing.T) {
+func TestPaginatedDuo(t *testing.T) {
 	t.Run("paginated", func(t *testing.T) {
 		i := 0
 		s1 := iter.PaginateKV(func(pageToken string) (keys, values [][]byte, nextPageToken string, err error) {
@@ -364,7 +364,7 @@ func TestFiler(t *testing.T) {
 		})
 
 	}
-	t.Run("dual", func(t *testing.T) {
+	t.Run("duo", func(t *testing.T) {
 		s2 := iter.FilterKV(createKVIter(), func(k, v []byte) bool { return bytes.Equal(k, []byte{1}) })
 		keys, values, err := iter.ToKVArray(s2)
 		require.NoError(t, err)
