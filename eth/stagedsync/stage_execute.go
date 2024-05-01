@@ -91,7 +91,8 @@ type ExecuteBlockCfg struct {
 	genesis   *types.Genesis
 	agg       *libstate.Aggregator
 
-	silkworm *silkworm.Silkworm
+	silkworm        *silkworm.Silkworm
+	blockProduction bool
 }
 
 func StageExecuteBlocksCfg(
