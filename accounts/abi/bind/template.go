@@ -377,7 +377,7 @@ var (
 		// Parse {{$metaType}}{{.Normalized.Name}} method from calldata of a transaction
 		// 
 		// Solidity: {{.Original.String}}
-		func Parse{{$metaType}}{{.Normalized.Name}}(calldata []byte) (*{{$metaType}}{{.Normalized.Name}}Params, error) {
+		func Parse{{$metaType}}{{.Normalized.Name}}Params(calldata []byte) (*{{$metaType}}{{.Normalized.Name}}Params, error) {
 			if len(calldata) <= 4 {
 				return nil, fmt.Errorf("invalid calldata input")
 			}
