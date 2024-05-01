@@ -49,7 +49,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 			KeyCount:   1,
 			BucketSize: 10,
 			TmpDir:     dir,
-			IndexFile:  filepath.Join(dir, snaptype.IdxFileName(1, from, to, snaptype.Indexes.TxnHash2BlockNum.String())),
+			IndexFile:  filepath.Join(dir, snaptype.IdxFileName(1, from, to, coresnaptype.Indexes.TxnHash2BlockNum.Name)),
 			LeafSize:   8,
 		}, logger)
 		require.NoError(t, err)
@@ -269,7 +269,7 @@ func TestCanRetire(t *testing.T) {
 		{1_001_000, 2_000_000, 1_001_000, 1_002_000, true},
 	}
 	for i, tc := range cases {
-		from, to, can := canRetire(tc.inFrom, tc.inTo, snaptype.Enums.Unknown, nil)
+		from, to, can := canRetire(tc.inFrom, tc.inTo, snaptype.Unknown, nil)
 		require.Equal(int(tc.outFrom), int(from), i)
 		require.Equal(int(tc.outTo), int(to), i)
 		require.Equal(tc.can, can, tc.inFrom, tc.inTo, i)
@@ -291,19 +291,19 @@ func TestOpenAllSnapshot(t *testing.T) {
 		defer s.Close()
 		err := s.ReopenFolder()
 		require.NoError(err)
-		require.NotNil(s.segments.Get(snaptype.Enums.Headers))
+		require.NotNil(s.segments.Get(coresnaptype.Enums.Headers))
 		getSegs := func(e snaptype.Enum) *segments {
 			res, _ := s.segments.Get(e)
 			return res
 		}
-		require.Equal(0, len(getSegs(snaptype.Enums.Headers).segments))
+		require.Equal(0, len(getSegs(coresnaptype.Enums.Headers).segments))
 		s.Close()
 
 		createFile(500_000, 1_000_000, coresnaptype.Bodies)
 		s = NewRoSnapshots(cfg, dir, 0, logger)
 		defer s.Close()
-		require.NotNil(getSegs(snaptype.Enums.Bodies))
-		require.Equal(0, len(getSegs(snaptype.Enums.Bodies).segments))
+		require.NotNil(getSegs(coresnaptype.Enums.Bodies))
+		require.Equal(0, len(getSegs(coresnaptype.Enums.Bodies).segments))
 		s.Close()
 
 		createFile(500_000, 1_000_000, coresnaptype.Headers)
@@ -311,8 +311,8 @@ func TestOpenAllSnapshot(t *testing.T) {
 		s = NewRoSnapshots(cfg, dir, 0, logger)
 		err = s.ReopenFolder()
 		require.NoError(err)
-		require.NotNil(getSegs(snaptype.Enums.Headers))
-		require.Equal(0, len(getSegs(snaptype.Enums.Headers).segments))
+		require.NotNil(getSegs(coresnaptype.Enums.Headers))
+		require.Equal(0, len(getSegs(coresnaptype.Enums.Headers).segments))
 		s.Close()
 
 		createFile(0, 500_000, coresnaptype.Bodies)
@@ -323,8 +323,8 @@ func TestOpenAllSnapshot(t *testing.T) {
 
 		err = s.ReopenFolder()
 		require.NoError(err)
-		require.NotNil(getSegs(snaptype.Enums.Headers))
-		require.Equal(2, len(getSegs(snaptype.Enums.Headers).segments))
+		require.NotNil(getSegs(coresnaptype.Enums.Headers))
+		require.Equal(2, len(getSegs(coresnaptype.Enums.Headers).segments))
 
 		view := s.View()
 		defer view.Close()
@@ -347,8 +347,8 @@ func TestOpenAllSnapshot(t *testing.T) {
 		err = s.ReopenFolder()
 		require.NoError(err)
 		defer s.Close()
-		require.NotNil(getSegs(snaptype.Enums.Headers))
-		require.Equal(2, len(getSegs(snaptype.Enums.Headers).segments))
+		require.NotNil(getSegs(coresnaptype.Enums.Headers))
+		require.Equal(2, len(getSegs(coresnaptype.Enums.Headers).segments))
 
 		createFile(500_000, 900_000, coresnaptype.Headers)
 		createFile(500_000, 900_000, coresnaptype.Bodies)
