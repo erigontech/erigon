@@ -50,14 +50,14 @@ func TransformKV(it KV, transform func(k, v []byte) ([]byte, []byte, error)) *Tr
 
 // internal types
 type (
-	NextPage1[T any]    func(pageToken string) (arr []T, nextPageToken string, err error)
-	NextPage2[K, V any] func(pageToken string) (keys []K, values []V, nextPageToken string, err error)
+	NextPageUno[T any]    func(pageToken string) (arr []T, nextPageToken string, err error)
+	NextPageDuo[K, V any] func(pageToken string) (keys []K, values []V, nextPageToken string, err error)
 )
 
-func PaginateKV(f NextPage2[[]byte, []byte]) *PaginatedDuo[[]byte, []byte] {
+func PaginateKV(f NextPageDuo[[]byte, []byte]) *PaginatedDuo[[]byte, []byte] {
 	return PaginateDuo[[]byte, []byte](f)
 }
-func PaginateU64(f NextPage1[uint64]) *Paginated[uint64] {
+func PaginateU64(f NextPageUno[uint64]) *Paginated[uint64] {
 	return Paginate[uint64](f)
 }
 

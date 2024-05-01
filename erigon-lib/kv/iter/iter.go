@@ -381,12 +381,12 @@ type Paginated[T any] struct {
 	arr           []T
 	i             int
 	err           error
-	nextPage      NextPage1[T]
+	nextPage      NextPageUno[T]
 	nextPageToken string
 	initialized   bool
 }
 
-func Paginate[T any](f NextPage1[T]) *Paginated[T] { return &Paginated[T]{nextPage: f} }
+func Paginate[T any](f NextPageUno[T]) *Paginated[T] { return &Paginated[T]{nextPage: f} }
 func (it *Paginated[T]) HasNext() bool {
 	if it.err != nil || it.i < len(it.arr) {
 		return true
@@ -414,12 +414,12 @@ type PaginatedDuo[K, V any] struct {
 	values        []V
 	i             int
 	err           error
-	nextPage      NextPage2[K, V]
+	nextPage      NextPageDuo[K, V]
 	nextPageToken string
 	initialized   bool
 }
 
-func PaginateDuo[K, V any](f NextPage2[K, V]) *PaginatedDuo[K, V] {
+func PaginateDuo[K, V any](f NextPageDuo[K, V]) *PaginatedDuo[K, V] {
 	return &PaginatedDuo[K, V]{nextPage: f}
 }
 func (it *PaginatedDuo[K, V]) HasNext() bool {
