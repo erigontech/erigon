@@ -140,6 +140,7 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, blockPrune uint, prever
 			// e.g 'v1-000000-000100-beaconblocks.seg'
 			// parse "from" (000000) and "to" (000100) from the name. 100 is 100'000 blocks
 			rangeString := strings.Split(name, "-")[1]
+			fmt.Println(rangeString)
 			rangeNums := strings.Split(rangeString, "-")
 			// convert the range to uint64
 			from, err = strconv.ParseUint(rangeNums[0], 10, 64)
