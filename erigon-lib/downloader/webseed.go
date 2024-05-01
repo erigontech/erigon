@@ -114,7 +114,6 @@ func (d *WebSeeds) checkHasTorrents(manifestResponse snaptype.WebSeedsFromProvid
 	hasTorrents := len(torrentNames) > 0
 	report.missingTorrents = make([]string, 0)
 	for name := range manifestResponse {
-		// skip non-seedable files. maybe will need extend list of seedable files in future.
 		if !snaptype.IsSeedableExtension(name) {
 			continue
 		}
@@ -332,7 +331,7 @@ func (d *WebSeeds) constructListsOfFiles(ctx context.Context, httpProviders []*u
 		}
 		manifestResponse, err := d.retrieveManifest(ctx, webSeedProviderURL)
 		if err != nil { // don't fail on error
-			d.logger.Debug("[snapshots.webseed] get from HTTP provider", "err", err, "url", webSeedProviderURL.EscapedPath())
+			d.logger.Debug("[snapshots.webseed] get from HTTP provider", "err", err, "url", webSeedProviderURL.String())
 			continue
 		}
 		// check if we need to prohibit new downloads for some files
@@ -551,7 +550,20 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 	for fileName, tUrls := range urlsByName {
 		name := fileName
 		addedNew++
-		if !strings.HasSuffix(name, ".seg.torrent") {
+		whiteListed := strings.HasSuffix(name, ".seg.torrent") ||
+			strings.HasSuffix(name, ".kv.torrent") ||
+			strings.HasSuffix(name, ".v.torrent") ||
+			strings.HasSuffix(name, ".ef.torrent")
+		if !whiteListed {
+			_, fName := filepath.Split(name)
+			d.logger.Log(d.verbosity, "[snapshots] webseed has .torrent, but we skip it because this file-type not supported yet", "name", fName)
+			continue
+		}
+		//Erigon3 doesn't provide history of commitment (.v, .ef files), but does provide .kv:
+		// - prohibit v1-commitment...v, v2-commitment...ef, etc...
+		// - allow v1-commitment...kv
+		e3blackListed := strings.Contains(name, "commitment") && (strings.HasSuffix(name, ".v.torrent") || strings.HasSuffix(name, ".ef.torrent"))
+		if e3blackListed {
 			_, fName := filepath.Split(name)
 			d.logger.Log(d.verbosity, "[snapshots] webseed has .torrent, but we skip it because this file-type not supported yet", "name", fName)
 			continue
@@ -595,7 +607,7 @@ func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) 
 		}
 		res, err := d.callTorrentHttpProvider(ctx, parsedUrl, name)
 		if err != nil {
-			d.logger.Log(d.verbosity, "[snapshots] .torrent from webseed rejected", "name", name, "err", err)
+			d.logger.Log(d.verbosity, "[snapshots] .torrent from webseed rejected", "name", name, "err", err, "url", urlStr)
 			continue // it's ok if some HTTP provider failed - try next one
 		}
 		ts, _, err = d.torrentFiles.Create(name, res)
@@ -619,7 +631,7 @@ func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL, fi
 	request = request.WithContext(ctx)
 	resp, err := http.DefaultClient.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("webseed.downloadTorrentFile: host=%s, url=%s, %w", url.Hostname(), url.EscapedPath(), err)
+		return nil, fmt.Errorf("webseed.downloadTorrentFile: url=%s, %w", url.String(), err)
 	}
 	defer resp.Body.Close()
 	//protect against too small and too big data
@@ -644,7 +656,7 @@ func validateTorrentBytes(fileName string, b []byte, whitelist snapcfg.Preverifi
 	torrentHash := mi.HashInfoBytes()
 	// files with different names can have same hash. means need check AND name AND hash.
 	if !nameAndHashWhitelisted(fileName, torrentHash.String(), whitelist) {
-		return fmt.Errorf(".torrent file is not whitelisted")
+		return fmt.Errorf(".torrent file is not whitelisted %s", torrentHash.String())
 	}
 	return nil
 }

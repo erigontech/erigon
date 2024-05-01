@@ -24,7 +24,7 @@ func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postSt
 
 	ctx := context.Background()
 	vt := state_accessors.NewStaticValidatorTable()
-	a := antiquary.NewAntiquary(ctx, nil, preState, vt, &clparams.MainnetBeaconConfig, datadir.New("/tmp"), nil, db, nil, reader, log.New(), true, true, true)
+	a := antiquary.NewAntiquary(ctx, nil, preState, vt, &clparams.MainnetBeaconConfig, datadir.New("/tmp"), nil, db, nil, reader, log.New(), true, true, true, nil)
 	require.NoError(t, a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
 	// Now lets test it against the reader
 	tx, err := db.BeginRw(ctx)
@@ -45,19 +45,19 @@ func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postSt
 }
 
 func TestStateAntiquaryCapella(t *testing.T) {
-	//t.Skip()
+	t.Skip("oom on CI")
 	blocks, preState, postState := tests.GetCapellaRandom()
 	runTest(t, blocks, preState, postState)
 }
 
 func TestStateAntiquaryPhase0(t *testing.T) {
-	//t.Skip()
+	t.Skip("oom on CI")
 	blocks, preState, postState := tests.GetPhase0Random()
 	runTest(t, blocks, preState, postState)
 }
 
 func TestStateAntiquaryBellatrix(t *testing.T) {
-	//t.Skip()
+	t.Skip("oom on CI")
 	blocks, preState, postState := tests.GetBellatrixRandom()
 	runTest(t, blocks, preState, postState)
 }

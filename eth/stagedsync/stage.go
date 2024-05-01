@@ -63,13 +63,6 @@ func (s *StageState) ExecutionAt(db kv.Getter) (uint64, error) {
 	return execution, err
 }
 
-// IntermediateHashesAt gets the current state of the "IntermediateHashes" stage.
-// A block is fully validated after the IntermediateHashes stage is passed successfully.
-func (s *StageState) IntermediateHashesAt(db kv.Getter) (uint64, error) {
-	progress, err := stages.GetStageProgress(db, stages.IntermediateHashes)
-	return progress, err
-}
-
 type UnwindReason struct {
 	// If we;re unwinding due to a fork - we want to unlink blocks but not mark
 	// them as bad - as they may get replayed then deselected
@@ -97,7 +90,9 @@ func ForkReset(badBlock libcommon.Hash) UnwindReason {
 // Unwinder allows the stage to cause an unwind.
 type Unwinder interface {
 	// UnwindTo begins staged sync unwind to the specified block.
-	UnwindTo(unwindPoint uint64, reason UnwindReason)
+	UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error
+	HasUnwindPoint() bool
+	LogPrefix() string
 }
 
 // UnwindState contains the information about unwind.

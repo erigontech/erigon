@@ -33,6 +33,9 @@ integration stage_history --unwind=N
 integration stage_exec --prune.to=N     
 integration stage_history --prune.to=N
 
+# Reset stage_headers
+integration stage_headers --reset --datadir=<my_datadir> --chain=<my_chain>
+
 # Exec blocks, but don't commit changes (loose them)
 integration stage_exec --no-commit
 ...

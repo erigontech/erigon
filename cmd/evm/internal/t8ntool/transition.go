@@ -30,6 +30,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
+	"github.com/ledgerwatch/erigon/eth/consensuschain"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
@@ -47,7 +48,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	trace_logger "github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/tests"
@@ -309,7 +309,7 @@ func Main(ctx *cli.Context) error {
 	engine := merge.New(&ethash.FakeEthash{})
 
 	t8logger := log.New("t8ntool")
-	chainReader := stagedsync.NewChainReaderImpl(chainConfig, tx, nil, t8logger)
+	chainReader := consensuschain.NewReader(chainConfig, tx, nil, t8logger)
 	result, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, chainReader, getTracer, t8logger)
 
 	if hashError != nil {

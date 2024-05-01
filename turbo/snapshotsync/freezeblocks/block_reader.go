@@ -24,8 +24,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -104,6 +106,7 @@ func (r *RemoteBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, bl
 }
 func (r *RemoteBlockReader) Snapshots() services.BlockSnapshots    { panic("not implemented") }
 func (r *RemoteBlockReader) BorSnapshots() services.BlockSnapshots { panic("not implemented") }
+func (r *RemoteBlockReader) AllTypes() []snaptype.Type             { panic("not implemented") }
 func (r *RemoteBlockReader) FrozenBlocks() uint64                  { panic("not supported") }
 func (r *RemoteBlockReader) FrozenBorBlocks() uint64               { panic("not supported") }
 func (r *RemoteBlockReader) FrozenFiles() (list []string)          { panic("not supported") }
@@ -251,7 +254,7 @@ func (r *RemoteBlockReader) EventLookup(ctx context.Context, tx kv.Getter, txnHa
 }
 
 func (r *RemoteBlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
-	borTxnHash := types.ComputeBorTxHash(blockHeight, hash)
+	borTxnHash := bortypes.ComputeBorTxHash(blockHeight, hash)
 	reply, err := r.client.BorEvent(ctx, &remote.BorEventRequest{BorTxHash: gointerfaces.ConvertHashToH256(borTxnHash)})
 	if err != nil {
 		return nil, err
@@ -322,6 +325,15 @@ func (r *BlockReader) BorSnapshots() services.BlockSnapshots {
 	return nil
 }
 
+func (r *BlockReader) AllTypes() []snaptype.Type {
+	var types []snaptype.Type
+	types = append(types, r.sn.Types()...)
+	if r.borSn != nil {
+		types = append(types, r.borSn.Types()...)
+	}
+	return types
+}
+
 func (r *BlockReader) FrozenBlocks() uint64 { return r.sn.BlocksAvailable() }
 func (r *BlockReader) FrozenBorBlocks() uint64 {
 	if r.borSn != nil {
@@ -341,6 +353,10 @@ func (r *BlockReader) FreezingCfg() ethconfig.BlocksFreezing { return r.sn.Cfg()
 
 func (r *BlockReader) HeadersRange(ctx context.Context, walker func(header *types.Header) error) error {
 	return ForEachHeader(ctx, r.sn, walker)
+}
+
+func (r *BlockReader) LastNonCanonicalHeaderNumber(ctx context.Context, tx kv.Getter) {
+
 }
 
 func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (h *types.Header, err error) {
@@ -781,7 +797,7 @@ func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txsAmount uint32, txsSeg
 		}
 	}() // avoid crash because Erigon's core does many things
 
-	idxTxnHash := txsSeg.Index(snaptype.Indexes.TxnHash)
+	idxTxnHash := txsSeg.Index(coresnaptype.Indexes.TxnHash)
 
 	if idxTxnHash == nil {
 		return nil, nil, nil
@@ -819,7 +835,7 @@ func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txsAmount uint32, txsSeg
 }
 
 func (r *BlockReader) txnByID(txnID uint64, sn *Segment, buf []byte) (txn types.Transaction, err error) {
-	idxTxnHash := sn.Index(snaptype.Indexes.TxnHash)
+	idxTxnHash := sn.Index(coresnaptype.Indexes.TxnHash)
 
 	offset := idxTxnHash.OrdinalLookup(txnID - idxTxnHash.BaseDataID())
 	gg := sn.MakeGetter()
@@ -842,8 +858,8 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*Segment, buf []
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 
-		idxTxnHash := sn.Index(snaptype.Indexes.TxnHash)
-		idxTxnHash2BlockNum := sn.Index(snaptype.Indexes.TxnHash2BlockNum)
+		idxTxnHash := sn.Index(coresnaptype.Indexes.TxnHash)
+		idxTxnHash2BlockNum := sn.Index(coresnaptype.Indexes.TxnHash2BlockNum)
 
 		if idxTxnHash == nil || idxTxnHash2BlockNum == nil {
 			continue
@@ -934,6 +950,7 @@ func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.
 	if err != nil {
 		return 0, false, err
 	}
+
 	if n != nil {
 		return *n, true, nil
 	}
@@ -958,7 +975,7 @@ func (r *BlockReader) FirstTxnNumNotInSnapshots() uint64 {
 		return 0
 	}
 
-	lastTxnID := sn.Index(snaptype.Indexes.TxnHash).BaseDataID() + uint64(sn.Count())
+	lastTxnID := sn.Index(coresnaptype.Indexes.TxnHash).BaseDataID() + uint64(sn.Count())
 	return lastTxnID
 }
 
@@ -968,7 +985,7 @@ func (r *BlockReader) IterateFrozenBodies(f func(blockNum, baseTxNum, txAmount u
 
 	for _, sn := range view.Bodies() {
 		sn := sn
-		defer sn.EnableMadvNormal().DisableReadAhead()
+		defer sn.EnableReadAhead().DisableReadAhead()
 
 		var buf []byte
 		g := sn.MakeGetter()
@@ -1165,11 +1182,14 @@ func (r *BlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, hash common
 		if err != nil {
 			return 0, err
 		}
+		if len(v) == 0 {
+			return 0, fmt.Errorf("BorStartEventID(%d) not found", blockHeight)
+		}
 		startEventId := binary.BigEndian.Uint64(v)
 		return startEventId, nil
 	}
 
-	borTxHash := types.ComputeBorTxHash(blockHeight, hash)
+	borTxHash := bortypes.ComputeBorTxHash(blockHeight, hash)
 	view := r.borSn.View()
 	defer view.Close()
 
@@ -1247,7 +1267,7 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 		}
 		return result, nil
 	}
-	borTxHash := types.ComputeBorTxHash(blockHeight, hash)
+	borTxHash := bortypes.ComputeBorTxHash(blockHeight, hash)
 	view := r.borSn.View()
 	defer view.Close()
 	segments := view.Events()
@@ -1549,7 +1569,15 @@ func (r *BlockReader) Milestone(ctx context.Context, tx kv.Getter, milestoneId u
 }
 
 func (r *BlockReader) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	return lastId(ctx, tx, kv.BorCheckpoints)
+	lastCheckpointId, ok, err := lastId(ctx, tx, kv.BorCheckpoints)
+
+	snapshotLastCheckpointId := r.LastFrozenCheckpointId()
+
+	if snapshotLastCheckpointId > lastCheckpointId {
+		return snapshotLastCheckpointId, true, nil
+	}
+
+	return lastCheckpointId, ok, err
 }
 
 func (r *BlockReader) Checkpoint(ctx context.Context, tx kv.Getter, checkpointId uint64) ([]byte, error) {
@@ -1561,11 +1589,58 @@ func (r *BlockReader) Checkpoint(ctx context.Context, tx kv.Getter, checkpointId
 		return nil, err
 	}
 
-	if v == nil {
-		return nil, fmt.Errorf("milestone %d not found (db)", checkpointId)
+	if v != nil {
+		return common.Copy(v), nil
 	}
 
-	return common.Copy(v), nil
+	view := r.borSn.View()
+	defer view.Close()
+	segments := view.Checkpoints()
+	for i := len(segments) - 1; i >= 0; i-- {
+		sn := segments[i]
+		index := sn.Index()
+
+		if index == nil || index.KeyCount() == 0 || checkpointId < index.BaseDataID() {
+			continue
+		}
+
+		offset := index.OrdinalLookup(checkpointId - index.BaseDataID())
+		gg := sn.MakeGetter()
+		gg.Reset(offset)
+		result, _ := gg.Next(nil)
+		return common.Copy(result), nil
+	}
+
+	return nil, fmt.Errorf("checkpoint %d not found (db)", checkpointId)
+}
+
+func (r *BlockReader) LastFrozenCheckpointId() uint64 {
+	if r.borSn == nil {
+		return 0
+	}
+
+	view := r.borSn.View()
+	defer view.Close()
+	segments := view.Checkpoints()
+	if len(segments) == 0 {
+		return 0
+	}
+	// find the last segment which has a built index
+	var lastSegment *Segment
+	for i := len(segments) - 1; i >= 0; i-- {
+		if segments[i].Index() != nil {
+			lastSegment = segments[i]
+			break
+		}
+	}
+
+	if lastSegment == nil {
+		return 0
+	}
+
+	index := lastSegment.Index()
+
+	return index.BaseDataID() + index.KeyCount() - 1
 }
 
 // ---- Data Integrity part ----

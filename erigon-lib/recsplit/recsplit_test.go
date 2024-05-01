@@ -23,15 +23,17 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/log/v3"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestRecSplit2(t *testing.T) {
 	logger := log.New()
 	tmpDir := t.TempDir()
+	salt := uint32(1)
 	rs, err := NewRecSplit(RecSplitArgs{
 		KeyCount:   2,
 		BucketSize: 10,
-		Salt:       0,
+		Salt:       &salt,
 		TmpDir:     tmpDir,
 		IndexFile:  filepath.Join(tmpDir, "index"),
 		LeafSize:   8,
@@ -62,10 +64,11 @@ func TestRecSplit2(t *testing.T) {
 func TestRecSplitDuplicate(t *testing.T) {
 	logger := log.New()
 	tmpDir := t.TempDir()
+	salt := uint32(1)
 	rs, err := NewRecSplit(RecSplitArgs{
 		KeyCount:   2,
 		BucketSize: 10,
-		Salt:       0,
+		Salt:       &salt,
 		TmpDir:     tmpDir,
 		IndexFile:  filepath.Join(tmpDir, "index"),
 		LeafSize:   8,
@@ -87,10 +90,11 @@ func TestRecSplitDuplicate(t *testing.T) {
 func TestRecSplitLeafSizeTooLarge(t *testing.T) {
 	logger := log.New()
 	tmpDir := t.TempDir()
+	salt := uint32(1)
 	_, err := NewRecSplit(RecSplitArgs{
 		KeyCount:   2,
 		BucketSize: 10,
-		Salt:       0,
+		Salt:       &salt,
 		TmpDir:     tmpDir,
 		IndexFile:  filepath.Join(tmpDir, "index"),
 		LeafSize:   64,
@@ -104,13 +108,17 @@ func TestIndexLookup(t *testing.T) {
 	logger := log.New()
 	tmpDir := t.TempDir()
 	indexFile := filepath.Join(tmpDir, "index")
+	salt := uint32(1)
 	rs, err := NewRecSplit(RecSplitArgs{
 		KeyCount:   100,
 		BucketSize: 10,
-		Salt:       0,
+		Salt:       &salt,
 		TmpDir:     tmpDir,
 		IndexFile:  indexFile,
 		LeafSize:   8,
+
+		Enums:              false,
+		LessFalsePositives: true, //must not impact index when `Enums: false`
 	}, logger)
 	if err != nil {
 		t.Fatal(err)
@@ -127,7 +135,8 @@ func TestIndexLookup(t *testing.T) {
 	defer idx.Close()
 	for i := 0; i < 100; i++ {
 		reader := NewIndexReader(idx)
-		offset, _ := reader.Lookup([]byte(fmt.Sprintf("key %d", i)))
+		offset, ok := reader.Lookup([]byte(fmt.Sprintf("key %d", i)))
+		assert.True(t, ok)
 		if offset != uint64(i*17) {
 			t.Errorf("expected offset: %d, looked up: %d", i*17, offset)
 		}
@@ -142,7 +151,7 @@ func TestTwoLayerIndex(t *testing.T) {
 	rs, err := NewRecSplit(RecSplitArgs{
 		KeyCount:           100,
 		BucketSize:         10,
-		Salt:               salt,
+		Salt:               &salt,
 		TmpDir:             tmpDir,
 		IndexFile:          indexFile,
 		LeafSize:           8,

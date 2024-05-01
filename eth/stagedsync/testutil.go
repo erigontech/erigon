@@ -6,13 +6,15 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/stretchr/testify/assert"
 )
 
 const (
@@ -38,57 +40,49 @@ func compareCurrentState(
 }
 
 func compareDomain(t *testing.T, agg *state2.Aggregator, db1, db2 kv.Tx, bucketName string) {
-	panic("implement me")
-	/*
-		ac := agg.BeginFilesRo()
-		defer ac.Close()
+	ac := agg.BeginFilesRo()
+	defer ac.Close()
 
-		switch bucketName {
-		case kv.PlainState:
-			bucket1 := make(map[string][]byte)
-			ac.DeprecatedLatestAcc(db1.(kv.RwTx), func(k, v []byte) {
-				bucket1[string(k)] = v
-			})
-			require.True(t, len(bucket1) > 0)
-			bucket2 := make(map[string][]byte)
-			ac.DeprecatedLatestAcc(db2.(kv.RwTx), func(k, v []byte) {
-				bucket2[string(k)] = v
-			})
-			assert.Equalf(t, bucket1, bucket2, "bucket %q", bucketName)
+	var domain kv.Domain
+	bucket1 := make(map[string][]byte)
+	bucket2 := make(map[string][]byte)
+	assertions := func(t *testing.T) {}
 
-			bucket1 = make(map[string][]byte)
-			ac.DeprecatedLatestSt(db1.(kv.RwTx), func(k, v []byte) {
-				bucket1[string(k)] = v
-			})
-			bucket2 = make(map[string][]byte)
-			ac.DeprecatedLatestSt(db2.(kv.RwTx), func(k, v []byte) {
-				bucket2[string(k)] = v
-			})
-			assert.Equalf(t, bucket1, bucket2, "bucket %q", bucketName)
-		case kv.PlainContractCode:
-			bucket1 := make(map[string][]byte)
-			ac.DeprecatedLatestCode(db1.(kv.RwTx), func(k, v []byte) {
-				bucket1[string(k)] = v
-			})
-			bucket2 := make(map[string][]byte)
-			ac.DeprecatedLatestCode(db2.(kv.RwTx), func(k, v []byte) {
-				bucket2[string(k)] = v
-			})
-			assert.Equalf(t, bucket1, bucket2, "bucket %q", bucketName)
+	switch bucketName {
+	case kv.PlainState, kv.HashedAccounts:
+		domain = kv.AccountsDomain
+		assertions = func(t *testing.T) { require.True(t, len(bucket1) > 0) }
 
-			bucket1 = make(map[string][]byte)
-			ac.DeprecatedLatestSt(db1.(kv.RwTx), func(k, v []byte) {
-				bucket1[string(k)] = v
-			})
-			bucket2 = make(map[string][]byte)
-			ac.DeprecatedLatestSt(db2.(kv.RwTx), func(k, v []byte) {
-				bucket2[string(k)] = v
-			})
-			assert.Equalf(t, bucket1, bucket2, "bucket %q", bucketName)
-		default:
-			panic(bucketName)
-		}
-	*/
+	case kv.PlainContractCode, kv.ContractCode:
+		domain = kv.CodeDomain
+
+	case kv.HashedStorage:
+		domain = kv.StorageDomain
+
+	default:
+		panic(bucketName)
+	}
+
+	it, err := ac.DomainRangeLatest(db1.(kv.RwTx), domain, nil, nil, -1)
+	require.NoError(t, err)
+	if it.HasNext() {
+		k, v, err := it.Next()
+		require.NoError(t, err)
+
+		bucket1[string(k)] = v
+	}
+
+	it2, err := ac.DomainRangeLatest(db2.(kv.RwTx), domain, nil, nil, -1)
+	require.NoError(t, err)
+	if it2.HasNext() {
+		k, v, err := it2.Next()
+		require.NoError(t, err)
+
+		bucket2[string(k)] = v
+	}
+
+	assertions(t)
+	assert.Equalf(t, bucket1, bucket2, "bucket %q", bucketName)
 }
 
 func compareBucket(t *testing.T, db1, db2 kv.Tx, bucketName string) {
@@ -111,16 +105,16 @@ func compareBucket(t *testing.T, db1, db2 kv.Tx, bucketName string) {
 	assert.Equalf(t, bucket1 /*expected*/, bucket2 /*actual*/, "bucket %q", bucketName)
 }
 
-type stateWriterGen func(uint64) state.WriterWithChangeSets
+type stateWriterGen func(uint64) state.StateWriter
 
 func hashedWriterGen(tx kv.RwTx) stateWriterGen {
-	return func(blockNum uint64) state.WriterWithChangeSets {
+	return func(blockNum uint64) state.StateWriter {
 		return state.NewDbStateWriter(tx, blockNum)
 	}
 }
 
 func plainWriterGen(tx kv.RwTx) stateWriterGen {
-	return func(blockNum uint64) state.WriterWithChangeSets {
+	return func(blockNum uint64) state.StateWriter {
 		return state.NewPlainStateWriter(tx, tx, blockNum)
 	}
 }
@@ -266,8 +260,10 @@ func generateBlocks(t *testing.T, from uint64, numberOfBlocks uint64, stateWrite
 			testAccounts[i] = newAcc
 		}
 		if blockNumber >= from {
-			if err := blockWriter.WriteChangeSets(); err != nil {
-				t.Fatal(err)
+			if casted, ok := blockWriter.(state.WriterWithChangeSets); ok {
+				if err := casted.WriteChangeSets(); err != nil {
+					t.Fatal(err)
+				}
 			}
 		}
 	}

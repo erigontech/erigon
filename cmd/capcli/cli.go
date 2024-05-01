@@ -176,7 +176,7 @@ func (c *Chain) Run(ctx *Context) error {
 	}
 
 	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, nil, db)
-	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, false, false, false), csn, db, nil, beaconConfig, true, false, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root())
+	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, false, false, false, nil), csn, db, nil, beaconConfig, true, false, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root())
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
 }
 
@@ -334,7 +334,12 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 		return
 	})
 
-	salt := freezeblocks.GetIndicesSalt(dirs.Snap)
+	salt, err := snaptype.GetIndexSalt(dirs.Snap)
+
+	if err != nil {
+		return err
+	}
+
 	return freezeblocks.DumpBeaconBlocks(ctx, db, 0, to, salt, dirs, estimate.CompressSnapshot.Workers(), log.LvlInfo, log.Root())
 }
 
@@ -512,7 +517,7 @@ func (d *DownloadSnapshots) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	s, err := state2.NewAggregator(ctx, dirs.Tmp, dirs.Tmp, 200000, db, log.Root())
+	s, err := state2.NewAggregator(ctx, dirs, 200000, db, log.Root())
 	if err != nil {
 		return err
 	}
@@ -977,7 +982,12 @@ func (c *DumpBlobsSnapshots) Run(ctx *Context) error {
 	})
 	from := ((beaconConfig.DenebForkEpoch * beaconConfig.SlotsPerEpoch) / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
 
-	salt := freezeblocks.GetIndicesSalt(dirs.Snap)
+	salt, err := snaptype.GetIndexSalt(dirs.Snap)
+
+	if err != nil {
+		return err
+	}
+
 	return freezeblocks.DumpBlobsSidecar(ctx, blobStorage, db, from, to, salt, dirs, estimate.CompressSnapshot.Workers(), log.LvlInfo, log.Root())
 }
 

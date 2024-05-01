@@ -71,13 +71,13 @@ type TipEvents struct {
 	logger          log.Logger
 	events          *EventChannel[Event]
 	p2pService      p2p.Service
-	heimdallService heimdall.HeimdallNoStore
+	heimdallService heimdall.Heimdall
 }
 
 func NewTipEvents(
 	logger log.Logger,
 	p2pService p2p.Service,
-	heimdallService heimdall.HeimdallNoStore,
+	heimdallService heimdall.Heimdall,
 ) *TipEvents {
 	eventsCapacity := uint(1000) // more than 3 milestones
 

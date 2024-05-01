@@ -39,8 +39,6 @@ import (
 	"github.com/google/btree"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/assert"
@@ -52,7 +50,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	proto_txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	txpoolproto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -60,6 +58,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	"github.com/ledgerwatch/erigon-lib/types"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/log/v3"
 )
 
 const DefaultBlockGasLimit = uint64(30000000)
@@ -82,6 +81,8 @@ var TraceAll = false
 // Pool is interface for the transaction pool
 // This interface exists for the convenience of testing, and not yet because
 // there are multiple implementations
+//
+//go:generate mockgen -typed=true -destination=./pool_mock.go -package=txpool . Pool
 type Pool interface {
 	ValidateSerializedTxn(serializedTxn []byte) error
 
@@ -1897,7 +1898,7 @@ func MainLoop(ctx context.Context, db kv.RwDB, p *TxPool, newTxs chan types.Anno
 					return
 				}
 				if newSlotsStreams != nil {
-					newSlotsStreams.Broadcast(&proto_txpool.OnAddReply{RplTxs: slotsRlp}, p.logger)
+					newSlotsStreams.Broadcast(&txpoolproto.OnAddReply{RplTxs: slotsRlp}, p.logger)
 				}
 
 				// broadcast local transactions
@@ -2411,7 +2412,13 @@ func (sc *sendersBatch) info(cacheView kvcache.CacheView, id uint64) (nonce uint
 	if len(encoded) == 0 {
 		return emptySender.nonce, emptySender.balance, nil
 	}
-	nonce, balance, err = types.DecodeSender(encoded)
+	if cacheView.StateV3() {
+		var bp *uint256.Int
+		nonce, bp, _ = types.DecodeAccountBytesV3(encoded)
+		balance = *bp
+	} else {
+		nonce, balance, err = types.DecodeSender(encoded)
+	}
 	if err != nil {
 		return 0, emptySender.balance, err
 	}

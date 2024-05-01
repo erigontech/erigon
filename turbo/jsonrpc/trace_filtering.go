@@ -5,13 +5,15 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon/eth/consensuschain"
+
 	"github.com/RoaringBitmap/roaring/roaring64"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
@@ -24,8 +26,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/ethdb"
+	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -568,7 +570,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	nSeen := uint64(0)
 	nExported := uint64(0)
 	includeAll := len(fromAddresses) == 0 && len(toAddresses) == 0
-	it := MapTxNum2BlockNum(dbtx, allTxs)
+	it := rawdbv3.TxNums2BlockNums(dbtx, allTxs, order.Asc)
 
 	var lastBlockHash common.Hash
 	var lastHeader *types.Header
@@ -911,13 +913,13 @@ func (api *TraceAPIImpl) callManyTransactions(
 	if cfg.Bor != nil {
 		// check if this block has state sync txn
 		blockHash := block.Hash()
-		borStateSyncTxnHash = types.ComputeBorTxHash(blockNumber, blockHash)
+		borStateSyncTxnHash = bortypes.ComputeBorTxHash(blockNumber, blockHash)
 		_, ok, err := api._blockReader.EventLookup(ctx, dbtx, borStateSyncTxnHash)
 		if err != nil {
 			return nil, nil, err
 		}
 		if ok {
-			borStateSyncTxn = types.NewBorTransaction()
+			borStateSyncTxn = bortypes.NewBorTransaction()
 			txs = append(txs, borStateSyncTxn)
 		}
 	}
@@ -934,7 +936,7 @@ func (api *TraceAPIImpl) callManyTransactions(
 	}
 
 	engine := api.engine()
-	consensusHeaderReader := stagedsync.NewChainReaderImpl(cfg, dbtx, nil, nil)
+	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, nil, nil)
 	logger := log.New("trace_filtering")
 	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, initialState, logger)
 	if err != nil {

@@ -186,7 +186,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		if err != nil {
 			return 0, err
 		}
-		stateReader := state.NewCachedReader2(cacheView, dbtx)
+		stateReader := rpchelper.CreateLatestCachedStateReader(cacheView, dbtx, api.historyV3(dbtx))
 		state := state.New(stateReader)
 		if state == nil {
 			return 0, fmt.Errorf("can't get the current state")
@@ -455,15 +455,16 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	if block == nil {
 		return nil, nil
 	}
+	histV3 := api.historyV3(tx)
 	var stateReader state.StateReader
 	if latest {
 		cacheView, err := api.stateCache.View(ctx, tx)
 		if err != nil {
 			return nil, err
 		}
-		stateReader = state.NewCachedReader2(cacheView, tx)
+		stateReader = rpchelper.CreateLatestCachedStateReader(cacheView, tx, histV3)
 	} else {
-		stateReader, err = rpchelper.CreateHistoryStateReader(tx, blockNumber+1, 0, api.historyV3(tx), chainConfig.ChainName)
+		stateReader, err = rpchelper.CreateHistoryStateReader(tx, blockNumber+1, 0, histV3, chainConfig.ChainName)
 		if err != nil {
 			return nil, err
 		}

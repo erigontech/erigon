@@ -31,7 +31,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 	}
 	defer tx.Rollback()
 
-	latestState := rpchelper.NewLatestStateReader(tx)
+	latestState := rpchelper.NewLatestStateReader(tx, api.historyV3(tx))
 	plainStateAcc, err := latestState.ReadAccountData(addr)
 	if err != nil {
 		return nil, err

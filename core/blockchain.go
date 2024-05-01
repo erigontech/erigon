@@ -39,6 +39,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/eth/ethutils"
+	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -192,7 +193,7 @@ func ExecuteBlockEphemerally(
 				stateSyncReceipt.Logs = blockLogs[len(logs):] // get state-sync logs from `state.Logs()`
 
 				// fill the state sync with the correct information
-				types.DeriveFieldsForBorReceipt(stateSyncReceipt, block.Hash(), block.NumberU64(), receipts)
+				bortypes.DeriveFieldsForBorReceipt(stateSyncReceipt, block.Hash(), block.NumberU64(), receipts)
 				stateSyncReceipt.Status = types.ReceiptStatusSuccessful
 			}
 		}
@@ -312,7 +313,7 @@ func SysCreate(contract libcommon.Address, data []byte, chainConfig chain.Config
 func FinalizeBlockExecution(
 	engine consensus.Engine, stateReader state.StateReader,
 	header *types.Header, txs types.Transactions, uncles []*types.Header,
-	stateWriter state.WriterWithChangeSets, cc *chain.Config,
+	stateWriter state.StateWriter, cc *chain.Config,
 	ibs *state.IntraBlockState, receipts types.Receipts,
 	withdrawals []*types.Withdrawal, chainReader consensus.ChainReader,
 	isMining bool,
@@ -334,8 +335,10 @@ func FinalizeBlockExecution(
 		return nil, nil, nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
 	}
 
-	if err := stateWriter.WriteChangeSets(); err != nil {
-		return nil, nil, nil, fmt.Errorf("writing changesets for block %d failed: %w", header.Number.Uint64(), err)
+	if casted, ok := stateWriter.(state.WriterWithChangeSets); ok {
+		if err := casted.WriteChangeSets(); err != nil {
+			return nil, nil, nil, fmt.Errorf("writing changesets for block %d failed: %w", header.Number.Uint64(), err)
+		}
 	}
 	return newBlock, newTxs, newReceipt, nil
 }
@@ -348,5 +351,18 @@ func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHead
 	}, logger)
 	noop := state.NewNoopWriter()
 	ibs.FinalizeTx(cc.Rules(header.Number.Uint64(), header.Time), noop)
+	return nil
+}
+
+func BlockPostValidation(gasUsed, blobGasUsed uint64, h *types.Header) error {
+	if gasUsed != h.GasUsed {
+		return fmt.Errorf("gas used by execution: %d, in header: %d, headerNum=%d, %x",
+			gasUsed, h.GasUsed, h.Number.Uint64(), h.Hash())
+	}
+
+	if h.BlobGasUsed != nil && blobGasUsed != *h.BlobGasUsed {
+		return fmt.Errorf("blobGasUsed by execution: %d, in header: %d, headerNum=%d, %x",
+			blobGasUsed, *h.BlobGasUsed, h.Number.Uint64(), h.Hash())
+	}
 	return nil
 }

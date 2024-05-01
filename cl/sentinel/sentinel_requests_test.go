@@ -8,6 +8,13 @@ import (
 	"testing"
 
 	"github.com/golang/snappy"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/protocol"
+	"github.com/spf13/afero"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
@@ -18,16 +25,10 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/libp2p/go-libp2p"
-	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-libp2p/core/protocol"
-	"github.com/spf13/afero"
-	"github.com/stretchr/testify/require"
 )
 
 func loadChain(t *testing.T) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState, reader *tests.MockBlockReader) {
@@ -37,7 +38,7 @@ func loadChain(t *testing.T) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f
 
 	ctx := context.Background()
 	vt := state_accessors.NewStaticValidatorTable()
-	a := antiquary.NewAntiquary(ctx, nil, preState, vt, &clparams.MainnetBeaconConfig, datadir.New("/tmp"), nil, db, nil, reader, log.New(), true, true, false)
+	a := antiquary.NewAntiquary(ctx, nil, preState, vt, &clparams.MainnetBeaconConfig, datadir.New("/tmp"), nil, db, nil, reader, log.New(), true, true, false, nil)
 	require.NoError(t, a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
 	return
 }
@@ -55,7 +56,7 @@ func TestSentinelBlocksByRange(t *testing.T) {
 		IpAddr:        listenAddrHost,
 		Port:          7070,
 		EnableBlocks:  true,
-	}, ethClock, reader, nil, db, log.New(), &forkchoice.ForkChoiceStorageMock{})
+	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel.Stop()
 
@@ -159,7 +160,7 @@ func TestSentinelBlocksByRoots(t *testing.T) {
 		IpAddr:        listenAddrHost,
 		Port:          7070,
 		EnableBlocks:  true,
-	}, ethClock, reader, nil, db, log.New(), &forkchoice.ForkChoiceStorageMock{})
+	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel.Stop()
 
@@ -268,7 +269,7 @@ func TestSentinelStatusRequest(t *testing.T) {
 		IpAddr:        listenAddrHost,
 		Port:          7070,
 		EnableBlocks:  true,
-	}, ethClock, reader, nil, db, log.New(), &forkchoice.ForkChoiceStorageMock{})
+	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel.Stop()
 

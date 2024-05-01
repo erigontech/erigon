@@ -29,7 +29,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -40,7 +39,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/merge"
@@ -51,6 +49,9 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
+
+//go:embed allocs
+var allocs embed.FS
 
 // CommitGenesisBlock writes or updates the genesis block in db.
 // The block that will be used is:
@@ -191,11 +192,8 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string, logger log.L
 	}
 
 	var stateWriter state.StateWriter
-	if config3.EnableHistoryV4InTest {
-		panic("implement me")
-		//tx.(*temporal.Tx).Agg().SetTxNum(0)
-		//stateWriter = state.NewWriterV4(tx.(kv.TemporalTx))
-		//defer tx.(*temporal.Tx).Agg().StartUnbufferedWrites().FinishWrites()
+	if histV3 {
+		stateWriter = state.NewNoopWriter()
 	} else {
 		for addr, account := range g.Alloc {
 			if len(account.Code) > 0 || len(account.Storage) > 0 {
@@ -213,10 +211,10 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string, logger log.L
 	if block.Number().Sign() != 0 {
 		return nil, statedb, fmt.Errorf("can't commit genesis block with number > 0")
 	}
-
 	if err := statedb.CommitBlock(&chain.Rules{}, stateWriter); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write state: %w", err)
 	}
+
 	if !histV3 {
 		if csw, ok := stateWriter.(state.WriterWithChangeSets); ok {
 			if err := csw.WriteChangeSets(); err != nil {
@@ -229,6 +227,7 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string, logger log.L
 	}
 	return block, statedb, nil
 }
+
 func MustCommitGenesis(g *types.Genesis, db kv.RwDB, tmpDir string, logger log.Logger) *types.Block {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
@@ -267,7 +266,7 @@ func write(tx kv.RwTx, g *types.Genesis, tmpDir string, logger log.Logger) (*typ
 	if err := rawdb.WriteTd(tx, block.Hash(), block.NumberU64(), g.Difficulty); err != nil {
 		return nil, nil, err
 	}
-	if err := rawdbv3.TxNums.WriteForGenesis(tx, 1); err != nil {
+	if err := rawdbv3.TxNums.WriteForGenesis(tx, uint64(block.Transactions().Len()+1)); err != nil {
 		return nil, nil, err
 	}
 	if err := rawdb.WriteReceipts(tx, block.NumberU64(), nil); err != nil {
@@ -456,6 +455,9 @@ func ChiadoGenesisBlock() *types.Genesis {
 		Alloc:      readPrealloc("allocs/chiado.json"),
 	}
 }
+func TestGenesisBlock() *types.Genesis {
+	return &types.Genesis{Config: params.TestChainConfig}
+}
 
 // Pre-calculated version of:
 //
@@ -553,19 +555,20 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 
 	var err error
 	go func() { // we may run inside write tx, can't open 2nd write tx in same goroutine
-		// TODO(yperbasis): use memdb.MemoryMutation instead
 		defer wg.Done()
-
+		// some users creaing > 1Gb custome genesis by `erigon init`
 		genesisTmpDB := mdbx.NewMDBX(logger).InMem(tmpDir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
 		defer genesisTmpDB.Close()
-		var tx kv.RwTx
-		if tx, err = genesisTmpDB.BeginRw(context.Background()); err != nil {
+
+		tx, err := genesisTmpDB.BeginRw(context.Background())
+		if err != nil {
 			return
 		}
 		defer tx.Rollback()
 
 		r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
 		statedb = state.New(r)
+		statedb.SetTrace(false)
 
 		hasConstructorAllocation := false
 		for _, account := range g.Alloc {
@@ -635,9 +638,6 @@ func sortedAllocKeys(m types.GenesisAlloc) []string {
 	return keys
 }
 
-//go:embed allocs
-var allocs embed.FS
-
 func readPrealloc(filename string) types.GenesisAlloc {
 	f, err := allocs.Open(filename)
 	if err != nil {
@@ -675,6 +675,8 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 		return GnosisGenesisBlock()
 	case networkname.ChiadoChainName:
 		return ChiadoGenesisBlock()
+	case networkname.Test:
+		return TestGenesisBlock()
 	default:
 		return nil
 	}

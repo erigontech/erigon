@@ -5,6 +5,9 @@ import (
 	"log"
 	"testing"
 
+	"github.com/stretchr/testify/suite"
+	"go.uber.org/mock/gomock"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	mockSync "github.com/ledgerwatch/erigon/cl/beacon/synced_data/mock_services"
@@ -13,11 +16,9 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	mockState "github.com/ledgerwatch/erigon/cl/phase1/core/state/mock_services"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	mockCommittee "github.com/ledgerwatch/erigon/cl/validator/committee_subscription/mock_services"
-	"github.com/stretchr/testify/suite"
-	"go.uber.org/mock/gomock"
 )
 
 var (
@@ -38,7 +39,7 @@ var (
 type attestationTestSuite struct {
 	suite.Suite
 	gomockCtrl        *gomock.Controller
-	mockForkChoice    *forkchoice.ForkChoiceStorageMock
+	mockForkChoice    *mock_services.ForkChoiceStorageMock
 	syncedData        *mockSync.MockSyncedData
 	beaconStateReader *mockState.MockBeaconStateReader
 	committeeSubscibe *mockCommittee.MockCommitteeSubscribe
@@ -49,7 +50,7 @@ type attestationTestSuite struct {
 
 func (t *attestationTestSuite) SetupTest() {
 	t.gomockCtrl = gomock.NewController(t.T())
-	t.mockForkChoice = &forkchoice.ForkChoiceStorageMock{}
+	t.mockForkChoice = &mock_services.ForkChoiceStorageMock{}
 	t.syncedData = mockSync.NewMockSyncedData(t.gomockCtrl)
 	t.beaconStateReader = mockState.NewMockBeaconStateReader(t.gomockCtrl)
 	t.committeeSubscibe = mockCommittee.NewMockCommitteeSubscribe(t.gomockCtrl)
@@ -58,7 +59,9 @@ func (t *attestationTestSuite) SetupTest() {
 	netConfig := &clparams.NetworkConfig{}
 	computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) { return [32]byte{}, nil }
 	blsVerify = func(sig []byte, msg []byte, pubKeys []byte) (bool, error) { return true, nil }
-	t.attService = NewAttestationService(t.mockForkChoice, t.committeeSubscibe, t.ethClock, t.syncedData, t.beaconConfig, netConfig)
+	ctx, cn := context.WithCancel(context.Background())
+	cn()
+	t.attService = NewAttestationService(ctx, t.mockForkChoice, t.committeeSubscibe, t.ethClock, t.syncedData, t.beaconConfig, netConfig)
 }
 
 func (t *attestationTestSuite) TearDownTest() {

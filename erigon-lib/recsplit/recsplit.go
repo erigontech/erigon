@@ -90,7 +90,7 @@ type RecSplit struct {
 	golombRice        []uint32
 	bucketSizeAcc     []uint64 // Bucket size accumulator
 	// Helper object to encode the sequence of cumulative number of keys in the buckets
-	// and the sequence of of cumulative bit offsets of buckets in the Golomb-Rice code.
+	// and the sequence of cumulative bit offsets of buckets in the Golomb-Rice code.
 	ef                 eliasfano16.DoubleEliasFano
 	lvl                log.Lvl
 	bytesPerRec        int
@@ -134,7 +134,7 @@ type RecSplitArgs struct {
 	BucketSize  int
 	BaseDataID  uint64
 	EtlBufLimit datasize.ByteSize
-	Salt        uint32 // Hash seed (salt) for the hash function used for allocating the initial buckets - need to be generated randomly
+	Salt        *uint32 // Hash seed (salt) for the hash function used for allocating the initial buckets - need to be generated randomly
 	LeafSize    uint16
 }
 
@@ -150,28 +150,29 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 			0x082f20e10092a9a3, 0x2ada2ce68d21defc, 0xe33cb4f3e7c6466b, 0x3980be458c509c59, 0xc466fd9584828e8c, 0x45f0aabe1a61ede6, 0xf6e7b8b33ad9b98d,
 			0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a}
 	}
-	rs.salt = args.Salt
-	if rs.salt == 0 {
-		seedBytes := make([]byte, 4)
-		if _, err := rand.Read(seedBytes); err != nil {
-			return nil, err
-		}
-		rs.salt = binary.BigEndian.Uint32(seedBytes)
-	}
-	rs.hasher = murmur3.New128WithSeed(rs.salt)
 	rs.tmpDir = args.TmpDir
 	rs.indexFile = args.IndexFile
 	rs.tmpFilePath = args.IndexFile + ".tmp"
 	_, fname := filepath.Split(rs.indexFile)
 	rs.indexFileName = fname
 	rs.baseDataID = args.BaseDataID
+	if args.Salt == nil {
+		seedBytes := make([]byte, 4)
+		if _, err := rand.Read(seedBytes); err != nil {
+			return nil, err
+		}
+		rs.salt = binary.BigEndian.Uint32(seedBytes)
+	} else {
+		rs.salt = *args.Salt
+	}
+	rs.hasher = murmur3.New128WithSeed(rs.salt)
 	rs.etlBufLimit = args.EtlBufLimit
 	if rs.etlBufLimit == 0 {
 		// reduce ram pressure, because:
 		//   - indexing done in background or in many workers (building many indices in-parallel)
 		//   - `recsplit` has 2 etl collectors
 		//   - `rescplit` building is cpu-intencive and bottleneck is not in etl loading
-		rs.etlBufLimit = etl.BufferOptimalSize / 8
+		rs.etlBufLimit = etl.BufferOptimalSize / 4
 	}
 	rs.bucketCollector = etl.NewCollector(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.NewSortableBuffer(rs.etlBufLimit), logger)
 	rs.bucketCollector.LogLvl(log.LvlDebug)
@@ -209,6 +210,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	return rs, nil
 }
 
+func (rs *RecSplit) Salt() uint32 { return rs.salt }
 func (rs *RecSplit) Close() {
 	if rs.indexF != nil {
 		rs.indexF.Close()
@@ -454,7 +456,7 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 	salt := rs.startSeed[level]
 	m := uint16(len(bucket))
 	if m <= rs.leafSize {
-		// No need to build aggregation levels - just find find bijection
+		// No need to build aggregation levels - just find bijection
 		var mask uint32
 		for {
 			mask = 0
@@ -578,7 +580,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return fmt.Errorf("already built")
 	}
 	if rs.keysAdded != rs.keyExpectedCount {
-		return fmt.Errorf("expected keys %d, got %d", rs.keyExpectedCount, rs.keysAdded)
+		return fmt.Errorf("rs %s expected keys %d, got %d", rs.indexFileName, rs.keyExpectedCount, rs.keysAdded)
 	}
 	var err error
 	if rs.indexF, err = os.Create(rs.tmpFilePath); err != nil {
@@ -692,7 +694,6 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	if err := rs.flushExistenceFilter(); err != nil {
 		return err
 	}
-
 	// Write out the size of golomb rice params
 	binary.BigEndian.PutUint16(rs.numBuf[:], uint16(len(rs.golombRice)))
 	if _, err := rs.indexW.Write(rs.numBuf[:4]); err != nil {

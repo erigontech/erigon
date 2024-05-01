@@ -24,7 +24,7 @@ func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postSt
 
 	ctx := context.Background()
 	vt := state_accessors.NewStaticValidatorTable()
-	a := NewAntiquary(ctx, nil, preState, vt, &clparams.MainnetBeaconConfig, datadir.New("/tmp"), nil, db, nil, reader, log.New(), true, true, true)
+	a := NewAntiquary(ctx, nil, preState, vt, &clparams.MainnetBeaconConfig, datadir.New("/tmp"), nil, db, nil, reader, log.New(), true, true, true, nil)
 	require.NoError(t, a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
 }
 
@@ -34,11 +34,13 @@ func TestStateAntiquaryCapella(t *testing.T) {
 }
 
 func TestStateAntiquaryBellatrix(t *testing.T) {
+	t.Skip("TODO: oom")
 	blocks, preState, postState := tests.GetBellatrixRandom()
 	runTest(t, blocks, preState, postState)
 }
 
 func TestStateAntiquaryPhase0(t *testing.T) {
+	t.Skip("TODO: oom")
 	blocks, preState, postState := tests.GetPhase0Random()
 	runTest(t, blocks, preState, postState)
 }

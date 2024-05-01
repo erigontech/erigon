@@ -6,15 +6,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/log/v3"
 )
 
 func TestExecutionSpec(t *testing.T) {
-	if config3.EnableHistoryV3InTest {
-		t.Skip("fix me in e3 please")
-	}
-
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 

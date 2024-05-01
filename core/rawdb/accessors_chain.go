@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -41,6 +42,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -308,27 +310,17 @@ func ReadCurrentHeaderHavingBody(db kv.Getter) *types.Header {
 	return ReadHeader(db, headHash, *headNumber)
 }
 
-func ReadHeadersByNumber(db kv.Tx, number uint64) ([]*types.Header, error) {
-	var res []*types.Header
-	c, err := db.Cursor(kv.Headers)
-	if err != nil {
-		return nil, err
-	}
-	defer c.Close()
+func ReadHeadersByNumber(db kv.Getter, number uint64) (res []*types.Header, err error) {
 	prefix := hexutility.EncodeTs(number)
-	for k, v, err := c.Seek(prefix); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return nil, err
-		}
-		if !bytes.HasPrefix(k, prefix) {
-			break
-		}
-
+	if err = db.ForPrefix(kv.Headers, prefix, func(k, v []byte) error {
 		header := new(types.Header)
 		if err := rlp.Decode(bytes.NewReader(v), header); err != nil {
-			return nil, fmt.Errorf("invalid block header RLP: hash=%x, err=%w", k[8:], err)
+			return fmt.Errorf("invalid block header RLP: hash=%x, err=%w", k[8:], err)
 		}
 		res = append(res, header)
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	return res, nil
 }
@@ -714,7 +706,7 @@ func DeleteBody(db kv.Deleter, hash common.Hash, number uint64) {
 }
 
 func AppendCanonicalTxNums(tx kv.RwTx, from uint64) (err error) {
-	nextBaseTxNum := -1
+	nextBaseTxNum := 0
 	if from > 0 {
 		nextBaseTxNumFromDb, err := rawdbv3.TxNums.Max(tx, from-1)
 		if err != nil {
@@ -1150,6 +1142,57 @@ func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt 
 		}
 		counter--
 	}
+
+	checkpointCursor, err := tx.RwCursor(kv.BorCheckpoints)
+	if err != nil {
+		return err
+	}
+
+	defer checkpointCursor.Close()
+	lastCheckpointToRemove, err := heimdall.CheckpointIdAt(tx, blockTo)
+
+	if err != nil {
+		return err
+	}
+
+	var checkpointIdBytes [8]byte
+	binary.BigEndian.PutUint64(checkpointIdBytes[:], uint64(lastCheckpointToRemove))
+	for k, _, err := checkpointCursor.Seek(checkpointIdBytes[:]); err == nil && k != nil; k, _, err = checkpointCursor.Prev() {
+		if err = checkpointCursor.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
+
+	milestoneCursor, err := tx.RwCursor(kv.BorMilestones)
+
+	if err != nil {
+		return err
+	}
+
+	defer milestoneCursor.Close()
+
+	var lastMilestoneToRemove heimdall.MilestoneId
+
+	for blockCount := 1; err != nil && blockCount < blocksDeleteLimit; blockCount++ {
+		lastMilestoneToRemove, err = heimdall.MilestoneIdAt(tx, blockTo-uint64(blockCount))
+
+		if !errors.Is(err, heimdall.ErrMilestoneNotFound) {
+			return err
+		} else {
+			if blockCount == blocksDeleteLimit-1 {
+				return nil
+			}
+		}
+	}
+
+	var milestoneIdBytes [8]byte
+	binary.BigEndian.PutUint64(milestoneIdBytes[:], uint64(lastMilestoneToRemove))
+	for k, _, err := milestoneCursor.Seek(milestoneIdBytes[:]); err == nil && k != nil; k, _, err = milestoneCursor.Prev() {
+		if err = milestoneCursor.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 

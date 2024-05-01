@@ -10,6 +10,12 @@ import (
 	"testing"
 
 	"github.com/golang/snappy"
+	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/protocol"
+	"github.com/spf13/afero"
+	"github.com/stretchr/testify/require"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cl/antiquary/tests"
@@ -18,17 +24,12 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
-	"github.com/libp2p/go-libp2p"
-	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-libp2p/core/protocol"
-	"github.com/spf13/afero"
-	"github.com/stretchr/testify/require"
 )
 
 func getEthClock(t *testing.T) eth_clock.EthereumClock {
@@ -101,7 +102,7 @@ func TestBlobsByRangeHandler(t *testing.T) {
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, &forkchoice.ForkChoiceStorageMock{}, blobStorage, true,
+		nil, &mock_services.ForkChoiceStorageMock{}, blobStorage, true,
 	)
 	c.Start()
 	req := &cltypes.BlobsByRangeRequest{
@@ -222,7 +223,7 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, &forkchoice.ForkChoiceStorageMock{}, blobStorage, true,
+		nil, &mock_services.ForkChoiceStorageMock{}, blobStorage, true,
 	)
 	c.Start()
 	req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](40269, 40)

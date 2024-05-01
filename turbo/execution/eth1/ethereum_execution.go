@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
-	"github.com/ledgerwatch/erigon-lib/wrap"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -58,6 +58,7 @@ type EthereumExecutionModule struct {
 
 	// configuration
 	config    *chain.Config
+	syncCfg   ethconfig.Sync
 	historyV3 bool
 	// consensus
 	engine consensus.Engine
@@ -71,7 +72,8 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB
 	hook *stages.Hook, accumulator *shards.Accumulator,
 	stateChangeConsumer shards.StateChangeConsumer,
 	logger log.Logger, engine consensus.Engine,
-	historyV3 bool, ctx context.Context,
+	historyV3 bool, syncCfg ethconfig.Sync,
+	ctx context.Context,
 ) *EthereumExecutionModule {
 	return &EthereumExecutionModule{
 		blockReader:         blockReader,
@@ -87,7 +89,10 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB
 		accumulator:         accumulator,
 		stateChangeConsumer: stateChangeConsumer,
 		engine:              engine,
-		bacgroundCtx:        ctx,
+
+		historyV3:    historyV3,
+		syncCfg:      syncCfg,
+		bacgroundCtx: ctx,
 	}
 }
 
@@ -244,23 +249,9 @@ func (e *EthereumExecutionModule) Start(ctx context.Context) {
 	e.semaphore.Acquire(ctx, 1)
 	defer e.semaphore.Release(1)
 
-	more := true
-
-	for more {
-		var err error
-
-		if more, err = e.executionPipeline.Run(e.db, wrap.TxContainer{}, true); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				e.logger.Error("Could not start execution service", "err", err)
-			}
-			continue
-		}
-
-		if err := e.executionPipeline.RunPrune(e.db, nil, true); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				e.logger.Error("Could not start execution service", "err", err)
-			}
-			continue
+	if err := stages.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline); err != nil {
+		if !errors.Is(err, context.Canceled) {
+			e.logger.Error("Could not start execution service", "err", err)
 		}
 	}
 }

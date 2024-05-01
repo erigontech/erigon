@@ -6,13 +6,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/clparams/initial_state"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
-	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/clparams/initial_state"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/mock_services"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 )
 
 func getEthClock(t *testing.T) eth_clock.EthereumClock {
@@ -45,7 +46,7 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 		IpAddr:        listenAddrHost,
 		Port:          7070,
 		EnableBlocks:  true,
-	}, ethClock, reader, nil, db, log.New(), &forkchoice.ForkChoiceStorageMock{})
+	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel1.Stop()
 
@@ -59,7 +60,7 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 		Port:          7077,
 		EnableBlocks:  true,
 		TCPPort:       9123,
-	}, ethClock, reader, nil, db, log.New(), &forkchoice.ForkChoiceStorageMock{})
+	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel2.Stop()
 

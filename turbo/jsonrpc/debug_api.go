@@ -76,6 +76,9 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 
 	if api.historyV3(tx) {
 		number := rawdb.ReadHeaderNumber(tx, blockHash)
+		if number == nil {
+			return StorageRangeResult{}, fmt.Errorf("block not found")
+		}
 		minTxNum, err := rawdbv3.TxNums.Min(tx, *number)
 		if err != nil {
 			return StorageRangeResult{}, err
@@ -324,7 +327,7 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 		result.Nonce = hexutil.Uint64(a.Nonce)
 		result.CodeHash = a.CodeHash
 
-		code, _, err := ttx.DomainGetAsOf(kv.CodeDomain, address[:], a.CodeHash[:], minTxNum+txIndex)
+		code, _, err := ttx.DomainGetAsOf(kv.CodeDomain, address[:], nil, minTxNum+txIndex)
 		if err != nil {
 			return nil, err
 		}

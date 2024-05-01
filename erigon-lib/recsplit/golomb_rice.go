@@ -116,9 +116,7 @@ func (g *GolombRiceReader) SkipSubtree(nodes, fixedLen int) {
 	g.currFixedOffset += fixedLen
 }
 
-func (g *GolombRiceReader) ReadNext(log2golomb int) uint64 {
-	var result uint64
-
+func (g *GolombRiceReader) ReadNext(log2golomb int) (result uint64) {
 	if g.currWindowUnary == 0 {
 		result += uint64(g.validLowerBitsUnary)
 		g.currWindowUnary = g.data[g.currPtrUnary]
@@ -141,9 +139,8 @@ func (g *GolombRiceReader) ReadNext(log2golomb int) uint64 {
 	result <<= log2golomb
 
 	idx64 := g.currFixedOffset >> 6
-	var fixed uint64
 	shift := g.currFixedOffset & 63
-	fixed = g.data[idx64] >> shift
+	fixed := g.data[idx64] >> shift
 	if shift+log2golomb > 64 {
 		fixed |= g.data[idx64+1] << (64 - shift)
 	}

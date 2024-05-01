@@ -1,6 +1,7 @@
 package commitment
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"slices"
@@ -13,14 +14,15 @@ import (
 
 func Test_BinPatriciaTrie_UniqueRepresentation(t *testing.T) {
 	t.Skip()
+	ctx := context.Background()
 
 	ms := NewMockState(t)
 	ms2 := NewMockState(t)
 
-	trie := NewBinPatriciaHashed(length.Addr, ms.branchFn, ms.accountFn, ms.storageFn)
-	trieBatch := NewBinPatriciaHashed(length.Addr, ms2.branchFn, ms2.accountFn, ms2.storageFn)
+	trie := NewBinPatriciaHashed(length.Addr, ms)
+	trieBatch := NewBinPatriciaHashed(length.Addr, ms2)
 
-	plainKeys, hashedKeys, updates := NewUpdateBuilder().
+	plainKeys, updates := NewUpdateBuilder().
 		Balance("e25652aaa6b9417973d325f9a1246b48ff9420bf", 12).
 		Balance("cdd0a12034e978f7eccda72bd1bd89a8142b704e", 120000).
 		Balance("5bb6abae12c87592b940458437526cb6cad60d50", 170).
@@ -43,13 +45,12 @@ func Test_BinPatriciaTrie_UniqueRepresentation(t *testing.T) {
 	fmt.Println("1. Running sequential updates over the bin trie")
 	var seqHash []byte
 	for i := 0; i < len(updates); i++ {
-		sh, branchNodeUpdates, err := trie.ReviewKeys(plainKeys[i:i+1], hashedKeys[i:i+1])
+		sh, err := trie.ProcessKeys(ctx, plainKeys[i:i+1], "")
 		require.NoError(t, err)
 		require.Len(t, sh, length.Hash)
-		ms.applyBranchNodeUpdates(branchNodeUpdates)
 		// WARN! provided sequential branch updates are incorrect - lead to deletion of prefixes (afterMap is zero)
 		//       while root hashes are equal
-		renderUpdates(branchNodeUpdates)
+		//renderUpdates(branchNodeUpdates)
 
 		fmt.Printf("h=%x\n", sh)
 		seqHash = sh
@@ -57,11 +58,11 @@ func Test_BinPatriciaTrie_UniqueRepresentation(t *testing.T) {
 
 	fmt.Println("2. Running batch updates over the bin trie")
 
-	batchHash, branchBatchUpdates, err := trieBatch.ReviewKeys(plainKeys, hashedKeys)
+	batchHash, err := trieBatch.ProcessKeys(ctx, plainKeys, "")
 	require.NoError(t, err)
-	ms2.applyBranchNodeUpdates(branchBatchUpdates)
+	//ms2.applyBranchNodeUpdates(branchBatchUpdates)
 
-	renderUpdates(branchBatchUpdates)
+	//renderUpdates(branchBatchUpdates)
 
 	require.EqualValues(t, seqHash, batchHash)
 	// require.EqualValues(t, seqHash, batchHash)
@@ -84,11 +85,12 @@ func renderUpdates(branchNodeUpdates map[string]BranchData) {
 
 func Test_BinPatriciaHashed_UniqueRepresentation(t *testing.T) {
 	t.Skip()
+	ctx := context.Background()
 
 	ms := NewMockState(t)
 	ms2 := NewMockState(t)
 
-	plainKeys, hashedKeys, updates := NewUpdateBuilder().
+	plainKeys, updates := NewUpdateBuilder().
 		Balance("f5", 4).
 		Balance("ff", 900234).
 		Balance("04", 1233).
@@ -107,8 +109,8 @@ func Test_BinPatriciaHashed_UniqueRepresentation(t *testing.T) {
 		Storage("f5", "04", "9898").
 		Build()
 
-	trieOne := NewBinPatriciaHashed(1, ms.branchFn, ms.accountFn, ms.storageFn)
-	trieTwo := NewBinPatriciaHashed(1, ms2.branchFn, ms2.accountFn, ms2.storageFn)
+	trieOne := NewBinPatriciaHashed(1, ms)
+	trieTwo := NewBinPatriciaHashed(1, ms2)
 
 	trieOne.SetTrace(true)
 	trieTwo.SetTrace(true)
@@ -122,12 +124,12 @@ func Test_BinPatriciaHashed_UniqueRepresentation(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		sequentialRoot, branchNodeUpdates, err := trieOne.ReviewKeys(plainKeys[i:i+1], hashedKeys[i:i+1])
+		sequentialRoot, err := trieOne.ProcessKeys(ctx, plainKeys[i:i+1], "")
 		require.NoError(t, err)
 		roots = append(roots, sequentialRoot)
 
-		ms.applyBranchNodeUpdates(branchNodeUpdates)
-		renderUpdates(branchNodeUpdates)
+		//ms.applyBranchNodeUpdates(branchNodeUpdates)
+		//renderUpdates(branchNodeUpdates)
 	}
 
 	err := ms2.applyPlainUpdates(plainKeys, updates)
@@ -135,26 +137,27 @@ func Test_BinPatriciaHashed_UniqueRepresentation(t *testing.T) {
 
 	fmt.Printf("\n2. Trie batch update generated following branch updates\n")
 	// batch update
-	batchRoot, branchNodeUpdatesTwo, err := trieTwo.ReviewKeys(plainKeys, hashedKeys)
+	batchRoot, err := trieTwo.ProcessKeys(ctx, plainKeys, "")
 	require.NoError(t, err)
-	renderUpdates(branchNodeUpdatesTwo)
+	//renderUpdates(branchNodeUpdatesTwo)
 
 	fmt.Printf("\n sequential roots:\n")
 	for i, rh := range roots {
 		fmt.Printf("%2d %+v\n", i, hex.EncodeToString(rh))
 	}
 
-	ms2.applyBranchNodeUpdates(branchNodeUpdatesTwo)
+	//ms2.applyBranchNodeUpdates(branchNodeUpdatesTwo)
 
 	require.EqualValues(t, batchRoot, roots[len(roots)-1],
 		"expected equal roots, got sequential [%v] != batch [%v]", hex.EncodeToString(roots[len(roots)-1]), hex.EncodeToString(batchRoot))
 	require.Lenf(t, batchRoot, 32, "root hash length should be equal to 32 bytes")
 }
 func Test_BinPatriciaHashed_EmptyState(t *testing.T) {
+	ctx := context.Background()
 	ms := NewMockState(t)
-	hph := NewBinPatriciaHashed(1, ms.branchFn, ms.accountFn, ms.storageFn)
+	hph := NewBinPatriciaHashed(1, ms)
 	hph.SetTrace(false)
-	plainKeys, hashedKeys, updates := NewUpdateBuilder().
+	plainKeys, updates := NewUpdateBuilder().
 		Balance("00", 4).
 		Balance("01", 5).
 		Balance("02", 6).
@@ -171,56 +174,57 @@ func Test_BinPatriciaHashed_EmptyState(t *testing.T) {
 	err := ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	firstRootHash, branchNodeUpdates, err := hph.ReviewKeys(plainKeys, hashedKeys)
+	firstRootHash, err := hph.ProcessKeys(ctx, plainKeys, "")
 	require.NoError(t, err)
 
 	t.Logf("root hash %x\n", firstRootHash)
 
-	ms.applyBranchNodeUpdates(branchNodeUpdates)
+	//ms.applyBranchNodeUpdates(branchNodeUpdates)
 
 	fmt.Printf("1. Generated updates\n")
-	renderUpdates(branchNodeUpdates)
+	//renderUpdates(branchNodeUpdates)
 
 	// More updates
 	hph.Reset()
 	hph.SetTrace(false)
-	plainKeys, hashedKeys, updates = NewUpdateBuilder().
+	plainKeys, updates = NewUpdateBuilder().
 		Storage("03", "58", "050505").
 		Build()
 	err = ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	secondRootHash, branchNodeUpdates, err := hph.ReviewKeys(plainKeys, hashedKeys)
+	secondRootHash, err := hph.ProcessKeys(ctx, plainKeys, "")
 	require.NoError(t, err)
 	require.NotEqualValues(t, firstRootHash, secondRootHash)
 
-	ms.applyBranchNodeUpdates(branchNodeUpdates)
+	//ms.applyBranchNodeUpdates(branchNodeUpdates)
 	fmt.Printf("2. Generated single update\n")
-	renderUpdates(branchNodeUpdates)
+	//renderUpdates(branchNodeUpdates)
 
 	// More updates
-	hph.Reset()
+	//hph.Reset() // one update - no need to reset
 	hph.SetTrace(false)
-	plainKeys, hashedKeys, updates = NewUpdateBuilder().
+	plainKeys, updates = NewUpdateBuilder().
 		Storage("03", "58", "070807").
 		Build()
 	err = ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	thirdRootHash, branchNodeUpdates, err := hph.ReviewKeys(plainKeys, hashedKeys)
+	thirdRootHash, err := hph.ProcessKeys(ctx, plainKeys, "")
 	require.NoError(t, err)
 	require.NotEqualValues(t, secondRootHash, thirdRootHash)
 
-	ms.applyBranchNodeUpdates(branchNodeUpdates)
+	//ms.applyBranchNodeUpdates(branchNodeUpdates)
 	fmt.Printf("3. Generated single update\n")
-	renderUpdates(branchNodeUpdates)
+	//renderUpdates(branchNodeUpdates)
 }
 
 func Test_BinPatriciaHashed_EmptyUpdateState(t *testing.T) {
+	ctx := context.Background()
 	ms := NewMockState(t)
-	hph := NewBinPatriciaHashed(1, ms.branchFn, ms.accountFn, ms.storageFn)
+	hph := NewBinPatriciaHashed(1, ms)
 	hph.SetTrace(false)
-	plainKeys, hashedKeys, updates := NewUpdateBuilder().
+	plainKeys, updates := NewUpdateBuilder().
 		Balance("00", 4).
 		Nonce("00", 246462653).
 		Balance("01", 5).
@@ -233,27 +237,27 @@ func Test_BinPatriciaHashed_EmptyUpdateState(t *testing.T) {
 	err := ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	hashBeforeEmptyUpdate, branchNodeUpdates, err := hph.ReviewKeys(plainKeys, hashedKeys)
+	hashBeforeEmptyUpdate, err := hph.ProcessKeys(ctx, plainKeys, "")
 	require.NoError(t, err)
 	require.NotEmpty(t, hashBeforeEmptyUpdate)
 
-	ms.applyBranchNodeUpdates(branchNodeUpdates)
+	//ms.applyBranchNodeUpdates(branchNodeUpdates)
 
 	fmt.Println("1. Updates applied")
-	renderUpdates(branchNodeUpdates)
+	//renderUpdates(branchNodeUpdates)
 
 	// generate empty updates and do NOT reset tree
 	hph.SetTrace(true)
 
-	plainKeys, hashedKeys, updates = NewUpdateBuilder().Build()
+	plainKeys, updates = NewUpdateBuilder().Build()
 
 	err = ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	hashAfterEmptyUpdate, branchNodeUpdates, err := hph.ReviewKeys(plainKeys, hashedKeys)
+	hashAfterEmptyUpdate, err := hph.ProcessKeys(ctx, plainKeys, "")
 	require.NoError(t, err)
 
-	ms.applyBranchNodeUpdates(branchNodeUpdates)
+	//ms.applyBranchNodeUpdates(branchNodeUpdates)
 	fmt.Println("2. Empty updates applied without state reset")
 
 	require.EqualValues(t, hashBeforeEmptyUpdate, hashAfterEmptyUpdate)

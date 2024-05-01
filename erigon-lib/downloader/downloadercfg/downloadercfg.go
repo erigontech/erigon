@@ -43,7 +43,7 @@ const DefaultPieceSize = 2 * 1024 * 1024
 
 // DefaultNetworkChunkSize - how much data request per 1 network call to peer.
 // default: 16Kb
-const DefaultNetworkChunkSize = 256 * 1024
+const DefaultNetworkChunkSize = 8 * 1024 * 1024
 
 type Cfg struct {
 	ClientConfig  *torrent.ClientConfig
@@ -98,6 +98,7 @@ func Default() *torrent.ClientConfig {
 
 func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile, downloadSlots int, staticPeers, webseeds []string, chainName string, lockSnapshots bool) (*Cfg, error) {
 	torrentConfig := Default()
+	//torrentConfig.PieceHashersPerTorrent = runtime.NumCPU()
 	torrentConfig.DataDir = dirs.Snap // `DataDir` of torrent-client-lib is different from Erigon's `DataDir`. Just same naming.
 
 	torrentConfig.ExtendedHandshakeClientVersion = version

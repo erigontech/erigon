@@ -6,10 +6,10 @@ import (
 	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
@@ -38,7 +38,7 @@ func GetCanonicalBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, filt
 
 func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, filters *Filters) (blockNumber uint64, hash libcommon.Hash, latest bool, err error) {
 	// Due to changed semantics of `lastest` block in RPC request, it is now distinct
-	// from the block block number corresponding to the plain state
+	// from the block number corresponding to the plain state
 	var plainStateBlockNumber uint64
 	if plainStateBlockNumber, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
 		return 0, libcommon.Hash{}, false, fmt.Errorf("getting plain state block number: %w", err)
@@ -123,7 +123,7 @@ func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.Tx, blockNumber
 		if err != nil {
 			return nil, err
 		}
-		return state.NewCachedReader2(cacheView, tx), nil
+		return CreateLatestCachedStateReader(cacheView, tx, historyV3), nil
 	}
 	return CreateHistoryStateReader(tx, blockNumber+1, txnIndex, historyV3, chainName)
 }
@@ -141,20 +141,32 @@ func CreateHistoryStateReader(tx kv.Tx, blockNumber uint64, txnIndex int, histor
 	if err != nil {
 		return nil, err
 	}
-	r.SetTxNum(uint64(int(minTxNum) + txnIndex + 1))
+	r.SetTxNum(uint64(int(minTxNum) + txnIndex + /* 1 system txNum in begining of block */ 1))
 	return r, nil
 }
 
-func NewLatestStateReader(tx kv.Getter) state.StateReader {
-	if config3.EnableHistoryV4InTest {
-		panic("implement me")
-		//b.pendingReader = state.NewReaderV4(b.pendingReaderTx.(kv.TemporalTx))
+func NewLatestStateReader(tx kv.Tx, histV3 bool) state.StateReader {
+	if histV3 {
+		return state.NewReaderV4(tx.(kv.TemporalGetter))
 	}
 	return state.NewPlainStateReader(tx)
 }
-func NewLatestStateWriter(tx kv.RwTx, blockNum uint64) state.StateWriter {
-	if config3.EnableHistoryV4InTest {
-		panic("implement me")
+func NewLatestStateWriter(txc wrap.TxContainer, blockNum uint64, histV3 bool) state.StateWriter {
+	if histV3 {
+		domains := txc.Doms
+		minTxNum, err := rawdbv3.TxNums.Min(domains.Tx(), blockNum)
+		if err != nil {
+			panic(err)
+		}
+		domains.SetTxNum(uint64(int(minTxNum) + /* 1 system txNum in begining of block */ 1))
+		return state.NewWriterV4(domains)
 	}
-	return state.NewPlainStateWriter(tx, tx, blockNum)
+	return state.NewPlainStateWriter(txc.Tx, txc.Tx, blockNum)
+}
+
+func CreateLatestCachedStateReader(cache kvcache.CacheView, tx kv.Tx, histV3 bool) state.StateReader {
+	if histV3 {
+		return state.NewCachedReader3(cache, tx.(kv.TemporalTx))
+	}
+	return state.NewCachedReader2(cache, tx)
 }

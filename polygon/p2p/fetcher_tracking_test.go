@@ -59,10 +59,11 @@ func TestTrackingFetcherFetchHeadersUpdatesPeerTracker(t *testing.T) {
 		}, time.Second, 100*time.Millisecond, "expected number of initial peers never satisfied: want=2, have=%d", len(peerIds))
 
 		headers, err := test.trackingFetcher.FetchHeaders(ctx, 1, 3, peerId1) // fetch headers 1 and 2
+		headersData := headers.Data
 		require.NoError(t, err)
-		require.Len(t, headers, 2)
-		require.Equal(t, uint64(1), headers[0].Number.Uint64())
-		require.Equal(t, uint64(2), headers[1].Number.Uint64())
+		require.Len(t, headersData, 2)
+		require.Equal(t, uint64(1), headersData[0].Number.Uint64())
+		require.Equal(t, uint64(2), headersData[1].Number.Uint64())
 
 		peerIds = test.peerTracker.ListPeersMayHaveBlockNum(4) // peers which may have blocks 1,2,3,4
 		require.Len(t, peerIds, 2)
@@ -74,7 +75,7 @@ func TestTrackingFetcherFetchHeadersUpdatesPeerTracker(t *testing.T) {
 		require.Equal(t, uint64(2), errIncompleteHeaders.requested)
 		require.Equal(t, uint64(0), errIncompleteHeaders.received)
 		require.Equal(t, uint64(3), errIncompleteHeaders.LowestMissingBlockNum())
-		require.Nil(t, headers)
+		require.Nil(t, headers.Data)
 
 		// should be one peer less now given that we know that peer 1 does not have block num 4
 		peerIds = test.peerTracker.ListPeersMayHaveBlockNum(4)
@@ -145,14 +146,14 @@ func TestTrackingFetcherFetchBodiesUpdatesPeerTracker(t *testing.T) {
 
 		bodies, err := test.trackingFetcher.FetchBodies(ctx, mockHeaders, peerId1)
 		require.ErrorIs(t, err, &ErrMissingBodies{})
-		require.Nil(t, bodies)
+		require.Nil(t, bodies.Data)
 
 		peerIds = test.peerTracker.ListPeersMayHaveBlockNum(1) // only peerId2 may have block 1, peerId does not
 		require.Len(t, peerIds, 1)
 
 		bodies, err = test.trackingFetcher.FetchBodies(ctx, mockHeaders, peerId2)
 		require.ErrorIs(t, err, context.DeadlineExceeded)
-		require.Nil(t, bodies)
+		require.Nil(t, bodies.Data)
 
 		peerIds = test.peerTracker.ListPeersMayHaveBlockNum(1) // neither peerId1 nor peerId2 have block num 1
 		require.Len(t, peerIds, 0)

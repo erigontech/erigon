@@ -109,8 +109,11 @@ type EthAPI interface {
 }
 
 type BaseAPI struct {
-	stateCache   kvcache.Cache                         // thread-safe
-	blocksLRU    *lru.Cache[common.Hash, *types.Block] // thread-safe
+	// all caches are thread-safe
+	stateCache    kvcache.Cache
+	blocksLRU     *lru.Cache[common.Hash, *types.Block]
+	receiptsCache *lru.Cache[common.Hash, []*types.Receipt]
+
 	filters      *rpchelper.Filters
 	_chainConfig atomic.Pointer[chain.Config]
 	_genesis     atomic.Pointer[types.Block]
@@ -127,16 +130,36 @@ type BaseAPI struct {
 }
 
 func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, agg *libstate.Aggregator, singleNodeMode bool, evmCallTimeout time.Duration, engine consensus.EngineReader, dirs datadir.Dirs) *BaseAPI {
-	blocksLRUSize := 128 // ~32Mb
+	var (
+		blocksLRUSize      = 128 // ~32Mb
+		receiptsCacheLimit = 32
+	)
+	// if RPCDaemon deployed as independent process: increase cache sizes
 	if !singleNodeMode {
-		blocksLRUSize = 512
+		blocksLRUSize *= 5
+		receiptsCacheLimit *= 5
 	}
 	blocksLRU, err := lru.New[common.Hash, *types.Block](blocksLRUSize)
 	if err != nil {
 		panic(err)
 	}
+	receiptsCache, err := lru.New[common.Hash, []*types.Receipt](receiptsCacheLimit)
+	if err != nil {
+		panic(err)
+	}
 
-	return &BaseAPI{filters: f, stateCache: stateCache, blocksLRU: blocksLRU, _blockReader: blockReader, _txnReader: blockReader, _agg: agg, evmCallTimeout: evmCallTimeout, _engine: engine, dirs: dirs}
+	return &BaseAPI{
+		filters:        f,
+		stateCache:     stateCache,
+		blocksLRU:      blocksLRU,
+		receiptsCache:  receiptsCache,
+		_blockReader:   blockReader,
+		_txnReader:     blockReader,
+		_agg:           agg,
+		evmCallTimeout: evmCallTimeout,
+		_engine:        engine,
+		dirs:           dirs,
+	}
 }
 
 func (api *BaseAPI) chainConfig(ctx context.Context, tx kv.Tx) (*chain.Config, error) {
@@ -385,7 +408,7 @@ type RPCTransaction struct {
 func NewRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber uint64, index uint64, baseFee *big.Int) *RPCTransaction {
 	// Determine the signer. For replay-protected transactions, use the most permissive
 	// signer, because we assume that signers are backwards-compatible with old
-	// transactions. For non-protected transactions, the homestead signer signer is used
+	// transactions. For non-protected transactions, the homestead signer is used
 	// because the return value of ChainId is zero for those transactions.
 	chainId := uint256.NewInt(0)
 	result := &RPCTransaction{

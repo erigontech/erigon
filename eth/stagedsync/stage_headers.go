@@ -17,12 +17,14 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -45,6 +47,7 @@ type HeadersCfg struct {
 	batchSize         datasize.ByteSize
 	noP2PDiscovery    bool
 	tmpdir            string
+	historyV3         bool
 
 	blockReader   services.FullBlockReader
 	blockWriter   *blockio.BlockWriter
@@ -68,6 +71,7 @@ func StageHeadersCfg(
 	blockReader services.FullBlockReader,
 	blockWriter *blockio.BlockWriter,
 	tmpdir string,
+	historyV3 bool,
 	notifications *shards.Notifications,
 	loopBreakCheck func(int) bool) HeadersCfg {
 	return HeadersCfg{
@@ -81,6 +85,7 @@ func StageHeadersCfg(
 		penalize:          penalize,
 		batchSize:         batchSize,
 		tmpdir:            tmpdir,
+		historyV3:         historyV3,
 		noP2PDiscovery:    noP2PDiscovery,
 		blockReader:       blockReader,
 		blockWriter:       blockWriter,
@@ -142,25 +147,23 @@ func HeadersPOW(
 	defer cfg.hd.SetFetchingNew(false)
 	startProgress := cfg.hd.Progress()
 	logPrefix := s.LogPrefix()
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
 
 	// Check if this is called straight after the unwinds, which means we need to create new canonical markings
 	hash, err := cfg.blockReader.CanonicalHash(ctx, tx, startProgress)
 	if err != nil {
 		return err
 	}
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
-	if hash == (libcommon.Hash{}) {
+	if hash == (libcommon.Hash{}) { // restore canonical markers after unwind
 		headHash := rawdb.ReadHeadHeaderHash(tx)
 		if err = fixCanonicalChain(logPrefix, logEvery, startProgress, headHash, tx, cfg.blockReader, logger); err != nil {
 			return err
 		}
-		if !useExternalTx {
-			if err = tx.Commit(); err != nil {
-				return err
-			}
+		hash, err = cfg.blockReader.CanonicalHash(ctx, tx, startProgress)
+		if err != nil {
+			return err
 		}
-		return nil
 	}
 
 	// Allow other stages to run 1 cycle if no network available
@@ -304,9 +307,11 @@ Loop:
 				noProgressCounter = 0 // Reset, there was progress
 			}
 			if noProgressCounter >= 5 {
+				var m runtime.MemStats
+				dbg.ReadMemStats(&m)
 				logger.Info("Req/resp stats", "req", stats.Requests, "reqMin", stats.ReqMinBlock, "reqMax", stats.ReqMaxBlock,
 					"skel", stats.SkeletonRequests, "skelMin", stats.SkeletonReqMinBlock, "skelMax", stats.SkeletonReqMaxBlock,
-					"resp", stats.Responses, "respMin", stats.RespMinBlock, "respMax", stats.RespMaxBlock, "dups", stats.Duplicates)
+					"resp", stats.Responses, "respMin", stats.RespMinBlock, "respMax", stats.RespMaxBlock, "dups", stats.Duplicates, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 				cfg.hd.LogAnchorState()
 				if wasProgress {
 					logger.Warn("Looks like chain is not progressing, moving to the next stage")
@@ -322,7 +327,29 @@ Loop:
 		timer.Stop()
 	}
 	if headerInserter.Unwind() {
-		u.UnwindTo(headerInserter.UnwindPoint(), StagedUnwind)
+		if cfg.historyV3 {
+			unwindTo := headerInserter.UnwindPoint()
+			doms, err := state.NewSharedDomains(tx, logger) //TODO: if remove this line TestBlockchainHeaderchainReorgConsistency failing
+			if err != nil {
+				return err
+			}
+			defer doms.Close()
+
+			allowedUnwindTo, ok, err := tx.(state.HasAggCtx).AggCtx().(*state.AggregatorRoTx).CanUnwindBeforeBlockNum(unwindTo, tx)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindTo, allowedUnwindTo)
+			}
+			if err := u.UnwindTo(allowedUnwindTo, StagedUnwind, tx); err != nil {
+				return err
+			}
+		} else {
+			if err := u.UnwindTo(headerInserter.UnwindPoint(), StagedUnwind, tx); err != nil {
+				return err
+			}
+		}
 	}
 	if headerInserter.GetHighest() != 0 {
 		if !headerInserter.Unwind() {
