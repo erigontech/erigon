@@ -47,3 +47,12 @@ func (d *Deposit) copy() RequestData {
 		Index:                 d.Index,
 	}
 }
+
+type Deposits []*Deposit
+
+func (ds Deposits) ToRequests() (reqs Requests) {
+	for _, d := range ds {
+		reqs = append(reqs, NewRequest(d))
+	}
+	return
+}

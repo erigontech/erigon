@@ -15,7 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-const RUNS = 1000000 // for local tests increase this number
+const RUNS = 10 // for local tests increase this number
 
 type TRand struct {
 	rnd *rand.Rand

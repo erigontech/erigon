@@ -160,6 +160,16 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		header.WithdrawalsHash = &wh
 	}
 
+	var requests types.Requests
+	if version >= clparams.CapellaVersion && req.DepositRequests != nil {
+		requests = req.DepositRequests.ToRequests()
+	}
+
+	if requests != nil {
+		rh := types.DeriveSha(requests)
+		header.RequestsRoot = &rh
+	}
+
 	if err := s.checkWithdrawalsPresence(header.Time, withdrawals); err != nil {
 		return nil, err
 	}

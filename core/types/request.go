@@ -20,6 +20,12 @@ func (r *Request) Type() byte {
 	return r.inner.requestType()
 }
 
+func NewRequest(inner RequestData) *Request {
+	req := new(Request)
+	req.inner = inner.copy()
+	return req
+}
+
 func (r *Request) EncodeRLP(w io.Writer) error {
 	var buf bytes.Buffer    // TODO(racytech): find a solution to reuse the same buffer instead of recreating it
 	buf.WriteByte(r.Type()) // first write type of request then encode inner data
