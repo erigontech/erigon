@@ -13,15 +13,15 @@ type (
 
 var (
 	EmptyU64 = &Empty[uint64]{}
-	EmptyKV  = &Empty2[[]byte, []byte]{}
-	EmptyKVS = &Empty3[[]byte, []byte, uint64]{}
+	EmptyKV  = &EmptyDuo[[]byte, []byte]{}
+	EmptyKVS = &EmptyTrio[[]byte, []byte, uint64]{}
 )
 
 func FilterU64(it U64, filter func(k uint64) bool) *Filtered[uint64] {
 	return Filter[uint64](it, filter)
 }
-func FilterKV(it KV, filter func(k, v []byte) bool) *Filtered2[[]byte, []byte] {
-	return Filter2[[]byte, []byte](it, filter)
+func FilterKV(it KV, filter func(k, v []byte) bool) *FilteredDuo[[]byte, []byte] {
+	return FilterDuo[[]byte, []byte](it, filter)
 }
 
 func ToU64Arr(s U64) ([]uint64, error)           { return ToArr[uint64](s) }
@@ -45,20 +45,20 @@ func ToArrKVMust(s KV) ([][]byte, [][]byte) {
 func CountU64(s U64) (int, error) { return Count[uint64](s) }
 func CountKV(s KV) (int, error)   { return Count2[[]byte, []byte](s) }
 
-func TransformKV(it KV, transform func(k, v []byte) ([]byte, []byte, error)) *Transformed2[[]byte, []byte] {
-	return Transform2[[]byte, []byte](it, transform)
+func TransformKV(it KV, transform func(k, v []byte) ([]byte, []byte, error)) *TransformedDuo[[]byte, []byte] {
+	return TransformDuo[[]byte, []byte](it, transform)
 }
 
 // internal types
 type (
-	NextPage1[T any]    func(pageToken string) (arr []T, nextPageToken string, err error)
-	NextPage2[K, V any] func(pageToken string) (keys []K, values []V, nextPageToken string, err error)
+	NextPageUno[T any]    func(pageToken string) (arr []T, nextPageToken string, err error)
+	NextPageDuo[K, V any] func(pageToken string) (keys []K, values []V, nextPageToken string, err error)
 )
 
-func PaginateKV(f NextPage2[[]byte, []byte]) *Paginated2[[]byte, []byte] {
-	return Paginate2[[]byte, []byte](f)
+func PaginateKV(f NextPageDuo[[]byte, []byte]) *PaginatedDuo[[]byte, []byte] {
+	return PaginateDuo[[]byte, []byte](f)
 }
-func PaginateU64(f NextPage1[uint64]) *Paginated[uint64] {
+func PaginateU64(f NextPageUno[uint64]) *Paginated[uint64] {
 	return Paginate[uint64](f)
 }
 
