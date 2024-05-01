@@ -795,6 +795,12 @@ var (
 		Value: true,
 	}
 
+	WithHeimdallWaypoints = cli.BoolFlag{
+		Name:  "bor.waypoints",
+		Usage: "Enabling bor waypont recording",
+		Value: false,
+	}
+
 	PolygonSyncFlag = cli.BoolFlag{
 		Name:  "polygon.sync",
 		Usage: "Enabling syncing using the new polygon sync component",
@@ -986,9 +992,24 @@ var (
 		Usage: "set the cors' allow origins",
 		Value: cli.NewStringSlice(),
 	}
+	DiagDisabledFlag = cli.BoolFlag{
+		Name:  "diagnostics.disabled",
+		Usage: "Disable diagnostics",
+		Value: false,
+	}
+	DiagEndpointAddrFlag = cli.StringFlag{
+		Name:  "diagnostics.endpoint.addr",
+		Usage: "Diagnostics HTTP server listening interface",
+		Value: "0.0.0.0",
+	}
+	DiagEndpointPortFlag = cli.UintFlag{
+		Name:  "diagnostics.endpoint.port",
+		Usage: "Diagnostics HTTP server listening port",
+		Value: 6060,
+	}
 )
 
-var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag}
+var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag, &DiagDisabledFlag, &DiagEndpointAddrFlag, &DiagEndpointPortFlag}
 
 var DiagnosticsFlags = []cli.Flag{&DiagnosticsURLFlag, &DiagnosticsURLFlag, &DiagnosticsSessionsFlag}
 
@@ -1556,6 +1577,7 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.HeimdallURL = ctx.String(HeimdallURLFlag.Name)
 	cfg.WithoutHeimdall = ctx.Bool(WithoutHeimdallFlag.Name)
 	cfg.WithHeimdallMilestones = ctx.Bool(WithHeimdallMilestones.Name)
+	cfg.WithHeimdallWaypointRecording = ctx.Bool(WithHeimdallWaypoints.Name)
 	cfg.PolygonSync = ctx.Bool(PolygonSyncFlag.Name)
 	cfg.PolygonSyncStage = ctx.Bool(PolygonSyncStageFlag.Name)
 }
@@ -1875,6 +1897,8 @@ func CobraFlags(cmd *cobra.Command, urfaveCliFlagsLists ...[]cli.Flag) {
 			switch f := flag.(type) {
 			case *cli.IntFlag:
 				flags.Int(f.Name, f.Value, f.Usage)
+			case *cli.UintFlag:
+				flags.Uint(f.Name, f.Value, f.Usage)
 			case *cli.StringFlag:
 				flags.String(f.Name, f.Value, f.Usage)
 			case *cli.BoolFlag:

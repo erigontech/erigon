@@ -11,7 +11,7 @@ import (
 )
 
 // Generate all mocks in file
-//go:generate mockgen -typed=true -destination=./storage_mock.go -package=heimdall -source=./storage.go
+//go:generate mockgen -typed=true -destination=./store_mock.go -package=heimdall -source=./store.go
 
 type SpanReader interface {
 	LastSpanId(ctx context.Context) (SpanId, bool, error)
@@ -187,14 +187,57 @@ func (io blockReaderStore) PutCheckpoint(ctx context.Context, checkpointId Check
 		return fmt.Errorf("span writer failed: tx is read only")
 	}
 
-	spanBytes, err := json.Marshal(checkpoint)
+	bytes, err := json.Marshal(checkpoint)
 
 	if err != nil {
 		return err
 	}
 
-	var spanIdBytes [8]byte
-	binary.BigEndian.PutUint64(spanIdBytes[:], uint64(checkpointId))
+	var idBytes [8]byte
+	binary.BigEndian.PutUint64(idBytes[:], uint64(checkpointId))
 
-	return tx.Put(kv.BorCheckpoints, spanIdBytes[:], spanBytes)
+	return tx.Put(kv.BorCheckpoints, idBytes[:], bytes)
+}
+
+func NewNoopStore() Store {
+	return &noopStore{}
+}
+
+type noopStore struct {
+}
+
+func (s noopStore) LastCheckpointId(context.Context) (CheckpointId, bool, error) {
+	return 0, false, nil
+}
+
+func (s noopStore) GetCheckpoint(context.Context, CheckpointId) (*Checkpoint, error) {
+	return nil, nil
+}
+
+func (s noopStore) PutCheckpoint(context.Context, CheckpointId, *Checkpoint) error {
+	return nil
+}
+
+func (s noopStore) LastMilestoneId(context.Context) (MilestoneId, bool, error) {
+	return 0, false, nil
+}
+
+func (s noopStore) GetMilestone(context.Context, MilestoneId) (*Milestone, error) {
+	return nil, nil
+}
+
+func (s noopStore) PutMilestone(context.Context, MilestoneId, *Milestone) error {
+	return nil
+}
+
+func (s noopStore) LastSpanId(context.Context) (SpanId, bool, error) {
+	return 0, false, nil
+}
+
+func (s noopStore) GetSpan(context.Context, SpanId) (*Span, error) {
+	return nil, nil
+}
+
+func (s noopStore) PutSpan(context.Context, *Span) error {
+	return nil
 }

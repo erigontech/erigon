@@ -334,7 +334,12 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 		return
 	})
 
-	salt := freezeblocks.GetIndicesSalt(dirs.Snap)
+	salt, err := snaptype.GetIndexSalt(dirs.Snap)
+
+	if err != nil {
+		return err
+	}
+
 	return freezeblocks.DumpBeaconBlocks(ctx, db, 0, to, salt, dirs, estimate.CompressSnapshot.Workers(), log.LvlInfo, log.Root())
 }
 
@@ -977,7 +982,12 @@ func (c *DumpBlobsSnapshots) Run(ctx *Context) error {
 	})
 	from := ((beaconConfig.DenebForkEpoch * beaconConfig.SlotsPerEpoch) / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
 
-	salt := freezeblocks.GetIndicesSalt(dirs.Snap)
+	salt, err := snaptype.GetIndexSalt(dirs.Snap)
+
+	if err != nil {
+		return err
+	}
+
 	return freezeblocks.DumpBlobsSidecar(ctx, blobStorage, db, from, to, salt, dirs, estimate.CompressSnapshot.Workers(), log.LvlInfo, log.Root())
 }
 

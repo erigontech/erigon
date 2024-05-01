@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
+	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
@@ -145,7 +146,7 @@ func traceBorStateSyncTxn(
 
 func initStateSyncTxContext(blockNum uint64, blockHash libcommon.Hash) evmtypes.TxContext {
 	return evmtypes.TxContext{
-		TxHash:   types.ComputeBorTxHash(blockNum, blockHash),
+		TxHash:   bortypes.ComputeBorTxHash(blockNum, blockHash),
 		Origin:   libcommon.Address{},
 		GasPrice: uint256.NewInt(0),
 	}

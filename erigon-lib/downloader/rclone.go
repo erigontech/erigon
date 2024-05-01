@@ -26,6 +26,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spaolacci/murmur3"
@@ -597,7 +598,7 @@ func (c *RCloneSession) Cat(ctx context.Context, file string) (io.Reader, error)
 }
 
 func (c *RCloneSession) ReadLocalDir(ctx context.Context) ([]fs.DirEntry, error) {
-	return os.ReadDir(c.localFs)
+	return dir.ReadDir(c.localFs)
 }
 
 func (c *RCloneSession) Label() string {
