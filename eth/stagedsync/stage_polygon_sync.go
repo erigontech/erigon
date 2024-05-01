@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/polygon/p2p"
 	"github.com/ledgerwatch/erigon/polygon/sync"
+	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
 func NewPolygonSyncStageCfg(
@@ -29,9 +30,10 @@ func NewPolygonSyncStageCfg(
 	sentry direct.SentryClient,
 	maxPeers int,
 	statusDataProvider *sentry.StatusDataProvider,
+	blockReader services.FullBlockReader,
 ) PolygonSyncStageCfg {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
-	storage := newPolygonSyncStageStorage(logger)
+	storage := newPolygonSyncStageStorage(logger, blockReader)
 	p2pService := p2p.NewService(maxPeers, logger, sentry, statusDataProvider.GetStatusData)
 	headersVerifier := sync.VerifyAccumulatedHeaders
 	blocksVerifier := sync.VerifyBlocks
@@ -119,14 +121,16 @@ func (s polygonSyncStageService) Run(ctx context.Context) error {
 	return nil
 }
 
-func newPolygonSyncStageStorage(logger log.Logger) *polygonSyncStageStorage {
+func newPolygonSyncStageStorage(logger log.Logger, blockReader services.FullBlockReader) *polygonSyncStageStorage {
 	return &polygonSyncStageStorage{
-		logger: logger,
+		logger:      logger,
+		blockReader: blockReader,
 	}
 }
 
 type polygonSyncStageStorage struct {
-	logger log.Logger
+	logger      log.Logger
+	blockReader services.FullBlockReader
 
 	heimdall.Store
 	tx kv.RwTx
@@ -186,8 +190,7 @@ func (s *polygonSyncStageStorage) Run(context.Context) error {
 
 func (s *polygonSyncStageStorage) use(tx kv.RwTx) {
 	s.tx = tx
-	// TODO pass in reader
-	s.Store = heimdall.NewTxStore(nil, tx)
+	s.Store = heimdall.NewTxStore(s.blockReader, tx)
 }
 
 type noopExecutionClient struct{}

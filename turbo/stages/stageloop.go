@@ -785,6 +785,7 @@ func NewPolygonSyncStages(
 			sentry,
 			maxPeers,
 			statusDataProvider,
+			blockReader,
 		),
 		stagedsync.StageBlockHashesCfg(
 			db,
