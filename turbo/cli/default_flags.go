@@ -128,7 +128,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.GpoBlocksFlag,
 	&utils.GpoPercentileFlag,
 	&utils.InsecureUnlockAllowedFlag,
-	&utils.HistoryV3Flag,
 	&utils.IdentityFlag,
 	&utils.CliqueSnapshotCheckpointIntervalFlag,
 	&utils.CliqueSnapshotInmemorySnapshotsFlag,
