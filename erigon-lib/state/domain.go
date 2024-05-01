@@ -84,7 +84,7 @@ type Domain struct {
 
 	// _visibleFiles - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
-	_visibleFiles atomic.Pointer[[]ctxItem]
+	_visibleFiles []ctxItem
 
 	// replaceKeysInValues allows to replace commitment branch values with shorter keys.
 	// for commitment domain only
@@ -123,7 +123,7 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, v
 		restrictSubsetFileDeletions: cfg.restrictSubsetFileDeletions, // to prevent not merged 'garbage' to delete on start
 	}
 
-	d._visibleFiles.Store(&[]ctxItem{})
+	d._visibleFiles = []ctxItem{}
 
 	var err error
 	if d.History, err = NewHistory(cfg.hist, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, nil, logger); err != nil {
@@ -178,13 +178,14 @@ func (d *Domain) OpenList(idxFiles, histFiles, domainFiles []string, readonly bo
 }
 
 func (d *Domain) openList(names []string, readonly bool) error {
+	defer d.reCalcVisibleFiles()
 	d.closeWhatNotInList(names)
 	d.scanStateFiles(names)
 	if err := d.openFiles(); err != nil {
 		return fmt.Errorf("Domain.openList: %w, %s", err, d.filenameBase)
 	}
-	d.protectFromHistoryFilesAheadOfDomainFiles(readonly)
 	d.reCalcVisibleFiles()
+	d.protectFromHistoryFilesAheadOfDomainFiles(readonly)
 	return nil
 }
 
@@ -386,7 +387,6 @@ func (d *Domain) openFiles() (err error) {
 		d.dirtyFiles.Delete(item)
 	}
 
-	d.reCalcVisibleFiles()
 	return nil
 }
 
@@ -411,14 +411,13 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 }
 
 func (d *Domain) reCalcVisibleFiles() {
-	visibleFiles := calcVisibleFiles(d.dirtyFiles, d.indexList, false)
-	d._visibleFiles.Store(&visibleFiles)
+	d._visibleFiles = calcVisibleFiles(d.dirtyFiles, d.indexList, false)
+	d.History.reCalcVisibleFiles()
 }
 
 func (d *Domain) Close() {
 	d.History.Close()
 	d.closeWhatNotInList([]string{})
-	d.reCalcVisibleFiles()
 }
 
 func (w *domainBufferedWriter) PutWithPrev(key1, key2, val, preval []byte, prevStep uint64) error {
@@ -759,7 +758,7 @@ func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 }
 
 func (d *Domain) BeginFilesRo() *DomainRoTx {
-	files := *d._visibleFiles.Load()
+	files := d._visibleFiles
 	for i := 0; i < len(files); i++ {
 		if !files[i].src.frozen {
 			files[i].src.refcount.Add(1)
@@ -1172,10 +1171,8 @@ func buildIndex(ctx context.Context, d *seg.Decompressor, compressed FileCompres
 	return nil
 }
 
-func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
-	defer d.reCalcVisibleFiles()
-
-	d.History.integrateFiles(sf.HistoryFiles, txNumFrom, txNumTo)
+func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
+	d.History.integrateDirtyFiles(sf.HistoryFiles, txNumFrom, txNumTo)
 
 	fi := newFilesItem(txNumFrom, txNumTo, d.aggregationStep)
 	fi.frozen = false

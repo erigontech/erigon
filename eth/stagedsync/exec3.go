@@ -225,7 +225,6 @@ func ExecV3(ctx context.Context,
 		if err != nil {
 			return err
 		}
-
 		ok, _blockNum, err := rawdbv3.TxNums.FindBlockNum(applyTx, doms.TxNum())
 		if err != nil {
 			return err
@@ -948,7 +947,7 @@ Loop:
 		waitWorkers()
 	}
 
-	if !u.HasUnwindPoint() {
+	if u != nil && !u.HasUnwindPoint() {
 		if b != nil {
 			_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
 			if err != nil {
@@ -1060,6 +1059,7 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
 
 // flushAndCheckCommitmentV3 - does write state to db and then check commitment
 func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.RwTx, doms *state2.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, inMemExec bool) (bool, error) {
+
 	// E2 state root check was in another stage - means we did flush state even if state root will not match
 	// And Unwind expecting it
 	if !parallel {
@@ -1079,6 +1079,9 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	rh, err := doms.ComputeCommitment(ctx, true, header.Number.Uint64(), u.LogPrefix())
 	if err != nil {
 		return false, fmt.Errorf("StateV3.Apply: %w", err)
+	}
+	if cfg.blockProduction {
+		return true, nil
 	}
 	if bytes.Equal(rh, header.Root.Bytes()) {
 		if !inMemExec {

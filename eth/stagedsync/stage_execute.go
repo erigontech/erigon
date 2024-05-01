@@ -91,7 +91,8 @@ type ExecuteBlockCfg struct {
 	genesis   *types.Genesis
 	agg       *libstate.Aggregator
 
-	silkworm *silkworm.Silkworm
+	silkworm        *silkworm.Silkworm
+	blockProduction bool
 }
 
 func StageExecuteBlocksCfg(
@@ -227,10 +228,7 @@ func gatherNoPruneReceipts(receipts *types.Receipts, chainCfg *chain.Config) boo
 		}
 	}
 	receipts = &cr
-	if receipts.Len() > 0 {
-		return true
-	}
-	return false
+	return receipts.Len() > 0
 }
 
 func newStateReaderWriter(
@@ -449,6 +447,10 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 
 	if toBlock > 0 {
 		to = cmp.Min(prevStageProgress, toBlock)
+	}
+
+	if cfg.syncCfg.LoopBlockLimit > 0 {
+		to = s.BlockNumber + uint64(cfg.syncCfg.LoopBlockLimit)
 	}
 
 	if to <= s.BlockNumber {

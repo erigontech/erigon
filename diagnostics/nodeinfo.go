@@ -8,6 +8,10 @@ import (
 )
 
 func SetupNodeInfoAccess(metricsMux *http.ServeMux, node *node.ErigonNode) {
+	if metricsMux == nil {
+		return
+	}
+
 	metricsMux.HandleFunc("/nodeinfo", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		writeNodeInfo(w, node)

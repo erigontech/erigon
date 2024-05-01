@@ -29,6 +29,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -58,7 +59,7 @@ func TestServerRegisterName(t *testing.T) {
 
 func TestServer(t *testing.T) {
 	logger := log.New()
-	files, err := os.ReadDir("testdata")
+	files, err := dir.ReadDir("testdata")
 	if err != nil {
 		t.Fatal("where'd my testdata go?")
 	}
