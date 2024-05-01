@@ -241,9 +241,9 @@ func StartPProf(address string, metricsMux *http.ServeMux) *http.ServeMux {
 
 	pprofMux.HandleFunc("/", pprof.Index)
 	pprofMux.HandleFunc("/cmdline", pprof.Cmdline)
-	pprofMux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-	pprofMux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-	pprofMux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	pprofMux.HandleFunc("/profile", pprof.Profile)
+	pprofMux.HandleFunc("/symbol", pprof.Symbol)
+	pprofMux.HandleFunc("/trace", pprof.Trace)
 
 	if metricsMux == nil {
 		middleMux := http.NewServeMux()
