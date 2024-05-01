@@ -130,10 +130,6 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		if cfg.Zk.ExecutorStrictMode && (len(cfg.Zk.ExecutorUrls) == 0 || cfg.ExecutorUrls[0] == "") {
 			panic("You must set executor urls when running in executor strict mode (zkevm.executor-strict)")
 		}
-
-		if cfg.Zk.ExecutorStrictMode && cfg.Zk.AllowPreEIP155Transactions {
-			panic("You must disable pre-EIP155 transactions when running in executor strict mode (zkevm.executor-strict)")
-		}
 	}
 
 	checkFlag(utils.AddressSequencerFlag.Name, cfg.AddressSequencer)
