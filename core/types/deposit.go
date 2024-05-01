@@ -2,6 +2,8 @@ package types
 
 import (
 	"bytes"
+	"encoding/binary"
+	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/accounts/abi"
@@ -46,6 +48,47 @@ func (d *Deposit) copy() RequestData {
 		Signature:             d.Signature,
 		Index:                 d.Index,
 	}
+}
+
+// field type overrides for abi upacking
+type depositUnpacking struct {
+	Pubkey                []byte
+	WithdrawalCredentials []byte
+	Amount                []byte
+	Signature             []byte
+	Index                 []byte
+}
+
+// unpackIntoDeposit unpacks a serialized DepositEvent.
+func unpackIntoDeposit(data []byte) (*Deposit, error) {
+	var du depositUnpacking
+	if err := DepositABI.UnpackIntoInterface(&du, "DepositEvent", data); err != nil {
+		return nil, err
+	}
+	var d Deposit
+	copy(d.Pubkey[:], du.Pubkey)
+	copy(d.WithdrawalCredentials[:], du.WithdrawalCredentials)
+	d.Amount = binary.LittleEndian.Uint64(du.Amount)
+	copy(d.Signature[:], du.Signature)
+	d.Index = binary.LittleEndian.Uint64(du.Index)
+
+	return &d, nil
+}
+
+// ParseDepositLogs extracts the EIP-6110 deposit values from logs emitted by
+// BeaconDepositContract.
+func ParseDepositLogs(logs []*Log, depositContractAddress *libcommon.Address) (Requests, error) {
+	var deposits Requests
+	for _, log := range logs {
+		if log.Address == *depositContractAddress {
+			d, err := unpackIntoDeposit(log.Data)
+			if err != nil {
+				return nil, fmt.Errorf("unable to parse deposit data: %v", err)
+			}
+			deposits = append(deposits, NewRequest(d))
+		}
+	}
+	return deposits, nil
 }
 
 type Deposits []*Deposit

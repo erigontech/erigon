@@ -105,6 +105,7 @@ func ExecuteBlockEphemerally(
 	includedTxs := make(types.Transactions, 0, block.Transactions().Len())
 	receipts := make(types.Receipts, 0, block.Transactions().Len())
 	noop := state.NewNoopWriter()
+	var allLogs types.Logs
 	for i, tx := range block.Transactions() {
 		ibs.SetTxContext(tx.Hash(), block.Hash(), i)
 		writeTrace := false
@@ -135,6 +136,7 @@ func ExecuteBlockEphemerally(
 				receipts = append(receipts, receipt)
 			}
 		}
+		allLogs = append(allLogs, receipt.Logs...)
 	}
 
 	receiptSha := types.DeriveSha(receipts)
@@ -199,6 +201,18 @@ func ExecuteBlockEphemerally(
 		}
 
 		execRs.StateSyncReceipt = stateSyncReceipt
+	}
+
+	if chainConfig.IsPrague(block.Time()) {
+		requests, err := types.ParseDepositLogs(allLogs, chainConfig.DepositContract)
+		if err != nil {
+			return nil, fmt.Errorf("error: could not parse requests logs: %v", err)
+		}
+
+		rh := types.DeriveSha(requests)
+		if *block.Header().RequestsRoot != rh {
+			// TODO(racytech): do we have to check it here?
+		}
 	}
 
 	return execRs, nil
