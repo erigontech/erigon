@@ -32,6 +32,9 @@ package iter
 //   4. automatically checks cancelation of `ctx` passed to `db.Begin(ctx)`, can skip this
 //     check in loops on stream. Duo has very limited API - user has no way to
 //     terminate it - but user can specify more strict conditions when creating stream (then server knows better when to stop)
+//
+//
+// Uno - return 1 element. Duo - 2. Trio - 3. Example of 3 elemets: `k, v1, v2, err := s.Next()`
 
 // Uno - return 1 item. Example:
 //
