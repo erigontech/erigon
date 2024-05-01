@@ -368,16 +368,16 @@ var (
 	{{range .Transacts}}
 		{{if ne (len .Normalized.Inputs) 0}}
 
-		// {{.Type}}{{.Normalized.Name}}Params is an auto generated read-only Go binding of transcaction calldata params
-		type {{.Type}}{{.Normalized.Name}}Params struct {
+		// {{$metaType}}{{.Normalized.Name}}Params is an auto generated read-only Go binding of transcaction calldata params
+		type {{$metaType}}{{.Normalized.Name}}Params struct {
 			{{range $i, $_ := .Normalized.Inputs}} Param_{{.Name}} {{bindtype .Type $structs}}
 			{{end}}
 		}
 
-		// Parse {{.Type}}{{.Normalized.Name}} method from calldata of a transaction
+		// Parse {{$metaType}}{{.Normalized.Name}} method from calldata of a transaction
 		// 
 		// Solidity: {{.Original.String}}
-		func Parse{{.Type}}{{.Normalized.Name}}(calldata []byte) (*{{.Type}}{{.Normalized.Name}}Params, error) {
+		func Parse{{$metaType}}{{.Normalized.Name}}(calldata []byte) (*{{$metaType}}{{.Normalized.Name}}Params, error) {
 			if len(calldata) <= 4 {
 				return nil, fmt.Errorf("invalid calldata input")
 			}
@@ -392,7 +392,7 @@ var (
 				return nil, fmt.Errorf("failed to unpack {{.Original.Name}} params data: %w", err)
 			}		
 
-			var paramsResult = new({{.Type}}{{.Normalized.Name}}Params)
+			var paramsResult = new({{$metaType}}{{.Normalized.Name}}Params)
 			value := reflect.ValueOf(paramsResult).Elem()
 
 			if value.NumField() != len(out) {
@@ -402,7 +402,7 @@ var (
 			{{range $i, $t := .Normalized.Inputs}}
 			out{{$i}} := *abi.ConvertType(out[{{$i}}], new({{bindtype .Type $structs}})).(*{{bindtype .Type $structs}}){{end}}
 
-			return &{{.Type}}{{.Normalized.Name}}Params{
+			return &{{$metaType}}{{.Normalized.Name}}Params{
 				{{range $i, $_ := .Normalized.Inputs}} Param_{{.Name}} : out{{$i}},{{end}} 
 			}, nil 
 		}
