@@ -374,7 +374,7 @@ var (
 			{{end}}
 		}
 
-		// Parse {{$metaType}}{{.Normalized.Name}} method from calldata of a transaction
+		// Parse {{.Normalized.Name}} method from calldata of a transaction
 		// 
 		// Solidity: {{.Original.String}}
 		func Parse{{$metaType}}{{.Normalized.Name}}Params(calldata []byte) (*{{$metaType}}{{.Normalized.Name}}Params, error) {
