@@ -24,7 +24,9 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/misc"
+	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -43,6 +45,7 @@ var activators = map[int]func(*JumpTable){
 	1884: enable1884,
 	1344: enable1344,
 	1153: enable1153,
+	3074: enable3074,
 }
 
 // EnableEIP enables the given EIP on the config.
@@ -341,6 +344,67 @@ func enable2935(jt *JumpTable) {
 }
 
 func opAuth(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	var (
+		_authority = scope.Stack.Pop()
+		_sigOffset = scope.Stack.Pop()
+		_sigLength = scope.Stack.Pop()
+	)
+
+	authority := libcommon.BigToAddress(_authority.ToBig())
+	sigOffset := int64(_sigOffset.Uint64())
+	sigLength := int64(_sigLength.Uint64())
+	output := &_authority // reuse a uint256.Int for output on stack
+
+	// if EXTCODESIZE of authority is not zero, operation is unsuccessful and unset authority
+	if interpreter.evm.intraBlockState.GetCodeSize(authority) > 0 {
+		return authUnsuccessful(scope, output)
+	}
+
+	sigAndCommit := common.RightPadBytes(scope.Memory.GetPtr(sigOffset, min(sigLength, 97)), 97)
+	commit := uint256.NewInt(0).SetBytes(sigAndCommit[65:])
+	signature := make([]byte, 0, 65)
+	signature = append(signature, sigAndCommit[1:65]...)
+	signature = append(signature, sigAndCommit[0])
+
+	chainId := interpreter.evm.ChainRules().ChainID
+	nonce := uint256.NewInt(interpreter.evm.intraBlockState.GetNonce(authority))
+
+	messageData := make([]byte, 0, 129)
+	messageData = append(messageData, params.AuthMagicPrefix)
+	messageData = append(messageData, common.LeftPadBytes(chainId.Bytes(), 32)...)
+	messageData = append(messageData, common.LeftPadBytes(nonce.Bytes(), 32)...)
+	messageData = append(messageData, common.LeftPadBytes(scope.Contract.self.Bytes(), 32)...)
+	messageData = append(messageData, common.LeftPadBytes(commit.Bytes(), 32)...)
+	message := crypto.Keccak256(messageData)
+
+	pubkey, error := crypto.Ecrecover(message, signature)
+	if error != nil {
+		// note that error is ignored silently here.
+		// TODO: look at other implementations, should this really be ignored and exec proceeded?
+		// it seems like a case for returning error and tx revert (but eip mentions to reset
+		// authority to nil, which seems to suggest the tx still proceeds. So it's a bit unclear)
+		return authUnsuccessful(scope, output)
+	}
+
+	recoveredAddress := libcommon.BytesToAddress(crypto.Keccak256(pubkey[1:])[12:])
+	if recoveredAddress != authority {
+		// TODO: should it become nil? Or point to the previous value (in case there are 2 auth calls)
+		// eip says the former, but worth checking.
+		// Actually can't decide for either, I think if there's a mismatch, the tx itself should fail (just
+		// like in ecrecovery error scenario above should also fail the tx)
+		return authUnsuccessful(scope, output)
+	}
+
+	// set the authority
+	scope.Authority = &authority
+	scope.Stack.Push(output.SetOne())
+
+	return nil, nil
+}
+
+func authUnsuccessful(scope *ScopeContext, spare *uint256.Int) ([]byte, error) {
+	scope.Authority = nil
+	scope.Stack.Push(spare.Clear())
 	return nil, nil
 }
 

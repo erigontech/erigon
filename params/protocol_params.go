@@ -176,7 +176,8 @@ const (
 	BlockHashHistoryServeWindow uint64 = 8192
 	BlockHashOldWindow          uint64 = 256
 	// EIP-3074
-	AuthFixedGas uint64 = 3100
+	AuthFixedGas    uint64 = 3100
+	AuthMagicPrefix        = byte(0x04)
 )
 
 // EIP-4788: Beacon block root in the EVM
