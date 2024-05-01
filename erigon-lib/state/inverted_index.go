@@ -32,7 +32,6 @@ import (
 	"regexp"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
@@ -1535,14 +1534,16 @@ func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (
 	var (
 		prevEf      []byte
 		prevKey     []byte
-		initialized atomic.Bool
+		initialized bool
 		bitmap      = bitmapdb.NewBitmap64()
 	)
+	defer bitmapdb.ReturnToPool64(bitmap)
 
 	loadBitmapsFunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		txNum := binary.BigEndian.Uint64(v)
-		if initialized.CompareAndSwap(false, true) {
+		if !initialized {
 			prevKey = append(prevKey[:0], k...)
+			initialized = true
 		}
 
 		if bytes.Equal(prevKey, k) {
@@ -1628,9 +1629,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, coll Inver
 	closeComp := true
 	defer func() {
 		if closeComp {
-			//if coll != nil {
 			coll.Close()
-			//}
 			if decomp != nil {
 				decomp.Close()
 			}
@@ -1643,8 +1642,10 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, coll Inver
 		}
 	}()
 
-	if assert.Enable && coll.iiPath == "" && reflect.ValueOf(coll.writer).IsNil() {
-		panic("assert: collation is not initialized " + ii.filenameBase)
+	if assert.Enable {
+		if coll.iiPath == "" && reflect.ValueOf(coll.writer).IsNil() {
+			panic("assert: collation is not initialized " + ii.filenameBase)
+		}
 	}
 
 	{

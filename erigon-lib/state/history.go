@@ -27,7 +27,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
-	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv/backup"
@@ -566,12 +565,13 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	var (
 		historyComp   ArchiveWriter
 		efHistoryComp ArchiveWriter
-		closeComp     = true
+		txKey         [8]byte
 		err           error
 
 		historyPath   = h.vFilePath(step, step+1)
 		efHistoryPath = h.efFilePath(step, step+1)
 		startAt       = time.Now()
+		closeComp     = true
 	)
 	defer func() {
 		mxCollateTookHistory.ObserveDuration(startAt)
@@ -597,7 +597,6 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	}
 	defer keysCursor.Close()
 
-	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
 	collector := etl.NewCollector(h.historyValsTable, h.iiCfg.dirs.Tmp, etl.NewSortableBuffer(CollateETLRAM), h.logger)
 	defer collector.Close()
@@ -651,15 +650,17 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 		bitmap      = bitmapdb.NewBitmap64()
 		prevEf      []byte
 		prevKey     []byte
-		initialized atomic.Bool
+		initialized bool
 	)
 	efHistoryComp = NewArchiveWriter(efComp, CompressNone)
 	collector.SortAndFlushInBackground(true)
+	defer bitmapdb.ReturnToPool64(bitmap)
 
 	loadBitmapsFunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		txNum := binary.BigEndian.Uint64(v)
-		if initialized.CompareAndSwap(false, true) {
+		if !initialized {
 			prevKey = append(prevKey[:0], k...)
+			initialized = true
 		}
 
 		if bytes.Equal(prevKey, k) {
