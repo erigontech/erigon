@@ -27,20 +27,20 @@ func newBlockDownloaderTest(t *testing.T) *blockDownloaderTest {
 
 func newBlockDownloaderTestWithOpts(t *testing.T, opts blockDownloaderTestOpts) *blockDownloaderTest {
 	ctrl := gomock.NewController(t)
-	heimdallService := heimdall.NewMockHeimdallNoStore(ctrl)
+	heimdallService := heimdall.NewMockHeimdall(ctrl)
 	p2pService := p2p.NewMockService(ctrl)
 	p2pService.EXPECT().MaxPeers().Return(100).Times(1)
 	logger := testlog.Logger(t, log.LvlDebug)
 	headersVerifier := opts.getOrCreateDefaultHeadersVerifier()
 	blocksVerifier := opts.getOrCreateDefaultBlocksVerifier()
-	storage := NewMockStorage(ctrl)
+	store := NewMockStore(ctrl)
 	headerDownloader := newBlockDownloader(
 		logger,
 		p2pService,
 		heimdallService,
 		headersVerifier,
 		blocksVerifier,
-		storage,
+		store,
 		time.Millisecond,
 		opts.getOrCreateDefaultMaxWorkers(),
 	)
@@ -48,7 +48,7 @@ func newBlockDownloaderTestWithOpts(t *testing.T, opts blockDownloaderTestOpts) 
 		heimdall:        heimdallService,
 		p2pService:      p2pService,
 		blockDownloader: headerDownloader,
-		storage:         storage,
+		store:           store,
 	}
 }
 
@@ -87,10 +87,10 @@ func (opts blockDownloaderTestOpts) getOrCreateDefaultMaxWorkers() int {
 }
 
 type blockDownloaderTest struct {
-	heimdall        *heimdall.MockHeimdallNoStore
+	heimdall        *heimdall.MockHeimdall
 	p2pService      *p2p.MockService
 	blockDownloader *blockDownloader
-	storage         *MockStorage
+	store           *MockStore
 }
 
 func (hdt blockDownloaderTest) fakePeers(count int) []*p2p.PeerId {
@@ -214,7 +214,7 @@ func TestBlockDownloaderDownloadBlocksUsingMilestones(t *testing.T) {
 		DoAndReturn(test.defaultFetchBodiesMock()).
 		Times(4)
 	var blocks []*types.Block
-	test.storage.EXPECT().
+	test.store.EXPECT().
 		InsertBlocks(gomock.Any(), gomock.Any()).
 		DoAndReturn(test.defaultInsertBlocksMock(&blocks)).
 		Times(1)
@@ -249,7 +249,7 @@ func TestBlockDownloaderDownloadBlocksUsingCheckpoints(t *testing.T) {
 		DoAndReturn(test.defaultFetchBodiesMock()).
 		Times(8)
 	var blocks []*types.Block
-	test.storage.EXPECT().
+	test.store.EXPECT().
 		InsertBlocks(gomock.Any(), gomock.Any()).
 		DoAndReturn(test.defaultInsertBlocksMock(&blocks)).
 		Times(4)
@@ -318,11 +318,11 @@ func TestBlockDownloaderDownloadBlocksWhenInvalidHeadersThenPenalizePeerAndReDow
 		Times(1)
 	var blocksBatch1, blocksBatch2 []*types.Block
 	gomock.InOrder(
-		test.storage.EXPECT().
+		test.store.EXPECT().
 			InsertBlocks(gomock.Any(), gomock.Any()).
 			DoAndReturn(test.defaultInsertBlocksMock(&blocksBatch1)).
 			Times(1),
-		test.storage.EXPECT().
+		test.store.EXPECT().
 			InsertBlocks(gomock.Any(), gomock.Any()).
 			DoAndReturn(test.defaultInsertBlocksMock(&blocksBatch2)).
 			Times(3),
@@ -349,7 +349,7 @@ func TestBlockDownloaderDownloadBlocksWhenZeroPeersTriesAgain(t *testing.T) {
 		DoAndReturn(test.defaultFetchBodiesMock()).
 		Times(8)
 	var blocks []*types.Block
-	test.storage.EXPECT().
+	test.store.EXPECT().
 		InsertBlocks(gomock.Any(), gomock.Any()).
 		DoAndReturn(test.defaultInsertBlocksMock(&blocks)).
 		Times(4)
@@ -421,11 +421,11 @@ func TestBlockDownloaderDownloadBlocksWhenInvalidBodiesThenPenalizePeerAndReDown
 		Times(1)
 	var blocksBatch1, blocksBatch2 []*types.Block
 	gomock.InOrder(
-		test.storage.EXPECT().
+		test.store.EXPECT().
 			InsertBlocks(gomock.Any(), gomock.Any()).
 			DoAndReturn(test.defaultInsertBlocksMock(&blocksBatch1)).
 			Times(1),
-		test.storage.EXPECT().
+		test.store.EXPECT().
 			InsertBlocks(gomock.Any(), gomock.Any()).
 			DoAndReturn(test.defaultInsertBlocksMock(&blocksBatch2)).
 			Times(3),
@@ -482,11 +482,11 @@ func TestBlockDownloaderDownloadBlocksWhenMissingBodiesThenPenalizePeerAndReDown
 		Times(1)
 	var blocksBatch1, blocksBatch2 []*types.Block
 	gomock.InOrder(
-		test.storage.EXPECT().
+		test.store.EXPECT().
 			InsertBlocks(gomock.Any(), gomock.Any()).
 			DoAndReturn(test.defaultInsertBlocksMock(&blocksBatch1)).
 			Times(1),
-		test.storage.EXPECT().
+		test.store.EXPECT().
 			InsertBlocks(gomock.Any(), gomock.Any()).
 			DoAndReturn(test.defaultInsertBlocksMock(&blocksBatch2)).
 			Times(3),
@@ -520,11 +520,11 @@ func TestBlockDownloaderDownloadBlocksRespectsMaxWorkers(t *testing.T) {
 		Times(2)
 	var blocksBatch1, blocksBatch2 []*types.Block
 	gomock.InOrder(
-		test.storage.EXPECT().
+		test.store.EXPECT().
 			InsertBlocks(gomock.Any(), gomock.Any()).
 			DoAndReturn(test.defaultInsertBlocksMock(&blocksBatch1)).
 			Times(1),
-		test.storage.EXPECT().
+		test.store.EXPECT().
 			InsertBlocks(gomock.Any(), gomock.Any()).
 			DoAndReturn(test.defaultInsertBlocksMock(&blocksBatch2)).
 			Times(1),

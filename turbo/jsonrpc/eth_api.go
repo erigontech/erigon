@@ -109,8 +109,11 @@ type EthAPI interface {
 }
 
 type BaseAPI struct {
-	stateCache   kvcache.Cache                         // thread-safe
-	blocksLRU    *lru.Cache[common.Hash, *types.Block] // thread-safe
+	// all caches are thread-safe
+	stateCache    kvcache.Cache
+	blocksLRU     *lru.Cache[common.Hash, *types.Block]
+	receiptsCache *lru.Cache[common.Hash, []*types.Receipt]
+
 	filters      *rpchelper.Filters
 	_chainConfig atomic.Pointer[chain.Config]
 	_genesis     atomic.Pointer[types.Block]
@@ -127,16 +130,36 @@ type BaseAPI struct {
 }
 
 func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, agg *libstate.Aggregator, singleNodeMode bool, evmCallTimeout time.Duration, engine consensus.EngineReader, dirs datadir.Dirs) *BaseAPI {
-	blocksLRUSize := 128 // ~32Mb
+	var (
+		blocksLRUSize      = 128 // ~32Mb
+		receiptsCacheLimit = 32
+	)
+	// if RPCDaemon deployed as independent process: increase cache sizes
 	if !singleNodeMode {
-		blocksLRUSize = 512
+		blocksLRUSize *= 5
+		receiptsCacheLimit *= 5
 	}
 	blocksLRU, err := lru.New[common.Hash, *types.Block](blocksLRUSize)
 	if err != nil {
 		panic(err)
 	}
+	receiptsCache, err := lru.New[common.Hash, []*types.Receipt](receiptsCacheLimit)
+	if err != nil {
+		panic(err)
+	}
 
-	return &BaseAPI{filters: f, stateCache: stateCache, blocksLRU: blocksLRU, _blockReader: blockReader, _txnReader: blockReader, _agg: agg, evmCallTimeout: evmCallTimeout, _engine: engine, dirs: dirs}
+	return &BaseAPI{
+		filters:        f,
+		stateCache:     stateCache,
+		blocksLRU:      blocksLRU,
+		receiptsCache:  receiptsCache,
+		_blockReader:   blockReader,
+		_txnReader:     blockReader,
+		_agg:           agg,
+		evmCallTimeout: evmCallTimeout,
+		_engine:        engine,
+		dirs:           dirs,
+	}
 }
 
 func (api *BaseAPI) chainConfig(ctx context.Context, tx kv.Tx) (*chain.Config, error) {

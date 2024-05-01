@@ -8,9 +8,7 @@ An accessible and complete version of the documentation is available at **[erigo
 **.
 <br>
 
-![Build status](https://github.com/ledgerwatch/erigon/actions/workflows/ci.yml/badge.svg)
-
-![Coverage](https://gist.githubusercontent.com/revitteth/ee38e9beb22353eef6b88f2ad6ed7aa9/raw/badge.svg)
+![Build status](https://github.com/ledgerwatch/erigon/actions/workflows/ci.yml/badge.svg) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=ledgerwatch_erigon&metric=coverage)](https://sonarcloud.io/summary/new_code?id=ledgerwatch_erigon)
 
 <!--ts-->
 
@@ -99,7 +97,7 @@ For building the bleeding edge development branch:
 ```sh
 git clone --recurse-submodules https://github.com/ledgerwatch/erigon.git
 cd erigon
-git checkout devel
+git checkout main
 make erigon
 ./build/bin/erigon
 ```
@@ -685,7 +683,7 @@ https://github.com/mathMakesArt/Erigon-on-RPi-4
 
 ### How to change db pagesize
 
-[post](https://github.com/ledgerwatch/erigon/blob/devel/cmd/integration/Readme.md#copy-data-to-another-db)
+[post](https://github.com/ledgerwatch/erigon/blob/main/cmd/integration/Readme.md#copy-data-to-another-db)
 
 
 Getting in touch
@@ -764,7 +762,7 @@ XDG_DATA_HOME=/preferred/data/folder DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=
 
 ## Erigon3 user's guide
 
-Git branch `e35`. Just start erigon as you usually do.
+Git branch `main`. Just start erigon as you usually do.
 
 RAM requirement is higher: 32gb and better 64gb. We will work on this topic a bit later.
 
@@ -828,7 +826,7 @@ datadir
 ### E3 datadir size
 
 ```
-# eth-mainnet - April 2024
+# eth-mainnet - archive - April 2024
 
 du -hsc /erigon/* 
 6G  	/erigon/caplin
@@ -845,7 +843,7 @@ du -hsc /erigon/snapshots/*
 ```
 
 ```
-# bor-mainnet - April 2024
+# bor-mainnet - archive - April 2024
 
 du -hsc /erigon/* 
 160M	/erigon/bor

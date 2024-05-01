@@ -91,7 +91,8 @@ type ExecuteBlockCfg struct {
 	genesis   *types.Genesis
 	agg       *libstate.Aggregator
 
-	silkworm *silkworm.Silkworm
+	silkworm        *silkworm.Silkworm
+	blockProduction bool
 }
 
 func StageExecuteBlocksCfg(
@@ -205,17 +206,16 @@ func executeBlock(
 	return nil
 }
 
-// Filters out and keeps receipts of contracts that may be needed by CL, such as deposit contrac,
-// The list of contracts to filter is config-specified
+// Filters out and keeps receipts of the contracts that may be needed by CL, namely of the deposit contract.
 func gatherNoPruneReceipts(receipts *types.Receipts, chainCfg *chain.Config) bool {
 	cr := types.Receipts{}
 	for _, r := range *receipts {
 		toStore := false
-		if chainCfg.NoPruneContracts != nil && chainCfg.NoPruneContracts[r.ContractAddress] {
+		if chainCfg.DepositContract != nil && *chainCfg.DepositContract == r.ContractAddress {
 			toStore = true
 		} else {
 			for _, l := range r.Logs {
-				if chainCfg.NoPruneContracts != nil && chainCfg.NoPruneContracts[l.Address] {
+				if chainCfg.DepositContract != nil && *chainCfg.DepositContract == l.Address {
 					toStore = true
 					break
 				}
@@ -227,10 +227,7 @@ func gatherNoPruneReceipts(receipts *types.Receipts, chainCfg *chain.Config) boo
 		}
 	}
 	receipts = &cr
-	if receipts.Len() > 0 {
-		return true
-	}
-	return false
+	return receipts.Len() > 0
 }
 
 func newStateReaderWriter(
@@ -449,6 +446,10 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 
 	if toBlock > 0 {
 		to = cmp.Min(prevStageProgress, toBlock)
+	}
+
+	if cfg.syncCfg.LoopBlockLimit > 0 {
+		to = s.BlockNumber + uint64(cfg.syncCfg.LoopBlockLimit)
 	}
 
 	if to <= s.BlockNumber {

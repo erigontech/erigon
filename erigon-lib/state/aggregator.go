@@ -590,7 +590,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 		g.Go(func() error {
 			defer a.wg.Done()
 
-			var collation map[string]*roaring64.Bitmap
+			var collation InvertedIndexCollation
 			err := a.db.View(ctx, func(tx kv.Tx) (err error) {
 				collation, err = d.collate(ctx, step, tx)
 				return err
