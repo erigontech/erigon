@@ -16,7 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-//go:generate mockgen -destination=./spanner_mock.go -package=bor . Spanner
+//go:generate mockgen -typed=true -destination=./spanner_mock.go -package=bor . Spanner
 type Spanner interface {
 	GetCurrentSpan(syscall consensus.SystemCall) (*heimdall.Span, error)
 	GetCurrentValidators(spanId uint64, signer libcommon.Address, chain consensus.ChainHeaderReader) ([]*valset.Validator, error)

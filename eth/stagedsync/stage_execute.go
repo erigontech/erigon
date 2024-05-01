@@ -91,7 +91,8 @@ type ExecuteBlockCfg struct {
 	genesis   *types.Genesis
 	agg       *libstate.Aggregator
 
-	silkworm *silkworm.Silkworm
+	silkworm        *silkworm.Silkworm
+	blockProduction bool
 }
 
 func StageExecuteBlocksCfg(
@@ -227,10 +228,7 @@ func gatherNoPruneReceipts(receipts *types.Receipts, chainCfg *chain.Config) boo
 		}
 	}
 	receipts = &cr
-	if receipts.Len() > 0 {
-		return true
-	}
-	return false
+	return receipts.Len() > 0
 }
 
 func newStateReaderWriter(
@@ -371,8 +369,9 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	if err != nil {
 		return err
 	}
+	t := time.Now()
 	if err := rs.Unwind(ctx, txc.Tx, u.UnwindPoint, txNum, accumulator); err != nil {
-		return fmt.Errorf("StateV3.Unwind: %w", err)
+		return fmt.Errorf("StateV3.Unwind(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
 	}
 	if err := rawdb.TruncateReceipts(txc.Tx, u.UnwindPoint+1); err != nil {
 		return fmt.Errorf("truncate receipts: %w", err)
@@ -448,6 +447,10 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 
 	if toBlock > 0 {
 		to = cmp.Min(prevStageProgress, toBlock)
+	}
+
+	if cfg.syncCfg.LoopBlockLimit > 0 {
+		to = s.BlockNumber + uint64(cfg.syncCfg.LoopBlockLimit)
 	}
 
 	if to <= s.BlockNumber {
@@ -800,7 +803,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 	}
 	useExternalTx := txc.Tx != nil
 	if !useExternalTx {
-		txc.Tx, err = cfg.db.BeginRw(context.Background())
+		txc.Tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}

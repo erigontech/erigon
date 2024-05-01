@@ -43,6 +43,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
+	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
 	"github.com/ledgerwatch/erigon/diagnostics"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
@@ -775,7 +776,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 			return err
 		})
 		blockReader, _ := br.IO()
-		from2, to2, ok := freezeblocks.CanRetire(forwardProgress, blockReader.FrozenBlocks(), nil)
+		from2, to2, ok := freezeblocks.CanRetire(forwardProgress, blockReader.FrozenBlocks(), coresnaptype.Enums.Headers, nil)
 		if ok {
 			from, to, every = from2, to2, to2-from2
 		}
@@ -944,9 +945,7 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 		return err
 	}
 
-	if metricsMux != nil {
-		diagnostics.Setup(cliCtx, metricsMux, ethNode)
-	}
+	diagnostics.Setup(cliCtx, ethNode, metricsMux)
 
 	err = ethNode.Serve()
 	if err != nil {
