@@ -40,7 +40,7 @@ func NewTestDB(tb testing.TB, dirs datadir.Dirs) (histV3 bool, db kv.RwDB, agg *
 	if err != nil {
 		panic(err)
 	}
-	if err := agg.OpenFolder(false); err != nil {
+	if err := agg.OpenFolder(true); err != nil {
 		panic(err)
 	}
 
