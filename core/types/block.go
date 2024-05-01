@@ -105,6 +105,8 @@ type Header struct {
 
 	ParentBeaconBlockRoot *libcommon.Hash `json:"parentBeaconBlockRoot"` // EIP-4788
 
+	RequestsRoot *libcommon.Hash `json:"requestsRoot"` // EIP-7685
+
 	// The verkle proof is ignored in legacy headers
 	Verkle        bool
 	VerkleProof   []byte
@@ -158,6 +160,10 @@ func (h *Header) EncodingSize() int {
 	}
 
 	if h.ParentBeaconBlockRoot != nil {
+		encodingSize += 33
+	}
+
+	if h.RequestsRoot != nil {
 		encodingSize += 33
 	}
 
@@ -306,6 +312,16 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 			return err
 		}
 		if _, err := w.Write(h.ParentBeaconBlockRoot.Bytes()); err != nil {
+			return err
+		}
+	}
+
+	if h.RequestsRoot != nil {
+		b[0] = 128 + 32
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+		if _, err := w.Write(h.RequestsRoot.Bytes()); err != nil {
 			return err
 		}
 	}
@@ -498,6 +514,23 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	h.ParentBeaconBlockRoot = new(libcommon.Hash)
 	h.ParentBeaconBlockRoot.SetBytes(b)
 
+	// RequestsRoot
+	if b, err = s.Bytes(); err != nil {
+		if errors.Is(err, rlp.EOL) {
+			h.RequestsRoot = nil
+			if err := s.ListEnd(); err != nil {
+				return fmt.Errorf("close header struct (no RequestsRoot): %w", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("read RequestsRoot: %w", err)
+	}
+	if len(b) != 32 {
+		return fmt.Errorf("wrong size for RequestsRoot: %d", len(b))
+	}
+	h.RequestsRoot = new(libcommon.Hash)
+	h.RequestsRoot.SetBytes(b)
+
 	if h.Verkle {
 		if h.VerkleProof, err = s.Bytes(); err != nil {
 			return fmt.Errorf("read VerkleProof: %w", err)
@@ -557,6 +590,9 @@ func (h *Header) Size() common.StorageSize {
 	if h.ParentBeaconBlockRoot != nil {
 		s += common.StorageSize(32)
 	}
+	if h.RequestsRoot != nil {
+		s += common.StorageSize(32)
+	}
 	return s
 }
 
@@ -591,6 +627,7 @@ type Body struct {
 	Transactions []Transaction
 	Uncles       []*Header
 	Withdrawals  []*Withdrawal
+	Requests     []*Request
 }
 
 // RawBody is semi-parsed variant of Body, where transactions are still unparsed RLP strings
@@ -600,6 +637,7 @@ type RawBody struct {
 	Transactions [][]byte
 	Uncles       []*Header
 	Withdrawals  []*Withdrawal
+	Requests     []*Request
 }
 
 type BodyForStorage struct {
@@ -607,6 +645,7 @@ type BodyForStorage struct {
 	TxAmount    uint32
 	Uncles      []*Header
 	Withdrawals []*Withdrawal
+	Requests    []*Request
 }
 
 // Alternative representation of the Block.
@@ -638,6 +677,7 @@ type Block struct {
 	uncles       []*Header
 	transactions Transactions
 	withdrawals  []*Withdrawal
+	requests     []*Request
 
 	// caches
 	hash atomic.Value

@@ -15,7 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-const RUNS = 100 // for local tests increase this number
+const RUNS = 1000000 // for local tests increase this number
 
 type TRand struct {
 	rnd *rand.Rand
@@ -67,6 +67,23 @@ func (tr *TRand) RandWithdrawal() *Withdrawal {
 		Address:   tr.RandAddress(),
 		Amount:    tr.rnd.Uint64(),
 	}
+}
+
+func (tr *TRand) RandDeposit() *Deposit {
+	return &Deposit{
+		Pubkey:                [48]byte(tr.RandBytes(48)),
+		WithdrawalCredentials: tr.RandHash(),
+		Amount:                *tr.RandUint64(),
+		Signature:             [96]byte(tr.RandBytes(96)),
+		Index:                 *tr.RandUint64(),
+	}
+}
+
+func (tr *TRand) RandRequest() *Request {
+	d := tr.RandDeposit()
+	var r Request
+	r.inner = d.copy()
+	return &r
 }
 
 func (tr *TRand) RandHeader() *Header {
@@ -210,6 +227,7 @@ func (tr *TRand) RandWithdrawals(size int) []*Withdrawal {
 	}
 	return withdrawals
 }
+
 func (tr *TRand) RandRawBody() *RawBody {
 	return &RawBody{
 		Transactions: tr.RandRawTransactions(tr.RandIntInRange(1, 6)),
@@ -254,9 +272,9 @@ func isEqualBytes(a, b []byte) bool {
 	return true
 }
 
-func check(t *testing.T, f string, got, want interface{}) {
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("%s mismatch: got %v, want %v", f, got, want)
+func check(t *testing.T, f string, want, got interface{}) {
+	if !reflect.DeepEqual(want, got) {
+		t.Errorf("%s mismatch: want %v, got %v", f, want, got)
 	}
 }
 
@@ -311,13 +329,13 @@ func compareTransactions(t *testing.T, a, b Transaction) {
 	check(t, "Tx.S", s1, s2)
 }
 
-// func compareDeposits(t *testing.T, a, b *Deposit) {
-// 	check(t, "Deposit.Pubkey", a.Index, b.Index)
-// 	check(t, "Deposit.WithdrawalCredentials", a.WithdrawalCredentials, b.WithdrawalCredentials)
-// 	check(t, "Deposit.Amount", a.Amount, b.Amount)
-// 	check(t, "Deposit.Signature", a.Signature, b.Signature)
-// 	check(t, "Deposit.Index", a.Index, b.Index)
-// }
+func compareDeposits(t *testing.T, a, b *Deposit) {
+	check(t, "Deposit.Pubkey", a.Index, b.Index)
+	check(t, "Deposit.WithdrawalCredentials", a.WithdrawalCredentials, b.WithdrawalCredentials)
+	check(t, "Deposit.Amount", a.Amount, b.Amount)
+	check(t, "Deposit.Signature", a.Signature, b.Signature)
+	check(t, "Deposit.Index", a.Index, b.Index)
+}
 
 func compareRawBodies(t *testing.T, a, b *RawBody) error {
 
@@ -438,5 +456,25 @@ func TestBodyEncodeDecodeRLP(t *testing.T) {
 		if err := compareBodies(t, enc, dec); err != nil {
 			t.Errorf("error: compareRawBodies: %v", err)
 		}
+	}
+}
+
+func TestDepositEncodeDecode(t *testing.T) {
+	tr := NewTRand()
+	var buf bytes.Buffer
+	for i := 0; i < RUNS; i++ {
+		enc := tr.RandRequest()
+		buf.Reset()
+		if err := enc.EncodeRLP(&buf); err != nil {
+			t.Errorf("error: deposit.EncodeRLP(): %v", err)
+		}
+		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
+		dec := &Request{}
+		if err := dec.DecodeRLP(s); err != nil {
+			t.Errorf("error: Deposit.DecodeRLP(): %v", err)
+		}
+		a := enc.inner.(*Deposit)
+		b := dec.inner.(*Deposit)
+		compareDeposits(t, a, b)
 	}
 }
