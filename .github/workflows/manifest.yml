@@ -2,15 +2,13 @@ name: Manifest Check
 on:
   push:
     branches:
-      - devel
-      - e35
+      - main
       - 'release/**'
     paths:
       - 'go.mod'
   pull_request:
     branches:
-      - devel
-      - e35
+      - main
       - 'release/**'
     paths:
       - 'go.mod'

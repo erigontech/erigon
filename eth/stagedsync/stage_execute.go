@@ -91,7 +91,8 @@ type ExecuteBlockCfg struct {
 	genesis   *types.Genesis
 	agg       *libstate.Aggregator
 
-	silkworm *silkworm.Silkworm
+	silkworm        *silkworm.Silkworm
+	blockProduction bool
 }
 
 func StageExecuteBlocksCfg(
@@ -205,17 +206,16 @@ func executeBlock(
 	return nil
 }
 
-// Filters out and keeps receipts of contracts that may be needed by CL, such as deposit contrac,
-// The list of contracts to filter is config-specified
+// Filters out and keeps receipts of the contracts that may be needed by CL, namely of the deposit contract.
 func gatherNoPruneReceipts(receipts *types.Receipts, chainCfg *chain.Config) bool {
 	cr := types.Receipts{}
 	for _, r := range *receipts {
 		toStore := false
-		if chainCfg.NoPruneContracts != nil && chainCfg.NoPruneContracts[r.ContractAddress] {
+		if chainCfg.DepositContract != nil && *chainCfg.DepositContract == r.ContractAddress {
 			toStore = true
 		} else {
 			for _, l := range r.Logs {
-				if chainCfg.NoPruneContracts != nil && chainCfg.NoPruneContracts[l.Address] {
+				if chainCfg.DepositContract != nil && *chainCfg.DepositContract == l.Address {
 					toStore = true
 					break
 				}
