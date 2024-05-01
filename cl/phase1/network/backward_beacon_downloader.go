@@ -193,21 +193,6 @@ Loop:
 			break
 		}
 
-		if b.engine != nil && b.engine.SupportInsertion() {
-			blockHash, err := beacon_indicies.ReadExecutionBlockHash(tx, b.expectedRoot)
-			if err != nil {
-				return err
-			}
-			if blockHash != (libcommon.Hash{}) {
-				has, err := b.engine.HasBlock(ctx, blockHash)
-				if err != nil {
-					return err
-				}
-				if !has {
-					break
-				}
-			}
-		}
 		b.slotToDownload.Store(*slot - 1)
 		if err := beacon_indicies.MarkRootCanonical(b.ctx, tx, *slot, b.expectedRoot); err != nil {
 			return err
