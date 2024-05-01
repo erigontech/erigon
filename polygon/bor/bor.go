@@ -1504,6 +1504,7 @@ func (c *Bor) CommitStates(
 			return err
 		}
 	}
+
 	return nil
 }
 

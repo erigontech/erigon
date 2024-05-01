@@ -187,7 +187,7 @@ func (s *polygonSyncStageStorage) Run(context.Context) error {
 func (s *polygonSyncStageStorage) use(tx kv.RwTx) {
 	s.tx = tx
 	// TODO pass in reader
-	s.Store = heimdall.NewRwTxStore(nil, tx)
+	s.Store = heimdall.NewTxStore(nil, tx)
 }
 
 type noopExecutionClient struct{}

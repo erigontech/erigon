@@ -1302,7 +1302,11 @@ func (c *MockStorePutSpanCall) DoAndReturn(f func(context.Context, *Span) error)
 	return c
 }
 
+<<<<<<< HEAD
 // MockRoStore is a mock of RoStore interface.
+=======
+// MockRoStore is a mock of ReadStore interface.
+>>>>>>> 7e3ea3a283760669f7520d8b14363ad45fae4136
 type MockRoStore struct {
 	ctrl     *gomock.Controller
 	recorder *MockRoStoreMockRecorder

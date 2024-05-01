@@ -8,9 +8,7 @@ An accessible and complete version of the documentation is available at **[erigo
 **.
 <br>
 
-![Build status](https://github.com/ledgerwatch/erigon/actions/workflows/ci.yml/badge.svg)
-
-![Coverage](https://gist.githubusercontent.com/revitteth/ee38e9beb22353eef6b88f2ad6ed7aa9/raw/badge.svg)
+![Build status](https://github.com/ledgerwatch/erigon/actions/workflows/ci.yml/badge.svg) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=ledgerwatch_erigon&metric=coverage)](https://sonarcloud.io/summary/new_code?id=ledgerwatch_erigon)
 
 <!--ts-->
 
@@ -828,7 +826,7 @@ datadir
 ### E3 datadir size
 
 ```
-# eth-mainnet - April 2024
+# eth-mainnet - archive - April 2024
 
 du -hsc /erigon/* 
 6G  	/erigon/caplin
@@ -845,7 +843,7 @@ du -hsc /erigon/snapshots/*
 ```
 
 ```
-# bor-mainnet - April 2024
+# bor-mainnet - archive - April 2024
 
 du -hsc /erigon/* 
 160M	/erigon/bor
