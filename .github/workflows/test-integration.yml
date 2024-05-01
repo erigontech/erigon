@@ -2,13 +2,11 @@ name: Integration tests
 on:
   push:
     branches:
-      - devel
-      - alpha
-      - e35
+      - main
       - 'release/**'
   pull_request:
     branches:
-      - e35
+      - main
     types:
       - opened
       - reopened
