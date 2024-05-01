@@ -153,7 +153,7 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, blockPrune uint, prever
 			from *= 1000
 			to *= 1000
 			kind = minusSplit[3]
-			fmt.Println(minusSplit, kind)
+			fmt.Println(from, to, kind)
 		}
 		blackList[p.Name] = struct{}{} // Add all of them to the blacklist and remove the ones that are not blacklisted later.
 		snapshotKindToNames[kind] = append(snapshotKindToNames[kind], snapshotFileData{
