@@ -70,7 +70,7 @@ func RequestSnapshotsDownload(ctx context.Context, downloadRequest []services.Do
 
 const (
 	MinPruneStep   = 64
-	MinPruneBlocks = 2_000_000
+	MinPruneBlocks = 2_000_000 // Still download 2 million blocks for good measure. TODO: make this the real minimum
 )
 
 func adjustStepPrune(steps uint) uint {
