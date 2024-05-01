@@ -22,10 +22,11 @@ import (
 	"math/big"
 	"sync/atomic"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"

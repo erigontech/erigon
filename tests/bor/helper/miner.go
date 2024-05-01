@@ -104,7 +104,7 @@ func InitMiner(ctx context.Context, genesis *types.Genesis, privKey *ecdsa.Priva
 		MdbxDBSizeLimit: 64 * datasize.MB,
 	}
 
-	stack, err := node.New(context.Background(), nodeCfg, logger)
+	stack, err := node.New(ctx, nodeCfg, logger)
 	if err != nil {
 		return nil, nil, err
 	}

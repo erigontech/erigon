@@ -9,6 +9,7 @@ import (
 	"time"
 
 	jsoniter "github.com/json-iterator/go"
+	"github.com/ledgerwatch/erigon/eth/consensuschain"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -20,7 +21,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -76,7 +76,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 	vmenv := vm.NewEVM(blockContext, evmtypes.TxContext{}, statedb, cfg, vm.Config{})
 	rules := vmenv.ChainRules()
 
-	consensusHeaderReader := stagedsync.NewChainReaderImpl(cfg, dbtx, nil, nil)
+	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, nil, nil)
 
 	logger := log.New("tracing")
 	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, header, cfg, statedb, logger)

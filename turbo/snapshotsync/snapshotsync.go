@@ -19,11 +19,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type CaplinMode int
@@ -71,7 +71,7 @@ func RequestSnapshotsDownload(ctx context.Context, downloadRequest []services.Do
 func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool, caplin CaplinMode, agg *state.Aggregator, tx kv.RwTx, blockReader services.FullBlockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient, stagesIdsList []string) error {
 	snapshots := blockReader.Snapshots()
 	borSnapshots := blockReader.BorSnapshots()
-	if blockReader.FreezingCfg().NoDownloader {
+	if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
 		if err := snapshots.ReopenFolder(); err != nil {
 			return err
 		}
@@ -138,9 +138,12 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
+	/*diagnostics.RegisterProvider(diagnostics.ProviderFunc(func(ctx context.Context) error {
+		return nil
+	}), diagnostics.TypeOf(diagnostics.DownloadStatistics{}), log.Root())*/
+
 	// Check once without delay, for faster erigon re-start
 	stats, err := snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{})
-
 	if err != nil {
 		return err
 	}
@@ -193,7 +196,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 		}
 	}
 
-	if err := agg.OpenFolder(); err != nil {
+	if err := agg.OpenFolder(true); err != nil {
 		return err
 	}
 
@@ -209,7 +212,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 	// prohibits further downloads, except some exceptions
 	for _, p := range blockReader.AllTypes() {
 		if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
-			Type: p.String(),
+			Type: p.Name(),
 		}); err != nil {
 			return err
 		}
@@ -222,7 +225,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 			}
 
 			if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
-				Type: p.String(),
+				Type: p.Name(),
 			}); err != nil {
 				return err
 			}

@@ -63,6 +63,7 @@ func originalAccountData(original *accounts.Account, omitHashes bool) []byte {
 }
 
 func (dsw *DbStateWriter) UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error {
+	//fmt.Printf("DBW balance %x,%d\n", address, account.Balance.Uint64())
 	if err := dsw.csw.UpdateAccountData(address, original, account); err != nil {
 		return err
 	}
@@ -109,6 +110,7 @@ func (dsw *DbStateWriter) DeleteAccount(address libcommon.Address, original *acc
 }
 
 func (dsw *DbStateWriter) UpdateAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash, code []byte) error {
+	//fmt.Printf("DBW code %x,%x\n", address, codeHash)
 	if err := dsw.csw.UpdateAccountCode(address, incarnation, codeHash, code); err != nil {
 		return err
 	}
@@ -129,6 +131,7 @@ func (dsw *DbStateWriter) UpdateAccountCode(address libcommon.Address, incarnati
 
 func (dsw *DbStateWriter) WriteAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash, original, value *uint256.Int) error {
 	// We delegate here first to let the changeSetWrite make its own decision on whether to proceed in case *original == *value
+	//fmt.Printf("DBW storage %x,%x,%x\n", address, *key, value)
 	if err := dsw.csw.WriteAccountStorage(address, incarnation, key, original, value); err != nil {
 		return err
 	}

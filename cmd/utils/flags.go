@@ -136,11 +136,6 @@ var (
 		Name:  "ethash.dagslockmmap",
 		Usage: "Lock memory maps for recent ethash mining DAGs",
 	}
-	SnapshotFlag = cli.BoolFlag{
-		Name:  "snapshots",
-		Usage: `Default: use snapshots "true" for Mainnet, Goerli, Gnosis Chain and Chiado. use snapshots "false" in all other cases`,
-		Value: true,
-	}
 	InternalConsensusFlag = cli.BoolFlag{
 		Name:  "internalcl",
 		Usage: "Enables internal consensus",
@@ -661,10 +656,6 @@ var (
 		Usage: "Metrics HTTP server listening port",
 		Value: metrics.DefaultConfig.Port,
 	}
-	HistoryV3Flag = cli.BoolFlag{
-		Name:  "experimental.history.v3",
-		Usage: "(Also known as Erigon3) Not recommended yet: Can't change this flag after node creation. New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
-	}
 
 	CliqueSnapshotCheckpointIntervalFlag = cli.UintFlag{
 		Name:  "clique.checkpoint",
@@ -712,7 +703,7 @@ var (
 	}
 	TorrentDownloadSlotsFlag = cli.IntFlag{
 		Name:  "torrent.download.slots",
-		Value: 3,
+		Value: 6,
 		Usage: "Amount of files to download in parallel. If network has enough seeders 1-3 slot enough, if network has lack of seeders increase to 5-7 (too big value will slow down everything).",
 	}
 	TorrentStaticPeersFlag = cli.StringFlag{
@@ -764,11 +755,6 @@ var (
 		Usage: "Runtime limit of chaindata db size. You can change value of this flag at any time.",
 		Value: (12 * datasize.TB).String(),
 	}
-	ForcePartialCommitFlag = cli.BoolFlag{
-		Name:  "force.partial.commit",
-		Usage: "Force data commit after each stage (or even do multiple commits per 1 stage - to save it's progress). Don't use this flag if node is synced. Meaning: readers (users of RPC) would like to see 'fully consistent' data (block is executed and all indices are updated). Erigon guarantee this level of data-consistency. But 1 downside: after restore node from backup - it can't save partial progress (non-committed progress will be lost at restart). This flag will be removed in future if we can find automatic way to detect corner-cases.",
-		Value: false,
-	}
 
 	HealthCheckFlag = cli.BoolFlag{
 		Name:  "healthcheck",
@@ -818,6 +804,11 @@ var (
 	PolygonSyncFlag = cli.BoolFlag{
 		Name:  "polygon.sync",
 		Usage: "Enabling syncing using the new polygon sync component",
+	}
+
+	PolygonSyncStageFlag = cli.BoolFlag{
+		Name:  "polygon.sync.stage",
+		Usage: "Enabling syncing with a stage that uses the polygon sync component",
 	}
 
 	ConfigFlag = cli.StringFlag{
@@ -1588,6 +1579,7 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.WithHeimdallMilestones = ctx.Bool(WithHeimdallMilestones.Name)
 	cfg.WithHeimdallWaypointRecording = ctx.Bool(WithHeimdallWaypoints.Name)
 	cfg.PolygonSync = ctx.Bool(PolygonSyncFlag.Name)
+	cfg.PolygonSyncStage = ctx.Bool(PolygonSyncStageFlag.Name)
 }
 
 func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
@@ -1729,7 +1721,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.LightClientDiscoveryTCPPort = ctx.Uint64(LightClientDiscoveryTCPPortFlag.Name)
 	cfg.SentinelAddr = ctx.String(SentinelAddrFlag.Name)
 	cfg.SentinelPort = ctx.Uint64(SentinelPortFlag.Name)
-	cfg.ForcePartialCommit = ctx.Bool(ForcePartialCommitFlag.Name)
 
 	chain := ctx.String(ChainFlag.Name) // mainnet by default
 	if ctx.IsSet(NetworkIdFlag.Name) {
@@ -1739,11 +1730,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		}
 	} else {
 		cfg.NetworkID = params.NetworkIDByChainName(chain)
-	}
-
-	cfg.Sync.UseSnapshots = ethconfig.UseSnapshotsByChainName(chain)
-	if ctx.IsSet(SnapshotFlag.Name) { //force override default by cli
-		cfg.Sync.UseSnapshots = ctx.Bool(SnapshotFlag.Name)
 	}
 
 	cfg.Dirs = nodeConfig.Dirs
@@ -1804,7 +1790,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setCaplin(ctx, cfg)
 
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
-	cfg.HistoryV3 = ctx.Bool(HistoryV3Flag.Name)
 
 	if ctx.IsSet(RPCGlobalGasCapFlag.Name) {
 		cfg.RPCGasCap = ctx.Uint64(RPCGlobalGasCapFlag.Name)

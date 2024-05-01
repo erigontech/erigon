@@ -2,9 +2,16 @@ name: Integration tests
 on:
   push:
     branches:
-      - devel
-      - alpha
+      - main
       - 'release/**'
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
   schedule:
     - cron: '20 16 * * *' # daily at 16:20 UTC
   workflow_dispatch:
@@ -36,9 +43,6 @@ jobs:
         env:
           GIT_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
         run: make test-erigon-ext GIT_COMMIT=$GIT_COMMIT
-
-  #        name: history-v3-test-integration
-  #        run: make test3-integration
 
   tests-windows:
     strategy:

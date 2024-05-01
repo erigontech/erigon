@@ -51,7 +51,7 @@ services:
 
   downloader:
     <<: *default-erigon-service
-    entrypoint: downloader 
+    entrypoint: downloader
     command: ${DOWNLOADER_FLAGS-} --downloader.api.addr=0.0.0.0:9093 --datadir=/home/erigon/.local/share/erigon
     ports: [ "42069:42069/tcp", "42069:42069/udp" ]
 

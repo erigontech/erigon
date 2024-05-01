@@ -17,7 +17,7 @@ DOCKER_TAG ?= thorax/erigon:latest
 # Pipe error below to /dev/null since Makefile structure kind of expects
 # Go to be available, but with docker it's not strictly necessary
 CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS 2>/dev/null) # don't lose default
-CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=0 # Enable MDBX's asserts by default in 'devel' branch and disable in releases
+CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=0 # Enable MDBX's asserts by default in 'main' branch and disable in releases
 #CGO_CFLAGS += -DMDBX_DISABLE_VALIDATION=1 # This feature is not ready yet
 #CGO_CFLAGS += -DMDBX_ENABLE_PROFGC=0 # Disabled by default, but may be useful for performance debugging
 #CGO_CFLAGS += -DMDBX_ENABLE_PGOP_STAT=0 # Disabled by default, but may be useful for performance debugging
@@ -49,7 +49,7 @@ GO_FLAGS += -ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}
 
 GOBUILD = CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" $(GO) build $(GO_FLAGS)
 GO_DBG_BUILD = CGO_CFLAGS="$(CGO_CFLAGS) -DMDBX_DEBUG=1" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" $(GO) build -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
-GOTEST = CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" GODEBUG=cgocheck=0 $(GO) test $(GO_FLAGS) ./... -p 2
+GOTEST = CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" GODEBUG=cgocheck=0 GOTRACEBACK=1 $(GO) test $(GO_FLAGS) ./... -p 2
 
 default: all
 
@@ -164,15 +164,9 @@ test-erigon-ext:
 test: test-erigon-lib
 	$(GOTEST) --timeout 10m -coverprofile=coverage.out
 
-test3: test-erigon-lib
-	$(GOTEST) --timeout 10m -tags $(BUILD_TAGS),e3
-
 ## test-integration:                  run integration tests with a 30m timeout
 test-integration: test-erigon-lib
 	$(GOTEST) --timeout 240m -tags $(BUILD_TAGS),integration
-
-test3-integration: test-erigon-lib
-	$(GOTEST) --timeout 240m -tags $(BUILD_TAGS),integration,e3
 
 ## lint-deps:                         install lint dependencies
 lint-deps:

@@ -7,10 +7,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"runtime"
 	"slices"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"

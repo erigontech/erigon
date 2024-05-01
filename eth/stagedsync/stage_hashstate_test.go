@@ -17,7 +17,7 @@ import (
 
 func TestPromoteHashedStateClearState(t *testing.T) {
 	if config3.EnableHistoryV4InTest {
-		t.Skip()
+		t.Skip("e3: doesn't have this stage")
 	}
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
@@ -68,7 +68,7 @@ func TestPromoteHashedStateIncremental(t *testing.T) {
 
 func TestPromoteHashedStateIncrementalMixed(t *testing.T) {
 	if config3.EnableHistoryV4InTest {
-		t.Skip()
+		t.Skip("e3: doesn't have this stage")
 	}
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
@@ -116,7 +116,7 @@ func TestUnwindHashed(t *testing.T) {
 
 func TestPromoteIncrementallyShutdown(t *testing.T) {
 	if config3.EnableHistoryV4InTest {
-		t.Skip()
+		t.Skip("e3: doesn't have this stage")
 	}
 	historyV3 := false
 
@@ -151,7 +151,7 @@ func TestPromoteIncrementallyShutdown(t *testing.T) {
 
 func TestPromoteHashedStateCleanlyShutdown(t *testing.T) {
 	if config3.EnableHistoryV4InTest {
-		t.Skip()
+		t.Skip("e3: doesn't have this stage")
 	}
 	logger := log.New()
 	historyV3 := false
@@ -190,7 +190,7 @@ func TestPromoteHashedStateCleanlyShutdown(t *testing.T) {
 
 func TestUnwindHashStateShutdown(t *testing.T) {
 	if config3.EnableHistoryV4InTest {
-		t.Skip()
+		t.Skip("e3: doesn't have this stage")
 	}
 	logger := log.New()
 	historyV3 := false

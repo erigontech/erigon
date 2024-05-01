@@ -39,8 +39,6 @@ import (
 	"github.com/google/btree"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/assert"
@@ -60,6 +58,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	"github.com/ledgerwatch/erigon-lib/types"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/log/v3"
 )
 
 const DefaultBlockGasLimit = uint64(30000000)
@@ -2413,7 +2412,13 @@ func (sc *sendersBatch) info(cacheView kvcache.CacheView, id uint64) (nonce uint
 	if len(encoded) == 0 {
 		return emptySender.nonce, emptySender.balance, nil
 	}
-	nonce, balance, err = types.DecodeSender(encoded)
+	if cacheView.StateV3() {
+		var bp *uint256.Int
+		nonce, bp, _ = types.DecodeAccountBytesV3(encoded)
+		balance = *bp
+	} else {
+		nonce, balance, err = types.DecodeSender(encoded)
+	}
 	if err != nil {
 		return 0, emptySender.balance, err
 	}

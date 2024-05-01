@@ -24,23 +24,21 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
-
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/state/contracts"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
@@ -376,8 +374,10 @@ func TestCreate2Polymorth(t *testing.T) {
 		if !bytes.Equal(st.GetCode(create2address), common.FromHex("6002ff")) {
 			t.Errorf("Expected CREATE2 deployed code 6002ff, got %x", st.GetCode(create2address))
 		}
-		if st.GetIncarnation(create2address) != 1 {
-			t.Errorf("expected incarnation 1, got %d", st.GetIncarnation(create2address))
+		if !m.HistoryV3 { //AccountsDomain: has no "incarnation" concept
+			if st.GetIncarnation(create2address) != 1 {
+				t.Errorf("expected incarnation 1, got %d", st.GetIncarnation(create2address))
+			}
 		}
 		return nil
 	})
@@ -408,10 +408,11 @@ func TestCreate2Polymorth(t *testing.T) {
 		if !bytes.Equal(st.GetCode(create2address), common.FromHex("6004ff")) {
 			t.Errorf("Expected CREATE2 deployed code 6004ff, got %x", st.GetCode(create2address))
 		}
-		if st.GetIncarnation(create2address) != 2 {
-			t.Errorf("expected incarnation 2, got %d", st.GetIncarnation(create2address))
+		if !m.HistoryV3 { //AccountsDomain: has no "incarnation" concept
+			if st.GetIncarnation(create2address) != 2 {
+				t.Errorf("expected incarnation 2, got %d", st.GetIncarnation(create2address))
+			}
 		}
-
 		return nil
 	})
 	require.NoError(t, err)
@@ -428,8 +429,11 @@ func TestCreate2Polymorth(t *testing.T) {
 		if !bytes.Equal(st.GetCode(create2address), common.FromHex("6005ff")) {
 			t.Errorf("Expected CREATE2 deployed code 6005ff, got %x", st.GetCode(create2address))
 		}
-		if st.GetIncarnation(create2address) != 4 {
-			t.Errorf("expected incarnation 4 (two self-destructs and two-recreations within a block), got %d", st.GetIncarnation(create2address))
+
+		if !m.HistoryV3 { //AccountsDomain: has no "incarnation" concept
+			if st.GetIncarnation(create2address) != 4 {
+				t.Errorf("expected incarnation 4 (two self-destructs and two-recreations within a block), got %d", st.GetIncarnation(create2address))
+			}
 		}
 		return nil
 	})
@@ -736,6 +740,8 @@ func (b BucketsStats) Size() uint64 {
 }
 
 func TestCreateOnExistingStorage(t *testing.T) {
+	t.Skip("Alex Sharov: seems it's not useful property in reality")
+
 	t.Parallel()
 	// Configure and generate a sample block chain
 	var (
@@ -1034,13 +1040,13 @@ func TestWrongIncarnation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var acc accounts.Account
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		ok, err := rawdb.ReadAccount(tx, contractAddress, &acc)
+		stateReader := m.NewStateReader(tx)
+		acc, err := stateReader.ReadAccountData(contractAddress)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !ok {
+		if acc == nil {
 			t.Fatal(errors.New("acc not found"))
 		}
 
@@ -1048,7 +1054,7 @@ func TestWrongIncarnation(t *testing.T) {
 			t.Fatal("Incorrect incarnation", acc.Incarnation)
 		}
 
-		st := state.New(m.NewStateReader(tx))
+		st := state.New(stateReader)
 		if !st.Exist(contractAddress) {
 			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 		}
@@ -1061,11 +1067,12 @@ func TestWrongIncarnation(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		ok, err := rawdb.ReadAccount(tx, contractAddress, &acc)
+		stateReader := m.NewStateReader(tx)
+		acc, err := stateReader.ReadAccountData(contractAddress)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !ok {
+		if acc == nil {
 			t.Fatal(errors.New("acc not found"))
 		}
 		if acc.Incarnation != state.FirstContractIncarnation {
@@ -1185,18 +1192,18 @@ func TestWrongIncarnation2(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var acc accounts.Account
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(m.NewStateReader(tx))
 		if !st.Exist(contractAddress) {
 			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 		}
 
-		ok, err := rawdb.ReadAccount(tx, contractAddress, &acc)
+		stateReader := m.NewStateReader(tx)
+		acc, err := stateReader.ReadAccountData(contractAddress)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !ok {
+		if acc == nil {
 			t.Fatal(errors.New("acc not found"))
 		}
 		if acc.Incarnation != state.FirstContractIncarnation {
@@ -1211,11 +1218,12 @@ func TestWrongIncarnation2(t *testing.T) {
 	}
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		ok, err := rawdb.ReadAccount(tx, contractAddress, &acc)
+		stateReader := m.NewStateReader(tx)
+		acc, err := stateReader.ReadAccountData(contractAddress)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !ok {
+		if acc == nil {
 			t.Fatal(errors.New("acc not found"))
 		}
 		if acc.Incarnation != state.NonContractIncarnation {

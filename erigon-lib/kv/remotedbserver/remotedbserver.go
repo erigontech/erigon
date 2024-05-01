@@ -534,6 +534,10 @@ func (s *StateChangePubSub) remove(id uint) {
 //
 
 func (s *KvServer) DomainGet(_ context.Context, req *remote.DomainGetReq) (reply *remote.DomainGetReply, err error) {
+	domainName, err := kv.String2Domain(req.Table)
+	if err != nil {
+		return nil, err
+	}
 	reply = &remote.DomainGetReply{}
 	if err := s.with(req.TxId, func(tx kv.Tx) error {
 		ttx, ok := tx.(kv.TemporalTx)
@@ -541,12 +545,12 @@ func (s *KvServer) DomainGet(_ context.Context, req *remote.DomainGetReq) (reply
 			return fmt.Errorf("server DB doesn't implement kv.Temporal interface")
 		}
 		if req.Latest {
-			reply.V, reply.Ok, err = ttx.DomainGet(kv.Domain(req.Table), req.K, req.K2)
+			reply.V, _, err = ttx.DomainGet(domainName, req.K, req.K2)
 			if err != nil {
 				return err
 			}
 		} else {
-			reply.V, reply.Ok, err = ttx.DomainGetAsOf(kv.Domain(req.Table), req.K, req.K2, req.Ts)
+			reply.V, reply.Ok, err = ttx.DomainGetAsOf(domainName, req.K, req.K2, req.Ts)
 			if err != nil {
 				return err
 			}

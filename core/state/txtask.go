@@ -1,4 +1,4 @@
-package exec22
+package state
 
 import (
 	"container/heap"
@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon-lib/state"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -33,10 +34,13 @@ type TxTask struct {
 	SkipAnalysis    bool
 	TxIndex         int // -1 for block initialisation
 	Final           bool
+	Failed          bool
 	Tx              types.Transaction
 	GetHashFn       func(n uint64) libcommon.Hash
 	TxAsMessage     types.Message
 	EvmBlockContext evmtypes.BlockContext
+
+	HistoryExecution bool // use history reader for that tx instead of state reader
 
 	BalanceIncreaseSet map[libcommon.Address]uint256.Int
 	ReadLists          map[string]*state.KvList
@@ -51,6 +55,24 @@ type TxTask struct {
 	TraceTos           map[libcommon.Address]struct{}
 
 	UsedGas uint64
+
+	// BlockReceipts is used only by Gnosis:
+	//  - it does store `proof, err := rlp.EncodeToBytes(ValidatorSetProof{Header: header, Receipts: r})`
+	//  - and later read it by filter: len(l.Topics) == 2 && l.Address == s.contractAddress && l.Topics[0] == EVENT_NAME_HASH && l.Topics[1] == header.ParentHash
+	// Need investigate if we can pass here - only limited amount of receipts
+	// And remove this field if possible - because it will make problems for parallel-execution
+	BlockReceipts types.Receipts
+}
+
+func (t *TxTask) Reset() {
+	t.BalanceIncreaseSet = nil
+	returnReadList(t.ReadLists)
+	t.ReadLists = nil
+	returnWriteList(t.WriteLists)
+	t.WriteLists = nil
+	t.Logs = nil
+	t.TraceFroms = nil
+	t.TraceTos = nil
 }
 
 // TxTaskQueue non-thread-safe priority-queue
@@ -118,9 +140,9 @@ func (q *QueueWithRetry) Len() (l int) { return q.RetriesLen() + len(q.newTasks)
 // Expecting already-ordered tasks.
 func (q *QueueWithRetry) Add(ctx context.Context, t *TxTask) {
 	select {
-	case q.newTasks <- t:
 	case <-ctx.Done():
 		return
+	case q.newTasks <- t:
 	}
 }
 
@@ -243,9 +265,9 @@ func NewResultsQueue(newTasksLimit, queueLimit int) *ResultsQueue {
 // Add result of execution. May block when internal channel is full
 func (q *ResultsQueue) Add(ctx context.Context, task *TxTask) error {
 	select {
-	case q.resultCh <- task: // Needs to have outside of the lock
 	case <-ctx.Done():
 		return ctx.Err()
+	case q.resultCh <- task: // Needs to have outside of the lock
 	}
 	return nil
 }

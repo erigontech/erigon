@@ -72,6 +72,7 @@ func setup(t *testing.T, ctx context.Context, iterations []uint64) simulator.Hei
 }
 
 func TestSimulatorEvents(t *testing.T) {
+	t.Skip("TODO: e35 do not store Logs")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -100,6 +101,7 @@ func TestSimulatorEvents(t *testing.T) {
 }
 
 func TestSimulatorSpans(t *testing.T) {
+	t.Skip("TODO: e35 do not store Logs")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

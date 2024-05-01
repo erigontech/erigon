@@ -21,8 +21,9 @@ import (
 	"fmt"
 	"io"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon/rlp"
 )

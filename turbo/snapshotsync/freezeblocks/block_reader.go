@@ -24,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
@@ -352,6 +353,10 @@ func (r *BlockReader) FreezingCfg() ethconfig.BlocksFreezing { return r.sn.Cfg()
 
 func (r *BlockReader) HeadersRange(ctx context.Context, walker func(header *types.Header) error) error {
 	return ForEachHeader(ctx, r.sn, walker)
+}
+
+func (r *BlockReader) LastNonCanonicalHeaderNumber(ctx context.Context, tx kv.Getter) {
+
 }
 
 func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (h *types.Header, err error) {
@@ -792,7 +797,7 @@ func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txsAmount uint32, txsSeg
 		}
 	}() // avoid crash because Erigon's core does many things
 
-	idxTxnHash := txsSeg.Index(snaptype.Indexes.TxnHash)
+	idxTxnHash := txsSeg.Index(coresnaptype.Indexes.TxnHash)
 
 	if idxTxnHash == nil {
 		return nil, nil, nil
@@ -830,7 +835,7 @@ func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txsAmount uint32, txsSeg
 }
 
 func (r *BlockReader) txnByID(txnID uint64, sn *Segment, buf []byte) (txn types.Transaction, err error) {
-	idxTxnHash := sn.Index(snaptype.Indexes.TxnHash)
+	idxTxnHash := sn.Index(coresnaptype.Indexes.TxnHash)
 
 	offset := idxTxnHash.OrdinalLookup(txnID - idxTxnHash.BaseDataID())
 	gg := sn.MakeGetter()
@@ -853,8 +858,8 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*Segment, buf []
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 
-		idxTxnHash := sn.Index(snaptype.Indexes.TxnHash)
-		idxTxnHash2BlockNum := sn.Index(snaptype.Indexes.TxnHash2BlockNum)
+		idxTxnHash := sn.Index(coresnaptype.Indexes.TxnHash)
+		idxTxnHash2BlockNum := sn.Index(coresnaptype.Indexes.TxnHash2BlockNum)
 
 		if idxTxnHash == nil || idxTxnHash2BlockNum == nil {
 			continue
@@ -945,6 +950,7 @@ func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.
 	if err != nil {
 		return 0, false, err
 	}
+
 	if n != nil {
 		return *n, true, nil
 	}
@@ -969,7 +975,7 @@ func (r *BlockReader) FirstTxnNumNotInSnapshots() uint64 {
 		return 0
 	}
 
-	lastTxnID := sn.Index(snaptype.Indexes.TxnHash).BaseDataID() + uint64(sn.Count())
+	lastTxnID := sn.Index(coresnaptype.Indexes.TxnHash).BaseDataID() + uint64(sn.Count())
 	return lastTxnID
 }
 
@@ -979,7 +985,7 @@ func (r *BlockReader) IterateFrozenBodies(f func(blockNum, baseTxNum, txAmount u
 
 	for _, sn := range view.Bodies() {
 		sn := sn
-		defer sn.EnableMadvNormal().DisableReadAhead()
+		defer sn.EnableReadAhead().DisableReadAhead()
 
 		var buf []byte
 		g := sn.MakeGetter()
@@ -1175,6 +1181,9 @@ func (r *BlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, hash common
 		v, err := tx.GetOne(kv.BorEventNums, hexutility.EncodeTs(blockHeight))
 		if err != nil {
 			return 0, err
+		}
+		if len(v) == 0 {
+			return 0, fmt.Errorf("BorStartEventID(%d) not found", blockHeight)
 		}
 		startEventId := binary.BigEndian.Uint64(v)
 		return startEventId, nil

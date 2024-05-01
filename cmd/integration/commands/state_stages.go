@@ -14,6 +14,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/wrap"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
+
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -22,8 +25,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/utils"
@@ -223,7 +224,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 	syncCfg.ReconWorkerCount = int(reconWorkers)
 
 	br, _ := blocksIO(db, logger1)
-	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, changeSetHook, chainConfig, engine, vmConfig, changesAcc, false, false, historyV3, dirs,
+	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, changeSetHook, chainConfig, engine, vmConfig, changesAcc, false, true, historyV3, dirs,
 		br, nil, genesis, syncCfg, agg, nil)
 
 	execUntilFunc := func(execToBlock uint64) func(firstCycle bool, badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
@@ -392,7 +393,9 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 		}
 
 		to := execAtBlock - unwind
-		stateStages.UnwindTo(to, stagedsync.StagedUnwind)
+		if err := stateStages.UnwindTo(to, stagedsync.StagedUnwind, tx); err != nil {
+			return err
+		}
 
 		if err := tx.Commit(); err != nil {
 			return err
@@ -562,7 +565,7 @@ func loopExec(db kv.RwDB, ctx context.Context, unwind uint64, logger log.Logger)
 	br, _ := blocksIO(db, logger)
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil,
 		/*stateStream=*/ false,
-		/*badBlockHalt=*/ false, historyV3, dirs, br, nil, genesis, syncCfg, agg, nil)
+		/*badBlockHalt=*/ true, historyV3, dirs, br, nil, genesis, syncCfg, agg, nil)
 
 	// set block limit of execute stage
 	sync.MockExecFunc(stages.Execution, func(firstCycle bool, badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, txc wrap.TxContainer, logger log.Logger) error {

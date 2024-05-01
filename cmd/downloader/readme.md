@@ -1,3 +1,28 @@
+## Snapshots (synonym of segments/shards) overview
+
+- What is "snaphots"? - It's way to store "cold" data outside of main database. It's not 'temporary' files -
+  it's `frozen db` where stored old blocks/history/etc... Most important: it's "building block" for future "sync Archive
+  node without execution all blocks from genesis" (will release this feature in Erigon3).
+
+- When snapshots are created? - Blocks older than 90K (`FullImmutabilityThreshold`) are moved from DB to files
+  in-background
+
+- Where snapshots are stored? - `datadir/snapshots` - you can symlink/mount it to cheaper disk.
+
+- When snapshots are pulled? - Erigon download snapshots **only-once** when creating node - all other files are
+  self-generated
+
+- How does it benefit the new nodes? - P2P and Becaon networks may have not enough good peers for old data (no
+  incentives). StageSenders results are included into blocks snaps - means new node can skip it.
+
+- How network benefit? - Serve immutable snapshots can use cheaper infrastructure: Bittorrent/S3/R2/etc... - because
+  there is no incentive. Polygon mainnet is 12Tb now. Also Beacon network is very bad in serving old data.
+
+- How does it benefit current nodes? - Erigon's db is 1-file (doesens of Tb of nvme) - which is not friendly for
+  maintainance. Can't mount `hot` data to 1 type of disk and `cold` to another. Erigon2 moving only Blocks to snaps
+  but Erigon3 also moving there `cold latest state` and `state history` - means new node doesn't need re-exec all blocks
+  from genesis.
+
 # Downloader
 
 Service to seed/download historical data (snapshots, immutable .seg files) by
@@ -180,3 +205,28 @@ crontab -e
 
 It does push to branch `auto`, before release - merge `auto` to `main` manually
 
+## Create seedbox to support network
+
+```
+# Can run on empty datadir
+downloader --datadir=<your> --chain=mainnet
+```
+
+## Launch new network or new type of snapshots
+
+Usually Erigon's network is self-sufficient - peers automatically producing and
+seedingsnapshots. But new network or new type of snapshots need Bootstraping
+step - no peers yet have this files.
+
+**WebSeed** - is centralized file-storage - used to Bootstrap network. For
+example S3 with signed_url.
+
+Erigon dev team can share existing **webseed_url**. Or you can create own.
+
+```
+downloader --datadir=<your> --chain=mainnet --webseed=<webseed_url>
+
+# See also: `downloader --help` of `--webseed` flag. There is an option to pass it by `datadir/webseed.toml` file.   
+```
+
+---------------

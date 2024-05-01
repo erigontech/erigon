@@ -56,6 +56,7 @@ type Cache interface {
 	ValidateCurrentRoot(ctx context.Context, tx kv.Tx) (*CacheValidationResult, error)
 }
 type CacheView interface {
+	StateV3() bool
 	Get(k []byte) ([]byte, error)
 	GetCode(k []byte) ([]byte, error)
 }
@@ -141,7 +142,10 @@ type CoherentView struct {
 	stateVersionID uint64
 }
 
-func (c *CoherentView) Get(k []byte) ([]byte, error) { return c.cache.Get(k, c.tx, c.stateVersionID) }
+func (c *CoherentView) StateV3() bool { return c.cache.cfg.StateV3 }
+func (c *CoherentView) Get(k []byte) ([]byte, error) {
+	return c.cache.Get(k, c.tx, c.stateVersionID)
+}
 func (c *CoherentView) GetCode(k []byte) ([]byte, error) {
 	return c.cache.GetCode(k, c.tx, c.stateVersionID)
 }
@@ -162,6 +166,7 @@ type CoherentConfig struct {
 	MetricsLabel    string
 	NewBlockWait    time.Duration // how long wait
 	KeepViews       uint64        // keep in memory up to this amount of views, evict older
+	StateV3         bool
 }
 
 var DefaultCoherentConfig = CoherentConfig{
@@ -172,6 +177,7 @@ var DefaultCoherentConfig = CoherentConfig{
 	MetricsLabel:    "default",
 	WithStorage:     true,
 	WaitForNewBlock: true,
+	StateV3:         true,
 }
 
 func New(cfg CoherentConfig) *Coherent {
@@ -386,7 +392,7 @@ func (c *Coherent) getFromCache(k []byte, id uint64, code bool) (*Element, *Cohe
 
 	return it, r, nil
 }
-func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
+func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) (v []byte, err error) {
 	it, r, err := c.getFromCache(k, id, false)
 	if err != nil {
 		return nil, err
@@ -399,7 +405,15 @@ func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
 	}
 	c.miss.Inc()
 
-	v, err := tx.GetOne(kv.PlainState, k)
+	if c.cfg.StateV3 {
+		if len(k) == 20 {
+			v, _, err = tx.(kv.TemporalTx).DomainGet(kv.AccountsDomain, k, nil)
+		} else {
+			v, _, err = tx.(kv.TemporalTx).DomainGet(kv.StorageDomain, k, nil)
+		}
+	} else {
+		v, err = tx.GetOne(kv.PlainState, k)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -411,7 +425,7 @@ func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
 	return v, nil
 }
 
-func (c *Coherent) GetCode(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
+func (c *Coherent) GetCode(k []byte, tx kv.Tx, id uint64) (v []byte, err error) {
 	it, r, err := c.getFromCache(k, id, true)
 	if err != nil {
 		return nil, err
@@ -424,7 +438,11 @@ func (c *Coherent) GetCode(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
 	}
 	c.codeMiss.Inc()
 
-	v, err := tx.GetOne(kv.Code, k)
+	if c.cfg.StateV3 {
+		v, _, err = tx.(kv.TemporalTx).DomainGet(kv.CodeDomain, k, nil)
+	} else {
+		v, err = tx.GetOne(kv.Code, k)
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.21
 
 require (
-	github.com/erigontech/mdbx-go v0.27.24
+	github.com/erigontech/mdbx-go v0.38.0
 	github.com/erigontech/silkworm-go v0.18.0
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -16,7 +16,7 @@ require (
 	github.com/99designs/gqlgen v0.17.40
 	github.com/Giulio2002/bls v0.0.0-20240315151443-652e18a3d188
 	github.com/Masterminds/sprig/v3 v3.2.3
-	github.com/RoaringBitmap/roaring v1.2.3
+	github.com/RoaringBitmap/roaring v1.9.3
 	github.com/VictoriaMetrics/fastcache v1.12.2
 	github.com/alecthomas/atomic v0.1.0-alpha2
 	github.com/alecthomas/kong v0.8.1
@@ -42,6 +42,7 @@ require (
 	github.com/gfx-labs/sse v0.0.0-20231226060816-f747e26a9baa
 	github.com/go-chi/chi/v5 v5.0.12
 	github.com/go-chi/cors v1.2.1
+	github.com/go-echarts/go-echarts/v2 v2.3.3
 	github.com/goccy/go-json v0.9.11
 	github.com/gofrs/flock v0.8.1
 	github.com/golang-jwt/jwt/v4 v4.5.0
@@ -173,6 +174,7 @@ require (
 	github.com/golang/mock v1.6.0 // indirect
 	github.com/google/gopacket v1.1.19 // indirect
 	github.com/google/pprof v0.0.0-20240409012703-83162a5b38cd // indirect
+	github.com/holiman/bloomfilter/v2 v2.0.3 // indirect
 	github.com/ianlancetaylor/cgosymbolizer v0.0.0-20220405231054-a1ae3e4bba26 // indirect
 	github.com/imdario/mergo v0.3.11 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
@@ -183,7 +185,7 @@ require (
 	github.com/koron/go-ssdp v0.0.4 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
-	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240417163500-185a51876901 // indirect
+	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240430044856-b76bb4892492 // indirect
 	github.com/libp2p/go-buffer-pool v0.1.0 // indirect
 	github.com/libp2p/go-cidranger v1.1.0 // indirect
 	github.com/libp2p/go-flow-metrics v0.1.0 // indirect
@@ -290,4 +292,7 @@ require (
 	zombiezen.com/go/sqlite v0.13.1 // indirect
 )
 
-replace github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha
+replace (
+	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha
+	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.8
+)

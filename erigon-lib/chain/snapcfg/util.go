@@ -79,13 +79,17 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 
 		parts := strings.Split(name, "-")
 		if len(parts) < 3 {
+			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") {
+				bestVersions.Set(p.Name, p)
+				continue
+			}
 			continue
 		}
 		typeName, _ := strings.CutSuffix(parts[2], filepath.Ext(parts[2]))
 		include := false
 
 		for _, typ := range types {
-			if typeName == typ.String() {
+			if typeName == typ.Name() {
 				preferredVersion = typ.Versions().Current
 				minVersion = typ.Versions().MinSupported
 				include = true
@@ -137,12 +141,22 @@ func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion sna
 
 	for _, p := range p {
 		v, name, ok := strings.Cut(p.Name, "-")
-
 		if !ok {
+			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") {
+				bestVersions.Set(p.Name, p)
+				continue
+			}
 			continue
 		}
 
 		parts := strings.Split(name, "-")
+		if len(parts) < 3 {
+			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") {
+				bestVersions.Set(p.Name, p)
+				continue
+			}
+			continue
+		}
 		typeName, _ := strings.CutSuffix(parts[2], filepath.Ext(parts[2]))
 		include := false
 
@@ -285,7 +299,7 @@ func (c Cfg) Seedable(info snaptype.FileInfo) bool {
 }
 
 func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
-	hasType := t == snaptype.Enums.Headers
+	hasType := t == snaptype.MinCoreEnum
 
 	for _, p := range c.Preverified {
 		info, _, ok := snaptype.ParseFileName("", p.Name)
@@ -293,7 +307,7 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 			continue
 		}
 
-		if info.Ext != ".seg" || (t != snaptype.Enums.Unknown && t != info.Type.Enum()) {
+		if info.Ext != ".seg" || (t != snaptype.Unknown && t != info.Type.Enum()) {
 			continue
 		}
 
@@ -322,7 +336,7 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 		return snaptype.Erigon2MergeLimit
 	}
 
-	return c.MergeLimit(snaptype.Enums.Headers, fromBlock)
+	return c.MergeLimit(snaptype.MinCoreEnum, fromBlock)
 }
 
 var knownPreverified = map[string]Preverified{
@@ -359,7 +373,7 @@ func MaxSeedableSegment(chain string, dir string) uint64 {
 
 	if list, err := snaptype.Segments(dir); err == nil {
 		for _, info := range list {
-			if Seedable(chain, info) && info.Type.Enum() == snaptype.Enums.Headers && info.To > max {
+			if Seedable(chain, info) && info.Type.Enum() == snaptype.MinCoreEnum && info.To > max {
 				max = info.To
 			}
 		}
@@ -387,7 +401,6 @@ func KnownCfg(networkName string) *Cfg {
 	if !ok {
 		return newCfg(networkName, Preverified{})
 	}
-
 	return newCfg(networkName, c.Typed(knownTypes[networkName]))
 }
 

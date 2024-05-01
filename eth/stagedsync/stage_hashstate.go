@@ -7,9 +7,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"runtime"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"

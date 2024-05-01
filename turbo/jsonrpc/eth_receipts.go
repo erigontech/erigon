@@ -5,6 +5,11 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math/big"
+
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 
 	"github.com/RoaringBitmap/roaring"
 	"github.com/ledgerwatch/log/v3"
@@ -20,18 +25,16 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethutils"
 	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
 
-	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
 
@@ -420,12 +423,12 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	if err != nil {
 		return nil, err
 	}
-	exec := txnExecutor(tx, chainConfig, api.engine(), api._blockReader, nil)
+	exec := exec3.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, nil)
 
 	var blockHash common.Hash
 	var header *types.Header
 
-	iter := MapTxNum2BlockNum(tx, txNumbers)
+	iter := rawdbv3.TxNums2BlockNums(tx, txNumbers, order.Asc)
 	for iter.HasNext() {
 		if err = ctx.Err(); err != nil {
 			return nil, err
@@ -448,7 +451,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				continue
 			}
 			blockHash = header.Hash()
-			exec.changeBlock(header)
+			exec.ChangeBlock(header)
 		}
 
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
@@ -459,18 +462,19 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if txn == nil {
 			continue
 		}
-		rawLogs, _, err := exec.execTx(txNum, txIndex, txn)
+
+		_, err = exec.ExecTxn(txNum, txIndex, txn)
 		if err != nil {
 			return nil, err
 		}
-
+		rawLogs := exec.GetLogs(txIndex, txn)
 		//TODO: logIndex within the block! no way to calc it now
 		//logIndex := uint(0)
 		//for _, log := range rawLogs {
 		//	log.Index = logIndex
 		//	logIndex++
 		//}
-		filtered := types.Logs(rawLogs).Filter(addrMap, crit.Topics)
+		filtered := rawLogs.Filter(addrMap, crit.Topics)
 		for _, log := range filtered {
 			log.BlockNumber = blockNum
 			log.BlockHash = blockHash
@@ -480,84 +484,8 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	}
 
 	//stats := api._agg.GetAndResetStats()
-	//log.Info("Finished", "duration", time.Since(start), "history queries", stats.HistoryQueries, "ef search duration", stats.EfSearchTime)
+	//log.Info("Finished", "duration", time.Since(start), "history queries", stats.FilesQueries, "ef search duration", stats.EfSearchTime)
 	return logs, nil
-}
-
-type intraBlockExec struct {
-	ibs         *state.IntraBlockState
-	stateReader *state.HistoryReaderV3
-	engine      consensus.EngineReader
-	tx          kv.TemporalTx
-	br          services.FullBlockReader
-	chainConfig *chain.Config
-	evm         *vm.EVM
-
-	tracer GenericTracer
-
-	// calculated by .changeBlock()
-	blockHash common.Hash
-	blockNum  uint64
-	header    *types.Header
-	blockCtx  *evmtypes.BlockContext
-	rules     *chain.Rules
-	signer    *types.Signer
-	vmConfig  *vm.Config
-}
-
-func txnExecutor(tx kv.TemporalTx, chainConfig *chain.Config, engine consensus.EngineReader, br services.FullBlockReader, tracer GenericTracer) *intraBlockExec {
-	stateReader := state.NewHistoryReaderV3()
-	stateReader.SetTx(tx)
-
-	ie := &intraBlockExec{
-		tx:          tx,
-		engine:      engine,
-		chainConfig: chainConfig,
-		br:          br,
-		stateReader: stateReader,
-		tracer:      tracer,
-		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
-		vmConfig:    &vm.Config{},
-		ibs:         state.New(stateReader),
-	}
-	if tracer != nil {
-		ie.vmConfig = &vm.Config{Debug: true, Tracer: tracer}
-	}
-	return ie
-}
-
-func (e *intraBlockExec) changeBlock(header *types.Header) {
-	e.blockNum = header.Number.Uint64()
-	blockCtx := transactions.NewEVMBlockContext(e.engine, header, true /* requireCanonical */, e.tx, e.br)
-	e.blockCtx = &blockCtx
-	e.blockHash = header.Hash()
-	e.header = header
-	e.rules = e.chainConfig.Rules(e.blockNum, header.Time)
-	e.signer = types.MakeSigner(e.chainConfig, e.blockNum, header.Time)
-	e.vmConfig.SkipAnalysis = core.SkipAnalysis(e.chainConfig, e.blockNum)
-}
-
-func (e *intraBlockExec) execTx(txNum uint64, txIndex int, txn types.Transaction) ([]*types.Log, *core.ExecutionResult, error) {
-	e.stateReader.SetTxNum(txNum)
-	txHash := txn.Hash()
-	e.ibs.Reset()
-	e.ibs.SetTxContext(txHash, e.blockHash, txIndex)
-	gp := new(core.GasPool).AddGas(txn.GetGas()).AddBlobGas(txn.GetBlobGas())
-	msg, err := txn.AsMessage(*e.signer, e.header.BaseFee, e.rules)
-	if err != nil {
-		return nil, nil, err
-	}
-	e.evm.ResetBetweenBlocks(*e.blockCtx, core.NewEVMTxContext(msg), e.ibs, *e.vmConfig, e.rules)
-	res, err := core.ApplyMessage(e.evm, msg, gp, true /* refunds */, false /* gasBailout */)
-	if err != nil {
-		return nil, nil, fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, e.blockNum, txNum, e.ibs.Error())
-	}
-	if e.vmConfig.Tracer != nil {
-		if e.tracer.Found() {
-			e.tracer.SetTransaction(txn)
-		}
-	}
-	return e.ibs.GetLogs(txHash), res, nil
 }
 
 // The Topic list restricts matches to particular event topics. Each event has a list
@@ -730,6 +658,71 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	}
 
 	return result, nil
+}
+
+func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *chain.Config, header *types.Header, txnHash common.Hash, signed bool) map[string]interface{} {
+	var chainId *big.Int
+	switch t := txn.(type) {
+	case *types.LegacyTx:
+		if t.Protected() {
+			chainId = types.DeriveChainId(&t.V).ToBig()
+		}
+	default:
+		chainId = txn.GetChainID().ToBig()
+	}
+
+	var from common.Address
+	if signed {
+		signer := types.LatestSignerForChainID(chainId)
+		from, _ = txn.Sender(*signer)
+	}
+
+	fields := map[string]interface{}{
+		"blockHash":         receipt.BlockHash,
+		"blockNumber":       hexutil.Uint64(receipt.BlockNumber.Uint64()),
+		"transactionHash":   txnHash,
+		"transactionIndex":  hexutil.Uint64(receipt.TransactionIndex),
+		"from":              from,
+		"to":                txn.GetTo(),
+		"type":              hexutil.Uint(txn.Type()),
+		"gasUsed":           hexutil.Uint64(receipt.GasUsed),
+		"cumulativeGasUsed": hexutil.Uint64(receipt.CumulativeGasUsed),
+		"contractAddress":   nil,
+		"logs":              receipt.Logs,
+		"logsBloom":         types.CreateBloom(types.Receipts{receipt}),
+	}
+
+	if !chainConfig.IsLondon(header.Number.Uint64()) {
+		fields["effectiveGasPrice"] = hexutil.Uint64(txn.GetPrice().Uint64())
+	} else {
+		baseFee, _ := uint256.FromBig(header.BaseFee)
+		gasPrice := new(big.Int).Add(header.BaseFee, txn.GetEffectiveGasTip(baseFee).ToBig())
+		fields["effectiveGasPrice"] = hexutil.Uint64(gasPrice.Uint64())
+	}
+	// Assign receipt status.
+	fields["status"] = hexutil.Uint64(receipt.Status)
+	if receipt.Logs == nil {
+		fields["logs"] = [][]*types.Log{}
+	}
+	// If the ContractAddress is 20 0x0 bytes, assume it is not a contract creation
+	if receipt.ContractAddress != (common.Address{}) {
+		fields["contractAddress"] = receipt.ContractAddress
+	}
+	// Set derived blob related fields
+	numBlobs := len(txn.GetBlobHashes())
+	if numBlobs > 0 {
+		if header.ExcessBlobGas == nil {
+			log.Warn("excess blob gas not set when trying to marshal blob tx")
+		} else {
+			blobGasPrice, err := misc.GetBlobGasPrice(chainConfig, *header.ExcessBlobGas)
+			if err != nil {
+				log.Error(err.Error())
+			}
+			fields["blobGasPrice"] = blobGasPrice
+			fields["blobGasUsed"] = hexutil.Uint64(misc.GetBlobGasUsed(numBlobs))
+		}
+	}
+	return fields
 }
 
 // MapTxNum2BlockNumIter - enrich iterator by TxNumbers, adding more info:
