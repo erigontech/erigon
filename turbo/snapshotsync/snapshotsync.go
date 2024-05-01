@@ -136,6 +136,7 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, blockPrune uint, prever
 				return nil, err
 			}
 			kind = strings.Split(name, ".")[0]
+			fmt.Println(rangeString, kind)
 		} else {
 			// e.g 'v1-000000-000100-beaconblocks.seg'
 			// parse "from" (000000) and "to" (000100) from the name. 100 is 100'000 blocks
