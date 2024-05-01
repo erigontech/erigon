@@ -977,15 +977,14 @@ type SharedDomainsCommitmentContext struct {
 
 func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode commitment.Mode, trieVariant commitment.TrieVariant) *SharedDomainsCommitmentContext {
 	ctx := &SharedDomainsCommitmentContext{
-		sd:           sd,
-		mode:         mode,
-		updates:      commitment.NewUpdateTree(mode),
-		discard:      dbg.DiscardCommitment(),
-		patriciaTrie: commitment.InitializeTrie(trieVariant),
-		branchCache:  make(map[string]cachedBranch),
-		keccak:       sha3.NewLegacyKeccak256().(cryptozerocopy.KeccakState),
+		sd:          sd,
+		mode:        mode,
+		discard:     dbg.DiscardCommitment(),
+		branchCache: make(map[string]cachedBranch),
+		keccak:      sha3.NewLegacyKeccak256().(cryptozerocopy.KeccakState),
 	}
 
+	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdateTree(trieVariant, mode, sd.aggCtx.a.tmpdir)
 	ctx.patriciaTrie.ResetContext(ctx)
 	return ctx
 }
@@ -1050,7 +1049,6 @@ func (sdc *SharedDomainsCommitmentContext) GetAccount(plainKey []byte, cell *com
 		if len(chash) > 0 {
 			copy(cell.CodeHash[:], chash)
 		}
-		//fmt.Printf("GetAccount: %x: n=%d b=%d ch=%x\n", plainKey, nonce, balance, chash)
 	}
 
 	code, _, err := sdc.sd.LatestCode(plainKey)
@@ -1058,7 +1056,6 @@ func (sdc *SharedDomainsCommitmentContext) GetAccount(plainKey []byte, cell *com
 		return fmt.Errorf("GetAccount: failed to read latest code: %w", err)
 	}
 	if len(code) > 0 {
-		//fmt.Printf("GetAccount: code %x - %x\n", plainKey, code)
 		sdc.keccak.Reset()
 		sdc.keccak.Write(code)
 		sdc.keccak.Read(cell.CodeHash[:])
@@ -1075,9 +1072,6 @@ func (sdc *SharedDomainsCommitmentContext) GetStorage(plainKey []byte, cell *com
 	if err != nil {
 		return err
 	}
-	//if sdc.sd.trace {
-	//	fmt.Printf("[SDC] GetStorage: %x - %x\n", plainKey, enc)
-	//}
 	cell.StorageLen = len(enc)
 	copy(cell.Storage[:], enc)
 	cell.Delete = cell.StorageLen == 0
@@ -1095,7 +1089,8 @@ func (sdc *SharedDomainsCommitmentContext) TempDir() string {
 }
 
 func (sdc *SharedDomainsCommitmentContext) KeysCount() uint64 {
-	return sdc.updates.Size()
+	s, _ := sdc.updates.Size()
+	return s
 }
 
 // TouchPlainKey marks plainKey as updated and applies different fn for different key types
@@ -1104,13 +1099,14 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 	if sdc.discard {
 		return
 	}
+	ks := []byte(key)
 	switch d {
 	case kv.AccountsDomain:
-		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchAccount)
+		sdc.updates.TouchPlainKey(ks, val, sdc.updates.TouchAccount)
 	case kv.CodeDomain:
-		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchCode)
+		sdc.updates.TouchPlainKey(ks, val, sdc.updates.TouchCode)
 	case kv.StorageDomain:
-		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchStorage)
+		sdc.updates.TouchPlainKey(ks, val, sdc.updates.TouchStorage)
 	default:
 		panic(fmt.Errorf("TouchKey: unknown domain %s", d))
 	}
@@ -1128,11 +1124,9 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	defer mxCommitmentRunning.Dec()
 	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
 
-	updateCount := sdc.updates.Size()
+	updateCount, areUnique := sdc.updates.Size()
 	if sdc.sd.trace {
-		defer func() {
-			fmt.Printf("[SDC] rootHash %x block %d keys %d mode %s\n", rootHash, blockNum, updateCount, sdc.mode)
-		}()
+		defer sdc.sd.logger.Trace("ComputeCommitment", "block", blockNum, "keys", updateCount, "unique", areUnique, "mode", sdc.mode)
 	}
 	if updateCount == 0 {
 		rootHash, err = sdc.patriciaTrie.RootHash()

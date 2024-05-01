@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"hash"
 	"io"
@@ -1278,30 +1279,25 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 }
 
 func (hph *HexPatriciaHashed) ProcessTree(ctx context.Context, tree *UpdateTree, logPrefix string) (rootHash []byte, err error) {
-	collector := etl.NewCollector("commitment.UpdateTree", hph.ctx.TempDir(), etl.NewSortableBuffer(etl.BufferOptimalSize/2), log.Root().New("update-tree"))
+	collector := etl.NewCollector("commitment", hph.ctx.TempDir(), etl.NewSortableBuffer(datasize.MB*64), log.Root().New("update-tree"))
 	defer collector.Close()
 
-	updatesCount := tree.Size()
-	if err = tree.HashSort(ctx, hph.hashAndNibblizeKey, collector.Collect); err != nil {
-		return nil, fmt.Errorf("hash sort failed: %w", err)
-	}
-
+	updatesCount, unique := tree.Size()
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	var m runtime.MemStats
 	stagedCell, ki := new(Cell), 0
 
-	do := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-logEvery.C:
+	go func() {
+		for range logEvery.C {
 			dbg.ReadMemStats(&m)
-			log.Info(fmt.Sprintf("[%s][agg] computing trie", logPrefix), "progress", fmt.Sprintf("%dk/%dk", ki/1000, updatesCount/1000), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-		default:
+			log.Info(fmt.Sprintf("[%s][agg] computing trie", logPrefix),
+				"progress", fmt.Sprintf("%dk/%dk", ki/1000, updatesCount/1000),
+				"countUnique", unique, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 		}
+	}()
 
-		hashedKey, plainKey := k, v
+	updateKey := func(hashedKey, plainKey []byte) error {
 		if hph.trace {
 			fmt.Printf("\n%d/%d) plainKey=[%x], hashedKey=[%x], currentKey=[%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
 		}
@@ -1355,7 +1351,7 @@ func (hph *HexPatriciaHashed) ProcessTree(ctx context.Context, tree *UpdateTree,
 		return nil
 	}
 
-	if err = collector.Load(nil, "", do, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err = tree.HashSort(ctx, updateKey); err != nil {
 		return nil, fmt.Errorf("hash sort failed: %w", err)
 	}
 

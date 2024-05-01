@@ -5,13 +5,14 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math/bits"
+	"strings"
+
 	"github.com/google/btree"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cryptozerocopy"
 	"github.com/ledgerwatch/erigon-lib/types"
 	"golang.org/x/crypto/sha3"
-	"math/bits"
-	"strings"
 
 	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/log/v3"
@@ -75,14 +76,19 @@ const (
 	VariantBinPatriciaTrie TrieVariant = "bin-patricia-hashed"
 )
 
-func InitializeTrie(tv TrieVariant) Trie {
+func InitializeTrieAndUpdateTree(tv TrieVariant, mode Mode, tmpdir string) (Trie, *UpdateTree) {
 	switch tv {
 	case VariantBinPatriciaTrie:
-		return NewBinPatriciaHashed(length.Addr, nil)
+		trie := NewBinPatriciaHashed(length.Addr, nil)
+		fn := func(key []byte) []byte { return hexToBin(key) }
+		tree := NewUpdateTree(mode, tmpdir, fn)
+		return trie, tree
 	case VariantHexPatriciaTrie:
 		fallthrough
 	default:
-		return NewHexPatriciaHashed(length.Addr, nil)
+		trie := NewHexPatriciaHashed(length.Addr, nil)
+		tree := NewUpdateTree(mode, tmpdir, trie.hashAndNibblizeKey)
+		return trie, tree
 	}
 }
 
@@ -795,47 +801,80 @@ func ParseCommitmentMode(s string) Mode {
 }
 
 type UpdateTree struct {
-	tree   *btree.BTreeG[*KeyUpdate]
-	keccak cryptozerocopy.KeccakState
-	keys   map[string]struct{}
-	mode   Mode
+	keccak    cryptozerocopy.KeccakState
+	hasher    keyHasher
+	tree      *btree.BTreeG[*KeyUpdate]
+	mode      Mode
+	updates   uint64
+	collector *etl.Collector
+	tmpdir    string
 }
 
-func NewUpdateTree(m Mode) *UpdateTree {
-	return &UpdateTree{
-		tree:   btree.NewG[*KeyUpdate](64, keyUpdateLessFn),
+type keyHasher func(key []byte) []byte
+
+func keyHasherNoop(key []byte) []byte { return key }
+
+func NewUpdateTree(m Mode, tmpdir string, hasher keyHasher) *UpdateTree {
+	t := &UpdateTree{
 		keccak: sha3.NewLegacyKeccak256().(cryptozerocopy.KeccakState),
-		keys:   map[string]struct{}{},
+		hasher: hasher,
 		mode:   m,
+		tmpdir: tmpdir,
 	}
+	if t.mode == ModeDirect {
+		t.initCollector()
+	} else if t.mode == ModeUpdate {
+		t.tree = btree.NewG[*KeyUpdate](64, keyUpdateLessFn)
+	}
+	return t
 }
 
-func (t *UpdateTree) get(key []byte) (*KeyUpdate, bool) {
-	c := &KeyUpdate{plainKey: key, update: Update{CodeHashOrStorage: EmptyCodeHashArray}}
-	el, ok := t.tree.Get(c)
-	if ok {
-		return el, true
-	}
-	c.plainKey = common.Copy(c.plainKey)
-	return c, false
+func (t *UpdateTree) initCollector() {
+	t.collector = etl.NewCollector("commitment", t.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize/4), log.Root().New("update-tree"))
+	t.collector.LogLvl(log.LvlDebug)
+	t.updates = 0
 }
 
 // TouchPlainKey marks plainKey as updated and applies different fn for different key types
 // (different behaviour for Code, Account and Storage key modifications).
-func (t *UpdateTree) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, val []byte)) {
+func (t *UpdateTree) TouchPlainKey(key, val []byte, fn func(c *KeyUpdate, val []byte)) {
 	switch t.mode {
 	case ModeUpdate:
-		item, _ := t.get([]byte(key))
-		fn(item, val)
-		t.tree.ReplaceOrInsert(item)
+		pivot, updated := &KeyUpdate{plainKey: key}, false
+
+		t.tree.DescendLessOrEqual(pivot, func(item *KeyUpdate) bool {
+			if bytes.Equal(item.plainKey, pivot.plainKey) {
+				fn(item, val)
+				updated = true
+			}
+			return false
+		})
+		if !updated {
+			pivot.update.plainKey = pivot.plainKey
+			pivot.update.hashedKey = t.hasher(pivot.plainKey)
+			fn(pivot, val)
+			t.tree.ReplaceOrInsert(pivot)
+		}
+		t.updates++
 	case ModeDirect:
-		t.keys[key] = struct{}{}
+		err := t.collector.Collect(t.hasher(key), key)
+		if err != nil {
+			log.Error("[commitment] failed to collect key", "err", err)
+		}
+		t.updates++
 	default:
 	}
 }
 
-func (t *UpdateTree) Size() uint64 {
-	return uint64(len(t.keys))
+func (t *UpdateTree) Size() (updates uint64, unique bool) {
+	switch t.mode {
+	case ModeDirect:
+		return t.updates, false
+	case ModeUpdate:
+		return uint64(t.tree.Len()), true
+	default:
+		return 0, false
+	}
 }
 
 func (t *UpdateTree) TouchAccount(c *KeyUpdate, val []byte) {
@@ -867,16 +906,6 @@ func (t *UpdateTree) TouchAccount(c *KeyUpdate, val []byte) {
 	}
 }
 
-func (t *UpdateTree) UpdatePrefix(prefix, val []byte, fn func(c *KeyUpdate, val []byte)) {
-	t.tree.AscendGreaterOrEqual(&KeyUpdate{}, func(item *KeyUpdate) bool {
-		if !bytes.HasPrefix(item.plainKey, prefix) {
-			return false
-		}
-		fn(item, val)
-		return true
-	})
-}
-
 func (t *UpdateTree) TouchStorage(c *KeyUpdate, val []byte) {
 	c.update.ValLength = len(val)
 	if len(val) == 0 {
@@ -903,24 +932,39 @@ func (t *UpdateTree) TouchCode(c *KeyUpdate, val []byte) {
 }
 
 func (t *UpdateTree) Close() {
-	t.keys = nil
-	t.tree.Clear(true)
+	if t.collector != nil {
+		t.collector.Close()
+		t.collector = nil
+	}
+	if t.tree != nil {
+		t.tree.Clear(true)
+		t.tree = nil
+	}
 }
 
-func (t *UpdateTree) HashSort(ctx context.Context, hasher func(key []byte) []byte, collect func(k []byte, v []byte) error) error {
+func (t *UpdateTree) HashSort(ctx context.Context, fn func(hk, pk []byte) error) error {
 	switch t.mode {
 	case ModeDirect:
-		for key := range t.keys {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
+		var phk []byte
+		var initialised bool
+		load := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			if initialised && bytes.Equal(phk, k) {
+				return nil
 			}
-			if err := collect(hasher([]byte(key)), []byte(key)); err != nil {
+			if err := fn(k, v); err != nil {
 				return err
 			}
+			phk = append(phk[:0], k...)
+			initialised = true
+			return nil
 		}
-		t.keys = make(map[string]struct{}, len(t.keys))
+
+		if err := t.collector.Load(nil, "", load, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+			t.collector.Close()
+			return err
+		}
+		t.collector.Close()
+		t.initCollector()
 	case ModeUpdate:
 		t.tree.Ascend(func(item *KeyUpdate) bool {
 			select {
@@ -928,14 +972,12 @@ func (t *UpdateTree) HashSort(ctx context.Context, hasher func(key []byte) []byt
 				return false
 			default:
 			}
-			if err := collect(hasher(item.plainKey), item.plainKey); err != nil {
+
+			if err := fn(item.update.hashedKey, item.plainKey); err != nil {
 				return false
 			}
 			return true
 		})
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
 		t.tree.Clear(true)
 	default:
 		return nil
@@ -948,16 +990,15 @@ func (t *UpdateTree) HashSort(ctx context.Context, hasher func(key []byte) []byt
 func (t *UpdateTree) List(clear bool) ([][]byte, []Update) {
 	switch t.mode {
 	case ModeDirect:
-		plainKeys := make([][]byte, len(t.keys))
-		i := 0
-		for key := range t.keys {
-			plainKeys[i] = []byte(key)
-			i++
+		plainKeys := make([][]byte, 0, t.updates)
+		err := t.HashSort(context.Background(), func(hk, pk []byte) error {
+			plainKeys = append(plainKeys, common.Copy(pk))
+			return nil
+		})
+		if err != nil {
+			return nil, nil
 		}
-		if clear {
-			t.keys = make(map[string]struct{}, len(t.keys)/8)
-		}
-
+		t.updates = 0
 		return plainKeys, nil
 	case ModeUpdate:
 		plainKeys := make([][]byte, t.tree.Len())

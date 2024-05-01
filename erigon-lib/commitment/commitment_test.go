@@ -1,9 +1,12 @@
 package commitment
 
 import (
+	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"math/rand"
+	"sort"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -284,4 +287,102 @@ func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
 		require.NoError(t, err)
 		require.EqualValues(t, orig, merged)
 	})
+}
+
+func TestNewUpdateTree(t *testing.T) {
+	t.Run("ModeUpdate", func(t *testing.T) {
+		ut := NewUpdateTree(ModeUpdate, t.TempDir(), keyHasherNoop)
+
+		require.NotNil(t, ut.tree)
+		require.NotNil(t, ut.keccak)
+		require.Nil(t, ut.collector)
+		require.Equal(t, ModeUpdate, ut.mode)
+	})
+
+	t.Run("ModeDirect", func(t *testing.T) {
+		ut := NewUpdateTree(ModeDirect, t.TempDir(), keyHasherNoop)
+
+		require.NotNil(t, ut.keccak)
+		require.NotNil(t, ut.collector)
+		require.Equal(t, ModeDirect, ut.mode)
+	})
+
+}
+
+func TestUpdateTree_TouchPlainKey(t *testing.T) {
+	utUpdate := NewUpdateTree(ModeUpdate, t.TempDir(), keyHasherNoop)
+	utDirect := NewUpdateTree(ModeDirect, t.TempDir(), keyHasherNoop)
+	utUpdate1 := NewUpdateTree(ModeUpdate, t.TempDir(), keyHasherNoop)
+	utDirect1 := NewUpdateTree(ModeDirect, t.TempDir(), keyHasherNoop)
+
+	type tc struct {
+		key []byte
+		val []byte
+	}
+
+	upds := []tc{
+		{common.FromHex("c17fa85f22306d37cec90b0ec74c5623dbbac68f"), []byte("value1")},
+		{common.FromHex("553bba1d92398a69fbc9f01593bbc51b58862366"), []byte("value0")},
+		{common.FromHex("553bba1d92398a69fbc9f01593bbc51b58862366"), []byte("value1")},
+		{common.FromHex("97c780315e7820752006b7a918ce7ec023df263a87a715b64d5ab445e1782a760a974f8810551f81dfb7f1425f7d8358332af195"), []byte("value1")},
+	}
+	for i := 0; i < len(upds); i++ {
+		utUpdate.TouchPlainKey(upds[i].key, upds[i].val, utUpdate.TouchStorage)
+		utDirect.TouchPlainKey(upds[i].key, upds[i].val, utDirect.TouchStorage)
+		utUpdate1.TouchPlainKey(upds[i].key, upds[i].val, utUpdate.TouchStorage)
+		utDirect1.TouchPlainKey(upds[i].key, upds[i].val, utDirect.TouchStorage)
+	}
+
+	uniqUpds := make(map[string]tc)
+	for i := 0; i < len(upds); i++ {
+		uniqUpds[string(upds[i].key)] = upds[i]
+	}
+	sortedUniqUpds := make([]tc, 0, len(uniqUpds))
+	for _, v := range uniqUpds {
+		sortedUniqUpds = append(sortedUniqUpds, v)
+	}
+	sort.Slice(sortedUniqUpds, func(i, j int) bool {
+		return bytes.Compare(sortedUniqUpds[i].key, sortedUniqUpds[j].key) < 0
+	})
+
+	sz, uniq := utUpdate.Size()
+	require.EqualValues(t, 3, sz)
+	require.True(t, uniq)
+
+	sz, uniq = utDirect.Size()
+	require.EqualValues(t, len(upds), sz)
+	require.False(t, uniq)
+
+	pk, upd := utUpdate.List(true)
+	require.Len(t, pk, 3)
+	require.NotNil(t, upd)
+
+	for i := 0; i < len(sortedUniqUpds); i++ {
+		require.EqualValues(t, sortedUniqUpds[i].key, pk[i])
+		require.EqualValues(t, sortedUniqUpds[i].val, upd[i].CodeHashOrStorage[:upd[i].ValLength])
+	}
+
+	pk, upd = utDirect.List(true)
+	require.Len(t, pk, 3)
+	require.Nil(t, upd)
+
+	for i := 0; i < len(sortedUniqUpds); i++ {
+		require.EqualValues(t, sortedUniqUpds[i].key, pk[i])
+	}
+
+	i := 0
+	err := utUpdate1.HashSort(context.Background(), func(hk, pk []byte) error {
+		require.EqualValues(t, sortedUniqUpds[i].key, pk)
+		i++
+		return nil
+	})
+	require.NoError(t, err)
+
+	i = 0
+	err = utDirect1.HashSort(context.Background(), func(hk, pk []byte) error {
+		require.EqualValues(t, sortedUniqUpds[i].key, pk)
+		i++
+		return nil
+	})
+	require.NoError(t, err)
 }
