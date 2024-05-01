@@ -35,7 +35,6 @@ type WebSeeds struct {
 	torrentUrls         snaptype.TorrentUrls // HTTP urls of .torrent files
 	downloadTorrentFile bool
 	torrentsWhitelist   snapcfg.Preverified
-	downloader          *Downloader
 	seeds               []*url.URL
 
 	logger    log.Logger
@@ -97,11 +96,10 @@ func (d *WebSeeds) getWebDownloadInfo(ctx context.Context, t *torrent.Torrent) (
 	return infos, seedHashMismatches, nil
 }
 
-func (d *WebSeeds) SetTorrent(downloader *Downloader, whiteList snapcfg.Preverified, downloadTorrentFile bool) {
+func (d *WebSeeds) SetTorrent(torrentFS *AtomicTorrentFS, whiteList snapcfg.Preverified, downloadTorrentFile bool) {
 	d.downloadTorrentFile = downloadTorrentFile
 	d.torrentsWhitelist = whiteList
-	d.torrentFiles = downloader.torrentFS
-	d.downloader = downloader
+	d.torrentFiles = torrentFS
 }
 
 func (d *WebSeeds) checkHasTorrents(manifestResponse snaptype.WebSeedsFromProvider, report *WebSeedCheckReport) {
@@ -409,15 +407,6 @@ func (d *WebSeeds) makeWebSeedUrls(listsOfFiles []snaptype.WebSeedsFromProvider,
 	d.lock.Lock()
 	d.byFileName = webSeedUrls
 	d.lock.Unlock()
-
-	d.downloader.lock.Lock()
-	defer d.downloader.lock.Unlock()
-
-	for _, t := range d.downloader.torrentClient.Torrents() {
-		if urls, ok := d.ByFileName(t.Name()); ok {
-			t.AddWebSeeds(urls)
-		}
-	}
 }
 
 func (d *WebSeeds) TorrentUrls() snaptype.TorrentUrls {

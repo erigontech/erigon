@@ -318,7 +318,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		downloading:         map[string]struct{}{},
 		webseedsDiscover:    discover,
 	}
-	d.webseeds.SetTorrent(d, lock.Downloads, cfg.DownloadTorrentFilesFromWebseed)
+	d.webseeds.SetTorrent(d.torrentFS, lock.Downloads, cfg.DownloadTorrentFilesFromWebseed)
 
 	requestHandler.downloader = d
 
@@ -820,6 +820,15 @@ func (d *Downloader) mainLoop(silent bool) error {
 			// apply webseeds to existing torrents
 			if err := d.addTorrentFilesFromDisk(true); err != nil && !errors.Is(err, context.Canceled) {
 				d.logger.Warn("[snapshots] addTorrentFilesFromDisk", "err", err)
+			}
+
+			d.lock.Lock()
+			defer d.lock.Unlock()
+
+			for _, t := range d.torrentClient.Torrents() {
+				if urls, ok := d.webseeds.ByFileName(t.Name()); ok {
+					t.AddWebSeeds(urls)
+				}
 			}
 		}()
 	}
