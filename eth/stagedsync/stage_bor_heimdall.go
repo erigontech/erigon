@@ -12,13 +12,6 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
-<<<<<<< HEAD
-
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon/polygon/sync"
-
-=======
->>>>>>> 7e3ea3a283760669f7520d8b14363ad45fae4136
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
@@ -39,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/bor/finality/whitelist"
 	"github.com/ledgerwatch/erigon/polygon/bor/valset"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
+	"github.com/ledgerwatch/erigon/polygon/sync"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
