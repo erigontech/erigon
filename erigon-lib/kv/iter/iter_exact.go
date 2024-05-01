@@ -13,7 +13,7 @@ type (
 
 var (
 	EmptyU64 = &Empty[uint64]{}
-	EmptyKV  = &Empty2[[]byte, []byte]{}
+	EmptyKV  = &EmptyDuo[[]byte, []byte]{}
 )
 
 func FilterU64(it U64, filter func(k uint64) bool) *FilteredUno[uint64] {

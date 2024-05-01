@@ -24,14 +24,14 @@ import (
 )
 
 type (
-	Empty[T any]     struct{}
-	Empty2[K, V any] struct{}
+	Empty[T any]       struct{}
+	EmptyDuo[K, V any] struct{}
 )
 
-func (Empty[T]) HasNext() bool                   { return false }
-func (Empty[T]) Next() (v T, err error)          { return v, err }
-func (Empty2[K, V]) HasNext() bool               { return false }
-func (Empty2[K, V]) Next() (k K, v V, err error) { return k, v, err }
+func (Empty[T]) HasNext() bool                     { return false }
+func (Empty[T]) Next() (v T, err error)            { return v, err }
+func (EmptyDuo[K, V]) HasNext() bool               { return false }
+func (EmptyDuo[K, V]) Next() (k K, v V, err error) { return k, v, err }
 
 type ArrStream[V any] struct {
 	arr []V
