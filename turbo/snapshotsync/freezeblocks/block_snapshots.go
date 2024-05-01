@@ -728,9 +728,9 @@ func (s *RoSnapshots) removeOverlaps() error {
 }
 
 func (s *RoSnapshots) buildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier, dirs datadir.Dirs, cc *chain.Config, logger log.Logger) error {
-	if s.IndicesMax() >= s.SegmentsMax() {
-		return nil
-	}
+	// if s.IndicesMax() >= s.SegmentsMax() {
+	// 	return nil
+	// }
 	if !s.Cfg().Produce && s.IndicesMax() == 0 {
 		return fmt.Errorf("please remove --snap.stop, erigon can't work without creating basic indices")
 	}
