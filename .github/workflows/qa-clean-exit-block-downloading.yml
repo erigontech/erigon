@@ -6,7 +6,7 @@ on:
       - 'release/**'
   pull_request:
     branches:
-      - devel
+      - main
       - 'release/**'
     types:
       - ready_for_review
