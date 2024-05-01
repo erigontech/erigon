@@ -24,17 +24,17 @@ import (
 )
 
 type (
-	Empty[T any]          struct{}
-	Empty2[K, V any]      struct{}
-	Empty3[K, V1, V2 any] struct{}
+	Empty[T any]             struct{}
+	EmptyDuo[K, V any]       struct{}
+	EmptyTrio[K, V1, V2 any] struct{}
 )
 
-func (Empty[T]) HasNext() bool                                 { return false }
-func (Empty[T]) Next() (v T, err error)                        { return v, err }
-func (Empty2[K, V]) HasNext() bool                             { return false }
-func (Empty2[K, V]) Next() (k K, v V, err error)               { return k, v, err }
-func (Empty3[K, V1, v2]) HasNext() bool                        { return false }
-func (Empty3[K, V1, V2]) Next() (k K, v1 V1, v2 V2, err error) { return k, v1, v2, err }
+func (Empty[T]) HasNext() bool                                    { return false }
+func (Empty[T]) Next() (v T, err error)                           { return v, err }
+func (EmptyDuo[K, V]) HasNext() bool                              { return false }
+func (EmptyDuo[K, V]) Next() (k K, v V, err error)                { return k, v, err }
+func (EmptyTrio[K, V1, v2]) HasNext() bool                        { return false }
+func (EmptyTrio[K, V1, V2]) Next() (k K, v1 V1, v2 V2, err error) { return k, v1, v2, err }
 
 type ArrStream[V any] struct {
 	arr []V
@@ -81,8 +81,8 @@ func (it *RangeIter[T]) Next() (T, error) {
 	return v, nil
 }
 
-// Union1
-type Union1[T constraints.Ordered] struct {
+// UnionUno
+type UnionUno[T constraints.Ordered] struct {
 	x, y           Uno[T]
 	asc            bool
 	xHas, yHas     bool
@@ -107,16 +107,16 @@ func Union[T constraints.Ordered](x, y Uno[T], asc order.By, limit int) Uno[T] {
 	if !y.HasNext() {
 		return x
 	}
-	m := &Union1[T]{x: x, y: y, asc: bool(asc), limit: limit}
+	m := &UnionUno[T]{x: x, y: y, asc: bool(asc), limit: limit}
 	m.advanceX()
 	m.advanceY()
 	return m
 }
 
-func (m *Union1[T]) HasNext() bool {
+func (m *UnionUno[T]) HasNext() bool {
 	return m.err != nil || (m.limit != 0 && m.xHas) || (m.limit != 0 && m.yHas)
 }
-func (m *Union1[T]) advanceX() {
+func (m *UnionUno[T]) advanceX() {
 	if m.err != nil {
 		return
 	}
@@ -125,7 +125,7 @@ func (m *Union1[T]) advanceX() {
 		m.xNextK, m.err = m.x.Next()
 	}
 }
-func (m *Union1[T]) advanceY() {
+func (m *UnionUno[T]) advanceY() {
 	if m.err != nil {
 		return
 	}
@@ -135,11 +135,11 @@ func (m *Union1[T]) advanceY() {
 	}
 }
 
-func (m *Union1[T]) less() bool {
+func (m *UnionUno[T]) less() bool {
 	return (m.asc && m.xNextK < m.yNextK) || (!m.asc && m.xNextK > m.yNextK)
 }
 
-func (m *Union1[T]) Next() (res T, err error) {
+func (m *UnionUno[T]) Next() (res T, err error) {
 	if m.err != nil {
 		return res, m.err
 	}
@@ -168,7 +168,7 @@ func (m *Union1[T]) Next() (res T, err error) {
 	m.advanceY()
 	return k, err
 }
-func (m *Union1[T]) Close() {
+func (m *UnionUno[T]) Close() {
 	if x, ok := m.x.(Closer); ok {
 		x.Close()
 	}
@@ -253,33 +253,33 @@ func (m *Intersected[T]) Close() {
 	}
 }
 
-// Transformed2 - analog `map` (in terms of map-filter-reduce pattern)
-type Transformed2[K, V any] struct {
+// TransformedDuo - analog `map` (in terms of map-filter-reduce pattern)
+type TransformedDuo[K, V any] struct {
 	it        Duo[K, V]
 	transform func(K, V) (K, V, error)
 }
 
-func Transform2[K, V any](it Duo[K, V], transform func(K, V) (K, V, error)) *Transformed2[K, V] {
-	return &Transformed2[K, V]{it: it, transform: transform}
+func TransformDuo[K, V any](it Duo[K, V], transform func(K, V) (K, V, error)) *TransformedDuo[K, V] {
+	return &TransformedDuo[K, V]{it: it, transform: transform}
 }
-func (m *Transformed2[K, V]) HasNext() bool { return m.it.HasNext() }
-func (m *Transformed2[K, V]) Next() (K, V, error) {
+func (m *TransformedDuo[K, V]) HasNext() bool { return m.it.HasNext() }
+func (m *TransformedDuo[K, V]) Next() (K, V, error) {
 	k, v, err := m.it.Next()
 	if err != nil {
 		return k, v, err
 	}
 	return m.transform(k, v)
 }
-func (m *Transformed2[K, v]) Close() {
+func (m *TransformedDuo[K, v]) Close() {
 	if x, ok := m.it.(Closer); ok {
 		x.Close()
 	}
 }
 
-// Filtered2 - analog `map` (in terms of map-filter-reduce pattern)
+// FilteredDuo - analog `map` (in terms of map-filter-reduce pattern)
 // please avoid reading from Disk/DB more elements and then filter them. Better
 // push-down filter conditions to lower-level iterator to reduce disk reads amount.
-type Filtered2[K, V any] struct {
+type FilteredDuo[K, V any] struct {
 	it      Duo[K, V]
 	filter  func(K, V) bool
 	hasNext bool
@@ -288,12 +288,12 @@ type Filtered2[K, V any] struct {
 	nextV   V
 }
 
-func Filter2[K, V any](it Duo[K, V], filter func(K, V) bool) *Filtered2[K, V] {
-	i := &Filtered2[K, V]{it: it, filter: filter}
+func FilterDuo[K, V any](it Duo[K, V], filter func(K, V) bool) *FilteredDuo[K, V] {
+	i := &FilteredDuo[K, V]{it: it, filter: filter}
 	i.advance()
 	return i
 }
-func (m *Filtered2[K, V]) advance() {
+func (m *FilteredDuo[K, V]) advance() {
 	if m.err != nil {
 		return
 	}
@@ -312,13 +312,13 @@ func (m *Filtered2[K, V]) advance() {
 		}
 	}
 }
-func (m *Filtered2[K, V]) HasNext() bool { return m.err != nil || m.hasNext }
-func (m *Filtered2[K, V]) Next() (k K, v V, err error) {
+func (m *FilteredDuo[K, V]) HasNext() bool { return m.err != nil || m.hasNext }
+func (m *FilteredDuo[K, V]) Next() (k K, v V, err error) {
 	k, v, err = m.nextK, m.nextV, m.err
 	m.advance()
 	return k, v, err
 }
-func (m *Filtered2[K, v]) Close() {
+func (m *FilteredDuo[K, v]) Close() {
 	if x, ok := m.it.(Closer); ok {
 		x.Close()
 	}
@@ -384,12 +384,12 @@ type Paginated[T any] struct {
 	arr           []T
 	i             int
 	err           error
-	nextPage      NextPage1[T]
+	nextPage      NextPageUno[T]
 	nextPageToken string
 	initialized   bool
 }
 
-func Paginate[T any](f NextPage1[T]) *Paginated[T] { return &Paginated[T]{nextPage: f} }
+func Paginate[T any](f NextPageUno[T]) *Paginated[T] { return &Paginated[T]{nextPage: f} }
 func (it *Paginated[T]) HasNext() bool {
 	if it.err != nil || it.i < len(it.arr) {
 		return true
@@ -412,20 +412,20 @@ func (it *Paginated[T]) Next() (v T, err error) {
 	return v, nil
 }
 
-type Paginated2[K, V any] struct {
+type PaginatedDuo[K, V any] struct {
 	keys          []K
 	values        []V
 	i             int
 	err           error
-	nextPage      NextPage2[K, V]
+	nextPage      NextPageDuo[K, V]
 	nextPageToken string
 	initialized   bool
 }
 
-func Paginate2[K, V any](f NextPage2[K, V]) *Paginated2[K, V] {
-	return &Paginated2[K, V]{nextPage: f}
+func PaginateDuo[K, V any](f NextPageDuo[K, V]) *PaginatedDuo[K, V] {
+	return &PaginatedDuo[K, V]{nextPage: f}
 }
-func (it *Paginated2[K, V]) HasNext() bool {
+func (it *PaginatedDuo[K, V]) HasNext() bool {
 	if it.err != nil || it.i < len(it.keys) {
 		return true
 	}
@@ -437,8 +437,8 @@ func (it *Paginated2[K, V]) HasNext() bool {
 	it.keys, it.values, it.nextPageToken, it.err = it.nextPage(it.nextPageToken)
 	return it.err != nil || it.i < len(it.keys)
 }
-func (it *Paginated2[K, V]) Close() {}
-func (it *Paginated2[K, V]) Next() (k K, v V, err error) {
+func (it *PaginatedDuo[K, V]) Close() {}
+func (it *PaginatedDuo[K, V]) Next() (k K, v V, err error) {
 	if it.err != nil {
 		return k, v, it.err
 	}

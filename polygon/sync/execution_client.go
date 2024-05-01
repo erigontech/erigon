@@ -2,8 +2,16 @@ package sync
 
 import (
 	"context"
+	"fmt"
+	"runtime"
+	"time"
 
-	executionclient "github.com/ledgerwatch/erigon/cl/phase1/execution_client"
+	"google.golang.org/protobuf/types/known/emptypb"
+
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	executionproto "github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
+	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
+
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -14,23 +22,77 @@ type ExecutionClient interface {
 }
 
 type executionClient struct {
-	engine executionclient.ExecutionEngine
+	client executionproto.ExecutionClient
 }
 
-func NewExecutionClient(engine executionclient.ExecutionEngine) ExecutionClient {
-	return &executionClient{engine}
+func NewExecutionClient(client executionproto.ExecutionClient) ExecutionClient {
+	return &executionClient{client}
 }
 
 func (e *executionClient) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
-	return e.engine.InsertBlocks(ctx, blocks, true)
+	request := &executionproto.InsertBlocksRequest{
+		Blocks: eth1_utils.ConvertBlocksToRPC(blocks),
+	}
+
+	for {
+		response, err := e.client.InsertBlocks(ctx, request)
+		if err != nil {
+			return err
+		}
+
+		status := response.Result
+		switch status {
+		case executionproto.ExecutionStatus_Success:
+			return nil
+		case executionproto.ExecutionStatus_Busy:
+			// retry after sleep
+			delayTimer := time.NewTimer(time.Second)
+			defer delayTimer.Stop()
+
+			select {
+			case <-delayTimer.C:
+			case <-ctx.Done():
+			}
+		default:
+			return fmt.Errorf("executionClient.InsertBlocks failed with response status: %s", status.String())
+		}
+	}
 }
 
-func (e *executionClient) UpdateForkChoice(_ context.Context, _ *types.Header, _ *types.Header) error {
+func (e *executionClient) UpdateForkChoice(ctx context.Context, tip *types.Header, finalizedHeader *types.Header) error {
 	// TODO - not ready for execution - missing state sync event and span data - uncomment once ready
-	//return e.engine.ForkChoiceUpdate(ctx, finalizedHeader.Hash(), tip.Hash())
+	if runtime.GOOS != "TODO" {
+		return nil
+	}
+
+	tipHash := tip.Hash()
+	const timeout = 5 * time.Second
+
+	request := executionproto.ForkChoice{
+		HeadBlockHash:      gointerfaces.ConvertHashToH256(tipHash),
+		SafeBlockHash:      gointerfaces.ConvertHashToH256(tipHash),
+		FinalizedBlockHash: gointerfaces.ConvertHashToH256(finalizedHeader.Hash()),
+		Timeout:            uint64(timeout.Milliseconds()),
+	}
+
+	response, err := e.client.UpdateForkChoice(ctx, &request)
+	if err != nil {
+		return err
+	}
+
+	if len(response.ValidationError) > 0 {
+		return fmt.Errorf("executionClient.UpdateForkChoice failed with a validation error: %s", response.ValidationError)
+	}
 	return nil
 }
 
 func (e *executionClient) CurrentHeader(ctx context.Context) (*types.Header, error) {
-	return e.engine.CurrentHeader(ctx)
+	response, err := e.client.CurrentHeader(ctx, &emptypb.Empty{})
+	if err != nil {
+		return nil, err
+	}
+	if (response == nil) || (response.Header == nil) {
+		return nil, nil
+	}
+	return eth1_utils.HeaderRpcToHeader(response.Header)
 }

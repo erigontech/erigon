@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/ethdb"
+	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -912,13 +913,13 @@ func (api *TraceAPIImpl) callManyTransactions(
 	if cfg.Bor != nil {
 		// check if this block has state sync txn
 		blockHash := block.Hash()
-		borStateSyncTxnHash = types.ComputeBorTxHash(blockNumber, blockHash)
+		borStateSyncTxnHash = bortypes.ComputeBorTxHash(blockNumber, blockHash)
 		_, ok, err := api._blockReader.EventLookup(ctx, dbtx, borStateSyncTxnHash)
 		if err != nil {
 			return nil, nil, err
 		}
 		if ok {
-			borStateSyncTxn = types.NewBorTransaction()
+			borStateSyncTxn = bortypes.NewBorTransaction()
 			txs = append(txs, borStateSyncTxn)
 		}
 	}

@@ -12,7 +12,7 @@ import (
 )
 
 type Sync struct {
-	storage          Storage
+	store            Store
 	execution        ExecutionClient
 	headersVerifier  AccumulatedHeadersVerifier
 	blocksVerifier   BlocksVerifier
@@ -26,7 +26,7 @@ type Sync struct {
 }
 
 func NewSync(
-	storage Storage,
+	store Store,
 	execution ExecutionClient,
 	headersVerifier AccumulatedHeadersVerifier,
 	blocksVerifier BlocksVerifier,
@@ -39,7 +39,7 @@ func NewSync(
 	logger log.Logger,
 ) *Sync {
 	return &Sync{
-		storage:          storage,
+		store:            store,
 		execution:        execution,
 		headersVerifier:  headersVerifier,
 		blocksVerifier:   blocksVerifier,
@@ -54,7 +54,7 @@ func NewSync(
 }
 
 func (s *Sync) commitExecution(ctx context.Context, newTip *types.Header, finalizedHeader *types.Header) error {
-	if err := s.storage.Flush(ctx); err != nil {
+	if err := s.store.Flush(ctx); err != nil {
 		return err
 	}
 	return s.execution.UpdateForkChoice(ctx, newTip, finalizedHeader)
