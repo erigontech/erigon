@@ -1817,8 +1817,14 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 
 		if useSnapshots {
 			g := &errgroup.Group{}
-			g.Go(func() error { return _allSnapshotsSingleton.ReopenFolder() })
-			g.Go(func() error { return _allBorSnapshotsSingleton.ReopenFolder() })
+			g.Go(func() error {
+				_allSnapshotsSingleton.OptimisticalyReopenFolder()
+				return nil
+			})
+			g.Go(func() error {
+				_allBorSnapshotsSingleton.OptimisticalyReopenFolder()
+				return nil
+			})
 			g.Go(func() error { return _aggSingleton.OpenFolder(true) }) //TODO: open in read-only if erigon running?
 			err := g.Wait()
 			if err != nil {

@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
+	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/log/v3"
@@ -91,7 +92,7 @@ func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string, min
 		}
 
 		switch segment.Type.Enum() {
-		case snaptype.Enums.Headers, snaptype.Enums.Bodies, snaptype.Enums.Transactions:
+		case coresnaptype.Enums.Headers, coresnaptype.Enums.Bodies, coresnaptype.Enums.Transactions:
 			g.Go(func() error {
 				jobProgress := &background.Progress{}
 				ps.Add(jobProgress)
