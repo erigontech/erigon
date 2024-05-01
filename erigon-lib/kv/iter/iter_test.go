@@ -92,7 +92,7 @@ func TestUnionPairs(t *testing.T) {
 		_ = tx.Put(kv.PlainState, []byte{3}, []byte{9})
 		it, _ := tx.Range(kv.E2AccountsHistory, nil, nil)
 		it2, _ := tx.Range(kv.PlainState, nil, nil)
-		keys, values, err := iter.ToKVArray(iter.UnionKV(it, it2, -1))
+		keys, values, err := iter.ToArrayKV(iter.UnionKV(it, it2, -1))
 		require.NoError(err)
 		require.Equal([][]byte{{1}, {2}, {3}, {4}}, keys)
 		require.Equal([][]byte{{1}, {9}, {1}, {1}}, values)
@@ -105,7 +105,7 @@ func TestUnionPairs(t *testing.T) {
 		_ = tx.Put(kv.PlainState, []byte{3}, []byte{9})
 		it, _ := tx.Range(kv.E2AccountsHistory, nil, nil)
 		it2, _ := tx.Range(kv.PlainState, nil, nil)
-		keys, _, err := iter.ToKVArray(iter.UnionKV(it, it2, -1))
+		keys, _, err := iter.ToArrayKV(iter.UnionKV(it, it2, -1))
 		require.NoError(err)
 		require.Equal([][]byte{{2}, {3}}, keys)
 	})
@@ -118,7 +118,7 @@ func TestUnionPairs(t *testing.T) {
 		_ = tx.Put(kv.E2AccountsHistory, []byte{4}, []byte{1})
 		it, _ := tx.Range(kv.E2AccountsHistory, nil, nil)
 		it2, _ := tx.Range(kv.PlainState, nil, nil)
-		keys, _, err := iter.ToKVArray(iter.UnionKV(it, it2, -1))
+		keys, _, err := iter.ToArrayKV(iter.UnionKV(it, it2, -1))
 		require.NoError(err)
 		require.Equal([][]byte{{1}, {3}, {4}}, keys)
 	})
@@ -137,7 +137,7 @@ func TestUnionPairs(t *testing.T) {
 		defer tx.Rollback()
 		it := iter.PairsWithError(10)
 		it2 := iter.PairsWithError(12)
-		keys, _, err := iter.ToKVArray(iter.UnionKV(it, it2, -1))
+		keys, _, err := iter.ToArrayKV(iter.UnionKV(it, it2, -1))
 		require.Equal("expected error at iteration: 10", err.Error())
 		require.Equal(10, len(keys))
 	})
@@ -299,7 +299,7 @@ func TestPaginatedDuo(t *testing.T) {
 			return
 		})
 
-		keys, values, err := iter.ToKVArray(s1)
+		keys, values, err := iter.ToArrayKV(s1)
 		require.NoError(t, err)
 		require.Equal(t, [][]byte{{1}, {2}, {3}, {4}, {5}, {6}, {7}}, keys)
 		require.Equal(t, [][]byte{{1}, {2}, {3}, {4}, {5}, {6}, {7}}, values)
@@ -323,7 +323,7 @@ func TestPaginatedDuo(t *testing.T) {
 			}
 			return
 		})
-		keys, values, err := iter.ToKVArray(s1)
+		keys, values, err := iter.ToArrayKV(s1)
 		require.ErrorIs(t, err, testErr)
 		require.Equal(t, [][]byte{{1}, {2}, {3}}, keys)
 		require.Equal(t, [][]byte{{1}, {2}, {3}}, values)
@@ -338,7 +338,7 @@ func TestPaginatedDuo(t *testing.T) {
 		s1 := iter.PaginateKV(func(pageToken string) (keys, values [][]byte, nextPageToken string, err error) {
 			return [][]byte{}, [][]byte{}, "", nil
 		})
-		keys, values, err := iter.ToKVArray(s1)
+		keys, values, err := iter.ToArrayKV(s1)
 		require.NoError(t, err)
 		require.Nil(t, keys)
 		require.Nil(t, values)
@@ -366,25 +366,25 @@ func TestFiler(t *testing.T) {
 	}
 	t.Run("duo", func(t *testing.T) {
 		s2 := iter.FilterKV(createKVIter(), func(k, v []byte) bool { return bytes.Equal(k, []byte{1}) })
-		keys, values, err := iter.ToKVArray(s2)
+		keys, values, err := iter.ToArrayKV(s2)
 		require.NoError(t, err)
 		require.Equal(t, [][]byte{{1}}, keys)
 		require.Equal(t, [][]byte{{1}}, values)
 
 		s2 = iter.FilterKV(createKVIter(), func(k, v []byte) bool { return bytes.Equal(k, []byte{3}) })
-		keys, values, err = iter.ToKVArray(s2)
+		keys, values, err = iter.ToArrayKV(s2)
 		require.NoError(t, err)
 		require.Equal(t, [][]byte{{3}}, keys)
 		require.Equal(t, [][]byte{{3}}, values)
 
 		s2 = iter.FilterKV(createKVIter(), func(k, v []byte) bool { return bytes.Equal(k, []byte{4}) })
-		keys, values, err = iter.ToKVArray(s2)
+		keys, values, err = iter.ToArrayKV(s2)
 		require.NoError(t, err)
 		require.Nil(t, keys)
 		require.Nil(t, values)
 
 		s2 = iter.FilterKV(iter.EmptyKV, func(k, v []byte) bool { return bytes.Equal(k, []byte{4}) })
-		keys, values, err = iter.ToKVArray(s2)
+		keys, values, err = iter.ToArrayKV(s2)
 		require.NoError(t, err)
 		require.Nil(t, keys)
 		require.Nil(t, values)
@@ -392,24 +392,24 @@ func TestFiler(t *testing.T) {
 	t.Run("unary", func(t *testing.T) {
 		s1 := iter.Array[uint64]([]uint64{1, 2, 3})
 		s2 := iter.FilterU64(s1, func(k uint64) bool { return k == 1 })
-		res, err := iter.ToU64Arr(s2)
+		res, err := iter.ToArrayU64(s2)
 		require.NoError(t, err)
 		require.Equal(t, []uint64{1}, res)
 
 		s1 = iter.Array[uint64]([]uint64{1, 2, 3})
 		s2 = iter.FilterU64(s1, func(k uint64) bool { return k == 3 })
-		res, err = iter.ToU64Arr(s2)
+		res, err = iter.ToArrayU64(s2)
 		require.NoError(t, err)
 		require.Equal(t, []uint64{3}, res)
 
 		s1 = iter.Array[uint64]([]uint64{1, 2, 3})
 		s2 = iter.FilterU64(s1, func(k uint64) bool { return k == 4 })
-		res, err = iter.ToU64Arr(s2)
+		res, err = iter.ToArrayU64(s2)
 		require.NoError(t, err)
 		require.Nil(t, res)
 
 		s2 = iter.FilterU64(iter.EmptyU64, func(k uint64) bool { return k == 4 })
-		res, err = iter.ToU64Arr(s2)
+		res, err = iter.ToArrayU64(s2)
 		require.NoError(t, err)
 		require.Nil(t, res)
 	})

@@ -136,7 +136,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 			keyWords = append(keyWords, string(w))
 			w, _ = g.Next(w[:0])
 			ef, _ := eliasfano32.ReadEliasFano(w)
-			ints, err := iter.ToU64Arr(ef.Iterator())
+			ints, err := iter.ToArrayU64(ef.Iterator())
 			require.NoError(err)
 			intArrs = append(intArrs, ints)
 		}

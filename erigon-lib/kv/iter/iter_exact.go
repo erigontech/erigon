@@ -23,8 +23,8 @@ func FilterKV(it KV, filter func(k, v []byte) bool) *FilteredDuo[[]byte, []byte]
 	return FilterDuo[[]byte, []byte](it, filter)
 }
 
-func ToU64Arr(s U64) ([]uint64, error)           { return ToArray[uint64](s) }
-func ToKVArray(s KV) ([][]byte, [][]byte, error) { return ToArrayDuo[[]byte, []byte](s) }
+func ToArrayU64(s U64) ([]uint64, error)         { return ToArray[uint64](s) }
+func ToArrayKV(s KV) ([][]byte, [][]byte, error) { return ToArrayDuo[[]byte, []byte](s) }
 
 func ToArrU64Must(s U64) []uint64 {
 	arr, err := ToArray[uint64](s)
@@ -161,7 +161,7 @@ func (m *UnionKVIter) Next() ([]byte, []byte, error) {
 	return k, v, err
 }
 
-// func (m *UnionKVIter) ToArray() (keys, values [][]byte, err error) { return ToKVArray(m) }
+// func (m *UnionKVIter) ToArray() (keys, values [][]byte, err error) { return ToArrayKV(m) }
 func (m *UnionKVIter) Close() {
 	if x, ok := m.x.(Closer); ok {
 		x.Close()
