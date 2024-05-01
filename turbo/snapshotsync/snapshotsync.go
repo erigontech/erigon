@@ -212,7 +212,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 	// prohibits further downloads, except some exceptions
 	for _, p := range blockReader.AllTypes() {
 		if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
-			Type: p.String(),
+			Type: p.Name(),
 		}); err != nil {
 			return err
 		}
@@ -225,7 +225,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 			}
 
 			if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
-				Type: p.String(),
+				Type: p.Name(),
 			}); err != nil {
 				return err
 			}

@@ -396,6 +396,12 @@ func MiningStep(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, tmpDir
 	miningBatch = mb
 	//}
 	txc := wrap.TxContainer{Tx: miningBatch}
+	sd, err := state.NewSharedDomains(mb, logger)
+	if err != nil {
+		return err
+	}
+	defer sd.Close()
+	txc.Doms = sd
 
 	if _, err = mining.Run(nil, txc, false /* firstCycle */); err != nil {
 		return err
@@ -497,7 +503,7 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 	return nil
 }
 
-func silkwormForExecutionStage(silkworm *silkworm.Silkworm, cfg *ethconfig.Config) *silkworm.Silkworm {
+func SilkwormForExecutionStage(silkworm *silkworm.Silkworm, cfg *ethconfig.Config) *silkworm.Silkworm {
 	if cfg.SilkwormExecution {
 		return silkworm
 	}
@@ -529,7 +535,7 @@ func NewDefaultStages(ctx context.Context,
 	// Hence we run it in the test mode.
 	runInTestMode := cfg.ImportMode
 
-	loopBreakCheck := newLoopBreakCheck(cfg, heimdallClient)
+	loopBreakCheck := NewLoopBreakCheck(cfg, heimdallClient)
 
 	if heimdallClient != nil && flags.Milestone {
 		loopBreakCheck = func(int) bool {
@@ -552,9 +558,9 @@ func NewDefaultStages(ctx context.Context,
 		}
 	}
 
-	var noPruneContracts map[libcommon.Address]bool
+	var depositContract *libcommon.Address
 	if cfg.Genesis != nil {
-		noPruneContracts = cfg.Genesis.Config.NoPruneContracts
+		depositContract = cfg.Genesis.Config.DepositContract
 	}
 
 	return stagedsync.DefaultStages(ctx,
@@ -582,12 +588,12 @@ func NewDefaultStages(ctx context.Context,
 			cfg.Genesis,
 			cfg.Sync,
 			agg,
-			silkwormForExecutionStage(silkworm, cfg),
+			SilkwormForExecutionStage(silkworm, cfg),
 		),
 		stagedsync.StageHashStateCfg(db, dirs, cfg.HistoryV3),
 		stagedsync.StageTrieCfg(db, true, true, false, dirs.Tmp, blockReader, controlServer.Hd, cfg.HistoryV3, agg),
 		stagedsync.StageHistoryCfg(db, cfg.Prune, dirs.Tmp),
-		stagedsync.StageLogIndexCfg(db, cfg.Prune, dirs.Tmp, noPruneContracts),
+		stagedsync.StageLogIndexCfg(db, cfg.Prune, dirs.Tmp, depositContract),
 		stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, dirs.Tmp),
 		stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, controlServer.ChainConfig.Bor, blockReader),
 		stagedsync.StageFinishCfg(db, dirs.Tmp, forkValidator),
@@ -615,11 +621,11 @@ func NewPipelineStages(ctx context.Context,
 	// During Import we don't want other services like header requests, body requests etc. to be running.
 	// Hence we run it in the test mode.
 	runInTestMode := cfg.ImportMode
-	loopBreakCheck := newLoopBreakCheck(cfg, nil)
+	loopBreakCheck := NewLoopBreakCheck(cfg, nil)
 
-	var noPruneContracts map[libcommon.Address]bool
+	var depositContract *libcommon.Address
 	if cfg.Genesis != nil {
-		noPruneContracts = cfg.Genesis.Config.NoPruneContracts
+		depositContract = cfg.Genesis.Config.DepositContract
 	}
 
 	if len(cfg.Sync.UploadLocation) == 0 {
@@ -645,12 +651,12 @@ func NewPipelineStages(ctx context.Context,
 				cfg.Genesis,
 				cfg.Sync,
 				agg,
-				silkwormForExecutionStage(silkworm, cfg),
+				SilkwormForExecutionStage(silkworm, cfg),
 			),
 			stagedsync.StageHashStateCfg(db, dirs, cfg.HistoryV3),
 			stagedsync.StageTrieCfg(db, checkStateRoot, true, false, dirs.Tmp, blockReader, controlServer.Hd, cfg.HistoryV3, agg),
 			stagedsync.StageHistoryCfg(db, cfg.Prune, dirs.Tmp),
-			stagedsync.StageLogIndexCfg(db, cfg.Prune, dirs.Tmp, noPruneContracts),
+			stagedsync.StageLogIndexCfg(db, cfg.Prune, dirs.Tmp, depositContract),
 			stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, dirs.Tmp),
 			stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, controlServer.ChainConfig.Bor, blockReader),
 			stagedsync.StageFinishCfg(db, dirs.Tmp, forkValidator),
@@ -681,12 +687,12 @@ func NewPipelineStages(ctx context.Context,
 			cfg.Genesis,
 			cfg.Sync,
 			agg,
-			silkwormForExecutionStage(silkworm, cfg),
+			SilkwormForExecutionStage(silkworm, cfg),
 		),
 		stagedsync.StageHashStateCfg(db, dirs, cfg.HistoryV3),
 		stagedsync.StageTrieCfg(db, checkStateRoot, true, false, dirs.Tmp, blockReader, controlServer.Hd, cfg.HistoryV3, agg),
 		stagedsync.StageHistoryCfg(db, cfg.Prune, dirs.Tmp),
-		stagedsync.StageLogIndexCfg(db, cfg.Prune, dirs.Tmp, noPruneContracts),
+		stagedsync.StageLogIndexCfg(db, cfg.Prune, dirs.Tmp, depositContract),
 		stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, dirs.Tmp),
 		stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, controlServer.ChainConfig.Bor, blockReader),
 		stagedsync.StageFinishCfg(db, dirs.Tmp, forkValidator),
@@ -722,7 +728,7 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 				cfg.Genesis,
 				cfg.Sync,
 				agg,
-				silkwormForExecutionStage(silkworm, cfg),
+				SilkwormForExecutionStage(silkworm, cfg),
 			),
 			stagedsync.StageHashStateCfg(db, dirs, cfg.HistoryV3),
 			stagedsync.StageTrieCfg(db, true, true, true, dirs.Tmp, blockReader, controlServer.Hd, cfg.HistoryV3, agg)),
@@ -747,7 +753,7 @@ func NewPolygonSyncStages(
 	forkValidator *engine_helpers.ForkValidator,
 	heimdallClient heimdall.HeimdallClient,
 ) []*stagedsync.Stage {
-	loopBreakCheck := newLoopBreakCheck(config, heimdallClient)
+	loopBreakCheck := NewLoopBreakCheck(config, heimdallClient)
 	return stagedsync.PolygonSyncStages(
 		ctx,
 		stagedsync.StageSnapshotsCfg(
@@ -800,7 +806,7 @@ func NewPolygonSyncStages(
 			config.Genesis,
 			config.Sync,
 			agg,
-			silkwormForExecutionStage(silkworm, config),
+			SilkwormForExecutionStage(silkworm, config),
 		),
 		stagedsync.StageTxLookupCfg(
 			db,
@@ -817,7 +823,7 @@ func NewPolygonSyncStages(
 	)
 }
 
-func newLoopBreakCheck(cfg *ethconfig.Config, heimdallClient heimdall.HeimdallClient) func(int) bool {
+func NewLoopBreakCheck(cfg *ethconfig.Config, heimdallClient heimdall.HeimdallClient) func(int) bool {
 	var loopBreakCheck func(int) bool
 
 	if heimdallClient != nil && flags.Milestone {

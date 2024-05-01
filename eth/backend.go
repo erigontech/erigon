@@ -74,6 +74,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/txpool"
+	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
 	libtypes "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon-lib/wrap"
@@ -313,6 +314,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.chainConfig = chainConfig
 	backend.genesisBlock = genesis
 	backend.genesisHash = genesis.Hash()
+
+	setBorDefaultMinerGasPrice(chainConfig, config, logger)
+	setBorDefaultTxPoolPriceLimit(chainConfig, config.TxPool, logger)
 
 	if err := chainKv.Update(context.Background(), func(tx kv.RwTx) error {
 		isCorrectSync, useSnapshots, err := snap.EnsureNotChanged(tx, config.Snapshot)
@@ -658,15 +662,34 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		recents = bor.Recents
 		signatures = bor.Signatures
 	}
+	loopBreakCheck := stages2.NewLoopBreakCheck(config, nil)
 	// proof-of-work mining
 	mining := stagedsync.New(
 		config.Sync,
 		stagedsync.MiningStages(backend.sentryCtx,
 			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPoolDB, nil, tmpdir, backend.blockReader),
-			stagedsync.StageBorHeimdallCfg(backend.chainDB, snapDb, miner, *backend.chainConfig, heimdallClient, backend.blockReader, nil, nil, nil, recents, signatures, false, nil),
+			stagedsync.StageBorHeimdallCfg(backend.chainDB, snapDb, miner, *backend.chainConfig, heimdallClient, backend.blockReader, nil, nil, nil, recents, signatures, false, nil), stagedsync.StageExecuteBlocksCfg(
+				backend.chainDB,
+				config.Prune,
+				config.BatchSize,
+				nil,
+				chainConfig,
+				backend.engine,
+				&vm.Config{},
+				backend.notifications.Accumulator,
+				config.StateStream,
+				/*stateStream=*/ false,
+				config.HistoryV3,
+				dirs,
+				blockReader,
+				backend.sentriesClient.Hd,
+				config.Genesis,
+				config.Sync,
+				agg,
+				stages2.SilkwormForExecutionStage(backend.silkworm, config),
+			),
+			stagedsync.StageSendersCfg(backend.chainDB, chainConfig, config.Sync, false, dirs.Tmp, config.Prune, blockReader, backend.sentriesClient.Hd, loopBreakCheck),
 			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, nil, 0, backend.txPool, backend.txPoolDB, blockReader),
-			stagedsync.StageHashStateCfg(backend.chainDB, dirs, config.HistoryV3),
-			stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, blockReader, nil, config.HistoryV3, backend.agg),
 			stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore),
 		), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder,
 		logger)
@@ -685,12 +708,29 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			stagedsync.MiningStages(backend.sentryCtx,
 				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, backend.txPoolDB, param, tmpdir, backend.blockReader),
 				stagedsync.StageBorHeimdallCfg(backend.chainDB, snapDb, miningStatePos, *backend.chainConfig, heimdallClient, backend.blockReader, nil, nil, nil, recents, signatures, false, nil),
+				stagedsync.StageExecuteBlocksCfg(
+					backend.chainDB,
+					config.Prune,
+					config.BatchSize,
+					nil,
+					chainConfig,
+					backend.engine,
+					&vm.Config{},
+					backend.notifications.Accumulator,
+					config.StateStream,
+					/*stateStream=*/ false,
+					config.HistoryV3,
+					dirs,
+					blockReader,
+					backend.sentriesClient.Hd,
+					config.Genesis,
+					config.Sync,
+					agg,
+					stages2.SilkwormForExecutionStage(backend.silkworm, config),
+				),
+				stagedsync.StageSendersCfg(backend.chainDB, chainConfig, config.Sync, false, dirs.Tmp, config.Prune, blockReader, backend.sentriesClient.Hd, loopBreakCheck),
 				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, backend.txPool, backend.txPoolDB, blockReader),
-				stagedsync.StageHashStateCfg(backend.chainDB, dirs, config.HistoryV3),
-				stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, blockReader, nil, config.HistoryV3, backend.agg),
-				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore),
-			), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder,
-			logger)
+				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore)), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder, logger)
 		// We start the mining step
 		if err := stages2.MiningStep(ctx, backend.chainDB, proposingSync, tmpdir, logger); err != nil {
 			return nil, err
@@ -834,13 +874,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	if !config.Sync.UseSnapshots && backend.downloaderClient != nil {
 		for _, p := range blockReader.AllTypes() {
 			backend.downloaderClient.ProhibitNewDownloads(ctx, &protodownloader.ProhibitNewDownloadsRequest{
-				Type: p.String(),
+				Type: p.Name(),
 			})
 		}
 
 		for _, p := range snaptype.CaplinSnapshotTypes {
 			backend.downloaderClient.ProhibitNewDownloads(ctx, &protodownloader.ProhibitNewDownloadsRequest{
-				Type: p.String(),
+				Type: p.Name(),
 			})
 		}
 
@@ -1672,4 +1712,20 @@ func (s *Ethereum) Sentinel() rpcsentinel.SentinelClient {
 
 func (s *Ethereum) DataDir() string {
 	return s.config.Dirs.DataDir
+}
+
+// setBorDefaultMinerGasPrice enforces Miner.GasPrice to be equal to BorDefaultMinerGasPrice (30gwei by default)
+func setBorDefaultMinerGasPrice(chainConfig *chain.Config, config *ethconfig.Config, logger log.Logger) {
+	if chainConfig.Bor != nil && config.Miner.GasPrice == nil || config.Miner.GasPrice.Cmp(ethconfig.BorDefaultMinerGasPrice) != 0 {
+		logger.Warn("Sanitizing invalid bor miner gas price", "provided", config.Miner.GasPrice, "updated", ethconfig.BorDefaultMinerGasPrice)
+		config.Miner.GasPrice = ethconfig.BorDefaultMinerGasPrice
+	}
+}
+
+// setBorDefaultTxPoolPriceLimit enforces MinFeeCap to be equal to BorDefaultTxPoolPriceLimit  (30gwei by default)
+func setBorDefaultTxPoolPriceLimit(chainConfig *chain.Config, config txpoolcfg.Config, logger log.Logger) {
+	if chainConfig.Bor != nil && config.MinFeeCap != txpoolcfg.BorDefaultTxPoolPriceLimit {
+		logger.Warn("Sanitizing invalid bor min fee cap", "provided", config.MinFeeCap, "updated", txpoolcfg.BorDefaultTxPoolPriceLimit)
+		config.MinFeeCap = txpoolcfg.BorDefaultTxPoolPriceLimit
+	}
 }

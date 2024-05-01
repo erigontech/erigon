@@ -1541,7 +1541,7 @@ func stageLogIndex(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	logger.Info("Stage exec", "progress", execAt)
 	logger.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 
-	cfg := stagedsync.StageLogIndexCfg(db, pm, dirs.Tmp, chainConfig.NoPruneContracts)
+	cfg := stagedsync.StageLogIndexCfg(db, pm, dirs.Tmp, chainConfig.DepositContract)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.LogIndex, s.BlockNumber-unwind, s.BlockNumber)
 		err = stagedsync.UnwindLogIndex(u, s, tx, cfg, ctx)
@@ -1817,8 +1817,14 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 
 		if useSnapshots {
 			g := &errgroup.Group{}
-			g.Go(func() error { return _allSnapshotsSingleton.ReopenFolder() })
-			g.Go(func() error { return _allBorSnapshotsSingleton.ReopenFolder() })
+			g.Go(func() error {
+				_allSnapshotsSingleton.OptimisticalyReopenFolder()
+				return nil
+			})
+			g.Go(func() error {
+				_allBorSnapshotsSingleton.OptimisticalyReopenFolder()
+				return nil
+			})
 			g.Go(func() error { return _aggSingleton.OpenFolder(true) }) //TODO: open in read-only if erigon running?
 			err := g.Wait()
 			if err != nil {
@@ -1949,9 +1955,28 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 		stagedsync.MiningStages(ctx,
 			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, dirs.Tmp, blockReader),
 			stagedsync.StageBorHeimdallCfg(db, snapDb, miner, *chainConfig, heimdallClient, blockReader, nil, nil, nil, recents, signatures, false, unwindTypes),
+			stagedsync.StageExecuteBlocksCfg(
+				db,
+				cfg.Prune,
+				cfg.BatchSize,
+				nil,
+				sentryControlServer.ChainConfig,
+				sentryControlServer.Engine,
+				&vm.Config{},
+				notifications.Accumulator,
+				cfg.StateStream,
+				/*stateStream=*/ false,
+				cfg.HistoryV3,
+				dirs,
+				blockReader,
+				sentryControlServer.Hd,
+				cfg.Genesis,
+				cfg.Sync,
+				agg,
+				nil,
+			),
+			stagedsync.StageSendersCfg(db, sentryControlServer.ChainConfig, cfg.Sync, false, dirs.Tmp, cfg.Prune, blockReader, sentryControlServer.Hd, nil),
 			stagedsync.StageMiningExecCfg(db, miner, events, *chainConfig, engine, &vm.Config{}, dirs.Tmp, nil, 0, nil, nil, blockReader),
-			stagedsync.StageHashStateCfg(db, dirs, historyV3),
-			stagedsync.StageTrieCfg(db, false, true, false, dirs.Tmp, blockReader, nil, historyV3, agg),
 			stagedsync.StageMiningFinishCfg(db, *chainConfig, engine, miner, miningCancel, blockReader, builder.NewLatestBlockBuiltStore()),
 		),
 		stagedsync.MiningUnwindOrder,

@@ -17,6 +17,7 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
@@ -233,7 +234,7 @@ func NewTorrentClient(config CreateNewTorrentClientConfig) (*TorrentClient, erro
 
 	cfg.ClientConfig.DataDir = torrentDir
 
-	cfg.ClientConfig.PieceHashersPerTorrent = 32
+	cfg.ClientConfig.PieceHashersPerTorrent = dbg.EnvInt("DL_HASHERS", 32)
 	cfg.ClientConfig.DisableIPv6 = config.DisableIPv6
 	cfg.ClientConfig.DisableIPv4 = config.DisableIPv4
 

@@ -42,16 +42,16 @@ var ProhibitNewDownloadsLock2 = Migration{
 			locked := []string{}
 
 			for _, t := range coresnaptype.BlockSnapshotTypes {
-				locked = append(locked, t.String())
+				locked = append(locked, t.Name())
 			}
 
 			for _, t := range borsnaptype.BorSnapshotTypes {
-				locked = append(locked, t.String())
+				locked = append(locked, t.Name())
 			}
 
 			for _, t := range snaptype.CaplinSnapshotTypes {
-				if t.String() != snaptype.BlobSidecars.String() {
-					locked = append(locked, t.String())
+				if t.Name() != snaptype.BlobSidecars.Name() {
+					locked = append(locked, t.Name())
 				}
 			}
 
