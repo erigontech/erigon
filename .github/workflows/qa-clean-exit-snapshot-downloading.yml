@@ -3,11 +3,11 @@ name: QA - Clean exit (snapshot downloading)
 on:
   push:
     branches:
-      - devel
+      - main
       - 'release/**'
   pull_request:
     branches:
-      - devel
+      - main
       - 'release/**'
     types:
       - ready_for_review
