@@ -60,7 +60,7 @@ func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {
 	}
 
 	slices.SortFunc(out, func(a, b FileInfo) int {
-		if cmp := strings.Compare(a.Type.String(), b.Type.String()); cmp != 0 {
+		if cmp := strings.Compare(a.Type.Name(), b.Type.Name()); cmp != 0 {
 			return cmp
 		}
 
@@ -236,7 +236,8 @@ func (f FileInfo) CompareTo(o FileInfo) int {
 		return res
 	}
 
-	return strings.Compare(f.Type.String(), o.Type.String())
+	// this is a lexical comparison (don't use enum)
+	return strings.Compare(f.Type.Name(), o.Type.Name())
 }
 
 func (f FileInfo) As(t Type) FileInfo {
