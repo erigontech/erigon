@@ -118,20 +118,39 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, blockPrune uint, prever
 		if !canSnapshotBePruned(name) {
 			continue
 		}
-		// parse the snapshot "kind". e.g kind of 'idx/v1-accounts.0-64.ef' is "idx/v1-accounts"
-		// parse "from" (0) and "to" (64) from the name
-		rangeString := strings.Split(name, ".")[1]
-		rangeNums := strings.Split(rangeString, "-")
-		// convert the range to uint64
-		from, err := strconv.ParseUint(rangeNums[0], 10, 64)
-		if err != nil {
-			return nil, err
+		var from, to uint64
+		var err error
+		if shouldUseStepsForPruning(name) {
+			// parse "from" (0) and "to" (64) from the name
+			// parse the snapshot "kind". e.g kind of 'idx/v1-accounts.0-64.ef' is "idx/v1-accounts"
+			rangeString := strings.Split(name, ".")[1]
+			rangeNums := strings.Split(rangeString, "-")
+			// convert the range to uint64
+			from, err = strconv.ParseUint(rangeNums[0], 10, 64)
+			if err != nil {
+				return nil, err
+			}
+			to, err = strconv.ParseUint(rangeNums[1], 10, 64)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			// e.g 'v1-000000-000100-beaconblocks.seg'
+			// parse "from" (000000) and "to" (000100) from the name. 100 is 100'000 blocks
+			rangeString := strings.Split(name, "-")[1]
+			rangeNums := strings.Split(rangeString, "-")
+			// convert the range to uint64
+			from, err = strconv.ParseUint(rangeNums[0], 10, 64)
+			if err != nil {
+				return nil, err
+			}
+			to, err = strconv.ParseUint(rangeNums[1], 10, 64)
+			if err != nil {
+				return nil, err
+			}
+			from *= 1000
+			to *= 1000
 		}
-		to, err := strconv.ParseUint(rangeNums[1], 10, 64)
-		if err != nil {
-			return nil, err
-		}
-
 		kind := strings.Split(name, ".")[0]
 		blackList[p.Name] = struct{}{} // Add all of them to the blacklist and remove the ones that are not blacklisted later.
 		snapshotKindToNames[kind] = append(snapshotKindToNames[kind], snapshotFileData{
