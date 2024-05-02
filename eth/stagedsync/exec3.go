@@ -623,6 +623,7 @@ Loop:
 			return err
 		}
 		if b == nil {
+			log.Warn("nil blk, retry with dbg", "num", blockNum)
 			_, _ = blockWithSenders(dbg.ContextWithDebug(ctx, true), chainDb, applyTx, blockReader, blockNum)
 
 			// TODO: panic here and see that overall process deadlock
