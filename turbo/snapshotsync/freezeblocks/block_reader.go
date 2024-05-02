@@ -513,7 +513,12 @@ func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, ha
 		if err != nil {
 			return nil, err
 		}
-		return body, nil
+		if body != nil {
+			return body, nil
+		}
+		if dbgLogs {
+			log.Info(dbgPrefix + "found in db=false")
+		}
 	}
 
 	view := r.sn.View()
