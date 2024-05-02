@@ -257,9 +257,11 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, histV
 		return nil
 	}
 
-	snapshots.Close()
-	if cc.Bor != nil {
-		borSnapshots.Close()
+	if headerchain {
+		snapshots.Close()
+		if cc.Bor != nil {
+			borSnapshots.Close()
+		}
 	}
 
 	//Corner cases:
