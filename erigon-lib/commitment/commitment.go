@@ -175,6 +175,7 @@ func (be *BranchEncoder) initCollector() {
 }
 
 // reads previous comitted value and merges current with it if needed.
+// TODO could move into load function
 func loadToPatriciaContextFunc(pc PatriciaContext) etl.LoadFunc {
 	return func(prefix, update []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		stateValue, stateStep, err := pc.GetBranch(prefix)
@@ -947,7 +948,8 @@ func (t *UpdateTree) HashSort(ctx context.Context, fn func(hk, pk []byte) error)
 	case ModeDirect:
 		var phk []byte
 		var initialised bool
-		load := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+
+		if err := t.collector.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			if initialised && bytes.Equal(phk, k) {
 				return nil
 			}
@@ -957,12 +959,11 @@ func (t *UpdateTree) HashSort(ctx context.Context, fn func(hk, pk []byte) error)
 			phk = append(phk[:0], k...)
 			initialised = true
 			return nil
-		}
-
-		if err := t.collector.Load(nil, "", load, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		}, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 			t.collector.Close()
 			return err
 		}
+
 		t.collector.Close()
 		t.initCollector()
 	case ModeUpdate:
