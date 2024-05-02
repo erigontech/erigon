@@ -589,6 +589,7 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 			// it's possible to iterate over .seg file even if you don't have index
 			// then make segment available even if index open may fail
 			segtype.segments = append(segtype.segments, sn)
+			fmt.Println(sn.FileName())
 			fmt.Println(s.segments.Get(f.Type.Enum()))
 		}
 
