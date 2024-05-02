@@ -277,6 +277,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, histV
 		if err != nil {
 			return err
 		}
+		fmt.Println(blockNum)
 		if blockNum != 0 {
 			return nil
 		}
