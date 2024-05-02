@@ -553,9 +553,7 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 		}
 
 		if f.To > 0 {
-			if f.To > segmentsMax {
-				segmentsMax = f.To - 1
-			}
+			segmentsMax = f.To - 1
 		} else {
 			segmentsMax = 0
 		}
