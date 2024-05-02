@@ -879,7 +879,13 @@ func (t *UpdateTree) hashHexKey(key []byte) []byte {
 		t.keccak.Write(key[fp:])
 		t.keccak.Read(hashedKey[length.Hash:])
 	}
-	return hashedKey
+
+	nibbls := make([]byte, len(hashedKey)*2)
+	for i, b := range hashedKey {
+		nibbls[i*2] = (b >> 4) & 0xf
+		nibbls[i*2+1] = b & 0xf
+	}
+	return nibbls
 }
 
 func (t *UpdateTree) Size() (updates uint64, unique bool) {
