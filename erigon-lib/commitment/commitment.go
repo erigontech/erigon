@@ -825,7 +825,7 @@ func NewUpdateTree(m Mode, tmpdir string, hasher keyHasher) *UpdateTree {
 }
 
 func (t *UpdateTree) initCollector() {
-	t.collector = etl.NewCollector("commitment", t.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize/4), log.Root().New("update-tree"))
+	t.collector = etl.NewCollector("commitment", t.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize/4), log.Root().New("update-tree"))
 	t.collector.LogLvl(log.LvlDebug)
 	t.collector.SortAndFlushInBackground(true)
 	t.updates = 0
@@ -879,18 +879,20 @@ func (t *UpdateTree) hashHexKey(key []byte) []byte {
 		t.keccak.Write(key[fp:])
 		t.keccak.Read(hashedKey[length.Hash:])
 	}
+	return hashedKey
 
-	nibbls := make([]byte, len(hashedKey)*2)
-	for i, b := range hashedKey {
-		nibbls[i*2] = (b >> 4) & 0xf
-		nibbls[i*2+1] = b & 0xf
-	}
-	return nibbls
+	//nibbls := make([]byte, len(hashedKey)*2)
+	//for i, b := range hashedKey {
+	//	nibbls[i*2] = (b >> 4) & 0xf
+	//	nibbls[i*2+1] = b & 0xf
+	//}
+	//return nibbls
 }
 
 func (t *UpdateTree) Size() (updates uint64, unique bool) {
 	switch t.mode {
 	case ModeDirect:
+		//return uint64(len(t.keys)), true
 		return t.updates, false
 	case ModeUpdate:
 		return uint64(t.tree.Len()), true
@@ -984,7 +986,6 @@ func (t *UpdateTree) HashSort(ctx context.Context, fn func(hk, pk []byte) error)
 			t.collector.Close()
 			return err
 		}
-
 		t.collector.Close()
 		t.initCollector()
 	case ModeUpdate:
