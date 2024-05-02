@@ -588,7 +588,7 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 			}
 		}
 
-		fmt.Println(exists)
+		fmt.Println(exists, sn.FilePath())
 		if !exists {
 			// it's possible to iterate over .seg file even if you don't have index
 			// then make segment available even if index open may fail
