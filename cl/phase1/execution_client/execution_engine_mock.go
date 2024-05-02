@@ -434,10 +434,10 @@ func (c *MockExecutionEngineIsCanonicalHashCall) DoAndReturn(f func(context.Cont
 }
 
 // NewPayload mocks base method.
-func (m *MockExecutionEngine) NewPayload(ctx context.Context, payload *cltypes.Eth1Block, beaconParentRoot *common.Hash, versionedHashes []common.Hash) (bool, error) {
+func (m *MockExecutionEngine) NewPayload(ctx context.Context, payload *cltypes.Eth1Block, beaconParentRoot *common.Hash, versionedHashes []common.Hash) (PayloadStatus, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "NewPayload", ctx, payload, beaconParentRoot, versionedHashes)
-	ret0, _ := ret[0].(bool)
+	ret0, _ := ret[0].(PayloadStatus)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -455,19 +455,19 @@ type MockExecutionEngineNewPayloadCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockExecutionEngineNewPayloadCall) Return(arg0 bool, arg1 error) *MockExecutionEngineNewPayloadCall {
+func (c *MockExecutionEngineNewPayloadCall) Return(arg0 PayloadStatus, arg1 error) *MockExecutionEngineNewPayloadCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockExecutionEngineNewPayloadCall) Do(f func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash) (bool, error)) *MockExecutionEngineNewPayloadCall {
+func (c *MockExecutionEngineNewPayloadCall) Do(f func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash) (PayloadStatus, error)) *MockExecutionEngineNewPayloadCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockExecutionEngineNewPayloadCall) DoAndReturn(f func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash) (bool, error)) *MockExecutionEngineNewPayloadCall {
+func (c *MockExecutionEngineNewPayloadCall) DoAndReturn(f func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash) (PayloadStatus, error)) *MockExecutionEngineNewPayloadCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

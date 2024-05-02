@@ -24,38 +24,45 @@ func NewExecutionClientDirect(chainRW eth1_chain_reader.ChainReaderWriterEth1) (
 	}, nil
 }
 
-func (cc *ExecutionClientDirect) NewPayload(ctx context.Context, payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash, versionedHashes []libcommon.Hash) (invalid bool, err error) {
+func (cc *ExecutionClientDirect) NewPayload(ctx context.Context, payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash, versionedHashes []libcommon.Hash) (PayloadStatus, error) {
 	if payload == nil {
-		return
+		return PayloadStatusValidated, nil
 	}
 
 	header, err := payload.RlpHeader(beaconParentRoot)
 	if err != nil {
-		return true, err
+		return PayloadStatusInvalidated, err
 	}
 
 	body := payload.Body()
 	txs, err := types.DecodeTransactions(body.Transactions)
 	if err != nil {
-		return true, err
+		return PayloadStatusInvalidated, err
 	}
 
 	if err := cc.chainRW.InsertBlockAndWait(ctx, types.NewBlockFromStorage(payload.BlockHash, header, txs, nil, body.Withdrawals, body.Requests)); err != nil {
-		return false, err
+		return PayloadStatusNotValidated, err
 	}
 
 	headHeader := cc.chainRW.CurrentHeader(ctx)
 	if headHeader == nil || header.Number.Uint64() > headHeader.Number.Uint64()+1 {
-		return false, nil // import optimistically.
+		return PayloadStatusNotValidated, nil
+		//return false, nil // import optimistically.
 	}
 
 	status, _, _, err := cc.chainRW.ValidateChain(ctx, payload.BlockHash, payload.BlockNumber)
 	if err != nil {
-		return false, err
+		return PayloadStatusNotValidated, err
 	}
-	invalid = status == execution.ExecutionStatus_BadBlock
-
-	return
+	//invalid = status == execution.ExecutionStatus_BadBlock
+	switch status {
+	case execution.ExecutionStatus_BadBlock, execution.ExecutionStatus_InvalidForkchoice:
+		return PayloadStatusInvalidated, nil
+	case execution.ExecutionStatus_Busy, execution.ExecutionStatus_MissingSegment:
+		return PayloadStatusNotValidated, nil
+	default:
+		return PayloadStatusValidated, nil
+	}
 }
 
 func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized libcommon.Hash, head libcommon.Hash, attr *engine_types.PayloadAttributes) ([]byte, error) {

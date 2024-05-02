@@ -16,6 +16,7 @@ import (
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/optimistic"
 	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
 	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
@@ -117,7 +118,8 @@ type ForkChoiceStore struct {
 	emitters *beaconevents.Emitters
 	synced   atomic.Bool
 
-	ethClock eth_clock.EthereumClock
+	ethClock        eth_clock.EthereumClock
+	optimisticStore optimistic.OptimisticStore // todo
 }
 
 type LatestMessage struct {
