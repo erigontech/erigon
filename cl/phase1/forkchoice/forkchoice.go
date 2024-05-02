@@ -119,7 +119,7 @@ type ForkChoiceStore struct {
 	synced   atomic.Bool
 
 	ethClock        eth_clock.EthereumClock
-	optimisticStore optimistic.OptimisticStore // todo
+	optimisticStore optimistic.OptimisticStore
 }
 
 type LatestMessage struct {
@@ -239,6 +239,7 @@ func NewForkChoiceStore(
 		hotSidecars:           make(map[libcommon.Hash][]*cltypes.BlobSidecar),
 		blobStorage:           blobStorage,
 		ethClock:              ethClock,
+		optimisticStore:       optimistic.NewOptimisticStore(),
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint.Copy())
 	f.finalizedCheckpoint.Store(anchorCheckpoint.Copy())
@@ -504,4 +505,14 @@ func (f *ForkChoiceStore) GetValidatorSet(blockRoot libcommon.Hash) (*solid.Vali
 
 func (f *ForkChoiceStore) GetCurrentPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error) {
 	return f.forkGraph.GetCurrentPartecipationIndicies(blockRoot)
+}
+
+func (f *ForkChoiceStore) IsHeadOptimistic() bool {
+	headState := f.syncedDataManager.HeadState()
+	if headState == nil {
+		return true
+	}
+	// get latest root
+	latestRoot := headState.LatestBlockHeader().Root
+	return f.optimisticStore.IsOptimistic(latestRoot)
 }
