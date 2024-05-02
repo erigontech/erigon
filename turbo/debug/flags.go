@@ -23,7 +23,6 @@ import (
 	"net/http/pprof" //nolint:gosec
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/ledgerwatch/erigon-lib/common/disk"
 	"github.com/ledgerwatch/erigon-lib/common/mem"
@@ -237,25 +236,18 @@ func StartPProf(address string, metricsMux *http.ServeMux) *http.ServeMux {
 	heapMsg := fmt.Sprintf("go tool pprof -lines -http=: http://%s/%s", address, "debug/pprof/heap")
 	log.Info("Starting pprof server", "cpu", cpuMsg, "heap", heapMsg)
 
-	pprofMux := http.NewServeMux()
-
-	pprofMux.HandleFunc("/", pprof.Index)
-	pprofMux.HandleFunc("/cmdline", pprof.Cmdline)
-	pprofMux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-	pprofMux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-	pprofMux.HandleFunc("/debug/pprof/trace", pprof.Trace)
-
 	if metricsMux == nil {
-		middleMux := http.NewServeMux()
-		middleMux.HandleFunc("/debug/pprof/", func(w http.ResponseWriter, r *http.Request) {
-			r.URL.Path = strings.TrimPrefix(r.URL.Path, "/debug/pprof")
-			r.URL.RawPath = strings.TrimPrefix(r.URL.RawPath, "/debug/pprof")
-			pprofMux.ServeHTTP(w, r)
-		})
+		pprofMux := http.NewServeMux()
+
+		pprofMux.HandleFunc("/debug/pprof/", pprof.Index)
+		pprofMux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		pprofMux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		pprofMux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		pprofMux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 
 		pprofServer := &http.Server{
 			Addr:    address,
-			Handler: middleMux,
+			Handler: pprofMux,
 		}
 
 		go func() {
@@ -264,13 +256,13 @@ func StartPProf(address string, metricsMux *http.ServeMux) *http.ServeMux {
 			}
 		}()
 
-		return middleMux
+		return pprofMux
 	} else {
-		metricsMux.HandleFunc("/debug/pprof/", func(w http.ResponseWriter, r *http.Request) {
-			r.URL.Path = strings.TrimPrefix(r.URL.Path, "/debug/pprof")
-			r.URL.RawPath = strings.TrimPrefix(r.URL.RawPath, "/debug/pprof")
-			pprofMux.ServeHTTP(w, r)
-		})
+		metricsMux.HandleFunc("/debug/pprof/", pprof.Index)
+		metricsMux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		metricsMux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		metricsMux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		metricsMux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 
 		return metricsMux
 	}
