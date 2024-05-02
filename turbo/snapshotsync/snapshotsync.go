@@ -15,7 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadergrpc"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
+	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
@@ -216,6 +216,11 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 		}); err != nil {
 			return err
 		}
+	}
+	for _, p := range snaptype.SeedableV3Extensions() {
+		snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
+			Type: p,
+		})
 	}
 
 	if caplin != NoCaplin {

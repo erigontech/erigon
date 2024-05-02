@@ -14,7 +14,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 
-	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/rpc"

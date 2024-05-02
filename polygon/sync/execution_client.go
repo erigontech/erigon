@@ -9,7 +9,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	executionproto "github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
+	executionproto "github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
 
 	"github.com/ledgerwatch/erigon/core/types"
