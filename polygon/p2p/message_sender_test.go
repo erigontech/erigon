@@ -10,8 +10,8 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	erigonlibtypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
+	erigonlibtypes "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/rlp"
 )

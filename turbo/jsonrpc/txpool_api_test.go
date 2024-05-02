@@ -9,8 +9,8 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/config3"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
-	txPoolProto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	txPoolProto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
+	txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/stretchr/testify/require"
 
