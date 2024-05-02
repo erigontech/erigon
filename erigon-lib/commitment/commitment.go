@@ -827,6 +827,7 @@ func NewUpdateTree(m Mode, tmpdir string, hasher keyHasher) *UpdateTree {
 func (t *UpdateTree) initCollector() {
 	t.collector = etl.NewCollector("commitment", t.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize/4), log.Root().New("update-tree"))
 	t.collector.LogLvl(log.LvlDebug)
+	t.collector.SortAndFlushInBackground(true)
 	t.updates = 0
 }
 
@@ -852,13 +853,33 @@ func (t *UpdateTree) TouchPlainKey(key, val []byte, fn func(c *KeyUpdate, val []
 		}
 		t.updates++
 	case ModeDirect:
-		err := t.collector.Collect(t.hasher(key), key)
+		err := t.collector.Collect(t.hashHexKey(key), key)
 		if err != nil {
 			log.Error("[commitment] failed to collect key", "err", err)
 		}
 		t.updates++
 	default:
 	}
+}
+
+func (t *UpdateTree) hashHexKey(key []byte) []byte {
+	hashedKey := make([]byte, length.Hash)
+
+	t.keccak.Reset()
+	fp := length.Addr
+	if len(key) < length.Addr {
+		fp = len(key)
+	}
+	t.keccak.Write(key[:fp])
+	t.keccak.Read(hashedKey[:length.Hash])
+
+	if len(key[fp:]) > 0 {
+		hashedKey = append(hashedKey, make([]byte, length.Hash)...)
+		t.keccak.Reset()
+		t.keccak.Write(key[fp:])
+		t.keccak.Read(hashedKey[length.Hash:])
+	}
+	return hashedKey
 }
 
 func (t *UpdateTree) Size() (updates uint64, unique bool) {
