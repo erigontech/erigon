@@ -360,7 +360,11 @@ func (r *BlockReader) LastNonCanonicalHeaderNumber(ctx context.Context, tx kv.Ge
 }
 
 func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (h *types.Header, err error) {
-	if tx != nil {
+	maxBlockNumInFiles := r.FrozenBorBlocks()
+	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+		if tx == nil {
+			return nil, nil
+		}
 		blockHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
 		if err != nil {
 			return nil, err
@@ -450,7 +454,10 @@ func (r *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeig
 
 func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (h *types.Header, err error) {
 	maxBlockNumInFiles := r.sn.BlocksAvailable()
-	if tx != nil && (maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles) {
+	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+		if tx == nil {
+			return nil, nil
+		}
 		h = rawdb.ReadHeader(tx, hash, blockHeight)
 		return h, nil
 	}
@@ -476,7 +483,10 @@ func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, ha
 	}
 
 	maxBlockNumInFiles := r.sn.BlocksAvailable()
-	if tx != nil && (maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles) {
+	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+		if tx == nil {
+			return nil, nil
+		}
 		body, err = rawdb.ReadBodyWithTransactions(tx, hash, blockHeight)
 		if err != nil {
 			return nil, err
@@ -543,7 +553,10 @@ func (r *BlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Has
 
 func (r *BlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, txAmount uint32, err error) {
 	maxBlockNumInFiles := r.sn.BlocksAvailable()
-	if tx != nil && (maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles) {
+	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+		if tx == nil {
+			return nil, 0, nil
+		}
 		body, _, txAmount = rawdb.ReadBody(tx, hash, blockHeight)
 		return body, txAmount, nil
 	}
@@ -580,7 +593,10 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 	}
 
 	maxBlockNumInFiles := r.sn.BlocksAvailable()
-	if tx != nil && (maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles) {
+	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+		if tx == nil {
+			return nil, nil, nil
+		}
 		if forceCanonical {
 			canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
 			if err != nil {
@@ -1239,7 +1255,10 @@ func (r *BlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, hash common
 
 func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
 	maxBlockNumInFiles := r.FrozenBorBlocks()
-	if tx != nil && (maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles) {
+	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+		if tx == nil {
+			return nil, nil
+		}
 		c, err := tx.Cursor(kv.BorEventNums)
 		if err != nil {
 			return nil, err
@@ -1494,7 +1513,10 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], spanId)
 	maxBlockNumInFiles := r.FrozenBorBlocks()
-	if tx != nil && (maxBlockNumInFiles == 0 || endBlock > maxBlockNumInFiles) {
+	if maxBlockNumInFiles == 0 || endBlock > maxBlockNumInFiles {
+		if tx == nil {
+			return nil, nil
+		}
 		v, err := tx.GetOne(kv.BorSpans, buf[:])
 		if err != nil {
 			return nil, err
