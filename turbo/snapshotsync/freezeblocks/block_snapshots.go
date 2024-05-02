@@ -403,7 +403,7 @@ func (s *RoSnapshots) EnableMadvWillNeed() *RoSnapshots {
 }
 
 func (s *RoSnapshots) idxAvailability() uint64 {
-	max := make([]uint64, 0, len(s.Types()))
+	_max := make([]uint64, 0, len(s.Types()))
 	i := 0
 
 	seglen := 0
@@ -414,36 +414,39 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 		}
 		return true
 	})
+	log.Warn("[dbg] seglen", "seglen", seglen)
 
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
 		if !s.HasType(segtype.Type()) {
+			log.Warn("[dbg] no type?", "segtype", segtype.Type())
 			return true
 		}
 
 		if len(value.segments) < seglen {
+			log.Warn("[dbg] skip2", "len(value.segments)", len(value.segments), "seglen", seglen)
 			return true
 		}
 
-		max = append(max, 0)
+		_max = append(_max, 0)
 
 		for _, seg := range value.segments {
 			if !seg.IsIndexed() {
 				break
 			}
 
-			max[i] = seg.to - 1
+			_max[i] = seg.to - 1
 		}
 
 		i++
 		return true
 	})
 
-	var min uint64 = math.MaxUint64
-	for _, maxEl := range max {
-		min = cmp.Min(min, maxEl)
+	var _min uint64 = math.MaxUint64
+	for _, maxEl := range _max {
+		_min = cmp.Min(_min, maxEl)
 	}
 
-	return min
+	return _min
 }
 
 // OptimisticReopenWithDB - optimistically open snapshots (ignoring error), useful at App startup because:
