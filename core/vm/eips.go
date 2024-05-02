@@ -380,18 +380,13 @@ func opAuth(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 	pubkey, error := crypto.Ecrecover(message, signature)
 	if error != nil {
 		// note that error is ignored silently here.
-		// TODO: look at other implementations, should this really be ignored and exec proceeded?
-		// it seems like a case for returning error and tx revert (but eip mentions to reset
-		// authority to nil, which seems to suggest the tx still proceeds. So it's a bit unclear)
+		// tx is not reverted here, just that authority is unset and 0 pushed, and tx proceeds.
 		return authUnsuccessful(scope, output)
 	}
 
 	recoveredAddress := libcommon.BytesToAddress(crypto.Keccak256(pubkey[1:])[12:])
 	if recoveredAddress != authority {
-		// TODO: should it become nil? Or point to the previous value (in case there are 2 auth calls)
-		// eip says the former, but worth checking.
-		// Actually can't decide for either, I think if there's a mismatch, the tx itself should fail (just
-		// like in ecrecovery error scenario above should also fail the tx)
+		// tx not reverted
 		return authUnsuccessful(scope, output)
 	}
 
