@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 
@@ -232,9 +231,7 @@ Loop:
 			return err
 		}
 		if body == nil {
-			_, _ = cfg.blockReader.BodyWithTransactions(dbg.ContextWithDebug(ctx, true), tx, blockHash, blockNumber)
 			logger.Warn(fmt.Sprintf("[%s] ReadBodyWithTransactions can't find block", logPrefix), "num", blockNumber, "hash", blockHash)
-			panic(1)
 			continue
 		}
 
