@@ -272,6 +272,15 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, histV
 
 	blackListForPruning := make(map[string]struct{})
 	fmt.Println("pruneMode", pruneMode, "headerchain", headerchain)
+	if headerchain {
+		blockNum, _, err := rawdbv3.TxNums.Last(tx)
+		if err != nil {
+			return err
+		}
+		if blockNum != 0 {
+			return nil
+		}
+	}
 	if !headerchain && pruneMode {
 		minStep, err := getMinStep(preverifiedBlockSnapshots)
 		if err != nil {
