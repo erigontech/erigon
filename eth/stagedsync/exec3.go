@@ -1457,7 +1457,7 @@ func reconstituteStep(last bool,
 
 		for bn := startBlockNum; bn <= endBlockNum; bn++ {
 			t = time.Now()
-			b, err = blockWithSenders(chainDb, nil, blockReader, bn)
+			b, err = blockWithSenders(ctx, chainDb, nil, blockReader, bn)
 			if err != nil {
 				return err
 			}
