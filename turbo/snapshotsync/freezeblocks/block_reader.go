@@ -479,12 +479,15 @@ func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, ha
 	var dbgPrefix string
 	dbgLogs := dbg.Enabled(ctx)
 	if dbgLogs {
-		dbgPrefix = fmt.Sprintf("[dbg] BlockReader.BodyWithTransactions(hash=%x,blk=%d), idxMax=%d,segMax=%d,txNil=%t", hash, blockHeight, r.sn.idxMax.Load(), r.sn.segmentsMax.Load(), tx == nil)
+		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(idxMax=%d,segMax=%d).BodyWithTransactions(hash=%x,blk=%d) -> ", r.sn.idxMax.Load(), r.sn.segmentsMax.Load(), hash, blockHeight)
 	}
 
 	maxBlockNumInFiles := r.sn.BlocksAvailable()
 	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
 		if tx == nil {
+			if dbgLogs {
+				log.Info(dbgPrefix + "RoTx is nil")
+			}
 			return nil, nil
 		}
 		body, err = rawdb.ReadBodyWithTransactions(tx, hash, blockHeight)
@@ -589,12 +592,15 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 	var dbgPrefix string
 	dbgLogs := dbg.Enabled(ctx)
 	if dbgLogs {
-		dbgPrefix = fmt.Sprintf("[dbg] BlockReader.blockWithSenders(hash=%x,blk=%d,forceCanonical=%t) -> ", hash, blockHeight, forceCanonical)
+		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(idxMax=%d,segMax=%d).blockWithSenders(hash=%x,blk=%d) -> ", r.sn.idxMax.Load(), r.sn.segmentsMax.Load(), hash, blockHeight)
 	}
 
 	maxBlockNumInFiles := r.sn.BlocksAvailable()
 	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
 		if tx == nil {
+			if dbgLogs {
+				log.Info(dbgPrefix + "RoTx is nil")
+			}
 			return nil, nil, nil
 		}
 		if forceCanonical {
