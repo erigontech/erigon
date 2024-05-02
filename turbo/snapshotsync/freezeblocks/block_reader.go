@@ -473,17 +473,16 @@ func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, ha
 	var dbgPrefix string
 	dbgLogs := dbg.Enabled(ctx)
 	if dbgLogs {
-		dbgPrefix = fmt.Sprintf("[dbg] BlockReader.BodyWithTransactions(hash=%x,blk=%d)", hash, blockHeight)
+		dbgPrefix = fmt.Sprintf("[dbg] BlockReader.BodyWithTransactions(hash=%x,blk=%d), idxMax=%d,segMax=%d,txNil=%t", hash, blockHeight, r.sn.idxMax.Load(), r.sn.segmentsMax.Load(), tx == nil)
 	}
 
-	if tx != nil {
+	maxBlockNumInFiles := r.sn.BlocksAvailable()
+	if tx != nil && (maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles) {
 		body, err = rawdb.ReadBodyWithTransactions(tx, hash, blockHeight)
 		if err != nil {
 			return nil, err
 		}
-		if body != nil {
-			return body, nil
-		}
+		return body, nil
 	}
 
 	view := r.sn.View()
@@ -512,7 +511,7 @@ func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, ha
 	txnSeg, ok := view.TxsSegment(blockHeight)
 	if !ok {
 		if dbgLogs {
-			log.Info(dbgPrefix+"no transactions file for this block num", "r.sn.BlocksAvailable()", r.sn.BlocksAvailable(), "r.sn.indicesReady", r.sn.indicesReady.Load())
+			log.Info(dbgPrefix+"no transactions file for this block num", "r.sn.BlocksAvailable()", r.sn.BlocksAvailable(), "r.sn.idxMax", r.sn.idxMax.Load(), "r.sn.segmetntsMax", r.sn.segmentsMax.Load(), "")
 		}
 		return nil, nil
 	}
@@ -545,7 +544,7 @@ func (r *BlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Has
 
 func (r *BlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, txAmount uint32, err error) {
 	maxBlockNumInFiles := r.sn.BlocksAvailable()
-	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+	if tx != nil && (maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles) {
 		body, _, txAmount = rawdb.ReadBody(tx, hash, blockHeight)
 		return body, txAmount, nil
 	}
