@@ -174,10 +174,8 @@ func (be *BranchEncoder) initCollector() {
 	be.updates.LogLvl(log.LvlDebug)
 }
 
-// reads previous comitted value and merges current with it if needed.
-// TODO could move into load function
-func loadToPatriciaContextFunc(pc PatriciaContext) etl.LoadFunc {
-	return func(prefix, update []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+func (be *BranchEncoder) Load(pc PatriciaContext, args etl.TransformArgs) error {
+	if err := be.updates.Load(nil, "", func(prefix, update []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		stateValue, stateStep, err := pc.GetBranch(prefix)
 		if err != nil {
 			return err
@@ -188,11 +186,7 @@ func loadToPatriciaContextFunc(pc PatriciaContext) etl.LoadFunc {
 			return err
 		}
 		return nil
-	}
-}
-
-func (be *BranchEncoder) Load(load etl.LoadFunc, args etl.TransformArgs) error {
-	if err := be.updates.Load(nil, "", load, args); err != nil {
+	}, args); err != nil {
 		return err
 	}
 	be.initCollector()

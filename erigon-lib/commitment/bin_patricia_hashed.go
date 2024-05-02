@@ -1366,7 +1366,7 @@ func (bph *BinPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byt
 	if err != nil {
 		return nil, fmt.Errorf("root hash evaluation failed: %w", err)
 	}
-	err = bph.branchEncoder.Load(loadToPatriciaContextFunc(bph.ctx), etl.TransformArgs{Quit: ctx.Done()})
+	err = bph.branchEncoder.Load(bph.ctx, etl.TransformArgs{Quit: ctx.Done()})
 	if err != nil {
 		return nil, fmt.Errorf("branch update failed: %w", err)
 	}
@@ -1619,7 +1619,7 @@ func (bph *BinPatriciaHashed) ProcessUpdates(ctx context.Context, plainKeys [][]
 		return nil, fmt.Errorf("root hash evaluation failed: %w", err)
 	}
 
-	err = bph.branchEncoder.Load(loadToPatriciaContextFunc(bph.ctx), etl.TransformArgs{Quit: ctx.Done()})
+	err = bph.branchEncoder.Load(bph.ctx, etl.TransformArgs{Quit: ctx.Done()})
 	if err != nil {
 		return nil, fmt.Errorf("branch update failed: %w", err)
 	}
