@@ -449,11 +449,10 @@ func (r *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeig
 }
 
 func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (h *types.Header, err error) {
-	if tx != nil {
+	maxBlockNumInFiles := r.sn.BlocksAvailable()
+	if tx != nil && (maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles) {
 		h = rawdb.ReadHeader(tx, hash, blockHeight)
-		if h != nil {
-			return h, nil
-		}
+		return h, nil
 	}
 
 	view := r.sn.View()
