@@ -450,7 +450,7 @@ func blockComparison(tx kv.RwTx, hermezDb *hermez_db.HermezDb, blockNo uint64, l
 	}
 
 	if v.StateRoot != block.Root() {
-		log.Error(fmt.Sprintf("[%s] State root mismatch in block %d", logPrefix, blockNo))
+		log.Error(fmt.Sprintf("[%s] State root mismatch in block %d. Local=0x%x, L1 verification=0x%x", logPrefix, blockNo, block.Root(), v.StateRoot))
 		return ErrStateRootMismatch
 	}
 
