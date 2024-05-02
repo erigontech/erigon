@@ -268,6 +268,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return nil, err
 	}
 
+	if config.HistoryV3 {
+		return nil, errors.New("seems you using erigon2 git branch on erigon3 DB")
+	}
 	ctx, ctxCancel := context.WithCancel(context.Background())
 
 	// kv_remote architecture does blocks on stream.Send - means current architecture require unlimited amount of txs to provide good throughput
