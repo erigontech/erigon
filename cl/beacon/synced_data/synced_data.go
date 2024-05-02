@@ -3,6 +3,7 @@ package synced_data
 import (
 	"sync/atomic"
 
+	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 )
@@ -43,7 +44,7 @@ func (s *SyncedDataManager) HeadState() *state.CachingBeaconState {
 	return nil
 }
 
-func (s *SyncedDataManager) HeadStateReader() state.BeaconStateReader {
+func (s *SyncedDataManager) HeadStateReader() abstract.BeaconStateReader {
 	headstate := s.HeadState()
 	if headstate == nil {
 		return nil

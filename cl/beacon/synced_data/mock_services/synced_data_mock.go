@@ -12,6 +12,7 @@ package mock_services
 import (
 	reflect "reflect"
 
+	abstract "github.com/ledgerwatch/erigon/cl/abstract"
 	state "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	gomock "go.uber.org/mock/gomock"
 )
@@ -116,10 +117,10 @@ func (c *MockSyncedDataHeadStateCall) DoAndReturn(f func() *state.CachingBeaconS
 }
 
 // HeadStateReader mocks base method.
-func (m *MockSyncedData) HeadStateReader() state.BeaconStateReader {
+func (m *MockSyncedData) HeadStateReader() abstract.BeaconStateReader {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "HeadStateReader")
-	ret0, _ := ret[0].(state.BeaconStateReader)
+	ret0, _ := ret[0].(abstract.BeaconStateReader)
 	return ret0
 }
 
@@ -136,19 +137,19 @@ type MockSyncedDataHeadStateReaderCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockSyncedDataHeadStateReaderCall) Return(arg0 state.BeaconStateReader) *MockSyncedDataHeadStateReaderCall {
+func (c *MockSyncedDataHeadStateReaderCall) Return(arg0 abstract.BeaconStateReader) *MockSyncedDataHeadStateReaderCall {
 	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockSyncedDataHeadStateReaderCall) Do(f func() state.BeaconStateReader) *MockSyncedDataHeadStateReaderCall {
+func (c *MockSyncedDataHeadStateReaderCall) Do(f func() abstract.BeaconStateReader) *MockSyncedDataHeadStateReaderCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSyncedDataHeadStateReaderCall) DoAndReturn(f func() state.BeaconStateReader) *MockSyncedDataHeadStateReaderCall {
+func (c *MockSyncedDataHeadStateReaderCall) DoAndReturn(f func() abstract.BeaconStateReader) *MockSyncedDataHeadStateReaderCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
