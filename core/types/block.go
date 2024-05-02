@@ -1051,8 +1051,8 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 
 // NewBlockFromStorage like NewBlock but used to create Block object when read it from DB
 // in this case no reason to copy parts, or re-calculate headers fields - they are all stored in DB
-func NewBlockFromStorage(hash libcommon.Hash, header *Header, txs []Transaction, uncles []*Header, withdrawals []*Withdrawal) *Block {
-	b := &Block{header: header, transactions: txs, uncles: uncles, withdrawals: withdrawals}
+func NewBlockFromStorage(hash libcommon.Hash, header *Header, txs []Transaction, uncles []*Header, withdrawals []*Withdrawal, requests []*Request) *Block {
+	b := &Block{header: header, transactions: txs, uncles: uncles, withdrawals: withdrawals, requests: requests}
 	b.hash.Store(hash)
 	return b
 }
@@ -1072,6 +1072,7 @@ func NewBlockFromNetwork(header *Header, body *Body) *Block {
 		transactions: body.Transactions,
 		uncles:       body.Uncles,
 		withdrawals:  body.Withdrawals,
+		requests:     body.Requests,
 	}
 }
 
@@ -1112,6 +1113,10 @@ func CopyHeader(h *Header) *Header {
 	if h.ParentBeaconBlockRoot != nil {
 		cpy.ParentBeaconBlockRoot = new(libcommon.Hash)
 		cpy.ParentBeaconBlockRoot.SetBytes(h.ParentBeaconBlockRoot.Bytes())
+	}
+	if h.RequestsRoot != nil {
+		cpy.RequestsRoot = new(libcommon.Hash)
+		cpy.RequestsRoot.SetBytes(h.RequestsRoot.Bytes())
 	}
 	return &cpy
 }
@@ -1260,6 +1265,8 @@ func (b *Block) BaseFee() *big.Int {
 func (b *Block) WithdrawalsHash() *libcommon.Hash       { return b.header.WithdrawalsHash }
 func (b *Block) Withdrawals() Withdrawals               { return b.withdrawals }
 func (b *Block) ParentBeaconBlockRoot() *libcommon.Hash { return b.header.ParentBeaconBlockRoot }
+func (b *Block) RequestsRoot() *libcommon.Hash          { return b.header.RequestsRoot }
+func (b *Block) Requests() Requests                     { return b.requests }
 
 // Header returns a deep-copy of the entire block header using CopyHeader()
 func (b *Block) Header() *Header       { return CopyHeader(b.header) }
@@ -1267,7 +1274,7 @@ func (b *Block) HeaderNoCopy() *Header { return b.header }
 
 // Body returns the non-header content of the block.
 func (b *Block) Body() *Body {
-	bd := &Body{Transactions: b.transactions, Uncles: b.uncles, Withdrawals: b.withdrawals}
+	bd := &Body{Transactions: b.transactions, Uncles: b.uncles, Withdrawals: b.withdrawals, Requests: b.requests}
 	bd.SendersFromTxs()
 	return bd
 }

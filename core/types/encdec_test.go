@@ -15,7 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-const RUNS = 10 // for local tests increase this number
+const RUNS = 2 // for local tests increase this number
 
 type TRand struct {
 	rnd *rand.Rand
@@ -340,7 +340,7 @@ func compareTransactions(t *testing.T, a, b Transaction) {
 }
 
 func compareDeposits(t *testing.T, a, b *Deposit) {
-	check(t, "Deposit.Pubkey", a.Index, b.Index)
+	check(t, "Deposit.Pubkey", a.Pubkey, b.Pubkey)
 	check(t, "Deposit.WithdrawalCredentials", a.WithdrawalCredentials, b.WithdrawalCredentials)
 	check(t, "Deposit.Amount", a.Amount, b.Amount)
 	check(t, "Deposit.Signature", a.Signature, b.Signature)

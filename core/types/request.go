@@ -90,6 +90,16 @@ func (r *Request) decode(data []byte) error {
 	return nil
 }
 
+func (r Requests) Deposits() Deposits {
+	deposits := make(Deposits, 0, len(r))
+	for _, req := range r {
+		if req.Type() == DepositRequestType {
+			deposits = append(deposits, req.inner.(*Deposit))
+		}
+	}
+	return deposits
+}
+
 type Requests []*Request
 
 func (r Requests) Len() int { return len(r) }
