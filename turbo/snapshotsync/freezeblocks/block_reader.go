@@ -360,11 +360,23 @@ func (r *BlockReader) LastNonCanonicalHeaderNumber(ctx context.Context, tx kv.Ge
 }
 
 func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (h *types.Header, err error) {
-	maxBlockNumInFiles := r.sn.BlocksAvailable()
-	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
-		if tx == nil {
-			return nil, nil
-		}
+	//TODO: investigate why code blolow causing getting error `Could not set forkchoice                 app=caplin stage=ForkChoice err="execution Client RPC failed to retrieve ForkChoiceUpdate response, err: unknown ancestor"`
+	//maxBlockNumInFiles := r.sn.BlocksAvailable()
+	//if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+	//	if tx == nil {
+	//		return nil, nil
+	//	}
+	//	blockHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//	if blockHash == (common.Hash{}) {
+	//		return nil, nil
+	//	}
+	//	h = rawdb.ReadHeader(tx, blockHash, blockHeight)
+	//	return h, nil
+	//}
+	if tx != nil {
 		blockHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
 		if err != nil {
 			return nil, err
@@ -373,7 +385,9 @@ func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHei
 			return nil, nil
 		}
 		h = rawdb.ReadHeader(tx, blockHash, blockHeight)
-		return h, nil
+		if h != nil {
+			return h, nil
+		}
 	}
 
 	view := r.sn.View()
@@ -451,13 +465,20 @@ func (r *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeig
 }
 
 func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (h *types.Header, err error) {
-	maxBlockNumInFiles := r.sn.BlocksAvailable()
-	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
-		if tx == nil {
-			return nil, nil
-		}
+	//TODO: investigate why code blolow causing getting error `Could not set forkchoice                 app=caplin stage=ForkChoice err="execution Client RPC failed to retrieve ForkChoiceUpdate response, err: unknown ancestor"`
+	//maxBlockNumInFiles := r.sn.BlocksAvailable()
+	//if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+	//	if tx == nil {
+	//		return nil, nil
+	//	}
+	//	h = rawdb.ReadHeader(tx, hash, blockHeight)
+	//	return h, nil
+	//}
+	if tx != nil {
 		h = rawdb.ReadHeader(tx, hash, blockHeight)
-		return h, nil
+		if h != nil {
+			return h, nil
+		}
 	}
 
 	view := r.sn.View()
