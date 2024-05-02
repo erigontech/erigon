@@ -652,7 +652,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 	txnSeg, ok := view.TxsSegment(blockHeight)
 	if !ok {
 		if dbgLogs {
-			log.Info(dbgPrefix + "no transactions file for this block num")
+			log.Info(dbgPrefix+"no transactions file for this block num", "r.sn.BlocksAvailable()", r.sn.BlocksAvailable(), "r.sn.indicesReady", r.sn.indicesReady.Load())
 		}
 		return
 	}
