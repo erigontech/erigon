@@ -403,32 +403,10 @@ func (s *RoSnapshots) EnableMadvWillNeed() *RoSnapshots {
 }
 
 func (s *RoSnapshots) idxAvailability() uint64 {
-	_max := make([]uint64, 0, len(s.Types()))
+	_max := make([]uint64, len(s.Types()))
 	i := 0
 
-	seglen := 0
-
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
-		if l := len(value.segments); l > seglen {
-			seglen = l
-		}
-		return true
-	})
-	log.Warn("[dbg] seglen", "seglen", seglen)
-
-	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
-		if !s.HasType(segtype.Type()) {
-			log.Warn("[dbg] no type?", "segtype", segtype.Type())
-			return true
-		}
-
-		if len(value.segments) < seglen {
-			log.Warn("[dbg] skip2", "len(value.segments)", len(value.segments), "seglen", seglen)
-			return true
-		}
-
-		_max = append(_max, 0)
-
 		for _, seg := range value.segments {
 			if !seg.IsIndexed() {
 				break
