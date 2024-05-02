@@ -737,9 +737,9 @@ func (s *RoSnapshots) buildMissedIndicesIfNeed(ctx context.Context, logPrefix st
 	if !s.Cfg().Produce {
 		return nil
 	}
-	if !s.SegmentsReady() {
-		return fmt.Errorf("not all snapshot segments are available")
-	}
+	// if !s.SegmentsReady() {
+	// 	return fmt.Errorf("not all snapshot segments are available")
+	// }
 	s.LogStat("missed-idx")
 
 	// wait for Downloader service to download all expected snapshots
