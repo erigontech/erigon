@@ -532,7 +532,6 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 	s.closeWhatNotInList(fileNames)
 	var segmentsMax uint64
 	var segmentsMaxSet bool
-	fmt.Println(fileNames)
 
 	for _, fName := range fileNames {
 		f, _, ok := snaptype.ParseFileName(s.dir, fName)
@@ -573,8 +572,10 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 			if err := sn.reopenSeg(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
 					if optimistic {
+						fmt.Println("optimistic", sn.FilePath())
 						continue
 					} else {
+						fmt.Println("break", sn.FilePath())
 						break
 					}
 				}
@@ -587,6 +588,7 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 			}
 		}
 
+		fmt.Println(exists)
 		if !exists {
 			// it's possible to iterate over .seg file even if you don't have index
 			// then make segment available even if index open may fail
