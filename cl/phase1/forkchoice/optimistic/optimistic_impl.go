@@ -30,8 +30,9 @@ func (impl *optimisticStoreImpl) AddOptimisticCandidate(block *cltypes.BeaconBlo
 		return nil
 	}
 	blockNode := &blockNode{
-		block:  block,
-		parent: parentRoot,
+		block:    block,
+		parent:   parentRoot,
+		children: []common.Hash{},
 	}
 	impl.optimisticRoots[root] = blockNode
 
