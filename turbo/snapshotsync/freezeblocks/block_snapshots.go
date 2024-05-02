@@ -572,15 +572,12 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 			if err := sn.reopenSeg(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
 					if optimistic {
-						fmt.Println("optimistic", sn.FilePath())
 						continue
 					} else {
-						fmt.Println("break", sn.FilePath())
 						break
 					}
 				}
 				if optimistic {
-					s.logger.Warn("[snapshots] open segment", "err", err)
 					continue
 				} else {
 					return err
@@ -588,11 +585,11 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 			}
 		}
 
-		fmt.Println(exists, sn.FilePath())
 		if !exists {
 			// it's possible to iterate over .seg file even if you don't have index
 			// then make segment available even if index open may fail
 			segtype.segments = append(segtype.segments, sn)
+			fmt.Println(s.segments.Get(f.Type.Enum()))
 		}
 
 		if open {
