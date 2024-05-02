@@ -13,7 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
-	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	remoteproto "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
 	kv "github.com/ledgerwatch/erigon-lib/kv"
 	txpoolcfg "github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	types "github.com/ledgerwatch/erigon-lib/types"
@@ -272,7 +272,7 @@ func (c *MockPoolIdHashKnownCall) DoAndReturn(f func(kv.Tx, []byte) (bool, error
 }
 
 // OnNewBlock mocks base method.
-func (m *MockPool) OnNewBlock(arg0 context.Context, arg1 *remote.StateChangeBatch, arg2, arg3, arg4 types.TxSlots, arg5 kv.Tx) error {
+func (m *MockPool) OnNewBlock(arg0 context.Context, arg1 *remoteproto.StateChangeBatch, arg2, arg3, arg4 types.TxSlots, arg5 kv.Tx) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "OnNewBlock", arg0, arg1, arg2, arg3, arg4, arg5)
 	ret0, _ := ret[0].(error)
@@ -298,13 +298,13 @@ func (c *MockPoolOnNewBlockCall) Return(arg0 error) *MockPoolOnNewBlockCall {
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockPoolOnNewBlockCall) Do(f func(context.Context, *remote.StateChangeBatch, types.TxSlots, types.TxSlots, types.TxSlots, kv.Tx) error) *MockPoolOnNewBlockCall {
+func (c *MockPoolOnNewBlockCall) Do(f func(context.Context, *remoteproto.StateChangeBatch, types.TxSlots, types.TxSlots, types.TxSlots, kv.Tx) error) *MockPoolOnNewBlockCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPoolOnNewBlockCall) DoAndReturn(f func(context.Context, *remote.StateChangeBatch, types.TxSlots, types.TxSlots, types.TxSlots, kv.Tx) error) *MockPoolOnNewBlockCall {
+func (c *MockPoolOnNewBlockCall) DoAndReturn(f func(context.Context, *remoteproto.StateChangeBatch, types.TxSlots, types.TxSlots, types.TxSlots, kv.Tx) error) *MockPoolOnNewBlockCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

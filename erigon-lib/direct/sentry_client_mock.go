@@ -13,8 +13,8 @@ import (
 	context "context"
 	reflect "reflect"
 
-	sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	sentryproto "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
+	typesproto "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
 	gomock "go.uber.org/mock/gomock"
 	grpc "google.golang.org/grpc"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
@@ -44,14 +44,14 @@ func (m *MockSentryClient) EXPECT() *MockSentryClientMockRecorder {
 }
 
 // AddPeer mocks base method.
-func (m *MockSentryClient) AddPeer(arg0 context.Context, arg1 *sentry.AddPeerRequest, arg2 ...grpc.CallOption) (*sentry.AddPeerReply, error) {
+func (m *MockSentryClient) AddPeer(arg0 context.Context, arg1 *sentryproto.AddPeerRequest, arg2 ...grpc.CallOption) (*sentryproto.AddPeerReply, error) {
 	m.ctrl.T.Helper()
 	varargs := []any{arg0, arg1}
 	for _, a := range arg2 {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "AddPeer", varargs...)
-	ret0, _ := ret[0].(*sentry.AddPeerReply)
+	ret0, _ := ret[0].(*sentryproto.AddPeerReply)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -70,32 +70,32 @@ type MockSentryClientAddPeerCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockSentryClientAddPeerCall) Return(arg0 *sentry.AddPeerReply, arg1 error) *MockSentryClientAddPeerCall {
+func (c *MockSentryClientAddPeerCall) Return(arg0 *sentryproto.AddPeerReply, arg1 error) *MockSentryClientAddPeerCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockSentryClientAddPeerCall) Do(f func(context.Context, *sentry.AddPeerRequest, ...grpc.CallOption) (*sentry.AddPeerReply, error)) *MockSentryClientAddPeerCall {
+func (c *MockSentryClientAddPeerCall) Do(f func(context.Context, *sentryproto.AddPeerRequest, ...grpc.CallOption) (*sentryproto.AddPeerReply, error)) *MockSentryClientAddPeerCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSentryClientAddPeerCall) DoAndReturn(f func(context.Context, *sentry.AddPeerRequest, ...grpc.CallOption) (*sentry.AddPeerReply, error)) *MockSentryClientAddPeerCall {
+func (c *MockSentryClientAddPeerCall) DoAndReturn(f func(context.Context, *sentryproto.AddPeerRequest, ...grpc.CallOption) (*sentryproto.AddPeerReply, error)) *MockSentryClientAddPeerCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // HandShake mocks base method.
-func (m *MockSentryClient) HandShake(arg0 context.Context, arg1 *emptypb.Empty, arg2 ...grpc.CallOption) (*sentry.HandShakeReply, error) {
+func (m *MockSentryClient) HandShake(arg0 context.Context, arg1 *emptypb.Empty, arg2 ...grpc.CallOption) (*sentryproto.HandShakeReply, error) {
 	m.ctrl.T.Helper()
 	varargs := []any{arg0, arg1}
 	for _, a := range arg2 {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "HandShake", varargs...)
-	ret0, _ := ret[0].(*sentry.HandShakeReply)
+	ret0, _ := ret[0].(*sentryproto.HandShakeReply)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -114,19 +114,19 @@ type MockSentryClientHandShakeCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockSentryClientHandShakeCall) Return(arg0 *sentry.HandShakeReply, arg1 error) *MockSentryClientHandShakeCall {
+func (c *MockSentryClientHandShakeCall) Return(arg0 *sentryproto.HandShakeReply, arg1 error) *MockSentryClientHandShakeCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockSentryClientHandShakeCall) Do(f func(context.Context, *emptypb.Empty, ...grpc.CallOption) (*sentry.HandShakeReply, error)) *MockSentryClientHandShakeCall {
+func (c *MockSentryClientHandShakeCall) Do(f func(context.Context, *emptypb.Empty, ...grpc.CallOption) (*sentryproto.HandShakeReply, error)) *MockSentryClientHandShakeCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSentryClientHandShakeCall) DoAndReturn(f func(context.Context, *emptypb.Empty, ...grpc.CallOption) (*sentry.HandShakeReply, error)) *MockSentryClientHandShakeCall {
+func (c *MockSentryClientHandShakeCall) DoAndReturn(f func(context.Context, *emptypb.Empty, ...grpc.CallOption) (*sentryproto.HandShakeReply, error)) *MockSentryClientHandShakeCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -168,14 +168,14 @@ func (c *MockSentryClientMarkDisconnectedCall) DoAndReturn(f func()) *MockSentry
 }
 
 // Messages mocks base method.
-func (m *MockSentryClient) Messages(arg0 context.Context, arg1 *sentry.MessagesRequest, arg2 ...grpc.CallOption) (sentry.Sentry_MessagesClient, error) {
+func (m *MockSentryClient) Messages(arg0 context.Context, arg1 *sentryproto.MessagesRequest, arg2 ...grpc.CallOption) (sentryproto.Sentry_MessagesClient, error) {
 	m.ctrl.T.Helper()
 	varargs := []any{arg0, arg1}
 	for _, a := range arg2 {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "Messages", varargs...)
-	ret0, _ := ret[0].(sentry.Sentry_MessagesClient)
+	ret0, _ := ret[0].(sentryproto.Sentry_MessagesClient)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -194,32 +194,32 @@ type MockSentryClientMessagesCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockSentryClientMessagesCall) Return(arg0 sentry.Sentry_MessagesClient, arg1 error) *MockSentryClientMessagesCall {
+func (c *MockSentryClientMessagesCall) Return(arg0 sentryproto.Sentry_MessagesClient, arg1 error) *MockSentryClientMessagesCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockSentryClientMessagesCall) Do(f func(context.Context, *sentry.MessagesRequest, ...grpc.CallOption) (sentry.Sentry_MessagesClient, error)) *MockSentryClientMessagesCall {
+func (c *MockSentryClientMessagesCall) Do(f func(context.Context, *sentryproto.MessagesRequest, ...grpc.CallOption) (sentryproto.Sentry_MessagesClient, error)) *MockSentryClientMessagesCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSentryClientMessagesCall) DoAndReturn(f func(context.Context, *sentry.MessagesRequest, ...grpc.CallOption) (sentry.Sentry_MessagesClient, error)) *MockSentryClientMessagesCall {
+func (c *MockSentryClientMessagesCall) DoAndReturn(f func(context.Context, *sentryproto.MessagesRequest, ...grpc.CallOption) (sentryproto.Sentry_MessagesClient, error)) *MockSentryClientMessagesCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // NodeInfo mocks base method.
-func (m *MockSentryClient) NodeInfo(arg0 context.Context, arg1 *emptypb.Empty, arg2 ...grpc.CallOption) (*types.NodeInfoReply, error) {
+func (m *MockSentryClient) NodeInfo(arg0 context.Context, arg1 *emptypb.Empty, arg2 ...grpc.CallOption) (*typesproto.NodeInfoReply, error) {
 	m.ctrl.T.Helper()
 	varargs := []any{arg0, arg1}
 	for _, a := range arg2 {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "NodeInfo", varargs...)
-	ret0, _ := ret[0].(*types.NodeInfoReply)
+	ret0, _ := ret[0].(*typesproto.NodeInfoReply)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -238,32 +238,32 @@ type MockSentryClientNodeInfoCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockSentryClientNodeInfoCall) Return(arg0 *types.NodeInfoReply, arg1 error) *MockSentryClientNodeInfoCall {
+func (c *MockSentryClientNodeInfoCall) Return(arg0 *typesproto.NodeInfoReply, arg1 error) *MockSentryClientNodeInfoCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockSentryClientNodeInfoCall) Do(f func(context.Context, *emptypb.Empty, ...grpc.CallOption) (*types.NodeInfoReply, error)) *MockSentryClientNodeInfoCall {
+func (c *MockSentryClientNodeInfoCall) Do(f func(context.Context, *emptypb.Empty, ...grpc.CallOption) (*typesproto.NodeInfoReply, error)) *MockSentryClientNodeInfoCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSentryClientNodeInfoCall) DoAndReturn(f func(context.Context, *emptypb.Empty, ...grpc.CallOption) (*types.NodeInfoReply, error)) *MockSentryClientNodeInfoCall {
+func (c *MockSentryClientNodeInfoCall) DoAndReturn(f func(context.Context, *emptypb.Empty, ...grpc.CallOption) (*typesproto.NodeInfoReply, error)) *MockSentryClientNodeInfoCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // PeerById mocks base method.
-func (m *MockSentryClient) PeerById(arg0 context.Context, arg1 *sentry.PeerByIdRequest, arg2 ...grpc.CallOption) (*sentry.PeerByIdReply, error) {
+func (m *MockSentryClient) PeerById(arg0 context.Context, arg1 *sentryproto.PeerByIdRequest, arg2 ...grpc.CallOption) (*sentryproto.PeerByIdReply, error) {
 	m.ctrl.T.Helper()
 	varargs := []any{arg0, arg1}
 	for _, a := range arg2 {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "PeerById", varargs...)
-	ret0, _ := ret[0].(*sentry.PeerByIdReply)
+	ret0, _ := ret[0].(*sentryproto.PeerByIdReply)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -282,32 +282,32 @@ type MockSentryClientPeerByIdCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockSentryClientPeerByIdCall) Return(arg0 *sentry.PeerByIdReply, arg1 error) *MockSentryClientPeerByIdCall {
+func (c *MockSentryClientPeerByIdCall) Return(arg0 *sentryproto.PeerByIdReply, arg1 error) *MockSentryClientPeerByIdCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockSentryClientPeerByIdCall) Do(f func(context.Context, *sentry.PeerByIdRequest, ...grpc.CallOption) (*sentry.PeerByIdReply, error)) *MockSentryClientPeerByIdCall {
+func (c *MockSentryClientPeerByIdCall) Do(f func(context.Context, *sentryproto.PeerByIdRequest, ...grpc.CallOption) (*sentryproto.PeerByIdReply, error)) *MockSentryClientPeerByIdCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSentryClientPeerByIdCall) DoAndReturn(f func(context.Context, *sentry.PeerByIdRequest, ...grpc.CallOption) (*sentry.PeerByIdReply, error)) *MockSentryClientPeerByIdCall {
+func (c *MockSentryClientPeerByIdCall) DoAndReturn(f func(context.Context, *sentryproto.PeerByIdRequest, ...grpc.CallOption) (*sentryproto.PeerByIdReply, error)) *MockSentryClientPeerByIdCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // PeerCount mocks base method.
-func (m *MockSentryClient) PeerCount(arg0 context.Context, arg1 *sentry.PeerCountRequest, arg2 ...grpc.CallOption) (*sentry.PeerCountReply, error) {
+func (m *MockSentryClient) PeerCount(arg0 context.Context, arg1 *sentryproto.PeerCountRequest, arg2 ...grpc.CallOption) (*sentryproto.PeerCountReply, error) {
 	m.ctrl.T.Helper()
 	varargs := []any{arg0, arg1}
 	for _, a := range arg2 {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "PeerCount", varargs...)
-	ret0, _ := ret[0].(*sentry.PeerCountReply)
+	ret0, _ := ret[0].(*sentryproto.PeerCountReply)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -326,32 +326,32 @@ type MockSentryClientPeerCountCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockSentryClientPeerCountCall) Return(arg0 *sentry.PeerCountReply, arg1 error) *MockSentryClientPeerCountCall {
+func (c *MockSentryClientPeerCountCall) Return(arg0 *sentryproto.PeerCountReply, arg1 error) *MockSentryClientPeerCountCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockSentryClientPeerCountCall) Do(f func(context.Context, *sentry.PeerCountRequest, ...grpc.CallOption) (*sentry.PeerCountReply, error)) *MockSentryClientPeerCountCall {
+func (c *MockSentryClientPeerCountCall) Do(f func(context.Context, *sentryproto.PeerCountRequest, ...grpc.CallOption) (*sentryproto.PeerCountReply, error)) *MockSentryClientPeerCountCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSentryClientPeerCountCall) DoAndReturn(f func(context.Context, *sentry.PeerCountRequest, ...grpc.CallOption) (*sentry.PeerCountReply, error)) *MockSentryClientPeerCountCall {
+func (c *MockSentryClientPeerCountCall) DoAndReturn(f func(context.Context, *sentryproto.PeerCountRequest, ...grpc.CallOption) (*sentryproto.PeerCountReply, error)) *MockSentryClientPeerCountCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // PeerEvents mocks base method.
-func (m *MockSentryClient) PeerEvents(arg0 context.Context, arg1 *sentry.PeerEventsRequest, arg2 ...grpc.CallOption) (sentry.Sentry_PeerEventsClient, error) {
+func (m *MockSentryClient) PeerEvents(arg0 context.Context, arg1 *sentryproto.PeerEventsRequest, arg2 ...grpc.CallOption) (sentryproto.Sentry_PeerEventsClient, error) {
 	m.ctrl.T.Helper()
 	varargs := []any{arg0, arg1}
 	for _, a := range arg2 {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "PeerEvents", varargs...)
-	ret0, _ := ret[0].(sentry.Sentry_PeerEventsClient)
+	ret0, _ := ret[0].(sentryproto.Sentry_PeerEventsClient)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -370,25 +370,25 @@ type MockSentryClientPeerEventsCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockSentryClientPeerEventsCall) Return(arg0 sentry.Sentry_PeerEventsClient, arg1 error) *MockSentryClientPeerEventsCall {
+func (c *MockSentryClientPeerEventsCall) Return(arg0 sentryproto.Sentry_PeerEventsClient, arg1 error) *MockSentryClientPeerEventsCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockSentryClientPeerEventsCall) Do(f func(context.Context, *sentry.PeerEventsRequest, ...grpc.CallOption) (sentry.Sentry_PeerEventsClient, error)) *MockSentryClientPeerEventsCall {
+func (c *MockSentryClientPeerEventsCall) Do(f func(context.Context, *sentryproto.PeerEventsRequest, ...grpc.CallOption) (sentryproto.Sentry_PeerEventsClient, error)) *MockSentryClientPeerEventsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSentryClientPeerEventsCall) DoAndReturn(f func(context.Context, *sentry.PeerEventsRequest, ...grpc.CallOption) (sentry.Sentry_PeerEventsClient, error)) *MockSentryClientPeerEventsCall {
+func (c *MockSentryClientPeerEventsCall) DoAndReturn(f func(context.Context, *sentryproto.PeerEventsRequest, ...grpc.CallOption) (sentryproto.Sentry_PeerEventsClient, error)) *MockSentryClientPeerEventsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // PeerMinBlock mocks base method.
-func (m *MockSentryClient) PeerMinBlock(arg0 context.Context, arg1 *sentry.PeerMinBlockRequest, arg2 ...grpc.CallOption) (*emptypb.Empty, error) {
+func (m *MockSentryClient) PeerMinBlock(arg0 context.Context, arg1 *sentryproto.PeerMinBlockRequest, arg2 ...grpc.CallOption) (*emptypb.Empty, error) {
 	m.ctrl.T.Helper()
 	varargs := []any{arg0, arg1}
 	for _, a := range arg2 {
@@ -420,26 +420,26 @@ func (c *MockSentryClientPeerMinBlockCall) Return(arg0 *emptypb.Empty, arg1 erro
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockSentryClientPeerMinBlockCall) Do(f func(context.Context, *sentry.PeerMinBlockRequest, ...grpc.CallOption) (*emptypb.Empty, error)) *MockSentryClientPeerMinBlockCall {
+func (c *MockSentryClientPeerMinBlockCall) Do(f func(context.Context, *sentryproto.PeerMinBlockRequest, ...grpc.CallOption) (*emptypb.Empty, error)) *MockSentryClientPeerMinBlockCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSentryClientPeerMinBlockCall) DoAndReturn(f func(context.Context, *sentry.PeerMinBlockRequest, ...grpc.CallOption) (*emptypb.Empty, error)) *MockSentryClientPeerMinBlockCall {
+func (c *MockSentryClientPeerMinBlockCall) DoAndReturn(f func(context.Context, *sentryproto.PeerMinBlockRequest, ...grpc.CallOption) (*emptypb.Empty, error)) *MockSentryClientPeerMinBlockCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // Peers mocks base method.
-func (m *MockSentryClient) Peers(arg0 context.Context, arg1 *emptypb.Empty, arg2 ...grpc.CallOption) (*sentry.PeersReply, error) {
+func (m *MockSentryClient) Peers(arg0 context.Context, arg1 *emptypb.Empty, arg2 ...grpc.CallOption) (*sentryproto.PeersReply, error) {
 	m.ctrl.T.Helper()
 	varargs := []any{arg0, arg1}
 	for _, a := range arg2 {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "Peers", varargs...)
-	ret0, _ := ret[0].(*sentry.PeersReply)
+	ret0, _ := ret[0].(*sentryproto.PeersReply)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -458,25 +458,25 @@ type MockSentryClientPeersCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockSentryClientPeersCall) Return(arg0 *sentry.PeersReply, arg1 error) *MockSentryClientPeersCall {
+func (c *MockSentryClientPeersCall) Return(arg0 *sentryproto.PeersReply, arg1 error) *MockSentryClientPeersCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockSentryClientPeersCall) Do(f func(context.Context, *emptypb.Empty, ...grpc.CallOption) (*sentry.PeersReply, error)) *MockSentryClientPeersCall {
+func (c *MockSentryClientPeersCall) Do(f func(context.Context, *emptypb.Empty, ...grpc.CallOption) (*sentryproto.PeersReply, error)) *MockSentryClientPeersCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSentryClientPeersCall) DoAndReturn(f func(context.Context, *emptypb.Empty, ...grpc.CallOption) (*sentry.PeersReply, error)) *MockSentryClientPeersCall {
+func (c *MockSentryClientPeersCall) DoAndReturn(f func(context.Context, *emptypb.Empty, ...grpc.CallOption) (*sentryproto.PeersReply, error)) *MockSentryClientPeersCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // PenalizePeer mocks base method.
-func (m *MockSentryClient) PenalizePeer(arg0 context.Context, arg1 *sentry.PenalizePeerRequest, arg2 ...grpc.CallOption) (*emptypb.Empty, error) {
+func (m *MockSentryClient) PenalizePeer(arg0 context.Context, arg1 *sentryproto.PenalizePeerRequest, arg2 ...grpc.CallOption) (*emptypb.Empty, error) {
 	m.ctrl.T.Helper()
 	varargs := []any{arg0, arg1}
 	for _, a := range arg2 {
@@ -508,13 +508,13 @@ func (c *MockSentryClientPenalizePeerCall) Return(arg0 *emptypb.Empty, arg1 erro
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockSentryClientPenalizePeerCall) Do(f func(context.Context, *sentry.PenalizePeerRequest, ...grpc.CallOption) (*emptypb.Empty, error)) *MockSentryClientPenalizePeerCall {
+func (c *MockSentryClientPenalizePeerCall) Do(f func(context.Context, *sentryproto.PenalizePeerRequest, ...grpc.CallOption) (*emptypb.Empty, error)) *MockSentryClientPenalizePeerCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSentryClientPenalizePeerCall) DoAndReturn(f func(context.Context, *sentry.PenalizePeerRequest, ...grpc.CallOption) (*emptypb.Empty, error)) *MockSentryClientPenalizePeerCall {
+func (c *MockSentryClientPenalizePeerCall) DoAndReturn(f func(context.Context, *sentryproto.PenalizePeerRequest, ...grpc.CallOption) (*emptypb.Empty, error)) *MockSentryClientPenalizePeerCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -596,14 +596,14 @@ func (c *MockSentryClientReadyCall) DoAndReturn(f func() bool) *MockSentryClient
 }
 
 // SendMessageById mocks base method.
-func (m *MockSentryClient) SendMessageById(arg0 context.Context, arg1 *sentry.SendMessageByIdRequest, arg2 ...grpc.CallOption) (*sentry.SentPeers, error) {
+func (m *MockSentryClient) SendMessageById(arg0 context.Context, arg1 *sentryproto.SendMessageByIdRequest, arg2 ...grpc.CallOption) (*sentryproto.SentPeers, error) {
 	m.ctrl.T.Helper()
 	varargs := []any{arg0, arg1}
 	for _, a := range arg2 {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "SendMessageById", varargs...)
-	ret0, _ := ret[0].(*sentry.SentPeers)
+	ret0, _ := ret[0].(*sentryproto.SentPeers)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -622,32 +622,32 @@ type MockSentryClientSendMessageByIdCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockSentryClientSendMessageByIdCall) Return(arg0 *sentry.SentPeers, arg1 error) *MockSentryClientSendMessageByIdCall {
+func (c *MockSentryClientSendMessageByIdCall) Return(arg0 *sentryproto.SentPeers, arg1 error) *MockSentryClientSendMessageByIdCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockSentryClientSendMessageByIdCall) Do(f func(context.Context, *sentry.SendMessageByIdRequest, ...grpc.CallOption) (*sentry.SentPeers, error)) *MockSentryClientSendMessageByIdCall {
+func (c *MockSentryClientSendMessageByIdCall) Do(f func(context.Context, *sentryproto.SendMessageByIdRequest, ...grpc.CallOption) (*sentryproto.SentPeers, error)) *MockSentryClientSendMessageByIdCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSentryClientSendMessageByIdCall) DoAndReturn(f func(context.Context, *sentry.SendMessageByIdRequest, ...grpc.CallOption) (*sentry.SentPeers, error)) *MockSentryClientSendMessageByIdCall {
+func (c *MockSentryClientSendMessageByIdCall) DoAndReturn(f func(context.Context, *sentryproto.SendMessageByIdRequest, ...grpc.CallOption) (*sentryproto.SentPeers, error)) *MockSentryClientSendMessageByIdCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // SendMessageByMinBlock mocks base method.
-func (m *MockSentryClient) SendMessageByMinBlock(arg0 context.Context, arg1 *sentry.SendMessageByMinBlockRequest, arg2 ...grpc.CallOption) (*sentry.SentPeers, error) {
+func (m *MockSentryClient) SendMessageByMinBlock(arg0 context.Context, arg1 *sentryproto.SendMessageByMinBlockRequest, arg2 ...grpc.CallOption) (*sentryproto.SentPeers, error) {
 	m.ctrl.T.Helper()
 	varargs := []any{arg0, arg1}
 	for _, a := range arg2 {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "SendMessageByMinBlock", varargs...)
-	ret0, _ := ret[0].(*sentry.SentPeers)
+	ret0, _ := ret[0].(*sentryproto.SentPeers)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -666,32 +666,32 @@ type MockSentryClientSendMessageByMinBlockCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockSentryClientSendMessageByMinBlockCall) Return(arg0 *sentry.SentPeers, arg1 error) *MockSentryClientSendMessageByMinBlockCall {
+func (c *MockSentryClientSendMessageByMinBlockCall) Return(arg0 *sentryproto.SentPeers, arg1 error) *MockSentryClientSendMessageByMinBlockCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockSentryClientSendMessageByMinBlockCall) Do(f func(context.Context, *sentry.SendMessageByMinBlockRequest, ...grpc.CallOption) (*sentry.SentPeers, error)) *MockSentryClientSendMessageByMinBlockCall {
+func (c *MockSentryClientSendMessageByMinBlockCall) Do(f func(context.Context, *sentryproto.SendMessageByMinBlockRequest, ...grpc.CallOption) (*sentryproto.SentPeers, error)) *MockSentryClientSendMessageByMinBlockCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSentryClientSendMessageByMinBlockCall) DoAndReturn(f func(context.Context, *sentry.SendMessageByMinBlockRequest, ...grpc.CallOption) (*sentry.SentPeers, error)) *MockSentryClientSendMessageByMinBlockCall {
+func (c *MockSentryClientSendMessageByMinBlockCall) DoAndReturn(f func(context.Context, *sentryproto.SendMessageByMinBlockRequest, ...grpc.CallOption) (*sentryproto.SentPeers, error)) *MockSentryClientSendMessageByMinBlockCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // SendMessageToAll mocks base method.
-func (m *MockSentryClient) SendMessageToAll(arg0 context.Context, arg1 *sentry.OutboundMessageData, arg2 ...grpc.CallOption) (*sentry.SentPeers, error) {
+func (m *MockSentryClient) SendMessageToAll(arg0 context.Context, arg1 *sentryproto.OutboundMessageData, arg2 ...grpc.CallOption) (*sentryproto.SentPeers, error) {
 	m.ctrl.T.Helper()
 	varargs := []any{arg0, arg1}
 	for _, a := range arg2 {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "SendMessageToAll", varargs...)
-	ret0, _ := ret[0].(*sentry.SentPeers)
+	ret0, _ := ret[0].(*sentryproto.SentPeers)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -710,32 +710,32 @@ type MockSentryClientSendMessageToAllCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockSentryClientSendMessageToAllCall) Return(arg0 *sentry.SentPeers, arg1 error) *MockSentryClientSendMessageToAllCall {
+func (c *MockSentryClientSendMessageToAllCall) Return(arg0 *sentryproto.SentPeers, arg1 error) *MockSentryClientSendMessageToAllCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockSentryClientSendMessageToAllCall) Do(f func(context.Context, *sentry.OutboundMessageData, ...grpc.CallOption) (*sentry.SentPeers, error)) *MockSentryClientSendMessageToAllCall {
+func (c *MockSentryClientSendMessageToAllCall) Do(f func(context.Context, *sentryproto.OutboundMessageData, ...grpc.CallOption) (*sentryproto.SentPeers, error)) *MockSentryClientSendMessageToAllCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSentryClientSendMessageToAllCall) DoAndReturn(f func(context.Context, *sentry.OutboundMessageData, ...grpc.CallOption) (*sentry.SentPeers, error)) *MockSentryClientSendMessageToAllCall {
+func (c *MockSentryClientSendMessageToAllCall) DoAndReturn(f func(context.Context, *sentryproto.OutboundMessageData, ...grpc.CallOption) (*sentryproto.SentPeers, error)) *MockSentryClientSendMessageToAllCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // SendMessageToRandomPeers mocks base method.
-func (m *MockSentryClient) SendMessageToRandomPeers(arg0 context.Context, arg1 *sentry.SendMessageToRandomPeersRequest, arg2 ...grpc.CallOption) (*sentry.SentPeers, error) {
+func (m *MockSentryClient) SendMessageToRandomPeers(arg0 context.Context, arg1 *sentryproto.SendMessageToRandomPeersRequest, arg2 ...grpc.CallOption) (*sentryproto.SentPeers, error) {
 	m.ctrl.T.Helper()
 	varargs := []any{arg0, arg1}
 	for _, a := range arg2 {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "SendMessageToRandomPeers", varargs...)
-	ret0, _ := ret[0].(*sentry.SentPeers)
+	ret0, _ := ret[0].(*sentryproto.SentPeers)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -754,32 +754,32 @@ type MockSentryClientSendMessageToRandomPeersCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockSentryClientSendMessageToRandomPeersCall) Return(arg0 *sentry.SentPeers, arg1 error) *MockSentryClientSendMessageToRandomPeersCall {
+func (c *MockSentryClientSendMessageToRandomPeersCall) Return(arg0 *sentryproto.SentPeers, arg1 error) *MockSentryClientSendMessageToRandomPeersCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockSentryClientSendMessageToRandomPeersCall) Do(f func(context.Context, *sentry.SendMessageToRandomPeersRequest, ...grpc.CallOption) (*sentry.SentPeers, error)) *MockSentryClientSendMessageToRandomPeersCall {
+func (c *MockSentryClientSendMessageToRandomPeersCall) Do(f func(context.Context, *sentryproto.SendMessageToRandomPeersRequest, ...grpc.CallOption) (*sentryproto.SentPeers, error)) *MockSentryClientSendMessageToRandomPeersCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSentryClientSendMessageToRandomPeersCall) DoAndReturn(f func(context.Context, *sentry.SendMessageToRandomPeersRequest, ...grpc.CallOption) (*sentry.SentPeers, error)) *MockSentryClientSendMessageToRandomPeersCall {
+func (c *MockSentryClientSendMessageToRandomPeersCall) DoAndReturn(f func(context.Context, *sentryproto.SendMessageToRandomPeersRequest, ...grpc.CallOption) (*sentryproto.SentPeers, error)) *MockSentryClientSendMessageToRandomPeersCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // SetStatus mocks base method.
-func (m *MockSentryClient) SetStatus(arg0 context.Context, arg1 *sentry.StatusData, arg2 ...grpc.CallOption) (*sentry.SetStatusReply, error) {
+func (m *MockSentryClient) SetStatus(arg0 context.Context, arg1 *sentryproto.StatusData, arg2 ...grpc.CallOption) (*sentryproto.SetStatusReply, error) {
 	m.ctrl.T.Helper()
 	varargs := []any{arg0, arg1}
 	for _, a := range arg2 {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "SetStatus", varargs...)
-	ret0, _ := ret[0].(*sentry.SetStatusReply)
+	ret0, _ := ret[0].(*sentryproto.SetStatusReply)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -798,19 +798,19 @@ type MockSentryClientSetStatusCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockSentryClientSetStatusCall) Return(arg0 *sentry.SetStatusReply, arg1 error) *MockSentryClientSetStatusCall {
+func (c *MockSentryClientSetStatusCall) Return(arg0 *sentryproto.SetStatusReply, arg1 error) *MockSentryClientSetStatusCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockSentryClientSetStatusCall) Do(f func(context.Context, *sentry.StatusData, ...grpc.CallOption) (*sentry.SetStatusReply, error)) *MockSentryClientSetStatusCall {
+func (c *MockSentryClientSetStatusCall) Do(f func(context.Context, *sentryproto.StatusData, ...grpc.CallOption) (*sentryproto.SetStatusReply, error)) *MockSentryClientSetStatusCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSentryClientSetStatusCall) DoAndReturn(f func(context.Context, *sentry.StatusData, ...grpc.CallOption) (*sentry.SetStatusReply, error)) *MockSentryClientSetStatusCall {
+func (c *MockSentryClientSetStatusCall) DoAndReturn(f func(context.Context, *sentryproto.StatusData, ...grpc.CallOption) (*sentryproto.SetStatusReply, error)) *MockSentryClientSetStatusCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

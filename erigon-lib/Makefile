@@ -27,6 +27,7 @@ PROTOC_OS = linux
 endif
 
 PROTOC_INCLUDE = build/include/google
+PROTO_PATH = vendor/github.com/ledgerwatch/interfaces
 
 
 default: gen
@@ -61,11 +62,28 @@ protoc-clean:
 
 grpc: protoc-all
 	go mod vendor
-	PATH="$(GOBIN):$(PATH)" protoc --proto_path=vendor/github.com/ledgerwatch/interfaces --go_out=gointerfaces -I=$(PROTOC_INCLUDE) \
+	PATH="$(GOBIN):$(PATH)" protoc --proto_path=$(PROTO_PATH) --go_out=gointerfaces -I=$(PROTOC_INCLUDE) \
+		--go_opt=Mtypes/types.proto=./typesproto \
 		types/types.proto
-	PATH="$(GOBIN):$(PATH)" protoc --proto_path=vendor/github.com/ledgerwatch/interfaces --go_out=gointerfaces --go-grpc_out=gointerfaces -I=$(PROTOC_INCLUDE) \
-		--go_opt=Mtypes/types.proto=github.com/ledgerwatch/erigon-lib/gointerfaces/types \
-		--go-grpc_opt=Mtypes/types.proto=github.com/ledgerwatch/erigon-lib/gointerfaces/types \
+	PATH="$(GOBIN):$(PATH)" protoc --proto_path=$(PROTO_PATH) --go_out=gointerfaces --go-grpc_out=gointerfaces -I=$(PROTOC_INCLUDE) \
+		--go_opt=Mtypes/types.proto=github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto \
+		--go-grpc_opt=Mtypes/types.proto=github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto \
+		--go_opt=Mp2psentry/sentry.proto=./sentryproto \
+		--go-grpc_opt=Mp2psentry/sentry.proto=./sentryproto \
+		--go_opt=Mp2psentinel/sentinel.proto=./sentinelproto \
+		--go-grpc_opt=Mp2psentinel/sentinel.proto=./sentinelproto \
+		--go_opt=Mremote/kv.proto=./remoteproto \
+		--go-grpc_opt=Mremote/kv.proto=./remoteproto \
+		--go_opt=Mremote/ethbackend.proto=./remoteproto \
+		--go-grpc_opt=Mremote/ethbackend.proto=./remoteproto \
+		--go_opt=Mdownloader/downloader.proto=./downloaderproto \
+		--go-grpc_opt=Mdownloader/downloader.proto=./downloaderproto \
+		--go_opt=Mexecution/execution.proto=./executionproto \
+		--go-grpc_opt=Mexecution/execution.proto=./executionproto \
+		--go_opt=Mtxpool/txpool.proto=./txpoolproto \
+		--go-grpc_opt=Mtxpool/txpool.proto=./txpoolproto \
+		--go_opt=Mtxpool/mining.proto=./txpoolproto \
+		--go-grpc_opt=Mtxpool/mining.proto=./txpoolproto \
 		p2psentry/sentry.proto p2psentinel/sentinel.proto \
 		remote/kv.proto remote/ethbackend.proto \
 		downloader/downloader.proto execution/execution.proto \

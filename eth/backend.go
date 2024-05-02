@@ -60,13 +60,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadergrpc"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	protodownloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
+	protodownloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	rpcsentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
-	protosentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	txpoolproto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
-	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
+	rpcsentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinelproto"
+	protosentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
+	txpoolproto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
+	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
@@ -881,6 +881,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		for _, p := range snaptype.CaplinSnapshotTypes {
 			backend.downloaderClient.ProhibitNewDownloads(ctx, &protodownloader.ProhibitNewDownloadsRequest{
 				Type: p.Name(),
+			})
+		}
+
+		for _, p := range snaptype.SeedableV3Extensions() {
+			backend.downloaderClient.ProhibitNewDownloads(ctx, &protodownloader.ProhibitNewDownloadsRequest{
+				Type: p,
 			})
 		}
 

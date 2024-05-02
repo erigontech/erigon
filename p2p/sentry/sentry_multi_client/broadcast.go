@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
 
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"

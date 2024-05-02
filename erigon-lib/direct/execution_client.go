@@ -19,8 +19,8 @@ package direct
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	execution "github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
+	types "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
