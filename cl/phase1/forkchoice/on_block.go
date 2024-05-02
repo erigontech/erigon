@@ -90,7 +90,6 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		}
 	}
 
-	//var invalidBlock bool
 	startEngine := time.Now()
 	if newPayload && f.engine != nil {
 		if block.Version() >= clparams.DenebVersion {

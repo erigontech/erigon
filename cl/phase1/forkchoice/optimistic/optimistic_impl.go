@@ -19,18 +19,19 @@ func NewOptimisticStore() OptimisticStore {
 }
 
 func (impl *optimisticStoreImpl) AddOptimisticCandidate(block *cltypes.BeaconBlock) error {
+	root, err := block.HashSSZ()
+	if err != nil {
+		return err
+	}
+	parentRoot := block.ParentRoot
+
 	impl.opMutex.Lock()
 	defer impl.opMutex.Unlock()
-	var (
-		root       = block.StateRoot
-		parentRoot = block.ParentRoot
-	)
 	if _, ok := impl.optimisticRoots[root]; ok {
 		// block already optimistically imported
 		return nil
 	}
 	blockNode := &blockNode{
-		block:    block,
 		parent:   parentRoot,
 		children: []common.Hash{},
 	}
@@ -89,7 +90,6 @@ func (impl *optimisticStoreImpl) IsOptimistic(root common.Hash) bool {
 }
 
 type blockNode struct {
-	block    *cltypes.BeaconBlock
 	parent   common.Hash
 	children []common.Hash
 }
