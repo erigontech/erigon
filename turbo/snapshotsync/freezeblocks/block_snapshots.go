@@ -2099,7 +2099,6 @@ type View struct {
 
 func (s *RoSnapshots) View() *View {
 	v := &View{s: s, baseSegType: coresnaptype.Headers}
-	fmt.Println(s.segments.Get(coresnaptype.Bodies.Enum()))
 	s.lockSegments()
 	return v
 }
