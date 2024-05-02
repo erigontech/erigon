@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/connectivity"
 )
 
 type Config struct {
@@ -61,11 +62,15 @@ func NewExecutors(cfg Config) []*Executor {
 
 func NewExecutor(grpcUrl string, timeout time.Duration) (*Executor, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
 	conn, err := grpc.DialContext(ctx, grpcUrl, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
+	// log the error but continue on because the executor may come back online later and we will re-attempt
+	// to connect when it is asked to verify
 	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("failed to dial grpc: %w", err)
+		log.Error("Failed to dial grpc", "grpcUrl", grpcUrl, "error", err)
 	}
+
 	client := executor.NewExecutorServiceClient(conn)
 
 	e := &Executor{
@@ -74,6 +79,7 @@ func NewExecutor(grpcUrl string, timeout time.Duration) (*Executor, error) {
 		connCancel: cancel,
 		client:     client,
 	}
+
 	return e, nil
 }
 
@@ -88,13 +94,48 @@ func (e *Executor) Close() {
 	}
 }
 
+func (e *Executor) CheckOnline() bool {
+	// first ensure there is a connection to work with
+	if e.conn == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		conn, err := grpc.DialContext(ctx, e.grpcUrl, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
+		if err != nil {
+			log.Error("Failed to dial grpc", "grpcUrl", e.grpcUrl, "error", err)
+			return false
+		}
+		e.conn = conn
+		e.client = executor.NewExecutorServiceClient(conn)
+
+		// no point in checking the state if we just connected so just return ok
+		return true
+	}
+
+	state := e.conn.GetState()
+
+	if state == connectivity.TransientFailure || state == connectivity.Shutdown {
+		log.Info("Executor reconnecting to grpc server", "grpcUrl", e.grpcUrl)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		if !e.conn.WaitForStateChange(ctx, state) {
+			return false
+		} else {
+			log.Info("Executor reconnected to grpc server", "grpcUrl", e.grpcUrl)
+		}
+	}
+
+	return true
+}
+
 func (e *Executor) Verify(p *Payload, request *VerifierRequest, oldStateRoot common.Hash) (bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	log.Debug("Sending request to grpc server", "grpcUrl", e.grpcUrl)
 
 	size := 1024 * 1024 * 256 // 256mb maximum size - hack for now until trimmed witness is proved off
+	log.Info("Sending executor request", "grpcUrl", e.grpcUrl, "batch", request.BatchNumber)
 	resp, err := e.client.ProcessStatelessBatchV2(ctx, &executor.ProcessStatelessBatchRequestV2{
 		Witness:                     p.Witness,
 		DataStream:                  p.DataStream,
@@ -129,6 +170,7 @@ func (e *Executor) Verify(p *Payload, request *VerifierRequest, oldStateRoot com
 	}
 
 	log.Info("executor result",
+		"grpcUrl", e.grpcUrl,
 		"batch", request.BatchNumber,
 		"counters", counters,
 		"exec-root", common.BytesToHash(resp.NewStateRoot),

@@ -17,11 +17,12 @@ import (
 	"github.com/ledgerwatch/erigon/zk/legacy_executor_verifier/proto/github.com/0xPolygonHermez/zkevm-node/state/runtime/executor"
 	"github.com/ledgerwatch/erigon/zk/syncer"
 	"github.com/ledgerwatch/log/v3"
+	"fmt"
+	"sort"
+	"time"
 )
 
 const (
-	maximumInflightRequests = 1024 // todo [zkevm] this should probably be from config
-
 	ROLLUP_ID = 1 // todo [zkevm] this should be read from config to anticipate more than 1 rollup per manager contract
 )
 
@@ -39,8 +40,11 @@ type VerifierResponse struct {
 	Witness     []byte
 }
 
+var ErrNoExecutorAvailable = fmt.Errorf("no executor available")
+
 type ILegacyExecutor interface {
 	Verify(*Payload, *VerifierRequest, common.Hash) (bool, error)
+	CheckOnline() bool
 }
 
 type WitnessGenerator interface {
@@ -54,9 +58,9 @@ type LegacyExecutorVerifier struct {
 	executorNumberLock *sync.Mutex
 	executorNumber     int
 
-	requestChan   chan *VerifierRequest
+	working       *sync.Mutex
+	openRequests  []*VerifierRequest
 	requestsMap   map[uint64]uint64
-	responseChan  chan *VerifierResponse
 	responses     []*VerifierResponse
 	responseMutex *sync.Mutex
 	quit          chan struct{}
@@ -88,9 +92,9 @@ func NewLegacyExecutorVerifier(
 		db:                 db,
 		executorNumberLock: &sync.Mutex{},
 		executorNumber:     0,
-		requestChan:        make(chan *VerifierRequest, maximumInflightRequests),
+		working:            &sync.Mutex{},
+		openRequests:       make([]*VerifierRequest, 0),
 		requestsMap:        make(map[uint64]uint64),
-		responseChan:       make(chan *VerifierResponse, maximumInflightRequests),
 		responses:          make([]*VerifierResponse, 0),
 		responseMutex:      &sync.Mutex{},
 		quit:               make(chan struct{}),
@@ -108,44 +112,92 @@ func (v *LegacyExecutorVerifier) StopWork() {
 
 func (v *LegacyExecutorVerifier) StartWork() {
 	go func() {
+		tick := time.NewTicker(1 * time.Second)
 	LOOP:
 		for {
 			select {
 			case <-v.quit:
 				break LOOP
-			case request := <-v.requestChan:
-				ctx := context.Background()
-				err := v.handleRequest(ctx, request)
-				if err != nil {
-					log.Error("[Verifier] error handling request", "err", err)
-					// requeue the request, could be a transient error
-					v.requestChan <- request
-				}
-			case response := <-v.responseChan:
-				v.handleResponse(response)
+			case <-tick.C:
+				go v.processOpenRequests()
 			}
 		}
 	}()
 }
 
-func (v *LegacyExecutorVerifier) handleRequest(ctx context.Context, request *VerifierRequest) error {
+func (v *LegacyExecutorVerifier) processOpenRequests() {
+	v.working.Lock()
+	defer v.working.Unlock()
+
+	if len(v.openRequests) == 0 {
+		return
+	}
+
+	// sort the requests by batch number ascending
+	sort.Slice(v.openRequests, func(i, j int) bool {
+		return v.openRequests[i].BatchNumber < v.openRequests[j].BatchNumber
+	})
+
+	// we want to trim down the requests once we have worked through them so keep track of
+	// where we got to
+	successCount := 0
+
+	// process the requests
+	for _, request := range v.openRequests {
+		processed, err := v.handleRequest(context.Background(), request)
+		if err != nil {
+			log.Error("[Verifier] error handling request", "batch", request.BatchNumber, "err", err)
+			break
+		}
+		if !processed {
+			// likely the underlying stage loop is still running so the batch had no transactions
+			// in this case subsequent batches will also be in the same state so exit now and wait
+			// for the next iteration
+			break
+		}
+		successCount++
+	}
+
+	v.openRequests = v.openRequests[successCount:]
+}
+
+func (v *LegacyExecutorVerifier) getNextOnlineExecutor() ILegacyExecutor {
+	v.executorNumberLock.Lock()
+	defer v.executorNumberLock.Unlock()
+
+	var exec ILegacyExecutor
+
+	// attempt to find an executor that is online amongst them all
+	for i := 0; i < len(v.executors); i++ {
+		v.executorNumber++
+		if v.executorNumber >= len(v.executors) {
+			v.executorNumber = 0
+		}
+		temp := v.executors[v.executorNumber]
+		if temp.CheckOnline() {
+			exec = temp
+			break
+		}
+	}
+
+	return exec
+}
+
+func (v *LegacyExecutorVerifier) handleRequest(ctx context.Context, request *VerifierRequest) (bool, error) {
 	// if we have no executor config then just skip this step and treat everything as OK
 	if len(v.executors) == 0 {
 		response := &VerifierResponse{
 			BatchNumber: request.BatchNumber,
 			Valid:       true,
 		}
-		v.responseChan <- response
-		return nil
+		v.handleResponse(response)
+		return true, nil
 	}
 
-	v.executorNumberLock.Lock()
-	v.executorNumber++
-	if v.executorNumber >= len(v.executors) {
-		v.executorNumber = 0
+	execer := v.getNextOnlineExecutor()
+	if execer == nil {
+		return false, ErrNoExecutorAvailable
 	}
-	v.executorNumberLock.Unlock()
-	execer := v.executors[v.executorNumber]
 
 	// mapmutation has some issue with us not having a quit channel on the context call to `Done` so
 	// here we're creating a cancelable context and just deferring the cancel
@@ -154,7 +206,7 @@ func (v *LegacyExecutorVerifier) handleRequest(ctx context.Context, request *Ver
 
 	tx, err := v.db.BeginRo(innerCtx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer tx.Rollback()
 
@@ -163,33 +215,32 @@ func (v *LegacyExecutorVerifier) handleRequest(ctx context.Context, request *Ver
 	// get the data stream bytes
 	blocks, err := hermezDb.GetL2BlockNosByBatch(request.BatchNumber)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// we might not have blocks yet as the underlying stage loop might still be running and the tx hasn't been
 	// committed yet so just requeue the request
 	if len(blocks) == 0 {
 		request.CheckCount++
-		v.requestChan <- request
-		return nil
+		return false, nil
 	}
 
 	l1InfoTreeMinTimestamps := make(map[uint64]uint64)
 	streamBytes, err := v.GetStreamBytes(request, tx, blocks, hermezDb, l1InfoTreeMinTimestamps)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	witness, err := v.witnessGenerator.GenerateWitness(tx, innerCtx, blocks[0], blocks[len(blocks)-1], false, v.cfg.WitnessFull)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	log.Debug("witness generated", "data", hex.EncodeToString(witness))
 
 	oldAccInputHash, err := v.l1Syncer.GetOldAccInputHash(innerCtx, &v.cfg.AddressRollup, ROLLUP_ID, request.BatchNumber)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// now we need to figure out the timestamp limit for this payload.  It must be:
@@ -198,7 +249,7 @@ func (v *LegacyExecutorVerifier) handleRequest(ctx context.Context, request *Ver
 	// and just add 5 minutes
 	lastBlock, err := rawdb.ReadBlockByNumber(tx, blocks[len(blocks)-1])
 	if err != nil {
-		return err
+		return false, err
 	}
 	timestampLimit := lastBlock.Time()
 
@@ -218,7 +269,7 @@ func (v *LegacyExecutorVerifier) handleRequest(ctx context.Context, request *Ver
 
 	ok, err := execer.Verify(payload, request, previousBlock.Root())
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	response := &VerifierResponse{
@@ -226,9 +277,9 @@ func (v *LegacyExecutorVerifier) handleRequest(ctx context.Context, request *Ver
 		Valid:       ok,
 		Witness:     witness,
 	}
-	v.responseChan <- response
+	v.handleResponse(response)
 
-	return nil
+	return true, nil
 }
 
 func (v *LegacyExecutorVerifier) GetStreamBytes(request *VerifierRequest, tx kv.Tx, blocks []uint64, hermezDb *hermez_db.HermezDbReader, l1InfoTreeMinTimestamps map[uint64]uint64) ([]byte, error) {
@@ -285,7 +336,15 @@ func (v *LegacyExecutorVerifier) AddRequest(request *VerifierRequest) {
 	}
 
 	v.requestsMap[request.BatchNumber] = request.BatchNumber
-	v.requestChan <- request
+	go v.addRequestWhenFree(request)
+}
+
+func (v *LegacyExecutorVerifier) addRequestWhenFree(request *VerifierRequest) {
+	v.working.Lock()
+	v.openRequests = append(v.openRequests, request)
+	v.working.Unlock()
+
+	v.processOpenRequests()
 }
 
 // not thread safe
