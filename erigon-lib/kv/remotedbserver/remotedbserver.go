@@ -604,6 +604,7 @@ func (s *KvServer) IndexRange(_ context.Context, req *remote.IndexRangeReq) (*re
 		if err != nil {
 			return err
 		}
+		defer it.Close()
 		for it.HasNext() {
 			v, err := it.Next()
 			if err != nil {

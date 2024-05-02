@@ -217,9 +217,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 			}
 			blockLogs = append(blockLogs, filtered...)
 		}
-		if casted, ok := it.(kv.Closer); ok {
-			casted.Close()
-		}
+		it.Close()
 		if len(blockLogs) == 0 {
 			continue
 		}
@@ -386,6 +384,7 @@ func applyFiltersV3(tx kv.TemporalTx, begin, end uint64, crit filters.FilterCrit
 	if err != nil {
 		return out, err
 	}
+	defer topicsBitmap.Close()
 	if topicsBitmap != nil {
 		out = topicsBitmap
 	}
@@ -393,6 +392,7 @@ func applyFiltersV3(tx kv.TemporalTx, begin, end uint64, crit filters.FilterCrit
 	if err != nil {
 		return out, err
 	}
+	defer addrBitmap.Close()
 	if addrBitmap != nil {
 		if out == nil {
 			out = addrBitmap
