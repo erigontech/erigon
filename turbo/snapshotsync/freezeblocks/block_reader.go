@@ -561,6 +561,9 @@ func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, ha
 		}
 		return nil, nil
 	}
+	if dbgLogs {
+		log.Info(dbgPrefix+"got non-nil txs from file", "len(txs)", len(txs))
+	}
 	body.Transactions = txs
 	body.SendersToTxs(senders)
 	return body, nil
