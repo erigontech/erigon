@@ -17,7 +17,7 @@ import (
 
 type proposerSlashingService struct {
 	operationsPool    pool.OperationsPool
-	syncedDataManager *synced_data.SyncedDataManager
+	syncedDataManager synced_data.SyncedData
 	beaconCfg         *clparams.BeaconChainConfig
 	ethClock          eth_clock.EthereumClock
 	cache             *lru.Cache[uint64, struct{}]
@@ -25,7 +25,7 @@ type proposerSlashingService struct {
 
 func NewProposerSlashingService(
 	operationsPool pool.OperationsPool,
-	syncedDataManager *synced_data.SyncedDataManager,
+	syncedDataManager synced_data.SyncedData,
 	beaconCfg *clparams.BeaconChainConfig,
 	ethClock eth_clock.EthereumClock,
 ) *proposerSlashingService {
@@ -73,7 +73,7 @@ func (s *proposerSlashingService) ProcessMessage(ctx context.Context, subnet *ui
 	}
 
 	// Verify the proposer is slashable
-	state := s.syncedDataManager.HeadState()
+	state := s.syncedDataManager.HeadStateReader()
 	if state == nil {
 		return ErrIgnore
 	}
@@ -87,7 +87,7 @@ func (s *proposerSlashingService) ProcessMessage(ctx context.Context, subnet *ui
 
 	// Verify signatures for both headers
 	for _, signedHeader := range []*cltypes.SignedBeaconBlockHeader{msg.Header1, msg.Header2} {
-		domain, err := state.GetDomain(state.BeaconConfig().DomainBeaconProposer, st.GetEpochAtSlot(state.BeaconConfig(), signedHeader.Header.Slot))
+		domain, err := state.GetDomain(s.beaconCfg.DomainBeaconProposer, st.GetEpochAtSlot(s.beaconCfg, signedHeader.Header.Slot))
 		if err != nil {
 			return fmt.Errorf("unable to get domain: %v", err)
 		}
