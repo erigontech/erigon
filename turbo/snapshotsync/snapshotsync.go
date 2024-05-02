@@ -205,6 +205,7 @@ func getMinimumBlocksToDownload(tx kv.Tx, blockReader services.FullBlockReader, 
 	minToDownload := uint64(math.MaxUint64)
 	stateTxNum := minStep * config3.HistoryV3AggregationStep
 	if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
+		fmt.Println(blockNum, baseTxNum, txAmount)
 		if stateTxNum <= baseTxNum { // If blocks is behind state then we can consider a starting point
 			return nil
 		}
