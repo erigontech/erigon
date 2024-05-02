@@ -234,6 +234,7 @@ Loop:
 		if body == nil {
 			_, _ = cfg.blockReader.BodyWithTransactions(dbg.ContextWithDebug(ctx, true), tx, blockHash, blockNumber)
 			logger.Warn(fmt.Sprintf("[%s] ReadBodyWithTransactions can't find block", logPrefix), "num", blockNumber, "hash", blockHash)
+			panic(1)
 			continue
 		}
 
