@@ -373,9 +373,7 @@ func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHei
 			return nil, nil
 		}
 		h = rawdb.ReadHeader(tx, blockHash, blockHeight)
-		if h != nil {
-			return h, nil
-		}
+		return h, nil
 	}
 
 	view := r.sn.View()
