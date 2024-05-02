@@ -10,8 +10,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
+	types "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
 	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"

@@ -13,7 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
-	sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
 	types "github.com/ledgerwatch/erigon/core/types"
 	eth "github.com/ledgerwatch/erigon/eth/protocols/eth"
 	gomock "go.uber.org/mock/gomock"
