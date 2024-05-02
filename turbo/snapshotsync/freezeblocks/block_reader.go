@@ -360,7 +360,7 @@ func (r *BlockReader) LastNonCanonicalHeaderNumber(ctx context.Context, tx kv.Ge
 }
 
 func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (h *types.Header, err error) {
-	maxBlockNumInFiles := r.FrozenBorBlocks()
+	maxBlockNumInFiles := r.sn.BlocksAvailable()
 	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
 		if tx == nil {
 			return nil, nil

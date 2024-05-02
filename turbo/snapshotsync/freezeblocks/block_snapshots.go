@@ -326,33 +326,6 @@ func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapcfg.Cfg) error {
 	return nil
 }
 
-func (s *RoSnapshots) blocksAvailable(in snaptype.Type, indexed bool) uint64 {
-	if s == nil {
-		return 0
-	}
-
-	var max uint64
-
-	if segtype, ok := s.segments.Get(in.Enum()); ok {
-		if indexed {
-			for _, seg := range segtype.segments {
-				if !seg.IsIndexed() {
-					break
-				}
-
-				max = seg.to - 1
-			}
-		} else {
-			if seglen := len(segtype.segments); seglen > 0 {
-				max = segtype.segments[seglen-1].to
-			}
-		}
-
-	}
-
-	return max
-}
-
 func (s *RoSnapshots) Types() []snaptype.Type { return s.types }
 func (s *RoSnapshots) HasType(in snaptype.Type) bool {
 	for _, t := range s.types {
