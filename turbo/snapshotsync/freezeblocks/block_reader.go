@@ -470,6 +470,12 @@ func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash
 }
 
 func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
+	var dbgPrefix string
+	dbgLogs := dbg.Enabled(ctx)
+	if dbgLogs {
+		dbgPrefix = fmt.Sprintf("[dbg] BlockReader.BodyWithTransactions(hash=%x,blk=%d)", hash, blockHeight)
+	}
+
 	if tx != nil {
 		body, err = rawdb.ReadBodyWithTransactions(tx, hash, blockHeight)
 		if err != nil {
@@ -488,6 +494,9 @@ func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, ha
 	var buf []byte
 	seg, ok := view.BodiesSegment(blockHeight)
 	if !ok {
+		if dbgLogs {
+			log.Info(dbgPrefix + "no bodies file for this block num")
+		}
 		return nil, nil
 	}
 	body, baseTxnID, txsAmount, buf, err = r.bodyFromSnapshot(blockHeight, seg, buf)
@@ -495,10 +504,16 @@ func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, ha
 		return nil, err
 	}
 	if body == nil {
+		if dbgLogs {
+			log.Info(dbgPrefix + "got nil body from file")
+		}
 		return nil, nil
 	}
 	txnSeg, ok := view.TxsSegment(blockHeight)
 	if !ok {
+		if dbgLogs {
+			log.Info(dbgPrefix+"no transactions file for this block num", "r.sn.BlocksAvailable()", r.sn.BlocksAvailable(), "r.sn.indicesReady", r.sn.indicesReady.Load())
+		}
 		return nil, nil
 	}
 	txs, senders, err := r.txsFromSnapshot(baseTxnID, txsAmount, txnSeg, buf)
@@ -506,6 +521,9 @@ func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, ha
 		return nil, err
 	}
 	if txs == nil {
+		if dbgLogs {
+			log.Info(dbgPrefix + "got nil txs from file")
+		}
 		return nil, nil
 	}
 	body.Transactions = txs
