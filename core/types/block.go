@@ -706,11 +706,11 @@ func (b *Body) SendersFromTxs() []libcommon.Address {
 }
 
 func (rb RawBody) EncodingSize() int {
-	payloadSize, _, _, _ := rb.payloadSize()
+	payloadSize, _, _, _, _ := rb.payloadSize()
 	return payloadSize
 }
 
-func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen int) {
+func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen, requestsLen int) {
 	// size of Transactions
 	for _, tx := range rb.Transactions {
 		txsLen += len(tx)
@@ -727,11 +727,17 @@ func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen 
 		payloadSize += rlp2.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
-	return payloadSize, txsLen, unclesLen, withdrawalsLen
+	// size of requests
+	if rb.Requests != nil {
+		requestsLen += encodingSizeGeneric(rb.Requests)
+		payloadSize += rlp2.ListPrefixLen(requestsLen) + requestsLen
+	}
+
+	return payloadSize, txsLen, unclesLen, withdrawalsLen, requestsLen
 }
 
 func (rb RawBody) EncodeRLP(w io.Writer) error {
-	payloadSize, txsLen, unclesLen, withdrawalsLen := rb.payloadSize()
+	payloadSize, txsLen, unclesLen, withdrawalsLen, requestsLen := rb.payloadSize()
 	var b [33]byte
 	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
@@ -753,6 +759,12 @@ func (rb RawBody) EncodeRLP(w io.Writer) error {
 	// encode Withdrawals
 	if rb.Withdrawals != nil {
 		if err := encodeRLPGeneric(rb.Withdrawals, withdrawalsLen, w, b[:]); err != nil {
+			return err
+		}
+	}
+	// encode Requests
+	if rb.Requests != nil {
+		if err := encodeRLPGeneric(rb.Requests, requestsLen, w, b[:]); err != nil {
 			return err
 		}
 	}
@@ -791,11 +803,16 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 	if err := decodeWithdrawals(&rb.Withdrawals, s); err != nil {
 		return err
 	}
+	// decode Requests
+	rb.Requests = []*Request{}
+	if err := decodeRequests(&rb.Requests, s); err != nil {
+		return err
+	}
 
 	return s.ListEnd()
 }
 
-func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen int) {
+func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen, requestsLen int) {
 	baseTxIdLen := 1 + rlp.IntLenExcludingHead(bfs.BaseTxId)
 	txAmountLen := 1 + rlp.IntLenExcludingHead(uint64(bfs.TxAmount))
 
@@ -812,11 +829,17 @@ func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen 
 		payloadSize += rlp2.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
-	return payloadSize, unclesLen, withdrawalsLen
+	// size of Requests
+	if bfs.Requests != nil {
+		requestsLen += encodingSizeGeneric(bfs.Requests)
+		payloadSize += rlp2.ListPrefixLen(requestsLen) + requestsLen
+	}
+
+	return payloadSize, unclesLen, withdrawalsLen, requestsLen
 }
 
 func (bfs BodyForStorage) EncodeRLP(w io.Writer) error {
-	payloadSize, unclesLen, withdrawalsLen := bfs.payloadSize()
+	payloadSize, unclesLen, withdrawalsLen, requestsLen := bfs.payloadSize()
 	var b [33]byte
 
 	// prefix
@@ -842,6 +865,12 @@ func (bfs BodyForStorage) EncodeRLP(w io.Writer) error {
 	// nil if pre-shanghai, empty slice if shanghai and no withdrawals in block, otherwise non-empty
 	if bfs.Withdrawals != nil {
 		if err := encodeRLPGeneric(bfs.Withdrawals, withdrawalsLen, w, b[:]); err != nil {
+			return err
+		}
+	}
+	// encode Requests
+	if bfs.Requests != nil {
+		if err := encodeRLPGeneric(bfs.Requests, requestsLen, w, b[:]); err != nil {
 			return err
 		}
 	}
@@ -871,16 +900,20 @@ func (bfs *BodyForStorage) DecodeRLP(s *rlp.Stream) error {
 	if err := decodeWithdrawals(&bfs.Withdrawals, s); err != nil {
 		return err
 	}
-
+	// decode Requests
+	bfs.Requests = []*Request{}
+	if err := decodeRequests(&bfs.Requests, s); err != nil {
+		return err
+	}
 	return s.ListEnd()
 }
 
 func (bb Body) EncodingSize() int {
-	payloadSize, _, _, _ := bb.payloadSize()
+	payloadSize, _, _, _, _ := bb.payloadSize()
 	return payloadSize
 }
 
-func (bb Body) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen int) {
+func (bb Body) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen, requestsLen int) {
 	// size of Transactions
 	txsLen += encodingSizeGeneric(bb.Transactions)
 	payloadSize += rlp2.ListPrefixLen(txsLen) + txsLen
@@ -895,11 +928,17 @@ func (bb Body) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen
 		payloadSize += rlp2.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
-	return payloadSize, txsLen, unclesLen, withdrawalsLen
+	// size of Requests
+	if bb.Requests != nil {
+		requestsLen += encodingSizeGeneric(bb.Requests)
+		payloadSize += rlp2.ListPrefixLen(requestsLen) + requestsLen
+	}
+
+	return payloadSize, txsLen, unclesLen, withdrawalsLen, requestsLen
 }
 
 func (bb Body) EncodeRLP(w io.Writer) error {
-	payloadSize, txsLen, unclesLen, withdrawalsLen := bb.payloadSize()
+	payloadSize, txsLen, unclesLen, withdrawalsLen, requestsLen := bb.payloadSize()
 	var b [33]byte
 	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
@@ -916,6 +955,12 @@ func (bb Body) EncodeRLP(w io.Writer) error {
 	// encode Withdrawals
 	if bb.Withdrawals != nil {
 		if err := encodeRLPGeneric(bb.Withdrawals, withdrawalsLen, w, b[:]); err != nil {
+			return err
+		}
+	}
+	// encode Requests
+	if bb.Requests != nil {
+		if err := encodeRLPGeneric(bb.Requests, requestsLen, w, b[:]); err != nil {
 			return err
 		}
 	}
@@ -938,6 +983,10 @@ func (bb *Body) DecodeRLP(s *rlp.Stream) error {
 	// decode Withdrawals
 	bb.Withdrawals = []*Withdrawal{}
 	if err := decodeWithdrawals(&bb.Withdrawals, s); err != nil {
+		return err
+	}
+	// decode Requests
+	if err := decodeRequests(&bb.Requests, s); err != nil {
 		return err
 	}
 
@@ -1095,11 +1144,16 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 	if err := decodeWithdrawals(&bb.withdrawals, s); err != nil {
 		return err
 	}
+	// decode Requests
+	bb.requests = []*Request{}
+	if err := decodeRequests(&bb.requests, s); err != nil {
+		return err
+	}
 
 	return s.ListEnd()
 }
 
-func (bb Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen int) {
+func (bb Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen, requestsLen int) {
 	// size of Header
 	headerLen := bb.header.EncodingSize()
 	payloadSize += rlp2.ListPrefixLen(headerLen) + headerLen
@@ -1118,17 +1172,23 @@ func (bb Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLe
 		payloadSize += rlp2.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
-	return payloadSize, txsLen, unclesLen, withdrawalsLen
+	// size of Requests
+	if bb.requests != nil {
+		requestsLen += encodingSizeGeneric(bb.requests)
+		payloadSize += rlp2.ListPrefixLen(requestsLen) + requestsLen
+	}
+
+	return payloadSize, txsLen, unclesLen, withdrawalsLen, requestsLen
 }
 
 func (bb Block) EncodingSize() int {
-	payloadSize, _, _, _ := bb.payloadSize()
+	payloadSize, _, _, _, _ := bb.payloadSize()
 	return payloadSize
 }
 
 // EncodeRLP serializes b into the Ethereum RLP block format.
 func (bb Block) EncodeRLP(w io.Writer) error {
-	payloadSize, txsLen, unclesLen, withdrawalsLen := bb.payloadSize()
+	payloadSize, txsLen, unclesLen, withdrawalsLen, requestsLen := bb.payloadSize()
 	var b [33]byte
 	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
@@ -1149,6 +1209,12 @@ func (bb Block) EncodeRLP(w io.Writer) error {
 	// encode Withdrawals
 	if bb.withdrawals != nil {
 		if err := encodeRLPGeneric(bb.withdrawals, withdrawalsLen, w, b[:]); err != nil {
+			return err
+		}
+	}
+	// encode Requests
+	if bb.requests != nil {
+		if err := encodeRLPGeneric(bb.requests, requestsLen, w, b[:]); err != nil {
 			return err
 		}
 	}
@@ -1482,6 +1548,25 @@ func decodeWithdrawals(appendList *[]*Withdrawal, s *rlp.Stream) error {
 			break
 		}
 		*appendList = append(*appendList, &w)
+	}
+	return checkErrListEnd(s, err)
+}
+
+func decodeRequests(appendList *[]*Request, s *rlp.Stream) error {
+	var err error
+	if _, err = s.List(); err != nil {
+		if errors.Is(err, rlp.EOL) {
+			*appendList = nil
+			return nil
+		}
+		return fmt.Errorf("read requests: %v", err)
+	}
+	for err == nil {
+		var r Request
+		if err = r.DecodeRLP(s); err != nil {
+			break
+		}
+		*appendList = append(*appendList, &r)
 	}
 	return checkErrListEnd(s, err)
 }

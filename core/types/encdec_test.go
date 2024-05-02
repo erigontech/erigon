@@ -228,11 +228,20 @@ func (tr *TRand) RandWithdrawals(size int) []*Withdrawal {
 	return withdrawals
 }
 
+func (tr *TRand) RandRequests(size int) []*Request {
+	requests := make([]*Request, size)
+	for i := 0; i < size; i++ {
+		requests[i] = tr.RandRequest()
+	}
+	return requests
+}
+
 func (tr *TRand) RandRawBody() *RawBody {
 	return &RawBody{
-		Transactions: tr.RandRawTransactions(tr.RandIntInRange(1, 6)),
-		Uncles:       tr.RandHeaders(tr.RandIntInRange(1, 6)),
-		Withdrawals:  tr.RandWithdrawals(tr.RandIntInRange(1, 6)),
+		// Transactions: tr.RandRawTransactions(tr.RandIntInRange(1, 6)),
+		Uncles:      tr.RandHeaders(tr.RandIntInRange(1, 6)),
+		Withdrawals: tr.RandWithdrawals(tr.RandIntInRange(1, 6)),
+		Requests:    tr.RandRequests(tr.RandIntInRange(1, 6)),
 	}
 }
 
@@ -259,6 +268,7 @@ func (tr *TRand) RandBody() *Body {
 		Transactions: tr.RandTransactions(tr.RandIntInRange(1, 6)),
 		Uncles:       tr.RandHeaders(tr.RandIntInRange(1, 6)),
 		Withdrawals:  tr.RandWithdrawals(tr.RandIntInRange(1, 6)),
+		Requests:     tr.RandRequests(tr.RandIntInRange(1, 6)),
 	}
 }
 
@@ -278,7 +288,7 @@ func check(t *testing.T, f string, want, got interface{}) {
 	}
 }
 
-func compareHeaders(t *testing.T, a, b *Header) {
+func checkHeaders(t *testing.T, a, b *Header) {
 	check(t, "Header.ParentHash", a.ParentHash, b.ParentHash)
 	check(t, "Header.UncleHash", a.UncleHash, b.UncleHash)
 	check(t, "Header.Coinbase", a.Coinbase, b.Coinbase)
@@ -301,7 +311,7 @@ func compareHeaders(t *testing.T, a, b *Header) {
 	check(t, "Header.ParentBeaconBlockRoot", a.ParentBeaconBlockRoot, b.ParentBeaconBlockRoot)
 }
 
-func compareWithdrawals(t *testing.T, a, b *Withdrawal) {
+func checkWithdrawals(t *testing.T, a, b *Withdrawal) {
 	check(t, "Withdrawal.Index", a.Index, b.Index)
 	check(t, "Withdrawal.Validator", a.Validator, b.Validator)
 	check(t, "Withdrawal.Address", a.Address, b.Address)
@@ -337,6 +347,57 @@ func compareDeposits(t *testing.T, a, b *Deposit) {
 	check(t, "Deposit.Index", a.Index, b.Index)
 }
 
+func checkRequests(t *testing.T, a, b *Request) {
+	if a.Type() != b.Type() {
+		t.Errorf("request type mismatch: request-a: %v, request-b: %v", a.Type(), b.Type())
+	}
+
+	switch a.Type() {
+	case DepositRequestType:
+		c := a.inner.(*Deposit)
+		d := b.inner.(*Deposit)
+		compareDeposits(t, c, d)
+	default:
+		t.Errorf("unknown request type: %v", a.Type())
+	}
+}
+
+func compareHeaders(t *testing.T, a, b []*Header) error {
+	auLen, buLen := len(a), len(b)
+	if auLen != buLen {
+		return fmt.Errorf("uncles len mismatch: expected: %v, got: %v", auLen, buLen)
+	}
+
+	for i := 0; i < auLen; i++ {
+		checkHeaders(t, a[i], b[i])
+	}
+	return nil
+}
+
+func compareWithdrawals(t *testing.T, a, b []*Withdrawal) error {
+	awLen, bwLen := len(a), len(b)
+	if awLen != bwLen {
+		return fmt.Errorf("withdrawals len mismatch: expected: %v, got: %v", awLen, bwLen)
+	}
+
+	for i := 0; i < awLen; i++ {
+		checkWithdrawals(t, a[i], b[i])
+	}
+	return nil
+}
+
+func compareRequests(t *testing.T, a, b []*Request) error {
+	arLen, brLen := len(a), len(b)
+	if arLen != brLen {
+		return fmt.Errorf("requests len mismatch: expected: %v, got: %v", arLen, brLen)
+	}
+
+	for i := 0; i < arLen; i++ {
+		checkRequests(t, a[i], b[i])
+	}
+	return nil
+}
+
 func compareRawBodies(t *testing.T, a, b *RawBody) error {
 
 	atLen, btLen := len(a.Transactions), len(b.Transactions)
@@ -350,23 +411,9 @@ func compareRawBodies(t *testing.T, a, b *RawBody) error {
 		}
 	}
 
-	auLen, buLen := len(a.Uncles), len(b.Uncles)
-	if auLen != buLen {
-		return fmt.Errorf("uncles len mismatch: expected: %v, got: %v", auLen, buLen)
-	}
-
-	for i := 0; i < auLen; i++ {
-		compareHeaders(t, a.Uncles[i], b.Uncles[i])
-	}
-
-	awLen, bwLen := len(a.Withdrawals), len(b.Withdrawals)
-	if awLen != bwLen {
-		return fmt.Errorf("withdrawals len mismatch: expected: %v, got: %v", auLen, buLen)
-	}
-
-	for i := 0; i < awLen; i++ {
-		compareWithdrawals(t, a.Withdrawals[i], b.Withdrawals[i])
-	}
+	compareHeaders(t, a.Uncles, b.Uncles)
+	compareWithdrawals(t, a.Withdrawals, b.Withdrawals)
+	compareRequests(t, a.Requests, b.Requests)
 
 	return nil
 }
@@ -382,32 +429,9 @@ func compareBodies(t *testing.T, a, b *Body) error {
 		compareTransactions(t, a.Transactions[i], b.Transactions[i])
 	}
 
-	auLen, buLen := len(a.Uncles), len(b.Uncles)
-	if auLen != buLen {
-		return fmt.Errorf("uncles len mismatch: expected: %v, got: %v", auLen, buLen)
-	}
-
-	for i := 0; i < auLen; i++ {
-		compareHeaders(t, a.Uncles[i], b.Uncles[i])
-	}
-
-	awLen, bwLen := len(a.Withdrawals), len(b.Withdrawals)
-	if awLen != bwLen {
-		return fmt.Errorf("withdrawals len mismatch: expected: %v, got: %v", awLen, bwLen)
-	}
-
-	for i := 0; i < awLen; i++ {
-		compareWithdrawals(t, a.Withdrawals[i], b.Withdrawals[i])
-	}
-
-	// adLen, bdLen := len(a.deposits), len(b.deposits)
-	// if adLen != bdLen {
-	// 	return fmt.Errorf("deposits len mismatch: expected: %v, got: %v", adLen, bdLen)
-	// }
-
-	// for i := 0; i < adLen; i++ {
-	// 	compareDeposits(t, a.deposits[i], b.deposits[i])
-	// }
+	compareHeaders(t, a.Uncles, b.Uncles)
+	compareWithdrawals(t, a.Withdrawals, b.Withdrawals)
+	compareRequests(t, a.Requests, b.Requests)
 
 	return nil
 }

@@ -30,11 +30,11 @@ var (
 )
 
 type Deposit struct {
-	Pubkey                [pLen]byte
-	WithdrawalCredentials libcommon.Hash
-	Amount                uint64
-	Signature             [sLen]byte
-	Index                 uint64
+	Pubkey                [pLen]byte     `json:"pubkey"`                // public key of validator
+	WithdrawalCredentials libcommon.Hash `json:"withdrawalCredentials"` // beneficiary of the validator
+	Amount                uint64         `json:"amount"`                // deposit size in Gwei
+	Signature             [sLen]byte     `json:"signature"`             // signature over deposit msg
+	Index                 uint64         `json:"index"`                 // deposit count value
 }
 
 func (d *Deposit) requestType() byte               { return DepositRequestType }
@@ -48,6 +48,16 @@ func (d *Deposit) copy() RequestData {
 		Signature:             d.Signature,
 		Index:                 d.Index,
 	}
+}
+
+func (d *Deposit) encodingSize() (encodingSize int) {
+	encodingSize++
+	encodingSize += rlp.IntLenExcludingHead(d.Amount)
+	encodingSize++
+	encodingSize += rlp.IntLenExcludingHead(d.Index)
+
+	encodingSize += 180 // 1 + 48 + 1 + 32 + 1 + 1 + 96 (0x80 + pLen, 0x80 + wLen, 0xb8 + 2 + sLen)
+	return encodingSize
 }
 
 // field type overrides for abi upacking
