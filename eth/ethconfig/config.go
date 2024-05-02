@@ -288,7 +288,6 @@ type Sync struct {
 	LoopBlockLimit             uint
 
 	SnapshotPrune             bool
-	SnapshotsPruneStep        uint // steps for .kv/.ef files
 	SnapshotsPruneBlockNumber uint // pruning for transactions .seg files
 
 	UploadLocation   string

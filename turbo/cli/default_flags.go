@@ -29,7 +29,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.TxPoolCommitEveryFlag,
 	&PruneFlag,
 	&PruneSnapshotBlocksFlag,
-	&PruneSnapshotStepFlag,
 	&PruneHistoryFlag,
 	&PruneReceiptFlag,
 	&PruneTxIndexFlag,

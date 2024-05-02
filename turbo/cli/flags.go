@@ -78,11 +78,7 @@ var (
 	Example: --prune=htc`,
 		Value: "disabled",
 	}
-	PruneSnapshotStepFlag = cli.Uint64Flag{
-		Name:  "prune.snapshot.step",
-		Usage: "Step for pruning snapshot data.",
-		Value: 64,
-	}
+
 	PruneSnapshotBlocksFlag = cli.Uint64Flag{
 		Name:  "prune.snapshot.blocks",
 		Usage: "Step for pruning snapshot data.",
@@ -307,7 +303,6 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	prune := ctx.String(PruneFlag.Name)
 	cfg.SnapshotPrune = strings.Contains(prune, "h") // Pruning of snapshots is enabled with h.
 	cfg.SnapshotsPruneBlockNumber = ctx.Uint(PruneSnapshotBlocksFlag.Name)
-	cfg.SnapshotsPruneStep = ctx.Uint(PruneSnapshotStepFlag.Name)
 
 	cfg.StateStream = !ctx.Bool(StateStreamDisableFlag.Name)
 	if ctx.String(BodyCacheLimitFlag.Name) != "" {
