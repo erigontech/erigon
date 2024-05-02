@@ -1,9 +1,11 @@
 package vm
 
 import (
+	"fmt"
 	"math"
 
 	"github.com/ledgerwatch/erigon/zk/tx"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type BatchCounterCollector struct {
@@ -118,12 +120,24 @@ func (bcc *BatchCounterCollector) CheckForOverflow() (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	overflow := false
 	for _, v := range combined {
 		if v.remaining < 0 {
-			return true, nil
+			log.Info("[VCOUNTER] Counter overflow detected", "counter", v.name, "remaining", v.remaining, "used", v.used)
+			overflow = true
 		}
 	}
-	return false, nil
+
+	// if we have an overflow we want to log the counters for debugging purposes
+	if overflow {
+		logText := "[VCOUNTER] Counters stats"
+		for _, v := range combined {
+			logText += fmt.Sprintf(" %s: initial: %v used: %v (remaining: %v)", v.name, v.initialAmount, v.used, v.remaining)
+		}
+		log.Info(logText)
+	}
+
+	return overflow, nil
 }
 
 // CombineCollectors takes the batch level data from all transactions and combines these counters with each transactions'
