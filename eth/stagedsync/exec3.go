@@ -623,8 +623,7 @@ Loop:
 			return err
 		}
 		if b == nil {
-			ctx := dbg.ContextWithDebug(ctx, true)
-			_, _ = blockWithSenders(ctx, chainDb, applyTx, blockReader, blockNum)
+			_, _ = blockWithSenders(dbg.ContextWithDebug(ctx, true), chainDb, applyTx, blockReader, blockNum)
 
 			// TODO: panic here and see that overall process deadlock
 			return fmt.Errorf("nil block %d", blockNum)
