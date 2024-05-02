@@ -101,10 +101,11 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		payloadStatus, err := f.engine.NewPayload(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes)
 		switch payloadStatus {
 		case execution_client.PayloadStatusNotValidated:
-			// add into optimistic candidate
+			// optimistic block candidate
 			if err := f.optimisticStore.AddOptimisticCandidate(block.Block); err != nil {
 				return fmt.Errorf("failed to add block to optimistic store: %v", err)
 			}
+			// not sure if need to retry NewPayload for this block later
 		case execution_client.PayloadStatusInvalidated:
 			f.forkGraph.MarkHeaderAsInvalid(blockRoot)
 			// remove from optimistic candidate
@@ -121,18 +122,6 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		if err != nil {
 			return fmt.Errorf("newPayload failed: %v", err)
 		}
-		/*
-			if invalidBlock, err = f.engine.NewPayload(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes); err != nil {
-				if invalidBlock {
-					f.forkGraph.MarkHeaderAsInvalid(blockRoot)
-				}
-				return fmt.Errorf("newPayload failed: %v", err)
-			}
-			if invalidBlock {
-				f.forkGraph.MarkHeaderAsInvalid(blockRoot)
-				return fmt.Errorf("execution client failed")
-			}
-		*/
 	}
 	log.Trace("OnBlock: engine", "elapsed", time.Since(startEngine))
 	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation)

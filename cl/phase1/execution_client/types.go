@@ -11,7 +11,7 @@ const (
 	PayloadStatusValidated
 )
 
-func NewPayloadStatusByEngineStatus(status engine_types.EngineStatus) PayloadStatus {
+func newPayloadStatusByEngineStatus(status engine_types.EngineStatus) PayloadStatus {
 	switch status {
 	case engine_types.SyncingStatus, engine_types.AcceptedStatus:
 		return PayloadStatusNotValidated

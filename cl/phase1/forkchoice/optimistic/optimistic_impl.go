@@ -26,7 +26,7 @@ func (impl *optimisticStoreImpl) AddOptimisticCandidate(block *cltypes.BeaconBlo
 		parentRoot = block.ParentRoot
 	)
 	if _, ok := impl.optimisticRoots[root]; ok {
-		// block already in the store
+		// block already optimistically imported
 		return nil
 	}
 	blockNode := &blockNode{

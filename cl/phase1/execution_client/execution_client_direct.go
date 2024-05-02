@@ -31,33 +31,34 @@ func (cc *ExecutionClientDirect) NewPayload(ctx context.Context, payload *cltype
 
 	header, err := payload.RlpHeader(beaconParentRoot)
 	if err != nil {
+		// invalid block
 		return PayloadStatusInvalidated, err
 	}
 
 	body := payload.Body()
 	txs, err := types.DecodeTransactions(body.Transactions)
 	if err != nil {
+		// invalid block
 		return PayloadStatusInvalidated, err
 	}
 
 	if err := cc.chainRW.InsertBlockAndWait(ctx, types.NewBlockFromStorage(payload.BlockHash, header, txs, nil, body.Withdrawals, body.Requests)); err != nil {
-		return PayloadStatusNotValidated, err
+		return PayloadStatusNone, err
 	}
 
 	headHeader := cc.chainRW.CurrentHeader(ctx)
 	if headHeader == nil || header.Number.Uint64() > headHeader.Number.Uint64()+1 {
 		return PayloadStatusNotValidated, nil
-		//return false, nil // import optimistically.
 	}
 
 	status, _, _, err := cc.chainRW.ValidateChain(ctx, payload.BlockHash, payload.BlockNumber)
 	if err != nil {
-		return PayloadStatusNotValidated, err
+		return PayloadStatusNone, err
 	}
-	//invalid = status == execution.ExecutionStatus_BadBlock
+	// check status
 	switch status {
 	case execution.ExecutionStatus_BadBlock, execution.ExecutionStatus_InvalidForkchoice:
-		return PayloadStatusInvalidated, nil
+		return PayloadStatusInvalidated, fmt.Errorf("bad block")
 	case execution.ExecutionStatus_Busy, execution.ExecutionStatus_MissingSegment:
 		return PayloadStatusNotValidated, nil
 	default:

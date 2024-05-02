@@ -116,14 +116,13 @@ func (cc *ExecutionClientRpc) NewPayload(ctx context.Context, payload *cltypes.E
 	}
 	if err := cc.client.CallContext(ctx, &payloadStatus, engineMethod, args...); err != nil {
 		err = fmt.Errorf("execution Client RPC failed to retrieve the NewPayload status response, err: %w", err)
-		return PayloadStatusNotValidated, err
+		return PayloadStatusNone, err
 	}
 
-	//invalid = payloadStatus.Status == engine_types.InvalidStatus || payloadStatus.Status == engine_types.InvalidBlockHashStatus
 	if payloadStatus.Status == engine_types.AcceptedStatus {
 		log.Info("[ExecutionClientRpc] New block accepted")
 	}
-	return NewPayloadStatusByEngineStatus(payloadStatus.Status), checkPayloadStatus(payloadStatus)
+	return newPayloadStatusByEngineStatus(payloadStatus.Status), checkPayloadStatus(payloadStatus)
 }
 
 func (cc *ExecutionClientRpc) ForkChoiceUpdate(ctx context.Context, finalized libcommon.Hash, head libcommon.Hash, attributes *engine_types.PayloadAttributes) ([]byte, error) {
