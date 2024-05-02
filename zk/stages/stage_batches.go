@@ -68,6 +68,7 @@ type HermezDb interface {
 	WriteBatchGlobalExitRoot(batchNumber uint64, ger types.GerUpdate) error
 	WriteIntermediateTxStateRoot(l2BlockNumber uint64, txHash common.Hash, rpcRoot common.Hash) error
 	WriteBlockL1InfoTreeIndex(blockNumber uint64, l1Index uint64) error
+	WriteLatestUsedGer(batchNo uint64, ger common.Hash) error
 }
 
 type DatastreamClient interface {
@@ -515,6 +516,10 @@ func UnwindBatchesStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg BatchesCfg, c
 		return fmt.Errorf("delete global exit roots error: %v", err)
 	}
 
+	if err = hermezDb.TruncateLatestUsedGers(fromBatch); err != nil {
+		return fmt.Errorf("delete latest used gers error: %v", err)
+	}
+
 	if err := hermezDb.DeleteBlockGlobalExitRoots(fromBlock, toBlock); err != nil {
 		return fmt.Errorf("delete block global exit roots error: %v", err)
 	}
@@ -691,6 +696,9 @@ func writeL2Block(eriDb ErigonDb, hermezDb HermezDb, l2Block *types.FullL2Block,
 		return fmt.Errorf("write header error: %v", err)
 	}
 
+	didStoreGer := false
+	l1InfoTreeIndexReused := false
+
 	if l2Block.GlobalExitRoot != emptyHash {
 		gerWritten, err := hermezDb.CheckGlobalExitRootWritten(l2Block.GlobalExitRoot)
 		if err != nil {
@@ -705,6 +713,7 @@ func writeL2Block(eriDb ErigonDb, hermezDb HermezDb, l2Block *types.FullL2Block,
 			if err := hermezDb.WriteGlobalExitRoot(l2Block.GlobalExitRoot); err != nil {
 				return fmt.Errorf("write global exit root error: %v", err)
 			}
+			didStoreGer = true
 		}
 	}
 
@@ -741,6 +750,7 @@ func writeL2Block(eriDb ErigonDb, hermezDb HermezDb, l2Block *types.FullL2Block,
 		// this can only happen in post etrog blocks, and we need the GER/L1 block hash
 		// for the stream and also for the block info root to be correct
 		if uint64(l2Block.L1InfoTreeIndex) <= highestL1InfoTreeIndex {
+			l1InfoTreeIndexReused = true
 			if err = hermezDb.WriteBlockGlobalExitRoot(l2Block.L2BlockNumber, l2Block.GlobalExitRoot); err != nil {
 				return fmt.Errorf("write block global exit root error: %w", err)
 			}
@@ -750,6 +760,16 @@ func writeL2Block(eriDb ErigonDb, hermezDb HermezDb, l2Block *types.FullL2Block,
 			if err = hermezDb.WriteReusedL1InfoTreeIndex(l2Block.L2BlockNumber); err != nil {
 				return fmt.Errorf("write reused l1 info tree index error: %w", err)
 			}
+		}
+	}
+
+	// if we haven't reused the l1 info tree index, and we have also written the GER
+	// then we need to write the latest used GER for this batch to the table
+	// we always want the last written GER in this table as it's at the batch level, so it can and should
+	// be overwritten
+	if !l1InfoTreeIndexReused && didStoreGer {
+		if err = hermezDb.WriteLatestUsedGer(l2Block.BatchNumber, l2Block.GlobalExitRoot); err != nil {
+			return fmt.Errorf("write latest used ger error: %w", err)
 		}
 	}
 

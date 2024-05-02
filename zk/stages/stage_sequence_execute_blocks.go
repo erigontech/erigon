@@ -28,6 +28,7 @@ func handleStateForNewBlockStarting(
 	hermezDb *hermez_db.HermezDb,
 	ibs *state.IntraBlockState,
 	blockNumber uint64,
+	batchNumber uint64,
 	timestamp uint64,
 	stateRoot *common.Hash,
 	l1info *zktypes.L1InfoTreeUpdate,
@@ -54,7 +55,9 @@ func handleStateForNewBlockStarting(
 			if l1BlockHash == (common.Hash{}) {
 				// not in the contract so let's write it!
 				ibs.WriteGerManagerL1BlockHash(l1info.GER, l1info.ParentHash)
-
+				if err := hermezDb.WriteLatestUsedGer(batchNumber, l1info.GER); err != nil {
+					return err
+				}
 			}
 		}
 	}

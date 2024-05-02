@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/ledgerwatch/erigon/zk/hermez_db"
 )
 
 func UnwindSequenceExecutionStage(u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, ctx context.Context, cfg SequenceBlockCfg, initialCycle bool) (err error) {
@@ -181,6 +182,16 @@ func unwindExecutionStage(u *stagedsync.UnwindState, s *stagedsync.StageState, t
 		if err != nil {
 			return err
 		}
+	}
+
+	fromBlock := u.UnwindPoint
+	hermezDb := hermez_db.NewHermezDb(tx)
+	fromBatch, err := hermezDb.GetBatchNoByL2Block(fromBlock)
+	if err != nil {
+		return fmt.Errorf("get fromBatch no by l2 block error: %v", err)
+	}
+	if err = hermezDb.TruncateLatestUsedGers(fromBatch); err != nil {
+		return fmt.Errorf("truncate latest used gers error: %v", err)
 	}
 
 	return nil

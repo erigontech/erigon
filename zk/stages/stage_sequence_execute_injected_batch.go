@@ -16,6 +16,7 @@ import (
 const (
 	injectedBatchNumber      = 1
 	injectedBatchBlockNumber = 1
+	injectedBatchBatchNumber = 1
 )
 
 func processInjectedInitialBatch(
@@ -44,7 +45,17 @@ func processInjectedInitialBatch(
 	header.Time = injected.Timestamp
 
 	parentRoot := parentBlock.Root()
-	if err = handleStateForNewBlockStarting(cfg.chainConfig, sdb.hermezDb, ibs, injectedBatchBlockNumber, injected.Timestamp, &parentRoot, fakeL1TreeUpdate, true); err != nil {
+	if err = handleStateForNewBlockStarting(
+		cfg.chainConfig,
+		sdb.hermezDb,
+		ibs,
+		injectedBatchBlockNumber,
+		injectedBatchBatchNumber,
+		injected.Timestamp,
+		&parentRoot,
+		fakeL1TreeUpdate,
+		true,
+	); err != nil {
 		return err
 	}
 

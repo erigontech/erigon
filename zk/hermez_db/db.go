@@ -36,6 +36,7 @@ const BATCH_COUNTERS = "hermez_batch_counters"                         // batch 
 const L1_BATCH_DATA = "l1_batch_data"                                  // batch number -> l1 batch data from transaction call data
 const L1_INFO_TREE_HIGHEST_BLOCK = "l1_info_tree_highest_block"        // highest l1 block number found with L1 info tree updates
 const REUSED_L1_INFO_TREE_INDEX = "reused_l1_info_tree_index"          // block number => const 1
+const LATEST_USED_GER = "latest_used_ger"                              // batch number -> GER latest used GER
 
 type HermezDb struct {
 	tx kv.RwTx
@@ -84,6 +85,7 @@ func CreateHermezBuckets(tx kv.RwTx) error {
 		L1_BATCH_DATA,
 		L1_INFO_TREE_HIGHEST_BLOCK,
 		REUSED_L1_INFO_TREE_INDEX,
+		LATEST_USED_GER,
 	}
 	for _, t := range tables {
 		if err := tx.CreateBucket(t); err != nil {
@@ -1067,4 +1069,43 @@ func (db *HermezDbReader) GetL1InfoTreeHighestBlock() (uint64, error) {
 		return 0, err
 	}
 	return BytesToUint64(data), nil
+}
+
+func (db *HermezDb) WriteLatestUsedGer(batchNo uint64, ger common.Hash) error {
+	batchBytes := Uint64ToBytes(batchNo)
+	return db.tx.Put(LATEST_USED_GER, batchBytes, ger.Bytes())
+}
+
+func (db *HermezDbReader) GetLatestUsedGer() (uint64, common.Hash, error) {
+	c, err := db.tx.Cursor(LATEST_USED_GER)
+	if err != nil {
+		return 0, common.Hash{}, err
+	}
+
+	k, v, err := c.Last()
+	if err != nil {
+		return 0, common.Hash{}, err
+	}
+
+	batchNo := BytesToUint64(k)
+	ger := common.BytesToHash(v)
+
+	return batchNo, ger, nil
+}
+
+func (db *HermezDb) TruncateLatestUsedGers(fromBatch uint64) error {
+	latestBatch, _, err := db.GetLatestUsedGer()
+	if err != nil {
+		return err
+	}
+
+	for i := fromBatch; i <= latestBatch; i++ {
+		err := db.tx.Delete(LATEST_USED_GER, Uint64ToBytes(i))
+		if err != nil {
+			return err
+		}
+
+	}
+
+	return nil
 }

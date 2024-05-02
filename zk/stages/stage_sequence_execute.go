@@ -190,7 +190,17 @@ func SpawnSequencingStage(
 		ibs := state.New(sdb.stateReader)
 
 		parentRoot := parentBlock.Root()
-		if err = handleStateForNewBlockStarting(cfg.chainConfig, sdb.hermezDb, ibs, thisBlockNumber, header.Time, &parentRoot, l1TreeUpdate, shouldWriteGerToContract); err != nil {
+		if err = handleStateForNewBlockStarting(
+			cfg.chainConfig,
+			sdb.hermezDb,
+			ibs,
+			thisBlockNumber,
+			thisBatch,
+			header.Time,
+			&parentRoot,
+			l1TreeUpdate,
+			shouldWriteGerToContract,
+		); err != nil {
 			return err
 		}
 

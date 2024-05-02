@@ -52,6 +52,7 @@ type ZkEvmAPI interface {
 	GetBlockRangeWitness(ctx context.Context, startBlockNrOrHash rpc.BlockNumberOrHash, endBlockNrOrHash rpc.BlockNumberOrHash, mode *WitnessMode, debug *bool) (hexutility.Bytes, error)
 	GetBatchWitness(ctx context.Context, batchNumber uint64, mode *WitnessMode) (hexutility.Bytes, error)
 	GetProverInput(ctx context.Context, batchNumber uint64, mode *WitnessMode, debug *bool) (*legacy_executor_verifier.RpcPayload, error)
+	GetLatestGlobalExitRoot(ctx context.Context) (common.Hash, error)
 }
 
 // APIImpl is implementation of the ZkEvmAPI interface based on remote Db access
@@ -504,6 +505,22 @@ func (api *ZkEvmAPIImpl) GetProverInput(ctx context.Context, batchNumber uint64,
 		TimestampLimit:    timestampLimit,
 		ForcedBlockhashL1: "",
 	}, nil
+}
+
+func (api *ZkEvmAPIImpl) GetLatestGlobalExitRoot(ctx context.Context) (common.Hash, error) {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	defer tx.Rollback()
+
+	hermezDb := hermez_db.NewHermezDbReader(tx)
+	_, ger, err := hermezDb.GetLatestUsedGer()
+	if err != nil {
+		return common.Hash{}, err
+	}
+
+	return ger, nil
 }
 
 func getLastBlockInBatchNumber(tx kv.Tx, batchNumber uint64) (uint64, error) {
