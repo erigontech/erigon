@@ -132,7 +132,7 @@ func (e *Executor) Verify(p *Payload, request *VerifierRequest, oldStateRoot com
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	log.Debug("Sending request to grpc server", "grpcUrl", e.grpcUrl)
+	log.Info("Sending request to grpc server", "grpcUrl", e.grpcUrl, "ourRoot", request.StateRoot, "oldRoot", oldStateRoot, "batch", request.BatchNumber)
 
 	size := 1024 * 1024 * 256 // 256mb maximum size - hack for now until trimmed witness is proved off
 	log.Info("Sending executor request", "grpcUrl", e.grpcUrl, "batch", request.BatchNumber)
