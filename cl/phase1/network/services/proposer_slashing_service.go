@@ -4,11 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/fork"
 	st "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 	"github.com/ledgerwatch/erigon/cl/pool"
@@ -92,11 +90,11 @@ func (s *proposerSlashingService) ProcessMessage(ctx context.Context, subnet *ui
 			return fmt.Errorf("unable to get domain: %v", err)
 		}
 		pk := proposer.PublicKey()
-		signingRoot, err := fork.ComputeSigningRoot(signedHeader, domain)
+		signingRoot, err := computeSigningRoot(signedHeader, domain)
 		if err != nil {
 			return fmt.Errorf("unable to compute signing root: %v", err)
 		}
-		valid, err := bls.Verify(signedHeader.Signature[:], signingRoot[:], pk[:])
+		valid, err := blsVerify(signedHeader.Signature[:], signingRoot[:], pk[:])
 		if err != nil {
 			return fmt.Errorf("unable to verify signature: %v", err)
 		}
