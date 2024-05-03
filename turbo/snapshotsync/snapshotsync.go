@@ -201,7 +201,7 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 
 // getMinimumBlocksToDownload - get the minimum number of blocks to download
 func getMinimumBlocksToDownload(tx kv.Tx, blockReader services.FullBlockReader, minStep uint64) (uint64, error) {
-	frozenBlocks := blockReader.FrozenBlocks()
+	frozenBlocks := blockReader.Snapshots().SegmentsMax()
 	minToDownload := uint64(math.MaxUint64)
 	stateTxNum := minStep * config3.HistoryV3AggregationStep
 	if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
