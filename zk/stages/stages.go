@@ -203,23 +203,6 @@ func SequencerZkStages(
 				return stages.PruneTxLookup(p, tx, txLookup, ctx, firstCycle)
 			},
 		},
-		/*
-		  TODO: verify batches stage -- real executor that verifies batches
-		  if it fails, we need to unwind everything up until before the bad batch
-		*/
-		{
-			ID:          stages2.DataStream,
-			Description: "Update the data stream with missing details",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return SpawnStageDataStreamCatchup(s, ctx, tx, dataStreamCatchupCfg)
-			},
-			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
-				return nil
-			},
-			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
-				return nil
-			},
-		},
 		{
 			ID:          stages2.Finish,
 			Description: "Final: update current block for the RPC API",

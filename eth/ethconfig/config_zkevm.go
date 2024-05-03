@@ -60,3 +60,7 @@ var DefaultZkConfig = &Zk{}
 func (c *Zk) ShouldCountersBeUnlimited() bool {
 	return c.DisableVirtualCounters && !c.ExecutorStrictMode && len(c.ExecutorUrls) != 0
 }
+
+func (c *Zk) HasExecutors() bool {
+	return len(c.ExecutorUrls) > 0 && c.ExecutorUrls[0] != ""
+}

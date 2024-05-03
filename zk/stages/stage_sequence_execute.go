@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
 	"github.com/ledgerwatch/erigon/zk/utils"
+	"github.com/ledgerwatch/erigon/zk/datastream/server"
 )
 
 func SpawnSequencingStage(
@@ -77,6 +78,11 @@ func SpawnSequencingStage(
 			return err
 		}
 
+		srv := server.NewDataStreamServer(cfg.stream, cfg.chainConfig.ChainID.Uint64(), server.StandardOperationMode)
+		if err = server.WriteBlocksToStream(tx, sdb.hermezDb.HermezDbReader, srv, cfg.stream, 1, 1, logPrefix); err != nil {
+			return err
+		}
+
 		if freshTx {
 			if err = tx.Commit(); err != nil {
 				return err
@@ -131,9 +137,10 @@ func SpawnSequencingStage(
 
 	log.Info(fmt.Sprintf("[%s] Starting batch %d...", logPrefix, thisBatch))
 
-	for bn := executionAt; runLoopBlocks; bn++ {
+	var blockNumber uint64
+	for blockNumber = executionAt; runLoopBlocks; blockNumber++ {
 		if l1Recovery {
-			decodedBlocksIndex := bn - executionAt
+			decodedBlocksIndex := blockNumber - executionAt
 			if decodedBlocksIndex == decodedBlocksSize {
 				runLoopBlocks = false
 				break
@@ -145,16 +152,16 @@ func SpawnSequencingStage(
 			blockTransactions = decodedBlock.Transactions
 		}
 
-		log.Info(fmt.Sprintf("[%s] Starting block %d...", logPrefix, bn+1))
+		log.Info(fmt.Sprintf("[%s] Starting block %d...", logPrefix, blockNumber+1))
 
-		reRunBlockAfterOverflow := bn == lastStartedBn
-		lastStartedBn = bn
+		reRunBlockAfterOverflow := blockNumber == lastStartedBn
+		lastStartedBn = blockNumber
 
 		if !reRunBlockAfterOverflow {
 			clonedBatchCounters = batchCounters.Clone()
 			addedTransactions = []types.Transaction{}
 			addedReceipts = []*types.Receipt{}
-			header, parentBlock, err = prepareHeader(tx, bn, deltaTimestamp, forkId, coinbase)
+			header, parentBlock, err = prepareHeader(tx, blockNumber, deltaTimestamp, forkId, coinbase)
 			if err != nil {
 				return err
 			}
@@ -315,8 +322,8 @@ func SpawnSequencingStage(
 				}
 			}
 			if !l1Recovery && overflow {
-				bn--     // in order to trigger reRunBlockAfterOverflow check
-				continue // lets execute the same block again
+				blockNumber-- // in order to trigger reRunBlockAfterOverflow check
+				continue      // lets execute the same block again
 			}
 		} else {
 			for idx, transaction := range addedTransactions {
@@ -354,6 +361,15 @@ func SpawnSequencingStage(
 	err = sdb.hermezDb.WriteBatchCounters(thisBatch, counters.UsedAsMap())
 	if err != nil {
 		return err
+	}
+
+	// if we do not have an executors in the zk config then we can populate the stream immediately with the latest
+	// batch information
+	if !cfg.zk.HasExecutors() {
+		srv := server.NewDataStreamServer(cfg.stream, cfg.chainConfig.ChainID.Uint64(), server.StandardOperationMode)
+		if err = server.WriteBlocksToStream(tx, sdb.hermezDb.HermezDbReader, srv, cfg.stream, executionAt+1, blockNumber, logPrefix); err != nil {
+			return err
+		}
 	}
 
 	log.Info(fmt.Sprintf("[%s] Finish batch %d...", logPrefix, thisBatch))

@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"sort"
 	"time"
+	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 )
 
 const (
@@ -52,11 +53,10 @@ type WitnessGenerator interface {
 }
 
 type LegacyExecutorVerifier struct {
-	db                 kv.RwDB
-	cfg                ethconfig.Zk
-	executors          []ILegacyExecutor
-	executorNumberLock *sync.Mutex
-	executorNumber     int
+	db             kv.RwDB
+	cfg            ethconfig.Zk
+	executors      []ILegacyExecutor
+	executorNumber int
 
 	working       *sync.Mutex
 	openRequests  []*VerifierRequest
@@ -66,6 +66,7 @@ type LegacyExecutorVerifier struct {
 	quit          chan struct{}
 
 	streamServer     *server.DataStreamServer
+	stream           *datastreamer.StreamServer
 	witnessGenerator WitnessGenerator
 	l1Syncer         *syncer.L1Syncer
 	executorGrpc     executor.ExecutorServiceClient
@@ -78,29 +79,30 @@ func NewLegacyExecutorVerifier(
 	db kv.RwDB,
 	witnessGenerator WitnessGenerator,
 	l1Syncer *syncer.L1Syncer,
+	stream *datastreamer.StreamServer,
 ) *LegacyExecutorVerifier {
 	executorLocks := make([]*sync.Mutex, len(executors))
 	for i := range executorLocks {
 		executorLocks[i] = &sync.Mutex{}
 	}
 
-	streamServer := server.NewDataStreamServer(nil, chainCfg.ChainID.Uint64(), server.ExecutorOperationMode)
+	streamServer := server.NewDataStreamServer(stream, chainCfg.ChainID.Uint64(), server.ExecutorOperationMode)
 
 	verifier := &LegacyExecutorVerifier{
-		cfg:                cfg,
-		executors:          executors,
-		db:                 db,
-		executorNumberLock: &sync.Mutex{},
-		executorNumber:     0,
-		working:            &sync.Mutex{},
-		openRequests:       make([]*VerifierRequest, 0),
-		requestsMap:        make(map[uint64]uint64),
-		responses:          make([]*VerifierResponse, 0),
-		responseMutex:      &sync.Mutex{},
-		quit:               make(chan struct{}),
-		streamServer:       streamServer,
-		witnessGenerator:   witnessGenerator,
-		l1Syncer:           l1Syncer,
+		cfg:              cfg,
+		executors:        executors,
+		db:               db,
+		executorNumber:   0,
+		working:          &sync.Mutex{},
+		openRequests:     make([]*VerifierRequest, 0),
+		requestsMap:      make(map[uint64]uint64),
+		responses:        make([]*VerifierResponse, 0),
+		responseMutex:    &sync.Mutex{},
+		quit:             make(chan struct{}),
+		streamServer:     streamServer,
+		stream:           stream,
+		witnessGenerator: witnessGenerator,
+		l1Syncer:         l1Syncer,
 	}
 
 	return verifier
@@ -162,9 +164,6 @@ func (v *LegacyExecutorVerifier) processOpenRequests() {
 }
 
 func (v *LegacyExecutorVerifier) getNextOnlineExecutor() ILegacyExecutor {
-	v.executorNumberLock.Lock()
-	defer v.executorNumberLock.Unlock()
-
 	var exec ILegacyExecutor
 
 	// attempt to find an executor that is online amongst them all
@@ -270,6 +269,13 @@ func (v *LegacyExecutorVerifier) handleRequest(ctx context.Context, request *Ver
 	ok, err := execer.Verify(payload, request, previousBlock.Root())
 	if err != nil {
 		return false, err
+	}
+
+	if ok {
+		// update the datastream now that we know the batch is OK
+		if err = server.WriteBlocksToStream(tx, hermezDb, v.streamServer, v.stream, blocks[0], blocks[len(blocks)-1], "verifier"); err != nil {
+			return true, err
+		}
 	}
 
 	response := &VerifierResponse{

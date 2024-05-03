@@ -65,7 +65,7 @@ func SpawnSequencerExecutorVerifyStage(
 
 	// we need to get the batch number for the latest block, so we can search for new batches to send for
 	// verification
-	intersBatch, err := hermezDb.GetBatchNoByL2Block(executeProgress)
+	latestBatch, err := hermezDb.GetBatchNoByL2Block(executeProgress)
 	if err != nil {
 		return err
 	}
@@ -75,7 +75,7 @@ func SpawnSequencerExecutorVerifyStage(
 	// this mode of operation
 	canVerify := cfg.verifier.HasExecutors()
 	if !canVerify {
-		if err = stages.SaveStageProgress(tx, stages.SequenceExecutorVerify, intersBatch); err != nil {
+		if err = stages.SaveStageProgress(tx, stages.SequenceExecutorVerify, latestBatch); err != nil {
 			return err
 		}
 		if freshTx {
@@ -108,10 +108,21 @@ func SpawnSequencerExecutorVerifyStage(
 			// todo [zkevm]!
 
 			// todo: remove any witnesses for batches higher than the one failing (including the failing one)
+
+			// for now just return early and do not update any stage progress, safest option for now
+			log.Error("Batch failed verification, skipping updating executor verify progress", "batch", response.BatchNumber)
+			break
 		}
 
 		// all good so just update the stage progress for now
 		if err = stages.SaveStageProgress(tx, stages.SequenceExecutorVerify, response.BatchNumber); err != nil {
+			return err
+		}
+
+		// we know that if the batch has been marked as OK we can update the datastream progress to match
+		// as the verifier will have handled writing to the stream
+		highestBlock, err := hermezDb.GetHighestBlockInBatch(response.BatchNumber)
+		if err = stages.SaveStageProgress(tx, stages.DataStream, highestBlock); err != nil {
 			return err
 		}
 
@@ -128,7 +139,7 @@ func SpawnSequencerExecutorVerifyStage(
 	}
 
 	// send off the new batches to the verifier to be processed
-	for batch := progress + 1; batch <= intersBatch; batch++ {
+	for batch := progress + 1; batch <= latestBatch; batch++ {
 		// we do not need to verify batch 1 as this is the injected batch so just updated progress and move on
 		if batch == injectedBatchNumber {
 			if err = stages.SaveStageProgress(tx, stages.SequenceExecutorVerify, injectedBatchNumber); err != nil {

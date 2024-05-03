@@ -33,6 +33,7 @@ import (
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
 	"github.com/ledgerwatch/erigon/zk/txpool"
 	zktypes "github.com/ledgerwatch/erigon/zk/types"
+	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 )
 
 const (
@@ -75,6 +76,7 @@ type SequenceBlockCfg struct {
 	syncCfg   ethconfig.Sync
 	genesis   *types.Genesis
 	agg       *libstate.AggregatorV3
+	stream    *datastreamer.StreamServer
 	zk        *ethconfig.Zk
 
 	txPool   *txpool.TxPool
@@ -99,6 +101,7 @@ func StageSequenceBlocksCfg(
 	genesis *types.Genesis,
 	syncCfg ethconfig.Sync,
 	agg *libstate.AggregatorV3,
+	stream *datastreamer.StreamServer,
 	zk *ethconfig.Zk,
 
 	txPool *txpool.TxPool,
@@ -121,6 +124,7 @@ func StageSequenceBlocksCfg(
 		historyV3:     historyV3,
 		syncCfg:       syncCfg,
 		agg:           agg,
+		stream:        stream,
 		zk:            zk,
 		txPool:        txPool,
 		txPoolDb:      txPoolDb,

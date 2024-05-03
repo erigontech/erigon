@@ -290,7 +290,7 @@ LOOP:
 				return fmt.Errorf("writeL2Block error: %v", err)
 			}
 
-			// make sure to capture the l1 info tree index changes, so we can store progress
+			// make sure to capture the l1 info tree index changes so we can store progress
 			if uint64(l2Block.L1InfoTreeIndex) > highestL1InfoTreeIndex {
 				highestL1InfoTreeIndex = uint64(l2Block.L1InfoTreeIndex)
 			}
