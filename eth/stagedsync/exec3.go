@@ -618,7 +618,7 @@ Loop:
 		inputBlockNum.Store(blockNum)
 		doms.SetBlockNum(blockNum)
 
-		b, err = blockWithSenders(chainDb, applyTx, blockReader, blockNum)
+		b, err = blockWithSenders(ctx, chainDb, applyTx, blockReader, blockNum)
 		if err != nil {
 			return err
 		}
@@ -1146,15 +1146,15 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	return false, nil
 }
 
-func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, blockNum uint64) (b *types.Block, err error) {
+func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, blockNum uint64) (b *types.Block, err error) {
 	if tx == nil {
-		tx, err = db.BeginRo(context.Background())
+		tx, err = db.BeginRo(ctx)
 		if err != nil {
 			return nil, err
 		}
 		defer tx.Rollback()
 	}
-	b, err = blockReader.BlockByNumber(context.Background(), tx, blockNum)
+	b, err = blockReader.BlockByNumber(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -1454,7 +1454,7 @@ func reconstituteStep(last bool,
 
 		for bn := startBlockNum; bn <= endBlockNum; bn++ {
 			t = time.Now()
-			b, err = blockWithSenders(chainDb, nil, blockReader, bn)
+			b, err = blockWithSenders(ctx, chainDb, nil, blockReader, bn)
 			if err != nil {
 				return err
 			}
