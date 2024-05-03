@@ -546,7 +546,6 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 			continue
 		}
 		oneFileGotRemoved = true
-		cfg.blockReader.Snapshots().Close()
 		if err := os.Remove(filepath.Join(cfg.dirs.Snap, file)); err != nil {
 			return err
 		}
@@ -576,7 +575,6 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 			continue
 		}
 		oneFileGotRemoved = true
-		cfg.agg.Close()
 		if err := os.Remove(filepath.Join(cfg.dirs.Snap, file)); err != nil {
 			return err
 		}
