@@ -523,9 +523,15 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 
 	headNumber := cfg.blockReader.FrozenBlocks()
 
+	pruneAmount := uint64(cfg.syncConfig.SnapshotsPruneBlockNumber)
+	if pruneAmount < snaptype.Erigon2MergeLimit {
+		pruneAmount = snaptype.Erigon2MergeLimit
+	}
+	pruneAmount += pruneAmount % snaptype.Erigon2MergeLimit
+
 	minBlockNumberToKeep := uint64(0)
-	if headNumber > uint64(cfg.syncConfig.SnapshotsPruneBlockNumber) {
-		minBlockNumberToKeep = headNumber - uint64(cfg.syncConfig.SnapshotsPruneBlockNumber)
+	if headNumber > pruneAmount {
+		minBlockNumberToKeep = headNumber - pruneAmount
 	}
 	// Check min tx num for the min block number to keep
 	minTxNum, err := rawdbv3.TxNums.Min(tx, minBlockNumberToKeep)
