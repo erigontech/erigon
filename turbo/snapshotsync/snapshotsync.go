@@ -118,6 +118,7 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 	}
 	stepPrune = adjustStepPrune(stepPrune)
 	blockPrune = adjustBlockPrune(blockPrune, minBlockToDownload)
+	fmt.Println("stepPrune", stepPrune, "blockPrune", blockPrune, "minBlockToDownload", minBlockToDownload)
 	snapshotKindToNames := make(map[string][]snapshotFileData)
 	for _, p := range preverified {
 		name := p.Name
@@ -189,11 +190,11 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 
 			if snapshot.stepBased {
 				delete(blackList, snapshot.name)
-				prunedDistance += uint64(snapshot.to - snapshot.from)
-			} else {
-				delete(blackList, snapshot.name)
 				prunedDistance += snapshot.to - snapshot.from
+				continue
 			}
+			delete(blackList, snapshot.name)
+			prunedDistance += snapshot.to - snapshot.from
 		}
 	}
 	return blackList, nil
