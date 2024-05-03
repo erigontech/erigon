@@ -29,6 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"os"
+	"github.com/ledgerwatch/erigon/zk/zkchainconfig"
 )
 
 //go:embed chainspecs
@@ -224,6 +225,10 @@ func DynamicChainConfig(ch string) *chain.Config {
 	if err != nil {
 		panic(fmt.Sprintf("could not parse chainspec for %s: %v", filename, err))
 	}
+
+	chainId := spec.ChainID.Uint64()
+	zkchainconfig.SetDynamicChainDetails(chainId, spec.ChainName)
+
 	return spec
 }
 
