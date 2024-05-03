@@ -200,9 +200,10 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 }
 
 // getMinimumBlocksToDownload - get the minimum number of blocks to download
-func getMinimumBlocksToDownload(tx kv.Tx, blockReader services.FullBlockReader, minStep uint64) (uint64, error) {
+func getMinimumBlocksToDownload(tx kv.Tx, blockReader services.FullBlockReader, minStep uint64) (uint64, uint64, error) {
 	frozenBlocks := blockReader.Snapshots().SegmentsMax()
 	minToDownload := uint64(math.MaxUint64)
+	minStepToDownload := uint64(math.MaxUint64)
 	stateTxNum := minStep * config3.HistoryV3AggregationStep
 	if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
 		if stateTxNum <= baseTxNum { // only cosnider the block if it
@@ -210,13 +211,15 @@ func getMinimumBlocksToDownload(tx kv.Tx, blockReader services.FullBlockReader, 
 		}
 		newMinToDownload := frozenBlocks - blockNum
 		if newMinToDownload < minToDownload {
+			minStepToDownload = (baseTxNum / config3.HistoryV3AggregationStep) + 1
 			minToDownload = newMinToDownload
 		}
 		return nil
 	}); err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	return minToDownload, nil
+	// return the minimum number of blocks to download and the minimum step.
+	return minToDownload, minStepToDownload, nil
 }
 
 func getMinStep(preverified snapcfg.Preverified) (uint64, error) {
@@ -282,12 +285,12 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, histV
 		if err != nil {
 			return err
 		}
-		minBlockAmountToDownload, err := getMinimumBlocksToDownload(tx, blockReader, minStep)
+		minBlockAmountToDownload, minStepToDownload, err := getMinimumBlocksToDownload(tx, blockReader, minStep)
 		if err != nil {
 			return err
 		}
-		fmt.Println(minBlockAmountToDownload, minStep)
-		blackListForPruning, err = buildBlackListForPruning(pruneMode, 1, uint(minBlockAmountToDownload), blockPrune, preverifiedBlockSnapshots)
+		fmt.Println(minBlockAmountToDownload, minStepToDownload, minStep)
+		blackListForPruning, err = buildBlackListForPruning(pruneMode, uint(minStepToDownload), uint(minBlockAmountToDownload), blockPrune, preverifiedBlockSnapshots)
 		if err != nil {
 			return err
 		}
