@@ -219,7 +219,6 @@ func getMinimumBlocksToDownload(tx kv.Tx, blockReader services.FullBlockReader, 
 		}
 		newMinToDownload := frozenBlocks - blockNum
 		if newMinToDownload < minToDownload {
-			fmt.Println(newMinToDownload)
 			minToDownload = newMinToDownload
 		}
 		return nil

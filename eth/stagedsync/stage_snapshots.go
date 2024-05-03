@@ -521,6 +521,8 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 		}
 	}
 
+	// Prune snapshots if necessary (remove .segs or idx files appropriatelly)
+
 	headNumber := cfg.blockReader.FrozenBlocks()
 
 	pruneAmount := uint64(cfg.syncConfig.SnapshotsPruneBlockNumber)
@@ -567,7 +569,7 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 			continue
 		}
 		oneFileGotRemoved = true
-		if err := os.Remove(filepath.Join(cfg.dirs.Snap, file)); err != nil {
+		if err := removeBlockSnapshot(cfg.dirs.Snap, file); err != nil {
 			return err
 		}
 	}
@@ -611,6 +613,23 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 		}
 	}
 
+	return nil
+}
+
+// removeBlockSnapshot removes all files related to the given block snapshot
+func removeBlockSnapshot(dir, name string) error {
+	prefix := strings.TrimSuffix(name, filepath.Ext(name))
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, file := range files {
+		if strings.HasPrefix(file.Name(), prefix) {
+			if err := os.Remove(filepath.Join(dir, file.Name())); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
