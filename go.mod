@@ -59,6 +59,7 @@ require (
 	github.com/huandu/xstrings v1.4.0
 	github.com/huin/goupnp v1.2.0
 	github.com/jackpal/go-nat-pmp v1.0.2
+	github.com/jedib0t/go-pretty/v6 v6.5.8
 	github.com/json-iterator/go v1.1.12
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/klauspost/compress v1.17.3
@@ -181,14 +182,11 @@ require (
 	github.com/ipfs/go-cid v0.4.1 // indirect
 	github.com/ipfs/go-log/v2 v2.5.1 // indirect
 	github.com/jbenet/go-temp-err-catcher v0.1.0 // indirect
-	github.com/jedib0t/go-pretty/v6 v6.5.8 // indirect
-	github.com/kataras/tablewriter v0.0.0-20180708051242-e063d29b7c23 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.7 // indirect
 	github.com/koron/go-ssdp v0.0.4 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240430044856-b76bb4892492 // indirect
-	github.com/lensesio/tableprinter v0.0.0-20201125135848-89e81fc956e7 // indirect
 	github.com/libp2p/go-buffer-pool v0.1.0 // indirect
 	github.com/libp2p/go-cidranger v1.1.0 // indirect
 	github.com/libp2p/go-flow-metrics v0.1.0 // indirect
