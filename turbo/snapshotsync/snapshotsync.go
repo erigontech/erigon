@@ -267,6 +267,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, histV
 		if cc.Bor != nil {
 			borSnapshots.Close()
 		}
+		return nil
 	}
 
 	//Corner cases:
@@ -278,15 +279,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, histV
 	snapCfg := snapcfg.KnownCfg(cc.ChainName)
 	preverifiedBlockSnapshots := snapCfg.Preverified
 	downloadRequest := make([]services.DownloadRequest, 0, len(preverifiedBlockSnapshots))
-	minStep, err := getMinStep(preverifiedBlockSnapshots)
-	if err != nil {
-		return err
-	}
-	minBlockAmountToDownload, minStepToDownload, err := getMinimumBlocksToDownload(tx, blockReader, minStep)
-	if err != nil {
-		return err
-	}
-	fmt.Println("minBlockAmountToDownload", minBlockAmountToDownload, "minStepToDownload", minStepToDownload, "blockPrune", blockPrune, "preverifiedBlockSnapshots", preverifiedBlockSnapshots)
 
 	blackListForPruning := make(map[string]struct{})
 	if !headerchain && pruneMode {
@@ -303,6 +295,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, histV
 		if err != nil {
 			return err
 		}
+		fmt.Println(blackListForPruning)
 	}
 
 	// build all download requests
