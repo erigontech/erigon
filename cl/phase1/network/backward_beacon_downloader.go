@@ -201,6 +201,21 @@ Loop:
 		if err != nil {
 			return err
 		}
+		if b.engine != nil && b.engine.SupportInsertion() {
+			blockHash, err := beacon_indicies.ReadExecutionBlockHash(tx, b.expectedRoot)
+			if err != nil {
+				return err
+			}
+			if blockHash != (libcommon.Hash{}) {
+				has, err := b.engine.HasBlock(ctx, blockHash)
+				if err != nil {
+					return err
+				}
+				if !has {
+					break
+				}
+			}
+		}
 		// Some cleaning of possible ugly restarts
 		newSlotToDownload, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, b.expectedRoot)
 		if err != nil {
