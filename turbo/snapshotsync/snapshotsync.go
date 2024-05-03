@@ -205,7 +205,7 @@ func getMinimumBlocksToDownload(tx kv.Tx, blockReader services.FullBlockReader, 
 	minToDownload := uint64(math.MaxUint64)
 	stateTxNum := minStep * config3.HistoryV3AggregationStep
 	if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
-		fmt.Println(blockNum, stateTxNum, baseTxNum, txAmount)
+		fmt.Println(blockNum, stateTxNum, baseTxNum, txAmount, minToDownload, stateTxNum > baseTxNum)
 		if stateTxNum > baseTxNum { // only cosnider the block if it
 			return nil
 		}
