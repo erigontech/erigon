@@ -15,20 +15,11 @@ import (
 //
 //go:generate mockgen -typed=true -destination=./heimdall_mock.go -package=heimdall . Heimdall
 type Heimdall interface {
-	LastCheckpointId(ctx context.Context) (CheckpointId, bool, error)
-	LastMilestoneId(ctx context.Context) (MilestoneId, bool, error)
-	LastSpanId(ctx context.Context) (SpanId, bool, error)
 	FetchLatestSpan(ctx context.Context) (*Span, error)
-
-	FetchCheckpoints(ctx context.Context, start CheckpointId, end CheckpointId) ([]*Checkpoint, error)
-	FetchMilestones(ctx context.Context, start MilestoneId, end MilestoneId) ([]*Milestone, error)
-	FetchSpans(ctx context.Context, start SpanId, end SpanId) ([]*Span, error)
 
 	FetchCheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
 	FetchMilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
-	FetchSpansFromBlock(ctx context.Context, startBlock uint64) ([]*Span, error)
 
-	OnCheckpointEvent(ctx context.Context, callback func(*Checkpoint)) error
 	OnMilestoneEvent(ctx context.Context, callback func(*Milestone)) error
 	OnSpanEvent(ctx context.Context, callback func(*Span)) error
 }
@@ -36,7 +27,6 @@ type Heimdall interface {
 // ErrIncompleteMilestoneRange happens when FetchMilestones is called with an old start block because old milestones are evicted
 var ErrIncompleteMilestoneRange = errors.New("milestone range doesn't contain the start block")
 var ErrIncompleteCheckpointRange = errors.New("checkpoint range doesn't contain the start block")
-var ErrIncompleteSpanRange = errors.New("span range doesn't contain the start block")
 
 const checkpointsBatchFetchThreshold = 100
 
@@ -68,18 +58,6 @@ type heimdall struct {
 	pollDelay time.Duration
 	logger    log.Logger
 	store     Store
-}
-
-func (h *heimdall) LastCheckpointId(ctx context.Context) (CheckpointId, bool, error) {
-	// todo get this from store if its likely not changed (need timeout)
-
-	count, err := h.client.FetchCheckpointCount(ctx)
-
-	if err != nil {
-		return 0, false, err
-	}
-
-	return CheckpointId(count), true, nil
 }
 
 func (h *heimdall) FetchCheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
@@ -361,43 +339,6 @@ func (h *heimdall) FetchLatestSpan(ctx context.Context) (*Span, error) {
 	return h.client.FetchLatestSpan(ctx)
 }
 
-func (h *heimdall) FetchSpansFromBlock(ctx context.Context, startBlock uint64) ([]*Span, error) {
-	last, _, err := h.LastSpanId(ctx)
-
-	if err != nil {
-		return nil, err
-	}
-
-	var spans []*Span
-
-	for i := last; i >= 1; i-- {
-		m, err := h.FetchSpans(ctx, i, i)
-		if err != nil {
-			if errors.Is(err, ErrNotInSpanList) {
-				common.SliceReverse(spans)
-				return spans, ErrIncompleteSpanRange
-			}
-			return nil, err
-		}
-
-		cmpResult := m[0].CmpRange(startBlock)
-		// the start block is past the last span
-		if cmpResult > 0 {
-			return nil, nil
-		}
-
-		spans = append(spans, m...)
-
-		// the checkpoint contains the start block
-		if cmpResult == 0 {
-			break
-		}
-	}
-
-	common.SliceReverse(spans)
-	return spans, nil
-}
-
 func (h *heimdall) FetchSpans(ctx context.Context, start SpanId, end SpanId) ([]*Span, error) {
 	var spans []*Span
 
@@ -494,60 +435,6 @@ func (h *heimdall) pollSpans(ctx context.Context, tip SpanId, cb func(*Span)) {
 		}
 
 		tip = latestSpan.Id
-		go cb(m[len(m)-1])
-	}
-}
-
-func (h *heimdall) OnCheckpointEvent(ctx context.Context, cb func(*Checkpoint)) error {
-	tip, ok, err := h.store.LastCheckpointId(ctx)
-	if err != nil {
-		return err
-	}
-
-	if !ok {
-		tip, _, err = h.LastCheckpointId(ctx)
-		if err != nil {
-			return err
-		}
-	}
-
-	go h.pollCheckpoints(ctx, tip, cb)
-
-	return nil
-}
-
-func (h *heimdall) pollCheckpoints(ctx context.Context, tip CheckpointId, cb func(*Checkpoint)) {
-	for ctx.Err() == nil {
-		count, err := h.client.FetchCheckpointCount(ctx)
-		if err != nil {
-			h.logger.Warn(
-				heimdallLogPrefix("OnCheckpointEvent.OnCheckpointEvent FetchCheckpointCount failed"),
-				"err", err,
-			)
-
-			h.waitPollingDelay(ctx)
-			// keep background goroutine alive in case of heimdall errors
-			continue
-		}
-
-		if count <= int64(tip) {
-			h.waitPollingDelay(ctx)
-			continue
-		}
-
-		m, err := h.FetchCheckpoints(ctx, tip+1, CheckpointId(count))
-		if err != nil {
-			h.logger.Warn(
-				heimdallLogPrefix("heimdall.OnCheckpointEvent FetchCheckpoints failed"),
-				"err", err,
-			)
-
-			h.waitPollingDelay(ctx)
-			// keep background goroutine alive in case of heimdall errors
-			continue
-		}
-
-		tip = CheckpointId(count)
 		go cb(m[len(m)-1])
 	}
 }
