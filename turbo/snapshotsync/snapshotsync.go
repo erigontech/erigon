@@ -219,7 +219,7 @@ func getMinimumBlocksToDownload(tx kv.Tx, blockReader services.FullBlockReader, 
 		return 0, 0, err
 	}
 	// return the minimum number of blocks to download and the minimum step.
-	return minToDownload, minStepToDownload, nil
+	return minToDownload, minStep - minStepToDownload, nil
 }
 
 func getMinStep(preverified snapcfg.Preverified) (uint64, error) {
@@ -289,7 +289,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, histV
 		if err != nil {
 			return err
 		}
-		fmt.Println(minBlockAmountToDownload, minStepToDownload, minStep)
 		blackListForPruning, err = buildBlackListForPruning(pruneMode, uint(minStepToDownload), uint(minBlockAmountToDownload), blockPrune, preverifiedBlockSnapshots)
 		if err != nil {
 			return err
