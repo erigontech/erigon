@@ -46,10 +46,11 @@ type L1InfoTreeUpdate struct {
 	RollupExitRoot  common.Hash
 	ParentHash      common.Hash
 	Timestamp       uint64
+	BlockNumber     uint64
 }
 
 func (l *L1InfoTreeUpdate) Marshall() []byte {
-	result := make([]byte, 8+32+32+32+32+8)
+	result := make([]byte, 8+32+32+32+32+8+8)
 	idx := utils.Uint64ToLE(l.Index)
 	copy(result[:8], idx)
 	copy(result[8:], l.GER[:])
@@ -57,6 +58,7 @@ func (l *L1InfoTreeUpdate) Marshall() []byte {
 	copy(result[72:], l.RollupExitRoot[:])
 	copy(result[104:], l.ParentHash[:])
 	copy(result[136:], utils.Uint64ToLE(l.Timestamp))
+	copy(result[144:], utils.Uint64ToLE(l.BlockNumber))
 	return result
 }
 
@@ -67,6 +69,7 @@ func (l *L1InfoTreeUpdate) Unmarshall(input []byte) {
 	copy(l.RollupExitRoot[:], input[72:104])
 	copy(l.ParentHash[:], input[104:136])
 	l.Timestamp = binary.LittleEndian.Uint64(input[136:])
+	l.BlockNumber = binary.LittleEndian.Uint64(input[144:])
 }
 
 type L1InjectedBatch struct {

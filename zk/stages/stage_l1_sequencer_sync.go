@@ -174,8 +174,12 @@ func HandleL1InfoTreeUpdate(
 	}
 	update.ParentHash = block.ParentHash()
 	update.Timestamp = block.Time()
+	update.BlockNumber = l.BlockNumber
 
 	if err = hermezDb.WriteL1InfoTreeUpdate(update); err != nil {
+		return nil, err
+	}
+	if err = hermezDb.WriteL1InfoTreeUpdateToGer(update); err != nil {
 		return nil, err
 	}
 	return update, nil

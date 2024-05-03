@@ -24,6 +24,7 @@ const GLOBAL_EXIT_ROOTS_BATCHES = "hermez_globalExitRoots_batches"     // batchk
 const TX_PRICE_PERCENTAGE = "hermez_txPricePercentage"                 // txHash -> txPricePercentage
 const STATE_ROOTS = "hermez_stateRoots"                                // l2blockno -> stateRoot
 const L1_INFO_TREE_UPDATES = "l1_info_tree_updates"                    // index -> L1InfoTreeUpdate
+const L1_INFO_TREE_UPDATES_BY_GER = "l1_info_tree_updates_by_ger"      // GER -> L1InfoTreeUpdate
 const BLOCK_L1_INFO_TREE_INDEX = "block_l1_info_tree_index"            // block number -> l1 info tree index
 const L1_INJECTED_BATCHES = "l1_injected_batches"                      // index increasing by 1 -> injected batch for the start of the chain
 const BLOCK_INFO_ROOTS = "block_info_roots"                            // block number -> block info root hash
@@ -73,6 +74,7 @@ func CreateHermezBuckets(tx kv.RwTx) error {
 		TX_PRICE_PERCENTAGE,
 		STATE_ROOTS,
 		L1_INFO_TREE_UPDATES,
+		L1_INFO_TREE_UPDATES_BY_GER,
 		BLOCK_L1_INFO_TREE_INDEX,
 		L1_INJECTED_BATCHES,
 		BLOCK_INFO_ROOTS,
@@ -886,6 +888,24 @@ func (db *HermezDb) WriteL1InfoTreeUpdate(update *types.L1InfoTreeUpdate) error 
 	marshalled := update.Marshall()
 	idx := Uint64ToBytes(update.Index)
 	return db.tx.Put(L1_INFO_TREE_UPDATES, idx, marshalled)
+}
+
+func (db *HermezDb) WriteL1InfoTreeUpdateToGer(update *types.L1InfoTreeUpdate) error {
+	marshalled := update.Marshall()
+	return db.tx.Put(L1_INFO_TREE_UPDATES_BY_GER, update.GER.Bytes(), marshalled)
+}
+
+func (db *HermezDbReader) GetL1InfoTreeUpdateByGer(ger common.Hash) (*types.L1InfoTreeUpdate, error) {
+	data, err := db.tx.GetOne(L1_INFO_TREE_UPDATES_BY_GER, ger.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 {
+		return nil, nil
+	}
+	update := &types.L1InfoTreeUpdate{}
+	update.Unmarshall(data)
+	return update, nil
 }
 
 func (db *HermezDbReader) GetL1InfoTreeUpdate(idx uint64) (*types.L1InfoTreeUpdate, error) {

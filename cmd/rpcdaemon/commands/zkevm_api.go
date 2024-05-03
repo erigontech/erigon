@@ -53,6 +53,7 @@ type ZkEvmAPI interface {
 	GetBatchWitness(ctx context.Context, batchNumber uint64, mode *WitnessMode) (hexutility.Bytes, error)
 	GetProverInput(ctx context.Context, batchNumber uint64, mode *WitnessMode, debug *bool) (*legacy_executor_verifier.RpcPayload, error)
 	GetLatestGlobalExitRoot(ctx context.Context) (common.Hash, error)
+	GetExitRootsByGER(ctx context.Context, globalExitRoot common.Hash) (*ZkExitRoots, error)
 }
 
 // APIImpl is implementation of the ZkEvmAPI interface based on remote Db access
@@ -269,6 +270,27 @@ func (api *ZkEvmAPIImpl) GetFullBlockByHash(ctx context.Context, hash libcommon.
 	}
 
 	return api.populateBlockDetail(tx, ctx, baseBlock, fullTx)
+}
+
+func (api *ZkEvmAPIImpl) GetExitRootsByGER(ctx context.Context, globalExitRoot common.Hash) (*ZkExitRoots, error) {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	hermezDb := hermez_db.NewHermezDbReader(tx)
+	infoTreeUpdate, err := hermezDb.GetL1InfoTreeUpdateByGer(globalExitRoot)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ZkExitRoots{
+		BlockNumber:     types.ArgUint64(infoTreeUpdate.BlockNumber),
+		Timestamp:       types.ArgUint64(infoTreeUpdate.Timestamp),
+		MainnetExitRoot: infoTreeUpdate.MainnetExitRoot,
+		RollupExitRoot:  infoTreeUpdate.RollupExitRoot,
+	}, nil
 }
 
 func (api *ZkEvmAPIImpl) populateBlockDetail(
