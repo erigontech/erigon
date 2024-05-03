@@ -75,6 +75,9 @@ const (
 )
 
 func adjustStepPrune(steps uint) uint {
+	if steps < MinPruneStep {
+		return MinPruneStep
+	}
 	if steps%MinPruneStep == 0 {
 		return steps
 	}
