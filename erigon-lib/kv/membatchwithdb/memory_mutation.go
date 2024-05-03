@@ -278,6 +278,16 @@ type rangeIter struct {
 	limit                                int64
 }
 
+func (s *rangeIter) Close() {
+	if s.iterDb != nil {
+		s.iterDb.Close()
+		s.iterDb = nil
+	}
+	if s.iterMem != nil {
+		s.iterMem.Close()
+		s.iterMem = nil
+	}
+}
 func (s *rangeIter) init() (*rangeIter, error) {
 	s.hasNextDb = s.iterDb.HasNext()
 	s.hasNextMem = s.iterMem.HasNext()
@@ -346,6 +356,17 @@ type rangeDupSortIter struct {
 	nextVdb, nextVmem     []byte
 	orderAscend           bool
 	limit                 int64
+}
+
+func (s *rangeDupSortIter) Close() {
+	if s.iterDb != nil {
+		s.iterDb.Close()
+		s.iterDb = nil
+	}
+	if s.iterMem != nil {
+		s.iterMem.Close()
+		s.iterMem = nil
+	}
 }
 
 func (s *rangeDupSortIter) init() (*rangeDupSortIter, error) {

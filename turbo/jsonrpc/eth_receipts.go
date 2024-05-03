@@ -217,9 +217,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 			}
 			blockLogs = append(blockLogs, filtered...)
 		}
-		if casted, ok := it.(kv.Closer); ok {
-			casted.Close()
-		}
+		it.Close()
 		if len(blockLogs) == 0 {
 			continue
 		}
@@ -409,11 +407,6 @@ func applyFiltersV3(tx kv.TemporalTx, begin, end uint64, crit filters.FilterCrit
 func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) ([]*types.Log, error) {
 	logs := []*types.Log{}
 
-	txNumbers, err := applyFiltersV3(tx, begin, end, crit)
-	if err != nil {
-		return logs, err
-	}
-
 	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
 	for _, v := range crit.Addresses {
 		addrMap[v] = struct{}{}
@@ -428,7 +421,12 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	var blockHash common.Hash
 	var header *types.Header
 
+	txNumbers, err := applyFiltersV3(tx, begin, end, crit)
+	if err != nil {
+		return logs, err
+	}
 	iter := rawdbv3.TxNums2BlockNums(tx, txNumbers, order.Asc)
+	defer iter.Close()
 	for iter.HasNext() {
 		if err = ctx.Err(); err != nil {
 			return nil, err

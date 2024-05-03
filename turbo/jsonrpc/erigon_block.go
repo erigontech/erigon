@@ -226,6 +226,7 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 		if err != nil {
 			return nil, err
 		}
+		defer it.Close()
 		for it.HasNext() {
 			addressBytes, v, err := it.Next()
 			if err != nil {

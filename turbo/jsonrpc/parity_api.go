@@ -75,6 +75,7 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account libcommon
 		if err != nil {
 			return nil, err
 		}
+		defer r.Close()
 		for r.HasNext() {
 			k, _, err := r.Next()
 			if err != nil {
