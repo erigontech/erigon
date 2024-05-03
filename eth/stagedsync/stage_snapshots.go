@@ -520,22 +520,32 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 			}()
 		}
 	}
-	currentHeader := rawdb.ReadCurrentHeader(tx)
+	headNumber, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return err
+	}
+
+	minBlockNumberToKeep := uint64(0)
+	if headNumber > uint64(cfg.syncConfig.SnapshotsPruneBlockNumber) {
+		minBlockNumberToKeep = headNumber - uint64(cfg.syncConfig.SnapshotsPruneBlockNumber)
+	}
+	// Check min tx num for the min block number to keep
+	minTxNum, err := rawdbv3.TxNums.Min(tx, minBlockNumberToKeep)
+	if err != nil {
+		return err
+	}
+	minStepToKeep := minTxNum / config3.HistoryV3AggregationStep
 
 	snapshotFileNames := cfg.blockReader.FrozenFiles()
 	erigon3SnapshotFileNames := cfg.agg.Files()
 	oneFileGotRemoved := false
+
 	// Prune blocks snapshots if necessary
 	for _, file := range snapshotFileNames {
-		if !cfg.syncConfig.SnapshotPrune || currentHeader == nil || !strings.Contains(file, "transactions") {
+		if !cfg.syncConfig.SnapshotPrune || headNumber == 0 || !strings.Contains(file, "transactions") {
 			continue
 		}
 
-		minBlockNumberToKeep := uint64(0)
-		headNumber := currentHeader.Number.Uint64()
-		if headNumber > uint64(cfg.syncConfig.SnapshotsPruneBlockNumber) {
-			minBlockNumberToKeep = headNumber - uint64(cfg.syncConfig.SnapshotsPruneBlockNumber)
-		}
 		// take the snapshot file name and parse it to get the "from"
 		info, _, ok := snaptype.ParseFileName(cfg.dirs.Snap, file)
 		if !ok {
@@ -555,20 +565,10 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 	}
 	// Prune E3 snapshots if necessary
 	for _, file := range erigon3SnapshotFileNames {
-		if !cfg.syncConfig.SnapshotPrune || currentHeader == nil || !cfg.historyV3 || strings.HasPrefix(file, "domain/") {
+		if !cfg.syncConfig.SnapshotPrune || headNumber == 0 || !cfg.historyV3 || strings.HasPrefix(file, "domain/") {
 			continue
 		}
-		minBlockNumberToKeep := uint64(0)
-		headNumber := currentHeader.Number.Uint64()
-		if headNumber > uint64(cfg.syncConfig.SnapshotsPruneBlockNumber) {
-			minBlockNumberToKeep = headNumber - uint64(cfg.syncConfig.SnapshotsPruneBlockNumber)
-		}
-		// Check min tx num for the min block number to keep
-		minTxNum, err := rawdbv3.TxNums.Min(tx, minBlockNumberToKeep)
-		if err != nil {
-			return err
-		}
-		minStepToKeep := minTxNum / config3.HistoryV3AggregationStep
+
 		// parse the file name to get the info
 		info, _, ok := snaptype.ParseFileName(cfg.dirs.Snap, file)
 		if !ok {

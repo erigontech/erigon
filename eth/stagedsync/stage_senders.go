@@ -86,7 +86,6 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 		}
 		defer tx.Rollback()
 	}
-	fmt.Println("AXd")
 
 	prevStageProgress, errStart := stages.GetStageProgress(tx, stages.Bodies)
 	if errStart != nil {
