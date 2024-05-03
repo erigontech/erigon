@@ -237,10 +237,8 @@ func (v *LegacyExecutorVerifier) handleRequest(ctx context.Context, request *Ver
 
 	log.Debug("witness generated", "data", hex.EncodeToString(witness))
 
-	oldAccInputHash, err := v.l1Syncer.GetOldAccInputHash(innerCtx, &v.cfg.AddressRollup, ROLLUP_ID, request.BatchNumber)
-	if err != nil {
-		return false, err
-	}
+	// executor is perfectly happy with just an empty hash here
+	oldAccInputHash := common.HexToHash("0x0")
 
 	// now we need to figure out the timestamp limit for this payload.  It must be:
 	// timestampLimit >= currentTimestamp (from batch pre-state) + deltaTimestamp

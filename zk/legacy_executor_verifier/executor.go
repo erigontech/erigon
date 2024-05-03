@@ -129,13 +129,12 @@ func (e *Executor) CheckOnline() bool {
 }
 
 func (e *Executor) Verify(p *Payload, request *VerifierRequest, oldStateRoot common.Hash) (bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	log.Info("Sending request to grpc server", "grpcUrl", e.grpcUrl, "ourRoot", request.StateRoot, "oldRoot", oldStateRoot, "batch", request.BatchNumber)
 
 	size := 1024 * 1024 * 256 // 256mb maximum size - hack for now until trimmed witness is proved off
-	log.Info("Sending executor request", "grpcUrl", e.grpcUrl, "batch", request.BatchNumber)
 	resp, err := e.client.ProcessStatelessBatchV2(ctx, &executor.ProcessStatelessBatchRequestV2{
 		Witness:                     p.Witness,
 		DataStream:                  p.DataStream,
