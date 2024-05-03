@@ -538,7 +538,11 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 	if err != nil {
 		return err
 	}
-	minStepToKeep := minTxNum / config3.HistoryV3AggregationStep
+	minStepsToKeep := minTxNum / config3.HistoryV3AggregationStep
+	if minStepsToKeep < 64 {
+		minStepsToKeep = 64
+	}
+	minStepsToKeep += minStepsToKeep % 64
 
 	snapshotFileNames := cfg.blockReader.FrozenFiles()
 	erigon3SnapshotFileNames := cfg.agg.Files()
