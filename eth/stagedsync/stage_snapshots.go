@@ -585,7 +585,7 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 		if info.To-info.From != 64 {
 			continue
 		}
-		if info.To >= minStepToKeep {
+		if info.To >= minStepsToKeep {
 			continue
 		}
 		oneFileGotRemoved = true
