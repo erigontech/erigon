@@ -69,7 +69,10 @@ func (l *L1InfoTreeUpdate) Unmarshall(input []byte) {
 	copy(l.RollupExitRoot[:], input[72:104])
 	copy(l.ParentHash[:], input[104:136])
 	l.Timestamp = binary.LittleEndian.Uint64(input[136:])
-	l.BlockNumber = binary.LittleEndian.Uint64(input[144:])
+	// this was added later and could cause an already running sequencer to panic
+	if len(input) > 144 {
+		l.BlockNumber = binary.LittleEndian.Uint64(input[144:])
+	}
 }
 
 type L1InjectedBatch struct {
