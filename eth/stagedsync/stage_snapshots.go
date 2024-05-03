@@ -527,7 +527,7 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 	oneFileGotRemoved := false
 	// Prune blocks snapshots if necessary
 	for _, file := range snapshotFileNames {
-		if !cfg.syncConfig.SnapshotPrune || currentHeader != nil || !strings.Contains(file, "transactions") {
+		if !cfg.syncConfig.SnapshotPrune || currentHeader == nil || !strings.Contains(file, "transactions") {
 			continue
 		}
 
@@ -553,7 +553,7 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 	}
 	// Prune E3 snapshots if necessary
 	for _, file := range erigon3SnapshotFileNames {
-		if !cfg.syncConfig.SnapshotPrune || currentHeader != nil || !cfg.historyV3 || strings.HasPrefix(file, "domain/") {
+		if !cfg.syncConfig.SnapshotPrune || currentHeader == nil || !cfg.historyV3 || strings.HasPrefix(file, "domain/") {
 			continue
 		}
 		minBlockNumberToKeep := uint64(0)
