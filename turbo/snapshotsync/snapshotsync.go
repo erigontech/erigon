@@ -204,18 +204,20 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 }
 
 // getMinimumBlocksToDownload - get the minimum number of blocks to download
-func getMinimumBlocksToDownload(tx kv.Tx, blockReader services.FullBlockReader, minStep uint64) (uint64, uint64, error) {
+func getMinimumBlocksToDownload(tx kv.Tx, blockReader services.FullBlockReader, minStep uint64, expectedPruneBlockAmount uint64) (uint64, uint64, error) {
 	frozenBlocks := blockReader.Snapshots().SegmentsMax()
 	minToDownload := uint64(math.MaxUint64)
-	minStepToDownload := uint64(math.MaxUint64)
+	minStepToDownload := uint64(1)
 	stateTxNum := minStep * config3.HistoryV3AggregationStep
 	if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
 		if stateTxNum <= baseTxNum { // only cosnider the block if it
 			return nil
 		}
+		if blockNum == frozenBlocks-expectedPruneBlockAmount {
+			minStepToDownload = (baseTxNum / config3.HistoryV3AggregationStep) + 1
+		}
 		newMinToDownload := frozenBlocks - blockNum
 		if newMinToDownload < minToDownload {
-			minStepToDownload = (baseTxNum / config3.HistoryV3AggregationStep) + 1
 			minToDownload = newMinToDownload
 		}
 		return nil
