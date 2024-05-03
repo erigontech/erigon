@@ -266,6 +266,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, histV
 		if cc.Bor != nil {
 			borSnapshots.Close()
 		}
+		return nil
 	}
 
 	//Corner cases:
@@ -288,6 +289,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, histV
 		if err != nil {
 			return err
 		}
+		fmt.Println("minBlockAmountToDownload", minBlockAmountToDownload, "minStepToDownload", minStepToDownload, "blockPrune", blockPrune, "preverifiedBlockSnapshots", preverifiedBlockSnapshots)
 		blackListForPruning, err = buildBlackListForPruning(pruneMode, uint(minStepToDownload), uint(minBlockAmountToDownload), blockPrune, preverifiedBlockSnapshots)
 		if err != nil {
 			return err
