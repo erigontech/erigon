@@ -37,7 +37,7 @@ var (
 	DBNameFlag = cli.StringFlag{
 		Name:     "db.name",
 		Aliases:  []string{"dbn"},
-		Usage:    "DB name",
+		Usage:    "DB name to print info about. If not set, all dbs will be printed.",
 		Required: false,
 		Value:    "",
 	}
