@@ -78,9 +78,8 @@ func adjustStepPrune(steps uint) uint {
 	if steps%MinPruneStep == 0 {
 		return steps
 	}
-	ret := steps + MinPruneStep
 	// round to nearest multiple of 64. if less than 64, round to 64
-	return ret - ret%MinPruneStep
+	return steps + steps%MinPruneStep
 }
 
 func adjustBlockPrune(blocks, minBlocksToDownload uint) uint {
@@ -116,6 +115,7 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 	if !pruneMode {
 		return blackList, nil
 	}
+	fmt.Println("stepPrune", stepPrune, "blockPrune", blockPrune, "minBlockToDownload", minBlockToDownload)
 	stepPrune = adjustStepPrune(stepPrune)
 	blockPrune = adjustBlockPrune(blockPrune, minBlockToDownload)
 	fmt.Println("stepPrune", stepPrune, "blockPrune", blockPrune, "minBlockToDownload", minBlockToDownload)
