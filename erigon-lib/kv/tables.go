@@ -770,29 +770,14 @@ type TableCfgItem struct {
 	// If good DB format found, push app code to accept this format and then disable this property.
 	IsDeprecated bool
 	DBI          DBI
-	// DupFromLen - if user provide key of this length, then next transformation applied:
-	// v = append(k[DupToLen:], v...)
-	// k = k[:DupToLen]
-	// And opposite at retrieval
-	// Works only if AutoDupSortKeysConversion enabled
-	DupFromLen int
-	DupToLen   int
 }
 
 var ChaindataTablesCfg = TableCfg{
-	HashedStorage: {
-		Flags:      DupSort,
-		DupFromLen: 72,
-		DupToLen:   40,
-	},
+	HashedStorage:    {},
 	AccountChangeSet: {Flags: DupSort},
 	StorageChangeSet: {Flags: DupSort},
-	PlainState: {
-		Flags:      DupSort,
-		DupFromLen: 60,
-		DupToLen:   28,
-	},
-	CallTraceSet: {Flags: DupSort},
+	PlainState:       {},
+	CallTraceSet:     {Flags: DupSort},
 
 	TblAccountKeys:           {Flags: DupSort},
 	TblAccountHistoryKeys:    {Flags: DupSort},

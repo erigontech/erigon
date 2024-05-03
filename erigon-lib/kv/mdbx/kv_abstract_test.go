@@ -100,10 +100,9 @@ func TestManagedTx(t *testing.T) {
 	writeDBs, readDBs := setupDatabases(t, logger, func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return map[string]kv.TableCfgItem{
 			bucket1: {
-				Flags:                     kv.DupSort,
-				AutoDupSortKeysConversion: true,
-				DupToLen:                  4,
-				DupFromLen:                6,
+				Flags:      kv.DupSort,
+				DupToLen:   4,
+				DupFromLen: 6,
 			},
 			bucket2: {
 				Flags: 0,
