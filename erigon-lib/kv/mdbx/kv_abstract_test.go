@@ -99,11 +99,7 @@ func TestManagedTx(t *testing.T) {
 	bucket2 := kv.ChaindataTables[bucketID+1]
 	writeDBs, readDBs := setupDatabases(t, logger, func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return map[string]kv.TableCfgItem{
-			bucket1: {
-				Flags:      kv.DupSort,
-				DupToLen:   4,
-				DupFromLen: 6,
-			},
+			bucket1: {},
 			bucket2: {
 				Flags: 0,
 			},
@@ -225,7 +221,7 @@ func TestRemoteKvRange(t *testing.T) {
 
 	require := require.New(t)
 	require.NoError(writeDB.Update(ctx, func(tx kv.RwTx) error {
-		wc, err := tx.RwCursorDupSort(kv.PlainState)
+		wc, err := tx.RwCursorDupSort(kv.AccountChangeSet)
 		require.NoError(err)
 		require.NoError(wc.Append([]byte{1}, []byte{1}))
 		require.NoError(wc.Append([]byte{1}, []byte{2}))
@@ -235,7 +231,7 @@ func TestRemoteKvRange(t *testing.T) {
 	}))
 
 	require.NoError(db.View(ctx, func(tx kv.Tx) error {
-		c, err := tx.Cursor(kv.PlainState)
+		c, err := tx.Cursor(kv.AccountChangeSet)
 		require.NoError(err)
 
 		k, v, err := c.First()
@@ -245,7 +241,7 @@ func TestRemoteKvRange(t *testing.T) {
 
 		// it must be possible to Stream and manipulate cursors in same time
 		cnt := 0
-		require.NoError(tx.ForEach(kv.PlainState, nil, func(_, _ []byte) error {
+		require.NoError(tx.ForEach(kv.AccountChangeSet, nil, func(_, _ []byte) error {
 			if cnt == 0 {
 				k, v, err = c.Next()
 				require.NoError(err)
@@ -259,7 +255,7 @@ func TestRemoteKvRange(t *testing.T) {
 
 		// remote Tx must provide Snapshots-Isolation-Level: new updates are not visible for old readers
 		require.NoError(writeDB.Update(ctx, func(tx kv.RwTx) error {
-			require.NoError(tx.Put(kv.PlainState, []byte{4}, []byte{1}))
+			require.NoError(tx.Put(kv.AccountChangeSet, []byte{4}, []byte{1}))
 			return nil
 		}))
 
@@ -272,7 +268,7 @@ func TestRemoteKvRange(t *testing.T) {
 
 	err = db.View(ctx, func(tx kv.Tx) error {
 		cntRange := func(from, to []byte) (i int) {
-			it, err := tx.Range(kv.PlainState, from, to)
+			it, err := tx.Range(kv.AccountChangeSet, from, to)
 			require.NoError(err)
 			for it.HasNext() {
 				_, _, err = it.Next()
@@ -293,7 +289,7 @@ func TestRemoteKvRange(t *testing.T) {
 	// Limit
 	err = db.View(ctx, func(tx kv.Tx) error {
 		cntRange := func(from, to []byte) (i int) {
-			it, err := tx.RangeAscend(kv.PlainState, from, to, 2)
+			it, err := tx.RangeAscend(kv.AccountChangeSet, from, to, 2)
 			require.NoError(err)
 			for it.HasNext() {
 				_, _, err := it.Next()
@@ -313,7 +309,7 @@ func TestRemoteKvRange(t *testing.T) {
 
 	err = db.View(ctx, func(tx kv.Tx) error {
 		cntRange := func(from, to []byte) (i int) {
-			it, err := tx.RangeDescend(kv.PlainState, from, to, 2)
+			it, err := tx.RangeDescend(kv.AccountChangeSet, from, to, 2)
 			require.NoError(err)
 			for it.HasNext() {
 				_, _, err := it.Next()
