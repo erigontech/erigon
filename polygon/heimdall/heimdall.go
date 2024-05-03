@@ -667,13 +667,5 @@ func (h *heimdall) batchFetchCheckpoints(
 }
 
 func (h *heimdall) waitPollingDelay(ctx context.Context) {
-	pollDelayTimer := time.NewTimer(h.pollDelay)
-	defer pollDelayTimer.Stop()
-
-	select {
-	case <-ctx.Done():
-		return
-	case <-pollDelayTimer.C:
-		return
-	}
+	common.Sleep(ctx, h.pollDelay)
 }
