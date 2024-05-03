@@ -545,6 +545,9 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 		if info.From <= minBlockNumberToKeep && minBlockNumberToKeep <= info.To {
 			continue
 		}
+		if info.To-info.From != snaptype.Erigon2MergeLimit {
+			continue
+		}
 		oneFileGotRemoved = true
 		if err := os.Remove(filepath.Join(cfg.dirs.Snap, file)); err != nil {
 			return err
@@ -569,6 +572,9 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 		// parse the file name to get the info
 		info, _, ok := snaptype.ParseFileName(cfg.dirs.Snap, file)
 		if !ok {
+			continue
+		}
+		if info.To-info.From != 64 {
 			continue
 		}
 		if info.To >= minStepToKeep {
