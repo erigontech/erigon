@@ -524,6 +524,14 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 	// Prune snapshots if necessary (remove .segs or idx files appropriatelly)
 
 	headNumber := cfg.blockReader.FrozenBlocks()
+	executionProgress, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return err
+	}
+	// If we are behind the execution stage, we should not prune snapshots
+	if headNumber > executionProgress {
+		return nil
+	}
 
 	pruneAmount := uint64(cfg.syncConfig.SnapshotsPruneBlockNumber)
 	if pruneAmount < snaptype.Erigon2MergeLimit {
