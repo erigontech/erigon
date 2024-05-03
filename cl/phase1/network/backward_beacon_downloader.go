@@ -193,14 +193,6 @@ Loop:
 			break
 		}
 
-		b.slotToDownload.Store(*slot - 1)
-		if err := beacon_indicies.MarkRootCanonical(b.ctx, tx, *slot, b.expectedRoot); err != nil {
-			return err
-		}
-		b.expectedRoot, err = beacon_indicies.ReadParentBlockRoot(b.ctx, tx, b.expectedRoot)
-		if err != nil {
-			return err
-		}
 		if b.engine != nil && b.engine.SupportInsertion() {
 			blockHash, err := beacon_indicies.ReadExecutionBlockHash(tx, b.expectedRoot)
 			if err != nil {
@@ -215,6 +207,14 @@ Loop:
 					break
 				}
 			}
+		}
+		b.slotToDownload.Store(*slot - 1)
+		if err := beacon_indicies.MarkRootCanonical(b.ctx, tx, *slot, b.expectedRoot); err != nil {
+			return err
+		}
+		b.expectedRoot, err = beacon_indicies.ReadParentBlockRoot(b.ctx, tx, b.expectedRoot)
+		if err != nil {
+			return err
 		}
 		// Some cleaning of possible ugly restarts
 		newSlotToDownload, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, b.expectedRoot)
