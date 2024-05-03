@@ -521,7 +521,7 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 		}
 	}
 
-	headNumber := cfg.blockReader.Snapshots().SegmentsMax()
+	headNumber := cfg.blockReader.FrozenBlocks()
 
 	minBlockNumberToKeep := uint64(0)
 	if headNumber > uint64(cfg.syncConfig.SnapshotsPruneBlockNumber) {
