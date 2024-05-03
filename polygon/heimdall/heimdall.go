@@ -467,7 +467,7 @@ func (h *heimdall) pollSpans(ctx context.Context, tip SpanId, cb func(*Span)) {
 		latestSpan, err := h.client.FetchLatestSpan(ctx)
 		if err != nil {
 			h.logger.Warn(
-				heimdallLogPrefix("heimdall.OnSpanEvent FetchSpanCount failed"),
+				heimdallLogPrefix("heimdall.OnSpanEvent FetchLatestSpan failed"),
 				"err", err,
 			)
 
@@ -484,7 +484,7 @@ func (h *heimdall) pollSpans(ctx context.Context, tip SpanId, cb func(*Span)) {
 		m, err := h.FetchSpans(ctx, tip+1, latestSpan.Id)
 		if err != nil {
 			h.logger.Warn(
-				heimdallLogPrefix("heimdall.OnSpanEvent FetchSpan failed"),
+				heimdallLogPrefix("heimdall.OnSpanEvent FetchSpans failed"),
 				"err", err,
 			)
 
@@ -592,7 +592,7 @@ func (h *heimdall) pollMilestones(ctx context.Context, tip MilestoneId, cb func(
 		m, err := h.FetchMilestones(ctx, tip+1, MilestoneId(count))
 		if err != nil {
 			h.logger.Warn(
-				heimdallLogPrefix("heimdall.OnMilestoneEvent FetchMilestone failed"),
+				heimdallLogPrefix("heimdall.OnMilestoneEvent FetchMilestones failed"),
 				"err", err,
 			)
 
