@@ -228,6 +228,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if err := cfg.blockReader.Snapshots().ReopenFolder(); err != nil {
 			return err
 		}
+		fmt.Println("A")
 
 		if cfg.chainConfig.Bor != nil {
 			if err := cfg.blockReader.BorSnapshots().ReopenFolder(); err != nil {
