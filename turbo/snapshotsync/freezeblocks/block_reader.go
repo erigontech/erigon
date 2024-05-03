@@ -1538,10 +1538,7 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], spanId)
 	maxBlockNumInFiles := r.FrozenBorBlocks()
-	if maxBlockNumInFiles == 0 || endBlock > maxBlockNumInFiles {
-		if tx == nil {
-			return nil, nil
-		}
+	if tx != nil && (maxBlockNumInFiles == 0 || endBlock > maxBlockNumInFiles) {
 		v, err := tx.GetOne(kv.BorSpans, buf[:])
 		if err != nil {
 			return nil, err
