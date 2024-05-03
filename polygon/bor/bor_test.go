@@ -15,7 +15,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"

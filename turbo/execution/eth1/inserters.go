@@ -8,7 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
+	execution "github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"

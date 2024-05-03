@@ -14,7 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
 	"github.com/ledgerwatch/erigon/core"

@@ -8,7 +8,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	txPoolProto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	txPoolProto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
 
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"

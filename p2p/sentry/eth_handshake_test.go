@@ -10,7 +10,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
 
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"

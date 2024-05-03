@@ -18,7 +18,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
+	sentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"

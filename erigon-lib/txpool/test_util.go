@@ -23,7 +23,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
 	"github.com/ledgerwatch/erigon-lib/types"
 )
 
