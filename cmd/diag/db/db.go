@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/kataras/tablewriter"
+	"github.com/jedib0t/go-pretty/v6/table"
+	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/diag/flags"
 	"github.com/ledgerwatch/erigon/cmd/diag/util"
-	"github.com/lensesio/tableprinter"
 	"github.com/urfave/cli/v2"
 )
 
@@ -80,58 +80,37 @@ func startPrintDBsInfo(cliCtx *cli.Context) error {
 
 	printDBsInfo(data)
 
-	fmt.Println("\033[1m To get detailed info about Erigon node state use 'diag ui' command. \033[0m")
+	txt := text.Colors{text.BgGreen, text.Bold}
+	fmt.Println(txt.Sprint("To get detailed info about Erigon node state use 'diag ui' command."))
 	return nil
 }
 
-type PrintableDBInfo struct {
-	DBName    string `header:"DB Name"`
-	KeysCount int    `header:"Keys Count"`
-	Size      string `header:"Size"`
-}
-
-type PrintableDBTableInfo struct {
-	Name  string `header:"Table Name"`
-	Count int    `header:"Keys Count"`
-	Size  string `header:"Size"`
-}
-
 func printDBsInfo(data []DBInfo) {
-	printer := tableprinter.New(os.Stdout)
-	printer.BorderTop, printer.BorderBottom, printer.BorderLeft, printer.BorderRight = true, true, true, true
-	printer.CenterSeparator = "│"
-	printer.ColumnSeparator = "│"
-	printer.RowSeparator = "─"
-	printer.HeaderBgColor = tablewriter.BgBlackColor
-	printer.HeaderFgColor = tablewriter.FgGreenColor
+	txt := text.Colors{text.FgBlue, text.Bold}
+	fmt.Println(txt.Sprint("Databases Info:"))
+	t := table.NewWriter()
+	t.SetOutputMirror(os.Stdout)
+	t.AppendHeader(table.Row{"DB Name", "Keys Count", "Size"})
 
-	printabledata := make([]PrintableDBInfo, 0)
 	for _, db := range data {
-		pdb := PrintableDBInfo{
-			DBName:    db.name,
-			KeysCount: db.count,
-			Size:      db.size,
-		}
-
-		printabledata = append(printabledata, pdb)
+		t.AppendRow(table.Row{db.name, db.count, db.size})
 	}
 
-	printer.Print(printabledata)
+	t.AppendSeparator()
+	t.Render()
 
-	fmt.Print("\n")
-	printableTableData := make([]PrintableDBTableInfo, 0)
+	t.ResetHeaders()
+	t.AppendHeader(table.Row{"Table Name", "Keys Count", "Size"})
+
 	for _, db := range data {
-		for _, table := range db.tables {
-			ptable := PrintableDBTableInfo{
-				Name:  table.Name,
-				Count: table.Count,
-				Size:  common.ByteCount(table.Size),
-			}
-
-			printableTableData = append(printableTableData, ptable)
+		t.ResetRows()
+		fmt.Println(txt.Sprint("DB " + db.name + " tables:"))
+		for _, tbl := range db.tables {
+			t.AppendRow(table.Row{tbl.Name, tbl.Count, common.ByteCount(tbl.Size)})
 		}
 
-		printer.Print(printableTableData)
+		t.AppendSeparator()
+		t.Render()
 		fmt.Print("\n")
 	}
 }
