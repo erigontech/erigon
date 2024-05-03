@@ -205,12 +205,10 @@ func getMinimumBlocksToDownload(tx kv.Tx, blockReader services.FullBlockReader, 
 	minToDownload := uint64(math.MaxUint64)
 	stateTxNum := minStep * config3.HistoryV3AggregationStep
 	if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
-		fmt.Println(blockNum, stateTxNum, baseTxNum, txAmount, minToDownload, stateTxNum > baseTxNum)
 		if stateTxNum <= baseTxNum { // only cosnider the block if it
 			return nil
 		}
 		newMinToDownload := frozenBlocks - blockNum
-		fmt.Println(newMinToDownload, frozenBlocks, blockNum)
 		if newMinToDownload < minToDownload {
 			minToDownload = newMinToDownload
 		}
@@ -278,9 +276,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, histV
 	downloadRequest := make([]services.DownloadRequest, 0, len(preverifiedBlockSnapshots))
 
 	blackListForPruning := make(map[string]struct{})
-	if headerchain {
-		return nil
-	}
 
 	if !headerchain && pruneMode {
 		minStep, err := getMinStep(preverifiedBlockSnapshots)
