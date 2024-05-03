@@ -175,6 +175,7 @@ func TestRangeDupSort(t *testing.T) {
 		//[from, to)
 		it, err := tx.RangeDupSort("Table", []byte("key1"), nil, nil, order.Asc, -1)
 		require.NoError(t, err)
+		defer it.Close()
 		require.True(t, it.HasNext())
 		k, v, err := it.Next()
 		require.NoError(t, err)

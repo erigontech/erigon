@@ -215,6 +215,7 @@ func getModifiedAccountsV3(tx kv.TemporalTx, startTxNum, endTxNum uint64) ([]com
 	if err != nil {
 		return nil, err
 	}
+	defer it.Close()
 
 	changedAddrs := make(map[common.Address]struct{})
 	for it.HasNext() {

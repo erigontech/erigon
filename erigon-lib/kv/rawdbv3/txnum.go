@@ -291,6 +291,12 @@ type MapTxNum2BlockNumIter struct {
 func TxNums2BlockNums(tx kv.Tx, it iter.U64, by order.By) *MapTxNum2BlockNumIter {
 	return &MapTxNum2BlockNumIter{tx: tx, it: it, orderAscend: bool(by)}
 }
+func (i *MapTxNum2BlockNumIter) Close() {
+	if i.it != nil {
+		i.it.Close()
+		i.it = nil
+	}
+}
 func (i *MapTxNum2BlockNumIter) HasNext() bool { return i.it.HasNext() }
 func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isFinalTxn, blockNumChanged bool, err error) {
 	txNum, err = i.it.Next()
