@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -29,6 +30,27 @@ var Command = cli.Command{
 }
 
 func runUI(cli *cli.Context) error {
+	supportedSubpaths := []string{
+		"sentry-network",
+		"sentinel-network",
+		"downloader",
+		"logs",
+		"chain",
+		"data",
+		"debug",
+		"testing",
+		"performance",
+		"documentation",
+		"issues",
+		"admin",
+	}
+
+	listenAddr := "127.0.0.1"
+	listenPort := 8080
+
+	assets, _ := web.Assets()
+	fs := http.FileServer(http.FS(assets))
+
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
@@ -41,22 +63,16 @@ func runUI(cli *cli.Context) error {
 		})).
 		Handler)
 
-	r.Mount("/", web.UI)
-	r.HandleFunc("/snapshot-sync", index)
-	r.HandleFunc("/sentry-network", index)
-	r.HandleFunc("/sentinel-network", index)
-	r.HandleFunc("/logs", index)
-	r.HandleFunc("/chain", index)
-	r.HandleFunc("/data", index)
-	r.HandleFunc("/debug", index)
-	r.HandleFunc("/testing", index)
-	r.HandleFunc("/performance", index)
-	r.HandleFunc("/documentation", index)
-	r.HandleFunc("/admin", index)
-	r.HandleFunc("/downloader", index)
+	r.Mount("/", fs)
 
-	listenAddr := "127.0.0.1"
-	listenPort := 8080
+	for _, subpath := range supportedSubpaths {
+		addhandler(r, "/"+subpath, fs)
+	}
+
+	// Use the file system to serve static files
+
+	r.Get("/diagaddr", writeDiagAdderss)
+	r.Handle("/data", http.StripPrefix("/data", fs))
 
 	srv := &http.Server{
 		Addr:              fmt.Sprintf("%s:%d", listenAddr, listenPort),
@@ -81,6 +97,24 @@ func runUI(cli *cli.Context) error {
 	return nil
 }
 
-func index(w http.ResponseWriter, r *http.Request) {
-	http.ServeFile(w, r, "./web/dist/index.html")
+func addhandler(r *chi.Mux, path string, handler http.Handler) {
+	r.Handle(path, http.StripPrefix(path, handler))
+}
+
+type DiagAddress struct {
+	Address string `json:"address"`
+}
+
+func writeDiagAdderss(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Content-Type", "application/json")
+
+	addr := DiagAddress{
+		Address: "http://127.0.0.1:6060",
+	}
+
+	if err := json.NewEncoder(w).Encode(addr); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+
 }
