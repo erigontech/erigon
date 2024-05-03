@@ -2,7 +2,7 @@ package misc
 
 import (
 	// "fmt"
-	"math/big"
+	// "math/big"
 
 	"github.com/holiman/uint256"
 
@@ -15,28 +15,30 @@ import (
 )
 
 func StoreBlockHashesEip2935(header *types.Header, state *state.IntraBlockState, config *chain.Config, headerReader consensus.ChainHeaderReader) {
-	if header.Number.Cmp(big.NewInt(0)) == 0 { // Activation of fork at Genesis
+	headerNum := header.Number.Uint64()
+	if headerNum == 0 { // Activation of fork at Genesis
 		return
 	}
-	parent := headerReader.GetHeaderByHash(header.ParentHash)
-	_storeHash(parent.Number, header.ParentHash, state)
+	storeHash(headerNum - 1, header.ParentHash, state)
 	// If this is the fork block, add the parent's direct `HISTORY_SERVE_WINDOW - 1` ancestors as well
+	parent := headerReader.GetHeader(header.ParentHash, headerNum - 1)
 	if parent.Time < config.PragueTime.Uint64() {
-		p := parent.Number.Uint64()
+		p := headerNum - 1
 		window := params.BlockHashHistoryServeWindow - 1
 		if p < window {
 			window = p
 		}
 		for i := window; i > 0; i-- {
-			_storeHash(big.NewInt(0).Sub(parent.Number, big.NewInt(1)), parent.ParentHash, state)
-			parent = headerReader.GetHeaderByHash(parent.ParentHash)
+			p = p - 1
+			storeHash(p, parent.ParentHash, state)
+			parent = headerReader.GetHeader(parent.ParentHash, p)
 		}
 	}
 }
 
-func _storeHash(num *big.Int, hash libcommon.Hash, state *state.IntraBlockState) {
-	storageSlot := libcommon.BigToHash(big.NewInt(0).Mod(num, big.NewInt(int64(params.BlockHashHistoryServeWindow))))
-	hh := hash.Big()
-	parentHashInt := uint256.MustFromBig(hh)
+func storeHash(num uint64, hash libcommon.Hash, state *state.IntraBlockState) {
+	slotNum := num % params.BlockHashHistoryServeWindow
+	storageSlot := libcommon.BytesToHash(uint256.NewInt(slotNum).Bytes()) 
+	parentHashInt := uint256.NewInt(0).SetBytes32(hash.Bytes())
 	state.SetState(params.HistoryStorageAddress, &storageSlot, *parentHashInt)
 }

@@ -253,17 +253,7 @@ type FakeChainHeaderReader struct {
 }
 
 func (cr *FakeChainHeaderReader) GetHeaderByHash(hash libcommon.Hash) *types.Header {
-	num := hash.Big()
-	return &types.Header{
-		Coinbase:   libcommon.HexToAddress("0x00000000000000000000000000000000deadbeef"),
-		Number:     num,
-		ParentHash: libcommon.BigToHash(big.NewInt(0).Sub(num, big.NewInt(1))),
-		Time:       num.Uint64(),
-		Nonce:      types.BlockNonce{0x1},
-		Extra:      []byte{},
-		Difficulty: big.NewInt(0),
-		GasLimit:   100000,
-	}
+	return nil
 }
 func (cr *FakeChainHeaderReader) GetHeaderByNumber(number uint64) *types.Header {
 	return cr.GetHeaderByHash(libcommon.BigToHash(big.NewInt(int64(number))))
@@ -271,7 +261,16 @@ func (cr *FakeChainHeaderReader) GetHeaderByNumber(number uint64) *types.Header 
 func (cr *FakeChainHeaderReader) Config() *chain.Config        { return nil }
 func (cr *FakeChainHeaderReader) CurrentHeader() *types.Header { return nil }
 func (cr *FakeChainHeaderReader) GetHeader(hash libcommon.Hash, number uint64) *types.Header {
-	return nil
+	return &types.Header{
+		Coinbase:   libcommon.HexToAddress("0x00000000000000000000000000000000deadbeef"),
+		Number:     big.NewInt(int64(number)),
+		ParentHash: libcommon.BigToHash(big.NewInt(int64(number - 1))),
+		Time:       number,
+		Nonce:      types.BlockNonce{0x1},
+		Extra:      []byte{},
+		Difficulty: big.NewInt(0),
+		GasLimit:   100000,
+	}
 }
 func (cr *FakeChainHeaderReader) GetBlock(hash libcommon.Hash, number uint64) *types.Block {
 	return nil
@@ -352,7 +351,7 @@ func TestBlockhash(t *testing.T) {
 
 	*/
 	// The contract above
-	data := libcommon.Hex2Bytes("6080604052348015600f57600080fd5b50600436106045576000357c010000000000000000000000000000000000000000000000000000000090048063f8a8fd6d14604a575b600080fd5b60506074565b60405180848152602001838152602001828152602001935050505060405180910390f35b600080600080439050600080600083409050600184034092506000600290505b61010481101560c35760008186034090506000816001900414151560b6578093505b5080806001019150506094565b508083839650965096505050505090919256fea165627a7a72305820dfe2458cc086a06042239d07ce304746e65c88f8a42a9b5dfb0ac053c287d8380029")
+	data := libcommon.Hex2Bytes("6080604052348015600f57600080fd5b50600436106045576000357c010000000000000000000000000000000000000000000000000000000090048063f8a8fd6d14604a575b600080fd5b60506074565b60405180848152602001838152602001828152602001935050505060405180910390f35b600080600080439050600080600083409050600184034092506000600290505b61010481101560c35760008186034090506000816001900414151560b6578093505b5080806001019150506094565b508083839650965096505050505090919256fea165627a7a72305820462d71b510c1725ff35946c20b415b0d50b468ea157c8c77dff9466c9cb85f560029")
 	// The method call to 'test()'
 	input := libcommon.Hex2Bytes("f8a8fd6d")
 	chain := &dummyChain{}
@@ -416,7 +415,7 @@ func TestBlockHashEip2935(t *testing.T) {
 	s := common.LeftPadBytes(big.NewInt(int64(n-1)).Bytes(), 32)
 	copy(parentHash[:], s)
 	fakeHeaderReader := &FakeChainHeaderReader{}
-	header := fakeHeaderReader.GetHeaderByNumber(n)
+	header := fakeHeaderReader.GetHeader(libcommon.BigToHash(big.NewInt(int64(n))), n)
 
 	chain := &dummyChain{}
 	cfg := &Config{
@@ -447,7 +446,7 @@ func TestBlockHashEip2935(t *testing.T) {
 		t.Fatalf("expected zeroes, got %x %x", ret[0:32], ret[96:128])
 	}
 	if first.Uint64() != 9999 {
-		t.Fatalf("second block should be 9999, got %d (%x)", first, ret[32:64])
+		t.Fatalf("first block should be 9999, got %d (%x)", first, ret[32:64])
 	}
 	if last.Uint64() != 1808 {
 		t.Fatalf("last block should be 1808, got %d (%x)", last, ret[64:96])
