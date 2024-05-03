@@ -529,7 +529,7 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 		return err
 	}
 	// If we are behind the execution stage, we should not prune snapshots
-	if headNumber > executionProgress {
+	if headNumber > executionProgress || !cfg.syncConfig.SnapshotPrune {
 		return nil
 	}
 
