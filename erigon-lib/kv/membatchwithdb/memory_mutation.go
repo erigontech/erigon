@@ -658,7 +658,7 @@ func isTablePurelyDupsort(bucket string) bool {
 	if !ok {
 		return false
 	}
-	return !config.AutoDupSortKeysConversion && config.Flags == kv.DupSort
+	return config.Flags == kv.DupSort
 }
 
 func (m *MemoryMutation) MemDB() kv.RwDB {

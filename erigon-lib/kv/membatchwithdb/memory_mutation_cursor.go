@@ -131,15 +131,7 @@ func (m *memoryMutationCursor) getNextOnDb(t NextType) (key []byte, value []byte
 }
 
 func (m *memoryMutationCursor) convertAutoDupsort(key []byte, value []byte) []byte {
-	config, ok := kv.ChaindataTablesCfg[m.table]
-	// If we do not have the configuration we assume it is not dupsorted
-	if !ok || !config.AutoDupSortKeysConversion {
-		return key
-	}
-	if len(key) != config.DupToLen {
-		return key
-	}
-	return append(key, value[:config.DupFromLen-config.DupToLen]...)
+	return key
 }
 
 // Current return the current key and values the cursor is on.
@@ -155,19 +147,13 @@ func (m *memoryMutationCursor) skipIntersection(memKey, memValue, dbKey, dbValue
 	newDbValue = dbValue
 	config, ok := kv.ChaindataTablesCfg[m.table]
 	dupSortTable := ok && ((config.Flags & kv.DupSort) != 0)
-	autoKeyConversion := ok && config.AutoDupSortKeysConversion
-	dupsortOffset := 0
-	if autoKeyConversion {
-		dupsortOffset = config.DupFromLen - config.DupToLen
-	}
 	// Check for duplicates
 	if bytes.Equal(memKey, dbKey) {
 		var skip bool
 		if t == Normal {
-			skip = !dupSortTable || autoKeyConversion || bytes.Equal(memValue, dbValue)
+			skip = !dupSortTable || bytes.Equal(memValue, dbValue)
 		} else {
-			skip = bytes.Equal(memValue, dbValue) ||
-				(dupsortOffset != 0 && len(memValue) >= dupsortOffset && len(dbValue) >= dupsortOffset && bytes.Equal(memValue[:dupsortOffset], dbValue[:dupsortOffset]))
+			skip = bytes.Equal(memValue, dbValue)
 		}
 		if skip {
 			if newDbKey, newDbValue, err = m.getNextOnDb(t); err != nil {
@@ -350,12 +336,6 @@ func (m *memoryMutationCursor) DeleteExact(_, _ []byte) error {
 }
 
 func (m *memoryMutationCursor) DeleteCurrentDuplicates() error {
-	config, ok := kv.ChaindataTablesCfg[m.table]
-	autoKeyConversion := ok && config.AutoDupSortKeysConversion
-	if autoKeyConversion {
-		panic("DeleteCurrentDuplicates Not implemented for AutoDupSortKeysConversion tables")
-	}
-
 	k, _, err := m.Current()
 	if err != nil {
 		return err

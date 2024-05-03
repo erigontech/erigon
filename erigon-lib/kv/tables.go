@@ -768,9 +768,8 @@ type TableCfgItem struct {
 	// AutoDupSortKeysConversion - enables some keys transformation - to change db layout without changing app code.
 	// Use it wisely - it helps to do experiments with DB format faster, but better reduce amount of Magic in app.
 	// If good DB format found, push app code to accept this format and then disable this property.
-	AutoDupSortKeysConversion bool
-	IsDeprecated              bool
-	DBI                       DBI
+	IsDeprecated bool
+	DBI          DBI
 	// DupFromLen - if user provide key of this length, then next transformation applied:
 	// v = append(k[DupToLen:], v...)
 	// k = k[:DupToLen]
@@ -782,18 +781,16 @@ type TableCfgItem struct {
 
 var ChaindataTablesCfg = TableCfg{
 	HashedStorage: {
-		Flags:                     DupSort,
-		AutoDupSortKeysConversion: true,
-		DupFromLen:                72,
-		DupToLen:                  40,
+		Flags:      DupSort,
+		DupFromLen: 72,
+		DupToLen:   40,
 	},
 	AccountChangeSet: {Flags: DupSort},
 	StorageChangeSet: {Flags: DupSort},
 	PlainState: {
-		Flags:                     DupSort,
-		AutoDupSortKeysConversion: true,
-		DupFromLen:                60,
-		DupToLen:                  28,
+		Flags:      DupSort,
+		DupFromLen: 60,
+		DupToLen:   28,
 	},
 	CallTraceSet: {Flags: DupSort},
 
