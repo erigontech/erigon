@@ -520,10 +520,8 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 			}()
 		}
 	}
-	headNumber, err := stages.GetStageProgress(tx, stages.Execution)
-	if err != nil {
-		return err
-	}
+
+	headNumber := cfg.blockReader.Snapshots().SegmentsMax()
 
 	minBlockNumberToKeep := uint64(0)
 	if headNumber > uint64(cfg.syncConfig.SnapshotsPruneBlockNumber) {
