@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/anacrolix/torrent"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
@@ -519,6 +520,78 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 			}()
 		}
 	}
+	currentHeader := rawdb.ReadCurrentHeader(tx)
+
+	snapshotFileNames := cfg.blockReader.FrozenFiles()
+	erigon3SnapshotFileNames := cfg.agg.Files()
+	oneFileGotRemoved := false
+	// Prune blocks snapshots if necessary
+	for _, file := range snapshotFileNames {
+		if !cfg.syncConfig.SnapshotPrune || currentHeader != nil || !strings.Contains(file, "transactions") {
+			continue
+		}
+
+		minBlockNumberToKeep := uint64(0)
+		headNumber := currentHeader.Number.Uint64()
+		if headNumber > uint64(cfg.syncConfig.SnapshotsPruneBlockNumber) {
+			minBlockNumberToKeep = headNumber - uint64(cfg.syncConfig.SnapshotsPruneBlockNumber)
+		}
+		// take the snapshot file name and parse it to get the "from"
+		info, _, ok := snaptype.ParseFileName(cfg.dirs.Snap, file)
+		if !ok {
+			continue
+		}
+		// skip if minBlockNumberToKeep is in range [info.From, headNumber]
+		if info.From <= minBlockNumberToKeep && minBlockNumberToKeep <= info.To {
+			continue
+		}
+		oneFileGotRemoved = true
+		cfg.blockReader.Snapshots().Close()
+		if err := os.Remove(filepath.Join(cfg.dirs.Snap, file)); err != nil {
+			return err
+		}
+	}
+	// Prune E3 snapshots if necessary
+	for _, file := range erigon3SnapshotFileNames {
+		if !cfg.syncConfig.SnapshotPrune || currentHeader != nil || !cfg.historyV3 || strings.HasPrefix(file, "domain/") {
+			continue
+		}
+		minBlockNumberToKeep := uint64(0)
+		headNumber := currentHeader.Number.Uint64()
+		if headNumber > uint64(cfg.syncConfig.SnapshotsPruneBlockNumber) {
+			minBlockNumberToKeep = headNumber - uint64(cfg.syncConfig.SnapshotsPruneBlockNumber)
+		}
+		// Check min tx num for the min block number to keep
+		minTxNum, err := rawdbv3.TxNums.Min(tx, minBlockNumberToKeep)
+		if err != nil {
+			return err
+		}
+		minStepToKeep := minTxNum / config3.HistoryV3AggregationStep
+		// parse the file name to get the info
+		info, _, ok := snaptype.ParseFileName(cfg.dirs.Snap, file)
+		if !ok {
+			continue
+		}
+		if info.To >= minStepToKeep {
+			continue
+		}
+		oneFileGotRemoved = true
+		cfg.agg.Close()
+		if err := os.Remove(filepath.Join(cfg.dirs.Snap, file)); err != nil {
+			return err
+		}
+	}
+
+	if oneFileGotRemoved {
+		if err := cfg.blockReader.Snapshots().ReopenFolder(); err != nil {
+			return err
+		}
+		if err := cfg.agg.OpenFolder(false); err != nil {
+			return err
+		}
+	}
+
+	// Get rid of snapshots that are no longer needed according to the pruning rules
 
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
