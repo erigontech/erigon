@@ -101,11 +101,11 @@ func adjustBlockPrune(blocks, minBlocksToDownload uint) uint {
 }
 
 func shouldUseStepsForPruning(name string) bool {
-	return strings.HasPrefix(name, "history") || strings.HasPrefix(name, "idx")
+	return strings.HasPrefix(name, "idx")
 }
 
 func canSnapshotBePruned(name string) bool {
-	return strings.HasPrefix(name, "history") || strings.HasPrefix(name, "idx") || strings.Contains(name, "transactions")
+	return strings.HasPrefix(name, "idx") || strings.Contains(name, "transactions")
 }
 
 func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blockPrune uint, preverified snapcfg.Preverified) (map[string]struct{}, error) {
@@ -118,10 +118,8 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 	if !pruneMode {
 		return blackList, nil
 	}
-	fmt.Println("stepPrune", stepPrune, "blockPrune", blockPrune, "minBlockToDownload", minBlockToDownload)
 	stepPrune = adjustStepPrune(stepPrune)
 	blockPrune = adjustBlockPrune(blockPrune, minBlockToDownload)
-	fmt.Println("stepPrune", stepPrune, "blockPrune", blockPrune, "minBlockToDownload", minBlockToDownload)
 	snapshotKindToNames := make(map[string][]snapshotFileData)
 	for _, p := range preverified {
 		name := p.Name
@@ -297,7 +295,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, histV
 		if err != nil {
 			return err
 		}
-		fmt.Println("minBlockAmountToDownload", minBlockAmountToDownload, "minStepToDownload", minStepToDownload, "blockPrune", blockPrune, "preverifiedBlockSnapshots", preverifiedBlockSnapshots)
 		blackListForPruning, err = buildBlackListForPruning(pruneMode, uint(minStepToDownload), uint(minBlockAmountToDownload), blockPrune, preverifiedBlockSnapshots)
 		if err != nil {
 			return err
