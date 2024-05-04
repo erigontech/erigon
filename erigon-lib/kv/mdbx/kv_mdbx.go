@@ -1368,7 +1368,9 @@ func (c *MdbxCursor) getBoth(k, v []byte) ([]byte, error) {
 	_, v, err := c.c.Get(k, v, mdbx.GetBoth)
 	return v, err
 }
-
+func (c *MdbxCursor) setRange(k []byte) ([]byte, []byte, error) {
+	return c.c.Get(k, nil, mdbx.SetRange)
+}
 func (c *MdbxCursor) Count() (uint64, error) {
 	st, err := c.tx.tx.StatDBI(c.dbi)
 	if err != nil {
@@ -1398,7 +1400,7 @@ func (c *MdbxCursor) Seek(seek []byte) (k, v []byte, err error) {
 	if len(seek) == 0 {
 		k, v, err = c.c.Get(nil, nil, mdbx.First)
 	} else {
-		k, v, err = c.c.Get(k, nil, mdbx.SetRange)
+		k, v, err = c.setRange(seek)
 	}
 	if err != nil {
 		if mdbx.IsNotFound(err) {
