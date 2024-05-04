@@ -25,6 +25,7 @@ import (
 	"strconv"
 
 	"github.com/c2h5oh/datasize"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 )
 
@@ -36,7 +37,6 @@ const (
 	// SortableOldestAppearedBuffer - buffer that keeps only the oldest entries.
 	// if first v1 was added under key K, then v2; only v1 will stay
 	SortableOldestAppearedBuffer
-	SortableMergeBuffer
 
 	//BufIOSize - 128 pages | default is 1 page | increasing over `64 * 4096` doesn't show speedup on SSD/NVMe, but show speedup in cloud drives
 	BufIOSize = 128 * 4096
@@ -391,8 +391,6 @@ func getBufferByType(tp int, size datasize.ByteSize, prevBuf Buffer) Buffer {
 		return NewAppendBuffer(size)
 	case SortableOldestAppearedBuffer:
 		return NewOldestEntryBuffer(size)
-	case SortableMergeBuffer:
-		return NewLatestMergedEntryMergedBuffer(size, prevBuf.(*oldestMergedEntrySortableBuffer).merge)
 	default:
 		panic("unknown buffer type " + strconv.Itoa(tp))
 	}
@@ -406,112 +404,7 @@ func getTypeByBuffer(b Buffer) int {
 		return SortableAppendBuffer
 	case *oldestEntrySortableBuffer:
 		return SortableOldestAppearedBuffer
-	case *oldestMergedEntrySortableBuffer:
-		return SortableMergeBuffer
 	default:
 		panic(fmt.Sprintf("unknown buffer type: %T ", b))
 	}
-}
-
-func NewLatestMergedEntryMergedBuffer(bufferOptimalSize datasize.ByteSize, merger func([]byte, []byte) []byte) *oldestMergedEntrySortableBuffer {
-	if merger == nil {
-		panic("nil merge func")
-	}
-	return &oldestMergedEntrySortableBuffer{
-		entries:     make(map[string][]byte),
-		size:        0,
-		merge:       merger,
-		optimalSize: int(bufferOptimalSize.Bytes()),
-	}
-}
-
-type oldestMergedEntrySortableBuffer struct {
-	entries     map[string][]byte
-	merge       func([]byte, []byte) []byte
-	sortedBuf   []sortableBufferEntry
-	size        int
-	optimalSize int
-}
-
-func (b *oldestMergedEntrySortableBuffer) Put(k, v []byte) {
-	prev, ok := b.entries[string(k)]
-	if ok {
-		b.size -= len(v)
-		// if we already had this entry, we are going to keep it and ignore new value
-		v = b.merge(prev, v)
-		b.size += len(v)
-	} else {
-		b.size += len(k) + len(v)
-	}
-	b.entries[string(k)] = common.Copy(v)
-}
-
-func (b *oldestMergedEntrySortableBuffer) Size() int      { return b.size }
-func (b *oldestMergedEntrySortableBuffer) SizeLimit() int { return b.optimalSize }
-
-func (b *oldestMergedEntrySortableBuffer) Len() int {
-	return len(b.entries)
-}
-
-func (b *oldestMergedEntrySortableBuffer) Sort() {
-	for k, v := range b.entries {
-		b.sortedBuf = append(b.sortedBuf, sortableBufferEntry{key: []byte(k), value: v})
-	}
-	sort.Stable(b)
-}
-
-func (b *oldestMergedEntrySortableBuffer) Less(i, j int) bool {
-	return bytes.Compare(b.sortedBuf[i].key, b.sortedBuf[j].key) < 0
-}
-
-func (b *oldestMergedEntrySortableBuffer) Swap(i, j int) {
-	b.sortedBuf[i], b.sortedBuf[j] = b.sortedBuf[j], b.sortedBuf[i]
-}
-
-func (b *oldestMergedEntrySortableBuffer) Get(i int, keyBuf, valBuf []byte) ([]byte, []byte) {
-	keyBuf = append(keyBuf, b.sortedBuf[i].key...)
-	valBuf = append(valBuf, b.sortedBuf[i].value...)
-	return keyBuf, valBuf
-}
-func (b *oldestMergedEntrySortableBuffer) Reset() {
-	b.sortedBuf = nil
-	b.entries = make(map[string][]byte)
-	b.size = 0
-}
-func (b *oldestMergedEntrySortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) {
-	b.entries = make(map[string][]byte, predictKeysAmount)
-	b.sortedBuf = make([]sortableBufferEntry, 0, predictKeysAmount*2)
-}
-
-func (b *oldestMergedEntrySortableBuffer) Write(w io.Writer) error {
-	var numBuf [binary.MaxVarintLen64]byte
-	entries := b.sortedBuf
-	for _, entry := range entries {
-		lk := int64(len(entry.key))
-		if entry.key == nil {
-			lk = -1
-		}
-		n := binary.PutVarint(numBuf[:], lk)
-		if _, err := w.Write(numBuf[:n]); err != nil {
-			return err
-		}
-		if _, err := w.Write(entry.key); err != nil {
-			return err
-		}
-		lv := int64(len(entry.value))
-		if entry.value == nil {
-			lv = -1
-		}
-		n = binary.PutVarint(numBuf[:], lv)
-		if _, err := w.Write(numBuf[:n]); err != nil {
-			return err
-		}
-		if _, err := w.Write(entry.value); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-func (b *oldestMergedEntrySortableBuffer) CheckFlushSize() bool {
-	return b.size >= b.optimalSize
 }

@@ -13,9 +13,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
+	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	"github.com/ledgerwatch/erigon-lib/txpool"
@@ -157,6 +158,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 
 	cacheConfig := kvcache.DefaultCoherentConfig
 	cacheConfig.MetricsLabel = "txpool"
+	cacheConfig.StateV3 = kvcfg.HistoryV3.FromDB(coreDB) //TODO: cache to txpool db
 
 	cfg.TracedSenders = make([]string, len(traceSenders))
 	for i, senderHex := range traceSenders {

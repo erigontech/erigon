@@ -13,6 +13,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	_ "github.com/ledgerwatch/erigon/core/snaptype" //hack
+
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/c2h5oh/datasize"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
@@ -24,7 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadergrpc"
-	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
+	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
@@ -217,7 +220,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 
-	cfg.ClientConfig.PieceHashersPerTorrent = 32
+	cfg.ClientConfig.PieceHashersPerTorrent = dbg.EnvInt("DL_HASHERS", 32)
 	cfg.ClientConfig.DisableIPv6 = disableIPV6
 	cfg.ClientConfig.DisableIPv4 = disableIPV4
 
@@ -314,7 +317,7 @@ var manifestCmd = &cobra.Command{
 
 var manifestVerifyCmd = &cobra.Command{
 	Use:     "manifest-verify",
-	Example: "go run ./cmd/downloader manifest-verify --chain <chain> [--webseeds 'a','b','c']",
+	Example: "go run ./cmd/downloader manifest-verify --chain <chain> [--webseed 'a','b','c']",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "downloader")
 		if err := manifestVerify(cmd.Context(), logger); err != nil {
@@ -404,7 +407,7 @@ var torrentMagnet = &cobra.Command{
 
 func manifestVerify(ctx context.Context, logger log.Logger) error {
 	webseedsList := common.CliString2Array(webseeds)
-	if len(webseedsList) == 0 {
+	if len(webseedsList) == 0 { // fallback to default if exact list not passed
 		if known, ok := snapcfg.KnownWebseeds[chain]; ok {
 			webseedsList = append(webseedsList, known...)
 		}
@@ -463,7 +466,7 @@ func manifest(ctx context.Context, logger log.Logger) error {
 		//".kv", ".kvi", ".bt", ".kvei", // e3 domain
 		//".v", ".vi", //e3 hist
 		//".ef", ".efi", //e3 idx
-		".txt", //salt.txt, manifest.txt
+		".txt", //salt-state.txt, salt-blocks.txt, manifest.txt
 	}
 	l, _ := dir.ListFiles(dirs.Snap, extList...)
 	for _, fPath := range l {

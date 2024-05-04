@@ -3,15 +3,15 @@ module github.com/ledgerwatch/erigon-lib
 go 1.21
 
 require (
-	github.com/erigontech/mdbx-go v0.27.24
-	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240417163500-185a51876901
-	github.com/ledgerwatch/interfaces v0.0.0-20240320062914-b57f05746087
+	github.com/erigontech/mdbx-go v0.38.0
+	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240430044856-b76bb4892492
+	github.com/ledgerwatch/interfaces v0.0.0-20240502103437-1e84e26799a6
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 )
 
 require (
-	github.com/RoaringBitmap/roaring v1.2.3
+	github.com/RoaringBitmap/roaring v1.9.3
 	github.com/anacrolix/dht/v2 v2.21.1
 	github.com/anacrolix/go-libutp v1.3.1
 	github.com/anacrolix/log v0.15.2
@@ -26,6 +26,7 @@ require (
 	github.com/google/btree v1.1.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
+	github.com/holiman/bloomfilter/v2 v2.0.3
 	github.com/holiman/uint256 v1.2.4
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 	github.com/pelletier/go-toml/v2 v2.2.1
@@ -125,6 +126,7 @@ require (
 	github.com/prometheus/common v0.48.0 // indirect
 	github.com/prometheus/procfs v0.12.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+	github.com/rogpeppe/go-internal v1.12.0 // indirect
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417 // indirect
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
 	github.com/showwin/speedtest-go v1.6.12
@@ -135,7 +137,8 @@ require (
 	go.etcd.io/bbolt v1.3.6 // indirect
 	go.opentelemetry.io/otel v1.8.0 // indirect
 	go.opentelemetry.io/otel/trace v1.8.0 // indirect
-	golang.org/x/net v0.24.0 // indirect
+	go.uber.org/goleak v1.3.0 // indirect
+	golang.org/x/net v0.24.0
 	golang.org/x/text v0.14.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240227224415-6ceb2ff114de // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
@@ -144,4 +147,8 @@ require (
 	zombiezen.com/go/sqlite v0.13.1 // indirect
 )
 
-replace github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha
+replace (
+	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha-7
+	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.8
+	github.com/tidwall/btree => github.com/AskAlexSharov/btree v1.6.2
+)

@@ -10,8 +10,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	sentry_if "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
+	sentry_if "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/p2p/sentry/simulator"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -21,7 +21,6 @@ func TestSimulatorStart(t *testing.T) {
 	t.Skip("For now, this test is intended for manual runs only as it downloads snapshots and takes too long")
 
 	ctx, cancel := context.WithCancel(context.Background())
-
 	defer cancel()
 
 	logger := log.New()
@@ -29,7 +28,6 @@ func TestSimulatorStart(t *testing.T) {
 	dataDir := t.TempDir()
 
 	sim, err := simulator.NewSentry(ctx, "mumbai", dataDir, 1, logger)
-
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +35,6 @@ func TestSimulatorStart(t *testing.T) {
 	simClient := direct.NewSentryClientDirect(66, sim)
 
 	peerCount, err := simClient.PeerCount(ctx, &sentry.PeerCountRequest{})
-
 	if err != nil {
 		t.Fatal(err)
 	}

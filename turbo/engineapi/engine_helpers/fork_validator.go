@@ -23,18 +23,19 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
+	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
-
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // the maximum point from the current head, past which side forks are not validated anymore.
@@ -58,6 +59,7 @@ type ForkValidator struct {
 	tmpDir        string
 	// block hashes that are deemed valid
 	validHashes *lru.Cache[libcommon.Hash, bool]
+	stateV3     bool
 
 	ctx context.Context
 
@@ -65,7 +67,7 @@ type ForkValidator struct {
 	lock sync.Mutex
 }
 
-func NewForkValidatorMock(currentHeight uint64) *ForkValidator {
+func NewForkValidatorMock(currentHeight uint64, stateV3 bool) *ForkValidator {
 	validHashes, err := lru.New[libcommon.Hash, bool]("validHashes", maxForkDepth*8)
 	if err != nil {
 		panic(err)
@@ -73,6 +75,7 @@ func NewForkValidatorMock(currentHeight uint64) *ForkValidator {
 	return &ForkValidator{
 		currentHeight: currentHeight,
 		validHashes:   validHashes,
+		stateV3:       stateV3,
 	}
 }
 
@@ -130,6 +133,10 @@ func (fv *ForkValidator) FlushExtendingFork(tx kv.RwTx, accumulator *shards.Accu
 	return nil
 }
 
+type HasDiff interface {
+	Diff() (*membatchwithdb.MemoryDiff, error)
+}
+
 // ValidatePayload returns whether a payload is valid or invalid, or if cannot be determined, it will be accepted.
 // if the payload extends the canonical chain, then we stack it in extendingFork without any unwind.
 // if the payload is a fork then we unwind to the point where the fork meets the canonical chain, and there we check whether it is valid.
@@ -141,36 +148,52 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 		status = engine_types.AcceptedStatus
 		return
 	}
+	hash := header.Hash()
+	number := header.Number.Uint64()
 
 	// If the block is stored within the side fork it means it was already validated.
-	if _, ok := fv.validHashes.Get(header.Hash()); ok {
+	if _, ok := fv.validHashes.Get(hash); ok {
 		status = engine_types.ValidStatus
-		latestValidHash = header.Hash()
+		latestValidHash = hash
 		return
 	}
 
 	log.Debug("Execution ForkValidator.ValidatePayload", "extendCanonical", extendCanonical)
 	if extendCanonical {
-		extendingFork := membatchwithdb.NewMemoryBatch(tx, fv.tmpDir, logger)
-		defer extendingFork.Close()
+		histV3, err := kvcfg.HistoryV3.Enabled(tx)
+		if err != nil {
+			return "", [32]byte{}, nil, err
+		}
 		var txc wrap.TxContainer
-		txc.Tx = extendingFork
-
+		m := membatchwithdb.NewMemoryBatch(tx, fv.tmpDir, logger)
+		defer m.Close()
+		txc.Tx = m
+		if histV3 {
+			txc.Doms, err = state.NewSharedDomains(tx, logger)
+			if err != nil {
+				return "", [32]byte{}, nil, err
+			}
+			defer txc.Doms.Close()
+		}
 		fv.extendingForkNotifications = &shards.Notifications{
 			Events:      shards.NewEvents(),
 			Accumulator: shards.NewAccumulator(),
 		}
 		// Update fork head hash.
-		fv.extendingForkHeadHash = header.Hash()
-		fv.extendingForkNumber = header.Number.Uint64()
+		fv.extendingForkHeadHash = hash
+		fv.extendingForkNumber = number
 		status, latestValidHash, validationError, criticalError = fv.validateAndStorePayload(txc, header, body, 0, nil, nil, fv.extendingForkNotifications)
 		if criticalError != nil {
 			return
 		}
 		if validationError == nil {
-			fv.memoryDiff, criticalError = extendingFork.Diff()
-			if criticalError != nil {
-				return
+			if casted, ok := txc.Tx.(HasDiff); ok {
+				fv.memoryDiff, criticalError = casted.Diff()
+				if criticalError != nil {
+					return
+				}
+			} else {
+				panic(fmt.Sprintf("type %T doesn't have method Diff - like in MemoryMutation", casted))
 			}
 		}
 		return status, latestValidHash, validationError, criticalError
@@ -181,10 +204,19 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 		status = engine_types.AcceptedStatus
 		return
 	}
-	// Let's assemble the side fork backwards
 	var foundCanonical bool
+	foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, hash, number)
+	if criticalError != nil {
+		return
+	}
+	if foundCanonical {
+		status = engine_types.ValidStatus
+		latestValidHash = header.Hash()
+		return
+	}
+	// Let's assemble the side fork backwards
 	currentHash := header.ParentHash
-	unwindPoint := header.Number.Uint64() - 1
+	unwindPoint := number - 1
 	foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash, unwindPoint)
 	if criticalError != nil {
 		return
@@ -232,10 +264,22 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 	if unwindPoint == fv.currentHeight {
 		unwindPoint = 0
 	}
+	var txc wrap.TxContainer
+	histV3, err := kvcfg.HistoryV3.Enabled(tx)
+	if err != nil {
+		return "", [32]byte{}, nil, err
+	}
 	batch := membatchwithdb.NewMemoryBatch(tx, fv.tmpDir, logger)
 	defer batch.Rollback()
-	var txc wrap.TxContainer
 	txc.Tx = batch
+	if histV3 {
+		sd, err := state.NewSharedDomains(tx, logger)
+		if err != nil {
+			return "", [32]byte{}, nil, err
+		}
+		defer sd.Close()
+		txc.Doms = sd
+	}
 	notifications := &shards.Notifications{
 		Events:      shards.NewEvents(),
 		Accumulator: shards.NewAccumulator(),
@@ -274,7 +318,11 @@ func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *t
 	latestValidHash = header.Hash()
 	if validationError != nil {
 		var latestValidNumber uint64
-		latestValidNumber, criticalError = stages.GetStageProgress(txc.Tx, stages.IntermediateHashes)
+		if fv.stateV3 {
+			latestValidNumber, criticalError = stages.GetStageProgress(txc.Tx, stages.Execution)
+		} else {
+			latestValidNumber, criticalError = stages.GetStageProgress(txc.Tx, stages.IntermediateHashes)
+		}
 		if criticalError != nil {
 			return
 		}

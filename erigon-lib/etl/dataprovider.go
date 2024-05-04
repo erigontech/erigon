@@ -126,7 +126,7 @@ func (p *fileDataProvider) Dispose() {
 	if p.file != nil { //invariant: safe to call multiple time
 		p.Wait()
 		_ = p.file.Close()
-		_ = os.Remove(p.file.Name())
+		go func(fPath string) { _ = os.Remove(fPath) }(p.file.Name())
 		p.file = nil
 	}
 }

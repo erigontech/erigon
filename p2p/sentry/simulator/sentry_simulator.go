@@ -13,8 +13,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	isentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	isentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
+	types "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
 	"github.com/ledgerwatch/erigon/cmd/snapshots/sync"
 	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
 	coretypes "github.com/ledgerwatch/erigon/core/types"
@@ -440,7 +440,7 @@ func (s *server) getHeaderByHash(ctx context.Context, hash common.Hash) (*corety
 }
 
 func (s *server) downloadHeaders(ctx context.Context, header *freezeblocks.Segment) error {
-	fileName := snaptype.SegmentFileName(0, header.From(), header.To(), snaptype.Enums.Headers)
+	fileName := snaptype.SegmentFileName(0, header.From(), header.To(), coresnaptype.Enums.Headers)
 	session := sync.NewTorrentSession(s.downloader, s.chain)
 
 	s.logger.Info("Downloading", "file", fileName)

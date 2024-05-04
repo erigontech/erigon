@@ -49,6 +49,15 @@ func TestState(t *testing.T) {
 	st.skipLoad(`^stTimeConsuming/`)
 	st.skipLoad(`.*vmPerformance/loop.*`)
 
+	//st.slow(`^/modexp`)
+	//st.slow(`^stQuadraticComplexityTest/`)
+
+	// Very time consuming
+	st.skipLoad(`^stTimeConsuming/`)
+	st.skipLoad(`.*vmPerformance/loop.*`)
+	//if ethconfig.EnableHistoryV3InTest {
+	//}
+
 	_, db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	st.walk(t, stateTestDir, func(t *testing.T, name string, test *StateTest) {
 		for _, subtest := range test.Subtests() {
@@ -95,8 +104,9 @@ func withTrace(t *testing.T, test func(vm.Config) error) {
 	w.Flush()
 	if buf.Len() == 0 {
 		t.Log("no EVM operation logs generated")
-	} else {
-		t.Log("EVM operation log:\n" + buf.String())
+		//} else {
+		//enable it if need extensive logging
+		//t.Log("EVM operation log:\n" + buf.String())
 	}
 	//t.Logf("EVM output: 0x%x", tracer.Output())
 	//t.Logf("EVM error: %v", tracer.Error())

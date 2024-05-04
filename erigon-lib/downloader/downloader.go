@@ -295,9 +295,9 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		downloadProgress:     map[string]downloadProgress{},
 	}
 
-	lock, err := getSnapshotLock(ctx, cfg, db, &stats, mutex, logger)
+	snapLock, err := getSnapshotLock(ctx, cfg, db, &stats, mutex, logger)
 	if err != nil {
-		return nil, fmt.Errorf("can't initialize snapshot lock: %w", err)
+		return nil, fmt.Errorf("can't initialize snapshot snapLock: %w", err)
 	}
 
 	d := &Downloader{
@@ -312,13 +312,13 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		logger:              logger,
 		verbosity:           verbosity,
 		torrentFS:           &AtomicTorrentFS{dir: cfg.Dirs.Snap},
-		snapshotLock:        lock,
+		snapshotLock:        snapLock,
 		webDownloadInfo:     map[string]webDownloadInfo{},
 		webDownloadSessions: map[string]*RCloneSession{},
 		downloading:         map[string]struct{}{},
 		webseedsDiscover:    discover,
 	}
-	d.webseeds.SetTorrent(d.torrentFS, lock.Downloads, cfg.DownloadTorrentFilesFromWebseed)
+	d.webseeds.SetTorrent(d.torrentFS, snapLock.Downloads, cfg.DownloadTorrentFilesFromWebseed)
 
 	requestHandler.downloader = d
 
@@ -332,7 +332,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 	if cfg.AddTorrentsFromDisk {
 		var downloadMismatches []string
 
-		for _, download := range lock.Downloads {
+		for _, download := range snapLock.Downloads {
 			if info, err := d.torrentInfo(download.Name); err == nil {
 				if info.Completed != nil {
 					if hash := hex.EncodeToString(info.Hash); download.Hash != hash {
@@ -357,10 +357,10 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 						fileHash := hex.EncodeToString(fileHashBytes)
 
 						if fileHash != download.Hash && fileHash != hash {
-							d.logger.Error("[snapshots] download db mismatch", "file", download.Name, "lock", download.Hash, "db", hash, "disk", fileHash, "downloaded", *info.Completed)
+							d.logger.Error("[snapshots] download db mismatch", "file", download.Name, "snapshotLock", download.Hash, "db", hash, "disk", fileHash, "downloaded", *info.Completed)
 							downloadMismatches = append(downloadMismatches, download.Name)
 						} else {
-							d.logger.Warn("[snapshots] lock hash does not match completed download", "file", download.Name, "lock", hash, "download", download.Hash, "downloaded", *info.Completed)
+							d.logger.Warn("[snapshots] snapshotLock hash does not match completed download", "file", download.Name, "snapshotLock", hash, "download", download.Hash, "downloaded", *info.Completed)
 						}
 					}
 				}
@@ -373,14 +373,14 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 
 		//TODO: why do we need it if we have `addTorrentFilesFromDisk`? what if they are conflict?
 		//TODO: why it's before `BuildTorrentFilesIfNeed`? what if they are conflict?
-		//TODO: even if hash is saved in "snapshots-lock.json" - it still must preserve `prohibit_new_downloads.lock` and don't download new files ("user restart" must be fast, "erigon3 has .kv files which never-ending merge and delete small files")
-		//for _, it := range lock.Downloads {
+		//TODO: even if hash is saved in "snapshots-snapLock.json" - it still must preserve `prohibit_new_downloads.snapLock` and don't download new files ("user restart" must be fast, "erigon3 has .kv files which never-ending merge and delete small files")
+		//for _, it := range snapLock.Downloads {
 		//	if err := d.AddMagnetLink(ctx, snaptype.Hex2InfoHash(it.Hash), it.Name); err != nil {
 		//		return nil, err
 		//	}
 		//}
 
-		if err := d.BuildTorrentFilesIfNeed(d.ctx, lock.Chain, lock.Downloads); err != nil {
+		if err := d.BuildTorrentFilesIfNeed(d.ctx, snapLock.Chain, snapLock.Downloads); err != nil {
 			return nil, err
 		}
 
@@ -408,72 +408,72 @@ func getSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, st
 			return initSnapshotLock(ctx, cfg, db, logger)
 		}
 
-		snapDir := cfg.Dirs.Snap
+			snapDir := cfg.Dirs.Snap
 
-		lockPath := filepath.Join(snapDir, SnapshotsLockFileName)
+			lockPath := filepath.Join(snapDir, SnapshotsLockFileName)
 
-		file, err := os.Open(lockPath)
-		if err != nil {
-			if !errors.Is(err, os.ErrNotExist) {
-				return nil, err
-			}
-		}
-
-		var data []byte
-
-		if file != nil {
-			defer file.Close()
-
-			data, err = io.ReadAll(file)
-
+			file, err := os.Open(lockPath)
 			if err != nil {
-				return nil, err
-			}
-		}
-
-		if file == nil || len(data) == 0 {
-			f, err := os.Create(lockPath)
-			if err != nil {
-				return nil, err
-			}
-			defer f.Close()
-
-			lock, err := initSnapshotLock(ctx, cfg, db, logger)
-
-			if err != nil {
-				return nil, err
+				if !errors.Is(err, os.ErrNotExist) {
+					return nil, err
+				}
 			}
 
-			data, err := json.Marshal(lock)
+			var data []byte
 
-			if err != nil {
+			if file != nil {
+				defer file.Close()
+
+				data, err = io.ReadAll(file)
+
+				if err != nil {
+					return nil, err
+				}
+			}
+
+			if file == nil || len(data) == 0 {
+				f, err := os.Create(lockPath)
+				if err != nil {
+					return nil, err
+				}
+				defer f.Close()
+
+				lock, err := initSnapshotLock(ctx, cfg, db, logger)
+
+				if err != nil {
+					return nil, err
+				}
+
+				data, err := json.Marshal(lock)
+
+				if err != nil {
+					return nil, err
+				}
+
+				_, err = f.Write(data)
+
+				if err != nil {
+					return nil, err
+				}
+
+				if err := f.Sync(); err != nil {
+					return nil, err
+				}
+
+				return lock, nil
+			}
+
+			var lock snapshotLock
+
+			if err = json.Unmarshal(data, &lock); err != nil {
 				return nil, err
 			}
 
-			_, err = f.Write(data)
-
-			if err != nil {
-				return nil, err
+			if lock.Chain != cfg.ChainName {
+				return nil, fmt.Errorf("unexpected chain name:%q expecting: %q", lock.Chain, cfg.ChainName)
 			}
 
-			if err := f.Sync(); err != nil {
-				return nil, err
-			}
-
-			return lock, nil
-		}
-
-		var lock snapshotLock
-
-		if err = json.Unmarshal(data, &lock); err != nil {
-			return nil, err
-		}
-
-		if lock.Chain != cfg.ChainName {
-			return nil, fmt.Errorf("unexpected chain name:%q expecting: %q", lock.Chain, cfg.ChainName)
-		}
-
-		prevHashes := map[string]string{}
+			prevHashes := map[string]string{}
 		prevNames := map[string]string{}
 
 		for _, current := range lock.Downloads {
@@ -491,8 +491,7 @@ func getSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, st
 
 			prevHashes[current.Name] = current.Hash
 			prevNames[current.Hash] = current.Name
-		}
-		return &lock, nil
+		}return &lock, nil
 	*/
 }
 
@@ -511,7 +510,6 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 	if snapCfg == nil {
 		snapCfg = snapcfg.KnownCfg(cfg.ChainName)
 	}
-
 	//if len(files) == 0 {
 	lock.Downloads = snapCfg.Preverified
 	//}
@@ -821,6 +819,15 @@ func (d *Downloader) mainLoop(silent bool) error {
 			if err := d.addTorrentFilesFromDisk(true); err != nil && !errors.Is(err, context.Canceled) {
 				d.logger.Warn("[snapshots] addTorrentFilesFromDisk", "err", err)
 			}
+
+			d.lock.Lock()
+			defer d.lock.Unlock()
+
+			for _, t := range d.torrentClient.Torrents() {
+				if urls, ok := d.webseeds.ByFileName(t.Name()); ok {
+					t.AddWebSeeds(urls)
+				}
+			}
 		}()
 	}
 
@@ -918,7 +925,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 				if _, ok := failed[t.Name()]; ok {
 					continue
 				}
-
 				d.lock.RLock()
 				_, downloading := d.downloading[t.Name()]
 				d.lock.RUnlock()
@@ -1086,7 +1092,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 						available = append(available, webDownload.torrent)
 					}
 				} else {
-					if wi, _, ok := snaptype.ParseFileName(d.SnapDir(), webDownload.torrent.Name()); ok {
+					if wi, isStateFile, ok := snaptype.ParseFileName(d.SnapDir(), webDownload.torrent.Name()); ok && !isStateFile {
 						for i, t := range available {
 							if ai, _, ok := snaptype.ParseFileName(d.SnapDir(), t.Name()); ok {
 								if ai.CompareTo(wi) > 0 {
@@ -1135,7 +1141,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 								failed[t.Name()] = struct{}{}
 								d.logger.Debug("[snapshots] NonCanonical hash", "file", t.Name(), "got", hex.EncodeToString(localHash), "expected", t.InfoHash(), "downloaded", *torrentInfo.Completed)
+
 								continue
+
 							} else {
 								if err := d.db.Update(d.ctx, torrentInfoReset(t.Name(), t.InfoHash().Bytes(), 0)); err != nil {
 									d.logger.Debug("[snapshots] Can't reset torrent info", "file", t.Name(), "hash", t.InfoHash(), "err", err)
@@ -1189,7 +1197,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 								delete(waiting, t.Name())
 								d.torrentDownload(t, downloadComplete, sem)
 							}
-
 							continue
 						}
 					} else {
@@ -1464,7 +1471,6 @@ func getWebpeerTorrentInfo(ctx context.Context, downloadUrl *url.URL) (*metainfo
 }
 
 func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloadStatus, sem *semaphore.Weighted) {
-
 	d.lock.Lock()
 	d.downloading[t.Name()] = struct{}{}
 	d.lock.Unlock()
@@ -1703,10 +1709,29 @@ func availableTorrents(ctx context.Context, pending []*torrent.Torrent, slots in
 		}
 	}
 
+	var pendingStateFiles []*torrent.Torrent
+	var pendingBlocksFiles []*torrent.Torrent
+
+	for _, t := range pending {
+		_, isStateFile, ok := snaptype.ParseFileName("", t.Name())
+		if !ok {
+			continue
+		}
+		if isStateFile {
+			pendingStateFiles = append(pendingStateFiles, t)
+		} else {
+			pendingBlocksFiles = append(pendingBlocksFiles, t)
+		}
+	}
+	pending = pendingBlocksFiles
+
 	slices.SortFunc(pending, func(i, j *torrent.Torrent) int {
-		in, _, _ := snaptype.ParseFileName("", i.Name())
-		jn, _, _ := snaptype.ParseFileName("", j.Name())
-		return in.CompareTo(jn)
+		in, _, ok1 := snaptype.ParseFileName("", i.Name())
+		jn, _, ok2 := snaptype.ParseFileName("", j.Name())
+		if ok1 && ok2 {
+			return in.CompareTo(jn)
+		}
+		return strings.Compare(i.Name(), j.Name())
 	})
 
 	var available []*torrent.Torrent
@@ -1720,8 +1745,17 @@ func availableTorrents(ctx context.Context, pending []*torrent.Torrent, slots in
 
 		pending = pending[1:]
 	}
+	for len(pendingStateFiles) > 0 && pendingStateFiles[0].Info() != nil {
+		available = append(available, pendingStateFiles[0])
 
-	if len(pending) == 0 {
+		if len(available) == slots {
+			return available
+		}
+
+		pendingStateFiles = pendingStateFiles[1:]
+	}
+
+	if len(pending) == 0 && len(pendingStateFiles) == 0 {
 		return available
 	}
 
@@ -2451,13 +2485,20 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 	}()
 
 	for i, ts := range files {
-		d.lock.RLock()
-		_, downloading := d.downloading[ts.DisplayName]
-		d.lock.RUnlock()
-
-		if downloading {
-			continue
-		}
+		//TODO: why we depend on Stat? Did you mean `dir.FileExist()` ? How it can be false here?
+		//TODO: What this code doing? Why delete something from db?
+		//if info, err := d.torrentInfo(ts.DisplayName); err == nil {
+		//	if info.Completed != nil {
+		//		_, serr := os.Stat(filepath.Join(d.SnapDir(), info.Name))
+		//		if serr != nil {
+		//			if err := d.db.Update(d.ctx, func(tx kv.RwTx) error {
+		//				return tx.Delete(kv.BittorrentInfo, []byte(info.Name))
+		//			}); err != nil {
+		//				log.Error("[snapshots] Failed to delete db entry after stat error", "file", info.Name, "err", err, "stat-err", serr)
+		//			}
+		//		}
+		//	}
+		//}
 
 		// this check is performed here becuase t.MergeSpec in addTorrentFile will do a file
 		// update in place when it opens its MemMap.  This is non destructive for the data
@@ -2582,9 +2623,22 @@ func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientC
 	//})
 	cfg.DefaultStorage = m
 
-	torrentClient, err = torrent.NewClient(cfg)
+	err = func() error {
+		defer func() {
+			if err := recover(); err != nil {
+				fmt.Printf("openTorrentClient: %v\n", err)
+			}
+		}()
+
+		torrentClient, err = torrent.NewClient(cfg)
+		if err != nil {
+			return fmt.Errorf("torrent.NewClient: %w", err)
+		}
+		return err
+	}()
+
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("torrent.NewClient: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("torrentcfg.openClient: %w", err)
 	}
 
 	return db, c, m, torrentClient, nil

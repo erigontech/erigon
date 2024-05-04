@@ -38,9 +38,36 @@ func init() {
 	snapcfg.RegisterKnownTypes(networkname.BorMainnetChainName, borTypes)
 }
 
+var Enums = struct {
+	snaptype.Enums
+	BorEvents,
+	BorSpans,
+	BorCheckpoints,
+	BorMilestones snaptype.Enum
+}{
+	Enums:          snaptype.Enums{},
+	BorEvents:      snaptype.MinBorEnum,
+	BorSpans:       snaptype.MinBorEnum + 1,
+	BorCheckpoints: snaptype.MinBorEnum + 2,
+	BorMilestones:  snaptype.MinBorEnum + 3,
+}
+
+var Indexes = struct {
+	BorTxnHash,
+	BorSpanId,
+	BorCheckpointId,
+	BorMilestoneId snaptype.Index
+}{
+	BorTxnHash:      snaptype.Index{Name: "borevents"},
+	BorSpanId:       snaptype.Index{Name: "borspans"},
+	BorCheckpointId: snaptype.Index{Name: "borcheckpoints"},
+	BorMilestoneId:  snaptype.Index{Name: "bormilestones"},
+}
+
 var (
 	BorEvents = snaptype.RegisterType(
-		snaptype.Enums.BorEvents,
+		Enums.BorEvents,
+		"borevents",
 		snaptype.Versions{
 			Current:      1, //2,
 			MinSupported: 1,
@@ -108,7 +135,7 @@ var (
 
 				return lastEventId, nil
 			}),
-		[]snaptype.Index{snaptype.Indexes.BorTxnHash},
+		[]snaptype.Index{Indexes.BorTxnHash},
 		snaptype.IndexBuilderFunc(
 			func(ctx context.Context, sn snaptype.FileInfo, salt uint32, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 				defer func() {
@@ -151,7 +178,7 @@ var (
 					BucketSize: 2000,
 					LeafSize:   8,
 					TmpDir:     tmpDir,
-					IndexFile:  filepath.Join(sn.Dir(), snaptype.IdxFileName(sn.Version, sn.From, sn.To, snaptype.Enums.BorEvents.String())),
+					IndexFile:  filepath.Join(sn.Dir(), snaptype.IdxFileName(sn.Version, sn.From, sn.To, Enums.BorEvents.String())),
 					BaseDataID: baseEventId,
 				}, logger)
 				if err != nil {
@@ -159,7 +186,7 @@ var (
 				}
 				rs.LogLvl(log.LvlDebug)
 
-				defer d.EnableMadvNormal().DisableReadAhead()
+				defer d.EnableReadAhead().DisableReadAhead()
 
 				for {
 					g.Reset(0)
@@ -198,7 +225,8 @@ var (
 			}))
 
 	BorSpans = snaptype.RegisterType(
-		snaptype.Enums.BorSpans,
+		Enums.BorSpans,
+		"borspans",
 		snaptype.Versions{
 			Current:      1, //2,
 			MinSupported: 1,
@@ -209,7 +237,7 @@ var (
 				spanTo := uint64(heimdall.SpanIdAt(blockTo))
 				return extractValueRange(ctx, kv.BorSpans, spanFrom, spanTo, db, collect, workers, lvl, logger)
 			}),
-		[]snaptype.Index{snaptype.Indexes.BorSpanId},
+		[]snaptype.Index{Indexes.BorSpanId},
 		snaptype.IndexBuilderFunc(
 			func(ctx context.Context, sn snaptype.FileInfo, salt uint32, _ *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 				d, err := seg.NewDecompressor(sn.Path)
@@ -226,7 +254,8 @@ var (
 	)
 
 	BorCheckpoints = snaptype.RegisterType(
-		snaptype.Enums.BorCheckpoints,
+		Enums.BorCheckpoints,
+		"borcheckpoints",
 		snaptype.Versions{
 			Current:      1, //2,
 			MinSupported: 1,
@@ -270,7 +299,7 @@ var (
 
 				return extractValueRange(ctx, kv.BorCheckpoints, uint64(checkpointFrom), uint64(checkpointTo), db, collect, workers, lvl, logger)
 			}),
-		[]snaptype.Index{snaptype.Indexes.BorCheckpointId},
+		[]snaptype.Index{Indexes.BorCheckpointId},
 		snaptype.IndexBuilderFunc(
 			func(ctx context.Context, sn snaptype.FileInfo, salt uint32, _ *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 				d, err := seg.NewDecompressor(sn.Path)
@@ -300,7 +329,8 @@ var (
 	)
 
 	BorMilestones = snaptype.RegisterType(
-		snaptype.Enums.BorMilestones,
+		Enums.BorMilestones,
+		"bormilestones",
 		snaptype.Versions{
 			Current:      1, //2,
 			MinSupported: 1,
@@ -344,7 +374,7 @@ var (
 
 				return extractValueRange(ctx, kv.BorMilestones, uint64(milestoneFrom), uint64(milestoneTo), db, collect, workers, lvl, logger)
 			}),
-		[]snaptype.Index{snaptype.Indexes.BorMilestoneId},
+		[]snaptype.Index{Indexes.BorMilestoneId},
 		snaptype.IndexBuilderFunc(
 			func(ctx context.Context, sn snaptype.FileInfo, salt uint32, _ *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 				d, err := seg.NewDecompressor(sn.Path)
@@ -423,14 +453,14 @@ func buildValueIndex(ctx context.Context, sn snaptype.FileInfo, salt uint32, d *
 		TmpDir:     tmpDir,
 		IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To)),
 		BaseDataID: baseId,
-		Salt:       salt,
+		Salt:       &salt,
 	}, logger)
 	if err != nil {
 		return err
 	}
 	rs.LogLvl(log.LvlDebug)
 
-	defer d.EnableMadvNormal().DisableReadAhead()
+	defer d.EnableReadAhead().DisableReadAhead()
 
 	for {
 		g := d.MakeGetter()

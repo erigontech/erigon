@@ -35,15 +35,40 @@ func init() {
 	snapcfg.RegisterKnownTypes(networkname.ChiadoChainName, ethereumTypes)
 }
 
+var Enums = struct {
+	snaptype.Enums
+	Headers,
+	Bodies,
+	Transactions snaptype.Enum
+}{
+	Enums:        snaptype.Enums{},
+	Headers:      snaptype.MinCoreEnum,
+	Bodies:       snaptype.MinCoreEnum + 1,
+	Transactions: snaptype.MinCoreEnum + 2,
+}
+
+var Indexes = struct {
+	HeaderHash,
+	BodyHash,
+	TxnHash,
+	TxnHash2BlockNum snaptype.Index
+}{
+	HeaderHash:       snaptype.Index{Name: "headers"},
+	BodyHash:         snaptype.Index{Name: "bodies"},
+	TxnHash:          snaptype.Index{Name: "transactions"},
+	TxnHash2BlockNum: snaptype.Index{Name: "transactions-to-block", Offset: 1},
+}
+
 var (
 	Headers = snaptype.RegisterType(
-		snaptype.Enums.Headers,
+		Enums.Headers,
+		"headers",
 		snaptype.Versions{
 			Current:      1, //2,
 			MinSupported: 1,
 		},
 		nil,
-		[]snaptype.Index{snaptype.Indexes.HeaderHash},
+		[]snaptype.Index{Indexes.HeaderHash},
 		snaptype.IndexBuilderFunc(
 			func(ctx context.Context, info snaptype.FileInfo, salt uint32, _ *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 				hasher := crypto.NewKeccakState()
@@ -70,13 +95,14 @@ var (
 	)
 
 	Bodies = snaptype.RegisterType(
-		snaptype.Enums.Bodies,
+		Enums.Bodies,
+		"bodies",
 		snaptype.Versions{
 			Current:      1, //2,
 			MinSupported: 1,
 		},
 		nil,
-		[]snaptype.Index{snaptype.Indexes.BodyHash},
+		[]snaptype.Index{Indexes.BodyHash},
 		snaptype.IndexBuilderFunc(
 			func(ctx context.Context, info snaptype.FileInfo, salt uint32, _ *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 				num := make([]byte, 8)
@@ -98,13 +124,14 @@ var (
 	)
 
 	Transactions = snaptype.RegisterType(
-		snaptype.Enums.Transactions,
+		Enums.Transactions,
+		"transactions",
 		snaptype.Versions{
 			Current:      1, //2,
 			MinSupported: 1,
 		},
 		nil,
-		[]snaptype.Index{snaptype.Indexes.TxnHash, snaptype.Indexes.TxnHash2BlockNum},
+		[]snaptype.Index{Indexes.TxnHash, Indexes.TxnHash2BlockNum},
 		snaptype.IndexBuilderFunc(
 			func(ctx context.Context, sn snaptype.FileInfo, salt uint32, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 				defer func() {
@@ -162,7 +189,7 @@ var (
 					BucketSize: 2000,
 					LeafSize:   8,
 					TmpDir:     tmpDir,
-					IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To, snaptype.Indexes.TxnHash2BlockNum)),
+					IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To, Indexes.TxnHash2BlockNum)),
 					BaseDataID: firstBlockNum,
 				}, logger)
 				if err != nil {
@@ -178,8 +205,8 @@ var (
 				slot := types2.TxSlot{}
 				bodyBuf, word := make([]byte, 0, 4096), make([]byte, 0, 4096)
 
-				defer d.EnableMadvNormal().DisableReadAhead()
-				defer bodiesSegment.EnableMadvNormal().DisableReadAhead()
+				defer d.EnableReadAhead().DisableReadAhead()
+				defer bodiesSegment.EnableReadAhead().DisableReadAhead()
 
 				for {
 					g, bodyGetter := d.MakeGetter(), bodiesSegment.MakeGetter()

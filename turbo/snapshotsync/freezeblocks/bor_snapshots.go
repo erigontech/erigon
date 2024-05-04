@@ -36,7 +36,7 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 	for _, snaptype := range blockReader.BorSnapshots().Types() {
 		minSnapNum := minBlockNum
 
-		if available := blockReader.BorSnapshots().(*BorRoSnapshots).blocksAvailable(snaptype, false); available < minBlockNum {
+		if available := blockReader.BorSnapshots().SegmentsMax(); available < minBlockNum {
 			minSnapNum = available
 		}
 
@@ -149,7 +149,7 @@ func removeBorOverlaps(dir string, active []snaptype.FileInfo, max uint64) {
 	l := make([]snaptype.FileInfo, 0, len(list))
 
 	for _, f := range list {
-		if !(f.Type.Enum() == snaptype.Enums.BorSpans || f.Type.Enum() == snaptype.Enums.BorEvents) {
+		if !(f.Type.Enum() == borsnaptype.Enums.BorSpans || f.Type.Enum() == borsnaptype.Enums.BorEvents) {
 			continue
 		}
 		l = append(l, f)
@@ -167,7 +167,7 @@ func removeBorOverlaps(dir string, active []snaptype.FileInfo, max uint64) {
 		}
 
 		for _, a := range active {
-			if a.Type.Enum() != snaptype.Enums.BorSpans {
+			if a.Type.Enum() != borsnaptype.Enums.BorSpans {
 				continue
 			}
 

@@ -21,17 +21,22 @@ fi
 # enable build tags to cover maximum .go files
 export GOFLAGS="-tags=gorules,linux,tools"
 
+# github.com/pion/transport  - MIT + asm files
+# github.com/shirou/gopsutil - BSD-3-Clause +c files
+
 output=$(find "$projectDir" -maxdepth 1 -type 'd' \
     -not -name ".*" \
     -not -name tools \
     -not -name build \
-    | xargs go-licenses report 2>&1 \
+    | xargs go-licenses report --ignore github.com/pion/transport/v2/utils/xor \
+    --ignore github.com/shirou/gopsutil/v3/disk 2>&1  \
     `# exceptions` \
     | grep -v "erigon-lib has empty version"        `# self` \
     | grep -v "golang.org/x/"                       `# a part of Go` \
     | grep -v "crawshaw.io/sqlite"                  `# ISC` \
     | grep -v "erigon-lib/seg/sais"                 `# MIT` \
     | grep -v "github.com/anacrolix/go-libutp"      `# MIT` \
+    | grep -v "github.com/cespare/xxhash"           `# MIT` \
     | grep -v "github.com/cespare/xxhash/v2"        `# MIT` \
     | grep -v "github.com/cespare/xxhash"           `# MIT` \
     | grep -v "github.com/anacrolix/mmsg"           `# MPL-2.0` \
@@ -43,8 +48,10 @@ output=$(find "$projectDir" -maxdepth 1 -type 'd' \
     | grep -v "github.com/consensys/gnark-crypto"   `# Apache-2.0` \
     | grep -v "github.com/erigontech/mdbx-go"       `# Apache-2.0` \
     | grep -v "github.com/ledgerwatch/secp256k1"    `# BSD-3-Clause` \
+    | grep -v "golang.org/toolchain"                `# BSD-3-Clause` \
     | grep -v "github.com/RoaringBitmap/roaring"    `# Apache-2.0` \
     | grep -v "github.com/!roaring!bitmap/roaring"  `# Apache-2.0` \
+    | grep -v "github.com/holiman/bloomfilter/v2"   `# MIT` \
     | grep -v "pedersen_hash"                       `# Apache-2.0` \
     `# approved licenses` \
     | grep -Ev "Apache-2.0$" \

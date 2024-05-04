@@ -37,6 +37,7 @@ var migrations = map[kv.Label][]Migration{
 		TxsBeginEnd,
 		TxsV3,
 		ProhibitNewDownloadsLock,
+		SqueezeCommitmentFiles,
 		ProhibitNewDownloadsLock2,
 	},
 	kv.TxPoolDB: {},
