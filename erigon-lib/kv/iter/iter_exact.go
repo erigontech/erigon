@@ -211,8 +211,9 @@ func (m *WrapKVSIter) Next() ([]byte, []byte, uint64, error) {
 
 // func (m *WrapKVSIter) ToArray() (keys, values [][]byte, err error) { return ToArrayKV(m) }
 func (m *WrapKVSIter) Close() {
-	if y, ok := m.y.(Closer); ok {
-		y.Close()
+	if m.y != nil {
+		m.y.Close()
+		m.y = nil
 	}
 }
 
@@ -255,8 +256,9 @@ func (m *WrapKVIter) Next() ([]byte, []byte, error) {
 
 // func (m *WrapKVIter) ToArray() (keys, values [][]byte, err error) { return ToArrayKV(m) }
 func (m *WrapKVIter) Close() {
-	if x, ok := m.x.(Closer); ok {
-		x.Close()
+	if m.x != nil {
+		m.x.Close()
+		m.x = nil
 	}
 }
 

@@ -1302,31 +1302,31 @@ func (c *MockStorePutSpanCall) DoAndReturn(f func(context.Context, *Span) error)
 	return c
 }
 
-// MockRoStore is a mock of ReadStore interface.
-type MockRoStore struct {
+// MockReadStore is a mock of ReadStore interface.
+type MockReadStore struct {
 	ctrl     *gomock.Controller
-	recorder *MockRoStoreMockRecorder
+	recorder *MockReadStoreMockRecorder
 }
 
-// MockRoStoreMockRecorder is the mock recorder for MockRoStore.
-type MockRoStoreMockRecorder struct {
-	mock *MockRoStore
+// MockReadStoreMockRecorder is the mock recorder for MockReadStore.
+type MockReadStoreMockRecorder struct {
+	mock *MockReadStore
 }
 
-// NewMockRoStore creates a new mock instance.
-func NewMockRoStore(ctrl *gomock.Controller) *MockRoStore {
-	mock := &MockRoStore{ctrl: ctrl}
-	mock.recorder = &MockRoStoreMockRecorder{mock}
+// NewMockReadStore creates a new mock instance.
+func NewMockReadStore(ctrl *gomock.Controller) *MockReadStore {
+	mock := &MockReadStore{ctrl: ctrl}
+	mock.recorder = &MockReadStoreMockRecorder{mock}
 	return mock
 }
 
 // EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockRoStore) EXPECT() *MockRoStoreMockRecorder {
+func (m *MockReadStore) EXPECT() *MockReadStoreMockRecorder {
 	return m.recorder
 }
 
 // GetCheckpoint mocks base method.
-func (m *MockRoStore) GetCheckpoint(ctx context.Context, checkpointId CheckpointId) (*Checkpoint, error) {
+func (m *MockReadStore) GetCheckpoint(ctx context.Context, checkpointId CheckpointId) (*Checkpoint, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetCheckpoint", ctx, checkpointId)
 	ret0, _ := ret[0].(*Checkpoint)
@@ -1335,37 +1335,37 @@ func (m *MockRoStore) GetCheckpoint(ctx context.Context, checkpointId Checkpoint
 }
 
 // GetCheckpoint indicates an expected call of GetCheckpoint.
-func (mr *MockRoStoreMockRecorder) GetCheckpoint(ctx, checkpointId any) *MockRoStoreGetCheckpointCall {
+func (mr *MockReadStoreMockRecorder) GetCheckpoint(ctx, checkpointId any) *MockReadStoreGetCheckpointCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCheckpoint", reflect.TypeOf((*MockRoStore)(nil).GetCheckpoint), ctx, checkpointId)
-	return &MockRoStoreGetCheckpointCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCheckpoint", reflect.TypeOf((*MockReadStore)(nil).GetCheckpoint), ctx, checkpointId)
+	return &MockReadStoreGetCheckpointCall{Call: call}
 }
 
-// MockRoStoreGetCheckpointCall wrap *gomock.Call
-type MockRoStoreGetCheckpointCall struct {
+// MockReadStoreGetCheckpointCall wrap *gomock.Call
+type MockReadStoreGetCheckpointCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockRoStoreGetCheckpointCall) Return(arg0 *Checkpoint, arg1 error) *MockRoStoreGetCheckpointCall {
+func (c *MockReadStoreGetCheckpointCall) Return(arg0 *Checkpoint, arg1 error) *MockReadStoreGetCheckpointCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockRoStoreGetCheckpointCall) Do(f func(context.Context, CheckpointId) (*Checkpoint, error)) *MockRoStoreGetCheckpointCall {
+func (c *MockReadStoreGetCheckpointCall) Do(f func(context.Context, CheckpointId) (*Checkpoint, error)) *MockReadStoreGetCheckpointCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockRoStoreGetCheckpointCall) DoAndReturn(f func(context.Context, CheckpointId) (*Checkpoint, error)) *MockRoStoreGetCheckpointCall {
+func (c *MockReadStoreGetCheckpointCall) DoAndReturn(f func(context.Context, CheckpointId) (*Checkpoint, error)) *MockReadStoreGetCheckpointCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // GetMilestone mocks base method.
-func (m *MockRoStore) GetMilestone(ctx context.Context, milestoneId MilestoneId) (*Milestone, error) {
+func (m *MockReadStore) GetMilestone(ctx context.Context, milestoneId MilestoneId) (*Milestone, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetMilestone", ctx, milestoneId)
 	ret0, _ := ret[0].(*Milestone)
@@ -1374,37 +1374,37 @@ func (m *MockRoStore) GetMilestone(ctx context.Context, milestoneId MilestoneId)
 }
 
 // GetMilestone indicates an expected call of GetMilestone.
-func (mr *MockRoStoreMockRecorder) GetMilestone(ctx, milestoneId any) *MockRoStoreGetMilestoneCall {
+func (mr *MockReadStoreMockRecorder) GetMilestone(ctx, milestoneId any) *MockReadStoreGetMilestoneCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetMilestone", reflect.TypeOf((*MockRoStore)(nil).GetMilestone), ctx, milestoneId)
-	return &MockRoStoreGetMilestoneCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetMilestone", reflect.TypeOf((*MockReadStore)(nil).GetMilestone), ctx, milestoneId)
+	return &MockReadStoreGetMilestoneCall{Call: call}
 }
 
-// MockRoStoreGetMilestoneCall wrap *gomock.Call
-type MockRoStoreGetMilestoneCall struct {
+// MockReadStoreGetMilestoneCall wrap *gomock.Call
+type MockReadStoreGetMilestoneCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockRoStoreGetMilestoneCall) Return(arg0 *Milestone, arg1 error) *MockRoStoreGetMilestoneCall {
+func (c *MockReadStoreGetMilestoneCall) Return(arg0 *Milestone, arg1 error) *MockReadStoreGetMilestoneCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockRoStoreGetMilestoneCall) Do(f func(context.Context, MilestoneId) (*Milestone, error)) *MockRoStoreGetMilestoneCall {
+func (c *MockReadStoreGetMilestoneCall) Do(f func(context.Context, MilestoneId) (*Milestone, error)) *MockReadStoreGetMilestoneCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockRoStoreGetMilestoneCall) DoAndReturn(f func(context.Context, MilestoneId) (*Milestone, error)) *MockRoStoreGetMilestoneCall {
+func (c *MockReadStoreGetMilestoneCall) DoAndReturn(f func(context.Context, MilestoneId) (*Milestone, error)) *MockReadStoreGetMilestoneCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // GetSpan mocks base method.
-func (m *MockRoStore) GetSpan(ctx context.Context, spanId SpanId) (*Span, error) {
+func (m *MockReadStore) GetSpan(ctx context.Context, spanId SpanId) (*Span, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetSpan", ctx, spanId)
 	ret0, _ := ret[0].(*Span)
@@ -1413,37 +1413,37 @@ func (m *MockRoStore) GetSpan(ctx context.Context, spanId SpanId) (*Span, error)
 }
 
 // GetSpan indicates an expected call of GetSpan.
-func (mr *MockRoStoreMockRecorder) GetSpan(ctx, spanId any) *MockRoStoreGetSpanCall {
+func (mr *MockReadStoreMockRecorder) GetSpan(ctx, spanId any) *MockReadStoreGetSpanCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSpan", reflect.TypeOf((*MockRoStore)(nil).GetSpan), ctx, spanId)
-	return &MockRoStoreGetSpanCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSpan", reflect.TypeOf((*MockReadStore)(nil).GetSpan), ctx, spanId)
+	return &MockReadStoreGetSpanCall{Call: call}
 }
 
-// MockRoStoreGetSpanCall wrap *gomock.Call
-type MockRoStoreGetSpanCall struct {
+// MockReadStoreGetSpanCall wrap *gomock.Call
+type MockReadStoreGetSpanCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockRoStoreGetSpanCall) Return(arg0 *Span, arg1 error) *MockRoStoreGetSpanCall {
+func (c *MockReadStoreGetSpanCall) Return(arg0 *Span, arg1 error) *MockReadStoreGetSpanCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockRoStoreGetSpanCall) Do(f func(context.Context, SpanId) (*Span, error)) *MockRoStoreGetSpanCall {
+func (c *MockReadStoreGetSpanCall) Do(f func(context.Context, SpanId) (*Span, error)) *MockReadStoreGetSpanCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockRoStoreGetSpanCall) DoAndReturn(f func(context.Context, SpanId) (*Span, error)) *MockRoStoreGetSpanCall {
+func (c *MockReadStoreGetSpanCall) DoAndReturn(f func(context.Context, SpanId) (*Span, error)) *MockReadStoreGetSpanCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // LastCheckpointId mocks base method.
-func (m *MockRoStore) LastCheckpointId(ctx context.Context) (CheckpointId, bool, error) {
+func (m *MockReadStore) LastCheckpointId(ctx context.Context) (CheckpointId, bool, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "LastCheckpointId", ctx)
 	ret0, _ := ret[0].(CheckpointId)
@@ -1453,37 +1453,37 @@ func (m *MockRoStore) LastCheckpointId(ctx context.Context) (CheckpointId, bool,
 }
 
 // LastCheckpointId indicates an expected call of LastCheckpointId.
-func (mr *MockRoStoreMockRecorder) LastCheckpointId(ctx any) *MockRoStoreLastCheckpointIdCall {
+func (mr *MockReadStoreMockRecorder) LastCheckpointId(ctx any) *MockReadStoreLastCheckpointIdCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LastCheckpointId", reflect.TypeOf((*MockRoStore)(nil).LastCheckpointId), ctx)
-	return &MockRoStoreLastCheckpointIdCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LastCheckpointId", reflect.TypeOf((*MockReadStore)(nil).LastCheckpointId), ctx)
+	return &MockReadStoreLastCheckpointIdCall{Call: call}
 }
 
-// MockRoStoreLastCheckpointIdCall wrap *gomock.Call
-type MockRoStoreLastCheckpointIdCall struct {
+// MockReadStoreLastCheckpointIdCall wrap *gomock.Call
+type MockReadStoreLastCheckpointIdCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockRoStoreLastCheckpointIdCall) Return(arg0 CheckpointId, arg1 bool, arg2 error) *MockRoStoreLastCheckpointIdCall {
+func (c *MockReadStoreLastCheckpointIdCall) Return(arg0 CheckpointId, arg1 bool, arg2 error) *MockReadStoreLastCheckpointIdCall {
 	c.Call = c.Call.Return(arg0, arg1, arg2)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockRoStoreLastCheckpointIdCall) Do(f func(context.Context) (CheckpointId, bool, error)) *MockRoStoreLastCheckpointIdCall {
+func (c *MockReadStoreLastCheckpointIdCall) Do(f func(context.Context) (CheckpointId, bool, error)) *MockReadStoreLastCheckpointIdCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockRoStoreLastCheckpointIdCall) DoAndReturn(f func(context.Context) (CheckpointId, bool, error)) *MockRoStoreLastCheckpointIdCall {
+func (c *MockReadStoreLastCheckpointIdCall) DoAndReturn(f func(context.Context) (CheckpointId, bool, error)) *MockReadStoreLastCheckpointIdCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // LastMilestoneId mocks base method.
-func (m *MockRoStore) LastMilestoneId(ctx context.Context) (MilestoneId, bool, error) {
+func (m *MockReadStore) LastMilestoneId(ctx context.Context) (MilestoneId, bool, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "LastMilestoneId", ctx)
 	ret0, _ := ret[0].(MilestoneId)
@@ -1493,37 +1493,37 @@ func (m *MockRoStore) LastMilestoneId(ctx context.Context) (MilestoneId, bool, e
 }
 
 // LastMilestoneId indicates an expected call of LastMilestoneId.
-func (mr *MockRoStoreMockRecorder) LastMilestoneId(ctx any) *MockRoStoreLastMilestoneIdCall {
+func (mr *MockReadStoreMockRecorder) LastMilestoneId(ctx any) *MockReadStoreLastMilestoneIdCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LastMilestoneId", reflect.TypeOf((*MockRoStore)(nil).LastMilestoneId), ctx)
-	return &MockRoStoreLastMilestoneIdCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LastMilestoneId", reflect.TypeOf((*MockReadStore)(nil).LastMilestoneId), ctx)
+	return &MockReadStoreLastMilestoneIdCall{Call: call}
 }
 
-// MockRoStoreLastMilestoneIdCall wrap *gomock.Call
-type MockRoStoreLastMilestoneIdCall struct {
+// MockReadStoreLastMilestoneIdCall wrap *gomock.Call
+type MockReadStoreLastMilestoneIdCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockRoStoreLastMilestoneIdCall) Return(arg0 MilestoneId, arg1 bool, arg2 error) *MockRoStoreLastMilestoneIdCall {
+func (c *MockReadStoreLastMilestoneIdCall) Return(arg0 MilestoneId, arg1 bool, arg2 error) *MockReadStoreLastMilestoneIdCall {
 	c.Call = c.Call.Return(arg0, arg1, arg2)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockRoStoreLastMilestoneIdCall) Do(f func(context.Context) (MilestoneId, bool, error)) *MockRoStoreLastMilestoneIdCall {
+func (c *MockReadStoreLastMilestoneIdCall) Do(f func(context.Context) (MilestoneId, bool, error)) *MockReadStoreLastMilestoneIdCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockRoStoreLastMilestoneIdCall) DoAndReturn(f func(context.Context) (MilestoneId, bool, error)) *MockRoStoreLastMilestoneIdCall {
+func (c *MockReadStoreLastMilestoneIdCall) DoAndReturn(f func(context.Context) (MilestoneId, bool, error)) *MockReadStoreLastMilestoneIdCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // LastSpanId mocks base method.
-func (m *MockRoStore) LastSpanId(ctx context.Context) (SpanId, bool, error) {
+func (m *MockReadStore) LastSpanId(ctx context.Context) (SpanId, bool, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "LastSpanId", ctx)
 	ret0, _ := ret[0].(SpanId)
@@ -1533,31 +1533,31 @@ func (m *MockRoStore) LastSpanId(ctx context.Context) (SpanId, bool, error) {
 }
 
 // LastSpanId indicates an expected call of LastSpanId.
-func (mr *MockRoStoreMockRecorder) LastSpanId(ctx any) *MockRoStoreLastSpanIdCall {
+func (mr *MockReadStoreMockRecorder) LastSpanId(ctx any) *MockReadStoreLastSpanIdCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LastSpanId", reflect.TypeOf((*MockRoStore)(nil).LastSpanId), ctx)
-	return &MockRoStoreLastSpanIdCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LastSpanId", reflect.TypeOf((*MockReadStore)(nil).LastSpanId), ctx)
+	return &MockReadStoreLastSpanIdCall{Call: call}
 }
 
-// MockRoStoreLastSpanIdCall wrap *gomock.Call
-type MockRoStoreLastSpanIdCall struct {
+// MockReadStoreLastSpanIdCall wrap *gomock.Call
+type MockReadStoreLastSpanIdCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockRoStoreLastSpanIdCall) Return(arg0 SpanId, arg1 bool, arg2 error) *MockRoStoreLastSpanIdCall {
+func (c *MockReadStoreLastSpanIdCall) Return(arg0 SpanId, arg1 bool, arg2 error) *MockReadStoreLastSpanIdCall {
 	c.Call = c.Call.Return(arg0, arg1, arg2)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockRoStoreLastSpanIdCall) Do(f func(context.Context) (SpanId, bool, error)) *MockRoStoreLastSpanIdCall {
+func (c *MockReadStoreLastSpanIdCall) Do(f func(context.Context) (SpanId, bool, error)) *MockReadStoreLastSpanIdCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockRoStoreLastSpanIdCall) DoAndReturn(f func(context.Context) (SpanId, bool, error)) *MockRoStoreLastSpanIdCall {
+func (c *MockReadStoreLastSpanIdCall) DoAndReturn(f func(context.Context) (SpanId, bool, error)) *MockReadStoreLastSpanIdCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

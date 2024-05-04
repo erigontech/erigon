@@ -8,7 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
+	execution "github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -36,6 +36,7 @@ func (s *EthereumExecutionModule) validatePayloadBlobs(expectedBlobHashes []libc
 
 func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *execution.InsertBlocksRequest) (*execution.InsertionResult, error) {
 	if !e.semaphore.TryAcquire(1) {
+		e.logger.Warn("ethereumExecutionModule.InsertBlocks: ExecutionStatus_Busy")
 		return &execution.InsertionResult{
 			Result: execution.ExecutionStatus_Busy,
 		}, nil

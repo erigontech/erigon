@@ -23,12 +23,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"math"
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
 	"regexp"
-	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -1476,42 +1477,117 @@ func (iit *InvertedIndexRoTx) IterateChangedKeys(startTxNum, endTxNum uint64, ro
 }
 
 // collate [stepFrom, stepTo)
-func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (map[string]*roaring64.Bitmap, error) {
+func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (InvertedIndexCollation, error) {
 	stepTo := step + 1
 	txFrom, txTo := step*ii.aggregationStep, stepTo*ii.aggregationStep
 	start := time.Now()
-	defer mxCollateTook.ObserveDuration(start)
+	defer mxCollateTookIndex.ObserveDuration(start)
 
 	keysCursor, err := roTx.CursorDupSort(ii.indexKeysTable)
 	if err != nil {
-		return nil, fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
+		return InvertedIndexCollation{}, fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
 	}
 	defer keysCursor.Close()
-	indexBitmaps := map[string]*roaring64.Bitmap{}
+
+	collector := etl.NewCollector(ii.indexKeysTable, ii.iiCfg.dirs.Tmp, etl.NewSortableBuffer(CollateETLRAM), ii.logger)
+	defer collector.Close()
+
 	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
+
 	for k, v, err := keysCursor.Seek(txKey[:]); k != nil; k, v, err = keysCursor.Next() {
 		if err != nil {
-			return nil, fmt.Errorf("iterate over %s keys cursor: %w", ii.filenameBase, err)
+			return InvertedIndexCollation{}, fmt.Errorf("iterate over %s keys cursor: %w", ii.filenameBase, err)
 		}
 		txNum := binary.BigEndian.Uint64(k)
 		if txNum >= txTo { // [txFrom; txTo)
 			break
 		}
-		bitmap, ok := indexBitmaps[string(v)]
-		if !ok {
-			bitmap = bitmapdb.NewBitmap64()
-			indexBitmaps[string(v)] = bitmap
+		if err := collector.Collect(v, k); err != nil {
+			return InvertedIndexCollation{}, fmt.Errorf("collect %s history key [%x]=>txn %d [%x]: %w", ii.filenameBase, k, txNum, k, err)
 		}
-		bitmap.Add(txNum)
-
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return InvertedIndexCollation{}, ctx.Err()
 		default:
 		}
 	}
-	return indexBitmaps, nil
+
+	var (
+		coll = InvertedIndexCollation{
+			iiPath: ii.efFilePath(step, stepTo),
+		}
+		closeComp bool
+	)
+	defer func() {
+		if closeComp {
+			coll.Close()
+		}
+	}()
+
+	comp, err := seg.NewCompressor(ctx, "snapshots", coll.iiPath, ii.dirs.Tmp, seg.MinPatternScore, ii.compressWorkers, log.LvlTrace, ii.logger)
+	if err != nil {
+		return InvertedIndexCollation{}, fmt.Errorf("create %s compressor: %w", ii.filenameBase, err)
+	}
+	coll.writer = NewArchiveWriter(comp, ii.compression)
+
+	var (
+		prevEf      []byte
+		prevKey     []byte
+		initialized bool
+		bitmap      = bitmapdb.NewBitmap64()
+	)
+	defer bitmapdb.ReturnToPool64(bitmap)
+
+	loadBitmapsFunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		txNum := binary.BigEndian.Uint64(v)
+		if !initialized {
+			prevKey = append(prevKey[:0], k...)
+			initialized = true
+		}
+
+		if bytes.Equal(prevKey, k) {
+			bitmap.Add(txNum)
+			prevKey = append(prevKey[:0], k...)
+			return nil
+		}
+
+		ef := eliasfano32.NewEliasFano(bitmap.GetCardinality(), bitmap.Maximum())
+		it := bitmap.Iterator()
+		for it.HasNext() {
+			ef.AddOffset(it.Next())
+		}
+		bitmap.Clear()
+		ef.Build()
+
+		prevEf = ef.AppendBytes(prevEf[:0])
+
+		if err = coll.writer.AddWord(prevKey); err != nil {
+			return fmt.Errorf("add %s efi index key [%x]: %w", ii.filenameBase, prevKey, err)
+		}
+		if err = coll.writer.AddWord(prevEf); err != nil {
+			return fmt.Errorf("add %s efi index val: %w", ii.filenameBase, err)
+		}
+
+		prevKey = append(prevKey[:0], k...)
+		txNum = binary.BigEndian.Uint64(v)
+		bitmap.Add(txNum)
+
+		return nil
+	}
+
+	err = collector.Load(nil, "", loadBitmapsFunc, etl.TransformArgs{Quit: ctx.Done()})
+	if err != nil {
+		return InvertedIndexCollation{}, err
+	}
+	if !bitmap.IsEmpty() {
+		if err = loadBitmapsFunc(nil, make([]byte, 8), nil, nil); err != nil {
+			return InvertedIndexCollation{}, err
+		}
+	}
+
+	closeComp = false
+	return coll, nil
 }
 
 type InvertedFiles struct {
@@ -1529,13 +1605,23 @@ func (sf InvertedFiles) CleanupOnError() {
 	}
 }
 
+type InvertedIndexCollation struct {
+	iiPath string
+	writer ArchiveWriter
+}
+
+func (ic InvertedIndexCollation) Close() {
+	if ic.writer != nil {
+		ic.writer.Close()
+	}
+}
+
 // buildFiles - `step=N` means build file `[N:N+1)` which is equal to [N:N+1)
-func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps map[string]*roaring64.Bitmap, ps *background.ProgressSet) (InvertedFiles, error) {
+func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, coll InvertedIndexCollation, ps *background.ProgressSet) (InvertedFiles, error) {
 	var (
 		decomp    *seg.Decompressor
 		index     *recsplit.Index
 		existence *ExistenceFilter
-		comp      *seg.Compressor
 		err       error
 	)
 	mxRunningFilesBuilding.Inc()
@@ -1543,9 +1629,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 	closeComp := true
 	defer func() {
 		if closeComp {
-			if comp != nil {
-				comp.Close()
-			}
+			coll.Close()
 			if decomp != nil {
 				decomp.Close()
 			}
@@ -1557,46 +1641,24 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 			}
 		}
 	}()
-	datPath := ii.efFilePath(step, step+1)
-	keys := make([]string, 0, len(bitmaps))
-	for key := range bitmaps {
-		keys = append(keys, key)
+
+	if assert.Enable {
+		if coll.iiPath == "" && reflect.ValueOf(coll.writer).IsNil() {
+			panic("assert: collation is not initialized " + ii.filenameBase)
+		}
 	}
 
-	slices.Sort(keys)
 	{
-		p := ps.AddNew(path.Base(datPath), 1)
-		defer ps.Delete(p)
-		comp, err = seg.NewCompressor(ctx, "snapshots", datPath, ii.dirs.Tmp, seg.MinPatternScore, ii.compressWorkers, log.LvlTrace, ii.logger)
-		if err != nil {
-			return InvertedFiles{}, fmt.Errorf("create %s compressor: %w", ii.filenameBase, err)
-		}
-		writer := NewArchiveWriter(comp, ii.compression)
-		var buf []byte
-		for _, key := range keys {
-			if err = writer.AddWord([]byte(key)); err != nil {
-				return InvertedFiles{}, fmt.Errorf("add %s key [%x]: %w", ii.filenameBase, key, err)
-			}
-			bitmap := bitmaps[key]
-			ef := eliasfano32.NewEliasFano(bitmap.GetCardinality(), bitmap.Maximum())
-			it := bitmap.Iterator()
-			for it.HasNext() {
-				ef.AddOffset(it.Next())
-			}
-			ef.Build()
-			buf = ef.AppendBytes(buf[:0])
-			if err = writer.AddWord(buf); err != nil {
-				return InvertedFiles{}, fmt.Errorf("add %s val: %w", ii.filenameBase, err)
-			}
-		}
-		if err = comp.Compress(); err != nil {
+		p := ps.AddNew(path.Base(coll.iiPath), 1)
+		if err = coll.writer.Compress(); err != nil {
+			ps.Delete(p)
 			return InvertedFiles{}, fmt.Errorf("compress %s: %w", ii.filenameBase, err)
 		}
-		comp.Close()
-		comp = nil
+		coll.Close()
 		ps.Delete(p)
 	}
-	if decomp, err = seg.NewDecompressor(datPath); err != nil {
+
+	if decomp, err = seg.NewDecompressor(coll.iiPath); err != nil {
 		return InvertedFiles{}, fmt.Errorf("open %s decompressor: %w", ii.filenameBase, err)
 	}
 

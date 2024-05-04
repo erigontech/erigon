@@ -301,6 +301,7 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwi
 		if err != nil {
 			return err
 		}
+		defer iter.Close()
 		for iter.HasNext() {
 			k, v, err := iter.Next()
 			if err != nil {
@@ -316,6 +317,7 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwi
 		if err != nil {
 			return err
 		}
+		defer iter.Close()
 		for iter.HasNext() {
 			k, v, err := iter.Next()
 			if err != nil {
