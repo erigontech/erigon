@@ -480,7 +480,6 @@ func (s *RoSnapshots) unlockSegments() {
 }
 
 func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic bool) error {
-	s.lock
 	defer s.unlockSegments()
 
 	s.closeWhatNotInList(fileNames)
