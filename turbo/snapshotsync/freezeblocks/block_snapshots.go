@@ -480,7 +480,7 @@ func (s *RoSnapshots) unlockSegments() {
 }
 
 func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic bool) error {
-	s.lockSegments()
+	s.lock
 	defer s.unlockSegments()
 
 	s.closeWhatNotInList(fileNames)
@@ -679,9 +679,9 @@ func (s *RoSnapshots) removeOverlaps() error {
 }
 
 func (s *RoSnapshots) buildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier, dirs datadir.Dirs, cc *chain.Config, logger log.Logger) error {
-	// if s.IndicesMax() >= s.SegmentsMax() {
-	// 	return nil
-	// }
+	if s.IndicesMax() >= s.SegmentsMax() {
+		return nil
+	}
 	if !s.Cfg().Produce && s.IndicesMax() == 0 {
 		return fmt.Errorf("please remove --snap.stop, erigon can't work without creating basic indices")
 	}

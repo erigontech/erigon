@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/anacrolix/torrent"
-	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
@@ -520,98 +519,88 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 			}()
 		}
 	}
+	/*
 
-	// Prune snapshots if necessary (remove .segs or idx files appropriatelly)
+		// Prune snapshots if necessary (remove .segs or idx files appropriatelly)
 
-	headNumber := cfg.blockReader.FrozenBlocks()
-	executionProgress, err := stages.GetStageProgress(tx, stages.Execution)
-	if err != nil {
-		return err
-	}
-	// If we are behind the execution stage, we should not prune snapshots
-	if headNumber > executionProgress || !cfg.syncConfig.SnapshotPrune {
-		return nil
-	}
-
-	pruneAmount := uint64(cfg.syncConfig.SnapshotsPruneBlockNumber)
-	if pruneAmount < snaptype.Erigon2MergeLimit {
-		pruneAmount = snaptype.Erigon2MergeLimit
-	}
-	pruneAmount += pruneAmount % snaptype.Erigon2MergeLimit
-
-	minBlockNumberToKeep := uint64(0)
-	if headNumber > pruneAmount {
-		minBlockNumberToKeep = headNumber - pruneAmount
-	}
-	// Check min tx num for the min block number to keep
-	minTxNum, err := rawdbv3.TxNums.Min(tx, minBlockNumberToKeep)
-	if err != nil {
-		return err
-	}
-	minStepsToKeep := minTxNum / config3.HistoryV3AggregationStep
-	if minStepsToKeep < 64 {
-		minStepsToKeep = 64
-	}
-	minStepsToKeep += minStepsToKeep % 64
-
-	snapshotFileNames := cfg.blockReader.FrozenFiles()
-	erigon3SnapshotFileNames := cfg.agg.Files()
-	oneFileGotRemoved := false
-
-	// Prune blocks snapshots if necessary
-	for _, file := range snapshotFileNames {
-		if !cfg.syncConfig.SnapshotPrune || headNumber == 0 || !strings.Contains(file, "transactions") {
-			continue
-		}
-
-		// take the snapshot file name and parse it to get the "from"
-		info, _, ok := snaptype.ParseFileName(cfg.dirs.Snap, file)
-		if !ok {
-			continue
-		}
-		// skip if minBlockNumberToKeep is in range [info.From, headNumber]
-		if info.From <= minBlockNumberToKeep && minBlockNumberToKeep <= info.To {
-			continue
-		}
-		if info.To-info.From != snaptype.Erigon2MergeLimit {
-			continue
-		}
-		oneFileGotRemoved = true
-		if err := removeBlockSnapshot(cfg.dirs.Snap, file); err != nil {
+		headNumber := cfg.blockReader.FrozenBlocks()
+		executionProgress, err := stages.GetStageProgress(tx, stages.Execution)
+		if err != nil {
 			return err
 		}
-	}
-	// Prune E3 snapshots if necessary
-	for _, file := range erigon3SnapshotFileNames {
-		if !cfg.syncConfig.SnapshotPrune || headNumber == 0 || !cfg.historyV3 || strings.HasPrefix(file, "domain/") {
-			continue
+		// If we are behind the execution stage, we should not prune snapshots
+		if headNumber > executionProgress || !cfg.syncConfig.SnapshotPrune {
+			return nil
 		}
 
-		// parse the file name to get the info
-		info, _, ok := snaptype.ParseFileName(cfg.dirs.Snap, file)
-		if !ok {
-			continue
+		pruneAmount := uint64(cfg.syncConfig.SnapshotsPruneBlockNumber)
+		if pruneAmount < snaptype.Erigon2MergeLimit {
+			pruneAmount = snaptype.Erigon2MergeLimit
 		}
-		if info.To-info.From != 64 {
-			continue
-		}
-		if info.To >= minStepsToKeep {
-			continue
-		}
-		oneFileGotRemoved = true
-		if err := os.Remove(filepath.Join(cfg.dirs.Snap, file)); err != nil {
-			return err
-		}
-	}
+		pruneAmount += pruneAmount % snaptype.Erigon2MergeLimit
 
-	if oneFileGotRemoved {
-		if err := cfg.blockReader.Snapshots().ReopenFolder(); err != nil {
+		minBlockNumberToKeep := uint64(0)
+		if headNumber > pruneAmount {
+			minBlockNumberToKeep = headNumber - pruneAmount
+		}
+		// Check min tx num for the min block number to keep
+		minTxNum, err := rawdbv3.TxNums.Min(tx, minBlockNumberToKeep)
+		if err != nil {
 			return err
 		}
-		if err := cfg.agg.OpenFolder(false); err != nil {
-			return err
+		minStepsToKeep := minTxNum / config3.HistoryV3AggregationStep
+		if minStepsToKeep < 64 {
+			minStepsToKeep = 64
 		}
-	}
+		minStepsToKeep += minStepsToKeep % 64
+
+		snapshotFileNames := cfg.blockReader.FrozenFiles()
+		erigon3SnapshotFileNames := cfg.agg.Files()
+		oneFileGotRemoved := false
+
+		// Prune blocks snapshots if necessary
+		for _, file := range snapshotFileNames {
+			if !cfg.syncConfig.SnapshotPrune || headNumber == 0 || !strings.Contains(file, "transactions") {
+				continue
+			}
+
+			// take the snapshot file name and parse it to get the "from"
+			info, _, ok := snaptype.ParseFileName(cfg.dirs.Snap, file)
+			if !ok {
+				continue
+			}
+			// skip if minBlockNumberToKeep is in range [info.From, headNumber]
+			if info.From <= minBlockNumberToKeep && minBlockNumberToKeep <= info.To {
+				continue
+			}
+			if info.To-info.From != snaptype.Erigon2MergeLimit {
+				continue
+			}
+			if err := removeBlockSnapshot(cfg.dirs.Snap, file); err != nil {
+				return err
+			}
+		}
+		// Prune E3 snapshots if necessary
+		for _, file := range erigon3SnapshotFileNames {
+			if !cfg.syncConfig.SnapshotPrune || headNumber == 0 || !cfg.historyV3 || strings.HasPrefix(file, "domain/") {
+				continue
+			}
+
+			// parse the file name to get the info
+			info, _, ok := snaptype.ParseFileName(cfg.dirs.Snap, file)
+			if !ok {
+				continue
+			}
+			if info.To-info.From != 64 {
+				continue
+			}
+			if info.To >= minStepsToKeep {
+				continue
+			}
+			if err := os.Remove(filepath.Join(cfg.dirs.Snap, file)); err != nil {
+				return err
+			}
+		}*/
 
 	// Get rid of snapshots that are no longer needed according to the pruning rules
 
