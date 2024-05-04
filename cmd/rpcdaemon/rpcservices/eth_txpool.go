@@ -7,7 +7,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	txpooproto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	txpooproto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"

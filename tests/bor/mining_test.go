@@ -26,9 +26,9 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
-	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
+	txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
+	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
 )
 
 const (
@@ -60,7 +60,7 @@ func TestMiningBenchmark(t *testing.T) {
 		t.Skip("TODO: [e4] implement me")
 	}
 
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat())))
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StreamHandler(os.Stderr, log.TerminalFormat())))
 	fdlimit.Raise(2048)
 
 	genesis := helper.InitGenesis("./testdata/genesis_2val.json", 64, networkname.BorE2ETestChain2ValName)
