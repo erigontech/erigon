@@ -705,6 +705,7 @@ Loop:
 
 				BlockReceipts: receipts,
 			}
+			fmt.Println(doms.TxNum())
 			doms.SetTxNum(txTask.TxNum)
 			doms.SetBlockNum(txTask.BlockNum)
 

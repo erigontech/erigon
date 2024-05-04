@@ -101,11 +101,11 @@ func adjustBlockPrune(blocks, minBlocksToDownload uint) uint {
 }
 
 func shouldUseStepsForPruning(name string) bool {
-	return strings.HasPrefix(name, "idx")
+	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history")
 }
 
 func canSnapshotBePruned(name string) bool {
-	return strings.HasPrefix(name, "idx") || strings.Contains(name, "transactions")
+	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.Contains(name, "transactions")
 }
 
 func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blockPrune uint, preverified snapcfg.Preverified) (map[string]struct{}, error) {
