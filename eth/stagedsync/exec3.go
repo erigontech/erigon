@@ -710,7 +710,7 @@ Loop:
 
 				BlockReceipts: receipts,
 			}
-			if txTask.TxNum <= txNumInDB {
+			if txTask.TxNum <= txNumInDB && txTask.TxNum > 0 {
 				inputTxNum++
 				skipPostEvaluation = true
 				continue
