@@ -299,7 +299,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, histV
 		if err != nil {
 			return err
 		}
-		fmt.Println(blackListForPruning)
 	}
 
 	// build all download requests
@@ -319,6 +318,10 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, histV
 			continue
 		}
 		if headerchain && !strings.Contains(p.Name, "headers") && !strings.Contains(p.Name, "bodies") {
+			continue
+		}
+		// Keep this for debug
+		if strings.HasPrefix(p.Name, "history") {
 			continue
 		}
 		if _, ok := blackListForPruning[p.Name]; ok {
