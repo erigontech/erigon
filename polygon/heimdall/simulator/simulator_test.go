@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -72,7 +73,10 @@ func setup(t *testing.T, ctx context.Context, iterations []uint64) simulator.Hei
 }
 
 func TestSimulatorEvents(t *testing.T) {
-	t.Skip("TODO: e35 do not store Logs")
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win")
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -101,7 +105,10 @@ func TestSimulatorEvents(t *testing.T) {
 }
 
 func TestSimulatorSpans(t *testing.T) {
-	t.Skip("TODO: e35 do not store Logs")
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win")
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
