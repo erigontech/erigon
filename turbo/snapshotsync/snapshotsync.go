@@ -320,10 +320,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, histV
 		if headerchain && !strings.Contains(p.Name, "headers") && !strings.Contains(p.Name, "bodies") {
 			continue
 		}
-		// Keep this for debug
-		if strings.HasPrefix(p.Name, "history") {
-			continue
-		}
 		if _, ok := blackListForPruning[p.Name]; ok {
 			continue
 		}
