@@ -1374,7 +1374,6 @@ func (c *MdbxCursor) last() ([]byte, []byte, error)        { return c.c.Get(nil,
 func (c *MdbxCursor) delCurrent() error                    { return c.c.Del(mdbx.Current) }
 func (c *MdbxCursor) delAllDupData() error                 { return c.c.Del(mdbx.AllDups) }
 func (c *MdbxCursor) put(k, v []byte) error                { return c.c.Put(k, v, 0) }
-func (c *MdbxCursor) putCurrent(k, v []byte) error         { return c.c.Put(k, v, mdbx.Current) }
 func (c *MdbxCursor) putNoOverwrite(k, v []byte) error     { return c.c.Put(k, v, mdbx.NoOverwrite) }
 func (c *MdbxCursor) getBoth(k, v []byte) ([]byte, error) {
 	_, v, err := c.c.Get(k, v, mdbx.GetBoth)
