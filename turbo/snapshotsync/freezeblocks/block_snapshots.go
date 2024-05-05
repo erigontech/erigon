@@ -714,13 +714,12 @@ func (s *RoSnapshots) buildMissedIndicesIfNeed(ctx context.Context, logPrefix st
 }
 
 func (s *RoSnapshots) Delete(fileName string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.lockSegments()
-	defer s.unlockSegments()
+
 	if s == nil {
 		return nil
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	_, fName := filepath.Split(fileName)
 	s.lockSegments()
