@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -480,16 +481,42 @@ func (d *Decompressor) DisableReadAhead() {
 		return
 	}
 	leftReaders := d.readAheadRefcnt.Add(-1)
-	if leftReaders == 0 {
-		if dbg.SnapshotMadvRnd {
-			_ = mmap.MadviseRandom(d.mmapHandle1)
-		} else {
-			_ = mmap.MadviseNormal(d.mmapHandle1)
-		}
-	} else if leftReaders < 0 {
+	if leftReaders < 0 {
 		log.Warn("read-ahead negative counter", "file", d.FileName())
+		return
 	}
+
+	if dbg.SnapshotMadvRnd {
+		_ = mmap.MadviseRandom(d.mmapHandle1)
+		return
+	}
+
+	if dbg.KvMadvNormal != "" && strings.HasSuffix(d.FileName(), ".kv") {
+		types := strings.Split(dbg.KvMadvNormal, ",")
+		for _, t := range types {
+			if strings.Contains(d.FileName(), t) {
+				_ = mmap.MadviseRandom(d.mmapHandle1)
+				return
+			}
+		}
+		return
+	}
+
+	if dbg.KvMadvNormalNoLastLvl != "" && strings.HasSuffix(d.FileName(), ".kv") {
+		types := strings.Split(dbg.KvMadvNormal, ",")
+		for _, t := range types {
+			//v1-storage.0-1024.kv
+			if strings.Contains(d.FileName(), t) && !strings.Contains(d.FileName(), t+".0-") {
+				_ = mmap.MadviseRandom(d.mmapHandle1)
+				return
+			}
+		}
+		return
+	}
+
+	_ = mmap.MadviseNormal(d.mmapHandle1)
 }
+
 func (d *Decompressor) EnableReadAhead() *Decompressor {
 	if d == nil || d.mmapHandle1 == nil {
 		return d
