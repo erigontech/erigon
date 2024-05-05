@@ -533,6 +533,7 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 		return nil
 	}
 
+	// Keep at least 2 block snapshots as we do not want FrozenBlocks to be 0
 	pruneAmount := uint64(cfg.syncConfig.SnapshotsPruneBlockNumber)
 	if pruneAmount < snaptype.Erigon2MergeLimit*2 {
 		pruneAmount = snaptype.Erigon2MergeLimit * 2
