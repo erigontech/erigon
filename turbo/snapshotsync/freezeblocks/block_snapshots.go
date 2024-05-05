@@ -721,7 +721,6 @@ func (s *RoSnapshots) Delete(fileName string) error {
 	if s == nil {
 		return nil
 	}
-	fmt.Println(fileName)
 
 	_, fName := filepath.Split(fileName)
 	s.lockSegments()
@@ -758,6 +757,8 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 	if s == nil {
 		return nil
 	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	dir, tmpDir := dirs.Snap, dirs.Tmp
 	//log.Log(lvl, "[snapshots] Build indices", "from", min)
