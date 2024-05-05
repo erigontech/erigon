@@ -737,6 +737,7 @@ func (s *RoSnapshots) Delete(fileName string) error {
 			sn.close()
 			idxsToRemove = append(idxsToRemove, i)
 			for _, f := range files {
+				fmt.Println(f)
 				if err = os.Remove(f); err != nil {
 					return false
 				}
