@@ -534,8 +534,8 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 	}
 
 	pruneAmount := uint64(cfg.syncConfig.SnapshotsPruneBlockNumber)
-	if pruneAmount < snaptype.Erigon2MergeLimit*3 {
-		pruneAmount = snaptype.Erigon2MergeLimit * 3
+	if pruneAmount < snaptype.Erigon2MergeLimit {
+		pruneAmount = snaptype.Erigon2MergeLimit
 	}
 	pruneAmount += pruneAmount % snaptype.Erigon2MergeLimit
 
