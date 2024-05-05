@@ -555,7 +555,6 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 	minStepsToKeep += minStepsToKeep % 64
 
 	snapshotFileNames := cfg.blockReader.FrozenFiles()
-	erigon3SnapshotFileNames := cfg.agg.Files()
 
 	// Prune blocks snapshots if necessary
 	for _, file := range snapshotFileNames {
@@ -583,33 +582,6 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 		}
 
 	}
-	_ = erigon3SnapshotFileNames
-	// Prune E3 snapshots if necessary
-	// for _, file := range erigon3SnapshotFileNames {
-	// 	if !cfg.syncConfig.SnapshotPrune || headNumber == 0 || !cfg.historyV3 || strings.HasPrefix(file, "domain/") {
-	// 		continue
-	// 	}
-
-	// 	// parse the file name to get the info
-	// 	info, _, ok := snaptype.ParseFileName(cfg.dirs.Snap, file)
-	// 	if !ok {
-	// 		continue
-	// 	}
-	// 	if info.To-info.From != 64 {
-	// 		continue
-	// 	}
-	// 	if info.To >= minStepsToKeep {
-	// 		continue
-	// 	}
-	// 	if _, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: []string{file}}); err != nil {
-	// 		return err
-	// 	}
-	// 	if err := os.Remove(filepath.Join(cfg.dirs.Snap, file)); err != nil {
-	// 		return err
-	// 	}
-	// }
-
-	// Get rid of snapshots that are no longer needed according to the pruning rules
 
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {

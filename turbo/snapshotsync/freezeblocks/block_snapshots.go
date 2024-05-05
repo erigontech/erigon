@@ -727,6 +727,7 @@ func (s *RoSnapshots) Delete(fileName string) error {
 	defer s.unlockSegments()
 	var err error
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
+		idxsToRemove := []int{}
 		for i, sn := range value.segments {
 			if sn.Decompressor == nil {
 				continue
@@ -736,12 +737,15 @@ func (s *RoSnapshots) Delete(fileName string) error {
 			}
 			files := sn.openFiles()
 			sn.close()
-			value.segments[i] = nil
+			idxsToRemove = append(idxsToRemove, i)
 			for _, f := range files {
 				if err = os.Remove(f); err != nil {
 					return false
 				}
 			}
+		}
+		for i := len(idxsToRemove) - 1; i >= 0; i-- {
+			value.segments = append(value.segments[:idxsToRemove[i]], value.segments[idxsToRemove[i]+1:]...)
 		}
 		return true
 	})
