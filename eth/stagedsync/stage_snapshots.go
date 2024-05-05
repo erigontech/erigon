@@ -567,8 +567,7 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 		if !ok {
 			continue
 		}
-		// skip if minBlockNumberToKeep is in range [info.From, headNumber]
-		if info.From <= minBlockNumberToKeep && minBlockNumberToKeep <= info.To {
+		if info.To >= minBlockNumberToKeep {
 			continue
 		}
 		if info.To-info.From != snaptype.Erigon2MergeLimit {
