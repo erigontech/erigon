@@ -486,8 +486,8 @@ func (d *Decompressor) DisableReadAhead() {
 		return
 	}
 
-	if dbg.SnapshotMadvRnd {
-		_ = mmap.MadviseRandom(d.mmapHandle1)
+	if !dbg.SnapshotMadvRnd { // all files
+		_ = mmap.MadviseNormal(d.mmapHandle1)
 		return
 	}
 
@@ -495,11 +495,10 @@ func (d *Decompressor) DisableReadAhead() {
 		types := strings.Split(dbg.KvMadvNormal, ",")
 		for _, t := range types {
 			if strings.Contains(d.FileName(), t) {
-				_ = mmap.MadviseRandom(d.mmapHandle1)
+				_ = mmap.MadviseNormal(d.mmapHandle1)
 				return
 			}
 		}
-		return
 	}
 
 	if dbg.KvMadvNormalNoLastLvl != "" && strings.HasSuffix(d.FileName(), ".kv") {
@@ -507,14 +506,14 @@ func (d *Decompressor) DisableReadAhead() {
 		for _, t := range types {
 			//v1-storage.0-1024.kv
 			if strings.Contains(d.FileName(), t) && !strings.Contains(d.FileName(), t+".0-") {
-				_ = mmap.MadviseRandom(d.mmapHandle1)
+				_ = mmap.MadviseNormal(d.mmapHandle1)
 				return
 			}
 		}
 		return
 	}
 
-	_ = mmap.MadviseNormal(d.mmapHandle1)
+	_ = mmap.MadviseRandom(d.mmapHandle1)
 }
 
 func (d *Decompressor) EnableReadAhead() *Decompressor {
