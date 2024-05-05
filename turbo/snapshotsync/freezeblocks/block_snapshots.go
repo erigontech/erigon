@@ -488,11 +488,10 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 	var segmentsMaxSet bool
 
 	for _, fName := range fileNames {
-		f, _, ok := snaptype.ParseFileName(s.dir, fName)
-		if !ok {
+		f, isState, ok := snaptype.ParseFileName(s.dir, fName)
+		if !ok || isState {
 			continue
 		}
-
 		if !s.HasType(f.Type) {
 			continue
 		}
