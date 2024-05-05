@@ -576,6 +576,7 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 		if _, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: []string{file}}); err != nil {
 			return err
 		}
+		fmt.Println(file)
 		if err := cfg.blockReader.Snapshots().Delete(file); err != nil {
 			return err
 		}
