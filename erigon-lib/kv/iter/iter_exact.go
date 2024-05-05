@@ -218,39 +218,22 @@ func (m *WrapKVSIter) Close() {
 }
 
 type WrapKVIter struct {
-	x              KVS
-	xHasNext       bool
-	xNextK, xNextV []byte
-	err            error
+	x KVS
 }
 
 func WrapKV(x KVS) KV {
 	if x == nil {
 		return EmptyKV
 	}
-	m := &WrapKVIter{x: x}
-	m.advance()
-	return m
+	return &WrapKVIter{x: x}
 }
 
 func (m *WrapKVIter) HasNext() bool {
-	return m.err != nil || m.xHasNext
+	return m.x.HasNext()
 }
-func (m *WrapKVIter) advance() {
-	if m.err != nil {
-		return
-	}
-	m.xHasNext = m.x.HasNext()
-	if m.xHasNext {
-		m.xNextK, m.xNextV, _, m.err = m.x.Next()
-	}
-}
+
 func (m *WrapKVIter) Next() ([]byte, []byte, error) {
-	if m.err != nil {
-		return nil, nil, m.err
-	}
-	k, v, err := m.xNextK, m.xNextV, m.err
-	m.advance()
+	k, v, _, err := m.x.Next()
 	return k, v, err
 }
 
