@@ -82,9 +82,17 @@ func runUI(cli *cli.Context) error {
 	}
 
 	// Use the file system to serve static files
+	url := "http://" + cli.String(flags.DebugURLFlag.Name)
+	addr := DiagAddress{
+		Address: url,
+	}
 
-	r.Get("/diagaddr", writeDiagAdderss)
+	//r.Get("/diagaddr", writeDiagAdderss(addr))
 	r.Handle("/data", http.StripPrefix("/data", fs))
+
+	r.HandleFunc("/diagaddr", func(w http.ResponseWriter, r *http.Request) {
+		writeDiagAdderss(w, addr)
+	})
 
 	srv := &http.Server{
 		Addr:              fmt.Sprintf("%s:%d", listenAddr, listenPort),
@@ -117,13 +125,9 @@ type DiagAddress struct {
 	Address string `json:"address"`
 }
 
-func writeDiagAdderss(w http.ResponseWriter, r *http.Request) {
+func writeDiagAdderss(w http.ResponseWriter, addr DiagAddress) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Content-Type", "application/json")
-
-	addr := DiagAddress{
-		Address: "http://127.0.0.1:6060",
-	}
 
 	if err := json.NewEncoder(w).Encode(addr); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
