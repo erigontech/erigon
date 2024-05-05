@@ -491,7 +491,7 @@ func (d *Decompressor) DisableReadAhead() {
 		return
 	}
 
-	if dbg.KvMadvNormal != "" && strings.HasSuffix(d.FileName(), ".kv") {
+	if dbg.KvMadvNormal != "" && strings.HasSuffix(d.FileName(), ".kv") { //all .kv files
 		types := strings.Split(dbg.KvMadvNormal, ",")
 		for _, t := range types {
 			if strings.Contains(d.FileName(), t) {
@@ -501,10 +501,9 @@ func (d *Decompressor) DisableReadAhead() {
 		}
 	}
 
-	if dbg.KvMadvNormalNoLastLvl != "" && strings.HasSuffix(d.FileName(), ".kv") {
+	if dbg.KvMadvNormalNoLastLvl != "" && strings.HasSuffix(d.FileName(), ".kv") { //all .kv files - except last-level `v1-storage.0-1024.kv` - starting from step 0
 		types := strings.Split(dbg.KvMadvNormal, ",")
 		for _, t := range types {
-			//v1-storage.0-1024.kv
 			if strings.Contains(d.FileName(), t) && !strings.Contains(d.FileName(), t+".0-") {
 				_ = mmap.MadviseNormal(d.mmapHandle1)
 				return
