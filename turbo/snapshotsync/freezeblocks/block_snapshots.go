@@ -721,6 +721,7 @@ func (s *RoSnapshots) Delete(fileName string) error {
 	if s == nil {
 		return nil
 	}
+	fmt.Println(fileName)
 
 	_, fName := filepath.Split(fileName)
 	s.lockSegments()
