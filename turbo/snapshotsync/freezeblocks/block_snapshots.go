@@ -723,7 +723,6 @@ func (s *RoSnapshots) Delete(fileName string) error {
 
 	_, fName := filepath.Split(fileName)
 	s.lockSegments()
-	defer s.unlockSegments()
 	var err error
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
 		idxsToRemove := []int{}
@@ -748,8 +747,12 @@ func (s *RoSnapshots) Delete(fileName string) error {
 		}
 		return true
 	})
+	s.unlockSegments()
+	if err != nil {
+		return fmt.Errorf("can't delete file: %w", err)
+	}
+	return s.ReopenFolder()
 
-	return err
 }
 
 func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) error {
