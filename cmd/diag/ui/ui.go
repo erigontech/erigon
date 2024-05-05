@@ -8,11 +8,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/diagnostic-ui/ui"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/ledgerwatch/erigon/cmd/diag/flags"
-	"github.com/ledgerwatch/erigon/cmd/diag/ui/web"
 	"github.com/urfave/cli/v2"
 )
 
@@ -48,7 +49,7 @@ func runUI(cli *cli.Context) error {
 	listenAddr := "127.0.0.1"
 	listenPort := 8080
 
-	assets, _ := web.Assets()
+	assets, _ := ui.Assets()
 	fs := http.FileServer(http.FS(assets))
 
 	r := chi.NewRouter()
