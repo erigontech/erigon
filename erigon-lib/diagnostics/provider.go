@@ -154,7 +154,7 @@ func Send[I Info](info I) {
 			return
 		}
 
-		log.Debug("diagnostic Send: context canceled error", ctx.Err())
+		log.Debug("diagnostic send failed: context error", "err", ctx.Err())
 	}
 
 	cval := ctx.Value(ckChan)
@@ -169,7 +169,11 @@ func Send[I Info](info I) {
 			}
 		}
 	} else {
-		log.Debug("unexpected channel type: %T", cval)
+		if cval == nil {
+			return
+		}
+
+		log.Debug(fmt.Sprintf("unexpected channel type: %T", cval))
 	}
 }
 

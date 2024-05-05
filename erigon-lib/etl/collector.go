@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
@@ -61,7 +62,7 @@ func NewCollectorFromFiles(logPrefix, tmpdir string, logger log.Logger) (*Collec
 	if _, err := os.Stat(tmpdir); os.IsNotExist(err) {
 		return nil, nil
 	}
-	dirEntries, err := os.ReadDir(tmpdir)
+	dirEntries, err := dir.ReadDir(tmpdir)
 	if err != nil {
 		return nil, fmt.Errorf("collector from files - reading directory %s: %w", tmpdir, err)
 	}

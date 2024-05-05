@@ -36,10 +36,10 @@ type BlockDownloader interface {
 func NewBlockDownloader(
 	logger log.Logger,
 	p2pService p2p.Service,
-	heimdall heimdall.HeimdallNoStore,
+	heimdall heimdall.Heimdall,
 	headersVerifier AccumulatedHeadersVerifier,
 	blocksVerifier BlocksVerifier,
-	storage Storage,
+	store Store,
 ) BlockDownloader {
 	return newBlockDownloader(
 		logger,
@@ -47,7 +47,7 @@ func NewBlockDownloader(
 		heimdall,
 		headersVerifier,
 		blocksVerifier,
-		storage,
+		store,
 		notEnoughPeersBackOffDuration,
 		blockDownloaderEstimatedRamPerWorker.WorkersByRAMOnly(),
 	)
@@ -56,10 +56,10 @@ func NewBlockDownloader(
 func newBlockDownloader(
 	logger log.Logger,
 	p2pService p2p.Service,
-	heimdall heimdall.HeimdallNoStore,
+	heimdall heimdall.Heimdall,
 	headersVerifier AccumulatedHeadersVerifier,
 	blocksVerifier BlocksVerifier,
-	storage Storage,
+	store Store,
 	notEnoughPeersBackOffDuration time.Duration,
 	maxWorkers int,
 ) *blockDownloader {
@@ -69,7 +69,7 @@ func newBlockDownloader(
 		heimdall:                      heimdall,
 		headersVerifier:               headersVerifier,
 		blocksVerifier:                blocksVerifier,
-		storage:                       storage,
+		store:                         store,
 		notEnoughPeersBackOffDuration: notEnoughPeersBackOffDuration,
 		maxWorkers:                    maxWorkers,
 	}
@@ -78,10 +78,10 @@ func newBlockDownloader(
 type blockDownloader struct {
 	logger                        log.Logger
 	p2pService                    p2p.Service
-	heimdall                      heimdall.HeimdallNoStore
+	heimdall                      heimdall.Heimdall
 	headersVerifier               AccumulatedHeadersVerifier
 	blocksVerifier                BlocksVerifier
-	storage                       Storage
+	store                         Store
 	notEnoughPeersBackOffDuration time.Duration
 	maxWorkers                    int
 }
@@ -254,7 +254,7 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 
 		batchFetchStartTime = time.Now() // reset for next time
 
-		if err := d.storage.InsertBlocks(ctx, blocks); err != nil {
+		if err := d.store.InsertBlocks(ctx, blocks); err != nil {
 			return nil, err
 		}
 

@@ -34,8 +34,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
+	types "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
@@ -91,7 +91,7 @@ type threadSafeTx struct {
 	sync.Mutex
 }
 
-//go:generate mockgen -destination=./snapshots_mock.go -package=remotedbserver . Snapshots
+//go:generate mockgen -typed=true -destination=./snapshots_mock.go -package=remotedbserver . Snapshots
 type Snapshots interface {
 	Files() []string
 }
@@ -604,6 +604,7 @@ func (s *KvServer) IndexRange(_ context.Context, req *remote.IndexRangeReq) (*re
 		if err != nil {
 			return err
 		}
+		defer it.Close()
 		for it.HasNext() {
 			v, err := it.Next()
 			if err != nil {

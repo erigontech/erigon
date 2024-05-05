@@ -228,6 +228,7 @@ func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, from, to uint64, sto
 		if err != nil {
 			return err
 		}
+		defer it.Close()
 		for it.HasNext() {
 			k, v, err := it.Next()
 			if err != nil {
@@ -257,6 +258,7 @@ func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, from, to uint64, sto
 	if err != nil {
 		return err
 	}
+	defer it.Close()
 	for it.HasNext() {
 		k, v, err := it.Next()
 		if err != nil {
@@ -380,6 +382,7 @@ func (p *HashPromoter) UnwindOnHistoryV3(logPrefix string, unwindFrom, unwindTo 
 		if err != nil {
 			return err
 		}
+		defer it.Close()
 		for it.HasNext() {
 			k, _, err := it.Next()
 			if err != nil {
@@ -413,6 +416,7 @@ func (p *HashPromoter) UnwindOnHistoryV3(logPrefix string, unwindFrom, unwindTo 
 	if err != nil {
 		return err
 	}
+	defer it.Close()
 	for it.HasNext() {
 		k, v, err := it.Next()
 		if err != nil {

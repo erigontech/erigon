@@ -4,12 +4,11 @@ Erigon is an implementation of Ethereum (execution layer with embeddable consens
 frontier. [Archive Node](https://ethereum.org/en/developers/docs/nodes-and-clients/archive-nodes/#what-is-an-archive-node)
 by default.
 
-An accessible and complete version of the documentation is available at **[erigon.gitbook.io](https://erigon.gitbook.io)**.
+An accessible and complete version of the documentation is available at **[erigon.gitbook.io](https://erigon.gitbook.io)
+**.
 <br>
 
-![Build status](https://github.com/ledgerwatch/erigon/actions/workflows/ci.yml/badge.svg)
-
-![Coverage](https://gist.githubusercontent.com/revitteth/ee38e9beb22353eef6b88f2ad6ed7aa9/raw/badge.svg)
+![Build status](https://github.com/ledgerwatch/erigon/actions/workflows/ci.yml/badge.svg) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=ledgerwatch_erigon&metric=coverage)](https://sonarcloud.io/summary/new_code?id=ledgerwatch_erigon)
 
 <!--ts-->
 
@@ -55,15 +54,18 @@ System Requirements
 ===================
 
 * For an Archive node of Ethereum Mainnet we recommend >=3.5TB storage space: 2.3TiB state (as of March 2024),
-  643GiB snapshots (can symlink or mount folder `<datadir>/snapshots` to another disk), 200GB temp files (can symlink or mount folder `<datadir>/temp` to another disk). Ethereum Mainnet Full node (
-  see `--prune*` flags): 1.1TiB (March 2024).
+  643GiB snapshots (can symlink or mount folder `<datadir>/snapshots` to another disk), 200GB temp files (can symlink or
+  mount folder `<datadir>/temp` to another disk).
+  Ethereum Mainnet Full node (see [Pruned Node][pruned_node]): 1.5TiB not including temp files (April 2024).
 
-* Goerli Full node (see `--prune*` flags): 189GB on Beta, 114GB on Alpha (April 2022).
+* Goerli Full node (see [Pruned Node][pruned_node]): 189GB on Beta, 114GB on Alpha (April 2022).
 
-* Gnosis Chain Archive: 1.7TiB (March 2024). Gnosis Chain Full node (`--prune=hrtc` flag): 530GiB (March 2024).
+* Gnosis Chain Archive: 1.7TiB (March 2024).
+  Gnosis Chain Full node (see [Pruned Node][pruned_node]): 530GiB (March 2024).
 
-* Polygon Mainnet Archive: 8.5TiB (December 2023). `--prune.*.older 15768000`: 5.1Tb (September 2023). Polygon Mumbai Archive:
-  1TB. (April 2022).
+* Polygon Mainnet Archive: 8.5TiB (December 2023).
+  Polygon Mainnet Full node (see [Pruned Node][pruned_node]) with `--prune.*.older 15768000`: 5.1Tb (September 2023).
+  Polygon Mumbai Archive: 1TB. (April 2022).
 
 SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind.
 Bear in mind that SSD performance deteriorates when close to capacity.
@@ -74,6 +76,8 @@ RAM: >=16GB, 64-bit architecture.
 
 <code>🔬 more details on disk storage [here](https://erigon.substack.com/p/disk-footprint-changes-in-new-erigon?s=r)
 and [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space).</code>
+
+[pruned_node]: https://erigon.gitbook.io/erigon/basic-usage/usage/type-of-node#full-node-or-pruned-node
 
 Usage
 =====
@@ -96,7 +100,7 @@ For building the bleeding edge development branch:
 ```sh
 git clone --recurse-submodules https://github.com/ledgerwatch/erigon.git
 cd erigon
-git checkout devel
+git checkout main
 make erigon
 ./build/bin/erigon
 ```
@@ -107,7 +111,7 @@ download speed by flag `--torrent.download.rate=20mb`. <code>🔬 See [Downloade
 
 Use `--datadir` to choose where to store data.
 
-Use `--chain=gnosis` for [Gnosis Chain](https://www.gnosis.io/), `--chain=bor-mainnet` for Polygon Mainnet, 
+Use `--chain=gnosis` for [Gnosis Chain](https://www.gnosis.io/), `--chain=bor-mainnet` for Polygon Mainnet,
 `--chain=mumbai` for Polygon Mumbai and `--chain=amoy` for Polygon Amoy.
 For Gnosis Chain you need a [Consensus Layer](#beacon-chain-consensus-layer) client alongside
 Erigon (https://docs.gnosischain.com/node/manual/beacon).
@@ -199,7 +203,6 @@ Support only remote-miners.
   , `--miner.gastarget`
 * JSON-RPC supports methods: eth_coinbase , eth_hashrate, eth_mining, eth_getWork, eth_submitWork, eth_submitHashrate
 * JSON-RPC supports websocket methods: newPendingTransaction
-
 
 <code> 🔬 Detailed explanation is [here](/docs/mining.md).</code>
 
@@ -310,23 +313,31 @@ secret path created by Erigon.
 
 ### Caplin
 
-Caplin is a full-fledged validating Consensus Client like Prysm, Lighthouse, Teku, Nimbus and Lodestar. Its goal is: 
+Caplin is a full-fledged validating Consensus Client like Prysm, Lighthouse, Teku, Nimbus and Lodestar. Its goal is:
 
 * provide better stability
 * Validation of the chain
 * Stay in sync
 * keep the execution of blocks on chain tip
-* serve the  Beacon API using a fast and compact data model alongside low CPU and memory usage.
+* serve the Beacon API using a fast and compact data model alongside low CPU and memory usage.
 
- The main reason why developed a new Consensus Layer is to experiment with the possible benefits that could come with it.  For example, The Engine API does not work well with Erigon. The Engine API sends data one block at a time, which does not suit how Erigon works. Erigon is designed to handle many blocks simultaneously and needs to sort and process data efficiently. Therefore, it would be better for Erigon to handle the blocks independently instead of relying on the Engine API.
+The main reason why developed a new Consensus Layer is to experiment with the possible benefits that could come with it.
+For example, The Engine API does not work well with Erigon. The Engine API sends data one block at a time, which does
+not suit how Erigon works. Erigon is designed to handle many blocks simultaneously and needs to sort and process data
+efficiently. Therefore, it would be better for Erigon to handle the blocks independently instead of relying on the
+Engine API.
 
 #### Caplin's Usage.
 
-Caplin can be enabled through the `--internalcl` flag. from that point on, an external Consensus Layer will not be need anymore.
+Caplin can be enabled through the `--internalcl` flag. from that point on, an external Consensus Layer will not be need
+anymore.
 
-Caplin also has an archivial mode for historical states and blocks. it can be enabled through the `--caplin.archive` flag.
+Caplin also has an archivial mode for historical states and blocks. it can be enabled through the `--caplin.archive`
+flag.
 In order to enable the caplin's Beacon API, the flag `--beacon.api=<namespaces>` must be added.
-e.g: `--beacon.api=beacon,builder,config,debug,node,validator,lighthouse` will enable all endpoints. **NOTE: Caplin is not staking-ready so aggregation endpoints are still to be implemented. Additionally enabling the Beacon API will lead to a 6 GB higher RAM usage.
+e.g: `--beacon.api=beacon,builder,config,debug,node,validator,lighthouse` will enable all endpoints. **NOTE: Caplin is
+not staking-ready so aggregation endpoints are still to be implemented. Additionally enabling the Beacon API will lead
+to a 6 GB higher RAM usage.
 
 ### Multiple Instances / One Machine
 
@@ -572,20 +583,21 @@ node.
 
 #### `caplin` ports
 
-| Component | Port | Protocol | Purpose          | Should Expose |
-|-----------|------|----------|------------------|---------------|
-| sentinel  | 4000 | UDP      | Peering          | Public        |
-| sentinel  | 4001 | TCP      | Peering          | Public        |
+| Component | Port | Protocol | Purpose | Should Expose |
+|-----------|------|----------|---------|---------------|
+| sentinel  | 4000 | UDP      | Peering | Public        |
+| sentinel  | 4001 | TCP      | Peering | Public        |
 
 If you are using `--internalcl` aka `caplin` as your consensus client, then also look at the chart above
 
 #### `beaconAPI` ports
 
-| Component | Port | Protocol | Purpose          | Should Expose |
-|-----------|------|----------|------------------|---------------|
-| REST  | 5555 | TCP      | REST          | Public        |
+| Component | Port | Protocol | Purpose | Should Expose |
+|-----------|------|----------|---------|---------------|
+| REST      | 5555 | TCP      | REST    | Public        |
 
-If you are using `--internalcl` aka `caplin` as your consensus client and `--beacon.api` then also look at the chart above
+If you are using `--internalcl` aka `caplin` as your consensus client and `--beacon.api` then also look at the chart
+above
 
 #### `shared` ports
 
@@ -634,7 +646,8 @@ Running erigon from `build/bin` as a separate user might produce an error:
 
     error while loading shared libraries: libsilkworm_capi.so: cannot open shared object file: No such file or directory
 
-The library needs to be *installed* for another user using `make DIST=<path> install`. You could use `$HOME/erigon` or `/opt/erigon` as the installation path, for example:
+The library needs to be *installed* for another user using `make DIST=<path> install`. You could use `$HOME/erigon`
+or `/opt/erigon` as the installation path, for example:
 
     make DIST=/opt/erigon install
 
@@ -673,7 +686,7 @@ https://github.com/mathMakesArt/Erigon-on-RPi-4
 
 ### How to change db pagesize
 
-[post](https://github.com/ledgerwatch/erigon/blob/devel/cmd/integration/Readme.md#copy-data-to-another-db)
+[post](https://github.com/ledgerwatch/erigon/blob/main/cmd/integration/Readme.md#copy-data-to-another-db)
 
 
 Getting in touch
@@ -749,9 +762,10 @@ XDG_DATA_HOME=/preferred/data/folder DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=
 ```
 
 ---------
+
 ## Erigon3 user's guide
 
-Git branch `e35`. Just start erigon as you usually do.
+Git branch `main`. Just start erigon as you usually do.
 
 RAM requirement is higher: 32gb and better 64gb. We will work on this topic a bit later.
 
@@ -812,12 +826,38 @@ datadir
 #   - if still not enough: `history` 
 ```
 
-### E3 public test goals
+### E3 datadir size
 
-- to gather RPC-usability feedback:
-  - E3 doesn't store receipts, using totally different indices, etc...
-  - It may behave different on warious stress-tests
-- to gather datadadir-usability feedback
-- discover bad data
-  - re-gen of snapshts takes much time, better fix data-bugs in-advance
+```
+# eth-mainnet - archive - April 2024
 
+du -hsc /erigon/* 
+6G  	/erigon/caplin
+80G 	/erigon/chaindata
+1.7T	/erigon/snapshots
+1.8T	total
+
+du -hsc /erigon/snapshots/* 
+100G 	/erigon/snapshots/accessor
+230G	/erigon/snapshots/domain
+250G	/erigon/snapshots/history
+400G	/erigon/snapshots/idx
+1.7T	total
+```
+
+```
+# bor-mainnet - archive - April 2024
+
+du -hsc /erigon/* 
+160M	/erigon/bor
+60G 	/erigon/chaindata
+3.7T	/erigon/snapshots
+3.8T	total
+
+du -hsc /erigon/snapshots/* 
+24G	/erigon/snapshots/accessor
+680G	/erigon/snapshots/domain
+580G	/erigon/snapshots/history
+1.3T	/erigon/snapshots/idx
+3.7T	total
+```

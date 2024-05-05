@@ -60,6 +60,8 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		nil, // loopBreakCheck
 		nil, // recent bor snapshots cached
 		nil, // signatures lru cache
+		false,
+		nil,
 	)
 	stateSyncStages := stagedsync.DefaultStages(
 		ctx,
@@ -90,9 +92,9 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		ctx,
 		stagedsync.MiningCreateBlockCfg{},
 		bhCfg,
+		stagedsync.ExecuteBlockCfg{},
+		stagedsync.SendersCfg{},
 		stagedsync.MiningExecCfg{},
-		stagedsync.HashStateCfg{},
-		stagedsync.TrieCfg{},
 		stagedsync.MiningFinishCfg{},
 	)
 	miningSync := stagedsync.New(

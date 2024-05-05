@@ -206,6 +206,7 @@ func doWarmup(ctx context.Context, chaindata string, bucket string, logger log.L
 					if err != nil {
 						return err
 					}
+					defer it.Close()
 					for it.HasNext() {
 						_, v, err := it.Next()
 						if len(v) > 0 {

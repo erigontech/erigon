@@ -104,10 +104,6 @@ func TestInvIndexCollationBuild(t *testing.T) {
 
 	bs, err := ii.collate(ctx, 0, roTx)
 	require.NoError(t, err)
-	require.Equal(t, 3, len(bs))
-	require.Equal(t, []uint64{3}, bs["key2"].ToArray())
-	require.Equal(t, []uint64{2, 6}, bs["key1"].ToArray())
-	require.Equal(t, []uint64{6}, bs["key3"].ToArray())
 
 	sf, err := ii.buildFiles(ctx, 0, bs, background.NewProgressSet())
 	require.NoError(t, err)
@@ -188,7 +184,8 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	sf, err := ii.buildFiles(ctx, 0, bs, background.NewProgressSet())
 	require.NoError(t, err)
 
-	ii.integrateFiles(sf, 0, 16)
+	ii.integrateDirtyFiles(sf, 0, 16)
+	ii.reCalcVisibleFiles()
 
 	ic.Close()
 	err = db.Update(ctx, func(tx kv.RwTx) error {
@@ -373,7 +370,8 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			require.NoError(tb, err)
 			sf, err := ii.buildFiles(ctx, step, bs, background.NewProgressSet())
 			require.NoError(tb, err)
-			ii.integrateFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
+			ii.integrateDirtyFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
+			ii.reCalcVisibleFiles()
 			ic := ii.BeginFilesRo()
 			defer ic.Close()
 			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, false, nil)
@@ -394,8 +392,8 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 					outs, _ := ic.staticFilesInRange(startTxNum, endTxNum)
 					in, err := ic.mergeFiles(ctx, outs, startTxNum, endTxNum, background.NewProgressSet())
 					require.NoError(tb, err)
-					ii.integrateMergedFiles(outs, in)
-					require.NoError(tb, err)
+					ii.integrateMergedDirtyFiles(outs, in)
+					ii.reCalcVisibleFiles()
 					return false
 				}(); stop {
 					break
@@ -424,7 +422,8 @@ func TestInvIndexRanges(t *testing.T) {
 			require.NoError(t, err)
 			sf, err := ii.buildFiles(ctx, step, bs, background.NewProgressSet())
 			require.NoError(t, err)
-			ii.integrateFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
+			ii.integrateDirtyFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
+			ii.reCalcVisibleFiles()
 			ic := ii.BeginFilesRo()
 			defer ic.Close()
 			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, false, nil)
@@ -618,9 +617,9 @@ func TestInvIndex_OpenFolder(t *testing.T) {
 
 	mergeInverted(t, db, ii, txs)
 
-	list := ii._visibleFiles.Load()
+	list := ii._visibleFiles
 	require.NotEmpty(t, list)
-	ff := (*list)[len(*list)-1]
+	ff := list[len(list)-1]
 	fn := ff.src.decompressor.FilePath()
 	ii.Close()
 

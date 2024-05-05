@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/ethdb"
+	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -545,6 +546,8 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	if err != nil {
 		return err
 	}
+	it := rawdbv3.TxNums2BlockNums(dbtx, allTxs, order.Asc)
+	defer it.Close()
 
 	chainConfig, err := api.chainConfig(ctx, dbtx)
 	if err != nil {
@@ -569,7 +572,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	nSeen := uint64(0)
 	nExported := uint64(0)
 	includeAll := len(fromAddresses) == 0 && len(toAddresses) == 0
-	it := rawdbv3.TxNums2BlockNums(dbtx, allTxs, order.Asc)
 
 	var lastBlockHash common.Hash
 	var lastHeader *types.Header
@@ -912,13 +914,13 @@ func (api *TraceAPIImpl) callManyTransactions(
 	if cfg.Bor != nil {
 		// check if this block has state sync txn
 		blockHash := block.Hash()
-		borStateSyncTxnHash = types.ComputeBorTxHash(blockNumber, blockHash)
+		borStateSyncTxnHash = bortypes.ComputeBorTxHash(blockNumber, blockHash)
 		_, ok, err := api._blockReader.EventLookup(ctx, dbtx, borStateSyncTxnHash)
 		if err != nil {
 			return nil, nil, err
 		}
 		if ok {
-			borStateSyncTxn = types.NewBorTransaction()
+			borStateSyncTxn = bortypes.NewBorTransaction()
 			txs = append(txs, borStateSyncTxn)
 		}
 	}
