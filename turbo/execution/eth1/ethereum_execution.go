@@ -151,7 +151,6 @@ func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, b
 
 func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execution.ValidationRequest) (*execution.ValidationReceipt, error) {
 	if !e.semaphore.TryAcquire(1) {
-		e.logger.Warn("ethereumExecutionModule.ValidateChain: ExecutionStatus_Busy")
 		return &execution.ValidationReceipt{
 			LatestValidHash:  gointerfaces.ConvertHashToH256(libcommon.Hash{}),
 			ValidationStatus: execution.ExecutionStatus_Busy,
@@ -212,7 +211,6 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		}
 	}
 	if isInvalidChain {
-		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain is invalid", "hash", libcommon.Hash(blockHash))
 		validationStatus = execution.ExecutionStatus_BadBlock
 	}
 	validationReceipt := &execution.ValidationReceipt{
@@ -269,7 +267,6 @@ func (e *EthereumExecutionModule) Start(ctx context.Context) {
 
 func (e *EthereumExecutionModule) Ready(context.Context, *emptypb.Empty) (*execution.ReadyResponse, error) {
 	if !e.semaphore.TryAcquire(1) {
-		e.logger.Warn("ethereumExecutionModule.Ready: ExecutionStatus_Busy")
 		return &execution.ReadyResponse{Ready: false}, nil
 	}
 	defer e.semaphore.Release(1)
