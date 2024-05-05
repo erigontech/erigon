@@ -127,7 +127,7 @@ type BlockSnapshots interface {
 // BlockRetire - freezing blocks: moving old data from DB to snapshot files
 type BlockRetire interface {
 	PruneAncientBlocks(tx kv.RwTx, limit int) error
-	RetireBlocksInBackground(ctx context.Context, miBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []DownloadRequest) error, onDelete func(l []string) error)
+	RetireBlocksInBackground(ctx context.Context, miBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []DownloadRequest) error, onDelete func(l []string) error, onFinishRetire func() error)
 	HasNewFrozenFiles() bool
 	BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier DBEventNotifier, cc *chain.Config) error
 	SetWorkers(workers int)

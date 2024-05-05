@@ -485,6 +485,8 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 				}
 
 				return nil
+			}, func() error {
+				return pruneBlockSnapshots(ctx, cfg, logger)
 			})
 
 			//cfg.agg.BuildFilesInBackground()
@@ -521,8 +523,21 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 		}
 	}
 
-	// Prune snapshots if necessary (remove .segs or idx files appropriatelly)
+	if !useExternalTx {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
 
+	return nil
+}
+
+func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logger) error {
+	tx, err := cfg.db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	// Prune snapshots if necessary (remove .segs or idx files appropriatelly)
 	headNumber := cfg.blockReader.FrozenBlocks()
 	executionProgress, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
@@ -577,34 +592,8 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 		if _, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: []string{file}}); err != nil {
 			return err
 		}
-		fmt.Println(file)
 		if err := cfg.blockReader.Snapshots().Delete(file); err != nil {
 			return err
-		}
-
-	}
-
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// removeBlockSnapshot removes all files related to the given block snapshot
-func removeBlockSnapshot(dir, name string) error {
-	prefix := strings.TrimSuffix(name, filepath.Ext(name))
-	files, err := os.ReadDir(dir)
-	if err != nil {
-		return err
-	}
-	for _, file := range files {
-		if strings.HasPrefix(file.Name(), prefix) {
-			if err := os.Remove(filepath.Join(dir, file.Name())); err != nil {
-				return err
-			}
 		}
 	}
 	return nil

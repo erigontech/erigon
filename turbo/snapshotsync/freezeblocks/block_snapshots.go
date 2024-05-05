@@ -273,7 +273,7 @@ type RoSnapshots struct {
 	// allows for pruning segments - this is the min availible segment
 	segmentsMin atomic.Uint64
 
-	mu sync.RWMutex
+	sem *semaphore.Weighted
 }
 
 // NewRoSnapshots - opens all snapshots. But to simplify everything:
@@ -291,7 +291,7 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 		segs.Set(snapType.Enum(), &segments{})
 	}
 
-	s := &RoSnapshots{dir: snapDir, cfg: cfg, segments: segs, logger: logger, types: types}
+	s := &RoSnapshots{dir: snapDir, cfg: cfg, segments: segs, logger: logger, types: types, sem: semaphore.NewWeighted(1)}
 	s.segmentsMin.Store(segmentsMin)
 
 	return s
@@ -681,8 +681,6 @@ func (s *RoSnapshots) removeOverlaps() error {
 }
 
 func (s *RoSnapshots) buildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier, dirs datadir.Dirs, cc *chain.Config, logger log.Logger) error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
 	if s.IndicesMax() >= s.SegmentsMax() {
 		return nil
 	}
@@ -714,15 +712,12 @@ func (s *RoSnapshots) buildMissedIndicesIfNeed(ctx context.Context, logPrefix st
 }
 
 func (s *RoSnapshots) Delete(fileName string) error {
-
 	if s == nil {
 		return nil
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.lockSegments()
 
 	_, fName := filepath.Split(fileName)
-	s.lockSegments()
 	var err error
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
 		idxsToRemove := []int{}
@@ -738,9 +733,6 @@ func (s *RoSnapshots) Delete(fileName string) error {
 			idxsToRemove = append(idxsToRemove, i)
 			for _, f := range files {
 				fmt.Println(f)
-				// if err = os.Remove(f); err != nil {
-				// 	return false
-				// }
 			}
 		}
 		for i := len(idxsToRemove) - 1; i >= 0; i-- {
@@ -760,8 +752,6 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 	if s == nil {
 		return nil
 	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
 
 	dir, tmpDir := dirs.Snap, dirs.Tmp
 	//log.Log(lvl, "[snapshots] Build indices", "from", min)
@@ -1382,7 +1372,7 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
 	return nil
 }
 
-func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error) {
+func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error, onFinishRetire func() error) {
 	if maxBlockNum > br.maxScheduledBlock.Load() {
 		br.maxScheduledBlock.Store(maxBlockNum)
 	}
@@ -1407,6 +1397,11 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum
 		if err != nil {
 			br.logger.Warn("[snapshots] retire blocks", "err", err)
 			return
+		}
+		if onFinishRetire != nil {
+			if err := onFinishRetire(); err != nil {
+				br.logger.Warn("[snapshots] retire blocks", "err", err)
+			}
 		}
 	}()
 }
