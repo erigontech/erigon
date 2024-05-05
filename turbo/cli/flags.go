@@ -11,7 +11,6 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
@@ -77,12 +76,6 @@ var (
 	If an item is NOT on the list - means NO pruning for this data.
 	Example: --prune=htc`,
 		Value: "disabled",
-	}
-
-	PruneSnapshotBlocksFlag = cli.Uint64Flag{
-		Name:  "prune.snapshot.blocks",
-		Usage: "Step for pruning snapshot data.",
-		Value: snaptype.Erigon2MergeLimit,
 	}
 	PruneHistoryFlag = cli.Uint64Flag{
 		Name:  "prune.h.older",
@@ -302,7 +295,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	}
 	prune := ctx.String(PruneFlag.Name)
 	cfg.SnapshotPrune = strings.Contains(prune, "h") // Pruning of snapshots is enabled with h.
-	cfg.SnapshotsPruneBlockNumber = ctx.Uint(PruneSnapshotBlocksFlag.Name)
+	cfg.SnapshotsPruneBlockNumber = ctx.Uint(PruneHistoryBeforeFlag.Name)
 
 	cfg.StateStream = !ctx.Bool(StateStreamDisableFlag.Name)
 	if ctx.String(BodyCacheLimitFlag.Name) != "" {
