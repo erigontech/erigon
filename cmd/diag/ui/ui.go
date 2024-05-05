@@ -17,6 +17,16 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
+var (
+	UIPortFlag = cli.IntFlag{
+		Name:     "ui.port",
+		Aliases:  []string{"up"},
+		Usage:    "UI port to listen on",
+		Required: false,
+		Value:    8080,
+	}
+)
+
 var Command = cli.Command{
 	Name:      "ui",
 	Action:    runUI,
@@ -26,6 +36,7 @@ var Command = cli.Command{
 	Flags: []cli.Flag{
 		&flags.DebugURLFlag,
 		&flags.OutputFlag,
+		&UIPortFlag,
 	},
 	Description: ``,
 }
@@ -47,7 +58,7 @@ func runUI(cli *cli.Context) error {
 	}
 
 	listenAddr := "127.0.0.1"
-	listenPort := 8080
+	listenPort := cli.Int(UIPortFlag.Name)
 
 	assets, _ := erigonwatch.UIFiles()
 	fs := http.FileServer(http.FS(assets))
