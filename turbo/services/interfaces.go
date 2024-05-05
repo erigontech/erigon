@@ -119,6 +119,7 @@ type BlockSnapshots interface {
 	ReopenSegments(types []snaptype.Type, allowGaps bool) error
 	SegmentsMax() uint64
 	SegmentsMin() uint64
+	Delete(fileName string) error
 	Types() []snaptype.Type
 	Close()
 }

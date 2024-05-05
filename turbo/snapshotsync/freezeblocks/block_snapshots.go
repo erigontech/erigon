@@ -272,6 +272,8 @@ type RoSnapshots struct {
 
 	// allows for pruning segments - this is the min availible segment
 	segmentsMin atomic.Uint64
+
+	mu sync.RWMutex
 }
 
 // NewRoSnapshots - opens all snapshots. But to simplify everything:
@@ -679,6 +681,8 @@ func (s *RoSnapshots) removeOverlaps() error {
 }
 
 func (s *RoSnapshots) buildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier, dirs datadir.Dirs, cc *chain.Config, logger log.Logger) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if s.IndicesMax() >= s.SegmentsMax() {
 		return nil
 	}
@@ -707,6 +711,42 @@ func (s *RoSnapshots) buildMissedIndicesIfNeed(ctx context.Context, logPrefix st
 		notifier.OnNewSnapshot()
 	}
 	return nil
+}
+
+func (s *RoSnapshots) Delete(fileName string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lockSegments()
+	defer s.unlockSegments()
+	if s == nil {
+		return nil
+	}
+
+	_, fName := filepath.Split(fileName)
+	s.lockSegments()
+	defer s.unlockSegments()
+	var err error
+	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
+		for i, sn := range value.segments {
+			if sn.Decompressor == nil {
+				continue
+			}
+			if sn.segType.FileName(sn.version, sn.from, sn.to) != fName {
+				continue
+			}
+			files := sn.openFiles()
+			sn.close()
+			value.segments[i] = nil
+			for _, f := range files {
+				if err = os.Remove(f); err != nil {
+					return false
+				}
+			}
+		}
+		return true
+	})
+
+	return err
 }
 
 func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) error {
