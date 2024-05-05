@@ -515,7 +515,6 @@ func (d *Decompressor) DisableReadAhead() {
 		return
 	}
 
-	fmt.Printf("rnd: %s\n", d.FileName())
 	_ = mmap.MadviseRandom(d.mmapHandle1)
 }
 
