@@ -379,6 +379,7 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 	_max := make([]uint64, len(s.Types()))
 	i := 0
 
+	fmt.Printf("[dbg] s.segments.Len(): %d\n", s.segments.Len())
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
 		for _, seg := range value.segments {
 			if !seg.IsIndexed() {
