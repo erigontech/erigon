@@ -375,23 +375,68 @@ func (s *RoSnapshots) EnableMadvWillNeed() *RoSnapshots {
 	return s
 }
 
+/*
 func (s *RoSnapshots) idxAvailability() uint64 {
-	// developers can add new types in future. and users will not have this type.
-	// but it doesno't mean - that they need re-index something.
-	_max := make([]uint64, 0, len(s.Types()))
+	var headers, bodies, txs uint64
+	for _, seg := range s.Headers.segments {
+		if seg.idxHeaderHash == nil {
+			break
+		}
+		headers = seg.ranges.to - 1
+	}
+	for _, seg := range s.Bodies.segments {
+		if seg.idxBodyNumber == nil {
+			break
+		}
+		bodies = seg.ranges.to - 1
+	}
+	for _, seg := range s.Txs.segments {
+		if seg.IdxTxnHash == nil || seg.IdxTxnHash2BlockNum == nil {
+			break
+		}
+		txs = seg.ranges.to - 1
+	}
+	return cmp.Min(headers, cmp.Min(bodies, txs))
+}
+*/
 
-	fmt.Printf("[dbg] types: %s\n", s.Types())
+func (s *RoSnapshots) idxAvailability() uint64 {
+	// Use-Cases:
+	//   1. developers can add new types in future. and users will not have files of this type
+	//   2. some types are network-specific. example: borevents exists only on Bor-consensus networks
+	//   3. user can manually remove 1 .idx file: `rm snapshots/v1-type1-0000-1000.idx`
+	//   4. user can manually remove all .idx files of given type: `rm snapshots/*type1*.idx`
+	amount := 0
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
-		fmt.Printf("[dbg] value.segments: %d\n", len(value.segments))
+		if !s.HasType(segtype.Type()) {
+			return true
+		}
+		if len(value.segments) == 0 {
+			return true
+		}
+		amount++
+		return true
+	})
+
+	_max := make([]uint64, amount)
+	var i = 0
+	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
+		if !s.HasType(segtype.Type()) {
+			return true
+		}
+		if len(value.segments) == 0 {
+			return true
+		}
+
 		for _, seg := range value.segments {
 			if !seg.IsIndexed() {
 				fmt.Printf("[dbg] break: %s\n", seg.FileName())
 				break
 			}
 
-			fmt.Printf("[dbg] add: %s, %s\n", seg.FileName(), seg.to-1)
-			_max = append(_max, seg.to-1)
+			_max[i] = seg.to - 1
 		}
+		i++
 		return true
 	})
 
