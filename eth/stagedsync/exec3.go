@@ -854,7 +854,8 @@ Loop:
 			case <-logEvery.C:
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
 				progress.Log(rs, in, rws, count, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB)
-				if rs.SizeEstimate() < commitThreshold || inMemExec {
+				// If we skip post evaluation, then we should compute root hash ASAP for fail-fast
+				if !skipPostEvaluation && (rs.SizeEstimate() < commitThreshold || inMemExec) {
 					break
 				}
 				var (
