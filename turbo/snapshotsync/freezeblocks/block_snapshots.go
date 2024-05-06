@@ -562,7 +562,6 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 	if segmentsMaxSet {
 		s.segmentsMax.Store(segmentsMax)
 	}
-	fmt.Printf("[dbg] reopen done: segmentsMax=%d, idxAvl=%d\n", segmentsMax, s.idxAvailability())
 	s.segmentsReady.Store(true)
 	s.idxMax.Store(s.idxAvailability())
 	s.indicesReady.Store(true)
