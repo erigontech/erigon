@@ -389,8 +389,8 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 				break
 			}
 
+			fmt.Printf("[dbg] add: %s, %s\n", seg.FileName(), seg.to-1)
 			_max = append(_max, seg.to-1)
-
 		}
 		return true
 	})
