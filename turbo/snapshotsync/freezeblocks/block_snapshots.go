@@ -314,7 +314,7 @@ func (s *RoSnapshots) LogStat(label string) {
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	s.logger.Info(fmt.Sprintf("[snapshots:%s] Blocks Stat", label),
-		"blocks", fmt.Sprintf("%dk", (s.BlocksAvailable()+1)/1000),
+		"blocks", fmt.Sprintf("%dk", (s.SegmentsMax()+1)/1000),
 		"indices", fmt.Sprintf("%dk", (s.IndicesMax()+1)/1000),
 		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 }
