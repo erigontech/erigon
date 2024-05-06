@@ -545,6 +545,7 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 			segtype.segments = append(segtype.segments, sn)
 		}
 
+		fmt.Printf("[dbg] reopen %s, open=%t\n", fName, open)
 		if open {
 			if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
 				return err
