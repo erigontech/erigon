@@ -464,6 +464,7 @@ func opGasprice(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	return nil, nil
 }
 
+// opBlockhash executes the BLOCKHASH opcode pre-EIP-2935
 func opBlockhash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	arg := scope.Stack.Peek()
 	arg64, overflow := arg.Uint64WithOverflow()
@@ -473,20 +474,6 @@ func opBlockhash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 	}
 	var upper, lower uint64
 	upper = interpreter.evm.Context.BlockNumber
-	if interpreter.evm.chainRules.IsPrague {
-		if arg64 >= upper || arg64+params.BlockHashHistoryServeWindow < upper {
-			arg.Clear()
-		} else {
-			storageSlot := libcommon.BytesToHash(uint256.NewInt(arg64 % params.BlockHashHistoryServeWindow).Bytes())
-			interpreter.evm.intraBlockState.GetState(
-				params.HistoryStorageAddress,
-				&storageSlot,
-				arg,
-			)
-		}
-		return nil, nil
-	}
-
 	if upper <= params.BlockHashOldWindow {
 		lower = 0
 	} else {
@@ -497,6 +484,38 @@ func opBlockhash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 	} else {
 		arg.Clear()
 	}
+	return nil, nil
+}
+
+// opBlockhash2935 executes for the BLOCKHASH opcode post EIP-2935 by returning the
+// corresponding hash for the blocknumber from the state, if within range.
+// The range is defined by [head - params.BlockHashHistoryServeWindow - 1, head - 1]
+// This should not be used without activating EIP-2935
+func opBlockhash2935(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	arg := scope.Stack.Peek()
+	refundAmt := params.ColdSloadCostEIP2929
+	arg64, overflow := arg.Uint64WithOverflow()
+	if overflow {
+		arg.Clear()
+	} else {
+		var upper uint64
+		upper = interpreter.evm.Context.BlockNumber
+		if arg64 >= upper || arg64+params.BlockHashHistoryServeWindow < upper {
+			arg.Clear()
+		} else {
+			storageSlot := libcommon.BytesToHash(uint256.NewInt(arg64 % params.BlockHashHistoryServeWindow).Bytes())
+			if _, slotMod := interpreter.evm.IntraBlockState().AddSlotToAccessList(params.HistoryStorageAddress, storageSlot); !slotMod {
+				refundAmt = params.ColdSloadCostEIP2929 - params.WarmStorageReadCostEIP2929
+			}
+			interpreter.evm.intraBlockState.GetState(
+				params.HistoryStorageAddress,
+				&storageSlot,
+				arg,
+			)
+		}
+	}
+	// The gas func for this charges max (ColdSloadCostEIP2929) gas, refunding the rest here
+	interpreter.evm.intraBlockState.AddRefund(refundAmt)
 	return nil, nil
 }
 

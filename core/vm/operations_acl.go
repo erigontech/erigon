@@ -235,3 +235,8 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 	}
 	return gasFunc
 }
+
+// gasOpBlockhashEIP2935 returns the max possible gas here, and refund the rest at its execute function
+func gasOpBlockhashEIP2935(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+	return params.ColdSloadCostEIP2929, nil
+}
