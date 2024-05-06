@@ -487,6 +487,8 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 	var segmentsMax uint64
 	var segmentsMaxSet bool
 
+	fmt.Printf("[dbg] reopen list %s\n", fileNames)
+
 	for _, fName := range fileNames {
 		f, isState, ok := snaptype.ParseFileName(s.dir, fName)
 		if !ok || isState {
