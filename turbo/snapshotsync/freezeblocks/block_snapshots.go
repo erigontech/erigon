@@ -375,37 +375,13 @@ func (s *RoSnapshots) EnableMadvWillNeed() *RoSnapshots {
 	return s
 }
 
-/*
-func (s *RoSnapshots) idxAvailability() uint64 {
-	var headers, bodies, txs uint64
-	for _, seg := range s.Headers.segments {
-		if seg.idxHeaderHash == nil {
-			break
-		}
-		headers = seg.ranges.to - 1
-	}
-	for _, seg := range s.Bodies.segments {
-		if seg.idxBodyNumber == nil {
-			break
-		}
-		bodies = seg.ranges.to - 1
-	}
-	for _, seg := range s.Txs.segments {
-		if seg.IdxTxnHash == nil || seg.IdxTxnHash2BlockNum == nil {
-			break
-		}
-		txs = seg.ranges.to - 1
-	}
-	return cmp.Min(headers, cmp.Min(bodies, txs))
-}
-*/
-
 func (s *RoSnapshots) idxAvailability() uint64 {
 	// Use-Cases:
 	//   1. developers can add new types in future. and users will not have files of this type
 	//   2. some types are network-specific. example: borevents exists only on Bor-consensus networks
 	//   3. user can manually remove 1 .idx file: `rm snapshots/v1-type1-0000-1000.idx`
 	//   4. user can manually remove all .idx files of given type: `rm snapshots/*type1*.idx`
+	//   5. snapshots may have different height: 10 headers, 10 bodies, 9 trancasctions (for example if `kill -9` came during files building/merge). still need index all 3 types.
 	amount := 0
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
 		if len(value.segments) == 0 || !s.HasType(segtype.Type()) {
