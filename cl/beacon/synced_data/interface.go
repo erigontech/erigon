@@ -7,9 +7,10 @@ import (
 
 //go:generate mockgen -typed=true -destination=./mock_services/synced_data_mock.go -package=mock_services . SyncedData
 type SyncedData interface {
-	OnHeadState(newState *state.CachingBeaconState) (err error)
+	OnHeadState(newState *state.CachingBeaconState) error
 	HeadState() *state.CachingBeaconState
 	HeadStateReader() abstract.BeaconStateReader
+	HeadStateMutator() abstract.BeaconStateMutator
 	Syncing() bool
 	HeadSlot() uint64
 }

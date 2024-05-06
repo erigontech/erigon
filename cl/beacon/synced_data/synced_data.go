@@ -52,6 +52,14 @@ func (s *SyncedDataManager) HeadStateReader() abstract.BeaconStateReader {
 	return headstate
 }
 
+func (s *SyncedDataManager) HeadStateMutator() abstract.BeaconStateMutator {
+	headstate := s.HeadState()
+	if headstate == nil {
+		return nil
+	}
+	return headstate
+}
+
 func (s *SyncedDataManager) Syncing() bool {
 	if !s.enabled {
 		return false

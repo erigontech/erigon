@@ -6,12 +6,12 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
+	mockState "github.com/ledgerwatch/erigon/cl/abstract/mock_services"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	mockSync "github.com/ledgerwatch/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	mockState "github.com/ledgerwatch/erigon/cl/phase1/core/state/mock_services"
 	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/pkg/errors"
