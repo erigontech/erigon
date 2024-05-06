@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	mockState "github.com/ledgerwatch/erigon/cl/abstract/mock_services"
 	mockSync "github.com/ledgerwatch/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -18,26 +17,6 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 )
-
-type mockFuncs struct {
-	ctrl *gomock.Controller
-}
-
-func (m *mockFuncs) ComputeSigningRoot(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ComputeSigningRoot", obj, domain)
-	ret0, _ := ret[0].([32]byte)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-func (m *mockFuncs) BlsVerify(pubkey, message, signature []byte) (bool, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "BlsVerify", pubkey, message, signature)
-	ret0, _ := ret[0].(bool)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
 
 type proposerSlashingTestSuite struct {
 	suite.Suite
@@ -61,7 +40,7 @@ func (t *proposerSlashingTestSuite) SetupTest() {
 		SlotsPerEpoch: 2,
 	}
 	t.proposerSlashingService = NewProposerSlashingService(*t.operationsPool, t.syncedData, t.beaconCfg, t.ethClock)
-
+	// mock global functions
 	t.mockFuncs = &mockFuncs{ctrl: t.gomockCtrl}
 	computeSigningRoot = t.mockFuncs.ComputeSigningRoot
 	blsVerify = t.mockFuncs.BlsVerify
