@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -313,8 +312,8 @@ func (s *RoSnapshots) BlocksAvailable() uint64 {
 func (s *RoSnapshots) LogStat(label string) {
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
-	s.logger.Info(fmt.Sprintf("[snapshots:%s] Blocks Stat", label),
-		"blocks", fmt.Sprintf("%dk", (s.BlocksAvailable()+1)/1000),
+	s.logger.Info(fmt.Sprintf("[snapshots:%s] Stat", label),
+		"blocks", fmt.Sprintf("%dk", (s.SegmentsMax()+1)/1000),
 		"indices", fmt.Sprintf("%dk", (s.IndicesMax()+1)/1000),
 		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 }
@@ -324,33 +323,6 @@ func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapcfg.Cfg) error {
 		return fmt.Errorf("app must wait until all expected snapshots are available. Expected: %d, Available: %d", cfg.ExpectBlocks, s.BlocksAvailable())
 	}
 	return nil
-}
-
-func (s *RoSnapshots) blocksAvailable(in snaptype.Type, indexed bool) uint64 {
-	if s == nil {
-		return 0
-	}
-
-	var max uint64
-
-	if segtype, ok := s.segments.Get(in.Enum()); ok {
-		if indexed {
-			for _, seg := range segtype.segments {
-				if !seg.IsIndexed() {
-					break
-				}
-
-				max = seg.to - 1
-			}
-		} else {
-			if seglen := len(segtype.segments); seglen > 0 {
-				max = segtype.segments[seglen-1].to
-			}
-		}
-
-	}
-
-	return max
 }
 
 func (s *RoSnapshots) Types() []snaptype.Type { return s.types }
@@ -402,48 +374,46 @@ func (s *RoSnapshots) EnableMadvWillNeed() *RoSnapshots {
 	return s
 }
 
+// minimax of existing indices
 func (s *RoSnapshots) idxAvailability() uint64 {
-	max := make([]uint64, 0, len(s.Types()))
-	i := 0
-
-	seglen := 0
-
+	// Use-Cases:
+	//   1. developers can add new types in future. and users will not have files of this type
+	//   2. some types are network-specific. example: borevents exists only on Bor-consensus networks
+	//   3. user can manually remove 1 .idx file: `rm snapshots/v1-type1-0000-1000.idx`
+	//   4. user can manually remove all .idx files of given type: `rm snapshots/*type1*.idx`
+	//   5. file-types may have different height: 10 headers, 10 bodies, 9 trancasctions (for example if `kill -9` came during files building/merge). still need index all 3 types.
+	amount := 0
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
-		if l := len(value.segments); l > seglen {
-			seglen = l
+		if len(value.segments) == 0 || !s.HasType(segtype.Type()) {
+			return true
 		}
+		amount++
 		return true
 	})
 
+	maximums := make([]uint64, amount)
+	var i int
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
-		if !s.HasType(segtype.Type()) {
+		if len(value.segments) == 0 || !s.HasType(segtype.Type()) {
 			return true
 		}
-
-		if len(value.segments) < seglen {
-			return true
-		}
-
-		max = append(max, 0)
 
 		for _, seg := range value.segments {
 			if !seg.IsIndexed() {
 				break
 			}
 
-			max[i] = seg.to - 1
+			maximums[i] = seg.to - 1
 		}
 
 		i++
 		return true
 	})
 
-	var min uint64 = math.MaxUint64
-	for _, maxEl := range max {
-		min = cmp.Min(min, maxEl)
+	if len(maximums) == 0 {
+		return 0
 	}
-
-	return min
+	return slices.Min(maximums)
 }
 
 // OptimisticReopenWithDB - optimistically open snapshots (ignoring error), useful at App startup because:
@@ -534,11 +504,10 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 	var segmentsMaxSet bool
 
 	for _, fName := range fileNames {
-		f, _, ok := snaptype.ParseFileName(s.dir, fName)
-		if !ok {
+		f, isState, ok := snaptype.ParseFileName(s.dir, fName)
+		if !ok || isState {
 			continue
 		}
-
 		if !s.HasType(f.Type) {
 			continue
 		}
@@ -599,9 +568,7 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 		}
 
 		if f.To > 0 {
-			if f.To > segmentsMax {
-				segmentsMax = f.To - 1
-			}
+			segmentsMax = f.To - 1
 		} else {
 			segmentsMax = 0
 		}
