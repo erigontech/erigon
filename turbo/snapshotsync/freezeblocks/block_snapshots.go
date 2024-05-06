@@ -380,9 +380,12 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 	// but it doesno't mean - that they need re-index something.
 	_max := make([]uint64, 0, len(s.Types()))
 
+	fmt.Printf("[dbg] types: %s\n", s.Types())
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
+		fmt.Printf("[dbg] value.segments: %d\n", len(value.segments))
 		for _, seg := range value.segments {
 			if !seg.IsIndexed() {
+				fmt.Printf("[dbg] break: %s\n", seg.FileName())
 				break
 			}
 
