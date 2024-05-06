@@ -861,6 +861,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			polygonSyncSentry(sentries),
 			p2pConfig.MaxPeers,
 			statusDataProvider,
+			backend.stopNode,
 		)
 		backend.syncUnwindOrder = stagedsync.PolygonSyncUnwindOrder
 		backend.syncPruneOrder = stagedsync.PolygonSyncPruneOrder

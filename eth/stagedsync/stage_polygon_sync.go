@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -31,6 +32,7 @@ func NewPolygonSyncStageCfg(
 	maxPeers int,
 	statusDataProvider *sentry.StatusDataProvider,
 	blockReader services.FullBlockReader,
+	stopNode func() error,
 ) PolygonSyncStageCfg {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	storage := newPolygonSyncStageStorage(logger, blockReader)
@@ -48,9 +50,10 @@ func NewPolygonSyncStageCfg(
 	)
 	spansCache := sync.NewSpansCache()
 	events := sync.NewTipEvents(logger, p2pService, heimdallService)
+	executionClient := &interruptingExecutionClient{}
 	sync := sync.NewSync(
 		storage,
-		&noopExecutionClient{},
+		executionClient,
 		headersVerifier,
 		blocksVerifier,
 		p2pService,
@@ -61,7 +64,7 @@ func NewPolygonSyncStageCfg(
 		events.Events(),
 		logger,
 	)
-	syncService := newPolygonSyncStageService(sync)
+	syncService := newPolygonSyncStageService(logger, sync, events, p2pService, executionClient, stopNode)
 	return PolygonSyncStageCfg{
 		db:      db,
 		storage: storage,
@@ -87,6 +90,9 @@ func SpawnPolygonSyncStage(ctx context.Context, tx kv.RwTx, cfg PolygonSyncStage
 	}
 
 	cfg.storage.use(tx)
+	if err := cfg.service.Run(ctx); err != nil {
+		return err
+	}
 
 	if !useExternalTx {
 		return nil
@@ -107,18 +113,92 @@ func PrunePolygonSyncStage() error {
 	return nil
 }
 
-func newPolygonSyncStageService(sync *sync.Sync) *polygonSyncStageService {
+func newPolygonSyncStageService(
+	logger log.Logger,
+	sync *sync.Sync,
+	events *sync.TipEvents,
+	p2pService p2p.Service,
+	executionClient *interruptingExecutionClient,
+	stopNode func() error,
+) *polygonSyncStageService {
 	return &polygonSyncStageService{
-		sync: sync,
+		logger:          logger,
+		sync:            sync,
+		events:          events,
+		p2pService:      p2pService,
+		executionClient: executionClient,
+		stopNode:        stopNode,
 	}
 }
 
 type polygonSyncStageService struct {
-	sync *sync.Sync
+	logger          log.Logger
+	sync            *sync.Sync
+	events          *sync.TipEvents
+	p2pService      p2p.Service
+	executionClient *interruptingExecutionClient
+	stopNode        func() error
+	bgComponentsRun bool
+	errChan         chan error
 }
 
 func (s polygonSyncStageService) Run(ctx context.Context) error {
+	select {
+	case err := <-s.errChan:
+		s.logger.Error("stopping node", "err", err)
+		stopErr := s.stopNode()
+		if stopErr != nil {
+			return fmt.Errorf("%w: %w", stopErr, err)
+		}
+		return err
+	default:
+		// carry on
+	}
+
+	if !s.bgComponentsRun {
+		s.runBgComponents(ctx)
+	}
+
+	ctx, cancel := context.WithCancelCause(ctx)
+	s.executionClient.useInterrupt(cancel)
+
+	err := s.sync.Run(ctx)
+	if err != nil {
+		if errors.Is(err, context.Canceled) && errors.Is(context.Cause(ctx), errUpdateForkChoiceInterrupt) {
+			s.logger.Info("fork choice update called, stage done")
+			return nil
+		}
+
+		return err
+	}
+
 	return nil
+}
+
+func (s polygonSyncStageService) runBgComponents(ctx context.Context) {
+	s.bgComponentsRun = true
+
+	go func() {
+		eg := errgroup.Group{}
+
+		eg.Go(func() error {
+			return s.events.Run(ctx)
+		})
+
+		eg.Go(func() error {
+			s.p2pService.Run(ctx)
+			select {
+			case <-ctx.Done():
+				return nil
+			default:
+				return errors.New("p2p service stopped")
+			}
+		})
+
+		if err := eg.Wait(); err != nil {
+			s.errChan <- err
+		}
+	}()
 }
 
 func newPolygonSyncStageStorage(logger log.Logger, blockReader services.FullBlockReader) *polygonSyncStageStorage {
@@ -193,17 +273,28 @@ func (s *polygonSyncStageStorage) use(tx kv.RwTx) {
 	s.Store = heimdall.NewTxStore(s.blockReader, tx)
 }
 
-type noopExecutionClient struct{}
+var errUpdateForkChoiceInterrupt = errors.New("update fork choice interrupt")
 
-func (ec noopExecutionClient) InsertBlocks(context.Context, []*types.Block) error {
+type interruptingExecutionClient struct {
+	interrupt context.CancelCauseFunc
+}
+
+func (ec interruptingExecutionClient) InsertBlocks(context.Context, []*types.Block) error {
 	panic("should not be used")
 }
 
-func (ec noopExecutionClient) UpdateForkChoice(context.Context, *types.Header, *types.Header) error {
+func (ec interruptingExecutionClient) UpdateForkChoice(context.Context, *types.Header, *types.Header) error {
+	// we need to interrupt sync.Run when we reach an UpdateForkChoice call
+	// so that the stage can exit and allow the loop to proceed to execution
+	ec.interrupt(errUpdateForkChoiceInterrupt)
 	return nil
 }
 
-func (ec noopExecutionClient) CurrentHeader(context.Context) (*types.Header, error) {
+func (ec interruptingExecutionClient) CurrentHeader(context.Context) (*types.Header, error) {
 	// TODO need to change sync.Run to use some other func for getting current persisted header instead of canonical/executed?
 	panic("should not be used")
+}
+
+func (ec interruptingExecutionClient) useInterrupt(cancel context.CancelCauseFunc) {
+	ec.interrupt = cancel
 }

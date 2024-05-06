@@ -758,6 +758,7 @@ func NewPolygonSyncStages(
 	sentry direct.SentryClient,
 	maxPeers int,
 	statusDataProvider *sentry.StatusDataProvider,
+	stopNode func() error,
 ) []*stagedsync.Stage {
 	loopBreakCheck := NewLoopBreakCheck(config, heimdallClient)
 	return stagedsync.PolygonSyncStages(
@@ -786,6 +787,7 @@ func NewPolygonSyncStages(
 			maxPeers,
 			statusDataProvider,
 			blockReader,
+			stopNode,
 		),
 		stagedsync.StageBlockHashesCfg(
 			db,
