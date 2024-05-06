@@ -487,8 +487,6 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 	var segmentsMax uint64
 	var segmentsMaxSet bool
 
-	fmt.Printf("[dbg] reopen list %s\n", fileNames)
-
 	for _, fName := range fileNames {
 		f, isState, ok := snaptype.ParseFileName(s.dir, fName)
 		if !ok || isState {
@@ -547,7 +545,6 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 			segtype.segments = append(segtype.segments, sn)
 		}
 
-		fmt.Printf("[dbg] reopen %s, open=%t\n", fName, open)
 		if open {
 			if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
 				return err
@@ -565,6 +562,7 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 	if segmentsMaxSet {
 		s.segmentsMax.Store(segmentsMax)
 	}
+	fmt.Printf("[dbg] reopen done: segmentsMax=%d, idxAvl=%d\n", segmentsMax, s.idxAvailability())
 	s.segmentsReady.Store(true)
 	s.idxMax.Store(s.idxAvailability())
 	s.indicesReady.Store(true)
