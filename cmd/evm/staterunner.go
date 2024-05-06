@@ -61,7 +61,7 @@ func stateTestCmd(ctx *cli.Context) error {
 	if machineFriendlyOutput {
 		log.Root().SetHandler(log.DiscardHandler())
 	} else {
-		log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+		log.Root().SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))
 	}
 
 	// Configure the EVM logger

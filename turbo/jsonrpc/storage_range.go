@@ -56,6 +56,7 @@ func storageRangeAtV3(ttx kv.TemporalTx, contractAddress libcommon.Address, star
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
+	defer r.Close()
 	for i := 0; i < maxResult && r.HasNext(); i++ {
 		k, v, err := r.Next()
 		if err != nil {

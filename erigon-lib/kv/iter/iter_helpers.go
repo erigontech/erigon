@@ -82,6 +82,7 @@ type PairsWithErrorIter struct {
 func PairsWithError(errorAt int) *PairsWithErrorIter {
 	return &PairsWithErrorIter{errorAt: errorAt}
 }
+func (m *PairsWithErrorIter) Close()        {}
 func (m *PairsWithErrorIter) HasNext() bool { return true }
 func (m *PairsWithErrorIter) Next() ([]byte, []byte, error) {
 	if m.i >= m.errorAt {
