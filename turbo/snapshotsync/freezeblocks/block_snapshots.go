@@ -1409,16 +1409,19 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, max
 }
 
 func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier, cc *chain.Config) error {
+	fmt.Printf("[dbg] sn\n")
 	if err := br.snapshots().buildMissedIndicesIfNeed(ctx, logPrefix, notifier, br.dirs, cc, br.logger); err != nil {
 		return err
 	}
 
 	if cc.Bor != nil {
+		fmt.Printf("[dbg] sn bor\n")
 		if err := br.borSnapshots().RoSnapshots.buildMissedIndicesIfNeed(ctx, logPrefix, notifier, br.dirs, cc, br.logger); err != nil {
 			return err
 		}
 	}
 
+	fmt.Printf("[dbg] sn done\n")
 	return nil
 }
 
