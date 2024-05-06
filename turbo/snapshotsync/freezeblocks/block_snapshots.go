@@ -679,6 +679,7 @@ func (s *RoSnapshots) removeOverlaps() error {
 }
 
 func (s *RoSnapshots) buildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier, dirs datadir.Dirs, cc *chain.Config, logger log.Logger) error {
+	fmt.Printf("[dbg] buildMissedIndicesIfNeed1: %d, %d\n", s.IndicesMax(), s.SegmentsMax())
 	if s.IndicesMax() >= s.SegmentsMax() {
 		return nil
 	}
@@ -1383,20 +1384,20 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, max
 			// "bor snaps" can be behind "block snaps", it's ok: for example because of `kill -9` in the middle of merge
 			okBor, err = br.retireBorBlocks(ctx, br.blockReader.FrozenBorBlocks(), minBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 			if err != nil {
-				return err
+				return fmt.Errorf("retireBorBlocks: %w", err)
 			}
 		}
 
 		ok, err = br.retireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 		if err != nil {
-			return err
+			return fmt.Errorf("retireBlocks: %w", err)
 		}
 
 		if includeBor {
 			minBorBlockNum := cmp.Max(br.blockReader.FrozenBorBlocks(), minBlockNum)
 			okBor, err = br.retireBorBlocks(ctx, minBorBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 			if err != nil {
-				return err
+				return fmt.Errorf("retireBorBlocks: %w", err)
 			}
 		}
 

@@ -551,6 +551,9 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 
 	cfg := ethconfig.NewSnapCfg(true, false, true)
 	chainConfig := fromdb.ChainConfig(chainDB)
+
+	fmt.Printf("[dbg] here0\n")
+
 	blockSnaps, borSnaps, caplinSnaps, br, agg, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
@@ -560,9 +563,11 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	defer caplinSnaps.Close()
 	defer agg.Close()
 
+	fmt.Printf("[dbg] here1\n")
 	if err := br.BuildMissedIndicesIfNeed(ctx, "Indexing", nil, chainConfig); err != nil {
 		return err
 	}
+	fmt.Printf("[dbg] here2\n")
 	if err := caplinSnaps.BuildMissingIndices(ctx, logger); err != nil {
 		return err
 	}
