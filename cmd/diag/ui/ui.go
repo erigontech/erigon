@@ -35,7 +35,6 @@ var Command = cli.Command{
 	ArgsUsage: "",
 	Flags: []cli.Flag{
 		&flags.DebugURLFlag,
-		&flags.OutputFlag,
 		&UIPortFlag,
 	},
 	Description: ``,
