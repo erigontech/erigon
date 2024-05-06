@@ -1,7 +1,6 @@
 package abstract
 
 import (
-	_ "github.com/golang/mock/mockgen/model"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon/cl/clparams"
