@@ -416,7 +416,7 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 	})
 
 	_max := make([]uint64, amount)
-	var i = 0
+	var i int
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
 		if len(value.segments) == 0 || !s.HasType(segtype.Type()) {
 			return true
