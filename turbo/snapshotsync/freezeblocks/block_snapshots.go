@@ -408,10 +408,7 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 	//   4. user can manually remove all .idx files of given type: `rm snapshots/*type1*.idx`
 	amount := 0
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
-		if !s.HasType(segtype.Type()) {
-			return true
-		}
-		if len(value.segments) == 0 {
+		if len(value.segments) == 0 || !s.HasType(segtype.Type()) {
 			return true
 		}
 		amount++
@@ -421,16 +418,12 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 	_max := make([]uint64, amount)
 	var i = 0
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
-		if !s.HasType(segtype.Type()) {
-			return true
-		}
-		if len(value.segments) == 0 {
+		if len(value.segments) == 0 || !s.HasType(segtype.Type()) {
 			return true
 		}
 
 		for _, seg := range value.segments {
 			if !seg.IsIndexed() {
-				fmt.Printf("[dbg] break: %s\n", seg.FileName())
 				break
 			}
 
