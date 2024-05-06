@@ -210,9 +210,9 @@ func ExecuteBlockEphemerally(
 		}
 
 		rh := types.DeriveSha(requests)
-		if *block.Header().RequestsRoot != rh {
+		if *block.Header().RequestsRoot != rh && !vmConfig.NoReceipts {
 			// TODO(racytech): do we have to check it here?
-			return nil, fmt.Errorf("error: parsed requests root hash mismatch, expected: %v, got :%v", *block.Header().RequestsRoot, rh)
+			return nil, fmt.Errorf("error: invalid requests root hash, expected: %v, got :%v", *block.Header().RequestsRoot, rh)
 		}
 	}
 
