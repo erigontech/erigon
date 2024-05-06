@@ -376,6 +376,7 @@ func (s *RoSnapshots) EnableMadvWillNeed() *RoSnapshots {
 }
 
 func (s *RoSnapshots) idxAvailability() uint64 {
+	fmt.Printf("[dbg] len(s.Types()): %d\n", len(s.Types()))
 	_max := make([]uint64, len(s.Types()))
 	i := 0
 
