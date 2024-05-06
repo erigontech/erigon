@@ -3,6 +3,7 @@ package eth1
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 
 	"github.com/ledgerwatch/log/v3"
@@ -255,6 +256,10 @@ func (e *EthereumExecutionModule) Start(ctx context.Context) {
 			e.logger.Error("Could not start execution service", "err", err)
 		}
 	}
+	if err := e.blockReader.Snapshots().ReopenFolder(); err != nil {
+		e.logger.Error("Could not reopen snapshots", "err", err)
+	}
+	fmt.Println(e.blockReader.FrozenBlocks())
 }
 
 func (e *EthereumExecutionModule) Ready(context.Context, *emptypb.Empty) (*execution.ReadyResponse, error) {
