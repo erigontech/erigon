@@ -47,8 +47,13 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 	}
 	defer tx.Rollback()
 	e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
+	frozenBlocks := e.blockReader.FrozenBlocks()
 
 	for _, block := range req.Blocks {
+		// Skip frozen blocks.
+		if block.Header.BlockNumber < frozenBlocks {
+			continue
+		}
 		header, err := eth1_utils.HeaderRpcToHeader(block.Header)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: cannot convert headers: %s", err)
