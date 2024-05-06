@@ -162,7 +162,7 @@ func (evm *EVM) Interpreter() Interpreter {
 	return evm.interpreter
 }
 
-func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
+func (evm *EVM) call(typ OpCode, caller ContractRef, authorized *libcommon.Address, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
 	depth := evm.interpreter.Depth()
 
 	if evm.config.NoRecursion && depth > 0 {
@@ -172,9 +172,15 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 	if depth > int(params.CallCreateDepth) {
 		return nil, gas, ErrDepth
 	}
-	if typ == CALL || typ == CALLCODE {
+
+	// if authorized is present, it should be the one to provide eth value
+	valueProvider := caller.Address()
+	if authorized != nil {
+		valueProvider = *authorized
+	}
+	if typ == CALL || typ == CALLCODE || typ == AUTHCALL {
 		// Fail if we're trying to transfer more than the available balance
-		if !value.IsZero() && !evm.Context.CanTransfer(evm.intraBlockState, caller.Address(), value) {
+		if !value.IsZero() && !evm.Context.CanTransfer(evm.intraBlockState, valueProvider, value) {
 			if !bailout {
 				return nil, gas, ErrInsufficientBalance
 			}
@@ -188,7 +194,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 
 	snapshot := evm.intraBlockState.Snapshot()
 
-	if typ == CALL {
+	if typ == CALL || typ == AUTHCALL || typ == CALLCODE {
 		if !evm.intraBlockState.Exist(addr) {
 			if !isPrecompile && evm.chainRules.IsSpuriousDragon && value.IsZero() {
 				if evm.config.Debug {
@@ -197,6 +203,8 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 						v = nil
 					}
 					// Calling a non existing account, don't do anything, but ping the tracer
+					// for AUTHCALL, still using caller.Address() rather than authorized
+					// because the former is the originator of the call
 					if depth == 0 {
 						evm.config.Tracer.CaptureStart(evm, caller.Address(), addr, isPrecompile, false /* create */, input, gas, v, code)
 						evm.config.Tracer.CaptureEnd(ret, 0, nil)
@@ -209,7 +217,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 			}
 			evm.intraBlockState.CreateAccount(addr, false)
 		}
-		evm.Context.Transfer(evm.intraBlockState, caller.Address(), addr, value, bailout)
+		evm.Context.Transfer(evm.intraBlockState, valueProvider, addr, value, bailout)
 	} else if typ == STATICCALL {
 		// We do an AddBalance of zero here, just in order to trigger a touch.
 		// This doesn't matter on Mainnet, where all empties are gone at the time of Byzantium,
@@ -255,6 +263,8 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 			contract = NewContract(caller, caller.Address(), value, gas, evm.config.SkipAnalysis)
 		} else if typ == DELEGATECALL {
 			contract = NewContract(caller, caller.Address(), value, gas, evm.config.SkipAnalysis).AsDelegate()
+		} else if typ == AUTHCALL {
+			contract = NewContract(caller, addrCopy, value, gas, evm.config.SkipAnalysis).AsAuthorized(*authorized)
 		} else {
 			contract = NewContract(caller, addrCopy, value, gas, evm.config.SkipAnalysis)
 		}
@@ -286,7 +296,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 // the necessary steps to create accounts and reverses the state in case of an
 // execution error or failed value transfer.
 func (evm *EVM) Call(caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
-	return evm.call(CALL, caller, addr, input, gas, value, bailout)
+	return evm.call(CALL, caller, nil, addr, input, gas, value, bailout)
 }
 
 // CallCode executes the contract associated with the addr with the given input
@@ -297,7 +307,7 @@ func (evm *EVM) Call(caller ContractRef, addr libcommon.Address, input []byte, g
 // CallCode differs from Call in the sense that it executes the given address'
 // code with the caller as context.
 func (evm *EVM) CallCode(caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int) (ret []byte, leftOverGas uint64, err error) {
-	return evm.call(CALLCODE, caller, addr, input, gas, value, false)
+	return evm.call(CALLCODE, caller, nil, addr, input, gas, value, false)
 }
 
 // DelegateCall executes the contract associated with the addr with the given input
@@ -306,7 +316,7 @@ func (evm *EVM) CallCode(caller ContractRef, addr libcommon.Address, input []byt
 // DelegateCall differs from CallCode in the sense that it executes the given address'
 // code with the caller as context and the caller is set to the caller of the caller.
 func (evm *EVM) DelegateCall(caller ContractRef, addr libcommon.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error) {
-	return evm.call(DELEGATECALL, caller, addr, input, gas, nil, false)
+	return evm.call(DELEGATECALL, caller, nil, addr, input, gas, nil, false)
 }
 
 // StaticCall executes the contract associated with the addr with the given input
@@ -314,7 +324,11 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr libcommon.Address, input [
 // Opcodes that attempt to perform such modifications will result in exceptions
 // instead of performing the modifications.
 func (evm *EVM) StaticCall(caller ContractRef, addr libcommon.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error) {
-	return evm.call(STATICCALL, caller, addr, input, gas, new(uint256.Int), false)
+	return evm.call(STATICCALL, caller, nil, addr, input, gas, new(uint256.Int), false)
+}
+
+func (evm *EVM) AuthCall(invoker ContractRef, authorized, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int) (ret []byte, leftOverGas uint64, err error) {
+	return evm.call(AUTHCALL, invoker, &authorized, addr, input, gas, value, false)
 }
 
 type codeAndHash struct {

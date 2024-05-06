@@ -51,3 +51,24 @@ func callGas(isEip150 bool, availableGas, base uint64, callCost *uint256.Int) (u
 
 	return callCost.Uint64(), nil
 }
+
+// authCallGas returns the actual gas cost of the call
+//
+// this is for invocations made via AUTHCALL opcodes. The handling is substantially
+// the same except for when the callCost is zero AND
+// when gas is less than callcost
+func authCallGas(availableGas, base uint64, callCost *uint256.Int) (uint64, error) {
+	if base > availableGas {
+		return 0, ErrOutOfGas
+	}
+	availableGas = availableGas - base
+	gas := availableGas - availableGas/64
+
+	if callCost.IsZero() {
+		return gas, nil
+	} else if !callCost.IsUint64() || gas < callCost.Uint64() {
+		return 0, ErrGasUintOverflow
+	} else {
+		return callCost.Uint64(), nil
+	}
+}

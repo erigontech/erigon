@@ -148,6 +148,11 @@ func (c *Contract) AsDelegate() *Contract {
 	return c
 }
 
+func (c *Contract) AsAuthorized(authorized libcommon.Address) *Contract {
+	c.CallerAddress = authorized
+	return c
+}
+
 // GetOp returns the n'th element in the contract's byte array
 func (c *Contract) GetOp(n uint64) OpCode {
 	if n < uint64(len(c.Code)) {

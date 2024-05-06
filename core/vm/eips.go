@@ -404,7 +404,44 @@ func authUnsuccessful(scope *ScopeContext, spare *uint256.Int) ([]byte, error) {
 }
 
 func opAuthCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	return nil, nil
+	if scope.Authority == nil {
+		return nil, ErrAuthorizedNotSet
+	}
+
+	stack := scope.Stack
+	// Pop gas. The actual gas in interpreter.evm.callGasTemp.
+	// We can use this as a temporary value
+	temp := stack.Pop()
+	gas := interpreter.evm.CallGasTemp()
+
+	// pop the rest of the arguments
+	_addr, value, inOffset, inSize, retOffset, retLength := stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop()
+	toAddr := libcommon.BigToAddress(_addr.ToBig())
+	args := scope.Memory.GetPtr(int64(inOffset.Uint64()), int64(inSize.Uint64()))
+
+	if !value.IsZero() {
+		if interpreter.readOnly {
+			return nil, ErrWriteProtection
+		}
+	}
+
+	ret, returnGas, err := interpreter.evm.AuthCall(scope.Contract, *scope.Authority, toAddr, args, gas, &value)
+
+	if err != nil {
+		temp.Clear()
+	} else {
+		temp.SetOne()
+	}
+	stack.Push(&temp)
+	if err == nil || err == ErrExecutionReverted {
+		ret = libcommon.CopyBytes(ret)
+		scope.Memory.Set(retOffset.Uint64(), retLength.Uint64(), ret)
+	}
+
+	scope.Contract.Gas += returnGas
+
+	interpreter.returnData = ret
+	return ret, nil
 }
 
 func enable3074(jt *JumpTable) {
@@ -418,8 +455,10 @@ func enable3074(jt *JumpTable) {
 	}
 	jt[AUTHCALL] = &operation{
 		execute:     opAuthCall,
-		constantGas: GasFastStep,
-		numPop:      0,
-		numPush:     0,
+		constantGas: params.WarmStorageReadCostEIP2929,
+		dynamicGas:  gasAuthCall,
+		numPop:      7,
+		numPush:     1,
+		memorySize:  memoryCall,
 	}
 }
