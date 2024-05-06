@@ -196,6 +196,7 @@ func ExecV3(ctx context.Context,
 		}
 		defer doms.Close()
 	}
+	txNumInDB := doms.TxNum()
 
 	var (
 		inputTxNum    = doms.TxNum()
@@ -681,6 +682,10 @@ Loop:
 
 		rules := chainConfig.Rules(blockNum, b.Time())
 		var receipts types.Receipts
+		// During the first block execution, we may have half-block data in the snapshots.
+		// Thus, we need to skip the first txs in the block, however, this causes the GasUsed to be incorrect.
+		// So we skip that check for the first block, if we find half-executed data.
+		skipPostEvaluation := false
 		var usedGas, blobGasUsed uint64
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
@@ -704,6 +709,11 @@ Loop:
 				HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
 
 				BlockReceipts: receipts,
+			}
+			if txTask.TxNum <= txNumInDB && txTask.TxNum > 0 {
+				inputTxNum++
+				skipPostEvaluation = true
+				continue
 			}
 			doms.SetTxNum(txTask.TxNum)
 			doms.SetBlockNum(txTask.BlockNum)
@@ -756,7 +766,7 @@ Loop:
 						blobGasUsed += txTask.Tx.GetBlobGas()
 					}
 					if txTask.Final {
-						if txTask.BlockNum > 0 { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
+						if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 							if err := core.BlockPostValidation(usedGas, blobGasUsed, txTask.Header); err != nil {
 								return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 							}
@@ -844,7 +854,8 @@ Loop:
 			case <-logEvery.C:
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
 				progress.Log(rs, in, rws, count, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB)
-				if rs.SizeEstimate() < commitThreshold || inMemExec {
+				// If we skip post evaluation, then we should compute root hash ASAP for fail-fast
+				if !skipPostEvaluation && (rs.SizeEstimate() < commitThreshold || inMemExec) {
 					break
 				}
 				var (
