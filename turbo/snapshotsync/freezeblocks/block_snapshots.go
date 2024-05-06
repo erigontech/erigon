@@ -679,7 +679,6 @@ func (s *RoSnapshots) removeOverlaps() error {
 }
 
 func (s *RoSnapshots) buildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier, dirs datadir.Dirs, cc *chain.Config, logger log.Logger) error {
-	fmt.Printf("[dbg] buildMissedIndicesIfNeed1: %d, %d\n", s.IndicesMax(), s.SegmentsMax())
 	if s.IndicesMax() >= s.SegmentsMax() {
 		return nil
 	}
