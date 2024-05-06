@@ -1286,15 +1286,14 @@ func (hph *HexPatriciaHashed) ProcessTree(ctx context.Context, tree *UpdateTree,
 		ki uint64
 	)
 	defer logEvery.Stop()
-	updatesCount, unique := tree.Size()
+	updatesCount := tree.Size()
 
 	err = tree.HashSort(ctx, func(hashedKey, plainKey []byte) error {
 		select {
 		case <-logEvery.C:
 			dbg.ReadMemStats(&m)
 			log.Info(fmt.Sprintf("[%s][agg] computing trie", logPrefix),
-				"progress", fmt.Sprintf("%dk/%dk", ki/1000, updatesCount/1000),
-				"countUnique", unique, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+				"progress", fmt.Sprintf("%dk/%dk", ki/1000, updatesCount/1000), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 		default:
 		}
 

@@ -295,7 +295,7 @@ func TestNewUpdateTree(t *testing.T) {
 
 		require.NotNil(t, ut.tree)
 		require.NotNil(t, ut.keccak)
-		require.Nil(t, ut.collector)
+		require.Nil(t, ut.keys)
 		require.Equal(t, ModeUpdate, ut.mode)
 	})
 
@@ -303,7 +303,7 @@ func TestNewUpdateTree(t *testing.T) {
 		ut := NewUpdateTree(ModeDirect, t.TempDir(), keyHasherNoop)
 
 		require.NotNil(t, ut.keccak)
-		require.NotNil(t, ut.collector)
+		require.NotNil(t, ut.keys)
 		require.Equal(t, ModeDirect, ut.mode)
 	})
 
@@ -345,13 +345,11 @@ func TestUpdateTree_TouchPlainKey(t *testing.T) {
 		return bytes.Compare(sortedUniqUpds[i].key, sortedUniqUpds[j].key) < 0
 	})
 
-	sz, uniq := utUpdate.Size()
+	sz := utUpdate.Size()
 	require.EqualValues(t, 3, sz)
-	require.True(t, uniq)
 
-	sz, uniq = utDirect.Size()
-	require.EqualValues(t, len(upds), sz)
-	require.False(t, uniq)
+	sz = utDirect.Size()
+	require.EqualValues(t, 3, sz)
 
 	pk, upd := utUpdate.List(true)
 	require.Len(t, pk, 3)

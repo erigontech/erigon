@@ -1089,7 +1089,7 @@ func (sdc *SharedDomainsCommitmentContext) TempDir() string {
 }
 
 func (sdc *SharedDomainsCommitmentContext) KeysCount() uint64 {
-	s, _ := sdc.updates.Size()
+	s := sdc.updates.Size()
 	return s
 }
 
@@ -1124,9 +1124,9 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	defer mxCommitmentRunning.Dec()
 	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
 
-	updateCount, areUnique := sdc.updates.Size()
+	updateCount := sdc.updates.Size()
 	if sdc.sd.trace {
-		defer sdc.sd.logger.Trace("ComputeCommitment", "block", blockNum, "keys", updateCount, "unique", areUnique, "mode", sdc.mode)
+		defer sdc.sd.logger.Trace("ComputeCommitment", "block", blockNum, "keys", updateCount, "mode", sdc.mode)
 	}
 	if updateCount == 0 {
 		rootHash, err = sdc.patriciaTrie.RootHash()
