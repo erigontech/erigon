@@ -551,7 +551,6 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 
 	cfg := ethconfig.NewSnapCfg(true, false, true)
 	chainConfig := fromdb.ChainConfig(chainDB)
-
 	blockSnaps, borSnaps, caplinSnaps, br, agg, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err

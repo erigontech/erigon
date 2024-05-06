@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -375,6 +374,7 @@ func (s *RoSnapshots) EnableMadvWillNeed() *RoSnapshots {
 	return s
 }
 
+// minimax of existing indices
 func (s *RoSnapshots) idxAvailability() uint64 {
 	// Use-Cases:
 	//   1. developers can add new types in future. and users will not have files of this type
@@ -391,7 +391,7 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 		return true
 	})
 
-	_max := make([]uint64, amount)
+	maximums := make([]uint64, amount)
 	var i int
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
 		if len(value.segments) == 0 || !s.HasType(segtype.Type()) {
@@ -403,18 +403,17 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 				break
 			}
 
-			_max[i] = seg.to - 1
+			maximums[i] = seg.to - 1
 		}
+
 		i++
 		return true
 	})
 
-	var _min uint64 = math.MaxUint64
-	for _, maxEl := range _max {
-		_min = cmp.Min(_min, maxEl)
+	if len(maximums) == 0 {
+		return 0
 	}
-
-	return _min
+	return slices.Min(maximums)
 }
 
 // OptimisticReopenWithDB - optimistically open snapshots (ignoring error), useful at App startup because:
@@ -1385,7 +1384,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, max
 	}
 	includeBor := br.chainConfig.Bor != nil
 
-	if err := br.BuildMissedIndicesIfNeed(ctx, "retire", br.notifier, br.chainConfig); err != nil {
+	if err := br.BuildMissedIndicesIfNeed(ctx, "RetireBlocks", br.notifier, br.chainConfig); err != nil {
 		return err
 	}
 
@@ -1400,20 +1399,20 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, max
 			// "bor snaps" can be behind "block snaps", it's ok: for example because of `kill -9` in the middle of merge
 			okBor, err = br.retireBorBlocks(ctx, br.blockReader.FrozenBorBlocks(), minBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 			if err != nil {
-				return fmt.Errorf("retireBorBlocks: %w", err)
+				return err
 			}
 		}
 
 		ok, err = br.retireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 		if err != nil {
-			return fmt.Errorf("retireBlocks: %w", err)
+			return err
 		}
 
 		if includeBor {
 			minBorBlockNum := cmp.Max(br.blockReader.FrozenBorBlocks(), minBlockNum)
 			okBor, err = br.retireBorBlocks(ctx, minBorBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 			if err != nil {
-				return fmt.Errorf("retireBorBlocks: %w", err)
+				return err
 			}
 		}
 
