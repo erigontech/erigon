@@ -382,19 +382,22 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 	storageGetter := NewArchiveGetter(storageItem.decompressor.MakeGetter(), sto.d.compression)
 	accountGetter := NewArchiveGetter(accountItem.decompressor.MakeGetter(), acc.d.compression)
 
-	aux := make([]byte, 0, 512)
+	aux := make([]byte, 0, 256)
 	return branch.ReplacePlainKeys(aux, func(key []byte, isStorage bool) ([]byte, error) {
 		if isStorage {
 			if len(key) == length.Addr+length.Hash {
 				return nil, nil // save storage key as is
 			}
 			// Optimised key referencing a state file record (file number and offset within the file)
-			storagePlainKey, found := sto.lookupByShortenedKey(key, storageGetter)
+			storagePlainKey, found, value := sto.lookupByShortenedKey(key, storageGetter)
 			if !found {
 				s0, s1 := fStartTxNum/sd.aggCtx.a.StepSize(), fEndTxNum/sd.aggCtx.a.StepSize()
 				sd.logger.Crit("replace back lost storage full key", "shortened", fmt.Sprintf("%x", key),
 					"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, decodeShorterKey(key)))
 				return nil, fmt.Errorf("replace back lost storage full key: %x", key)
+			}
+			if sd.sdCtx != nil && sd.sdCtx.storage != nil {
+				sd.sdCtx.storage[string(storagePlainKey)] = value
 			}
 			return storagePlainKey, nil
 		}
@@ -403,12 +406,15 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 			return nil, nil // save account key as is
 		}
 
-		apkBuf, found := acc.lookupByShortenedKey(key, accountGetter)
+		apkBuf, found, value := acc.lookupByShortenedKey(key, accountGetter)
 		if !found {
 			s0, s1 := fStartTxNum/sd.aggCtx.a.StepSize(), fEndTxNum/sd.aggCtx.a.StepSize()
 			sd.logger.Crit("replace back lost account full key", "shortened", fmt.Sprintf("%x", key),
 				"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, decodeShorterKey(key)))
 			return nil, fmt.Errorf("replace back lost account full key: %x", key)
+		}
+		if sd.sdCtx != nil && sd.sdCtx.account != nil {
+			sd.sdCtx.account[string(apkBuf)] = value
 		}
 		return apkBuf, nil
 	})
@@ -967,21 +973,27 @@ func (sd *SharedDomains) Tx() kv.Tx { return sd.roTx }
 type SharedDomainsCommitmentContext struct {
 	sd           *SharedDomains
 	discard      bool
-	updates      *commitment.UpdateTree
 	mode         commitment.Mode
-	branchCache  map[string]cachedBranch
+	branches     map[string]cachedBranch
+	account      map[string][]byte
+	code         map[string][]byte
+	storage      map[string][]byte
+	keccak       cryptozerocopy.KeccakState
+	updates      *commitment.UpdateTree
 	patriciaTrie commitment.Trie
 	justRestored atomic.Bool
-	keccak       cryptozerocopy.KeccakState
 }
 
 func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode commitment.Mode, trieVariant commitment.TrieVariant) *SharedDomainsCommitmentContext {
 	ctx := &SharedDomainsCommitmentContext{
-		sd:          sd,
-		mode:        mode,
-		discard:     dbg.DiscardCommitment(),
-		branchCache: make(map[string]cachedBranch),
-		keccak:      sha3.NewLegacyKeccak256().(cryptozerocopy.KeccakState),
+		sd:       sd,
+		mode:     mode,
+		discard:  dbg.DiscardCommitment(),
+		branches: make(map[string]cachedBranch),
+		code:     make(map[string][]byte),
+		account:  make(map[string][]byte),
+		storage:  make(map[string][]byte),
+		keccak:   sha3.NewLegacyKeccak256().(cryptozerocopy.KeccakState),
 	}
 
 	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdateTree(trieVariant, mode, sd.aggCtx.a.tmpdir)
@@ -998,13 +1010,16 @@ type cachedBranch struct {
 	step uint64
 }
 
-// Cache should ResetBranchCache after each commitment computation
+// ResetBranchCache should be called after each commitment computation
 func (sdc *SharedDomainsCommitmentContext) ResetBranchCache() {
-	sdc.branchCache = make(map[string]cachedBranch)
+	clear(sdc.branches)
+	clear(sdc.account)
+	clear(sdc.code)
+	clear(sdc.storage)
 }
 
 func (sdc *SharedDomainsCommitmentContext) GetBranch(pref []byte) ([]byte, uint64, error) {
-	cached, ok := sdc.branchCache[string(pref)]
+	cached, ok := sdc.branches[string(pref)]
 	if ok {
 		// cached value is already transformed/clean to read.
 		// Cache should ResetBranchCache after each commitment computation
@@ -1023,7 +1038,7 @@ func (sdc *SharedDomainsCommitmentContext) GetBranch(pref []byte) ([]byte, uint6
 	}
 	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update, if any, so
 	// cache branch until ResetBranchCache called
-	sdc.branchCache[string(pref)] = cachedBranch{data: v, step: step}
+	sdc.branches[string(pref)] = cachedBranch{data: v, step: step}
 	return v, step, nil
 }
 
@@ -1031,7 +1046,7 @@ func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte,
 	if sdc.sd.trace {
 		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
 	}
-	sdc.branchCache[string(prefix)] = cachedBranch{data: data, step: prevStep}
+	sdc.branches[string(prefix)] = cachedBranch{data: data, step: prevStep}
 	return sdc.sd.updateCommitmentData(prefix, data, prevData, prevStep)
 }
 

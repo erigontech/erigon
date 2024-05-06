@@ -191,9 +191,9 @@ func (dt *DomainRoTx) lookupFileByItsRange(txFrom uint64, txTo uint64) *filesIte
 }
 
 // searches in given list of files for a key or searches in domain files if list is empty
-func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter ArchiveGetter) (fullKey []byte, found bool) {
+func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter ArchiveGetter) (fullKey []byte, found bool, value []byte) {
 	if len(shortKey) < 1 {
-		return nil, false
+		return nil, false, nil
 	}
 	offset := decodeShorterKey(shortKey)
 	defer func() {
@@ -214,11 +214,12 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter ArchiveGetter
 		dt.d.logger.Warn("lookupByShortenedKey failed",
 			//"stepFrom", item.startTxNum/dt.d.aggregationStep, "stepTo", item.endTxNum/dt.d.aggregationStep,
 			"short", shortKey, "offset", offset, "file", getter.FileName())
-		return nil, false
+		return nil, false, nil
 	}
 
 	fullKey, _ = getter.Next(nil)
-	return fullKey, true
+	value, _ = getter.Next(nil)
+	return fullKey, true, value
 }
 
 // commitmentValTransform parses the value of the commitment record to extract references
@@ -268,7 +269,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(accounts, storage *DomainRoTx
 					auxBuf = append(auxBuf[:0], key...)
 				} else {
 					// Optimised key referencing a state file record (file number and offset within the file)
-					auxBuf, found = storage.lookupByShortenedKey(key, sig)
+					auxBuf, found, _ = storage.lookupByShortenedKey(key, sig)
 					if !found {
 						dt.d.logger.Crit("valTransform: lost storage full key",
 							"shortened", fmt.Sprintf("%x", key),
@@ -298,7 +299,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(accounts, storage *DomainRoTx
 				// Non-optimised key originating from a database record
 				auxBuf = append(auxBuf[:0], key...)
 			} else {
-				auxBuf, found = accounts.lookupByShortenedKey(key, aig)
+				auxBuf, found, _ = accounts.lookupByShortenedKey(key, aig)
 				if !found {
 					dt.d.logger.Crit("valTransform: lost account full key",
 						"shortened", fmt.Sprintf("%x", key),
