@@ -194,7 +194,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, authorized *libcommon.Addre
 
 	snapshot := evm.intraBlockState.Snapshot()
 
-	if typ == CALL || typ == AUTHCALL || typ == CALLCODE {
+	if typ == CALL || typ == AUTHCALL {
 		if !evm.intraBlockState.Exist(addr) {
 			if !isPrecompile && evm.chainRules.IsSpuriousDragon && value.IsZero() {
 				if evm.config.Debug {
