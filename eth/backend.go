@@ -1526,7 +1526,6 @@ func (s *Ethereum) Start() error {
 
 	if params.IsChainPoS(s.chainConfig, currentTDProvider) {
 		s.waitForStageLoopStop = nil // TODO: Ethereum.Stop should wait for execution_server shutdown
-		fmt.Println("X")
 		go s.eth1ExecutionServer.Start(s.sentryCtx)
 	} else if s.config.PolygonSync {
 		s.waitForStageLoopStop = nil // Shutdown is handled by context
