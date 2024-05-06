@@ -3,11 +3,9 @@ name: QA - Clean exit (block downloading)
 on:
   push:
     branches:
-      - main
       - 'release/2.*'
   pull_request:
     branches:
-      - main
       - 'release/2.*'
     types:
       - ready_for_review
