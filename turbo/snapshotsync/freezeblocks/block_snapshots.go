@@ -747,7 +747,7 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
 		for _, segment := range value.segments {
 			info := segment.FileInfo(dir)
-			fmt.Printf("alex: %d\n", segtype.HasIndexFiles(info, logger))
+			fmt.Printf("[dbg] HasIndexFiles: %s, %t\n", info.Name(), segtype.HasIndexFiles(info, logger))
 
 			if segtype.HasIndexFiles(info, logger) {
 				continue
