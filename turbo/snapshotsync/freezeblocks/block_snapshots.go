@@ -376,22 +376,19 @@ func (s *RoSnapshots) EnableMadvWillNeed() *RoSnapshots {
 }
 
 func (s *RoSnapshots) idxAvailability() uint64 {
-	fmt.Printf("[dbg] len(s.Types()): %d, %s\n", len(s.Types()), s.Types())
-	_max := make([]uint64, len(s.Types()))
-	i := 0
+	// developers can add new types in future. and users will not have this type.
+	// but it doesno't mean - that they need re-index something.
+	_max := make([]uint64, 0, len(s.Types()))
 
-	fmt.Printf("[dbg] s.segments.Len(): %d\n", s.segments.Len())
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
 		for _, seg := range value.segments {
 			if !seg.IsIndexed() {
-				fmt.Printf("[dbg] seg.IsIndexed(): %s, %t\n", seg.FileName(), seg.IsIndexed())
 				break
 			}
 
-			_max[i] = seg.to - 1
-		}
+			_max = append(_max, seg.to-1)
 
-		i++
+		}
 		return true
 	})
 
