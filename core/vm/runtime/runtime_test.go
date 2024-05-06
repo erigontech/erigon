@@ -361,6 +361,7 @@ func TestBlockhash(t *testing.T) {
 		Time:        new(big.Int),
 	}
 	setDefaults(cfg)
+	cfg.ChainConfig.PragueTime = big.NewInt(1)
 	ret, _, err := Execute(data, input, cfg, header.Number.Uint64())
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
