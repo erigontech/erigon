@@ -999,7 +999,7 @@ func (bb *Body) DecodeRLP(s *rlp.Stream) error {
 // The values of TxHash, UncleHash, ReceiptHash, Bloom, and WithdrawalHash
 // in the header are ignored and set to the values derived from
 // the given txs, uncles, receipts, and withdrawals.
-func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt, withdrawals []*Withdrawal) *Block {
+func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt, withdrawals []*Withdrawal, requests []*Request) *Block {
 	b := &Block{header: CopyHeader(header)}
 
 	// TODO: panic if len(txs) != len(receipts)
@@ -1045,6 +1045,21 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 	}
 
 	b.header.ParentBeaconBlockRoot = header.ParentBeaconBlockRoot
+
+	if requests == nil {
+		b.header.RequestsRoot = nil
+	} else if len(requests) == 0 {
+		b.header.RequestsRoot = &EmptyRootHash // TODO(racytech): is this correct?
+		b.requests = make(Requests, len(requests))
+	} else {
+		h := DeriveSha(Requests(requests))
+		b.header.RequestsRoot = &h
+		b.requests = make(Requests, len(requests))
+		for i, r := range requests {
+			rCopy := *r
+			b.requests[i] = &rCopy
+		}
+	}
 
 	return b
 }

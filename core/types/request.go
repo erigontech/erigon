@@ -66,7 +66,6 @@ func (r *Request) DecodeRLP(s *rlp.Stream) error {
 		if buf, err = s.Bytes(); err != nil {
 			return err
 		}
-
 		return r.decode(buf)
 	}
 }
