@@ -8,6 +8,7 @@ on:
 jobs:
   long-running-test:
     runs-on: [self-hosted, Erigon3]
+    timeout-minutes: 600
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir

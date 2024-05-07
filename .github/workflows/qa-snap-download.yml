@@ -8,6 +8,7 @@ on:
 jobs:
   long-running-test:
     runs-on: [self-hosted, Erigon3]
+    timeout-minutes: 600
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
