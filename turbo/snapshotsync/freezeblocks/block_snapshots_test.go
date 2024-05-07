@@ -265,7 +265,7 @@ func TestRemoveOverlaps(t *testing.T) {
 	s := NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, 0, logger)
 
 	defer s.Close()
-	require.NoError(s.ReopenFolder())
+	require.NoError(s.ReopenSegments(coresnaptype.BlockSnapshotTypes, false))
 
 	list, err := snaptype.Segments(s.dir)
 	require.NoError(err)
