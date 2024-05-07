@@ -176,15 +176,15 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	if a.d[kv.CommitmentDomain], err = NewDomain(cfg, aggregationStep, "commitment", kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, logger); err != nil {
 		return nil, err
 	}
-	//cfg = domainCfg{
-	//	hist: histCfg{
-	//		iiCfg:             iiCfg{salt: salt, dirs: dirs},
-	//		withLocalityIndex: false, withExistenceIndex: false, historyLargeValues: false,
-	//	},
-	//}
-	//if a.d[kv.GasUsedDomain], err = NewDomain(cfg, aggregationStep, "gasused", kv.TblGasUsedKeys, kv.TblGasUsedVals, kv.TblGasUsedHistoryKeys, kv.TblGasUsedHistoryVals, kv.TblGasUsedIdx, logger); err != nil {
-	//	return nil, err
-	//}
+	cfg = domainCfg{
+		hist: histCfg{
+			iiCfg:             iiCfg{salt: salt, dirs: dirs},
+			withLocalityIndex: false, withExistenceIndex: false, historyLargeValues: false,
+		},
+	}
+	if a.d[kv.GasUsedDomain], err = NewDomain(cfg, aggregationStep, "gasused", kv.TblGasUsedKeys, kv.TblGasUsedVals, kv.TblGasUsedHistoryKeys, kv.TblGasUsedHistoryVals, kv.TblGasUsedIdx, logger); err != nil {
+		return nil, err
+	}
 	idxCfg := iiCfg{salt: salt, dirs: dirs, db: db}
 	if a.logAddrs, err = NewInvertedIndex(idxCfg, aggregationStep, "logaddrs", kv.TblLogAddressKeys, kv.TblLogAddressIdx, false, nil, logger); err != nil {
 		return nil, err
