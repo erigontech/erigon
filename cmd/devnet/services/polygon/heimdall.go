@@ -210,7 +210,7 @@ func (h *Heimdall) FetchCheckpointCount(ctx context.Context) (int64, error) {
 	return 0, fmt.Errorf("TODO")
 }
 
-func (h *Heimdall) FetchCheckpoints(ctx context.Context, page uint64, limit uint64) (heimdall.Checkpoints, error) {
+func (h *Heimdall) FetchCheckpoints(ctx context.Context, page uint64, limit uint64) ([]*heimdall.Checkpoint, error) {
 	return nil, fmt.Errorf("TODO")
 }
 

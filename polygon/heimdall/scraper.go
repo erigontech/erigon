@@ -62,6 +62,10 @@ type EntityIdRange struct {
 	End   uint64
 }
 
+func (r EntityIdRange) Len() uint64 {
+	return r.End + 1 - r.Start
+}
+
 type entityFetcher interface {
 	FetchLastEntityId(ctx context.Context) (uint64, error)
 	FetchEntitiesRange(ctx context.Context, idRange EntityIdRange) ([]any, error)
@@ -114,10 +118,6 @@ func (s *Scraper) syncEntity(
 }
 
 func (s *Scraper) Run(parentCtx context.Context) error {
-	// TODO: checkpoint fetcher implementing entityFetcher using s.client
-	// TODO: milestone fetcher implementing entityFetcher using s.client
-	// TODO: span fetcher implementing entityFetcher using s.client
-
 	tx := s.txProvider()
 	if tx == nil {
 		// TODO: implement and remove
@@ -135,15 +135,15 @@ func (s *Scraper) Run(parentCtx context.Context) error {
 
 	// sync checkpoints
 	group.Go(func() error {
-		return s.syncEntity(ctx, newCheckpointStore(tx, reader), nil /* TODO */, nil /* TODO */)
+		return s.syncEntity(ctx, newCheckpointStore(tx, reader), newCheckpointFetcher(s.client, s.logger), nil /* TODO */)
 	})
 	// sync milestones
 	group.Go(func() error {
-		return s.syncEntity(ctx, newMilestoneStore(tx, reader), nil /* TODO */, nil /* TODO */)
+		return s.syncEntity(ctx, newMilestoneStore(tx, reader), newMilestoneFetcher(s.client, s.logger), nil /* TODO */)
 	})
 	// sync spans
 	group.Go(func() error {
-		return s.syncEntity(ctx, newSpanStore(tx, reader), nil /* TODO */, nil /* TODO */)
+		return s.syncEntity(ctx, newSpanStore(tx, reader), newSpanFetcher(s.client, s.logger), nil /* TODO */)
 	})
 
 	return group.Wait()
