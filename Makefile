@@ -162,7 +162,7 @@ test-erigon-ext:
 	@cd tests/erigon-ext-test && ./test.sh $(GIT_COMMIT)
 
 ## test:                              run unit tests with a 100s timeout
-test:
+test: test-erigon-lib
 	$(GOTEST) --timeout 10m -coverprofile=coverage.out
 
 ## test-integration:                  run integration tests with a 30m timeout
