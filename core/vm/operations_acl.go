@@ -238,5 +238,17 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 
 // gasOpBlockhashEIP2935 returns the max possible gas here, and refund the rest at its execute function
 func gasOpBlockhashEIP2935(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
-	return params.ColdSloadCostEIP2929, nil
+	arg := stack.Peek()
+	arg64, overflow := arg.Uint64WithOverflow()
+	if overflow {
+		return 0, nil
+	}
+	if arg64 >= evm.Context.BlockNumber || arg64+params.BlockHashHistoryServeWindow < evm.Context.BlockNumber {
+		return 0, nil
+	}
+	storageSlot := libcommon.BytesToHash(uint256.NewInt(arg64 % params.BlockHashHistoryServeWindow).Bytes())
+	if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(params.HistoryStorageAddress, storageSlot); slotMod {
+		return params.ColdSloadCostEIP2929, nil
+	}
+	return params.WarmStorageReadCostEIP2929, nil
 }

@@ -493,29 +493,28 @@ func opBlockhash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 // This should not be used without activating EIP-2935
 func opBlockhash2935(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	arg := scope.Stack.Peek()
-	refundAmt := params.ColdSloadCostEIP2929
 	arg64, overflow := arg.Uint64WithOverflow()
 	if overflow {
 		arg.Clear()
-	} else {
-		var upper uint64
-		upper = interpreter.evm.Context.BlockNumber
-		if arg64 >= upper || arg64+params.BlockHashHistoryServeWindow < upper {
-			arg.Clear()
-		} else {
-			storageSlot := libcommon.BytesToHash(uint256.NewInt(arg64 % params.BlockHashHistoryServeWindow).Bytes())
-			if _, slotMod := interpreter.evm.IntraBlockState().AddSlotToAccessList(params.HistoryStorageAddress, storageSlot); !slotMod {
-				refundAmt = params.ColdSloadCostEIP2929 - params.WarmStorageReadCostEIP2929
-			}
-			interpreter.evm.intraBlockState.GetState(
-				params.HistoryStorageAddress,
-				&storageSlot,
-				arg,
-			)
-		}
+		return nil, nil
 	}
-	// The gas func for this charges max (ColdSloadCostEIP2929) gas, refunding the rest here
-	interpreter.evm.intraBlockState.AddRefund(refundAmt)
+
+	// Check if arg is within allowed window
+	var upper uint64
+	upper = interpreter.evm.Context.BlockNumber
+	if arg64 >= upper || arg64+params.BlockHashHistoryServeWindow < upper {
+		arg.Clear()
+		return nil, nil
+	}
+
+	// Return state read value from the slot
+	storageSlot := libcommon.BytesToHash(uint256.NewInt(arg64 % params.BlockHashHistoryServeWindow).Bytes())
+	interpreter.evm.intraBlockState.GetState(
+		params.HistoryStorageAddress,
+		&storageSlot,
+		arg,
+	)
+
 	return nil, nil
 }
 
