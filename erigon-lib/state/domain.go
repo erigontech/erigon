@@ -1220,6 +1220,10 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		if err := restored.addValue(k, nil, v); err != nil {
 			return err
 		}
+		type closable interface {
+			Close()
+		}
+		ic.(closable).Close()
 		seen[string(k)] = struct{}{}
 	}
 

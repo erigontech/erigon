@@ -884,6 +884,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			})
 		}
 
+		for _, p := range snaptype.SeedableV3Extensions() {
+			backend.downloaderClient.ProhibitNewDownloads(ctx, &protodownloader.ProhibitNewDownloadsRequest{
+				Type: p,
+			})
+		}
+
 	}
 
 	checkStateRoot := true

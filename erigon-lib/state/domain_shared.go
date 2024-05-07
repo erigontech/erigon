@@ -68,10 +68,8 @@ type SharedDomains struct {
 	//muMaps   sync.RWMutex
 	//walLock sync.RWMutex
 
-	account    map[string][]byte
-	code       map[string][]byte
-	storage    *btree2.Map[string, []byte]
-	commitment map[string][]byte
+	domains [kv.DomainLen]map[string][]byte
+	storage *btree2.Map[string, []byte]
 
 	dWriter          [kv.DomainLen]*domainBufferedWriter
 	logAddrsWriter   *invertedIndexBufferedWriter
@@ -105,12 +103,10 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 		tracesFromWriter: ac.tracesFrom.NewWriter(),
 		tracesToWriter:   ac.tracesTo.NewWriter(),
 
-		account:    map[string][]byte{},
-		commitment: map[string][]byte{},
-		code:       map[string][]byte{},
-		storage:    btree2.NewMap[string, []byte](128),
+		storage: btree2.NewMap[string, []byte](128),
 	}
 	for id, d := range ac.d {
+		sd.domains[id] = map[string][]byte{}
 		sd.dWriter[id] = d.NewWriter()
 	}
 
@@ -252,9 +248,9 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 	//sd.muMaps.Lock()
 	//defer sd.muMaps.Unlock()
-	sd.account = map[string][]byte{}
-	sd.code = map[string][]byte{}
-	sd.commitment = map[string][]byte{}
+	for i, _ := range sd.domains {
+		sd.domains[i] = map[string][]byte{}
+	}
 	if resetCommitment {
 		sd.sdCtx.updates.List(true)
 		sd.sdCtx.Reset()
@@ -264,62 +260,40 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 	sd.estSize = 0
 }
 
-func (sd *SharedDomains) put(table kv.Domain, key string, val []byte) {
+func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte) {
 	// disable mutex - because work on parallel execution postponed after E3 release.
 	//sd.muMaps.Lock()
-	switch table {
-	case kv.AccountsDomain:
-		if old, ok := sd.account[key]; ok {
-			sd.estSize += len(val) - len(old)
-		} else {
-			sd.estSize += len(key) + len(val)
-		}
-		sd.account[key] = val
-	case kv.CodeDomain:
-		if old, ok := sd.code[key]; ok {
-			sd.estSize += len(val) - len(old)
-		} else {
-			sd.estSize += len(key) + len(val)
-		}
-		sd.code[key] = val
-	case kv.StorageDomain:
+	if domain == kv.StorageDomain {
 		if old, ok := sd.storage.Set(key, val); ok {
 			sd.estSize += len(val) - len(old)
 		} else {
 			sd.estSize += len(key) + len(val)
 		}
-	case kv.CommitmentDomain:
-		if old, ok := sd.commitment[key]; ok {
-			sd.estSize += len(val) - len(old)
-		} else {
-			sd.estSize += len(key) + len(val)
-		}
-		sd.commitment[key] = val
-	default:
-		panic(fmt.Errorf("sharedDomains put to invalid table %s", table))
+		return
 	}
+
+	if old, ok := sd.domains[domain][key]; ok {
+		sd.estSize += len(val) - len(old)
+	} else {
+		sd.estSize += len(key) + len(val)
+	}
+	sd.domains[domain][key] = val
 	//sd.muMaps.Unlock()
 }
 
-// Get returns cached value by key. Cache is invalidated when associated WAL is flushed
-func (sd *SharedDomains) Get(table kv.Domain, key []byte) (v []byte, ok bool) {
+// get returns cached value by key. Cache is invalidated when associated WAL is flushed
+func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, ok bool) {
 	//sd.muMaps.RLock()
 	keyS := *(*string)(unsafe.Pointer(&key))
 	//keyS := string(key)
-	switch table {
-	case kv.AccountsDomain:
-		v, ok = sd.account[keyS]
-	case kv.CodeDomain:
-		v, ok = sd.code[keyS]
-	case kv.StorageDomain:
+	if table == kv.StorageDomain {
 		v, ok = sd.storage.Get(keyS)
-	case kv.CommitmentDomain:
-		v, ok = sd.commitment[keyS]
-	default:
-		panic(table)
+		return v, ok
+
 	}
-	//sd.muMaps.RUnlock()
+	v, ok = sd.domains[table][keyS]
 	return v, ok
+	//sd.muMaps.RUnlock()
 }
 
 func (sd *SharedDomains) SizeEstimate() uint64 {
@@ -329,7 +303,7 @@ func (sd *SharedDomains) SizeEstimate() uint64 {
 }
 
 func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error) {
-	if v, ok := sd.Get(kv.CommitmentDomain, prefix); ok {
+	if v, ok := sd.get(kv.CommitmentDomain, prefix); ok {
 		// sd cache values as is (without transformation) so safe to return
 		return v, 0, nil
 	}
@@ -420,28 +394,6 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 	})
 }
 
-func (sd *SharedDomains) LatestCode(addr []byte) ([]byte, uint64, error) {
-	if v, ok := sd.Get(kv.CodeDomain, addr); ok {
-		return v, 0, nil
-	}
-	v, step, _, err := sd.aggCtx.GetLatest(kv.CodeDomain, addr, nil, sd.roTx)
-	if err != nil {
-		return nil, 0, fmt.Errorf("code %x read error: %w", addr, err)
-	}
-	return v, step, nil
-}
-
-func (sd *SharedDomains) LatestAccount(addr []byte) ([]byte, uint64, error) {
-	if v, ok := sd.Get(kv.AccountsDomain, addr); ok {
-		return v, 0, nil
-	}
-	v, step, _, err := sd.aggCtx.GetLatest(kv.AccountsDomain, addr, nil, sd.roTx)
-	if err != nil {
-		return nil, 0, fmt.Errorf("account %x read error: %w", addr, err)
-	}
-	return v, step, nil
-}
-
 const CodeSizeTableFake = "CodeSize"
 
 func (sd *SharedDomains) ReadsValid(readLists map[string]*KvList) bool {
@@ -451,7 +403,7 @@ func (sd *SharedDomains) ReadsValid(readLists map[string]*KvList) bool {
 	for table, list := range readLists {
 		switch table {
 		case kv.AccountsDomain.String():
-			m := sd.account
+			m := sd.domains[kv.AccountsDomain]
 			for i, key := range list.Keys {
 				if val, ok := m[key]; ok {
 					if !bytes.Equal(list.Vals[i], val) {
@@ -460,7 +412,7 @@ func (sd *SharedDomains) ReadsValid(readLists map[string]*KvList) bool {
 				}
 			}
 		case kv.CodeDomain.String():
-			m := sd.code
+			m := sd.domains[kv.CodeDomain]
 			for i, key := range list.Keys {
 				if val, ok := m[key]; ok {
 					if !bytes.Equal(list.Vals[i], val) {
@@ -478,7 +430,7 @@ func (sd *SharedDomains) ReadsValid(readLists map[string]*KvList) bool {
 				}
 			}
 		case CodeSizeTableFake:
-			m := sd.code
+			m := sd.domains[kv.CodeDomain]
 			for i, key := range list.Keys {
 				if val, ok := m[key]; ok {
 					if binary.BigEndian.Uint64(list.Vals[i]) != uint64(len(val)) {
@@ -492,17 +444,6 @@ func (sd *SharedDomains) ReadsValid(readLists map[string]*KvList) bool {
 	}
 
 	return true
-}
-
-func (sd *SharedDomains) LatestStorage(addrLoc []byte) ([]byte, uint64, error) {
-	if v, ok := sd.Get(kv.StorageDomain, addrLoc); ok {
-		return v, 0, nil
-	}
-	v, step, _, err := sd.aggCtx.GetLatest(kv.StorageDomain, addrLoc, nil, sd.roTx)
-	if err != nil {
-		return nil, 0, fmt.Errorf("storage %x read error: %w", addrLoc, err)
-	}
-	return v, step, nil
 }
 
 func (sd *SharedDomains) updateAccountData(addr []byte, account, prevAccount []byte, prevStep uint64) error {
@@ -850,22 +791,22 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 }
 
 // TemporalDomain satisfaction
-func (sd *SharedDomains) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, step uint64, err error) {
-	switch name {
-	case kv.AccountsDomain:
-		return sd.LatestAccount(k)
-	case kv.StorageDomain:
-		if k2 != nil {
-			k = append(k, k2...)
-		}
-		return sd.LatestStorage(k)
-	case kv.CodeDomain:
-		return sd.LatestCode(k)
-	case kv.CommitmentDomain:
+func (sd *SharedDomains) DomainGet(domain kv.Domain, k, k2 []byte) (v []byte, step uint64, err error) {
+	if domain == kv.CommitmentDomain {
 		return sd.LatestCommitment(k)
-	default:
-		panic(name)
 	}
+
+	if k2 != nil {
+		k = append(k, k2...)
+	}
+	if v, ok := sd.get(domain, k); ok {
+		return v, 0, nil
+	}
+	v, step, _, err = sd.aggCtx.GetLatest(domain, k, nil, sd.roTx)
+	if err != nil {
+		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
+	}
+	return v, step, nil
 }
 
 // DomainPut
@@ -894,10 +835,9 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 			return nil
 		}
 		return sd.updateAccountCode(k1, val, prevVal, prevStep)
-	case kv.CommitmentDomain:
-		return sd.updateCommitmentData(k1, val, prevVal, prevStep)
 	default:
-		panic(domain)
+		sd.put(domain, string(append(k1, k2...)), val)
+		return sd.dWriter[domain].PutWithPrev(k1, k2, val, prevVal, prevStep)
 	}
 }
 
@@ -928,7 +868,8 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []by
 	case kv.CommitmentDomain:
 		return sd.updateCommitmentData(k1, nil, prevVal, prevStep)
 	default:
-		panic(domain)
+		sd.put(domain, string(append(k1, k2...)), nil)
+		return sd.dWriter[domain].DeleteWithPrev(k1, k2, prevVal, prevStep)
 	}
 }
 
@@ -1051,7 +992,7 @@ func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte,
 }
 
 func (sdc *SharedDomainsCommitmentContext) GetAccount(plainKey []byte, cell *commitment.Cell) error {
-	encAccount, _, err := sdc.sd.LatestAccount(plainKey)
+	encAccount, _, err := sdc.sd.DomainGet(kv.AccountsDomain, plainKey, nil)
 	if err != nil {
 		return fmt.Errorf("GetAccount failed: %w", err)
 	}
@@ -1066,7 +1007,7 @@ func (sdc *SharedDomainsCommitmentContext) GetAccount(plainKey []byte, cell *com
 		}
 	}
 
-	code, _, err := sdc.sd.LatestCode(plainKey)
+	code, _, err := sdc.sd.DomainGet(kv.CodeDomain, plainKey, nil)
 	if err != nil {
 		return fmt.Errorf("GetAccount: failed to read latest code: %w", err)
 	}
@@ -1083,7 +1024,7 @@ func (sdc *SharedDomainsCommitmentContext) GetAccount(plainKey []byte, cell *com
 
 func (sdc *SharedDomainsCommitmentContext) GetStorage(plainKey []byte, cell *commitment.Cell) error {
 	// Look in the summary table first
-	enc, _, err := sdc.sd.LatestStorage(plainKey)
+	enc, _, err := sdc.sd.DomainGet(kv.StorageDomain, plainKey, nil)
 	if err != nil {
 		return err
 	}
