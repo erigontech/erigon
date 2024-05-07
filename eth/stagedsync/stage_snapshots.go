@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/anacrolix/torrent"
-	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
@@ -559,16 +558,6 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 	if headNumber > pruneAmount {
 		minBlockNumberToKeep = headNumber - pruneAmount
 	}
-	// Check min tx num for the min block number to keep
-	minTxNum, err := rawdbv3.TxNums.Min(tx, minBlockNumberToKeep)
-	if err != nil {
-		return err
-	}
-	minStepsToKeep := minTxNum / config3.HistoryV3AggregationStep
-	if minStepsToKeep < 64 {
-		minStepsToKeep = 64
-	}
-	minStepsToKeep += minStepsToKeep % 64
 
 	snapshotFileNames := cfg.blockReader.FrozenFiles()
 
