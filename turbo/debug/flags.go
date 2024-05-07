@@ -230,26 +230,6 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *http.ServeMux, *http
 		}
 	}
 
-	/*if metricsEnabled && (!pprofEnabled || metricsAddr != "") {
-		metricsPort := ctx.Int(metricsPortFlag.Name)
-		metricsAddress = fmt.Sprintf("%s:%d", metricsAddr, metricsPort)
-		metricsMux = metrics.Setup(metricsAddress, logger)
-	}
-
-	// pprof server
-	if pprofEnabled {
-		pprofHost := ctx.String(pprofAddrFlag.Name)
-		pprofPort := ctx.Int(pprofPortFlag.Name)
-		address := fmt.Sprintf("%s:%d", pprofHost, pprofPort)
-
-		if address == metricsAddress {
-			metricsMux = StartPProf(address, metricsMux)
-		} else {
-			pprofMux := StartPProf(address, nil)
-			return logger, metricsMux, pprofMux, nil
-		}
-	}*/
-
 	return logger, metricsMux, nil, nil
 }
 
