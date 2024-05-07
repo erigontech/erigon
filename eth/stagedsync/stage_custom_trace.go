@@ -12,7 +12,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
@@ -100,25 +99,10 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 	}
 	defer doms.Close()
 
-	key := []byte{0}
-	total := uint256.NewInt(0)
-
-	it, err := tx.IndexRange(kv.GasUsedHistoryIdx, key, -1, -1, order.Desc, 1)
+	keyTotal := []byte("total")
+	total, err := lastGasUsed(tx, keyTotal)
 	if err != nil {
 		return err
-	}
-	if it.HasNext() {
-		lastTxNum, err := it.Next()
-		if err != nil {
-			return err
-		}
-		lastTotal, ok, err := tx.HistoryGet(kv.GasUsedHistory, key, lastTxNum)
-		if err != nil {
-			return err
-		}
-		if ok {
-			total.SetBytes(lastTotal)
-		}
 	}
 
 	//TODO: new tracer may get tracer from pool, maybe add it to TxTask field
@@ -133,7 +117,7 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 			total.AddUint64(total, txTask.UsedGas)
 			doms.SetTxNum(txTask.TxNum)
 			v := total.Bytes()
-			err = doms.DomainPut(kv.GasUsedDomain, key, nil, v, nil, 0)
+			err = doms.DomainPut(kv.GasUsedDomain, keyTotal, nil, v, nil, 0)
 			if err != nil {
 				return err
 			}
@@ -166,6 +150,40 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 	}
 
 	return nil
+}
+
+func lastGasUsed(tx kv.TemporalTx, key []byte) (*uint256.Int, error) {
+	total := uint256.NewInt(0)
+	v, _, err := tx.DomainGet(kv.GasUsedDomain, key, nil)
+	if err != nil {
+		return nil, err
+	}
+	if len(v) > 0 {
+		total.SetBytes(v)
+	}
+	return total, nil
+
+	/*
+		it, err := tx.IndexRange(kv.GasUsedHistoryIdx, key, -1, -1, order.Desc, 1)
+		if err != nil {
+			return nil, err
+		}
+		defer it.Close()
+		if it.HasNext() {
+			lastTxNum, err := it.Next()
+			if err != nil {
+				return nil, err
+			}
+			lastTotal, ok, err := tx.HistoryGet(kv.GasUsedHistory, key, lastTxNum)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				total.SetBytes(lastTotal)
+			}
+		}
+		return total, nil
+	*/
 }
 
 func UnwindCustomTrace(u *UnwindState, s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, ctx context.Context, logger log.Logger) (err error) {

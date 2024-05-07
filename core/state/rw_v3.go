@@ -226,21 +226,21 @@ func (rs *StateV3) ApplyLogsAndTraces4(txTask *TxTask, domains *libstate.SharedD
 	}
 
 	for addr := range txTask.TraceFroms {
-		if err := domains.IndexAdd(kv.TblTracesFromIdx, addr[:]); err != nil {
+		if err := domains.IdxPut(kv.TblTracesFromIdx, addr[:]); err != nil {
 			return err
 		}
 	}
 	for addr := range txTask.TraceTos {
-		if err := domains.IndexAdd(kv.TblTracesToIdx, addr[:]); err != nil {
+		if err := domains.IdxPut(kv.TblTracesToIdx, addr[:]); err != nil {
 			return err
 		}
 	}
 	for _, lg := range txTask.Logs {
-		if err := domains.IndexAdd(kv.TblLogAddressIdx, lg.Address[:]); err != nil {
+		if err := domains.IdxPut(kv.TblLogAddressIdx, lg.Address[:]); err != nil {
 			return err
 		}
 		for _, topic := range lg.Topics {
-			if err := domains.IndexAdd(kv.TblLogTopicsIdx, topic[:]); err != nil {
+			if err := domains.IdxPut(kv.TblLogTopicsIdx, topic[:]); err != nil {
 				return err
 			}
 		}

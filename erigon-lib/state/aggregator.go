@@ -179,7 +179,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	cfg = domainCfg{
 		hist: histCfg{
 			iiCfg:             iiCfg{salt: salt, dirs: dirs},
-			withLocalityIndex: false, withExistenceIndex: false, historyLargeValues: false,
+			withLocalityIndex: false, withExistenceIndex: false, compression: CompressKeys | CompressVals, historyLargeValues: false,
 		},
 	}
 	if a.d[kv.GasUsedDomain], err = NewDomain(cfg, aggregationStep, "gasused", kv.TblGasUsedKeys, kv.TblGasUsedVals, kv.TblGasUsedHistoryKeys, kv.TblGasUsedHistoryVals, kv.TblGasUsedIdx, logger); err != nil {

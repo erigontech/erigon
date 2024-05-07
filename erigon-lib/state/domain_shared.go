@@ -497,7 +497,7 @@ func (sd *SharedDomains) delAccountStorage(addr, loc []byte, preVal []byte, prev
 	return sd.dWriter[kv.StorageDomain].DeleteWithPrev(composite, nil, preVal, prevStep)
 }
 
-func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) {
+func (sd *SharedDomains) IdxPut(table kv.InvertedIdx, key []byte) (err error) {
 	switch table {
 	case kv.LogAddrIdx, kv.TblLogAddressIdx:
 		err = sd.logAddrsWriter.Add(key)
