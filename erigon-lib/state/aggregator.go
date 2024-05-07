@@ -1619,8 +1619,8 @@ func (ac *AggregatorRoTx) HistoryGet(name kv.History, key []byte, ts uint64, tx 
 		return ac.d[kv.CodeDomain].ht.GetNoStateWithRecent(key, ts, tx)
 	case kv.CommitmentHistory:
 		return ac.d[kv.CommitmentDomain].ht.GetNoStateWithRecent(key, ts, tx)
-	case kv.GasUsedHistory:
-		return ac.d[kv.GasUsedDomain].ht.GetNoStateWithRecent(key, ts, tx)
+	//case kv.GasUsedHistory:
+	//	return ac.d[kv.GasUsedDomain].ht.GetNoStateWithRecent(key, ts, tx)
 	default:
 		panic(fmt.Sprintf("unexpected: %s", name))
 	}

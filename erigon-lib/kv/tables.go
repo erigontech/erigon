@@ -946,7 +946,7 @@ const (
 	StorageHistory    History = "StorageHistory"
 	CodeHistory       History = "CodeHistory"
 	CommitmentHistory History = "CommitmentHistory"
-	GasUsedHistory    History = "GasUsedHistory"
+	//GasUsedHistory    History = "GasUsedHistory"
 )
 
 const (
