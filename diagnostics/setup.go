@@ -18,9 +18,11 @@ var (
 	diagnosticsPortFlag     = "diagnostics.endpoint.port"
 	metricsHTTPFlag         = "metrics.addr"
 	metricsPortFlag         = "metrics.port"
+	pprofPortFlag           = "pprof.port"
+	pprofAddrFlag           = "pprof.addr"
 )
 
-func Setup(ctx *cli.Context, node *node.ErigonNode, metricsMux *http.ServeMux) {
+func Setup(ctx *cli.Context, node *node.ErigonNode, metricsMux *http.ServeMux, pprofMux *http.ServeMux) {
 	if ctx.Bool(diagnosticsDisabledFlag) {
 		return
 	}
@@ -35,8 +37,14 @@ func Setup(ctx *cli.Context, node *node.ErigonNode, metricsMux *http.ServeMux) {
 	metricsPort := ctx.Int(metricsPortFlag)
 	metricsAddress := fmt.Sprintf("%s:%d", metricsHost, metricsPort)
 
+	pprofHost := ctx.String(pprofAddrFlag)
+	pprofPort := ctx.Int(pprofPortFlag)
+	pprofAddress := fmt.Sprintf("%s:%d", pprofHost, pprofPort)
+
 	if diagAddress == metricsAddress {
 		diagMux = SetupDiagnosticsEndpoint(metricsMux, diagAddress)
+	} else if diagAddress == pprofAddress && pprofMux != nil {
+		diagMux = SetupDiagnosticsEndpoint(pprofMux, diagAddress)
 	} else {
 		diagMux = SetupDiagnosticsEndpoint(nil, diagAddress)
 	}
