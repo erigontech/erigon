@@ -89,6 +89,7 @@ func (a *ApiHandler) getStateFork(w http.ResponseWriter, r *http.Request) (*beac
 		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}
 
+	isOptimistic := a.forkchoiceStore.IsRootOptimistic(root)
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
 	if err != nil {
 		return nil, err
@@ -107,7 +108,7 @@ func (a *ApiHandler) getStateFork(w http.ResponseWriter, r *http.Request) (*beac
 		PreviousVersion: utils.Uint32ToBytes4(previousVersion),
 		CurrentVersion:  utils.Uint32ToBytes4(currentVersion),
 		Epoch:           forkEpoch,
-	}), nil
+	}).WithOptimistic(isOptimistic), nil
 }
 
 func (a *ApiHandler) getStateRoot(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -136,6 +137,7 @@ func (a *ApiHandler) getStateRoot(w http.ResponseWriter, r *http.Request) (*beac
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read block header: %x", root))
 	}
 
+	isOptimistic := a.forkchoiceStore.IsRootOptimistic(root)
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
 	if err != nil {
 		return nil, err
@@ -149,6 +151,7 @@ func (a *ApiHandler) getStateRoot(w http.ResponseWriter, r *http.Request) (*beac
 	}
 
 	return newBeaconResponse(&rootResponse{Root: stateRoot}).
+		WithOptimistic(isOptimistic).
 		WithFinalized(canonicalRoot == root && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
 }
 
@@ -228,6 +231,7 @@ func (a *ApiHandler) getFinalityCheckpoints(w http.ResponseWriter, r *http.Reque
 		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}
 
+	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
 	if err != nil {
 		return nil, err
@@ -259,7 +263,8 @@ func (a *ApiHandler) getFinalityCheckpoints(w http.ResponseWriter, r *http.Reque
 		FinalizedCheckpoint:         finalizedCheckpoint,
 		CurrentJustifiedCheckpoint:  currentJustifiedCheckpoint,
 		PreviousJustifiedCheckpoint: previousJustifiedCheckpoint,
-	}).WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()).WithVersion(version), nil
+	}).WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()).
+		WithVersion(version).WithOptimistic(isOptimistic), nil
 }
 
 type syncCommitteesResponse struct {
@@ -285,6 +290,7 @@ func (a *ApiHandler) getSyncCommittees(w http.ResponseWriter, r *http.Request) (
 		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}
 
+	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
 	if err != nil {
 		return nil, err
@@ -323,7 +329,7 @@ func (a *ApiHandler) getSyncCommittees(w http.ResponseWriter, r *http.Request) (
 		if requestPeriod == statePeriod+1 {
 			committee = nextSyncCommittee.GetCommittee()
 		} else if requestPeriod != statePeriod {
-			return nil, fmt.Errorf("Epoch is outside the sync committee period of the state")
+			return nil, fmt.Errorf("epoch is outside the sync committee period of the state")
 		}
 	}
 	// Lastly construct the response
@@ -355,7 +361,9 @@ func (a *ApiHandler) getSyncCommittees(w http.ResponseWriter, r *http.Request) (
 		return nil, err
 	}
 
-	return newBeaconResponse(response).WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
+	return newBeaconResponse(response).
+		WithOptimistic(isOptimistic).
+		WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
 }
 
 type randaoResponse struct {
@@ -379,6 +387,8 @@ func (a *ApiHandler) getRandao(w http.ResponseWriter, r *http.Request) (*beaconh
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}
+	// Check if the block is optimistic
+	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
 
 	epochReq, err := beaconhttp.Uint64FromQueryParams(r, "epoch")
 	if err != nil {
@@ -401,7 +411,9 @@ func (a *ApiHandler) getRandao(w http.ResponseWriter, r *http.Request) (*beaconh
 
 	if a.forkchoiceStore.RandaoMixes(blockRoot, randaoMixes) {
 		mix := randaoMixes.Get(int(epoch % a.beaconChainCfg.EpochsPerHistoricalVector))
-		return newBeaconResponse(randaoResponse{Randao: mix}).WithFinalized(slot <= a.forkchoiceStore.FinalizedSlot()), nil
+		return newBeaconResponse(randaoResponse{Randao: mix}).
+			WithFinalized(slot <= a.forkchoiceStore.FinalizedSlot()).
+			WithOptimistic(isOptimistic), nil
 	}
 	// check if the block is canonical
 	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
@@ -415,5 +427,7 @@ func (a *ApiHandler) getRandao(w http.ResponseWriter, r *http.Request) (*beaconh
 	if err != nil {
 		return nil, err
 	}
-	return newBeaconResponse(randaoResponse{Randao: mix}).WithFinalized(slot <= a.forkchoiceStore.FinalizedSlot()), nil
+	return newBeaconResponse(randaoResponse{Randao: mix}).
+		WithFinalized(slot <= a.forkchoiceStore.FinalizedSlot()).
+		WithOptimistic(isOptimistic), nil
 }
