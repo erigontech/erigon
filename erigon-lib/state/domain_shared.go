@@ -507,7 +507,6 @@ func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) 
 		err = sd.tracesToWriter.Add(key)
 	case kv.TblTracesFromIdx:
 		err = sd.tracesFromWriter.Add(key)
-		err = sd.tracesFromWriter.Add(key)
 	default:
 		panic(fmt.Errorf("unknown shared index %s", table))
 	}
