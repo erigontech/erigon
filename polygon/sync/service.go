@@ -50,7 +50,11 @@ func NewService(
 	p2pService := p2p.NewService(maxPeers, logger, sentryClient, statusDataProvider.GetStatusData)
 	heimdallClient := heimdall.NewHeimdallClient(heimdallUrl, logger)
 	heimdallService := heimdall.NewHeimdall(heimdallClient, logger)
-	heimdallScraper := heimdall.NewScraper(heimdall.NewNoopStore(), heimdallClient, 1*time.Second, logger)
+	heimdallScraper := heimdall.NewScraperTODO(
+		heimdallClient,
+		1*time.Second,
+		logger,
+	)
 	blockDownloader := NewBlockDownloader(
 		logger,
 		p2pService,

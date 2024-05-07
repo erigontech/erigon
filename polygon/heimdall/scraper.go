@@ -8,23 +8,44 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
 type Scraper struct {
-	store     Store
+	txProvider     func() kv.RwTx
+	readerProvider func() reader
+
 	client    HeimdallClient
 	pollDelay time.Duration
 	logger    log.Logger
 }
 
+func NewScraperTODO(
+	client HeimdallClient,
+	pollDelay time.Duration,
+	logger log.Logger,
+) *Scraper {
+	return NewScraper(
+		func() kv.RwTx { /* TODO */ return nil },
+		func() reader { /* TODO */ return nil },
+		client,
+		pollDelay,
+		logger,
+	)
+}
+
 func NewScraper(
-	store Store,
+	txProvider func() kv.RwTx,
+	readerProvider func() reader,
+
 	client HeimdallClient,
 	pollDelay time.Duration,
 	logger log.Logger,
 ) *Scraper {
 	return &Scraper{
-		store:     store,
+		txProvider:     txProvider,
+		readerProvider: readerProvider,
+
 		client:    client,
 		pollDelay: pollDelay,
 		logger:    logger,
@@ -93,27 +114,36 @@ func (s *Scraper) syncEntity(
 }
 
 func (s *Scraper) Run(parentCtx context.Context) error {
-	// TODO: checkpoint store implementing entityStore using s.store
-	// TODO: milestone store implementing entityStore using s.store
-	// TODO: span store implementing entityStore using s.store
-
 	// TODO: checkpoint fetcher implementing entityFetcher using s.client
 	// TODO: milestone fetcher implementing entityFetcher using s.client
 	// TODO: span fetcher implementing entityFetcher using s.client
+
+	tx := s.txProvider()
+	if tx == nil {
+		// TODO: implement and remove
+		s.logger.Warn("heimdall.Scraper txProvider is not implemented yet")
+		return nil
+	}
+	reader := s.readerProvider()
+	if reader == nil {
+		// TODO: implement and remove
+		s.logger.Warn("heimdall.Scraper readerProvider is not implemented yet")
+		return nil
+	}
 
 	group, ctx := errgroup.WithContext(parentCtx)
 
 	// sync checkpoints
 	group.Go(func() error {
-		return s.syncEntity(ctx, nil /* TODO */, nil /* TODO */, nil /* TODO */)
+		return s.syncEntity(ctx, newCheckpointStore(tx, reader), nil /* TODO */, nil /* TODO */)
 	})
 	// sync milestones
 	group.Go(func() error {
-		return s.syncEntity(ctx, nil /* TODO */, nil /* TODO */, nil /* TODO */)
+		return s.syncEntity(ctx, newMilestoneStore(tx, reader), nil /* TODO */, nil /* TODO */)
 	})
 	// sync spans
 	group.Go(func() error {
-		return s.syncEntity(ctx, nil /* TODO */, nil /* TODO */, nil /* TODO */)
+		return s.syncEntity(ctx, newSpanStore(tx, reader), nil /* TODO */, nil /* TODO */)
 	})
 
 	return group.Wait()
