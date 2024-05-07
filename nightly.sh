@@ -26,3 +26,4 @@ GETH_STATUS=$?
 echo "The exit status of the process was $GETH_STATUS"
 
 exit $GETH_STATUS
+echo "Done..."
