@@ -214,9 +214,9 @@
     "timestampLimit": 1944498031,
     "expectedNewAccInputHash": "0x23883a7c55dd510280c50fa07b2faf5de5aeb12aed037bc93c7112c427f6941c",
     "virtualCounters": {
-      "steps": 75590,
+      "steps": 74870,
       "arith": 3529,
-      "binary": 4601,
+      "binary": 4577,
       "memAlign": 12,
       "keccaks": 60,
       "padding": 186,

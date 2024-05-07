@@ -454,8 +454,8 @@ func (cc *CounterCollector) SHRarith() {
 }
 
 func (cc *CounterCollector) SHLarith() {
-	cc.Deduct(S, 100)
-	cc.Deduct(B, 4)
+	cc.Deduct(S, 40)
+	cc.Deduct(B, 2)
 	cc.Deduct(A, 2)
 }
 
@@ -467,7 +467,7 @@ func (cc *CounterCollector) divArith() {
 
 func (cc *CounterCollector) opCode(scope *ScopeContext) {
 	cc.Deduct(S, 12)
-	if scope.Contract.IsCreate || cc.isDeploy {
+	if scope.Contract.IsCreate {
 		cc.mLoadX()
 		cc.SHRarith()
 	}
@@ -1738,6 +1738,7 @@ func (cc *CounterCollector) opPush(num int, scope *ScopeContext) {
 			cc.Deduct(S, 10)
 			for i := 0; i < num; i++ {
 				cc.Deduct(S, 10)
+				cc.SHLarith()
 			}
 		}
 	} else {
