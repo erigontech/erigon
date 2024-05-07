@@ -14,6 +14,16 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
+var (
+	SegmentsFilterFlag = cli.StringFlag{
+		Name:     "downloader.segments.filter",
+		Aliases:  []string{"dsf"},
+		Usage:    "Filter segments list [all|active|inactive|downloaded|queued], dafault value is all",
+		Required: false,
+		Value:    "all",
+	}
+)
+
 var Command = cli.Command{
 	Action:    printDownloadStatus,
 	Name:      "downloader",
@@ -26,14 +36,15 @@ var Command = cli.Command{
 	},
 	Subcommands: []*cli.Command{
 		{
-			Name:      "current",
-			Aliases:   []string{"c"},
-			Action:    print,
+			Name:      "segments",
+			Aliases:   []string{"segs"},
+			Action:    printSegmentsList,
 			Usage:     "print current stage",
 			ArgsUsage: "",
 			Flags: []cli.Flag{
 				&flags.DebugURLFlag,
 				&flags.OutputFlag,
+				&SegmentsFilterFlag,
 			},
 		},
 	},
@@ -58,6 +69,7 @@ func printDownloadStatus(cliCtx *cli.Context) error {
 
 	remainingBytes := snapDownload.Total - snapDownload.Downloaded
 	downloadTimeLeft := util.CalculateTime(remainingBytes, snapDownload.DownloadRate)
+
 	rowObj := table.Row{
 		status,                                   // Status
 		fmt.Sprintf("%.2f%%", downloadedPercent), // Progress
@@ -101,13 +113,85 @@ func printDownloadStatus(cliCtx *cli.Context) error {
 	return nil
 }
 
-/*func printSegmentsList(cliCtx *cli.Context) error {
+func printSegmentsList(cliCtx *cli.Context) error {
 	data, err := getData(cliCtx)
 
 	if err != nil {
 		return err
 	}
-}*/
+
+	snapDownload := data.SnapshotDownload
+
+	segments := snapDownload.SegmentsDownloading
+	rows := []table.Row{}
+
+	for _, segment := range segments {
+		peersDownloadRate := getSegmentDownloadRate(segment.Peers)
+		webseedsDownloadRate := getSegmentDownloadRate(segment.Webseeds)
+		totalDownloadRate := peersDownloadRate + webseedsDownloadRate
+		downloadedPercent := float32(segment.DownloadedBytes) / float32(segment.TotalBytes/100)
+		remainingBytes := segment.TotalBytes - segment.DownloadedBytes
+		downloadTimeLeft := util.CalculateTime(remainingBytes, totalDownloadRate)
+		isActive := "false"
+		if totalDownloadRate > 0 {
+			isActive = "true"
+		}
+
+		row := table.Row{
+			segment.Name,
+			fmt.Sprintf("%.2f%%", downloadedPercent),
+			common.ByteCount(segment.TotalBytes),
+			common.ByteCount(segment.DownloadedBytes),
+			len(segment.Peers),
+			common.ByteCount(peersDownloadRate) + "/s",
+			len(segment.Webseeds),
+			common.ByteCount(webseedsDownloadRate) + "/s",
+			downloadTimeLeft,
+			isActive,
+		}
+
+		rows = append(rows, row)
+	}
+
+	filteredRows := filterRows(rows, cliCtx.String(SegmentsFilterFlag.Name))
+
+	switch cliCtx.String(flags.OutputFlag.Name) {
+	case "json":
+		bytes, err := json.Marshal(rows)
+
+		if err != nil {
+			return err
+		}
+
+		fmt.Println(string(bytes))
+
+	case "text":
+		txt := text.Colors{text.FgBlue, text.Bold}
+		fmt.Println(txt.Sprint("Snapshot download info:"))
+		t := table.NewWriter()
+		t.SetOutputMirror(os.Stdout)
+
+		t.AppendHeader(table.Row{"Segment", "Progress", "Total", "Downloaded", "Peers", "Peers Download Rate", "Webseeds", "Webseeds Download Rate", "Time Left", "Active"})
+		t.AppendRows(filteredRows)
+
+		t.AppendSeparator()
+		t.Render()
+		fmt.Print("\n")
+	}
+
+	return nil
+
+}
+
+func getSegmentDownloadRate(peers []diagnostics.SegmentPeer) uint64 {
+	var downloadRate uint64
+
+	for _, peer := range peers {
+		downloadRate += peer.DownloadRate
+	}
+
+	return downloadRate
+}
 
 func getData(cliCtx *cli.Context) (diagnostics.SyncStatistics, error) {
 	/*var data diagnostics.SyncStatistics
@@ -122,6 +206,71 @@ func getData(cliCtx *cli.Context) (diagnostics.SyncStatistics, error) {
 	return data, nil*/
 
 	return response, nil
+}
+
+func filterRows(rows []table.Row, filter string) []table.Row {
+	switch filter {
+	case "all":
+		return rows
+	case "active":
+		return filterActive(rows)
+	case "inactive":
+		return filterInactive(rows)
+	case "downloaded":
+		return filterDownloaded(rows)
+	case "queued":
+		return filterQueued(rows)
+	}
+
+	return rows
+}
+
+func filterActive(rows []table.Row) []table.Row {
+	filtered := []table.Row{}
+
+	for _, row := range rows {
+		if row[9] == "true" {
+			filtered = append(filtered, row)
+		}
+	}
+
+	return filtered
+}
+
+func filterInactive(rows []table.Row) []table.Row {
+	filtered := []table.Row{}
+
+	for _, row := range rows {
+		if row[9] == "false" {
+			filtered = append(filtered, row)
+		}
+	}
+
+	return filtered
+}
+
+func filterDownloaded(rows []table.Row) []table.Row {
+	filtered := []table.Row{}
+
+	for _, row := range rows {
+		if row[1] == "100.00%" {
+			filtered = append(filtered, row)
+		}
+	}
+
+	return filtered
+}
+
+func filterQueued(rows []table.Row) []table.Row {
+	filtered := []table.Row{}
+
+	for _, row := range rows {
+		if row[1] == "0.00%" {
+			filtered = append(filtered, row)
+		}
+	}
+
+	return filtered
 }
 
 var response = diagnostics.SyncStatistics{
