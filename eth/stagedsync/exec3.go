@@ -712,9 +712,9 @@ Loop:
 			}
 			if txTask.TxNum <= txNumInDB && txTask.TxNum > 0 {
 				inputTxNum++
-				panic(2)
 				skipPostEvaluation = true
-				continue
+				panic(2)
+				continue //nolint
 			}
 			doms.SetTxNum(txTask.TxNum)
 			doms.SetBlockNum(txTask.BlockNum)
