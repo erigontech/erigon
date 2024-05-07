@@ -136,9 +136,9 @@ var (
 		Name:  "ethash.dagslockmmap",
 		Usage: "Lock memory maps for recent ethash mining DAGs",
 	}
-	InternalConsensusFlag = cli.BoolFlag{
-		Name:  "internalcl",
-		Usage: "Enables internal consensus",
+	ExternalConsensusFlag = cli.BoolFlag{
+		Name:  "exeternal",
+		Usage: "Enables the external consensus layer",
 	}
 	// Transaction pool settings
 	TxPoolDisableFlag = cli.BoolFlag{
@@ -817,19 +817,19 @@ var (
 		Value: "",
 	}
 
-	LightClientDiscoveryAddrFlag = cli.StringFlag{
-		Name:  "lightclient.discovery.addr",
-		Usage: "Address for lightclient DISCV5 protocol",
+	CaplinDiscoveryAddrFlag = cli.StringFlag{
+		Name:  "caplin.discovery.addr",
+		Usage: "Address for Caplin DISCV5 protocol",
 		Value: "127.0.0.1",
 	}
-	LightClientDiscoveryPortFlag = cli.Uint64Flag{
-		Name:  "lightclient.discovery.port",
-		Usage: "Port for lightclient DISCV5 protocol",
+	CaplinDiscoveryPortFlag = cli.Uint64Flag{
+		Name:  "caplin.discovery.port",
+		Usage: "Port for Caplin DISCV5 protocol",
 		Value: 4000,
 	}
-	LightClientDiscoveryTCPPortFlag = cli.Uint64Flag{
-		Name:  "lightclient.discovery.tcpport",
-		Usage: "TCP Port for lightclient DISCV5 protocol",
+	CaplinDiscoveryTCPPortFlag = cli.Uint64Flag{
+		Name:  "caplin.discovery.tcpport",
+		Usage: "TCP Port for Caplin DISCV5 protocol",
 		Value: 4001,
 	}
 
@@ -1716,9 +1716,9 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.Config, logger log.Logger) {
-	cfg.LightClientDiscoveryAddr = ctx.String(LightClientDiscoveryAddrFlag.Name)
-	cfg.LightClientDiscoveryPort = ctx.Uint64(LightClientDiscoveryPortFlag.Name)
-	cfg.LightClientDiscoveryTCPPort = ctx.Uint64(LightClientDiscoveryTCPPortFlag.Name)
+	cfg.CaplinDiscoveryAddr = ctx.String(CaplinDiscoveryAddrFlag.Name)
+	cfg.CaplinDiscoveryPort = ctx.Uint64(CaplinDiscoveryPortFlag.Name)
+	cfg.CaplinDiscoveryTCPPort = ctx.Uint64(CaplinDiscoveryTCPPortFlag.Name)
 	cfg.SentinelAddr = ctx.String(SentinelAddrFlag.Name)
 	cfg.SentinelPort = ctx.Uint64(SentinelPortFlag.Name)
 
@@ -1848,8 +1848,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		cfg.OverridePragueTime = flags.GlobalBig(ctx, OverridePragueFlag.Name)
 	}
 
-	if ctx.IsSet(InternalConsensusFlag.Name) && clparams.EmbeddedSupported(cfg.NetworkID) {
-		cfg.InternalCL = ctx.Bool(InternalConsensusFlag.Name)
+	if ctx.IsSet(ExternalConsensusFlag.Name) && clparams.EmbeddedSupported(cfg.NetworkID) {
+		cfg.InternalCL = !ctx.Bool(ExternalConsensusFlag.Name)
 	}
 
 	if ctx.IsSet(TrustedSetupFile.Name) {
