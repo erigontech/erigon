@@ -1287,10 +1287,7 @@ func (r *BlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, hash common
 
 func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
 	maxBlockNumInFiles := r.FrozenBorBlocks()
-	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
-		if tx == nil {
-			return nil, nil
-		}
+	if tx != nil && (maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles) {
 		c, err := tx.Cursor(kv.BorEventNums)
 		if err != nil {
 			return nil, err
@@ -1545,10 +1542,7 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], spanId)
 	maxBlockNumInFiles := r.FrozenBorBlocks()
-	if maxBlockNumInFiles == 0 || endBlock > maxBlockNumInFiles {
-		if tx == nil {
-			return nil, nil
-		}
+	if tx != nil && (maxBlockNumInFiles == 0 || endBlock > maxBlockNumInFiles) {
 		v, err := tx.GetOne(kv.BorSpans, buf[:])
 		if err != nil {
 			return nil, err
