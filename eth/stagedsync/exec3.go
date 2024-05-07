@@ -604,7 +604,7 @@ func ExecV3(ctx context.Context,
 		defer clean()
 	}
 
-	//fmt.Printf("exec blocks: %d -> %d\n", blockNum, maxBlockNum)
+	//fmt.Printf("exec bslocks: %d -> %d\n", blockNum, maxBlockNum)
 
 	var b *types.Block
 Loop:
@@ -712,6 +712,7 @@ Loop:
 			}
 			if txTask.TxNum <= txNumInDB && txTask.TxNum > 0 {
 				inputTxNum++
+				panic(2)
 				skipPostEvaluation = true
 				continue
 			}
@@ -766,6 +767,9 @@ Loop:
 						blobGasUsed += txTask.Tx.GetBlobGas()
 					}
 					if txTask.Final {
+						if skipPostEvaluation {
+							panic(1)
+						}
 						if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 							if err := core.BlockPostValidation(usedGas, blobGasUsed, txTask.Header); err != nil {
 								return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
