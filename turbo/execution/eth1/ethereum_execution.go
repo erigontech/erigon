@@ -156,10 +156,7 @@ func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, b
 
 func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execution.ValidationRequest) (*execution.ValidationReceipt, error) {
 	if !e.semaphore.TryAcquire(1) {
-<<<<<<< HEAD
-=======
 		e.logger.Trace("ethereumExecutionModule.ValidateChain: ExecutionStatus_Busy")
->>>>>>> origin/main
 		return &execution.ValidationReceipt{
 			LatestValidHash:  gointerfaces.ConvertHashToH256(libcommon.Hash{}),
 			ValidationStatus: execution.ExecutionStatus_Busy,
