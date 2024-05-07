@@ -9,12 +9,12 @@ import (
 
 type optimisticStoreImpl struct {
 	opMutex         sync.RWMutex
-	optimisticRoots map[common.Hash]*blockNode
+	optimisticRoots map[common.Hash]*opNode
 }
 
 func NewOptimisticStore() OptimisticStore {
 	return &optimisticStoreImpl{
-		optimisticRoots: make(map[common.Hash]*blockNode),
+		optimisticRoots: make(map[common.Hash]*opNode),
 	}
 }
 
@@ -31,7 +31,7 @@ func (impl *optimisticStoreImpl) AddOptimisticCandidate(block *cltypes.BeaconBlo
 		// block already optimistically imported
 		return nil
 	}
-	blockNode := &blockNode{
+	blockNode := &opNode{
 		parent:   parentRoot,
 		children: []common.Hash{},
 	}
@@ -83,13 +83,16 @@ func (impl *optimisticStoreImpl) InvalidateBlock(block *cltypes.BeaconBlock) err
 }
 
 func (impl *optimisticStoreImpl) IsOptimistic(root common.Hash) bool {
+	if root == (common.Hash{}) {
+		return false
+	}
 	if _, ok := impl.optimisticRoots[root]; ok {
 		return true
 	}
 	return false
 }
 
-type blockNode struct {
+type opNode struct {
 	parent   common.Hash
 	children []common.Hash
 }

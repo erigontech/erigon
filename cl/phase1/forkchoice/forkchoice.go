@@ -507,6 +507,10 @@ func (f *ForkChoiceStore) GetCurrentPartecipationIndicies(blockRoot libcommon.Ha
 	return f.forkGraph.GetCurrentPartecipationIndicies(blockRoot)
 }
 
+func (f *ForkChoiceStore) IsRootOptimistic(root libcommon.Hash) bool {
+	return f.optimisticStore.IsOptimistic(root)
+}
+
 func (f *ForkChoiceStore) IsHeadOptimistic() bool {
 	headState := f.syncedDataManager.HeadState()
 	if headState == nil {
