@@ -172,7 +172,7 @@ const (
 	// PIP-27: secp256r1 elliptic curve signature verifier gas price
 	P256VerifyGas uint64 = 3450
 
-	// EIP-2935
+	// EIP-2935: Historical block hashes in state
 	BlockHashHistoryServeWindow uint64 = 8192
 	BlockHashOldWindow          uint64 = 256
 )
