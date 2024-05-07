@@ -86,13 +86,8 @@ make all
 ```
 1. Stop Erigon
 2. Create new db with new --db.pagesize: 
-```
-
 ONLY_CREATE_DB=true ./build/bin/erigon --datadir=/erigon-new/ --chain="$CHAIN" --db.pagesize=8kb --db.size.limit=12T
-
 # if erigon doesn't stop after 1 min. just stop it.
-
-```
 3. Build integration: cd erigon; make integration
 5. Run: ./build/bin/integration mdbx_to_mdbx --chaindata /existing/erigon/path/chaindata/ --chaindata.to /erigon-new/chaindata/
 6. cp -R /existing/erigon/path/snapshots /erigon-new/snapshots
