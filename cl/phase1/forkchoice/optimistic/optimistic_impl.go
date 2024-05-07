@@ -19,6 +19,10 @@ func NewOptimisticStore() OptimisticStore {
 }
 
 func (impl *optimisticStoreImpl) AddOptimisticCandidate(block *cltypes.BeaconBlock) error {
+	if block.Body.ExecutionPayload == nil || *block.Body.ExecutionPayload == (cltypes.Eth1Block{}) {
+		return nil
+	}
+
 	root, err := block.HashSSZ()
 	if err != nil {
 		return err
@@ -32,8 +36,9 @@ func (impl *optimisticStoreImpl) AddOptimisticCandidate(block *cltypes.BeaconBlo
 		return nil
 	}
 	blockNode := &opNode{
-		parent:   parentRoot,
-		children: []common.Hash{},
+		execBlockNum: block.Body.ExecutionPayload.BlockNumber,
+		parent:       parentRoot,
+		children:     []common.Hash{},
 	}
 	impl.optimisticRoots[root] = blockNode
 
@@ -47,6 +52,7 @@ func (impl *optimisticStoreImpl) AddOptimisticCandidate(block *cltypes.BeaconBlo
 func (impl *optimisticStoreImpl) ValidateBlock(block *cltypes.BeaconBlock) error {
 	// When a block transitions from NOT_VALIDATED -> VALID, all ancestors of the block MUST also transition
 	// from NOT_VALIDATED -> VALID. Such a block and any previously NOT_VALIDATED ancestors are no longer considered "optimistically imported".
+	blockNum := block.Body.ExecutionPayload.BlockNumber
 	impl.opMutex.Lock()
 	defer impl.opMutex.Unlock()
 	curRoot := block.StateRoot
@@ -59,6 +65,16 @@ func (impl *optimisticStoreImpl) ValidateBlock(block *cltypes.BeaconBlock) error
 		} else {
 			break
 		}
+	}
+	// and try to clean up all nodes with block number less than blockNum
+	toRemoves := []common.Hash{}
+	for root, node := range impl.optimisticRoots {
+		if node.execBlockNum < blockNum {
+			toRemoves = append(toRemoves, root)
+		}
+	}
+	for _, root := range toRemoves {
+		delete(impl.optimisticRoots, root)
 	}
 	return nil
 }
@@ -93,6 +109,7 @@ func (impl *optimisticStoreImpl) IsOptimistic(root common.Hash) bool {
 }
 
 type opNode struct {
-	parent   common.Hash
-	children []common.Hash
+	execBlockNum uint64
+	parent       common.Hash
+	children     []common.Hash
 }
