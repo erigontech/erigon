@@ -8,6 +8,7 @@ import (
 
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
@@ -204,6 +205,34 @@ func TestMergeSnapshots(t *testing.T) {
 	defer d.Close()
 	a = d.Count()
 	require.Equal(10, a)
+}
+
+func TestDeleteSnapshots(t *testing.T) {
+	logger := log.New()
+	dir, require := t.TempDir(), require.New(t)
+	createFile := func(from, to uint64) {
+		for _, snT := range coresnaptype.BlockSnapshotTypes {
+			createTestSegmentFile(t, from, to, snT.Enum(), dir, 1, logger)
+		}
+	}
+
+	N := uint64(70)
+
+	for i := uint64(0); i < N; i++ {
+		createFile(i*10_000, (i+1)*10_000)
+	}
+	s := NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, 0, logger)
+	defer s.Close()
+	retireFiles := []string{
+		"v1-000000-000010-bodies.seg",
+		"v1-000000-000010-headers.seg",
+		"v1-000000-000010-transactions.seg",
+	}
+	require.NoError(s.ReopenFolder())
+	for _, f := range retireFiles {
+		require.NoError(s.Delete(f))
+		require.False(slices.Contains(s.Files(), f))
+	}
 }
 
 func TestRemoveOverlaps(t *testing.T) {

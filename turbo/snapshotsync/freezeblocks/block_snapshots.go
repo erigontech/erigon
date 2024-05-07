@@ -272,8 +272,6 @@ type RoSnapshots struct {
 
 	// allows for pruning segments - this is the min availible segment
 	segmentsMin atomic.Uint64
-
-	sem *semaphore.Weighted
 }
 
 // NewRoSnapshots - opens all snapshots. But to simplify everything:
@@ -291,7 +289,7 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 		segs.Set(snapType.Enum(), &segments{})
 	}
 
-	s := &RoSnapshots{dir: snapDir, cfg: cfg, segments: segs, logger: logger, types: types, sem: semaphore.NewWeighted(1)}
+	s := &RoSnapshots{dir: snapDir, cfg: cfg, segments: segs, logger: logger, types: types}
 	s.segmentsMin.Store(segmentsMin)
 
 	return s

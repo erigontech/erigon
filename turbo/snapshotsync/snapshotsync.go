@@ -227,7 +227,7 @@ func getMinimumBlocksToDownload(tx kv.Tx, blockReader services.FullBlockReader, 
 	return minToDownload, minStep - minStepToDownload, nil
 }
 
-func getMinStep(preverified snapcfg.Preverified) (uint64, error) {
+func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error) {
 	maxTo := uint64(0)
 	for _, p := range preverified {
 		// take the "to" from "domain" snapshot
@@ -286,7 +286,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, histV
 
 	blackListForPruning := make(map[string]struct{})
 	if !headerchain && pruneMode {
-		minStep, err := getMinStep(preverifiedBlockSnapshots)
+		minStep, err := getMaxStepRangeInSnapshots(preverifiedBlockSnapshots)
 		if err != nil {
 			return err
 		}
