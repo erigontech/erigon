@@ -222,7 +222,6 @@ func getMinimumBlocksToDownload(tx kv.Tx, blockReader services.FullBlockReader, 
 	}); err != nil {
 		return 0, 0, err
 	}
-	fmt.Println("minToDownload", minToDownload, "minStepToDownload", minStepToDownload)
 	// return the minimum number of blocks to download and the minimum step.
 	return minToDownload, minStep - minStepToDownload, nil
 }
