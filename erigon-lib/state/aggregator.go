@@ -1585,8 +1585,8 @@ func (ac *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs
 		return ac.d[kv.CodeDomain].ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
 	case kv.CommitmentHistoryIdx:
 		return ac.d[kv.StorageDomain].ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
-	//case kv.GasUsedHistoryIdx:
-	//	return ac.d[kv.GasUsedDomain].ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
+	case kv.GasUsedHistoryIdx:
+		return ac.d[kv.GasUsedDomain].ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
 	case kv.LogTopicIdx:
 		return ac.logTopics.IdxRange(k, fromTs, toTs, asc, limit, tx)
 	case kv.LogAddrIdx:
@@ -1619,8 +1619,8 @@ func (ac *AggregatorRoTx) HistoryGet(name kv.History, key []byte, ts uint64, tx 
 		return ac.d[kv.CodeDomain].ht.GetNoStateWithRecent(key, ts, tx)
 	case kv.CommitmentHistory:
 		return ac.d[kv.CommitmentDomain].ht.GetNoStateWithRecent(key, ts, tx)
-	//case kv.GasUsedHistory:
-	//	return ac.d[kv.GasUsedDomain].ht.GetNoStateWithRecent(key, ts, tx)
+	case kv.GasUsedHistory:
+		return ac.d[kv.GasUsedDomain].ht.GetNoStateWithRecent(key, ts, tx)
 	default:
 		panic(fmt.Sprintf("unexpected: %s", name))
 	}

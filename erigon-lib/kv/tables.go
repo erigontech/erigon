@@ -399,11 +399,11 @@ const (
 	TblCommitmentHistoryVals = "CommitmentHistoryVals"
 	TblCommitmentIdx         = "CommitmentIdx"
 
-	//TblGasUsedKeys        = "GasUsedKeys"
-	//TblGasUsedVals        = "GasUsedVals"
-	//TblGasUsedHistoryKeys = "GasUsedHistoryKeys"
-	//TblGasUsedHistoryVals = "GasUsedHistoryVals"
-	//TblGasUsedIdx         = "GasUsedIdx"
+	TblGasUsedKeys        = "GasUsedKeys"
+	TblGasUsedVals        = "GasUsedVals"
+	TblGasUsedHistoryKeys = "GasUsedHistoryKeys"
+	TblGasUsedHistoryVals = "GasUsedHistoryVals"
+	TblGasUsedIdx         = "GasUsedIdx"
 
 	TblLogAddressKeys = "LogAddressKeys"
 	TblLogAddressIdx  = "LogAddressIdx"
@@ -812,19 +812,19 @@ var ChaindataTablesCfg = TableCfg{
 	TblCommitmentHistoryKeys: {Flags: DupSort},
 	TblCommitmentHistoryVals: {Flags: DupSort},
 	TblCommitmentIdx:         {Flags: DupSort},
-	//TblGasUsedKeys:           {Flags: DupSort},
-	//TblGasUsedHistoryKeys:    {Flags: DupSort},
-	//TblGasUsedHistoryVals:    {Flags: DupSort},
-	//TblGasUsedIdx:            {Flags: DupSort},
-	TblLogAddressKeys:  {Flags: DupSort},
-	TblLogAddressIdx:   {Flags: DupSort},
-	TblLogTopicsKeys:   {Flags: DupSort},
-	TblLogTopicsIdx:    {Flags: DupSort},
-	TblTracesFromKeys:  {Flags: DupSort},
-	TblTracesFromIdx:   {Flags: DupSort},
-	TblTracesToKeys:    {Flags: DupSort},
-	TblTracesToIdx:     {Flags: DupSort},
-	TblPruningProgress: {Flags: DupSort},
+	TblGasUsedKeys:           {Flags: DupSort},
+	TblGasUsedHistoryKeys:    {Flags: DupSort},
+	TblGasUsedHistoryVals:    {Flags: DupSort},
+	TblGasUsedIdx:            {Flags: DupSort},
+	TblLogAddressKeys:        {Flags: DupSort},
+	TblLogAddressIdx:         {Flags: DupSort},
+	TblLogTopicsKeys:         {Flags: DupSort},
+	TblLogTopicsIdx:          {Flags: DupSort},
+	TblTracesFromKeys:        {Flags: DupSort},
+	TblTracesFromIdx:         {Flags: DupSort},
+	TblTracesToKeys:          {Flags: DupSort},
+	TblTracesToIdx:           {Flags: DupSort},
+	TblPruningProgress:       {Flags: DupSort},
 
 	RAccountKeys: {Flags: DupSort},
 	RAccountIdx:  {Flags: DupSort},
@@ -936,9 +936,9 @@ const (
 	StorageDomain    Domain = 1
 	CodeDomain       Domain = 2
 	CommitmentDomain Domain = 3
-	//GasUsedDomain    Domain = 4
+	GasUsedDomain    Domain = 4
 
-	DomainLen Domain = 4
+	DomainLen Domain = 5
 )
 
 const (
@@ -946,7 +946,7 @@ const (
 	StorageHistory    History = "StorageHistory"
 	CodeHistory       History = "CodeHistory"
 	CommitmentHistory History = "CommitmentHistory"
-	//GasUsedHistory    History = "GasUsedHistory"
+	GasUsedHistory    History = "GasUsedHistory"
 )
 
 const (
@@ -954,7 +954,7 @@ const (
 	StorageHistoryIdx    InvertedIdx = "StorageHistoryIdx"
 	CodeHistoryIdx       InvertedIdx = "CodeHistoryIdx"
 	CommitmentHistoryIdx InvertedIdx = "CommitmentHistoryIdx"
-	//GasUsedHistoryIdx    InvertedIdx = "GasUsedHistoryIdx"
+	GasUsedHistoryIdx    InvertedIdx = "GasUsedHistoryIdx"
 
 	LogTopicIdx   InvertedIdx = "LogTopicIdx"
 	LogAddrIdx    InvertedIdx = "LogAddrIdx"
@@ -972,8 +972,8 @@ func (d Domain) String() string {
 		return "code"
 	case CommitmentDomain:
 		return "commitment"
-	//case GasUsedDomain:
-	//	return "gasused"
+	case GasUsedDomain:
+		return "gasused"
 	default:
 		return "unknown domain"
 	}
@@ -989,8 +989,8 @@ func String2Domain(in string) (Domain, error) {
 		return CodeDomain, nil
 	case "commitment":
 		return CommitmentDomain, nil
-	//case "gasused":
-	//	return GasUsedDomain, nil
+	case "gasused":
+		return GasUsedDomain, nil
 	default:
 		return 0, fmt.Errorf("unknown history name: %s", in)
 	}

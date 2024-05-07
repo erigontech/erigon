@@ -130,23 +130,23 @@ func DefaultStages(ctx context.Context,
 				return PruneExecutionStage(p, tx, exec, ctx, firstCycle)
 			},
 		},
-		//{
-		//	ID:          stages.CustomTrace,
-		//	Description: "Re-Execute blocks on history state - with custom tracer",
-		//	Disabled:    !bodies.historyV3 || dbg.StagesOnlyBlocks,
-		//	Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-		//		cfg := StageCustomTraceCfg(exec.db, exec.prune, exec.dirs, exec.blockReader, exec.chainConfig, exec.engine, exec.genesis, &exec.syncCfg)
-		//		return SpawnCustomTrace(s, txc, cfg, ctx, firstCycle, 0, logger)
-		//	},
-		//	Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-		//		cfg := StageCustomTraceCfg(exec.db, exec.prune, exec.dirs, exec.blockReader, exec.chainConfig, exec.engine, exec.genesis, &exec.syncCfg)
-		//		return UnwindCustomTrace(u, s, txc, cfg, ctx, logger)
-		//	},
-		//	Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
-		//		cfg := StageCustomTraceCfg(exec.db, exec.prune, exec.dirs, exec.blockReader, exec.chainConfig, exec.engine, exec.genesis, &exec.syncCfg)
-		//		return PruneCustomTrace(p, tx, cfg, ctx, firstCycle, logger)
-		//	},
-		//},
+		{
+			ID:          stages.CustomTrace,
+			Description: "Re-Execute blocks on history state - with custom tracer",
+			Disabled:    !bodies.historyV3 || dbg.StagesOnlyBlocks,
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+				cfg := StageCustomTraceCfg(exec.db, exec.prune, exec.dirs, exec.blockReader, exec.chainConfig, exec.engine, exec.genesis, &exec.syncCfg)
+				return SpawnCustomTrace(s, txc, cfg, ctx, firstCycle, 0, logger)
+			},
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
+				cfg := StageCustomTraceCfg(exec.db, exec.prune, exec.dirs, exec.blockReader, exec.chainConfig, exec.engine, exec.genesis, &exec.syncCfg)
+				return UnwindCustomTrace(u, s, txc, cfg, ctx, logger)
+			},
+			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
+				cfg := StageCustomTraceCfg(exec.db, exec.prune, exec.dirs, exec.blockReader, exec.chainConfig, exec.engine, exec.genesis, &exec.syncCfg)
+				return PruneCustomTrace(p, tx, cfg, ctx, firstCycle, logger)
+			},
+		},
 		{
 			ID:          stages.HashState,
 			Description: "Hash the key in the state",
