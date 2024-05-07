@@ -23,12 +23,12 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
+	"github.com/ledgerwatch/erigon-lib/crypto/blake2b"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/crypto/blake2b"
 	"github.com/ledgerwatch/erigon/crypto/bls12381"
 	"github.com/ledgerwatch/erigon/params"
 	"golang.org/x/crypto/ripemd160"
@@ -835,7 +835,7 @@ type bls12381MapG1_zkevm struct{}
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
 func (c *bls12381MapG1_zkevm) RequiredGas(input []byte) uint64 {
-	return params.Bls12381MapG1Gas
+	return params.Bls12381MapFpToG1Gas
 }
 
 func (c *bls12381MapG1_zkevm) Run(input []byte) ([]byte, error) {
@@ -870,7 +870,7 @@ type bls12381MapG2_zkevm struct{}
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
 func (c *bls12381MapG2_zkevm) RequiredGas(input []byte) uint64 {
-	return params.Bls12381MapG2Gas
+	return params.Bls12381MapFp2ToG2Gas
 }
 
 func (c *bls12381MapG2_zkevm) Run(input []byte) ([]byte, error) {

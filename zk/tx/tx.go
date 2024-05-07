@@ -14,7 +14,7 @@ import (
 	"encoding/binary"
 
 	"github.com/holiman/uint256"
-	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/smt/pkg/utils"
@@ -156,7 +156,9 @@ func DecodeTx(encodedTx []byte, efficiencyPercentage byte, forkId uint16) (types
 		encodedTx = append(encodedTx, efficiencyPercentage)
 	}
 
-	tx, err := types.DecodeTransaction(rlp.NewStream(bytes.NewReader(encodedTx), 0))
+	data := rlp.NewStream(bytes.NewReader(encodedTx), 0)
+
+	tx, err := types.DecodeRLPTransaction(data, false)
 	if err != nil {
 		return nil, 0, err
 	}

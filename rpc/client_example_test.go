@@ -19,10 +19,11 @@ package rpc_test
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // In this example, our client wishes to track the latest 'block number'
@@ -40,7 +41,8 @@ type Block struct {
 
 func ExampleClientSubscription() {
 	// Connect the client.
-	client, _ := rpc.Dial("ws://127.0.0.1:8545")
+	logger := log.New()
+	client, _ := rpc.Dial("ws://127.0.0.1:8545", logger)
 	subch := make(chan Block)
 
 	// Ensure that subch receives the latest block.

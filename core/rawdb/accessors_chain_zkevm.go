@@ -4,11 +4,11 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/common/dbg"
-	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common/dbutils"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
@@ -61,7 +61,7 @@ func TruncateBodies(tx kv.RwTx, fromBlockNum uint64) error {
 
 		blockhash := libcommon.BytesToHash(k[8:])
 		// delete body for storage
-		deleteBody(tx, blockhash, blockNum)
+		DeleteBody(tx, blockhash, blockNum)
 
 		// delete transactions
 		if err := DeleteTransactions(tx, uint64(len(txs)), body.BaseTxId+1, nil); err != nil {

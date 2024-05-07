@@ -22,10 +22,10 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/davecgh/go-spew/spew"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/davecgh/go-spew/spew"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 var unmarshalLogTests = map[string]struct {
@@ -106,6 +106,7 @@ var unmarshalLogTests = map[string]struct {
 }
 
 func TestUnmarshalLog(t *testing.T) {
+	t.Parallel()
 	dumper := spew.ConfigState{DisableMethods: true, Indent: "    "}
 	for name, test := range unmarshalLogTests {
 		var log *Log
@@ -136,6 +137,7 @@ func checkError(t *testing.T, testname string, got, want error) bool {
 }
 
 func TestFilterLogsTopics(t *testing.T) {
+	t.Parallel()
 	// hashes and addresses to make test more readable
 	var (
 		A libcommon.Hash = [32]byte{1}

@@ -4,10 +4,11 @@ import (
 	"encoding/binary"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
 
-	"github.com/ledgerwatch/erigon/common/dbutils"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 )
@@ -55,6 +56,15 @@ func (w *PlainStateWriter) UpdateAccountData(address libcommon.Address, original
 	if w.accumulator != nil {
 		w.accumulator.ChangeAccount(address, account.Incarnation, value)
 	}
+
+	if account.Incarnation == 0 && original.Incarnation > 0 {
+		var b [8]byte
+		binary.BigEndian.PutUint64(b[:], original.Incarnation)
+		if err := w.db.Put(kv.IncarnationMap, address[:], b[:]); err != nil {
+			return err
+		}
+	}
+
 	return w.db.Put(kv.PlainState, address[:], value)
 }
 
@@ -130,6 +140,7 @@ func (w *PlainStateWriter) CreateContract(address libcommon.Address) error {
 
 func (w *PlainStateWriter) WriteChangeSets() error {
 	if w.csw != nil {
+
 		return w.csw.WriteChangeSets()
 	}
 

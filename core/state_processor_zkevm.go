@@ -17,11 +17,9 @@
 package core
 
 import (
-	"math/big"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-
-	"github.com/ledgerwatch/erigon/chain"
+	"github.com/ledgerwatch/erigon-lib/chain"
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -35,10 +33,10 @@ import (
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func applyTransaction_zkevm(config *chain.Config, engine consensus.EngineReader, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, evm vm.VMInterface, cfg vm.Config, effectiveGasPricePercentage uint8) (*types.Receipt, *ExecutionResult, error) {
+func applyTransaction_zkevm(config *chain.Config, engine consensus.EngineReader, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, evm *vm.EVM, cfg vm.Config, effectiveGasPricePercentage uint8) (*types.Receipt, *ExecutionResult, error) {
 	rules := evm.ChainRules()
 
-	msg, err := tx.AsMessage(*types.MakeSigner(config, header.Number.Uint64()), header.BaseFee, rules)
+	msg, err := tx.AsMessage(*types.MakeSigner(config, header.Number.Uint64(), 0), header.BaseFee, rules)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -54,7 +52,7 @@ func applyTransaction_zkevm(config *chain.Config, engine consensus.EngineReader,
 	if msg.FeeCap().IsZero() && engine != nil {
 		// Only zero-gas transactions may be service ones
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			return SysCallContract(contract, data, *config, ibs, header, engine, true /* constCall */, nil /*excessDataGas*/)
+			return SysCallContract(contract, data, config, ibs, header, engine, true /* constCall */)
 		}
 		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 	}
@@ -91,7 +89,7 @@ func applyTransaction_zkevm(config *chain.Config, engine consensus.EngineReader,
 		var contractAddress libcommon.Address
 
 		if msg.To() == nil {
-			contractAddress = crypto.CreateAddress(evm.TxContext().Origin, tx.GetNonce())
+			contractAddress = crypto.CreateAddress(evm.TxContext.Origin, tx.GetNonce())
 		}
 
 		// [hack][zkevm] - ignore the bloom at this point due to a bug in zknode where the bloom is not included
@@ -131,7 +129,6 @@ func ApplyTransaction_zkevm(
 	tx types.Transaction,
 	usedGas *uint64,
 	cfg vm.ZkConfig,
-	excessDataGas *big.Int,
 	effectiveGasPricePercentage uint8,
 ) (*types.Receipt, *ExecutionResult, error) {
 	// Create a new context to be used in the EVM environment
@@ -140,7 +137,7 @@ func ApplyTransaction_zkevm(
 	// about the transaction and calling mechanisms.
 	cfg.Config.SkipAnalysis = SkipAnalysis(config, header.Number.Uint64())
 
-	blockContext := NewEVMBlockContext(header, blockHashFunc, engine, author, excessDataGas)
+	blockContext := NewEVMBlockContext(header, blockHashFunc, engine, author)
 	vmenv := vm.NewZkEVM(blockContext, evmtypes.TxContext{}, ibs, config, cfg)
 
 	return applyTransaction_zkevm(config, engine, gp, ibs, stateWriter, header, tx, usedGas, vmenv, cfg.Config, effectiveGasPricePercentage)

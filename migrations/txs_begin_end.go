@@ -8,15 +8,14 @@ import (
 	"runtime"
 	"time"
 
-	common2 "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/common/assert"
-	"github.com/gateway-fm/cdk-erigon-lib/common/datadir"
-	"github.com/gateway-fm/cdk-erigon-lib/common/dbg"
-	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/assert"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -25,9 +24,9 @@ import (
 
 var ErrTxsBeginEndNoMigration = fmt.Errorf("in this Erigon version DB format was changed: added additional first/last system-txs to blocks. There is no DB migration for this change. Please re-sync or switch to earlier version")
 
-var txsBeginEnd = Migration{
+var TxsBeginEnd = Migration{
 	Name: "txs_begin_end",
-	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback) (err error) {
+	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 		logEvery := time.NewTicker(10 * time.Second)
 		defer logEvery.Stop()
 
@@ -39,7 +38,7 @@ var txsBeginEnd = Migration{
 			}
 			if progress != nil {
 				latestBlock = binary.BigEndian.Uint64(progress)
-				log.Info("[database version migration] Continue migration", "from_block", latestBlock)
+				logger.Info("[database version migration] Continue migration", "from_block", latestBlock)
 			} else {
 				latestBlock = bodiesProgress + 1 // include block 0
 			}
@@ -63,7 +62,7 @@ var txsBeginEnd = Migration{
 			case <-logEvery.C:
 				var m runtime.MemStats
 				dbg.ReadMemStats(&m)
-				log.Info("[database version migration] Adding system-txs",
+				logger.Info("[database version migration] Adding system-txs",
 					"progress", fmt.Sprintf("%.2f%%", 100-100*float64(blockNum)/float64(latestBlock)), "block_num", blockNum,
 					"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 			default:
@@ -89,7 +88,7 @@ var txsBeginEnd = Migration{
 				continue
 			}
 
-			txs, err := rawdb.CanonicalTransactions(tx, b.BaseTxId, b.TxAmount)
+			txs, err := canonicalTransactions(tx, b.BaseTxId, b.TxAmount)
 			if err != nil {
 				return err
 			}
@@ -114,7 +113,7 @@ var txsBeginEnd = Migration{
 
 			if assert.Enable {
 				newBlock, baseTxId, txAmount := rawdb.ReadBody(tx, canonicalHash, blockNum)
-				newBlock.Transactions, err = rawdb.CanonicalTransactions(tx, baseTxId, txAmount)
+				newBlock.Transactions, err = canonicalTransactions(tx, baseTxId, txAmount)
 				for i, oldTx := range oldBlock.Transactions {
 					newTx := newBlock.Transactions[i]
 					if oldTx.GetNonce() != newTx.GetNonce() {
@@ -226,24 +225,6 @@ var txsBeginEnd = Migration{
 	},
 }
 
-func writeRawBodyDeprecated(db kv.RwTx, hash common2.Hash, number uint64, body *types.RawBody) error {
-	baseTxId, err := db.IncrementSequence(kv.EthTx, uint64(len(body.Transactions)))
-	if err != nil {
-		return err
-	}
-	data := types.BodyForStorage{
-		BaseTxId: baseTxId,
-		TxAmount: uint32(len(body.Transactions)),
-		Uncles:   body.Uncles,
-	}
-	if err = rawdb.WriteBodyForStorage(db, hash, number, &data); err != nil {
-		return fmt.Errorf("failed to write body: %w", err)
-	}
-	if err = rawdb.WriteRawTransactions(db, body.Transactions, baseTxId, &hash); err != nil {
-		return fmt.Errorf("failed to WriteRawTransactions: %w, blockNum=%d", err, number)
-	}
-	return nil
-}
 func writeTransactionsNewDeprecated(db kv.RwTx, txs []types.Transaction, baseTxId uint64) error {
 	txId := baseTxId
 	buf := bytes.NewBuffer(nil)
@@ -256,7 +237,7 @@ func writeTransactionsNewDeprecated(db kv.RwTx, txs []types.Transaction, baseTxI
 			return fmt.Errorf("broken tx rlp: %w", err)
 		}
 		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
-		if err := db.Put(kv.EthTx, txIdKey, common.CopyBytes(buf.Bytes())); err != nil {
+		if err := db.Put(kv.EthTx, txIdKey, common2.CopyBytes(buf.Bytes())); err != nil {
 			return err
 		}
 		txId++
@@ -277,7 +258,7 @@ func readCanonicalBodyWithTransactionsDeprecated(db kv.Getter, hash common2.Hash
 	}
 	body := new(types.Body)
 	body.Uncles = bodyForStorage.Uncles
-	body.Transactions, err = rawdb.CanonicalTransactions(db, bodyForStorage.BaseTxId, bodyForStorage.TxAmount)
+	body.Transactions, err = canonicalTransactions(db, bodyForStorage.BaseTxId, bodyForStorage.TxAmount)
 	if err != nil {
 		log.Error("failed ReadTransactionByHash", "hash", hash, "block", number, "err", err)
 		return nil
@@ -285,7 +266,7 @@ func readCanonicalBodyWithTransactionsDeprecated(db kv.Getter, hash common2.Hash
 	return body
 }
 
-func makeBodiesNonCanonicalDeprecated(tx kv.RwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker) error {
+func MakeBodiesNonCanonicalDeprecated(tx kv.RwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker) error {
 	for blockNum := from; ; blockNum++ {
 		h, err := rawdb.ReadCanonicalHash(tx, blockNum)
 		if err != nil {
@@ -353,4 +334,27 @@ func makeBodiesNonCanonicalDeprecated(tx kv.RwTx, from uint64, ctx context.Conte
 	}
 
 	return nil
+}
+
+func canonicalTransactions(db kv.Getter, baseTxId uint64, amount uint32) ([]types.Transaction, error) {
+	if amount == 0 {
+		return []types.Transaction{}, nil
+	}
+	txIdKey := make([]byte, 8)
+	txs := make([]types.Transaction, amount)
+	binary.BigEndian.PutUint64(txIdKey, baseTxId)
+	i := uint32(0)
+
+	if err := db.ForAmount(kv.EthTx, txIdKey, amount, func(k, v []byte) error {
+		var decodeErr error
+		if txs[i], decodeErr = types.UnmarshalTransactionFromBinary(v, false /* blobTxnsAreWrappedWithBlobs */); decodeErr != nil {
+			return decodeErr
+		}
+		i++
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	txs = txs[:i] // user may request big "amount", but db can return small "amount". Return as much as we found.
+	return txs, nil
 }

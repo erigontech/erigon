@@ -9,9 +9,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/mdbx"
-	historyv22 "github.com/gateway-fm/cdk-erigon-lib/kv/temporal/historyv2"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	historyv22 "github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"golang.org/x/sync/errgroup"
 )
 

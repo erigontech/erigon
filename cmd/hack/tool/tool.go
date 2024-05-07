@@ -3,9 +3,8 @@ package tool
 import (
 	"strconv"
 
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/chain"
-
+	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 )
 
@@ -21,9 +20,9 @@ func ParseFloat64(str string) float64 {
 }
 
 func ChainConfig(tx kv.Tx) *chain.Config {
-	genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
+	genesisBlockHash, err := rawdb.ReadCanonicalHash(tx, 0)
 	Check(err)
-	chainConfig, err := rawdb.ReadChainConfig(tx, genesisBlock.Hash())
+	chainConfig, err := rawdb.ReadChainConfig(tx, genesisBlockHash)
 	Check(err)
 	return chainConfig
 }

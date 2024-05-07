@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/mdbx"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -86,7 +86,7 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 				if innerErr != nil {
 					return innerErr
 				}
-				err = db.Put(kv.AccountsHistory, addr.Bytes(), b)
+				err = db.Put(kv.E2AccountsHistory, addr.Bytes(), b)
 				if err != nil {
 					return err
 				}
@@ -122,18 +122,20 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 		log.Error(err.Error())
 		return
 	}
+	defer tgTx.Rollback()
 	gethTx, err := gethKV.BeginRo(context.Background())
 	if err != nil {
 		log.Error(err.Error())
 		return
 	}
-	tgCursor, err := tgTx.Cursor(kv.AccountsHistory)
+	defer gethTx.Rollback()
+	tgCursor, err := tgTx.Cursor(kv.E2AccountsHistory)
 	if err != nil {
 		log.Error(err.Error())
 		return
 	}
 	defer tgCursor.Close()
-	gethCursor, err := gethTx.Cursor(kv.AccountsHistory)
+	gethCursor, err := gethTx.Cursor(kv.E2AccountsHistory)
 	if err != nil {
 		log.Error(err.Error())
 		return

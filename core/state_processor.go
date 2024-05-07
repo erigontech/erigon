@@ -17,11 +17,8 @@
 package core
 
 import (
-	"math/big"
-
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-
-	"github.com/ledgerwatch/erigon/chain"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -35,10 +32,9 @@ import (
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, evm vm.VMInterface, cfg vm.Config, effectiveGasPricePercentage uint8) (*types.Receipt, []byte, error) {
+func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas, usedBlobGas *uint64, evm *vm.EVM, cfg vm.Config, effectiveGasPricePercentage uint8) (*types.Receipt, []byte, error) {
 	rules := evm.ChainRules()
-
-	msg, err := tx.AsMessage(*types.MakeSigner(config, header.Number.Uint64()), header.BaseFee, rules)
+	msg, err := tx.AsMessage(*types.MakeSigner(config, header.Number.Uint64(), header.Time), header.BaseFee, rules)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -53,7 +49,7 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 	if msg.FeeCap().IsZero() && engine != nil {
 		// Only zero-gas transactions may be service ones
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			return SysCallContract(contract, data, *config, ibs, header, engine, true /* constCall */, nil /*excessDataGas*/)
+			return SysCallContract(contract, data, config, ibs, header, engine, true /* constCall */)
 		}
 		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 	}
@@ -76,6 +72,9 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 		return nil, nil, err
 	}
 	*usedGas += result.UsedGas
+	if usedBlobGas != nil {
+		*usedBlobGas += tx.GetBlobGas()
+	}
 
 	// Set the receipt logs and create the bloom filter.
 	// based on the eip phase, we're passing whether the root touch-delete accounts.
@@ -92,7 +91,7 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 		receipt.GasUsed = result.UsedGas
 		// if the transaction created a contract, store the creation address in the receipt.
 		if msg.To() == nil {
-			receipt.ContractAddress = crypto.CreateAddress(evm.TxContext().Origin, tx.GetNonce())
+			receipt.ContractAddress = crypto.CreateAddress(evm.Origin, tx.GetNonce())
 		}
 		// Set the receipt logs and create a bloom for filtering
 		receipt.Logs = ibs.GetLogs(tx.Hash())
@@ -112,15 +111,15 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func ApplyTransaction(config *chain.Config, blockHashFunc func(n uint64) libcommon.Hash, engine consensus.EngineReader, author *libcommon.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, cfg vm.Config, excessDataGas *big.Int, effectiveGasPricePercentage uint8) (*types.Receipt, []byte, error) {
+func ApplyTransaction(config *chain.Config, blockHashFunc func(n uint64) libcommon.Hash, engine consensus.EngineReader, author *libcommon.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas, usedBlobGas *uint64, cfg vm.Config, effectiveGasPricePercentage uint8) (*types.Receipt, []byte, error) {
 	// Create a new context to be used in the EVM environment
 
 	// Add addresses to access list if applicable
 	// about the transaction and calling mechanisms.
 	cfg.SkipAnalysis = SkipAnalysis(config, header.Number.Uint64())
 
-	blockContext := NewEVMBlockContext(header, blockHashFunc, engine, author, excessDataGas)
+	blockContext := NewEVMBlockContext(header, blockHashFunc, engine, author)
 	vmenv := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, config, cfg)
 
-	return applyTransaction(config, engine, gp, ibs, stateWriter, header, tx, usedGas, vmenv, cfg, effectiveGasPricePercentage)
+	return applyTransaction(config, engine, gp, ibs, stateWriter, header, tx, usedGas, usedBlobGas, vmenv, cfg, effectiveGasPricePercentage)
 }

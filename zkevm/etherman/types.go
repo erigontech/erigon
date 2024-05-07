@@ -3,7 +3,7 @@ package etherman
 import (
 	"time"
 
-	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/zkevm/etherman/smartcontracts/polygonzkevm"
 )
 

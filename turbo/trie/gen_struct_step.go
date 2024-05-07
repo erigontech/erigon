@@ -20,7 +20,7 @@ import (
 	"fmt"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/turbo/rlphacks"
 )
@@ -184,7 +184,7 @@ func GenStructStepEx(
 				}
 				buildExtensions = true
 			case *GenStructStepAccountData:
-				proving := retainIfProving(curr[:len(curr)-1])
+				proving := retainIfProving(curr[:remainderStart])
 				if proving || retain(curr[:maxLen]) {
 					if err := e.accountLeaf(remainderLen, curr, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet, codeSizeUncached); err != nil {
 						return nil, nil, nil, err
@@ -199,7 +199,7 @@ func GenStructStepEx(
 				}
 			case *GenStructStepLeafData:
 				/* building leafs */
-				proving := retainIfProving(curr[:len(curr)-1])
+				proving := retainIfProving(curr[:remainderStart])
 				if proving || retain(curr[:maxLen]) {
 					if err := e.leaf(remainderLen, curr, v.Value); err != nil {
 						return nil, nil, nil, err

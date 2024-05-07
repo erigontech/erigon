@@ -450,7 +450,7 @@ also pushes the hash of the byte code onto the hash stack.
 the node stack.
 
 `ACCOUNTLEAF` opcode is similar to `LEAF`. It consumes the next item from the key tape. The rest of the semantics
-depends on the value of the `field-set`. Field set can be respresented by a bitmask. In that case, bit 0 would
+depends on the value of the `field-set`. Field set can be represented by a bitmask. In that case, bit 0 would
 correspond to field 0, bit 1 (number 2) - to field 1, bit 2 (number 4) - to field 2. Currently, field 0 means account
 nonce, field 1 means account balance, field 2 means contract storage, field 3 means contract code.
 

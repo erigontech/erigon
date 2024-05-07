@@ -19,6 +19,7 @@ package node
 import (
 	"bytes"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"io"
 	"net/http"
 	"net/url"
@@ -50,7 +51,7 @@ func TestCorsHandler(t *testing.T) {
 	assert.Equal(t, "", resp2.Header.Get("Access-Control-Allow-Origin"))
 }
 
-// TestVhosts makes sure vhosts are properly handled on the http server.
+// TestVhosts makes sure vhosts is properly handled on the http server.
 func TestVhosts(t *testing.T) {
 	srv := createAndStartServer(t, &httpConfig{Vhosts: []string{"test"}}, false, &wsConfig{})
 	defer srv.stop()
@@ -65,24 +66,25 @@ func TestVhosts(t *testing.T) {
 	assert.Equal(t, resp2.StatusCode, http.StatusForbidden)
 }
 
+// TestVhostsAny makes sure vhosts any is properly handled on the http server.
+func TestVhostsAny(t *testing.T) {
+	srv := createAndStartServer(t, &httpConfig{Vhosts: []string{"any"}}, false, &wsConfig{})
+	defer srv.stop()
+	url := "http://" + srv.listenAddr()
+
+	resp := rpcRequest(t, url, "host", "test")
+	defer resp.Body.Close()
+	assert.Equal(t, resp.StatusCode, http.StatusOK)
+
+	resp2 := rpcRequest(t, url, "host", "bad")
+	defer resp2.Body.Close()
+	assert.Equal(t, resp.StatusCode, http.StatusOK)
+}
+
 type originTest struct {
 	spec    string
 	expOk   []string
 	expFail []string
-}
-
-// splitAndTrim splits input separated by a comma
-// and trims excessive white space from the substrings.
-// Copied over from flags.go
-func splitAndTrim(input string) (ret []string) {
-	l := strings.Split(input, ",")
-	for _, r := range l {
-		r = strings.TrimSpace(r)
-		if len(r) > 0 {
-			ret = append(ret, r)
-		}
-	}
-	return ret
 }
 
 // TestWebsocketOrigins makes sure the websocket origins are properly handled on the websocket server.
@@ -150,7 +152,7 @@ func TestWebsocketOrigins(t *testing.T) {
 		},
 	}
 	for _, tc := range tests {
-		srv := createAndStartServer(t, &httpConfig{}, true, &wsConfig{Origins: splitAndTrim(tc.spec)})
+		srv := createAndStartServer(t, &httpConfig{}, true, &wsConfig{Origins: common.CliString2Array(tc.spec)})
 		url := fmt.Sprintf("ws://%v", srv.listenAddr())
 		for _, origin := range tc.expOk {
 			if err := wsRequest(t, url, origin); err != nil {

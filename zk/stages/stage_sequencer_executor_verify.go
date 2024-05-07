@@ -2,14 +2,15 @@ package stages
 
 import (
 	"context"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"sort"
+
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zk/legacy_executor_verifier"
 	"github.com/ledgerwatch/erigon/zk/txpool"
-	"sort"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -36,7 +37,6 @@ func SpawnSequencerExecutorVerifyStage(
 	ctx context.Context,
 	cfg SequencerExecutorVerifyCfg,
 	initialCycle bool,
-	quiet bool,
 ) error {
 	var err error
 	freshTx := tx == nil

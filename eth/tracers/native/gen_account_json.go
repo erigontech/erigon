@@ -4,12 +4,11 @@ package native
 
 import (
 	"encoding/json"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
-
-	"github.com/ledgerwatch/erigon/common/hexutil"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 )
 
 var _ = (*accountMarshaling)(nil)

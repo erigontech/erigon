@@ -5,8 +5,8 @@ import (
 	"math/big"
 	"time"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 )
 
 // MiningConfig is the configuration parameters of mining.

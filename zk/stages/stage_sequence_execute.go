@@ -7,14 +7,14 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/common/datadir"
-	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
-	"github.com/gateway-fm/cdk-erigon-lib/common/length"
-	"github.com/gateway-fm/cdk-erigon-lib/etl"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/temporal/historyv2"
-	libstate "github.com/gateway-fm/cdk-erigon-lib/state"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
 
 	"bytes"
@@ -24,10 +24,10 @@ import (
 	"errors"
 
 	mapset "github.com/deckarep/golang-set/v2"
-	types2 "github.com/gateway-fm/cdk-erigon-lib/types"
-	"github.com/ledgerwatch/erigon/chain"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/common/changeset"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
@@ -154,7 +154,6 @@ func SpawnSequencingStage(
 	ctx context.Context,
 	cfg SequenceBlockCfg,
 	initialCycle bool,
-	quiet bool,
 ) (err error) {
 	logPrefix := s.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Starting sequencing stage", logPrefix))
@@ -398,7 +397,7 @@ LOOP:
 		}
 		if err := cfg.txPoolDb.View(context.Background(), func(poolTx kv.Tx) error {
 			slots := types2.TxsRlp{}
-			_, count, err = cfg.txPool.YieldBest(yieldSize, &slots, poolTx, executionAt, getGasLimit(uint16(forkId)), alreadyYielded)
+			_, count, err = cfg.txPool.YieldBest(yieldSize, &slots, poolTx, executionAt, getGasLimit(uint16(forkId)), 0, alreadyYielded)
 			if err != nil {
 				return err
 			}
@@ -501,7 +500,7 @@ func postBlockStateHandling(
 		if ok {
 			from = sender
 		} else {
-			signer := types.MakeSigner(cfg.chainConfig, header.Number.Uint64())
+			signer := types.MakeSigner(cfg.chainConfig, header.Number.Uint64(), 0)
 			from, err = t.Sender(*signer)
 			if err != nil {
 				return err
@@ -595,11 +594,6 @@ func finaliseBlock(
 		Db:  tx,
 	}
 
-	var excessDataGas *big.Int
-	if parentBlock != nil {
-		excessDataGas = parentBlock.ExcessDataGas()
-	}
-
 	if err := postBlockStateHandling(cfg, ibs, hermezDb, newHeader, ger, l1BlockHash, parentBlock.Root(), transactions, receipts); err != nil {
 		return err
 	}
@@ -617,7 +611,7 @@ func finaliseBlock(
 		nil, // no withdrawals
 		chainReader,
 		true,
-		excessDataGas,
+		log.New(),
 	)
 	if err != nil {
 		return err
@@ -704,7 +698,7 @@ func addSenders(
 	tx kv.RwTx,
 	finalHeader *types.Header,
 ) error {
-	signer := types.MakeSigner(cfg.chainConfig, newNum.Uint64())
+	signer := types.MakeSigner(cfg.chainConfig, newNum.Uint64(), 0)
 	cryptoContext := secp256k1.ContextForThread(1)
 	senders := make([]common.Address, 0, len(finalTransactions))
 	for _, transaction := range finalTransactions {
@@ -725,7 +719,11 @@ func extractTransactionsFromSlot(slot types2.TxsRlp) ([]types.Transaction, error
 	for idx, txBytes := range slot.Txs {
 		reader.Reset(txBytes)
 		stream.Reset(reader, uint64(len(txBytes)))
-		transaction, err := types.DecodeTransaction(stream)
+		data, err := stream.Bytes()
+		if err != nil {
+			return nil, err
+		}
+		transaction, err := types.DecodeTransaction(data)
 		if err == io.EOF {
 			continue
 		}
@@ -768,7 +766,7 @@ func attemptAddTransaction(
 
 	// TODO: possibly inject zero tracer here!
 
-	ibs.Prepare(transaction.Hash(), common.Hash{}, 0)
+	ibs.SetTxContext(transaction.Hash(), common.Hash{}, 0)
 
 	effectiveGasPrice := DeriveEffectiveGasPrice(cfg, transaction)
 	receipt, execResult, err := core.ApplyTransaction_zkevm(
@@ -783,7 +781,6 @@ func attemptAddTransaction(
 		transaction,
 		&header.GasUsed,
 		*cfg.zkVmConfig,
-		parentHeader.ExcessDataGas,
 		effectiveGasPrice)
 
 	if err != nil {
@@ -906,7 +903,7 @@ func unwindExecutionStage(u *stagedsync.UnwindState, s *stagedsync.StageState, t
 		accumulator.StartChange(u.UnwindPoint, hash, txs, true)
 	}
 
-	changes := etl.NewCollector(logPrefix, cfg.dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
+	changes := etl.NewCollector(logPrefix, cfg.dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), log.New())
 	defer changes.Close()
 	errRewind := changeset.RewindData(tx, s.BlockNumber, u.UnwindPoint, changes, ctx.Done())
 	if errRewind != nil {

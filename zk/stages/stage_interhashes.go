@@ -3,11 +3,11 @@ package stages
 import (
 	"fmt"
 
-	"github.com/gateway-fm/cdk-erigon-lib/common"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/common/length"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/gateway-fm/cdk-erigon-lib/state"
+	"github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/state"
 	state2 "github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	db2 "github.com/ledgerwatch/erigon/smt/pkg/db"
@@ -28,7 +28,9 @@ import (
 
 	"net/url"
 
-	"github.com/ledgerwatch/erigon/common/dbutils"
+	"os"
+
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -39,7 +41,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/erigon/zk"
 	"github.com/status-im/keycard-go/hexutils"
-	"os"
 )
 
 type ZkInterHashesCfg struct {
@@ -81,7 +82,7 @@ func StageZkInterHashesCfg(
 	}
 }
 
-func SpawnZkIntermediateHashesStage(s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, cfg ZkInterHashesCfg, ctx context.Context, quiet bool) (root libcommon.Hash, err error) {
+func SpawnZkIntermediateHashesStage(s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, cfg ZkInterHashesCfg, ctx context.Context) (root libcommon.Hash, err error) {
 	logPrefix := s.LogPrefix()
 
 	quit := ctx.Done()
@@ -135,7 +136,7 @@ func SpawnZkIntermediateHashesStage(s *stagedsync.StageState, u stagedsync.Unwin
 		expectedRootHash = syncHeadHeader.Root
 		headerHash = syncHeadHeader.Hash()
 	}
-	if !quiet && to > s.BlockNumber+16 {
+	if to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Generating intermediate hashes", logPrefix), "from", s.BlockNumber, "to", to)
 	}
 

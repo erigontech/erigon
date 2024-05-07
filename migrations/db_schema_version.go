@@ -3,13 +3,14 @@ package migrations
 import (
 	"context"
 
-	"github.com/gateway-fm/cdk-erigon-lib/common/datadir"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
 )
 
 var dbSchemaVersion5 = Migration{
 	Name: "db_schema_version5",
-	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback) (err error) {
+	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 		tx, err := db.BeginRw(context.Background())
 		if err != nil {
 			return err

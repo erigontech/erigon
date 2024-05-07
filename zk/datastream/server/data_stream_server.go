@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	eritypes "github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"

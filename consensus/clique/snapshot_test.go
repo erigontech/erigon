@@ -26,18 +26,21 @@ import (
 	"sort"
 	"testing"
 
-	chain2 "github.com/gateway-fm/cdk-erigon-lib/chain"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/common/length"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	"github.com/ledgerwatch/erigon/turbo/testlog"
 )
 
 // testerAccountPool is a pool to maintain currently active tester accounts,
@@ -394,6 +397,7 @@ func TestClique(t *testing.T) {
 		tt := tt
 
 		t.Run(tt.name, func(t *testing.T) {
+			logger := testlog.Logger(t, log.LvlInfo)
 			// Create the account pool and generate the initial set of signers
 			accounts := newTesterAccountPool()
 
@@ -419,17 +423,18 @@ func TestClique(t *testing.T) {
 
 			// Assemble a chain of headers from the cast votes
 			config := *params.AllCliqueProtocolChanges
-			config.Clique = &chain2.CliqueConfig{
+			config.Clique = &chain.CliqueConfig{
 				Period: 1,
 				Epoch:  tt.epoch,
 			}
 
 			cliqueDB := memdb.NewTestDB(t)
 
-			engine := clique.New(&config, params.CliqueSnapshot, cliqueDB)
+			engine := clique.New(&config, params.CliqueSnapshot, cliqueDB, log.New())
 			engine.FakeDiff = true
+			checkStateRoot := true
 			// Create a pristine blockchain with the genesis injected
-			m := stages.MockWithGenesisEngine(t, genesis, engine, false)
+			m := mock.MockWithGenesisEngine(t, genesis, engine, false, checkStateRoot)
 
 			chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, len(tt.votes), func(j int, gen *core.BlockGen) {
 				// Cast the vote contained in this block
@@ -439,7 +444,7 @@ func TestClique(t *testing.T) {
 					copy(nonce[:], clique.NonceAuthVote)
 					gen.SetNonce(nonce)
 				}
-			}, false /* intermediateHashes */)
+			})
 			if err != nil {
 				t.Fatalf("generate blocks: %v", err)
 			}
@@ -510,7 +515,13 @@ func TestClique(t *testing.T) {
 
 			var snap *clique.Snapshot
 			if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
-				snap, err = engine.Snapshot(stagedsync.ChainReader{Cfg: config, Db: tx}, head.NumberU64(), head.Hash(), nil)
+				chainReader := stagedsync.ChainReader{
+					Cfg:         config,
+					Db:          tx,
+					BlockReader: m.BlockReader,
+					Logger:      logger,
+				}
+				snap, err = engine.Snapshot(chainReader, head.NumberU64(), head.Hash(), nil)
 				if err != nil {
 					return err
 				}

@@ -145,7 +145,7 @@ feature DupFixed (can add this flag to table configuration).
 
 It means in 1 db call you can Get/Put up to 4Kb of sub-table keys.
 
-[see mdbx.h](https://github.com/torquem-ch/libmdbx/blob/master/mdbx.h)
+[see mdbx.h](https://github.com/erigontech/libmdbx/blob/master/mdbx.h)
 
 Erigon
 ---------

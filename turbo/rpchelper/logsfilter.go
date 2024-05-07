@@ -3,9 +3,9 @@ package rpchelper
 import (
 	"sync"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces"
-	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces/remote"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 
 	types2 "github.com/ledgerwatch/erigon/core/types"
 )

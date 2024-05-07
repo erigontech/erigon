@@ -1,22 +1,26 @@
 package stagedsync
 
 import (
+	"context"
 	"math/big"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/log/v3"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
-// Implements consensus.ChainReader
+// ChainReader implements consensus.ChainReader
 type ChainReader struct {
-	Cfg chain.Config
-
-	Db kv.Getter
+	Cfg         chain.Config
+	Db          kv.Getter
+	BlockReader services.FullBlockReader
+	Logger      log.Logger
 }
 
 // Config retrieves the blockchain's chain configuration.
@@ -28,46 +32,68 @@ func (cr ChainReader) Config() *chain.Config {
 func (cr ChainReader) CurrentHeader() *types.Header {
 	hash := rawdb.ReadHeadHeaderHash(cr.Db)
 	number := rawdb.ReadHeaderNumber(cr.Db, hash)
-	return rawdb.ReadHeader(cr.Db, hash, *number)
+	h, _ := cr.BlockReader.Header(context.Background(), cr.Db, hash, *number)
+	return h
 }
 
 // GetHeader retrieves a block header from the database by hash and number.
 func (cr ChainReader) GetHeader(hash libcommon.Hash, number uint64) *types.Header {
-	return rawdb.ReadHeader(cr.Db, hash, number)
+	h, _ := cr.BlockReader.Header(context.Background(), cr.Db, hash, number)
+	return h
 }
 
 // GetHeaderByNumber retrieves a block header from the database by number.
 func (cr ChainReader) GetHeaderByNumber(number uint64) *types.Header {
-	hash, err := rawdb.ReadCanonicalHash(cr.Db, number)
-	if err != nil {
-		log.Error("ReadCanonicalHash failed", "err", err)
-		return nil
-	}
-	return rawdb.ReadHeader(cr.Db, hash, number)
+	h, _ := cr.BlockReader.HeaderByNumber(context.Background(), cr.Db, number)
+	return h
 }
 
 // GetHeaderByHash retrieves a block header from the database by its hash.
 func (cr ChainReader) GetHeaderByHash(hash libcommon.Hash) *types.Header {
 	number := rawdb.ReadHeaderNumber(cr.Db, hash)
-	return rawdb.ReadHeader(cr.Db, hash, *number)
+	h, _ := cr.BlockReader.Header(context.Background(), cr.Db, hash, *number)
+	return h
 }
 
 // GetBlock retrieves a block from the database by hash and number.
 func (cr ChainReader) GetBlock(hash libcommon.Hash, number uint64) *types.Block {
-	return rawdb.ReadBlock(cr.Db, hash, number)
+	b, _, _ := cr.BlockReader.BlockWithSenders(context.Background(), cr.Db, hash, number)
+	return b
 }
 
 // HasBlock retrieves a block from the database by hash and number.
 func (cr ChainReader) HasBlock(hash libcommon.Hash, number uint64) bool {
-	return rawdb.HasBlock(cr.Db, hash, number)
+	b, _ := cr.BlockReader.BodyRlp(context.Background(), cr.Db, hash, number)
+	return b != nil
 }
 
 // GetTd retrieves the total difficulty from the database by hash and number.
 func (cr ChainReader) GetTd(hash libcommon.Hash, number uint64) *big.Int {
 	td, err := rawdb.ReadTd(cr.Db, hash, number)
 	if err != nil {
-		log.Error("ReadTd failed", "err", err)
+		cr.Logger.Error("ReadTd failed", "err", err)
 		return nil
 	}
 	return td
+}
+
+func (cr ChainReader) FrozenBlocks() uint64 {
+	return cr.BlockReader.FrozenBlocks()
+}
+
+func (cr ChainReader) BorStartEventID(_ libcommon.Hash, _ uint64) uint64 {
+	panic("bor events by block not implemented")
+}
+func (cr ChainReader) BorEventsByBlock(_ libcommon.Hash, _ uint64) []rlp.RawValue {
+	panic("bor events by block not implemented")
+}
+
+func (cr ChainReader) BorSpan(spanId uint64) []byte {
+	span, err := cr.BlockReader.Span(context.Background(), cr.Db, spanId)
+	if err != nil {
+		cr.Logger.Error("BorSpan failed", "err", err)
+		return nil
+	}
+
+	return span
 }

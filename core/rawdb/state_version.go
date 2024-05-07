@@ -3,7 +3,7 @@ package rawdb
 import (
 	"encoding/binary"
 
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
 func GetStateVersion(tx kv.Tx) (uint64, error) {

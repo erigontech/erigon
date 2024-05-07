@@ -34,29 +34,29 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/gateway-fm/cdk-erigon-lib/txpool/txpoolcfg"
 	"github.com/go-stack/stack"
 	"github.com/google/btree"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/gateway-fm/cdk-erigon-lib/chain"
-	"github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/common/assert"
-	"github.com/gateway-fm/cdk-erigon-lib/common/dbg"
-	"github.com/gateway-fm/cdk-erigon-lib/common/fixedgas"
-	emath "github.com/gateway-fm/cdk-erigon-lib/common/math"
-	"github.com/gateway-fm/cdk-erigon-lib/common/u256"
-	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces"
-	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces/grpcutil"
-	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces/remote"
-	proto_txpool "github.com/gateway-fm/cdk-erigon-lib/gointerfaces/txpool"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/kvcache"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/mdbx"
-	"github.com/gateway-fm/cdk-erigon-lib/types"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/assert"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
+	emath "github.com/ledgerwatch/erigon-lib/common/math"
+	"github.com/ledgerwatch/erigon-lib/common/u256"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	proto_txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/types"
 )
 
 var (
@@ -610,13 +610,13 @@ func (p *TxPool) ResetYieldedStatus() {
 	}
 }
 
-func (p *TxPool) YieldBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error) {
-	return p.best(n, txs, tx, onTopOf, availableGas, toSkip)
+func (p *TxPool) YieldBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error) {
+	return p.best(n, txs, tx, onTopOf, availableGas, availableBlobGas, toSkip)
 }
 
-func (p *TxPool) PeekBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas uint64) (bool, error) {
+func (p *TxPool) PeekBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64) (bool, error) {
 	set := mapset.NewThreadUnsafeSet[[32]byte]()
-	onTime, _, err := p.best(n, txs, tx, onTopOf, availableGas, set)
+	onTime, _, err := p.best(n, txs, tx, onTopOf, availableGas, availableBlobGas, set)
 	return onTime, err
 }
 
@@ -1518,7 +1518,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 		addr, txRlp := *(*[20]byte)(v[:20]), v[20:]
 		txn := &types.TxSlot{}
 
-		_, err = parseCtx.ParseTransaction(txRlp, 0, txn, nil, false /* hasEnvelope */, nil)
+		_, err = parseCtx.ParseTransaction(txRlp, 0, txn, nil, false /* hasEnvelope */, false, nil)
 		if err != nil {
 			err = fmt.Errorf("err: %w, rlp: %x", err, txRlp)
 			log.Warn("[txpool] fromDB: parseTransaction", "err", err)

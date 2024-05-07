@@ -3,10 +3,11 @@ package types
 import (
 	"time"
 
-	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 
 	"bytes"
 	"encoding/binary"
+
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	ethTypes "github.com/ledgerwatch/erigon/core/types"

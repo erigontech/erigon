@@ -3,7 +3,7 @@ package ethconfig
 import (
 	"time"
 
-	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 )
 
 type Zk struct {

@@ -41,7 +41,7 @@ Please install:
 
 Using the Makefile command: `make build-libs` will install these for the relevant architecture.
 
-Due to dependency requirements Go 1.19 is required to build.
+Due to dependency requirements Go 1.21 is required to build.
 
 ## Sequencer (WIP)
 

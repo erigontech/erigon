@@ -11,7 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -244,7 +245,7 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			netApiResponse: hexutil.Uint(1),
 			netApiError:    nil,
 			ethApiBlockResult: map[string]interface{}{
-				"timestamp": time.Now().Add(1 * time.Second).Unix(),
+				"timestamp": uint64(time.Now().Add(-10 * time.Second).Unix()),
 			},
 			ethApiBlockError:    nil,
 			ethApiSyncingResult: false,
@@ -263,7 +264,7 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			netApiResponse: hexutil.Uint(1),
 			netApiError:    nil,
 			ethApiBlockResult: map[string]interface{}{
-				"timestamp": uint64(time.Now().Add(1 * time.Hour).Unix()),
+				"timestamp": uint64(time.Now().Add(-1 * time.Hour).Unix()),
 			},
 			ethApiBlockError:    nil,
 			ethApiSyncingResult: false,
@@ -318,7 +319,7 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			netApiResponse: hexutil.Uint(10),
 			netApiError:    nil,
 			ethApiBlockResult: map[string]interface{}{
-				"timestamp": time.Now().Add(1 * time.Second).Unix(),
+				"timestamp": uint64(time.Now().Add(1 * time.Second).Unix()),
 			},
 			ethApiBlockError:    nil,
 			ethApiSyncingResult: false,

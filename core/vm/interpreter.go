@@ -20,9 +20,9 @@ import (
 	"hash"
 	"sync"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/common/math"
-	"github.com/ledgerwatch/erigon/chain"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/math"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/vm/stack"
@@ -99,7 +99,7 @@ type EVMInterpreter struct {
 //
 //nolint:structcheck
 type VM struct {
-	evm VMInterpreter
+	evm *EVM
 	cfg Config
 
 	hasher    keccakState    // Keccak256 hasher instance shared across opcodes
@@ -121,13 +121,15 @@ func copyJumpTable(jt *JumpTable) *JumpTable {
 }
 
 // NewEVMInterpreter returns a new instance of the Interpreter.
-func NewEVMInterpreter(evm VMInterpreter, cfg Config) *EVMInterpreter {
+func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	var jt *JumpTable
 	switch {
 	case evm.ChainRules().IsPrague:
 		jt = &pragueInstructionSet
 	case evm.ChainRules().IsCancun:
 		jt = &cancunInstructionSet
+	case evm.ChainRules().IsNapoli:
+		jt = &napoliInstructionSet
 	case evm.ChainRules().IsShanghai:
 		jt = &shanghaiInstructionSet
 	case evm.ChainRules().IsLondon:
@@ -183,17 +185,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		return nil, nil
 	}
 
-	// Increment the call depth which is restricted to 1024
-	in.depth++
-	defer in.decrementDepth()
-
-	// Make sure the readOnly is only set if we aren't in readOnly yet.
-	// This makes also sure that the readOnly flag isn't removed for child calls.
-	if readOnly && !in.readOnly {
-		in.readOnly = true
-		defer func() { in.readOnly = false }()
-	}
-
 	// Reset the previous call's return data. It's unimportant to preserve the old buffer
 	// as every returning call will return new data anyway.
 	in.returnData = nil
@@ -219,25 +210,37 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		logged  bool   // deferred Tracer should ignore already logged steps
 		res     []byte // result of the opcode execution function
 	)
-	// Don't move this deferrred function, it's placed before the capturestate-deferred method,
-	// so that it get's executed _after_: the capturestate needs the stacks before
-	// they are returned to the pools
+
 	mem.Reset()
-	defer pool.Put(mem)
-	defer stack.ReturnNormalStack(locStack)
+
 	contract.Input = input
 
-	if in.cfg.Debug {
-		defer func() {
-			if err != nil {
-				if !logged {
-					in.cfg.Tracer.CaptureState(pcCopy, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
-				} else {
-					in.cfg.Tracer.CaptureFault(pcCopy, op, gasCopy, cost, callContext, in.depth, err)
-				}
-			}
-		}()
+	// Make sure the readOnly is only set if we aren't in readOnly yet.
+	// This makes also sure that the readOnly flag isn't removed for child calls.
+	restoreReadonly := readOnly && !in.readOnly
+	if restoreReadonly {
+		in.readOnly = true
 	}
+	// Increment the call depth which is restricted to 1024
+	in.depth++
+	defer func() {
+		// first: capture data/memory/state/depth/etc... then clenup them
+		if in.cfg.Debug && err != nil {
+			if !logged {
+				in.cfg.Tracer.CaptureState(pcCopy, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
+			} else {
+				in.cfg.Tracer.CaptureFault(pcCopy, op, gasCopy, cost, callContext, in.depth, err)
+			}
+		}
+		// this function must execute _after_: the `CaptureState` needs the stacks before
+		pool.Put(mem)
+		stack.ReturnNormalStack(locStack)
+		if restoreReadonly {
+			in.readOnly = false
+		}
+		in.depth--
+	}()
+
 	// The Interpreter main run loop (contextual). This loop runs until either an
 	// explicit STOP, RETURN or SELFDESTRUCT is executed, an error occurred during
 	// the execution of one of the operations or until the done flag is set by the
@@ -292,11 +295,15 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			if err != nil || !contract.UseGas(dynamicCost) {
 				return nil, ErrOutOfGas
 			}
+			// Do tracing before memory expansion
+			if in.cfg.Debug {
+				in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
+				logged = true
+			}
 			if memorySize > 0 {
 				mem.Resize(memorySize)
 			}
-		}
-		if in.cfg.Debug {
+		} else if in.cfg.Debug {
 			in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
 			logged = true
 		}

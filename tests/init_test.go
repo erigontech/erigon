@@ -31,13 +31,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/chain"
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"golang.org/x/exp/slices"
 )
 
 var (
 	baseDir            = filepath.Join(".", "testdata")
 	blockTestDir       = filepath.Join(baseDir, "BlockchainTests")
+	blockEipTestDir    = filepath.Join(baseDir, "EIPTests", "BlockchainTests")
 	stateTestDir       = filepath.Join(baseDir, "GeneralStateTests")
 	transactionTestDir = filepath.Join(baseDir, "TransactionTests")
 	rlpTestDir         = filepath.Join(baseDir, "RLPTests")

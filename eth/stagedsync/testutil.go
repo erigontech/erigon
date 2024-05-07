@@ -6,10 +6,9 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	state2 "github.com/gateway-fm/cdk-erigon-lib/state"
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -41,7 +40,7 @@ func compareCurrentState(
 func compareDomain(t *testing.T, agg *state2.AggregatorV3, db1, db2 kv.Tx, bucketName string) {
 	panic("implement me")
 	/*
-		ac := agg.MakeContext()
+		ac := agg.BeginFilesRo()
 		defer ac.Close()
 
 		switch bucketName {
@@ -167,7 +166,7 @@ func generateBlocks2(t *testing.T, from uint64, numberOfBlocks uint64, blockWrit
 			if blockNumber == 1 || updateIncarnation || difficulty == changeCodeIndepenentlyOfIncarnations {
 				if newAcc.Incarnation > 0 {
 					code := []byte(fmt.Sprintf("acc-code-%v", blockNumber))
-					codeHash, _ := common.HashData(code)
+					codeHash, _ := libcommon.HashData(code)
 					if blockNumber >= from {
 						if err := blockWriter.UpdateAccountCode(addr, newAcc.Incarnation, codeHash, code); err != nil {
 							t.Fatal(err)
@@ -238,7 +237,7 @@ func generateBlocks(t *testing.T, from uint64, numberOfBlocks uint64, stateWrite
 			if blockNumber == 1 || updateIncarnation || difficulty == changeCodeIndepenentlyOfIncarnations {
 				if newAcc.Incarnation > 0 {
 					code := []byte(fmt.Sprintf("acc-code-%v", blockNumber))
-					codeHash, _ := common.HashData(code)
+					codeHash, _ := libcommon.HashData(code)
 					if blockNumber >= from {
 						if err := blockWriter.UpdateAccountCode(addr, newAcc.Incarnation, codeHash, code); err != nil {
 							t.Fatal(err)

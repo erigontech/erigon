@@ -23,8 +23,8 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/ledgerwatch/erigon/chain"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
 	"github.com/ledgerwatch/log/v3"
 
@@ -40,7 +40,7 @@ type OracleBackend interface {
 	BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error)
 	ChainConfig() *chain.Config
 
-	GetReceipts(ctx context.Context, hash libcommon.Hash) (types.Receipts, error)
+	GetReceipts(ctx context.Context, block *types.Block) (types.Receipts, error)
 	PendingBlockAndReceipts() (*types.Block, types.Receipts)
 }
 
@@ -197,7 +197,7 @@ func (t *transactionsByGasPrice) Pop() interface{} {
 	old := t.txs
 	n := len(old)
 	x := old[n-1]
-	old[n-1] = nil
+	old[n-1] = nil // avoid memory leak
 	t.txs = old[0 : n-1]
 	return x
 }
@@ -276,7 +276,7 @@ func (s *sortingHeap) Pop() interface{} {
 	old := *s
 	n := len(old)
 	x := old[n-1]
-	old[n-1] = nil
+	old[n-1] = nil // avoid memory leak
 	*s = old[0 : n-1]
 	return x
 }

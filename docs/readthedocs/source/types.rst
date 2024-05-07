@@ -22,7 +22,7 @@ Address represents the 20 byte address of an Ethereum account.
     type Hash [32]byte
 
 Hash represents the 32 byte Keccak256 hash of arbitrary data.
-Address repressents the 20 byte standard Ethereum Address
+Address represents the 20 byte standard Ethereum Address
 
 Both Hash and Address are bytes arrays.
 
@@ -60,7 +60,7 @@ Transaction
 
     type Transactions []*Transaction
 
-repressent an Ethereum Transaction.
+represent an Ethereum Transaction.
 
 **from**
 
@@ -125,7 +125,7 @@ an alias for an array of Transaction. Instead of []Transaction, Transactions can
 
     type Transactions []*Transaction
 
-repressent an Ethereum Transaction.
+represent an Ethereum Transaction.
 
 Block Header
 ============
@@ -218,7 +218,7 @@ Block
         ReceivedFrom interface{}
     }
 
-repressent a block of the chain.
+represent a block of the chain.
 
 **header**
 

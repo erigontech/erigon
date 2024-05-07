@@ -405,7 +405,7 @@ if (!Test-Path -Path [string](Join-Path $MyContext.Directory "\.git") -PathType 
 if(!(Test-Git-Installed)) { exit 1 }
     
 ## Test GO language is installed AND min version
-if(!(Test-GO-Installed "1.19")) { exit 1 }
+if(!(Test-GO-Installed "1.21")) { exit 1 }
 
 # Build erigon binaries
 Set-Variable -Name "Erigon" -Value ([hashtable]::Synchronized(@{})) -Scope Script
@@ -413,15 +413,15 @@ $Erigon.Commit     = [string]@(git.exe rev-list -1 HEAD)
 $Erigon.Branch     = [string]@(git.exe rev-parse --abbrev-ref HEAD)
 $Erigon.Tag        = [string]@(git.exe describe --tags)
 
-$Erigon.BuildTags = "nosqlite,noboltdb,netgo"
+$Erigon.BuildTags = "nosqlite,noboltdb"
 $Erigon.Package = "github.com/ledgerwatch/erigon"
 
 $Erigon.BuildFlags = "-trimpath -tags $($Erigon.BuildTags) -buildvcs=false -v"
 $Erigon.BuildFlags += " -ldflags ""-X $($Erigon.Package)/params.GitCommit=$($Erigon.Commit) -X $($Erigon.Package)/params.GitBranch=$($Erigon.Branch) -X $($Erigon.Package)/params.GitTag=$($Erigon.Tag)"""
 
 $Erigon.BinPath    = [string](Join-Path $MyContext.StartDir "\build\bin")
-$env:GO111MODULE = "on"
 $env:CGO_CFLAGS = "-g -O2 -D__BLST_PORTABLE__"
+$env:GOPRIVATE = "github.com/erigontech/silkworm-go"
 
 New-Item -Path $Erigon.BinPath -ItemType Directory -Force | Out-Null
 if(!$?) {
@@ -520,7 +520,7 @@ if ($BuildTarget -eq "db-tools") {
 } elseif ($BuildTarget -eq "test") {
     Write-Host " Running tests ..."
     $env:GODEBUG = "cgocheck=0"
-    $TestCommand = "go test $($Erigon.BuildFlags) ./... -p 2 --timeout 30s"
+    $TestCommand = "go test $($Erigon.BuildFlags) ./... -p 2 --timeout 120s"
     Invoke-Expression -Command $TestCommand | Out-Host
     if (!($?)) {
         Write-Host " ERROR : Tests failed"

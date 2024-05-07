@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/chain"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/zk/datastream/server"
@@ -195,11 +195,9 @@ func (v *LegacyExecutorVerifier) handleRequest(ctx context.Context, request *Ver
 	// timestampLimit >= currentTimestamp (from batch pre-state) + deltaTimestamp
 	// so to ensure we have a good value we can take the timestamp of the last block in the batch
 	// and just add 5 minutes
-	lastBlock, err := rawdb.ReadBlockByNumber(tx, blocks[len(blocks)-1])
-	if err != nil {
-		return err
-	}
-	timestampLimit := lastBlock.Time()
+	lastBlock := rawdb.ReadHeaderByNumber(tx, blocks[len(blocks)-1])
+
+	timestampLimit := lastBlock.Time
 
 	payload := &Payload{
 		Witness:           witness,
@@ -212,9 +210,9 @@ func (v *LegacyExecutorVerifier) handleRequest(ctx context.Context, request *Ver
 		ContextId:         strconv.Itoa(int(request.BatchNumber)),
 	}
 
-	previousBlock, _ := rawdb.ReadBlockByNumber(tx, blocks[0]-1)
+	previousBlock := rawdb.ReadHeaderByNumber(tx, blocks[0]-1)
 
-	ok, err := execer.Verify(payload, request, previousBlock.Root())
+	ok, err := execer.Verify(payload, request, previousBlock.Root)
 	if err != nil {
 		return err
 	}
@@ -243,6 +241,7 @@ func (v *LegacyExecutorVerifier) GetStreamBytes(request *VerifierRequest, tx kv.
 
 	for _, blockNumber := range blocks {
 		block, err := rawdb.ReadBlockByNumber(tx, blockNumber)
+
 		if err != nil {
 			return nil, err
 		}

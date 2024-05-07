@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
@@ -38,7 +38,6 @@ func SpawnSequencerInterhashesStage(
 	ctx context.Context,
 	cfg SequencerInterhashesCfg,
 	initialCycle bool,
-	quiet bool,
 ) error {
 	var err error
 	freshTx := tx == nil

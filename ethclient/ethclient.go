@@ -28,10 +28,11 @@ import (
 
 	"github.com/holiman/uint256"
 	ethereum "github.com/ledgerwatch/erigon"
-	"github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/log/v3"
 )
 
 var EmptyTxsHash = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
@@ -47,7 +48,7 @@ func Dial(rawurl string) (*Client, error) {
 }
 
 func DialContext(ctx context.Context, rawurl string) (*Client, error) {
-	c, err := rpc.DialContext(ctx, rawurl)
+	c, err := rpc.DialContext(ctx, rawurl, log.New())
 	if err != nil {
 		return nil, err
 	}

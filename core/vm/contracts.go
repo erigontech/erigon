@@ -23,15 +23,18 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/ledgerwatch/erigon/chain"
+
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/crypto/blake2b"
+	libkzg "github.com/ledgerwatch/erigon-lib/crypto/kzg"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/crypto/blake2b"
 	"github.com/ledgerwatch/erigon/crypto/bls12381"
 	"github.com/ledgerwatch/erigon/crypto/bn256"
+	"github.com/ledgerwatch/erigon/crypto/secp256r1"
 	"github.com/ledgerwatch/erigon/params"
 
 	//lint:ignore SA1019 Needed for precompile
@@ -96,21 +99,58 @@ var PrecompiledContractsBerlin = map[libcommon.Address]PrecompiledContract{
 	libcommon.BytesToAddress([]byte{9}): &blake2F{},
 }
 
-// PrecompiledContractsBLS contains the set of pre-compiled Ethereum
-// contracts specified in EIP-2537. These are exported for testing purposes.
-var PrecompiledContractsBLS = map[libcommon.Address]PrecompiledContract{
-	libcommon.BytesToAddress([]byte{10}): &bls12381G1Add{},
-	libcommon.BytesToAddress([]byte{11}): &bls12381G1Mul{},
-	libcommon.BytesToAddress([]byte{12}): &bls12381G1MultiExp{},
-	libcommon.BytesToAddress([]byte{13}): &bls12381G2Add{},
-	libcommon.BytesToAddress([]byte{14}): &bls12381G2Mul{},
-	libcommon.BytesToAddress([]byte{15}): &bls12381G2MultiExp{},
-	libcommon.BytesToAddress([]byte{16}): &bls12381Pairing{},
-	libcommon.BytesToAddress([]byte{17}): &bls12381MapG1{},
-	libcommon.BytesToAddress([]byte{18}): &bls12381MapG2{},
+var PrecompiledContractsCancun = map[libcommon.Address]PrecompiledContract{
+	libcommon.BytesToAddress([]byte{0x01}): &ecrecover{},
+	libcommon.BytesToAddress([]byte{0x02}): &sha256hash{},
+	libcommon.BytesToAddress([]byte{0x03}): &ripemd160hash{},
+	libcommon.BytesToAddress([]byte{0x04}): &dataCopy{},
+	libcommon.BytesToAddress([]byte{0x05}): &bigModExp{eip2565: true},
+	libcommon.BytesToAddress([]byte{0x06}): &bn256AddIstanbul{},
+	libcommon.BytesToAddress([]byte{0x07}): &bn256ScalarMulIstanbul{},
+	libcommon.BytesToAddress([]byte{0x08}): &bn256PairingIstanbul{},
+	libcommon.BytesToAddress([]byte{0x09}): &blake2F{},
+	libcommon.BytesToAddress([]byte{0x0a}): &pointEvaluation{},
+}
+
+var PrecompiledContractsNapoli = map[libcommon.Address]PrecompiledContract{
+	libcommon.BytesToAddress([]byte{0x01}):       &ecrecover{},
+	libcommon.BytesToAddress([]byte{0x02}):       &sha256hash{},
+	libcommon.BytesToAddress([]byte{0x03}):       &ripemd160hash{},
+	libcommon.BytesToAddress([]byte{0x04}):       &dataCopy{},
+	libcommon.BytesToAddress([]byte{0x05}):       &bigModExp{eip2565: true},
+	libcommon.BytesToAddress([]byte{0x06}):       &bn256AddIstanbul{},
+	libcommon.BytesToAddress([]byte{0x07}):       &bn256ScalarMulIstanbul{},
+	libcommon.BytesToAddress([]byte{0x08}):       &bn256PairingIstanbul{},
+	libcommon.BytesToAddress([]byte{0x09}):       &blake2F{},
+	libcommon.BytesToAddress([]byte{0x01, 0x00}): &p256Verify{},
+}
+
+var PrecompiledContractsPrague = map[libcommon.Address]PrecompiledContract{
+	libcommon.BytesToAddress([]byte{0x01}): &ecrecover{},
+	libcommon.BytesToAddress([]byte{0x02}): &sha256hash{},
+	libcommon.BytesToAddress([]byte{0x03}): &ripemd160hash{},
+	libcommon.BytesToAddress([]byte{0x04}): &dataCopy{},
+	libcommon.BytesToAddress([]byte{0x05}): &bigModExp{eip2565: true},
+	libcommon.BytesToAddress([]byte{0x06}): &bn256AddIstanbul{},
+	libcommon.BytesToAddress([]byte{0x07}): &bn256ScalarMulIstanbul{},
+	libcommon.BytesToAddress([]byte{0x08}): &bn256PairingIstanbul{},
+	libcommon.BytesToAddress([]byte{0x09}): &blake2F{},
+	libcommon.BytesToAddress([]byte{0x0a}): &pointEvaluation{},
+	libcommon.BytesToAddress([]byte{0x0b}): &bls12381G1Add{},
+	libcommon.BytesToAddress([]byte{0x0c}): &bls12381G1Mul{},
+	libcommon.BytesToAddress([]byte{0x0d}): &bls12381G1MultiExp{},
+	libcommon.BytesToAddress([]byte{0x0e}): &bls12381G2Add{},
+	libcommon.BytesToAddress([]byte{0x0f}): &bls12381G2Mul{},
+	libcommon.BytesToAddress([]byte{0x10}): &bls12381G2MultiExp{},
+	libcommon.BytesToAddress([]byte{0x11}): &bls12381Pairing{},
+	libcommon.BytesToAddress([]byte{0x12}): &bls12381MapFpToG1{},
+	libcommon.BytesToAddress([]byte{0x13}): &bls12381MapFp2ToG2{},
 }
 
 var (
+	PrecompiledAddressesPrague             []libcommon.Address
+	PrecompiledAddressesNapoli             []libcommon.Address
+	PrecompiledAddressesCancun             []libcommon.Address
 	PrecompiledAddressesBerlin             []libcommon.Address
 	PrecompiledAddressesIstanbul           []libcommon.Address
 	PrecompiledAddressesByzantium          []libcommon.Address
@@ -142,6 +182,15 @@ func init() {
 	for k := range PrecompiledContractsForkID88Elderberry {
 		PrecompiledAddressesForkID88Elderberry = append(PrecompiledAddressesForkID88Elderberry, k)
 	}
+	for k := range PrecompiledContractsCancun {
+		PrecompiledAddressesCancun = append(PrecompiledAddressesCancun, k)
+	}
+	for k := range PrecompiledContractsNapoli {
+		PrecompiledAddressesNapoli = append(PrecompiledAddressesNapoli, k)
+	}
+	for k := range PrecompiledContractsPrague {
+		PrecompiledAddressesPrague = append(PrecompiledAddressesPrague, k)
+	}
 }
 
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
@@ -153,6 +202,12 @@ func ActivePrecompiles(rules *chain.Rules) []libcommon.Address {
 		return PrecompiledAddressesEtrog
 	case rules.IsForkID5Dragonfruit:
 		return PrecompiledAddressesDragonfruit
+	case rules.IsPrague:
+		return PrecompiledAddressesPrague
+	case rules.IsNapoli:
+		return PrecompiledAddressesNapoli
+	case rules.IsCancun:
+		return PrecompiledAddressesCancun
 	case rules.IsBerlin:
 		return PrecompiledAddressesBerlin
 	case rules.IsIstanbul:
@@ -169,7 +224,8 @@ func ActivePrecompiles(rules *chain.Rules) []libcommon.Address {
 // - the returned bytes,
 // - the _remaining_ gas,
 // - any error that occurred
-func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas uint64) (ret []byte, remainingGas uint64, err error) {
+func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas uint64,
+) (ret []byte, remainingGas uint64, err error) {
 	gasCost := p.RequiredGas(input)
 	if suppliedGas < gasCost {
 		return nil, 0, ErrOutOfGas
@@ -974,7 +1030,7 @@ func (c *bls12381Pairing) Run(input []byte) ([]byte, error) {
 			return nil, errBLS12381G2PointSubgroup
 		}
 
-		// Update pairing engine with G1 and G2 ponits
+		// Update pairing engine with G1 and G2 points
 		e.AddPair(p1, p2)
 	}
 	// Prepare 32 byte output
@@ -1004,17 +1060,17 @@ func decodeBLS12381FieldElement(in []byte) ([]byte, error) {
 	return out, nil
 }
 
-// bls12381MapG1 implements EIP-2537 MapG1 precompile.
-type bls12381MapG1 struct{}
+// bls12381MapFpToG1 implements EIP-2537 MapG1 precompile.
+type bls12381MapFpToG1 struct{}
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
-func (c *bls12381MapG1) RequiredGas(input []byte) uint64 {
-	return params.Bls12381MapG1Gas
+func (c *bls12381MapFpToG1) RequiredGas(input []byte) uint64 {
+	return params.Bls12381MapFpToG1Gas
 }
 
-func (c *bls12381MapG1) Run(input []byte) ([]byte, error) {
+func (c *bls12381MapFpToG1) Run(input []byte) ([]byte, error) {
 	// Implements EIP-2537 Map_To_G1 precompile.
-	// > Field-to-curve call expects `64` bytes an an input that is interpreted as a an element of the base field.
+	// > Field-to-curve call expects `64` bytes as an input that is interpreted as a an element of the base field.
 	// > Output of this call is `128` bytes and is G1 point following respective encoding rules.
 	if len(input) != 64 {
 		return nil, errBLS12381InvalidInputLength
@@ -1039,17 +1095,17 @@ func (c *bls12381MapG1) Run(input []byte) ([]byte, error) {
 	return g.EncodePoint(r), nil
 }
 
-// bls12381MapG2 implements EIP-2537 MapG2 precompile.
-type bls12381MapG2 struct{}
+// bls12381MapFp2ToG2 implements EIP-2537 MapG2 precompile.
+type bls12381MapFp2ToG2 struct{}
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
-func (c *bls12381MapG2) RequiredGas(input []byte) uint64 {
-	return params.Bls12381MapG2Gas
+func (c *bls12381MapFp2ToG2) RequiredGas(input []byte) uint64 {
+	return params.Bls12381MapFp2ToG2Gas
 }
 
-func (c *bls12381MapG2) Run(input []byte) ([]byte, error) {
+func (c *bls12381MapFp2ToG2) Run(input []byte) ([]byte, error) {
 	// Implements EIP-2537 Map_FP2_TO_G2 precompile logic.
-	// > Field-to-curve call expects `128` bytes an an input that is interpreted as a an element of the quadratic extension field.
+	// > Field-to-curve call expects `128` bytes as an input that is interpreted as a an element of the quadratic extension field.
 	// > Output of this call is `256` bytes and is G2 point following respective encoding rules.
 	if len(input) != 128 {
 		return nil, errBLS12381InvalidInputLength
@@ -1079,4 +1135,51 @@ func (c *bls12381MapG2) Run(input []byte) ([]byte, error) {
 
 	// Encode the G2 point to 256 bytes
 	return g.EncodePoint(r), nil
+}
+
+// pointEvaluation implements the EIP-4844 point evaluation precompile
+// to check if a value is part of a blob at a specific point with a KZG proof.
+type pointEvaluation struct{}
+
+// RequiredGas returns the gas required to execute the pre-compiled contract.
+func (c *pointEvaluation) RequiredGas(input []byte) uint64 {
+	return params.PointEvaluationGas
+}
+
+func (c *pointEvaluation) Run(input []byte) ([]byte, error) {
+	return libkzg.PointEvaluationPrecompile(input)
+}
+
+// P256VERIFY (secp256r1 signature verification)
+// implemented as a native contract
+type p256Verify struct{}
+
+// RequiredGas returns the gas required to execute the precompiled contract
+func (c *p256Verify) RequiredGas(input []byte) uint64 {
+	return params.P256VerifyGas
+}
+
+// Run executes the precompiled contract with given 160 bytes of param, returning the output and the used gas
+func (c *p256Verify) Run(input []byte) ([]byte, error) {
+	// Required input length is 160 bytes
+	const p256VerifyInputLength = 160
+	// Check the input length
+	if len(input) != p256VerifyInputLength {
+		// Input length is invalid
+		return nil, nil
+	}
+
+	// Extract the hash, r, s, x, y from the input
+	hash := input[0:32]
+	r, s := new(big.Int).SetBytes(input[32:64]), new(big.Int).SetBytes(input[64:96])
+	x, y := new(big.Int).SetBytes(input[96:128]), new(big.Int).SetBytes(input[128:160])
+
+	// Verify the secp256r1 signature
+	if secp256r1.Verify(hash, r, s, x, y) {
+		// Signature is valid
+		return common.LeftPadBytes(big1.Bytes(), 32), nil
+	} else {
+		// Signature is invalid
+		return nil, nil
+	}
 }

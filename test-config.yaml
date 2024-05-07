@@ -1,0 +1,18 @@
+datadir : '../erigon-data'
+chain : "hermez-cardona"
+http : true
+private.api.addr : "localhost:9093"
+zkevm.l2-chain-id: 2442
+zkevm.l2-sequencer-rpc-url: "https://rpc.cardona.zkevm-rpc.com/"
+zkevm.l2-datastreamer-url: "datastream.cardona.zkevm-rpc.com:6900"
+zkevm.l1-chain-id: 11155111
+zkevm.l1-rpc-url: "https://rpc.sepolia.org"
+zkevm.l1-matic-contract-address: "0x1850Dd35dE878238fb1dBa7aF7f929303AB6e8E4"
+zkevm.l1-block-range: 20000
+zkevm.l1-query-delay: 6000
+zkevm.l1-first-block: 4789190
+zkevm.rpc-ratelimit: 250
+torrent.port: 42071
+zkevm.datastream-version: 2
+
+http.api : ["eth","debug","net","trace","web3","erigon","zkevm"]

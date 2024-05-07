@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func Bench5(erigonURL string) {
+func Bench5(erigonURL string) error {
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
@@ -24,16 +24,15 @@ func Bench5(erigonURL string) {
 	for scanner.Scan() {
 		req_id++
 		if err = post(client, erigonURL, fmt.Sprintf(template, scanner.Text(), req_id), &receipt); err != nil {
-			fmt.Printf("Count not get receipt: %s: %v\n", scanner.Text(), err)
-			return
+			return fmt.Errorf("Count not get receipt: %s: %v\n", scanner.Text(), err)
 		}
 		if receipt.Error != nil {
-			fmt.Printf("Error getting receipt: %d %s\n", receipt.Error.Code, receipt.Error.Message)
-			return
+			return fmt.Errorf("Error getting receipt: %d %s\n", receipt.Error.Code, receipt.Error.Message)
 		}
 	}
 	err = scanner.Err()
 	if err != nil {
 		panic(err)
 	}
+	return nil
 }

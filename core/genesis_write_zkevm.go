@@ -3,15 +3,16 @@ package core
 import (
 	"math/big"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/smt/pkg/smt"
 	"github.com/ledgerwatch/erigon/zkevm/hex"
-	"fmt"
-	"os"
-	"path"
-	"encoding/json"
 )
 
 func HermezMainnetGenesisBlock() *types.Genesis {

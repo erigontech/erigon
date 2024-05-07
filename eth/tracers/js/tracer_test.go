@@ -28,10 +28,10 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/ledgerwatch/erigon/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/chain"
 
-	chain2 "github.com/gateway-fm/cdk-erigon-lib/chain"
+	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
@@ -74,7 +74,7 @@ func runTrace(tracer tracers.Tracer, vmctx *vmContext, chaincfg *chain.Config, c
 		gasLimit uint64 = 31000
 		startGas uint64 = 10000
 		value           = uint256.NewInt(0)
-		contract        = vm.NewContract(account{}, account{}, value, startGas, false /* skipAnalysis */)
+		contract        = vm.NewContract(account{}, libcommon.Address{}, value, startGas, false /* skipAnalysis */)
 	)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x1, 0x0}
 	if contractCode != nil {
@@ -190,7 +190,7 @@ func TestHaltBetweenSteps(t *testing.T) {
 	}
 	env := vm.NewEVM(evmtypes.BlockContext{BlockNumber: 1}, evmtypes.TxContext{GasPrice: uint256.NewInt(1)}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer})
 	scope := &vm.ScopeContext{
-		Contract: vm.NewContract(&account{}, &account{}, uint256.NewInt(0), 0, false /* skipAnalysis */),
+		Contract: vm.NewContract(&account{}, libcommon.Address{}, uint256.NewInt(0), 0, false /* skipAnalysis */),
 	}
 	tracer.CaptureStart(env, libcommon.Address{}, libcommon.Address{}, false /* precompile */, false /* create */, []byte{}, 0, uint256.NewInt(0), []byte{} /* code */)
 	tracer.CaptureState(0, 0, 0, 0, scope, nil, 0, nil)
@@ -281,7 +281,7 @@ func TestEnterExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	scope := &vm.ScopeContext{
-		Contract: vm.NewContract(&account{}, &account{}, uint256.NewInt(0), 0, false /* skipAnalysis */),
+		Contract: vm.NewContract(&account{}, libcommon.Address{}, uint256.NewInt(0), 0, false /* skipAnalysis */),
 	}
 	tracer.CaptureEnter(vm.CALL, scope.Contract.Caller(), scope.Contract.Address(), false, false, []byte{}, 1000, new(uint256.Int), []byte{})
 	tracer.CaptureExit([]byte{}, 400, nil)

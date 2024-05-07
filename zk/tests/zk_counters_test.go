@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,11 +11,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/chain"
-	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -22,11 +24,16 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
+	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
+	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 	seq "github.com/ledgerwatch/erigon/zk/sequencer"
 	"github.com/ledgerwatch/erigon/zk/tx"
 	zktypes "github.com/ledgerwatch/erigon/zk/types"
 	"github.com/ledgerwatch/erigon/zkevm/hex"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/status-im/keycard-go/hexutils"
 )
 
@@ -80,6 +87,9 @@ func Test_RunTestVectors(t *testing.T) {
 	os.Setenv(seq.SEQUENCER_ENV_KEY, "1")
 	defer os.Setenv(seq.SEQUENCER_ENV_KEY, "0")
 
+	m := mock.Mock(t)
+	blockReader, _ := m.BlocksIO()
+
 	files, err := os.ReadDir(root)
 	if err != nil {
 		t.Fatal(err)
@@ -106,12 +116,12 @@ func Test_RunTestVectors(t *testing.T) {
 
 	for idx, test := range tests {
 		t.Run(fileNames[idx], func(t *testing.T) {
-			runTest(t, test, err, fileNames[idx], idx)
+			runTest(t, blockReader, test, err, fileNames[idx], idx)
 		})
 	}
 }
 
-func runTest(t *testing.T, test vector, err error, fileName string, idx int) {
+func runTest(t *testing.T, blockReader services.FullBlockReader, test vector, err error, fileName string, idx int) {
 	test.BatchL2DataDecoded, err = hex.DecodeHex(test.BatchL2Data)
 	if err != nil {
 		t.Fatal(err)
@@ -172,7 +182,7 @@ func runTest(t *testing.T, test vector, err error, fileName string, idx int) {
 		},
 	}
 
-	genesisBlock, _, sparseTree, err := core.WriteGenesisState(genesis, tx, fmt.Sprintf("%s/temp-%v", os.TempDir(), idx))
+	genesisBlock, _, sparseTree, err := core.WriteGenesisState(genesis, tx, fmt.Sprintf("%s/temp-%v", os.TempDir(), idx), log.New())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +223,8 @@ func runTest(t *testing.T, test vector, err error, fileName string, idx int) {
 		Log:              nil,
 	}
 
-	engine := ethconsensusconfig.CreateConsensusEngine(chainConfig, ethashCfg, []string{}, true, "", "", true, "./datadir", nil, false /* readonly */, db)
+	logger := log.New()
+	engine := ethconsensusconfig.CreateConsensusEngine(context.Background(), &nodecfg.Config{Dirs: datadir.New("./datadir")}, chainConfig, ethashCfg, []string{}, true, heimdall.NewHeimdallClient("", logger), true, blockReader, db.ReadOnly(), logger)
 
 	vmCfg := vm.ZkConfig{
 		Config: vm.Config{
@@ -298,7 +309,6 @@ func runTest(t *testing.T, test vector, err error, fileName string, idx int) {
 			transaction,
 			&header.GasUsed,
 			vmCfg,
-			big.NewInt(0), // parent excess data gas
 			zktypes.EFFECTIVE_GAS_PRICE_PERCENTAGE_MAXIMUM)
 
 		if err != nil {

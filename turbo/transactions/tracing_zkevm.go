@@ -3,13 +3,12 @@ package transactions
 import (
 	"context"
 	"fmt"
-	"math/big"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/chain"
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -40,27 +39,20 @@ func ComputeTxEnv_ZkEvm(ctx context.Context, engine consensus.EngineReader, bloc
 		return h
 	}
 	header := block.HeaderNoCopy()
-	parentHeader, err := headerReader.HeaderByHash(ctx, dbtx, header.ParentHash)
-	if err != nil {
-		// TODO(eip-4844): Do we need to propagate this error?
-		log.Error("Can't get parent block's header:", err)
-	}
-	var excessDataGas *big.Int
-	if parentHeader != nil {
-		excessDataGas = parentHeader.ExcessDataGas
-	}
-	BlockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, excessDataGas)
+
+	BlockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil)
 
 	// Recompute transactions up to the target index.
-	signer := types.MakeSigner(cfg, block.NumberU64())
+	signer := types.MakeSigner(cfg, block.NumberU64(), 0)
 	if historyV3 {
 		rules := cfg.Rules(BlockContext.BlockNumber, BlockContext.Time)
 		txn := block.Transactions()[txIndex]
-		statedb.Prepare(txn.Hash(), block.Hash(), txIndex)
+		// todo: upstream merge
+		// statedb.Prepare(txn.Hash(), block.Hash(), txIndex)
 		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
 		if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, *cfg, statedb, header, engine, true /* constCall */, excessDataGas)
+				return core.SysCallContract(contract, data, cfg, statedb, header, engine, true /* constCall */)
 			}
 			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 		}
@@ -71,9 +63,9 @@ func ComputeTxEnv_ZkEvm(ctx context.Context, engine consensus.EngineReader, bloc
 	vmenv := vm.NewEVM(BlockContext, evmtypes.TxContext{}, statedb, cfg, vm.Config{})
 	rules := vmenv.ChainRules()
 
-	consensusHeaderReader := stagedsync.NewChainReaderImpl(cfg, dbtx, nil)
+	consensusHeaderReader := stagedsync.NewChainReaderImpl(cfg, dbtx, nil, log.New())
 
-	core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, header, block.Transactions(), block.Uncles(), cfg, statedb, excessDataGas)
+	core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, header, cfg, statedb, log.New())
 
 	hermezReader := hermez_db.NewHermezDbReader(dbtx)
 
@@ -119,7 +111,8 @@ func ComputeTxEnv_ZkEvm(ctx context.Context, engine consensus.EngineReader, bloc
 		case <-ctx.Done():
 			return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, ctx.Err()
 		}
-		statedb.Prepare(txn.Hash(), block.Hash(), idx)
+		// todo: upstream merge
+		// statedb.Prepare(txn.Hash(), block.Hash(), idx)
 
 		// Assemble the transaction call message and return if the requested offset
 		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
@@ -129,7 +122,7 @@ func ComputeTxEnv_ZkEvm(ctx context.Context, engine consensus.EngineReader, bloc
 
 		if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, *cfg, statedb, header, engine, true /* constCall */, excessDataGas)
+				return core.SysCallContract(contract, data, cfg, statedb, header, engine, true /* constCall */)
 			}
 			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 		}

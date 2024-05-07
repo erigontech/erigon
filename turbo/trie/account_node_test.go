@@ -5,11 +5,12 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+
 	"github.com/holiman/uint256"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 )

@@ -23,11 +23,12 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/gateway-fm/cdk-erigon-lib/common/datadir"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -49,7 +50,7 @@ func TestNodeCloseMultipleTimes(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 
-	stack, err := New(testNodeConfig(t))
+	stack, err := New(context.Background(), testNodeConfig(t), log.New())
 	if err != nil {
 		t.Fatalf("failed to create protocol stack: %v", err)
 	}
@@ -68,7 +69,7 @@ func TestNodeStartMultipleTimes(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 
-	stack, err := New(testNodeConfig(t))
+	stack, err := New(context.Background(), testNodeConfig(t), log.New())
 	if err != nil {
 		t.Fatalf("failed to create protocol stack: %v", err)
 	}
@@ -99,7 +100,7 @@ func TestNodeUsedDataDir(t *testing.T) {
 	dir := t.TempDir()
 
 	// Create a new node based on the data directory
-	original, originalErr := New(&nodecfg.Config{Dirs: datadir.New(dir)})
+	original, originalErr := New(context.Background(), &nodecfg.Config{Dirs: datadir.New(dir)}, log.New())
 	if originalErr != nil {
 		t.Fatalf("failed to create original protocol stack: %v", originalErr)
 	}
@@ -109,14 +110,14 @@ func TestNodeUsedDataDir(t *testing.T) {
 	}
 
 	// Create a second node based on the same data directory and ensure failure
-	if _, err := New(&nodecfg.Config{Dirs: datadir.New(dir)}); !errors.Is(err, ErrDataDirUsed) {
-		t.Fatalf("duplicate datadir failure mismatch: have %v, want %v", err, ErrDataDirUsed)
+	if _, err := New(context.Background(), &nodecfg.Config{Dirs: datadir.New(dir)}, log.New()); !errors.Is(err, datadir.ErrDataDirLocked) {
+		t.Fatalf("duplicate datadir failure mismatch: have %v, want %v", err, datadir.ErrDataDirLocked)
 	}
 }
 
 // Tests whether a Lifecycle can be registered.
 func TestLifecycleRegistry_Successful(t *testing.T) {
-	stack, err := New(testNodeConfig(t))
+	stack, err := New(context.Background(), testNodeConfig(t), log.New())
 	if err != nil {
 		t.Fatalf("failed to create protocol stack: %v", err)
 	}
@@ -142,10 +143,11 @@ func TestNodeCloseClosesDB(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 
-	stack, _ := New(testNodeConfig(t))
+	logger := log.New()
+	stack, _ := New(context.Background(), testNodeConfig(t), logger)
 	defer stack.Close()
 
-	db, err := OpenDatabase(stack.Config(), kv.SentryDB)
+	db, err := OpenDatabase(context.Background(), stack.Config(), kv.SentryDB, "", false, logger)
 	if err != nil {
 		t.Fatal("can't open DB:", err)
 	}
@@ -169,14 +171,15 @@ func TestNodeOpenDatabaseFromLifecycleStart(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 
-	stack, err := New(testNodeConfig(t))
+	logger := log.New()
+	stack, err := New(context.Background(), testNodeConfig(t), logger)
 	require.NoError(t, err)
 	defer stack.Close()
 
 	var db kv.RwDB
 	stack.RegisterLifecycle(&InstrumentedService{
 		startHook: func() {
-			db, err = OpenDatabase(stack.Config(), kv.SentryDB)
+			db, err = OpenDatabase(context.Background(), stack.Config(), kv.SentryDB, "", false, logger)
 			if err != nil {
 				t.Fatal("can't open DB:", err)
 			}
@@ -196,12 +199,13 @@ func TestNodeOpenDatabaseFromLifecycleStop(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 
-	stack, _ := New(testNodeConfig(t))
+	logger := log.New()
+	stack, _ := New(context.Background(), testNodeConfig(t), logger)
 	defer stack.Close()
 
 	stack.RegisterLifecycle(&InstrumentedService{
 		stopHook: func() {
-			db, err := OpenDatabase(stack.Config(), kv.ChainDB)
+			db, err := OpenDatabase(context.Background(), stack.Config(), kv.ChainDB, "", false, logger)
 			if err != nil {
 				t.Fatal("can't open DB:", err)
 			}
@@ -215,7 +219,7 @@ func TestNodeOpenDatabaseFromLifecycleStop(t *testing.T) {
 
 // Tests that registered Lifecycles get started and stopped correctly.
 func TestLifecycleLifeCycle(t *testing.T) {
-	stack, _ := New(testNodeConfig(t))
+	stack, _ := New(context.Background(), testNodeConfig(t), log.New())
 	defer stack.Close()
 
 	started := make(map[string]bool)
@@ -270,7 +274,7 @@ func TestLifecycleStartupError(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 
-	stack, err := New(testNodeConfig(t))
+	stack, err := New(context.Background(), testNodeConfig(t), log.New())
 	if err != nil {
 		t.Fatalf("failed to create protocol stack: %v", err)
 	}
@@ -320,7 +324,7 @@ func TestLifecycleStartupError(t *testing.T) {
 // Tests that even if a registered Lifecycle fails to shut down cleanly, it does
 // not influence the rest of the shutdown invocations.
 func TestLifecycleTerminationGuarantee(t *testing.T) {
-	stack, err := New(testNodeConfig(t))
+	stack, err := New(context.Background(), testNodeConfig(t), log.New())
 	if err != nil {
 		t.Fatalf("failed to create protocol stack: %v", err)
 	}

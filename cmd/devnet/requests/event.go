@@ -1,46 +1,87 @@
 package requests
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
-	"strconv"
 
-	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
-	"github.com/ledgerwatch/erigon/cmd/devnet/models"
-	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+
+	ethereum "github.com/ledgerwatch/erigon"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
-func GetAndCompareLogs(reqId int, fromBlock uint64, toBlock uint64, expected rpctest.Log) error {
-	fmt.Printf("\nGETTING AND COMPARING LOGS\n")
-	reqGen := initialiseRequestGenerator(reqId)
-	var b rpctest.EthGetLogs
+func Compare(expected types.Log, actual types.Log) ([]error, bool) {
+	var errs []error
 
-	if res := reqGen.Erigon(models.ETHGetLogs, reqGen.GetLogs(fromBlock, toBlock, expected.Address), &b); res.Err != nil {
-		return fmt.Errorf("failed to fetch logs: %v", res.Err)
+	switch {
+	case expected.Address != actual.Address:
+		errs = append(errs, fmt.Errorf("expected address: %v, actual address %v", expected.Address, actual.Address))
+	case expected.TxHash != actual.TxHash:
+		errs = append(errs, fmt.Errorf("expected txhash: %v, actual txhash %v", expected.TxHash, actual.TxHash))
+	case expected.BlockHash != actual.BlockHash:
+		errs = append(errs, fmt.Errorf("expected blockHash: %v, actual blockHash %v", expected.BlockHash, actual.BlockHash))
+	case expected.BlockNumber != actual.BlockNumber:
+		errs = append(errs, fmt.Errorf("expected blockNumber: %v, actual blockNumber %v", expected.BlockNumber, actual.BlockNumber))
+	case expected.TxIndex != actual.TxIndex:
+		errs = append(errs, fmt.Errorf("expected txIndex: %v, actual txIndex %v", expected.TxIndex, actual.TxIndex))
+	case !hashSlicesAreEqual(expected.Topics, actual.Topics):
+		errs = append(errs, fmt.Errorf("expected topics: %v, actual topics %v", expected.Topics, actual.Topics))
 	}
 
-	if len(b.Result) == 0 {
-		return fmt.Errorf("logs result should not be empty")
+	return errs, len(errs) == 0
+}
+
+func NewLog(hash libcommon.Hash, blockNum uint64, address libcommon.Address, topics []libcommon.Hash, data hexutility.Bytes, txIndex uint, blockHash libcommon.Hash, index hexutil.Uint, removed bool) types.Log {
+	return types.Log{
+		Address:     address,
+		Topics:      topics,
+		Data:        data,
+		BlockNumber: blockNum,
+		TxHash:      hash,
+		TxIndex:     txIndex,
+		BlockHash:   blockHash,
+		Index:       txIndex,
+		Removed:     removed,
+	}
+}
+
+func (reqGen *requestGenerator) FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error) {
+	var result []types.Log
+
+	if err := reqGen.rpcCall(ctx, &result, Methods.ETHGetLogs, query); err != nil {
+		return nil, err
 	}
 
-	eventLog := b.Result[0]
+	return result, nil
+}
 
-	actual := devnetutils.BuildLog(eventLog.TxHash, strconv.FormatUint(uint64(eventLog.BlockNumber), 10),
-		eventLog.Address, eventLog.Topics, eventLog.Data, eventLog.TxIndex, eventLog.BlockHash, eventLog.Index,
-		eventLog.Removed)
+func (reqGen *requestGenerator) SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error) {
+	return reqGen.Subscribe(ctx, Methods.ETHLogs, ch, query)
+}
 
-	// compare the log events
-	errs, ok := devnetutils.CompareLogEvents(expected, actual)
-	if !ok {
-		fmt.Printf("FAILURE => log result is incorrect: %v\n", errs)
-		return fmt.Errorf("incorrect logs: %v", errs)
-	}
-
-	_, err := devnetutils.ParseResponse(b)
+// ParseResponse converts any of the models interfaces to a string for readability
+func parseResponse(resp interface{}) (string, error) {
+	result, err := json.Marshal(resp)
 	if err != nil {
-		return fmt.Errorf("error parsing response: %v", err)
+		return "", fmt.Errorf("error trying to marshal response: %v", err)
 	}
 
-	fmt.Println("SUCCESS => Logs compared successfully, no discrepancies")
+	return string(result), nil
+}
 
-	return nil
+func hashSlicesAreEqual(s1, s2 []libcommon.Hash) bool {
+	if len(s1) != len(s2) {
+		return false
+	}
+
+	for i := 0; i < len(s1); i++ {
+		if s1[i] != s2[i] {
+			return false
+		}
+	}
+
+	return true
 }

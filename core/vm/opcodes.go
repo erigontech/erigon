@@ -95,16 +95,17 @@ const (
 
 // 0x40 range - block operations.
 const (
-	BLOCKHASH OpCode = 0x40 + iota
-	COINBASE
-	TIMESTAMP
-	NUMBER
-	DIFFICULTY
-	GASLIMIT
+	BLOCKHASH   OpCode = 0x40
+	COINBASE    OpCode = 0x41
+	TIMESTAMP   OpCode = 0x42
+	NUMBER      OpCode = 0x43
+	DIFFICULTY  OpCode = 0x44
+	GASLIMIT    OpCode = 0x45
 	CHAINID     OpCode = 0x46
 	SELFBALANCE OpCode = 0x47
 	BASEFEE     OpCode = 0x48
-	DATAHASH    OpCode = 0x49
+	BLOBHASH    OpCode = 0x49
+	BLOBBASEFEE OpCode = 0x4a
 )
 
 // 0x50 range - 'storage' and execution.
@@ -121,6 +122,9 @@ const (
 	MSIZE    OpCode = 0x59
 	GAS      OpCode = 0x5a
 	JUMPDEST OpCode = 0x5b
+	TLOAD    OpCode = 0x5c
+	TSTORE   OpCode = 0x5d
+	MCOPY    OpCode = 0x5e
 	PUSH0    OpCode = 0x5f
 )
 
@@ -278,7 +282,8 @@ var opCodeToString = map[OpCode]string{
 	CHAINID:     "CHAINID",
 	SELFBALANCE: "SELFBALANCE",
 	BASEFEE:     "BASEFEE",
-	DATAHASH:    "DATAHASH",
+	BLOBHASH:    "BLOBHASH",
+	BLOBBASEFEE: "BLOBBASEFEE",
 
 	// 0x50 range - 'storage' and execution.
 	POP: "POP",
@@ -295,6 +300,9 @@ var opCodeToString = map[OpCode]string{
 	MSIZE:    "MSIZE",
 	GAS:      "GAS",
 	JUMPDEST: "JUMPDEST",
+	TLOAD:    "TLOAD",
+	TSTORE:   "TSTORE",
+	MCOPY:    "MCOPY",
 	PUSH0:    "PUSH0",
 
 	// 0x60 range - push.
@@ -430,7 +438,8 @@ var stringToOp = map[string]OpCode{
 	"CALLDATACOPY":   CALLDATACOPY,
 	"CHAINID":        CHAINID,
 	"BASEFEE":        BASEFEE,
-	"DATAHASH":       DATAHASH,
+	"BLOBHASH":       BLOBHASH,
+	"BLOBBASEFEE":    BLOBBASEFEE,
 	"DELEGATECALL":   DELEGATECALL,
 	"STATICCALL":     STATICCALL,
 	"CODESIZE":       CODESIZE,
@@ -460,6 +469,9 @@ var stringToOp = map[string]OpCode{
 	"MSIZE":          MSIZE,
 	"GAS":            GAS,
 	"JUMPDEST":       JUMPDEST,
+	"TLOAD":          TLOAD,
+	"TSTORE":         TSTORE,
+	"MCOPY":          MCOPY,
 	"PUSH0":          PUSH0,
 	"PUSH1":          PUSH1,
 	"PUSH2":          PUSH2,

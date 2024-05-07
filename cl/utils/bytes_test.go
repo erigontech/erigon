@@ -3,21 +3,22 @@ package utils_test
 import (
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/stretchr/testify/require"
 )
 
 func TestSSZSnappy(t *testing.T) {
 	verySussyMessage := &cltypes.Metadata{
-		SeqNumber: 69, // :D
-		Attnets:   96, // :(
+		SeqNumber: 69,          // :D
+		Attnets:   [8]byte{96}, // :(
 	}
 	sussyEncoded, err := utils.EncodeSSZSnappy(verySussyMessage)
 	require.NoError(t, err)
 	sussyDecoded := &cltypes.Metadata{}
-	require.NoError(t, utils.DecodeSSZSnappy(sussyDecoded, sussyEncoded))
+	require.NoError(t, utils.DecodeSSZSnappy(sussyDecoded, sussyEncoded, 0))
 	require.Equal(t, verySussyMessage.SeqNumber, sussyDecoded.SeqNumber)
 	require.Equal(t, verySussyMessage.Attnets, sussyDecoded.Attnets)
 }

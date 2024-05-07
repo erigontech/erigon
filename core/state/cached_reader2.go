@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"encoding/binary"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
-	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
@@ -25,7 +26,7 @@ func NewCachedReader2(cache kvcache.CacheView, tx kv.Tx) *CachedReader2 {
 }
 
 // ReadAccountData is called when an account needs to be fetched from the state
-func (r *CachedReader2) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
+func (r *CachedReader2) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	enc, err := r.cache.Get(address[:])
 	if err != nil {
 		return nil, err
@@ -40,7 +41,7 @@ func (r *CachedReader2) ReadAccountData(address libcommon.Address) (*accounts.Ac
 	return &a, nil
 }
 
-func (r *CachedReader2) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
+func (r *CachedReader2) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
 	enc, err := r.cache.Get(compositeKey)
 	if err != nil {
@@ -52,7 +53,7 @@ func (r *CachedReader2) ReadAccountStorage(address libcommon.Address, incarnatio
 	return enc, nil
 }
 
-func (r *CachedReader2) ReadAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) ([]byte, error) {
+func (r *CachedReader2) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
 	if bytes.Equal(codeHash.Bytes(), emptyCodeHash) {
 		return nil, nil
 	}
@@ -63,12 +64,12 @@ func (r *CachedReader2) ReadAccountCode(address libcommon.Address, incarnation u
 	return code, err
 }
 
-func (r *CachedReader2) ReadAccountCodeSize(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) (int, error) {
+func (r *CachedReader2) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
 	code, err := r.ReadAccountCode(address, incarnation, codeHash)
 	return len(code), err
 }
 
-func (r *CachedReader2) ReadAccountIncarnation(address libcommon.Address) (uint64, error) {
+func (r *CachedReader2) ReadAccountIncarnation(address common.Address) (uint64, error) {
 	b, err := r.db.GetOne(kv.IncarnationMap, address.Bytes())
 	if err != nil {
 		return 0, err

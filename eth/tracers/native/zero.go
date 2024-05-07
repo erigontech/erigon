@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -28,7 +28,7 @@ func init() {
 
 type zeroTracer struct {
 	noopTracer  // stub struct to mock not used interface methods
-	env         vm.VMInterface
+	env         *vm.EVM
 	tx          types.TxnInfo
 	gasLimit    uint64      // Amount of gas bought for the whole tx
 	interrupt   atomic.Bool // Atomic flag to signal execution interruption
@@ -50,13 +50,13 @@ func newZeroTracer(ctx *tracers.Context, cfg json.RawMessage) (tracers.Tracer, e
 }
 
 // CaptureStart implements the EVMLogger interface to initialize the tracing operation.
-func (t *zeroTracer) CaptureStart(env vm.VMInterface, from libcommon.Address, to libcommon.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *zeroTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	t.to = &to
 	t.env = env
 
 	t.addAccountToTrace(from)
 	t.addAccountToTrace(to)
-	t.addAccountToTrace(env.Context().Coinbase)
+	t.addAccountToTrace(env.Context.Coinbase)
 
 	if code != nil {
 		t.addOpCodeToAccount(to, vm.CALL)
@@ -69,7 +69,7 @@ func (t *zeroTracer) CaptureStart(env vm.VMInterface, from libcommon.Address, to
 	// The sender balance is after reducing: value and gasLimit.
 	// We need to re-add them to get the pre-tx balance.
 	fromBal := new(big.Int).Set(t.tx.Traces[from].Balance.ToBig())
-	gasPrice := env.TxContext().GasPrice
+	gasPrice := env.TxContext.GasPrice
 	consumedGas := new(big.Int).Mul(gasPrice.ToBig(), new(big.Int).SetUint64(t.gasLimit))
 	fromBal.Add(fromBal, new(big.Int).Add(value.ToBig(), consumedGas))
 	t.tx.Traces[from].Balance = uint256.MustFromBig(fromBal)
@@ -290,7 +290,7 @@ func (t *zeroTracer) CaptureTxEnd(restGas uint64) {
 
 	// if the transaction created a contract, store the creation address in the receipt.
 	if t.to == nil {
-		receipt.ContractAddress = crypto.CreateAddress(t.env.TxContext().Origin, t.ctx.Txn.GetNonce())
+		receipt.ContractAddress = crypto.CreateAddress(t.env.TxContext.Origin, t.ctx.Txn.GetNonce())
 	}
 	// Set the receipt logs and create a bloom for filtering
 	receipt.Logs = t.env.IntraBlockState().GetLogs(t.ctx.Txn.Hash())

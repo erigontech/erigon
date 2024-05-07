@@ -20,12 +20,14 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"math/big"
 	"sort"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+
 	"github.com/holiman/uint256"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/hexutil"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
@@ -62,7 +64,7 @@ type ProofRetainer struct {
 // set onto the FlatDBTrieLoader via SetProofRetainer before performing its Load
 // operation in order to appropriately collect the proof elements.
 func NewProofRetainer(addr libcommon.Address, a *accounts.Account, storageKeys []libcommon.Hash, rl *RetainList) (*ProofRetainer, error) {
-	addrHash, err := common.HashData(addr[:])
+	addrHash, err := libcommon.HashData(addr[:])
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +72,7 @@ func NewProofRetainer(addr libcommon.Address, a *accounts.Account, storageKeys [
 
 	storageHexKeys := make([][]byte, len(storageKeys))
 	for i, sk := range storageKeys {
-		storageHash, err := common.HashData(sk[:])
+		storageHash, err := libcommon.HashData(sk[:])
 		if err != nil {
 			return nil, err
 		}
@@ -114,7 +116,10 @@ func (pr *ProofRetainer) ProofElement(prefix []byte) *proofElement {
 	pe := &proofElement{
 		hexKey: append([]byte{}, prefix...),
 	}
-	pr.proofs = append(pr.proofs, pe)
+	// Since we do a depth-first traversal, reverse the proof elements so that
+	// they are ordered correctly root -> node -> ... -> leaf as dictated by
+	// EIP-1186
+	pr.proofs = append([]*proofElement{pe}, pr.proofs...)
 	return pe
 }
 
@@ -136,12 +141,12 @@ func (pr *ProofRetainer) ProofResult() (*accounts.AccProofResult, error) {
 			continue
 		}
 		result.AccountProof = append(result.AccountProof, pe.proof.Bytes())
-		if pe.storageRoot != (libcommon.Hash{}) {
+		if bytes.Equal(pr.accHexKey, pe.storageRootKey) {
 			result.StorageHash = pe.storageRoot
 		}
 	}
 
-	if result.StorageHash == (libcommon.Hash{}) {
+	if pr.acc.Initialised && result.StorageHash == (libcommon.Hash{}) {
 		return nil, fmt.Errorf("did not find storage root in proof elements")
 	}
 
@@ -149,6 +154,19 @@ func (pr *ProofRetainer) ProofResult() (*accounts.AccProofResult, error) {
 	for i, sk := range pr.storageKeys {
 		result.StorageProof[i].Key = sk
 		hexKey := pr.storageHexKeys[i]
+		if !pr.acc.Initialised || result.StorageHash == EmptyRoot {
+			// The yellow paper makes it clear that the EmptyRoot is a special case
+			// when the trie has no nodes, but EIP-1186 states that the proof is
+			// "starting with the storageHash-Node".  Since the trie has no nodes,
+			// it's unclear whether the correct proof should contain the EmptyRoot
+			// pre-image of RLP([]byte(nil)), or be empty.  This implementation
+			// chooses 'empty' as it seems more consistent and it is expected that
+			// provers will treat the EmptyRoot as a special case and ignore the proof
+			// bytes.
+			result.StorageProof[i].Value = (*hexutil.Big)(new(big.Int))
+			continue
+		}
+
 		for _, pe := range pr.proofs {
 			if len(pe.hexKey) <= 2*32 {
 				// Ignore the proof elements above the storage tree (64 bytes, as nibble
@@ -158,7 +176,8 @@ func (pr *ProofRetainer) ProofResult() (*accounts.AccProofResult, error) {
 			if !bytes.HasPrefix(hexKey, pe.hexKey) {
 				continue
 			}
-			if pe.storageValue != nil {
+
+			if pe.storageValue != nil && bytes.Equal(pe.storageKey, hexKey[2*(length.Hash+length.Incarnation):]) {
 				result.StorageProof[i].Value = (*hexutil.Big)(pe.storageValue.ToBig())
 			}
 
@@ -166,7 +185,7 @@ func (pr *ProofRetainer) ProofResult() (*accounts.AccProofResult, error) {
 		}
 
 		if result.StorageProof[i].Value == nil {
-			return nil, fmt.Errorf("no storage value for storage key 0x%x set", sk)
+			result.StorageProof[i].Value = (*hexutil.Big)(new(big.Int))
 		}
 	}
 
@@ -189,9 +208,19 @@ type proofElement struct {
 	// an account leaf
 	storageRoot libcommon.Hash
 
-	// storageValue stores the value of the particular storage
-	// key if this writer is for a storage key
+	// storageRootKey stores the actual hexKey from which the storageRoot came.
+	// This is needed because other proof nodes can be included in the negative
+	// proof case.
+	storageRootKey []byte
+
+	// storageValue stores the value of the particular storage key if this writer
+	// is for a storage key
 	storageValue *uint256.Int
+
+	// storageKey stores the actual hexKey from which the storageValue came. This
+	// is needed because the same proofElement may be used to both prove and
+	// disprove two different storage elements.
+	storageKey []byte
 }
 
 // RetainList encapsulates the list of keys that are required to be fully available, or loaded

@@ -1,7 +1,7 @@
 package vm
 
 import (
-	"github.com/ledgerwatch/erigon/chain"
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon/zk/sequencer"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -32,7 +32,7 @@ func getJumpTable(cr *chain.Rules) *JumpTable {
 }
 
 // NewZKEVMInterpreter returns a new instance of the Interpreter.
-func NewZKEVMInterpreter(evm VMInterpreter, cfg ZkConfig) *EVMInterpreter {
+func NewZKEVMInterpreter(evm *EVM, cfg ZkConfig) *EVMInterpreter {
 	jt := getJumpTable(evm.ChainRules())
 
 	// here we need to copy the jump table every time as we're about to wrap it with the zk counters handling

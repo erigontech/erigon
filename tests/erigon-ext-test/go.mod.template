@@ -1,0 +1,9 @@
+module example.com/erigon-ext-test
+
+go 1.21
+
+require github.com/ledgerwatch/erigon $COMMIT_SHA
+
+replace github.com/ledgerwatch/erigon-lib => github.com/ledgerwatch/erigon/erigon-lib $COMMIT_SHA
+
+require github.com/ethereum/go-ethereum v1.13.3

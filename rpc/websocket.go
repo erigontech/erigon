@@ -27,7 +27,7 @@ import (
 	"sync"
 	"time"
 
-	mapset "github.com/deckarep/golang-set"
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/gorilla/websocket"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -46,13 +46,13 @@ var wsBufferPool = new(sync.Pool)
 //
 // allowedOrigins should be a comma-separated list of allowed origin URLs.
 // To allow connections with any origin, pass "*".
-func (s *Server) WebsocketHandler(allowedOrigins []string, jwtSecret []byte, compression bool) http.Handler {
+func (s *Server) WebsocketHandler(allowedOrigins []string, jwtSecret []byte, compression bool, logger log.Logger) http.Handler {
 	upgrader := websocket.Upgrader{
 		EnableCompression: compression,
 		ReadBufferSize:    wsReadBuffer,
 		WriteBufferSize:   wsWriteBuffer,
 		WriteBufferPool:   wsBufferPool,
-		CheckOrigin:       wsHandshakeValidator(allowedOrigins),
+		CheckOrigin:       wsHandshakeValidator(allowedOrigins, logger),
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if jwtSecret != nil && !CheckJwtSecret(w, r, jwtSecret) {
@@ -60,10 +60,10 @@ func (s *Server) WebsocketHandler(allowedOrigins []string, jwtSecret []byte, com
 		}
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
-			log.Warn("WebSocket upgrade failed", "err", err)
+			logger.Warn("WebSocket upgrade failed", "err", err)
 			return
 		}
-		codec := newWebsocketCodec(conn)
+		codec := NewWebsocketCodec(conn)
 		s.ServeCodec(codec, 0)
 	})
 }
@@ -71,8 +71,8 @@ func (s *Server) WebsocketHandler(allowedOrigins []string, jwtSecret []byte, com
 // wsHandshakeValidator returns a handler that verifies the origin during the
 // websocket upgrade process. When a '*' is specified as an allowed origins all
 // connections are accepted.
-func wsHandshakeValidator(allowedOrigins []string) func(*http.Request) bool {
-	origins := mapset.NewSet()
+func wsHandshakeValidator(allowedOrigins []string, logger log.Logger) func(*http.Request) bool {
+	origins := mapset.NewSet[string]()
 	allowAllOrigins := false
 
 	for _, origin := range allowedOrigins {
@@ -90,7 +90,7 @@ func wsHandshakeValidator(allowedOrigins []string) func(*http.Request) bool {
 			origins.Add("http://" + hostname)
 		}
 	}
-	log.Trace(fmt.Sprintf("Allowed origin(s) for WS RPC interface %v", origins.ToSlice()))
+	logger.Trace(fmt.Sprintf("Allowed origin(s) for WS RPC interface %v", origins.ToSlice()))
 
 	f := func(req *http.Request) bool {
 		// Skip origin verification if no Origin header is present. The origin check
@@ -102,10 +102,10 @@ func wsHandshakeValidator(allowedOrigins []string) func(*http.Request) bool {
 		}
 		// Verify origin against whitelist.
 		origin := strings.ToLower(req.Header.Get("Origin"))
-		if allowAllOrigins || originIsAllowed(origins, origin) {
+		if allowAllOrigins || originIsAllowed(origins, origin, logger) {
 			return true
 		}
-		log.Warn("Rejected WebSocket connection", "origin", origin)
+		logger.Warn("Rejected WebSocket connection", "origin", origin)
 		return false
 	}
 
@@ -125,17 +125,21 @@ func (e wsHandshakeError) Error() string {
 	return s
 }
 
-func originIsAllowed(allowedOrigins mapset.Set, browserOrigin string) bool {
+func (e wsHandshakeError) Unwrap() error {
+	return e.err
+}
+
+func originIsAllowed(allowedOrigins mapset.Set[string], browserOrigin string, logger log.Logger) bool {
 	it := allowedOrigins.Iterator()
 	for origin := range it.C {
-		if ruleAllowsOrigin(origin.(string), browserOrigin) {
+		if ruleAllowsOrigin(origin, browserOrigin, logger) {
 			return true
 		}
 	}
 	return false
 }
 
-func ruleAllowsOrigin(allowedOrigin string, browserOrigin string) bool {
+func ruleAllowsOrigin(allowedOrigin string, browserOrigin string, logger log.Logger) bool {
 	var (
 		allowedScheme, allowedHostname, allowedPort string
 		browserScheme, browserHostname, browserPort string
@@ -143,12 +147,12 @@ func ruleAllowsOrigin(allowedOrigin string, browserOrigin string) bool {
 	)
 	allowedScheme, allowedHostname, allowedPort, err = parseOriginURL(allowedOrigin)
 	if err != nil {
-		log.Warn("Error parsing allowed origin specification", "spec", allowedOrigin, "err", err)
+		logger.Warn("Error parsing allowed origin specification", "spec", allowedOrigin, "err", err)
 		return false
 	}
 	browserScheme, browserHostname, browserPort, err = parseOriginURL(browserOrigin)
 	if err != nil {
-		log.Warn("Error parsing browser 'Origin' field", "Origin", browserOrigin, "err", err)
+		logger.Warn("Error parsing browser 'Origin' field", "Origin", browserOrigin, "err", err)
 		return false
 	}
 	if allowedScheme != "" && allowedScheme != browserScheme {
@@ -186,7 +190,7 @@ func parseOriginURL(origin string) (string, string, string, error) {
 
 // DialWebsocketWithDialer creates a new RPC client that communicates with a JSON-RPC server
 // that is listening on the given endpoint using the provided dialer.
-func DialWebsocketWithDialer(ctx context.Context, endpoint, origin string, dialer websocket.Dialer) (*Client, error) {
+func DialWebsocketWithDialer(ctx context.Context, endpoint, origin string, dialer websocket.Dialer, logger log.Logger) (*Client, error) {
 	endpoint, header, err := wsClientHeaders(endpoint, origin)
 	if err != nil {
 		return nil, err
@@ -201,8 +205,8 @@ func DialWebsocketWithDialer(ctx context.Context, endpoint, origin string, diale
 			}
 			return nil, hErr
 		}
-		return newWebsocketCodec(conn), nil
-	})
+		return NewWebsocketCodec(conn), nil
+	}, logger)
 }
 
 // DialWebsocket creates a new RPC client that communicates with a JSON-RPC server
@@ -210,13 +214,13 @@ func DialWebsocketWithDialer(ctx context.Context, endpoint, origin string, diale
 //
 // The context is used for the initial connection establishment. It does not
 // affect subsequent interactions with the client.
-func DialWebsocket(ctx context.Context, endpoint, origin string) (*Client, error) {
+func DialWebsocket(ctx context.Context, endpoint, origin string, logger log.Logger) (*Client, error) {
 	dialer := websocket.Dialer{
 		ReadBufferSize:  wsReadBuffer,
 		WriteBufferSize: wsWriteBuffer,
 		WriteBufferPool: wsBufferPool,
 	}
-	return DialWebsocketWithDialer(ctx, endpoint, origin, dialer)
+	return DialWebsocketWithDialer(ctx, endpoint, origin, dialer, logger)
 }
 
 func wsClientHeaders(endpoint, origin string) (string, http.Header, error) {
@@ -244,7 +248,7 @@ type websocketCodec struct {
 	pingReset chan struct{}
 }
 
-func newWebsocketCodec(conn *websocket.Conn) ServerCodec {
+func NewWebsocketCodec(conn *websocket.Conn) ServerCodec {
 	conn.SetReadLimit(wsMessageSizeLimit)
 	wc := &websocketCodec{
 		jsonCodec: NewFuncCodec(conn, conn.WriteJSON, conn.ReadJSON).(*jsonCodec),
@@ -256,13 +260,13 @@ func newWebsocketCodec(conn *websocket.Conn) ServerCodec {
 	return wc
 }
 
-func (wc *websocketCodec) close() {
-	wc.jsonCodec.close()
+func (wc *websocketCodec) Close() {
+	wc.jsonCodec.Close()
 	wc.wg.Wait()
 }
 
-func (wc *websocketCodec) writeJSON(ctx context.Context, v interface{}) error {
-	err := wc.jsonCodec.writeJSON(ctx, v)
+func (wc *websocketCodec) WriteJSON(ctx context.Context, v interface{}) error {
+	err := wc.jsonCodec.WriteJSON(ctx, v)
 	if err == nil {
 		// Notify pingLoop to delay the next idle ping.
 		select {

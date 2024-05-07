@@ -9,7 +9,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -22,14 +22,6 @@ var DefaultMode = Mode{
 	CallTraces:  Distance(math.MaxUint64),
 	Experiments: Experiments{}, // all off
 }
-
-var (
-	mainnetDepositContractBlock uint64 = 11052984
-	sepoliaDepositContractBlock uint64 = 1273020
-	goerliDepositContractBlock  uint64 = 4367322
-	gnosisDepositContractBlock  uint64 = 19475089
-	chiadoDepositContractBlock  uint64 = 155530
-)
 
 type Experiments struct {
 }
@@ -55,8 +47,6 @@ func FromCli(chainId uint64, flags string, exactHistory, exactReceipts, exactTxI
 		}
 	}
 
-	pruneBlockBefore := pruneBlockDefault(chainId)
-
 	if exactHistory > 0 {
 		mode.History = Distance(exactHistory)
 	}
@@ -74,16 +64,7 @@ func FromCli(chainId uint64, flags string, exactHistory, exactReceipts, exactTxI
 		mode.History = Before(beforeH)
 	}
 	if beforeR > 0 {
-		if pruneBlockBefore != 0 {
-			log.Warn("specifying prune.before.r might break CL compatibility")
-			if beforeR > pruneBlockBefore {
-				log.Warn("the specified prune.before.r block number is higher than the deposit contract contract block number", "highest block number", pruneBlockBefore)
-			}
-		}
 		mode.Receipts = Before(beforeR)
-	} else if exactReceipts == 0 && mode.Receipts.Enabled() && pruneBlockBefore != 0 {
-		// Default --prune=r to pruning receipts before the Beacon Chain genesis
-		mode.Receipts = Before(pruneBlockBefore)
 	}
 	if beforeT > 0 {
 		mode.TxIndex = Before(beforeT)
@@ -101,23 +82,6 @@ func FromCli(chainId uint64, flags string, exactHistory, exactReceipts, exactTxI
 		}
 	}
 	return mode, nil
-}
-
-func pruneBlockDefault(chainId uint64) uint64 {
-	switch chainId {
-	case 1 /* mainnet */ :
-		return mainnetDepositContractBlock
-	case 11155111 /* sepolia */ :
-		return sepoliaDepositContractBlock
-	case 5 /* goerli */ :
-		return goerliDepositContractBlock
-	case 10200 /* chiado */ :
-		return chiadoDepositContractBlock
-	case 100 /* gnosis */ :
-		return gnosisDepositContractBlock
-	}
-
-	return 0
 }
 
 func Get(db kv.Getter) (Mode, error) {
@@ -296,6 +260,11 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 	}
 
 	if pruneMode.Initialised {
+		// Don't change from previous default as default for Receipts pruning has now changed
+		if pruneMode.Receipts.useDefaultValue() {
+			pruneMode.Receipts = pm.Receipts
+		}
+
 		// If storage mode is not explicitly specified, we take whatever is in the database
 		if !reflect.DeepEqual(pm, pruneMode) {
 			if bytes.Equal(pm.Receipts.dbType(), kv.PruneTypeOlder) && bytes.Equal(pruneMode.Receipts.dbType(), kv.PruneTypeBefore) {

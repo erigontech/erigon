@@ -17,11 +17,11 @@
 package dnsdisc
 
 import (
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"reflect"
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 )
 

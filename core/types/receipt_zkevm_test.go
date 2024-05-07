@@ -21,7 +21,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -109,7 +109,7 @@ func TestDeriveFields_zkEvm_preForkId8(t *testing.T) {
 		t.Fatalf("DeriveFields_zkEvm(...) = %v, want <nil>", err)
 	}
 	// Iterate over all the computed fields and check that they're correct
-	signer := MakeSigner(params.TestChainConfig, number.Uint64())
+	signer := MakeSigner(params.TestChainConfig, number.Uint64(), 0)
 
 	for i := range receipts {
 		if receipts[i].Type != txs[i].Type() {
@@ -245,7 +245,7 @@ func TestDeriveFields_zkEvmForkid8(t *testing.T) {
 		t.Fatalf("DeriveFields_zkEvm(...) = %v, want <nil>", err)
 	}
 	// Iterate over all the computed fields and check that they're correct
-	signer := MakeSigner(params.TestChainConfig, number.Uint64())
+	signer := MakeSigner(params.TestChainConfig, number.Uint64(), 0)
 
 	for i := range receipts {
 		if receipts[i].Type != txs[i].Type() {

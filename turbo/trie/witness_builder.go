@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math/big"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 type HashNodeFunc func(node, bool, []byte) (int, error)

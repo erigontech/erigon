@@ -21,9 +21,10 @@ import (
 	"testing"
 	"time"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/core/types"
 )
 

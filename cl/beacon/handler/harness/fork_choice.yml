@@ -1,0 +1,24 @@
+vars:
+tests:
+  - name: get fork choice
+    expect:
+      file: "forkchoice_1"
+      fs: td
+    actual:
+      handler: i
+      path: /eth/v2/debug/beacon/heads
+    compare:
+      exprs:
+       - "actual_code == 200"
+       - "actual == expect[0]"
+  - name: get heads
+    expect:
+      file: "forkchoice_1"
+      fs: td
+    actual:
+      handler: i
+      path: /eth/v1/debug/fork_choice
+    compare:
+      exprs:
+       - "actual_code == 200"
+       - "actual == expect[1]"

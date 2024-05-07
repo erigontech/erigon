@@ -3,7 +3,8 @@ package hermez_db
 import (
 	"encoding/binary"
 	"fmt"
-	"github.com/gateway-fm/cdk-erigon-lib/common"
+
+	"github.com/ledgerwatch/erigon-lib/common"
 )
 
 var emptyHash = common.Hash{0}

@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/gateway-fm/cdk-erigon-lib/common"
-	chain2 "github.com/ledgerwatch/erigon/chain"
+	chain2 "github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/spf13/cobra"
 
@@ -34,10 +34,6 @@ var rootCmd = &cobra.Command{
 	Use:   "state",
 	Short: "state is a utility for Stateless ethereum clients",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		if err := debug.SetupCobra(cmd); err != nil {
-			panic(err)
-		}
-
 		genesis, chainConfig = getChainGenesisAndConfig()
 		if genesisPath != "" {
 			genesis = genesisFromFile(genesisPath)

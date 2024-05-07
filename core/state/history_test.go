@@ -8,19 +8,19 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+
 	"github.com/davecgh/go-spew/spew"
 	"github.com/holiman/uint256"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/common/length"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/bitmapdb"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/memdb"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/temporal/historyv2"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/state/historyv2read"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -29,6 +29,7 @@ import (
 )
 
 func TestMutationDeleteTimestamp(t *testing.T) {
+	t.Parallel()
 	_, tx := memdb.NewTestTx(t)
 
 	acc := make([]*accounts.Account, 10)
@@ -60,7 +61,7 @@ func TestMutationDeleteTimestamp(t *testing.T) {
 		t.FailNow()
 	}
 
-	index, err := bitmapdb.Get64(tx, kv.AccountsHistory, addr[0].Bytes(), 0, math.MaxUint32)
+	index, err := bitmapdb.Get64(tx, kv.E2AccountsHistory, addr[0].Bytes(), 0, math.MaxUint32)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,12 +83,13 @@ func TestMutationDeleteTimestamp(t *testing.T) {
 		t.Fatal("changeset must be deleted")
 	}
 
-	found, err := tx.GetOne(kv.AccountsHistory, addr[0].Bytes())
+	found, err := tx.GetOne(kv.E2AccountsHistory, addr[0].Bytes())
 	require.NoError(t, err)
 	require.Nil(t, found, "account must be deleted")
 }
 
 func TestMutationCommit(t *testing.T) {
+	t.Parallel()
 	_, tx := memdb.NewTestTx(t)
 
 	numOfAccounts := 5
@@ -110,7 +112,7 @@ func TestMutationCommit(t *testing.T) {
 			t.Fatal("Accounts not equals")
 		}
 
-		index, err := bitmapdb.Get64(tx, kv.AccountsHistory, addr.Bytes(), 0, math.MaxUint32)
+		index, err := bitmapdb.Get64(tx, kv.E2AccountsHistory, addr.Bytes(), 0, math.MaxUint32)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -136,9 +138,9 @@ func TestMutationCommit(t *testing.T) {
 		}
 
 		for k, v := range accHistoryStateStorage[i] {
-			c1, _ := tx.Cursor(kv.StorageHistory)
+			c1, _ := tx.Cursor(kv.E2StorageHistory)
 			c2, _ := tx.CursorDupSort(kv.StorageChangeSet)
-			res, err := historyv2read.GetAsOf(tx, c1, c2, true /* storage */, dbutils.PlainGenerateCompositeStorageKey(addr.Bytes(), acc.Incarnation, k.Bytes()), 1)
+			res, _, err := historyv2read.GetAsOf(tx, c1, c2, true /* storage */, dbutils.PlainGenerateCompositeStorageKey(addr.Bytes(), acc.Incarnation, k.Bytes()), 1)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -292,6 +294,7 @@ func randomAccount(t *testing.T) (*accounts.Account, libcommon.Address) {
 */
 
 func TestWalkAsOfStatePlain(t *testing.T) {
+	t.Parallel()
 	_, tx := memdb.NewTestTx(t)
 
 	emptyVal := uint256.NewInt(0)
@@ -377,7 +380,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 
 	for _, addr := range addrs {
 		if err := WalkAsOfStorage(tx, addr, historyv2read.DefaultIncarnation, libcommon.Hash{}, 2, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
-			err := block2.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+			err := block2.Add(append(libcommon.CopyBytes(kAddr), kLoc...), libcommon.CopyBytes(v))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -393,7 +396,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 	}
 	for _, addr := range addrs {
 		if err := WalkAsOfStorage(tx, addr, historyv2read.DefaultIncarnation, libcommon.Hash{}, 4, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
-			err := block4.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+			err := block4.Add(append(libcommon.CopyBytes(kAddr), kLoc...), libcommon.CopyBytes(v))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -424,7 +427,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 	}
 	for _, addr := range addrs {
 		if err := WalkAsOfStorage(tx, addr, historyv2read.DefaultIncarnation, libcommon.Hash{}, 6, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
-			err := block6.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+			err := block6.Add(append(libcommon.CopyBytes(kAddr), kLoc...), libcommon.CopyBytes(v))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -452,6 +455,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 }
 
 func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
+	t.Parallel()
 	_, tx := memdb.NewTestTx(t)
 
 	emptyVal := uint256.NewInt(0)
@@ -555,7 +559,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	copy(startKey[:length.Addr], addr1.Bytes())
 
 	if err := WalkAsOfStorage(tx, addr1, historyv2read.DefaultIncarnation, libcommon.Hash{}, 2, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
-		err := block2.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+		err := block2.Add(append(libcommon.CopyBytes(kAddr), kLoc...), libcommon.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -569,7 +573,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 		Changes: make([]historyv2.Change, 0),
 	}
 	if err := WalkAsOfStorage(tx, addr1, historyv2read.DefaultIncarnation, libcommon.Hash{}, 4, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
-		err := block4.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+		err := block4.Add(append(libcommon.CopyBytes(kAddr), kLoc...), libcommon.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -597,7 +601,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	block4.Changes = block4.Changes[:0]
 	for _, addr := range []libcommon.Address{addr1, addr2} {
 		if err := WalkAsOfStorage(tx, addr, historyv2read.DefaultIncarnation, libcommon.Hash{}, 4, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
-			err := block4.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+			err := block4.Add(append(libcommon.CopyBytes(kAddr), kLoc...), libcommon.CopyBytes(v))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -617,7 +621,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 		Changes: make([]historyv2.Change, 0),
 	}
 	if err := WalkAsOfStorage(tx, addr1, historyv2read.DefaultIncarnation, libcommon.Hash{}, 6, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
-		err := block6.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+		err := block6.Add(append(libcommon.CopyBytes(kAddr), kLoc...), libcommon.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -641,7 +645,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	block6.Changes = block6.Changes[:0]
 	for _, addr := range []libcommon.Address{addr1, addr2} {
 		if err := WalkAsOfStorage(tx, addr, historyv2read.DefaultIncarnation, libcommon.Hash{}, 6, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
-			err := block6.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+			err := block6.Add(append(libcommon.CopyBytes(kAddr), kLoc...), libcommon.CopyBytes(v))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -658,6 +662,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 }
 
 func TestWalkAsOfAccountPlain(t *testing.T) {
+	t.Parallel()
 	_, tx := memdb.NewTestTx(t)
 
 	emptyValAcc := accounts.NewAccount()
@@ -681,7 +686,7 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 	addrHashes := make([]libcommon.Hash, numOfAccounts)
 	for i := uint8(0); i < numOfAccounts; i++ {
 		addrs[i] = libcommon.Address{i + 1}
-		addrHash, _ := common.HashData(addrs[i].Bytes())
+		addrHash, _ := libcommon.HashData(addrs[i].Bytes())
 		addrHashes[i] = addrHash
 	}
 
@@ -730,7 +735,7 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 	})
 
 	if err := WalkAsOfAccounts(tx, libcommon.Address{}, 2, func(k []byte, v []byte) (b bool, e error) {
-		innerErr := block2.Add(common.CopyBytes(k), common.CopyBytes(v))
+		innerErr := block2.Add(libcommon.CopyBytes(k), libcommon.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
 		}
@@ -762,7 +767,7 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 	}
 
 	if err := WalkAsOfAccounts(tx, libcommon.Address{}, 4, func(k []byte, v []byte) (b bool, e error) {
-		innerErr := block4.Add(common.CopyBytes(k), common.CopyBytes(v))
+		innerErr := block4.Add(libcommon.CopyBytes(k), libcommon.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
 		}
@@ -794,7 +799,7 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 	}
 
 	if err := WalkAsOfAccounts(tx, libcommon.Address{}, 6, func(k []byte, v []byte) (b bool, e error) {
-		innerErr := block6.Add(common.CopyBytes(k), common.CopyBytes(v))
+		innerErr := block6.Add(libcommon.CopyBytes(k), libcommon.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
 		}
@@ -806,6 +811,7 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 }
 
 func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
+	t.Parallel()
 	_, tx := memdb.NewTestTx(t)
 
 	emptyValAcc := accounts.NewAccount()
@@ -829,7 +835,7 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 	addrHashes := make([]libcommon.Hash, numOfAccounts)
 	for i := uint8(0); i < numOfAccounts; i++ {
 		addrs[i] = libcommon.Address{i + 1}
-		addrHash, _ := common.HashData(addrs[i].Bytes())
+		addrHash, _ := libcommon.HashData(addrs[i].Bytes())
 		addrHashes[i] = addrHash
 	}
 
@@ -923,7 +929,7 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 		}
 
 		if err := WalkAsOfAccounts(tx, libcommon.Address{}, blockNum, func(k []byte, v []byte) (b bool, e error) {
-			innerErr := obtained.Add(common.CopyBytes(k), common.CopyBytes(v))
+			innerErr := obtained.Add(libcommon.CopyBytes(k), libcommon.CopyBytes(v))
 			if innerErr != nil {
 				t.Fatal(innerErr)
 			}
@@ -957,6 +963,7 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 }
 
 func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
+	t.Parallel()
 	_, tx := memdb.NewTestTx(t)
 
 	numOfAccounts := uint8(4)
@@ -964,7 +971,7 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 	addrHashes := make([]libcommon.Hash, numOfAccounts)
 	for i := uint8(0); i < numOfAccounts; i++ {
 		addrs[i] = libcommon.Address{i + 1}
-		addrHash, _ := common.HashData(addrs[i].Bytes())
+		addrHash, _ := libcommon.HashData(addrs[i].Bytes())
 		addrHashes[i] = addrHash
 	}
 	key := libcommon.Hash{123}
@@ -1057,7 +1064,7 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 
 		for _, addr := range addrs {
 			if err := WalkAsOfStorage(tx, addr, historyv2read.DefaultIncarnation, libcommon.Hash{}, blockNum, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
-				if innerErr := obtained.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v)); innerErr != nil {
+				if innerErr := obtained.Add(append(libcommon.CopyBytes(kAddr), kLoc...), libcommon.CopyBytes(v)); innerErr != nil {
 					t.Fatal(innerErr)
 				}
 				return true, nil

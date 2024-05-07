@@ -27,8 +27,8 @@ var hasherPool = sync.Pool{
 	},
 }
 
-// General purpose Keccak256
-func Keccak256(data []byte, extras ...[]byte) [32]byte {
+// General purpose Sha256
+func Sha256(data []byte, extras ...[]byte) [32]byte {
 	h, ok := hasherPool.Get().(hash.Hash)
 	if !ok {
 		h = sha256.New()
@@ -46,12 +46,13 @@ func Keccak256(data []byte, extras ...[]byte) [32]byte {
 	return b
 }
 
-// Optimized Keccak256, avoid pool.put/pool.get, meant for intensive operations.
-func OptimizedKeccak256() HashFunc {
+// Optimized Sha256, avoid pool.put/pool.get, meant for intensive operations.
+// this version is not thread safe
+func OptimizedSha256NotThreadSafe() HashFunc {
 	h := sha256.New()
+	var b [32]byte
 	return func(data []byte, extras ...[]byte) [32]byte {
 		h.Reset()
-		var b [32]byte
 		h.Write(data)
 		for _, extra := range extras {
 			h.Write(extra)

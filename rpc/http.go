@@ -33,10 +33,11 @@ import (
 
 	"github.com/golang-jwt/jwt/v4"
 	jsoniter "github.com/json-iterator/go"
+	"github.com/ledgerwatch/log/v3"
 )
 
 const (
-	maxRequestContentLength = 1024 * 1024 * 5
+	maxRequestContentLength = 1024 * 1024 * 32 // 32MB
 	contentType             = "application/json"
 	jwtTokenExpiry          = 60 * time.Second
 )
@@ -54,7 +55,7 @@ type httpConn struct {
 }
 
 // httpConn is treated specially by Client.
-func (hc *httpConn) writeJSON(context.Context, interface{}) error {
+func (hc *httpConn) WriteJSON(context.Context, interface{}) error {
 	panic("writeJSON called on httpConn")
 }
 
@@ -62,12 +63,12 @@ func (hc *httpConn) remoteAddr() string {
 	return hc.url
 }
 
-func (hc *httpConn) readBatch() ([]*jsonrpcMessage, bool, error) {
+func (hc *httpConn) ReadBatch() ([]*jsonrpcMessage, bool, error) {
 	<-hc.closeCh
 	return nil, false, io.EOF
 }
 
-func (hc *httpConn) close() {
+func (hc *httpConn) Close() {
 	hc.closeOnce.Do(func() { close(hc.closeCh) })
 }
 
@@ -77,7 +78,7 @@ func (hc *httpConn) closed() <-chan interface{} {
 
 // DialHTTPWithClient creates a new RPC client that connects to an RPC server over HTTP
 // using the provided HTTP Client.
-func DialHTTPWithClient(endpoint string, client *http.Client) (*Client, error) {
+func DialHTTPWithClient(endpoint string, client *http.Client, logger log.Logger) (*Client, error) {
 	// Sanity check URL so we don't end up with a client that will fail every request.
 	_, err := url.Parse(endpoint)
 	if err != nil {
@@ -96,32 +97,22 @@ func DialHTTPWithClient(endpoint string, client *http.Client) (*Client, error) {
 			closeCh: make(chan interface{}),
 		}
 		return hc, nil
-	})
+	}, logger)
 }
 
 // DialHTTP creates a new RPC client that connects to an RPC server over HTTP.
-func DialHTTP(endpoint string) (*Client, error) {
-	return DialHTTPWithClient(endpoint, new(http.Client))
+func DialHTTP(endpoint string, logger log.Logger) (*Client, error) {
+	return DialHTTPWithClient(endpoint, new(http.Client), logger)
 }
 
 func (c *Client) sendHTTP(ctx context.Context, op *requestOp, msg interface{}) error {
 	hc := c.writeConn.(*httpConn)
 	respBody, err := hc.doRequest(ctx, msg)
-	if respBody != nil {
-		defer respBody.Close()
-	}
-
 	if err != nil {
-		if respBody != nil {
-			buf := new(bytes.Buffer)
-			if _, err2 := buf.ReadFrom(respBody); err2 == nil {
-				return fmt.Errorf("%w: %v", err, buf.String())
-			}
-		}
 		return err
 	}
 	var respmsg jsonrpcMessage
-	if err := json.NewDecoder(respBody).Decode(&respmsg); err != nil {
+	if err := json.Unmarshal(respBody, &respmsg); err != nil {
 		return err
 	}
 	op.resp <- &respmsg
@@ -134,9 +125,8 @@ func (c *Client) sendBatchHTTP(ctx context.Context, op *requestOp, msgs []*jsonr
 	if err != nil {
 		return err
 	}
-	defer respBody.Close()
 	var respmsgs []jsonrpcMessage
-	if err := json.NewDecoder(respBody).Decode(&respmsgs); err != nil {
+	if err := json.Unmarshal(respBody, &respmsgs); err != nil {
 		return err
 	}
 	for i := 0; i < len(respmsgs); i++ {
@@ -145,7 +135,7 @@ func (c *Client) sendBatchHTTP(ctx context.Context, op *requestOp, msgs []*jsonr
 	return nil
 }
 
-func (hc *httpConn) doRequest(ctx context.Context, msg interface{}) (io.ReadCloser, error) {
+func (hc *httpConn) doRequest(ctx context.Context, msg interface{}) ([]byte, error) {
 	body, err := json.Marshal(msg)
 	if err != nil {
 		return nil, err
@@ -166,10 +156,19 @@ func (hc *httpConn) doRequest(ctx context.Context, msg interface{}) (io.ReadClos
 	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return resp.Body, errors.New(resp.Status)
+	defer func() { _ = resp.Body.Close() }()
+
+	// read the response body
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
 	}
-	return resp.Body, nil
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("%s: %s", resp.Status, string(respBody))
+	}
+
+	return respBody, nil
 }
 
 // httpServerConn turns a HTTP connection into a Conn.
@@ -249,7 +248,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("content-type", contentType)
 	codec := newHTTPServerConn(r, w)
-	defer codec.close()
+	defer codec.Close()
 	var stream *jsoniter.Stream
 	if !s.disableStreaming {
 		stream = jsoniter.NewStream(jsoniter.ConfigDefault, w, 4096)

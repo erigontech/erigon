@@ -3,12 +3,13 @@ package hermez_db
 import (
 	"context"
 	"fmt"
-	"github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/gateway-fm/cdk-erigon-lib/kv/mdbx"
+	"testing"
+
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 type IHermezDb interface {
@@ -17,7 +18,7 @@ type IHermezDb interface {
 }
 
 func GetDbTx() (tx kv.RwTx, cleanup func()) {
-	dbi, err := mdbx.NewTemporaryMdbx()
+	dbi, err := mdbx.NewTemporaryMdbx(context.Background(), "")
 	if err != nil {
 		panic(err)
 	}
