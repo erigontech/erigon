@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os/exec"
-	"runtime"
 	"sync"
 	"time"
 
@@ -15,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/ledgerwatch/erigon/cmd/diag/flags"
 	"github.com/urfave/cli/v2"
 )
@@ -114,7 +113,8 @@ func runUI(cli *cli.Context) error {
 		}
 	}()
 
-	open(fmt.Sprintf("http://%s:%d", listenAddr, listenPort))
+	uiUrl := fmt.Sprintf("http://%s:%d", listenAddr, listenPort)
+	fmt.Println(text.Hyperlink(uiUrl, fmt.Sprintf("UI running on %s", uiUrl)))
 
 	wg.Wait() // Wait for the server goroutine to finish
 	return nil
@@ -136,22 +136,4 @@ func writeDiagAdderss(w http.ResponseWriter, addr DiagAddress) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 
-}
-
-// open opens the specified URL in the default browser of the user.
-func open(url string) error {
-	var cmd string
-	var args []string
-
-	switch runtime.GOOS {
-	case "windows":
-		cmd = "cmd"
-		args = []string{"/c", "start"}
-	case "darwin":
-		cmd = "open"
-	default: // "linux", "freebsd", "openbsd", "netbsd"
-		cmd = "xdg-open"
-	}
-	args = append(args, url)
-	return exec.Command(cmd, args...).Start()
 }
