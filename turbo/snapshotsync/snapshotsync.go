@@ -233,15 +233,12 @@ func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error)
 		if !strings.HasPrefix(p.Name, "domain") {
 			continue
 		}
-		rangeString := strings.Split(p.Name, ".")[1]
-		rangeNums := strings.Split(rangeString, "-")
-		// convert the range to uint64
-		to, err := strconv.ParseUint(rangeNums[1], 10, 64)
-		if err != nil {
-			return 0, err
+		s, _, ok := snaptype.ParseFileName("tmp", p.Name)
+		if !ok {
+			continue
 		}
-		if to > maxTo {
-			maxTo = to
+		if s.To > maxTo {
+			maxTo = s.To
 		}
 	}
 	return maxTo, nil
