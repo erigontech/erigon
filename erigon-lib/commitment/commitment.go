@@ -942,6 +942,7 @@ func (t *UpdateTree) HashSort(ctx context.Context, fn func(hk, pk []byte) error)
 				return err
 			}
 		}
+		clear(t.keys)
 
 		err := collector.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			return fn(k, v)
@@ -949,8 +950,6 @@ func (t *UpdateTree) HashSort(ctx context.Context, fn func(hk, pk []byte) error)
 		if err != nil {
 			return err
 		}
-
-		clear(t.keys)
 	case ModeUpdate:
 		t.tree.Ascend(func(item *KeyUpdate) bool {
 			select {
