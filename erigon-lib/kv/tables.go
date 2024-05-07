@@ -946,7 +946,7 @@ const (
 	StorageHistory    History = "StorageHistory"
 	CodeHistory       History = "CodeHistory"
 	CommitmentHistory History = "CommitmentHistory"
-	GasUsedHistory    History = "GasUsedHistory"
+	//GasUsedHistory    History = "GasUsedHistory"
 )
 
 const (
@@ -954,7 +954,7 @@ const (
 	StorageHistoryIdx    InvertedIdx = "StorageHistoryIdx"
 	CodeHistoryIdx       InvertedIdx = "CodeHistoryIdx"
 	CommitmentHistoryIdx InvertedIdx = "CommitmentHistoryIdx"
-	GasusedHistoryIdx    InvertedIdx = "GasUsedHistoryIdx"
+	//GasUsedHistoryIdx    InvertedIdx = "GasUsedHistoryIdx"
 
 	LogTopicIdx   InvertedIdx = "LogTopicIdx"
 	LogAddrIdx    InvertedIdx = "LogAddrIdx"
