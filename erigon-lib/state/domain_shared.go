@@ -279,8 +279,8 @@ func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte) {
 	//sd.muMaps.Unlock()
 }
 
-// Get returns cached value by key. Cache is invalidated when associated WAL is flushed
-func (sd *SharedDomains) Get(table kv.Domain, key []byte) (v []byte, ok bool) {
+// get returns cached value by key. Cache is invalidated when associated WAL is flushed
+func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, ok bool) {
 	//sd.muMaps.RLock()
 	keyS := *(*string)(unsafe.Pointer(&key))
 	//keyS := string(key)
@@ -301,7 +301,7 @@ func (sd *SharedDomains) SizeEstimate() uint64 {
 }
 
 func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error) {
-	if v, ok := sd.Get(kv.CommitmentDomain, prefix); ok {
+	if v, ok := sd.get(kv.CommitmentDomain, prefix); ok {
 		// sd cache values as is (without transformation) so safe to return
 		return v, 0, nil
 	}
@@ -787,7 +787,7 @@ func (sd *SharedDomains) DomainGet(domain kv.Domain, k, k2 []byte) (v []byte, st
 	if k2 != nil {
 		k = append(k, k2...)
 	}
-	if v, ok := sd.Get(domain, k); ok {
+	if v, ok := sd.get(domain, k); ok {
 		return v, 0, nil
 	}
 	v, step, _, err = sd.aggCtx.GetLatest(domain, k, nil, sd.roTx)
