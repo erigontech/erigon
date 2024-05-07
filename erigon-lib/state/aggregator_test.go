@@ -638,7 +638,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txN
 		switch {
 		case r <= 33:
 			buf := types.EncodeAccountBytesV3(txNum, uint256.NewInt(txNum*100_000), nil, 0)
-			prev, step, err := domains.LatestAccount(key)
+			prev, step, err := domains.DomainGet(kv.AccountsDomain, key, nil)
 			require.NoError(t, err)
 
 			usedKeys[string(key)] = struct{}{}
