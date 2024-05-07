@@ -84,6 +84,7 @@ make all
 ## Copy data to another db
 
 ```
+0. You will need 2x disk space (can be different disks). 
 1. Stop Erigon
 2. Create new db with new --db.pagesize: 
 ONLY_CREATE_DB=true ./build/bin/erigon --datadir=/erigon-new/ --chain="$CHAIN" --db.pagesize=8kb --db.size.limit=12T
