@@ -13,6 +13,9 @@ import (
 	"strings"
 	"time"
 
+	_ "github.com/ledgerwatch/erigon/core/snaptype"        //hack
+	_ "github.com/ledgerwatch/erigon/polygon/bor/snaptype" //hack
+
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/c2h5oh/datasize"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
