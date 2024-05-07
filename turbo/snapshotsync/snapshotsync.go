@@ -131,6 +131,8 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 		var err error
 		var kind string
 		if shouldUseStepsForPruning(name) {
+			// ParseFileName does not support state snapshots
+
 			// parse "from" (0) and "to" (64) from the name
 			// parse the snapshot "kind". e.g kind of 'idx/v1-accounts.0-64.ef' is "idx/v1-accounts"
 			rangeString := strings.Split(name, ".")[1]
@@ -149,17 +151,12 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 			// e.g 'v1-000000-000100-beaconblocks.seg'
 			// parse "from" (000000) and "to" (000100) from the name. 100 is 100'000 blocks
 			minusSplit := strings.Split(name, "-")
-			// convert the range to uint64
-			from, err = strconv.ParseUint(minusSplit[1], 10, 64)
-			if err != nil {
-				return nil, err
+			s, _, ok := snaptype.ParseFileName("", name)
+			if !ok {
+				continue
 			}
-			to, err = strconv.ParseUint(minusSplit[2], 10, 64)
-			if err != nil {
-				return nil, err
-			}
-			from *= 1000
-			to *= 1000
+			to = s.To
+			from = s.From
 			kind = minusSplit[3]
 		}
 		blackList[p.Name] = struct{}{} // Add all of them to the blacklist and remove the ones that are not blacklisted later.
@@ -233,7 +230,7 @@ func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error)
 		if !strings.HasPrefix(p.Name, "domain") {
 			continue
 		}
-		s, _, ok := snaptype.ParseFileName("tmp", p.Name)
+		s, _, ok := snaptype.ParseFileName("", p.Name)
 		if !ok {
 			continue
 		}
