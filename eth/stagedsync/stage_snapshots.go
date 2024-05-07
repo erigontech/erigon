@@ -536,6 +536,7 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 	if err != nil {
 		return err
 	}
+	defer tx.Rollback()
 	// Prune snapshots if necessary (remove .segs or idx files appropriatelly)
 	headNumber := cfg.blockReader.FrozenBlocks()
 	executionProgress, err := stages.GetStageProgress(tx, stages.Execution)
