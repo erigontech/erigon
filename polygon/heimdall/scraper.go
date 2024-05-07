@@ -9,6 +9,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
 type Scraper struct {
@@ -50,25 +51,6 @@ func NewScraper(
 		pollDelay: pollDelay,
 		logger:    logger,
 	}
-}
-
-type entityStore interface {
-	GetLastEntityId(ctx context.Context) (uint64, bool, error)
-	PutEntity(ctx context.Context, id uint64, entity any) error
-}
-
-type EntityIdRange struct {
-	Start uint64
-	End   uint64
-}
-
-func (r EntityIdRange) Len() uint64 {
-	return r.End + 1 - r.Start
-}
-
-type entityFetcher interface {
-	FetchLastEntityId(ctx context.Context) (uint64, error)
-	FetchEntitiesRange(ctx context.Context, idRange EntityIdRange) ([]any, error)
 }
 
 func (s *Scraper) syncEntity(
@@ -115,6 +97,63 @@ func (s *Scraper) syncEntity(
 		}
 	}
 	return ctx.Err()
+}
+
+func newCheckpointStore(tx kv.RwTx, reader services.BorCheckpointReader) entityStore {
+	return newGenericEntityStore[Checkpoint](tx, kv.BorCheckpoints, reader.LastCheckpointId, reader.Checkpoint)
+}
+
+func newMilestoneStore(tx kv.RwTx, reader services.BorMilestoneReader) entityStore {
+	return newGenericEntityStore[Milestone](tx, kv.BorMilestones, reader.LastMilestoneId, reader.Milestone)
+}
+
+func newSpanStore(tx kv.RwTx, reader services.BorSpanReader) entityStore {
+	return newGenericEntityStore[Span](tx, kv.BorSpans, reader.LastSpanId, reader.Span)
+}
+
+func newCheckpointFetcher(client HeimdallClient, logger log.Logger) entityFetcher {
+	return newGenericEntityFetcher[Checkpoint](
+		"CheckpointFetcher",
+		client.FetchCheckpointCount,
+		client.FetchCheckpoint,
+		client.FetchCheckpoints,
+		func(entity *Checkpoint) uint64 { return entity.StartBlock().Uint64() },
+		logger,
+	)
+}
+
+func newMilestoneFetcher(client HeimdallClient, logger log.Logger) entityFetcher {
+	return newGenericEntityFetcher[Milestone](
+		"MilestoneFetcher",
+		client.FetchMilestoneCount,
+		client.FetchMilestone,
+		nil,
+		func(entity *Milestone) uint64 { return entity.StartBlock().Uint64() },
+		logger,
+	)
+}
+
+func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher {
+	fetchLastSpanId := func(ctx context.Context) (int64, error) {
+		span, err := client.FetchLatestSpan(ctx)
+		if err != nil {
+			return 0, err
+		}
+		return int64(span.Id), nil
+	}
+
+	fetchSpan := func(ctx context.Context, id int64) (*Span, error) {
+		return client.FetchSpan(ctx, uint64(id))
+	}
+
+	return newGenericEntityFetcher[Span](
+		"SpanFetcher",
+		fetchLastSpanId,
+		fetchSpan,
+		nil,
+		func(entity *Span) uint64 { return entity.StartBlock },
+		logger,
+	)
 }
 
 func (s *Scraper) Run(parentCtx context.Context) error {

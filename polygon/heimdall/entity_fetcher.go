@@ -10,6 +10,11 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+type entityFetcher interface {
+	FetchLastEntityId(ctx context.Context) (uint64, error)
+	FetchEntitiesRange(ctx context.Context, idRange EntityIdRange) ([]any, error)
+}
+
 type genericEntityFetcher[TEntity entity] struct {
 	name string
 
@@ -19,51 +24,6 @@ type genericEntityFetcher[TEntity entity] struct {
 	getStartBlockNum  func(entity *TEntity) uint64
 
 	logger log.Logger
-}
-
-func newCheckpointFetcher(client HeimdallClient, logger log.Logger) entityFetcher {
-	return newGenericEntityFetcher[Checkpoint](
-		"CheckpointFetcher",
-		client.FetchCheckpointCount,
-		client.FetchCheckpoint,
-		client.FetchCheckpoints,
-		func(entity *Checkpoint) uint64 { return entity.StartBlock().Uint64() },
-		logger,
-	)
-}
-
-func newMilestoneFetcher(client HeimdallClient, logger log.Logger) entityFetcher {
-	return newGenericEntityFetcher[Milestone](
-		"MilestoneFetcher",
-		client.FetchMilestoneCount,
-		client.FetchMilestone,
-		nil,
-		func(entity *Milestone) uint64 { return entity.StartBlock().Uint64() },
-		logger,
-	)
-}
-
-func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher {
-	fetchLastSpanId := func(ctx context.Context) (int64, error) {
-		span, err := client.FetchLatestSpan(ctx)
-		if err != nil {
-			return 0, err
-		}
-		return int64(span.Id), nil
-	}
-
-	fetchSpan := func(ctx context.Context, id int64) (*Span, error) {
-		return client.FetchSpan(ctx, uint64(id))
-	}
-
-	return newGenericEntityFetcher[Span](
-		"SpanFetcher",
-		fetchLastSpanId,
-		fetchSpan,
-		nil,
-		func(entity *Span) uint64 { return entity.StartBlock },
-		logger,
-	)
 }
 
 func newGenericEntityFetcher[TEntity entity](
