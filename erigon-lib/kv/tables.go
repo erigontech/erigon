@@ -637,11 +637,11 @@ var ChaindataTables = []string{
 	TblCommitmentHistoryVals,
 	TblCommitmentIdx,
 
-	//TblGasUsedKeys,
-	//TblGasUsedVals,
-	//TblGasUsedHistoryKeys,
-	//TblGasUsedHistoryVals,
-	//TblGasUsedIdx,
+	TblGasUsedKeys,
+	TblGasUsedVals,
+	TblGasUsedHistoryKeys,
+	TblGasUsedHistoryVals,
+	TblGasUsedIdx,
 
 	TblLogAddressKeys,
 	TblLogAddressIdx,
