@@ -335,7 +335,7 @@ func enable2935(jt *JumpTable) {
 		execute:     opBlockhash2935,
 		constantGas: GasExtStep,
 		dynamicGas:  gasOpBlockhashEIP2935,
-		numPop:      0,
+		numPop:      1,
 		numPush:     1,
 	}
 }
