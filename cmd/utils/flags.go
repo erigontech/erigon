@@ -1848,7 +1848,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		cfg.OverridePragueTime = flags.GlobalBig(ctx, OverridePragueFlag.Name)
 	}
 
-	if ctx.IsSet(ExternalConsensusFlag.Name) && clparams.EmbeddedSupported(cfg.NetworkID) {
+	if clparams.EmbeddedSupported(cfg.NetworkID) {
 		cfg.InternalCL = !ctx.Bool(ExternalConsensusFlag.Name)
 	}
 
