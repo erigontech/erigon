@@ -389,6 +389,13 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 		}
 		if sd.sdCtx != nil && sd.sdCtx.account != nil {
 			sd.sdCtx.account[string(apkBuf)] = value
+			codeToCache, _, err := sd.DomainGet(kv.CodeDomain, apkBuf, nil)
+			if err != nil {
+				return nil, err
+			}
+			if codeToCache != nil {
+				sd.sdCtx.code[string(apkBuf)] = codeToCache
+			}
 		}
 		return apkBuf, nil
 	})
@@ -1011,10 +1018,6 @@ func (sdc *SharedDomainsCommitmentContext) GetAccount(plainKey []byte, cell *com
 			copy(cell.CodeHash[:], chash)
 		}
 	}
-	//if cell.CodeHash == commitment.EmptyCodeHashArray {
-	//	cell.Delete = len(encAccount) == 0
-	//	return nil
-	//}
 
 	code, cached := sdc.code[string(plainKey)]
 	if !cached {
