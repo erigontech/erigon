@@ -236,7 +236,9 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 	return gasFunc
 }
 
-// gasOpBlockhashEIP2935 returns the max possible gas here, and refund the rest at its execute function
+// gasOpBlockhashEIP2935 returns the gas for the new BLOCKHASH operation post EIP-2935
+// If arg is outside of the params.BlockHashHistoryServeWindow, zero dynamic gas is returned
+// EIP-2929 Cold/Warm storage read cost is applicable here similar to SLOAD
 func gasOpBlockhashEIP2935(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	arg := stack.Peek()
 	arg64, overflow := arg.Uint64WithOverflow()
