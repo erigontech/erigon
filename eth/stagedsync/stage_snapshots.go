@@ -484,7 +484,11 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 
 				return nil
 			}, func() error {
-				return pruneBlockSnapshots(ctx, cfg, logger)
+				filesDeleted, err := pruneBlockSnapshots(ctx, cfg, logger)
+				if filesDeleted && cfg.notifier != nil {
+					cfg.notifier.Events.OnNewSnapshot()
+				}
+				return err
 			})
 
 			//cfg.agg.BuildFilesInBackground()
@@ -530,22 +534,21 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 	return nil
 }
 
-func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logger) error {
-
+func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logger) (bool, error) {
 	tx, err := cfg.db.BeginRo(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer tx.Rollback()
 	// Prune snapshots if necessary (remove .segs or idx files appropriatelly)
 	headNumber := cfg.blockReader.FrozenBlocks()
 	executionProgress, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
-		return err
+		return false, err
 	}
 	// If we are behind the execution stage, we should not prune snapshots
 	if headNumber > executionProgress || !cfg.syncConfig.SnapshotPrune {
-		return nil
+		return false, nil
 	}
 
 	// Keep at least 2 block snapshots as we do not want FrozenBlocks to be 0
@@ -561,7 +564,7 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 	}
 
 	snapshotFileNames := cfg.blockReader.FrozenFiles()
-
+	filesDeleted := false
 	// Prune blocks snapshots if necessary
 	for _, file := range snapshotFileNames {
 		if !cfg.syncConfig.SnapshotPrune || headNumber == 0 || !strings.Contains(file, "transactions") {
@@ -581,14 +584,15 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 		}
 		if cfg.snapshotDownloader != nil {
 			if _, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: []string{file}}); err != nil {
-				return err
+				return filesDeleted, err
 			}
 		}
 		if err := cfg.blockReader.Snapshots().Delete(file); err != nil {
-			return err
+			return filesDeleted, err
 		}
+		filesDeleted = true
 	}
-	return nil
+	return filesDeleted, nil
 }
 
 type uploadState struct {
