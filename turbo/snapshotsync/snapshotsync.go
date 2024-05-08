@@ -149,7 +149,10 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 			// e.g 'v1-000000-000100-beaconblocks.seg'
 			// parse "from" (000000) and "to" (000100) from the name. 100 is 100'000 blocks
 			minusSplit := strings.Split(name, "-")
-			s, _, _ := snaptype.ParseFileName("tmp", name)
+			s, _, ok := snaptype.ParseFileName("", name)
+			if !ok {
+				continue
+			}
 			from = s.From
 			to = s.To
 			kind = minusSplit[3]
