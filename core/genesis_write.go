@@ -459,6 +459,13 @@ func TestGenesisBlock() *types.Genesis {
 	return &types.Genesis{Config: params.TestChainConfig}
 }
 
+func InteropGenesisBlock() *types.Genesis {
+	return &types.Genesis{
+		Config: params.InteropChainConfig,
+		Alloc:  readPrealloc("allocs/interop.json"),
+	}
+}
+
 // Pre-calculated version of:
 //
 //	DevnetSignPrivateKey = crypto.HexToECDSA(sha256.Sum256([]byte("erigon devnet key")))
