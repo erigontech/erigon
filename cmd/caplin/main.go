@@ -56,7 +56,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		log.Error("[Phase1] Could not initialize caplin", "err", err)
 		return err
 	}
-	if _, _, err := debug.Setup(cliCtx, true /* root logger */); err != nil {
+	if _, _, _, err := debug.Setup(cliCtx, true /* root logger */); err != nil {
 		return err
 	}
 	rcfg := beacon_router_configuration.RouterConfiguration{
@@ -138,9 +138,9 @@ func runCaplinNode(cliCtx *cli.Context) error {
 
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
 	return caplin1.RunCaplinPhase1(ctx, executionEngine, &ethconfig.Config{
-		LightClientDiscoveryAddr:    cfg.Addr,
-		LightClientDiscoveryPort:    uint64(cfg.Port),
-		LightClientDiscoveryTCPPort: uint64(cfg.ServerTcpPort),
-		BeaconRouter:                rcfg,
+		CaplinDiscoveryAddr:    cfg.Addr,
+		CaplinDiscoveryPort:    uint64(cfg.Port),
+		CaplinDiscoveryTCPPort: uint64(cfg.ServerTcpPort),
+		BeaconRouter:           rcfg,
 	}, cfg.NetworkCfg, cfg.BeaconCfg, ethClock, state, cfg.Dirs, nil, nil, false, false, false, indiciesDB, blobStorage, nil, blockSnapBuildSema)
 }

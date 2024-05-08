@@ -1056,6 +1056,7 @@ func (ht *HistoryRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 	var (
 		seek     = make([]byte, 8, 256)
 		valsCDup kv.RwCursorDupSort
+		valsC    kv.RwCursor
 		err      error
 	)
 
@@ -1065,6 +1066,12 @@ func (ht *HistoryRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 			return nil, err
 		}
 		defer valsCDup.Close()
+	} else {
+		valsC, err = rwTx.RwCursor(ht.h.historyValsTable)
+		if err != nil {
+			return nil, err
+		}
+		defer valsC.Close()
 	}
 
 	pruneValue := func(k, txnm []byte) error {
@@ -1075,7 +1082,7 @@ func (ht *HistoryRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 
 		if ht.h.historyLargeValues {
 			seek = append(append(seek[:0], k...), txnm...)
-			if err := rwTx.Delete(ht.h.historyValsTable, seek); err != nil {
+			if err := valsC.Delete(seek); err != nil {
 				return err
 			}
 		} else {
