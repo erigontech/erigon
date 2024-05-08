@@ -88,11 +88,15 @@ func adjustBlockPrune(blocks, minBlocksToDownload uint) uint {
 	if minBlocksToDownload < snaptype.Erigon2MergeLimit {
 		minBlocksToDownload = snaptype.Erigon2MergeLimit
 	}
-	if blocks > minBlocksToDownload {
+	if blocks < minBlocksToDownload {
 		blocks = minBlocksToDownload
 	}
+	if blocks%snaptype.Erigon2MergeLimit == 0 {
+		return blocks
+	}
+	ret := blocks + snaptype.Erigon2MergeLimit
 	// round to nearest multiple of 64. if less than 64, round to 64
-	return blocks
+	return ret - ret%snaptype.Erigon2MergeLimit
 }
 
 func shouldUseStepsForPruning(name string) bool {
@@ -178,14 +182,12 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 			} else if prunedDistance >= uint64(blockPrune) {
 				break
 			}
-
-			if snapshot.stepBased {
-				delete(blackList, snapshot.name)
-				prunedDistance += snapshot.to - snapshot.from
-				continue
-			}
 			delete(blackList, snapshot.name)
 			prunedDistance += snapshot.to - snapshot.from
+			if snapshot.stepBased {
+				continue
+			}
+
 		}
 	}
 	return blackList, nil

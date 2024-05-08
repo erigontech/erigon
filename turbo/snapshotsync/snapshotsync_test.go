@@ -16,7 +16,7 @@ func TestBlackListForPruning(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Prune 64 steps and contain at least all the blocks
-	blackList, err := buildBlackListForPruning(true, 64, 19_000_000, 100_000, preverified)
+	blackList, err := buildBlackListForPruning(true, 64, 100_000, 19_000_000, preverified)
 	if err != nil {
 		t.Fatal(err)
 	}
