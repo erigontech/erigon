@@ -724,11 +724,9 @@ func (s *RoSnapshots) buildMissedIndicesIfNeed(ctx context.Context, logPrefix st
 	return nil
 }
 
-func (s *RoSnapshots) Delete(fileName string) error {
-	if s == nil {
-		return nil
-	}
-	s.lockSegments()
+func (s *RoSnapshots) delete(fileName string) error {
+	v := s.View()
+	defer v.Close()
 
 	_, fName := filepath.Split(fileName)
 	var err error
@@ -753,8 +751,14 @@ func (s *RoSnapshots) Delete(fileName string) error {
 		}
 		return true
 	})
-	s.unlockSegments()
-	if err != nil {
+	return err
+}
+
+func (s *RoSnapshots) Delete(fileName string) error {
+	if s == nil {
+		return nil
+	}
+	if err := s.delete(fileName); err != nil {
 		return fmt.Errorf("can't delete file: %w", err)
 	}
 	return s.ReopenFolder()
