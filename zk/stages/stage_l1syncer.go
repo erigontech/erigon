@@ -30,9 +30,10 @@ type IL1Syncer interface {
 	GetLastCheckedL1Block() uint64
 
 	// Channels
-	GetLogsChan() chan ethTypes.Log
+	GetLogsChan() chan []ethTypes.Log
 	GetProgressMessageChan() chan string
 
+	L1QueryBlocks(logPrefix string, logs []ethTypes.Log) (map[uint64]*ethTypes.Block, error)
 	GetBlock(number uint64) (*ethTypes.Block, error)
 	Run(lastCheckedBlock uint64)
 }
@@ -130,37 +131,58 @@ func SpawnStageL1Syncer(
 Loop:
 	for {
 		select {
-		case l := <-logsChan:
-			info, batchLogType := parseLogType(cfg.zkCfg.L1RollupId, &l)
-			switch batchLogType {
-			case logSequence:
-				if err := hermezDb.WriteSequence(info.L1BlockNo, info.BatchNo, info.L1TxHash, info.StateRoot); err != nil {
-					return fmt.Errorf("failed to write batch info, %w", err)
+		case logs := <-logsChan:
+			logsForQueryBlocks := make([]ethTypes.Log, 0, len(logs))
+			infos := make([]*types.L1BatchInfo, 0, len(logs))
+			batchLogTypes := make([]BatchLogType, 0, len(logs))
+			for _, l := range logs {
+				info, batchLogType := parseLogType(cfg.zkCfg.L1RollupId, &l)
+				infos = append(infos, &info)
+				batchLogTypes = append(batchLogTypes, batchLogType)
+				if batchLogType == logL1InfoTreeUpdate {
+					logsForQueryBlocks = append(logsForQueryBlocks, l)
 				}
-				newSequencesCount++
-			case logVerify:
-				if info.BatchNo > highestVerification.BatchNo {
-					highestVerification = info
-				}
-				if err := hermezDb.WriteVerification(info.L1BlockNo, info.BatchNo, info.L1TxHash, info.StateRoot); err != nil {
-					return fmt.Errorf("failed to write verification for block %d, %w", info.L1BlockNo, err)
-				}
-				newVerificationsCount++
-			case logL1InfoTreeUpdate:
-				if latestL1InfoTreeBlockNumber > 0 && l.BlockNumber <= latestL1InfoTreeBlockNumber {
+			}
+
+			blocksMap, err := cfg.syncer.L1QueryBlocks(logPrefix, logsForQueryBlocks)
+			if err != nil {
+				return err
+			}
+
+			for i, l := range logs {
+				info := *infos[i]
+				batchLogType := batchLogTypes[i]
+				switch batchLogType {
+				case logSequence:
+					if err := hermezDb.WriteSequence(info.L1BlockNo, info.BatchNo, info.L1TxHash, info.StateRoot); err != nil {
+						return fmt.Errorf("failed to write batch info, %w", err)
+					}
+					newSequencesCount++
+				case logVerify:
+					if info.BatchNo > highestVerification.BatchNo {
+						highestVerification = info
+					}
+					if err := hermezDb.WriteVerification(info.L1BlockNo, info.BatchNo, info.L1TxHash, info.StateRoot); err != nil {
+						return fmt.Errorf("failed to write verification for block %d, %w", info.L1BlockNo, err)
+					}
+					newVerificationsCount++
+				case logL1InfoTreeUpdate:
+					if latestL1InfoTreeBlockNumber > 0 && l.BlockNumber <= latestL1InfoTreeBlockNumber {
+						continue
+					}
+					block := blocksMap[l.BlockNumber]
+					latestL1InfoTreeUpdate, err = HandleL1InfoTreeUpdate(cfg.syncer, hermezDb, l, latestL1InfoTreeUpdate, found, block)
+					if err != nil {
+						return err
+					}
+					found = true
+					infoTreeUpdates++
+					latestL1InfoTreeBlockNumber = l.BlockNumber
+				case logIncompatible:
 					continue
+				default:
+					log.Warn("L1 Syncer unknown topic", "topic", l.Topics[0])
 				}
-				latestL1InfoTreeUpdate, err = HandleL1InfoTreeUpdate(cfg.syncer, hermezDb, l, latestL1InfoTreeUpdate, found)
-				if err != nil {
-					return err
-				}
-				found = true
-				infoTreeUpdates++
-				latestL1InfoTreeBlockNumber = l.BlockNumber
-			case logIncompatible:
-				continue
-			default:
-				log.Warn("L1 Syncer unknown topic", "topic", l.Topics[0])
 			}
 		case progressMessage := <-progressMessageChan:
 			log.Info(fmt.Sprintf("[%s] %s", logPrefix, progressMessage))

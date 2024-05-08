@@ -32,6 +32,7 @@ type Zk struct {
 	SequencerNonEmptyBatchSealTime         time.Duration
 	ExecutorUrls                           []string
 	ExecutorStrictMode                     bool
+	L1QueryBlocksThreads                   uint64
 	AllowFreeTransactions                  bool
 	AllowPreEIP155Transactions             bool
 	EffectiveGasPriceForEthTransfer        uint8

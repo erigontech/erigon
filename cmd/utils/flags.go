@@ -491,6 +491,11 @@ var (
 		Usage: "Define the host used for the zkevm data stream",
 		Value: "",
 	}
+	L1QueryBlocksThreads = cli.Uint64Flag{
+		Name:  "zkevm.l1-query-blocks-threads",
+		Usage: "Define the number of threads used to query blocks from L1",
+		Value: 1,
+	}
 	AllowFreeTransactions = cli.BoolFlag{
 		Name:  "zkevm.allow-free-transactions",
 		Usage: "Allow the sequencer to proceed transactions with 0 gas price",

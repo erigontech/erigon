@@ -782,6 +782,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			l1Topics,
 			cfg.L1BlockRange,
 			cfg.L1QueryDelay,
+			cfg.L1QueryBlocksThreads,
 		)
 
 		if isSequencer {
@@ -829,6 +830,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				[][]libcommon.Hash{{contracts.SequenceBatchesTopic}},
 				cfg.L1BlockRange,
 				cfg.L1QueryDelay,
+				cfg.L1QueryBlocksThreads,
 			)
 
 			backend.syncStages = stages2.NewSequencerZkStages(

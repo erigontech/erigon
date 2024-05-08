@@ -190,6 +190,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.SequencerNonEmptyBatchSealTime,
 	&utils.ExecutorUrls,
 	&utils.ExecutorStrictMode,
+	&utils.L1QueryBlocksThreads,
 	&utils.AllowFreeTransactions,
 	&utils.AllowPreEIP155Transactions,
 	&utils.EffectiveGasPriceForEthTransfer,
