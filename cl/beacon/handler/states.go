@@ -173,7 +173,7 @@ func (a *ApiHandler) getFullState(w http.ResponseWriter, r *http.Request) (*beac
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}
-
+	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
 	state, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot, true)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
@@ -201,10 +201,10 @@ func (a *ApiHandler) getFullState(w http.ResponseWriter, r *http.Request) (*beac
 		if state == nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read state: %x", blockRoot))
 		}
-		return newBeaconResponse(state).WithFinalized(true).WithVersion(state.Version()), nil
+		return newBeaconResponse(state).WithFinalized(true).WithVersion(state.Version()).WithOptimistic(isOptimistic), nil
 	}
 
-	return newBeaconResponse(state).WithFinalized(false).WithVersion(state.Version()), nil
+	return newBeaconResponse(state).WithFinalized(false).WithVersion(state.Version()).WithOptimistic(isOptimistic), nil
 }
 
 type finalityCheckpointsResponse struct {
