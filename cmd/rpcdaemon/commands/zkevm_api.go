@@ -28,7 +28,6 @@ import (
 	"github.com/ledgerwatch/erigon/zk/syncer"
 	"github.com/ledgerwatch/erigon/zk/witness"
 	"github.com/ledgerwatch/erigon/zkevm/hex"
-	"github.com/ledgerwatch/erigon/zkevm/jsonrpc/client"
 )
 
 var sha3UncleHash = common.HexToHash("0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347")
@@ -222,14 +221,132 @@ func (api *ZkEvmAPIImpl) VerifiedBatchNumber(ctx context.Context) (hexutil.Uint6
 // GetBatchByNumber returns a batch from the current canonical chain. If number is nil, the
 // latest known batch is returned.
 func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.BlockNumber, fullTx *bool) (json.RawMessage, error) {
-	res, err := client.JSONRPCCall(api.ethApi.ZkRpcUrl, "zkevm_getBatchByNumber", batchNumber, fullTx)
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	hermezDb := hermez_db.NewHermezDbReader(tx)
+
+	// looks weird but we're using the rpc.BlockNumber type to represent the batch number, LatestBlockNumber represents latest batch
+	if batchNumber == rpc.LatestBlockNumber {
+		highestBlock, err := rawdb.ReadLastBlockSynced(tx)
+		if err != nil {
+			return nil, err
+		}
+		highestBatchNo, err := hermezDb.GetBatchNoByL2Block(highestBlock.NumberU64())
+		if err != nil {
+			return nil, err
+		}
+		batchNumber = rpc.BlockNumber(highestBatchNo)
+	}
+
+	bn := uint64(batchNumber.Int64())
+
+	batch := &types.Batch{
+		Number: types.ArgUint64(bn),
+	}
+
+	// highest block in batch
+	blockNo, err := hermezDb.GetHighestBlockInBatch(bn)
 	if err != nil {
 		return nil, err
 	}
 
-	return res.Result, nil
+	block, err := api.ethApi.BaseAPI.blockByNumberWithSenders(tx, blockNo)
+	if err != nil {
+		return nil, err
+	}
 
-	// TODO: implement this when we get to sequencer activities in erigon
+	// last block in batch data
+	batch.Coinbase = block.Coinbase()
+	batch.StateRoot = block.Root()
+	batch.Timestamp = types.ArgUint64(block.Time())
+
+	// block numbers in batch
+	blocksInBatch, err := hermezDb.GetL2BlockNosByBatch(bn)
+	if err != nil {
+		return nil, err
+	}
+
+	// collect blocks in batch
+	batch.Blocks = []interface{}{}
+	batch.Transactions = []interface{}{}
+	// handle genesis - not in the hermez tables so requires special treament
+	if batchNumber == 0 {
+		blk, err := api.ethApi.BaseAPI.blockByNumberWithSenders(tx, 0)
+		if err != nil {
+			return nil, err
+		}
+		batch.Blocks = append(batch.Blocks, blk.Hash())
+		// no txs in genesis
+	}
+	for _, blkNo := range blocksInBatch {
+		blk, err := api.ethApi.BaseAPI.blockByNumberWithSenders(tx, blkNo)
+		if err != nil {
+			return nil, err
+		}
+		batch.Blocks = append(batch.Blocks, blk.Hash())
+		for _, btx := range blk.Transactions() {
+			batch.Transactions = append(batch.Transactions, btx.Hash())
+		}
+	}
+
+	// global exit root of batch
+	ger, err := hermezDb.GetBatchGlobalExitRoot(bn)
+	if err != nil {
+		return nil, err
+	}
+	if ger != nil {
+		batch.GlobalExitRoot = ger.GlobalExitRoot
+	}
+
+	// sequence
+	seq, err := hermezDb.GetSequenceByBatchNo(bn)
+	if err != nil {
+		return nil, err
+	}
+	if seq != nil {
+		batch.SendSequencesTxHash = &seq.L1TxHash
+	}
+	batch.Closed = seq != nil || bn == 0 || bn == 1 // sequenced, genesis or injected batch 1 - special batches 0,1 will always be closed
+
+	// verification
+	ver, err := hermezDb.GetVerificationByBatchNo(bn)
+	if err != nil {
+		return nil, err
+	}
+	if ver != nil {
+		batch.VerifyBatchTxHash = &ver.L1TxHash
+	}
+
+	// batch l2 data
+	batchL2Data, err := hermezDb.GetL1BatchData(bn)
+	if err != nil {
+		return nil, err
+	}
+	batch.BatchL2Data = batchL2Data
+
+	// exit roots
+	infoTreeUpdate, err := hermezDb.GetL1InfoTreeUpdateByGer(batch.GlobalExitRoot)
+	if err != nil {
+		return nil, err
+	}
+	if infoTreeUpdate != nil {
+		batch.MainnetExitRoot = infoTreeUpdate.MainnetExitRoot
+		batch.RollupExitRoot = infoTreeUpdate.RollupExitRoot
+	}
+
+	// currently gives 'error execution reverted' when calling the L1
+	//oaih, err := api.l1Syncer.GetOldAccInputHash(ctx, &api.config.AddressRollup, ApiRollupId, bn+1)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//batch.AccInputHash = oaih
+
+	//batch.LocalExitRoot = ver.LocalExitRoot
+
+	return populateBatchDetails(batch)
 }
 
 // GetFullBlockByNumber returns a full block from the current canonical chain. If number is nil, the
@@ -778,4 +895,44 @@ func convertReceipt(
 		Type:              types.ArgUint64(r.Type),
 		EffectiveGasPrice: effectiveGasPrice,
 	}
+}
+
+func populateBatchDetails(batch *types.Batch) (json.RawMessage, error) {
+	jBatch := map[string]interface{}{}
+	jBatch["number"] = batch.Number
+	jBatch["coinbase"] = batch.Coinbase
+	jBatch["stateRoot"] = batch.StateRoot
+	jBatch["timestamp"] = batch.Timestamp
+	jBatch["blocks"] = batch.Blocks
+	jBatch["transactions"] = batch.Transactions
+	if batch.GlobalExitRoot != (common.Hash{}) {
+		jBatch["globalExitRoot"] = batch.GlobalExitRoot
+	}
+	if batch.ForcedBatchNumber != nil {
+		jBatch["forcedBatchNumber"] = batch.ForcedBatchNumber
+	}
+	if batch.MainnetExitRoot != (common.Hash{}) {
+		jBatch["mainnetExitRoot"] = batch.MainnetExitRoot
+	}
+	if batch.RollupExitRoot != (common.Hash{}) {
+		jBatch["rollupExitRoot"] = batch.RollupExitRoot
+	}
+	if batch.LocalExitRoot != (common.Hash{}) {
+		jBatch["localExitRoot"] = batch.LocalExitRoot
+	}
+	if batch.AccInputHash != (common.Hash{}) {
+		jBatch["accInputHash"] = batch.AccInputHash
+	}
+	if batch.SendSequencesTxHash != nil {
+		jBatch["sendSequencesTxHash"] = batch.SendSequencesTxHash
+	}
+	if batch.VerifyBatchTxHash != nil {
+		jBatch["verifyBatchTxHash"] = batch.VerifyBatchTxHash
+	}
+	jBatch["closed"] = batch.Closed
+	if len(batch.BatchL2Data) > 0 {
+		jBatch["batchL2Data"] = batch.BatchL2Data
+	}
+
+	return json.Marshal(jBatch)
 }

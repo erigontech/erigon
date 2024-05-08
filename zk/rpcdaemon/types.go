@@ -316,26 +316,6 @@ func NewBlock(b *types.Block, receipts []types.Receipt, fullTx, includeReceipts 
 	return res, nil
 }
 
-// Batch structure
-type Batch struct {
-	Number              ArgUint64      `json:"number"`
-	ForcedBatchNumber   *ArgUint64     `json:"forcedBatchNumber,omitempty"`
-	Coinbase            common.Address `json:"coinbase"`
-	StateRoot           common.Hash    `json:"stateRoot"`
-	GlobalExitRoot      common.Hash    `json:"globalExitRoot"`
-	MainnetExitRoot     common.Hash    `json:"mainnetExitRoot"`
-	RollupExitRoot      common.Hash    `json:"rollupExitRoot"`
-	LocalExitRoot       common.Hash    `json:"localExitRoot"`
-	AccInputHash        common.Hash    `json:"accInputHash"`
-	Timestamp           ArgUint64      `json:"timestamp"`
-	SendSequencesTxHash *common.Hash   `json:"sendSequencesTxHash"`
-	VerifyBatchTxHash   *common.Hash   `json:"verifyBatchTxHash"`
-	Closed              bool           `json:"closed"`
-	Blocks              []interface{}  `json:"blocks"`
-	Transactions        []interface{}  `json:"transactions"`
-	BatchL2Data         ArgBytes       `json:"batchL2Data"`
-}
-
 // TransactionOrHash for union type of transaction and types.Hash
 type TransactionOrHash struct {
 	Hash *common.Hash
