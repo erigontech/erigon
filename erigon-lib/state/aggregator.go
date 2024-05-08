@@ -179,7 +179,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	cfg = domainCfg{
 		hist: histCfg{
 			iiCfg:             iiCfg{salt: salt, dirs: dirs},
-			withLocalityIndex: false, withExistenceIndex: false, compression: CompressKeys | CompressVals, historyLargeValues: false,
+			withLocalityIndex: false, withExistenceIndex: false, historyLargeValues: false,
 		},
 	}
 	if a.d[kv.GasUsedDomain], err = NewDomain(cfg, aggregationStep, "gasused", kv.TblGasUsedKeys, kv.TblGasUsedVals, kv.TblGasUsedHistoryKeys, kv.TblGasUsedHistoryVals, kv.TblGasUsedIdx, logger); err != nil {
@@ -807,19 +807,20 @@ func (ac *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 	// On tip-of-chain timeout is about `3sec`
 	//  On tip of chain:     must be real-time - prune by small batches and prioritize exact-`timeout`
 	//  Not on tip of chain: must be aggressive (prune as much as possible) by bigger batches
-	aggressivePrune := timeout >= 1*time.Minute
+
+	furiousPrune := timeout > 5*time.Hour
+	aggressivePrune := !furiousPrune && timeout >= 1*time.Minute
 
 	var pruneLimit uint64 = 1_000
 	var withWarmup bool = false //nolint
-	/* disabling this feature for now - seems it doesn't cancel even after prune finished
-	if timeout >= 1*time.Minute {
+	if furiousPrune {
+		pruneLimit = 1_000_000
+		/* disabling this feature for now - seems it doesn't cancel even after prune finished
 		// start from a bit high limit to give time for warmup
 		// will disable warmup after first iteration and will adjust pruneLimit based on `time`
-		pruneLimit = 100_000
 		withWarmup = true
+		*/
 	}
-	withWarmup = false // disabling this feature for now - seems it doesn't cancel even after prune finished
-	*/
 
 	started := time.Now()
 	localTimeout := time.NewTicker(timeout)

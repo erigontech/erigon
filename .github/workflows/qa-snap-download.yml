@@ -7,7 +7,8 @@ on:
 
 jobs:
   long-running-test:
-    runs-on: self-hosted
+    runs-on: [self-hosted, Erigon3]
+    timeout-minutes: 600
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
@@ -18,9 +19,10 @@ jobs:
     - name: Check out repository
       uses: actions/checkout@v4
 
-    - name: Clean Erigon Build Directory
+    - name: Clean Erigon Build & Data Directories
       run: |
         make clean
+        rm -rf $ERIGON_DATA_DIR
 
     - name: Build Erigon
       run: |
@@ -35,24 +37,22 @@ jobs:
       id: test_step
       run: |
         set +e # Disable exit on error
-        
+             
         # Run Erigon, monitor snapshot downloading and check logs
         python3 $ERIGON_QA_PATH/test_system/qa-tests/snap-download/run_and_check_snap_download.py ${{ github.workspace }}/build/bin $ERIGON_DATA_DIR $TOTAL_TIME_SECONDS
   
         # Capture monitoring script exit status
         test_exit_status=$?
         
+        # Save the subsection reached status
+        echo "::set-output name=test_executed::true"
+        
         # Clean up Erigon process if it's still running
         if kill -0 $ERIGON_PID 2> /dev/null; then
           echo "Terminating Erigon"
           kill $ERIGON_PID
           wait $ERIGON_PID
-        else
-          echo "Erigon has already terminated"
         fi
-        
-        # Clean up Erigon build and data directories
-        rm -rf $ERIGON_DATA_DIR
         
         # Check test runner script exit status
         if [ $test_exit_status -eq 0 ]; then
@@ -63,18 +63,23 @@ jobs:
           echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
         fi
 
+    - name: Clean up Erigon data directory
+      if: always()
+      run: |
+        rm -rf $ERIGON_DATA_DIR
+
     - name: Resume the Erigon instance dedicated to db maintenance
       run: |
         python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
 
     - name: Save test results
-      if: always()
+      if: steps.test_step.outputs.test_executed == 'true'
       env:
         TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
       run: python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --test_name snap-download --outcome $TEST_RESULT --result_file ${{ github.workspace }}/result.json
 
     - name: Upload test results
-      if: always()
+      if: steps.test_step.outputs.test_executed == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: test-results

@@ -65,7 +65,7 @@ import (
 	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
 	rpcsentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinelproto"
 	protosentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
-	txpoolproto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
 	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
@@ -906,6 +906,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			logger, backend.sentriesClient.Hd, executionRpc,
 			backend.sentriesClient.Bd, backend.sentriesClient.BroadcastNewBlock, backend.sentriesClient.SendBodyRequest, blockReader,
 			backend.chainDB, chainConfig, tmpdir, config.Sync),
+		config.InternalCL,
 		false,
 		config.Miner.EnabledPOS)
 	backend.engineBackendRPC = engineBackendRPC

@@ -153,9 +153,9 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 	activeIndicies := state.GetActiveValidatorsIndices(state.Slot() / beaconConfig.SlotsPerEpoch)
 
 	sentinel, err := service.StartSentinelService(&sentinel.SentinelConfig{
-		IpAddr:         config.LightClientDiscoveryAddr,
-		Port:           int(config.LightClientDiscoveryPort),
-		TCPPort:        uint(config.LightClientDiscoveryTCPPort),
+		IpAddr:         config.CaplinDiscoveryAddr,
+		Port:           int(config.CaplinDiscoveryPort),
+		TCPPort:        uint(config.CaplinDiscoveryTCPPort),
 		NetworkConfig:  networkConfig,
 		BeaconConfig:   beaconConfig,
 		TmpDir:         dirs.Tmp,

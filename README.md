@@ -329,7 +329,7 @@ Engine API.
 
 #### Caplin's Usage.
 
-Caplin can be enabled through the `--internalcl` flag. from that point on, an external Consensus Layer will not be need
+Caplin is be enabled by default. to disable it and enable the Engine API, use the `--externalcl` flag. from that point on, an external Consensus Layer will not be need
 anymore.
 
 Caplin also has an archivial mode for historical states and blocks. it can be enabled through the `--caplin.archive`
@@ -588,7 +588,13 @@ node.
 | sentinel  | 4000 | UDP      | Peering | Public        |
 | sentinel  | 4001 | TCP      | Peering | Public        |
 
-If you are using `--internalcl` aka `caplin` as your consensus client, then also look at the chart above
+In order to configure the ports, use:
+
+```
+   --caplin.discovery.addr value                                                    Address for Caplin DISCV5 protocol (default: "127.0.0.1")
+   --caplin.discovery.port value                                                    Port for Caplin DISCV5 protocol (default: 4000)
+   --caplin.discovery.tcpport value                                                 TCP Port for Caplin DISCV5 protocol (default: 4001)
+```
 
 #### `beaconAPI` ports
 
@@ -596,8 +602,6 @@ If you are using `--internalcl` aka `caplin` as your consensus client, then also
 |-----------|------|----------|---------|---------------|
 | REST      | 5555 | TCP      | REST    | Public        |
 
-If you are using `--internalcl` aka `caplin` as your consensus client and `--beacon.api` then also look at the chart
-above
 
 #### `shared` ports
 
