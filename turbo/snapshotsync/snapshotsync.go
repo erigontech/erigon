@@ -70,19 +70,15 @@ func RequestSnapshotsDownload(ctx context.Context, downloadRequest []services.Do
 	return nil
 }
 
-const (
-	MinPruneStep = 64
-)
-
 func adjustStepPrune(steps uint) uint {
-	if steps < MinPruneStep {
-		return MinPruneStep
+	if steps < snaptype.Erigon3SeedableSteps {
+		return snaptype.Erigon3SeedableSteps
 	}
-	if steps%MinPruneStep == 0 {
+	if steps%snaptype.Erigon3SeedableSteps == 0 {
 		return steps
 	}
 	// round to nearest multiple of 64. if less than 64, round to 64
-	return steps + steps%MinPruneStep
+	return steps + steps%snaptype.Erigon3SeedableSteps
 }
 
 func adjustBlockPrune(blocks, minBlocksToDownload uint) uint {
