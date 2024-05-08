@@ -301,7 +301,7 @@ func filterActive(rows []table.Row) []table.Row {
 	filtered := []table.Row{}
 
 	for _, row := range rows {
-		if row[9] == "true" {
+		if row[len(row)-1] == "true" {
 			filtered = append(filtered, row)
 		}
 	}
@@ -313,7 +313,7 @@ func filterInactive(rows []table.Row) []table.Row {
 	filtered := []table.Row{}
 
 	for _, row := range rows {
-		if row[9] == "false" {
+		if row[len(row)-1] == "false" {
 			filtered = append(filtered, row)
 		}
 	}
