@@ -512,6 +512,10 @@ func (f *ForkChoiceStore) IsRootOptimistic(root libcommon.Hash) bool {
 }
 
 func (f *ForkChoiceStore) IsHeadOptimistic() bool {
+	if f.ethClock.GetCurrentEpoch() < f.beaconCfg.BellatrixForkEpoch {
+		return false
+	}
+
 	headState := f.syncedDataManager.HeadState()
 	if headState == nil {
 		return true

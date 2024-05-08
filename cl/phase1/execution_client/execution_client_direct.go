@@ -48,6 +48,7 @@ func (cc *ExecutionClientDirect) NewPayload(ctx context.Context, payload *cltype
 
 	headHeader := cc.chainRW.CurrentHeader(ctx)
 	if headHeader == nil || header.Number.Uint64() > headHeader.Number.Uint64()+1 {
+		// can't validate yet
 		return PayloadStatusNotValidated, nil
 	}
 
@@ -59,11 +60,12 @@ func (cc *ExecutionClientDirect) NewPayload(ctx context.Context, payload *cltype
 	switch status {
 	case execution.ExecutionStatus_BadBlock, execution.ExecutionStatus_InvalidForkchoice:
 		return PayloadStatusInvalidated, fmt.Errorf("bad block")
-	case execution.ExecutionStatus_Busy, execution.ExecutionStatus_MissingSegment:
+	case execution.ExecutionStatus_Busy, execution.ExecutionStatus_MissingSegment, execution.ExecutionStatus_TooFarAway:
 		return PayloadStatusNotValidated, nil
-	default:
+	case execution.ExecutionStatus_Success:
 		return PayloadStatusValidated, nil
 	}
+	return PayloadStatusNone, fmt.Errorf("unexpected status")
 }
 
 func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized libcommon.Hash, head libcommon.Hash, attr *engine_types.PayloadAttributes) ([]byte, error) {
