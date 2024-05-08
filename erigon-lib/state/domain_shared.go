@@ -974,12 +974,13 @@ func (sdc *SharedDomainsCommitmentContext) GetBranch(pref []byte) ([]byte, uint6
 	if sdc.sd.trace {
 		fmt.Printf("[SDC] GetBranch: %x: %x\n", pref, v)
 	}
-	if len(v) == 0 {
-		return nil, 0, nil
-	}
 	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update, if any, so
 	// cache branch until ResetBranchCache called
 	sdc.branches[string(pref)] = cachedBranch{data: v, step: step}
+
+	if len(v) == 0 {
+		return nil, 0, nil
+	}
 	return v, step, nil
 }
 
@@ -992,9 +993,13 @@ func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte,
 }
 
 func (sdc *SharedDomainsCommitmentContext) GetAccount(plainKey []byte, cell *commitment.Cell) error {
-	encAccount, _, err := sdc.sd.DomainGet(kv.AccountsDomain, plainKey, nil)
-	if err != nil {
-		return fmt.Errorf("GetAccount failed: %w", err)
+	var err error
+	encAccount, cached := sdc.account[string(plainKey)]
+	if !cached {
+		encAccount, _, err = sdc.sd.DomainGet(kv.AccountsDomain, plainKey, nil)
+		if err != nil {
+			return fmt.Errorf("GetAccount failed: %w", err)
+		}
 	}
 	cell.Nonce = 0
 	cell.Balance.Clear()
@@ -1006,10 +1011,18 @@ func (sdc *SharedDomainsCommitmentContext) GetAccount(plainKey []byte, cell *com
 			copy(cell.CodeHash[:], chash)
 		}
 	}
+	if cell.CodeHash == commitment.EmptyCodeHashArray {
+		cell.Delete = len(encAccount) == 0
+		return nil
+	}
 
-	code, _, err := sdc.sd.DomainGet(kv.CodeDomain, plainKey, nil)
-	if err != nil {
-		return fmt.Errorf("GetAccount: failed to read latest code: %w", err)
+	code, cached := sdc.code[string(plainKey)]
+	if !cached {
+		code, _, err = sdc.sd.DomainGet(kv.CodeDomain, plainKey, nil)
+		if err != nil {
+			return fmt.Errorf("GetAccount: failed to read latest code: %w", err)
+		}
+		// doesnt make sense to cache since it will never be read again
 	}
 	if len(code) > 0 {
 		sdc.keccak.Reset()
@@ -1024,9 +1037,13 @@ func (sdc *SharedDomainsCommitmentContext) GetAccount(plainKey []byte, cell *com
 
 func (sdc *SharedDomainsCommitmentContext) GetStorage(plainKey []byte, cell *commitment.Cell) error {
 	// Look in the summary table first
-	enc, _, err := sdc.sd.DomainGet(kv.StorageDomain, plainKey, nil)
-	if err != nil {
-		return err
+	var err error
+	enc, cached := sdc.storage[string(plainKey)]
+	if !cached {
+		enc, _, err = sdc.sd.DomainGet(kv.StorageDomain, plainKey, nil)
+		if err != nil {
+			return err
+		}
 	}
 	cell.StorageLen = len(enc)
 	copy(cell.Storage[:], enc)
