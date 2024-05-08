@@ -1731,6 +1731,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	} else {
 		cfg.NetworkID = params.NetworkIDByChainName(chain)
 	}
+	fmt.Println("CFG:GENESIS: ", cfg.Genesis)
 	fmt.Println("-------------> NetworkID: ", cfg.NetworkID)
 	cfg.Dirs = nodeConfig.Dirs
 	cfg.Snapshot.KeepBlocks = ctx.Bool(SnapKeepBlocksFlag.Name)
@@ -1862,6 +1863,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	if ctx.IsSet(TxPoolGossipDisableFlag.Name) {
 		cfg.DisableTxPoolGossip = ctx.Bool(TxPoolGossipDisableFlag.Name)
 	}
+	fmt.Println("CFG.GENESIS.ALLOC==nil ", cfg.Genesis.Alloc == nil)
 }
 
 // SetDNSDiscoveryDefaults configures DNS discovery with the given URL if
