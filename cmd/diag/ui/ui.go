@@ -21,7 +21,6 @@ import (
 var (
 	UIURLFlag = cli.StringFlag{
 		Name:     "ui.addr",
-		Aliases:  []string{"up"},
 		Usage:    "URL to serve UI web application",
 		Required: false,
 		Value:    "127.0.0.1:6060",
