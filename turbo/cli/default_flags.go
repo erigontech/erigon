@@ -10,7 +10,7 @@ import (
 var DefaultFlags = []cli.Flag{
 	&utils.DataDirFlag,
 	&utils.EthashDatasetDirFlag,
-	&utils.InternalConsensusFlag,
+	&utils.ExternalConsensusFlag,
 	&utils.TxPoolDisableFlag,
 	&utils.TxPoolLocalsFlag,
 	&utils.TxPoolNoLocalsFlag,
@@ -159,9 +159,9 @@ var DefaultFlags = []cli.Flag{
 	&utils.EthStatsURLFlag,
 	&utils.OverridePragueFlag,
 
-	&utils.LightClientDiscoveryAddrFlag,
-	&utils.LightClientDiscoveryPortFlag,
-	&utils.LightClientDiscoveryTCPPortFlag,
+	&utils.CaplinDiscoveryAddrFlag,
+	&utils.CaplinDiscoveryPortFlag,
+	&utils.CaplinDiscoveryTCPPortFlag,
 	&utils.SentinelAddrFlag,
 	&utils.SentinelPortFlag,
 

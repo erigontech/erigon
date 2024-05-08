@@ -555,8 +555,11 @@ type TemporalTx interface {
 	// Example: IndexRange("IndexName", 10, 5, order.Desc, -1)
 	// Example: IndexRange("IndexName", -1, -1, order.Asc, 10)
 	IndexRange(name InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error)
-	HistoryRange(name History, fromTs, toTs int, asc order.By, limit int) (it iter.KV, err error)
 	DomainRange(name Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error)
+
+	// HistoryRange - producing "state patch" - sorted list of keys updated at [fromTs,toTs) with their most-recent value.
+	//   no duplicates
+	HistoryRange(name History, fromTs, toTs int, asc order.By, limit int) (it iter.KV, err error)
 }
 type TemporalCommitment interface {
 	ComputeCommitment(ctx context.Context, saveStateAfter, trace bool) (rootHash []byte, err error)

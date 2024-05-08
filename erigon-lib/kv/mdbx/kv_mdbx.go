@@ -1810,7 +1810,7 @@ func (c *MdbxDupSortCursor) FirstDup() ([]byte, error) {
 		if mdbx.IsNotFound(err) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("in FirstDup: %w", err)
+		return nil, fmt.Errorf("in FirstDup: tbl=%s, %w", c.bucketName, err)
 	}
 	return v, nil
 }
