@@ -3,6 +3,8 @@ package downloader
 import (
 	"fmt"
 
+	"time"
+
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
@@ -87,13 +89,15 @@ func printDownloadStatus(cliCtx *cli.Context) error {
 	remainingBytes := snapDownload.Total - snapDownload.Downloaded
 	downloadTimeLeft := util.CalculateTime(remainingBytes, snapDownload.DownloadRate)
 
+	totalDownloadTimeString := time.Duration(snapDownload.TotalTime * float64(time.Second)).String()
+
 	rowObj := table.Row{
 		status,                                   // Status
 		fmt.Sprintf("%.2f%%", downloadedPercent), // Progress
 		common.ByteCount(snapDownload.Downloaded),          // Downloaded
 		common.ByteCount(snapDownload.Total),               // Total
 		downloadTimeLeft,                                   // Time Left
-		snapDownload.TotalTime,                             // Total Time
+		totalDownloadTimeString,                            // Total Time
 		common.ByteCount(snapDownload.DownloadRate) + "/s", // Download Rate
 		common.ByteCount(snapDownload.UploadRate) + "/s",   // Upload Rate
 		snapDownload.Peers,                                 // Peers
