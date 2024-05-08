@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"runtime"
 	"sort"
 	"strconv"
@@ -87,14 +88,11 @@ func adjustBlockPrune(blocks, minBlocksToDownload uint) uint {
 	if minBlocksToDownload < snaptype.Erigon2MergeLimit {
 		minBlocksToDownload = snaptype.Erigon2MergeLimit
 	}
-	if blocks < minBlocksToDownload {
+	if blocks > minBlocksToDownload {
 		blocks = minBlocksToDownload
 	}
-	if blocks%snaptype.Erigon2MergeLimit == 0 {
-		return blocks
-	}
 	// round to nearest multiple of 64. if less than 64, round to 64
-	return blocks + blocks%snaptype.Erigon2MergeLimit
+	return blocks
 }
 
 func shouldUseStepsForPruning(name string) bool {
@@ -106,7 +104,6 @@ func canSnapshotBePruned(name string) bool {
 }
 
 func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blockPrune uint, preverified snapcfg.Preverified) (map[string]struct{}, error) {
-	fmt.Println("AX", pruneMode, stepPrune, minBlockToDownload, blockPrune)
 	type snapshotFileData struct {
 		from, to  uint64
 		stepBased bool
@@ -197,7 +194,7 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 // getMinimumBlocksToDownload - get the minimum number of blocks to download
 func getMinimumBlocksToDownload(tx kv.Tx, blockReader services.FullBlockReader, minStep uint64, expectedPruneBlockAmount uint64) (uint64, uint64, error) {
 	frozenBlocks := blockReader.Snapshots().SegmentsMax()
-	minToDownload := uint64(0)
+	minToDownload := uint64(math.MaxUint64)
 	minStepToDownload := minStep
 	stateTxNum := minStep * config3.HistoryV3AggregationStep
 	if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
@@ -209,21 +206,20 @@ func getMinimumBlocksToDownload(tx kv.Tx, blockReader services.FullBlockReader, 
 		}
 		newMinToDownload := uint64(0)
 		if frozenBlocks > blockNum {
-			newMinToDownload = blockNum
+			newMinToDownload = frozenBlocks - blockNum
 		}
-		if newMinToDownload > minToDownload {
+		if newMinToDownload < minToDownload {
 			minToDownload = newMinToDownload
 		}
 		return nil
 	}); err != nil {
 		return 0, 0, err
 	}
-	minimumStepsToKeep := minStep - minStepToDownload
-	if expectedPruneBlockAmount >= frozenBlocks {
-		minimumStepsToKeep = 0
+	if expectedPruneBlockAmount == 0 {
+		return minToDownload, 0, nil
 	}
 	// return the minimum number of blocks to download and the minimum step.
-	return minToDownload, minimumStepsToKeep, nil
+	return minToDownload, minStep - minStepToDownload, nil
 }
 
 func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error) {
@@ -288,9 +284,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, histV
 		minStep, err := getMaxStepRangeInSnapshots(preverifiedBlockSnapshots)
 		if err != nil {
 			return err
-		}
-		if blockPrune > uint(snapshots.SegmentsMax()) {
-			blockPrune = uint(snapshots.SegmentsMax())
 		}
 		minBlockAmountToDownload, minStepToDownload, err := getMinimumBlocksToDownload(tx, blockReader, minStep, uint64(blockPrune))
 		if err != nil {

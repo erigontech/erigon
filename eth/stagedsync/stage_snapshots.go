@@ -428,10 +428,13 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 }
 
 func computeBlocksToPrune(cfg SnapshotsCfg) uint {
+	frozenBlocks := cfg.blockReader.Snapshots().SegmentsMax()
 	blocksToPrune := uint64(cfg.syncConfig.SnapshotsPruneBlockOlder)
-	if cfg.syncConfig.SnapshotsPruneBlockBefore > 0 && // Flag must be set
-		uint64(blocksToPrune) < cfg.blockReader.Snapshots().SegmentsMax()-uint64(cfg.syncConfig.SnapshotsPruneBlockBefore) { // check if we prune more blocks with older option
-		blocksToPrune = cfg.blockReader.Snapshots().SegmentsMax() - uint64(cfg.syncConfig.SnapshotsPruneBlockBefore) // Underflow is expected behaviour, it will mean: keep nothing prune all.
+	if cfg.syncConfig.SnapshotsPruneBlockBefore > 0 { // check if we prune more blocks with older option
+		blocksToPrune = frozenBlocks - uint64(cfg.syncConfig.SnapshotsPruneBlockBefore) // Underflow is expected behaviour, it will mean: keep nothing prune all.
+		if frozenBlocks < uint64(cfg.syncConfig.SnapshotsPruneBlockBefore) {
+			blocksToPrune = 0
+		}
 	}
 	return uint(blocksToPrune)
 }

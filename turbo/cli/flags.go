@@ -259,12 +259,29 @@ var (
 	}
 )
 
+func getMinimalPrunedMode(ctx *cli.Context, chainID uint64) (prune.Mode, error) {
+	return prune.FromCli(
+		chainID,
+		"htrc", // avoid
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		libcommon.CliString2Array(ctx.String(ExperimentsFlag.Name)),
+	)
+
+}
+
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.Logger) {
 	chainId := cfg.NetworkID
 	if cfg.Genesis != nil {
 		chainId = cfg.Genesis.Config.ChainID.Uint64()
 	}
-
+	minimal := ctx.Bool(MinimalHistoryFlag.Name)
 	mode, err := prune.FromCli(
 		chainId,
 		ctx.String(PruneFlag.Name),
@@ -278,6 +295,12 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		ctx.Uint64(PruneCallTracesBeforeFlag.Name),
 		libcommon.CliString2Array(ctx.String(ExperimentsFlag.Name)),
 	)
+	if err != nil {
+		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
+	}
+	if minimal {
+		mode, err = getMinimalPrunedMode(ctx, chainId)
+	}
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
@@ -298,14 +321,13 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		}
 		etl.BufferOptimalSize = *size
 	}
-	prune := ctx.String(PruneFlag.Name)
-	cfg.SnapshotPrune = strings.Contains(prune, "h") // Pruning of snapshots is enabled with h.
-	cfg.SnapshotsPruneBlockOlder = ctx.Uint(PruneHistoryFlag.Name)
+	cfg.SnapshotPrune = strings.Contains(ctx.String(PruneFlag.Name), "h") // Pruning of snapshots is enabled with h.
+	cfg.SnapshotsPruneBlockOlder = uint(mode.History.(prune.Distance))
 	cfg.SnapshotsPruneBlockBefore = ctx.Uint(PruneHistoryBeforeFlag.Name)
-	if ctx.Bool(MinimalHistoryFlag.Name) { // If we enable minimal history, we only keep essential history.
+	if minimal { // If we enable minimal history, we only keep essential history.
 		cfg.SnapshotPrune = true
 		cfg.SnapshotsPruneBlockOlder = 0
-		cfg.SnapshotsPruneBlockBefore = math.MaxUint64
+		cfg.SnapshotsPruneBlockBefore = math.MaxUint
 	}
 
 	cfg.StateStream = !ctx.Bool(StateStreamDisableFlag.Name)

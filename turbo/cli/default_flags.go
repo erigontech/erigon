@@ -28,7 +28,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.TxPoolTraceSendersFlag,
 	&utils.TxPoolCommitEveryFlag,
 	&PruneFlag,
-	&MinimalHistoryFlag,
 	&PruneHistoryFlag,
 	&MinimalHistoryFlag,
 	&PruneReceiptFlag,
