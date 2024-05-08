@@ -197,6 +197,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if cfg.caplin { //TODO(Giulio2002): uncomment
 		cstate = snapshotsync.AlsoCaplin
 	}
+	blocksToPrune := cfg.syncConfig.SnapshotsPruneBlockOlder
 
 	if cfg.snapshotUploader != nil {
 		u := cfg.snapshotUploader
@@ -234,13 +235,14 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 	} else {
 		// Download only the snapshots that are for the header chain.
-		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, true, cfg.historyV3, cfg.blobs, cfg.syncConfig.SnapshotPrune, cfg.syncConfig.SnapshotsPruneBlockNumber, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
+		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, true, cfg.historyV3, cfg.blobs, cfg.syncConfig.SnapshotPrune, blocksToPrune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
 			return err
 		}
 		if err := cfg.blockReader.Snapshots().ReopenSegments([]snaptype.Type{coresnaptype.Headers, coresnaptype.Bodies}, true); err != nil {
 			return err
 		}
-		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, false, cfg.historyV3, cfg.blobs, cfg.syncConfig.SnapshotPrune, cfg.syncConfig.SnapshotsPruneBlockNumber, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
+		blocksToPrune = computeBlocksToPrune(cfg)
+		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, false, cfg.historyV3, cfg.blobs, cfg.syncConfig.SnapshotPrune, blocksToPrune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
 			return err
 		}
 	}
@@ -424,6 +426,16 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 	return nil
 }
 
+func computeBlocksToPrune(cfg SnapshotsCfg) uint {
+	blocksToPrune := uint64(cfg.syncConfig.SnapshotsPruneBlockOlder)
+	if cfg.syncConfig.SnapshotsPruneBlockBefore > 0 && // Flag must be set
+		uint64(blocksToPrune) < cfg.blockReader.Snapshots().SegmentsMax()-uint64(cfg.syncConfig.SnapshotsPruneBlockBefore) && // check if we prune more blocks with older option
+		cfg.blockReader.Snapshots().SegmentsMax() > uint64(cfg.syncConfig.SnapshotsPruneBlockBefore) { // Prevent underflow
+		blocksToPrune = cfg.blockReader.Snapshots().SegmentsMax() - uint64(cfg.syncConfig.SnapshotsPruneBlockBefore)
+	}
+	return uint(blocksToPrune)
+}
+
 /* ====== PRUNING ====== */
 // snapshots pruning sections works more as a retiring of blocks
 // retiring blocks means moving block data from db into snapshots
@@ -552,11 +564,7 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 	}
 
 	// Keep at least 2 block snapshots as we do not want FrozenBlocks to be 0
-	pruneAmount := uint64(cfg.syncConfig.SnapshotsPruneBlockNumber)
-	if pruneAmount < snaptype.Erigon2MergeLimit {
-		pruneAmount = snaptype.Erigon2MergeLimit
-	}
-	pruneAmount += pruneAmount % snaptype.Erigon2MergeLimit
+	pruneAmount := uint64(computeBlocksToPrune(cfg))
 
 	minBlockNumberToKeep := uint64(0)
 	if headNumber > pruneAmount {
