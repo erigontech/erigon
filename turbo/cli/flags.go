@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -76,6 +77,10 @@ var (
 	If an item is NOT on the list - means NO pruning for this data.
 	Example: --prune=htc`,
 		Value: "disabled",
+	}
+	MinimalHistoryFlag = cli.BoolFlag{
+		Name:  "minimal-history",
+		Usage: `Keep only minimal amount of history. it overrides the --prune.h.* flags`,
 	}
 	PruneHistoryFlag = cli.Uint64Flag{
 		Name:  "prune.h.older",
@@ -297,6 +302,11 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	cfg.SnapshotPrune = strings.Contains(prune, "h") // Pruning of snapshots is enabled with h.
 	cfg.SnapshotsPruneBlockOlder = ctx.Uint(PruneHistoryFlag.Name)
 	cfg.SnapshotsPruneBlockBefore = ctx.Uint(PruneHistoryBeforeFlag.Name)
+	if ctx.Bool(MinimalHistoryFlag.Name) { // If we enable minimal history, we only keep essential history.
+		cfg.SnapshotPrune = true
+		cfg.SnapshotsPruneBlockOlder = 0
+		cfg.SnapshotsPruneBlockBefore = math.MaxUint64
+	}
 
 	cfg.StateStream = !ctx.Bool(StateStreamDisableFlag.Name)
 	if ctx.String(BodyCacheLimitFlag.Name) != "" {
