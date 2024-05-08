@@ -19,12 +19,12 @@ import (
 )
 
 var (
-	UIPortFlag = cli.IntFlag{
+	UIURLFlag = cli.StringFlag{
 		Name:     "ui.port",
 		Aliases:  []string{"up"},
-		Usage:    "UI port to listen on",
+		Usage:    "URL to serve UI web application",
 		Required: false,
-		Value:    8080,
+		Value:    "127.0.0.1:6060",
 	}
 )
 
@@ -36,7 +36,7 @@ var Command = cli.Command{
 	ArgsUsage: "",
 	Flags: []cli.Flag{
 		&flags.DebugURLFlag,
-		&UIPortFlag,
+		&UIURLFlag,
 	},
 	Description: ``,
 }
@@ -57,8 +57,7 @@ func runUI(cli *cli.Context) error {
 		"admin",
 	}
 
-	listenAddr := "127.0.0.1"
-	listenPort := cli.Int(UIPortFlag.Name)
+	listenUrl := cli.String(UIURLFlag.Name)
 
 	assets, _ := erigonwatch.UIFiles()
 	fs := http.FileServer(http.FS(assets))
@@ -95,7 +94,7 @@ func runUI(cli *cli.Context) error {
 	})
 
 	srv := &http.Server{
-		Addr:              fmt.Sprintf("%s:%d", listenAddr, listenPort),
+		Addr:              listenUrl,
 		Handler:           r,
 		MaxHeaderBytes:    1 << 20,
 		ReadHeaderTimeout: 1 * time.Minute,
@@ -113,7 +112,7 @@ func runUI(cli *cli.Context) error {
 		}
 	}()
 
-	uiUrl := fmt.Sprintf("http://%s:%d", listenAddr, listenPort)
+	uiUrl := fmt.Sprintf("http://%s", listenUrl)
 	fmt.Println(text.Hyperlink(uiUrl, fmt.Sprintf("UI running on %s", uiUrl)))
 
 	wg.Wait() // Wait for the server goroutine to finish
