@@ -119,6 +119,8 @@ func printDownloadStatus(cliCtx *cli.Context) error {
 		)
 	}
 
+	util.RenderUseDiagUI()
+
 	return nil
 }
 
@@ -150,6 +152,8 @@ func printSegmentsList(cliCtx *cli.Context) error {
 			filteredRows,
 		)
 	}
+
+	util.RenderUseDiagUI()
 
 	return nil
 }
@@ -192,6 +196,8 @@ func printSegment(cliCtx *cli.Context) error {
 			segWebseeds,
 		)
 	}
+
+	util.RenderUseDiagUI()
 
 	return nil
 }

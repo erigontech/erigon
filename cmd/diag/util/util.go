@@ -81,3 +81,8 @@ func RenderTableWithHeader(title string, header table.Row, rows []table.Row) {
 	t.Render()
 	fmt.Print("\n")
 }
+
+func RenderUseDiagUI() {
+	txt := text.Colors{text.BgGreen, text.Bold}
+	fmt.Println(txt.Sprint("To get detailed info about Erigon node state use 'diag ui' command."))
+}
