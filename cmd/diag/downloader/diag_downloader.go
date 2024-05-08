@@ -172,7 +172,7 @@ func printSegment(cliCtx *cli.Context) error {
 	case "text":
 		util.RenderTableWithHeader(
 			"Segment download info:",
-			table.Row{"Segment", "Progress", "Total", "Downloaded", "Peers", "Peers Download Rate", "Webseeds", "Webseeds Download Rate", "Time Left"},
+			table.Row{"Segment", "Progress", "Total", "Downloaded", "Peers", "Peers Download Rate", "Webseeds", "Webseeds Download Rate", "Time Left", "Active"},
 			[]table.Row{segRow},
 		)
 
