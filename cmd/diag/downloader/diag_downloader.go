@@ -1,12 +1,9 @@
 package downloader
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 
 	"github.com/jedib0t/go-pretty/v6/table"
-	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon/cmd/diag/flags"
@@ -108,26 +105,14 @@ func printDownloadStatus(cliCtx *cli.Context) error {
 
 	switch cliCtx.String(flags.OutputFlag.Name) {
 	case "json":
-		bytes, err := json.Marshal(rowObj)
-
-		if err != nil {
-			return err
-		}
-
-		fmt.Println(string(bytes))
+		util.RenderJson(rowObj)
 
 	case "text":
-		txt := text.Colors{text.FgBlue, text.Bold}
-		fmt.Println(txt.Sprint("Snapshot download info:"))
-		t := table.NewWriter()
-		t.SetOutputMirror(os.Stdout)
-
-		t.AppendHeader(table.Row{"Status", "Progress", "Downloaded", "Total", "Time Left", "Total Time", "Download Rate", "Upload Rate", "Peers", "Files", "Connections", "Alloc", "Sys"})
-		t.AppendRow(rowObj)
-
-		t.AppendSeparator()
-		t.Render()
-		fmt.Print("\n")
+		util.RenderTableWithHeader(
+			"Snapshot download info:",
+			table.Row{"Status", "Progress", "Downloaded", "Total", "Time Left", "Total Time", "Download Rate", "Upload Rate", "Peers", "Files", "Connections", "Alloc", "Sys"},
+			[]table.Row{rowObj},
+		)
 	}
 
 	return nil
@@ -146,57 +131,20 @@ func printSegmentsList(cliCtx *cli.Context) error {
 	rows := []table.Row{}
 
 	for _, segment := range segments {
-		peersDownloadRate := getSegmentDownloadRate(segment.Peers)
-		webseedsDownloadRate := getSegmentDownloadRate(segment.Webseeds)
-		totalDownloadRate := peersDownloadRate + webseedsDownloadRate
-		downloadedPercent := float32(segment.DownloadedBytes) / float32(segment.TotalBytes/100)
-		remainingBytes := segment.TotalBytes - segment.DownloadedBytes
-		downloadTimeLeft := util.CalculateTime(remainingBytes, totalDownloadRate)
-		isActive := "false"
-		if totalDownloadRate > 0 {
-			isActive = "true"
-		}
-
-		row := table.Row{
-			segment.Name,
-			fmt.Sprintf("%.2f%%", downloadedPercent),
-			common.ByteCount(segment.TotalBytes),
-			common.ByteCount(segment.DownloadedBytes),
-			len(segment.Peers),
-			common.ByteCount(peersDownloadRate) + "/s",
-			len(segment.Webseeds),
-			common.ByteCount(webseedsDownloadRate) + "/s",
-			downloadTimeLeft,
-			isActive,
-		}
-
-		rows = append(rows, row)
+		rows = append(rows, getSegmentRow(segment))
 	}
 
 	filteredRows := filterRows(rows, cliCtx.String(SegmentsFilterFlag.Name))
 
 	switch cliCtx.String(flags.OutputFlag.Name) {
 	case "json":
-		bytes, err := json.Marshal(rows)
-
-		if err != nil {
-			return err
-		}
-
-		fmt.Println(string(bytes))
-
+		util.RenderJson(filteredRows)
 	case "text":
-		txt := text.Colors{text.FgBlue, text.Bold}
-		fmt.Println(txt.Sprint("Snapshot download info:"))
-		t := table.NewWriter()
-		t.SetOutputMirror(os.Stdout)
-
-		t.AppendHeader(table.Row{"Segment", "Progress", "Total", "Downloaded", "Peers", "Peers Download Rate", "Webseeds", "Webseeds Download Rate", "Time Left", "Active"})
-		t.AppendRows(filteredRows)
-
-		t.AppendSeparator()
-		t.Render()
-		fmt.Print("\n")
+		util.RenderTableWithHeader(
+			"Snapshot download info:",
+			table.Row{"Segment", "Progress", "Total", "Downloaded", "Peers", "Peers Download Rate", "Webseeds", "Webseeds Download Rate", "Time Left", "Active"},
+			filteredRows,
+		)
 	}
 
 	return nil
@@ -212,15 +160,51 @@ func printSegment(cliCtx *cli.Context) error {
 	snapDownload := data.SnapshotDownload
 
 	segment := snapDownload.SegmentsDownloading[cliCtx.String(SenmentNameFlag.Name)]
+	segRow := getSegmentRow(segment)
+	segPeers := getPeersRows(segment.Peers)
+	segWebseeds := getPeersRows(segment.Webseeds)
 
+	switch cliCtx.String(flags.OutputFlag.Name) {
+	case "json":
+		util.RenderJson(segRow)
+		util.RenderJson(segPeers)
+		util.RenderJson(segWebseeds)
+	case "text":
+		util.RenderTableWithHeader(
+			"Segment download info:",
+			table.Row{"Segment", "Progress", "Total", "Downloaded", "Peers", "Peers Download Rate", "Webseeds", "Webseeds Download Rate", "Time Left"},
+			[]table.Row{segRow},
+		)
+
+		util.RenderTableWithHeader(
+			"",
+			table.Row{"Peer", "Download Rate"},
+			segPeers,
+		)
+
+		util.RenderTableWithHeader(
+			"",
+			table.Row{"Webseed", "Download Rate"},
+			segWebseeds,
+		)
+	}
+
+	return nil
+}
+
+func getSegmentRow(segment diagnostics.SegmentDownloadStatistics) table.Row {
 	peersDownloadRate := getSegmentDownloadRate(segment.Peers)
 	webseedsDownloadRate := getSegmentDownloadRate(segment.Webseeds)
 	totalDownloadRate := peersDownloadRate + webseedsDownloadRate
 	downloadedPercent := float32(segment.DownloadedBytes) / float32(segment.TotalBytes/100)
 	remainingBytes := segment.TotalBytes - segment.DownloadedBytes
 	downloadTimeLeft := util.CalculateTime(remainingBytes, totalDownloadRate)
+	isActive := "false"
+	if totalDownloadRate > 0 {
+		isActive = "true"
+	}
 
-	segRow := table.Row{
+	row := table.Row{
 		segment.Name,
 		fmt.Sprintf("%.2f%%", downloadedPercent),
 		common.ByteCount(segment.TotalBytes),
@@ -230,93 +214,25 @@ func printSegment(cliCtx *cli.Context) error {
 		len(segment.Webseeds),
 		common.ByteCount(webseedsDownloadRate) + "/s",
 		downloadTimeLeft,
+		isActive,
 	}
 
-	segPeers := make([]table.Row, 0)
-	segWebseeds := make([]table.Row, 0)
+	return row
+}
 
-	for _, peer := range segment.Peers {
+func getPeersRows(peers []diagnostics.SegmentPeer) []table.Row {
+	rows := make([]table.Row, 0)
+
+	for _, peer := range peers {
 		row := table.Row{
 			peer.Url,
 			common.ByteCount(peer.DownloadRate) + "/s",
 		}
 
-		segPeers = append(segPeers, row)
+		rows = append(rows, row)
 	}
 
-	for _, peer := range segment.Webseeds {
-		row := table.Row{
-			peer.Url,
-			common.ByteCount(peer.DownloadRate) + "/s",
-		}
-
-		segWebseeds = append(segWebseeds, row)
-	}
-
-	switch cliCtx.String(flags.OutputFlag.Name) {
-	case "json":
-		bytes, err := json.Marshal(segRow)
-
-		if err != nil {
-			return err
-		}
-
-		fmt.Println(string(bytes))
-
-		fmt.Print("\n")
-
-		bytes, err = json.Marshal(segPeers)
-
-		if err != nil {
-			return err
-		}
-
-		fmt.Println(string(bytes))
-
-		fmt.Print("\n")
-
-		bytes, err = json.Marshal(segWebseeds)
-
-		if err != nil {
-			return err
-		}
-
-		fmt.Println(string(bytes))
-
-	case "text":
-		txt := text.Colors{text.FgBlue, text.Bold}
-		fmt.Println(txt.Sprint("Segment download info:"))
-		t := table.NewWriter()
-		t.SetOutputMirror(os.Stdout)
-
-		t.AppendHeader(table.Row{"Segment", "Progress", "Total", "Downloaded", "Peers", "Peers Download Rate", "Webseeds", "Webseeds Download Rate", "Time Left"})
-		t.AppendRow(segRow)
-
-		t.AppendSeparator()
-		t.Render()
-		fmt.Print("\n")
-
-		t.ResetHeaders()
-		t.ResetRows()
-		t.AppendHeader(table.Row{"Peer", "Download Rate"})
-		t.AppendRows(segPeers)
-
-		t.AppendSeparator()
-		t.Render()
-		fmt.Print("\n")
-
-		t.ResetHeaders()
-		t.ResetRows()
-		t.AppendHeader(table.Row{"Webseed", "Download Rate"})
-		t.AppendRows(segWebseeds)
-
-		t.AppendSeparator()
-		t.Render()
-		fmt.Print("\n")
-	}
-
-	return nil
-
+	return rows
 }
 
 func getSegmentDownloadRate(peers []diagnostics.SegmentPeer) uint64 {
