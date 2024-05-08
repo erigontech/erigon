@@ -242,7 +242,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			return err
 		}
 		blocksToPrune = computeBlocksToPrune(cfg)
-		fmt.Println("blocksToPrune", blocksToPrune)
 		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, false, cfg.historyV3, cfg.blobs, cfg.syncConfig.SnapshotPrune, blocksToPrune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
 			return err
 		}
