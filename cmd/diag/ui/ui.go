@@ -20,7 +20,7 @@ import (
 
 var (
 	UIURLFlag = cli.StringFlag{
-		Name:     "ui.port",
+		Name:     "ui.addr",
 		Aliases:  []string{"up"},
 		Usage:    "URL to serve UI web application",
 		Required: false,
