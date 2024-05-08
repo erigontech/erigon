@@ -128,7 +128,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		checkFlag(utils.ExecutorStrictMode.Name, cfg.ExecutorStrictMode)
 
 		// if we are running in strict mode, the default, and we have no executor URLs then we panic
-		if cfg.Zk.ExecutorStrictMode && (len(cfg.Zk.ExecutorUrls) == 0 || cfg.ExecutorUrls[0] == "") {
+		if cfg.ExecutorStrictMode && !cfg.HasExecutors() {
 			panic("You must set executor urls when running in executor strict mode (zkevm.executor-strict)")
 		}
 	}

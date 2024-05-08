@@ -404,6 +404,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 
 		DataStreamPort: ctx.Int(utils.DataStreamPort.Name),
 		DataStreamHost: ctx.String(utils.DataStreamHost.Name),
+		L2RpcUrl:       ctx.String(utils.L2RpcUrlFlag.Name),
 	}
 	if ctx.IsSet(utils.HttpCompressionFlag.Name) {
 		c.HttpCompression = ctx.Bool(utils.HttpCompressionFlag.Name)
