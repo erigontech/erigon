@@ -22,6 +22,14 @@ var (
 		Required: false,
 		Value:    "all",
 	}
+
+	SenmentNameFlag = cli.StringFlag{
+		Name:     "downloader.segment.name",
+		Aliases:  []string{"dsn"},
+		Usage:    "Segment name to print details about.",
+		Required: true,
+		Value:    "",
+	}
 )
 
 var Command = cli.Command{
@@ -45,6 +53,18 @@ var Command = cli.Command{
 				&flags.DebugURLFlag,
 				&flags.OutputFlag,
 				&SegmentsFilterFlag,
+			},
+		},
+		{
+			Name:      "segment",
+			Aliases:   []string{"seg"},
+			Action:    printSegment,
+			Usage:     "print current stage",
+			ArgsUsage: "",
+			Flags: []cli.Flag{
+				&flags.DebugURLFlag,
+				&flags.OutputFlag,
+				&SenmentNameFlag,
 			},
 		},
 	},
@@ -173,6 +193,122 @@ func printSegmentsList(cliCtx *cli.Context) error {
 
 		t.AppendHeader(table.Row{"Segment", "Progress", "Total", "Downloaded", "Peers", "Peers Download Rate", "Webseeds", "Webseeds Download Rate", "Time Left", "Active"})
 		t.AppendRows(filteredRows)
+
+		t.AppendSeparator()
+		t.Render()
+		fmt.Print("\n")
+	}
+
+	return nil
+}
+
+func printSegment(cliCtx *cli.Context) error {
+	data, err := getData(cliCtx)
+
+	if err != nil {
+		return err
+	}
+
+	snapDownload := data.SnapshotDownload
+
+	segment := snapDownload.SegmentsDownloading[cliCtx.String(SenmentNameFlag.Name)]
+
+	peersDownloadRate := getSegmentDownloadRate(segment.Peers)
+	webseedsDownloadRate := getSegmentDownloadRate(segment.Webseeds)
+	totalDownloadRate := peersDownloadRate + webseedsDownloadRate
+	downloadedPercent := float32(segment.DownloadedBytes) / float32(segment.TotalBytes/100)
+	remainingBytes := segment.TotalBytes - segment.DownloadedBytes
+	downloadTimeLeft := util.CalculateTime(remainingBytes, totalDownloadRate)
+
+	segRow := table.Row{
+		segment.Name,
+		fmt.Sprintf("%.2f%%", downloadedPercent),
+		common.ByteCount(segment.TotalBytes),
+		common.ByteCount(segment.DownloadedBytes),
+		len(segment.Peers),
+		common.ByteCount(peersDownloadRate) + "/s",
+		len(segment.Webseeds),
+		common.ByteCount(webseedsDownloadRate) + "/s",
+		downloadTimeLeft,
+	}
+
+	segPeers := make([]table.Row, 0)
+	segWebseeds := make([]table.Row, 0)
+
+	for _, peer := range segment.Peers {
+		row := table.Row{
+			peer.Url,
+			common.ByteCount(peer.DownloadRate) + "/s",
+		}
+
+		segPeers = append(segPeers, row)
+	}
+
+	for _, peer := range segment.Webseeds {
+		row := table.Row{
+			peer.Url,
+			common.ByteCount(peer.DownloadRate) + "/s",
+		}
+
+		segWebseeds = append(segWebseeds, row)
+	}
+
+	switch cliCtx.String(flags.OutputFlag.Name) {
+	case "json":
+		bytes, err := json.Marshal(segRow)
+
+		if err != nil {
+			return err
+		}
+
+		fmt.Println(string(bytes))
+
+		fmt.Print("\n")
+
+		bytes, err = json.Marshal(segPeers)
+
+		if err != nil {
+			return err
+		}
+
+		fmt.Println(string(bytes))
+
+		fmt.Print("\n")
+
+		bytes, err = json.Marshal(segWebseeds)
+
+		if err != nil {
+			return err
+		}
+
+		fmt.Println(string(bytes))
+
+	case "text":
+		txt := text.Colors{text.FgBlue, text.Bold}
+		fmt.Println(txt.Sprint("Segment download info:"))
+		t := table.NewWriter()
+		t.SetOutputMirror(os.Stdout)
+
+		t.AppendHeader(table.Row{"Segment", "Progress", "Total", "Downloaded", "Peers", "Peers Download Rate", "Webseeds", "Webseeds Download Rate", "Time Left"})
+		t.AppendRow(segRow)
+
+		t.AppendSeparator()
+		t.Render()
+		fmt.Print("\n")
+
+		t.ResetHeaders()
+		t.ResetRows()
+		t.AppendHeader(table.Row{"Peer", "Download Rate"})
+		t.AppendRows(segPeers)
+
+		t.AppendSeparator()
+		t.Render()
+		fmt.Print("\n")
+
+		t.ResetHeaders()
+		t.ResetRows()
+		t.AppendHeader(table.Row{"Webseed", "Download Rate"})
+		t.AppendRows(segWebseeds)
 
 		t.AppendSeparator()
 		t.Render()
