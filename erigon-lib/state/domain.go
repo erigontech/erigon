@@ -1898,6 +1898,12 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 	}
 	defer keysCursor.Close()
 
+	valsCursor, err := rwTx.RwCursor(dt.d.valsTable)
+	if err != nil {
+		return stat, fmt.Errorf("create %s domain values cursor: %w", dt.d.filenameBase, err)
+	}
+	defer valsCursor.Close()
+
 	//fmt.Printf("prune domain %s from %d to %d step %d limit %d\n", dt.d.filenameBase, txFrom, txTo, step, limit)
 	//defer func() {
 	//	dt.d.logger.Info("[snapshots] prune domain",
@@ -1946,7 +1952,7 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		limit--
 
 		seek = append(append(seek[:0], k...), v...)
-		err = rwTx.Delete(dt.d.valsTable, seek)
+		err = valsCursor.Delete(seek)
 		if err != nil {
 			return stat, fmt.Errorf("prune domain value: %w", err)
 		}
