@@ -24,6 +24,10 @@ type Scraper struct {
 	milestoneObservers  *polygoncommon.Observers[[]*Milestone]
 	spanObservers       *polygoncommon.Observers[[]*Span]
 
+	checkpointSyncEvent *polygoncommon.EventNotifier
+	milestoneSyncEvent  *polygoncommon.EventNotifier
+	spanSyncEvent       *polygoncommon.EventNotifier
+
 	logger log.Logger
 }
 
@@ -60,6 +64,10 @@ func NewScraper(
 		milestoneObservers:  polygoncommon.NewObservers[[]*Milestone](),
 		spanObservers:       polygoncommon.NewObservers[[]*Span](),
 
+		checkpointSyncEvent: polygoncommon.NewEventNotifier(),
+		milestoneSyncEvent:  polygoncommon.NewEventNotifier(),
+		spanSyncEvent:       polygoncommon.NewEventNotifier(),
+
 		logger: logger,
 	}
 }
@@ -69,6 +77,7 @@ func (s *Scraper) syncEntity(
 	store entityStore,
 	fetcher entityFetcher,
 	callback func([]Entity),
+	syncEvent *polygoncommon.EventNotifier,
 ) error {
 	for ctx.Err() == nil {
 		lastKnownId, hasLastKnownId, err := store.GetLastEntityId(ctx)
@@ -89,7 +98,11 @@ func (s *Scraper) syncEntity(
 		}
 
 		if idRange.Start > idRange.End {
+			syncEvent.SetAndBroadcast()
 			libcommon.Sleep(ctx, s.pollDelay)
+			if ctx.Err() != nil {
+				syncEvent.Reset()
+			}
 		} else {
 			entities, err := fetcher.FetchEntitiesRange(ctx, idRange)
 			if err != nil {
@@ -200,6 +213,12 @@ func (s *Scraper) RegisterSpanObserver(observer func([]*Span)) polygoncommon.Unr
 	return s.spanObservers.Register(observer)
 }
 
+func (s *Scraper) Synchronize(ctx context.Context) {
+	s.checkpointSyncEvent.Wait(ctx)
+	s.milestoneSyncEvent.Wait(ctx)
+	s.spanSyncEvent.Wait(ctx)
+}
+
 func (s *Scraper) Run(parentCtx context.Context) error {
 	tx := s.txProvider()
 	if tx == nil {
@@ -225,6 +244,7 @@ func (s *Scraper) Run(parentCtx context.Context) error {
 			func(entities []Entity) {
 				s.checkpointObservers.Notify(libcommon.SliceMap(entities, downcastCheckpointEntity))
 			},
+			s.checkpointSyncEvent,
 		)
 	})
 
@@ -237,6 +257,7 @@ func (s *Scraper) Run(parentCtx context.Context) error {
 			func(entities []Entity) {
 				s.milestoneObservers.Notify(libcommon.SliceMap(entities, downcastMilestoneEntity))
 			},
+			s.milestoneSyncEvent,
 		)
 	})
 
@@ -249,6 +270,7 @@ func (s *Scraper) Run(parentCtx context.Context) error {
 			func(entities []Entity) {
 				s.spanObservers.Notify(libcommon.SliceMap(entities, downcastSpanEntity))
 			},
+			s.spanSyncEvent,
 		)
 	})
 
