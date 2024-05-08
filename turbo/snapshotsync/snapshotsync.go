@@ -200,11 +200,11 @@ func getMinimumBlocksToDownload(tx kv.Tx, blockReader services.FullBlockReader, 
 	minStepToDownload := minStep
 	stateTxNum := minStep * config3.HistoryV3AggregationStep
 	if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
+		if blockNum == frozenBlocks-expectedPruneBlockAmount {
+			minStepToDownload = (baseTxNum / config3.HistoryV3AggregationStep) - 1
+		}
 		if stateTxNum <= baseTxNum { // only cosnider the block if it
 			return nil
-		}
-		if blockNum == frozenBlocks-expectedPruneBlockAmount {
-			minStepToDownload = (baseTxNum / config3.HistoryV3AggregationStep) + 1
 		}
 		newMinToDownload := uint64(0)
 		if frozenBlocks > blockNum {
@@ -269,6 +269,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, histV
 		if cc.Bor != nil {
 			borSnapshots.Close()
 		}
+		return nil
 	}
 
 	//Corner cases:
@@ -291,6 +292,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, histV
 		if err != nil {
 			return err
 		}
+		fmt.Println("minBlockAmountToDownload", minBlockAmountToDownload, "minStepToDownload", minStepToDownload, "blockPrune", blockPrune, "minStep", minStep)
 		blackListForPruning, err = buildBlackListForPruning(pruneMode, uint(minStepToDownload), uint(minBlockAmountToDownload), blockPrune, preverifiedBlockSnapshots)
 		if err != nil {
 			return err
