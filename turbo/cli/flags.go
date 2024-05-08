@@ -296,7 +296,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	prune := ctx.String(PruneFlag.Name)
 	cfg.SnapshotPrune = strings.Contains(prune, "h") // Pruning of snapshots is enabled with h.
 	cfg.SnapshotsPruneBlockOlder = ctx.Uint(PruneHistoryFlag.Name)
-	cfg.SnapshotsPruneBlockBefore = ctx.Uint(PruneHistoryFlag.Name)
+	cfg.SnapshotsPruneBlockBefore = ctx.Uint(PruneHistoryBeforeFlag.Name)
 
 	cfg.StateStream = !ctx.Bool(StateStreamDisableFlag.Name)
 	if ctx.String(BodyCacheLimitFlag.Name) != "" {

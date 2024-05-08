@@ -242,6 +242,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			return err
 		}
 		blocksToPrune = computeBlocksToPrune(cfg)
+		fmt.Println("blocksToPrune", blocksToPrune)
 		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, false, cfg.historyV3, cfg.blobs, cfg.syncConfig.SnapshotPrune, blocksToPrune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
 			return err
 		}
@@ -429,9 +430,8 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 func computeBlocksToPrune(cfg SnapshotsCfg) uint {
 	blocksToPrune := uint64(cfg.syncConfig.SnapshotsPruneBlockOlder)
 	if cfg.syncConfig.SnapshotsPruneBlockBefore > 0 && // Flag must be set
-		uint64(blocksToPrune) < cfg.blockReader.Snapshots().SegmentsMax()-uint64(cfg.syncConfig.SnapshotsPruneBlockBefore) && // check if we prune more blocks with older option
-		cfg.blockReader.Snapshots().SegmentsMax() > uint64(cfg.syncConfig.SnapshotsPruneBlockBefore) { // Prevent underflow
-		blocksToPrune = cfg.blockReader.Snapshots().SegmentsMax() - uint64(cfg.syncConfig.SnapshotsPruneBlockBefore)
+		uint64(blocksToPrune) < cfg.blockReader.Snapshots().SegmentsMax()-uint64(cfg.syncConfig.SnapshotsPruneBlockBefore) { // check if we prune more blocks with older option
+		blocksToPrune = cfg.blockReader.Snapshots().SegmentsMax() - uint64(cfg.syncConfig.SnapshotsPruneBlockBefore) // Underflow is expected behaviour, it will mean: keep nothing prune all.
 	}
 	return uint(blocksToPrune)
 }
