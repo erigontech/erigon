@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jedib0t/go-pretty/v6/table"
+	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon/cmd/diag/flags"
@@ -14,19 +15,19 @@ import (
 )
 
 var (
-	SegmentsFilterFlag = cli.StringFlag{
-		Name:     "downloader.segments.filter",
-		Aliases:  []string{"dsf"},
-		Usage:    "Filter segments list [all|active|inactive|downloaded|queued], dafault value is all",
+	FileFilterFlag = cli.StringFlag{
+		Name:     "downloader.file.filter",
+		Aliases:  []string{"dff"},
+		Usage:    "Filter files list [all|active|inactive|downloaded|queued], dafault value is all",
 		Required: false,
 		Value:    "all",
 	}
 
-	SenmentNameFlag = cli.StringFlag{
-		Name:     "downloader.segment.name",
-		Aliases:  []string{"dsn"},
-		Usage:    "Segment name to print details about.",
-		Required: true,
+	FileNameFlag = cli.StringFlag{
+		Name:     "downloader.file.name",
+		Aliases:  []string{"dfn"},
+		Usage:    "File name to print details about.",
+		Required: false,
 		Value:    "",
 	}
 )
@@ -43,27 +44,16 @@ var Command = cli.Command{
 	},
 	Subcommands: []*cli.Command{
 		{
-			Name:      "segments",
-			Aliases:   []string{"segs"},
-			Action:    printSegmentsList,
-			Usage:     "print current stage",
+			Name:      "files",
+			Aliases:   []string{"fls"},
+			Action:    printFiles,
+			Usage:     "Print snapshot download files status",
 			ArgsUsage: "",
 			Flags: []cli.Flag{
 				&flags.DebugURLFlag,
 				&flags.OutputFlag,
-				&SegmentsFilterFlag,
-			},
-		},
-		{
-			Name:      "segment",
-			Aliases:   []string{"seg"},
-			Action:    printSegment,
-			Usage:     "print current stage",
-			ArgsUsage: "",
-			Flags: []cli.Flag{
-				&flags.DebugURLFlag,
-				&flags.OutputFlag,
-				&SenmentNameFlag,
+				&FileFilterFlag,
+				&FileNameFlag,
 			},
 		},
 	},
@@ -74,11 +64,125 @@ func printDownloadStatus(cliCtx *cli.Context) error {
 	data, err := getData(cliCtx)
 
 	if err != nil {
+
+		return err
+	}
+
+	snapshotDownloadStatus := getSnapshotStatusRow(data.SnapshotDownload)
+
+	switch cliCtx.String(flags.OutputFlag.Name) {
+	case "json":
+		util.RenderJson(snapshotDownloadStatus)
+
+	case "text":
+		util.RenderTableWithHeader(
+			"Snapshot download info:",
+			table.Row{"Status", "Progress", "Downloaded", "Total", "Time Left", "Total Time", "Download Rate", "Upload Rate", "Peers", "Files", "Connections", "Alloc", "Sys"},
+			[]table.Row{snapshotDownloadStatus},
+		)
+	}
+
+	return nil
+}
+
+func printFiles(cliCtx *cli.Context) error {
+	if cliCtx.String(FileNameFlag.Name) != "" {
+		return printFile(cliCtx)
+	}
+
+	data, err := getData(cliCtx)
+
+	if err != nil {
+		txt := text.Colors{text.FgWhite, text.BgRed}
+		fmt.Printf("%s %s", txt.Sprint("[ERROR]"), "Failed to connect to Erigon node.")
+		return err
+	}
+
+	snapshotDownloadStatus := getSnapshotStatusRow(data.SnapshotDownload)
+
+	snapDownload := data.SnapshotDownload
+
+	files := snapDownload.SegmentsDownloading
+	rows := []table.Row{}
+
+	for _, file := range files {
+		rows = append(rows, getFileRow(file))
+	}
+
+	filteredRows := filterRows(rows, cliCtx.String(FileFilterFlag.Name))
+
+	switch cliCtx.String(flags.OutputFlag.Name) {
+	case "json":
+		util.RenderJson(snapshotDownloadStatus)
+		util.RenderJson(filteredRows)
+	case "text":
+		//Print overall status
+		util.RenderTableWithHeader(
+			"Snapshot download info:",
+			table.Row{"Status", "Progress", "Downloaded", "Total", "Time Left", "Total Time", "Download Rate", "Upload Rate", "Peers", "Files", "Connections", "Alloc", "Sys"},
+			[]table.Row{snapshotDownloadStatus},
+		)
+
+		//Print files status
+		util.RenderTableWithHeader(
+			"Files download info:",
+			table.Row{"File", "Progress", "Total", "Downloaded", "Peers", "Peers Download Rate", "Webseeds", "Webseeds Download Rate", "Time Left", "Active"},
+			filteredRows,
+		)
+	}
+
+	return nil
+}
+
+func printFile(cliCtx *cli.Context) error {
+	data, err := getData(cliCtx)
+
+	if err != nil {
 		return err
 	}
 
 	snapDownload := data.SnapshotDownload
 
+	if file, ok := snapDownload.SegmentsDownloading[cliCtx.String(FileNameFlag.Name)]; ok {
+		fileRow := getFileRow(file)
+		filePeers := getPeersRows(file.Peers)
+		fileWebseeds := getPeersRows(file.Webseeds)
+
+		switch cliCtx.String(flags.OutputFlag.Name) {
+		case "json":
+			util.RenderJson(fileRow)
+			util.RenderJson(filePeers)
+			util.RenderJson(fileWebseeds)
+		case "text":
+			//Print file status
+			util.RenderTableWithHeader(
+				"file download info:",
+				table.Row{"File", "Progress", "Total", "Downloaded", "Peers", "Peers Download Rate", "Webseeds", "Webseeds Download Rate", "Time Left", "Active"},
+				[]table.Row{fileRow},
+			)
+
+			//Print peers and webseeds status
+			util.RenderTableWithHeader(
+				"",
+				table.Row{"Peer", "Download Rate"},
+				filePeers,
+			)
+
+			util.RenderTableWithHeader(
+				"",
+				table.Row{"Webseed", "Download Rate"},
+				fileWebseeds,
+			)
+		}
+	} else {
+		txt := text.Colors{text.FgWhite, text.BgRed}
+		fmt.Printf("%s %s", txt.Sprint("[ERROR]"), "File with name: "+cliCtx.String(FileNameFlag.Name)+" does not exist.")
+	}
+
+	return nil
+}
+
+func getSnapshotStatusRow(snapDownload diagnostics.SnapshotDownloadStatistics) table.Row {
 	status := "Downloading"
 	if snapDownload.DownloadFinished {
 		status = "Finished"
@@ -107,101 +211,15 @@ func printDownloadStatus(cliCtx *cli.Context) error {
 		common.ByteCount(snapDownload.Sys),                 // Sys
 	}
 
-	switch cliCtx.String(flags.OutputFlag.Name) {
-	case "json":
-		util.RenderJson(rowObj)
-
-	case "text":
-		util.RenderTableWithHeader(
-			"Snapshot download info:",
-			table.Row{"Status", "Progress", "Downloaded", "Total", "Time Left", "Total Time", "Download Rate", "Upload Rate", "Peers", "Files", "Connections", "Alloc", "Sys"},
-			[]table.Row{rowObj},
-		)
-	}
-
-	return nil
+	return rowObj
 }
 
-func printSegmentsList(cliCtx *cli.Context) error {
-	data, err := getData(cliCtx)
-
-	if err != nil {
-		return err
-	}
-
-	snapDownload := data.SnapshotDownload
-
-	segments := snapDownload.SegmentsDownloading
-	rows := []table.Row{}
-
-	for _, segment := range segments {
-		rows = append(rows, getSegmentRow(segment))
-	}
-
-	filteredRows := filterRows(rows, cliCtx.String(SegmentsFilterFlag.Name))
-
-	switch cliCtx.String(flags.OutputFlag.Name) {
-	case "json":
-		util.RenderJson(filteredRows)
-	case "text":
-		util.RenderTableWithHeader(
-			"Snapshot download info:",
-			table.Row{"Segment", "Progress", "Total", "Downloaded", "Peers", "Peers Download Rate", "Webseeds", "Webseeds Download Rate", "Time Left", "Active"},
-			filteredRows,
-		)
-	}
-
-	return nil
-}
-
-func printSegment(cliCtx *cli.Context) error {
-	data, err := getData(cliCtx)
-
-	if err != nil {
-		return err
-	}
-
-	snapDownload := data.SnapshotDownload
-
-	segment := snapDownload.SegmentsDownloading[cliCtx.String(SenmentNameFlag.Name)]
-	segRow := getSegmentRow(segment)
-	segPeers := getPeersRows(segment.Peers)
-	segWebseeds := getPeersRows(segment.Webseeds)
-
-	switch cliCtx.String(flags.OutputFlag.Name) {
-	case "json":
-		util.RenderJson(segRow)
-		util.RenderJson(segPeers)
-		util.RenderJson(segWebseeds)
-	case "text":
-		util.RenderTableWithHeader(
-			"Segment download info:",
-			table.Row{"Segment", "Progress", "Total", "Downloaded", "Peers", "Peers Download Rate", "Webseeds", "Webseeds Download Rate", "Time Left", "Active"},
-			[]table.Row{segRow},
-		)
-
-		util.RenderTableWithHeader(
-			"",
-			table.Row{"Peer", "Download Rate"},
-			segPeers,
-		)
-
-		util.RenderTableWithHeader(
-			"",
-			table.Row{"Webseed", "Download Rate"},
-			segWebseeds,
-		)
-	}
-
-	return nil
-}
-
-func getSegmentRow(segment diagnostics.SegmentDownloadStatistics) table.Row {
-	peersDownloadRate := getSegmentDownloadRate(segment.Peers)
-	webseedsDownloadRate := getSegmentDownloadRate(segment.Webseeds)
+func getFileRow(file diagnostics.SegmentDownloadStatistics) table.Row {
+	peersDownloadRate := getFileDownloadRate(file.Peers)
+	webseedsDownloadRate := getFileDownloadRate(file.Webseeds)
 	totalDownloadRate := peersDownloadRate + webseedsDownloadRate
-	downloadedPercent := float32(segment.DownloadedBytes) / float32(segment.TotalBytes/100)
-	remainingBytes := segment.TotalBytes - segment.DownloadedBytes
+	downloadedPercent := float32(file.DownloadedBytes) / float32(file.TotalBytes/100)
+	remainingBytes := file.TotalBytes - file.DownloadedBytes
 	downloadTimeLeft := util.CalculateTime(remainingBytes, totalDownloadRate)
 	isActive := "false"
 	if totalDownloadRate > 0 {
@@ -209,13 +227,13 @@ func getSegmentRow(segment diagnostics.SegmentDownloadStatistics) table.Row {
 	}
 
 	row := table.Row{
-		segment.Name,
+		file.Name,
 		fmt.Sprintf("%.2f%%", downloadedPercent),
-		common.ByteCount(segment.TotalBytes),
-		common.ByteCount(segment.DownloadedBytes),
-		len(segment.Peers),
+		common.ByteCount(file.TotalBytes),
+		common.ByteCount(file.DownloadedBytes),
+		len(file.Peers),
 		common.ByteCount(peersDownloadRate) + "/s",
-		len(segment.Webseeds),
+		len(file.Webseeds),
 		common.ByteCount(webseedsDownloadRate) + "/s",
 		downloadTimeLeft,
 		isActive,
@@ -239,7 +257,7 @@ func getPeersRows(peers []diagnostics.SegmentPeer) []table.Row {
 	return rows
 }
 
-func getSegmentDownloadRate(peers []diagnostics.SegmentPeer) uint64 {
+func getFileDownloadRate(peers []diagnostics.SegmentPeer) uint64 {
 	var downloadRate uint64
 
 	for _, peer := range peers {
