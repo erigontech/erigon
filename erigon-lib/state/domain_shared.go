@@ -363,15 +363,19 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 				return nil, nil // save storage key as is
 			}
 			// Optimised key referencing a state file record (file number and offset within the file)
-			storagePlainKey, found, value := sto.lookupByShortenedKey(key, storageGetter)
+			storagePlainKey, found := sto.lookupByShortenedKey(key, storageGetter)
 			if !found {
 				s0, s1 := fStartTxNum/sd.aggCtx.a.StepSize(), fEndTxNum/sd.aggCtx.a.StepSize()
 				sd.logger.Crit("replace back lost storage full key", "shortened", fmt.Sprintf("%x", key),
 					"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, decodeShorterKey(key)))
 				return nil, fmt.Errorf("replace back lost storage full key: %x", key)
 			}
-			if sd.sdCtx != nil && sd.sdCtx.storage != nil {
-				sd.sdCtx.storage[string(storagePlainKey)] = value
+			if sd.sdCtx != nil {
+				v, _, err := sd.DomainGet(kv.StorageDomain, storagePlainKey, nil)
+				if err != nil {
+					return nil, err
+				}
+				sd.sdCtx.storage[string(storagePlainKey)] = v
 			}
 			return storagePlainKey, nil
 		}
@@ -380,22 +384,24 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 			return nil, nil // save account key as is
 		}
 
-		apkBuf, found, value := acc.lookupByShortenedKey(key, accountGetter)
+		apkBuf, found := acc.lookupByShortenedKey(key, accountGetter)
 		if !found {
 			s0, s1 := fStartTxNum/sd.aggCtx.a.StepSize(), fEndTxNum/sd.aggCtx.a.StepSize()
 			sd.logger.Crit("replace back lost account full key", "shortened", fmt.Sprintf("%x", key),
 				"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, decodeShorterKey(key)))
 			return nil, fmt.Errorf("replace back lost account full key: %x", key)
 		}
-		if sd.sdCtx != nil && sd.sdCtx.account != nil {
-			sd.sdCtx.account[string(apkBuf)] = value
+		if sd.sdCtx != nil {
+			v, _, err := sd.DomainGet(kv.AccountsDomain, apkBuf, nil)
+			if err != nil {
+				return nil, err
+			}
+			sd.sdCtx.account[string(apkBuf)] = v
 			codeToCache, _, err := sd.DomainGet(kv.CodeDomain, apkBuf, nil)
 			if err != nil {
 				return nil, err
 			}
-			if codeToCache != nil {
-				sd.sdCtx.code[string(apkBuf)] = codeToCache
-			}
+			sd.sdCtx.code[string(apkBuf)] = codeToCache
 		}
 		return apkBuf, nil
 	})
