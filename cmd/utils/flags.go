@@ -137,7 +137,7 @@ var (
 		Usage: "Lock memory maps for recent ethash mining DAGs",
 	}
 	ExternalConsensusFlag = cli.BoolFlag{
-		Name:  "exeternal",
+		Name:  "external",
 		Usage: "Enables the external consensus layer",
 	}
 	// Transaction pool settings
