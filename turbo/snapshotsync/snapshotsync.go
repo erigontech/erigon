@@ -205,7 +205,10 @@ func getMinimumBlocksToDownload(tx kv.Tx, blockReader services.FullBlockReader, 
 		if blockNum == frozenBlocks-expectedPruneBlockAmount {
 			minStepToDownload = (baseTxNum / config3.HistoryV3AggregationStep) + 1
 		}
-		newMinToDownload := frozenBlocks - blockNum
+		newMinToDownload := uint64(0)
+		if frozenBlocks > blockNum {
+			newMinToDownload = frozenBlocks - blockNum
+		}
 		if newMinToDownload < minToDownload {
 			minToDownload = newMinToDownload
 		}
