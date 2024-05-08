@@ -531,6 +531,7 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 }
 
 func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logger) error {
+
 	tx, err := cfg.db.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -578,8 +579,10 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 		if info.To-info.From != snaptype.Erigon2MergeLimit {
 			continue
 		}
-		if _, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: []string{file}}); err != nil {
-			return err
+		if cfg.snapshotDownloader != nil {
+			if _, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: []string{file}}); err != nil {
+				return err
+			}
 		}
 		if err := cfg.blockReader.Snapshots().Delete(file); err != nil {
 			return err
