@@ -55,7 +55,7 @@ func HermezCardonaGenesisBlock() *types.Genesis {
 	}
 }
 
-func HermezCardonaInternalGenesisBlock() *types.Genesis {
+func HermezBaliGenesisBlock() *types.Genesis {
 	return &types.Genesis{
 		Config:     params.HermezBaliChainConfig,
 		Timestamp:  1701336708,
@@ -135,16 +135,6 @@ func processAccount(s *smt.SMT, root *big.Int, a *types.GenesisAccount, addr lib
 		}
 	}
 	return s.LastRoot(), nil
-}
-
-func DynamicGenesisBlock(chain string) *types.Genesis {
-	return &types.Genesis{
-		Config:     params.DynamicChainConfig(chain),
-		Timestamp:  0x0,
-		GasLimit:   0x0,
-		Difficulty: big.NewInt(0x0),
-		Alloc:      dynamicPrealloc(chain),
-	}
 }
 
 func dynamicPrealloc(ch string) types.GenesisAlloc {

@@ -6,30 +6,32 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/cli"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/cmd/utils/flags"
+
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 )
 
 var (
-	chaindata                      string
-	databaseVerbosity              int
-	referenceChaindata             string
-	block, pruneTo, unwind         uint64
-	unwindEvery                    uint64
-	batchSizeStr                   string
-	reset, warmup, noCommit        bool
-	bucket                         string
-	datadirCli, toChaindata        string
-	migration                      string
-	integrityFast, integritySlow   bool
-	file                           string
-	HeimdallURL                    string
-	txtrace                        bool // Whether to trace the execution (should only be used together with `block`)
-	pruneFlag                      string
-	pruneH, pruneR, pruneT, pruneC uint64
-	pruneHBefore, pruneRBefore     uint64
-	pruneTBefore, pruneCBefore     uint64
-	experiments                    []string
-	chain                          string // Which chain to use (mainnet, goerli, sepolia, etc.)
+	chaindata                               string
+	databaseVerbosity                       int
+	referenceChaindata                      string
+	block, pruneTo, unwind                  uint64
+	unwindEvery                             uint64
+	batchSizeStr                            string
+	reset, warmup, noCommit                 bool
+	bucket                                  string
+	datadirCli, datadirCompare, toChaindata string
+	migration                               string
+	integrityFast, integritySlow            bool
+	file                                    string
+	HeimdallURL                             string
+	txtrace                                 bool // Whether to trace the execution (should only be used together with `block`)
+	pruneFlag                               string
+	pruneH, pruneR, pruneT, pruneC          uint64
+	pruneHBefore, pruneRBefore              uint64
+	pruneTBefore, pruneCBefore              uint64
+	experiments                             []string
+	chain                                   string // Which chain to use (mainnet, goerli, sepolia, etc.)
 
 	commitmentMode string
 	commitmentTrie string
@@ -112,6 +114,16 @@ func withDataDir2(cmd *cobra.Command) {
 	must(cmd.MarkFlagDirname(utils.DataDirFlag.Name))
 	must(cmd.MarkFlagRequired(utils.DataDirFlag.Name))
 	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning.")
+}
+
+func withDataDirCompare(cmd *cobra.Command) {
+	DataDirCompareFlag := flags.DirectoryFlag{
+		Name:  "datadir-compare",
+		Usage: "Data directory for the database to compare with",
+		Value: "",
+	}
+	cmd.Flags().StringVar(&datadirCompare, DataDirCompareFlag.Name, "", DataDirCompareFlag.Usage)
+	must(cmd.MarkFlagDirname(DataDirCompareFlag.Name))
 }
 
 func withDataDir(cmd *cobra.Command) {

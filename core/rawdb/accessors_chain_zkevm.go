@@ -153,7 +153,7 @@ func ReadReceipts_zkEvm(db kv.Tx, block *types.Block, senders []libcommon.Addres
 
 	//[hack] there was a cumulativeGasUsed bug priod to forkid8, so we need to check for it
 	hermezDb := hermez_db.NewHermezDbReader(db)
-	forkid8BlockNum, _ := hermezDb.GetForkIdBlock(8)
+	forkid8BlockNum, _, _ := hermezDb.GetForkIdBlock(8)
 
 	if err := receipts.DeriveFields_zkEvm(forkid8BlockNum, block.Hash(), block.NumberU64(), block.Transactions(), senders); err != nil {
 		log.Error("Failed to derive block receipts fields", "hash", block.Hash(), "number", block.NumberU64(), "err", err, "stack", dbg.Stack())

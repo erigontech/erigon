@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
@@ -150,10 +151,10 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 		return err
 	}
 	logCtx := sync.PrintTimings()
-	var tableSizes []interface{}
+	// var tableSizes []interface{}
 	var commitTime time.Duration
 	if canRunCycleInOneTransaction && !externalTx {
-		tableSizes = stagedsync.PrintTables(db, txc.Tx) // Need to do this before commit to access tx
+		// tableSizes = stagedsync.PrintTables(db, txc.Tx) // Need to do this before commit to access tx
 		commitStart := time.Now()
 		errTx := txc.Tx.Commit()
 		txc.Tx = nil
@@ -172,12 +173,12 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	if canRunCycleInOneTransaction && !externalTx && commitTime > 500*time.Millisecond {
 		logger.Info("Commit cycle", "in", commitTime)
 	}
-	if len(logCtx) > 0 { // No printing of timings or table sizes if there were no progress
-		logger.Info("Timings (slower than 50ms)", logCtx...)
-		if len(tableSizes) > 0 {
-			logger.Info("Tables", tableSizes...)
-		}
-	}
+	//if len(logCtx) > 0 { // No printing of timings or table sizes if there were no progress
+	var m runtime.MemStats
+	dbg.ReadMemStats(&m)
+	logCtx = append(logCtx, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+	logger.Info("Timings (slower than 50ms)", logCtx...)
+
 	// -- send notifications END
 
 	// -- Prune+commit(sync)

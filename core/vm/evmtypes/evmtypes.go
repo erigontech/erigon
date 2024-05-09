@@ -116,4 +116,6 @@ type IntraBlockState interface {
 	AddLog(*types.Log)
 	AddLog_zkEvm(*types.Log)
 	GetLogs(hash common.Hash) []*types.Log
+	GetBlockStateRoot(blockNum uint64) common.Hash
+	GetBlockNumber() *uint256.Int
 }

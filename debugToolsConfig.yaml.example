@@ -1,4 +1,5 @@
 
 url: "localhost:8545"
+localUrl: "http://0.0.0.0:8123"
 block: "0x9095F"
 dumpFileName: "storageDump.json"

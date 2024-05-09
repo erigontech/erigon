@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 )
 
-var totalSteps = math.Pow(2, 23)
+var totalSteps = 1 << 23
 
 const (
 	MCPL    = 23
@@ -46,6 +46,15 @@ type Counter struct {
 	used          int
 	name          string
 	initialAmount int
+}
+
+func (c *Counter) Clone() *Counter {
+	return &Counter{
+		remaining:     c.remaining,
+		used:          c.used,
+		name:          c.name,
+		initialAmount: c.initialAmount,
+	}
 }
 
 func (c *Counter) Used() int { return c.used }
@@ -90,16 +99,6 @@ var (
 	SHA CounterKey = "SHA"
 )
 
-type CounterManager struct {
-	currentCounters    Counters
-	currentTransaction types.Transaction
-	historicalCounters []Counters
-	calls              [256]executionFunc
-	smtMaxLevel        int64
-	smtLevels          int
-	transactionStore   []types.Transaction
-}
-
 type CounterCollector struct {
 	counters    Counters
 	smtLevels   int
@@ -123,10 +122,32 @@ func calculateSmtLevels(smtMaxLevel int, minValue int) int {
 	return binaryLength
 }
 
+func NewUnlimitedCounterCollector() *CounterCollector {
+	return &CounterCollector{
+		counters:  unlimitedCounters(),
+		smtLevels: math.MaxInt32,
+	}
+}
+
 func NewCounterCollector(smtLevels int) *CounterCollector {
 	return &CounterCollector{
 		counters:  defaultCounters(),
 		smtLevels: smtLevels,
+	}
+}
+
+func (cc *CounterCollector) Clone() *CounterCollector {
+	var clonedCounters Counters = Counters{}
+
+	for k, v := range cc.counters {
+		clonedCounters[k] = v.Clone()
+	}
+
+	return &CounterCollector{
+		counters:    clonedCounters,
+		smtLevels:   cc.smtLevels,
+		isDeploy:    cc.isDeploy,
+		transaction: cc.transaction, // no need to make deep clone of a transaction
 	}
 }
 
@@ -138,44 +159,89 @@ func (cc *CounterCollector) Deduct(key CounterKey, amount int) {
 func defaultCounters() Counters {
 	return Counters{
 		S: {
-			remaining:     int(totalSteps),
+			remaining:     totalSteps,
 			name:          "totalSteps",
-			initialAmount: int(totalSteps),
+			initialAmount: totalSteps,
 		},
 		A: {
-			remaining:     int(math.Floor(totalSteps / 32)),
+			remaining:     totalSteps >> 5,
 			name:          "arith",
-			initialAmount: int(math.Floor(totalSteps / 32)),
+			initialAmount: totalSteps >> 5,
 		},
 		B: {
-			remaining:     int(math.Floor(totalSteps / 16)),
+			remaining:     totalSteps >> 4,
 			name:          "binary",
-			initialAmount: int(math.Floor(totalSteps / 16)),
+			initialAmount: totalSteps >> 4,
 		},
 		M: {
-			remaining:     int(math.Floor(totalSteps / 32)),
+			remaining:     totalSteps >> 5,
 			name:          "memAlign",
-			initialAmount: int(math.Floor(totalSteps / 32)),
+			initialAmount: totalSteps >> 5,
 		},
 		K: {
-			remaining:     int(math.Floor(totalSteps/155286) * 44),
+			remaining:     int(math.Floor(float64(totalSteps)/155286) * 44),
 			name:          "keccaks",
-			initialAmount: int(math.Floor(totalSteps/155286) * 44),
+			initialAmount: int(math.Floor(float64(totalSteps)/155286) * 44),
 		},
 		D: {
-			remaining:     int(math.Floor(totalSteps / 56)),
+			remaining:     int(math.Floor(float64(totalSteps) / 56)),
 			name:          "padding",
-			initialAmount: int(math.Floor(totalSteps / 56)),
+			initialAmount: int(math.Floor(float64(totalSteps) / 56)),
 		},
 		P: {
-			remaining:     int(math.Floor(totalSteps / 30)),
+			remaining:     int(math.Floor(float64(totalSteps) / 30)),
 			name:          "poseidon",
-			initialAmount: int(math.Floor(totalSteps / 30)),
+			initialAmount: int(math.Floor(float64(totalSteps) / 30)),
 		},
 		SHA: {
-			remaining:     int(math.Floor(totalSteps-1)/31488) * 7,
+			remaining:     int(math.Floor(float64(totalSteps-1)/31488)) * 7,
 			name:          "sha256",
-			initialAmount: int(math.Floor(totalSteps-1)/31488) * 7,
+			initialAmount: int(math.Floor(float64(totalSteps-1)/31488)) * 7,
+		},
+	}
+}
+
+func unlimitedCounters() Counters {
+	return Counters{
+		S: {
+			remaining:     math.MaxInt32,
+			name:          "totalSteps",
+			initialAmount: math.MaxInt32,
+		},
+		A: {
+			remaining:     math.MaxInt32,
+			name:          "arith",
+			initialAmount: math.MaxInt32,
+		},
+		B: {
+			remaining:     math.MaxInt32,
+			name:          "binary",
+			initialAmount: math.MaxInt32,
+		},
+		M: {
+			remaining:     math.MaxInt32,
+			name:          "memAlign",
+			initialAmount: math.MaxInt32,
+		},
+		K: {
+			remaining:     math.MaxInt32,
+			name:          "keccaks",
+			initialAmount: math.MaxInt32,
+		},
+		D: {
+			remaining:     math.MaxInt32,
+			name:          "padding",
+			initialAmount: math.MaxInt32,
+		},
+		P: {
+			remaining:     math.MaxInt32,
+			name:          "poseidon",
+			initialAmount: math.MaxInt32,
+		},
+		SHA: {
+			remaining:     math.MaxInt32,
+			name:          "sha256",
+			initialAmount: math.MaxInt32,
 		},
 	}
 }
@@ -388,8 +454,8 @@ func (cc *CounterCollector) SHRarith() {
 }
 
 func (cc *CounterCollector) SHLarith() {
-	cc.Deduct(S, 100)
-	cc.Deduct(B, 4)
+	cc.Deduct(S, 40)
+	cc.Deduct(B, 2)
 	cc.Deduct(A, 2)
 }
 
@@ -401,7 +467,7 @@ func (cc *CounterCollector) divArith() {
 
 func (cc *CounterCollector) opCode(scope *ScopeContext) {
 	cc.Deduct(S, 12)
-	if scope.Contract.IsCreate || cc.isDeploy {
+	if scope.Contract.IsCreate {
 		cc.mLoadX()
 		cc.SHRarith()
 	}
@@ -1672,6 +1738,7 @@ func (cc *CounterCollector) opPush(num int, scope *ScopeContext) {
 			cc.Deduct(S, 10)
 			for i := 0; i < num; i++ {
 				cc.Deduct(S, 10)
+				cc.SHLarith()
 			}
 		}
 	} else {

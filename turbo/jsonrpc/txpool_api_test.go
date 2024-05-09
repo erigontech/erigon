@@ -53,15 +53,17 @@ func TestTxPoolContent(t *testing.T) {
 	}
 
 	content, err := api.Content(ctx)
+	content_map := content.(map[string]map[string]map[string]*RPCTransaction)
 	require.NoError(err)
 
 	sender := m.Address.String()
-	require.Equal(1, len(content["pending"][sender]))
-	require.Equal(expectValue, content["pending"][sender]["0"].Value.ToInt().Uint64())
+	require.Equal(1, len(content_map["pending"][sender]))
+	require.Equal(expectValue, content_map["pending"][sender]["0"].Value.ToInt().Uint64())
 
 	status, err := api.Status(ctx)
+	status_map := status.(map[string]hexutil.Uint)
 	require.NoError(err)
-	require.Len(status, 3)
-	require.Equal(status["pending"], hexutil.Uint(1))
-	require.Equal(status["queued"], hexutil.Uint(0))
+	require.Len(status_map, 3)
+	require.Equal(status_map["pending"], hexutil.Uint(1))
+	require.Equal(status_map["queued"], hexutil.Uint(0))
 }

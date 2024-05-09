@@ -15,8 +15,8 @@ import (
 func SequencerZkStages(
 	ctx context.Context,
 	l1InfoTreeCfg L1SequencerSyncCfg,
+	sequencerL1BlockSyncCfg SequencerL1BlockSyncCfg,
 	dataStreamCatchupCfg DataStreamCatchupCfg,
-	sequencerInterhashesCfg SequencerInterhashesCfg,
 	exec SequenceBlockCfg,
 	hashState stages.HashStateCfg,
 	zkInterHashesCfg ZkInterHashesCfg,
@@ -40,6 +40,19 @@ func SequencerZkStages(
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx, logger log.Logger) error {
 				return PruneL1SequencerSyncStage(p, tx, l1InfoTreeCfg, ctx)
+			},
+		},
+		{
+			ID:          stages2.L1BlockSync,
+			Description: "L1 Sequencer L1 Block Sync",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, unwinder stages.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+				return SpawnSequencerL1BlockSyncStage(s, unwinder, ctx, txc.Tx, sequencerL1BlockSyncCfg, firstCycle, logger)
+			},
+			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, txc wrap.TxContainer, logger log.Logger) error {
+				return UnwindSequencerL1BlockSyncStage(u, txc.Tx, sequencerL1BlockSyncCfg, ctx, logger)
+			},
+			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx, logger log.Logger) error {
+				return PruneSequencerL1BlockSyncStage(p, tx, sequencerL1BlockSyncCfg, ctx, logger)
 			},
 		},
 		{
@@ -75,20 +88,7 @@ func SequencerZkStages(
 				return UnwindSequenceExecutionStage(u, s, txc.Tx, ctx, exec, firstCycle)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneSequenceExecutionStage(p, tx, exec, ctx, firstCycle)
-			},
-		},
-		{
-			ID:          stages2.IntermediateHashes,
-			Description: "Sequencer Intermediate Hashes",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnSequencerInterhashesStage(s, u, txc.Tx, ctx, sequencerInterhashesCfg, firstCycle)
-			},
-			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindSequencerInterhashsStage(u, s, txc.Tx, ctx, sequencerInterhashesCfg, firstCycle)
-			},
-			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneSequencerInterhashesStage(p, tx, sequencerInterhashesCfg, ctx, firstCycle)
+				return PruneSequenceExecutionStage(p, tx, exec, ctx, firstCycle, logger)
 			},
 		},
 		{
@@ -186,23 +186,6 @@ func SequencerZkStages(
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx, logger log.Logger) error {
 				return stages.PruneTxLookup(p, tx, txLookup, ctx, firstCycle, logger)
-			},
-		},
-		/*
-		  TODO: verify batches stage -- real executor that verifies batches
-		  if it fails, we need to unwind everything up until before the bad batch
-		*/
-		{
-			ID:          stages2.DataStream,
-			Description: "Update the data stream with missing details",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnStageDataStreamCatchup(s, ctx, txc.Tx, dataStreamCatchupCfg)
-			},
-			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return nil
-			},
-			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx, logger log.Logger) error {
-				return nil
 			},
 		},
 		{

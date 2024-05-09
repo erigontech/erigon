@@ -405,6 +405,11 @@ var (
 		Usage: "The time to wait for data to arrive from the stream before reporting an error (0s doesn't check)",
 		Value: "0s",
 	}
+	L1SyncStartBlock = cli.Uint64Flag{
+		Name:  "zkevm.l1-sync-start-block",
+		Usage: "Designed for recovery of the network from the L1 batch data, slower mode of operation than the datastream.  If set the datastream will not be used",
+		Value: 0,
+	}
 	L1ChainIdFlag = cli.Uint64Flag{
 		Name:  "zkevm.l1-chain-id",
 		Usage: "Ethereum L1 chain ID",
@@ -459,7 +464,7 @@ var (
 	L1MaticContractAddressFlag = cli.StringFlag{
 		Name:  "zkevm.l1-matic-contract-address",
 		Usage: "Ethereum L1 Matic contract address",
-		Value: "",
+		Value: "0x0",
 	}
 	L1FirstBlockFlag = cli.Uint64Flag{
 		Name:  "zkevm.l1-first-block",
@@ -475,6 +480,21 @@ var (
 		Name:  "zkevm.sequencer-initial-fork-id",
 		Usage: "The initial fork id to launch the sequencer with",
 		Value: 8,
+	}
+	SequencerBlockSealTime = cli.StringFlag{
+		Name:  "zkevm.sequencer-block-seal-time",
+		Usage: "Block seal time. Defaults to 6s",
+		Value: "6s",
+	}
+	SequencerBatchSealTime = cli.StringFlag{
+		Name:  "zkevm.sequencer-batch-seal-time",
+		Usage: "Batch seal time. Defaults to 12s",
+		Value: "12s",
+	}
+	SequencerNonEmptyBatchSealTime = cli.StringFlag{
+		Name:  "zkevm.sequencer-non-empty-batch-seal-time",
+		Usage: "Batch seal time. Defaults to 3s",
+		Value: "3s",
 	}
 	ExecutorUrls = cli.StringFlag{
 		Name:  "zkevm.executor-urls",
@@ -506,6 +526,11 @@ var (
 		Usage: "Define the host used for the zkevm data stream",
 		Value: "",
 	}
+	L1QueryBlocksThreads = cli.Uint64Flag{
+		Name:  "zkevm.l1-query-blocks-threads",
+		Usage: "Define the number of threads used to query blocks from L1",
+		Value: 1,
+	}
 	AllowFreeTransactions = cli.BoolFlag{
 		Name:  "zkevm.allow-free-transactions",
 		Usage: "Allow the sequencer to proceed transactions with 0 gas price",
@@ -516,8 +541,13 @@ var (
 		Usage: "Allow the sequencer to proceed pre-EIP155 transactions",
 		Value: false,
 	}
-	EffectiveGasPriceForTransfer = cli.Float64Flag{
-		Name:  "zkevm.effective-gas-price-transfer",
+	EffectiveGasPriceForEthTransfer = cli.Float64Flag{
+		Name:  "zkevm.effective-gas-price-eth-transfer",
+		Usage: "Set the effective gas price in percentage for transfers",
+		Value: 1,
+	}
+	EffectiveGasPriceForErc20Transfer = cli.Float64Flag{
+		Name:  "zkevm.effective-gas-price-erc20-transfer",
 		Usage: "Set the effective gas price in percentage for transfers",
 		Value: 1,
 	}
@@ -531,10 +561,45 @@ var (
 		Usage: "Set the effective gas price in percentage for contract deployment",
 		Value: 1,
 	}
+	DefaultGasPrice = cli.Uint64Flag{
+		Name:  "zkevm.default-gas-price",
+		Usage: "Set the default/min gas price",
+		Value: 0,
+	}
+	MaxGasPrice = cli.Uint64Flag{
+		Name:  "zkevm.max-gas-price",
+		Usage: "Set the max gas price",
+		Value: 0,
+	}
+	GasPriceFactor = cli.Float64Flag{
+		Name:  "zkevm.gas-price-factor",
+		Usage: "Apply factor to L1 gas price to calculate l2 gasPrice",
+		Value: 1,
+	}
 	WitnessFullFlag = cli.BoolFlag{
 		Name:  "zkevm.witness-full",
 		Usage: "Enable/Diable witness full",
 		Value: true,
+	}
+	SyncLimit = cli.UintFlag{
+		Name:  "zkevm.sync-limit",
+		Usage: "Limit the number of blocks to sync, this will halt batches and execution to this number but keep the node active",
+		Value: 0,
+	}
+	PoolManagerUrl = cli.StringFlag{
+		Name:  "zkevm.pool-manager-url",
+		Usage: "The URL of the pool manager. If set, eth_sendRawTransaction will be redirected there.",
+		Value: "",
+	}
+	DisableVirtualCounters = cli.BoolFlag{
+		Name:  "zkevm.disable-virtual-counters",
+		Usage: "Disable the virtual counters. This has an effect on on sequencer node and when external executor is not enabled.",
+		Value: false,
+	}
+	SupportGasless = cli.BoolFlag{
+		Name:  "zkevm.gasless",
+		Usage: "Support gasless transactions",
+		Value: false,
 	}
 	DebugLimit = cli.UintFlag{
 		Name:  "debug.limit",

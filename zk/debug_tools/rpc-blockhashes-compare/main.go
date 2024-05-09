@@ -25,7 +25,7 @@ func main() {
 	if err != nil {
 		panic(fmt.Sprintf("ethclient.Dial: %s", err))
 	}
-	rpcClientLocal, err := ethclient.Dial("http://localhost:8545")
+	rpcClientLocal, err := ethclient.Dial(rpcConfig.LocalUrl)
 	if err != nil {
 		panic(fmt.Sprintf("ethclient.Dial: %s", err))
 	}

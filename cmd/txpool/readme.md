@@ -6,7 +6,7 @@ Erigon's TxPool can work inside Erigon (default) and as separated process.
 Erigon's pool implementation is not fork of Geth’s, has Apache license - Design
 docs: https://github.com/ledgerwatch/erigon/wiki/Transaction-Pool-Design
 95% of pool-related code (from p2p message parsing, to sorting logic) is inside this
-folder: https://github.com/gateway-fm/cdk-erigon-lib/tree/main/txpool
+folder: https://github.com/ledgerwatch/erigon-lib/tree/main/txpool
 
 ## Internal mode
 

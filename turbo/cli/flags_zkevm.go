@@ -35,11 +35,33 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		panic(fmt.Sprintf("could not parse l2 datastreamer timeout value %s", l2DataStreamTimeoutVal))
 	}
 
-	effectiveGasPriceForTransferVal := ctx.Float64(utils.EffectiveGasPriceForTransfer.Name)
+	sequencerBlockSealTimeVal := ctx.String(utils.SequencerBlockSealTime.Name)
+	sequencerBlockSealTime, err := time.ParseDuration(sequencerBlockSealTimeVal)
+	if err != nil {
+		panic(fmt.Sprintf("could not parse sequencer block seal time timeout value %s", sequencerBlockSealTimeVal))
+	}
+
+	sequencerBatchSealTimeVal := ctx.String(utils.SequencerBatchSealTime.Name)
+	sequencerBatchSealTime, err := time.ParseDuration(sequencerBatchSealTimeVal)
+	if err != nil {
+		panic(fmt.Sprintf("could not parse sequencer batch seal time timeout value %s", sequencerBatchSealTimeVal))
+	}
+
+	sequencerNonEmptyBatchSealTimeVal := ctx.String(utils.SequencerNonEmptyBatchSealTime.Name)
+	sequencerNonEmptyBatchSealTime, err := time.ParseDuration(sequencerNonEmptyBatchSealTimeVal)
+	if err != nil {
+		panic(fmt.Sprintf("could not parse sequencer batch seal time timeout value %s", sequencerNonEmptyBatchSealTimeVal))
+	}
+
+	effectiveGasPriceForEthTransferVal := ctx.Float64(utils.EffectiveGasPriceForEthTransfer.Name)
+	effectiveGasPriceForErc20TransferVal := ctx.Float64(utils.EffectiveGasPriceForErc20Transfer.Name)
 	effectiveGasPriceForContractInvocationVal := ctx.Float64(utils.EffectiveGasPriceForContractInvocation.Name)
 	effectiveGasPriceForContractDeploymentVal := ctx.Float64(utils.EffectiveGasPriceForContractDeployment.Name)
-	if effectiveGasPriceForTransferVal < 0 || effectiveGasPriceForTransferVal > 1 {
-		panic("Effective gas price for transfer must be in interval [0; 1]")
+	if effectiveGasPriceForEthTransferVal < 0 || effectiveGasPriceForEthTransferVal > 1 {
+		panic("Effective gas price for eth transfer must be in interval [0; 1]")
+	}
+	if effectiveGasPriceForErc20TransferVal < 0 || effectiveGasPriceForErc20TransferVal > 1 {
+		panic("Effective gas price for erc20 transfer must be in interval [0; 1]")
 	}
 	if effectiveGasPriceForContractInvocationVal < 0 || effectiveGasPriceForContractInvocationVal > 1 {
 		panic("Effective gas price for contract invocation must be in interval [0; 1]")
@@ -53,6 +75,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		L2RpcUrl:                               ctx.String(utils.L2RpcUrlFlag.Name),
 		L2DataStreamerUrl:                      ctx.String(utils.L2DataStreamerUrlFlag.Name),
 		L2DataStreamerTimeout:                  l2DataStreamTimeout,
+		L1SyncStartBlock:                       ctx.Uint64(utils.L1SyncStartBlock.Name),
 		L1ChainId:                              ctx.Uint64(utils.L1ChainIdFlag.Name),
 		L1RpcUrl:                               ctx.String(utils.L1RpcUrlFlag.Name),
 		AddressSequencer:                       libcommon.HexToAddress(ctx.String(utils.AddressSequencerFlag.Name)),
@@ -69,47 +92,59 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		DatastreamVersion:                      ctx.Int(utils.DatastreamVersionFlag.Name),
 		RebuildTreeAfter:                       ctx.Uint64(utils.RebuildTreeAfterFlag.Name),
 		SequencerInitialForkId:                 ctx.Uint64(utils.SequencerInitialForkId.Name),
+		SequencerBlockSealTime:                 sequencerBlockSealTime,
+		SequencerBatchSealTime:                 sequencerBatchSealTime,
+		SequencerNonEmptyBatchSealTime:         sequencerNonEmptyBatchSealTime,
 		ExecutorUrls:                           strings.Split(ctx.String(utils.ExecutorUrls.Name), ","),
 		ExecutorStrictMode:                     ctx.Bool(utils.ExecutorStrictMode.Name),
+		L1QueryBlocksThreads:                   ctx.Uint64(utils.L1QueryBlocksThreads.Name),
 		AllowFreeTransactions:                  ctx.Bool(utils.AllowFreeTransactions.Name),
 		AllowPreEIP155Transactions:             ctx.Bool(utils.AllowPreEIP155Transactions.Name),
-		EffectiveGasPriceForTransfer:           uint8(math.Round(effectiveGasPriceForTransferVal * 255.0)),
+		EffectiveGasPriceForEthTransfer:        uint8(math.Round(effectiveGasPriceForEthTransferVal * 255.0)),
+		EffectiveGasPriceForErc20Transfer:      uint8(math.Round(effectiveGasPriceForErc20TransferVal * 255.0)),
 		EffectiveGasPriceForContractInvocation: uint8(math.Round(effectiveGasPriceForContractInvocationVal * 255.0)),
 		EffectiveGasPriceForContractDeployment: uint8(math.Round(effectiveGasPriceForContractDeploymentVal * 255.0)),
+		DefaultGasPrice:                        ctx.Uint64(utils.DefaultGasPrice.Name),
+		MaxGasPrice:                            ctx.Uint64(utils.MaxGasPrice.Name),
+		GasPriceFactor:                         ctx.Float64(utils.GasPriceFactor.Name),
 		WitnessFull:                            ctx.Bool(utils.WitnessFullFlag.Name),
+		SyncLimit:                              ctx.Uint64(utils.SyncLimit.Name),
+		Gasless:                                ctx.Bool(utils.SupportGasless.Name),
 		DebugLimit:                             ctx.Uint64(utils.DebugLimit.Name),
 		DebugStep:                              ctx.Uint64(utils.DebugStep.Name),
 		DebugStepAfter:                         ctx.Uint64(utils.DebugStepAfter.Name),
+		PoolManagerUrl:                         ctx.String(utils.PoolManagerUrl.Name),
+		DisableVirtualCounters:                 ctx.Bool(utils.DisableVirtualCounters.Name),
 	}
 
 	checkFlag(utils.L2ChainIdFlag.Name, cfg.Zk.L2ChainId)
 	if !sequencer.IsSequencer() {
 		checkFlag(utils.L2RpcUrlFlag.Name, cfg.Zk.L2RpcUrl)
-		checkFlag(utils.L2DataStreamerUrlFlag.Name, cfg.Zk.L2DataStreamerUrl)
-		checkFlag(utils.L2DataStreamerTimeout.Name, cfg.Zk.L2DataStreamerTimeout)
+		checkFlag(utils.L2DataStreamerUrlFlag.Name, cfg.L2DataStreamerUrl)
+		checkFlag(utils.L2DataStreamerTimeout.Name, cfg.L2DataStreamerTimeout)
 	} else {
-		checkFlag(utils.SequencerInitialForkId.Name, cfg.Zk.SequencerInitialForkId)
-		checkFlag(utils.ExecutorUrls.Name, cfg.Zk.ExecutorUrls)
-		checkFlag(utils.ExecutorStrictMode.Name, cfg.Zk.ExecutorStrictMode)
+		checkFlag(utils.SequencerInitialForkId.Name, cfg.SequencerInitialForkId)
+		checkFlag(utils.ExecutorUrls.Name, cfg.ExecutorUrls)
+		checkFlag(utils.ExecutorStrictMode.Name, cfg.ExecutorStrictMode)
 
 		// if we are running in strict mode, the default, and we have no executor URLs then we panic
-		if cfg.Zk.ExecutorStrictMode && (len(cfg.Zk.ExecutorUrls) == 0 || cfg.Zk.ExecutorUrls[0] == "") {
+		if cfg.ExecutorStrictMode && !cfg.HasExecutors() {
 			panic("You must set executor urls when running in executor strict mode (zkevm.executor-strict)")
 		}
 	}
 
-	checkFlag(utils.AddressSequencerFlag.Name, cfg.Zk.AddressSequencer)
-	checkFlag(utils.AddressAdminFlag.Name, cfg.Zk.AddressAdmin)
-	checkFlag(utils.AddressRollupFlag.Name, cfg.Zk.AddressRollup)
-	checkFlag(utils.AddressZkevmFlag.Name, cfg.Zk.AddressZkevm)
-	checkFlag(utils.AddressGerManagerFlag.Name, cfg.Zk.AddressGerManager)
+	checkFlag(utils.AddressSequencerFlag.Name, cfg.AddressSequencer)
+	checkFlag(utils.AddressAdminFlag.Name, cfg.AddressAdmin)
+	checkFlag(utils.AddressRollupFlag.Name, cfg.AddressRollup)
+	checkFlag(utils.AddressZkevmFlag.Name, cfg.AddressZkevm)
+	checkFlag(utils.AddressGerManagerFlag.Name, cfg.AddressGerManager)
 
-	checkFlag(utils.L1ChainIdFlag.Name, cfg.Zk.L1ChainId)
-	checkFlag(utils.L1RpcUrlFlag.Name, cfg.Zk.L1RpcUrl)
-	checkFlag(utils.L1MaticContractAddressFlag.Name, cfg.Zk.L1MaticContractAddress.Hex())
-	checkFlag(utils.L1FirstBlockFlag.Name, cfg.Zk.L1FirstBlock)
-	checkFlag(utils.RpcRateLimitsFlag.Name, cfg.Zk.RpcRateLimits)
-	checkFlag(utils.RebuildTreeAfterFlag.Name, cfg.Zk.RebuildTreeAfter)
-	checkFlag(utils.L1BlockRangeFlag.Name, cfg.Zk.L1BlockRange)
-	checkFlag(utils.L1QueryDelayFlag.Name, cfg.Zk.L1QueryDelay)
+	checkFlag(utils.L1ChainIdFlag.Name, cfg.L1ChainId)
+	checkFlag(utils.L1RpcUrlFlag.Name, cfg.L1RpcUrl)
+	checkFlag(utils.L1MaticContractAddressFlag.Name, cfg.L1MaticContractAddress.Hex())
+	checkFlag(utils.L1FirstBlockFlag.Name, cfg.L1FirstBlock)
+	checkFlag(utils.RpcRateLimitsFlag.Name, cfg.RpcRateLimits)
+	checkFlag(utils.RebuildTreeAfterFlag.Name, cfg.RebuildTreeAfter)
+	checkFlag(utils.L1BlockRangeFlag.Name, cfg.L1BlockRange)
+	checkFlag(utils.L1QueryDelayFlag.Name, cfg.L1QueryDelay)
 }

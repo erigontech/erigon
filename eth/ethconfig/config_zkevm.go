@@ -11,6 +11,7 @@ type Zk struct {
 	L2RpcUrl                               string
 	L2DataStreamerUrl                      string
 	L2DataStreamerTimeout                  time.Duration
+	L1SyncStartBlock                       uint64
 	L1ChainId                              uint64
 	L1RpcUrl                               string
 	AddressSequencer                       common.Address
@@ -26,20 +27,41 @@ type Zk struct {
 	RpcRateLimits                          int
 	DatastreamVersion                      int
 	SequencerInitialForkId                 uint64
+	SequencerBlockSealTime                 time.Duration
+	SequencerBatchSealTime                 time.Duration
+	SequencerNonEmptyBatchSealTime         time.Duration
 	ExecutorUrls                           []string
 	ExecutorStrictMode                     bool
+	L1QueryBlocksThreads                   uint64
 	AllowFreeTransactions                  bool
 	AllowPreEIP155Transactions             bool
-	EffectiveGasPriceForTransfer           uint8
+	EffectiveGasPriceForEthTransfer        uint8
+	EffectiveGasPriceForErc20Transfer      uint8
 	EffectiveGasPriceForContractInvocation uint8
 	EffectiveGasPriceForContractDeployment uint8
+	DefaultGasPrice                        uint64
+	MaxGasPrice                            uint64
+	GasPriceFactor                         float64
 
 	RebuildTreeAfter uint64
 	WitnessFull      bool
+	SyncLimit        uint64
+	Gasless          bool
 
 	DebugLimit     uint64
 	DebugStep      uint64
 	DebugStepAfter uint64
+
+	PoolManagerUrl         string
+	DisableVirtualCounters bool
 }
 
 var DefaultZkConfig = &Zk{}
+
+func (c *Zk) ShouldCountersBeUnlimited() bool {
+	return c.DisableVirtualCounters && !c.ExecutorStrictMode && len(c.ExecutorUrls) != 0
+}
+
+func (c *Zk) HasExecutors() bool {
+	return len(c.ExecutorUrls) > 0 && c.ExecutorUrls[0] != ""
+}

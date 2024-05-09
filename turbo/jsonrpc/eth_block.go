@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto/cryptopool"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
@@ -202,6 +203,19 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 		return nil, err
 	}
 	defer tx.Rollback()
+
+	// get latest executed block
+	executedBlock, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return nil, err
+	}
+
+	// return null if requested block  is higher than executed
+	// made for consistency with zkevm
+	if number > 0 && executedBlock < uint64(number.Int64()) {
+		return nil, nil
+	}
+
 	b, err := api.blockByNumber(ctx, number, tx)
 	if err != nil {
 		return nil, err

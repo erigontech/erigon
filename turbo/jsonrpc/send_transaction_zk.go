@@ -13,6 +13,10 @@ import (
 	"github.com/ledgerwatch/erigon/zkevm/jsonrpc/client"
 )
 
+func (api *APIImpl) isPoolManagerAddressSet() bool {
+	return api.PoolManagerUrl != ""
+}
+
 func (api *APIImpl) isZkNonSequencer(chainId *big.Int) bool {
 	return !sequencer.IsSequencer() && zkchainconfig.IsZk(chainId.Uint64())
 }

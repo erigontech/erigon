@@ -6,7 +6,6 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -15,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
@@ -61,50 +59,15 @@ func ComputeTxEnv_ZkEvm(ctx context.Context, engine consensus.EngineReader, bloc
 		return msg, BlockContext, TxContext, statedb, reader, nil
 	}
 	vmenv := vm.NewEVM(BlockContext, evmtypes.TxContext{}, statedb, cfg, vm.Config{})
-	rules := vmenv.ChainRules()
-
-	consensusHeaderReader := stagedsync.NewChainReaderImpl(cfg, dbtx, nil, log.New())
-
-	core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, header, cfg, statedb, log.New())
 
 	hermezReader := hermez_db.NewHermezDbReader(dbtx)
 
-	///////////////////////////////////////////
-	// [zkevm] finish set preexecution state //
-	///////////////////////////////////////////
-	//[zkevm] get batches between last block and this one
-	// plus this blocks ger
-	lastBatchInserted, err := hermezReader.GetBatchNoByL2Block(BlockContext.BlockNumber - 1)
-	if err != nil {
-		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, fmt.Errorf("failed to get last batch inserted: %v", err)
-	}
+	// _, excessBlobGas, err = core.PrepareBlockTxExecution(cfg, engine.(consensus.Engine), stagedsync.NewChainReaderImpl(cfg, dbtx, nil), block, statedb, hermezReader, block.GasLimit(), false)
+	// if err != nil {
+	// 	return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
+	// }
 
-	// write batches between last block and this if they exist
-	currentBatch, err := hermezReader.GetBatchNoByL2Block(BlockContext.BlockNumber)
-	if err != nil {
-		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
-	}
-
-	gersInBetween, err := hermezReader.GetBatchGlobalExitRoots(lastBatchInserted, currentBatch)
-	if err != nil {
-		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
-	}
-
-	blockGer, err := hermezReader.GetBlockGlobalExitRoot(BlockContext.BlockNumber)
-	if err != nil {
-		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
-	}
-
-	l1BlockHash, err := hermezReader.GetBlockL1BlockHash(BlockContext.BlockNumber)
-	if err != nil {
-		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
-	}
-
-	parentHash := block.ParentHash()
-	statedb.SyncerPreExecuteStateSet(cfg, BlockContext.BlockNumber, BlockContext.Time, &parentHash, &blockGer, &l1BlockHash, gersInBetween)
-	///////////////////////////////////////////
-	// [zkevm] finish set preexecution state //
-	///////////////////////////////////////////
+	rules := vmenv.ChainRules()
 	for idx, txn := range block.Transactions() {
 		select {
 		default:

@@ -1,0 +1,197 @@
+package stages
+
+import (
+	"context"
+	"time"
+
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/kv"
+
+	"bytes"
+	"io"
+
+	mapset "github.com/deckarep/golang-set/v2"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	zktx "github.com/ledgerwatch/erigon/zk/tx"
+)
+
+func getNextPoolTransactions(cfg SequenceBlockCfg, executionAt, forkId uint64, alreadyYielded mapset.Set[[32]byte]) ([]types.Transaction, error) {
+	var transactions []types.Transaction
+	var err error
+	var count int
+	killer := time.NewTicker(50 * time.Millisecond)
+LOOP:
+	for {
+		// ensure we don't spin forever looking for transactions, attempt for a while then exit up to the caller
+		select {
+		case <-killer.C:
+			break LOOP
+		default:
+		}
+		if err := cfg.txPoolDb.View(context.Background(), func(poolTx kv.Tx) error {
+			slots := types2.TxsRlp{}
+			_, count, err = cfg.txPool.YieldBest(yieldSize, &slots, poolTx, executionAt, getGasLimit(uint16(forkId)), 0, alreadyYielded)
+			if err != nil {
+				return err
+			}
+			if count == 0 {
+				time.Sleep(500 * time.Microsecond)
+				return nil
+			}
+			transactions, err = extractTransactionsFromSlot(slots)
+			if err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+
+		if len(transactions) > 0 {
+			break
+		}
+	}
+
+	return transactions, err
+}
+
+func getNextL1BatchData(batchNumber uint64, forkId uint64, hermezDb *hermez_db.HermezDb) ([]zktx.DecodedBatchL2Data, common.Address, bool, error) {
+	// we expect that the batch we're going to load in next should be in the db already because of the l1 block sync
+	// stage, if it is not there we need to panic as we're in a bad state
+	batchL2Data, err := hermezDb.GetL1BatchData(batchNumber)
+	if err != nil {
+		return nil, common.Address{}, true, err
+	}
+
+	if len(batchL2Data) == 0 {
+		// end of the line for batch recovery so return empty
+		return nil, common.Address{}, false, nil
+	}
+
+	coinbase := common.BytesToAddress(batchL2Data[:length.Addr])
+	batchL2Data = batchL2Data[length.Addr:]
+
+	decodedBlockData, err := zktx.DecodeBatchL2Blocks(batchL2Data, forkId)
+	if err != nil {
+		return nil, common.Address{}, true, err
+	}
+
+	// no data means no more work to do - end of the line
+	if len(decodedBlockData) == 0 {
+		return nil, common.Address{}, false, nil
+	}
+
+	isWorkRemaining := true
+	transactionsInBatch := 0
+	for _, batch := range decodedBlockData {
+		transactionsInBatch += len(batch.Transactions)
+	}
+	if transactionsInBatch == 0 {
+		// we need to check if this batch should simply be empty or not so we need to check against the
+		// highest known batch number to see if we have work to do still
+		highestKnown, err := hermezDb.GetLastL1BatchData()
+		if err != nil {
+			return nil, common.Address{}, true, err
+		}
+		if batchNumber >= highestKnown {
+			isWorkRemaining = false
+		}
+	}
+
+	return decodedBlockData, coinbase, isWorkRemaining, err
+}
+
+func extractTransactionsFromSlot(slot types2.TxsRlp) ([]types.Transaction, error) {
+	transactions := make([]types.Transaction, 0, len(slot.Txs))
+	reader := bytes.NewReader([]byte{})
+	stream := new(rlp.Stream)
+	for idx, txBytes := range slot.Txs {
+		reader.Reset(txBytes)
+		stream.Reset(reader, uint64(len(txBytes)))
+		transaction, err := types.DecodeRLPTransaction(stream, false)
+		if err == io.EOF {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		var sender common.Address
+		copy(sender[:], slot.Senders.At(idx))
+		transaction.SetSender(sender)
+		transactions = append(transactions, transaction)
+	}
+	return transactions, nil
+}
+
+func attemptAddTransaction(
+	cfg SequenceBlockCfg,
+	sdb *stageDb,
+	ibs *state.IntraBlockState,
+	batchCounters *vm.BatchCounterCollector,
+	header *types.Header,
+	parentHeader *types.Header,
+	transaction types.Transaction,
+	effectiveGasPrice uint8,
+	l1Recovery bool,
+) (*types.Receipt, bool, error) {
+	txCounters := vm.NewTransactionCounter(transaction, sdb.smt.GetDepth(), cfg.zk.ShouldCountersBeUnlimited() || l1Recovery)
+	overflow, err := batchCounters.AddNewTransactionCounters(txCounters)
+	if err != nil {
+		return nil, false, err
+	}
+	if overflow && !l1Recovery {
+		return nil, true, nil
+	}
+
+	gasPool := new(core.GasPool).AddGas(transactionGasLimit)
+	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(sdb.tx, hash, number) }
+
+	// set the counter collector on the config so that we can gather info during the execution
+	cfg.zkVmConfig.CounterCollector = txCounters.ExecutionCounters()
+
+	// TODO: possibly inject zero tracer here!
+
+	ibs.Init(transaction.Hash(), common.Hash{}, 0)
+
+	receipt, execResult, err := core.ApplyTransaction_zkevm(
+		cfg.chainConfig,
+		core.GetHashFn(header, getHeader),
+		cfg.engine,
+		&cfg.zk.AddressSequencer,
+		gasPool,
+		ibs,
+		noop,
+		header,
+		transaction,
+		&header.GasUsed,
+		*cfg.zkVmConfig,
+		effectiveGasPrice)
+
+	if err != nil {
+		return nil, false, err
+	}
+
+	// we need to keep hold of the effective percentage used
+	// todo [zkevm] for now we're hard coding to the max value but we need to calc this properly
+	if err = sdb.hermezDb.WriteEffectiveGasPricePercentage(transaction.Hash(), effectiveGasPrice); err != nil {
+		return nil, false, err
+	}
+
+	err = txCounters.ProcessTx(ibs, execResult.ReturnData)
+	if err != nil {
+		return nil, false, err
+	}
+
+	// now that we have executed we can check again for an overflow
+	overflow, err = batchCounters.CheckForOverflow()
+
+	return receipt, overflow, err
+}

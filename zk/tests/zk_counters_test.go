@@ -127,12 +127,17 @@ func runTest(t *testing.T, blockReader services.FullBlockReader, test vector, er
 		t.Fatal(err)
 	}
 
-	decodedTransactions, _, _, err := tx.DecodeTxs(test.BatchL2DataDecoded, test.ForkId)
+	decodedBlocks, err := tx.DecodeBatchL2Blocks(test.BatchL2DataDecoded, test.ForkId)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(decodedTransactions) == 0 {
-		fmt.Printf("found no transactions in file %s", fileName)
+	if len(decodedBlocks) == 0 {
+		fmt.Printf("found no blocks in file %s", fileName)
+	}
+	for _, block := range decodedBlocks {
+		if len(block.Transactions) == 0 {
+			fmt.Printf("found no transactions in file %s", fileName)
+		}
 	}
 
 	db, tx := memdb.NewTestTx(t)
@@ -187,7 +192,7 @@ func runTest(t *testing.T, blockReader services.FullBlockReader, test vector, er
 		t.Fatal(err)
 	}
 	smtDepth := sparseTree.GetDepth()
-	for len(test.SmtDepths) < len(decodedTransactions) {
+	for len(test.SmtDepths) < len(decodedBlocks) {
 		test.SmtDepths = append(test.SmtDepths, smtDepth)
 	}
 	if len(test.SmtDepths) == 0 {
@@ -276,52 +281,55 @@ func runTest(t *testing.T, blockReader services.FullBlockReader, test vector, er
 	batchCollector := vm.NewBatchCounterCollector(test.SmtDepths[0], uint16(test.ForkId))
 
 	blockStarted := false
-	for i, transaction := range decodedTransactions {
-		if !blockStarted {
-			overflow, err := batchCollector.StartNewBlock()
+	for i, block := range decodedBlocks {
+		for _, transaction := range block.Transactions {
+			if !blockStarted {
+				overflow, err := batchCollector.StartNewBlock()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if overflow {
+					t.Fatal("unexpected overflow")
+				}
+				blockStarted = true
+			}
+			txCounters := vm.NewTransactionCounter(transaction, test.SmtDepths[i], false)
+			overflow, err := batchCollector.AddNewTransactionCounters(txCounters)
 			if err != nil {
 				t.Fatal(err)
+			}
+
+			gasPool := new(core.GasPool).AddGas(transactionGasLimit)
+
+			vmCfg.CounterCollector = txCounters.ExecutionCounters()
+
+			_, result, err := core.ApplyTransaction_zkevm(
+				chainConfig,
+				core.GetHashFn(header, getHeader),
+				engine,
+				&sequencer,
+				gasPool,
+				ibs,
+				noop,
+				header,
+				transaction,
+				&header.GasUsed,
+				vmCfg,
+				big.NewInt(0), // parent excess data gas
+				zktypes.EFFECTIVE_GAS_PRICE_PERCENTAGE_MAXIMUM)
+
+			if err != nil {
+				// this could be deliberate in the test so just move on and note it
+				fmt.Println("err handling tx", err)
+				continue
 			}
 			if overflow {
 				t.Fatal("unexpected overflow")
 			}
-			blockStarted = true
-		}
-		txCounters := vm.NewTransactionCounter(transaction, test.SmtDepths[i])
-		overflow, err := batchCollector.AddNewTransactionCounters(txCounters)
-		if err != nil {
-			t.Fatal(err)
-		}
 
-		gasPool := new(core.GasPool).AddGas(transactionGasLimit)
-
-		vmCfg.CounterCollector = txCounters.ExecutionCounters()
-
-		_, result, err := core.ApplyTransaction_zkevm(
-			chainConfig,
-			core.GetHashFn(header, getHeader),
-			engine,
-			&sequencer,
-			gasPool,
-			ibs,
-			noop,
-			header,
-			transaction,
-			&header.GasUsed,
-			vmCfg,
-			zktypes.EFFECTIVE_GAS_PRICE_PERCENTAGE_MAXIMUM)
-
-		if err != nil {
-			// this could be deliberate in the test so just move on and note it
-			fmt.Println("err handling tx", err)
-			continue
-		}
-		if overflow {
-			t.Fatal("unexpected overflow")
-		}
-
-		if err = txCounters.ProcessTx(ibs, result.ReturnData); err != nil {
-			t.Fatal(err)
+			if err = txCounters.ProcessTx(ibs, result.ReturnData); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 

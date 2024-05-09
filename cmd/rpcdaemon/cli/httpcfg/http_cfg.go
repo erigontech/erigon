@@ -89,4 +89,5 @@ type HttpCfg struct {
 	// zkevm
 	DataStreamPort int
 	DataStreamHost string
+	L2RpcUrl       string
 }

@@ -1,9 +1,11 @@
 package vm
 
 import (
+	"fmt"
 	"math"
 
 	"github.com/ledgerwatch/erigon/zk/tx"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type BatchCounterCollector struct {
@@ -26,6 +28,29 @@ func NewBatchCounterCollector(smtMaxLevel int, forkId uint16) *BatchCounterColle
 		smtLevelsForTransaction: smtLevelsForTransaction,
 		blockCount:              0,
 		forkId:                  forkId,
+	}
+}
+
+func (bcc *BatchCounterCollector) Clone() *BatchCounterCollector {
+	var l2DataCollector *CounterCollector
+	txSize := len(bcc.transactions)
+	clonedTransactions := make([]*TransactionCounter, txSize)
+
+	for i, tc := range bcc.transactions {
+		clonedTransactions[i] = tc.Clone()
+	}
+
+	if bcc.l2DataCollector != nil {
+		l2DataCollector = bcc.l2DataCollector.Clone()
+	}
+
+	return &BatchCounterCollector{
+		l2DataCollector:         l2DataCollector,
+		transactions:            clonedTransactions,
+		smtLevels:               bcc.smtLevels,
+		smtLevelsForTransaction: bcc.smtLevelsForTransaction,
+		blockCount:              bcc.blockCount,
+		forkId:                  bcc.forkId,
 	}
 }
 
@@ -95,12 +120,24 @@ func (bcc *BatchCounterCollector) CheckForOverflow() (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	overflow := false
 	for _, v := range combined {
 		if v.remaining < 0 {
-			return true, nil
+			log.Info("[VCOUNTER] Counter overflow detected", "counter", v.name, "remaining", v.remaining, "used", v.used)
+			overflow = true
 		}
 	}
-	return false, nil
+
+	// if we have an overflow we want to log the counters for debugging purposes
+	if overflow {
+		logText := "[VCOUNTER] Counters stats"
+		for _, v := range combined {
+			logText += fmt.Sprintf(" %s: initial: %v used: %v (remaining: %v)", v.name, v.initialAmount, v.used, v.remaining)
+		}
+		log.Info(logText)
+	}
+
+	return overflow, nil
 }
 
 // CombineCollectors takes the batch level data from all transactions and combines these counters with each transactions'

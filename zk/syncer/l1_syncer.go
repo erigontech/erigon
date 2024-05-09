@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -30,6 +31,7 @@ type IEtherman interface {
 	BlockByNumber(ctx context.Context, blockNumber *big.Int) (*ethTypes.Block, error)
 	FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]ethTypes.Log, error)
 	CallContract(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error)
+	TransactionByHash(ctx context.Context, hash common.Hash) (ethTypes.Transaction, bool, error)
 }
 
 type fetchJob struct {
@@ -44,11 +46,12 @@ type jobResult struct {
 }
 
 type L1Syncer struct {
-	em                  IEtherman
-	l1ContractAddresses []common.Address
-	topics              [][]common.Hash
-	blockRange          uint64
-	queryDelay          uint64
+	em                   IEtherman
+	l1ContractAddresses  []common.Address
+	topics               [][]common.Hash
+	blockRange           uint64
+	queryDelay           uint64
+	l1QueryBlocksThreads uint64
 
 	latestL1Block uint64
 
@@ -58,20 +61,20 @@ type L1Syncer struct {
 	lastCheckedL1Block atomic.Uint64
 
 	// Channels
-	logsChan            chan ethTypes.Log
+	logsChan            chan []ethTypes.Log
 	progressMessageChan chan string
 }
 
-func NewL1Syncer(em IEtherman, l1ContractAddresses []common.Address, topics [][]common.Hash, blockRange, queryDelay uint64) *L1Syncer {
-
+func NewL1Syncer(em IEtherman, l1ContractAddresses []common.Address, topics [][]common.Hash, blockRange, queryDelay, l1QueryBlocksThreads uint64) *L1Syncer {
 	return &L1Syncer{
-		em:                  em,
-		l1ContractAddresses: l1ContractAddresses,
-		topics:              topics,
-		blockRange:          blockRange,
-		queryDelay:          queryDelay,
-		progressMessageChan: make(chan string),
-		logsChan:            make(chan ethTypes.Log),
+		em:                   em,
+		l1ContractAddresses:  l1ContractAddresses,
+		topics:               topics,
+		blockRange:           blockRange,
+		queryDelay:           queryDelay,
+		l1QueryBlocksThreads: l1QueryBlocksThreads,
+		progressMessageChan:  make(chan string),
+		logsChan:             make(chan []ethTypes.Log),
 	}
 }
 
@@ -88,7 +91,7 @@ func (s *L1Syncer) GetLastCheckedL1Block() uint64 {
 }
 
 // Channels
-func (s *L1Syncer) GetLogsChan() chan ethTypes.Log {
+func (s *L1Syncer) GetLogsChan() chan []ethTypes.Log {
 	return s.logsChan
 }
 
@@ -118,16 +121,15 @@ func (s *L1Syncer) Run(lastCheckedBlock uint64) {
 			latestL1Block, err := s.getLatestL1Block()
 			if err != nil {
 				log.Error("Error getting latest L1 block", "err", err)
-				continue
-			}
-
-			if latestL1Block > s.lastCheckedL1Block.Load() {
-				s.isDownloading.Store(true)
-				if err := s.queryBlocks(); err != nil {
-					log.Error("Error querying blocks", "err", err)
-					continue
+			} else {
+				if latestL1Block > s.lastCheckedL1Block.Load() {
+					s.isDownloading.Store(true)
+					if err := s.queryBlocks(); err != nil {
+						log.Error("Error querying blocks", "err", err)
+					} else {
+						s.lastCheckedL1Block.Store(latestL1Block)
+					}
 				}
-				s.lastCheckedL1Block.Store(latestL1Block)
 			}
 
 			s.isDownloading.Store(false)
@@ -138,6 +140,10 @@ func (s *L1Syncer) Run(lastCheckedBlock uint64) {
 
 func (s *L1Syncer) GetBlock(number uint64) (*ethTypes.Block, error) {
 	return s.em.BlockByNumber(context.Background(), new(big.Int).SetUint64(number))
+}
+
+func (s *L1Syncer) GetTransaction(hash common.Hash) (ethTypes.Transaction, bool, error) {
+	return s.em.TransactionByHash(context.Background(), hash)
 }
 
 func (s *L1Syncer) GetOldAccInputHash(ctx context.Context, addr *common.Address, rollupId, batchNum uint64) (common.Hash, error) {
@@ -174,6 +180,67 @@ func (s *L1Syncer) GetOldAccInputHash(ctx context.Context, addr *common.Address,
 		// if the hash is zero, we need to go back to the previous batch
 		batchNum = previousBatch
 		loopCount++
+	}
+}
+
+func (s *L1Syncer) L1QueryBlocks(logPrefix string, logs []ethTypes.Log) (map[uint64]*ethTypes.Block, error) {
+	// more thread causes error on remote rpc server
+	numThreads := int(s.l1QueryBlocksThreads)
+	blocksMap := map[uint64]*ethTypes.Block{}
+	logsSize := len(logs)
+
+	if numThreads > 1 && logsSize > (numThreads<<2) {
+		var wg sync.WaitGroup
+		var err error
+		blocksArray := make([]*ethTypes.Block, logsSize)
+
+		wg.Add(numThreads)
+
+		for i := 0; i < numThreads; i++ {
+			go func(cpuI int) {
+				defer wg.Done()
+
+				durationTick := time.Now()
+				for j := cpuI; j < logsSize; j += numThreads {
+					l := logs[j]
+					block, e := s.GetBlock(l.BlockNumber)
+					if e != nil {
+						err = e
+						return
+					}
+					blocksArray[j] = block
+					tryToLogL1QueryBlocks(logPrefix, j/numThreads, logsSize/numThreads, cpuI+1, &durationTick)
+				}
+			}(i)
+		}
+		wg.Wait()
+
+		if err != nil {
+			return nil, err
+		}
+
+		for _, block := range blocksArray {
+			blocksMap[block.NumberU64()] = block
+		}
+	} else {
+		durationTick := time.Now()
+		for i, l := range logs {
+			block, err := s.GetBlock(l.BlockNumber)
+			if err != nil {
+				return nil, err
+			}
+			blocksMap[l.BlockNumber] = block
+			tryToLogL1QueryBlocks(logPrefix, i, logsSize, 1, &durationTick)
+		}
+	}
+
+	return blocksMap, nil
+}
+
+func tryToLogL1QueryBlocks(logPrefix string, current, total, threadNum int, durationTick *time.Time) {
+	if time.Since(*durationTick).Seconds() > 10 {
+		log.Info(fmt.Sprintf("[%s] %s %d/%d", logPrefix, "Query L1 blocks", current, total), "thread", threadNum)
+		*durationTick = time.Now()
 	}
 }
 
@@ -243,9 +310,7 @@ loop:
 			}
 			progress += res.Size
 			if len(res.Logs) > 0 {
-				for _, l := range res.Logs {
-					s.logsChan <- l
-				}
+				s.logsChan <- res.Logs
 			}
 
 			if complete == len(fetches) {
@@ -327,7 +392,6 @@ func (s *L1Syncer) callGetRollupSequencedBatches(ctx context.Context, addr *comm
 		return common.Hash{}, 0, errorShortResponseLT32
 	}
 	h := common.BytesToHash(resp[:32])
-	fmt.Printf("hash: %s\n", h.String())
 
 	if len(resp) < 96 {
 		return common.Hash{}, 0, errorShortResponseLT96

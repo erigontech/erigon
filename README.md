@@ -22,15 +22,25 @@ To use chains other than the defaults above, a set of configuration files can be
 
 1. Create a directory `~/dynamic-configs` (in the user home directory)
 2. Ensure your chain name starts with the word `dynamic` e.g. `dynamic-mynetwork`
-3. Create 3 files in dynamic configs (examples for Cardona in `zk/examples/dynamic-configs`):
+3. Create 3 files in dynamic configs (examples for Cardona in `zk/examples/dynamic-configs`, copy these into your dynamic-configs folder and edit as required)
    - `dynamic-{network}-allocs.json` - the allocs file
    - `dynamic-{network}-chainspec.json` - the chainspec file
    - `dynamic-{network}-conf.json` - an additional configuration file
-- Ensure to create a run configuration to set flags, with the network name beginning dynamic
+   - `dynamic-{network}.yaml` - the run config file for erigon.  You can use any of the example yaml files at the root of the repo as a base and edit as required, but ensure the `chain` field is in the format `dynamic-{network}` and matches the names of the config files above.
 
-This could be more concise, however we are attempting to retain upstream compatibility where possible.
+**Tip**: if you have allocs in the format from Polygon when originally launching the network you can save this file to the root of the cdk-erigon code
+base and run `go run cmd/hack/allocs/main.go [your-file-name]` to convert it to the format needed by erigon, this will form the `dynamic-{network}-allocs.json` file.
+
+**Tip**: the contract addresses in the `dynamic-{network}.yaml` can be found in the files output when launching the network:
+- zkevm.address-sequencer => create_rollup_output.json => `sequencer`
+- zkevm.address-zkevm => create_rollup_output.json => `rollupAddress`
+- zkevm.address-admin => deploy_output.json => `admin`
+- zkevm.address-rollup => deploy_output.json => `polygonRollupManagerAddress`
+- zkevm.address-ger-manager => deploy_output.json => `polygonZkEVMGlobalExitRootAddress`
 
 Mount point for this folder on docker container: `~/dynamic-configs` (home directory of erigon user)
+
+To use the new config when starting erigon use the `--config` flag with the path to the config file e.g. `--config="/path/to/home-dir/dynamic-networks/dynamic-mynetwork.yaml"`
 
 ## Prereqs
 In order to use the optimal vectorized poseidon hashing for the Sparse Merkle Tree, on x86 the following packages are required (for Apple silicon it will fall back to the iden3 library and as such these dependencies are not required in that case.
@@ -46,6 +56,18 @@ Due to dependency requirements Go 1.21 is required to build.
 ## Sequencer (WIP)
 
 Enable Sequencer: `CDK_ERIGON_SEQUENCER=1 ./build/bin/cdk-erigon <flags>`
+
+### Special mode - L1 recovery
+The sequencer supports a special recovery mode which allows it to continue the chain using data from the L1.  To enable
+this add the flag `zkevm.l1-sync-start-block: [first l1 block with sequencer data]`.  It is important to find the first block
+on the L1 from the sequencer contract that contains the `sequenceBatches` event.  When the node starts up it will pull of
+the L1 data into the cdk-erigon database and use this during execution rather than waiting for transactions from the txpool, effectively
+rebuilding the chain from the L1 data.  This can be used in tandem with unwinding the chain, or using the `zkevm.sync-limit` flag
+to limit the chain to a certain block height before starting the L1 recovery (useful if you have an RPC node available to speed up the process).
+
+**Important Note:**
+**If using the `zkevm.sync-limit` flag you need to go to the boundary of a batch+1 block so if batch 41 ends at block 99
+then set the sync limit flag to 100.**
 
 ## zkEVM-specific API Support
 
@@ -93,6 +115,12 @@ Depending on the RPC provider you are using, you may wish to alter `zkevm.rpc-ra
 
 NB: `--externalcl` flag is removed in upstream erigon so beware of re-using commands/config
 
+### Run modes
+cdk-erigon can be run as an RPC node which will use the data stream to fetch new block/batch information and track a 
+remote sequencer (the default behaviour).  It can also run as a sequencer. To enable the sequencer, set the `CDK_ERIGON_SEQUENCER` environment variable to `1` and start the node.
+cdk-erigon supports migrating a node from being an RPC node to a sequencer and vice versa.  To do this, stop the node, set the `CDK_ERIGON_SEQUENCER` environment variable to the desired value and restart the node.
+Please ensure that you do include the sequencer specific flags found below when running as a sequencer.  You can include these flags when running as an RPC to keep a consistent configuration between the two run modes.
+
 ### Docker ([DockerHub](https://hub.docker.com/r/hermeznetwork/cdk-erigon))
 The image comes with 3 preinstalled default configs which you may wish to edit according to the config section below, otherwise you can mount your own config to the container as necessary.
 
@@ -124,7 +152,7 @@ to increase performance, e.g. `zkevm.l1-rpc-url` as the provided RPCs may have r
 
 For a full explanation of the config options, see below:
 - `datadir`: Path to your node's data directory.
-- `chain`: Specifies the L2 network to connect with, e.g., hermez-mainnet.
+- `chain`: Specifies the L2 network to connect with, e.g., hermez-mainnet.  For dynamic configs this should always be in the format `dynamic-{network}`
 - `http`: Enables HTTP RPC server (set to true).
 - `private.api.addr`: Address for the private API, typically localhost:9091, change this to run multiple instances on the same machine
 - `zkevm.l2-chain-id`: Chain ID for the L2 network, e.g., 1101.
@@ -132,11 +160,26 @@ For a full explanation of the config options, see below:
 - `zkevm.l2-datastreamer-url`: URL for the L2 data streamer.
 - `zkevm.l1-chain-id`: Chain ID for the L1 network.
 - `zkevm.l1-rpc-url`: L1 Ethereum RPC URL.
-- `zkevm.l1-polygon-rollup-manager`, `zkevm.l1-rollup`, `zkevm.l1-matic-contract-address`: Addresses and topics for smart contracts and event listening.
+- `zkevm.address-sequencer`: The contract address for the sequencer
+- `zkevm.address-zkevm`: The address for the zkevm contract
+- `zkevm.address-admin`: The address for the admin contract
+- `zkevm.address-rollup`: The address for the rollup contract
+- `zkevm.address-ger-manager`: The address for the GER manager contract
 - `zkevm.rpc-ratelimit`: Rate limit for RPC calls.
+- `zkevm.data-stream-port`: Port for the data stream.  This needs to be set to enable the datastream server
+- `zkevm.data-stream-host`: The host for the data stream i.e. `localhost`.  This must be set to enable the datastream server
 - `zkevm.datastream-version:` Version of the data stream protocol.
 - `externalcl`: External consensus layer flag.
 - `http.api`: List of enabled HTTP API modules.
+
+Sequencer specific config:
+- `zkevm.executor-urls`: A csv list of the executor URLs.  These will be used in a round robbin fashion by the sequencer
+- `zkevm.executor-strict`: Defaulted to true, but can be set to false when running the sequencer without verifications (use with extreme caution)
+- `zkevm.witness-full`: Defaulted to true.  Controls whether the full or partial witness is used with the executor.
+- `zkevm.sequencer-initial-fork-id`: The fork id to start the network with.
+
+Useful config entries:
+- `zkevm.sync-limit`: This will ensure the network only syncs to a given block height.
 
 ***
 
@@ -145,8 +188,8 @@ For a full explanation of the config options, see below:
 
 | Network Name  | Chain ID | ForkID | Genesis File | RPC URL                                          | Rootchain        | Rollup Address                               |
 |---------------|----------|--------|--------------|--------------------------------------------------|------------------|----------------------------------------------|
-| zkEVM Mainnet | 1101     | 7      | [Link](https://hackmd.io/bpmxb5QaSFafV0nB4i-KZA) | [Mainnet RPC](https://zkevm-rpc.com/)            | Ethereum Mainnet | `0x5132A183E9F3CB7C848b0AAC5Ae0c4f0491B7aB2` |
-| zkEVM Cardona | 2442     | 7      | [Link](https://hackmd.io/Ug9pB613SvevJgnXRC4YJA) | [Cardona RPC](https://rpc.cardona.zkevm-rpc.com/) | Sepolia          | `0x32d33D5137a7cFFb54c5Bf8371172bcEc5f310ff` |
+| zkEVM Mainnet | 1101     | 9      | [Link](https://hackmd.io/bpmxb5QaSFafV0nB4i-KZA) | [Mainnet RPC](https://zkevm-rpc.com/)            | Ethereum Mainnet | `0x5132A183E9F3CB7C848b0AAC5Ae0c4f0491B7aB2` |
+| zkEVM Cardona | 2442     | 9      | [Link](https://hackmd.io/Ug9pB613SvevJgnXRC4YJA) | [Cardona RPC](https://rpc.cardona.zkevm-rpc.com/) | Sepolia          | `0x32d33D5137a7cFFb54c5Bf8371172bcEc5f310ff` |
 
 ***
 

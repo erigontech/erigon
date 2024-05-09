@@ -18,19 +18,41 @@ type TransactionCounter struct {
 	smtLevels          int
 }
 
-func NewTransactionCounter(transaction types.Transaction, smtMaxLevel int) *TransactionCounter {
+func NewTransactionCounter(transaction types.Transaction, smtMaxLevel int, shouldCountersBeUnlimited bool) *TransactionCounter {
 	totalLevel := calculateSmtLevels(smtMaxLevel, 32)
-	tc := &TransactionCounter{
-		transaction:        transaction,
-		rlpCounters:        NewCounterCollector(totalLevel),
-		executionCounters:  NewCounterCollector(totalLevel),
-		processingCounters: NewCounterCollector(totalLevel),
-		smtLevels:          totalLevel,
-	}
 
+	var tc *TransactionCounter
+
+	if shouldCountersBeUnlimited {
+		tc = &TransactionCounter{
+			transaction:        transaction,
+			rlpCounters:        NewUnlimitedCounterCollector(),
+			executionCounters:  NewUnlimitedCounterCollector(),
+			processingCounters: NewUnlimitedCounterCollector(),
+			smtLevels:          1, // max depth of the tree anyways
+		}
+	} else {
+		tc = &TransactionCounter{
+			transaction:        transaction,
+			rlpCounters:        NewCounterCollector(totalLevel),
+			executionCounters:  NewCounterCollector(totalLevel),
+			processingCounters: NewCounterCollector(totalLevel),
+			smtLevels:          totalLevel,
+		}
+	}
 	tc.executionCounters.SetTransaction(transaction)
 
 	return tc
+}
+
+func (tc *TransactionCounter) Clone() *TransactionCounter {
+	return &TransactionCounter{
+		transaction:        tc.transaction,
+		rlpCounters:        tc.rlpCounters.Clone(),
+		executionCounters:  tc.executionCounters.Clone(),
+		processingCounters: tc.processingCounters.Clone(),
+		smtLevels:          tc.smtLevels,
+	}
 }
 
 func (tc *TransactionCounter) CalculateRlp() error {
@@ -96,8 +118,8 @@ func (tc *TransactionCounter) CalculateRlp() error {
 	collector.getLenBytes(nonceLength)
 
 	collector.divArith()
-	collector.multiCall(collector.addHashTx, 9+int(math.Floor(float64(txDataLen)/32)))
-	collector.multiCall(collector.addL2HashTx, 8+int(math.Floor(float64(txDataLen)/32)))
+	collector.multiCall(collector.addHashTx, 9+(txDataLen>>5)) //txDataLen>>5 equals to int(math.Floor(float64(txDataLen)/32))
+	collector.multiCall(collector.addL2HashTx, 8+(txDataLen>>5))
 	collector.multiCall(collector.addBatchHashByteByByte, txDataLen)
 	collector.SHLarith()
 

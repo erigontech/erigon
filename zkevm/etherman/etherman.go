@@ -13,7 +13,6 @@ import (
 	"github.com/holiman/uint256"
 	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon-lib/chain"
-	zkchainconfig "github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
@@ -166,7 +165,9 @@ func NewClient(cfg Config) (*Client, error) {
 		l1Conf = params.SepoliaChainConfig
 		l2Conf = params.ChainConfigByChainName(cfg.L2ChainName)
 	default:
-		l1Conf = params.ChainConfigByChainName(zkchainconfig.GetChainName(cfg.L1ChainID))
+		l1Conf = &chain.Config{
+			ChainID: big.NewInt(int64(cfg.L1ChainID)),
+		}
 		l2Conf = params.ChainConfigByChainName(cfg.L2ChainName)
 	}
 	if l1Conf == nil {

@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
-	"os"
 	"path"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -76,10 +75,10 @@ var (
 	ChiadoGenesisHash                  = libcommon.HexToHash("0xada44fd8d2ecab8b08f256af07ad3e777f17fb434f8f8e678b312f576212ba9a")
 	HermezMainnetGenesisHash           = libcommon.HexToHash("0x81005434635456a16f74ff7023fbe0bf423abbc8a8deb093ffff455c0ad3b741")
 	HermezMainnetShadowforkGenesisHash = libcommon.HexToHash("0xe54709058a084845156393707161a7b3347859b1796167ca014354841f68373c")
-	HermezLocalDevnetGenesisHash       = libcommon.HexToHash("0x433043a1b0948d109cd92a6b7e0e5a3f011c761d70eebe3135ec8f7a39815a65")
+	HermezLocalDevnetGenesisHash       = libcommon.HexToHash("0x532abde1baf4157008acf46f17c27624b54cab8e24922dac9ddb63da681e1848")
 	HermezESTestGenesisHash            = libcommon.HexToHash("0x8c630b598fab24a99b59cdd8257f41b35d0aca992f13cd381c7591f5e89eec58")
 	HermezCardonaGenesisHash           = libcommon.HexToHash("0x676c1a76a6c5855a32bdf7c61977a0d1510088a4eeac1330466453b3d08b60b9")
-	HermezCardonaInternalGenesisHash   = libcommon.HexToHash("0x7311011ce6ab98ef0a15e44fe29f7680909588322534d1736361daa678543038")
+	HermezBaliGenesisHash              = libcommon.HexToHash("0x7311011ce6ab98ef0a15e44fe29f7680909588322534d1736361daa678543038")
 	XLayerTestnetGenesisHash           = libcommon.HexToHash("0x22a8085892b367833bd7431fa5a90ff6b5d3769167cdaa29ce8571d07bc8f866")
 	XLayerMainnetGenesisHash           = libcommon.HexToHash("0x11f32f605beb94a1acb783cb3b6da6d7975461ce3addf441e7ad60c2ec95e88f")
 	HermezEtrogGenesisHash             = libcommon.HexToHash("0x5e14aefe391fafa040ee0a0fff6afbc1c230853b9684afb9363f3af081db0192")
@@ -221,29 +220,6 @@ type ConsensusSnapshotConfig struct {
 
 const cliquePath = "clique"
 
-func DynamicChainConfig(ch string) *chain.Config {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		panic(err)
-	}
-
-	basePath := path.Join(homeDir, "dynamic-configs")
-	filename := path.Join(basePath, ch+"-chainspec.json")
-
-	f, err := os.Open(filename)
-	if err != nil {
-		panic(fmt.Sprintf("could not open chainspec for %s: %v", filename, err))
-	}
-	defer f.Close()
-	decoder := json.NewDecoder(f)
-	spec := &chain.Config{}
-	err = decoder.Decode(&spec)
-	if err != nil {
-		panic(fmt.Sprintf("could not parse chainspec for %s: %v", filename, err))
-	}
-	return spec
-}
-
 func NewSnapshotConfig(checkpointInterval uint64, inmemorySnapshots int, inmemorySignatures int, inmemory bool, dbPath string) *ConsensusSnapshotConfig {
 	if len(dbPath) == 0 {
 		dbPath = paths.DefaultDataDir()
@@ -301,7 +277,7 @@ func ChainConfigByChainName(chain string) *chain.Config {
 	case networkname.XLayerMainnetChainName:
 		return XLayerMainnetChainConfig
 	default:
-		return DynamicChainConfig(chain)
+		return nil
 	}
 }
 
@@ -340,7 +316,7 @@ func GenesisHashByChainName(chain string) *libcommon.Hash {
 	case networkname.HermezCardonaChainName:
 		return &HermezCardonaGenesisHash
 	case networkname.HermezBaliChainName:
-		return &HermezCardonaInternalGenesisHash
+		return &HermezBaliGenesisHash
 	case networkname.XLayerTestnetChainName:
 		return &XLayerTestnetGenesisHash
 	case networkname.XLayerMainnetChainName:
@@ -382,6 +358,8 @@ func ChainConfigByGenesisHash(genesisHash libcommon.Hash) *chain.Config {
 		return HermezESTestChainConfig
 	case genesisHash == HermezCardonaGenesisHash:
 		return HermezCardonaChainConfig
+	case genesisHash == HermezBaliGenesisHash:
+		return HermezBaliChainConfig
 	case genesisHash == XLayerTestnetGenesisHash:
 		return XLayerTestnetChainConfig
 	case genesisHash == XLayerMainnetGenesisHash:

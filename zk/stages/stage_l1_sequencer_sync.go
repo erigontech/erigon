@@ -68,33 +68,53 @@ func SpawnL1SequencerSyncStage(
 		return err
 	}
 
+	// because the info tree updates are used by the RPC node and the sequencer, and we can switch between
+	// the two, we need to ensure consistency when migrating from RPC to sequencer modes of operation,
+	// so we keep track of these block numbers outside of the usual stage progress
+	latestL1InfoTreeBlockNumber, err := hermezDb.GetL1InfoTreeHighestBlock()
+	if err != nil {
+		return err
+	}
+
 	if !cfg.syncer.IsSyncStarted() {
 		cfg.syncer.Run(progress)
 	}
 
 	logChan := cfg.syncer.GetLogsChan()
 	progressChan := cfg.syncer.GetProgressMessageChan()
+	infoTreeUpdates := 0
 
 Loop:
 	for {
 		select {
-		case l := <-logChan:
-			switch l.Topics[0] {
-			case contracts.UpdateL1InfoTreeTopic:
-				latestUpdate, err = HandleL1InfoTreeUpdate(cfg.syncer, hermezDb, l, latestUpdate, found)
-				if err != nil {
-					return err
-				}
-				found = true
-			case contracts.InitialSequenceBatchesTopic:
-				if err := HandleInitialSequenceBatches(cfg.syncer, hermezDb, l); err != nil {
-					return err
-				}
-				// todo: [zkevm] handle the writing of this information for use in execution
-			default:
-				log.Warn("received unexpected topic from l1 sync stage", "topic", l.Topics[0])
+		case logs := <-logChan:
+			blocksMap, err := cfg.syncer.L1QueryBlocks(logPrefix, logs)
+			if err != nil {
+				return err
 			}
 
+			for _, l := range logs {
+				block := blocksMap[l.BlockNumber]
+				switch l.Topics[0] {
+				case contracts.UpdateL1InfoTreeTopic:
+					if latestL1InfoTreeBlockNumber > 0 && l.BlockNumber <= latestL1InfoTreeBlockNumber {
+						continue
+					}
+					latestUpdate, err = HandleL1InfoTreeUpdate(cfg.syncer, hermezDb, l, latestUpdate, found, block)
+					if err != nil {
+						return err
+					}
+					found = true
+					infoTreeUpdates++
+					latestL1InfoTreeBlockNumber = l.BlockNumber
+				case contracts.InitialSequenceBatchesTopic:
+					if err := HandleInitialSequenceBatches(cfg.syncer, hermezDb, l, block); err != nil {
+						return err
+					}
+				default:
+					log.Warn("received unexpected topic from l1 sync stage", "topic", l.Topics[0])
+				}
+			}
 		case progMsg := <-progressChan:
 			log.Info(fmt.Sprintf("[%s] %s", logPrefix, progMsg))
 		default:
@@ -104,10 +124,16 @@ Loop:
 		}
 	}
 
+	if err = hermezDb.WriteL1InfoTreeHighestBlock(latestL1InfoTreeBlockNumber); err != nil {
+		return err
+	}
+
 	progress = cfg.syncer.GetLastCheckedL1Block()
 	if err = stages.SaveStageProgress(tx, stages.L1InfoTree, progress); err != nil {
 		return err
 	}
+
+	log.Info(fmt.Sprintf("[%s] Info tree updates", logPrefix), "count", infoTreeUpdates)
 
 	if freshTx {
 		if err = tx.Commit(); err != nil {
@@ -124,11 +150,14 @@ func HandleL1InfoTreeUpdate(
 	l ethTypes.Log,
 	latestUpdate *types.L1InfoTreeUpdate,
 	found bool,
+	block *ethTypes.Block,
 ) (*types.L1InfoTreeUpdate, error) {
 	if len(l.Topics) != 3 {
 		log.Warn("Received log for info tree that did not have 3 topics")
 		return nil, nil
 	}
+	var err error
+
 	mainnetExitRoot := l.Topics[1]
 	rollupExitRoot := l.Topics[2]
 	combined := append(mainnetExitRoot.Bytes(), rollupExitRoot.Bytes()...)
@@ -149,14 +178,20 @@ func HandleL1InfoTreeUpdate(
 
 	// now we need the block timestamp and the parent hash information for the block tied
 	// to this event
-	block, err := syncer.GetBlock(l.BlockNumber)
-	if err != nil {
-		return nil, err
+	if block == nil {
+		block, err = syncer.GetBlock(l.BlockNumber)
+		if err != nil {
+			return nil, err
+		}
 	}
 	update.ParentHash = block.ParentHash()
 	update.Timestamp = block.Time()
+	update.BlockNumber = l.BlockNumber
 
 	if err = hermezDb.WriteL1InfoTreeUpdate(update); err != nil {
+		return nil, err
+	}
+	if err = hermezDb.WriteL1InfoTreeUpdateToGer(update); err != nil {
 		return nil, err
 	}
 	return update, nil
@@ -175,10 +210,15 @@ func HandleInitialSequenceBatches(
 	syncer IL1Syncer,
 	db *hermez_db.HermezDb,
 	l ethTypes.Log,
+	l1Block *ethTypes.Block,
 ) error {
-	l1Block, err := syncer.GetBlock(l.BlockNumber)
-	if err != nil {
-		return err
+	var err error
+
+	if l1Block == nil {
+		l1Block, err = syncer.GetBlock(l.BlockNumber)
+		if err != nil {
+			return err
+		}
 	}
 
 	// the log appears to have some trailing 24 bytes of all 0s in it.  Not sure why but we can't handle the

@@ -1,5 +1,5 @@
 {
-  "ChainName": "hermez-cardona",
+  "ChainName": "dynamic-hermez-cardona",
   "chainId": 2442,
   "consensus": "ethash",
   "homesteadBlock": 0,

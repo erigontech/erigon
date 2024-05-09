@@ -34,7 +34,7 @@ import (
 )
 
 var (
-	maxGetProofRewindBlockCount uint64 = 10_000
+	maxGetProofRewindBlockCount uint64 = 500_000
 
 	ErrEndBeforeStart = errors.New("end block must be higher than start block")
 )
@@ -147,13 +147,6 @@ func (g *Generator) GenerateWitness(tx kv.Tx, ctx context.Context, startBlock, e
 			return nil, err
 		}
 
-		var prevBlockHash libcommon.Hash
-		prevBlock, err := rawdb.ReadBlockByNumber(tx, blockNum-1)
-		if err != nil {
-			return nil, err
-		}
-		prevBlockHash = prevBlock.Hash()
-
 		reader := state.NewPlainState(tx, blockNum, systemcontracts.SystemContractCodeLookup[g.chainCfg.ChainName])
 
 		tds.SetStateReader(reader)
@@ -216,7 +209,7 @@ func (g *Generator) GenerateWitness(tx kv.Tx, ctx context.Context, startBlock, e
 
 		chainReader := stagedsync.NewChainReaderImpl(g.chainCfg, tx, nil, log.New())
 
-		_, err = core.ExecuteBlockEphemerallyZk(g.chainCfg, &vmConfig, getHashFn, engine, &prevBlockHash, block, tds, trieStateWriter, chainReader, nil, nil, hermezDb)
+		_, err = core.ExecuteBlockEphemerallyZk(g.chainCfg, &vmConfig, getHashFn, engine, block, tds, trieStateWriter, chainReader, nil, nil, hermezDb)
 
 		if err != nil {
 			return nil, err
@@ -270,6 +263,9 @@ func populateDbTables(batch *membatchwithdb.MemoryMutation) error {
 		hermez_db.L1_BLOCK_HASHES,
 		hermez_db.BLOCK_L1_BLOCK_HASHES,
 		hermez_db.INTERMEDIATE_TX_STATEROOTS,
+		hermez_db.REUSED_L1_INFO_TREE_INDEX,
+		hermez_db.LATEST_USED_GER,
+		hermez_db.L1_INFO_TREE_UPDATES_BY_GER,
 	}
 
 	for _, t := range tables {

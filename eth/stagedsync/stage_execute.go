@@ -464,16 +464,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 		batch.Close()
 	}()
 
-	var readAhead chan uint64
-	if initialCycle && cfg.silkworm == nil { // block read-ahead is not compatible w/ Silkworm one-shot block execution
-		// snapshots are often stored on cheaper drives. don't expect low-read-latency and manually read-ahead.
-		// can't use OS-level ReadAhead - because Data >> RAM
-		// it also warmsup state a bit - by touching senders/coninbase accounts and code
-		var clean func()
-		readAhead, clean = blocksReadAhead(ctx, &cfg, 4)
-		defer clean()
-	}
-
 	if to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
@@ -488,12 +478,6 @@ Loop:
 
 		if stoppedErr = common.Stopped(quit); stoppedErr != nil {
 			break
-		}
-		if initialCycle && cfg.silkworm == nil { // block read-ahead is not compatible w/ Silkworm one-shot block execution
-			select {
-			case readAhead <- blockNum:
-			default:
-			}
 		}
 
 		blockHash, err := cfg.blockReader.CanonicalHash(ctx, txc.Tx, blockNum)

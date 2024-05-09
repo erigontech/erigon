@@ -14,11 +14,11 @@ import (
 	"encoding/binary"
 
 	"github.com/holiman/uint256"
+	constants "github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/smt/pkg/utils"
-	"github.com/ledgerwatch/erigon/zk/constants"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zkevm/hex"
 	"github.com/ledgerwatch/log/v3"
@@ -42,79 +42,111 @@ const (
 	efficiencyPercentageByteLength uint64 = 1
 
 	changeL2BlockTxType = 11
+	changeL2BlockLength = 9
 )
 
 var (
 	ErrInvalidData = errors.New("invalid data")
 )
 
-func DecodeTxs(txsData []byte, forkID uint64) ([]types.Transaction, []byte, []uint8, error) {
+type DecodedBatchL2Data struct {
+	Transactions                 []types.Transaction
+	EffectiveGasPricePercentages []uint8
+	DeltaTimestamp               uint32
+	L1InfoTreeIndex              uint32
+}
+
+func DecodeBatchL2Blocks(txsData []byte, forkID uint64) ([]DecodedBatchL2Data, error) {
+	var result []DecodedBatchL2Data
 	var pos uint64
-	var txs []types.Transaction
-	var efficiencyPercentages []uint8
 	txDataLength := uint64(len(txsData))
 	if txDataLength == 0 {
-		return txs, txsData, nil, nil
+		return result, nil
 	}
+
+	currentData := DecodedBatchL2Data{}
+	var currentDelta uint32
+	var currentL1InfoTreeIndex uint32
+
 	for pos < txDataLength {
 		num, err := strconv.ParseUint(hex.EncodeToString(txsData[pos:pos+1]), hex.Base, hex.BitSize64)
 		if err != nil {
 			log.Debug("error parsing header length: ", err)
-			return []types.Transaction{}, txsData, []uint8{}, err
+			return result, err
 		}
 
-		// if num is 11 then we are trying to parse a `changeL2Block` transaction so skip it
+		// if num is 11 then we are trying to parse a `changeL2Block` transaction
 		if num == changeL2BlockTxType {
-			pos += 9
+			hasStarted := pos > 0
+
+			// if we aren't at the very start of the data then we know we're at a block boundary, so we want to capture
+			// the data we have been working on so far (hasStarted handles this).  In some cases the data will not
+			// contain any change l2 blocks, just pure transaction data, so the capture of currentData will be picked
+			// up outside the loop over txData.
+			//
+			// We also want to check if the next byte is a change block transaction,
+			// this is so that we can handle empty blocks with no transactions inside the data.
+			if hasStarted || txsData[pos+1] == changeL2BlockTxType {
+				currentData.DeltaTimestamp = currentDelta
+				currentData.L1InfoTreeIndex = currentL1InfoTreeIndex
+				result = append(result, currentData)
+				currentData = DecodedBatchL2Data{}
+			}
+
+			currentDelta = binary.BigEndian.Uint32(txsData[pos+1 : pos+5])
+			currentL1InfoTreeIndex = binary.BigEndian.Uint32(txsData[pos+5 : pos+9])
+
+			pos += changeL2BlockLength
+
 			continue
 		}
 
 		// First byte is the length and must be ignored
 		if num < c0 {
 			log.Debug("error num < c0 : %d, %d", num, c0)
-			return []types.Transaction{}, txsData, []uint8{}, ErrInvalidData
+			return result, ErrInvalidData
 		}
 		length := num - c0
 		if length > shortRlp { // If rlp is bigger than length 55
 			// n is the length of the rlp data without the header (1 byte) for example "0xf7"
 			if (pos + 1 + num - f7) > txDataLength {
 				log.Debug("error parsing length: ", err)
-				return []types.Transaction{}, txsData, []uint8{}, err
+				return result, err
 			}
 			n, err := strconv.ParseUint(hex.EncodeToString(txsData[pos+1:pos+1+num-f7]), hex.Base, hex.BitSize64) // +1 is the header. For example 0xf7
 			if err != nil {
 				log.Debug("error parsing length: ", err)
-				return []types.Transaction{}, txsData, []uint8{}, err
+				return result, err
 			}
 			if n+num < f7 {
 				log.Debug("error n + num < f7: ", err)
-				return []types.Transaction{}, txsData, []uint8{}, ErrInvalidData
+				return result, ErrInvalidData
 			}
 			length = n + num - f7 // num - f7 is the header. For example 0xf7
 		}
 
 		endPos := pos + length + rLength + sLength + vLength + headerByteLength
 
-		if forkID >= constants.ForkDragonfruitId5 {
+		if forkID >= uint64(constants.ForkID5Dragonfruit) {
 			endPos += efficiencyPercentageByteLength
 		}
 
 		if endPos > txDataLength {
 			err := fmt.Errorf("endPos %d is bigger than txDataLength %d", endPos, txDataLength)
 			log.Debug("error parsing header: ", err)
-			return []types.Transaction{}, txsData, []uint8{}, ErrInvalidData
+			return result, ErrInvalidData
 		}
 
 		if endPos < pos {
 			err := fmt.Errorf("endPos %d is smaller than pos %d", endPos, pos)
 			log.Debug("error parsing header: ", err)
-			return []types.Transaction{}, txsData, []uint8{}, ErrInvalidData
+			return result, ErrInvalidData
 		}
 
 		if endPos < pos {
 			err := fmt.Errorf("endPos %d is smaller than pos %d", endPos, pos)
 			log.Debug("error parsing header: ", err)
-			return []types.Transaction{}, txsData, []uint8{}, ErrInvalidData
+			return result, ErrInvalidData
 		}
 
 		fullDataTx := txsData[pos:endPos]
@@ -124,9 +156,9 @@ func DecodeTxs(txsData []byte, forkID uint64) ([]types.Transaction, []byte, []ui
 		sData := txsData[dataStart+rLength : dataStart+rLength+sLength]
 		vData := txsData[dataStart+rLength+sLength : dataStart+rLength+sLength+vLength]
 
-		if forkID >= constants.ForkDragonfruitId5 {
+		if forkID >= uint64(constants.ForkID5Dragonfruit) {
 			efficiencyPercentage := txsData[dataStart+rLength+sLength+vLength : endPos]
-			efficiencyPercentages = append(efficiencyPercentages, efficiencyPercentage[0])
+			currentData.EffectiveGasPricePercentages = append(currentData.EffectiveGasPricePercentages, efficiencyPercentage[0])
 		}
 
 		pos = endPos
@@ -135,24 +167,31 @@ func DecodeTxs(txsData []byte, forkID uint64) ([]types.Transaction, []byte, []ui
 		var rlpFields [][]byte
 		err = rlp.DecodeBytes(txInfo, &rlpFields)
 		if err != nil {
-			log.Error("error decoding tx Bytes: ", err, ". fullDataTx: ", hex.EncodeToString(fullDataTx), "\n tx: ", hex.EncodeToString(txInfo), "\n Txs received: ", hex.EncodeToString(txsData))
-			return []types.Transaction{}, txsData, []uint8{}, ErrInvalidData
+			log.Error("error decoding tx Bytes: ", err, ". fullDataTx: ", hex.EncodeToString(fullDataTx), "\n tx: ", hex.EncodeToString(txInfo), "\n Transactions received: ", hex.EncodeToString(txsData))
+			return result, ErrInvalidData
 		}
 
 		legacyTx, err := rlpFieldsToLegacyTx(rlpFields, vData, rData, sData)
 		if err != nil {
-			log.Debug("error creating tx from rlp fields: ", err, ". fullDataTx: ", hex.EncodeToString(fullDataTx), "\n tx: ", hex.EncodeToString(txInfo), "\n Txs received: ", hex.EncodeToString(txsData))
-			return []types.Transaction{}, txsData, []uint8{}, err
+			log.Debug("error creating tx from rlp fields: ", err, ". fullDataTx: ", hex.EncodeToString(fullDataTx), "\n tx: ", hex.EncodeToString(txInfo), "\n Transactions received: ", hex.EncodeToString(txsData))
+			return result, err
 		}
 
-		txs = append(txs, legacyTx)
+		currentData.Transactions = append(currentData.Transactions, legacyTx)
 	}
-	return txs, txsData, efficiencyPercentages, nil
+
+	// always capture the last data as there won't have been a change l2 block to seal it off
+	// or there are no change l2 blocks and the data only contains transaction info
+	currentData.DeltaTimestamp = currentDelta
+	currentData.L1InfoTreeIndex = currentL1InfoTreeIndex
+	result = append(result, currentData)
+
+	return result, nil
 }
 
 func DecodeTx(encodedTx []byte, efficiencyPercentage byte, forkId uint16) (types.Transaction, uint8, error) {
 	// efficiencyPercentage := uint8(0)
-	if forkId >= constants.ForkDragonfruitId5 {
+	if forkId >= uint16(constants.ForkID5Dragonfruit) {
 		encodedTx = append(encodedTx, efficiencyPercentage)
 	}
 
@@ -311,7 +350,7 @@ func TransactionToL2Data(tx types.Transaction, forkId uint16, efficiencyPercenta
 	encoded = append(encoded, sBytes[:]...)
 	encoded = append(encoded, vBytes...)
 
-	if forkId >= constants.ForkDragonfruitId5 {
+	if forkId >= uint16(constants.ForkID5Dragonfruit) {
 		ep := hermez_db.Uint8ToBytes(efficiencyPercentage)
 		encoded = append(encoded, ep...)
 	}
@@ -506,9 +545,7 @@ func formatL2TxHashParam(param interface{}, paramLength int) (string, error) {
 		return "", fmt.Errorf("unsupported parameter type")
 	}
 
-	if strings.HasPrefix(paramStr, "0x") {
-		paramStr = paramStr[2:]
-	}
+	paramStr = strings.TrimPrefix(paramStr, "0x")
 
 	if len(paramStr)%2 == 1 {
 		paramStr = "0" + paramStr

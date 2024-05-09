@@ -26,12 +26,16 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 )
 
-const (
-	ForkID5Dragonfruit = 5
-	ForkID6IncaBerry   = 6
-	ForkID7Etrog       = 7
-	ForkID88Elderberry = 8
-)
+// this needs to always be in descending order
+// add new forkIds at the beginning of the array
+var ForkIdsOrdered = []ForkId{
+	ForkID9Elderberry2,
+	ForkID8Elderberry,
+	ForkID7Etrog,
+	ForkID6IncaBerry,
+	ForkID5Dragonfruit,
+	ForkID4,
+}
 
 // Config is the core config which determines the blockchain settings.
 //
@@ -104,6 +108,9 @@ type Config struct {
 	ForkID6IncaBerryBlock   *big.Int `json:"forkID6IncaBerryBlock,omitempty"`
 	ForkID7EtrogBlock       *big.Int `json:"forkID7EtrogBlock,omitempty"`
 	ForkID88ElderberryBlock *big.Int `json:"forkID88ElderberryBlock,omitempty"`
+	ForkID9Elderberry2Block *big.Int `json:"forkID9FeijoaBlock,omitempty"`
+
+	SupportGasless bool `json:"supportGasless,omitempty"`
 }
 
 type BorConfig interface {
@@ -141,6 +148,27 @@ func (c *Config) String() string {
 		engine,
 		c.NoPruneContracts,
 	)
+}
+
+func (c *Config) SetForkIdBlock(forkIdNumber ForkId, blockNum uint64) error {
+	switch forkIdNumber {
+	case ForkID4:
+		c.ForkID4Block = new(big.Int).SetUint64(blockNum)
+	case ForkID5Dragonfruit:
+		c.ForkID5DragonfruitBlock = new(big.Int).SetUint64(blockNum)
+	case ForkID6IncaBerry:
+		c.ForkID6IncaBerryBlock = new(big.Int).SetUint64(blockNum)
+	case ForkID7Etrog:
+		c.ForkID7EtrogBlock = new(big.Int).SetUint64(blockNum)
+	case ForkID8Elderberry:
+		c.ForkID88ElderberryBlock = new(big.Int).SetUint64(blockNum)
+	case ForkID9Elderberry2:
+		c.ForkID9Elderberry2Block = new(big.Int).SetUint64(blockNum)
+	default:
+		return fmt.Errorf("unknown fork id number %d", forkIdNumber)
+	}
+
+	return nil
 }
 
 func (c *Config) getEngine() string {
@@ -336,31 +364,33 @@ func (c *Config) CheckCompatible(newcfg *Config, height uint64) *ConfigCompatErr
 	return lasterr
 }
 
-type forkBlockNumber struct {
-	name        string
-	blockNumber *big.Int
-	optional    bool // if true, the fork may be nil and next fork is still allowed
-}
+//////////////// not used currently due to dynamic fork
+// type forkBlockNumber struct {
+// 	name        string
+// 	blockNumber *big.Int
+// 	optional    bool // if true, the fork may be nil and next fork is still allowed
+// }
 
-func (c *Config) forkBlockNumbers() []forkBlockNumber {
-	return []forkBlockNumber{
-		{name: "homesteadBlock", blockNumber: c.HomesteadBlock},
-		{name: "daoForkBlock", blockNumber: c.DAOForkBlock, optional: true},
-		{name: "eip150Block", blockNumber: c.TangerineWhistleBlock},
-		{name: "eip155Block", blockNumber: c.SpuriousDragonBlock},
-		{name: "byzantiumBlock", blockNumber: c.ByzantiumBlock},
-		{name: "constantinopleBlock", blockNumber: c.ConstantinopleBlock},
-		{name: "petersburgBlock", blockNumber: c.PetersburgBlock},
-		{name: "istanbulBlock", blockNumber: c.IstanbulBlock},
-		{name: "muirGlacierBlock", blockNumber: c.MuirGlacierBlock, optional: true},
-		{name: "berlinBlock", blockNumber: c.BerlinBlock},
-		{name: "londonBlock", blockNumber: c.LondonBlock},
-		{name: "arrowGlacierBlock", blockNumber: c.ArrowGlacierBlock, optional: true},
-		{name: "grayGlacierBlock", blockNumber: c.GrayGlacierBlock, optional: true},
-		{name: "mergeNetsplitBlock", blockNumber: c.MergeNetsplitBlock, optional: true},
-	}
-}
-
+//	func (c *Config) forkBlockNumbers() []forkBlockNumber {
+//		return []forkBlockNumber{
+//			{name: "homesteadBlock", blockNumber: c.HomesteadBlock},
+//			{name: "daoForkBlock", blockNumber: c.DAOForkBlock, optional: true},
+//			{name: "eip150Block", blockNumber: c.TangerineWhistleBlock},
+//			{name: "eip155Block", blockNumber: c.SpuriousDragonBlock},
+//			{name: "byzantiumBlock", blockNumber: c.ByzantiumBlock},
+//			{name: "constantinopleBlock", blockNumber: c.ConstantinopleBlock},
+//			{name: "petersburgBlock", blockNumber: c.PetersburgBlock},
+//			{name: "istanbulBlock", blockNumber: c.IstanbulBlock},
+//			{name: "muirGlacierBlock", blockNumber: c.MuirGlacierBlock, optional: true},
+//			{name: "berlinBlock", blockNumber: c.BerlinBlock},
+//			{name: "londonBlock", blockNumber: c.LondonBlock},
+//			{name: "arrowGlacierBlock", blockNumber: c.ArrowGlacierBlock, optional: true},
+//			{name: "grayGlacierBlock", blockNumber: c.GrayGlacierBlock, optional: true},
+//			{name: "mergeNetsplitBlock", blockNumber: c.MergeNetsplitBlock, optional: true},
+//		}
+//	}
+//
+// ////////////////////////
 // CheckConfigForkOrder checks that we don't "skip" any forks
 func (c *Config) CheckConfigForkOrder() error {
 	if c != nil && c.ChainID != nil && c.ChainID.Uint64() == 77 {
@@ -375,28 +405,32 @@ func (c *Config) CheckConfigForkOrder() error {
 	// [dynamic fork]
 	return nil
 
-	var lastFork forkBlockNumber
+	//////////////// not used currently due to dynamic fork
 
-	for _, fork := range c.forkBlockNumbers() {
-		if lastFork.name != "" {
-			// Next one must be higher number
-			if lastFork.blockNumber == nil && fork.blockNumber != nil {
-				return fmt.Errorf("unsupported fork ordering: %v not enabled, but %v enabled at %v",
-					lastFork.name, fork.name, fork.blockNumber)
-			}
-			if lastFork.blockNumber != nil && fork.blockNumber != nil {
-				if lastFork.blockNumber.Cmp(fork.blockNumber) > 0 {
-					return fmt.Errorf("unsupported fork ordering: %v enabled at %v, but %v enabled at %v",
-						lastFork.name, lastFork.blockNumber, fork.name, fork.blockNumber)
-				}
-			}
-			// If it was optional and not set, then ignore it
-		}
-		if !fork.optional || fork.blockNumber != nil {
-			lastFork = fork
-		}
-	}
-	return nil
+	// var lastFork forkBlockNumber
+
+	// for _, fork := range c.forkBlockNumbers() {
+	// 	if lastFork.name != "" {
+	// 		// Next one must be higher number
+	// 		if lastFork.blockNumber == nil && fork.blockNumber != nil {
+	// 			return fmt.Errorf("unsupported fork ordering: %v not enabled, but %v enabled at %v",
+	// 				lastFork.name, fork.name, fork.blockNumber)
+	// 		}
+	// 		if lastFork.blockNumber != nil && fork.blockNumber != nil {
+	// 			if lastFork.blockNumber.Cmp(fork.blockNumber) > 0 {
+	// 				return fmt.Errorf("unsupported fork ordering: %v enabled at %v, but %v enabled at %v",
+	// 					lastFork.name, lastFork.blockNumber, fork.name, fork.blockNumber)
+	// 			}
+	// 		}
+	// 		// If it was optional and not set, then ignore it
+	// 	}
+	// 	if !fork.optional || fork.blockNumber != nil {
+	// 		lastFork = fork
+	// 	}
+	// }
+	// return nil
+	//////////////////////////
+
 }
 
 func (c *Config) checkCompatible(newcfg *Config, head uint64) *ConfigCompatError {

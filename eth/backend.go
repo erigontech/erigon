@@ -93,7 +93,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/ethstats"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
@@ -212,7 +211,6 @@ type Ethereum struct {
 	dataStream *datastreamer.StreamServer
 	l1Syncer   *syncer.L1Syncer
 	etherMan   *etherman.Client
-	nodeType   byte
 
 	preStartTasks *PreStartTasks
 
@@ -630,7 +628,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.newTxs2 = make(chan types2.Announcements, 1024)
 		//defer close(newTxs)
 		backend.txPool2DB, backend.txPool2, backend.txPool2Fetch, backend.txPool2Send, backend.txPool2GrpcServer, err = txpooluitl.AllComponents(
-			ctx, config.TxPool, config.Zk, kvcache.NewDummy(), backend.newTxs2, backend.chainDB, backend.sentriesClient.Sentries(), stateDiffClient,
+			ctx, config.TxPool, config, kvcache.NewDummy(), backend.newTxs2, backend.chainDB, backend.sentriesClient.Sentries(), stateDiffClient,
 		)
 		if err != nil {
 			return nil, err
@@ -966,10 +964,20 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 
 		// entering ZK territory!
-		cfg := backend.config.Zk
+		cfg := backend.config
+
+		// update the chain config with the zero gas from the flags
+		backend.chainConfig.SupportGasless = cfg.Gasless
+
 		backend.etherMan = newEtherMan(cfg, chainConfig.ChainName)
 
 		isSequencer := sequencer.IsSequencer()
+
+		// if the L1 block sync is set we're in recovery so can't run as a sequencer
+		if cfg.L1SyncStartBlock > 0 && !isSequencer {
+			panic("you cannot launch in l1 sync mode as an RPC node")
+		}
+
 		var l1Topics [][]libcommon.Hash
 		var l1Contracts []libcommon.Address
 		if isSequencer {
@@ -981,8 +989,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				contracts.SequencedBatchTopicEtrog,
 				contracts.VerificationTopicPreEtrog,
 				contracts.VerificationTopicEtrog,
+				contracts.UpdateL1InfoTreeTopic,
 			}}
-			l1Contracts = []libcommon.Address{cfg.AddressRollup, cfg.AddressAdmin}
+			l1Contracts = []libcommon.Address{cfg.AddressRollup, cfg.AddressAdmin, cfg.AddressGerManager}
 		}
 
 		backend.l1Syncer = syncer.NewL1Syncer(
@@ -991,11 +1000,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			l1Topics,
 			cfg.L1BlockRange,
 			cfg.L1QueryDelay,
+			cfg.L1QueryBlocksThreads,
 		)
 
 		if isSequencer {
-			backend.nodeType = zkStages.NodeTypeSequencer
-
 			// if we are sequencing transactions, we do the sequencing loop...
 			witnessGenerator := witness.NewGenerator(
 				config.Dirs,
@@ -1019,12 +1027,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			}
 
 			verifier := legacy_executor_verifier.NewLegacyExecutorVerifier(
-				*cfg,
+				*cfg.Zk,
 				legacyExecutors,
 				backend.chainConfig,
 				backend.chainDB,
 				witnessGenerator,
 				backend.l1Syncer,
+				backend.dataStream,
 			)
 
 			verifier.StartWork()
@@ -1032,6 +1041,15 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			// we need to make sure the pool is always aware of the latest block for when
 			// we switch context from being an RPC node to a sequencer
 			backend.txPool2.ForceUpdateLatestBlock(executionProgress)
+
+			l1BlockSyncer := syncer.NewL1Syncer(
+				backend.etherMan.EthClient,
+				[]libcommon.Address{cfg.AddressZkevm},
+				[][]libcommon.Hash{{contracts.SequenceBatchesTopic}},
+				cfg.L1BlockRange,
+				cfg.L1QueryDelay,
+				cfg.L1QueryBlocksThreads,
+			)
 
 			backend.syncStages = stages2.NewSequencerZkStages(
 				backend.sentryCtx,
@@ -1046,6 +1064,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				backend.engine,
 				backend.dataStream,
 				backend.l1Syncer,
+				l1BlockSyncer,
 				backend.txPool2,
 				backend.txPool2DB,
 				verifier,
@@ -1065,9 +1084,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 			*/
 
-			backend.nodeType = zkStages.NodeTypeSynchronizer
-
-			datastreamClient := initDataStreamClient(cfg)
+			streamClient := initDataStreamClient(cfg.Zk)
 
 			backend.syncStages = stages2.NewDefaultZkStages(
 				backend.sentryCtx,
@@ -1081,7 +1098,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				backend.forkValidator,
 				backend.engine,
 				backend.l1Syncer,
-				datastreamClient,
+				streamClient,
 				backend.dataStream,
 			)
 
@@ -1103,7 +1120,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 }
 
 // creates an EtherMan instance with default parameters
-func newEtherMan(cfg *ethconfig.Zk, l2ChainName string) *etherman.Client {
+func newEtherMan(cfg *ethconfig.Config, l2ChainName string) *etherman.Client {
 	ethmanConf := etherman.Config{
 		URL:                       cfg.L1RpcUrl,
 		L1ChainID:                 cfg.L1ChainId,
@@ -1186,16 +1203,10 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		return err
 	}
 
-	//eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
-	if config.Ethstats != "" {
-		var headCh chan [][]byte
-		headCh, s.unsubscribeEthstat = s.notifications.Events.AddHeaderSubscription()
-		if err := ethstats.New(stack, s.sentryServers, chainKv, s.blockReader, s.engine, config.Ethstats, s.networkID, ctx.Done(), headCh, txPoolRpcClient); err != nil {
-			return err
-		}
-	}
+	// apiList := jsonrpc.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, backend.agg, httpRpcCfg, backend.engine, config, backend.l1Syncer)
+	// authApiList := jsonrpc.AuthAPIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, backend.agg, httpRpcCfg, backend.engine, config)
 
-	s.apiList = jsonrpc.APIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, s.agg, &httpRpcCfg, s.engine, ethconfig.DefaultZkConfig, nil, s.logger)
+	s.apiList = jsonrpc.APIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, s.agg, &httpRpcCfg, s.engine, &ethconfig.Defaults, nil, s.logger)
 
 	if config.SilkwormRpcDaemon && httpRpcCfg.Enabled {
 		silkwormRPCDaemonService := silkworm.NewRpcDaemonService(s.silkworm, chainKv)
@@ -1237,7 +1248,7 @@ func (s *Ethereum) PreStart() error {
 		// so here we loop and take a brief pause waiting for it to be ready
 		attempts := 0
 		for {
-			_, err = zkStages.CatchupDatastream("stream-catchup", tx, s.dataStream, s.nodeType, s.chainConfig.ChainID.Uint64())
+			_, err = zkStages.CatchupDatastream("stream-catchup", tx, s.dataStream, s.chainConfig.ChainID.Uint64())
 			if err != nil {
 				if errors.Is(err, datastreamer.ErrAtomicOpNotAllowed) {
 					attempts++

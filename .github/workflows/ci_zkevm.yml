@@ -1,0 +1,55 @@
+name: CI
+on:
+  push:
+    branches:
+      - zkevm
+  pull_request:
+    branches:
+      - zkevm
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    strategy:
+      matrix:
+        os: [ ubuntu-20.04, macos-11 ] # list of os: https://github.com/actions/virtual-environments
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-go@v4
+        with:
+          go-version: '1.19'
+      - name: Install dependencies on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt update && sudo apt install build-essential
+
+      - name: Build
+        run: make all
+
+      - name: Reproducible build test
+        run: |
+          make cdk-erigon
+          shasum -a256 ./build/bin/cdk-erigon > erigon1.sha256
+          make cdk-erigon
+          shasum -a256 ./build/bin/cdk-erigon > erigon2.sha256
+          if ! cmp -s erigon1.sha256 erigon2.sha256; then
+            echo >&2 "Reproducible build broken"; cat erigon1.sha256; cat erigon2.sha256; exit 1
+          fi
+
+#      - name: Lint
+#        if: runner.os == 'Linux'
+#        uses: golangci/golangci-lint-action@v4
+#        with:
+#          version: v1.54
+
+      - name: Test
+        run: make test

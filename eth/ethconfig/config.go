@@ -106,6 +106,8 @@ var Defaults = Config{
 		KeepBlocks: false,
 		Produce:    true,
 	},
+
+	Zk: &Zk{},
 }
 
 func init() {
@@ -251,7 +253,7 @@ type Config struct {
 	OverridePragueTime *big.Int `toml:",omitempty"`
 
 	//[zkevm]
-	Zk *Zk
+	*Zk
 
 	ForcePartialCommit bool
 

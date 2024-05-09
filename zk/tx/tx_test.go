@@ -11,71 +11,64 @@ import (
 	"encoding/binary"
 
 	"github.com/holiman/uint256"
+	constants "github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/zk/constants"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestDecodeRandomBatchL2Data(t *testing.T) {
 	randomData := []byte("Random data")
-	txs, _, _, err := DecodeTxs(randomData, constants.ForkDragonfruitId5)
+	blocks, err := DecodeBatchL2Blocks(randomData, uint64(constants.ForkID5Dragonfruit))
 	require.Error(t, err)
-	assert.Equal(t, []types.Transaction{}, txs)
-	t.Log("Txs decoded 1: ", txs)
+	assert.Equal(t, 0, len(blocks))
 
 	randomData = []byte("Esto es autentica basura")
-	txs, _, _, err = DecodeTxs(randomData, constants.ForkDragonfruitId5)
+	blocks, err = DecodeBatchL2Blocks(randomData, uint64(constants.ForkID5Dragonfruit))
 	require.Error(t, err)
-	assert.Equal(t, []types.Transaction{}, txs)
-	t.Log("Txs decoded 2: ", txs)
+	assert.Equal(t, 0, len(blocks))
 
 	randomData = []byte("beef")
-	txs, _, _, err = DecodeTxs(randomData, constants.ForkDragonfruitId5)
+	blocks, err = DecodeBatchL2Blocks(randomData, uint64(constants.ForkID5Dragonfruit))
 	require.Error(t, err)
-	assert.Equal(t, []types.Transaction{}, txs)
-	t.Log("Txs decoded 3: ", txs)
+	assert.Equal(t, 0, len(blocks))
 }
 
 func TestDecodePre155BatchL2DataPreForkID5(t *testing.T) {
 	pre155, err := hex.DecodeString("e480843b9aca00826163941275fbb540c8efc58b812ba83b0d0b8b9917ae98808464fbb77cb7d2a666860f3c6b8f5ef96f86c7ec5562e97fd04c2e10f3755ff3a0456f9feb246df95217bf9082f84f9e40adb0049c6664a5bb4c9cbe34ab1a73e77bab26ed1b")
 	require.NoError(t, err)
-	txs, _, _, err := DecodeTxs(pre155, constants.ForkId4)
+	blocks, err := DecodeBatchL2Blocks(pre155, uint64(constants.ForkID4))
 	require.NoError(t, err)
-	t.Log("Txs decoded: ", txs, len(txs))
-	assert.Equal(t, 1, len(txs))
-	v, r, s := txs[0].RawSignatureValues()
-	assert.Equal(t, "0x1275fbb540c8efC58b812ba83B0D0B8b9917AE98", txs[0].GetTo().String())
+	assert.Equal(t, 1, len(blocks))
+	v, r, s := blocks[0].Transactions[0].RawSignatureValues()
+	assert.Equal(t, "0x1275fbb540c8efC58b812ba83B0D0B8b9917AE98", blocks[0].Transactions[0].GetTo().String())
 	assert.Equal(t, "1b", fmt.Sprintf("%x", v))
 	assert.Equal(t, "b7d2a666860f3c6b8f5ef96f86c7ec5562e97fd04c2e10f3755ff3a0456f9feb", fmt.Sprintf("%x", r))
 	assert.Equal(t, "246df95217bf9082f84f9e40adb0049c6664a5bb4c9cbe34ab1a73e77bab26ed", fmt.Sprintf("%x", s))
-	assert.Equal(t, uint64(24931), txs[0].GetGas())
-	assert.Equal(t, "64fbb77c", hex.EncodeToString(txs[0].GetData()))
-	assert.Equal(t, uint64(0), txs[0].GetNonce())
-	assert.Equal(t, uint256.NewInt(1000000000), txs[0].GetPrice())
+	assert.Equal(t, uint64(24931), blocks[0].Transactions[0].GetGas())
+	assert.Equal(t, "64fbb77c", hex.EncodeToString(blocks[0].Transactions[0].GetData()))
+	assert.Equal(t, uint64(0), blocks[0].Transactions[0].GetNonce())
+	assert.Equal(t, uint256.NewInt(1000000000), blocks[0].Transactions[0].GetPrice())
 
 	pre155, err = hex.DecodeString("e580843b9aca00830186a0941275fbb540c8efc58b812ba83b0d0b8b9917ae988084159278193d7bcd98c00060650f12c381cc2d4f4cc8abf54059aecd2c7aabcfcdd191ba6827b1e72f0eb0b8d5daae64962f4aafde7853e1c102de053edbedf066e6e3c2dc1b")
 	require.NoError(t, err)
-	txs, _, _, err = DecodeTxs(pre155, constants.ForkId4)
+	blocks, err = DecodeBatchL2Blocks(pre155, uint64(constants.ForkID4))
 	require.NoError(t, err)
-	t.Log("Txs decoded: ", txs)
-	assert.Equal(t, 1, len(txs))
-	assert.Equal(t, "0x1275fbb540c8efC58b812ba83B0D0B8b9917AE98", txs[0].GetTo().String())
-	assert.Equal(t, uint64(0), txs[0].GetNonce())
-	assert.Equal(t, uint256.NewInt(0), txs[0].GetValue())
-	assert.Equal(t, "15927819", hex.EncodeToString(txs[0].GetData()))
-	assert.Equal(t, uint64(100000), txs[0].GetGas())
-	assert.Equal(t, uint256.NewInt(1000000000), txs[0].GetPrice())
+	assert.Equal(t, 1, len(blocks))
+	assert.Equal(t, "0x1275fbb540c8efC58b812ba83B0D0B8b9917AE98", blocks[0].Transactions[0].GetTo().String())
+	assert.Equal(t, uint64(0), blocks[0].Transactions[0].GetNonce())
+	assert.Equal(t, uint256.NewInt(0), blocks[0].Transactions[0].GetValue())
+	assert.Equal(t, "15927819", hex.EncodeToString(blocks[0].Transactions[0].GetData()))
+	assert.Equal(t, uint64(100000), blocks[0].Transactions[0].GetGas())
+	assert.Equal(t, uint256.NewInt(1000000000), blocks[0].Transactions[0].GetPrice())
 }
 
 func TestDecodePre155Tx(t *testing.T) {
 	pre155 := "0xf86780843b9aca00826163941275fbb540c8efc58b812ba83b0d0b8b9917ae98808464fbb77c1ba0b7d2a666860f3c6b8f5ef96f86c7ec5562e97fd04c2e10f3755ff3a0456f9feba0246df95217bf9082f84f9e40adb0049c6664a5bb4c9cbe34ab1a73e77bab26ed"
 	pre155Bytes, err := hex.DecodeString(pre155[2:])
 	require.NoError(t, err)
-	tx, _, err := DecodeTx(pre155Bytes, 0, constants.ForkId4)
+	tx, _, err := DecodeTx(pre155Bytes, 0, uint16(constants.ForkID5Dragonfruit))
 	require.NoError(t, err)
 	v, r, s := tx.RawSignatureValues()
 	assert.Equal(t, "0x1275fbb540c8efC58b812ba83B0D0B8b9917AE98", tx.GetTo().String())
@@ -92,7 +85,7 @@ func TestDecodePost155Tx(t *testing.T) {
 	post155 := "0xf86780843b9aca00826163941275fbb540c8efc58b812ba83b0d0b8b9917ae98808464fbb77c1ba0b7d2a666860f3c6b8f5ef96f86c7ec5562e97fd04c2e10f3755ff3a0456f9feba0246df95217bf9082f84f9e40adb0049c6664a5bb4c9cbe34ab1a73e77bab26ed"
 	post155Bytes, err := hex.DecodeString(post155[2:])
 	require.NoError(t, err)
-	tx, pct, err := DecodeTx(post155Bytes, 75, constants.ForkDragonfruitId5)
+	tx, pct, err := DecodeTx(post155Bytes, 75, uint16(constants.ForkID5Dragonfruit))
 	require.NoError(t, err)
 	v, r, s := tx.RawSignatureValues()
 	assert.Equal(t, "0x1275fbb540c8efC58b812ba83B0D0B8b9917AE98", tx.GetTo().String())
@@ -109,61 +102,30 @@ func TestDecodePost155Tx(t *testing.T) {
 func TestDecodePre155BatchL2DataForkID5(t *testing.T) {
 	pre155, err := hex.DecodeString("e480843b9aca00826163941275fbb540c8efc58b812ba83b0d0b8b9917ae98808464fbb77cb7d2a666860f3c6b8f5ef96f86c7ec5562e97fd04c2e10f3755ff3a0456f9feb246df95217bf9082f84f9e40adb0049c6664a5bb4c9cbe34ab1a73e77bab26ed1bff")
 	require.NoError(t, err)
-	txs, _, _, err := DecodeTxs(pre155, constants.ForkDragonfruitId5)
+	blocks, err := DecodeBatchL2Blocks(pre155, uint64(constants.ForkID5Dragonfruit))
 	require.NoError(t, err)
-	t.Log("Txs decoded: ", txs, len(txs))
-	assert.Equal(t, 1, len(txs))
-	v, r, s := txs[0].RawSignatureValues()
-	assert.Equal(t, "0x1275fbb540c8efC58b812ba83B0D0B8b9917AE98", txs[0].GetTo().String())
+	assert.Equal(t, 1, len(blocks))
+	v, r, s := blocks[0].Transactions[0].RawSignatureValues()
+	assert.Equal(t, "0x1275fbb540c8efC58b812ba83B0D0B8b9917AE98", blocks[0].Transactions[0].GetTo().String())
 	assert.Equal(t, "1b", fmt.Sprintf("%x", v))
 	assert.Equal(t, "b7d2a666860f3c6b8f5ef96f86c7ec5562e97fd04c2e10f3755ff3a0456f9feb", fmt.Sprintf("%x", r))
 	assert.Equal(t, "246df95217bf9082f84f9e40adb0049c6664a5bb4c9cbe34ab1a73e77bab26ed", fmt.Sprintf("%x", s))
-	assert.Equal(t, uint64(24931), txs[0].GetGas())
-	assert.Equal(t, "64fbb77c", hex.EncodeToString(txs[0].GetData()))
-	assert.Equal(t, uint64(0), txs[0].GetNonce())
-	assert.Equal(t, uint256.NewInt(1000000000), txs[0].GetPrice())
+	assert.Equal(t, uint64(24931), blocks[0].Transactions[0].GetGas())
+	assert.Equal(t, "64fbb77c", hex.EncodeToString(blocks[0].Transactions[0].GetData()))
+	assert.Equal(t, uint64(0), blocks[0].Transactions[0].GetNonce())
+	assert.Equal(t, uint256.NewInt(1000000000), blocks[0].Transactions[0].GetPrice())
 
 	pre155, err = hex.DecodeString("e580843b9aca00830186a0941275fbb540c8efc58b812ba83b0d0b8b9917ae988084159278193d7bcd98c00060650f12c381cc2d4f4cc8abf54059aecd2c7aabcfcdd191ba6827b1e72f0eb0b8d5daae64962f4aafde7853e1c102de053edbedf066e6e3c2dc1b")
 	require.NoError(t, err)
-	txs, _, _, err = DecodeTxs(pre155, constants.ForkId4)
+	blocks, err = DecodeBatchL2Blocks(pre155, uint64(constants.ForkID4))
 	require.NoError(t, err)
-	t.Log("Txs decoded: ", txs)
-	assert.Equal(t, 1, len(txs))
-	assert.Equal(t, "0x1275fbb540c8efC58b812ba83B0D0B8b9917AE98", txs[0].GetTo().String())
-	assert.Equal(t, uint64(0), txs[0].GetNonce())
-	assert.Equal(t, uint256.NewInt(0), txs[0].GetValue())
-	assert.Equal(t, "15927819", hex.EncodeToString(txs[0].GetData()))
-	assert.Equal(t, uint64(100000), txs[0].GetGas())
-	assert.Equal(t, uint256.NewInt(1000000000), txs[0].GetPrice())
-}
-
-func createTx(nonce, gasPrice, gasLimit, from, to, value, data string, chainID uint64) types.LegacyTx {
-	nonceUint, _ := hexutil.DecodeUint64(nonce)
-	gasPriceInt, _ := uint256.FromHex(gasPrice)
-	gasLimitUint, _ := hexutil.DecodeUint64(gasLimit)
-	valueInt, _ := uint256.FromHex(value)
-	fromAddr := libcommon.HexToAddress(from)
-
-	var toAddress *libcommon.Address
-	if to != "" {
-		addr := libcommon.HexToAddress(to)
-		toAddress = &addr
-	}
-
-	tx := types.LegacyTx{
-		CommonTx: types.CommonTx{
-			ChainID: uint256.NewInt(chainID),
-			Nonce:   nonceUint,
-			Gas:     gasLimitUint,
-			To:      toAddress,
-			Value:   valueInt,
-			Data:    hexutil.MustDecode(data),
-		},
-		GasPrice: gasPriceInt,
-	}
-	tx.SetSender(fromAddr)
-
-	return tx
+	assert.Equal(t, 1, len(blocks))
+	assert.Equal(t, "0x1275fbb540c8efC58b812ba83B0D0B8b9917AE98", blocks[0].Transactions[0].GetTo().String())
+	assert.Equal(t, uint64(0), blocks[0].Transactions[0].GetNonce())
+	assert.Equal(t, uint256.NewInt(0), blocks[0].Transactions[0].GetValue())
+	assert.Equal(t, "15927819", hex.EncodeToString(blocks[0].Transactions[0].GetData()))
+	assert.Equal(t, uint64(100000), blocks[0].Transactions[0].GetGas())
+	assert.Equal(t, uint256.NewInt(1000000000), blocks[0].Transactions[0].GetPrice())
 }
 
 func TestComputeL2TxHashScenarios(t *testing.T) {
@@ -422,16 +384,19 @@ func Test_EncodeToBatchL2DataAndBack(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	decoded, _, _, err := DecodeTxs(encoded, 7)
+	decoded, err := DecodeBatchL2Blocks(encoded, 7)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	if len(decoded) != 1 {
-		t.Errorf("expected 1 transaction but found %v", len(decoded))
+		t.Errorf("expected 1 block but found %v", len(decoded))
+	}
+	if len(decoded[0].Transactions) != 1 {
+		t.Errorf("expected 1 transaction but found %v", len(decoded[0].Transactions))
 	}
 
-	toCompare := decoded[0]
+	toCompare := decoded[0].Transactions[0]
 	require.Equal(t, tx, toCompare)
 }
 
@@ -478,4 +443,59 @@ func Test_BlockBatchL2DataEncode(t *testing.T) {
 	expectedInfoTreeBytes := make([]byte, 0)
 	expectedInfoTreeBytes = binary.BigEndian.AppendUint32(expectedInfoTreeBytes, 2)
 	require.Equal(t, expectedInfoTreeBytes, batchL2Data[5:9], "mismatch in l1 info tree")
+}
+
+func Test_BatchL2DataWithMultipleEmptyBlocks(t *testing.T) {
+	testData := "0b000001f4000000000b000001f400000000"
+	decoded, err := hex.DecodeString(testData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks, err := DecodeBatchL2Blocks(decoded, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocks) != 2 {
+		t.Fatalf("expected 2 blocks but found %v", len(blocks))
+	}
+}
+
+func Test_OnlyOneBlockReturnedWithOneBlockInData(t *testing.T) {
+	testData := "0b0000005b00000001ed0985119a1c74008252089451c06a3e11b3b9540dbd3d1697508af105a4dd15880de0b6b3a76400008081ea80805949d75c266f9ac75b829c9cc0d5ce6519f7ef042c3f230589d56a43ca89c8240d69ce59e021384ad6c0c3c44c9008ea6a7e041a475364e5ec7c253e3bf4840b1bff"
+	decoded, err := hex.DecodeString(testData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks, err := DecodeBatchL2Blocks(decoded, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocks) != 1 {
+		t.Fatalf("expected 1 blocks but found %v", len(blocks))
+	}
+}
+
+func Test_ComplexMixOfBlocks(t *testing.T) {
+	testData := "0b00000001000000010b00000002000000020b0000000300000003ed0985119a1c74008252089451c06a3e11b3b9540dbd3d1697508af105a4dd15880de0b6b3a76400008081ea80805949d75c266f9ac75b829c9cc0d5ce6519f7ef042c3f230589d56a43ca89c8240d69ce59e021384ad6c0c3c44c9008ea6a7e041a475364e5ec7c253e3bf4840b1bff0b0000000400000004"
+	decoded, err := hex.DecodeString(testData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks, err := DecodeBatchL2Blocks(decoded, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocks) != 4 {
+		t.Fatalf("expected 4 blocks but found %v", len(blocks))
+	}
+
+	// test data increments the l1 info index and delta for each block
+	for idx, block := range blocks {
+		if block.L1InfoTreeIndex != uint32(idx)+1 {
+			t.Errorf("block %v expected l1 info tree index %v but got %v", idx, idx+1, block.L1InfoTreeIndex)
+		}
+		if block.DeltaTimestamp != uint32(idx)+1 {
+			t.Errorf("block %v expected delta timestamp %v but got %v", idx, idx+1, block.DeltaTimestamp)
+		}
+	}
 }

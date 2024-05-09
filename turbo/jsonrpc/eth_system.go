@@ -107,7 +107,7 @@ func (api *APIImpl) ProtocolVersion(ctx context.Context) (hexutil.Uint, error) {
 }
 
 // GasPrice implements eth_gasPrice. Returns the current price per gas in wei.
-func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
+func (api *APIImpl) GasPrice_deprecated(ctx context.Context) (*hexutil.Big, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -116,11 +116,6 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 	cc, err := api.chainConfig(tx)
 	if err != nil {
 		return nil, err
-	}
-
-	// [zkevm] - proxy the request if the chainID is ZK and not a sequencer
-	if api.isZkNonSequencer(cc.ChainID) {
-		return api.gasPriceZk(api.l2RpcUrl)
 	}
 
 	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, cc, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache)

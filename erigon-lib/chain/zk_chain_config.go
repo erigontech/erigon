@@ -48,3 +48,8 @@ func IsDevnet(chainId uint64) bool {
 func CheckForkOrder() error {
 	return nil
 }
+
+func SetDynamicChainDetails(chainId uint64, chainName string) {
+	chainIdToName[chainId] = chainName
+	chainIds = append(chainIds, chainId)
+}

@@ -771,6 +771,15 @@ func (sdb *IntraBlockState) SetTxContext(thash, bhash libcommon.Hash, ti int) {
 	sdb.txIndex = ti
 }
 
+// Prepare sets the current transaction hash and index and block hash which is
+// used when the EVM emits new state logs.
+func (sdb *IntraBlockState) Init(thash, bhash libcommon.Hash, ti int) {
+	sdb.thash = thash
+	sdb.bhash = bhash
+	sdb.txIndex = ti
+	sdb.accessList = newAccessList()
+}
+
 // no not lock
 func (sdb *IntraBlockState) clearJournalAndRefund() {
 	sdb.journal = newJournal()

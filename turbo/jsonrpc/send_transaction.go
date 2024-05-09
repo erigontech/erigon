@@ -33,6 +33,11 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 
 	// [zkevm] - proxy the request if the chainID is ZK and not a sequencer
 	if api.isZkNonSequencer(chainId) {
+		// [zkevm] - proxy the request to the pool manager if the pool manager is set
+		if api.isPoolManagerAddressSet() {
+			return api.sendTxZk(api.PoolManagerUrl, encodedTx, chainId.Uint64())
+		}
+
 		return api.sendTxZk(api.l2RpcUrl, encodedTx, chainId.Uint64())
 	}
 

@@ -23,18 +23,18 @@ import (
 func APIList(db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
 	filters *rpchelper.Filters, stateCache kvcache.Cache,
 	blockReader services.FullBlockReader, agg *libstate.AggregatorV3, cfg *httpcfg.HttpCfg, engine consensus.EngineReader,
-	zkConfig *ethconfig.Zk, l1Syncer *syncer.L1Syncer, logger log.Logger,
+	ethCfg *ethconfig.Config, l1Syncer *syncer.L1Syncer, logger log.Logger,
 ) (list []rpc.API) {
 
 	// non-sequencer nodes should forward on requests to the sequencer
 	rpcUrl := ""
 	if !sequencer.IsSequencer() {
-		rpcUrl = zkConfig.L2RpcUrl
+		rpcUrl = ethCfg.Zk.L2RpcUrl
 	}
 
 	base := NewBaseApi(filters, stateCache, blockReader, agg, cfg.WithDatadir, cfg.EvmCallTimeout, engine, cfg.Dirs)
-	base.SetL2RpcUrl(zkConfig.L2RpcUrl)
-	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap, cfg.ReturnDataLimit, zkConfig, cfg.AllowUnprotectedTxs, cfg.MaxGetProofRewindBlockCount, logger)
+	base.SetL2RpcUrl(ethCfg.Zk.L2RpcUrl)
+	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap, cfg.ReturnDataLimit, ethCfg, cfg.AllowUnprotectedTxs, cfg.MaxGetProofRewindBlockCount, logger)
 	erigonImpl := NewErigonAPI(base, db, eth)
 	txpoolImpl := NewTxPoolAPI(base, db, txPool, rpcUrl)
 	netImpl := NewNetAPIImpl(eth)
@@ -64,7 +64,7 @@ func APIList(db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, m
 	otsImpl := NewOtterscanAPI(base, db, cfg.OtsMaxPageSize)
 	gqlImpl := NewGraphQLAPI(base, db)
 	overlayImpl := NewOverlayAPI(base, db, cfg.Gascap, cfg.OverlayGetLogsTimeout, cfg.OverlayReplayBlockTimeout, otsImpl)
-	zkEvmImpl := NewZkEvmAPI(ethImpl, db, cfg.ReturnDataLimit, zkConfig, l1Syncer)
+	zkEvmImpl := NewZkEvmAPI(ethImpl, db, cfg.ReturnDataLimit, ethCfg, l1Syncer)
 
 	if cfg.GraphQLEnabled {
 		list = append(list, rpc.API{
@@ -188,11 +188,11 @@ func APIList(db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, m
 // 	filters *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader,
 // 	agg *libstate.AggregatorV3,
 // 	cfg httpcfg.HttpCfg, engine consensus.EngineReader,
-// 	zkConfig *ethconfig.Zk,
+// 	ethCfg *ethconfig.Config,
 // ) (list []rpc.API) {
 // 	base := NewBaseApi(filters, stateCache, blockReader, agg, cfg.WithDatadir, cfg.EvmCallTimeout, engine, cfg.Dirs)
 
-// 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap, cfg.ReturnDataLimit, zkConfig, false, 100_000, log.New())
+// 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap, cfg.ReturnDataLimit, ethCfg, false, 100_000, log.New())
 // 	engineImpl := NewEngineAPI(base, db, eth, cfg.InternalCL)
 
 // 	list = append(list, rpc.API{
