@@ -856,53 +856,33 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	//		"tx until limit", limit)
 	//}()
 
-	// do not collect and sort keys if it's History index
-	var indexWithHistoryValues bool
-	{
-		itc, err := rwTx.CursorDupSort(ii.indexTable)
-		if err != nil {
-			return nil, err
-		}
-		idxValuesCount, err := itc.Count()
-		itc.Close()
-		if err != nil {
-			return nil, err
-		}
-		indexWithHistoryValues = idxValuesCount == 0 && fn != nil
-	}
-
 	keysCursor, err := rwTx.RwCursorDupSort(ii.indexKeysTable)
 	if err != nil {
 		return stat, fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
 	}
 	defer keysCursor.Close()
-
-	var txKey [8]byte
-	binary.BigEndian.PutUint64(txKey[:], txFrom)
-	k, v, err := keysCursor.Seek(txKey[:])
+	keysCForDeletes, err := rwTx.RwCursorDupSort(ii.indexKeysTable)
+	if err != nil {
+		return stat, fmt.Errorf("create %s keys delete cursor: %w", ii.filenameBase, err)
+	}
+	defer keysCForDeletes.Close()
+	indexCForDeletes, err := rwTx.RwCursorDupSort(ii.indexTable)
 	if err != nil {
 		return nil, err
 	}
-	if k == nil {
-		return nil, nil
-	}
+	defer indexCForDeletes.Close()
 
-	txFrom = binary.BigEndian.Uint64(k)
-	if limit == 0 {
-		limit = math.MaxUint64
-	}
-	if txFrom >= txTo {
-		return nil, nil
-	}
-
-	collector := etl.NewCollector("snapshots", ii.dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), ii.logger)
+	collector := etl.NewCollector("snapshots", ii.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), ii.logger)
 	defer collector.Close()
 	collector.LogLvl(log.LvlDebug)
 	collector.SortAndFlushInBackground(true)
 
+	var txKey [8]byte
+	binary.BigEndian.PutUint64(txKey[:], txFrom)
+
 	// Invariant: if some `txNum=N` pruned - it's pruned Fully
 	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
-	for ; k != nil; k, v, err = keysCursor.NextNoDup() {
+	for k, v, err := keysCursor.Seek(txKey[:]); k != nil; k, v, err = keysCursor.NextNoDup() {
 		if err != nil {
 			return nil, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
 		}
@@ -922,80 +902,44 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 			if err != nil {
 				return nil, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
 			}
-			if !indexWithHistoryValues {
-				if err := collector.Collect(v, nil); err != nil {
-					return nil, err
-				}
+			if err := collector.Collect(v, k); err != nil {
+				return nil, err
 			}
-			if fn != nil {
-				if err := fn(v, k); err != nil {
-					return nil, err
-				}
-			}
-			stat.PruneCountValues++
 		}
 
-		stat.PruneCountTx++
 		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
-		if err = rwTx.Delete(ii.indexKeysTable, k); err != nil {
+		if err = keysCForDeletes.Delete(k); err != nil {
 			return nil, err
 		}
+		stat.PruneCountTx++
 
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 	}
 
-	if indexWithHistoryValues {
-		// empty indexTable, no need to collect and prune keys out of there
-		return stat, nil
-	}
-
-	idxCForDeletes, err := rwTx.RwCursorDupSort(ii.indexTable)
-	if err != nil {
-		return nil, err
-	}
-	defer idxCForDeletes.Close()
-	idxC, err := rwTx.RwCursorDupSort(ii.indexTable)
-	if err != nil {
-		return nil, err
-	}
-	defer idxC.Close()
-
-	binary.BigEndian.PutUint64(txKey[:], stat.MinTxNum)
-	err = collector.Load(rwTx, "", func(key, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		for txnm, err := idxC.SeekBothRange(key, txKey[:]); txnm != nil; _, txnm, err = idxC.NextDup() {
-			if err != nil {
+	err = collector.Load(nil, "", func(key, txnum []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		if fn != nil {
+			if err := fn(key, txnum); err != nil {
 				return err
-			}
-
-			txNum := binary.BigEndian.Uint64(txnm)
-			if txNum < stat.MinTxNum {
-				continue // to bigger txnums
-			}
-			if txNum > stat.MaxTxNum {
-				return nil //  go to next key
-			}
-			if _, _, err = idxCForDeletes.SeekBothExact(key, txnm); err != nil {
-				return err
-			}
-			if err = idxCForDeletes.DeleteCurrent(); err != nil {
-				return err
-			}
-			mxPruneSizeIndex.Inc()
-
-			select {
-			case <-logEvery.C:
-				ii.logger.Info("[snapshots] prune index", "name", ii.filenameBase, "pruned tx", stat.PruneCountTx,
-					"pruned values", stat.PruneCountValues,
-					"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(ii.aggregationStep), float64(txNum)/float64(ii.aggregationStep)))
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
 			}
 		}
+		if err = indexCForDeletes.DeleteExact(key, txnum); err != nil {
+			return err
+		}
+		mxPruneSizeIndex.Inc()
+		stat.PruneCountValues++
+
+		select {
+		case <-logEvery.C:
+			txNum := binary.BigEndian.Uint64(txnum)
+			ii.logger.Info("[snapshots] prune index", "name", ii.filenameBase, "pruned tx", stat.PruneCountTx,
+				"pruned values", stat.PruneCountValues,
+				"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(ii.aggregationStep), float64(txNum)/float64(ii.aggregationStep)))
+		default:
+		}
 		return nil
-	}, etl.TransformArgs{})
+	}, etl.TransformArgs{Quit: ctx.Done()})
 
 	return stat, err
 }

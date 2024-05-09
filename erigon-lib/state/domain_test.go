@@ -2251,6 +2251,14 @@ func compareIteratorsS(t *testing.T, et, ut iter.KVS) {
 		require.EqualValues(t, ev, uv)
 		require.EqualValues(t, estep, ustep)
 		if !et.HasNext() {
+			if ut.HasNext() {
+				for ut.HasNext() {
+					uk, uv, ustep, err2 := ut.Next()
+					require.NoError(t, err2)
+					t.Logf("unexpected key %x %x %d\n", uk, uv, ustep)
+				}
+				t.FailNow()
+			}
 			require.False(t, ut.HasNext(), "unwindedIter has more keys than expectedIter got\n")
 			break
 		}
