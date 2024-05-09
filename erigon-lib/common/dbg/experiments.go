@@ -56,8 +56,10 @@ var (
 
 	BuildSnapshotAllowance = EnvInt("SNAPSHOT_BUILD_SEMA_SIZE", 1)
 
-	SnapshotMadvRnd = EnvBool("SNAPSHOT_MADV_RND", true)
-	OnlyCreateDB    = EnvBool("ONLY_CREATE_DB", false)
+	SnapshotMadvRnd       = EnvBool("SNAPSHOT_MADV_RND", true)
+	KvMadvNormalNoLastLvl = EnvString("KV_MADV_NORMAL_NO_LAST_LVL", "")
+	KvMadvNormal          = EnvString("KV_MADV_NORMAL", "")
+	OnlyCreateDB          = EnvBool("ONLY_CREATE_DB", false)
 )
 
 func ReadMemStats(m *runtime.MemStats) {
