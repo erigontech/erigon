@@ -81,3 +81,7 @@ func checkPeerStatusCompatibility(
 	forkFilter := forkid.NewFilterFromForks(status.ForkData.HeightForks, status.ForkData.TimeForks, genesisHash, status.MaxBlockHeight, status.MaxBlockTime)
 	return forkFilter(reply.ForkID)
 }
+
+// Their forkid [4]uint8 [5,254,225,10]
+// "0x05fee10a"
+

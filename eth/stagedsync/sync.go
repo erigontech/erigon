@@ -376,11 +376,11 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, firstCycle bool) (bool, err
 			s.NextStage()
 			continue
 		}
-
+		////////////////--------------------------------//////////////////////////////////
 		if err := s.runStage(stage, db, txc, firstCycle, badBlockUnwind); err != nil {
 			return false, err
 		}
-
+		////////////////--------------------------------//////////////////////////////////
 		if string(stage.ID) == dbg.StopAfterStage() { // stop process for debugging reasons
 			s.logger.Warn("STOP_AFTER_STAGE env flag forced to stop app")
 			return false, libcommon.ErrStopped

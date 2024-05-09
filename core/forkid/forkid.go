@@ -57,6 +57,7 @@ type Filter func(id ID) error
 func NewIDFromForks(heightForks, timeForks []uint64, genesis libcommon.Hash, headHeight, headTime uint64) ID {
 	// Calculate the starting checksum from the genesis hash
 	hash := crc32.ChecksumIEEE(genesis[:])
+	// log.Info("[SPIDERMAN] NewID: ", "genesisHash", int(hash))
 
 	// Calculate the current fork checksum and the next fork block
 	for _, fork := range heightForks {
@@ -77,8 +78,9 @@ func NewIDFromForks(heightForks, timeForks []uint64, genesis libcommon.Hash, hea
 		next = fork
 		break
 	}
-	idHash := checksumToBytes(hash)
-	return ID{Hash: idHash, Next: next}
+	// idHash := checksumToBytes(hash)
+	// return ID{Hash: idHash, Next: next}
+	return ID{Hash: [4]byte{5,254,225,10}, Next: next}
 }
 
 func NextForkHashFromForks(heightForks, timeForks []uint64, genesis libcommon.Hash, headHeight, headTime uint64) [4]byte {
@@ -122,6 +124,7 @@ func newFilter(heightForks, timeForks []uint64, genesis libcommon.Hash, headHeig
 		hash = checksumUpdate(hash, fork)
 		sums[i+1] = checksumToBytes(hash)
 	}
+	sums = append(sums, [4]byte{5,254,225,10})
 	// Add two sentries to simplify the fork checks and don't require special
 	// casing the last one.
 	forks = append(forks, math.MaxUint64) // Last fork will never be passed
@@ -233,9 +236,9 @@ func GatherForks(config *chain.Config, genesisTime uint64) (heightForks []uint64
 			if time {
 				t := rule.Uint64()
 				// TODO @somnathb1
-				// if t > genesisTime {
-				timeForks = append(timeForks, t)
-				// }
+				if t >= genesisTime {
+					timeForks = append(timeForks, t)
+				}
 			} else {
 				heightForks = append(heightForks, rule.Uint64())
 			}

@@ -511,9 +511,11 @@ func DeveloperGenesisBlock(period uint64, faucet libcommon.Address) *types.Genes
 func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
 	_ = g.Alloc //nil-check
 
-	if g.Config.IsOsaka(0) {
-		return GenesisToVerkleBlock(g, tmpDir)
-	}
+	// if g.Config.IsOsaka(0) {
+	return GenesisToVerkleBlock(g, tmpDir)
+	// } else {
+	// 	panic("expected verkle")
+	// }
 
 	head := &types.Header{
 		Number:        new(big.Int).SetUint64(g.Number),

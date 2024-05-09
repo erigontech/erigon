@@ -201,6 +201,8 @@ func StaticPeerURLsOfChain(chain string) []string {
 	switch chain {
 	case networkname.SepoliaChainName:
 		return SepoliaStaticPeers
+	// case networkname.VerkleGenDevnet6:
+	// 	return VerkleGenDevnet6Bootnodes
 	default:
 		return []string{}
 	}
