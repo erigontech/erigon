@@ -177,10 +177,10 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 		})
 		for _, snapshot := range snapshots {
 			if snapshot.stepBased {
-				if prunedDistance >= uint64(stepPrune) {
+				if prunedDistance >= stepPrune {
 					break
 				}
-			} else if prunedDistance >= uint64(blockPrune) {
+			} else if prunedDistance >= blockPrune {
 				fmt.Println(snapshot.name)
 				break
 			}
