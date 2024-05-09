@@ -89,7 +89,6 @@ func adjustBlockPrune(blocks, minBlocksToDownload uint64) uint64 {
 	if minBlocksToDownload < snaptype.Erigon2MergeLimit {
 		minBlocksToDownload = snaptype.Erigon2MergeLimit
 	}
-	fmt.Println(minBlocksToDownload)
 	if blocks < minBlocksToDownload {
 		blocks = minBlocksToDownload
 	}
@@ -257,7 +256,6 @@ func computeBlocksToPrune(blockReader services.FullBlockReader, p prune.Mode) (b
 	if historyPruneTo <= frozenBlocks {
 		historyToPrune = frozenBlocks - historyPruneTo
 	}
-	fmt.Println("O", p.Blocks.PruneTo(frozenBlocks), p.History.PruneTo(frozenBlocks))
 	return blocksToPrune, historyToPrune
 }
 
@@ -298,9 +296,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, histV
 	downloadRequest := make([]services.DownloadRequest, 0, len(preverifiedBlockSnapshots))
 
 	blockPrune, historyPrune := computeBlocksToPrune(blockReader, prune)
-	fmt.Println("X", blockPrune, historyPrune)
 	blackListForPruning := make(map[string]struct{})
-	fmt.Println(prune)
 	wantToPrune := prune.Blocks.Enabled() || prune.History.Enabled()
 	if !headerchain && wantToPrune {
 		minStep, err := getMaxStepRangeInSnapshots(preverifiedBlockSnapshots)
@@ -311,12 +307,10 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, histV
 		if err != nil {
 			return err
 		}
-		fmt.Println("minBlockAmountToDownload", minBlockAmountToDownload, "minStepToDownload", minStepToDownload, "blockPrune", blockPrune, "minStep", minStep)
 		blackListForPruning, err = buildBlackListForPruning(wantToPrune, minStepToDownload, minBlockAmountToDownload, blockPrune, preverifiedBlockSnapshots)
 		if err != nil {
 			return err
 		}
-		fmt.Println("blackListForPruning", blackListForPruning)
 	}
 
 	// build all download requests
