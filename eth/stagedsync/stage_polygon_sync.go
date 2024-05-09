@@ -102,7 +102,7 @@ func SpawnPolygonSyncStage(ctx context.Context, tx kv.RwTx, stageState *StageSta
 		return err
 	}
 
-	if !useExternalTx {
+	if useExternalTx {
 		return nil
 	}
 
