@@ -70,7 +70,7 @@ func RequestSnapshotsDownload(ctx context.Context, downloadRequest []services.Do
 	return nil
 }
 
-func adjustStepPrune(steps uint) uint {
+func adjustStepPrune(steps uint64) uint64 {
 	if steps == 0 {
 		return 0
 	}
@@ -84,7 +84,7 @@ func adjustStepPrune(steps uint) uint {
 	return steps + steps%snaptype.Erigon3SeedableSteps
 }
 
-func adjustBlockPrune(blocks, minBlocksToDownload uint) uint {
+func adjustBlockPrune(blocks, minBlocksToDownload uint64) uint64 {
 	if minBlocksToDownload < snaptype.Erigon2MergeLimit {
 		minBlocksToDownload = snaptype.Erigon2MergeLimit
 	}
@@ -108,7 +108,7 @@ func canSnapshotBePruned(name string) bool {
 	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.Contains(name, "transactions")
 }
 
-func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blockPrune uint, preverified snapcfg.Preverified) (map[string]struct{}, error) {
+func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blockPrune uint64, preverified snapcfg.Preverified) (map[string]struct{}, error) {
 	type snapshotFileData struct {
 		from, to  uint64
 		stepBased bool
@@ -195,13 +195,13 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 }
 
 // getMinimumBlocksToDownload - get the minimum number of blocks to download
-func getMinimumBlocksToDownload(tx kv.Tx, blockReader services.FullBlockReader, minStep uint64, expectedPruneBlockAmount uint64) (uint64, uint64, error) {
+func getMinimumBlocksToDownload(tx kv.Tx, blockReader services.FullBlockReader, minStep uint64, expectedPruneBlockAmount, expectedPruneHistoryAmount uint64) (uint64, uint64, error) {
 	frozenBlocks := blockReader.Snapshots().SegmentsMax()
 	minToDownload := uint64(math.MaxUint64)
 	minStepToDownload := minStep
 	stateTxNum := minStep * config3.HistoryV3AggregationStep
 	if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
-		if blockNum == frozenBlocks-expectedPruneBlockAmount {
+		if blockNum == frozenBlocks-expectedPruneHistoryAmount {
 			minStepToDownload = (baseTxNum / config3.HistoryV3AggregationStep) - 1
 		}
 		if stateTxNum <= baseTxNum { // only cosnider the block if it
@@ -248,7 +248,7 @@ func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error)
 
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, histV3, blobs, pruneMode bool, blockPrune uint, caplin CaplinMode, agg *state.Aggregator, tx kv.RwTx, blockReader services.FullBlockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient, stagesIdsList []string) error {
+func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, histV3, blobs bool, historyPrune, blockPrune uint64, caplin CaplinMode, agg *state.Aggregator, tx kv.RwTx, blockReader services.FullBlockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient, stagesIdsList []string) error {
 	snapshots := blockReader.Snapshots()
 	borSnapshots := blockReader.BorSnapshots()
 
@@ -282,18 +282,19 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, histV
 	preverifiedBlockSnapshots := snapCfg.Preverified
 	downloadRequest := make([]services.DownloadRequest, 0, len(preverifiedBlockSnapshots))
 
+	wantToPrune := historyPrune > 0 || blockPrune > 0
 	blackListForPruning := make(map[string]struct{})
-	if !headerchain && pruneMode {
+	if !headerchain && wantToPrune {
 		minStep, err := getMaxStepRangeInSnapshots(preverifiedBlockSnapshots)
 		if err != nil {
 			return err
 		}
-		minBlockAmountToDownload, minStepToDownload, err := getMinimumBlocksToDownload(tx, blockReader, minStep, uint64(blockPrune))
+		minBlockAmountToDownload, minStepToDownload, err := getMinimumBlocksToDownload(tx, blockReader, minStep, blockPrune, historyPrune)
 		if err != nil {
 			return err
 		}
 		fmt.Println("minBlockAmountToDownload", minBlockAmountToDownload, "minStepToDownload", minStepToDownload, "blockPrune", blockPrune, "minStep", minStep)
-		blackListForPruning, err = buildBlackListForPruning(pruneMode, uint(minStepToDownload), uint(minBlockAmountToDownload), blockPrune, preverifiedBlockSnapshots)
+		blackListForPruning, err = buildBlackListForPruning(wantToPrune, minStepToDownload, minBlockAmountToDownload, blockPrune, preverifiedBlockSnapshots)
 		if err != nil {
 			return err
 		}

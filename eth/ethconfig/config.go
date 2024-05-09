@@ -285,10 +285,6 @@ type Sync struct {
 	BreakAfterStage            string
 	LoopBlockLimit             uint
 
-	SnapshotPrune             bool
-	SnapshotsPruneBlockOlder  uint // pruning for transactions .seg files
-	SnapshotsPruneBlockBefore uint // pruning for transactions .seg files
-
 	UploadLocation   string
 	UploadFrom       rpc.BlockNumber
 	FrozenBlockLimit uint64

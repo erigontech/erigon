@@ -38,12 +38,14 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	borsnaptype "github.com/ledgerwatch/erigon/polygon/bor/snaptype"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -70,6 +72,7 @@ type SnapshotsCfg struct {
 	silkworm         *silkworm.Silkworm
 	snapshotUploader *snapshotUploader
 	syncConfig       ethconfig.Sync
+	prune            prune.Mode
 }
 
 func StageSnapshotsCfg(db kv.RwDB,
@@ -85,6 +88,7 @@ func StageSnapshotsCfg(db kv.RwDB,
 	caplin bool,
 	blobs bool,
 	silkworm *silkworm.Silkworm,
+	prune prune.Mode,
 ) SnapshotsCfg {
 	cfg := SnapshotsCfg{
 		db:                 db,
@@ -100,6 +104,7 @@ func StageSnapshotsCfg(db kv.RwDB,
 		silkworm:           silkworm,
 		syncConfig:         syncConfig,
 		blobs:              blobs,
+		prune:              prune,
 	}
 
 	if uploadFs := cfg.syncConfig.UploadLocation; len(uploadFs) > 0 {
@@ -197,7 +202,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if cfg.caplin { //TODO(Giulio2002): uncomment
 		cstate = snapshotsync.AlsoCaplin
 	}
-	blocksToPrune := cfg.syncConfig.SnapshotsPruneBlockOlder
 
 	if cfg.snapshotUploader != nil {
 		u := cfg.snapshotUploader
@@ -235,14 +239,14 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 	} else {
 		// Download only the snapshots that are for the header chain.
-		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, true, cfg.historyV3, cfg.blobs, cfg.syncConfig.SnapshotPrune, blocksToPrune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
+		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, true, cfg.historyV3, cfg.blobs, math.MaxUint64, math.MaxUint64, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
 			return err
 		}
 		if err := cfg.blockReader.Snapshots().ReopenSegments([]snaptype.Type{coresnaptype.Headers, coresnaptype.Bodies}, true); err != nil {
 			return err
 		}
-		blocksToPrune = computeBlocksToPrune(cfg)
-		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, false, cfg.historyV3, cfg.blobs, cfg.syncConfig.SnapshotPrune, blocksToPrune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
+		blocksToPrune, historyToPrune := computeBlocksToPrune(cfg)
+		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, false, cfg.historyV3, cfg.blobs, historyToPrune, blocksToPrune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
 			return err
 		}
 	}
@@ -426,16 +430,9 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 	return nil
 }
 
-func computeBlocksToPrune(cfg SnapshotsCfg) uint {
+func computeBlocksToPrune(cfg SnapshotsCfg) (blocksToPrune uint64, historyToPrune uint64) {
 	frozenBlocks := cfg.blockReader.Snapshots().SegmentsMax()
-	blocksToPrune := uint64(cfg.syncConfig.SnapshotsPruneBlockOlder)
-	if cfg.syncConfig.SnapshotsPruneBlockBefore > 0 { // check if we prune more blocks with older option
-		blocksToPrune = frozenBlocks - uint64(cfg.syncConfig.SnapshotsPruneBlockBefore) // Underflow is expected behaviour, it will mean: keep nothing prune all.
-		if frozenBlocks < uint64(cfg.syncConfig.SnapshotsPruneBlockBefore) {
-			blocksToPrune = 0
-		}
-	}
-	return uint(blocksToPrune)
+	return frozenBlocks - cfg.prune.Blocks.PruneTo(frozenBlocks), frozenBlocks - cfg.prune.Blocks.PruneTo(frozenBlocks)
 }
 
 /* ====== PRUNING ====== */
@@ -561,12 +558,15 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 		return false, err
 	}
 	// If we are behind the execution stage, we should not prune snapshots
-	if headNumber > executionProgress || !cfg.syncConfig.SnapshotPrune {
+	if headNumber > executionProgress {
 		return false, nil
 	}
 
 	// Keep at least 2 block snapshots as we do not want FrozenBlocks to be 0
-	pruneAmount := uint64(computeBlocksToPrune(cfg))
+	pruneAmount, _ := computeBlocksToPrune(cfg)
+	if pruneAmount == 0 {
+		return false, nil
+	}
 
 	minBlockNumberToKeep := uint64(0)
 	if headNumber > pruneAmount {
@@ -577,7 +577,7 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 	filesDeleted := false
 	// Prune blocks snapshots if necessary
 	for _, file := range snapshotFileNames {
-		if !cfg.syncConfig.SnapshotPrune || headNumber == 0 || !strings.Contains(file, "transactions") {
+		if !cfg.prune.Blocks.Enabled() || headNumber == 0 || !strings.Contains(file, "transactions") {
 			continue
 		}
 

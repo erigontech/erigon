@@ -20,14 +20,15 @@ var DefaultMode = Mode{
 	Receipts:    Distance(math.MaxUint64),
 	TxIndex:     Distance(math.MaxUint64),
 	CallTraces:  Distance(math.MaxUint64),
+	Blocks:      Distance(math.MaxUint64),
 	Experiments: Experiments{}, // all off
 }
 
 type Experiments struct {
 }
 
-func FromCli(chainId uint64, flags string, exactHistory, exactReceipts, exactTxIndex, exactCallTraces,
-	beforeH, beforeR, beforeT, beforeC uint64, experiments []string) (Mode, error) {
+func FromCli(chainId uint64, flags string, exactBlocks, exactHistory, exactReceipts, exactTxIndex, exactCallTraces,
+	beforeB, beforeH, beforeR, beforeT, beforeC uint64, experiments []string) (Mode, error) {
 	mode := DefaultMode
 
 	if flags != "default" && flags != "disabled" {
@@ -41,12 +42,17 @@ func FromCli(chainId uint64, flags string, exactHistory, exactReceipts, exactTxI
 				mode.TxIndex = Distance(params.FullImmutabilityThreshold)
 			case 'c':
 				mode.CallTraces = Distance(params.FullImmutabilityThreshold)
+			case 'b':
+				mode.Blocks = Distance(params.FullImmutabilityThreshold)
 			default:
 				return DefaultMode, fmt.Errorf("unexpected flag found: %c", flag)
 			}
 		}
 	}
 
+	if exactBlocks > 0 {
+		mode.Blocks = Distance(exactBlocks)
+	}
 	if exactHistory > 0 {
 		mode.History = Distance(exactHistory)
 	}
@@ -71,6 +77,9 @@ func FromCli(chainId uint64, flags string, exactHistory, exactReceipts, exactTxI
 	}
 	if beforeC > 0 {
 		mode.CallTraces = Before(beforeC)
+	}
+	if beforeB > 0 {
+		mode.Blocks = Before(beforeB)
 	}
 
 	for _, ex := range experiments {
@@ -129,6 +138,7 @@ type Mode struct {
 	Receipts    BlockAmount
 	TxIndex     BlockAmount
 	CallTraces  BlockAmount
+	Blocks      BlockAmount
 	Experiments Experiments
 }
 

@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"math"
-	"strings"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
@@ -82,6 +81,10 @@ var (
 		Name:  "minimal-history",
 		Usage: `Keep only minimal amount of history. it overrides the --prune.h.* flags`,
 	}
+	PruneBlocksFlag = cli.Uint64Flag{
+		Name:  "prune.b.older",
+		Usage: `Prune data older than this number of blocks from the tip of the chain (if --prune flag has 'b', then default is 90K)`,
+	}
 	PruneHistoryFlag = cli.Uint64Flag{
 		Name:  "prune.h.older",
 		Usage: `Prune data older than this number of blocks from the tip of the chain (if --prune flag has 'h', then default is 90K)`,
@@ -113,6 +116,10 @@ var (
 	}
 	PruneCallTracesBeforeFlag = cli.Uint64Flag{
 		Name:  "prune.c.before",
+		Usage: `Prune data before this block`,
+	}
+	PruneBlocksBeforeFlag = cli.Uint64Flag{
+		Name:  "prune.b.before",
 		Usage: `Prune data before this block`,
 	}
 
@@ -259,23 +266,6 @@ var (
 	}
 )
 
-func getMinimalPrunedMode(ctx *cli.Context, chainID uint64) (prune.Mode, error) {
-	return prune.FromCli(
-		chainID,
-		"htrc", // avoid
-		0,
-		0,
-		0,
-		0,
-		0,
-		0,
-		0,
-		0,
-		libcommon.CliString2Array(ctx.String(ExperimentsFlag.Name)),
-	)
-
-}
-
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.Logger) {
 	chainId := cfg.NetworkID
 	if cfg.Genesis != nil {
@@ -285,6 +275,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	mode, err := prune.FromCli(
 		chainId,
 		ctx.String(PruneFlag.Name),
+		ctx.Uint64(PruneBlocksFlag.Name),
 		ctx.Uint64(PruneHistoryFlag.Name),
 		ctx.Uint64(PruneReceiptFlag.Name),
 		ctx.Uint64(PruneTxIndexFlag.Name),
@@ -293,14 +284,13 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		ctx.Uint64(PruneReceiptBeforeFlag.Name),
 		ctx.Uint64(PruneTxIndexBeforeFlag.Name),
 		ctx.Uint64(PruneCallTracesBeforeFlag.Name),
+		ctx.Uint64(PruneBlocksBeforeFlag.Name),
 		libcommon.CliString2Array(ctx.String(ExperimentsFlag.Name)),
 	)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
-	if minimal {
-		mode, err = getMinimalPrunedMode(ctx, chainId)
-	}
+
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
@@ -321,13 +311,14 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		}
 		etl.BufferOptimalSize = *size
 	}
-	cfg.SnapshotPrune = strings.Contains(ctx.String(PruneFlag.Name), "h") // Pruning of snapshots is enabled with h.
-	cfg.SnapshotsPruneBlockOlder = uint(mode.History.(prune.Distance))
-	cfg.SnapshotsPruneBlockBefore = ctx.Uint(PruneHistoryBeforeFlag.Name)
-	if minimal { // If we enable minimal history, we only keep essential history.
-		cfg.SnapshotPrune = true
-		cfg.SnapshotsPruneBlockOlder = 0
-		cfg.SnapshotsPruneBlockBefore = math.MaxUint
+
+	if minimal {
+		// Prune them all.
+		cfg.Prune.Blocks = prune.Before(math.MaxUint64)
+		cfg.Prune.History = prune.Before(math.MaxUint64)
+		cfg.Prune.Receipts = prune.Before(math.MaxUint64)
+		cfg.Prune.TxIndex = prune.Before(math.MaxUint64)
+		cfg.Prune.CallTraces = prune.Before(math.MaxUint64)
 	}
 
 	cfg.StateStream = !ctx.Bool(StateStreamDisableFlag.Name)
@@ -402,7 +393,10 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 		if exp := f.StringSlice(ExperimentsFlag.Name, nil, ExperimentsFlag.Usage); exp != nil {
 			experiments = *exp
 		}
-		var exactH, exactR, exactT, exactC uint64
+		var exactB, exactH, exactR, exactT, exactC uint64
+		if v := f.Uint64(PruneBlocksFlag.Name, PruneBlocksFlag.Value, PruneBlocksFlag.Usage); v != nil {
+			exactB = *v
+		}
 		if v := f.Uint64(PruneHistoryFlag.Name, PruneHistoryFlag.Value, PruneHistoryFlag.Usage); v != nil {
 			exactH = *v
 		}
@@ -416,7 +410,10 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 			exactC = *v
 		}
 
-		var beforeH, beforeR, beforeT, beforeC uint64
+		var beforeB, beforeH, beforeR, beforeT, beforeC uint64
+		if v := f.Uint64(PruneBlocksBeforeFlag.Name, PruneBlocksBeforeFlag.Value, PruneBlocksBeforeFlag.Usage); v != nil {
+			beforeB = *v
+		}
 		if v := f.Uint64(PruneHistoryBeforeFlag.Name, PruneHistoryBeforeFlag.Value, PruneHistoryBeforeFlag.Usage); v != nil {
 			beforeH = *v
 		}
@@ -435,7 +432,7 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 			chainId = cfg.Genesis.Config.ChainID.Uint64()
 		}
 
-		mode, err := prune.FromCli(chainId, *v, exactH, exactR, exactT, exactC, beforeH, beforeR, beforeT, beforeC, experiments)
+		mode, err := prune.FromCli(chainId, *v, exactB, exactH, exactR, exactT, exactC, beforeH, beforeR, beforeT, beforeC, beforeB, experiments)
 		if err != nil {
 			utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 		}
