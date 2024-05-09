@@ -182,7 +182,6 @@ func (dt *DomainRoTx) lookupFileByItsRange(txFrom uint64, txTo uint64) *filesIte
 		}
 		dt.d.logger.Warn("lookupFileByItsRange: file not found",
 			"stepFrom", txFrom/dt.d.aggregationStep, "stepTo", txTo/dt.d.aggregationStep,
-			//"shortened", fmt.Sprintf("%x", shortKey),
 			"domain", dt.d.keysTable, "files", fileStepsss, "_visibleFiles", visibleFiles,
 			"visibleFilesCount", len(dt.files), "filesCount", dt.d.dirtyFiles.Len())
 		return nil
@@ -202,7 +201,6 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter ArchiveGetter
 				"err", r,
 				"domain", dt.d.keysTable,
 				"offset", offset, "short", fmt.Sprintf("%x", shortKey),
-				//"stepFrom", item.startTxNum/dt.d.aggregationStep, "stepTo", item.endTxNum/dt.d.aggregationStep,
 				"cleanFilesCount", len(dt.files), "dirtyFilesCount", dt.d.dirtyFiles.Len(),
 				"file", getter.FileName())
 		}
@@ -211,9 +209,7 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter ArchiveGetter
 	//getter := NewArchiveGetter(item.decompressor.MakeGetter(), dt.d.compression)
 	getter.Reset(offset)
 	if !getter.HasNext() || uint64(getter.Size()) <= offset {
-		dt.d.logger.Warn("lookupByShortenedKey failed",
-			//"stepFrom", item.startTxNum/dt.d.aggregationStep, "stepTo", item.endTxNum/dt.d.aggregationStep,
-			"short", shortKey, "offset", offset, "file", getter.FileName())
+		dt.d.logger.Warn("lookupByShortenedKey failed", "short", shortKey, "offset", offset, "file", getter.FileName())
 		return nil, false
 	}
 

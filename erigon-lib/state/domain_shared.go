@@ -1035,8 +1035,7 @@ func (sdc *SharedDomainsCommitmentContext) TempDir() string {
 }
 
 func (sdc *SharedDomainsCommitmentContext) KeysCount() uint64 {
-	s := sdc.updates.Size()
-	return s
+	return sdc.updates.Size()
 }
 
 // TouchPlainKey marks plainKey as updated and applies different fn for different key types

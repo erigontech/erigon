@@ -923,9 +923,6 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 				return nil, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
 			}
 			if !indexWithHistoryValues {
-				// todo awskii we could speed up history pruning by calling fn during etl.Load.
-				// that requires index key Deletion also be moved to etl.Load
-
 				if err := collector.Collect(v, nil); err != nil {
 					return nil, err
 				}
