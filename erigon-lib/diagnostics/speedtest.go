@@ -29,10 +29,17 @@ func (d *DiagnosticClient) setupSpeedtestDiagnostics(rootCtx context.Context) {
 	}()
 }
 
+var cacheServerList speedtest.Servers
+
 func (d *DiagnosticClient) runSpeedTest(rootCtx context.Context) NetworkSpeedTestResult {
 	var speedtestClient = speedtest.New()
-	serverList, _ := speedtestClient.FetchServers()
-	targets, _ := serverList.FindServer([]int{})
+
+	serverList, err := speedtestClient.FetchServers()
+	// Ensure that the server list can rolled back to the previous cache.
+	if err == nil {
+		cacheServerList = serverList
+	}
+	targets, _ := cacheServerList.FindServer([]int{})
 
 	latency := time.Duration(0)
 	downloadSpeed := float64(0)
