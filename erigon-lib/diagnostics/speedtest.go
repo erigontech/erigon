@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/showwin/speedtest-go/speedtest"
+	"github.com/showwin/speedtest-go/speedtest/transport"
 )
 
 func (d *DiagnosticClient) setupSpeedtestDiagnostics(rootCtx context.Context) {
@@ -36,22 +37,35 @@ func (d *DiagnosticClient) runSpeedTest(rootCtx context.Context) NetworkSpeedTes
 	latency := time.Duration(0)
 	downloadSpeed := float64(0)
 	uploadSpeed := float64(0)
+	packetLoss := float64(-1)
+
+	analyzer, _ := speedtest.NewPacketLossAnalyzer(nil)
 
 	if len(targets) > 0 {
 		s := targets[0]
-		err := s.PingTestContext(rootCtx, nil)
+		err = s.PingTestContext(rootCtx, nil)
 		if err == nil {
 			latency = s.Latency
 		}
 
 		err = s.DownloadTestContext(rootCtx)
 		if err == nil {
-			downloadSpeed = s.DLSpeed
+			downloadSpeed = float64(s.DLSpeed) / 125000
 		}
 
 		err = s.UploadTestContext(rootCtx)
 		if err == nil {
-			uploadSpeed = s.ULSpeed
+			uploadSpeed = float64(s.ULSpeed) / 125000
+		}
+
+		if analyzer != nil {
+			ctx, cancel := context.WithTimeout(rootCtx, time.Second*15)
+			defer cancel()
+			_ = analyzer.RunWithContext(ctx, s.Host, func(pl *transport.PLoss) {
+				if pl.Sent != 0 {
+					packetLoss = pl.Loss()
+				}
+			})
 		}
 	}
 
@@ -59,6 +73,7 @@ func (d *DiagnosticClient) runSpeedTest(rootCtx context.Context) NetworkSpeedTes
 		Latency:       latency,
 		DownloadSpeed: downloadSpeed,
 		UploadSpeed:   uploadSpeed,
+		PacketLoss:    packetLoss,
 	}
 }
 
