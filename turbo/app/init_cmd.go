@@ -37,7 +37,7 @@ It expects the genesis file as argument.`,
 func initGenesis(cliCtx *cli.Context) error {
 	var logger log.Logger
 	var err error
-	if logger, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+	if logger, _, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
 	// Make sure we have a valid genesis JSON
