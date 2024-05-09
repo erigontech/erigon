@@ -1,16 +1,59 @@
 package server
 
 import (
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/zk/hermez_db"
-	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
-	"time"
-	eritypes "github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"fmt"
-	"github.com/ledgerwatch/log/v3"
+	"time"
+
+	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	eritypes "github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/zk/datastream/types"
+	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	"github.com/ledgerwatch/log/v3"
 )
+
+func getLatestBlockNumberWritten(stream *datastreamer.StreamServer, header *datastreamer.HeaderEntry) (uint64, error) {
+	if header.TotalEntries == 0 {
+		return 0, nil
+	}
+
+	entry, err := stream.GetEntry(header.TotalEntries - 1)
+	if err != nil {
+		return 0, err
+	}
+
+	if entry.Type != datastreamer.EntryType(3) {
+		return 0, fmt.Errorf("expected endL2BlockEntry, got %d", entry.Type)
+	}
+
+	l2EndBlock, err := types.DecodeEndL2BlockBigEndian(entry.Data)
+	if err != nil {
+		return 0, err
+	}
+
+	return l2EndBlock.L2BlockNumber, nil
+}
+
+func ConsecutiveWriteBlocksToStream(
+	tx kv.Tx,
+	reader *hermez_db.HermezDbReader,
+	srv *DataStreamServer,
+	stream *datastreamer.StreamServer,
+	to uint64,
+	logPrefix string,
+) error {
+	header := stream.GetHeader()
+	lastWrittenBlockNum, dserr := getLatestBlockNumberWritten(stream, &header)
+	if dserr != nil {
+		return dserr
+	}
+
+	from := lastWrittenBlockNum + 1
+
+	return WriteBlocksToStream(tx, reader, srv, stream, from, to, logPrefix)
+}
 
 func WriteBlocksToStream(
 	tx kv.Tx,

@@ -17,9 +17,9 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/zk/datastream/server"
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
 	"github.com/ledgerwatch/erigon/zk/utils"
-	"github.com/ledgerwatch/erigon/zk/datastream/server"
 )
 
 func SpawnSequencingStage(
@@ -132,6 +132,15 @@ func SpawnSequencingStage(
 			log.Info(fmt.Sprintf("[%s] L1 recovery has completed!", logPrefix), "batch", thisBatch)
 			time.Sleep(1 * time.Second)
 			return nil
+		}
+	}
+
+	// if we do not have an executors in the zk config then we can populate the stream immediately with the latest
+	// batch information
+	if !cfg.zk.HasExecutors() {
+		srv := server.NewDataStreamServer(cfg.stream, cfg.chainConfig.ChainID.Uint64(), server.StandardOperationMode)
+		if err = server.ConsecutiveWriteBlocksToStream(tx, sdb.hermezDb.HermezDbReader, srv, cfg.stream, executionAt-1, logPrefix); err != nil {
+			return err
 		}
 	}
 
@@ -361,15 +370,6 @@ func SpawnSequencingStage(
 	err = sdb.hermezDb.WriteBatchCounters(thisBatch, counters.UsedAsMap())
 	if err != nil {
 		return err
-	}
-
-	// if we do not have an executors in the zk config then we can populate the stream immediately with the latest
-	// batch information
-	if !cfg.zk.HasExecutors() {
-		srv := server.NewDataStreamServer(cfg.stream, cfg.chainConfig.ChainID.Uint64(), server.StandardOperationMode)
-		if err = server.WriteBlocksToStream(tx, sdb.hermezDb.HermezDbReader, srv, cfg.stream, executionAt+1, blockNumber, logPrefix); err != nil {
-			return err
-		}
 	}
 
 	log.Info(fmt.Sprintf("[%s] Finish batch %d...", logPrefix, thisBatch))
