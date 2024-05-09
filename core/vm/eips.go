@@ -29,6 +29,7 @@ import (
 )
 
 var activators = map[int]func(*JumpTable){
+	2935: enable2935,
 	7516: enable7516,
 	6780: enable6780,
 	5656: enable5656,
@@ -324,6 +325,17 @@ func enable7516(jt *JumpTable) {
 		execute:     opBlobBaseFee,
 		constantGas: GasQuickStep,
 		numPop:      0,
+		numPush:     1,
+	}
+}
+
+// enable2935 applies EIP-2935 (Historical block hashes in state)
+func enable2935(jt *JumpTable) {
+	jt[BLOCKHASH] = &operation{
+		execute:     opBlockhash2935,
+		constantGas: GasExtStep,
+		dynamicGas:  gasOpBlockhashEIP2935,
+		numPop:      1,
 		numPush:     1,
 	}
 }
