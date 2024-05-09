@@ -46,7 +46,7 @@ func (d *DiagnosticClient) runSpeedTest(rootCtx context.Context) NetworkSpeedTes
 	uploadSpeed := float64(0)
 	packetLoss := float64(-1)
 
-	analyzer, _ := speedtest.NewPacketLossAnalyzer(nil)
+	analyzer := speedtest.NewPacketLossAnalyzer(nil)
 
 	if len(targets) > 0 {
 		s := targets[0]
@@ -57,23 +57,19 @@ func (d *DiagnosticClient) runSpeedTest(rootCtx context.Context) NetworkSpeedTes
 
 		err = s.DownloadTestContext(rootCtx)
 		if err == nil {
-			downloadSpeed = float64(s.DLSpeed) / 125000
+			downloadSpeed = s.DLSpeed.Mbps()
 		}
 
 		err = s.UploadTestContext(rootCtx)
 		if err == nil {
-			uploadSpeed = float64(s.ULSpeed) / 125000
+			uploadSpeed = s.ULSpeed.Mbps()
 		}
 
-		if analyzer != nil {
-			ctx, cancel := context.WithTimeout(rootCtx, time.Second*15)
-			defer cancel()
-			_ = analyzer.RunWithContext(ctx, s.Host, func(pl *transport.PLoss) {
-				if pl.Sent != 0 {
-					packetLoss = pl.Loss()
-				}
-			})
-		}
+		ctx, cancel := context.WithTimeout(rootCtx, time.Second*15)
+		defer cancel()
+		_ = analyzer.RunWithContext(ctx, s.Host, func(pl *transport.PLoss) {
+			packetLoss = pl.Loss()
+		})
 	}
 
 	return NetworkSpeedTestResult{
