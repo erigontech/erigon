@@ -845,6 +845,9 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		cleanup := iit.Warmup(ctx)
 		defer cleanup()
 	}
+	if limit == 0 {
+		limit = math.MaxUint64
+	}
 
 	ii := iit.ii
 	//defer func() {
