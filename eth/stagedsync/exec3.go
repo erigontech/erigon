@@ -196,6 +196,7 @@ func ExecV3(ctx context.Context,
 		}
 		defer doms.Close()
 	}
+	txNumInDB := doms.TxNum()
 
 	var (
 		inputTxNum    = doms.TxNum()
@@ -618,7 +619,7 @@ Loop:
 		inputBlockNum.Store(blockNum)
 		doms.SetBlockNum(blockNum)
 
-		b, err = blockWithSenders(chainDb, applyTx, blockReader, blockNum)
+		b, err = blockWithSenders(ctx, chainDb, applyTx, blockReader, blockNum)
 		if err != nil {
 			return err
 		}
@@ -681,6 +682,10 @@ Loop:
 
 		rules := chainConfig.Rules(blockNum, b.Time())
 		var receipts types.Receipts
+		// During the first block execution, we may have half-block data in the snapshots.
+		// Thus, we need to skip the first txs in the block, however, this causes the GasUsed to be incorrect.
+		// So we skip that check for the first block, if we find half-executed data.
+		skipPostEvaluation := false
 		var usedGas, blobGasUsed uint64
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
@@ -704,6 +709,11 @@ Loop:
 				HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
 
 				BlockReceipts: receipts,
+			}
+			if txTask.TxNum <= txNumInDB && txTask.TxNum > 0 {
+				inputTxNum++
+				skipPostEvaluation = true
+				continue
 			}
 			doms.SetTxNum(txTask.TxNum)
 			doms.SetBlockNum(txTask.BlockNum)
@@ -756,7 +766,7 @@ Loop:
 						blobGasUsed += txTask.Tx.GetBlobGas()
 					}
 					if txTask.Final {
-						if txTask.BlockNum > 0 { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
+						if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 							if err := core.BlockPostValidation(usedGas, blobGasUsed, txTask.Header); err != nil {
 								return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 							}
@@ -844,7 +854,8 @@ Loop:
 			case <-logEvery.C:
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
 				progress.Log(rs, in, rws, count, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB)
-				if rs.SizeEstimate() < commitThreshold || inMemExec {
+				// If we skip post evaluation, then we should compute root hash ASAP for fail-fast
+				if !skipPostEvaluation && (rs.SizeEstimate() < commitThreshold || inMemExec) {
 					break
 				}
 				var (
@@ -1146,15 +1157,15 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	return false, nil
 }
 
-func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, blockNum uint64) (b *types.Block, err error) {
+func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, blockNum uint64) (b *types.Block, err error) {
 	if tx == nil {
-		tx, err = db.BeginRo(context.Background())
+		tx, err = db.BeginRo(ctx)
 		if err != nil {
 			return nil, err
 		}
 		defer tx.Rollback()
 	}
-	b, err = blockReader.BlockByNumber(context.Background(), tx, blockNum)
+	b, err = blockReader.BlockByNumber(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -1454,7 +1465,7 @@ func reconstituteStep(last bool,
 
 		for bn := startBlockNum; bn <= endBlockNum; bn++ {
 			t = time.Now()
-			b, err = blockWithSenders(chainDb, nil, blockReader, bn)
+			b, err = blockWithSenders(ctx, chainDb, nil, blockReader, bn)
 			if err != nil {
 				return err
 			}

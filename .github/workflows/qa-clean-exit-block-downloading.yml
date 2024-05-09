@@ -3,17 +3,19 @@ name: QA - Clean exit (block downloading)
 on:
   push:
     branches:
-      - 'release/**'
+      - main
+      - 'release/3.*'
   pull_request:
     branches:
       - main
-      - 'release/**'
+      - 'release/3.*'
     types:
       - ready_for_review
+  workflow_dispatch:     # Run manually
 
 jobs:
   long-running-test:
-    runs-on: self-hosted
+    runs-on: [self-hosted, Erigon3]
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
@@ -51,14 +53,15 @@ jobs:
   
         # Capture monitoring script exit status
         test_exit_status=$?
+
+        # Save the subsection reached status
+        echo "::set-output name=test_executed::true"
         
         # Clean up Erigon process if it's still running
         if kill -0 $ERIGON_PID 2> /dev/null; then
           echo "Terminating Erigon"
           kill $ERIGON_PID
           wait $ERIGON_PID
-        else
-          echo "Erigon has already terminated"
         fi
         
         # Check test runner script exit status
@@ -71,6 +74,7 @@ jobs:
         fi
 
     - name: Delete Erigon Testbed Data Directory
+      if: always()
       run: |
         rm -rf $ERIGON_TESTBED_DATA_DIR
 
@@ -79,13 +83,13 @@ jobs:
         python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
 
     - name: Save test results
-      if: always()
+      if: steps.test_step.outputs.test_executed == 'true'
       env:
         TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
       run: python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --test_name clean-exit-block-downloading --outcome $TEST_RESULT --result_file ${{ github.workspace }}/result.json
 
     - name: Upload test results
-      if: always()
+      if: steps.test_step.outputs.test_executed == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: test-results

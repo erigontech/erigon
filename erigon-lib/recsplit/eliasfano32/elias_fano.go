@@ -308,6 +308,7 @@ type EliasFanoIter struct {
 	upperMask uint64
 }
 
+func (efi *EliasFanoIter) Close() {}
 func (efi *EliasFanoIter) HasNext() bool {
 	return efi.idx <= efi.count
 }

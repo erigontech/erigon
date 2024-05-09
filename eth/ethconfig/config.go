@@ -44,8 +44,6 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
-//const HistoryV3AggregationStep = 1_562_500 / 10 // use this to reduce step size for dev/debug
-
 // BorDefaultMinerGasPrice defines the minimum gas price for bor validators to mine a transaction.
 var BorDefaultMinerGasPrice = big.NewInt(30 * params.GWei)
 
@@ -244,12 +242,12 @@ type Config struct {
 	// Ethstats service
 	Ethstats string
 	// Consensus layer
-	InternalCL                  bool
-	LightClientDiscoveryAddr    string
-	LightClientDiscoveryPort    uint64
-	LightClientDiscoveryTCPPort uint64
-	SentinelAddr                string
-	SentinelPort                uint64
+	InternalCL             bool
+	CaplinDiscoveryAddr    string
+	CaplinDiscoveryPort    uint64
+	CaplinDiscoveryTCPPort uint64
+	SentinelAddr           string
+	SentinelPort           uint64
 
 	OverridePragueTime *big.Int `toml:",omitempty"`
 

@@ -7,7 +7,6 @@ import (
 	"math/big"
 
 	hexutil2 "github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/holiman/uint256"
@@ -15,9 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -28,7 +24,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // API_LEVEL Must be incremented every time new additions are made
@@ -258,95 +253,6 @@ func (api *OtterscanAPIImpl) SearchTransactionsBefore(ctx context.Context, addr 
 	return &TransactionsWithReceipts{txs, receipts, isFirstPage, !hasMore}, nil
 }
 
-func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx context.Context, addr common.Address, fromBlockNum uint64, pageSize uint16) (*TransactionsWithReceipts, error) {
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-
-	isFirstPage := false
-	if fromBlockNum == 0 {
-		isFirstPage = true
-	} else {
-		// Internal search code considers blockNum [including], so adjust the value
-		fromBlockNum--
-	}
-	fromTxNum, err := rawdbv3.TxNums.Max(tx, fromBlockNum)
-	if err != nil {
-		return nil, err
-	}
-	itTo, err := tx.IndexRange(kv.TracesToIdx, addr[:], int(fromTxNum), -1, order.Desc, kv.Unlim)
-	if err != nil {
-		return nil, err
-	}
-	itFrom, err := tx.IndexRange(kv.TracesFromIdx, addr[:], int(fromTxNum), -1, order.Desc, kv.Unlim)
-	if err != nil {
-		return nil, err
-	}
-	txNums := iter.Union[uint64](itFrom, itTo, order.Desc, kv.Unlim)
-	txNumsIter := rawdbv3.TxNums2BlockNums(tx, txNums, order.Desc)
-
-	exec := exec3.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, nil)
-	var blockHash common.Hash
-	var header *types.Header
-	txs := make([]*RPCTransaction, 0, pageSize)
-	receipts := make([]map[string]interface{}, 0, pageSize)
-	resultCount := uint16(0)
-
-	for txNumsIter.HasNext() {
-		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := txNumsIter.Next()
-		if err != nil {
-			return nil, err
-		}
-		if isFinalTxn {
-			continue
-		}
-
-		if blockNumChanged { // things which not changed within 1 block
-			if header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {
-				return nil, err
-			}
-			if header == nil {
-				log.Warn("[rpc] header is nil", "blockNum", blockNum)
-				continue
-			}
-			blockHash = header.Hash()
-			exec.ChangeBlock(header)
-		}
-
-		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
-		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
-		if err != nil {
-			return nil, err
-		}
-		if txn == nil {
-			continue
-		}
-		res, err := exec.ExecTxn(txNum, txIndex, txn)
-		if err != nil {
-			return nil, err
-		}
-		rawLogs := exec.GetLogs(txIndex, txn)
-		rpcTx := NewRPCTransaction(txn, blockHash, blockNum, uint64(txIndex), header.BaseFee)
-		txs = append(txs, rpcTx)
-		receipt := &types.Receipt{
-			Type: txn.Type(), CumulativeGasUsed: res.UsedGas,
-			TransactionIndex: uint(txIndex),
-			BlockNumber:      header.Number, BlockHash: blockHash, Logs: rawLogs,
-		}
-		mReceipt := ethutils.MarshalReceipt(receipt, txn, chainConfig, header, txn.Hash(), true)
-		mReceipt["timestamp"] = header.Time
-		receipts = append(receipts, mReceipt)
-
-		resultCount++
-		if resultCount >= pageSize {
-			break
-		}
-	}
-	hasMore := txNumsIter.HasNext()
-	return &TransactionsWithReceipts{txs, receipts, isFirstPage, !hasMore}, nil
-}
-
 // Search transactions that touch a certain address.
 //
 // It searches forward a certain block (excluding); the results are sorted descending.
@@ -365,6 +271,10 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 		return nil, err
 	}
 	defer dbtx.Rollback()
+
+	if api.historyV3(dbtx) {
+		return api.searchTransactionsAfterV3(dbtx.(kv.TemporalTx), ctx, addr, blockNum, pageSize)
+	}
 
 	callFromCursor, err := dbtx.Cursor(kv.CallFromIndex)
 	if err != nil {

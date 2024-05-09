@@ -55,16 +55,17 @@ System Requirements
 
 * For an Archive node of Ethereum Mainnet we recommend >=3.5TB storage space: 2.3TiB state (as of March 2024),
   643GiB snapshots (can symlink or mount folder `<datadir>/snapshots` to another disk), 200GB temp files (can symlink or
-  mount folder `<datadir>/temp` to another disk). Ethereum Mainnet Full node (
-  see `--prune*` flags): 1.1TiB (March 2024).
+  mount folder `<datadir>/temp` to another disk).
+  Ethereum Mainnet Full node (see [Pruned Node][pruned_node]): 1.5TiB not including temp files (April 2024).
 
-* Goerli Full node (see `--prune*` flags): 189GB on Beta, 114GB on Alpha (April 2022).
+* Goerli Full node (see [Pruned Node][pruned_node]): 189GB on Beta, 114GB on Alpha (April 2022).
 
-* Gnosis Chain Archive: 1.7TiB (March 2024). Gnosis Chain Full node (`--prune=hrtc` flag): 530GiB (March 2024).
+* Gnosis Chain Archive: 1.7TiB (March 2024).
+  Gnosis Chain Full node (see [Pruned Node][pruned_node]): 530GiB (March 2024).
 
-* Polygon Mainnet Archive: 8.5TiB (December 2023). `--prune.*.older 15768000`: 5.1Tb (September 2023). Polygon Mumbai
-  Archive:
-  1TB. (April 2022).
+* Polygon Mainnet Archive: 8.5TiB (December 2023).
+  Polygon Mainnet Full node (see [Pruned Node][pruned_node]) with `--prune.*.older 15768000`: 5.1Tb (September 2023).
+  Polygon Mumbai Archive: 1TB. (April 2022).
 
 SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind.
 Bear in mind that SSD performance deteriorates when close to capacity.
@@ -75,6 +76,8 @@ RAM: >=16GB, 64-bit architecture.
 
 <code>🔬 more details on disk storage [here](https://erigon.substack.com/p/disk-footprint-changes-in-new-erigon?s=r)
 and [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space).</code>
+
+[pruned_node]: https://erigon.gitbook.io/erigon/basic-usage/usage/type-of-node#full-node-or-pruned-node
 
 Usage
 =====
@@ -326,7 +329,7 @@ Engine API.
 
 #### Caplin's Usage.
 
-Caplin can be enabled through the `--internalcl` flag. from that point on, an external Consensus Layer will not be need
+Caplin is be enabled by default. to disable it and enable the Engine API, use the `--externalcl` flag. from that point on, an external Consensus Layer will not be need
 anymore.
 
 Caplin also has an archivial mode for historical states and blocks. it can be enabled through the `--caplin.archive`
@@ -585,7 +588,13 @@ node.
 | sentinel  | 4000 | UDP      | Peering | Public        |
 | sentinel  | 4001 | TCP      | Peering | Public        |
 
-If you are using `--internalcl` aka `caplin` as your consensus client, then also look at the chart above
+In order to configure the ports, use:
+
+```
+   --caplin.discovery.addr value                                                    Address for Caplin DISCV5 protocol (default: "127.0.0.1")
+   --caplin.discovery.port value                                                    Port for Caplin DISCV5 protocol (default: 4000)
+   --caplin.discovery.tcpport value                                                 TCP Port for Caplin DISCV5 protocol (default: 4001)
+```
 
 #### `beaconAPI` ports
 
@@ -593,8 +602,6 @@ If you are using `--internalcl` aka `caplin` as your consensus client, then also
 |-----------|------|----------|---------|---------------|
 | REST      | 5555 | TCP      | REST    | Public        |
 
-If you are using `--internalcl` aka `caplin` as your consensus client and `--beacon.api` then also look at the chart
-above
 
 #### `shared` ports
 
