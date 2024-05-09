@@ -1,4 +1,4 @@
-datadir: /home/erigon/.local/share/erigon
+datadir: ../erigon-data
 chain: hermez-cardona
 http: true
 private.api.addr: localhost:9092
