@@ -2,7 +2,6 @@ package downloader
 
 import (
 	"fmt"
-
 	"time"
 
 	"github.com/jedib0t/go-pretty/v6/table"
