@@ -768,7 +768,7 @@ func PolygonSyncStages(
 			ID:          stages.PolygonSync,
 			Description: "Use polygon sync component to sync headers, bodies and heimdall data",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, unwinder Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnPolygonSyncStage(ctx, txc.Tx, polygonSyncStageCfg)
+				return SpawnPolygonSyncStage(ctx, txc.Tx, s, polygonSyncStageCfg)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
 				return UnwindPolygonSyncStage()

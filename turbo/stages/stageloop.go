@@ -788,6 +788,7 @@ func NewPolygonSyncStages(
 			statusDataProvider,
 			blockReader,
 			stopNode,
+			bor.GenesisContractStateReceiverABI(),
 		),
 		stagedsync.StageBlockHashesCfg(
 			db,
