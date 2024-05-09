@@ -129,6 +129,14 @@ func Get(db kv.Getter) (Mode, error) {
 		prune.CallTraces = blockAmount
 	}
 
+	blockAmount, err = get(db, kv.PruneBlocks)
+	if err != nil {
+		return prune, err
+	}
+	if blockAmount != nil {
+		prune.Blocks = blockAmount
+	}
+
 	return prune, nil
 }
 
@@ -204,6 +212,13 @@ func (m Mode) String() string {
 			long += fmt.Sprintf(" --prune.h.%s=%d", m.History.dbType(), m.History.toValue())
 		}
 	}
+	if m.Blocks.Enabled() {
+		if m.Blocks.useDefaultValue() {
+			short += fmt.Sprintf(" --prune.b.older=%d", defaultVal)
+		} else {
+			long += fmt.Sprintf(" --prune.b.%s=%d", m.Blocks.dbType(), m.Blocks.toValue())
+		}
+	}
 	if m.Receipts.Enabled() {
 		if m.Receipts.useDefaultValue() {
 			short += fmt.Sprintf(" --prune.r.older=%d", defaultVal)
@@ -254,6 +269,11 @@ func Override(db kv.RwTx, sm Mode) error {
 		return err
 	}
 
+	err = set(db, kv.PruneBlocks, sm.Blocks)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -300,6 +320,7 @@ func setIfNotExist(db kv.GetPut, pm Mode) error {
 		string(kv.PruneReceipts):   pm.Receipts,
 		string(kv.PruneTxIndex):    pm.TxIndex,
 		string(kv.PruneCallTraces): pm.CallTraces,
+		string(kv.PruneBlocks):     pm.Blocks,
 	}
 
 	for key, value := range pruneDBData {

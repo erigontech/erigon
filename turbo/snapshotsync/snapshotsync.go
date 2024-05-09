@@ -27,6 +27,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
@@ -246,9 +247,23 @@ func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error)
 	return maxTo, nil
 }
 
+func computeBlocksToPrune(blockReader services.FullBlockReader, p prune.Mode) (blocksToPrune uint64, historyToPrune uint64) {
+	frozenBlocks := blockReader.Snapshots().SegmentsMax()
+	blocksPruneTo := p.Blocks.PruneTo(frozenBlocks)
+	historyPruneTo := p.History.PruneTo(frozenBlocks)
+	if blocksPruneTo <= frozenBlocks {
+		blocksToPrune = frozenBlocks - blocksPruneTo
+	}
+	if historyPruneTo <= frozenBlocks {
+		historyToPrune = frozenBlocks - historyPruneTo
+	}
+	fmt.Println("O", p.Blocks.PruneTo(frozenBlocks), p.History.PruneTo(frozenBlocks))
+	return blocksToPrune, historyToPrune
+}
+
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, histV3, blobs bool, historyPrune, blockPrune uint64, caplin CaplinMode, agg *state.Aggregator, tx kv.RwTx, blockReader services.FullBlockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient, stagesIdsList []string) error {
+func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, histV3, blobs bool, prune prune.Mode, caplin CaplinMode, agg *state.Aggregator, tx kv.RwTx, blockReader services.FullBlockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient, stagesIdsList []string) error {
 	snapshots := blockReader.Snapshots()
 	borSnapshots := blockReader.BorSnapshots()
 
@@ -282,8 +297,11 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, histV
 	preverifiedBlockSnapshots := snapCfg.Preverified
 	downloadRequest := make([]services.DownloadRequest, 0, len(preverifiedBlockSnapshots))
 
-	wantToPrune := historyPrune > 0 || blockPrune > 0
+	blockPrune, historyPrune := computeBlocksToPrune(blockReader, prune)
+	fmt.Println("X", blockPrune, historyPrune)
 	blackListForPruning := make(map[string]struct{})
+	fmt.Println(prune)
+	wantToPrune := prune.Blocks.Enabled() || prune.History.Enabled()
 	if !headerchain && wantToPrune {
 		minStep, err := getMaxStepRangeInSnapshots(preverifiedBlockSnapshots)
 		if err != nil {
@@ -298,6 +316,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, histV
 		if err != nil {
 			return err
 		}
+		fmt.Println("blackListForPruning", blackListForPruning)
 	}
 
 	// build all download requests

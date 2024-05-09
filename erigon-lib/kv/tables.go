@@ -528,6 +528,8 @@ var (
 	PruneTxIndexType    = []byte("pruneTxIndexType")
 	PruneCallTraces     = []byte("pruneCallTraces")
 	PruneCallTracesType = []byte("pruneCallTracesType")
+	PruneBlocks         = []byte("pruneBlocks")
+	PruneBlocksType     = []byte("pruneBlocksType")
 
 	DBSchemaVersionKey = []byte("dbVersion")
 
