@@ -20,6 +20,51 @@ type L1GasPrice struct {
 }
 
 func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	cc, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+	chainId := cc.ChainID
+	if !api.isZkNonSequencer(chainId) {
+		return api.GasPrice_nonRedirected(ctx)
+	}
+
+	if api.BaseAPI.gasless {
+		var price hexutil.Big
+		return &price, nil
+	}
+
+	res, err := client.JSONRPCCall(api.l2RpcUrl, "eth_gasPrice")
+	if err != nil {
+		return nil, err
+	}
+
+	if res.Error != nil {
+		return nil, fmt.Errorf("RPC error response: %s", res.Error.Message)
+	}
+	if res.Error != nil {
+		return nil, fmt.Errorf("RPC error response: %s", res.Error.Message)
+	}
+
+	var resultString string
+	if err := json.Unmarshal(res.Result, &resultString); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal result: %v", err)
+	}
+
+	price, ok := big.NewInt(0).SetString(resultString[2:], 16)
+	if !ok {
+		return nil, fmt.Errorf("failed to convert result to big.Int")
+	}
+
+	return (*hexutil.Big)(price), nil
+}
+
+func (api *APIImpl) GasPrice_nonRedirected(ctx context.Context) (*hexutil.Big, error) {
 	if api.BaseAPI.gasless {
 		var price hexutil.Big
 		return &price, nil
