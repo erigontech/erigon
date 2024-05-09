@@ -88,6 +88,7 @@ func adjustBlockPrune(blocks, minBlocksToDownload uint) uint {
 	if minBlocksToDownload < snaptype.Erigon2MergeLimit {
 		minBlocksToDownload = snaptype.Erigon2MergeLimit
 	}
+	fmt.Println(minBlocksToDownload)
 	if blocks < minBlocksToDownload {
 		blocks = minBlocksToDownload
 	}
@@ -269,7 +270,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, histV
 		if cc.Bor != nil {
 			borSnapshots.Close()
 		}
-		return nil
 	}
 
 	//Corner cases:
