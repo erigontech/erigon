@@ -593,7 +593,7 @@ func (s *RoSnapshots) Ranges() []Range {
 func (s *RoSnapshots) OptimisticalyReopenFolder()           { _ = s.ReopenFolder() }
 func (s *RoSnapshots) OptimisticalyReopenWithDB(db kv.RoDB) { _ = s.ReopenWithDB(db) }
 func (s *RoSnapshots) ReopenFolder() error {
-	if err := s.ReopenSegments(s.Types(), true); err != nil {
+	if err := s.ReopenSegments(s.Types(), false); err != nil {
 		return fmt.Errorf("ReopenSegments: %w", err)
 	}
 	return nil
@@ -948,8 +948,11 @@ func sendDiagnostics(startIndexingTime time.Time, indexPercent map[string]int, a
 	})
 }
 
-func noGaps(in []snaptype.FileInfo, from uint64) (out []snaptype.FileInfo, missingSnapshots []Range) {
-	prevTo := from
+func noGaps(in []snaptype.FileInfo) (out []snaptype.FileInfo, missingSnapshots []Range) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	prevTo := in[0].From
 	for _, f := range in {
 		if f.To <= prevTo {
 			continue
@@ -1069,7 +1072,7 @@ func SegmentsCaplin(dir string, minBlock uint64) (res []snaptype.FileInfo, missi
 			}
 			l = append(l, f)
 		}
-		l, m = noGaps(noOverlaps(l), minBlock)
+		l, m = noGaps(noOverlaps(l))
 		if len(m) > 0 {
 			lst := m[len(m)-1]
 			log.Debug("[snapshots] see gap", "type", snaptype.CaplinEnums.BeaconBlocks, "from", lst.from)
@@ -1110,7 +1113,7 @@ func typedSegments(dir string, minBlock uint64, types []snaptype.Type, allowGaps
 			if allowGaps {
 				l = noOverlaps(segmentsTypeCheck(dir, l))
 			} else {
-				l, m = noGaps(noOverlaps(segmentsTypeCheck(dir, l)), minBlock)
+				l, m = noGaps(noOverlaps(segmentsTypeCheck(dir, l)))
 			}
 			if len(m) > 0 {
 				lst := m[len(m)-1]
