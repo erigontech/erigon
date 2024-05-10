@@ -803,7 +803,7 @@ func (ac *AggregatorRoTx) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx) (ui
 
 // PruneSmallBatches is not cancellable, it's over when it's over or failed.
 // It fills whole timeout with pruning by small batches (of 100 keys) and making some progress
-func (ac *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Duration, tx kv.RwTx) (haveMore bool, err error) {
+func (ac *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Duration, db kv.RwDB, tx kv.RwTx, externalTx bool) (haveMore bool, err error) {
 	// On tip-of-chain timeout is about `3sec`
 	//  On tip of chain:     must be real-time - prune by small batches and prioritize exact-`timeout`
 	//  Not on tip of chain: must be aggressive (prune as much as possible) by bigger batches
@@ -838,7 +838,19 @@ func (ac *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 		// `context.Background()` is important here!
 		//     it allows keep DB consistent - prune all keys-related data or noting
 		//     can't interrupt by ctrl+c and leave dirt in DB
-		stat, err := ac.Prune(context.Background(), tx, pruneLimit, withWarmup, aggLogEvery)
+		var stat *AggregatorPruneStat
+		var err error
+		if externalTx && tx == nil {
+			stat, err = ac.Prune(context.Background(), tx, pruneLimit, withWarmup, aggLogEvery)
+		} else {
+			if err2 := db.Update(ctx, func(tx kv.RwTx) error {
+				var err error
+				stat, err = ac.Prune(context.Background(), tx, pruneLimit, withWarmup, aggLogEvery)
+				return err
+			}); err2 != nil {
+				return false, err
+			}
+		}
 		if err != nil {
 			ac.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err)
 			return false, err
