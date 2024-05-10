@@ -30,8 +30,9 @@ func TestEIP3074(t *testing.T) {
 		key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr   = crypto.PubkeyToAddress(key.PublicKey)
 		funds  = new(big.Int).Mul(libcommon.Big1, big.NewInt(params.Ether))
+		config = *params.TestChainConfig // copy
 		gspec  = &types.Genesis{
-			Config: params.TestChainConfig,
+			Config: &config,
 			Alloc: types.GenesisAlloc{
 				addr: {Balance: funds},
 				// The address 0xAAAA sloads 0x00 and 0x01
