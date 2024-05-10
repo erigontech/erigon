@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -104,7 +105,7 @@ func (rw *TraceWorker2) Run() error {
 }
 
 func (rw *TraceWorker2) RunTxTask(txTask *state.TxTask) {
-	log.Warn("worker: ", " rw.background ", rw.background, "rw.chainTx", rw.chainTx)
+	log.Warn("[dbg] worker: ", " rw.background ", rw.background, "rw.chainTx", rw.chainTx)
 	if rw.background && rw.chainTx == nil {
 		var err error
 		if rw.chainTx, err = rw.execArgs.ChainDB.BeginRo(rw.ctx); err != nil {
@@ -133,7 +134,7 @@ func (rw *TraceWorker2) RunTxTask(txTask *state.TxTask) {
 			// Genesis block
 			_, ibs, err = core.GenesisToBlock(rw.execArgs.Genesis, rw.execArgs.Dirs.Tmp, rw.logger)
 			if err != nil {
-				panic(err)
+				panic(fmt.Errorf("GenesisToBlock: %w", err))
 			}
 			// For Genesis, rules should be empty, so that empty accounts can be included
 			rules = &chain.Rules{} //nolint
@@ -184,6 +185,7 @@ func (rw *TraceWorker2) RunTxTask(txTask *state.TxTask) {
 		// MA applytx
 		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
 		if err != nil {
+			log.Warn("[dbg] applyerr: ", "err", err)
 			txTask.Error = err
 		} else {
 			txTask.Failed = applyRes.Failed()
@@ -234,13 +236,25 @@ func NewTraceWorkers2Pool(consumer TraceConsumer, cfg *ExecArgs, ctx context.Con
 	}
 	for i := 0; i < workerCount; i++ {
 		i := i
-		g.Go(func() error {
+		g.Go(func() (err error) {
+			defer func() {
+				if rec := recover(); rec != nil {
+					err = fmt.Errorf("%s, %s", rec, dbg.Stack())
+				}
+			}()
+
 			return workers[i].Run()
 		})
 	}
 
 	//Reducer
-	g.Go(func() error {
+	g.Go(func() (err error) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				err = fmt.Errorf("%s, %s", rec, dbg.Stack())
+			}
+		}()
+
 		defer logger.Warn("[dbg] reduce goroutine exit", "toTxNum", toTxNum)
 		tx, err := cfg.ChainDB.BeginRo(ctx)
 		if err != nil {

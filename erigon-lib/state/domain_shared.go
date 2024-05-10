@@ -791,6 +791,7 @@ func (sd *SharedDomains) DomainGet(domain kv.Domain, k, k2 []byte) (v []byte, st
 	}
 	v, step, _, err = sd.aggCtx.GetLatest(domain, k, nil, sd.roTx)
 	if err != nil {
+		panic(err)
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
 	return v, step, nil
