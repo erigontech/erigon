@@ -743,7 +743,6 @@ func (db *MdbxKV) Close() {
 }
 
 func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
-	log.Warn("[dbg] BeginRo", "stack", dbg.Stack())
 	// don't try to acquire if the context is already done
 	select {
 	case <-ctx.Done():
