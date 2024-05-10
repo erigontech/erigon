@@ -566,6 +566,11 @@ var (
 		Usage: "Support gasless transactions",
 		Value: false,
 	}
+	DebugNoSync = cli.BoolFlag{
+		Name:  "debug.no-sync",
+		Usage: "Disable syncing",
+		Value: false,
+	}
 	DebugLimit = cli.UintFlag{
 		Name:  "debug.limit",
 		Usage: "Limit the number of blocks to sync",

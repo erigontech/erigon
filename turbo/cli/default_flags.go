@@ -205,6 +205,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.WitnessFullFlag,
 	&utils.SyncLimit,
 	&utils.SupportGasless,
+	&utils.DebugNoSync,
 	&utils.DebugLimit,
 	&utils.DebugStep,
 	&utils.DebugStepAfter,
