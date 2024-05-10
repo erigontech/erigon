@@ -111,7 +111,7 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 	//	if err != nil {
 	//		return err
 	//	}
-	//	lastTotal, ok, err := tx.HistoryGet(kv.GasUsedHistory, key, lastTxNum)
+	//	lastTotal, ok, err := tx.HistorySeek(kv.GasUsedHistory, key, lastTxNum)
 	//	if err != nil {
 	//		return err
 	//	}
