@@ -820,17 +820,15 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 
 	logger.Info("Prune state history")
+	ac := agg.BeginFilesRo()
+	defer ac.Close()
 	for hasMoreToPrune := true; hasMoreToPrune; {
-		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-			ac := agg.BeginFilesRo()
-			defer ac.Close()
-
-			hasMoreToPrune, err = ac.PruneSmallBatches(ctx, 2*time.Minute, tx)
-			return err
-		}); err != nil {
+		hasMoreToPrune, err = ac.PruneSmallBatchesDb(ctx, 2*time.Minute, db)
+		if err != nil {
 			return err
 		}
 	}
+	ac.Close()
 
 	logger.Info("Work on state history snapshots")
 	indexWorkers := estimate.IndexSnapshot.Workers()
@@ -877,17 +875,16 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}); err != nil {
 		return err
 	}
-	for hasMoreToPrune := true; hasMoreToPrune; {
-		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-			ac := agg.BeginFilesRo()
-			defer ac.Close()
 
-			hasMoreToPrune, err = ac.PruneSmallBatches(context.Background(), 2*time.Minute, tx)
-			return err
-		}); err != nil {
+	ac = agg.BeginFilesRo()
+	defer ac.Close()
+	for hasMoreToPrune := true; hasMoreToPrune; {
+		hasMoreToPrune, err = ac.PruneSmallBatchesDb(context.Background(), 2*time.Minute, db)
+		if err != nil {
 			return err
 		}
 	}
+	ac.Close()
 
 	if err = agg.MergeLoop(ctx); err != nil {
 		return err
