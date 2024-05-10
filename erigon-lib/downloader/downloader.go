@@ -1900,8 +1900,8 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	downloading := map[string]*downloadInfo{}
 
 	for file, info := range d.downloading {
-		copy := *info
-		downloading[file] = &copy
+		i := *info
+		downloading[file] = &i
 	}
 
 	webDownloadClient := d.webDownloadClient
