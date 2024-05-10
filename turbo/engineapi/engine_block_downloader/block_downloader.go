@@ -126,11 +126,25 @@ func (e *EngineBlockDownloader) scheduleHeadersDownload(
 }
 
 // waitForEndOfHeadersDownload waits until the download of headers ends and returns the outcome.
-func (e *EngineBlockDownloader) waitForEndOfHeadersDownload() headerdownload.SyncStatus {
-	for e.hd.PosStatus() == headerdownload.Syncing {
-		time.Sleep(10 * time.Millisecond)
+func (e *EngineBlockDownloader) waitForEndOfHeadersDownload(ctx context.Context) (headerdownload.SyncStatus, error) {
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if e.hd.PosStatus() != headerdownload.Syncing {
+				return e.hd.PosStatus(), nil
+			}
+		case <-ctx.Done():
+			return e.hd.PosStatus(), ctx.Err()
+		case <-logEvery.C:
+			e.logger.Info("[EngineBlockDownloader] Waiting for headers download to finish")
+		}
 	}
-	return e.hd.PosStatus()
 }
 
 // waitForEndOfHeadersDownload waits until the download of headers ends and returns the outcome.
