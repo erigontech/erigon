@@ -109,7 +109,7 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 	/// maybe need startTxNum/endTxNum
 	if err = exec3.CustomTraceMapReduce(startBlock, endBlock, exec3.TraceConsumer{
 		NewTracer: func() exec3.GenericTracer { return nil },
-		Collect: func(txTask *state.TxTask) error {
+		Reduce: func(txTask *state.TxTask) error {
 			if txTask.Error != nil {
 				return err
 			}
@@ -123,11 +123,11 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 			}
 
 			select {
-			default:
 			case <-logEvery.C:
 				dbg.ReadMemStats(&m)
 				log.Info("Scanned", "block", txTask.BlockNum, "blk/sec", float64(txTask.BlockNum-prevBlockNumLog)/10, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 				prevBlockNumLog = txTask.BlockNum
+			default:
 			}
 
 			return nil

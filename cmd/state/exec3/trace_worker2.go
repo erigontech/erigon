@@ -57,8 +57,8 @@ type TraceWorker2 struct {
 
 type TraceConsumer struct {
 	NewTracer func() GenericTracer
-	//Collect receiving results of execution. They are sorted and have no gaps.
-	Collect func(task *state.TxTask) error
+	//Reduce receiving results of execution. They are sorted and have no gaps.
+	Reduce func(task *state.TxTask) error
 }
 
 func NewTraceWorker2(
@@ -303,7 +303,7 @@ func processResultQueue2(consumer TraceConsumer, rws *state.ResultsQueue, output
 			err := fmt.Errorf("%w: %v, blockNum=%d, TxNum=%d, TxIndex=%d, Final=%t", consensus.ErrInvalidBlock, txTask.Error, txTask.BlockNum, txTask.TxNum, txTask.TxIndex, txTask.Final)
 			return outputTxNum, false, err
 		}
-		if err := consumer.Collect(txTask); err != nil {
+		if err := consumer.Reduce(txTask); err != nil {
 			return outputTxNum, false, err
 		}
 
