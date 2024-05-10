@@ -184,7 +184,6 @@ func (rw *TraceWorker2) RunTxTask(txTask *state.TxTask) {
 		// MA applytx
 		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
 		if err != nil {
-			log.Warn("[dbg] applyerr: ", "err", err)
 			txTask.Error = err
 		} else {
 			txTask.Failed = applyRes.Failed()

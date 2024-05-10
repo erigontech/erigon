@@ -13,7 +13,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
@@ -798,12 +797,6 @@ func (sd *SharedDomains) DomainGet(domain kv.Domain, k, k2 []byte) (v []byte, st
 	}
 	v, step, _, err = sd.aggCtx.GetLatest(domain, k, nil, sd.roTx)
 	if err != nil {
-		type A interface {
-			InternalMdbxTx() *mdbx.MdbxTx
-		}
-		log.Warn("[dbg] DomainGet see err: " + fmt.Errorf("%w, txptr=%p, %T, %+v", err, sd.roTx, sd.roTx, sd.roTx.(A).InternalMdbxTx()).Error())
-		time.Sleep(2 * time.Second)
-		panic(fmt.Errorf("%w, txptr=%p, %T, %+v", err, sd.roTx, sd.roTx, sd.roTx.(A).InternalMdbxTx()))
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
 	return v, step, nil
