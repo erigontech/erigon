@@ -93,29 +93,33 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 	var m runtime.MemStats
 	var prevBlockNumLog uint64 = startBlock
 
-	doms, err := state2.NewSharedDomains(tx, logger)
-	if err != nil {
-		return err
-	}
-	defer doms.Close()
-
 	keyTotal := []byte("total")
 	total, err := lastGasUsed(tx, keyTotal)
 	if err != nil {
 		return err
 	}
 
+	doms, err := state2.NewSharedDomains(tx, logger)
+	if err != nil {
+		return err
+	}
+	defer doms.Close()
+
+	fmt.Printf("dbg1: %s\n", tx.ViewID())
 	//TODO: new tracer may get tracer from pool, maybe add it to TxTask field
 	/// maybe need startTxNum/endTxNum
 	if err = exec3.CustomTraceMapReduce(startBlock, endBlock, exec3.TraceConsumer{
 		NewTracer: func() exec3.GenericTracer { return nil },
-		Reduce: func(txTask *state.TxTask) error {
+		Reduce: func(txTask *state.TxTask, tx kv.Tx) error {
 			if txTask.Error != nil {
 				return err
 			}
 
 			total.AddUint64(total, txTask.UsedGas)
 			v := total.Bytes()
+
+			log.Warn("[dbg] recude", "txptr", fmt.Sprintf("%p", tx))
+			doms.SetTx(tx)
 			doms.SetTxNum(txTask.TxNum)
 			err = doms.DomainPut(kv.GasUsedDomain, keyTotal, nil, v, nil, 0)
 			if err != nil {

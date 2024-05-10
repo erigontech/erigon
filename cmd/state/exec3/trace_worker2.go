@@ -59,7 +59,7 @@ type TraceWorker2 struct {
 type TraceConsumer struct {
 	NewTracer func() GenericTracer
 	//Reduce receiving results of execution. They are sorted and have no gaps.
-	Reduce func(task *state.TxTask) error
+	Reduce func(task *state.TxTask, tx kv.Tx) error
 }
 
 func NewTraceWorker2(
@@ -105,7 +105,6 @@ func (rw *TraceWorker2) Run() error {
 }
 
 func (rw *TraceWorker2) RunTxTask(txTask *state.TxTask) {
-	log.Warn("[dbg] worker: ", " rw.background ", rw.background, "rw.chainTx", rw.chainTx)
 	if rw.background && rw.chainTx == nil {
 		var err error
 		if rw.chainTx, err = rw.execArgs.ChainDB.BeginRo(rw.ctx); err != nil {
@@ -198,6 +197,7 @@ func (rw *TraceWorker2) RunTxTask(txTask *state.TxTask) {
 	}
 }
 func (rw *TraceWorker2) ResetTx(chainTx kv.Tx) {
+	//log.Warn("[dbg] ResetTx", "bg", rw.background, "stack", dbg.Stack())
 	if rw.background && rw.chainTx != nil {
 		rw.chainTx.Rollback()
 		rw.chainTx = nil
@@ -255,14 +255,15 @@ func NewTraceWorkers2Pool(consumer TraceConsumer, cfg *ExecArgs, ctx context.Con
 			}
 		}()
 
-		defer logger.Warn("[dbg] reduce goroutine exit", "toTxNum", toTxNum)
 		tx, err := cfg.ChainDB.BeginRo(ctx)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 
+		defer logger.Warn("[dbg] reduce goroutine exit", "toTxNum", toTxNum, "txptr", fmt.Sprintf("%p", tx))
 		applyWorker := NewTraceWorker2(consumer, in, rws, ctx, cfg, logger)
+		applyWorker.background = false
 		applyWorker.ResetTx(tx)
 		for outputTxNum.Load() <= toTxNum {
 			if err := rws.Drain(ctx); err != nil {
@@ -305,24 +306,23 @@ func processResultQueue2(consumer TraceConsumer, rws *state.ResultsQueue, output
 
 	var i int
 	outputTxNum = outputTxNumIn
-	log.Warn("[dbg] alex01", "outputTxNum", outputTxNum)
+	log.Warn("[dbg] applyWorker.chainTx0", "txptr", fmt.Sprintf("%p", applyWorker.chainTx))
 	for rwsIt.HasNext(outputTxNum) {
 		txTask := rwsIt.PopNext()
-		log.Warn("[dbg] alex0", "txnum", txTask.TxNum)
 		if txTask.Final {
 			txTask.Reset()
 			//re-exec right here, because gnosis expecting TxTask.BlockReceipts field - receipts of all
 			txTask.BlockReceipts = receipts
-			log.Warn("[dbg] alex1", "txnum", txTask.TxNum)
+			log.Warn("[dbg] applyWorker.chainTx1", "txptr", fmt.Sprintf("%p", applyWorker.chainTx))
 			applyWorker.RunTxTask(txTask)
-			log.Warn("[dbg] alex2", "txnum", txTask.TxNum)
+			log.Warn("[dbg] applyWorker.chainTx2", "txptr", fmt.Sprintf("%p", applyWorker.chainTx))
 		}
 		if txTask.Error != nil {
-			log.Warn("[dbg] alex3", "txnum", txTask.TxNum)
 			err := fmt.Errorf("%w: %v, blockNum=%d, TxNum=%d, TxIndex=%d, Final=%t", consensus.ErrInvalidBlock, txTask.Error, txTask.BlockNum, txTask.TxNum, txTask.TxIndex, txTask.Final)
 			return outputTxNum, false, err
 		}
-		if err := consumer.Reduce(txTask); err != nil {
+		log.Warn("[dbg] applyWorker.chainTx3", "txptr", fmt.Sprintf("%p", applyWorker.chainTx))
+		if err := consumer.Reduce(txTask, applyWorker.chainTx); err != nil {
 			return outputTxNum, false, err
 		}
 
