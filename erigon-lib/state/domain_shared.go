@@ -81,29 +81,19 @@ type HasAggTx interface {
 }
 
 func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
-	var ac *AggregatorRoTx
-	if casted, ok := tx.(HasAggTx); ok {
-		ac = casted.AggTx().(*AggregatorRoTx)
-	} else {
-		return nil, fmt.Errorf("type %T need AggTx method", tx)
-	}
-	if tx == nil {
-		return nil, fmt.Errorf("tx is nil")
-	}
-
 	sd := &SharedDomains{
-		logger: logger,
-		aggTx:  ac,
-		roTx:   tx,
-		//trace:            true,
-		logAddrsWriter:   ac.logAddrs.NewWriter(),
-		logTopicsWriter:  ac.logTopics.NewWriter(),
-		tracesFromWriter: ac.tracesFrom.NewWriter(),
-		tracesToWriter:   ac.tracesTo.NewWriter(),
-
+		logger:  logger,
 		storage: btree2.NewMap[string, []byte](128),
+		//trace:            true,
 	}
-	for id, d := range ac.d {
+	sd.SetTx(tx)
+
+	sd.logAddrsWriter = sd.aggTx.logAddrs.NewWriter()
+	sd.logTopicsWriter = sd.aggTx.logTopics.NewWriter()
+	sd.tracesFromWriter = sd.aggTx.tracesFrom.NewWriter()
+	sd.tracesToWriter = sd.aggTx.tracesTo.NewWriter()
+
+	for id, d := range sd.aggTx.d {
 		sd.domains[id] = map[string][]byte{}
 		sd.dWriter[id] = d.NewWriter()
 	}
@@ -514,12 +504,22 @@ func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) 
 }
 
 func (sd *SharedDomains) SetTx(tx kv.Tx) {
+	if tx == nil {
+		panic(fmt.Errorf("tx is nil"))
+	}
 	sd.roTx = tx
-	if casted, ok := tx.(HasAggTx); ok {
-		sd.aggTx = casted.AggTx().(*AggregatorRoTx)
+
+	casted, ok := tx.(HasAggTx)
+	if !ok {
+		panic(fmt.Errorf("type %T need AggTx method", tx))
 	}
 
+	sd.aggTx = casted.AggTx().(*AggregatorRoTx)
+	if sd.aggTx == nil {
+		panic(fmt.Errorf("aggtx is nil"))
+	}
 }
+
 func (sd *SharedDomains) StepSize() uint64 { return sd.aggTx.a.StepSize() }
 
 // SetTxNum sets txNum for all domains as well as common txNum for all domains
