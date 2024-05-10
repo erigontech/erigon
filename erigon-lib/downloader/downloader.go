@@ -1525,6 +1525,13 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloa
 			case <-t.Complete.On():
 				downloadTime := time.Since(downloadStarted)
 				downloaded := t.Stats().BytesReadUsefulData
+
+				diagnostics.Send(diagnostics.FileDownloadedStatisticsUpdate{
+					FileName:    t.Name(),
+					TimeTook:    downloadTime.Seconds(),
+					AverageRate: uint64(float64(downloaded.Int64()) / downloadTime.Seconds()),
+				})
+
 				d.logger.Debug("[snapshots] Downloaded from BitTorrent", "file", t.Name(),
 					"download-time", downloadTime.Round(time.Second).String(), "downloaded", common.ByteCount(uint64(downloaded.Int64())),
 					"rate", fmt.Sprintf("%s/s", common.ByteCount(uint64(float64(downloaded.Int64())/downloadTime.Seconds()))))
