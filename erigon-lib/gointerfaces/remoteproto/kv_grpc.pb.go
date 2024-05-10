@@ -27,7 +27,7 @@ const (
 	KV_Snapshots_FullMethodName    = "/remote.KV/Snapshots"
 	KV_Range_FullMethodName        = "/remote.KV/Range"
 	KV_DomainGet_FullMethodName    = "/remote.KV/DomainGet"
-	KV_HistoryGet_FullMethodName   = "/remote.KV/HistoryGet"
+	KV_HistoryGet_FullMethodName   = "/remote.KV/HistorySeek"
 	KV_IndexRange_FullMethodName   = "/remote.KV/IndexRange"
 	KV_HistoryRange_FullMethodName = "/remote.KV/HistoryRange"
 	KV_DomainRange_FullMethodName  = "/remote.KV/DomainRange"
@@ -256,7 +256,7 @@ func (UnimplementedKVServer) DomainGet(context.Context, *DomainGetReq) (*DomainG
 	return nil, status.Errorf(codes.Unimplemented, "method DomainGet not implemented")
 }
 func (UnimplementedKVServer) HistoryGet(context.Context, *HistoryGetReq) (*HistoryGetReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method HistoryGet not implemented")
+	return nil, status.Errorf(codes.Unimplemented, "method HistorySeek not implemented")
 }
 func (UnimplementedKVServer) IndexRange(context.Context, *IndexRangeReq) (*IndexRangeReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method IndexRange not implemented")
@@ -495,7 +495,7 @@ var KV_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _KV_DomainGet_Handler,
 		},
 		{
-			MethodName: "HistoryGet",
+			MethodName: "HistorySeek",
 			Handler:    _KV_HistoryGet_Handler,
 		},
 		{

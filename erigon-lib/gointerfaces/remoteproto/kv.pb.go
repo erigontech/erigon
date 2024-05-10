@@ -2090,7 +2090,7 @@ var file_remote_kv_proto_depIdxs = []int32{
 	10, // 12: remote.KV.Snapshots:input_type -> remote.SnapshotsRequest
 	12, // 13: remote.KV.Range:input_type -> remote.RangeReq
 	13, // 14: remote.KV.DomainGet:input_type -> remote.DomainGetReq
-	15, // 15: remote.KV.HistoryGet:input_type -> remote.HistoryGetReq
+	15, // 15: remote.KV.HistorySeek:input_type -> remote.HistoryGetReq
 	17, // 16: remote.KV.IndexRange:input_type -> remote.IndexRangeReq
 	19, // 17: remote.KV.HistoryRange:input_type -> remote.HistoryRangeReq
 	20, // 18: remote.KV.DomainRange:input_type -> remote.DomainRangeReq
@@ -2100,7 +2100,7 @@ var file_remote_kv_proto_depIdxs = []int32{
 	11, // 22: remote.KV.Snapshots:output_type -> remote.SnapshotsReply
 	21, // 23: remote.KV.Range:output_type -> remote.Pairs
 	14, // 24: remote.KV.DomainGet:output_type -> remote.DomainGetReply
-	16, // 25: remote.KV.HistoryGet:output_type -> remote.HistoryGetReply
+	16, // 25: remote.KV.HistorySeek:output_type -> remote.HistoryGetReply
 	18, // 26: remote.KV.IndexRange:output_type -> remote.IndexRangeReply
 	21, // 27: remote.KV.HistoryRange:output_type -> remote.Pairs
 	21, // 28: remote.KV.DomainRange:output_type -> remote.Pairs

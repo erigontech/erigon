@@ -137,7 +137,7 @@ func (m *MockKVClient) HistoryGet(arg0 context.Context, arg1 *HistoryGetReq, arg
 	for _, a := range arg2 {
 		varargs = append(varargs, a)
 	}
-	ret := m.ctrl.Call(m, "HistoryGet", varargs...)
+	ret := m.ctrl.Call(m, "HistorySeek", varargs...)
 	ret0, _ := ret[0].(*HistoryGetReply)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
@@ -147,7 +147,7 @@ func (m *MockKVClient) HistoryGet(arg0 context.Context, arg1 *HistoryGetReq, arg
 func (mr *MockKVClientMockRecorder) HistoryGet(arg0, arg1 any, arg2 ...any) *MockKVClientHistoryGetCall {
 	mr.mock.ctrl.T.Helper()
 	varargs := append([]any{arg0, arg1}, arg2...)
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HistoryGet", reflect.TypeOf((*MockKVClient)(nil).HistoryGet), varargs...)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HistorySeek", reflect.TypeOf((*MockKVClient)(nil).HistoryGet), varargs...)
 	return &MockKVClientHistoryGetCall{Call: call}
 }
 

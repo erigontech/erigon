@@ -1360,7 +1360,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 // GetAsOf does not always require usage of roTx. If it is possible to determine
 // historical value based only on static files, roTx will not be used.
 func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
-	v, hOk, err := dt.ht.GetNoStateWithRecent(key, txNum, roTx)
+	v, hOk, err := dt.ht.HistorySeek(key, txNum, roTx)
 	if err != nil {
 		return nil, err
 	}

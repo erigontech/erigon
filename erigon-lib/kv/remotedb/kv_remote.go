@@ -549,7 +549,7 @@ func (c *remoteCursor) Current() ([]byte, []byte, error) {
 	return c.getCurrent()
 }
 
-// Seek - doesn't start streaming (because much of code does only several .Seek calls without reading sequence of data)
+// Seek - doesn't start streaming (because much of code does only several .seekInFiles calls without reading sequence of data)
 // .Next() - does request streaming (if configured by user)
 func (c *remoteCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	return c.setRange(seek)

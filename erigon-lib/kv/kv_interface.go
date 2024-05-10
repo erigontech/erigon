@@ -449,7 +449,7 @@ type BucketMigrator interface {
 // Cursor - class for navigating through a database
 // CursorDupSort are inherit this class
 //
-// If methods (like First/Next/Seek) return error, then returned key SHOULD not be nil (can be []byte{} for example).
+// If methods (like First/Next/seekInFiles) return error, then returned key SHOULD not be nil (can be []byte{} for example).
 // Then looping code will look as:
 // c := kv.Cursor(bucketName)
 //

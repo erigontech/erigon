@@ -1157,10 +1157,10 @@ func (ht *HistoryRoTx) getFile(txNum uint64) (it ctxItem, ok bool) {
 	return it, false
 }
 
-func (ht *HistoryRoTx) GetNoState(key []byte, txNum uint64) ([]byte, bool, error) {
+func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, bool, error) {
 	// Files list of II and History is different
 	// it means II can't return index of file, but can return TxNum which History will use to find own file
-	ok, histTxNum := ht.iit.Seek(key, txNum)
+	ok, histTxNum := ht.iit.seekInFiles(key, txNum)
 	if !ok {
 		return nil, false, nil
 	}
@@ -1187,7 +1187,7 @@ func (ht *HistoryRoTx) GetNoState(key []byte, txNum uint64) ([]byte, bool, error
 }
 
 func (hs *HistoryStep) GetNoState(key []byte, txNum uint64) ([]byte, bool, uint64) {
-	//fmt.Printf("GetNoState [%x] %d\n", key, txNum)
+	//fmt.Printf("historySeekInFiles [%x] %d\n", key, txNum)
 	if hs.indexFile.reader.Empty() {
 		return nil, false, txNum
 	}
@@ -1252,10 +1252,10 @@ func (ht *HistoryRoTx) encodeTs(txNum uint64) []byte {
 	return ht._bufTs
 }
 
-// GetNoStateWithRecent searches history for a value of specified key before txNum
+// HistorySeek searches history for a value of specified key before txNum
 // second return value is true if the value is found in the history (even if it is nil)
-func (ht *HistoryRoTx) GetNoStateWithRecent(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
-	v, ok, err := ht.GetNoState(key, txNum)
+func (ht *HistoryRoTx) HistorySeek(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
+	v, ok, err := ht.historySeekInFiles(key, txNum)
 	if err != nil {
 		return nil, ok, err
 	}
@@ -1263,7 +1263,7 @@ func (ht *HistoryRoTx) GetNoStateWithRecent(key []byte, txNum uint64, roTx kv.Tx
 		return v, true, nil
 	}
 
-	return ht.getNoStateFromDB(key, txNum, roTx)
+	return ht.historySeekInDB(key, txNum, roTx)
 }
 
 func (ht *HistoryRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
@@ -1287,7 +1287,7 @@ func (ht *HistoryRoTx) valsCursorDup(tx kv.Tx) (c kv.CursorDupSort, err error) {
 	return ht.valsCDup, nil
 }
 
-func (ht *HistoryRoTx) getNoStateFromDB(key []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
+func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
 	if ht.h.historyLargeValues {
 		c, err := ht.valsCursor(tx)
 		if err != nil {
@@ -1401,7 +1401,7 @@ func (hi *StateAsOfIterF) advanceInFiles() error {
 			}
 		}
 
-		if hi.from != nil && bytes.Compare(key, hi.from) < 0 { //TODO: replace by Seek()
+		if hi.from != nil && bytes.Compare(key, hi.from) < 0 { //TODO: replace by seekInFiles()
 			continue
 		}
 
