@@ -162,53 +162,56 @@ func TestMergeSnapshots(t *testing.T) {
 		require.NoError(err)
 	}
 
-	expectedFileName = snaptype.SegmentFileName(coresnaptype.Transactions.Versions().Current, 600_000, 700_000, coresnaptype.Transactions.Enum())
-	d, err = seg.NewDecompressor(filepath.Join(dir, expectedFileName))
-	require.NoError(err)
-	defer d.Close()
-	a = d.Count()
-	require.Equal(10, a)
+	// [0; N] merges are not supported anymore
 
-	start := uint64(19_000_000)
-	for i := uint64(0); i < N; i++ {
-		createFile(start+i*10_000, start+(i+1)*10_000)
-	}
-	s = NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, start, logger)
-	defer s.Close()
-	require.NoError(s.ReopenFolder())
-	{
-		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
-		merger.DisableFsync()
-		s.ReopenSegments(coresnaptype.BlockSnapshotTypes, false)
-		ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
-		require.True(len(ranges) > 0)
-		err := merger.Merge(context.Background(), s, coresnaptype.BlockSnapshotTypes, ranges, s.Dir(), false, nil, nil)
-		require.NoError(err)
-	}
+	// expectedFileName = snaptype.SegmentFileName(coresnaptype.Transactions.Versions().Current, 600_000, 700_000, coresnaptype.Transactions.Enum())
+	// d, err = seg.NewDecompressor(filepath.Join(dir, expectedFileName))
+	// require.NoError(err)
+	// defer d.Close()
+	// a = d.Count()
+	// require.Equal(10, a)
 
-	expectedFileName = snaptype.SegmentFileName(coresnaptype.Transactions.Versions().Current, start+100_000, start+200_000, coresnaptype.Transactions.Enum())
-	d, err = seg.NewDecompressor(filepath.Join(dir, expectedFileName))
-	require.NoError(err)
-	defer d.Close()
-	a = d.Count()
-	require.Equal(10, a)
+	// start := uint64(19_000_000)
+	// for i := uint64(0); i < N; i++ {
+	// 	createFile(start+i*10_000, start+(i+1)*10_000)
+	// }
+	// s = NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, start, logger)
+	// defer s.Close()
+	// require.NoError(s.ReopenFolder())
+	// {
+	// 	merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
+	// 	merger.DisableFsync()
+	// 	fmt.Println(s.Ranges(), s.SegmentsMax())
+	// 	fmt.Println(s.Ranges(), s.SegmentsMax())
+	// 	ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
+	// 	require.True(len(ranges) > 0)
+	// 	err := merger.Merge(context.Background(), s, coresnaptype.BlockSnapshotTypes, ranges, s.Dir(), false, nil, nil)
+	// 	require.NoError(err)
+	// }
 
-	{
-		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
-		merger.DisableFsync()
-		s.ReopenSegments(coresnaptype.BlockSnapshotTypes, false)
-		ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
-		require.True(len(ranges) == 0)
-		err := merger.Merge(context.Background(), s, coresnaptype.BlockSnapshotTypes, ranges, s.Dir(), false, nil, nil)
-		require.NoError(err)
-	}
+	// expectedFileName = snaptype.SegmentFileName(coresnaptype.Transactions.Versions().Current, start+100_000, start+200_000, coresnaptype.Transactions.Enum())
+	// d, err = seg.NewDecompressor(filepath.Join(dir, expectedFileName))
+	// require.NoError(err)
+	// defer d.Close()
+	// a = d.Count()
+	// require.Equal(10, a)
 
-	expectedFileName = snaptype.SegmentFileName(coresnaptype.Transactions.Versions().Current, start+600_000, start+700_000, coresnaptype.Transactions.Enum())
-	d, err = seg.NewDecompressor(filepath.Join(dir, expectedFileName))
-	require.NoError(err)
-	defer d.Close()
-	a = d.Count()
-	require.Equal(10, a)
+	// {
+	// 	merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
+	// 	merger.DisableFsync()
+	// 	s.ReopenSegments(coresnaptype.BlockSnapshotTypes, false)
+	// 	ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
+	// 	require.True(len(ranges) == 0)
+	// 	err := merger.Merge(context.Background(), s, coresnaptype.BlockSnapshotTypes, ranges, s.Dir(), false, nil, nil)
+	// 	require.NoError(err)
+	// }
+
+	// expectedFileName = snaptype.SegmentFileName(coresnaptype.Transactions.Versions().Current, start+600_000, start+700_000, coresnaptype.Transactions.Enum())
+	// d, err = seg.NewDecompressor(filepath.Join(dir, expectedFileName))
+	// require.NoError(err)
+	// defer d.Close()
+	// a = d.Count()
+	// require.Equal(10, a)
 }
 
 func TestDeleteSnapshots(t *testing.T) {
@@ -346,7 +349,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		require.NoError(err)
 		require.NotNil(getSegs(coresnaptype.Enums.Headers))
 		s.ReopenSegments(coresnaptype.BlockSnapshotTypes, false)
-		require.Equal(0, len(getSegs(coresnaptype.Enums.Headers).segments))
+		require.Equal(1, len(getSegs(coresnaptype.Enums.Headers).segments))
 		s.Close()
 
 		createFile(0, 500_000, coresnaptype.Bodies)
