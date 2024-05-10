@@ -449,7 +449,7 @@ type BucketMigrator interface {
 // Cursor - class for navigating through a database
 // CursorDupSort are inherit this class
 //
-// If methods (like First/Next/Seek) return error, then returned key SHOULD not be nil (can be []byte{} for example).
+// If methods (like First/Next/seekInFiles) return error, then returned key SHOULD not be nil (can be []byte{} for example).
 // Then looping code will look as:
 // c := kv.Cursor(bucketName)
 //
@@ -545,7 +545,7 @@ type TemporalTx interface {
 	Tx
 	TemporalGetter
 	DomainGetAsOf(name Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error)
-	HistoryGet(name History, k []byte, ts uint64) (v []byte, ok bool, err error)
+	HistorySeek(name History, k []byte, ts uint64) (v []byte, ok bool, err error)
 
 	// IndexRange - return iterator over range of inverted index for given key `k`
 	// Asc semantic:  [from, to) AND from > to
@@ -567,8 +567,8 @@ type TemporalCommitment interface {
 }
 
 type TemporalRwTx interface {
-	TemporalTx
 	RwTx
+	TemporalTx
 }
 
 type TemporalPutDel interface {

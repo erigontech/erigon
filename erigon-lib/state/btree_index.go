@@ -734,7 +734,7 @@ type BtIndex struct {
 	filePath string
 }
 
-// Decompressor should be managed by caller (could be closed after index is built). When index is built, external getter should be passed to Seek function
+// Decompressor should be managed by caller (could be closed after index is built). When index is built, external getter should be passed to seekInFiles function
 func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *seg.Decompressor, compressed FileCompression, seed uint32, ps *background.ProgressSet, tmpdir string, logger log.Logger, noFsync bool) (*BtIndex, error) {
 	err := BuildBtreeIndexWithDecompressor(indexPath, decompressor, compressed, ps, tmpdir, seed, logger, noFsync)
 	if err != nil {
@@ -1022,7 +1022,7 @@ func (b *BtIndex) Seek(g ArchiveGetter, x []byte) (*Cursor, error) {
 	}
 
 	// defer func() {
-	// 	fmt.Printf("[Bindex][%s] Seek '%x' -> '%x' di=%d\n", b.FileName(), x, cursor.Value(), cursor.d)
+	// 	fmt.Printf("[Bindex][%s] seekInFiles '%x' -> '%x' di=%d\n", b.FileName(), x, cursor.Value(), cursor.d)
 	// }()
 	var (
 		k     []byte

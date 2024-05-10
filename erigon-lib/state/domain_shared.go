@@ -13,6 +13,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
@@ -513,7 +514,10 @@ func (sd *SharedDomains) IdxPut(table kv.InvertedIdx, key []byte) (err error) {
 	return err
 }
 
-func (sd *SharedDomains) SetTx(tx kv.RwTx) { sd.roTx = tx }
+func (sd *SharedDomains) SetTx(tx kv.Tx) {
+	log.Warn("[dbg] SetTx", "txprt", fmt.Sprintf("%p", tx))
+	sd.roTx = tx
+}
 func (sd *SharedDomains) StepSize() uint64 { return sd.aggCtx.a.StepSize() }
 
 // SetTxNum sets txNum for all domains as well as common txNum for all domains
@@ -791,7 +795,10 @@ func (sd *SharedDomains) DomainGet(domain kv.Domain, k, k2 []byte) (v []byte, st
 	}
 	v, step, _, err = sd.aggCtx.GetLatest(domain, k, nil, sd.roTx)
 	if err != nil {
-		panic(err)
+		type A interface {
+			InternalMdbxTx() *mdbx.MdbxTx
+		}
+		panic(fmt.Errorf("%w, txptr=%p, %T, %+v", err, sd.roTx, sd.roTx, sd.roTx.(A).InternalMdbxTx()))
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
 	return v, step, nil
@@ -1208,7 +1215,7 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(tx kv.Tx, cd *D
 		}
 
 		txn, _ := _decodeTxBlockNums(value)
-		//fmt.Printf("[commitment] Seek found committed txn %d block %d\n", txn, bn)
+		//fmt.Printf("[commitment] seekInFiles found committed txn %d block %d\n", txn, bn)
 		if txn >= sinceTx && txn <= untilTx {
 			state = value
 		}
