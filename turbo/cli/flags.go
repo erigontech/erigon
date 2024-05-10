@@ -77,10 +77,6 @@ var (
 	Example: --prune=htc`,
 		Value: "disabled",
 	}
-	MinimalHistoryFlag = cli.BoolFlag{
-		Name:  "minimal-history",
-		Usage: `Keep only minimal amount of history. it overrides the --prune.h.* flags`,
-	}
 	PruneBlocksFlag = cli.Uint64Flag{
 		Name:  "prune.b.older",
 		Usage: `Prune data older than this number of blocks from the tip of the chain (if --prune flag has 'b', then default is 90K)`,
@@ -271,10 +267,14 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	if cfg.Genesis != nil {
 		chainId = cfg.Genesis.Config.ChainID.Uint64()
 	}
-	minimal := ctx.Bool(MinimalHistoryFlag.Name)
+	minimal := ctx.String(PruneFlag.Name) == "minimal"
+	pruneFlagString := ctx.String(PruneFlag.Name)
+	if minimal {
+		pruneFlagString = "htrcb"
+	}
 	mode, err := prune.FromCli(
 		chainId,
-		ctx.String(PruneFlag.Name),
+		pruneFlagString,
 		ctx.Uint64(PruneBlocksFlag.Name),
 		ctx.Uint64(PruneHistoryFlag.Name),
 		ctx.Uint64(PruneReceiptFlag.Name),

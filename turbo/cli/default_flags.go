@@ -30,7 +30,6 @@ var DefaultFlags = []cli.Flag{
 	&PruneFlag,
 	&PruneBlocksFlag,
 	&PruneHistoryFlag,
-	&MinimalHistoryFlag,
 	&PruneReceiptFlag,
 	&PruneTxIndexFlag,
 	&PruneCallTracesFlag,
