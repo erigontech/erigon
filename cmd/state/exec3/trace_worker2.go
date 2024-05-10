@@ -297,11 +297,12 @@ func processResultQueue2(consumer TraceConsumer, rws *state.ResultsQueue, output
 			txTask.Reset()
 			//re-exec right here, because gnosis expecting TxTask.BlockReceipts field - receipts of all
 			txTask.BlockReceipts = receipts
+			log.Warn("[dbg] alex1")
 			applyWorker.RunTxTask(txTask)
-
-			log.Info("[dbg] processResultQueue2", "bn")
+			log.Warn("[dbg] alex2")
 		}
 		if txTask.Error != nil {
+			log.Warn("[dbg] alex3")
 			err := fmt.Errorf("%w: %v, blockNum=%d, TxNum=%d, TxIndex=%d, Final=%t", consensus.ErrInvalidBlock, txTask.Error, txTask.BlockNum, txTask.TxNum, txTask.TxIndex, txTask.Final)
 			return outputTxNum, false, err
 		}
