@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"hash"
 	"io"
 	"math/bits"
@@ -81,7 +82,6 @@ type HexPatriciaHashed struct {
 	ctx           PatriciaContext
 	hashAuxBuffer [128]byte     // buffer to compute cell hash or write hash-related things
 	auxBuffer     *bytes.Buffer // auxiliary buffer used during branch updates encoding
-	branchMerger  *BranchMerger
 	branchEncoder *BranchEncoder
 }
 
@@ -92,7 +92,6 @@ func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext) *HexPatriciaHa
 		keccak2:       sha3.NewLegacyKeccak256().(keccakState),
 		accountKeyLen: accountKeyLen,
 		auxBuffer:     bytes.NewBuffer(make([]byte, 8192)),
-		branchMerger:  NewHexBranchMerger(1024),
 	}
 	tdir := os.TempDir()
 	if ctx != nil {
@@ -1054,7 +1053,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		upCell.extLen = 0
 		upCell.downHashedLen = 0
 		if hph.branchBefore[row] {
-			_, err := hph.collectBranchUpdate(updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
+			_, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
 			}
@@ -1082,7 +1081,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		upCell.fillFromLowerCell(cell, depth, hph.currentKey[upDepth:hph.currentKeyLen], nibble)
 		// Delete if it existed
 		if hph.branchBefore[row] {
-			_, err := hph.collectBranchUpdate(updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
+			_, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
 			}
@@ -1155,7 +1154,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		var lastNibble int
 		var err error
 
-		lastNibble, err = hph.collectBranchUpdate(updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], cellGetter)
+		lastNibble, err = hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], cellGetter)
 		if err != nil {
 			return fmt.Errorf("failed to encode branch update: %w", err)
 		}
@@ -1270,45 +1269,109 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte) *Cell {
 	return cell
 }
 
-func (hph *HexPatriciaHashed) collectBranchUpdate(
-	prefix []byte,
-	bitmap, touchMap, afterMap uint16,
-	readCell func(nibble int, skip bool) (*Cell, error),
-) (lastNibble int, err error) {
-
-	update, ln, err := hph.branchEncoder.EncodeBranch(bitmap, touchMap, afterMap, readCell)
-	if err != nil {
-		return 0, err
-	}
-	prev, prevStep, err := hph.ctx.GetBranch(prefix) // prefix already compacted by fold
-	if err != nil {
-		return 0, err
-	}
-	if len(prev) > 0 {
-		previous := BranchData(prev)
-		merged, err := hph.branchMerger.Merge(previous, update)
-		if err != nil {
-			return 0, err
-		}
-		update = merged
-	}
-	// this updates ensures that if commitment is present, each branch are also present in commitment state at that moment with costs of storage
-	//fmt.Printf("commitment branch encoder merge prefix [%x] [%x]->[%x]\n%update\n", prefix, stateValue, update, BranchData(update).String())
-
-	cp, cu := common.Copy(prefix), common.Copy(update) // has to copy :(
-	if err = hph.ctx.PutBranch(cp, cu, prev, prevStep); err != nil {
-		return 0, err
-	}
-	mxCommitmentBranchUpdates.Inc()
-	return ln, nil
-}
-
 func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 	rh, err := hph.computeCellHash(&hph.root, 0, nil)
 	if err != nil {
 		return nil, err
 	}
 	return rh[1:], nil // first byte is 128+hash_len
+}
+
+func (hph *HexPatriciaHashed) ProcessTree(ctx context.Context, tree *UpdateTree, logPrefix string) (rootHash []byte, err error) {
+	var (
+		stagedCell = new(Cell)
+		logEvery   = time.NewTicker(20 * time.Second)
+
+		m  runtime.MemStats
+		ki uint64
+	)
+	defer logEvery.Stop()
+	updatesCount := tree.Size()
+
+	err = tree.HashSort(ctx, func(hashedKey, plainKey []byte) error {
+		select {
+		case <-logEvery.C:
+			dbg.ReadMemStats(&m)
+			log.Info(fmt.Sprintf("[%s][agg] computing trie", logPrefix),
+				"progress", fmt.Sprintf("%dk/%dk", ki/1000, updatesCount/1000), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+		default:
+		}
+
+		if hph.trace {
+			fmt.Printf("\n%d/%d) plainKey=[%x], hashedKey=[%x], currentKey=[%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
+		}
+		// Keep folding until the currentKey is the prefix of the key we modify
+		for hph.needFolding(hashedKey) {
+			if err := hph.fold(); err != nil {
+				return fmt.Errorf("fold: %w", err)
+			}
+		}
+		// Now unfold until we step on an empty cell
+		for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
+			if err := hph.unfold(hashedKey, unfolding); err != nil {
+				return fmt.Errorf("unfold: %w", err)
+			}
+		}
+
+		// Update the cell
+		stagedCell.reset()
+		if len(plainKey) == hph.accountKeyLen {
+			if err := hph.ctx.GetAccount(plainKey, stagedCell); err != nil {
+				return fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
+			}
+			if !stagedCell.Delete {
+				cell := hph.updateCell(plainKey, hashedKey)
+				cell.setAccountFields(stagedCell.CodeHash[:], &stagedCell.Balance, stagedCell.Nonce)
+
+				if hph.trace {
+					fmt.Printf("GetAccount update key %x => balance=%d nonce=%v codeHash=%x\n", cell.apk, &cell.Balance, cell.Nonce, cell.CodeHash)
+				}
+			}
+		} else {
+			if err = hph.ctx.GetStorage(plainKey, stagedCell); err != nil {
+				return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
+			}
+			if !stagedCell.Delete {
+				hph.updateCell(plainKey, hashedKey).setStorage(stagedCell.Storage[:stagedCell.StorageLen])
+				if hph.trace {
+					fmt.Printf("GetStorage reading key %x => %x\n", plainKey, stagedCell.Storage[:stagedCell.StorageLen])
+				}
+			}
+		}
+
+		if stagedCell.Delete {
+			if hph.trace {
+				fmt.Printf("delete cell %x hash %x\n", plainKey, hashedKey)
+			}
+			hph.deleteCell(hashedKey)
+		}
+		mxCommitmentKeys.Inc()
+		ki++
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("hash sort failed: %w", err)
+	}
+
+	// Folding everything up to the root
+	for hph.activeRows > 0 {
+		if err := hph.fold(); err != nil {
+			return nil, fmt.Errorf("final fold: %w", err)
+		}
+	}
+
+	rootHash, err = hph.RootHash()
+	if err != nil {
+		return nil, fmt.Errorf("root hash evaluation failed: %w", err)
+	}
+	if hph.trace {
+		fmt.Printf("root hash %x updates %d\n", rootHash, updatesCount)
+	}
+	err = hph.branchEncoder.Load(hph.ctx, etl.TransformArgs{Quit: ctx.Done()})
+	if err != nil {
+		return nil, fmt.Errorf("branch update failed: %w", err)
+	}
+	return rootHash, nil
 }
 
 // Process keys and updates in a single pass. Branch updates are written to PatriciaContext if no error occurs.
@@ -1403,6 +1466,10 @@ func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byt
 	if hph.trace {
 		fmt.Printf("root hash %x updates %d\n", rootHash, len(plainKeys))
 	}
+	err = hph.branchEncoder.Load(hph.ctx, etl.TransformArgs{Quit: ctx.Done()})
+	if err != nil {
+		return nil, fmt.Errorf("branch update failed: %w", err)
+	}
 	return rootHash, nil
 }
 
@@ -1491,6 +1558,10 @@ func (hph *HexPatriciaHashed) ProcessUpdates(ctx context.Context, plainKeys [][]
 	rootHash, err = hph.RootHash()
 	if err != nil {
 		return nil, fmt.Errorf("root hash evaluation failed: %w", err)
+	}
+	err = hph.branchEncoder.Load(hph.ctx, etl.TransformArgs{Quit: ctx.Done()})
+	if err != nil {
+		return nil, fmt.Errorf("branch update failed: %w", err)
 	}
 	return rootHash, nil
 }
