@@ -115,8 +115,8 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 			}
 
 			total.AddUint64(total, txTask.UsedGas)
-			doms.SetTxNum(txTask.TxNum)
 			v := total.Bytes()
+			doms.SetTxNum(txTask.TxNum)
 			err = doms.DomainPut(kv.GasUsedDomain, keyTotal, nil, v, nil, 0)
 			if err != nil {
 				return err
