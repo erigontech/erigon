@@ -179,6 +179,15 @@ func (t *UpdateTree) TouchCode(c *commitmentItem, val []byte) {
 	}
 }
 
+func (t *UpdateTree) Reset() {
+	switch t.mode {
+	case CommitmentModeDirect:
+		t.keys = make(map[string]struct{}, len(t.keys)/8)
+	case CommitmentModeUpdate:
+		t.tree.Clear(true)
+	}
+}
+
 // Returns list of both plain and hashed keys. If .mode is CommitmentModeUpdate, updates also returned.
 // No ordering guarantees is provided.
 func (t *UpdateTree) List(clear bool) ([][]byte, []commitment.Update) {

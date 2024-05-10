@@ -246,7 +246,7 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 	//sd.muMaps.Lock()
 	//defer sd.muMaps.Unlock()
-	for i, _ := range sd.domains {
+	for i := range sd.domains {
 		sd.domains[i] = map[string][]byte{}
 	}
 	if resetCommitment {
@@ -718,8 +718,7 @@ func (sd *SharedDomains) Close() {
 	}
 
 	if sd.sdCtx != nil {
-		sd.sdCtx.updates.keys = nil
-		sd.sdCtx.updates.tree.Clear(true)
+		sd.sdCtx.updates.Reset()
 	}
 }
 
