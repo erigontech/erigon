@@ -339,8 +339,8 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 		return branch, nil // do not transform, return as is
 	}
 
-	sto := sd.aggCtx.d[kv.StorageDomain]
-	acc := sd.aggCtx.d[kv.AccountsDomain]
+	sto := sd.aggTx.d[kv.StorageDomain]
+	acc := sd.aggTx.d[kv.AccountsDomain]
 	storageItem := sto.lookupFileByItsRange(fStartTxNum, fEndTxNum)
 	accountItem := acc.lookupFileByItsRange(fStartTxNum, fEndTxNum)
 	storageGetter := NewArchiveGetter(storageItem.decompressor.MakeGetter(), sto.d.compression)
@@ -355,7 +355,7 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 			// Optimised key referencing a state file record (file number and offset within the file)
 			storagePlainKey, found := sto.lookupByShortenedKey(key, storageGetter)
 			if !found {
-				s0, s1 := fStartTxNum/sd.aggCtx.a.StepSize(), fEndTxNum/sd.aggCtx.a.StepSize()
+				s0, s1 := fStartTxNum/sd.aggTx.a.StepSize(), fEndTxNum/sd.aggTx.a.StepSize()
 				sd.logger.Crit("replace back lost storage full key", "shortened", fmt.Sprintf("%x", key),
 					"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, decodeShorterKey(key)))
 				return nil, fmt.Errorf("replace back lost storage full key: %x", key)
@@ -369,7 +369,7 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 
 		apkBuf, found := acc.lookupByShortenedKey(key, accountGetter)
 		if !found {
-			s0, s1 := fStartTxNum/sd.aggCtx.a.StepSize(), fEndTxNum/sd.aggCtx.a.StepSize()
+			s0, s1 := fStartTxNum/sd.aggTx.a.StepSize(), fEndTxNum/sd.aggTx.a.StepSize()
 			sd.logger.Crit("replace back lost account full key", "shortened", fmt.Sprintf("%x", key),
 				"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, decodeShorterKey(key)))
 			return nil, fmt.Errorf("replace back lost account full key: %x", key)
@@ -931,7 +931,7 @@ func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode commitment.Mode, 
 		keccak:   sha3.NewLegacyKeccak256().(cryptozerocopy.KeccakState),
 	}
 
-	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdateTree(trieVariant, mode, sd.aggCtx.a.tmpdir)
+	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdateTree(trieVariant, mode, sd.aggTx.a.tmpdir)
 	ctx.patriciaTrie.ResetContext(ctx)
 	return ctx
 }
