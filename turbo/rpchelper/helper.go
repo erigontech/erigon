@@ -56,7 +56,10 @@ func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash,
 				return 0, libcommon.Hash{}, false, err
 			}
 		case rpc.SafeBlockNumber:
-			blockNumber, err = GetSafeBlockNumber(tx)
+			// [zkevm] safe not available, returns finilized instead
+			// blockNumber, err = GetSafeBlockNumber(tx)
+			blockNumber, err = GetFinalizedBlockNumber(tx)
+
 			if err != nil {
 				return 0, libcommon.Hash{}, false, err
 			}
