@@ -565,6 +565,12 @@ type TemporalTx interface {
 type TemporalCommitment interface {
 	ComputeCommitment(ctx context.Context, saveStateAfter, trace bool) (rootHash []byte, err error)
 }
+
+type TemporalRwTx interface {
+	TemporalTx
+	RwTx
+}
+
 type TemporalPutDel interface {
 	// DomainPut
 	// Optimizations:
@@ -580,12 +586,6 @@ type TemporalPutDel interface {
 	//   - if `val == nil` it will call DomainDel
 	DomainDel(domain Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error
 	DomainDelPrefix(domain Domain, prefix []byte) error
-}
-
-type TemporalRwTx interface {
-	TemporalTx
-	RwTx
-	TemporalPutDel
 }
 
 type CanWarmupDB interface {
