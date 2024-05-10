@@ -219,7 +219,7 @@ type ExecArgs struct {
 	Workers     int
 }
 
-func NewTraceWorkers2Pool(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, in *state.QueueWithRetry, workerCount int, logger log.Logger) (g *errgroup.Group, clearFunc func()) {
+func NewTraceWorkers2Pool(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, in *state.QueueWithRetry, workerCount int, outputTxNum *atomic.Uint64, logger log.Logger) (g *errgroup.Group, clearFunc func()) {
 	workers := make([]*TraceWorker2, workerCount)
 
 	resultChSize := workerCount * 8
@@ -249,18 +249,17 @@ func NewTraceWorkers2Pool(consumer TraceConsumer, cfg *ExecArgs, ctx context.Con
 
 		applyWorker := NewTraceWorker2(consumer, in, rws, ctx, cfg, logger)
 		applyWorker.ResetTx(tx)
-		var outputTxNum uint64
-		for outputTxNum <= toTxNum {
+		for outputTxNum.Load() <= toTxNum {
 			if err := rws.Drain(ctx); err != nil {
 				return err
 			}
 
-			processedTxNum, _, err := processResultQueue2(consumer, rws, outputTxNum, applyWorker, true)
+			processedTxNum, _, err := processResultQueue2(consumer, rws, outputTxNum.Load(), applyWorker, true)
 			if err != nil {
 				return err
 			}
 			if processedTxNum > 0 {
-				outputTxNum = processedTxNum
+				outputTxNum.Store(processedTxNum)
 			}
 		}
 		return nil
@@ -369,6 +368,10 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 		return h
 	}
 
+	fromTxNum, err := rawdbv3.TxNums.Max(tx, fromBlock)
+	if err != nil {
+		return err
+	}
 	toTxNum, err := rawdbv3.TxNums.Max(tx, toBlock)
 	if err != nil {
 		return err
@@ -383,7 +386,9 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	if cfg.Workers > 0 {
 		WorkerCount = cfg.Workers
 	}
-	workers, cleanup := NewTraceWorkers2Pool(consumer, cfg, ctx, toTxNum, in, WorkerCount, logger)
+	outTxNum := &atomic.Uint64{}
+	outTxNum.Store(fromTxNum)
+	workers, cleanup := NewTraceWorkers2Pool(consumer, cfg, ctx, toTxNum, in, WorkerCount, outTxNum, logger)
 	defer workers.Wait()
 	defer cleanup()
 
