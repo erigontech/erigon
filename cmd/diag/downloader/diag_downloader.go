@@ -268,7 +268,7 @@ func getFileDownloadRate(peers []diagnostics.SegmentPeer) uint64 {
 
 func getData(cliCtx *cli.Context) (diagnostics.SyncStatistics, error) {
 	var data diagnostics.SyncStatistics
-	url := "http://" + cliCtx.String(flags.DebugURLFlag.Name) + "/debug/diag/snapshot-sync"
+	url := "http://" + cliCtx.String(flags.DebugURLFlag.Name) + flags.ApiPath + "/snapshot-sync"
 
 	err := util.MakeHttpGetCall(cliCtx.Context, url, &data)
 
