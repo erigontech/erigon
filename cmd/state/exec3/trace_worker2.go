@@ -251,12 +251,12 @@ func NewTraceWorkers2Pool(consumer TraceConsumer, cfg *ExecArgs, ctx context.Con
 		applyWorker.ResetTx(tx)
 		for outputTxNum.Load() <= toTxNum {
 			if err := rws.Drain(ctx); err != nil {
-				return err
+				return fmt.Errorf("rws.Drain: %w", err)
 			}
 
 			processedTxNum, _, err := processResultQueue2(consumer, rws, outputTxNum.Load(), applyWorker, true)
 			if err != nil {
-				return err
+				return fmt.Errorf("processResultQueue2: %w", err)
 			}
 			if processedTxNum > 0 {
 				outputTxNum.Store(processedTxNum)
@@ -477,7 +477,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	}
 
 	if err := workers.Wait(); err != nil {
-		return err
+		return fmt.Errorf("WorkersPool: %w", err)
 	}
 
 	return nil
