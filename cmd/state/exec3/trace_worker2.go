@@ -347,7 +347,7 @@ func processResultQueue2(consumer TraceConsumer, rws *state.ResultsQueue, output
 }
 
 func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx context.Context, tx kv.TemporalTx, cfg *ExecArgs, logger log.Logger) (err error) {
-	log.Info("[CustomTraceMapReduce] start", "fromBlock", fromBlock, "toBlock", toBlock)
+	log.Info("[CustomTraceMapReduce] start", "fromBlock", fromBlock, "toBlock", toBlock, "workers", cfg.Workers)
 	br := cfg.BlockReader
 	chainConfig := cfg.ChainConfig
 	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {
@@ -369,7 +369,8 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 		return err
 	}
 
-	// input queue
+	// "Map-Reduce on history" is conflict-free - means we don't need "Retry" feature.
+	// But still can use this data-type as simple queue.
 	in := state.NewQueueWithRetry(100_000)
 	defer in.Close()
 
