@@ -1446,7 +1446,7 @@ func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	}
 	dt.valsC, err = tx.Cursor(dt.d.valsTable)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("valsCursor: %w", err)
 	}
 	return dt.valsC, nil
 }
@@ -1457,7 +1457,7 @@ func (dt *DomainRoTx) keysCursor(tx kv.Tx) (c kv.CursorDupSort, err error) {
 	}
 	dt.keysC, err = tx.CursorDupSort(dt.d.keysTable)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("keysCursor: %w", err)
 	}
 	return dt.keysC, nil
 }
@@ -1528,7 +1528,7 @@ func (dt *DomainRoTx) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint64, 
 
 	v, foundStep, found, err = dt.getLatestFromDb(key, roTx)
 	if err != nil {
-		return nil, 0, false, err
+		return nil, 0, false, fmt.Errorf("getLatestFromDb: %w", err)
 	}
 	if found {
 		return v, foundStep, true, nil
@@ -1536,7 +1536,7 @@ func (dt *DomainRoTx) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint64, 
 
 	v, foundInFile, _, endTxNum, err := dt.getFromFiles(key)
 	if err != nil {
-		return nil, 0, false, err
+		return nil, 0, false, fmt.Errorf("getFromFiles: %w", err)
 	}
 	return v, endTxNum / dt.d.aggregationStep, foundInFile, nil
 }

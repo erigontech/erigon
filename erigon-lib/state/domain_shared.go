@@ -76,16 +76,16 @@ type SharedDomains struct {
 	tracesToWriter   *invertedIndexBufferedWriter
 }
 
-type HasAggCtx interface {
-	AggCtx() interface{}
+type HasAggTx interface {
+	AggTx() interface{}
 }
 
 func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 	var ac *AggregatorRoTx
-	if casted, ok := tx.(HasAggCtx); ok {
-		ac = casted.AggCtx().(*AggregatorRoTx)
+	if casted, ok := tx.(HasAggTx); ok {
+		ac = casted.AggTx().(*AggregatorRoTx)
 	} else {
-		return nil, fmt.Errorf("type %T need AggCtx method", tx)
+		return nil, fmt.Errorf("type %T need AggTx method", tx)
 	}
 	if tx == nil {
 		return nil, fmt.Errorf("tx is nil")
@@ -117,7 +117,7 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 	return sd, nil
 }
 
-func (sd *SharedDomains) AggCtx() interface{} { return sd.aggCtx }
+func (sd *SharedDomains) AggTx() interface{} { return sd.aggCtx }
 
 // aggregator context should call aggCtx.Unwind before this one.
 func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo, txUnwindTo uint64) error {
@@ -513,7 +513,13 @@ func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) 
 	return err
 }
 
-func (sd *SharedDomains) SetTx(tx kv.RwTx) { sd.roTx = tx }
+func (sd *SharedDomains) SetTx(tx kv.Tx) {
+	sd.roTx = tx
+	if casted, ok := tx.(HasAggTx); ok {
+		sd.aggCtx = casted.AggTx().(*AggregatorRoTx)
+	}
+
+}
 func (sd *SharedDomains) StepSize() uint64 { return sd.aggCtx.a.StepSize() }
 
 // SetTxNum sets txNum for all domains as well as common txNum for all domains
