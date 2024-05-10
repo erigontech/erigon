@@ -211,7 +211,7 @@ func (tx *Tx) DomainGetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []by
 	return tx.aggCtx.DomainGetAsOf(tx.MdbxTx, name, key, ts)
 }
 
-func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok bool, err error) {
+func (tx *Tx) HistorySeek(name kv.History, key []byte, ts uint64) (v []byte, ok bool, err error) {
 	return tx.aggCtx.HistoryGet(name, key, ts, tx.MdbxTx)
 }
 

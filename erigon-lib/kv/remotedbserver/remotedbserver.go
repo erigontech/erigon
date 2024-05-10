@@ -62,7 +62,7 @@ const MaxTxTTL = 60 * time.Second
 // 5.0 - BlockTransaction table now has canonical ids (txs of non-canonical blocks moving to NonCanonicalTransaction table)
 // 5.1.0 - Added blockGasLimit to the StateChangeBatch
 // 6.0.0 - Blocks now have system-txs - in the begin/end of block
-// 6.1.0 - Add methods Range, IndexRange, HistoryGet, HistoryRange
+// 6.1.0 - Add methods Range, IndexRange, HistorySeek, HistoryRange
 // 6.2.0 - Add HistoryFiles to reply of Snapshots() method
 var KvServiceAPIVersion = &types.VersionReply{Major: 6, Minor: 2, Patch: 0}
 
@@ -568,7 +568,7 @@ func (s *KvServer) HistoryGet(_ context.Context, req *remote.HistoryGetReq) (rep
 		if !ok {
 			return fmt.Errorf("server DB doesn't implement kv.Temporal interface")
 		}
-		reply.V, reply.Ok, err = ttx.HistoryGet(kv.History(req.Table), req.K, req.Ts)
+		reply.V, reply.Ok, err = ttx.HistorySeek(kv.History(req.Table), req.K, req.Ts)
 		if err != nil {
 			return err
 		}

@@ -545,7 +545,7 @@ type TemporalTx interface {
 	Tx
 	TemporalGetter
 	DomainGetAsOf(name Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error)
-	HistoryGet(name History, k []byte, ts uint64) (v []byte, ok bool, err error)
+	HistorySeek(name History, k []byte, ts uint64) (v []byte, ok bool, err error)
 
 	// IndexRange - return iterator over range of inverted index for given key `k`
 	// Asc semantic:  [from, to) AND from > to
