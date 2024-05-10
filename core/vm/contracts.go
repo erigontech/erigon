@@ -1121,9 +1121,6 @@ func (c *bls12381MapFpToG1) Run(input []byte) ([]byte, error) {
 
 	// Compute mapping
 	r := bls12381.MapToG1(fe)
-	if err != nil {
-		return nil, err
-	}
 
 	// Encode the G1 point to 128 bytes
 	return encodePointG1(&r), nil
@@ -1157,9 +1154,6 @@ func (c *bls12381MapFp2ToG2) Run(input []byte) ([]byte, error) {
 
 	// Compute mapping
 	r := bls12381.MapToG2(bls12381.E2{A0: c0, A1: c1})
-	if err != nil {
-		return nil, err
-	}
 
 	// Encode the G2 point to 256 bytes
 	return encodePointG2(&r), nil
