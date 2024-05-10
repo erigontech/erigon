@@ -4,15 +4,14 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math/rand"
-	"testing"
-	"time"
-
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
+	"math/rand"
+	"testing"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/types"
@@ -425,10 +424,11 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	ac.Close()
 	ac = agg.BeginFilesRo()
 
-	err = db.Update(ctx, func(tx kv.RwTx) error {
-		_, err = ac.PruneSmallBatches(ctx, 1*time.Minute, tx)
-		return err
-	})
+	//err = db.Update(ctx, func(tx kv.RwTx) error {
+	//	_, err = ac.PruneSmallBatches(ctx, 1*time.Minute, tx)
+	//	return err
+	//})
+	_, err = ac.PruneSmallBatchesDb(ctx, 1*time.Minute, db)
 	require.NoError(t, err)
 
 	ac.Close()
