@@ -292,7 +292,7 @@ func BorHeimdallForward(
 			// if the last time we persisted snapshots is too far away re-run the forward
 			// initialization process - this is to avoid memory growth due to recusrion
 			// in persistValidatorSets
-			if snap == nil && blockNum-lastPersistedBlockNum > (snapshotPersistInterval*5) {
+			if snap == nil && (blockNum == 1 || blockNum-lastPersistedBlockNum > (snapshotPersistInterval*5)) {
 				snap, err = initValidatorSets(
 					ctx,
 					tx,
