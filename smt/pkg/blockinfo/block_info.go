@@ -59,7 +59,6 @@ func BuildBlockInfoTree(
 			return nil, err
 		}
 
-		// TODO: calculate l2 tx hash
 		_, err = infoTree.SetBlockTx(&l2TxHash, i, receipt, logIndex, receipt.CumulativeGasUsed, txInfo.EffectiveGasPrice)
 		if err != nil {
 			return nil, err

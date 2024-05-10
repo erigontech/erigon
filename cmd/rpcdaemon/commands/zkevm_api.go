@@ -53,6 +53,7 @@ type ZkEvmAPI interface {
 	GetProverInput(ctx context.Context, batchNumber uint64, mode *WitnessMode, debug *bool) (*legacy_executor_verifier.RpcPayload, error)
 	GetLatestGlobalExitRoot(ctx context.Context) (common.Hash, error)
 	GetExitRootsByGER(ctx context.Context, globalExitRoot common.Hash) (*ZkExitRoots, error)
+	GetL2BlockInfoTree(ctx context.Context, blockNum rpc.BlockNumberOrHash) (json.RawMessage, error)
 }
 
 // APIImpl is implementation of the ZkEvmAPI interface based on remote Db access

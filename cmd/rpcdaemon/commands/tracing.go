@@ -94,11 +94,14 @@ func (api *PrivateDebugAPIImpl) traceBlock_deprecated(ctx context.Context, block
 	}
 	engine := api.engine()
 
-	_, blockCtx, _, ibs, _, err := transactions.ComputeTxEnv_ZkEvm(ctx, engine, block, chainConfig, api._blockReader, tx, 0, api.historyV3(tx))
+	txEnv, err := transactions.ComputeTxEnv_ZkEvm(ctx, engine, block, chainConfig, api._blockReader, tx, 0, api.historyV3(tx))
 	if err != nil {
 		stream.WriteNil()
 		return err
 	}
+
+	blockCtx := txEnv.BlockContext
+	ibs := txEnv.Ibs
 
 	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	stream.WriteArrayStart()
@@ -255,13 +258,13 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	}
 	engine := api.engine()
 
-	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv_ZkEvm(ctx, engine, block, chainConfig, api._blockReader, tx, int(txnIndex), api.historyV3(tx))
+	txEnv, err := transactions.ComputeTxEnv_ZkEvm(ctx, engine, block, chainConfig, api._blockReader, tx, int(txnIndex), api.historyV3(tx))
 	if err != nil {
 		stream.WriteNil()
 		return err
 	}
 	// Trace the transaction and return
-	return transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
+	return transactions.TraceTx(ctx, txEnv.Msg, txEnv.BlockContext, txEnv.TxContext, txEnv.Ibs, config, chainConfig, stream, api.evmCallTimeout)
 }
 
 func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, config *tracers.TraceConfig, stream *jsoniter.Stream) error {

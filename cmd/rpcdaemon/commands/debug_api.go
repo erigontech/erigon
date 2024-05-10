@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 
-	jsoniter "github.com/json-iterator/go"
 	"github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/gateway-fm/cdk-erigon-lib/kv/order"
 	"github.com/gateway-fm/cdk-erigon-lib/kv/rawdbv3"
+	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -86,11 +86,11 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 		return StorageRangeResult{}, nil
 	}
 
-	_, _, _, _, stateReader, err := transactions.ComputeTxEnv_ZkEvm(ctx, engine, block, chainConfig, api._blockReader, tx, int(txIndex), api.historyV3(tx))
+	txEnv, err := transactions.ComputeTxEnv_ZkEvm(ctx, engine, block, chainConfig, api._blockReader, tx, int(txIndex), api.historyV3(tx))
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
-	return storageRangeAt(stateReader.(*state.PlainState), contractAddress, keyStart, maxResult)
+	return storageRangeAt(txEnv.StateReader.(*state.PlainState), contractAddress, keyStart, maxResult)
 }
 
 // AccountRange implements debug_accountRange. Returns a range of accounts involved in the given block rangeb
@@ -343,10 +343,11 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 	if block == nil {
 		return nil, nil
 	}
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv_ZkEvm(ctx, engine, block, chainConfig, api._blockReader, tx, int(txIndex), api.historyV3(tx))
+	txEnv, err := transactions.ComputeTxEnv_ZkEvm(ctx, engine, block, chainConfig, api._blockReader, tx, int(txIndex), api.historyV3(tx))
 	if err != nil {
 		return nil, err
 	}
+	ibs := txEnv.Ibs
 	result := &AccountResult{}
 	result.Balance.ToInt().Set(ibs.GetBalance(address).ToBig())
 	result.Nonce = hexutil.Uint64(ibs.GetNonce(address))

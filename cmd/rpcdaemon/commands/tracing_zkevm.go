@@ -83,11 +83,13 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	}
 	engine := api.engine()
 
-	_, blockCtx, _, ibs, _, err := transactions.ComputeTxEnv_ZkEvm(ctx, engine, block, chainConfig, api._blockReader, tx, 0, api.historyV3(tx))
+	txEnv, err := transactions.ComputeTxEnv_ZkEvm(ctx, engine, block, chainConfig, api._blockReader, tx, 0, api.historyV3(tx))
 	if err != nil {
 		stream.WriteNil()
 		return err
 	}
+	blockCtx := txEnv.BlockContext
+	ibs := txEnv.Ibs
 
 	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	stream.WriteArrayStart()

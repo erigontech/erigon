@@ -129,7 +129,7 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.Tx, hash commo
 	}
 	engine := api.engine()
 
-	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv_ZkEvm(ctx, engine, block, chainConfig, api._blockReader, tx, int(txIndex), api.historyV3(tx))
+	txEnv, err := transactions.ComputeTxEnv_ZkEvm(ctx, engine, block, chainConfig, api._blockReader, tx, int(txIndex), api.historyV3(tx))
 	if err != nil {
 		return nil, err
 	}
@@ -140,9 +140,9 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.Tx, hash commo
 	} else {
 		vmConfig = vm.Config{Debug: true, Tracer: tracer}
 	}
-	vmenv := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
+	vmenv := vm.NewEVM(txEnv.BlockContext, txEnv.TxContext, txEnv.Ibs, chainConfig, vmConfig)
 
-	result, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(msg.Gas()), true, false /* gasBailout */)
+	result, err := core.ApplyMessage(vmenv, txEnv.Msg, new(core.GasPool).AddGas(txEnv.Msg.Gas()), true, false /* gasBailout */)
 	if err != nil {
 		return nil, fmt.Errorf("tracing failed: %v", err)
 	}
