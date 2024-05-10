@@ -52,16 +52,16 @@ func StageCustomTraceCfg(db kv.RwDB, prune prune.Mode, dirs datadir.Dirs, br ser
 
 func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, ctx context.Context, initialCycle bool, prematureEndBlock uint64, logger log.Logger) error {
 	useExternalTx := txc.Ttx != nil
-	var tx kv.TemporalTx
+	var tx kv.TemporalRwTx
 	if !useExternalTx {
 		_tx, err := cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
 		defer _tx.Rollback()
-		tx = _tx.(kv.TemporalTx)
+		tx = _tx.(kv.TemporalRwTx)
 	} else {
-		tx = txc.Ttx
+		tx = txc.Ttx.(kv.TemporalRwTx)
 	}
 
 	endBlock, err := s.ExecutionAt(tx)
@@ -93,7 +93,7 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 	var m runtime.MemStats
 	var prevBlockNumLog uint64 = startBlock
 
-	doms, err := state2.NewSharedDomains(txc.Tx, logger)
+	doms, err := state2.NewSharedDomains(tx, logger)
 	if err != nil {
 		return err
 	}
@@ -135,11 +135,11 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 	}, ctx, tx, cfg.execArgs, logger); err != nil {
 		return err
 	}
-	if err = s.Update(txc.Tx, endBlock); err != nil {
+	if err = s.Update(tx.(kv.RwTx), endBlock); err != nil {
 		return err
 	}
 
-	if err := doms.Flush(ctx, txc.Tx); err != nil {
+	if err := doms.Flush(ctx, tx); err != nil {
 		return err
 	}
 
