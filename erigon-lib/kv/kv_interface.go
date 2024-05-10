@@ -564,6 +564,12 @@ type TemporalTx interface {
 type TemporalCommitment interface {
 	ComputeCommitment(ctx context.Context, saveStateAfter, trace bool) (rootHash []byte, err error)
 }
+
+type TemporalRwTx interface {
+	RwTx
+	TemporalTx
+}
+
 type TemporalPutDel interface {
 	// DomainPut
 	// Optimizations:
