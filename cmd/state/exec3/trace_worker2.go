@@ -104,10 +104,11 @@ func (rw *TraceWorker2) Run() error {
 }
 
 func (rw *TraceWorker2) RunTxTask(txTask *state.TxTask) {
+	log.Warn("worker: ", " rw.background ", rw.background, "rw.chainTx", rw.chainTx)
 	if rw.background && rw.chainTx == nil {
 		var err error
 		if rw.chainTx, err = rw.execArgs.ChainDB.BeginRo(rw.ctx); err != nil {
-			panic(err)
+			panic(fmt.Errorf("BeginRo: %w", err))
 		}
 		rw.stateReader.SetTx(rw.chainTx)
 		rw.chain = consensuschain.NewReader(rw.execArgs.ChainConfig, rw.chainTx, rw.execArgs.BlockReader, rw.logger)
