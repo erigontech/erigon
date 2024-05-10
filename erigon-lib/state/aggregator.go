@@ -1603,10 +1603,10 @@ func (ac *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs
 
 // -- range end
 
-func (ac *AggregatorRoTx) HistoryGet(name kv.History, key []byte, ts uint64, tx kv.Tx) (v []byte, ok bool, err error) {
+func (ac *AggregatorRoTx) HistorySeek(name kv.History, key []byte, ts uint64, tx kv.Tx) (v []byte, ok bool, err error) {
 	switch name {
 	case kv.AccountsHistory:
-		v, ok, err = ac.d[kv.AccountsDomain].ht.GetNoStateWithRecent(key, ts, tx)
+		v, ok, err = ac.d[kv.AccountsDomain].ht.HistorySeek(key, ts, tx)
 		if err != nil {
 			return nil, false, err
 		}
@@ -1615,13 +1615,13 @@ func (ac *AggregatorRoTx) HistoryGet(name kv.History, key []byte, ts uint64, tx 
 		}
 		return v, true, nil
 	case kv.StorageHistory:
-		return ac.d[kv.StorageDomain].ht.GetNoStateWithRecent(key, ts, tx)
+		return ac.d[kv.StorageDomain].ht.HistorySeek(key, ts, tx)
 	case kv.CodeHistory:
-		return ac.d[kv.CodeDomain].ht.GetNoStateWithRecent(key, ts, tx)
+		return ac.d[kv.CodeDomain].ht.HistorySeek(key, ts, tx)
 	case kv.CommitmentHistory:
-		return ac.d[kv.CommitmentDomain].ht.GetNoStateWithRecent(key, ts, tx)
+		return ac.d[kv.CommitmentDomain].ht.HistorySeek(key, ts, tx)
 	//case kv.GasUsedHistory:
-	//	return ac.d[kv.GasUsedDomain].ht.GetNoStateWithRecent(key, ts, tx)
+	//	return ac.d[kv.GasUsedDomain].ht.HistorySeek(key, ts, tx)
 	default:
 		panic(fmt.Sprintf("unexpected: %s", name))
 	}
