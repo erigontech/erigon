@@ -107,7 +107,6 @@ func (ac *AggregatorRoTx) staticFilesInRange(r RangesV3) (sf SelectedStaticFiles
 	for id := range ac.d {
 		if r.d[id].any() {
 			sf.d[id], sf.dIdx[id], sf.dHist[id], sf.dI[id] = ac.d[id].staticFilesInRange(r.d[id])
-
 		}
 	}
 	if r.logAddrs {
