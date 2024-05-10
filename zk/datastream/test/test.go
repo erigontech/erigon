@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 
@@ -18,7 +19,7 @@ const estest = "34.175.214.161:6900"
 // This code downloads headers and blocks from a datastream server.
 func main() {
 	// Create client
-	c := client.NewClient(datastreamMainnet, 0, 0)
+	c := client.NewClient(context.Background(), datastreamMainnet, 0, 0)
 
 	// Start client (connect to the server)
 	defer c.Stop()

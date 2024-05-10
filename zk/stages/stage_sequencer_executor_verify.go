@@ -122,6 +122,10 @@ func SpawnSequencerExecutorVerifyStage(
 		// we know that if the batch has been marked as OK we can update the datastream progress to match
 		// as the verifier will have handled writing to the stream
 		highestBlock, err := hermezDb.GetHighestBlockInBatch(response.BatchNumber)
+		if err != nil {
+			return err
+		}
+
 		if err = stages.SaveStageProgress(tx, stages.DataStream, highestBlock); err != nil {
 			return err
 		}

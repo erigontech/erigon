@@ -19,6 +19,7 @@ package core
 import (
 	"math/big"
 
+	"github.com/gateway-fm/cdk-erigon-lib/common"
 	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/chain"
@@ -31,19 +32,15 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 )
 
-// applyTransaction attempts to apply a transaction to the given state database
-// and uses the input parameters for its environment. It returns the receipt
-// for the transaction, gas used and an error if the transaction failed,
-// indicating the block was invalid.
-func applyTransaction_zkevm(config *chain.Config, engine consensus.EngineReader, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, evm vm.VMInterface, cfg vm.Config, effectiveGasPricePercentage uint8) (*types.Receipt, *ExecutionResult, error) {
+func GetTxContext(config *chain.Config, engine consensus.EngineReader, ibs *state.IntraBlockState, header *types.Header, tx types.Transaction, evm vm.VMInterface, effectiveGasPricePercentage uint8) (types.Message, evmtypes.TxContext, error) {
 	rules := evm.ChainRules()
 
 	msg, err := tx.AsMessage(*types.MakeSigner(config, header.Number.Uint64()), header.BaseFee, rules)
 	if err != nil {
-		return nil, nil, err
+		return types.Message{}, evmtypes.TxContext{}, err
 	}
 	msg.SetEffectiveGasPricePercentage(effectiveGasPricePercentage)
-	msg.SetCheckNonce(!cfg.StatelessExec)
+	msg.SetCheckNonce(!evm.Config().StatelessExec)
 
 	// apply effective gas percentage here, so it is actual for all further calculations
 	if evm.ChainRules().IsForkID5Dragonfruit {
@@ -54,13 +51,24 @@ func applyTransaction_zkevm(config *chain.Config, engine consensus.EngineReader,
 	if msg.FeeCap().IsZero() && engine != nil {
 		// Only zero-gas transactions may be service ones
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			return SysCallContract(contract, data, *config, ibs, header, engine, true /* constCall */, nil /*excessDataGas*/)
+			return SysCallContract(contract, data, *config, ibs, header, engine, true /* constCall */, evm.Context().ExcessDataGas)
 		}
 		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 	}
 
 	txContext := NewEVMTxContext(msg)
-	if cfg.TraceJumpDest {
+
+	return msg, txContext, nil
+}
+
+// applyTransaction attempts to apply a transaction to the given state database
+// and uses the input parameters for its environment. It returns the receipt
+// for the transaction, gas used and an error if the transaction failed,
+// indicating the block was invalid.
+func ApplyMessageWithTxContext(msg types.Message, txContext evmtypes.TxContext, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, blockNumber *big.Int, tx types.Transaction, usedGas *uint64, evm vm.VMInterface) (*types.Receipt, *ExecutionResult, error) {
+	rules := evm.ChainRules()
+
+	if evm.Config().TraceJumpDest {
 		txContext.TxHash = tx.Hash()
 	}
 
@@ -76,12 +84,14 @@ func applyTransaction_zkevm(config *chain.Config, engine consensus.EngineReader,
 	if err = ibs.FinalizeTx(rules, stateWriter); err != nil {
 		return nil, nil, err
 	}
-	*usedGas += result.UsedGas
 
+	if usedGas != nil {
+		*usedGas += result.UsedGas
+	}
 	// Set the receipt logs and create the bloom filter.
 	// based on the eip phase, we're passing whether the root touch-delete accounts.
 	var receipt *types.Receipt
-	if !cfg.NoReceipts {
+	if !evm.Config().NoReceipts {
 		// by the tx.
 		status := types.ReceiptStatusSuccessful
 		if result.Failed() {
@@ -107,12 +117,39 @@ func applyTransaction_zkevm(config *chain.Config, engine consensus.EngineReader,
 			Status:            status,
 			ContractAddress:   contractAddress,
 			Logs:              ibs.GetLogs(tx.Hash()),
-			BlockNumber:       header.Number,
+			BlockNumber:       blockNumber,
 			TransactionIndex:  uint(ibs.TxIndex()),
 		}
 	}
 
 	return receipt, result, err
+}
+
+func PrepareForTxExecution(
+	cfg *chain.Config,
+	vmConfig *vm.Config,
+	blockContext *evmtypes.BlockContext,
+	hermezReader state.ReadOnlyHermezDb,
+	ibs *state.IntraBlockState,
+	block *types.Block,
+	txhash *common.Hash,
+	idx int,
+) (vm.VMInterface, uint8, error) {
+	zkConfig := vm.NewZkConfig(*vmConfig, nil)
+	// Add addresses to access list if applicable
+	// about the transaction and calling mechanisms.
+	zkConfig.Config.SkipAnalysis = SkipAnalysis(cfg, block.NumberU64())
+
+	ibs.Prepare(*txhash, block.Hash(), idx)
+	// Assemble the transaction call message and return if the requested offset
+	effectiveGasPricePercentage, err := hermezReader.GetEffectiveGasPricePercentage(*txhash)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	evm := vm.NewZkEVM(*blockContext, evmtypes.TxContext{}, ibs, cfg, zkConfig)
+
+	return evm, effectiveGasPricePercentage, nil
 }
 
 // ApplyTransaction attempts to apply a transaction to the given state database
@@ -121,27 +158,20 @@ func applyTransaction_zkevm(config *chain.Config, engine consensus.EngineReader,
 // indicating the block was invalid.
 func ApplyTransaction_zkevm(
 	config *chain.Config,
-	blockHashFunc func(n uint64) libcommon.Hash,
 	engine consensus.EngineReader,
-	author *libcommon.Address,
+	evm vm.VMInterface,
 	gp *GasPool,
 	ibs *state.IntraBlockState,
 	stateWriter state.StateWriter,
 	header *types.Header,
 	tx types.Transaction,
 	usedGas *uint64,
-	cfg vm.ZkConfig,
-	excessDataGas *big.Int,
 	effectiveGasPricePercentage uint8,
 ) (*types.Receipt, *ExecutionResult, error) {
 	// Create a new context to be used in the EVM environment
-
-	// Add addresses to access list if applicable
-	// about the transaction and calling mechanisms.
-	cfg.Config.SkipAnalysis = SkipAnalysis(config, header.Number.Uint64())
-
-	blockContext := NewEVMBlockContext(header, blockHashFunc, engine, author, excessDataGas)
-	vmenv := vm.NewZkEVM(blockContext, evmtypes.TxContext{}, ibs, config, cfg)
-
-	return applyTransaction_zkevm(config, engine, gp, ibs, stateWriter, header, tx, usedGas, vmenv, cfg.Config, effectiveGasPricePercentage)
+	msg, txContext, err := GetTxContext(config, engine, ibs, header, tx, evm, effectiveGasPricePercentage)
+	if err != nil {
+		return nil, nil, err
+	}
+	return ApplyMessageWithTxContext(msg, txContext, gp, ibs, stateWriter, header.Number, tx, usedGas, evm)
 }

@@ -18,7 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon/smt/pkg/blockinfo"
 	"github.com/ledgerwatch/erigon/zk/erigon_db"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
-	zktx "github.com/ledgerwatch/erigon/zk/tx"
 	zktypes "github.com/ledgerwatch/erigon/zk/types"
 	"github.com/ledgerwatch/secp256k1"
 )
@@ -79,7 +78,7 @@ func finaliseBlock(
 	l1BlockHash common.Hash,
 	transactions []types.Transaction,
 	receipts types.Receipts,
-	effectiveGasPrices []uint8,
+	effectiveGases []uint8,
 ) error {
 	stateWriter := state.NewPlainStateWriter(sdb.tx, sdb.tx, newHeader.Number.Uint64())
 	chainReader := stagedsync.ChainReader{
@@ -92,7 +91,28 @@ func finaliseBlock(
 		excessDataGas = parentBlock.ExcessDataGas()
 	}
 
-	if err := postBlockStateHandling(cfg, ibs, sdb.hermezDb, newHeader, ger, l1BlockHash, parentBlock.Root(), transactions, receipts, effectiveGasPrices); err != nil {
+	txInfos := []blockinfo.ExecutedTxInfo{}
+	for i, tx := range transactions {
+		var from common.Address
+		var err error
+		sender, ok := tx.GetSender()
+		if ok {
+			from = sender
+		} else {
+			signer := types.MakeSigner(cfg.chainConfig, newHeader.Number.Uint64())
+			from, err = tx.Sender(*signer)
+			if err != nil {
+				return err
+			}
+		}
+		txInfos = append(txInfos, blockinfo.ExecutedTxInfo{
+			Tx:                tx,
+			EffectiveGasPrice: effectiveGases[i],
+			Receipt:           receipts[i],
+			Signer:            &from,
+		})
+	}
+	if err := postBlockStateHandling(cfg, ibs, sdb.hermezDb, newHeader, ger, l1BlockHash, parentBlock.Root(), txInfos); err != nil {
 		return err
 	}
 
@@ -175,66 +195,27 @@ func postBlockStateHandling(
 	ger common.Hash,
 	l1BlockHash common.Hash,
 	parentHash common.Hash,
-	transactions types.Transactions,
-	receipts []*types.Receipt,
-	effectiveGasPrices []uint8,
+	txInfos []blockinfo.ExecutedTxInfo,
 ) error {
-	infoTree := blockinfo.NewBlockInfoTree()
-	coinbase := header.Coinbase
-	blockNo := header.Number.Uint64()
-	if err := infoTree.InitBlockHeader(&parentHash, &coinbase, blockNo, header.GasLimit, header.Time, &ger, &l1BlockHash); err != nil {
-		return err
-	}
-	var err error
-	var logIndex int64 = 0
-	for i := 0; i < len(transactions); i++ {
-		receipt := receipts[i]
-		t := transactions[i]
-
-		var from common.Address
-		sender, ok := t.GetSender()
-		if ok {
-			from = sender
-		} else {
-			signer := types.MakeSigner(cfg.chainConfig, header.Number.Uint64())
-			from, err = t.Sender(*signer)
-			if err != nil {
-				return err
-			}
-		}
-
-		l2TxHash, err := zktx.ComputeL2TxHash(
-			t.GetChainID().ToBig(),
-			t.GetValue(),
-			t.GetPrice(),
-			t.GetNonce(),
-			t.GetGas(),
-			t.GetTo(),
-			&from,
-			t.GetData(),
-		)
-		if err != nil {
-			return err
-		}
-
-		effectiveGasPrice := effectiveGasPrices[i]
-		_, err = infoTree.SetBlockTx(&l2TxHash, i, receipt, logIndex, receipt.CumulativeGasUsed, effectiveGasPrice)
-		if err != nil {
-			return err
-		}
-		logIndex += int64(len(receipt.Logs))
-	}
-
-	root, err := infoTree.SetBlockGasUsed(header.GasUsed)
+	blokInfoRootHash, err := blockinfo.BuildBlockInfoTree(
+		&header.Coinbase,
+		header.Number.Uint64(),
+		header.Time,
+		header.GasLimit,
+		header.GasUsed,
+		ger,
+		l1BlockHash,
+		parentHash,
+		&txInfos,
+	)
 	if err != nil {
 		return err
 	}
 
-	rootHash := common.BigToHash(root)
-	ibs.PostExecuteStateSet(cfg.chainConfig, header.Number.Uint64(), &rootHash)
+	ibs.PostExecuteStateSet(cfg.chainConfig, header.Number.Uint64(), blokInfoRootHash)
 
 	// store a reference to this block info root against the block number
-	return hermezDb.WriteBlockInfoRoot(header.Number.Uint64(), rootHash)
+	return hermezDb.WriteBlockInfoRoot(header.Number.Uint64(), *blokInfoRootHash)
 }
 
 func addSenders(

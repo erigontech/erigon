@@ -70,6 +70,10 @@ func SpawnSequencerL1BlockSyncStage(
 		return err
 	}
 	highestKnownBatch, err := hermezDb.GetLastL1BatchData()
+	if err != nil {
+		return err
+	}
+
 	if highestKnownBatch == highestBatch {
 		log.Info("L1 block sync recovery has completed!", "batch", highestBatch)
 		time.Sleep(5 * time.Second)

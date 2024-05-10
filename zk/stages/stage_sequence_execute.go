@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -66,6 +68,8 @@ func SpawnSequencingStage(
 		return err
 	}
 
+	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(sdb.tx, hash, number) }
+
 	// injected batch
 	if executionAt == 0 {
 		header, parentBlock, err := prepareHeader(tx, executionAt, math.MaxUint64, forkId, cfg.zk.AddressSequencer)
@@ -73,7 +77,10 @@ func SpawnSequencingStage(
 			return err
 		}
 
-		err = processInjectedInitialBatch(ctx, cfg, s, sdb, forkId, header, parentBlock)
+		getHashFn := core.GetHashFn(header, getHeader)
+		blockContext := core.NewEVMBlockContext(header, getHashFn, cfg.engine, &cfg.zk.AddressSequencer, parentBlock.ExcessDataGas())
+
+		err = processInjectedInitialBatch(ctx, cfg, s, sdb, forkId, header, parentBlock, &blockContext)
 		if err != nil {
 			return err
 		}
@@ -103,7 +110,7 @@ func SpawnSequencingStage(
 	var deltaTimestamp uint64 = math.MaxUint64
 	var decodedBlocks []zktx.DecodedBatchL2Data // only used in l1 recovery
 	var blockTransactions []types.Transaction
-	var effectiveGases []uint8
+	var l1EffectiveGases, effectiveGases []uint8
 	l1Recovery := cfg.zk.L1SyncStartBlock > 0
 
 	batchTicker := time.NewTicker(cfg.zk.SequencerBatchSealTime)
@@ -157,7 +164,7 @@ func SpawnSequencingStage(
 
 			decodedBlock = decodedBlocks[decodedBlocksIndex]
 			deltaTimestamp = uint64(decodedBlock.DeltaTimestamp)
-			effectiveGases = decodedBlock.EffectiveGasPricePercentages
+			l1EffectiveGases = decodedBlock.EffectiveGasPricePercentages
 			blockTransactions = decodedBlock.Transactions
 		}
 
@@ -204,6 +211,8 @@ func SpawnSequencingStage(
 		}
 
 		ibs := state.New(sdb.stateReader)
+		getHashFn := core.GetHashFn(header, getHeader)
+		blockContext := core.NewEVMBlockContext(header, getHashFn, cfg.engine, &cfg.zk.AddressSequencer, parentBlock.ExcessDataGas())
 
 		parentRoot := parentBlock.Root()
 		if err = handleStateForNewBlockStarting(
@@ -271,13 +280,14 @@ func SpawnSequencingStage(
 						var effectiveGas uint8
 
 						if l1Recovery {
-							effectiveGas = effectiveGases[i]
+							effectiveGas = l1EffectiveGases[i]
 						} else {
 							effectiveGas = DeriveEffectiveGasPrice(cfg, transaction)
 							effectiveGases = append(effectiveGases, effectiveGas)
 						}
+						effectiveGases = append(effectiveGases, effectiveGas)
 
-						receipt, overflow, err = attemptAddTransaction(cfg, sdb, ibs, batchCounters, header, parentBlock.Header(), transaction, effectiveGas, l1Recovery)
+						receipt, overflow, err = attemptAddTransaction(cfg, sdb, ibs, batchCounters, &blockContext, header, transaction, effectiveGas, l1Recovery)
 						if err != nil {
 							// if we are in recovery just log the error as a warning.  If the data is on the L1 then we should consider it as confirmed.
 							// The executor/prover would simply skip a TX with an invalid nonce for example so we don't need to worry about that here.
@@ -336,8 +346,8 @@ func SpawnSequencingStage(
 			}
 		} else {
 			for idx, transaction := range addedTransactions {
-				effectiveGas := DeriveEffectiveGasPrice(cfg, transaction)
-				receipt, innerOverflow, err := attemptAddTransaction(cfg, sdb, ibs, batchCounters, header, parentBlock.Header(), transaction, effectiveGas, false)
+				effectiveGas := effectiveGases[idx]
+				receipt, innerOverflow, err := attemptAddTransaction(cfg, sdb, ibs, batchCounters, &blockContext, header, transaction, effectiveGas, false)
 				if err != nil {
 					return err
 				}

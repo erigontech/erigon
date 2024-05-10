@@ -8,13 +8,74 @@ import (
 
 	"github.com/ledgerwatch/erigon/smt/pkg/smt"
 	"github.com/ledgerwatch/erigon/smt/pkg/utils"
+	zktx "github.com/ledgerwatch/erigon/zk/tx"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common"
 )
 
 const (
 	BlockGasLimit = 18446744073709551615
 )
+
+type ExecutedTxInfo struct {
+	Tx                ethTypes.Transaction
+	EffectiveGasPrice uint8
+	Receipt           *ethTypes.Receipt
+	Signer            *common.Address
+}
+
+func BuildBlockInfoTree(
+	coinbase *common.Address,
+	blockNumber,
+	blockTime,
+	blockGasLimit,
+	blockGasUsed uint64,
+	ger common.Hash,
+	l1BlockHash common.Hash,
+	previousStateRoot common.Hash,
+	transactionInfos *[]ExecutedTxInfo,
+) (*common.Hash, error) {
+	infoTree := NewBlockInfoTree()
+	if err := infoTree.InitBlockHeader(&previousStateRoot, coinbase, blockNumber, blockGasLimit, blockTime, &ger, &l1BlockHash); err != nil {
+		return nil, err
+	}
+	var err error
+	var logIndex int64 = 0
+	for i, txInfo := range *transactionInfos {
+		receipt := txInfo.Receipt
+		t := txInfo.Tx
+
+		l2TxHash, err := zktx.ComputeL2TxHash(
+			t.GetChainID().ToBig(),
+			t.GetValue(),
+			t.GetPrice(),
+			t.GetNonce(),
+			t.GetGas(),
+			t.GetTo(),
+			txInfo.Signer,
+			t.GetData(),
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		// TODO: calculate l2 tx hash
+		_, err = infoTree.SetBlockTx(&l2TxHash, i, receipt, logIndex, receipt.CumulativeGasUsed, txInfo.EffectiveGasPrice)
+		if err != nil {
+			return nil, err
+		}
+		logIndex += int64(len(receipt.Logs))
+	}
+
+	root, err := infoTree.SetBlockGasUsed(blockGasUsed)
+	if err != nil {
+		return nil, err
+	}
+
+	rootHash := common.BigToHash(root)
+
+	return &rootHash, nil
+}
 
 type BlockInfoTree struct {
 	smt *smt.SMT
@@ -29,7 +90,7 @@ func (b *BlockInfoTree) GetRoot() *big.Int {
 	return b.smt.LastRoot()
 }
 
-func (b *BlockInfoTree) InitBlockHeader(oldBlockHash *libcommon.Hash, coinbase *libcommon.Address, blockNumber, gasLimit, timestamp uint64, ger, l1BlochHash *libcommon.Hash) error {
+func (b *BlockInfoTree) InitBlockHeader(oldBlockHash *common.Hash, coinbase *common.Address, blockNumber, gasLimit, timestamp uint64, ger, l1BlochHash *common.Hash) error {
 	_, err := setL2BlockHash(b.smt, oldBlockHash)
 	if err != nil {
 		return err
@@ -64,7 +125,7 @@ func (b *BlockInfoTree) InitBlockHeader(oldBlockHash *libcommon.Hash, coinbase *
 }
 
 func (b *BlockInfoTree) SetBlockTx(
-	l2TxHash *libcommon.Hash,
+	l2TxHash *common.Hash,
 	txIndex int,
 	receipt *ethTypes.Receipt,
 	logIndex int64,
@@ -201,7 +262,7 @@ func setTxLog(smt *smt.SMT, txIndex *big.Int, logIndex *big.Int, log *big.Int) (
 	return resp.NewRootScalar.ToBigInt(), nil
 }
 
-func setL2BlockHash(smt *smt.SMT, blockHash *libcommon.Hash) (*big.Int, error) {
+func setL2BlockHash(smt *smt.SMT, blockHash *common.Hash) (*big.Int, error) {
 	key, err := KeyBlockHeaderParams(big.NewInt(IndexBlockHeaderParamBlockHash))
 	if err != nil {
 		return nil, err
@@ -214,7 +275,7 @@ func setL2BlockHash(smt *smt.SMT, blockHash *libcommon.Hash) (*big.Int, error) {
 	return resp.NewRootScalar.ToBigInt(), nil
 }
 
-func setCoinbase(smt *smt.SMT, coinbase *libcommon.Address) (*big.Int, error) {
+func setCoinbase(smt *smt.SMT, coinbase *common.Address) (*big.Int, error) {
 	key, err := KeyBlockHeaderParams(big.NewInt(IndexBlockHeaderParamCoinbase))
 	if err != nil {
 		return nil, err
@@ -272,7 +333,7 @@ func setTimestamp(smt *smt.SMT, timestamp uint64) (*big.Int, error) {
 	return resp.NewRootScalar.ToBigInt(), nil
 }
 
-func setGer(smt *smt.SMT, ger *libcommon.Hash) (*big.Int, error) {
+func setGer(smt *smt.SMT, ger *common.Hash) (*big.Int, error) {
 	key, err := KeyBlockHeaderParams(big.NewInt(IndexBlockHeaderParamGer))
 	if err != nil {
 		return nil, err
@@ -285,7 +346,7 @@ func setGer(smt *smt.SMT, ger *libcommon.Hash) (*big.Int, error) {
 	return resp.NewRootScalar.ToBigInt(), nil
 }
 
-func setL1BlockHash(smt *smt.SMT, blockHash *libcommon.Hash) (*big.Int, error) {
+func setL1BlockHash(smt *smt.SMT, blockHash *common.Hash) (*big.Int, error) {
 	key, err := KeyBlockHeaderParams(big.NewInt(IndexBlockHeaderParamBlockHashL1))
 	if err != nil {
 		return nil, err

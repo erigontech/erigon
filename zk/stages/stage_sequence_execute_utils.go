@@ -14,6 +14,7 @@ import (
 
 	"errors"
 
+	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -33,7 +34,6 @@ import (
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
 	"github.com/ledgerwatch/erigon/zk/txpool"
 	zktypes "github.com/ledgerwatch/erigon/zk/types"
-	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 )
 
 const (
@@ -308,12 +308,12 @@ func doFinishBlockAndUpdateState(
 	l1BlockHash common.Hash,
 	transactions []types.Transaction,
 	receipts types.Receipts,
-	effectiveGasPrices []uint8,
+	effectiveGases []uint8,
 	l1InfoIndex uint64,
 ) error {
 	thisBlockNumber := header.Number.Uint64()
 
-	if err := finaliseBlock(ctx, cfg, s, sdb, ibs, header, parentBlock, forkId, thisBatch, ger, l1BlockHash, transactions, receipts, effectiveGasPrices); err != nil {
+	if err := finaliseBlock(ctx, cfg, s, sdb, ibs, header, parentBlock, forkId, thisBatch, ger, l1BlockHash, transactions, receipts, effectiveGases); err != nil {
 		return err
 	}
 

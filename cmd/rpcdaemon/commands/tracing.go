@@ -6,9 +6,9 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
-	"github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -24,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
+	"github.com/ledgerwatch/erigon/zk/hermez_db"
 )
 
 // TraceBlockByNumber implements debug_traceBlockByNumber. Returns Geth style block traces.
@@ -36,7 +37,7 @@ func (api *PrivateDebugAPIImpl) TraceBlockByHash(ctx context.Context, hash commo
 	return api.traceBlock(ctx, rpc.BlockNumberOrHashWithHash(hash, true), config, stream)
 }
 
-func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, config *tracers.TraceConfig, stream *jsoniter.Stream) error {
+func (api *PrivateDebugAPIImpl) traceBlock_deprecated(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, config *tracers.TraceConfig, stream *jsoniter.Stream) error {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		stream.WriteNil()
@@ -86,15 +87,6 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		config.BorTraceEnabled = newBoolPtr(false)
 	}
 
-	var excessDataGas *big.Int
-	parentBlock, err := api.blockByHashWithSenders(tx, block.ParentHash())
-	if err != nil {
-		stream.WriteNil()
-		return err
-	}
-	if parentBlock != nil {
-		excessDataGas = parentBlock.ExcessDataGas()
-	}
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		stream.WriteNil()
@@ -108,7 +100,6 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		return err
 	}
 
-	signer := types.MakeSigner(chainConfig, block.NumberU64())
 	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	stream.WriteArrayStart()
 
@@ -119,6 +110,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	}
 
 	cumulativeGas := uint64(0)
+	hermezReader := hermez_db.NewHermezDbReader(tx)
 
 	for idx, txn := range txns {
 		stream.WriteObjectStart()
@@ -129,17 +121,18 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 			stream.WriteNil()
 			return ctx.Err()
 		}
-		ibs.Prepare(txn.Hash(), block.Hash(), idx)
-		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
 
-		effectiveGasPricePercentage, _ := api.getEffectiveGasPricePercentage(tx, txn.Hash())
-		msg.SetEffectiveGasPricePercentage(effectiveGasPricePercentage)
+		txHash := txn.Hash()
+		evm, effectiveGasPricePercentage, err := core.PrepareForTxExecution(chainConfig, &vm.Config{}, &blockCtx, hermezReader, ibs, block, &txHash, idx)
+		if err != nil {
+			stream.WriteNil()
+			return err
+		}
 
-		if msg.FeeCap().IsZero() && engine != nil {
-			syscall := func(contract common.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, *chainConfig, ibs, block.Header(), engine, true /* constCall */, excessDataGas)
-			}
-			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
+		msg, _, err := core.GetTxContext(chainConfig, engine, ibs, block.Header(), txn, evm, effectiveGasPricePercentage)
+		if err != nil {
+			stream.WriteNil()
+			return err
 		}
 
 		txCtx := evmtypes.TxContext{
@@ -332,7 +325,7 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 	return transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
 }
 
-func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, config *tracers.TraceConfig, stream *jsoniter.Stream) error {
+func (api *PrivateDebugAPIImpl) TraceCallMany_deprecated(ctx context.Context, bundles []Bundle, simulateContext StateContext, config *tracers.TraceConfig, stream *jsoniter.Stream) error {
 	var (
 		hash               common.Hash
 		replayTransactions types.Transactions
@@ -465,13 +458,6 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 			stream.WriteNil()
 			return err
 		}
-
-		effectiveGasPricePercentage, err := api.getEffectiveGasPricePercentage(tx, txn.Hash())
-		if err != nil {
-			stream.WriteNil()
-			return err
-		}
-		msg.SetEffectiveGasPricePercentage(effectiveGasPricePercentage)
 
 		txCtx = core.NewEVMTxContext(msg)
 		evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Debug: false})

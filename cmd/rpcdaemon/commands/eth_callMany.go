@@ -7,8 +7,8 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/holiman/uint256"
 	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -70,7 +70,7 @@ func blockHeaderOverride(blockCtx *evmtypes.BlockContext, blockOverride BlockOve
 	}
 }
 
-func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, stateOverride *ethapi.StateOverrides, timeoutMilliSecondsPtr *int64) ([][]map[string]interface{}, error) {
+func (api *APIImpl) CallMany_deprecated(ctx context.Context, bundles []Bundle, simulateContext StateContext, stateOverride *ethapi.StateOverrides, timeoutMilliSecondsPtr *int64) ([][]map[string]interface{}, error) {
 	var (
 		hash               common.Hash
 		replayTransactions types.Transactions
@@ -212,11 +212,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		if err != nil {
 			return nil, err
 		}
-		effectiveGasPricePercentage, err := api.getEffectiveGasPricePercentage(tx, txn.Hash())
-		if err != nil {
-			return nil, err
-		}
-		msg.SetEffectiveGasPricePercentage(effectiveGasPricePercentage)
+
 		txCtx = core.NewEVMTxContext(msg)
 		evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Debug: false})
 		// Execute the transaction message

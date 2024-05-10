@@ -7,13 +7,13 @@ import (
 	"math/big"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
-	jsoniter "github.com/json-iterator/go"
 	"github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/gateway-fm/cdk-erigon-lib/kv/bitmapdb"
 	"github.com/gateway-fm/cdk-erigon-lib/kv/iter"
 	"github.com/gateway-fm/cdk-erigon-lib/kv/order"
 	"github.com/gateway-fm/cdk-erigon-lib/kv/rawdbv3"
+	jsoniter "github.com/json-iterator/go"
 
 	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -577,7 +577,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	return stream.Flush()
 }
 
-func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromBlock, toBlock uint64, req TraceFilterRequest, stream *jsoniter.Stream) error {
+func (api *TraceAPIImpl) filterV3_deprecated(ctx context.Context, dbtx kv.TemporalTx, fromBlock, toBlock uint64, req TraceFilterRequest, stream *jsoniter.Stream) error {
 	var fromTxNum, toTxNum uint64
 	var err error
 	if fromBlock > 0 {
@@ -810,12 +810,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			continue
 		}
 
-		effectiveGasPricePercentage, err := api.getEffectiveGasPricePercentage(dbtx, txHash)
-		if err != nil {
-			return err
-		}
-		msg.SetEffectiveGasPricePercentage(effectiveGasPricePercentage)
-
 		stateReader.SetTxNum(txNum)
 		stateCache := shards.NewStateCache(32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
 		cachedReader := state.NewCachedReader(stateReader, stateCache)
@@ -941,7 +935,7 @@ func filter_trace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, to
 	return false
 }
 
-func (api *TraceAPIImpl) callManyTransactions(
+func (api *TraceAPIImpl) callManyTransactions_deprecated(
 	ctx context.Context,
 	dbtx kv.Tx,
 	block *types.Block,
@@ -981,6 +975,7 @@ func (api *TraceAPIImpl) callManyTransactions(
 	if err != nil {
 		return nil, err
 	}
+
 	msgs := make([]types.Message, len(txs))
 	for i, tx := range txs {
 		hash := tx.Hash()
@@ -994,13 +989,6 @@ func (api *TraceAPIImpl) callManyTransactions(
 		if err != nil {
 			return nil, fmt.Errorf("convert tx into msg: %w", err)
 		}
-
-		// now read back the effective gas price and set it for execution
-		effectiveGasPricePercentage, err := api.getEffectiveGasPricePercentage(dbtx, hash)
-		if err != nil {
-			return nil, err
-		}
-		msg.SetEffectiveGasPricePercentage(effectiveGasPricePercentage)
 
 		// gnosis might have a fee free account here
 		if msg.FeeCap().IsZero() && engine != nil {
