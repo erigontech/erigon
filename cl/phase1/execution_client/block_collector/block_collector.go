@@ -111,6 +111,7 @@ func (b *blockCollector) Flush(ctx context.Context) error {
 		}
 		blocksBatch = append(blocksBatch, types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals))
 		if len(blocksBatch) >= batchSize {
+			b.logger.Info("[Caplin] Inserting blocks", "from", blocksBatch[0].NumberU64(), "to", blocksBatch[len(blocksBatch)-1].NumberU64())
 			if err := b.engine.InsertBlocks(ctx, blocksBatch, true); err != nil {
 				b.logger.Warn("failed to insert blocks", "err", err)
 			}

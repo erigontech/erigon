@@ -1047,7 +1047,6 @@ func (r *BlockReader) FirstTxnNumNotInSnapshots() uint64 {
 func (r *BlockReader) IterateFrozenBodies(f func(blockNum, baseTxNum, txAmount uint64) error) error {
 	view := r.sn.View()
 	defer view.Close()
-
 	for _, sn := range view.Bodies() {
 		sn := sn
 		defer sn.EnableReadAhead().DisableReadAhead()
