@@ -260,7 +260,6 @@ func NewTraceWorkers2Pool(consumer TraceConsumer, cfg *ExecArgs, ctx context.Con
 		}
 		defer tx.Rollback()
 
-		defer logger.Warn("[dbg] reduce goroutine exit", "toTxNum", toTxNum, "txptr", fmt.Sprintf("%p", tx))
 		applyWorker := NewTraceWorker2(consumer, in, rws, ctx, cfg, logger)
 		applyWorker.background = false
 		applyWorker.ResetTx(tx)
@@ -305,22 +304,17 @@ func processResultQueue2(consumer TraceConsumer, rws *state.ResultsQueue, output
 
 	var i int
 	outputTxNum = outputTxNumIn
-	log.Warn("[dbg] applyWorker.chainTx0", "txptr", fmt.Sprintf("%p", applyWorker.chainTx))
 	for rwsIt.HasNext(outputTxNum) {
 		txTask := rwsIt.PopNext()
 		if txTask.Final {
 			txTask.Reset()
 			//re-exec right here, because gnosis expecting TxTask.BlockReceipts field - receipts of all
 			txTask.BlockReceipts = receipts
-			log.Warn("[dbg] applyWorker.chainTx1", "txptr", fmt.Sprintf("%p", applyWorker.chainTx))
 			applyWorker.RunTxTask(txTask)
-			log.Warn("[dbg] applyWorker.chainTx2", "txptr", fmt.Sprintf("%p", applyWorker.chainTx))
 		}
 		if txTask.Error != nil {
-			err := fmt.Errorf("%w: %v, blockNum=%d, TxNum=%d, TxIndex=%d, Final=%t", consensus.ErrInvalidBlock, txTask.Error, txTask.BlockNum, txTask.TxNum, txTask.TxIndex, txTask.Final)
 			return outputTxNum, false, err
 		}
-		log.Warn("[dbg] applyWorker.chainTx3", "txptr", fmt.Sprintf("%p", applyWorker.chainTx))
 		if err := consumer.Reduce(txTask, applyWorker.chainTx); err != nil {
 			return outputTxNum, false, err
 		}
@@ -483,7 +477,6 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 			if workersExited.Load() {
 				return workers.Wait()
 			}
-			log.Info("[dbg] alex", "txTask.BlockNum", txTask.BlockNum)
 			logger.Warn("[Execution] expensive lazy sender recovery", "blockNum", txTask.BlockNum, "txIdx", txTask.TxIndex)
 			in.Add(ctx, txTask)
 			inputTxNum++
