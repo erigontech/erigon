@@ -607,6 +607,14 @@ func (e *EngineServer) GetPayloadV3(ctx context.Context, payloadID hexutility.By
 	return e.getPayload(ctx, decodedPayloadId, clparams.DenebVersion)
 }
 
+// Same as [GetPayloadV3]
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_getpayloadv3
+func (e *EngineServer) GetPayloadV4(ctx context.Context, payloadID hexutility.Bytes) (*engine_types.GetPayloadResponse, error) {
+	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
+	e.logger.Info("Received GetPayloadV4", "payloadId", decodedPayloadId)
+	return e.getPayload(ctx, decodedPayloadId, clparams.DenebVersion)
+}
+
 // Updates the forkchoice state after validating the headBlockHash
 // Additionally, builds and returns a unique identifier for an initial version of a payload
 // (asynchronously updated with transactions), if payloadAttributes is not nil and passes validation
@@ -642,6 +650,13 @@ func (e *EngineServer) NewPayloadV2(ctx context.Context, payload *engine_types.E
 // NewPayloadV3 processes new payloads (blocks) from the beacon chain with withdrawals & blob gas.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_newpayloadv3
 func (e *EngineServer) NewPayloadV3(ctx context.Context, payload *engine_types.ExecutionPayload,
+	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash) (*engine_types.PayloadStatus, error) {
+	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, clparams.DenebVersion)
+}
+
+// NewPayloadV3 processes new payloads (blocks) from the beacon chain with withdrawals & blob gas.
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_newpayloadv3
+func (e *EngineServer) NewPayloadV4(ctx context.Context, payload *engine_types.ExecutionPayload,
 	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash) (*engine_types.PayloadStatus, error) {
 	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, clparams.DenebVersion)
 }
@@ -697,9 +712,11 @@ var ourCapabilities = []string{
 	"engine_newPayloadV1",
 	"engine_newPayloadV2",
 	"engine_newPayloadV3",
+	"engine_newPayloadV4",
 	"engine_getPayloadV1",
 	"engine_getPayloadV2",
 	"engine_getPayloadV3",
+	"engine_getPayloadV4",
 	"engine_exchangeTransitionConfigurationV1",
 	"engine_getPayloadBodiesByHashV1",
 	"engine_getPayloadBodiesByRangeV1",
