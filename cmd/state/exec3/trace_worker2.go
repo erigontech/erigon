@@ -197,7 +197,6 @@ func (rw *TraceWorker2) RunTxTask(txTask *state.TxTask) {
 	}
 }
 func (rw *TraceWorker2) ResetTx(chainTx kv.Tx) {
-	//log.Warn("[dbg] ResetTx", "bg", rw.background, "stack", dbg.Stack())
 	if rw.background && rw.chainTx != nil {
 		rw.chainTx.Rollback()
 		rw.chainTx = nil

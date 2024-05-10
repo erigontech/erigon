@@ -515,8 +515,11 @@ func (sd *SharedDomains) IdxPut(table kv.InvertedIdx, key []byte) (err error) {
 }
 
 func (sd *SharedDomains) SetTx(tx kv.Tx) {
-	log.Warn("[dbg] SetTx", "txprt", fmt.Sprintf("%p", tx))
 	sd.roTx = tx
+	if casted, ok := tx.(HasAggCtx); ok {
+		sd.aggCtx = casted.AggCtx().(*AggregatorRoTx)
+	}
+
 }
 func (sd *SharedDomains) StepSize() uint64 { return sd.aggCtx.a.StepSize() }
 
@@ -798,6 +801,8 @@ func (sd *SharedDomains) DomainGet(domain kv.Domain, k, k2 []byte) (v []byte, st
 		type A interface {
 			InternalMdbxTx() *mdbx.MdbxTx
 		}
+		log.Warn("[dbg] DomainGet see err: " + fmt.Errorf("%w, txptr=%p, %T, %+v", err, sd.roTx, sd.roTx, sd.roTx.(A).InternalMdbxTx()).Error())
+		time.Sleep(2 * time.Second)
 		panic(fmt.Errorf("%w, txptr=%p, %T, %+v", err, sd.roTx, sd.roTx, sd.roTx.(A).InternalMdbxTx()))
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}

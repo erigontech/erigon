@@ -118,7 +118,6 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 			total.AddUint64(total, txTask.UsedGas)
 			v := total.Bytes()
 
-			log.Warn("[dbg] recude", "txptr", fmt.Sprintf("%p", tx))
 			doms.SetTx(tx)
 			doms.SetTxNum(txTask.TxNum)
 			err = doms.DomainPut(kv.GasUsedDomain, keyTotal, nil, v, nil, 0)
