@@ -298,6 +298,8 @@ func processResultQueue2(consumer TraceConsumer, rws *state.ResultsQueue, output
 			//re-exec right here, because gnosis expecting TxTask.BlockReceipts field - receipts of all
 			txTask.BlockReceipts = receipts
 			applyWorker.RunTxTask(txTask)
+
+			log.Info("[dbg] processResultQueue2", "bn")
 		}
 		if txTask.Error != nil {
 			err := fmt.Errorf("%w: %v, blockNum=%d, TxNum=%d, TxIndex=%d, Final=%t", consensus.ErrInvalidBlock, txTask.Error, txTask.BlockNum, txTask.TxNum, txTask.TxIndex, txTask.Final)
@@ -459,6 +461,8 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 			if workersExited.Load() {
 				return workers.Wait()
 			}
+			log.Info("[dbg] alex", "txTask.BlockNum", txTask.BlockNum)
+			logger.Warn("[Execution] expensive lazy sender recovery", "blockNum", txTask.BlockNum, "txIdx", txTask.TxIndex)
 			in.Add(ctx, txTask)
 			inputTxNum++
 		}

@@ -1351,7 +1351,7 @@ func stageCustomTrace(db kv.RwDB, ctx context.Context, logger log.Logger) error 
 		return nil
 	}
 
-	err := stagedsync.SpawnCustomTrace(s, txc, cfg, ctx, true /* initialCycle */, 0, logger)
+	err := stagedsync.SpawnCustomTrace(s, txc, cfg, ctx, true /* initialCycle */, block, logger)
 	if err != nil {
 		return err
 	}
