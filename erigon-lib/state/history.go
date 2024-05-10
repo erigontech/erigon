@@ -1670,6 +1670,74 @@ func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit 
 	return iter.MergeKVS(itOnDB, itOnFiles, limit), nil
 }
 
+func (ht *HistoryRoTx) idxRangeRecent(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.U64, error) {
+	var dbIt iter.U64
+	if ht.h.historyLargeValues {
+		from := make([]byte, len(key)+8)
+		copy(from, key)
+		var fromTxNum uint64
+		if startTxNum >= 0 {
+			fromTxNum = uint64(startTxNum)
+		}
+		binary.BigEndian.PutUint64(from[len(key):], fromTxNum)
+		to := common.Copy(from)
+		toTxNum := uint64(math.MaxUint64)
+		if endTxNum >= 0 {
+			toTxNum = uint64(endTxNum)
+		}
+		binary.BigEndian.PutUint64(to[len(key):], toTxNum)
+		var it iter.KV
+		var err error
+		if asc {
+			it, err = roTx.RangeAscend(ht.h.historyValsTable, from, to, limit)
+		} else {
+			it, err = roTx.RangeDescend(ht.h.historyValsTable, from, to, limit)
+		}
+		if err != nil {
+			return nil, err
+		}
+		dbIt = iter.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
+			if len(k) < 8 {
+				return 0, fmt.Errorf("unexpected large key length %d", len(k))
+			}
+			return binary.BigEndian.Uint64(k[len(k)-8:]), nil
+		})
+	} else {
+		var from, to []byte
+		if startTxNum >= 0 {
+			from = make([]byte, 8)
+			binary.BigEndian.PutUint64(from, uint64(startTxNum))
+		}
+		if endTxNum >= 0 {
+			to = make([]byte, 8)
+			binary.BigEndian.PutUint64(to, uint64(endTxNum))
+		}
+		it, err := roTx.RangeDupSort(ht.h.historyValsTable, key, from, to, asc, limit)
+		if err != nil {
+			return nil, err
+		}
+		dbIt = iter.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
+			if len(v) < 8 {
+				return 0, fmt.Errorf("unexpected small value length %d", len(v))
+			}
+			return binary.BigEndian.Uint64(v), nil
+		})
+	}
+
+	return dbIt, nil
+}
+func (ht *HistoryRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.U64, error) {
+	frozenIt, err := ht.iit.iterateRangeFrozen(key, startTxNum, endTxNum, asc, limit)
+	if err != nil {
+		return nil, err
+	}
+	recentIt, err := ht.idxRangeRecent(key, startTxNum, endTxNum, asc, limit, roTx)
+	if err != nil {
+		return nil, err
+	}
+	return iter.Union[uint64](frozenIt, recentIt, asc, limit), nil
+}
+
 type HistoryChangesIterFiles struct {
 	hc         *HistoryRoTx
 	nextVal    []byte
@@ -2009,72 +2077,4 @@ func (hs *HistoryStep) Clone() *HistoryStep {
 			reader:     recsplit.NewIndexReader(hs.historyItem.index),
 		},
 	}
-}
-
-func (ht *HistoryRoTx) idxRangeRecent(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.U64, error) {
-	var dbIt iter.U64
-	if ht.h.historyLargeValues {
-		from := make([]byte, len(key)+8)
-		copy(from, key)
-		var fromTxNum uint64
-		if startTxNum >= 0 {
-			fromTxNum = uint64(startTxNum)
-		}
-		binary.BigEndian.PutUint64(from[len(key):], fromTxNum)
-		to := common.Copy(from)
-		toTxNum := uint64(math.MaxUint64)
-		if endTxNum >= 0 {
-			toTxNum = uint64(endTxNum)
-		}
-		binary.BigEndian.PutUint64(to[len(key):], toTxNum)
-		var it iter.KV
-		var err error
-		if asc {
-			it, err = roTx.RangeAscend(ht.h.historyValsTable, from, to, limit)
-		} else {
-			it, err = roTx.RangeDescend(ht.h.historyValsTable, from, to, limit)
-		}
-		if err != nil {
-			return nil, err
-		}
-		dbIt = iter.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
-			if len(k) < 8 {
-				return 0, fmt.Errorf("unexpected large key length %d", len(k))
-			}
-			return binary.BigEndian.Uint64(k[len(k)-8:]), nil
-		})
-	} else {
-		var from, to []byte
-		if startTxNum >= 0 {
-			from = make([]byte, 8)
-			binary.BigEndian.PutUint64(from, uint64(startTxNum))
-		}
-		if endTxNum >= 0 {
-			to = make([]byte, 8)
-			binary.BigEndian.PutUint64(to, uint64(endTxNum))
-		}
-		it, err := roTx.RangeDupSort(ht.h.historyValsTable, key, from, to, asc, limit)
-		if err != nil {
-			return nil, err
-		}
-		dbIt = iter.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
-			if len(v) < 8 {
-				return 0, fmt.Errorf("unexpected small value length %d", len(v))
-			}
-			return binary.BigEndian.Uint64(v), nil
-		})
-	}
-
-	return dbIt, nil
-}
-func (ht *HistoryRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.U64, error) {
-	frozenIt, err := ht.iit.iterateRangeFrozen(key, startTxNum, endTxNum, asc, limit)
-	if err != nil {
-		return nil, err
-	}
-	recentIt, err := ht.idxRangeRecent(key, startTxNum, endTxNum, asc, limit, roTx)
-	if err != nil {
-		return nil, err
-	}
-	return iter.Union[uint64](frozenIt, recentIt, asc, limit), nil
 }

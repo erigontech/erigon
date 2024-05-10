@@ -561,8 +561,8 @@ func (s *KvServer) DomainGet(_ context.Context, req *remote.DomainGetReq) (reply
 	}
 	return reply, nil
 }
-func (s *KvServer) HistoryGet(_ context.Context, req *remote.HistoryGetReq) (reply *remote.HistoryGetReply, err error) {
-	reply = &remote.HistoryGetReply{}
+func (s *KvServer) HistorySeek(_ context.Context, req *remote.HistorySeekReq) (reply *remote.HistorySeekReply, err error) {
+	reply = &remote.HistorySeekReply{}
 	if err := s.with(req.TxId, func(tx kv.Tx) error {
 		ttx, ok := tx.(kv.TemporalTx)
 		if !ok {

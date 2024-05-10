@@ -675,7 +675,7 @@ func (tx *tx) DomainRange(name kv.Domain, fromKey, toKey []byte, ts uint64, asc 
 	}), nil
 }
 func (tx *tx) HistorySeek(name kv.History, k []byte, ts uint64) (v []byte, ok bool, err error) {
-	reply, err := tx.db.remoteKV.HistoryGet(tx.ctx, &remote.HistoryGetReq{TxId: tx.id, Table: string(name), K: k, Ts: ts})
+	reply, err := tx.db.remoteKV.HistorySeek(tx.ctx, &remote.HistorySeekReq{TxId: tx.id, Table: string(name), K: k, Ts: ts})
 	if err != nil {
 		return nil, false, err
 	}
