@@ -211,8 +211,8 @@ func (tx *Tx) DomainGetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []by
 	return tx.aggCtx.DomainGetAsOf(tx.MdbxTx, name, key, ts)
 }
 
-func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok bool, err error) {
-	return tx.aggCtx.HistoryGet(name, key, ts, tx.MdbxTx)
+func (tx *Tx) HistorySeek(name kv.History, key []byte, ts uint64) (v []byte, ok bool, err error) {
+	return tx.aggCtx.HistorySeek(name, key, ts, tx.MdbxTx)
 }
 
 func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error) {

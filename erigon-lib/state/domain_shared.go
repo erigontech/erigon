@@ -1207,7 +1207,7 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(tx kv.Tx, cd *D
 		}
 
 		txn, _ := _decodeTxBlockNums(value)
-		//fmt.Printf("[commitment] Seek found committed txn %d block %d\n", txn, bn)
+		//fmt.Printf("[commitment] seekInFiles found committed txn %d block %d\n", txn, bn)
 		if txn >= sinceTx && txn <= untilTx {
 			state = value
 		}

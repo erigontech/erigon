@@ -173,48 +173,27 @@ func (m *UnionKVIter) Close() {
 }
 
 type WrapKVSIter struct {
-	y              KV
-	yHasNext       bool
-	yNextK, yNextV []byte
-	err            error
+	y KV
 }
 
 func WrapKVS(y KV) KVS {
 	if y == nil {
 		return EmptyKVS
 	}
-	m := &WrapKVSIter{y: y}
-	m.advance()
-	return m
+	return &WrapKVSIter{y: y}
 }
 
 func (m *WrapKVSIter) HasNext() bool {
-	return m.err != nil || m.yHasNext
+	return m.y.HasNext()
 }
-func (m *WrapKVSIter) advance() {
-	if m.err != nil {
-		return
-	}
-	m.yHasNext = m.y.HasNext()
-	if m.yHasNext {
-		m.yNextK, m.yNextV, m.err = m.y.Next()
-	}
-}
+
 func (m *WrapKVSIter) Next() ([]byte, []byte, uint64, error) {
-	if m.err != nil {
-		return nil, nil, 0, m.err
-	}
-	k, v, err := m.yNextK, m.yNextV, m.err
-	m.advance()
+	k, v, err := m.y.Next()
 	return k, v, 0, err
 }
 
-// func (m *WrapKVSIter) ToArray() (keys, values [][]byte, err error) { return ToArrayKV(m) }
 func (m *WrapKVSIter) Close() {
-	if m.y != nil {
-		m.y.Close()
-		m.y = nil
-	}
+	m.y.Close()
 }
 
 type WrapKVIter struct {
@@ -237,12 +216,8 @@ func (m *WrapKVIter) Next() ([]byte, []byte, error) {
 	return k, v, err
 }
 
-// func (m *WrapKVIter) ToArray() (keys, values [][]byte, err error) { return ToArrayKV(m) }
 func (m *WrapKVIter) Close() {
-	if m.x != nil {
-		m.x.Close()
-		m.x = nil
-	}
+	m.x.Close()
 }
 
 // MergedKV - merge 2 kv.Pairs streams (without replacements, or "shadowing",
