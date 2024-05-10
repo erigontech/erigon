@@ -39,7 +39,7 @@ jobs:
         set +e # Disable exit on error
              
         # Run Erigon, monitor snapshot downloading and check logs
-        python3 $ERIGON_QA_PATH/test_system/qa-tests/snap-download/run_and_check_snap_download.py ${{ github.workspace }}/build/bin $ERIGON_DATA_DIR $TOTAL_TIME_SECONDS
+        python3 $ERIGON_QA_PATH/test_system/qa-tests/snap-download/run_and_check_snap_download.py ${{ github.workspace }}/build/bin $ERIGON_DATA_DIR $TOTAL_TIME_SECONDS Erigon3
   
         # Capture monitoring script exit status
         test_exit_status=$?
