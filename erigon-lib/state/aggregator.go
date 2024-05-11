@@ -1088,10 +1088,10 @@ func (ac *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, w
 	if err != nil {
 		return nil, err
 	}
-	// ltp, err := ac.logTopics.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, withWarmup, nil)
-	// if err != nil {
-	// 	return nil, err
-	// }
+	ltp, err := ac.logTopics.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, withWarmup, nil)
+	if err != nil {
+		return nil, err
+	}
 	// tfp, err := ac.tracesFrom.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, withWarmup, nil)
 	// if err != nil {
 	// 	return nil, err

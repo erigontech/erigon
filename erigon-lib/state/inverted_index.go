@@ -931,6 +931,8 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	if !indexWithValues {
 		return stat, nil
 	}
+	// Close cursor to avoid spilling garbage to disk.
+	keysCursor.Close()
 
 	idxCForDeletes, err := rwTx.RwCursorDupSort(ii.indexTable)
 	if err != nil {
