@@ -540,7 +540,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 
 	fromStep, toStep := r.valuesStartTxNum/dt.d.aggregationStep, r.valuesEndTxNum/dt.d.aggregationStep
 	kvFilePath := dt.d.kvFilePath(fromStep, toStep)
-	kvFile, err := seg.NewCompressor(ctx, "merge", kvFilePath, dt.d.dirs.Tmp, seg.MinPatternScore, dt.d.compressWorkers, log.LvlTrace, dt.d.logger)
+	kvFile, err := seg.NewCompressor(ctx, "merge domain "+dt.d.filenameBase, kvFilePath, dt.d.dirs.Tmp, seg.MinPatternScore, dt.d.compressWorkers, log.LvlTrace, dt.d.logger)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s compressor: %w", dt.d.filenameBase, err)
 	}
