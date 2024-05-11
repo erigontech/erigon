@@ -1904,7 +1904,7 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 			return err
 		}
 		defer keysCursorForDeletes.Close()
-		return domainAncientsCollector.Load(nil, "", func(key, txnm []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		return domainAncientsCollector.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			if _, _, err = keysCursorForDeletes.SeekBothExact(k, v); err != nil {
 				return err
 			}
@@ -1979,7 +1979,7 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 
 		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
 
-		if err = domainAncientsColecctor.Collect(k, v); err != nil {
+		if err = domainAncientsCollector.Collect(k, v); err != nil {
 			return stat, err
 		}
 		stat.Values++
