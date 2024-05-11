@@ -2,7 +2,6 @@ package temporal
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -184,14 +183,12 @@ func (tx *Tx) Commit() error {
 	return mdbxTx.Commit()
 }
 
-func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (it iter.KV, err error) {
-	it, err = tx.aggCtx.DomainRange(tx.MdbxTx, name, fromKey, toKey, asOfTs, asc, limit)
+func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (iter.KV, error) {
+	it, err := tx.aggCtx.DomainRange(tx.MdbxTx, name, fromKey, toKey, asOfTs, asc, limit)
 	if err != nil {
 		return nil, err
 	}
-	if closer, ok := it.(kv.Closer); ok {
-		tx.resourcesToClose = append(tx.resourcesToClose, closer)
-	}
+	tx.resourcesToClose = append(tx.resourcesToClose, it)
 	return it, nil
 }
 
@@ -221,34 +218,15 @@ func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc or
 	if err != nil {
 		return nil, err
 	}
-	if closer, ok := timestamps.(kv.Closer); ok {
-		tx.resourcesToClose = append(tx.resourcesToClose, closer)
-	}
+	tx.resourcesToClose = append(tx.resourcesToClose, timestamps)
 	return timestamps, nil
 }
 
-func (tx *Tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int) (it iter.KV, err error) {
-	if asc == order.Desc {
-		panic("not implemented yet")
-	}
-	if limit >= 0 {
-		panic("not implemented yet")
-	}
-	switch name {
-	case kv.AccountsHistory:
-		it, err = tx.aggCtx.AccountHistoryRange(fromTs, toTs, asc, limit, tx)
-	case kv.StorageHistory:
-		it, err = tx.aggCtx.StorageHistoryRange(fromTs, toTs, asc, limit, tx)
-	case kv.CodeHistory:
-		it, err = tx.aggCtx.CodeHistoryRange(fromTs, toTs, asc, limit, tx)
-	default:
-		return nil, fmt.Errorf("unexpected history name: %s", name)
-	}
+func (tx *Tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int) (iter.KV, error) {
+	it, err := tx.aggCtx.HistoryRange(name, fromTs, toTs, asc, limit, tx.MdbxTx)
 	if err != nil {
 		return nil, err
 	}
-	if closer, ok := it.(kv.Closer); ok {
-		tx.resourcesToClose = append(tx.resourcesToClose, closer)
-	}
-	return it, err
+	tx.resourcesToClose = append(tx.resourcesToClose, it)
+	return it, nil
 }
