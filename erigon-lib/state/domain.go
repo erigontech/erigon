@@ -1447,7 +1447,7 @@ func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	}
 	dt.valsC, err = tx.Cursor(dt.d.valsTable)
 	if err != nil {
-		return nil, fmt.Errorf("valsCursor: %w", err)
+		return nil, err
 	}
 	return dt.valsC, nil
 }
@@ -1458,7 +1458,7 @@ func (dt *DomainRoTx) keysCursor(tx kv.Tx) (c kv.CursorDupSort, err error) {
 	}
 	dt.keysC, err = tx.CursorDupSort(dt.d.keysTable)
 	if err != nil {
-		return nil, fmt.Errorf("keysCursor: %w", err)
+		return nil, err
 	}
 	return dt.keysC, nil
 }
@@ -1529,7 +1529,7 @@ func (dt *DomainRoTx) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint64, 
 
 	v, foundStep, found, err = dt.getLatestFromDb(key, roTx)
 	if err != nil {
-		return nil, 0, false, fmt.Errorf("getLatestFromDb: %w", err)
+		return nil, 0, false, err
 	}
 	if found {
 		return v, foundStep, true, nil
@@ -1537,7 +1537,7 @@ func (dt *DomainRoTx) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint64, 
 
 	v, foundInFile, _, endTxNum, err := dt.getFromFiles(key)
 	if err != nil {
-		return nil, 0, false, fmt.Errorf("getFromFiles: %w", err)
+		return nil, 0, false, err
 	}
 	return v, endTxNum / dt.d.aggregationStep, foundInFile, nil
 }
@@ -1690,11 +1690,11 @@ func (dt *DomainRoTx) DomainRange(tx kv.Tx, fromKey, toKey []byte, ts uint64, as
 	if !asc {
 		panic("implement me")
 	}
-	//histStateIt, err := tx.aggTx.AccountHistoricalStateRange(asOfTs, fromKey, toKey, limit, tx.MdbxTx)
+	//histStateIt, err := tx.aggCtx.AccountHistoricalStateRange(asOfTs, fromKey, toKey, limit, tx.MdbxTx)
 	//if err != nil {
 	//	return nil, err
 	//}
-	//lastestStateIt, err := tx.aggTx.DomainRangeLatest(tx.MdbxTx, kv.AccountDomain, fromKey, toKey, limit)
+	//lastestStateIt, err := tx.aggCtx.DomainRangeLatest(tx.MdbxTx, kv.AccountDomain, fromKey, toKey, limit)
 	//if err != nil {
 	//	return nil, err
 	//}
@@ -1888,16 +1888,32 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		defer cleanup()
 	}
 
-	keysCursorForDeletes, err := rwTx.RwCursorDupSort(dt.d.keysTable)
-	if err != nil {
-		return stat, fmt.Errorf("create %s domain cursor: %w", dt.d.filenameBase, err)
-	}
-	defer keysCursorForDeletes.Close()
-	keysCursor, err := rwTx.RwCursorDupSort(dt.d.keysTable)
+	domainAncientsCollector := etl.NewCollector("domainAncientsColecctor", dt.ht.iit.ii.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/8), ii.logger)
+	defer domainAncientsCollector.Close()
+
+	keysCursor, err := rwTx.CursorDupSort(dt.d.keysTable)
 	if err != nil {
 		return stat, fmt.Errorf("create %s domain cursor: %w", dt.d.filenameBase, err)
 	}
 	defer keysCursor.Close()
+
+	deleteAccumulated := func() error {
+		keysCursor.Close()
+		keysCursorForDeletes, err := rwTx.RwCursorDupSort(dt.d.keysTable)
+		if err != nil {
+			return err
+		}
+		defer keysCursorForDeletes.Close()
+		return domainAncientsCollector.Load(nil, "", func(key, txnm []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			if _, _, err = keysCursorForDeletes.SeekBothExact(k, v); err != nil {
+				return err
+			}
+			if err = keysCursorForDeletes.DeleteCurrent(); err != nil {
+				return err
+			}
+			return nil
+		}, etl.TransformArgs{Quit: ctx.Done()})
+	}
 
 	valsCursor, err := rwTx.RwCursor(dt.d.valsTable)
 	if err != nil {
@@ -1945,6 +1961,9 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 			continue
 		}
 		if limit == 0 {
+			if err := deleteAccumulated(); err != nil {
+				return stat, err
+			}
 			if err := SaveExecV3PruneProgress(rwTx, dt.d.keysTable, k); err != nil {
 				return stat, fmt.Errorf("save domain pruning progress: %s, %w", dt.d.filenameBase, err)
 			}
@@ -1959,10 +1978,8 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		}
 
 		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
-		if _, _, err = keysCursorForDeletes.SeekBothExact(k, v); err != nil {
-			return stat, err
-		}
-		if err = keysCursorForDeletes.DeleteCurrent(); err != nil {
+
+		if err = domainAncientsColecctor.Collect(k, v); err != nil {
 			return stat, err
 		}
 		stat.Values++
@@ -1982,6 +1999,10 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 				"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(dt.d.aggregationStep), float64(txTo)/float64(dt.d.aggregationStep)))
 		default:
 		}
+	}
+
+	if err := deleteAccumulated(); err != nil {
+		return stat, err
 	}
 	if err := SaveExecV3PruneProgress(rwTx, dt.d.keysTable, nil); err != nil {
 		return stat, fmt.Errorf("save domain pruning progress: %s, %w", dt.d.filenameBase, err)
