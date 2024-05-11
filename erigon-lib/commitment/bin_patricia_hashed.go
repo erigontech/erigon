@@ -1059,7 +1059,7 @@ func (bph *BinPatriciaHashed) fold() (err error) {
 		upBinaryCell.extLen = 0
 		upBinaryCell.downHashedLen = 0
 		if bph.branchBefore[row] {
-			_, err = bph.branchEncoder.CollectUpdate(updateKey, 0, bph.touchMap[row], 0, RetrieveCellNoop)
+			_, err = bph.branchEncoder.CollectUpdate(bph.ctx, updateKey, 0, bph.touchMap[row], 0, RetrieveCellNoop)
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
 			}
@@ -1087,7 +1087,7 @@ func (bph *BinPatriciaHashed) fold() (err error) {
 		upBinaryCell.fillFromLowerBinaryCell(cell, depth, bph.currentKey[upDepth:bph.currentKeyLen], nibble)
 		// Delete if it existed
 		if bph.branchBefore[row] {
-			_, err = bph.branchEncoder.CollectUpdate(updateKey, 0, bph.touchMap[row], 0, RetrieveCellNoop)
+			_, err = bph.branchEncoder.CollectUpdate(bph.ctx, updateKey, 0, bph.touchMap[row], 0, RetrieveCellNoop)
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
 			}
@@ -1162,7 +1162,7 @@ func (bph *BinPatriciaHashed) fold() (err error) {
 		var err error
 		_ = cellGetter
 
-		lastNibble, err = bph.branchEncoder.CollectUpdate(updateKey, bitmap, bph.touchMap[row], bph.afterMap[row], cellGetter)
+		lastNibble, err = bph.branchEncoder.CollectUpdate(bph.ctx, updateKey, bitmap, bph.touchMap[row], bph.afterMap[row], cellGetter)
 		if err != nil {
 			return fmt.Errorf("failed to encode branch update: %w", err)
 		}
@@ -1366,7 +1366,7 @@ func (bph *BinPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byt
 	if err != nil {
 		return nil, fmt.Errorf("root hash evaluation failed: %w", err)
 	}
-	err = bph.branchEncoder.Load(loadToPatriciaContextFunc(bph.ctx), etl.TransformArgs{Quit: ctx.Done()})
+	err = bph.branchEncoder.Load(bph.ctx, etl.TransformArgs{Quit: ctx.Done()})
 	if err != nil {
 		return nil, fmt.Errorf("branch update failed: %w", err)
 	}
@@ -1530,6 +1530,10 @@ func (bph *BinPatriciaHashed) SetState(buf []byte) error {
 	return nil
 }
 
+func (bph *BinPatriciaHashed) ProcessTree(ctx context.Context, t *UpdateTree, lp string) (rootHash []byte, err error) {
+	panic("not implemented")
+}
+
 func (bph *BinPatriciaHashed) ProcessUpdates(ctx context.Context, plainKeys [][]byte, updates []Update) (rootHash []byte, err error) {
 	for i, pk := range plainKeys {
 		updates[i].hashedKey = hexToBin(pk)
@@ -1615,7 +1619,7 @@ func (bph *BinPatriciaHashed) ProcessUpdates(ctx context.Context, plainKeys [][]
 		return nil, fmt.Errorf("root hash evaluation failed: %w", err)
 	}
 
-	err = bph.branchEncoder.Load(loadToPatriciaContextFunc(bph.ctx), etl.TransformArgs{Quit: ctx.Done()})
+	err = bph.branchEncoder.Load(bph.ctx, etl.TransformArgs{Quit: ctx.Done()})
 	if err != nil {
 		return nil, fmt.Errorf("branch update failed: %w", err)
 	}

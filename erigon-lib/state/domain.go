@@ -631,6 +631,7 @@ type DomainRoTx struct {
 
 	keyBuf [60]byte // 52b key and 8b for inverted step
 	valBuf [128]byte
+	comBuf []byte
 
 	keysC kv.CursorDupSort
 	valsC kv.Cursor
@@ -2044,6 +2045,7 @@ func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 	}
 
 	for i, item := range dc.files {
+		// todo release btcursor when iter over/make it truly stateless
 		btCursor, err := dc.statelessBtree(i).Seek(dc.statelessGetter(i), hi.from)
 		if err != nil {
 			return err

@@ -776,10 +776,12 @@ func init() {
 	withDataDir(cmdSetPrune)
 	withChain(cmdSetPrune)
 	cmdSetPrune.Flags().StringVar(&pruneFlag, "prune", "hrtc", "")
+	cmdSetPrune.Flags().Uint64Var(&pruneB, "prune.b.older", 0, "")
 	cmdSetPrune.Flags().Uint64Var(&pruneH, "prune.h.older", 0, "")
 	cmdSetPrune.Flags().Uint64Var(&pruneR, "prune.r.older", 0, "")
 	cmdSetPrune.Flags().Uint64Var(&pruneT, "prune.t.older", 0, "")
 	cmdSetPrune.Flags().Uint64Var(&pruneC, "prune.c.older", 0, "")
+	cmdSetPrune.Flags().Uint64Var(&pruneBBefore, "prune.b.before", 0, "")
 	cmdSetPrune.Flags().Uint64Var(&pruneHBefore, "prune.h.before", 0, "")
 	cmdSetPrune.Flags().Uint64Var(&pruneRBefore, "prune.r.before", 0, "")
 	cmdSetPrune.Flags().Uint64Var(&pruneTBefore, "prune.t.before", 0, "")
@@ -2005,8 +2007,8 @@ func stage(st *stagedsync.Sync, tx kv.Tx, db kv.RoDB, stage stages.SyncStage) *s
 
 func overrideStorageMode(db kv.RwDB, logger log.Logger) error {
 	chainConfig := fromdb.ChainConfig(db)
-	pm, err := prune.FromCli(chainConfig.ChainID.Uint64(), pruneFlag, pruneH, pruneR, pruneT, pruneC,
-		pruneHBefore, pruneRBefore, pruneTBefore, pruneCBefore, experiments)
+	pm, err := prune.FromCli(chainConfig.ChainID.Uint64(), pruneFlag, pruneB, pruneH, pruneR, pruneT, pruneC,
+		pruneHBefore, pruneRBefore, pruneTBefore, pruneCBefore, pruneBBefore, experiments)
 	if err != nil {
 		return err
 	}

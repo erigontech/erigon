@@ -5,16 +5,18 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"hash"
 	"math/bits"
 	"strings"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/google/btree"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cryptozerocopy"
+	"github.com/ledgerwatch/erigon-lib/types"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 )
@@ -40,6 +42,8 @@ type Trie interface {
 
 	// Set context for state IO
 	ResetContext(ctx PatriciaContext)
+
+	ProcessTree(ctx context.Context, tree *UpdateTree, logPrefix string) (rootHash []byte, err error)
 
 	// Reads updates from storage
 	ProcessKeys(ctx context.Context, pk [][]byte, logPrefix string) (rootHash []byte, err error)
@@ -72,14 +76,19 @@ const (
 	VariantBinPatriciaTrie TrieVariant = "bin-patricia-hashed"
 )
 
-func InitializeTrie(tv TrieVariant) Trie {
+func InitializeTrieAndUpdateTree(tv TrieVariant, mode Mode, tmpdir string) (Trie, *UpdateTree) {
 	switch tv {
 	case VariantBinPatriciaTrie:
-		return NewBinPatriciaHashed(length.Addr, nil)
+		trie := NewBinPatriciaHashed(length.Addr, nil)
+		fn := func(key []byte) []byte { return hexToBin(key) }
+		tree := NewUpdateTree(mode, tmpdir, fn)
+		return trie, tree
 	case VariantHexPatriciaTrie:
 		fallthrough
 	default:
-		return NewHexPatriciaHashed(length.Addr, nil)
+		trie := NewHexPatriciaHashed(length.Addr, nil)
+		tree := NewUpdateTree(mode, tmpdir, trie.hashAndNibblizeKey)
+		return trie, tree
 	}
 }
 
@@ -145,6 +154,7 @@ func (branchData BranchData) String() string {
 type BranchEncoder struct {
 	buf       *bytes.Buffer
 	bitmapBuf [binary.MaxVarintLen64]byte
+	merger    *BranchMerger
 	updates   *etl.Collector
 	tmpdir    string
 }
@@ -153,6 +163,7 @@ func NewBranchEncoder(sz uint64, tmpdir string) *BranchEncoder {
 	be := &BranchEncoder{
 		buf:    bytes.NewBuffer(make([]byte, sz)),
 		tmpdir: tmpdir,
+		merger: NewHexBranchMerger(sz / 2),
 	}
 	be.initCollector()
 	return be
@@ -163,26 +174,19 @@ func (be *BranchEncoder) initCollector() {
 	be.updates.LogLvl(log.LvlDebug)
 }
 
-// reads previous comitted value and merges current with it if needed.
-func loadToPatriciaContextFunc(pc PatriciaContext) etl.LoadFunc {
-	return func(prefix, update []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+func (be *BranchEncoder) Load(pc PatriciaContext, args etl.TransformArgs) error {
+	if err := be.updates.Load(nil, "", func(prefix, update []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		stateValue, stateStep, err := pc.GetBranch(prefix)
 		if err != nil {
 			return err
 		}
-		// this updates ensures that if commitment is present, each branch are also present in commitment state at that moment with costs of storage
-		//fmt.Printf("commitment branch encoder merge prefix [%x] [%x]->[%x]\n%v\n", prefix, stateValue, update, BranchData(update).String())
 
 		cp, cu := common.Copy(prefix), common.Copy(update) // has to copy :(
 		if err = pc.PutBranch(cp, cu, stateValue, stateStep); err != nil {
 			return err
 		}
 		return nil
-	}
-}
-
-func (be *BranchEncoder) Load(load etl.LoadFunc, args etl.TransformArgs) error {
-	if err := be.updates.Load(nil, "", load, args); err != nil {
+	}, args); err != nil {
 		return err
 	}
 	be.initCollector()
@@ -190,20 +194,35 @@ func (be *BranchEncoder) Load(load etl.LoadFunc, args etl.TransformArgs) error {
 }
 
 func (be *BranchEncoder) CollectUpdate(
+	ctx PatriciaContext,
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
 	readCell func(nibble int, skip bool) (*Cell, error),
 ) (lastNibble int, err error) {
 
-	v, ln, err := be.EncodeBranch(bitmap, touchMap, afterMap, readCell)
+	var update []byte
+	update, lastNibble, err = be.EncodeBranch(bitmap, touchMap, afterMap, readCell)
 	if err != nil {
 		return 0, err
 	}
-	//fmt.Printf("collectBranchUpdate [%x] -> [%x]\n", prefix, []byte(v))
-	if err := be.updates.Collect(prefix, v); err != nil {
+
+	prev, prevStep, err := ctx.GetBranch(prefix)
+	_ = prevStep
+	if err != nil {
 		return 0, err
 	}
-	return ln, nil
+	if len(prev) > 0 {
+		update, err = be.merger.Merge(prev, update)
+		if err != nil {
+			return 0, err
+		}
+	}
+	//fmt.Printf("collectBranchUpdate [%x] -> [%x]\n", prefix, update)
+	if err = be.updates.Collect(prefix, update); err != nil {
+		return 0, err
+	}
+	mxCommitmentBranchUpdates.Inc()
+	return lastNibble, nil
 }
 
 // Encoded result should be copied before next call to EncodeBranch, underlying slice is reused
@@ -453,7 +472,7 @@ func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []
 	var bitmapBuf [4]byte
 	binary.BigEndian.PutUint16(bitmapBuf[0:], touchMap1|touchMap2)
 	binary.BigEndian.PutUint16(bitmapBuf[2:], afterMap2)
-	newData = append(newData, bitmapBuf[:]...)
+	newData = append(newData[:0], bitmapBuf[:]...)
 	for bitset, j := bitmap1|bitmap2, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
 		if bitmap2&bit != 0 {
@@ -535,13 +554,12 @@ func (branchData BranchData) DecodeCells() (touchMap, afterMap uint16, row [16]*
 }
 
 type BranchMerger struct {
-	buf    *bytes.Buffer
-	num    [4]byte
-	keccak hash.Hash
+	buf []byte
+	num [4]byte
 }
 
 func NewHexBranchMerger(capacity uint64) *BranchMerger {
-	return &BranchMerger{buf: bytes.NewBuffer(make([]byte, capacity)), keccak: sha3.NewLegacyKeccak256()}
+	return &BranchMerger{buf: make([]byte, capacity)}
 }
 
 // MergeHexBranches combines two branchData, number 2 coming after (and potentially shadowing) number 1
@@ -567,19 +585,14 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 	binary.BigEndian.PutUint16(m.num[2:], afterMap2)
 	dataPos := 4
 
-	m.buf.Reset()
-	if _, err := m.buf.Write(m.num[:]); err != nil {
-		return nil, err
-	}
+	m.buf = append(m.buf[:0], m.num[:]...)
 
 	for bitset, j := bitmap1|bitmap2, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
 		if bitmap2&bit != 0 {
 			// Add fields from branch2
 			fieldBits := PartFlags(branch2[pos2])
-			if err := m.buf.WriteByte(byte(fieldBits)); err != nil {
-				return nil, err
-			}
+			m.buf = append(m.buf, byte(fieldBits))
 			pos2++
 
 			for i := 0; i < bits.OnesCount8(byte(fieldBits)); i++ {
@@ -590,19 +603,14 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 					return nil, fmt.Errorf("MergeHexBranches branch2: size overflow for length")
 				}
 
-				_, err := m.buf.Write(branch2[pos2 : pos2+n])
-				if err != nil {
-					return nil, err
-				}
+				m.buf = append(m.buf, branch2[pos2:pos2+n]...)
 				pos2 += n
 				dataPos += n
 				if len(branch2) < pos2+int(l) {
 					return nil, fmt.Errorf("MergeHexBranches branch2 is too small: expected at least %d got %d bytes", pos2+int(l), len(branch2))
 				}
 				if l > 0 {
-					if _, err := m.buf.Write(branch2[pos2 : pos2+int(l)]); err != nil {
-						return nil, err
-					}
+					m.buf = append(m.buf, branch2[pos2:pos2+int(l)]...)
 					pos2 += int(l)
 					dataPos += int(l)
 				}
@@ -612,9 +620,7 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 			add := (touchMap2&bit == 0) && (afterMap2&bit != 0) // Add fields from branchData1
 			fieldBits := PartFlags(branch1[pos1])
 			if add {
-				if err := m.buf.WriteByte(byte(fieldBits)); err != nil {
-					return nil, err
-				}
+				m.buf = append(m.buf, byte(fieldBits))
 			}
 			pos1++
 			for i := 0; i < bits.OnesCount8(byte(fieldBits)); i++ {
@@ -624,10 +630,9 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 				} else if n < 0 {
 					return nil, fmt.Errorf("MergeHexBranches branch1: size overflow for length")
 				}
+
 				if add {
-					if _, err := m.buf.Write(branch1[pos1 : pos1+n]); err != nil {
-						return nil, err
-					}
+					m.buf = append(m.buf, branch1[pos1:pos1+n]...)
 				}
 				pos1 += n
 				if len(branch1) < pos1+int(l) {
@@ -637,9 +642,7 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 				}
 				if l > 0 {
 					if add {
-						if _, err := m.buf.Write(branch1[pos1 : pos1+int(l)]); err != nil {
-							return nil, err
-						}
+						m.buf = append(m.buf, branch1[pos1:pos1+int(l)]...)
 					}
 					pos1 += int(l)
 				}
@@ -647,9 +650,7 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 		}
 		bitset ^= bit
 	}
-	target := make([]byte, m.buf.Len())
-	copy(target, m.buf.Bytes())
-	return target, nil
+	return m.buf, nil
 }
 
 func ParseTrieVariant(s string) TrieVariant {
@@ -757,4 +758,255 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 		}
 	}
 	return stat
+}
+
+// Defines how to evaluate commitments
+type Mode uint
+
+const (
+	ModeDisabled Mode = 0
+	ModeDirect   Mode = 1
+	ModeUpdate   Mode = 2
+)
+
+func (m Mode) String() string {
+	switch m {
+	case ModeDisabled:
+		return "disabled"
+	case ModeDirect:
+		return "direct"
+	case ModeUpdate:
+		return "update"
+	default:
+		return "unknown"
+	}
+}
+
+func ParseCommitmentMode(s string) Mode {
+	var mode Mode
+	switch s {
+	case "off":
+		mode = ModeDisabled
+	case "update":
+		mode = ModeUpdate
+	default:
+		mode = ModeDirect
+	}
+	return mode
+}
+
+type UpdateTree struct {
+	keccak cryptozerocopy.KeccakState
+	hasher keyHasher
+	keys   map[string]struct{}
+	tree   *btree.BTreeG[*KeyUpdate]
+	mode   Mode
+	tmpdir string
+}
+
+type keyHasher func(key []byte) []byte
+
+func keyHasherNoop(key []byte) []byte { return key }
+
+func NewUpdateTree(m Mode, tmpdir string, hasher keyHasher) *UpdateTree {
+	t := &UpdateTree{
+		keccak: sha3.NewLegacyKeccak256().(cryptozerocopy.KeccakState),
+		hasher: hasher,
+		tmpdir: tmpdir,
+		mode:   m,
+	}
+	if t.mode == ModeDirect {
+		t.keys = make(map[string]struct{})
+	} else if t.mode == ModeUpdate {
+		t.tree = btree.NewG[*KeyUpdate](64, keyUpdateLessFn)
+	}
+	return t
+}
+
+// TouchPlainKey marks plainKey as updated and applies different fn for different key types
+// (different behaviour for Code, Account and Storage key modifications).
+func (t *UpdateTree) TouchPlainKey(key, val []byte, fn func(c *KeyUpdate, val []byte)) {
+	switch t.mode {
+	case ModeUpdate:
+		pivot, updated := &KeyUpdate{plainKey: key}, false
+
+		t.tree.DescendLessOrEqual(pivot, func(item *KeyUpdate) bool {
+			if bytes.Equal(item.plainKey, pivot.plainKey) {
+				fn(item, val)
+				updated = true
+			}
+			return false
+		})
+		if !updated {
+			pivot.update.plainKey = pivot.plainKey
+			pivot.update.hashedKey = t.hasher(pivot.plainKey)
+			fn(pivot, val)
+			t.tree.ReplaceOrInsert(pivot)
+		}
+	case ModeDirect:
+		t.keys[string(key)] = struct{}{}
+	default:
+	}
+}
+
+func (t *UpdateTree) Size() (updates uint64) {
+	switch t.mode {
+	case ModeDirect:
+		return uint64(len(t.keys))
+	case ModeUpdate:
+		return uint64(t.tree.Len())
+	default:
+		return 0
+	}
+}
+
+func (t *UpdateTree) TouchAccount(c *KeyUpdate, val []byte) {
+	if len(val) == 0 {
+		c.update.Flags = DeleteUpdate
+		return
+	}
+	if c.update.Flags&DeleteUpdate != 0 {
+		c.update.Flags ^= DeleteUpdate
+	}
+	nonce, balance, chash := types.DecodeAccountBytesV3(val)
+	if c.update.Nonce != nonce {
+		c.update.Nonce = nonce
+		c.update.Flags |= NonceUpdate
+	}
+	if !c.update.Balance.Eq(balance) {
+		c.update.Balance.Set(balance)
+		c.update.Flags |= BalanceUpdate
+	}
+	if !bytes.Equal(chash, c.update.CodeHashOrStorage[:]) {
+		if len(chash) == 0 {
+			c.update.ValLength = length.Hash
+			copy(c.update.CodeHashOrStorage[:], EmptyCodeHash)
+		} else {
+			copy(c.update.CodeHashOrStorage[:], chash)
+			c.update.ValLength = length.Hash
+			c.update.Flags |= CodeUpdate
+		}
+	}
+}
+
+func (t *UpdateTree) TouchStorage(c *KeyUpdate, val []byte) {
+	c.update.ValLength = len(val)
+	if len(val) == 0 {
+		c.update.Flags = DeleteUpdate
+	} else {
+		c.update.Flags |= StorageUpdate
+		copy(c.update.CodeHashOrStorage[:], val)
+	}
+}
+
+func (t *UpdateTree) TouchCode(c *KeyUpdate, val []byte) {
+	t.keccak.Reset()
+	t.keccak.Write(val)
+	t.keccak.Read(c.update.CodeHashOrStorage[:])
+	if c.update.Flags == DeleteUpdate && len(val) == 0 {
+		c.update.Flags = DeleteUpdate
+		c.update.ValLength = 0
+		return
+	}
+	c.update.ValLength = length.Hash
+	if len(val) != 0 {
+		c.update.Flags |= CodeUpdate
+	}
+}
+
+func (t *UpdateTree) Close() {
+	if t.keys != nil {
+		clear(t.keys)
+	}
+	if t.tree != nil {
+		t.tree.Clear(true)
+		t.tree = nil
+	}
+}
+
+func (t *UpdateTree) HashSort(ctx context.Context, fn func(hk, pk []byte) error) error {
+	switch t.mode {
+	case ModeDirect:
+		collector := etl.NewCollector("commitment", t.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize/4), log.Root().New("update-tree"))
+		defer collector.Close()
+		collector.LogLvl(log.LvlDebug)
+		collector.SortAndFlushInBackground(true)
+
+		for k := range t.keys {
+			select {
+			case <-ctx.Done():
+				return nil
+			default:
+			}
+			if err := collector.Collect(t.hasher([]byte(k)), []byte(k)); err != nil {
+				return err
+			}
+		}
+		clear(t.keys)
+
+		err := collector.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			return fn(k, v)
+		}, etl.TransformArgs{Quit: ctx.Done()})
+		if err != nil {
+			return err
+		}
+	case ModeUpdate:
+		t.tree.Ascend(func(item *KeyUpdate) bool {
+			select {
+			case <-ctx.Done():
+				return false
+			default:
+			}
+
+			if err := fn(item.update.hashedKey, item.plainKey); err != nil {
+				return false
+			}
+			return true
+		})
+		t.tree.Clear(true)
+	default:
+		return nil
+	}
+	return nil
+}
+
+// Returns list of both plain and hashed keys. If .mode is ModeUpdate, updates also returned.
+// No ordering guarantees is provided.
+func (t *UpdateTree) List(clear bool) ([][]byte, []Update) {
+	switch t.mode {
+	case ModeDirect:
+		plainKeys := make([][]byte, 0, len(t.keys))
+		err := t.HashSort(context.Background(), func(hk, pk []byte) error {
+			plainKeys = append(plainKeys, common.Copy(pk))
+			return nil
+		})
+		if err != nil {
+			return nil, nil
+		}
+		return plainKeys, nil
+	case ModeUpdate:
+		plainKeys := make([][]byte, t.tree.Len())
+		updates := make([]Update, t.tree.Len())
+		i := 0
+		t.tree.Ascend(func(item *KeyUpdate) bool {
+			plainKeys[i], updates[i] = item.plainKey, item.update
+			i++
+			return true
+		})
+		if clear {
+			t.tree.Clear(true)
+		}
+		return plainKeys, updates
+	default:
+		return nil, nil
+	}
+}
+
+type KeyUpdate struct {
+	plainKey []byte
+	update   Update
+}
+
+func keyUpdateLessFn(i, j *KeyUpdate) bool {
+	return bytes.Compare(i.plainKey, j.plainKey) < 0
 }

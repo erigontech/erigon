@@ -45,7 +45,7 @@ jobs:
         set +e # Disable exit on error
         
         # Run Erigon, send ctrl-c and check logs
-        python3 $ERIGON_QA_PATH/test_system/qa-tests/clean-exit/run_and_check_clean_exit.py ${{ github.workspace }}/build/bin $ERIGON_DATA_DIR $WORKING_TIME_SECONDS
+        python3 $ERIGON_QA_PATH/test_system/qa-tests/clean-exit/run_and_check_clean_exit.py ${{ github.workspace }}/build/bin $ERIGON_DATA_DIR $WORKING_TIME_SECONDS Erigon3
   
         # Capture monitoring script exit status
         test_exit_status=$?
