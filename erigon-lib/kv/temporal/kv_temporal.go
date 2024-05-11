@@ -156,7 +156,7 @@ func (tx *Tx) ForceReopenAggCtx() {
 
 func (tx *Tx) WarmupDB(force bool) error { return tx.MdbxTx.WarmupDB(force) }
 func (tx *Tx) LockDBInRam() error        { return tx.MdbxTx.LockDBInRam() }
-func (tx *Tx) AggCtx() interface{}       { return tx.aggCtx }
+func (tx *Tx) AggTx() interface{}        { return tx.aggCtx }
 func (tx *Tx) Agg() *state.Aggregator    { return tx.db.agg }
 func (tx *Tx) Rollback() {
 	tx.autoClose()

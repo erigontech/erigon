@@ -345,7 +345,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	//}
 	start := time.Now()
 
-	unwindToLimit, err := txc.Tx.(libstate.HasAggCtx).AggCtx().(*libstate.AggregatorRoTx).CanUnwindDomainsToBlockNum(txc.Tx)
+	unwindToLimit, err := txc.Tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).CanUnwindDomainsToBlockNum(txc.Tx)
 	if err != nil {
 		return err
 	}
@@ -999,8 +999,7 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		if initialCycle {
 			pruneTimeout = 12 * time.Hour
 		}
-
-		if _, err = tx.(*temporal.Tx).AggCtx().(*libstate.AggregatorRoTx).PruneSmallBatches(ctx, pruneTimeout, tx); err != nil { // prune part of retired data, before commit
+		if _, err = tx.(*temporal.Tx).AggTx().(*libstate.AggregatorRoTx).PruneSmallBatches(ctx, pruneTimeout, tx); err != nil { // prune part of retired data, before commit
 			return err
 		}
 	} else {
