@@ -481,6 +481,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 			inputTxNum++
 		}
 	}
+	in.Close() //no more work. no retries in map-reduce. means can close here.
 
 	if err := workers.Wait(); err != nil {
 		return fmt.Errorf("WorkersPool: %w", err)
