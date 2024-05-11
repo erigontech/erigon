@@ -792,6 +792,7 @@ Supported networks: all (except Mumbai).
 - More cold-start-friendly and os-pre-fetch-friendly.
 - datadir/chaindata is small now - to prevent it's grow: we recommend set --batchSize <= 1G. Probably 512mb is
   enough.
+- `--sync.loop.block.limit` is enabled by default. (Default: `2_000`. Set `--sync.loop.block.limit=10_000_000 --batchSize=1g` to increase sync speed on good hardware. We don't recommend set `--batchSize > 1g`).
 
 ### E3 datadir structure
 
