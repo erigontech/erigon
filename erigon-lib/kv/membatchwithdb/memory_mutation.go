@@ -731,8 +731,8 @@ func (m *MemoryMutation) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, step
 func (m *MemoryMutation) DomainGetAsOf(name kv.Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error) {
 	return m.db.(kv.TemporalTx).DomainGetAsOf(name, k, k2, ts)
 }
-func (m *MemoryMutation) HistoryGet(name kv.History, k []byte, ts uint64) (v []byte, ok bool, err error) {
-	return m.db.(kv.TemporalTx).HistoryGet(name, k, ts)
+func (m *MemoryMutation) HistorySeek(name kv.History, k []byte, ts uint64) (v []byte, ok bool, err error) {
+	return m.db.(kv.TemporalTx).HistorySeek(name, k, ts)
 }
 
 func (m *MemoryMutation) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error) {

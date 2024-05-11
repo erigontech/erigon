@@ -1005,7 +1005,7 @@ func UnwrapTxPlayloadRlp(blobTxRlp []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	blobTxRlp = blobTxRlp[dataposPrev-1 : datapos+datalen] // Seek left an extra-bit
+	blobTxRlp = blobTxRlp[dataposPrev-1 : datapos+datalen] // seekInFiles left an extra-bit
 	blobTxRlp[0] = 0x3
 	// Include the prefix part of the rlp
 	return blobTxRlp, nil

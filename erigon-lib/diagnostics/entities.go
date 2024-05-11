@@ -77,11 +77,23 @@ type SnapshotDownloadStatistics struct {
 }
 
 type SegmentDownloadStatistics struct {
-	Name            string        `json:"name"`
-	TotalBytes      uint64        `json:"totalBytes"`
-	DownloadedBytes uint64        `json:"downloadedBytes"`
-	Webseeds        []SegmentPeer `json:"webseeds"`
-	Peers           []SegmentPeer `json:"peers"`
+	Name            string                   `json:"name"`
+	TotalBytes      uint64                   `json:"totalBytes"`
+	DownloadedBytes uint64                   `json:"downloadedBytes"`
+	Webseeds        []SegmentPeer            `json:"webseeds"`
+	Peers           []SegmentPeer            `json:"peers"`
+	DownloadedStats FileDownloadedStatistics `json:"downloadedStats"`
+}
+
+type FileDownloadedStatistics struct {
+	TimeTook    float64 `json:"timeTook"`
+	AverageRate uint64  `json:"averageRate"`
+}
+
+type FileDownloadedStatisticsUpdate struct {
+	FileName    string  `json:"fileName"`
+	TimeTook    float64 `json:"timeTook"`
+	AverageRate uint64  `json:"averageRate"`
 }
 
 type SegmentPeer struct {
@@ -245,6 +257,10 @@ type NetworkSpeedTestResult struct {
 	Latency       time.Duration `json:"latency"`
 	DownloadSpeed float64       `json:"downloadSpeed"`
 	UploadSpeed   float64       `json:"uploadSpeed"`
+}
+
+func (ti FileDownloadedStatisticsUpdate) Type() Type {
+	return TypeOf(ti)
 }
 
 func (ti MemoryStats) Type() Type {

@@ -343,6 +343,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	//if ok && bn != u.UnwindPoint {
 	//	return fmt.Errorf("commitment can unwind only to block: %d, requested: %d. UnwindTo was called with wrong value", bn, u.UnwindPoint)
 	//}
+	start := time.Now()
 
 	unwindToLimit, err := txc.Tx.(libstate.HasAggCtx).AggCtx().(*libstate.AggregatorRoTx).CanUnwindDomainsToBlockNum(txc.Tx)
 	if err != nil {
@@ -382,7 +383,11 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 		return fmt.Errorf("delete newer epochs: %w", err)
 	}
 
-	return domains.Flush(ctx, txc.Tx)
+	if err = domains.Flush(ctx, txc.Tx); err != nil {
+		return fmt.Errorf("uwind flush domains: %w", err)
+	}
+	fmt.Printf("unwindv3: %d -> %d done within %s\n", s.BlockNumber, u.UnwindPoint, time.Since(start))
+	return nil
 }
 
 func senderStageProgress(tx kv.Tx, db kv.RoDB) (prevStageProgress uint64, err error) {
@@ -994,6 +999,7 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		if initialCycle {
 			pruneTimeout = 12 * time.Hour
 		}
+
 		if _, err = tx.(*temporal.Tx).AggCtx().(*libstate.AggregatorRoTx).PruneSmallBatches(ctx, pruneTimeout, tx); err != nil { // prune part of retired data, before commit
 			return err
 		}

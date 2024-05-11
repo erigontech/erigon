@@ -801,6 +801,99 @@ func (ac *AggregatorRoTx) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx) (ui
 	return blockNumWithCommitment, true, nil
 }
 
+func (ac *AggregatorRoTx) PruneSmallBatchesDb(ctx context.Context, timeout time.Duration, db kv.RwDB) (haveMore bool, err error) {
+	// On tip-of-chain timeout is about `3sec`
+	//  On tip of chain:     must be real-time - prune by small batches and prioritize exact-`timeout`
+	//  Not on tip of chain: must be aggressive (prune as much as possible) by bigger batches
+
+	furiousPrune := timeout > 5*time.Hour
+	aggressivePrune := !furiousPrune && timeout >= 1*time.Minute
+
+	var pruneLimit uint64 = 1_000
+	var withWarmup bool = false //nolint
+	if furiousPrune {
+		pruneLimit = 1_000_000
+		/* disabling this feature for now - seems it doesn't cancel even after prune finished
+		// start from a bit high limit to give time for warmup
+		// will disable warmup after first iteration and will adjust pruneLimit based on `time`
+		withWarmup = true
+		*/
+	}
+
+	started := time.Now()
+	localTimeout := time.NewTicker(timeout)
+	defer localTimeout.Stop()
+	logPeriod := 30 * time.Second
+	logEvery := time.NewTicker(logPeriod)
+	defer logEvery.Stop()
+	aggLogEvery := time.NewTicker(600 * time.Second) // to hide specific domain/idx logging
+	defer aggLogEvery.Stop()
+
+	fullStat := newAggregatorPruneStat()
+	innerCtx := context.Background()
+	goExit := false
+
+	for {
+		err = db.Update(innerCtx, func(tx kv.RwTx) error {
+			iterationStarted := time.Now()
+			// `context.Background()` is important here!
+			//     it allows keep DB consistent - prune all keys-related data or noting
+			//     can't interrupt by ctrl+c and leave dirt in DB
+			stat, err := ac.Prune(innerCtx, tx, pruneLimit, withWarmup, aggLogEvery)
+			if err != nil {
+				ac.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err)
+				return err
+			}
+			if stat == nil {
+				if fstat := fullStat.String(); fstat != "" {
+					ac.a.logger.Info("[snapshots] PruneSmallBatches finished", "took", time.Since(started).String(), "stat", fstat)
+				}
+				goExit = true
+				return nil
+			}
+			fullStat.Accumulate(stat)
+
+			withWarmup = false // warmup once is enough
+
+			if aggressivePrune {
+				took := time.Since(iterationStarted)
+				if took < 2*time.Second {
+					pruneLimit *= 10
+				}
+				if took > logPeriod {
+					pruneLimit /= 10
+				}
+			}
+
+			select {
+			case <-logEvery.C:
+				ac.a.logger.Info("[snapshots] pruning state",
+					"until commit", time.Until(started.Add(timeout)).String(),
+					"pruneLimit", pruneLimit,
+					"aggregatedStep", (ac.minimaxTxNumInDomainFiles(false)-1)/ac.a.StepSize(),
+					"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx),
+					"pruned", fullStat.String(),
+				)
+			default:
+			}
+			return nil
+		})
+		if err != nil {
+			return false, err
+		}
+		select {
+		case <-localTimeout.C: //must be first to improve responsivness
+			return true, nil
+		case <-ctx.Done():
+			return false, ctx.Err()
+		default:
+		}
+		if goExit {
+			return false, nil
+		}
+	}
+}
+
 // PruneSmallBatches is not cancellable, it's over when it's over or failed.
 // It fills whole timeout with pruning by small batches (of 100 keys) and making some progress
 func (ac *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Duration, tx kv.RwTx) (haveMore bool, err error) {
@@ -1603,10 +1696,10 @@ func (ac *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs
 
 // -- range end
 
-func (ac *AggregatorRoTx) HistoryGet(name kv.History, key []byte, ts uint64, tx kv.Tx) (v []byte, ok bool, err error) {
+func (ac *AggregatorRoTx) HistorySeek(name kv.History, key []byte, ts uint64, tx kv.Tx) (v []byte, ok bool, err error) {
 	switch name {
 	case kv.AccountsHistory:
-		v, ok, err = ac.d[kv.AccountsDomain].ht.GetNoStateWithRecent(key, ts, tx)
+		v, ok, err = ac.d[kv.AccountsDomain].ht.HistorySeek(key, ts, tx)
 		if err != nil {
 			return nil, false, err
 		}
@@ -1615,13 +1708,13 @@ func (ac *AggregatorRoTx) HistoryGet(name kv.History, key []byte, ts uint64, tx 
 		}
 		return v, true, nil
 	case kv.StorageHistory:
-		return ac.d[kv.StorageDomain].ht.GetNoStateWithRecent(key, ts, tx)
+		return ac.d[kv.StorageDomain].ht.HistorySeek(key, ts, tx)
 	case kv.CodeHistory:
-		return ac.d[kv.CodeDomain].ht.GetNoStateWithRecent(key, ts, tx)
+		return ac.d[kv.CodeDomain].ht.HistorySeek(key, ts, tx)
 	case kv.CommitmentHistory:
-		return ac.d[kv.CommitmentDomain].ht.GetNoStateWithRecent(key, ts, tx)
+		return ac.d[kv.CommitmentDomain].ht.HistorySeek(key, ts, tx)
 	//case kv.GasUsedHistory:
-	//	return ac.d[kv.GasUsedDomain].ht.GetNoStateWithRecent(key, ts, tx)
+	//	return ac.d[kv.GasUsedDomain].ht.HistorySeek(key, ts, tx)
 	default:
 		panic(fmt.Sprintf("unexpected: %s", name))
 	}

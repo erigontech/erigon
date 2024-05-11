@@ -173,7 +173,7 @@ func DBsInfo(cliCtx *cli.Context) ([]DBInfo, error) {
 
 func getAllDbsNames(cliCtx *cli.Context) ([]string, error) {
 	var data []string
-	url := "http://" + cliCtx.String(flags.DebugURLFlag.Name) + "/debug/diag/dbs"
+	url := "http://" + cliCtx.String(flags.DebugURLFlag.Name) + flags.ApiPath + "/dbs"
 
 	err := util.MakeHttpGetCall(cliCtx.Context, url, &data)
 	if err != nil {
@@ -185,7 +185,7 @@ func getAllDbsNames(cliCtx *cli.Context) ([]string, error) {
 
 func getDb(cliCtx *cli.Context, dbName string) ([]BDTableInfo, error) {
 	var data []BDTableInfo
-	url := "http://" + cliCtx.String(flags.DebugURLFlag.Name) + "/debug/diag/dbs/" + dbName + "/tables"
+	url := "http://" + cliCtx.String(flags.DebugURLFlag.Name) + flags.ApiPath + "/dbs/" + dbName + "/tables"
 
 	err := util.MakeHttpGetCall(cliCtx.Context, url, &data)
 	if err != nil {

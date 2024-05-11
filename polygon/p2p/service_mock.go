@@ -13,7 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
-	sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
+	sentryproto "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
 	types "github.com/ledgerwatch/erigon/core/types"
 	eth "github.com/ledgerwatch/erigon/eth/protocols/eth"
 	gomock "go.uber.org/mock/gomock"
@@ -570,7 +570,7 @@ func (c *MockServiceRegisterNewBlockObserverCall) DoAndReturn(f func(MessageObse
 }
 
 // RegisterPeerEventObserver mocks base method.
-func (m *MockService) RegisterPeerEventObserver(observer MessageObserver[*sentry.PeerEvent]) UnregisterFunc {
+func (m *MockService) RegisterPeerEventObserver(observer MessageObserver[*sentryproto.PeerEvent]) UnregisterFunc {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "RegisterPeerEventObserver", observer)
 	ret0, _ := ret[0].(UnregisterFunc)
@@ -596,13 +596,13 @@ func (c *MockServiceRegisterPeerEventObserverCall) Return(arg0 UnregisterFunc) *
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockServiceRegisterPeerEventObserverCall) Do(f func(MessageObserver[*sentry.PeerEvent]) UnregisterFunc) *MockServiceRegisterPeerEventObserverCall {
+func (c *MockServiceRegisterPeerEventObserverCall) Do(f func(MessageObserver[*sentryproto.PeerEvent]) UnregisterFunc) *MockServiceRegisterPeerEventObserverCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockServiceRegisterPeerEventObserverCall) DoAndReturn(f func(MessageObserver[*sentry.PeerEvent]) UnregisterFunc) *MockServiceRegisterPeerEventObserverCall {
+func (c *MockServiceRegisterPeerEventObserverCall) DoAndReturn(f func(MessageObserver[*sentryproto.PeerEvent]) UnregisterFunc) *MockServiceRegisterPeerEventObserverCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

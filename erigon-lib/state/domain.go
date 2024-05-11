@@ -456,8 +456,8 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *domainBufferedWrit
 		aux:       make([]byte, 0, 128),
 		keysTable: dt.d.keysTable,
 		valsTable: dt.d.valsTable,
-		keys:      etl.NewCollector(dt.d.keysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), dt.d.logger),
-		values:    etl.NewCollector(dt.d.valsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), dt.d.logger),
+		keys:      etl.NewCollector("flush "+dt.d.keysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), dt.d.logger),
+		values:    etl.NewCollector("flush "+dt.d.valsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), dt.d.logger),
 
 		h: dt.ht.newWriter(tmpdir, discardHistory),
 	}
@@ -631,6 +631,7 @@ type DomainRoTx struct {
 
 	keyBuf [60]byte // 52b key and 8b for inverted step
 	valBuf [128]byte
+	comBuf []byte
 
 	keysC kv.CursorDupSort
 	valsC kv.Cursor
@@ -1360,7 +1361,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 // GetAsOf does not always require usage of roTx. If it is possible to determine
 // historical value based only on static files, roTx will not be used.
 func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
-	v, hOk, err := dt.ht.GetNoStateWithRecent(key, txNum, roTx)
+	v, hOk, err := dt.ht.HistorySeek(key, txNum, roTx)
 	if err != nil {
 		return nil, err
 	}
@@ -2043,6 +2044,7 @@ func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 	}
 
 	for i, item := range dc.files {
+		// todo release btcursor when iter over/make it truly stateless
 		btCursor, err := dc.statelessBtree(i).Seek(dc.statelessGetter(i), hi.from)
 		if err != nil {
 			return err

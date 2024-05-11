@@ -828,7 +828,7 @@ func (c *AccTrieCursor) _seek(seek []byte, withinPrefix []byte) (bool, error) {
 		// optimistic .Next call, can use result in 2 cases:
 		// - k is not child of current key
 		// - looking for first child, means: c.childID[c.lvl] <= int16(bits.TrailingZeros16(c.hasTree[c.lvl]))
-		// otherwise do .Seek call
+		// otherwise do .seekInFiles call
 		//k, v, err = c.c.Next()
 		//if err != nil {
 		//	return false, err

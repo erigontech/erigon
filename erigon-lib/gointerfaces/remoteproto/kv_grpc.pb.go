@@ -27,7 +27,7 @@ const (
 	KV_Snapshots_FullMethodName    = "/remote.KV/Snapshots"
 	KV_Range_FullMethodName        = "/remote.KV/Range"
 	KV_DomainGet_FullMethodName    = "/remote.KV/DomainGet"
-	KV_HistoryGet_FullMethodName   = "/remote.KV/HistoryGet"
+	KV_HistorySeek_FullMethodName  = "/remote.KV/HistorySeek"
 	KV_IndexRange_FullMethodName   = "/remote.KV/IndexRange"
 	KV_HistoryRange_FullMethodName = "/remote.KV/HistoryRange"
 	KV_DomainRange_FullMethodName  = "/remote.KV/DomainRange"
@@ -55,7 +55,7 @@ type KVClient interface {
 	Range(ctx context.Context, in *RangeReq, opts ...grpc.CallOption) (*Pairs, error)
 	// Temporal methods
 	DomainGet(ctx context.Context, in *DomainGetReq, opts ...grpc.CallOption) (*DomainGetReply, error)
-	HistoryGet(ctx context.Context, in *HistoryGetReq, opts ...grpc.CallOption) (*HistoryGetReply, error)
+	HistorySeek(ctx context.Context, in *HistorySeekReq, opts ...grpc.CallOption) (*HistorySeekReply, error)
 	IndexRange(ctx context.Context, in *IndexRangeReq, opts ...grpc.CallOption) (*IndexRangeReply, error)
 	HistoryRange(ctx context.Context, in *HistoryRangeReq, opts ...grpc.CallOption) (*Pairs, error)
 	DomainRange(ctx context.Context, in *DomainRangeReq, opts ...grpc.CallOption) (*Pairs, error)
@@ -168,9 +168,9 @@ func (c *kVClient) DomainGet(ctx context.Context, in *DomainGetReq, opts ...grpc
 	return out, nil
 }
 
-func (c *kVClient) HistoryGet(ctx context.Context, in *HistoryGetReq, opts ...grpc.CallOption) (*HistoryGetReply, error) {
-	out := new(HistoryGetReply)
-	err := c.cc.Invoke(ctx, KV_HistoryGet_FullMethodName, in, out, opts...)
+func (c *kVClient) HistorySeek(ctx context.Context, in *HistorySeekReq, opts ...grpc.CallOption) (*HistorySeekReply, error) {
+	out := new(HistorySeekReply)
+	err := c.cc.Invoke(ctx, KV_HistorySeek_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -226,7 +226,7 @@ type KVServer interface {
 	Range(context.Context, *RangeReq) (*Pairs, error)
 	// Temporal methods
 	DomainGet(context.Context, *DomainGetReq) (*DomainGetReply, error)
-	HistoryGet(context.Context, *HistoryGetReq) (*HistoryGetReply, error)
+	HistorySeek(context.Context, *HistorySeekReq) (*HistorySeekReply, error)
 	IndexRange(context.Context, *IndexRangeReq) (*IndexRangeReply, error)
 	HistoryRange(context.Context, *HistoryRangeReq) (*Pairs, error)
 	DomainRange(context.Context, *DomainRangeReq) (*Pairs, error)
@@ -255,8 +255,8 @@ func (UnimplementedKVServer) Range(context.Context, *RangeReq) (*Pairs, error) {
 func (UnimplementedKVServer) DomainGet(context.Context, *DomainGetReq) (*DomainGetReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DomainGet not implemented")
 }
-func (UnimplementedKVServer) HistoryGet(context.Context, *HistoryGetReq) (*HistoryGetReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method HistoryGet not implemented")
+func (UnimplementedKVServer) HistorySeek(context.Context, *HistorySeekReq) (*HistorySeekReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method HistorySeek not implemented")
 }
 func (UnimplementedKVServer) IndexRange(context.Context, *IndexRangeReq) (*IndexRangeReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method IndexRange not implemented")
@@ -399,20 +399,20 @@ func _KV_DomainGet_Handler(srv interface{}, ctx context.Context, dec func(interf
 	return interceptor(ctx, in, info, handler)
 }
 
-func _KV_HistoryGet_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(HistoryGetReq)
+func _KV_HistorySeek_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HistorySeekReq)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(KVServer).HistoryGet(ctx, in)
+		return srv.(KVServer).HistorySeek(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: KV_HistoryGet_FullMethodName,
+		FullMethod: KV_HistorySeek_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(KVServer).HistoryGet(ctx, req.(*HistoryGetReq))
+		return srv.(KVServer).HistorySeek(ctx, req.(*HistorySeekReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -495,8 +495,8 @@ var KV_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _KV_DomainGet_Handler,
 		},
 		{
-			MethodName: "HistoryGet",
-			Handler:    _KV_HistoryGet_Handler,
+			MethodName: "HistorySeek",
+			Handler:    _KV_HistorySeek_Handler,
 		},
 		{
 			MethodName: "IndexRange",

@@ -547,7 +547,6 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 					}
 				}
 				if optimistic {
-					s.logger.Warn("[snapshots] open segment", "err", err)
 					continue
 				} else {
 					return err
@@ -723,6 +722,47 @@ func (s *RoSnapshots) buildMissedIndicesIfNeed(ctx context.Context, logPrefix st
 		notifier.OnNewSnapshot()
 	}
 	return nil
+}
+
+func (s *RoSnapshots) delete(fileName string) error {
+	v := s.View()
+	defer v.Close()
+
+	_, fName := filepath.Split(fileName)
+	var err error
+	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
+		idxsToRemove := []int{}
+		for i, sn := range value.segments {
+			if sn.Decompressor == nil {
+				continue
+			}
+			if sn.segType.FileName(sn.version, sn.from, sn.to) != fName {
+				continue
+			}
+			files := sn.openFiles()
+			sn.close()
+			idxsToRemove = append(idxsToRemove, i)
+			for _, f := range files {
+				_ = os.Remove(f)
+			}
+		}
+		for i := len(idxsToRemove) - 1; i >= 0; i-- {
+			value.segments = append(value.segments[:idxsToRemove[i]], value.segments[idxsToRemove[i]+1:]...)
+		}
+		return true
+	})
+	return err
+}
+
+func (s *RoSnapshots) Delete(fileName string) error {
+	if s == nil {
+		return nil
+	}
+	if err := s.delete(fileName); err != nil {
+		return fmt.Errorf("can't delete file: %w", err)
+	}
+	return s.ReopenFolder()
+
 }
 
 func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) error {
@@ -908,8 +948,11 @@ func sendDiagnostics(startIndexingTime time.Time, indexPercent map[string]int, a
 	})
 }
 
-func noGaps(in []snaptype.FileInfo, from uint64) (out []snaptype.FileInfo, missingSnapshots []Range) {
-	prevTo := from
+func noGaps(in []snaptype.FileInfo) (out []snaptype.FileInfo, missingSnapshots []Range) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	prevTo := in[0].From
 	for _, f := range in {
 		if f.To <= prevTo {
 			continue
@@ -1029,7 +1072,7 @@ func SegmentsCaplin(dir string, minBlock uint64) (res []snaptype.FileInfo, missi
 			}
 			l = append(l, f)
 		}
-		l, m = noGaps(noOverlaps(l), minBlock)
+		l, m = noGaps(noOverlaps(l))
 		if len(m) > 0 {
 			lst := m[len(m)-1]
 			log.Debug("[snapshots] see gap", "type", snaptype.CaplinEnums.BeaconBlocks, "from", lst.from)
@@ -1042,7 +1085,7 @@ func SegmentsCaplin(dir string, minBlock uint64) (res []snaptype.FileInfo, missi
 }
 
 func Segments(dir string, minBlock uint64) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
-	return typedSegments(dir, minBlock, coresnaptype.BlockSnapshotTypes, false)
+	return typedSegments(dir, minBlock, coresnaptype.BlockSnapshotTypes, true)
 }
 
 func typedSegments(dir string, minBlock uint64, types []snaptype.Type, allowGaps bool) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
@@ -1070,7 +1113,7 @@ func typedSegments(dir string, minBlock uint64, types []snaptype.Type, allowGaps
 			if allowGaps {
 				l = noOverlaps(segmentsTypeCheck(dir, l))
 			} else {
-				l, m = noGaps(noOverlaps(segmentsTypeCheck(dir, l)), minBlock)
+				l, m = noGaps(noOverlaps(segmentsTypeCheck(dir, l)))
 			}
 			if len(m) > 0 {
 				lst := m[len(m)-1]
@@ -1349,7 +1392,7 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
 	return nil
 }
 
-func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error) {
+func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error, onFinishRetire func() error) {
 	if maxBlockNum > br.maxScheduledBlock.Load() {
 		br.maxScheduledBlock.Store(maxBlockNum)
 	}
@@ -1370,7 +1413,7 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum
 			defer br.snBuildAllowed.Release(1)
 		}
 
-		err := br.RetireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+		err := br.RetireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots, onFinishRetire)
 		if err != nil {
 			br.logger.Warn("[snapshots] retire blocks", "err", err)
 			return
@@ -1378,7 +1421,7 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum
 	}()
 }
 
-func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error) error {
+func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error, onFinish func() error) error {
 	if maxBlockNum > br.maxScheduledBlock.Load() {
 		br.maxScheduledBlock.Store(maxBlockNum)
 	}
@@ -1415,6 +1458,11 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, max
 				return err
 			}
 		}
+		if onFinish != nil {
+			if err := onFinish(); err != nil {
+				return err
+			}
+		}
 
 		if !(ok || okBor) {
 			break
@@ -1438,7 +1486,6 @@ func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 }
 
 func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
-
 	firstTxNum := blockReader.FirstTxnNumNotInSnapshots()
 	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, coresnaptype.Enums.Headers, chainConfig) {
 		lastTxNum, err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, coresnaptype.Enums.Headers, chainConfig), tmpDir, snapDir, firstTxNum, chainDB, chainConfig, workers, lvl, logger)

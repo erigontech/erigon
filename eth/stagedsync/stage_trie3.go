@@ -91,7 +91,7 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 		processed atomic.Uint64
 	)
 
-	sdCtx := state.NewSharedDomainsCommitmentContext(domains, state.CommitmentModeDirect, commitment.VariantHexPatriciaTrie)
+	sdCtx := state.NewSharedDomainsCommitmentContext(domains, commitment.ModeDirect, commitment.VariantHexPatriciaTrie)
 
 	loadKeys := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if sdCtx.KeysCount() >= batchSize {
@@ -104,7 +104,7 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 				"intermediate root", fmt.Sprintf("%x", rh))
 		}
 		processed.Add(1)
-		sdCtx.TouchPlainKey(string(k), nil, nil)
+		sdCtx.TouchKey(kv.AccountsDomain, string(k), nil)
 
 		return nil
 	}
