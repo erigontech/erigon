@@ -865,11 +865,7 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		return stat, fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
 	}
 	defer keysCursor.Close()
-	keysCursorForDel, err := rwTx.RwCursorDupSort(ii.indexKeysTable)
-	if err != nil {
-		return stat, fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
-	}
-	defer keysCursorForDel.Close()
+
 	idxC, err := rwTx.RwCursorDupSort(ii.indexTable)
 	if err != nil {
 		return nil, err
@@ -879,10 +875,17 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	if err != nil {
 		return nil, err
 	}
+
+	// Close cursor to avoid spilling garbage to disk.
+	idxC.Close()
+
 	indexWithValues := idxValuesCount != 0 || fn != nil
 
 	collector := etl.NewCollector("snapshots", ii.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/8), ii.logger)
 	defer collector.Close()
+	// We need to collect all values for given txNum, because we need to delete them from indexTable after the first cursor iteration.
+	idxAncientsCollector := etl.NewCollector("idxAncientsCollector", ii.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/8), ii.logger)
+	defer idxAncientsCollector.Close()
 	collector.LogLvl(log.LvlDebug)
 	collector.SortAndFlushInBackground(true)
 
@@ -919,8 +922,7 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		}
 
 		stat.PruneCountTx++
-		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
-		if err = rwTx.Delete(ii.indexKeysTable, k); err != nil {
+		if err := idxAncientsCollector.Collect(k, nil); err != nil {
 			return nil, err
 		}
 
@@ -933,6 +935,20 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	}
 	// Close cursor to avoid spilling garbage to disk.
 	keysCursor.Close()
+	if err := idxAncientsCollector.Load(nil, "", func(key, txnm []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		if err := rwTx.Delete(iit.ii.indexKeysTable, key); err != nil {
+			return err
+		}
+		return nil
+	}, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return nil, err
+	}
+
+	keysCursorForDel, err := rwTx.RwCursorDupSort(ii.indexKeysTable)
+	if err != nil {
+		return stat, fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
+	}
+	defer keysCursorForDel.Close()
 
 	idxCForDeletes, err := rwTx.RwCursorDupSort(ii.indexTable)
 	if err != nil {
