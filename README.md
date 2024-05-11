@@ -875,7 +875,7 @@ du -hsc /erigon/snapshots/*
   of `madv_random`). For `snapshots/domain` folder (latest
   state) `KV_MADV_NORMAL_NO_LAST_LVL=accounts,storage,commitment` (or if have enough
   RAM:  `KV_MADV_NORMAL=accounts,storage,commitment`). For `chaindata` folder (latest updates) `MDBX_READAHEAD=true`.
-  For all files - `SNAPSHOT_MADV_RND=false`.
+  For all files - `SNAPSHOT_MADV_RND=false`
 
 - can lock latest state in RAM - to prevent from eviction (node may face high historical RPC traffic without impacting
   Chain-Tip perf):
