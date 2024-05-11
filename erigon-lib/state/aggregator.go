@@ -1092,18 +1092,18 @@ func (ac *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, w
 	if err != nil {
 		return nil, err
 	}
-	// tfp, err := ac.tracesFrom.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, withWarmup, nil)
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// ttp, err := ac.tracesTo.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, withWarmup, nil)
-	// if err != nil {
-	// 	return nil, err
-	// }
+	tfp, err := ac.tracesFrom.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, withWarmup, nil)
+	if err != nil {
+		return nil, err
+	}
+	ttp, err := ac.tracesTo.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, withWarmup, nil)
+	if err != nil {
+		return nil, err
+	}
 	aggStat.Indices[ac.logAddrs.ii.filenameBase] = lap
-	// aggStat.Indices[ac.logTopics.ii.filenameBase] = ltp
-	// aggStat.Indices[ac.tracesFrom.ii.filenameBase] = tfp
-	// aggStat.Indices[ac.tracesTo.ii.filenameBase] = ttp
+	aggStat.Indices[ac.logTopics.ii.filenameBase] = ltp
+	aggStat.Indices[ac.tracesFrom.ii.filenameBase] = tfp
+	aggStat.Indices[ac.tracesTo.ii.filenameBase] = ttp
 
 	return aggStat, nil
 }
