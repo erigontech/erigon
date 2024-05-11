@@ -860,7 +860,7 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	//		"tx until limit", limit)
 	//}()
 
-	keysCursor, err := rwTx.RwCursorDupSort(ii.indexKeysTable)
+	keysCursor, err := rwTx.CursorDupSort(ii.indexKeysTable)
 	if err != nil {
 		return stat, fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
 	}
