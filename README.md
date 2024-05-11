@@ -790,9 +790,8 @@ Supported networks: all (except Mumbai).
   above). We would like to see how it will impact users - welcome feedback. Likely we will try add some small LRU-cache
   here. Likely later we will add optional flag "to persist receipts".
 - More cold-start-friendly and os-pre-fetch-friendly.
-- datadir/chaindata is small now - to prevent it's grow: we recommend set --batchSize <= 1G. Probably 512mb is
-  enough.
-- `--sync.loop.block.limit` is enabled by default. (Default: `2_000`. Set `--sync.loop.block.limit=10_000_000 --batchSize=1g` to increase sync speed on good hardware. We don't recommend set `--batchSize > 1g`).
+- `--sync.loop.block.limit` is enabled by default. (Default: `2_000`. Set `--sync.loop.block.limit=10_000_000 --batchSize=1g` to increase sync speed on good hardware).
+- datadir/chaindata is small now - to prevent it's grow: we recommend set `--batchSize <= 1G`. And it's fine to `rm -rf chaindata`
 
 ### E3 datadir structure
 
