@@ -329,7 +329,8 @@ Engine API.
 
 #### Caplin's Usage.
 
-Caplin is be enabled by default. to disable it and enable the Engine API, use the `--externalcl` flag. from that point on, an external Consensus Layer will not be need
+Caplin is be enabled by default. to disable it and enable the Engine API, use the `--externalcl` flag. from that point
+on, an external Consensus Layer will not be need
 anymore.
 
 Caplin also has an archivial mode for historical states and blocks. it can be enabled through the `--caplin.archive`
@@ -602,7 +603,6 @@ In order to configure the ports, use:
 |-----------|------|----------|---------|---------------|
 | REST      | 5555 | TCP      | REST    | Public        |
 
-
 #### `shared` ports
 
 | Component | Port | Protocol | Purpose | Should Expose |
@@ -784,11 +784,15 @@ Supported networks: all (except Mumbai).
 - Sync from scratch doesn't require re-exec all history. Latest state and it's history are in snapshots - can download.
 - ExecutionStage - now including many E2 stages: stage_hash_state, stage_trie, stage_log_index, stage_history_index,
   stage_trace_index
-- E3 can execute 1 historical transaction - without executing it's block - because history/indices have transaction-granularity, instead of block-granularity.
-- E3 doesn't store Logs (aka Receipts) - it always re-executing historical txn (but it's cheaper then in E2 - see point above). Also Logs LRU added in E2 (release/2.60) and E3: https://github.com/ledgerwatch/erigon/pull/10112 
+- E3 can execute 1 historical transaction - without executing it's block - because history/indices have
+  transaction-granularity, instead of block-granularity.
+- E3 doesn't store Logs (aka Receipts) - it always re-executing historical txn (but it's cheaper then in E2 - see point
+  above). Also Logs LRU added in E2 (release/2.60) and E3: https://github.com/ledgerwatch/erigon/pull/10112
   here. Likely later we will add optional flag "to persist receipts".
-- `--sync.loop.block.limit` is enabled by default. (Default: `2_000`. Set `--sync.loop.block.limit=10_000_000 --batchSize=1g` to increase sync speed on good hardware).
-- datadir/chaindata is small now - to prevent it's grow: we recommend set `--batchSize <= 1G`. And it's fine to `rm -rf chaindata`
+- `--sync.loop.block.limit` is enabled by default. (Default: `2_000`.
+  Set `--sync.loop.block.limit=10_000_000 --batchSize=1g` to increase sync speed on good hardware).
+- datadir/chaindata is small now - to prevent it's grow: we recommend set `--batchSize <= 1G`. And it's fine
+  to `rm -rf chaindata`
 - can symlink/mount latest state to fast drive and history to cheap drive
 
 ### E3 datadir structure
@@ -867,9 +871,15 @@ du -hsc /erigon/snapshots/*
 ### E3 other perf trics
 
 - `--sync.loop.block.limit=10_000_000 --batchSize=1g` - likely will help for sync speed.
-- on cloud-drives (good throughput, bad latency) - can enable OS's brain to pre-fetch some data (`madv_normal` instead of `madv_random`). For `snapshots/domain` folder (latest state) `KV_MADV_NORMAL_NO_LAST_LVL=accounts,storage,commitment` (or if have enough RAM:  `KV_MADV_NORMAL=accounts,storage,commitment`). For `chaindata` folder (latest updates) `MDBX_READAHEAD=true`. For all files - `SNAPSHOT_MADV_RND=false`.
+- on cloud-drives (good throughput, bad latency) - can enable OS's brain to pre-fetch some data (`madv_normal` instead
+  of `madv_random`). For `snapshots/domain` folder (latest
+  state) `KV_MADV_NORMAL_NO_LAST_LVL=accounts,storage,commitment` (or if have enough
+  RAM:  `KV_MADV_NORMAL=accounts,storage,commitment`). For `chaindata` folder (latest updates) `MDBX_READAHEAD=true`.
+  For all files - `SNAPSHOT_MADV_RND=false`.
 
-- can lock latest state in RAM - to prevent from eviction (node may face high historical RPC traffic without impacting Chain-Tip perf):
+- can lock latest state in RAM - to prevent from eviction (node may face high historical RPC traffic without impacting
+  Chain-Tip perf):
+
 ```
 vmtouch -vdlw /mnt/erigon/snapshots/domain/*bt
 ls /mnt/erigon/snapshots/domain/*.kv | parallel vmtouch -vdlw
