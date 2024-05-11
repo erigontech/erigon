@@ -881,7 +881,7 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	}
 	indexWithValues := idxValuesCount != 0 || fn != nil
 
-	collector := etl.NewCollector("prune", ii.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/8), ii.logger)
+	collector := etl.NewCollector("prune idx "+ii.filenameBase, ii.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/8), ii.logger)
 	defer collector.Close()
 	collector.LogLvl(log.LvlDebug)
 	collector.SortAndFlushInBackground(true)
