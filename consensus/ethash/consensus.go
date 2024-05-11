@@ -673,7 +673,7 @@ func accumulateRewards(config *chain.Config, state *state.IntraBlockState, heade
 		state.Witness().TouchAddressOnReadAndComputeGas(header.Coinbase.Bytes(), uint256.Int{}, vkutils.BalanceLeafKey)
 		state.Witness().TouchAddressOnReadAndComputeGas(header.Coinbase.Bytes(), uint256.Int{}, vkutils.VersionLeafKey)
 		state.Witness().TouchAddressOnReadAndComputeGas(header.Coinbase.Bytes(), uint256.Int{}, vkutils.NonceLeafKey)
-		state.Witness().TouchAddressOnReadAndComputeGas(header.Coinbase.Bytes(), uint256.Int{}, vkutils.CodeKeccakLeafKey)
+		state.Witness().TouchAddressOnReadAndComputeGas(header.Coinbase.Bytes(), uint256.Int{}, vkutils.CodeHashLeafKey)
 	}
 	state.AddBalance(header.Coinbase, &minerReward)
 }

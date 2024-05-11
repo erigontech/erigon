@@ -406,8 +406,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 
 	if rules.IsOsaka {
 		statelessGasOrigin := st.evm.TxContext.Accesses.TouchTxOriginAndComputeGas(msg.From().Bytes())
-		if !tryConsumeGas(&st.gas, statelessGasOrigin) {
-			return nil, fmt.Errorf("%w: Insufficient funds to cover witness access costs for transaction: have %d, want %d", ErrInsufficientFunds, st.gas, gas)
+		if !tryConsumeGas(&st.gasRemaining, statelessGasOrigin) {
+			return nil, fmt.Errorf("%w: Insufficient funds to cover witness access costs for transaction: have %d, want %d", ErrInsufficientFunds, st.gasRemaining, gas)
 		}
 		originNonce := st.state.GetNonce(msg.From())
 
@@ -419,16 +419,16 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		if msg.To() != nil {
 			toAddr := msg.To().Bytes()
 			statelessGasDest := txCtxAcc.TouchTxExistingAndComputeGas(toAddr, sendsValue)
-			if !tryConsumeGas(&st.gas, statelessGasDest) {
-				return nil, fmt.Errorf("%w: Insufficient funds to cover witness access costs for transaction: have %d, want %d", ErrInsufficientFunds, st.gas, gas)
+			if !tryConsumeGas(&st.gasRemaining, statelessGasDest) {
+				return nil, fmt.Errorf("%w: Insufficient funds to cover witness access costs for transaction: have %d, want %d", ErrInsufficientFunds, st.gasRemaining, gas)
 			}
 			// ensure the code size ends up in the access witness
 			st.state.GetCodeSize(*msg.To())
 		} else {
 			contractAddr := crypto.CreateAddress(msg.From(), originNonce)
 			statelessGasDest := txCtxAcc.TouchAndChargeContractCreateInit(contractAddr.Bytes(), sendsValue)
-			if !tryConsumeGas(&st.gas, statelessGasDest) {
-				return nil, fmt.Errorf("%w: Insufficient funds to cover witness access costs for transaction: have %d, want %d", ErrInsufficientFunds, st.gas, gas)
+			if !tryConsumeGas(&st.gasRemaining, statelessGasDest) {
+				return nil, fmt.Errorf("%w: Insufficient funds to cover witness access costs for transaction: have %d, want %d", ErrInsufficientFunds, st.gasRemaining, gas)
 			}
 		}
 	}

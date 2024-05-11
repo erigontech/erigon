@@ -28,7 +28,7 @@ func sha256GetTreeKeyCodeSize(addr []byte) []byte {
 	copy(payload[:len(treeIndexBytes)], treeIndexBytes)
 	digest.Write(payload[:])
 	h := digest.Sum(nil)
-	h[31] = CodeKeccakLeafKey
+	h[31] = CodeHashLeafKey
 	return h
 }
 

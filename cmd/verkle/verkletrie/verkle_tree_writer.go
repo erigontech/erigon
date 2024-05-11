@@ -123,7 +123,7 @@ func (v *VerkleTreeWriter) UpdateAccount(versionKey []byte, codeSize uint64, isC
 	copy(nonceKey[:], versionKey[:31])
 	copy(balanceKey[:], versionKey[:31])
 	copy(codeSizeKey[:], versionKey[:31])
-	codeHashKey[31] = vkutils.CodeKeccakLeafKey
+	codeHashKey[31] = vkutils.CodeHashLeafKey
 	nonceKey[31] = vkutils.NonceLeafKey
 	balanceKey[31] = vkutils.BalanceLeafKey
 	codeSizeKey[31] = vkutils.CodeSizeLeafKey
@@ -162,7 +162,7 @@ func (v *VerkleTreeWriter) DeleteAccount(versionKey []byte, isContract bool) err
 	copy(nonceKey[:], versionKey[:31])
 	copy(balanceKey[:], versionKey[:31])
 	copy(codeSizeKey[:], versionKey[:31])
-	codeHashKey[31] = vkutils.CodeKeccakLeafKey
+	codeHashKey[31] = vkutils.CodeHashLeafKey
 	nonceKey[31] = vkutils.NonceLeafKey
 	balanceKey[31] = vkutils.BalanceLeafKey
 	codeSizeKey[31] = vkutils.CodeSizeLeafKey
