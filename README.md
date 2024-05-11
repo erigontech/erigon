@@ -784,14 +784,12 @@ Supported networks: all (except Mumbai).
 - Sync from scratch doesn't require re-exec all history. Latest state and it's history are in snapshots - can download.
 - ExecutionStage - now including many E2 stages: stage_hash_state, stage_trie, stage_log_index, stage_history_index,
   stage_trace_index
-- E3 can execute 1 historical transaction - without executing it's block - because history/indices have
-  transaction-granularity, instead of block-granularity.
-- Doesn't store Receipts/Logs - it always re-executing historical transactions - but re-execution is cheaper (see point
-  above). We would like to see how it will impact users - welcome feedback. Likely we will try add some small LRU-cache
+- E3 can execute 1 historical transaction - without executing it's block - because history/indices have transaction-granularity, instead of block-granularity.
+- E3 doesn't store Logs (aka Receipts) - it always re-executing historical txn (but it's cheaper then in E2 - see point above). Also Logs LRU added in E2 (release/2.60) and E3: https://github.com/ledgerwatch/erigon/pull/10112 
   here. Likely later we will add optional flag "to persist receipts".
-- More cold-start-friendly and os-pre-fetch-friendly.
 - `--sync.loop.block.limit` is enabled by default. (Default: `2_000`. Set `--sync.loop.block.limit=10_000_000 --batchSize=1g` to increase sync speed on good hardware).
 - datadir/chaindata is small now - to prevent it's grow: we recommend set `--batchSize <= 1G`. And it's fine to `rm -rf chaindata`
+- can symlink/mount latest state to fast drive and history to cheap drive
 
 ### E3 datadir structure
 
@@ -808,7 +806,7 @@ datadir
 # There is 4 domains: account, storage, code, commitment 
 ```
 
-### E3 can store state on fast disk and history on slow disk
+### E3 can store state on fast disk and history on cheap disk
 
 If you can afford store datadir on 1 nvme-raid - great. If can't - it's possible to store history on cheap drive.
 
@@ -864,4 +862,19 @@ du -hsc /erigon/snapshots/*
 580G	/erigon/snapshots/history
 1.3T	/erigon/snapshots/idx
 3.7T	total
+```
+
+### E3 other perf trics
+
+- `--sync.loop.block.limit=10_000_000 --batchSize=1g` - likely will help for sync speed.
+- on cloud-drives (good throughput, bad latency) - can enable OS's brain to pre-fetch some data (`madv_normal` instead of `madv_random`). For `snapshots/domain` folder (latest state) `KV_MADV_NORMAL_NO_LAST_LVL=accounts,storage,commitment` (or if have enough RAM:  `KV_MADV_NORMAL=accounts,storage,commitment`). For `chaindata` folder (latest updates) `MDBX_READAHEAD=true`. For all files - `SNAPSHOT_MADV_RND=false`.
+
+- can lock latest state in RAM - to prevent from eviction (node may face high historical RPC traffic without impacting Chain-Tip perf):
+```
+vmtouch -vdlw /mnt/erigon/snapshots/domain/*bt
+ls /mnt/erigon/snapshots/domain/*.kv | parallel vmtouch -vdlw
+
+# if it failing with "can't allocate memory", try: 
+sync && sudo sysctl vm.drop_caches=3
+echo 1 > /proc/sys/vm/compact_memory
 ```
