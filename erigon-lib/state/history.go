@@ -585,7 +585,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 		}
 	}()
 
-	comp, err := seg.NewCompressor(ctx, "collate history", historyPath, h.dirs.Tmp, seg.MinPatternScore, h.compressWorkers, log.LvlTrace, h.logger)
+	comp, err := seg.NewCompressor(ctx, "collate hist "+h.filenameBase, historyPath, h.dirs.Tmp, seg.MinPatternScore, h.compressWorkers, log.LvlTrace, h.logger)
 	if err != nil {
 		return HistoryCollation{}, fmt.Errorf("create %s history compressor: %w", h.filenameBase, err)
 	}
@@ -598,7 +598,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	defer keysCursor.Close()
 
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
-	collector := etl.NewCollector("collate "+h.historyValsTable, h.iiCfg.dirs.Tmp, etl.NewSortableBuffer(CollateETLRAM), h.logger)
+	collector := etl.NewCollector("collate hist "+h.filenameBase, h.iiCfg.dirs.Tmp, etl.NewSortableBuffer(CollateETLRAM), h.logger)
 	defer collector.Close()
 
 	for txnmb, k, err := keysCursor.Seek(txKey[:]); err == nil && txnmb != nil; txnmb, k, err = keysCursor.Next() {
