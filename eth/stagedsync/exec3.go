@@ -881,7 +881,6 @@ Loop:
 					tt = time.Now()
 					applyTx.CollectMetrics()
 					if !useExternalTx {
-						aggCtx := applyTx.(state2.HasAggCtx).AggCtx().(*state2.AggregatorRoTx)
 						tt = time.Now()
 						if err = applyTx.Commit(); err != nil {
 							return err
@@ -891,6 +890,9 @@ Loop:
 						if blocksFreezeCfg.Produce {
 							agg.BuildFilesInBackground(outputTxNum.Load())
 						}
+
+						aggCtx := agg.BeginFilesRo()
+						defer aggCtx.Close()
 
 						tt = time.Now()
 						for haveMoreToPrune := true; haveMoreToPrune; {
