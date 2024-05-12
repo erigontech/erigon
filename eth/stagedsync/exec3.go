@@ -425,6 +425,7 @@ func ExecV3(ctx context.Context,
 							return err
 						}
 						ac := agg.BeginFilesRo()
+						defer ac.Close()
 						if _, err = ac.PruneSmallBatches(ctx, 10*time.Second, tx); err != nil { // prune part of retired data, before commit
 							return err
 						}
@@ -888,7 +889,7 @@ Loop:
 
 						t2 = time.Since(tt)
 						if blocksFreezeCfg.Produce {
-							// agg.BuildFilesInBackground(outputTxNum.Load())
+							agg.BuildFilesInBackground(outputTxNum.Load())
 						}
 
 						aggCtx := agg.BeginFilesRo()
