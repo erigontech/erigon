@@ -169,18 +169,6 @@ func ExecV3(ctx context.Context,
 		agg.SetCollateAndBuildWorkers(1)
 	}
 	aggCtx := agg.BeginFilesRo()
-	if txc.Tx != nil {
-		txc.Tx.Commit()
-	}
-	for haveMoreToPrune := true; haveMoreToPrune; {
-		var err error
-		//very aggressive prune, because:
-		// if prune is slow - means DB > RAM and skip pruning will only make things worse
-		// db will grow -> prune will get slower -> db will grow -> ...
-		if haveMoreToPrune, err = aggCtx.PruneSmallBatchesDb(ctx, 10*time.Minute, chainDb); err != nil {
-			return err
-		}
-	}
 
 	applyTx := txc.Tx
 	useExternalTx := applyTx != nil
@@ -210,6 +198,16 @@ func ExecV3(ctx context.Context,
 		defer doms.Close()
 	}
 	txNumInDB := doms.TxNum()
+
+	for haveMoreToPrune := true; haveMoreToPrune; {
+		var err error
+		//very aggressive prune, because:
+		// if prune is slow - means DB > RAM and skip pruning will only make things worse
+		// db will grow -> prune will get slower -> db will grow -> ...
+		if haveMoreToPrune, err = aggCtx.PruneSmallBatches(ctx, 10*time.Minute, applyTx); err != nil {
+			return err
+		}
+	}
 
 	var (
 		inputTxNum    = doms.TxNum()

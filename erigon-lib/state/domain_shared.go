@@ -6,14 +6,15 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/cryptozerocopy"
-	"golang.org/x/crypto/sha3"
 	"math"
 	"path/filepath"
 	"runtime"
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/ledgerwatch/erigon-lib/common/cryptozerocopy"
+	"golang.org/x/crypto/sha3"
 
 	btree2 "github.com/tidwall/btree"
 
