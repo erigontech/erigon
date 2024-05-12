@@ -304,16 +304,6 @@ func ExecV3(ctx context.Context,
 		agg.BuildFilesInBackground(outputTxNum.Load())
 	}
 
-	for haveMoreToPrune := true; haveMoreToPrune; {
-		var err error
-		//very aggressive prune, because:
-		// if prune is slow - means DB > RAM and skip pruning will only make things worse
-		// db will grow -> prune will get slower -> db will grow -> ...
-		if haveMoreToPrune, err = aggCtx.PruneSmallBatches(ctx, 10*time.Minute, applyTx); err != nil {
-			return err
-		}
-	}
-
 	var outputBlockNum = stages.SyncMetrics[stages.Execution]
 	inputBlockNum := &atomic.Uint64{}
 	var count uint64
@@ -876,6 +866,15 @@ Loop:
 
 					t1, t2, t3 time.Duration
 				)
+				for haveMoreToPrune := true; haveMoreToPrune; {
+					var err error
+					//very aggressive prune, because:
+					// if prune is slow - means DB > RAM and skip pruning will only make things worse
+					// db will grow -> prune will get slower -> db will grow -> ...
+					if haveMoreToPrune, err = aggCtx.PruneSmallBatches(ctx, 10*time.Minute, applyTx); err != nil {
+						return err
+					}
+				}
 
 				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
 					return err
