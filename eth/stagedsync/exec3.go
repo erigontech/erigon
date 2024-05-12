@@ -169,6 +169,9 @@ func ExecV3(ctx context.Context,
 		agg.SetCollateAndBuildWorkers(1)
 	}
 	aggCtx := agg.BeginFilesRo()
+	if txc.Tx != nil {
+		txc.Tx.Commit()
+	}
 	for haveMoreToPrune := true; haveMoreToPrune; {
 		var err error
 		//very aggressive prune, because:
