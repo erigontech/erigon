@@ -1077,13 +1077,14 @@ func (ac *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, w
 	//	"txn_range", fmt.Sprintf("[%d,%d)", txFrom, txTo), "limit", limit,
 	//	/*"stepsLimit", limit/ac.a.aggregationStep,*/ "stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx))
 	aggStat := newAggregatorPruneStat()
-	for id, d := range ac.d {
-		var err error
-		aggStat.Domains[ac.d[id].d.filenameBase], err = d.Prune(ctx, tx, step, txFrom, txTo, limit, withWarmup, logEvery)
-		if err != nil {
-			return aggStat, err
-		}
-	}
+	_ = step
+	// for id, d := range ac.d {
+	// 	var err error
+	// 	aggStat.Domains[ac.d[id].d.filenameBase], err = d.Prune(ctx, tx, step, txFrom, txTo, limit, withWarmup, logEvery)
+	// 	if err != nil {
+	// 		return aggStat, err
+	// 	}
+	// }
 	lap, err := ac.logAddrs.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, withWarmup, nil)
 	if err != nil {
 		return nil, err
