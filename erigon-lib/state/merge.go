@@ -311,12 +311,12 @@ func (dt *DomainRoTx) maxTxNumInDomainFiles(cold bool) uint64 {
 	return 0
 }
 
-func (ht *HistoryRoTx) maxTxNumInFiles(cold bool) uint64 {
+func (ht *HistoryRoTx) maxTxNumInFiles(onlyFrozen bool) uint64 {
 	if len(ht.files) == 0 {
 		return 0
 	}
 	var max uint64
-	if cold {
+	if onlyFrozen {
 		for i := len(ht.files) - 1; i >= 0; i-- {
 			if !ht.files[i].src.frozen {
 				continue
@@ -327,15 +327,18 @@ func (ht *HistoryRoTx) maxTxNumInFiles(cold bool) uint64 {
 	} else {
 		max = ht.files[len(ht.files)-1].endTxNum
 	}
-	return cmp.Min(max, ht.iit.maxTxNumInFiles(cold))
+	return cmp.Min(max, ht.iit.maxTxNumInFiles(onlyFrozen))
 }
-func (iit *InvertedIndexRoTx) maxTxNumInFiles(cold bool) uint64 {
+
+func (iit *InvertedIndexRoTx) maxTxNumInFiles(onlyFrozen bool) uint64 {
 	if len(iit.files) == 0 {
 		return 0
 	}
-	if !cold {
-		return iit.files[len(iit.files)-1].endTxNum
+	if !onlyFrozen {
+		return iit.lastTxNumInFiles()
 	}
+
+	// files contains [frozen..., cold...] in that order
 	for i := len(iit.files) - 1; i >= 0; i-- {
 		if !iit.files[i].src.frozen {
 			continue
