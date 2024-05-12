@@ -944,12 +944,6 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		return nil, err
 	}
 
-	keysCursorForDel, err := rwTx.RwCursorDupSort(ii.indexKeysTable)
-	if err != nil {
-		return stat, fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
-	}
-	defer keysCursorForDel.Close()
-
 	idxCForDeletes, err := rwTx.RwCursorDupSort(ii.indexTable)
 	if err != nil {
 		return nil, err

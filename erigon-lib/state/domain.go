@@ -1886,21 +1886,12 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		}
 		defer keysCursorForDeletes.Close()
 		return domainAncientsCollector.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			if _, _, err = keysCursorForDeletes.SeekBothExact(k, v); err != nil {
-				return err
-			}
-			if err = keysCursorForDeletes.DeleteCurrent(); err != nil {
+			if err = keysCursorForDeletes.DeleteExact(k, v); err != nil {
 				return err
 			}
 			return nil
 		}, etl.TransformArgs{Quit: ctx.Done()})
 	}
-
-	valsCursor, err := rwTx.RwCursor(dt.d.valsTable)
-	if err != nil {
-		return stat, fmt.Errorf("create %s domain values cursor: %w", dt.d.filenameBase, err)
-	}
-	defer valsCursor.Close()
 
 	//fmt.Printf("prune domain %s from %d to %d step %d limit %d\n", dt.d.filenameBase, txFrom, txTo, step, limit)
 	//defer func() {
@@ -1953,7 +1944,7 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		limit--
 
 		seek = append(append(seek[:0], k...), v...)
-		err = valsCursor.Delete(seek)
+		err = rwTx.Delete(dt.d.valsTable, seek)
 		if err != nil {
 			return stat, fmt.Errorf("prune domain value: %w", err)
 		}
