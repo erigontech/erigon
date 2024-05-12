@@ -1060,6 +1060,7 @@ func (ht *HistoryRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 		err      error
 	)
 
+	fmt.Println(ht.valsC, ht.valsCDup)
 	if !ht.h.historyLargeValues {
 		valsCDup, err = rwTx.RwCursorDupSort(ht.h.historyValsTable)
 		if err != nil {
