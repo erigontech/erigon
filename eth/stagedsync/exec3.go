@@ -168,6 +168,16 @@ func ExecV3(ctx context.Context,
 		agg.SetCompressWorkers(1)
 		agg.SetCollateAndBuildWorkers(1)
 	}
+	aggCtx := agg.BeginFilesRo()
+	for haveMoreToPrune := true; haveMoreToPrune; {
+		var err error
+		//very aggressive prune, because:
+		// if prune is slow - means DB > RAM and skip pruning will only make things worse
+		// db will grow -> prune will get slower -> db will grow -> ...
+		if haveMoreToPrune, err = aggCtx.PruneSmallBatchesDb(ctx, 10*time.Minute, chainDb); err != nil {
+			return err
+		}
+	}
 
 	applyTx := txc.Tx
 	useExternalTx := applyTx != nil
