@@ -888,7 +888,7 @@ Loop:
 
 						t2 = time.Since(tt)
 						if blocksFreezeCfg.Produce {
-							agg.BuildFilesInBackground(outputTxNum.Load())
+							// agg.BuildFilesInBackground(outputTxNum.Load())
 						}
 
 						aggCtx := agg.BeginFilesRo()

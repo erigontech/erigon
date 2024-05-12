@@ -935,11 +935,7 @@ type HistoryRoTx struct {
 	getters []ArchiveGetter
 	readers []*recsplit.IndexReader
 
-	trace bool
-
-	valsC    kv.Cursor
-	valsCDup kv.CursorDupSort
-
+	trace  bool
 	_bufTs []byte
 }
 
@@ -1060,7 +1056,6 @@ func (ht *HistoryRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 		err      error
 	)
 
-	fmt.Println(ht.valsC, ht.valsCDup)
 	if !ht.h.historyLargeValues {
 		valsCDup, err = rwTx.RwCursorDupSort(ht.h.historyValsTable)
 		if err != nil {
@@ -1267,33 +1262,13 @@ func (ht *HistoryRoTx) HistorySeek(key []byte, txNum uint64, roTx kv.Tx) ([]byte
 	return ht.historySeekInDB(key, txNum, roTx)
 }
 
-func (ht *HistoryRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
-	if ht.valsC != nil {
-		return ht.valsC, nil
-	}
-	ht.valsC, err = tx.Cursor(ht.h.historyValsTable)
-	if err != nil {
-		return nil, err
-	}
-	return ht.valsC, nil
-}
-func (ht *HistoryRoTx) valsCursorDup(tx kv.Tx) (c kv.CursorDupSort, err error) {
-	if ht.valsCDup != nil {
-		return ht.valsCDup, nil
-	}
-	ht.valsCDup, err = tx.CursorDupSort(ht.h.historyValsTable)
-	if err != nil {
-		return nil, err
-	}
-	return ht.valsCDup, nil
-}
-
 func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
 	if ht.h.historyLargeValues {
-		c, err := ht.valsCursor(tx)
+		c, err := tx.Cursor(ht.h.historyValsTable)
 		if err != nil {
 			return nil, false, err
 		}
+		defer c.Close()
 		seek := make([]byte, len(key)+8)
 		copy(seek, key)
 		binary.BigEndian.PutUint64(seek[len(key):], txNum)
@@ -1308,10 +1283,11 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 		// val == []byte{}, means key was created in this txNum and doesn't exist before.
 		return val, true, nil
 	}
-	c, err := ht.valsCursorDup(tx)
+	c, err := tx.CursorDupSort(ht.h.historyValsTable)
 	if err != nil {
 		return nil, false, err
 	}
+	defer c.Close()
 	val, err := c.SeekBothRange(key, ht.encodeTs(txNum))
 	if err != nil {
 		return nil, false, err
