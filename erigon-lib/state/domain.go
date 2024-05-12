@@ -1869,7 +1869,7 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		defer cleanup()
 	}
 
-	domainAncientsCollector := etl.NewCollector("domainAncientsColecctor", dt.d.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/8), dt.d.logger)
+	domainAncientsCollector := etl.NewCollector("domainAncientsCollector", dt.d.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/8), dt.d.logger)
 	defer domainAncientsCollector.Close()
 
 	keysCursor, err := rwTx.CursorDupSort(dt.d.keysTable)

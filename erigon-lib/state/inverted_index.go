@@ -958,9 +958,9 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 			}
 		}
 		if idxValuesCount > 0 {
-			if err = idxCForDeletes.DeleteExact(key, txnm); err != nil {
-				return err
-			}
+			// if err = idxCForDeletes.DeleteExact(key, txnm); err != nil {
+			// 	return err
+			// }
 		}
 		mxPruneSizeIndex.Inc()
 		stat.PruneCountValues++
