@@ -12,7 +12,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
-// InitializeValidatorTable initializes the validator table in the database.
+// InitializeStaticTables initializes the validator table in the database.
 func InitializeStaticTables(tx kv.RwTx, state *state.CachingBeaconState) error {
 	var err error
 	if err = tx.ClearBucket(kv.ValidatorPublicKeys); err != nil {
@@ -60,7 +60,7 @@ func InitializeStaticTables(tx kv.RwTx, state *state.CachingBeaconState) error {
 	return err
 }
 
-// IncrementValidatorTable increments the validator table in the database, by ignoring all the preverified indices.
+// IncrementPublicKeyTable increments the validator table in the database, by ignoring all the preverified indices.
 func IncrementPublicKeyTable(tx kv.RwTx, state *state.CachingBeaconState, preverifiedIndicies uint64) error {
 	valLength := state.ValidatorLength()
 	for i := preverifiedIndicies; i < uint64(valLength); i++ {
@@ -195,7 +195,7 @@ func ReadCheckpoints(tx kv.Tx, slot uint64) (current solid.Checkpoint, previous 
 	return ed.CurrentJustifiedCheckpoint, ed.PreviousJustifiedCheckpoint, ed.FinalizedCheckpoint, nil
 }
 
-// ReadCheckpoints reads the checkpoints from the database, Current, Previous and Finalized
+// ReadNextSyncCommittee reads the checkpoints from the database, Current, Previous and Finalized
 func ReadNextSyncCommittee(tx kv.Tx, slot uint64) (committee *solid.SyncCommittee, err error) {
 	v, err := tx.GetOne(kv.NextSyncCommittee, base_encoding.Encode64ToBytes4(slot))
 	if err != nil {
@@ -209,7 +209,7 @@ func ReadNextSyncCommittee(tx kv.Tx, slot uint64) (committee *solid.SyncCommitte
 	return
 }
 
-// ReadCheckpoints reads the checkpoints from the database, Current, Previous and Finalized
+// ReadCurrentSyncCommittee reads the checkpoints from the database, Current, Previous and Finalized
 func ReadCurrentSyncCommittee(tx kv.Tx, slot uint64) (committee *solid.SyncCommittee, err error) {
 	v, err := tx.GetOne(kv.CurrentSyncCommittee, base_encoding.Encode64ToBytes4(slot))
 	if err != nil {
