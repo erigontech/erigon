@@ -1227,7 +1227,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		seen[string(k)] = struct{}{}
 	}
 
-	keysCursor, err := dt.keysCursor(rwTx)
+	keysCursor, err := rwTx.CursorDupSort(d.keysTable)
 	if err != nil {
 		return err
 	}
@@ -1441,33 +1441,13 @@ func (dt *DomainRoTx) statelessBtree(i int) *BtIndex {
 	return r
 }
 
-func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
-	if dt.valsC != nil {
-		return dt.valsC, nil
-	}
-	dt.valsC, err = tx.Cursor(dt.d.valsTable)
-	if err != nil {
-		return nil, err
-	}
-	return dt.valsC, nil
-}
-
-func (dt *DomainRoTx) keysCursor(tx kv.Tx) (c kv.CursorDupSort, err error) {
-	if dt.keysC != nil {
-		return dt.keysC, nil
-	}
-	dt.keysC, err = tx.CursorDupSort(dt.d.keysTable)
-	if err != nil {
-		return nil, err
-	}
-	return dt.keysC, nil
-}
-
 func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, bool, error) {
-	keysC, err := dt.keysCursor(roTx)
+	keysC, err := roTx.Cursor(dt.d.keysTable)
 	if err != nil {
 		return nil, 0, false, err
 	}
+	defer keysC.Close()
+
 	var v, foundInvStep []byte
 	_, foundInvStep, err = keysC.SeekExact(key)
 	if err != nil {
@@ -1476,10 +1456,11 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 	if foundInvStep != nil {
 		foundStep := ^binary.BigEndian.Uint64(foundInvStep)
 		if LastTxNumOfStep(foundStep, dt.d.aggregationStep) >= dt.maxTxNumInDomainFiles(false) {
-			valsC, err := dt.valsCursor(roTx)
+			valsC, err := roTx.Cursor(dt.d.valsTable)
 			if err != nil {
 				return nil, foundStep, false, err
 			}
+			defer valsC.Close()
 			_, v, err = valsC.SeekExact(append(append(dt.valBuf[:0], key...), foundInvStep...))
 			if err != nil {
 				return nil, foundStep, false, fmt.Errorf("GetLatest value: %w", err)
