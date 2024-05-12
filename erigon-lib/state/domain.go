@@ -1882,14 +1882,14 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		keysCursor.Close()
 
 		return domainAncientsCollector.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			// keysCursorForDeletes, err := rwTx.RwCursorDupSort(dt.d.keysTable)
-			// if err != nil {
-			// 	return err
-			// }
-			// defer keysCursorForDeletes.Close()
-			// if err = keysCursorForDeletes.DeleteExact(k, v); err != nil {
-			// 	return err
-			// }
+			keysCursorForDeletes, err := rwTx.RwCursorDupSort(dt.d.keysTable)
+			if err != nil {
+				return err
+			}
+			defer keysCursorForDeletes.Close()
+			if err = keysCursorForDeletes.DeleteExact(k, v); err != nil {
+				return err
+			}
 			return nil
 		}, etl.TransformArgs{Quit: ctx.Done()})
 	}
