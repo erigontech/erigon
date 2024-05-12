@@ -952,14 +952,14 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 			}
 		}
 		if idxValuesCount > 0 {
-			// idxCForDeletes, err := rwTx.RwCursorDupSort(ii.indexTable)
-			// if err != nil {
-			// 	return err
-			// }
-			// defer idxCForDeletes.Close()
-			// if err = idxCForDeletes.DeleteExact(key, txnm); err != nil {
-			// 	return err
-			// }
+			idxCForDeletes, err := rwTx.RwCursorDupSort(ii.indexTable)
+			if err != nil {
+				return err
+			}
+			defer idxCForDeletes.Close()
+			if err = idxCForDeletes.DeleteExact(key, txnm); err != nil {
+				return err
+			}
 		}
 		mxPruneSizeIndex.Inc()
 		stat.PruneCountValues++
