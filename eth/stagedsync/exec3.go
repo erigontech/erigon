@@ -199,16 +199,6 @@ func ExecV3(ctx context.Context,
 	}
 	txNumInDB := doms.TxNum()
 
-	for haveMoreToPrune := true; haveMoreToPrune; {
-		var err error
-		//very aggressive prune, because:
-		// if prune is slow - means DB > RAM and skip pruning will only make things worse
-		// db will grow -> prune will get slower -> db will grow -> ...
-		if haveMoreToPrune, err = aggCtx.PruneSmallBatches(ctx, 10*time.Minute, applyTx); err != nil {
-			return err
-		}
-	}
-
 	var (
 		inputTxNum    = doms.TxNum()
 		stageProgress = execStage.BlockNumber
@@ -312,6 +302,16 @@ func ExecV3(ctx context.Context,
 	if blocksFreezeCfg.Produce {
 		//log.Info(fmt.Sprintf("[snapshots] db has steps amount: %s", agg.StepsRangeInDBAsStr(applyTx)))
 		agg.BuildFilesInBackground(outputTxNum.Load())
+	}
+
+	for haveMoreToPrune := true; haveMoreToPrune; {
+		var err error
+		//very aggressive prune, because:
+		// if prune is slow - means DB > RAM and skip pruning will only make things worse
+		// db will grow -> prune will get slower -> db will grow -> ...
+		if haveMoreToPrune, err = aggCtx.PruneSmallBatches(ctx, 10*time.Minute, applyTx); err != nil {
+			return err
+		}
 	}
 
 	var outputBlockNum = stages.SyncMetrics[stages.Execution]
