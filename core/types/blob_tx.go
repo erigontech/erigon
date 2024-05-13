@@ -80,6 +80,11 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Me
 	return msg, err
 }
 
+func (stx *BlobTx) cashedSender() (libcommon.Address, bool) {
+	s := stx.from.Load()
+	return s.(libcommon.Address), s != nil
+}
+
 func (stx *BlobTx) Sender(signer Signer) (libcommon.Address, error) {
 	if sc := stx.from.Load(); sc != nil {
 		return sc.(libcommon.Address), nil

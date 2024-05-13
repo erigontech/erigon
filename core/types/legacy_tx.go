@@ -430,6 +430,10 @@ func (tx *LegacyTx) GetChainID() *uint256.Int {
 	return DeriveChainId(&tx.V)
 }
 
+func (tx *LegacyTx) cashedSender() (libcommon.Address, bool) {
+	s := tx.from.Load()
+	return s.(libcommon.Address), s != nil
+}
 func (tx *LegacyTx) Sender(signer Signer) (libcommon.Address, error) {
 	if sc := tx.from.Load(); sc != nil {
 		return sc.(libcommon.Address), nil

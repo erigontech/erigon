@@ -426,6 +426,10 @@ func (tx *DynamicFeeTransaction) GetChainID() *uint256.Int {
 	return tx.ChainID
 }
 
+func (tx *DynamicFeeTransaction) cashedSender() (libcommon.Address, bool) {
+	s := tx.from.Load()
+	return s.(libcommon.Address), s != nil
+}
 func (tx *DynamicFeeTransaction) Sender(signer Signer) (libcommon.Address, error) {
 	if sc := tx.from.Load(); sc != nil {
 		return sc.(libcommon.Address), nil
