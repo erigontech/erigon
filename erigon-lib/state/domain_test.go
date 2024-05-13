@@ -1621,7 +1621,6 @@ func TestDomain_CanPruneAfterAggregation(t *testing.T) {
 	d.historyLargeValues = false
 	d.History.compression = CompressKeys | CompressVals
 	d.compression = CompressKeys | CompressVals
-	d.withExistenceIndex = true
 
 	dc := d.BeginFilesRo()
 	defer dc.Close()
