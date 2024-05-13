@@ -1184,6 +1184,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	if err != nil {
 		return fmt.Errorf("historyRange %s: %w", dt.ht.h.filenameBase, err)
 	}
+	defer histRng.Close()
 
 	seen := make(map[string]struct{})
 	restored := dt.NewWriter()
@@ -1196,11 +1197,13 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 
 		ic, err := dt.ht.IdxRange(k, int(txNumUnwindTo)-1, 0, order.Desc, -1, rwTx)
 		if err != nil {
+			ic.Close()
 			return err
 		}
 		if ic.HasNext() {
 			nextTxn, err := ic.Next()
 			if err != nil {
+				ic.Close()
 				return err
 			}
 			restored.SetTxNum(nextTxn) // todo what if we actually had to decrease current step to provide correct update?
@@ -1209,12 +1212,10 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		}
 		//fmt.Printf("[%s] unwinding %x ->'%x'\n", dt.d.filenameBase, k, v)
 		if err := restored.addValue(k, nil, v); err != nil {
+			ic.Close()
 			return err
 		}
-		type closable interface {
-			Close()
-		}
-		ic.(closable).Close()
+		ic.Close()
 		seen[string(k)] = struct{}{}
 	}
 
