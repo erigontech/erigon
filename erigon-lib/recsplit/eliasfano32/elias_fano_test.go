@@ -22,9 +22,10 @@ import (
 	"math/bits"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
 )
 
 func TestEliasFanoSeek(t *testing.T) {
@@ -66,12 +67,12 @@ func TestEliasFanoSeek(t *testing.T) {
 			it.Next()
 		}
 		//save all fields values
-		//v1, v2, v3, v4, v5 := it.upperIdx, it.upperMask, it.lowerIdx, it.upper, it.idx
+		//v1, v2, v3, v4, v5 := it.upperIdx, it.upperMask, it.lowerIdx, it.upper, it.itemsIterated
 		// seek to same item and check new fields
 		it.Seek(ef.Max())
 		//require.Equal(t, int(v1), int(it.upperIdx))
 		//require.Equal(t, int(v3), int(it.lowerIdx))
-		//require.Equal(t, int(v5), int(it.idx))
+		//require.Equal(t, int(v5), int(it.itemsIterated))
 		//require.Equal(t, bits.TrailingZeros64(v2), bits.TrailingZeros64(it.upperMask))
 		//require.Equal(t, int(v4), int(it.upper))
 
@@ -249,13 +250,13 @@ func checkSeek(t *testing.T, j int, ef *EliasFano, vals []uint64) {
 		efi.Next()
 	}
 	//save all fields values
-	v1, v2, v3, v4, v5 := efi.upperIdx, efi.upperMask, efi.lowerIdx, efi.upper, efi.idx
+	v1, v2, v3, v4, v5 := efi.upperIdx, efi.upperMask, efi.lowerIdx, efi.upper, efi.itemsIterated
 	// seek to same item and check new fields
 	efi.Seek(vals[j])
 	require.Equal(t, int(v1), int(efi.upperIdx))
 	require.Equal(t, int(v3), int(efi.lowerIdx))
 	require.Equal(t, int(v4), int(efi.upper))
-	require.Equal(t, int(v5), int(efi.idx))
+	require.Equal(t, int(v5), int(efi.itemsIterated))
 	require.Equal(t, bits.TrailingZeros64(v2), bits.TrailingZeros64(efi.upperMask))
 }
 
@@ -279,12 +280,6 @@ func BenchmarkName(b *testing.B) {
 		}
 	})
 	b.Run("seek", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			it := ef.Iterator()
-			it.SeekDeprecated(1_000_000)
-		}
-	})
-	b.Run("seek2", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			it := ef.Iterator()
 			it.Seek(1_000_000)
