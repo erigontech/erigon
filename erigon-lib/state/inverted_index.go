@@ -945,6 +945,11 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	}
 
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
+	idxCForDeletes, err := rwTx.RwCursorDupSort(ii.indexTable)
+	if err != nil {
+		return nil, err
+	}
+	defer idxCForDeletes.Close()
 	err = collector.Load(nil, "", func(key, txnm []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if fn != nil {
 			if err = fn(key, txnm); err != nil {
@@ -952,11 +957,7 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 			}
 		}
 		if idxValuesCount > 0 {
-			idxCForDeletes, err := rwTx.RwCursorDupSort(ii.indexTable)
-			if err != nil {
-				return err
-			}
-			defer idxCForDeletes.Close()
+
 			if err = idxCForDeletes.DeleteExact(key, txnm); err != nil {
 				return err
 			}
