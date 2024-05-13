@@ -933,7 +933,6 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int) error {
 	if upCell.downHashedLen == 0 {
 		// root unfolded
 		depth = upDepth + 1
-		mxDepthUnfolded.Observe(float64(row))
 		if unfolded, err := hph.unfoldBranchNode(row, touched && !present /* deleted */, depth); err != nil {
 			return err
 		} else if !unfolded {
