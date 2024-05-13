@@ -228,8 +228,7 @@ func Seek(data []byte, n uint64) (uint64, bool) {
 	return ef.Search(n)
 }
 
-// Search returns the value in the sequence, equal or greater than given value
-func (ef *EliasFano) search(v uint64) (nextV uint64, nextI uint64, ok bool) {
+func (ef *EliasFano) search(v uint64, lte bool) (nextV uint64, nextI uint64, ok bool) {
 	if v == 0 {
 		return ef.Min(), 0, true
 	}
@@ -241,20 +240,34 @@ func (ef *EliasFano) search(v uint64) (nextV uint64, nextI uint64, ok bool) {
 	}
 
 	hi := v >> ef.l
-	i := sort.Search(int(ef.count+1), func(i int) bool {
+	n := int(ef.count + 1)
+	i := sort.Search(n, func(i int) bool {
 		return ef.upper(uint64(i)) >= hi
 	})
-	for j := uint64(i); j <= ef.count; j++ {
-		val, _, _, _, _ := ef.get(j)
-		if val >= v {
-			return val, j, true
+	if lte {
+		if n == i {
+			i--
+		}
+		for j := uint64(i); j >= 0; j-- {
+			val, _, _, _, _ := ef.get(j)
+			if val <= v {
+				return val, j, true
+			}
+		}
+	} else {
+		for j := uint64(i); j <= ef.count; j++ {
+			val, _, _, _, _ := ef.get(j)
+			if val >= v {
+				return val, j, true
+			}
 		}
 	}
 	return 0, 0, false
 }
 
+// Search returns the value in the sequence, equal or greater than given value
 func (ef *EliasFano) Search(v uint64) (uint64, bool) {
-	n, _, ok := ef.search(v)
+	n, _, ok := ef.search(v, false /* lte */)
 	return n, ok
 }
 
@@ -340,18 +353,28 @@ func (efi *EliasFanoIter) Seek(n uint64) {
 	//fmt.Printf("b seek2: efi.upperMask(%d)=%d, upperIdx=%d, lowerIdx=%d, itemsIterated=%d\n", n, bits.TrailingZeros64(efi.upperMask), efi.upperIdx, efi.lowerIdx, efi.itemsIterated)
 	//fmt.Printf("b seek2: efi.upper=%d\n", efi.upper)
 	efi.Reset()
-	nn, nextI, ok := efi.ef.search(n)
+	nn, nextI, ok := efi.ef.search(n, efi.reverse)
 	_ = nn
 	if !ok {
 		efi.itemsIterated = efi.count + 1
 		return
 	}
-	if nextI == 0 {
+	if nextI == 0 && !efi.reverse {
+		return
+	}
+	if nextI == efi.count && efi.reverse {
 		return
 	}
 
+	var currIdx uint64
+	if efi.reverse {
+		currIdx = nextI + 1
+	} else {
+		currIdx = nextI - 1
+	}
+
 	// fields of current value
-	v, _, sel, currWords, lower := efi.ef.get(nextI - 1) //TODO: search can return same info
+	v, _, sel, currWords, lower := efi.ef.get(currIdx) //TODO: search can return same info
 	efi.upper = v &^ (lower & efi.ef.lowerBitsMask)
 	efi.upperIdx = currWords
 
