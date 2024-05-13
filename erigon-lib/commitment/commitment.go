@@ -5,14 +5,13 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math/bits"
-	"strings"
-
 	"github.com/google/btree"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cryptozerocopy"
 	"github.com/ledgerwatch/erigon-lib/types"
 	"golang.org/x/crypto/sha3"
+	"math/bits"
+	"strings"
 
 	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/log/v3"
@@ -22,8 +21,11 @@ import (
 )
 
 var (
-	mxCommitmentKeys          = metrics.GetOrCreateCounter("domain_commitment_keys")
-	mxCommitmentBranchUpdates = metrics.GetOrCreateCounter("domain_commitment_updates_applied")
+	mxKeys                 = metrics.GetOrCreateCounter("domain_commitment_keys")
+	mxBranchUpdatesApplied = metrics.GetOrCreateCounter("domain_commitment_updates_applied")
+	mxDepthUnfolded        = metrics.GetOrCreateHistogram("domain_commitment_depth")
+	mxFoldingTook          = metrics.GetOrCreateHistogram("domain_commitment_folding_took")
+	mxUnfoldingTook        = metrics.GetOrCreateHistogram("domain_commitment_unfolding_took")
 )
 
 // Trie represents commitment variant.
@@ -185,6 +187,7 @@ func (be *BranchEncoder) Load(pc PatriciaContext, args etl.TransformArgs) error 
 		if err = pc.PutBranch(cp, cu, stateValue, stateStep); err != nil {
 			return err
 		}
+		mxBranchUpdatesApplied.Inc()
 		return nil
 	}, args); err != nil {
 		return err
@@ -221,7 +224,6 @@ func (be *BranchEncoder) CollectUpdate(
 	if err = be.updates.Collect(prefix, update); err != nil {
 		return 0, err
 	}
-	mxCommitmentBranchUpdates.Inc()
 	return lastNibble, nil
 }
 

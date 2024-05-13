@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
@@ -248,12 +249,21 @@ func (rs *StateV3) ApplyLogsAndTraces4(txTask *TxTask, domains *libstate.SharedD
 	return nil
 }
 
+var (
+	mxState3UnwindRunning = metrics.GetOrCreateGauge("state3_unwind_running")
+	mxState3Unwind        = metrics.GetOrCreateSummary("state3_unwind")
+)
+
 func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwindTo uint64, accumulator *shards.Accumulator) error {
 	unwindToLimit := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).CanUnwindDomainsToTxNum()
 	if txUnwindTo < unwindToLimit {
 		return fmt.Errorf("can't unwind to txNum=%d, limit is %d", txUnwindTo, unwindToLimit)
 	}
 
+	mxState3UnwindRunning.Inc()
+	defer mxState3UnwindRunning.Dec()
+	st := time.Now()
+	defer mxState3Unwind.ObserveDuration(st)
 	var currentInc uint64
 
 	handle := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
@@ -296,6 +306,7 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwi
 
 	ttx := tx.(kv.TemporalTx)
 
+	// todo these updates could be collected during rs.domains.Unwind (as passed collect function eg)
 	{
 		iter, err := ttx.HistoryRange(kv.AccountsHistory, int(txUnwindTo), -1, order.Asc, -1)
 		if err != nil {

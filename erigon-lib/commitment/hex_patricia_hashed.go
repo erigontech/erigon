@@ -893,6 +893,8 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int) error {
 	if hph.trace {
 		fmt.Printf("unfold %d: activeRows: %d\n", unfolding, hph.activeRows)
 	}
+	sf := time.Now()
+	defer mxUnfoldingTook.ObserveDuration(sf)
 	var upCell *Cell
 	var touched, present bool
 	var col byte
@@ -921,6 +923,7 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int) error {
 		hph.currentKeyLen++
 	}
 	row := hph.activeRows
+	mxDepthUnfolded.Observe(float64(row))
 	for i := 0; i < 16; i++ {
 		hph.grid[row][i].reset()
 	}
@@ -994,6 +997,9 @@ func (hph *HexPatriciaHashed) needFolding(hashedKey []byte) bool {
 // until that current key becomes a prefix of hashedKey that we will proccess next
 // (in other words until the needFolding function returns 0)
 func (hph *HexPatriciaHashed) fold() (err error) {
+	sf := time.Now()
+	defer mxFoldingTook.ObserveDuration(sf)
+
 	updateKeyLen := hph.currentKeyLen
 	if hph.activeRows == 0 {
 		return fmt.Errorf("cannot fold - no active rows")
@@ -1345,7 +1351,7 @@ func (hph *HexPatriciaHashed) ProcessTree(ctx context.Context, tree *UpdateTree,
 			}
 			hph.deleteCell(hashedKey)
 		}
-		mxCommitmentKeys.Inc()
+		mxKeys.Inc()
 		ki++
 		return nil
 	})
@@ -1450,7 +1456,7 @@ func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byt
 			}
 			hph.deleteCell(hashedKey)
 		}
-		mxCommitmentKeys.Inc()
+		mxKeys.Inc()
 	}
 	// Folding everything up to the root
 	for hph.activeRows > 0 {
@@ -1546,7 +1552,7 @@ func (hph *HexPatriciaHashed) ProcessUpdates(ctx context.Context, plainKeys [][]
 			}
 		}
 
-		mxCommitmentKeys.Inc()
+		mxKeys.Inc()
 	}
 	// Folding everything up to the root
 	for hph.activeRows > 0 {
