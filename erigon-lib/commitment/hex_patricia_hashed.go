@@ -893,8 +893,6 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int) error {
 	if hph.trace {
 		fmt.Printf("unfold %d: activeRows: %d\n", unfolding, hph.activeRows)
 	}
-	sf := time.Now()
-	defer mxUnfoldingTook.ObserveDuration(sf)
 	var upCell *Cell
 	var touched, present bool
 	var col byte

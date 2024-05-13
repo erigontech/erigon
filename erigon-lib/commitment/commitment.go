@@ -22,7 +22,6 @@ import (
 var (
 	mxKeys                 = metrics.GetOrCreateCounter("domain_commitment_keys")
 	mxBranchUpdatesApplied = metrics.GetOrCreateCounter("domain_commitment_updates_applied")
-	mxUnfoldingTook        = metrics.GetOrCreateSummary("domain_commitment_unfolding_took")
 )
 
 // Trie represents commitment variant.
