@@ -306,6 +306,7 @@ type EliasFanoIter struct {
 	lowerBitsMask uint64
 	l             uint64
 	upperStep     uint64
+	reverse       bool
 
 	//fields of current value
 	upper    uint64
@@ -363,7 +364,15 @@ func (efi *EliasFanoIter) Seek(n uint64) {
 	//fmt.Printf("seek2: efi.upper=%d\n", efi.upper)
 }
 
-func (efi *EliasFanoIter) increment() {
+func (efi *EliasFanoIter) moveNext() {
+	if efi.reverse {
+		efi.moveBackward()
+	} else {
+		efi.moveForward()
+	}
+}
+
+func (efi *EliasFanoIter) moveForward() {
 	if efi.itemsIterated == 0 {
 		efi.upperIdx = 0
 		efi.upperMask = 1
@@ -385,13 +394,17 @@ func (efi *EliasFanoIter) increment() {
 	efi.itemsIterated++
 }
 
+func (efi *EliasFanoIter) moveBackward() {
+	panic("not implemented")
+}
+
 func (efi *EliasFanoIter) Next() (uint64, error) {
 	idx64, shift := efi.lowerIdx/64, efi.lowerIdx%64
 	lower := efi.lowerBits[idx64] >> shift
 	if shift > 0 {
 		lower |= efi.lowerBits[idx64+1] << (64 - shift)
 	}
-	efi.increment()
+	efi.moveNext()
 	return efi.upper | (lower & efi.lowerBitsMask), nil
 }
 
