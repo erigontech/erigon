@@ -52,21 +52,21 @@ type Receipt struct {
 	Type              uint8  `json:"type,omitempty"`
 	PostState         []byte `json:"root" codec:"1"`
 	Status            uint64 `json:"status" codec:"2"`
-	CumulativeGasUsed uint64 `json:"cumulativeGasUsed" gencodec:"required" codec:"3"`
-	Bloom             Bloom  `json:"logsBloom"         gencodec:"required" codec:"-"`
-	Logs              Logs   `json:"logs"              gencodec:"required" codec:"-"`
+	CumulativeGasUsed uint64 `json:"cumulativeGasUsed" gencodec:"required"`
+	Bloom             Bloom  `json:"logsBloom"         gencodec:"required"`
+	Logs              Logs   `json:"logs"              gencodec:"required"`
 
 	// Implementation fields: These fields are added by geth when processing a transaction.
 	// They are stored in the chain database.
-	TxHash          libcommon.Hash    `json:"transactionHash" gencodec:"required" codec:"-"`
-	ContractAddress libcommon.Address `json:"contractAddress" codec:"-"`
-	GasUsed         uint64            `json:"gasUsed" gencodec:"required" codec:"-"`
+	TxHash          libcommon.Hash    `json:"transactionHash" gencodec:"required"`
+	ContractAddress libcommon.Address `json:"contractAddress"`
+	GasUsed         uint64            `json:"gasUsed" gencodec:"required"`
 
 	// Inclusion information: These fields provide information about the inclusion of the
 	// transaction corresponding to this receipt.
-	BlockHash        libcommon.Hash `json:"blockHash,omitempty" codec:"-"`
-	BlockNumber      *big.Int       `json:"blockNumber,omitempty" codec:"-"`
-	TransactionIndex uint           `json:"transactionIndex" codec:"-"`
+	BlockHash        libcommon.Hash `json:"blockHash,omitempty"`
+	BlockNumber      *big.Int       `json:"blockNumber,omitempty"`
+	TransactionIndex uint           `json:"transactionIndex"`
 
 	firstLogIndex uint32 `json:"-"` // field which used to store in db and re-calc
 }
