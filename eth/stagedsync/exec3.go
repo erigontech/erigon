@@ -169,6 +169,7 @@ func ExecV3(ctx context.Context,
 		agg.SetCollateAndBuildWorkers(1)
 	}
 	aggCtx := agg.BeginFilesRo()
+	defer aggCtx.Close()
 	applyTx := txc.Tx
 	useExternalTx := applyTx != nil
 
@@ -200,6 +201,7 @@ func ExecV3(ctx context.Context,
 			return err
 		}
 	}
+	aggCtx.Close()
 
 	inMemExec := txc.Doms != nil
 	var doms *state2.SharedDomains
