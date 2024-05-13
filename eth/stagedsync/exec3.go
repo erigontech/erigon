@@ -170,20 +170,17 @@ func ExecV3(ctx context.Context,
 	}
 	aggCtx := agg.BeginFilesRo()
 	applyTx := txc.Tx
-	if applyTx != nil {
-		applyTx.Commit()
-	}
-	for haveMoreToPrune := true; haveMoreToPrune; {
-		var err error
-		//very aggressive prune, because:
-		// if prune is slow - means DB > RAM and skip pruning will only make things worse
-		// db will grow -> prune will get slower -> db will grow -> ...
-		if haveMoreToPrune, err = aggCtx.PruneSmallBatchesDb(ctx, 10*time.Minute, chainDb); err != nil {
+	useExternalTx := applyTx != nil
+
+	//very aggressive prune, because:
+	// if prune is slow - means DB > RAM and skip pruning will only make things worse
+	// db will grow -> prune will get slower -> db will grow -> ...
+	if !useExternalTx {
+		if _, err := aggCtx.PruneSmallBatchesDb(ctx, 10*time.Minute, chainDb); err != nil {
 			return err
 		}
 	}
 
-	useExternalTx := applyTx != nil
 	if !useExternalTx {
 		if !parallel {
 			var err error
@@ -194,6 +191,13 @@ func ExecV3(ctx context.Context,
 			defer func() { // need callback - because tx may be committed
 				applyTx.Rollback()
 			}()
+		}
+	}
+
+	if useExternalTx {
+		// We need speed here.
+		if _, err := aggCtx.PruneSmallBatches(ctx, time.Second, applyTx); err != nil {
+			return err
 		}
 	}
 
