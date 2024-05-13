@@ -139,6 +139,8 @@ rwloop does:
 
 When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rotate+agg.Flush)
 */
+var skipped bool
+
 func ExecV3(ctx context.Context,
 	execStage *StageState, u Unwinder, workerCount int, cfg ExecuteBlockCfg, txc wrap.TxContainer,
 	parallel bool, //nolint
@@ -175,7 +177,7 @@ func ExecV3(ctx context.Context,
 	//very aggressive prune, because:
 	// if prune is slow - means DB > RAM and skip pruning will only make things worse
 	// db will grow -> prune will get slower -> db will grow -> ...
-	if !useExternalTx {
+	if !useExternalTx && skipped {
 		aggCtx := agg.BeginFilesRo()
 		defer aggCtx.Close()
 		if _, err := aggCtx.PruneSmallBatchesDb(ctx, 10*time.Minute, chainDb); err != nil {
@@ -183,6 +185,7 @@ func ExecV3(ctx context.Context,
 		}
 		aggCtx.Close()
 	}
+	skipped = true
 
 	if !useExternalTx && !parallel {
 		var err error
