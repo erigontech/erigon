@@ -344,7 +344,9 @@ func postExecuteCommitValues(
 	if err := rawdb.WriteHeader_zkEvm(tx, header); err != nil {
 		return fmt.Errorf("failed to write header: %v", err)
 	}
-
+	if err := rawdb.WriteHeadHeaderHash(tx, headerHash); err != nil {
+		return err
+	}
 	if err := rawdb.WriteCanonicalHash(tx, headerHash, blockNum); err != nil {
 		return fmt.Errorf("failed to write header: %v", err)
 	}

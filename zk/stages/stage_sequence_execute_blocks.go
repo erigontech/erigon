@@ -148,7 +148,10 @@ func finaliseBlock(
 	finalHeader.Bloom = types.CreateBloom(receipts)
 	newNum := finalBlock.Number()
 
-	rawdb.WriteHeader(sdb.tx, finalHeader)
+	err = rawdb.WriteHeader_zkEvm(sdb.tx, finalHeader)
+	if err != nil {
+		return fmt.Errorf("failed to write header: %v", err)
+	}
 	if err := rawdb.WriteHeadHeaderHash(sdb.tx, finalHeader.Hash()); err != nil {
 		return err
 	}
