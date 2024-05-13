@@ -257,6 +257,7 @@ type NetworkSpeedTestResult struct {
 	Latency       time.Duration `json:"latency"`
 	DownloadSpeed float64       `json:"downloadSpeed"`
 	UploadSpeed   float64       `json:"uploadSpeed"`
+	PacketLoss    float64       `json:"packetLoss"`
 }
 
 func (ti FileDownloadedStatisticsUpdate) Type() Type {
