@@ -879,6 +879,10 @@ Loop:
 					t1, t2, t3 time.Duration
 				)
 
+				if blocksFreezeCfg.Produce {
+					//log.Info(fmt.Sprintf("[snapshots] db has steps amount: %s", agg.StepsRangeInDBAsStr(applyTx)))
+					agg.BuildFilesInBackground(outputTxNum.Load())
+				}
 				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
 					return err
 				} else if !ok {
