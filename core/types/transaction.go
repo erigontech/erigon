@@ -166,7 +166,6 @@ func DecodeTransaction(data []byte) (Transaction, error) {
 	s := rlp.NewStream(bytes.NewReader(data), uint64(len(data)))
 	tx, err := DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs)
 	if err != nil {
-		fmt.Println(err)
 		return nil, err
 	}
 
@@ -174,7 +173,7 @@ func DecodeTransaction(data []byte) (Transaction, error) {
 	if err != nil && errors.Is(err, io.EOF) {
 		return tx, nil
 	}
-	return nil, fmt.Errorf("trailing bytes after rlp encdode transaction")
+	return nil, fmt.Errorf("trailing bytes after rlp encoded transaction")
 }
 
 // Parse transaction without envelope.
