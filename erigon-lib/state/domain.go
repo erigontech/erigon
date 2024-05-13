@@ -1006,8 +1006,9 @@ func (d *Domain) buildMapIdx(ctx context.Context, fromStep, toStep uint64, data 
 		TmpDir:     d.dirs.Tmp,
 		IndexFile:  idxPath,
 		Salt:       d.salt,
+		NoFsync:    d.noFsync,
 	}
-	return buildIndex(ctx, data, d.compression, idxPath, false, cfg, ps, d.logger, d.noFsync)
+	return buildIndex(ctx, data, d.compression, idxPath, false, cfg, ps, d.logger)
 }
 
 func (d *Domain) missedBtreeIdxFiles() (l []*filesItem) {
@@ -1110,7 +1111,7 @@ func buildIndexFilterThenOpen(ctx context.Context, d *seg.Decompressor, compress
 	}
 	return OpenExistenceFilter(idxPath)
 }
-func buildIndex(ctx context.Context, d *seg.Decompressor, compressed FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger, noFsync bool) error {
+func buildIndex(ctx context.Context, d *seg.Decompressor, compressed FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {
 	_, fileName := filepath.Split(idxPath)
 	count := d.Count()
 	if !values {
@@ -1130,9 +1131,6 @@ func buildIndex(ctx context.Context, d *seg.Decompressor, compressed FileCompres
 	}
 	defer rs.Close()
 	rs.LogLvl(log.LvlTrace)
-	if noFsync {
-		rs.DisableFsync()
-	}
 
 	word := make([]byte, 0, 256)
 	var keyPos, valPos uint64
