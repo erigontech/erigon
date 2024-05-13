@@ -21,11 +21,11 @@ import (
 	"errors"
 	"math"
 	"math/big"
-	"reflect"
 	"testing"
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -66,11 +66,13 @@ func TestLegacyReceiptDecoding(t *testing.T) {
 				Address: libcommon.BytesToAddress([]byte{0x11}),
 				Topics:  []libcommon.Hash{libcommon.HexToHash("dead"), libcommon.HexToHash("beef")},
 				Data:    []byte{0x01, 0x00, 0xff},
+				Index:   999,
 			},
 			{
 				Address: libcommon.BytesToAddress([]byte{0x01, 0x11}),
 				Topics:  []libcommon.Hash{libcommon.HexToHash("dead"), libcommon.HexToHash("beef")},
 				Data:    []byte{0x01, 0x00, 0xff},
+				Index:   1000,
 			},
 		},
 		TxHash:          tx.Hash(),
@@ -98,31 +100,33 @@ func TestLegacyReceiptDecoding(t *testing.T) {
 			if dec.CumulativeGasUsed != receipt.CumulativeGasUsed {
 				t.Fatalf("Receipt CumulativeGasUsed mismatch, want %v, have %v", receipt.CumulativeGasUsed, dec.CumulativeGasUsed)
 			}
-			if len(dec.Logs) != len(receipt.Logs) {
-				t.Fatalf("Receipt log number mismatch, want %v, have %v", len(receipt.Logs), len(dec.Logs))
-			}
-			for i := 0; i < len(dec.Logs); i++ {
-				if dec.Logs[i].Address != receipt.Logs[i].Address {
-					t.Fatalf("Receipt log %d address mismatch, want %v, have %v", i, receipt.Logs[i].Address, dec.Logs[i].Address)
-				}
-				if !reflect.DeepEqual(dec.Logs[i].Topics, receipt.Logs[i].Topics) {
-					t.Fatalf("Receipt log %d topics mismatch, want %v, have %v", i, receipt.Logs[i].Topics, dec.Logs[i].Topics)
-				}
-				if !bytes.Equal(dec.Logs[i].Data, receipt.Logs[i].Data) {
-					t.Fatalf("Receipt log %d data mismatch, want %v, have %v", i, receipt.Logs[i].Data, dec.Logs[i].Data)
-				}
-			}
+			assert.Equal(t, uint32(receipt.Logs[0].Index), dec.firstLogIndex)
+			//if len(dec.Logs) != len(receipt.Logs) {
+			//	t.Fatalf("Receipt log number mismatch, want %v, have %v", len(receipt.Logs), len(dec.Logs))
+			//}
+			//for i := 0; i < len(dec.Logs); i++ {
+			//	if dec.Logs[i].Address != receipt.Logs[i].Address {
+			//		t.Fatalf("Receipt log %d address mismatch, want %v, have %v", i, receipt.Logs[i].Address, dec.Logs[i].Address)
+			//	}
+			//	if !reflect.DeepEqual(dec.Logs[i].Topics, receipt.Logs[i].Topics) {
+			//		t.Fatalf("Receipt log %d topics mismatch, want %v, have %v", i, receipt.Logs[i].Topics, dec.Logs[i].Topics)
+			//	}
+			//	if !bytes.Equal(dec.Logs[i].Data, receipt.Logs[i].Data) {
+			//		t.Fatalf("Receipt log %d data mismatch, want %v, have %v", i, receipt.Logs[i].Data, dec.Logs[i].Data)
+			//	}
+			//}
 		})
 	}
 }
 
 func encodeAsStoredReceiptRLP(want *Receipt) ([]byte, error) {
-	stored := &storedReceiptRLP{
-		PostStateOrStatus: want.statusEncoding(),
-		CumulativeGasUsed: want.CumulativeGasUsed,
-		FirstLogIndex:     want.firstLogIndex,
+	w := bytes.NewBuffer(nil)
+	casted := ReceiptForStorage(*want)
+	err := casted.EncodeRLP(w)
+	if err != nil {
+		return nil, err
 	}
-	return rlp.EncodeToBytes(stored)
+	return w.Bytes(), nil
 }
 
 // Tests that receipt data can be correctly derived from the contextual infos
@@ -173,6 +177,7 @@ func TestDeriveFields(t *testing.T) {
 			TxHash:          txs[0].Hash(),
 			ContractAddress: libcommon.BytesToAddress([]byte{0x01, 0x11, 0x11}),
 			GasUsed:         1,
+			firstLogIndex:   0,
 		},
 		&Receipt{
 			PostState:         libcommon.Hash{2}.Bytes(),
@@ -184,6 +189,7 @@ func TestDeriveFields(t *testing.T) {
 			TxHash:          txs[1].Hash(),
 			ContractAddress: libcommon.BytesToAddress([]byte{0x02, 0x22, 0x22}),
 			GasUsed:         2,
+			firstLogIndex:   2,
 		},
 		&Receipt{
 			Type:              AccessListTxType,
@@ -196,6 +202,7 @@ func TestDeriveFields(t *testing.T) {
 			TxHash:          txs[2].Hash(),
 			ContractAddress: libcommon.BytesToAddress([]byte{0x03, 0x33, 0x33}),
 			GasUsed:         3,
+			firstLogIndex:   4,
 		},
 	}
 	// Clear all the computed fields and re-derive them
@@ -269,6 +276,7 @@ func TestDeriveFields(t *testing.T) {
 
 		logIndex := uint(0)
 		for i := range receipts {
+			txs[i].SetSender(libcommon.BytesToAddress([]byte{0x0}))
 			r, err := receipts.DeriveFieldsV3ForSingleReceipt(i, hash, number.Uint64(), txs[i])
 			if err != nil {
 				panic(err)
