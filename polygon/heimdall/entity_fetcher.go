@@ -66,17 +66,9 @@ func (f *genericEntityFetcher[TEntity]) FetchEntitiesRange(ctx context.Context, 
 }
 
 func (f *genericEntityFetcher[TEntity]) FetchEntitiesRangeSequentially(ctx context.Context, idRange EntityIdRange) ([]any, error) {
-	entities := make([]any, 0, idRange.Len())
-
-	for id := idRange.Start; id <= idRange.End; id++ {
-		entity, err := f.fetchEntity(ctx, int64(id))
-		if err != nil {
-			return nil, err
-		}
-		entities = append(entities, entity)
-	}
-
-	return entities, nil
+	return idRange.Map(func(id uint64) (any, error) {
+		return f.fetchEntity(ctx, int64(id))
+	})
 }
 
 func (f *genericEntityFetcher[TEntity]) FetchAllEntities(ctx context.Context) ([]any, error) {
