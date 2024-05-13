@@ -129,7 +129,7 @@ func (s txReadStore) LastCheckpointId(ctx context.Context) (CheckpointId, bool, 
 }
 
 func (s txReadStore) GetCheckpoint(ctx context.Context, checkpointId CheckpointId) (*Checkpoint, error) {
-	checkpointBytes, err := s.reader.Milestone(ctx, s.tx, uint64(checkpointId))
+	checkpointBytes, err := s.reader.Checkpoint(ctx, s.tx, uint64(checkpointId))
 	if err != nil {
 		return nil, err
 	}

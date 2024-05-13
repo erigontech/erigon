@@ -89,7 +89,7 @@ func (test heimdallTest) setupCheckpoints(count int) []*Checkpoint {
 	} else {
 		client.EXPECT().
 			FetchCheckpoints(gomock.Any(), gomock.Any(), gomock.Any()).
-			DoAndReturn(func(ctx context.Context, page uint64, limit uint64) (Checkpoints, error) {
+			DoAndReturn(func(ctx context.Context, page uint64, limit uint64) ([]*Checkpoint, error) {
 				if page == 0 {
 					return nil, nil
 				}

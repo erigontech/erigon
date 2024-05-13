@@ -47,7 +47,7 @@ type HeimdallClient interface {
 
 	FetchCheckpoint(ctx context.Context, number int64) (*Checkpoint, error)
 	FetchCheckpointCount(ctx context.Context) (int64, error)
-	FetchCheckpoints(ctx context.Context, page uint64, limit uint64) (Checkpoints, error)
+	FetchCheckpoints(ctx context.Context, page uint64, limit uint64) ([]*Checkpoint, error)
 	FetchMilestone(ctx context.Context, number int64) (*Milestone, error)
 	FetchMilestoneCount(ctx context.Context) (int64, error)
 
@@ -250,7 +250,7 @@ func (c *Client) FetchCheckpoint(ctx context.Context, number int64) (*Checkpoint
 	return &response.Result, nil
 }
 
-func (c *Client) FetchCheckpoints(ctx context.Context, page uint64, limit uint64) (Checkpoints, error) {
+func (c *Client) FetchCheckpoints(ctx context.Context, page uint64, limit uint64) ([]*Checkpoint, error) {
 	url, err := checkpointListURL(c.urlString, page, limit)
 	if err != nil {
 		return nil, err
