@@ -561,6 +561,11 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 	return false, 0
 }
 
+// it is assumed files are always sorted
+func (iit *InvertedIndexRoTx) lastTxNumInFiles() uint64 {
+	return iit.files[len(iit.files)-1].endTxNum
+}
+
 // IdxRange - return range of txNums for given `key`
 // is to be used in public API, therefore it relies on read-only transaction
 // so that iteration can be done even when the inverted index is being updated.
@@ -580,12 +585,12 @@ func (iit *InvertedIndexRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc
 func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.U64, error) {
 	//optimization: return empty pre-allocated iterator if range is frozen
 	if asc {
-		isFrozenRange := len(iit.files) > 0 && endTxNum >= 0 && iit.files[len(iit.files)-1].endTxNum >= uint64(endTxNum)
+		isFrozenRange := len(iit.files) > 0 && endTxNum >= 0 && iit.lastTxNumInFiles() >= uint64(endTxNum)
 		if isFrozenRange {
 			return iter.EmptyU64, nil
 		}
 	} else {
-		isFrozenRange := len(iit.files) > 0 && startTxNum >= 0 && iit.files[len(iit.files)-1].endTxNum >= uint64(startTxNum)
+		isFrozenRange := len(iit.files) > 0 && startTxNum >= 0 && iit.lastTxNumInFiles() >= uint64(startTxNum)
 		if isFrozenRange {
 			return iter.EmptyU64, nil
 		}
