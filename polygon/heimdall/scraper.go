@@ -9,6 +9,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
@@ -18,7 +19,16 @@ type Scraper struct {
 
 	client    HeimdallClient
 	pollDelay time.Duration
-	logger    log.Logger
+
+	checkpointObservers *polygoncommon.Observers[[]*Checkpoint]
+	milestoneObservers  *polygoncommon.Observers[[]*Milestone]
+	spanObservers       *polygoncommon.Observers[[]*Span]
+
+	checkpointSyncEvent *polygoncommon.EventNotifier
+	milestoneSyncEvent  *polygoncommon.EventNotifier
+	spanSyncEvent       *polygoncommon.EventNotifier
+
+	logger log.Logger
 }
 
 func NewScraperTODO(
@@ -49,7 +59,16 @@ func NewScraper(
 
 		client:    client,
 		pollDelay: pollDelay,
-		logger:    logger,
+
+		checkpointObservers: polygoncommon.NewObservers[[]*Checkpoint](),
+		milestoneObservers:  polygoncommon.NewObservers[[]*Milestone](),
+		spanObservers:       polygoncommon.NewObservers[[]*Span](),
+
+		checkpointSyncEvent: polygoncommon.NewEventNotifier(),
+		milestoneSyncEvent:  polygoncommon.NewEventNotifier(),
+		spanSyncEvent:       polygoncommon.NewEventNotifier(),
+
+		logger: logger,
 	}
 }
 
@@ -57,7 +76,8 @@ func (s *Scraper) syncEntity(
 	ctx context.Context,
 	store entityStore,
 	fetcher entityFetcher,
-	callback func(ClosedRange),
+	callback func([]Entity),
+	syncEvent *polygoncommon.EventNotifier,
 ) error {
 	for ctx.Err() == nil {
 		lastKnownId, hasLastKnownId, err := store.GetLastEntityId(ctx)
@@ -78,7 +98,11 @@ func (s *Scraper) syncEntity(
 		}
 
 		if idRange.Start > idRange.End {
+			syncEvent.SetAndBroadcast()
 			libcommon.Sleep(ctx, s.pollDelay)
+			if ctx.Err() != nil {
+				syncEvent.Reset()
+			}
 		} else {
 			entities, err := fetcher.FetchEntitiesRange(ctx, idRange)
 			if err != nil {
@@ -92,7 +116,7 @@ func (s *Scraper) syncEntity(
 			}
 
 			if callback != nil {
-				go callback(idRange)
+				go callback(entities)
 			}
 		}
 	}
@@ -165,6 +189,36 @@ func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher {
 	)
 }
 
+func downcastCheckpointEntity(e Entity) *Checkpoint {
+	return e.(*Checkpoint)
+}
+
+func downcastMilestoneEntity(e Entity) *Milestone {
+	return e.(*Milestone)
+}
+
+func downcastSpanEntity(e Entity) *Span {
+	return e.(*Span)
+}
+
+func (s *Scraper) RegisterCheckpointObserver(observer func([]*Checkpoint)) polygoncommon.UnregisterFunc {
+	return s.checkpointObservers.Register(observer)
+}
+
+func (s *Scraper) RegisterMilestoneObserver(observer func([]*Milestone)) polygoncommon.UnregisterFunc {
+	return s.milestoneObservers.Register(observer)
+}
+
+func (s *Scraper) RegisterSpanObserver(observer func([]*Span)) polygoncommon.UnregisterFunc {
+	return s.spanObservers.Register(observer)
+}
+
+func (s *Scraper) Synchronize(ctx context.Context) {
+	s.checkpointSyncEvent.Wait(ctx)
+	s.milestoneSyncEvent.Wait(ctx)
+	s.spanSyncEvent.Wait(ctx)
+}
+
 func (s *Scraper) Run(parentCtx context.Context) error {
 	tx := s.txProvider()
 	if tx == nil {
@@ -183,16 +237,48 @@ func (s *Scraper) Run(parentCtx context.Context) error {
 
 	// sync checkpoints
 	group.Go(func() error {
-		return s.syncEntity(ctx, newCheckpointStore(tx, reader), newCheckpointFetcher(s.client, s.logger), nil /* TODO */)
+		return s.syncEntity(
+			ctx,
+			newCheckpointStore(tx, reader),
+			newCheckpointFetcher(s.client, s.logger),
+			func(entities []Entity) {
+				s.checkpointObservers.Notify(libcommon.SliceMap(entities, downcastCheckpointEntity))
+			},
+			s.checkpointSyncEvent,
+		)
 	})
+
 	// sync milestones
 	group.Go(func() error {
-		return s.syncEntity(ctx, newMilestoneStore(tx, reader), newMilestoneFetcher(s.client, s.logger), nil /* TODO */)
+		return s.syncEntity(
+			ctx,
+			newMilestoneStore(tx, reader),
+			newMilestoneFetcher(s.client, s.logger),
+			func(entities []Entity) {
+				s.milestoneObservers.Notify(libcommon.SliceMap(entities, downcastMilestoneEntity))
+			},
+			s.milestoneSyncEvent,
+		)
 	})
+
 	// sync spans
 	group.Go(func() error {
-		return s.syncEntity(ctx, newSpanStore(tx, reader), newSpanFetcher(s.client, s.logger), nil /* TODO */)
+		return s.syncEntity(
+			ctx,
+			newSpanStore(tx, reader),
+			newSpanFetcher(s.client, s.logger),
+			func(entities []Entity) {
+				s.spanObservers.Notify(libcommon.SliceMap(entities, downcastSpanEntity))
+			},
+			s.spanSyncEvent,
+		)
 	})
+
+	defer func() {
+		s.checkpointObservers.Close()
+		s.milestoneObservers.Close()
+		s.spanObservers.Close()
+	}()
 
 	return group.Wait()
 }
