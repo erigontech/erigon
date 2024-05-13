@@ -92,7 +92,7 @@ func (f *genericEntityFetcher[TEntity]) FetchAllEntities(ctx context.Context) ([
 	progressLogTicker := time.NewTicker(30 * time.Second)
 	defer progressLogTicker.Stop()
 
-	for page := uint64(1); page < 10_000; page++ {
+	for page := uint64(1); ; page++ {
 		entitiesPage, err := f.fetchEntitiesPage(ctx, page, 10_000)
 		if err != nil {
 			return nil, err
