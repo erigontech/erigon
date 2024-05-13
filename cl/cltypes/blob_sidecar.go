@@ -21,7 +21,7 @@ type BlobSidecar struct {
 	KzgCommitment            libcommon.Bytes48        `json:"kzg_commitment"`
 	KzgProof                 libcommon.Bytes48        `json:"kzg_proof"`
 	SignedBlockHeader        *SignedBeaconBlockHeader `json:"signed_block_header"`
-	CommitmentInclusionProof solid.HashVectorSSZ      `json:"proof"`
+	CommitmentInclusionProof solid.HashVectorSSZ      `json:"kzg_commitment_inclusion_proof"`
 }
 
 func NewBlobSidecar(index uint64, blob *Blob, kzgCommitment libcommon.Bytes48, kzgProof libcommon.Bytes48, signedBlockHeader *SignedBeaconBlockHeader, commitmentInclusionProof solid.HashVectorSSZ) *BlobSidecar {
