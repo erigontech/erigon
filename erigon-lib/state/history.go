@@ -123,7 +123,7 @@ func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTabl
 	}
 	h._visibleFiles = []ctxItem{}
 	var err error
-	h.InvertedIndex, err = NewInvertedIndex(cfg.iiCfg, aggregationStep, filenameBase, indexKeysTable, indexTable, cfg.withExistenceIndex, func(fromStep, toStep uint64) bool { return dir.FileExist(h.vFilePath(fromStep, toStep)) }, logger)
+	h.InvertedIndex, err = NewInvertedIndex(cfg.iiCfg, aggregationStep, filenameBase, indexKeysTable, indexTable, func(fromStep, toStep uint64) bool { return dir.FileExist(h.vFilePath(fromStep, toStep)) }, logger)
 	if err != nil {
 		return nil, fmt.Errorf("NewHistory: %s, %w", filenameBase, err)
 	}
