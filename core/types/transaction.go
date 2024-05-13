@@ -168,12 +168,10 @@ func DecodeTransaction(data []byte) (Transaction, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	_, _, err = s.Kind()
-	if err != nil && errors.Is(err, io.EOF) {
-		return tx, nil
+	if s.Remaining() != 0 {
+		return nil, fmt.Errorf("trailing bytes after rlp encoded transaction")
 	}
-	return nil, fmt.Errorf("trailing bytes after rlp encoded transaction")
+	return tx, nil
 }
 
 // Parse transaction without envelope.
@@ -188,11 +186,17 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 		if err := t.DecodeRLP(s); err != nil {
 			return nil, err
 		}
+		if s.Remaining() != 0 {
+			return nil, fmt.Errorf("trailing bytes after rlp encoded transaction")
+		}
 		return t, nil
 	case DynamicFeeTxType:
 		t := &DynamicFeeTransaction{}
 		if err := t.DecodeRLP(s); err != nil {
 			return nil, err
+		}
+		if s.Remaining() != 0 {
+			return nil, fmt.Errorf("trailing bytes after rlp encoded transaction")
 		}
 		return t, nil
 	case BlobTxType:
@@ -201,11 +205,17 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 			if err := t.DecodeRLP(s); err != nil {
 				return nil, err
 			}
+			if s.Remaining() != 0 {
+				return nil, fmt.Errorf("trailing bytes after rlp encoded transaction")
+			}
 			return t, nil
 		} else {
 			t := &BlobTx{}
 			if err := t.DecodeRLP(s); err != nil {
 				return nil, err
+			}
+			if s.Remaining() != 0 {
+				return nil, fmt.Errorf("trailing bytes after rlp encoded transaction")
 			}
 			return t, nil
 		}
