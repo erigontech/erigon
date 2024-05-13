@@ -610,13 +610,6 @@ func ExecV3(ctx context.Context,
 	var b *types.Block
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
-		if !hasPrunedBeforeCommit {
-			// We need speed here.
-			if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Minute, applyTx); err != nil {
-				return err
-			}
-			hasPrunedBeforeCommit = true
-		}
 
 		//time.Sleep(50 * time.Microsecond)
 		if !parallel {
@@ -877,6 +870,13 @@ Loop:
 				if blocksFreezeCfg.Produce {
 					//log.Info(fmt.Sprintf("[snapshots] db has steps amount: %s", agg.StepsRangeInDBAsStr(applyTx)))
 					agg.BuildFilesInBackground(outputTxNum.Load())
+				}
+				if !hasPrunedBeforeCommit {
+					// We need speed here.
+					if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Minute, applyTx); err != nil {
+						return err
+					}
+					hasPrunedBeforeCommit = true
 				}
 				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
 					return err
