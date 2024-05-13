@@ -42,8 +42,8 @@ import (
 
 func (d *Domain) dirtyFilesEndTxNumMinimax() uint64 {
 	minimax := d.History.endTxNumMinimax()
-	if max, ok := d.dirtyFiles.Max(); ok {
-		endTxNum := max.endTxNum
+	if _max, ok := d.dirtyFiles.Max(); ok {
+		endTxNum := _max.endTxNum
 		if minimax == 0 || endTxNum < minimax {
 			minimax = endTxNum
 		}
@@ -53,8 +53,8 @@ func (d *Domain) dirtyFilesEndTxNumMinimax() uint64 {
 
 func (ii *InvertedIndex) endTxNumMinimax() uint64 {
 	var minimax uint64
-	if max, ok := ii.dirtyFiles.Max(); ok {
-		endTxNum := max.endTxNum
+	if _max, ok := ii.dirtyFiles.Max(); ok {
+		endTxNum := _max.endTxNum
 		if minimax == 0 || endTxNum < minimax {
 			minimax = endTxNum
 		}
@@ -62,17 +62,17 @@ func (ii *InvertedIndex) endTxNumMinimax() uint64 {
 	return minimax
 }
 func (ii *InvertedIndex) endIndexedTxNumMinimax(needFrozen bool) uint64 {
-	var max uint64
+	var _max uint64
 	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.index == nil || (needFrozen && !item.frozen) {
 				continue
 			}
-			max = cmp.Max(max, item.endTxNum)
+			_max = cmp.Max(_max, item.endTxNum)
 		}
 		return true
 	})
-	return max
+	return _max
 }
 
 func (h *History) endTxNumMinimax() uint64 {
@@ -80,8 +80,8 @@ func (h *History) endTxNumMinimax() uint64 {
 		return math.MaxUint64
 	}
 	minimax := h.InvertedIndex.endTxNumMinimax()
-	if max, ok := h.dirtyFiles.Max(); ok {
-		endTxNum := max.endTxNum
+	if _max, ok := h.dirtyFiles.Max(); ok {
+		endTxNum := _max.endTxNum
 		if minimax == 0 || endTxNum < minimax {
 			minimax = endTxNum
 		}
@@ -89,20 +89,20 @@ func (h *History) endTxNumMinimax() uint64 {
 	return minimax
 }
 func (h *History) endIndexedTxNumMinimax(needFrozen bool) uint64 {
-	var max uint64
+	var _max uint64
 	if h.dontProduceHistoryFiles && h.dirtyFiles.Len() == 0 {
-		max = math.MaxUint64
+		_max = math.MaxUint64
 	}
 	h.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.index == nil || (needFrozen && !item.frozen) {
 				continue
 			}
-			max = cmp.Max(max, item.endTxNum)
+			_max = cmp.Max(_max, item.endTxNum)
 		}
 		return true
 	})
-	return cmp.Min(max, h.InvertedIndex.endIndexedTxNumMinimax(needFrozen))
+	return cmp.Min(_max, h.InvertedIndex.endIndexedTxNumMinimax(needFrozen))
 }
 
 type DomainRanges struct {
@@ -315,19 +315,19 @@ func (ht *HistoryRoTx) maxTxNumInFiles(cold bool) uint64 {
 	if len(ht.files) == 0 {
 		return 0
 	}
-	var max uint64
+	var _max uint64
 	if cold {
 		for i := len(ht.files) - 1; i >= 0; i-- {
 			if !ht.files[i].src.frozen {
 				continue
 			}
-			max = ht.files[i].endTxNum
+			_max = ht.files[i].endTxNum
 			break
 		}
 	} else {
-		max = ht.files[len(ht.files)-1].endTxNum
+		_max = ht.files[len(ht.files)-1].endTxNum
 	}
-	return cmp.Min(max, ht.iit.maxTxNumInFiles(cold))
+	return cmp.Min(_max, ht.iit.maxTxNumInFiles(cold))
 }
 func (iit *InvertedIndexRoTx) maxTxNumInFiles(cold bool) uint64 {
 	if len(iit.files) == 0 {
