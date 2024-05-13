@@ -799,8 +799,9 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			var legacyExecutors []legacy_executor_verifier.ILegacyExecutor
 			if len(cfg.ExecutorUrls) > 0 && cfg.ExecutorUrls[0] != "" {
 				levCfg := legacy_executor_verifier.Config{
-					GrpcUrls: cfg.ExecutorUrls,
-					Timeout:  time.Second * 5,
+					GrpcUrls:              cfg.ExecutorUrls,
+					Timeout:               cfg.ExecutorRequestTimeout,
+					MaxConcurrentRequests: cfg.ExecutorMaxConcurrentRequests,
 				}
 				executors := legacy_executor_verifier.NewExecutors(levCfg)
 				for _, e := range executors {
@@ -817,8 +818,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				backend.l1Syncer,
 				backend.dataStream,
 			)
-
-			verifier.StartWork()
 
 			// we need to make sure the pool is always aware of the latest block for when
 			// we switch context from being an RPC node to a sequencer

@@ -97,6 +97,8 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		SequencerNonEmptyBatchSealTime:         sequencerNonEmptyBatchSealTime,
 		ExecutorUrls:                           strings.Split(ctx.String(utils.ExecutorUrls.Name), ","),
 		ExecutorStrictMode:                     ctx.Bool(utils.ExecutorStrictMode.Name),
+		ExecutorRequestTimeout:                 ctx.Duration(utils.ExecutorRequestTimeout.Name),
+		ExecutorMaxConcurrentRequests:          ctx.Int(utils.ExecutorMaxConcurrentRequests.Name),
 		L1QueryBlocksThreads:                   ctx.Uint64(utils.L1QueryBlocksThreads.Name),
 		AllowFreeTransactions:                  ctx.Bool(utils.AllowFreeTransactions.Name),
 		AllowPreEIP155Transactions:             ctx.Bool(utils.AllowPreEIP155Transactions.Name),

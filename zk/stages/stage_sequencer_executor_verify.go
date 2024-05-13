@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/legacy_executor_verifier"
 	"github.com/ledgerwatch/erigon/zk/txpool"
 	"github.com/ledgerwatch/log/v3"
+	"fmt"
 )
 
 type SequencerExecutorVerifyCfg struct {
@@ -86,16 +87,19 @@ func SpawnSequencerExecutorVerifyStage(
 		return nil
 	}
 
-	// get the latest responses from the verifier then sort them, so we can make sure we're handling verifications
-	// in order
-	responses := cfg.verifier.GetAllResponses()
-
-	// sort responses by batch number in ascending order
-	sort.Slice(responses, func(i, j int) bool {
-		return responses[i].BatchNumber < responses[j].BatchNumber
-	})
+	// get ordered promises from the verifier
+	// NB: this call is where the stream write happens (so it will be delayed until this stage is run)
+	responses, err := cfg.verifier.ConsumeResultsUnsafe(tx)
+	if err != nil {
+		return err
+	}
 
 	for _, response := range responses {
+		if response == nil {
+			// something went wrong in the verification process (but not a failed verification)
+			return fmt.Errorf("verifier failed (but not due to verification)")
+		}
+
 		// ensure that the first response is the next batch based on the current stage progress
 		// otherwise just return early until we get it
 		if response.BatchNumber != progress+1 {
@@ -136,9 +140,6 @@ func SpawnSequencerExecutorVerifyStage(
 			log.Warn("Failed to write witness", "batch", response.BatchNumber, "err", errWitness)
 		}
 
-		// now let the verifier know we have got this message, so it can release it
-		cfg.verifier.RemoveResponse(response.BatchNumber)
-		cfg.verifier.MarkRequestAsHandled(response.BatchNumber)
 		progress = response.BatchNumber
 	}
 
@@ -150,7 +151,7 @@ func SpawnSequencerExecutorVerifyStage(
 				return err
 			}
 		} else {
-			if cfg.verifier.IsRequestAdded(batch) {
+			if cfg.verifier.IsRequestAddedUnsafe(batch) {
 				continue
 			}
 
@@ -178,7 +179,10 @@ func SpawnSequencerExecutorVerifyStage(
 				return err
 			}
 
-			cfg.verifier.AddRequest(&legacy_executor_verifier.VerifierRequest{BatchNumber: batch, ForkId: forkId, StateRoot: block.Root(), Counters: counters})
+			_, addErr := cfg.verifier.AddRequestUnsafe(ctx, tx, &legacy_executor_verifier.VerifierRequest{BatchNumber: batch, ForkId: forkId, StateRoot: block.Root(), Counters: counters})
+			if addErr != nil {
+				log.Error("Failed to add request to verifier", "batch", batch, "err", addErr)
+			}
 		}
 	}
 

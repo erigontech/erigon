@@ -50,30 +50,41 @@ func TestExecutor_Verify(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockClient := &mockExecutorServiceClient{
-				shouldError: tt.shouldError,
-			}
+		go func(tt struct {
+			name              string
+			expectedStateRoot *common.Hash
+			shouldError       bool
+			wantErr           bool
+		}) {
+			t.Run(tt.name, func(t *testing.T) {
+				mockClient := &mockExecutorServiceClient{
+					shouldError: tt.shouldError,
+				}
 
-			executor := &Executor{
-				client: mockClient,
-			}
+				executor := &Executor{
+					grpcUrl:    "",
+					conn:       nil,
+					connCancel: nil,
+					client:     mockClient,
+					semaphore:  make(chan struct{}),
+				}
 
-			payload := &Payload{
-				Witness:           []byte{0, 1},
-				DataStream:        []byte{2, 3},
-				Coinbase:          "0x000000000",
-				OldAccInputHash:   []byte{4, 5},
-				L1InfoRoot:        []byte{6, 7},
-				TimestampLimit:    100,
-				ForcedBlockhashL1: []byte{8, 9},
-				ContextId:         "cdk-erigon-test",
-			}
+				payload := &Payload{
+					Witness:           []byte{0, 1},
+					DataStream:        []byte{2, 3},
+					Coinbase:          "0x000000000",
+					OldAccInputHash:   []byte{4, 5},
+					L1InfoRoot:        []byte{6, 7},
+					TimestampLimit:    100,
+					ForcedBlockhashL1: []byte{8, 9},
+					ContextId:         "cdk-erigon-test",
+				}
 
-			_, err := executor.Verify(payload, &VerifierRequest{StateRoot: *tt.expectedStateRoot}, common.Hash{})
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Executor.Verify() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
+				_, err := executor.Verify(payload, &VerifierRequest{StateRoot: *tt.expectedStateRoot}, common.Hash{})
+				if (err != nil) != tt.wantErr {
+					t.Errorf("Executor.Verify() error = %v, wantErr %v", err, tt.wantErr)
+				}
+			})
+		}(tt)
 	}
 }
