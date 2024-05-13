@@ -923,7 +923,6 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int) error {
 		hph.currentKeyLen++
 	}
 	row := hph.activeRows
-	mxDepthUnfolded.Observe(float64(row))
 	for i := 0; i < 16; i++ {
 		hph.grid[row][i].reset()
 	}
@@ -934,6 +933,7 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int) error {
 	if upCell.downHashedLen == 0 {
 		// root unfolded
 		depth = upDepth + 1
+		mxDepthUnfolded.Observe(float64(row))
 		if unfolded, err := hph.unfoldBranchNode(row, touched && !present /* deleted */, depth); err != nil {
 			return err
 		} else if !unfolded {
@@ -997,9 +997,6 @@ func (hph *HexPatriciaHashed) needFolding(hashedKey []byte) bool {
 // until that current key becomes a prefix of hashedKey that we will proccess next
 // (in other words until the needFolding function returns 0)
 func (hph *HexPatriciaHashed) fold() (err error) {
-	sf := time.Now()
-	defer mxFoldingTook.ObserveDuration(sf)
-
 	updateKeyLen := hph.currentKeyLen
 	if hph.activeRows == 0 {
 		return fmt.Errorf("cannot fold - no active rows")

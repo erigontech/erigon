@@ -12,6 +12,7 @@ import (
 	"golang.org/x/crypto/sha3"
 	"math/bits"
 	"strings"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/log/v3"
@@ -23,9 +24,8 @@ import (
 var (
 	mxKeys                 = metrics.GetOrCreateCounter("domain_commitment_keys")
 	mxBranchUpdatesApplied = metrics.GetOrCreateCounter("domain_commitment_updates_applied")
-	mxDepthUnfolded        = metrics.GetOrCreateHistogram("domain_commitment_depth")
-	mxFoldingTook          = metrics.GetOrCreateHistogram("domain_commitment_folding_took")
-	mxUnfoldingTook        = metrics.GetOrCreateHistogram("domain_commitment_unfolding_took")
+	mxDepthUnfolded        = metrics.NewHistogram("domain_commitment_depth", []float64{2, 4, 8, 12, 16, 24, 32, 40, 48, 56, 64, 72, 80, 90, 100, 108, 116, 128})
+	mxUnfoldingTook        = metrics.NewHistogram("domain_commitment_unfolding_took", []float64{float64(time.Millisecond * 10), float64(time.Millisecond * 100), float64(time.Millisecond * 200), float64(time.Millisecond * 300), float64(time.Millisecond * 500), float64(time.Second), float64(time.Second * 2), float64(time.Second * 5), float64(time.Second * 10)})
 )
 
 // Trie represents commitment variant.
