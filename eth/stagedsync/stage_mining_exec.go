@@ -184,9 +184,6 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	if current.Receipts == nil {
 		current.Receipts = types.Receipts{}
 	}
-	if current.Requests == nil {
-		current.Requests = types.Requests{}
-	}
 
 	var err error
 	_, current.Txs, current.Receipts, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txs, current.Uncles, &state.NoopWriter{}, &cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, current.Requests, ChainReaderImpl{config: &cfg.chainConfig, tx: txc.Tx, blockReader: cfg.blockReader, logger: logger}, true, logger)
