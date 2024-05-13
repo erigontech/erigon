@@ -606,14 +606,18 @@ func ExecV3(ctx context.Context,
 	}
 
 	//fmt.Printf("exec blocks: %d -> %d\n", blockNum, maxBlockNum)
-
+	hasPrunedBeforeCommit := false
 	var b *types.Block
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
-		// We need speed here.
-		if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Minute, applyTx); err != nil {
-			return err
+		if !hasPrunedBeforeCommit {
+			// We need speed here.
+			if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Minute, applyTx); err != nil {
+				return err
+			}
+			hasPrunedBeforeCommit = true
 		}
+
 		//time.Sleep(50 * time.Microsecond)
 		if !parallel {
 			select {
@@ -891,6 +895,7 @@ Loop:
 					applyTx.CollectMetrics()
 					if !useExternalTx {
 						tt = time.Now()
+						hasPrunedBeforeCommit = false
 						if err = applyTx.Commit(); err != nil {
 							return err
 						}
