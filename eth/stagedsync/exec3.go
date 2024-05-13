@@ -173,18 +173,6 @@ func ExecV3(ctx context.Context,
 	applyTx := txc.Tx
 	useExternalTx := applyTx != nil
 
-	//very aggressive prune, because:
-	// if prune is slow - means DB > RAM and skip pruning will only make things worse
-	// db will grow -> prune will get slower -> db will grow -> ...
-	if !useExternalTx {
-		aggCtx := agg.BeginFilesRo()
-		defer aggCtx.Close()
-		if _, err := aggCtx.PruneSmallBatchesDb(ctx, 10*time.Minute, chainDb); err != nil {
-			return err
-		}
-		aggCtx.Close()
-	}
-
 	if !useExternalTx && !parallel {
 		var err error
 		applyTx, err = chainDb.BeginRw(ctx) //nolint
@@ -194,13 +182,6 @@ func ExecV3(ctx context.Context,
 		defer func() { // need callback - because tx may be committed
 			applyTx.Rollback()
 		}()
-	}
-
-	if useExternalTx {
-		// We need speed here.
-		if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, time.Second, applyTx); err != nil {
-			return err
-		}
 	}
 
 	inMemExec := txc.Doms != nil
@@ -629,6 +610,10 @@ func ExecV3(ctx context.Context,
 	var b *types.Block
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
+		// We need speed here.
+		if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Minute, applyTx); err != nil {
+			return err
+		}
 		//time.Sleep(50 * time.Microsecond)
 		if !parallel {
 			select {
@@ -916,14 +901,14 @@ Loop:
 						defer aggCtx.Close()
 
 						tt = time.Now()
-						// for haveMoreToPrune := true; haveMoreToPrune; {
-						//very aggressive prune, because:
-						// if prune is slow - means DB > RAM and skip pruning will only make things worse
-						// db will grow -> prune will get slower -> db will grow -> ...
-						// if haveMoreToPrune, err = aggCtx.PruneSmallBatchesDb(ctx, 10*time.Minute, chainDb); err != nil {
-						// 	return err
-						// }
-						//}
+						for haveMoreToPrune := true; haveMoreToPrune; {
+							//very aggressive prune, because:
+							// if prune is slow - means DB > RAM and skip pruning will only make things worse
+							// db will grow -> prune will get slower -> db will grow -> ...
+							if haveMoreToPrune, err = aggCtx.PruneSmallBatchesDb(ctx, 10*time.Minute, chainDb); err != nil {
+								return err
+							}
+						}
 
 						t3 = time.Since(tt)
 
