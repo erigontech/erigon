@@ -851,12 +851,6 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 			return HistoryFiles{}, err
 		}
 	}
-	if h.InvertedIndex.withExistenceIndex {
-		existenceIdxPath := h.efExistenceIdxFilePath(step, step+1)
-		if efExistence, err = buildIndexFilterThenOpen(ctx, efHistoryDecomp, h.compression, existenceIdxPath, h.dirs.Tmp, h.salt, ps, h.logger, h.noFsync); err != nil {
-			return HistoryFiles{}, fmt.Errorf("build %s .ef history idx: %w", h.filenameBase, err)
-		}
-	}
 
 	historyDecomp, err = seg.NewDecompressor(collation.historyPath)
 	if err != nil {

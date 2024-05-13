@@ -807,13 +807,6 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 		return nil, err
 	}
 
-	if iit.ii.withExistenceIndex {
-		idxPath := iit.ii.efExistenceIdxFilePath(fromStep, toStep)
-		if outItem.existence, err = buildIndexFilterThenOpen(ctx, outItem.decompressor, iit.ii.compression, idxPath, iit.ii.dirs.Tmp, iit.ii.salt, ps, iit.ii.logger, iit.ii.noFsync); err != nil {
-			return nil, err
-		}
-	}
-
 	closeItem = false
 	return outItem, nil
 }
