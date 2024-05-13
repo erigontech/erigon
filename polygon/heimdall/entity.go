@@ -1,5 +1,5 @@
 package heimdall
 
-type entity interface {
-	Checkpoint | Milestone | Span
+type Entity interface {
+	BlockNumRange() ClosedRange
 }

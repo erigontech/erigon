@@ -100,41 +100,51 @@ func (s *Scraper) syncEntity(
 }
 
 func newCheckpointStore(tx kv.RwTx, reader services.BorCheckpointReader) entityStore {
-	return newGenericEntityStore[Checkpoint](tx, kv.BorCheckpoints, reader.LastCheckpointId, reader.Checkpoint)
+	makeEntity := func() Entity { return new(Checkpoint) }
+	return newEntityStore(tx, kv.BorCheckpoints, makeEntity, reader.LastCheckpointId, reader.Checkpoint)
 }
 
 func newMilestoneStore(tx kv.RwTx, reader services.BorMilestoneReader) entityStore {
-	return newGenericEntityStore[Milestone](tx, kv.BorMilestones, reader.LastMilestoneId, reader.Milestone)
+	makeEntity := func() Entity { return new(Milestone) }
+	return newEntityStore(tx, kv.BorMilestones, makeEntity, reader.LastMilestoneId, reader.Milestone)
 }
 
 func newSpanStore(tx kv.RwTx, reader services.BorSpanReader) entityStore {
-	return newGenericEntityStore[Span](tx, kv.BorSpans, reader.LastSpanId, reader.Span)
+	makeEntity := func() Entity { return new(Span) }
+	return newEntityStore(tx, kv.BorSpans, makeEntity, reader.LastSpanId, reader.Span)
 }
 
 func newCheckpointFetcher(client HeimdallClient, logger log.Logger) entityFetcher {
-	return newGenericEntityFetcher[Checkpoint](
+	fetchEntity := func(ctx context.Context, id int64) (Entity, error) { return client.FetchCheckpoint(ctx, id) }
+
+	fetchEntitiesPage := func(ctx context.Context, page uint64, limit uint64) ([]Entity, error) {
+		entities, err := client.FetchCheckpoints(ctx, page, limit)
+		return libcommon.SliceMap(entities, func(c *Checkpoint) Entity { return c }), err
+	}
+
+	return newEntityFetcher(
 		"CheckpointFetcher",
 		client.FetchCheckpointCount,
-		client.FetchCheckpoint,
-		client.FetchCheckpoints,
-		func(entity *Checkpoint) uint64 { return entity.StartBlock().Uint64() },
+		fetchEntity,
+		fetchEntitiesPage,
 		logger,
 	)
 }
 
 func newMilestoneFetcher(client HeimdallClient, logger log.Logger) entityFetcher {
-	return newGenericEntityFetcher[Milestone](
+	fetchEntity := func(ctx context.Context, id int64) (Entity, error) { return client.FetchMilestone(ctx, id) }
+
+	return newEntityFetcher(
 		"MilestoneFetcher",
 		client.FetchMilestoneCount,
-		client.FetchMilestone,
+		fetchEntity,
 		nil,
-		func(entity *Milestone) uint64 { return entity.StartBlock().Uint64() },
 		logger,
 	)
 }
 
 func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher {
-	fetchLastSpanId := func(ctx context.Context) (int64, error) {
+	fetchLastEntityId := func(ctx context.Context) (int64, error) {
 		span, err := client.FetchLatestSpan(ctx)
 		if err != nil {
 			return 0, err
@@ -142,16 +152,15 @@ func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher {
 		return int64(span.Id), nil
 	}
 
-	fetchSpan := func(ctx context.Context, id int64) (*Span, error) {
+	fetchEntity := func(ctx context.Context, id int64) (Entity, error) {
 		return client.FetchSpan(ctx, uint64(id))
 	}
 
-	return newGenericEntityFetcher[Span](
+	return newEntityFetcher(
 		"SpanFetcher",
-		fetchLastSpanId,
-		fetchSpan,
+		fetchLastEntityId,
+		fetchEntity,
 		nil,
-		func(entity *Span) uint64 { return entity.StartBlock },
 		logger,
 	)
 }

@@ -12,44 +12,41 @@ import (
 
 type entityFetcher interface {
 	FetchLastEntityId(ctx context.Context) (uint64, error)
-	FetchEntitiesRange(ctx context.Context, idRange ClosedRange) ([]any, error)
+	FetchEntitiesRange(ctx context.Context, idRange ClosedRange) ([]Entity, error)
 }
 
-type genericEntityFetcher[TEntity entity] struct {
+type entityFetcherImpl struct {
 	name string
 
 	fetchLastEntityId func(ctx context.Context) (int64, error)
-	fetchEntity       func(ctx context.Context, id int64) (*TEntity, error)
-	fetchEntitiesPage func(ctx context.Context, page uint64, limit uint64) ([]*TEntity, error)
-	getStartBlockNum  func(entity *TEntity) uint64
+	fetchEntity       func(ctx context.Context, id int64) (Entity, error)
+	fetchEntitiesPage func(ctx context.Context, page uint64, limit uint64) ([]Entity, error)
 
 	logger log.Logger
 }
 
-func newGenericEntityFetcher[TEntity entity](
+func newEntityFetcher(
 	name string,
 	fetchLastEntityId func(ctx context.Context) (int64, error),
-	fetchEntity func(ctx context.Context, id int64) (*TEntity, error),
-	fetchEntitiesPage func(ctx context.Context, page uint64, limit uint64) ([]*TEntity, error),
-	getStartBlockNum func(entity *TEntity) uint64,
+	fetchEntity func(ctx context.Context, id int64) (Entity, error),
+	fetchEntitiesPage func(ctx context.Context, page uint64, limit uint64) ([]Entity, error),
 	logger log.Logger,
 ) entityFetcher {
-	return &genericEntityFetcher[TEntity]{
+	return &entityFetcherImpl{
 		name:              name,
 		fetchLastEntityId: fetchLastEntityId,
 		fetchEntity:       fetchEntity,
 		fetchEntitiesPage: fetchEntitiesPage,
-		getStartBlockNum:  getStartBlockNum,
 		logger:            logger,
 	}
 }
 
-func (f *genericEntityFetcher[TEntity]) FetchLastEntityId(ctx context.Context) (uint64, error) {
+func (f *entityFetcherImpl) FetchLastEntityId(ctx context.Context) (uint64, error) {
 	id, err := f.fetchLastEntityId(ctx)
 	return uint64(id), err
 }
 
-func (f *genericEntityFetcher[TEntity]) FetchEntitiesRange(ctx context.Context, idRange ClosedRange) ([]any, error) {
+func (f *entityFetcherImpl) FetchEntitiesRange(ctx context.Context, idRange ClosedRange) ([]Entity, error) {
 	count := idRange.Len()
 
 	const batchFetchThreshold = 100
@@ -65,20 +62,20 @@ func (f *genericEntityFetcher[TEntity]) FetchEntitiesRange(ctx context.Context, 
 	return f.FetchEntitiesRangeSequentially(ctx, idRange)
 }
 
-func (f *genericEntityFetcher[TEntity]) FetchEntitiesRangeSequentially(ctx context.Context, idRange ClosedRange) ([]any, error) {
-	return idRange.Map(func(id uint64) (any, error) {
+func (f *entityFetcherImpl) FetchEntitiesRangeSequentially(ctx context.Context, idRange ClosedRange) ([]Entity, error) {
+	return ClosedRangeMap(idRange, func(id uint64) (Entity, error) {
 		return f.fetchEntity(ctx, int64(id))
 	})
 }
 
-func (f *genericEntityFetcher[TEntity]) FetchAllEntities(ctx context.Context) ([]any, error) {
+func (f *entityFetcherImpl) FetchAllEntities(ctx context.Context) ([]Entity, error) {
 	// TODO: once heimdall API is fixed to return sorted items in pages we can only fetch
 	//
 	//	the new pages after lastStoredCheckpointId using the checkpoints/list paging API
 	//	(for now we have to fetch all of them)
 	//	and also remove sorting we do after fetching
 
-	var entities []any
+	var entities []Entity
 
 	fetchStartTime := time.Now()
 	progressLogTicker := time.NewTicker(30 * time.Second)
@@ -109,9 +106,9 @@ func (f *genericEntityFetcher[TEntity]) FetchAllEntities(ctx context.Context) ([
 		}
 	}
 
-	slices.SortFunc(entities, func(e1, e2 any) int {
-		n1 := f.getStartBlockNum(e1.(*TEntity))
-		n2 := f.getStartBlockNum(e2.(*TEntity))
+	slices.SortFunc(entities, func(e1, e2 Entity) int {
+		n1 := e1.BlockNumRange().Start
+		n2 := e2.BlockNumRange().Start
 		return cmp.Compare(n1, n2)
 	})
 

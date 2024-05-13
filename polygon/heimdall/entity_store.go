@@ -10,51 +10,54 @@ import (
 
 type entityStore interface {
 	GetLastEntityId(ctx context.Context) (uint64, bool, error)
-	PutEntity(ctx context.Context, id uint64, entity any) error
+	PutEntity(ctx context.Context, id uint64, entity Entity) error
 }
 
-type genericEntityStore[TEntity entity] struct {
+type entityStoreImpl struct {
 	tx    kv.RwTx
 	table string
 
+	makeEntity      func() Entity
 	getLastEntityId func(ctx context.Context, tx kv.Tx) (uint64, bool, error)
 	loadEntityBytes func(ctx context.Context, tx kv.Getter, id uint64) ([]byte, error)
 }
 
-func newGenericEntityStore[TEntity entity](
+func newEntityStore(
 	tx kv.RwTx,
 	table string,
+	makeEntity func() Entity,
 	getLastEntityId func(ctx context.Context, tx kv.Tx) (uint64, bool, error),
 	loadEntityBytes func(ctx context.Context, tx kv.Getter, id uint64) ([]byte, error),
 ) entityStore {
-	return &genericEntityStore[TEntity]{
+	return &entityStoreImpl{
 		tx:    tx,
 		table: table,
 
+		makeEntity:      makeEntity,
 		getLastEntityId: getLastEntityId,
 		loadEntityBytes: loadEntityBytes,
 	}
 }
 
-func (s *genericEntityStore[TEntity]) GetLastEntityId(ctx context.Context) (uint64, bool, error) {
+func (s *entityStoreImpl) GetLastEntityId(ctx context.Context) (uint64, bool, error) {
 	return s.getLastEntityId(ctx, s.tx)
 }
 
-func (s *genericEntityStore[TEntity]) GetEntity(ctx context.Context, id uint64) (any, error) {
+func (s *entityStoreImpl) GetEntity(ctx context.Context, id uint64) (Entity, error) {
 	jsonBytes, err := s.loadEntityBytes(ctx, s.tx, id)
 	if err != nil {
 		return nil, err
 	}
 
-	var e TEntity
-	if err := json.Unmarshal(jsonBytes, &e); err != nil {
+	entity := s.makeEntity()
+	if err := json.Unmarshal(jsonBytes, entity); err != nil {
 		return nil, err
 	}
 
-	return &e, nil
+	return entity, nil
 }
 
-func (s *genericEntityStore[TEntity]) PutEntity(_ context.Context, id uint64, entity any) error {
+func (s *entityStoreImpl) PutEntity(_ context.Context, id uint64, entity Entity) error {
 	jsonBytes, err := json.Marshal(entity)
 	if err != nil {
 		return err
