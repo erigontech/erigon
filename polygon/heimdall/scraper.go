@@ -57,7 +57,7 @@ func (s *Scraper) syncEntity(
 	ctx context.Context,
 	store entityStore,
 	fetcher entityFetcher,
-	callback func(EntityIdRange),
+	callback func(ClosedRange),
 ) error {
 	for ctx.Err() == nil {
 		lastKnownId, hasLastKnownId, err := store.GetLastEntityId(ctx)
@@ -65,7 +65,7 @@ func (s *Scraper) syncEntity(
 			return err
 		}
 
-		var idRange EntityIdRange
+		var idRange ClosedRange
 		if hasLastKnownId {
 			idRange.Start = lastKnownId + 1
 		} else {

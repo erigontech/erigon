@@ -12,7 +12,7 @@ import (
 
 type entityFetcher interface {
 	FetchLastEntityId(ctx context.Context) (uint64, error)
-	FetchEntitiesRange(ctx context.Context, idRange EntityIdRange) ([]any, error)
+	FetchEntitiesRange(ctx context.Context, idRange ClosedRange) ([]any, error)
 }
 
 type genericEntityFetcher[TEntity entity] struct {
@@ -49,7 +49,7 @@ func (f *genericEntityFetcher[TEntity]) FetchLastEntityId(ctx context.Context) (
 	return uint64(id), err
 }
 
-func (f *genericEntityFetcher[TEntity]) FetchEntitiesRange(ctx context.Context, idRange EntityIdRange) ([]any, error) {
+func (f *genericEntityFetcher[TEntity]) FetchEntitiesRange(ctx context.Context, idRange ClosedRange) ([]any, error) {
 	count := idRange.Len()
 
 	const batchFetchThreshold = 100
@@ -65,7 +65,7 @@ func (f *genericEntityFetcher[TEntity]) FetchEntitiesRange(ctx context.Context, 
 	return f.FetchEntitiesRangeSequentially(ctx, idRange)
 }
 
-func (f *genericEntityFetcher[TEntity]) FetchEntitiesRangeSequentially(ctx context.Context, idRange EntityIdRange) ([]any, error) {
+func (f *genericEntityFetcher[TEntity]) FetchEntitiesRangeSequentially(ctx context.Context, idRange ClosedRange) ([]any, error) {
 	return idRange.Map(func(id uint64) (any, error) {
 		return f.fetchEntity(ctx, int64(id))
 	})
