@@ -168,8 +168,7 @@ func ExecV3(ctx context.Context,
 		agg.SetCompressWorkers(1)
 		agg.SetCollateAndBuildWorkers(1)
 	}
-	aggCtx := agg.BeginFilesRo()
-	defer aggCtx.Close()
+
 	applyTx := txc.Tx
 	useExternalTx := applyTx != nil
 
@@ -177,31 +176,31 @@ func ExecV3(ctx context.Context,
 	// if prune is slow - means DB > RAM and skip pruning will only make things worse
 	// db will grow -> prune will get slower -> db will grow -> ...
 	if !useExternalTx {
+		aggCtx := agg.BeginFilesRo()
+		defer aggCtx.Close()
 		if _, err := aggCtx.PruneSmallBatchesDb(ctx, 10*time.Minute, chainDb); err != nil {
 			return err
 		}
+		aggCtx.Close()
 	}
 
-	if !useExternalTx {
-		if !parallel {
-			var err error
-			applyTx, err = chainDb.BeginRw(ctx) //nolint
-			if err != nil {
-				return err
-			}
-			defer func() { // need callback - because tx may be committed
-				applyTx.Rollback()
-			}()
+	if !useExternalTx && !parallel {
+		var err error
+		applyTx, err = chainDb.BeginRw(ctx) //nolint
+		if err != nil {
+			return err
 		}
+		defer func() { // need callback - because tx may be committed
+			applyTx.Rollback()
+		}()
 	}
 
 	if useExternalTx {
 		// We need speed here.
-		if _, err := aggCtx.PruneSmallBatches(ctx, time.Second, applyTx); err != nil {
+		if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, time.Second, applyTx); err != nil {
 			return err
 		}
 	}
-	aggCtx.Close()
 
 	inMemExec := txc.Doms != nil
 	var doms *state2.SharedDomains
