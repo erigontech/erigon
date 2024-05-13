@@ -16,6 +16,7 @@ import (
 
 	ethTypes "github.com/ledgerwatch/erigon/core/types"
 	types "github.com/ledgerwatch/erigon/zk/rpcdaemon"
+	"github.com/ledgerwatch/erigon/rpc"
 )
 
 var (
@@ -245,7 +246,7 @@ func tryToLogL1QueryBlocks(logPrefix string, current, total, threadNum int, dura
 }
 
 func (s *L1Syncer) getLatestL1Block() (uint64, error) {
-	latestBlock, err := s.em.BlockByNumber(context.Background(), nil)
+	latestBlock, err := s.em.BlockByNumber(context.Background(), big.NewInt(rpc.FinalizedBlockNumber.Int64()))
 	if err != nil {
 		return 0, err
 	}
