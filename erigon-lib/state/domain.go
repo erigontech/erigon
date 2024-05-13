@@ -1134,9 +1134,9 @@ func buildIndex(ctx context.Context, d *seg.Decompressor, compressed FileCompres
 		rs.DisableFsync()
 	}
 
-	word := make([]byte, 0, 256)
 	var keyPos, valPos uint64
 	for {
+		word := make([]byte, 0, 256)
 		if err := ctx.Err(); err != nil {
 			return err
 		}
