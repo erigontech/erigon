@@ -165,7 +165,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	var requests types.Requests
-	if version >= clparams.CapellaVersion && req.DepositRequests != nil {
+	if version >= clparams.ElectraVersion && req.DepositRequests != nil {
 		requests = req.DepositRequests.ToRequests()
 	}
 
@@ -607,12 +607,12 @@ func (e *EngineServer) GetPayloadV3(ctx context.Context, payloadID hexutility.By
 	return e.getPayload(ctx, decodedPayloadId, clparams.DenebVersion)
 }
 
-// Same as [GetPayloadV3]
-// See https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_getpayloadv3
+// Same as [GetPayloadV3], but returning ExecutionPayloadV4 (= ExecutionPayloadV3 + requests)
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_getpayloadv4
 func (e *EngineServer) GetPayloadV4(ctx context.Context, payloadID hexutility.Bytes) (*engine_types.GetPayloadResponse, error) {
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
 	e.logger.Info("Received GetPayloadV4", "payloadId", decodedPayloadId)
-	return e.getPayload(ctx, decodedPayloadId, clparams.DenebVersion)
+	return e.getPayload(ctx, decodedPayloadId, clparams.ElectraVersion)
 }
 
 // Updates the forkchoice state after validating the headBlockHash
@@ -655,12 +655,12 @@ func (e *EngineServer) NewPayloadV3(ctx context.Context, payload *engine_types.E
 }
 
 // NewPayloadV4 processes new payloads (blocks) from the beacon chain with withdrawals, blob gas and requests.
-// See https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_newpayloadv4
 func (e *EngineServer) NewPayloadV4(ctx context.Context, payload *engine_types.ExecutionPayload,
 	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash) (*engine_types.PayloadStatus, error) {
 	// TODO(racytech): add proper version or refactor this part
 	// add all version ralated checks here so the newpayload doesn't have to deal with checks
-	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, clparams.DenebVersion+1)
+	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, clparams.ElectraVersion)
 }
 
 // Receives consensus layer's transition configuration and checks if the execution layer has the correct configuration.
