@@ -16,7 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/suite"
-	gomock "go.uber.org/mock/gomock"
+	"go.uber.org/mock/gomock"
 )
 
 type voluntaryExitTestSuite struct {

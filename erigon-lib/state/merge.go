@@ -955,14 +955,11 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 			TmpDir:     ht.h.dirs.Tmp,
 			IndexFile:  idxPath,
 			Salt:       ht.h.salt,
+			NoFsync:    ht.h.noFsync,
 		}, ht.h.logger); err != nil {
 			return nil, nil, fmt.Errorf("create recsplit: %w", err)
 		}
 		rs.LogLvl(log.LvlTrace)
-
-		if ht.h.noFsync {
-			rs.DisableFsync()
-		}
 
 		var (
 			txKey      [8]byte
