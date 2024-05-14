@@ -843,9 +843,6 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 			return nil, ctx.Err()
 		}
 	}
-	if !indexWithValues {
-		return stat, nil
-	}
 	// Close cursor to avoid spilling garbage to disk.
 	keysCursor.Close()
 	if err := idxAncientsCollector.Load(nil, "", func(key, txnm []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
@@ -855,6 +852,9 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		return nil
 	}, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return nil, err
+	}
+	if !indexWithValues {
+		return stat, nil
 	}
 
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
