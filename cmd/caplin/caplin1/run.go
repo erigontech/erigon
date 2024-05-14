@@ -38,7 +38,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
-	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/persistence/state/historical_states_reader"
@@ -60,7 +59,6 @@ import (
 )
 
 func OpenCaplinDatabase(ctx context.Context,
-	databaseConfig db_config.DatabaseConfiguration,
 	beaconConfig *clparams.BeaconChainConfig,
 	ethClock eth_clock.EthereumClock,
 	dbPath string,
@@ -88,10 +86,6 @@ func OpenCaplinDatabase(ctx context.Context,
 		return nil, nil, err
 	}
 	defer tx.Rollback()
-
-	if err := db_config.WriteConfigurationIfNotExist(ctx, tx, databaseConfig); err != nil {
-		return nil, nil, err
-	}
 
 	if err := tx.Commit(); err != nil {
 		return nil, nil, err
@@ -234,11 +228,6 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 	}
 	defer tx.Rollback()
 
-	dbConfig, err := db_config.ReadConfiguration(ctx, tx)
-	if err != nil {
-		return err
-	}
-
 	if err := state_accessors.InitializeStaticTables(tx, state); err != nil {
 		return err
 	}
@@ -310,7 +299,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 		log.Info("Beacon API started", "addr", config.BeaconRouter.Address)
 	}
 
-	stageCfg := stages.ClStagesCfg(beaconRpc, antiq, ethClock, beaconConfig, state, engine, gossipManager, forkChoice, indexDB, csn, rcsn, dirs.Tmp, dbConfig, backfilling, blobBackfilling, syncedDataManager, emitters, blobStorage, attestationProducer)
+	stageCfg := stages.ClStagesCfg(beaconRpc, antiq, ethClock, beaconConfig, state, engine, gossipManager, forkChoice, indexDB, csn, rcsn, dirs.Tmp, uint64(config.LoopBlockLimit), backfilling, blobBackfilling, syncedDataManager, emitters, blobStorage, attestationProducer)
 	sync := stages.ConsensusClStages(ctx, stageCfg)
 
 	logger.Info("[Caplin] starting clstages loop")

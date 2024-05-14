@@ -78,7 +78,6 @@ import (
 	libtypes "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format/getters"
 	clcore "github.com/ledgerwatch/erigon/cl/phase1/core"
 	executionclient "github.com/ledgerwatch/erigon/cl/phase1/execution_client"
@@ -939,7 +938,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			pruneBlobDistance = math.MaxUint64
 		}
 
-		indiciesDB, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, beaconCfg, ethClock, dirs.CaplinIndexing, dirs.CaplinBlobs, executionEngine, false, pruneBlobDistance)
+		indiciesDB, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, beaconCfg, ethClock, dirs.CaplinIndexing, dirs.CaplinBlobs, executionEngine, false, pruneBlobDistance)
 		if err != nil {
 			return nil, err
 		}
