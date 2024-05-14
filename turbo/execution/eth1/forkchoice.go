@@ -256,6 +256,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		fmt.Println("newCanonicals", len(newCanonicals))
 
 		if err := e.executionPipeline.UnwindTo(currentParentNumber, stagedsync.ForkChoice, tx); err != nil {
+			fmt.Println("ADD", err)
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
