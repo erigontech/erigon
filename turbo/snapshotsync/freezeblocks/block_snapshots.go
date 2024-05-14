@@ -1455,7 +1455,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, max
 		if includeBor {
 			minBorBlockNum := cmp.Max(br.blockReader.FrozenBorBlocks(), minBlockNum)
 			okBor, err = br.retireBorBlocks(ctx, minBorBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
-			log.Warn("[dbg] retireBorBlocks1", "minBorBlockNum", minBorBlockNum, "maxBlockNum", maxBlockNumm, "okBor", okBor)
+			log.Warn("[dbg] retireBorBlocks2", "minBorBlockNum", minBorBlockNum, "maxBlockNum", maxBlockNum, "okBor", okBor)
 			if err != nil {
 				return err
 			}
