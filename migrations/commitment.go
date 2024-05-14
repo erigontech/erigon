@@ -19,9 +19,7 @@ var SqueezeCommitmentFiles = Migration{
 	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 		ctx := context.Background()
 
-		historyV3 := true //kvcfg.HistoryV3.FromDB(db)
-
-		if !EnableSqueezeCommitmentFiles || !libstate.AggregatorSqueezeCommitmentValues || !historyV3 { //nolint:staticcheck
+		if !EnableSqueezeCommitmentFiles || !libstate.AggregatorSqueezeCommitmentValues { //nolint:staticcheck
 			return db.Update(ctx, func(tx kv.RwTx) error {
 				return BeforeCommit(tx, nil, true)
 			})
