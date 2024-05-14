@@ -864,6 +864,19 @@ Loop:
 					t1, t2, t3 time.Duration
 				)
 
+				if blocksFreezeCfg.Produce {
+					//log.Info(fmt.Sprintf("[snapshots] db has steps amount: %s", agg.StepsRangeInDBAsStr(applyTx)))
+					agg.BuildFilesInBackground(outputTxNum.Load())
+				}
+
+				if !useExternalTx {
+					if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 2*time.Minute, applyTx); err != nil {
+						return err
+					}
+				}
+				t3 = time.Since(tt)
+
+				tt = time.Now()
 				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
 					return err
 				} else if !ok {
@@ -892,18 +905,6 @@ Loop:
 
 						aggCtx := agg.BeginFilesRo()
 						defer aggCtx.Close()
-
-						tt = time.Now()
-						for haveMoreToPrune := true; haveMoreToPrune; {
-							//very aggressive prune, because:
-							// if prune is slow - means DB > RAM and skip pruning will only make things worse
-							// db will grow -> prune will get slower -> db will grow -> ...
-							if haveMoreToPrune, err = aggCtx.PruneSmallBatchesDb(ctx, 10*time.Minute, chainDb); err != nil {
-								return err
-							}
-						}
-
-						t3 = time.Since(tt)
 
 						applyTx, err = cfg.db.BeginRw(context.Background()) //nolint
 						if err != nil {
