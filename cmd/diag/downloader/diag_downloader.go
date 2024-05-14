@@ -217,7 +217,7 @@ func getSnapshotStatusRow(snapDownload diagnostics.SnapshotDownloadStatistics) t
 		status = "Finished"
 	}
 
-	downloadedPercent := float32(snapDownload.Downloaded) / float32(snapDownload.Total/100)
+	downloadedPercent := getPercentDownloaded(snapDownload.Downloaded, snapDownload.Total)
 
 	remainingBytes := snapDownload.Total - snapDownload.Downloaded
 	downloadTimeLeft := util.CalculateTime(remainingBytes, snapDownload.DownloadRate)
@@ -225,8 +225,8 @@ func getSnapshotStatusRow(snapDownload diagnostics.SnapshotDownloadStatistics) t
 	totalDownloadTimeString := time.Duration(snapDownload.TotalTime) * time.Second
 
 	rowObj := table.Row{
-		status,                                   // Status
-		fmt.Sprintf("%.2f%%", downloadedPercent), // Progress
+		status,            // Status
+		downloadedPercent, // Progress
 		common.ByteCount(snapDownload.Downloaded),          // Downloaded
 		common.ByteCount(snapDownload.Total),               // Total
 		downloadTimeLeft,                                   // Time Left
@@ -247,7 +247,7 @@ func getFileRow(file diagnostics.SegmentDownloadStatistics) table.Row {
 	peersDownloadRate := getFileDownloadRate(file.Peers)
 	webseedsDownloadRate := getFileDownloadRate(file.Webseeds)
 	totalDownloadRate := peersDownloadRate + webseedsDownloadRate
-	downloadedPercent := float32(file.DownloadedBytes) / float32(file.TotalBytes/100)
+	downloadedPercent := getPercentDownloaded(file.DownloadedBytes, file.TotalBytes)
 	remainingBytes := file.TotalBytes - file.DownloadedBytes
 	downloadTimeLeft := util.CalculateTime(remainingBytes, totalDownloadRate)
 	isActive := "false"
@@ -257,7 +257,7 @@ func getFileRow(file diagnostics.SegmentDownloadStatistics) table.Row {
 
 	row := table.Row{
 		file.Name,
-		fmt.Sprintf("%.2f%%", downloadedPercent),
+		downloadedPercent,
 		common.ByteCount(file.TotalBytes),
 		common.ByteCount(file.DownloadedBytes),
 		len(file.Peers),
@@ -372,4 +372,14 @@ func filterQueued(rows []table.Row) []table.Row {
 	}
 
 	return filtered
+}
+
+func getPercentDownloaded(downloaded, total uint64) string {
+	percent := float32(downloaded) / float32(total/100)
+
+	if percent > 100 {
+		percent = 100
+	}
+
+	return fmt.Sprintf("%.2f%%", percent)
 }
