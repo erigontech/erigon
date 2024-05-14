@@ -8,14 +8,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon/eth/consensuschain"
 
-	"github.com/RoaringBitmap/roaring/roaring64"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
@@ -235,59 +233,6 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 	return out, err
 }
 
-func traceFilterBitmaps(tx kv.Tx, req TraceFilterRequest, from, to uint64) (fromAddresses, toAddresses map[common.Address]struct{}, allBlocks *roaring64.Bitmap, err error) {
-	fromAddresses = make(map[common.Address]struct{}, len(req.FromAddress))
-	toAddresses = make(map[common.Address]struct{}, len(req.ToAddress))
-	allBlocks = roaring64.New()
-	var blocksTo roaring64.Bitmap
-	for _, addr := range req.FromAddress {
-		if addr != nil {
-			b, err := bitmapdb.Get64(tx, kv.CallFromIndex, addr.Bytes(), from, to)
-			if err != nil {
-				if errors.Is(err, ethdb.ErrKeyNotFound) {
-					continue
-				}
-				return nil, nil, nil, err
-			}
-			allBlocks.Or(b)
-			fromAddresses[*addr] = struct{}{}
-		}
-	}
-
-	for _, addr := range req.ToAddress {
-		if addr != nil {
-			b, err := bitmapdb.Get64(tx, kv.CallToIndex, addr.Bytes(), from, to)
-			if err != nil {
-				if errors.Is(err, ethdb.ErrKeyNotFound) {
-					continue
-				}
-				return nil, nil, nil, err
-			}
-			blocksTo.Or(b)
-			toAddresses[*addr] = struct{}{}
-		}
-	}
-
-	switch req.Mode {
-	case TraceFilterModeIntersection:
-		allBlocks.And(&blocksTo)
-	case TraceFilterModeUnion:
-		fallthrough
-	default:
-		allBlocks.Or(&blocksTo)
-	}
-
-	// Special case - if no addresses specified, take all traces
-	if len(req.FromAddress) == 0 && len(req.ToAddress) == 0 {
-		allBlocks.AddRange(from, to)
-	} else {
-		allBlocks.RemoveRange(0, from)
-		allBlocks.RemoveRange(to, uint64(0x100000000))
-	}
-
-	return fromAddresses, toAddresses, allBlocks, nil
-}
-
 func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uint64) (fromAddresses, toAddresses map[common.Address]struct{}, allBlocks iter.U64, err error) {
 	fromAddresses = make(map[common.Address]struct{}, len(req.FromAddress))
 	toAddresses = make(map[common.Address]struct{}, len(req.ToAddress))
@@ -340,6 +285,7 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 // Pull blocks which have txs with matching address
 func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gasBailOut *bool, stream *jsoniter.Stream) error {
 	if gasBailOut == nil {
+		//nolint
 		gasBailOut = new(bool) // false by default
 	}
 	dbtx, err1 := api.kv.BeginRo(ctx)
@@ -366,10 +312,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 		return fmt.Errorf("invalid parameters: fromBlock cannot be greater than toBlock")
 	}
 
-	return api.filterV3(ctx, dbtx.(kv.TemporalTx), fromBlock, toBlock, req, stream)
+	return api.filterV3(ctx, dbtx.(kv.TemporalTx), fromBlock, toBlock, req, stream, *gasBailOut)
 }
 
-func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromBlock, toBlock uint64, req TraceFilterRequest, stream *jsoniter.Stream) error {
+func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromBlock, toBlock uint64, req TraceFilterRequest, stream *jsoniter.Stream, gasBailOut bool) error {
 	var fromTxNum, toTxNum uint64
 	var err error
 	if fromBlock > 0 {
@@ -631,7 +577,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 		ibs.SetTxContext(txHash, lastBlockHash, txIndex)
 		var execResult *core.ExecutionResult
-		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
+		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailOut)
 		if err != nil {
 			if first {
 				first = false
