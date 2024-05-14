@@ -252,6 +252,7 @@ func (e *EngineBlockDownloader) insertHeadersAndBodies(ctx context.Context, tx k
 				if _, _, _, err := e.chainRW.UpdateForkChoice(ctx, lastHash, lastHash, lastHash); err != nil {
 					return err
 				}
+				inserted = 0
 				e.chainRW.Ready(ctx)
 				return nil
 			}
