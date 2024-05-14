@@ -28,12 +28,14 @@ type Scraper struct {
 	milestoneSyncEvent  *polygoncommon.EventNotifier
 	spanSyncEvent       *polygoncommon.EventNotifier
 
+	tmpDir string
 	logger log.Logger
 }
 
 func NewScraperTODO(
 	client HeimdallClient,
 	pollDelay time.Duration,
+	tmpDir string,
 	logger log.Logger,
 ) *Scraper {
 	return NewScraper(
@@ -41,6 +43,7 @@ func NewScraperTODO(
 		func() reader { /* TODO */ return nil },
 		client,
 		pollDelay,
+		tmpDir,
 		logger,
 	)
 }
@@ -51,6 +54,7 @@ func NewScraper(
 
 	client HeimdallClient,
 	pollDelay time.Duration,
+	tmpDir string,
 	logger log.Logger,
 ) *Scraper {
 	return &Scraper{
@@ -68,6 +72,7 @@ func NewScraper(
 		milestoneSyncEvent:  polygoncommon.NewEventNotifier(),
 		spanSyncEvent:       polygoncommon.NewEventNotifier(),
 
+		tmpDir: tmpDir,
 		logger: logger,
 	}
 }
@@ -79,6 +84,11 @@ func (s *Scraper) syncEntity(
 	callback func([]Entity),
 	syncEvent *polygoncommon.EventNotifier,
 ) error {
+	defer store.Close()
+	if err := store.Prepare(); err != nil {
+		return err
+	}
+
 	for ctx.Err() == nil {
 		lastKnownId, hasLastKnownId, err := store.GetLastEntityId(ctx)
 		if err != nil {
@@ -123,19 +133,19 @@ func (s *Scraper) syncEntity(
 	return ctx.Err()
 }
 
-func newCheckpointStore(tx kv.RwTx, reader services.BorCheckpointReader) entityStore {
+func newCheckpointStore(tx kv.RwTx, reader services.BorCheckpointReader, blockNumToIdIndexFactory func() *RangeIndex) entityStore {
 	makeEntity := func() Entity { return new(Checkpoint) }
-	return newEntityStore(tx, kv.BorCheckpoints, makeEntity, reader.LastCheckpointId, reader.Checkpoint)
+	return newEntityStore(tx, kv.BorCheckpoints, makeEntity, reader.LastCheckpointId, reader.Checkpoint, blockNumToIdIndexFactory())
 }
 
-func newMilestoneStore(tx kv.RwTx, reader services.BorMilestoneReader) entityStore {
+func newMilestoneStore(tx kv.RwTx, reader services.BorMilestoneReader, blockNumToIdIndexFactory func() *RangeIndex) entityStore {
 	makeEntity := func() Entity { return new(Milestone) }
-	return newEntityStore(tx, kv.BorMilestones, makeEntity, reader.LastMilestoneId, reader.Milestone)
+	return newEntityStore(tx, kv.BorMilestones, makeEntity, reader.LastMilestoneId, reader.Milestone, blockNumToIdIndexFactory())
 }
 
-func newSpanStore(tx kv.RwTx, reader services.BorSpanReader) entityStore {
+func newSpanStore(tx kv.RwTx, reader services.BorSpanReader, blockNumToIdIndexFactory func() *RangeIndex) entityStore {
 	makeEntity := func() Entity { return new(Span) }
-	return newEntityStore(tx, kv.BorSpans, makeEntity, reader.LastSpanId, reader.Span)
+	return newEntityStore(tx, kv.BorSpans, makeEntity, reader.LastSpanId, reader.Span, blockNumToIdIndexFactory())
 }
 
 func newCheckpointFetcher(client HeimdallClient, logger log.Logger) entityFetcher {
@@ -233,13 +243,21 @@ func (s *Scraper) Run(parentCtx context.Context) error {
 		return nil
 	}
 
+	blockNumToIdIndexFactory := func() *RangeIndex {
+		index, err := NewRangeIndex(s.tmpDir, s.logger)
+		if err != nil {
+			panic(err)
+		}
+		return index
+	}
+
 	group, ctx := errgroup.WithContext(parentCtx)
 
 	// sync checkpoints
 	group.Go(func() error {
 		return s.syncEntity(
 			ctx,
-			newCheckpointStore(tx, reader),
+			newCheckpointStore(tx, reader, blockNumToIdIndexFactory),
 			newCheckpointFetcher(s.client, s.logger),
 			func(entities []Entity) {
 				s.checkpointObservers.Notify(libcommon.SliceMap(entities, downcastCheckpointEntity))
@@ -252,7 +270,7 @@ func (s *Scraper) Run(parentCtx context.Context) error {
 	group.Go(func() error {
 		return s.syncEntity(
 			ctx,
-			newMilestoneStore(tx, reader),
+			newMilestoneStore(tx, reader, blockNumToIdIndexFactory),
 			newMilestoneFetcher(s.client, s.logger),
 			func(entities []Entity) {
 				s.milestoneObservers.Notify(libcommon.SliceMap(entities, downcastMilestoneEntity))
@@ -265,7 +283,7 @@ func (s *Scraper) Run(parentCtx context.Context) error {
 	group.Go(func() error {
 		return s.syncEntity(
 			ctx,
-			newSpanStore(tx, reader),
+			newSpanStore(tx, reader, blockNumToIdIndexFactory),
 			newSpanFetcher(s.client, s.logger),
 			func(entities []Entity) {
 				s.spanObservers.Notify(libcommon.SliceMap(entities, downcastSpanEntity))
