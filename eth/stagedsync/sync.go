@@ -141,15 +141,17 @@ func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error
 		if casted, ok := tx.(state.HasAggTx); ok {
 			// protect from too far unwind
 			unwindPointWithCommitment, ok, err := casted.AggTx().(*state.AggregatorRoTx).CanUnwindBeforeBlockNum(unwindPoint, tx)
-			if !errors.Is(err, state.ErrBehindCommitment) {
-				if err != nil {
-					return err
-				}
-				if !ok {
-					return fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindPoint, unwindPointWithCommitment)
-				}
-				unwindPoint = unwindPointWithCommitment
+			// Ignore in the case that snapshots are ahead of commitment, it will be resolved later.
+			if errors.Is(err, state.ErrBehindCommitment) {
+				return nil
 			}
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindPoint, unwindPointWithCommitment)
+			}
+			unwindPoint = unwindPointWithCommitment
 		}
 	}
 
