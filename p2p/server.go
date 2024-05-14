@@ -1221,21 +1221,18 @@ func (srv *Server) resetErrors() {
 }
 
 func (srv *Server) listErrors() []interface{} {
-	list := make([]interface{}, len(srv.errors)*2)
+	list := make([]interface{}, 0, len(srv.errors)*2)
 
 	srv.errorsMu.Lock()
 	defer srv.errorsMu.Unlock()
 	for err, count := range srv.errors {
 		list = append(list, err, count)
 	}
-	fmt.Printf("[dbg] p2p %d, %d, %#v\n", len(srv.errors), len(list), list)
 	return list
 }
 
 func cleanError(err string) string {
 	switch {
-	case strings.HasSuffix(err, "EOF"):
-		return "EOF"
 	case strings.HasSuffix(err, "i/o timeout"):
 		return "i/o timeout"
 	case strings.HasSuffix(err, "closed by the remote host."):
