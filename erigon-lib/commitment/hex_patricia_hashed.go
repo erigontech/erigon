@@ -1345,7 +1345,7 @@ func (hph *HexPatriciaHashed) ProcessTree(ctx context.Context, tree *UpdateTree,
 			}
 			hph.deleteCell(hashedKey)
 		}
-		mxCommitmentKeys.Inc()
+		mxKeys.Inc()
 		ki++
 		return nil
 	})
@@ -1450,7 +1450,7 @@ func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byt
 			}
 			hph.deleteCell(hashedKey)
 		}
-		mxCommitmentKeys.Inc()
+		mxKeys.Inc()
 	}
 	// Folding everything up to the root
 	for hph.activeRows > 0 {
@@ -1546,7 +1546,7 @@ func (hph *HexPatriciaHashed) ProcessUpdates(ctx context.Context, plainKeys [][]
 			}
 		}
 
-		mxCommitmentKeys.Inc()
+		mxKeys.Inc()
 	}
 	// Folding everything up to the root
 	for hph.activeRows > 0 {

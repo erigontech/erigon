@@ -140,8 +140,8 @@ func GetOrCreateSummary(name string) Summary {
 //   - foo{bar="baz",aaa="b"}
 //
 // The returned histogram is safe to use from concurrent goroutines.
-func NewHistogram(name string) Histogram {
-	h, err := defaultSet.NewHistogram(name)
+func NewHistogram(name string, buckets []float64) Histogram {
+	h, err := defaultSet.NewHistogram(name, buckets)
 	if err != nil {
 		panic(fmt.Errorf("could not create new histogram: %w", err))
 	}
@@ -164,6 +164,15 @@ func NewHistogram(name string) Histogram {
 //
 // Performance tip: prefer NewHistogram instead of GetOrCreateHistogram.
 func GetOrCreateHistogram(name string) Histogram {
+	h, err := defaultSet.GetOrCreateHistogram(name)
+	if err != nil {
+		panic(fmt.Errorf("could not get or create new histogram: %w", err))
+	}
+
+	return &histogram{h}
+}
+
+func GetOrCreateHistogramWithBuckets(name string) Histogram {
 	h, err := defaultSet.GetOrCreateHistogram(name)
 	if err != nil {
 		panic(fmt.Errorf("could not get or create new histogram: %w", err))
