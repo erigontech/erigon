@@ -108,7 +108,7 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, commitment.VariantHexPatriciaTrie)
 
 	if _, err := sd.SeekCommitment(context.Background(), tx); err != nil {
-		return nil, fmt.Errorf("SeekCommitment: %w", err)
+		return nil, err
 	}
 	return sd, nil
 }
