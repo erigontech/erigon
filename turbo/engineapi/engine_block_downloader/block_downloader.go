@@ -253,7 +253,6 @@ func (e *EngineBlockDownloader) insertHeadersAndBodies(ctx context.Context, tx k
 					return err
 				}
 				inserted = 0
-				e.chainRW.Ready(ctx)
 				return nil
 			}
 			blocksBatch = blocksBatch[:0]
