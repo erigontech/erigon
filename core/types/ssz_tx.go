@@ -3,7 +3,7 @@ package types
 import libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 type SSZTransaction struct {
-	BlobTx
+	Transacton
 }
 
 func (tx *SSZTransaction) Hash() libcommon.Hash {
@@ -15,11 +15,11 @@ func (tx *SSZTransaction) Type() byte {
 }
 
 func (tx *SSZTransaction) Unwrap() Transaction {
-	return tx
+	return tx.Transaction
 }
 
 func (tx *SSZTransaction) copy() *SSZTransaction {
 	return &SSZTransaction{
-		BlobTx: *tx.BlobTx.copy(),
+		Transaction: *tx.Transaction.copy(),
 	}
 }
