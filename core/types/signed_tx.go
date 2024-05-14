@@ -2,6 +2,7 @@ package types
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 
 	"github.com/holiman/uint256"
@@ -94,9 +95,6 @@ func UnmarshalTransctionFromJson(signer Signer, data []byte, blobTxnsAreWrappedW
 		GasPrice: tx.Payload.GasPrice,
 	}
 
-	// TODO: v,r,s extraction
-	// TODO: verification
-
 	var txi Transaction
 	variant := tx.GetVariant()
 	switch variant {
@@ -170,7 +168,27 @@ func UnmarshalTransctionFromJson(signer Signer, data []byte, blobTxnsAreWrappedW
 		return nil, err
 	}
 
+	// validate transaction
+
+	v, r, s := txi.RawSignatureValues()
+	maybeProtected := txi.Type() == LegacyTxType
+	if err = sanityCheckSignature(v, r, s, maybeProtected); err != nil {
+		return nil, err
+	}
+
+	// sender check
+
+	txiSender, err := txi.Sender(signer)
+	if err != nil {
+		return nil, fmt.Errorf("failed at sender recovery")
+	}
+
+	if tx.Signature.From != txiSender {
+		return nil, fmt.Errorf("sender mismatch: expected %v, got %v", tx.Signature.From, txiSender)
+	}
+
 	txi.SetSender(tx.Signature.From)
+
 	return txi, nil
 }
 
