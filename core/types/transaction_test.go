@@ -826,3 +826,46 @@ func TestShortUnwrapLib(t *testing.T) {
 
 	assertEqual(blobTx, &wrappedBlobTx.Tx)
 }
+
+func TestTrailingBytes(t *testing.T) {
+	// Create a valid transaction
+	valid_rlp_transaction := []byte{201, 38, 38, 128, 128, 107, 58, 42, 38, 42}
+
+	// Test valid transaction
+	transactions := make([][]byte, 1)
+	transactions[0] = valid_rlp_transaction
+
+	for _, txn := range transactions {
+		if TypedTransactionMarshalledAsRlpString(txn) {
+			panic("TypedTransactionMarshalledAsRlpString() error")
+		}
+	}
+
+	_, err := DecodeTransactions(transactions)
+	if err != nil {
+		fmt.Println("Valid transaction errored")
+		panic(err) // @audit this will pass
+	}
+
+	// Append excess bytes to the blob transaction
+	num_excess := 100
+	malicious_rlp_transaction := make([]byte, len(valid_rlp_transaction)+num_excess)
+	copy(malicious_rlp_transaction, valid_rlp_transaction)
+
+	// Validate transactions are different
+	assert.NotEqual(t, malicious_rlp_transaction, valid_rlp_transaction)
+
+	// Test malicious transaction
+	transactions[0] = malicious_rlp_transaction
+
+	for _, txn := range transactions {
+		if TypedTransactionMarshalledAsRlpString(txn) {
+			panic("TypedTransactionMarshalledAsRlpString() error")
+		}
+	}
+
+	_, err = DecodeTransactions(transactions)
+	if err == nil {
+		panic("Malicious transaction has not errored!") // @audit this panic is occurs
+	}
+}
