@@ -737,7 +737,6 @@ func AppendCanonicalTxNums(tx kv.RwTx, from uint64) (err error) {
 		}
 
 		nextBaseTxNum += int(bodyForStorage.TxAmount)
-		fmt.Println(blockNum, nextBaseTxNum-1)
 		err = rawdbv3.TxNums.Append(tx, blockNum, uint64(nextBaseTxNum-1))
 		if err != nil {
 			return err

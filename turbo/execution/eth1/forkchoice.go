@@ -251,24 +251,18 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 				return
 			}
-			fmt.Println("currentParentNumber", currentParentNumber, "currentParentHash", currentParentHash, "isCanonicalHash", isCanonicalHash)
 		}
-		fmt.Println("newCanonicals", len(newCanonicals))
 
 		if err := e.executionPipeline.UnwindTo(currentParentNumber, stagedsync.ForkChoice, tx); err != nil {
-			fmt.Println("ADD", err)
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
-		fmt.Println("AX")
 		if e.hook != nil {
 			if err = e.hook.BeforeRun(tx, isSynced); err != nil {
-				fmt.Println("A2")
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 				return
 			}
 		}
-		fmt.Println("A1")
 
 		// Run the unwind
 		if err := e.executionPipeline.RunUnwind(e.db, wrap.TxContainer{Tx: tx}); err != nil {
@@ -281,7 +275,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
-		fmt.Println("A2")
 		// Mark all new canonicals as canonicals
 		for _, canonicalSegment := range newCanonicals {
 			chainReader := consensuschain.NewReader(e.config, tx, e.blockReader, e.logger)
@@ -309,9 +302,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				return
 			}
 		}
-		fmt.Println("A3")
 		if len(newCanonicals) > 0 {
-			fmt.Println("A")
 			if err := rawdbv3.TxNums.Truncate(tx, newCanonicals[0].number); err != nil {
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 				return
