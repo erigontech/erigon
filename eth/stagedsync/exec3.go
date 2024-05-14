@@ -903,9 +903,6 @@ Loop:
 							agg.BuildFilesInBackground(outputTxNum.Load())
 						}
 
-						aggCtx := agg.BeginFilesRo()
-						defer aggCtx.Close()
-
 						applyTx, err = cfg.db.BeginRw(context.Background()) //nolint
 						if err != nil {
 							return err
