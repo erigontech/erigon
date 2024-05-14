@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
@@ -61,7 +62,7 @@ func NewCollectorFromFiles(logPrefix, tmpdir string, logger log.Logger) (*Collec
 	if _, err := os.Stat(tmpdir); os.IsNotExist(err) {
 		return nil, nil
 	}
-	dirEntries, err := os.ReadDir(tmpdir)
+	dirEntries, err := dir.ReadDir(tmpdir)
 	if err != nil {
 		return nil, fmt.Errorf("collector from files - reading directory %s: %w", tmpdir, err)
 	}
@@ -335,19 +336,6 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 				prevV = common.Copy(element.Value)
 			} else {
 				prevV = append(prevV, element.Value...)
-			}
-		} else if args.BufferType == SortableMergeBuffer {
-			if !bytes.Equal(prevK, element.Key) {
-				if prevK != nil {
-					if err = loadFunc(prevK, prevV); err != nil {
-						return err
-					}
-				}
-				// Need to copy k because the underlying space will be re-used for the next key
-				prevK = common.Copy(element.Key)
-				prevV = common.Copy(element.Value)
-			} else {
-				prevV = buf.(*oldestMergedEntrySortableBuffer).merge(prevV, element.Value)
 			}
 		} else {
 			if err = loadFunc(element.Key, element.Value); err != nil {

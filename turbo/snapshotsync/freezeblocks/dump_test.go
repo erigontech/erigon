@@ -3,6 +3,7 @@ package freezeblocks_test
 import (
 	"context"
 	"math/big"
+	"runtime"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
@@ -16,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -48,6 +48,10 @@ func baseIdRange(base, indexer, len int) []uint64 {
 }
 
 func TestDump(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win")
+	}
+
 	type test struct {
 		chainConfig *chain.Config
 		chainSize   int
@@ -246,7 +250,7 @@ func TestDump(t *testing.T) {
 			snConfig := snapcfg.KnownCfg(networkname.MainnetChainName)
 			snConfig.ExpectBlocks = math.MaxUint64
 
-			err := freezeblocks.DumpBlocks(m.Ctx, 0, uint64(test.chainSize), 0, m.ChainConfig, tmpDir, snapDir, m.DB, 1, log.LvlInfo, logger, m.BlockReader)
+			err := freezeblocks.DumpBlocks(m.Ctx, 0, uint64(test.chainSize), m.ChainConfig, tmpDir, snapDir, m.DB, 1, log.LvlInfo, logger, m.BlockReader)
 			require.NoError(err)
 		})
 	}

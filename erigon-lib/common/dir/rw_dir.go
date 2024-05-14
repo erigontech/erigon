@@ -48,6 +48,9 @@ func FileExist(path string) bool {
 	if err != nil && os.IsNotExist(err) {
 		return false
 	}
+	if fi == nil {
+		return false
+	}
 	if !fi.Mode().IsRegular() {
 		return false
 	}
@@ -57,6 +60,9 @@ func FileExist(path string) bool {
 func FileNonZero(path string) bool {
 	fi, err := os.Stat(path)
 	if err != nil && os.IsNotExist(err) {
+		return false
+	}
+	if fi == nil {
 		return false
 	}
 	if !fi.Mode().IsRegular() {
@@ -91,7 +97,7 @@ func Recreate(dir string) {
 }
 
 func HasFileOfType(dir, ext string) bool {
-	files, err := os.ReadDir(dir)
+	files, err := ReadDir(dir)
 	if err != nil {
 		return false
 	}
@@ -123,10 +129,11 @@ func DeleteFiles(dirs ...string) error {
 }
 
 func ListFiles(dir string, extensions ...string) (paths []string, err error) {
-	files, err := os.ReadDir(dir)
+	files, err := ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
+
 	paths = make([]string, 0, len(files))
 	for _, f := range files {
 		if f.IsDir() && !f.Type().IsRegular() {

@@ -6,13 +6,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"golang.org/x/exp/slices"
 )
 
 // AtomicTorrentFS - does provide thread-safe CRUD operations on .torrent files
@@ -223,7 +223,7 @@ func (tf *AtomicTorrentFS) NewDownloadsAreProhibited(name string) (bool, error) 
 }
 
 func (tf *AtomicTorrentFS) newDownloadsAreProhibited(name string) (bool, error) {
-	f, err := os.OpenFile(filepath.Join(tf.dir, ProhibitNewDownloadsFileName), os.O_CREATE|os.O_APPEND|os.O_RDONLY, 0644)
+	f, err := os.OpenFile(filepath.Join(tf.dir, ProhibitNewDownloadsFileName), os.O_CREATE|os.O_RDONLY, 0644)
 	if err != nil {
 		return false, err
 	}

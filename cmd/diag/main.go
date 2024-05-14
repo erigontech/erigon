@@ -11,8 +11,10 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
+	"github.com/ledgerwatch/erigon/cmd/diag/db"
 	"github.com/ledgerwatch/erigon/cmd/diag/downloader"
 	"github.com/ledgerwatch/erigon/cmd/diag/stages"
+	"github.com/ledgerwatch/erigon/cmd/diag/ui"
 	"github.com/ledgerwatch/erigon/cmd/snapshots/sync"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/params"
@@ -31,6 +33,8 @@ func main() {
 	app.Commands = []*cli.Command{
 		&downloader.Command,
 		&stages.Command,
+		&db.Command,
+		&ui.Command,
 	}
 
 	app.Flags = []cli.Flag{}

@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/tracers"
@@ -52,7 +53,7 @@ func TestTraceBlockByNumber(t *testing.T) {
 	agg := m.HistoryV3Components()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
-	ethApi := NewEthAPI(baseApi, m.DB, nil, nil, nil, 5000000, 100_000, false, 100_000, log.New())
+	ethApi := NewEthAPI(baseApi, m.DB, nil, nil, nil, 5000000, 100_000, false, 100_000, 128, log.New())
 	api := NewPrivateDebugAPI(baseApi, m.DB, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
@@ -97,7 +98,7 @@ func TestTraceBlockByNumber(t *testing.T) {
 
 func TestTraceBlockByHash(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	ethApi := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, 100_000, false, 100_000, log.New())
+	ethApi := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, 100_000, false, 100_000, 128, log.New())
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
@@ -392,7 +393,7 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 	}
 
 	addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")
-	checkIter := func(t *testing.T, expectTxNums iter.U64, txNumsIter *MapTxNum2BlockNumIter) {
+	checkIter := func(t *testing.T, expectTxNums iter.U64, txNumsIter *rawdbv3.MapTxNum2BlockNumIter) {
 		for expectTxNums.HasNext() {
 			require.True(t, txNumsIter.HasNext())
 			expectTxNum, _ := expectTxNums.Next()
@@ -408,7 +409,7 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 
 		txNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 1024, -1, order.Desc, kv.Unlim)
 		require.NoError(t, err)
-		txNumsIter := MapDescendTxNum2BlockNum(tx, txNums)
+		txNumsIter := rawdbv3.TxNums2BlockNums(tx, txNums, order.Desc)
 		expectTxNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 1024, -1, order.Desc, kv.Unlim)
 		require.NoError(t, err)
 		checkIter(t, expectTxNums, txNumsIter)
@@ -421,7 +422,7 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 
 		txNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 0, 1024, order.Asc, kv.Unlim)
 		require.NoError(t, err)
-		txNumsIter := MapDescendTxNum2BlockNum(tx, txNums)
+		txNumsIter := rawdbv3.TxNums2BlockNums(tx, txNums, order.Desc)
 		expectTxNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 0, 1024, order.Asc, kv.Unlim)
 		require.NoError(t, err)
 		checkIter(t, expectTxNums, txNumsIter)
@@ -434,7 +435,7 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 
 		txNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 0, 1024, order.Asc, 2)
 		require.NoError(t, err)
-		txNumsIter := MapDescendTxNum2BlockNum(tx, txNums)
+		txNumsIter := rawdbv3.TxNums2BlockNums(tx, txNums, order.Desc)
 		expectTxNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 0, 1024, order.Asc, 2)
 		require.NoError(t, err)
 		checkIter(t, expectTxNums, txNumsIter)

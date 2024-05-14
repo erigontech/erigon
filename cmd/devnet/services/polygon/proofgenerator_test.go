@@ -53,7 +53,6 @@ type requestGenerator struct {
 
 func newRequestGenerator(sentry *mock.MockSentry, chain *core.ChainPack) (*requestGenerator, error) {
 	db := memdb.New("")
-
 	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
 		if err := rawdb.WriteHeader(tx, chain.TopBlock.Header()); err != nil {
 			return err
@@ -145,7 +144,7 @@ func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash libc
 	}
 	defer tx.Rollback()
 
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, reader, tx, 0, false)
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, reader, tx, 0)
 
 	if err != nil {
 		return nil, err

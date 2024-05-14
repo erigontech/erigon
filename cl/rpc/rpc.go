@@ -16,7 +16,7 @@ import (
 	"github.com/golang/snappy"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
+	sentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/zap/buffer"
 

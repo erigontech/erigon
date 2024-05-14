@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,17 +15,20 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadergrpc"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
+	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type CaplinMode int
@@ -36,7 +42,7 @@ const (
 )
 
 func BuildProtoRequest(downloadRequest []services.DownloadRequest) *proto_downloader.AddRequest {
-	req := &proto_downloader.AddRequest{Items: make([]*proto_downloader.AddItem, 0, len(snaptype.BlockSnapshotTypes))}
+	req := &proto_downloader.AddRequest{Items: make([]*proto_downloader.AddItem, 0, len(coresnaptype.BlockSnapshotTypes))}
 	for _, r := range downloadRequest {
 		if r.Path == "" {
 			continue
@@ -65,12 +71,198 @@ func RequestSnapshotsDownload(ctx context.Context, downloadRequest []services.Do
 	return nil
 }
 
+func adjustStepPrune(steps uint64) uint64 {
+	if steps == 0 {
+		return 0
+	}
+	if steps < snaptype.Erigon3SeedableSteps {
+		return snaptype.Erigon3SeedableSteps
+	}
+	if steps%snaptype.Erigon3SeedableSteps == 0 {
+		return steps
+	}
+	// round to nearest multiple of 64. if less than 64, round to 64
+	return steps + steps%snaptype.Erigon3SeedableSteps
+}
+
+func adjustBlockPrune(blocks, minBlocksToDownload uint64) uint64 {
+	if minBlocksToDownload < snaptype.Erigon2MergeLimit {
+		minBlocksToDownload = snaptype.Erigon2MergeLimit
+	}
+	if blocks < minBlocksToDownload {
+		blocks = minBlocksToDownload
+	}
+	if blocks%snaptype.Erigon2MergeLimit == 0 {
+		return blocks
+	}
+	ret := blocks + snaptype.Erigon2MergeLimit
+	// round to nearest multiple of 64. if less than 64, round to 64
+	return ret - ret%snaptype.Erigon2MergeLimit
+}
+
+func shouldUseStepsForPruning(name string) bool {
+	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history")
+}
+
+func canSnapshotBePruned(name string) bool {
+	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.Contains(name, "transactions")
+}
+
+func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blockPrune uint64, preverified snapcfg.Preverified) (map[string]struct{}, error) {
+	type snapshotFileData struct {
+		from, to  uint64
+		stepBased bool
+		name      string
+	}
+	blackList := make(map[string]struct{})
+	if !pruneMode {
+		return blackList, nil
+	}
+	stepPrune = adjustStepPrune(stepPrune)
+	blockPrune = adjustBlockPrune(blockPrune, minBlockToDownload)
+	snapshotKindToNames := make(map[string][]snapshotFileData)
+	for _, p := range preverified {
+		name := p.Name
+		// Dont prune unprunable files
+		if !canSnapshotBePruned(name) {
+			continue
+		}
+		var from, to uint64
+		var err error
+		var kind string
+		if shouldUseStepsForPruning(name) {
+			// parse "from" (0) and "to" (64) from the name
+			// parse the snapshot "kind". e.g kind of 'idx/v1-accounts.0-64.ef' is "idx/v1-accounts"
+			rangeString := strings.Split(name, ".")[1]
+			rangeNums := strings.Split(rangeString, "-")
+			// convert the range to uint64
+			from, err = strconv.ParseUint(rangeNums[0], 10, 64)
+			if err != nil {
+				return nil, err
+			}
+			to, err = strconv.ParseUint(rangeNums[1], 10, 64)
+			if err != nil {
+				return nil, err
+			}
+			kind = strings.Split(name, ".")[0]
+		} else {
+			// e.g 'v1-000000-000100-beaconblocks.seg'
+			// parse "from" (000000) and "to" (000100) from the name. 100 is 100'000 blocks
+			minusSplit := strings.Split(name, "-")
+			s, _, ok := snaptype.ParseFileName("", name)
+			if !ok {
+				continue
+			}
+			from = s.From
+			to = s.To
+			kind = minusSplit[3]
+		}
+		blackList[p.Name] = struct{}{} // Add all of them to the blacklist and remove the ones that are not blacklisted later.
+		snapshotKindToNames[kind] = append(snapshotKindToNames[kind], snapshotFileData{
+			from:      from,
+			to:        to,
+			stepBased: shouldUseStepsForPruning(name),
+			name:      name,
+		})
+	}
+	// sort the snapshots by "from" and "to" in ascending order
+	for _, snapshots := range snapshotKindToNames {
+		prunedDistance := uint64(0) // keep track of pruned distance for snapshots
+		// sort the snapshots by "from" and "to" in descending order
+		sort.Slice(snapshots, func(i, j int) bool {
+			if snapshots[i].from == snapshots[j].from {
+				return snapshots[i].to > snapshots[j].to
+			}
+			return snapshots[i].from > snapshots[j].from
+		})
+		for _, snapshot := range snapshots {
+			if snapshot.stepBased {
+				if prunedDistance >= stepPrune {
+					break
+				}
+			} else if prunedDistance >= blockPrune {
+				break
+			}
+			delete(blackList, snapshot.name)
+			prunedDistance += snapshot.to - snapshot.from
+		}
+	}
+	return blackList, nil
+}
+
+// getMinimumBlocksToDownload - get the minimum number of blocks to download
+func getMinimumBlocksToDownload(tx kv.Tx, blockReader services.FullBlockReader, minStep uint64, expectedPruneBlockAmount, expectedPruneHistoryAmount uint64) (uint64, uint64, error) {
+	frozenBlocks := blockReader.Snapshots().SegmentsMax()
+	minToDownload := uint64(math.MaxUint64)
+	minStepToDownload := minStep
+	stateTxNum := minStep * config3.HistoryV3AggregationStep
+	if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
+		if blockNum == frozenBlocks-expectedPruneHistoryAmount {
+			minStepToDownload = (baseTxNum / config3.HistoryV3AggregationStep) - 1
+		}
+		if stateTxNum <= baseTxNum { // only cosnider the block if it
+			return nil
+		}
+		newMinToDownload := uint64(0)
+		if frozenBlocks > blockNum {
+			newMinToDownload = frozenBlocks - blockNum
+		}
+		if newMinToDownload < minToDownload {
+			minToDownload = newMinToDownload
+		}
+		return nil
+	}); err != nil {
+		return 0, 0, err
+	}
+	if expectedPruneBlockAmount == 0 {
+		return minToDownload, 0, nil
+	}
+	// return the minimum number of blocks to download and the minimum step.
+	return minToDownload, minStep - minStepToDownload, nil
+}
+
+func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error) {
+	maxTo := uint64(0)
+	for _, p := range preverified {
+		// take the "to" from "domain" snapshot
+		if !strings.HasPrefix(p.Name, "domain") {
+			continue
+		}
+		rangeString := strings.Split(p.Name, ".")[1]
+		rangeNums := strings.Split(rangeString, "-")
+		// convert the range to uint64
+		to, err := strconv.ParseUint(rangeNums[1], 10, 64)
+		if err != nil {
+			return 0, err
+		}
+		if to > maxTo {
+			maxTo = to
+		}
+	}
+	return maxTo, nil
+}
+
+func computeBlocksToPrune(blockReader services.FullBlockReader, p prune.Mode) (blocksToPrune uint64, historyToPrune uint64) {
+	frozenBlocks := blockReader.Snapshots().SegmentsMax()
+	blocksPruneTo := p.Blocks.PruneTo(frozenBlocks)
+	historyPruneTo := p.History.PruneTo(frozenBlocks)
+	if blocksPruneTo <= frozenBlocks {
+		blocksToPrune = frozenBlocks - blocksPruneTo
+	}
+	if historyPruneTo <= frozenBlocks {
+		historyToPrune = frozenBlocks - historyPruneTo
+	}
+	return blocksToPrune, historyToPrune
+}
+
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool, caplin CaplinMode, agg *state.Aggregator, tx kv.RwTx, blockReader services.FullBlockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient, stagesIdsList []string) error {
+func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs bool, prune prune.Mode, caplin CaplinMode, agg *state.Aggregator, tx kv.RwTx, blockReader services.FullBlockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient, stagesIdsList []string) error {
 	snapshots := blockReader.Snapshots()
 	borSnapshots := blockReader.BorSnapshots()
-	if blockReader.FreezingCfg().NoDownloader {
+
+	// Find minimum block to download.
+	if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
 		if err := snapshots.ReopenFolder(); err != nil {
 			return err
 		}
@@ -82,9 +274,11 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 		return nil
 	}
 
-	snapshots.Close()
-	if cc.Bor != nil {
-		borSnapshots.Close()
+	if headerchain {
+		snapshots.Close()
+		if cc.Bor != nil {
+			borSnapshots.Close()
+		}
 	}
 
 	//Corner cases:
@@ -97,13 +291,26 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 	preverifiedBlockSnapshots := snapCfg.Preverified
 	downloadRequest := make([]services.DownloadRequest, 0, len(preverifiedBlockSnapshots))
 
+	blockPrune, historyPrune := computeBlocksToPrune(blockReader, prune)
+	blackListForPruning := make(map[string]struct{})
+	wantToPrune := prune.Blocks.Enabled() || prune.History.Enabled()
+	if !headerchain && wantToPrune {
+		minStep, err := getMaxStepRangeInSnapshots(preverifiedBlockSnapshots)
+		if err != nil {
+			return err
+		}
+		minBlockAmountToDownload, minStepToDownload, err := getMinimumBlocksToDownload(tx, blockReader, minStep, blockPrune, historyPrune)
+		if err != nil {
+			return err
+		}
+		blackListForPruning, err = buildBlackListForPruning(wantToPrune, minStepToDownload, minBlockAmountToDownload, blockPrune, preverifiedBlockSnapshots)
+		if err != nil {
+			return err
+		}
+	}
+
 	// build all download requests
 	for _, p := range preverifiedBlockSnapshots {
-		if !histV3 {
-			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") {
-				continue
-			}
-		}
 		if caplin == NoCaplin && (strings.Contains(p.Name, "beaconblocks") || strings.Contains(p.Name, "blobsidecars")) {
 			continue
 		}
@@ -113,6 +320,13 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 		if !blobs && strings.Contains(p.Name, "blobsidecars") {
 			continue
 		}
+		if headerchain && !strings.Contains(p.Name, "headers") && !strings.Contains(p.Name, "bodies") {
+			continue
+		}
+		if _, ok := blackListForPruning[p.Name]; ok {
+			continue
+		}
+
 		downloadRequest = append(downloadRequest, services.NewDownloadRequest(p.Name, p.Hash))
 	}
 
@@ -137,9 +351,12 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
+	/*diagnostics.RegisterProvider(diagnostics.ProviderFunc(func(ctx context.Context) error {
+		return nil
+	}), diagnostics.TypeOf(diagnostics.DownloadStatistics{}), log.Root())*/
+
 	// Check once without delay, for faster erigon re-start
 	stats, err := snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{})
-
 	if err != nil {
 		return err
 	}
@@ -192,7 +409,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 		}
 	}
 
-	if err := agg.OpenFolder(); err != nil {
+	if err := agg.OpenFolder(true); err != nil {
 		return err
 	}
 
@@ -205,18 +422,48 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 	// after the initial call the downloader or snapshot-lock.file will prevent this download from running
 	//
 
-	// prohibits further downloads, except some exceptions
-	for _, p := range snaptype.AllTypes {
-		if (p.Enum() == snaptype.BeaconBlocks.Enum() || p.Enum() == snaptype.BlobSidecars.Enum()) && caplin == NoCaplin {
-			continue
-		}
-		if p.Enum() == snaptype.BlobSidecars.Enum() && !blobs {
-			continue
-		}
+	// prohibit new downloads for the files that were downloaded
+
+	// If we only download headers and bodies, we should prohibit only those.
+	if headerchain {
 		if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
-			Type: p.String(),
+			Type: coresnaptype.Bodies.Name(),
 		}); err != nil {
 			return err
+		}
+		if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
+			Type: coresnaptype.Headers.Name(),
+		}); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	// prohibits further downloads, except some exceptions
+	for _, p := range blockReader.AllTypes() {
+		if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
+			Type: p.Name(),
+		}); err != nil {
+			return err
+		}
+	}
+	for _, p := range snaptype.SeedableV3Extensions() {
+		snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
+			Type: p,
+		})
+	}
+
+	if caplin != NoCaplin {
+		for _, p := range snaptype.CaplinSnapshotTypes {
+			if p.Enum() == snaptype.BlobSidecars.Enum() && !blobs {
+				continue
+			}
+
+			if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
+				Type: p.Name(),
+			}); err != nil {
+				return err
+			}
 		}
 	}
 

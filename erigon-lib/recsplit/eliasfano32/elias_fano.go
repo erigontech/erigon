@@ -221,6 +221,13 @@ func (ef *EliasFano) upper(i uint64) uint64 {
 	return currWord*64 + uint64(sel) - i
 }
 
+// TODO: optimize me - to avoid object allocation
+func Seek(data []byte, n uint64) (uint64, bool) {
+	ef, _ := ReadEliasFano(data)
+	//TODO: if startTxNum==0, can do ef.Get(0)
+	return ef.Search(n)
+}
+
 // Search returns the value in the sequence, equal or greater than given value
 func (ef *EliasFano) search(v uint64) (nextV uint64, nextI uint64, ok bool) {
 	if v == 0 {
@@ -301,6 +308,7 @@ type EliasFanoIter struct {
 	upperMask uint64
 }
 
+func (efi *EliasFanoIter) Close() {}
 func (efi *EliasFanoIter) HasNext() bool {
 	return efi.idx <= efi.count
 }

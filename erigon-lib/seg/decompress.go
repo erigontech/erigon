@@ -21,12 +21,15 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/ledgerwatch/erigon-lib/common/assert"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/log/v3"
@@ -130,7 +133,9 @@ type Decompressor struct {
 	wordsCount      uint64
 	emptyWordsCount uint64
 
-	filePath, fileName string
+	filePath, FileName1 string
+
+	readAheadRefcnt atomic.Int32 // ref-counter: allow enable/disable read-ahead from goroutines. only when refcnt=0 - disable read-ahead once
 }
 
 const (
@@ -175,8 +180,8 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 	var err error
 	var closeDecompressor = true
 	d := &Decompressor{
-		filePath: compressedFilePath,
-		fileName: fName,
+		filePath:  compressedFilePath,
+		FileName1: fName,
 	}
 
 	defer func() {
@@ -459,16 +464,14 @@ func (d *Decompressor) Close() {
 }
 
 func (d *Decompressor) FilePath() string { return d.filePath }
-func (d *Decompressor) FileName() string { return d.fileName }
+func (d *Decompressor) FileName() string { return d.FileName1 }
 
 // WithReadAhead - Expect read in sequential order. (Hence, pages in the given range can be aggressively read ahead, and may be freed soon after they are accessed.)
 func (d *Decompressor) WithReadAhead(f func() error) error {
 	if d == nil || d.mmapHandle1 == nil {
 		return nil
 	}
-	_ = mmap.MadviseSequential(d.mmapHandle1)
-	//_ = mmap.MadviseWillNeed(d.mmapHandle1)
-	defer mmap.MadviseRandom(d.mmapHandle1)
+	defer d.EnableReadAhead().DisableReadAhead()
 	return f()
 }
 
@@ -477,26 +480,57 @@ func (d *Decompressor) DisableReadAhead() {
 	if d == nil || d.mmapHandle1 == nil {
 		return
 	}
+	leftReaders := d.readAheadRefcnt.Add(-1)
+	if leftReaders < 0 {
+		log.Warn("read-ahead negative counter", "file", d.FileName())
+		return
+	}
+
+	if !dbg.SnapshotMadvRnd { // all files
+		_ = mmap.MadviseNormal(d.mmapHandle1)
+		return
+	}
+
+	if dbg.KvMadvNormal != "" && strings.HasSuffix(d.FileName(), ".kv") { //all .kv files
+		for _, t := range strings.Split(dbg.KvMadvNormal, ",") {
+			if !strings.Contains(d.FileName(), t) {
+				continue
+			}
+			_ = mmap.MadviseNormal(d.mmapHandle1)
+			return
+		}
+	}
+
+	if dbg.KvMadvNormalNoLastLvl != "" && strings.HasSuffix(d.FileName(), ".kv") { //all .kv files - except last-level `v1-storage.0-1024.kv` - starting from step 0
+		for _, t := range strings.Split(dbg.KvMadvNormalNoLastLvl, ",") {
+			if !strings.Contains(d.FileName(), t) {
+				continue
+			}
+			if strings.Contains(d.FileName(), t+".0-") {
+				continue
+			}
+			_ = mmap.MadviseNormal(d.mmapHandle1)
+			return
+		}
+		return
+	}
+
 	_ = mmap.MadviseRandom(d.mmapHandle1)
 }
+
 func (d *Decompressor) EnableReadAhead() *Decompressor {
 	if d == nil || d.mmapHandle1 == nil {
 		return d
 	}
+	d.readAheadRefcnt.Add(1)
 	_ = mmap.MadviseSequential(d.mmapHandle1)
-	return d
-}
-func (d *Decompressor) EnableMadvNormal() *Decompressor {
-	if d == nil || d.mmapHandle1 == nil {
-		return d
-	}
-	_ = mmap.MadviseNormal(d.mmapHandle1)
 	return d
 }
 func (d *Decompressor) EnableMadvWillNeed() *Decompressor {
 	if d == nil || d.mmapHandle1 == nil {
 		return d
 	}
+	d.readAheadRefcnt.Add(1)
 	_ = mmap.MadviseWillNeed(d.mmapHandle1)
 	return d
 }
@@ -614,7 +648,7 @@ func (d *Decompressor) MakeGetter() *Getter {
 		posDict:     d.posDict,
 		data:        d.data[d.wordsStart:],
 		patternDict: d.dict,
-		fName:       d.fileName,
+		fName:       d.FileName1,
 	}
 }
 
@@ -631,6 +665,11 @@ func (g *Getter) HasNext() bool {
 // and appends it to the given buf, returning the result of appending
 // After extracting next word, it moves to the beginning of the next one
 func (g *Getter) Next(buf []byte) ([]byte, uint64) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			panic(fmt.Sprintf("file: %s, %s, %s", g.fName, rec, dbg.Stack()))
+		}
+	}()
 	savePos := g.dataP
 	wordLen := g.nextPos(true)
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
@@ -697,6 +736,11 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 }
 
 func (g *Getter) NextUncompressed() ([]byte, uint64) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			panic(fmt.Sprintf("file: %s, %s, %s", g.fName, rec, dbg.Stack()))
+		}
+	}()
 	wordLen := g.nextPos(true)
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
 	if wordLen == 0 {
@@ -773,9 +817,14 @@ func (g *Getter) SkipUncompressed() (uint64, int) {
 	return g.dataP, int(wordLen)
 }
 
-// Match returns true and next offset if the word at current offset fully matches the buf
-// returns false and current offset otherwise.
-func (g *Getter) Match(buf []byte) (bool, uint64) {
+// Match returns
+//
+//	1 if the word at current offset is greater than the buf
+//
+// -1 if it is less than the buf
+//
+//	0 if they are equal.
+func (g *Getter) Match(buf []byte) int {
 	savePos := g.dataP
 	wordLen := g.nextPos(true)
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
@@ -785,10 +834,18 @@ func (g *Getter) Match(buf []byte) (bool, uint64) {
 			g.dataP++
 			g.dataBit = 0
 		}
-		if lenBuf != 0 {
+		if lenBuf != 0 || lenBuf != int(wordLen) {
 			g.dataP, g.dataBit = savePos, 0
 		}
-		return lenBuf == int(wordLen), g.dataP
+		if lenBuf == int(wordLen) {
+			return 0
+		}
+		if lenBuf < int(wordLen) {
+			return -1
+		}
+		if lenBuf > int(wordLen) {
+			return 1
+		}
 	}
 
 	var bufPos int
@@ -796,9 +853,14 @@ func (g *Getter) Match(buf []byte) (bool, uint64) {
 	for pos := g.nextPos(false /* clean */); pos != 0; pos = g.nextPos(false) {
 		bufPos += int(pos) - 1
 		pattern := g.nextPattern()
-		if lenBuf < bufPos+len(pattern) || !bytes.Equal(buf[bufPos:bufPos+len(pattern)], pattern) {
+		compared := bytes.Compare(buf[bufPos:bufPos+len(pattern)], pattern)
+		if compared != 0 {
 			g.dataP, g.dataBit = savePos, 0
-			return false, savePos
+			return compared
+		}
+		if lenBuf < bufPos+len(pattern) {
+			g.dataP, g.dataBit = savePos, 0
+			return -1
 		}
 	}
 	if g.dataBit > 0 {
@@ -815,9 +877,14 @@ func (g *Getter) Match(buf []byte) (bool, uint64) {
 		bufPos += int(pos) - 1
 		if bufPos > lastUncovered {
 			dif := uint64(bufPos - lastUncovered)
-			if lenBuf < bufPos || !bytes.Equal(buf[lastUncovered:bufPos], g.data[postLoopPos:postLoopPos+dif]) {
+			compared := bytes.Compare(buf[lastUncovered:bufPos], g.data[postLoopPos:postLoopPos+dif])
+			if compared != 0 {
 				g.dataP, g.dataBit = savePos, 0
-				return false, savePos
+				return compared
+			}
+			if lenBuf < bufPos {
+				g.dataP, g.dataBit = savePos, 0
+				return -1
 			}
 			postLoopPos += dif
 		}
@@ -825,18 +892,28 @@ func (g *Getter) Match(buf []byte) (bool, uint64) {
 	}
 	if int(wordLen) > lastUncovered {
 		dif := wordLen - uint64(lastUncovered)
-		if lenBuf < int(wordLen) || !bytes.Equal(buf[lastUncovered:wordLen], g.data[postLoopPos:postLoopPos+dif]) {
+
+		compared := bytes.Compare(buf[lastUncovered:wordLen], g.data[postLoopPos:postLoopPos+dif])
+		if compared != 0 {
 			g.dataP, g.dataBit = savePos, 0
-			return false, savePos
+			return compared
+		}
+		if lenBuf < int(wordLen) {
+			g.dataP, g.dataBit = savePos, 0
+			return -1
 		}
 		postLoopPos += dif
 	}
-	if lenBuf != int(wordLen) {
+	if lenBuf < int(wordLen) {
 		g.dataP, g.dataBit = savePos, 0
-		return false, savePos
+		return -1
+	}
+	if lenBuf > int(wordLen) {
+		g.dataP, g.dataBit = savePos, 0
+		return 1
 	}
 	g.dataP, g.dataBit = postLoopPos, 0
-	return true, postLoopPos
+	return 0
 }
 
 // MatchPrefix only checks if the word at the current offset has a buf prefix. Does not move offset to the next word.

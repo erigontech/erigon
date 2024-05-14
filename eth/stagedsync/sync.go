@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -44,6 +45,8 @@ type Timing struct {
 func (s *Sync) Len() int {
 	return len(s.stages)
 }
+
+func (s *Sync) Cfg() ethconfig.Sync { return s.cfg }
 
 func (s *Sync) UnwindPoint() uint64 {
 	return *s.unwindPoint
@@ -131,15 +134,31 @@ func (s *Sync) IsAfter(stage1, stage2 stages.SyncStage) bool {
 	return idx1 > idx2
 }
 
-func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason) {
+func (s *Sync) HasUnwindPoint() bool { return s.unwindPoint != nil }
+func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error {
+	if tx != nil {
+		if casted, ok := tx.(state.HasAggTx); ok {
+			// protect from too far unwind
+			unwindPointWithCommitment, ok, err := casted.AggTx().(*state.AggregatorRoTx).CanUnwindBeforeBlockNum(unwindPoint, tx)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindPoint, unwindPointWithCommitment)
+			}
+			unwindPoint = unwindPointWithCommitment
+		}
+	}
+
 	if reason.Block != nil {
-		s.logger.Debug("UnwindTo", "block", unwindPoint, "block_hash", reason.Block.String(), "err", reason.Err)
+		s.logger.Debug("UnwindTo", "block", unwindPoint, "block_hash", reason.Block.String(), "err", reason.Err, "stack", dbg.Stack())
 	} else {
-		s.logger.Debug("UnwindTo", "block", unwindPoint)
+		s.logger.Debug("UnwindTo", "block", unwindPoint, "stack", dbg.Stack())
 	}
 
 	s.unwindPoint = &unwindPoint
 	s.unwindReason = reason
+	return nil
 }
 
 func (s *Sync) IsDone() bool {
@@ -516,7 +535,7 @@ func (s *Sync) runStage(stage *Stage, db kv.RwDB, txc wrap.TxContainer, firstCyc
 	took := time.Since(start)
 	logPrefix := s.LogPrefix()
 	if took > 60*time.Second {
-		s.logger.Info(fmt.Sprintf("[%s] DONE", logPrefix), "in", took)
+		s.logger.Info(fmt.Sprintf("[%s] DONE", logPrefix), "in", took, "block", stageState.BlockNumber)
 	} else {
 		s.logger.Debug(fmt.Sprintf("[%s] DONE", logPrefix), "in", took)
 	}

@@ -3,9 +3,12 @@ package blockio
 import (
 	"context"
 	"encoding/binary"
+	"errors"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv/backup"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
@@ -22,15 +25,10 @@ import (
 
 // BlockReader can read blocks from db and snapshots
 type BlockWriter struct {
-	historyV3 bool
-
-	// adding Auto-Increment BlockID
-	// allow store non-canonical Txs/Senders
-	txsV3 bool
 }
 
-func NewBlockWriter(historyV3 bool) *BlockWriter {
-	return &BlockWriter{historyV3: historyV3, txsV3: true}
+func NewBlockWriter() *BlockWriter {
+	return &BlockWriter{}
 }
 
 func (w *BlockWriter) FillHeaderNumberIndex(logPrefix string, tx kv.RwTx, tmpDir string, from, to uint64, ctx context.Context, logger log.Logger) error {
@@ -56,18 +54,19 @@ func (w *BlockWriter) FillHeaderNumberIndex(logPrefix string, tx kv.RwTx, tmpDir
 }
 
 func (w *BlockWriter) MakeBodiesCanonical(tx kv.RwTx, from uint64) error {
-	if w.historyV3 {
-		if err := rawdb.AppendCanonicalTxNums(tx, from); err != nil {
-			return err
+	if err := rawdb.AppendCanonicalTxNums(tx, from); err != nil {
+		var e1 rawdbv3.ErrTxNumsAppendWithGap
+		if ok := errors.As(err, &e1); ok {
+			// try again starting from latest available  block
+			return rawdb.AppendCanonicalTxNums(tx, e1.LastBlock()+1)
 		}
+		return err
 	}
 	return nil
 }
 func (w *BlockWriter) MakeBodiesNonCanonical(tx kv.RwTx, from uint64) error {
-	if w.historyV3 {
-		if err := rawdbv3.TxNums.Truncate(tx, from); err != nil {
-			return err
-		}
+	if err := rawdbv3.TxNums.Truncate(tx, from); err != nil {
+		return err
 	}
 	return nil
 }
@@ -103,11 +102,17 @@ func (w *BlockWriter) TruncateBodies(db kv.RoDB, tx kv.RwTx, from uint64) error 
 	return nil
 }
 
+var (
+	mxPruneTookBlocks = metrics.GetOrCreateSummary(`prune_seconds{type="blocks"}`)
+	mxPruneTookBor    = metrics.GetOrCreateSummary(`prune_seconds{type="bor"}`)
+)
+
 // PruneBlocks - [1, to) old blocks after moving it to snapshots.
 // keeps genesis in db
 // doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
 func (w *BlockWriter) PruneBlocks(ctx context.Context, tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
+	defer mxPruneTookBlocks.ObserveDuration(time.Now())
 	return rawdb.PruneBlocks(tx, blockTo, blocksDeleteLimit)
 }
 
@@ -116,5 +121,6 @@ func (w *BlockWriter) PruneBlocks(ctx context.Context, tx kv.RwTx, blockTo uint6
 // doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
 func (w *BlockWriter) PruneBorBlocks(ctx context.Context, tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt func(number uint64) uint64) error {
+	defer mxPruneTookBor.ObserveDuration(time.Now())
 	return rawdb.PruneBorBlocks(tx, blockTo, blocksDeleteLimit, SpanIdAt)
 }

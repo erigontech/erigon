@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
+	execution "github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -35,6 +36,7 @@ func (s *EthereumExecutionModule) validatePayloadBlobs(expectedBlobHashes []libc
 
 func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *execution.InsertBlocksRequest) (*execution.InsertionResult, error) {
 	if !e.semaphore.TryAcquire(1) {
+		e.logger.Trace("ethereumExecutionModule.InsertBlocks: ExecutionStatus_Busy")
 		return &execution.InsertionResult{
 			Result: execution.ExecutionStatus_Busy,
 		}, nil
@@ -46,8 +48,13 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 	}
 	defer tx.Rollback()
 	e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
+	frozenBlocks := e.blockReader.FrozenBlocks()
 
 	for _, block := range req.Blocks {
+		// Skip frozen blocks.
+		if block.Header.BlockNumber < frozenBlocks {
+			continue
+		}
 		header, err := eth1_utils.HeaderRpcToHeader(block.Header)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: cannot convert headers: %s", err)
@@ -56,11 +63,14 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: cannot convert body: %s", err)
 		}
+		parentTd := common.Big0
 		height := header.Number.Uint64()
-		// Parent's total difficulty
-		parentTd, err := rawdb.ReadTd(tx, header.ParentHash, height-1)
-		if err != nil || parentTd == nil {
-			return nil, fmt.Errorf("parent's total difficulty not found with hash %x and height %d: %v", header.ParentHash, header.Number.Uint64()-1, err)
+		if height > 0 {
+			// Parent's total difficulty
+			parentTd, err = rawdb.ReadTd(tx, header.ParentHash, height-1)
+			if err != nil || parentTd == nil {
+				return nil, fmt.Errorf("parent's total difficulty not found with hash %x and height %d: %v", header.ParentHash, height-1, err)
+			}
 		}
 
 		metrics.UpdateBlockConsumerHeaderDownloadDelay(header.Time, height-1, e.logger)

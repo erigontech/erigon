@@ -231,9 +231,6 @@ func (n *Node) openDataDir(ctx context.Context) error {
 	}
 
 	instdir := n.config.Dirs.DataDir
-	if err := datadir.ApplyMigrations(n.config.Dirs); err != nil {
-		return err
-	}
 	for retry := 0; ; retry++ {
 		l, locked, err := datadir.TryFlock(n.config.Dirs)
 		if err != nil {
@@ -348,7 +345,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 			if config.MdbxGrowthStep > 0 {
 				opts = opts.GrowthStep(config.MdbxGrowthStep)
 			}
-			opts = opts.DirtySpace(uint64(128 * datasize.MB))
+			opts = opts.DirtySpace(uint64(512 * datasize.MB))
 		case kv.ConsensusDB:
 			if config.MdbxPageSize.Bytes() > 0 {
 				opts = opts.PageSize(config.MdbxPageSize.Bytes())

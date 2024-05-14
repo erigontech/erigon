@@ -8,7 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -27,7 +27,7 @@ func TestPendingBlock(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	engine := ethash.NewFaker()
 	api := NewEthAPI(NewBaseApi(ff, stateCache, m.BlockReader, nil, false, rpccfg.DefaultEvmCallTimeout, engine,
-		m.Dirs), nil, nil, nil, mining, 5000000, 100_000, false, 100_000, log.New())
+		m.Dirs), nil, nil, nil, mining, 5000000, 100_000, false, 100_000, 128, log.New())
 	expect := uint64(12345)
 	b, err := rlp.EncodeToBytes(types.NewBlockWithHeader(&types.Header{Number: big.NewInt(int64(expect))}))
 	require.NoError(t, err)

@@ -22,62 +22,32 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
-// StepsInBiggestFile - files of this size are completely frozen/immutable.
-// files of smaller size are also immutable, but can be removed after merge to bigger files.
-const StepsInBiggestFile = 32
-
-var (
-	mxCurrentTx                = metrics.GetOrCreateGauge("domain_tx_processed")                 //nolint
-	mxCurrentBlock             = metrics.GetOrCreateGauge("domain_block_current")                //nolint
-	mxRunningMerges            = metrics.GetOrCreateGauge("domain_running_merges")               //nolint
-	mxRunningCollations        = metrics.GetOrCreateGauge("domain_running_collations")           //nolint
-	mxCollateTook              = metrics.GetOrCreateHistogram("domain_collate_took")             //nolint
-	mxPruneTook                = metrics.GetOrCreateHistogram("domain_prune_took")               //nolint
-	mxPruneHistTook            = metrics.GetOrCreateHistogram("domain_prune_hist_took")          //nolint
-	mxPruningProgress          = metrics.GetOrCreateGauge("domain_pruning_progress")             //nolint
-	mxCollationSize            = metrics.GetOrCreateGauge("domain_collation_size")               //nolint
-	mxCollationSizeHist        = metrics.GetOrCreateGauge("domain_collation_hist_size")          //nolint
-	mxPruneSize                = metrics.GetOrCreateCounter("domain_prune_size")                 //nolint
-	mxBuildTook                = metrics.GetOrCreateSummary("domain_build_files_took")           //nolint
-	mxStepCurrent              = metrics.GetOrCreateGauge("domain_step_current")                 //nolint
-	mxStepTook                 = metrics.GetOrCreateHistogram("domain_step_took")                //nolint
-	mxCommitmentKeys           = metrics.GetOrCreateCounter("domain_commitment_keys")            //nolint
-	mxCommitmentRunning        = metrics.GetOrCreateGauge("domain_running_commitment")           //nolint
-	mxCommitmentTook           = metrics.GetOrCreateSummary("domain_commitment_took")            //nolint
-	mxCommitmentWriteTook      = metrics.GetOrCreateHistogram("domain_commitment_write_took")    //nolint
-	mxCommitmentUpdates        = metrics.GetOrCreateCounter("domain_commitment_updates")         //nolint
-	mxCommitmentUpdatesApplied = metrics.GetOrCreateCounter("domain_commitment_updates_applied") //nolint
-)
-
-type SelectedStaticFiles struct {
-	accounts       []*filesItem
-	accountsIdx    []*filesItem
-	accountsHist   []*filesItem
-	storage        []*filesItem
-	storageIdx     []*filesItem
-	storageHist    []*filesItem
-	code           []*filesItem
-	codeIdx        []*filesItem
-	codeHist       []*filesItem
-	commitment     []*filesItem
-	commitmentIdx  []*filesItem
-	commitmentHist []*filesItem
-	codeI          int //nolint
-	storageI       int //nolint
-	accountsI      int //nolint
-	commitmentI    int //nolint
+type SelectedStaticFilesV3 struct {
+	d           [kv.DomainLen][]*filesItem
+	dHist       [kv.DomainLen][]*filesItem
+	dIdx        [kv.DomainLen][]*filesItem
+	logTopics   []*filesItem
+	tracesTo    []*filesItem
+	tracesFrom  []*filesItem
+	logAddrs    []*filesItem
+	dI          [kv.DomainLen]int
+	logAddrsI   int
+	logTopicsI  int
+	tracesFromI int
+	tracesToI   int
 }
 
-func (sf SelectedStaticFiles) Close() {
-	for _, group := range [][]*filesItem{
-		sf.accounts, sf.accountsIdx, sf.accountsHist,
-		sf.storage, sf.storageIdx, sf.storageHist,
-		sf.code, sf.codeIdx, sf.codeHist,
-		sf.commitment, sf.commitmentIdx, sf.commitmentHist,
-	} {
+func (sf SelectedStaticFilesV3) Close() {
+	clist := make([][]*filesItem, 0, kv.DomainLen+4)
+	for id := range sf.d {
+		clist = append(clist, sf.d[id], sf.dIdx[id], sf.dHist[id])
+	}
+
+	clist = append(clist, sf.logAddrs, sf.logTopics, sf.tracesFrom, sf.tracesTo)
+	for _, group := range clist {
 		for _, item := range group {
 			if item != nil {
 				if item.decompressor != nil {
@@ -86,42 +56,116 @@ func (sf SelectedStaticFiles) Close() {
 				if item.index != nil {
 					item.index.Close()
 				}
-				if item.bindex != nil {
-					item.bindex.Close()
-				}
+			}
+		}
+	}
+}
+
+func (ac *AggregatorRoTx) staticFilesInRange(r RangesV3) (sf SelectedStaticFilesV3, err error) {
+	for id := range ac.d {
+		if r.d[id].any() {
+			sf.d[id], sf.dIdx[id], sf.dHist[id], sf.dI[id] = ac.d[id].staticFilesInRange(r.d[id])
+		}
+	}
+	if r.logAddrs {
+		sf.logAddrs, sf.logAddrsI = ac.logAddrs.staticFilesInRange(r.logAddrsStartTxNum, r.logAddrsEndTxNum)
+	}
+	if r.logTopics {
+		sf.logTopics, sf.logTopicsI = ac.logTopics.staticFilesInRange(r.logTopicsStartTxNum, r.logTopicsEndTxNum)
+	}
+	if r.tracesFrom {
+		sf.tracesFrom, sf.tracesFromI = ac.tracesFrom.staticFilesInRange(r.tracesFromStartTxNum, r.tracesFromEndTxNum)
+	}
+	if r.tracesTo {
+		sf.tracesTo, sf.tracesToI = ac.tracesTo.staticFilesInRange(r.tracesToStartTxNum, r.tracesToEndTxNum)
+	}
+	return sf, err
+}
+
+type MergedFilesV3 struct {
+	d          [kv.DomainLen]*filesItem
+	dHist      [kv.DomainLen]*filesItem
+	dIdx       [kv.DomainLen]*filesItem
+	logAddrs   *filesItem
+	logTopics  *filesItem
+	tracesFrom *filesItem
+	tracesTo   *filesItem
+}
+
+func (mf MergedFilesV3) FrozenList() (frozen []string) {
+	for id, d := range mf.d {
+		if d == nil {
+			continue
+		}
+		frozen = append(frozen, d.decompressor.FileName())
+
+		if mf.dHist[id] != nil && mf.dHist[id].frozen {
+			frozen = append(frozen, mf.dHist[id].decompressor.FileName())
+		}
+		if mf.dIdx[id] != nil && mf.dIdx[id].frozen {
+			frozen = append(frozen, mf.dIdx[id].decompressor.FileName())
+		}
+	}
+
+	if mf.logAddrs != nil && mf.logAddrs.frozen {
+		frozen = append(frozen, mf.logAddrs.decompressor.FileName())
+	}
+	if mf.logTopics != nil && mf.logTopics.frozen {
+		frozen = append(frozen, mf.logTopics.decompressor.FileName())
+	}
+	if mf.tracesFrom != nil && mf.tracesFrom.frozen {
+		frozen = append(frozen, mf.tracesFrom.decompressor.FileName())
+	}
+	if mf.tracesTo != nil && mf.tracesTo.frozen {
+		frozen = append(frozen, mf.tracesTo.decompressor.FileName())
+	}
+	return frozen
+}
+func (mf MergedFilesV3) Close() {
+	clist := make([]*filesItem, 0, kv.DomainLen+4)
+	for id := range mf.d {
+		clist = append(clist, mf.d[id], mf.dHist[id], mf.dIdx[id])
+	}
+	clist = append(clist, mf.logAddrs, mf.logTopics, mf.tracesFrom, mf.tracesTo)
+
+	for _, item := range clist {
+		if item != nil {
+			if item.decompressor != nil {
+				item.decompressor.Close()
+			}
+			if item.index != nil {
+				item.index.Close()
 			}
 		}
 	}
 }
 
 type MergedFiles struct {
-	accounts                      *filesItem
-	accountsIdx, accountsHist     *filesItem
-	storage                       *filesItem
-	storageIdx, storageHist       *filesItem
-	code                          *filesItem
-	codeIdx, codeHist             *filesItem
-	commitment                    *filesItem
-	commitmentIdx, commitmentHist *filesItem
+	d     [kv.DomainLen]*filesItem
+	dHist [kv.DomainLen]*filesItem
+	dIdx  [kv.DomainLen]*filesItem
+}
+
+func (mf MergedFiles) FillV3(m *MergedFilesV3) MergedFiles {
+	for id := range m.d {
+		mf.d[id], mf.dHist[id], mf.dIdx[id] = m.d[id], m.dHist[id], m.dIdx[id]
+	}
+	return mf
 }
 
 func (mf MergedFiles) Close() {
-	for _, item := range []*filesItem{
-		mf.accounts, mf.accountsIdx, mf.accountsHist,
-		mf.storage, mf.storageIdx, mf.storageHist,
-		mf.code, mf.codeIdx, mf.codeHist,
-		mf.commitment, mf.commitmentIdx, mf.commitmentHist,
-		//mf.logAddrs, mf.logTopics, mf.tracesFrom, mf.tracesTo,
-	} {
-		if item != nil {
-			if item.decompressor != nil {
-				item.decompressor.Close()
-			}
-			if item.decompressor != nil {
-				item.index.Close()
-			}
-			if item.bindex != nil {
-				item.bindex.Close()
+	for id := range mf.d {
+		for _, item := range []*filesItem{mf.d[id], mf.dHist[id], mf.dIdx[id]} {
+			if item != nil {
+				if item.decompressor != nil {
+					item.decompressor.Close()
+				}
+				if item.decompressor != nil {
+					item.index.Close()
+				}
+				if item.bindex != nil {
+					item.bindex.Close()
+				}
 			}
 		}
 	}

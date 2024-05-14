@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/pprof"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -23,13 +24,11 @@ import (
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
@@ -132,15 +131,8 @@ func printCurrentBlockNumber(chaindata string) {
 }
 
 func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
-	var histV3 bool
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		histV3, _ = kvcfg.HistoryV3.Enabled(tx)
-		return nil
-	}); err != nil {
-		panic(err)
-	}
 	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", 0, log.New()), nil /* BorSnapshots */)
-	bw := blockio.NewBlockWriter(histV3)
+	bw := blockio.NewBlockWriter()
 	return br, bw
 }
 
@@ -1298,7 +1290,10 @@ func iterate(filename string, prefix string) error {
 			fmt.Printf("[%x] =>", key)
 			cnt := 0
 			for efIt.HasNext() {
-				txNum, _ := efIt.Next()
+				txNum, err := efIt.Next()
+				if err != nil {
+					return err
+				}
 				var txKey [8]byte
 				binary.BigEndian.PutUint64(txKey[:], txNum)
 				offset, ok := r.Lookup2(txKey[:], key)

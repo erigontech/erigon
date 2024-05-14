@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/disk"
 	"github.com/ledgerwatch/erigon-lib/common/mem"
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
@@ -25,9 +26,9 @@ import (
 	execution_client2 "github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/ledgerwatch/erigon/cmd/caplin/caplin1"
 	"github.com/ledgerwatch/erigon/cmd/caplin/caplincli"
@@ -55,7 +56,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		log.Error("[Phase1] Could not initialize caplin", "err", err)
 		return err
 	}
-	if _, _, err := debug.Setup(cliCtx, true /* root logger */); err != nil {
+	if _, _, _, err := debug.Setup(cliCtx, true /* root logger */); err != nil {
 		return err
 	}
 	rcfg := beacon_router_configuration.RouterConfiguration{
@@ -135,10 +136,11 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		return err
 	}
 
+	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
 	return caplin1.RunCaplinPhase1(ctx, executionEngine, &ethconfig.Config{
-		LightClientDiscoveryAddr:    cfg.Addr,
-		LightClientDiscoveryPort:    uint64(cfg.Port),
-		LightClientDiscoveryTCPPort: uint64(cfg.ServerTcpPort),
-		BeaconRouter:                rcfg,
-	}, cfg.NetworkCfg, cfg.BeaconCfg, ethClock, state, cfg.Dirs, nil, nil, false, false, false, indiciesDB, blobStorage, nil)
+		CaplinDiscoveryAddr:    cfg.Addr,
+		CaplinDiscoveryPort:    uint64(cfg.Port),
+		CaplinDiscoveryTCPPort: uint64(cfg.ServerTcpPort),
+		BeaconRouter:           rcfg,
+	}, cfg.NetworkCfg, cfg.BeaconCfg, ethClock, state, cfg.Dirs, nil, nil, false, false, false, indiciesDB, blobStorage, nil, blockSnapBuildSema)
 }

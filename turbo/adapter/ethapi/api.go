@@ -416,7 +416,7 @@ type RPCTransaction struct {
 func newRPCTransaction(tx types.Transaction, blockHash libcommon.Hash, blockNumber uint64, index uint64, baseFee *big.Int) *RPCTransaction {
 	// Determine the signer. For replay-protected transactions, use the most permissive
 	// signer, because we assume that signers are backwards-compatible with old
-	// transactions. For non-protected transactions, the homestead signer signer is used
+	// transactions. For non-protected transactions, the homestead signer is used
 	// because the return value of ChainId is zero for those transactions.
 	chainId := uint256.NewInt(0)
 	result := &RPCTransaction{

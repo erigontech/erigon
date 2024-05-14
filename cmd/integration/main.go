@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"os"
 
+	_ "github.com/ledgerwatch/erigon/core/snaptype"        //hack
+	_ "github.com/ledgerwatch/erigon/polygon/bor/snaptype" //hack
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/integration/commands"
-
-	// needed so that erigon-lib/kv init func is run
-	_ "github.com/ledgerwatch/erigon-lib/kv"
 )
 
 func main() {

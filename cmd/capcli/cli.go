@@ -18,17 +18,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	lg "github.com/anacrolix/log"
-
-	"github.com/ledgerwatch/erigon-lib/direct"
-	downloader3 "github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/metrics"
-	state2 "github.com/ledgerwatch/erigon-lib/state"
-
-	"github.com/c2h5oh/datasize"
-
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
-	"github.com/ledgerwatch/erigon-lib/downloader"
 
 	"github.com/ledgerwatch/erigon/cl/antiquary"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -37,12 +27,9 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/caplin/caplin1"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
@@ -62,14 +49,13 @@ import (
 	"github.com/spf13/afero"
 	"google.golang.org/grpc"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
+	sentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinelproto"
 )
 
 var CLI struct {
 	Chain                   Chain                   `cmd:"" help:"download the entire chain from reqresp network"`
 	DumpSnapshots           DumpSnapshots           `cmd:"" help:"generate caplin snapshots"`
 	CheckSnapshots          CheckSnapshots          `cmd:"" help:"check snapshot folder against content of chain data"`
-	DownloadSnapshots       DownloadSnapshots       `cmd:"" help:"download snapshots from webseed"`
 	LoopSnapshots           LoopSnapshots           `cmd:"" help:"loop over snapshots"`
 	RetrieveHistoricalState RetrieveHistoricalState `cmd:"" help:"retrieve historical state from db"`
 	ChainEndpoint           ChainEndpoint           `cmd:"" help:"chain endpoint"`
@@ -176,7 +162,7 @@ func (c *Chain) Run(ctx *Context) error {
 	}
 
 	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, nil, db)
-	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, false, false, false), csn, db, nil, beaconConfig, true, false, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root())
+	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, false, false, false, nil), csn, db, nil, beaconConfig, true, false, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root())
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
 }
 
@@ -334,7 +320,12 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 		return
 	})
 
-	salt := freezeblocks.GetIndicesSalt(dirs.Snap)
+	salt, err := snaptype.GetIndexSalt(dirs.Snap)
+
+	if err != nil {
+		return err
+	}
+
 	return freezeblocks.DumpBeaconBlocks(ctx, db, 0, to, salt, dirs, estimate.CompressSnapshot.Workers(), log.LvlInfo, log.Root())
 }
 
@@ -466,67 +457,6 @@ func (c *LoopSnapshots) Run(ctx *Context) error {
 	}
 	log.Info("Successfully checked", "slot", c.Slot, "time", time.Since(start))
 	return nil
-}
-
-type DownloadSnapshots struct {
-	chainCfg
-	outputFolder
-}
-
-func (d *DownloadSnapshots) Run(ctx *Context) error {
-	webSeeds := snapcfg.KnownWebseeds[d.Chain]
-	dirs := datadir.New(d.Datadir)
-
-	_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(d.Chain)
-	if err != nil {
-		return err
-	}
-
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
-
-	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
-	if err != nil {
-		return err
-	}
-	tx, err := db.BeginRw(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	downloadRate, err := datasize.ParseString("16mb")
-	if err != nil {
-		return err
-	}
-
-	uploadRate, err := datasize.ParseString("0mb")
-	if err != nil {
-		return err
-	}
-	version := "erigon: " + params.VersionWithCommit(params.GitCommit)
-
-	downloaderCfg, err := downloadercfg.New(dirs, version, lg.Info, downloadRate, uploadRate, 42069, 10, 3, nil, webSeeds, d.Chain, true)
-	if err != nil {
-		return err
-	}
-	downlo, err := downloader.New(ctx, downloaderCfg, log.Root(), log.LvlInfo, true)
-	if err != nil {
-		return err
-	}
-	s, err := state2.NewAggregator(ctx, dirs.Tmp, dirs.Tmp, 200000, db, log.Root())
-	if err != nil {
-		return err
-	}
-	downlo.MainLoopInBackground(false)
-	bittorrentServer, err := downloader3.NewGrpcServer(downlo)
-	if err != nil {
-		return fmt.Errorf("new server: %w", err)
-	}
-
-	return snapshotsync.WaitForDownloader(ctx, "CapCliDownloader", false, false, snapshotsync.OnlyCaplin, s, tx,
-		freezeblocks.NewBlockReader(
-			freezeblocks.NewRoSnapshots(ethconfig.NewSnapCfg(false, false, false), dirs.Snap, 0, log.Root()),
-			freezeblocks.NewBorRoSnapshots(ethconfig.NewSnapCfg(false, false, false), dirs.Snap, 0, log.Root())),
-		params.ChainConfigByChainName(d.Chain), direct.NewDownloaderClient(bittorrentServer), []string{})
 }
 
 type RetrieveHistoricalState struct {
@@ -977,7 +907,12 @@ func (c *DumpBlobsSnapshots) Run(ctx *Context) error {
 	})
 	from := ((beaconConfig.DenebForkEpoch * beaconConfig.SlotsPerEpoch) / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
 
-	salt := freezeblocks.GetIndicesSalt(dirs.Snap)
+	salt, err := snaptype.GetIndexSalt(dirs.Snap)
+
+	if err != nil {
+		return err
+	}
+
 	return freezeblocks.DumpBlobsSidecar(ctx, blobStorage, db, from, to, salt, dirs, estimate.CompressSnapshot.Workers(), log.LvlInfo, log.Root())
 }
 

@@ -10,12 +10,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
+
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
+	execution "github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
@@ -61,6 +63,7 @@ type EngineBlockDownloader struct {
 	tmpdir  string
 	timeout int
 	config  *chain.Config
+	syncCfg ethconfig.Sync
 
 	// lock
 	lock sync.Mutex
@@ -72,7 +75,8 @@ type EngineBlockDownloader struct {
 func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *headerdownload.HeaderDownload, executionClient execution.ExecutionClient,
 	bd *bodydownload.BodyDownload, blockPropagator adapter.BlockPropagator,
 	bodyReqSend RequestBodyFunction, blockReader services.FullBlockReader, db kv.RoDB, config *chain.Config,
-	tmpdir string, timeout int) *EngineBlockDownloader {
+	tmpdir string, syncCfg ethconfig.Sync) *EngineBlockDownloader {
+	timeout := syncCfg.BodyDownloadTimeoutSeconds
 	var s atomic.Value
 	s.Store(headerdownload.Idle)
 	return &EngineBlockDownloader{
@@ -82,6 +86,7 @@ func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *header
 		db:              db,
 		status:          s,
 		config:          config,
+		syncCfg:         syncCfg,
 		tmpdir:          tmpdir,
 		logger:          logger,
 		blockReader:     blockReader,
@@ -113,7 +118,7 @@ func (e *EngineBlockDownloader) scheduleHeadersDownload(
 	e.hd.SetPOSSync(true) // This needs to be called after SetHeaderToDownloadPOS because SetHeaderToDownloadPOS sets `posAnchor` member field which is used by ProcessHeadersPOS
 
 	//nolint
-	e.hd.SetHeadersCollector(etl.NewCollector("EngineBlockDownloader", e.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), e.logger))
+	e.hd.SetHeadersCollector(etl.NewCollector("EngineBlockDownloader", e.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize/2), e.logger))
 
 	e.hd.SetPosStatus(headerdownload.Syncing)
 
@@ -121,11 +126,25 @@ func (e *EngineBlockDownloader) scheduleHeadersDownload(
 }
 
 // waitForEndOfHeadersDownload waits until the download of headers ends and returns the outcome.
-func (e *EngineBlockDownloader) waitForEndOfHeadersDownload() headerdownload.SyncStatus {
-	for e.hd.PosStatus() == headerdownload.Syncing {
-		time.Sleep(10 * time.Millisecond)
+func (e *EngineBlockDownloader) waitForEndOfHeadersDownload(ctx context.Context) (headerdownload.SyncStatus, error) {
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if e.hd.PosStatus() != headerdownload.Syncing {
+				return e.hd.PosStatus(), nil
+			}
+		case <-ctx.Done():
+			return e.hd.PosStatus(), ctx.Err()
+		case <-logEvery.C:
+			e.logger.Info("[EngineBlockDownloader] Waiting for headers download to finish")
+		}
 	}
-	return e.hd.PosStatus()
 }
 
 // waitForEndOfHeadersDownload waits until the download of headers ends and returns the outcome.
@@ -245,7 +264,7 @@ func (e *EngineBlockDownloader) insertHeadersAndBodies(ctx context.Context, tx k
 		if body == nil {
 			return fmt.Errorf("missing body at block=%d", number)
 		}
-		blocksBatch = append(blocksBatch, types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals))
+		blocksBatch = append(blocksBatch, types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals, body.Requests))
 		if number%uint64(blockWrittenLogSize) == 0 {
 			e.logger.Info("[insertHeadersAndBodies] Written blocks", "progress", number, "to", toBlock)
 		}

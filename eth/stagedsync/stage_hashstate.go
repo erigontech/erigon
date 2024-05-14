@@ -7,9 +7,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"runtime"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -32,15 +33,12 @@ import (
 type HashStateCfg struct {
 	db   kv.RwDB
 	dirs datadir.Dirs
-
-	historyV3 bool
 }
 
-func StageHashStateCfg(db kv.RwDB, dirs datadir.Dirs, historyV3 bool) HashStateCfg {
+func StageHashStateCfg(db kv.RwDB, dirs datadir.Dirs) HashStateCfg {
 	return HashStateCfg{
-		db:        db,
-		dirs:      dirs,
-		historyV3: historyV3,
+		db:   db,
+		dirs: dirs,
 	}
 }
 
@@ -125,25 +123,13 @@ func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, t
 	// Currently it does not require unwinding because it does not create any Intermediate Hash records
 	// and recomputes the state root from scratch
 	prom := NewPromoter(tx, cfg.dirs, ctx, logger)
-	if cfg.historyV3 {
-		if err := prom.UnwindOnHistoryV3(logPrefix, s.BlockNumber, u.UnwindPoint, false, true); err != nil {
-			return err
-		}
-		if err := prom.UnwindOnHistoryV3(logPrefix, s.BlockNumber, u.UnwindPoint, false, false); err != nil {
-			return err
-		}
-		if err := prom.UnwindOnHistoryV3(logPrefix, s.BlockNumber, u.UnwindPoint, true, false); err != nil {
-			return err
-		}
-		return nil
-	}
-	if err := prom.Unwind(logPrefix, s, u, false /* storage */, true /* codes */); err != nil {
+	if err := prom.UnwindOnHistoryV3(logPrefix, s.BlockNumber, u.UnwindPoint, false, true); err != nil {
 		return err
 	}
-	if err := prom.Unwind(logPrefix, s, u, false /* storage */, false /* codes */); err != nil {
+	if err := prom.UnwindOnHistoryV3(logPrefix, s.BlockNumber, u.UnwindPoint, false, false); err != nil {
 		return err
 	}
-	if err := prom.Unwind(logPrefix, s, u, true /* storage */, false /* codes */); err != nil {
+	if err := prom.UnwindOnHistoryV3(logPrefix, s.BlockNumber, u.UnwindPoint, true, false); err != nil {
 		return err
 	}
 	return nil
@@ -322,6 +308,7 @@ func parallelWarmup(ctx context.Context, db kv.RoDB, bucket string, workers int)
 				if err != nil {
 					return err
 				}
+				defer it.Close()
 				for it.HasNext() {
 					_, _, err = it.Next()
 					if err != nil {
@@ -568,6 +555,7 @@ func (p *Promoter) PromoteOnHistoryV3(logPrefix string, from, to uint64, storage
 		if err != nil {
 			return err
 		}
+		defer it.Close()
 		for it.HasNext() {
 			k, _, err := it.Next()
 			if err != nil {
@@ -614,6 +602,7 @@ func (p *Promoter) PromoteOnHistoryV3(logPrefix string, from, to uint64, storage
 	if err != nil {
 		return err
 	}
+	defer it.Close()
 	for it.HasNext() {
 		k, _, err := it.Next()
 		if err != nil {
@@ -733,6 +722,7 @@ func (p *Promoter) UnwindOnHistoryV3(logPrefix string, unwindFrom, unwindTo uint
 		if err != nil {
 			return err
 		}
+		defer it.Close()
 		for it.HasNext() {
 			k, v, err := it.Next()
 			if err != nil {
@@ -772,6 +762,7 @@ func (p *Promoter) UnwindOnHistoryV3(logPrefix string, unwindFrom, unwindTo uint
 		if err != nil {
 			return err
 		}
+		defer it.Close()
 		for it.HasNext() {
 			k, v, err := it.Next()
 			if err != nil {
@@ -802,6 +793,7 @@ func (p *Promoter) UnwindOnHistoryV3(logPrefix string, unwindFrom, unwindTo uint
 	if err != nil {
 		return err
 	}
+	defer it.Close()
 	for it.HasNext() {
 		k, v, err := it.Next()
 		if err != nil {
@@ -894,23 +886,10 @@ func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, stora
 
 func promoteHashedStateIncrementally(logPrefix string, from, to uint64, tx kv.RwTx, cfg HashStateCfg, ctx context.Context, logger log.Logger) error {
 	prom := NewPromoter(tx, cfg.dirs, ctx, logger)
-	if cfg.historyV3 {
-		if err := prom.PromoteOnHistoryV3(logPrefix, from, to, false); err != nil {
-			return err
-		}
-		if err := prom.PromoteOnHistoryV3(logPrefix, from, to, true); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	if err := prom.Promote(logPrefix, from, to, false, true); err != nil {
+	if err := prom.PromoteOnHistoryV3(logPrefix, from, to, false); err != nil {
 		return err
 	}
-	if err := prom.Promote(logPrefix, from, to, false, false); err != nil {
-		return err
-	}
-	if err := prom.Promote(logPrefix, from, to, true, false); err != nil {
+	if err := prom.PromoteOnHistoryV3(logPrefix, from, to, true); err != nil {
 		return err
 	}
 	return nil

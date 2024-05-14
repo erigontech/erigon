@@ -17,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client/block_collector"
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
-
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -171,6 +170,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				logArgs = append(logArgs,
 					"slot", currProgress,
 					"blockNumber", currEth1Progress.Load(),
+					"frozenBlocks", cfg.engine.FrozenBlocks(ctx),
 					"blk/sec", fmt.Sprintf("%.1f", speed),
 					"snapshots", cfg.sn.SegmentsMax(),
 				)

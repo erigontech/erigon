@@ -33,10 +33,11 @@ func TestReWriteIndex(t *testing.T) {
 	logger := log.New()
 	tmpDir := t.TempDir()
 	indexFile := filepath.Join(tmpDir, "index")
+	salt := uint32(1)
 	rs, err := NewRecSplit(RecSplitArgs{
 		KeyCount:   100,
 		BucketSize: 10,
-		Salt:       0,
+		Salt:       &salt,
 		TmpDir:     tmpDir,
 		IndexFile:  indexFile,
 		LeafSize:   8,

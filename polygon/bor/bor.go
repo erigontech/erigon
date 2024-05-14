@@ -974,7 +974,7 @@ func (c *Bor) CalculateRewards(config *chain.Config, header *types.Header, uncle
 // Finalize implements consensus.Engine, ensuring no uncles are set, nor block
 // rewards given.
 func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
+	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal, requests []*types.Request,
 	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
 ) (types.Transactions, types.Receipts, error) {
 	headerNumber := header.Number.Uint64()
@@ -1038,7 +1038,7 @@ func (c *Bor) changeContractCodeIfNeeded(headerNumber uint64, state *state.Intra
 // FinalizeAndAssemble implements consensus.Engine, ensuring no uncles are set,
 // nor block rewards given, and returns the final block.
 func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
+	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests []*types.Request,
 	chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
 ) (*types.Block, types.Transactions, types.Receipts, error) {
 	// stateSyncData := []*types.StateSyncData{}
@@ -1078,7 +1078,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 	header.UncleHash = types.CalcUncleHash(nil)
 
 	// Assemble block
-	block := types.NewBlock(header, txs, nil, receipts, withdrawals)
+	block := types.NewBlock(header, txs, nil, receipts, withdrawals, requests)
 
 	// set state sync
 	// bc := chain.(*core.BlockChain)
@@ -1452,11 +1452,63 @@ func (c *Bor) CommitStates(
 ) error {
 	events := chain.Chain.BorEventsByBlock(header.Hash(), header.Number.Uint64())
 
+	//if len(events) == 50 || len(events) == 0 { // we still sometime could get 0 events from borevent file
+	if len(events) == 50 { // we still sometime could get 0 events from borevent file
+		blockNum := header.Number.Uint64()
+
+		var to time.Time
+		if c.config.IsIndore(blockNum) {
+			stateSyncDelay := c.config.CalculateStateSyncDelay(blockNum)
+			to = time.Unix(int64(header.Time-stateSyncDelay), 0)
+		} else {
+			pHeader := chain.Chain.GetHeaderByNumber(blockNum - c.config.CalculateSprintLength(blockNum))
+			to = time.Unix(int64(pHeader.Time), 0)
+		}
+
+		startEventID := chain.Chain.BorStartEventID(header.Hash(), blockNum)
+		log.Warn("[dbg] fallback to remote bor events", "blockNum", blockNum, "startEventID", startEventID, "events_from_db_or_snaps", len(events))
+		remote, err := c.HeimdallClient.FetchStateSyncEvents(context.Background(), startEventID, to, 0)
+		if err != nil {
+			return err
+		}
+		if len(remote) > 0 {
+			chainID := c.chainConfig.ChainID.String()
+
+			var merged []*heimdall.EventRecordWithTime
+			events = events[:0]
+			for _, event := range remote {
+				if event.ChainID != chainID {
+					continue
+				}
+				if event.Time.After(to) {
+					continue
+				}
+				merged = append(merged, event)
+			}
+
+			for _, ev := range merged {
+				eventRecordWithoutTime := ev.BuildEventRecord()
+
+				recordBytes, err := rlp.EncodeToBytes(eventRecordWithoutTime)
+				if err != nil {
+					panic(err)
+				}
+
+				data, err := stateReceiverABI.Pack("commitState", big.NewInt(ev.Time.Unix()), recordBytes)
+				if err != nil {
+					panic(err)
+				}
+				events = append(events, data)
+			}
+		}
+	}
+
 	for _, event := range events {
 		if err := c.GenesisContractsClient.CommitState(event, syscall); err != nil {
 			return err
 		}
 	}
+
 	return nil
 }
 
