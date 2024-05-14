@@ -864,11 +864,6 @@ Loop:
 					t1, t2, t3 time.Duration
 				)
 
-				if blocksFreezeCfg.Produce {
-					//log.Info(fmt.Sprintf("[snapshots] db has steps amount: %s", agg.StepsRangeInDBAsStr(applyTx)))
-					agg.BuildFilesInBackground(outputTxNum.Load())
-				}
-
 				if !useExternalTx {
 					if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Minute, applyTx); err != nil {
 						return err
