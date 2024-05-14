@@ -186,8 +186,8 @@ func ExecV3(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	// If our starting is the maxBlockNum or before, we have nothing to do
-	if blocksInDB >= maxBlockNum {
+	// If our starting is the before maxBlockNum, then skip.
+	if blocksInDB > maxBlockNum {
 		fmt.Println("XXX", blocksInDB, maxBlockNum)
 		return nil
 	}
