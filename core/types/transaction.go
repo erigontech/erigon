@@ -185,7 +185,6 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 	switch data[0] {
 	case AccessListTxType:
 		t = &AccessListTx{}
-
 	case DynamicFeeTxType:
 		t = &DynamicFeeTransaction{}
 	case BlobTxType:
