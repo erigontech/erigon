@@ -1,9 +1,7 @@
 package stages
 
 import (
-	"encoding/json"
-	"fmt"
-
+	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon/cmd/diag/flags"
 	"github.com/ledgerwatch/erigon/cmd/diag/util"
@@ -39,28 +37,38 @@ func printCurentStage(cliCtx *cli.Context) error {
 		return err
 	}
 
+	stagesRows := getStagesRows(data.SyncStages)
+
 	switch cliCtx.String(flags.OutputFlag.Name) {
 	case "json":
-		bytes, err := json.Marshal(data.SyncStages.StagesList)
-		if err != nil {
-			return err
-		}
-
-		fmt.Println(string(bytes))
+		util.RenderJson(stagesRows)
 
 	case "text":
-		fmt.Println("-------------------Stages-------------------")
-
-		for idx, stage := range data.SyncStages.StagesList {
-			if idx == int(data.SyncStages.CurrentStage) {
-				fmt.Println("[" + stage + "]" + " - Running")
-			} else if idx < int(data.SyncStages.CurrentStage) {
-				fmt.Println("[" + stage + "]" + " - Completed")
-			} else {
-				fmt.Println("[" + stage + "]" + " - Queued")
-			}
-		}
+		util.RenderTableWithHeader(
+			"Sync stages:",
+			table.Row{"Stage", "Status"},
+			stagesRows,
+		)
 	}
 
 	return nil
+}
+
+func getStagesRows(syncStages diagnostics.SyncStages) []table.Row {
+	rows := []table.Row{}
+	for idx, stage := range syncStages.StagesList {
+		row := table.Row{
+			stage,
+			"Queued",
+		}
+		if idx == int(syncStages.CurrentStage) {
+			row[1] = "Running"
+		} else if idx < int(syncStages.CurrentStage) {
+			row[1] = "Completed"
+		}
+
+		rows = append(rows, row)
+	}
+
+	return rows
 }
