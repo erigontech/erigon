@@ -876,13 +876,14 @@ Loop:
 				} else if !ok {
 					break Loop
 				}
-				if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Minute, applyTx); err != nil {
-					return err
-				}
+
 				t1 = time.Since(tt)
 
 				if err := func() error {
 					doms.Close()
+					if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Minute, applyTx); err != nil {
+						return err
+					}
 					if err = execStage.Update(applyTx, outputBlockNum.GetValueUint64()); err != nil {
 						return err
 					}
