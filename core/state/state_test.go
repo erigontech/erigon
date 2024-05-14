@@ -72,7 +72,8 @@ func (s *StateSuite) TestDump(c *checker.C) {
 	}
 	defer tx.Rollback()
 
-	got := string(NewDumper(tx, 1).DefaultDump())
+	historyV3 := false //TODO: https://github.com/ledgerwatch/erigon/issues/10323
+	got := string(NewDumper(tx, 1, historyV3).DefaultDump())
 	want := `{
     "root": "71edff0130dd2385947095001c73d9e28d862fc286fca2b922ca6f6f3cddfdd2",
     "accounts": {
@@ -364,7 +365,8 @@ func TestDump(t *testing.T) {
 	}
 
 	// check that dump contains the state objects that are in trie
-	got := string(NewDumper(tx, 2).DefaultDump())
+	historyV3 := false
+	got := string(NewDumper(tx, 2, historyV3).DefaultDump())
 	want := `{
     "root": "0000000000000000000000000000000000000000000000000000000000000000",
     "accounts": {
