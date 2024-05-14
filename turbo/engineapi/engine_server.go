@@ -832,7 +832,11 @@ func (e *EngineServer) HandleNewPayload(
 			}
 
 			status, _, latestValidHash, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
-			if err != nil || status == execution.ExecutionStatus_Busy || status == execution.ExecutionStatus_TooFarAway {
+			if err != nil {
+				return nil, err
+			}
+
+			if status == execution.ExecutionStatus_Busy || status == execution.ExecutionStatus_TooFarAway {
 				e.logger.Debug(fmt.Sprintf("[%s] New payload: Client is still syncing", logPrefix))
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			} else {
