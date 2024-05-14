@@ -103,19 +103,19 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 
 	//maps are unordered in Go! don't iterate over it. SharedDomains.deleteAccount will call GetLatest(Code) and expecting it not been delete yet
 	if txTask.WriteLists != nil {
-		for _, table := range []kv.Domain{kv.AccountsDomain, kv.CodeDomain, kv.StorageDomain} {
-			list, ok := txTask.WriteLists[table.String()]
+		for _, domain := range []kv.Domain{kv.AccountsDomain, kv.CodeDomain, kv.StorageDomain} {
+			list, ok := txTask.WriteLists[domain.String()]
 			if !ok {
 				continue
 			}
 
 			for i, key := range list.Keys {
 				if list.Vals[i] == nil {
-					if err := domains.DomainDel(table, []byte(key), nil, nil, 0); err != nil {
+					if err := domains.DomainDel(domain, []byte(key), nil, nil, 0); err != nil {
 						return err
 					}
 				} else {
-					if err := domains.DomainPut(table, []byte(key), nil, list.Vals[i], nil, 0); err != nil {
+					if err := domains.DomainPut(domain, []byte(key), nil, list.Vals[i], nil, 0); err != nil {
 						return err
 					}
 				}
