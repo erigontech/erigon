@@ -28,6 +28,13 @@ func (m Milestone) EndBlock() *big.Int {
 	return m.Fields.EndBlock
 }
 
+func (m Milestone) BlockNumRange() ClosedRange {
+	return ClosedRange{
+		Start: m.StartBlock().Uint64(),
+		End:   m.EndBlock().Uint64(),
+	}
+}
+
 func (m Milestone) RootHash() libcommon.Hash {
 	return m.Fields.RootHash
 }
