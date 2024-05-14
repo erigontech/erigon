@@ -330,7 +330,7 @@ func Main(ctx *cli.Context) error {
 	body, _ := rlp.EncodeToBytes(txs)
 	collector := make(Alloc)
 
-	dumper := state.NewDumper(tx, prestate.Env.Number)
+	dumper := state.NewDumper(tx, prestate.Env.Number, true)
 	dumper.DumpToCollector(collector, false, false, libcommon.Address{}, 0)
 	return dispatchOutput(ctx, baseDir, result, collector, body)
 }
