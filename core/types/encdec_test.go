@@ -15,7 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-const RUNS = 2 // for local tests increase this number
+const RUNS = 100 // for local tests increase this number
 
 type TRand struct {
 	rnd *rand.Rand
@@ -238,10 +238,10 @@ func (tr *TRand) RandRequests(size int) []*Request {
 
 func (tr *TRand) RandRawBody() *RawBody {
 	return &RawBody{
-		// Transactions: tr.RandRawTransactions(tr.RandIntInRange(1, 6)),
-		Uncles:      tr.RandHeaders(tr.RandIntInRange(1, 6)),
-		Withdrawals: tr.RandWithdrawals(tr.RandIntInRange(1, 6)),
-		Requests:    tr.RandRequests(tr.RandIntInRange(1, 6)),
+		Transactions: tr.RandRawTransactions(tr.RandIntInRange(1, 6)),
+		Uncles:       tr.RandHeaders(tr.RandIntInRange(1, 6)),
+		Withdrawals:  tr.RandWithdrawals(tr.RandIntInRange(1, 6)),
+		Requests:     tr.RandRequests(tr.RandIntInRange(1, 6)),
 	}
 }
 
