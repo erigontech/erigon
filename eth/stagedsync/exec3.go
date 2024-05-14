@@ -182,6 +182,14 @@ func ExecV3(ctx context.Context,
 			}()
 		}
 	}
+	blocksInDB, _, err := rawdbv3.TxNums.Last(applyTx)
+	if err != nil {
+		return err
+	}
+	// If our starting is the maxBlockNum or before, we have nothing to do
+	if blocksInDB >= maxBlockNum {
+		return nil
+	}
 
 	inMemExec := txc.Doms != nil
 	var doms *state2.SharedDomains
@@ -195,11 +203,7 @@ func ExecV3(ctx context.Context,
 		}
 		defer doms.Close()
 	}
-	txNumInDB, blockNumInDoms := doms.TxNum(), doms.BlockNum()
-	fmt.Println(blockNumInDoms, maxBlockNum)
-	if blockNumInDoms > maxBlockNum {
-		return nil
-	}
+	txNumInDB := doms.TxNum()
 
 	var (
 		inputTxNum    = doms.TxNum()
@@ -293,8 +297,6 @@ func ExecV3(ctx context.Context,
 
 	blockNum = doms.BlockNum()
 	outputTxNum.Store(doms.TxNum())
-
-	var err error
 
 	if maxBlockNum-blockNum > 16 {
 		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
