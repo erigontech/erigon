@@ -57,24 +57,23 @@ type PlainState struct {
 }
 
 func NewPlainState(tx kv.Tx, blockNr uint64, systemContractLookup map[libcommon.Address][]libcommon.CodeRecord) *PlainState {
-	panic("Please use HistoryStateReaderV3 with HistoryV3")
-	//ps := &PlainState{
-	//	tx:                   tx,
-	//	blockNr:              blockNr,
-	//	storage:              make(map[libcommon.Address]*btree.BTree),
-	//	systemContractLookup: systemContractLookup,
-	//}
-	//
-	//c1, _ := tx.Cursor(kv.E2AccountsHistory)
-	//c2, _ := tx.Cursor(kv.E2StorageHistory)
-	//c3, _ := tx.CursorDupSort(kv.AccountChangeSet)
-	//c4, _ := tx.CursorDupSort(kv.StorageChangeSet)
-	//
-	//ps.accHistoryC = c1
-	//ps.storageHistoryC = c2
-	//ps.accChangesC = c3
-	//ps.storageChangesC = c4
-	//return ps
+	ps := &PlainState{
+		tx:                   tx,
+		blockNr:              blockNr,
+		storage:              make(map[libcommon.Address]*btree.BTree),
+		systemContractLookup: systemContractLookup,
+	}
+
+	c1, _ := tx.Cursor(kv.E2AccountsHistory)
+	c2, _ := tx.Cursor(kv.E2StorageHistory)
+	c3, _ := tx.CursorDupSort(kv.AccountChangeSet)
+	c4, _ := tx.CursorDupSort(kv.StorageChangeSet)
+
+	ps.accHistoryC = c1
+	ps.storageHistoryC = c2
+	ps.accChangesC = c3
+	ps.storageChangesC = c4
+	return ps
 }
 
 func (s *PlainState) SetTrace(trace bool) {
