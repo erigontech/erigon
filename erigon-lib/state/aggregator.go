@@ -186,19 +186,19 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	//	return nil, err
 	//}
 	idxCfg := iiCfg{salt: salt, dirs: dirs, db: db}
-	if a.logAddrs, err = NewInvertedIndex(idxCfg, aggregationStep, "logaddrs", kv.TblLogAddressKeys, kv.TblLogAddressIdx, false, nil, logger); err != nil {
+	if a.logAddrs, err = NewInvertedIndex(idxCfg, aggregationStep, "logaddrs", kv.TblLogAddressKeys, kv.TblLogAddressIdx, nil, logger); err != nil {
 		return nil, err
 	}
 	idxCfg = iiCfg{salt: salt, dirs: dirs, db: db}
-	if a.logTopics, err = NewInvertedIndex(idxCfg, aggregationStep, "logtopics", kv.TblLogTopicsKeys, kv.TblLogTopicsIdx, false, nil, logger); err != nil {
+	if a.logTopics, err = NewInvertedIndex(idxCfg, aggregationStep, "logtopics", kv.TblLogTopicsKeys, kv.TblLogTopicsIdx, nil, logger); err != nil {
 		return nil, err
 	}
 	idxCfg = iiCfg{salt: salt, dirs: dirs, db: db}
-	if a.tracesFrom, err = NewInvertedIndex(idxCfg, aggregationStep, "tracesfrom", kv.TblTracesFromKeys, kv.TblTracesFromIdx, false, nil, logger); err != nil {
+	if a.tracesFrom, err = NewInvertedIndex(idxCfg, aggregationStep, "tracesfrom", kv.TblTracesFromKeys, kv.TblTracesFromIdx, nil, logger); err != nil {
 		return nil, err
 	}
 	idxCfg = iiCfg{salt: salt, dirs: dirs, db: db}
-	if a.tracesTo, err = NewInvertedIndex(idxCfg, aggregationStep, "tracesto", kv.TblTracesToKeys, kv.TblTracesToIdx, false, nil, logger); err != nil {
+	if a.tracesTo, err = NewInvertedIndex(idxCfg, aggregationStep, "tracesto", kv.TblTracesToKeys, kv.TblTracesToIdx, nil, logger); err != nil {
 		return nil, err
 	}
 	a.KeepStepsInDB(1)
@@ -1722,24 +1722,22 @@ func (ac *AggregatorRoTx) HistorySeek(name kv.History, key []byte, ts uint64, tx
 	}
 }
 
-func (ac *AggregatorRoTx) AccountHistoryRange(startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.KV, error) {
-	hr, err := ac.d[kv.AccountsDomain].ht.HistoryRange(startTxNum, endTxNum, asc, limit, tx)
-	if err != nil {
-		return nil, err
-	}
-	return iter.WrapKV(hr), nil
-}
+func (ac *AggregatorRoTx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (it iter.KV, err error) {
+	//TODO: aggTx to store array of histories
+	var domainName kv.Domain
 
-func (ac *AggregatorRoTx) StorageHistoryRange(startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.KV, error) {
-	hr, err := ac.d[kv.StorageDomain].ht.HistoryRange(startTxNum, endTxNum, asc, limit, tx)
-	if err != nil {
-		return nil, err
+	switch name {
+	case kv.AccountsHistory:
+		domainName = kv.AccountsDomain
+	case kv.StorageHistory:
+		domainName = kv.StorageDomain
+	case kv.CodeHistory:
+		domainName = kv.CodeDomain
+	default:
+		return nil, fmt.Errorf("unexpected history name: %s", name)
 	}
-	return iter.WrapKV(hr), nil
-}
 
-func (ac *AggregatorRoTx) CodeHistoryRange(startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.KV, error) {
-	hr, err := ac.d[kv.CodeDomain].ht.HistoryRange(startTxNum, endTxNum, asc, limit, tx)
+	hr, err := ac.d[domainName].ht.HistoryRange(fromTs, toTs, asc, limit, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -1772,17 +1770,17 @@ type AggregatorRoTx struct {
 }
 
 func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
-	a.visibleFilesLock.RLock()
 	ac := &AggregatorRoTx{
-		a:          a,
-		logAddrs:   a.logAddrs.BeginFilesRo(),
-		logTopics:  a.logTopics.BeginFilesRo(),
-		tracesFrom: a.tracesFrom.BeginFilesRo(),
-		tracesTo:   a.tracesTo.BeginFilesRo(),
-
+		a:       a,
 		id:      a.ctxAutoIncrement.Add(1),
 		_leakID: a.leakDetector.Add(),
 	}
+
+	a.visibleFilesLock.RLock()
+	ac.logAddrs = a.logAddrs.BeginFilesRo()
+	ac.logTopics = a.logTopics.BeginFilesRo()
+	ac.tracesFrom = a.tracesFrom.BeginFilesRo()
+	ac.tracesTo = a.tracesTo.BeginFilesRo()
 	for id, d := range a.d {
 		ac.d[id] = d.BeginFilesRo()
 	}

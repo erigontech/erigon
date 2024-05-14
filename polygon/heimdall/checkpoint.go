@@ -28,6 +28,13 @@ func (c Checkpoint) EndBlock() *big.Int {
 	return c.Fields.EndBlock
 }
 
+func (c Checkpoint) BlockNumRange() ClosedRange {
+	return ClosedRange{
+		Start: c.StartBlock().Uint64(),
+		End:   c.EndBlock().Uint64(),
+	}
+}
+
 func (c Checkpoint) RootHash() libcommon.Hash {
 	return c.Fields.RootHash
 }
