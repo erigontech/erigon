@@ -17,12 +17,12 @@ type RangeIndex struct {
 
 const rangeIndexTableName = "Index"
 
-func NewRangeIndex(tmpDir string, logger log.Logger) (*RangeIndex, error) {
+func NewRangeIndex(ctx context.Context, tmpDir string, logger log.Logger) (*RangeIndex, error) {
 	db, err := mdbx.NewMDBX(logger).
 		InMem(tmpDir).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TableCfg{rangeIndexTableName: {}} }).
 		MapSize(1 * datasize.GB).
-		Open(context.Background())
+		Open(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -51,8 +51,8 @@ func rangeIndexValueParse(value []byte) uint64 {
 }
 
 // Put a mapping from a range to an id.
-func (i *RangeIndex) Put(r ClosedRange, id uint64) error {
-	tx, err := i.db.BeginRw(context.Background())
+func (i *RangeIndex) Put(ctx context.Context, r ClosedRange, id uint64) error {
+	tx, err := i.db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
@@ -67,9 +67,9 @@ func (i *RangeIndex) Put(r ClosedRange, id uint64) error {
 }
 
 // Lookup an id of a range by a blockNum within that range.
-func (i *RangeIndex) Lookup(blockNum uint64) (uint64, error) {
+func (i *RangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64, error) {
 	var id uint64
-	err := i.db.View(context.Background(), func(tx kv.Tx) error {
+	err := i.db.View(ctx, func(tx kv.Tx) error {
 		cursor, err := tx.Cursor(rangeIndexTableName)
 		if err != nil {
 			return err

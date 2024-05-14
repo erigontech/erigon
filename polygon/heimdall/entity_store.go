@@ -11,7 +11,7 @@ import (
 )
 
 type entityStore interface {
-	Prepare() error
+	Prepare(ctx context.Context) error
 	Close()
 	GetLastEntityId(ctx context.Context) (uint64, bool, error)
 	GetEntity(ctx context.Context, id uint64) (Entity, error)
@@ -51,11 +51,11 @@ func newEntityStore(
 	}
 }
 
-func (s *entityStoreImpl) Prepare() error {
+func (s *entityStoreImpl) Prepare(ctx context.Context) error {
 	var err error
 	s.prepareOnce.Do(func() {
 		iteratorFactory := func() (iter.KV, error) { return s.tx.Range(s.table, nil, nil) }
-		err = buildBlockNumToIdIndex(s.blockNumToIdIndex, iteratorFactory, s.entityUnmarshalJSON)
+		err = buildBlockNumToIdIndex(ctx, s.blockNumToIdIndex, iteratorFactory, s.entityUnmarshalJSON)
 	})
 	return err
 }
@@ -95,7 +95,7 @@ func (s *entityStoreImpl) GetEntity(ctx context.Context, id uint64) (Entity, err
 	return s.entityUnmarshalJSON(jsonBytes)
 }
 
-func (s *entityStoreImpl) PutEntity(_ context.Context, id uint64, entity Entity) error {
+func (s *entityStoreImpl) PutEntity(ctx context.Context, id uint64, entity Entity) error {
 	jsonBytes, err := json.Marshal(entity)
 	if err != nil {
 		return err
@@ -108,11 +108,11 @@ func (s *entityStoreImpl) PutEntity(_ context.Context, id uint64, entity Entity)
 	}
 
 	// update blockNumToIdIndex
-	return s.blockNumToIdIndex.Put(entity.BlockNumRange(), id)
+	return s.blockNumToIdIndex.Put(ctx, entity.BlockNumRange(), id)
 }
 
 func (s *entityStoreImpl) FindByBlockNum(ctx context.Context, blockNum uint64) (Entity, error) {
-	id, err := s.blockNumToIdIndex.Lookup(blockNum)
+	id, err := s.blockNumToIdIndex.Lookup(ctx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -125,6 +125,7 @@ func (s *entityStoreImpl) FindByBlockNum(ctx context.Context, blockNum uint64) (
 }
 
 func buildBlockNumToIdIndex(
+	ctx context.Context,
 	index *RangeIndex,
 	iteratorFactory func() (iter.KV, error),
 	entityUnmarshalJSON func([]byte) (Entity, error),
@@ -146,7 +147,7 @@ func buildBlockNumToIdIndex(
 			return err
 		}
 
-		if err = index.Put(entity.BlockNumRange(), entity.RawId()); err != nil {
+		if err = index.Put(ctx, entity.BlockNumRange(), entity.RawId()); err != nil {
 			return err
 		}
 	}

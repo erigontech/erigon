@@ -85,7 +85,7 @@ func (s *Scraper) syncEntity(
 	syncEvent *polygoncommon.EventNotifier,
 ) error {
 	defer store.Close()
-	if err := store.Prepare(); err != nil {
+	if err := store.Prepare(ctx); err != nil {
 		return err
 	}
 
@@ -244,7 +244,7 @@ func (s *Scraper) Run(parentCtx context.Context) error {
 	}
 
 	blockNumToIdIndexFactory := func() *RangeIndex {
-		index, err := NewRangeIndex(s.tmpDir, s.logger)
+		index, err := NewRangeIndex(parentCtx, s.tmpDir, s.logger)
 		if err != nil {
 			panic(err)
 		}

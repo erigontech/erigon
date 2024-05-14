@@ -1,6 +1,7 @@
 package heimdall
 
 import (
+	"context"
 	"testing"
 
 	"github.com/ledgerwatch/log/v3"
@@ -10,32 +11,36 @@ import (
 
 type rangeIndexTest struct {
 	index  *RangeIndex
+	ctx    context.Context
 	logger log.Logger
 }
 
 func newRangeIndexTest(t *testing.T) rangeIndexTest {
 	tmpDir := t.TempDir()
+	ctx := context.Background()
 	logger := log.New()
-	index, err := NewRangeIndex(tmpDir, logger)
+	index, err := NewRangeIndex(ctx, tmpDir, logger)
 	require.NoError(t, err)
 
 	t.Cleanup(index.Close)
 
 	return rangeIndexTest{
 		index:  index,
+		ctx:    ctx,
 		logger: logger,
 	}
 }
 
 func TestRangeIndexEmpty(t *testing.T) {
 	test := newRangeIndexTest(t)
-	actualId, err := test.index.Lookup(1000)
+	actualId, err := test.index.Lookup(test.ctx, 1000)
 	require.NoError(t, err)
 	assert.Equal(t, uint64(0), actualId)
 }
 
 func TestRangeIndex(t *testing.T) {
 	test := newRangeIndexTest(t)
+	ctx := test.ctx
 
 	ranges := []ClosedRange{
 		{100, 200 - 1},
@@ -46,7 +51,7 @@ func TestRangeIndex(t *testing.T) {
 	}
 
 	for i, r := range ranges {
-		require.NoError(t, test.index.Put(r, uint64(i+1)))
+		require.NoError(t, test.index.Put(ctx, r, uint64(i+1)))
 	}
 
 	examples := map[uint64]uint64{
@@ -83,7 +88,7 @@ func TestRangeIndex(t *testing.T) {
 	}
 
 	for blockNum, expectedId := range examples {
-		actualId, err := test.index.Lookup(blockNum)
+		actualId, err := test.index.Lookup(ctx, blockNum)
 		require.NoError(t, err)
 		assert.Equal(t, expectedId, actualId)
 	}
