@@ -18,7 +18,7 @@ import (
 func TestRebuildPatriciaTrieBasedOnFiles(t *testing.T) {
 	ctx := context.Background()
 	dirs := datadir.New(t.TempDir())
-	v3, db, agg := temporaltest.NewTestDB(t, dirs)
+	db, agg := temporaltest.NewTestDB(t, dirs)
 	if !v3 {
 		t.Skip("this test is v3 only")
 	}

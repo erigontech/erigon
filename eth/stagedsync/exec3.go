@@ -28,7 +28,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/metrics"
@@ -981,39 +980,6 @@ Loop:
 
 // nolint
 func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
-	blockNum, err := stages.GetStageProgress(tx, stages.Execution)
-	if err != nil {
-		panic(err)
-	}
-	histV3, err := kvcfg.HistoryV3.Enabled(tx)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Printf("[dbg] plain state: %d\n", blockNum)
-	defer fmt.Printf("[dbg] plain state end\n")
-
-	if !histV3 {
-		if err := tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
-			if len(k) == 20 {
-				a := accounts.NewAccount()
-				a.DecodeForStorage(v)
-				fmt.Printf("%x, %d, %d, %d, %x\n", k, &a.Balance, a.Nonce, a.Incarnation, a.CodeHash)
-			}
-			return nil
-		}); err != nil {
-			panic(err)
-		}
-		if err := tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
-			if len(k) > 20 {
-				fmt.Printf("%x, %x\n", k, v)
-			}
-			return nil
-		}); err != nil {
-			panic(err)
-		}
-		return
-	}
-
 	if doms != nil {
 		doms.Flush(context.Background(), tx)
 	}

@@ -33,7 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/metrics"
@@ -616,7 +615,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	}
 
 	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps)
-	blockWriter := blockio.NewBlockWriter(fromdb.HistV3(chainDB))
+	blockWriter := blockio.NewBlockWriter()
 
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
@@ -808,10 +807,6 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		}); err != nil {
 			return err
 		}
-	}
-
-	if !kvcfg.HistoryV3.FromDB(db) {
-		return nil
 	}
 
 	db, err = temporal.New(db, agg)

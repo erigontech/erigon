@@ -39,7 +39,6 @@ type Dumper struct {
 	blockNumber uint64
 	db          kv.Tx
 	hashedState bool
-	historyV3   bool
 }
 
 // DumpAccount represents an account in the state.
@@ -127,12 +126,11 @@ func (d iterativeDump) OnRoot(root libcommon.Hash) {
 	}{root})
 }
 
-func NewDumper(db kv.Tx, blockNumber uint64, historyV3 bool) *Dumper {
+func NewDumper(db kv.Tx, blockNumber uint64) *Dumper {
 	return &Dumper{
 		db:          db,
 		blockNumber: blockNumber,
 		hashedState: false,
-		historyV3:   historyV3,
 	}
 }
 
@@ -150,88 +148,54 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 	numberOfResults := 0
 
 	var txNum, txNumForStorage uint64
-	if d.historyV3 {
-		ttx := d.db.(kv.TemporalTx)
-		var err error
-		// Why only account does +1?
-		txNum, err = rawdbv3.TxNums.Min(ttx, d.blockNumber+1)
+	ttx := d.db.(kv.TemporalTx)
+	var err error
+	// Why only account does +1?
+	txNum, err = rawdbv3.TxNums.Min(ttx, d.blockNumber+1)
+	if err != nil {
+		return nil, err
+	}
+	txNumForStorage, err = rawdbv3.TxNums.Min(ttx, d.blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	it, err := ttx.DomainRange(kv.AccountsDomain, startAddress[:], nil, txNum, order.Asc, maxResults+1)
+	if err != nil {
+		return nil, err
+	}
+	defer it.Close()
+	for it.HasNext() {
+		k, v, err := it.Next()
 		if err != nil {
 			return nil, err
 		}
-		txNumForStorage, err = rawdbv3.TxNums.Min(ttx, d.blockNumber)
-		if err != nil {
-			return nil, err
+		if maxResults > 0 && numberOfResults >= maxResults {
+			if nextKey == nil {
+				nextKey = make([]byte, len(k))
+			}
+			copy(nextKey, k)
+			break
+		}
+		if len(v) == 0 {
+			continue
 		}
 
-		it, err := ttx.DomainRange(kv.AccountsDomain, startAddress[:], nil, txNum, order.Asc, maxResults+1)
-		if err != nil {
-			return nil, err
+		if e := accounts.DeserialiseV3(&acc, v); e != nil {
+			return nil, fmt.Errorf("decoding %x for %x: %w", v, k, e)
 		}
-		defer it.Close()
-		for it.HasNext() {
-			k, v, err := it.Next()
-			if err != nil {
-				return nil, err
-			}
-			if maxResults > 0 && numberOfResults >= maxResults {
-				if nextKey == nil {
-					nextKey = make([]byte, len(k))
-				}
-				copy(nextKey, k)
-				break
-			}
-			if len(v) == 0 {
-				continue
-			}
-
-			if e := accounts.DeserialiseV3(&acc, v); e != nil {
-				return nil, fmt.Errorf("decoding %x for %x: %w", v, k, e)
-			}
-			account := DumpAccount{
-				Balance:  acc.Balance.ToBig().String(),
-				Nonce:    acc.Nonce,
-				Root:     hexutility.Bytes(emptyHash[:]), // We cannot provide historical storage hash
-				CodeHash: hexutility.Bytes(emptyCodeHash[:]),
-				Storage:  make(map[string]string),
-			}
-			accountList = append(accountList, &account)
-			addrList = append(addrList, libcommon.BytesToAddress(k))
-			incarnationList = append(incarnationList, acc.Incarnation)
-
-			numberOfResults++
+		account := DumpAccount{
+			Balance:  acc.Balance.ToBig().String(),
+			Nonce:    acc.Nonce,
+			Root:     hexutility.Bytes(emptyHash[:]), // We cannot provide historical storage hash
+			CodeHash: hexutility.Bytes(emptyCodeHash[:]),
+			Storage:  make(map[string]string),
 		}
-	} else {
-		if err := WalkAsOfAccounts(d.db, startAddress, d.blockNumber+1, func(k, v []byte) (bool, error) {
-			if maxResults > 0 && numberOfResults >= maxResults {
-				if nextKey == nil {
-					nextKey = make([]byte, len(k))
-				}
-				copy(nextKey, k)
-				return false, nil
-			}
+		accountList = append(accountList, &account)
+		addrList = append(addrList, libcommon.BytesToAddress(k))
+		incarnationList = append(incarnationList, acc.Incarnation)
 
-			if len(k) > 32 {
-				return true, nil
-			}
-			if e := acc.DecodeForStorage(v); e != nil {
-				return false, fmt.Errorf("decoding %x for %x: %w", v, k, e)
-			}
-			account := DumpAccount{
-				Balance:  acc.Balance.ToBig().String(),
-				Nonce:    acc.Nonce,
-				Root:     hexutility.Bytes(emptyHash[:]), // We cannot provide historical storage hash
-				CodeHash: hexutility.Bytes(emptyCodeHash[:]),
-				Storage:  make(map[string]string),
-			}
-			accountList = append(accountList, &account)
-			addrList = append(addrList, libcommon.BytesToAddress(k))
-			incarnationList = append(incarnationList, acc.Incarnation)
-
-			numberOfResults++
-			return true, nil
-		}); err != nil {
-			return nil, err
-		}
+		numberOfResults++
 	}
 
 	for i, addr := range addrList {
@@ -260,39 +224,23 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 
 		if !excludeStorage {
 			t := trie.New(libcommon.Hash{})
-			if d.historyV3 {
-				r, err := d.db.(kv.TemporalTx).DomainRange(kv.StorageDomain, addr[:], nil, txNumForStorage, order.Asc, kv.Unlim)
+			r, err := d.db.(kv.TemporalTx).DomainRange(kv.StorageDomain, addr[:], nil, txNumForStorage, order.Asc, kv.Unlim)
+			if err != nil {
+				return nil, fmt.Errorf("walking over storage for %x: %w", addr, err)
+			}
+			defer r.Close()
+			for r.HasNext() {
+				k, vs, err := r.Next()
 				if err != nil {
 					return nil, fmt.Errorf("walking over storage for %x: %w", addr, err)
 				}
-				defer r.Close()
-				for r.HasNext() {
-					k, vs, err := r.Next()
-					if err != nil {
-						return nil, fmt.Errorf("walking over storage for %x: %w", addr, err)
-					}
-					if len(vs) == 0 {
-						continue // Skip deleted entries
-					}
-					loc := k[20:]
-					account.Storage[libcommon.BytesToHash(loc).String()] = common.Bytes2Hex(vs)
-					h, _ := libcommon.HashData(loc)
-					t.Update(h.Bytes(), libcommon.Copy(vs))
+				if len(vs) == 0 {
+					continue // Skip deleted entries
 				}
-			} else {
-				if err := WalkAsOfStorage(d.db,
-					addr,
-					incarnation,
-					libcommon.Hash{}, /* startLocation */
-					d.blockNumber,
-					func(_, loc, vs []byte) (bool, error) {
-						account.Storage[libcommon.BytesToHash(loc).String()] = common.Bytes2Hex(vs)
-						h, _ := libcommon.HashData(loc)
-						t.Update(h.Bytes(), libcommon.Copy(vs))
-						return true, nil
-					}); err != nil {
-					return nil, fmt.Errorf("walking over storage for %x: %w", addr, err)
-				}
+				loc := k[20:]
+				account.Storage[libcommon.BytesToHash(loc).String()] = common.Bytes2Hex(vs)
+				h, _ := libcommon.HashData(loc)
+				t.Update(h.Bytes(), libcommon.Copy(vs))
 			}
 
 			account.Root = t.Hash().Bytes()

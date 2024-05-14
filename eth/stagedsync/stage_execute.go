@@ -107,7 +107,6 @@ func StageExecuteBlocksCfg(
 	stateStream bool,
 	badBlockHalt bool,
 
-	historyV3 bool,
 	dirs datadir.Dirs,
 	blockReader services.FullBlockReader,
 	hd headerDownloader,
@@ -131,7 +130,7 @@ func StageExecuteBlocksCfg(
 		blockReader:   blockReader,
 		hd:            hd,
 		genesis:       genesis,
-		historyV3:     historyV3,
+		historyV3:     true,
 		syncCfg:       syncCfg,
 		agg:           agg,
 		silkworm:      silkworm,

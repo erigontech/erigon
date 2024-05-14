@@ -271,12 +271,10 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
-		if e.historyV3 {
-			if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
-				//if err := rawdbv3.TxNums.Truncate(tx, fcuHeader.Number.Uint64()); err != nil {
-				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-				return
-			}
+		if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
+			//if err := rawdbv3.TxNums.Truncate(tx, fcuHeader.Number.Uint64()); err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
 		}
 		// Mark all new canonicals as canonicals
 		for _, canonicalSegment := range newCanonicals {
@@ -305,23 +303,15 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				return
 			}
 		}
-		if e.historyV3 {
-			if len(newCanonicals) > 0 {
-				if err := rawdbv3.TxNums.Truncate(tx, newCanonicals[0].number); err != nil {
-					sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-					return
-				}
-				if err := rawdb.AppendCanonicalTxNums(tx, newCanonicals[len(newCanonicals)-1].number); err != nil {
-					sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-					return
-				}
+		if len(newCanonicals) > 0 {
+			if err := rawdbv3.TxNums.Truncate(tx, newCanonicals[0].number); err != nil {
+				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+				return
 			}
-			//} else {
-			//if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
-			//	sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			//	return
-			//}
-			//}
+			if err := rawdb.AppendCanonicalTxNums(tx, newCanonicals[len(newCanonicals)-1].number); err != nil {
+				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+				return
+			}
 		}
 	}
 
