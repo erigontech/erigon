@@ -993,6 +993,11 @@ var (
 		Usage: "set the cors' allow origins",
 		Value: cli.NewStringSlice(),
 	}
+	EngineAPIJsonFlag = cli.BoolFlag{
+		Name:  "engine.api.use-json",
+		Usage: "Enable if Engine API expects tx as json rather than opaque bytes",
+		Value: false,
+	}
 	DiagDisabledFlag = cli.BoolFlag{
 		Name:  "diagnostics.disabled",
 		Usage: "Disable diagnostics",
@@ -1860,6 +1865,9 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	if ctx.IsSet(TxPoolGossipDisableFlag.Name) {
 		cfg.DisableTxPoolGossip = ctx.Bool(TxPoolGossipDisableFlag.Name)
+	}
+	if ctx.IsSet(EngineAPIJsonFlag.Name) {
+		cfg.EngineAPIJsonUse = ctx.Bool(EngineAPIJsonFlag.Name)
 	}
 }
 

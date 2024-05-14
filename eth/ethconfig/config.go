@@ -265,6 +265,9 @@ type Config struct {
 	SilkwormRpcNumWorkers        uint32
 	SilkwormRpcJsonCompatibility bool
 
+	// Engine API server config
+	EngineAPIJsonUse bool
+
 	DisableTxPoolGossip bool
 }
 

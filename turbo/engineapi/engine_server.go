@@ -53,6 +53,7 @@ type EngineServer struct {
 	proposing        bool
 	test             bool
 	caplin           bool // we need to send errors for caplin.
+	useJsonTx        bool // engine api uses json encoded tx (rather than opaque bytes)
 	executionService execution.ExecutionClient
 
 	chainRW eth1_chain_reader.ChainReaderWriterEth1
@@ -64,7 +65,7 @@ const fcuTimeout = 1000 // according to mathematics: 1000 millisecods = 1 second
 
 func NewEngineServer(logger log.Logger, config *chain.Config, executionService execution.ExecutionClient,
 	hd *headerdownload.HeaderDownload,
-	blockDownloader *engine_block_downloader.EngineBlockDownloader, caplin, test, proposing bool) *EngineServer {
+	blockDownloader *engine_block_downloader.EngineBlockDownloader, caplin, test, proposing, useJsonTx bool) *EngineServer {
 	chainRW := eth1_chain_reader.NewChainReaderEth1(config, executionService, fcuTimeout)
 	return &EngineServer{
 		logger:           logger,
@@ -75,6 +76,7 @@ func NewEngineServer(logger log.Logger, config *chain.Config, executionService e
 		proposing:        proposing,
 		hd:               hd,
 		caplin:           caplin,
+		useJsonTx:        useJsonTx,
 	}
 }
 
@@ -215,7 +217,13 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 	}
 
-	transactions, err := types.DecodeTransactions(txs)
+	var transactions []types.Transaction
+	var err error
+	if s.useJsonTx {
+		transactions, err = types.DecodeTransactionsSSZ(txs)
+	} else {
+		transactions, err = types.DecodeTransactions(txs)
+	}
 	if err != nil {
 		s.logger.Warn("[NewPayload] failed to decode transactions", "err", err)
 		return &engine_types.PayloadStatus{
