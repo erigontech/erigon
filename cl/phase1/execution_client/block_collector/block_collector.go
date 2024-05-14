@@ -120,7 +120,6 @@ func (b *blockCollector) Flush(ctx context.Context) error {
 			}
 			inserted += uint64(len(blocksBatch))
 			b.logger.Info("[Caplin] Inserted blocks", "progress", blocksBatch[len(blocksBatch)-1].NumberU64())
-			blocksBatch = []*types.Block{}
 			// If we have inserted enough blocks, update fork choice (Optimation for E35)
 			lastBlockHash := blocksBatch[len(blocksBatch)-1].Hash()
 			if inserted >= b.syncBackLoop {
@@ -129,6 +128,7 @@ func (b *blockCollector) Flush(ctx context.Context) error {
 				}
 				inserted = 0
 			}
+			blocksBatch = []*types.Block{}
 		}
 		return next(k, nil, nil)
 	}, etl.TransformArgs{}); err != nil {
