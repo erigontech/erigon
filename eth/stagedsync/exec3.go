@@ -182,17 +182,7 @@ func ExecV3(ctx context.Context,
 			}()
 		}
 	}
-	blocksInDB, _, err := rawdbv3.TxNums.Last(applyTx)
-	if err != nil {
-		return err
-	}
-	fmt.Println("XXX", blocksInDB, maxBlockNum)
-	// If our ending is before our start, then skip.
-	if blocksInDB > maxBlockNum {
-		fmt.Println("XXX", blocksInDB, maxBlockNum)
-		return nil
-	}
-
+	var err error
 	inMemExec := txc.Doms != nil
 	var doms *state2.SharedDomains
 	if inMemExec {
@@ -200,6 +190,11 @@ func ExecV3(ctx context.Context,
 	} else {
 		var err error
 		doms, err = state2.NewSharedDomains(applyTx, log.New())
+		// if we are behind the commitment, we can't execute anything
+		// this can heppen if progress in domain is higher than progress in blocks
+		if errors.Is(err, state2.ErrBehindCommitment) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
