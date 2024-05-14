@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
 )
 
 // Heimdall is a wrapper of Heimdall HTTP API
@@ -20,8 +21,8 @@ type Heimdall interface {
 	FetchCheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
 	FetchMilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
 
-	OnMilestoneEvent(ctx context.Context, callback func(*Milestone)) error
-	OnSpanEvent(ctx context.Context, callback func(*Span)) error
+	OnMilestoneEvent(callback func(*Milestone)) polygoncommon.UnregisterFunc
+	OnSpanEvent(callback func(*Span)) polygoncommon.UnregisterFunc
 }
 
 // ErrIncompleteMilestoneRange happens when FetchMilestones is called with an old start block because old milestones are evicted
@@ -385,7 +386,18 @@ func (h *heimdall) FetchSpans(ctx context.Context, start SpanId, end SpanId) ([]
 	return spans, nil
 }
 
-func (h *heimdall) OnSpanEvent(ctx context.Context, cb func(*Span)) error {
+// OnSpanEvent
+// TODO: this will be soon replaced by service.OnSpanEvent
+func (h *heimdall) OnSpanEvent(cb func(*Span)) polygoncommon.UnregisterFunc {
+	ctx, cancel := context.WithCancel(context.Background())
+	err := h.onSpanEvent(ctx, cb)
+	if err != nil {
+		panic(err)
+	}
+	return polygoncommon.UnregisterFunc(cancel)
+}
+
+func (h *heimdall) onSpanEvent(ctx context.Context, cb func(*Span)) error {
 	tip, ok, err := h.store.LastSpanId(ctx)
 	if err != nil {
 		return err
@@ -439,7 +451,18 @@ func (h *heimdall) pollSpans(ctx context.Context, tip SpanId, cb func(*Span)) {
 	}
 }
 
-func (h *heimdall) OnMilestoneEvent(ctx context.Context, cb func(*Milestone)) error {
+// OnMilestoneEvent
+// TODO: this will be soon replaced by service.OnMilestoneEvent
+func (h *heimdall) OnMilestoneEvent(cb func(*Milestone)) polygoncommon.UnregisterFunc {
+	ctx, cancel := context.WithCancel(context.Background())
+	err := h.onMilestoneEvent(ctx, cb)
+	if err != nil {
+		panic(err)
+	}
+	return polygoncommon.UnregisterFunc(cancel)
+}
+
+func (h *heimdall) onMilestoneEvent(ctx context.Context, cb func(*Milestone)) error {
 	tip, ok, err := h.store.LastMilestoneId(ctx)
 	if err != nil {
 		return err

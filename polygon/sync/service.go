@@ -2,7 +2,6 @@ package sync
 
 import (
 	"context"
-	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/ledgerwatch/log/v3"
@@ -30,7 +29,7 @@ type service struct {
 	store      Store
 	events     *TipEvents
 
-	heimdallScraper *heimdall.Scraper
+	heimdallService heimdall.Service
 }
 
 func NewService(
@@ -51,9 +50,8 @@ func NewService(
 	p2pService := p2p.NewService(maxPeers, logger, sentryClient, statusDataProvider.GetStatusData)
 	heimdallClient := heimdall.NewHeimdallClient(heimdallUrl, logger)
 	heimdallService := heimdall.NewHeimdall(heimdallClient, logger)
-	heimdallScraper := heimdall.NewScraperTODO(
-		heimdallClient,
-		1*time.Second,
+	heimdallServiceV2 := heimdall.NewService(
+		heimdallUrl,
 		tmpDir,
 		logger,
 	)
@@ -106,7 +104,7 @@ func NewService(
 		store:      store,
 		events:     events,
 
-		heimdallScraper: heimdallScraper,
+		heimdallService: heimdallServiceV2,
 	}
 }
 
@@ -137,7 +135,11 @@ func (s *service) Run(ctx context.Context) error {
 	}()
 
 	go func() {
-		err := s.heimdallScraper.Run(ctx)
+		// TODO: remove when heimdall.NewService is functional
+		if s.heimdallService == nil {
+			return
+		}
+		err := s.heimdallService.Run(ctx)
 		if (err != nil) && (ctx.Err() == nil) {
 			serviceErr = err
 			cancel()
