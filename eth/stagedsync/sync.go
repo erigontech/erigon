@@ -143,9 +143,7 @@ func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error
 			unwindPointWithCommitment, ok, err := casted.AggTx().(*state.AggregatorRoTx).CanUnwindBeforeBlockNum(unwindPoint, tx)
 			// Ignore in the case that snapshots are ahead of commitment, it will be resolved later.
 			// This can be a problem if snapshots include a wrong chain so it is ok to ignore it.
-			fmt.Println(err)
 			if errors.Is(err, state.ErrBehindCommitment) {
-				fmt.Println("A")
 				return nil
 			}
 			if err != nil {
