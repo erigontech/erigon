@@ -143,35 +143,51 @@ func printFile(cliCtx *cli.Context) error {
 	snapDownload := data.SnapshotDownload
 
 	if file, ok := snapDownload.SegmentsDownloading[cliCtx.String(FileNameFlag.Name)]; ok {
-		fileRow := getFileRow(file)
-		filePeers := getPeersRows(file.Peers)
-		fileWebseeds := getPeersRows(file.Webseeds)
 
-		switch cliCtx.String(flags.OutputFlag.Name) {
-		case "json":
-			util.RenderJson(fileRow)
-			util.RenderJson(filePeers)
-			util.RenderJson(fileWebseeds)
-		case "text":
-			//Print file status
-			util.RenderTableWithHeader(
-				"file download info:",
-				table.Row{"File", "Progress", "Total", "Downloaded", "Peers", "Peers Download Rate", "Webseeds", "Webseeds Download Rate", "Time Left", "Active"},
-				[]table.Row{fileRow},
-			)
+		if file.DownloadedBytes >= file.TotalBytes {
+			fileRow := getDownloadedFileRow(file)
+			switch cliCtx.String(flags.OutputFlag.Name) {
+			case "json":
+				util.RenderJson(fileRow)
+			case "text":
+				//Print file status
+				util.RenderTableWithHeader(
+					"File download info:",
+					table.Row{"File", "Average Download Rate", "Time Took"},
+					[]table.Row{fileRow},
+				)
+			}
+		} else {
+			fileRow := getFileRow(file)
+			filePeers := getPeersRows(file.Peers)
+			fileWebseeds := getPeersRows(file.Webseeds)
 
-			//Print peers and webseeds status
-			util.RenderTableWithHeader(
-				"",
-				table.Row{"Peer", "Download Rate"},
-				filePeers,
-			)
+			switch cliCtx.String(flags.OutputFlag.Name) {
+			case "json":
+				util.RenderJson(fileRow)
+				util.RenderJson(filePeers)
+				util.RenderJson(fileWebseeds)
+			case "text":
+				//Print file status
+				util.RenderTableWithHeader(
+					"file download info:",
+					table.Row{"File", "Progress", "Total", "Downloaded", "Peers", "Peers Download Rate", "Webseeds", "Webseeds Download Rate", "Time Left", "Active"},
+					[]table.Row{fileRow},
+				)
 
-			util.RenderTableWithHeader(
-				"",
-				table.Row{"Webseed", "Download Rate"},
-				fileWebseeds,
-			)
+				//Print peers and webseeds status
+				util.RenderTableWithHeader(
+					"",
+					table.Row{"Peer", "Download Rate"},
+					filePeers,
+				)
+
+				util.RenderTableWithHeader(
+					"",
+					table.Row{"Webseed", "Download Rate"},
+					fileWebseeds,
+				)
+			}
 		}
 	} else {
 		txt := text.Colors{text.FgWhite, text.BgRed}
@@ -179,6 +195,19 @@ func printFile(cliCtx *cli.Context) error {
 	}
 
 	return nil
+}
+
+func getDownloadedFileRow(file diagnostics.SegmentDownloadStatistics) table.Row {
+	averageDownloadRate := common.ByteCount(file.DownloadedStats.AverageRate) + "/s"
+	totalDownloadTimeString := time.Duration(file.DownloadedStats.TimeTook) * time.Second
+
+	row := table.Row{
+		file.Name,
+		averageDownloadRate,
+		totalDownloadTimeString.String(),
+	}
+
+	return row
 }
 
 func getSnapshotStatusRow(snapDownload diagnostics.SnapshotDownloadStatistics) table.Row {
@@ -192,7 +221,7 @@ func getSnapshotStatusRow(snapDownload diagnostics.SnapshotDownloadStatistics) t
 	remainingBytes := snapDownload.Total - snapDownload.Downloaded
 	downloadTimeLeft := util.CalculateTime(remainingBytes, snapDownload.DownloadRate)
 
-	totalDownloadTimeString := time.Duration(snapDownload.TotalTime * float64(time.Second)).String()
+	totalDownloadTimeString := time.Duration(snapDownload.TotalTime) * time.Second
 
 	rowObj := table.Row{
 		status,                                   // Status
@@ -200,7 +229,7 @@ func getSnapshotStatusRow(snapDownload diagnostics.SnapshotDownloadStatistics) t
 		common.ByteCount(snapDownload.Downloaded),          // Downloaded
 		common.ByteCount(snapDownload.Total),               // Total
 		downloadTimeLeft,                                   // Time Left
-		totalDownloadTimeString,                            // Total Time
+		totalDownloadTimeString.String(),                   // Total Time
 		common.ByteCount(snapDownload.DownloadRate) + "/s", // Download Rate
 		common.ByteCount(snapDownload.UploadRate) + "/s",   // Upload Rate
 		snapDownload.Peers,                                 // Peers
