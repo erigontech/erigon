@@ -864,20 +864,21 @@ Loop:
 					t1, t2, t3 time.Duration
 				)
 
-				if !useExternalTx {
-					if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Minute, applyTx); err != nil {
-						return err
-					}
-				}
-				t3 = time.Since(tt)
-
-				tt = time.Now()
 				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
 					return err
 				} else if !ok {
 					break Loop
 				}
 				t1 = time.Since(tt)
+
+				tt = time.Now()
+
+				if !useExternalTx {
+					if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Minute, applyTx); err != nil {
+						return err
+					}
+				}
+				t3 = time.Since(tt)
 
 				if err := func() error {
 					doms.Close()
