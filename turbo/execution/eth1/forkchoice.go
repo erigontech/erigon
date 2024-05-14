@@ -259,9 +259,10 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
-
+		fmt.Println("AX")
 		if e.hook != nil {
 			if err = e.hook.BeforeRun(tx, isSynced); err != nil {
+				fmt.Println("A2")
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 				return
 			}
