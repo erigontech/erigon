@@ -87,6 +87,7 @@ type Transaction interface {
 	// signing method. The cache is invalidated if the cached signer does
 	// not match the signer used in the current call.
 	Sender(Signer) (libcommon.Address, error)
+	cashedSender() (libcommon.Address, bool)
 	GetSender() (libcommon.Address, bool)
 	SetSender(libcommon.Address)
 	IsContractDeploy() bool

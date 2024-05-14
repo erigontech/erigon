@@ -333,7 +333,7 @@ TooBigJumpStep:
 			return
 		}
 		defer func() {
-			if tx == nil {
+			if tx != nil {
 				tx.Rollback()
 			}
 		}()

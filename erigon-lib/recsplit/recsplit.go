@@ -136,6 +136,8 @@ type RecSplitArgs struct {
 	EtlBufLimit datasize.ByteSize
 	Salt        *uint32 // Hash seed (salt) for the hash function used for allocating the initial buckets - need to be generated randomly
 	LeafSize    uint16
+
+	NoFsync bool // fsync is enabled by default, but tests can manually disable
 }
 
 // NewRecSplit creates a new RecSplit instance with given number of keys and given bucket size
@@ -207,6 +209,9 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	}
 	rs.startSeed = args.StartSeed
 	rs.count = make([]uint16, rs.secondaryAggrBound)
+	if args.NoFsync {
+		rs.DisableFsync()
+	}
 	return rs, nil
 }
 
