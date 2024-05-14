@@ -111,12 +111,22 @@ func (e *EngineServer) Start(
 	}
 }
 
-func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {
+func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals types.Withdrawals) error {
 	if !s.config.IsShanghai(time) && withdrawals != nil {
-		return &rpc.InvalidParamsError{Message: "withdrawals before shanghai"}
+		return &rpc.InvalidParamsError{Message: "withdrawals before Shanghai"}
 	}
 	if s.config.IsShanghai(time) && withdrawals == nil {
 		return &rpc.InvalidParamsError{Message: "missing withdrawals list"}
+	}
+	return nil
+}
+
+func (s *EngineServer) checkRequestsPresence(time uint64, requests types.Requests) error {
+	if !s.config.IsPrague(time) && requests != nil {
+		return &rpc.InvalidParamsError{Message: "requests before Prague"}
+	}
+	if s.config.IsPrague(time) && requests == nil {
+		return &rpc.InvalidParamsError{Message: "missing requests list"}
 	}
 	return nil
 }
@@ -151,18 +161,29 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		ReceiptHash: req.ReceiptsRoot,
 		TxHash:      types.DeriveSha(types.BinaryTransactions(txs)),
 	}
-	var withdrawals []*types.Withdrawal
+
+	var withdrawals types.Withdrawals
 	if version >= clparams.CapellaVersion {
 		withdrawals = req.Withdrawals
 	}
-
+	if err := s.checkWithdrawalsPresence(header.Time, withdrawals); err != nil {
+		return nil, err
+	}
 	if withdrawals != nil {
-		wh := types.DeriveSha(types.Withdrawals(withdrawals))
+		wh := types.DeriveSha(withdrawals)
 		header.WithdrawalsHash = &wh
 	}
 
-	if err := s.checkWithdrawalsPresence(header.Time, withdrawals); err != nil {
+	var requests types.Requests
+	if version >= clparams.ElectraVersion && req.DepositRequests != nil {
+		requests = req.DepositRequests.ToRequests()
+	}
+	if err := s.checkRequestsPresence(header.Time, requests); err != nil {
 		return nil, err
+	}
+	if requests != nil {
+		rh := types.DeriveSha(requests)
+		header.RequestsRoot = &rh
 	}
 
 	if version <= clparams.CapellaVersion {
@@ -252,7 +273,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	defer s.lock.Unlock()
 
 	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
-	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
+	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals, requests)
 
 	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes)
 	if err != nil {
@@ -598,6 +619,14 @@ func (e *EngineServer) GetPayloadV3(ctx context.Context, payloadID hexutility.By
 	return e.getPayload(ctx, decodedPayloadId, clparams.DenebVersion)
 }
 
+// Same as [GetPayloadV3], but returning ExecutionPayloadV4 (= ExecutionPayloadV3 + requests)
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_getpayloadv4
+func (e *EngineServer) GetPayloadV4(ctx context.Context, payloadID hexutility.Bytes) (*engine_types.GetPayloadResponse, error) {
+	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
+	e.logger.Info("Received GetPayloadV4", "payloadId", decodedPayloadId)
+	return e.getPayload(ctx, decodedPayloadId, clparams.ElectraVersion)
+}
+
 // Updates the forkchoice state after validating the headBlockHash
 // Additionally, builds and returns a unique identifier for an initial version of a payload
 // (asynchronously updated with transactions), if payloadAttributes is not nil and passes validation
@@ -635,6 +664,15 @@ func (e *EngineServer) NewPayloadV2(ctx context.Context, payload *engine_types.E
 func (e *EngineServer) NewPayloadV3(ctx context.Context, payload *engine_types.ExecutionPayload,
 	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash) (*engine_types.PayloadStatus, error) {
 	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, clparams.DenebVersion)
+}
+
+// NewPayloadV4 processes new payloads (blocks) from the beacon chain with withdrawals, blob gas and requests.
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_newpayloadv4
+func (e *EngineServer) NewPayloadV4(ctx context.Context, payload *engine_types.ExecutionPayload,
+	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash) (*engine_types.PayloadStatus, error) {
+	// TODO(racytech): add proper version or refactor this part
+	// add all version ralated checks here so the newpayload doesn't have to deal with checks
+	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, clparams.ElectraVersion)
 }
 
 // Receives consensus layer's transition configuration and checks if the execution layer has the correct configuration.
@@ -688,9 +726,11 @@ var ourCapabilities = []string{
 	"engine_newPayloadV1",
 	"engine_newPayloadV2",
 	"engine_newPayloadV3",
+	"engine_newPayloadV4",
 	"engine_getPayloadV1",
 	"engine_getPayloadV2",
 	"engine_getPayloadV3",
+	"engine_getPayloadV4",
 	"engine_exchangeTransitionConfigurationV1",
 	"engine_getPayloadBodiesByHashV1",
 	"engine_getPayloadBodiesByRangeV1",

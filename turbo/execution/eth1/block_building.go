@@ -65,6 +65,8 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 		param.ParentBeaconBlockRoot = &pbbr
 	}
 
+	// TODO(racytech): add requests (Pectra)
+
 	// First check if we're already building a block with the requested parameters
 	if e.lastParameters != nil {
 		param.PayloadId = e.lastParameters.PayloadId
