@@ -870,10 +870,15 @@ Loop:
 					//log.Info(fmt.Sprintf("[snapshots] db has steps amount: %s", agg.StepsRangeInDBAsStr(applyTx)))
 					agg.BuildFilesInBackground(outputTxNum.Load())
 				}
-				// if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 2*time.Minute, applyTx); err != nil {
-				// 	return err
-				// }
 
+				if !useExternalTx {
+					if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Minute, applyTx); err != nil {
+						return err
+					}
+				}
+				t3 = time.Since(tt)
+
+				tt = time.Now()
 				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
 					return err
 				} else if !ok {
@@ -884,43 +889,28 @@ Loop:
 
 				if err := func() error {
 					doms.Close()
-					// if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 2*time.Minute, applyTx); err != nil {
-					// 	return err
-					// }
 					if err = execStage.Update(applyTx, outputBlockNum.GetValueUint64()); err != nil {
 						return err
 					}
 
 					tt = time.Now()
 					applyTx.CollectMetrics()
-					if !useExternalTx {
-						tt = time.Now()
-						if err = applyTx.Commit(); err != nil {
-							return err
-						}
+					// if !useExternalTx {
+					// 	tt = time.Now()
+					// 	if err = applyTx.Commit(); err != nil {
+					// 		return err
+					// 	}
 
-						t2 = time.Since(tt)
+					// 	t2 = time.Since(tt)
 
-						aggCtx := agg.BeginFilesRo()
-						defer aggCtx.Close()
+					// 	aggCtx := agg.BeginFilesRo()
+					// 	defer aggCtx.Close()
 
-						tt = time.Now()
-						for haveMoreToPrune := true; haveMoreToPrune; {
-							//very aggressive prune, because:
-							// if prune is slow - means DB > RAM and skip pruning will only make things worse
-							// db will grow -> prune will get slower -> db will grow -> ...
-							if haveMoreToPrune, err = aggCtx.PruneSmallBatchesDb(ctx, 10*time.Minute, chainDb); err != nil {
-								return err
-							}
-						}
-
-						t3 = time.Since(tt)
-
-						applyTx, err = cfg.db.BeginRw(context.Background()) //nolint
-						if err != nil {
-							return err
-						}
-					}
+					// 	applyTx, err = cfg.db.BeginRw(context.Background()) //nolint
+					// 	if err != nil {
+					// 		return err
+					// 	}
+					// }
 					doms, err = state2.NewSharedDomains(applyTx, logger)
 					if err != nil {
 						return err
