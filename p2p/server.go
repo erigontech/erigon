@@ -1221,10 +1221,10 @@ func (srv *Server) resetErrors() {
 }
 
 func (srv *Server) listErrors() []interface{} {
-	list := make([]interface{}, 0, len(srv.errors)*2)
-
 	srv.errorsMu.Lock()
 	defer srv.errorsMu.Unlock()
+
+	list := make([]interface{}, 0, len(srv.errors)*2)
 	for err, count := range srv.errors {
 		list = append(list, err, count)
 	}
