@@ -188,7 +188,7 @@ func ExecV3(ctx context.Context,
 	}
 	// If our starting is the maxBlockNum or before, we have nothing to do
 	if blocksInDB >= maxBlockNum {
-		fmt.Println("XXX")
+		fmt.Println("XXX", blocksInDB, maxBlockNum)
 		return nil
 	}
 
