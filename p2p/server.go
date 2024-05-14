@@ -1203,6 +1203,9 @@ func (srv *Server) PeersInfo() []*PeerInfo {
 }
 
 func (srv *Server) addError(err error) {
+	if err == nil {
+		return
+	}
 	srv.errorsMu.Lock()
 	defer srv.errorsMu.Unlock()
 	if srv.errors == nil {
@@ -1218,19 +1221,20 @@ func (srv *Server) resetErrors() {
 }
 
 func (srv *Server) listErrors() []interface{} {
+	list := make([]interface{}, len(srv.errors)*2)
+
 	srv.errorsMu.Lock()
 	defer srv.errorsMu.Unlock()
-
-	list := make([]interface{}, len(srv.errors)*2)
 	for err, count := range srv.errors {
 		list = append(list, err, count)
 	}
-	fmt.Printf("[dbg] p2p %d, %s\n", len(list), list)
 	return list
 }
 
 func cleanError(err string) string {
 	switch {
+	case strings.HasSuffix(err, "EOF"):
+		return "EOF"
 	case strings.HasSuffix(err, "i/o timeout"):
 		return "i/o timeout"
 	case strings.HasSuffix(err, "closed by the remote host."):
