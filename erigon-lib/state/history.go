@@ -337,15 +337,13 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		TmpDir:     h.dirs.Tmp,
 		IndexFile:  historyIdxPath,
 		Salt:       h.salt,
+		NoFsync:    h.noFsync,
 	}, h.logger)
 	if err != nil {
 		return "", fmt.Errorf("create recsplit: %w", err)
 	}
 	defer rs.Close()
 	rs.LogLvl(log.LvlTrace)
-	if h.noFsync {
-		rs.DisableFsync()
-	}
 
 	var historyKey []byte
 	var txKey [8]byte

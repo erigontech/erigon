@@ -1006,8 +1006,9 @@ func (d *Domain) buildMapIdx(ctx context.Context, fromStep, toStep uint64, data 
 		TmpDir:     d.dirs.Tmp,
 		IndexFile:  idxPath,
 		Salt:       d.salt,
+		NoFsync:    d.noFsync,
 	}
-	return buildIndex(ctx, data, d.compression, idxPath, false, cfg, ps, d.logger, d.noFsync)
+	return buildIndex(ctx, data, d.compression, idxPath, false, cfg, ps, d.logger)
 }
 
 func (d *Domain) missedBtreeIdxFiles() (l []*filesItem) {
@@ -1101,7 +1102,7 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 	}
 }
 
-func buildIndex(ctx context.Context, d *seg.Decompressor, compressed FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger, noFsync bool) error {
+func buildIndex(ctx context.Context, d *seg.Decompressor, compressed FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {
 	_, fileName := filepath.Split(idxPath)
 	count := d.Count()
 	if !values {
@@ -1121,9 +1122,6 @@ func buildIndex(ctx context.Context, d *seg.Decompressor, compressed FileCompres
 	}
 	defer rs.Close()
 	rs.LogLvl(log.LvlTrace)
-	if noFsync {
-		rs.DisableFsync()
-	}
 
 	var keyPos, valPos uint64
 	for {
@@ -1188,6 +1186,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	defer mxUnwindTook.ObserveDuration(sf)
 	mxRunningUnwind.Inc()
 	defer mxRunningUnwind.Dec()
+	defer histRng.Close()
 
 	seen := make(map[string]struct{})
 	restored := dt.NewWriter()
@@ -1200,11 +1199,13 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 
 		ic, err := dt.ht.IdxRange(k, int(txNumUnwindTo)-1, 0, order.Desc, -1, rwTx)
 		if err != nil {
+			ic.Close()
 			return err
 		}
 		if ic.HasNext() {
 			nextTxn, err := ic.Next()
 			if err != nil {
+				ic.Close()
 				return err
 			}
 			restored.SetTxNum(nextTxn) // todo what if we actually had to decrease current step to provide correct update?
@@ -1213,12 +1214,10 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		}
 		//fmt.Printf("[%s] unwinding %x ->'%x'\n", dt.d.filenameBase, k, v)
 		if err := restored.addValue(k, nil, v); err != nil {
+			ic.Close()
 			return err
 		}
-		type closable interface {
-			Close()
-		}
-		ic.(closable).Close()
+		ic.Close()
 		seen[string(k)] = struct{}{}
 	}
 
