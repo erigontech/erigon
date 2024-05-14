@@ -153,7 +153,7 @@ func printFile(cliCtx *cli.Context) error {
 				//Print file status
 				util.RenderTableWithHeader(
 					"File download info:",
-					table.Row{"File", "Average Download Rate", "Time Took"},
+					table.Row{"File", "Size", "Average Download Rate", "Time Took"},
 					[]table.Row{fileRow},
 				)
 			}
@@ -203,6 +203,7 @@ func getDownloadedFileRow(file diagnostics.SegmentDownloadStatistics) table.Row 
 
 	row := table.Row{
 		file.Name,
+		common.ByteCount(file.TotalBytes),
 		averageDownloadRate,
 		totalDownloadTimeString.String(),
 	}
