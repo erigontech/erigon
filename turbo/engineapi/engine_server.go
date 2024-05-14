@@ -110,12 +110,22 @@ func (e *EngineServer) Start(
 	}
 }
 
-func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {
+func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals types.Withdrawals) error {
 	if !s.config.IsShanghai(time) && withdrawals != nil {
-		return &rpc.InvalidParamsError{Message: "withdrawals before shanghai"}
+		return &rpc.InvalidParamsError{Message: "withdrawals before Shanghai"}
 	}
 	if s.config.IsShanghai(time) && withdrawals == nil {
 		return &rpc.InvalidParamsError{Message: "missing withdrawals list"}
+	}
+	return nil
+}
+
+func (s *EngineServer) checkRequestsPresence(time uint64, requests types.Requests) error {
+	if !s.config.IsPrague(time) && requests != nil {
+		return &rpc.InvalidParamsError{Message: "requests before Prague"}
+	}
+	if s.config.IsPrague(time) && requests == nil {
+		return &rpc.InvalidParamsError{Message: "missing requests list"}
 	}
 	return nil
 }
@@ -150,25 +160,26 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		ReceiptHash: req.ReceiptsRoot,
 		TxHash:      types.DeriveSha(types.BinaryTransactions(txs)),
 	}
-	var withdrawals []*types.Withdrawal
+
+	var withdrawals types.Withdrawals
 	if version >= clparams.CapellaVersion {
 		withdrawals = req.Withdrawals
 	}
-
-	if withdrawals != nil {
-		wh := types.DeriveSha(types.Withdrawals(withdrawals))
-		header.WithdrawalsHash = &wh
-	}
-
 	if err := s.checkWithdrawalsPresence(header.Time, withdrawals); err != nil {
 		return nil, err
+	}
+	if withdrawals != nil {
+		wh := types.DeriveSha(withdrawals)
+		header.WithdrawalsHash = &wh
 	}
 
 	var requests types.Requests
 	if version >= clparams.ElectraVersion && req.DepositRequests != nil {
 		requests = req.DepositRequests.ToRequests()
 	}
-
+	if err := s.checkRequestsPresence(header.Time, requests); err != nil {
+		return nil, err
+	}
 	if requests != nil {
 		rh := types.DeriveSha(requests)
 		header.RequestsRoot = &rh
