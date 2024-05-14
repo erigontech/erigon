@@ -1438,28 +1438,28 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, max
 		minBlockNum = cmp.Max(br.blockReader.FrozenBlocks(), minBlockNum)
 		maxBlockNum = br.maxScheduledBlock.Load()
 
-		if includeBor {
-			// "bor snaps" can be behind "block snaps", it's ok: for example because of `kill -9` in the middle of merge
-			okBor, err = br.retireBorBlocks(ctx, br.blockReader.FrozenBorBlocks(), minBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
-			log.Warn("[dbg] retireBorBlocks1", "br.blockReader.FrozenBorBlocks()", br.blockReader.FrozenBorBlocks(), "minBlockNum", minBlockNum, "okBor", okBor)
-			if err != nil {
-				return err
-			}
-		}
+		//if includeBor {
+		//	// "bor snaps" can be behind "block snaps", it's ok: for example because of `kill -9` in the middle of merge
+		//	okBor, err = br.retireBorBlocks(ctx, br.blockReader.FrozenBorBlocks(), minBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+		//	log.Warn("[dbg] retireBorBlocks1", "br.blockReader.FrozenBorBlocks()", br.blockReader.FrozenBorBlocks(), "minBlockNum", minBlockNum, "okBor", okBor)
+		//	if err != nil {
+		//		return err
+		//	}
+		//}
 
 		ok, err = br.retireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 		if err != nil {
 			return err
 		}
 
-		if includeBor {
-			minBorBlockNum := cmp.Max(br.blockReader.FrozenBorBlocks(), minBlockNum)
-			okBor, err = br.retireBorBlocks(ctx, minBorBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
-			log.Warn("[dbg] retireBorBlocks2", "minBorBlockNum", minBorBlockNum, "maxBlockNum", maxBlockNum, "okBor", okBor)
-			if err != nil {
-				return err
-			}
-		}
+		//if includeBor {
+		//	minBorBlockNum := cmp.Max(br.blockReader.FrozenBorBlocks(), minBlockNum)
+		//	okBor, err = br.retireBorBlocks(ctx, minBorBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+		//	log.Warn("[dbg] retireBorBlocks2", "minBorBlockNum", minBorBlockNum, "maxBlockNum", maxBlockNum, "okBor", okBor)
+		//	if err != nil {
+		//		return err
+		//	}
+		//}
 		if onFinish != nil {
 			if err := onFinish(); err != nil {
 				return err
