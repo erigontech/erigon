@@ -1225,6 +1225,7 @@ func (srv *Server) listErrors() []interface{} {
 	for err, count := range srv.errors {
 		list = append(list, err, count)
 	}
+	fmt.Printf("[dbg] p2p %d, %s\n", len(list), list)
 	return list
 }
 
