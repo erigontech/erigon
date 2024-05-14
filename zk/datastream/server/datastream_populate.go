@@ -44,8 +44,7 @@ func ConsecutiveWriteBlocksToStream(
 	to uint64,
 	logPrefix string,
 ) error {
-	header := stream.GetHeader()
-	lastWrittenBlockNum, dserr := getLatestBlockNumberWritten(stream, &header)
+	lastWrittenBlockNum, dserr := srv.GetHighestBlockNumber()
 	if dserr != nil {
 		return dserr
 	}
@@ -63,13 +62,25 @@ func WriteBlocksToStream(
 	from, to uint64,
 	logPrefix string,
 ) error {
+	var err error
+
+	// if from is higher than the last datastream block number - unwind the stream
+	highestDatastreamBlock, err := srv.GetHighestBlockNumber()
+	if err != nil {
+		return err
+	}
+
+	if highestDatastreamBlock > from {
+		if err := srv.UnwindToBlock(from); err != nil {
+			return err
+		}
+	}
 
 	foo := stream.GetHeader()
 	_ = foo
 
 	logTicker := time.NewTicker(10 * time.Second)
 	var lastBlock *eritypes.Block
-	var err error
 	if err = stream.StartAtomicOp(); err != nil {
 		return err
 	}
