@@ -14,6 +14,7 @@ import (
 	"unsafe"
 
 	"github.com/ledgerwatch/erigon-lib/common/cryptozerocopy"
+	"github.com/pkg/errors"
 	"golang.org/x/crypto/sha3"
 
 	btree2 "github.com/tidwall/btree"
@@ -29,6 +30,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/log/v3"
 )
+
+var ErrBehindCommitment = fmt.Errorf("behind commitment")
 
 // KvList sort.Interface to sort write list by keys
 type KvList struct {
@@ -197,7 +200,7 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 				return 0, err
 			}
 			if lastBn < bn {
-				return 0, fmt.Errorf("TxNums index is at block %d and behind commitment %d. Likely it means that `domain snaps` are ahead of `block snaps`", lastBn, bn)
+				return 0, errors.WithMessage(ErrBehindCommitment, fmt.Sprintf("TxNums index is at block %d and behind commitment %d", lastBn, bn))
 			}
 		}
 		sd.SetBlockNum(bn)

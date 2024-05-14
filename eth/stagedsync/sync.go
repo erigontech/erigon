@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -140,13 +141,15 @@ func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error
 		if casted, ok := tx.(state.HasAggTx); ok {
 			// protect from too far unwind
 			unwindPointWithCommitment, ok, err := casted.AggTx().(*state.AggregatorRoTx).CanUnwindBeforeBlockNum(unwindPoint, tx)
-			if err != nil {
-				return err
+			if !errors.Is(err, state.ErrBehindCommitment) {
+				if err != nil {
+					return err
+				}
+				if !ok {
+					return fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindPoint, unwindPointWithCommitment)
+				}
+				unwindPoint = unwindPointWithCommitment
 			}
-			if !ok {
-				return fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindPoint, unwindPointWithCommitment)
-			}
-			unwindPoint = unwindPointWithCommitment
 		}
 	}
 
