@@ -884,15 +884,15 @@ Loop:
 
 				if err := func() error {
 					doms.Close()
-					if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 2*time.Minute, applyTx); err != nil {
-						return err
-					}
 					if err = execStage.Update(applyTx, outputBlockNum.GetValueUint64()); err != nil {
 						return err
 					}
 
 					tt = time.Now()
 					applyTx.CollectMetrics()
+					if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 2*time.Minute, applyTx); err != nil {
+						return err
+					}
 					if !useExternalTx {
 						tt = time.Now()
 						if err = applyTx.Commit(); err != nil {
