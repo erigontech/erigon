@@ -196,6 +196,7 @@ func ExecV3(ctx context.Context,
 		defer doms.Close()
 	}
 	txNumInDB, blockNumInDoms := doms.TxNum(), doms.BlockNum()
+	fmt.Println(blockNumInDoms, maxBlockNum)
 	if blockNumInDoms > maxBlockNum {
 		return nil
 	}
