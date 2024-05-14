@@ -39,7 +39,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/merge"
@@ -294,7 +293,7 @@ func Main(ctx *cli.Context) error {
 		return h
 	}
 
-	_, db, _ := temporaltest.NewTestDB(nil, datadir.New(""))
+	db, _ := temporaltest.NewTestDB(nil, datadir.New(""))
 	defer db.Close()
 
 	tx, err := db.BeginRw(context.Background())
@@ -331,11 +330,7 @@ func Main(ctx *cli.Context) error {
 	body, _ := rlp.EncodeToBytes(txs)
 	collector := make(Alloc)
 
-	historyV3, err := kvcfg.HistoryV3.Enabled(tx)
-	if err != nil {
-		return err
-	}
-	dumper := state.NewDumper(tx, prestate.Env.Number, historyV3)
+	dumper := state.NewDumper(tx, prestate.Env.Number, true)
 	dumper.DumpToCollector(collector, false, false, libcommon.Address{}, 0)
 	return dispatchOutput(ctx, baseDir, result, collector, body)
 }

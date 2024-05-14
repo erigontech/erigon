@@ -65,11 +65,10 @@ import (
 	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
 	rpcsentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinelproto"
 	protosentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
-	txpoolproto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
 	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
@@ -262,8 +261,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			return err
 		}
 
-		config.HistoryV3, err = kvcfg.HistoryV3.WriteOnce(tx, config.HistoryV3)
-		return err
+		return nil
 	}); err != nil {
 		return nil, err
 	}
@@ -341,19 +339,17 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	// Check if we have an already initialized chain and fall back to
 	// that if so. Otherwise we need to generate a new genesis spec.
-	blockReader, blockWriter, allSnapshots, allBorSnapshots, agg, err := setUpBlockReader(ctx, chainKv, config.Dirs, config, config.HistoryV3, chainConfig.Bor != nil, logger)
+	blockReader, blockWriter, allSnapshots, allBorSnapshots, agg, err := setUpBlockReader(ctx, chainKv, config.Dirs, config, chainConfig.Bor != nil, logger)
 	if err != nil {
 		return nil, err
 	}
 	backend.agg, backend.blockSnapshots, backend.blockReader, backend.blockWriter = agg, allSnapshots, blockReader, blockWriter
 
-	if config.HistoryV3 {
-		backend.chainDB, err = temporal.New(backend.chainDB, agg)
-		if err != nil {
-			return nil, err
-		}
-		chainKv = backend.chainDB //nolint
+	backend.chainDB, err = temporal.New(backend.chainDB, agg)
+	if err != nil {
+		return nil, err
 	}
+	chainKv = backend.chainDB //nolint
 
 	if err := backend.setUpSnapDownloader(ctx, config.Downloader); err != nil {
 		return nil, err
@@ -558,16 +554,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			dirs, notifications, blockReader, blockWriter, backend.agg, backend.silkworm, terseLogger)
 		chainReader := consensuschain.NewReader(chainConfig, txc.Tx, blockReader, logger)
 		// We start the mining step
-		if err := stages2.StateStep(ctx, chainReader, backend.engine, txc, stateSync, header, body, unwindPoint, headersChain, bodiesChain, config.HistoryV3); err != nil {
+		if err := stages2.StateStep(ctx, chainReader, backend.engine, txc, stateSync, header, body, unwindPoint, headersChain, bodiesChain); err != nil {
 			logger.Warn("Could not validate block", "err", err)
 			return err
 		}
 		var progress uint64
-		if config.HistoryV3 {
-			progress, err = stages.GetStageProgress(txc.Tx, stages.Execution)
-		} else {
-			progress, err = stages.GetStageProgress(txc.Tx, stages.IntermediateHashes)
-		}
+		progress, err = stages.GetStageProgress(txc.Tx, stages.Execution)
 		if err != nil {
 			return err
 		}
@@ -637,7 +629,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.newTxs = make(chan libtypes.Announcements, 1024)
 		//defer close(newTxs)
 		backend.txPoolDB, backend.txPool, backend.txPoolFetch, backend.txPoolSend, backend.txPoolGrpcServer, err = txpooluitl.AllComponents(
-			ctx, config.TxPool, kvcache.NewDummy(config.HistoryV3), backend.newTxs, chainKv, backend.sentriesClient.Sentries(), stateDiffClient, misc.Eip1559FeeCalculator, logger,
+			ctx, config.TxPool, kvcache.NewDummy(), backend.newTxs, chainKv, backend.sentriesClient.Sentries(), stateDiffClient, misc.Eip1559FeeCalculator, logger,
 		)
 		if err != nil {
 			return nil, err
@@ -679,7 +671,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				backend.notifications.Accumulator,
 				config.StateStream,
 				/*stateStream=*/ false,
-				config.HistoryV3,
 				dirs,
 				blockReader,
 				backend.sentriesClient.Hd,
@@ -719,7 +710,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 					backend.notifications.Accumulator,
 					config.StateStream,
 					/*stateStream=*/ false,
-					config.HistoryV3,
 					dirs,
 					blockReader,
 					backend.sentriesClient.Hd,
@@ -895,7 +885,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	checkStateRoot := true
 	pipelineStages := stages2.NewPipelineStages(ctx, backend.chainDB, config, p2pConfig, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.agg, backend.silkworm, backend.forkValidator, logger, checkStateRoot)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger)
-	backend.eth1ExecutionServer = eth1.NewEthereumExecutionModule(blockReader, backend.chainDB, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.StateChangesConsumer, logger, backend.engine, config.HistoryV3, config.Sync, ctx)
+	backend.eth1ExecutionServer = eth1.NewEthereumExecutionModule(blockReader, backend.chainDB, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.StateChangesConsumer, logger, backend.engine, config.Sync, ctx)
 	executionRpc := direct.NewExecutionClientDirect(backend.eth1ExecutionServer)
 
 	var executionEngine executionclient.ExecutionEngine
@@ -1434,7 +1424,7 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 	return err
 }
 
-func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, histV3 bool, isBor bool, logger log.Logger) (services.FullBlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *freezeblocks.BorRoSnapshots, *libstate.Aggregator, error) {
+func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, isBor bool, logger log.Logger) (services.FullBlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *freezeblocks.BorRoSnapshots, *libstate.Aggregator, error) {
 	var minFrozenBlock uint64
 
 	if frozenLimit := snConfig.Sync.FrozenBlockLimit; frozenLimit != 0 {
@@ -1473,7 +1463,7 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	}
 
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
-	blockWriter := blockio.NewBlockWriter(histV3)
+	blockWriter := blockio.NewBlockWriter()
 
 	return blockReader, blockWriter, allSnapshots, allBorSnapshots, agg, nil
 }

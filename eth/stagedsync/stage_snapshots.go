@@ -35,7 +35,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	protodownloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -64,7 +63,6 @@ type SnapshotsCfg struct {
 	blockReader        services.FullBlockReader
 	notifier           *shards.Notifications
 
-	historyV3        bool
 	caplin           bool
 	blobs            bool
 	agg              *state.Aggregator
@@ -82,7 +80,6 @@ func StageSnapshotsCfg(db kv.RwDB,
 	snapshotDownloader protodownloader.DownloaderClient,
 	blockReader services.FullBlockReader,
 	notifier *shards.Notifications,
-	historyV3 bool,
 	agg *state.Aggregator,
 	caplin bool,
 	blobs bool,
@@ -97,7 +94,6 @@ func StageSnapshotsCfg(db kv.RwDB,
 		snapshotDownloader: snapshotDownloader,
 		blockReader:        blockReader,
 		notifier:           notifier,
-		historyV3:          historyV3,
 		caplin:             caplin,
 		agg:                agg,
 		silkworm:           silkworm,
@@ -239,14 +235,14 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	} else {
 
 		// Download only the snapshots that are for the header chain.
-		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, true, cfg.historyV3, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
+		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, true, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
 			return err
 		}
 		if err := cfg.blockReader.Snapshots().ReopenSegments([]snaptype.Type{coresnaptype.Headers, coresnaptype.Bodies}, true); err != nil {
 			return err
 		}
 
-		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, false, cfg.historyV3, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
+		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, false, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
 			return err
 		}
 	}
@@ -266,21 +262,19 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 	}
 
-	if cfg.historyV3 {
-		indexWorkers := estimate.IndexSnapshot.Workers()
-		if err := cfg.agg.BuildOptionalMissedIndices(ctx, indexWorkers); err != nil {
-			return err
-		}
-		if err := cfg.agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
-			return err
-		}
-		if cfg.notifier.Events != nil {
-			cfg.notifier.Events.OnNewSnapshot()
-		}
+	indexWorkers := estimate.IndexSnapshot.Workers()
+	if err := cfg.agg.BuildOptionalMissedIndices(ctx, indexWorkers); err != nil {
+		return err
+	}
+	if err := cfg.agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
+		return err
+	}
+	if cfg.notifier.Events != nil {
+		cfg.notifier.Events.OnNewSnapshot()
+	}
 
-		if casted, ok := tx.(*temporal.Tx); ok {
-			casted.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
-		}
+	if casted, ok := tx.(*temporal.Tx); ok {
+		casted.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
 	}
 
 	frozenBlocks := cfg.blockReader.FrozenBlocks()
@@ -383,40 +377,37 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				return err
 			}
 
-			historyV3, err := kvcfg.HistoryV3.Enabled(tx)
 			if err != nil {
 				return err
 			}
-			if historyV3 {
-				_ = tx.ClearBucket(kv.MaxTxNum)
-				if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
-					select {
-					case <-ctx.Done():
-						return ctx.Err()
-					case <-logEvery.C:
-						logger.Info(fmt.Sprintf("[%s] MaxTxNums index: %dk/%dk", logPrefix, blockNum/1000, blockReader.FrozenBlocks()/1000))
-					default:
-					}
-					if baseTxNum+txAmount == 0 {
-						panic(baseTxNum + txAmount) //uint-underflow
-					}
-					maxTxNum := baseTxNum + txAmount - 1
-
-					if err := rawdbv3.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
-						return fmt.Errorf("%w. blockNum=%d, maxTxNum=%d", err, blockNum, maxTxNum)
-					}
-					return nil
-				}); err != nil {
-					return fmt.Errorf("build txNum => blockNum mapping: %w", err)
+			_ = tx.ClearBucket(kv.MaxTxNum)
+			if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-logEvery.C:
+					logger.Info(fmt.Sprintf("[%s] MaxTxNums index: %dk/%dk", logPrefix, blockNum/1000, blockReader.FrozenBlocks()/1000))
+				default:
 				}
-				if blockReader.FrozenBlocks() > 0 {
-					if err := rawdb.AppendCanonicalTxNums(tx, blockReader.FrozenBlocks()+1); err != nil {
-						return err
-					}
-				} else {
-					if err := rawdb.AppendCanonicalTxNums(tx, 0); err != nil {
-						return err
-					}
+				if baseTxNum+txAmount == 0 {
+					panic(baseTxNum + txAmount) //uint-underflow
+				}
+				maxTxNum := baseTxNum + txAmount - 1
+
+				if err := rawdbv3.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
+					return fmt.Errorf("%w. blockNum=%d, maxTxNum=%d", err, blockNum, maxTxNum)
+				}
+				return nil
+			}); err != nil {
+				return fmt.Errorf("build txNum => blockNum mapping: %w", err)
+			}
+			if blockReader.FrozenBlocks() > 0 {
+				if err := rawdb.AppendCanonicalTxNums(tx, blockReader.FrozenBlocks()+1); err != nil {
+					return err
+				}
+			} else {
+				if err := rawdb.AppendCanonicalTxNums(tx, 0); err != nil {
+					return err
 				}
 			}
 			ac := agg.BeginFilesRo()

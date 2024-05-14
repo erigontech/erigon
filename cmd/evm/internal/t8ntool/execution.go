@@ -24,8 +24,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -78,8 +76,7 @@ type stEnvMarshaling struct {
 
 func MakePreState(chainRules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc) (state.StateReader, *state.PlainStateWriter) {
 	var blockNr uint64 = 0
-	histV3, _ := kvcfg.HistoryV3.Enabled(tx)
-	stateReader, stateWriter := rpchelper.NewLatestStateReader(tx, histV3), state.NewPlainStateWriter(tx, tx, blockNr)
+	stateReader, stateWriter := rpchelper.NewLatestStateReader(tx), state.NewPlainStateWriter(tx, tx, blockNr)
 	statedb := state.New(stateReader) //ibs
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)
