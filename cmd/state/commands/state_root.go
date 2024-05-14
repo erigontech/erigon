@@ -154,7 +154,7 @@ func StateRoot(ctx context.Context, genesis *types.Genesis, blockNum uint64, dat
 			if err = rwTx.ClearBucket(kv.HashedStorage); err != nil {
 				return err
 			}
-			if err = stagedsync.PromoteHashedStateCleanly("hashedstate", rwTx, stagedsync.StageHashStateCfg(nil, dirs, false), ctx, logger); err != nil {
+			if err = stagedsync.PromoteHashedStateCleanly("hashedstate", rwTx, stagedsync.StageHashStateCfg(nil, dirs), ctx, logger); err != nil {
 				return err
 			}
 			var root libcommon.Hash

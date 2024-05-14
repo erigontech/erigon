@@ -33,12 +33,11 @@ func genTestCallTraceSet(t *testing.T, tx kv.RwTx, to uint64) {
 }
 
 func TestCallTrace(t *testing.T) {
+	t.Skip("this stage is disabled in E3")
+
 	logger := log.New()
 	ctx, require := context.Background(), require.New(t)
 	db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	if histV3 {
-		t.Skip()
-	}
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(err)
 	defer tx.Rollback()
