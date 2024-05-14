@@ -779,7 +779,7 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	}
 	defer keysCursor.Close()
 
-	idxC, err := rwTx.RwCursorDupSort(ii.indexTable)
+	idxC, err := rwTx.CursorDupSort(ii.indexTable)
 	if err != nil {
 		return nil, err
 	}
