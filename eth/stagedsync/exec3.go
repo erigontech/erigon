@@ -870,7 +870,7 @@ Loop:
 				}
 
 				if !useExternalTx {
-					if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 2*time.Minute, applyTx); err != nil {
+					if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Minute, applyTx); err != nil {
 						return err
 					}
 				}
