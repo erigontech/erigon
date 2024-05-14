@@ -251,7 +251,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 				return
 			}
-
+			fmt.Println("currentParentNumber", currentParentNumber, "currentParentHash", currentParentHash, "isCanonicalHash", isCanonicalHash)
 		}
 		fmt.Println("newCanonicals", len(newCanonicals))
 
