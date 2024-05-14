@@ -872,7 +872,7 @@ Loop:
 				}
 
 				if !useExternalTx {
-					if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Minute, applyTx); err != nil {
+					if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 2*time.Minute, applyTx); err != nil {
 						return err
 					}
 				}
@@ -895,22 +895,22 @@ Loop:
 
 					tt = time.Now()
 					applyTx.CollectMetrics()
-					// if !useExternalTx {
-					// 	tt = time.Now()
-					// 	if err = applyTx.Commit(); err != nil {
-					// 		return err
-					// 	}
+					if !useExternalTx {
+						tt = time.Now()
+						if err = applyTx.Commit(); err != nil {
+							return err
+						}
 
-					// 	t2 = time.Since(tt)
+						t2 = time.Since(tt)
 
-					// 	aggCtx := agg.BeginFilesRo()
-					// 	defer aggCtx.Close()
+						aggCtx := agg.BeginFilesRo()
+						defer aggCtx.Close()
 
-					// 	applyTx, err = cfg.db.BeginRw(context.Background()) //nolint
-					// 	if err != nil {
-					// 		return err
-					// 	}
-					// }
+						applyTx, err = cfg.db.BeginRw(context.Background()) //nolint
+						if err != nil {
+							return err
+						}
+					}
 					doms, err = state2.NewSharedDomains(applyTx, logger)
 					if err != nil {
 						return err
