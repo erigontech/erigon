@@ -268,6 +268,20 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (
 		// id, add 27 to become equivalent to unprotected Homestead signatures.
 		V.Add(&t.V, u256.Num27)
 		R, S = &t.R, &t.S
+	case *SSZTransaction:
+		// TODO: check for ssz in signer
+		if t.ChainID == nil {
+			if !sg.chainID.IsZero() {
+				return libcommon.Address{}, ErrInvalidChainId
+			}
+		} else if !t.ChainID.Eq(&sg.chainID) {
+			return libcommon.Address{}, ErrInvalidChainId
+		}
+		// ACL, DynamicFee, blob and ssz txs are defined to use 0 and 1 as their recovery
+		// id, add 27 to become equivalent to unprotected Homestead signatures.
+		V.Add(&t.V, u256.Num27)
+		R, S = &t.R, &t.S
+
 	default:
 		return libcommon.Address{}, ErrTxTypeNotSupported
 	}
@@ -301,6 +315,13 @@ func (sg Signer) SignatureValues(tx Transaction, sig []byte) (R, S, V *uint256.I
 		}
 		R, S, V = decodeSignature(sig)
 	case *BlobTx:
+		// Check that chain ID of tx matches the signer. We also accept ID zero here,
+		// because it indicates that the chain ID was not specified in the tx.
+		if t.ChainID != nil && !t.ChainID.IsZero() && !t.ChainID.Eq(&sg.chainID) {
+			return nil, nil, nil, ErrInvalidChainId
+		}
+		R, S, V = decodeSignature(sig)
+	case *SSZTransaction:
 		// Check that chain ID of tx matches the signer. We also accept ID zero here,
 		// because it indicates that the chain ID was not specified in the tx.
 		if t.ChainID != nil && !t.ChainID.IsZero() && !t.ChainID.Eq(&sg.chainID) {

@@ -168,48 +168,6 @@ func DecodeTransaction(data []byte) (Transaction, error) {
 	return DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs)
 }
 
-func UnmarshalTransactionFromSSZBinary(data []byte, blobTxnsAreWrappedWithBlobs bool) (Transaction, error) {
-	if len(data) <= 1 {
-		return nil, fmt.Errorf("short input: %v", len(data))
-	}
-	s := codec.NewDecodingReader(bytes.NewReader(data[1:]), uint64(len(data)-1))
-	switch data[0] {
-	case AccessListTxType:
-		t := &AccessListTx{}
-		if err := t.DecodeSSZ(s); err != nil {
-			return nil, err
-		}
-		return t, nil
-	case DynamicFeeTxType:
-		t := &DynamicFeeTransaction{}
-		if err := t.DecodeSSZ(s); err != nil {
-			return nil, err
-		}
-		return t, nil
-	case BlobTxType:
-		if blobTxnsAreWrappedWithBlobs {
-			t := &BlobTxWrapper{}
-			if err := t.DecodeSSZ(s); err != nil {
-				return nil, err
-			}
-			return t, nil
-		} else {
-			t := &BlobTx{}
-			if err := t.DecodeSSZ(s); err != nil {
-				return nil, err
-			}
-			return t, nil
-		}
-	default:
-		if data[0] >= 0x80 {
-			// Tx is type legacy which is RLP encoded
-			return DecodeTransaction(data)
-		}
-		return nil, ErrTxTypeNotSupported
-	}
-
-}
-
 // Parse transaction without envelope.
 func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs bool) (Transaction, error) {
 	if len(data) <= 1 {
@@ -295,17 +253,6 @@ func DecodeTransactions(txs [][]byte) ([]Transaction, error) {
 		}
 	}
 	return result, nil
-}
-
-func DecodeTransactionsSSZ(txs [][]byte) ([]Transaction, error) {
-	result := make([]Transaction, len(txs))
-	var err error
-	for i := range txs {
-		result[i], err = UnmarshalTransactionFromSSZBinary(txs[i], false /* blobTxnsAreWrappedWithBlobs*/)
-		if err != nil {
-			return nil, err
-		}
-	}
 }
 
 func TypedTransactionMarshalledAsRlpString(data []byte) bool {

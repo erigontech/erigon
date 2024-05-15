@@ -217,10 +217,12 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 	}
 
+	// TODO: add ssz? to signer
+	signer := *types.MakeSigner(s.config, header.Number.Uint64(), header.Time)
 	var transactions []types.Transaction
 	var err error
 	if s.useJsonTx {
-		transactions, err = types.DecodeTransactionsSSZ(txs)
+		transactions, err = types.DecodeTransactionsJson(signer, txs)
 	} else {
 		transactions, err = types.DecodeTransactions(txs)
 	}
