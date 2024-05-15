@@ -327,7 +327,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		return
 	}
 	if tooBigJump {
-		log.Info("[sync] small jump", "to", finishProgressBefore+uint64(e.syncCfg.LoopBlockLimit))
+		log.Info("[sync] limited big jump", "to", finishProgressBefore+uint64(e.syncCfg.LoopBlockLimit))
 	}
 
 	// Set Progress for headers and bodies accordingly.
