@@ -257,7 +257,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
-
 		if e.hook != nil {
 			if err = e.hook.BeforeRun(tx, isSynced); err != nil {
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
@@ -271,6 +270,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
+
 		if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
 			//if err := rawdbv3.TxNums.Truncate(tx, fcuHeader.Number.Uint64()); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
@@ -303,6 +303,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				return
 			}
 		}
+
 		if len(newCanonicals) > 0 {
 			if err := rawdbv3.TxNums.Truncate(tx, newCanonicals[0].number); err != nil {
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
