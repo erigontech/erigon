@@ -756,6 +756,12 @@ func (c *bls12381G1Mul) Run(input []byte) ([]byte, error) {
 	if p0, err = decodePointG1(input[:128]); err != nil {
 		return nil, err
 	}
+
+	// Fast subgroup check
+	if !p0.IsInSubGroup() {
+		return nil, errBLS12381G1PointSubgroup
+	}
+
 	// Decode scalar value
 	e := new(big.Int).SetBytes(input[128:])
 
@@ -879,6 +885,12 @@ func (c *bls12381G2Mul) Run(input []byte) ([]byte, error) {
 	if p0, err = decodePointG2(input[:256]); err != nil {
 		return nil, err
 	}
+
+	// Fast subgroup check
+	if !p0.IsInSubGroup() {
+		return nil, errBLS12381G2PointSubgroup
+	}
+
 	// Decode scalar value
 	e := new(big.Int).SetBytes(input[256:])
 

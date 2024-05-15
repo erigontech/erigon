@@ -143,7 +143,7 @@ func testPrecompiledFailure(addr string, test precompiledFailureTest, t *testing
 	t.Run(test.Name, func(t *testing.T) {
 		t.Parallel()
 		_, _, err := RunPrecompiledContract(p, in, gas)
-		if err.Error() != test.ExpectedError {
+		if err == nil || err.Error() != test.ExpectedError {
 			t.Errorf("Expected error [%v], got [%v]", test.ExpectedError, err)
 		}
 		// Verify that the precompile did not touch the input buffer
@@ -349,6 +349,7 @@ func TestPrecompiledBLS12381G2AddEip(t *testing.T)     { testJson("blsG2Add-eip"
 func TestPrecompiledBLS12381G1AddFailEip(t *testing.T) { testJsonFail("blsG1Add-eip", "0a", t) }
 func TestPrecompiledBLS12381G1MulFailEip(t *testing.T) { testJsonFail("blsG1Mul-eip", "0b", t) }
 func TestPrecompiledBLS12381G2AddFailEip(t *testing.T) { testJsonFail("blsG2Add-eip", "0d", t) }
+func TestPrecompiledBLS12381G2MulFailEip(t *testing.T) { testJsonFail("blsG2Mul-eip", "0e", t) }
 func TestPrecompiledBLS12381MapG1FailEip(t *testing.T) { testJsonFail("blsMapG1-eip", "11", t) }
 func TestPrecompiledBLS12381MapG2FailEip(t *testing.T) { testJsonFail("blsMapG2-eip", "12", t) }
 
