@@ -4,9 +4,6 @@ on:
   schedule:
     - cron: '1 0 * * *'  # Run every day at 01:00 AM UTC
   workflow_dispatch:     # Run manually
-  pull_request:  # only to debug, remove later
-    branches:
-      - main
 
 jobs:
   amoy-test:
