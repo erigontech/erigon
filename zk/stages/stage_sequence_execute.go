@@ -168,6 +168,7 @@ func SpawnSequencingStage(
 			clonedBatchCounters = batchCounters.Clone()
 			addedTransactions = []types.Transaction{}
 			addedReceipts = []*types.Receipt{}
+			effectiveGases = []uint8{}
 			header, parentBlock, err = prepareHeader(tx, blockNumber, deltaTimestamp, forkId, coinbase)
 			if err != nil {
 				return err
