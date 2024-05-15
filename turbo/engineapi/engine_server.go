@@ -140,7 +140,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	txs := [][]byte{}
 	for _, transaction := range req.Transactions {
-		txs = append(txs, transaction)
+		txs = append(txs, transaction.Inner)
 	}
 
 	header := types.Header{
@@ -207,7 +207,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}, nil
 	}
 
-	for _, txn := range req.Transactions {
+	for _, txn := range txs {
 		if types.TypedTransactionMarshalledAsRlpString(txn) {
 			s.logger.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", common.Bytes2Hex(txn))
 			return &engine_types.PayloadStatus{
@@ -220,12 +220,16 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	// TODO: add ssz? to signer
 	signer := *types.MakeSigner(s.config, header.Number.Uint64(), header.Time)
 	var transactions []types.Transaction
+
 	var err error
-	if s.useJsonTx {
-		transactions, err = types.DecodeTransactionsJson(signer, txs)
-	} else {
-		transactions, err = types.DecodeTransactions(txs)
+	if len(txs) > 0 {
+		if hexutility.IsJsonObject(txs[0]) {
+			transactions, err = types.DecodeTransactionsJson(signer, txs)
+		} else {
+			transactions, err = types.DecodeTransactions(txs)
+		}
 	}
+
 	if err != nil {
 		s.logger.Warn("[NewPayload] failed to decode transactions", "err", err)
 		return &engine_types.PayloadStatus{

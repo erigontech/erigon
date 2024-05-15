@@ -7,6 +7,8 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 )
 
@@ -20,23 +22,23 @@ type SignedTransaction struct {
 }
 
 type TransactionPayload struct {
-	Type                byte               `json:"type"`
-	ChainID             *uint256.Int       `json:"chainId,omitempty"`
-	Nonce               uint64             `json:"nonce"`
-	GasPrice            *uint256.Int       `json:"gasPrice,omitempty"`
-	Gas                 uint64             `json:"gas"`
-	To                  *common.Address    `json:"to"`
-	Value               *uint256.Int       `json:"value"`
-	Input               []byte             `json:"input"`
-	Accesses            *types2.AccessList `json:"accessList,omitempty"`
-	Tip                 *uint256.Int       `json:"maxPriorityFeePerGas,omitempty"`
-	MaxFeePerBlobGas    *uint256.Int       `json:"maxFeePerBlobGas,omitempty"`
-	BlobVersionedHashes *[]common.Hash     `json:"blobVersionedHashes,omitempty"`
+	Type                hexutil.Uint       `json:"type"`
+	ChainID             *uint256.Int       `json:"chain_id,omitempty"`
+	Nonce               hexutil.Uint64     `json:"nonce"`
+	GasPrice            uint256.Int        `json:"max_fee_per_gas,omitempty"`
+	Gas                 hexutil.Uint64     `json:"gas"`
+	To                  *common.Address    `json:"to,omitempty"`
+	Value               uint256.Int        `json:"value"`
+	Input               hexutility.Bytes   `json:"input"`
+	Accesses            *types2.AccessList `json:"access_list,omitempty"`
+	Tip                 *uint256.Int       `json:"max_priority_fee_per_gas,omitempty"`
+	MaxFeePerBlobGas    *uint256.Int       `json:"max_fee_per_blob_gas,omitempty"`
+	BlobVersionedHashes *[]common.Hash     `json:"blob_versioned_hashes,omitempty"`
 }
 
 type TransactionSignature struct {
-	From      common.Address `json:"from"`
-	Signature [65]byte       `json:"signature"` // TODO: this needs to be of particular size (see EIP)
+	From      common.Address   `json:"from"`
+	Signature hexutility.Bytes `json:"ecdsa_signature"` // TODO: this needs to be of particular size (see EIP)
 }
 
 type TxVariant uint
@@ -86,13 +88,13 @@ func UnmarshalTransctionFromJson(signer Signer, data []byte, blobTxnsAreWrappedW
 	legacyTx := LegacyTx{
 		CommonTx: CommonTx{
 			TransactionMisc: TransactionMisc{},
-			Nonce:           tx.Payload.Nonce,
-			Gas:             tx.Payload.Gas,
+			Nonce:           tx.Payload.Nonce.Uint64(),
+			Gas:             tx.Payload.Gas.Uint64(),
 			To:              tx.Payload.To,
-			Value:           tx.Payload.Value,
+			Value:           &tx.Payload.Value,
 			Data:            tx.Payload.Input,
 		},
-		GasPrice: tx.Payload.GasPrice,
+		GasPrice: &tx.Payload.GasPrice,
 	}
 
 	var txi Transaction
@@ -104,7 +106,7 @@ func UnmarshalTransctionFromJson(signer Signer, data []byte, blobTxnsAreWrappedW
 				CommonTx:   legacyTx.CommonTx,
 				ChainID:    tx.Payload.ChainID,
 				Tip:        tx.Payload.Tip,
-				FeeCap:     tx.Payload.GasPrice,
+				FeeCap:     &tx.Payload.GasPrice,
 				AccessList: *tx.Payload.Accesses,
 			},
 			BlobVersionedHashes: *tx.Payload.BlobVersionedHashes,
@@ -119,7 +121,7 @@ func UnmarshalTransctionFromJson(signer Signer, data []byte, blobTxnsAreWrappedW
 				CommonTx:   legacyTx.CommonTx,
 				ChainID:    tx.Payload.ChainID,
 				Tip:        tx.Payload.Tip,
-				FeeCap:     tx.Payload.GasPrice,
+				FeeCap:     &tx.Payload.GasPrice,
 				AccessList: *tx.Payload.Accesses,
 			},
 		}
@@ -133,7 +135,7 @@ func UnmarshalTransctionFromJson(signer Signer, data []byte, blobTxnsAreWrappedW
 				CommonTx:   legacyTx.CommonTx,
 				ChainID:    tx.Payload.ChainID,
 				Tip:        tx.Payload.Tip,
-				FeeCap:     tx.Payload.GasPrice,
+				FeeCap:     &tx.Payload.GasPrice,
 				AccessList: *tx.Payload.Accesses,
 			},
 			BlobVersionedHashes: *tx.Payload.BlobVersionedHashes,
@@ -144,7 +146,7 @@ func UnmarshalTransctionFromJson(signer Signer, data []byte, blobTxnsAreWrappedW
 			CommonTx:   legacyTx.CommonTx,
 			ChainID:    tx.Payload.ChainID,
 			Tip:        tx.Payload.Tip,
-			FeeCap:     tx.Payload.GasPrice,
+			FeeCap:     &tx.Payload.GasPrice,
 			AccessList: *tx.Payload.Accesses,
 		}
 

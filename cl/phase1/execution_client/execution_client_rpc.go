@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
 	"github.com/ledgerwatch/log/v3"
 
@@ -99,7 +100,7 @@ func (cc *ExecutionClientRpc) NewPayload(ctx context.Context, payload *cltypes.E
 	request.Withdrawals = payloadBody.Withdrawals
 
 	for _, bytesTransaction := range payloadBody.Transactions {
-		request.Transactions = append(request.Transactions, bytesTransaction)
+		request.Transactions = append(request.Transactions, hexutility.NewProbablyHexBytes(bytesTransaction))
 	}
 	// Process Deneb
 	if payload.Version() >= clparams.DenebVersion {

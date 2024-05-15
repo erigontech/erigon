@@ -17,23 +17,23 @@ import (
 
 // ExecutionPayload represents an execution payload (aka block)
 type ExecutionPayload struct {
-	ParentHash    common.Hash         `json:"parentHash"    gencodec:"required"`
-	FeeRecipient  common.Address      `json:"feeRecipient"  gencodec:"required"`
-	StateRoot     common.Hash         `json:"stateRoot"     gencodec:"required"`
-	ReceiptsRoot  common.Hash         `json:"receiptsRoot"  gencodec:"required"`
-	LogsBloom     hexutility.Bytes    `json:"logsBloom"     gencodec:"required"`
-	PrevRandao    common.Hash         `json:"prevRandao"    gencodec:"required"`
-	BlockNumber   hexutil.Uint64      `json:"blockNumber"   gencodec:"required"`
-	GasLimit      hexutil.Uint64      `json:"gasLimit"      gencodec:"required"`
-	GasUsed       hexutil.Uint64      `json:"gasUsed"       gencodec:"required"`
-	Timestamp     hexutil.Uint64      `json:"timestamp"     gencodec:"required"`
-	ExtraData     hexutility.Bytes    `json:"extraData"     gencodec:"required"`
-	BaseFeePerGas *hexutil.Big        `json:"baseFeePerGas" gencodec:"required"`
-	BlockHash     common.Hash         `json:"blockHash"     gencodec:"required"`
-	Transactions  []hexutility.Bytes  `json:"transactions"  gencodec:"required"`
-	Withdrawals   []*types.Withdrawal `json:"withdrawals"`
-	BlobGasUsed   *hexutil.Uint64     `json:"blobGasUsed"`
-	ExcessBlobGas *hexutil.Uint64     `json:"excessBlobGas"`
+	ParentHash    common.Hash                   `json:"parentHash"    gencodec:"required"`
+	FeeRecipient  common.Address                `json:"feeRecipient"  gencodec:"required"`
+	StateRoot     common.Hash                   `json:"stateRoot"     gencodec:"required"`
+	ReceiptsRoot  common.Hash                   `json:"receiptsRoot"  gencodec:"required"`
+	LogsBloom     hexutility.Bytes              `json:"logsBloom"     gencodec:"required"`
+	PrevRandao    common.Hash                   `json:"prevRandao"    gencodec:"required"`
+	BlockNumber   hexutil.Uint64                `json:"blockNumber"   gencodec:"required"`
+	GasLimit      hexutil.Uint64                `json:"gasLimit"      gencodec:"required"`
+	GasUsed       hexutil.Uint64                `json:"gasUsed"       gencodec:"required"`
+	Timestamp     hexutil.Uint64                `json:"timestamp"     gencodec:"required"`
+	ExtraData     hexutility.Bytes              `json:"extraData"     gencodec:"required"`
+	BaseFeePerGas *hexutil.Big                  `json:"baseFeePerGas" gencodec:"required"`
+	BlockHash     common.Hash                   `json:"blockHash"     gencodec:"required"`
+	Transactions  []hexutility.ProbablyHexBytes `json:"transactions"  gencodec:"required"`
+	Withdrawals   []*types.Withdrawal           `json:"withdrawals"`
+	BlobGasUsed   *hexutil.Uint64               `json:"blobGasUsed"`
+	ExcessBlobGas *hexutil.Uint64               `json:"excessBlobGas"`
 }
 
 // PayloadAttributes represent the attributes required to start assembling a payload
@@ -119,9 +119,9 @@ func ConvertRpcBlockToExecutionPayload(payload *execution.Block) *ExecutionPaylo
 	baseFee := gointerfaces.ConvertH256ToUint256Int(header.BaseFeePerGas).ToBig()
 
 	// Convert slice of hexutility.Bytes to a slice of slice of bytes
-	transactions := make([]hexutility.Bytes, len(body.Transactions))
+	transactions := make([]hexutility.ProbablyHexBytes, len(body.Transactions))
 	for i, transaction := range body.Transactions {
-		transactions[i] = transaction
+		transactions[i] = hexutility.NewProbablyHexBytes(transaction)
 	}
 
 	res := &ExecutionPayload{
@@ -157,9 +157,9 @@ func ConvertPayloadFromRpc(payload *types2.ExecutionPayload) *ExecutionPayload {
 	baseFee := gointerfaces.ConvertH256ToUint256Int(payload.BaseFeePerGas).ToBig()
 
 	// Convert slice of hexutility.Bytes to a slice of slice of bytes
-	transactions := make([]hexutility.Bytes, len(payload.Transactions))
+	transactions := make([]hexutility.ProbablyHexBytes, len(payload.Transactions))
 	for i, transaction := range payload.Transactions {
-		transactions[i] = transaction
+		transactions[i] = hexutility.NewProbablyHexBytes(transaction)
 	}
 
 	res := &ExecutionPayload{
