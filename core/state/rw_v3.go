@@ -103,51 +103,22 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 
 	//maps are unordered in Go! don't iterate over it. SharedDomains.deleteAccount will call GetLatest(Code) and expecting it not been delete yet
 	if txTask.WriteLists != nil {
-		for _, table := range []kv.Domain{kv.AccountsDomain, kv.CodeDomain, kv.StorageDomain} {
-			list, ok := txTask.WriteLists[table.String()]
+		for _, domain := range []kv.Domain{kv.AccountsDomain, kv.CodeDomain, kv.StorageDomain} {
+			list, ok := txTask.WriteLists[domain.String()]
 			if !ok {
 				continue
 			}
 
-			switch table {
-			case kv.AccountsDomain:
-				for i, key := range list.Keys {
-					if list.Vals[i] == nil {
-						if err := domains.DomainDel(kv.AccountsDomain, []byte(key), nil, nil, 0); err != nil {
-							return err
-						}
-					} else {
-						if err := domains.DomainPut(kv.AccountsDomain, []byte(key), nil, list.Vals[i], nil, 0); err != nil {
-							return err
-						}
+			for i, key := range list.Keys {
+				if list.Vals[i] == nil {
+					if err := domains.DomainDel(domain, []byte(key), nil, nil, 0); err != nil {
+						return err
+					}
+				} else {
+					if err := domains.DomainPut(domain, []byte(key), nil, list.Vals[i], nil, 0); err != nil {
+						return err
 					}
 				}
-			case kv.CodeDomain:
-				for i, key := range list.Keys {
-					if list.Vals[i] == nil {
-						if err := domains.DomainDel(kv.CodeDomain, []byte(key), nil, nil, 0); err != nil {
-							return err
-						}
-					} else {
-						if err := domains.DomainPut(kv.CodeDomain, []byte(key), nil, list.Vals[i], nil, 0); err != nil {
-							return err
-						}
-					}
-				}
-			case kv.StorageDomain:
-				for i, key := range list.Keys {
-					if list.Vals[i] == nil {
-						if err := domains.DomainDel(kv.StorageDomain, []byte(key), nil, nil, 0); err != nil {
-							return err
-						}
-					} else {
-						if err := domains.DomainPut(kv.StorageDomain, []byte(key), nil, list.Vals[i], nil, 0); err != nil {
-							return err
-						}
-					}
-				}
-			default:
-				continue
 			}
 		}
 	}
