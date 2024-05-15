@@ -37,7 +37,7 @@ jobs:
       run: |
         python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
 
-    - name: Run Erigon and monitor snapshot downloading
+    - name: Run Erigon and monitor chain sync
       id: test_step
       run: |
         set +e # Disable exit on error
