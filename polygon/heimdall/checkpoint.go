@@ -7,6 +7,7 @@ import (
 	"math/big"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
@@ -159,7 +160,7 @@ func CheckpointIdAt(tx kv.Tx, block uint64) (CheckpointId, error) {
 	}
 
 	if k == nil {
-		return 0, fmt.Errorf("%d: %w", block, ErrCheckpointNotFound)
+		return 0, fmt.Errorf("%d: %w, stack=%s", block, ErrCheckpointNotFound, dbg.Stack())
 	}
 
 	id = binary.BigEndian.Uint64(v)
