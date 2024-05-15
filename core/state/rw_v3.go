@@ -37,7 +37,7 @@ type StateV3 struct {
 	trace bool
 }
 
-func NewStateV3(domains *libstate.SharedDomains, logger log.Logger) *StateV3 {
+func NewStateV3(domains *libstate.SharedDomains, accumulator *shards.Accumulator, logger log.Logger) *StateV3 {
 	return &StateV3{
 		domains:             domains,
 		triggers:            map[uint64]*TxTask{},
@@ -345,14 +345,16 @@ type StateWriterBufferedV3 struct {
 	accountDels  map[string]*accounts.Account
 	storagePrevs map[string][]byte
 	codePrevs    map[string]uint64
+	accumulator  *shards.Accumulator
 
 	tx kv.Tx
 }
 
-func NewStateWriterBufferedV3(rs *StateV3) *StateWriterBufferedV3 {
+func NewStateWriterBufferedV3(rs *StateV3, accumulator *shards.Accumulator) *StateWriterBufferedV3 {
 	return &StateWriterBufferedV3{
-		rs:         rs,
-		writeLists: newWriteList(),
+		rs:          rs,
+		writeLists:  newWriteList(),
+		accumulator: accumulator,
 		//trace:      true,
 	}
 }
@@ -395,6 +397,9 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 		}
 	}
 	value := accounts.SerialiseV3(account)
+	if w.accumulator != nil {
+		w.accumulator.ChangeAccount(address, account.Incarnation, value)
+	}
 	w.writeLists[kv.AccountsDomain.String()].Push(string(address[:]), value)
 
 	return nil
@@ -404,6 +409,9 @@ func (w *StateWriterBufferedV3) UpdateAccountCode(address common.Address, incarn
 	if w.trace {
 		fmt.Printf("code: %x, %x, valLen: %d\n", address.Bytes(), codeHash, len(code))
 	}
+	if w.accumulator != nil {
+		w.accumulator.ChangeCode(address, incarnation, code)
+	}
 	w.writeLists[kv.CodeDomain.String()].Push(string(address[:]), code)
 	return nil
 }
@@ -411,6 +419,9 @@ func (w *StateWriterBufferedV3) UpdateAccountCode(address common.Address, incarn
 func (w *StateWriterBufferedV3) DeleteAccount(address common.Address, original *accounts.Account) error {
 	if w.trace {
 		fmt.Printf("del acc: %x\n", address)
+	}
+	if w.accumulator != nil {
+		w.accumulator.DeleteAccount(address)
 	}
 	w.writeLists[kv.AccountsDomain.String()].Push(string(address.Bytes()), nil)
 	return nil
@@ -424,6 +435,11 @@ func (w *StateWriterBufferedV3) WriteAccountStorage(address common.Address, inca
 	w.writeLists[kv.StorageDomain.String()].Push(compositeS, value.Bytes())
 	if w.trace {
 		fmt.Printf("storage: %x,%x,%x\n", address, *key, value.Bytes())
+	}
+	if w.accumulator != nil && key != nil && value != nil {
+		k := *key
+		v := value.Bytes()
+		w.accumulator.ChangeStorage(address, incarnation, k, v)
 	}
 	return nil
 }

@@ -44,6 +44,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/shards"
 )
 
 var execStepsInDB = metrics.NewGauge(`exec_steps_in_db`) //nolint
@@ -305,7 +306,12 @@ func ExecV3(ctx context.Context,
 	var count uint64
 	var lock sync.RWMutex
 
-	rs := state.NewStateV3(doms, logger)
+	shouldReportToTxPool := maxBlockNum-blockNum <= 8
+	var accumulator *shards.Accumulator
+	if shouldReportToTxPool {
+		accumulator = cfg.accumulator
+	}
+	rs := state.NewStateV3(doms, accumulator, logger)
 
 	////TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
 	// Now rwLoop closing both (because applyLoop we completely restart)
@@ -910,7 +916,7 @@ Loop:
 						return err
 					}
 					doms.SetTxNum(inputTxNum)
-					rs = state.NewStateV3(doms, logger)
+					rs = state.NewStateV3(doms, nil, logger)
 
 					applyWorker.ResetTx(applyTx)
 					applyWorker.ResetState(rs)
