@@ -873,7 +873,8 @@ Loop:
 				t1 = time.Since(tt)
 
 				tt = time.Now()
-
+				// If execute more than 100 blocks then, it is safe to assume that we are not on the tip of the chain.
+				// In this case, we can prune the state to save memory.
 				pruneBlockMargin := uint64(100)
 
 				if blockNum-initialBlockNum > pruneBlockMargin {
