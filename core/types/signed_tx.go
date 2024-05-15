@@ -161,7 +161,7 @@ func (tx *TransactionPayload) getPayloadContainer() (bitfield.Bitvector32, *payl
 
 type TransactionSignature struct {
 	From      common.Address `json:"from"`
-	Signature []byte         `json:"signature"` // TODO: this needs to be of particular size (see EIP)
+	Signature [65]byte       `json:"signature"` // TODO: this needs to be of particular size (see EIP)
 }
 
 func (tx *TransactionSignature) Clone() clonable.Clonable {
@@ -310,7 +310,7 @@ func UnmarshalTransctionFromJson(signer Signer, data []byte, blobTxnsAreWrappedW
 		return nil, nil
 	}
 
-	txi, err = txi.WithSignature(signer, tx.Signature.Signature)
+	txi, err = txi.WithSignature(signer, tx.Signature.Signature[:])
 	if err != nil {
 		return nil, err
 	}
