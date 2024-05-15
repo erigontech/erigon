@@ -37,21 +37,19 @@ func NewLeakDetector(name string, slowThreshold time.Duration) *LeakDetector {
 	d := &LeakDetector{list: map[uint64]LeakDetectorItem{}}
 	d.SetSlowThreshold(slowThreshold)
 
-	if enabled {
-		go func() {
-			logEvery := time.NewTicker(20 * time.Second)
-			defer logEvery.Stop()
+	go func() {
+		logEvery := time.NewTicker(20 * time.Second)
+		defer logEvery.Stop()
 
-			for {
-				select {
-				case <-logEvery.C:
-					if list := d.slowList(); len(list) > 0 {
-						log.Info(fmt.Sprintf("[dbg.%s] long living resources", name), "list", strings.Join(d.slowList(), ", "))
-					}
+		for {
+			select {
+			case <-logEvery.C:
+				if list := d.slowList(); len(list) > 0 {
+					log.Info(fmt.Sprintf("[dbg.%s] long living resources", name), "list", strings.Join(d.slowList(), ", "))
 				}
 			}
-		}()
-	}
+		}
+	}()
 	return d
 }
 
