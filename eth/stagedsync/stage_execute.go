@@ -284,16 +284,12 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 		return err
 	}
 
-	logPrefix := s.LogPrefix()
 	var to = prevStageProgress
 	if toBlock > 0 {
 		to = cmp.Min(prevStageProgress, toBlock)
 	}
 	if to < s.BlockNumber {
 		return nil
-	}
-	if to > s.BlockNumber+16 {
-		logger.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
 
 	parallel := txc.Tx == nil
