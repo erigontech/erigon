@@ -46,7 +46,7 @@ func (b *BlobSidecar) UnmarshalJSON(buf []byte) error {
 		KzgCommitment            libcommon.Bytes48        `json:"kzg_commitment"`
 		KzgProof                 libcommon.Bytes48        `json:"kzg_proof"`
 		SignedBlockHeader        *SignedBeaconBlockHeader `json:"signed_block_header"`
-		CommitmentInclusionProof solid.HashVectorSSZ      `json:"proof"`
+		CommitmentInclusionProof solid.HashVectorSSZ      `json:"kzg_commitment_inclusion_proof"`
 	}
 	tmp.Blob = &Blob{}
 	tmp.CommitmentInclusionProof = solid.NewHashVector(CommitmentBranchSize)
