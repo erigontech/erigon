@@ -19,7 +19,7 @@ package state
 import (
 	"bytes"
 	"context"
-	datadir2 "github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"testing"
 
@@ -331,8 +331,9 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *state.Aggregator) {
 	tb.Helper()
 	db := memdb.NewStateDB(tb.TempDir())
-	dirs := datadir2.New(tb.TempDir())
-	agg, err := state.NewAggregator(context.Background(), dirs, 16, db, log.New())
+	tb.Cleanup(db.Close)
+
+	agg, err := state.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, log.New())
 	if err != nil {
 		tb.Fatal(err)
 	}
