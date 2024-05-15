@@ -459,7 +459,6 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	db.path = opts.path
 	addToPathDbMap(opts.path, db)
 	if dbg.MdbxLockInRam() && opts.label == kv.ChainDB {
-		log.Info("[dbg] locking db in mem", "lable", opts.label)
 		if err := db.View(ctx, func(tx kv.Tx) error { return tx.(*MdbxTx).LockDBInRam() }); err != nil {
 			return nil, err
 		}
@@ -1114,9 +1113,6 @@ func (tx *MdbxTx) Commit() error {
 func (tx *MdbxTx) Rollback() {
 	if tx.tx == nil {
 		return
-	}
-	if tx.db.opts.label == kv.ChainDB && !tx.readOnly {
-		log.Warn("[dbg] rollback")
 	}
 	defer func() {
 		tx.tx = nil
