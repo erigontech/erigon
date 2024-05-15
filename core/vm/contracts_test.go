@@ -353,6 +353,9 @@ func TestPrecompiledBLS12381G1MultiExpFailEip(t *testing.T) {
 }
 func TestPrecompiledBLS12381G2AddFailEip(t *testing.T) { testJsonFail("blsG2Add-eip", "0d", t) }
 func TestPrecompiledBLS12381G2MulFailEip(t *testing.T) { testJsonFail("blsG2Mul-eip", "0e", t) }
+func TestPrecompiledBLS12381G2MultiExpFailEip(t *testing.T) {
+	testJsonFail("blsG2MultiExp-eip", "0f", t)
+}
 func TestPrecompiledBLS12381MapG1FailEip(t *testing.T) { testJsonFail("blsMapG1-eip", "11", t) }
 func TestPrecompiledBLS12381MapG2FailEip(t *testing.T) { testJsonFail("blsMapG2-eip", "12", t) }
 
