@@ -356,8 +356,9 @@ func TestPrecompiledBLS12381G2MulFailEip(t *testing.T) { testJsonFail("blsG2Mul-
 func TestPrecompiledBLS12381G2MultiExpFailEip(t *testing.T) {
 	testJsonFail("blsG2MultiExp-eip", "0f", t)
 }
-func TestPrecompiledBLS12381MapG1FailEip(t *testing.T) { testJsonFail("blsMapG1-eip", "11", t) }
-func TestPrecompiledBLS12381MapG2FailEip(t *testing.T) { testJsonFail("blsMapG2-eip", "12", t) }
+func TestPrecompiledBLS12381PairingFailEip(t *testing.T) { testJsonFail("blsPairing-eip", "10", t) }
+func TestPrecompiledBLS12381MapG1FailEip(t *testing.T)   { testJsonFail("blsMapG1-eip", "11", t) }
+func TestPrecompiledBLS12381MapG2FailEip(t *testing.T)   { testJsonFail("blsMapG2-eip", "12", t) }
 
 func loadJson(name string) ([]precompiledTest, error) {
 	data, err := os.ReadFile(fmt.Sprintf("testdata/precompiles/%v.json", name))
