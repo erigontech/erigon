@@ -124,6 +124,8 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		return
 	}
 
+	defer e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
+
 	var validationError string
 	type canonicalEntry struct {
 		hash   common.Hash
@@ -134,13 +136,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
-	defer func() {
-		if tx != nil {
-			tx.Rollback()
-		}
-	}()
-
-	defer e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
+	defer tx.Rollback()
 
 	blockHash := originalBlockHash
 
@@ -154,7 +150,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
-	isSynced := finishProgressBefore > 0 && finishProgressBefore > e.blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
 
 	// Step one, find reconnection point, and mark all of those headers as canonical.
 	fcuHeader, err := e.blockReader.HeaderByHash(ctx, tx, originalBlockHash)
@@ -167,10 +162,11 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		return
 	}
 
-	tooBigJump := e.syncCfg.LoopBlockLimit > 0 && finishProgressBefore > 0 && fcuHeader.Number.Uint64()-finishProgressBefore > uint64(e.syncCfg.LoopBlockLimit)
-
-	if tooBigJump {
+	limitedBigJump := e.syncCfg.LoopBlockLimit > 0 && finishProgressBefore > 0 && fcuHeader.Number.Uint64()-finishProgressBefore > uint64(e.syncCfg.LoopBlockLimit-2)
+	isSynced := finishProgressBefore > 0 && finishProgressBefore > e.blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
+	if limitedBigJump {
 		isSynced = false
+		log.Info("[sync] limited big jump", "from", finishProgressBefore, "amount", uint64(e.syncCfg.LoopBlockLimit))
 	}
 
 	canonicalHash, err := e.blockReader.CanonicalHash(ctx, tx, fcuHeader.Number.Uint64())
@@ -272,7 +268,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		}
 
 		if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
-			//if err := rawdbv3.TxNums.Truncate(tx, fcuHeader.Number.Uint64()); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
@@ -316,43 +311,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		}
 	}
 
-TooBigJumpStep:
-	if tx == nil {
-		tx, err = e.db.BeginRwNosync(ctx)
-		if err != nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
-		defer func() {
-			if tx != nil {
-				tx.Rollback()
-			}
-		}()
-	}
-	finishProgressBefore, err = stages.GetStageProgress(tx, stages.Finish)
-	if err != nil {
-		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-		return
-	}
-	tooBigJump = e.syncCfg.LoopBlockLimit > 0 && finishProgressBefore > 0 && fcuHeader.Number.Uint64() > finishProgressBefore && fcuHeader.Number.Uint64()-finishProgressBefore > uint64(e.syncCfg.LoopBlockLimit)
-	if tooBigJump { //jump forward by 1K blocks
-		log.Info("[sync] jump by 1K blocks", "currentJumpTo", finishProgressBefore+uint64(e.syncCfg.LoopBlockLimit), "bigJumpTo", fcuHeader.Number.Uint64())
-		blockHash, err = e.blockReader.CanonicalHash(ctx, tx, finishProgressBefore+uint64(e.syncCfg.LoopBlockLimit))
-		if err != nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
-		fcuHeader, err = e.blockReader.HeaderByHash(ctx, tx, blockHash)
-		if err != nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
-		if fcuHeader == nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, fmt.Errorf("forkchoice: block %x not found or was marked invalid", blockHash))
-			return
-		}
-	}
-
 	// Set Progress for headers and bodies accordingly.
 	if err := stages.SaveStageProgress(tx, stages.Headers, fcuHeader.Number.Uint64()); err != nil {
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
@@ -378,7 +336,7 @@ TooBigJumpStep:
 		}
 	}
 	// Run the forkchoice
-	initialCycle := tooBigJump
+	initialCycle := limitedBigJump
 	if _, err := e.executionPipeline.Run(e.db, wrap.TxContainer{Tx: tx}, initialCycle); err != nil {
 		err = fmt.Errorf("updateForkChoice: %w", err)
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
@@ -400,30 +358,27 @@ TooBigJumpStep:
 			e.logger.Warn("bad forkchoice", "head", headHash, "hash", blockHash)
 		}
 	} else {
-		if !tooBigJump {
-			valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
-			if err != nil {
-				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-				return
-			}
-			if !valid {
-				sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
-					Status:          execution.ExecutionStatus_InvalidForkchoice,
-					LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
-				})
-				return
-			}
-			if err := rawdb.TruncateCanonicalChain(ctx, tx, *headNumber+1); err != nil {
-				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-				return
-			}
+		valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
+		if err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
+		}
+		if !valid {
+			sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
+				Status:          execution.ExecutionStatus_InvalidForkchoice,
+				LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
+			})
+			return
+		}
+		if err := rawdb.TruncateCanonicalChain(ctx, tx, *headNumber+1); err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
 		}
 
 		if err := tx.Commit(); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
-		tx = nil
 
 		if e.hook != nil {
 			if err := e.db.View(ctx, func(tx kv.Tx) error {
@@ -456,9 +411,6 @@ TooBigJumpStep:
 		dbg.ReadMemStats(&m)
 		timings = append(timings, "commit", time.Since(commitStart), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 		e.logger.Info("Timings (slower than 50ms)", timings...)
-	}
-	if tooBigJump {
-		goto TooBigJumpStep
 	}
 
 	sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
