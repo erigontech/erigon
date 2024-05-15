@@ -124,6 +124,8 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		return
 	}
 
+	defer e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
+
 	var validationError string
 	type canonicalEntry struct {
 		hash   common.Hash
@@ -135,8 +137,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		return
 	}
 	defer tx.Rollback()
-
-	defer e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
 
 	blockHash := originalBlockHash
 
@@ -150,7 +150,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
-	isSynced := finishProgressBefore > 0 && finishProgressBefore > e.blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
 
 	// Step one, find reconnection point, and mark all of those headers as canonical.
 	fcuHeader, err := e.blockReader.HeaderByHash(ctx, tx, originalBlockHash)
@@ -164,8 +163,10 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	}
 
 	limitedBigJump := e.syncCfg.LoopBlockLimit > 0 && finishProgressBefore > 0 && fcuHeader.Number.Uint64()-finishProgressBefore > uint64(e.syncCfg.LoopBlockLimit-2)
+	isSynced := finishProgressBefore > 0 && finishProgressBefore > e.blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
 	if limitedBigJump {
 		isSynced = false
+		log.Info("[sync] limited big jump", "to", finishProgressBefore+uint64(e.syncCfg.LoopBlockLimit))
 	}
 
 	canonicalHash, err := e.blockReader.CanonicalHash(ctx, tx, fcuHeader.Number.Uint64())
@@ -307,15 +308,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				return
 			}
 		}
-	}
-
-	finishProgressBefore, err = stages.GetStageProgress(tx, stages.Finish)
-	if err != nil {
-		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-		return
-	}
-	if limitedBigJump {
-		log.Info("[sync] limited big jump", "to", finishProgressBefore+uint64(e.syncCfg.LoopBlockLimit))
 	}
 
 	// Set Progress for headers and bodies accordingly.
