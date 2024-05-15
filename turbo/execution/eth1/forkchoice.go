@@ -45,9 +45,11 @@ func sendForkchoiceErrorWithoutWaiting(ch chan forkchoiceOutcome, err error) {
 
 func isDomainAheadOfBlocks(tx kv.RwTx) bool {
 	doms, err := state.NewSharedDomains(tx, log.New())
+	if err != nil {
+		return errors.Is(err, state.ErrBehindCommitment)
+	}
 	defer doms.Close()
-	return errors.Is(err, state.ErrBehindCommitment)
-
+	return false
 }
 
 // verifyForkchoiceHashes verifies the finalized and safe hash of the forkchoice state
