@@ -319,18 +319,15 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
-	defer func() {
-		if tx != nil {
-			tx.Rollback()
-		}
-	}()
+	defer tx.Rollback()
+
 	finishProgressBefore, err = stages.GetStageProgress(tx, stages.Finish)
 	if err != nil {
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
-	if tooBigJump { //jump forward by 1K blocks
-		log.Info("[sync] jump by 1K blocks", "currentJumpTo", finishProgressBefore+uint64(e.syncCfg.LoopBlockLimit), "bigJumpTo", fcuHeader.Number.Uint64())
+	if tooBigJump {
+		log.Info("[sync] small jump", "to", finishProgressBefore+uint64(e.syncCfg.LoopBlockLimit))
 	}
 
 	// Set Progress for headers and bodies accordingly.
