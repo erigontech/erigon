@@ -24,7 +24,6 @@ func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
 func TestFindMergeRangeCornerCases(t *testing.T) {
 	t.Run("> 2 unmerged files", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
-		ii.withExistenceIndex = false
 		ii.scanStateFiles([]string{
 			"v1-test.0-2.ef",
 			"v1-test.2-3.ef",

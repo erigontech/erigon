@@ -45,6 +45,7 @@ type Uno[V any] interface {
 	Next() (V, error)
 	//NextBatch() ([]V, error)
 	HasNext() bool
+	Close()
 }
 
 // Duo - return 2 items - usually called Key and Value (or `k` and `v`)
@@ -59,6 +60,7 @@ type Uno[V any] interface {
 type Duo[K, V any] interface {
 	Next() (K, V, error)
 	HasNext() bool
+	Close()
 }
 
 // Trio - return 3 items - usually called Key and Value (or `k` and `v`)
@@ -73,6 +75,7 @@ type Duo[K, V any] interface {
 type Trio[K, V1, V2 any] interface {
 	Next() (K, V1, V2, error)
 	HasNext() bool
+	Close()
 }
 
 // Deprecated - use Trio

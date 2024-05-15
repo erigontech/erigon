@@ -36,7 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/ledgerwatch/erigon-lib/crypto"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	types "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
 	"github.com/ledgerwatch/erigon-lib/rlp"
 )
 
@@ -1005,7 +1005,7 @@ func UnwrapTxPlayloadRlp(blobTxRlp []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	blobTxRlp = blobTxRlp[dataposPrev-1 : datapos+datalen] // Seek left an extra-bit
+	blobTxRlp = blobTxRlp[dataposPrev-1 : datapos+datalen] // seekInFiles left an extra-bit
 	blobTxRlp[0] = 0x3
 	// Include the prefix part of the rlp
 	return blobTxRlp, nil

@@ -173,91 +173,51 @@ func (m *UnionKVIter) Close() {
 }
 
 type WrapKVSIter struct {
-	y              KV
-	yHasNext       bool
-	yNextK, yNextV []byte
-	err            error
+	y KV
 }
 
 func WrapKVS(y KV) KVS {
 	if y == nil {
 		return EmptyKVS
 	}
-	m := &WrapKVSIter{y: y}
-	m.advance()
-	return m
+	return &WrapKVSIter{y: y}
 }
 
 func (m *WrapKVSIter) HasNext() bool {
-	return m.err != nil || m.yHasNext
+	return m.y.HasNext()
 }
-func (m *WrapKVSIter) advance() {
-	if m.err != nil {
-		return
-	}
-	m.yHasNext = m.y.HasNext()
-	if m.yHasNext {
-		m.yNextK, m.yNextV, m.err = m.y.Next()
-	}
-}
+
 func (m *WrapKVSIter) Next() ([]byte, []byte, uint64, error) {
-	if m.err != nil {
-		return nil, nil, 0, m.err
-	}
-	k, v, err := m.yNextK, m.yNextV, m.err
-	m.advance()
+	k, v, err := m.y.Next()
 	return k, v, 0, err
 }
 
-// func (m *WrapKVSIter) ToArray() (keys, values [][]byte, err error) { return ToArrayKV(m) }
 func (m *WrapKVSIter) Close() {
-	if y, ok := m.y.(Closer); ok {
-		y.Close()
-	}
+	m.y.Close()
 }
 
 type WrapKVIter struct {
-	x              KVS
-	xHasNext       bool
-	xNextK, xNextV []byte
-	err            error
+	x KVS
 }
 
 func WrapKV(x KVS) KV {
 	if x == nil {
 		return EmptyKV
 	}
-	m := &WrapKVIter{x: x}
-	m.advance()
-	return m
+	return &WrapKVIter{x: x}
 }
 
 func (m *WrapKVIter) HasNext() bool {
-	return m.err != nil || m.xHasNext
+	return m.x.HasNext()
 }
-func (m *WrapKVIter) advance() {
-	if m.err != nil {
-		return
-	}
-	m.xHasNext = m.x.HasNext()
-	if m.xHasNext {
-		m.xNextK, m.xNextV, _, m.err = m.x.Next()
-	}
-}
+
 func (m *WrapKVIter) Next() ([]byte, []byte, error) {
-	if m.err != nil {
-		return nil, nil, m.err
-	}
-	k, v, err := m.xNextK, m.xNextV, m.err
-	m.advance()
+	k, v, _, err := m.x.Next()
 	return k, v, err
 }
 
-// func (m *WrapKVIter) ToArray() (keys, values [][]byte, err error) { return ToArrayKV(m) }
 func (m *WrapKVIter) Close() {
-	if x, ok := m.x.(Closer); ok {
-		x.Close()
-	}
+	m.x.Close()
 }
 
 // MergedKV - merge 2 kv.Pairs streams (without replacements, or "shadowing",

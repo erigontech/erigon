@@ -92,6 +92,7 @@ func validateAndFillMaxStack(jt *JumpTable) {
 // cancun, and prague instructions.
 func newPragueInstructionSet() JumpTable {
 	instructionSet := newCancunInstructionSet()
+	enable2935(&instructionSet)
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }

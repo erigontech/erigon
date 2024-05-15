@@ -17,7 +17,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	sentrymulticlient "github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
@@ -416,7 +416,7 @@ func blockHeadersPacket66Bytes(t *testing.T, requestId uint64, headers []*types.
 
 func newMockNewBlockPacketBytes(t *testing.T) []byte {
 	newBlockPacket := eth.NewBlockPacket{
-		Block: types.NewBlock(newMockBlockHeaders(1)[0], nil, nil, nil, nil),
+		Block: types.NewBlock(newMockBlockHeaders(1)[0], nil, nil, nil, nil, nil),
 	}
 	newBlockPacketBytes, err := rlp.EncodeToBytes(&newBlockPacket)
 	require.NoError(t, err)

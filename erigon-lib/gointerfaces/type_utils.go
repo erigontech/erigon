@@ -17,7 +17,7 @@ import (
 	"encoding/binary"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	types "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
 )
 
 func ConvertH2048ToBloom(h2048 *types.H2048) [256]byte {

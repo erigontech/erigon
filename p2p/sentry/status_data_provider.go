@@ -11,12 +11,14 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 )
+
+var ErrNoHead = errors.New("ReadChainHead: ReadCurrentHeader error")
 
 type ChainHead struct {
 	HeadHeight uint64
@@ -77,7 +79,7 @@ func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*proto_sentry.S
 func ReadChainHeadWithTx(tx kv.Tx) (ChainHead, error) {
 	header := rawdb.ReadCurrentHeaderHavingBody(tx)
 	if header == nil {
-		return ChainHead{}, errors.New("ReadChainHead: ReadCurrentHeader error")
+		return ChainHead{}, ErrNoHead
 	}
 
 	height := header.Number.Uint64()

@@ -25,7 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
 	"github.com/stretchr/testify/require"
@@ -107,7 +107,7 @@ func TestEviction(t *testing.T) {
 	c := New(cfg)
 
 	dirs := datadir.New(t.TempDir())
-	_, db, _ := temporaltest.NewTestDB(t, dirs)
+	db, _ := temporaltest.NewTestDB(t, dirs)
 	k1, k2 := [20]byte{1}, [20]byte{2}
 
 	var id uint64
@@ -167,7 +167,7 @@ func TestAPI(t *testing.T) {
 	require := require.New(t)
 	c := New(DefaultCoherentConfig)
 	k1, k2 := [20]byte{1}, [20]byte{2}
-	_, db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	get := func(key [20]byte, expectTxnID uint64) (res [1]chan []byte) {
 		wg := sync.WaitGroup{}
 		for i := 0; i < len(res); i++ {
@@ -357,7 +357,7 @@ func TestCode(t *testing.T) {
 	t.Skip("TODO: use state reader/writer instead of Put()")
 	require, ctx := require.New(t), context.Background()
 	c := New(DefaultCoherentConfig)
-	_, db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	k1, k2 := [20]byte{1}, [20]byte{2}
 
 	_ = db.Update(ctx, func(tx kv.RwTx) error {

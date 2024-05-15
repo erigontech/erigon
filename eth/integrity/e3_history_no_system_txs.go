@@ -38,10 +38,12 @@ func E3HistoryNoSystemTxs(ctx context.Context, chainDB kv.RwDB, agg *state.Aggre
 				defer tx.Rollback()
 
 				var minStep uint64 = math.MaxUint64
-				keys, err := tx.(state.HasAggCtx).AggCtx().(*state.AggregatorRoTx).DomainRangeLatest(tx, kv.AccountsDomain, []byte{byte(j), byte(jj)}, []byte{byte(j), byte(jj + 1)}, -1)
+				keys, err := tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx).DomainRangeLatest(tx, kv.AccountsDomain, []byte{byte(j), byte(jj)}, []byte{byte(j), byte(jj + 1)}, -1)
 				if err != nil {
 					return err
 				}
+				defer keys.Close()
+
 				for keys.HasNext() {
 					key, _, err := keys.Next()
 					if err != nil {
@@ -79,10 +81,8 @@ func E3HistoryNoSystemTxs(ctx context.Context, chainDB kv.RwDB, agg *state.Aggre
 						default:
 						}
 					}
+					it.Close()
 					count.Add(1)
-					if casted, ok := it.(kv.Closer); ok {
-						casted.Close()
-					}
 				}
 				return nil
 			})

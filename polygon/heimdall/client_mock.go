@@ -155,10 +155,10 @@ func (c *MockHeimdallClientFetchCheckpointCountCall) DoAndReturn(f func(context.
 }
 
 // FetchCheckpoints mocks base method.
-func (m *MockHeimdallClient) FetchCheckpoints(arg0 context.Context, arg1, arg2 uint64) (Checkpoints, error) {
+func (m *MockHeimdallClient) FetchCheckpoints(arg0 context.Context, arg1, arg2 uint64) ([]*Checkpoint, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "FetchCheckpoints", arg0, arg1, arg2)
-	ret0, _ := ret[0].(Checkpoints)
+	ret0, _ := ret[0].([]*Checkpoint)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -176,19 +176,19 @@ type MockHeimdallClientFetchCheckpointsCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockHeimdallClientFetchCheckpointsCall) Return(arg0 Checkpoints, arg1 error) *MockHeimdallClientFetchCheckpointsCall {
+func (c *MockHeimdallClientFetchCheckpointsCall) Return(arg0 []*Checkpoint, arg1 error) *MockHeimdallClientFetchCheckpointsCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockHeimdallClientFetchCheckpointsCall) Do(f func(context.Context, uint64, uint64) (Checkpoints, error)) *MockHeimdallClientFetchCheckpointsCall {
+func (c *MockHeimdallClientFetchCheckpointsCall) Do(f func(context.Context, uint64, uint64) ([]*Checkpoint, error)) *MockHeimdallClientFetchCheckpointsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockHeimdallClientFetchCheckpointsCall) DoAndReturn(f func(context.Context, uint64, uint64) (Checkpoints, error)) *MockHeimdallClientFetchCheckpointsCall {
+func (c *MockHeimdallClientFetchCheckpointsCall) DoAndReturn(f func(context.Context, uint64, uint64) ([]*Checkpoint, error)) *MockHeimdallClientFetchCheckpointsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
