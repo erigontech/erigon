@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"math"
 	"os"
 	"path"
@@ -20,7 +21,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spaolacci/murmur3"
 
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -626,26 +626,7 @@ func (btw *BtIndexWriter) AddKey(key []byte, offset uint64) error {
 
 // loadFuncBucket is required to satisfy the type etl.LoadFunc type, to use with collector.Load
 func (btw *BtIndexWriter) loadFuncBucket(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-	// k is the BigEndian encoding of the bucket number, and the v is the key that is assigned into that bucket
-	//if uint64(len(btw.vals)) >= btw.batchSizeLimit {
-	//	if err := btw.drainBatch(); err != nil {
-	//		return err
-	//	}
-	//}
-
-	// if _, err := btw.indexW.Write(k); err != nil {
-	// 	return err
-	// }
-	//if _, err := btw.indexW.Write(v); err != nil {
-	//	return err
-	//}
-	//copy(btw.numBuf[8-btw.bytesPerRec:], v)
-	//btw.ef.AddOffset(binary.BigEndian.Uint64(btw.numBuf[:]))
-
 	btw.ef.AddOffset(binary.BigEndian.Uint64(v))
-
-	//btw.keys = append(btw.keys, binary.BigEndian.Uint64(k), binary.BigEndian.Uint64(k[8:]))
-	//btw.vals = append(btw.vals, binary.BigEndian.Uint64(v))
 	return nil
 }
 
@@ -734,7 +715,7 @@ type BtIndex struct {
 	filePath string
 }
 
-// Decompressor should be managed by caller (could be closed after index is built). When index is built, external getter should be passed to Seek function
+// Decompressor should be managed by caller (could be closed after index is built). When index is built, external getter should be passed to seekInFiles function
 func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *seg.Decompressor, compressed FileCompression, seed uint32, ps *background.ProgressSet, tmpdir string, logger log.Logger, noFsync bool) (*BtIndex, error) {
 	err := BuildBtreeIndexWithDecompressor(indexPath, decompressor, compressed, ps, tmpdir, seed, logger, noFsync)
 	if err != nil {
@@ -915,12 +896,12 @@ func (b *BtIndex) keyCmp(k []byte, di uint64, g ArchiveGetter) (int, []byte, err
 // Key and value is valid until cursor.Next is called
 func (b *BtIndex) newCursor(ctx context.Context, k, v []byte, d uint64, g ArchiveGetter) *Cursor {
 	return &Cursor{
-		btt:    b,
 		ctx:    ctx,
 		getter: g,
 		key:    common.Copy(k),
 		value:  common.Copy(v),
 		d:      d,
+		btt:    b,
 	}
 }
 
@@ -1022,7 +1003,7 @@ func (b *BtIndex) Seek(g ArchiveGetter, x []byte) (*Cursor, error) {
 	}
 
 	// defer func() {
-	// 	fmt.Printf("[Bindex][%s] Seek '%x' -> '%x' di=%d\n", b.FileName(), x, cursor.Value(), cursor.d)
+	// 	fmt.Printf("[Bindex][%s] seekInFiles '%x' -> '%x' di=%d\n", b.FileName(), x, cursor.Value(), cursor.d)
 	// }()
 	var (
 		k     []byte

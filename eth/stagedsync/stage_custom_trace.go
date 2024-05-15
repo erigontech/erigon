@@ -6,11 +6,13 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -50,17 +52,19 @@ func StageCustomTraceCfg(db kv.RwDB, prune prune.Mode, dirs datadir.Dirs, br ser
 
 func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, ctx context.Context, initialCycle bool, prematureEndBlock uint64, logger log.Logger) error {
 	useExternalTx := txc.Ttx != nil
+	var tx kv.TemporalTx
 	if !useExternalTx {
-		tx, err := cfg.db.BeginRw(ctx)
+		_tx, err := cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
-		defer tx.Rollback()
-		txc.Ttx = tx.(kv.TemporalTx)
-		txc.Tx = tx
+		defer _tx.Rollback()
+		tx = _tx.(kv.TemporalTx)
+	} else {
+		tx = txc.Ttx
 	}
 
-	endBlock, err := s.ExecutionAt(txc.Tx)
+	endBlock, err := s.ExecutionAt(tx)
 	if err != nil {
 		return fmt.Errorf("getting last executed block: %w", err)
 	}
@@ -89,13 +93,51 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 	var m runtime.MemStats
 	var prevBlockNumLog uint64 = startBlock
 
+	doms, err := state2.NewSharedDomains(txc.Tx, logger)
+	if err != nil {
+		return err
+	}
+	defer doms.Close()
+
+	key := []byte{0}
+	total := uint256.NewInt(0)
+
+	//it, err := tx.IndexRange(kv.GasUsedHistoryIdx, key, -1, -1, order.Desc, 1)
+	//if err != nil {
+	//	return err
+	//}
+	//if it.HasNext() {
+	//	lastTxNum, err := it.Next()
+	//	if err != nil {
+	//		return err
+	//	}
+	//	lastTotal, ok, err := tx.HistorySeek(kv.GasUsedHistory, key, lastTxNum)
+	//	if err != nil {
+	//		return err
+	//	}
+	//	if ok {
+	//		total.SetBytes(lastTotal)
+	//	}
+	//}
+
 	//TODO: new tracer may get tracer from pool, maybe add it to TxTask field
+	/// maybe need startTxNum/endTxNum
 	if err = exec3.CustomTraceMapReduce(startBlock, endBlock, exec3.TraceConsumer{
 		NewTracer: func() exec3.GenericTracer { return nil },
 		Collect: func(txTask *state.TxTask) error {
 			if txTask.Error != nil {
 				return err
 			}
+
+			total.AddUint64(total, txTask.UsedGas)
+			doms.SetTxNum(txTask.TxNum)
+			v := total.Bytes()
+			_, _ = key, v
+			//err = doms.DomainPut(kv.GasUsedDomain, key, nil, v, nil, 0)
+			//if err != nil {
+			//	return err
+			//}
+
 			select {
 			default:
 			case <-logEvery.C:
@@ -106,10 +148,14 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 
 			return nil
 		},
-	}, ctx, txc.Ttx, cfg.execArgs, logger); err != nil {
+	}, ctx, tx, cfg.execArgs, logger); err != nil {
 		return err
 	}
 	if err = s.Update(txc.Tx, endBlock); err != nil {
+		return err
+	}
+
+	if err := doms.Flush(ctx, txc.Tx); err != nil {
 		return err
 	}
 
@@ -124,21 +170,23 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 
 func UnwindCustomTrace(u *UnwindState, s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, ctx context.Context, logger log.Logger) (err error) {
 	useExternalTx := txc.Ttx != nil
+	var tx kv.TemporalTx
 	if !useExternalTx {
-		tx, err := cfg.db.BeginRw(ctx)
+		_tx, err := cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
-		defer tx.Rollback()
-		txc.Ttx = tx.(kv.TemporalTx)
-		txc.Tx = tx
+		defer _tx.Rollback()
+		tx = _tx.(kv.TemporalTx)
+	} else {
+		tx = txc.Ttx
 	}
 
-	if err := u.Done(txc.Tx); err != nil {
+	if err := u.Done(tx.(kv.RwTx)); err != nil {
 		return fmt.Errorf("%w", err)
 	}
 	if !useExternalTx {
-		if err := txc.Tx.Commit(); err != nil {
+		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}

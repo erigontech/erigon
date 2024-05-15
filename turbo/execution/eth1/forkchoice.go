@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
+	execution "github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/wrap"
@@ -110,6 +110,7 @@ func writeForkChoiceHashes(tx kv.RwTx, blockHash, safeHash, finalizedHash common
 
 func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, originalBlockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) {
 	if !e.semaphore.TryAcquire(1) {
+		e.logger.Trace("ethereumExecutionModule.updateForkChoice: ExecutionStatus_Busy")
 		sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
 			LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
 			Status:          execution.ExecutionStatus_Busy,
@@ -270,12 +271,10 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
-		if e.historyV3 {
-			if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
-				//if err := rawdbv3.TxNums.Truncate(tx, fcuHeader.Number.Uint64()); err != nil {
-				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-				return
-			}
+		if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
+			//if err := rawdbv3.TxNums.Truncate(tx, fcuHeader.Number.Uint64()); err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
 		}
 		// Mark all new canonicals as canonicals
 		for _, canonicalSegment := range newCanonicals {
@@ -304,23 +303,15 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				return
 			}
 		}
-		if e.historyV3 {
-			if len(newCanonicals) > 0 {
-				if err := rawdbv3.TxNums.Truncate(tx, newCanonicals[0].number); err != nil {
-					sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-					return
-				}
-				if err := rawdb.AppendCanonicalTxNums(tx, newCanonicals[len(newCanonicals)-1].number); err != nil {
-					sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-					return
-				}
+		if len(newCanonicals) > 0 {
+			if err := rawdbv3.TxNums.Truncate(tx, newCanonicals[0].number); err != nil {
+				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+				return
 			}
-			//} else {
-			//if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
-			//	sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			//	return
-			//}
-			//}
+			if err := rawdb.AppendCanonicalTxNums(tx, newCanonicals[len(newCanonicals)-1].number); err != nil {
+				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+				return
+			}
 		}
 	}
 
@@ -332,7 +323,7 @@ TooBigJumpStep:
 			return
 		}
 		defer func() {
-			if tx == nil {
+			if tx != nil {
 				tx.Rollback()
 			}
 		}()

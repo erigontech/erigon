@@ -31,10 +31,13 @@ type (
 
 func (Empty[T]) HasNext() bool                                    { return false }
 func (Empty[T]) Next() (v T, err error)                           { return v, err }
+func (Empty[T]) Close()                                           {}
 func (EmptyDuo[K, V]) HasNext() bool                              { return false }
 func (EmptyDuo[K, V]) Next() (k K, v V, err error)                { return k, v, err }
+func (EmptyDuo[K, V]) Close()                                     {}
 func (EmptyTrio[K, V1, v2]) HasNext() bool                        { return false }
 func (EmptyTrio[K, V1, V2]) Next() (k K, v1 V1, v2 V2, err error) { return k, v1, v2, err }
+func (EmptyTrio[K, V1, V2]) Close()                               {}
 
 type ArrStream[V any] struct {
 	arr []V

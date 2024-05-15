@@ -9,7 +9,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 )
 
@@ -19,7 +18,8 @@ var SqueezeCommitmentFiles = Migration{
 	Name: "squeeze_commit_files",
 	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 		ctx := context.Background()
-		if !EnableSqueezeCommitmentFiles || !libstate.AggregatorSqueezeCommitmentValues || !kvcfg.HistoryV3.FromDB(db) { //nolint:staticcheck
+
+		if !EnableSqueezeCommitmentFiles || !libstate.AggregatorSqueezeCommitmentValues { //nolint:staticcheck
 			return db.Update(ctx, func(tx kv.RwTx) error {
 				return BeforeCommit(tx, nil, true)
 			})

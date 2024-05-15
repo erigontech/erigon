@@ -55,16 +55,17 @@ System Requirements
 
 * For an Archive node of Ethereum Mainnet we recommend >=3.5TB storage space: 2.3TiB state (as of March 2024),
   643GiB snapshots (can symlink or mount folder `<datadir>/snapshots` to another disk), 200GB temp files (can symlink or
-  mount folder `<datadir>/temp` to another disk). Ethereum Mainnet Full node (
-  see `--prune*` flags): 1.1TiB (March 2024).
+  mount folder `<datadir>/temp` to another disk).
+  Ethereum Mainnet Full node (see [Pruned Node][pruned_node]): 1.5TiB not including temp files (April 2024).
 
-* Goerli Full node (see `--prune*` flags): 189GB on Beta, 114GB on Alpha (April 2022).
+* Goerli Full node (see [Pruned Node][pruned_node]): 189GB on Beta, 114GB on Alpha (April 2022).
 
-* Gnosis Chain Archive: 1.7TiB (March 2024). Gnosis Chain Full node (`--prune=hrtc` flag): 530GiB (March 2024).
+* Gnosis Chain Archive: 1.7TiB (March 2024).
+  Gnosis Chain Full node (see [Pruned Node][pruned_node]): 530GiB (March 2024).
 
-* Polygon Mainnet Archive: 8.5TiB (December 2023). `--prune.*.older 15768000`: 5.1Tb (September 2023). Polygon Mumbai
-  Archive:
-  1TB. (April 2022).
+* Polygon Mainnet Archive: 8.5TiB (December 2023).
+  Polygon Mainnet Full node (see [Pruned Node][pruned_node]) with `--prune.*.older 15768000`: 5.1Tb (September 2023).
+  Polygon Mumbai Archive: 1TB. (April 2022).
 
 SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind.
 Bear in mind that SSD performance deteriorates when close to capacity.
@@ -75,6 +76,8 @@ RAM: >=16GB, 64-bit architecture.
 
 <code>🔬 more details on disk storage [here](https://erigon.substack.com/p/disk-footprint-changes-in-new-erigon?s=r)
 and [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space).</code>
+
+[pruned_node]: https://erigon.gitbook.io/erigon/basic-usage/usage/type-of-node#full-node-or-pruned-node
 
 Usage
 =====
@@ -326,7 +329,8 @@ Engine API.
 
 #### Caplin's Usage.
 
-Caplin can be enabled through the `--internalcl` flag. from that point on, an external Consensus Layer will not be need
+Caplin is be enabled by default. to disable it and enable the Engine API, use the `--externalcl` flag. from that point
+on, an external Consensus Layer will not be need
 anymore.
 
 Caplin also has an archivial mode for historical states and blocks. it can be enabled through the `--caplin.archive`
@@ -585,16 +589,19 @@ node.
 | sentinel  | 4000 | UDP      | Peering | Public        |
 | sentinel  | 4001 | TCP      | Peering | Public        |
 
-If you are using `--internalcl` aka `caplin` as your consensus client, then also look at the chart above
+In order to configure the ports, use:
+
+```
+   --caplin.discovery.addr value                                                    Address for Caplin DISCV5 protocol (default: "127.0.0.1")
+   --caplin.discovery.port value                                                    Port for Caplin DISCV5 protocol (default: 4000)
+   --caplin.discovery.tcpport value                                                 TCP Port for Caplin DISCV5 protocol (default: 4001)
+```
 
 #### `beaconAPI` ports
 
 | Component | Port | Protocol | Purpose | Should Expose |
 |-----------|------|----------|---------|---------------|
 | REST      | 5555 | TCP      | REST    | Public        |
-
-If you are using `--internalcl` aka `caplin` as your consensus client and `--beacon.api` then also look at the chart
-above
 
 #### `shared` ports
 
@@ -779,12 +786,14 @@ Supported networks: all (except Mumbai).
   stage_trace_index
 - E3 can execute 1 historical transaction - without executing it's block - because history/indices have
   transaction-granularity, instead of block-granularity.
-- Doesn't store Receipts/Logs - it always re-executing historical transactions - but re-execution is cheaper (see point
-  above). We would like to see how it will impact users - welcome feedback. Likely we will try add some small LRU-cache
+- E3 doesn't store Logs (aka Receipts) - it always re-executing historical txn (but it's cheaper then in E2 - see point
+  above). Also Logs LRU added in E2 (release/2.60) and E3: https://github.com/ledgerwatch/erigon/pull/10112
   here. Likely later we will add optional flag "to persist receipts".
-- More cold-start-friendly and os-pre-fetch-friendly.
-- datadir/chaindata is small now - to prevent it's grow: we recommend set --batchSize <= 1G. Probably 512mb is
-  enough.
+- `--sync.loop.block.limit` is enabled by default. (Default: `2_000`.
+  Set `--sync.loop.block.limit=10_000_000 --batchSize=1g` to increase sync speed on good hardware).
+- datadir/chaindata is small now - to prevent it's grow: we recommend set `--batchSize <= 1G`. And it's fine
+  to `rm -rf chaindata`
+- can symlink/mount latest state to fast drive and history to cheap drive
 
 ### E3 datadir structure
 
@@ -801,7 +810,7 @@ datadir
 # There is 4 domains: account, storage, code, commitment 
 ```
 
-### E3 can store state on fast disk and history on slow disk
+### E3 can store state on fast disk and history on cheap disk
 
 If you can afford store datadir on 1 nvme-raid - great. If can't - it's possible to store history on cheap drive.
 
@@ -857,4 +866,25 @@ du -hsc /erigon/snapshots/*
 580G	/erigon/snapshots/history
 1.3T	/erigon/snapshots/idx
 3.7T	total
+```
+
+### E3 other perf trics
+
+- `--sync.loop.block.limit=10_000_000 --batchSize=1g` - likely will help for sync speed.
+- on cloud-drives (good throughput, bad latency) - can enable OS's brain to pre-fetch some data (`madv_normal` instead
+  of `madv_random`). For `snapshots/domain` folder (latest
+  state) `KV_MADV_NORMAL_NO_LAST_LVL=accounts,storage,commitment` (or if have enough
+  RAM:  `KV_MADV_NORMAL=accounts,storage,commitment`). For `chaindata` folder (latest updates) `MDBX_READAHEAD=true`.
+  For all files - `SNAPSHOT_MADV_RND=false`
+
+- can lock latest state in RAM - to prevent from eviction (node may face high historical RPC traffic without impacting
+  Chain-Tip perf):
+
+```
+vmtouch -vdlw /mnt/erigon/snapshots/domain/*bt
+ls /mnt/erigon/snapshots/domain/*.kv | parallel vmtouch -vdlw
+
+# if it failing with "can't allocate memory", try: 
+sync && sudo sysctl vm.drop_caches=3
+echo 1 > /proc/sys/vm/compact_memory
 ```

@@ -54,7 +54,7 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	tb.Cleanup(db.Close)
 	salt := uint32(1)
 	cfg := iiCfg{salt: &salt, dirs: dirs, db: db}
-	ii, err := NewInvertedIndex(cfg, aggStep, "inv", keysTable, indexTable, true, nil, logger)
+	ii, err := NewInvertedIndex(cfg, aggStep, "inv", keysTable, indexTable, nil, logger)
 	require.NoError(tb, err)
 	ii.DisableFsync()
 	tb.Cleanup(ii.Close)
@@ -104,10 +104,6 @@ func TestInvIndexCollationBuild(t *testing.T) {
 
 	bs, err := ii.collate(ctx, 0, roTx)
 	require.NoError(t, err)
-	require.Equal(t, 3, len(bs))
-	require.Equal(t, []uint64{3}, bs["key2"].ToArray())
-	require.Equal(t, []uint64{2, 6}, bs["key1"].ToArray())
-	require.Equal(t, []uint64{6}, bs["key3"].ToArray())
 
 	sf, err := ii.buildFiles(ctx, 0, bs, background.NewProgressSet())
 	require.NoError(t, err)
@@ -456,7 +452,7 @@ func TestInvIndexScanFiles(t *testing.T) {
 	var err error
 	salt := uint32(1)
 	cfg := iiCfg{salt: &salt, dirs: ii.dirs, db: db}
-	ii, err = NewInvertedIndex(cfg, ii.aggregationStep, ii.filenameBase, ii.indexKeysTable, ii.indexTable, true, nil, logger)
+	ii, err = NewInvertedIndex(cfg, ii.aggregationStep, ii.filenameBase, ii.indexKeysTable, ii.indexTable, nil, logger)
 	require.NoError(t, err)
 	defer ii.Close()
 

@@ -137,9 +137,9 @@ func (s *Sync) IsAfter(stage1, stage2 stages.SyncStage) bool {
 func (s *Sync) HasUnwindPoint() bool { return s.unwindPoint != nil }
 func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error {
 	if tx != nil {
-		if casted, ok := tx.(state.HasAggCtx); ok {
+		if casted, ok := tx.(state.HasAggTx); ok {
 			// protect from too far unwind
-			unwindPointWithCommitment, ok, err := casted.AggCtx().(*state.AggregatorRoTx).CanUnwindBeforeBlockNum(unwindPoint, tx)
+			unwindPointWithCommitment, ok, err := casted.AggTx().(*state.AggregatorRoTx).CanUnwindBeforeBlockNum(unwindPoint, tx)
 			if err != nil {
 				return err
 			}

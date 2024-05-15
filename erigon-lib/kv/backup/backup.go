@@ -191,6 +191,7 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, re
 					if err != nil {
 						return err
 					}
+					defer it.Close()
 					kNum := 0
 					for it.HasNext() {
 						k, v, err := it.Next()
@@ -231,6 +232,7 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, re
 				if err != nil {
 					return err
 				}
+				defer it.Close()
 				kNum := 0
 				for it.HasNext() {
 					k, v, err := it.Next()

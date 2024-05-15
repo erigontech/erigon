@@ -12,6 +12,7 @@ func (d *DiagnosticClient) setupSnapshotDiagnostics(rootCtx context.Context) {
 	d.runSegmentIndexingListener(rootCtx)
 	d.runSegmentIndexingFinishedListener(rootCtx)
 	d.runSnapshotFilesListListener(rootCtx)
+	d.runFileDownloadedListener(rootCtx)
 }
 
 func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
@@ -65,7 +66,17 @@ func (d *DiagnosticClient) runSegmentDownloadingListener(rootCtx context.Context
 					d.syncStats.SnapshotDownload.SegmentsDownloading = map[string]SegmentDownloadStatistics{}
 				}
 
-				d.syncStats.SnapshotDownload.SegmentsDownloading[info.Name] = info
+				if val, ok := d.syncStats.SnapshotDownload.SegmentsDownloading[info.Name]; ok {
+					val.TotalBytes = info.TotalBytes
+					val.DownloadedBytes = info.DownloadedBytes
+					val.Webseeds = info.Webseeds
+					val.Peers = info.Peers
+
+					d.syncStats.SnapshotDownload.SegmentsDownloading[info.Name] = val
+				} else {
+					d.syncStats.SnapshotDownload.SegmentsDownloading[info.Name] = info
+				}
+
 				d.mu.Unlock()
 			}
 		}
@@ -171,6 +182,89 @@ func (d *DiagnosticClient) runSnapshotFilesListListener(rootCtx context.Context)
 			}
 		}
 	}()
+}
+
+func (d *DiagnosticClient) runFileDownloadedListener(rootCtx context.Context) {
+	go func() {
+		ctx, ch, closeChannel := Context[FileDownloadedStatisticsUpdate](rootCtx, 1)
+		defer closeChannel()
+
+		StartProviders(ctx, TypeOf(FileDownloadedStatisticsUpdate{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				return
+			case info := <-ch:
+				d.mu.Lock()
+
+				if d.syncStats.SnapshotDownload.SegmentsDownloading == nil {
+					d.syncStats.SnapshotDownload.SegmentsDownloading = map[string]SegmentDownloadStatistics{}
+				}
+
+				if val, ok := d.syncStats.SnapshotDownload.SegmentsDownloading[info.FileName]; ok {
+					val.DownloadedStats = FileDownloadedStatistics{
+						TimeTook:    info.TimeTook,
+						AverageRate: info.AverageRate,
+					}
+
+					d.syncStats.SnapshotDownload.SegmentsDownloading[info.FileName] = val
+				} else {
+					d.syncStats.SnapshotDownload.SegmentsDownloading[info.FileName] = SegmentDownloadStatistics{
+						Name:            info.FileName,
+						TotalBytes:      0,
+						DownloadedBytes: 0,
+						Webseeds:        nil,
+						Peers:           nil,
+						DownloadedStats: FileDownloadedStatistics{
+							TimeTook:    info.TimeTook,
+							AverageRate: info.AverageRate,
+						},
+					}
+				}
+
+				d.mu.Unlock()
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) UpdateFileDownloadedStatistics(downloadedInfo *FileDownloadedStatisticsUpdate, downloadingInfo *SegmentDownloadStatistics) {
+	if d.syncStats.SnapshotDownload.SegmentsDownloading == nil {
+		d.syncStats.SnapshotDownload.SegmentsDownloading = map[string]SegmentDownloadStatistics{}
+	}
+
+	if downloadedInfo != nil {
+		dwStats := FileDownloadedStatistics{
+			TimeTook:    downloadedInfo.TimeTook,
+			AverageRate: downloadedInfo.AverageRate,
+		}
+		if val, ok := d.syncStats.SnapshotDownload.SegmentsDownloading[downloadedInfo.FileName]; ok {
+			val.DownloadedStats = dwStats
+
+			d.syncStats.SnapshotDownload.SegmentsDownloading[downloadedInfo.FileName] = val
+		} else {
+			d.syncStats.SnapshotDownload.SegmentsDownloading[downloadedInfo.FileName] = SegmentDownloadStatistics{
+				Name:            downloadedInfo.FileName,
+				TotalBytes:      0,
+				DownloadedBytes: 0,
+				Webseeds:        make([]SegmentPeer, 0),
+				Peers:           make([]SegmentPeer, 0),
+				DownloadedStats: dwStats,
+			}
+		}
+	} else {
+		if val, ok := d.syncStats.SnapshotDownload.SegmentsDownloading[downloadingInfo.Name]; ok {
+			val.TotalBytes = downloadingInfo.TotalBytes
+			val.DownloadedBytes = downloadingInfo.DownloadedBytes
+			val.Webseeds = downloadingInfo.Webseeds
+			val.Peers = downloadingInfo.Peers
+
+			d.syncStats.SnapshotDownload.SegmentsDownloading[downloadingInfo.Name] = val
+		} else {
+			d.syncStats.SnapshotDownload.SegmentsDownloading[downloadingInfo.Name] = *downloadingInfo
+		}
+	}
+
 }
 
 func (d *DiagnosticClient) SyncStatistics() SyncStatistics {
