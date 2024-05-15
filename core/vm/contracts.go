@@ -815,6 +815,10 @@ func (c *bls12381G1MultiExp) Run(input []byte) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
+		// Fast subgroup check
+		if !p.IsInSubGroup() {
+			return nil, errBLS12381G1PointSubgroup
+		}
 		points[i] = *p
 		// Decode scalar value
 		scalars[i] = *new(fr.Element).SetBytes(input[t1:t2])
