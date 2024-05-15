@@ -167,8 +167,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		return
 	}
 
-	tooBigJump := e.syncCfg.LoopBlockLimit > 0 && finishProgressBefore > 0 && fcuHeader.Number.Uint64()-finishProgressBefore > uint64(e.syncCfg.LoopBlockLimit)
-
+	tooBigJump := e.syncCfg.LoopBlockLimit > 0 && finishProgressBefore > 0 && fcuHeader.Number.Uint64()-finishProgressBefore > uint64(e.syncCfg.LoopBlockLimit-2)
 	if tooBigJump {
 		isSynced = false
 	}
@@ -315,41 +314,23 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		}
 	}
 
-TooBigJumpStep:
-	if tx == nil {
-		tx, err = e.db.BeginRwNosync(ctx)
-		if err != nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
-		defer func() {
-			if tx != nil {
-				tx.Rollback()
-			}
-		}()
+	tx, err = e.db.BeginRwNosync(ctx)
+	if err != nil {
+		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+		return
 	}
+	defer func() {
+		if tx != nil {
+			tx.Rollback()
+		}
+	}()
 	finishProgressBefore, err = stages.GetStageProgress(tx, stages.Finish)
 	if err != nil {
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
-	tooBigJump = e.syncCfg.LoopBlockLimit > 0 && finishProgressBefore > 0 && fcuHeader.Number.Uint64() > finishProgressBefore && fcuHeader.Number.Uint64()-finishProgressBefore > uint64(e.syncCfg.LoopBlockLimit)
 	if tooBigJump { //jump forward by 1K blocks
 		log.Info("[sync] jump by 1K blocks", "currentJumpTo", finishProgressBefore+uint64(e.syncCfg.LoopBlockLimit), "bigJumpTo", fcuHeader.Number.Uint64())
-		blockHash, err = e.blockReader.CanonicalHash(ctx, tx, finishProgressBefore+uint64(e.syncCfg.LoopBlockLimit))
-		if err != nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
-		fcuHeader, err = e.blockReader.HeaderByHash(ctx, tx, blockHash)
-		if err != nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
-		if fcuHeader == nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, fmt.Errorf("forkchoice: block %x not found or was marked invalid", blockHash))
-			return
-		}
 	}
 
 	// Set Progress for headers and bodies accordingly.
@@ -399,30 +380,27 @@ TooBigJumpStep:
 			e.logger.Warn("bad forkchoice", "head", headHash, "hash", blockHash)
 		}
 	} else {
-		if !tooBigJump {
-			valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
-			if err != nil {
-				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-				return
-			}
-			if !valid {
-				sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
-					Status:          execution.ExecutionStatus_InvalidForkchoice,
-					LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
-				})
-				return
-			}
-			if err := rawdb.TruncateCanonicalChain(ctx, tx, *headNumber+1); err != nil {
-				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-				return
-			}
+		valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
+		if err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
+		}
+		if !valid {
+			sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
+				Status:          execution.ExecutionStatus_InvalidForkchoice,
+				LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
+			})
+			return
+		}
+		if err := rawdb.TruncateCanonicalChain(ctx, tx, *headNumber+1); err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
 		}
 
 		if err := tx.Commit(); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
-		tx = nil
 
 		if e.hook != nil {
 			if err := e.db.View(ctx, func(tx kv.Tx) error {
@@ -455,9 +433,6 @@ TooBigJumpStep:
 		dbg.ReadMemStats(&m)
 		timings = append(timings, "commit", time.Since(commitStart), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 		e.logger.Info("Timings (slower than 50ms)", timings...)
-	}
-	if tooBigJump {
-		goto TooBigJumpStep
 	}
 
 	sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
