@@ -288,6 +288,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	blockNum = doms.BlockNum()
+	initialBlockNum := blockNum
 	outputTxNum.Store(doms.TxNum())
 
 	var err error
@@ -872,8 +873,11 @@ Loop:
 				t1 = time.Since(tt)
 
 				tt = time.Now()
+				// If execute more than 100 blocks then, it is safe to assume that we are not on the tip of the chain.
+				// In this case, we can prune the state to save memory.
+				pruneBlockMargin := uint64(100)
 
-				if !useExternalTx {
+				if blockNum-initialBlockNum > pruneBlockMargin {
 					if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Minute, applyTx); err != nil {
 						return err
 					}

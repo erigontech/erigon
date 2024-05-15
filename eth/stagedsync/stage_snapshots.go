@@ -423,7 +423,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 
 func computeBlocksToPrune(cfg SnapshotsCfg) (blocksToPrune uint64, historyToPrune uint64) {
 	frozenBlocks := cfg.blockReader.Snapshots().SegmentsMax()
-	fmt.Println("O", cfg.prune.Blocks.PruneTo(frozenBlocks), cfg.prune.History.PruneTo(frozenBlocks))
 	return frozenBlocks - cfg.prune.Blocks.PruneTo(frozenBlocks), frozenBlocks - cfg.prune.History.PruneTo(frozenBlocks)
 }
 
