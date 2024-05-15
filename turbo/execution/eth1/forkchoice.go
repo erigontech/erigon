@@ -149,15 +149,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	}
 	defer tx.Rollback()
 
-	if isDomainAheadOfBlocks(tx) {
-		sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
-			LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
-			Status:          execution.ExecutionStatus_TooFarAway,
-			ValidationError: "domain ahead of blocks",
-		})
-		return
-	}
-
 	blockHash := originalBlockHash
 
 	finishProgressBefore, err := stages.GetStageProgress(tx, stages.Finish)
@@ -329,6 +320,14 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				return
 			}
 		}
+	}
+	if isDomainAheadOfBlocks(tx) {
+		sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
+			LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
+			Status:          execution.ExecutionStatus_TooFarAway,
+			ValidationError: "domain ahead of blocks",
+		})
+		return
 	}
 
 	// Set Progress for headers and bodies accordingly.
