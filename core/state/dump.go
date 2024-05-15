@@ -146,7 +146,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 	c.OnRoot(emptyHash) // We do not calculate the root
 
 	ttx := d.db.(kv.TemporalTx)
-	txNum, err := rawdbv3.TxNums.Min(ttx, d.blockNumber)
+	txNum, err := rawdbv3.TxNums.Min(ttx, d.blockNumber+1)
 	if err != nil {
 		return nil, err
 	}
