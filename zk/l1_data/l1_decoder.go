@@ -1,12 +1,12 @@
 package l1_data
 
 import (
-	"github.com/ledgerwatch/erigon/accounts/abi"
 	"strings"
 	"github.com/ledgerwatch/erigon/zk/contracts"
 	"encoding/json"
 	"fmt"
 	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/ledgerwatch/erigon/accounts/abi"
 )
 
 type RollupBaseEtrogBatchData struct {
@@ -16,42 +16,58 @@ type RollupBaseEtrogBatchData struct {
 	ForcedBlockHashL1    [32]byte
 }
 
-func DecodeL1BatchData(txData []byte) (uint64, [][]byte, common.Address, error) {
-	smcAbi, err := abi.JSON(strings.NewReader(contracts.SequenceBatchesAbi))
+func DecodeL1BatchData(txData []byte) ([][]byte, common.Address, error) {
+	// we need to know which version of the ABI to use here so lets find it
+	idAsString := fmt.Sprintf("%x", txData[:4])
+	abiMapped, found := contracts.SequenceBatchesMapping[idAsString]
+	if !found {
+		return nil, common.Address{}, fmt.Errorf("unknown l1 call data")
+	}
+
+	smcAbi, err := abi.JSON(strings.NewReader(abiMapped))
 	if err != nil {
-		return 0, nil, common.Address{}, err
+		return nil, common.Address{}, err
 	}
 
 	method, err := smcAbi.MethodById(txData[:4])
 	if err != nil {
-		return 0, nil, common.Address{}, err
+		return nil, common.Address{}, err
 	}
 
 	// Unpack method inputs
 	data, err := method.Inputs.Unpack(txData[4:])
 	if err != nil {
-		return 0, nil, common.Address{}, err
+		return nil, common.Address{}, err
 	}
 
-	initialSequence, ok := data[2].(uint64)
-	if !ok {
-		return 0, nil, common.Address{}, fmt.Errorf("expected position 2 in the l1 call data to be uint64")
-	}
+	var coinbase common.Address
 
-	coinbase, ok := data[3].(common.Address)
-	if !ok {
-		return 0, nil, common.Address{}, fmt.Errorf("expected position 3 in the l1 call data to be address")
+	switch idAsString {
+	case contracts.SequenceBatchesIdv5_0:
+		cb, ok := data[1].(common.Address)
+		if !ok {
+			return nil, common.Address{}, fmt.Errorf("expected position 1 in the l1 call data to be address")
+		}
+		coinbase = cb
+	case contracts.SequenceBatchesIdv6_6:
+		cb, ok := data[3].(common.Address)
+		if !ok {
+			return nil, common.Address{}, fmt.Errorf("expected position 3 in the l1 call data to be address")
+		}
+		coinbase = cb
+	default:
+		return nil, common.Address{}, fmt.Errorf("unknown l1 call data")
 	}
 
 	var sequences []RollupBaseEtrogBatchData
 
 	bytedata, err := json.Marshal(data[0])
 	if err != nil {
-		return 0, nil, coinbase, err
+		return nil, coinbase, err
 	}
 	err = json.Unmarshal(bytedata, &sequences)
 	if err != nil {
-		return 0, nil, coinbase, err
+		return nil, coinbase, err
 	}
 
 	batchL2Datas := make([][]byte, len(sequences))
@@ -59,5 +75,5 @@ func DecodeL1BatchData(txData []byte) (uint64, [][]byte, common.Address, error) 
 		batchL2Datas[idx] = sequence.Transactions
 	}
 
-	return initialSequence, batchL2Datas, coinbase, err
+	return batchL2Datas, coinbase, err
 }

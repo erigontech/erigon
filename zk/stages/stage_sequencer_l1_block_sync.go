@@ -74,7 +74,7 @@ func SpawnSequencerL1BlockSyncStage(
 		return err
 	}
 
-	if highestKnownBatch == highestBatch {
+	if highestBatch > 0 && highestKnownBatch == highestBatch {
 		log.Info("L1 block sync recovery has completed!", "batch", highestBatch)
 		time.Sleep(5 * time.Second)
 	}
@@ -101,6 +101,10 @@ func SpawnSequencerL1BlockSyncStage(
 		totalBlocks = 1
 	}
 
+	logTicker := time.NewTicker(10 * time.Second)
+	defer logTicker.Stop()
+	var latestBatch uint64
+
 LOOP:
 	for {
 		select {
@@ -111,10 +115,17 @@ LOOP:
 					return err
 				}
 
-				initBatch, batches, coinbase, err := l1_data.DecodeL1BatchData(transaction.GetData())
+				lastBatchSequenced := l.Topics[1].Big().Uint64()
+				latestBatch = lastBatchSequenced
+
+				batches, coinbase, err := l1_data.DecodeL1BatchData(transaction.GetData())
 				if err != nil {
 					return err
 				}
+
+				// here we find the first batch number that was sequenced by working backwards
+				// from the latest batch in the original event
+				initBatch := lastBatchSequenced - uint64(len(batches)-1)
 
 				log.Debug(fmt.Sprintf("[%s] Processing L1 sequence transaction", logPrefix),
 					"hash", transaction.Hash().String(),
@@ -126,8 +137,7 @@ LOOP:
 				// this is important because the batches are written in reverse order
 
 				for idx, batch := range batches {
-					// add 1 here to have the batches line up, on the L1 they start at 1
-					b := initBatch + uint64(idx) + 1
+					b := initBatch + uint64(idx)
 					data := append(coinbase.Bytes(), batch...)
 					if err := hermezDb.WriteL1BatchData(b, data); err != nil {
 						return err
@@ -139,11 +149,13 @@ LOOP:
 					}
 					totalBlocks += len(decoded)
 					log.Debug(fmt.Sprintf("[%s] Wrote L1 batch", logPrefix), "batch", b, "blocks", len(decoded), "totalBlocks", totalBlocks)
-
 				}
+
 			}
 		case msg := <-progressChan:
 			log.Info(fmt.Sprintf("[%s] %s", logPrefix, msg))
+		case <-logTicker.C:
+			log.Info(fmt.Sprintf("[%s] Syncing L1 blocks", logPrefix), "latest-batch", latestBatch)
 		default:
 			if !cfg.syncer.IsDownloading() {
 				break LOOP
