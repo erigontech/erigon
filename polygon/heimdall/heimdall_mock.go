@@ -157,78 +157,78 @@ func (c *MockHeimdallFetchMilestonesFromBlockCall) DoAndReturn(f func(context.Co
 	return c
 }
 
-// OnMilestoneEvent mocks base method.
-func (m *MockHeimdall) OnMilestoneEvent(arg0 func(*Milestone)) polygoncommon.UnregisterFunc {
+// RegisterMilestoneObserver mocks base method.
+func (m *MockHeimdall) RegisterMilestoneObserver(arg0 func(*Milestone)) polygoncommon.UnregisterFunc {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "OnMilestoneEvent", arg0)
+	ret := m.ctrl.Call(m, "RegisterMilestoneObserver", arg0)
 	ret0, _ := ret[0].(polygoncommon.UnregisterFunc)
 	return ret0
 }
 
-// OnMilestoneEvent indicates an expected call of OnMilestoneEvent.
-func (mr *MockHeimdallMockRecorder) OnMilestoneEvent(arg0 any) *MockHeimdallOnMilestoneEventCall {
+// RegisterMilestoneObserver indicates an expected call of RegisterMilestoneObserver.
+func (mr *MockHeimdallMockRecorder) RegisterMilestoneObserver(arg0 any) *MockHeimdallRegisterMilestoneObserverCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OnMilestoneEvent", reflect.TypeOf((*MockHeimdall)(nil).OnMilestoneEvent), arg0)
-	return &MockHeimdallOnMilestoneEventCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RegisterMilestoneObserver", reflect.TypeOf((*MockHeimdall)(nil).RegisterMilestoneObserver), arg0)
+	return &MockHeimdallRegisterMilestoneObserverCall{Call: call}
 }
 
-// MockHeimdallOnMilestoneEventCall wrap *gomock.Call
-type MockHeimdallOnMilestoneEventCall struct {
+// MockHeimdallRegisterMilestoneObserverCall wrap *gomock.Call
+type MockHeimdallRegisterMilestoneObserverCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockHeimdallOnMilestoneEventCall) Return(arg0 polygoncommon.UnregisterFunc) *MockHeimdallOnMilestoneEventCall {
+func (c *MockHeimdallRegisterMilestoneObserverCall) Return(arg0 polygoncommon.UnregisterFunc) *MockHeimdallRegisterMilestoneObserverCall {
 	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockHeimdallOnMilestoneEventCall) Do(f func(func(*Milestone)) polygoncommon.UnregisterFunc) *MockHeimdallOnMilestoneEventCall {
+func (c *MockHeimdallRegisterMilestoneObserverCall) Do(f func(func(*Milestone)) polygoncommon.UnregisterFunc) *MockHeimdallRegisterMilestoneObserverCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockHeimdallOnMilestoneEventCall) DoAndReturn(f func(func(*Milestone)) polygoncommon.UnregisterFunc) *MockHeimdallOnMilestoneEventCall {
+func (c *MockHeimdallRegisterMilestoneObserverCall) DoAndReturn(f func(func(*Milestone)) polygoncommon.UnregisterFunc) *MockHeimdallRegisterMilestoneObserverCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
-// OnSpanEvent mocks base method.
-func (m *MockHeimdall) OnSpanEvent(arg0 func(*Span)) polygoncommon.UnregisterFunc {
+// RegisterSpanObserver mocks base method.
+func (m *MockHeimdall) RegisterSpanObserver(arg0 func(*Span)) polygoncommon.UnregisterFunc {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "OnSpanEvent", arg0)
+	ret := m.ctrl.Call(m, "RegisterSpanObserver", arg0)
 	ret0, _ := ret[0].(polygoncommon.UnregisterFunc)
 	return ret0
 }
 
-// OnSpanEvent indicates an expected call of OnSpanEvent.
-func (mr *MockHeimdallMockRecorder) OnSpanEvent(arg0 any) *MockHeimdallOnSpanEventCall {
+// RegisterSpanObserver indicates an expected call of RegisterSpanObserver.
+func (mr *MockHeimdallMockRecorder) RegisterSpanObserver(arg0 any) *MockHeimdallRegisterSpanObserverCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OnSpanEvent", reflect.TypeOf((*MockHeimdall)(nil).OnSpanEvent), arg0)
-	return &MockHeimdallOnSpanEventCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RegisterSpanObserver", reflect.TypeOf((*MockHeimdall)(nil).RegisterSpanObserver), arg0)
+	return &MockHeimdallRegisterSpanObserverCall{Call: call}
 }
 
-// MockHeimdallOnSpanEventCall wrap *gomock.Call
-type MockHeimdallOnSpanEventCall struct {
+// MockHeimdallRegisterSpanObserverCall wrap *gomock.Call
+type MockHeimdallRegisterSpanObserverCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockHeimdallOnSpanEventCall) Return(arg0 polygoncommon.UnregisterFunc) *MockHeimdallOnSpanEventCall {
+func (c *MockHeimdallRegisterSpanObserverCall) Return(arg0 polygoncommon.UnregisterFunc) *MockHeimdallRegisterSpanObserverCall {
 	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockHeimdallOnSpanEventCall) Do(f func(func(*Span)) polygoncommon.UnregisterFunc) *MockHeimdallOnSpanEventCall {
+func (c *MockHeimdallRegisterSpanObserverCall) Do(f func(func(*Span)) polygoncommon.UnregisterFunc) *MockHeimdallRegisterSpanObserverCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockHeimdallOnSpanEventCall) DoAndReturn(f func(func(*Span)) polygoncommon.UnregisterFunc) *MockHeimdallOnSpanEventCall {
+func (c *MockHeimdallRegisterSpanObserverCall) DoAndReturn(f func(func(*Span)) polygoncommon.UnregisterFunc) *MockHeimdallRegisterSpanObserverCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

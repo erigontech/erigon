@@ -116,7 +116,7 @@ func (s *service) FetchMilestonesFromBlock(ctx context.Context, startBlock uint6
 // during the first sync. Let's discuss alternatives. Hopefully we can remove this limit.
 const maxEntityEvents = 5
 
-func (s *service) OnMilestoneEvent(callback func(*Milestone)) polygoncommon.UnregisterFunc {
+func (s *service) RegisterMilestoneObserver(callback func(*Milestone)) polygoncommon.UnregisterFunc {
 	return s.scraper.RegisterMilestoneObserver(func(entities []*Milestone) {
 		for _, entity := range libcommon.SliceTakeLast(entities, maxEntityEvents) {
 			callback(entity)
@@ -124,7 +124,7 @@ func (s *service) OnMilestoneEvent(callback func(*Milestone)) polygoncommon.Unre
 	})
 }
 
-func (s *service) OnSpanEvent(callback func(*Span)) polygoncommon.UnregisterFunc {
+func (s *service) RegisterSpanObserver(callback func(*Span)) polygoncommon.UnregisterFunc {
 	return s.scraper.RegisterSpanObserver(func(entities []*Span) {
 		for _, entity := range libcommon.SliceTakeLast(entities, maxEntityEvents) {
 			callback(entity)

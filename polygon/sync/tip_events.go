@@ -118,7 +118,7 @@ func (te *TipEvents) Run(ctx context.Context) error {
 	})
 	defer newBlockHashesObserverCancel()
 
-	milestoneObserverCancel := te.heimdallService.OnMilestoneEvent(func(milestone *heimdall.Milestone) {
+	milestoneObserverCancel := te.heimdallService.RegisterMilestoneObserver(func(milestone *heimdall.Milestone) {
 		te.events.PushEvent(Event{
 			Type:         EventTypeNewMilestone,
 			newMilestone: milestone,
@@ -126,7 +126,7 @@ func (te *TipEvents) Run(ctx context.Context) error {
 	})
 	defer milestoneObserverCancel()
 
-	spanObserverCancel := te.heimdallService.OnSpanEvent(func(span *heimdall.Span) {
+	spanObserverCancel := te.heimdallService.RegisterSpanObserver(func(span *heimdall.Span) {
 		te.events.PushEvent(Event{
 			Type:    EventTypeNewSpan,
 			newSpan: span,
