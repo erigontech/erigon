@@ -20,6 +20,10 @@ type Milestone struct {
 	Fields WaypointFields
 }
 
+func (m Milestone) RawId() uint64 {
+	return uint64(m.Id)
+}
+
 func (m Milestone) StartBlock() *big.Int {
 	return m.Fields.StartBlock
 }

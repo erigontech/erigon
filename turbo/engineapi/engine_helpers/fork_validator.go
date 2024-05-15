@@ -23,7 +23,6 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
@@ -160,21 +159,16 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 
 	log.Debug("Execution ForkValidator.ValidatePayload", "extendCanonical", extendCanonical)
 	if extendCanonical {
-		histV3, err := kvcfg.HistoryV3.Enabled(tx)
-		if err != nil {
-			return "", [32]byte{}, nil, err
-		}
 		var txc wrap.TxContainer
 		m := membatchwithdb.NewMemoryBatch(tx, fv.tmpDir, logger)
 		defer m.Close()
 		txc.Tx = m
-		if histV3 {
-			txc.Doms, err = state.NewSharedDomains(tx, logger)
-			if err != nil {
-				return "", [32]byte{}, nil, err
-			}
-			defer txc.Doms.Close()
+		var err error
+		txc.Doms, err = state.NewSharedDomains(tx, logger)
+		if err != nil {
+			return "", [32]byte{}, nil, err
 		}
+		defer txc.Doms.Close()
 		fv.extendingForkNotifications = &shards.Notifications{
 			Events:      shards.NewEvents(),
 			Accumulator: shards.NewAccumulator(),
@@ -265,21 +259,15 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 		unwindPoint = 0
 	}
 	var txc wrap.TxContainer
-	histV3, err := kvcfg.HistoryV3.Enabled(tx)
-	if err != nil {
-		return "", [32]byte{}, nil, err
-	}
 	batch := membatchwithdb.NewMemoryBatch(tx, fv.tmpDir, logger)
 	defer batch.Rollback()
 	txc.Tx = batch
-	if histV3 {
-		sd, err := state.NewSharedDomains(tx, logger)
-		if err != nil {
-			return "", [32]byte{}, nil, err
-		}
-		defer sd.Close()
-		txc.Doms = sd
+	sd, err := state.NewSharedDomains(tx, logger)
+	if err != nil {
+		return "", [32]byte{}, nil, err
 	}
+	defer sd.Close()
+	txc.Doms = sd
 	notifications := &shards.Notifications{
 		Events:      shards.NewEvents(),
 		Accumulator: shards.NewAccumulator(),

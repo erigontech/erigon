@@ -146,7 +146,7 @@ var createGasTests = []struct {
 
 func TestCreateGas(t *testing.T) {
 	t.Parallel()
-	_, db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	for i, tt := range createGasTests {
 		address := libcommon.BytesToAddress([]byte("contract"))
 
@@ -164,8 +164,8 @@ func TestCreateGas(t *testing.T) {
 		defer domains.Close()
 		txc.Doms = domains
 
-		stateReader = rpchelper.NewLatestStateReader(tx, true)
-		stateWriter = rpchelper.NewLatestStateWriter(txc, 0, true)
+		stateReader = rpchelper.NewLatestStateReader(tx)
+		stateWriter = rpchelper.NewLatestStateWriter(txc, 0)
 
 		s := state.New(stateReader)
 		s.CreateAccount(address, true)

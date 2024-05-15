@@ -20,6 +20,10 @@ type Checkpoint struct {
 	Fields WaypointFields
 }
 
+func (c Checkpoint) RawId() uint64 {
+	return uint64(c.Id)
+}
+
 func (c Checkpoint) StartBlock() *big.Int {
 	return c.Fields.StartBlock
 }

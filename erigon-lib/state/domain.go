@@ -1182,6 +1182,10 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	if err != nil {
 		return fmt.Errorf("historyRange %s: %w", dt.ht.h.filenameBase, err)
 	}
+	sf := time.Now()
+	defer mxUnwindTook.ObserveDuration(sf)
+	mxRunningUnwind.Inc()
+	defer mxRunningUnwind.Dec()
 	defer histRng.Close()
 
 	seen := make(map[string]struct{})

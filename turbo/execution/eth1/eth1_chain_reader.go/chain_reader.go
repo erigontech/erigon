@@ -107,7 +107,7 @@ func (c ChainReaderWriterEth1) GetBlockByHash(ctx context.Context, hash libcommo
 		log.Warn("[engine] GetBlockByHash", "err", err)
 		return nil
 	}
-	return types.NewBlock(header, txs, nil, nil, body.Withdrawals)
+	return types.NewBlock(header, txs, nil, nil, body.Withdrawals, body.Requests)
 }
 
 func (c ChainReaderWriterEth1) GetBlockByNumber(ctx context.Context, number uint64) *types.Block {
@@ -136,7 +136,7 @@ func (c ChainReaderWriterEth1) GetBlockByNumber(ctx context.Context, number uint
 		log.Warn("[engine] GetBlockByNumber", "err", err)
 		return nil
 	}
-	return types.NewBlock(header, txs, nil, nil, body.Withdrawals)
+	return types.NewBlock(header, txs, nil, nil, body.Withdrawals, body.Requests)
 }
 
 func (c ChainReaderWriterEth1) GetHeaderByHash(ctx context.Context, hash libcommon.Hash) *types.Header {
@@ -279,10 +279,6 @@ func (c ChainReaderWriterEth1) InsertBlocksAndWait(ctx context.Context, blocks [
 	if err != nil {
 		return err
 	}
-
-	// limit the number of retries
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
 
 	for response.Result == execution.ExecutionStatus_Busy {
 		const retryDelay = 100 * time.Millisecond

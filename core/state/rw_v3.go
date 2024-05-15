@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
@@ -102,51 +103,22 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 
 	//maps are unordered in Go! don't iterate over it. SharedDomains.deleteAccount will call GetLatest(Code) and expecting it not been delete yet
 	if txTask.WriteLists != nil {
-		for _, table := range []kv.Domain{kv.AccountsDomain, kv.CodeDomain, kv.StorageDomain} {
-			list, ok := txTask.WriteLists[table.String()]
+		for _, domain := range []kv.Domain{kv.AccountsDomain, kv.CodeDomain, kv.StorageDomain} {
+			list, ok := txTask.WriteLists[domain.String()]
 			if !ok {
 				continue
 			}
 
-			switch table {
-			case kv.AccountsDomain:
-				for i, key := range list.Keys {
-					if list.Vals[i] == nil {
-						if err := domains.DomainDel(kv.AccountsDomain, []byte(key), nil, nil, 0); err != nil {
-							return err
-						}
-					} else {
-						if err := domains.DomainPut(kv.AccountsDomain, []byte(key), nil, list.Vals[i], nil, 0); err != nil {
-							return err
-						}
+			for i, key := range list.Keys {
+				if list.Vals[i] == nil {
+					if err := domains.DomainDel(domain, []byte(key), nil, nil, 0); err != nil {
+						return err
+					}
+				} else {
+					if err := domains.DomainPut(domain, []byte(key), nil, list.Vals[i], nil, 0); err != nil {
+						return err
 					}
 				}
-			case kv.CodeDomain:
-				for i, key := range list.Keys {
-					if list.Vals[i] == nil {
-						if err := domains.DomainDel(kv.CodeDomain, []byte(key), nil, nil, 0); err != nil {
-							return err
-						}
-					} else {
-						if err := domains.DomainPut(kv.CodeDomain, []byte(key), nil, list.Vals[i], nil, 0); err != nil {
-							return err
-						}
-					}
-				}
-			case kv.StorageDomain:
-				for i, key := range list.Keys {
-					if list.Vals[i] == nil {
-						if err := domains.DomainDel(kv.StorageDomain, []byte(key), nil, nil, 0); err != nil {
-							return err
-						}
-					} else {
-						if err := domains.DomainPut(kv.StorageDomain, []byte(key), nil, list.Vals[i], nil, 0); err != nil {
-							return err
-						}
-					}
-				}
-			default:
-				continue
 			}
 		}
 	}
@@ -248,12 +220,21 @@ func (rs *StateV3) ApplyLogsAndTraces4(txTask *TxTask, domains *libstate.SharedD
 	return nil
 }
 
+var (
+	mxState3UnwindRunning = metrics.GetOrCreateGauge("state3_unwind_running")
+	mxState3Unwind        = metrics.GetOrCreateSummary("state3_unwind")
+)
+
 func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwindTo uint64, accumulator *shards.Accumulator) error {
 	unwindToLimit := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).CanUnwindDomainsToTxNum()
 	if txUnwindTo < unwindToLimit {
 		return fmt.Errorf("can't unwind to txNum=%d, limit is %d", txUnwindTo, unwindToLimit)
 	}
 
+	mxState3UnwindRunning.Inc()
+	defer mxState3UnwindRunning.Dec()
+	st := time.Now()
+	defer mxState3Unwind.ObserveDuration(st)
 	var currentInc uint64
 
 	handle := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
@@ -296,6 +277,7 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwi
 
 	ttx := tx.(kv.TemporalTx)
 
+	// todo these updates could be collected during rs.domains.Unwind (as passed collect function eg)
 	{
 		iter, err := ttx.HistoryRange(kv.AccountsHistory, int(txUnwindTo), -1, order.Asc, -1)
 		if err != nil {

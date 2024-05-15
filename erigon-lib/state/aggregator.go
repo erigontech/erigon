@@ -49,12 +49,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon-lib/seg"
-)
-
-var (
-	mxPruneTookAgg = metrics.GetOrCreateSummary(`prune_seconds{type="state"}`)
 )
 
 type Aggregator struct {

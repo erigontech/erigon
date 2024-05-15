@@ -23,7 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
-	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
@@ -50,7 +49,6 @@ type Cfg struct {
 	forkChoice              *forkchoice.ForkChoiceStore
 	indiciesDB              kv.RwDB
 	tmpdir                  string
-	dbConfig                db_config.DatabaseConfiguration
 	blockReader             freezeblocks.BeaconSnapshotReader
 	antiquary               *antiquary.Antiquary
 	syncedData              *synced_data.SyncedDataManager
@@ -85,7 +83,7 @@ func ClStagesCfg(
 	sn *freezeblocks.CaplinSnapshots,
 	blockReader freezeblocks.BeaconSnapshotReader,
 	tmpdir string,
-	dbConfig db_config.DatabaseConfiguration,
+	syncBackLoopLimit uint64,
 	backfilling bool,
 	blobBackfilling bool,
 	syncedData *synced_data.SyncedDataManager,
@@ -104,14 +102,13 @@ func ClStagesCfg(
 		forkChoice:              forkChoice,
 		tmpdir:                  tmpdir,
 		indiciesDB:              indiciesDB,
-		dbConfig:                dbConfig,
 		sn:                      sn,
 		blockReader:             blockReader,
 		backfilling:             backfilling,
 		syncedData:              syncedData,
 		emitter:                 emitters,
 		blobStore:               blobStore,
-		blockCollector:          block_collector.NewBlockCollector(log.Root(), executionClient, beaconCfg, tmpdir),
+		blockCollector:          block_collector.NewBlockCollector(log.Root(), executionClient, beaconCfg, syncBackLoopLimit, tmpdir),
 		blobBackfilling:         blobBackfilling,
 		attestationDataProducer: attestationDataProducer,
 	}
