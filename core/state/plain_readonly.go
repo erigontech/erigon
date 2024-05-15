@@ -81,6 +81,13 @@ func NewPlainState(tx kv.Tx, blockNr uint64, systemContractLookup map[libcommon.
 	return ps
 }
 
+func (s *PlainState) Close() {
+	s.accHistoryC.Close()
+	s.storageHistoryC.Close()
+	s.accChangesC.Close()
+	s.storageChangesC.Close()
+}
+
 func (s *PlainState) SetTrace(trace bool) {
 	s.trace = trace
 }

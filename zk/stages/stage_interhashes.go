@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/erigon/zk"
 	"github.com/status-im/keycard-go/hexutils"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/memdb"
 )
 
 type ZkInterHashesCfg struct {
@@ -445,7 +446,10 @@ func unwindZkSMT(logPrefix string, from, to uint64, db kv.RwTx, checkRoot bool, 
 		quit = make(chan struct{})
 	}
 
-	eridb.OpenBatch(quit)
+	// only open the batch if tx is not already one
+	if _, ok := db.(*memdb.MemoryMutation); !ok {
+		eridb.OpenBatch(quit)
+	}
 
 	ac, err := db.CursorDupSort(kv.AccountChangeSet)
 	if err != nil {
@@ -563,6 +567,7 @@ func unwindZkSMT(logPrefix string, from, to uint64, db kv.RwTx, checkRoot bool, 
 		}
 
 		progressChan <- total - i
+		psr.Close()
 	}
 
 	if _, _, err := dbSmt.SetStorage(logPrefix, accChanges, codeChanges, storageChanges); err != nil {
