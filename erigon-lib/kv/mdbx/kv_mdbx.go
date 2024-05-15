@@ -1115,6 +1115,9 @@ func (tx *MdbxTx) Rollback() {
 	if tx.tx == nil {
 		return
 	}
+	if tx.db.opts.label == kv.ChainDB && !tx.readOnly {
+		log.Warn("[dbg] rollback")
+	}
 	defer func() {
 		tx.tx = nil
 		tx.db.trackTxEnd()
