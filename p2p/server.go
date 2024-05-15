@@ -1221,7 +1221,7 @@ func (srv *Server) listErrors() []interface{} {
 	srv.errorsMu.Lock()
 	defer srv.errorsMu.Unlock()
 
-	list := make([]interface{}, len(srv.errors)*2)
+	list := make([]interface{}, 0, len(srv.errors)*2)
 	for err, count := range srv.errors {
 		list = append(list, err, count)
 	}

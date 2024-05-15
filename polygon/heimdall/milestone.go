@@ -20,12 +20,23 @@ type Milestone struct {
 	Fields WaypointFields
 }
 
+func (m Milestone) RawId() uint64 {
+	return uint64(m.Id)
+}
+
 func (m Milestone) StartBlock() *big.Int {
 	return m.Fields.StartBlock
 }
 
 func (m Milestone) EndBlock() *big.Int {
 	return m.Fields.EndBlock
+}
+
+func (m Milestone) BlockNumRange() ClosedRange {
+	return ClosedRange{
+		Start: m.StartBlock().Uint64(),
+		End:   m.EndBlock().Uint64(),
+	}
 }
 
 func (m Milestone) RootHash() libcommon.Hash {

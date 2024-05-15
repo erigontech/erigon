@@ -6,7 +6,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/state"
@@ -51,9 +50,6 @@ type DB struct {
 }
 
 func New(db kv.RwDB, agg *state.Aggregator) (*DB, error) {
-	if !kvcfg.HistoryV3.FromDB(db) {
-		panic("not supported")
-	}
 	return &DB{RwDB: db, agg: agg}, nil
 }
 func (db *DB) Agg() *state.Aggregator { return db.agg }

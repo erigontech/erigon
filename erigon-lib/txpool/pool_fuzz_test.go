@@ -313,7 +313,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 		var prevHashes types.Hashes
 		ch := make(chan types.Announcements, 100)
 
-		_, coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+		coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 		db := memdb.NewTestPoolDB(t)
 
 		cfg := txpoolcfg.DefaultConfig

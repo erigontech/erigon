@@ -2,12 +2,10 @@ package jsonrpc
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
@@ -52,63 +50,35 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account libcommon
 		return nil, fmt.Errorf("listStorageKeys cannot open tx: %w", err)
 	}
 	defer tx.Rollback()
-	a, err := rpchelper.NewLatestStateReader(tx, api.historyV3(tx)).ReadAccountData(account)
+	a, err := rpchelper.NewLatestStateReader(tx).ReadAccountData(account)
 	if err != nil {
 		return nil, err
 	} else if a == nil {
 		return nil, fmt.Errorf("acc not found")
 	}
 
-	if api.historyV3(tx) {
-		bn := rawdb.ReadCurrentBlockNumber(tx)
-		minTxNum, err := rawdbv3.TxNums.Min(tx, *bn)
-		if err != nil {
-			return nil, err
-		}
-
-		from := account[:]
-		if offset != nil {
-			from = append(from, *offset...)
-		}
-		to, _ := kv.NextSubtree(account[:])
-		r, err := tx.(kv.TemporalTx).DomainRange(kv.StorageDomain, from, to, minTxNum, order.Asc, quantity)
-		if err != nil {
-			return nil, err
-		}
-		defer r.Close()
-		for r.HasNext() {
-			k, _, err := r.Next()
-			if err != nil {
-				return nil, err
-			}
-			keys = append(keys, libcommon.CopyBytes(k[20:]))
-		}
-		return keys, nil
-	}
-	b := make([]byte, 8)
-	binary.BigEndian.PutUint64(b, a.GetIncarnation())
-	seekBytes := append(account.Bytes(), b...)
-
-	c, err := tx.CursorDupSort(kv.PlainState)
+	bn := rawdb.ReadCurrentBlockNumber(tx)
+	minTxNum, err := rawdbv3.TxNums.Min(tx, *bn)
 	if err != nil {
 		return nil, err
 	}
-	defer c.Close()
-	var v []byte
-	var seekVal []byte
+
+	from := account[:]
 	if offset != nil {
-		seekVal = *offset
+		from = append(from, *offset...)
 	}
-
-	for v, err = c.SeekBothRange(seekBytes, seekVal); v != nil && len(keys) != quantity && err == nil; _, v, err = c.NextDup() {
-		if len(v) > length.Hash {
-			keys = append(keys, v[:length.Hash])
-		} else {
-			keys = append(keys, v)
-		}
-	}
+	to, _ := kv.NextSubtree(account[:])
+	r, err := tx.(kv.TemporalTx).DomainRange(kv.StorageDomain, from, to, minTxNum, order.Asc, quantity)
 	if err != nil {
 		return nil, err
+	}
+	defer r.Close()
+	for r.HasNext() {
+		k, _, err := r.Next()
+		if err != nil {
+			return nil, err
+		}
+		keys = append(keys, libcommon.CopyBytes(k[20:]))
 	}
 	return keys, nil
 }
