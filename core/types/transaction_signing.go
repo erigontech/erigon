@@ -83,6 +83,15 @@ func MakeFrontierSigner() *Signer {
 	return &signer
 }
 
+func (signer *Signer) SetChainId(chainId *uint256.Int) *Signer {
+	if chainId == nil {
+		chainId = new(uint256.Int)
+	}
+	signer.chainID.Set(chainId)
+	signer.chainIDMul.Mul(chainId, u256.Num2)
+	return signer
+}
+
 // LatestSigner returns the 'most permissive' Signer available for the given chain
 // configuration. Specifically, this enables support of EIP-155 replay protection and
 // EIP-2930 access list transactions when their respective forks are scheduled to occur at

@@ -34,9 +34,10 @@ func (tx *SSZTransaction) AsSignedTransation() *SignedTransaction {
 }
 
 func (tx *SSZTransaction) AsTransationPayload() *TransactionPayload {
+	chainId := hexutil.Uint64(tx.ChainID.Uint64())
 	return &TransactionPayload{
 		Type:                hexutil.Uint(sszType(tx)),
-		ChainID:             tx.ChainID,
+		ChainID:             &chainId,
 		Nonce:               hexutil.Uint64(tx.Nonce),
 		GasPrice:            *gasPrice(tx),
 		Gas:                 hexutil.Uint64(tx.Gas),

@@ -57,17 +57,17 @@ func (tx *SignedTransaction) txHash() ([32]byte, error) {
 
 type TransactionPayload struct {
 	Type                hexutil.Uint       `json:"type"`
-	ChainID             *uint256.Int       `json:"chain_id,omitempty"`
+	ChainID             *hexutil.Uint64    `json:"chainId,omitempty"`
 	Nonce               hexutil.Uint64     `json:"nonce"`
-	GasPrice            uint256.Int        `json:"max_fee_per_gas,omitempty"`
+	GasPrice            uint256.Int        `json:"maxFeePerGas,omitempty"`
 	Gas                 hexutil.Uint64     `json:"gas"`
 	To                  *common.Address    `json:"to,omitempty"`
 	Value               uint256.Int        `json:"value"`
 	Input               hexutility.Bytes   `json:"input"`
-	Accesses            *types2.AccessList `json:"access_list,omitempty"`
-	Tip                 *uint256.Int       `json:"max_priority_fee_per_gas,omitempty"`
-	MaxFeePerBlobGas    *uint256.Int       `json:"max_fee_per_blob_gas,omitempty"`
-	BlobVersionedHashes *[]common.Hash     `json:"blob_versioned_hashes,omitempty"`
+	Accesses            *types2.AccessList `json:"accessList,omitempty"`
+	Tip                 *uint256.Int       `json:"maxPriorityFeePerGas,omitempty"`
+	MaxFeePerBlobGas    *uint256.Int       `json:"maxFeePerBlobGas,omitempty"`
+	BlobVersionedHashes *[]common.Hash     `json:"blobVersionedHashes,omitempty"`
 }
 
 func (tx *TransactionPayload) Clone() clonable.Clonable {
@@ -163,7 +163,7 @@ func (tx *TransactionPayload) getPayloadContainer() (bitfield.Bitvector32, *payl
 
 type TransactionSignature struct {
 	From      common.Address   `json:"from"`
-	Signature hexutility.Bytes `json:"ecdsa_signature"` // TODO: this needs to be of particular size (see EIP)
+	Signature hexutility.Bytes `json:"ecdsaSignature"` // TODO: this needs to be of particular size (see EIP)
 }
 
 func (tx *TransactionSignature) Clone() clonable.Clonable {
@@ -246,12 +246,17 @@ func UnmarshalTransctionFromJson(signer Signer, data []byte, blobTxnsAreWrappedW
 
 	var txi Transaction
 	variant := tx.GetVariant()
+	var chainId *uint256.Int
+	if tx.Payload.ChainID != nil {
+		chainId = uint256.NewInt(tx.Payload.ChainID.Uint64())
+	}
+
 	switch variant {
 	case SSZTxType:
 		blobTx := &BlobTx{
 			DynamicFeeTransaction: DynamicFeeTransaction{
 				CommonTx:   legacyTx.CommonTx,
-				ChainID:    tx.Payload.ChainID,
+				ChainID:    chainId,
 				Tip:        tx.Payload.Tip,
 				FeeCap:     &tx.Payload.GasPrice,
 				AccessList: *tx.Payload.Accesses,
@@ -266,7 +271,7 @@ func UnmarshalTransctionFromJson(signer Signer, data []byte, blobTxnsAreWrappedW
 		blobTx := &BlobTx{
 			DynamicFeeTransaction: DynamicFeeTransaction{
 				CommonTx:   legacyTx.CommonTx,
-				ChainID:    tx.Payload.ChainID,
+				ChainID:    chainId,
 				Tip:        tx.Payload.Tip,
 				FeeCap:     &tx.Payload.GasPrice,
 				AccessList: *tx.Payload.Accesses,
@@ -280,7 +285,7 @@ func UnmarshalTransctionFromJson(signer Signer, data []byte, blobTxnsAreWrappedW
 		txi = &BlobTx{
 			DynamicFeeTransaction: DynamicFeeTransaction{
 				CommonTx:   legacyTx.CommonTx,
-				ChainID:    tx.Payload.ChainID,
+				ChainID:    chainId,
 				Tip:        tx.Payload.Tip,
 				FeeCap:     &tx.Payload.GasPrice,
 				AccessList: *tx.Payload.Accesses,
@@ -291,7 +296,7 @@ func UnmarshalTransctionFromJson(signer Signer, data []byte, blobTxnsAreWrappedW
 	case DynamicFeeTxnType:
 		txi = &DynamicFeeTransaction{
 			CommonTx:   legacyTx.CommonTx,
-			ChainID:    tx.Payload.ChainID,
+			ChainID:    chainId,
 			Tip:        tx.Payload.Tip,
 			FeeCap:     &tx.Payload.GasPrice,
 			AccessList: *tx.Payload.Accesses,
@@ -300,7 +305,7 @@ func UnmarshalTransctionFromJson(signer Signer, data []byte, blobTxnsAreWrappedW
 	case AccessListTxnType:
 		txi = &AccessListTx{
 			LegacyTx:   legacyTx,
-			ChainID:    tx.Payload.ChainID,
+			ChainID:    chainId,
 			AccessList: *tx.Payload.Accesses,
 		}
 
@@ -312,13 +317,13 @@ func UnmarshalTransctionFromJson(signer Signer, data []byte, blobTxnsAreWrappedW
 		return nil, nil
 	}
 
+	signer = *signer.SetChainId(chainId)
 	txi, err = txi.WithSignature(signer, tx.Signature.Signature[:])
 	if err != nil {
 		return nil, err
 	}
 
 	// validate transaction
-
 	v, r, s := txi.RawSignatureValues()
 	maybeProtected := txi.Type() == LegacyTxType
 	if err = sanityCheckSignature(v, r, s, maybeProtected); err != nil {

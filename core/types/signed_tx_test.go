@@ -2,7 +2,7 @@ package types_test
 
 import (
 	"encoding/json"
-	"io/ioutil"
+	"os"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -12,7 +12,7 @@ import (
 )
 
 func TestJsonToExecPayload(t *testing.T) {
-	payloadb, err := ioutil.ReadFile("testdata/execution_payload_sample.json")
+	payloadb, err := os.ReadFile("testdata/execution_payload.json")
 	if err != nil {
 		t.Fatalf("could not read file: %v", err)
 	}
@@ -31,7 +31,6 @@ func TestJsonToExecPayload(t *testing.T) {
 	}
 
 	signer := *types.MakeSigner(chainConfig, exp.BlockNumber.Uint64(), uint64(exp.Timestamp))
-
 	txs := [][]byte{}
 	for _, transaction := range exp.Transactions {
 		txs = append(txs, transaction.Inner)
