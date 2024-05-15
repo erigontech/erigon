@@ -459,6 +459,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	db.path = opts.path
 	addToPathDbMap(opts.path, db)
 	if dbg.MdbxLockInRam() && opts.label == kv.ChainDB {
+		log.Info("[dbg] locking db in mem", "lable", opts.label)
 		if err := db.View(ctx, func(tx kv.Tx) error { return tx.(*MdbxTx).LockDBInRam() }); err != nil {
 			return nil, err
 		}
@@ -791,9 +792,6 @@ func (db *MdbxKV) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
 }
 
 func (db *MdbxKV) beginRw(ctx context.Context, flags uint) (txn kv.RwTx, err error) {
-	if db.opts.label == kv.ChainDB {
-		log.Warn("[dbg] beginRw", "stack", dbg.Stack())
-	}
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()

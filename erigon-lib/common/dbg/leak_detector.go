@@ -38,7 +38,7 @@ func NewLeakDetector(name string, slowThreshold time.Duration) *LeakDetector {
 	d.SetSlowThreshold(slowThreshold)
 
 	go func() {
-		logEvery := time.NewTicker(20 * time.Second)
+		logEvery := time.NewTicker(60 * time.Second)
 		defer logEvery.Stop()
 
 		for {
