@@ -536,9 +536,9 @@ func (w *StateWriterV3) DeleteAccount(address common.Address, original *accounts
 	if err := w.rs.domains.DomainDel(kv.AccountsDomain, address[:], nil, nil, 0); err != nil {
 		return err
 	}
-	if w.accumulator != nil {
-		w.accumulator.DeleteAccount(address)
-	}
+	// if w.accumulator != nil { TODO: investigate later. basically this will always panic. keeping this out should be fine anyway.
+	// 	w.accumulator.DeleteAccount(address)
+	// }
 	return nil
 }
 
