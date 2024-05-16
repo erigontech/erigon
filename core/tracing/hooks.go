@@ -120,11 +120,6 @@ type (
 	// BlockEndHook is called after executing a block.
 	BlockEndHook = func(err error)
 
-	// SkippedBlockHook indicates a block was skipped during processing
-	// due to it being known previously. This can happen e.g. when recovering
-	// from a crash.
-	SkippedBlockHook = func(event BlockEvent)
-
 	// GenesisBlockHook is called when the genesis block is being processed.
 	GenesisBlockHook = func(genesis *types.Block, alloc types.GenesisAlloc)
 
@@ -161,7 +156,6 @@ type Hooks struct {
 	OnBlockchainInit BlockchainInitHook
 	OnBlockStart     BlockStartHook
 	OnBlockEnd       BlockEndHook
-	OnSkippedBlock   SkippedBlockHook
 	OnGenesisBlock   GenesisBlockHook
 	// State events
 	OnBalanceChange BalanceChangeHook
