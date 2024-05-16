@@ -673,14 +673,12 @@ Loop:
 					}
 				}
 			}()
-		} else {
-			if !initialCycle && stateStream {
-				txs, err := blockReader.RawTransactions(context.Background(), applyTx, b.NumberU64(), b.NumberU64())
-				if err != nil {
-					return err
-				}
-				cfg.accumulator.StartChange(b.NumberU64(), b.Hash(), txs, false)
+		} else if shouldReportToTxPool {
+			txs, err := blockReader.RawTransactions(context.Background(), applyTx, b.NumberU64(), b.NumberU64())
+			if err != nil {
+				return err
 			}
+			cfg.accumulator.StartChange(b.NumberU64(), b.Hash(), txs, false)
 		}
 
 		rules := chainConfig.Rules(blockNum, b.Time())
