@@ -550,6 +550,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 		if err != nil {
 			return err
 		}
+		defer tdb.Close()
 
 		tx, err := tdb.BeginTemporalRw(ctx)
 		if err != nil {
