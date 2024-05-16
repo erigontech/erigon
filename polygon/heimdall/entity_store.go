@@ -14,9 +14,12 @@ type entityStore interface {
 	Prepare(ctx context.Context) error
 	Close()
 	GetLastEntityId(ctx context.Context) (uint64, bool, error)
+	GetLastEntity(ctx context.Context) (Entity, error)
 	GetEntity(ctx context.Context, id uint64) (Entity, error)
 	PutEntity(ctx context.Context, id uint64, entity Entity) error
 	FindByBlockNum(ctx context.Context, blockNum uint64) (Entity, error)
+	RangeFromId(ctx context.Context, startId uint64) ([]Entity, error)
+	RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]Entity, error)
 }
 
 type entityStoreImpl struct {
@@ -27,8 +30,9 @@ type entityStoreImpl struct {
 	getLastEntityId func(ctx context.Context, tx kv.Tx) (uint64, bool, error)
 	loadEntityBytes func(ctx context.Context, tx kv.Getter, id uint64) ([]byte, error)
 
-	blockNumToIdIndex *RangeIndex
-	prepareOnce       sync.Once
+	blockNumToIdIndexFactory func(ctx context.Context) (*RangeIndex, error)
+	blockNumToIdIndex        *RangeIndex
+	prepareOnce              sync.Once
 }
 
 func newEntityStore(
@@ -37,7 +41,7 @@ func newEntityStore(
 	makeEntity func() Entity,
 	getLastEntityId func(ctx context.Context, tx kv.Tx) (uint64, bool, error),
 	loadEntityBytes func(ctx context.Context, tx kv.Getter, id uint64) ([]byte, error),
-	blockNumToIdIndex *RangeIndex,
+	blockNumToIdIndexFactory func(ctx context.Context) (*RangeIndex, error),
 ) entityStore {
 	return &entityStoreImpl{
 		tx:    tx,
@@ -47,13 +51,17 @@ func newEntityStore(
 		getLastEntityId: getLastEntityId,
 		loadEntityBytes: loadEntityBytes,
 
-		blockNumToIdIndex: blockNumToIdIndex,
+		blockNumToIdIndexFactory: blockNumToIdIndexFactory,
 	}
 }
 
 func (s *entityStoreImpl) Prepare(ctx context.Context) error {
 	var err error
 	s.prepareOnce.Do(func() {
+		s.blockNumToIdIndex, err = s.blockNumToIdIndexFactory(ctx)
+		if err != nil {
+			return
+		}
 		iteratorFactory := func() (iter.KV, error) { return s.tx.Range(s.table, nil, nil) }
 		err = buildBlockNumToIdIndex(ctx, s.blockNumToIdIndex, iteratorFactory, s.entityUnmarshalJSON)
 	})
@@ -66,6 +74,18 @@ func (s *entityStoreImpl) Close() {
 
 func (s *entityStoreImpl) GetLastEntityId(ctx context.Context) (uint64, bool, error) {
 	return s.getLastEntityId(ctx, s.tx)
+}
+
+func (s *entityStoreImpl) GetLastEntity(ctx context.Context) (Entity, error) {
+	id, ok, err := s.GetLastEntityId(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// not found
+	if !ok {
+		return nil, nil
+	}
+	return s.GetEntity(ctx, id)
 }
 
 func entityStoreKey(id uint64) [8]byte {
@@ -122,6 +142,42 @@ func (s *entityStoreImpl) FindByBlockNum(ctx context.Context, blockNum uint64) (
 	}
 
 	return s.GetEntity(ctx, id)
+}
+
+func (s *entityStoreImpl) RangeFromId(_ context.Context, startId uint64) ([]Entity, error) {
+	startKey := entityStoreKey(startId)
+	it, err := s.tx.Range(s.table, startKey[:], nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var entities []Entity
+	for it.HasNext() {
+		_, jsonBytes, err := it.Next()
+		if err != nil {
+			return nil, err
+		}
+
+		entity, err := s.entityUnmarshalJSON(jsonBytes)
+		if err != nil {
+			return nil, err
+		}
+		entities = append(entities, entity)
+	}
+	return entities, nil
+}
+
+func (s *entityStoreImpl) RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]Entity, error) {
+	id, err := s.blockNumToIdIndex.Lookup(ctx, startBlockNum)
+	if err != nil {
+		return nil, err
+	}
+	// not found
+	if id == 0 {
+		return nil, nil
+	}
+
+	return s.RangeFromId(ctx, id)
 }
 
 func buildBlockNumToIdIndex(

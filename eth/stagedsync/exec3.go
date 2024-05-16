@@ -16,7 +16,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 	"github.com/ledgerwatch/erigon-lib/config3"
-	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
@@ -45,6 +44,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/shards"
 )
 
 var execStepsInDB = metrics.NewGauge(`exec_steps_in_db`) //nolint
@@ -156,11 +156,7 @@ func ExecV3(ctx context.Context,
 	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
 
 	if initialCycle {
-		if _, ok := engine.(*aura.AuRa); ok { //gnosis collate eating too much RAM, will add ETL later
-			agg.SetCollateAndBuildWorkers(1)
-		} else {
-			agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
-		}
+		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
 		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 		defer agg.DiscardHistory(kv.CommitmentDomain).EnableHistory(kv.CommitmentDomain)
 	} else {
@@ -182,7 +178,7 @@ func ExecV3(ctx context.Context,
 			}()
 		}
 	}
-
+	var err error
 	inMemExec := txc.Doms != nil
 	var doms *state2.SharedDomains
 	if inMemExec {
@@ -190,6 +186,11 @@ func ExecV3(ctx context.Context,
 	} else {
 		var err error
 		doms, err = state2.NewSharedDomains(applyTx, log.New())
+		// if we are behind the commitment, we can't execute anything
+		// this can heppen if progress in domain is higher than progress in blocks
+		if errors.Is(err, state2.ErrBehindCommitment) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -288,10 +289,8 @@ func ExecV3(ctx context.Context,
 	}
 
 	blockNum = doms.BlockNum()
+	initialBlockNum := blockNum
 	outputTxNum.Store(doms.TxNum())
-
-	var err error
-
 	if maxBlockNum-blockNum > 16 {
 		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
 			"from", blockNum, "to", maxBlockNum, "fromTxNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx)
@@ -307,6 +306,11 @@ func ExecV3(ctx context.Context,
 	var count uint64
 	var lock sync.RWMutex
 
+	shouldReportToTxPool := maxBlockNum-blockNum <= 8
+	var accumulator *shards.Accumulator
+	if shouldReportToTxPool {
+		accumulator = cfg.accumulator
+	}
 	rs := state.NewStateV3(doms, logger)
 
 	////TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
@@ -320,7 +324,7 @@ func ExecV3(ctx context.Context,
 	rwsConsumed := make(chan struct{}, 1)
 	defer close(rwsConsumed)
 
-	execWorkers, applyWorker, rws, stopWorkers, waitWorkers := exec3.NewWorkersPool(lock.RLocker(), logger, ctx, parallel, chainDb, rs, in, blockReader, chainConfig, genesis, engine, workerCount+1, cfg.dirs)
+	execWorkers, applyWorker, rws, stopWorkers, waitWorkers := exec3.NewWorkersPool(lock.RLocker(), accumulator, logger, ctx, parallel, chainDb, rs, in, blockReader, chainConfig, genesis, engine, workerCount+1, cfg.dirs)
 	defer stopWorkers()
 	applyWorker.DiscardReadList()
 
@@ -872,8 +876,11 @@ Loop:
 				t1 = time.Since(tt)
 
 				tt = time.Now()
+				// If execute more than 100 blocks then, it is safe to assume that we are not on the tip of the chain.
+				// In this case, we can prune the state to save memory.
+				pruneBlockMargin := uint64(100)
 
-				if !useExternalTx {
+				if blockNum-initialBlockNum > pruneBlockMargin {
 					if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Minute, applyTx); err != nil {
 						return err
 					}
@@ -912,7 +919,7 @@ Loop:
 					rs = state.NewStateV3(doms, logger)
 
 					applyWorker.ResetTx(applyTx)
-					applyWorker.ResetState(rs)
+					applyWorker.ResetState(rs, accumulator)
 
 					return nil
 				}(); err != nil {

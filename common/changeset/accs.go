@@ -60,7 +60,7 @@ func ForRange(db kv.Tx, bucket string, from, to uint64, walker func(blockN uint6
 	})
 }
 
-// RewindDataPlain generates rewind data for all plain buckets between the timestamp
+// RewindData generates rewind data for all plain buckets between the timestamp
 // timestapSrc is the current timestamp, and timestamp Dst is where we rewind
 func RewindData(db kv.Tx, timestampSrc, timestampDst uint64, changes *etl.Collector, quit <-chan struct{}) error {
 	if err := walkAndCollect(

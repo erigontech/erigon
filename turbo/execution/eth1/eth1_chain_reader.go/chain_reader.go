@@ -280,10 +280,6 @@ func (c ChainReaderWriterEth1) InsertBlocksAndWait(ctx context.Context, blocks [
 		return err
 	}
 
-	// limit the number of retries
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
 	for response.Result == execution.ExecutionStatus_Busy {
 		const retryDelay = 100 * time.Millisecond
 		select {
