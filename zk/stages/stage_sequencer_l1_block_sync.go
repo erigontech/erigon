@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/syncer"
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 type SequencerL1BlockSyncCfg struct {
@@ -110,9 +111,24 @@ LOOP:
 		select {
 		case logs := <-logChan:
 			for _, l := range logs {
-				transaction, _, err := cfg.syncer.GetTransaction(l.TxHash)
-				if err != nil {
-					return err
+				// for some reason some endpoints seem to not have certain transactions available to
+				// them even they are perfectly valid and other RPC nodes return them fine.  So, leaning
+				// on the internals of the syncer which will round-robin through available RPC nodes, we
+				// can attempt a few times to get the transaction before giving up and returning an error
+				var transaction types.Transaction
+				attempts := 0
+				for {
+					transaction, _, err = cfg.syncer.GetTransaction(l.TxHash)
+					if err == nil {
+						break
+					} else {
+						log.Warn("Error getting transaction, attempting again", "hash", l.TxHash.String(), "err", err)
+						attempts++
+						if attempts > 50 {
+							return err
+						}
+						time.Sleep(500 * time.Millisecond)
+					}
 				}
 
 				lastBatchSequenced := l.Topics[1].Big().Uint64()
