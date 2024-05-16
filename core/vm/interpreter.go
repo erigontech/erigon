@@ -302,7 +302,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		if steps%1000 == 0 && in.evm.Cancelled() {
 			break
 		}
-		if in.cfg.Debug {
+		if in.cfg.Debug || in.cfg.Tracer != nil {
 			// Capture pre-execution values for tracing.
 			logged, pcCopy, gasCopy = false, _pc, contract.Gas
 		}
