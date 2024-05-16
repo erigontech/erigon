@@ -346,6 +346,7 @@ func TestPrecompiledBLS12381MapG2Fail(t *testing.T)      { testJsonFail("blsMapG
 // Tests from https://github.com/ethereum/EIPs/tree/master/assets/eip-2537
 func TestPrecompiledBLS12381G1AddEip(t *testing.T)     { testJson("blsG1Add-eip", "0a", t) }
 func TestPrecompiledBLS12381G2AddEip(t *testing.T)     { testJson("blsG2Add-eip", "0d", t) }
+func TestPrecompiledBLS12381MapG1Eip(t *testing.T)     { testJson("blsMapG1-eip", "11", t) }
 func TestPrecompiledBLS12381MapG2Eip(t *testing.T)     { testJson("blsMapG2-eip", "12", t) }
 func TestPrecompiledBLS12381G1AddFailEip(t *testing.T) { testJsonFail("blsG1Add-eip", "0a", t) }
 func TestPrecompiledBLS12381G1MulFailEip(t *testing.T) { testJsonFail("blsG1Mul-eip", "0b", t) }
