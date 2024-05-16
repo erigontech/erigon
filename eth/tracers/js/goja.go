@@ -232,6 +232,7 @@ func (t *jsTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from 
 	rules := env.ChainConfig.Rules(env.BlockNumber, env.Time)
 	t.activePrecompiles = vm.ActivePrecompiles(rules)
 	t.ctx["block"] = t.vm.ToValue(t.env.BlockNumber)
+	t.ctx["gas"] = t.vm.ToValue(tx.GetGas())
 	t.ctx["gasPrice"] = t.vm.ToValue(t.env.GasPrice.ToBig())
 }
 
@@ -288,7 +289,6 @@ func (t *jsTracer) onStart(from libcommon.Address, to libcommon.Address, create 
 	t.ctx["from"] = t.vm.ToValue(from.Bytes())
 	t.ctx["to"] = t.vm.ToValue(to.Bytes())
 	t.ctx["input"] = t.vm.ToValue(input)
-	t.ctx["gas"] = t.vm.ToValue(gas)
 	valueBig, err := t.toBig(t.vm, value.ToBig().String())
 	if err != nil {
 		t.err = err
@@ -344,15 +344,16 @@ func (t *jsTracer) onEnd(output []byte, gasUsed uint64, err error, reverted bool
 
 // OnEnter is called when EVM enters a new scope (via call, create or selfdestruct).
 func (t *jsTracer) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	if !t.traceFrame {
-		return
-	}
 	if t.err != nil {
 		return
 	}
 
 	if depth == 0 {
 		t.onStart(from, to, vm.OpCode(typ) == vm.CREATE, input, gas, value)
+		return
+	}
+
+	if !t.traceFrame {
 		return
 	}
 
@@ -374,16 +375,16 @@ func (t *jsTracer) OnEnter(depth int, typ byte, from libcommon.Address, to libco
 // OnExit is called when EVM exits a scope, even if the scope didn't
 // execute any code.
 func (t *jsTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
-	if !t.traceFrame {
-		return
-	}
-
 	if t.err != nil {
 		return
 	}
 
 	if depth == 0 {
 		t.onEnd(output, gasUsed, err, reverted)
+		return
+	}
+
+	if !t.traceFrame {
 		return
 	}
 
