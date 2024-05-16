@@ -27,7 +27,11 @@ import (
 	"github.com/c2h5oh/datasize"
 	mdbx2 "github.com/erigontech/mdbx-go/mdbx"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
@@ -61,7 +65,7 @@ func stateTestCmd(ctx *cli.Context) error {
 	if machineFriendlyOutput {
 		log.Root().SetHandler(log.DiscardHandler())
 	} else {
-		log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+		log.Root().SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))
 	}
 
 	// Configure the EVM logger
@@ -122,16 +126,29 @@ func runStateTest(fname string, cfg vm.Config, jsonOut bool) error {
 func aggregateResultsFromStateTests(
 	stateTests map[string]tests.StateTest, cfg vm.Config,
 	jsonOut bool) ([]StatetestResult, error) {
+	dirs := datadir.New(filepath.Join(os.TempDir(), "erigon-statetest"))
 	//this DB is shared. means:
 	// - faster sequential tests: don't need create/delete db
 	// - less parallelism: multiple processes can open same DB but only 1 can create rw-transaction (other will wait when 1-st finish)
-	db := mdbx.NewMDBX(log.New()).
-		Path(filepath.Join(os.TempDir(), "erigon-statetest")).
+	_db := mdbx.NewMDBX(log.New()).
+		Path(dirs.Chaindata).
 		Flags(func(u uint) uint {
-			return u | mdbx2.UtterlyNoSync | mdbx2.NoMetaSync | mdbx2.LifoReclaim | mdbx2.NoMemInit
+			return u | mdbx2.UtterlyNoSync | mdbx2.NoMetaSync | mdbx2.NoMemInit | mdbx2.WriteMap
 		}).
 		GrowthStep(1 * datasize.MB).
 		MustOpen()
+	defer _db.Close()
+
+	agg, err := libstate.NewAggregator(context.Background(), dirs, config3.HistoryV3AggregationStep, _db, log.New())
+	if err != nil {
+		return nil, err
+	}
+	defer agg.Close()
+
+	db, err := temporal.New(_db, agg)
+	if err != nil {
+		return nil, err
+	}
 	defer db.Close()
 
 	tx, txErr := db.BeginRw(context.Background())

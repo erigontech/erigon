@@ -40,11 +40,10 @@ var (
 	mergeTr = EnvInt("MERGE_THRESHOLD", -1)
 
 	//state v3
-	noPrune                  = EnvBool("NO_PRUNE", false)
-	noMerge                  = EnvBool("NO_MERGE", false)
-	discardHistory           = EnvBool("DISCARD_HISTORY", false)
-	DiscardCommitmentHistory = EnvBool("DISCARD_COMMITMENT_HISTORY", false)
-	discardCommitment        = EnvBool("DISCARD_COMMITMENT", false)
+	noPrune           = EnvBool("NO_PRUNE", false)
+	noMerge           = EnvBool("NO_MERGE", false)
+	discardHistory    = EnvBool("DISCARD_HISTORY", false)
+	discardCommitment = EnvBool("DISCARD_COMMITMENT", false)
 
 	// force skipping of any non-Erigon2 .torrent files
 	DownloaderOnlyBlocks = EnvBool("DOWNLOADER_ONLY_BLOCKS", false)
@@ -57,8 +56,10 @@ var (
 
 	BuildSnapshotAllowance = EnvInt("SNAPSHOT_BUILD_SEMA_SIZE", 1)
 
-	SnapshotMadvRnd = EnvBool("SNAPSHOT_MADV_RND", true)
-	OnlyCreateDB    = EnvBool("ONLY_CREATE_DB", false)
+	SnapshotMadvRnd       = EnvBool("SNAPSHOT_MADV_RND", true)
+	KvMadvNormalNoLastLvl = EnvString("KV_MADV_NORMAL_NO_LAST_LVL", "")
+	KvMadvNormal          = EnvString("KV_MADV_NORMAL", "")
+	OnlyCreateDB          = EnvBool("ONLY_CREATE_DB", false)
 )
 
 func ReadMemStats(m *runtime.MemStats) {

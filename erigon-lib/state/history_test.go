@@ -21,13 +21,14 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/length"
 	"math"
 	"os"
 	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/common/length"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -157,7 +158,8 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 				values[string(keyBuf)] = updates[vi:]
 				require.True(t, sort.StringsAreSorted(seenKeys))
 			}
-			h.integrateFiles(sf, i, i+h.aggregationStep)
+			h.integrateDirtyFiles(sf, i, i+h.aggregationStep)
+			h.reCalcVisibleFiles()
 			lastAggergatedTx = i + h.aggregationStep
 		}
 
@@ -249,7 +251,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 			keyWords = append(keyWords, string(w))
 			w, _ = g.Next(w[:0])
 			ef, _ := eliasfano32.ReadEliasFano(w)
-			ints, err := iter.ToU64Arr(ef.Iterator())
+			ints, err := iter.ToArrayU64(ef.Iterator())
 			require.NoError(err)
 			intArrs = append(intArrs, ints)
 		}
@@ -339,7 +341,8 @@ func TestHistoryAfterPrune(t *testing.T) {
 		sf, err := h.buildFiles(ctx, 0, c, background.NewProgressSet())
 		require.NoError(err)
 
-		h.integrateFiles(sf, 0, 16)
+		h.integrateDirtyFiles(sf, 0, 16)
+		h.reCalcVisibleFiles()
 		hc.Close()
 
 		hc = h.BeginFilesRo()
@@ -422,7 +425,7 @@ func TestHistoryCanPrune(t *testing.T) {
 	}
 	t.Run("withFiles", func(t *testing.T) {
 		db, h := testDbAndHistory(t, true, logger)
-		h.dontProduceFiles = false
+		h.dontProduceHistoryFiles = false
 
 		defer db.Close()
 		writeKey(t, h, db)
@@ -457,7 +460,7 @@ func TestHistoryCanPrune(t *testing.T) {
 	})
 	t.Run("withoutFiles", func(t *testing.T) {
 		db, h := testDbAndHistory(t, false, logger)
-		h.dontProduceFiles = true
+		h.dontProduceHistoryFiles = true
 		h.keepTxInDB = stepKeepInDB * h.aggregationStep
 
 		defer db.Close()
@@ -619,7 +622,7 @@ func checkHistoryHistory(t *testing.T, h *History, txs uint64) {
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], valNum)
 			k[0], v[0] = 0x01, 0xff
-			val, ok, err := hc.GetNoState(k[:], txNum+1)
+			val, ok, err := hc.historySeekInFiles(k[:], txNum+1)
 			//require.Equal(t, ok, txNum < 976)
 			if ok {
 				require.NoError(t, err, label)
@@ -652,7 +655,8 @@ func TestHistoryHistory(t *testing.T) {
 				require.NoError(err)
 				sf, err := h.buildFiles(ctx, step, c, background.NewProgressSet())
 				require.NoError(err)
-				h.integrateFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
+				h.integrateDirtyFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
+				h.reCalcVisibleFiles()
 
 				hc := h.BeginFilesRo()
 				_, err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, false, logEvery)
@@ -690,7 +694,8 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 		require.NoError(err)
 		sf, err := h.buildFiles(ctx, step, c, background.NewProgressSet())
 		require.NoError(err)
-		h.integrateFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
+		h.integrateDirtyFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
+		h.reCalcVisibleFiles()
 
 		if doPrune {
 			hc := h.BeginFilesRo()
@@ -718,6 +723,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 			indexIn, historyIn, err := hc.mergeFiles(ctx, indexOuts, historyOuts, r, background.NewProgressSet())
 			require.NoError(err)
 			h.integrateMergedFiles(indexOuts, historyOuts, indexIn, historyIn)
+			h.reCalcVisibleFiles()
 			return false
 		}(); stop {
 			break
@@ -984,7 +990,7 @@ func TestIterateChanged2(t *testing.T) {
 				require.NoError(err)
 				idxItDesc, err := hc.IdxRange(firstKey[:], 19, 1, order.Desc, -1, roTx)
 				require.NoError(err)
-				descArr, err := iter.ToU64Arr(idxItDesc)
+				descArr, err := iter.ToArrayU64(idxItDesc)
 				require.NoError(err)
 				iter.ExpectEqualU64(t, idxIt, iter.ReverseArray(descArr))
 			}
@@ -1082,15 +1088,15 @@ func TestIterateChanged2(t *testing.T) {
 			require.NoError(err)
 			defer tx.Rollback()
 
-			v, ok, err := hc.GetNoStateWithRecent(hexutility.MustDecodeHex("0100000000000001"), 900, tx)
+			v, ok, err := hc.HistorySeek(hexutility.MustDecodeHex("0100000000000001"), 900, tx)
 			require.NoError(err)
 			require.True(ok)
 			require.Equal(hexutility.MustDecodeHex("ff00000000000383"), v)
-			v, ok, err = hc.GetNoStateWithRecent(hexutility.MustDecodeHex("0100000000000001"), 0, tx)
+			v, ok, err = hc.HistorySeek(hexutility.MustDecodeHex("0100000000000001"), 0, tx)
 			require.NoError(err)
 			require.True(ok)
 			require.Equal([]byte{}, v)
-			v, ok, err = hc.GetNoStateWithRecent(hexutility.MustDecodeHex("0100000000000001"), 1000, tx)
+			v, ok, err = hc.HistorySeek(hexutility.MustDecodeHex("0100000000000001"), 1000, tx)
 			require.NoError(err)
 			require.True(ok)
 			require.Equal(hexutility.MustDecodeHex("ff000000000003e7"), v)
@@ -1136,15 +1142,15 @@ func TestIterateChanged2(t *testing.T) {
 			require.NoError(err)
 			defer tx.Rollback()
 
-			v, ok, err := hc.GetNoStateWithRecent(hexutility.MustDecodeHex("0100000000000001"), 900, tx)
+			v, ok, err := hc.HistorySeek(hexutility.MustDecodeHex("0100000000000001"), 900, tx)
 			require.NoError(err)
 			require.True(ok)
 			require.Equal(hexutility.MustDecodeHex("ff00000000000383"), v)
-			v, ok, err = hc.GetNoStateWithRecent(hexutility.MustDecodeHex("0100000000000001"), 0, tx)
+			v, ok, err = hc.HistorySeek(hexutility.MustDecodeHex("0100000000000001"), 0, tx)
 			require.NoError(err)
 			require.True(ok)
 			require.Equal([]byte{}, v)
-			v, ok, err = hc.GetNoStateWithRecent(hexutility.MustDecodeHex("0100000000000001"), 1000, tx)
+			v, ok, err = hc.HistorySeek(hexutility.MustDecodeHex("0100000000000001"), 1000, tx)
 			require.NoError(err)
 			require.True(ok)
 			require.Equal(hexutility.MustDecodeHex("ff000000000003e7"), v)
@@ -1305,9 +1311,9 @@ func TestHistory_OpenFolder(t *testing.T) {
 	db, h, txs := filledHistory(t, true, logger)
 	collateAndMergeHistory(t, db, h, txs, true)
 
-	list := h._visibleFiles.Load()
+	list := h._visibleFiles
 	require.NotEmpty(t, list)
-	ff := (*list)[len(*list)-1]
+	ff := list[len(list)-1]
 	fn := ff.src.decompressor.FilePath()
 	h.Close()
 

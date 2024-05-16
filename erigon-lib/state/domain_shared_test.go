@@ -4,15 +4,14 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math/rand"
-	"testing"
-	"time"
-
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
+	"math/rand"
+	"testing"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/types"
@@ -135,7 +134,7 @@ Loop:
 		for accs := 0; accs < 256; accs++ {
 			v := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*10e6)+uint64(accs*10e2)), nil, 0)
 			k0[0] = byte(accs)
-			pv, step, err := domains.LatestAccount(k0)
+			pv, step, err := domains.DomainGet(kv.AccountsDomain, k0, nil)
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.AccountsDomain, k0, nil, v, pv, step)
@@ -347,7 +346,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 }
 
 func TestSharedDomain_StorageIter(t *testing.T) {
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))
 
 	stepSize := uint64(10)
 	db, agg := testDbAndAggregatorv3(t, stepSize)
@@ -383,7 +382,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 			v := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*10e6)+uint64(accs*10e2)), nil, 0)
 			k0[0] = byte(accs)
 
-			pv, step, err := domains.LatestAccount(k0)
+			pv, step, err := domains.DomainGet(kv.AccountsDomain, k0, nil)
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.AccountsDomain, k0, nil, v, pv, step)
@@ -392,7 +391,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 
 			for locs := 0; locs < 15000; locs++ {
 				binary.BigEndian.PutUint64(l0[24:], uint64(locs))
-				pv, step, err := domains.LatestStorage(append(k0, l0...))
+				pv, step, err := domains.DomainGet(kv.AccountsDomain, append(k0, l0...), nil)
 				require.NoError(t, err)
 
 				err = domains.DomainPut(kv.StorageDomain, k0, l0, l0[24:], pv, step)
@@ -425,10 +424,11 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	ac.Close()
 	ac = agg.BeginFilesRo()
 
-	err = db.Update(ctx, func(tx kv.RwTx) error {
-		_, err = ac.PruneSmallBatches(ctx, 1*time.Minute, tx)
-		return err
-	})
+	//err = db.Update(ctx, func(tx kv.RwTx) error {
+	//	_, err = ac.PruneSmallBatches(ctx, 1*time.Minute, tx)
+	//	return err
+	//})
+	_, err = ac.PruneSmallBatchesDb(ctx, 1*time.Minute, db)
 	require.NoError(t, err)
 
 	ac.Close()
@@ -445,7 +445,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 
 	for accs := 0; accs < accounts; accs++ {
 		k0[0] = byte(accs)
-		pv, step, err := domains.LatestAccount(k0)
+		pv, step, err := domains.DomainGet(kv.AccountsDomain, k0, nil)
 		require.NoError(t, err)
 
 		existed := make(map[string]struct{})

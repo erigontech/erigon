@@ -68,7 +68,8 @@ type HttpCfg struct {
 	SocketListenUrl     string
 
 	JWTSecretPath             string // Engine API Authentication
-	TraceRequests             bool   // Always trace requests in INFO level
+	TraceRequests             bool   // Print requests to logs at INFO level
+	DebugSingleRequest        bool   // Print single-request-related debugging info to logs at INFO level
 	HTTPTimeouts              rpccfg.HTTPTimeouts
 	AuthRpcTimeouts           rpccfg.HTTPTimeouts
 	EvmCallTimeout            time.Duration

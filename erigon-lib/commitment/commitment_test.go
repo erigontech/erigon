@@ -1,17 +1,21 @@
 package commitment
 
 import (
+	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/hex"
-	"github.com/ledgerwatch/erigon-lib/common"
 	"math/rand"
+	"sort"
 	"testing"
+
+	"github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/stretchr/testify/require"
 )
 
-func generateCellRow(t *testing.T, size int) (row []*Cell, bitmap uint16) {
-	t.Helper()
+func generateCellRow(tb testing.TB, size int) (row []*Cell, bitmap uint16) {
+	tb.Helper()
 
 	row = make([]*Cell, size)
 	var bm uint16
@@ -19,24 +23,24 @@ func generateCellRow(t *testing.T, size int) (row []*Cell, bitmap uint16) {
 		row[i] = new(Cell)
 		row[i].hl = 32
 		n, err := rand.Read(row[i].h[:])
-		require.NoError(t, err)
-		require.EqualValues(t, row[i].hl, n)
+		require.NoError(tb, err)
+		require.EqualValues(tb, row[i].hl, n)
 
 		th := rand.Intn(120)
 		switch {
 		case th > 70:
 			n, err = rand.Read(row[i].apk[:])
-			require.NoError(t, err)
+			require.NoError(tb, err)
 			row[i].apl = n
 		case th > 20 && th <= 70:
 			n, err = rand.Read(row[i].spk[:])
-			require.NoError(t, err)
+			require.NoError(tb, err)
 			row[i].spl = n
 		case th <= 20:
 			n, err = rand.Read(row[i].extension[:th])
 			row[i].extLen = n
-			require.NoError(t, err)
-			require.EqualValues(t, th, n)
+			require.NoError(tb, err)
+			require.EqualValues(tb, th, n)
 		}
 		bm |= uint16(1 << i)
 	}
@@ -80,6 +84,42 @@ func TestBranchData_MergeHexBranches2(t *testing.T) {
 	}
 }
 
+func TestBranchData_MergeHexBranches_ValueAliveAfterNewMerges(t *testing.T) {
+	t.Skip()
+	row, bm := generateCellRow(t, 16)
+
+	be := NewBranchEncoder(1024, t.TempDir())
+	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*Cell, error) {
+		return row[i], nil
+	})
+	require.NoError(t, err)
+
+	copies := make([][]byte, 16)
+	values := make([][]byte, len(copies))
+
+	merger := NewHexBranchMerger(8192)
+
+	var tm uint16
+	am := bm
+
+	for i := 15; i >= 0; i-- {
+		row[i] = nil
+		tm, bm, am = uint16(1<<i), bm>>1, am>>1
+		enc1, _, err := be.EncodeBranch(bm, tm, am, func(i int, skip bool) (*Cell, error) {
+			return row[i], nil
+		})
+		require.NoError(t, err)
+		merged, err := merger.Merge(enc, enc1)
+		require.NoError(t, err)
+
+		copies[i] = common.Copy(merged)
+		values[i] = merged
+	}
+	for i := 0; i < len(copies); i++ {
+		require.EqualValues(t, copies[i], values[i])
+	}
+}
+
 func TestBranchData_MergeHexBranchesEmptyBranches(t *testing.T) {
 	// Create a BranchMerger instance with sufficient capacity for testing.
 	merger := NewHexBranchMerger(1024)
@@ -114,20 +154,20 @@ func TestBranchData_MergeHexBranches3(t *testing.T) {
 }
 
 // helper to decode row of cells from string
-func unfoldBranchDataFromString(t *testing.T, encs string) (row []*Cell, am uint16) {
-	t.Helper()
+func unfoldBranchDataFromString(tb testing.TB, encs string) (row []*Cell, am uint16) {
+	tb.Helper()
 
 	//encs := "0405040b04080f0b080d030204050b0502090805050d01060e060d070f0903090c04070a0d0a000e090b060b0c040c0700020e0b0c060b0106020c0607050a0b0209070d06040808"
 	//encs := "37ad10eb75ea0fc1c363db0dda0cd2250426ee2c72787155101ca0e50804349a94b649deadcc5cddc0d2fd9fb358c2edc4e7912d165f88877b1e48c69efacf418e923124506fbb2fd64823fd41cbc10427c423"
 	enc, err := hex.DecodeString(encs)
-	require.NoError(t, err)
+	require.NoError(tb, err)
 
 	tm, am, origins, err := BranchData(enc).DecodeCells()
-	require.NoError(t, err)
+	require.NoError(tb, err)
 	_, _ = tm, am
 
-	t.Logf("%s", BranchData(enc).String())
-	//require.EqualValues(t, tm, am)
+	tb.Logf("%s", BranchData(enc).String())
+	//require.EqualValues(tb, tm, am)
 	//for i, c := range origins {
 	//	if c == nil {
 	//		continue
@@ -247,4 +287,100 @@ func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
 		require.NoError(t, err)
 		require.EqualValues(t, orig, merged)
 	})
+}
+
+func TestNewUpdateTree(t *testing.T) {
+	t.Run("ModeUpdate", func(t *testing.T) {
+		ut := NewUpdateTree(ModeUpdate, t.TempDir(), keyHasherNoop)
+
+		require.NotNil(t, ut.tree)
+		require.NotNil(t, ut.keccak)
+		require.Nil(t, ut.keys)
+		require.Equal(t, ModeUpdate, ut.mode)
+	})
+
+	t.Run("ModeDirect", func(t *testing.T) {
+		ut := NewUpdateTree(ModeDirect, t.TempDir(), keyHasherNoop)
+
+		require.NotNil(t, ut.keccak)
+		require.NotNil(t, ut.keys)
+		require.Equal(t, ModeDirect, ut.mode)
+	})
+
+}
+
+func TestUpdateTree_TouchPlainKey(t *testing.T) {
+	utUpdate := NewUpdateTree(ModeUpdate, t.TempDir(), keyHasherNoop)
+	utDirect := NewUpdateTree(ModeDirect, t.TempDir(), keyHasherNoop)
+	utUpdate1 := NewUpdateTree(ModeUpdate, t.TempDir(), keyHasherNoop)
+	utDirect1 := NewUpdateTree(ModeDirect, t.TempDir(), keyHasherNoop)
+
+	type tc struct {
+		key []byte
+		val []byte
+	}
+
+	upds := []tc{
+		{common.FromHex("c17fa85f22306d37cec90b0ec74c5623dbbac68f"), []byte("value1")},
+		{common.FromHex("553bba1d92398a69fbc9f01593bbc51b58862366"), []byte("value0")},
+		{common.FromHex("553bba1d92398a69fbc9f01593bbc51b58862366"), []byte("value1")},
+		{common.FromHex("97c780315e7820752006b7a918ce7ec023df263a87a715b64d5ab445e1782a760a974f8810551f81dfb7f1425f7d8358332af195"), []byte("value1")},
+	}
+	for i := 0; i < len(upds); i++ {
+		utUpdate.TouchPlainKey(upds[i].key, upds[i].val, utUpdate.TouchStorage)
+		utDirect.TouchPlainKey(upds[i].key, upds[i].val, utDirect.TouchStorage)
+		utUpdate1.TouchPlainKey(upds[i].key, upds[i].val, utUpdate.TouchStorage)
+		utDirect1.TouchPlainKey(upds[i].key, upds[i].val, utDirect.TouchStorage)
+	}
+
+	uniqUpds := make(map[string]tc)
+	for i := 0; i < len(upds); i++ {
+		uniqUpds[string(upds[i].key)] = upds[i]
+	}
+	sortedUniqUpds := make([]tc, 0, len(uniqUpds))
+	for _, v := range uniqUpds {
+		sortedUniqUpds = append(sortedUniqUpds, v)
+	}
+	sort.Slice(sortedUniqUpds, func(i, j int) bool {
+		return bytes.Compare(sortedUniqUpds[i].key, sortedUniqUpds[j].key) < 0
+	})
+
+	sz := utUpdate.Size()
+	require.EqualValues(t, 3, sz)
+
+	sz = utDirect.Size()
+	require.EqualValues(t, 3, sz)
+
+	pk, upd := utUpdate.List(true)
+	require.Len(t, pk, 3)
+	require.NotNil(t, upd)
+
+	for i := 0; i < len(sortedUniqUpds); i++ {
+		require.EqualValues(t, sortedUniqUpds[i].key, pk[i])
+		require.EqualValues(t, sortedUniqUpds[i].val, upd[i].CodeHashOrStorage[:upd[i].ValLength])
+	}
+
+	pk, upd = utDirect.List(true)
+	require.Len(t, pk, 3)
+	require.Nil(t, upd)
+
+	for i := 0; i < len(sortedUniqUpds); i++ {
+		require.EqualValues(t, sortedUniqUpds[i].key, pk[i])
+	}
+
+	i := 0
+	err := utUpdate1.HashSort(context.Background(), func(hk, pk []byte) error {
+		require.EqualValues(t, sortedUniqUpds[i].key, pk)
+		i++
+		return nil
+	})
+	require.NoError(t, err)
+
+	i = 0
+	err = utDirect1.HashSort(context.Background(), func(hk, pk []byte) error {
+		require.EqualValues(t, sortedUniqUpds[i].key, pk)
+		i++
+		return nil
+	})
+	require.NoError(t, err)
 }

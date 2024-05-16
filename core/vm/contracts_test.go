@@ -143,7 +143,7 @@ func testPrecompiledFailure(addr string, test precompiledFailureTest, t *testing
 	t.Run(test.Name, func(t *testing.T) {
 		t.Parallel()
 		_, _, err := RunPrecompiledContract(p, in, gas)
-		if err.Error() != test.ExpectedError {
+		if err == nil || err.Error() != test.ExpectedError {
 			t.Errorf("Expected error [%v], got [%v]", test.ExpectedError, err)
 		}
 		// Verify that the precompile did not touch the input buffer
@@ -343,6 +343,31 @@ func TestPrecompiledBLS12381PairingFail(t *testing.T)    { testJsonFail("blsPair
 func TestPrecompiledBLS12381MapG1Fail(t *testing.T)      { testJsonFail("blsMapG1", "11", t) }
 func TestPrecompiledBLS12381MapG2Fail(t *testing.T)      { testJsonFail("blsMapG2", "12", t) }
 
+// Tests from https://github.com/ethereum/EIPs/tree/master/assets/eip-2537
+func TestPrecompiledBLS12381G1AddEip(t *testing.T)      { testJson("blsG1Add-eip", "0a", t) }
+func TestPrecompiledBLS12381G1MulEip(t *testing.T)      { testJson("blsG1Mul-eip", "0b", t) }
+func TestPrecompiledBLS12381G1MultiExpEip(t *testing.T) { testJson("blsG1MultiExp-eip", "0c", t) }
+func TestPrecompiledBLS12381G2AddEip(t *testing.T)      { testJson("blsG2Add-eip", "0d", t) }
+func TestPrecompiledBLS12381G2MulEip(t *testing.T)      { testJson("blsG2Mul-eip", "0e", t) }
+func TestPrecompiledBLS12381G2MultiExpEip(t *testing.T) { testJson("blsG2MultiExp-eip", "0f", t) }
+func TestPrecompiledBLS12381PairingEip(t *testing.T)    { testJson("blsPairing-eip", "10", t) }
+func TestPrecompiledBLS12381MapG1Eip(t *testing.T)      { testJson("blsMapG1-eip", "11", t) }
+func TestPrecompiledBLS12381MapG2Eip(t *testing.T)      { testJson("blsMapG2-eip", "12", t) }
+
+func TestPrecompiledBLS12381G1AddFailEip(t *testing.T) { testJsonFail("blsG1Add-eip", "0a", t) }
+func TestPrecompiledBLS12381G1MulFailEip(t *testing.T) { testJsonFail("blsG1Mul-eip", "0b", t) }
+func TestPrecompiledBLS12381G1MultiExpFailEip(t *testing.T) {
+	testJsonFail("blsG1MultiExp-eip", "0c", t)
+}
+func TestPrecompiledBLS12381G2AddFailEip(t *testing.T) { testJsonFail("blsG2Add-eip", "0d", t) }
+func TestPrecompiledBLS12381G2MulFailEip(t *testing.T) { testJsonFail("blsG2Mul-eip", "0e", t) }
+func TestPrecompiledBLS12381G2MultiExpFailEip(t *testing.T) {
+	testJsonFail("blsG2MultiExp-eip", "0f", t)
+}
+func TestPrecompiledBLS12381PairingFailEip(t *testing.T) { testJsonFail("blsPairing-eip", "10", t) }
+func TestPrecompiledBLS12381MapG1FailEip(t *testing.T)   { testJsonFail("blsMapG1-eip", "11", t) }
+func TestPrecompiledBLS12381MapG2FailEip(t *testing.T)   { testJsonFail("blsMapG2-eip", "12", t) }
+
 func loadJson(name string) ([]precompiledTest, error) {
 	data, err := os.ReadFile(fmt.Sprintf("testdata/precompiles/%v.json", name))
 	if err != nil {
@@ -378,7 +403,7 @@ func BenchmarkPrecompiledBLS12381G1MultiExpWorstCase(b *testing.B) {
 		Name:        "WorstCaseG1",
 		NoBenchmark: false,
 	}
-	benchmarkPrecompiled(b, "0c", testcase)
+	benchmarkPrecompiled(b, "f0c", testcase)
 }
 
 // BenchmarkPrecompiledBLS12381G2MultiExpWorstCase benchmarks the worst case we could find that still fits a gaslimit of 10MGas.
@@ -399,7 +424,7 @@ func BenchmarkPrecompiledBLS12381G2MultiExpWorstCase(b *testing.B) {
 		Name:        "WorstCaseG2",
 		NoBenchmark: false,
 	}
-	benchmarkPrecompiled(b, "0f", testcase)
+	benchmarkPrecompiled(b, "f0f", testcase)
 }
 
 // Benchmarks the sample inputs from the P256VERIFY precompile.

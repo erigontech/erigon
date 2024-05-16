@@ -70,27 +70,30 @@ func NewOracle(backend OracleBackend, params gaspricecfg.Config, cache Cache) *O
 	blocks := params.Blocks
 	if blocks < 1 {
 		blocks = 1
-		log.Warn("Sanitizing invalid gasprice oracle sample blocks", "provided", params.Blocks, "updated", blocks)
+		log.Warn("[GasPriceOracle] Sanitizing invalid gasprice oracle sample blocks", "provided", params.Blocks, "updated", blocks)
 	}
 	percent := params.Percentile
 	if percent < 0 {
 		percent = 0
-		log.Warn("Sanitizing invalid gasprice oracle sample percentile", "provided", params.Percentile, "updated", percent)
+		log.Warn("[GasPriceOracle] Sanitizing invalid gasprice oracle sample percentile", "provided", params.Percentile, "updated", percent)
 	}
 	if percent > 100 {
 		percent = 100
-		log.Warn("Sanitizing invalid gasprice oracle sample percentile", "provided", params.Percentile, "updated", percent)
+		log.Warn("[GasPriceOracle] Sanitizing invalid gasprice oracle sample percentile", "provided", params.Percentile, "updated", percent)
 	}
 	maxPrice := params.MaxPrice
 	if maxPrice == nil || maxPrice.Int64() <= 0 {
 		maxPrice = gaspricecfg.DefaultMaxPrice
-		log.Warn("Sanitizing invalid gasprice oracle price cap", "provided", params.MaxPrice, "updated", maxPrice)
+		log.Warn("[GasPriceOracle] Sanitizing invalid gasprice oracle price cap", "provided", params.MaxPrice, "updated", maxPrice)
 	}
 	ignorePrice := params.IgnorePrice
 	if ignorePrice == nil || ignorePrice.Int64() < 0 {
 		ignorePrice = gaspricecfg.DefaultIgnorePrice
-		log.Warn("Sanitizing invalid gasprice oracle ignore price", "provided", params.IgnorePrice, "updated", ignorePrice)
+		log.Warn("[GasPriceOracle] Sanitizing invalid gasprice oracle ignore price", "provided", params.IgnorePrice, "updated", ignorePrice)
 	}
+
+	setBorDefaultGpoIgnorePrice(backend.ChainConfig(), params)
+
 	return &Oracle{
 		backend:          backend,
 		lastPrice:        params.Default,
@@ -187,7 +190,7 @@ func (t *transactionsByGasPrice) Push(x interface{}) {
 	// not just its contents.
 	l, ok := x.(types.Transaction)
 	if !ok {
-		log.Error("Type assertion failure", "err", "cannot get types.Transaction from interface")
+		log.Error("[GasPriceOracle] Type assertion failure", "err", "cannot get types.Transaction from interface")
 	}
 	t.txs = append(t.txs, l)
 }
@@ -211,12 +214,12 @@ func (oracle *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit
 	ignoreUnder, overflow := uint256.FromBig(ingoreUnderBig)
 	if overflow {
 		err := errors.New("overflow in getBlockPrices, gasprice.go: ignoreUnder too large")
-		log.Error("gasprice.go: getBlockPrices", "err", err)
+		log.Error("[GasPriceOracle] getBlockPrices", "err", err)
 		return err
 	}
 	block, err := oracle.backend.BlockByNumber(ctx, rpc.BlockNumber(blockNum))
 	if err != nil {
-		log.Error("gasprice.go: getBlockPrices", "err", err)
+		log.Error("[GasPriceOracle] getBlockPrices", "err", err)
 		return err
 	}
 
@@ -234,7 +237,7 @@ func (oracle *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit
 		baseFee, overflow = uint256.FromBig(block.BaseFee())
 		if overflow {
 			err := errors.New("overflow in getBlockPrices, gasprice.go: baseFee > 2^256-1")
-			log.Error("gasprice.go: getBlockPrices", "err", err)
+			log.Error("[GasPriceOracle] getBlockPrices", "err", err)
 			return err
 		}
 	}
@@ -279,4 +282,12 @@ func (s *sortingHeap) Pop() interface{} {
 	old[n-1] = nil // avoid memory leak
 	*s = old[0 : n-1]
 	return x
+}
+
+// setBorDefaultGpoIgnorePrice enforces gpo IgnorePrice to be equal to BorDefaultGpoIgnorePrice  (30gwei by default)
+func setBorDefaultGpoIgnorePrice(chainConfig *chain.Config, gasPriceConfig gaspricecfg.Config) {
+	if chainConfig.Bor != nil && gasPriceConfig.IgnorePrice != gaspricecfg.BorDefaultGpoIgnorePrice {
+		log.Warn("[GasPriceOracle] Sanitizing invalid bor gasprice oracle ignore price", "provided", gasPriceConfig.IgnorePrice, "updated", gaspricecfg.BorDefaultGpoIgnorePrice)
+		gasPriceConfig.IgnorePrice = gaspricecfg.BorDefaultGpoIgnorePrice
+	}
 }

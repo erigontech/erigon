@@ -1,9 +1,7 @@
 package jsonrpc
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
 	"math/big"
 
@@ -16,13 +14,13 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/eth/ethutils"
+	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
 
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
@@ -31,19 +29,29 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/filters"
-	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
 
-func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chain.Config, block *types.Block, senders []common.Address) (types.Receipts, error) {
-	if cached := rawdb.ReadReceipts(tx, block, senders); cached != nil {
-		return cached, nil
+// getReceipts - checking in-mem cache, or else fallback to db, or else fallback to re-exec of block to re-gen receipts
+func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, block *types.Block, senders []common.Address) (types.Receipts, error) {
+	if receipts, ok := api.receiptsCache.Get(block.Hash()); ok {
+		return receipts, nil
 	}
-	engine := api.engine()
 
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, 0, api.historyV3(tx))
+	if receipts := rawdb.ReadReceipts(tx, block, senders); receipts != nil {
+		api.receiptsCache.Add(block.Hash(), receipts)
+		return receipts, nil
+	}
+
+	engine := api.engine()
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -74,6 +82,7 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chai
 		receipts[i] = receipt
 	}
 
+	api.receiptsCache.Add(block.Hash(), receipts)
 	return receipts, nil
 }
 
@@ -89,11 +98,10 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	defer tx.Rollback()
 
 	if crit.BlockHash != nil {
-		block, err := api._blockReader.BlockByHash(ctx, tx, *crit.BlockHash)
+		block, err := api.blockByHashWithSenders(ctx, tx, *crit.BlockHash)
 		if err != nil {
 			return nil, err
 		}
-
 		if block == nil {
 			return nil, fmt.Errorf("block not found: %x", *crit.BlockHash)
 		}
@@ -151,93 +159,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		end = latest
 	}
 
-	if api.historyV3(tx) {
-		return api.getLogsV3(ctx, tx.(kv.TemporalTx), begin, end, crit)
-	}
-	blockNumbers := bitmapdb.NewBitmap()
-	defer bitmapdb.ReturnToPool(blockNumbers)
-	if err := applyFilters(blockNumbers, tx, begin, end, crit); err != nil {
-		return logs, err
-	}
-	if blockNumbers.IsEmpty() {
-		return logs, nil
-	}
-	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
-	for _, v := range crit.Addresses {
-		addrMap[v] = struct{}{}
-	}
-	iter := blockNumbers.Iterator()
-	for iter.HasNext() {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-
-		blockNumber := uint64(iter.Next())
-		var logIndex uint
-		var txIndex uint
-		var blockLogs []*types.Log
-
-		it, err := tx.Prefix(kv.Log, hexutility.EncodeTs(blockNumber))
-		if err != nil {
-			return nil, err
-		}
-		for it.HasNext() {
-			k, v, err := it.Next()
-			if err != nil {
-				return logs, err
-			}
-
-			var logs types.Logs
-			if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
-				return logs, fmt.Errorf("receipt unmarshal failed:  %w", err)
-			}
-			for _, log := range logs {
-				log.Index = logIndex
-				logIndex++
-			}
-			filtered := logs.Filter(addrMap, crit.Topics)
-			if len(filtered) == 0 {
-				continue
-			}
-			txIndex = uint(binary.BigEndian.Uint32(k[8:]))
-			for _, log := range filtered {
-				log.TxIndex = txIndex
-			}
-			blockLogs = append(blockLogs, filtered...)
-		}
-		if casted, ok := it.(kv.Closer); ok {
-			casted.Close()
-		}
-		if len(blockLogs) == 0 {
-			continue
-		}
-
-		blockHash, err := api._blockReader.CanonicalHash(ctx, tx, blockNumber)
-		if err != nil {
-			return nil, err
-		}
-
-		body, err := api._blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
-		if err != nil {
-			return nil, err
-		}
-		if body == nil {
-			return nil, fmt.Errorf("block not found %d", blockNumber)
-		}
-		for _, log := range blockLogs {
-			log.BlockNumber = blockNumber
-			log.BlockHash = blockHash
-			// bor transactions are at the end of the bodies transactions (added manually but not actually part of the block)
-			if log.TxIndex == uint(len(body.Transactions)) {
-				log.TxHash = types.ComputeBorTxHash(blockNumber, blockHash)
-			} else {
-				log.TxHash = body.Transactions[log.TxIndex].Hash()
-			}
-		}
-		logs = append(logs, blockLogs...)
-	}
-
-	return logs, nil
+	return api.getLogsV3(ctx, tx.(kv.TemporalTx), begin, end, crit)
 }
 
 // The Topic list restricts matches to particular event topics. Each event has a list
@@ -397,17 +319,12 @@ func applyFiltersV3(tx kv.TemporalTx, begin, end uint64, crit filters.FilterCrit
 func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) ([]*types.Log, error) {
 	logs := []*types.Log{}
 
-	txNumbers, err := applyFiltersV3(tx, begin, end, crit)
-	if err != nil {
-		return logs, err
-	}
-
 	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
 	for _, v := range crit.Addresses {
 		addrMap[v] = struct{}{}
 	}
 
-	chainConfig, err := api.chainConfig(tx)
+	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -416,7 +333,12 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	var blockHash common.Hash
 	var header *types.Header
 
+	txNumbers, err := applyFiltersV3(tx, begin, end, crit)
+	if err != nil {
+		return logs, err
+	}
 	iter := rawdbv3.TxNums2BlockNums(tx, txNumbers, order.Asc)
+	defer iter.Close()
 	for iter.HasNext() {
 		if err = ctx.Err(); err != nil {
 			return nil, err
@@ -530,12 +452,12 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	var blockNum uint64
 	var ok bool
 
-	blockNum, ok, err = api.txnLookup(tx, txnHash)
+	blockNum, ok, err = api.txnLookup(ctx, tx, txnHash)
 	if err != nil {
 		return nil, err
 	}
 
-	cc, err := api.chainConfig(tx)
+	cc, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -551,7 +473,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, nil
 	}
 
-	block, err := api.blockByNumberWithSenders(tx, blockNum)
+	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -573,10 +495,10 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	if txn == nil && cc.Bor != nil {
 		borTx = rawdb.ReadBorTransactionForBlock(tx, blockNum)
 		if borTx == nil {
-			borTx = types.NewBorTransaction()
+			borTx = bortypes.NewBorTransaction()
 		}
 	}
-	receipts, err := api.getReceipts(ctx, tx, cc, block, block.Body().SendersFromTxs())
+	receipts, err := api.getReceipts(ctx, tx, block, block.Body().SendersFromTxs())
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
@@ -611,18 +533,18 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	if err != nil {
 		return nil, err
 	}
-	block, err := api.blockWithSenders(tx, blockHash, blockNum)
+	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
 	if block == nil {
 		return nil, nil
 	}
-	chainConfig, err := api.chainConfig(tx)
+	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
-	receipts, err := api.getReceipts(ctx, tx, chainConfig, block, block.Body().SendersFromTxs())
+	receipts, err := api.getReceipts(ctx, tx, block, block.Body().SendersFromTxs())
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}

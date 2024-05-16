@@ -90,7 +90,7 @@ type RecSplit struct {
 	golombRice        []uint32
 	bucketSizeAcc     []uint64 // Bucket size accumulator
 	// Helper object to encode the sequence of cumulative number of keys in the buckets
-	// and the sequence of of cumulative bit offsets of buckets in the Golomb-Rice code.
+	// and the sequence of cumulative bit offsets of buckets in the Golomb-Rice code.
 	ef                 eliasfano16.DoubleEliasFano
 	lvl                log.Lvl
 	bytesPerRec        int
@@ -136,6 +136,8 @@ type RecSplitArgs struct {
 	EtlBufLimit datasize.ByteSize
 	Salt        *uint32 // Hash seed (salt) for the hash function used for allocating the initial buckets - need to be generated randomly
 	LeafSize    uint16
+
+	NoFsync bool // fsync is enabled by default, but tests can manually disable
 }
 
 // NewRecSplit creates a new RecSplit instance with given number of keys and given bucket size
@@ -207,6 +209,9 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	}
 	rs.startSeed = args.StartSeed
 	rs.count = make([]uint16, rs.secondaryAggrBound)
+	if args.NoFsync {
+		rs.DisableFsync()
+	}
 	return rs, nil
 }
 
@@ -456,7 +461,7 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 	salt := rs.startSeed[level]
 	m := uint16(len(bucket))
 	if m <= rs.leafSize {
-		// No need to build aggregation levels - just find find bijection
+		// No need to build aggregation levels - just find bijection
 		var mask uint32
 		for {
 			mask = 0

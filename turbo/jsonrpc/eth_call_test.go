@@ -15,7 +15,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 
@@ -191,7 +191,7 @@ func TestGetProof(t *testing.T) {
 			tx, err := m.DB.BeginRo(context.Background())
 			assert.NoError(t, err)
 			defer tx.Rollback()
-			header, err := api.headerByRPCNumber(rpc.BlockNumber(tt.blockNum), tx)
+			header, err := api.headerByRPCNumber(context.Background(), rpc.BlockNumber(tt.blockNum), tx)
 			require.NoError(t, err)
 
 			require.Equal(t, tt.addr, proof.Address)
@@ -534,13 +534,13 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, libcommon.Addres
 	}
 	defer tx.Rollback()
 
-	stateReader, err := rpchelper.CreateHistoryStateReader(tx, 1, 0, m.HistoryV3, "")
+	stateReader, err := rpchelper.CreateHistoryStateReader(tx, 1, 0, "")
 	assert.NoError(t, err)
 	st := state.New(stateReader)
 	assert.NoError(t, err)
 	assert.False(t, st.Exist(contractAddr), "Contract should not exist at block #1")
 
-	stateReader, err = rpchelper.CreateHistoryStateReader(tx, 2, 0, m.HistoryV3, "")
+	stateReader, err = rpchelper.CreateHistoryStateReader(tx, 2, 0, "")
 	assert.NoError(t, err)
 	st = state.New(stateReader)
 	assert.NoError(t, err)

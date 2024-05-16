@@ -17,8 +17,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
+	types "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/log/v3"
@@ -67,7 +67,7 @@ var supportCommand = cli.Command{
 	Usage:     "Connect Erigon instance to a diagnostics system for support",
 	ArgsUsage: "--diagnostics.addr <URL for the diagnostics system> --ids <diagnostic session ids allowed to connect> --metrics.urls <http://erigon_host:metrics_port>",
 	Before: func(cliCtx *cli.Context) error {
-		_, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+		_, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 		if err != nil {
 			return err
 		}
@@ -185,7 +185,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 	nodes := map[string]*node{}
 
 	for _, debugURL := range debugURLs {
-		debugResponse, err := metricsClient.Get(debugURL + "/debug/nodeinfo")
+		debugResponse, err := metricsClient.Get(debugURL + "/debug/diag/nodeinfo")
 
 		if err != nil {
 			return err
@@ -326,7 +326,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 					queryString = "?" + nodeRequest.QueryParams.Encode()
 				}
 
-				debugURL := node.debugURL + "/debug/" + requests[0].Method + queryString
+				debugURL := node.debugURL + "/debug/diag/" + requests[0].Method + queryString
 				debugResponse, err := metricsClient.Get(debugURL)
 
 				if err != nil {

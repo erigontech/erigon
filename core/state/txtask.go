@@ -62,6 +62,8 @@ type TxTask struct {
 	// Need investigate if we can pass here - only limited amount of receipts
 	// And remove this field if possible - because it will make problems for parallel-execution
 	BlockReceipts types.Receipts
+
+	Requests types.Requests
 }
 
 func (t *TxTask) Reset() {

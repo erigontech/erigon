@@ -7,6 +7,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -108,20 +109,25 @@ type FullBlockReader interface {
 
 	Snapshots() BlockSnapshots
 	BorSnapshots() BlockSnapshots
+
+	AllTypes() []snaptype.Type
 }
 
 type BlockSnapshots interface {
 	LogStat(label string)
 	ReopenFolder() error
+	ReopenSegments(types []snaptype.Type, allowGaps bool) error
 	SegmentsMax() uint64
 	SegmentsMin() uint64
+	Delete(fileName string) error
+	Types() []snaptype.Type
 	Close()
 }
 
 // BlockRetire - freezing blocks: moving old data from DB to snapshot files
 type BlockRetire interface {
 	PruneAncientBlocks(tx kv.RwTx, limit int) error
-	RetireBlocksInBackground(ctx context.Context, miBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []DownloadRequest) error, onDelete func(l []string) error)
+	RetireBlocksInBackground(ctx context.Context, miBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []DownloadRequest) error, onDelete func(l []string) error, onFinishRetire func() error)
 	HasNewFrozenFiles() bool
 	BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier DBEventNotifier, cc *chain.Config) error
 	SetWorkers(workers int)

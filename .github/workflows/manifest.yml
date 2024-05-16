@@ -2,15 +2,13 @@ name: Manifest Check
 on:
   push:
     branches:
-      - devel
-      - e35
+      - main
       - 'release/**'
     paths:
       - 'go.mod'
   pull_request:
     branches:
-      - devel
-      - e35
+      - main
       - 'release/**'
     paths:
       - 'go.mod'
@@ -27,7 +25,7 @@ jobs:
       modified: ${{ steps.check-modified.outputs.modified }}
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 2 # Ensures we fetch enough history to compare
 
@@ -45,7 +43,7 @@ jobs:
 #    runs-on: ${{ matrix.os }}
 #
 #    steps:
-#      - uses: actions/checkout@v3
+#      - uses: actions/checkout@v4
 #      - uses: actions/setup-go@v4
 #        with:
 #          go-version: '1.21'

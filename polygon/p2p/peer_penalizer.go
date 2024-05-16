@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
 )
 
 type PeerPenalizer interface {

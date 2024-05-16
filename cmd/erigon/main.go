@@ -44,8 +44,9 @@ func runErigon(cliCtx *cli.Context) error {
 	var logger log.Logger
 	var err error
 	var metricsMux *http.ServeMux
+	var pprofMux *http.ServeMux
 
-	if logger, metricsMux, err = debug.Setup(cliCtx, true /* root logger */); err != nil {
+	if logger, metricsMux, pprofMux, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
 
@@ -68,9 +69,7 @@ func runErigon(cliCtx *cli.Context) error {
 		return err
 	}
 
-	if metricsMux != nil {
-		diagnostics.Setup(cliCtx, metricsMux, ethNode)
-	}
+	diagnostics.Setup(cliCtx, ethNode, metricsMux, pprofMux)
 
 	err = ethNode.Serve()
 	if err != nil {

@@ -10,29 +10,30 @@ import (
 )
 
 var (
-	chaindata                      string
-	databaseVerbosity              int
-	referenceChaindata             string
-	block, pruneTo, unwind         uint64
-	unwindEvery                    uint64
-	batchSizeStr                   string
-	reset, warmup, noCommit        bool
-	resetPruneAt                   bool
-	bucket                         string
-	datadirCli, toChaindata        string
-	migration                      string
-	squeezeCommitmentFiles         bool
-	integrityFast, integritySlow   bool
-	file                           string
-	HeimdallURL                    string
-	txtrace                        bool // Whether to trace the execution (should only be used together with `block`)
-	pruneFlag                      string
-	pruneH, pruneR, pruneT, pruneC uint64
-	pruneHBefore, pruneRBefore     uint64
-	pruneTBefore, pruneCBefore     uint64
-	experiments                    []string
-	chain                          string // Which chain to use (mainnet, goerli, sepolia, etc.)
-	outputCsvFile                  string
+	chaindata                                string
+	databaseVerbosity                        int
+	referenceChaindata                       string
+	block, pruneTo, unwind                   uint64
+	unwindEvery                              uint64
+	batchSizeStr                             string
+	reset, warmup, noCommit                  bool
+	resetPruneAt                             bool
+	bucket                                   string
+	datadirCli, toChaindata                  string
+	migration                                string
+	squeezeCommitmentFiles                   bool
+	integrityFast, integritySlow             bool
+	file                                     string
+	HeimdallURL                              string
+	txtrace                                  bool // Whether to trace the execution (should only be used together with `block`)
+	pruneFlag                                string
+	pruneB, pruneH, pruneR, pruneT, pruneC   uint64
+	pruneBBefore, pruneHBefore, pruneRBefore uint64
+	pruneTBefore, pruneCBefore               uint64
+	experiments                              []string
+	unwindTypes                              []string
+	chain                                    string // Which chain to use (mainnet, goerli, sepolia, etc.)
+	outputCsvFile                            string
 
 	commitmentMode string
 	commitmentTrie string

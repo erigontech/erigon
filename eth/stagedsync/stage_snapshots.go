@@ -33,16 +33,18 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/etl"
-	protodownloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
+	protodownloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
+	borsnaptype "github.com/ledgerwatch/erigon/polygon/bor/snaptype"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -61,13 +63,13 @@ type SnapshotsCfg struct {
 	blockReader        services.FullBlockReader
 	notifier           *shards.Notifications
 
-	historyV3        bool
 	caplin           bool
 	blobs            bool
 	agg              *state.Aggregator
 	silkworm         *silkworm.Silkworm
 	snapshotUploader *snapshotUploader
 	syncConfig       ethconfig.Sync
+	prune            prune.Mode
 }
 
 func StageSnapshotsCfg(db kv.RwDB,
@@ -78,11 +80,11 @@ func StageSnapshotsCfg(db kv.RwDB,
 	snapshotDownloader protodownloader.DownloaderClient,
 	blockReader services.FullBlockReader,
 	notifier *shards.Notifications,
-	historyV3 bool,
 	agg *state.Aggregator,
 	caplin bool,
 	blobs bool,
 	silkworm *silkworm.Silkworm,
+	prune prune.Mode,
 ) SnapshotsCfg {
 	cfg := SnapshotsCfg{
 		db:                 db,
@@ -92,12 +94,12 @@ func StageSnapshotsCfg(db kv.RwDB,
 		snapshotDownloader: snapshotDownloader,
 		blockReader:        blockReader,
 		notifier:           notifier,
-		historyV3:          historyV3,
 		caplin:             caplin,
 		agg:                agg,
 		silkworm:           silkworm,
 		syncConfig:         syncConfig,
 		blobs:              blobs,
+		prune:              prune,
 	}
 
 	if uploadFs := cfg.syncConfig.UploadLocation; len(uploadFs) > 0 {
@@ -152,7 +154,6 @@ func SpawnStageSnapshots(
 		}
 		defer tx.Rollback()
 	}
-
 	if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg, initialCycle, logger); err != nil {
 		return err
 	}
@@ -232,7 +233,16 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			}
 		}
 	} else {
-		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.historyV3, cfg.blobs, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
+
+		// Download only the snapshots that are for the header chain.
+		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, true, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
+			return err
+		}
+		if err := cfg.blockReader.Snapshots().ReopenSegments([]snaptype.Type{coresnaptype.Headers, coresnaptype.Bodies}, true); err != nil {
+			return err
+		}
+
+		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, false, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
 			return err
 		}
 	}
@@ -252,21 +262,19 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 	}
 
-	if cfg.historyV3 {
-		indexWorkers := estimate.IndexSnapshot.Workers()
-		if err := cfg.agg.BuildOptionalMissedIndices(ctx, indexWorkers); err != nil {
-			return err
-		}
-		if err := cfg.agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
-			return err
-		}
-		if cfg.notifier.Events != nil {
-			cfg.notifier.Events.OnNewSnapshot()
-		}
+	indexWorkers := estimate.IndexSnapshot.Workers()
+	if err := cfg.agg.BuildOptionalMissedIndices(ctx, indexWorkers); err != nil {
+		return err
+	}
+	if err := cfg.agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
+		return err
+	}
+	if cfg.notifier.Events != nil {
+		cfg.notifier.Events.OnNewSnapshot()
+	}
 
-		if casted, ok := tx.(*temporal.Tx); ok {
-			casted.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
-		}
+	if casted, ok := tx.(*temporal.Tx); ok {
+		casted.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
 	}
 
 	frozenBlocks := cfg.blockReader.FrozenBlocks()
@@ -286,7 +294,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 	{
 		cfg.blockReader.Snapshots().LogStat("download")
-		tx.(state.HasAggCtx).AggCtx().(*state.AggregatorRoTx).LogStats(tx, func(endTxNumMinimax uint64) uint64 {
+		tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx).LogStats(tx, func(endTxNumMinimax uint64) uint64 {
 			_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
 			return histBlockNumProgress
 		})
@@ -369,40 +377,37 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				return err
 			}
 
-			historyV3, err := kvcfg.HistoryV3.Enabled(tx)
 			if err != nil {
 				return err
 			}
-			if historyV3 {
-				_ = tx.ClearBucket(kv.MaxTxNum)
-				if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
-					select {
-					case <-ctx.Done():
-						return ctx.Err()
-					case <-logEvery.C:
-						logger.Info(fmt.Sprintf("[%s] MaxTxNums index: %dk/%dk", logPrefix, blockNum/1000, blockReader.FrozenBlocks()/1000))
-					default:
-					}
-					if baseTxNum+txAmount == 0 {
-						panic(baseTxNum + txAmount) //uint-underflow
-					}
-					maxTxNum := baseTxNum + txAmount - 1
-
-					if err := rawdbv3.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
-						return fmt.Errorf("%w. blockNum=%d, maxTxNum=%d", err, blockNum, maxTxNum)
-					}
-					return nil
-				}); err != nil {
-					return fmt.Errorf("build txNum => blockNum mapping: %w", err)
+			_ = tx.ClearBucket(kv.MaxTxNum)
+			if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-logEvery.C:
+					logger.Info(fmt.Sprintf("[%s] MaxTxNums index: %dk/%dk", logPrefix, blockNum/1000, blockReader.FrozenBlocks()/1000))
+				default:
 				}
-				if blockReader.FrozenBlocks() > 0 {
-					if err := rawdb.AppendCanonicalTxNums(tx, blockReader.FrozenBlocks()+1); err != nil {
-						return err
-					}
-				} else {
-					if err := rawdb.AppendCanonicalTxNums(tx, 0); err != nil {
-						return err
-					}
+				if baseTxNum+txAmount == 0 {
+					panic(baseTxNum + txAmount) //uint-underflow
+				}
+				maxTxNum := baseTxNum + txAmount - 1
+
+				if err := rawdbv3.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
+					return fmt.Errorf("%w. blockNum=%d, maxTxNum=%d", err, blockNum, maxTxNum)
+				}
+				return nil
+			}); err != nil {
+				return fmt.Errorf("build txNum => blockNum mapping: %w", err)
+			}
+			if blockReader.FrozenBlocks() > 0 {
+				if err := rawdb.AppendCanonicalTxNums(tx, blockReader.FrozenBlocks()+1); err != nil {
+					return err
+				}
+			} else {
+				if err := rawdb.AppendCanonicalTxNums(tx, 0); err != nil {
+					return err
 				}
 			}
 			ac := agg.BeginFilesRo()
@@ -414,6 +419,11 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 		}
 	}
 	return nil
+}
+
+func computeBlocksToPrune(cfg SnapshotsCfg) (blocksToPrune uint64, historyToPrune uint64) {
+	frozenBlocks := cfg.blockReader.Snapshots().SegmentsMax()
+	return frozenBlocks - cfg.prune.Blocks.PruneTo(frozenBlocks), frozenBlocks - cfg.prune.History.PruneTo(frozenBlocks)
 }
 
 /* ====== PRUNING ====== */
@@ -475,6 +485,12 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 				}
 
 				return nil
+			}, func() error {
+				filesDeleted, err := pruneBlockSnapshots(ctx, cfg, logger)
+				if filesDeleted && cfg.notifier != nil {
+					cfg.notifier.Events.OnNewSnapshot()
+				}
+				return err
 			})
 
 			//cfg.agg.BuildFilesInBackground()
@@ -518,6 +534,66 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 	}
 
 	return nil
+}
+
+func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logger) (bool, error) {
+	tx, err := cfg.db.BeginRo(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	// Prune snapshots if necessary (remove .segs or idx files appropriatelly)
+	headNumber := cfg.blockReader.FrozenBlocks()
+	executionProgress, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return false, err
+	}
+	// If we are behind the execution stage, we should not prune snapshots
+	if headNumber > executionProgress {
+		return false, nil
+	}
+
+	// Keep at least 2 block snapshots as we do not want FrozenBlocks to be 0
+	pruneAmount, _ := computeBlocksToPrune(cfg)
+	if pruneAmount == 0 {
+		return false, nil
+	}
+
+	minBlockNumberToKeep := uint64(0)
+	if headNumber > pruneAmount {
+		minBlockNumberToKeep = headNumber - pruneAmount
+	}
+
+	snapshotFileNames := cfg.blockReader.FrozenFiles()
+	filesDeleted := false
+	// Prune blocks snapshots if necessary
+	for _, file := range snapshotFileNames {
+		if !cfg.prune.Blocks.Enabled() || headNumber == 0 || !strings.Contains(file, "transactions") {
+			continue
+		}
+
+		// take the snapshot file name and parse it to get the "from"
+		info, _, ok := snaptype.ParseFileName(cfg.dirs.Snap, file)
+		if !ok {
+			continue
+		}
+		if info.To >= minBlockNumberToKeep {
+			continue
+		}
+		if info.To-info.From != snaptype.Erigon2MergeLimit {
+			continue
+		}
+		if cfg.snapshotDownloader != nil {
+			if _, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: []string{file}}); err != nil {
+				return filesDeleted, err
+			}
+		}
+		if err := cfg.blockReader.Snapshots().Delete(file); err != nil {
+			return filesDeleted, err
+		}
+		filesDeleted = true
+	}
+	return filesDeleted, nil
 }
 
 type uploadState struct {
@@ -564,14 +640,14 @@ func (u *snapshotUploader) maxUploadedHeader() uint64 {
 		for _, state := range u.files {
 			if state.local && state.remote {
 				if state.info != nil {
-					if state.info.Type.Enum() == snaptype.Enums.Headers {
+					if state.info.Type.Enum() == coresnaptype.Enums.Headers {
 						if state.info.To > max {
 							max = state.info.To
 						}
 					}
 				} else {
 					if info, _, ok := snaptype.ParseFileName(u.cfg.dirs.Snap, state.file); ok {
-						if info.Type.Enum() == snaptype.Enums.Headers {
+						if info.Type.Enum() == coresnaptype.Enums.Headers {
 							if info.To > max {
 								max = info.To
 							}
@@ -1043,7 +1119,8 @@ func (u *snapshotUploader) removeBefore(before uint64) {
 	for _, f := range list {
 		if f.To > before {
 			switch f.Type.Enum() {
-			case snaptype.Enums.BorEvents, snaptype.Enums.BorSpans:
+			case borsnaptype.Enums.BorEvents, borsnaptype.Enums.BorSpans,
+				borsnaptype.Enums.BorCheckpoints, borsnaptype.Enums.BorMilestones:
 				borToReopen = append(borToReopen, filepath.Base(f.Path))
 			default:
 				toReopen = append(toReopen, filepath.Base(f.Path))

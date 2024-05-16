@@ -104,9 +104,9 @@ func TestDomain_OpenFolder(t *testing.T) {
 
 	collateAndMerge(t, db, nil, d, txs)
 
-	list := d._visibleFiles.Load()
+	list := d._visibleFiles
 	require.NotEmpty(t, list)
-	ff := (*list)[len(*list)-1]
+	ff := list[len(list)-1]
 	fn := ff.src.decompressor.FilePath()
 	d.Close()
 
@@ -225,7 +225,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		//}
 
 		for i := 0; i < len(words); i += 2 {
-			c, _ := sf.valuesBt.SeekDeprecated([]byte(words[i]))
+			c, _ := sf.valuesBt.Seek(g, []byte(words[i]))
 			require.Equal(t, words[i], string(c.Key()))
 			require.Equal(t, words[i+1], string(c.Value()))
 		}
@@ -249,7 +249,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		// Check index
 		require.Equal(t, 1, int(sf.valuesBt.KeyCount()))
 		for i := 0; i < len(words); i += 2 {
-			c, _ := sf.valuesBt.SeekDeprecated([]byte(words[i]))
+			c, _ := sf.valuesBt.Seek(g, []byte(words[i]))
 			require.Equal(t, words[i], string(c.Key()))
 			require.Equal(t, words[i+1], string(c.Value()))
 		}
@@ -389,7 +389,8 @@ func TestDomain_AfterPrune(t *testing.T) {
 	sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
 	require.NoError(t, err)
 
-	d.integrateFiles(sf, 0, 16)
+	d.integrateDirtyFiles(sf, 0, 16)
+	d.reCalcVisibleFiles()
 	var v []byte
 	dc = d.BeginFilesRo()
 	defer dc.Close()
@@ -576,7 +577,8 @@ func TestIterationMultistep(t *testing.T) {
 			require.NoError(t, err)
 			sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
 			require.NoError(t, err)
-			d.integrateFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
+			d.integrateDirtyFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
+			d.reCalcVisibleFiles()
 
 			dc := d.BeginFilesRo()
 			_, err = dc.Prune(ctx, tx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64, false, logEvery)
@@ -634,7 +636,8 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 		require.NoError(t, err)
 		sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
 		require.NoError(t, err)
-		d.integrateFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
+		d.integrateDirtyFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
+		d.reCalcVisibleFiles()
 
 		dc := d.BeginFilesRo()
 		_, err = dc.Prune(ctx, tx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64, false, logEvery)
@@ -659,7 +662,8 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 			if valuesIn != nil && valuesIn.decompressor != nil {
 				fmt.Printf("merge: %s\n", valuesIn.decompressor.FileName())
 			}
-			d.integrateMergedFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
+			d.integrateMergedDirtyFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
+			d.reCalcVisibleFiles()
 			return false
 		}(); stop {
 			break
@@ -683,7 +687,8 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64, prune
 
 	sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
 	require.NoError(t, err)
-	d.integrateFiles(sf, txFrom, txTo)
+	d.integrateDirtyFiles(sf, txFrom, txTo)
+	d.reCalcVisibleFiles()
 
 	if prune {
 		dc := d.BeginFilesRo()
@@ -706,7 +711,8 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64, prune
 		valuesIn, indexIn, historyIn, err := dc.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
 		require.NoError(t, err)
 
-		d.integrateMergedFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
+		d.integrateMergedDirtyFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
+		d.reCalcVisibleFiles()
 		dc.Close()
 	}
 }
@@ -1055,7 +1061,7 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	defer sf.CleanupOnError()
 	c.Close()
 
-	g := sf.valuesDecomp.MakeGetter()
+	g := NewArchiveGetter(sf.valuesDecomp.MakeGetter(), d.compression)
 	g.Reset(0)
 	var words []string
 	for g.HasNext() {
@@ -1066,7 +1072,7 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	// Check index
 	require.Equal(t, 3, int(sf.valuesBt.KeyCount()))
 	for i := 0; i < len(words); i += 2 {
-		c, _ := sf.valuesBt.SeekDeprecated([]byte(words[i]))
+		c, _ := sf.valuesBt.Seek(g, []byte(words[i]))
 		require.Equal(t, words[i], string(c.Key()))
 		require.Equal(t, words[i+1], string(c.Value()))
 	}
@@ -1292,7 +1298,8 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		sf, err := d.buildFiles(ctx, step, collation, ps)
 		require.NoError(t, err)
 
-		d.integrateFiles(sf, txFrom, txTo)
+		d.integrateDirtyFiles(sf, txFrom, txTo)
+		d.reCalcVisibleFiles()
 		collation.Close()
 
 		logEvery := time.NewTicker(time.Second * 30)
@@ -1306,7 +1313,8 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		dv, di, dh, err := dc.mergeFiles(ctx, vl, il, hl, ranges, nil, ps)
 		require.NoError(t, err)
 
-		d.integrateMergedFiles(vl, il, hl, dv, di, dh)
+		d.integrateMergedDirtyFiles(vl, il, hl, dv, di, dh)
+		d.reCalcVisibleFiles()
 
 		logEvery.Stop()
 
@@ -1427,8 +1435,10 @@ func generateTestDataForDomainCommitment(tb testing.TB, keySize1, keySize2, tota
 		key1 := generateRandomKey(r, keySize1)
 		accs[key1] = generateAccountUpdates(r, totalTx, keyTxsLimit)
 		key2 := key1 + generateRandomKey(r, keySize2-keySize1)
-		stor[key2] = generateStorageUpdates(r, totalTx, keyTxsLimit)
+		stor[key2] = generateArbitraryValueUpdates(r, totalTx, keyTxsLimit, 32)
 	}
+	doms["accounts"] = accs
+	doms["storage"] = stor
 
 	return doms
 }
@@ -1486,14 +1496,15 @@ func generateAccountUpdates(r *rand.Rand, totalTx, keyTxsLimit uint64) []upd {
 	return updates
 }
 
-func generateStorageUpdates(r *rand.Rand, totalTx, keyTxsLimit uint64) []upd {
+func generateArbitraryValueUpdates(r *rand.Rand, totalTx, keyTxsLimit, maxSize uint64) []upd {
 	updates := make([]upd, 0)
 	usedTxNums := make(map[uint64]bool)
+	//maxStorageSize := 24 * (1 << 10) // limit on contract code
 
 	for i := uint64(0); i < keyTxsLimit; i++ {
 		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
 
-		value := make([]byte, r.Intn(24*(1<<10)))
+		value := make([]byte, r.Intn(int(maxSize)))
 		r.Read(value)
 
 		updates = append(updates, upd{txNum: txNum, value: value})
@@ -1614,7 +1625,6 @@ func TestDomain_CanPruneAfterAggregation(t *testing.T) {
 	d.historyLargeValues = false
 	d.History.compression = CompressKeys | CompressVals
 	d.compression = CompressKeys | CompressVals
-	d.withExistenceIndex = true
 
 	dc := d.BeginFilesRo()
 	defer dc.Close()
@@ -1912,7 +1922,8 @@ func TestDomain_PruneProgress(t *testing.T) {
 
 		sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
 		require.NoError(t, err)
-		d.integrateFiles(sf, txFrom, txTo)
+		d.integrateDirtyFiles(sf, txFrom, txTo)
+		d.reCalcVisibleFiles()
 	}
 	require.NoError(t, rwTx.Commit())
 
@@ -2394,7 +2405,8 @@ func TestDomain_PruneSimple(t *testing.T) {
 		require.NoError(t, err)
 		sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
 		require.NoError(t, err)
-		d.integrateFiles(sf, pruneFrom, pruneTo)
+		d.integrateDirtyFiles(sf, pruneFrom, pruneTo)
+		d.reCalcVisibleFiles()
 		rotx.Rollback()
 
 		dc = d.BeginFilesRo()
@@ -2504,7 +2516,9 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 		lastFile := findFile(st, en)
 		require.NotNilf(t, lastFile, "%d-%d", st/dc.d.aggregationStep, en/dc.d.aggregationStep)
 
-		shortenedKey, found := dc.findShortenedKey([]byte(key), lastFile)
+		lf := NewArchiveGetter(lastFile.decompressor.MakeGetter(), d.compression)
+
+		shortenedKey, found := dc.findShortenedKey([]byte(key), lf, lastFile)
 		require.Truef(t, found, "key %d/%d %x file %d %d %s", ki, len(data), []byte(key), lastFile.startTxNum, lastFile.endTxNum, lastFile.decompressor.FileName())
 		require.NotNil(t, shortenedKey)
 		ki++

@@ -9,8 +9,8 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
-	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	execution "github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
+	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
 
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -64,6 +64,8 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 		pbbr := libcommon.Hash(gointerfaces.ConvertH256ToHash(req.ParentBeaconBlockRoot))
 		param.ParentBeaconBlockRoot = &pbbr
 	}
+
+	// TODO(racytech): add requests (Pectra)
 
 	// First check if we're already building a block with the requested parameters
 	if e.lastParameters != nil {

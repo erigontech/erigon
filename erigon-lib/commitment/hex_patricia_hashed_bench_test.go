@@ -9,7 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 )
 
-func Benchmark_HexPatriciaHahsed_ReviewKeys(b *testing.B) {
+func Benchmark_HexPatriciaHashed_ReviewKeys(b *testing.B) {
 	ms := NewMockState(&testing.T{})
 	ctx := context.Background()
 	hph := NewHexPatriciaHashed(length.Addr, ms)

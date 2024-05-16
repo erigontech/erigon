@@ -5,11 +5,12 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/direct"
-	executionclient "github.com/ledgerwatch/erigon/cl/phase1/execution_client"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/p2p/sentry"
@@ -26,34 +27,42 @@ type service struct {
 	sync *Sync
 
 	p2pService p2p.Service
-	storage    Storage
+	store      Store
 	events     *TipEvents
+
+	heimdallService heimdall.Service
 }
 
 func NewService(
 	logger log.Logger,
 	chainConfig *chain.Config,
+	tmpDir string,
 	sentryClient direct.SentryClient,
 	maxPeers int,
 	statusDataProvider *sentry.StatusDataProvider,
 	heimdallUrl string,
-	executionEngine executionclient.ExecutionEngine,
+	executionClient executionproto.ExecutionClient,
 ) Service {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
-	execution := NewExecutionClient(executionEngine)
-	storage := NewStorage(logger, execution, maxPeers)
+	execution := NewExecutionClient(executionClient)
+	store := NewStore(logger, execution)
 	headersVerifier := VerifyAccumulatedHeaders
 	blocksVerifier := VerifyBlocks
 	p2pService := p2p.NewService(maxPeers, logger, sentryClient, statusDataProvider.GetStatusData)
 	heimdallClient := heimdall.NewHeimdallClient(heimdallUrl, logger)
-	heimdallService := heimdall.NewHeimdallNoStore(heimdallClient, logger)
+	heimdallService := heimdall.NewHeimdall(heimdallClient, logger)
+	heimdallServiceV2 := heimdall.NewService(
+		heimdallUrl,
+		tmpDir,
+		logger,
+	)
 	blockDownloader := NewBlockDownloader(
 		logger,
 		p2pService,
 		heimdallService,
 		headersVerifier,
 		blocksVerifier,
-		storage,
+		store,
 	)
 	spansCache := NewSpansCache()
 	signaturesCache, err := lru.NewARC[common.Hash, common.Address](stagedsync.InMemorySignatures)
@@ -78,7 +87,7 @@ func NewService(
 	}
 	events := NewTipEvents(logger, p2pService, heimdallService)
 	sync := NewSync(
-		storage,
+		store,
 		execution,
 		headersVerifier,
 		blocksVerifier,
@@ -93,50 +102,24 @@ func NewService(
 	return &service{
 		sync:       sync,
 		p2pService: p2pService,
-		storage:    storage,
+		store:      store,
 		events:     events,
+
+		heimdallService: heimdallServiceV2,
 	}
 }
 
-func (s *service) Run(ctx context.Context) error {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+func (s *service) Run(parentCtx context.Context) error {
+	group, ctx := errgroup.WithContext(parentCtx)
 
-	var serviceErr error
-
-	go func() {
-		s.p2pService.Run(ctx)
-	}()
-
-	go func() {
-		err := s.storage.Run(ctx)
-		if (err != nil) && (ctx.Err() == nil) {
-			serviceErr = err
-			cancel()
-		}
-	}()
-
-	go func() {
-		err := s.events.Run(ctx)
-		if (err != nil) && (ctx.Err() == nil) {
-			serviceErr = err
-			cancel()
-		}
-	}()
-
-	go func() {
-		err := s.sync.Run(ctx)
-		if (err != nil) && (ctx.Err() == nil) {
-			serviceErr = err
-			cancel()
-		}
-	}()
-
-	<-ctx.Done()
-
-	if serviceErr != nil {
-		return serviceErr
+	group.Go(func() error { s.p2pService.Run(ctx); return nil })
+	group.Go(func() error { return s.store.Run(ctx) })
+	group.Go(func() error { return s.events.Run(ctx) })
+	// TODO: remove the check when heimdall.NewService is functional
+	if s.heimdallService != nil {
+		group.Go(func() error { return s.heimdallService.Run(ctx) })
 	}
+	group.Go(func() error { return s.sync.Run(ctx) })
 
-	return ctx.Err()
+	return group.Wait()
 }

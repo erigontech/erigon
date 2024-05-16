@@ -20,7 +20,7 @@ import (
 	"context"
 	"io"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
 	"google.golang.org/grpc"
 )
 

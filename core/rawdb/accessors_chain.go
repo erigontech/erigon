@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -41,6 +42,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -608,6 +610,7 @@ func ReadBody(db kv.Getter, hash common.Hash, number uint64) (*types.Body, uint6
 	body := new(types.Body)
 	body.Uncles = bodyForStorage.Uncles
 	body.Withdrawals = bodyForStorage.Withdrawals
+	body.Requests = bodyForStorage.Requests
 
 	if bodyForStorage.TxAmount < 2 {
 		panic(fmt.Sprintf("block body hash too few txs amount: %d, %d", number, bodyForStorage.TxAmount))
@@ -652,6 +655,7 @@ func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBo
 		TxAmount:    uint32(len(body.Transactions)) + 2, /*system txs*/
 		Uncles:      body.Uncles,
 		Withdrawals: body.Withdrawals,
+		Requests:    body.Requests,
 	}
 	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return false, fmt.Errorf("WriteBodyForStorage: %w", err)
@@ -675,6 +679,7 @@ func WriteBody(db kv.RwTx, hash common.Hash, number uint64, body *types.Body) (e
 		TxAmount:    uint32(len(body.Transactions)) + 2,
 		Uncles:      body.Uncles,
 		Withdrawals: body.Withdrawals,
+		Requests:    body.Requests,
 	}
 	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return fmt.Errorf("failed to write body: %w", err)
@@ -812,11 +817,7 @@ func ReadRawReceipts(db kv.Tx, blockNum uint64) types.Receipts {
 		log.Error("logs fetching failed", "err", err)
 		return nil
 	}
-	defer func() {
-		if casted, ok := it.(kv.Closer); ok {
-			casted.Close()
-		}
-	}()
+	defer it.Close()
 	for it.HasNext() {
 		k, v, err := it.Next()
 		if err != nil {
@@ -981,7 +982,7 @@ func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
 	if body == nil {
 		return nil
 	}
-	return types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals)
+	return types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals, body.Requests)
 }
 
 // HasBlock - is more efficient than ReadBlock because doesn't read transactions.
@@ -1140,6 +1141,57 @@ func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt 
 		}
 		counter--
 	}
+
+	checkpointCursor, err := tx.RwCursor(kv.BorCheckpoints)
+	if err != nil {
+		return err
+	}
+
+	defer checkpointCursor.Close()
+	lastCheckpointToRemove, err := heimdall.CheckpointIdAt(tx, blockTo)
+
+	if err != nil {
+		return err
+	}
+
+	var checkpointIdBytes [8]byte
+	binary.BigEndian.PutUint64(checkpointIdBytes[:], uint64(lastCheckpointToRemove))
+	for k, _, err := checkpointCursor.Seek(checkpointIdBytes[:]); err == nil && k != nil; k, _, err = checkpointCursor.Prev() {
+		if err = checkpointCursor.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
+
+	milestoneCursor, err := tx.RwCursor(kv.BorMilestones)
+
+	if err != nil {
+		return err
+	}
+
+	defer milestoneCursor.Close()
+
+	var lastMilestoneToRemove heimdall.MilestoneId
+
+	for blockCount := 1; err != nil && blockCount < blocksDeleteLimit; blockCount++ {
+		lastMilestoneToRemove, err = heimdall.MilestoneIdAt(tx, blockTo-uint64(blockCount))
+
+		if !errors.Is(err, heimdall.ErrMilestoneNotFound) {
+			return err
+		} else {
+			if blockCount == blocksDeleteLimit-1 {
+				return nil
+			}
+		}
+	}
+
+	var milestoneIdBytes [8]byte
+	binary.BigEndian.PutUint64(milestoneIdBytes[:], uint64(lastMilestoneToRemove))
+	for k, _, err := milestoneCursor.Seek(milestoneIdBytes[:]); err == nil && k != nil; k, _, err = milestoneCursor.Prev() {
+		if err = milestoneCursor.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
