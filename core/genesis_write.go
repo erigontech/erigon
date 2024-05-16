@@ -20,7 +20,6 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"embed"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -36,7 +35,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/common"
@@ -187,27 +185,9 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string, logger log.L
 	if err != nil {
 		return nil, nil, err
 	}
-	histV3, err := kvcfg.HistoryV3.Enabled(tx)
-	if err != nil {
-		panic(err)
-	}
 
 	var stateWriter state.StateWriter
-	if histV3 {
-		stateWriter = state.NewNoopWriter()
-	} else {
-		for addr, account := range g.Alloc {
-			if len(account.Code) > 0 || len(account.Storage) > 0 {
-				// Special case for weird tests - inaccessible storage
-				var b [8]byte
-				binary.BigEndian.PutUint64(b[:], state.FirstContractIncarnation)
-				if err := tx.Put(kv.IncarnationMap, addr[:], b[:]); err != nil {
-					return nil, nil, err
-				}
-			}
-		}
-		stateWriter = state.NewPlainStateWriter(tx, tx, 0)
-	}
+	stateWriter = state.NewNoopWriter()
 
 	if block.Number().Sign() != 0 {
 		return nil, statedb, fmt.Errorf("can't commit genesis block with number > 0")
@@ -216,16 +196,6 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string, logger log.L
 		return nil, statedb, fmt.Errorf("cannot write state: %w", err)
 	}
 
-	if !histV3 {
-		if csw, ok := stateWriter.(state.WriterWithChangeSets); ok {
-			if err := csw.WriteChangeSets(); err != nil {
-				return nil, statedb, fmt.Errorf("cannot write change sets: %w", err)
-			}
-			if err := csw.WriteHistory(); err != nil {
-				return nil, statedb, fmt.Errorf("cannot write history: %w", err)
-			}
-		}
-	}
 	return block, statedb, nil
 }
 
@@ -557,6 +527,11 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 		}
 	}
 
+	var requests []*types.Request // TODO(racytech): revisit this after merge, make sure everythin is correct
+	if g.Config != nil && g.Config.IsPrague(g.Timestamp) {
+		requests = []*types.Request{}
+	}
+
 	var root libcommon.Hash
 	var statedb *state.IntraBlockState
 	wg := sync.WaitGroup{}
@@ -633,7 +608,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 
 	head.Root = root
 
-	return types.NewBlock(head, nil, nil, nil, withdrawals), statedb, nil
+	return types.NewBlock(head, nil, nil, nil, withdrawals, requests), statedb, nil
 }
 
 func sortedAllocKeys(m types.GenesisAlloc) []string {

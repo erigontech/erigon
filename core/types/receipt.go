@@ -32,14 +32,6 @@ import (
 
 // go:generate gencodec -type Receipt -field-override receiptMarshaling -out gen_receipt_json.go
 
-// disabling codecgen generation since it does not work for go1.22
-// to get it working need to update github.com/ugorji/go/codec to v1.2.12 which has the fix:
-//   - https://github.com/ugorji/go/commit/8286c2dc986535d23e3fad8d3e816b9dd1e5aea6
-// however updating the lib has caused us issues in the past, and we don't have good unit test coverage for updating atm
-// we also use this for storing Receipts and Logs in the DB - we won't be doing that in Erigon 3
-// do not regen, more context: https://github.com/ledgerwatch/erigon/pull/10105#pullrequestreview-2027423601
-// go:generate codecgen -o receipt_codecgen_gen.go -r "^Receipts$|^Receipt$|^Logs$|^Log$" -st "codec" -j=false -nx=true -ta=true -oe=false -d 2 receipt.go log.go
-
 var (
 	receiptStatusFailedRLP     = []byte{}
 	receiptStatusSuccessfulRLP = []byte{0x01}
@@ -60,21 +52,23 @@ type Receipt struct {
 	Type              uint8  `json:"type,omitempty"`
 	PostState         []byte `json:"root" codec:"1"`
 	Status            uint64 `json:"status" codec:"2"`
-	CumulativeGasUsed uint64 `json:"cumulativeGasUsed" gencodec:"required" codec:"3"`
-	Bloom             Bloom  `json:"logsBloom"         gencodec:"required" codec:"-"`
-	Logs              Logs   `json:"logs"              gencodec:"required" codec:"-"`
+	CumulativeGasUsed uint64 `json:"cumulativeGasUsed" gencodec:"required"`
+	Bloom             Bloom  `json:"logsBloom"         gencodec:"required"`
+	Logs              Logs   `json:"logs"              gencodec:"required"`
 
 	// Implementation fields: These fields are added by geth when processing a transaction.
 	// They are stored in the chain database.
-	TxHash          libcommon.Hash    `json:"transactionHash" gencodec:"required" codec:"-"`
-	ContractAddress libcommon.Address `json:"contractAddress" codec:"-"`
-	GasUsed         uint64            `json:"gasUsed" gencodec:"required" codec:"-"`
+	TxHash          libcommon.Hash    `json:"transactionHash" gencodec:"required"`
+	ContractAddress libcommon.Address `json:"contractAddress"`
+	GasUsed         uint64            `json:"gasUsed" gencodec:"required"`
 
 	// Inclusion information: These fields provide information about the inclusion of the
 	// transaction corresponding to this receipt.
-	BlockHash        libcommon.Hash `json:"blockHash,omitempty" codec:"-"`
-	BlockNumber      *big.Int       `json:"blockNumber,omitempty" codec:"-"`
-	TransactionIndex uint           `json:"transactionIndex" codec:"-"`
+	BlockHash        libcommon.Hash `json:"blockHash,omitempty"`
+	BlockNumber      *big.Int       `json:"blockNumber,omitempty"`
+	TransactionIndex uint           `json:"transactionIndex"`
+
+	firstLogIndex uint32 `json:"-"` // field which used to store in db and re-calc
 }
 
 type receiptMarshaling struct {
@@ -99,28 +93,7 @@ type receiptRLP struct {
 type storedReceiptRLP struct {
 	PostStateOrStatus []byte
 	CumulativeGasUsed uint64
-	Logs              []*LogForStorage
-}
-
-// v4StoredReceiptRLP is the storage encoding of a receipt used in database version 4.
-type v4StoredReceiptRLP struct {
-	PostStateOrStatus []byte
-	CumulativeGasUsed uint64
-	TxHash            libcommon.Hash
-	ContractAddress   libcommon.Address
-	Logs              []*LogForStorage
-	GasUsed           uint64
-}
-
-// v3StoredReceiptRLP is the original storage encoding of a receipt including some unnecessary fields.
-type v3StoredReceiptRLP struct {
-	PostStateOrStatus []byte
-	CumulativeGasUsed uint64
-	//Bloom             Bloom
-	//TxHash            libcommon.Hash
-	ContractAddress libcommon.Address
-	Logs            []*LogForStorage
-	GasUsed         uint64
+	FirstLogIndex     uint32 // Logs have their own incremental Index within block. To allow calc it without re-executing whole block - can store it in Receipt
 }
 
 // NewReceipt creates a barebone transaction receipt, copying the init fields.
@@ -328,99 +301,45 @@ func (r *Receipt) Copy() *Receipt {
 
 type ReceiptsForStorage []*ReceiptForStorage
 
-// ReceiptForStorage is a wrapper around a Receipt that flattens and parses the
-// entire content of a receipt, as opposed to only the consensus fields originally.
+// ReceiptForStorage is a wrapper around a Receipt with RLP serialization
+// that omits the Bloom field and deserialization that re-computes it.
 type ReceiptForStorage Receipt
 
 // EncodeRLP implements rlp.Encoder, and flattens all content fields of a receipt
 // into an RLP stream.
 func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
-	enc := &storedReceiptRLP{
+	var firstLogIndex uint32
+	if len(r.Logs) > 0 {
+		firstLogIndex = uint32(r.Logs[0].Index)
+	}
+	return rlp.Encode(w, &storedReceiptRLP{
 		PostStateOrStatus: (*Receipt)(r).statusEncoding(),
 		CumulativeGasUsed: r.CumulativeGasUsed,
-		Logs:              make([]*LogForStorage, len(r.Logs)),
-	}
-	for i, log := range r.Logs {
-		enc.Logs[i] = (*LogForStorage)(log)
-	}
-	return rlp.Encode(w, enc)
+		FirstLogIndex:     firstLogIndex,
+	})
 }
 
 // DecodeRLP implements rlp.Decoder, and loads both consensus and implementation
 // fields of a receipt from an RLP stream.
 func (r *ReceiptForStorage) DecodeRLP(s *rlp.Stream) error {
-	// Retrieve the entire receipt blob as we need to try multiple decoders
-	blob, err := s.Raw()
-	if err != nil {
-		return err
-	}
-	// Try decoding from the newest format for future proofness, then the older one
-	// for old nodes that just upgraded. V4 was an intermediate unreleased format so
-	// we do need to decode it, but it's not common (try last).
-	if err := decodeStoredReceiptRLP(r, blob); err == nil {
-		return nil
-	}
-	if err := decodeV3StoredReceiptRLP(r, blob); err == nil {
-		return nil
-	}
-	return decodeV4StoredReceiptRLP(r, blob)
-}
-
-func decodeStoredReceiptRLP(r *ReceiptForStorage, blob []byte) error {
 	var stored storedReceiptRLP
-	if err := rlp.DecodeBytes(blob, &stored); err != nil {
+	if err := s.Decode(&stored); err != nil {
 		return err
 	}
 	if err := (*Receipt)(r).setStatus(stored.PostStateOrStatus); err != nil {
 		return err
 	}
 	r.CumulativeGasUsed = stored.CumulativeGasUsed
-	r.Logs = make([]*Log, len(stored.Logs))
-	for i, log := range stored.Logs {
-		r.Logs[i] = (*Log)(log)
-	}
+	r.firstLogIndex = stored.FirstLogIndex
+
+	//r.Logs = make([]*Log, len(stored.Logs))
+	//for i, log := range stored.Logs {
+	//	r.Logs[i] = (*Log)(log)
+	//}
 	//r.Bloom = CreateBloom(Receipts{(*Receipt)(r)})
 
 	return nil
-}
 
-func decodeV4StoredReceiptRLP(r *ReceiptForStorage, blob []byte) error {
-	var stored v4StoredReceiptRLP
-	if err := rlp.DecodeBytes(blob, &stored); err != nil {
-		return err
-	}
-	if err := (*Receipt)(r).setStatus(stored.PostStateOrStatus); err != nil {
-		return err
-	}
-	r.CumulativeGasUsed = stored.CumulativeGasUsed
-	r.TxHash = stored.TxHash
-	r.ContractAddress = stored.ContractAddress
-	r.GasUsed = stored.GasUsed
-	r.Logs = make([]*Log, len(stored.Logs))
-	for i, log := range stored.Logs {
-		r.Logs[i] = (*Log)(log)
-	}
-	//r.Bloom = CreateBloom(Receipts{(*Receipt)(r)})
-
-	return nil
-}
-
-func decodeV3StoredReceiptRLP(r *ReceiptForStorage, blob []byte) error {
-	var stored v3StoredReceiptRLP
-	if err := rlp.DecodeBytes(blob, &stored); err != nil {
-		return err
-	}
-	if err := (*Receipt)(r).setStatus(stored.PostStateOrStatus); err != nil {
-		return err
-	}
-	r.CumulativeGasUsed = stored.CumulativeGasUsed
-	r.ContractAddress = stored.ContractAddress
-	r.GasUsed = stored.GasUsed
-	r.Logs = make([]*Log, len(stored.Logs))
-	for i, log := range stored.Logs {
-		r.Logs[i] = (*Log)(log)
-	}
-	return nil
 }
 
 // Receipts implements DerivableList for receipts.
@@ -507,4 +426,50 @@ func (r Receipts) DeriveFields(hash libcommon.Hash, number uint64, txs Transacti
 		}
 	}
 	return nil
+}
+
+// DeriveFields fills the receipts with their computed fields based on consensus
+// data and contextual infos like containing block and transactions.
+func (rl Receipts) DeriveFieldsV3ForSingleReceipt(i int, blockHash libcommon.Hash, blockNum uint64, txn Transaction) (*Receipt, error) {
+	r := rl[i]
+	logIndex := r.firstLogIndex // logIdx is unique within the block and starts from 0
+
+	sender, ok := txn.cashedSender()
+	if !ok {
+		return nil, fmt.Errorf("tx must have cached sender")
+	}
+
+	blockNumber := new(big.Int).SetUint64(blockNum)
+	// The transaction type and hash can be retrieved from the transaction itself
+	r.Type = txn.Type()
+	r.TxHash = txn.Hash()
+
+	// block location fields
+	r.BlockHash = blockHash
+	r.BlockNumber = blockNumber
+	r.TransactionIndex = uint(i)
+
+	// The contract address can be derived from the transaction itself
+	if txn.GetTo() == nil {
+		// If one wants to deploy a contract, one needs to send a transaction that does not have `To` field
+		// and then the address of the contract one is creating this way will depend on the `tx.From`
+		// and the nonce of the creating account (which is `tx.From`).
+		r.ContractAddress = crypto.CreateAddress(sender, txn.GetNonce())
+	}
+	// The used gas can be calculated based on previous r
+	if i == 0 {
+		r.GasUsed = r.CumulativeGasUsed
+	} else {
+		r.GasUsed = r.CumulativeGasUsed - rl[i-1].CumulativeGasUsed
+	}
+	// The derived log fields can simply be set from the block and transaction
+	for j := 0; j < len(r.Logs); j++ {
+		r.Logs[j].BlockNumber = blockNum
+		r.Logs[j].BlockHash = blockHash
+		r.Logs[j].TxHash = r.TxHash
+		r.Logs[j].TxIndex = uint(i)
+		r.Logs[j].Index = uint(logIndex)
+		logIndex++
+	}
+	return r, nil
 }

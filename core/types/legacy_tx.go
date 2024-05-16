@@ -289,10 +289,11 @@ func (tx *LegacyTx) EncodeRLP(w io.Writer) error {
 	return nil
 }
 
-// DecodeRLP decodes LegacyTx but with the list token already consumed and encodingSize being presented
-func (tx *LegacyTx) DecodeRLP(s *rlp.Stream, encodingSize uint64) error {
-	var err error
-	s.NewList(encodingSize)
+func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
+	_, err := s.List()
+	if err != nil {
+		return fmt.Errorf("legacy tx must be a list: %w", err)
+	}
 	if tx.Nonce, err = s.Uint(); err != nil {
 		return fmt.Errorf("read Nonce: %w", err)
 	}
@@ -430,6 +431,13 @@ func (tx *LegacyTx) GetChainID() *uint256.Int {
 	return DeriveChainId(&tx.V)
 }
 
+func (tx *LegacyTx) cashedSender() (sender libcommon.Address, ok bool) {
+	s := tx.from.Load()
+	if s == nil {
+		return sender, false
+	}
+	return s.(libcommon.Address), true
+}
 func (tx *LegacyTx) Sender(signer Signer) (libcommon.Address, error) {
 	if sc := tx.from.Load(); sc != nil {
 		return sc.(libcommon.Address), nil

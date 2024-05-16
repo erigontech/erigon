@@ -29,7 +29,7 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 		return nil, err
 	}
 	defer domains.Close()
-	ac := domains.AggCtx().(*state.AggregatorRoTx)
+	ac := domains.AggTx().(*state.AggregatorRoTx)
 
 	// has to set this value because it will be used during domain.Commit() call.
 	// If we do not, txNum of block beginning will be used, which will cause invalid txNum on restart following commitment rebuilding
@@ -91,7 +91,7 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 		processed atomic.Uint64
 	)
 
-	sdCtx := state.NewSharedDomainsCommitmentContext(domains, state.CommitmentModeDirect, commitment.VariantHexPatriciaTrie)
+	sdCtx := state.NewSharedDomainsCommitmentContext(domains, commitment.ModeDirect, commitment.VariantHexPatriciaTrie)
 
 	loadKeys := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if sdCtx.KeysCount() >= batchSize {
@@ -104,7 +104,7 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 				"intermediate root", fmt.Sprintf("%x", rh))
 		}
 		processed.Add(1)
-		sdCtx.TouchPlainKey(string(k), nil, nil)
+		sdCtx.TouchKey(kv.AccountsDomain, string(k), nil)
 
 		return nil
 	}
@@ -189,7 +189,7 @@ func RebuildPatriciaTrieBasedOnFiles(rwTx kv.RwTx, cfg TrieCfg, ctx context.Cont
 	}
 
 	var foundHash bool
-	toTxNum := rwTx.(*temporal.Tx).AggCtx().(*state.AggregatorRoTx).EndTxNumNoCommitment()
+	toTxNum := rwTx.(*temporal.Tx).AggTx().(*state.AggregatorRoTx).EndTxNumNoCommitment()
 	ok, blockNum, err := rawdbv3.TxNums.FindBlockNum(rwTx, toTxNum)
 	if err != nil {
 		return libcommon.Hash{}, err

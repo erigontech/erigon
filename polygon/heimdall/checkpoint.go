@@ -20,12 +20,23 @@ type Checkpoint struct {
 	Fields WaypointFields
 }
 
+func (c Checkpoint) RawId() uint64 {
+	return uint64(c.Id)
+}
+
 func (c Checkpoint) StartBlock() *big.Int {
 	return c.Fields.StartBlock
 }
 
 func (c Checkpoint) EndBlock() *big.Int {
 	return c.Fields.EndBlock
+}
+
+func (c Checkpoint) BlockNumRange() ClosedRange {
+	return ClosedRange{
+		Start: c.StartBlock().Uint64(),
+		End:   c.EndBlock().Uint64(),
+	}
 }
 
 func (c Checkpoint) RootHash() libcommon.Hash {

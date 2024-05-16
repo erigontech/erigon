@@ -30,7 +30,7 @@ type DummyCache struct {
 var _ Cache = (*DummyCache)(nil)    // compile-time interface check
 var _ CacheView = (*DummyView)(nil) // compile-time interface check
 
-func NewDummy(stateV3 bool) *DummyCache { return &DummyCache{stateV3: stateV3} }
+func NewDummy() *DummyCache { return &DummyCache{stateV3: true} }
 func (c *DummyCache) View(_ context.Context, tx kv.Tx) (CacheView, error) {
 	return &DummyView{cache: c, tx: tx}, nil
 }

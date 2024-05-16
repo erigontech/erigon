@@ -42,8 +42,8 @@ import (
 
 func (d *Domain) dirtyFilesEndTxNumMinimax() uint64 {
 	minimax := d.History.endTxNumMinimax()
-	if max, ok := d.dirtyFiles.Max(); ok {
-		endTxNum := max.endTxNum
+	if _max, ok := d.dirtyFiles.Max(); ok {
+		endTxNum := _max.endTxNum
 		if minimax == 0 || endTxNum < minimax {
 			minimax = endTxNum
 		}
@@ -53,8 +53,8 @@ func (d *Domain) dirtyFilesEndTxNumMinimax() uint64 {
 
 func (ii *InvertedIndex) endTxNumMinimax() uint64 {
 	var minimax uint64
-	if max, ok := ii.dirtyFiles.Max(); ok {
-		endTxNum := max.endTxNum
+	if _max, ok := ii.dirtyFiles.Max(); ok {
+		endTxNum := _max.endTxNum
 		if minimax == 0 || endTxNum < minimax {
 			minimax = endTxNum
 		}
@@ -62,17 +62,17 @@ func (ii *InvertedIndex) endTxNumMinimax() uint64 {
 	return minimax
 }
 func (ii *InvertedIndex) endIndexedTxNumMinimax(needFrozen bool) uint64 {
-	var max uint64
+	var _max uint64
 	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.index == nil || (needFrozen && !item.frozen) {
 				continue
 			}
-			max = cmp.Max(max, item.endTxNum)
+			_max = cmp.Max(_max, item.endTxNum)
 		}
 		return true
 	})
-	return max
+	return _max
 }
 
 func (h *History) endTxNumMinimax() uint64 {
@@ -80,8 +80,8 @@ func (h *History) endTxNumMinimax() uint64 {
 		return math.MaxUint64
 	}
 	minimax := h.InvertedIndex.endTxNumMinimax()
-	if max, ok := h.dirtyFiles.Max(); ok {
-		endTxNum := max.endTxNum
+	if _max, ok := h.dirtyFiles.Max(); ok {
+		endTxNum := _max.endTxNum
 		if minimax == 0 || endTxNum < minimax {
 			minimax = endTxNum
 		}
@@ -89,20 +89,20 @@ func (h *History) endTxNumMinimax() uint64 {
 	return minimax
 }
 func (h *History) endIndexedTxNumMinimax(needFrozen bool) uint64 {
-	var max uint64
+	var _max uint64
 	if h.dontProduceHistoryFiles && h.dirtyFiles.Len() == 0 {
-		max = math.MaxUint64
+		_max = math.MaxUint64
 	}
 	h.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.index == nil || (needFrozen && !item.frozen) {
 				continue
 			}
-			max = cmp.Max(max, item.endTxNum)
+			_max = cmp.Max(_max, item.endTxNum)
 		}
 		return true
 	})
-	return cmp.Min(max, h.InvertedIndex.endIndexedTxNumMinimax(needFrozen))
+	return cmp.Min(_max, h.InvertedIndex.endIndexedTxNumMinimax(needFrozen))
 }
 
 type DomainRanges struct {
@@ -311,31 +311,34 @@ func (dt *DomainRoTx) maxTxNumInDomainFiles(cold bool) uint64 {
 	return 0
 }
 
-func (ht *HistoryRoTx) maxTxNumInFiles(cold bool) uint64 {
+func (ht *HistoryRoTx) maxTxNumInFiles(onlyFrozen bool) uint64 {
 	if len(ht.files) == 0 {
 		return 0
 	}
-	var max uint64
-	if cold {
+	var _max uint64
+	if onlyFrozen {
 		for i := len(ht.files) - 1; i >= 0; i-- {
 			if !ht.files[i].src.frozen {
 				continue
 			}
-			max = ht.files[i].endTxNum
+			_max = ht.files[i].endTxNum
 			break
 		}
 	} else {
-		max = ht.files[len(ht.files)-1].endTxNum
+		_max = ht.files[len(ht.files)-1].endTxNum
 	}
-	return cmp.Min(max, ht.iit.maxTxNumInFiles(cold))
+	return cmp.Min(_max, ht.iit.maxTxNumInFiles(onlyFrozen))
 }
-func (iit *InvertedIndexRoTx) maxTxNumInFiles(cold bool) uint64 {
+
+func (iit *InvertedIndexRoTx) maxTxNumInFiles(onlyFrozen bool) uint64 {
 	if len(iit.files) == 0 {
 		return 0
 	}
-	if !cold {
-		return iit.files[len(iit.files)-1].endTxNum
+	if !onlyFrozen {
+		return iit.lastTxNumInFiles()
 	}
+
+	// files contains [frozen..., cold...] in that order
 	for i := len(iit.files) - 1; i >= 0; i-- {
 		if !iit.files[i].src.frozen {
 			continue
@@ -540,7 +543,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 
 	fromStep, toStep := r.valuesStartTxNum/dt.d.aggregationStep, r.valuesEndTxNum/dt.d.aggregationStep
 	kvFilePath := dt.d.kvFilePath(fromStep, toStep)
-	kvFile, err := seg.NewCompressor(ctx, "merge", kvFilePath, dt.d.dirs.Tmp, seg.MinPatternScore, dt.d.compressWorkers, log.LvlTrace, dt.d.logger)
+	kvFile, err := seg.NewCompressor(ctx, "merge domain "+dt.d.filenameBase, kvFilePath, dt.d.dirs.Tmp, seg.MinPatternScore, dt.d.compressWorkers, log.LvlTrace, dt.d.logger)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s compressor: %w", dt.d.filenameBase, err)
 	}
@@ -704,7 +707,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 	fromStep, toStep := startTxNum/iit.ii.aggregationStep, endTxNum/iit.ii.aggregationStep
 
 	datPath := iit.ii.efFilePath(fromStep, toStep)
-	if comp, err = seg.NewCompressor(ctx, "Snapshots merge", datPath, iit.ii.dirs.Tmp, seg.MinPatternScore, iit.ii.compressWorkers, log.LvlTrace, iit.ii.logger); err != nil {
+	if comp, err = seg.NewCompressor(ctx, "merge idx "+iit.ii.filenameBase, datPath, iit.ii.dirs.Tmp, seg.MinPatternScore, iit.ii.compressWorkers, log.LvlTrace, iit.ii.logger); err != nil {
 		return nil, fmt.Errorf("merge %s inverted index compressor: %w", iit.ii.filenameBase, err)
 	}
 	if iit.ii.noFsync {
@@ -807,13 +810,6 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 		return nil, err
 	}
 
-	if iit.ii.withExistenceIndex {
-		idxPath := iit.ii.efExistenceIdxFilePath(fromStep, toStep)
-		if outItem.existence, err = buildIndexFilterThenOpen(ctx, outItem.decompressor, iit.ii.compression, idxPath, iit.ii.dirs.Tmp, iit.ii.salt, ps, iit.ii.logger, iit.ii.noFsync); err != nil {
-			return nil, err
-		}
-	}
-
 	closeItem = false
 	return outItem, nil
 }
@@ -868,7 +864,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		fromStep, toStep := r.historyStartTxNum/ht.h.aggregationStep, r.historyEndTxNum/ht.h.aggregationStep
 		datPath := ht.h.vFilePath(fromStep, toStep)
 		idxPath := ht.h.vAccessorFilePath(fromStep, toStep)
-		if comp, err = seg.NewCompressor(ctx, "merge", datPath, ht.h.dirs.Tmp, seg.MinPatternScore, ht.h.compressWorkers, log.LvlTrace, ht.h.logger); err != nil {
+		if comp, err = seg.NewCompressor(ctx, "merge hist "+ht.h.filenameBase, datPath, ht.h.dirs.Tmp, seg.MinPatternScore, ht.h.compressWorkers, log.LvlTrace, ht.h.logger); err != nil {
 			return nil, nil, fmt.Errorf("merge %s history compressor: %w", ht.h.filenameBase, err)
 		}
 		compr := NewArchiveWriter(comp, ht.h.compression)
@@ -959,14 +955,11 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 			TmpDir:     ht.h.dirs.Tmp,
 			IndexFile:  idxPath,
 			Salt:       ht.h.salt,
+			NoFsync:    ht.h.noFsync,
 		}, ht.h.logger); err != nil {
 			return nil, nil, fmt.Errorf("create recsplit: %w", err)
 		}
 		rs.LogLvl(log.LvlTrace)
-
-		if ht.h.noFsync {
-			rs.DisableFsync()
-		}
 
 		var (
 			txKey      [8]byte

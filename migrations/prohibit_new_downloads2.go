@@ -45,7 +45,7 @@ var ProhibitNewDownloadsLock2 = Migration{
 				locked = append(locked, t.Name())
 			}
 
-			for _, t := range borsnaptype.BorSnapshotTypes {
+			for _, t := range borsnaptype.BorSnapshotTypes() {
 				locked = append(locked, t.Name())
 			}
 
