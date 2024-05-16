@@ -350,6 +350,7 @@ func TestPrecompiledBLS12381G1MultiExpEip(t *testing.T) { testJson("blsG1MultiEx
 func TestPrecompiledBLS12381G2AddEip(t *testing.T)      { testJson("blsG2Add-eip", "0d", t) }
 func TestPrecompiledBLS12381G2MulEip(t *testing.T)      { testJson("blsG2Mul-eip", "0e", t) }
 func TestPrecompiledBLS12381G2MultiExpEip(t *testing.T) { testJson("blsG2MultiExp-eip", "0f", t) }
+func TestPrecompiledBLS12381PairingEip(t *testing.T)    { testJson("blsPairing-eip", "10", t) }
 func TestPrecompiledBLS12381MapG1Eip(t *testing.T)      { testJson("blsMapG1-eip", "11", t) }
 func TestPrecompiledBLS12381MapG2Eip(t *testing.T)      { testJson("blsMapG2-eip", "12", t) }
 
