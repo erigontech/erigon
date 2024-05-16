@@ -12,7 +12,6 @@ on:
       - opened
       - ready_for_review
       - synchronize
-  workflow_dispatch:  # Run manually
 
 jobs:
   integration-test-suite:
