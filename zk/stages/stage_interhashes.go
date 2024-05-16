@@ -36,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk"
 	"github.com/status-im/keycard-go/hexutils"
 	"github.com/gateway-fm/cdk-erigon-lib/kv/memdb"
+	"math"
 )
 
 type ZkInterHashesCfg struct {
@@ -465,7 +466,7 @@ func unwindZkSMT(logPrefix string, from, to uint64, db kv.RwTx, checkRoot bool, 
 
 	currentPsr := state2.NewPlainStateReader(db)
 
-	total := from - to + 1
+	total := uint64(math.Abs(float64(from) - float64(to) + 1))
 	progressChan, stopPrinter := zk.ProgressPrinter(fmt.Sprintf("[%s] Progress unwinding", logPrefix), total)
 	defer stopPrinter()
 
