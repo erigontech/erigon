@@ -300,7 +300,7 @@ func runCmd(ctx *cli.Context) error {
 			fmt.Println("Could not commit state: ", err)
 			os.Exit(1)
 		}
-		fmt.Println(string(state.NewDumper(tx, 0, true).DefaultDump()))
+		fmt.Println(string(state.NewDumper(tx, 0).DefaultDump()))
 	}
 
 	if memProfilePath := ctx.String(MemProfileFlag.Name); memProfilePath != "" {
