@@ -19,6 +19,8 @@ package vm
 import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
+	"github.com/ledgerwatch/erigon/core/tracing"
 )
 
 // ContractRef is a reference to the contract's backing object
@@ -166,12 +168,27 @@ func (c *Contract) Caller() libcommon.Address {
 }
 
 // UseGas attempts the use gas and subtracts it and returns true on success
-func (c *Contract) UseGas(gas uint64) (ok bool) {
+func (c *Contract) UseGas(gas uint64, logger *tracing.Hooks, reason tracing.GasChangeReason) (ok bool) {
 	if c.Gas < gas {
 		return false
 	}
+
+	if logger != nil && logger.OnGasChange != nil && reason != tracing.GasChangeIgnored {
+		logger.OnGasChange(c.Gas, c.Gas-gas, reason)
+	}
 	c.Gas -= gas
 	return true
+}
+
+// RefundGas refunds gas to the contract
+func (c *Contract) RefundGas(gas uint64, logger *tracing.Hooks, reason tracing.GasChangeReason) {
+	if gas == 0 {
+		return
+	}
+	if logger != nil && logger.OnGasChange != nil && reason != tracing.GasChangeIgnored {
+		logger.OnGasChange(c.Gas, c.Gas+gas, reason)
+	}
+	c.Gas += gas
 }
 
 // Address returns the contracts address

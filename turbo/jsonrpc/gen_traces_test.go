@@ -13,7 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/ledgerwatch/erigon/eth/tracers"
+	tracerConfig "github.com/ledgerwatch/erigon/eth/tracers/config"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
@@ -35,7 +35,7 @@ func TestGeneratedDebugApi(t *testing.T) {
 	var buf bytes.Buffer
 	stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
 	callTracer := "callTracer"
-	err := api.TraceBlockByNumber(context.Background(), rpc.BlockNumber(1), &tracers.TraceConfig{Tracer: &callTracer}, stream)
+	err := api.TraceBlockByNumber(context.Background(), rpc.BlockNumber(1), &tracerConfig.TraceConfig{Tracer: &callTracer}, stream)
 	if err != nil {
 		t.Errorf("debug_traceBlock %d: %v", 0, err)
 	}

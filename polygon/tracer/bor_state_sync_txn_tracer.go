@@ -6,20 +6,38 @@ import (
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/tracing"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 )
 
 func NewBorStateSyncTxnTracer(
-	tracer vm.EVMLogger,
+	tracer *tracers.Tracer,
 	stateSyncEventsCount int,
 	stateReceiverContractAddress libcommon.Address,
-) tracers.Tracer {
-	return &borStateSyncTxnTracer{
-		EVMLogger:                    tracer,
+) *tracers.Tracer {
+	l := &borStateSyncTxnTracer{
+		Tracer:                       tracer,
 		stateSyncEventsCount:         stateSyncEventsCount,
 		stateReceiverContractAddress: stateReceiverContractAddress,
+	}
+	return &tracers.Tracer{
+		Hooks: &tracing.Hooks{
+			OnTxStart:       l.OnTxStart,
+			OnTxEnd:         l.OnTxEnd,
+			OnEnter:         l.OnEnter,
+			OnExit:          l.OnExit,
+			OnOpcode:        l.OnOpcode,
+			OnFault:         l.OnFault,
+			OnGasChange:     l.OnGasChange,
+			OnBalanceChange: l.OnBalanceChange,
+			OnNonceChange:   l.OnNonceChange,
+			OnCodeChange:    l.OnCodeChange,
+			OnStorageChange: l.OnStorageChange,
+			OnLog:           l.OnLog,
+		},
+		GetResult: l.GetResult,
+		Stop:      l.Stop,
 	}
 }
 
@@ -33,45 +51,25 @@ func NewBorStateSyncTxnTracer(
 // state sync events at end of each sprint these are synthetically executed as if they were sub-calls of the
 // state sync events bor transaction.
 type borStateSyncTxnTracer struct {
-	vm.EVMLogger
+	Tracer                       *tracers.Tracer
 	captureStartCalledOnce       bool
 	stateSyncEventsCount         int
 	stateReceiverContractAddress libcommon.Address
 }
 
-func (bsstt *borStateSyncTxnTracer) CaptureTxStart(_ uint64) {
-	bsstt.EVMLogger.CaptureTxStart(0)
-}
-
-func (bsstt *borStateSyncTxnTracer) CaptureTxEnd(_ uint64) {
-	bsstt.EVMLogger.CaptureTxEnd(0)
-}
-
-func (bsstt *borStateSyncTxnTracer) CaptureStart(
-	env *vm.EVM,
-	from libcommon.Address,
-	to libcommon.Address,
-	precompile bool,
-	create bool,
-	input []byte,
-	gas uint64,
-	value *uint256.Int,
-	code []byte,
-) {
-	if !bsstt.captureStartCalledOnce {
-		// first event execution started
-		// perform a CaptureStart for the synthetic state sync transaction
-		from := state.SystemAddress
-		to := bsstt.stateReceiverContractAddress
-		bsstt.EVMLogger.CaptureStart(env, from, to, false, false, nil, 0, uint256.NewInt(0), nil)
-		bsstt.captureStartCalledOnce = true
+func (bsstt *borStateSyncTxnTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from libcommon.Address) {
+	if bsstt.Tracer.OnTxStart != nil {
+		bsstt.Tracer.OnTxStart(env, tx, from)
 	}
-
-	// trick the tracer to think it is a CaptureEnter
-	bsstt.EVMLogger.CaptureEnter(vm.CALL, from, to, precompile, create, input, gas, value, code)
 }
 
-func (bsstt *borStateSyncTxnTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
+func (bsstt *borStateSyncTxnTracer) OnTxEnd(receipt *types.Receipt, err error) {
+	if bsstt.Tracer.OnTxEnd != nil {
+		bsstt.Tracer.OnTxEnd(receipt, err)
+	}
+}
+
+func (bsstt *borStateSyncTxnTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
 	if bsstt.stateSyncEventsCount == 0 {
 		// guard against unexpected use
 		panic("unexpected extra call to borStateSyncTxnTracer.CaptureEnd")
@@ -80,55 +78,96 @@ func (bsstt *borStateSyncTxnTracer) CaptureEnd(output []byte, usedGas uint64, er
 	// finished executing 1 event
 	bsstt.stateSyncEventsCount--
 
-	// trick tracer to think it is a CaptureExit
-	bsstt.EVMLogger.CaptureExit(output, usedGas, err)
-
-	if bsstt.stateSyncEventsCount == 0 {
-		// reached last event
-		// perform a CaptureEnd for the synthetic state sync transaction
-		bsstt.EVMLogger.CaptureEnd(nil, 0, nil)
+	if bsstt.Tracer.OnExit != nil {
+		// trick tracer to think it is a CaptureExit
+		bsstt.Tracer.OnExit(depth, output, gasUsed, err, reverted)
 	}
 }
 
-func (bsstt *borStateSyncTxnTracer) CaptureState(
-	pc uint64,
-	op vm.OpCode,
-	gas uint64,
-	cost uint64,
-	scope *vm.ScopeContext,
-	rData []byte,
-	depth int,
-	err error,
-) {
-	// trick tracer to think it is 1 level deeper
-	bsstt.EVMLogger.CaptureState(pc, op, gas, cost, scope, rData, depth+1, err)
-}
-
-func (bsstt *borStateSyncTxnTracer) CaptureFault(
-	pc uint64,
-	op vm.OpCode,
-	gas uint64,
-	cost uint64,
-	scope *vm.ScopeContext,
-	depth int,
-	err error,
-) {
-	// trick tracer to think it is 1 level deeper
-	bsstt.EVMLogger.CaptureFault(pc, op, gas, cost, scope, depth+1, err)
+func (bsstt *borStateSyncTxnTracer) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	if bsstt.Tracer.OnEnter != nil {
+		bsstt.Tracer.OnEnter(depth, typ, from, to, precompile, input, gas, value, code)
+	}
 }
 
 func (bsstt *borStateSyncTxnTracer) GetResult() (json.RawMessage, error) {
-	if tracer, ok := bsstt.EVMLogger.(tracers.Tracer); ok {
-		return tracer.GetResult()
-	} else {
-		panic("unexpected usage - borStateSyncTxnTracer.GetResult called on a wrapped tracer which does not support it")
+	if bsstt.Tracer.GetResult != nil {
+		return bsstt.Tracer.GetResult()
+	}
+	return json.RawMessage{}, nil
+}
+
+func (bsstt *borStateSyncTxnTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
+	if bsstt.Tracer.OnOpcode != nil {
+		// trick tracer to think it is 1 level deeper
+		bsstt.Tracer.OnOpcode(pc, op, gas, cost, scope, rData, depth+1, err)
+	}
+}
+
+func (bsstt *borStateSyncTxnTracer) OnFault(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, depth int, err error) {
+	if bsstt.Tracer.OnFault != nil {
+		// trick tracer to think it is 1 level deeper
+		bsstt.Tracer.OnFault(pc, op, gas, cost, scope, depth+1, err)
 	}
 }
 
 func (bsstt *borStateSyncTxnTracer) Stop(err error) {
-	if tracer, ok := bsstt.EVMLogger.(tracers.Tracer); ok {
-		tracer.Stop(err)
-	} else {
-		panic("unexpected usage - borStateSyncTxnTracer.Stop called on a wrapped tracer which does not support it")
+	if bsstt.Tracer.Stop != nil {
+		bsstt.Tracer.Stop(err)
+	}
+}
+
+// OnGasChange is called when gas is either consumed or refunded.
+func (bsstt *borStateSyncTxnTracer) OnGasChange(old, new uint64, reason tracing.GasChangeReason) {
+	if bsstt.Tracer.OnGasChange != nil {
+		bsstt.Tracer.OnGasChange(old, new, reason)
+	}
+}
+
+func (bsstt *borStateSyncTxnTracer) OnBlockStart(event tracing.BlockEvent) {
+	if bsstt.Tracer.OnBlockStart != nil {
+		bsstt.Tracer.OnBlockStart(event)
+	}
+}
+
+func (bsstt *borStateSyncTxnTracer) OnBlockEnd(err error) {
+	if bsstt.Tracer.OnBlockEnd != nil {
+		bsstt.Tracer.OnBlockEnd(err)
+	}
+}
+
+func (bsstt *borStateSyncTxnTracer) OnGenesisBlock(b *types.Block, alloc types.GenesisAlloc) {
+	if bsstt.Tracer.OnGenesisBlock != nil {
+		bsstt.Tracer.OnGenesisBlock(b, alloc)
+	}
+}
+
+func (bsstt *borStateSyncTxnTracer) OnBalanceChange(a libcommon.Address, prev, new *uint256.Int, reason tracing.BalanceChangeReason) {
+	if bsstt.Tracer.OnBalanceChange != nil {
+		bsstt.Tracer.OnBalanceChange(a, prev, new, reason)
+	}
+}
+
+func (bsstt *borStateSyncTxnTracer) OnNonceChange(a libcommon.Address, prev, new uint64) {
+	if bsstt.Tracer.OnNonceChange != nil {
+		bsstt.Tracer.OnNonceChange(a, prev, new)
+	}
+}
+
+func (bsstt *borStateSyncTxnTracer) OnCodeChange(a libcommon.Address, prevCodeHash libcommon.Hash, prev []byte, codeHash libcommon.Hash, code []byte) {
+	if bsstt.Tracer.OnCodeChange != nil {
+		bsstt.Tracer.OnCodeChange(a, prevCodeHash, prev, codeHash, code)
+	}
+}
+
+func (bsstt *borStateSyncTxnTracer) OnStorageChange(a libcommon.Address, k *libcommon.Hash, prev, new uint256.Int) {
+	if bsstt.Tracer.OnStorageChange != nil {
+		bsstt.Tracer.OnStorageChange(a, k, prev, new)
+	}
+}
+
+func (bsstt *borStateSyncTxnTracer) OnLog(log *types.Log) {
+	if bsstt.Tracer.OnLog != nil {
+		bsstt.Tracer.OnLog(log)
 	}
 }

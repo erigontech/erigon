@@ -60,7 +60,7 @@ func importChain(cliCtx *cli.Context) error {
 	if cliCtx.NArg() < 1 {
 		utils.Fatalf("This command requires an argument.")
 	}
-	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, tracer, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -71,7 +71,7 @@ func importChain(cliCtx *cli.Context) error {
 	stack := makeConfigNode(cliCtx.Context, nodeCfg, logger)
 	defer stack.Close()
 
-	ethereum, err := eth.New(cliCtx.Context, stack, ethCfg, logger)
+	ethereum, err := eth.New(cliCtx.Context, stack, ethCfg, logger, tracer)
 	if err != nil {
 		return err
 	}

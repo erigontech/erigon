@@ -127,15 +127,19 @@ func testPrestateDiffTracer(tracerName string, dirPath string, t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to create call tracer: %v", err)
 			}
-			evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Debug: true, Tracer: tracer})
+			statedb.SetLogger(tracer.Hooks)
+			evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Debug: true, Tracer: tracer.Hooks})
 			msg, err := tx.AsMessage(*signer, nil, rules) // BaseFee is set to nil and not to contet.BaseFee, to match the output to go-ethereum tests
 			if err != nil {
 				t.Fatalf("failed to prepare transaction for tracing: %v", err)
 			}
+			tracer.OnTxStart(evm.GetVMContext(), tx, msg.From())
 			st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.GetGas()).AddBlobGas(tx.GetBlobGas()))
-			if _, err = st.TransitionDb(true /* refunds */, false /* gasBailout */); err != nil {
+			vmRet, err := st.TransitionDb(true /* refunds */, false /* gasBailout */)
+			if err != nil {
 				t.Fatalf("failed to execute transaction: %v", err)
 			}
+			tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.UsedGas}, nil)
 			// Retrieve the trace result and compare against the expected
 			res, err := tracer.GetResult()
 			if err != nil {

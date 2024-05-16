@@ -248,8 +248,10 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 		stopAt = 1
 	}
 
+	var structLogger *logger.StructLogger
 	traceStart := func() {
-		vmConfig.Tracer = logger.NewStructLogger(&logger.LogConfig{})
+		structLogger = logger.NewStructLogger(&logger.LogConfig{})
+		vmConfig.Tracer = structLogger.Hooks()
 		vmConfig.Debug = true
 	}
 	traceStop := func(id int) {
@@ -262,7 +264,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 		}
 		encoder := json.NewEncoder(w)
 		encoder.SetIndent(" ", " ")
-		for _, l := range logger.FormatLogs(vmConfig.Tracer.(*logger.StructLogger).StructLogs()) {
+		for _, l := range logger.FormatLogs(structLogger.StructLogs()) {
 			if err2 := encoder.Encode(l); err2 != nil {
 				panic(err2)
 			}

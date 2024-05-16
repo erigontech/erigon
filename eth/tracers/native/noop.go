@@ -22,7 +22,8 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/tracing"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 )
 
@@ -32,47 +33,66 @@ func init() {
 
 // noopTracer is a go implementation of the Tracer interface which
 // performs no action. It's mostly useful for testing purposes.
-type noopTracer struct{}
+type NoopTracer struct{}
 
 // newNoopTracer returns a new noop tracer.
-func newNoopTracer(ctx *tracers.Context, _ json.RawMessage) (tracers.Tracer, error) {
-	return &noopTracer{}, nil
+func newNoopTracer(ctx *tracers.Context, _ json.RawMessage) (*tracers.Tracer, error) {
+	t := &NoopTracer{}
+	return &tracers.Tracer{
+		Hooks: &tracing.Hooks{
+			OnTxStart:       t.OnTxStart,
+			OnTxEnd:         t.OnTxEnd,
+			OnEnter:         t.OnEnter,
+			OnExit:          t.OnExit,
+			OnOpcode:        t.OnOpcode,
+			OnFault:         t.OnFault,
+			OnGasChange:     t.OnGasChange,
+			OnBalanceChange: t.OnBalanceChange,
+			OnNonceChange:   t.OnNonceChange,
+			OnCodeChange:    t.OnCodeChange,
+			OnStorageChange: t.OnStorageChange,
+			OnLog:           t.OnLog,
+		},
+		GetResult: t.GetResult,
+		Stop:      t.Stop,
+	}, nil
 }
 
-// CaptureStart implements the EVMLogger interface to initialize the tracing operation.
-func (t *noopTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *NoopTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
 }
 
-// CaptureEnd is called after the call finishes to finalize the tracing.
-func (t *noopTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
+func (t *NoopTracer) OnFault(pc uint64, op byte, gas, cost uint64, _ tracing.OpContext, depth int, err error) {
 }
 
-// CaptureState implements the EVMLogger interface to trace a single step of VM execution.
-func (t *noopTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
+func (t *NoopTracer) OnGasChange(old, new uint64, reason tracing.GasChangeReason) {}
+
+func (t *NoopTracer) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }
 
-// CaptureFault implements the EVMLogger interface to trace an execution fault.
-func (t *noopTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, _ *vm.ScopeContext, depth int, err error) {
+func (t *NoopTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
 }
 
-// CaptureEnter is called when EVM enters a new scope (via call, create or selfdestruct).
-func (t *noopTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (*NoopTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from libcommon.Address) {
 }
 
-// CaptureExit is called when EVM exits a scope, even if the scope didn't
-// execute any code.
-func (t *noopTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
+func (*NoopTracer) OnTxEnd(receipt *types.Receipt, err error) {}
+
+func (*NoopTracer) OnBalanceChange(a libcommon.Address, prev, new *uint256.Int, reason tracing.BalanceChangeReason) {
 }
 
-func (*noopTracer) CaptureTxStart(gasLimit uint64) {}
+func (*NoopTracer) OnNonceChange(a libcommon.Address, prev, new uint64) {}
 
-func (*noopTracer) CaptureTxEnd(restGas uint64) {}
+func (*NoopTracer) OnCodeChange(a libcommon.Address, prevCodeHash libcommon.Hash, prev []byte, codeHash libcommon.Hash, code []byte) {
+}
 
-// GetResult returns an empty json object.
-func (t *noopTracer) GetResult() (json.RawMessage, error) {
+func (*NoopTracer) OnStorageChange(a libcommon.Address, k *libcommon.Hash, prev, new uint256.Int) {}
+
+func (*NoopTracer) OnLog(log *types.Log) {}
+
+func (t *NoopTracer) GetResult() (json.RawMessage, error) {
 	return json.RawMessage(`{}`), nil
 }
 
 // Stop terminates execution of the tracer at the first opportune moment.
-func (t *noopTracer) Stop(err error) {
+func (t *NoopTracer) Stop(err error) {
 }

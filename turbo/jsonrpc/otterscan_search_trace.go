@@ -91,13 +91,19 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNu
 		msg, _ := tx.AsMessage(*signer, header.BaseFee, rules)
 
 		tracer := NewTouchTracer(searchAddr)
+		ibs.SetLogger(tracer.TracingHooks())
 		BlockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, chainConfig)
 		TxContext := core.NewEVMTxContext(msg)
 
-		vmenv := vm.NewEVM(BlockContext, TxContext, ibs, chainConfig, vm.Config{Debug: true, Tracer: tracer})
-		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.GetGas()).AddBlobGas(tx.GetBlobGas()), true /* refunds */, false /* gasBailout */); err != nil {
+		vmenv := vm.NewEVM(BlockContext, TxContext, ibs, chainConfig, vm.Config{Debug: true, Tracer: tracer.TracingHooks()})
+		// FIXME (tracing): Geth has a new method ApplyEVMMessage or something like this that does the OnTxStart/OnTxEnd wrapping, let's port it too
+		tracer.TracingHooks().OnTxStart(vmenv.GetVMContext(), tx, msg.From())
+		res, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.GetGas()).AddBlobGas(tx.GetBlobGas()), true /* refunds */, false /* gasBailout */)
+		if err != nil {
+			tracer.TracingHooks().OnTxEnd(nil, err)
 			return false, nil, err
 		}
+		tracer.TracingHooks().OnTxEnd(&types.Receipt{GasUsed: res.UsedGas}, nil)
 		_ = ibs.FinalizeTx(rules, cachedWriter)
 
 		if tracer.Found {

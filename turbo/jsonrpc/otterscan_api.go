@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethutils"
+	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -110,7 +111,7 @@ func (api *OtterscanAPIImpl) getTransactionByHash(ctx context.Context, tx kv.Tx,
 	return txn, block, blockHash, blockNum, txnIndex, nil
 }
 
-func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.Tx, hash common.Hash, tracer vm.EVMLogger) (*core.ExecutionResult, error) {
+func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.Tx, hash common.Hash, tracer *tracers.Tracer) (*core.ExecutionResult, error) {
 	txn, block, _, _, txIndex, err := api.getTransactionByHash(ctx, tx, hash)
 	if err != nil {
 		return nil, err
@@ -130,19 +131,31 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.Tx, hash commo
 		return nil, err
 	}
 
+	if tracer != nil {
+		ibs.SetLogger(tracer.Hooks)
+	}
 	var vmConfig vm.Config
 	if tracer == nil {
 		vmConfig = vm.Config{}
 	} else {
-		vmConfig = vm.Config{Debug: true, Tracer: tracer}
+		vmConfig = vm.Config{Debug: true, Tracer: tracer.Hooks}
 	}
 	vmenv := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 
+	if tracer != nil && tracer.Hooks.OnTxStart != nil {
+		tracer.Hooks.OnTxStart(vmenv.GetVMContext(), txn, msg.From())
+	}
 	result, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas()), true, false /* gasBailout */)
 	if err != nil {
+		if tracer != nil && tracer.Hooks.OnTxEnd != nil {
+			tracer.Hooks.OnTxEnd(nil, err)
+		}
 		return nil, fmt.Errorf("tracing failed: %v", err)
 	}
 
+	if tracer != nil && tracer.Hooks.OnTxEnd != nil {
+		tracer.OnTxEnd(&types.Receipt{GasUsed: result.UsedGas}, nil)
+	}
 	return result, nil
 }
 
@@ -154,7 +167,7 @@ func (api *OtterscanAPIImpl) GetInternalOperations(ctx context.Context, hash com
 	defer tx.Rollback()
 
 	tracer := NewOperationsTracer(ctx)
-	if _, err := api.runTracer(ctx, tx, hash, tracer); err != nil {
+	if _, err := api.runTracer(ctx, tx, hash, tracer.Tracer()); err != nil {
 		return nil, err
 	}
 

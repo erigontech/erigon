@@ -163,6 +163,68 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 	return msg, nil
 }
 
+// ToTransaction converts CallArgs to the Transaction type used by the core evm
+func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (types.Transaction, error) {
+	chainID, overflow := uint256.FromBig((*big.Int)(args.ChainID))
+	if overflow {
+		return nil, fmt.Errorf("chainId field caused an overflow (uint256)")
+	}
+
+	msg, err := args.ToMessage(globalGasCap, baseFee)
+	if err != nil {
+		return nil, err
+	}
+
+	var tx types.Transaction
+	switch {
+	case args.MaxFeePerGas != nil:
+		al := types2.AccessList{}
+		if args.AccessList != nil {
+			al = *args.AccessList
+		}
+		tx = &types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{
+				Nonce: msg.Nonce(),
+				Gas:   msg.Gas(),
+				To:    args.To,
+				Value: msg.Value(),
+				Data:  msg.Data(),
+			},
+			ChainID:    chainID,
+			FeeCap:     msg.FeeCap(),
+			Tip:        msg.Tip(),
+			AccessList: al,
+		}
+	case args.AccessList != nil:
+		tx = &types.AccessListTx{
+			LegacyTx: types.LegacyTx{
+				CommonTx: types.CommonTx{
+					Nonce: msg.Nonce(),
+					Gas:   msg.Gas(),
+					To:    args.To,
+					Value: msg.Value(),
+					Data:  msg.Data(),
+				},
+				GasPrice: msg.GasPrice(),
+			},
+			ChainID:    chainID,
+			AccessList: *args.AccessList,
+		}
+	default:
+		tx = &types.LegacyTx{
+			CommonTx: types.CommonTx{
+				Nonce: msg.Nonce(),
+				Gas:   msg.Gas(),
+				To:    args.To,
+				Value: msg.Value(),
+				Data:  msg.Data(),
+			},
+			GasPrice: msg.GasPrice(),
+		}
+	}
+	return tx, nil
+}
+
 // account indicates the overriding fields of account during the execution of
 // a message call.
 // Note, state and stateDiff can't be specified at the same time. If state is

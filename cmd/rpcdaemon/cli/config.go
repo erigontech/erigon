@@ -982,7 +982,7 @@ func (e *remoteConsensusEngine) Initialize(config *chain.Config, chain consensus
 		panic(err)
 	}
 
-	e.engine.Initialize(config, chain, header, state, syscall, logger)
+	e.engine.Initialize(config, chain, header, state, syscall, logger, nil)
 }
 
 func (e *remoteConsensusEngine) VerifyHeader(_ consensus.ChainHeaderReader, _ *types.Header, _ bool) error {

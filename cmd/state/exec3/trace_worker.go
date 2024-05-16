@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/tracing"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
@@ -17,7 +18,7 @@ import (
 )
 
 type GenericTracer interface {
-	vm.EVMLogger
+	TracingHooks() *tracing.Hooks
 	SetTransaction(tx types.Transaction)
 	Found() bool
 }
@@ -62,7 +63,7 @@ func NewTraceWorker(tx kv.TemporalTx, cc *chain.Config, engine consensus.EngineR
 		ibs:          state.New(stateReader),
 	}
 	if tracer != nil {
-		ie.vmConfig = &vm.Config{Debug: true, Tracer: tracer}
+		ie.vmConfig = &vm.Config{Debug: true, Tracer: tracer.TracingHooks()}
 	}
 	return ie
 }
@@ -96,7 +97,7 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction) 
 	if msg.FeeCap().IsZero() {
 		// Only zero-gas transactions may be service ones
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			return core.SysCallContract(contract, data, e.chainConfig, e.ibs, e.header, e.engine, true /* constCall */)
+			return core.SysCallContract(contract, data, e.chainConfig, e.ibs, e.header, e.engine, true /* constCall */, nil)
 		}
 		msg.SetIsFree(e.engine.IsServiceTransaction(msg.From(), syscall))
 	}

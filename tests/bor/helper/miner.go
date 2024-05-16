@@ -163,7 +163,7 @@ func InitMiner(ctx context.Context, genesis *types.Genesis, privKey *ecdsa.Priva
 	ethCfg.DeprecatedTxPool.AccountSlots = 1000000
 	ethCfg.DeprecatedTxPool.GlobalSlots = 1000000
 
-	ethBackend, err := eth.New(ctx, stack, ethCfg, logger)
+	ethBackend, err := eth.New(ctx, stack, ethCfg, logger, nil)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -22,6 +22,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/tracing"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
@@ -35,6 +36,11 @@ import (
 func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *GasPool, ibs *state.IntraBlockState,
 	stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas, usedBlobGas *uint64,
 	evm *vm.EVM, cfg vm.Config) (*types.Receipt, []byte, error) {
+	var (
+		receipt *types.Receipt
+		err     error
+	)
+
 	rules := evm.ChainRules()
 	msg, err := tx.AsMessage(*types.MakeSigner(config, header.Number.Uint64(), header.Time), header.BaseFee, rules)
 	if err != nil {
@@ -42,10 +48,29 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 	}
 	msg.SetCheckNonce(!cfg.StatelessExec)
 
+	if cfg.Tracer != nil {
+		if cfg.Tracer.OnTxStart != nil {
+			cfg.Tracer.OnTxStart(&tracing.VMContext{
+				ChainConfig:     evm.ChainConfig(),
+				IntraBlockState: ibs,
+				BlockNumber:     evm.Context.BlockNumber,
+				Time:            evm.Context.Time,
+				Coinbase:        evm.Context.Coinbase,
+				Random:          evm.Context.PrevRanDao,
+				TxHash:          evm.TxHash,
+			}, tx, msg.From())
+		}
+		if cfg.Tracer.OnTxEnd != nil {
+			defer func() {
+				cfg.Tracer.OnTxEnd(receipt, err)
+			}()
+		}
+	}
+
 	if msg.FeeCap().IsZero() && engine != nil {
 		// Only zero-gas transactions may be service ones
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			return SysCallContract(contract, data, config, ibs, header, engine, true /* constCall */)
+			return SysCallContract(contract, data, config, ibs, header, engine, true /* constCall */, cfg.Tracer)
 		}
 		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 	}
@@ -73,7 +98,6 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 
 	// Set the receipt logs and create the bloom filter.
 	// based on the eip phase, we're passing whether the root touch-delete accounts.
-	var receipt *types.Receipt
 	if !cfg.NoReceipts {
 		// by the tx.
 		receipt = &types.Receipt{Type: tx.Type(), CumulativeGasUsed: *usedGas}

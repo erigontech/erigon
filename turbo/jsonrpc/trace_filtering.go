@@ -567,7 +567,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		ot.idx = []string{fmt.Sprintf("%d-", txIndex)}
 		ot.traceAddr = []int{}
 		vmConfig.Debug = true
-		vmConfig.Tracer = &ot
+		vmConfig.Tracer = ot.Tracer().Hooks
 		ibs := state.New(cachedReader)
 
 		blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader, chainConfig)
@@ -576,9 +576,14 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 
 		gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 		ibs.SetTxContext(txHash, lastBlockHash, txIndex)
+		ibs.SetLogger(ot.Tracer().Hooks)
+
+		ot.Tracer().OnTxStart(evm.GetVMContext(), txn, msg.From())
+
 		var execResult *core.ExecutionResult
 		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailOut)
 		if err != nil {
+			ot.Tracer().OnTxEnd(nil, err)
 			if first {
 				first = false
 			} else {
@@ -589,6 +594,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			stream.WriteObjectEnd()
 			continue
 		}
+		ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.UsedGas}, nil)
 		traceResult.Output = common.Copy(execResult.ReturnData)
 		if err = ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {
 			if first {
@@ -726,7 +732,7 @@ func (api *TraceAPIImpl) callManyTransactions(
 	engine := api.engine()
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, nil, nil)
 	logger := log.New("trace_filtering")
-	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, initialState, logger)
+	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, initialState, logger, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -750,7 +756,7 @@ func (api *TraceAPIImpl) callManyTransactions(
 			// gnosis might have a fee free account here
 			if msg.FeeCap().IsZero() && engine != nil {
 				syscall := func(contract common.Address, data []byte) ([]byte, error) {
-					return core.SysCallContract(contract, data, cfg, initialState, header, engine, true /* constCall */)
+					return core.SysCallContract(contract, data, cfg, initialState, header, engine, true /* constCall */, nil)
 				}
 				msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 			}
@@ -767,7 +773,7 @@ func (api *TraceAPIImpl) callManyTransactions(
 
 	parentHash := block.ParentHash()
 
-	traces, lastState, cmErr := api.doCallMany(ctx, dbtx, msgs, callParams, &rpc.BlockNumberOrHash{
+	traces, lastState, cmErr := api.doCallMany(ctx, dbtx, txs, msgs, callParams, &rpc.BlockNumberOrHash{
 		BlockNumber:      &parentNo,
 		BlockHash:        &parentHash,
 		RequireCanonical: true,
@@ -778,7 +784,7 @@ func (api *TraceAPIImpl) callManyTransactions(
 	}
 
 	syscall := func(contract common.Address, data []byte) ([]byte, error) {
-		return core.SysCallContract(contract, data, cfg, lastState, header, engine, false /* constCall */)
+		return core.SysCallContract(contract, data, cfg, lastState, header, engine, false /* constCall */, nil)
 	}
 
 	return traces, syscall, nil

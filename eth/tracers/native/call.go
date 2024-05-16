@@ -28,6 +28,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon/accounts/abi"
+	"github.com/ledgerwatch/erigon/core/tracing"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 )
@@ -102,10 +104,11 @@ type callFrameMarshaling struct {
 }
 
 type callTracer struct {
-	noopTracer
+	NoopTracer
 	callstack []callFrame
 	config    callTracerConfig
 	gasLimit  uint64
+	depth     int
 	interrupt uint32 // Atomic flag to signal execution interruption
 	reason    error  // Textual reason for the interruption
 	logIndex  uint64
@@ -119,7 +122,7 @@ type callTracerConfig struct {
 
 // newCallTracer returns a native go tracer which tracks
 // call frames of a tx, and implements vm.EVMLogger.
-func newCallTracer(ctx *tracers.Context, cfg json.RawMessage) (tracers.Tracer, error) {
+func newCallTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, error) {
 	var config callTracerConfig
 	if cfg != nil {
 		if err := json.Unmarshal(cfg, &config); err != nil {
@@ -128,7 +131,18 @@ func newCallTracer(ctx *tracers.Context, cfg json.RawMessage) (tracers.Tracer, e
 	}
 	// First callframe contains tx context info
 	// and is populated on start and end.
-	return &callTracer{callstack: make([]callFrame, 1), config: config}, nil
+	t := &callTracer{callstack: make([]callFrame, 1), config: config}
+	return &tracers.Tracer{
+		Hooks: &tracing.Hooks{
+			OnTxStart: t.OnTxStart,
+			OnTxEnd:   t.OnTxEnd,
+			OnEnter:   t.OnEnter,
+			OnExit:    t.OnExit,
+			OnLog:     t.OnLog,
+		},
+		GetResult: t.GetResult,
+		Stop:      t.Stop,
+	}, nil
 }
 
 // CaptureStart implements the EVMLogger interface to initialize the tracing operation.
@@ -195,8 +209,9 @@ func (t *callTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, sco
 }
 
 // CaptureEnter is called when EVM enters a new scope (via call, create or selfdestruct).
-func (t *callTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	if t.config.OnlyTopCall {
+func (t *callTracer) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	t.depth = depth
+	if t.config.OnlyTopCall && depth > 0 {
 		return
 	}
 	// Skip if tracing was interrupted
@@ -205,7 +220,7 @@ func (t *callTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libc
 	}
 
 	call := callFrame{
-		Type:  typ,
+		Type:  vm.OpCode(typ),
 		From:  from,
 		To:    to,
 		Input: libcommon.CopyBytes(input),
@@ -217,9 +232,14 @@ func (t *callTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libc
 	t.callstack = append(t.callstack, call)
 }
 
-// CaptureExit is called when EVM exits a scope, even if the scope didn't
-// execute any code.
-func (t *callTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
+func (t *callTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+	if depth == 0 {
+		t.captureEnd(output, gasUsed, err, reverted)
+		return
+	}
+
+	t.depth = depth - 1
+
 	if t.config.OnlyTopCall {
 		return
 	}
@@ -237,14 +257,26 @@ func (t *callTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
 	t.callstack[size-1].Calls = append(t.callstack[size-1].Calls, call)
 }
 
-func (t *callTracer) CaptureTxStart(gasLimit uint64) {
-	t.gasLimit = gasLimit
+func (t *callTracer) captureEnd(output []byte, gasUsed uint64, err error, reverted bool) {
+	if len(t.callstack) != 1 {
+		return
+	}
+	t.callstack[0].processOutput(output, err)
+}
+
+func (t *callTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from libcommon.Address) {
+	t.gasLimit = tx.GetGas()
 	t.logIndex = 0
 	t.logGaps = make(map[uint64]int)
 }
 
-func (t *callTracer) CaptureTxEnd(restGas uint64) {
-	t.callstack[0].GasUsed = t.gasLimit - restGas
+func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
+	// Error happened during tx validation.
+	if err != nil {
+		return
+	}
+
+	t.callstack[0].GasUsed = receipt.GasUsed
 	if t.config.WithLog {
 		// Logs are not emitted when the call fails
 		clearFailedLogs(&t.callstack[0], false, t.logGaps)

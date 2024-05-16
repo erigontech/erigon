@@ -10,11 +10,15 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/tracing"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/eth/tracers"
 )
 
 type CallTracer struct {
+	t *tracers.Tracer
+
 	froms map[libcommon.Address]struct{}
 	tos   map[libcommon.Address]bool // address -> isCreated
 }
@@ -26,8 +30,13 @@ func NewCallTracer() *CallTracer {
 	}
 }
 
-func (ct *CallTracer) CaptureTxStart(gasLimit uint64) {}
-func (ct *CallTracer) CaptureTxEnd(restGas uint64)    {}
+func (ct *CallTracer) Tracer() *tracers.Tracer {
+	return &tracers.Tracer{
+		Hooks: &tracing.Hooks{
+			OnEnter: ct.OnEnter,
+		},
+	}
+}
 
 // CaptureStart and CaptureEnter also capture SELFDESTRUCT opcode invocations
 func (ct *CallTracer) captureStartOrEnter(from, to libcommon.Address, create bool, code []byte) {
@@ -45,19 +54,9 @@ func (ct *CallTracer) captureStartOrEnter(from, to libcommon.Address, create boo
 	}
 }
 
-func (ct *CallTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (ct *CallTracer) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	create := vm.OpCode(typ) == vm.CREATE
 	ct.captureStartOrEnter(from, to, create, code)
-}
-func (ct *CallTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	ct.captureStartOrEnter(from, to, create, code)
-}
-func (ct *CallTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
-}
-func (ct *CallTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
-}
-func (ct *CallTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
-}
-func (ct *CallTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 }
 
 func (ct *CallTracer) WriteToDb(tx kv.StatelessWriteTx, block *types.Block, vmConfig vm.Config) error {

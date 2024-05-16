@@ -295,7 +295,7 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) error {
 	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
 		//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 		// Genesis block
-		_, ibs, err = core.GenesisToBlock(rw.genesis, "", rw.logger)
+		_, ibs, err = core.GenesisToBlock(rw.genesis, "", rw.logger, nil)
 		if err != nil {
 			return err
 		}
@@ -306,7 +306,7 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) error {
 			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 			// End of block transaction in a block
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */)
+				return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */, nil)
 			}
 			if _, _, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, txTask.Requests, rw.chain, syscall, rw.logger); err != nil {
 				if _, readError := rw.stateReader.ReadError(); !readError {
@@ -317,10 +317,10 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) error {
 	} else if txTask.TxIndex == -1 {
 		// Block initialisation
 		syscall := func(contract libcommon.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			return core.SysCallContract(contract, data, rw.chainConfig, ibState, header, rw.engine, constCall /* constCall */)
+			return core.SysCallContract(contract, data, rw.chainConfig, ibState, header, rw.engine, constCall /* constCall */, nil)
 		}
 
-		rw.engine.Initialize(rw.chainConfig, rw.chain, header, ibs, syscall, rw.logger)
+		rw.engine.Initialize(rw.chainConfig, rw.chain, header, ibs, syscall, rw.logger, nil)
 		if err = ibs.FinalizeTx(rules, noop); err != nil {
 			if _, readError := rw.stateReader.ReadError(); !readError {
 				return err
@@ -337,7 +337,7 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) error {
 		if msg.FeeCap().IsZero() && rw.engine != nil {
 			// Only zero-gas transactions may be service ones
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, true /* constCall */)
+				return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, true /* constCall */, nil)
 			}
 			msg.SetIsFree(rw.engine.IsServiceTransaction(msg.From(), syscall))
 		}

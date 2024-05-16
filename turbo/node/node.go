@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/eth"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/params"
@@ -114,6 +115,7 @@ func New(
 	nodeConfig *nodecfg.Config,
 	ethConfig *ethconfig.Config,
 	logger log.Logger,
+	tracer *tracers.Tracer,
 ) (*ErigonNode, error) {
 	//prepareBuckets(optionalParams.CustomBuckets)
 	node, err := node.New(ctx, nodeConfig, logger)
@@ -121,7 +123,7 @@ func New(
 		utils.Fatalf("Failed to create Erigon node: %v", err)
 	}
 
-	ethereum, err := eth.New(ctx, node, ethConfig, logger)
+	ethereum, err := eth.New(ctx, node, ethConfig, logger, tracer)
 	if err != nil {
 		return nil, err
 	}

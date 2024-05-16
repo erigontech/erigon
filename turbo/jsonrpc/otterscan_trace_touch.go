@@ -6,31 +6,32 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/tracing"
 )
 
 type TouchTracer struct {
-	DefaultTracer
 	searchAddr common.Address
 	Found      bool
+	hooks      *tracing.Hooks
 }
 
 func NewTouchTracer(searchAddr common.Address) *TouchTracer {
-	return &TouchTracer{
+	tracer := &TouchTracer{
 		searchAddr: searchAddr,
 	}
+	tracer.hooks = &tracing.Hooks{
+		OnEnter: tracer.OnEnter,
+	}
+
+	return tracer
 }
 
-func (t *TouchTracer) captureStartOrEnter(from, to common.Address) {
+func (t *TouchTracer) TracingHooks() *tracing.Hooks {
+	return t.hooks
+}
+
+func (t *TouchTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	if !t.Found && (bytes.Equal(t.searchAddr.Bytes(), from.Bytes()) || bytes.Equal(t.searchAddr.Bytes(), to.Bytes())) {
 		t.Found = true
 	}
-}
-
-func (t *TouchTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	t.captureStartOrEnter(from, to)
-}
-
-func (t *TouchTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	t.captureStartOrEnter(from, to)
 }

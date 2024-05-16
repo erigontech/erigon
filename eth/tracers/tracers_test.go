@@ -109,16 +109,20 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to prestate tracer: %v", err)
 	}
-	evm := vm.NewEVM(context, txContext, statedb, params.AllProtocolChanges, vm.Config{Debug: true, Tracer: tracer})
+	evm := vm.NewEVM(context, txContext, statedb, params.AllProtocolChanges, vm.Config{Debug: true, Tracer: tracer.Hooks})
 
 	msg, err := txn.AsMessage(*signer, nil, rules)
 	if err != nil {
 		t.Fatalf("failed to prepare transaction for tracing: %v", err)
 	}
+
+	tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())
 	st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(txn.GetGas()).AddBlobGas(txn.GetBlobGas()))
-	if _, err = st.TransitionDb(false, false); err != nil {
+	exeRes, err := st.TransitionDb(false, false)
+	if err != nil {
 		t.Fatalf("failed to execute transaction: %v", err)
 	}
+	tracer.OnTxEnd(&types.Receipt{GasUsed: exeRes.UsedGas}, nil)
 	// Retrieve the trace result and compare against the etalon
 	res, err := tracer.GetResult()
 	if err != nil {

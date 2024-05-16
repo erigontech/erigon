@@ -201,7 +201,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	}
 	txCtx = core.NewEVMTxContext(msg)
 	ct := OverlayCreateTracer{contractAddress: address, code: *code, gasCap: api.GasCap}
-	evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Debug: true, Tracer: &ct})
+	evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Debug: true, Tracer: ct.Tracer().Hooks})
 
 	// Execute the transaction message
 	_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)

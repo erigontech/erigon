@@ -44,6 +44,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/tracing"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -99,7 +100,7 @@ func Main(ctx *cli.Context) error {
 		err     error
 		baseDir = ""
 	)
-	var getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error)
+	var getTracer func(txIndex int, txHash libcommon.Hash) (*tracing.Hooks, error)
 
 	// If user specified a basedir, make sure it exists
 	if ctx.IsSet(OutputBasedir.Name) {
@@ -126,7 +127,7 @@ func Main(ctx *cli.Context) error {
 				prevFile.Close()
 			}
 		}()
-		getTracer = func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error) {
+		getTracer = func(txIndex int, txHash libcommon.Hash) (*tracing.Hooks, error) {
 			if prevFile != nil {
 				prevFile.Close()
 			}
@@ -135,10 +136,10 @@ func Main(ctx *cli.Context) error {
 				return nil, NewError(ErrorIO, fmt.Errorf("failed creating trace-file: %v", err2))
 			}
 			prevFile = traceFile
-			return trace_logger.NewJSONLogger(logConfig, traceFile), nil
+			return trace_logger.NewJSONLogger(logConfig, traceFile).Tracer().Hooks, nil
 		}
 	} else {
-		getTracer = func(txIndex int, txHash libcommon.Hash) (tracer vm.EVMLogger, err error) {
+		getTracer = func(txIndex int, txHash libcommon.Hash) (tracer *tracing.Hooks, err error) {
 			return nil, nil
 		}
 	}

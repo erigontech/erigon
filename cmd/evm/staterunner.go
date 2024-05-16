@@ -78,9 +78,9 @@ func stateTestCmd(ctx *cli.Context) error {
 		Debug: ctx.Bool(DebugFlag.Name) || ctx.Bool(MachineFlag.Name),
 	}
 	if machineFriendlyOutput {
-		cfg.Tracer = logger.NewJSONLogger(config, os.Stderr)
+		cfg.Tracer = logger.NewJSONLogger(config, os.Stderr).Tracer().Hooks
 	} else if ctx.Bool(DebugFlag.Name) {
-		cfg.Tracer = logger.NewStructLogger(config)
+		cfg.Tracer = logger.NewStructLogger(config).Tracer().Hooks
 	}
 
 	if len(ctx.Args().First()) != 0 {

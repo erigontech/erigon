@@ -256,8 +256,10 @@ func (cr *FakeChainHeaderReader) GetHeaderByHash(hash libcommon.Hash) *types.Hea
 func (cr *FakeChainHeaderReader) GetHeaderByNumber(number uint64) *types.Header {
 	return cr.GetHeaderByHash(libcommon.BigToHash(big.NewInt(int64(number))))
 }
-func (cr *FakeChainHeaderReader) Config() *chain.Config        { return nil }
-func (cr *FakeChainHeaderReader) CurrentHeader() *types.Header { return nil }
+func (cr *FakeChainHeaderReader) Config() *chain.Config                 { return nil }
+func (cr *FakeChainHeaderReader) CurrentHeader() *types.Header          { return nil }
+func (cr *FakeChainHeaderReader) CurrentFinalizedHeader() *types.Header { return nil }
+func (cr *FakeChainHeaderReader) CurrentSafeHeader() *types.Header      { return nil }
 
 // GetHeader returns a fake header with the parentHash equal to the number - 1
 func (cr *FakeChainHeaderReader) GetHeader(hash libcommon.Hash, number uint64) *types.Header {
@@ -638,7 +640,7 @@ func TestEip2929Cases(t *testing.T) {
 		cfg := &Config{
 			EVMConfig: vm.Config{
 				Debug:     true,
-				Tracer:    logger.NewMarkdownLogger(nil, os.Stdout),
+				Tracer:    logger.NewMarkdownLogger(nil, os.Stdout).Hooks(),
 				ExtraEips: []int{2929},
 			},
 		}
