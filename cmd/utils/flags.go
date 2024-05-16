@@ -1833,6 +1833,10 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		cfg.Genesis = genesis
 		SetDNSDiscoveryDefaults(cfg, *genesisHash)
 	case "":
+
+		// hack for interop
+		genesis := core.InteropGenesisBlock2()
+		cfg.Genesis = genesis
 		if cfg.NetworkID == 1 {
 			SetDNSDiscoveryDefaults(cfg, params.MainnetGenesisHash)
 		}

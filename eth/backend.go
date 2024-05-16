@@ -303,7 +303,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
 			return genesisErr
 		}
-
 		return nil
 	}); err != nil {
 		panic(err)
@@ -311,7 +310,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.chainConfig = chainConfig
 	backend.genesisBlock = genesis
 	backend.genesisHash = genesis.Hash()
-	fmt.Println("---------------> PragueTime: ", chainConfig.PragueTime.Uint64())
 	setBorDefaultMinerGasPrice(chainConfig, config, logger)
 	setBorDefaultTxPoolPriceLimit(chainConfig, config.TxPool, logger)
 
