@@ -2,6 +2,7 @@ package eth1
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"runtime"
 	"slices"
@@ -13,6 +14,7 @@ import (
 	execution "github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/consensuschain"
@@ -39,6 +41,15 @@ func sendForkchoiceErrorWithoutWaiting(ch chan forkchoiceOutcome, err error) {
 	case ch <- forkchoiceOutcome{err: err}:
 	default:
 	}
+}
+
+func isDomainAheadOfBlocks(tx kv.RwTx) bool {
+	doms, err := state.NewSharedDomains(tx, log.New())
+	if err != nil {
+		return errors.Is(err, state.ErrBehindCommitment)
+	}
+	defer doms.Close()
+	return false
 }
 
 // verifyForkchoiceHashes verifies the finalized and safe hash of the forkchoice state
@@ -310,6 +321,14 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			}
 		}
 	}
+	if isDomainAheadOfBlocks(tx) {
+		sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
+			LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
+			Status:          execution.ExecutionStatus_TooFarAway,
+			ValidationError: "domain ahead of blocks",
+		})
+		return
+	}
 
 	// Set Progress for headers and bodies accordingly.
 	if err := stages.SaveStageProgress(tx, stages.Headers, fcuHeader.Number.Uint64()); err != nil {
@@ -351,6 +370,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	// Update forks...
 	writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
 	status := execution.ExecutionStatus_Success
+
 	if headHash != blockHash {
 		status = execution.ExecutionStatus_BadBlock
 		validationError = "headHash and blockHash mismatch"
