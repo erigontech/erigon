@@ -37,7 +37,7 @@ type StateV3 struct {
 	trace bool
 }
 
-func NewStateV3(domains *libstate.SharedDomains, accumulator *shards.Accumulator, logger log.Logger) *StateV3 {
+func NewStateV3(domains *libstate.SharedDomains, logger log.Logger) *StateV3 {
 	return &StateV3{
 		domains:             domains,
 		triggers:            map[uint64]*TxTask{},
@@ -462,13 +462,14 @@ func (w *StateWriterBufferedV3) CreateContract(address common.Address) error {
 
 // StateWriterV3 - used by parallel workers to accumulate updates and then send them to conflict-resolution.
 type StateWriterV3 struct {
-	rs    *StateV3
-	trace bool
+	rs          *StateV3
+	trace       bool
+	accumulator *shards.Accumulator
 
 	tx kv.Tx
 }
 
-func NewStateWriterV3(rs *StateV3) *StateWriterV3 {
+func NewStateWriterV3(rs *StateV3, accumulator *shards.Accumulator) *StateWriterV3 {
 	return &StateWriterV3{
 		rs: rs,
 		//trace: true,
@@ -504,6 +505,9 @@ func (w *StateWriterV3) UpdateAccountData(address common.Address, original, acco
 		}
 	}
 	value := accounts.SerialiseV3(account)
+	if w.accumulator != nil {
+		w.accumulator.ChangeAccount(address, account.Incarnation, value)
+	}
 
 	if err := w.rs.domains.DomainPut(kv.AccountsDomain, address[:], nil, value, nil, 0); err != nil {
 		return err
@@ -518,6 +522,9 @@ func (w *StateWriterV3) UpdateAccountCode(address common.Address, incarnation ui
 	if err := w.rs.domains.DomainPut(kv.CodeDomain, address[:], nil, code, nil, 0); err != nil {
 		return err
 	}
+	if w.accumulator != nil {
+		w.accumulator.ChangeCode(address, incarnation, code)
+	}
 	return nil
 }
 
@@ -527,6 +534,9 @@ func (w *StateWriterV3) DeleteAccount(address common.Address, original *accounts
 	}
 	if err := w.rs.domains.DomainDel(kv.AccountsDomain, address[:], nil, nil, 0); err != nil {
 		return err
+	}
+	if w.accumulator != nil {
+		w.accumulator.DeleteAccount(address)
 	}
 	return nil
 }
@@ -543,6 +553,11 @@ func (w *StateWriterV3) WriteAccountStorage(address common.Address, incarnation 
 	if len(v) == 0 {
 		return w.rs.domains.DomainDel(kv.StorageDomain, composite, nil, nil, 0)
 	}
+	if w.accumulator != nil && key != nil && value != nil {
+		k := *key
+		w.accumulator.ChangeStorage(address, incarnation, k, v)
+	}
+
 	return w.rs.domains.DomainPut(kv.StorageDomain, composite, nil, v, nil, 0)
 }
 

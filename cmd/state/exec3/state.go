@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/shards"
 )
 
 type Worker struct {
@@ -53,7 +54,7 @@ type Worker struct {
 	dirs datadir.Dirs
 }
 
-func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *state.ResultsQueue, engine consensus.Engine, dirs datadir.Dirs) *Worker {
+func NewWorker(lock sync.Locker, logger log.Logger, accumulator *shards.Accumulator, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *state.ResultsQueue, engine consensus.Engine, dirs datadir.Dirs) *Worker {
 	w := &Worker{
 		lock:        lock,
 		logger:      logger,
@@ -62,7 +63,7 @@ func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, backgro
 		rs:          rs,
 		background:  background,
 		blockReader: blockReader,
-		stateWriter: state.NewStateWriterV3(rs),
+		stateWriter: state.NewStateWriterV3(rs, accumulator),
 		stateReader: state.NewStateReaderV3(rs.Domains()),
 		chainConfig: chainConfig,
 
@@ -83,10 +84,10 @@ func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, backgro
 	return w
 }
 
-func (rw *Worker) ResetState(rs *state.StateV3) {
+func (rw *Worker) ResetState(rs *state.StateV3, accumulator *shards.Accumulator) {
 	rw.rs = rs
 	rw.SetReader(state.NewStateReaderV3(rs.Domains()))
-	rw.stateWriter = state.NewStateWriterV3(rs)
+	rw.stateWriter = state.NewStateWriterV3(rs, accumulator)
 }
 
 func (rw *Worker) Tx() kv.Tx        { return rw.chainTx }
@@ -268,7 +269,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 	}
 }
 
-func NewWorkersPool(lock sync.Locker, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int, dirs datadir.Dirs) (reconWorkers []*Worker, applyWorker *Worker, rws *state.ResultsQueue, clear func(), wait func()) {
+func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int, dirs datadir.Dirs) (reconWorkers []*Worker, applyWorker *Worker, rws *state.ResultsQueue, clear func(), wait func()) {
 	reconWorkers = make([]*Worker, workerCount)
 
 	resultChSize := workerCount * 8
@@ -279,7 +280,7 @@ func NewWorkersPool(lock sync.Locker, logger log.Logger, ctx context.Context, ba
 		ctx, cancel := context.WithCancel(ctx)
 		g, ctx := errgroup.WithContext(ctx)
 		for i := 0; i < workerCount; i++ {
-			reconWorkers[i] = NewWorker(lock, logger, ctx, background, chainDb, rs, in, blockReader, chainConfig, genesis, rws, engine, dirs)
+			reconWorkers[i] = NewWorker(lock, logger, accumulator, ctx, background, chainDb, rs, in, blockReader, chainConfig, genesis, rws, engine, dirs)
 		}
 		if background {
 			for i := 0; i < workerCount; i++ {
@@ -305,7 +306,7 @@ func NewWorkersPool(lock sync.Locker, logger log.Logger, ctx context.Context, ba
 			//applyWorker.ResetTx(nil)
 		}
 	}
-	applyWorker = NewWorker(lock, logger, ctx, false, chainDb, rs, in, blockReader, chainConfig, genesis, rws, engine, dirs)
+	applyWorker = NewWorker(lock, logger, accumulator, ctx, false, chainDb, rs, in, blockReader, chainConfig, genesis, rws, engine, dirs)
 
 	return reconWorkers, applyWorker, rws, clear, wait
 }

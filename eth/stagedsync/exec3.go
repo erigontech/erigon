@@ -311,7 +311,7 @@ func ExecV3(ctx context.Context,
 	if shouldReportToTxPool {
 		accumulator = cfg.accumulator
 	}
-	rs := state.NewStateV3(doms, accumulator, logger)
+	rs := state.NewStateV3(doms, logger)
 
 	////TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
 	// Now rwLoop closing both (because applyLoop we completely restart)
@@ -324,7 +324,7 @@ func ExecV3(ctx context.Context,
 	rwsConsumed := make(chan struct{}, 1)
 	defer close(rwsConsumed)
 
-	execWorkers, applyWorker, rws, stopWorkers, waitWorkers := exec3.NewWorkersPool(lock.RLocker(), logger, ctx, parallel, chainDb, rs, in, blockReader, chainConfig, genesis, engine, workerCount+1, cfg.dirs)
+	execWorkers, applyWorker, rws, stopWorkers, waitWorkers := exec3.NewWorkersPool(lock.RLocker(), accumulator, logger, ctx, parallel, chainDb, rs, in, blockReader, chainConfig, genesis, engine, workerCount+1, cfg.dirs)
 	defer stopWorkers()
 	applyWorker.DiscardReadList()
 
@@ -916,10 +916,10 @@ Loop:
 						return err
 					}
 					doms.SetTxNum(inputTxNum)
-					rs = state.NewStateV3(doms, nil, logger)
+					rs = state.NewStateV3(doms, logger)
 
 					applyWorker.ResetTx(applyTx)
-					applyWorker.ResetState(rs)
+					applyWorker.ResetState(rs, accumulator)
 
 					return nil
 				}(); err != nil {

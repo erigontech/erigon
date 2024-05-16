@@ -21,7 +21,7 @@ func apply(tx kv.RwTx, logger log.Logger) (beforeBlock, afterBlock testGenHook, 
 	if err != nil {
 		panic(err)
 	}
-	rs := state.NewStateV3(domains, logger)
+	rs := state.NewStateV3(domains, nil, logger)
 	stateWriter := state.NewStateWriterBufferedV3(rs)
 	stateWriter.SetTx(tx)
 
