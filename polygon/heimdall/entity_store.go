@@ -10,23 +10,23 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 )
 
-type entityStore interface {
+type entityStore[TEntity Entity] interface {
 	Prepare(ctx context.Context) error
 	Close()
 	GetLastEntityId(ctx context.Context) (uint64, bool, error)
-	GetLastEntity(ctx context.Context) (Entity, error)
-	GetEntity(ctx context.Context, id uint64) (Entity, error)
-	PutEntity(ctx context.Context, id uint64, entity Entity) error
-	FindByBlockNum(ctx context.Context, blockNum uint64) (Entity, error)
-	RangeFromId(ctx context.Context, startId uint64) ([]Entity, error)
-	RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]Entity, error)
+	GetLastEntity(ctx context.Context) (TEntity, error)
+	GetEntity(ctx context.Context, id uint64) (TEntity, error)
+	PutEntity(ctx context.Context, id uint64, entity TEntity) error
+	FindByBlockNum(ctx context.Context, blockNum uint64) (TEntity, error)
+	RangeFromId(ctx context.Context, startId uint64) ([]TEntity, error)
+	RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]TEntity, error)
 }
 
-type entityStoreImpl struct {
+type entityStoreImpl[TEntity Entity] struct {
 	tx    kv.RwTx
 	table string
 
-	makeEntity      func() Entity
+	makeEntity      func() TEntity
 	getLastEntityId func(ctx context.Context, tx kv.Tx) (uint64, bool, error)
 	loadEntityBytes func(ctx context.Context, tx kv.Getter, id uint64) ([]byte, error)
 
@@ -35,15 +35,15 @@ type entityStoreImpl struct {
 	prepareOnce              sync.Once
 }
 
-func newEntityStore(
+func newEntityStore[TEntity Entity](
 	tx kv.RwTx,
 	table string,
-	makeEntity func() Entity,
+	makeEntity func() TEntity,
 	getLastEntityId func(ctx context.Context, tx kv.Tx) (uint64, bool, error),
 	loadEntityBytes func(ctx context.Context, tx kv.Getter, id uint64) ([]byte, error),
 	blockNumToIdIndexFactory func(ctx context.Context) (*RangeIndex, error),
-) entityStore {
-	return &entityStoreImpl{
+) entityStore[TEntity] {
+	return &entityStoreImpl[TEntity]{
 		tx:    tx,
 		table: table,
 
@@ -55,7 +55,7 @@ func newEntityStore(
 	}
 }
 
-func (s *entityStoreImpl) Prepare(ctx context.Context) error {
+func (s *entityStoreImpl[TEntity]) Prepare(ctx context.Context) error {
 	var err error
 	s.prepareOnce.Do(func() {
 		s.blockNumToIdIndex, err = s.blockNumToIdIndexFactory(ctx)
@@ -68,22 +68,30 @@ func (s *entityStoreImpl) Prepare(ctx context.Context) error {
 	return err
 }
 
-func (s *entityStoreImpl) Close() {
+func (s *entityStoreImpl[TEntity]) Close() {
 	s.blockNumToIdIndex.Close()
 }
 
-func (s *entityStoreImpl) GetLastEntityId(ctx context.Context) (uint64, bool, error) {
+func (s *entityStoreImpl[TEntity]) GetLastEntityId(ctx context.Context) (uint64, bool, error) {
 	return s.getLastEntityId(ctx, s.tx)
 }
 
-func (s *entityStoreImpl) GetLastEntity(ctx context.Context) (Entity, error) {
+// Zero value of any type T
+// https://stackoverflow.com/questions/70585852/return-default-value-for-generic-type)
+// https://go.dev/ref/spec#The_zero_value
+func Zero[T any]() T {
+	var value T
+	return value
+}
+
+func (s *entityStoreImpl[TEntity]) GetLastEntity(ctx context.Context) (TEntity, error) {
 	id, ok, err := s.GetLastEntityId(ctx)
 	if err != nil {
-		return nil, err
+		return Zero[TEntity](), err
 	}
 	// not found
 	if !ok {
-		return nil, nil
+		return Zero[TEntity](), nil
 	}
 	return s.GetEntity(ctx, id)
 }
@@ -94,28 +102,28 @@ func entityStoreKey(id uint64) [8]byte {
 	return key
 }
 
-func (s *entityStoreImpl) entityUnmarshalJSON(jsonBytes []byte) (Entity, error) {
+func (s *entityStoreImpl[TEntity]) entityUnmarshalJSON(jsonBytes []byte) (TEntity, error) {
 	entity := s.makeEntity()
 	if err := json.Unmarshal(jsonBytes, entity); err != nil {
-		return nil, err
+		return Zero[TEntity](), err
 	}
 	return entity, nil
 }
 
-func (s *entityStoreImpl) GetEntity(ctx context.Context, id uint64) (Entity, error) {
+func (s *entityStoreImpl[TEntity]) GetEntity(ctx context.Context, id uint64) (TEntity, error) {
 	jsonBytes, err := s.loadEntityBytes(ctx, s.tx, id)
 	if err != nil {
-		return nil, err
+		return Zero[TEntity](), err
 	}
 	// not found
 	if jsonBytes == nil {
-		return nil, nil
+		return Zero[TEntity](), nil
 	}
 
 	return s.entityUnmarshalJSON(jsonBytes)
 }
 
-func (s *entityStoreImpl) PutEntity(ctx context.Context, id uint64, entity Entity) error {
+func (s *entityStoreImpl[TEntity]) PutEntity(ctx context.Context, id uint64, entity TEntity) error {
 	jsonBytes, err := json.Marshal(entity)
 	if err != nil {
 		return err
@@ -131,27 +139,27 @@ func (s *entityStoreImpl) PutEntity(ctx context.Context, id uint64, entity Entit
 	return s.blockNumToIdIndex.Put(ctx, entity.BlockNumRange(), id)
 }
 
-func (s *entityStoreImpl) FindByBlockNum(ctx context.Context, blockNum uint64) (Entity, error) {
+func (s *entityStoreImpl[TEntity]) FindByBlockNum(ctx context.Context, blockNum uint64) (TEntity, error) {
 	id, err := s.blockNumToIdIndex.Lookup(ctx, blockNum)
 	if err != nil {
-		return nil, err
+		return Zero[TEntity](), err
 	}
 	// not found
 	if id == 0 {
-		return nil, nil
+		return Zero[TEntity](), nil
 	}
 
 	return s.GetEntity(ctx, id)
 }
 
-func (s *entityStoreImpl) RangeFromId(_ context.Context, startId uint64) ([]Entity, error) {
+func (s *entityStoreImpl[TEntity]) RangeFromId(_ context.Context, startId uint64) ([]TEntity, error) {
 	startKey := entityStoreKey(startId)
 	it, err := s.tx.Range(s.table, startKey[:], nil)
 	if err != nil {
 		return nil, err
 	}
 
-	var entities []Entity
+	var entities []TEntity
 	for it.HasNext() {
 		_, jsonBytes, err := it.Next()
 		if err != nil {
@@ -167,7 +175,7 @@ func (s *entityStoreImpl) RangeFromId(_ context.Context, startId uint64) ([]Enti
 	return entities, nil
 }
 
-func (s *entityStoreImpl) RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]Entity, error) {
+func (s *entityStoreImpl[TEntity]) RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]TEntity, error) {
 	id, err := s.blockNumToIdIndex.Lookup(ctx, startBlockNum)
 	if err != nil {
 		return nil, err
@@ -180,11 +188,11 @@ func (s *entityStoreImpl) RangeFromBlockNum(ctx context.Context, startBlockNum u
 	return s.RangeFromId(ctx, id)
 }
 
-func buildBlockNumToIdIndex(
+func buildBlockNumToIdIndex[TEntity Entity](
 	ctx context.Context,
 	index *RangeIndex,
 	iteratorFactory func() (iter.KV, error),
-	entityUnmarshalJSON func([]byte) (Entity, error),
+	entityUnmarshalJSON func([]byte) (TEntity, error),
 ) error {
 	it, err := iteratorFactory()
 	if err != nil {

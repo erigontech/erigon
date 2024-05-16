@@ -21,23 +21,23 @@ type Service interface {
 type service struct {
 	scraper *Scraper
 
-	checkpointStore entityStore
-	milestoneStore  entityStore
-	spanStore       entityStore
+	checkpointStore entityStore[*Checkpoint]
+	milestoneStore  entityStore[*Milestone]
+	spanStore       entityStore[*Span]
 }
 
-func newCheckpointStore(tx kv.RwTx, reader services.BorCheckpointReader, blockNumToIdIndexFactory func(context.Context) (*RangeIndex, error)) entityStore {
-	makeEntity := func() Entity { return new(Checkpoint) }
+func newCheckpointStore(tx kv.RwTx, reader services.BorCheckpointReader, blockNumToIdIndexFactory func(context.Context) (*RangeIndex, error)) entityStore[*Checkpoint] {
+	makeEntity := func() *Checkpoint { return new(Checkpoint) }
 	return newEntityStore(tx, kv.BorCheckpoints, makeEntity, reader.LastCheckpointId, reader.Checkpoint, blockNumToIdIndexFactory)
 }
 
-func newMilestoneStore(tx kv.RwTx, reader services.BorMilestoneReader, blockNumToIdIndexFactory func(context.Context) (*RangeIndex, error)) entityStore {
-	makeEntity := func() Entity { return new(Milestone) }
+func newMilestoneStore(tx kv.RwTx, reader services.BorMilestoneReader, blockNumToIdIndexFactory func(context.Context) (*RangeIndex, error)) entityStore[*Milestone] {
+	makeEntity := func() *Milestone { return new(Milestone) }
 	return newEntityStore(tx, kv.BorMilestones, makeEntity, reader.LastMilestoneId, reader.Milestone, blockNumToIdIndexFactory)
 }
 
-func newSpanStore(tx kv.RwTx, reader services.BorSpanReader, blockNumToIdIndexFactory func(context.Context) (*RangeIndex, error)) entityStore {
-	makeEntity := func() Entity { return new(Span) }
+func newSpanStore(tx kv.RwTx, reader services.BorSpanReader, blockNumToIdIndexFactory func(context.Context) (*RangeIndex, error)) entityStore[*Span] {
+	makeEntity := func() *Span { return new(Span) }
 	return newEntityStore(tx, kv.BorSpans, makeEntity, reader.LastSpanId, reader.Span, blockNumToIdIndexFactory)
 }
 
@@ -92,24 +92,23 @@ func NewService(
 
 func (s *service) FetchLatestSpan(ctx context.Context) (*Span, error) {
 	s.scraper.Synchronize(ctx)
-	entity, err := s.spanStore.GetLastEntity(ctx)
-	return downcastSpanEntity(entity), err
+	return s.spanStore.GetLastEntity(ctx)
 }
 
-func castEntityToWaypoint(entity Entity) Waypoint {
-	return entity.(Waypoint)
+func castEntityToWaypoint[TEntity Waypoint](entity TEntity) Waypoint {
+	return entity
 }
 
 func (s *service) FetchCheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
 	s.scraper.Synchronize(ctx)
 	entities, err := s.checkpointStore.RangeFromBlockNum(ctx, startBlock)
-	return libcommon.SliceMap(entities, castEntityToWaypoint), err
+	return libcommon.SliceMap(entities, castEntityToWaypoint[*Checkpoint]), err
 }
 
 func (s *service) FetchMilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
 	s.scraper.Synchronize(ctx)
 	entities, err := s.milestoneStore.RangeFromBlockNum(ctx, startBlock)
-	return libcommon.SliceMap(entities, castEntityToWaypoint), err
+	return libcommon.SliceMap(entities, castEntityToWaypoint[*Milestone]), err
 }
 
 // TODO: this limit is a temporary solution to avoid piping thousands of events
