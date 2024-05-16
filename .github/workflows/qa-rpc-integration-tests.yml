@@ -1,13 +1,12 @@
 name: QA - RPC Integration Tests
 
 on:
-  push:
-    branches:
-      - 'release/**'
+  schedule:
+    - cron: '3 0 * * *'  # Run every day at 03:00 AM UTC
+  workflow_dispatch:     # Run manually
   pull_request:
     branches:
       - main
-      - 'release/**'
     types:
       - draft
       - opened
@@ -16,7 +15,7 @@ on:
 
 jobs:
   integration-test-suite:
-    runs-on: [self-hosted, Erigon2]
+    runs-on: [self-hosted, Erigon3]
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
