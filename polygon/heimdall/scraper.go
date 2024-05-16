@@ -12,9 +12,9 @@ import (
 )
 
 type Scraper struct {
-	checkpointStore entityStore
-	milestoneStore  entityStore
-	spanStore       entityStore
+	checkpointStore entityStore[*Checkpoint]
+	milestoneStore  entityStore[*Milestone]
+	spanStore       entityStore[*Span]
 
 	client    HeimdallClient
 	pollDelay time.Duration
@@ -31,9 +31,9 @@ type Scraper struct {
 }
 
 func NewScraper(
-	checkpointStore entityStore,
-	milestoneStore entityStore,
-	spanStore entityStore,
+	checkpointStore entityStore[*Checkpoint],
+	milestoneStore entityStore[*Milestone],
+	spanStore entityStore[*Span],
 	client HeimdallClient,
 	pollDelay time.Duration,
 	logger log.Logger,
@@ -58,11 +58,12 @@ func NewScraper(
 	}
 }
 
-func (s *Scraper) syncEntity(
+func syncEntity[TEntity Entity](
 	ctx context.Context,
-	store entityStore,
-	fetcher entityFetcher,
-	callback func([]Entity),
+	s *Scraper,
+	store entityStore[TEntity],
+	fetcher entityFetcher[TEntity],
+	callback func([]TEntity),
 	syncEvent *polygoncommon.EventNotifier,
 ) error {
 	defer store.Close()
@@ -114,36 +115,27 @@ func (s *Scraper) syncEntity(
 	return ctx.Err()
 }
 
-func newCheckpointFetcher(client HeimdallClient, logger log.Logger) entityFetcher {
-	fetchEntity := func(ctx context.Context, id int64) (Entity, error) { return client.FetchCheckpoint(ctx, id) }
-
-	fetchEntitiesPage := func(ctx context.Context, page uint64, limit uint64) ([]Entity, error) {
-		entities, err := client.FetchCheckpoints(ctx, page, limit)
-		return libcommon.SliceMap(entities, func(c *Checkpoint) Entity { return c }), err
-	}
-
+func newCheckpointFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Checkpoint] {
 	return newEntityFetcher(
 		"CheckpointFetcher",
 		client.FetchCheckpointCount,
-		fetchEntity,
-		fetchEntitiesPage,
+		client.FetchCheckpoint,
+		client.FetchCheckpoints,
 		logger,
 	)
 }
 
-func newMilestoneFetcher(client HeimdallClient, logger log.Logger) entityFetcher {
-	fetchEntity := func(ctx context.Context, id int64) (Entity, error) { return client.FetchMilestone(ctx, id) }
-
+func newMilestoneFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Milestone] {
 	return newEntityFetcher(
 		"MilestoneFetcher",
 		client.FetchMilestoneCount,
-		fetchEntity,
+		client.FetchMilestone,
 		nil,
 		logger,
 	)
 }
 
-func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher {
+func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Span] {
 	fetchLastEntityId := func(ctx context.Context) (int64, error) {
 		span, err := client.FetchLatestSpan(ctx)
 		if err != nil {
@@ -152,7 +144,7 @@ func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher {
 		return int64(span.Id), nil
 	}
 
-	fetchEntity := func(ctx context.Context, id int64) (Entity, error) {
+	fetchEntity := func(ctx context.Context, id int64) (*Span, error) {
 		return client.FetchSpan(ctx, uint64(id))
 	}
 
@@ -163,27 +155,6 @@ func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher {
 		nil,
 		logger,
 	)
-}
-
-func downcastCheckpointEntity(e Entity) *Checkpoint {
-	if e == nil {
-		return nil
-	}
-	return e.(*Checkpoint)
-}
-
-func downcastMilestoneEntity(e Entity) *Milestone {
-	if e == nil {
-		return nil
-	}
-	return e.(*Milestone)
-}
-
-func downcastSpanEntity(e Entity) *Span {
-	if e == nil {
-		return nil
-	}
-	return e.(*Span)
 }
 
 func (s *Scraper) RegisterCheckpointObserver(observer func([]*Checkpoint)) polygoncommon.UnregisterFunc {
@@ -209,39 +180,36 @@ func (s *Scraper) Run(parentCtx context.Context) error {
 
 	// sync checkpoints
 	group.Go(func() error {
-		return s.syncEntity(
+		return syncEntity(
 			ctx,
+			s,
 			s.checkpointStore,
 			newCheckpointFetcher(s.client, s.logger),
-			func(entities []Entity) {
-				s.checkpointObservers.Notify(libcommon.SliceMap(entities, downcastCheckpointEntity))
-			},
+			s.checkpointObservers.Notify,
 			s.checkpointSyncEvent,
 		)
 	})
 
 	// sync milestones
 	group.Go(func() error {
-		return s.syncEntity(
+		return syncEntity(
 			ctx,
+			s,
 			s.milestoneStore,
 			newMilestoneFetcher(s.client, s.logger),
-			func(entities []Entity) {
-				s.milestoneObservers.Notify(libcommon.SliceMap(entities, downcastMilestoneEntity))
-			},
+			s.milestoneObservers.Notify,
 			s.milestoneSyncEvent,
 		)
 	})
 
 	// sync spans
 	group.Go(func() error {
-		return s.syncEntity(
+		return syncEntity(
 			ctx,
+			s,
 			s.spanStore,
 			newSpanFetcher(s.client, s.logger),
-			func(entities []Entity) {
-				s.spanObservers.Notify(libcommon.SliceMap(entities, downcastSpanEntity))
-			},
+			s.spanObservers.Notify,
 			s.spanSyncEvent,
 		)
 	})
