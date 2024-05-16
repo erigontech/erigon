@@ -493,10 +493,14 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 							peerCountMap[protocol] += count
 						}
 					}
-					for protocol, count := range peerCountMap {
-						logItems = append(logItems, eth.ProtocolToString[protocol], strconv.Itoa(count))
+					if len(peerCountMap) == 0 {
+						logger.Warn("[p2p] No GoodPeers")
+					} else {
+						for protocol, count := range peerCountMap {
+							logItems = append(logItems, eth.ProtocolToString[protocol], strconv.Itoa(count))
+						}
+						logger.Info("[p2p] GoodPeers", logItems...)
 					}
-					logger.Info("[p2p] GoodPeers", logItems...)
 				}
 			}
 		}()

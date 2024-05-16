@@ -182,7 +182,7 @@ func ExecV3(ctx context.Context,
 			}()
 		}
 	}
-
+	var err error
 	inMemExec := txc.Doms != nil
 	var doms *state2.SharedDomains
 	if inMemExec {
@@ -190,6 +190,11 @@ func ExecV3(ctx context.Context,
 	} else {
 		var err error
 		doms, err = state2.NewSharedDomains(applyTx, log.New())
+		// if we are behind the commitment, we can't execute anything
+		// this can heppen if progress in domain is higher than progress in blocks
+		if errors.Is(err, state2.ErrBehindCommitment) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -290,8 +295,6 @@ func ExecV3(ctx context.Context,
 	blockNum = doms.BlockNum()
 	initialBlockNum := blockNum
 	outputTxNum.Store(doms.TxNum())
-
-	var err error
 
 	if maxBlockNum-blockNum > 16 {
 		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
