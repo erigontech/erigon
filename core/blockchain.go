@@ -263,6 +263,15 @@ func rlpHash(x interface{}) (h libcommon.Hash) {
 }
 
 func SysCallContract(contract libcommon.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine consensus.EngineReader, constCall bool, tracing *tracing.Hooks) (result []byte, err error) {
+	if tracing != nil {
+		if tracing.OnSystemCallStart != nil {
+			tracing.OnSystemCallStart()
+		}
+		if tracing.OnSystemCallEnd != nil {
+			defer tracing.OnSystemCallEnd()
+		}
+	}
+
 	msg := types.NewMessage(
 		state.SystemAddress,
 		&contract,
@@ -373,11 +382,11 @@ func FinalizeBlockExecution(
 }
 
 func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHeaderReader, header *types.Header,
-	cc *chain.Config, ibs *state.IntraBlockState, logger log.Logger, bcLogger *tracing.Hooks,
+	cc *chain.Config, ibs *state.IntraBlockState, logger log.Logger, tracing *tracing.Hooks,
 ) error {
 	engine.Initialize(cc, chain, header, ibs, func(contract libcommon.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-		return SysCallContract(contract, data, cc, ibState, header, engine, constCall, nil)
-	}, logger, bcLogger)
+		return SysCallContract(contract, data, cc, ibState, header, engine, constCall, tracing)
+	}, logger, tracing)
 	noop := state.NewNoopWriter()
 	ibs.FinalizeTx(cc.Rules(header.Number.Uint64(), header.Time), noop)
 	return nil
