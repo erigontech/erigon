@@ -123,6 +123,22 @@ type (
 	// GenesisBlockHook is called when the genesis block is being processed.
 	GenesisBlockHook = func(genesis *types.Block, alloc types.GenesisAlloc)
 
+	// OnSystemCallStartHook is called when a system call is about to be executed. Today,
+	// this hook is invoked when the EIP-4788 system call is about to be executed to set the
+	// beacon block root.
+	//
+	// After this hook, the EVM call tracing will happened as usual so you will receive a `OnEnter/OnExit`
+	// as well as state hooks between this hook and the `OnSystemCallEndHook`.
+	//
+	// Note that system call happens outside normal transaction execution, so the `OnTxStart/OnTxEnd` hooks
+	// will not be invoked.
+	OnSystemCallStartHook = func()
+
+	// OnSystemCallEndHook is called when a system call has finished executing. Today,
+	// this hook is invoked when the EIP-4788 system call is about to be executed to set the
+	// beacon block root.
+	OnSystemCallEndHook = func()
+
 	/*
 		- State events -
 	*/
@@ -153,10 +169,12 @@ type Hooks struct {
 	OnFault     FaultHook
 	OnGasChange GasChangeHook
 	// Chain events
-	OnBlockchainInit BlockchainInitHook
-	OnBlockStart     BlockStartHook
-	OnBlockEnd       BlockEndHook
-	OnGenesisBlock   GenesisBlockHook
+	OnBlockchainInit  BlockchainInitHook
+	OnBlockStart      BlockStartHook
+	OnBlockEnd        BlockEndHook
+	OnGenesisBlock    GenesisBlockHook
+	OnSystemCallStart OnSystemCallStartHook
+	OnSystemCallEnd   OnSystemCallEndHook
 	// State events
 	OnBalanceChange BalanceChangeHook
 	OnNonceChange   NonceChangeHook
