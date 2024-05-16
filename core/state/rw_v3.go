@@ -471,7 +471,8 @@ type StateWriterV3 struct {
 
 func NewStateWriterV3(rs *StateV3, accumulator *shards.Accumulator) *StateWriterV3 {
 	return &StateWriterV3{
-		rs: rs,
+		rs:          rs,
+		accumulator: accumulator,
 		//trace: true,
 	}
 }
