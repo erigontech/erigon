@@ -1,6 +1,7 @@
 package transactions
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -84,7 +85,9 @@ func TraceTx(
 	stream *jsoniter.Stream,
 	callTimeout time.Duration,
 ) error {
-	tracer, streaming, cancel, err := AssembleTracer(ctx, config, txCtx.TxHash, stream, callTimeout)
+	tracerBuffer := bytes.NewBuffer(nil)
+	tracerStream := jsoniter.NewStream(jsoniter.ConfigDefault, tracerBuffer, 4096)
+	tracer, streaming, cancel, err := AssembleTracer(ctx, config, txCtx.TxHash, tracerStream, callTimeout)
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -97,7 +100,7 @@ func TraceTx(
 		return core.ApplyMessage(evm, message, gp, refunds, false /* gasBailout */)
 	}
 
-	return ExecuteTraceTx(blockCtx, txCtx, ibs, config, chainConfig, stream, tracer, streaming, execCb)
+	return ExecuteTraceTx(blockCtx, txCtx, ibs, config, chainConfig, stream, tracerBuffer, tracer, streaming, execCb)
 }
 
 func AssembleTracer(
@@ -152,6 +155,7 @@ func ExecuteTraceTx(
 	config *tracers.TraceConfig,
 	chainConfig *chain.Config,
 	stream *jsoniter.Stream,
+	tracerBuffer *bytes.Buffer,
 	tracer vm.EVMLogger,
 	streaming bool,
 	execCb func(evm *vm.EVM, refunds bool) (*core.ExecutionResult, error),
@@ -164,25 +168,25 @@ func ExecuteTraceTx(
 		refunds = false
 	}
 
-	if streaming {
-		stream.WriteObjectStart()
-		stream.WriteObjectField("structLogs")
-		stream.WriteArrayStart()
-	}
-
 	result, err := execCb(evm, refunds)
 	if err != nil {
-		if streaming {
-			stream.WriteArrayEnd()
-			stream.WriteObjectEnd()
-		} else {
-			stream.WriteNil()
-		}
+		stream.WriteNil()
 		return fmt.Errorf("tracing failed: %w", err)
 	}
 
 	// Depending on the tracer type, format and return the output
 	if streaming {
+		stream.WriteObjectStart()
+		stream.WriteObjectField("structLogs")
+		stream.WriteArrayStart()
+
+		_ = stream.Flush()
+
+		oldBuf := stream.Buffer()
+		stream.SetBuffer(tracerBuffer.Bytes())
+		_ = stream.Flush()
+		stream.SetBuffer(oldBuf)
+
 		stream.WriteArrayEnd()
 		stream.WriteMore()
 		stream.WriteObjectField("gas")

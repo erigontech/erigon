@@ -1,6 +1,7 @@
 package tracer
 
 import (
+	"bytes"
 	"context"
 	"time"
 
@@ -45,7 +46,9 @@ func TraceBorStateSyncTxnDebugAPI(
 	}
 
 	txCtx := initStateSyncTxContext(blockNum, blockHash)
-	tracer, streaming, cancel, err := transactions.AssembleTracer(ctx, traceConfig, txCtx.TxHash, stream, callTimeout)
+	tracerBuffer := bytes.NewBuffer(nil)
+	tracerStream := jsoniter.NewStream(jsoniter.ConfigDefault, tracerBuffer, 4096)
+	tracer, streaming, cancel, err := transactions.AssembleTracer(ctx, traceConfig, txCtx.TxHash, tracerStream, callTimeout)
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -60,7 +63,7 @@ func TraceBorStateSyncTxnDebugAPI(
 		return traceBorStateSyncTxn(ctx, ibs, stateWriter, stateReceiverContract, stateSyncEvents, evm, rules, txCtx, refunds)
 	}
 
-	return transactions.ExecuteTraceTx(blockCtx, txCtx, ibs, traceConfig, chainConfig, stream, tracer, streaming, execCb)
+	return transactions.ExecuteTraceTx(blockCtx, txCtx, ibs, traceConfig, chainConfig, stream, tracerBuffer, tracer, streaming, execCb)
 }
 
 func TraceBorStateSyncTxnTraceAPI(
