@@ -143,35 +143,51 @@ func printFile(cliCtx *cli.Context) error {
 	snapDownload := data.SnapshotDownload
 
 	if file, ok := snapDownload.SegmentsDownloading[cliCtx.String(FileNameFlag.Name)]; ok {
-		fileRow := getFileRow(file)
-		filePeers := getPeersRows(file.Peers)
-		fileWebseeds := getPeersRows(file.Webseeds)
 
-		switch cliCtx.String(flags.OutputFlag.Name) {
-		case "json":
-			util.RenderJson(fileRow)
-			util.RenderJson(filePeers)
-			util.RenderJson(fileWebseeds)
-		case "text":
-			//Print file status
-			util.RenderTableWithHeader(
-				"file download info:",
-				table.Row{"File", "Progress", "Total", "Downloaded", "Peers", "Peers Download Rate", "Webseeds", "Webseeds Download Rate", "Time Left", "Active"},
-				[]table.Row{fileRow},
-			)
+		if file.DownloadedBytes >= file.TotalBytes {
+			fileRow := getDownloadedFileRow(file)
+			switch cliCtx.String(flags.OutputFlag.Name) {
+			case "json":
+				util.RenderJson(fileRow)
+			case "text":
+				//Print file status
+				util.RenderTableWithHeader(
+					"File download info:",
+					table.Row{"File", "Size", "Average Download Rate", "Time Took"},
+					[]table.Row{fileRow},
+				)
+			}
+		} else {
+			fileRow := getFileRow(file)
+			filePeers := getPeersRows(file.Peers)
+			fileWebseeds := getPeersRows(file.Webseeds)
 
-			//Print peers and webseeds status
-			util.RenderTableWithHeader(
-				"",
-				table.Row{"Peer", "Download Rate"},
-				filePeers,
-			)
+			switch cliCtx.String(flags.OutputFlag.Name) {
+			case "json":
+				util.RenderJson(fileRow)
+				util.RenderJson(filePeers)
+				util.RenderJson(fileWebseeds)
+			case "text":
+				//Print file status
+				util.RenderTableWithHeader(
+					"file download info:",
+					table.Row{"File", "Progress", "Total", "Downloaded", "Peers", "Peers Download Rate", "Webseeds", "Webseeds Download Rate", "Time Left", "Active"},
+					[]table.Row{fileRow},
+				)
 
-			util.RenderTableWithHeader(
-				"",
-				table.Row{"Webseed", "Download Rate"},
-				fileWebseeds,
-			)
+				//Print peers and webseeds status
+				util.RenderTableWithHeader(
+					"",
+					table.Row{"Peer", "Download Rate"},
+					filePeers,
+				)
+
+				util.RenderTableWithHeader(
+					"",
+					table.Row{"Webseed", "Download Rate"},
+					fileWebseeds,
+				)
+			}
 		}
 	} else {
 		txt := text.Colors{text.FgWhite, text.BgRed}
@@ -181,26 +197,40 @@ func printFile(cliCtx *cli.Context) error {
 	return nil
 }
 
+func getDownloadedFileRow(file diagnostics.SegmentDownloadStatistics) table.Row {
+	averageDownloadRate := common.ByteCount(file.DownloadedStats.AverageRate) + "/s"
+	totalDownloadTimeString := time.Duration(file.DownloadedStats.TimeTook) * time.Second
+
+	row := table.Row{
+		file.Name,
+		common.ByteCount(file.TotalBytes),
+		averageDownloadRate,
+		totalDownloadTimeString.String(),
+	}
+
+	return row
+}
+
 func getSnapshotStatusRow(snapDownload diagnostics.SnapshotDownloadStatistics) table.Row {
 	status := "Downloading"
 	if snapDownload.DownloadFinished {
 		status = "Finished"
 	}
 
-	downloadedPercent := float32(snapDownload.Downloaded) / float32(snapDownload.Total/100)
+	downloadedPercent := getPercentDownloaded(snapDownload.Downloaded, snapDownload.Total)
 
 	remainingBytes := snapDownload.Total - snapDownload.Downloaded
 	downloadTimeLeft := util.CalculateTime(remainingBytes, snapDownload.DownloadRate)
 
-	totalDownloadTimeString := time.Duration(snapDownload.TotalTime * float64(time.Second)).String()
+	totalDownloadTimeString := time.Duration(snapDownload.TotalTime) * time.Second
 
 	rowObj := table.Row{
-		status,                                   // Status
-		fmt.Sprintf("%.2f%%", downloadedPercent), // Progress
+		status,            // Status
+		downloadedPercent, // Progress
 		common.ByteCount(snapDownload.Downloaded),          // Downloaded
 		common.ByteCount(snapDownload.Total),               // Total
 		downloadTimeLeft,                                   // Time Left
-		totalDownloadTimeString,                            // Total Time
+		totalDownloadTimeString.String(),                   // Total Time
 		common.ByteCount(snapDownload.DownloadRate) + "/s", // Download Rate
 		common.ByteCount(snapDownload.UploadRate) + "/s",   // Upload Rate
 		snapDownload.Peers,                                 // Peers
@@ -217,7 +247,7 @@ func getFileRow(file diagnostics.SegmentDownloadStatistics) table.Row {
 	peersDownloadRate := getFileDownloadRate(file.Peers)
 	webseedsDownloadRate := getFileDownloadRate(file.Webseeds)
 	totalDownloadRate := peersDownloadRate + webseedsDownloadRate
-	downloadedPercent := float32(file.DownloadedBytes) / float32(file.TotalBytes/100)
+	downloadedPercent := getPercentDownloaded(file.DownloadedBytes, file.TotalBytes)
 	remainingBytes := file.TotalBytes - file.DownloadedBytes
 	downloadTimeLeft := util.CalculateTime(remainingBytes, totalDownloadRate)
 	isActive := "false"
@@ -227,7 +257,7 @@ func getFileRow(file diagnostics.SegmentDownloadStatistics) table.Row {
 
 	row := table.Row{
 		file.Name,
-		fmt.Sprintf("%.2f%%", downloadedPercent),
+		downloadedPercent,
 		common.ByteCount(file.TotalBytes),
 		common.ByteCount(file.DownloadedBytes),
 		len(file.Peers),
@@ -342,4 +372,14 @@ func filterQueued(rows []table.Row) []table.Row {
 	}
 
 	return filtered
+}
+
+func getPercentDownloaded(downloaded, total uint64) string {
+	percent := float32(downloaded) / float32(total/100)
+
+	if percent > 100 {
+		percent = 100
+	}
+
+	return fmt.Sprintf("%.2f%%", percent)
 }

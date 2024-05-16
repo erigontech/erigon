@@ -1,9 +1,7 @@
 package jsonrpc
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
 	"math/big"
 
@@ -16,7 +14,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
@@ -32,7 +29,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/filters"
-	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
@@ -55,7 +51,7 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, block *types.Bloc
 		return nil, err
 	}
 
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, 0, api.historyV3(tx))
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -163,91 +159,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		end = latest
 	}
 
-	if api.historyV3(tx) {
-		return api.getLogsV3(ctx, tx.(kv.TemporalTx), begin, end, crit)
-	}
-	blockNumbers := bitmapdb.NewBitmap()
-	defer bitmapdb.ReturnToPool(blockNumbers)
-	if err := applyFilters(blockNumbers, tx, begin, end, crit); err != nil {
-		return logs, err
-	}
-	if blockNumbers.IsEmpty() {
-		return logs, nil
-	}
-	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
-	for _, v := range crit.Addresses {
-		addrMap[v] = struct{}{}
-	}
-	iter := blockNumbers.Iterator()
-	for iter.HasNext() {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-
-		blockNumber := uint64(iter.Next())
-		var logIndex uint
-		var txIndex uint
-		var blockLogs []*types.Log
-
-		it, err := tx.Prefix(kv.Log, hexutility.EncodeTs(blockNumber))
-		if err != nil {
-			return nil, err
-		}
-		for it.HasNext() {
-			k, v, err := it.Next()
-			if err != nil {
-				return logs, err
-			}
-
-			var logs types.Logs
-			if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
-				return logs, fmt.Errorf("receipt unmarshal failed:  %w", err)
-			}
-			for _, log := range logs {
-				log.Index = logIndex
-				logIndex++
-			}
-			filtered := logs.Filter(addrMap, crit.Topics)
-			if len(filtered) == 0 {
-				continue
-			}
-			txIndex = uint(binary.BigEndian.Uint32(k[8:]))
-			for _, log := range filtered {
-				log.TxIndex = txIndex
-			}
-			blockLogs = append(blockLogs, filtered...)
-		}
-		it.Close()
-		if len(blockLogs) == 0 {
-			continue
-		}
-
-		blockHash, err := api._blockReader.CanonicalHash(ctx, tx, blockNumber)
-		if err != nil {
-			return nil, err
-		}
-
-		body, err := api._blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
-		if err != nil {
-			return nil, err
-		}
-		if body == nil {
-			return nil, fmt.Errorf("block not found %d", blockNumber)
-		}
-		for _, log := range blockLogs {
-			log.BlockNumber = blockNumber
-			log.BlockHash = blockHash
-			// bor transactions are at the end of the bodies transactions (added manually but not actually part of the block)
-			if log.TxIndex == uint(len(body.Transactions)) {
-				log.TxHash = bortypes.ComputeBorTxHash(blockNumber, blockHash)
-			} else {
-				log.TxHash = body.Transactions[log.TxIndex].Hash()
-			}
-		}
-		logs = append(logs, blockLogs...)
-	}
-
-	return logs, nil
+	return api.getLogsV3(ctx, tx.(kv.TemporalTx), begin, end, crit)
 }
 
 // The Topic list restricts matches to particular event topics. Each event has a list

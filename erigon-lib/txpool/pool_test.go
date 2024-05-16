@@ -51,7 +51,7 @@ func TestNonceFromAddress(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan types.Announcements, 100)
 
-	_, coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	db := memdb.NewTestPoolDB(t)
 
 	cfg := txpoolcfg.DefaultConfig
@@ -173,7 +173,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	t.Skip("TODO")
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan types.Announcements, 100)
-	_, coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	db := memdb.NewTestPoolDB(t)
 
 	cfg := txpoolcfg.DefaultConfig
@@ -292,7 +292,7 @@ func TestReverseNonces(t *testing.T) {
 	t.Skip("TODO")
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan types.Announcements, 100)
-	_, coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	db := memdb.NewTestPoolDB(t)
 
 	cfg := txpoolcfg.DefaultConfig
@@ -421,7 +421,7 @@ func TestTxPoke(t *testing.T) {
 	t.Skip("TODO")
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan types.Announcements, 100)
-	_, coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	db := memdb.NewTestPoolDB(t)
 
 	cfg := txpoolcfg.DefaultConfig
@@ -682,7 +682,7 @@ func TestShanghaiValidateTx(t *testing.T) {
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			ch := make(chan types.Announcements, 100)
-			_, coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+			coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 
 			cfg := txpoolcfg.DefaultConfig
 
@@ -736,7 +736,7 @@ func TestBlobTxReplacement(t *testing.T) {
 	t.Skip("TODO")
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan types.Announcements, 5)
-	_, coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	db := memdb.NewTestPoolDB(t)
 
 	cfg := txpoolcfg.DefaultConfig
@@ -951,7 +951,7 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 	t.Skip("TODO")
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan types.Announcements, 100)
-	_, coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	db := memdb.NewTestPoolDB(t)
 
 	cfg := txpoolcfg.DefaultConfig
@@ -1060,7 +1060,7 @@ func TestBlobSlots(t *testing.T) {
 	t.Skip("TODO")
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan types.Announcements, 5)
-	_, coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	db := memdb.NewTestPoolDB(t)
 	cfg := txpoolcfg.DefaultConfig
 
@@ -1140,7 +1140,7 @@ func TestGasLimitChanged(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan types.Announcements, 100)
 
-	_, coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	db := memdb.NewTestPoolDB(t)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)

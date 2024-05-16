@@ -8,14 +8,13 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
-	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
 type Scraper struct {
-	txProvider     func() kv.RwTx
-	readerProvider func() reader
+	checkpointStore entityStore
+	milestoneStore  entityStore
+	spanStore       entityStore
 
 	client    HeimdallClient
 	pollDelay time.Duration
@@ -31,31 +30,18 @@ type Scraper struct {
 	logger log.Logger
 }
 
-func NewScraperTODO(
-	client HeimdallClient,
-	pollDelay time.Duration,
-	logger log.Logger,
-) *Scraper {
-	return NewScraper(
-		func() kv.RwTx { /* TODO */ return nil },
-		func() reader { /* TODO */ return nil },
-		client,
-		pollDelay,
-		logger,
-	)
-}
-
 func NewScraper(
-	txProvider func() kv.RwTx,
-	readerProvider func() reader,
-
+	checkpointStore entityStore,
+	milestoneStore entityStore,
+	spanStore entityStore,
 	client HeimdallClient,
 	pollDelay time.Duration,
 	logger log.Logger,
 ) *Scraper {
 	return &Scraper{
-		txProvider:     txProvider,
-		readerProvider: readerProvider,
+		checkpointStore: checkpointStore,
+		milestoneStore:  milestoneStore,
+		spanStore:       spanStore,
 
 		client:    client,
 		pollDelay: pollDelay,
@@ -79,6 +65,11 @@ func (s *Scraper) syncEntity(
 	callback func([]Entity),
 	syncEvent *polygoncommon.EventNotifier,
 ) error {
+	defer store.Close()
+	if err := store.Prepare(ctx); err != nil {
+		return err
+	}
+
 	for ctx.Err() == nil {
 		lastKnownId, hasLastKnownId, err := store.GetLastEntityId(ctx)
 		if err != nil {
@@ -121,21 +112,6 @@ func (s *Scraper) syncEntity(
 		}
 	}
 	return ctx.Err()
-}
-
-func newCheckpointStore(tx kv.RwTx, reader services.BorCheckpointReader) entityStore {
-	makeEntity := func() Entity { return new(Checkpoint) }
-	return newEntityStore(tx, kv.BorCheckpoints, makeEntity, reader.LastCheckpointId, reader.Checkpoint)
-}
-
-func newMilestoneStore(tx kv.RwTx, reader services.BorMilestoneReader) entityStore {
-	makeEntity := func() Entity { return new(Milestone) }
-	return newEntityStore(tx, kv.BorMilestones, makeEntity, reader.LastMilestoneId, reader.Milestone)
-}
-
-func newSpanStore(tx kv.RwTx, reader services.BorSpanReader) entityStore {
-	makeEntity := func() Entity { return new(Span) }
-	return newEntityStore(tx, kv.BorSpans, makeEntity, reader.LastSpanId, reader.Span)
 }
 
 func newCheckpointFetcher(client HeimdallClient, logger log.Logger) entityFetcher {
@@ -190,14 +166,23 @@ func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher {
 }
 
 func downcastCheckpointEntity(e Entity) *Checkpoint {
+	if e == nil {
+		return nil
+	}
 	return e.(*Checkpoint)
 }
 
 func downcastMilestoneEntity(e Entity) *Milestone {
+	if e == nil {
+		return nil
+	}
 	return e.(*Milestone)
 }
 
 func downcastSpanEntity(e Entity) *Span {
+	if e == nil {
+		return nil
+	}
 	return e.(*Span)
 }
 
@@ -220,26 +205,13 @@ func (s *Scraper) Synchronize(ctx context.Context) {
 }
 
 func (s *Scraper) Run(parentCtx context.Context) error {
-	tx := s.txProvider()
-	if tx == nil {
-		// TODO: implement and remove
-		s.logger.Warn("heimdall.Scraper txProvider is not implemented yet")
-		return nil
-	}
-	reader := s.readerProvider()
-	if reader == nil {
-		// TODO: implement and remove
-		s.logger.Warn("heimdall.Scraper readerProvider is not implemented yet")
-		return nil
-	}
-
 	group, ctx := errgroup.WithContext(parentCtx)
 
 	// sync checkpoints
 	group.Go(func() error {
 		return s.syncEntity(
 			ctx,
-			newCheckpointStore(tx, reader),
+			s.checkpointStore,
 			newCheckpointFetcher(s.client, s.logger),
 			func(entities []Entity) {
 				s.checkpointObservers.Notify(libcommon.SliceMap(entities, downcastCheckpointEntity))
@@ -252,7 +224,7 @@ func (s *Scraper) Run(parentCtx context.Context) error {
 	group.Go(func() error {
 		return s.syncEntity(
 			ctx,
-			newMilestoneStore(tx, reader),
+			s.milestoneStore,
 			newMilestoneFetcher(s.client, s.logger),
 			func(entities []Entity) {
 				s.milestoneObservers.Notify(libcommon.SliceMap(entities, downcastMilestoneEntity))
@@ -265,7 +237,7 @@ func (s *Scraper) Run(parentCtx context.Context) error {
 	group.Go(func() error {
 		return s.syncEntity(
 			ctx,
-			newSpanStore(tx, reader),
+			s.spanStore,
 			newSpanFetcher(s.client, s.logger),
 			func(entities []Entity) {
 				s.spanObservers.Notify(libcommon.SliceMap(entities, downcastSpanEntity))

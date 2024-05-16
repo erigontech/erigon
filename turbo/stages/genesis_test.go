@@ -180,7 +180,7 @@ func TestSetupGenesis(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			dirs := datadir.New(tmpdir)
-			_, db, _ := temporaltest.NewTestDB(t, dirs)
+			db, _ := temporaltest.NewTestDB(t, dirs)
 			blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, dirs.Snap, 0, log.New()), freezeblocks.NewBorRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, dirs.Snap, 0, log.New()))
 			config, genesis, err := test.fn(t, db)
 			// Check the return values.

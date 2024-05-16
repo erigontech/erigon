@@ -15,6 +15,10 @@ type Span struct {
 	ChainID           string              `json:"bor_chain_id,omitempty" yaml:"bor_chain_id"`
 }
 
+func (s *Span) RawId() uint64 {
+	return uint64(s.Id)
+}
+
 func (s *Span) BlockNumRange() ClosedRange {
 	return ClosedRange{
 		Start: s.StartBlock,
