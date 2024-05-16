@@ -22,7 +22,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/tracing"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
@@ -50,15 +49,7 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 
 	if cfg.Tracer != nil {
 		if cfg.Tracer.OnTxStart != nil {
-			cfg.Tracer.OnTxStart(&tracing.VMContext{
-				ChainConfig:     evm.ChainConfig(),
-				IntraBlockState: ibs,
-				BlockNumber:     evm.Context.BlockNumber,
-				Time:            evm.Context.Time,
-				Coinbase:        evm.Context.Coinbase,
-				Random:          evm.Context.PrevRanDao,
-				TxHash:          evm.TxHash,
-			}, tx, msg.From())
+			cfg.Tracer.OnTxStart(evm.GetVMContext(), tx, msg.From())
 		}
 		if cfg.Tracer.OnTxEnd != nil {
 			defer func() {
