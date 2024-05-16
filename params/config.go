@@ -148,6 +148,8 @@ var (
 
 	ChiadoChainConfig = readChainSpec("chainspecs/chiado.json")
 
+	InteropChainConfig = readChainSpec("chainspecs/interop.json")
+
 	CliqueSnapshot = NewSnapshotConfig(10, 1024, 16384, true, "")
 
 	TestChainConfig = &chain.Config{

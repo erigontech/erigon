@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 
 	"github.com/ledgerwatch/erigon/core/types"
@@ -56,7 +57,7 @@ func initGenesis(cliCtx *cli.Context) error {
 	if err := json.NewDecoder(file).Decode(genesis); err != nil {
 		utils.Fatalf("invalid genesis file: %v", err)
 	}
-
+	fmt.Println("-----------------> genesis.Alloc == nil", genesis.Alloc == nil)
 	// Open and initialise both full and light databases
 	stack := MakeConfigNodeDefault(cliCtx, logger)
 	defer stack.Close()

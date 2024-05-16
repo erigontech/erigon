@@ -122,6 +122,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *b
 
 	// Check whether the genesis block is already written.
 	if genesis != nil {
+		fmt.Println("--------------> Alloc == nil: ", genesis.Alloc == nil)
 		block, _, err1 := GenesisToBlock(genesis, tmpDir, logger)
 		if err1 != nil {
 			return genesis.Config, nil, err1
@@ -429,6 +430,13 @@ func TestGenesisBlock() *types.Genesis {
 	return &types.Genesis{Config: params.TestChainConfig}
 }
 
+func InteropGenesisBlock() *types.Genesis {
+	return &types.Genesis{
+		Config: params.InteropChainConfig,
+		Alloc:  readPrealloc("allocs/interop.json"),
+	}
+}
+
 // Pre-calculated version of:
 //
 //	DevnetSignPrivateKey = crypto.HexToECDSA(sha256.Sum256([]byte("erigon devnet key")))
@@ -462,6 +470,7 @@ func DeveloperGenesisBlock(period uint64, faucet libcommon.Address) *types.Genes
 // ToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
 func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
+	fmt.Println("------------------> nil-check: ", g.Alloc == nil)
 	_ = g.Alloc //nil-check
 
 	head := &types.Header{

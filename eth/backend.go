@@ -311,7 +311,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.chainConfig = chainConfig
 	backend.genesisBlock = genesis
 	backend.genesisHash = genesis.Hash()
-
+	fmt.Println("---------------> PragueTime: ", chainConfig.PragueTime.Uint64())
 	setBorDefaultMinerGasPrice(chainConfig, config, logger)
 	setBorDefaultTxPoolPriceLimit(chainConfig, config.TxPool, logger)
 
