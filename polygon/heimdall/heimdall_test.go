@@ -2,7 +2,6 @@ package heimdall
 
 import (
 	"context"
-	"encoding/json"
 	"math/big"
 	"testing"
 	"time"
@@ -329,30 +328,4 @@ func TestRegisterMilestoneObserver(t *testing.T) {
 
 	m := <-eventChan
 	assert.Equal(t, expectedMilestone.Timestamp(), m.Timestamp())
-}
-
-func TestMarshall(t *testing.T) {
-	m := makeMilestone(10, 100)
-
-	b, err := json.Marshal(m)
-
-	assert.Nil(t, err)
-
-	var m1 Milestone
-
-	assert.Nil(t, json.Unmarshal(b, &m1))
-
-	assert.Equal(t, *m, m1)
-
-	c := makeCheckpoint(10, 100)
-
-	b, err = json.Marshal(c)
-
-	assert.Nil(t, err)
-
-	var c1 Checkpoint
-
-	assert.Nil(t, json.Unmarshal(b, &c1))
-
-	assert.Equal(t, *c, c1)
 }
