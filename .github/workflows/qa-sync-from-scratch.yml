@@ -6,15 +6,19 @@ on:
   workflow_dispatch:     # Run manually
 
 jobs:
-  amoy-test:
+  long-running-test:
     runs-on: self-hosted
     timeout-minutes: 800
+    strategy:
+      fail-fast: false
+      matrix:
+        chain: [ sepolia, amoy ]  # Chain name as specified on the erigon command line
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 7200 # 2 hours
       TOTAL_TIME_SECONDS: 43200 # 12 hours
-      CHAIN: amoy # Chain name as specified on the erigon command line
+      CHAIN: ${{ matrix.chain }}
 
     steps:
     - name: Check out repository
