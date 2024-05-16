@@ -98,12 +98,18 @@ func TraceTx(
 
 	execCb := func(evm *vm.EVM, refunds bool) (*core.ExecutionResult, error) {
 		gp := new(core.GasPool).AddGas(message.Gas()).AddBlobGas(message.BlobGas())
-		tracer.OnTxStart(evm.GetVMContext(), tx, message.From())
+		if tracer != nil && tracer.OnTxStart != nil {
+			tracer.OnTxStart(evm.GetVMContext(), tx, message.From())
+		}
 		result, err := core.ApplyMessage(evm, message, gp, refunds, false /* gasBailout */)
 		if err != nil {
-			tracer.OnTxEnd(nil, err)
+			if tracer != nil && tracer.OnTxEnd != nil {
+				tracer.OnTxEnd(nil, err)
+			}
 		} else {
-			tracer.OnTxEnd(&types.Receipt{GasUsed: result.UsedGas}, nil)
+			if tracer != nil && tracer.OnTxEnd != nil {
+				tracer.OnTxEnd(&types.Receipt{GasUsed: result.UsedGas}, nil)
+			}
 		}
 		return result, err
 	}

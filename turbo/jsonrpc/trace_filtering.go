@@ -578,12 +578,16 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		ibs.SetTxContext(txHash, lastBlockHash, txIndex)
 		ibs.SetLogger(ot.Tracer().Hooks)
 
-		ot.Tracer().OnTxStart(evm.GetVMContext(), txn, msg.From())
+		if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxStart != nil {
+			ot.Tracer().OnTxStart(evm.GetVMContext(), txn, msg.From())
+		}
 
 		var execResult *core.ExecutionResult
 		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailOut)
 		if err != nil {
-			ot.Tracer().OnTxEnd(nil, err)
+			if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
+				ot.Tracer().OnTxEnd(nil, err)
+			}
 			if first {
 				first = false
 			} else {
@@ -594,7 +598,9 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			stream.WriteObjectEnd()
 			continue
 		}
-		ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.UsedGas}, nil)
+		if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
+			ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.UsedGas}, nil)
+		}
 		traceResult.Output = common.Copy(execResult.ReturnData)
 		if err = ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {
 			if first {

@@ -1057,13 +1057,19 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	ibs.SetTxContext(libcommon.Hash{}, libcommon.Hash{}, 0)
 	ibs.SetLogger(ot.Tracer().Hooks)
 
-	ot.Tracer().OnTxStart(evm.GetVMContext(), txn, msg.From())
+	if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxStart != nil {
+		ot.Tracer().OnTxStart(evm.GetVMContext(), txn, msg.From())
+	}
 	execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
 	if err != nil {
-		ot.Tracer().OnTxEnd(nil, err)
+		if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
+			ot.Tracer().OnTxEnd(nil, err)
+		}
 		return nil, err
 	}
-	ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.UsedGas}, nil)
+	if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
+		ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.UsedGas}, nil)
+	}
 	traceResult.Output = libcommon.CopyBytes(execResult.ReturnData)
 	if traceTypeStateDiff {
 		sdMap := make(map[libcommon.Address]*StateDiffAccount)
