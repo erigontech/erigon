@@ -455,9 +455,6 @@ func (s *KvServer) StateChanges(_ *remote.StateChangeRequest, server remote.KV_S
 }
 
 func (s *KvServer) SendStateChanges(_ context.Context, sc *remote.StateChangeBatch) {
-	for _, c := range sc.ChangeBatch {
-		fmt.Println("SendStateChanges", len(c.Changes))
-	}
 	s.stateChangeStreams.Pub(sc)
 }
 
