@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/hashicorp/go-retryablehttp"
+
 	"github.com/anacrolix/torrent"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
@@ -41,14 +43,21 @@ type WebSeeds struct {
 	verbosity log.Lvl
 
 	torrentFiles *AtomicTorrentFS
+	client       *http.Client
 }
 
 func NewWebSeeds(seeds []*url.URL, verbosity log.Lvl, logger log.Logger) *WebSeeds {
-	return &WebSeeds{
+	ws := &WebSeeds{
 		seeds:     seeds,
 		logger:    logger,
 		verbosity: verbosity,
 	}
+
+	rc := retryablehttp.NewClient()
+	rc.RetryMax = 5
+	rc.Logger = logger
+	ws.client = rc.StandardClient()
+	return ws
 }
 
 func (d *WebSeeds) getWebDownloadInfo(ctx context.Context, t *torrent.Torrent) (infos []webDownloadInfo, seedHashMismatches []*seedHash, err error) {
@@ -60,7 +69,7 @@ func (d *WebSeeds) getWebDownloadInfo(ctx context.Context, t *torrent.Torrent) (
 		if headRequest, err := http.NewRequestWithContext(ctx, http.MethodHead, downloadUrl.String(), nil); err == nil {
 			insertCloudflareHeaders(headRequest)
 
-			headResponse, err := http.DefaultClient.Do(headRequest)
+			headResponse, err := d.client.Do(headRequest)
 			if err != nil {
 				continue
 			}
@@ -435,13 +444,12 @@ var ErrInvalidEtag = fmt.Errorf("invalid etag")
 var ErrEtagNotFound = fmt.Errorf("not found")
 
 func (d *WebSeeds) retrieveFileEtag(ctx context.Context, file *url.URL) (string, error) {
-	request, err := http.NewRequest(http.MethodHead, file.String(), nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodHead, file.String(), nil)
 	if err != nil {
 		return "", err
 	}
 
-	request = request.WithContext(ctx)
-	resp, err := http.DefaultClient.Do(request)
+	resp, err := d.client.Do(request.WithContext(ctx))
 	if err != nil {
 		return "", fmt.Errorf("webseed.http: %w, url=%s", err, file.String())
 	}
@@ -457,11 +465,6 @@ func (d *WebSeeds) retrieveFileEtag(ctx context.Context, file *url.URL) (string,
 	if etag == "" {
 		return "", fmt.Errorf("webseed.http: file has no etag, url=%s", file.String())
 	}
-	// Todo(awskii): figure out reason why multipart etags contains "-" and remove this check
-	//etag = strings.Trim(etag, "\"")
-	//if strings.Contains(etag, "-") {
-	//	return etag, ErrInvalidEtag
-	//}
 	return etag, nil
 }
 
@@ -477,8 +480,7 @@ func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url
 
 	insertCloudflareHeaders(request)
 
-	request = request.WithContext(ctx)
-	resp, err := http.DefaultClient.Do(request)
+	resp, err := d.client.Do(request.WithContext(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("webseed.http: make request: %w, url=%s", err, u.String())
 	}
@@ -632,7 +634,7 @@ func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL, fi
 	insertCloudflareHeaders(request)
 
 	request = request.WithContext(ctx)
-	resp, err := http.DefaultClient.Do(request)
+	resp, err := d.client.Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("webseed.downloadTorrentFile: url=%s, %w", url.String(), err)
 	}

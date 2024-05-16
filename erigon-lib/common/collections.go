@@ -21,3 +21,11 @@ func SliceShuffle[T any](s []T) {
 		s[i], s[j] = s[j], s[i]
 	})
 }
+
+func SliceTakeLast[T any](s []T, count int) []T {
+	length := len(s)
+	if length > count {
+		return s[length-count:]
+	}
+	return s
+}

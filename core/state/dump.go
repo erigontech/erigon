@@ -21,8 +21,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
-
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -127,141 +125,72 @@ func (d iterativeDump) OnRoot(root libcommon.Hash) {
 	}{root})
 }
 
-func NewDumper(db kv.Tx, blockNumber uint64, historyV3 bool) *Dumper {
+func NewDumper(db kv.Tx, blockNumber uint64) *Dumper {
 	return &Dumper{
 		db:          db,
 		blockNumber: blockNumber,
 		hashedState: false,
-		historyV3:   historyV3,
 	}
 }
 
 func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bool, startAddress libcommon.Address, maxResults int) ([]byte, error) {
-	var nextKey []byte
 	var emptyCodeHash = crypto.Keccak256Hash(nil)
 	var emptyHash = libcommon.Hash{}
 	var accountList []*DumpAccount
-	var incarnationList []uint64
 	var addrList []libcommon.Address
+	var acc accounts.Account
+	var numberOfResults int
+	if maxResults == 0 {
+		maxResults = kv.Unlim
+	}
 
 	c.OnRoot(emptyHash) // We do not calculate the root
 
-	var acc accounts.Account
-	numberOfResults := 0
-
-	var txNum, txNumForStorage uint64
-	if d.historyV3 {
-		ttx := d.db.(kv.TemporalTx)
-		var err error
-		// Why only account does +1?
-		txNum, err = rawdbv3.TxNums.Min(ttx, d.blockNumber+1)
-		if err != nil {
-			return nil, err
-		}
-		txNumForStorage, err = rawdbv3.TxNums.Min(ttx, d.blockNumber)
-		if err != nil {
-			return nil, err
-		}
-
-		it, err := ttx.DomainRange(kv.AccountsDomain, startAddress[:], nil, txNum, order.Asc, maxResults+1)
-		if err != nil {
-			return nil, err
-		}
-		defer it.Close()
-		for it.HasNext() {
-			k, v, err := it.Next()
-			if err != nil {
-				return nil, err
-			}
-			if maxResults > 0 && numberOfResults >= maxResults {
-				if nextKey == nil {
-					nextKey = make([]byte, len(k))
-				}
-				copy(nextKey, k)
-				break
-			}
-			if len(v) == 0 {
-				continue
-			}
-
-			if e := accounts.DeserialiseV3(&acc, v); e != nil {
-				return nil, fmt.Errorf("decoding %x for %x: %w", v, k, e)
-			}
-			account := DumpAccount{
-				Balance:  acc.Balance.ToBig().String(),
-				Nonce:    acc.Nonce,
-				Root:     hexutility.Bytes(emptyHash[:]), // We cannot provide historical storage hash
-				CodeHash: hexutility.Bytes(emptyCodeHash[:]),
-				Storage:  make(map[string]string),
-			}
-			accountList = append(accountList, &account)
-			addrList = append(addrList, libcommon.BytesToAddress(k))
-			incarnationList = append(incarnationList, acc.Incarnation)
-
-			numberOfResults++
-		}
-	} else {
-		if err := WalkAsOfAccounts(d.db, startAddress, d.blockNumber+1, func(k, v []byte) (bool, error) {
-			if maxResults > 0 && numberOfResults >= maxResults {
-				if nextKey == nil {
-					nextKey = make([]byte, len(k))
-				}
-				copy(nextKey, k)
-				return false, nil
-			}
-
-			if len(k) > 32 {
-				return true, nil
-			}
-			if e := acc.DecodeForStorage(v); e != nil {
-				return false, fmt.Errorf("decoding %x for %x: %w", v, k, e)
-			}
-			account := DumpAccount{
-				Balance:  acc.Balance.ToBig().String(),
-				Nonce:    acc.Nonce,
-				Root:     hexutility.Bytes(emptyHash[:]), // We cannot provide historical storage hash
-				CodeHash: hexutility.Bytes(emptyCodeHash[:]),
-				Storage:  make(map[string]string),
-			}
-			accountList = append(accountList, &account)
-			addrList = append(addrList, libcommon.BytesToAddress(k))
-			incarnationList = append(incarnationList, acc.Incarnation)
-
-			numberOfResults++
-			return true, nil
-		}); err != nil {
-			return nil, err
-		}
+	ttx := d.db.(kv.TemporalTx)
+	txNum, err := rawdbv3.TxNums.Min(ttx, d.blockNumber+1)
+	if err != nil {
+		return nil, err
+	}
+	txNumForStorage, err := rawdbv3.TxNums.Min(ttx, d.blockNumber)
+	if err != nil {
+		return nil, err
 	}
 
-	for i, addr := range addrList {
-		account := accountList[i]
-		incarnation := incarnationList[i]
-		storagePrefix := dbutils.PlainGenerateStoragePrefix(addr[:], incarnation)
-		if incarnation > 0 {
-			codeHash, err := d.db.GetOne(kv.PlainContractCode, storagePrefix)
-			if err != nil {
-				return nil, fmt.Errorf("getting code hash for %x: %w", addr, err)
-			}
-			if codeHash != nil {
-				account.CodeHash = codeHash
-			} else {
-				account.CodeHash = emptyCodeHash[:]
-			}
-
-			if !excludeCode && codeHash != nil && !bytes.Equal(codeHash, emptyCodeHash[:]) {
-				var code []byte
-				if code, err = d.db.GetOne(kv.Code, codeHash); err != nil {
-					return nil, err
-				}
-				account.Code = code
-			}
+	var nextKey []byte
+	it, err := ttx.DomainRange(kv.AccountsDomain, startAddress[:], nil, txNum, order.Asc, maxResults)
+	if err != nil {
+		return nil, err
+	}
+	defer it.Close()
+	for it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			return nil, err
+		}
+		if maxResults > 0 && numberOfResults >= maxResults {
+			nextKey = append(nextKey[:0], k...)
+			break
+		}
+		if len(v) == 0 {
+			continue
 		}
 
-		if !excludeStorage {
-			t := trie.New(libcommon.Hash{})
-			if d.historyV3 {
-				r, err := d.db.(kv.TemporalTx).DomainRange(kv.StorageDomain, addr[:], nil, txNumForStorage, order.Asc, kv.Unlim)
+		if e := accounts.DeserialiseV3(&acc, v); e != nil {
+			return nil, fmt.Errorf("decoding %x for %x: %w", v, k, e)
+		}
+		account := DumpAccount{
+			Balance:  acc.Balance.ToBig().String(),
+			Nonce:    acc.Nonce,
+			Root:     hexutility.Bytes(emptyHash[:]), // We cannot provide historical storage hash
+			CodeHash: hexutility.Bytes(emptyCodeHash[:]),
+			Storage:  make(map[string]string),
+		}
+		if acc.CodeHash != emptyCodeHash {
+			account.CodeHash = acc.CodeHash[:]
+
+			if !excludeCode {
+				addr := libcommon.BytesToAddress(k)
+				r, err := ttx.DomainRange(kv.CodeDomain, addr[:], nil, txNumForStorage, order.Asc, kv.Unlim)
 				if err != nil {
 					return nil, fmt.Errorf("walking over storage for %x: %w", addr, err)
 				}
@@ -274,25 +203,42 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 					if len(vs) == 0 {
 						continue // Skip deleted entries
 					}
-					loc := k[20:]
-					account.Storage[libcommon.BytesToHash(loc).String()] = common.Bytes2Hex(vs)
-					h, _ := libcommon.HashData(loc)
-					t.Update(h.Bytes(), libcommon.Copy(vs))
+					if !bytes.Equal(k, addr[:]) {
+						fmt.Printf("unexpected key %x while addr %x\n", k, addr[:])
+						continue
+					}
+					account.Code = vs
 				}
-			} else {
-				if err := WalkAsOfStorage(d.db,
-					addr,
-					incarnation,
-					libcommon.Hash{}, /* startLocation */
-					d.blockNumber,
-					func(_, loc, vs []byte) (bool, error) {
-						account.Storage[libcommon.BytesToHash(loc).String()] = common.Bytes2Hex(vs)
-						h, _ := libcommon.HashData(loc)
-						t.Update(h.Bytes(), libcommon.Copy(vs))
-						return true, nil
-					}); err != nil {
+			}
+		}
+		accountList = append(accountList, &account)
+		addrList = append(addrList, libcommon.BytesToAddress(k))
+
+		numberOfResults++
+	}
+
+	for i, addr := range addrList {
+		account := accountList[i]
+
+		if !excludeStorage {
+			t := trie.New(libcommon.Hash{})
+			r, err := ttx.DomainRange(kv.StorageDomain, addr[:], nil, txNumForStorage, order.Asc, kv.Unlim)
+			if err != nil {
+				return nil, fmt.Errorf("walking over storage for %x: %w", addr, err)
+			}
+			defer r.Close()
+			for r.HasNext() {
+				k, vs, err := r.Next()
+				if err != nil {
 					return nil, fmt.Errorf("walking over storage for %x: %w", addr, err)
 				}
+				if len(vs) == 0 {
+					continue // Skip deleted entries
+				}
+				loc := k[20:]
+				account.Storage[libcommon.BytesToHash(loc).String()] = common.Bytes2Hex(vs)
+				h, _ := libcommon.HashData(loc)
+				t.Update(h.Bytes(), libcommon.Copy(vs))
 			}
 
 			account.Root = t.Hash().Bytes()

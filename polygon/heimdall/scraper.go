@@ -8,14 +8,13 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
-	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
 type Scraper struct {
-	txProvider     func() kv.RwTx
-	readerProvider func() reader
+	checkpointStore entityStore
+	milestoneStore  entityStore
+	spanStore       entityStore
 
 	client    HeimdallClient
 	pollDelay time.Duration
@@ -28,38 +27,21 @@ type Scraper struct {
 	milestoneSyncEvent  *polygoncommon.EventNotifier
 	spanSyncEvent       *polygoncommon.EventNotifier
 
-	tmpDir string
 	logger log.Logger
 }
 
-func NewScraperTODO(
-	client HeimdallClient,
-	pollDelay time.Duration,
-	tmpDir string,
-	logger log.Logger,
-) *Scraper {
-	return NewScraper(
-		func() kv.RwTx { /* TODO */ return nil },
-		func() reader { /* TODO */ return nil },
-		client,
-		pollDelay,
-		tmpDir,
-		logger,
-	)
-}
-
 func NewScraper(
-	txProvider func() kv.RwTx,
-	readerProvider func() reader,
-
+	checkpointStore entityStore,
+	milestoneStore entityStore,
+	spanStore entityStore,
 	client HeimdallClient,
 	pollDelay time.Duration,
-	tmpDir string,
 	logger log.Logger,
 ) *Scraper {
 	return &Scraper{
-		txProvider:     txProvider,
-		readerProvider: readerProvider,
+		checkpointStore: checkpointStore,
+		milestoneStore:  milestoneStore,
+		spanStore:       spanStore,
 
 		client:    client,
 		pollDelay: pollDelay,
@@ -72,7 +54,6 @@ func NewScraper(
 		milestoneSyncEvent:  polygoncommon.NewEventNotifier(),
 		spanSyncEvent:       polygoncommon.NewEventNotifier(),
 
-		tmpDir: tmpDir,
 		logger: logger,
 	}
 }
@@ -133,21 +114,6 @@ func (s *Scraper) syncEntity(
 	return ctx.Err()
 }
 
-func newCheckpointStore(tx kv.RwTx, reader services.BorCheckpointReader, blockNumToIdIndexFactory func() *RangeIndex) entityStore {
-	makeEntity := func() Entity { return new(Checkpoint) }
-	return newEntityStore(tx, kv.BorCheckpoints, makeEntity, reader.LastCheckpointId, reader.Checkpoint, blockNumToIdIndexFactory())
-}
-
-func newMilestoneStore(tx kv.RwTx, reader services.BorMilestoneReader, blockNumToIdIndexFactory func() *RangeIndex) entityStore {
-	makeEntity := func() Entity { return new(Milestone) }
-	return newEntityStore(tx, kv.BorMilestones, makeEntity, reader.LastMilestoneId, reader.Milestone, blockNumToIdIndexFactory())
-}
-
-func newSpanStore(tx kv.RwTx, reader services.BorSpanReader, blockNumToIdIndexFactory func() *RangeIndex) entityStore {
-	makeEntity := func() Entity { return new(Span) }
-	return newEntityStore(tx, kv.BorSpans, makeEntity, reader.LastSpanId, reader.Span, blockNumToIdIndexFactory())
-}
-
 func newCheckpointFetcher(client HeimdallClient, logger log.Logger) entityFetcher {
 	fetchEntity := func(ctx context.Context, id int64) (Entity, error) { return client.FetchCheckpoint(ctx, id) }
 
@@ -200,14 +166,23 @@ func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher {
 }
 
 func downcastCheckpointEntity(e Entity) *Checkpoint {
+	if e == nil {
+		return nil
+	}
 	return e.(*Checkpoint)
 }
 
 func downcastMilestoneEntity(e Entity) *Milestone {
+	if e == nil {
+		return nil
+	}
 	return e.(*Milestone)
 }
 
 func downcastSpanEntity(e Entity) *Span {
+	if e == nil {
+		return nil
+	}
 	return e.(*Span)
 }
 
@@ -230,34 +205,13 @@ func (s *Scraper) Synchronize(ctx context.Context) {
 }
 
 func (s *Scraper) Run(parentCtx context.Context) error {
-	tx := s.txProvider()
-	if tx == nil {
-		// TODO: implement and remove
-		s.logger.Warn("heimdall.Scraper txProvider is not implemented yet")
-		return nil
-	}
-	reader := s.readerProvider()
-	if reader == nil {
-		// TODO: implement and remove
-		s.logger.Warn("heimdall.Scraper readerProvider is not implemented yet")
-		return nil
-	}
-
-	blockNumToIdIndexFactory := func() *RangeIndex {
-		index, err := NewRangeIndex(parentCtx, s.tmpDir, s.logger)
-		if err != nil {
-			panic(err)
-		}
-		return index
-	}
-
 	group, ctx := errgroup.WithContext(parentCtx)
 
 	// sync checkpoints
 	group.Go(func() error {
 		return s.syncEntity(
 			ctx,
-			newCheckpointStore(tx, reader, blockNumToIdIndexFactory),
+			s.checkpointStore,
 			newCheckpointFetcher(s.client, s.logger),
 			func(entities []Entity) {
 				s.checkpointObservers.Notify(libcommon.SliceMap(entities, downcastCheckpointEntity))
@@ -270,7 +224,7 @@ func (s *Scraper) Run(parentCtx context.Context) error {
 	group.Go(func() error {
 		return s.syncEntity(
 			ctx,
-			newMilestoneStore(tx, reader, blockNumToIdIndexFactory),
+			s.milestoneStore,
 			newMilestoneFetcher(s.client, s.logger),
 			func(entities []Entity) {
 				s.milestoneObservers.Notify(libcommon.SliceMap(entities, downcastMilestoneEntity))
@@ -283,7 +237,7 @@ func (s *Scraper) Run(parentCtx context.Context) error {
 	group.Go(func() error {
 		return s.syncEntity(
 			ctx,
-			newSpanStore(tx, reader, blockNumToIdIndexFactory),
+			s.spanStore,
 			newSpanFetcher(s.client, s.logger),
 			func(entities []Entity) {
 				s.spanObservers.Notify(libcommon.SliceMap(entities, downcastSpanEntity))

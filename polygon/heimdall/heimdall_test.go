@@ -287,7 +287,7 @@ func TestFetchMilestonesStartingBeforeEvictionPoint(t *testing.T) {
 	}
 }
 
-func TestOnMilestoneEvent(t *testing.T) {
+func TestRegisterMilestoneObserver(t *testing.T) {
 	test := newHeimdallTest(t)
 
 	var cancel context.CancelFunc
@@ -322,10 +322,10 @@ func TestOnMilestoneEvent(t *testing.T) {
 		}).AnyTimes()
 
 	eventChan := make(chan *Milestone)
-	err := test.heimdall.OnMilestoneEvent(test.ctx, func(m *Milestone) {
+	subscriptionCancel := test.heimdall.RegisterMilestoneObserver(func(m *Milestone) {
 		eventChan <- m
 	})
-	require.Nil(t, err)
+	defer subscriptionCancel()
 
 	m := <-eventChan
 	assert.Equal(t, expectedMilestone.Timestamp(), m.Timestamp())
