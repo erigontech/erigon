@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	pLen = 48 // pubkey size
-	wLen = 32 // withdrawalCredentials size
-	sLen = 96 // signature size
+	PublicKeyLen      = 48 // pubkey size
+	WithdrawalCredLen = 32 // withdrawalCredentials size
+	SignatureLen      = 96 // signature size
 )
 
 var (
@@ -30,11 +30,11 @@ var (
 )
 
 type Deposit struct {
-	Pubkey                [pLen]byte     `json:"pubkey"`                // public key of validator
-	WithdrawalCredentials libcommon.Hash `json:"withdrawalCredentials"` // beneficiary of the validator
-	Amount                uint64         `json:"amount"`                // deposit size in Gwei
-	Signature             [sLen]byte     `json:"signature"`             // signature over deposit msg
-	Index                 uint64         `json:"index"`                 // deposit count value
+	Pubkey                [PublicKeyLen]byte `json:"pubkey"`                // public key of validator
+	WithdrawalCredentials libcommon.Hash     `json:"withdrawalCredentials"` // beneficiary of the validator
+	Amount                uint64             `json:"amount"`                // deposit size in Gwei
+	Signature             [SignatureLen]byte `json:"signature"`             // signature over deposit msg
+	Index                 uint64             `json:"index"`                 // deposit count value
 }
 
 func (d *Deposit) requestType() byte               { return DepositRequestType }

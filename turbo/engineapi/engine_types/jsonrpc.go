@@ -189,6 +189,10 @@ func ConvertPayloadFromRpc(payload *types2.ExecutionPayload) *ExecutionPayload {
 		excessBlobGas := *payload.ExcessBlobGas
 		res.ExcessBlobGas = (*hexutil.Uint64)(&excessBlobGas)
 	}
+	if payload.Version >= 4 {
+		res.DepositRequests = ConvertDepositRequestsFromRpc(payload.DepositRequests)
+		res.WithdrawalRequests = ConvertWithdrawalRequestsFromRpc(payload.WithdrawalRequests)
+	}
 	return res
 }
 
@@ -243,6 +247,39 @@ func ConvertWithdrawalsFromRpc(in []*types2.Withdrawal) []*types.Withdrawal {
 		})
 	}
 	return out
+}
+
+func ConvertDepositRequestsFromRpc(in []*types2.DepositRequest) types.Deposits {
+	out := make(types.Deposits, 0, len(in))
+	var pubkey [types.PublicKeyLen]byte
+	var signature [types.SignatureLen]byte
+	for _, d := range in {
+		copy(pubkey[:], d.Pubkey)
+		copy(signature[:], d.Signature)
+		out = append(out, &types.Deposit{
+			Index:                 d.Index,
+			Pubkey:                pubkey,
+			WithdrawalCredentials: gointerfaces.ConvertH256ToHash(d.WithdrawalCredentials),
+			Amount:                d.Amount,
+			Signature:             signature,
+		})
+	}
+	return out
+}
+
+func ConvertWithdrawalRequestsFromRpc(in []*types2.WithdrawalRequest) types.WithdrawalRequests {
+	out := make(types.WithdrawalRequests, 0, len(in))
+	var validatorPubkey [types.PublicKeyLen]byte
+	for _, w := range in {
+		copy(validatorPubkey[:], w.ValidatorPubkey)
+		out = append(out, &types.WithdrawalRequest{
+			SourceAddress:   gointerfaces.ConvertH160toAddress(w.SourceAddress),
+			ValidatorPubkey: validatorPubkey,
+			Amount:          w.Amount,
+		})
+	}
+	return out
+
 }
 
 func ConvertPayloadId(payloadId uint64) *hexutility.Bytes {

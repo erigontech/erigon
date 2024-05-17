@@ -9,7 +9,7 @@ import (
 
 type WithdrawalRequest struct {
 	SourceAddress   libcommon.Address
-	ValidatorPubkey [pLen]byte // bls
+	ValidatorPubkey [PublicKeyLen]byte // bls
 	Amount          uint64
 }
 
