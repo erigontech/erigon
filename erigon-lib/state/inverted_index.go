@@ -36,12 +36,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/assert"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/ledgerwatch/erigon-lib/kv/backup"
-	"github.com/ledgerwatch/erigon-lib/seg"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/ledgerwatch/erigon-lib/kv/backup"
+	"github.com/ledgerwatch/erigon-lib/seg"
 
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -1001,19 +1002,17 @@ func (it *FrozenInvertedIdxIter) advanceInFiles() {
 			if bytes.Equal(k, it.key) {
 				eliasVal, _ := g.NextUncompressed()
 				it.ef.Reset(eliasVal)
+				var efiter *eliasfano32.EliasFanoIter
 				if it.orderAscend {
-					efiter := it.ef.Iterator()
-					if it.startTxNum > 0 {
-						efiter.Seek(uint64(it.startTxNum))
-					}
-					it.efIt = efiter
+					efiter = it.ef.Iterator()
 				} else {
-					it.efIt = it.ef.ReverseIterator()
+					efiter = it.ef.ReverseIterator()
 				}
+				efiter.Seek(uint64(it.startTxNum))
+				it.efIt = efiter
 			}
 		}
 
-		//TODO: add seek method
 		//Asc:  [from, to) AND from < to
 		//Desc: [from, to) AND from > to
 		if it.orderAscend {
