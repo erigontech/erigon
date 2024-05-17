@@ -27,7 +27,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: git submodule update --init --recursive --force
       - uses: actions/setup-go@v4
         with:
@@ -39,11 +39,6 @@ jobs:
       - name: test-integration
         run: make test-integration
 
-      - name: Test erigon as a library
-        env:
-          GIT_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: make test-erigon-ext GIT_COMMIT=$GIT_COMMIT
-
   tests-windows:
     strategy:
       matrix:
@@ -51,7 +46,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: git submodule update --init --recursive --force
       - uses: actions/setup-go@v4
         with:

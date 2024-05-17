@@ -2,7 +2,6 @@ package stagedsync
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
@@ -20,21 +19,15 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
-	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon-lib/kv/membatch"
 	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
-	"github.com/ledgerwatch/erigon/common/changeset"
-	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -107,7 +100,6 @@ func StageExecuteBlocksCfg(
 	stateStream bool,
 	badBlockHalt bool,
 
-	historyV3 bool,
 	dirs datadir.Dirs,
 	blockReader services.FullBlockReader,
 	hd headerDownloader,
@@ -131,7 +123,7 @@ func StageExecuteBlocksCfg(
 		blockReader:   blockReader,
 		hd:            hd,
 		genesis:       genesis,
-		historyV3:     historyV3,
+		historyV3:     true,
 		syncCfg:       syncCfg,
 		agg:           agg,
 		silkworm:      silkworm,
@@ -292,16 +284,12 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 		return err
 	}
 
-	logPrefix := s.LogPrefix()
 	var to = prevStageProgress
 	if toBlock > 0 {
 		to = cmp.Min(prevStageProgress, toBlock)
 	}
 	if to < s.BlockNumber {
 		return nil
-	}
-	if to > s.BlockNumber+16 {
-		logger.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
 
 	parallel := txc.Tx == nil
@@ -381,10 +369,6 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	}
 	if err := rawdb.DeleteNewerEpochs(txc.Tx, u.UnwindPoint+1); err != nil {
 		return fmt.Errorf("delete newer epochs: %w", err)
-	}
-
-	if err = domains.Flush(ctx, txc.Tx); err != nil {
-		return fmt.Errorf("uwind flush domains: %w", err)
 	}
 	fmt.Printf("unwindv3: %d -> %d done within %s\n", s.BlockNumber, u.UnwindPoint, time.Since(start))
 	return nil
@@ -833,10 +817,6 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 }
 
 func unwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, logger log.Logger) error {
-	logPrefix := s.LogPrefix()
-	stateBucket := kv.PlainState
-	storageKeyLength := length.Addr + length.Incarnation + length.Hash
-
 	var accumulator *shards.Accumulator
 	if cfg.stateStream && s.BlockNumber-u.UnwindPoint < stateStreamLimit {
 		accumulator = cfg.accumulator
@@ -853,121 +833,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 	}
 
 	//TODO: why we don't call accumulator.ChangeCode???
-	if cfg.historyV3 {
-		return unwindExec3(u, s, txc, ctx, accumulator, logger)
-	}
-
-	changes := etl.NewCollector(logPrefix, cfg.dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), logger)
-	defer changes.Close()
-	errRewind := changeset.RewindData(txc.Tx, s.BlockNumber, u.UnwindPoint, changes, ctx.Done())
-	if errRewind != nil {
-		return fmt.Errorf("getting rewind data: %w", errRewind)
-	}
-
-	if err := changes.Load(txc.Tx, stateBucket, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		if len(k) == 20 {
-			if len(v) > 0 {
-				var acc accounts.Account
-				if err := acc.DecodeForStorage(v); err != nil {
-					return err
-				}
-
-				// Fetch the code hash
-				recoverCodeHashPlain(&acc, txc.Tx, k)
-				var address common.Address
-				copy(address[:], k)
-
-				// cleanup contract code bucket
-				original, err := state.NewPlainStateReader(txc.Tx).ReadAccountData(address)
-				if err != nil {
-					return fmt.Errorf("read account for %x: %w", address, err)
-				}
-				if original != nil {
-					// clean up all the code incarnations original incarnation and the new one
-					for incarnation := original.Incarnation; incarnation > acc.Incarnation && incarnation > 0; incarnation-- {
-						err = txc.Tx.Delete(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], incarnation))
-						if err != nil {
-							return fmt.Errorf("writeAccountPlain for %x: %w", address, err)
-						}
-					}
-				}
-
-				newV := make([]byte, acc.EncodingLengthForStorage())
-				acc.EncodeForStorage(newV)
-				if accumulator != nil {
-					accumulator.ChangeAccount(address, acc.Incarnation, newV)
-				}
-				if err := next(k, k, newV); err != nil {
-					return err
-				}
-			} else {
-				if accumulator != nil {
-					var address common.Address
-					copy(address[:], k)
-					accumulator.DeleteAccount(address)
-				}
-				if err := next(k, k, nil); err != nil {
-					return err
-				}
-			}
-			return nil
-		}
-		if accumulator != nil {
-			var address common.Address
-			var incarnation uint64
-			var location common.Hash
-			copy(address[:], k[:length.Addr])
-			incarnation = binary.BigEndian.Uint64(k[length.Addr:])
-			copy(location[:], k[length.Addr+length.Incarnation:])
-			logger.Debug(fmt.Sprintf("un ch st: %x, %d, %x, %x\n", address, incarnation, location, common.Copy(v)))
-			accumulator.ChangeStorage(address, incarnation, location, common.Copy(v))
-		}
-		if len(v) > 0 {
-			if err := next(k, k[:storageKeyLength], v); err != nil {
-				return err
-			}
-		} else {
-			if err := next(k, k[:storageKeyLength], nil); err != nil {
-				return err
-			}
-		}
-		return nil
-
-	}, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
-	}
-
-	if err := historyv2.Truncate(txc.Tx, u.UnwindPoint+1); err != nil {
-		return err
-	}
-
-	if err := rawdb.TruncateReceipts(txc.Tx, u.UnwindPoint+1); err != nil {
-		return fmt.Errorf("truncate receipts: %w", err)
-	}
-	if err := rawdb.TruncateBorReceipts(txc.Tx, u.UnwindPoint+1); err != nil {
-		return fmt.Errorf("truncate bor receipts: %w", err)
-	}
-	if err := rawdb.DeleteNewerEpochs(txc.Tx, u.UnwindPoint+1); err != nil {
-		return fmt.Errorf("delete newer epochs: %w", err)
-	}
-
-	// Truncate CallTraceSet
-	keyStart := hexutility.EncodeTs(u.UnwindPoint + 1)
-	c, err := txc.Tx.RwCursorDupSort(kv.CallTraceSet)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	for k, _, err := c.Seek(keyStart); k != nil; k, _, err = c.NextNoDup() {
-		if err != nil {
-			return err
-		}
-		if err = txc.Tx.Delete(kv.CallTraceSet, k); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return unwindExec3(u, s, txc, ctx, accumulator, logger)
 }
 
 func recoverCodeHashPlain(acc *accounts.Account, db kv.Tx, key []byte) {
@@ -981,7 +847,6 @@ func recoverCodeHashPlain(acc *accounts.Account, db kv.Tx, key []byte) {
 }
 
 func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx context.Context, initialCycle bool) (err error) {
-	logPrefix := s.LogPrefix()
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -994,42 +859,12 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	if cfg.historyV3 {
-		pruneTimeout := 3 * time.Second
-		if initialCycle {
-			pruneTimeout = 12 * time.Hour
-		}
-		if _, err = tx.(*temporal.Tx).AggTx().(*libstate.AggregatorRoTx).PruneSmallBatches(ctx, pruneTimeout, tx); err != nil { // prune part of retired data, before commit
-			return err
-		}
-	} else {
-		if cfg.prune.History.Enabled() {
-			if err = rawdb.PruneTableDupSort(tx, kv.AccountChangeSet, logPrefix, cfg.prune.History.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
-				return err
-			}
-			if err = rawdb.PruneTableDupSort(tx, kv.StorageChangeSet, logPrefix, cfg.prune.History.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
-				return err
-			}
-		}
-
-		if cfg.prune.Receipts.Enabled() {
-			if err = rawdb.PruneTable(tx, kv.Receipts, cfg.prune.Receipts.PruneTo(s.ForwardProgress), ctx, math.MaxInt32); err != nil {
-				return err
-			}
-			if err = rawdb.PruneTable(tx, kv.BorReceipts, cfg.prune.Receipts.PruneTo(s.ForwardProgress), ctx, math.MaxUint32); err != nil {
-				return err
-			}
-			// EDIT: Don't prune yet, let LogIndex stage take care of it
-			// LogIndex.Prune will read everything what not pruned here
-			// if err = rawdb.PruneTable(tx, kv.Log, cfg.prune.Receipts.PruneTo(s.ForwardProgress), ctx, math.MaxInt32); err != nil {
-			// 	return err
-			// }
-		}
-		if cfg.prune.CallTraces.Enabled() {
-			if err = rawdb.PruneTableDupSort(tx, kv.CallTraceSet, logPrefix, cfg.prune.CallTraces.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
-				return err
-			}
-		}
+	pruneTimeout := 3 * time.Second
+	if initialCycle {
+		pruneTimeout = 12 * time.Hour
+	}
+	if _, err = tx.(*temporal.Tx).AggTx().(*libstate.AggregatorRoTx).PruneSmallBatches(ctx, pruneTimeout, tx); err != nil { // prune part of retired data, before commit
+		return err
 	}
 
 	if err = s.Done(tx); err != nil {

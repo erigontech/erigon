@@ -416,7 +416,7 @@ func blockHeadersPacket66Bytes(t *testing.T, requestId uint64, headers []*types.
 
 func newMockNewBlockPacketBytes(t *testing.T) []byte {
 	newBlockPacket := eth.NewBlockPacket{
-		Block: types.NewBlock(newMockBlockHeaders(1)[0], nil, nil, nil, nil),
+		Block: types.NewBlock(newMockBlockHeaders(1)[0], nil, nil, nil, nil, nil),
 	}
 	newBlockPacketBytes, err := rlp.EncodeToBytes(&newBlockPacket)
 	require.NoError(t, err)

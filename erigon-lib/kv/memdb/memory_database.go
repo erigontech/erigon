@@ -18,6 +18,7 @@ package memdb
 
 import (
 	"context"
+	"github.com/c2h5oh/datasize"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -27,6 +28,13 @@ import (
 
 func New(tmpDir string) kv.RwDB {
 	return mdbx.NewMDBX(log.New()).InMem(tmpDir).MustOpen()
+}
+
+func NewStateDB(tmpDir string) kv.RwDB {
+	return mdbx.NewMDBX(log.New()).InMem(tmpDir).GrowthStep(32 * datasize.MB).
+		MapSize(2 * datasize.GB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.ChaindataTablesCfg
+	}).MustOpen()
 }
 
 func NewPoolDB(tmpDir string) kv.RwDB {

@@ -13,7 +13,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	datadir2 "github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
@@ -48,16 +47,9 @@ var stateRootCmd = &cobra.Command{
 }
 
 func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
-	var histV3 bool
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		histV3, _ = kvcfg.HistoryV3.Enabled(tx)
-		return nil
-	}); err != nil {
-		panic(err)
-	}
 	dirs := datadir2.New(filepath.Dir(db.(*kv2.MdbxKV).Path()))
 	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, dirs.Snap, 0, log.New()), nil /* BorSnapshots */)
-	bw := blockio.NewBlockWriter(histV3)
+	bw := blockio.NewBlockWriter()
 	return br, bw
 }
 
@@ -162,7 +154,7 @@ func StateRoot(ctx context.Context, genesis *types.Genesis, blockNum uint64, dat
 			if err = rwTx.ClearBucket(kv.HashedStorage); err != nil {
 				return err
 			}
-			if err = stagedsync.PromoteHashedStateCleanly("hashedstate", rwTx, stagedsync.StageHashStateCfg(nil, dirs, false), ctx, logger); err != nil {
+			if err = stagedsync.PromoteHashedStateCleanly("hashedstate", rwTx, stagedsync.StageHashStateCfg(nil, dirs), ctx, logger); err != nil {
 				return err
 			}
 			var root libcommon.Hash

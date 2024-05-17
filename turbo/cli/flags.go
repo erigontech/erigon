@@ -38,7 +38,7 @@ var (
 	BatchSizeFlag = cli.StringFlag{
 		Name:  "batchSize",
 		Usage: "Batch size for the execution stage",
-		Value: "256M",
+		Value: "512M",
 	}
 	EtlBufferSizeFlag = cli.StringFlag{
 		Name:  "etl.bufferSize",
@@ -173,7 +173,7 @@ var (
 	SyncLoopBlockLimitFlag = cli.UintFlag{
 		Name:  "sync.loop.block.limit",
 		Usage: "Sets the maximum number of blocks to process per loop iteration",
-		Value: 2_000, // unlimited
+		Value: 5_000,
 	}
 
 	UploadLocationFlag = cli.StringFlag{
