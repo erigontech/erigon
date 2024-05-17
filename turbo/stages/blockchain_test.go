@@ -821,9 +821,14 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 			require.Greater(found, uint64(0))
 		}
 	} else {
-		receiptsAvailable, err := rawdb.ReceiptsAvailableFrom(tx)
-		require.NoError(err)
-		require.Equal(uint64(0), receiptsAvailable)
+		if m.HistoryV3 {
+			// receipts are not stored in erigon3
+		} else {
+			receiptsAvailable, err := rawdb.ReceiptsAvailableFrom(tx)
+			require.NoError(err)
+			require.Equal(uint64(0), receiptsAvailable)
+		}
+
 	}
 
 	if m.HistoryV3 {
