@@ -2,16 +2,8 @@ name: QA - RPC Integration Tests
 
 on:
   schedule:
-    - cron: '3 0 * * *'  # Run every day at 03:00 AM UTC
+    - cron: '0 23 * * *'  # Run every day at 23:00 UTC
   workflow_dispatch:     # Run manually
-  pull_request:
-    branches:
-      - main
-    types:
-      - draft
-      - opened
-      - ready_for_review
-      - synchronize
 
 jobs:
   integration-test-suite:
