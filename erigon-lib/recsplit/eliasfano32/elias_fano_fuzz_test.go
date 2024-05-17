@@ -81,18 +81,6 @@ func FuzzSingleEliasFano(f *testing.F) {
 				t.Fatalf("rit.next: got err: %v", err)
 			}
 			if v != keys[i] {
-				//lowerIdx := rit.lowerIdx + rit.l
-				//idx64, shift := lowerIdx/64, lowerIdx%64
-				//lower := rit.lowerBits[idx64] >> shift
-				//fmt.Println(strconv.FormatUint(lower, 10))
-				//fmt.Println(strconv.FormatUint(lower, 2))
-				//1110010011011000011101100010100111101100110001110110111011000000
-				//if shift > 0 {
-				//	//fmt.Println(efi.lowerBits[idx64+1] << (64 - shift))
-				//	lower |= rit.lowerBits[idx64+1] << (64 - shift)
-				//}
-
-				//t.Fatalf("rit.next: got %d, expected %d, upper %d, lower %d, i %d, len, %d, keys %v", v, keys[i], rit.upper, lower&rit.lowerBitsMask, i, len(keys), keys)
 				t.Fatalf("rit.next: got %d, expected %d, i %d, len, %d", v, keys[i], i, len(keys))
 			}
 			i--

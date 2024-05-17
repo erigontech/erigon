@@ -232,9 +232,6 @@ func Seek(data []byte, n uint64) (uint64, bool) {
 }
 
 func (ef *EliasFano) search(v uint64, reverse bool) (nextV uint64, nextI uint64, ok bool) {
-	//
-	// TODO need to revise these conditions for reverse case
-	//
 	if v == 0 {
 		if reverse {
 			return 0, 0, ef.Min() == 0
@@ -352,11 +349,6 @@ type EliasFanoIter struct {
 	upperMask uint64
 
 	itemsIterated uint64
-
-	//
-	//
-	// TODO remove
-	//real []uint64
 }
 
 func (efi *EliasFanoIter) Close() {}
@@ -380,20 +372,15 @@ func (efi *EliasFanoIter) init() {
 
 	if efi.reverse {
 		// init reverse
-		//bitsNeeded := bits.Len64(efi.ef.maxOffset)
-		//println(bitsNeeded)
-		//bitsNeeded = bits.Len64(efi.ef.maxOffset >> efi.ef.l)
-		//higherBitsMaxValue := uint64(1)<<bitsNeeded - 1
 		higherBitsMaxValue := efi.ef.u >> efi.l
 		lastUpperBitIdx := (efi.ef.count + 1) + higherBitsMaxValue
-		efi.upperMask = 1 << (lastUpperBitIdx % 64) >> 1 // last bit is always 0, so we move >> 1
-		efi.upperIdx = lastUpperBitIdx / 64              // uint64(len(efi.upperBits)) - 1
+		efi.upperMask = 1 << (lastUpperBitIdx % 64) >> 1 // last bit is always 0 delimiter, so we move >> 1
+		efi.upperIdx = lastUpperBitIdx / 64
 		efi.upper = higherBitsMaxValue << efi.l
 		efi.lowerIdx = efi.count * efi.l
 	} else {
 		// init forward
 		efi.upperMask = 1
-		return
 	}
 }
 
@@ -476,27 +463,20 @@ func (efi *EliasFanoIter) decrement() {
 		}
 		efi.upperIdx--
 		efi.upperMask = 1 << 63
-		//fmt.Println(fmt.Sprintf("upperMask update 1: %d", uint64(math.Log2(float64(efi.upperMask)))))
 	}
 
-	//fmt.Println(fmt.Sprintf("decrement: upperIdx: %d", efi.upperIdx))
-	//fmt.Println(fmt.Sprintf("decrement: upperMask: %d", uint64(math.Log2(float64(efi.upperMask)))))
-	//fmt.Println(fmt.Sprintf("decrement: lowerIdx: %v", float64(efi.lowerIdx)))
 	for efi.upperBits[efi.upperIdx]&efi.upperMask == 0 {
 		if efi.upper < efi.upperStep {
 			panic("decrement: unexpected efi.upper underflow")
 		}
 		efi.upper -= efi.upperStep
-		//println("DECREMENT")
 		efi.upperMask >>= 1
-		//fmt.Println(fmt.Sprintf("upperMask update 2: %d", uint64(math.Log2(float64(efi.upperMask)))))
 		if efi.upperMask == 0 {
 			if efi.upperIdx == 0 {
 				panic("decrement: unexpected efi.upperIdx underflow")
 			}
 			efi.upperIdx--
 			efi.upperMask = 1 << 63
-			//fmt.Println(fmt.Sprintf("upperMask update 3: %d", uint64(math.Log2(float64(efi.upperMask)))))
 		}
 	}
 
@@ -512,51 +492,10 @@ func (efi *EliasFanoIter) Next() (uint64, error) {
 	}
 	idx64, shift := efi.lowerIdx/64, efi.lowerIdx%64
 	lower := efi.lowerBits[idx64] >> shift
-	//fmt.Println(strconv.FormatUint(lower, 10))
-	//fmt.Println(strconv.FormatUint(lower, 2))
-	//1110010011011000011101100010100111101100110001110110111011000000
 	if shift > 0 {
-		//fmt.Println(efi.lowerBits[idx64+1] << (64 - shift))
 		lower |= efi.lowerBits[idx64+1] << (64 - shift)
 	}
-	//fmt.Println(strconv.FormatUint(lower&efi.lowerBitsMask, 10))
 	efi.moveNext()
-	//if efi.reverse {
-	//	x, sb := bits.LeadingZeros64(efi.upperMask), strings.Builder{}
-	//	for i := 0; i < x; i++ {
-	//		sb.WriteRune('0')
-	//	}
-	//	fmt.Printf("itemsIterated: %d\n", efi.itemsIterated)
-	//	fmt.Printf("upperMask: %s%s\n", sb.String(), strconv.FormatUint(efi.upperMask, 2))
-	//	fmt.Printf("upperNorm: %d\n", efi.upper>>efi.l)
-	//	fmt.Printf("upper: %d\n", efi.upper)
-	//	upperReal := efi.real[uint64(len(efi.real))-1-(efi.itemsIterated-1)] &^ efi.lowerBitsMask
-	//	fmt.Printf("upperReal: %d\n", upperReal)
-	//	if efi.upper != upperReal {
-	//		fmt.Printf(">>>DIVERGENCE<<<\n")
-	//		fmt.Printf("GOING BACK\n")
-	//		for i := 1; i < 10; i++ {
-	//			efi.upper += efi.upperStep
-	//			fmt.Printf("upperTweaked: %d\n", efi.upper)
-	//			if efi.upper == upperReal {
-	//				fmt.Printf("FOUND IT\n")
-	//				fmt.Printf("%d steps backward\n", i)
-	//				break
-	//			}
-	//		}
-	//	}
-	//	lowerPrintable := lower & efi.lowerBitsMask
-	//	fmt.Printf("lower: %d\n", lowerPrintable)
-	//	lowerReal := efi.real[uint64(len(efi.real))-1-(efi.itemsIterated-1)] & efi.lowerBitsMask
-	//	fmt.Printf("lowerReal: %d\n", lowerReal)
-	//	if lowerPrintable != lowerReal {
-	//		fmt.Printf(">>>DIVERGENCE<<<\n")
-	//	}
-	//	fmt.Printf("num: %d\n", efi.upper|(lower&efi.lowerBitsMask))
-	//	fmt.Printf("numReal: %d\n", efi.real[uint64(len(efi.real))-1-(efi.itemsIterated-1)])
-	//}
-	//fmt.Printf("upper: %d\n", efi.upper)
-	//fmt.Printf("lower: %d\n", lower&efi.lowerBitsMask)
 	return efi.upper | (lower & efi.lowerBitsMask), nil
 }
 
