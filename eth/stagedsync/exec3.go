@@ -16,7 +16,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 	"github.com/ledgerwatch/erigon-lib/config3"
-	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
@@ -45,6 +44,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/shards"
 )
 
 var execStepsInDB = metrics.NewGauge(`exec_steps_in_db`) //nolint
@@ -156,11 +156,7 @@ func ExecV3(ctx context.Context,
 	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
 
 	if initialCycle {
-		if _, ok := engine.(*aura.AuRa); ok { //gnosis collate eating too much RAM, will add ETL later
-			agg.SetCollateAndBuildWorkers(1)
-		} else {
-			agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
-		}
+		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
 		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 		defer agg.DiscardHistory(kv.CommitmentDomain).EnableHistory(kv.CommitmentDomain)
 	} else {
@@ -295,7 +291,6 @@ func ExecV3(ctx context.Context,
 	blockNum = doms.BlockNum()
 	initialBlockNum := blockNum
 	outputTxNum.Store(doms.TxNum())
-
 	if maxBlockNum-blockNum > 16 {
 		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
 			"from", blockNum, "to", maxBlockNum, "fromTxNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx)
@@ -311,6 +306,11 @@ func ExecV3(ctx context.Context,
 	var count uint64
 	var lock sync.RWMutex
 
+	shouldReportToTxPool := maxBlockNum-blockNum <= 8
+	var accumulator *shards.Accumulator
+	if shouldReportToTxPool {
+		accumulator = cfg.accumulator
+	}
 	rs := state.NewStateV3(doms, logger)
 
 	////TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
@@ -324,7 +324,7 @@ func ExecV3(ctx context.Context,
 	rwsConsumed := make(chan struct{}, 1)
 	defer close(rwsConsumed)
 
-	execWorkers, applyWorker, rws, stopWorkers, waitWorkers := exec3.NewWorkersPool(lock.RLocker(), logger, ctx, parallel, chainDb, rs, in, blockReader, chainConfig, genesis, engine, workerCount+1, cfg.dirs)
+	execWorkers, applyWorker, rws, stopWorkers, waitWorkers := exec3.NewWorkersPool(lock.RLocker(), accumulator, logger, ctx, parallel, chainDb, rs, in, blockReader, chainConfig, genesis, engine, workerCount+1, cfg.dirs)
 	defer stopWorkers()
 	applyWorker.DiscardReadList()
 
@@ -919,7 +919,7 @@ Loop:
 					rs = state.NewStateV3(doms, logger)
 
 					applyWorker.ResetTx(applyTx)
-					applyWorker.ResetState(rs)
+					applyWorker.ResetState(rs, accumulator)
 
 					return nil
 				}(); err != nil {

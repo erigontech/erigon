@@ -117,7 +117,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		maxResults = AccountRangeMaxResults
 	}
 
-	dumper := state.NewDumper(tx, blockNumber, true)
+	dumper := state.NewDumper(tx, blockNumber)
 	res, err := dumper.IteratorDump(excludeCode, excludeStorage, common.BytesToAddress(startKey), maxResults)
 	if err != nil {
 		return state.IteratorDump{}, err

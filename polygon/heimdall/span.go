@@ -15,6 +15,8 @@ type Span struct {
 	ChainID           string              `json:"bor_chain_id,omitempty" yaml:"bor_chain_id"`
 }
 
+var _ Entity = &Span{}
+
 func (s *Span) RawId() uint64 {
 	return uint64(s.Id)
 }
@@ -26,13 +28,13 @@ func (s *Span) BlockNumRange() ClosedRange {
 	}
 }
 
-func (hs *Span) Less(other btree.Item) bool {
+func (s *Span) Less(other btree.Item) bool {
 	otherHs := other.(*Span)
-	if hs.EndBlock == 0 || otherHs.EndBlock == 0 {
+	if s.EndBlock == 0 || otherHs.EndBlock == 0 {
 		// if endblock is not specified in one of the items, allow search by ID
-		return hs.Id < otherHs.Id
+		return s.Id < otherHs.Id
 	}
-	return hs.EndBlock < otherHs.EndBlock
+	return s.EndBlock < otherHs.EndBlock
 }
 
 func (s *Span) CmpRange(n uint64) int {

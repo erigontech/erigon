@@ -11,8 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
-var _ Waypoint = Checkpoint{}
-
 type CheckpointId uint64
 
 // Checkpoint defines a response object type of bor checkpoint
@@ -21,50 +19,53 @@ type Checkpoint struct {
 	Fields WaypointFields
 }
 
-func (c Checkpoint) RawId() uint64 {
+var _ Entity = &Checkpoint{}
+var _ Waypoint = &Checkpoint{}
+
+func (c *Checkpoint) RawId() uint64 {
 	return uint64(c.Id)
 }
 
-func (c Checkpoint) StartBlock() *big.Int {
+func (c *Checkpoint) StartBlock() *big.Int {
 	return c.Fields.StartBlock
 }
 
-func (c Checkpoint) EndBlock() *big.Int {
+func (c *Checkpoint) EndBlock() *big.Int {
 	return c.Fields.EndBlock
 }
 
-func (c Checkpoint) BlockNumRange() ClosedRange {
+func (c *Checkpoint) BlockNumRange() ClosedRange {
 	return ClosedRange{
 		Start: c.StartBlock().Uint64(),
 		End:   c.EndBlock().Uint64(),
 	}
 }
 
-func (c Checkpoint) RootHash() libcommon.Hash {
+func (c *Checkpoint) RootHash() libcommon.Hash {
 	return c.Fields.RootHash
 }
 
-func (c Checkpoint) Timestamp() uint64 {
+func (c *Checkpoint) Timestamp() uint64 {
 	return c.Fields.Timestamp
 }
 
-func (c Checkpoint) Length() uint64 {
+func (c *Checkpoint) Length() uint64 {
 	return c.Fields.Length()
 }
 
-func (c Checkpoint) CmpRange(n uint64) int {
+func (c *Checkpoint) CmpRange(n uint64) int {
 	return c.Fields.CmpRange(n)
 }
 
-func (m Checkpoint) String() string {
+func (c *Checkpoint) String() string {
 	return fmt.Sprintf(
 		"Checkpoint {%v (%d:%d) %v %v %v}",
-		m.Fields.Proposer.String(),
-		m.Fields.StartBlock,
-		m.Fields.EndBlock,
-		m.Fields.RootHash.Hex(),
-		m.Fields.ChainID,
-		m.Fields.Timestamp,
+		c.Fields.Proposer.String(),
+		c.Fields.StartBlock,
+		c.Fields.EndBlock,
+		c.Fields.RootHash.Hex(),
+		c.Fields.ChainID,
+		c.Fields.Timestamp,
 	)
 }
 

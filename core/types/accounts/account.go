@@ -623,6 +623,9 @@ func ConvertV2toV3(v []byte) ([]byte, error) {
 // DeserialiseV3 - method to deserialize accounts in Erigon22 history
 func DeserialiseV3(a *Account, enc []byte) error {
 	a.Reset()
+	//if len(enc) == 0 {
+	//	return nil
+	//}
 	pos := 0
 	nonceBytes := int(enc[pos])
 	pos++
