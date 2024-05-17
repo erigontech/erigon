@@ -163,7 +163,6 @@ func TestEviction(t *testing.T) {
 }
 
 func TestAPI(t *testing.T) {
-	t.Skip("TODO: state reader/writer instead of Put(kv.PlainState)")
 	require := require.New(t)
 	c := New(DefaultCoherentConfig)
 	k1, k2 := [20]byte{1}, [20]byte{2}
@@ -223,6 +222,7 @@ func TestAPI(t *testing.T) {
 		for i := range res2 {
 			require.Equal([]byte{42}, <-res2[i])
 		}
+
 		fmt.Printf("done1: \n")
 	}()
 
