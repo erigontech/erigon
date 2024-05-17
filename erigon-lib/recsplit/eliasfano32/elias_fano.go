@@ -249,23 +249,18 @@ func (ef *EliasFano) search(v uint64, reverse bool) (nextV uint64, nextI uint64,
 	}
 
 	hi := v >> ef.l
-	n := int(ef.count + 1)
-	i := sort.Search(n, func(i int) bool {
+	i := sort.Search(int(ef.count+1), func(i int) bool {
 		if reverse {
 			return ef.upper(ef.count-uint64(i)) <= hi
 		}
 		return ef.upper(uint64(i)) >= hi
 	})
 	if reverse {
-		if n == i {
-			i = int(ef.count)
-		} else {
-			i = int(ef.count) - i
-		}
-		for j := uint64(i); j >= 0; j-- {
-			val, _, _, _, _ := ef.get(j)
+		for j := uint64(i); j <= ef.count; j++ {
+			idx := ef.count - j
+			val, _, _, _, _ := ef.get(idx)
 			if val <= v {
-				return val, j, true
+				return val, idx, true
 			}
 		}
 	} else {
