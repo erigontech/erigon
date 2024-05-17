@@ -113,7 +113,9 @@ func TestUnwindBatches(t *testing.T) {
 	require.NoError(t, err)
 	for _, bucket := range buckets {
 		//currently not decrementing sequence
-		if bucket == kv.Sequence {
+		// Unwinded headers will be added to BadHeaderNumber bucket
+		// Allow store non-canonical blocks/senders: https://github.com/ledgerwatch/erigon/pull/7648
+		if bucket == kv.Sequence || bucket == kv.BadHeaderNumber || bucket == kv.Headers {
 			continue
 		}
 		size, err := tx3.BucketSize(bucket)

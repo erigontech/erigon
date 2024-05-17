@@ -629,6 +629,9 @@ Loop:
 			 later.
 		*/
 		rawdb.WriteHeader(txc.Tx, header)
+		// if header.Hash() != blockHash {
+		// 	return fmt.Errorf("header hash mismatch: %s != %s", header.Hash().String(), blockHash.String())
+		// }
 		err = rawdb.WriteCanonicalHash(txc.Tx, header.Hash(), blockNum)
 		if err != nil {
 			return fmt.Errorf("failed to write header: %v", err)

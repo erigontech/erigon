@@ -315,7 +315,6 @@ func runTest(t *testing.T, blockReader services.FullBlockReader, test vector, er
 				transaction,
 				&header.GasUsed,
 				vmCfg,
-				big.NewInt(0), // parent excess data gas
 				zktypes.EFFECTIVE_GAS_PRICE_PERCENTAGE_MAXIMUM)
 
 			if err != nil {

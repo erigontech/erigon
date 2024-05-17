@@ -1,3 +1,6 @@
+//go:build notzkevm
+// +build notzkevm
+
 package bor_test
 
 import (

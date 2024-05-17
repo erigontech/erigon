@@ -101,7 +101,7 @@ func (m *EriDb) RollbackBatch() {
 	if _, ok := m.tx.(kv.PendingMutations); !ok {
 		return // don't roll back a kvRw tx
 	}
-	m.tx.Rollback()
+	m.tx.(kv.PendingMutations).Close()
 	m.tx = m.kvTx
 }
 
