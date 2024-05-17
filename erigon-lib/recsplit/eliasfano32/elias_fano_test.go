@@ -426,6 +426,31 @@ func BenchmarkName(b *testing.B) {
 			it.Seek(1_000_000)
 		}
 	})
+	b.Run("reverse next to value 1_230", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			it := ef.ReverseIterator()
+			for it.HasNext() {
+				n, err := it.Next()
+				require.NoError(b, err)
+				if n <= 1_230 {
+					break
+				}
+			}
+			require.True(b, it.HasNext())
+			n, err := it.Next()
+			require.NoError(b, err)
+			require.Equal(b, uint64(1_230-123), n)
+		}
+	})
+	b.Run("reverse seek to value 1_230", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			it := ef.ReverseIterator()
+			it.Seek(1_230)
+			n, err := it.Next()
+			require.NoError(b, err)
+			require.Equal(b, n, uint64(1_230))
+		}
+	})
 	b.Run("naive reverse iterator", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			it := naiveReverseIterator(ef)
