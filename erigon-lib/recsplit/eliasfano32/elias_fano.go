@@ -276,7 +276,7 @@ func (ef *EliasFano) search(v uint64, reverse bool) (nextV uint64, nextI uint64,
 
 // Search returns the value in the sequence, equal or greater than given value
 func (ef *EliasFano) Search(v uint64) (uint64, bool) {
-	n, _, ok := ef.search(v, false /* lte */)
+	n, _, ok := ef.search(v, false /* reverse */)
 	return n, ok
 }
 
