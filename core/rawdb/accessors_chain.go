@@ -1575,10 +1575,6 @@ func ReadDBSchemaVersion(tx kv.Tx) (major, minor, patch uint32, ok bool, err err
 	return major, minor, patch, true, nil
 }
 
-func ResetLastNewBlockSeen(tx kv.RwTx) error {
-	return tx.Delete(kv.SyncStageProgress, kv.LastNewBlockSeen)
-}
-
 func WriteLastNewBlockSeen(tx kv.RwTx, blockNum uint64) error {
 	return tx.Put(kv.SyncStageProgress, kv.LastNewBlockSeen, dbutils.EncodeBlockNumber(blockNum))
 }
