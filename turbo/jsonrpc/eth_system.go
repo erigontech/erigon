@@ -70,9 +70,10 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 	}
 
 	return map[string]interface{}{
-		"currentBlock": hexutil.Uint64(currentBlock),
-		"highestBlock": hexutil.Uint64(highestBlock),
-		"stages":       stagesMap,
+		"startingBlock": "0x0", // TODO: this is a placeholder, I do not think it matters what we return here, but 0x0 is probably a good placeholder.
+		"currentBlock":  hexutil.Uint64(currentBlock),
+		"highestBlock":  hexutil.Uint64(highestBlock),
+		"stages":        stagesMap,
 	}, nil
 }
 
