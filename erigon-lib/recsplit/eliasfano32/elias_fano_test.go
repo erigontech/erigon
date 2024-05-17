@@ -390,7 +390,7 @@ func BenchmarkName(b *testing.B) {
 		ef.AddOffset(offset * 123)
 	}
 	ef.Build()
-	b.Run("next", func(b *testing.B) {
+	b.Run("next to value 1_000_000", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			it := ef.Iterator()
 			for it.HasNext() {
@@ -402,10 +402,41 @@ func BenchmarkName(b *testing.B) {
 			}
 		}
 	})
-	b.Run("seek", func(b *testing.B) {
+	b.Run("seek to value 1_000_000", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			it := ef.Iterator()
 			it.Seek(1_000_000)
 		}
 	})
+	b.Run("reverse iterator", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			it := ef.ReverseIterator()
+			for it.HasNext() {
+				_, err := it.Next()
+				require.NoError(b, err)
+			}
+		}
+	})
+	b.Run("naive reverse iterator", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			it := naiveReverseIterator(ef)
+			for it.HasNext() {
+				_, err := it.Next()
+				require.NoError(b, err)
+			}
+		}
+	})
+}
+
+func naiveReverseIterator(ef *EliasFano) *iter.ArrStream[uint64] {
+	it := ef.Iterator()
+	var values []uint64
+	for it.HasNext() {
+		v, err := it.Next()
+		if err != nil {
+			panic(err)
+		}
+		values = append(values, v)
+	}
+	return iter.ReverseArray[uint64](values)
 }
