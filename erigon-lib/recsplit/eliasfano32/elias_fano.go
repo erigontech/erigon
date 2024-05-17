@@ -366,7 +366,6 @@ func (efi *EliasFanoIter) init() {
 	}
 
 	if efi.reverse {
-		// init reverse
 		higherBitsMaxValue := efi.ef.u >> efi.l
 		lastUpperBitIdx := (efi.ef.count + 1) + higherBitsMaxValue
 		efi.upperMask = 1 << (lastUpperBitIdx % 64) >> 1 // last bit is always 0 delimiter, so we move >> 1
@@ -374,7 +373,6 @@ func (efi *EliasFanoIter) init() {
 		efi.upper = higherBitsMaxValue << efi.l
 		efi.lowerIdx = efi.count * efi.l
 	} else {
-		// init forward
 		efi.upperMask = 1
 	}
 }
@@ -746,7 +744,7 @@ func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
 
 // setBits assumes that bits are set in monotonic order, so that
 // we can skip the masking for the second word
-func setBits(bits []uint64, start /*i*ef.l*/ uint64, width /*ef.l*/ int, value /*offset&ef.lowerBitsMask*/ uint64) {
+func setBits(bits []uint64, start uint64, width int, value uint64) {
 	idx64, shift := start>>6, int(start&63)
 	mask := (uint64(1)<<width - 1) << shift
 	//fmt.Printf("mask = %b, idx64 = %d\n", mask, idx64)
@@ -756,14 +754,10 @@ func setBits(bits []uint64, start /*i*ef.l*/ uint64, width /*ef.l*/ int, value /
 		// changes two 64-bit words
 		bits[idx64+1] = value >> (64 - shift)
 	}
-
-	//fmt.Println(fmt.Sprintf("lower bits idx: %d", start))
 }
 
 func set(bits []uint64, pos uint64) {
 	//bits[pos>>6] |= uint64(1) << (pos & 63)
-	//fmt.Println(fmt.Sprintf("upper bits pos div 64: %d", pos/64))
-	//fmt.Println(fmt.Sprintf("upper bits pos mod 64: %d", pos%64))
 	bits[pos/64] |= uint64(1) << (pos % 64)
 }
 
