@@ -896,7 +896,6 @@ func BorHeimdallUnwind(u *UnwindState, ctx context.Context, _ *StageState, tx kv
 			}
 		}
 	}
-
 	// Removing checkpoints
 	if len(cfg.unwindTypes) == 0 || slices.Contains(cfg.unwindTypes, "checkpoints") {
 		checkpointCursor, err := tx.RwCursor(kv.BorCheckpoints)
