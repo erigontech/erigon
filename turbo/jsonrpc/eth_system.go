@@ -64,8 +64,10 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 			"highestBlock":  hexutil.Uint64(math.MaxUint64),
 		}, nil
 	}
+	reorgRange := 8
 
-	if highestBlock > 0 && currentBlock >= highestBlock { // Return not syncing if the synchronisation already completed
+	// If the distance between the current block and the highest block is less than the reorg range, we are not syncing. abs(highestBlock - currentBlock) < reorgRange
+	if math.Abs(float64(highestBlock)-float64(currentBlock)) < float64(reorgRange) {
 		return false, nil
 	}
 
