@@ -783,12 +783,12 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		return stat, fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
 	}
 	defer keysCursorForDel.Close()
-	idxC, err := rwTx.RwCursorDupSort(ii.indexTable)
+	idxCForDeletes, err := rwTx.RwCursorDupSort(ii.indexTable)
 	if err != nil {
 		return nil, err
 	}
-	defer idxC.Close()
-	idxValuesCount, err := idxC.Count()
+	defer idxCForDeletes.Close()
+	idxValuesCount, err := idxCForDeletes.Count()
 	if err != nil {
 		return nil, err
 	}
@@ -844,12 +844,6 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	if !indexWithValues {
 		return stat, nil
 	}
-
-	idxCForDeletes, err := rwTx.RwCursorDupSort(ii.indexTable)
-	if err != nil {
-		return nil, err
-	}
-	defer idxCForDeletes.Close()
 
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
 	err = collector.Load(nil, "", func(key, txnm []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
