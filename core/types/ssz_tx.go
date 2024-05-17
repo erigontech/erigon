@@ -11,7 +11,7 @@ type SSZTransaction struct {
 }
 
 func (tx *SSZTransaction) Hash() libcommon.Hash {
-	hash, _ := tx.AsSignedTransation().txHash()
+	hash, _ := tx.AsSignedTransation().HashSSZ()
 	return libcommon.Hash(hash)
 }
 

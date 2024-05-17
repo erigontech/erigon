@@ -1,11 +1,14 @@
 package types_test
 
 import (
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/tests"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
@@ -69,4 +72,17 @@ func TestUnmarshalExecPaylaod2(t *testing.T) {
 	if ep.WithdrawalRequests == nil {
 		t.Fatalf("wrong unmarshal")
 	}
+}
+
+func TestUnma3(t *testing.T) {
+	//txs := make([]types.SignedTransaction, 0)
+	ssz_txs := solid.NewDynamicListSSZ[*types.SignedTransaction](1 << 20)
+	hash, err := ssz_txs.HashSSZ()
+	if err != nil {
+		fmt.Println("ssz_txs_hash", err)
+		return
+	}
+	s := hex.EncodeToString(hash[:])
+	fmt.Println("ssz_txs_hash", s)
+
 }

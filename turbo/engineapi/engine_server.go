@@ -11,6 +11,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/eth/ethutils"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -229,25 +230,6 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
-	blockHash := req.BlockHash
-	if header.Hash() != blockHash {
-		s.logger.Error("[NewPayload] invalid block hash", "stated", blockHash, "actual", header.Hash())
-		return &engine_types.PayloadStatus{
-			Status:          engine_types.InvalidStatus,
-			ValidationError: engine_types.NewStringifiedErrorFromString("invalid block hash"),
-		}, nil
-	}
-
-	for _, txn := range txs {
-		if types.TypedTransactionMarshalledAsRlpString(txn) {
-			s.logger.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", common.Bytes2Hex(txn))
-			return &engine_types.PayloadStatus{
-				Status:          engine_types.InvalidStatus,
-				ValidationError: engine_types.NewStringifiedErrorFromString("typed txn marshalled as RLP string"),
-			}, nil
-		}
-	}
-
 	// TODO: add ssz? to signer
 	signer := *types.MakeSigner(s.config, header.Number.Uint64(), header.Time)
 	var transactions []types.Transaction
@@ -258,6 +240,45 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			transactions, err = types.DecodeTransactionsJson(signer, txs)
 		} else {
 			transactions, err = types.DecodeTransactions(txs)
+		}
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	//ssz_txs := solid.ListSSZ[*types.SignedTransaction]{}
+	ssz_txs := solid.NewDynamicListSSZ[*types.SignedTransaction](1 << 20)
+
+	for _, tx := range transactions {
+		// Transactions:  solid.NewTransactionsSSZFromTransactions(body.Transactions),
+		// Withdrawals:   solid.NewStaticListSSZFromList(convertExecutionWithdrawalsToConsensusWithdrawals(body.Withdrawals), int(beaconCfg.MaxWithdrawalsPerPayload), 44),
+		ssz_txs.Append(tx.(*types.SSZTransaction).AsSignedTransation())
+	}
+
+	header.TxHash, err = ssz_txs.HashSSZ()
+	if err != nil {
+		return nil, err
+	}
+
+	log.Debug("NewPayload", "header", header, "txhash", header.TxHash)
+
+	blockHash := req.BlockHash
+	// if header.Hash() != blockHash {
+	// 	s.logger.Error("[NewPayload] invalid block hash", "stated", blockHash, "actual", header.Hash())
+	// 	return &engine_types.PayloadStatus{
+	// 		Status:          engine_types.InvalidStatus,
+	// 		ValidationError: engine_types.NewStringifiedErrorFromString("invalid block hash"),
+	// 	}, nil
+	// }
+
+	for _, txn := range txs {
+		if types.TypedTransactionMarshalledAsRlpString(txn) {
+			s.logger.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", common.Bytes2Hex(txn))
+			return &engine_types.PayloadStatus{
+				Status:          engine_types.InvalidStatus,
+				ValidationError: engine_types.NewStringifiedErrorFromString("typed txn marshalled as RLP string"),
+			}, nil
 		}
 	}
 

@@ -51,7 +51,7 @@ func (tx *SignedTransaction) sigHash() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(tx.Payload)
 }
 
-func (tx *SignedTransaction) txHash() ([32]byte, error) {
+func (tx *SignedTransaction) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(tx.Payload, tx.Signature)
 }
 

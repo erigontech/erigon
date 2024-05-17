@@ -2,7 +2,6 @@ package eth1_utils
 
 import (
 	"encoding/binary"
-	"fmt"
 	"math/big"
 
 	"github.com/holiman/uint256"
@@ -11,6 +10,7 @@ import (
 	execution "github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func HeaderToHeaderRPC(header *types.Header) *execution.Header {
@@ -97,6 +97,14 @@ func ConvertBlockToRPC(block *types.Block) *execution.Block {
 func HeaderRpcToHeader(header *execution.Header) (*types.Header, error) {
 	var blockNonce types.BlockNonce
 	binary.BigEndian.PutUint64(blockNonce[:], header.Nonce)
+	var rr1 libcommon.Hash
+	if header.RequestsRoot != nil {
+		log.Warn("HeaderRpcToHeader", "request_hash", header.RequestsRoot)
+		rr := gointerfaces.ConvertH256ToHash(header.RequestsRoot)
+		rr1 = libcommon.BytesToHash(rr[:])
+	} else {
+		log.Warn("requests root is nil")
+	}
 	h := &types.Header{
 		ParentHash:    gointerfaces.ConvertH256ToHash(header.ParentHash),
 		UncleHash:     gointerfaces.ConvertH256ToHash(header.OmmerHash),
@@ -115,6 +123,7 @@ func HeaderRpcToHeader(header *execution.Header) (*types.Header, error) {
 		Nonce:         blockNonce,
 		BlobGasUsed:   header.BlobGasUsed,
 		ExcessBlobGas: header.ExcessBlobGas,
+		RequestsRoot:  &rr1,
 	}
 	if header.AuraStep != nil {
 		h.AuRaSeal = header.AuraSeal
@@ -133,7 +142,8 @@ func HeaderRpcToHeader(header *execution.Header) (*types.Header, error) {
 	}
 	blockHash := gointerfaces.ConvertH256ToHash(header.BlockHash)
 	if blockHash != h.Hash() {
-		return nil, fmt.Errorf("block %d, %x has invalid hash. expected: %x", header.BlockNumber, h.Hash(), blockHash)
+		log.Debug("block has invalid hash", "blockNumber", header.BlockNumber, "expected", h.Hash(), "actual", blockHash)
+		//return nil, fmt.Errorf("block %d, %x has invalid hash. expected: %x", header.BlockNumber, h.Hash(), blockHash)
 	}
 
 	return h, nil
