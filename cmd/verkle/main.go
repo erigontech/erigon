@@ -517,6 +517,127 @@ func dump_pre_images(ctx context.Context, cfg optionsCfg, logger log.Logger) err
 	return nil
 }
 
+func dump_pre_images_new(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
+	db, err := openDB(ctx, cfg.stateDb, logger, false)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	tx, err := db.BeginRw(cfg.ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	logInterval := time.NewTicker(120 * time.Second)
+	accFile, err := os.Create("acc_pre_images.dat")
+	storageFile, err := os.Create("storage_pre_images.dat")
+	// file, err := os.Create("pre_image_dump")
+	if err != nil {
+		return err
+	}
+	// collector := etl.NewCollector(".", "/tmp", etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+	accCollector := etl.NewCollector(".", cfg.tmpdir + "/tmpAcc", etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+	storageCollector := etl.NewCollector(".", cfg.tmpdir + "./tmpStg", etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+	defer accCollector.Close()
+	defer storageCollector.Close()
+	stateCursor, err := tx.Cursor(kv.PlainState)
+	if err != nil {
+		return err
+	}
+	num, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return err
+	}
+	logger.Info("Current Block Number", "num", num)
+	var currentIncarnation uint64
+	var currentAddress libcommon.Address
+	var addressHash libcommon.Hash
+	var keyCounter, accCounter, storageCounter uint64
+	var notCurrAddrCounter = 0
+	var notCurrIncarnation = 0
+	// var buf buffer.Buffer
+	for k, _, err := stateCursor.First(); k != nil; k, _, err = stateCursor.Next() {
+		if err != nil {
+			return err
+		}
+		keyCounter++
+		if len(k) == 20 {
+			currentAddress = libcommon.BytesToAddress(k)
+			addressHash = utils.Sha256(currentAddress[:])
+			var acc accounts.Account
+
+			// if err := acc.DecodeForStorage(v); err != nil {
+				// return err
+			// }
+			currentAddress = libcommon.BytesToAddress(k)
+			if err := accCollector.Collect(addressHash[:], k); err != nil {
+				return err
+			}
+			currentIncarnation = acc.Incarnation
+			accCounter++
+		} else {
+			// logger.Info("Iterating through storage key", "k", k, "k[28:]", k[28:])
+
+			address := libcommon.BytesToAddress(k[:20])
+			if address != currentAddress {
+				notCurrAddrCounter++
+				continue
+			}
+			if binary.BigEndian.Uint64(k[20:]) != currentIncarnation {
+				notCurrIncarnation++
+				continue
+			}
+			storageHash := utils.Sha256(k[28:])
+			if err := storageCollector.Collect(storageHash[:], k[28:]); err != nil {
+				return err
+			}
+			// buf.Write(k[28:])
+			// buf.Write(storageHash[:])
+			storageCounter++
+		}
+
+		select {
+		case <-logInterval.C:
+			logger.Info("Computing preimages to state key", "key", common.Bytes2Hex(k), "accCounter", accCounter, "storageCounter", storageCounter)
+		default:
+		}
+	}
+	// if err := collector.Collect(addressHash[:], buf.Bytes()); err != nil {
+	// 	return err
+	// }
+	// db2, err := openDB(ctx, cfg.stateDb, logger, false)
+	logger.Info("Beginning writing file ", "keyCounter", keyCounter, "accCounter", accCounter, "storageCounter", storageCounter)	
+
+	accCounter = 0
+	storageCounter = 0
+	accCollector.Load(tx, "", func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		_, err := accFile.Write(v)
+		accCounter++
+		select {
+		case <-logInterval.C:
+			logger.Info("Computing preimages to state key", "acc", common.Bytes2Hex(k), "accCounter", accCounter)
+		default:
+		}
+		return err
+	}, etl.TransformArgs{})
+
+	storageCollector.Load(tx, "", func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		_, err := storageFile.Write(v)
+		storageCounter++
+		select {
+		case <-logInterval.C:
+			logger.Info("Computing preimages to state key", "key", common.Bytes2Hex(k), "storageCounter", storageCounter)
+		default:
+		}
+		return err
+	}, etl.TransformArgs{})
+
+	logger.Info("Finished writing file ", "keyCounter", keyCounter, "notCurrIncarnation", notCurrIncarnation, "notCurrAddrCounter", notCurrAddrCounter)
+	return nil
+}
+
 func main() {
 	ctx := context.Background()
 	// mainDb := flag.String("state-chaindata", "chaindata", "path to the chaindata database file")
@@ -571,6 +692,10 @@ func main() {
 		}
 	case "dump_preimages":
 		if err := dump_pre_images(ctx, opt, logger); err != nil {
+			logger.Error("Error", "err", err.Error())
+		}
+	case "dump_preimages_new":
+		if err := dump_pre_images_new(ctx, opt, logger); err != nil {
 			logger.Error("Error", "err", err.Error())
 		}
 	default:
