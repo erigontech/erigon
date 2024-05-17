@@ -968,7 +968,7 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 	cnfCopy := tx.db.buckets[name]
 	dbi, err := tx.tx.OpenDBI(name, mdbx.DBAccede, nil, nil)
 	if err != nil && !mdbx.IsNotFound(err) {
-		return fmt.Errorf("db-talbe doesn't exists: %s, %w. recommendation: can try run `integration run_migrations` to create non-existing tables", name, err)
+		return fmt.Errorf("create table: %s, %w", name, err)
 	}
 	if err == nil {
 		cnfCopy.DBI = kv.DBI(dbi)
@@ -1002,7 +1002,7 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 	dbi, err = tx.tx.OpenDBI(name, nativeFlags, nil, nil)
 
 	if err != nil {
-		return fmt.Errorf("create table: %s, %w", name, err)
+		return fmt.Errorf("db-talbe doesn't exists: %s, %w. recommendation: can try run `integration run_migrations` to create non-existing tables", name, err)
 	}
 	cnfCopy.DBI = kv.DBI(dbi)
 
