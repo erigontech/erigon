@@ -47,34 +47,48 @@ func TestEliasFanoSeek(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, int(vals[i]), int(n))
 		}
+
+		//
+		// TODO add reverse iterator here
+		//
 	})
 	t.Run("iter grow", func(t *testing.T) {
 		it := ef.Iterator()
-		prev, _ := it.Next()
+		prev, err := it.Next()
+		require.NoError(t, err)
 		for it.HasNext() {
-			n, _ := it.Next()
+			n, err := it.Next()
+			require.NoError(t, err)
 			require.GreaterOrEqual(t, int(n), int(prev))
 		}
+
+		//
+		// TODO add reverse iterator here
+		//
 	})
+
+	//
+	// TODO add reverse iterator to below?
+	//
 
 	{
 		v2, ok2 := ef.Search(ef.Max())
 		require.True(t, ok2, v2)
 		require.Equal(t, int(ef.Max()), int(v2))
 		it := ef.Iterator()
-		//it.SeekDeprecated(ef.Max())
 		for i := 0; i < int(ef.Count()-1); i++ {
-			it.Next()
+			_, err := it.Next()
+			require.NoError(t, err)
 		}
 		//save all fields values
-		//v1, v2, v3, v4, v5 := it.upperIdx, it.upperMask, it.lowerIdx, it.upper, it.itemsIterated
+		v1, v2, v3, v4, v5 := it.upperIdx, it.upperMask, it.lowerIdx, it.upper, it.itemsIterated
 		// seek to same item and check new fields
 		it.Seek(ef.Max())
-		//require.Equal(t, int(v1), int(it.upperIdx))
-		//require.Equal(t, int(v3), int(it.lowerIdx))
-		//require.Equal(t, int(v5), int(it.itemsIterated))
-		//require.Equal(t, bits.TrailingZeros64(v2), bits.TrailingZeros64(it.upperMask))
-		//require.Equal(t, int(v4), int(it.upper))
+		require.Equal(t, int(v1), int(it.upperIdx))
+		require.Equal(t, int(v3), int(it.lowerIdx))
+		require.Equal(t, int(v5), int(it.itemsIterated))
+		require.Equal(t, bits.TrailingZeros64(v2), bits.TrailingZeros64(it.upperMask))
+		require.Equal(t, int(v4), int(it.upper))
 
 		require.True(t, it.HasNext(), v2)
 		itV, err := it.Next()
@@ -169,7 +183,8 @@ func TestEliasFano(t *testing.T) {
 	assert.Equal(t, uint64(14), v, "search4")
 
 	buf := bytes.NewBuffer(nil)
-	ef.Write(buf)
+	err := ef.Write(buf)
+	assert.NoError(t, err)
 	assert.Equal(t, ef.AppendBytes(nil), buf.Bytes())
 
 	ef2, _ := ReadEliasFano(buf.Bytes())
@@ -227,6 +242,88 @@ func TestIterator(t *testing.T) {
 		iter2.Seek(1024)
 		require.False(t, iter2.HasNext())
 	})
+
+	t.Run("seek reverse", func(t *testing.T) {
+		it := ef.ReverseIterator()
+
+		it.Seek(90)
+		n, err := it.Next()
+		require.NoError(t, err)
+		require.Equal(t, 62, int(n))
+
+		it.Seek(62)
+		n, err = it.Next()
+		require.NoError(t, err)
+		require.Equal(t, 62, int(n))
+
+		it.Seek(59)
+		n, err = it.Next()
+		require.NoError(t, err)
+		require.Equal(t, 58, int(n))
+
+		it.Seek(57)
+		n, err = it.Next()
+		require.NoError(t, err)
+		require.Equal(t, 54, int(n))
+
+		it.Seek(1)
+		n, err = it.Next()
+		require.NoError(t, err)
+		require.Equal(t, 1, int(n))
+
+		it.Seek(0)
+		require.False(t, it.HasNext())
+	})
+
+	t.Run("iterator exhausted", func(t *testing.T) {
+		it := ef.Iterator()
+		for range offsets {
+			_, err := it.Next()
+			require.NoError(t, err)
+		}
+		_, err := it.Next()
+		require.ErrorIs(t, err, ErrEliasFanoIterExhausted)
+
+		it = ef.ReverseIterator()
+		for range offsets {
+			_, err := it.Next()
+			require.NoError(t, err)
+		}
+		_, err = it.Next()
+		require.ErrorIs(t, err, ErrEliasFanoIterExhausted)
+	})
+
+	t.Run("article-example1", func(t *testing.T) {
+		// https://www.antoniomallia.it/sorted-integers-compression-with-elias-fano-encoding.html
+		offsets := []uint64{2, 3, 5, 7, 11, 13, 24}
+		count := uint64(len(offsets))
+		maxOffset := offsets[len(offsets)-1]
+
+		ef := NewEliasFano(count, maxOffset)
+		for _, offset := range offsets {
+			ef.AddOffset(offset)
+		}
+		ef.Build()
+
+		iter.ExpectEqualU64(t, iter.Array(offsets), ef.Iterator())
+		iter.ExpectEqualU64(t, iter.ReverseArray(offsets), ef.ReverseIterator())
+	})
+
+	t.Run("article-example2", func(t *testing.T) {
+		// https://arxiv.org/pdf/1206.4300
+		offsets := []uint64{5, 8, 8, 15, 32}
+		count := uint64(len(offsets))
+		maxOffset := offsets[len(offsets)-1]
+
+		ef := NewEliasFano(count, maxOffset)
+		for _, offset := range offsets {
+			ef.AddOffset(offset)
+		}
+		ef.Build()
+
+		iter.ExpectEqualU64(t, iter.Array(offsets), ef.Iterator())
+		iter.ExpectEqualU64(t, iter.ReverseArray(offsets), ef.ReverseIterator())
+	})
 }
 
 func TestIteratorAndSeekAreBasedOnSameFields(t *testing.T) {
@@ -239,6 +336,7 @@ func TestIteratorAndSeekAreBasedOnSameFields(t *testing.T) {
 
 	for i := range vals {
 		checkSeek(t, i, ef, vals)
+		checkSeekReverse(t, i, ef, vals)
 	}
 }
 
@@ -247,7 +345,8 @@ func checkSeek(t *testing.T, j int, ef *EliasFano, vals []uint64) {
 	efi := ef.Iterator()
 	// drain iterator to given item
 	for i := 0; i < j; i++ {
-		efi.Next()
+		_, err := efi.Next()
+		require.NoError(t, err)
 	}
 	//save all fields values
 	v1, v2, v3, v4, v5 := efi.upperIdx, efi.upperMask, efi.lowerIdx, efi.upper, efi.itemsIterated
@@ -258,6 +357,29 @@ func checkSeek(t *testing.T, j int, ef *EliasFano, vals []uint64) {
 	require.Equal(t, int(v4), int(efi.upper))
 	require.Equal(t, int(v5), int(efi.itemsIterated))
 	require.Equal(t, bits.TrailingZeros64(v2), bits.TrailingZeros64(efi.upperMask))
+}
+
+func checkSeekReverse(t *testing.T, j int, ef *EliasFano, vals []uint64) {
+	t.Helper()
+	efi := ef.ReverseIterator()
+	// drain iterator to given item
+	for i := len(vals) - 1; i > j; i-- {
+		_, err := efi.Next()
+		require.NoError(t, err)
+	}
+	// save all fields values
+	prevUpperIdx := efi.upperIdx
+	prevUpperMask := efi.upperMask
+	prevLowerIdx := efi.lowerIdx
+	prevUpper := efi.upper
+	prevItemsIterated := efi.itemsIterated
+	// seek to same item and check new fields
+	efi.Seek(vals[j])
+	require.Equal(t, int(prevUpperIdx), int(efi.upperIdx))
+	require.Equal(t, int(prevLowerIdx), int(efi.lowerIdx))
+	require.Equal(t, int(prevUpper), int(efi.upper))
+	require.Equal(t, int(prevItemsIterated), int(efi.itemsIterated))
+	require.Equal(t, bits.TrailingZeros64(prevUpperMask), bits.TrailingZeros64(efi.upperMask))
 }
 
 func BenchmarkName(b *testing.B) {
@@ -272,7 +394,8 @@ func BenchmarkName(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			it := ef.Iterator()
 			for it.HasNext() {
-				n, _ := it.Next()
+				n, err := it.Next()
+				require.NoError(b, err)
 				if n > 1_000_000 {
 					break
 				}
@@ -285,4 +408,44 @@ func BenchmarkName(b *testing.B) {
 			it.Seek(1_000_000)
 		}
 	})
+}
+
+func TestPlayground(t *testing.T) {
+	//offsets := []uint64{2, 3, 5, 7, 11, 13, 24}
+	//count := uint64(len(offsets))
+	//maxOffset := offsets[len(offsets)-1]
+	//
+	//ef := NewEliasFano(count, maxOffset)
+	//for _, offset := range offsets {
+	//	ef.AddOffset(offset)
+	//}
+	//ef.Build()
+	//
+	//for i := range offsets {
+	//	_, _, sel, _, _ := ef.get(uint64(i))
+	//	println(sel)
+	//}
+
+	offsets := []uint64{1, 4, 6, 8, 10, 14, 16, 19, 22, 34, 37, 39, 41, 43, 48, 51, 54, 58, 62}
+	count := uint64(len(offsets))
+	maxOffset := offsets[0]
+	for _, offset := range offsets {
+		if offset > maxOffset {
+			maxOffset = offset
+		}
+	}
+	ef := NewEliasFano(count, maxOffset)
+	for _, offset := range offsets {
+		ef.AddOffset(offset)
+	}
+	ef.Build()
+
+	for i := range offsets {
+		_, _, sel, _, _ := ef.get(uint64(i))
+		println(sel)
+	}
+
+	it := ef.ReverseIterator()
+	_, err := it.Next()
+	require.NoError(t, err)
 }

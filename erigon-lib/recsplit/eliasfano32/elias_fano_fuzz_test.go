@@ -50,18 +50,62 @@ func FuzzSingleEliasFano(f *testing.F) {
 		ef.Build()
 
 		// Try to read from ef
-		for i := 0; i < count; i++ {
+		for i := range keys {
 			if ef.Get(uint64(i)) != keys[i] {
 				t.Fatalf("i %d: got %d, expected %d", i, ef.Get(uint64(i)), keys[i])
 			}
 		}
 
+		var i int
 		it := ef.Iterator()
 		for it.HasNext() {
-			it.Next()
+			v, err := it.Next()
+			if err != nil {
+				t.Fatalf("it.next: got err: %v", err)
+			}
+			if v != keys[i] {
+				t.Fatalf("it.next: got %d, expected %d", v, keys[i])
+			}
+			i++
 		}
+		if i != len(keys) {
+			t.Fatalf("it.len: got %d, expected %d", i, len(keys))
+		}
+
+		i--
+		rit := ef.ReverseIterator()
+		//rit.real = keys
+		for rit.HasNext() {
+			v, err := rit.Next()
+			if err != nil {
+				t.Fatalf("rit.next: got err: %v", err)
+			}
+			if v != keys[i] {
+				//lowerIdx := rit.lowerIdx + rit.l
+				//idx64, shift := lowerIdx/64, lowerIdx%64
+				//lower := rit.lowerBits[idx64] >> shift
+				//fmt.Println(strconv.FormatUint(lower, 10))
+				//fmt.Println(strconv.FormatUint(lower, 2))
+				//1110010011011000011101100010100111101100110001110110111011000000
+				//if shift > 0 {
+				//	//fmt.Println(efi.lowerBits[idx64+1] << (64 - shift))
+				//	lower |= rit.lowerBits[idx64+1] << (64 - shift)
+				//}
+
+				//t.Fatalf("rit.next: got %d, expected %d, upper %d, lower %d, i %d, len, %d, keys %v", v, keys[i], rit.upper, lower&rit.lowerBitsMask, i, len(keys), keys)
+				t.Fatalf("rit.next: got %d, expected %d, i %d, len, %d", v, keys[i], i, len(keys))
+			}
+			i--
+		}
+		if i != -1 {
+			t.Fatalf("rit.len: got %d, expected %d", i, -1)
+		}
+
 		buf := bytes.NewBuffer(nil)
-		ef.Write(buf)
+		err := ef.Write(buf)
+		if err != nil {
+			t.Fatalf("write: got err: %v", err)
+		}
 		if ef.Max() != Max(buf.Bytes()) {
 			t.Fatalf("max: got %d, expected %d", ef.Max(), Max(buf.Bytes()))
 		}
