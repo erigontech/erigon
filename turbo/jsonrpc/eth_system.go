@@ -39,9 +39,10 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	highestBlock, err := stages.GetStageProgress(tx, stages.Headers)
+
+	highestBlock, err := rawdb.ReadLastNewBlockSeen(tx)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 
 	currentBlock, err := stages.GetStageProgress(tx, stages.Finish)
