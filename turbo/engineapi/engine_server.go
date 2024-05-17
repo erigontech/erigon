@@ -191,8 +191,18 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	if err := s.checkRequestsPresence(header.Time, requests); err != nil {
 		return nil, err
 	}
+
+	if version >= clparams.ElectraVersion && req.WithdrawalRequests != nil {
+		requests = append(requests, req.WithdrawalRequests.ToRequests()...)
+	}
+
+	// check for withdrawals
 	if requests != nil {
-		rh := types.DeriveSha(requests)
+		//rh := types.DeriveSha(requests)
+		// TODO: hack to work with empty requests here
+		var emptyRequests types.Requests
+		emptyRequests = make(types.Requests, 0)
+		rh := types.DeriveSha(emptyRequests)
 		header.RequestsRoot = &rh
 	}
 

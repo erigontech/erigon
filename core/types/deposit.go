@@ -103,9 +103,10 @@ func ParseDepositLogs(logs []*Log, depositContractAddress *libcommon.Address) (R
 
 type Deposits []*Deposit
 
-func (ds Deposits) ToRequests() (reqs Requests) {
+func (ds Deposits) ToRequests() Requests {
+	reqs := make(Requests, 0, len(ds))
 	for _, d := range ds {
 		reqs = append(reqs, NewRequest(d))
 	}
-	return
+	return reqs
 }
