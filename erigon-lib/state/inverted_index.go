@@ -1006,7 +1006,9 @@ func (it *FrozenInvertedIdxIter) advanceInFiles() {
 				} else {
 					efiter = it.ef.ReverseIterator()
 				}
-				efiter.Seek(uint64(it.startTxNum))
+				if it.startTxNum > 0 {
+					efiter.Seek(uint64(it.startTxNum))
+				}
 				it.efIt = efiter
 			}
 		}
