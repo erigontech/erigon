@@ -2,6 +2,7 @@ package jsonrpc
 
 import (
 	"context"
+	"math"
 	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
@@ -50,7 +51,21 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 		return false, err
 	}
 
-	if currentBlock > 0 && currentBlock >= highestBlock { // Return not syncing if the synchronisation already completed
+	frozenBlocks := api._blockReader.FrozenBlocks()
+	if highestBlock < frozenBlocks {
+		highestBlock = frozenBlocks
+	}
+
+	// Maybe it is still downloading snapshots.
+	if highestBlock == 0 {
+		return map[string]interface{}{
+			"startingBlock": "0x0", // TODO: this is a placeholder, I do not think it matters what we return here, but 0x0 is probably a good placeholder.
+			"currentBlock":  hexutil.Uint64(currentBlock),
+			"highestBlock":  hexutil.Uint64(math.MaxUint64),
+		}, nil
+	}
+
+	if highestBlock > 0 && currentBlock >= highestBlock { // Return not syncing if the synchronisation already completed
 		return false, nil
 	}
 
