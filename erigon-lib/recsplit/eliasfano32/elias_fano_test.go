@@ -41,16 +41,23 @@ func TestEliasFanoSeek(t *testing.T) {
 	ef.Build()
 
 	t.Run("iter match vals", func(t *testing.T) {
+		var i int
 		it := ef.Iterator()
-		for i := 0; it.HasNext(); i++ {
+		for i = 0; it.HasNext(); i++ {
 			n, err := it.Next()
 			require.NoError(t, err)
 			require.Equal(t, int(vals[i]), int(n))
 		}
+		require.Equal(t, len(vals), i)
 
-		//
-		// TODO add reverse iterator here
-		//
+		var j int
+		rit := ef.ReverseIterator()
+		for j = len(vals) - 1; rit.HasNext(); j-- {
+			n, err := rit.Next()
+			require.NoError(t, err)
+			require.Equal(t, vals[j], n)
+		}
+		require.Equal(t, -1, j)
 	})
 	t.Run("iter grow", func(t *testing.T) {
 		it := ef.Iterator()
@@ -61,15 +68,17 @@ func TestEliasFanoSeek(t *testing.T) {
 			require.NoError(t, err)
 			require.GreaterOrEqual(t, int(n), int(prev))
 		}
-
-		//
-		// TODO add reverse iterator here
-		//
 	})
-
-	//
-	// TODO add reverse iterator to below?
-	//
+	t.Run("reverse iter decreases", func(t *testing.T) {
+		it := ef.ReverseIterator()
+		prev, err := it.Next()
+		require.NoError(t, err)
+		for it.HasNext() {
+			n, err := it.Next()
+			require.NoError(t, err)
+			require.LessOrEqual(t, int(n), int(prev))
+		}
+	})
 
 	{
 		v2, ok2 := ef.Search(ef.Max())
@@ -323,6 +332,15 @@ func TestIterator(t *testing.T) {
 
 		iter.ExpectEqualU64(t, iter.Array(offsets), ef.Iterator())
 		iter.ExpectEqualU64(t, iter.ReverseArray(offsets), ef.ReverseIterator())
+	})
+
+	t.Run("1 element", func(t *testing.T) {
+		ef := NewEliasFano(1, 15)
+		ef.AddOffset(7)
+		ef.Build()
+
+		iter.ExpectEqualU64(t, iter.Array([]uint64{7}), ef.Iterator())
+		iter.ExpectEqualU64(t, iter.ReverseArray([]uint64{7}), ef.ReverseIterator())
 	})
 }
 
