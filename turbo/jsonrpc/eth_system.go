@@ -43,7 +43,7 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 
 	highestBlock, err := rawdb.ReadLastNewBlockSeen(tx)
 	if err != nil {
-		return nil, err
+		return false, err
 	}
 
 	currentBlock, err := stages.GetStageProgress(tx, stages.Execution)
