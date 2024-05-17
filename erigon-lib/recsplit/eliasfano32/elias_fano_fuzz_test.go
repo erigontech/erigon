@@ -74,7 +74,6 @@ func FuzzSingleEliasFano(f *testing.F) {
 
 		i--
 		rit := ef.ReverseIterator()
-		//rit.real = keys
 		for rit.HasNext() {
 			v, err := rit.Next()
 			if err != nil {
