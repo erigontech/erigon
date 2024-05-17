@@ -595,8 +595,6 @@ func ExecV3(ctx context.Context,
 	slowDownLimit := time.NewTicker(time.Second)
 	defer slowDownLimit.Stop()
 
-	stateStream := !initialCycle && cfg.stateStream && maxBlockNum-blockNum < stateStreamLimit
-
 	var readAhead chan uint64
 	if !parallel {
 		// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
@@ -673,14 +671,12 @@ Loop:
 					}
 				}
 			}()
-		} else {
-			if !initialCycle && stateStream {
-				txs, err := blockReader.RawTransactions(context.Background(), applyTx, b.NumberU64(), b.NumberU64())
-				if err != nil {
-					return err
-				}
-				cfg.accumulator.StartChange(b.NumberU64(), b.Hash(), txs, false)
+		} else if shouldReportToTxPool {
+			txs, err := blockReader.RawTransactions(context.Background(), applyTx, b.NumberU64(), b.NumberU64())
+			if err != nil {
+				return err
 			}
+			cfg.accumulator.StartChange(b.NumberU64(), b.Hash(), txs, false)
 		}
 
 		rules := chainConfig.Rules(blockNum, b.Time())
