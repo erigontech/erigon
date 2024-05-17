@@ -408,18 +408,18 @@ func BenchmarkName(b *testing.B) {
 			it.Seek(1_000_000)
 		}
 	})
-	b.Run("reverse iterator", func(b *testing.B) {
+	b.Run("naive reverse iterator", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			it := ef.ReverseIterator()
+			it := naiveReverseIterator(ef)
 			for it.HasNext() {
 				_, err := it.Next()
 				require.NoError(b, err)
 			}
 		}
 	})
-	b.Run("naive reverse iterator", func(b *testing.B) {
+	b.Run("reverse iterator", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			it := naiveReverseIterator(ef)
+			it := ef.ReverseIterator()
 			for it.HasNext() {
 				_, err := it.Next()
 				require.NoError(b, err)
