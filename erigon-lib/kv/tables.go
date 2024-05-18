@@ -962,6 +962,12 @@ const (
 	LogAddrIdx    InvertedIdx = "LogAddrIdx"
 	TracesFromIdx InvertedIdx = "TracesFromIdx"
 	TracesToIdx   InvertedIdx = "TracesToIdx"
+
+	LogAddrIdxPos           = 0
+	LogTopicIdxPos          = 1
+	TracesFromIdxPos        = 2
+	TracesToIdxPos          = 3
+	StandaloneIdxLen uint16 = 4
 )
 
 func (d Domain) String() string {

@@ -75,11 +75,8 @@ type SharedDomains struct {
 	domains [kv.DomainLen]map[string][]byte
 	storage *btree2.Map[string, []byte]
 
-	dWriter          [kv.DomainLen]*domainBufferedWriter
-	logAddrsWriter   *invertedIndexBufferedWriter
-	logTopicsWriter  *invertedIndexBufferedWriter
-	tracesFromWriter *invertedIndexBufferedWriter
-	tracesToWriter   *invertedIndexBufferedWriter
+	dWriter   [kv.DomainLen]*domainBufferedWriter
+	iiWriters [kv.StandaloneIdxLen]*invertedIndexBufferedWriter
 }
 
 type HasAggTx interface {
@@ -94,10 +91,9 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 	}
 	sd.SetTx(tx)
 
-	sd.logAddrsWriter = sd.aggTx.logAddrs.NewWriter()
-	sd.logTopicsWriter = sd.aggTx.logTopics.NewWriter()
-	sd.tracesFromWriter = sd.aggTx.tracesFrom.NewWriter()
-	sd.tracesToWriter = sd.aggTx.tracesTo.NewWriter()
+	for id, ii := range sd.aggTx.iis {
+		sd.iiWriters[id] = ii.NewWriter()
+	}
 
 	for id, d := range sd.aggTx.d {
 		sd.domains[id] = map[string][]byte{}
@@ -136,17 +132,10 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 			return err
 		}
 	}
-	if _, err := sd.aggTx.logAddrs.Prune(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, withWarmup, nil); err != nil {
-		return err
-	}
-	if _, err := sd.aggTx.logTopics.Prune(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, withWarmup, nil); err != nil {
-		return err
-	}
-	if _, err := sd.aggTx.tracesFrom.Prune(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, withWarmup, nil); err != nil {
-		return err
-	}
-	if _, err := sd.aggTx.tracesTo.Prune(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, withWarmup, nil); err != nil {
-		return err
+	for _, ii := range sd.aggTx.iis {
+		if _, err := ii.Prune(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, withWarmup, nil); err != nil {
+			return err
+		}
 	}
 
 	sd.ClearRam(true)
@@ -506,13 +495,13 @@ func (sd *SharedDomains) delAccountStorage(addr, loc []byte, preVal []byte, prev
 func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) {
 	switch table {
 	case kv.LogAddrIdx, kv.TblLogAddressIdx:
-		err = sd.logAddrsWriter.Add(key)
+		err = sd.iiWriters[kv.LogAddrIdxPos].Add(key)
 	case kv.LogTopicIdx, kv.TblLogTopicsIdx, kv.LogTopicIndex:
-		err = sd.logTopicsWriter.Add(key)
+		err = sd.iiWriters[kv.LogTopicIdxPos].Add(key)
 	case kv.TblTracesToIdx:
-		err = sd.tracesToWriter.Add(key)
+		err = sd.iiWriters[kv.TracesToIdxPos].Add(key)
 	case kv.TblTracesFromIdx:
-		err = sd.tracesFromWriter.Add(key)
+		err = sd.iiWriters[kv.TracesFromIdxPos].Add(key)
 	default:
 		panic(fmt.Errorf("unknown shared index %s", table))
 	}
@@ -547,11 +536,10 @@ func (sd *SharedDomains) SetTxNum(txNum uint64) {
 			d.SetTxNum(txNum)
 		}
 	}
-	if sd.tracesToWriter != nil {
-		sd.tracesToWriter.SetTxNum(txNum)
-		sd.tracesFromWriter.SetTxNum(txNum)
-		sd.logAddrsWriter.SetTxNum(txNum)
-		sd.logTopicsWriter.SetTxNum(txNum)
+	for _, iiWriter := range sd.iiWriters {
+		if iiWriter != nil {
+			iiWriter.SetTxNum(txNum)
+		}
 	}
 }
 
@@ -733,10 +721,9 @@ func (sd *SharedDomains) Close() {
 		for _, d := range sd.dWriter {
 			d.close()
 		}
-		sd.logAddrsWriter.close()
-		sd.logTopicsWriter.close()
-		sd.tracesFromWriter.close()
-		sd.tracesToWriter.close()
+		for _, iiWriter := range sd.iiWriters {
+			iiWriter.close()
+		}
 	}
 
 	if sd.sdCtx != nil {
@@ -766,17 +753,10 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 				}
 			}
 		}
-		if err := sd.logAddrsWriter.Flush(ctx, tx); err != nil {
-			return err
-		}
-		if err := sd.logTopicsWriter.Flush(ctx, tx); err != nil {
-			return err
-		}
-		if err := sd.tracesFromWriter.Flush(ctx, tx); err != nil {
-			return err
-		}
-		if err := sd.tracesToWriter.Flush(ctx, tx); err != nil {
-			return err
+		for _, iiWriter := range sd.iiWriters {
+			if err := iiWriter.Flush(ctx, tx); err != nil {
+				return err
+			}
 		}
 		if dbg.PruneOnFlushTimeout != 0 {
 			_, err = sd.aggTx.PruneSmallBatches(ctx, dbg.PruneOnFlushTimeout, tx)
@@ -790,10 +770,9 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 				d.close()
 			}
 		}
-		sd.logAddrsWriter.close()
-		sd.logTopicsWriter.close()
-		sd.tracesFromWriter.close()
-		sd.tracesToWriter.close()
+		for _, iiWriter := range sd.iiWriters {
+			iiWriter.close()
+		}
 	}
 	return nil
 }
