@@ -86,6 +86,10 @@ func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, override
 }
 
 func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *big.Int, tmpDir string, logger log.Logger) (*chain.Config, *types.Block, error) {
+	if err := rawdb.WriteGenesis(tx, genesis); err != nil {
+		return nil, nil, err
+	}
+	
 	var storedBlock *types.Block
 	if genesis != nil && genesis.Config == nil {
 		return params.AllProtocolChanges, nil, types.ErrGenesisNoConfig
