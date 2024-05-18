@@ -185,6 +185,8 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
+	fmt.Println("AX")
+	fmt.Println(blockHash)
 
 	if fcuHeader.Number.Uint64() > 0 {
 		if canonicalHash == blockHash {
@@ -206,6 +208,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				LatestValidHash: gointerfaces.ConvertHashToH256(blockHash),
 				Status:          execution.ExecutionStatus_Success,
 			})
+			fmt.Println("canonical?")
 			return
 		}
 
@@ -241,6 +244,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 				return
 			}
+			fmt.Println(currentHeader)
 			if currentHeader == nil {
 				sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
 					LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
