@@ -313,7 +313,7 @@ func TestAPI(t *testing.T) {
 	}()
 	fmt.Printf("-----3\n")
 	txID4 := put(k1[:], account2Enc)
-	time.Sleep(2 * time.Second)
+	time.Sleep(10 * time.Second)
 
 	c.OnNewBlock(&remote.StateChangeBatch{
 		StateVersionId:      txID4,
