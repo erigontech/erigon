@@ -89,7 +89,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *b
 	if err := rawdb.WriteGenesis(tx, genesis); err != nil {
 		return nil, nil, err
 	}
-	
+
 	var storedBlock *types.Block
 	if genesis != nil && genesis.Config == nil {
 		return params.AllProtocolChanges, nil, types.ErrGenesisNoConfig
