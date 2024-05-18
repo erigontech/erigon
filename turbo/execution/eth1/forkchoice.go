@@ -244,7 +244,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 				return
 			}
-			fmt.Println(currentHeader)
+			fmt.Println("Chain is missing")
 			if currentHeader == nil {
 				sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
 					LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
