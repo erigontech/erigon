@@ -42,13 +42,14 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		}, nil
 	}
 	defer e.semaphore.Release(1)
+	e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
+	frozenBlocks := e.blockReader.FrozenBlocks()
+
 	tx, err := e.db.BeginRw(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not begin transaction: %s", err)
 	}
 	defer tx.Rollback()
-	e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
-	frozenBlocks := e.blockReader.FrozenBlocks()
 
 	for _, block := range req.Blocks {
 		// Skip frozen blocks.
@@ -94,5 +95,5 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 
 	return &execution.InsertionResult{
 		Result: execution.ExecutionStatus_Success,
-	}, tx.Commit()
+	}, nil
 }

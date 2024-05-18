@@ -717,11 +717,11 @@ func (m *MemoryMutation) CHandle() unsafe.Pointer {
 }
 
 type hasAggCtx interface {
-	AggCtx() interface{}
+	AggTx() interface{}
 }
 
-func (m *MemoryMutation) AggCtx() interface{} {
-	return m.db.(hasAggCtx).AggCtx()
+func (m *MemoryMutation) AggTx() interface{} {
+	return m.db.(hasAggCtx).AggTx()
 }
 
 func (m *MemoryMutation) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, step uint64, err error) {

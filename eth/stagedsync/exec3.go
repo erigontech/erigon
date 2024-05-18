@@ -16,7 +16,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 	"github.com/ledgerwatch/erigon-lib/config3"
-	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
@@ -28,7 +27,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/metrics"
@@ -46,6 +44,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/shards"
 )
 
 var execStepsInDB = metrics.NewGauge(`exec_steps_in_db`) //nolint
@@ -157,11 +156,7 @@ func ExecV3(ctx context.Context,
 	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
 
 	if initialCycle {
-		if _, ok := engine.(*aura.AuRa); ok { //gnosis collate eating too much RAM, will add ETL later
-			agg.SetCollateAndBuildWorkers(1)
-		} else {
-			agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
-		}
+		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
 		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 		defer agg.DiscardHistory(kv.CommitmentDomain).EnableHistory(kv.CommitmentDomain)
 	} else {
@@ -183,7 +178,7 @@ func ExecV3(ctx context.Context,
 			}()
 		}
 	}
-
+	var err error
 	inMemExec := txc.Doms != nil
 	var doms *state2.SharedDomains
 	if inMemExec {
@@ -191,6 +186,11 @@ func ExecV3(ctx context.Context,
 	} else {
 		var err error
 		doms, err = state2.NewSharedDomains(applyTx, log.New())
+		// if we are behind the commitment, we can't execute anything
+		// this can heppen if progress in domain is higher than progress in blocks
+		if errors.Is(err, state2.ErrBehindCommitment) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -289,10 +289,8 @@ func ExecV3(ctx context.Context,
 	}
 
 	blockNum = doms.BlockNum()
+	initialBlockNum := blockNum
 	outputTxNum.Store(doms.TxNum())
-
-	var err error
-
 	if maxBlockNum-blockNum > 16 {
 		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
 			"from", blockNum, "to", maxBlockNum, "fromTxNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx)
@@ -308,6 +306,11 @@ func ExecV3(ctx context.Context,
 	var count uint64
 	var lock sync.RWMutex
 
+	shouldReportToTxPool := maxBlockNum-blockNum <= 8
+	var accumulator *shards.Accumulator
+	if shouldReportToTxPool {
+		accumulator = cfg.accumulator
+	}
 	rs := state.NewStateV3(doms, logger)
 
 	////TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
@@ -321,7 +324,7 @@ func ExecV3(ctx context.Context,
 	rwsConsumed := make(chan struct{}, 1)
 	defer close(rwsConsumed)
 
-	execWorkers, applyWorker, rws, stopWorkers, waitWorkers := exec3.NewWorkersPool(lock.RLocker(), logger, ctx, parallel, chainDb, rs, in, blockReader, chainConfig, genesis, engine, workerCount+1, cfg.dirs)
+	execWorkers, applyWorker, rws, stopWorkers, waitWorkers := exec3.NewWorkersPool(lock.RLocker(), accumulator, logger, ctx, parallel, chainDb, rs, in, blockReader, chainConfig, genesis, engine, workerCount+1, cfg.dirs)
 	defer stopWorkers()
 	applyWorker.DiscardReadList()
 
@@ -592,8 +595,6 @@ func ExecV3(ctx context.Context,
 	slowDownLimit := time.NewTicker(time.Second)
 	defer slowDownLimit.Stop()
 
-	stateStream := !initialCycle && cfg.stateStream && maxBlockNum-blockNum < stateStreamLimit
-
 	var readAhead chan uint64
 	if !parallel {
 		// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
@@ -670,14 +671,12 @@ Loop:
 					}
 				}
 			}()
-		} else {
-			if !initialCycle && stateStream {
-				txs, err := blockReader.RawTransactions(context.Background(), applyTx, b.NumberU64(), b.NumberU64())
-				if err != nil {
-					return err
-				}
-				cfg.accumulator.StartChange(b.NumberU64(), b.Hash(), txs, false)
+		} else if shouldReportToTxPool {
+			txs, err := blockReader.RawTransactions(context.Background(), applyTx, b.NumberU64(), b.NumberU64())
+			if err != nil {
+				return err
 			}
+			cfg.accumulator.StartChange(b.NumberU64(), b.Hash(), txs, false)
 		}
 
 		rules := chainConfig.Rules(blockNum, b.Time())
@@ -872,6 +871,18 @@ Loop:
 				}
 				t1 = time.Since(tt)
 
+				tt = time.Now()
+				// If execute more than 100 blocks then, it is safe to assume that we are not on the tip of the chain.
+				// In this case, we can prune the state to save memory.
+				pruneBlockMargin := uint64(100)
+
+				if blockNum-initialBlockNum > pruneBlockMargin {
+					if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Minute, applyTx); err != nil {
+						return err
+					}
+				}
+				t3 = time.Since(tt)
+
 				if err := func() error {
 					doms.Close()
 					if err = execStage.Update(applyTx, outputBlockNum.GetValueUint64()); err != nil {
@@ -891,21 +902,6 @@ Loop:
 							agg.BuildFilesInBackground(outputTxNum.Load())
 						}
 
-						aggCtx := agg.BeginFilesRo()
-						defer aggCtx.Close()
-
-						tt = time.Now()
-						for haveMoreToPrune := true; haveMoreToPrune; {
-							//very aggressive prune, because:
-							// if prune is slow - means DB > RAM and skip pruning will only make things worse
-							// db will grow -> prune will get slower -> db will grow -> ...
-							if haveMoreToPrune, err = aggCtx.PruneSmallBatchesDb(ctx, 10*time.Minute, chainDb); err != nil {
-								return err
-							}
-						}
-
-						t3 = time.Since(tt)
-
 						applyTx, err = cfg.db.BeginRw(context.Background()) //nolint
 						if err != nil {
 							return err
@@ -919,7 +915,7 @@ Loop:
 					rs = state.NewStateV3(doms, logger)
 
 					applyWorker.ResetTx(applyTx)
-					applyWorker.ResetState(rs)
+					applyWorker.ResetState(rs, accumulator)
 
 					return nil
 				}(); err != nil {
@@ -981,44 +977,11 @@ Loop:
 
 // nolint
 func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
-	blockNum, err := stages.GetStageProgress(tx, stages.Execution)
-	if err != nil {
-		panic(err)
-	}
-	histV3, err := kvcfg.HistoryV3.Enabled(tx)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Printf("[dbg] plain state: %d\n", blockNum)
-	defer fmt.Printf("[dbg] plain state end\n")
-
-	if !histV3 {
-		if err := tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
-			if len(k) == 20 {
-				a := accounts.NewAccount()
-				a.DecodeForStorage(v)
-				fmt.Printf("%x, %d, %d, %d, %x\n", k, &a.Balance, a.Nonce, a.Incarnation, a.CodeHash)
-			}
-			return nil
-		}); err != nil {
-			panic(err)
-		}
-		if err := tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
-			if len(k) > 20 {
-				fmt.Printf("%x, %x\n", k, v)
-			}
-			return nil
-		}); err != nil {
-			panic(err)
-		}
-		return
-	}
-
 	if doms != nil {
 		doms.Flush(context.Background(), tx)
 	}
 	{
-		it, err := tx.(state2.HasAggCtx).AggCtx().(*state2.AggregatorRoTx).DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
+		it, err := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
 		if err != nil {
 			panic(err)
 		}
@@ -1033,7 +996,7 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
 		}
 	}
 	{
-		it, err := tx.(state2.HasAggCtx).AggCtx().(*state2.AggregatorRoTx).DomainRangeLatest(tx, kv.StorageDomain, nil, nil, -1)
+		it, err := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).DomainRangeLatest(tx, kv.StorageDomain, nil, nil, -1)
 		if err != nil {
 			panic(1)
 		}
@@ -1046,7 +1009,7 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
 		}
 	}
 	{
-		it, err := tx.(state2.HasAggCtx).AggCtx().(*state2.AggregatorRoTx).DomainRangeLatest(tx, kv.CommitmentDomain, nil, nil, -1)
+		it, err := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).DomainRangeLatest(tx, kv.CommitmentDomain, nil, nil, -1)
 		if err != nil {
 			panic(1)
 		}
@@ -1127,7 +1090,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		return false, nil
 	}
 
-	unwindToLimit, err := applyTx.(state2.HasAggCtx).AggCtx().(*state2.AggregatorRoTx).CanUnwindDomainsToBlockNum(applyTx)
+	unwindToLimit, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).CanUnwindDomainsToBlockNum(applyTx)
 	if err != nil {
 		return false, err
 	}
@@ -1138,7 +1101,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	unwindTo := maxBlockNum - jump
 
 	// protect from too far unwind
-	allowedUnwindTo, ok, err := applyTx.(state2.HasAggCtx).AggCtx().(*state2.AggregatorRoTx).CanUnwindBeforeBlockNum(unwindTo, applyTx)
+	allowedUnwindTo, ok, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).CanUnwindBeforeBlockNum(unwindTo, applyTx)
 	if err != nil {
 		return false, err
 	}
