@@ -3,6 +3,8 @@ package flags
 import "github.com/urfave/cli/v2"
 
 var (
+	ApiPath = "/debug/diag"
+
 	DebugURLFlag = cli.StringFlag{
 		Name:     "debug.addr",
 		Aliases:  []string{"da"},

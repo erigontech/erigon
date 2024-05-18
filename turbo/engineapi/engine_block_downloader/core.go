@@ -22,7 +22,12 @@ func (e *EngineBlockDownloader) download(ctx context.Context, hashToDownload lib
 		return
 	}
 	// see the outcome of header download
-	headersStatus := e.waitForEndOfHeadersDownload()
+	headersStatus, err := e.waitForEndOfHeadersDownload(ctx)
+	if err != nil {
+		e.logger.Warn("[EngineBlockDownloader] Could not finish headers download", "err", err)
+		e.status.Store(headerdownload.Idle)
+		return
+	}
 
 	if headersStatus != headerdownload.Synced {
 		// Could not sync. Set to idle

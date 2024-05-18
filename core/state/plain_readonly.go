@@ -29,7 +29,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/state/historyv2read"
@@ -58,10 +57,6 @@ type PlainState struct {
 }
 
 func NewPlainState(tx kv.Tx, blockNr uint64, systemContractLookup map[libcommon.Address][]libcommon.CodeRecord) *PlainState {
-	histV3, _ := kvcfg.HistoryV3.Enabled(tx)
-	if histV3 {
-		panic("Please use HistoryStateReaderV3 with HistoryV3")
-	}
 	ps := &PlainState{
 		tx:                   tx,
 		blockNr:              blockNr,
@@ -79,6 +74,13 @@ func NewPlainState(tx kv.Tx, blockNr uint64, systemContractLookup map[libcommon.
 	ps.accChangesC = c3
 	ps.storageChangesC = c4
 	return ps
+}
+
+func (s *PlainState) Close() {
+	s.accHistoryC.Close()
+	s.storageHistoryC.Close()
+	s.accChangesC.Close()
+	s.accHistoryC.Close()
 }
 
 func (s *PlainState) SetTrace(trace bool) {

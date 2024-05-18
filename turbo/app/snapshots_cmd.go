@@ -33,7 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/metrics"
@@ -616,7 +615,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	}
 
 	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps)
-	blockWriter := blockio.NewBlockWriter(fromdb.HistV3(chainDB))
+	blockWriter := blockio.NewBlockWriter()
 
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
@@ -783,7 +782,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 
 	logger.Info("Params", "from", from, "to", to, "every", every)
-	if err := br.RetireBlocks(ctx, 0, forwardProgress, log.LvlInfo, nil, nil); err != nil {
+	if err := br.RetireBlocks(ctx, 0, forwardProgress, log.LvlInfo, nil, nil, nil); err != nil {
 		return err
 	}
 
@@ -810,27 +809,21 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		}
 	}
 
-	if !kvcfg.HistoryV3.FromDB(db) {
-		return nil
-	}
-
 	db, err = temporal.New(db, agg)
 	if err != nil {
 		return err
 	}
 
 	logger.Info("Prune state history")
+	ac := agg.BeginFilesRo()
+	defer ac.Close()
 	for hasMoreToPrune := true; hasMoreToPrune; {
-		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-			ac := agg.BeginFilesRo()
-			defer ac.Close()
-
-			hasMoreToPrune, err = ac.PruneSmallBatches(ctx, 2*time.Minute, tx)
-			return err
-		}); err != nil {
+		hasMoreToPrune, err = ac.PruneSmallBatchesDb(ctx, 2*time.Minute, db)
+		if err != nil {
 			return err
 		}
 	}
+	ac.Close()
 
 	logger.Info("Work on state history snapshots")
 	indexWorkers := estimate.IndexSnapshot.Workers()
@@ -877,17 +870,16 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}); err != nil {
 		return err
 	}
-	for hasMoreToPrune := true; hasMoreToPrune; {
-		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-			ac := agg.BeginFilesRo()
-			defer ac.Close()
 
-			hasMoreToPrune, err = ac.PruneSmallBatches(context.Background(), 2*time.Minute, tx)
-			return err
-		}); err != nil {
+	ac = agg.BeginFilesRo()
+	defer ac.Close()
+	for hasMoreToPrune := true; hasMoreToPrune; {
+		hasMoreToPrune, err = ac.PruneSmallBatchesDb(context.Background(), 2*time.Minute, db)
+		if err != nil {
 			return err
 		}
 	}
+	ac.Close()
 
 	if err = agg.MergeLoop(ctx); err != nil {
 		return err

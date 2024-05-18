@@ -22,7 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal"
@@ -58,12 +57,6 @@ func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.RwDB,
 	t.Cleanup(agg.Close)
 	err = agg.OpenFolder(false)
 	agg.DisableFsync()
-	require.NoError(t, err)
-
-	// v3 setup
-	err = db.Update(context.Background(), func(tx kv.RwTx) error {
-		return kvcfg.HistoryV3.ForceWrite(tx, true)
-	})
 	require.NoError(t, err)
 
 	tdb, err := temporal.New(db, agg)

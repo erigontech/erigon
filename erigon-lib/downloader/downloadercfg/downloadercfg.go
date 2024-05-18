@@ -74,6 +74,11 @@ func Default() *torrent.ClientConfig {
 	//   *torrent.PeerConn: waiting for alloc limit reservation: reservation for 1802972 exceeds limiter max 1048576
 	torrentConfig.MaxAllocPeerRequestDataPerConn = int64(DefaultPieceSize)
 
+	// this limits the amount of unverified bytes - which will throttle the
+	// number of requests the torrent will handle - it acts as a brake on
+	// parallelism if set (default is 67,108,864)
+	torrentConfig.MaxUnverifiedBytes = 0
+
 	// enable dht
 	torrentConfig.NoDHT = true
 	//torrentConfig.DisableTrackers = true
