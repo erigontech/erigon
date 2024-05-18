@@ -2,12 +2,10 @@ package temporal
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/state"
@@ -52,9 +50,6 @@ type DB struct {
 }
 
 func New(db kv.RwDB, agg *state.Aggregator) (*DB, error) {
-	if !kvcfg.HistoryV3.FromDB(db) {
-		panic("not supported")
-	}
 	return &DB{RwDB: db, agg: agg}, nil
 }
 func (db *DB) Agg() *state.Aggregator { return db.agg }
@@ -156,7 +151,7 @@ func (tx *Tx) ForceReopenAggCtx() {
 
 func (tx *Tx) WarmupDB(force bool) error { return tx.MdbxTx.WarmupDB(force) }
 func (tx *Tx) LockDBInRam() error        { return tx.MdbxTx.LockDBInRam() }
-func (tx *Tx) AggCtx() interface{}       { return tx.aggCtx }
+func (tx *Tx) AggTx() interface{}        { return tx.aggCtx }
 func (tx *Tx) Agg() *state.Aggregator    { return tx.db.agg }
 func (tx *Tx) Rollback() {
 	tx.autoClose()
@@ -183,14 +178,12 @@ func (tx *Tx) Commit() error {
 	return mdbxTx.Commit()
 }
 
-func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (it iter.KV, err error) {
-	it, err = tx.aggCtx.DomainRange(tx.MdbxTx, name, fromKey, toKey, asOfTs, asc, limit)
+func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (iter.KV, error) {
+	it, err := tx.aggCtx.DomainRange(tx.MdbxTx, name, fromKey, toKey, asOfTs, asc, limit)
 	if err != nil {
 		return nil, err
 	}
-	if closer, ok := it.(kv.Closer); ok {
-		tx.resourcesToClose = append(tx.resourcesToClose, closer)
-	}
+	tx.resourcesToClose = append(tx.resourcesToClose, it)
 	return it, nil
 }
 
@@ -211,8 +204,8 @@ func (tx *Tx) DomainGetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []by
 	return tx.aggCtx.DomainGetAsOf(tx.MdbxTx, name, key, ts)
 }
 
-func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok bool, err error) {
-	return tx.aggCtx.HistoryGet(name, key, ts, tx.MdbxTx)
+func (tx *Tx) HistorySeek(name kv.History, key []byte, ts uint64) (v []byte, ok bool, err error) {
+	return tx.aggCtx.HistorySeek(name, key, ts, tx.MdbxTx)
 }
 
 func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error) {
@@ -220,34 +213,15 @@ func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc or
 	if err != nil {
 		return nil, err
 	}
-	if closer, ok := timestamps.(kv.Closer); ok {
-		tx.resourcesToClose = append(tx.resourcesToClose, closer)
-	}
+	tx.resourcesToClose = append(tx.resourcesToClose, timestamps)
 	return timestamps, nil
 }
 
-func (tx *Tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int) (it iter.KV, err error) {
-	if asc == order.Desc {
-		panic("not implemented yet")
-	}
-	if limit >= 0 {
-		panic("not implemented yet")
-	}
-	switch name {
-	case kv.AccountsHistory:
-		it, err = tx.aggCtx.AccountHistoryRange(fromTs, toTs, asc, limit, tx)
-	case kv.StorageHistory:
-		it, err = tx.aggCtx.StorageHistoryRange(fromTs, toTs, asc, limit, tx)
-	case kv.CodeHistory:
-		it, err = tx.aggCtx.CodeHistoryRange(fromTs, toTs, asc, limit, tx)
-	default:
-		return nil, fmt.Errorf("unexpected history name: %s", name)
-	}
+func (tx *Tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int) (iter.KV, error) {
+	it, err := tx.aggCtx.HistoryRange(name, fromTs, toTs, asc, limit, tx.MdbxTx)
 	if err != nil {
 		return nil, err
 	}
-	if closer, ok := it.(kv.Closer); ok {
-		tx.resourcesToClose = append(tx.resourcesToClose, closer)
-	}
-	return it, err
+	tx.resourcesToClose = append(tx.resourcesToClose, it)
+	return it, nil
 }

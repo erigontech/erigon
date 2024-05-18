@@ -54,7 +54,7 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	tb.Cleanup(db.Close)
 	salt := uint32(1)
 	cfg := iiCfg{salt: &salt, dirs: dirs, db: db}
-	ii, err := NewInvertedIndex(cfg, aggStep, "inv", keysTable, indexTable, true, nil, logger)
+	ii, err := NewInvertedIndex(cfg, aggStep, "inv", keysTable, indexTable, nil, logger)
 	require.NoError(tb, err)
 	ii.DisableFsync()
 	tb.Cleanup(ii.Close)
@@ -385,7 +385,8 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 				if stop := func() bool {
 					ic := ii.BeginFilesRo()
 					defer ic.Close()
-					found, startTxNum, endTxNum = ic.findMergeRange(maxEndTxNum, maxSpan)
+					mr := ic.findMergeRange(maxEndTxNum, maxSpan)
+					found, startTxNum, endTxNum = mr.needMerge, mr.from, mr.to
 					if !found {
 						return true
 					}
@@ -452,7 +453,7 @@ func TestInvIndexScanFiles(t *testing.T) {
 	var err error
 	salt := uint32(1)
 	cfg := iiCfg{salt: &salt, dirs: ii.dirs, db: db}
-	ii, err = NewInvertedIndex(cfg, ii.aggregationStep, ii.filenameBase, ii.indexKeysTable, ii.indexTable, true, nil, logger)
+	ii, err = NewInvertedIndex(cfg, ii.aggregationStep, ii.filenameBase, ii.indexKeysTable, ii.indexTable, nil, logger)
 	require.NoError(t, err)
 	defer ii.Close()
 

@@ -22,7 +22,7 @@ func apply(tx kv.RwTx, logger log.Logger) (beforeBlock, afterBlock testGenHook, 
 		panic(err)
 	}
 	rs := state.NewStateV3(domains, logger)
-	stateWriter := state.NewStateWriterBufferedV3(rs)
+	stateWriter := state.NewStateWriterBufferedV3(rs, nil)
 	stateWriter.SetTx(tx)
 
 	return func(n, from, numberOfBlocks uint64) {

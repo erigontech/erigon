@@ -126,11 +126,25 @@ func (e *EngineBlockDownloader) scheduleHeadersDownload(
 }
 
 // waitForEndOfHeadersDownload waits until the download of headers ends and returns the outcome.
-func (e *EngineBlockDownloader) waitForEndOfHeadersDownload() headerdownload.SyncStatus {
-	for e.hd.PosStatus() == headerdownload.Syncing {
-		time.Sleep(10 * time.Millisecond)
+func (e *EngineBlockDownloader) waitForEndOfHeadersDownload(ctx context.Context) (headerdownload.SyncStatus, error) {
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if e.hd.PosStatus() != headerdownload.Syncing {
+				return e.hd.PosStatus(), nil
+			}
+		case <-ctx.Done():
+			return e.hd.PosStatus(), ctx.Err()
+		case <-logEvery.C:
+			e.logger.Info("[EngineBlockDownloader] Waiting for headers download to finish")
+		}
 	}
-	return e.hd.PosStatus()
 }
 
 // waitForEndOfHeadersDownload waits until the download of headers ends and returns the outcome.
@@ -220,6 +234,7 @@ func (e *EngineBlockDownloader) insertHeadersAndBodies(ctx context.Context, tx k
 	if err != nil {
 		return err
 	}
+	inserted := uint64(0)
 
 	log.Info("Beginning downloaded blocks insertion")
 	// Start by seeking headers
@@ -230,6 +245,14 @@ func (e *EngineBlockDownloader) insertHeadersAndBodies(ctx context.Context, tx k
 		if len(blocksBatch) == blockBatchSize {
 			if err := e.chainRW.InsertBlocksAndWait(ctx, blocksBatch); err != nil {
 				return err
+			}
+			inserted += uint64(len(blocksBatch))
+			if inserted >= uint64(e.syncCfg.LoopBlockLimit) {
+				lastHash := blocksBatch[len(blocksBatch)-1].Hash()
+				if _, _, _, err := e.chainRW.UpdateForkChoice(ctx, lastHash, lastHash, lastHash); err != nil {
+					return err
+				}
+				inserted = 0
 			}
 			blocksBatch = blocksBatch[:0]
 		}
@@ -250,7 +273,7 @@ func (e *EngineBlockDownloader) insertHeadersAndBodies(ctx context.Context, tx k
 		if body == nil {
 			return fmt.Errorf("missing body at block=%d", number)
 		}
-		blocksBatch = append(blocksBatch, types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals))
+		blocksBatch = append(blocksBatch, types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals, body.Requests))
 		if number%uint64(blockWrittenLogSize) == 0 {
 			e.logger.Info("[insertHeadersAndBodies] Written blocks", "progress", number, "to", toBlock)
 		}

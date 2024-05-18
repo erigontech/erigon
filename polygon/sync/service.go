@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/direct"
@@ -24,11 +25,14 @@ type service struct {
 	p2pService p2p.Service
 	store      Store
 	events     *TipEvents
+
+	heimdallService heimdall.Service
 }
 
 func NewService(
 	logger log.Logger,
 	chainConfig *chain.Config,
+	tmpDir string,
 	sentryClient direct.SentryClient,
 	maxPeers int,
 	statusDataProvider *sentry.StatusDataProvider,
@@ -43,6 +47,11 @@ func NewService(
 	p2pService := p2p.NewService(maxPeers, logger, sentryClient, statusDataProvider.GetStatusData)
 	heimdallClient := heimdall.NewHeimdallClient(heimdallUrl, logger)
 	heimdallService := heimdall.NewHeimdall(heimdallClient, logger)
+	heimdallServiceV2 := heimdall.NewService(
+		heimdallUrl,
+		tmpDir,
+		logger,
+	)
 	blockDownloader := NewBlockDownloader(
 		logger,
 		p2pService,
@@ -72,48 +81,22 @@ func NewService(
 		p2pService: p2pService,
 		store:      store,
 		events:     events,
+
+		heimdallService: heimdallServiceV2,
 	}
 }
 
-func (s *service) Run(ctx context.Context) error {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+func (s *service) Run(parentCtx context.Context) error {
+	group, ctx := errgroup.WithContext(parentCtx)
 
-	var serviceErr error
-
-	go func() {
-		s.p2pService.Run(ctx)
-	}()
-
-	go func() {
-		err := s.store.Run(ctx)
-		if (err != nil) && (ctx.Err() == nil) {
-			serviceErr = err
-			cancel()
-		}
-	}()
-
-	go func() {
-		err := s.events.Run(ctx)
-		if (err != nil) && (ctx.Err() == nil) {
-			serviceErr = err
-			cancel()
-		}
-	}()
-
-	go func() {
-		err := s.sync.Run(ctx)
-		if (err != nil) && (ctx.Err() == nil) {
-			serviceErr = err
-			cancel()
-		}
-	}()
-
-	<-ctx.Done()
-
-	if serviceErr != nil {
-		return serviceErr
+	group.Go(func() error { s.p2pService.Run(ctx); return nil })
+	group.Go(func() error { return s.store.Run(ctx) })
+	group.Go(func() error { return s.events.Run(ctx) })
+	// TODO: remove the check when heimdall.NewService is functional
+	if s.heimdallService != nil {
+		group.Go(func() error { return s.heimdallService.Run(ctx) })
 	}
+	group.Go(func() error { return s.sync.Run(ctx) })
 
-	return ctx.Err()
+	return group.Wait()
 }

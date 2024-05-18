@@ -67,18 +67,26 @@ func RenderTableWithHeader(title string, header table.Row, rows []table.Row) {
 	if title != "" {
 		txt := text.Colors{text.FgBlue, text.Bold}
 		fmt.Println(txt.Sprint(title))
+
+		if len(rows) == 0 {
+			txt := text.Colors{text.FgRed, text.Bold}
+			fmt.Println(txt.Sprint("No data to show"))
+		}
 	}
 
-	t := table.NewWriter()
-	t.SetOutputMirror(os.Stdout)
-
-	t.AppendHeader(header)
 	if len(rows) > 0 {
-		t.AppendRows(rows)
+		t := table.NewWriter()
+		t.SetOutputMirror(os.Stdout)
+
+		t.AppendHeader(header)
+		if len(rows) > 0 {
+			t.AppendRows(rows)
+		}
+
+		t.AppendSeparator()
+		t.Render()
 	}
 
-	t.AppendSeparator()
-	t.Render()
 	fmt.Print("\n")
 }
 

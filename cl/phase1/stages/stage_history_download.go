@@ -170,6 +170,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				logArgs = append(logArgs,
 					"slot", currProgress,
 					"blockNumber", currEth1Progress.Load(),
+					"frozenBlocks", cfg.engine.FrozenBlocks(ctx),
 					"blk/sec", fmt.Sprintf("%.1f", speed),
 					"snapshots", cfg.sn.SegmentsMax(),
 				)
