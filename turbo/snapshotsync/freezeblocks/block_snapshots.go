@@ -2003,20 +2003,21 @@ func (m *Merger) mergeSubSegment(ctx context.Context, sn snaptype.FileInfo, toMe
 		}
 	}()
 	if len(toMerge) == 0 {
-		return nil
+		return
 	}
 	if err = m.merge(ctx, toMerge, sn.Path, nil); err != nil {
-		return fmt.Errorf("mergeByAppendSegments: %w", err)
+		err = fmt.Errorf("mergeByAppendSegments: %w", err)
+		return
 	}
 
 	if doIndex {
 		p := &background.Progress{}
 		if err = buildIdx(ctx, sn, m.chainConfig, m.tmpDir, p, m.lvl, m.logger); err != nil {
-			return err
+			return
 		}
 	}
 
-	return nil
+	return
 }
 
 // Merge does merge segments in given ranges
