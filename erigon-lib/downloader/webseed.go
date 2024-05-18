@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/hashicorp/go-retryablehttp"
 	"io"
 	"net/http"
 	"net/url"
@@ -14,6 +13,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/hashicorp/go-retryablehttp"
 
 	"github.com/anacrolix/torrent"
 	"github.com/c2h5oh/datasize"

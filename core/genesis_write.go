@@ -242,9 +242,6 @@ func write(tx kv.RwTx, g *types.Genesis, tmpDir string, logger log.Logger) (*typ
 	if err := rawdbv3.TxNums.WriteForGenesis(tx, uint64(block.Transactions().Len()+1)); err != nil {
 		return nil, nil, err
 	}
-	if err := rawdb.WriteReceipts(tx, block.NumberU64(), nil); err != nil {
-		return nil, nil, err
-	}
 
 	if err := rawdb.WriteCanonicalHash(tx, block.Hash(), block.NumberU64()); err != nil {
 		return nil, nil, err
