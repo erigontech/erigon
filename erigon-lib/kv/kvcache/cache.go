@@ -288,7 +288,6 @@ func (c *Coherent) OnNewBlock(stateChanges *remote.StateChangeBatch) {
 				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
 				v := sc.Changes[i].Data
 				//fmt.Printf("set: %x,%x\n", addr, v)
-				fmt.Println("add", addr, v)
 				c.add(addr[:], v, r, id)
 			case remote.Action_UPSERT_CODE:
 				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
@@ -395,7 +394,6 @@ func (c *Coherent) getFromCache(k []byte, id uint64, code bool) (*Element, *Cohe
 	return it, r, nil
 }
 func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) (v []byte, err error) {
-	fmt.Println(k, id)
 	it, r, err := c.getFromCache(k, id, false)
 	if err != nil {
 		return nil, err
@@ -477,7 +475,6 @@ func (c *Coherent) add(k, v []byte, r *CoherentRoot, id uint64) *Element {
 	it := &Element{K: k, V: v}
 
 	replaced, _ := r.cache.Set(it)
-	fmt.Println("rep", k, v, replaced)
 	if c.latestStateVersionID != id {
 		//fmt.Printf("add to non-last viewID: %d<%d\n", c.latestViewID, id)
 		return it
