@@ -1983,12 +1983,6 @@ func (m *Merger) filesByRangeOfType(view *View, from, to uint64, snapshotType sn
 }
 
 func (m *Merger) mergeSubSegment(ctx context.Context, sn snaptype.FileInfo, toMerge []string, snapDir string, doIndex bool, onMerge func(r Range) error) (err error) {
-	if len(toMerge) == 0 {
-		return nil
-	}
-	if err := m.merge(ctx, toMerge, f.Path, nil); err != nil {
-		return fmt.Errorf("mergeByAppendSegments: %w", err)
-	}
 	defer func() {
 		if err == nil {
 			if rec := recover(); rec != nil {
@@ -2008,6 +2002,13 @@ func (m *Merger) mergeSubSegment(ctx context.Context, sn snaptype.FileInfo, toMe
 			}
 		}
 	}()
+	if len(toMerge) == 0 {
+		return nil
+	}
+	if err := m.merge(ctx, toMerge, sn.Path, nil); err != nil {
+		return fmt.Errorf("mergeByAppendSegments: %w", err)
+	}
+
 	if doIndex {
 		p := &background.Progress{}
 		if err := buildIdx(ctx, sn, m.chainConfig, m.tmpDir, p, m.lvl, m.logger); err != nil {
