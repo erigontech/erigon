@@ -52,7 +52,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.1
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
-	github.com/hashicorp/golang-lru/arc/v2 v2.0.6
+	github.com/hashicorp/golang-lru/arc/v2 v2.0.7
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/holiman/uint256 v1.2.4
 	github.com/huandu/xstrings v1.4.0
@@ -187,7 +187,7 @@ require (
 	github.com/koron/go-ssdp v0.0.4 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
-	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240515092429-e0dba90b204d // indirect
+	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240518072356-af78ba52b15b // indirect
 	github.com/ledgerwatch/erigonwatch v0.1.0
 	github.com/libp2p/go-buffer-pool v0.1.0 // indirect
 	github.com/libp2p/go-cidranger v1.1.0 // indirect
