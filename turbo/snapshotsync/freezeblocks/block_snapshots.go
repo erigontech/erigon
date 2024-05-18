@@ -2005,20 +2005,17 @@ func (m *Merger) mergeSubSegment(ctx context.Context, sn snaptype.FileInfo, toMe
 	if len(toMerge) == 0 {
 		return nil
 	}
-	if err := m.merge(ctx, toMerge, sn.Path, nil); err != nil {
+	if err = m.merge(ctx, toMerge, sn.Path, nil); err != nil {
 		return fmt.Errorf("mergeByAppendSegments: %w", err)
 	}
 
 	if doIndex {
 		p := &background.Progress{}
-		if err := buildIdx(ctx, sn, m.chainConfig, m.tmpDir, p, m.lvl, m.logger); err != nil {
+		if err = buildIdx(ctx, sn, m.chainConfig, m.tmpDir, p, m.lvl, m.logger); err != nil {
 			return err
 		}
 	}
 
-	if onMerge != nil {
-		return onMerge(Range{from: sn.From, to: sn.To})
-	}
 	return nil
 }
 
