@@ -185,8 +185,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
-	fmt.Println("AX")
-	fmt.Println(blockHash)
 
 	if fcuHeader.Number.Uint64() > 0 {
 		if canonicalHash == blockHash {
@@ -208,7 +206,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				LatestValidHash: gointerfaces.ConvertHashToH256(blockHash),
 				Status:          execution.ExecutionStatus_Success,
 			})
-			fmt.Println("canonical?")
 			return
 		}
 
@@ -325,7 +322,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		}
 	}
 	if isDomainAheadOfBlocks(tx) {
-		fmt.Println("domain ahead of blocks")
 		sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
 			LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
 			Status:          execution.ExecutionStatus_TooFarAway,
@@ -358,7 +354,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			return
 		}
 	}
-	fmt.Println("0")
 	// Run the forkchoice
 	initialCycle := limitedBigJump
 	if _, err := e.executionPipeline.Run(e.db, wrap.TxContainer{Tx: tx}, initialCycle); err != nil {
@@ -366,7 +361,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
-	fmt.Println("1")
 	timings := slices.Clone(e.executionPipeline.PrintTimings())
 
 	// if head hash was set then success otherwise no
