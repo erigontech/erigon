@@ -17,6 +17,7 @@ import (
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -437,10 +438,14 @@ func addAndVerifyBlockStep(batch kv.RwTx, engine consensus.Engine, chainReader c
 		return err
 	}
 	if prevHash != currentHash {
+		if err := rawdbv3.TxNums.Truncate(batch, currentHeight); err != nil {
+			return err
+		}
 		if err := rawdb.AppendCanonicalTxNums(batch, currentHeight); err != nil {
 			return err
 		}
 	}
+
 	if err := stages.SaveStageProgress(batch, stages.Headers, currentHeight); err != nil {
 		return err
 	}
