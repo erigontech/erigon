@@ -175,7 +175,6 @@ func TestAPI(t *testing.T) {
 	db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	account1Enc := types.EncodeAccountBytesV3(1, uint256.NewInt(11), make([]byte, 32), 2)
 	account2Enc := types.EncodeAccountBytesV3(1, uint256.NewInt(11), make([]byte, 32), 3)
-	account3Enc := types.EncodeAccountBytesV3(1, uint256.NewInt(11), make([]byte, 32), 4)
 	account4Enc := types.EncodeAccountBytesV3(1, uint256.NewInt(11), make([]byte, 32), 5)
 
 	get := func(key [20]byte, expectTxnID uint64) (res [1]chan []byte) {
@@ -249,7 +248,7 @@ func TestAPI(t *testing.T) {
 	txID2 := put(k1[:], account2Enc)
 	fmt.Printf("-----1 %d, %d\n", txID1, txID2)
 	res3, res4 := get(k1, txID2), get(k2, txID2) // will see View of transaction 2
-	txID3 := put(k1[:], account3Enc)             // even if core already on block 3
+	txID3 := put(k1[:], account2Enc)             // even if core already on block 3
 
 	c.OnNewBlock(&remote.StateChangeBatch{
 		StateVersionId:      txID2,
