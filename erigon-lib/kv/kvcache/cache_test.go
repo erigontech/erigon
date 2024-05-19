@@ -293,7 +293,7 @@ func TestAPI(t *testing.T) {
 				Changes: []*remote.AccountChange{{
 					Action:  remote.Action_UPSERT,
 					Address: gointerfaces.ConvertAddressToH160(k1),
-					Data:    account3Enc,
+					Data:    account2Enc,
 				}},
 			},
 		},
@@ -313,7 +313,7 @@ func TestAPI(t *testing.T) {
 	}()
 	fmt.Printf("-----3\n")
 	txID4 := put(k1[:], account2Enc)
-	time.Sleep(30 * time.Second)
+	time.Sleep(10 * time.Second)
 
 	c.OnNewBlock(&remote.StateChangeBatch{
 		StateVersionId:      txID4,
