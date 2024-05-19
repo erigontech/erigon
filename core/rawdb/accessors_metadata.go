@@ -98,7 +98,7 @@ func ReadGenesis(db kv.Getter) (*types.Genesis, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(val) == 0 {
+	if len(val) == 0 || string(val) == "null" {
 		return nil, nil
 	}
 	var g types.Genesis
