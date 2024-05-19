@@ -58,7 +58,6 @@ type ForkValidator struct {
 	tmpDir        string
 	// block hashes that are deemed valid
 	validHashes *lru.Cache[libcommon.Hash, bool]
-	stateV3     bool
 
 	ctx context.Context
 
@@ -66,7 +65,7 @@ type ForkValidator struct {
 	lock sync.Mutex
 }
 
-func NewForkValidatorMock(currentHeight uint64, stateV3 bool) *ForkValidator {
+func NewForkValidatorMock(currentHeight uint64) *ForkValidator {
 	validHashes, err := lru.New[libcommon.Hash, bool]("validHashes", maxForkDepth*8)
 	if err != nil {
 		panic(err)
@@ -74,7 +73,6 @@ func NewForkValidatorMock(currentHeight uint64, stateV3 bool) *ForkValidator {
 	return &ForkValidator{
 		currentHeight: currentHeight,
 		validHashes:   validHashes,
-		stateV3:       stateV3,
 	}
 }
 
@@ -306,11 +304,8 @@ func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *t
 	latestValidHash = header.Hash()
 	if validationError != nil {
 		var latestValidNumber uint64
-		if fv.stateV3 {
-			latestValidNumber, criticalError = stages.GetStageProgress(txc.Tx, stages.Execution)
-		} else {
-			latestValidNumber, criticalError = stages.GetStageProgress(txc.Tx, stages.IntermediateHashes)
-		}
+		latestValidNumber, criticalError = stages.GetStageProgress(txc.Tx, stages.Execution)
+
 		if criticalError != nil {
 			return
 		}
