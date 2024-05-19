@@ -26,36 +26,11 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
-func (t *Trie) Print(w io.Writer) {
-	witness, err := t.ExtractWitness(false, nil)
-	if err != nil {
-		panic(err)
-	}
-	_, err = witness.WriteInto(w)
-	if err != nil {
-		panic(err)
-	}
-}
-
 type HexStdOutWriter struct{}
 
 func (*HexStdOutWriter) Write(p []byte) (n int, err error) {
 	fmt.Printf("%x", p)
 	return len(p), nil
-}
-
-func (t *Trie) PrintTrie() {
-	fmt.Printf("trie:0x")
-	t.Print(&HexStdOutWriter{})
-	fmt.Println("")
-}
-
-func Load(r io.Reader) (*Trie, error) {
-	witness, err := NewWitnessFromReader(r, false)
-	if err != nil {
-		return nil, err
-	}
-	return BuildTrieFromWitness(witness, false)
 }
 
 func (t *Trie) PrintDiff(t2 *Trie, w io.Writer) {

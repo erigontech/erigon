@@ -186,7 +186,8 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 
 func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges {
 	var r HistoryRanges
-	r.index, r.indexStartTxNum, r.indexEndTxNum = ht.iit.findMergeRange(maxEndTxNum, maxSpan)
+	mr := ht.iit.findMergeRange(maxEndTxNum, maxSpan)
+	r.index, r.indexStartTxNum, r.indexEndTxNum = mr.needMerge, mr.from, mr.to
 	for _, item := range ht.files {
 		if item.endTxNum > maxEndTxNum {
 			continue
@@ -233,7 +234,7 @@ func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges
 // 0-1,1-2,2-3: allow merge 0-2
 //
 // 0-2,2-3: nothing to merge
-func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) (bool, uint64, uint64) {
+func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *MergeRange {
 	var minFound bool
 	var startTxNum, endTxNum uint64
 	for _, item := range iit.files {
@@ -257,7 +258,7 @@ func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) (bool,
 			}
 		}
 	}
-	return minFound, startTxNum, endTxNum
+	return &MergeRange{minFound, startTxNum, endTxNum}
 }
 
 type HistoryRanges struct {

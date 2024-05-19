@@ -22,13 +22,17 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
-	"math/big"
-	"slices"
-	"sync"
-
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/config3"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal"
+	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/errgroup"
+	"math/big"
+	"os"
+	"slices"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
@@ -45,7 +49,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
 //go:embed allocs
@@ -237,9 +240,6 @@ func write(tx kv.RwTx, g *types.Genesis, tmpDir string, logger log.Logger) (*typ
 		return nil, nil, err
 	}
 	if err := rawdbv3.TxNums.WriteForGenesis(tx, uint64(block.Transactions().Len()+1)); err != nil {
-		return nil, nil, err
-	}
-	if err := rawdb.WriteReceipts(tx, block.NumberU64(), nil); err != nil {
 		return nil, nil, err
 	}
 
@@ -524,24 +524,45 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 	}
 
 	var root libcommon.Hash
-	var statedb *state.IntraBlockState
-	wg := sync.WaitGroup{}
-	wg.Add(1)
+	var statedb *state.IntraBlockState // reader behind this statedb is dead at the moment of return, tx is rolled back
 
-	var err error
-	go func() { // we may run inside write tx, can't open 2nd write tx in same goroutine
-		defer wg.Done()
+	ctx := context.Background()
+	wg, ctx := errgroup.WithContext(ctx)
+	// we may run inside write tx, can't open 2nd write tx in same goroutine
+	wg.Go(func() error {
+		if tmpDir == "" {
+			tmpDir = os.TempDir()
+		}
 		// some users creaing > 1Gb custome genesis by `erigon init`
 		genesisTmpDB := mdbx.NewMDBX(logger).InMem(tmpDir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
 		defer genesisTmpDB.Close()
 
-		tx, err := genesisTmpDB.BeginRw(context.Background())
+		agg, err := state2.NewAggregator(context.Background(), datadir.New(tmpDir), config3.HistoryV3AggregationStep, genesisTmpDB, logger)
 		if err != nil {
-			return
+			return err
+		}
+		defer agg.Close()
+
+		tdb, err := temporal.New(genesisTmpDB, agg)
+		if err != nil {
+			return err
+		}
+		defer tdb.Close()
+
+		tx, err := tdb.BeginTemporalRw(ctx)
+		if err != nil {
+			return err
 		}
 		defer tx.Rollback()
 
-		r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
+		sd, err := state2.NewSharedDomains(tx, logger)
+		if err != nil {
+			return err
+		}
+		defer sd.Close()
+
+		//r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
+		r, w := state.NewReaderV4(sd), state.NewWriterV4(sd)
 		statedb = state.New(r)
 		statedb.SetTrace(false)
 
@@ -577,7 +598,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 
 			if len(account.Constructor) > 0 {
 				if _, err = SysCreate(addr, account.Constructor, *g.Config, statedb, head); err != nil {
-					return
+					return err
 				}
 			}
 
@@ -586,14 +607,18 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 			}
 		}
 		if err = statedb.FinalizeTx(&chain.Rules{}, w); err != nil {
-			return
+			return err
 		}
-		if root, err = trie.CalcRoot("genesis", tx); err != nil {
-			return
+
+		rh, err := sd.ComputeCommitment(context.Background(), true, 0, "genesis")
+		if err != nil {
+			return err
 		}
-	}()
-	wg.Wait()
-	if err != nil {
+		root = libcommon.BytesToHash(rh)
+		return nil
+	})
+
+	if err := wg.Wait(); err != nil {
 		return nil, nil, err
 	}
 

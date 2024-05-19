@@ -487,6 +487,16 @@ func (iit *InvertedIndexRoTx) Close() {
 	}
 }
 
+type MergeRange struct {
+	needMerge bool
+	from      uint64
+	to        uint64
+}
+
+func (mr *MergeRange) String(prefix string, aggStep uint64) string {
+	return fmt.Sprintf("%s=%d-%d", prefix, mr.from/aggStep, mr.to/aggStep)
+}
+
 type InvertedIndexRoTx struct {
 	ii      *InvertedIndex
 	files   []ctxItem // have no garbage (overlaps, etc...)

@@ -57,6 +57,10 @@ func HeaderToHeaderRPC(header *types.Header) *execution.Header {
 		h.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(*header.ParentBeaconBlockRoot)
 	}
 
+	if header.RequestsRoot != nil {
+		h.RequestsRoot = gointerfaces.ConvertHashToH256(*header.RequestsRoot)
+	}
+
 	if len(header.AuRaSeal) > 0 {
 		h.AuraSeal = header.AuRaSeal
 		h.AuraStep = &header.AuRaStep
@@ -130,6 +134,10 @@ func HeaderRpcToHeader(header *execution.Header) (*types.Header, error) {
 	if header.ParentBeaconBlockRoot != nil {
 		h.ParentBeaconBlockRoot = new(libcommon.Hash)
 		*h.ParentBeaconBlockRoot = gointerfaces.ConvertH256ToHash(header.ParentBeaconBlockRoot)
+	}
+	if header.RequestsRoot != nil {
+		h.RequestsRoot = new(libcommon.Hash)
+		*h.RequestsRoot = gointerfaces.ConvertH256ToHash(header.RequestsRoot)
 	}
 	blockHash := gointerfaces.ConvertH256ToHash(header.BlockHash)
 	if blockHash != h.Hash() {

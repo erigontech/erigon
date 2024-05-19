@@ -68,9 +68,7 @@ func TestTrieDeleteSubtree_ShortNode_Debug(t *testing.T) {
 	trie.Update(key1, val)
 	trie.Update(key2, val)
 
-	trie.PrintTrie()
 	trie.DeleteSubtree(addrHash1.Bytes())
-	trie.PrintTrie()
 
 	v, ok := trie.Get(key2)
 	if ok == false || bytes.Equal(v, val) == false {
@@ -387,8 +385,6 @@ func TestAccountNotRemovedAfterRemovingSubtrieAfterAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fmt.Println("=============================")
-	trie.PrintTrie()
 	fmt.Println("=============================")
 	ck1 := GenerateCompositeTrieKey(addrHash, dataKey1)
 	ck2 := GenerateCompositeTrieKey(addrHash, dataKey2)
