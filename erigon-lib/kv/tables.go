@@ -532,6 +532,7 @@ var (
 	PruneBlocksType     = []byte("pruneBlocksType")
 
 	DBSchemaVersionKey = []byte("dbVersion")
+	GenesisKey         = []byte("genesis")
 
 	BittorrentPeerID            = "peerID"
 	CurrentHeadersSnapshotHash  = []byte("CurrentHeadersSnapshotHash")

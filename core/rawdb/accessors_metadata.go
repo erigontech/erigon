@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -81,4 +82,28 @@ func WriteChainConfig(db kv.Putter, hash libcommon.Hash, cfg *chain.Config) erro
 // DeleteChainConfig retrieves the consensus settings based on the given genesis hash.
 func DeleteChainConfig(db kv.Deleter, hash libcommon.Hash) error {
 	return db.Delete(kv.ConfigTable, hash[:])
+}
+
+func WriteGenesis(db kv.Putter, g *types.Genesis) error {
+	// Marshal json g
+	val, err := json.Marshal(g)
+	if err != nil {
+		return err
+	}
+	return db.Put(kv.ConfigTable, kv.GenesisKey, val)
+}
+
+func ReadGenesis(db kv.Getter) (*types.Genesis, error) {
+	val, err := db.GetOne(kv.ConfigTable, kv.GenesisKey)
+	if err != nil {
+		return nil, err
+	}
+	if len(val) == 0 {
+		return nil, nil
+	}
+	var g types.Genesis
+	if err := json.Unmarshal(val, &g); err != nil {
+		return nil, err
+	}
+	return &g, nil
 }
