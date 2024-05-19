@@ -408,6 +408,8 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			_ = err
 			// Recreating block to make sure Root makes it into the header
 			block := types.NewBlock(b.header, b.txs, b.uncles, b.receipts, nil /* withdrawals */, nil /*requests*/)
+
+			b.header.ReceiptHash = types.DeriveSha(types.Receipts(b.receipts))
 			return block, b.receipts, nil
 		}
 		return nil, nil, fmt.Errorf("no engine to generate blocks")
