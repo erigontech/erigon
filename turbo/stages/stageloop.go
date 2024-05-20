@@ -470,7 +470,7 @@ func cleanupProgressIfNeeded(batch kv.RwTx, header *types.Header) error {
 	return nil
 }
 
-func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine consensus.Engine, txc wrap.TxContainer, stateSync *stagedsync.Sync, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) (err error) {
+func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine consensus.Engine, txc wrap.TxContainer, stateSync *stagedsync.Sync, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody, test bool) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
@@ -501,8 +501,10 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 		}
 		// Run state sync
 		if err = stateSync.RunNoInterrupt(nil, txc, false /* firstCycle */); err != nil {
-			if err := cleanupProgressIfNeeded(txc.Tx, currentHeader); err != nil {
-				return err
+			if !test {
+				if err := cleanupProgressIfNeeded(txc.Tx, currentHeader); err != nil {
+					return err
+				}
 			}
 			return err
 		}
@@ -517,8 +519,10 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 		return err
 	}
 	if err = stateSync.RunNoInterrupt(nil, txc, false /* firstCycle */); err != nil {
-		if err := cleanupProgressIfNeeded(txc.Tx, header); err != nil {
-			return err
+		if !test {
+			if err := cleanupProgressIfNeeded(txc.Tx, header); err != nil {
+				return err
+			}
 		}
 		return err
 	}
