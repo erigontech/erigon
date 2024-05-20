@@ -568,7 +568,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		// We start the mining step
 		if err := stages2.StateStep(ctx, chainReader, backend.engine, txc, stateSync, header, body, unwindPoint, headersChain, bodiesChain, false); err != nil {
 			logger.Warn("Could not validate block", "err", err)
-			return errors.Join(consensus.ErrInvalidBlock, err)
+			//return errors.Join(consensus.ErrInvalidBlock, err)
+			return err
 		}
 		var progress uint64
 		progress, err = stages.GetStageProgress(txc.Tx, stages.Execution)
