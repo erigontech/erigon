@@ -21,7 +21,6 @@ import (
 type CaplinCliCfg struct {
 	*sentinelcli.SentinelCliCfg
 
-	CheckpointUri         string        `json:"checkpoint_uri"`
 	Chaindata             string        `json:"chaindata"`
 	ErigonPrivateApi      string        `json:"erigon_private_api"`
 	TransitionChain       bool          `json:"transition_chain"`
@@ -99,10 +98,8 @@ func SetupCaplinCli(ctx *cli.Context) (cfg *CaplinCliCfg, err error) {
 		}
 	}
 
-	if ctx.String(caplinflags.CheckpointSyncUrlFlag.Name) != "" {
-		cfg.CheckpointUri = ctx.String(caplinflags.CheckpointSyncUrlFlag.Name)
-	} else {
-		cfg.CheckpointUri = clparams.GetCheckpointSyncEndpoint(cfg.NetworkType)
+	if checkpointUrls := ctx.StringSlice(caplinflags.CheckpointSyncUrlFlag.Name); len(checkpointUrls) > 0 {
+		clparams.ConfigurableCheckpointsURLs = checkpointUrls
 	}
 
 	cfg.Chaindata = ctx.String(caplinflags.ChaindataFlag.Name)

@@ -300,6 +300,9 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 	},
 }
 
+// ConfigurableCheckpointsURLs is customized by the user to specify the checkpoint sync endpoints.
+var ConfigurableCheckpointsURLs = []string{}
+
 // MinEpochsForBlockRequests  equal to MIN_VALIDATOR_WITHDRAWABILITY_DELAY + CHURN_LIMIT_QUOTIENT / 2
 func (b *BeaconChainConfig) MinEpochsForBlockRequests() uint64 {
 	return b.MinValidatorWithdrawabilityDelay + (b.ChurnLimitQuotient)/2
@@ -1036,18 +1039,27 @@ func GetConfigsByNetworkName(net string) (*NetworkConfig, *BeaconChainConfig, Ne
 }
 
 func GetCheckpointSyncEndpoint(net NetworkType) string {
+	randomOne := func(checkpoints []string) string {
+		if len(checkpoints) == 1 {
+			return checkpoints[0]
+		}
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(checkpoints)-1)))
+		if err != nil {
+			panic(err)
+		}
+		return checkpoints[n.Int64()]
+	}
+	// Check if the user has configured a custom checkpoint sync endpoint
+	if len(ConfigurableCheckpointsURLs) > 0 {
+		return randomOne(ConfigurableCheckpointsURLs)
+	}
+
+	// Otherwise, use the default endpoints
 	checkpoints, ok := CheckpointSyncEndpoints[net]
 	if !ok {
 		return ""
 	}
-	if len(checkpoints) == 1 {
-		return checkpoints[0]
-	}
-	n, err := rand.Int(rand.Reader, big.NewInt(int64(len(checkpoints)-1)))
-	if err != nil {
-		panic(err)
-	}
-	return checkpoints[n.Int64()]
+	return randomOne(checkpoints)
 }
 
 // Check if chain with a specific ID is supported or not

@@ -64,10 +64,10 @@ var (
 		Usage: "level of storing on beacon chain, minimal(only 500k blocks stored), full (all blocks stored), light (no blocks stored)",
 		Value: "full",
 	}
-	CheckpointSyncUrlFlag = cli.StringFlag{
+	CheckpointSyncUrlFlag = cli.StringSliceFlag{
 		Name:  "checkpoint-sync-url",
 		Usage: "checkpoint sync endpoint",
-		Value: "",
+		Value: cli.NewStringSlice(),
 	}
 	TransitionChainFlag = cli.BoolFlag{
 		Name:  "transition-chain",
