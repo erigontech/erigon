@@ -371,7 +371,15 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 			if stats, err = snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
 				log.Warn("Error while waiting for snapshots progress", "err", err)
 			} else {
-				logStats(ctx, stats, downloadStartTime, stagesIdsList, logPrefix, "download")
+				reason := "download"
+				if headerchain {
+					reason = "downloading header-chain"
+				}
+				logEnd := "download finished"
+				if headerchain {
+					logEnd = "header-chain download finished"
+				}
+				logStats(ctx, stats, downloadStartTime, stagesIdsList, logPrefix, reason, logEnd)
 			}
 		}
 	}
@@ -394,7 +402,15 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 			if stats, err = snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
 				log.Warn("Error while waiting for snapshots progress", "err", err)
 			} else {
-				logStats(ctx, stats, downloadStartTime, stagesIdsList, logPrefix, "download")
+				reason := "download"
+				if headerchain {
+					reason = "downloading header-chain"
+				}
+				logEnd := "download finished"
+				if headerchain {
+					logEnd = "header-chain download finished"
+				}
+				logStats(ctx, stats, downloadStartTime, stagesIdsList, logPrefix, reason, logEnd)
 			}
 		}
 	}
@@ -484,7 +500,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 	return nil
 }
 
-func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime time.Time, stagesIdsList []string, logPrefix string, logReason string) {
+func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime time.Time, stagesIdsList []string, logPrefix string, logReason string, logEnd string) {
 	var m runtime.MemStats
 
 	diagnostics.Send(diagnostics.SyncStagesList{Stages: stagesIdsList})
@@ -504,7 +520,7 @@ func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime
 	})
 
 	if stats.Completed {
-		log.Info(fmt.Sprintf("[%s] download finished", logPrefix), "time", time.Since(startTime).String())
+		log.Info(fmt.Sprintf("[%s] %s", logPrefix, logEnd), "time", time.Since(startTime).String())
 	} else {
 
 		if stats.MetadataReady < stats.FilesTotal && stats.BytesTotal == 0 {
