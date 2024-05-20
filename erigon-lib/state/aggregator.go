@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon/common/math"
 	math2 "math"
 	"os"
 	"path/filepath"
@@ -1058,12 +1059,14 @@ func (ac *AggregatorRoTx) PruneCommitHistory(ctx context.Context, tx kv.RwTx, li
 	defer idxc.Close()
 
 	commitsInDB := 0
-
+	minTx, maxTx := uint64(math.MaxUint64), uint64(0)
 	for idxc.HasNext() {
-		_, _, err := idxc.Next()
+		_, txn, err := idxc.Next()
 		if err != nil {
 			return err
 		}
+		minTx = min(minTx, txn)
+		maxTx = max(maxTx, txn)
 		commitsInDB++
 	}
 
@@ -1071,7 +1074,8 @@ func (ac *AggregatorRoTx) PruneCommitHistory(ctx context.Context, tx kv.RwTx, li
 	if err != nil {
 		return err
 	}
-	ac.a.logger.Info("commit history backpressure prune", "limitTxN", limitTxNums, "commitsInDB", commitsInDB,
+	ac.a.logger.Info("commit history backpressure prune", "commitsPruneLimit", limitTxNums, "commitsInDB", commitsInDB,
+		"minTx", minTx, "maxTx", maxTx, "inFilesTxn", ac.a.visibleFilesMinimaxTxNum.Load(),
 		"stat", stat.String(), "stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx))
 	return nil
 }
@@ -1563,6 +1567,7 @@ func (a *Aggregator) cleanAfterMerge(in MergedFilesV3) {
 // we can set it to 0, because no re-org on this blocks are possible
 func (a *Aggregator) KeepStepsInDB(steps uint64) *Aggregator {
 	a.keepInDB = a.FirstTxNumOfStep(steps)
+	a.logger.Warn("[snapshots] KeepStepsInDB", "steps", steps, "txn", a.keepInDB)
 	for _, d := range a.d {
 		if d == nil {
 			continue
