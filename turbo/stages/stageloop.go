@@ -479,19 +479,14 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 
 	// Construct side fork if we have one
 	if unwindPoint > 0 {
-		progress, err := stages.GetStageProgress(txc.Tx, stages.Execution)
-		if err != nil {
+		// Run it through the unwind
+		if err := stateSync.UnwindTo(unwindPoint, stagedsync.StagedUnwind, nil); err != nil {
 			return err
 		}
-		for i := progress; i >= unwindPoint; i-- {
-			// Run it through the unwind
-			if err := stateSync.UnwindTo(i, stagedsync.StagedUnwind, nil); err != nil {
-				return err
-			}
-			if err = stateSync.RunUnwind(nil, txc); err != nil {
-				return err
-			}
+		if err = stateSync.RunUnwind(nil, txc); err != nil {
+			return err
 		}
+
 	}
 	if err := rawdb.TruncateCanonicalChain(ctx, txc.Tx, header.Number.Uint64()+1); err != nil {
 		return err
