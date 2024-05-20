@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"os"
 	"path"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -220,6 +221,33 @@ type ConsensusSnapshotConfig struct {
 
 const cliquePath = "clique"
 
+func DynamicChainConfig(ch string) *chain.Config {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		panic(err)
+	}
+
+	basePath := path.Join(homeDir, "dynamic-configs")
+	filename := path.Join(basePath, ch+"-chainspec.json")
+
+	f, err := os.Open(filename)
+	if err != nil {
+		panic(fmt.Sprintf("could not open chainspec for %s: %v", filename, err))
+	}
+	defer f.Close()
+	decoder := json.NewDecoder(f)
+	spec := &chain.Config{}
+	err = decoder.Decode(&spec)
+	if err != nil {
+		panic(fmt.Sprintf("could not parse chainspec for %s: %v", filename, err))
+	}
+
+	chainId := spec.ChainID.Uint64()
+	chain.SetDynamicChainDetails(chainId, spec.ChainName)
+
+	return spec
+}
+
 func NewSnapshotConfig(checkpointInterval uint64, inmemorySnapshots int, inmemorySignatures int, inmemory bool, dbPath string) *ConsensusSnapshotConfig {
 	if len(dbPath) == 0 {
 		dbPath = paths.DefaultDataDir()
@@ -277,7 +305,7 @@ func ChainConfigByChainName(chain string) *chain.Config {
 	case networkname.XLayerMainnetChainName:
 		return XLayerMainnetChainConfig
 	default:
-		return nil
+		return DynamicChainConfig(chain)
 	}
 }
 
