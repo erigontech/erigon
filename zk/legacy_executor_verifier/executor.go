@@ -10,8 +10,8 @@ import (
 	"github.com/ledgerwatch/erigon/zk/legacy_executor_verifier/proto/github.com/0xPolygonHermez/zkevm-node/state/runtime/executor"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/connectivity"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 type Config struct {
@@ -237,7 +237,11 @@ func responseCheck(resp *executor.ProcessBatchResponseV2, request *VerifierReque
 		// the provided witness
 		log.Error("executor error", "detail", resp.ProverId)
 		return false, fmt.Errorf("error in response: %s", resp.Error)
+	}
 
+	if resp.ErrorRom != executor.RomError_ROM_ERROR_NO_ERROR && resp.ErrorRom != executor.RomError_ROM_ERROR_UNSPECIFIED {
+		log.Error("executor ROM error", "detail", resp.ErrorRom)
+		return false, fmt.Errorf("error in response: %s", resp.ErrorRom)
 	}
 
 	erigonStateRoot := request.StateRoot
