@@ -476,7 +476,7 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things
-
+	fmt.Println(test)
 	// Construct side fork if we have one
 	if unwindPoint > 0 {
 		// Run it through the unwind
