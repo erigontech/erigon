@@ -658,6 +658,7 @@ func (r RawBlock) AsBlock() (*Block, error) {
 	b := &Block{header: r.Header}
 	b.uncles = r.Body.Uncles
 	b.withdrawals = r.Body.Withdrawals
+	b.requests = r.Body.Requests
 
 	txs := make([]Transaction, len(r.Body.Transactions))
 	for i, tx := range r.Body.Transactions {
@@ -1049,7 +1050,7 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 	if requests == nil {
 		b.header.RequestsRoot = nil
 	} else if len(requests) == 0 {
-		b.header.RequestsRoot = &EmptyRootHash // TODO(racytech): is this correct?
+		b.header.RequestsRoot = &EmptyRootHash
 		b.requests = make(Requests, len(requests))
 	} else {
 		h := DeriveSha(Requests(requests))
@@ -1305,7 +1306,7 @@ func (b *Block) SendersToTxs(senders []libcommon.Address) {
 // RawBody creates a RawBody based on the block. It is not very efficient, so
 // will probably be removed in favour of RawBlock. Also it panics
 func (b *Block) RawBody() *RawBody {
-	br := &RawBody{Transactions: make([][]byte, len(b.transactions)), Uncles: b.uncles, Withdrawals: b.withdrawals}
+	br := &RawBody{Transactions: make([][]byte, len(b.transactions)), Uncles: b.uncles, Withdrawals: b.withdrawals, Requests: b.requests}
 	for i, tx := range b.transactions {
 		var err error
 		br.Transactions[i], err = rlp.EncodeToBytes(tx)
@@ -1318,7 +1319,7 @@ func (b *Block) RawBody() *RawBody {
 
 // RawBody creates a RawBody based on the body.
 func (b *Body) RawBody() *RawBody {
-	br := &RawBody{Transactions: make([][]byte, len(b.Transactions)), Uncles: b.Uncles, Withdrawals: b.Withdrawals}
+	br := &RawBody{Transactions: make([][]byte, len(b.Transactions)), Uncles: b.Uncles, Withdrawals: b.Withdrawals, Requests: b.Requests}
 	for i, tx := range b.Transactions {
 		var err error
 		br.Transactions[i], err = rlp.EncodeToBytes(tx)
@@ -1347,7 +1348,7 @@ func (b *Block) SanityCheck() error {
 	return b.header.SanityCheck()
 }
 
-// HashCheck checks that transactions, receipts, uncles and withdrawals hashes are correct.
+// HashCheck checks that transactions, receipts, uncles, withdrawals, and requests hashes are correct.
 func (b *Block) HashCheck() error {
 	if hash := DeriveSha(b.Transactions()); hash != b.TxHash() {
 		return fmt.Errorf("block has invalid transaction hash: have %x, exp: %x", hash, b.TxHash())
@@ -1377,6 +1378,20 @@ func (b *Block) HashCheck() error {
 	if hash := DeriveSha(b.Withdrawals()); hash != *b.WithdrawalsHash() {
 		return fmt.Errorf("block has invalid withdrawals hash: have %x, exp: %x", hash, b.WithdrawalsHash())
 	}
+
+	if b.RequestsRoot() == nil {
+		if b.Requests() != nil {
+			return errors.New("header missing RequestsRoot")
+		}
+		return nil
+	}
+	if b.Requests() == nil {
+		return errors.New("body missing Requests")
+	}
+	if hash := DeriveSha(b.Requests()); hash != *b.RequestsRoot() {
+		return fmt.Errorf("block has invalid requests root: have %x, exp: %x", hash, b.RequestsRoot())
+	}
+
 	return nil
 }
 
@@ -1433,6 +1448,15 @@ func (b *Block) Copy() *Block {
 		}
 	}
 
+	var requests []*Request
+	if b.requests != nil {
+		requests = make([]*Request, 0, len(b.requests))
+		for _, request := range b.requests {
+			rCopy := *request
+			requests = append(requests, &rCopy)
+		}
+	}
+
 	var hashValue atomic.Value
 	if value := b.hash.Load(); value != nil {
 		hash := value.(libcommon.Hash)
@@ -1450,6 +1474,7 @@ func (b *Block) Copy() *Block {
 		uncles:       uncles,
 		transactions: CopyTxs(b.transactions),
 		withdrawals:  withdrawals,
+		requests:     requests,
 		hash:         hashValue,
 		size:         sizeValue,
 	}
@@ -1465,6 +1490,7 @@ func (b *Block) WithSeal(header *Header) *Block {
 		transactions: b.transactions,
 		uncles:       b.uncles,
 		withdrawals:  b.withdrawals,
+		requests:     b.requests,
 	}
 }
 
