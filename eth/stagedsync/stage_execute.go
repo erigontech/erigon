@@ -859,9 +859,9 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	pruneTimeout := 3 * time.Second
+	pruneTimeout := 3 * time.Second * 10
 	if initialCycle {
-		pruneTimeout = 12 * time.Hour
+		pruneTimeout = 12 * time.Hour * 10
 	}
 	if _, err = tx.(*temporal.Tx).AggTx().(*libstate.AggregatorRoTx).PruneSmallBatches(ctx, pruneTimeout, tx); err != nil { // prune part of retired data, before commit
 		return err
