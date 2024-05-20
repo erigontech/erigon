@@ -18,6 +18,12 @@ func NewOptimisticStore() OptimisticStore {
 	}
 }
 
+type opNode struct {
+	execBlockNum uint64
+	parent       common.Hash
+	children     []common.Hash
+}
+
 func (impl *optimisticStoreImpl) AddOptimisticCandidate(block *cltypes.BeaconBlock) error {
 	if block.Body.ExecutionPayload == nil || *block.Body.ExecutionPayload == (cltypes.Eth1Block{}) {
 		return nil
@@ -110,10 +116,4 @@ func (impl *optimisticStoreImpl) IsOptimistic(root common.Hash) bool {
 		return true
 	}
 	return false
-}
-
-type opNode struct {
-	execBlockNum uint64
-	parent       common.Hash
-	children     []common.Hash
 }
