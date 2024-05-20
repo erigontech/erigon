@@ -782,9 +782,11 @@ Loop:
 								TransactionIndex:  uint(txTask.TxIndex),
 								Type:              txTask.Tx.Type(),
 								CumulativeGasUsed: usedGas,
+								GasUsed:           txTask.UsedGas,
 								TxHash:            txTask.Tx.Hash(),
 								Logs:              txTask.Logs,
 							}
+							receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 							if txTask.Failed {
 								receipt.Status = types.ReceiptStatusFailed
 							} else {
