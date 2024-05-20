@@ -378,9 +378,8 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		}
 		txNumIncrement()
 		if b.engine != nil {
-			var err error
 			// Finalize and seal the block
-			if _, _, _, err = b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, nil, nil, nil, nil, logger); err != nil {
+			if _, _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, nil, nil, nil, nil, logger); err != nil {
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
 			// Write state changes to db
@@ -388,6 +387,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 				return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
 			}
 
+			var err error
 			if histV3 {
 				//To use `CalcHashRootForTests` need flush before, but to use `domains.ComputeCommitment` need flush after
 				//if err = domains.Flush(ctx, tx); err != nil {
@@ -405,10 +405,9 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			} else {
 				b.header.Root, err = CalcHashRootForTests(tx, b.header, histV3, false)
 			}
-			b.header.ReceiptHash = types.DeriveSha(types.Receipts(b.receipts))
+			_ = err
 			// Recreating block to make sure Root makes it into the header
 			block := types.NewBlock(b.header, b.txs, b.uncles, b.receipts, nil /* withdrawals */, nil /*requests*/)
-
 			return block, b.receipts, nil
 		}
 		return nil, nil, fmt.Errorf("no engine to generate blocks")
