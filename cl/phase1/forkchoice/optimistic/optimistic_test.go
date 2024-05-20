@@ -144,6 +144,6 @@ func (t *optimisticTestSuite) TestInvalidateBlock() {
 	t.Require().Len(t.opStore.optimisticRoots, 0)
 }
 
-func TestProposerSlashing(t *testing.T) {
+func TestOptimistic(t *testing.T) {
 	suite.Run(t, new(optimisticTestSuite))
 }
