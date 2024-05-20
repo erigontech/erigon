@@ -545,6 +545,7 @@ var (
 	LightClientStore            = []byte("LightClientStore")
 	LightClientFinalityUpdate   = []byte("LightClientFinalityUpdate")
 	LightClientOptimisticUpdate = []byte("LightClientOptimisticUpdate")
+	LastNewBlockSeen            = []byte("LastNewBlockSeen") // last seen block hash
 
 	StatesProcessingKey = []byte("StatesProcessing")
 )
