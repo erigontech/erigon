@@ -1038,6 +1038,44 @@ func (as *AggregatorPruneStat) Accumulate(other *AggregatorPruneStat) {
 	}
 }
 
+func (ac *AggregatorRoTx) PruneCommitHistory(ctx context.Context, tx kv.RwTx, limitTxNums uint64, withWarmup bool, logEvery *time.Ticker) error {
+	defer mxPruneTookAgg.ObserveDuration(time.Now())
+
+	cd := ac.d[kv.CommitmentDomain]
+	txFrom, txTo := uint64(0), ac.CanUnwindDomainsToTxNum()
+	if dbg.NoPrune() || !cd.CanPruneUntil(tx, txTo) {
+		return nil
+	}
+
+	if logEvery == nil {
+		logEvery = time.NewTicker(30 * time.Second)
+		defer logEvery.Stop()
+	}
+	idxc, err := cd.ht.IdxRange(nil, 0, int(txTo), order.Asc, 10000, tx)
+	if err != nil {
+		return err
+	}
+	defer idxc.Close()
+
+	commitsInDB := 0
+
+	for idxc.HasNext() {
+		_, _, err := idxc.Next()
+		if err != nil {
+			return err
+		}
+		commitsInDB++
+	}
+
+	stat, err := cd.ht.Prune(ctx, tx, txFrom, txTo, limitTxNums, false, withWarmup, logEvery)
+	if err != nil {
+		return err
+	}
+	ac.a.logger.Info("commit history backpressure prune", "limitTxN", limitTxNums, "commitsInDB", commitsInDB,
+		"stat", stat.String(), "stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx))
+	return nil
+}
+
 func (ac *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, withWarmup bool, logEvery *time.Ticker) (*AggregatorPruneStat, error) {
 	defer mxPruneTookAgg.ObserveDuration(time.Now())
 
