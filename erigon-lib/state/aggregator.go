@@ -1070,13 +1070,20 @@ func (ac *AggregatorRoTx) PruneCommitHistory(ctx context.Context, tx kv.RwTx, li
 		commitsInDB++
 	}
 
-	stat, err := cd.ht.Prune(ctx, tx, txFrom, txTo, limitTxNums, false, withWarmup, logEvery)
+	statPre, err := cd.ht.Prune(ctx, tx, txFrom, txTo, math.MaxUint64, false, withWarmup, logEvery)
 	if err != nil {
 		return err
 	}
+
+	stat, err := cd.ht.Prune(ctx, tx, txFrom, txTo, limitTxNums, true, withWarmup, logEvery)
+	if err != nil {
+		return err
+	}
+	stat.Accumulate(statPre)
+
 	ac.a.logger.Info("commit history backpressure prune", "commitsPruneLimit", limitTxNums, "commitsInDB", commitsInDB,
-		"minTx", minTx, "maxTx", maxTx, "inFilesTxn", ac.a.visibleFilesMinimaxTxNum.Load(),
-		"stat", stat.String(), "stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx))
+		"minTx", minTx, "maxTx", maxTx, "inFilesTxn", ac.a.visibleFilesMinimaxTxNum.Load(), "stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx),
+		"pruned", stat.String(), "of which pre-cleaning", statPre.String())
 	return nil
 }
 
