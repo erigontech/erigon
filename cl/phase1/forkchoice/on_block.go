@@ -105,7 +105,6 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			if err := f.optimisticStore.AddOptimisticCandidate(block.Block); err != nil {
 				return fmt.Errorf("failed to add block to optimistic store: %v", err)
 			}
-			// not sure if need to retry NewPayload for this block later
 		case execution_client.PayloadStatusInvalidated:
 			log.Debug("OnBlock: block is invalid", "block", blockRoot)
 			f.forkGraph.MarkHeaderAsInvalid(blockRoot)
