@@ -45,6 +45,9 @@ func (sf SelectedStaticFilesV3) Close() {
 	}
 
 	for _, i := range sf.ii {
+		if i == nil {
+			continue
+		}
 		clist = append(clist, i.fi)
 	}
 	for _, group := range clist {
