@@ -329,24 +329,27 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 	if sdb.trace {
 		fmt.Printf("AddBalance %x, %d\n", addr, amount)
 	}
-	// If this account has not been read, add to the balance increment map
-	_, needAccount := sdb.stateObjects[addr]
-	if !needAccount && addr == ripemd && amount.IsZero() {
-		needAccount = true
-	}
-	if !needAccount {
-		sdb.journal.append(balanceIncrease{
-			account:  &addr,
-			increase: *amount,
-		})
-		bi, ok := sdb.balanceInc[addr]
-		if !ok {
-			bi = &BalanceIncrease{}
-			sdb.balanceInc[addr] = bi
+
+	if sdb.logger == nil {
+		// If this account has not been read, add to the balance increment map
+		_, needAccount := sdb.stateObjects[addr]
+		if !needAccount && addr == ripemd && amount.IsZero() {
+			needAccount = true
 		}
-		bi.increase.Add(&bi.increase, amount)
-		bi.count++
-		return
+		if !needAccount {
+			sdb.journal.append(balanceIncrease{
+				account:  &addr,
+				increase: *amount,
+			})
+			bi, ok := sdb.balanceInc[addr]
+			if !ok {
+				bi = &BalanceIncrease{}
+				sdb.balanceInc[addr] = bi
+			}
+			bi.increase.Add(&bi.increase, amount)
+			bi.count++
+			return
+		}
 	}
 
 	stateObject := sdb.GetOrNewStateObject(addr)
