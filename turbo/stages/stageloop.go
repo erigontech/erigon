@@ -501,15 +501,15 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 		}
 		// Run state sync
 
-		if !test {
-			if err = stateSync.RunNoInterrupt(nil, txc, false /* firstCycle */); err != nil {
-				if err := cleanupProgressIfNeeded(txc.Tx, currentHeader); err != nil {
-					return err
+		// if !test {
+		// 	if err = stateSync.RunNoInterrupt(nil, txc, false /* firstCycle */); err != nil {
+		// 		if err := cleanupProgressIfNeeded(txc.Tx, currentHeader); err != nil {
+		// 			return err
 
-				}
-				return err
-			}
-		}
+		// 		}
+		// 		return err
+		// 	}
+		// }
 
 	}
 
