@@ -48,10 +48,12 @@ func Setup(ctx *cli.Context, node *node.ErigonNode, metricsMux *http.ServeMux, p
 		diagMux = SetupDiagnosticsEndpoint(nil, diagAddress)
 	}
 
-	diagnostic := diaglib.NewDiagnosticClient(diagMux, node.Backend().DataDir())
-	diagnostic.Setup()
+	diagnostic, err := diaglib.NewDiagnosticClient(ctx.Context, diagMux, node.Backend().DataDir())
+	if err == nil {
+		diagnostic.Setup()
 
-	SetupEndpoints(ctx, node, diagMux, diagnostic)
+		SetupEndpoints(ctx, node, diagMux, diagnostic)
+	}
 }
 
 func SetupDiagnosticsEndpoint(metricsMux *http.ServeMux, addres string) *http.ServeMux {

@@ -1,6 +1,8 @@
 package diagnostics
 
 import (
+	"fmt"
+
 	"github.com/ledgerwatch/erigon-lib/diskutils"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
@@ -9,6 +11,10 @@ import (
 
 func (d *DiagnosticClient) setupSysInfoDiagnostics() {
 	sysInfo := GetSysInfo(d.dataDirPath)
+
+	if err := d.db.Update(d.ctx, TestUpdater(fmt.Sprint(sysInfo.RAM.Total))); err != nil {
+		fmt.Println("Error updating sysinfo")
+	}
 
 	d.mu.Lock()
 	d.hardwareInfo = sysInfo

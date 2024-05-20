@@ -1,13 +1,24 @@
 package diagnostics
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
+	"path/filepath"
 	"sync"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/semaphore"
 )
 
 type DiagnosticClient struct {
+	ctx         context.Context
+	db          kv.RwDB
 	metricsMux  *http.ServeMux
 	dataDirPath string
 
@@ -26,8 +37,18 @@ type DiagnosticClient struct {
 	networkSpeedMutex   sync.Mutex
 }
 
-func NewDiagnosticClient(metricsMux *http.ServeMux, dataDirPath string) *DiagnosticClient {
+func NewDiagnosticClient(ctx context.Context, metricsMux *http.ServeMux, dataDirPath string) (*DiagnosticClient, error) {
+
+	// Create a new DiagnosticClient
+	dirPath := filepath.Join(dataDirPath, "diagnostics")
+	db, err := createDb(ctx, dirPath)
+	if err != nil {
+		return nil, err
+	}
+
 	return &DiagnosticClient{
+		ctx:              ctx,
+		db:               db,
 		metricsMux:       metricsMux,
 		dataDirPath:      dataDirPath,
 		syncStats:        SyncStatistics{},
@@ -38,7 +59,24 @@ func NewDiagnosticClient(metricsMux *http.ServeMux, dataDirPath string) *Diagnos
 			MemoryUsage: []MemoryStats{},
 		},
 		peersStats: NewPeerStats(1000), // 1000 is the limit of peers; TODO: make it configurable through a flag
+	}, nil
+}
+
+func createDb(ctx context.Context, dbDir string) (db kv.RwDB, err error) {
+	db, err = mdbx.NewMDBX(log.New()).
+		Label(kv.DiagnosticsDB).
+		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DiagnosticsTablesCfg }).
+		GrowthStep(4 * datasize.MB).
+		MapSize(16 * datasize.GB).
+		PageSize(uint64(4 * datasize.KB)).
+		RoTxsLimiter(semaphore.NewWeighted(9_000)).
+		Path(dbDir).
+		Open(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open diagnostics db: %w", err)
 	}
+
+	return db, nil
 }
 
 func (d *DiagnosticClient) Setup() {
@@ -56,6 +94,18 @@ func (d *DiagnosticClient) Setup() {
 	d.setupSpeedtestDiagnostics(rootCtx)
 
 	//d.logDiagMsgs()
+}
+
+func TestUpdater(ram string) func(tx kv.RwTx) error {
+	return func(tx kv.RwTx) error {
+		ramBytes, err := json.Marshal(ram)
+
+		if err != nil {
+			return err
+		}
+
+		return tx.Put(kv.HardwareInfo, []byte("ram"), ramBytes)
+	}
 }
 
 /*func (d *DiagnosticClient) logDiagMsgs() {

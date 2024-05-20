@@ -1,6 +1,7 @@
 package diagnostics_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
@@ -8,7 +9,8 @@ import (
 )
 
 func TestUpdateFileDownloadingStats(t *testing.T) {
-	d := diagnostics.NewDiagnosticClient(nil, "test")
+	d, err := diagnostics.NewDiagnosticClient(context.TODO(), nil, "test")
+	require.NoError(t, err)
 
 	d.UpdateFileDownloadedStatistics(nil, &segmentDownloadStatsMock)
 
@@ -20,7 +22,8 @@ func TestUpdateFileDownloadingStats(t *testing.T) {
 }
 
 func TestUpdateFileDownloadedStats(t *testing.T) {
-	d := diagnostics.NewDiagnosticClient(nil, "test")
+	d, err := diagnostics.NewDiagnosticClient(context.TODO(), nil, "test")
+	require.NoError(t, err)
 
 	d.UpdateFileDownloadedStatistics(&fileDownloadedUpdMock, nil)
 
@@ -42,7 +45,9 @@ func TestUpdateFileDownloadedStats(t *testing.T) {
 }
 
 func TestUpdateFileFullStatsUpdate(t *testing.T) {
-	d := diagnostics.NewDiagnosticClient(nil, "test")
+	d, err := diagnostics.NewDiagnosticClient(context.TODO(), nil, "test")
+
+	require.NoError(t, err)
 
 	d.UpdateFileDownloadedStatistics(nil, &segmentDownloadStatsMock)
 
