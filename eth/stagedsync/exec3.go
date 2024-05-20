@@ -290,7 +290,6 @@ func ExecV3(ctx context.Context,
 	}
 
 	blockNum = doms.BlockNum()
-	initialBlockNum := blockNum
 	outputTxNum.Store(doms.TxNum())
 	if maxBlockNum-blockNum > 16 {
 		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
