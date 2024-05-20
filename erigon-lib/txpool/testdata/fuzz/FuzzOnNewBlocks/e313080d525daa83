@@ -1,0 +1,7 @@
+go test fuzz v1
+[]byte("400000000000")
+[]byte(" ")
+[]byte("4")
+[]byte("z")
+[]byte("00")
+byte('û')
