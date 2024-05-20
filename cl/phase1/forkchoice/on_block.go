@@ -100,12 +100,14 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		payloadStatus, err := f.engine.NewPayload(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes)
 		switch payloadStatus {
 		case execution_client.PayloadStatusNotValidated:
+			log.Debug("OnBlock: block is not validated yet", "block", blockRoot)
 			// optimistic block candidate
 			if err := f.optimisticStore.AddOptimisticCandidate(block.Block); err != nil {
 				return fmt.Errorf("failed to add block to optimistic store: %v", err)
 			}
 			// not sure if need to retry NewPayload for this block later
 		case execution_client.PayloadStatusInvalidated:
+			log.Debug("OnBlock: block is invalid", "block", blockRoot)
 			f.forkGraph.MarkHeaderAsInvalid(blockRoot)
 			// remove from optimistic candidate
 			if err := f.optimisticStore.InvalidateBlock(block.Block); err != nil {
@@ -113,6 +115,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			}
 			return fmt.Errorf("block is invalid")
 		case execution_client.PayloadStatusValidated:
+			log.Debug("OnBlock: block is validated", "block", blockRoot)
 			// remove from optimistic candidate
 			if err := f.optimisticStore.ValidateBlock(block.Block); err != nil {
 				return fmt.Errorf("failed to validate block in optimistic store: %v", err)
