@@ -255,6 +255,64 @@ func (srv *DataStreamServer) CreateAndBuildStreamEntryBytes(
 	return result, nil
 }
 
+func (srv *DataStreamServer) GetHighestBlockNumber() (uint64, error) {
+	header := srv.stream.GetHeader()
+
+	if header.TotalEntries == 0 {
+		return 0, nil
+	}
+
+	//find end block entry to delete from it onward
+	entryNum := header.TotalEntries - 1
+	var err error
+	var entry datastreamer.FileEntry
+	for {
+		entry, err = srv.stream.GetEntry(entryNum)
+		if err != nil {
+			return 0, err
+		}
+		if entry.Type == datastreamer.EntryType(3) {
+			break
+		}
+		entryNum -= 1
+	}
+
+	endBlockEntry, err := types.DecodeEndL2BlockBigEndian(entry.Data)
+	if err != nil {
+		return 0, err
+	}
+
+	return endBlockEntry.L2BlockNumber, nil
+}
+
+// must be done on offline server
+// finds the position of the endBlock entry for the given number
+// and unwinds the datastream file to it
+func (srv *DataStreamServer) UnwindToBlock(blockNumber uint64) error {
+	// check if server is online
+
+	// find blockend entry
+	bookmark := types.NewL2BlockBookmark(blockNumber)
+	entryNum, err := srv.stream.GetBookmark(bookmark.EncodeBigEndian())
+	if err != nil {
+		return err
+	}
+
+	//find end block entry to delete from it onward
+	for {
+		entry, err := srv.stream.GetEntry(entryNum)
+		if err != nil {
+			return err
+		}
+		if entry.Type == datastreamer.EntryType(3) {
+			break
+		}
+		entryNum -= 1
+	}
+
+	return srv.stream.TruncateFile(entryNum + 1)
+}
+
 const (
 	PACKET_TYPE_DATA = 2
 	// NOOP_ENTRY_NUMBER is used because we don't care about the entry number when feeding an atrificial

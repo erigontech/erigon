@@ -124,7 +124,7 @@ Loop:
 		}
 
 		//fetch values pre execute
-		preExecuteHeaderHash, block, header, senders, err := getPreexecuteValues(cfg, ctx, tx, blockNum, prevBlockHash)
+		preExecuteHeaderHash, block, senders, err := getPreexecuteValues(cfg, ctx, tx, blockNum, prevBlockHash)
 		if err != nil {
 			stoppedErr = err
 			break
@@ -152,6 +152,7 @@ Loop:
 		}
 
 		// exec loop variables
+		header := block.HeaderNoCopy()
 		header.GasUsed = uint64(execRs.GasUsed)
 		header.ReceiptHash = types.DeriveSha(execRs.Receipts)
 		header.Bloom = execRs.Bloom
@@ -191,7 +192,7 @@ Loop:
 		}
 
 		//commit values post execute
-		if err := postExecuteCommitValues(cfg, tx, eridb, batch, preExecuteHeaderHash, block, header, senders); err != nil {
+		if err := postExecuteCommitValues(cfg, tx, eridb, batch, preExecuteHeaderHash, block, senders); err != nil {
 			return err
 		}
 	}
@@ -277,32 +278,25 @@ func getExecRange(cfg ExecuteBlockCfg, tx kv.RwTx, stageProgress, toBlock uint64
 	return to, total, nil
 }
 
-func getPreexecuteValues(cfg ExecuteBlockCfg, ctx context.Context, tx kv.RwTx, blockNum uint64, prevBlockHash common.Hash) (common.Hash, *types.Block, *types.Header, []common.Address, error) {
+// gets the pre-execute values for a block and sets the previous block hash
+func getPreexecuteValues(cfg ExecuteBlockCfg, ctx context.Context, tx kv.RwTx, blockNum uint64, prevBlockHash common.Hash) (common.Hash, *types.Block, []common.Address, error) {
 	preExecuteHeaderHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 	if err != nil {
-		return common.Hash{}, nil, nil, nil, err
+		return common.Hash{}, nil, nil, err
 	}
 
 	block, senders, err := cfg.blockReader.BlockWithSenders(ctx, tx, preExecuteHeaderHash, blockNum)
 	if err != nil {
-		return common.Hash{}, nil, nil, nil, err
-	}
-
-	header, err := cfg.blockReader.Header(ctx, tx, preExecuteHeaderHash, blockNum)
-	if err != nil {
-		return common.Hash{}, nil, nil, nil, err
+		return common.Hash{}, nil, nil, err
 	}
 
 	if block == nil {
-		return common.Hash{}, nil, nil, nil, fmt.Errorf("empty block blocknum: %d", blockNum)
+		return common.Hash{}, nil, nil, fmt.Errorf("empty block blocknum: %d", blockNum)
 	}
 
-	if header == nil {
-		return common.Hash{}, nil, nil, nil, fmt.Errorf("empty header blocknum: %d", blockNum)
-	}
-	header.ParentHash = prevBlockHash
+	block.HeaderNoCopy().ParentHash = prevBlockHash
 
-	return preExecuteHeaderHash, block, header, senders, nil
+	return preExecuteHeaderHash, block, senders, nil
 }
 
 func postExecuteCommitValues(
@@ -312,9 +306,20 @@ func postExecuteCommitValues(
 	batch kv.PendingMutations,
 	preExecuteHeaderHash common.Hash,
 	block *types.Block,
-	header *types.Header,
 	senders []common.Address,
 ) error {
+	header := block.Header()
+	headerHash := header.Hash()
+	blockNum := block.NumberU64()
+
+	if err := rawdbZk.DeleteSenders(tx, preExecuteHeaderHash, blockNum); err != nil {
+		return fmt.Errorf("failed to delete senders: %v", err)
+	}
+
+	if err := rawdbZk.DeleteHeader(tx, preExecuteHeaderHash, blockNum); err != nil {
+		return fmt.Errorf("failed to delete header: %v", err)
+	}
+
 	// TODO: how can we store this data right first time?  Or mop up old data as we're currently duping storage
 	/*
 			        ,     \    /      ,
@@ -335,12 +340,12 @@ func postExecuteCommitValues(
 		 provide it.  We also need to update the canonical hash, so we can retrieve this newly updated header
 		 later.
 	*/
-	headerHash := header.Hash()
-	blockNum := block.NumberU64()
 	if err := rawdb.WriteHeader_zkEvm(tx, header); err != nil {
 		return fmt.Errorf("failed to write header: %v", err)
 	}
-
+	if err := rawdb.WriteHeadHeaderHash(tx, headerHash); err != nil {
+		return err
+	}
 	if err := rawdb.WriteCanonicalHash(tx, headerHash, blockNum); err != nil {
 		return fmt.Errorf("failed to write header: %v", err)
 	}
@@ -354,14 +359,6 @@ func postExecuteCommitValues(
 	// also we should delete other ata based on the old hash, since it is unaccessable now
 	if err := rawdb.WriteSenders(tx, headerHash, blockNum, senders); err != nil {
 		return fmt.Errorf("failed to write senders: %v", err)
-	}
-
-	if err := rawdbZk.DeleteSenders(tx, preExecuteHeaderHash, blockNum); err != nil {
-		return fmt.Errorf("failed to delete senders: %v", err)
-	}
-
-	if err := rawdbZk.DeleteHeader(tx, preExecuteHeaderHash, blockNum); err != nil {
-		return fmt.Errorf("failed to delete header: %v", err)
 	}
 
 	// write the new block lookup entries
@@ -409,7 +406,7 @@ func executeBlockZk(
 	vmConfig.Tracer = callTracer
 
 	getHashFn := core.GetHashFn(block.Header(), getHeader)
-	execRs, err := core.ExecuteBlockEphemerallyZk(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, ChainReaderImpl{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, getTracer, tx, roHermezDb)
+	execRs, err := core.ExecuteBlockEphemerallyZk(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, ChainReaderImpl{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, getTracer, roHermezDb, prevBlockRoot)
 	if err != nil {
 		return nil, err
 	}

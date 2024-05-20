@@ -32,7 +32,10 @@ func main() {
 		defer db.Close()
 		defer engine.Close()
 
-		apiList := jsonrpc.APIList(db, backend, txPool, mining, ff, stateCache, blockReader, agg, cfg, engine, ethconfig.DefaultZkConfig, nil, logger)
+		ethConfig := ethconfig.Defaults
+		ethConfig.L2RpcUrl = cfg.L2RpcUrl
+
+		apiList := jsonrpc.APIList(db, backend, txPool, mining, ff, stateCache, blockReader, agg, cfg, engine, &ethConfig, nil, logger)
 		rpc.PreAllocateRPCMetricLabels(apiList)
 		if err := cli.StartRpcServer(ctx, cfg, apiList, logger); err != nil {
 			logger.Error(err.Error())

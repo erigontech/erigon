@@ -15,8 +15,9 @@ import (
 )
 
 type Config struct {
-	GrpcUrls []string
-	Timeout  time.Duration
+	GrpcUrls              []string
+	Timeout               time.Duration
+	MaxConcurrentRequests int
 }
 
 type Payload struct {
@@ -46,21 +47,18 @@ type Executor struct {
 	conn       *grpc.ClientConn
 	connCancel context.CancelFunc
 	client     executor.ExecutorServiceClient
+	semaphore  chan struct{}
 }
 
 func NewExecutors(cfg Config) []*Executor {
 	executors := make([]*Executor, len(cfg.GrpcUrls))
-	var err error
 	for i, grpcUrl := range cfg.GrpcUrls {
-		executors[i], err = NewExecutor(grpcUrl, cfg.Timeout)
-		if err != nil {
-			log.Warn("Failed to create executor", "error", err)
-		}
+		executors[i] = NewExecutor(grpcUrl, cfg.Timeout, cfg.MaxConcurrentRequests)
 	}
 	return executors
 }
 
-func NewExecutor(grpcUrl string, timeout time.Duration) (*Executor, error) {
+func NewExecutor(grpcUrl string, timeout time.Duration, maxConcurrentRequests int) *Executor {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
@@ -78,9 +76,10 @@ func NewExecutor(grpcUrl string, timeout time.Duration) (*Executor, error) {
 		conn:       conn,
 		connCancel: cancel,
 		client:     client,
+		semaphore:  make(chan struct{}, maxConcurrentRequests),
 	}
 
-	return e, nil
+	return e
 }
 
 func (e *Executor) Close() {
@@ -92,6 +91,11 @@ func (e *Executor) Close() {
 	if err != nil {
 		log.Warn("Failed to close grpc connection", err)
 	}
+}
+
+// QueueLength check 'how busy' the executor is
+func (e *Executor) QueueLength() int {
+	return len(e.semaphore)
 }
 
 func (e *Executor) CheckOnline() bool {
@@ -129,6 +133,9 @@ func (e *Executor) CheckOnline() bool {
 }
 
 func (e *Executor) Verify(p *Payload, request *VerifierRequest, oldStateRoot common.Hash) (bool, error) {
+	e.semaphore <- struct{}{}
+	defer func() { <-e.semaphore }()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
@@ -230,7 +237,11 @@ func responseCheck(resp *executor.ProcessBatchResponseV2, request *VerifierReque
 		// the provided witness
 		log.Error("executor error", "detail", resp.ProverId)
 		return false, fmt.Errorf("error in response: %s", resp.Error)
+	}
 
+	if resp.ErrorRom != executor.RomError_ROM_ERROR_NO_ERROR && resp.ErrorRom != executor.RomError_ROM_ERROR_UNSPECIFIED {
+		log.Error("executor ROM error", "detail", resp.ErrorRom)
+		return false, fmt.Errorf("error in response: %s", resp.ErrorRom)
 	}
 
 	erigonStateRoot := request.StateRoot

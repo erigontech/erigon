@@ -333,11 +333,6 @@ func (api *BaseAPI) pruneMode(tx kv.Tx) (*prune.Mode, error) {
 	return p, nil
 }
 
-func (api *BaseAPI) getEffectiveGasPricePercentage(tx kv.Tx, txHash common.Hash) (uint8, error) {
-	hermezReader := hermez_db.NewHermezDbReader(tx)
-	return hermezReader.GetEffectiveGasPricePercentage(txHash)
-}
-
 // APIImpl is implementation of the EthAPI interface based on remote Db access
 type APIImpl struct {
 	*BaseAPI

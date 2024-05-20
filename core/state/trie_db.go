@@ -542,11 +542,15 @@ func (tds *TrieDbState) GetAccount(addrHash common.Hash) (*accounts.Account, boo
 }
 
 func (tds *TrieDbState) HashSave(data []byte) (common.Hash, error) {
-	h, err := libcommon.HashData(data)
+	cpy := make([]byte, len(data))
+	copy(cpy, data)
+	h, err := libcommon.HashData(cpy)
 	if err != nil {
 		return common.Hash{}, err
 	} else {
-		tds.preimageMap[h] = data
+		h1 := common.Hash{}
+		copy(h1[:], h[:])
+		tds.preimageMap[h1] = cpy
 		return h, nil
 	}
 }

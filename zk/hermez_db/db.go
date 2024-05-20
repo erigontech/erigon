@@ -971,6 +971,7 @@ func (db *HermezDb) WriteL1InjectedBatch(batch *types.L1InjectedBatch) error {
 	if err != nil {
 		return err
 	}
+	defer cursor.Close()
 
 	count, err := cursor.Count()
 	if err != nil {
@@ -1070,6 +1071,7 @@ func (db *HermezDbReader) GetLastL1BatchData() (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
+	defer c.Close()
 
 	k, _, err := c.Last()
 	if err != nil {
@@ -1101,6 +1103,7 @@ func (db *HermezDbReader) GetLatestUsedGer() (uint64, common.Hash, error) {
 	if err != nil {
 		return 0, common.Hash{}, err
 	}
+	defer c.Close()
 
 	k, v, err := c.Last()
 	if err != nil {

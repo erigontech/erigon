@@ -41,7 +41,7 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chai
 	}
 	engine := api.engine()
 
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, 0, api.historyV3(tx))
+	txEnv, err := transactions.ComputeTxEnv_ZkEvm(ctx, engine, block, chainConfig, api._blockReader, tx, 0, api.historyV3(tx))
 	if err != nil {
 		return nil, err
 	}
@@ -61,14 +61,13 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chai
 		return h
 	}
 	header := block.Header()
-	excessBlobGas := header.ExcessBlobGas
 	for i, txn := range block.Transactions() {
-		ibs.SetTxContext(txn.Hash(), block.Hash(), i)
+		txEnv.Ibs.Init(txn.Hash(), block.Hash(), i)
 		effectiveGasPricePercentage, err := api._blockReader.TxnEffectiveGasPricePercentage(ctx, tx, txn.Hash())
 		if err != nil {
 			return nil, err
 		}
-		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, usedGas, excessBlobGas, vm.Config{}, effectiveGasPricePercentage)
+		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, txEnv.Ibs, noopWriter, header, txn, usedGas, header.ExcessBlobGas, vm.Config{}, effectiveGasPricePercentage)
 		if err != nil {
 			return nil, err
 		}

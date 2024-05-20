@@ -502,7 +502,7 @@ func (s *Sync) runStage(stage *Stage, db kv.RwDB, txc wrap.TxContainer, firstCyc
 
 	if err = stage.Forward(firstCycle, badBlockUnwind, stageState, s, txc, s.logger); err != nil {
 		wrappedError := fmt.Errorf("[%s] %w", s.LogPrefix(), err)
-		s.logger.Debug("Error while executing stage", "err", wrappedError)
+		log.Error("Error while executing stage", "err", wrappedError)
 		return wrappedError
 	}
 

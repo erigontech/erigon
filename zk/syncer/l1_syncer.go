@@ -16,6 +16,7 @@ import (
 
 	ethTypes "github.com/ledgerwatch/erigon/core/types"
 	types "github.com/ledgerwatch/erigon/zk/rpcdaemon"
+	"github.com/ledgerwatch/erigon/rpc"
 )
 
 var (
@@ -46,7 +47,9 @@ type jobResult struct {
 }
 
 type L1Syncer struct {
-	em                   IEtherman
+	etherMans            []IEtherman
+	ethermanIndex        uint8
+	ethermanMtx          *sync.Mutex
 	l1ContractAddresses  []common.Address
 	topics               [][]common.Hash
 	blockRange           uint64
@@ -65,9 +68,11 @@ type L1Syncer struct {
 	progressMessageChan chan string
 }
 
-func NewL1Syncer(em IEtherman, l1ContractAddresses []common.Address, topics [][]common.Hash, blockRange, queryDelay, l1QueryBlocksThreads uint64) *L1Syncer {
+func NewL1Syncer(etherMans []IEtherman, l1ContractAddresses []common.Address, topics [][]common.Hash, blockRange, queryDelay, l1QueryBlocksThreads uint64) *L1Syncer {
 	return &L1Syncer{
-		em:                   em,
+		etherMans:            etherMans,
+		ethermanIndex:        0,
+		ethermanMtx:          &sync.Mutex{},
 		l1ContractAddresses:  l1ContractAddresses,
 		topics:               topics,
 		blockRange:           blockRange,
@@ -76,6 +81,20 @@ func NewL1Syncer(em IEtherman, l1ContractAddresses []common.Address, topics [][]
 		progressMessageChan:  make(chan string),
 		logsChan:             make(chan []ethTypes.Log),
 	}
+}
+
+func (s *L1Syncer) getNextEtherman() IEtherman {
+	s.ethermanMtx.Lock()
+	defer s.ethermanMtx.Unlock()
+
+	if s.ethermanIndex >= uint8(len(s.etherMans)) {
+		s.ethermanIndex = 0
+	}
+
+	etherman := s.etherMans[s.ethermanIndex]
+	s.ethermanIndex++
+
+	return etherman
 }
 
 func (s *L1Syncer) IsSyncStarted() bool {
@@ -139,11 +158,13 @@ func (s *L1Syncer) Run(lastCheckedBlock uint64) {
 }
 
 func (s *L1Syncer) GetBlock(number uint64) (*ethTypes.Block, error) {
-	return s.em.BlockByNumber(context.Background(), new(big.Int).SetUint64(number))
+	em := s.getNextEtherman()
+	return em.BlockByNumber(context.Background(), new(big.Int).SetUint64(number))
 }
 
 func (s *L1Syncer) GetTransaction(hash common.Hash) (ethTypes.Transaction, bool, error) {
-	return s.em.TransactionByHash(context.Background(), hash)
+	em := s.getNextEtherman()
+	return em.TransactionByHash(context.Background(), hash)
 }
 
 func (s *L1Syncer) GetOldAccInputHash(ctx context.Context, addr *common.Address, rollupId, batchNum uint64) (common.Hash, error) {
@@ -245,7 +266,8 @@ func tryToLogL1QueryBlocks(logPrefix string, current, total, threadNum int, dura
 }
 
 func (s *L1Syncer) getLatestL1Block() (uint64, error) {
-	latestBlock, err := s.em.BlockByNumber(context.Background(), nil)
+	em := s.getNextEtherman()
+	latestBlock, err := em.BlockByNumber(context.Background(), big.NewInt(rpc.FinalizedBlockNumber.Int64()))
 	if err != nil {
 		return 0, err
 	}
@@ -349,7 +371,8 @@ func (s *L1Syncer) getSequencedLogs(jobs <-chan fetchJob, results chan jobResult
 			var err error
 			retry := 0
 			for {
-				logs, err = s.em.FilterLogs(context.Background(), query)
+				em := s.getNextEtherman()
+				logs, err = em.FilterLogs(context.Background(), query)
 				if err != nil {
 					log.Debug("getSequencedLogs retry error", "err", err)
 					retry++
@@ -379,7 +402,8 @@ func (s *L1Syncer) callGetRollupSequencedBatches(ctx context.Context, addr *comm
 	rollupID := fmt.Sprintf("%064x", rollupId)
 	batchNumber := fmt.Sprintf("%064x", batchNum)
 
-	resp, err := s.em.CallContract(ctx, ethereum.CallMsg{
+	em := s.getNextEtherman()
+	resp, err := em.CallContract(ctx, ethereum.CallMsg{
 		To:   addr,
 		Data: common.FromHex(rollupSequencedBatchesSignature + rollupID + batchNumber),
 	}, nil)

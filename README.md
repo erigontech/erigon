@@ -14,8 +14,8 @@ cdk-erigon is a fork of Erigon, currently in Alpha, optimized for syncing with t
 Current status of cdk-erigon's support for running various chains and fork ids:
 
 - zkEVM Cardona testnet — beta support
-- zkEVM mainnet — alpha support
-- CDK Chains - experimental support (forkid.8 and above)
+- zkEVM mainnet — beta support
+- CDK Chains - beta support (forkid.9 and above)
 
 ## Dynamic Chain Configuration
 To use chains other than the defaults above, a set of configuration files can be supplied to run any chain.

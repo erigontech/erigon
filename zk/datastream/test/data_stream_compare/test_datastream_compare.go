@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -19,12 +20,13 @@ var (
 )
 
 func main() {
+	ctx := context.Background()
 	flag.StringVar(&stream1, "stream1", "", "the first stream to pull data from")
 	flag.StringVar(&stream2, "stream2", "", "the second stream to pull data from")
 	flag.Parse()
 
-	client1 := client.NewClient(stream1, 0, 0)
-	client2 := client.NewClient(stream2, 0, 0)
+	client1 := client.NewClient(ctx, stream1, 0, 0)
+	client2 := client.NewClient(ctx, stream2, 0, 0)
 
 	err := client1.Start()
 	if err != nil {

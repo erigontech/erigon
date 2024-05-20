@@ -141,6 +141,8 @@ func (g *Generator) GenerateWitness(tx kv.Tx, ctx context.Context, startBlock, e
 		return h
 	}
 
+	prevStateRoot := prevHeader.Root
+
 	for blockNum := startBlock; blockNum <= endBlock; blockNum++ {
 		block, err := rawdb.ReadBlockByNumber(tx, blockNum)
 		if err != nil {
@@ -209,11 +211,14 @@ func (g *Generator) GenerateWitness(tx kv.Tx, ctx context.Context, startBlock, e
 
 		chainReader := stagedsync.NewChainReaderImpl(g.chainCfg, tx, nil, log.New())
 
-		_, err = core.ExecuteBlockEphemerallyZk(g.chainCfg, &vmConfig, getHashFn, engine, block, tds, trieStateWriter, chainReader, nil, nil, hermezDb)
+		_, err = core.ExecuteBlockEphemerallyZk(g.chainCfg, &vmConfig, getHashFn, engine, block, tds, trieStateWriter, chainReader, nil, hermezDb, &prevStateRoot)
 
 		if err != nil {
 			return nil, err
 		}
+
+		prevStateRoot = block.Root()
+		reader.Close() // close the cursors created by the plainstate
 	}
 
 	var rl trie.RetainDecider

@@ -44,6 +44,21 @@ type Config struct {
 	ExtraEips []int // Additional EIPS that are to be enabled
 }
 
+func NewTraceVmConfig() Config {
+	return Config{
+		Debug:         true,
+		Tracer:        nil,
+		NoRecursion:   false,
+		NoBaseFee:     false,
+		SkipAnalysis:  false,
+		TraceJumpDest: false,
+		NoReceipts:    true, // used to skip receipts at end of exec
+		ReadOnly:      false,
+		StatelessExec: true, // used to setCheckNonce to false
+		RestoreState:  false,
+	}
+}
+
 var pool = sync.Pool{
 	New: func() any {
 		return NewMemory()

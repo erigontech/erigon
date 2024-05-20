@@ -14,10 +14,10 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
@@ -136,13 +136,13 @@ func attemptAddTransaction(
 	sdb *stageDb,
 	ibs *state.IntraBlockState,
 	batchCounters *vm.BatchCounterCollector,
+	blockContext *evmtypes.BlockContext,
 	header *types.Header,
-	parentHeader *types.Header,
 	transaction types.Transaction,
 	effectiveGasPrice uint8,
 	l1Recovery bool,
 ) (*types.Receipt, bool, error) {
-	txCounters := vm.NewTransactionCounter(transaction, sdb.smt.GetDepth(), cfg.zk.ShouldCountersBeUnlimited() || l1Recovery)
+	txCounters := vm.NewTransactionCounter(transaction, sdb.smt.GetDepth(), cfg.zk.ShouldCountersBeUnlimited(l1Recovery))
 	overflow, err := batchCounters.AddNewTransactionCounters(txCounters)
 	if err != nil {
 		return nil, false, err
@@ -152,7 +152,6 @@ func attemptAddTransaction(
 	}
 
 	gasPool := new(core.GasPool).AddGas(transactionGasLimit)
-	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(sdb.tx, hash, number) }
 
 	// set the counter collector on the config so that we can gather info during the execution
 	cfg.zkVmConfig.CounterCollector = txCounters.ExecutionCounters()
@@ -160,20 +159,20 @@ func attemptAddTransaction(
 	// TODO: possibly inject zero tracer here!
 
 	ibs.Init(transaction.Hash(), common.Hash{}, 0)
+	evm := vm.NewZkEVM(*blockContext, evmtypes.TxContext{}, ibs, cfg.chainConfig, *cfg.zkVmConfig)
 
 	receipt, execResult, err := core.ApplyTransaction_zkevm(
 		cfg.chainConfig,
-		core.GetHashFn(header, getHeader),
 		cfg.engine,
-		&cfg.zk.AddressSequencer,
+		evm,
 		gasPool,
 		ibs,
 		noop,
 		header,
 		transaction,
 		&header.GasUsed,
-		*cfg.zkVmConfig,
-		effectiveGasPrice)
+		effectiveGasPrice,
+	)
 
 	if err != nil {
 		return nil, false, err

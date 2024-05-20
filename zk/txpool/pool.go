@@ -738,7 +738,7 @@ func (p *TxPool) isLondon() bool {
 		return true
 	}
 	lbsBig := big.NewInt(0).SetUint64(p.lastSeenBlock.Load())
-	if p.londonBlock.Cmp(lbsBig) <= 0 {
+	if p.londonBlock != nil && p.londonBlock.Cmp(lbsBig) <= 0 {
 		p.isPostLondon.Swap(true)
 		return true
 	}

@@ -308,12 +308,12 @@ func doFinishBlockAndUpdateState(
 	l1BlockHash common.Hash,
 	transactions []types.Transaction,
 	receipts types.Receipts,
-	effectiveGasPrices []uint8,
+	effectiveGases []uint8,
 	l1InfoIndex uint64,
 ) error {
 	thisBlockNumber := header.Number.Uint64()
 
-	if err := finaliseBlock(ctx, cfg, s, sdb, ibs, header, parentBlock, forkId, thisBatch, ger, l1BlockHash, transactions, receipts, effectiveGasPrices); err != nil {
+	if err := finaliseBlock(ctx, cfg, s, sdb, ibs, header, parentBlock, forkId, thisBatch, ger, l1BlockHash, transactions, receipts, effectiveGases); err != nil {
 		return err
 	}
 

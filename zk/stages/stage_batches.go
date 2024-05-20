@@ -160,7 +160,7 @@ func SpawnStageBatches(
 			// this will download all blocks from datastream and push them in a channel
 			// if no error, break, else continue trying to get them
 			// Create bookmark
-			bookmark := types.NewL2BlockBookmark(batchesProgress)
+			bookmark := types.NewL2BlockBookmark(batchesProgress + 1)
 			cfg.dsClient.ReadAllEntriesToChannel(bookmark)
 		}()
 	}
@@ -218,9 +218,18 @@ LOOP:
 			}
 
 			atLeastOneBlockWritten = true
-			// skip if we already have this block
-			if l2Block.L2BlockNumber < lastBlockHeight+1 {
+
+			if l2Block.L2BlockNumber == 0 {
 				continue
+			}
+			// if already had this block, unwind all stages, because the ones we have are wrong
+			if l2Block.L2BlockNumber < lastBlockHeight+1 {
+				log.Warn(fmt.Sprintf("[%s] Unwinding to block %d", logPrefix, l2Block.L2BlockNumber))
+				badBlock, err := eriDb.ReadCanonicalHash(l2Block.L2BlockNumber)
+				if err != nil {
+					return fmt.Errorf("failed to get bad block: %v", err)
+				}
+				u.UnwindTo(l2Block.L2BlockNumber, stagedsync.BadBlock(badBlock, fmt.Errorf("received block %d again", l2Block.L2BlockNumber)))
 			}
 
 			// check for sequential block numbers
@@ -318,6 +327,9 @@ LOOP:
 			if err != nil {
 				return fmt.Errorf("l2blocks download routine error: %v", err)
 			}
+		case <-ctx.Done():
+			log.Warn(fmt.Sprintf("[%s] Context done", logPrefix))
+			endLoop = true
 		default:
 			// wait at least one block to be written, before continuing
 			// or if stage_exec is ahead - don't wait here, but rather continue so exec catches up

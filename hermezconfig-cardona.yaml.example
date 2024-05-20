@@ -8,11 +8,11 @@ zkevm.l2-datastreamer-url: datastream.cardona.zkevm-rpc.com:6900
 zkevm.l1-chain-id: 11155111
 zkevm.l1-rpc-url: https://rpc.sepolia.org
 
-zkevm.address-sequencer: ""
-zkevm.address-zkevm: ""
-zkevm.address-admin: "0x32d33D5137a7cFFb54c5Bf8371172bcEc5f310ff"
-zkevm.address-rollup: "0xA13Ddb14437A8F34897131367ad3ca78416d6bCa"
-zkevm.address-ger-manager: "0xAd1490c248c5d3CbAE399Fd529b79B42984277DF"
+zkevm.address-sequencer: "0x761d53b47334bee6612c0bd1467fb881435375b2"
+zkevm.address-zkevm: "0xA13Ddb14437A8F34897131367ad3ca78416d6bCa"
+zkevm.address-admin: "0xff6250d0e86a2465b0c1bf8e36409503d6a26963"
+zkevm.address-rollup: "0x32d33d5137a7cffb54c5bf8371172bcec5f310ff"
+zkevm.address-ger-manager: "0x528e26b25a34a4a5d0dbda1d57d318153d2ed582"
 
 zkevm.default-gas-price: 1
 zkevm.max-gas-price: 0

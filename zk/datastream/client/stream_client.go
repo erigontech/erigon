@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/zk/datastream/types"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type StreamType uint64
@@ -22,6 +24,7 @@ type EntityDefinition struct {
 }
 
 type StreamClient struct {
+	ctx          context.Context
 	server       string // Server address to connect IP:port
 	version      int
 	streamType   StreamType
@@ -59,9 +62,10 @@ const (
 
 // Creates a new client fo datastream
 // server must be in format "url:port"
-func NewClient(server string, version int, checkTimeout time.Duration) *StreamClient {
+func NewClient(ctx context.Context, server string, version int, checkTimeout time.Duration) *StreamClient {
 	// Create the client data stream
 	c := &StreamClient{
+		ctx:          ctx,
 		checkTimeout: checkTimeout,
 		server:       server,
 		version:      version,
@@ -246,20 +250,6 @@ func (c *StreamClient) initiateDownloadBookmark(bookmark []byte) error {
 	return nil
 }
 
-// runs the prerequisites for entries download
-func (c *StreamClient) initiateDownload(fromEntry uint64) error {
-	// send start command
-	if err := c.sendStartCmd(fromEntry); err != nil {
-		return fmt.Errorf("send start command error: %v", err)
-	}
-
-	if err := c.afterStartCommand(); err != nil {
-		return fmt.Errorf("after start command error: %v", err)
-	}
-
-	return nil
-}
-
 func (c *StreamClient) afterStartCommand() error {
 	// Read packet
 	packet, err := readBuffer(c.conn, 1)
@@ -284,7 +274,15 @@ func (c *StreamClient) afterStartCommand() error {
 // sends the parsed FullL2Blocks with transactions to a channel
 func (c *StreamClient) readAllFullL2BlocksToChannel() error {
 	var err error
+LOOP:
 	for {
+		select {
+		default:
+		case <-c.ctx.Done():
+			log.Warn("[Datastream client] Context done - stopping")
+			break LOOP
+		}
+
 		if c.checkTimeout > 0 {
 			c.conn.SetReadDeadline(time.Now().Add(c.checkTimeout))
 		}

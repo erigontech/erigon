@@ -506,6 +506,16 @@ var (
 		Usage: "Defaulted to true to ensure you must set some executor URLs, bypass this restriction by setting to false",
 		Value: true,
 	}
+	ExecutorRequestTimeout = cli.DurationFlag{
+		Name:  "zkevm.executor-request-timeout",
+		Usage: "The timeout for the executor request",
+		Value: 60 * time.Second,
+	}
+	ExecutorMaxConcurrentRequests = cli.IntFlag{
+		Name:  "zkevm.executor-max-concurrent-requests",
+		Usage: "The maximum number of concurrent requests to the executor",
+		Value: 1,
+	}
 	RpcRateLimitsFlag = cli.IntFlag{
 		Name:  "zkevm.rpc-ratelimit",
 		Usage: "RPC rate limit in requests per second.",
@@ -599,6 +609,11 @@ var (
 	SupportGasless = cli.BoolFlag{
 		Name:  "zkevm.gasless",
 		Usage: "Support gasless transactions",
+		Value: false,
+	}
+	DebugNoSync = cli.BoolFlag{
+		Name:  "debug.no-sync",
+		Usage: "Disable syncing",
 		Value: false,
 	}
 	DebugLimit = cli.UintFlag{

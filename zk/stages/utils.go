@@ -10,10 +10,9 @@ import (
 	"strconv"
 	"strings"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-
 	"net/url"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	db2 "github.com/ledgerwatch/erigon/smt/pkg/db"
 )
@@ -30,7 +29,7 @@ func TrimHexString(s string) string {
 	return "0x0"
 }
 
-func RpcStateRootByTxNo(rpcUrl string, txNo *big.Int) (*libcommon.Hash, error) {
+func RpcStateRootByTxNo(rpcUrl string, txNo *big.Int) (*common.Hash, error) {
 	requestBody := map[string]interface{}{
 		"jsonrpc": "2.0",
 		"method":  "eth_getBlockByNumber",
@@ -69,7 +68,7 @@ func RpcStateRootByTxNo(rpcUrl string, txNo *big.Int) (*libcommon.Hash, error) {
 	if !ok {
 		return nil, err
 	}
-	h := libcommon.HexToHash(stateRoot)
+	h := common.HexToHash(stateRoot)
 
 	return &h, nil
 }

@@ -1,0 +1,15 @@
+require("@nomicfoundation/hardhat-toolbox");
+
+const endpointUrl = "http://localhost:8545";
+const privateKey = "";
+
+/** @type import('hardhat/config').HardhatUserConfig */
+module.exports = {
+  solidity: "0.8.24",
+  networks: {
+    testnet: {
+      url: endpointUrl,
+      accounts: [privateKey],
+    },
+  },
+};

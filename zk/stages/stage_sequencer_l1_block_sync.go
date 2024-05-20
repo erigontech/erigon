@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/syncer"
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 type SequencerL1BlockSyncCfg struct {
@@ -70,7 +71,11 @@ func SpawnSequencerL1BlockSyncStage(
 		return err
 	}
 	highestKnownBatch, err := hermezDb.GetLastL1BatchData()
-	if highestKnownBatch == highestBatch {
+	if err != nil {
+		return err
+	}
+
+	if highestBatch > 0 && highestKnownBatch == highestBatch {
 		log.Info("L1 block sync recovery has completed!", "batch", highestBatch)
 		time.Sleep(5 * time.Second)
 	}
@@ -97,20 +102,46 @@ func SpawnSequencerL1BlockSyncStage(
 		totalBlocks = 1
 	}
 
+	logTicker := time.NewTicker(10 * time.Second)
+	defer logTicker.Stop()
+	var latestBatch uint64
+
 LOOP:
 	for {
 		select {
 		case logs := <-logChan:
 			for _, l := range logs {
-				transaction, _, err := cfg.syncer.GetTransaction(l.TxHash)
+				// for some reason some endpoints seem to not have certain transactions available to
+				// them even they are perfectly valid and other RPC nodes return them fine.  So, leaning
+				// on the internals of the syncer which will round-robin through available RPC nodes, we
+				// can attempt a few times to get the transaction before giving up and returning an error
+				var transaction types.Transaction
+				attempts := 0
+				for {
+					transaction, _, err = cfg.syncer.GetTransaction(l.TxHash)
+					if err == nil {
+						break
+					} else {
+						log.Warn("Error getting transaction, attempting again", "hash", l.TxHash.String(), "err", err)
+						attempts++
+						if attempts > 50 {
+							return err
+						}
+						time.Sleep(500 * time.Millisecond)
+					}
+				}
+
+				lastBatchSequenced := l.Topics[1].Big().Uint64()
+				latestBatch = lastBatchSequenced
+
+				batches, coinbase, err := l1_data.DecodeL1BatchData(transaction.GetData())
 				if err != nil {
 					return err
 				}
 
-				initBatch, batches, coinbase, err := l1_data.DecodeL1BatchData(transaction.GetData())
-				if err != nil {
-					return err
-				}
+				// here we find the first batch number that was sequenced by working backwards
+				// from the latest batch in the original event
+				initBatch := lastBatchSequenced - uint64(len(batches)-1)
 
 				log.Debug(fmt.Sprintf("[%s] Processing L1 sequence transaction", logPrefix),
 					"hash", transaction.Hash().String(),
@@ -122,8 +153,7 @@ LOOP:
 				// this is important because the batches are written in reverse order
 
 				for idx, batch := range batches {
-					// add 1 here to have the batches line up, on the L1 they start at 1
-					b := initBatch + uint64(idx) + 1
+					b := initBatch + uint64(idx)
 					data := append(coinbase.Bytes(), batch...)
 					if err := hermezDb.WriteL1BatchData(b, data); err != nil {
 						return err
@@ -135,11 +165,13 @@ LOOP:
 					}
 					totalBlocks += len(decoded)
 					log.Debug(fmt.Sprintf("[%s] Wrote L1 batch", logPrefix), "batch", b, "blocks", len(decoded), "totalBlocks", totalBlocks)
-
 				}
+
 			}
 		case msg := <-progressChan:
 			log.Info(fmt.Sprintf("[%s] %s", logPrefix, msg))
+		case <-logTicker.C:
+			log.Info(fmt.Sprintf("[%s] Syncing L1 blocks", logPrefix), "latest-batch", latestBatch)
 		default:
 			if !cfg.syncer.IsDownloading() {
 				break LOOP

@@ -1,0 +1,17 @@
+{
+  "name": "modx-contract",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "mulmod": "npx hardhat compile && npx hardhat run scripts/mulmod.js --network testnet",
+    "bigloop": "npx hardhat compile && npx hardhat run scripts/bigloop.js --network testnet"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "hardhat": "^2.22.4"
+  }
+}

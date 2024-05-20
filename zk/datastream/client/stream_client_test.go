@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/big"
@@ -42,7 +43,7 @@ func Test_readHeaderEntry(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		c := NewClient("", 0, 0)
+		c := NewClient(context.Background(), "", 0, 0)
 		server, conn := net.Pipe()
 		defer server.Close()
 		defer c.Stop()
@@ -106,7 +107,7 @@ func Test_readResultEntry(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		c := NewClient("", 0, 0)
+		c := NewClient(context.Background(), "", 0, 0)
 		server, conn := net.Pipe()
 		defer server.Close()
 		defer c.Stop()
@@ -175,7 +176,7 @@ func Test_readFileEntry(t *testing.T) {
 		},
 	}
 	for _, testCase := range testCases {
-		c := NewClient("", 0, 0)
+		c := NewClient(context.Background(), "", 0, 0)
 		server, conn := net.Pipe()
 		defer server.Close()
 		defer c.Stop()
@@ -369,7 +370,7 @@ func Test_readFullL2Blocks(t *testing.T) {
 		},
 	}
 	for _, testCase := range testCases {
-		c := NewClient("", BigEndianVersion, 0)
+		c := NewClient(context.Background(), "", BigEndianVersion, 0)
 		c.Header.TotalEntries = 3
 		server, conn := net.Pipe()
 		defer server.Close()
@@ -525,7 +526,7 @@ func Test_readFullBlock(t *testing.T) {
 		},
 	}
 	for _, testCase := range testCases {
-		c := NewClient("", BigEndianVersion, 0)
+		c := NewClient(context.Background(), "", BigEndianVersion, 0)
 		c.Header.TotalEntries = 3
 		server, conn := net.Pipe()
 		defer server.Close()

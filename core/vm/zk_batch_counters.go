@@ -17,9 +17,10 @@ type BatchCounterCollector struct {
 	smtLevelsForTransaction int
 	blockCount              int
 	forkId                  uint16
+	unlimitedCounters       bool
 }
 
-func NewBatchCounterCollector(smtMaxLevel int, forkId uint16) *BatchCounterCollector {
+func NewBatchCounterCollector(smtMaxLevel int, forkId uint16, unlimitedCounters bool) *BatchCounterCollector {
 	smtLevels := calculateSmtLevels(smtMaxLevel, 0)
 	smtLevelsForTransaction := calculateSmtLevels(smtMaxLevel, 32)
 	return &BatchCounterCollector{
@@ -28,6 +29,7 @@ func NewBatchCounterCollector(smtMaxLevel int, forkId uint16) *BatchCounterColle
 		smtLevelsForTransaction: smtLevelsForTransaction,
 		blockCount:              0,
 		forkId:                  forkId,
+		unlimitedCounters:       unlimitedCounters,
 	}
 }
 
@@ -51,6 +53,7 @@ func (bcc *BatchCounterCollector) Clone() *BatchCounterCollector {
 		smtLevelsForTransaction: bcc.smtLevelsForTransaction,
 		blockCount:              bcc.blockCount,
 		forkId:                  bcc.forkId,
+		unlimitedCounters:       bcc.unlimitedCounters,
 	}
 }
 
@@ -140,11 +143,22 @@ func (bcc *BatchCounterCollector) CheckForOverflow() (bool, error) {
 	return overflow, nil
 }
 
+func (bcc *BatchCounterCollector) newCounters() Counters {
+	var combined Counters
+	if bcc.unlimitedCounters {
+		combined = unlimitedCounters()
+	} else {
+		combined = defaultCounters()
+	}
+
+	return combined
+}
+
 // CombineCollectors takes the batch level data from all transactions and combines these counters with each transactions'
 // rlp level counters and execution level counters
 func (bcc *BatchCounterCollector) CombineCollectors() (Counters, error) {
 	// combine all the counters we have so far
-	combined := defaultCounters()
+	combined := bcc.newCounters()
 
 	if err := bcc.processBatchLevelData(); err != nil {
 		return nil, err

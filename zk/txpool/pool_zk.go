@@ -234,7 +234,9 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 }
 
 func (p *TxPool) ForceUpdateLatestBlock(blockNumber uint64) {
-	p.lastSeenBlock.Store(blockNumber)
+	if p != nil {
+		p.lastSeenBlock.Store(blockNumber)
+	}
 }
 
 // This function is invoked if a single tx overflow entire zk-counters.
