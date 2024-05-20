@@ -767,8 +767,9 @@ Loop:
 						blobGasUsed += txTask.Tx.GetBlobGas()
 					}
 					if txTask.Final {
+						checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts
 						if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-							if err := core.BlockPostValidation(usedGas, blobGasUsed, types.DeriveSha(receipts), txTask.Header); err != nil {
+							if err := core.BlockPostValidation(usedGas, blobGasUsed, checkReceipts, types.DeriveSha(receipts), txTask.Header); err != nil {
 								return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 							}
 						}

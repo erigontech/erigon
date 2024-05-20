@@ -370,7 +370,7 @@ func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHead
 	return nil
 }
 
-func BlockPostValidation(gasUsed, blobGasUsed uint64, receiptHash common.Hash, h *types.Header) error {
+func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receiptHash common.Hash, h *types.Header) error {
 	if gasUsed != h.GasUsed {
 		return fmt.Errorf("gas used by execution: %d, in header: %d, headerNum=%d, %x",
 			gasUsed, h.GasUsed, h.Number.Uint64(), h.Hash())
@@ -380,7 +380,7 @@ func BlockPostValidation(gasUsed, blobGasUsed uint64, receiptHash common.Hash, h
 		return fmt.Errorf("blobGasUsed by execution: %d, in header: %d, headerNum=%d, %x",
 			blobGasUsed, *h.BlobGasUsed, h.Number.Uint64(), h.Hash())
 	}
-	if receiptHash != h.ReceiptHash {
+	if checkReceipts && receiptHash != h.ReceiptHash {
 		return fmt.Errorf("receiptHash mismatch: %x != %x, headerNum=%d, %x",
 			receiptHash, h.ReceiptHash, h.Number.Uint64(), h.Hash())
 	}
