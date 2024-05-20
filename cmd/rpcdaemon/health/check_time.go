@@ -26,6 +26,8 @@ func checkTime(
 	if ts, ok := i["timestamp"]; ok {
 		if cs, ok := ts.(hexutil.Uint64); ok {
 			timestamp = int(uint64(cs))
+		} else if cs, ok := ts.(uint64); ok {
+			timestamp = int(cs)
 		}
 	}
 	if timestamp < seconds {
