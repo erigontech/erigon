@@ -1,18 +1,24 @@
-name: QA - Snapshot Download
+name: QA - Sync from scratch
 
 on:
   schedule:
-    - cron: '5 0 * * *'  # Run every day at 05:00 AM UTC
+    - cron: '0 5 * * *'  # Run every day at 01:00 AM UTC
   workflow_dispatch:     # Run manually
 
 jobs:
   long-running-test:
-    runs-on: [self-hosted, Erigon3]
-    timeout-minutes: 600
+    runs-on: self-hosted
+    timeout-minutes: 800
+    strategy:
+      fail-fast: false
+      matrix:
+        chain: [ sepolia, amoy ]  # Chain name as specified on the erigon command line
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
+      TRACKING_TIME_SECONDS: 7200 # 2 hours
       TOTAL_TIME_SECONDS: 43200 # 12 hours
+      CHAIN: ${{ matrix.chain }}
 
     steps:
     - name: Check out repository
@@ -32,14 +38,14 @@ jobs:
       run: |
         python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
 
-    - name: Run Erigon and monitor snapshot downloading
+    - name: Run Erigon and monitor chain sync
       id: test_step
       run: |
         set +e # Disable exit on error
              
-        # Run Erigon, monitor snapshot downloading and check logs
-        python3 $ERIGON_QA_PATH/test_system/qa-tests/snap-download/run_and_check_snap_download.py ${{ github.workspace }}/build/bin $ERIGON_DATA_DIR $TOTAL_TIME_SECONDS Erigon3
-  
+        # Run Erigon, wait sync and check ability to maintain sync
+        python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py ${{ github.workspace }}/build/bin $ERIGON_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN
+        
         # Capture monitoring script exit status
         test_exit_status=$?
         
@@ -75,7 +81,7 @@ jobs:
       if: steps.test_step.outputs.test_executed == 'true'
       env:
         TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
-      run: python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --test_name snap-download --outcome $TEST_RESULT --result_file ${{ github.workspace }}/result.json
+      run: python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --test_name sync-from-scratch --chain $CHAIN --outcome $TEST_RESULT --result_file ${{ github.workspace }}/result.json
 
     - name: Upload test results
       if: steps.test_step.outputs.test_executed == 'true'
