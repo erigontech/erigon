@@ -1061,7 +1061,7 @@ func (ac *AggregatorRoTx) PruneCommitHistory(ctx context.Context, tx kv.RwTx, li
 	commitsInDB := 0
 	minTx, maxTx := uint64(math.MaxUint64), uint64(0)
 	for idxc.HasNext() {
-		_, txn, err := idxc.Next()
+		txn, err := idxc.Next()
 		if err != nil {
 			return err
 		}
