@@ -210,6 +210,8 @@ func TestGetAndSetForkId(t *testing.T) {
 
 			err := db.WriteForkId(10, 1)
 			require.NoError(t, err, "Failed to write ForkId")
+			err = db.WriteForkId(tc.batchNo, tc.forkId)
+			require.NoError(t, err, "Failed to write ForkId")
 			err = db.WriteForkId(100, 2)
 			require.NoError(t, err, "Failed to write ForkId")
 
