@@ -125,7 +125,7 @@ func calculateSmtLevels(smtMaxLevel int, minValue int) int {
 func NewUnlimitedCounterCollector() *CounterCollector {
 	return &CounterCollector{
 		counters:  unlimitedCounters(),
-		smtLevels: math.MaxInt32,
+		smtLevels: 256,
 	}
 }
 

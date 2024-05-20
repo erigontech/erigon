@@ -269,7 +269,7 @@ func runTest(t *testing.T, test vector, err error, fileName string, idx int) {
 		}
 	}
 
-	batchCollector := vm.NewBatchCounterCollector(test.SmtDepths[0], uint16(test.ForkId))
+	batchCollector := vm.NewBatchCounterCollector(test.SmtDepths[0], uint16(test.ForkId), false)
 
 	blockStarted := false
 	for i, block := range decodedBlocks {
