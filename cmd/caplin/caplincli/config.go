@@ -98,7 +98,7 @@ func SetupCaplinCli(ctx *cli.Context) (cfg *CaplinCliCfg, err error) {
 		}
 	}
 
-	if checkpointUrls := ctx.StringSlice(caplinflags.CheckpointSyncUrlFlag.Name); len(checkpointUrls) > 0 {
+	if checkpointUrls := ctx.StringSlice(utils.CaplinCheckpointSyncUrlFlag.Name); len(checkpointUrls) > 0 {
 		clparams.ConfigurableCheckpointsURLs = checkpointUrls
 	}
 
