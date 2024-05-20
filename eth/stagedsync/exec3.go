@@ -178,7 +178,6 @@ func ExecV3(ctx context.Context,
 			}()
 		}
 	}
-	fmt.Println("D")
 	var err error
 	inMemExec := txc.Doms != nil
 	var doms *state2.SharedDomains
@@ -190,7 +189,6 @@ func ExecV3(ctx context.Context,
 		// if we are behind the commitment, we can't execute anything
 		// this can heppen if progress in domain is higher than progress in blocks
 		if errors.Is(err, state2.ErrBehindCommitment) {
-			fmt.Println(err)
 			return nil
 		}
 		if err != nil {
@@ -218,7 +216,6 @@ func ExecV3(ctx context.Context,
 		}
 		return lastTxNum == inputTxNum, nil
 	}
-	fmt.Println("E")
 	// Cases:
 	//  1. Snapshots > ExecutionStage: snapshots can have half-block data `10.4`. Get right txNum from SharedDomains (after SeekCommitment)
 	//  2. ExecutionStage > Snapshots: no half-block data possible. Rely on DB.
@@ -262,7 +259,6 @@ func ExecV3(ctx context.Context,
 		doms.SetTxNum(inputTxNum)
 		return nil
 	}
-	fmt.Println("B")
 	if applyTx != nil {
 		if _nothing, err := nothingToExec(applyTx); err != nil {
 			return err
