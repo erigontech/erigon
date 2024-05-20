@@ -1,3 +1,0 @@
-go test fuzz v1
-[]byte("\xb0\\:'p\xb3")
-[]byte("\xb0\\:")

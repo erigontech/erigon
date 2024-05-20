@@ -47,7 +47,6 @@ profile.cov
 
 # VS Code
 .vscode
-*.code-workspace
 
 # dashboard
 /dashboard/assets/flow-typed
@@ -63,7 +62,6 @@ right_*.txt
 root_*.txt
 
 __pycache__
-docker-compose.dev.yml
 /build
 *.tmp
 
@@ -72,4 +70,18 @@ docker-compose.dev.yml
 libmdbx/build/*
 tests/testdata/*
 
-go.work*
+go.work
+go.work.sum
+erigon-lib/
+
+/goerli
+
+docker-compose.*.yml
+.env
+coverage.out
+hermezconfig*.yaml
+debugToolsConfig.yaml
+local.yml
+
+dist
+__debug_bin

@@ -1,3 +1,0 @@
-go test fuzz v1
-int(-2)
-[]byte("1stkey2ndkek")
