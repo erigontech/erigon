@@ -456,7 +456,7 @@ func addAndVerifyBlockStep(batch kv.RwTx, engine consensus.Engine, chainReader c
 }
 
 func cleanupProgressIfNeeded(batch kv.RwTx, header *types.Header) error {
-	If we fail state root then we have wrong execution stage progress set (+1), we need to decrease by one!
+	// If we fail state root then we have wrong execution stage progress set (+1), we need to decrease by one!
 	progress, err := stages.GetStageProgress(batch, stages.Execution)
 	if err != nil {
 		return err
