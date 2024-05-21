@@ -190,7 +190,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	if err := a.registerII(kv.TracesToIdxPos, salt, dirs, db, aggregationStep, "tracesto", kv.TblTracesToKeys, kv.TblTracesToIdx, logger); err != nil {
 		return nil, err
 	}
-	a.KeepStepsInDB(1)
+	a.KeepHistoryRecentTxInDB(aggregationStep)
 	a.recalcVisibleFiles()
 
 	if dbg.NoSync() {
@@ -1570,11 +1570,11 @@ func (a *Aggregator) cleanAfterMerge(in MergedFilesV3) {
 	}
 }
 
-// KeepStepsInDB - usually equal to one a.aggregationStep, but when we exec blocks from snapshots
+// KeepHistoryRecentTxInDB - usually equal to one a.aggregationStep, but when we exec blocks from snapshots
 // we can set it to 0, because no re-org on this blocks are possible
-func (a *Aggregator) KeepStepsInDB(steps uint64) *Aggregator {
-	a.keepInDB = a.FirstTxNumOfStep(steps)
-	a.logger.Warn("[snapshots] KeepStepsInDB", "steps", steps, "txn", a.keepInDB)
+func (a *Aggregator) KeepHistoryRecentTxInDB(recentTxs uint64) *Aggregator {
+	a.keepInDB = recentTxs
+	a.logger.Warn("[snapshots] KeepHistoryRecentTxInDB", "txn", a.keepInDB)
 	for _, d := range a.d {
 		if d == nil {
 			continue
