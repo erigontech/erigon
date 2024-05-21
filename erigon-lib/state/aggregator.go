@@ -22,8 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon/common/math"
-	math2 "math"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -1039,13 +1038,17 @@ func (as *AggregatorPruneStat) Accumulate(other *AggregatorPruneStat) {
 	}
 }
 
-func (ac *AggregatorRoTx) PruneCommitHistory(ctx context.Context, tx kv.RwTx, limitTxNums uint64, withWarmup bool, logEvery *time.Ticker) error {
-	return nil
-	defer mxPruneTookAgg.ObserveDuration(time.Now())
-
+// temporal function to prune history straight after commitment is done - reduce history size in db until we build
+// pruning in background
+func (ac *AggregatorRoTx) PruneCommitHistory(ctx context.Context, tx kv.RwTx, withWarmup bool, logEvery *time.Ticker) error {
 	cd := ac.d[kv.CommitmentDomain]
-	txFrom, txTo := uint64(0), ac.CanUnwindDomainsToTxNum()
-	if dbg.NoPrune() || !cd.CanPruneUntil(tx, txTo) {
+	if cd.ht.h.historyDisabled {
+		return nil
+	}
+
+	txFrom := uint64(0)
+	canHist, txTo := cd.ht.canPruneUntil(tx, math.MaxUint64)
+	if dbg.NoPrune() || !canHist {
 		return nil
 	}
 
@@ -1053,38 +1056,14 @@ func (ac *AggregatorRoTx) PruneCommitHistory(ctx context.Context, tx kv.RwTx, li
 		logEvery = time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
 	}
-	idxc, err := cd.ht.IdxRange(nil, 0, int(txTo), order.Asc, 10000, tx)
-	if err != nil {
-		return err
-	}
-	defer idxc.Close()
+	defer mxPruneTookAgg.ObserveDuration(time.Now())
 
-	commitsInDB := 0
-	minTx, maxTx := uint64(math.MaxUint64), uint64(0)
-	for idxc.HasNext() {
-		txn, err := idxc.Next()
-		if err != nil {
-			return err
-		}
-		minTx = min(minTx, txn)
-		maxTx = max(maxTx, txn)
-		commitsInDB++
-	}
-
-	statPre, err := cd.ht.Prune(ctx, tx, txFrom, txTo, math.MaxUint64, false, withWarmup, logEvery)
+	stat, err := cd.ht.Prune(ctx, tx, txFrom, txTo, math.MaxUint64, true, withWarmup, logEvery)
 	if err != nil {
 		return err
 	}
 
-	stat, err := cd.ht.Prune(ctx, tx, txFrom, txTo, limitTxNums, true, withWarmup, logEvery)
-	if err != nil {
-		return err
-	}
-	stat.Accumulate(statPre)
-
-	ac.a.logger.Info("commit history backpressure prune", "commitsPruneLimit", limitTxNums, "commitsInDB", commitsInDB,
-		"minTx", minTx, "maxTx", maxTx, "inFilesTxn", ac.a.visibleFilesMinimaxTxNum.Load(), "stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx),
-		"pruned", stat.String(), "of which pre-cleaning", statPre.String())
+	ac.a.logger.Info("commitment history backpressure pruning", "pruned", stat.String())
 	return nil
 }
 
@@ -1092,7 +1071,7 @@ func (ac *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, w
 	defer mxPruneTookAgg.ObserveDuration(time.Now())
 
 	if limit == 0 {
-		limit = uint64(math2.MaxUint64)
+		limit = uint64(math.MaxUint64)
 	}
 
 	var txFrom, step uint64 // txFrom is always 0 to avoid dangling keys in indices/hist
