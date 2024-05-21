@@ -53,9 +53,9 @@ func NewExecutionClientRPC(jwtSecret []byte, addr string, port int) (*ExecutionC
 	}, nil
 }
 
-func (cc *ExecutionClientRpc) NewPayload(ctx context.Context, payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash, versionedHashes []libcommon.Hash) (invalid bool, err error) {
+func (cc *ExecutionClientRpc) NewPayload(ctx context.Context, payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash, versionedHashes []libcommon.Hash) (PayloadStatus, error) {
 	if payload == nil {
-		return
+		return PayloadStatusValidated, nil
 	}
 
 	reversedBaseFeePerGas := libcommon.Copy(payload.BaseFeePerGas[:])
@@ -73,8 +73,7 @@ func (cc *ExecutionClientRpc) NewPayload(ctx context.Context, payload *cltypes.E
 	case clparams.DenebVersion:
 		engineMethod = rpc_helper.EngineNewPayloadV3
 	default:
-		err = fmt.Errorf("invalid payload version")
-		return
+		return PayloadStatusNone, fmt.Errorf("invalid payload version")
 	}
 
 	request := engine_types.ExecutionPayload{
@@ -115,18 +114,15 @@ func (cc *ExecutionClientRpc) NewPayload(ctx context.Context, payload *cltypes.E
 	if versionedHashes != nil {
 		args = append(args, versionedHashes, *beaconParentRoot)
 	}
-	err = cc.client.CallContext(ctx, &payloadStatus, engineMethod, args...)
-	if err != nil {
+	if err := cc.client.CallContext(ctx, &payloadStatus, engineMethod, args...); err != nil {
 		err = fmt.Errorf("execution Client RPC failed to retrieve the NewPayload status response, err: %w", err)
-		return
+		return PayloadStatusNone, err
 	}
 
-	invalid = payloadStatus.Status == engine_types.InvalidStatus || payloadStatus.Status == engine_types.InvalidBlockHashStatus
-	err = checkPayloadStatus(payloadStatus)
 	if payloadStatus.Status == engine_types.AcceptedStatus {
 		log.Info("[ExecutionClientRpc] New block accepted")
 	}
-	return
+	return newPayloadStatusByEngineStatus(payloadStatus.Status), checkPayloadStatus(payloadStatus)
 }
 
 func (cc *ExecutionClientRpc) ForkChoiceUpdate(ctx context.Context, finalized libcommon.Hash, head libcommon.Hash, attributes *engine_types.PayloadAttributes) ([]byte, error) {

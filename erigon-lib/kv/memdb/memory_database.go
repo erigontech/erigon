@@ -18,8 +18,9 @@ package memdb
 
 import (
 	"context"
-	"github.com/c2h5oh/datasize"
 	"testing"
+
+	"github.com/c2h5oh/datasize"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"

@@ -123,9 +123,16 @@ func (b *blockCollector) Flush(ctx context.Context) error {
 			b.logger.Info("[Caplin] Inserted blocks", "progress", blocksBatch[len(blocksBatch)-1].NumberU64())
 			// If we have inserted enough blocks, update fork choice (Optimation for E35)
 			lastBlockHash := blocksBatch[len(blocksBatch)-1].Hash()
+			currentHeader, err := b.engine.CurrentHeader(ctx)
+			if err != nil {
+				b.logger.Warn("failed to get current header", "err", err)
+			}
+			isForkchoiceNeeded := currentHeader == nil || blocksBatch[len(blocksBatch)-1].NumberU64() > currentHeader.Number.Uint64()
 			if inserted >= b.syncBackLoop {
-				if _, err := b.engine.ForkChoiceUpdate(ctx, lastBlockHash, lastBlockHash, nil); err != nil {
-					b.logger.Warn("failed to update fork choice", "err", err)
+				if isForkchoiceNeeded {
+					if _, err := b.engine.ForkChoiceUpdate(ctx, lastBlockHash, lastBlockHash, nil); err != nil {
+						b.logger.Warn("failed to update fork choice", "err", err)
+					}
 				}
 				inserted = 0
 			}

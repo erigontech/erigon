@@ -60,6 +60,8 @@ type ForkChoiceStorageReader interface {
 	GetCurrentPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error)
 
 	ValidateOnAttestation(attestation *solid.Attestation) error
+	IsRootOptimistic(root common.Hash) bool
+	IsHeadOptimistic() bool
 }
 
 type ForkChoiceStorageWriter interface {

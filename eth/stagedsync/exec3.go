@@ -15,6 +15,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
+	metrics2 "github.com/ledgerwatch/erigon-lib/common/metrics"
 	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
@@ -216,7 +217,6 @@ func ExecV3(ctx context.Context,
 		}
 		return lastTxNum == inputTxNum, nil
 	}
-
 	// Cases:
 	//  1. Snapshots > ExecutionStage: snapshots can have half-block data `10.4`. Get right txNum from SharedDomains (after SeekCommitment)
 	//  2. ExecutionStage > Snapshots: no half-block data possible. Rely on DB.
@@ -306,7 +306,7 @@ func ExecV3(ctx context.Context,
 	var count uint64
 	var lock sync.RWMutex
 
-	shouldReportToTxPool := maxBlockNum-blockNum <= 8
+	shouldReportToTxPool := maxBlockNum-blockNum <= 64
 	var accumulator *shards.Accumulator
 	if shouldReportToTxPool {
 		accumulator = cfg.accumulator
@@ -628,6 +628,7 @@ Loop:
 			// TODO: panic here and see that overall process deadlock
 			return fmt.Errorf("nil block %d", blockNum)
 		}
+		metrics2.UpdateBlockConsumerPreExecutionDelay(b.Time(), blockNum, logger)
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
@@ -641,7 +642,7 @@ Loop:
 			return f(n)
 		}
 		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */)
-
+		fmt.Println("B", blockNum, "txs", len(txs), "txNum", inputTxNum, "outputTxNum", outputTxNum.Load(), "blockComplete", blockComplete.Load())
 		if parallel {
 			select {
 			case err := <-rwLoopErrCh:
@@ -703,6 +704,7 @@ Loop:
 				GetHashFn:       getHashFn,
 				EvmBlockContext: blockContext,
 				Withdrawals:     b.Withdrawals(),
+				Requests:        b.Requests(),
 
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
@@ -765,8 +767,9 @@ Loop:
 						blobGasUsed += txTask.Tx.GetBlobGas()
 					}
 					if txTask.Final {
+						checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts
 						if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-							if err := core.BlockPostValidation(usedGas, blobGasUsed, txTask.Header); err != nil {
+							if err := core.BlockPostValidation(usedGas, blobGasUsed, checkReceipts, types.DeriveSha(receipts), txTask.Header); err != nil {
 								return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 							}
 						}
@@ -780,9 +783,11 @@ Loop:
 								TransactionIndex:  uint(txTask.TxIndex),
 								Type:              txTask.Tx.Type(),
 								CumulativeGasUsed: usedGas,
+								GasUsed:           txTask.UsedGas,
 								TxHash:            txTask.Tx.Hash(),
 								Logs:              txTask.Logs,
 							}
+							receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 							if txTask.Failed {
 								receipt.Status = types.ReceiptStatusFailed
 							} else {
@@ -839,6 +844,7 @@ Loop:
 
 		// MA commitTx
 		if !parallel {
+			metrics2.UpdateBlockConsumerPostExecutionDelay(b.Time(), blockNum, logger)
 			//if blockNum%1000 == 0 {
 			//	if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u); err != nil {
 			//		return err
@@ -1463,6 +1469,7 @@ func reconstituteStep(last bool,
 						GetHashFn:       getHashFn,
 						EvmBlockContext: blockContext,
 						Withdrawals:     b.Withdrawals(),
+						Requests:        b.Requests(),
 					}
 					if txIndex >= 0 && txIndex < len(txs) {
 						txTask.Tx = txs[txIndex]

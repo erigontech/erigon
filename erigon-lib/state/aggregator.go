@@ -55,10 +55,7 @@ import (
 type Aggregator struct {
 	db               kv.RoDB
 	d                [kv.DomainLen]*Domain
-	tracesTo         *InvertedIndex
-	logAddrs         *InvertedIndex
-	logTopics        *InvertedIndex
-	tracesFrom       *InvertedIndex
+	iis              [kv.StandaloneIdxLen]*InvertedIndex
 	backgroundResult *BackgroundResult
 	dirs             datadir.Dirs
 	tmpdir           string
@@ -136,7 +133,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		},
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
 	}
-	if a.d[kv.AccountsDomain], err = NewDomain(cfg, aggregationStep, "accounts", kv.TblAccountKeys, kv.TblAccountVals, kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx, logger); err != nil {
+	if a.d[kv.AccountsDomain], err = NewDomain(cfg, aggregationStep, kv.FileAccountDomain, kv.TblAccountKeys, kv.TblAccountVals, kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx, logger); err != nil {
 		return nil, err
 	}
 	cfg = domainCfg{
@@ -146,7 +143,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		},
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
 	}
-	if a.d[kv.StorageDomain], err = NewDomain(cfg, aggregationStep, "storage", kv.TblStorageKeys, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, logger); err != nil {
+	if a.d[kv.StorageDomain], err = NewDomain(cfg, aggregationStep, kv.FileStorageDomain, kv.TblStorageKeys, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, logger); err != nil {
 		return nil, err
 	}
 	cfg = domainCfg{
@@ -155,7 +152,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 			withLocalityIndex: false, withExistenceIndex: false, compression: CompressKeys | CompressVals, historyLargeValues: true,
 		},
 	}
-	if a.d[kv.CodeDomain], err = NewDomain(cfg, aggregationStep, "code", kv.TblCodeKeys, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx, logger); err != nil {
+	if a.d[kv.CodeDomain], err = NewDomain(cfg, aggregationStep, kv.FileCodeDomain, kv.TblCodeKeys, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx, logger); err != nil {
 		return nil, err
 	}
 	cfg = domainCfg{
@@ -168,7 +165,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
 		compress:                    CompressNone,
 	}
-	if a.d[kv.CommitmentDomain], err = NewDomain(cfg, aggregationStep, "commitment", kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, logger); err != nil {
+	if a.d[kv.CommitmentDomain], err = NewDomain(cfg, aggregationStep, kv.FileCommitmentDomain, kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, logger); err != nil {
 		return nil, err
 	}
 	//cfg = domainCfg{
@@ -180,20 +177,16 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	//if a.d[kv.GasUsedDomain], err = NewDomain(cfg, aggregationStep, "gasused", kv.TblGasUsedKeys, kv.TblGasUsedVals, kv.TblGasUsedHistoryKeys, kv.TblGasUsedHistoryVals, kv.TblGasUsedIdx, logger); err != nil {
 	//	return nil, err
 	//}
-	idxCfg := iiCfg{salt: salt, dirs: dirs, db: db}
-	if a.logAddrs, err = NewInvertedIndex(idxCfg, aggregationStep, "logaddrs", kv.TblLogAddressKeys, kv.TblLogAddressIdx, nil, logger); err != nil {
+	if err := a.registerII(kv.LogAddrIdxPos, salt, dirs, db, aggregationStep, kv.FileLogAddressIdx, kv.TblLogAddressKeys, kv.TblLogAddressIdx, logger); err != nil {
 		return nil, err
 	}
-	idxCfg = iiCfg{salt: salt, dirs: dirs, db: db}
-	if a.logTopics, err = NewInvertedIndex(idxCfg, aggregationStep, "logtopics", kv.TblLogTopicsKeys, kv.TblLogTopicsIdx, nil, logger); err != nil {
+	if err := a.registerII(kv.LogTopicIdxPos, salt, dirs, db, aggregationStep, kv.FileLogTopicsIdx, kv.TblLogTopicsKeys, kv.TblLogTopicsIdx, logger); err != nil {
 		return nil, err
 	}
-	idxCfg = iiCfg{salt: salt, dirs: dirs, db: db}
-	if a.tracesFrom, err = NewInvertedIndex(idxCfg, aggregationStep, "tracesfrom", kv.TblTracesFromKeys, kv.TblTracesFromIdx, nil, logger); err != nil {
+	if err := a.registerII(kv.TracesFromIdxPos, salt, dirs, db, aggregationStep, kv.FileTracesFromIdx, kv.TblTracesFromKeys, kv.TblTracesFromIdx, logger); err != nil {
 		return nil, err
 	}
-	idxCfg = iiCfg{salt: salt, dirs: dirs, db: db}
-	if a.tracesTo, err = NewInvertedIndex(idxCfg, aggregationStep, "tracesto", kv.TblTracesToKeys, kv.TblTracesToIdx, nil, logger); err != nil {
+	if err := a.registerII(kv.TracesToIdxPos, salt, dirs, db, aggregationStep, kv.FileTracesToIdx, kv.TblTracesToKeys, kv.TblTracesToIdx, logger); err != nil {
 		return nil, err
 	}
 	a.KeepStepsInDB(1)
@@ -233,15 +226,24 @@ func getStateIndicesSalt(baseDir string) (salt *uint32, err error) {
 	return salt, nil
 }
 
+func (a *Aggregator) registerII(idx kv.InvertedIdxPos, salt *uint32, dirs datadir.Dirs, db kv.RoDB, aggregationStep uint64, filenameBase, indexKeysTable, indexTable string, logger log.Logger) error {
+	idxCfg := iiCfg{salt: salt, dirs: dirs, db: db}
+	var err error
+	a.iis[idx], err = NewInvertedIndex(idxCfg, aggregationStep, filenameBase, indexKeysTable, indexTable, nil, logger)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (a *Aggregator) OnFreeze(f OnFreezeFunc) { a.onFreeze = f }
 func (a *Aggregator) DisableFsync() {
 	for _, d := range a.d {
 		d.DisableFsync()
 	}
-	a.logAddrs.DisableFsync()
-	a.logTopics.DisableFsync()
-	a.tracesFrom.DisableFsync()
-	a.tracesTo.DisableFsync()
+	for _, ii := range a.iis {
+		ii.DisableFsync()
+	}
 }
 
 func (a *Aggregator) OpenFolder(readonly bool) error {
@@ -261,10 +263,10 @@ func (a *Aggregator) OpenFolder(readonly bool) error {
 			return d.OpenFolder(readonly)
 		})
 	}
-	eg.Go(func() error { return a.logAddrs.OpenFolder(readonly) })
-	eg.Go(func() error { return a.logTopics.OpenFolder(readonly) })
-	eg.Go(func() error { return a.tracesFrom.OpenFolder(readonly) })
-	eg.Go(func() error { return a.tracesTo.OpenFolder(readonly) })
+	for _, ii := range a.iis {
+		ii := ii
+		eg.Go(func() error { return ii.OpenFolder(readonly) })
+	}
 	if err := eg.Wait(); err != nil {
 		return fmt.Errorf("OpenFolder: %w", err)
 	}
@@ -281,10 +283,10 @@ func (a *Aggregator) OpenList(files []string, readonly bool) error {
 		d := d
 		eg.Go(func() error { return d.OpenFolder(readonly) })
 	}
-	eg.Go(func() error { return a.logAddrs.OpenFolder(readonly) })
-	eg.Go(func() error { return a.logTopics.OpenFolder(readonly) })
-	eg.Go(func() error { return a.tracesFrom.OpenFolder(readonly) })
-	eg.Go(func() error { return a.tracesTo.OpenFolder(readonly) })
+	for _, ii := range a.iis {
+		ii := ii
+		eg.Go(func() error { return ii.OpenFolder(readonly) })
+	}
 	if err := eg.Wait(); err != nil {
 		return fmt.Errorf("OpenList: %w", err)
 	}
@@ -310,10 +312,9 @@ func (a *Aggregator) closeDirtyFiles() {
 	for _, d := range a.d {
 		d.Close()
 	}
-	a.logAddrs.Close()
-	a.logTopics.Close()
-	a.tracesFrom.Close()
-	a.tracesTo.Close()
+	for _, ii := range a.iis {
+		ii.Close()
+	}
 }
 
 func (a *Aggregator) SetCollateAndBuildWorkers(i int) { a.collateAndBuildWorkers = i }
@@ -322,10 +323,9 @@ func (a *Aggregator) SetCompressWorkers(i int) {
 	for _, d := range a.d {
 		d.compressWorkers = i
 	}
-	a.logAddrs.compressWorkers = i
-	a.logTopics.compressWorkers = i
-	a.tracesFrom.compressWorkers = i
-	a.tracesTo.compressWorkers = i
+	for _, ii := range a.iis {
+		ii.compressWorkers = i
+	}
 }
 
 func (a *Aggregator) DiscardHistory(name kv.Domain) *Aggregator {
@@ -348,10 +348,9 @@ func (ac *AggregatorRoTx) Files() []string {
 	for _, d := range ac.d {
 		res = append(res, d.Files()...)
 	}
-	res = append(res, ac.logAddrs.Files()...)
-	res = append(res, ac.logTopics.Files()...)
-	res = append(res, ac.tracesFrom.Files()...)
-	res = append(res, ac.tracesTo.Files()...)
+	for _, ii := range ac.iis {
+		res = append(res, ii.Files()...)
+	}
 	return res
 }
 func (a *Aggregator) Files() []string {
@@ -432,10 +431,9 @@ func (a *Aggregator) BuildMissedIndices(ctx context.Context, workers int) error 
 		for _, d := range a.d {
 			d.BuildMissedIndices(ctx, g, ps)
 		}
-		a.logAddrs.BuildMissedIndices(ctx, g, ps)
-		a.logTopics.BuildMissedIndices(ctx, g, ps)
-		a.tracesFrom.BuildMissedIndices(ctx, g, ps)
-		a.tracesTo.BuildMissedIndices(ctx, g, ps)
+		for _, ii := range a.iis {
+			ii.BuildMissedIndices(ctx, g, ps)
+		}
 
 		if err := g.Wait(); err != nil {
 			return err
@@ -498,11 +496,8 @@ func (c AggV3Collation) Close() {
 }
 
 type AggV3StaticFiles struct {
-	d          [kv.DomainLen]StaticFiles
-	logAddrs   InvertedFiles
-	logTopics  InvertedFiles
-	tracesFrom InvertedFiles
-	tracesTo   InvertedFiles
+	d    [kv.DomainLen]StaticFiles
+	ivfs [kv.StandaloneIdxLen]InvertedFiles
 }
 
 // CleanupOnError - call it on collation fail. It's closing all files
@@ -510,10 +505,9 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 	for _, d := range sf.d {
 		d.CleanupOnError()
 	}
-	sf.logAddrs.CleanupOnError()
-	sf.logTopics.CleanupOnError()
-	sf.tracesFrom.CleanupOnError()
-	sf.tracesTo.CleanupOnError()
+	for _, ivf := range sf.ivfs {
+		ivf.CleanupOnError()
+	}
 }
 
 func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
@@ -579,7 +573,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 	closeCollations = false
 
 	// indices are built concurrently
-	for _, d := range []*InvertedIndex{a.logTopics, a.logAddrs, a.tracesFrom, a.tracesTo} {
+	for _, d := range a.iis {
 		d := d
 		a.wg.Add(1)
 		g.Go(func() error {
@@ -601,13 +595,13 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 
 			switch d.indexKeysTable {
 			case kv.TblLogTopicsKeys:
-				static.logTopics = sf
+				static.ivfs[kv.LogTopicIdxPos] = sf
 			case kv.TblLogAddressKeys:
-				static.logAddrs = sf
+				static.ivfs[kv.LogAddrIdxPos] = sf
 			case kv.TblTracesFromKeys:
-				static.tracesFrom = sf
+				static.ivfs[kv.TracesFromIdxPos] = sf
 			case kv.TblTracesToKeys:
-				static.tracesTo = sf
+				static.ivfs[kv.TracesToIdxPos] = sf
 			default:
 				panic("unknown index " + d.indexKeysTable)
 			}
@@ -721,10 +715,9 @@ func (a *Aggregator) integrateDirtyFiles(sf AggV3StaticFiles, txNumFrom, txNumTo
 	for id, d := range a.d {
 		d.integrateDirtyFiles(sf.d[id], txNumFrom, txNumTo)
 	}
-	a.logAddrs.integrateDirtyFiles(sf.logAddrs, txNumFrom, txNumTo)
-	a.logTopics.integrateDirtyFiles(sf.logTopics, txNumFrom, txNumTo)
-	a.tracesFrom.integrateDirtyFiles(sf.tracesFrom, txNumFrom, txNumTo)
-	a.tracesTo.integrateDirtyFiles(sf.tracesTo, txNumFrom, txNumTo)
+	for id, ii := range a.iis {
+		ii.integrateDirtyFiles(sf.ivfs[id], txNumFrom, txNumTo)
+	}
 }
 
 func (a *Aggregator) HasNewFrozenFiles() bool {
@@ -756,10 +749,12 @@ func (ac *AggregatorRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
 			return true
 		}
 	}
-	return ac.logAddrs.CanPrune(tx) ||
-		ac.logTopics.CanPrune(tx) ||
-		ac.tracesFrom.CanPrune(tx) ||
-		ac.tracesTo.CanPrune(tx)
+	for _, ii := range ac.iis {
+		if ii.CanPrune(tx) {
+			return true
+		}
+	}
+	return false
 }
 
 func (ac *AggregatorRoTx) CanUnwindDomainsToBlockNum(tx kv.Tx) (uint64, error) {
@@ -974,12 +969,9 @@ func (a *Aggregator) StepsRangeInDBAsStr(tx kv.Tx) string {
 	for _, d := range a.d {
 		steps = append(steps, d.stepsRangeInDBAsStr(tx))
 	}
-	steps = append(steps,
-		a.logAddrs.stepsRangeInDBAsStr(tx),
-		a.logTopics.stepsRangeInDBAsStr(tx),
-		a.tracesFrom.stepsRangeInDBAsStr(tx),
-		a.tracesTo.stepsRangeInDBAsStr(tx),
-	)
+	for _, ii := range a.iis {
+		steps = append(steps, ii.stepsRangeInDBAsStr(tx))
+	}
 	return strings.Join(steps, ", ")
 }
 
@@ -1079,26 +1071,18 @@ func (ac *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, w
 			return aggStat, err
 		}
 	}
-	lap, err := ac.logAddrs.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, withWarmup, nil)
-	if err != nil {
-		return nil, err
+	var stats [kv.StandaloneIdxLen]*InvertedIndexPruneStat
+	for i := 0; i < int(kv.StandaloneIdxLen); i++ {
+		stat, err := ac.iis[i].Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, withWarmup, nil)
+		if err != nil {
+			return nil, err
+		}
+		stats[i] = stat
 	}
-	ltp, err := ac.logTopics.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, withWarmup, nil)
-	if err != nil {
-		return nil, err
+
+	for i := 0; i < int(kv.StandaloneIdxLen); i++ {
+		aggStat.Indices[ac.iis[i].ii.filenameBase] = stats[i]
 	}
-	tfp, err := ac.tracesFrom.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, withWarmup, nil)
-	if err != nil {
-		return nil, err
-	}
-	ttp, err := ac.tracesTo.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, withWarmup, nil)
-	if err != nil {
-		return nil, err
-	}
-	aggStat.Indices[ac.logAddrs.ii.filenameBase] = lap
-	aggStat.Indices[ac.logTopics.ii.filenameBase] = ltp
-	aggStat.Indices[ac.tracesFrom.ii.filenameBase] = tfp
-	aggStat.Indices[ac.tracesTo.ii.filenameBase] = ttp
 
 	return aggStat, nil
 }
@@ -1157,12 +1141,10 @@ func (a *Aggregator) FilesAmount() (res []int) {
 	for _, d := range a.d {
 		res = append(res, d.dirtyFiles.Len())
 	}
-	return append(res,
-		a.tracesFrom.dirtyFiles.Len(),
-		a.tracesTo.dirtyFiles.Len(),
-		a.logAddrs.dirtyFiles.Len(),
-		a.logTopics.dirtyFiles.Len(),
-	)
+	for _, ii := range a.iis {
+		res = append(res, ii.dirtyFiles.Len())
+	}
+	return res
 }
 
 func FirstTxNumOfStep(step, size uint64) uint64 {
@@ -1198,10 +1180,9 @@ func (a *Aggregator) recalcVisibleFiles() {
 	for _, domain := range a.d {
 		domain.reCalcVisibleFiles()
 	}
-	a.logTopics.reCalcVisibleFiles()
-	a.logAddrs.reCalcVisibleFiles()
-	a.tracesFrom.reCalcVisibleFiles()
-	a.tracesTo.reCalcVisibleFiles()
+	for _, ii := range a.iis {
+		ii.reCalcVisibleFiles()
+	}
 }
 
 func (a *Aggregator) recalcVisibleFilesMinimaxTxNum() {
@@ -1211,19 +1192,8 @@ func (a *Aggregator) recalcVisibleFilesMinimaxTxNum() {
 }
 
 type RangesV3 struct {
-	d                    [kv.DomainLen]DomainRanges
-	logTopicsStartTxNum  uint64
-	logAddrsEndTxNum     uint64
-	logAddrsStartTxNum   uint64
-	logTopicsEndTxNum    uint64
-	tracesFromStartTxNum uint64
-	tracesFromEndTxNum   uint64
-	tracesToStartTxNum   uint64
-	tracesToEndTxNum     uint64
-	logAddrs             bool
-	logTopics            bool
-	tracesFrom           bool
-	tracesTo             bool
+	d      [kv.DomainLen]DomainRanges
+	ranges [kv.StandaloneIdxLen]*MergeRange
 }
 
 func (r RangesV3) String() string {
@@ -1233,27 +1203,28 @@ func (r RangesV3) String() string {
 			ss = append(ss, fmt.Sprintf("%s(%s)", d.name, d.String()))
 		}
 	}
-	if r.logAddrs {
-		ss = append(ss, fmt.Sprintf("logAddr=%d-%d", r.logAddrsStartTxNum/r.d[kv.AccountsDomain].aggStep, r.logAddrsEndTxNum/r.d[kv.AccountsDomain].aggStep))
-	}
-	if r.logTopics {
-		ss = append(ss, fmt.Sprintf("logTopic=%d-%d", r.logTopicsStartTxNum/r.d[kv.AccountsDomain].aggStep, r.logTopicsEndTxNum/r.d[kv.AccountsDomain].aggStep))
-	}
-	if r.tracesFrom {
-		ss = append(ss, fmt.Sprintf("traceFrom=%d-%d", r.tracesFromStartTxNum/r.d[kv.AccountsDomain].aggStep, r.tracesFromEndTxNum/r.d[kv.AccountsDomain].aggStep))
-	}
-	if r.tracesTo {
-		ss = append(ss, fmt.Sprintf("traceTo=%d-%d", r.tracesToStartTxNum/r.d[kv.AccountsDomain].aggStep, r.tracesToEndTxNum/r.d[kv.AccountsDomain].aggStep))
+
+	aggStep := r.d[kv.AccountsDomain].aggStep
+	for p, mr := range r.ranges {
+		if mr != nil && mr.needMerge {
+			ss = append(ss, mr.String(kv.InvertedIdxPos(p).String(), aggStep))
+		}
 	}
 	return strings.Join(ss, ", ")
 }
+
 func (r RangesV3) any() bool {
 	for _, d := range r.d {
 		if d.any() {
 			return true
 		}
 	}
-	return r.logAddrs || r.logTopics || r.tracesFrom || r.tracesTo
+	for _, ii := range r.ranges {
+		if ii.needMerge {
+			return true
+		}
+	}
+	return false
 }
 
 func (ac *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) RangesV3 {
@@ -1261,10 +1232,9 @@ func (ac *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) RangesV3 {
 	for id, d := range ac.d {
 		r.d[id] = d.findMergeRange(maxEndTxNum, maxSpan)
 	}
-	r.logAddrs, r.logAddrsStartTxNum, r.logAddrsEndTxNum = ac.logAddrs.findMergeRange(maxEndTxNum, maxSpan)
-	r.logTopics, r.logTopicsStartTxNum, r.logTopicsEndTxNum = ac.logTopics.findMergeRange(maxEndTxNum, maxSpan)
-	r.tracesFrom, r.tracesFromStartTxNum, r.tracesFromEndTxNum = ac.tracesFrom.findMergeRange(maxEndTxNum, maxSpan)
-	r.tracesTo, r.tracesToStartTxNum, r.tracesToEndTxNum = ac.tracesTo.findMergeRange(maxEndTxNum, maxSpan)
+	for id, ii := range ac.iis {
+		r.ranges[id] = ii.findMergeRange(maxEndTxNum, maxSpan)
+	}
 	//log.Info(fmt.Sprintf("findMergeRange(%d, %d)=%s\n", maxEndTxNum/ac.a.aggregationStep, maxSpan/ac.a.aggregationStep, r))
 	return r
 }
@@ -1490,34 +1460,18 @@ func (ac *AggregatorRoTx) mergeFiles(ctx context.Context, files SelectedStaticFi
 		}
 	}
 
-	if r.logAddrs {
-		g.Go(func() error {
-			var err error
-			mf.logAddrs, err = ac.logAddrs.mergeFiles(ctx, files.logAddrs, r.logAddrsStartTxNum, r.logAddrsEndTxNum, ac.a.ps)
-			return err
-		})
+	for id, rng := range r.ranges {
+		id := id
+		rng := rng
+		if rng.needMerge {
+			g.Go(func() error {
+				var err error
+				mf.iis[id], err = ac.iis[id].mergeFiles(ctx, files.ii[id].fi, rng.from, rng.to, ac.a.ps)
+				return err
+			})
+		}
 	}
-	if r.logTopics {
-		g.Go(func() error {
-			var err error
-			mf.logTopics, err = ac.logTopics.mergeFiles(ctx, files.logTopics, r.logTopicsStartTxNum, r.logTopicsEndTxNum, ac.a.ps)
-			return err
-		})
-	}
-	if r.tracesFrom {
-		g.Go(func() error {
-			var err error
-			mf.tracesFrom, err = ac.tracesFrom.mergeFiles(ctx, files.tracesFrom, r.tracesFromStartTxNum, r.tracesFromEndTxNum, ac.a.ps)
-			return err
-		})
-	}
-	if r.tracesTo {
-		g.Go(func() error {
-			var err error
-			mf.tracesTo, err = ac.tracesTo.mergeFiles(ctx, files.tracesTo, r.tracesToStartTxNum, r.tracesToEndTxNum, ac.a.ps)
-			return err
-		})
-	}
+
 	err := g.Wait()
 	if err == nil {
 		closeFiles = false
@@ -1539,10 +1493,9 @@ func (a *Aggregator) integrateMergedDirtyFiles(outs SelectedStaticFilesV3, in Me
 		d.integrateMergedDirtyFiles(outs.d[id], outs.dIdx[id], outs.dHist[id], in.d[id], in.dIdx[id], in.dHist[id])
 	}
 
-	a.logAddrs.integrateMergedDirtyFiles(outs.logAddrs, in.logAddrs)
-	a.logTopics.integrateMergedDirtyFiles(outs.logTopics, in.logTopics)
-	a.tracesFrom.integrateMergedDirtyFiles(outs.tracesFrom, in.tracesFrom)
-	a.tracesTo.integrateMergedDirtyFiles(outs.tracesTo, in.tracesTo)
+	for id, ii := range a.iis {
+		ii.integrateMergedDirtyFiles(outs.ii[id].fi, in.iis[id])
+	}
 	return frozen
 }
 
@@ -1556,10 +1509,9 @@ func (a *Aggregator) cleanAfterMerge(in MergedFilesV3) {
 	for id, d := range at.d {
 		d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])
 	}
-	at.logAddrs.cleanAfterMerge(in.logAddrs)
-	at.logTopics.cleanAfterMerge(in.logTopics)
-	at.tracesFrom.cleanAfterMerge(in.tracesFrom)
-	at.tracesTo.cleanAfterMerge(in.tracesTo)
+	for id, ii := range at.iis {
+		ii.cleanAfterMerge(in.iis[id])
+	}
 }
 
 // KeepStepsInDB - usually equal to one a.aggregationStep, but when we exec blocks from snapshots
@@ -1677,13 +1629,13 @@ func (ac *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs
 	//case kv.GasUsedHistoryIdx:
 	//	return ac.d[kv.GasUsedDomain].ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
 	case kv.LogTopicIdx:
-		return ac.logTopics.IdxRange(k, fromTs, toTs, asc, limit, tx)
+		return ac.iis[kv.LogTopicIdxPos].IdxRange(k, fromTs, toTs, asc, limit, tx)
 	case kv.LogAddrIdx:
-		return ac.logAddrs.IdxRange(k, fromTs, toTs, asc, limit, tx)
+		return ac.iis[kv.LogAddrIdxPos].IdxRange(k, fromTs, toTs, asc, limit, tx)
 	case kv.TracesFromIdx:
-		return ac.tracesFrom.IdxRange(k, fromTs, toTs, asc, limit, tx)
+		return ac.iis[kv.TracesFromIdxPos].IdxRange(k, fromTs, toTs, asc, limit, tx)
 	case kv.TracesToIdx:
-		return ac.tracesTo.IdxRange(k, fromTs, toTs, asc, limit, tx)
+		return ac.iis[kv.TracesToIdxPos].IdxRange(k, fromTs, toTs, asc, limit, tx)
 	default:
 		return nil, fmt.Errorf("unexpected history name: %s", name)
 	}
@@ -1751,12 +1703,9 @@ func (a *Aggregator) Stats() FilesStats22 {
 //   - user will not see "partial writes" or "new files appearance"
 //   - last reader removing garbage files inside `Close` method
 type AggregatorRoTx struct {
-	a          *Aggregator
-	d          [kv.DomainLen]*DomainRoTx
-	logAddrs   *InvertedIndexRoTx
-	logTopics  *InvertedIndexRoTx
-	tracesFrom *InvertedIndexRoTx
-	tracesTo   *InvertedIndexRoTx
+	a   *Aggregator
+	d   [kv.DomainLen]*DomainRoTx
+	iis [kv.StandaloneIdxLen]*InvertedIndexRoTx
 
 	id      uint64 // auto-increment id of ctx for logs
 	_leakID uint64 // set only if TRACE_AGG=true
@@ -1770,10 +1719,9 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 	}
 
 	a.visibleFilesLock.RLock()
-	ac.logAddrs = a.logAddrs.BeginFilesRo()
-	ac.logTopics = a.logTopics.BeginFilesRo()
-	ac.tracesFrom = a.tracesFrom.BeginFilesRo()
-	ac.tracesTo = a.tracesTo.BeginFilesRo()
+	for id, ii := range a.iis {
+		ac.iis[id] = ii.BeginFilesRo()
+	}
 	for id, d := range a.d {
 		ac.d[id] = d.BeginFilesRo()
 	}
@@ -1843,22 +1791,22 @@ func (ac *AggregatorRoTx) DebugEFAllValuesAreInRange(ctx context.Context, name k
 	//		return err
 	//	}
 	case kv.TracesFromIdx:
-		err := ac.tracesFrom.DebugEFAllValuesAreInRange(ctx)
+		err := ac.iis[kv.TracesFromIdxPos].DebugEFAllValuesAreInRange(ctx)
 		if err != nil {
 			return err
 		}
 	case kv.TracesToIdx:
-		err := ac.tracesTo.DebugEFAllValuesAreInRange(ctx)
+		err := ac.iis[kv.TracesToIdxPos].DebugEFAllValuesAreInRange(ctx)
 		if err != nil {
 			return err
 		}
 	case kv.LogAddrIdx:
-		err := ac.logAddrs.DebugEFAllValuesAreInRange(ctx)
+		err := ac.iis[kv.LogAddrIdxPos].DebugEFAllValuesAreInRange(ctx)
 		if err != nil {
 			return err
 		}
 	case kv.LogTopicIdx:
-		err := ac.logTopics.DebugEFAllValuesAreInRange(ctx)
+		err := ac.iis[kv.LogTopicIdxPos].DebugEFAllValuesAreInRange(ctx)
 		if err != nil {
 			return err
 		}
@@ -1882,10 +1830,9 @@ func (ac *AggregatorRoTx) Close() {
 			d.Close()
 		}
 	}
-	ac.logAddrs.Close()
-	ac.logTopics.Close()
-	ac.tracesFrom.Close()
-	ac.tracesTo.Close()
+	for _, ii := range ac.iis {
+		ii.Close()
+	}
 }
 
 // BackgroundResult - used only indicate that some work is done

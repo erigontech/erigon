@@ -532,6 +532,7 @@ var (
 	PruneBlocksType     = []byte("pruneBlocksType")
 
 	DBSchemaVersionKey = []byte("dbVersion")
+	GenesisKey         = []byte("genesis")
 
 	BittorrentPeerID            = "peerID"
 	CurrentHeadersSnapshotHash  = []byte("CurrentHeadersSnapshotHash")
@@ -544,6 +545,7 @@ var (
 	LightClientStore            = []byte("LightClientStore")
 	LightClientFinalityUpdate   = []byte("LightClientFinalityUpdate")
 	LightClientOptimisticUpdate = []byte("LightClientOptimisticUpdate")
+	LastNewBlockSeen            = []byte("LastNewBlockSeen") // last seen block hash
 
 	StatesProcessingKey = []byte("StatesProcessing")
 )
@@ -962,7 +964,28 @@ const (
 	LogAddrIdx    InvertedIdx = "LogAddrIdx"
 	TracesFromIdx InvertedIdx = "TracesFromIdx"
 	TracesToIdx   InvertedIdx = "TracesToIdx"
+
+	LogAddrIdxPos    InvertedIdxPos = 0
+	LogTopicIdxPos   InvertedIdxPos = 1
+	TracesFromIdxPos InvertedIdxPos = 2
+	TracesToIdxPos   InvertedIdxPos = 3
+	StandaloneIdxLen uint16         = 4
 )
+
+func (iip InvertedIdxPos) String() string {
+	switch iip {
+	case LogAddrIdxPos:
+		return "logAddr"
+	case LogTopicIdxPos:
+		return "logTopic"
+	case TracesFromIdxPos:
+		return "traceFrom"
+	case TracesToIdxPos:
+		return "traceTo"
+	default:
+		return "unknown inverted index"
+	}
+}
 
 func (d Domain) String() string {
 	switch d {

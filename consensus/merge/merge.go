@@ -244,7 +244,6 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 	if !chain.Config().IsCancun(header.Time) {
 		return misc.VerifyAbsenceOfCancunHeaderFields(header)
 	}
-
 	if err := misc.VerifyPresenceOfCancunHeaderFields(header); err != nil {
 		return err
 	}
@@ -252,6 +251,16 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 	if *header.ExcessBlobGas != expectedExcessBlobGas {
 		return fmt.Errorf("invalid excessBlobGas: have %d, want %d", *header.ExcessBlobGas, expectedExcessBlobGas)
 	}
+
+	// Verify existence / non-existence of requestsRoot
+	prague := chain.Config().IsPrague(header.Time)
+	if prague && header.RequestsRoot == nil {
+		return fmt.Errorf("missing requestsRoot")
+	}
+	if !prague && header.RequestsRoot != nil {
+		return consensus.ErrUnexpectedRequests
+	}
+
 	return nil
 }
 

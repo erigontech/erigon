@@ -36,6 +36,7 @@ type service struct {
 func NewService(
 	logger log.Logger,
 	chainConfig *chain.Config,
+	dataDir string,
 	tmpDir string,
 	sentryClient direct.SentryClient,
 	maxPeers int,
@@ -53,6 +54,7 @@ func NewService(
 	heimdallService := heimdall.NewHeimdall(heimdallClient, logger)
 	heimdallServiceV2 := heimdall.NewService(
 		heimdallUrl,
+		dataDir,
 		tmpDir,
 		logger,
 	)
