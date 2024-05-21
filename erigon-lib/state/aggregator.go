@@ -190,7 +190,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	if err := a.registerII(kv.TracesToIdxPos, salt, dirs, db, aggregationStep, "tracesto", kv.TblTracesToKeys, kv.TblTracesToIdx, logger); err != nil {
 		return nil, err
 	}
-	a.KeepHistoryRecentTxInDB(aggregationStep)
+	a.KeepHistoryRecentTxInDB(aggregationStep / 2)
 	a.recalcVisibleFiles()
 
 	if dbg.NoSync() {
@@ -1040,6 +1040,7 @@ func (as *AggregatorPruneStat) Accumulate(other *AggregatorPruneStat) {
 }
 
 func (ac *AggregatorRoTx) PruneCommitHistory(ctx context.Context, tx kv.RwTx, limitTxNums uint64, withWarmup bool, logEvery *time.Ticker) error {
+	return nil
 	defer mxPruneTookAgg.ObserveDuration(time.Now())
 
 	cd := ac.d[kv.CommitmentDomain]

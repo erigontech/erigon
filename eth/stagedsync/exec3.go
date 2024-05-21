@@ -563,7 +563,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	if useExternalTx && blockNum < cfg.blockReader.FrozenBlocks() {
-		defer agg.KeepHistoryRecentTxInDB(0).KeepHistoryRecentTxInDB(agg.StepSize() - (agg.StepSize() / 4))
+		defer agg.KeepHistoryRecentTxInDB(0).KeepHistoryRecentTxInDB(agg.StepSize() / 2)
 	}
 
 	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {
