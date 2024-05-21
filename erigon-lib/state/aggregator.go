@@ -226,7 +226,7 @@ func getStateIndicesSalt(baseDir string) (salt *uint32, err error) {
 	return salt, nil
 }
 
-func (a *Aggregator) registerII(idx uint16, salt *uint32, dirs datadir.Dirs, db kv.RoDB, aggregationStep uint64, filenameBase, indexKeysTable, indexTable string, logger log.Logger) error {
+func (a *Aggregator) registerII(idx kv.InvertedIdxPos, salt *uint32, dirs datadir.Dirs, db kv.RoDB, aggregationStep uint64, filenameBase, indexKeysTable, indexTable string, logger log.Logger) error {
 	idxCfg := iiCfg{salt: salt, dirs: dirs, db: db}
 	var err error
 	a.iis[idx], err = NewInvertedIndex(idxCfg, aggregationStep, filenameBase, indexKeysTable, indexTable, nil, logger)
@@ -1205,17 +1205,10 @@ func (r RangesV3) String() string {
 	}
 
 	aggStep := r.d[kv.AccountsDomain].aggStep
-	if r.ranges[kv.LogAddrIdxPos] != nil && r.ranges[kv.LogAddrIdxPos].needMerge {
-		ss = append(ss, r.ranges[kv.LogAddrIdxPos].String("logAddr", aggStep))
-	}
-	if r.ranges[kv.LogTopicIdxPos] != nil && r.ranges[kv.LogTopicIdxPos].needMerge {
-		ss = append(ss, r.ranges[kv.LogTopicIdxPos].String("logTopic", aggStep))
-	}
-	if r.ranges[kv.TracesFromIdxPos] != nil && r.ranges[kv.TracesFromIdxPos].needMerge {
-		ss = append(ss, r.ranges[kv.TracesFromIdxPos].String("traceFrom", aggStep))
-	}
-	if r.ranges[kv.TracesToIdxPos] != nil && r.ranges[kv.TracesToIdxPos].needMerge {
-		ss = append(ss, r.ranges[kv.TracesToIdxPos].String("traceTo", aggStep))
+	for p, mr := range r.ranges {
+		if mr != nil && mr.needMerge {
+			ss = append(ss, mr.String(kv.InvertedIdxPos(p).String(), aggStep))
+		}
 	}
 	return strings.Join(ss, ", ")
 }
