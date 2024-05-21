@@ -32,11 +32,11 @@ func makeType[T any]() *T {
 
 func NewService(
 	heimdallUrl string,
-	openDatabase OpenDatabaseFunc,
+	dataDir string,
 	tmpDir string,
 	logger log.Logger,
 ) Service {
-	db := NewDatabase(openDatabase, logger)
+	db := NewDatabase(dataDir, logger)
 
 	blockNumToIdIndexFactory := func(ctx context.Context) (*RangeIndex, error) {
 		return NewRangeIndex(ctx, tmpDir, logger)

@@ -981,19 +981,15 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			return nil, errors.New("nil sentryClient for polygon sync")
 		}
 
-		var openDatabase heimdall.OpenDatabaseFunc = func(ctx context.Context, name string, logger log.Logger) (kv.RwDB, error) {
-			return node.OpenDatabase(ctx, stack.Config(), kv.ConsensusDB, name, false, logger)
-		}
-
 		backend.polygonSyncService = polygonsync.NewService(
 			logger,
 			chainConfig,
+			dirs.DataDir,
 			tmpdir,
 			sentryClient,
 			p2pConfig.MaxPeers,
 			statusDataProvider,
 			config.HeimdallURL,
-			openDatabase,
 			executionRpc,
 		)
 	}

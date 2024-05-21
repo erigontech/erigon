@@ -36,12 +36,12 @@ type service struct {
 func NewService(
 	logger log.Logger,
 	chainConfig *chain.Config,
+	dataDir string,
 	tmpDir string,
 	sentryClient direct.SentryClient,
 	maxPeers int,
 	statusDataProvider *sentry.StatusDataProvider,
 	heimdallUrl string,
-	openDatabase heimdall.OpenDatabaseFunc,
 	executionClient executionproto.ExecutionClient,
 ) Service {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
@@ -54,7 +54,7 @@ func NewService(
 	heimdallService := heimdall.NewHeimdall(heimdallClient, logger)
 	heimdallServiceV2 := heimdall.NewService(
 		heimdallUrl,
-		openDatabase,
+		dataDir,
 		tmpDir,
 		logger,
 	)
