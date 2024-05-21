@@ -1039,7 +1039,7 @@ func (as *AggregatorPruneStat) Accumulate(other *AggregatorPruneStat) {
 }
 
 // temporal function to prune history straight after commitment is done - reduce history size in db until we build
-// pruning in background
+// pruning in background. This helps on chain-tip performance (while full pruning is not available we can prune at least commit)
 func (ac *AggregatorRoTx) PruneCommitHistory(ctx context.Context, tx kv.RwTx, withWarmup bool, logEvery *time.Ticker) error {
 	cd := ac.d[kv.CommitmentDomain]
 	if cd.ht.h.historyDisabled {
