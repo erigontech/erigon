@@ -12,6 +12,7 @@ type Zk struct {
 	L2DataStreamerUrl                      string
 	L2DataStreamerTimeout                  time.Duration
 	L1SyncStartBlock                       uint64
+	L1SyncStopBatch                        uint64
 	L1ChainId                              uint64
 	L1RpcUrl                               string
 	AddressSequencer                       common.Address

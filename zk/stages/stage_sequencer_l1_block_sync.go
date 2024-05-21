@@ -75,6 +75,29 @@ func SpawnSequencerL1BlockSyncStage(
 		return err
 	}
 
+	// check if the highest batch from the L1 is higher than the config value if it is set
+	if cfg.zkCfg.L1SyncStopBatch > 0 {
+		// stop completely if we have executed past the stop batch
+		if highestKnownBatch > cfg.zkCfg.L1SyncStopBatch {
+			log.Info("Stopping L1 sync stage based on configured stop batch", "config", cfg.zkCfg.L1SyncStopBatch, "highest-known", highestKnownBatch)
+			time.Sleep(1 * time.Second)
+			return nil
+		}
+
+		// if not we might have already started execution and just need to see if we have all the batches we care about in the db, and we can exit
+		// early as well
+		hasEverything, err := haveAllBatchesInDb(highestBatch, cfg, hermezDb)
+		if err != nil {
+			return err
+		}
+		if hasEverything {
+			log.Info("Stopping L1 sync stage based on configured stop batch", "config", cfg.zkCfg.L1SyncStopBatch, "highest-known", highestKnownBatch)
+			time.Sleep(1 * time.Second)
+			return nil
+		}
+	}
+
+	// check if execution has caught up to the tip of the chain
 	if highestBatch > 0 && highestKnownBatch == highestBatch {
 		log.Info("L1 block sync recovery has completed!", "batch", highestBatch)
 		time.Sleep(5 * time.Second)
@@ -105,6 +128,7 @@ func SpawnSequencerL1BlockSyncStage(
 	logTicker := time.NewTicker(10 * time.Second)
 	defer logTicker.Stop()
 	var latestBatch uint64
+	stopBlockMap := make(map[uint64]struct{})
 
 LOOP:
 	for {
@@ -151,7 +175,6 @@ LOOP:
 
 				// iterate over the batches in reverse order to ensure that the batches are written in the correct order
 				// this is important because the batches are written in reverse order
-
 				for idx, batch := range batches {
 					b := initBatch + uint64(idx)
 					data := append(coinbase.Bytes(), batch...)
@@ -165,6 +188,15 @@ LOOP:
 					}
 					totalBlocks += len(decoded)
 					log.Debug(fmt.Sprintf("[%s] Wrote L1 batch", logPrefix), "batch", b, "blocks", len(decoded), "totalBlocks", totalBlocks)
+
+					// check if we need to stop here based on config
+					if cfg.zkCfg.L1SyncStopBatch > 0 {
+						stopBlockMap[b] = struct{}{}
+						if checkStopBlockMap(highestBatch, cfg.zkCfg.L1SyncStopBatch, stopBlockMap) {
+							log.Info("Stopping L1 sync based on stop batch config")
+							break LOOP
+						}
+					}
 				}
 
 			}
@@ -194,6 +226,31 @@ LOOP:
 	}
 
 	return nil
+}
+
+func haveAllBatchesInDb(highestBatch uint64, cfg SequencerL1BlockSyncCfg, hermezDb *hermez_db.HermezDb) (bool, error) {
+	hasEverything := true
+	for i := highestBatch; i <= cfg.zkCfg.L1SyncStopBatch; i++ {
+		data, err := hermezDb.GetL1BatchData(i)
+		if err != nil {
+			return false, err
+		}
+		if len(data) == 0 {
+			hasEverything = false
+			break
+		}
+	}
+	return hasEverything, nil
+}
+
+// checks the stop block map for any gaps between the known lowest and target block height
+func checkStopBlockMap(earliest, target uint64, stopBlockMap map[uint64]struct{}) bool {
+	for i := earliest; i <= target; i++ {
+		if _, ok := stopBlockMap[i]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func UnwindSequencerL1BlockSyncStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg SequencerL1BlockSyncCfg, ctx context.Context) (err error) {
