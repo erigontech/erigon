@@ -306,7 +306,7 @@ func ExecV3(ctx context.Context,
 	var count uint64
 	var lock sync.RWMutex
 
-	shouldReportToTxPool := maxBlockNum-blockNum <= 8
+	shouldReportToTxPool := maxBlockNum-blockNum <= 64
 	var accumulator *shards.Accumulator
 	if shouldReportToTxPool {
 		accumulator = cfg.accumulator
@@ -642,7 +642,7 @@ Loop:
 			return f(n)
 		}
 		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */)
-
+		fmt.Println("B", blockNum, "txs", len(txs), "txNum", inputTxNum, "outputTxNum", outputTxNum.Load(), "blockComplete", blockComplete.Load())
 		if parallel {
 			select {
 			case err := <-rwLoopErrCh:

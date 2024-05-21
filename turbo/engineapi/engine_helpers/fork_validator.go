@@ -24,7 +24,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
-	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -161,12 +160,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 		m := membatchwithdb.NewMemoryBatch(tx, fv.tmpDir, logger)
 		defer m.Close()
 		txc.Tx = m
-		var err error
-		txc.Doms, err = state.NewSharedDomains(tx, logger)
-		if err != nil {
-			return "", [32]byte{}, nil, err
-		}
-		defer txc.Doms.Close()
+
 		fv.extendingForkNotifications = &shards.Notifications{
 			Events:      shards.NewEvents(),
 			Accumulator: shards.NewAccumulator(),
@@ -260,12 +254,6 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 	batch := membatchwithdb.NewMemoryBatch(tx, fv.tmpDir, logger)
 	defer batch.Rollback()
 	txc.Tx = batch
-	sd, err := state.NewSharedDomains(tx, logger)
-	if err != nil {
-		return "", [32]byte{}, nil, err
-	}
-	defer sd.Close()
-	txc.Doms = sd
 	notifications := &shards.Notifications{
 		Events:      shards.NewEvents(),
 		Accumulator: shards.NewAccumulator(),
