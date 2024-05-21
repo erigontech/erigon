@@ -164,6 +164,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.CaplinDiscoveryAddrFlag,
 	&utils.CaplinDiscoveryPortFlag,
 	&utils.CaplinDiscoveryTCPPortFlag,
+	&utils.CaplinCheckpointSyncUrlFlag,
 	&utils.SentinelAddrFlag,
 	&utils.SentinelPortFlag,
 
