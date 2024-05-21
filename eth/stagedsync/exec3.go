@@ -593,6 +593,7 @@ Loop:
 				GetHashFn:       getHashFn,
 				EvmBlockContext: blockContext,
 				Withdrawals:     b.Withdrawals(),
+				Requests:        b.Requests(),
 			}
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
@@ -1080,6 +1081,7 @@ func reconstituteStep(last bool,
 						GetHashFn:       getHashFn,
 						EvmBlockContext: blockContext,
 						Withdrawals:     b.Withdrawals(),
+						Requests:        b.Requests(),
 					}
 					if txIndex >= 0 && txIndex < len(txs) {
 						txTask.Tx = txs[txIndex]

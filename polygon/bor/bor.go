@@ -551,6 +551,10 @@ func ValidateHeaderUnusedFields(header *types.Header) error {
 		return consensus.ErrUnexpectedWithdrawals
 	}
 
+	if header.RequestsRoot != nil {
+		return consensus.ErrUnexpectedRequests
+	}
+
 	return misc.VerifyAbsenceOfCancunHeaderFields(header)
 }
 
@@ -984,6 +988,10 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 		return nil, nil, consensus.ErrUnexpectedWithdrawals
 	}
 
+	if requests != nil || header.RequestsRoot != nil {
+		return nil, nil, consensus.ErrUnexpectedRequests
+	}
+
 	if isSprintStart(headerNumber, c.config.CalculateSprintLength(headerNumber)) {
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 
@@ -1048,6 +1056,10 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 
 	if withdrawals != nil || header.WithdrawalsHash != nil {
 		return nil, nil, nil, consensus.ErrUnexpectedWithdrawals
+	}
+
+	if requests != nil || header.RequestsRoot != nil {
+		return nil, nil, nil, consensus.ErrUnexpectedRequests
 	}
 
 	if isSprintStart(headerNumber, c.config.CalculateSprintLength(headerNumber)) {
