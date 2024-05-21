@@ -1096,7 +1096,6 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	if maxBlockNum <= minBlockNum {
 		return false, nil
 	}
-	aggTx := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 
 	unwindToLimit, err := aggTx.CanUnwindDomainsToBlockNum(applyTx)
 	if err != nil {
