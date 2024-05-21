@@ -246,11 +246,16 @@ func (e *EngineBlockDownloader) insertHeadersAndBodies(ctx context.Context, tx k
 			if err := e.chainRW.InsertBlocksAndWait(ctx, blocksBatch); err != nil {
 				return err
 			}
+			currentHeader := e.chainRW.CurrentHeader(ctx)
+			lastBlockNumber := blocksBatch[len(blocksBatch)-1].NumberU64()
+			isForkChoiceNeeded := currentHeader == nil || lastBlockNumber > currentHeader.Number.Uint64()
 			inserted += uint64(len(blocksBatch))
 			if inserted >= uint64(e.syncCfg.LoopBlockLimit) {
 				lastHash := blocksBatch[len(blocksBatch)-1].Hash()
-				if _, _, _, err := e.chainRW.UpdateForkChoice(ctx, lastHash, lastHash, lastHash); err != nil {
-					return err
+				if isForkChoiceNeeded {
+					if _, _, _, err := e.chainRW.UpdateForkChoice(ctx, lastHash, lastHash, lastHash); err != nil {
+						return err
+					}
 				}
 				inserted = 0
 			}

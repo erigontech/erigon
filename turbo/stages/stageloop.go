@@ -455,13 +455,27 @@ func addAndVerifyBlockStep(batch kv.RwTx, engine consensus.Engine, chainReader c
 	return nil
 }
 
-func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine consensus.Engine, txc wrap.TxContainer, stateSync *stagedsync.Sync, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) (err error) {
+func cleanupProgressIfNeeded(batch kv.RwTx, header *types.Header) error {
+	// If we fail state root then we have wrong execution stage progress set (+1), we need to decrease by one!
+	progress, err := stages.GetStageProgress(batch, stages.Execution)
+	if err != nil {
+		return err
+	}
+	if progress == header.Number.Uint64() && progress > 0 {
+		progress--
+		if err := stages.SaveStageProgress(batch, stages.Execution, progress); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine consensus.Engine, txc wrap.TxContainer, stateSync *stagedsync.Sync, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody, test bool) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things
-
 	// Construct side fork if we have one
 	if unwindPoint > 0 {
 		// Run it through the unwind
@@ -484,9 +498,16 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 			return err
 		}
 		// Run state sync
-		if err = stateSync.RunNoInterrupt(nil, txc, false /* firstCycle */); err != nil {
-			return err
+		if !test {
+			if err = stateSync.RunNoInterrupt(nil, txc, false /* firstCycle */); err != nil {
+				if err := cleanupProgressIfNeeded(txc.Tx, currentHeader); err != nil {
+					return err
+
+				}
+				return err
+			}
 		}
+
 	}
 
 	// If we did not specify header we stop here
@@ -497,10 +518,15 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 	if err := addAndVerifyBlockStep(txc.Tx, engine, chainReader, header, body); err != nil {
 		return err
 	}
-	// Run state sync
 	if err = stateSync.RunNoInterrupt(nil, txc, false /* firstCycle */); err != nil {
+		if !test {
+			if err := cleanupProgressIfNeeded(txc.Tx, header); err != nil {
+				return err
+			}
+		}
 		return err
 	}
+
 	return nil
 }
 

@@ -205,6 +205,7 @@ func ConvertRawBlockBodyToRpc(in *types.RawBody, blockNumber uint64, blockHash l
 		Transactions: in.Transactions,
 		Uncles:       HeadersToHeadersRPC(in.Uncles),
 		Withdrawals:  ConvertWithdrawalsToRpc(in.Withdrawals),
+		//TODO(racytech): Requests
 	}
 }
 
@@ -229,6 +230,7 @@ func ConvertRawBlockBodyFromRpc(in *execution.BlockBody) (*types.RawBody, error)
 		Transactions: in.Transactions,
 		Uncles:       uncles,
 		Withdrawals:  ConvertWithdrawalsFromRpc(in.Withdrawals),
+		//TODO(racytech): Requests
 	}, nil
 }
 
