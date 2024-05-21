@@ -22,7 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	math2 "math"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -189,7 +189,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	if err := a.registerII(kv.TracesToIdxPos, salt, dirs, db, aggregationStep, kv.FileTracesToIdx, kv.TblTracesToKeys, kv.TblTracesToIdx, logger); err != nil {
 		return nil, err
 	}
-	a.KeepStepsInDB(1)
+	a.KeepHistoryRecentTxInDB(aggregationStep / 2)
 	a.recalcVisibleFiles()
 
 	if dbg.NoSync() {
@@ -1038,11 +1038,40 @@ func (as *AggregatorPruneStat) Accumulate(other *AggregatorPruneStat) {
 	}
 }
 
+// temporal function to prune history straight after commitment is done - reduce history size in db until we build
+// pruning in background. This helps on chain-tip performance (while full pruning is not available we can prune at least commit)
+func (ac *AggregatorRoTx) PruneCommitHistory(ctx context.Context, tx kv.RwTx, withWarmup bool, logEvery *time.Ticker) error {
+	cd := ac.d[kv.CommitmentDomain]
+	if cd.ht.h.historyDisabled {
+		return nil
+	}
+
+	txFrom := uint64(0)
+	canHist, txTo := cd.ht.canPruneUntil(tx, math.MaxUint64)
+	if dbg.NoPrune() || !canHist {
+		return nil
+	}
+
+	if logEvery == nil {
+		logEvery = time.NewTicker(30 * time.Second)
+		defer logEvery.Stop()
+	}
+	defer mxPruneTookAgg.ObserveDuration(time.Now())
+
+	stat, err := cd.ht.Prune(ctx, tx, txFrom, txTo, math.MaxUint64, true, withWarmup, logEvery)
+	if err != nil {
+		return err
+	}
+
+	ac.a.logger.Info("commitment history backpressure pruning", "pruned", stat.String())
+	return nil
+}
+
 func (ac *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, withWarmup bool, logEvery *time.Ticker) (*AggregatorPruneStat, error) {
 	defer mxPruneTookAgg.ObserveDuration(time.Now())
 
 	if limit == 0 {
-		limit = uint64(math2.MaxUint64)
+		limit = uint64(math.MaxUint64)
 	}
 
 	var txFrom, step uint64 // txFrom is always 0 to avoid dangling keys in indices/hist
@@ -1514,10 +1543,11 @@ func (a *Aggregator) cleanAfterMerge(in MergedFilesV3) {
 	}
 }
 
-// KeepStepsInDB - usually equal to one a.aggregationStep, but when we exec blocks from snapshots
+// KeepHistoryRecentTxInDB - usually equal to one a.aggregationStep, but when we exec blocks from snapshots
 // we can set it to 0, because no re-org on this blocks are possible
-func (a *Aggregator) KeepStepsInDB(steps uint64) *Aggregator {
-	a.keepInDB = a.FirstTxNumOfStep(steps)
+func (a *Aggregator) KeepHistoryRecentTxInDB(recentTxs uint64) *Aggregator {
+	a.keepInDB = recentTxs
+	a.logger.Warn("[snapshots] KeepHistoryRecentTxInDB", "txn", a.keepInDB)
 	for _, d := range a.d {
 		if d == nil {
 			continue

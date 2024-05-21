@@ -289,7 +289,6 @@ func ExecV3(ctx context.Context,
 	}
 
 	blockNum = doms.BlockNum()
-	initialBlockNum := blockNum
 	outputTxNum.Store(doms.TxNum())
 	if maxBlockNum-blockNum > 16 {
 		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
@@ -563,7 +562,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	if useExternalTx && blockNum < cfg.blockReader.FrozenBlocks() {
-		defer agg.KeepStepsInDB(0).KeepStepsInDB(1)
+		defer agg.KeepHistoryRecentTxInDB(0).KeepHistoryRecentTxInDB(agg.StepSize() / 2)
 	}
 
 	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {
@@ -878,14 +877,8 @@ Loop:
 				t1 = time.Since(tt)
 
 				tt = time.Now()
-				// If execute more than 100 blocks then, it is safe to assume that we are not on the tip of the chain.
-				// In this case, we can prune the state to save memory.
-				pruneBlockMargin := uint64(100)
-
-				if blockNum-initialBlockNum > pruneBlockMargin {
-					if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Minute, applyTx); err != nil {
-						return err
-					}
+				if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Minute, applyTx); err != nil {
+					return err
 				}
 				t3 = time.Since(tt)
 
@@ -1063,6 +1056,9 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 			if err := doms.Flush(ctx, applyTx); err != nil {
 				return false, err
 			}
+			if err = applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneCommitHistory(ctx, applyTx, false, nil); err != nil {
+				return false, err
+			}
 		}
 		return true, nil
 	}
@@ -1095,8 +1091,9 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	if maxBlockNum <= minBlockNum {
 		return false, nil
 	}
+	aggTx := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 
-	unwindToLimit, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).CanUnwindDomainsToBlockNum(applyTx)
+	unwindToLimit, err := aggTx.CanUnwindDomainsToBlockNum(applyTx)
 	if err != nil {
 		return false, err
 	}
@@ -1107,7 +1104,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	unwindTo := maxBlockNum - jump
 
 	// protect from too far unwind
-	allowedUnwindTo, ok, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).CanUnwindBeforeBlockNum(unwindTo, applyTx)
+	allowedUnwindTo, ok, err := aggTx.CanUnwindBeforeBlockNum(unwindTo, applyTx)
 	if err != nil {
 		return false, err
 	}
