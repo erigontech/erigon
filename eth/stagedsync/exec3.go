@@ -1044,7 +1044,12 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	if doms.BlockNum() != header.Number.Uint64() {
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
+
+	aggTx := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+
+	aggTx.RestrictSubsetFileDeletions(true)
 	rh, err := doms.ComputeCommitment(ctx, true, header.Number.Uint64(), u.LogPrefix())
+	aggTx.RestrictSubsetFileDeletions(false)
 	if err != nil {
 		return false, fmt.Errorf("StateV3.Apply: %w", err)
 	}

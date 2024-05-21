@@ -1437,6 +1437,12 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 	return nil
 }
 
+func (ac *AggregatorRoTx) RestrictSubsetFileDeletions(b bool) {
+	ac.a.d[kv.AccountsDomain].restrictSubsetFileDeletions = b
+	ac.a.d[kv.StorageDomain].restrictSubsetFileDeletions = b
+	ac.a.d[kv.CommitmentDomain].restrictSubsetFileDeletions = b
+}
+
 func (ac *AggregatorRoTx) mergeFiles(ctx context.Context, files SelectedStaticFilesV3, r RangesV3) (MergedFilesV3, error) {
 	var mf MergedFilesV3
 	g, ctx := errgroup.WithContext(ctx)
@@ -1463,10 +1469,7 @@ func (ac *AggregatorRoTx) mergeFiles(ctx context.Context, files SelectedStaticFi
 			g.Go(func() (err error) {
 				var vt valueTransformer
 				if ac.a.commitmentValuesTransform && kid == kv.CommitmentDomain {
-					ac.a.d[kv.AccountsDomain].restrictSubsetFileDeletions = true
-					ac.a.d[kv.StorageDomain].restrictSubsetFileDeletions = true
-					ac.a.d[kv.CommitmentDomain].restrictSubsetFileDeletions = true
-
+					ac.RestrictSubsetFileDeletions(true)
 					accStorageMerged.Wait()
 
 					vt = ac.d[kv.CommitmentDomain].commitmentValTransformDomain(ac.d[kv.AccountsDomain], ac.d[kv.StorageDomain],
@@ -1479,9 +1482,7 @@ func (ac *AggregatorRoTx) mergeFiles(ctx context.Context, files SelectedStaticFi
 						accStorageMerged.Done()
 					}
 					if err == nil && kid == kv.CommitmentDomain {
-						ac.a.d[kv.AccountsDomain].restrictSubsetFileDeletions = false
-						ac.a.d[kv.StorageDomain].restrictSubsetFileDeletions = false
-						ac.a.d[kv.CommitmentDomain].restrictSubsetFileDeletions = false
+						ac.RestrictSubsetFileDeletions(false)
 					}
 				}
 				return err
