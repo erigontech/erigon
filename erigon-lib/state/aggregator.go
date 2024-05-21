@@ -133,7 +133,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		},
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
 	}
-	if a.d[kv.AccountsDomain], err = NewDomain(cfg, aggregationStep, "accounts", kv.TblAccountKeys, kv.TblAccountVals, kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx, logger); err != nil {
+	if a.d[kv.AccountsDomain], err = NewDomain(cfg, aggregationStep, kv.FileAccountDomain, kv.TblAccountKeys, kv.TblAccountVals, kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx, logger); err != nil {
 		return nil, err
 	}
 	cfg = domainCfg{
@@ -143,7 +143,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		},
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
 	}
-	if a.d[kv.StorageDomain], err = NewDomain(cfg, aggregationStep, "storage", kv.TblStorageKeys, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, logger); err != nil {
+	if a.d[kv.StorageDomain], err = NewDomain(cfg, aggregationStep, kv.FileStorageDomain, kv.TblStorageKeys, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, logger); err != nil {
 		return nil, err
 	}
 	cfg = domainCfg{
@@ -152,7 +152,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 			withLocalityIndex: false, withExistenceIndex: false, compression: CompressKeys | CompressVals, historyLargeValues: true,
 		},
 	}
-	if a.d[kv.CodeDomain], err = NewDomain(cfg, aggregationStep, "code", kv.TblCodeKeys, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx, logger); err != nil {
+	if a.d[kv.CodeDomain], err = NewDomain(cfg, aggregationStep, kv.FileCodeDomain, kv.TblCodeKeys, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx, logger); err != nil {
 		return nil, err
 	}
 	cfg = domainCfg{
@@ -165,7 +165,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
 		compress:                    CompressNone,
 	}
-	if a.d[kv.CommitmentDomain], err = NewDomain(cfg, aggregationStep, "commitment", kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, logger); err != nil {
+	if a.d[kv.CommitmentDomain], err = NewDomain(cfg, aggregationStep, kv.FileCommitmentDomain, kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, logger); err != nil {
 		return nil, err
 	}
 	//cfg = domainCfg{
@@ -177,16 +177,16 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	//if a.d[kv.GasUsedDomain], err = NewDomain(cfg, aggregationStep, "gasused", kv.TblGasUsedKeys, kv.TblGasUsedVals, kv.TblGasUsedHistoryKeys, kv.TblGasUsedHistoryVals, kv.TblGasUsedIdx, logger); err != nil {
 	//	return nil, err
 	//}
-	if err := a.registerII(kv.LogAddrIdxPos, salt, dirs, db, aggregationStep, "logaddrs", kv.TblLogAddressKeys, kv.TblLogAddressIdx, logger); err != nil {
+	if err := a.registerII(kv.LogAddrIdxPos, salt, dirs, db, aggregationStep, kv.FileLogAddressIdx, kv.TblLogAddressKeys, kv.TblLogAddressIdx, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerII(kv.LogTopicIdxPos, salt, dirs, db, aggregationStep, "logtopics", kv.TblLogTopicsKeys, kv.TblLogTopicsIdx, logger); err != nil {
+	if err := a.registerII(kv.LogTopicIdxPos, salt, dirs, db, aggregationStep, kv.FileLogTopicsIdx, kv.TblLogTopicsKeys, kv.TblLogTopicsIdx, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerII(kv.TracesFromIdxPos, salt, dirs, db, aggregationStep, "tracesfrom", kv.TblTracesFromKeys, kv.TblTracesFromIdx, logger); err != nil {
+	if err := a.registerII(kv.TracesFromIdxPos, salt, dirs, db, aggregationStep, kv.FileTracesFromIdx, kv.TblTracesFromKeys, kv.TblTracesFromIdx, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerII(kv.TracesToIdxPos, salt, dirs, db, aggregationStep, "tracesto", kv.TblTracesToKeys, kv.TblTracesToIdx, logger); err != nil {
+	if err := a.registerII(kv.TracesToIdxPos, salt, dirs, db, aggregationStep, kv.FileTracesToIdx, kv.TblTracesToKeys, kv.TblTracesToIdx, logger); err != nil {
 		return nil, err
 	}
 	a.KeepStepsInDB(1)
@@ -226,7 +226,7 @@ func getStateIndicesSalt(baseDir string) (salt *uint32, err error) {
 	return salt, nil
 }
 
-func (a *Aggregator) registerII(idx uint16, salt *uint32, dirs datadir.Dirs, db kv.RoDB, aggregationStep uint64, filenameBase, indexKeysTable, indexTable string, logger log.Logger) error {
+func (a *Aggregator) registerII(idx kv.InvertedIdxPos, salt *uint32, dirs datadir.Dirs, db kv.RoDB, aggregationStep uint64, filenameBase, indexKeysTable, indexTable string, logger log.Logger) error {
 	idxCfg := iiCfg{salt: salt, dirs: dirs, db: db}
 	var err error
 	a.iis[idx], err = NewInvertedIndex(idxCfg, aggregationStep, filenameBase, indexKeysTable, indexTable, nil, logger)
@@ -1205,17 +1205,10 @@ func (r RangesV3) String() string {
 	}
 
 	aggStep := r.d[kv.AccountsDomain].aggStep
-	if r.ranges[kv.LogAddrIdxPos] != nil && r.ranges[kv.LogAddrIdxPos].needMerge {
-		ss = append(ss, r.ranges[kv.LogAddrIdxPos].String("logAddr", aggStep))
-	}
-	if r.ranges[kv.LogTopicIdxPos] != nil && r.ranges[kv.LogTopicIdxPos].needMerge {
-		ss = append(ss, r.ranges[kv.LogTopicIdxPos].String("logTopic", aggStep))
-	}
-	if r.ranges[kv.TracesFromIdxPos] != nil && r.ranges[kv.TracesFromIdxPos].needMerge {
-		ss = append(ss, r.ranges[kv.TracesFromIdxPos].String("traceFrom", aggStep))
-	}
-	if r.ranges[kv.TracesToIdxPos] != nil && r.ranges[kv.TracesToIdxPos].needMerge {
-		ss = append(ss, r.ranges[kv.TracesToIdxPos].String("traceTo", aggStep))
+	for p, mr := range r.ranges {
+		if mr != nil && mr.needMerge {
+			ss = append(ss, mr.String(kv.InvertedIdxPos(p).String(), aggStep))
+		}
 	}
 	return strings.Join(ss, ", ")
 }

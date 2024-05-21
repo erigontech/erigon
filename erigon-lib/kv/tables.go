@@ -965,12 +965,27 @@ const (
 	TracesFromIdx InvertedIdx = "TracesFromIdx"
 	TracesToIdx   InvertedIdx = "TracesToIdx"
 
-	LogAddrIdxPos           = 0
-	LogTopicIdxPos          = 1
-	TracesFromIdxPos        = 2
-	TracesToIdxPos          = 3
-	StandaloneIdxLen uint16 = 4
+	LogAddrIdxPos    InvertedIdxPos = 0
+	LogTopicIdxPos   InvertedIdxPos = 1
+	TracesFromIdxPos InvertedIdxPos = 2
+	TracesToIdxPos   InvertedIdxPos = 3
+	StandaloneIdxLen uint16         = 4
 )
+
+func (iip InvertedIdxPos) String() string {
+	switch iip {
+	case LogAddrIdxPos:
+		return "logAddr"
+	case LogTopicIdxPos:
+		return "logTopic"
+	case TracesFromIdxPos:
+		return "traceFrom"
+	case TracesToIdxPos:
+		return "traceTo"
+	default:
+		return "unknown inverted index"
+	}
+}
 
 func (d Domain) String() string {
 	switch d {
