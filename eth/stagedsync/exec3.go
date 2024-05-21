@@ -642,7 +642,7 @@ Loop:
 			return f(n)
 		}
 		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */)
-
+		fmt.Println("B", blockNum, "txs", len(txs), "txNum", inputTxNum, "outputTxNum", outputTxNum.Load(), "blockComplete", blockComplete.Load())
 		if parallel {
 			select {
 			case err := <-rwLoopErrCh:
