@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math/big"
+	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
@@ -63,6 +64,8 @@ type EthereumExecutionModule struct {
 	syncCfg ethconfig.Sync
 	// consensus
 	engine consensus.Engine
+
+	doingPostForkchoice atomic.Bool
 
 	execution.UnimplementedExecutionServer
 }

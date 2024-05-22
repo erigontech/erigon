@@ -439,7 +439,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				return
 			}
 		}
-		e.runPostForkchoiceInBackground(initialCycle)
 		if log {
 			e.logger.Info("head updated", "hash", headHash, "number", *headNumber)
 		}
@@ -448,6 +447,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		dbg.ReadMemStats(&m)
 		timings = append(timings, "commit", commitTime, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 		e.logger.Info("Timings (slower than 50ms)", timings...)
+		e.runPostForkchoiceInBackground(initialCycle)
 	}
 
 	sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
@@ -458,7 +458,12 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 }
 
 func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle bool) {
+	if e.doingPostForkchoice.Load() {
+		return
+	}
+	e.doingPostForkchoice.Store(true)
 	go func() {
+		defer e.doingPostForkchoice.Store(false)
 		timings := []interface{}{}
 		// Wait for semaphore to be available
 		if e.semaphore.Acquire(e.bacgroundCtx, 1) != nil {
