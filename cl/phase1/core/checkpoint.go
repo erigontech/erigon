@@ -22,7 +22,9 @@ func extractSlotFromSerializedBeaconState(beaconState []byte) (uint64, error) {
 	return binary.LittleEndian.Uint64(beaconState[40:48]), nil
 }
 
-func RetrieveBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, uris []string) (*state.CachingBeaconState, error) {
+func RetrieveBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, net clparams.NetworkType) (*state.CachingBeaconState, error) {
+	uris := clparams.GetAllCheckpointSyncEndpoints(net)
+
 	fetchBeaconState := func(uri string) (*state.CachingBeaconState, error) {
 		log.Info("[Checkpoint Sync] Requesting beacon state", "uri", uri)
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)

@@ -1044,13 +1044,15 @@ func GetAllCheckpointSyncEndpoints(net NetworkType) []string {
 		if len(urls) <= 1 {
 			return urls
 		}
-		ret := make([]string, len(urls))
+		retUrls := make([]string, len(urls))
 		perm := mathrand.Perm(len(urls))
 		for i, v := range perm {
-			ret[v] = urls[i]
+			retUrls[v] = urls[i]
 		}
-		return ret
+		return retUrls
 	}
+	// shuffle the list of URLs to avoid always using the same one
+	// order: custom URLs -> default URLs
 	urls := []string{}
 	urls = append(urls, shuffle(ConfigurableCheckpointsURLs)...)
 	if checkpoints, ok := CheckpointSyncEndpoints[net]; ok {
