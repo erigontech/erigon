@@ -273,3 +273,36 @@ func (d *DiagnosticClient) SyncStatistics() SyncStatistics {
 func (d *DiagnosticClient) SnapshotFilesList() SnapshoFilesList {
 	return d.snapshotFileList
 }
+
+/*func ReadSyncStagesInfo(db kv.RoDB) (info SyncStages) {
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		infoBytes, err := tx.GetOne(kv.HardwareInfo, []byte("diagSyncInfo"))
+
+		if err != nil {
+			return err
+		}
+
+		err = json.Unmarshal(infoBytes, &info)
+
+		if err != nil {
+			return err
+		}
+
+		return nil
+	}); err != nil {
+		return HardwareInfo{}
+	}
+	return info
+}
+
+func SyncStagesInfoUpdater(info SyncStages) func(tx kv.RwTx) error {
+	return func(tx kv.RwTx) error {
+		infoBytes, err := json.Marshal(info)
+
+		if err != nil {
+			return err
+		}
+
+		return tx.Put(kv.HardwareInfo, []byte("diagSyncInfo"), infoBytes)
+	}
+}*/

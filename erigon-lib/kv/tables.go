@@ -512,7 +512,8 @@ const (
 	StatesProcessingProgress = "StatesProcessingProgress"
 
 	//Diagnostics tables
-	HardwareInfo = "HardwareInfo"
+	DiagSystemInfo = "DiagSystemInfo"
+	DiagSyncStages = "DiagSyncStages"
 )
 
 // Keys
@@ -755,7 +756,8 @@ var ChaindataDeprecatedTables = []string{
 
 // Diagnostics tables
 var DiagnosticsTables = []string{
-	HardwareInfo,
+	DiagSystemInfo,
+	DiagSyncStages,
 }
 
 type CmpFunc func(k1, k2, v1, v2 []byte) int
