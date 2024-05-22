@@ -45,13 +45,16 @@ func NewDiagnosticClient(ctx context.Context, metricsMux *http.ServeMux, dataDir
 	}
 
 	hInfo := ReadSysInfo(db)
+	ss := ReadSyncStagesInfo(db)
 
 	return &DiagnosticClient{
-		ctx:              ctx,
-		db:               db,
-		metricsMux:       metricsMux,
-		dataDirPath:      dataDirPath,
-		syncStats:        SyncStatistics{},
+		ctx:         ctx,
+		db:          db,
+		metricsMux:  metricsMux,
+		dataDirPath: dataDirPath,
+		syncStats: SyncStatistics{
+			SyncStages: ss,
+		},
 		hardwareInfo:     hInfo,
 		snapshotFileList: SnapshoFilesList{},
 		bodies:           BodiesInfo{},
