@@ -245,6 +245,10 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	}
 	if dbg.MdbxReadAhead() {
 		opts = opts.Flags(func(u uint) uint { return u &^ mdbx.NoReadahead }) //nolint
+	} else {
+		if opts.label == kv.ChainDB {
+			opts = opts.Flags(func(u uint) uint { return u &^ mdbx.NoReadahead }) //nolint
+		}
 	}
 	if opts.flags&mdbx.Accede != 0 || opts.flags&mdbx.Readonly != 0 {
 		for retry := 0; ; retry++ {

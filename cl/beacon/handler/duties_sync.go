@@ -33,7 +33,7 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("could not decode request body: %w. request body is required.", err))
 	}
 	if len(idxsStr) == 0 {
-		return newBeaconResponse([]string{}).WithOptimistic(false), nil
+		return newBeaconResponse([]string{}).WithOptimistic(a.forkchoiceStore.IsHeadOptimistic()), nil
 	}
 	duplicates := map[int]struct{}{}
 	// convert the request to uint64
@@ -123,5 +123,5 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 		return duties[i].ValidatorIndex < duties[j].ValidatorIndex
 	})
 
-	return newBeaconResponse(duties).WithOptimistic(false), nil
+	return newBeaconResponse(duties).WithOptimistic(a.forkchoiceStore.IsHeadOptimistic()), nil
 }

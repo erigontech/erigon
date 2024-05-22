@@ -20,6 +20,7 @@ jobs:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       WORKING_TIME_SECONDS: 600
+      CHAIN: mainnet
 
     steps:
     - name: Check out repository
@@ -82,7 +83,7 @@ jobs:
       if: steps.test_step.outputs.test_executed == 'true'
       env:
         TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
-      run: python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --test_name clean-exit-snapshot-downloading --outcome $TEST_RESULT --result_file ${{ github.workspace }}/result.json
+      run: python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --branch ${{ github.ref_name }} --test_name clean-exit-snapshot-downloading --chain $CHAIN --outcome $TEST_RESULT --result_file ${{ github.workspace }}/result.json
 
     - name: Upload test results
       if: steps.test_step.outputs.test_executed == 'true'

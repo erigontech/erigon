@@ -86,7 +86,6 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	current := cfg.miningState.MiningBlock
 	txs := current.PreparedTxs
 	noempty := true
-
 	var domains *state2.SharedDomains
 	var (
 		stateReader state.StateReader
@@ -107,6 +106,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	// But if we disable empty precommit already, ignore it. Since
 	// empty block is necessary to keep the liveness of the network.
 	if noempty {
+
 		if txs != nil && !txs.Empty() {
 			logs, _, err := addTransactionsToMiningBlock(logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txs, cfg.miningState.MiningConfig.Etherbase, ibs, ctx, cfg.interrupt, cfg.payloadId, logger)
 			if err != nil {
@@ -118,7 +118,6 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 			yielded := mapset.NewSet[[32]byte]()
 			var simStateReader state.StateReader
 			var simStateWriter state.StateWriter
-
 			m := membatchwithdb.NewMemoryBatch(txc.Tx, cfg.tmpdir, logger)
 			defer m.Rollback()
 			var err error

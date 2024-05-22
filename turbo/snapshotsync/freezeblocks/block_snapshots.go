@@ -1983,8 +1983,46 @@ func (m *Merger) filesByRangeOfType(view *View, from, to uint64, snapshotType sn
 	return paths
 }
 
+func (m *Merger) mergeSubSegment(ctx context.Context, sn snaptype.FileInfo, toMerge []string, snapDir string, doIndex bool, onMerge func(r Range) error) (err error) {
+	defer func() {
+		if err == nil {
+			if rec := recover(); rec != nil {
+				err = fmt.Errorf("panic: %v", rec)
+			}
+		}
+		if err != nil {
+			f := sn.Path
+			_ = os.Remove(f)
+			_ = os.Remove(f + ".torrent")
+			ext := filepath.Ext(f)
+			withoutExt := f[:len(f)-len(ext)]
+			_ = os.Remove(withoutExt + ".idx")
+			isTxnType := strings.HasSuffix(withoutExt, coresnaptype.Transactions.Name())
+			if isTxnType {
+				_ = os.Remove(withoutExt + "-to-block.idx")
+			}
+		}
+	}()
+	if len(toMerge) == 0 {
+		return
+	}
+	if err = m.merge(ctx, toMerge, sn.Path, nil); err != nil {
+		err = fmt.Errorf("mergeByAppendSegments: %w", err)
+		return
+	}
+
+	if doIndex {
+		p := &background.Progress{}
+		if err = buildIdx(ctx, sn, m.chainConfig, m.tmpDir, p, m.lvl, m.logger); err != nil {
+			return
+		}
+	}
+
+	return
+}
+
 // Merge does merge segments in given ranges
-func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []snaptype.Type, mergeRanges []Range, snapDir string, doIndex bool, onMerge func(r Range) error, onDelete func(l []string) error) error {
+func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []snaptype.Type, mergeRanges []Range, snapDir string, doIndex bool, onMerge func(r Range) error, onDelete func(l []string) error) (err error) {
 	if len(mergeRanges) == 0 {
 		return nil
 	}
@@ -1997,16 +2035,8 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 		}
 
 		for _, t := range snapTypes {
-			f := t.FileInfo(snapDir, r.from, r.to)
-
-			if err := m.merge(ctx, toMerge[t.Enum()], f.Path, logEvery); err != nil {
-				return fmt.Errorf("mergeByAppendSegments: %w", err)
-			}
-			if doIndex {
-				p := &background.Progress{}
-				if err := buildIdx(ctx, f, m.chainConfig, m.tmpDir, p, m.lvl, m.logger); err != nil {
-					return err
-				}
+			if err := m.mergeSubSegment(ctx, t.FileInfo(snapDir, r.from, r.to), toMerge[t.Enum()], snapDir, doIndex, onMerge); err != nil {
+				return err
 			}
 		}
 		if err := snapshots.ReopenFolder(); err != nil {

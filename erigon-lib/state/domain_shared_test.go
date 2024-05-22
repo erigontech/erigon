@@ -4,14 +4,15 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math/rand"
+	"testing"
+	"time"
+
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
-	"math/rand"
-	"testing"
-	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/types"
@@ -180,7 +181,6 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	stepSize := uint64(8)
 	require := require.New(t)
 	db, agg := testDbAndAggregatorv3(t, stepSize)
-	agg.keepInDB = 0
 
 	iterCount := func(domains *SharedDomains) int {
 		var list [][]byte
