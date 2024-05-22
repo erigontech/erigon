@@ -1,7 +1,6 @@
 package diagnostics
 
 import (
-	"context"
 	"encoding/json"
 
 	"github.com/ledgerwatch/erigon-lib/diskutils"
@@ -142,7 +141,7 @@ func ReadSysInfo(db kv.RoDB) (info HardwareInfo) {
 }
 
 func ReadRAMInfo(db kv.RoDB) RAMInfo {
-	data := ReadInfoBytes(db, SystemRamInfoKey)
+	data := ReadDataFromTable(db, kv.DiagSystemInfo, SystemRamInfoKey)
 	var info RAMInfo
 	err := json.Unmarshal(data, &info)
 
@@ -154,7 +153,7 @@ func ReadRAMInfo(db kv.RoDB) RAMInfo {
 }
 
 func ReadCPUInfo(db kv.RoDB) CPUInfo {
-	data := ReadInfoBytes(db, SystemCpuInfoKey)
+	data := ReadDataFromTable(db, kv.DiagSystemInfo, SystemCpuInfoKey)
 	var info CPUInfo
 	err := json.Unmarshal(data, &info)
 
@@ -166,7 +165,7 @@ func ReadCPUInfo(db kv.RoDB) CPUInfo {
 }
 
 func ReadDickInfo(db kv.RoDB) DiskInfo {
-	data := ReadInfoBytes(db, SystemDiskInfoKey)
+	data := ReadDataFromTable(db, kv.DiagSystemInfo, SystemDiskInfoKey)
 	var info DiskInfo
 	err := json.Unmarshal(data, &info)
 
@@ -177,43 +176,14 @@ func ReadDickInfo(db kv.RoDB) DiskInfo {
 	}
 }
 
-func ReadInfoBytes(db kv.RoDB, key []byte) (data []byte) {
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		bytes, err := tx.GetOne(kv.DiagSystemInfo, key)
-
-		if err != nil {
-			return err
-		}
-
-		data = bytes
-
-		return nil
-	}); err != nil {
-		return []byte{}
-	}
-	return data
-}
-
 func RAMInfoUpdater(info RAMInfo) func(tx kv.RwTx) error {
-	return UpdateDiagTable(kv.DiagSystemInfo, SystemRamInfoKey, info)
+	return PutDataToTable(kv.DiagSystemInfo, SystemRamInfoKey, info)
 }
 
 func CPUInfoUpdater(info CPUInfo) func(tx kv.RwTx) error {
-	return UpdateDiagTable(kv.DiagSystemInfo, SystemCpuInfoKey, info)
+	return PutDataToTable(kv.DiagSystemInfo, SystemCpuInfoKey, info)
 }
 
 func DiskInfoUpdater(info DiskInfo) func(tx kv.RwTx) error {
-	return UpdateDiagTable(kv.DiagSystemInfo, SystemDiskInfoKey, info)
-}
-
-func UpdateDiagTable(table string, key []byte, info any) func(tx kv.RwTx) error {
-	return func(tx kv.RwTx) error {
-		infoBytes, err := json.Marshal(info)
-
-		if err != nil {
-			return err
-		}
-
-		return tx.Put(table, key, infoBytes)
-	}
+	return PutDataToTable(kv.DiagSystemInfo, SystemDiskInfoKey, info)
 }
