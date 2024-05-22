@@ -34,6 +34,8 @@ func (r Receipts) DeriveFields_zkEvm(forkId8BlockNum uint64, hash libcommon.Hash
 	if len(senders) != len(txs) {
 		return fmt.Errorf("transaction and senders count mismatch, tx count = %d, senders count = %d", len(txs), len(senders))
 	}
+	// log index should increment across the whole block, not just the tx
+	logIndex := uint(0)
 	for i := 0; i < len(r); i++ {
 		// The transaction type and hash can be retrieved from the transaction itself
 		r[i].Type = txs[i].Type()
@@ -61,9 +63,6 @@ func (r Receipts) DeriveFields_zkEvm(forkId8BlockNum uint64, hash libcommon.Hash
 			r[i].GasUsed = r[i].CumulativeGasUsed - r[i-1].CumulativeGasUsed
 		}
 
-		//zkevm this was originally counting for all logs in the block
-		//in zkevm indexes are counting for within the receipt
-		logIndex := uint(0)
 		// The derived log fields can simply be set from the block and transaction
 		for j := 0; j < len(r[i].Logs); j++ {
 			r[i].Logs[j].BlockNumber = number
