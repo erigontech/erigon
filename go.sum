@@ -277,8 +277,8 @@ github.com/erigontech/mdbx-go v0.38.0 h1:K64h6YHc2biN081DPEp/KP1TE+X0Jmxu8T+RJad
 github.com/erigontech/mdbx-go v0.38.0/go.mod h1:FAMxbOgqOnRDx51j8HjuJZIgznbDwjX7LItd+/UWyA4=
 github.com/erigontech/silkworm-go v0.18.0 h1:j56p61xZHBFhZGH1OixlGU8KcfjHzcw9pjAfjmVsOZA=
 github.com/erigontech/silkworm-go v0.18.0/go.mod h1:O50ux0apICEVEGyRWiE488K8qz8lc3PA/SXbQQAc8SU=
-github.com/erigontech/torrent v1.54.2-alpha-10 h1:MqEorLDG5n2jsNAsSC+TKuZUyExO/KfGumHxh7GHG3o=
-github.com/erigontech/torrent v1.54.2-alpha-10/go.mod h1:nYNeuR4xPlEl4CturFD9/KRXBRJEcJGqjegDNWakwG4=
+github.com/erigontech/torrent v1.54.2-alpha-11 h1:NZGEDktH4lsITQgKXQwCPd/kigHBGE2PZNWahh0KDt8=
+github.com/erigontech/torrent v1.54.2-alpha-11/go.mod h1:nYNeuR4xPlEl4CturFD9/KRXBRJEcJGqjegDNWakwG4=
 github.com/fatih/color v1.16.0 h1:zmkK9Ngbjj+K0yRhTVONQh1p/HknKYSlNT+vZCzyokM=
 github.com/fatih/color v1.16.0/go.mod h1:fL2Sau1YI5c0pdGEVCbKQbLXB6edEj1ZgiY4NijnWvE=
 github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c h1:CndMRAH4JIwxbW8KYq6Q+cGWcGHz0FjGR3QqcInWcW0=

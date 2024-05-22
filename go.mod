@@ -298,6 +298,6 @@ require (
 )
 
 replace (
-	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha-10
+	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha-11
 	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.8
 )
