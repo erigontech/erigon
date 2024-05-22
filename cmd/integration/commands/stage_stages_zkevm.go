@@ -1,18 +1,21 @@
 package commands
 
 import (
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/spf13/cobra"
-	common2 "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core"
-	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"context"
-	"github.com/ledgerwatch/log/v3"
 	"errors"
 	"fmt"
 	"path/filepath"
+
+	common2 "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	smtdb "github.com/ledgerwatch/erigon/smt/pkg/db"
+	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
+	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
 )
 
 var stateStagesZk = &cobra.Command{
@@ -77,6 +80,14 @@ func unwindZk(ctx context.Context, db kv.RwDB) error {
 		return err
 	}
 	defer tx.Rollback()
+
+	if err := hermez_db.CreateHermezBuckets(tx); err != nil {
+		return err
+	}
+
+	if err := smtdb.CreateEriDbBuckets(tx); err != nil {
+		return err
+	}
 
 	stateStages.DisableStages(stages.Snapshots)
 

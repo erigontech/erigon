@@ -135,7 +135,7 @@ func finaliseBlock(
 		return err
 	}
 
-	newRoot, err := zkIncrementIntermediateHashes(s.LogPrefix(), s, sdb.tx, sdb.eridb, sdb.smt, newHeader.Number.Uint64()-1, newHeader.Number.Uint64())
+	newRoot, err := zkIncrementIntermediateHashes(ctx, s.LogPrefix(), s, sdb.tx, sdb.eridb, sdb.smt, newHeader.Number.Uint64()-1, newHeader.Number.Uint64())
 	if err != nil {
 		return err
 	}

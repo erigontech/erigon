@@ -1,6 +1,7 @@
 package smt
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -9,7 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk"
 )
 
-func (s *SMT) InsertBatch(logPrefix string, nodeKeys []*utils.NodeKey, nodeValues []*utils.NodeValue8, nodeValuesHashes []*[4]uint64, rootNodeHash *utils.NodeKey) (*SMTResponse, error) {
+func (s *SMT) InsertBatch(ctx context.Context, logPrefix string, nodeKeys []*utils.NodeKey, nodeValues []*utils.NodeValue8, nodeValuesHashes []*[4]uint64, rootNodeHash *utils.NodeKey) (*SMTResponse, error) {
 	s.clearUpMutex.Lock()
 	defer s.clearUpMutex.Unlock()
 
@@ -48,6 +49,11 @@ func (s *SMT) InsertBatch(logPrefix string, nodeKeys []*utils.NodeKey, nodeValue
 	}
 
 	for i := 0; i < size; i++ {
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf(fmt.Sprintf("[%s] Context done", logPrefix))
+		default:
+		}
 		progressChan <- preprocessStage + uint64(i)
 
 		insertingNodeKey := nodeKeys[i]
