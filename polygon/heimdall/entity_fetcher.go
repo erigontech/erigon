@@ -13,6 +13,7 @@ import (
 type entityFetcher[TEntity Entity] interface {
 	FetchLastEntityId(ctx context.Context) (uint64, error)
 	FetchEntitiesRange(ctx context.Context, idRange ClosedRange) ([]TEntity, error)
+	FetchAllEntities(ctx context.Context) ([]TEntity, error)
 }
 
 type entityFetcherImpl[TEntity Entity] struct {
@@ -20,7 +21,9 @@ type entityFetcherImpl[TEntity Entity] struct {
 
 	fetchLastEntityId func(ctx context.Context) (int64, error)
 	fetchEntity       func(ctx context.Context, id int64) (TEntity, error)
-	fetchEntitiesPage func(ctx context.Context, page uint64, limit uint64) ([]TEntity, error)
+
+	fetchEntitiesPage      func(ctx context.Context, page uint64, limit uint64) ([]TEntity, error)
+	fetchEntitiesPageLimit uint64
 
 	logger log.Logger
 }
@@ -30,14 +33,18 @@ func newEntityFetcher[TEntity Entity](
 	fetchLastEntityId func(ctx context.Context) (int64, error),
 	fetchEntity func(ctx context.Context, id int64) (TEntity, error),
 	fetchEntitiesPage func(ctx context.Context, page uint64, limit uint64) ([]TEntity, error),
+	fetchEntitiesPageLimit uint64,
 	logger log.Logger,
 ) entityFetcher[TEntity] {
 	return &entityFetcherImpl[TEntity]{
 		name:              name,
 		fetchLastEntityId: fetchLastEntityId,
 		fetchEntity:       fetchEntity,
-		fetchEntitiesPage: fetchEntitiesPage,
-		logger:            logger,
+
+		fetchEntitiesPage:      fetchEntitiesPage,
+		fetchEntitiesPageLimit: fetchEntitiesPageLimit,
+
+		logger: logger,
 	}
 }
 
@@ -46,11 +53,12 @@ func (f *entityFetcherImpl[TEntity]) FetchLastEntityId(ctx context.Context) (uin
 	return uint64(id), err
 }
 
+const entityFetcherBatchFetchThreshold = 100
+
 func (f *entityFetcherImpl[TEntity]) FetchEntitiesRange(ctx context.Context, idRange ClosedRange) ([]TEntity, error) {
 	count := idRange.Len()
 
-	const batchFetchThreshold = 100
-	if (count > batchFetchThreshold) && (f.fetchEntitiesPage != nil) {
+	if (count > entityFetcherBatchFetchThreshold) && (f.fetchEntitiesPage != nil) {
 		allEntities, err := f.FetchAllEntities(ctx)
 		if err != nil {
 			return nil, err
@@ -82,7 +90,7 @@ func (f *entityFetcherImpl[TEntity]) FetchAllEntities(ctx context.Context) ([]TE
 	defer progressLogTicker.Stop()
 
 	for page := uint64(1); ; page++ {
-		entitiesPage, err := f.fetchEntitiesPage(ctx, page, 10_000)
+		entitiesPage, err := f.fetchEntitiesPage(ctx, page, f.fetchEntitiesPageLimit)
 		if err != nil {
 			return nil, err
 		}

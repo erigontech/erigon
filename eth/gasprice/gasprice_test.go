@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -152,7 +153,7 @@ func TestSuggestPrice(t *testing.T) {
 	}
 	backend := newTestBackend(t)
 	cache := jsonrpc.NewGasPriceCache()
-	oracle := gasprice.NewOracle(backend, config, cache)
+	oracle := gasprice.NewOracle(backend, config, cache, log.New())
 
 	// The gas price sampled is: 32G, 31G, 30G, 29G, 28G, 27G
 	got, err := oracle.SuggestTipCap(context.Background())
