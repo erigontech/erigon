@@ -1,4 +1,4 @@
-package simulator_test
+package heimdallsim_test
 
 import (
 	"context"
@@ -12,8 +12,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/ledgerwatch/erigon/cmd/devnet/services/polygon/heimdallsim"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/polygon/heimdall/simulator"
 )
 
 //go:embed testdata/v1-000000-000500-borevents.seg
@@ -53,7 +53,7 @@ func createFiles(dataDir string) error {
 	return nil
 }
 
-func setup(t *testing.T, ctx context.Context, iterations []uint64) *simulator.HeimdallSimulator {
+func setup(t *testing.T, ctx context.Context, iterations []uint64) *heimdallsim.HeimdallSimulator {
 	logger := log.New()
 	logger.SetHandler(log.StdoutHandler)
 	dataDir := t.TempDir()
@@ -63,7 +63,7 @@ func setup(t *testing.T, ctx context.Context, iterations []uint64) *simulator.He
 		t.Fatal(err)
 	}
 
-	sim, err := simulator.NewHeimdallSimulator(ctx, dataDir, logger, iterations)
+	sim, err := heimdallsim.NewHeimdallSimulator(ctx, dataDir, logger, iterations)
 	if err != nil {
 		t.Fatal(err)
 	}

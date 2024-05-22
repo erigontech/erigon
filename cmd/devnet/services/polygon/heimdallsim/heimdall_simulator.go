@@ -1,4 +1,4 @@
-package simulator
+package heimdallsim
 
 import (
 	"context"
