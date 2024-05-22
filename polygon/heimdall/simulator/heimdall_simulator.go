@@ -9,7 +9,6 @@ import (
 
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
@@ -25,8 +24,6 @@ type HeimdallSimulator struct {
 
 	logger log.Logger
 }
-
-type IndexFnType func(context.Context, snaptype.FileInfo, uint32, string, *background.Progress, log.Lvl, log.Logger) error
 
 func NewHeimdallSimulator(ctx context.Context, snapDir string, logger log.Logger, iterations []uint64) (*HeimdallSimulator, error) {
 	snapshots := freezeblocks.NewBorRoSnapshots(ethconfig.Defaults.Snapshot, snapDir, 0, logger)
