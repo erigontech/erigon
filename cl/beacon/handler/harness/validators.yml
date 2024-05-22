@@ -1,0 +1,36 @@
+tests:
+  - name: head_validators_all
+    actual:
+      handler: i
+      path: /eth/v1/beacon/states/head/validators
+    expect:
+      file: "head_validators_all"
+      fs: td
+  - name: validators_some
+    actual:
+      handler: i
+      path: /eth/v1/beacon/states/159/validators?id=0,1,2,0xb0e7791fb972fe014159aa33a98622da3cdc98ff707965e536d8636b5fcc5ac7a91a8c46e59a00dca575af0f18fb13dc&status=active
+    expect:
+      file: "validators_some"
+      fs: td
+  - name: validator
+    actual:
+      handler: i
+      path: /eth/v1/beacon/states/159/validators/0xb0e7791fb972fe014159aa33a98622da3cdc98ff707965e536d8636b5fcc5ac7a91a8c46e59a00dca575af0f18fb13dc
+    expect:
+      file: "validator_1"
+      fs: td
+  - name: validator_not_found
+    actual:
+      handler: i
+      path: /eth/v1/beacon/states/159/validators/0xffe7791fb972fe014159aa33a98622da3cdc98ff707965e536d8636b5fcc5ac7a91a8c46e59a00dca575af0f18fb13dc
+    compare:
+      exprs:
+       - "actual_code==404"
+  - name: head_validators_balances
+    actual:
+      handler: i
+      path: /eth/v1/beacon/states/head/validator_balances
+    expect:
+      file: "head_validators_balances"
+      fs: td

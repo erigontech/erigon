@@ -12,25 +12,24 @@ func parseMetric(s string) (string, prometheus.Labels, error) {
 	if len(s) == 0 {
 		return "", nil, fmt.Errorf("metric cannot be empty")
 	}
-	n := strings.IndexByte(s, '{')
-	if n < 0 {
+
+	ident, rest, ok := strings.Cut(s, "{")
+	if !ok {
 		if err := validateIdent(s); err != nil {
 			return "", nil, err
 		}
-
 		return s, nil, nil
 	}
-	ident := s[:n]
-	s = s[n+1:]
+
 	if err := validateIdent(ident); err != nil {
 		return "", nil, err
 	}
-	if len(s) == 0 || s[len(s)-1] != '}' {
+
+	if len(rest) == 0 || rest[len(rest)-1] != '}' {
 		return "", nil, fmt.Errorf("missing closing curly brace at the end of %q", ident)
 	}
 
-	tags, err := parseTags(s[:len(s)-1])
-
+	tags, err := parseTags(rest[:len(rest)-1])
 	if err != nil {
 		return "", nil, err
 	}

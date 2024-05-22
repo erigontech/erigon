@@ -13,8 +13,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
+	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
@@ -24,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	common2 "github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
@@ -49,11 +50,14 @@ var (
 	baseFeePoolLimit int
 	queuedPoolLimit  int
 
-	priceLimit    uint64
-	accountSlots  uint64
-	blobSlots     uint64
-	priceBump     uint64
-	blobPriceBump uint64
+	priceLimit         uint64
+	accountSlots       uint64
+	blobSlots          uint64
+	totalBlobPoolLimit uint64
+	priceBump          uint64
+	blobPriceBump      uint64
+
+	noTxGossip bool
 
 	commitEvery time.Duration
 )
@@ -77,9 +81,11 @@ func init() {
 	rootCmd.PersistentFlags().Uint64Var(&priceLimit, "txpool.pricelimit", txpoolcfg.DefaultConfig.MinFeeCap, "Minimum gas price (fee cap) limit to enforce for acceptance into the pool")
 	rootCmd.PersistentFlags().Uint64Var(&accountSlots, "txpool.accountslots", txpoolcfg.DefaultConfig.AccountSlots, "Minimum number of executable transaction slots guaranteed per account")
 	rootCmd.PersistentFlags().Uint64Var(&blobSlots, "txpool.blobslots", txpoolcfg.DefaultConfig.BlobSlots, "Max allowed total number of blobs (within type-3 txs) per account")
+	rootCmd.PersistentFlags().Uint64Var(&totalBlobPoolLimit, "txpool.totalblobpoollimit", txpoolcfg.DefaultConfig.TotalBlobPoolLimit, "Total limit of number of all blobs in txs within the txpool")
 	rootCmd.PersistentFlags().Uint64Var(&priceBump, "txpool.pricebump", txpoolcfg.DefaultConfig.PriceBump, "Price bump percentage to replace an already existing transaction")
 	rootCmd.PersistentFlags().Uint64Var(&blobPriceBump, "txpool.blobpricebump", txpoolcfg.DefaultConfig.BlobPriceBump, "Price bump percentage to replace an existing blob (type-3) transaction")
 	rootCmd.PersistentFlags().DurationVar(&commitEvery, utils.TxPoolCommitEveryFlag.Name, utils.TxPoolCommitEveryFlag.Value, utils.TxPoolCommitEveryFlag.Usage)
+	rootCmd.PersistentFlags().BoolVar(&noTxGossip, utils.TxPoolGossipDisableFlag.Name, utils.TxPoolGossipDisableFlag.Value, utils.TxPoolGossipDisableFlag.Usage)
 	rootCmd.Flags().StringSliceVar(&traceSenders, utils.TxPoolTraceSendersFlag.Name, []string{}, utils.TxPoolTraceSendersFlag.Usage)
 }
 
@@ -144,8 +150,10 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 	cfg.MinFeeCap = priceLimit
 	cfg.AccountSlots = accountSlots
 	cfg.BlobSlots = blobSlots
+	cfg.TotalBlobPoolLimit = totalBlobPoolLimit
 	cfg.PriceBump = priceBump
 	cfg.BlobPriceBump = blobPriceBump
+	cfg.NoGossip = noTxGossip
 
 	cacheConfig := kvcache.DefaultCoherentConfig
 	cacheConfig.MetricsLabel = "txpool"
@@ -159,19 +167,13 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 	newTxs := make(chan types.Announcements, 1024)
 	defer close(newTxs)
 	txPoolDB, txPool, fetch, send, txpoolGrpcServer, err := txpooluitl.AllComponents(ctx, cfg,
-		kvcache.New(cacheConfig), newTxs, coreDB, sentryClients, kvClient, logger)
+		kvcache.New(cacheConfig), newTxs, coreDB, sentryClients, kvClient, misc.Eip1559FeeCalculator, logger)
 	if err != nil {
 		return err
 	}
 	fetch.ConnectCore()
 	fetch.ConnectSentries()
 
-	/*
-		var ethashApi *ethash.API
-		sif casted, ok := backend.engine.(*ethash.Ethash); ok {
-			ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
-		}
-	*/
 	miningGrpcServer := privateapi.NewMiningServer(ctx, &rpcdaemontest.IsMiningMock{}, nil, logger)
 
 	grpcServer, err := txpool.StartGrpc(txpoolGrpcServer, miningGrpcServer, txpoolApiAddr, nil, logger)
@@ -180,7 +182,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 	}
 
 	notifyMiner := func() {}
-	txpool.MainLoop(ctx, txPoolDB, coreDB, txPool, newTxs, send, txpoolGrpcServer.NewSlotsStreams, notifyMiner)
+	txpool.MainLoop(ctx, txPoolDB, txPool, newTxs, send, txpoolGrpcServer.NewSlotsStreams, notifyMiner)
 
 	grpcServer.GracefulStop()
 	return nil

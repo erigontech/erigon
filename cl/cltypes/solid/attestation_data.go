@@ -24,14 +24,14 @@ type AttestationData []byte
 
 func NewAttestionDataFromParameters(
 	slot uint64,
-	validatorIndex uint64,
+	committeeIndex uint64,
 	beaconBlockRoot libcommon.Hash,
 	source Checkpoint,
 	target Checkpoint,
 ) AttestationData {
 	a := NewAttestationData()
 	a.SetSlot(slot)
-	a.SetValidatorIndex(validatorIndex)
+	a.SetCommitteeIndex(committeeIndex)
 	a.SetBeaconBlockRoot(beaconBlockRoot)
 	a.SetSource(source)
 	a.SetTarget(target)
@@ -40,15 +40,15 @@ func NewAttestionDataFromParameters(
 
 func (a AttestationData) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Slot            uint64         `json:"slot"`
-		Index           uint64         `json:"index"`
+		Slot            uint64         `json:"slot,string"`
+		Index           uint64         `json:"index,string"`
 		BeaconBlockRoot libcommon.Hash `json:"beacon_block_root"`
 		Source          Checkpoint     `json:"source"`
 		Target          Checkpoint     `json:"target"`
 	}{
 		Slot:            a.Slot(),
 		BeaconBlockRoot: a.BeaconBlockRoot(),
-		Index:           a.ValidatorIndex(),
+		Index:           a.CommitteeIndex(),
 		Source:          a.Source(),
 		Target:          a.Target(),
 	})
@@ -56,17 +56,19 @@ func (a AttestationData) MarshalJSON() ([]byte, error) {
 
 func (a AttestationData) UnmarshalJSON(buf []byte) error {
 	var tmp struct {
-		Slot            uint64         `json:"slot"`
-		Index           uint64         `json:"index"`
+		Slot            uint64         `json:"slot,string"`
+		Index           uint64         `json:"index,string"`
 		BeaconBlockRoot libcommon.Hash `json:"beacon_block_root"`
 		Source          Checkpoint     `json:"source"`
 		Target          Checkpoint     `json:"target"`
 	}
+	tmp.Source = NewCheckpoint()
+	tmp.Target = NewCheckpoint()
 	if err := json.Unmarshal(buf, &tmp); err != nil {
 		return err
 	}
 	a.SetSlot(tmp.Slot)
-	a.SetValidatorIndex(tmp.Index)
+	a.SetCommitteeIndex(tmp.Index)
 	a.SetBeaconBlockRoot(tmp.BeaconBlockRoot)
 	a.SetSource(tmp.Source)
 	a.SetTarget(tmp.Target)
@@ -85,7 +87,7 @@ func (a AttestationData) Slot() uint64 {
 	return binary.LittleEndian.Uint64(a[:8])
 }
 
-func (a AttestationData) ValidatorIndex() uint64 {
+func (a AttestationData) CommitteeIndex() uint64 {
 	return binary.LittleEndian.Uint64(a[8:16])
 }
 
@@ -106,7 +108,7 @@ func (a AttestationData) SetSlot(slot uint64) {
 	binary.LittleEndian.PutUint64(a[:8], slot)
 }
 
-func (a AttestationData) SetValidatorIndex(validatorIndex uint64) {
+func (a AttestationData) SetCommitteeIndex(validatorIndex uint64) {
 	binary.LittleEndian.PutUint64(a[8:16], validatorIndex)
 }
 
@@ -118,7 +120,7 @@ func (a AttestationData) SetSlotWithRawBytes(b []byte) {
 	copy(a[:8], b)
 }
 
-func (a AttestationData) SetValidatorIndexWithRawBytes(b []byte) {
+func (a AttestationData) SetCommitteeIndexWithRawBytes(b []byte) {
 	copy(a[8:16], b)
 
 }

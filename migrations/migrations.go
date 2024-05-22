@@ -3,16 +3,17 @@ package migrations
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common"
 	"path/filepath"
+
+	"github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/ugorji/go/codec"
 )
 
 // migrations apply sequentially in order of this array, skips applied migrations
@@ -35,6 +36,9 @@ var migrations = map[kv.Label][]Migration{
 		dbSchemaVersion5,
 		TxsBeginEnd,
 		TxsV3,
+		ProhibitNewDownloadsLock,
+		SqueezeCommitmentFiles,
+		ProhibitNewDownloadsLock2,
 	},
 	kv.TxPoolDB: {},
 	kv.SentryDB: {},
@@ -49,7 +53,9 @@ type Migration struct {
 var (
 	ErrMigrationNonUniqueName   = fmt.Errorf("please provide unique migration name")
 	ErrMigrationCommitNotCalled = fmt.Errorf("migration before-commit function was not called")
-	ErrMigrationETLFilesDeleted = fmt.Errorf("db migration progress was interrupted after extraction step and ETL files was deleted, please contact development team for help or re-sync from scratch")
+	ErrMigrationETLFilesDeleted = fmt.Errorf(
+		"db migration progress was interrupted after extraction step and ETL files was deleted, please contact development team for help or re-sync from scratch",
+	)
 )
 
 func NewMigrator(label kv.Label) *Migrator {
@@ -207,7 +213,7 @@ func (m *Migrator) Apply(db kv.RwDB, dataDir string, logger log.Logger) error {
 			}
 			callbackCalled = true
 
-			stagesProgress, err := MarshalMigrationPayload(tx)
+			stagesProgress, err := json.Marshal(tx)
 			if err != nil {
 				return err
 			}
@@ -236,15 +242,21 @@ func (m *Migrator) Apply(db kv.RwDB, dataDir string, logger log.Logger) error {
 	}); err != nil {
 		return fmt.Errorf("migrator.Apply: %w", err)
 	}
-	logger.Info("Updated DB schema to", "version", fmt.Sprintf("%d.%d.%d", kv.DBSchemaVersion.Major, kv.DBSchemaVersion.Minor, kv.DBSchemaVersion.Patch))
+	logger.Info(
+		"Updated DB schema to",
+		"version",
+		fmt.Sprintf(
+			"%d.%d.%d",
+			kv.DBSchemaVersion.Major,
+			kv.DBSchemaVersion.Minor,
+			kv.DBSchemaVersion.Patch,
+		),
+	)
 	return nil
 }
 
 func MarshalMigrationPayload(db kv.Getter) ([]byte, error) {
 	s := map[string][]byte{}
-
-	buf := bytes.NewBuffer(nil)
-	encoder := codec.NewEncoder(buf, &codec.CborHandle{})
 
 	for _, stage := range stages.AllStages {
 		v, err := db.GetOne(kv.SyncStageProgress, []byte(stage))
@@ -256,16 +268,17 @@ func MarshalMigrationPayload(db kv.Getter) ([]byte, error) {
 		}
 	}
 
-	if err := encoder.Encode(s); err != nil {
+	b, err := json.Marshal(s)
+	if err != nil {
 		return nil, err
 	}
-	return buf.Bytes(), nil
+	return b, nil
 }
 
 func UnmarshalMigrationPayload(data []byte) (map[string][]byte, error) {
 	s := map[string][]byte{}
 
-	if err := codec.NewDecoder(bytes.NewReader(data), &codec.CborHandle{}).Decode(&s); err != nil {
+	if err := json.Unmarshal(data, &s); err != nil {
 		return nil, err
 	}
 	return s, nil

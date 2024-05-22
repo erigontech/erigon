@@ -9,8 +9,8 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
-	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	execution "github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
+	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
 
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -65,13 +65,18 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 		param.ParentBeaconBlockRoot = &pbbr
 	}
 
+	// TODO(racytech): add requests (Pectra)
+
 	// First check if we're already building a block with the requested parameters
-	if reflect.DeepEqual(e.lastParameters, &param) {
-		e.logger.Info("[ForkChoiceUpdated] duplicate build request")
-		return &execution.AssembleBlockResponse{
-			Id:   e.nextPayloadId,
-			Busy: false,
-		}, nil
+	if e.lastParameters != nil {
+		param.PayloadId = e.lastParameters.PayloadId
+		if reflect.DeepEqual(e.lastParameters, &param) {
+			e.logger.Info("[ForkChoiceUpdated] duplicate build request")
+			return &execution.AssembleBlockResponse{
+				Id:   e.lastParameters.PayloadId,
+				Busy: false,
+			}, nil
+		}
 	}
 
 	// Initiate payload building

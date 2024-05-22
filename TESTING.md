@@ -2,7 +2,7 @@ Testing of new releases of Erigon should ideally include these checks.
 
 ## Incremental Sync
 
-This check requires having the Erigon database synced previously. Lets assume (for command line examples) it is in the
+This check requires having the Erigon database synced previously. Let's assume (for command line examples) it is in the
 directory `~/mainnet/erigon/chaindata`.
 Using `git pull` or `git checkout`, update the code to the version that is to be released (or very close to it). Then,
 build erigon executable:
@@ -306,7 +306,7 @@ Example of recording command:
 ./build/bin/rpctest bench8 --erigonUrl http://192.168.1.2:8545 --gethUrl http://192.168.1.1:8545 --needCompare --blockFrom 9000000 --blockTo 9000100 --recordFile req.txt
 ```
 
-The file format is plain text, with requests and responses are written in separate lines, and delimited by the tripple
+The file format is plain text, with requests and responses are written in separate lines, and delimited by the triple
 line breaks, like this:
 
 ```

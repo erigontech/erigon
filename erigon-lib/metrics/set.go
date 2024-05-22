@@ -78,8 +78,8 @@ func (s *Set) Collect(ch chan<- prometheus.Metric) {
 //   - foo{bar="baz",aaa="b"}
 //
 // The returned histogram is safe to use from concurrent goroutines.
-func (s *Set) NewHistogram(name string, help ...string) (prometheus.Histogram, error) {
-	h, err := newHistogram(name, help...)
+func (s *Set) NewHistogram(name string, buckets []float64, help ...string) (prometheus.Histogram, error) {
+	h, err := newHistogram(name, buckets, help...)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +88,7 @@ func (s *Set) NewHistogram(name string, help ...string) (prometheus.Histogram, e
 	return h, nil
 }
 
-func newHistogram(name string, help ...string) (prometheus.Histogram, error) {
+func newHistogram(name string, buckets []float64, help ...string) (prometheus.Histogram, error) {
 	name, labels, err := parseMetric(name)
 	if err != nil {
 		return nil, err
@@ -97,6 +97,7 @@ func newHistogram(name string, help ...string) (prometheus.Histogram, error) {
 	return prometheus.NewHistogram(prometheus.HistogramOpts{
 		Name:        name,
 		ConstLabels: labels,
+		Buckets:     buckets,
 		Help:        strings.Join(help, " "),
 	}), nil
 }
@@ -119,7 +120,7 @@ func (s *Set) GetOrCreateHistogram(name string, help ...string) (prometheus.Hist
 	nm := s.m[name]
 	s.mu.Unlock()
 	if nm == nil {
-		metric, err := newHistogram(name, help...)
+		metric, err := newHistogram(name, nil, help...)
 		if err != nil {
 			return nil, fmt.Errorf("invalid metric name %q: %w", name, err)
 		}
@@ -226,8 +227,7 @@ func (s *Set) GetOrCreateCounter(name string, help ...string) (prometheus.Counte
 	return c, nil
 }
 
-// NewGauge registers and returns gauge with the given name in s, which calls f
-// to obtain gauge value.
+// NewGauge registers and returns gauge with the given name.
 //
 // name must be valid Prometheus-compatible metric with possible labels.
 // For instance,
@@ -301,91 +301,6 @@ func (s *Set) GetOrCreateGauge(name string, help ...string) (prometheus.Gauge, e
 	}
 
 	g, ok := nm.metric.(prometheus.Gauge)
-	if !ok {
-		return nil, fmt.Errorf("metric %q isn't a Gauge. It is %T", name, nm.metric)
-	}
-
-	return g, nil
-}
-
-// NewGaugeFunc registers and returns gauge with the given name in s, which calls f
-// to obtain gauge value.
-//
-// name must be valid Prometheus-compatible metric with possible labels.
-// For instance,
-//
-//   - foo
-//   - foo{bar="baz"}
-//   - foo{bar="baz",aaa="b"}
-//
-// f must be safe for concurrent calls.
-//
-// The returned gauge is safe to use from concurrent goroutines.
-func (s *Set) NewGaugeFunc(name string, f func() float64, help ...string) (prometheus.GaugeFunc, error) {
-	g, err := newGaugeFunc(name, f, help...)
-	if err != nil {
-		return nil, err
-	}
-
-	s.registerMetric(name, g)
-	return g, nil
-}
-
-func newGaugeFunc(name string, f func() float64, help ...string) (prometheus.GaugeFunc, error) {
-	if f == nil {
-		return nil, fmt.Errorf("f cannot be nil")
-	}
-
-	name, labels, err := parseMetric(name)
-	if err != nil {
-		return nil, err
-	}
-
-	return prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-		Name:        name,
-		Help:        strings.Join(help, " "),
-		ConstLabels: labels,
-	}, f), nil
-}
-
-// GetOrCreateGaugeFunc returns registered gauge with the given name in s
-// or creates new gauge if s doesn't contain gauge with the given name.
-//
-// name must be valid Prometheus-compatible metric with possible labels.
-// For instance,
-//
-//   - foo
-//   - foo{bar="baz"}
-//   - foo{bar="baz",aaa="b"}
-//
-// The returned gauge is safe to use from concurrent goroutines.
-//
-// Performance tip: prefer NewGauge instead of GetOrCreateGauge.
-func (s *Set) GetOrCreateGaugeFunc(name string, f func() float64, help ...string) (prometheus.GaugeFunc, error) {
-	s.mu.Lock()
-	nm := s.m[name]
-	s.mu.Unlock()
-	if nm == nil {
-		metric, err := newGaugeFunc(name, f, help...)
-		if err != nil {
-			return nil, fmt.Errorf("invalid metric name %q: %w", name, err)
-		}
-
-		nmNew := &namedMetric{
-			name:   name,
-			metric: metric,
-		}
-		s.mu.Lock()
-		nm = s.m[name]
-		if nm == nil {
-			nm = nmNew
-			s.m[name] = nm
-			s.a = append(s.a, nm)
-		}
-		s.mu.Unlock()
-	}
-
-	g, ok := nm.metric.(prometheus.GaugeFunc)
 	if !ok {
 		return nil, fmt.Errorf("metric %q isn't a Gauge. It is %T", name, nm.metric)
 	}

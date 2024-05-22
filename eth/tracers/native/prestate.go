@@ -19,21 +19,21 @@ package native
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
 	"sync/atomic"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 )
 
-//go:generate go run github.com/fjl/gencodec -type account -field-override accountMarshaling -out gen_account_json.go
+//go:generate gencodec -type account -field-override accountMarshaling -out gen_account_json.go
 
 func init() {
 	register("prestateTracer", newPrestateTracer)
@@ -100,7 +100,7 @@ func (t *prestateTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to li
 
 	t.lookupAccount(from)
 	t.lookupAccount(to)
-	t.lookupAccount(env.Context().Coinbase)
+	t.lookupAccount(env.Context.Coinbase)
 
 	// The recipient balance includes the value transferred.
 	toBal := new(big.Int).Sub(t.pre[to].Balance, value.ToBig())
@@ -109,7 +109,7 @@ func (t *prestateTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to li
 	// The sender balance is after reducing: value and gasLimit.
 	// We need to re-add them to get the pre-tx balance.
 	fromBal := new(big.Int).Set(t.pre[from].Balance)
-	gasPrice := env.TxContext().GasPrice
+	gasPrice := env.GasPrice
 	consumedGas := new(big.Int).Mul(gasPrice.ToBig(), new(big.Int).SetUint64(t.gasLimit))
 	fromBal.Add(fromBal, new(big.Int).Add(value.ToBig(), consumedGas))
 	t.pre[from].Balance = fromBal

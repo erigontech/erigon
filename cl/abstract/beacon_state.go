@@ -22,7 +22,7 @@ type BeaconStateUpgradable interface {
 }
 
 type BeaconStateExtension interface {
-	SlashValidator(slashedInd uint64, whistleblowerInd *uint64) error
+	SlashValidator(slashedInd uint64, whistleblowerInd *uint64) (uint64, error)
 	InitiateValidatorExit(index uint64) error
 	GetActiveValidatorsIndices(epoch uint64) (indicies []uint64)
 	GetTotalActiveBalance() uint64
@@ -32,7 +32,7 @@ type BeaconStateExtension interface {
 	BaseReward(index uint64) (uint64, error)
 	SyncRewards() (proposerReward, participantReward uint64, err error)
 	CommitteeCount(epoch uint64) uint64
-	GetAttestationParticipationFlagIndicies(data solid.AttestationData, inclusionDelay uint64) ([]uint8, error)
+	GetAttestationParticipationFlagIndicies(data solid.AttestationData, inclusionDelay uint64, skipAssert bool) ([]uint8, error)
 	GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, error)
 	ComputeNextSyncCommittee() (*solid.SyncCommittee, error)
 	GetAttestingIndicies(attestation solid.AttestationData, aggregationBits []byte, checkBitsLength bool) ([]uint64, error)
@@ -40,6 +40,7 @@ type BeaconStateExtension interface {
 	ValidatorIndexByPubkey(key [48]byte) (uint64, bool)
 	PreviousStateRoot() common.Hash
 	SetPreviousStateRoot(root common.Hash)
+	GetValidatorActivationChurnLimit() uint64
 }
 
 type BeaconStateBasic interface {
@@ -60,6 +61,7 @@ type BeaconStateSSZ interface {
 	HashSSZ() (out [32]byte, err error)
 }
 
+//go:generate mockgen -typed=true -destination=./mock_services/beacon_state_mutator_mock.go -package=mock_services . BeaconStateMutator
 type BeaconStateMutator interface {
 	SetVersion(version clparams.StateVersion)
 	SetSlot(slot uint64)
@@ -103,7 +105,7 @@ type BeaconStateMutator interface {
 	SetValidatorInactivityScore(index int, score uint64) error
 	SetCurrentEpochParticipationFlags(flags []cltypes.ParticipationFlags)
 	SetPreviousEpochParticipationFlags(flags []cltypes.ParticipationFlags)
-	SetPreviousEpochAttestations(attestations *solid.ListSSZ[*solid.PendingAttestation])
+	SetPreviousEpochAttestations(attestations *solid.ListSSZ[*solid.PendingAttestation]) // temporarily skip this mock
 
 	AddEth1DataVote(vote *cltypes.Eth1Data)
 	AddValidator(validator solid.Validator, balance uint64)
@@ -115,8 +117,6 @@ type BeaconStateMutator interface {
 	AddPreviousEpochParticipationAt(index int, delta byte)
 	AddCurrentEpochAtteastation(attestation *solid.PendingAttestation)
 	AddPreviousEpochAttestation(attestation *solid.PendingAttestation)
-
-	IncrementSlashingSegmentAt(index int, delta uint64)
 
 	AppendValidator(in solid.Validator)
 
@@ -164,6 +164,8 @@ type BeaconStateMinimal interface {
 	Eth1Data() *cltypes.Eth1Data
 	Eth1DataVotes() *solid.ListSSZ[*cltypes.Eth1Data]
 	Eth1DepositIndex() uint64
+	ValidatorSet() *solid.ValidatorSet
+	PreviousEpochParticipation() *solid.BitList
 
 	ForEachValidator(fn func(v solid.Validator, idx int, total int) bool)
 	ValidatorForValidatorIndex(index int) (solid.Validator, error)
@@ -191,8 +193,14 @@ type BeaconStateMinimal interface {
 	PreviousEpochAttestationsLength() int
 }
 
-// TODO figure this out
-type BeaconStateCopying interface {
-	//CopyInto(dst *raw.BeaconState) error
-	//Copy() (*raw.BeaconState, error)
+// BeaconStateReader is an interface for reading the beacon state.
+//
+//go:generate mockgen -typed=true -destination=./mock_services/beacon_state_reader_mock.go -package=mock_services . BeaconStateReader
+type BeaconStateReader interface {
+	ValidatorPublicKey(index int) (common.Bytes48, error)
+	GetDomain(domainType [4]byte, epoch uint64) ([]byte, error)
+	CommitteeCount(epoch uint64) uint64
+	ValidatorForValidatorIndex(index int) (solid.Validator, error)
+	Version() clparams.StateVersion
+	GenesisValidatorsRoot() common.Hash
 }

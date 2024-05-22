@@ -16,7 +16,7 @@ type IterableSSZ[T any] interface {
 	Set(index int, v T)
 	Length() int
 	Cap() int
-
+	Bytes() []byte
 	Pop() T
 	Append(v T)
 

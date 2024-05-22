@@ -19,12 +19,15 @@ func (I *impl) VerifyTransition(s abstract.BeaconState, currentBlock *cltypes.Be
 		return fmt.Errorf("unable to generate state root: %v", err)
 	}
 	if expectedStateRoot != currentBlock.StateRoot {
-		return fmt.Errorf("expected state root differs from received state root")
+		return fmt.Errorf("expected state root differs from received state root, slot %d", currentBlock.Slot)
 	}
 	return nil
 }
 
 func (I *impl) VerifyBlockSignature(s abstract.BeaconState, block *cltypes.SignedBeaconBlock) error {
+	if !I.FullValidation {
+		return nil
+	}
 	valid, err := verifyBlockSignature(s, block)
 	if err != nil {
 		return fmt.Errorf("error validating block signature: %v", err)

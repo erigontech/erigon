@@ -1,7 +1,8 @@
 {
-    "000-fork=Shanghai-two_withdrawals_no_value-two_withdrawals_no_value": {
+    "tests/shanghai/eip4895_withdrawals/test_withdrawals.py::test_zero_amount[fork_Shanghai-blockchain_test-two_withdrawals_no_value]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4895.md",
             "reference-spec-version": "81af3b60b632bc9c03513d1d137f25410e3f4d34"
         },
@@ -100,9 +101,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "001-fork=Shanghai-three_withdrawals_one_with_value-three_withdrawals_one_with_value": {
+    "tests/shanghai/eip4895_withdrawals/test_withdrawals.py::test_zero_amount[fork_Shanghai-blockchain_test-three_withdrawals_one_with_value]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4895.md",
             "reference-spec-version": "81af3b60b632bc9c03513d1d137f25410e3f4d34"
         },
@@ -213,9 +215,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "002-fork=Shanghai-four_withdrawals_one_with_value_one_with_max-four_withdrawals_one_with_value_one_with_max": {
+    "tests/shanghai/eip4895_withdrawals/test_withdrawals.py::test_zero_amount[fork_Shanghai-blockchain_test-four_withdrawals_one_with_value_one_with_max]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4895.md",
             "reference-spec-version": "81af3b60b632bc9c03513d1d137f25410e3f4d34"
         },
@@ -338,9 +341,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "003-fork=Shanghai-four_withdrawals_one_with_value_one_with_max_reversed_order-four_withdrawals_one_with_value_one_with_max_reversed_order": {
+    "tests/shanghai/eip4895_withdrawals/test_withdrawals.py::test_zero_amount[fork_Shanghai-blockchain_test-four_withdrawals_one_with_value_one_with_max_reversed_order]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4895.md",
             "reference-spec-version": "81af3b60b632bc9c03513d1d137f25410e3f4d34"
         },
@@ -463,9 +467,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "004-fork=Cancun-two_withdrawals_no_value-two_withdrawals_no_value": {
+    "tests/shanghai/eip4895_withdrawals/test_withdrawals.py::test_zero_amount[fork_Cancun-blockchain_test-two_withdrawals_no_value]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4895.md",
             "reference-spec-version": "81af3b60b632bc9c03513d1d137f25410e3f4d34"
         },
@@ -584,9 +589,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "005-fork=Cancun-three_withdrawals_one_with_value-three_withdrawals_one_with_value": {
+    "tests/shanghai/eip4895_withdrawals/test_withdrawals.py::test_zero_amount[fork_Cancun-blockchain_test-three_withdrawals_one_with_value]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4895.md",
             "reference-spec-version": "81af3b60b632bc9c03513d1d137f25410e3f4d34"
         },
@@ -717,9 +723,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "006-fork=Cancun-four_withdrawals_one_with_value_one_with_max-four_withdrawals_one_with_value_one_with_max": {
+    "tests/shanghai/eip4895_withdrawals/test_withdrawals.py::test_zero_amount[fork_Cancun-blockchain_test-four_withdrawals_one_with_value_one_with_max]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4895.md",
             "reference-spec-version": "81af3b60b632bc9c03513d1d137f25410e3f4d34"
         },
@@ -862,9 +869,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "007-fork=Cancun-four_withdrawals_one_with_value_one_with_max_reversed_order-four_withdrawals_one_with_value_one_with_max_reversed_order": {
+    "tests/shanghai/eip4895_withdrawals/test_withdrawals.py::test_zero_amount[fork_Cancun-blockchain_test-four_withdrawals_one_with_value_one_with_max_reversed_order]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4895.md",
             "reference-spec-version": "81af3b60b632bc9c03513d1d137f25410e3f4d34"
         },

@@ -1,0 +1,100 @@
+vars:
+  head_hash: '0xeffdd8ef40c3c901f0724d48e04ce257967cf1da31929f3b6db614f89ef8d660'
+  bad_hash: '0xbeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeef'
+tests:
+  ## blocks
+  - name: by hash
+    expect:
+      file: "block_1"
+      fs: td
+    actual:
+      handler: i
+      path: /eth/v2/beacon/blocks/{{.Vars.head_hash}}
+  - name: by head
+    expect:
+      file: "block_1"
+      fs: td
+    compare:
+      exprs:
+       - actual_code == 200
+       - actual == expect
+    actual:
+      handler: i
+      path: /eth/v2/beacon/blocks/head
+  - name: not found
+    actual:
+      handler: i
+      path: /eth/v2/beacon/blocks/{{.Vars.bad_hash}}
+    compare:
+      expr: "actual_code == 404"
+  ## blinded blocks
+  - name: blinded by hash
+    expect:
+      file: "blinded_block_1"
+      fs: td
+    actual:
+      handler: i
+      path: /eth/v1/beacon/blinded_blocks/{{.Vars.head_hash}}
+  - name: blinded by head
+    expect:
+      file: "blinded_block_1"
+      fs: td
+    actual:
+      handler: i
+      path: /eth/v1/beacon/blinded_blocks/head
+  - name: blinded not found
+    actual:
+      handler: i
+      path: /eth/v1/beacon/blinded_blocks/{{.Vars.bad_hash}}
+    compare:
+      expr: "actual_code == 404"
+  ### attestations
+  - name: attestations by hash
+    expect:
+      file: "block_1"
+      fs: td
+    actual:
+      handler: i
+      path: /eth/v1/beacon/blocks/{{.Vars.head_hash}}/attestations
+    compare:
+      expr: "size(actual.data) == size(expect.data.message.body.attestations)"
+  - name: attestions by head
+    expect:
+      file: "block_1"
+      fs: td
+    actual:
+      handler: i
+      path: /eth/v1/beacon/blocks/head/attestations
+    compare:
+      exprs:
+        - actual_code == 200
+        - size(actual.data) == size(expect.data.message.body.attestations)
+  - name: attestions not found
+    actual:
+      handler: i
+      path: /eth/v1/beacon/blocks/{{.Vars.bad_hash}}/attestations
+    compare:
+      expr: "actual_code == 404"
+  ### root
+  - name: root by hash
+    actual:
+      handler: i
+      path: /eth/v1/beacon/blocks/{{.Vars.head_hash}}/root
+    compare:
+      exprs:
+       - actual_code == 200
+       - actual.data.root == "{{.Vars.head_hash}}"
+  - name: root by head
+    actual:
+      handler: i
+      path: /eth/v1/beacon/blocks/head/root
+    compare:
+      exprs:
+       - actual_code == 200
+       - actual.data.root == "{{.Vars.head_hash}}"
+  - name: root not found
+    actual:
+      handler: i
+      path: /eth/v1/beacon/blocks/19912929/root
+    compare:
+      expr: "actual_code == 404"

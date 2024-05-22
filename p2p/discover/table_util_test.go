@@ -14,6 +14,8 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
+//go:build integration_skip
+
 package discover
 
 import (
@@ -43,8 +45,8 @@ func init() {
 	nullNode = enode.SignNull(&r, enode.ID{})
 }
 
-func newTestTable(t transport, tmpDir string) (*Table, *enode.DB) {
-	db, err := enode.OpenDB(context.Background(), "", tmpDir)
+func newTestTable(t transport, tmpDir string, logger log.Logger) (*Table, *enode.DB) {
+	db, err := enode.OpenDB(context.Background(), "", tmpDir, logger)
 	if err != nil {
 		panic(err)
 	}

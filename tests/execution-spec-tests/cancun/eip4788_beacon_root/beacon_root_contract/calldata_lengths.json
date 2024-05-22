@@ -1,7 +1,8 @@
 {
-    "000-fork=Cancun-timestamp=12-valid_call=False-valid_input=False-empty_calldata": {
+    "tests/cancun/eip4788_beacon_root/test_beacon_root_contract.py::test_calldata_lengths[fork_Cancun-blockchain_test-timestamp_12-valid_call_False-valid_input_False-empty_calldata]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4788.md",
             "reference-spec-version": "e7608fe8ac8a60934ca874f5aab7d5c1f4ff7782"
         },
@@ -56,6 +57,7 @@
                     "parentBeaconBlockRoot": "0x6c31fc15422ebad28aaf9089c306702f67540b53c7eea8b7d2941044b027100f",
                     "hash": "0xeb3d7ccb2c7108e286a0611e356e174d379ccb91072a36aef7de124e3af28700"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x02",
@@ -124,9 +126,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "001-fork=Cancun-timestamp=12-valid_call=False-valid_input=False-one_byte": {
+    "tests/cancun/eip4788_beacon_root/test_beacon_root_contract.py::test_calldata_lengths[fork_Cancun-blockchain_test-timestamp_12-valid_call_False-valid_input_False-one_byte]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4788.md",
             "reference-spec-version": "e7608fe8ac8a60934ca874f5aab7d5c1f4ff7782"
         },
@@ -181,6 +184,7 @@
                     "parentBeaconBlockRoot": "0x6c31fc15422ebad28aaf9089c306702f67540b53c7eea8b7d2941044b027100f",
                     "hash": "0x49a6561b202af82d83d0904ee53a3ffc79529b95e34e2b46c428c8a18fee19fb"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x02",
@@ -249,9 +253,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "002-fork=Cancun-timestamp=12-valid_call=False-valid_input=False-31_bytes": {
+    "tests/cancun/eip4788_beacon_root/test_beacon_root_contract.py::test_calldata_lengths[fork_Cancun-blockchain_test-timestamp_12-valid_call_False-valid_input_False-31_bytes]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4788.md",
             "reference-spec-version": "e7608fe8ac8a60934ca874f5aab7d5c1f4ff7782"
         },
@@ -306,6 +311,7 @@
                     "parentBeaconBlockRoot": "0x6c31fc15422ebad28aaf9089c306702f67540b53c7eea8b7d2941044b027100f",
                     "hash": "0x5a728cc6cd4d87c3134cd91a13462766cac5172bef6ac5a44f8d2afcc86a0bb9"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x02",
@@ -374,9 +380,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "003-fork=Cancun-timestamp=12-valid_call=False-valid_input=False-33_bytes": {
+    "tests/cancun/eip4788_beacon_root/test_beacon_root_contract.py::test_calldata_lengths[fork_Cancun-blockchain_test-timestamp_12-valid_call_False-valid_input_False-33_bytes]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4788.md",
             "reference-spec-version": "e7608fe8ac8a60934ca874f5aab7d5c1f4ff7782"
         },
@@ -431,6 +438,7 @@
                     "parentBeaconBlockRoot": "0x6c31fc15422ebad28aaf9089c306702f67540b53c7eea8b7d2941044b027100f",
                     "hash": "0xa8c36ee14e7c025aa2e6f469771290d3fa2314dbbdae3c2e6f900854085cde3e"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x02",
@@ -499,9 +507,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "004-fork=Cancun-timestamp=12-valid_call=False-valid_input=False-1024_bytes": {
+    "tests/cancun/eip4788_beacon_root/test_beacon_root_contract.py::test_calldata_lengths[fork_Cancun-blockchain_test-timestamp_12-valid_call_False-valid_input_False-1024_bytes]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4788.md",
             "reference-spec-version": "e7608fe8ac8a60934ca874f5aab7d5c1f4ff7782"
         },
@@ -556,6 +565,7 @@
                     "parentBeaconBlockRoot": "0x6c31fc15422ebad28aaf9089c306702f67540b53c7eea8b7d2941044b027100f",
                     "hash": "0x27637f6645ed9085ac141705fe17c6fb3db10d4f2b5315fb6d01167a636e374c"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x02",

@@ -23,10 +23,9 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/golang/snappy"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/fork"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 )
 
 var writerPool = sync.Pool{
@@ -64,14 +63,14 @@ func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
 	return err
 }
 
-func DecodeAndRead(r io.Reader, val ssz.EncodableSSZ, b *clparams.BeaconChainConfig, genesisValidatorRoot libcommon.Hash) error {
+func DecodeAndRead(r io.Reader, val ssz.EncodableSSZ, b *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock) error {
 	var forkDigest [4]byte
 	// TODO(issues/5884): assert the fork digest matches the expectation for
 	// a specific configuration.
 	if _, err := r.Read(forkDigest[:]); err != nil {
 		return err
 	}
-	version, err := fork.ForkDigestVersion(forkDigest, b, genesisValidatorRoot)
+	version, err := ethClock.StateVersionByForkDigest(forkDigest)
 	if err != nil {
 		return err
 	}
@@ -120,7 +119,7 @@ func ReadUvarint(r io.Reader) (x, n uint64, err error) {
 	return 0, n, nil
 }
 
-func DecodeListSSZ(data []byte, count uint64, list []ssz.EncodableSSZ, b *clparams.BeaconChainConfig, genesisValidatorRoot libcommon.Hash) error {
+func DecodeListSSZ(data []byte, count uint64, list []ssz.EncodableSSZ, b *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock) error {
 	objSize := list[0].EncodingSizeSSZ()
 
 	r := bytes.NewReader(data)
@@ -130,7 +129,7 @@ func DecodeListSSZ(data []byte, count uint64, list []ssz.EncodableSSZ, b *clpara
 		return err
 	}
 
-	version, err := fork.ForkDigestVersion(forkDigest, b, genesisValidatorRoot)
+	version, err := ethClock.StateVersionByForkDigest(forkDigest)
 	if err != nil {
 		return err
 	}

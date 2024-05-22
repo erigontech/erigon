@@ -2,13 +2,11 @@ name: CI
 on:
   push:
     branches:
-      - devel
-      - alpha
+      - main
       - 'release/**'
   pull_request:
     branches:
-      - devel
-      - alpha
+      - main
       - 'release/**'
     types:
       - opened
@@ -25,14 +23,19 @@ jobs:
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     strategy:
       matrix:
-        os: [ ubuntu-20.04, macos-11 ] # list of os: https://github.com/actions/virtual-environments
+        # list of os: https://github.com/actions/virtual-environments
+        os:
+          - ubuntu-22.04
+          - macos-13
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v4
         with:
-          go-version: '1.20'
+          go-version: '1.21'
       - name: Install dependencies on Linux
         if: runner.os == 'Linux'
         run: sudo apt update && sudo apt install build-essential
@@ -52,9 +55,9 @@ jobs:
 
       - name: Install golangci-lint
         if: runner.os == 'Linux'
-        uses: golangci/golangci-lint-action@v3
+        uses: golangci/golangci-lint-action@v4
         with:
-          version: v1.55.2
+          version: v1.57.2
           skip-build-cache: true
           args: --help
 
@@ -69,6 +72,14 @@ jobs:
       - name: Test
         run: make test
 
+      - name: SonarCloud
+        if: runner.os == 'Linux'
+        uses: SonarSource/sonarcloud-github-action@v2.1.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        continue-on-error: true
+
   tests-windows:
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     strategy:
@@ -78,13 +89,13 @@ jobs:
 
     steps:
       - name: configure Pagefile
-        uses: al-cheb/configure-pagefile-action@v1.3
+        uses: al-cheb/configure-pagefile-action@v1.4
         with:
           minimum-size: 8GB
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: actions/setup-go@v4
         with:
-          go-version: '1.20'
+          go-version: '1.21'
 
       - uses: actions/cache@v3
         with:
@@ -94,8 +105,8 @@ jobs:
           key: chocolatey-${{ matrix.os }}
       - name: Install dependencies
         run: |
-          choco upgrade mingw -y --no-progress --version 11.2.0.07112021
-          choco install cmake -y --no-progress --version 3.23.1
+          choco upgrade mingw -y --no-progress --version 13.2.0
+          choco install cmake -y --no-progress --version 3.27.8
 
       - name: Build
         run: .\wmake.ps1 all
@@ -107,12 +118,13 @@ jobs:
         run: cd erigon-lib && make test-no-fuzz
 
   docker-build-check:
-    # don't run this on devel - the PR must have run it to be merged and it misleads that this pushes the docker image
-    if: (${{ github.event_name == 'push' || !github.event.pull_request.draft }}) && ${{ github.ref != 'refs/heads/devel' }}
-    runs-on: ubuntu-20.04
+    # don't run this on main - the PR must have run it to be merged and it misleads that this pushes the docker image
+    if: (${{ github.event_name == 'push' || !github.event.pull_request.draft }}) && ${{ github.ref != 'refs/heads/main' }}
+    runs-on: ubuntu-22.04
+
     steps:
       - uses: AutoModality/action-clean@v1
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # fetch git tags for "git describe"
 
@@ -125,10 +137,10 @@ jobs:
 
 #  automated-tests:
 #    runs-on:
-#      ubuntu-20.04
+#      ubuntu-22.04
 #    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
 #    steps:
-#      - uses: actions/checkout@v3
+#      - uses: actions/checkout@v4
 #
 #      - name: run automated testing
 #        run: BUILD_ERIGON=1 ./tests/automated-testing/run.sh

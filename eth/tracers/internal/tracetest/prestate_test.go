@@ -26,6 +26,7 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -70,7 +71,7 @@ func TestPrestateWithDiffModeTracer(t *testing.T) {
 }
 
 func testPrestateDiffTracer(tracerName string, dirPath string, t *testing.T) {
-	files, err := os.ReadDir(filepath.Join("testdata", dirPath))
+	files, err := dir.ReadDir(filepath.Join("testdata", dirPath))
 	if err != nil {
 		t.Fatalf("failed to retrieve tracer test suite: %v", err)
 	}
@@ -91,7 +92,7 @@ func testPrestateDiffTracer(tracerName string, dirPath string, t *testing.T) {
 			} else if err := json.Unmarshal(blob, test); err != nil {
 				t.Fatalf("failed to parse testcase: %v", err)
 			}
-			tx, err := types.UnmarshalTransactionFromBinary(common.FromHex(test.Input))
+			tx, err := types.UnmarshalTransactionFromBinary(common.FromHex(test.Input), false /* blobTxnsAreWrappedWithBlobs */)
 			if err != nil {
 				t.Fatalf("failed to parse testcase input: %v", err)
 			}
@@ -118,7 +119,7 @@ func testPrestateDiffTracer(tracerName string, dirPath string, t *testing.T) {
 			dbTx, err := m.DB.BeginRw(m.Ctx)
 			require.NoError(t, err)
 			defer dbTx.Rollback()
-			statedb, _ := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, context.BlockNumber)
+			statedb, _ := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, context.BlockNumber, m.HistoryV3)
 			if test.Genesis.BaseFee != nil {
 				context.BaseFee, _ = uint256.FromBig(test.Genesis.BaseFee)
 			}

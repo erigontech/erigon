@@ -22,7 +22,6 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -42,12 +41,11 @@ func TestBlockchain(t *testing.T) {
 	// TODO(yperbasis): make it work
 	bt.skipLoad(`^TransitionTests/bcArrowGlacierToMerge/powToPosBlockRejection\.json`)
 	bt.skipLoad(`^TransitionTests/bcFrontierToHomestead/blockChainFrontierWithLargerTDvsHomesteadBlockchain\.json`)
-	if ethconfig.EnableHistoryV3InTest {
-		// HistoryV3: doesn't produce receipts on execution by design
-		bt.skipLoad(`^InvalidBlocks/bcInvalidHeaderTest/log1_wrongBloom\.json`)
-		bt.skipLoad(`^InvalidBlocks/bcInvalidHeaderTest/wrongReceiptTrie\.json`)
-		bt.skipLoad(`^InvalidBlocks/bcInvalidHeaderTest/wrongGasUsed\.json`)
-	}
+
+	// TODO: HistoryV3: doesn't produce receipts on execution by design. But maybe we can Generate them on-the fly (on history) and enable this tests
+	bt.skipLoad(`^InvalidBlocks/bcInvalidHeaderTest/log1_wrongBloom\.json`)
+	bt.skipLoad(`^InvalidBlocks/bcInvalidHeaderTest/wrongReceiptTrie\.json`)
+	bt.skipLoad(`^InvalidBlocks/bcInvalidHeaderTest/wrongGasUsed\.json`)
 
 	checkStateRoot := true
 

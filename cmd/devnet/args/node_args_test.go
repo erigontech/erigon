@@ -36,7 +36,7 @@ func TestNodeArgs(t *testing.T) {
 		t.Fatal(asMap, "not found")
 	}
 
-	nodeArgs, _ = args.AsArgs(args.NonBlockProducer{
+	nodeArgs, _ = args.AsArgs(args.BlockConsumer{
 		NodeArgs: args.NodeArgs{
 			DataDir:        filepath.Join("data", fmt.Sprintf("%d", 2)),
 			StaticPeers:    "enode",
@@ -159,6 +159,7 @@ func producingNodeArgs(dataDir string, nodeNumber int) []string {
 	p2pProtocol, _ := parameterFromArgument("--p2p.protocol", "68")
 	downloaderArg, _ := parameterFromArgument("--no-downloader", "true")
 	httpPortArg, _ := parameterFromArgument("--http.port", "8545")
+	wsPortArg, _ := parameterFromArgument("--ws.port", "8546")
 	authrpcPortArg, _ := parameterFromArgument("--authrpc.port", "8551")
 	natArg, _ := parameterFromArgument("--nat", "none")
 	accountSlotsArg, _ := parameterFromArgument("--txpool.accountslots", "16")
@@ -170,6 +171,7 @@ func producingNodeArgs(dataDir string, nodeNumber int) []string {
 		chainType,
 		privateApiAddr,
 		httpPortArg,
+		wsPortArg,
 		authrpcPortArg,
 		mine,
 		httpApi,
@@ -196,6 +198,7 @@ func nonProducingNodeArgs(dataDir string, nodeNumber int, enode string) []string
 	p2pProtocol, _ := parameterFromArgument("--p2p.protocol", "68")
 	downloaderArg, _ := parameterFromArgument("--no-downloader", "true")
 	httpPortArg, _ := parameterFromArgument("--http.port", "8545")
+	wsPortArg, _ := parameterFromArgument("--ws.port", "8546")
 	httpApi, _ := parameterFromArgument(httpApiArg, "admin,eth,debug,net,trace,web3,erigon,txpool")
 	authrpcPortArg, _ := parameterFromArgument("--authrpc.port", "8551")
 	natArg, _ := parameterFromArgument("--nat", "none")
@@ -208,6 +211,7 @@ func nonProducingNodeArgs(dataDir string, nodeNumber int, enode string) []string
 		chainType,
 		privateApiAddr,
 		httpPortArg,
+		wsPortArg,
 		authrpcPortArg,
 		httpApi,
 		ws,

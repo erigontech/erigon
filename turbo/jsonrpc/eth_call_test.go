@@ -3,10 +3,11 @@ package jsonrpc
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
 	"testing"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
@@ -14,7 +15,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 
@@ -42,7 +43,7 @@ func TestEstimateGas(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mock.Mock(t))
 	mining := txpool.NewMiningClient(conn)
 	ff := rpchelper.New(ctx, nil, nil, mining, func() {}, m.Log)
-	api := NewEthAPI(NewBaseApi(ff, stateCache, m.BlockReader, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil, nil, nil, 5000000, 100_000, false, 100_000, log.New())
+	api := NewEthAPI(NewBaseApi(ff, stateCache, m.BlockReader, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil, nil, nil, 5000000, 100_000, false, 100_000, 128, log.New())
 	var from = libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	var to = libcommon.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	if _, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
@@ -57,7 +58,7 @@ func TestEthCallNonCanonical(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, m.BlockReader, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil, nil, nil, 5000000, 100_000, false, 100_000, log.New())
+	api := NewEthAPI(NewBaseApi(nil, stateCache, m.BlockReader, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil, nil, nil, 5000000, 100_000, false, 100_000, 128, log.New())
 	var from = libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	var to = libcommon.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	if _, err := api.Call(context.Background(), ethapi.CallArgs{
@@ -76,7 +77,7 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 
 	m, bankAddress, contractAddress := chainWithDeployedContract(t)
 	doPrune(t, m.DB, pruneTo)
-	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, 100_000, false, 100_000, log.New())
+	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, 100_000, false, 100_000, 128, log.New())
 
 	callData := hexutil.MustDecode("0x2e64cec1")
 	callDataBytes := hexutility.Bytes(callData)
@@ -97,7 +98,7 @@ func TestGetProof(t *testing.T) {
 	if m.HistoryV3 {
 		t.Skip("not supported by Erigon3")
 	}
-	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, 100_000, false, maxGetProofRewindBlockCount, log.New())
+	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, 100_000, false, maxGetProofRewindBlockCount, 128, log.New())
 
 	key := func(b byte) libcommon.Hash {
 		result := libcommon.Hash{}
@@ -190,7 +191,7 @@ func TestGetProof(t *testing.T) {
 			tx, err := m.DB.BeginRo(context.Background())
 			assert.NoError(t, err)
 			defer tx.Rollback()
-			header, err := api.headerByRPCNumber(rpc.BlockNumber(tt.blockNum), tx)
+			header, err := api.headerByRPCNumber(context.Background(), rpc.BlockNumber(tt.blockNum), tx)
 			require.NoError(t, err)
 
 			require.Equal(t, tt.addr, proof.Address)
@@ -533,13 +534,13 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, libcommon.Addres
 	}
 	defer tx.Rollback()
 
-	stateReader, err := rpchelper.CreateHistoryStateReader(tx, 1, 0, m.HistoryV3, "")
+	stateReader, err := rpchelper.CreateHistoryStateReader(tx, 1, 0, "")
 	assert.NoError(t, err)
 	st := state.New(stateReader)
 	assert.NoError(t, err)
 	assert.False(t, st.Exist(contractAddr), "Contract should not exist at block #1")
 
-	stateReader, err = rpchelper.CreateHistoryStateReader(tx, 2, 0, m.HistoryV3, "")
+	stateReader, err = rpchelper.CreateHistoryStateReader(tx, 2, 0, "")
 	assert.NoError(t, err)
 	st = state.New(stateReader)
 	assert.NoError(t, err)

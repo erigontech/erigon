@@ -1,0 +1,31 @@
+name: Integration tests
+on:
+  push:
+    branches:
+      - main
+      - 'release/**'
+  workflow_dispatch:
+
+jobs:
+  tests:
+    strategy:
+      matrix:
+        # list of os: https://github.com/actions/virtual-environments
+        os:
+          - ubuntu-22.04
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - run: git submodule update --init --recursive --force
+      - uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+      - name: Install dependencies on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt update && sudo apt install build-essential
+
+      - name: Test erigon as a library
+        env:
+          GIT_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: make test-erigon-ext GIT_COMMIT=$GIT_COMMIT

@@ -1,7 +1,8 @@
 {
-    "000-fork=Cancun-call": {
+    "tests/cancun/eip1153_tstore/test_tstorage_execution_contexts.py::test_subcall[fork_Cancun-blockchain_test-call]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -56,6 +57,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xb3524aa4ed79ff4e5d324f60eb5da3ce37953abf619bb0d8e1a1ed3f21ea34f1"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -144,9 +146,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "001-fork=Cancun-staticcall_cant_call_tstore": {
+    "tests/cancun/eip1153_tstore/test_tstorage_execution_contexts.py::test_subcall[fork_Cancun-blockchain_test-staticcall_cant_call_tstore]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -201,6 +204,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xf759f394c6b8f00655e5134afd600bc27d24f9f5df8cc913dceb3d7633559c68"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -286,9 +290,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "002-fork=Cancun-staticcall_cant_call_tstore_with_stack_underflow": {
+    "tests/cancun/eip1153_tstore/test_tstorage_execution_contexts.py::test_subcall[fork_Cancun-blockchain_test-staticcall_cant_call_tstore_with_stack_underflow]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -343,6 +348,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xa75b5b6f7c1811234b34a9049c32d559e2f2043afe25da30da0cb8e7bdc067bd"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -428,9 +434,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "003-fork=Cancun-staticcalled_context_can_call_tload": {
+    "tests/cancun/eip1153_tstore/test_tstorage_execution_contexts.py::test_subcall[fork_Cancun-blockchain_test-staticcalled_context_can_call_tload]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -485,6 +492,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x99e4672e700496cadbe233a0e7a4d91cbd3d5079f078d0d3ecbef8c33f508366"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -571,9 +579,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "004-fork=Cancun-callcode": {
+    "tests/cancun/eip1153_tstore/test_tstorage_execution_contexts.py::test_subcall[fork_Cancun-blockchain_test-callcode]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -628,6 +637,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x37523918a2a192655f6a41a4514851f37db7b88c88f99ef049a55f42c488c35a"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -717,9 +727,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "005-fork=Cancun-delegatecall": {
+    "tests/cancun/eip1153_tstore/test_tstorage_execution_contexts.py::test_subcall[fork_Cancun-blockchain_test-delegatecall]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -774,6 +785,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x634279ef601f6fb0f6d62d4a5015defce461c933aa1664b4c663a40933b4ccf0"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -863,9 +875,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "006-fork=Cancun-call_with_revert": {
+    "tests/cancun/eip1153_tstore/test_tstorage_execution_contexts.py::test_subcall[fork_Cancun-blockchain_test-call_with_revert]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -920,6 +933,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xd1c12133043c336890042acdff22270a144ec2ccc64d623995dc4a4ecec6855c"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -1006,9 +1020,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "007-fork=Cancun-call_with_invalid": {
+    "tests/cancun/eip1153_tstore/test_tstorage_execution_contexts.py::test_subcall[fork_Cancun-blockchain_test-call_with_invalid]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -1063,6 +1078,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x1d9ae06a5070047a0b625c9d84c059b8bb44157b26368958a8019777b270719f"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -1149,9 +1165,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "008-fork=Cancun-call_with_stack_overflow": {
+    "tests/cancun/eip1153_tstore/test_tstorage_execution_contexts.py::test_subcall[fork_Cancun-blockchain_test-call_with_stack_overflow]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -1206,6 +1223,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xae88799e19a689240b23a8a8fef4dad841d0da80991e5c1dccb40e9826d10f9b"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -1292,9 +1310,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "009-fork=Cancun-call_with_tstore_stack_underflow": {
+    "tests/cancun/eip1153_tstore/test_tstorage_execution_contexts.py::test_subcall[fork_Cancun-blockchain_test-call_with_tstore_stack_underflow]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -1349,6 +1368,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x43baccbb8c0d768ef28c8d946a0a55dceffc2a8e58d3046ba9d0e673e2f6f838"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -1435,9 +1455,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "010-fork=Cancun-call_with_tstore_stack_underflow_2": {
+    "tests/cancun/eip1153_tstore/test_tstorage_execution_contexts.py::test_subcall[fork_Cancun-blockchain_test-call_with_tstore_stack_underflow_2]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -1492,6 +1513,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xa70d520e4e9769e7fb145597099ba90802976d584772327d971e415df934853e"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -1578,9 +1600,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "011-fork=Cancun-call_with_tload_stack_underflow": {
+    "tests/cancun/eip1153_tstore/test_tstorage_execution_contexts.py::test_subcall[fork_Cancun-blockchain_test-call_with_tload_stack_underflow]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -1635,6 +1658,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x74c94770359491a0b2bdf65f415b88a4cb5d4ae9576f074f3d7a19283231ce34"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -1721,9 +1745,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "012-fork=Cancun-call_with_out_of_gas": {
+    "tests/cancun/eip1153_tstore/test_tstorage_execution_contexts.py::test_subcall[fork_Cancun-blockchain_test-call_with_out_of_gas]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -1778,6 +1803,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xf85d2122bbb832498c3e9b3b140ef97227a847c60c89510e9112d92703103d6d"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -1864,9 +1890,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "013-fork=Cancun-call_with_out_of_gas_2": {
+    "tests/cancun/eip1153_tstore/test_tstorage_execution_contexts.py::test_subcall[fork_Cancun-blockchain_test-call_with_out_of_gas_2]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -1921,6 +1948,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x5e78e1c50afd939b06192b3bb9d10580c85753ee8571f68b18e9ffc6598454a6"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -2007,9 +2035,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "014-fork=Cancun-callcode_with_revert": {
+    "tests/cancun/eip1153_tstore/test_tstorage_execution_contexts.py::test_subcall[fork_Cancun-blockchain_test-callcode_with_revert]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -2064,6 +2093,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x98dfc12495cfe79205236d05c474096d7d0c1f7ba42540ef6bc5636a741423c7"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -2150,9 +2180,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "015-fork=Cancun-callcode_with_invalid": {
+    "tests/cancun/eip1153_tstore/test_tstorage_execution_contexts.py::test_subcall[fork_Cancun-blockchain_test-callcode_with_invalid]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -2207,6 +2238,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xfc47561b283397446719f3b54663fb072fec6792b989ac90e55cb1e544e7e736"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -2293,9 +2325,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "016-fork=Cancun-callcode_with_stack_overflow": {
+    "tests/cancun/eip1153_tstore/test_tstorage_execution_contexts.py::test_subcall[fork_Cancun-blockchain_test-callcode_with_stack_overflow]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -2350,6 +2383,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x70f43159b619449ee227a47f99656cda05443d56b5e4720aa64880cac1af51a6"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -2436,9 +2470,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "017-fork=Cancun-callcode_with_tstore_stack_underflow": {
+    "tests/cancun/eip1153_tstore/test_tstorage_execution_contexts.py::test_subcall[fork_Cancun-blockchain_test-callcode_with_tstore_stack_underflow]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -2493,6 +2528,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xacba3b3bcd7985f8a98d7dbaba82f0b6a17bc4801392ad4847249b297457d677"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -2579,9 +2615,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "018-fork=Cancun-callcode_with_tstore_stack_underflow_2": {
+    "tests/cancun/eip1153_tstore/test_tstorage_execution_contexts.py::test_subcall[fork_Cancun-blockchain_test-callcode_with_tstore_stack_underflow_2]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -2636,6 +2673,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x5c19503a0716a8ac76da9ad31c614bbd3dd74fee862e692423c17eda98c58022"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -2722,9 +2760,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "019-fork=Cancun-callcode_with_tload_stack_underflow": {
+    "tests/cancun/eip1153_tstore/test_tstorage_execution_contexts.py::test_subcall[fork_Cancun-blockchain_test-callcode_with_tload_stack_underflow]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -2779,6 +2818,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x8e95bc88bb1ec762c508fd1679676b739fca0bdace3059aad66d541bfaa9d153"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -2865,9 +2905,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "020-fork=Cancun-callcode_with_out_of_gas": {
+    "tests/cancun/eip1153_tstore/test_tstorage_execution_contexts.py::test_subcall[fork_Cancun-blockchain_test-callcode_with_out_of_gas]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -2922,6 +2963,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x8291c44b19d37d5eba0dfadf3b2a6afef0c8bd1927cf20de2b00ef951e611dd9"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -3008,9 +3050,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "021-fork=Cancun-callcode_with_out_of_gas_2": {
+    "tests/cancun/eip1153_tstore/test_tstorage_execution_contexts.py::test_subcall[fork_Cancun-blockchain_test-callcode_with_out_of_gas_2]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -3065,6 +3108,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x82fcd3858f0bc4e662b7d3438fa736f7bfba59003df8594e5b32fd32c8b6173c"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -3151,9 +3195,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "022-fork=Cancun-delegatecall_with_revert": {
+    "tests/cancun/eip1153_tstore/test_tstorage_execution_contexts.py::test_subcall[fork_Cancun-blockchain_test-delegatecall_with_revert]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -3208,6 +3253,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x2b701e2c663972fca8913a16bf21096b90e2229426a94f9286ef997f9cb7c133"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -3294,9 +3340,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "023-fork=Cancun-delegatecall_with_invalid": {
+    "tests/cancun/eip1153_tstore/test_tstorage_execution_contexts.py::test_subcall[fork_Cancun-blockchain_test-delegatecall_with_invalid]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -3351,6 +3398,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x6553d05ca4356cf866f132b28258c4ab9ba1cb7418b956199770a7c6eb24584f"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -3437,9 +3485,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "024-fork=Cancun-delegatecall_with_stack_overflow": {
+    "tests/cancun/eip1153_tstore/test_tstorage_execution_contexts.py::test_subcall[fork_Cancun-blockchain_test-delegatecall_with_stack_overflow]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -3494,6 +3543,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xdedc9a705b04432e903b1127bfcb4f113a44f1f6366dc8a8ebb08ad292edb8a4"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -3580,9 +3630,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "025-fork=Cancun-delegatecall_with_tstore_stack_underflow": {
+    "tests/cancun/eip1153_tstore/test_tstorage_execution_contexts.py::test_subcall[fork_Cancun-blockchain_test-delegatecall_with_tstore_stack_underflow]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -3637,6 +3688,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xd45f05d5ef0f14ccc8c69fc0df314cd06a497c2830d0587f878d4001c72e4960"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -3723,9 +3775,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "026-fork=Cancun-delegatecall_with_tstore_stack_underflow_2": {
+    "tests/cancun/eip1153_tstore/test_tstorage_execution_contexts.py::test_subcall[fork_Cancun-blockchain_test-delegatecall_with_tstore_stack_underflow_2]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -3780,6 +3833,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xf86da969c781ddb84fa18936c8ffc553aad0f4f7b620dc4b0beb1ae3be47ad78"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -3866,9 +3920,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "027-fork=Cancun-delegatecall_with_tload_stack_underflow": {
+    "tests/cancun/eip1153_tstore/test_tstorage_execution_contexts.py::test_subcall[fork_Cancun-blockchain_test-delegatecall_with_tload_stack_underflow]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -3923,6 +3978,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xfcb3517b1c5bfa2f8491fa74cc46cf1547316ee0030c802d8c92d2a4769e3df4"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -4009,9 +4065,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "028-fork=Cancun-delegatecall_with_out_of_gas": {
+    "tests/cancun/eip1153_tstore/test_tstorage_execution_contexts.py::test_subcall[fork_Cancun-blockchain_test-delegatecall_with_out_of_gas]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -4066,6 +4123,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x73f5c885e103a8fc2d447c87998fa002e28236b30abbba2b45582a0f2f0b58bb"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -4152,9 +4210,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "029-fork=Cancun-delegatecall_with_out_of_gas_2": {
+    "tests/cancun/eip1153_tstore/test_tstorage_execution_contexts.py::test_subcall[fork_Cancun-blockchain_test-delegatecall_with_out_of_gas_2]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -4209,6 +4268,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x7f8a04cf2aa0b99bb574e4b4aa482596995ec6731b4925a78520190d63c4f034"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",

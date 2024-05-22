@@ -86,7 +86,7 @@ if err != nil {
 - Methods .Bucket() and .Cursor(), can’t return nil, can't return error.
 - Bucket and Cursor - are interfaces - means different classes can satisfy it: for example `MdbxCursor`
   and `MdbxDupSortCursor` classes satisfy it.
-  If your are not familiar with "DupSort" concept, please read [dupsort.md](https://github.com/ledgerwatch/erigon/blob/devel/docs/programmers_guide/dupsort.md)
+  If your are not familiar with "DupSort" concept, please read [dupsort.md](https://github.com/ledgerwatch/erigon/blob/main/docs/programmers_guide/dupsort.md)
 
 
 
@@ -115,7 +115,7 @@ return err
 - method Begin DOESN'T create new TxDb object, it means this object can be passed into other objects by pointer,
   and high-level app code can start/commit transactions when it needs without re-creating all objects which holds
   TxDb pointer.
-- This is reason why txDb.CommitAndBegin() method works: inside it creating new transaction object, pinter to TxDb stays
+- This is reason why txDb.CommitAndBegin() method works: inside it creating new transaction object, pointer to TxDb stays
   valid.
 
 ## How to dump/load table

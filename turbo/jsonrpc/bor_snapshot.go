@@ -6,27 +6,27 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
+
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/bor"
-	"github.com/ledgerwatch/erigon/consensus/bor/finality/whitelist"
-	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/polygon/bor"
+	"github.com/ledgerwatch/erigon/polygon/bor/finality/whitelist"
+	"github.com/ledgerwatch/erigon/polygon/bor/valset"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
 type Snapshot struct {
-	config *chain.BorConfig // Consensus engine parameters to fine tune behavior
+	config *borcfg.BorConfig // Consensus engine parameters to fine tune behavior
 
-	Number       uint64                    `json:"number"`       // Block number where the snapshot was created
-	Hash         common.Hash               `json:"hash"`         // Block hash where the snapshot was created
-	ValidatorSet *ValidatorSet             `json:"validatorSet"` // Validator set at this moment
-	Recents      map[uint64]common.Address `json:"recents"`      // Set of recent signers for spam protections
+	Number       uint64        `json:"number"`       // Block number where the snapshot was created
+	Hash         common.Hash   `json:"hash"`         // Block hash where the snapshot was created
+	ValidatorSet *ValidatorSet `json:"validatorSet"` // Validator set at this moment
 }
 
 // GetSnapshot retrieves the state snapshot at a given block.
@@ -278,19 +278,6 @@ func (api *BorImpl) GetVoteOnHash(ctx context.Context, starBlockNr uint64, endBl
 		return false, fmt.Errorf("hash mismatch: localChainHash %s, milestoneHash %s", localEndBlockHash, hash)
 	}
 
-	bor, err := api.bor()
-
-	if err != nil {
-		return false, errors.New("bor engine not available")
-	}
-
-	err = bor.HeimdallClient.FetchMilestoneID(ctx, milestoneId)
-
-	if err != nil {
-		service.UnlockMutex(false, "", endBlockNr, common.Hash{})
-		return false, errors.New("milestone ID doesn't exist in Heimdall")
-	}
-
 	service.UnlockMutex(true, milestoneId, endBlockNr, localEndBlock.Hash())
 
 	return true, nil
@@ -463,35 +450,8 @@ func (s *Snapshot) copy() *Snapshot {
 		Number:       s.Number,
 		Hash:         s.Hash,
 		ValidatorSet: s.ValidatorSet.Copy(),
-		Recents:      make(map[uint64]common.Address),
 	}
-	for block, signer := range s.Recents {
-		cpy.Recents[block] = signer
-	}
-
 	return cpy
-}
-
-// GetSignerSuccessionNumber returns the relative position of signer in terms of the in-turn proposer
-func (s *Snapshot) GetSignerSuccessionNumber(signer common.Address) (int, error) {
-	validators := s.ValidatorSet.Validators
-	proposer := s.ValidatorSet.GetProposer().Address
-	proposerIndex, _ := s.ValidatorSet.GetByAddress(proposer)
-	if proposerIndex == -1 {
-		return -1, &bor.UnauthorizedProposerError{Number: s.Number, Proposer: proposer.Bytes()}
-	}
-	signerIndex, _ := s.ValidatorSet.GetByAddress(signer)
-	if signerIndex == -1 {
-		return -1, &bor.UnauthorizedSignerError{Number: s.Number, Signer: signer.Bytes()}
-	}
-
-	tempIndex := signerIndex
-	if proposerIndex != tempIndex {
-		if tempIndex < proposerIndex {
-			tempIndex = tempIndex + len(validators)
-		}
-	}
-	return tempIndex - proposerIndex, nil
 }
 
 // signers retrieves the list of authorized signers in ascending order.
@@ -524,12 +484,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 	for _, header := range headers {
 		// Remove any votes on checkpoint blocks
 		number := header.Number.Uint64()
-
-		// Delete the oldest signer from the recent list to allow it signing again
-		currentSprint := s.config.CalculateSprint(number)
-		if number >= currentSprint {
-			delete(snap.Recents, number-currentSprint)
-		}
+		currentLen := s.config.CalculateSprintLength(number)
 
 		// Resolve the authorization key and check against signers
 		signer, err := ecrecover(header, s.config)
@@ -538,20 +493,13 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 		}
 
 		// check if signer is in validator set
-		if !snap.ValidatorSet.HasAddress(signer.Bytes()) {
-			return nil, &bor.UnauthorizedSignerError{Number: number, Signer: signer.Bytes()}
+		if !snap.ValidatorSet.HasAddress(signer) {
+			return nil, &valset.UnauthorizedSignerError{Number: number, Signer: signer.Bytes()}
 		}
-
-		if _, err = snap.GetSignerSuccessionNumber(signer); err != nil {
-			return nil, err
-		}
-
-		// add recents
-		snap.Recents[number] = signer
 
 		// change validator set and change proposer
-		if number > 0 && (number+1)%currentSprint == 0 {
-			if err := bor.ValidateHeaderExtraField(header.Extra); err != nil {
+		if number > 0 && (number+1)%currentLen == 0 {
+			if err := bor.ValidateHeaderExtraLength(header.Extra); err != nil {
 				return nil, err
 			}
 			validatorBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
@@ -563,6 +511,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 			snap.ValidatorSet = v
 		}
 	}
+
 	snap.Number += uint64(len(headers))
 	snap.Hash = headers[len(headers)-1].Hash()
 
@@ -628,8 +577,8 @@ func loadSnapshot(api *BorImpl, db kv.Tx, borDb kv.Tx, hash common.Hash) (*Snaps
 	if err := json.Unmarshal(blob, snap); err != nil {
 		return nil, err
 	}
-	config, _ := api.chainConfig(db)
-	snap.config = config.Bor
+	borEngine, _ := api.bor()
+	snap.config = borEngine.Config()
 
 	// update total voting power
 	if err := snap.ValidatorSet.UpdateTotalVotingPower(); err != nil {

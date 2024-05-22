@@ -47,6 +47,7 @@ type memoryMutationCursor struct {
 	currentDbEntry  cursorEntry
 	currentMemEntry cursorEntry
 	isPrevFromDb    bool
+	pureDupSort     bool
 }
 
 func (m *memoryMutationCursor) isTableCleared() bool {
@@ -337,10 +338,16 @@ func (m *memoryMutationCursor) Delete(k []byte) error {
 }
 
 func (m *memoryMutationCursor) DeleteCurrent() error {
-	panic("DeleteCurrent Not implemented")
+	if !m.pureDupSort {
+		return m.mutation.Delete(m.table, m.currentPair.key)
+	}
+	m.mutation.deleteDup(m.table, m.currentPair.key, m.currentPair.value)
+	return nil
 }
-func (m *memoryMutationCursor) DeleteExact(_, _ []byte) error {
-	panic("DeleteExact Not implemented")
+
+func (m *memoryMutationCursor) DeleteExact(k, v []byte) error {
+	m.mutation.deleteDup(m.table, k, v)
+	return nil
 }
 
 func (m *memoryMutationCursor) DeleteCurrentDuplicates() error {
@@ -464,8 +471,17 @@ func (m *memoryMutationCursor) Close() {
 	}
 }
 
+// Count does not return accurate count, but overestimates
 func (m *memoryMutationCursor) Count() (uint64, error) {
-	panic("Not implemented")
+	cMem, err := m.memCursor.Count()
+	if err != nil {
+		return 0, err
+	}
+	cDb, err := m.cursor.Count()
+	if err != nil {
+		return 0, err
+	}
+	return cMem + cDb, nil
 }
 
 func (m *memoryMutationCursor) FirstDup() ([]byte, error) {
@@ -502,5 +518,34 @@ func (m *memoryMutationCursor) CountDuplicates() (uint64, error) {
 }
 
 func (m *memoryMutationCursor) SeekBothExact(key, value []byte) ([]byte, []byte, error) {
-	panic("SeekBothExact Not implemented")
+	memKey, memValue, err := m.memCursor.SeekBothExact(key, value)
+	if err != nil || m.isTableCleared() {
+		return memKey, memValue, err
+	}
+
+	if memKey != nil {
+		m.currentMemEntry.key = memKey
+		m.currentMemEntry.value = memValue
+		m.currentDbEntry.key = key
+		m.currentDbEntry.value, err = m.cursor.SeekBothRange(key, value)
+		m.isPrevFromDb = false
+		m.currentPair = cursorEntry{memKey, memValue}
+		return memKey, memValue, err
+	}
+
+	dbKey, dbValue, err := m.cursor.SeekBothExact(key, value)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if dbKey != nil && !m.mutation.isDupDeleted(m.table, key, value) {
+		m.currentDbEntry.key = dbKey
+		m.currentDbEntry.value = dbValue
+		m.currentMemEntry.key = key
+		m.currentMemEntry.value, err = m.memCursor.SeekBothRange(key, value)
+		m.isPrevFromDb = true
+		m.currentPair = cursorEntry{dbKey, dbValue}
+		return dbKey, dbValue, err
+	}
+	return nil, nil, nil
 }

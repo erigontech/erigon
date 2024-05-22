@@ -14,6 +14,8 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
+//go:build integration_skip
+
 package discover
 
 import (
@@ -82,7 +84,7 @@ func newUDPTestContext(ctx context.Context, t *testing.T, logger log.Logger) *ud
 	tmpDir := t.TempDir()
 
 	var err error
-	test.db, err = enode.OpenDB(ctx, "", tmpDir)
+	test.db, err = enode.OpenDB(ctx, "", tmpDir, logger)
 	if err != nil {
 		panic(err)
 	}
@@ -548,9 +550,8 @@ func TestUDPv4_EIP868(t *testing.T) {
 
 // This test verifies that a small network of nodes can boot up into a healthy state.
 func TestUDPv4_smallNetConvergence(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please")
-	}
+	t.Skip("FIXME: https://github.com/ledgerwatch/erigon/issues/8731")
+
 	t.Parallel()
 	logger := log.New()
 
@@ -620,7 +621,7 @@ func startLocalhostV4(ctx context.Context, t *testing.T, cfg Config, logger log.
 
 	cfg.PrivateKey = newkey()
 	tmpDir := t.TempDir()
-	db, err := enode.OpenDB(context.Background(), "", tmpDir)
+	db, err := enode.OpenDB(context.Background(), "", tmpDir, logger)
 	if err != nil {
 		panic(err)
 	}

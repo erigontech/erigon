@@ -21,16 +21,22 @@ import (
 	"context"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal"
+
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+	checker "gopkg.in/check.v1"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	checker "gopkg.in/check.v1"
-
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/log/v3"
 )
 
 var toAddr = common.BytesToAddress
@@ -73,11 +79,7 @@ func (s *StateSuite) TestDump(c *checker.C) {
 	}
 	defer tx.Rollback()
 
-	historyV3, err := kvcfg.HistoryV3.Enabled(tx)
-	if err != nil {
-		panic(err)
-	}
-	got := string(NewDumper(tx, 1, historyV3).DefaultDump())
+	got := string(NewDumper(tx, 1).DefaultDump())
 	want := `{
     "root": "71edff0130dd2385947095001c73d9e28d862fc286fca2b922ca6f6f3cddfdd2",
     "accounts": {
@@ -108,12 +110,15 @@ func (s *StateSuite) TestDump(c *checker.C) {
 }
 
 func (s *StateSuite) SetUpTest(c *checker.C) {
+	//var agg *state.Aggregator
+	//s.kv, s.tx, agg = memdb.NewTestTemporalDb(c.Logf)
 	s.kv = memdb.New("")
 	tx, err := s.kv.BeginRw(context.Background()) //nolint
 	if err != nil {
 		panic(err)
 	}
 	s.tx = tx
+	//s.r = NewWriterV4(s.tx)
 	s.r = NewPlainState(tx, 1, nil)
 	s.w = NewPlainState(tx, 1, nil)
 	s.state = New(s.r)
@@ -324,56 +329,70 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 	}
 }
 
+func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *state.Aggregator) {
+	tb.Helper()
+	db := memdb.NewStateDB(tb.TempDir())
+	tb.Cleanup(db.Close)
+
+	agg, err := state.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, log.New())
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tb.Cleanup(agg.Close)
+
+	_db, err := temporal.New(db, agg)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tb.Cleanup(tx.Rollback)
+	return _db, tx, agg
+}
+
 func TestDump(t *testing.T) {
 	t.Parallel()
-	_, tx := memdb.NewTestTx(t)
-	w := NewPlainStateWriter(tx, tx, 0)
-	state := New(NewPlainStateReader(tx))
+	_, tx, _ := NewTestTemporalDb(t)
+
+	domains, err := state.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	domains.SetTxNum(1)
+	domains.SetBlockNum(1)
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	require.NoError(t, err)
+
+	st := New(NewReaderV4(domains))
 
 	// generate a few entries
-	obj1 := state.GetOrNewStateObject(toAddr([]byte{0x01}))
+	obj1 := st.GetOrNewStateObject(toAddr([]byte{0x01}))
 	obj1.AddBalance(uint256.NewInt(22))
-	obj2 := state.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
+	obj2 := st.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
 	obj2.SetCode(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3}), []byte{3, 3, 3, 3, 3, 3, 3})
 	obj2.setIncarnation(1)
-	obj3 := state.GetOrNewStateObject(toAddr([]byte{0x02}))
+	obj3 := st.GetOrNewStateObject(toAddr([]byte{0x02}))
 	obj3.SetBalance(uint256.NewInt(44))
 
+	w := NewWriterV4(domains)
 	// write some of them to the trie
-	err := w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
-	if err != nil {
-		t.Fatal(err)
-	}
+	err = w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
+	require.NoError(t, err)
 	err = w.UpdateAccountData(obj2.address, &obj2.data, new(accounts.Account))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+	err = st.FinalizeTx(&chain.Rules{}, w)
+	require.NoError(t, err)
 
-	err = state.FinalizeTx(&chain.Rules{}, w)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	blockWriter := NewPlainStateWriter(tx, tx, 1)
-	err = state.CommitBlock(&chain.Rules{}, blockWriter)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = blockWriter.WriteChangeSets()
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = blockWriter.WriteHistory()
-	if err != nil {
-		t.Fatal(err)
-	}
+	blockWriter := NewWriterV4(domains)
+	err = st.CommitBlock(&chain.Rules{}, blockWriter)
+	require.NoError(t, err)
+	err = domains.Flush(context.Background(), tx)
+	require.NoError(t, err)
 
 	// check that dump contains the state objects that are in trie
-	historyV3, err := kvcfg.HistoryV3.Enabled(tx)
-	if err != nil {
-		panic(err)
-	}
-	got := string(NewDumper(tx, 2, historyV3).DefaultDump())
+	got := string(NewDumper(tx, 1).DefaultDump())
 	want := `{
     "root": "0000000000000000000000000000000000000000000000000000000000000000",
     "accounts": {

@@ -44,7 +44,7 @@ type Dirs struct {
 	Downloader      string
 	TxPool          string
 	Nodes           string
-	CaplinHistory   string
+	CaplinBlobs     string
 	CaplinIndexing  string
 }
 
@@ -72,13 +72,13 @@ func New(datadir string) Dirs {
 		Downloader:      filepath.Join(datadir, "downloader"),
 		TxPool:          filepath.Join(datadir, "txpool"),
 		Nodes:           filepath.Join(datadir, "nodes"),
-		CaplinHistory:   filepath.Join(datadir, "caplin/history"),
-		CaplinIndexing:  filepath.Join(datadir, "caplin/indexing"),
+		CaplinBlobs:     filepath.Join(datadir, "caplin", "blobs"),
+		CaplinIndexing:  filepath.Join(datadir, "caplin", "indexing"),
 	}
 
 	dir.MustExist(dirs.Chaindata, dirs.Tmp,
 		dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors,
-		dirs.Downloader, dirs.TxPool, dirs.Nodes, dirs.CaplinHistory, dirs.CaplinIndexing)
+		dirs.Downloader, dirs.TxPool, dirs.Nodes, dirs.CaplinBlobs, dirs.CaplinIndexing)
 	return dirs
 }
 
@@ -108,7 +108,7 @@ func TryFlock(dirs Dirs) (*flock.Flock, bool, error) {
 }
 
 // ApplyMigrations - if can get flock.
-func ApplyMigrations(dirs Dirs) error {
+func ApplyMigrations(dirs Dirs) error { //nolint
 	need := downloaderV2MigrationNeeded(dirs)
 	if !need {
 		return nil
@@ -151,7 +151,7 @@ func downloaderV2Migration(dirs Dirs) error {
 
 // nolint
 func moveFiles(from, to string, ext string) error {
-	files, err := os.ReadDir(from)
+	files, err := dir.ReadDir(from)
 	if err != nil {
 		return fmt.Errorf("ReadDir: %w, %s", err, from)
 	}

@@ -3,10 +3,11 @@ package rpctest
 import (
 	"bufio"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"

@@ -36,7 +36,7 @@ func DefaultDataDir() string {
 			if xdgDataDir := os.Getenv("XDG_DATA_HOME"); xdgDataDir != "" {
 				return filepath.Join(xdgDataDir, strings.ToLower(dirname))
 			}
-			return filepath.Join(home, ".local/share", strings.ToLower(dirname))
+			return filepath.Join(home, ".local", "share", strings.ToLower(dirname))
 		}
 	}
 	// As we cannot guess a stable location, return empty and handle later
@@ -88,6 +88,8 @@ func DataDirForNetwork(datadir string, network string) string {
 		return networkDataDirCheckingLegacy(datadir, "goerli")
 	case networkname.MumbaiChainName:
 		return networkDataDirCheckingLegacy(datadir, "mumbai")
+	case networkname.AmoyChainName:
+		return networkDataDirCheckingLegacy(datadir, "amoy")
 	case networkname.BorMainnetChainName:
 		return networkDataDirCheckingLegacy(datadir, "bor-mainnet")
 	case networkname.BorDevnetChainName:

@@ -2,11 +2,19 @@ package polygon
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
+	"net"
+	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/ledgerwatch/log/v3"
 
 	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -16,12 +24,9 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/blocks"
 	"github.com/ledgerwatch/erigon/cmd/devnet/contracts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/checkpoint"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/milestone"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdallgrpc"
-	"github.com/ledgerwatch/erigon/consensus/bor/valset"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
+	"github.com/ledgerwatch/erigon/polygon/bor/valset"
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
 )
 
 type BridgeEvent string
@@ -52,7 +57,7 @@ const (
 	DefaultCheckpointBufferTime      time.Duration = 1000 * time.Second
 )
 
-const HeimdallGrpcAddressDefault = "localhost:8540"
+const HeimdallURLDefault = "http://localhost:1317"
 
 type CheckpointConfig struct {
 	RootChainTxConfirmations  uint64
@@ -67,13 +72,14 @@ type CheckpointConfig struct {
 type Heimdall struct {
 	sync.Mutex
 	chainConfig        *chain.Config
-	grpcAddr           string
+	borConfig          *borcfg.BorConfig
+	listenAddr         string
 	validatorSet       *valset.ValidatorSet
-	pendingCheckpoint  *checkpoint.Checkpoint
+	pendingCheckpoint  *heimdall.Checkpoint
 	latestCheckpoint   *CheckpointAck
 	ackWaiter          *sync.Cond
-	currentSpan        *span.HeimdallSpan
-	spans              map[uint64]*span.HeimdallSpan
+	currentSpan        *heimdall.Span
+	spans              map[heimdall.SpanId]*heimdall.Span
 	logger             log.Logger
 	cancelFunc         context.CancelFunc
 	syncSenderAddress  libcommon.Address
@@ -90,15 +96,16 @@ type Heimdall struct {
 
 func NewHeimdall(
 	chainConfig *chain.Config,
-	grpcAddr string,
+	serverURL string,
 	checkpointConfig *CheckpointConfig,
 	logger log.Logger,
 ) *Heimdall {
 	heimdall := &Heimdall{
 		chainConfig:        chainConfig,
-		grpcAddr:           grpcAddr,
+		borConfig:          chainConfig.Bor.(*borcfg.BorConfig),
+		listenAddr:         serverURL[7:],
 		checkpointConfig:   *checkpointConfig,
-		spans:              map[uint64]*span.HeimdallSpan{},
+		spans:              map[heimdall.SpanId]*heimdall.Span{},
 		pendingSyncRecords: map[syncRecordKey]*EventRecordWithBlock{},
 		logger:             logger}
 
@@ -135,57 +142,58 @@ func NewHeimdall(
 	return heimdall
 }
 
-func (h *Heimdall) Span(ctx context.Context, spanID uint64) (*span.HeimdallSpan, error) {
+func (h *Heimdall) FetchSpan(ctx context.Context, spanID uint64) (*heimdall.Span, error) {
 	h.Lock()
 	defer h.Unlock()
 
-	if span, ok := h.spans[spanID]; ok {
+	if span, ok := h.spans[heimdall.SpanId(spanID)]; ok {
 		h.currentSpan = span
 		return span, nil
 	}
 
-	var nextSpan = span.Span{
-		ID: spanID,
+	var nextSpan = heimdall.Span{
+		Id:           heimdall.SpanId(spanID),
+		ValidatorSet: *h.validatorSet,
+		ChainID:      h.chainConfig.ChainID.String(),
 	}
 
 	if h.currentSpan == nil || spanID == 0 {
 		nextSpan.StartBlock = 1 //256
 	} else {
-		if spanID != h.currentSpan.ID+1 {
-			return nil, fmt.Errorf("Can't initialize span: non consecutive span")
+		if spanID != uint64(h.currentSpan.Id+1) {
+			return nil, fmt.Errorf("can't initialize span: non consecutive span")
 		}
 
 		nextSpan.StartBlock = h.currentSpan.EndBlock + 1
 	}
 
-	nextSpan.EndBlock = nextSpan.StartBlock + (100 * h.chainConfig.Bor.CalculateSprint(nextSpan.StartBlock)) - 1
+	nextSpan.EndBlock = nextSpan.StartBlock + (100 * h.borConfig.CalculateSprintLength(nextSpan.StartBlock)) - 1
 
 	// TODO we should use a subset here - see: https://wiki.polygon.technology/docs/pos/bor/
 
-	selectedProducers := make([]valset.Validator, len(h.validatorSet.Validators))
+	nextSpan.SelectedProducers = make([]valset.Validator, len(h.validatorSet.Validators))
 
 	for i, v := range h.validatorSet.Validators {
-		selectedProducers[i] = *v
+		nextSpan.SelectedProducers[i] = *v
 	}
 
-	h.currentSpan = &span.HeimdallSpan{
-		Span:              nextSpan,
-		ValidatorSet:      *h.validatorSet,
-		SelectedProducers: selectedProducers,
-		ChainID:           h.chainConfig.ChainID.String(),
-	}
+	h.currentSpan = &nextSpan
 
-	h.spans[h.currentSpan.ID] = h.currentSpan
+	h.spans[h.currentSpan.Id] = h.currentSpan
 
 	return h.currentSpan, nil
 }
 
+func (h *Heimdall) FetchLatestSpan(ctx context.Context) (*heimdall.Span, error) {
+	return nil, fmt.Errorf("TODO")
+}
+
 func (h *Heimdall) currentSprintLength() int {
 	if h.currentSpan != nil {
-		return int(h.chainConfig.Bor.CalculateSprint(h.currentSpan.StartBlock))
+		return int(h.borConfig.CalculateSprintLength(h.currentSpan.StartBlock))
 	}
 
-	return int(h.chainConfig.Bor.CalculateSprint(256))
+	return int(h.borConfig.CalculateSprintLength(256))
 }
 
 func (h *Heimdall) getSpanOverrideHeight() uint64 {
@@ -194,7 +202,7 @@ func (h *Heimdall) getSpanOverrideHeight() uint64 {
 	//MumbaiChain: 10205000
 }
 
-func (h *Heimdall) FetchCheckpoint(ctx context.Context, number int64) (*checkpoint.Checkpoint, error) {
+func (h *Heimdall) FetchCheckpoint(ctx context.Context, number int64) (*heimdall.Checkpoint, error) {
 	return nil, fmt.Errorf("TODO")
 }
 
@@ -202,7 +210,11 @@ func (h *Heimdall) FetchCheckpointCount(ctx context.Context) (int64, error) {
 	return 0, fmt.Errorf("TODO")
 }
 
-func (h *Heimdall) FetchMilestone(ctx context.Context) (*milestone.Milestone, error) {
+func (h *Heimdall) FetchCheckpoints(ctx context.Context, page uint64, limit uint64) ([]*heimdall.Checkpoint, error) {
+	return nil, fmt.Errorf("TODO")
+}
+
+func (h *Heimdall) FetchMilestone(ctx context.Context, number int64) (*heimdall.Milestone, error) {
 	return nil, fmt.Errorf("TODO")
 }
 
@@ -220,6 +232,14 @@ func (h *Heimdall) FetchLastNoAckMilestone(ctx context.Context) (string, error) 
 
 func (h *Heimdall) FetchMilestoneID(ctx context.Context, milestoneID string) error {
 	return fmt.Errorf("TODO")
+}
+
+func (h *Heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
+	return nil, fmt.Errorf("TODO")
+}
+
+func (h *Heimdall) FetchStateSyncEvent(ctx context.Context, id uint64) (*heimdall.EventRecordWithTime, error) {
+	return nil, fmt.Errorf("TODO")
 }
 
 func (h *Heimdall) Close() {
@@ -292,7 +312,7 @@ func (h *Heimdall) NodeStarted(ctx context.Context, node devnet.Node) {
 			h.Unlock()
 			h.unsubscribe()
 			h.Lock()
-			h.logger.Error("Failed to deploy state sender", "err", err)
+			h.logger.Error("Failed to create transact opts for deploying state sender", "err", err)
 			return
 		}
 
@@ -352,7 +372,7 @@ func (h *Heimdall) addValidator(validatorAddress libcommon.Address, votingPower 
 				VotingPower:      votingPower,
 				ProposerPriority: proposerPriority,
 			},
-		}, h.logger)
+		})
 	} else {
 		h.validatorSet.UpdateWithChangeSet([]*valset.Validator{
 			{
@@ -361,7 +381,7 @@ func (h *Heimdall) addValidator(validatorAddress libcommon.Address, votingPower 
 				VotingPower:      votingPower,
 				ProposerPriority: proposerPriority,
 			},
-		}, h.logger)
+		})
 	}
 }
 
@@ -377,7 +397,173 @@ func (h *Heimdall) Start(ctx context.Context) error {
 	// if this is a restart
 	h.unsubscribe()
 
-	return heimdallgrpc.StartHeimdallServer(ctx, h, h.grpcAddr, h.logger)
+	server := &http.Server{Addr: h.listenAddr, Handler: makeHeimdallRouter(ctx, h)}
+	return startHTTPServer(ctx, server, "devnet Heimdall service", h.logger)
+}
+
+func makeHeimdallRouter(ctx context.Context, client heimdall.HeimdallClient) *chi.Mux {
+	router := chi.NewRouter()
+
+	writeResponse := func(w http.ResponseWriter, result any, err error) {
+		if err != nil {
+			http.Error(w, http.StatusText(500), 500)
+			return
+		}
+
+		var resultEnvelope struct {
+			Height string `json:"height"`
+			Result any    `json:"result"`
+		}
+		resultEnvelope.Height = "0"
+		resultEnvelope.Result = result
+
+		response, err := json.Marshal(resultEnvelope)
+		if err != nil {
+			http.Error(w, http.StatusText(500), 500)
+			return
+		}
+
+		_, _ = w.Write(response)
+	}
+
+	wrapResult := func(result any) map[string]any {
+		return map[string]any{
+			"result": result,
+		}
+	}
+
+	router.Get("/clerk/event-record/list", func(w http.ResponseWriter, r *http.Request) {
+		fromIdStr := r.URL.Query().Get("from-id")
+		fromId, err := strconv.ParseUint(fromIdStr, 10, 64)
+		if err != nil {
+			http.Error(w, http.StatusText(400), 400)
+			return
+		}
+
+		toTimeStr := r.URL.Query().Get("to-time")
+		toTime, err := strconv.ParseInt(toTimeStr, 10, 64)
+		if err != nil {
+			http.Error(w, http.StatusText(400), 400)
+			return
+		}
+
+		result, err := client.FetchStateSyncEvents(ctx, fromId, time.Unix(toTime, 0), 0)
+		writeResponse(w, result, err)
+	})
+
+	router.Get("/bor/span/{id}", func(w http.ResponseWriter, r *http.Request) {
+		idStr := chi.URLParam(r, "id")
+		id, err := strconv.ParseUint(idStr, 10, 64)
+		if err != nil {
+			http.Error(w, http.StatusText(400), 400)
+			return
+		}
+		result, err := client.FetchSpan(ctx, id)
+		writeResponse(w, result, err)
+	})
+
+	router.Get("/checkpoints/{number}", func(w http.ResponseWriter, r *http.Request) {
+		numberStr := chi.URLParam(r, "number")
+		number, err := strconv.ParseInt(numberStr, 10, 64)
+		if err != nil {
+			http.Error(w, http.StatusText(400), 400)
+			return
+		}
+		result, err := client.FetchCheckpoint(ctx, number)
+		writeResponse(w, result, err)
+	})
+
+	router.Get("/checkpoints/latest", func(w http.ResponseWriter, r *http.Request) {
+		result, err := client.FetchCheckpoint(ctx, -1)
+		writeResponse(w, result, err)
+	})
+
+	router.Get("/checkpoints/count", func(w http.ResponseWriter, r *http.Request) {
+		result, err := client.FetchCheckpointCount(ctx)
+		writeResponse(w, wrapResult(result), err)
+	})
+
+	router.Get("/checkpoints/list", func(w http.ResponseWriter, r *http.Request) {
+		pageStr := r.URL.Query().Get("page")
+		page, err := strconv.ParseUint(pageStr, 10, 64)
+		if err != nil {
+			http.Error(w, http.StatusText(400), 400)
+			return
+		}
+
+		limitStr := r.URL.Query().Get("limit")
+		limit, err := strconv.ParseUint(limitStr, 10, 64)
+		if err != nil {
+			http.Error(w, http.StatusText(400), 400)
+			return
+		}
+
+		result, err := client.FetchCheckpoints(ctx, page, limit)
+		writeResponse(w, wrapResult(result), err)
+	})
+
+	router.Get("/milestone/{number}", func(w http.ResponseWriter, r *http.Request) {
+		numberStr := chi.URLParam(r, "number")
+		number, err := strconv.ParseInt(numberStr, 10, 64)
+		if err != nil {
+			http.Error(w, http.StatusText(400), 400)
+			return
+		}
+		result, err := client.FetchMilestone(ctx, number)
+		writeResponse(w, result, err)
+	})
+
+	router.Get("/milestone/latest", func(w http.ResponseWriter, r *http.Request) {
+		result, err := client.FetchMilestone(ctx, -1)
+		writeResponse(w, result, err)
+	})
+
+	router.Get("/milestone/count", func(w http.ResponseWriter, r *http.Request) {
+		result, err := client.FetchMilestoneCount(ctx)
+		writeResponse(w, heimdall.MilestoneCount{Count: result}, err)
+	})
+
+	router.Get("/milestone/noAck/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		err := client.FetchNoAckMilestone(ctx, id)
+		result := err == nil
+		writeResponse(w, wrapResult(result), err)
+	})
+
+	router.Get("/milestone/lastNoAck", func(w http.ResponseWriter, r *http.Request) {
+		result, err := client.FetchLastNoAckMilestone(ctx)
+		writeResponse(w, wrapResult(result), err)
+	})
+
+	router.Get("/milestone/ID/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		err := client.FetchMilestoneID(ctx, id)
+		result := err == nil
+		writeResponse(w, wrapResult(result), err)
+	})
+
+	return router
+}
+
+func startHTTPServer(ctx context.Context, server *http.Server, serverName string, logger log.Logger) error {
+	listener, err := net.Listen("tcp", server.Addr)
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		err := server.Serve(listener)
+		if (err != nil) && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("server.Serve error", "serverName", serverName, "err", err)
+		}
+	}()
+
+	go func() {
+		<-ctx.Done()
+		_ = server.Close()
+	}()
+
+	return nil
 }
 
 func (h *Heimdall) Stop() {

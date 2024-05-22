@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	dbutils2 "github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
+	dbutils2 "github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 
 	"github.com/ledgerwatch/erigon/common/math"
@@ -62,6 +63,7 @@ func originalAccountData(original *accounts.Account, omitHashes bool) []byte {
 }
 
 func (dsw *DbStateWriter) UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error {
+	//fmt.Printf("DBW balance %x,%d\n", address, account.Balance.Uint64())
 	if err := dsw.csw.UpdateAccountData(address, original, account); err != nil {
 		return err
 	}
@@ -74,6 +76,15 @@ func (dsw *DbStateWriter) UpdateAccountData(address libcommon.Address, original,
 	if err := dsw.db.Put(kv.HashedAccounts, addrHash[:], value); err != nil {
 		return err
 	}
+
+	if account.Incarnation == 0 && original.Incarnation > 0 {
+		var b [8]byte
+		binary.BigEndian.PutUint64(b[:], original.Incarnation)
+		if err := dsw.db.Put(kv.IncarnationMap, address[:], b[:]); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -99,6 +110,7 @@ func (dsw *DbStateWriter) DeleteAccount(address libcommon.Address, original *acc
 }
 
 func (dsw *DbStateWriter) UpdateAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash, code []byte) error {
+	//fmt.Printf("DBW code %x,%x\n", address, codeHash)
 	if err := dsw.csw.UpdateAccountCode(address, incarnation, codeHash, code); err != nil {
 		return err
 	}
@@ -119,6 +131,7 @@ func (dsw *DbStateWriter) UpdateAccountCode(address libcommon.Address, incarnati
 
 func (dsw *DbStateWriter) WriteAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash, original, value *uint256.Int) error {
 	// We delegate here first to let the changeSetWrite make its own decision on whether to proceed in case *original == *value
+	//fmt.Printf("DBW storage %x,%x,%x\n", address, *key, value)
 	if err := dsw.csw.WriteAccountStorage(address, incarnation, key, original, value); err != nil {
 		return err
 	}

@@ -4,28 +4,31 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"math/big"
 	"testing"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/stretchr/testify/require"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/turbo/trie"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/stretchr/testify/require"
 )
 
 // initialFlatDBTrieBuild leverages the stagedsync code to perform the initial
 // trie computation while also collecting the assorted hashes and loading them
-// into the TrieOfAccounts and TrieOfStorage tables
+// into theeth/stagedsync/stage_execute.go:294 TrieOfAccounts and TrieOfStorage tables
 func initialFlatDBTrieBuild(t *testing.T, db kv.RwDB) libcommon.Hash {
 	t.Helper()
 	//startTime := time.Now()
@@ -473,7 +476,7 @@ func FuzzTrieRootAccounts(f *testing.F) {
 // populates the trie tables. Then, it modifies the database of accounts but
 // does not update the trie tables.  Finally, for every seeded account (modified
 // and not), it computes a proof for that key and verifies that the proof
-// matches the one as computed by the naive trie implementation and that that
+// matches the one as computed by the naive trie implementation and that
 // proof is valid.
 func FuzzTrieRootAccountProofs(f *testing.F) {
 	addFuzzTrieSeeds(f)
@@ -554,7 +557,7 @@ func FuzzTrieRootAccountProofs(f *testing.F) {
 // modifies the database of storage but does not update the trie tables.
 // Finally, for every seeded storage key (modified and not), it computes a proof for
 // that key and verifies that the proof matches the one as computed by the naive
-// trie implementation and that that proof is valid.
+// trie implementation and that proof is valid.
 func FuzzTrieRootStorageProofs(f *testing.F) {
 	addFuzzTrieSeeds(f)
 

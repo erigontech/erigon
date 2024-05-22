@@ -10,27 +10,30 @@ import (
 )
 
 var (
-	chaindata                      string
-	databaseVerbosity              int
-	referenceChaindata             string
-	block, pruneTo, unwind         uint64
-	unwindEvery                    uint64
-	batchSizeStr                   string
-	reset, warmup, noCommit        bool
-	bucket                         string
-	datadirCli, toChaindata        string
-	migration                      string
-	integrityFast, integritySlow   bool
-	file                           string
-	HeimdallgRPCAddress            string
-	HeimdallURL                    string
-	txtrace                        bool // Whether to trace the execution (should only be used together with `block`)
-	pruneFlag                      string
-	pruneH, pruneR, pruneT, pruneC uint64
-	pruneHBefore, pruneRBefore     uint64
-	pruneTBefore, pruneCBefore     uint64
-	experiments                    []string
-	chain                          string // Which chain to use (mainnet, goerli, sepolia, etc.)
+	chaindata                                string
+	databaseVerbosity                        int
+	referenceChaindata                       string
+	block, pruneTo, unwind                   uint64
+	unwindEvery                              uint64
+	batchSizeStr                             string
+	reset, warmup, noCommit                  bool
+	resetPruneAt                             bool
+	bucket                                   string
+	datadirCli, toChaindata                  string
+	migration                                string
+	squeezeCommitmentFiles                   bool
+	integrityFast, integritySlow             bool
+	file                                     string
+	HeimdallURL                              string
+	txtrace                                  bool // Whether to trace the execution (should only be used together with `block`)
+	pruneFlag                                string
+	pruneB, pruneH, pruneR, pruneT, pruneC   uint64
+	pruneBBefore, pruneHBefore, pruneRBefore uint64
+	pruneTBefore, pruneCBefore               uint64
+	experiments                              []string
+	unwindTypes                              []string
+	chain                                    string // Which chain to use (mainnet, goerli, sepolia, etc.)
+	outputCsvFile                            string
 
 	commitmentMode string
 	commitmentTrie string
@@ -103,8 +106,16 @@ func withReset(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&warmup, "warmup", false, "warmup relevant tables by parallel random reads")
 }
 
+func withResetPruneAt(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&resetPruneAt, "resetPruneAt", false, "reset prune_at to 0 for a given stage")
+}
+
 func withBucket(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&bucket, "bucket", "", "reset given stage")
+}
+
+func withSqueezeCommitmentFiles(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&squeezeCommitmentFiles, "squeeze", false, "allow to squeeze commitment files on start")
 }
 
 func withDataDir2(cmd *cobra.Command) {
@@ -163,6 +174,10 @@ func withStartTx(cmd *cobra.Command) {
 
 func withTraceFromTx(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&traceFromTx, "txtrace.from", 0, "start tracing from tx number")
+}
+
+func withOutputCsvFile(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&outputCsvFile, "output.csv.file", "", "location to output csv data")
 }
 
 func withCommitment(cmd *cobra.Command) {

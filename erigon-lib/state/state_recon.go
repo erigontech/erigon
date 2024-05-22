@@ -20,15 +20,15 @@ import (
 	"bytes"
 	"encoding/binary"
 
-	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
+	"github.com/ledgerwatch/erigon-lib/seg"
 )
 
 // Algorithms for reconstituting the state from state history
 
 type ReconItem struct {
-	g           *compress.Getter
+	g           ArchiveGetter
 	key         []byte
 	txNum       uint64
 	startTxNum  uint64
@@ -43,8 +43,8 @@ func (rh ReconHeap) Len() int {
 	return len(rh)
 }
 
-// Less (part of heap.Interface) compares two links. For persisted links, those with the lower block heights get evicted first. This means that more recently persisted links are preferred.
-// For non-persisted links, those with the highest block heights get evicted first. This is to prevent "holes" in the block heights that may cause inability to
+// Less (part of heap.Interface) compares two links. For persisted links, those with the lower block heights getBeforeTxNum evicted first. This means that more recently persisted links are preferred.
+// For non-persisted links, those with the highest block heights getBeforeTxNum evicted first. This is to prevent "holes" in the block heights that may cause inability to
 // insert headers in the ascending order of their block heights.
 func (rh ReconHeap) Less(i, j int) bool {
 	c := bytes.Compare(rh[i].key, rh[j].key)
@@ -92,7 +92,7 @@ func (rh ReconHeapOlderFirst) Less(i, j int) bool {
 }
 
 type ScanIteratorInc struct {
-	g         *compress.Getter
+	g         *seg.Getter
 	key       []byte
 	nextTxNum uint64
 	hasNext   bool
@@ -142,8 +142,8 @@ func (hs *HistoryStep) iterateTxs() *ScanIteratorInc {
 
 type HistoryIteratorInc struct {
 	uptoTxNum    uint64
-	indexG       *compress.Getter
-	historyG     *compress.Getter
+	indexG       *seg.Getter
+	historyG     *seg.Getter
 	r            *recsplit.IndexReader
 	key          []byte
 	nextKey      []byte
@@ -181,17 +181,19 @@ func (hii *HistoryIteratorInc) advance() {
 	hii.nextKey = nil
 	for hii.nextKey == nil && hii.key != nil {
 		val, _ := hii.indexG.NextUncompressed()
-		ef, _ := eliasfano32.ReadEliasFano(val)
-		if n, ok := ef.Search(hii.uptoTxNum); ok {
+		n, ok := eliasfano32.Seek(val, hii.uptoTxNum)
+		if ok {
 			var txKey [8]byte
 			binary.BigEndian.PutUint64(txKey[:], n)
-			offset := hii.r.Lookup2(txKey[:], hii.key)
-			hii.historyG.Reset(offset)
-			hii.nextKey = hii.key
-			if hii.compressVals {
-				hii.nextVal, _ = hii.historyG.Next(nil)
-			} else {
-				hii.nextVal, _ = hii.historyG.NextUncompressed()
+			offset, ok := hii.r.Lookup2(txKey[:], hii.key)
+			if ok {
+				hii.historyG.Reset(offset)
+				hii.nextKey = hii.key
+				if hii.compressVals {
+					hii.nextVal, _ = hii.historyG.Next(nil)
+				} else {
+					hii.nextVal, _ = hii.historyG.NextUncompressed()
+				}
 			}
 		}
 		if hii.indexG.HasNext() {

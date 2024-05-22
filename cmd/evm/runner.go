@@ -34,7 +34,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	common2 "github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cmd/utils/flags"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -119,10 +118,12 @@ func timedExec(bench bool, execFunc func() ([]byte, uint64, error)) (output []by
 }
 
 func runCmd(ctx *cli.Context) error {
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
-	//glogger := log.NewGlogHandler(log.StreamHandler(os.Stderr, log.TerminalFormat(false)))
-	//glogger.Verbosity(log.Lvl(ctx.GlobalInt(VerbosityFlag.Name)))
-	//log.Root().SetHandler(glogger)
+	machineFriendlyOutput := ctx.Bool(MachineFlag.Name)
+	if machineFriendlyOutput {
+		log.Root().SetHandler(log.DiscardHandler())
+	} else {
+		log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	}
 	logconfig := &logger.LogConfig{
 		DisableMemory:     ctx.Bool(DisableMemoryFlag.Name),
 		DisableStack:      ctx.Bool(DisableStackFlag.Name),
@@ -140,7 +141,7 @@ func runCmd(ctx *cli.Context) error {
 		receiver      = libcommon.BytesToAddress([]byte("receiver"))
 		genesisConfig *types.Genesis
 	)
-	if ctx.Bool(MachineFlag.Name) {
+	if machineFriendlyOutput {
 		tracer = logger.NewJSONLogger(logconfig, os.Stdout)
 	} else if ctx.Bool(DebugFlag.Name) {
 		debugLogger = logger.NewStructLogger(logconfig)
@@ -152,7 +153,7 @@ func runCmd(ctx *cli.Context) error {
 	defer db.Close()
 	if ctx.String(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.String(GenesisFlag.Name))
-		core.MustCommitGenesis(gen, db, "")
+		core.MustCommitGenesis(gen, db, "", log.Root())
 		genesisConfig = gen
 		chainConfig = gen.Config
 	} else {
@@ -299,11 +300,7 @@ func runCmd(ctx *cli.Context) error {
 			fmt.Println("Could not commit state: ", err)
 			os.Exit(1)
 		}
-		historyV3, err := kvcfg.HistoryV3.Enabled(tx)
-		if err != nil {
-			return err
-		}
-		fmt.Println(string(state.NewDumper(tx, 0, historyV3).DefaultDump()))
+		fmt.Println(string(state.NewDumper(tx, 0).DefaultDump()))
 	}
 
 	if memProfilePath := ctx.String(MemProfileFlag.Name); memProfilePath != "" {

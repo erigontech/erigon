@@ -18,12 +18,13 @@ import (
 // These objects are stored in the main account trie.
 // DESCRIBED: docs/programmers_guide/guide.md#ethereum-state
 type Account struct {
-	Initialised bool
-	Nonce       uint64
-	Balance     uint256.Int
-	Root        libcommon.Hash // merkle root of the storage trie
-	CodeHash    libcommon.Hash // hash of the bytecode
-	Incarnation uint64
+	Initialised     bool
+	Nonce           uint64
+	Balance         uint256.Int
+	Root            libcommon.Hash // merkle root of the storage trie
+	CodeHash        libcommon.Hash // hash of the bytecode
+	Incarnation     uint64
+	PrevIncarnation uint64
 }
 
 const (
@@ -622,6 +623,9 @@ func ConvertV2toV3(v []byte) ([]byte, error) {
 // DeserialiseV3 - method to deserialize accounts in Erigon22 history
 func DeserialiseV3(a *Account, enc []byte) error {
 	a.Reset()
+	//if len(enc) == 0 {
+	//	return nil
+	//}
 	pos := 0
 	nonceBytes := int(enc[pos])
 	pos++

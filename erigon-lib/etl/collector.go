@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
@@ -49,6 +50,11 @@ type Collector struct {
 	allFlushed    bool
 	autoClean     bool
 	logger        log.Logger
+
+	// sortAndFlushInBackground increase insert performance, but make RAM use less-predictable:
+	//   - if disk is over-loaded - app may have much background threads which waiting for flush - and each thread whill hold own `buf` (can't free RAM until flush is done)
+	//   - enable it only when writing to `etl` is a bottleneck and unlikely to have many parallel collectors (to not overload CPU/Disk)
+	sortAndFlushInBackground bool
 }
 
 // NewCollectorFromFiles creates collector from existing files (left over from previous unsuccessful loading)
@@ -56,7 +62,7 @@ func NewCollectorFromFiles(logPrefix, tmpdir string, logger log.Logger) (*Collec
 	if _, err := os.Stat(tmpdir); os.IsNotExist(err) {
 		return nil, nil
 	}
-	dirEntries, err := os.ReadDir(tmpdir)
+	dirEntries, err := dir.ReadDir(tmpdir)
 	if err != nil {
 		return nil, fmt.Errorf("collector from files - reading directory %s: %w", tmpdir, err)
 	}
@@ -90,6 +96,8 @@ func NewCollector(logPrefix, tmpdir string, sortableBuffer Buffer, logger log.Lo
 	return &Collector{autoClean: true, bufType: getTypeByBuffer(sortableBuffer), buf: sortableBuffer, logPrefix: logPrefix, tmpdir: tmpdir, logLvl: log.LvlInfo, logger: logger}
 }
 
+func (c *Collector) SortAndFlushInBackground(v bool) { c.sortAndFlushInBackground = v }
+
 func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 	c.buf.Put(k, v)
 	if !c.buf.CheckFlushSize() {
@@ -115,17 +123,26 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 		provider = KeepInRAM(c.buf)
 		c.allFlushed = true
 	} else {
-		fullBuf := c.buf
-		prevLen, prevSize := fullBuf.Len(), fullBuf.SizeLimit()
-		c.buf = getBufferByType(c.bufType, datasize.ByteSize(c.buf.SizeLimit()), c.buf)
-
 		doFsync := !c.autoClean /* is critical collector */
 		var err error
-		provider, err = FlushToDisk(c.logPrefix, fullBuf, c.tmpdir, doFsync, c.logLvl)
-		if err != nil {
-			return err
+
+		if c.sortAndFlushInBackground {
+			fullBuf := c.buf // can't `.Reset()` because this `buf` will move to another goroutine
+			prevLen, prevSize := fullBuf.Len(), fullBuf.SizeLimit()
+			c.buf = getBufferByType(c.bufType, datasize.ByteSize(c.buf.SizeLimit()), c.buf)
+
+			provider, err = FlushToDiskAsync(c.logPrefix, fullBuf, c.tmpdir, doFsync, c.logLvl)
+			if err != nil {
+				return err
+			}
+			c.buf.Prealloc(prevLen/8, prevSize/8)
+		} else {
+			provider, err = FlushToDisk(c.logPrefix, c.buf, c.tmpdir, doFsync, c.logLvl)
+			if err != nil {
+				return err
+			}
+			c.buf.Reset()
 		}
-		c.buf.Prealloc(prevLen/8, prevSize/8)
 	}
 	if provider != nil {
 		c.dataProviders = append(c.dataProviders, provider)
@@ -319,19 +336,6 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 				prevV = common.Copy(element.Value)
 			} else {
 				prevV = append(prevV, element.Value...)
-			}
-		} else if args.BufferType == SortableMergeBuffer {
-			if !bytes.Equal(prevK, element.Key) {
-				if prevK != nil {
-					if err = loadFunc(prevK, prevV); err != nil {
-						return err
-					}
-				}
-				// Need to copy k because the underlying space will be re-used for the next key
-				prevK = common.Copy(element.Key)
-				prevV = common.Copy(element.Value)
-			} else {
-				prevV = buf.(*oldestMergedEntrySortableBuffer).merge(prevV, element.Value)
 			}
 		} else {
 			if err = loadFunc(element.Key, element.Value); err != nil {

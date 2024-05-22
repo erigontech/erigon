@@ -52,11 +52,12 @@ func FuzzRecSplit(f *testing.F) {
 		}
 		tmpDir := t.TempDir()
 		indexFile := filepath.Join(tmpDir, "index")
+		salt := uint32(1)
 		rs, err := NewRecSplit(RecSplitArgs{
 			KeyCount:   count,
 			Enums:      true,
 			BucketSize: 10,
-			Salt:       0,
+			Salt:       &salt,
 			TmpDir:     tmpDir,
 			IndexFile:  indexFile,
 			LeafSize:   8,
@@ -83,7 +84,7 @@ func FuzzRecSplit(f *testing.F) {
 		bits := make([]uint64, bitCount)
 		reader := NewIndexReader(idx)
 		for i = 0; i < len(in)-l; i += l {
-			off = reader.Lookup(in[i : i+l])
+			off, _ = reader.Lookup(in[i : i+l])
 			if int(off) >= count {
 				t.Errorf("off %d >= count %d", off, count)
 			}

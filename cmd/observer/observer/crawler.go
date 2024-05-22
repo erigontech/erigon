@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/observer/database"
 	"github.com/ledgerwatch/erigon/cmd/observer/observer/node_utils"
 	"github.com/ledgerwatch/erigon/cmd/observer/observer/sentry_candidates"
@@ -184,7 +185,7 @@ func (crawler *Crawler) selectCandidates(ctx context.Context, nodes chan<- candi
 		}
 
 		if len(candidates) == 0 {
-			utils.Sleep(ctx, 1*time.Second)
+			libcommon.Sleep(ctx, 1*time.Second)
 		}
 
 		for _, id := range candidates {

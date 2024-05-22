@@ -29,12 +29,12 @@ import (
 
 //Variables Naming:
 //  tx - Database Transaction
-//  txn - Ethereum Transaction (and TxNum - is also number of Etherum Transaction)
-//  blockNum - Ethereum block number - same across all nodes. blockID - auto-increment ID - which can be differrent across all nodes
+//  txn - Ethereum Transaction (and TxNum - is also number of Ethereum Transaction)
+//  blockNum - Ethereum block number - same across all nodes. blockID - auto-increment ID - which can be different across all nodes
 //  txNum/txID - same
 //  RoTx - Read-Only Database Transaction. RwTx - read-write
 //  k, v - key, value
-//  ts - TimeStamp. Usually it's Etherum's TransactionNumber (auto-increment ID). Or BlockNumber.
+//  ts - TimeStamp. Usually it's Ethereum's TransactionNumber (auto-increment ID). Or BlockNumber.
 //  Cursor - low-level mdbx-tide api to navigate over Table
 //  Iter - high-level iterator-like api over Table/InvertedIndex/History/Domain. Has less features than Cursor. See package `iter`.
 
@@ -60,11 +60,11 @@ import (
 //
 // MediumLevel:
 //    1. TemporalDB - abstracting DB+Snapshots. Target is:
-//         - provide 'time-travel' API for data: consistan snapshot of data as of given Timestamp.
+//         - provide 'time-travel' API for data: consistent snapshot of data as of given Timestamp.
 //         - auto-close iterators on Commit/Rollback
-//         - auto-open/close agg.MakeContext() on Begin/Commit/Rollback
+//         - auto-open/close agg.BeginRo() on Begin/Commit/Rollback
 //         - to keep DB small - only for Hot/Recent data (can be update/delete by re-org).
-//         - And TemporalRoTx/TemporalRwTx actaully open Read-Only files view (MakeContext) - no concept of "Read-Write view of snapshot files".
+//         - And TemporalRoTx/TemporalRwTx actually open Read-Only files view (BeginRo) - no concept of "Read-Write view of snapshot files".
 //         - using next entities:
 //               - InvertedIndex: supports range-scans
 //               - History: can return value of key K as of given TimeStamp. Doesn't know about latest/current
@@ -83,11 +83,11 @@ const Unlim int = -1
 var (
 	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.ChaindataDeprecatedTables can be deleted")
 
-	DbSize    = metrics.GetOrCreateCounter(`db_size`)    //nolint
-	TxLimit   = metrics.GetOrCreateCounter(`tx_limit`)   //nolint
-	TxSpill   = metrics.GetOrCreateCounter(`tx_spill`)   //nolint
-	TxUnspill = metrics.GetOrCreateCounter(`tx_unspill`) //nolint
-	TxDirty   = metrics.GetOrCreateCounter(`tx_dirty`)   //nolint
+	DbSize    = metrics.GetOrCreateGauge(`db_size`)    //nolint
+	TxLimit   = metrics.GetOrCreateGauge(`tx_limit`)   //nolint
+	TxSpill   = metrics.GetOrCreateGauge(`tx_spill`)   //nolint
+	TxUnspill = metrics.GetOrCreateGauge(`tx_unspill`) //nolint
+	TxDirty   = metrics.GetOrCreateGauge(`tx_dirty`)   //nolint
 
 	DbCommitPreparation = metrics.GetOrCreateSummary(`db_commit_seconds{phase="preparation"}`) //nolint
 	//DbGCWallClock       = metrics.GetOrCreateSummary(`db_commit_seconds{phase="gc_wall_clock"}`) //nolint
@@ -98,14 +98,14 @@ var (
 	DbCommitEnding = metrics.GetOrCreateSummary(`db_commit_seconds{phase="ending"}`) //nolint
 	DbCommitTotal  = metrics.GetOrCreateSummary(`db_commit_seconds{phase="total"}`)  //nolint
 
-	DbPgopsNewly   = metrics.GetOrCreateCounter(`db_pgops{phase="newly"}`)   //nolint
-	DbPgopsCow     = metrics.GetOrCreateCounter(`db_pgops{phase="cow"}`)     //nolint
-	DbPgopsClone   = metrics.GetOrCreateCounter(`db_pgops{phase="clone"}`)   //nolint
-	DbPgopsSplit   = metrics.GetOrCreateCounter(`db_pgops{phase="split"}`)   //nolint
-	DbPgopsMerge   = metrics.GetOrCreateCounter(`db_pgops{phase="merge"}`)   //nolint
-	DbPgopsSpill   = metrics.GetOrCreateCounter(`db_pgops{phase="spill"}`)   //nolint
-	DbPgopsUnspill = metrics.GetOrCreateCounter(`db_pgops{phase="unspill"}`) //nolint
-	DbPgopsWops    = metrics.GetOrCreateCounter(`db_pgops{phase="wops"}`)    //nolint
+	DbPgopsNewly   = metrics.GetOrCreateGauge(`db_pgops{phase="newly"}`)   //nolint
+	DbPgopsCow     = metrics.GetOrCreateGauge(`db_pgops{phase="cow"}`)     //nolint
+	DbPgopsClone   = metrics.GetOrCreateGauge(`db_pgops{phase="clone"}`)   //nolint
+	DbPgopsSplit   = metrics.GetOrCreateGauge(`db_pgops{phase="split"}`)   //nolint
+	DbPgopsMerge   = metrics.GetOrCreateGauge(`db_pgops{phase="merge"}`)   //nolint
+	DbPgopsSpill   = metrics.GetOrCreateGauge(`db_pgops{phase="spill"}`)   //nolint
+	DbPgopsUnspill = metrics.GetOrCreateGauge(`db_pgops{phase="unspill"}`) //nolint
+	DbPgopsWops    = metrics.GetOrCreateGauge(`db_pgops{phase="wops"}`)    //nolint
 	/*
 		DbPgopsPrefault = metrics.NewCounter(`db_pgops{phase="prefault"}`) //nolint
 		DbPgopsMinicore = metrics.NewCounter(`db_pgops{phase="minicore"}`) //nolint
@@ -139,9 +139,9 @@ var (
 	//DbGcSelfPnlMergeVolume = metrics.NewCounter(`db_gc_pnl{phase="self_merge_volume"}`)               //nolint
 	//DbGcSelfPnlMergeCalls  = metrics.NewCounter(`db_gc_pnl{phase="slef_merge_calls"}`)                //nolint
 
-	GcLeafMetric     = metrics.GetOrCreateCounter(`db_gc_leaf`)     //nolint
-	GcOverflowMetric = metrics.GetOrCreateCounter(`db_gc_overflow`) //nolint
-	GcPagesMetric    = metrics.GetOrCreateCounter(`db_gc_pages`)    //nolint
+	GcLeafMetric     = metrics.GetOrCreateGauge(`db_gc_leaf`)     //nolint
+	GcOverflowMetric = metrics.GetOrCreateGauge(`db_gc_overflow`) //nolint
+	GcPagesMetric    = metrics.GetOrCreateGauge(`db_gc_pages`)    //nolint
 
 )
 
@@ -155,6 +155,7 @@ const (
 	ConsensusDB  Label = 3
 	DownloaderDB Label = 4
 	InMem        Label = 5
+	HeimdallDB   Label = 6
 )
 
 func (l Label) String() string {
@@ -171,6 +172,8 @@ func (l Label) String() string {
 		return "downloader"
 	case InMem:
 		return "inMem"
+	case HeimdallDB:
+		return "heimdall"
 	default:
 		return "unknown"
 	}
@@ -189,6 +192,8 @@ func UnmarshalLabel(s string) Label {
 		return DownloaderDB
 	case "inMem":
 		return InMem
+	case "heimdall":
+		return HeimdallDB
 	default:
 		panic(fmt.Sprintf("unexpected label: %s", s))
 	}
@@ -293,6 +298,9 @@ type RwDB interface {
 
 	BeginRw(ctx context.Context) (RwTx, error)
 	BeginRwNosync(ctx context.Context) (RwTx, error)
+}
+type HasRwKV interface {
+	RwKV() RwDB
 }
 
 type StatelessReadTx interface {
@@ -446,7 +454,7 @@ type BucketMigrator interface {
 // Cursor - class for navigating through a database
 // CursorDupSort are inherit this class
 //
-// If methods (like First/Next/Seek) return error, then returned key SHOULD not be nil (can be []byte{} for example).
+// If methods (like First/Next/seekInFiles) return error, then returned key SHOULD not be nil (can be []byte{} for example).
 // Then looping code will look as:
 // c := kv.Cursor(bucketName)
 //
@@ -530,16 +538,21 @@ type RwCursorDupSort interface {
 // ---- Temporal part
 
 type (
-	Domain      string
+	Domain      uint16
 	History     string
 	InvertedIdx string
+
+	InvertedIdxPos uint16
 )
 
+type TemporalGetter interface {
+	DomainGet(name Domain, k, k2 []byte) (v []byte, step uint64, err error)
+}
 type TemporalTx interface {
 	Tx
-	DomainGet(name Domain, k, k2 []byte) (v []byte, ok bool, err error)
+	TemporalGetter
 	DomainGetAsOf(name Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error)
-	HistoryGet(name History, k []byte, ts uint64) (v []byte, ok bool, err error)
+	HistorySeek(name History, k []byte, ts uint64) (v []byte, ok bool, err error)
 
 	// IndexRange - return iterator over range of inverted index for given key `k`
 	// Asc semantic:  [from, to) AND from > to
@@ -549,6 +562,39 @@ type TemporalTx interface {
 	// Example: IndexRange("IndexName", 10, 5, order.Desc, -1)
 	// Example: IndexRange("IndexName", -1, -1, order.Asc, 10)
 	IndexRange(name InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error)
-	HistoryRange(name History, fromTs, toTs int, asc order.By, limit int) (it iter.KV, err error)
 	DomainRange(name Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error)
+
+	// HistoryRange - producing "state patch" - sorted list of keys updated at [fromTs,toTs) with their most-recent value.
+	//   no duplicates
+	HistoryRange(name History, fromTs, toTs int, asc order.By, limit int) (it iter.KV, err error)
+}
+type TemporalCommitment interface {
+	ComputeCommitment(ctx context.Context, saveStateAfter, trace bool) (rootHash []byte, err error)
+}
+
+type TemporalRwTx interface {
+	RwTx
+	TemporalTx
+}
+
+type TemporalPutDel interface {
+	// DomainPut
+	// Optimizations:
+	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
+	//   - user can append k2 into k1, then underlying methods will not preform append
+	//   - if `val == nil` it will call DomainDel
+	DomainPut(domain Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error
+
+	// DomainDel
+	// Optimizations:
+	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
+	//   - user can append k2 into k1, then underlying methods will not preform append
+	//   - if `val == nil` it will call DomainDel
+	DomainDel(domain Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error
+	DomainDelPrefix(domain Domain, prefix []byte) error
+}
+
+type CanWarmupDB interface {
+	WarmupDB(force bool) error
+	LockDBInRam() error
 }

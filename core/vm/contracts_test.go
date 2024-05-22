@@ -48,26 +48,27 @@ type precompiledFailureTest struct {
 // allPrecompiles does not map to the actual set of precompiles, as it also contains
 // repriced versions of precompiles at certain slots
 var allPrecompiles = map[libcommon.Address]PrecompiledContract{
-	libcommon.BytesToAddress([]byte{1}):    &ecrecover{},
-	libcommon.BytesToAddress([]byte{2}):    &sha256hash{},
-	libcommon.BytesToAddress([]byte{3}):    &ripemd160hash{},
-	libcommon.BytesToAddress([]byte{4}):    &dataCopy{},
-	libcommon.BytesToAddress([]byte{5}):    &bigModExp{eip2565: false},
-	libcommon.BytesToAddress([]byte{0xf5}): &bigModExp{eip2565: true},
-	libcommon.BytesToAddress([]byte{6}):    &bn256AddIstanbul{},
-	libcommon.BytesToAddress([]byte{7}):    &bn256ScalarMulIstanbul{},
-	libcommon.BytesToAddress([]byte{8}):    &bn256PairingIstanbul{},
-	libcommon.BytesToAddress([]byte{9}):    &blake2F{},
-	libcommon.BytesToAddress([]byte{10}):   &bls12381G1Add{},
-	libcommon.BytesToAddress([]byte{11}):   &bls12381G1Mul{},
-	libcommon.BytesToAddress([]byte{12}):   &bls12381G1MultiExp{},
-	libcommon.BytesToAddress([]byte{13}):   &bls12381G2Add{},
-	libcommon.BytesToAddress([]byte{14}):   &bls12381G2Mul{},
-	libcommon.BytesToAddress([]byte{15}):   &bls12381G2MultiExp{},
-	libcommon.BytesToAddress([]byte{16}):   &bls12381Pairing{},
-	libcommon.BytesToAddress([]byte{17}):   &bls12381MapG1{},
-	libcommon.BytesToAddress([]byte{18}):   &bls12381MapG2{},
-	libcommon.BytesToAddress([]byte{20}):   &pointEvaluation{},
+	libcommon.BytesToAddress([]byte{1}):          &ecrecover{},
+	libcommon.BytesToAddress([]byte{2}):          &sha256hash{},
+	libcommon.BytesToAddress([]byte{3}):          &ripemd160hash{},
+	libcommon.BytesToAddress([]byte{4}):          &dataCopy{},
+	libcommon.BytesToAddress([]byte{5}):          &bigModExp{eip2565: false},
+	libcommon.BytesToAddress([]byte{0xf5}):       &bigModExp{eip2565: true},
+	libcommon.BytesToAddress([]byte{6}):          &bn256AddIstanbul{},
+	libcommon.BytesToAddress([]byte{7}):          &bn256ScalarMulIstanbul{},
+	libcommon.BytesToAddress([]byte{8}):          &bn256PairingIstanbul{},
+	libcommon.BytesToAddress([]byte{9}):          &blake2F{},
+	libcommon.BytesToAddress([]byte{10}):         &bls12381G1Add{},
+	libcommon.BytesToAddress([]byte{11}):         &bls12381G1Mul{},
+	libcommon.BytesToAddress([]byte{12}):         &bls12381G1MultiExp{},
+	libcommon.BytesToAddress([]byte{13}):         &bls12381G2Add{},
+	libcommon.BytesToAddress([]byte{14}):         &bls12381G2Mul{},
+	libcommon.BytesToAddress([]byte{15}):         &bls12381G2MultiExp{},
+	libcommon.BytesToAddress([]byte{16}):         &bls12381Pairing{},
+	libcommon.BytesToAddress([]byte{17}):         &bls12381MapFpToG1{},
+	libcommon.BytesToAddress([]byte{18}):         &bls12381MapFp2ToG2{},
+	libcommon.BytesToAddress([]byte{20}):         &pointEvaluation{},
+	libcommon.BytesToAddress([]byte{0x01, 0x00}): &p256Verify{},
 }
 
 // EIP-152 test vectors
@@ -142,7 +143,7 @@ func testPrecompiledFailure(addr string, test precompiledFailureTest, t *testing
 	t.Run(test.Name, func(t *testing.T) {
 		t.Parallel()
 		_, _, err := RunPrecompiledContract(p, in, gas)
-		if err.Error() != test.ExpectedError {
+		if err == nil || err.Error() != test.ExpectedError {
 			t.Errorf("Expected error [%v], got [%v]", test.ExpectedError, err)
 		}
 		// Verify that the precompile did not touch the input buffer
@@ -342,6 +343,31 @@ func TestPrecompiledBLS12381PairingFail(t *testing.T)    { testJsonFail("blsPair
 func TestPrecompiledBLS12381MapG1Fail(t *testing.T)      { testJsonFail("blsMapG1", "11", t) }
 func TestPrecompiledBLS12381MapG2Fail(t *testing.T)      { testJsonFail("blsMapG2", "12", t) }
 
+// Tests from https://github.com/ethereum/EIPs/tree/master/assets/eip-2537
+func TestPrecompiledBLS12381G1AddEip(t *testing.T)      { testJson("blsG1Add-eip", "0a", t) }
+func TestPrecompiledBLS12381G1MulEip(t *testing.T)      { testJson("blsG1Mul-eip", "0b", t) }
+func TestPrecompiledBLS12381G1MultiExpEip(t *testing.T) { testJson("blsG1MultiExp-eip", "0c", t) }
+func TestPrecompiledBLS12381G2AddEip(t *testing.T)      { testJson("blsG2Add-eip", "0d", t) }
+func TestPrecompiledBLS12381G2MulEip(t *testing.T)      { testJson("blsG2Mul-eip", "0e", t) }
+func TestPrecompiledBLS12381G2MultiExpEip(t *testing.T) { testJson("blsG2MultiExp-eip", "0f", t) }
+func TestPrecompiledBLS12381PairingEip(t *testing.T)    { testJson("blsPairing-eip", "10", t) }
+func TestPrecompiledBLS12381MapG1Eip(t *testing.T)      { testJson("blsMapG1-eip", "11", t) }
+func TestPrecompiledBLS12381MapG2Eip(t *testing.T)      { testJson("blsMapG2-eip", "12", t) }
+
+func TestPrecompiledBLS12381G1AddFailEip(t *testing.T) { testJsonFail("blsG1Add-eip", "0a", t) }
+func TestPrecompiledBLS12381G1MulFailEip(t *testing.T) { testJsonFail("blsG1Mul-eip", "0b", t) }
+func TestPrecompiledBLS12381G1MultiExpFailEip(t *testing.T) {
+	testJsonFail("blsG1MultiExp-eip", "0c", t)
+}
+func TestPrecompiledBLS12381G2AddFailEip(t *testing.T) { testJsonFail("blsG2Add-eip", "0d", t) }
+func TestPrecompiledBLS12381G2MulFailEip(t *testing.T) { testJsonFail("blsG2Mul-eip", "0e", t) }
+func TestPrecompiledBLS12381G2MultiExpFailEip(t *testing.T) {
+	testJsonFail("blsG2MultiExp-eip", "0f", t)
+}
+func TestPrecompiledBLS12381PairingFailEip(t *testing.T) { testJsonFail("blsPairing-eip", "10", t) }
+func TestPrecompiledBLS12381MapG1FailEip(t *testing.T)   { testJsonFail("blsMapG1-eip", "11", t) }
+func TestPrecompiledBLS12381MapG2FailEip(t *testing.T)   { testJsonFail("blsMapG2-eip", "12", t) }
+
 func loadJson(name string) ([]precompiledTest, error) {
 	data, err := os.ReadFile(fmt.Sprintf("testdata/precompiles/%v.json", name))
 	if err != nil {
@@ -377,7 +403,7 @@ func BenchmarkPrecompiledBLS12381G1MultiExpWorstCase(b *testing.B) {
 		Name:        "WorstCaseG1",
 		NoBenchmark: false,
 	}
-	benchmarkPrecompiled(b, "0c", testcase)
+	benchmarkPrecompiled(b, "f0c", testcase)
 }
 
 // BenchmarkPrecompiledBLS12381G2MultiExpWorstCase benchmarks the worst case we could find that still fits a gaslimit of 10MGas.
@@ -398,5 +424,21 @@ func BenchmarkPrecompiledBLS12381G2MultiExpWorstCase(b *testing.B) {
 		Name:        "WorstCaseG2",
 		NoBenchmark: false,
 	}
-	benchmarkPrecompiled(b, "0f", testcase)
+	benchmarkPrecompiled(b, "f0f", testcase)
+}
+
+// Benchmarks the sample inputs from the P256VERIFY precompile.
+func BenchmarkPrecompiledP256Verify(b *testing.B) {
+	testcase := precompiledTest{
+		Input:    "4cee90eb86eaa050036147a12d49004b6b9c72bd725d39d4785011fe190f0b4da73bd4903f0ce3b639bbbf6e8e80d16931ff4bcf5993d58468e8fb19086e8cac36dbcd03009df8c59286b162af3bd7fcc0450c9aa81be5d10d312af6c66b1d604aebd3099c618202fcfe16ae7770b0c49ab5eadf74b754204a3bb6060e44eff37618b065f9832de4ca6ca971a7a1adc826d0f7c00181a5fb2ddf79ae00b4e10e",
+		Expected: "0000000000000000000000000000000000000000000000000000000000000001",
+		Name:     "p256Verify",
+	}
+	benchmarkPrecompiled(b, "100", testcase)
+}
+
+func TestPrecompiledP256Verify(t *testing.T) {
+	t.Parallel()
+
+	testJson("p256Verify", "100", t)
 }

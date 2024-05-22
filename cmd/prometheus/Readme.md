@@ -20,8 +20,8 @@ To add custom Erigon host: copy `./cmd/prometheus/prometheus.yml`, modify, pass 
 #### How to update dashboards
 
 1. Edit dashboard right in Grafana UI as you need. Save.
-2. Go to "Dashboard Settings" -> "JSON Model" -> Copy json representation of dashboard.
-3. Go to file `./cmd/prometheus/dashboards/erigon.json` and past json there.
+2. Go to "Share" -> "Export" -> enable checkbox "Export for sharing externally" -> "View Json" -> Copy json
+3. Go to file `./cmd/prometheus/dashboards/erigon.json` and paste json there.
 4. Commit and push. Done. 
 
 #### How to add new metrics

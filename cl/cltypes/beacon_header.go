@@ -13,8 +13,8 @@ import (
  * It contains the hash of the block body, and state root data.
  */
 type BeaconBlockHeader struct {
-	Slot          uint64         `json:"slot"`
-	ProposerIndex uint64         `json:"proposer_index"`
+	Slot          uint64         `json:"slot,string"`
+	ProposerIndex uint64         `json:"proposer_index,string"`
 	ParentRoot    libcommon.Hash `json:"parent_root"`
 	Root          libcommon.Hash `json:"state_root"`
 	BodyRoot      libcommon.Hash `json:"body_root"`

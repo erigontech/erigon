@@ -132,4 +132,9 @@ func TestGetBurntContract(t *testing.T) {
 	addr = MumbaiChainConfig.GetBurntContract(41874000 + 1)
 	require.NotNil(t, addr)
 	assert.Equal(t, common.HexToAddress("0x617b94CCCC2511808A3C9478ebb96f455CF167aA"), *addr)
+
+	// Amoy
+	addr = AmoyChainConfig.GetBurntContract(0)
+	require.NotNil(t, addr)
+	assert.Equal(t, common.HexToAddress("0x000000000000000000000000000000000000dead"), *addr)
 }

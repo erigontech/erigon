@@ -19,8 +19,8 @@ package direct
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	execution "github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
+	types "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -43,6 +43,10 @@ func (s *ExecutionClientDirect) GetBodiesByHashes(ctx context.Context, in *execu
 
 func (s *ExecutionClientDirect) GetBodiesByRange(ctx context.Context, in *execution.GetBodiesByRangeRequest, opts ...grpc.CallOption) (*execution.GetBodiesBatchResponse, error) {
 	return s.server.GetBodiesByRange(ctx, in)
+}
+
+func (s *ExecutionClientDirect) HasBlock(ctx context.Context, in *execution.GetSegmentRequest, opts ...grpc.CallOption) (*execution.HasBlockResponse, error) {
+	return s.server.HasBlock(ctx, in)
 }
 
 func (s *ExecutionClientDirect) GetAssembledBlock(ctx context.Context, in *execution.GetAssembledBlockRequest, opts ...grpc.CallOption) (*execution.GetAssembledBlockResponse, error) {

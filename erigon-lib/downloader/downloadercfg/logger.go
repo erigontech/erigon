@@ -92,7 +92,7 @@ func (b adapterHandler) Handle(r lg.Record) {
 		skip := strings.Contains(str, "EOF") ||
 			strings.Contains(str, "requested chunk too long") ||
 			strings.Contains(str, "banned ip") ||
-			strings.Contains(str, "banning webseed") ||
+			//strings.Contains(str, "banning webseed") ||
 			strings.Contains(str, "TrackerClient closed") ||
 			strings.Contains(str, "being sole dirtier of piece") ||
 			strings.Contains(str, "webrtc conn for unloaded torrent") ||
@@ -101,7 +101,7 @@ func (b adapterHandler) Handle(r lg.Record) {
 			strings.Contains(str, "reservation cancelled")
 
 		if skip {
-			log.Trace(str)
+			log.Debug(str)
 			break
 		}
 		log.Warn(str)

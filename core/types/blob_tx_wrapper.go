@@ -5,7 +5,6 @@ import (
 	"io"
 	"math/big"
 	"math/bits"
-	"time"
 
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/holiman/uint256"
@@ -298,14 +297,11 @@ func (txw *BlobTxWrapper) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int 
 }
 func (txw *BlobTxWrapper) GetFeeCap() *uint256.Int { return txw.Tx.GetFeeCap() }
 
-func (txw *BlobTxWrapper) Cost() *uint256.Int { return txw.Tx.GetFeeCap() }
-
 func (txw *BlobTxWrapper) GetBlobHashes() []libcommon.Hash { return txw.Tx.GetBlobHashes() }
 
 func (txw *BlobTxWrapper) GetGas() uint64            { return txw.Tx.GetGas() }
 func (txw *BlobTxWrapper) GetBlobGas() uint64        { return txw.Tx.GetBlobGas() }
 func (txw *BlobTxWrapper) GetValue() *uint256.Int    { return txw.Tx.GetValue() }
-func (txw *BlobTxWrapper) Time() time.Time           { return txw.Tx.Time() }
 func (txw *BlobTxWrapper) GetTo() *libcommon.Address { return txw.Tx.GetTo() }
 
 func (txw *BlobTxWrapper) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
@@ -334,6 +330,8 @@ func (txw *BlobTxWrapper) Protected() bool { return txw.Tx.Protected() }
 func (txw *BlobTxWrapper) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
 	return txw.Tx.RawSignatureValues()
 }
+
+func (txw *BlobTxWrapper) cashedSender() (libcommon.Address, bool) { return txw.Tx.cashedSender() }
 
 func (txw *BlobTxWrapper) Sender(s Signer) (libcommon.Address, error) { return txw.Tx.Sender(s) }
 
@@ -372,12 +370,12 @@ func (txw *BlobTxWrapper) DecodeRLP(s *rlp.Stream) error {
 
 // We deliberately encode only the transaction payload because the only case we need to serialize
 // blobs/commitments/proofs is when we reply to GetPooledTransactions (and that's handled by the txpool).
-func (txw BlobTxWrapper) EncodingSize() int {
+func (txw *BlobTxWrapper) EncodingSize() int {
 	return txw.Tx.EncodingSize()
 }
 func (txw *BlobTxWrapper) MarshalBinary(w io.Writer) error {
 	return txw.Tx.MarshalBinary(w)
 }
-func (txw BlobTxWrapper) EncodeRLP(w io.Writer) error {
+func (txw *BlobTxWrapper) EncodeRLP(w io.Writer) error {
 	return txw.Tx.EncodeRLP(w)
 }

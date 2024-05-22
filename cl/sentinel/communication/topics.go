@@ -31,6 +31,10 @@ const BeaconBlocksByRangeTopic = "/beacon_blocks_by_range"
 const BeaconBlocksByRootTopic = "/beacon_blocks_by_root"
 const BlobSidecarByRootTopic = "/blob_sidecars_by_root"
 const BlobSidecarByRangeTopic = "/blob_sidecars_by_range"
+const LightClientOptimisticUpdateTopic = "/light_client_optimistic_update"
+const LightClientFinalityUpdateTopic = "/light_client_finality_update"
+const LightClientBootstrapTopic = "/light_client_bootstrap"
+const LightClientUpdatesByRangeTopic = "/light_client_updates_by_range"
 
 // Request and Response protocol ids
 var (
@@ -50,5 +54,9 @@ var (
 
 	BlobSidecarByRootProtocolV1 = ProtocolPrefix + BlobSidecarByRootTopic + Schema1 + EncodingProtocol
 
-	BlobSidecarByRangeProtocolV1 = ProtocolPrefix + BlobSidecarByRangeTopic + Schema1 + EncodingProtocol
+	BlobSidecarByRangeProtocolV1          = ProtocolPrefix + BlobSidecarByRangeTopic + Schema1 + EncodingProtocol
+	LightClientOptimisticUpdateProtocolV1 = ProtocolPrefix + LightClientOptimisticUpdateTopic + Schema1 + EncodingProtocol
+	LightClientFinalityUpdateProtocolV1   = ProtocolPrefix + LightClientFinalityUpdateTopic + Schema1 + EncodingProtocol
+	LightClientBootstrapProtocolV1        = ProtocolPrefix + LightClientBootstrapTopic + Schema1 + EncodingProtocol
+	LightClientUpdatesByRangeProtocolV1   = ProtocolPrefix + LightClientUpdatesByRangeTopic + Schema1 + EncodingProtocol
 )

@@ -4,9 +4,11 @@ Erigon is an implementation of Ethereum (execution layer with embeddable consens
 frontier. [Archive Node](https://ethereum.org/en/developers/docs/nodes-and-clients/archive-nodes/#what-is-an-archive-node)
 by default.
 
-![Build status](https://github.com/ledgerwatch/erigon/actions/workflows/ci.yml/badge.svg)
+An accessible and complete version of the documentation is available at **[erigon.gitbook.io](https://erigon.gitbook.io)
+**.
+<br>
 
-![Coverage](https://gist.githubusercontent.com/revitteth/ee38e9beb22353eef6b88f2ad6ed7aa9/raw/badge.svg)
+![Build status](https://github.com/ledgerwatch/erigon/actions/workflows/ci.yml/badge.svg) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=ledgerwatch_erigon&metric=coverage)](https://sonarcloud.io/summary/new_code?id=ledgerwatch_erigon)
 
 <!--ts-->
 
@@ -20,6 +22,7 @@ by default.
     + [GoDoc](https://godoc.org/github.com/ledgerwatch/erigon)
     + [Beacon Chain](#beacon-chain-consensus-layer)
     + [Dev Chain](#dev-chain)
+    + [Caplin (Internal Consensus Layer)](#caplin)
 
 - [Key features](#key-features)
     + [More Efficient State Storage](#more-efficient-state-storage)
@@ -27,6 +30,7 @@ by default.
     + [JSON-RPC daemon](#json-rpc-daemon)
     + [Run all components by docker-compose](#run-all-components-by-docker-compose)
     + [Grafana dashboard](#grafana-dashboard)
+    + [Internal Consensus Layer](#caplin)
 - [Documentation](#documentation)
 - [FAQ](#faq)
 - [Getting in touch](#getting-in-touch)
@@ -49,26 +53,31 @@ in `erigon --help`). We don't allow change this flag after first start.
 System Requirements
 ===================
 
-* For an Archive node of Ethereum Mainnet we recommend >=3TB storage space: 1.8TB state (as of March 2022),
-  200GB temp files (can symlink or mount folder `<datadir>/temp` to another disk). Ethereum Mainnet Full node (
-  see `--prune*` flags): 400Gb (April 2022).
+* For an Archive node of Ethereum Mainnet we recommend >=3.5TB storage space: 2.3TiB state (as of March 2024),
+  643GiB snapshots (can symlink or mount folder `<datadir>/snapshots` to another disk), 200GB temp files (can symlink or
+  mount folder `<datadir>/temp` to another disk).
+  Ethereum Mainnet Full node (see [Pruned Node][pruned_node]): 1.5TiB not including temp files (April 2024).
 
-* Goerli Full node (see `--prune*` flags): 189GB on Beta, 114GB on Alpha (April 2022).
+* Goerli Full node (see [Pruned Node][pruned_node]): 189GB on Beta, 114GB on Alpha (April 2022).
 
-* Gnosis Chain Archive: 600GB (October 2023).
+* Gnosis Chain Archive: 1.7TiB (March 2024).
+  Gnosis Chain Full node (see [Pruned Node][pruned_node]): 530GiB (March 2024).
 
-* Polygon Mainnet Archive: 5TB. (April 2022). `--prune.*.older 15768000`: 5.1Tb (Sept 2023). Polygon Mumbai Archive:
-  1TB. (April 2022).
+* Polygon Mainnet Archive: 8.5TiB (December 2023).
+  Polygon Mainnet Full node (see [Pruned Node][pruned_node]) with `--prune.*.older 15768000`: 5.1Tb (September 2023).
+  Polygon Mumbai Archive: 1TB. (April 2022).
 
 SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind.
 Bear in mind that SSD performance deteriorates when close to capacity.
 
 RAM: >=16GB, 64-bit architecture.
 
-[Golang version >= 1.20](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4
+[Golang version >= 1.21](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4
 
 <code>🔬 more details on disk storage [here](https://erigon.substack.com/p/disk-footprint-changes-in-new-erigon?s=r)
 and [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space).</code>
+
+[pruned_node]: https://erigon.gitbook.io/erigon/basic-usage/usage/type-of-node#full-node-or-pruned-node
 
 Usage
 =====
@@ -91,7 +100,7 @@ For building the bleeding edge development branch:
 ```sh
 git clone --recurse-submodules https://github.com/ledgerwatch/erigon.git
 cd erigon
-git checkout devel
+git checkout main
 make erigon
 ./build/bin/erigon
 ```
@@ -103,9 +112,9 @@ download speed by flag `--torrent.download.rate=20mb`. <code>🔬 See [Downloade
 Use `--datadir` to choose where to store data.
 
 Use `--chain=gnosis` for [Gnosis Chain](https://www.gnosis.io/), `--chain=bor-mainnet` for Polygon Mainnet,
-and `--chain=mumbai` for Polygon Mumbai.
+`--chain=mumbai` for Polygon Mumbai and `--chain=amoy` for Polygon Amoy.
 For Gnosis Chain you need a [Consensus Layer](#beacon-chain-consensus-layer) client alongside
-Erigon (https://docs.gnosischain.com/node/guide/beacon).
+Erigon (https://docs.gnosischain.com/node/manual/beacon).
 
 Running `make help` will list and describe the convenience commands available in the [Makefile](./Makefile).
 
@@ -194,13 +203,6 @@ Support only remote-miners.
   , `--miner.gastarget`
 * JSON-RPC supports methods: eth_coinbase , eth_hashrate, eth_mining, eth_getWork, eth_submitWork, eth_submitHashrate
 * JSON-RPC supports websocket methods: newPendingTransaction
-* TODO:
-    + we don't broadcast mined blocks to p2p-network
-      yet, [but it's easy to accomplish](https://github.com/ledgerwatch/erigon/blob/9b8cdc0f2289a7cef78218a15043de5bdff4465e/eth/downloader/downloader.go#L673)
-    + eth_newPendingTransactionFilter
-    + eth_newBlockFilter
-    + eth_newFilter
-    + websocket Logs
 
 <code> 🔬 Detailed explanation is [here](/docs/mining.md).</code>
 
@@ -214,8 +216,8 @@ Windows users may run erigon in 3 possible ways:
   build on windows :
     * [Git](https://git-scm.com/downloads) for Windows must be installed. If you're cloning this repository is very
       likely you already have it
-    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.20
-    * GNU CC Compiler at least version 10 (is highly suggested that you install `chocolatey` package manager - see
+    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.21
+    * GNU CC Compiler at least version 13 (is highly suggested that you install `chocolatey` package manager - see
       following point)
     * If you need to build MDBX tools (i.e. `.\wmake.ps1 db-tools`)
       then [Chocolatey package manager](https://chocolatey.org/) for Windows must be installed. By Chocolatey you need
@@ -264,7 +266,7 @@ of the yaml configuration file and sets the chain to goerli
 Example of setting up TOML config file
 
 ```
-`datadir = 'your datadir'
+datadir = 'your datadir'
 port = 1111
 chain = "mainnet"
 http = true
@@ -308,6 +310,35 @@ More information can be found [here](https://github.com/ethereum/execution-apis/
 Once Erigon is running, you need to point your CL client to `<erigon address>:8551`,
 where `<erigon address>` is either `localhost` or the IP address of the device running Erigon, and also point to the JWT
 secret path created by Erigon.
+
+### Caplin
+
+Caplin is a full-fledged validating Consensus Client like Prysm, Lighthouse, Teku, Nimbus and Lodestar. Its goal is:
+
+* provide better stability
+* Validation of the chain
+* Stay in sync
+* keep the execution of blocks on chain tip
+* serve the Beacon API using a fast and compact data model alongside low CPU and memory usage.
+
+The main reason why developed a new Consensus Layer is to experiment with the possible benefits that could come with it.
+For example, The Engine API does not work well with Erigon. The Engine API sends data one block at a time, which does
+not suit how Erigon works. Erigon is designed to handle many blocks simultaneously and needs to sort and process data
+efficiently. Therefore, it would be better for Erigon to handle the blocks independently instead of relying on the
+Engine API.
+
+#### Caplin's Usage.
+
+Caplin is be enabled by default. to disable it and enable the Engine API, use the `--externalcl` flag. from that point
+on, an external Consensus Layer will not be need
+anymore.
+
+Caplin also has an archivial mode for historical states and blocks. it can be enabled through the `--caplin.archive`
+flag.
+In order to enable the caplin's Beacon API, the flag `--beacon.api=<namespaces>` must be added.
+e.g: `--beacon.api=beacon,builder,config,debug,node,validator,lighthouse` will enable all endpoints. **NOTE: Caplin is
+not staking-ready so aggregation endpoints are still to be implemented. Additionally enabling the Beacon API will lead
+to a 6 GB higher RAM usage.
 
 ### Multiple Instances / One Machine
 
@@ -553,20 +584,24 @@ node.
 
 #### `caplin` ports
 
-| Component | Port | Protocol | Purpose          | Should Expose |
-|-----------|------|----------|------------------|---------------|
-| sentinel  | 4000 | UDP      | Peering          | Public        |
-| sentinel  | 4001 | TCP      | Peering          | Public        |
+| Component | Port | Protocol | Purpose | Should Expose |
+|-----------|------|----------|---------|---------------|
+| sentinel  | 4000 | UDP      | Peering | Public        |
+| sentinel  | 4001 | TCP      | Peering | Public        |
 
-If you are using `--internalcl` aka `caplin` as your consensus client, then also look at the chart above
+In order to configure the ports, use:
+
+```
+   --caplin.discovery.addr value                                                    Address for Caplin DISCV5 protocol (default: "127.0.0.1")
+   --caplin.discovery.port value                                                    Port for Caplin DISCV5 protocol (default: 4000)
+   --caplin.discovery.tcpport value                                                 TCP Port for Caplin DISCV5 protocol (default: 4001)
+```
 
 #### `beaconAPI` ports
 
-| Component | Port | Protocol | Purpose          | Should Expose |
-|-----------|------|----------|------------------|---------------|
-| REST  | 5555 | TCP      | REST          | Public        |
-
-If you are using `--internalcl` aka `caplin` as your consensus client and `--beacon.api` then also look at the chart above
+| Component | Port | Protocol | Purpose | Should Expose |
+|-----------|------|----------|---------|---------------|
+| REST      | 5555 | TCP      | REST    | Public        |
 
 #### `shared` ports
 
@@ -609,6 +644,19 @@ RFC 922, Section 7
 Same
 in [IpTables syntax](https://ethereum.stackexchange.com/questions/6386/how-to-prevent-being-blacklisted-for-running-an-ethereum-client/13068#13068)
 
+### How to run erigon as a separate user? (e.g. as a `systemd` daemon)
+
+Running erigon from `build/bin` as a separate user might produce an error:
+
+    error while loading shared libraries: libsilkworm_capi.so: cannot open shared object file: No such file or directory
+
+The library needs to be *installed* for another user using `make DIST=<path> install`. You could use `$HOME/erigon`
+or `/opt/erigon` as the installation path, for example:
+
+    make DIST=/opt/erigon install
+
+and then run `/opt/erigon/erigon`.
+
 ### How to get diagnostic for bug report?
 
 - Get stack trace: `kill -SIGUSR1 <pid>`, get trace and stop: `kill -6 <pid>`
@@ -642,7 +690,7 @@ https://github.com/mathMakesArt/Erigon-on-RPi-4
 
 ### How to change db pagesize
 
-[post](https://github.com/ledgerwatch/erigon/blob/devel/cmd/integration/Readme.md#copy-data-to-another-db)
+[post](https://github.com/ledgerwatch/erigon/blob/main/cmd/integration/Readme.md#copy-data-to-another-db)
 
 
 Getting in touch
@@ -713,6 +761,130 @@ For example: btrfs's autodefrag option - may increase write IO 100x times
 
 For anyone else that was getting the BuildKit error when trying to start Erigon the old way you can use the below...
 
-```
+```sh
 XDG_DATA_HOME=/preferred/data/folder DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
+```
+
+---------
+
+## Erigon3 user's guide
+
+Git branch `main`. Just start erigon as you usually do.
+
+RAM requirement is higher: 32gb and better 64gb. We will work on this topic a bit later.
+
+Golang 1.21
+
+Almost all RPC methods are implemented - if something doesn't work - just drop it on our head.
+
+Supported networks: all (except Mumbai).
+
+### E3 changes from E2:
+
+- Sync from scratch doesn't require re-exec all history. Latest state and it's history are in snapshots - can download.
+- ExecutionStage - now including many E2 stages: stage_hash_state, stage_trie, stage_log_index, stage_history_index,
+  stage_trace_index
+- E3 can execute 1 historical transaction - without executing it's block - because history/indices have
+  transaction-granularity, instead of block-granularity.
+- E3 doesn't store Logs (aka Receipts) - it always re-executing historical txn (but it's cheaper then in E2 - see point
+  above). Also Logs LRU added in E2 (release/2.60) and E3: https://github.com/ledgerwatch/erigon/pull/10112
+  here. Likely later we will add optional flag "to persist receipts".
+- `--sync.loop.block.limit` is enabled by default. (Default: `2_000`.
+  Set `--sync.loop.block.limit=10_000_000 --batchSize=1g` to increase sync speed on good hardware).
+- datadir/chaindata is small now - to prevent it's grow: we recommend set `--batchSize <= 1G`. And it's fine
+  to `rm -rf chaindata`
+- can symlink/mount latest state to fast drive and history to cheap drive
+
+### E3 datadir structure
+
+```sh
+datadir        
+    chaindata   # "Recently-updated Latest State" and "Recent History"
+    snapshots   
+        domain    # Latest State: link to fast disk
+        history   # Historical values 
+        idx       # InvertedIndices: can search/filtering/union/intersect them - to find historical data. like eth_getLogs or trace_transaction
+        accessors # Additional (generated) indices of history - have "random-touch" read-pattern. They can serve only `Get` requests (no search/filters).
+    temp # buffers to sort data >> RAM. sequential-buffered IO - is slow-disk-friendly
+   
+# There is 4 domains: account, storage, code, commitment 
+```
+
+### E3 can store state on fast disk and history on cheap disk
+
+If you can afford store datadir on 1 nvme-raid - great. If can't - it's possible to store history on cheap drive.
+
+```sh
+# place (or ln -s) `datadir` on slow disk. link some sub-folders to fast disk.
+# Example: what need link to fast disk to speedup execution
+datadir        
+    chaindata   # link to fast disk
+    snapshots   
+        domain    # link to fast disk
+        history   
+        idx       
+        accessors 
+    temp   
+
+# Example: how to speedup history access: 
+#   - go step-by-step - first try store `accessors` on fast disk
+#   - if speed is not good enough: `idx`
+#   - if still not enough: `history` 
+```
+
+### E3 datadir size
+
+```
+# eth-mainnet - archive - April 2024
+
+du -hsc /erigon/* 
+6G  	/erigon/caplin
+80G 	/erigon/chaindata
+1.7T	/erigon/snapshots
+1.8T	total
+
+du -hsc /erigon/snapshots/* 
+100G 	/erigon/snapshots/accessor
+230G	/erigon/snapshots/domain
+250G	/erigon/snapshots/history
+400G	/erigon/snapshots/idx
+1.7T	total
+```
+
+```
+# bor-mainnet - archive - April 2024
+
+du -hsc /erigon/* 
+160M	/erigon/bor
+60G 	/erigon/chaindata
+3.7T	/erigon/snapshots
+3.8T	total
+
+du -hsc /erigon/snapshots/* 
+24G	/erigon/snapshots/accessor
+680G	/erigon/snapshots/domain
+580G	/erigon/snapshots/history
+1.3T	/erigon/snapshots/idx
+3.7T	total
+```
+
+### E3 other perf trics
+
+- `--sync.loop.block.limit=10_000_000 --batchSize=1g` - likely will help for sync speed.
+- on cloud-drives (good throughput, bad latency) - can enable OS's brain to pre-fetch some data (`madv_normal` instead
+  of `madv_random`). For `snapshots/domain` folder (latest
+  state) `KV_MADV_NORMAL_NO_LAST_LVL=accounts,storage,commitment` (or if have enough
+  RAM:  `KV_MADV_NORMAL=accounts,storage,commitment`). For `chaindata` folder (latest updates) `MDBX_READAHEAD=true`.
+  For all files - `SNAPSHOT_MADV_RND=false`
+
+- can lock latest state in RAM - to prevent from eviction (node may face high historical RPC traffic without impacting
+  Chain-Tip perf):
+
+```
+vmtouch -vdlw /mnt/erigon/snapshots/domain/*bt
+ls /mnt/erigon/snapshots/domain/*.kv | parallel vmtouch -vdlw
+
+# if it failing with "can't allocate memory", try: 
+sync && sudo sysctl vm.drop_caches=3
+echo 1 > /proc/sys/vm/compact_memory
 ```

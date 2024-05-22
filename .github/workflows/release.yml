@@ -27,7 +27,7 @@ jobs:
           remove-haskell: 'true'
 
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -47,7 +47,7 @@ jobs:
         id: prepare
         run: |
           TAG=${GITHUB_REF#refs/tags/}
-          echo ::set-output name=tag_name::${TAG}
+          echo "tag_name=${TAG}" >> $GITHUB_OUTPUT
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2

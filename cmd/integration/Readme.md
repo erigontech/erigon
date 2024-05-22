@@ -33,6 +33,9 @@ integration stage_history --unwind=N
 integration stage_exec --prune.to=N     
 integration stage_history --prune.to=N
 
+# Reset stage_headers
+integration stage_headers --reset --datadir=<my_datadir> --chain=<my_chain>
+
 # Exec blocks, but don't commit changes (loose them)
 integration stage_exec --no-commit
 ...
@@ -81,18 +84,21 @@ make all
 ## Copy data to another db
 
 ```
+0. You will need 2x disk space (can be different disks). 
 1. Stop Erigon
-2. Create new db, by starting erigon in new directory: with option --datadir /path/to/copy-to/
-(set new --db.pagesize option if need)
-3. Stop Erigon again after about 1 minute (Steps 2 and 3 create a new empty db in /path/to/copy-to/chaindata )
-4. Build integration: cd erigon; make integration
-5. Run: ./build/bin/integration mdbx_to_mdbx --chaindata /existing/erigon/path/chaindata/ --chaindata.to /path/to/copy-to/chaindata/
-6. cp -R /existing/erigon/path/snapshots /path/to/copy-to/snapshots
-7. start erigon in new datadir as usualy
+2. Create new db with new --db.pagesize: 
+ONLY_CREATE_DB=true ./build/bin/erigon --datadir=/erigon-new/ --chain="$CHAIN" --db.pagesize=8kb --db.size.limit=12T
+# if erigon doesn't stop after 1 min. just stop it.
+3. Build integration: cd erigon; make integration
+5. Run: ./build/bin/integration mdbx_to_mdbx --chaindata /existing/erigon/path/chaindata/ --chaindata.to /erigon-new/chaindata/
+6. cp -R /existing/erigon/path/snapshots /erigon-new/snapshots
+7. start erigon in new datadir as usually
 ```
 
-## Clear bad blocks markers table in the case some block was marked as invalid after some error 
+## Clear bad blocks markers table in the case some block was marked as invalid after some error
+
 It allows to process this blocks again
+
 ```
 1. ./build/bin/integration clear_bad_blocks --datadir=<datadir>
 ```

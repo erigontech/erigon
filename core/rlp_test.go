@@ -15,7 +15,7 @@
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 //
 //nolint:errcheck,prealloc
-package core
+package core_test
 
 import (
 	"fmt"
@@ -23,8 +23,9 @@ import (
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -35,8 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir string) *types.Block {
-	_, db, _ := temporal.NewTestDB(tb, datadir.New(tmpDir), nil)
+func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir string, logger log.Logger) *types.Block {
 	var (
 		aa = libcommon.HexToAddress("0x000000000000000000000000000000000000aaaa")
 		// Generate a canonical chain to act as the main dataset
@@ -49,11 +49,13 @@ func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir 
 			Config: params.TestChainConfig,
 			Alloc:  types.GenesisAlloc{address: {Balance: funds}},
 		}
-		genesis = MustCommitGenesis(gspec, db, tmpDir)
 	)
+	m := mock.MockWithGenesis(tb, gspec, key, false)
+	genesis := m.Genesis
+	db := m.DB
 
 	// We need to generate as many blocks +1 as uncles
-	chain, _ := GenerateChain(params.TestChainConfig, genesis, engine, db, uncles+1, func(n int, b *BlockGen) {
+	chain, _ := core.GenerateChain(params.TestChainConfig, genesis, engine, db, uncles+1, func(n int, b *core.BlockGen) {
 		if n == uncles {
 			// Add transactions and stuff on the last block
 			for i := 0; i < transactions; i++ {
@@ -91,7 +93,7 @@ func TestRlpIterator(t *testing.T) {
 
 func testRlpIterator(t *testing.T, txs, uncles, datasize int) {
 	desc := fmt.Sprintf("%d txs [%d datasize] and %d uncles", txs, datasize, uncles)
-	bodyRlp, _ := rlp.EncodeToBytes(getBlock(t, txs, uncles, datasize, "").Body())
+	bodyRlp, _ := rlp.EncodeToBytes(getBlock(t, txs, uncles, datasize, "", log.Root()).Body())
 	it, err := rlp.NewListIterator(bodyRlp)
 	if err != nil {
 		t.Fatal(err)
@@ -150,7 +152,7 @@ func BenchmarkHashing(b *testing.B) {
 		blockRlp []byte
 	)
 	{
-		block := getBlock(b, 200, 2, 50, "")
+		block := getBlock(b, 200, 2, 50, "", log.Root())
 		bodyRlp, _ = rlp.EncodeToBytes(block.Body())
 		blockRlp, _ = rlp.EncodeToBytes(block)
 	}

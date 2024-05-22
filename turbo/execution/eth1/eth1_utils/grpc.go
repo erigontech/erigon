@@ -8,8 +8,8 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
-	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	execution "github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
+	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -57,6 +57,10 @@ func HeaderToHeaderRPC(header *types.Header) *execution.Header {
 		h.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(*header.ParentBeaconBlockRoot)
 	}
 
+	if header.RequestsRoot != nil {
+		h.RequestsRoot = gointerfaces.ConvertHashToH256(*header.RequestsRoot)
+	}
+
 	if len(header.AuRaSeal) > 0 {
 		h.AuraSeal = header.AuRaSeal
 		h.AuraStep = &header.AuRaStep
@@ -65,7 +69,10 @@ func HeaderToHeaderRPC(header *types.Header) *execution.Header {
 }
 
 func HeadersToHeadersRPC(headers []*types.Header) []*execution.Header {
-	ret := []*execution.Header{}
+	if headers == nil {
+		return nil
+	}
+	ret := make([]*execution.Header, 0, len(headers))
 	for _, header := range headers {
 		ret = append(ret, HeaderToHeaderRPC(header))
 	}
@@ -128,12 +135,31 @@ func HeaderRpcToHeader(header *execution.Header) (*types.Header, error) {
 		h.ParentBeaconBlockRoot = new(libcommon.Hash)
 		*h.ParentBeaconBlockRoot = gointerfaces.ConvertH256ToHash(header.ParentBeaconBlockRoot)
 	}
+	if header.RequestsRoot != nil {
+		h.RequestsRoot = new(libcommon.Hash)
+		*h.RequestsRoot = gointerfaces.ConvertH256ToHash(header.RequestsRoot)
+	}
 	blockHash := gointerfaces.ConvertH256ToHash(header.BlockHash)
 	if blockHash != h.Hash() {
 		return nil, fmt.Errorf("block %d, %x has invalid hash. expected: %x", header.BlockNumber, h.Hash(), blockHash)
 	}
 
 	return h, nil
+}
+
+func HeadersRpcToHeaders(headers []*execution.Header) ([]*types.Header, error) {
+	if headers == nil {
+		return nil, nil
+	}
+	out := make([]*types.Header, 0, len(headers))
+	for _, h := range headers {
+		header, err := HeaderRpcToHeader(h)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, header)
+	}
+	return out, nil
 }
 
 func ConvertWithdrawalsFromRpc(in []*types2.Withdrawal) []*types.Withdrawal {
@@ -177,7 +203,9 @@ func ConvertRawBlockBodyToRpc(in *types.RawBody, blockNumber uint64, blockHash l
 		BlockNumber:  blockNumber,
 		BlockHash:    gointerfaces.ConvertHashToH256(blockHash),
 		Transactions: in.Transactions,
+		Uncles:       HeadersToHeadersRPC(in.Uncles),
 		Withdrawals:  ConvertWithdrawalsToRpc(in.Withdrawals),
+		//TODO(racytech): Requests
 	}
 }
 
@@ -190,14 +218,20 @@ func ConvertRawBlockBodiesToRpc(in []*types.RawBody, blockNumbers []uint64, bloc
 	return ret
 }
 
-func ConvertRawBlockBodyFromRpc(in *execution.BlockBody) *types.RawBody {
+func ConvertRawBlockBodyFromRpc(in *execution.BlockBody) (*types.RawBody, error) {
 	if in == nil {
-		return nil
+		return nil, nil
+	}
+	uncles, err := HeadersRpcToHeaders(in.Uncles)
+	if err != nil {
+		return nil, err
 	}
 	return &types.RawBody{
 		Transactions: in.Transactions,
+		Uncles:       uncles,
 		Withdrawals:  ConvertWithdrawalsFromRpc(in.Withdrawals),
-	}
+		//TODO(racytech): Requests
+	}, nil
 }
 
 func ConvertBigIntFromRpc(in *types2.H256) *big.Int {

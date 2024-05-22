@@ -1,0 +1,8 @@
+tests:
+- name: sidecars
+  actual:
+    handler: i
+    path: /eth/v1/beacon/blob_sidecars/0x694ee8130c036e4c7c052fac5d5a24618a52fa299a17e49d81af6bb82efd8998
+  expect:
+    file: "blob_sidecars_1"
+    fs: td

@@ -71,7 +71,7 @@ func BitlistRootWithLimit(bits []byte, limit uint64) ([32]byte, error) {
 	}
 
 	lengthRoot := Uint64Root(size)
-	return utils.Keccak256(base[:], lengthRoot[:]), nil
+	return utils.Sha256(base[:], lengthRoot[:]), nil
 }
 
 func packBits(bytes []byte) [][32]byte {
@@ -123,5 +123,5 @@ func ListObjectSSZRoot[T ssz.HashableSSZ](list []T, limit uint64) ([32]byte, err
 		return [32]byte{}, err
 	}
 	lenLeaf := Uint64Root(uint64(len(list)))
-	return utils.Keccak256(vectorLeaf[:], lenLeaf[:]), nil
+	return utils.Sha256(vectorLeaf[:], lenLeaf[:]), nil
 }

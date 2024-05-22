@@ -22,16 +22,18 @@ import (
 	"sort"
 
 	"github.com/holiman/uint256"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
+
+var _ evmtypes.IntraBlockState = new(IntraBlockState) // compile-time interface-check
 
 type revision struct {
 	id           int
@@ -103,6 +105,7 @@ func New(stateReader StateReader) *IntraBlockState {
 		accessList:        newAccessList(),
 		transientStorage:  newTransientStorage(),
 		balanceInc:        map[libcommon.Address]*BalanceIncrease{},
+		//trace:             true,
 	}
 }
 
@@ -130,11 +133,24 @@ func (sdb *IntraBlockState) Reset() {
 	//		"len(sdb.stateObjectsDirty)", len(sdb.stateObjectsDirty),
 	//		"len(sdb.balanceInc)", len(sdb.balanceInc))
 	//}
+
+	/*
+		sdb.nilAccounts = make(map[libcommon.Address]struct{})
+		sdb.stateObjects = make(map[libcommon.Address]*stateObject)
+		sdb.stateObjectsDirty = make(map[libcommon.Address]struct{})
+		sdb.logs = make(map[libcommon.Hash][]*types.Log)
+		sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
+	*/
+
 	sdb.nilAccounts = make(map[libcommon.Address]struct{})
+	//clear(sdb.nilAccounts)
 	sdb.stateObjects = make(map[libcommon.Address]*stateObject)
+	//clear(sdb.stateObjects)
 	sdb.stateObjectsDirty = make(map[libcommon.Address]struct{})
+	//clear(sdb.stateObjectsDirty)
 	sdb.logs = make(map[libcommon.Hash][]*types.Log)
 	sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
+	//clear(sdb.balanceInc)
 	sdb.thash = libcommon.Hash{}
 	sdb.bhash = libcommon.Hash{}
 	sdb.txIndex = 0
@@ -547,16 +563,17 @@ func (sdb *IntraBlockState) createObject(addr libcommon.Address, previous *state
 func (sdb *IntraBlockState) CreateAccount(addr libcommon.Address, contractCreation bool) {
 	var prevInc uint64
 	previous := sdb.getStateObject(addr)
-	if contractCreation {
-		if previous != nil && previous.selfdestructed {
-			prevInc = previous.data.Incarnation
+	if previous != nil && previous.selfdestructed {
+		prevInc = previous.data.Incarnation
+	} else {
+		if inc, err := sdb.stateReader.ReadAccountIncarnation(addr); err == nil {
+			prevInc = inc
 		} else {
-			if inc, err := sdb.stateReader.ReadAccountIncarnation(addr); err == nil {
-				prevInc = inc
-			} else {
-				sdb.savedErr = err
-			}
+			sdb.savedErr = err
 		}
+	}
+	if previous != nil && prevInc < previous.data.PrevIncarnation {
+		prevInc = previous.data.PrevIncarnation
 	}
 
 	newObj := sdb.createObject(addr, previous)
@@ -564,6 +581,7 @@ func (sdb *IntraBlockState) CreateAccount(addr libcommon.Address, contractCreati
 		newObj.data.Balance.Set(&previous.data.Balance)
 	}
 	newObj.data.Initialised = true
+	newObj.data.PrevIncarnation = prevInc
 
 	if contractCreation {
 		newObj.createdContract = true
@@ -675,6 +693,7 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 			continue
 		}
 
+		//fmt.Printf("FinalizeTx: %x, balance=%d %T\n", addr, so.data.Balance.Uint64(), stateWriter)
 		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, true); err != nil {
 			return err
 		}
@@ -684,6 +703,24 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 	// Invalidate journal because reverting across transactions is not allowed.
 	sdb.clearJournalAndRefund()
 	return nil
+}
+
+func (sdb *IntraBlockState) SoftFinalise() {
+	for addr := range sdb.journal.dirties {
+		_, exist := sdb.stateObjects[addr]
+		if !exist {
+			// ripeMD is 'touched' at block 1714175, in tx 0x1237f737031e40bcde4a8b7e717b2d15e3ecadfe49bb1bbc71ee9deb09c6fcf2
+			// That tx goes out of gas, and although the notion of 'touched' does not exist there, the
+			// touch-event will still be recorded in the journal. Since ripeMD is a special snowflake,
+			// it will persist in the journal even though the journal is reverted. In this special circumstance,
+			// it may exist in `sdb.journal.dirties` but not in `sdb.stateObjects`.
+			// Thus, we can safely ignore it here
+			continue
+		}
+		sdb.stateObjectsDirty[addr] = struct{}{}
+	}
+	// Invalidate journal because reverting across transactions is not allowed.
+	sdb.clearJournalAndRefund()
 }
 
 // CommitBlock finalizes the state by removing the self destructed objects
@@ -742,7 +779,7 @@ func (sdb *IntraBlockState) SetTxContext(thash, bhash libcommon.Hash, ti int) {
 
 // no not lock
 func (sdb *IntraBlockState) clearJournalAndRefund() {
-	sdb.journal = newJournal()
+	sdb.journal.Reset()
 	sdb.validRevisions = sdb.validRevisions[:0]
 	sdb.refund = 0
 }
@@ -764,10 +801,15 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcommon.Address, dst *libcommon.Address,
 	precompiles []libcommon.Address, list types2.AccessList,
 ) {
+	if sdb.trace {
+		fmt.Printf("ibs.Prepare %x, %x, %x, %x, %v, %v\n", sender, coinbase, dst, precompiles, list, rules)
+	}
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions
 		al := newAccessList()
 		sdb.accessList = al
+		//sdb.accessList.Reset()
+		//al := sdb.accessList
 
 		al.AddAddress(sender)
 		if dst != nil {

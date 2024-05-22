@@ -24,6 +24,7 @@ import (
 // NewExecutableSchema creates an ExecutableSchema from the ResolverRoot interface.
 func NewExecutableSchema(cfg Config) graphql.ExecutableSchema {
 	return &executableSchema{
+		schema:     cfg.Schema,
 		resolvers:  cfg.Resolvers,
 		directives: cfg.Directives,
 		complexity: cfg.Complexity,
@@ -31,6 +32,7 @@ func NewExecutableSchema(cfg Config) graphql.ExecutableSchema {
 }
 
 type Config struct {
+	Schema     *ast.Schema
 	Resolvers  ResolverRoot
 	Directives DirectiveRoot
 	Complexity ComplexityRoot
@@ -182,12 +184,16 @@ type QueryResolver interface {
 }
 
 type executableSchema struct {
+	schema     *ast.Schema
 	resolvers  ResolverRoot
 	directives DirectiveRoot
 	complexity ComplexityRoot
 }
 
 func (e *executableSchema) Schema() *ast.Schema {
+	if e.schema != nil {
+		return e.schema
+	}
 	return parsedSchema
 }
 
@@ -1023,14 +1029,14 @@ func (ec *executionContext) introspectSchema() (*introspection.Schema, error) {
 	if ec.DisableIntrospection {
 		return nil, errors.New("introspection disabled")
 	}
-	return introspection.WrapSchema(parsedSchema), nil
+	return introspection.WrapSchema(ec.Schema()), nil
 }
 
 func (ec *executionContext) introspectType(name string) (*introspection.Type, error) {
 	if ec.DisableIntrospection {
 		return nil, errors.New("introspection disabled")
 	}
-	return introspection.WrapTypeFromDef(parsedSchema, parsedSchema.Types[name]), nil
+	return introspection.WrapTypeFromDef(ec.Schema(), ec.Schema().Types[name]), nil
 }
 
 //go:embed "schema.graphqls"
@@ -1738,7 +1744,7 @@ func (ec *executionContext) fieldContext_Account_storage(ctx context.Context, fi
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Account_storage_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
-		return
+		return fc, err
 	}
 	return fc, nil
 }
@@ -2215,7 +2221,7 @@ func (ec *executionContext) fieldContext_Block_miner(ctx context.Context, field 
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Block_miner_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
-		return
+		return fc, err
 	}
 	return fc, nil
 }
@@ -2911,7 +2917,7 @@ func (ec *executionContext) fieldContext_Block_ommerAt(ctx context.Context, fiel
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Block_ommerAt_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
-		return
+		return fc, err
 	}
 	return fc, nil
 }
@@ -3156,7 +3162,7 @@ func (ec *executionContext) fieldContext_Block_transactionAt(ctx context.Context
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Block_transactionAt_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
-		return
+		return fc, err
 	}
 	return fc, nil
 }
@@ -3223,7 +3229,7 @@ func (ec *executionContext) fieldContext_Block_logs(ctx context.Context, field g
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Block_logs_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
-		return
+		return fc, err
 	}
 	return fc, nil
 }
@@ -3290,7 +3296,7 @@ func (ec *executionContext) fieldContext_Block_account(ctx context.Context, fiel
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Block_account_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
-		return
+		return fc, err
 	}
 	return fc, nil
 }
@@ -3350,7 +3356,7 @@ func (ec *executionContext) fieldContext_Block_call(ctx context.Context, field g
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Block_call_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
-		return
+		return fc, err
 	}
 	return fc, nil
 }
@@ -3405,7 +3411,7 @@ func (ec *executionContext) fieldContext_Block_estimateGas(ctx context.Context, 
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Block_estimateGas_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
-		return
+		return fc, err
 	}
 	return fc, nil
 }
@@ -3736,7 +3742,7 @@ func (ec *executionContext) fieldContext_Log_account(ctx context.Context, field 
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Log_account_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
-		return
+		return fc, err
 	}
 	return fc, nil
 }
@@ -3977,7 +3983,7 @@ func (ec *executionContext) fieldContext_Mutation_sendRawTransaction(ctx context
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Mutation_sendRawTransaction_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
-		return
+		return fc, err
 	}
 	return fc, nil
 }
@@ -4183,7 +4189,7 @@ func (ec *executionContext) fieldContext_Pending_account(ctx context.Context, fi
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Pending_account_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
-		return
+		return fc, err
 	}
 	return fc, nil
 }
@@ -4243,7 +4249,7 @@ func (ec *executionContext) fieldContext_Pending_call(ctx context.Context, field
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Pending_call_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
-		return
+		return fc, err
 	}
 	return fc, nil
 }
@@ -4298,7 +4304,7 @@ func (ec *executionContext) fieldContext_Pending_estimateGas(ctx context.Context
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Pending_estimateGas_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
-		return
+		return fc, err
 	}
 	return fc, nil
 }
@@ -4414,7 +4420,7 @@ func (ec *executionContext) fieldContext_Query_block(ctx context.Context, field 
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Query_block_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
-		return
+		return fc, err
 	}
 	return fc, nil
 }
@@ -4533,7 +4539,7 @@ func (ec *executionContext) fieldContext_Query_blocks(ctx context.Context, field
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Query_blocks_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
-		return
+		return fc, err
 	}
 	return fc, nil
 }
@@ -4695,7 +4701,7 @@ func (ec *executionContext) fieldContext_Query_transaction(ctx context.Context, 
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Query_transaction_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
-		return
+		return fc, err
 	}
 	return fc, nil
 }
@@ -4762,7 +4768,7 @@ func (ec *executionContext) fieldContext_Query_logs(ctx context.Context, field g
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Query_logs_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
-		return
+		return fc, err
 	}
 	return fc, nil
 }
@@ -5017,7 +5023,7 @@ func (ec *executionContext) fieldContext_Query___type(ctx context.Context, field
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Query___type_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
-		return
+		return fc, err
 	}
 	return fc, nil
 }
@@ -5400,7 +5406,7 @@ func (ec *executionContext) fieldContext_Transaction_from(ctx context.Context, f
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Transaction_from_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
-		return
+		return fc, err
 	}
 	return fc, nil
 }
@@ -5464,7 +5470,7 @@ func (ec *executionContext) fieldContext_Transaction_to(ctx context.Context, fie
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Transaction_to_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
-		return
+		return fc, err
 	}
 	return fc, nil
 }
@@ -6096,7 +6102,7 @@ func (ec *executionContext) fieldContext_Transaction_createdContract(ctx context
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Transaction_createdContract_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
-		return
+		return fc, err
 	}
 	return fc, nil
 }
@@ -7883,7 +7889,7 @@ func (ec *executionContext) fieldContext___Type_fields(ctx context.Context, fiel
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field___Type_fields_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
-		return
+		return fc, err
 	}
 	return fc, nil
 }
@@ -8071,7 +8077,7 @@ func (ec *executionContext) fieldContext___Type_enumValues(ctx context.Context, 
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field___Type_enumValues_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
-		return
+		return fc, err
 	}
 	return fc, nil
 }

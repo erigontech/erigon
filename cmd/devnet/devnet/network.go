@@ -34,7 +34,7 @@ type Network struct {
 	Snapshots          bool
 	Nodes              []Node
 	Services           []Service
-	Alloc              types.GenesisAlloc
+	Genesis            *types.Genesis
 	BorStateSyncDelay  time.Duration
 	BorPeriod          time.Duration
 	BorMinBlockSize    int
@@ -140,12 +140,16 @@ func (nw *Network) createNode(nodeArgs Node) (Node, error) {
 	}
 
 	if n.IsBlockProducer() {
-		if nw.Alloc == nil {
-			nw.Alloc = types.GenesisAlloc{
+		if nw.Genesis == nil {
+			nw.Genesis = &types.Genesis{}
+		}
+
+		if nw.Genesis.Alloc == nil {
+			nw.Genesis.Alloc = types.GenesisAlloc{
 				n.Account().Address: types.GenesisAccount{Balance: blockProducerFunds},
 			}
 		} else {
-			nw.Alloc[n.Account().Address] = types.GenesisAccount{Balance: blockProducerFunds}
+			nw.Genesis.Alloc[n.Account().Address] = types.GenesisAccount{Balance: blockProducerFunds}
 		}
 	}
 

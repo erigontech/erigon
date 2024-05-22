@@ -20,22 +20,15 @@ var DefaultMode = Mode{
 	Receipts:    Distance(math.MaxUint64),
 	TxIndex:     Distance(math.MaxUint64),
 	CallTraces:  Distance(math.MaxUint64),
+	Blocks:      Distance(math.MaxUint64),
 	Experiments: Experiments{}, // all off
 }
-
-var (
-	mainnetDepositContractBlock uint64 = 11052984
-	sepoliaDepositContractBlock uint64 = 1273020
-	goerliDepositContractBlock  uint64 = 4367322
-	gnosisDepositContractBlock  uint64 = 19475089
-	chiadoDepositContractBlock  uint64 = 155530
-)
 
 type Experiments struct {
 }
 
-func FromCli(chainId uint64, flags string, exactHistory, exactReceipts, exactTxIndex, exactCallTraces,
-	beforeH, beforeR, beforeT, beforeC uint64, experiments []string) (Mode, error) {
+func FromCli(chainId uint64, flags string, exactBlocks, exactHistory, exactReceipts, exactTxIndex, exactCallTraces,
+	beforeB, beforeH, beforeR, beforeT, beforeC uint64, experiments []string) (Mode, error) {
 	mode := DefaultMode
 
 	if flags != "default" && flags != "disabled" {
@@ -49,14 +42,17 @@ func FromCli(chainId uint64, flags string, exactHistory, exactReceipts, exactTxI
 				mode.TxIndex = Distance(params.FullImmutabilityThreshold)
 			case 'c':
 				mode.CallTraces = Distance(params.FullImmutabilityThreshold)
+			case 'b':
+				mode.Blocks = Distance(params.FullImmutabilityThreshold)
 			default:
 				return DefaultMode, fmt.Errorf("unexpected flag found: %c", flag)
 			}
 		}
 	}
 
-	pruneBlockBefore := pruneBlockDefault(chainId)
-
+	if exactBlocks > 0 {
+		mode.Blocks = Distance(exactBlocks)
+	}
 	if exactHistory > 0 {
 		mode.History = Distance(exactHistory)
 	}
@@ -74,22 +70,16 @@ func FromCli(chainId uint64, flags string, exactHistory, exactReceipts, exactTxI
 		mode.History = Before(beforeH)
 	}
 	if beforeR > 0 {
-		if pruneBlockBefore != 0 {
-			log.Warn("specifying prune.before.r might break CL compatibility")
-			if beforeR > pruneBlockBefore {
-				log.Warn("the specified prune.before.r block number is higher than the deposit contract contract block number", "highest block number", pruneBlockBefore)
-			}
-		}
 		mode.Receipts = Before(beforeR)
-	} else if exactReceipts == 0 && mode.Receipts.Enabled() && pruneBlockBefore != 0 {
-		// Default --prune=r to pruning receipts before the Beacon Chain genesis
-		mode.Receipts = Before(pruneBlockBefore)
 	}
 	if beforeT > 0 {
 		mode.TxIndex = Before(beforeT)
 	}
 	if beforeC > 0 {
 		mode.CallTraces = Before(beforeC)
+	}
+	if beforeB > 0 {
+		mode.Blocks = Before(beforeB)
 	}
 
 	for _, ex := range experiments {
@@ -101,23 +91,6 @@ func FromCli(chainId uint64, flags string, exactHistory, exactReceipts, exactTxI
 		}
 	}
 	return mode, nil
-}
-
-func pruneBlockDefault(chainId uint64) uint64 {
-	switch chainId {
-	case 1 /* mainnet */ :
-		return mainnetDepositContractBlock
-	case 11155111 /* sepolia */ :
-		return sepoliaDepositContractBlock
-	case 5 /* goerli */ :
-		return goerliDepositContractBlock
-	case 10200 /* chiado */ :
-		return chiadoDepositContractBlock
-	case 100 /* gnosis */ :
-		return gnosisDepositContractBlock
-	}
-
-	return 0
 }
 
 func Get(db kv.Getter) (Mode, error) {
@@ -156,6 +129,14 @@ func Get(db kv.Getter) (Mode, error) {
 		prune.CallTraces = blockAmount
 	}
 
+	blockAmount, err = get(db, kv.PruneBlocks)
+	if err != nil {
+		return prune, err
+	}
+	if blockAmount != nil {
+		prune.Blocks = blockAmount
+	}
+
 	return prune, nil
 }
 
@@ -165,6 +146,7 @@ type Mode struct {
 	Receipts    BlockAmount
 	TxIndex     BlockAmount
 	CallTraces  BlockAmount
+	Blocks      BlockAmount
 	Experiments Experiments
 }
 
@@ -230,6 +212,13 @@ func (m Mode) String() string {
 			long += fmt.Sprintf(" --prune.h.%s=%d", m.History.dbType(), m.History.toValue())
 		}
 	}
+	if m.Blocks.Enabled() {
+		if m.Blocks.useDefaultValue() {
+			short += fmt.Sprintf(" --prune.b.older=%d", defaultVal)
+		} else {
+			long += fmt.Sprintf(" --prune.b.%s=%d", m.Blocks.dbType(), m.Blocks.toValue())
+		}
+	}
 	if m.Receipts.Enabled() {
 		if m.Receipts.useDefaultValue() {
 			short += fmt.Sprintf(" --prune.r.older=%d", defaultVal)
@@ -280,6 +269,11 @@ func Override(db kv.RwTx, sm Mode) error {
 		return err
 	}
 
+	err = set(db, kv.PruneBlocks, sm.Blocks)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -296,6 +290,11 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 	}
 
 	if pruneMode.Initialised {
+		// Don't change from previous default as default for Receipts pruning has now changed
+		if pruneMode.Receipts.useDefaultValue() {
+			pruneMode.Receipts = pm.Receipts
+		}
+
 		// If storage mode is not explicitly specified, we take whatever is in the database
 		if !reflect.DeepEqual(pm, pruneMode) {
 			if bytes.Equal(pm.Receipts.dbType(), kv.PruneTypeOlder) && bytes.Equal(pruneMode.Receipts.dbType(), kv.PruneTypeBefore) {
@@ -321,6 +320,7 @@ func setIfNotExist(db kv.GetPut, pm Mode) error {
 		string(kv.PruneReceipts):   pm.Receipts,
 		string(kv.PruneTxIndex):    pm.TxIndex,
 		string(kv.PruneCallTraces): pm.CallTraces,
+		string(kv.PruneBlocks):     pm.Blocks,
 	}
 
 	for key, value := range pruneDBData {

@@ -1,5 +1,5 @@
 {
-  "ChainName": "mumbai",
+  "chainName": "mumbai",
   "chainId": 80001,
   "consensus": "bor",
   "homesteadBlock": 0,
@@ -58,6 +58,7 @@
     "jaipurBlock": 22770000,
     "delhiBlock": 29638656,
     "indoreBlock": 37075456,
-    "agraBlock": 41874000
+    "agraBlock": 41874000,
+    "napoliBlock": 45648608
   }
 }

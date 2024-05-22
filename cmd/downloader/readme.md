@@ -1,3 +1,28 @@
+## Snapshots (synonym of segments/shards) overview
+
+- What is "snaphots"? - It's way to store "cold" data outside of main database. It's not 'temporary' files -
+  it's `frozen db` where stored old blocks/history/etc... Most important: it's "building block" for future "sync Archive
+  node without execution all blocks from genesis" (will release this feature in Erigon3).
+
+- When snapshots are created? - Blocks older than 90K (`FullImmutabilityThreshold`) are moved from DB to files
+  in-background
+
+- Where snapshots are stored? - `datadir/snapshots` - you can symlink/mount it to cheaper disk.
+
+- When snapshots are pulled? - Erigon download snapshots **only-once** when creating node - all other files are
+  self-generated
+
+- How does it benefit the new nodes? - P2P and Becaon networks may have not enough good peers for old data (no
+  incentives). StageSenders results are included into blocks snaps - means new node can skip it.
+
+- How network benefit? - Serve immutable snapshots can use cheaper infrastructure: Bittorrent/S3/R2/etc... - because
+  there is no incentive. Polygon mainnet is 12Tb now. Also Beacon network is very bad in serving old data.
+
+- How does it benefit current nodes? - Erigon's db is 1-file (doesens of Tb of nvme) - which is not friendly for
+  maintainance. Can't mount `hot` data to 1 type of disk and `cold` to another. Erigon2 moving only Blocks to snaps
+  but Erigon3 also moving there `cold latest state` and `state history` - means new node doesn't need re-exec all blocks
+  from genesis.
+
 # Downloader
 
 Service to seed/download historical data (snapshots, immutable .seg files) by
@@ -47,14 +72,14 @@ Flag `--snapshots` is compatible with `--prune` flag
 # It will dump blocks from Database to .seg files:
 erigon snapshots retire --datadir=<your_datadir> 
 
-# Create .torrent files (Downloader will seed automatically all .torrent files)
+# Create .torrent files (you can think about them as "checksum")
+downloader torrent_create --datadir=<your_datadir>
+
 # output format is compatible with https://github.com/ledgerwatch/erigon-snapshot
-downloader torrent_hashes --rebuild --datadir=<your_datadir>
+downloader torrent_hashes --datadir=<your_datadir>
 
-# Start downloader (seeds automatically)
+# Start downloader (read all .torrent files, and download/seed data)
 downloader --downloader.api.addr=127.0.0.1:9093 --datadir=<your_datadir>
-
-# Erigon is not required for snapshots seeding. But Erigon with --snapshots also does seeding. 
 ```
 
 Additional info:
@@ -101,7 +126,7 @@ Downloader does:
 
 - Read .torrent files, download everything described by .torrent files
 - Use https://github.com/ngosang/trackerslist
-  see [./trackers/embed.go](../../../erigon-lib/downloader/trackers/embed.go)
+  see [./downloader/util.go](../../erigon-lib/downloader/util.go)
 - automatically seeding
 
 Technical details:
@@ -109,13 +134,58 @@ Technical details:
 - To prevent attack - .idx creation using random Seed - all nodes will have
   different .idx file (and same .seg files)
 - If you add/remove any .seg file manually, also need
-  remove `<your_datadir>/snapshots/db` folder
+  remove `<your_datadir>/downloader` folder
 
 ## How to verify that .seg files have the same checksum as current .torrent files
 
 ```
 # Use it if you see weird behavior, bugs, bans, hardware issues, etc...
 downloader --verify --datadir=<your_datadir>
+downloader --verify --verify.files=v1-1-2-transaction.seg --datadir=<your_datadir>
+```
+
+## Create cheap seedbox
+
+Usually Erigon's network is self-sufficient - peers automatically producing and
+seeding snapshots. But new network or new type of snapshots need Bootstraping
+step - no peers yet have this files.
+
+**Seedbox** - machie which ony seeding archive files:
+
+- Doesn't need synced erigon
+- Can work on very cheap disks, cpu, ram
+- It works exactly like Erigon node - downloading archive files and seed them
+
+```
+downloader --seedbox --datadir=<your> --chain=mainnet
+```
+
+Seedbox can fallback to **Webseed** - HTTP url to centralized infrastructure. For example: private S3 bucket with
+signed_urls, or any HTTP server with files. Main idea: erigon decentralized infrastructure has higher prioriity than
+centralized (which used as **support/fallback**).
+
+```
+# Erigon has default webseed url's - and you can create own
+downloader --datadir=<your> --chain=mainnet --webseed=<webseed_url>
+# See also: `downloader --help` of `--webseed` flag. There is an option to pass it by `datadir/webseed.toml` file
+```
+
+--------- 
+
+## Utilities
+
+```
+downloader torrent_cat /path/to.torrent
+
+downloader torrent_magnet /path/to.torrent
+
+downloader torrent_clean --datadir <datadir> # remote all .torrent files in datadir
+```
+
+## Remote manifest verify
+To check that remote webseeds has available manifest and all manifested files are available, has correct format of ETag, does not have dangling torrents etc.
+```
+downloader manifest-verify --chain <chain> [--webseeds 'a','b','c']
 ```
 
 ## Faster rsync
@@ -158,3 +228,5 @@ downloader --datadir=<your> --chain=mainnet --webseed=<webseed_url>
 
 # See also: `downloader --help` of `--webseed` flag. There is an option to pass it by `datadir/webseed.toml` file.   
 ```
+
+---------------

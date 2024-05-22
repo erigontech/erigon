@@ -32,6 +32,7 @@ type MemoryMutation struct {
 	memTx            kv.RwTx
 	memDb            kv.RwDB
 	deletedEntries   map[string]map[string]struct{}
+	deletedDups      map[string]map[string]map[string]struct{}
 	clearedTables    map[string]struct{}
 	db               kv.Tx
 	statelessCursors map[string]kv.RwCursor
@@ -45,9 +46,9 @@ type MemoryMutation struct {
 // defer batch.Close()
 // ... some calculations on `batch`
 // batch.Commit()
-func NewMemoryBatch(tx kv.Tx, tmpDir string) *MemoryMutation {
-	tmpDB := mdbx.NewMDBX(log.New()).InMem(tmpDir).GrowthStep(64 * datasize.MB).MapSize(512 * datasize.GB).MustOpen()
-	memTx, err := tmpDB.BeginRw(context.Background())
+func NewMemoryBatch(tx kv.Tx, tmpDir string, logger log.Logger) *MemoryMutation {
+	tmpDB := mdbx.NewMDBX(logger).InMem(tmpDir).GrowthStep(64 * datasize.MB).MapSize(512 * datasize.GB).MustOpen()
+	memTx, err := tmpDB.BeginRw(context.Background()) // nolint:gocritic
 	if err != nil {
 		panic(err)
 	}
@@ -60,6 +61,7 @@ func NewMemoryBatch(tx kv.Tx, tmpDir string) *MemoryMutation {
 		memDb:          tmpDB,
 		memTx:          memTx,
 		deletedEntries: make(map[string]map[string]struct{}),
+		deletedDups:    map[string]map[string]map[string]struct{}{},
 		clearedTables:  make(map[string]struct{}),
 	}
 }
@@ -70,6 +72,7 @@ func NewMemoryBatchWithCustomDB(tx kv.Tx, db kv.RwDB, uTx kv.RwTx, tmpDir string
 		memDb:          db,
 		memTx:          uTx,
 		deletedEntries: make(map[string]map[string]struct{}),
+		deletedDups:    map[string]map[string]map[string]struct{}{},
 		clearedTables:  make(map[string]struct{}),
 	}
 }
@@ -90,6 +93,19 @@ func (m *MemoryMutation) isEntryDeleted(table string, key []byte) bool {
 		return ok
 	}
 	_, ok = m.deletedEntries[table][string(key)]
+	return ok
+}
+
+func (m *MemoryMutation) isDupDeleted(table string, key []byte, val []byte) bool {
+	t, ok := m.deletedDups[table]
+	if !ok {
+		return ok
+	}
+	k, ok := t[string(key)]
+	if !ok {
+		return ok
+	}
+	_, ok = k[string(val)]
 	return ok
 }
 
@@ -243,10 +259,162 @@ func (m *MemoryMutation) RangeAscend(table string, fromPrefix, toPrefix []byte, 
 	panic("please implement me")
 }
 func (m *MemoryMutation) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error) {
-	panic("please implement me")
+	s := &rangeIter{orderAscend: false, limit: int64(limit)}
+	var err error
+	if s.iterDb, err = m.db.RangeDescend(table, fromPrefix, toPrefix, limit); err != nil {
+		return s, err
+	}
+	if s.iterMem, err = m.memTx.RangeDescend(table, fromPrefix, toPrefix, limit); err != nil {
+		return s, err
+	}
+	return s.init()
 }
+
+type rangeIter struct {
+	iterDb, iterMem                      iter.KV
+	hasNextDb, hasNextMem                bool
+	nextKdb, nextVdb, nextKmem, nextVmem []byte
+	orderAscend                          bool
+	limit                                int64
+}
+
+func (s *rangeIter) Close() {
+	if s.iterDb != nil {
+		s.iterDb.Close()
+		s.iterDb = nil
+	}
+	if s.iterMem != nil {
+		s.iterMem.Close()
+		s.iterMem = nil
+	}
+}
+func (s *rangeIter) init() (*rangeIter, error) {
+	s.hasNextDb = s.iterDb.HasNext()
+	s.hasNextMem = s.iterMem.HasNext()
+	var err error
+	if s.hasNextDb {
+		if s.nextKdb, s.nextVdb, err = s.iterDb.Next(); err != nil {
+			return s, err
+		}
+	}
+	if s.hasNextMem {
+		if s.nextKmem, s.nextVmem, err = s.iterMem.Next(); err != nil {
+			return s, err
+		}
+	}
+	return s, nil
+}
+
+func (s *rangeIter) HasNext() bool {
+	if s.limit == 0 {
+		return false
+	}
+	return s.hasNextDb || s.hasNextMem
+}
+func (s *rangeIter) Next() (k, v []byte, err error) {
+	s.limit--
+	c := bytes.Compare(s.nextKdb, s.nextKmem)
+	if !s.hasNextMem || c == -1 && s.orderAscend || c == 1 && !s.orderAscend || c == 0 {
+		if s.hasNextDb {
+			k = s.nextKdb
+			v = s.nextVdb
+			s.hasNextDb = s.iterDb.HasNext()
+			if s.nextKdb, s.nextVdb, err = s.iterDb.Next(); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+	if !s.hasNextDb || c == 1 && s.orderAscend || c == -1 && !s.orderAscend || c == 0 {
+		if s.hasNextMem {
+			k = s.nextKmem
+			v = s.nextVmem
+			s.hasNextMem = s.iterMem.HasNext()
+			if s.nextKmem, s.nextVmem, err = s.iterMem.Next(); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+	return
+}
+
 func (m *MemoryMutation) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (iter.KV, error) {
-	panic("please implement me")
+	s := &rangeDupSortIter{key: key, orderAscend: bool(asc), limit: int64(limit)}
+	var err error
+	if s.iterDb, err = m.db.RangeDupSort(table, key, fromPrefix, toPrefix, asc, limit); err != nil {
+		return s, err
+	}
+	if s.iterMem, err = m.memTx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, limit); err != nil {
+		return s, err
+	}
+	return s.init()
+}
+
+type rangeDupSortIter struct {
+	iterDb, iterMem       iter.KV
+	hasNextDb, hasNextMem bool
+	key                   []byte
+	nextVdb, nextVmem     []byte
+	orderAscend           bool
+	limit                 int64
+}
+
+func (s *rangeDupSortIter) Close() {
+	if s.iterDb != nil {
+		s.iterDb.Close()
+		s.iterDb = nil
+	}
+	if s.iterMem != nil {
+		s.iterMem.Close()
+		s.iterMem = nil
+	}
+}
+
+func (s *rangeDupSortIter) init() (*rangeDupSortIter, error) {
+	s.hasNextDb = s.iterDb.HasNext()
+	s.hasNextMem = s.iterMem.HasNext()
+	var err error
+	if s.hasNextDb {
+		if _, s.nextVdb, err = s.iterDb.Next(); err != nil {
+			return s, err
+		}
+	}
+	if s.hasNextMem {
+		if _, s.nextVmem, err = s.iterMem.Next(); err != nil {
+			return s, err
+		}
+	}
+	return s, nil
+}
+
+func (s *rangeDupSortIter) HasNext() bool {
+	if s.limit == 0 {
+		return false
+	}
+	return s.hasNextDb || s.hasNextMem
+}
+func (s *rangeDupSortIter) Next() (k, v []byte, err error) {
+	s.limit--
+	k = s.key
+	c := bytes.Compare(s.nextVdb, s.nextVmem)
+	if !s.hasNextMem || c == -1 && s.orderAscend || c == 1 && !s.orderAscend || c == 0 {
+		if s.hasNextDb {
+			v = s.nextVdb
+			s.hasNextDb = s.iterDb.HasNext()
+			if _, s.nextVdb, err = s.iterDb.Next(); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+	if !s.hasNextDb || c == 1 && s.orderAscend || c == -1 && !s.orderAscend || c == 0 {
+		if s.hasNextMem {
+			v = s.nextVmem
+			s.hasNextMem = s.iterMem.HasNext()
+			if _, s.nextVmem, err = s.iterMem.Next(); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+	return
 }
 
 func (m *MemoryMutation) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
@@ -271,11 +439,27 @@ func (m *MemoryMutation) ForPrefix(bucket string, prefix []byte, walker func(k, 
 }
 
 func (m *MemoryMutation) Delete(table string, k []byte) error {
-	if _, ok := m.deletedEntries[table]; !ok {
-		m.deletedEntries[table] = make(map[string]struct{})
+	t, ok := m.deletedEntries[table]
+	if !ok {
+		t = make(map[string]struct{})
+		m.deletedEntries[table] = t
 	}
-	m.deletedEntries[table][string(k)] = struct{}{}
+	t[string(k)] = struct{}{}
 	return m.memTx.Delete(table, k)
+}
+
+func (m *MemoryMutation) deleteDup(table string, k, v []byte) {
+	t, ok := m.deletedDups[table]
+	if !ok {
+		t = map[string]map[string]struct{}{}
+		m.deletedDups[table] = t
+	}
+	km, ok := t[string(k)]
+	if !ok {
+		km = map[string]struct{}{}
+		t[string(k)] = km
+	}
+	km[string(v)] = struct{}{}
 }
 
 func (m *MemoryMutation) Commit() error {
@@ -321,7 +505,7 @@ func (m *MemoryMutation) CreateBucket(bucket string) error {
 	return m.memTx.CreateBucket(bucket)
 }
 
-func (m *MemoryMutation) Flush(tx kv.RwTx) error {
+func (m *MemoryMutation) Flush(ctx context.Context, tx kv.RwTx) error {
 	// Obtain buckets touched.
 	buckets, err := m.memTx.ListBuckets()
 	if err != nil {
@@ -329,6 +513,11 @@ func (m *MemoryMutation) Flush(tx kv.RwTx) error {
 	}
 	// Obliterate buckets who are to be deleted
 	for bucket := range m.clearedTables {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 		if err := tx.ClearBucket(bucket); err != nil {
 			return err
 		}
@@ -343,38 +532,53 @@ func (m *MemoryMutation) Flush(tx kv.RwTx) error {
 	}
 	// Iterate over each bucket and apply changes accordingly.
 	for _, bucket := range buckets {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 		if isTablePurelyDupsort(bucket) {
-			cbucket, err := m.memTx.CursorDupSort(bucket)
-			if err != nil {
-				return err
-			}
-			defer cbucket.Close()
-			dbCursor, err := tx.RwCursorDupSort(bucket)
-			if err != nil {
-				return err
-			}
-			defer dbCursor.Close()
-			for k, v, err := cbucket.First(); k != nil; k, v, err = cbucket.Next() {
+			if err := func() error {
+				cbucket, err := m.memTx.CursorDupSort(bucket)
 				if err != nil {
 					return err
 				}
-				if err := dbCursor.Put(k, v); err != nil {
+				defer cbucket.Close()
+				dbCursor, err := tx.RwCursorDupSort(bucket)
+				if err != nil {
 					return err
 				}
+				defer dbCursor.Close()
+				for k, v, err := cbucket.First(); k != nil; k, v, err = cbucket.Next() {
+					if err != nil {
+						return err
+					}
+					if err := dbCursor.Put(k, v); err != nil {
+						return err
+					}
+				}
+				return nil
+			}(); err != nil {
+				return err
 			}
 		} else {
-			cbucket, err := m.memTx.Cursor(bucket)
-			if err != nil {
-				return err
-			}
-			defer cbucket.Close()
-			for k, v, err := cbucket.First(); k != nil; k, v, err = cbucket.Next() {
+			if err := func() error {
+				cbucket, err := m.memTx.Cursor(bucket)
 				if err != nil {
 					return err
 				}
-				if err := tx.Put(bucket, k, v); err != nil {
-					return err
+				defer cbucket.Close()
+				for k, v, err := cbucket.First(); k != nil; k, v, err = cbucket.Next() {
+					if err != nil {
+						return err
+					}
+					if err := tx.Put(bucket, k, v); err != nil {
+						return err
+					}
 				}
+				return nil
+			}(); err != nil {
+				return err
 			}
 		}
 	}
@@ -467,7 +671,7 @@ func (m *MemoryMutation) MemTx() kv.RwTx {
 
 // Cursor creates a new cursor (the real fun begins here)
 func (m *MemoryMutation) makeCursor(bucket string) (kv.RwCursorDupSort, error) {
-	c := &memoryMutationCursor{}
+	c := &memoryMutationCursor{pureDupSort: isTablePurelyDupsort(bucket)}
 	// We can filter duplicates in dup sorted table
 	c.table = bucket
 
@@ -510,4 +714,35 @@ func (m *MemoryMutation) ViewID() uint64 {
 
 func (m *MemoryMutation) CHandle() unsafe.Pointer {
 	panic("CHandle not implemented")
+}
+
+type hasAggCtx interface {
+	AggTx() interface{}
+}
+
+func (m *MemoryMutation) AggTx() interface{} {
+	return m.db.(hasAggCtx).AggTx()
+}
+
+func (m *MemoryMutation) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, step uint64, err error) {
+	return m.db.(kv.TemporalTx).DomainGet(name, k, k2)
+}
+
+func (m *MemoryMutation) DomainGetAsOf(name kv.Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error) {
+	return m.db.(kv.TemporalTx).DomainGetAsOf(name, k, k2, ts)
+}
+func (m *MemoryMutation) HistorySeek(name kv.History, k []byte, ts uint64) (v []byte, ok bool, err error) {
+	return m.db.(kv.TemporalTx).HistorySeek(name, k, ts)
+}
+
+func (m *MemoryMutation) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error) {
+	return m.db.(kv.TemporalTx).IndexRange(name, k, fromTs, toTs, asc, limit)
+}
+
+func (m *MemoryMutation) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int) (it iter.KV, err error) {
+	return m.db.(kv.TemporalTx).HistoryRange(name, fromTs, toTs, asc, limit)
+}
+
+func (m *MemoryMutation) DomainRange(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error) {
+	return m.db.(kv.TemporalTx).DomainRange(name, fromKey, toKey, ts, asc, limit)
 }

@@ -5,10 +5,14 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/stretchr/testify/require"
+	sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
+	"github.com/ledgerwatch/erigon-lib/wrap"
+
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/ledgerwatch/erigon/core"
@@ -19,7 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func TestEthSubscribe(t *testing.T) {
@@ -54,8 +57,8 @@ func TestEthSubscribe(t *testing.T) {
 	initialCycle := mock.MockInsertAsInitialCycle
 	highestSeenHeader := chain.TopBlock.NumberU64()
 
-	hook := stages.NewHook(m.Ctx, m.DB, m.Notifications, m.Sync, m.BlockReader, m.ChainConfig, m.Log, m.UpdateHead)
-	if err := stages.StageLoopIteration(m.Ctx, m.DB, nil, m.Sync, initialCycle, logger, m.BlockReader, hook, false); err != nil {
+	hook := stages.NewHook(m.Ctx, m.DB, m.Notifications, m.Sync, m.BlockReader, m.ChainConfig, m.Log, nil)
+	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.TxContainer{}, m.Sync, initialCycle, true, logger, m.BlockReader, hook); err != nil {
 		t.Fatal(err)
 	}
 

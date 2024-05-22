@@ -151,49 +151,34 @@ func processRewardsAndPenaltiesPhase0(s abstract.BeaconState, eligibleValidators
 			}
 			missed = 3 - attested
 		}
-
+		currentBalance, err := s.ValidatorBalance(int(index))
+		if err != nil {
+			return err
+		}
 		// If we attested then we reward the validator.
 		if state.InactivityLeaking(s) {
-			if err := state.IncreaseBalance(s, index, baseReward*attested); err != nil {
-				return err
-			}
+			currentBalance += baseReward * attested
 		} else {
 			if !currentValidator.Slashed() && previousMatchingSourceAttester {
-				rewardNumerator := baseReward * unslashedMatchingSourceBalanceIncrements
-				if err := state.IncreaseBalance(s, index, rewardNumerator/rewardDenominator); err != nil {
-					return err
-				}
+				currentBalance += (baseReward * unslashedMatchingSourceBalanceIncrements) / rewardDenominator
 			}
 			if !currentValidator.Slashed() && previousMatchingTargetAttester {
-				rewardNumerator := baseReward * unslashedMatchingTargetBalanceIncrements
-				if err := state.IncreaseBalance(s, index, rewardNumerator/rewardDenominator); err != nil {
-					return err
-				}
+				currentBalance += (baseReward * unslashedMatchingTargetBalanceIncrements) / rewardDenominator
 			}
 			if !currentValidator.Slashed() && previousMatchingHeadAttester {
-				rewardNumerator := baseReward * unslashedMatchingHeadBalanceIncrements
-				if err := state.IncreaseBalance(s, index, rewardNumerator/rewardDenominator); err != nil {
-					return err
-				}
+				currentBalance += (baseReward * unslashedMatchingHeadBalanceIncrements) / rewardDenominator
 			}
 		}
 		// Process inactivity of the network as a whole finalities.
 		if state.InactivityLeaking(s) {
 			proposerReward := baseReward / beaconConfig.ProposerRewardQuotient
-			// Neutralize rewards.
-			if state.DecreaseBalance(s, index, beaconConfig.BaseRewardsPerEpoch*baseReward-proposerReward); err != nil {
-				return err
-			}
+			currentBalance -= beaconConfig.BaseRewardsPerEpoch*baseReward - proposerReward
 			if currentValidator.Slashed() || !previousMatchingTargetAttester {
-				// Increase penalities linearly if network is leaking.
-				if state.DecreaseBalance(s, index, currentValidator.EffectiveBalance()*state.FinalityDelay(s)/beaconConfig.InactivityPenaltyQuotient); err != nil {
-					return err
-				}
+				currentBalance -= currentValidator.EffectiveBalance() * state.FinalityDelay(s) / beaconConfig.InactivityPenaltyQuotient
 			}
 		}
-
-		// For each missed duty we penalize the validator.
-		if state.DecreaseBalance(s, index, baseReward*missed); err != nil {
+		currentBalance -= baseReward * missed
+		if err = s.SetValidatorBalance(int(index), currentBalance); err != nil {
 			return err
 		}
 

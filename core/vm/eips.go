@@ -38,6 +38,7 @@ var activators = map[int]func(*JumpTable){
 	3855: enable3855,
 	3529: enable3529,
 	3198: enable3198,
+	2935: enable2935,
 	2929: enable2929,
 	2200: enable2200,
 	1884: enable1884,
@@ -218,7 +219,7 @@ func opTstore(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 
 // opBaseFee implements BASEFEE opcode
 func opBaseFee(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeContext) ([]byte, error) {
-	baseFee := interpreter.evm.Context().BaseFee
+	baseFee := interpreter.evm.Context.BaseFee
 	callContext.Stack.Push(baseFee)
 	return nil, nil
 }
@@ -261,8 +262,8 @@ func enable4844(jt *JumpTable) {
 // opBlobHash implements the BLOBHASH opcode
 func opBlobHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	idx := scope.Stack.Peek()
-	if idx.LtUint64(uint64(len(interpreter.evm.TxContext().BlobHashes))) {
-		hash := interpreter.evm.TxContext().BlobHashes[idx.Uint64()]
+	if idx.LtUint64(uint64(len(interpreter.evm.BlobHashes))) {
+		hash := interpreter.evm.BlobHashes[idx.Uint64()]
 		idx.SetBytes(hash.Bytes())
 	} else {
 		idx.Clear()
@@ -298,18 +299,12 @@ func opMcopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 
 // enable6780 applies EIP-6780 (deactivate SELFDESTRUCT)
 func enable6780(jt *JumpTable) {
-	jt[SELFDESTRUCT] = &operation{
-		execute:     opSelfdestruct6780,
-		dynamicGas:  gasSelfdestructEIP3529,
-		constantGas: params.SelfdestructGasEIP150,
-		numPop:      1,
-		numPush:     0,
-	}
+	jt[SELFDESTRUCT].execute = opSelfdestruct6780
 }
 
 // opBlobBaseFee implements the BLOBBASEFEE opcode
 func opBlobBaseFee(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeContext) ([]byte, error) {
-	excessBlobGas := interpreter.evm.Context().ExcessBlobGas
+	excessBlobGas := interpreter.evm.Context.ExcessBlobGas
 	blobBaseFee, err := misc.GetBlobGasPrice(interpreter.evm.ChainConfig(), *excessBlobGas)
 	if err != nil {
 		return nil, err
@@ -327,6 +322,11 @@ func enable7516(jt *JumpTable) {
 		numPop:      0,
 		numPush:     1,
 	}
+}
+
+// enable2935 applies EIP-2935 (Historical block hashes in state)
+func enable2935(jt *JumpTable) {
+	jt[BLOCKHASH].execute = opBlockhash2935
 }
 
 // enableEOF applies the EOF changes.

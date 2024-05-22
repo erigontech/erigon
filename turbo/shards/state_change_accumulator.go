@@ -5,7 +5,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
 )
 
 // Accumulator collects state changes in a form that can then be delivered to the RPC daemon
@@ -32,6 +32,7 @@ func (a *Accumulator) Reset(plainStateID uint64) {
 	a.storageChangeIndex = nil
 	a.plainStateID = plainStateID
 }
+
 func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer, pendingBaseFee uint64, pendingBlobFee uint64, blockGasLimit uint64, finalizedBlock uint64) {
 	if a == nil || c == nil || len(a.changes) == 0 {
 		return
@@ -83,7 +84,7 @@ func (a *Accumulator) ChangeAccount(address libcommon.Address, incarnation uint6
 	case remote.Action_CODE:
 		accountChange.Action = remote.Action_UPSERT_CODE
 	case remote.Action_REMOVE:
-		panic("")
+		//panic("")
 	}
 	accountChange.Incarnation = incarnation
 	accountChange.Data = data
@@ -126,7 +127,7 @@ func (a *Accumulator) ChangeCode(address libcommon.Address, incarnation uint64, 
 	case remote.Action_UPSERT:
 		accountChange.Action = remote.Action_UPSERT_CODE
 	case remote.Action_REMOVE:
-		panic("")
+		//panic("")
 	}
 	accountChange.Incarnation = incarnation
 	accountChange.Code = code
@@ -142,9 +143,9 @@ func (a *Accumulator) ChangeStorage(address libcommon.Address, incarnation uint6
 		delete(a.storageChangeIndex, address)
 	}
 	accountChange := a.latestChange.Changes[i]
-	if accountChange.Action == remote.Action_REMOVE {
-		panic("")
-	}
+	//if accountChange.Action == remote.Action_REMOVE {
+	//	panic("")
+	//}
 	accountChange.Incarnation = incarnation
 	si, ok1 := a.storageChangeIndex[address]
 	if !ok1 {

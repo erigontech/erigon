@@ -11,6 +11,9 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/pion/randutil"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -21,10 +24,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/blocks"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/bor"
-	"github.com/ledgerwatch/erigon/consensus/bor/contract"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
-	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -32,14 +31,15 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/polygon/bor"
+	"github.com/ledgerwatch/erigon/polygon/bor/valset"
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/pion/randutil"
 )
 
 type requestGenerator struct {
@@ -53,22 +53,17 @@ type requestGenerator struct {
 
 func newRequestGenerator(sentry *mock.MockSentry, chain *core.ChainPack) (*requestGenerator, error) {
 	db := memdb.New("")
-
-	tx, err := db.BeginRw(context.Background())
-
-	if err != nil {
+	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		if err := rawdb.WriteHeader(tx, chain.TopBlock.Header()); err != nil {
+			return err
+		}
+		if err := rawdb.WriteHeadHeaderHash(tx, chain.TopBlock.Header().Hash()); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		return nil, err
 	}
-
-	if err = rawdb.WriteHeader(tx, chain.TopBlock.Header()); err != nil {
-		return nil, err
-	}
-
-	if err = rawdb.WriteHeadHeaderHash(tx, chain.TopBlock.Header().Hash()); err != nil {
-		return nil, err
-	}
-
-	tx.Commit()
 
 	reader := blockReader{
 		chain: chain,
@@ -79,9 +74,9 @@ func newRequestGenerator(sentry *mock.MockSentry, chain *core.ChainPack) (*reque
 		sentry: sentry,
 		bor: bor.NewRo(params.BorDevnetChainConfig, db, reader,
 			&spanner{
-				span.NewChainSpanner(contract.ValidatorSet(), params.BorDevnetChainConfig, false, log.Root()),
+				bor.NewChainSpanner(bor.GenesisContractValidatorSetABI(), params.BorDevnetChainConfig, false, log.Root()),
 				libcommon.Address{},
-				span.Span{}},
+				heimdall.Span{}},
 			genesisContract{}, log.Root()),
 		txBlockMap: map[libcommon.Hash]*types.Block{},
 	}, nil
@@ -89,11 +84,9 @@ func newRequestGenerator(sentry *mock.MockSentry, chain *core.ChainPack) (*reque
 
 func (rg *requestGenerator) GetRootHash(ctx context.Context, startBlock uint64, endBlock uint64) (libcommon.Hash, error) {
 	tx, err := rg.bor.DB.BeginRo(context.Background())
-
 	if err != nil {
 		return libcommon.Hash{}, err
 	}
-
 	defer tx.Rollback()
 
 	result, err := rg.bor.GetRootHash(ctx, tx, startBlock, endBlock)
@@ -146,14 +139,12 @@ func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash libc
 	}
 
 	tx, err := rg.sentry.DB.BeginRo(context.Background())
-
 	if err != nil {
 		return nil, err
 	}
-
 	defer tx.Rollback()
 
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, reader, tx, 0, false)
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, reader, tx, 0)
 
 	if err != nil {
 		return nil, err
@@ -282,17 +273,17 @@ func (g genesisContract) LastStateId(syscall consensus.SystemCall) (*big.Int, er
 }
 
 type spanner struct {
-	*span.ChainSpanner
+	*bor.ChainSpanner
 	validatorAddress libcommon.Address
-	currentSpan      span.Span
+	currentSpan      heimdall.Span
 }
 
-func (c spanner) GetCurrentSpan(_ consensus.SystemCall) (*span.Span, error) {
+func (c spanner) GetCurrentSpan(_ consensus.SystemCall) (*heimdall.Span, error) {
 	return &c.currentSpan, nil
 }
 
-func (c *spanner) CommitSpan(heimdallSpan span.HeimdallSpan, syscall consensus.SystemCall) error {
-	c.currentSpan = heimdallSpan.Span
+func (c *spanner) CommitSpan(heimdallSpan heimdall.Span, syscall consensus.SystemCall) error {
+	c.currentSpan = heimdallSpan
 	return nil
 }
 

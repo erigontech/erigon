@@ -7,54 +7,71 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
+	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
+	"github.com/ledgerwatch/erigon/cl/persistence/base_encoding"
+	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	shuffling2 "github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
 type proposerDuties struct {
 	Pubkey         libcommon.Bytes48 `json:"pubkey"`
-	ValidatorIndex uint64            `json:"validator_index"`
-	Slot           uint64            `json:"slot"`
+	ValidatorIndex uint64            `json:"validator_index,string"`
+	Slot           uint64            `json:"slot,string"`
 }
 
-// The proposer knight respects its duties and hands over which proposer should be proposing in which slot.
-type proposerKnight struct {
-	// The proposer knight's duties.
-	dutiesCache *lru.Cache[uint64, []proposerDuties]
-}
-
-func (a *ApiHandler) getDutiesProposer(r *http.Request) (data any, finalized *bool, version *clparams.StateVersion, httpStatus int, err error) {
-	if a.dutiesCache == nil {
-		a.dutiesCache, err = lru.New[uint64, []proposerDuties]("proposerKnight", 32)
-	}
+func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	epoch, err := beaconhttp.EpochFromRequest(r)
 	if err != nil {
-		httpStatus = http.StatusInternalServerError
-		return
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
-	var epoch uint64
-
-	epoch, err = epochFromRequest(r)
-	if err != nil {
-		httpStatus = http.StatusBadRequest
-		return
+	s := a.syncedData.HeadState()
+	if s == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("node is syncing"))
 	}
-
+	dependentRoot := a.getDependentRoot(s, epoch)
 	if epoch < a.forkchoiceStore.FinalizedCheckpoint().Epoch() {
-		err = fmt.Errorf("invalid epoch")
-		httpStatus = http.StatusBadRequest
-		return
+		tx, err := a.indiciesDB.BeginRo(r.Context())
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback()
+		key := base_encoding.Encode64ToBytes4(epoch)
+		indiciesBytes, err := tx.GetOne(kv.Proposers, key)
+		if err != nil {
+			return nil, err
+		}
+		if len(indiciesBytes) != int(a.beaconChainCfg.SlotsPerEpoch*4) {
+			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("proposer duties is corrupted"))
+		}
+		duties := make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)
+		for i := uint64(0); i < a.beaconChainCfg.SlotsPerEpoch; i++ {
+			validatorIndex := binary.BigEndian.Uint32(indiciesBytes[i*4 : i*4+4])
+			var pk libcommon.Bytes48
+			pk, err := state_accessors.ReadPublicKeyByIndex(tx, uint64(validatorIndex))
+			if err != nil {
+				return nil, err
+			}
+			duties[i] = proposerDuties{
+				Pubkey:         pk,
+				ValidatorIndex: uint64(validatorIndex),
+				Slot:           epoch*a.beaconChainCfg.SlotsPerEpoch + i,
+			}
+		}
+		return newBeaconResponse(duties).
+			WithOptimistic(a.forkchoiceStore.IsHeadOptimistic()).
+			WithFinalized(true).
+			WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)).
+			With("dependent_root", dependentRoot), nil
 	}
 
 	// We need to compute our duties
-	state, cancel := a.syncedData.HeadState()
-	defer cancel()
+	state := a.syncedData.HeadState()
 	if state == nil {
-		err = fmt.Errorf("node is syncing")
-		httpStatus = http.StatusInternalServerError
-		return
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("beacon node is syncing"))
+
 	}
 
 	expectedSlot := epoch * a.beaconChainCfg.SlotsPerEpoch
@@ -93,14 +110,12 @@ func (a *ApiHandler) getDutiesProposer(r *http.Request) (data any, finalized *bo
 			defer wg.Done()
 			proposerIndex, err = shuffling2.ComputeProposerIndex(state.BeaconState, indices, seedArray)
 			if err != nil {
-				httpStatus = http.StatusInternalServerError
-				return
+				panic(err)
 			}
 			var pk libcommon.Bytes48
 			pk, err = state.ValidatorPublicKey(int(proposerIndex))
 			if err != nil {
-				httpStatus = http.StatusInternalServerError
-				return
+				panic(err)
 			}
 			duties[i] = proposerDuties{
 				Pubkey:         pk,
@@ -110,11 +125,6 @@ func (a *ApiHandler) getDutiesProposer(r *http.Request) (data any, finalized *bo
 		}(slot-expectedSlot, slot, indices, seedArray)
 	}
 	wg.Wait()
-	a.dutiesCache.Add(epoch, duties)
-	data = duties
-	finalized = new(bool)
-	*finalized = false
-	httpStatus = http.StatusAccepted
-	return
 
+	return newBeaconResponse(duties).WithFinalized(false).WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)).With("dependent_root", dependentRoot), nil
 }

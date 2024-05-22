@@ -13,6 +13,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
+
 package kvcache
 
 import (
@@ -32,7 +33,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/metrics"
 )
@@ -55,6 +56,7 @@ type Cache interface {
 	ValidateCurrentRoot(ctx context.Context, tx kv.Tx) (*CacheValidationResult, error)
 }
 type CacheView interface {
+	StateV3() bool
 	Get(k []byte) ([]byte, error)
 	GetCode(k []byte) ([]byte, error)
 }
@@ -100,10 +102,10 @@ type CacheView interface {
 //   - changes in Non-Canonical View SHOULD NOT reflect in stateEvict
 type Coherent struct {
 	hasher               hash.Hash
-	codeEvictLen         metrics.Counter
-	codeKeys             metrics.Counter
-	keys                 metrics.Counter
-	evict                metrics.Counter
+	codeEvictLen         metrics.Gauge
+	codeKeys             metrics.Gauge
+	keys                 metrics.Gauge
+	evict                metrics.Gauge
 	latestStateView      *CoherentRoot
 	codeMiss             metrics.Counter
 	timeout              metrics.Counter
@@ -140,7 +142,10 @@ type CoherentView struct {
 	stateVersionID uint64
 }
 
-func (c *CoherentView) Get(k []byte) ([]byte, error) { return c.cache.Get(k, c.tx, c.stateVersionID) }
+func (c *CoherentView) StateV3() bool { return c.cache.cfg.StateV3 }
+func (c *CoherentView) Get(k []byte) ([]byte, error) {
+	return c.cache.Get(k, c.tx, c.stateVersionID)
+}
 func (c *CoherentView) GetCode(k []byte) ([]byte, error) {
 	return c.cache.GetCode(k, c.tx, c.stateVersionID)
 }
@@ -161,6 +166,7 @@ type CoherentConfig struct {
 	MetricsLabel    string
 	NewBlockWait    time.Duration // how long wait
 	KeepViews       uint64        // keep in memory up to this amount of views, evict older
+	StateV3         bool
 }
 
 var DefaultCoherentConfig = CoherentConfig{
@@ -171,6 +177,7 @@ var DefaultCoherentConfig = CoherentConfig{
 	MetricsLabel:    "default",
 	WithStorage:     true,
 	WaitForNewBlock: true,
+	StateV3:         true,
 }
 
 func New(cfg CoherentConfig) *Coherent {
@@ -187,12 +194,12 @@ func New(cfg CoherentConfig) *Coherent {
 		miss:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="miss",name="%s"}`, cfg.MetricsLabel)),
 		hits:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="hit",name="%s"}`, cfg.MetricsLabel)),
 		timeout:      metrics.GetOrCreateCounter(fmt.Sprintf(`cache_timeout_total{name="%s"}`, cfg.MetricsLabel)),
-		keys:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_keys_total{name="%s"}`, cfg.MetricsLabel)),
-		evict:        metrics.GetOrCreateCounter(fmt.Sprintf(`cache_list_total{name="%s"}`, cfg.MetricsLabel)),
+		keys:         metrics.GetOrCreateGauge(fmt.Sprintf(`cache_keys_total{name="%s"}`, cfg.MetricsLabel)),
+		evict:        metrics.GetOrCreateGauge(fmt.Sprintf(`cache_list_total{name="%s"}`, cfg.MetricsLabel)),
 		codeMiss:     metrics.GetOrCreateCounter(fmt.Sprintf(`cache_code_total{result="miss",name="%s"}`, cfg.MetricsLabel)),
 		codeHits:     metrics.GetOrCreateCounter(fmt.Sprintf(`cache_code_total{result="hit",name="%s"}`, cfg.MetricsLabel)),
-		codeKeys:     metrics.GetOrCreateCounter(fmt.Sprintf(`cache_code_keys_total{name="%s"}`, cfg.MetricsLabel)),
-		codeEvictLen: metrics.GetOrCreateCounter(fmt.Sprintf(`cache_code_list_total{name="%s"}`, cfg.MetricsLabel)),
+		codeKeys:     metrics.GetOrCreateGauge(fmt.Sprintf(`cache_code_keys_total{name="%s"}`, cfg.MetricsLabel)),
+		codeEvictLen: metrics.GetOrCreateGauge(fmt.Sprintf(`cache_code_list_total{name="%s"}`, cfg.MetricsLabel)),
 	}
 }
 
@@ -260,10 +267,10 @@ func (c *Coherent) advanceRoot(stateVersionID uint64) (r *CoherentRoot) {
 	c.latestStateVersionID = stateVersionID
 	c.latestStateView = r
 
-	c.keys.Set(uint64(c.latestStateView.cache.Len()))
-	c.codeKeys.Set(uint64(c.latestStateView.codeCache.Len()))
-	c.evict.Set(uint64(c.stateEvict.Len()))
-	c.codeEvictLen.Set(uint64(c.codeEvict.Len()))
+	c.keys.SetInt(c.latestStateView.cache.Len())
+	c.codeKeys.SetInt(c.latestStateView.codeCache.Len())
+	c.evict.SetInt(c.stateEvict.Len())
+	c.codeEvictLen.SetInt(c.codeEvict.Len())
 	return r
 }
 
@@ -273,6 +280,7 @@ func (c *Coherent) OnNewBlock(stateChanges *remote.StateChangeBatch) {
 	c.waitExceededCount.Store(0) // reset the circuit breaker
 	id := stateChanges.StateVersionId
 	r := c.advanceRoot(id)
+
 	for _, sc := range stateChanges.ChangeBatch {
 		for i := range sc.Changes {
 			switch sc.Changes[i].Action {
@@ -367,6 +375,7 @@ func (c *Coherent) getFromCache(k []byte, id uint64, code bool) (*Element, *Cohe
 	// performance under load
 	c.lock.Lock()
 	defer c.lock.Unlock()
+
 	r, ok := c.roots[id]
 	if !ok {
 		return nil, r, fmt.Errorf("too old ViewID: %d, latestStateVersionID=%d", id, c.latestStateVersionID)
@@ -382,10 +391,9 @@ func (c *Coherent) getFromCache(k []byte, id uint64, code bool) (*Element, *Cohe
 	if it != nil && isLatest {
 		c.stateEvict.MoveToFront(it)
 	}
-
 	return it, r, nil
 }
-func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
+func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) (v []byte, err error) {
 	it, r, err := c.getFromCache(k, id, false)
 	if err != nil {
 		return nil, err
@@ -398,9 +406,20 @@ func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
 	}
 	c.miss.Inc()
 
-	v, err := tx.GetOne(kv.PlainState, k)
+	if c.cfg.StateV3 {
+		if len(k) == 20 {
+			v, _, err = tx.(kv.TemporalTx).DomainGet(kv.AccountsDomain, k, nil)
+		} else {
+			v, _, err = tx.(kv.TemporalTx).DomainGet(kv.StorageDomain, k, nil)
+		}
+	} else {
+		v, err = tx.GetOne(kv.PlainState, k)
+	}
 	if err != nil {
 		return nil, err
+	}
+	if len(v) == 0 {
+		return v, nil
 	}
 	//fmt.Printf("from db: %#x,%x\n", k, v)
 
@@ -410,7 +429,7 @@ func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
 	return v, nil
 }
 
-func (c *Coherent) GetCode(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
+func (c *Coherent) GetCode(k []byte, tx kv.Tx, id uint64) (v []byte, err error) {
 	it, r, err := c.getFromCache(k, id, true)
 	if err != nil {
 		return nil, err
@@ -423,7 +442,11 @@ func (c *Coherent) GetCode(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
 	}
 	c.codeMiss.Inc()
 
-	v, err := tx.GetOne(kv.Code, k)
+	if c.cfg.StateV3 {
+		v, _, err = tx.(kv.TemporalTx).DomainGet(kv.CodeDomain, k, nil)
+	} else {
+		v, err = tx.GetOne(kv.Code, k)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -450,6 +473,7 @@ func (c *Coherent) removeOldestCode(r *CoherentRoot) {
 }
 func (c *Coherent) add(k, v []byte, r *CoherentRoot, id uint64) *Element {
 	it := &Element{K: k, V: v}
+
 	replaced, _ := r.cache.Set(it)
 	if c.latestStateVersionID != id {
 		//fmt.Printf("add to non-last viewID: %d<%d\n", c.latestViewID, id)

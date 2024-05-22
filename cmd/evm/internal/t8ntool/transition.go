@@ -29,7 +29,8 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
+	"github.com/ledgerwatch/erigon/eth/consensuschain"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
@@ -38,7 +39,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/merge"
@@ -47,7 +47,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	trace_logger "github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/tests"
@@ -238,7 +237,11 @@ func Main(ctx *cli.Context) error {
 	}
 
 	if chainConfig.IsShanghai(prestate.Env.Timestamp) && prestate.Env.Withdrawals == nil {
-		return NewError(ErrorVMConfig, errors.New("Shanghai config but missing 'withdrawals' in env section"))
+		return NewError(ErrorVMConfig, errors.New("shanghai config but missing 'withdrawals' in env section"))
+	}
+
+	if chainConfig.IsPrague(prestate.Env.Timestamp) && prestate.Env.Requests == nil {
+		return NewError(ErrorVMConfig, errors.New("prague config but missing 'requests' in env section"))
 	}
 
 	isMerged := chainConfig.TerminalTotalDifficulty != nil && chainConfig.TerminalTotalDifficulty.BitLen() == 0
@@ -279,7 +282,7 @@ func Main(ctx *cli.Context) error {
 		ommerN.SetUint64(header.Number.Uint64() - ommer.Delta)
 		ommerHeaders[i] = &types.Header{Coinbase: ommer.Address, Number: &ommerN}
 	}
-	block := types.NewBlock(header, txs, ommerHeaders, nil /* receipts */, prestate.Env.Withdrawals)
+	block := types.NewBlock(header, txs, ommerHeaders, nil /* receipts */, prestate.Env.Withdrawals, prestate.Env.Requests)
 
 	var hashError error
 	getHash := func(num uint64) libcommon.Hash {
@@ -294,7 +297,7 @@ func Main(ctx *cli.Context) error {
 		return h
 	}
 
-	_, db, _ := temporal.NewTestDB(nil, datadir.New(""), nil)
+	db, _ := temporaltest.NewTestDB(nil, datadir.New(""))
 	defer db.Close()
 
 	tx, err := db.BeginRw(context.Background())
@@ -309,7 +312,7 @@ func Main(ctx *cli.Context) error {
 	engine := merge.New(&ethash.FakeEthash{})
 
 	t8logger := log.New("t8ntool")
-	chainReader := stagedsync.NewChainReaderImpl(chainConfig, tx, nil, t8logger)
+	chainReader := consensuschain.NewReader(chainConfig, tx, nil, t8logger)
 	result, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, chainReader, getTracer, t8logger)
 
 	if hashError != nil {
@@ -331,11 +334,7 @@ func Main(ctx *cli.Context) error {
 	body, _ := rlp.EncodeToBytes(txs)
 	collector := make(Alloc)
 
-	historyV3, err := kvcfg.HistoryV3.Enabled(tx)
-	if err != nil {
-		return err
-	}
-	dumper := state.NewDumper(tx, prestate.Env.Number, historyV3)
+	dumper := state.NewDumper(tx, prestate.Env.Number)
 	dumper.DumpToCollector(collector, false, false, libcommon.Address{}, 0)
 	return dispatchOutput(ctx, baseDir, result, collector, body)
 }
@@ -599,6 +598,7 @@ func NewHeader(env stEnv) *types.Header {
 
 	header.UncleHash = env.UncleHash
 	header.WithdrawalsHash = env.WithdrawalsHash
+	header.RequestsRoot = env.RequestsRoot
 
 	return &header
 }

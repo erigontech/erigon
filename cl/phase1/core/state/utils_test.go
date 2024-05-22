@@ -14,9 +14,10 @@ import (
 func TestValidatorSlashing(t *testing.T) {
 	state := New(&clparams.MainnetBeaconConfig)
 	utils.DecodeSSZSnappy(state, stateEncoded, int(clparams.DenebVersion))
-
-	require.NoError(t, state.SlashValidator(1, nil))
-	require.NoError(t, state.SlashValidator(2, nil))
+	_, err := state.SlashValidator(1, nil)
+	require.NoError(t, err)
+	_, err = state.SlashValidator(2, nil)
+	require.NoError(t, err)
 
 	exit, err := state.BeaconState.ValidatorExitEpoch(1)
 	require.NoError(t, err)

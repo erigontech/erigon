@@ -1,7 +1,8 @@
 {
-    "000-fork=Shanghai-selfdestruct_contract_address=0x6295ee1b4f6dd65047762f924ecd367c17eabf8f-entry_code_address=0xec0e71ad0a90ffe1909d27dac207f7680abba42d-call_times=1-selfdestruct_contract_initial_balance=0": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_created_same_block_different_tx[fork_Shanghai-blockchain_test-selfdestruct_contract_address_0x6295ee1b4f6dd65047762f924ecd367c17eabf8f-entry_code_address_0xec0e71ad0a90ffe1909d27dac207f7680abba42d-call_times_1-selfdestruct_contract_initial_balance_0]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -160,9 +161,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "001-fork=Shanghai-selfdestruct_contract_address=0x6295ee1b4f6dd65047762f924ecd367c17eabf8f-entry_code_address=0xec0e71ad0a90ffe1909d27dac207f7680abba42d-call_times=1-selfdestruct_contract_initial_balance=1": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_created_same_block_different_tx[fork_Shanghai-blockchain_test-selfdestruct_contract_address_0x6295ee1b4f6dd65047762f924ecd367c17eabf8f-entry_code_address_0xec0e71ad0a90ffe1909d27dac207f7680abba42d-call_times_1-selfdestruct_contract_initial_balance_1]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -327,9 +329,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "002-fork=Shanghai-selfdestruct_contract_address=0x6295ee1b4f6dd65047762f924ecd367c17eabf8f-entry_code_address=0xec0e71ad0a90ffe1909d27dac207f7680abba42d-call_times=10-selfdestruct_contract_initial_balance=0": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_created_same_block_different_tx[fork_Shanghai-blockchain_test-selfdestruct_contract_address_0x6295ee1b4f6dd65047762f924ecd367c17eabf8f-entry_code_address_0xec0e71ad0a90ffe1909d27dac207f7680abba42d-call_times_10-selfdestruct_contract_initial_balance_0]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -497,9 +500,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "003-fork=Shanghai-selfdestruct_contract_address=0x6295ee1b4f6dd65047762f924ecd367c17eabf8f-entry_code_address=0xec0e71ad0a90ffe1909d27dac207f7680abba42d-call_times=10-selfdestruct_contract_initial_balance=1": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_created_same_block_different_tx[fork_Shanghai-blockchain_test-selfdestruct_contract_address_0x6295ee1b4f6dd65047762f924ecd367c17eabf8f-entry_code_address_0xec0e71ad0a90ffe1909d27dac207f7680abba42d-call_times_10-selfdestruct_contract_initial_balance_1]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -673,9 +677,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "004-fork=Cancun-selfdestruct_contract_address=0x6295ee1b4f6dd65047762f924ecd367c17eabf8f-entry_code_address=0xec0e71ad0a90ffe1909d27dac207f7680abba42d-call_times=1-selfdestruct_contract_initial_balance=0": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_created_same_block_different_tx[fork_Cancun-blockchain_test-selfdestruct_contract_address_0x6295ee1b4f6dd65047762f924ecd367c17eabf8f-entry_code_address_0xec0e71ad0a90ffe1909d27dac207f7680abba42d-call_times_1-selfdestruct_contract_initial_balance_0]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -862,9 +867,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "005-fork=Cancun-selfdestruct_contract_address=0x6295ee1b4f6dd65047762f924ecd367c17eabf8f-entry_code_address=0xec0e71ad0a90ffe1909d27dac207f7680abba42d-call_times=1-selfdestruct_contract_initial_balance=1": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_created_same_block_different_tx[fork_Cancun-blockchain_test-selfdestruct_contract_address_0x6295ee1b4f6dd65047762f924ecd367c17eabf8f-entry_code_address_0xec0e71ad0a90ffe1909d27dac207f7680abba42d-call_times_1-selfdestruct_contract_initial_balance_1]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -1057,9 +1063,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "006-fork=Cancun-selfdestruct_contract_address=0x6295ee1b4f6dd65047762f924ecd367c17eabf8f-entry_code_address=0xec0e71ad0a90ffe1909d27dac207f7680abba42d-call_times=10-selfdestruct_contract_initial_balance=0": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_created_same_block_different_tx[fork_Cancun-blockchain_test-selfdestruct_contract_address_0x6295ee1b4f6dd65047762f924ecd367c17eabf8f-entry_code_address_0xec0e71ad0a90ffe1909d27dac207f7680abba42d-call_times_10-selfdestruct_contract_initial_balance_0]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -1255,9 +1262,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "007-fork=Cancun-selfdestruct_contract_address=0x6295ee1b4f6dd65047762f924ecd367c17eabf8f-entry_code_address=0xec0e71ad0a90ffe1909d27dac207f7680abba42d-call_times=10-selfdestruct_contract_initial_balance=1": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_created_same_block_different_tx[fork_Cancun-blockchain_test-selfdestruct_contract_address_0x6295ee1b4f6dd65047762f924ecd367c17eabf8f-entry_code_address_0xec0e71ad0a90ffe1909d27dac207f7680abba42d-call_times_10-selfdestruct_contract_initial_balance_1]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },

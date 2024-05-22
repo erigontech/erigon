@@ -10,11 +10,18 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
+
+	"github.com/ledgerwatch/erigon-lib/direct"
+	execution "github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/wrap"
+	"github.com/ledgerwatch/erigon/consensus/merge"
+	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
+	"github.com/ledgerwatch/erigon/turbo/services"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core"
@@ -53,8 +60,7 @@ func importChain(cliCtx *cli.Context) error {
 	if cliCtx.NArg() < 1 {
 		utils.Fatalf("This command requires an argument.")
 	}
-
-	logger, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -69,7 +75,7 @@ func importChain(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	err = ethereum.Init(stack, ethCfg)
+	err = ethereum.Init(stack, ethCfg, ethCfg.Genesis.Config)
 	if err != nil {
 		return err
 	}
@@ -211,19 +217,62 @@ func missingBlocks(chainDB kv.RwDB, blocks []*types.Block, blockReader services.
 func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack, logger log.Logger) error {
 	sentryControlServer := ethereum.SentryControlServer()
 	initialCycle := false
-
 	for _, b := range chain.Blocks {
 		sentryControlServer.Hd.AddMinedHeader(b.Header())
 		sentryControlServer.Bd.AddToPrefetch(b.Header(), b.RawBody())
 	}
-
 	sentryControlServer.Hd.MarkAllVerified()
 	blockReader, _ := ethereum.BlockIO()
 
-	hook := stages.NewHook(ethereum.SentryCtx(), ethereum.ChainDB(), ethereum.Notifications(), ethereum.StagedSync(), blockReader, ethereum.ChainConfig(), logger, sentryControlServer.UpdateHead)
-	err := stages.StageLoopIteration(ethereum.SentryCtx(), ethereum.ChainDB(), nil, ethereum.StagedSync(), initialCycle, logger, blockReader, hook, false)
+	hook := stages.NewHook(ethereum.SentryCtx(), ethereum.ChainDB(), ethereum.Notifications(), ethereum.StagedSync(), blockReader, ethereum.ChainConfig(), logger, sentryControlServer.SetStatus)
+	err := stages.StageLoopIteration(ethereum.SentryCtx(), ethereum.ChainDB(), wrap.TxContainer{}, ethereum.StagedSync(), initialCycle, false, logger, blockReader, hook)
 	if err != nil {
 		return err
+	}
+
+	return insertPosChain(ethereum, chain, logger)
+}
+
+func insertPosChain(ethereum *eth.Ethereum, chain *core.ChainPack, logger log.Logger) error {
+	posBlockStart := 0
+	for i, b := range chain.Blocks {
+		if b.Header().Difficulty.Cmp(merge.ProofOfStakeDifficulty) == 0 {
+			posBlockStart = i
+			break
+		}
+	}
+
+	if posBlockStart == chain.Length() {
+		return nil
+	}
+
+	for i := posBlockStart; i < chain.Length(); i++ {
+		if err := chain.Blocks[i].HashCheck(); err != nil {
+			return err
+		}
+	}
+
+	chainRW := eth1_chain_reader.NewChainReaderEth1(ethereum.ChainConfig(), direct.NewExecutionClientDirect(ethereum.ExecutionModule()), uint64(time.Hour))
+
+	ctx := context.Background()
+	if err := chainRW.InsertBlocksAndWait(ctx, chain.Blocks); err != nil {
+		return err
+	}
+
+	tipHash := chain.TopBlock.Hash()
+
+	status, _, lvh, err := chainRW.UpdateForkChoice(ctx, tipHash, tipHash, tipHash)
+
+	if err != nil {
+		return err
+	}
+
+	ethereum.ChainDB().Update(ethereum.SentryCtx(), func(tx kv.RwTx) error {
+		rawdb.WriteHeadBlockHash(tx, lvh)
+		return nil
+	})
+	if status != execution.ExecutionStatus_Success {
+		return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[chain.Length()-1].NumberU64(), status.String())
 	}
 
 	return nil

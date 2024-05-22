@@ -17,28 +17,29 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 	"sync"
+
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
+	"github.com/ledgerwatch/erigon-lib/wrap"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
-
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // the maximum point from the current head, past which side forks are not validated anymore.
 const maxForkDepth = 32 // 32 slots is the duration of an epoch thus there cannot be side forks in PoS deeper than 32 blocks from head.
 
-type validatePayloadFunc func(kv.RwTx, *types.Header, *types.RawBody, uint64, []*types.Header, []*types.RawBody, *shards.Notifications) error
+type validatePayloadFunc func(wrap.TxContainer, *types.Header, *types.RawBody, uint64, []*types.Header, []*types.RawBody, *shards.Notifications) error
 
 type ForkValidator struct {
 	// current memory batch containing chain head that extend canonical fork.
@@ -128,45 +129,57 @@ func (fv *ForkValidator) FlushExtendingFork(tx kv.RwTx, accumulator *shards.Accu
 	return nil
 }
 
+type HasDiff interface {
+	Diff() (*membatchwithdb.MemoryDiff, error)
+}
+
 // ValidatePayload returns whether a payload is valid or invalid, or if cannot be determined, it will be accepted.
 // if the payload extends the canonical chain, then we stack it in extendingFork without any unwind.
 // if the payload is a fork then we unwind to the point where the fork meets the canonical chain, and there we check whether it is valid.
 // if for any reason none of the actions above can be performed due to lack of information, we accept the payload and avoid validation.
-func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *types.RawBody, extendCanonical bool) (status engine_types.EngineStatus, latestValidHash libcommon.Hash, validationError error, criticalError error) {
+func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *types.RawBody, extendCanonical bool, logger log.Logger) (status engine_types.EngineStatus, latestValidHash libcommon.Hash, validationError error, criticalError error) {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	if fv.validatePayload == nil {
 		status = engine_types.AcceptedStatus
 		return
 	}
+	hash := header.Hash()
+	number := header.Number.Uint64()
 
 	// If the block is stored within the side fork it means it was already validated.
-	if _, ok := fv.validHashes.Get(header.Hash()); ok {
+	if _, ok := fv.validHashes.Get(hash); ok {
 		status = engine_types.ValidStatus
-		latestValidHash = header.Hash()
+		latestValidHash = hash
 		return
 	}
 
 	log.Debug("Execution ForkValidator.ValidatePayload", "extendCanonical", extendCanonical)
 	if extendCanonical {
-		extendingFork := membatchwithdb.NewMemoryBatch(tx, fv.tmpDir)
-		defer extendingFork.Close()
+		var txc wrap.TxContainer
+		m := membatchwithdb.NewMemoryBatch(tx, fv.tmpDir, logger)
+		defer m.Close()
+		txc.Tx = m
 
 		fv.extendingForkNotifications = &shards.Notifications{
 			Events:      shards.NewEvents(),
 			Accumulator: shards.NewAccumulator(),
 		}
 		// Update fork head hash.
-		fv.extendingForkHeadHash = header.Hash()
-		fv.extendingForkNumber = header.Number.Uint64()
-		status, latestValidHash, validationError, criticalError = fv.validateAndStorePayload(extendingFork, header, body, 0, nil, nil, fv.extendingForkNotifications)
+		fv.extendingForkHeadHash = hash
+		fv.extendingForkNumber = number
+		status, latestValidHash, validationError, criticalError = fv.validateAndStorePayload(txc, header, body, 0, nil, nil, fv.extendingForkNotifications)
 		if criticalError != nil {
 			return
 		}
 		if validationError == nil {
-			fv.memoryDiff, criticalError = extendingFork.Diff()
-			if criticalError != nil {
-				return
+			if casted, ok := txc.Tx.(HasDiff); ok {
+				fv.memoryDiff, criticalError = casted.Diff()
+				if criticalError != nil {
+					return
+				}
+			} else {
+				panic(fmt.Sprintf("type %T doesn't have method Diff - like in MemoryMutation", casted))
 			}
 		}
 		return status, latestValidHash, validationError, criticalError
@@ -177,16 +190,25 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 		status = engine_types.AcceptedStatus
 		return
 	}
-	// Let's assemble the side fork backwards
 	var foundCanonical bool
+	foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, hash, number)
+	if criticalError != nil {
+		return
+	}
+	if foundCanonical {
+		status = engine_types.ValidStatus
+		latestValidHash = header.Hash()
+		return
+	}
+	// Let's assemble the side fork backwards
 	currentHash := header.ParentHash
-	unwindPoint := header.Number.Uint64() - 1
+	unwindPoint := number - 1
 	foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash, unwindPoint)
 	if criticalError != nil {
 		return
 	}
 
-	log.Debug("Execution ForkValidator.ValidatePayload", "foundCanonical", foundCanonical, "currentHash", currentHash, "unwindPoint", unwindPoint)
+	logger.Debug("Execution ForkValidator.ValidatePayload", "foundCanonical", foundCanonical, "currentHash", currentHash, "unwindPoint", unwindPoint)
 
 	var bodiesChain []*types.RawBody
 	var headersChain []*types.Header
@@ -222,19 +244,21 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 		if criticalError != nil {
 			return
 		}
-		log.Debug("Execution ForkValidator.ValidatePayload", "foundCanonical", foundCanonical, "currentHash", currentHash, "unwindPoint", unwindPoint)
+		logger.Debug("Execution ForkValidator.ValidatePayload", "foundCanonical", foundCanonical, "currentHash", currentHash, "unwindPoint", unwindPoint)
 	}
 	// Do not set an unwind point if we are already there.
 	if unwindPoint == fv.currentHeight {
 		unwindPoint = 0
 	}
-	batch := membatchwithdb.NewMemoryBatch(tx, fv.tmpDir)
+	var txc wrap.TxContainer
+	batch := membatchwithdb.NewMemoryBatch(tx, fv.tmpDir, logger)
 	defer batch.Rollback()
+	txc.Tx = batch
 	notifications := &shards.Notifications{
 		Events:      shards.NewEvents(),
 		Accumulator: shards.NewAccumulator(),
 	}
-	return fv.validateAndStorePayload(batch, header, body, unwindPoint, headersChain, bodiesChain, notifications)
+	return fv.validateAndStorePayload(txc, header, body, unwindPoint, headersChain, bodiesChain, notifications)
 }
 
 // Clear wipes out current extending fork data, this method is called after fcu is called,
@@ -254,9 +278,9 @@ func (fv *ForkValidator) ClearWithUnwind(accumulator *shards.Accumulator, c shar
 }
 
 // validateAndStorePayload validate and store a payload fork chain if such chain results valid.
-func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
+func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 	notifications *shards.Notifications) (status engine_types.EngineStatus, latestValidHash libcommon.Hash, validationError error, criticalError error) {
-	if err := fv.validatePayload(tx, header, body, unwindPoint, headersChain, bodiesChain, notifications); err != nil {
+	if err := fv.validatePayload(txc, header, body, unwindPoint, headersChain, bodiesChain, notifications); err != nil {
 		if errors.Is(err, consensus.ErrInvalidBlock) {
 			validationError = err
 		} else {
@@ -268,11 +292,12 @@ func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Heade
 	latestValidHash = header.Hash()
 	if validationError != nil {
 		var latestValidNumber uint64
-		latestValidNumber, criticalError = stages.GetStageProgress(tx, stages.IntermediateHashes)
+		latestValidNumber, criticalError = stages.GetStageProgress(txc.Tx, stages.Execution)
+
 		if criticalError != nil {
 			return
 		}
-		latestValidHash, criticalError = rawdb.ReadCanonicalHash(tx, latestValidNumber)
+		latestValidHash, criticalError = rawdb.ReadCanonicalHash(txc.Tx, latestValidNumber)
 		if criticalError != nil {
 			return
 		}
@@ -286,7 +311,7 @@ func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Heade
 
 	// If we do not have the body we can recover it from the batch.
 	if body != nil {
-		if _, criticalError = rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), header.Number.Uint64(), body); criticalError != nil {
+		if _, criticalError = rawdb.WriteRawBodyIfNotExists(txc.Tx, header.Hash(), header.Number.Uint64(), body); criticalError != nil {
 			return
 		}
 	}

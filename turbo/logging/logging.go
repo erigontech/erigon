@@ -3,7 +3,6 @@ package logging
 import (
 	"flag"
 	"os"
-	"path"
 	"path/filepath"
 	"strconv"
 
@@ -11,7 +10,24 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/urfave/cli/v2"
 	"gopkg.in/natefinch/lumberjack.v2"
+
+	"github.com/ledgerwatch/erigon-lib/common/metrics"
 )
+
+// Determine the log dir path based on the given urfave context
+func LogDirPath(ctx *cli.Context) string {
+	dirPath := ""
+	if !ctx.Bool(LogDirDisableFlag.Name) {
+		dirPath = ctx.String(LogDirPathFlag.Name)
+		if dirPath == "" {
+			datadir := ctx.String("datadir")
+			if datadir != "" {
+				dirPath = filepath.Join(datadir, "logs")
+			}
+		}
+	}
+	return dirPath
+}
 
 // SetupLoggerCtx performs the logging setup according to the parameters
 // containted in the given urfave context. It returns either root logger,
@@ -21,40 +37,46 @@ import (
 // This function which is used in Erigon itself.
 // Note: urfave and cobra are two CLI frameworks/libraries for the same functionalities
 // and it would make sense to choose one over another
-func SetupLoggerCtx(filePrefix string, ctx *cli.Context, rootHandler bool) log.Logger {
+func SetupLoggerCtx(filePrefix string, ctx *cli.Context,
+	consoleDefaultLevel log.Lvl, dirDefaultLevel log.Lvl, rootHandler bool) log.Logger {
 	var consoleJson = ctx.Bool(LogJsonFlag.Name) || ctx.Bool(LogConsoleJsonFlag.Name)
 	var dirJson = ctx.Bool(LogDirJsonFlag.Name)
+
+	metrics.DelayLoggingEnabled = ctx.Bool(LogBlockDelayFlag.Name)
 
 	consoleLevel, lErr := tryGetLogLevel(ctx.String(LogConsoleVerbosityFlag.Name))
 	if lErr != nil {
 		// try verbosity flag
 		consoleLevel, lErr = tryGetLogLevel(ctx.String(LogVerbosityFlag.Name))
 		if lErr != nil {
-			consoleLevel = log.LvlInfo
+			consoleLevel = consoleDefaultLevel
 		}
 	}
 
 	dirLevel, dErr := tryGetLogLevel(ctx.String(LogDirVerbosityFlag.Name))
 	if dErr != nil {
-		dirLevel = log.LvlInfo
+		dirLevel = dirDefaultLevel
 	}
 
-	dirPath := ctx.String(LogDirPathFlag.Name)
-	if dirPath == "" {
-		datadir := ctx.String("datadir")
-		if datadir != "" {
-			dirPath = filepath.Join(datadir, "logs")
+	dirPath := ""
+	if !ctx.Bool(LogDirDisableFlag.Name) && dirPath != "/dev/null" {
+		dirPath = ctx.String(LogDirPathFlag.Name)
+		if dirPath == "" {
+			datadir := ctx.String("datadir")
+			if datadir != "" {
+				dirPath = filepath.Join(datadir, "logs")
+			}
+		}
+		if logDirPrefix := ctx.String(LogDirPrefixFlag.Name); len(logDirPrefix) > 0 {
+			filePrefix = logDirPrefix
 		}
 	}
+
 	var logger log.Logger
 	if rootHandler {
 		logger = log.Root()
 	} else {
 		logger = log.New()
-	}
-
-	if logDirPrefix := ctx.String(LogDirPrefixFlag.Name); len(logDirPrefix) > 0 {
-		filePrefix = logDirPrefix
 	}
 
 	initSeparatedLogging(logger, filePrefix, dirPath, consoleLevel, dirLevel, consoleJson, dirJson)
@@ -98,16 +120,25 @@ func SetupLoggerCmd(filePrefix string, cmd *cobra.Command) log.Logger {
 		dirLevel = log.LvlInfo
 	}
 
-	dirPath := cmd.Flags().Lookup(LogDirPathFlag.Name).Value.String()
-	if dirPath == "" {
-		datadir := cmd.Flags().Lookup("datadir").Value.String()
-		if datadir != "" {
-			dirPath = filepath.Join(datadir, "logs")
-		}
+	dirPath := ""
+	disableFileLogging, err := cmd.Flags().GetBool(LogDirDisableFlag.Name)
+	if err != nil {
+		disableFileLogging = false
 	}
-
-	if logDirPrefix := cmd.Flags().Lookup(LogDirPrefixFlag.Name).Value.String(); len(logDirPrefix) > 0 {
-		filePrefix = logDirPrefix
+	if !disableFileLogging && dirPath != "/dev/null" {
+		dirPath = cmd.Flags().Lookup(LogDirPathFlag.Name).Value.String()
+		if dirPath == "" {
+			datadirFlag := cmd.Flags().Lookup("datadir")
+			if datadirFlag != nil {
+				datadir := datadirFlag.Value.String()
+				if datadir != "" {
+					dirPath = filepath.Join(datadir, "logs")
+				}
+			}
+		}
+		if logDirPrefix := cmd.Flags().Lookup(LogDirPrefixFlag.Name).Value.String(); len(logDirPrefix) > 0 {
+			filePrefix = logDirPrefix
+		}
 	}
 
 	initSeparatedLogging(log.Root(), filePrefix, dirPath, consoleLevel, dirLevel, consoleJson, dirJson)
@@ -174,7 +205,7 @@ func initSeparatedLogging(
 	logger.SetHandler(consoleHandler)
 
 	if len(dirPath) == 0 {
-		logger.Warn("no log dir set, console logging only")
+		logger.Info("console logging only")
 		return
 	}
 
@@ -190,7 +221,7 @@ func initSeparatedLogging(
 	}
 
 	lumberjack := &lumberjack.Logger{
-		Filename:   path.Join(dirPath, filePrefix+".log"),
+		Filename:   filepath.Join(dirPath, filePrefix+".log"),
 		MaxSize:    100, // megabytes
 		MaxBackups: 3,
 		MaxAge:     28, //days
@@ -200,7 +231,6 @@ func initSeparatedLogging(
 	mux := log.MultiHandler(consoleHandler, log.LvlFilterHandler(dirLevel, userLog))
 	logger.SetHandler(mux)
 	logger.Info("logging to file system", "log dir", dirPath, "file prefix", filePrefix, "log level", dirLevel, "json", dirJson)
-	return
 }
 
 func tryGetLogLevel(s string) (log.Lvl, error) {

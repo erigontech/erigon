@@ -20,6 +20,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/c2h5oh/datasize"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
@@ -27,6 +29,13 @@ import (
 
 func New(tmpDir string) kv.RwDB {
 	return mdbx.NewMDBX(log.New()).InMem(tmpDir).MustOpen()
+}
+
+func NewStateDB(tmpDir string) kv.RwDB {
+	return mdbx.NewMDBX(log.New()).InMem(tmpDir).GrowthStep(32 * datasize.MB).
+		MapSize(2 * datasize.GB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.ChaindataTablesCfg
+	}).MustOpen()
 }
 
 func NewPoolDB(tmpDir string) kv.RwDB {
@@ -50,7 +59,7 @@ func NewTestDB(tb testing.TB) kv.RwDB {
 
 func BeginRw(tb testing.TB, db kv.RwDB) kv.RwTx {
 	tb.Helper()
-	tx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(context.Background()) //nolint:gocritic
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -60,7 +69,7 @@ func BeginRw(tb testing.TB, db kv.RwDB) kv.RwTx {
 
 func BeginRo(tb testing.TB, db kv.RoDB) kv.Tx {
 	tb.Helper()
-	tx, err := db.BeginRo(context.Background())
+	tx, err := db.BeginRo(context.Background()) //nolint:gocritic
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -97,7 +106,7 @@ func NewTestTx(tb testing.TB) (kv.RwDB, kv.RwTx) {
 	tmpDir := tb.TempDir()
 	db := New(tmpDir)
 	tb.Cleanup(db.Close)
-	tx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(context.Background()) //nolint:gocritic
 	if err != nil {
 		tb.Fatal(err)
 	}

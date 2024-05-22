@@ -17,6 +17,7 @@
 package tests
 
 import (
+	context2 "context"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -26,6 +27,7 @@ import (
 	"strings"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -33,7 +35,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	state2 "github.com/ledgerwatch/erigon-lib/state"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/erigon-lib/wrap"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -42,10 +46,10 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/trie"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // StateTest checks transaction processing without block context.
@@ -182,7 +186,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 	vmconfig.ExtraEips = eips
-	block, _, err := core.GenesisToBlock(t.genesis(config), "")
+	block, _, err := core.GenesisToBlock(t.genesis(config), "", log.Root())
 	if err != nil {
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
@@ -190,20 +194,27 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	readBlockNr := block.NumberU64()
 	writeBlockNr := readBlockNr + 1
 
-	_, err = MakePreState(&chain.Rules{}, tx, t.json.Pre, readBlockNr)
+	_, err = MakePreState(&chain.Rules{}, tx, t.json.Pre, readBlockNr, config3.EnableHistoryV4InTest)
 	if err != nil {
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 
-	r := rpchelper.NewLatestStateReader(tx)
-	statedb := state.New(r)
-
+	var r state.StateReader
 	var w state.StateWriter
-	if ethconfig.EnableHistoryV4InTest {
-		panic("implement me")
-	} else {
-		w = state.NewPlainStateWriter(tx, nil, writeBlockNr)
+	var domains *state2.SharedDomains
+	var txc wrap.TxContainer
+	txc.Tx = tx
+	if config3.EnableHistoryV4InTest {
+		domains, err = state2.NewSharedDomains(tx, log.New())
+		if err != nil {
+			return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
+		}
+		defer domains.Close()
+		txc.Doms = domains
 	}
+	r = rpchelper.NewLatestStateReader(tx)
+	w = rpchelper.NewLatestStateWriter(txc, writeBlockNr)
+	statedb := state.New(r)
 
 	var baseFee *big.Int
 	if config.IsLondon(0) {
@@ -220,7 +231,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 		return nil, libcommon.Hash{}, err
 	}
 	if len(post.Tx) != 0 {
-		txn, err := types.UnmarshalTransactionFromBinary(post.Tx)
+		txn, err := types.UnmarshalTransactionFromBinary(post.Tx, false /* blobTxnsAreWrappedWithBlobs */)
 		if err != nil {
 			return nil, libcommon.Hash{}, err
 		}
@@ -232,7 +243,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 
 	// Prepare the EVM.
 	txContext := core.NewEVMTxContext(msg)
-	header := block.Header()
+	header := block.HeaderNoCopy()
 	context := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &t.json.Env.Coinbase)
 	context.GetHash = vmTestBlockHash
 	if baseFee != nil {
@@ -258,6 +269,15 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	}
 	if err = statedb.CommitBlock(evm.ChainRules(), w); err != nil {
 		return nil, libcommon.Hash{}, err
+	}
+
+	if config3.EnableHistoryV4InTest {
+		var root libcommon.Hash
+		rootBytes, err := domains.ComputeCommitment(context2.Background(), false, header.Number.Uint64(), "")
+		if err != nil {
+			return statedb, root, fmt.Errorf("ComputeCommitment: %w", err)
+		}
+		return statedb, libcommon.BytesToHash(rootBytes), nil
 	}
 	// Generate hashed state
 	c, err := tx.RwCursor(kv.PlainState)
@@ -306,7 +326,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	return statedb, root, nil
 }
 
-func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
+func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, blockNr uint64, histV3 bool) (*state.IntraBlockState, error) {
 	r := rpchelper.NewLatestStateReader(tx)
 	statedb := state.New(r)
 	for addr, a := range accounts {
@@ -335,11 +355,21 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, b
 	}
 
 	var w state.StateWriter
-	if ethconfig.EnableHistoryV4InTest {
-		panic("implement me")
-	} else {
-		w = state.NewPlainStateWriter(tx, nil, blockNr+1)
+	var domains *state2.SharedDomains
+	var txc wrap.TxContainer
+	txc.Tx = tx
+	if config3.EnableHistoryV4InTest {
+		var err error
+		domains, err = state2.NewSharedDomains(tx, log.New())
+		if err != nil {
+			return nil, err
+		}
+		defer domains.Close()
+		defer domains.Flush(context2.Background(), tx)
+		txc.Doms = domains
 	}
+	w = rpchelper.NewLatestStateWriter(txc, blockNr-1)
+
 	// Commit and re-open to start with a clean state.
 	if err := statedb.FinalizeTx(rules, w); err != nil {
 		return nil, err

@@ -34,8 +34,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
+	types "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
@@ -62,7 +62,7 @@ const MaxTxTTL = 60 * time.Second
 // 5.0 - BlockTransaction table now has canonical ids (txs of non-canonical blocks moving to NonCanonicalTransaction table)
 // 5.1.0 - Added blockGasLimit to the StateChangeBatch
 // 6.0.0 - Blocks now have system-txs - in the begin/end of block
-// 6.1.0 - Add methods Range, IndexRange, HistoryGet, HistoryRange
+// 6.1.0 - Add methods Range, IndexRange, HistorySeek, HistoryRange
 // 6.2.0 - Add HistoryFiles to reply of Snapshots() method
 var KvServiceAPIVersion = &types.VersionReply{Major: 6, Minor: 2, Patch: 0}
 
@@ -71,8 +71,9 @@ type KvServer struct {
 
 	kv                 kv.RoDB
 	stateChangeStreams *StateChangePubSub
-	blockSnapshots     Snapsthots
-	historySnapshots   Snapsthots
+	blockSnapshots     Snapshots
+	borSnapshots       Snapshots
+	historySnapshots   Snapshots
 	ctx                context.Context
 
 	//v3 fields
@@ -90,18 +91,24 @@ type threadSafeTx struct {
 	sync.Mutex
 }
 
-type Snapsthots interface {
+//go:generate mockgen -typed=true -destination=./snapshots_mock.go -package=remotedbserver . Snapshots
+type Snapshots interface {
 	Files() []string
 }
 
-func NewKvServer(ctx context.Context, db kv.RoDB, snapshots Snapsthots, historySnapshots Snapsthots, logger log.Logger) *KvServer {
+func NewKvServer(ctx context.Context, db kv.RoDB, snapshots Snapshots, borSnapshots Snapshots, historySnapshots Snapshots, logger log.Logger) *KvServer {
 	return &KvServer{
-		trace:     false,
-		rangeStep: 1024,
-		kv:        db, stateChangeStreams: newStateChangeStreams(), ctx: ctx,
-		blockSnapshots: snapshots, historySnapshots: historySnapshots,
-		txs: map[uint64]*threadSafeTx{}, txsMapLock: &sync.RWMutex{},
-		logger: logger,
+		trace:              false,
+		rangeStep:          1024,
+		kv:                 db,
+		stateChangeStreams: newStateChangeStreams(),
+		ctx:                ctx,
+		blockSnapshots:     snapshots,
+		borSnapshots:       borSnapshots,
+		historySnapshots:   historySnapshots,
+		txs:                map[uint64]*threadSafeTx{},
+		txsMapLock:         &sync.RWMutex{},
+		logger:             logger,
 	}
 }
 
@@ -129,7 +136,7 @@ func (s *KvServer) begin(ctx context.Context) (id uint64, err error) {
 	}
 	s.txsMapLock.Lock()
 	defer s.txsMapLock.Unlock()
-	tx, errBegin := s.kv.BeginRo(ctx)
+	tx, errBegin := s.kv.BeginRo(ctx) //nolint:gocritic
 	if errBegin != nil {
 		return 0, errBegin
 	}
@@ -151,7 +158,7 @@ func (s *KvServer) renew(ctx context.Context, id uint64) (err error) {
 		defer tx.Unlock()
 		tx.Rollback()
 	}
-	newTx, errBegin := s.kv.BeginRo(ctx)
+	newTx, errBegin := s.kv.BeginRo(ctx) //nolint:gocritic
 	if errBegin != nil {
 		return fmt.Errorf("kvserver: %w", err)
 	}
@@ -430,7 +437,7 @@ func bytesCopy(b []byte) []byte {
 	return copiedBytes
 }
 
-func (s *KvServer) StateChanges(req *remote.StateChangeRequest, server remote.KV_StateChangesServer) error {
+func (s *KvServer) StateChanges(_ *remote.StateChangeRequest, server remote.KV_StateChangesServer) error {
 	ch, remove := s.stateChangeStreams.Sub()
 	defer remove()
 	for {
@@ -447,16 +454,31 @@ func (s *KvServer) StateChanges(req *remote.StateChangeRequest, server remote.KV
 	}
 }
 
-func (s *KvServer) SendStateChanges(ctx context.Context, sc *remote.StateChangeBatch) {
+func (s *KvServer) SendStateChanges(_ context.Context, sc *remote.StateChangeBatch) {
 	s.stateChangeStreams.Pub(sc)
 }
 
-func (s *KvServer) Snapshots(ctx context.Context, _ *remote.SnapshotsRequest) (*remote.SnapshotsReply, error) {
+func (s *KvServer) Snapshots(_ context.Context, _ *remote.SnapshotsRequest) (reply *remote.SnapshotsReply, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("%v, %s", rec, dbg.Stack())
+		}
+	}()
 	if s.blockSnapshots == nil || reflect.ValueOf(s.blockSnapshots).IsNil() { // nolint
 		return &remote.SnapshotsReply{BlocksFiles: []string{}, HistoryFiles: []string{}}, nil
 	}
 
-	return &remote.SnapshotsReply{BlocksFiles: s.blockSnapshots.Files(), HistoryFiles: s.historySnapshots.Files()}, nil
+	blockFiles := s.blockSnapshots.Files()
+	if s.borSnapshots != nil && !reflect.ValueOf(s.borSnapshots).IsNil() { // nolint
+		blockFiles = append(blockFiles, s.borSnapshots.Files()...)
+	}
+
+	reply = &remote.SnapshotsReply{BlocksFiles: blockFiles}
+	if s.historySnapshots != nil && !reflect.ValueOf(s.historySnapshots).IsNil() { // nolint
+		reply.HistoryFiles = s.historySnapshots.Files()
+	}
+
+	return reply, nil
 }
 
 type StateChangePubSub struct {
@@ -507,8 +529,15 @@ func (s *StateChangePubSub) remove(id uint) {
 	delete(s.chans, id)
 }
 
+//
 // Temporal methods
-func (s *KvServer) DomainGet(ctx context.Context, req *remote.DomainGetReq) (reply *remote.DomainGetReply, err error) {
+//
+
+func (s *KvServer) DomainGet(_ context.Context, req *remote.DomainGetReq) (reply *remote.DomainGetReply, err error) {
+	domainName, err := kv.String2Domain(req.Table)
+	if err != nil {
+		return nil, err
+	}
 	reply = &remote.DomainGetReply{}
 	if err := s.with(req.TxId, func(tx kv.Tx) error {
 		ttx, ok := tx.(kv.TemporalTx)
@@ -516,12 +545,12 @@ func (s *KvServer) DomainGet(ctx context.Context, req *remote.DomainGetReq) (rep
 			return fmt.Errorf("server DB doesn't implement kv.Temporal interface")
 		}
 		if req.Latest {
-			reply.V, reply.Ok, err = ttx.DomainGet(kv.Domain(req.Table), req.K, req.K2)
+			reply.V, _, err = ttx.DomainGet(domainName, req.K, req.K2)
 			if err != nil {
 				return err
 			}
 		} else {
-			reply.V, reply.Ok, err = ttx.DomainGetAsOf(kv.Domain(req.Table), req.K, req.K2, req.Ts)
+			reply.V, reply.Ok, err = ttx.DomainGetAsOf(domainName, req.K, req.K2, req.Ts)
 			if err != nil {
 				return err
 			}
@@ -532,14 +561,14 @@ func (s *KvServer) DomainGet(ctx context.Context, req *remote.DomainGetReq) (rep
 	}
 	return reply, nil
 }
-func (s *KvServer) HistoryGet(ctx context.Context, req *remote.HistoryGetReq) (reply *remote.HistoryGetReply, err error) {
-	reply = &remote.HistoryGetReply{}
+func (s *KvServer) HistorySeek(_ context.Context, req *remote.HistorySeekReq) (reply *remote.HistorySeekReply, err error) {
+	reply = &remote.HistorySeekReply{}
 	if err := s.with(req.TxId, func(tx kv.Tx) error {
 		ttx, ok := tx.(kv.TemporalTx)
 		if !ok {
 			return fmt.Errorf("server DB doesn't implement kv.Temporal interface")
 		}
-		reply.V, reply.Ok, err = ttx.HistoryGet(kv.History(req.Table), req.K, req.Ts)
+		reply.V, reply.Ok, err = ttx.HistorySeek(kv.History(req.Table), req.K, req.Ts)
 		if err != nil {
 			return err
 		}
@@ -552,7 +581,7 @@ func (s *KvServer) HistoryGet(ctx context.Context, req *remote.HistoryGetReq) (r
 
 const PageSizeLimit = 4 * 4096
 
-func (s *KvServer) IndexRange(ctx context.Context, req *remote.IndexRangeReq) (*remote.IndexRangeReply, error) {
+func (s *KvServer) IndexRange(_ context.Context, req *remote.IndexRangeReq) (*remote.IndexRangeReply, error) {
 	reply := &remote.IndexRangeReply{}
 	from, limit := int(req.FromTs), int(req.Limit)
 	if req.PageToken != "" {
@@ -575,6 +604,7 @@ func (s *KvServer) IndexRange(ctx context.Context, req *remote.IndexRangeReq) (*
 		if err != nil {
 			return err
 		}
+		defer it.Close()
 		for it.HasNext() {
 			v, err := it.Next()
 			if err != nil {
@@ -600,7 +630,7 @@ func (s *KvServer) IndexRange(ctx context.Context, req *remote.IndexRangeReq) (*
 	return reply, nil
 }
 
-func (s *KvServer) Range(ctx context.Context, req *remote.RangeReq) (*remote.Pairs, error) {
+func (s *KvServer) Range(_ context.Context, req *remote.RangeReq) (*remote.Pairs, error) {
 	from, limit := req.FromPrefix, int(req.Limit)
 	if req.PageToken != "" {
 		var pagination remote.ParisPagination

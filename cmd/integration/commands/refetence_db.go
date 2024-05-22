@@ -12,10 +12,11 @@ import (
 	"time"
 
 	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/backup"
 	mdbx2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/turbo/backup"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
@@ -56,6 +57,20 @@ var cmdWarmup = &cobra.Command{
 	},
 }
 
+var cmdMdbxTopDup = &cobra.Command{
+	Use: "mdbx_top_dup",
+	Run: func(cmd *cobra.Command, args []string) {
+		ctx, _ := common2.RootContext()
+		logger := debug.SetupCobra(cmd, "integration")
+		err := mdbxTopDup(ctx, chaindata, bucket, logger)
+		if err != nil {
+			if !errors.Is(err, context.Canceled) {
+				logger.Error(err.Error())
+			}
+			return
+		}
+	},
+}
 var cmdCompareBucket = &cobra.Command{
 	Use:   "compare_bucket",
 	Short: "compare bucket to the same bucket in '--chaindata.reference'",
@@ -139,6 +154,11 @@ func init() {
 
 	rootCmd.AddCommand(cmdWarmup)
 
+	withDataDir(cmdMdbxTopDup)
+	withBucket(cmdMdbxTopDup)
+
+	rootCmd.AddCommand(cmdMdbxTopDup)
+
 	withDataDir(cmdCompareStates)
 	withReferenceChaindata(cmdCompareStates)
 	withBucket(cmdCompareStates)
@@ -160,7 +180,7 @@ func init() {
 
 func doWarmup(ctx context.Context, chaindata string, bucket string, logger log.Logger) error {
 	const ThreadsLimit = 5_000
-	db := mdbx2.NewMDBX(log.New()).Path(chaindata).RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit)).MustOpen()
+	db := mdbx2.NewMDBX(log.New()).Path(chaindata).Accede().RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit)).MustOpen()
 	defer db.Close()
 
 	var total uint64
@@ -186,6 +206,7 @@ func doWarmup(ctx context.Context, chaindata string, bucket string, logger log.L
 					if err != nil {
 						return err
 					}
+					defer it.Close()
 					for it.HasNext() {
 						_, v, err := it.Next()
 						if len(v) > 0 {
@@ -209,6 +230,46 @@ func doWarmup(ctx context.Context, chaindata string, bucket string, logger log.L
 		}
 	}
 	g.Wait()
+	return nil
+}
+
+func mdbxTopDup(ctx context.Context, chaindata string, bucket string, logger log.Logger) error {
+	const ThreadsLimit = 5_000
+	db := mdbx2.NewMDBX(log.New()).Accede().Path(chaindata).RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit)).MustOpen()
+	defer db.Close()
+
+	cnt := map[string]int{}
+	if err := db.View(ctx, func(tx kv.Tx) error {
+		c, err := tx.CursorDupSort(bucket)
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+
+		for k, _, err := c.First(); k != nil; k, _, err = c.NextNoDup() {
+			if err != nil {
+				return err
+			}
+			if _, ok := cnt[string(k)]; !ok {
+				cnt[string(k)] = 0
+			}
+			cnt[string(k)]++
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	var _max int
+	for _, i := range cnt {
+		_max = cmp.Max(i, _max)
+	}
+	for k, i := range cnt {
+		if i > _max-10 {
+			fmt.Printf("k: %x\n", k)
+		}
+	}
+
 	return nil
 }
 

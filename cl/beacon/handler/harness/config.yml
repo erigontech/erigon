@@ -1,0 +1,33 @@
+tests:
+  - name: fork schedule
+    actual:
+      handler: i
+      path: /eth/v1/config/fork_schedule
+    compare:
+      exprs:
+       - actual_code == 200
+       - has(actual.data[0].current_version)
+       - has(actual.data[0].previous_version)
+       - has(actual.data[0].epoch)
+       - has(actual.data[1].current_version)
+       - has(actual.data[1].previous_version)
+       - has(actual.data[1].epoch)
+  - name: deposit contract
+    actual:
+      handler: i
+      path: /eth/v1/config/deposit_contract
+    compare:
+      exprs:
+       - actual_code == 200
+       - actual.data.address == "0x00000000219ab540356cBB839Cbe05303d7705Fa"
+       - actual.data.chain_id == "1"
+  - name: genesis
+    actual:
+      handler: i
+      path: /eth/v1/beacon/genesis
+    compare:
+      exprs:
+       - actual_code == 200
+       - actual.data.genesis_time == "1606824023"
+       - actual.data.genesis_validators_root == "0x4b363db94e286120d76eb905340fdd4e54bfe9f06bf33ff6cf5ad27f511bfe95"
+       - actual.data.genesis_fork_version == "0x00000000"

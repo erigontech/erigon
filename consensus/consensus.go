@@ -21,19 +21,20 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // ChainHeaderReader defines a small collection of methods needed to access the local
 // blockchain during header verification.
+//
+//go:generate mockgen -typed=true -destination=./chain_header_reader_mock.go -package=consensus . ChainHeaderReader
 type ChainHeaderReader interface {
 	// Config retrieves the blockchain's chain configuration.
 	Config() *chain.Config
@@ -71,6 +72,7 @@ type ChainReader interface {
 	HasBlock(hash libcommon.Hash, number uint64) bool
 
 	BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue
+	BorStartEventID(hash libcommon.Hash, number uint64) uint64
 }
 
 type SystemCall func(contract libcommon.Address, data []byte) ([]byte, error)
@@ -152,8 +154,7 @@ type EngineWriter interface {
 	// Note: The block header and state database might be updated to reflect any
 	// consensus rules that happen at finalization (e.g. block rewards).
 	Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
-		chain ChainReader, syscall SystemCall, logger log.Logger,
+		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests []*types.Request, chain ChainReader, syscall SystemCall, logger log.Logger,
 	) (types.Transactions, types.Receipts, error)
 
 	// FinalizeAndAssemble runs any post-transaction state modifications (e.g. block
@@ -162,8 +163,7 @@ type EngineWriter interface {
 	// Note: The block header and state database might be updated to reflect any
 	// consensus rules that happen at finalization (e.g. block rewards).
 	FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
-		chain ChainReader, syscall SystemCall, call Call, logger log.Logger,
+		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests []*types.Request, chain ChainReader, syscall SystemCall, call Call, logger log.Logger,
 	) (*types.Block, types.Transactions, types.Receipts, error)
 
 	// Seal generates a new sealing request for the given input block and pushes

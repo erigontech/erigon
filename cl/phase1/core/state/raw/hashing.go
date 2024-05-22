@@ -11,6 +11,8 @@ import (
 )
 
 func (b *BeaconState) HashSSZ() (out [32]byte, err error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	if err = b.computeDirtyLeaves(); err != nil {
 		return [32]byte{}, err
 	}
@@ -21,6 +23,45 @@ func (b *BeaconState) HashSSZ() (out [32]byte, err error) {
 	// Pad to 32 of length
 	err = merkle_tree.MerkleRootFromFlatLeaves(b.leaves, out[:])
 	return
+}
+
+func (b *BeaconState) CurrentSyncCommitteeBranch() ([][32]byte, error) {
+	if err := b.computeDirtyLeaves(); err != nil {
+		return nil, err
+	}
+	schema := []interface{}{}
+	for i := 0; i < len(b.leaves); i += 32 {
+		schema = append(schema, b.leaves[i:i+32])
+	}
+	return merkle_tree.MerkleProof(5, 22, schema...)
+}
+
+func (b *BeaconState) NextSyncCommitteeBranch() ([][32]byte, error) {
+	if err := b.computeDirtyLeaves(); err != nil {
+		return nil, err
+	}
+	schema := []interface{}{}
+	for i := 0; i < len(b.leaves); i += 32 {
+		schema = append(schema, b.leaves[i:i+32])
+	}
+	return merkle_tree.MerkleProof(5, 23, schema...)
+}
+
+func (b *BeaconState) FinalityRootBranch() ([][32]byte, error) {
+	if err := b.computeDirtyLeaves(); err != nil {
+		return nil, err
+	}
+	schema := []interface{}{}
+	for i := 0; i < len(b.leaves); i += 32 {
+		schema = append(schema, b.leaves[i:i+32])
+	}
+	proof, err := merkle_tree.MerkleProof(5, 20, schema...)
+	if err != nil {
+		return nil, err
+	}
+
+	proof = append([][32]byte{merkle_tree.Uint64Root(b.finalizedCheckpoint.Epoch())}, proof...)
+	return proof, nil
 }
 
 func preparateRootsForHashing(roots []common.Hash) [][32]byte {

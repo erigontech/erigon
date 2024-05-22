@@ -5,6 +5,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
 )
 
 /*
@@ -23,7 +24,18 @@ type ForkGraph interface {
 	GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.CachingBeaconState, error)
 	GetCurrentJustifiedCheckpoint(blockRoot libcommon.Hash) (solid.Checkpoint, bool)
 	GetFinalizedCheckpoint(blockRoot libcommon.Hash) (solid.Checkpoint, bool)
+	GetSyncCommittees(period uint64) (*solid.SyncCommittee, *solid.SyncCommittee, bool)
 	MarkHeaderAsInvalid(blockRoot libcommon.Hash)
 	AnchorSlot() uint64
 	Prune(uint64) error
+	GetBlockRewards(blockRoot libcommon.Hash) (*eth2.BlockRewardsCollector, bool)
+	LowestAvaiableSlot() uint64
+	GetLightClientBootstrap(blockRoot libcommon.Hash) (*cltypes.LightClientBootstrap, bool)
+	NewestLightClientUpdate() *cltypes.LightClientUpdate
+	GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool)
+	GetBalances(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error)
+	GetInactivitiesScores(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error)
+	GetPreviousPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error)
+	GetValidatorSet(blockRoot libcommon.Hash) (*solid.ValidatorSet, error)
+	GetCurrentPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error)
 }

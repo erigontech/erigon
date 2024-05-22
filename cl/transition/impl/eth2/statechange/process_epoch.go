@@ -7,20 +7,16 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 )
 
-func GetUnslashedIndiciesSet(s abstract.BeaconState) [][]bool {
-	if s.Version() == clparams.Phase0Version {
-		return nil
-	}
-	weights := s.BeaconConfig().ParticipationWeights()
+func GetUnslashedIndiciesSet(cfg *clparams.BeaconChainConfig, previousEpoch uint64, validatorSet *solid.ValidatorSet, previousEpochPartecipation *solid.BitList) [][]bool {
+	weights := cfg.ParticipationWeights()
 	flagsUnslashedIndiciesSet := make([][]bool, len(weights))
 	for i := range weights {
-		flagsUnslashedIndiciesSet[i] = make([]bool, s.ValidatorLength())
+		flagsUnslashedIndiciesSet[i] = make([]bool, validatorSet.Length())
 	}
-	previousEpoch := state.PreviousEpoch(s)
 
-	s.ForEachValidator(func(validator solid.Validator, validatorIndex, total int) bool {
+	validatorSet.Range(func(validatorIndex int, validator solid.Validator, total int) bool {
 		for i := range weights {
-			flagsUnslashedIndiciesSet[i][validatorIndex] = state.IsUnslashedParticipatingIndex(s, previousEpoch, uint64(validatorIndex), i)
+			flagsUnslashedIndiciesSet[i][validatorIndex] = state.IsUnslashedParticipatingIndex(validatorSet, previousEpochPartecipation, previousEpoch, uint64(validatorIndex), i)
 		}
 		return true
 	})
@@ -31,8 +27,10 @@ func GetUnslashedIndiciesSet(s abstract.BeaconState) [][]bool {
 func ProcessEpoch(s abstract.BeaconState) error {
 	eligibleValidators := state.EligibleValidatorsIndicies(s)
 	// start := time.Now()
-
-	unslashedIndiciesSet := GetUnslashedIndiciesSet(s)
+	var unslashedIndiciesSet [][]bool
+	if s.Version() >= clparams.AltairVersion {
+		unslashedIndiciesSet = GetUnslashedIndiciesSet(s.BeaconConfig(), state.PreviousEpoch(s), s.ValidatorSet(), s.PreviousEpochParticipation())
+	}
 	if err := ProcessJustificationBitsAndFinality(s, unslashedIndiciesSet); err != nil {
 		return err
 	}

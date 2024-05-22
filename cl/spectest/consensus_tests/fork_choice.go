@@ -3,22 +3,35 @@ package consensus_tests
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon/spectest"
 	"io/fs"
+	"math"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/cl/abstract"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
-	"github.com/ledgerwatch/erigon/cl/pool"
+	"github.com/ledgerwatch/erigon/spectest"
+
 	"github.com/spf13/afero"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/abstract"
+	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
+	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
+	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/clparams/initial_state"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
+	"github.com/ledgerwatch/erigon/cl/phase1/network/services"
+	"github.com/ledgerwatch/erigon/cl/pool"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
 )
 
 func (f *ForkChoiceStep) StepType() string {
@@ -51,6 +64,8 @@ type ForkChoiceStep struct {
 	Valid            *bool                    `yaml:"valid,omitempty"`
 	Attestation      *string                  `yaml:"attestation,omitempty"`
 	Block            *string                  `yaml:"block,omitempty"`
+	Blobs            *string                  `yaml:"blobs,omitempty"`
+	Proofs           []string                 `yaml:"proofs,omitempty"`
 	PowBlock         *string                  `yaml:"pow_block,omitempty"`
 	AttesterSlashing *string                  `yaml:"attester_slashing,omitempty"`
 	BlockHash        *string                  `yaml:"block_hash,omitempty"`
@@ -82,6 +97,14 @@ func (f *ForkChoiceStep) GetBlock() string {
 	}
 	return *f.Block
 }
+
+func (f *ForkChoiceStep) GetBlobs() string {
+	if f.Blobs == nil {
+		return ""
+	}
+	return *f.Blobs
+}
+
 func (f *ForkChoiceStep) GetPowBlock() string {
 	if f.PowBlock == nil {
 		return ""
@@ -146,6 +169,8 @@ func NewForkChoice(fn func(s abstract.BeaconState) error) *ForkChoice {
 }
 
 func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
+	ctx := context.Background()
+
 	anchorBlock, err := spectest.ReadAnchorBlock(root, c.Version(), "anchor_block.ssz_snappy")
 	require.NoError(t, err)
 
@@ -155,8 +180,17 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	anchorState, err := spectest.ReadBeaconState(root, c.Version(), "anchor_state.ssz_snappy")
 	require.NoError(t, err)
 
-	forkStore, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig), fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs()))
+	genesisState, err := initial_state.GetGenesisState(clparams.MainnetNetwork)
 	require.NoError(t, err)
+
+	emitters := beaconevents.NewEmitters()
+	_, beaconConfig := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
+	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), beaconConfig)
+	blobStorage := blob_storage.NewBlobStore(memdb.New("/tmp"), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
+
+	forkStore, err := forkchoice.NewForkChoiceStore(ethClock, anchorState, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig), fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}), emitters, synced_data.NewSyncedDataManager(true, &clparams.MainnetBeaconConfig), blobStorage)
+	require.NoError(t, err)
+	forkStore.SetSynced(true)
 
 	var steps []ForkChoiceStep
 	err = spectest.ReadYml(root, "steps.yaml", &steps)
@@ -184,7 +218,37 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 			blk := cltypes.NewSignedBeaconBlock(anchorState.BeaconConfig())
 			err := spectest.ReadSsz(root, c.Version(), step.GetBlock()+".ssz_snappy", blk)
 			require.NoError(t, err, stepstr)
-			err = forkStore.OnBlock(blk, true, true)
+			blobs := solid.NewStaticListSSZ[*cltypes.Blob](6, len(cltypes.Blob{}))
+			if step.GetBlobs() != "" {
+				err := spectest.ReadSsz(root, c.Version(), step.GetBlobs()+".ssz_snappy", blobs)
+				require.NoError(t, err, stepstr)
+				if step.GetValid() {
+					require.False(t, len(step.Proofs) != blobs.Len() || len(step.Proofs) != blk.Block.Body.BlobKzgCommitments.Len(), "invalid number of proofs")
+				} else {
+					if len(step.Proofs) != blobs.Len() || len(step.Proofs) != blk.Block.Body.BlobKzgCommitments.Len() {
+						continue
+					}
+				}
+				blobSidecarService := services.NewBlobSidecarService(ctx, &clparams.MainnetBeaconConfig, forkStore, nil, ethClock, true)
+
+				blobs.Range(func(index int, value *cltypes.Blob, length int) bool {
+					var proof libcommon.Bytes48
+					proofStr := step.Proofs[index]
+					proofBytes := common.Hex2Bytes(proofStr[2:])
+					copy(proof[:], proofBytes)
+					err = blobSidecarService.ProcessMessage(ctx, nil, &cltypes.BlobSidecar{
+						Index:             uint64(index),
+						SignedBlockHeader: blk.SignedBeaconBlockHeader(),
+						Blob:              *value,
+						KzgCommitment:     common.Bytes48(*blk.Block.Body.BlobKzgCommitments.Get(index)),
+						KzgProof:          proof,
+					})
+					return true
+				})
+
+			}
+
+			err = forkStore.OnBlock(ctx, blk, true, true, true)
 			if step.GetValid() {
 				require.NoError(t, err, stepstr)
 			} else {
@@ -194,7 +258,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 			att := &solid.Attestation{}
 			err := spectest.ReadSsz(root, c.Version(), step.GetAttestation()+".ssz_snappy", att)
 			require.NoError(t, err, stepstr)
-			err = forkStore.OnAttestation(att, false)
+			err = forkStore.OnAttestation(att, false, false)
 			if step.GetValid() {
 				require.NoError(t, err, stepstr)
 			} else {

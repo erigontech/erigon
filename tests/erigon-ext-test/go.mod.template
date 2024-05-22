@@ -6,8 +6,4 @@ require github.com/ledgerwatch/erigon $COMMIT_SHA
 
 replace github.com/ledgerwatch/erigon-lib => github.com/ledgerwatch/erigon/erigon-lib $COMMIT_SHA
 
-// TODO - remove this temp fix once VictoriaMetrics/metrics is removed from the repo in
-// https://github.com/ledgerwatch/erigon/pull/8766
-replace github.com/VictoriaMetrics/metrics => github.com/ledgerwatch/victoria-metrics v0.0.7
-
 require github.com/ethereum/go-ethereum v1.13.3

@@ -20,10 +20,11 @@ import (
 	"hash"
 	"sync"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/math"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/vm/stack"
 )
@@ -141,6 +142,8 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 		eofJt = &pragueInstructionSet
 	case evm.ChainRules().IsCancun:
 		jt = &cancunInstructionSet
+	case evm.ChainRules().IsNapoli:
+		jt = &napoliInstructionSet
 	case evm.ChainRules().IsShanghai:
 		jt = &shanghaiInstructionSet
 	case evm.ChainRules().IsLondon:
@@ -316,11 +319,15 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			if err != nil || !contract.UseGas(dynamicCost) {
 				return nil, ErrOutOfGas
 			}
+			// Do tracing before memory expansion
+			if in.cfg.Debug {
+				in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
+				logged = true
+			}
 			if memorySize > 0 {
 				mem.Resize(memorySize)
 			}
-		}
-		if in.cfg.Debug {
+		} else if in.cfg.Debug {
 			in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
 			logged = true
 		}

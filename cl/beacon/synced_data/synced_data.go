@@ -1,19 +1,17 @@
 package synced_data
 
 import (
-	"sync"
+	"sync/atomic"
 
+	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
 type SyncedDataManager struct {
 	enabled   bool
 	cfg       *clparams.BeaconChainConfig
-	headState *state.CachingBeaconState
-
-	mu sync.RWMutex
+	headState atomic.Value
 }
 
 func NewSyncedDataManager(enabled bool, cfg *clparams.BeaconChainConfig) *SyncedDataManager {
@@ -27,36 +25,55 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 	if !s.enabled {
 		return
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.headState == nil {
-		s.headState, err = newState.Copy()
+	st, err := newState.Copy()
+	if err != nil {
 		return err
 	}
-	err = newState.CopyInto(s.headState)
+	s.headState.Store(st)
+
 	return
 }
 
-func (s *SyncedDataManager) HeadState() (state *state.CachingBeaconState, cancel func()) {
+func (s *SyncedDataManager) HeadState() *state.CachingBeaconState {
 	if !s.enabled {
-		return nil, func() {}
+		return nil
 	}
-	s.mu.RLock()
-	return s.headState, s.mu.RUnlock
+	if ret, ok := s.headState.Load().(*state.CachingBeaconState); ok {
+		return ret
+	}
+	return nil
+}
+
+func (s *SyncedDataManager) HeadStateReader() abstract.BeaconStateReader {
+	headstate := s.HeadState()
+	if headstate == nil {
+		return nil
+	}
+	return headstate
+}
+
+func (s *SyncedDataManager) HeadStateMutator() abstract.BeaconStateMutator {
+	headstate := s.HeadState()
+	if headstate == nil {
+		return nil
+	}
+	return headstate
 }
 
 func (s *SyncedDataManager) Syncing() bool {
 	if !s.enabled {
 		return false
 	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.headState == nil {
-		return false
-	}
+	return s.headState.Load() == nil
+}
 
-	headEpoch := utils.GetCurrentEpoch(s.headState.GenesisTime(), s.cfg.SecondsPerSlot, s.cfg.SlotsPerEpoch)
-	// surplusMargin, give it a go if we are within 2 epochs of the head
-	surplusMargin := s.cfg.SlotsPerEpoch * 2
-	return s.headState.Slot()+surplusMargin < headEpoch
+func (s *SyncedDataManager) HeadSlot() uint64 {
+	if !s.enabled {
+		return 0
+	}
+	st, ok := s.headState.Load().(*state.CachingBeaconState)
+	if !ok {
+		return 0
+	}
+	return st.Slot()
 }

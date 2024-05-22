@@ -18,11 +18,15 @@ package commitment
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"math/bits"
+	"os"
+	"path/filepath"
+	"sort"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
@@ -30,6 +34,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/rlp"
 )
 
@@ -105,30 +110,35 @@ type BinPatriciaHashed struct {
 	hashAuxBuffer [maxKeySize]byte // buffer to compute cell hash or write hash-related things
 	auxBuffer     *bytes.Buffer    // auxiliary buffer used during branch updates encoding
 
-	// Function used to load branch node and fill up the cells
-	// For each cell, it sets the cell type, clears the modified flag, fills the hash,
-	// and for the extension, account, and leaf type, the `l` and `k`
-	branchFn func(prefix []byte) ([]byte, error)
+	branchEncoder *BranchEncoder
+	ctx           PatriciaContext
+
 	// Function used to fetch account with given plain key
 	accountFn func(plainKey []byte, cell *BinaryCell) error
 	// Function used to fetch account with given plain key
 	storageFn func(plainKey []byte, cell *BinaryCell) error
 }
 
-func NewBinPatriciaHashed(accountKeyLen int,
-	branchFn func(prefix []byte) ([]byte, error),
-	accountFn func(plainKey []byte, cell *Cell) error,
-	storageFn func(plainKey []byte, cell *Cell) error,
-) *BinPatriciaHashed {
-	return &BinPatriciaHashed{
+func NewBinPatriciaHashed(accountKeyLen int, ctx PatriciaContext) *BinPatriciaHashed {
+	bph := &BinPatriciaHashed{
 		keccak:        sha3.NewLegacyKeccak256().(keccakState),
 		keccak2:       sha3.NewLegacyKeccak256().(keccakState),
 		accountKeyLen: accountKeyLen,
-		branchFn:      branchFn,
-		accountFn:     wrapAccountStorageFn(accountFn),
-		storageFn:     wrapAccountStorageFn(storageFn),
+		accountFn:     wrapAccountStorageFn(ctx.GetAccount),
+		storageFn:     wrapAccountStorageFn(ctx.GetStorage),
 		auxBuffer:     bytes.NewBuffer(make([]byte, 8192)),
+		ctx:           ctx,
 	}
+	tdir := os.TempDir()
+	if ctx != nil {
+		tdir = ctx.TempDir()
+	}
+
+	tdir = filepath.Join(tdir, "branch-encoder")
+	bph.branchEncoder = NewBranchEncoder(1024, tdir)
+
+	return bph
+
 }
 
 type BinaryCell struct {
@@ -491,6 +501,8 @@ func (cell *BinaryCell) accountForHashing(buffer []byte, storageRootHash [length
 	return pos
 }
 
+func (bph *BinPatriciaHashed) ResetContext(ctx PatriciaContext) {}
+
 func (bph *BinPatriciaHashed) completeLeafHash(buf, keyPrefix []byte, kp, kl, compactLen int, key []byte, compact0 byte, ni int, val rlp.RlpSerializable, singleton bool) ([]byte, error) {
 	totalLen := kp + kl + val.DoubleRLPLen()
 	var lenPrefix [4]byte
@@ -746,7 +758,7 @@ func (bph *BinPatriciaHashed) computeBinaryCellHash(cell *BinaryCell, depth int,
 		var valBuf [128]byte
 		valLen := cell.accountForHashing(valBuf[:], storageRootHash)
 		if bph.trace {
-			fmt.Printf("accountLeafHashWithKey for [%x]=>[%x]\n", bph.hashAuxBuffer[:halfKeySize+1-depth], valBuf[:valLen])
+			fmt.Printf("accountLeafHashWithKey for [%x]=>[%x]\n", cell.downHashedKey[:halfKeySize+1-depth], rlp.RlpEncodedBytes(valBuf[:valLen]))
 		}
 		return bph.accountLeafHashWithKey(buf, cell.downHashedKey[:halfKeySize+1-depth], rlp.RlpEncodedBytes(valBuf[:valLen]))
 	}
@@ -825,9 +837,12 @@ func (bph *BinPatriciaHashed) needUnfolding(hashedKey []byte) int {
 
 // unfoldBranchNode returns true if unfolding has been done
 func (bph *BinPatriciaHashed) unfoldBranchNode(row int, deleted bool, depth int) (bool, error) {
-	branchData, err := bph.branchFn(binToCompact(bph.currentKey[:bph.currentKeyLen]))
+	branchData, _, err := bph.ctx.GetBranch(binToCompact(bph.currentKey[:bph.currentKeyLen]))
 	if err != nil {
 		return false, err
+	}
+	if len(branchData) >= 2 {
+		branchData = branchData[2:] // skip touch map and hold aftermap and rest
 	}
 	if !bph.rootChecked && bph.currentKeyLen == 0 && len(branchData) == 0 {
 		// Special case - empty or deleted root
@@ -864,13 +879,17 @@ func (bph *BinPatriciaHashed) unfoldBranchNode(row int, deleted bool, depth int)
 			fmt.Printf("cell (%d, %x) depth=%d, hash=[%x], a=[%x], s=[%x], ex=[%x]\n", row, nibble, depth, cell.h[:cell.hl], cell.apk[:cell.apl], cell.spk[:cell.spl], cell.extension[:cell.extLen])
 		}
 		if cell.apl > 0 {
-			bph.accountFn(cell.apk[:cell.apl], cell)
+			if err := bph.accountFn(cell.apk[:cell.apl], cell); err != nil {
+				return false, err
+			}
 			if bph.trace {
-				fmt.Printf("accountFn[%x] return balance=%d, nonce=%d code=%x\n", cell.apk[:cell.apl], &cell.Balance, cell.Nonce, cell.CodeHash[:])
+				fmt.Printf("GetAccount[%x] return balance=%d, nonce=%d code=%x\n", cell.apk[:cell.apl], &cell.Balance, cell.Nonce, cell.CodeHash[:])
 			}
 		}
 		if cell.spl > 0 {
-			bph.storageFn(cell.spk[:cell.spl], cell)
+			if err := bph.storageFn(cell.spk[:cell.spl], cell); err != nil {
+				return false, err
+			}
 		}
 		if err = cell.deriveHashedKeys(depth, bph.keccak, bph.accountKeyLen); err != nil {
 			return false, err
@@ -982,10 +1001,10 @@ func (bph *BinPatriciaHashed) needFolding(hashedKey []byte) bool {
 // The purpose of fold is to reduce hph.currentKey[:hph.currentKeyLen]. It should be invoked
 // until that current key becomes a prefix of hashedKey that we will proccess next
 // (in other words until the needFolding function returns 0)
-func (bph *BinPatriciaHashed) fold() (branchData BranchData, updateKey []byte, err error) {
+func (bph *BinPatriciaHashed) fold() (err error) {
 	updateKeyLen := bph.currentKeyLen
 	if bph.activeRows == 0 {
-		return nil, nil, fmt.Errorf("cannot fold - no active rows")
+		return fmt.Errorf("cannot fold - no active rows")
 	}
 	if bph.trace {
 		fmt.Printf("fold: activeRows: %d, currentKey: [%x], touchMap: %016b, afterMap: %016b\n", bph.activeRows, bph.currentKey[:bph.currentKeyLen], bph.touchMap[bph.activeRows-1], bph.afterMap[bph.activeRows-1])
@@ -1010,7 +1029,7 @@ func (bph *BinPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 	}
 
 	depth := bph.depths[bph.activeRows-1]
-	updateKey = binToCompact(bph.currentKey[:updateKeyLen])
+	updateKey := binToCompact(bph.currentKey[:updateKeyLen])
 	partsCount := bits.OnesCount16(bph.afterMap[row])
 
 	if bph.trace {
@@ -1040,9 +1059,9 @@ func (bph *BinPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 		upBinaryCell.extLen = 0
 		upBinaryCell.downHashedLen = 0
 		if bph.branchBefore[row] {
-			branchData, _, err = EncodeBranch(0, bph.touchMap[row], 0, func(nibble int, skip bool) (*Cell, error) { return nil, nil })
+			_, err = bph.branchEncoder.CollectUpdate(bph.ctx, updateKey, 0, bph.touchMap[row], 0, RetrieveCellNoop)
 			if err != nil {
-				return nil, updateKey, fmt.Errorf("failed to encode leaf node update: %w", err)
+				return fmt.Errorf("failed to encode leaf node update: %w", err)
 			}
 		}
 		bph.activeRows--
@@ -1068,10 +1087,9 @@ func (bph *BinPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 		upBinaryCell.fillFromLowerBinaryCell(cell, depth, bph.currentKey[upDepth:bph.currentKeyLen], nibble)
 		// Delete if it existed
 		if bph.branchBefore[row] {
-			//branchData, _, err = bph.EncodeBranchDirectAccess(0, row, depth)
-			branchData, _, err = EncodeBranch(0, bph.touchMap[row], 0, func(nibble int, skip bool) (*Cell, error) { return nil, nil })
+			_, err = bph.branchEncoder.CollectUpdate(bph.ctx, updateKey, 0, bph.touchMap[row], 0, RetrieveCellNoop)
 			if err != nil {
-				return nil, updateKey, fmt.Errorf("failed to encode leaf node update: %w", err)
+				return fmt.Errorf("failed to encode leaf node update: %w", err)
 			}
 		}
 		bph.activeRows--
@@ -1110,7 +1128,7 @@ func (bph *BinPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 		bph.keccak2.Reset()
 		pt := rlp.GenerateStructLen(bph.hashAuxBuffer[:], totalBranchLen)
 		if _, err := bph.keccak2.Write(bph.hashAuxBuffer[:pt]); err != nil {
-			return nil, nil, err
+			return err
 		}
 
 		b := [...]byte{0x80}
@@ -1144,14 +1162,13 @@ func (bph *BinPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 		var err error
 		_ = cellGetter
 
-		//branchData, lastNibble, err = bph.EncodeBranchDirectAccess(bitmap, row, depth, branchData)
-		branchData, lastNibble, err = EncodeBranch(bitmap, bph.touchMap[row], bph.afterMap[row], cellGetter)
+		lastNibble, err = bph.branchEncoder.CollectUpdate(bph.ctx, updateKey, bitmap, bph.touchMap[row], bph.afterMap[row], cellGetter)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to encode branch update: %w", err)
+			return fmt.Errorf("failed to encode branch update: %w", err)
 		}
 		for i := lastNibble; i <= maxChild; i++ {
 			if _, err := bph.keccak2.Write(b[:]); err != nil {
-				return nil, nil, err
+				return err
 			}
 			if bph.trace {
 				fmt.Printf("%x: empty(%d,%x)\n", i, row, i)
@@ -1169,7 +1186,7 @@ func (bph *BinPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 		upBinaryCell.spl = 0
 		upBinaryCell.hl = 32
 		if _, err := bph.keccak2.Read(upBinaryCell.h[:]); err != nil {
-			return nil, nil, err
+			return err
 		}
 		if bph.trace {
 			fmt.Printf("} [%x]\n", upBinaryCell.h[:])
@@ -1181,12 +1198,7 @@ func (bph *BinPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 			bph.currentKeyLen = 0
 		}
 	}
-	if branchData != nil {
-		if bph.trace {
-			fmt.Printf("fold: update key: %x, branchData: [%x]\n", CompactedKeyToHex(updateKey), branchData)
-		}
-	}
-	return branchData, updateKey, nil
+	return nil
 }
 
 func (bph *BinPatriciaHashed) deleteBinaryCell(hashedKey []byte) {
@@ -1274,11 +1286,24 @@ func (bph *BinPatriciaHashed) RootHash() ([]byte, error) {
 	return hash[1:], nil // first byte is 128+hash_len
 }
 
-func (bph *BinPatriciaHashed) ReviewKeys(plainKeys, hashedKeys [][]byte) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
-	branchNodeUpdates = make(map[string]BranchData)
+func (bph *BinPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byte, logPrefix string) (rootHash []byte, err error) {
+	pks := make(map[string]int, len(plainKeys))
+	hashedKeys := make([][]byte, len(plainKeys))
+	for i, pk := range plainKeys {
+		hashedKeys[i] = hexToBin(pk)
+		pks[string(hashedKeys[i])] = i
+	}
 
+	sort.Slice(hashedKeys, func(i, j int) bool {
+		return bytes.Compare(hashedKeys[i], hashedKeys[j]) < 0
+	})
 	stagedBinaryCell := new(BinaryCell)
 	for i, hashedKey := range hashedKeys {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
 		plainKey := plainKeys[i]
 		hashedKey = hexToBin(hashedKey)
 		if bph.trace {
@@ -1286,16 +1311,14 @@ func (bph *BinPatriciaHashed) ReviewKeys(plainKeys, hashedKeys [][]byte) (rootHa
 		}
 		// Keep folding until the currentKey is the prefix of the key we modify
 		for bph.needFolding(hashedKey) {
-			if branchData, updateKey, err := bph.fold(); err != nil {
-				return nil, nil, fmt.Errorf("fold: %w", err)
-			} else if branchData != nil {
-				branchNodeUpdates[string(updateKey)] = branchData
+			if err := bph.fold(); err != nil {
+				return nil, fmt.Errorf("fold: %w", err)
 			}
 		}
 		// Now unfold until we step on an empty cell
 		for unfolding := bph.needUnfolding(hashedKey); unfolding > 0; unfolding = bph.needUnfolding(hashedKey) {
 			if err := bph.unfold(hashedKey, unfolding); err != nil {
-				return nil, nil, fmt.Errorf("unfold: %w", err)
+				return nil, fmt.Errorf("unfold: %w", err)
 			}
 		}
 
@@ -1303,24 +1326,24 @@ func (bph *BinPatriciaHashed) ReviewKeys(plainKeys, hashedKeys [][]byte) (rootHa
 		stagedBinaryCell.fillEmpty()
 		if len(plainKey) == bph.accountKeyLen {
 			if err := bph.accountFn(plainKey, stagedBinaryCell); err != nil {
-				return nil, nil, fmt.Errorf("accountFn for key %x failed: %w", plainKey, err)
+				return nil, fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
 			}
 			if !stagedBinaryCell.Delete {
 				cell := bph.updateBinaryCell(plainKey, hashedKey)
 				cell.setAccountFields(stagedBinaryCell.CodeHash[:], &stagedBinaryCell.Balance, stagedBinaryCell.Nonce)
 
 				if bph.trace {
-					fmt.Printf("accountFn reading key %x => balance=%v nonce=%v codeHash=%x\n", cell.apk, cell.Balance.Uint64(), cell.Nonce, cell.CodeHash)
+					fmt.Printf("GetAccount reading key %x => balance=%d nonce=%v codeHash=%x\n", cell.apk, &cell.Balance, cell.Nonce, cell.CodeHash)
 				}
 			}
 		} else {
 			if err = bph.storageFn(plainKey, stagedBinaryCell); err != nil {
-				return nil, nil, fmt.Errorf("storageFn for key %x failed: %w", plainKey, err)
+				return nil, fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
 			}
 			if !stagedBinaryCell.Delete {
 				bph.updateBinaryCell(plainKey, hashedKey).setStorage(stagedBinaryCell.Storage[:stagedBinaryCell.StorageLen])
 				if bph.trace {
-					fmt.Printf("storageFn reading key %x => %x\n", plainKey, stagedBinaryCell.Storage[:stagedBinaryCell.StorageLen])
+					fmt.Printf("GetStorage reading key %x => %x\n", plainKey, stagedBinaryCell.Storage[:stagedBinaryCell.StorageLen])
 				}
 			}
 		}
@@ -1334,18 +1357,20 @@ func (bph *BinPatriciaHashed) ReviewKeys(plainKeys, hashedKeys [][]byte) (rootHa
 	}
 	// Folding everything up to the root
 	for bph.activeRows > 0 {
-		if branchData, updateKey, err := bph.fold(); err != nil {
-			return nil, nil, fmt.Errorf("final fold: %w", err)
-		} else if branchData != nil {
-			branchNodeUpdates[string(updateKey)] = branchData
+		if err := bph.fold(); err != nil {
+			return nil, fmt.Errorf("final fold: %w", err)
 		}
 	}
 
 	rootHash, err = bph.RootHash()
 	if err != nil {
-		return nil, branchNodeUpdates, fmt.Errorf("root hash evaluation failed: %w", err)
+		return nil, fmt.Errorf("root hash evaluation failed: %w", err)
 	}
-	return rootHash, branchNodeUpdates, nil
+	err = bph.branchEncoder.Load(bph.ctx, etl.TransformArgs{Quit: ctx.Done()})
+	if err != nil {
+		return nil, fmt.Errorf("branch update failed: %w", err)
+	}
+	return rootHash, nil
 }
 
 func (bph *BinPatriciaHashed) SetTrace(trace bool) { bph.trace = trace }
@@ -1366,16 +1391,6 @@ func (bph *BinPatriciaHashed) Reset() {
 	bph.root.Nonce = 0
 	bph.rootTouched = false
 	bph.rootPresent = true
-}
-
-func (bph *BinPatriciaHashed) ResetFns(
-	branchFn func(prefix []byte) ([]byte, error),
-	accountFn func(plainKey []byte, cell *Cell) error,
-	storageFn func(plainKey []byte, cell *Cell) error,
-) {
-	bph.branchFn = branchFn
-	bph.accountFn = wrapAccountStorageFn(accountFn)
-	bph.storageFn = wrapAccountStorageFn(storageFn)
 }
 
 func (c *BinaryCell) bytes() []byte {
@@ -1503,12 +1518,10 @@ func (bph *BinPatriciaHashed) SetState(buf []byte) error {
 		return err
 	}
 
-	bph.currentKeyLen = int(s.CurrentKeyLen)
 	bph.rootChecked = s.RootChecked
 	bph.rootTouched = s.RootTouched
 	bph.rootPresent = s.RootPresent
 
-	copy(bph.currentKey[:], s.CurrentKey[:])
 	copy(bph.depths[:], s.Depths[:])
 	copy(bph.branchBefore[:], s.BranchBefore[:])
 	copy(bph.touchMap[:], s.TouchMap[:])
@@ -1517,44 +1530,57 @@ func (bph *BinPatriciaHashed) SetState(buf []byte) error {
 	return nil
 }
 
-func (bph *BinPatriciaHashed) ProcessUpdates(plainKeys, hashedKeys [][]byte, updates []Update) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
-	branchNodeUpdates = make(map[string]BranchData)
+func (bph *BinPatriciaHashed) ProcessTree(ctx context.Context, t *UpdateTree, lp string) (rootHash []byte, err error) {
+	panic("not implemented")
+}
+
+func (bph *BinPatriciaHashed) ProcessUpdates(ctx context.Context, plainKeys [][]byte, updates []Update) (rootHash []byte, err error) {
+	for i, pk := range plainKeys {
+		updates[i].hashedKey = hexToBin(pk)
+		updates[i].plainKey = pk
+	}
+
+	sort.Slice(updates, func(i, j int) bool {
+		return bytes.Compare(updates[i].hashedKey, updates[j].hashedKey) < 0
+	})
 
 	for i, plainKey := range plainKeys {
-		hashedKey := hashedKeys[i]
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+		update := updates[i]
 		if bph.trace {
-			fmt.Printf("plainKey=[%x], hashedKey=[%x], currentKey=[%x]\n", plainKey, hashedKey, bph.currentKey[:bph.currentKeyLen])
+			fmt.Printf("plainKey=[%x], hashedKey=[%x], currentKey=[%x]\n", update.plainKey, update.hashedKey, bph.currentKey[:bph.currentKeyLen])
 		}
 		// Keep folding until the currentKey is the prefix of the key we modify
-		for bph.needFolding(hashedKey) {
-			if branchData, updateKey, err := bph.fold(); err != nil {
-				return nil, nil, fmt.Errorf("fold: %w", err)
-			} else if branchData != nil {
-				branchNodeUpdates[string(updateKey)] = branchData
+		for bph.needFolding(update.hashedKey) {
+			if err := bph.fold(); err != nil {
+				return nil, fmt.Errorf("fold: %w", err)
 			}
 		}
 		// Now unfold until we step on an empty cell
-		for unfolding := bph.needUnfolding(hashedKey); unfolding > 0; unfolding = bph.needUnfolding(hashedKey) {
-			if err := bph.unfold(hashedKey, unfolding); err != nil {
-				return nil, nil, fmt.Errorf("unfold: %w", err)
+		for unfolding := bph.needUnfolding(update.hashedKey); unfolding > 0; unfolding = bph.needUnfolding(update.hashedKey) {
+			if err := bph.unfold(update.hashedKey, unfolding); err != nil {
+				return nil, fmt.Errorf("unfold: %w", err)
 			}
 		}
 
-		update := updates[i]
 		// Update the cell
 		if update.Flags == DeleteUpdate {
-			bph.deleteBinaryCell(hashedKey)
+			bph.deleteBinaryCell(update.hashedKey)
 			if bph.trace {
-				fmt.Printf("key %x deleted\n", plainKey)
+				fmt.Printf("key %x deleted\n", update.plainKey)
 			}
 		} else {
-			cell := bph.updateBinaryCell(plainKey, hashedKey)
+			cell := bph.updateBinaryCell(update.plainKey, update.hashedKey)
 			if bph.trace {
-				fmt.Printf("accountFn updated key %x =>", plainKey)
+				fmt.Printf("GetAccount updated key %x =>", plainKey)
 			}
 			if update.Flags&BalanceUpdate != 0 {
 				if bph.trace {
-					fmt.Printf(" balance=%d", update.Balance.Uint64())
+					fmt.Printf(" balance=%d", &update.Balance)
 				}
 				cell.Balance.Set(&update.Balance)
 			}
@@ -1576,25 +1602,29 @@ func (bph *BinPatriciaHashed) ProcessUpdates(plainKeys, hashedKeys [][]byte, upd
 			if update.Flags&StorageUpdate != 0 {
 				cell.setStorage(update.CodeHashOrStorage[:update.ValLength])
 				if bph.trace {
-					fmt.Printf("\rstorageFn filled key %x => %x\n", plainKey, update.CodeHashOrStorage[:update.ValLength])
+					fmt.Printf("GetStorage filled key %x => %x\n", plainKey, update.CodeHashOrStorage[:update.ValLength])
 				}
 			}
 		}
 	}
 	// Folding everything up to the root
 	for bph.activeRows > 0 {
-		if branchData, updateKey, err := bph.fold(); err != nil {
-			return nil, nil, fmt.Errorf("final fold: %w", err)
-		} else if branchData != nil {
-			branchNodeUpdates[string(updateKey)] = branchData
+		if err := bph.fold(); err != nil {
+			return nil, fmt.Errorf("final fold: %w", err)
 		}
 	}
 
 	rootHash, err = bph.RootHash()
 	if err != nil {
-		return nil, branchNodeUpdates, fmt.Errorf("root hash evaluation failed: %w", err)
+		return nil, fmt.Errorf("root hash evaluation failed: %w", err)
 	}
-	return rootHash, branchNodeUpdates, nil
+
+	err = bph.branchEncoder.Load(bph.ctx, etl.TransformArgs{Quit: ctx.Done()})
+	if err != nil {
+		return nil, fmt.Errorf("branch update failed: %w", err)
+	}
+
+	return rootHash, nil
 }
 
 // Hashes provided key and expands resulting hash into nibbles (each byte split into two nibbles by 4 bits)
@@ -1603,13 +1633,13 @@ func (bph *BinPatriciaHashed) hashAndNibblizeKey2(key []byte) []byte { //nolint
 
 	bph.keccak.Reset()
 	bph.keccak.Write(key[:length.Addr])
-	copy(hashedKey[:length.Hash], bph.keccak.Sum(nil))
+	bph.keccak.Read(hashedKey[:length.Hash])
 
 	if len(key[length.Addr:]) > 0 {
 		hashedKey = append(hashedKey, make([]byte, length.Hash)...)
 		bph.keccak.Reset()
 		bph.keccak.Write(key[length.Addr:])
-		copy(hashedKey[length.Hash:], bph.keccak.Sum(nil))
+		bph.keccak.Read(hashedKey[length.Hash:])
 	}
 
 	nibblized := make([]byte, len(hashedKey)*2)

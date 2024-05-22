@@ -15,8 +15,8 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
+	txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
@@ -528,7 +528,7 @@ func (ff *Filters) OnNewTx(reply *txpool.OnAddReply) {
 		if len(rlpTx) == 0 {
 			continue
 		}
-		txs[i], decodeErr = types.DecodeWrappedTransaction(rlpTx)
+		txs[i], decodeErr = types.DecodeTransaction(rlpTx)
 		if decodeErr != nil {
 			// ignoring what we can't unmarshal
 			ff.logger.Warn("OnNewTx rpc filters, unprocessable payload", "err", decodeErr, "data", hex.EncodeToString(rlpTx))
