@@ -60,7 +60,6 @@ type Aggregator struct {
 	dirs             datadir.Dirs
 	tmpdir           string
 	aggregationStep  uint64
-	keepInDB         uint64
 
 	dirtyFilesLock           sync.Mutex
 	visibleFilesLock         sync.RWMutex
@@ -70,7 +69,7 @@ type Aggregator struct {
 	collateAndBuildWorkers int // minimize amount of background workers by default
 	mergeWorkers           int // usually 1
 
-	commitmentValuesTransform bool
+	commitmentValuesTransform bool // enables squeezing commitment values in CommitmentDomain
 
 	// To keep DB small - need move data to small files ASAP.
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
@@ -189,7 +188,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	if err := a.registerII(kv.TracesToIdxPos, salt, dirs, db, aggregationStep, kv.FileTracesToIdx, kv.TblTracesToKeys, kv.TblTracesToIdx, logger); err != nil {
 		return nil, err
 	}
-	a.KeepHistoryRecentTxInDB(aggregationStep / 2)
+	a.LimitRecentHistoryWithoutFiles(aggregationStep / 2)
 	a.recalcVisibleFiles()
 
 	if dbg.NoSync() {
@@ -1544,20 +1543,16 @@ func (a *Aggregator) cleanAfterMerge(in MergedFilesV3) {
 	}
 }
 
-// KeepHistoryRecentTxInDB - usually equal to one a.aggregationStep, but when we exec blocks from snapshots
-// we can set it to 0, because no re-org on this blocks are possible
-func (a *Aggregator) KeepHistoryRecentTxInDB(recentTxs uint64) *Aggregator {
-	a.keepInDB = recentTxs
-	a.logger.Warn("[snapshots] KeepHistoryRecentTxInDB", "txn", a.keepInDB)
+// LimitRecentHistoryWithoutFiles limits amount of recent transactions protected from prune in domains history.
+// Affects only domains with dontProduceHistoryFiles=true.
+// Usually equal to one a.aggregationStep, but could be set to step/2 or step/4 to reduce size of history tables.
+// when we exec blocks from snapshots we can set it to 0, because no re-org on those blocks are possible
+func (a *Aggregator) LimitRecentHistoryWithoutFiles(recentTxs uint64) *Aggregator {
 	for _, d := range a.d {
-		if d == nil {
-			continue
-		}
-		if d.History.dontProduceHistoryFiles {
-			d.History.keepTxInDB = a.keepInDB
+		if d != nil && d.History.dontProduceHistoryFiles {
+			d.History.keepRecentTxInDB = recentTxs
 		}
 	}
-
 	return a
 }
 
@@ -1569,7 +1564,7 @@ func (a *Aggregator) SetSnapshotBuildSema(semaphore *semaphore.Weighted) {
 func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 	fin := make(chan struct{})
 
-	if (txNum + 1) <= a.visibleFilesMinimaxTxNum.Load()+a.keepInDB {
+	if (txNum + 1) <= a.visibleFilesMinimaxTxNum.Load()+a.aggregationStep {
 		close(fin)
 		return fin
 	}

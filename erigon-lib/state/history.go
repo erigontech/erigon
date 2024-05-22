@@ -90,7 +90,7 @@ type History struct {
 
 	dontProduceHistoryFiles bool   // don't produce .v and .ef files. old data will be pruned anyway.
 	historyDisabled         bool   // skip all write operations to this History (even in DB)
-	keepTxInDB              uint64 // When dontProduceHistoryFiles=true, keepTxInDB is used to keep this amount of tx in db before pruning
+	keepRecentTxInDB        uint64 // When dontProduceHistoryFiles=true, keepRecentTxInDB is used to keep this amount of tx in db before pruning
 }
 
 type histCfg struct {
@@ -119,7 +119,7 @@ func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTabl
 		integrityCheck:          integrityCheck,
 		historyLargeValues:      cfg.historyLargeValues,
 		dontProduceHistoryFiles: cfg.dontProduceHistoryFiles,
-		keepTxInDB:              cfg.keepTxInDB,
+		keepRecentTxInDB:        cfg.keepTxInDB,
 	}
 	h._visibleFiles = []ctxItem{}
 	var err error
@@ -986,15 +986,15 @@ func (ht *HistoryRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo uint64) {
 	minIdxTx, maxIdxTx := ht.iit.smallestTxNum(tx), ht.iit.highestTxNum(tx)
 	//defer func() {
-	//	fmt.Printf("CanPrune[%s]Until(%d) noFiles=%t txTo %d idxTx [%d-%d] keepTxInDB=%d; result %t\n",
-	//		ht.h.filenameBase, untilTx, ht.h.dontProduceHistoryFiles, txTo, minIdxTx, maxIdxTx, ht.h.keepTxInDB, minIdxTx < txTo)
+	//	fmt.Printf("CanPrune[%s]Until(%d) noFiles=%t txTo %d idxTx [%d-%d] keepRecentTxInDB=%d; result %t\n",
+	//		ht.h.filenameBase, untilTx, ht.h.dontProduceHistoryFiles, txTo, minIdxTx, maxIdxTx, ht.h.keepRecentTxInDB, minIdxTx < txTo)
 	//}()
 
 	if ht.h.dontProduceHistoryFiles {
-		if ht.h.keepTxInDB >= maxIdxTx {
+		if ht.h.keepRecentTxInDB >= maxIdxTx {
 			return false, 0
 		}
-		txTo = min(maxIdxTx-ht.h.keepTxInDB, untilTx) // bound pruning
+		txTo = min(maxIdxTx-ht.h.keepRecentTxInDB, untilTx) // bound pruning
 	} else {
 		canPruneIdx := ht.iit.CanPrune(tx)
 		if !canPruneIdx {
