@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -16,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon/cmd/snapshots/sync"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	borsnaptype "github.com/ledgerwatch/erigon/polygon/bor/snaptype"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
@@ -24,13 +22,11 @@ import (
 )
 
 type HeimdallSimulator struct {
-	ctx                context.Context
-	knownBorSnapshots  *freezeblocks.BorRoSnapshots
-	activeBorSnapshots *freezeblocks.BorRoSnapshots
-	blockReader        *freezeblocks.BlockReader
-	logger             log.Logger
-	downloader         *sync.TorrentClient
-	chain              string
+	ctx         context.Context
+	snapshots   *freezeblocks.BorRoSnapshots
+	blockReader *freezeblocks.BlockReader
+	logger      log.Logger
+	chain       string
 
 	iterations               []uint64 // list of final block numbers for an iteration
 	lastAvailableBlockNumber uint64
@@ -42,7 +38,7 @@ func NewHeimdall(ctx context.Context, chain string, snapshotLocation string, log
 	cfg := snapcfg.KnownCfg(chain)
 	torrentDir := filepath.Join(snapshotLocation, "torrents", chain)
 
-	knownBorSnapshots := freezeblocks.NewBorRoSnapshots(ethconfig.Defaults.Snapshot, torrentDir, 0, logger)
+	snapshots := freezeblocks.NewBorRoSnapshots(ethconfig.Defaults.Snapshot, torrentDir, 0, logger)
 
 	files := make([]string, 0, len(cfg.Preverified))
 
@@ -50,15 +46,7 @@ func NewHeimdall(ctx context.Context, chain string, snapshotLocation string, log
 		files = append(files, item.Name)
 	}
 
-	err := knownBorSnapshots.InitSegments(files)
-	if err != nil {
-		return HeimdallSimulator{}, err
-	}
-
-	activeBorSnapshots := freezeblocks.NewBorRoSnapshots(ethconfig.Defaults.Snapshot, torrentDir, 0, logger)
-
-	config := sync.NewDefaultTorrentClientConfig(chain, snapshotLocation, logger)
-	downloader, err := sync.NewTorrentClient(config)
+	err := snapshots.InitSegments(files)
 	if err != nil {
 		return HeimdallSimulator{}, err
 	}
@@ -88,7 +76,7 @@ func NewHeimdall(ctx context.Context, chain string, snapshotLocation string, log
 		}
 	}
 
-	if err = activeBorSnapshots.ReopenFolder(); err != nil {
+	if err = snapshots.ReopenFolder(); err != nil {
 		return HeimdallSimulator{}, err
 	}
 
@@ -101,13 +89,11 @@ func NewHeimdall(ctx context.Context, chain string, snapshotLocation string, log
 	}
 
 	s := HeimdallSimulator{
-		ctx:                ctx,
-		knownBorSnapshots:  knownBorSnapshots,
-		activeBorSnapshots: activeBorSnapshots,
-		blockReader:        freezeblocks.NewBlockReader(nil, activeBorSnapshots),
-		logger:             logger,
-		downloader:         downloader,
-		chain:              chain,
+		ctx:         ctx,
+		snapshots:   snapshots,
+		blockReader: freezeblocks.NewBlockReader(nil, snapshots),
+		logger:      logger,
+		chain:       chain,
 
 		iterations:               iterations,
 		lastAvailableBlockNumber: lastAvailableBlockNum,
@@ -156,36 +142,8 @@ func (h *HeimdallSimulator) FetchSpan(ctx context.Context, spanID uint64) (*heim
 }
 
 func (h *HeimdallSimulator) FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
-	events, maxTime, err := h.blockReader.EventsByIdFromSnapshot(fromId, to, limit)
-	if err != nil {
-		return nil, err
-	}
-
-	view := h.knownBorSnapshots.View()
-	defer view.Close()
-
-	for !maxTime && len(events) != limit {
-		if seg, ok := view.EventsSegment(h.lastAvailableBlockNumber); ok {
-			if err := h.downloadData(ctx, seg, borsnaptype.BorEvents); err != nil {
-				return nil, err
-			}
-		}
-
-		if len(h.iterations) == 0 {
-			// we increment by 500k because the events we need are not in this snapshot file
-			h.lastAvailableBlockNumber += 500000
-		} else {
-			h.lastAvailableBlockNumber = h.iterations[0]
-			h.iterations = h.iterations[1:]
-		}
-
-		events, maxTime, err = h.blockReader.EventsByIdFromSnapshot(fromId, to, limit)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return events, nil
+	events, _, err := h.blockReader.EventsByIdFromSnapshot(fromId, to, limit)
+	return events, err
 }
 
 func (h *HeimdallSimulator) FetchCheckpoint(ctx context.Context, number int64) (*heimdall.Checkpoint, error) {
@@ -217,33 +175,7 @@ func (h *HeimdallSimulator) FetchMilestoneID(ctx context.Context, milestoneID st
 }
 
 func (h *HeimdallSimulator) Close() {
-	_ = h.downloader.Close()
-
-	h.activeBorSnapshots.Close()
-	h.knownBorSnapshots.Close()
-}
-
-func (h *HeimdallSimulator) downloadData(ctx context.Context, spans *freezeblocks.Segment, sType snaptype.Type) error {
-	fileName := snaptype.SegmentFileName(1, spans.From(), spans.To(), sType.Enum())
-	session := sync.NewTorrentSession(h.downloader, h.chain)
-	info, _, _ := snaptype.ParseFileName(session.LocalFsRoot(), fileName)
-
-	h.logger.Info(fmt.Sprintf("Downloading %s", fileName))
-
-	err := session.Download(ctx, fileName)
-	if err != nil {
-		return fmt.Errorf("can't download %s: %w", fileName, err)
-	}
-
-	h.logger.Info(fmt.Sprintf("Indexing %s", fileName))
-
-	err = sType.BuildIndexes(ctx, info, nil, session.LocalFsRoot(), nil, log.LvlDebug, h.logger)
-
-	if err != nil {
-		return fmt.Errorf("can't download %s: %w", fileName, err)
-	}
-
-	return h.activeBorSnapshots.ReopenSegments([]snaptype.Type{sType}, true)
+	h.snapshots.Close()
 }
 
 func (h *HeimdallSimulator) getSpan(ctx context.Context, spanId uint64) (heimdall.Span, error) {
@@ -256,28 +188,5 @@ func (h *HeimdallSimulator) getSpan(ctx context.Context, spanId uint64) (heimdal
 		return s, err
 	}
 
-	if span == nil {
-		view := h.knownBorSnapshots.View()
-		defer view.Close()
-
-		blockNum := heimdall.SpanEndBlockNum(heimdall.SpanId(spanId))
-
-		if seg, ok := view.SpansSegment(blockNum); ok {
-			if err := h.downloadData(ctx, seg, borsnaptype.BorSpans); err != nil {
-				return heimdall.Span{}, err
-			}
-		}
-
-		span, err = h.blockReader.Span(ctx, nil, spanId)
-		if err != nil {
-			return heimdall.Span{}, err
-		}
-	}
-
-	var s heimdall.Span
-	if err := json.Unmarshal(span, &s); err != nil {
-		return heimdall.Span{}, err
-	}
-
-	return s, nil
+	return heimdall.Span{}, err
 }
