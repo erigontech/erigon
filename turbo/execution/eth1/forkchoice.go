@@ -447,7 +447,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		dbg.ReadMemStats(&m)
 		timings = append(timings, "commit", commitTime, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 		e.logger.Info("Timings (slower than 50ms)", timings...)
-		e.runPostForkchoiceInBackground(initialCycle)
+		defer e.runPostForkchoiceInBackground(initialCycle)
 	}
 
 	sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
@@ -485,5 +485,6 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle boo
 		if len(timings) > 0 {
 			e.logger.Info("Timings: Post-Forkchoice (slower than 50ms)", timings...)
 		}
+		fmt.Println("A")
 	}()
 }
