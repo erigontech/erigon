@@ -121,12 +121,13 @@ func TestSimulatorSpans(t *testing.T) {
 	assert.Equal(t, uint64(96_256), span.StartBlock)
 	assert.Equal(t, uint64(102_655), span.EndBlock)
 
-	// get last span to move to next iteration
+	// get the last span
 	span2, err := sim.FetchSpan(ctx, uint64(heimdall.SpanIdAt(100_000)))
 	assert.NoError(t, err)
 	assert.Equal(t, span, span2)
 
 	// check if we are in the next iteration
+	sim.Next()
 	span3, err := sim.FetchLatestSpan(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, heimdall.SpanIdAt(205_055), span3.Id)
@@ -138,11 +139,7 @@ func TestSimulatorSpans(t *testing.T) {
 	assert.Error(t, err, "span not found")
 
 	// move to next iteration (should be +1 block since we have no more iterations defined)
-	span4, err := sim.FetchSpan(ctx, uint64(heimdall.SpanIdAt(205_055)))
-	assert.NoError(t, err)
-	assert.Equal(t, span4, span3)
-
-	// check latest span (should be the same since we are
+	sim.Next()
 	span5, err := sim.FetchLatestSpan(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, heimdall.SpanIdAt(205_056), span5.Id)

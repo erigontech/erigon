@@ -50,29 +50,32 @@ func NewHeimdallSimulator(ctx context.Context, snapDir string, logger log.Logger
 		return nil, err
 	}
 
-	var lastAvailableBlockNum uint64
-	if len(iterations) == 0 {
-		lastAvailableBlockNum = 0
-	} else {
-		lastAvailableBlockNum = iterations[0]
-		iterations = iterations[1:]
-	}
-
 	h := HeimdallSimulator{
 		snapshots:   snapshots,
 		blockReader: freezeblocks.NewBlockReader(nil, snapshots),
 
-		iterations:               iterations,
-		lastAvailableBlockNumber: lastAvailableBlockNum,
+		iterations: iterations,
 
 		logger: logger,
 	}
+
+	h.Next()
 
 	return &h, nil
 }
 
 func (h *HeimdallSimulator) Close() {
 	h.snapshots.Close()
+}
+
+// Next moves to the next iteration
+func (h *HeimdallSimulator) Next() {
+	if len(h.iterations) == 0 {
+		h.lastAvailableBlockNumber++
+	} else {
+		h.lastAvailableBlockNumber = h.iterations[0]
+		h.iterations = h.iterations[1:]
+	}
 }
 
 func (h *HeimdallSimulator) FetchLatestSpan(ctx context.Context) (*heimdall.Span, error) {
@@ -87,16 +90,6 @@ func (h *HeimdallSimulator) FetchLatestSpan(ctx context.Context) (*heimdall.Span
 }
 
 func (h *HeimdallSimulator) FetchSpan(ctx context.Context, spanID uint64) (*heimdall.Span, error) {
-	// move to next iteration
-	if spanID == uint64(heimdall.SpanIdAt(h.lastAvailableBlockNumber)) {
-		if len(h.iterations) == 0 {
-			h.lastAvailableBlockNumber++
-		} else {
-			h.lastAvailableBlockNumber = h.iterations[0]
-			h.iterations = h.iterations[1:]
-		}
-	}
-
 	if spanID > uint64(heimdall.SpanIdAt(h.lastAvailableBlockNumber)) {
 		return nil, errors.New("span not found")
 	}
