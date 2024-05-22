@@ -2,8 +2,6 @@ package diagnostics
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"path/filepath"
 	"sync"
@@ -46,13 +44,15 @@ func NewDiagnosticClient(ctx context.Context, metricsMux *http.ServeMux, dataDir
 		return nil, err
 	}
 
+	hInfo := ReadSysInfo(db)
+
 	return &DiagnosticClient{
 		ctx:              ctx,
 		db:               db,
 		metricsMux:       metricsMux,
 		dataDirPath:      dataDirPath,
 		syncStats:        SyncStatistics{},
-		hardwareInfo:     HardwareInfo{},
+		hardwareInfo:     hInfo,
 		snapshotFileList: SnapshoFilesList{},
 		bodies:           BodiesInfo{},
 		resourcesUsage: ResourcesUsage{
@@ -73,7 +73,7 @@ func createDb(ctx context.Context, dbDir string) (db kv.RwDB, err error) {
 		Path(dbDir).
 		Open(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open diagnostics db: %w", err)
+		return nil, err
 	}
 
 	return db, nil
@@ -94,18 +94,6 @@ func (d *DiagnosticClient) Setup() {
 	d.setupSpeedtestDiagnostics(rootCtx)
 
 	//d.logDiagMsgs()
-}
-
-func TestUpdater(ram string) func(tx kv.RwTx) error {
-	return func(tx kv.RwTx) error {
-		ramBytes, err := json.Marshal(ram)
-
-		if err != nil {
-			return err
-		}
-
-		return tx.Put(kv.HardwareInfo, []byte("ram"), ramBytes)
-	}
 }
 
 /*func (d *DiagnosticClient) logDiagMsgs() {

@@ -1,9 +1,12 @@
 package diagnostics
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/diskutils"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
@@ -11,8 +14,7 @@ import (
 
 func (d *DiagnosticClient) setupSysInfoDiagnostics() {
 	sysInfo := GetSysInfo(d.dataDirPath)
-
-	if err := d.db.Update(d.ctx, TestUpdater(fmt.Sprint(sysInfo.RAM.Total))); err != nil {
+	if err := d.db.Update(d.ctx, SystemInfoUpdater(sysInfo)); err != nil {
 		fmt.Println("Error updating sysinfo")
 	}
 
@@ -110,5 +112,38 @@ func GetCPUInfo() CPUInfo {
 		ModelName: modelName,
 		Cores:     cores,
 		Mhz:       mhz,
+	}
+}
+
+func ReadSysInfo(db kv.RoDB) (info HardwareInfo) {
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		infoBytes, err := tx.GetOne(kv.HardwareInfo, []byte("diagHardwareInfo"))
+
+		if err != nil {
+			return err
+		}
+
+		err = json.Unmarshal(infoBytes, &info)
+
+		if err != nil {
+			return err
+		}
+
+		return nil
+	}); err != nil {
+		return HardwareInfo{}
+	}
+	return info
+}
+
+func SystemInfoUpdater(info HardwareInfo) func(tx kv.RwTx) error {
+	return func(tx kv.RwTx) error {
+		infoBytes, err := json.Marshal(info)
+
+		if err != nil {
+			return err
+		}
+
+		return tx.Put(kv.HardwareInfo, []byte("diagHardwareInfo"), infoBytes)
 	}
 }

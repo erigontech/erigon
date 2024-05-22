@@ -53,6 +53,8 @@ func Setup(ctx *cli.Context, node *node.ErigonNode, metricsMux *http.ServeMux, p
 		diagnostic.Setup()
 
 		SetupEndpoints(ctx, node, diagMux, diagnostic)
+	} else {
+		log.Error("[Diagnostics] Failure in setting up diagnostics", "err", err)
 	}
 }
 

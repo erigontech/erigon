@@ -264,7 +264,6 @@ func (d *DiagnosticClient) UpdateFileDownloadedStatistics(downloadedInfo *FileDo
 			d.syncStats.SnapshotDownload.SegmentsDownloading[downloadingInfo.Name] = *downloadingInfo
 		}
 	}
-
 }
 
 func (d *DiagnosticClient) SyncStatistics() SyncStatistics {
