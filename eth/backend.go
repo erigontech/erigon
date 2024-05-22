@@ -767,17 +767,16 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		var l1Topics [][]libcommon.Hash
 		var l1Contracts []libcommon.Address
 		if isSequencer {
-			l1Topics = [][]libcommon.Hash{{contracts.UpdateL1InfoTreeTopic, contracts.InitialSequenceBatchesTopic}}
-			l1Contracts = []libcommon.Address{cfg.AddressGerManager, cfg.AddressZkevm}
+			l1Topics = [][]libcommon.Hash{{contracts.InitialSequenceBatchesTopic}}
+			l1Contracts = []libcommon.Address{cfg.AddressZkevm}
 		} else {
 			l1Topics = [][]libcommon.Hash{{
 				contracts.SequencedBatchTopicPreEtrog,
 				contracts.SequencedBatchTopicEtrog,
 				contracts.VerificationTopicPreEtrog,
 				contracts.VerificationTopicEtrog,
-				contracts.UpdateL1InfoTreeTopic,
 			}}
-			l1Contracts = []libcommon.Address{cfg.AddressRollup, cfg.AddressAdmin, cfg.AddressGerManager}
+			l1Contracts = []libcommon.Address{cfg.AddressRollup, cfg.AddressAdmin}
 		}
 
 		ethermanClients := make([]syncer.IEtherman, len(backend.etherManClients))
@@ -789,6 +788,15 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			ethermanClients,
 			l1Contracts,
 			l1Topics,
+			cfg.L1BlockRange,
+			cfg.L1QueryDelay,
+			cfg.L1QueryBlocksThreads,
+		)
+
+		l1InfoTreeSyncer := syncer.NewL1Syncer(
+			ethermanClients,
+			[]libcommon.Address{cfg.AddressGerManager},
+			[][]libcommon.Hash{{contracts.UpdateL1InfoTreeTopic}},
 			cfg.L1BlockRange,
 			cfg.L1QueryDelay,
 			cfg.L1QueryBlocksThreads,
@@ -854,6 +862,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				backend.engine,
 				backend.dataStream,
 				backend.l1Syncer,
+				l1InfoTreeSyncer,
 				l1BlockSyncer,
 				backend.txPool2,
 				backend.txPool2DB,
@@ -888,6 +897,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				backend.forkValidator,
 				backend.engine,
 				backend.l1Syncer,
+				l1InfoTreeSyncer,
 				streamClient,
 				backend.dataStream,
 			)

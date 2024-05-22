@@ -12,7 +12,8 @@ import (
 func SequencerZkStages(
 	ctx context.Context,
 	cumulativeIndex stages.CumulativeIndexCfg,
-	l1InfoTreeCfg L1SequencerSyncCfg,
+	l1SequencerSyncCfg L1SequencerSyncCfg,
+	l1InfoTreeCfg L1InfoTreeCfg,
 	sequencerL1BlockSyncCfg SequencerL1BlockSyncCfg,
 	dataStreamCatchupCfg DataStreamCatchupCfg,
 	exec SequenceBlockCfg,
@@ -48,13 +49,26 @@ func SequencerZkStages(
 			ID:          stages2.L1Syncer,
 			Description: "L1 Sequencer Sync Updates",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return SpawnL1SequencerSyncStage(s, u, tx, l1InfoTreeCfg, ctx, firstCycle, quiet)
+				return SpawnL1SequencerSyncStage(s, u, tx, l1SequencerSyncCfg, ctx, firstCycle, quiet)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
-				return UnwindL1SequencerSyncStage(u, tx, l1InfoTreeCfg, ctx)
+				return UnwindL1SequencerSyncStage(u, tx, l1SequencerSyncCfg, ctx)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
-				return PruneL1SequencerSyncStage(p, tx, l1InfoTreeCfg, ctx)
+				return PruneL1SequencerSyncStage(p, tx, l1SequencerSyncCfg, ctx)
+			},
+		},
+		{
+			ID:          stages2.L1InfoTree,
+			Description: "L1 Info tree index updates sync",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
+				return SpawnL1InfoTreeStage(s, u, tx, l1InfoTreeCfg, ctx, firstCycle, quiet)
+			},
+			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
+				return UnwindL1InfoTreeStage(u, tx, l1InfoTreeCfg, ctx)
+			},
+			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
+				return PruneL1InfoTreeStage(p, tx, l1InfoTreeCfg, ctx)
 			},
 		},
 		{
@@ -71,29 +85,6 @@ func SequencerZkStages(
 			},
 		},
 		{
-			/*
-				TODO:
-				we need to have another "execution" stage, that takes data from the txpool instead of from headers/bodies.
-
-				this "execution" stage should, in fact, write the following:
-				* block headers
-				* block bodies
-				* batches
-
-				currently it could be hard-coded to 1 batch -contains-> 1 block -contains-> 1 tx
-					+------------+
-					|  Batch #1  |
-					+------------+
-					| +--------+ |
-					| |Block #1| |
-					| |        | |
-					| | +Tx #1 | |
-					| +--------+ |
-					+------------+
-				later it should take both the gas limit of the block and the zk counters limit
-
-				it should also generate a retainlist for the future batch witness generation
-			*/
 			ID:          stages2.Execution,
 			Description: "Sequence transactions",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
@@ -222,6 +213,7 @@ func SequencerZkStages(
 func DefaultZkStages(
 	ctx context.Context,
 	l1SyncerCfg L1SyncerCfg,
+	l1InfoTreeCfg L1InfoTreeCfg,
 	batchesCfg BatchesCfg,
 	dataStreamCatchupCfg DataStreamCatchupCfg,
 	cumulativeIndex stages.CumulativeIndexCfg,
@@ -252,6 +244,19 @@ func DefaultZkStages(
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
 				return PruneL1SyncerStage(p, tx, l1SyncerCfg, ctx)
+			},
+		},
+		{
+			ID:          stages2.L1InfoTree,
+			Description: "L1 Info tree index updates sync",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
+				return SpawnL1InfoTreeStage(s, u, tx, l1InfoTreeCfg, ctx, firstCycle, quiet)
+			},
+			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
+				return UnwindL1InfoTreeStage(u, tx, l1InfoTreeCfg, ctx)
+			},
+			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
+				return PruneL1InfoTreeStage(p, tx, l1InfoTreeCfg, ctx)
 			},
 		},
 		{
