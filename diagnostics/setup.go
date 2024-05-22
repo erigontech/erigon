@@ -20,6 +20,7 @@ var (
 	metricsPortFlag         = "metrics.port"
 	pprofPortFlag           = "pprof.port"
 	pprofAddrFlag           = "pprof.addr"
+	downloaderDisabledFlag  = "no-downloader"
 )
 
 func Setup(ctx *cli.Context, node *node.ErigonNode, metricsMux *http.ServeMux, pprofMux *http.ServeMux) {
@@ -48,7 +49,9 @@ func Setup(ctx *cli.Context, node *node.ErigonNode, metricsMux *http.ServeMux, p
 		diagMux = SetupDiagnosticsEndpoint(nil, diagAddress)
 	}
 
-	diagnostic := diaglib.NewDiagnosticClient(diagMux, node.Backend().DataDir())
+	noDownloader := ctx.Bool(downloaderDisabledFlag)
+
+	diagnostic := diaglib.NewDiagnosticClient(diagMux, node.Backend().DataDir(), noDownloader)
 	diagnostic.Setup()
 
 	SetupEndpoints(ctx, node, diagMux, diagnostic)
