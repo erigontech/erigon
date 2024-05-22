@@ -25,8 +25,8 @@ var events2 []byte
 //go:embed testdata/v1-000000-000500-borspans.seg
 var spans []byte
 
-func createFiles(dataDir, chain string) error {
-	destPath := filepath.Join(dataDir, "torrents", chain)
+func createFiles(dataDir string) error {
+	destPath := filepath.Join(dataDir)
 	err := os.MkdirAll(destPath, 0755)
 	if err != nil {
 		return err
@@ -54,17 +54,16 @@ func createFiles(dataDir, chain string) error {
 }
 
 func setup(t *testing.T, ctx context.Context, iterations []uint64) simulator.HeimdallSimulator {
-	chain := "mumbai"
 	logger := log.New()
 	logger.SetHandler(log.StdoutHandler)
 	dataDir := t.TempDir()
 
-	err := createFiles(dataDir, chain)
+	err := createFiles(dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	sim, err := simulator.NewHeimdall(ctx, chain, dataDir, logger, iterations)
+	sim, err := simulator.NewHeimdall(ctx, dataDir, logger, iterations)
 	if err != nil {
 		t.Fatal(err)
 	}

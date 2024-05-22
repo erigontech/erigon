@@ -5,18 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	borsnaptype "github.com/ledgerwatch/erigon/polygon/bor/snaptype"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 )
@@ -26,7 +23,6 @@ type HeimdallSimulator struct {
 	snapshots   *freezeblocks.BorRoSnapshots
 	blockReader *freezeblocks.BlockReader
 	logger      log.Logger
-	chain       string
 
 	iterations               []uint64 // list of final block numbers for an iteration
 	lastAvailableBlockNumber uint64
@@ -34,44 +30,21 @@ type HeimdallSimulator struct {
 
 type IndexFnType func(context.Context, snaptype.FileInfo, uint32, string, *background.Progress, log.Lvl, log.Logger) error
 
-func NewHeimdall(ctx context.Context, chain string, snapshotLocation string, logger log.Logger, iterations []uint64) (HeimdallSimulator, error) {
-	cfg := snapcfg.KnownCfg(chain)
-	torrentDir := filepath.Join(snapshotLocation, "torrents", chain)
-
-	snapshots := freezeblocks.NewBorRoSnapshots(ethconfig.Defaults.Snapshot, torrentDir, 0, logger)
-
-	files := make([]string, 0, len(cfg.Preverified))
-
-	for _, item := range cfg.Preverified {
-		files = append(files, item.Name)
-	}
-
-	err := snapshots.InitSegments(files)
-	if err != nil {
-		return HeimdallSimulator{}, err
-	}
+func NewHeimdall(ctx context.Context, snapDir string, logger log.Logger, iterations []uint64) (HeimdallSimulator, error) {
+	snapshots := freezeblocks.NewBorRoSnapshots(ethconfig.Defaults.Snapshot, snapDir, 0, logger)
 
 	// index local files
-	localFiles, err := os.ReadDir(torrentDir)
+	localFiles, err := os.ReadDir(snapDir)
 	if err != nil {
 		return HeimdallSimulator{}, err
 	}
 
 	for _, file := range localFiles {
-		info, _, _ := snaptype.ParseFileName(torrentDir, file.Name())
+		info, _, _ := snaptype.ParseFileName(snapDir, file.Name())
 		if info.Ext == ".seg" {
-			if info.Type.Enum() == borsnaptype.Enums.BorSpans {
-				err = info.Type.BuildIndexes(ctx, info, nil, torrentDir, nil, log.LvlWarn, logger)
-				if err != nil {
-					return HeimdallSimulator{}, err
-				}
-			}
-
-			if info.Type.Enum() == borsnaptype.Enums.BorEvents {
-				err = info.Type.BuildIndexes(ctx, info, nil, torrentDir, nil, log.LvlWarn, logger)
-				if err != nil {
-					return HeimdallSimulator{}, err
-				}
+			err = info.Type.BuildIndexes(ctx, info, nil, snapDir, nil, log.LvlWarn, logger)
+			if err != nil {
+				return HeimdallSimulator{}, err
 			}
 		}
 	}
@@ -93,7 +66,6 @@ func NewHeimdall(ctx context.Context, chain string, snapshotLocation string, log
 		snapshots:   snapshots,
 		blockReader: freezeblocks.NewBlockReader(nil, snapshots),
 		logger:      logger,
-		chain:       chain,
 
 		iterations:               iterations,
 		lastAvailableBlockNumber: lastAvailableBlockNum,
