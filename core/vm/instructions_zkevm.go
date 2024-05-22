@@ -8,6 +8,8 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
+	"encoding/hex"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func opCallDataLoad_zkevmIncompatible(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -161,11 +163,77 @@ func makeLog_zkevm(size int) executionFunc {
 
 		d := scope.Memory.GetCopy(int64(mStart.Uint64()), int64(mSize.Uint64()))
 
-		// [zkEvm] fill 0 at the end
-		dataLen := len(d)
-		lenMod32 := dataLen & 31
-		if lenMod32 != 0 {
-			d = append(d, make([]byte, 32-lenMod32)...)
+		forkBlock := uint64(0)
+		if interpreter.evm.ChainConfig().ForkID88ElderberryBlock != nil {
+			forkBlock = interpreter.VM.evm.ChainConfig().ForkID88ElderberryBlock.Uint64()
+		}
+		blockNo := interpreter.VM.evm.Context().BlockNumber
+
+		// APPLY BUG ONLY ABOVE FORKID9
+		if forkBlock == 0 || blockNo < forkBlock {
+			// [zkEvm] fill 0 at the end
+			dataLen := len(d)
+			lenMod32 := dataLen & 31
+			if lenMod32 != 0 {
+				d = append(d, make([]byte, 32-lenMod32)...)
+			}
+		} else {
+			// bug start
+			/*
+			  \  /
+			 (o)(o)
+			 /    \
+			 \    /
+			  \  /
+			   \/
+			*/
+
+			dataHex := hex.EncodeToString(d)
+
+			bugPossible := false
+
+			// if the first part of datahex < 16 (mSize < 32), remove leading zero
+			if len(dataHex) > 0 && dataHex[0] == '0' && dataHex[1] != '0' && mSize.Uint64() < 32 {
+				bugPossible = true
+				log.Warn("Possible bug detected in log data", "block", blockNo, "data", dataHex, "size", mSize.Uint64())
+			}
+
+			if bugPossible {
+				dataHex = dataHex[1:]
+
+				// pad the hex out
+				dataHex = appendZerosHex(dataHex, 64)
+
+				msInt := mSize.Uint64()
+
+				// conditional padding to match C++ bug
+				if int(msInt*2) > len(dataHex) {
+					dataHex = prependZerosHex(dataHex, int(msInt*2))
+				}
+
+				if len(dataHex) > int(msInt*2) {
+					dataHex = dataHex[:msInt*2]
+				}
+
+				d, _ = hex.DecodeString(dataHex)
+			} else {
+				// erigon behaviour
+				// [zkEvm] fill 0 at the end
+				dataLen := len(d)
+				lenMod32 := dataLen & 31
+				if lenMod32 != 0 {
+					d = append(d, make([]byte, 32-lenMod32)...)
+				}
+			}
+			/*
+			  \  /
+			 (o)(o)
+			 /    \
+			 \    /
+			  \  /
+			   \/
+			*/
+			// bug end
 		}
 
 		interpreter.evm.IntraBlockState().AddLog_zkEvm(&types.Log{
@@ -179,6 +247,20 @@ func makeLog_zkevm(size int) executionFunc {
 
 		return nil, nil
 	}
+}
+
+func prependZerosHex(s string, length int) string {
+	for len(s) < length {
+		s = "0" + s
+	}
+	return s
+}
+
+func appendZerosHex(s string, length int) string {
+	for len(s) < length {
+		s = s + "0"
+	}
+	return s
 }
 
 func opCreate_zkevm(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
