@@ -458,13 +458,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 }
 
 func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle bool) {
-	// e.doingPostForkchoice is an atomic.Bool, use compare-and-swap to ensure only one goroutine is running
-	if e.doingPostForkchoice.Load() {
-		return
-	}
-	e.doingPostForkchoice.Store(true)
 	go func() {
-		defer e.doingPostForkchoice.Store(false)
 		timings := []interface{}{}
 		// Wait for semaphore to be available
 		if e.semaphore.Acquire(e.bacgroundCtx, 1) != nil {
