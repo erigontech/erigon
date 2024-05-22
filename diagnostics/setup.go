@@ -20,7 +20,11 @@ var (
 	metricsPortFlag         = "metrics.port"
 	pprofPortFlag           = "pprof.port"
 	pprofAddrFlag           = "pprof.addr"
+<<<<<<< HEAD
 	diagnoticsSpeedTestFlag = "diagnostics.speedtest"
+=======
+	downloaderDisabledFlag  = "no-downloader"
+>>>>>>> 420cfbfc94 (disable speedtest if)
 )
 
 func Setup(ctx *cli.Context, node *node.ErigonNode, metricsMux *http.ServeMux, pprofMux *http.ServeMux) {
