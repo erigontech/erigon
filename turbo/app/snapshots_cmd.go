@@ -766,7 +766,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		return err
 	}
 
-	//agg.KeepStepsInDB(0)
+	//agg.KeepHistoryRecentTxInDB(0)
 
 	var forwardProgress uint64
 	if to == 0 {

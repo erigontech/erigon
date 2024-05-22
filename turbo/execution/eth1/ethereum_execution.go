@@ -161,6 +161,15 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		}, nil
 	}
 	defer e.semaphore.Release(1)
+
+	// Update the last new block seen.
+	// This is used by eth_syncing as an heuristic to determine if the node is syncing or not.
+	if err := e.db.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteLastNewBlockSeen(tx, req.Number)
+	}); err != nil {
+		return nil, err
+	}
+
 	tx, err := e.db.BeginRw(ctx)
 	if err != nil {
 		return nil, err

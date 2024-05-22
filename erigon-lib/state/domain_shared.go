@@ -311,7 +311,7 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error)
 	}
 
 	if !sd.aggTx.a.commitmentValuesTransform || bytes.Equal(prefix, keyCommitmentState) {
-		return v, endTx, nil
+		return v, endTx / sd.aggTx.a.StepSize(), nil
 	}
 
 	// replace shortened keys in the branch with full keys to allow HPH work seamlessly

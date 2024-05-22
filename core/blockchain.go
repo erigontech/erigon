@@ -27,6 +27,7 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -369,7 +370,7 @@ func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHead
 	return nil
 }
 
-func BlockPostValidation(gasUsed, blobGasUsed uint64, h *types.Header) error {
+func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receiptHash common.Hash, h *types.Header) error {
 	if gasUsed != h.GasUsed {
 		return fmt.Errorf("gas used by execution: %d, in header: %d, headerNum=%d, %x",
 			gasUsed, h.GasUsed, h.Number.Uint64(), h.Hash())
@@ -378,6 +379,10 @@ func BlockPostValidation(gasUsed, blobGasUsed uint64, h *types.Header) error {
 	if h.BlobGasUsed != nil && blobGasUsed != *h.BlobGasUsed {
 		return fmt.Errorf("blobGasUsed by execution: %d, in header: %d, headerNum=%d, %x",
 			blobGasUsed, *h.BlobGasUsed, h.Number.Uint64(), h.Hash())
+	}
+	if checkReceipts && receiptHash != h.ReceiptHash {
+		return fmt.Errorf("receiptHash mismatch: %x != %x, headerNum=%d, %x",
+			receiptHash, h.ReceiptHash, h.Number.Uint64(), h.Hash())
 	}
 	return nil
 }
