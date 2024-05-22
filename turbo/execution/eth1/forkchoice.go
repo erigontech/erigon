@@ -470,6 +470,7 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle boo
 		if e.semaphore.Acquire(e.bacgroundCtx, 1) != nil {
 			return
 		}
+		defer e.semaphore.Release(1)
 		if err := e.db.Update(e.bacgroundCtx, func(tx kv.RwTx) error {
 			if err := e.executionPipeline.RunPrune(e.db, tx, initialCycle); err != nil {
 				return err
