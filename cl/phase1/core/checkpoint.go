@@ -24,6 +24,9 @@ func extractSlotFromSerializedBeaconState(beaconState []byte) (uint64, error) {
 
 func RetrieveBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, net clparams.NetworkType) (*state.CachingBeaconState, error) {
 	uris := clparams.GetAllCheckpointSyncEndpoints(net)
+	if len(uris) == 0 {
+		return nil, fmt.Errorf("no uris for checkpoint sync")
+	}
 
 	fetchBeaconState := func(uri string) (*state.CachingBeaconState, error) {
 		log.Info("[Checkpoint Sync] Requesting beacon state", "uri", uri)
