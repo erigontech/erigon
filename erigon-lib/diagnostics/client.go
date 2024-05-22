@@ -55,10 +55,7 @@ func (d *DiagnosticClient) Setup() {
 	d.setupHeadersDiagnostics(rootCtx)
 	d.setupBodiesDiagnostics(rootCtx)
 	d.setupResourcesUsageDiagnostics(rootCtx)
-
-	if !d.noDownloader {
-		d.setupSpeedtestDiagnostics(rootCtx)
-	}
+	d.setupSpeedtestDiagnostics(rootCtx)
 
 	//d.logDiagMsgs()
 }
