@@ -66,6 +66,7 @@ func (d *DiagnosticClient) runSpeedTest(rootCtx context.Context) NetworkSpeedTes
 		}
 
 		ctx, cancel := context.WithTimeout(rootCtx, time.Second*15)
+
 		defer cancel()
 		_ = analyzer.RunWithContext(ctx, s.Host, func(pl *transport.PLoss) {
 			packetLoss = pl.Loss()
