@@ -940,7 +940,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			return nil, err
 		}
 		state, err := clcore.RetrieveBeaconState(ctx, beaconCfg,
-			clparams.GetCheckpointSyncEndpoint(clparams.NetworkType(config.NetworkID)))
+			clparams.GetAllCheckpointSyncEndpoints(clparams.NetworkType(config.NetworkID)))
 		if err != nil {
 			return nil, err
 		}

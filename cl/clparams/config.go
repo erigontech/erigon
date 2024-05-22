@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	mathrand "math/rand"
 	"os"
 	"path"
 	"time"
@@ -1036,6 +1037,26 @@ func GetConfigsByNetworkName(net string) (*NetworkConfig, *BeaconChainConfig, Ne
 	default:
 		return nil, nil, MainnetNetwork, fmt.Errorf("chain not found")
 	}
+}
+
+func GetAllCheckpointSyncEndpoints(net NetworkType) []string {
+	shuffle := func(urls []string) []string {
+		if len(urls) <= 1 {
+			return urls
+		}
+		ret := make([]string, len(urls))
+		perm := mathrand.Perm(len(urls))
+		for i, v := range perm {
+			ret[v] = urls[i]
+		}
+		return ret
+	}
+	urls := []string{}
+	urls = append(urls, shuffle(ConfigurableCheckpointsURLs)...)
+	if checkpoints, ok := CheckpointSyncEndpoints[net]; ok {
+		urls = append(urls, shuffle(checkpoints)...)
+	}
+	return urls
 }
 
 func GetCheckpointSyncEndpoint(net NetworkType) string {

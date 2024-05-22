@@ -55,7 +55,7 @@ func runSentinelNode(cliCtx *cli.Context) error {
 	go mem.LogMemStats(cliCtx.Context, log.Root())
 	go disk.UpdateDiskStats(cliCtx.Context, log.Root())
 
-	bs, err := core.RetrieveBeaconState(context.Background(), cfg.BeaconCfg, clparams.GetCheckpointSyncEndpoint(cfg.NetworkType))
+	bs, err := core.RetrieveBeaconState(context.Background(), cfg.BeaconCfg, clparams.GetAllCheckpointSyncEndpoints(cfg.NetworkType))
 	if err != nil {
 		return err
 	}

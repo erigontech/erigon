@@ -127,7 +127,7 @@ func (c *Chain) Run(ctx *Context) error {
 	dirs := datadir.New(c.Datadir)
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
-	bs, err := core.RetrieveBeaconState(ctx, beaconConfig, clparams.GetCheckpointSyncEndpoint(networkType))
+	bs, err := core.RetrieveBeaconState(ctx, beaconConfig, clparams.GetAllCheckpointSyncEndpoints(networkType))
 	if err != nil {
 		return err
 	}
@@ -177,7 +177,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 		return err
 	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
-	bs, err := core.RetrieveBeaconState(ctx, beaconConfig, clparams.GetCheckpointSyncEndpoint(ntype))
+	bs, err := core.RetrieveBeaconState(ctx, beaconConfig, clparams.GetAllCheckpointSyncEndpoints(ntype))
 	if err != nil {
 		return err
 	}
