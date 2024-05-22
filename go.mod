@@ -65,7 +65,7 @@ require (
 	github.com/ledgerwatch/erigon-lib v1.0.0
 	github.com/libp2p/go-libp2p v0.34.0
 	github.com/libp2p/go-libp2p-mplex v0.9.0
-	github.com/libp2p/go-libp2p-pubsub v0.9.3
+	github.com/libp2p/go-libp2p-pubsub v0.11.0
 	github.com/maticnetwork/crand v1.0.2
 	github.com/multiformats/go-multiaddr v0.12.4
 	github.com/nxadm/tail v1.4.11
