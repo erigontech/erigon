@@ -57,7 +57,7 @@ type EthereumExecutionModule struct {
 	// Changes accumulator
 	hook                *stages.Hook
 	accumulator         *shards.Accumulator
-	stateChangeConsumer shards.StateChangeConsumers
+	stateChangeConsumer shards.StateChangeConsumer
 
 	// configuration
 	config  *chain.Config
