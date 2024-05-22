@@ -27,6 +27,8 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
+const hashProgressKeySuffix = "_hash"
+
 func NewPolygonSyncStageCfg(
 	logger log.Logger,
 	chainConfig *chain.Config,
@@ -324,6 +326,25 @@ func (e *polygonSyncStageExecutionEngine) InsertBlocks(_ context.Context, blocks
 		}
 	}
 
+	if len(blocks) == 0 {
+		return nil
+	}
+
+	// update stage progress
+	tip := blocks[len(blocks)-1]
+	tipBlockNum := tip.NumberU64()
+	tipBlockHash := tip.Hash()
+
+	if err := e.stageState.Update(e.tx, tipBlockNum); err != nil {
+		return err
+	}
+
+	if err := saveStageHashProgress(e.tx, e.stageState.ID, tipBlockHash); err != nil {
+		return err
+	}
+
+	e.logger.Info(e.appendLogPrefix("stage progress updated"), "blockNum", tipBlockNum, "blockHash", tipBlockHash)
+
 	return nil
 }
 
@@ -338,17 +359,10 @@ func (e *polygonSyncStageExecutionEngine) UpdateForkChoice(ctx context.Context, 
 		return err
 	}
 
-	// update stage progress
-	tipBlockNum := tip.Number.Uint64()
-	if err := e.stageState.Update(e.tx, tipBlockNum); err != nil {
-		return err
-	}
-
 	// we need to interrupt sync.Run when we reach an UpdateForkChoice call
 	// so that the stage can exit and allow the loop to proceed to execution
 	e.interrupt(errUpdateForkChoiceInterrupt)
-
-	e.logger.Info(e.appendLogPrefix("stage progress updated"), "block", tipBlockNum)
+	e.logger.Info(e.appendLogPrefix("update fork choice"), "block", tip.Number.Uint64())
 	return nil
 }
 
@@ -357,14 +371,20 @@ func (e *polygonSyncStageExecutionEngine) CurrentHeader(ctx context.Context) (*t
 		return nil, err
 	}
 
-	stageProgress, err := stages.GetStageProgress(e.tx, stages.PolygonSync)
+	snapshotBlockNum := e.blockReader.FrozenBlocks()
+	stageBlockNum := e.stageState.BlockNumber
+	if stageBlockNum < snapshotBlockNum {
+		return e.blockReader.HeaderByNumber(ctx, e.tx, snapshotBlockNum)
+	}
+
+	stageHash, err := readStageHashProgress(e.tx, e.stageState.ID)
 	if err != nil {
 		return nil, err
 	}
 
-	header, err := e.blockReader.HeaderByNumber(ctx, e.tx, stageProgress)
-	if err != nil {
-		return nil, err
+	header := rawdb.ReadHeader(e.tx, stageHash, stageBlockNum)
+	if header == nil {
+		return nil, errors.New("header not found")
 	}
 
 	return header, nil
@@ -449,6 +469,23 @@ func (e *polygonSyncStageExecutionEngine) downloadStateSyncEvents(ctx context.Co
 	)
 
 	return nil
+}
+
+func saveStageHashProgress(db kv.Putter, stageId stages.SyncStage, progress common.Hash) error {
+	return db.Put(kv.SyncStageProgress, hashProgressKey(stageId), progress[:])
+}
+
+func readStageHashProgress(db kv.Getter, stageId stages.SyncStage) (common.Hash, error) {
+	hashBytes, err := db.GetOne(kv.SyncStageProgress, hashProgressKey(stageId))
+	if err != nil {
+		return common.Hash{}, err
+	}
+
+	return common.BytesToHash(hashBytes), nil
+}
+
+func hashProgressKey(stageId stages.SyncStage) []byte {
+	return []byte(stageId + hashProgressKeySuffix)
 }
 
 func newAppendLogPrefix(logPrefix string) func(msg string) string {
