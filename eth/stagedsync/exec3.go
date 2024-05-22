@@ -876,7 +876,7 @@ Loop:
 				t1 = time.Since(tt)
 
 				tt = time.Now()
-				if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Minute, applyTx); err != nil {
+				if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Hour, applyTx); err != nil {
 					return err
 				}
 				t3 = time.Since(tt)
