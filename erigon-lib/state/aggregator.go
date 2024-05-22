@@ -74,7 +74,7 @@ type Aggregator struct {
 	// To keep DB small - need move data to small files ASAP.
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
 	buildingFiles           atomic.Bool
-	mergeingFiles           atomic.Bool
+	mergingFiles            atomic.Bool
 	buildingOptionalIndices atomic.Bool
 
 	//warmupWorking          atomic.Bool
@@ -621,7 +621,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 
 func (a *Aggregator) BuildFiles(toTxNum uint64) (err error) {
 	finished := a.BuildFilesInBackground(toTxNum)
-	if !(a.buildingFiles.Load() || a.mergeingFiles.Load() || a.buildingOptionalIndices.Load()) {
+	if !(a.buildingFiles.Load() || a.mergingFiles.Load() || a.buildingOptionalIndices.Load()) {
 		return nil
 	}
 
@@ -636,7 +636,7 @@ Loop:
 			fmt.Println("BuildFiles finished")
 			break Loop
 		case <-logEvery.C:
-			if !(a.buildingFiles.Load() || a.mergeingFiles.Load() || a.buildingOptionalIndices.Load()) {
+			if !(a.buildingFiles.Load() || a.mergingFiles.Load() || a.buildingOptionalIndices.Load()) {
 				break Loop
 			}
 			if a.HasBackgroundFilesBuild() {
@@ -1617,14 +1617,14 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 			close(fin)
 			return
 		}
-		if ok := a.mergeingFiles.CompareAndSwap(false, true); !ok {
+		if ok := a.mergingFiles.CompareAndSwap(false, true); !ok {
 			close(fin)
 			return
 		}
 		a.wg.Add(1)
 		go func() {
 			defer a.wg.Done()
-			defer a.mergeingFiles.Store(false)
+			defer a.mergingFiles.Store(false)
 
 			//TODO: merge must have own semphore
 
