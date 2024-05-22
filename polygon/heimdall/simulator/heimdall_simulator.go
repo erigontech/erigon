@@ -25,6 +25,8 @@ type HeimdallSimulator struct {
 	logger log.Logger
 }
 
+var _ heimdall.HeimdallClient = (*HeimdallSimulator)(nil)
+
 func NewHeimdallSimulator(ctx context.Context, snapDir string, logger log.Logger, iterations []uint64) (*HeimdallSimulator, error) {
 	snapshots := freezeblocks.NewBorRoSnapshots(ethconfig.Defaults.Snapshot, snapDir, 0, logger)
 
@@ -112,12 +114,20 @@ func (h *HeimdallSimulator) FetchStateSyncEvents(_ context.Context, fromId uint6
 	return events, err
 }
 
+func (h *HeimdallSimulator) FetchStateSyncEvent(ctx context.Context, id uint64) (*heimdall.EventRecordWithTime, error) {
+	return nil, errors.New("method FetchStateSyncEvent not implemented")
+}
+
 func (h *HeimdallSimulator) FetchCheckpoint(ctx context.Context, number int64) (*heimdall.Checkpoint, error) {
 	return nil, errors.New("method FetchCheckpoint not implemented")
 }
 
 func (h *HeimdallSimulator) FetchCheckpointCount(ctx context.Context) (int64, error) {
 	return 0, errors.New("method FetchCheckpointCount not implemented")
+}
+
+func (h *HeimdallSimulator) FetchCheckpoints(ctx context.Context, page uint64, limit uint64) ([]*heimdall.Checkpoint, error) {
+	return nil, errors.New("method FetchCheckpoints not implemented")
 }
 
 func (h *HeimdallSimulator) FetchMilestone(ctx context.Context, number int64) (*heimdall.Milestone, error) {
