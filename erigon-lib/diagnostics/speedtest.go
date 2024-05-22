@@ -17,6 +17,11 @@ func (d *DiagnosticClient) setupSpeedtestDiagnostics(rootCtx context.Context) {
 		for {
 			select {
 			case <-ticker.C:
+				if d.syncStats.SnapshotDownload.DownloadFinished {
+					ticker.Stop()
+					return
+				}
+
 				d.networkSpeedMutex.Lock()
 				d.networkSpeed = d.runSpeedTest(rootCtx)
 				d.networkSpeedMutex.Unlock()

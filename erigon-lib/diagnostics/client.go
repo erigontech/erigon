@@ -8,8 +8,9 @@ import (
 )
 
 type DiagnosticClient struct {
-	metricsMux  *http.ServeMux
-	dataDirPath string
+	metricsMux   *http.ServeMux
+	dataDirPath  string
+	noDownloader bool
 
 	syncStats           SyncStatistics
 	snapshotFileList    SnapshoFilesList
@@ -26,10 +27,11 @@ type DiagnosticClient struct {
 	networkSpeedMutex   sync.Mutex
 }
 
-func NewDiagnosticClient(metricsMux *http.ServeMux, dataDirPath string) *DiagnosticClient {
+func NewDiagnosticClient(metricsMux *http.ServeMux, dataDirPath string, noDownloader bool) *DiagnosticClient {
 	return &DiagnosticClient{
 		metricsMux:       metricsMux,
 		dataDirPath:      dataDirPath,
+		noDownloader:     noDownloader,
 		syncStats:        SyncStatistics{},
 		hardwareInfo:     HardwareInfo{},
 		snapshotFileList: SnapshoFilesList{},
@@ -53,7 +55,10 @@ func (d *DiagnosticClient) Setup() {
 	d.setupHeadersDiagnostics(rootCtx)
 	d.setupBodiesDiagnostics(rootCtx)
 	d.setupResourcesUsageDiagnostics(rootCtx)
-	d.setupSpeedtestDiagnostics(rootCtx)
+
+	if !d.noDownloader {
+		d.setupSpeedtestDiagnostics(rootCtx)
+	}
 
 	//d.logDiagMsgs()
 }
