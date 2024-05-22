@@ -423,10 +423,12 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			return
 		}
 
+		commitStart := time.Now()
 		if err := tx.Commit(); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
+		commitTime := time.Since(commitStart)
 
 		if e.hook != nil {
 			if err := e.db.View(ctx, func(tx kv.Tx) error {
@@ -440,24 +442,9 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			e.logger.Info("head updated", "hash", headHash, "number", *headNumber)
 		}
 
-		var commitStart time.Time
-		if err := e.db.Update(ctx, func(tx kv.RwTx) error {
-			if err := e.executionPipeline.RunPrune(e.db, tx, initialCycle); err != nil {
-				return err
-			}
-			if pruneTimings := e.executionPipeline.PrintTimings(); len(pruneTimings) > 0 {
-				timings = append(timings, pruneTimings...)
-			}
-			commitStart = time.Now()
-			return nil
-		}); err != nil {
-			err = fmt.Errorf("updateForkChoice: %w", err)
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
 		var m runtime.MemStats
 		dbg.ReadMemStats(&m)
-		timings = append(timings, "commit", time.Since(commitStart), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+		timings = append(timings, "commit", commitTime, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 		e.logger.Info("Timings (slower than 50ms)", timings...)
 	}
 
@@ -466,4 +453,35 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		Status:          status,
 		ValidationError: validationError,
 	})
+}
+
+func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle bool) {
+	// e.doingPostForkchoice is an atomic.Bool, use compare-and-swap to ensure only one goroutine is running
+	if !e.doingPostForkchoice.CompareAndSwap(false, true) {
+		return
+	}
+
+	go func() {
+		defer e.doingPostForkchoice.Store(false)
+		timings := []interface{}{}
+		// Wait for semaphore to be available
+		if e.semaphore.Acquire(e.bacgroundCtx, 1) != nil {
+			return
+		}
+		if err := e.db.Update(e.bacgroundCtx, func(tx kv.RwTx) error {
+			if err := e.executionPipeline.RunPrune(e.db, tx, initialCycle); err != nil {
+				return err
+			}
+			if pruneTimings := e.executionPipeline.PrintTimings(); len(pruneTimings) > 0 {
+				timings = append(timings, pruneTimings...)
+			}
+			return nil
+		}); err != nil {
+			e.logger.Error("runPostForkchoiceInBackground", "error", err)
+			return
+		}
+		if len(timings) > 0 {
+			e.logger.Info("Post-Forkchoice processing's Timings (slower than 50ms)", timings...)
+		}
+	}()
 }

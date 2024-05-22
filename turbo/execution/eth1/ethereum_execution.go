@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math/big"
+	"sync/atomic"
 
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
@@ -55,13 +56,15 @@ type EthereumExecutionModule struct {
 	// Changes accumulator
 	hook                *stages.Hook
 	accumulator         *shards.Accumulator
-	stateChangeConsumer shards.StateChangeConsumer
+	stateChangeConsumer shards.StateChangeConsumers
 
 	// configuration
 	config  *chain.Config
 	syncCfg ethconfig.Sync
 	// consensus
 	engine consensus.Engine
+
+	doingPostForkchoice atomic.Bool
 
 	execution.UnimplementedExecutionServer
 }
