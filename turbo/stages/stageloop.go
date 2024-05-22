@@ -383,15 +383,11 @@ func MiningStep(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, tmpDir
 	defer tx.Rollback()
 
 	var miningBatch kv.RwTx
-	//if histV3 {
-	//	sd := state.NewSharedDomains(tx)
-	//	defer sd.Close()
-	//	miningBatch = sd
-	//} else {
+
 	mb := membatchwithdb.NewMemoryBatch(tx, tmpDir, logger)
 	defer mb.Rollback()
 	miningBatch = mb
-	//}
+
 	txc := wrap.TxContainer{Tx: miningBatch}
 	sd, err := state.NewSharedDomains(mb, logger)
 	if err != nil {
@@ -476,8 +472,17 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things
+	shouldUnwind := unwindPoint > 0
+	var txNum, blockNum uint64
 	// Construct side fork if we have one
-	if unwindPoint > 0 {
+	if shouldUnwind {
+		// Persist block number and tx number
+		var err error
+		txc.Doms, err = state.NewSharedDomains(txc.Tx, log.New())
+		if err != nil {
+			return err
+		}
+		defer txc.Doms.Close()
 		// Run it through the unwind
 		if err := stateSync.UnwindTo(unwindPoint, stagedsync.StagedUnwind, nil); err != nil {
 			return err
@@ -485,6 +490,9 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 		if err = stateSync.RunUnwind(nil, txc); err != nil {
 			return err
 		}
+		txNum = txc.Doms.TxNum()
+		blockNum = txc.Doms.BlockNum()
+		txc.Doms.Close()
 	}
 	if err := rawdb.TruncateCanonicalChain(ctx, txc.Tx, header.Number.Uint64()+1); err != nil {
 		return err
@@ -517,6 +525,15 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 	// Prepare memory state for block execution
 	if err := addAndVerifyBlockStep(txc.Tx, engine, chainReader, header, body); err != nil {
 		return err
+	}
+	if shouldUnwind {
+		txc.Doms, err = state.NewSharedDomains(txc.Tx, log.New())
+		if err != nil {
+			return err
+		}
+		defer txc.Doms.Close()
+		txc.Doms.SetTxNum(txNum)
+		txc.Doms.SetBlockNum(blockNum)
 	}
 	if err = stateSync.RunNoInterrupt(nil, txc, false /* firstCycle */); err != nil {
 		if !test {

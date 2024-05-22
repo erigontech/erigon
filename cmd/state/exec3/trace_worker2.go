@@ -433,6 +433,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 				GetHashFn:       getHashFn,
 				EvmBlockContext: blockContext,
 				Withdrawals:     b.Withdrawals(),
+				Requests:        b.Requests(),
 
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: true,

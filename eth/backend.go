@@ -984,6 +984,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.polygonSyncService = polygonsync.NewService(
 			logger,
 			chainConfig,
+			dirs.DataDir,
 			tmpdir,
 			sentryClient,
 			p2pConfig.MaxPeers,
