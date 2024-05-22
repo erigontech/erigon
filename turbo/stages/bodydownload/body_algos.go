@@ -173,13 +173,9 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 			copy(bodyHashes[length.Hash:], header.TxHash.Bytes())
 			if header.WithdrawalsHash != nil {
 				copy(bodyHashes[2*length.Hash:], header.WithdrawalsHash.Bytes())
-			} else {
-				copy(bodyHashes[2*length.Hash:], types.EmptyRootHash.Bytes())
 			}
 			if header.RequestsRoot != nil {
 				copy(bodyHashes[3*length.Hash:], header.RequestsRoot.Bytes())
-			} else {
-				copy(bodyHashes[3*length.Hash:], types.EmptyRootHash.Bytes())
 			}
 			bd.requestedMap[bodyHashes] = blockNum
 			blockNums = append(blockNums, blockNum)
@@ -313,15 +309,19 @@ Loop:
 		txs, uncles, withdrawals, requests, lenOfP2PMessage := delivery.txs, delivery.uncles, delivery.withdrawals, delivery.requests, delivery.lenOfP2PMessage
 
 		for i := range txs {
-			uncleHash := types.CalcUncleHash(uncles[i])
-			txHash := types.DeriveSha(RawTransactions(txs[i]))
-			withdrawalsHash := types.DeriveSha(withdrawals[i])
-			requestsRoot := types.DeriveSha(requests[i])
 			var bodyHashes BodyHashes
+			uncleHash := types.CalcUncleHash(uncles[i])
 			copy(bodyHashes[:], uncleHash.Bytes())
+			txHash := types.DeriveSha(RawTransactions(txs[i]))
 			copy(bodyHashes[length.Hash:], txHash.Bytes())
-			copy(bodyHashes[2*length.Hash:], withdrawalsHash.Bytes())
-			copy(bodyHashes[3*length.Hash:], requestsRoot.Bytes())
+			if withdrawals[i] != nil {
+				withdrawalsHash := types.DeriveSha(withdrawals[i])
+				copy(bodyHashes[2*length.Hash:], withdrawalsHash.Bytes())
+			}
+			if requests[i] != nil {
+				requestsRoot := types.DeriveSha(requests[i])
+				copy(bodyHashes[3*length.Hash:], requestsRoot.Bytes())
+			}
 
 			// Block numbers are added to the bd.delivered bitmap here, only for blocks for which the body has been received, and their double hashes are present in the bd.requestedMap
 			// Also, block numbers can be added to bd.delivered for empty blocks, above
