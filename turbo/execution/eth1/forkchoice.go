@@ -439,6 +439,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				return
 			}
 		}
+		e.runPostForkchoiceInBackground(initialCycle)
 		if log {
 			e.logger.Info("head updated", "hash", headHash, "number", *headNumber)
 		}
