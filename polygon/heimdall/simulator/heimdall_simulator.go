@@ -8,8 +8,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
@@ -118,31 +116,31 @@ func (h *HeimdallSimulator) FetchStateSyncEvents(_ context.Context, fromId uint6
 }
 
 func (h *HeimdallSimulator) FetchCheckpoint(ctx context.Context, number int64) (*heimdall.Checkpoint, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method FetchCheckpoint not implemented")
+	return nil, errors.New("method FetchCheckpoint not implemented")
 }
 
 func (h *HeimdallSimulator) FetchCheckpointCount(ctx context.Context) (int64, error) {
-	return 0, status.Errorf(codes.Unimplemented, "method FetchCheckpointCount not implemented")
+	return 0, errors.New("method FetchCheckpointCount not implemented")
 }
 
 func (h *HeimdallSimulator) FetchMilestone(ctx context.Context, number int64) (*heimdall.Milestone, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method FetchMilestone not implemented")
+	return nil, errors.New("method FetchMilestone not implemented")
 }
 
 func (h *HeimdallSimulator) FetchMilestoneCount(ctx context.Context) (int64, error) {
-	return 0, status.Errorf(codes.Unimplemented, "method FetchMilestoneCount not implemented")
+	return 0, errors.New("method FetchMilestoneCount not implemented")
 }
 
 func (h *HeimdallSimulator) FetchNoAckMilestone(ctx context.Context, milestoneID string) error {
-	return status.Errorf(codes.Unimplemented, "method FetchNoAckMilestone not implemented")
+	return errors.New("method FetchNoAckMilestone not implemented")
 }
 
 func (h *HeimdallSimulator) FetchLastNoAckMilestone(ctx context.Context) (string, error) {
-	return "", status.Errorf(codes.Unimplemented, "method FetchLastNoAckMilestone not implemented")
+	return "", errors.New("method FetchLastNoAckMilestone not implemented")
 }
 
 func (h *HeimdallSimulator) FetchMilestoneID(ctx context.Context, milestoneID string) error {
-	return status.Errorf(codes.Unimplemented, "method FetchMilestoneID not implemented")
+	return errors.New("method FetchMilestoneID not implemented")
 }
 
 func (h *HeimdallSimulator) getSpan(ctx context.Context, spanId uint64) (heimdall.Span, error) {
