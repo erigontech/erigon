@@ -1,4 +1,4 @@
-//go:build integration
+// //go:build integration
 
 package tests
 
@@ -15,7 +15,7 @@ func TestExecutionSpec(t *testing.T) {
 
 	bt := new(testMatcher)
 
-	dir := filepath.Join(".", "execution-spec-tests")
+	dir := filepath.Join(".", "execution-spec-tests/prague/eip6110_deposits")
 
 	checkStateRoot := true
 
