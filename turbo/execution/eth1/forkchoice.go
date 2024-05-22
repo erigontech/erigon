@@ -284,8 +284,9 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				return
 			}
 		}
-
-		unwindToGenesis = e.executionPipeline.UnwindPoint() == 0
+		if e.executionPipeline.HasUnwindPoint() {
+			unwindToGenesis = e.executionPipeline.UnwindPoint() == 0
+		}
 
 		// Run the unwind
 		if err := e.executionPipeline.RunUnwind(e.db, wrap.TxContainer{Tx: tx}); err != nil {
