@@ -55,7 +55,7 @@ func createFiles(dataDir string) error {
 
 func setup(t *testing.T, ctx context.Context, iterations []uint64) *heimdallsim.HeimdallSimulator {
 	logger := log.New()
-	logger.SetHandler(log.StdoutHandler)
+	// logger.SetHandler(log.StdoutHandler)
 	dataDir := t.TempDir()
 
 	err := createFiles(dataDir)
