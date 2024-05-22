@@ -30,13 +30,13 @@ type HeimdallSimulator struct {
 
 type IndexFnType func(context.Context, snaptype.FileInfo, uint32, string, *background.Progress, log.Lvl, log.Logger) error
 
-func NewHeimdall(ctx context.Context, snapDir string, logger log.Logger, iterations []uint64) (HeimdallSimulator, error) {
+func NewHeimdallSimulator(ctx context.Context, snapDir string, logger log.Logger, iterations []uint64) (*HeimdallSimulator, error) {
 	snapshots := freezeblocks.NewBorRoSnapshots(ethconfig.Defaults.Snapshot, snapDir, 0, logger)
 
 	// index local files
 	localFiles, err := os.ReadDir(snapDir)
 	if err != nil {
-		return HeimdallSimulator{}, err
+		return nil, err
 	}
 
 	for _, file := range localFiles {
@@ -44,13 +44,13 @@ func NewHeimdall(ctx context.Context, snapDir string, logger log.Logger, iterati
 		if info.Ext == ".seg" {
 			err = info.Type.BuildIndexes(ctx, info, nil, snapDir, nil, log.LvlWarn, logger)
 			if err != nil {
-				return HeimdallSimulator{}, err
+				return nil, err
 			}
 		}
 	}
 
 	if err = snapshots.ReopenFolder(); err != nil {
-		return HeimdallSimulator{}, err
+		return nil, err
 	}
 
 	var lastAvailableBlockNum uint64
@@ -76,7 +76,7 @@ func NewHeimdall(ctx context.Context, snapDir string, logger log.Logger, iterati
 		s.Close()
 	}()
 
-	return s, nil
+	return &s, nil
 }
 
 func (h *HeimdallSimulator) FetchLatestSpan(ctx context.Context) (*heimdall.Span, error) {

@@ -53,7 +53,7 @@ func createFiles(dataDir string) error {
 	return nil
 }
 
-func setup(t *testing.T, ctx context.Context, iterations []uint64) simulator.HeimdallSimulator {
+func setup(t *testing.T, ctx context.Context, iterations []uint64) *simulator.HeimdallSimulator {
 	logger := log.New()
 	logger.SetHandler(log.StdoutHandler)
 	dataDir := t.TempDir()
@@ -63,7 +63,7 @@ func setup(t *testing.T, ctx context.Context, iterations []uint64) simulator.Hei
 		t.Fatal(err)
 	}
 
-	sim, err := simulator.NewHeimdall(ctx, dataDir, logger, iterations)
+	sim, err := simulator.NewHeimdallSimulator(ctx, dataDir, logger, iterations)
 	if err != nil {
 		t.Fatal(err)
 	}
