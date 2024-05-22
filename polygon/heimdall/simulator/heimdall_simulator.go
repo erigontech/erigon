@@ -19,13 +19,13 @@ import (
 )
 
 type HeimdallSimulator struct {
-	ctx         context.Context
 	snapshots   *freezeblocks.BorRoSnapshots
 	blockReader *freezeblocks.BlockReader
-	logger      log.Logger
 
 	iterations               []uint64 // list of final block numbers for an iteration
 	lastAvailableBlockNumber uint64
+
+	logger log.Logger
 }
 
 type IndexFnType func(context.Context, snaptype.FileInfo, uint32, string, *background.Progress, log.Lvl, log.Logger) error
@@ -62,27 +62,26 @@ func NewHeimdallSimulator(ctx context.Context, snapDir string, logger log.Logger
 	}
 
 	s := HeimdallSimulator{
-		ctx:         ctx,
 		snapshots:   snapshots,
 		blockReader: freezeblocks.NewBlockReader(nil, snapshots),
-		logger:      logger,
 
 		iterations:               iterations,
 		lastAvailableBlockNumber: lastAvailableBlockNum,
+
+		logger: logger,
 	}
 
-	go func() {
-		<-ctx.Done()
-		s.Close()
-	}()
-
 	return &s, nil
+}
+
+func (h *HeimdallSimulator) Close() {
+	h.snapshots.Close()
 }
 
 func (h *HeimdallSimulator) FetchLatestSpan(ctx context.Context) (*heimdall.Span, error) {
 	latestSpan := uint64(heimdall.SpanIdAt(h.lastAvailableBlockNumber))
 
-	span, err := h.getSpan(h.ctx, latestSpan)
+	span, err := h.getSpan(ctx, latestSpan)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +104,7 @@ func (h *HeimdallSimulator) FetchSpan(ctx context.Context, spanID uint64) (*heim
 		return nil, errors.New("span not found")
 	}
 
-	span, err := h.getSpan(h.ctx, spanID)
+	span, err := h.getSpan(ctx, spanID)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +112,7 @@ func (h *HeimdallSimulator) FetchSpan(ctx context.Context, spanID uint64) (*heim
 	return &span, err
 }
 
-func (h *HeimdallSimulator) FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
+func (h *HeimdallSimulator) FetchStateSyncEvents(_ context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
 	events, _, err := h.blockReader.EventsByIdFromSnapshot(fromId, to, limit)
 	return events, err
 }
@@ -144,10 +143,6 @@ func (h *HeimdallSimulator) FetchLastNoAckMilestone(ctx context.Context) (string
 
 func (h *HeimdallSimulator) FetchMilestoneID(ctx context.Context, milestoneID string) error {
 	return status.Errorf(codes.Unimplemented, "method FetchMilestoneID not implemented")
-}
-
-func (h *HeimdallSimulator) Close() {
-	h.snapshots.Close()
 }
 
 func (h *HeimdallSimulator) getSpan(ctx context.Context, spanId uint64) (heimdall.Span, error) {

@@ -67,6 +67,7 @@ func setup(t *testing.T, ctx context.Context, iterations []uint64) *simulator.He
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(sim.Close)
 
 	return sim
 }
