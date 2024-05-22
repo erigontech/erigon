@@ -48,14 +48,13 @@ type jobResult struct {
 }
 
 type L1Syncer struct {
-	etherMans            []IEtherman
-	ethermanIndex        uint8
-	ethermanMtx          *sync.Mutex
-	l1ContractAddresses  []common.Address
-	topics               [][]common.Hash
-	blockRange           uint64
-	queryDelay           uint64
-	l1QueryBlocksThreads uint64
+	etherMans           []IEtherman
+	ethermanIndex       uint8
+	ethermanMtx         *sync.Mutex
+	l1ContractAddresses []common.Address
+	topics              [][]common.Hash
+	blockRange          uint64
+	queryDelay          uint64
 
 	latestL1Block uint64
 
@@ -70,19 +69,18 @@ type L1Syncer struct {
 	quit                chan struct{}
 }
 
-func NewL1Syncer(etherMans []IEtherman, l1ContractAddresses []common.Address, topics [][]common.Hash, blockRange, queryDelay, l1QueryBlocksThreads uint64) *L1Syncer {
+func NewL1Syncer(etherMans []IEtherman, l1ContractAddresses []common.Address, topics [][]common.Hash, blockRange, queryDelay uint64) *L1Syncer {
 	return &L1Syncer{
-		etherMans:            etherMans,
-		ethermanIndex:        0,
-		ethermanMtx:          &sync.Mutex{},
-		l1ContractAddresses:  l1ContractAddresses,
-		topics:               topics,
-		blockRange:           blockRange,
-		queryDelay:           queryDelay,
-		l1QueryBlocksThreads: l1QueryBlocksThreads,
-		progressMessageChan:  make(chan string),
-		logsChan:             make(chan []ethTypes.Log),
-		quit:                 make(chan struct{}),
+		etherMans:           etherMans,
+		ethermanIndex:       0,
+		ethermanMtx:         &sync.Mutex{},
+		l1ContractAddresses: l1ContractAddresses,
+		topics:              topics,
+		blockRange:          blockRange,
+		queryDelay:          queryDelay,
+		progressMessageChan: make(chan string),
+		logsChan:            make(chan []ethTypes.Log),
+		quit:                make(chan struct{}),
 	}
 }
 
@@ -222,55 +220,52 @@ func (s *L1Syncer) GetOldAccInputHash(ctx context.Context, addr *common.Address,
 	}
 }
 
-func (s *L1Syncer) L1QueryHeaders(logPrefix string, logs []ethTypes.Log) (map[uint64]*ethTypes.Header, error) {
+func (s *L1Syncer) L1QueryHeaders(logs []ethTypes.Log) (map[uint64]*ethTypes.Header, error) {
 	// more thread causes error on remote rpc server
-	numThreads := int(s.l1QueryBlocksThreads)
-	headersMap := map[uint64]*ethTypes.Header{}
-	logsSize := len(logs)
+	headers := make([]*ethTypes.Header, 0)
 
-	if numThreads > 1 && logsSize > (numThreads<<2) {
-		var wg sync.WaitGroup
-		var err error
-		headersArray := make([]*ethTypes.Header, logsSize)
+	// queue up all the logs
+	logQueue := make(chan ethTypes.Log, len(logs))
+	for i := 0; i < len(logs); i++ {
+		logQueue <- logs[i]
+	}
+	close(logQueue)
 
-		wg.Add(numThreads)
+	var wg sync.WaitGroup
+	wg.Add(len(logs))
 
-		for i := 0; i < numThreads; i++ {
-			go func(cpuI int) {
-				defer wg.Done()
-
-				durationTick := time.Now()
-				for j := cpuI; j < logsSize; j += numThreads {
-					l := logs[j]
-					header, e := s.GetHeader(l.BlockNumber)
-					if e != nil {
-						err = e
-						return
-					}
-					headersArray[j] = header
-					tryToLogL1QueryBlocks(logPrefix, j/numThreads, logsSize/numThreads, cpuI+1, &durationTick)
-				}
-			}(i)
-		}
-		wg.Wait()
-
-		if err != nil {
-			return nil, err
-		}
-
-		for _, header := range headersArray {
-			headersMap[header.Number.Uint64()] = header
-		}
-	} else {
-		durationTick := time.Now()
-		for i, l := range logs {
-			header, err := s.GetHeader(l.BlockNumber)
-			if err != nil {
-				return nil, err
+	process := func(em IEtherman) {
+		ctx := context.Background()
+		for {
+			l, ok := <-logQueue
+			if !ok {
+				break
 			}
-			headersMap[l.BlockNumber] = header
-			tryToLogL1QueryBlocks(logPrefix, i, logsSize, 1, &durationTick)
+			header, err := em.HeaderByNumber(ctx, new(big.Int).SetUint64(l.BlockNumber))
+			if err != nil {
+				log.Error("Error getting block", "err", err)
+				// assume a transient error and try again
+				time.Sleep(1 * time.Second)
+				logQueue <- l
+				continue
+			}
+			headers = append(headers, header)
+			wg.Done()
 		}
+	}
+
+	// launch the workers - some endpoints might be faster than others so will consume more of the queue
+	// but, we really don't care about that.  We want the data as fast as possible
+	mans := s.etherMans
+	for i := 0; i < len(mans); i++ {
+		go process(mans[i])
+	}
+
+	wg.Wait()
+
+	headersMap := map[uint64]*ethTypes.Header{}
+	for i := 0; i < len(headers); i++ {
+		headersMap[headers[i].Number.Uint64()] = headers[i]
 	}
 
 	return headersMap, nil

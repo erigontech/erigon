@@ -35,7 +35,6 @@ type Zk struct {
 	ExecutorStrictMode                     bool
 	ExecutorRequestTimeout                 time.Duration
 	ExecutorMaxConcurrentRequests          int
-	L1QueryBlocksThreads                   uint64
 	AllowFreeTransactions                  bool
 	AllowPreEIP155Transactions             bool
 	EffectiveGasPriceForEthTransfer        uint8

@@ -193,7 +193,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.ExecutorStrictMode,
 	&utils.ExecutorRequestTimeout,
 	&utils.ExecutorMaxConcurrentRequests,
-	&utils.L1QueryBlocksThreads,
 	&utils.AllowFreeTransactions,
 	&utils.AllowPreEIP155Transactions,
 	&utils.EffectiveGasPriceForEthTransfer,

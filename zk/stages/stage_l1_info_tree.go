@@ -95,7 +95,7 @@ LOOP:
 	})
 
 	// chunk the logs into batches, so we don't overload the RPC endpoints too much at once
-	chunks := chunkLogs(allLogs, 20)
+	chunks := chunkLogs(allLogs, 50)
 
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
@@ -109,7 +109,7 @@ LOOP:
 		default:
 		}
 
-		headersMap, err := cfg.syncer.L1QueryHeaders(logPrefix, chunk)
+		headersMap, err := cfg.syncer.L1QueryHeaders(chunk)
 		if err != nil {
 			return err
 		}

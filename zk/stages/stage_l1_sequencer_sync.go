@@ -78,7 +78,7 @@ Loop:
 	for {
 		select {
 		case logs := <-logChan:
-			headersMap, err := cfg.syncer.L1QueryHeaders(logPrefix, logs)
+			headersMap, err := cfg.syncer.L1QueryHeaders(logs)
 			if err != nil {
 				return err
 			}
