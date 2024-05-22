@@ -58,7 +58,7 @@ func NewHeimdallSimulator(ctx context.Context, snapDir string, logger log.Logger
 		iterations = iterations[1:]
 	}
 
-	s := HeimdallSimulator{
+	h := HeimdallSimulator{
 		snapshots:   snapshots,
 		blockReader: freezeblocks.NewBlockReader(nil, snapshots),
 
@@ -68,7 +68,7 @@ func NewHeimdallSimulator(ctx context.Context, snapDir string, logger log.Logger
 		logger: logger,
 	}
 
-	return &s, nil
+	return &h, nil
 }
 
 func (h *HeimdallSimulator) Close() {
