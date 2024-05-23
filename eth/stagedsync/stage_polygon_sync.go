@@ -167,7 +167,7 @@ type polygonSyncStageService struct {
 func (s *polygonSyncStageService) Run(ctx context.Context, tx kv.RwTx, stageState *StageState) error {
 	s.appendLogPrefix = newAppendLogPrefix(stageState.LogPrefix())
 	s.stageState = stageState
-	s.logger.Info(s.appendLogPrefix("begin db persisting"))
+	s.logger.Info(s.appendLogPrefix("begin..."), "progress", stageState.BlockNumber)
 
 	if !s.bgComponentsRun {
 		s.runBgComponents(ctx)
@@ -239,6 +239,8 @@ func (s *polygonSyncStageService) runBgComponents(ctx context.Context) {
 }
 
 func (s *polygonSyncStageService) handleInsertBlocks(tx kv.RwTx, stageState *StageState, blocks []*types.Block) error {
+	s.logger.Info(s.appendLogPrefix("handle insert blocks"), "len", len(blocks))
+
 	for _, block := range blocks {
 		height := block.NumberU64()
 		header := block.Header()
@@ -298,13 +300,14 @@ func (s *polygonSyncStageService) handleInsertBlocks(tx kv.RwTx, stageState *Sta
 }
 
 func (s *polygonSyncStageService) handleUpdateForkChoice(ctx context.Context, tx kv.RwTx, tip *types.Header) error {
+	s.logger.Info(s.appendLogPrefix("handle update fork choice"), "block", tip.Number.Uint64())
+
 	// make sure all state sync events for the given tip are downloaded to mdbx
 	// NOTE: remove this once we integrate the bridge component in sync.Run
 	if err := s.downloadStateSyncEvents(ctx, tx, tip); err != nil {
 		return err
 	}
 
-	s.logger.Info(s.appendLogPrefix("update fork choice"), "block", tip.Number.Uint64())
 	return nil
 }
 
@@ -327,7 +330,7 @@ func (s *polygonSyncStageService) downloadStateSyncEvents(ctx context.Context, t
 	}
 
 	s.logger.Info(
-		s.appendLogPrefix("downloading state sync event"),
+		s.appendLogPrefix("downloading state sync events"),
 		"sprintStartBlockNum", tip.Number.Uint64(),
 		"lastStateSyncEventId", s.lastStateSyncEventId,
 	)
@@ -361,14 +364,17 @@ func (s *polygonSyncStageService) downloadStateSyncEvents(ctx context.Context, t
 }
 
 func (s *polygonSyncStageService) handleSpan(ctx context.Context, tx kv.RwTx, sp *heimdall.Span) error {
+	s.logger.Info(s.appendLogPrefix("handle span"), "id", sp.Id, "start", sp.StartBlock, "end", sp.EndBlock)
 	return heimdall.NewTxStore(s.blockReader, tx).PutSpan(ctx, sp)
 }
 
 func (s *polygonSyncStageService) handleCheckpoint(ctx context.Context, tx kv.RwTx, cp *heimdall.Checkpoint) error {
+	s.logger.Info(s.appendLogPrefix("handle checkpoint"), "id", cp.Id, "start", cp.StartBlock, "end", cp.EndBlock)
 	return heimdall.NewTxStore(s.blockReader, tx).PutCheckpoint(ctx, cp.Id, cp)
 }
 
 func (s *polygonSyncStageService) handleMilestone(ctx context.Context, tx kv.RwTx, ms *heimdall.Milestone) error {
+	s.logger.Info(s.appendLogPrefix("handle milestone"), "id", ms.Id, "start", ms.StartBlock, "end", ms.EndBlock)
 	return heimdall.NewTxStore(s.blockReader, tx).PutMilestone(ctx, ms.Id, ms)
 }
 
