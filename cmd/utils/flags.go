@@ -1008,9 +1008,14 @@ var (
 		Usage: "Diagnostics HTTP server listening port",
 		Value: 6060,
 	}
+	DiagSpeedTestFlag = cli.BoolFlag{
+		Name:  "diagnostics.speedtest",
+		Usage: "Enable speed test",
+		Value: false,
+	}
 )
 
-var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag, &DiagDisabledFlag, &DiagEndpointAddrFlag, &DiagEndpointPortFlag}
+var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag, &DiagDisabledFlag, &DiagEndpointAddrFlag, &DiagEndpointPortFlag, &DiagSpeedTestFlag}
 
 var DiagnosticsFlags = []cli.Flag{&DiagnosticsURLFlag, &DiagnosticsURLFlag, &DiagnosticsSessionsFlag}
 

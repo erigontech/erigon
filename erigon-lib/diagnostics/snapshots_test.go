@@ -8,7 +8,7 @@ import (
 )
 
 func TestUpdateFileDownloadingStats(t *testing.T) {
-	d := diagnostics.NewDiagnosticClient(nil, "test")
+	d := diagnostics.NewDiagnosticClient(nil, "test", false)
 
 	d.UpdateFileDownloadedStatistics(nil, &segmentDownloadStatsMock)
 
@@ -20,7 +20,7 @@ func TestUpdateFileDownloadingStats(t *testing.T) {
 }
 
 func TestUpdateFileDownloadedStats(t *testing.T) {
-	d := diagnostics.NewDiagnosticClient(nil, "test")
+	d := diagnostics.NewDiagnosticClient(nil, "test", false)
 
 	d.UpdateFileDownloadedStatistics(&fileDownloadedUpdMock, nil)
 
@@ -42,7 +42,7 @@ func TestUpdateFileDownloadedStats(t *testing.T) {
 }
 
 func TestUpdateFileFullStatsUpdate(t *testing.T) {
-	d := diagnostics.NewDiagnosticClient(nil, "test")
+	d := diagnostics.NewDiagnosticClient(nil, "test", false)
 
 	d.UpdateFileDownloadedStatistics(nil, &segmentDownloadStatsMock)
 
