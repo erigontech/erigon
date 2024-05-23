@@ -226,10 +226,10 @@ func (s *L1Syncer) L1QueryHeaders(logs []ethTypes.Log) (map[uint64]*ethTypes.Hea
 
 	// queue up all the logs
 	logQueue := make(chan ethTypes.Log, len(logs))
+	defer close(logQueue)
 	for i := 0; i < len(logs); i++ {
 		logQueue <- logs[i]
 	}
-	close(logQueue)
 
 	var wg sync.WaitGroup
 	wg.Add(len(logs))
