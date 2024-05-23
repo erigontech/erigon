@@ -610,6 +610,7 @@ func ReadBody(db kv.Getter, hash common.Hash, number uint64) (*types.Body, uint6
 	body := new(types.Body)
 	body.Uncles = bodyForStorage.Uncles
 	body.Withdrawals = bodyForStorage.Withdrawals
+	body.Requests = bodyForStorage.Requests
 
 	if bodyForStorage.TxAmount < 2 {
 		panic(fmt.Sprintf("block body hash too few txs amount: %d, %d", number, bodyForStorage.TxAmount))
@@ -654,6 +655,7 @@ func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBo
 		TxAmount:    uint32(len(body.Transactions)) + 2, /*system txs*/
 		Uncles:      body.Uncles,
 		Withdrawals: body.Withdrawals,
+		Requests:    body.Requests,
 	}
 	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return false, fmt.Errorf("WriteBodyForStorage: %w", err)
@@ -677,6 +679,7 @@ func WriteBody(db kv.RwTx, hash common.Hash, number uint64, body *types.Body) (e
 		TxAmount:    uint32(len(body.Transactions)) + 2,
 		Uncles:      body.Uncles,
 		Withdrawals: body.Withdrawals,
+		Requests:    body.Requests,
 	}
 	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return fmt.Errorf("failed to write body: %w", err)
@@ -814,11 +817,7 @@ func ReadRawReceipts(db kv.Tx, blockNum uint64) types.Receipts {
 		log.Error("logs fetching failed", "err", err)
 		return nil
 	}
-	defer func() {
-		if casted, ok := it.(kv.Closer); ok {
-			casted.Close()
-		}
-	}()
+	defer it.Close()
 	for it.HasNext() {
 		k, v, err := it.Next()
 		if err != nil {
@@ -983,7 +982,7 @@ func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
 	if body == nil {
 		return nil
 	}
-	return types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals)
+	return types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals, body.Requests)
 }
 
 // HasBlock - is more efficient than ReadBlock because doesn't read transactions.
@@ -1574,4 +1573,19 @@ func ReadDBSchemaVersion(tx kv.Tx) (major, minor, patch uint32, ok bool, err err
 	minor = binary.BigEndian.Uint32(existingVersion[4:])
 	patch = binary.BigEndian.Uint32(existingVersion[8:])
 	return major, minor, patch, true, nil
+}
+
+func WriteLastNewBlockSeen(tx kv.RwTx, blockNum uint64) error {
+	return tx.Put(kv.SyncStageProgress, kv.LastNewBlockSeen, dbutils.EncodeBlockNumber(blockNum))
+}
+
+func ReadLastNewBlockSeen(tx kv.Tx) (uint64, error) {
+	v, err := tx.GetOne(kv.SyncStageProgress, kv.LastNewBlockSeen)
+	if err != nil {
+		return 0, err
+	}
+	if len(v) == 0 {
+		return 0, nil
+	}
+	return dbutils.DecodeBlockNumber(v)
 }

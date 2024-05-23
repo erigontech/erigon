@@ -1,6 +1,8 @@
 package common
 
-import "math/rand"
+import (
+	"math/rand"
+)
 
 func SliceReverse[T any](s []T) {
 	for i, j := 0, len(s)-1; i < j; i, j = i+1, j-1 {
@@ -20,4 +22,12 @@ func SliceShuffle[T any](s []T) {
 	rand.Shuffle(len(s), func(i, j int) {
 		s[i], s[j] = s[j], s[i]
 	})
+}
+
+func SliceTakeLast[T any](s []T, count int) []T {
+	length := len(s)
+	if length > count {
+		return s[length-count:]
+	}
+	return s
 }

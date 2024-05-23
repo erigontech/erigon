@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
+	sentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/aggregation"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"

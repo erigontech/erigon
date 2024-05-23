@@ -245,6 +245,10 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	}
 	if dbg.MdbxReadAhead() {
 		opts = opts.Flags(func(u uint) uint { return u &^ mdbx.NoReadahead }) //nolint
+	} else {
+		if opts.label == kv.ChainDB {
+			opts = opts.Flags(func(u uint) uint { return u &^ mdbx.NoReadahead }) //nolint
+		}
 	}
 	if opts.flags&mdbx.Accede != 0 || opts.flags&mdbx.Readonly != 0 {
 		for retry := 0; ; retry++ {
@@ -758,7 +762,7 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	// will return nil err if context is cancelled (may appear to acquire the semaphore)
 	if semErr := db.roTxsLimiter.Acquire(ctx, 1); semErr != nil {
 		db.trackTxEnd()
-		return nil, semErr
+		return nil, fmt.Errorf("mdbx.MdbxKV.BeginRo: roTxsLimiter error %w", semErr)
 	}
 
 	defer func() {
@@ -1446,7 +1450,7 @@ func (c *MdbxCursor) Seek(seek []byte) (k, v []byte, err error) {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
 		}
-		err = fmt.Errorf("failed MdbxKV cursor.Seek(): %w, bucket: %s,  key: %x", err, c.bucketName, seek)
+		err = fmt.Errorf("failed MdbxKV cursor.seekInFiles(): %w, bucket: %s,  key: %x", err, c.bucketName, seek)
 		return []byte{}, nil, err
 	}
 
@@ -1810,7 +1814,7 @@ func (c *MdbxDupSortCursor) FirstDup() ([]byte, error) {
 		if mdbx.IsNotFound(err) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("in FirstDup: %w", err)
+		return nil, fmt.Errorf("in FirstDup: tbl=%s, %w", c.bucketName, err)
 	}
 	return v, nil
 }

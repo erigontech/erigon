@@ -638,7 +638,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txN
 		switch {
 		case r <= 33:
 			buf := types.EncodeAccountBytesV3(txNum, uint256.NewInt(txNum*100_000), nil, 0)
-			prev, step, err := domains.LatestAccount(key)
+			prev, step, err := domains.DomainGet(kv.AccountsDomain, key, nil)
 			require.NoError(t, err)
 
 			usedKeys[string(key)] = struct{}{}
@@ -658,7 +658,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txN
 			}
 			usedKeys[string(key)] = struct{}{}
 
-			prev, step, err := domains.LatestCode(key)
+			prev, step, err := domains.DomainGet(kv.CodeDomain, key, nil)
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.CodeDomain, key, nil, codeUpd, prev, step)
@@ -678,7 +678,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txN
 				key = key[:length.Addr]
 			}
 
-			prev, step, err := domains.LatestAccount(key)
+			prev, step, err := domains.DomainGet(kv.AccountsDomain, key, nil)
 			require.NoError(t, err)
 			if prev == nil {
 				usedKeys[string(key)] = struct{}{}
@@ -1136,7 +1136,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 
 		for j := 0; j < len(keys); j++ {
 			buf := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
-			prev, step, err := domains.LatestAccount(keys[j])
+			prev, step, err := domains.DomainGet(kv.AccountsDomain, keys[j], nil)
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.AccountsDomain, keys[j], nil, buf, prev, step)

@@ -2,7 +2,6 @@ package heimdall
 
 import (
 	"context"
-	"encoding/json"
 	"math/big"
 	"testing"
 	"time"
@@ -89,7 +88,7 @@ func (test heimdallTest) setupCheckpoints(count int) []*Checkpoint {
 	} else {
 		client.EXPECT().
 			FetchCheckpoints(gomock.Any(), gomock.Any(), gomock.Any()).
-			DoAndReturn(func(ctx context.Context, page uint64, limit uint64) (Checkpoints, error) {
+			DoAndReturn(func(ctx context.Context, page uint64, limit uint64) ([]*Checkpoint, error) {
 				if page == 0 {
 					return nil, nil
 				}
@@ -287,7 +286,7 @@ func TestFetchMilestonesStartingBeforeEvictionPoint(t *testing.T) {
 	}
 }
 
-func TestOnMilestoneEvent(t *testing.T) {
+func TestRegisterMilestoneObserver(t *testing.T) {
 	test := newHeimdallTest(t)
 
 	var cancel context.CancelFunc
@@ -322,37 +321,11 @@ func TestOnMilestoneEvent(t *testing.T) {
 		}).AnyTimes()
 
 	eventChan := make(chan *Milestone)
-	err := test.heimdall.OnMilestoneEvent(test.ctx, func(m *Milestone) {
+	subscriptionCancel := test.heimdall.RegisterMilestoneObserver(func(m *Milestone) {
 		eventChan <- m
 	})
-	require.Nil(t, err)
+	defer subscriptionCancel()
 
 	m := <-eventChan
 	assert.Equal(t, expectedMilestone.Timestamp(), m.Timestamp())
-}
-
-func TestMarshall(t *testing.T) {
-	m := makeMilestone(10, 100)
-
-	b, err := json.Marshal(m)
-
-	assert.Nil(t, err)
-
-	var m1 Milestone
-
-	assert.Nil(t, json.Unmarshal(b, &m1))
-
-	assert.Equal(t, *m, m1)
-
-	c := makeCheckpoint(10, 100)
-
-	b, err = json.Marshal(c)
-
-	assert.Nil(t, err)
-
-	var c1 Checkpoint
-
-	assert.Nil(t, json.Unmarshal(b, &c1))
-
-	assert.Equal(t, *c, c1)
 }

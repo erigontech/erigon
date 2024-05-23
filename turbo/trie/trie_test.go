@@ -263,7 +263,6 @@ func TestDeepHash(t *testing.T) {
 		for _, keyVal := range keyVals {
 			trie.Update([]byte(keyVal.key), []byte(keyVal.value))
 		}
-		trie.PrintTrie()
 		hash1 := trie.Hash()
 
 		prefixTrie := New(libcommon.Hash{})

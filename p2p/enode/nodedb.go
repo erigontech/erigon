@@ -29,7 +29,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	mdbx1 "github.com/erigontech/mdbx-go/mdbx"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -73,8 +72,8 @@ var zeroIP = make(net.IP, 16)
 // DB is the node database, storing previously seen nodes and any collected metadata about
 // them for QoS purposes.
 type DB struct {
-	kv     kv.RwDB   // Interface to the database itself
-	runner sync.Once // Ensures we can start at most one expirer
+	kv     *mdbx.MdbxKV // Interface to the database itself
+	runner sync.Once    // Ensures we can start at most one expirer
 
 	ctx       context.Context
 	ctxCancel func()
@@ -108,7 +107,7 @@ func newMemoryDB(ctx context.Context, logger log.Logger, tmpDir string) (*DB, er
 		return nil, err
 	}
 
-	nodeDB := &DB{kv: db}
+	nodeDB := &DB{kv: db.(*mdbx.MdbxKV)}
 	nodeDB.ctx, nodeDB.ctxCancel = context.WithCancel(ctx)
 
 	return nodeDB, nil
@@ -123,9 +122,7 @@ func newPersistentDB(ctx context.Context, logger log.Logger, path string) (*DB, 
 		WithTableCfg(bucketsConfig).
 		MapSize(8 * datasize.GB).
 		GrowthStep(16 * datasize.MB).
-		DirtySpace(uint64(128 * datasize.MB)).
-		Flags(func(f uint) uint { return f ^ mdbx1.Durable | mdbx1.SafeNoSync }).
-		SyncPeriod(2 * time.Second).
+		DirtySpace(uint64(64 * datasize.MB)).
 		Open(ctx)
 	if err != nil {
 		return nil, err
@@ -165,7 +162,7 @@ func newPersistentDB(ctx context.Context, logger log.Logger, path string) (*DB, 
 		return newPersistentDB(ctx, logger, path)
 	}
 
-	nodeDB := &DB{kv: db}
+	nodeDB := &DB{kv: db.(*mdbx.MdbxKV)}
 	nodeDB.ctx, nodeDB.ctxCancel = context.WithCancel(ctx)
 
 	return nodeDB, nil
@@ -260,7 +257,7 @@ func (db *DB) fetchInt64(key []byte) int64 {
 func (db *DB) storeInt64(key []byte, n int64) error {
 	blob := make([]byte, binary.MaxVarintLen64)
 	blob = blob[:binary.PutVarint(blob, n)]
-	return db.kv.Update(db.ctx, func(tx kv.RwTx) error {
+	return db.kv.Batch(func(tx kv.RwTx) error {
 		return tx.Put(kv.Inodes, key, blob)
 	})
 }
@@ -285,7 +282,7 @@ func (db *DB) fetchUint64(key []byte) uint64 {
 
 // storeUint64 stores an integer in the given key.
 func (db *DB) storeUint64(key []byte, n uint64) error {
-	return db.kv.Update(db.ctx, func(tx kv.RwTx) error {
+	return db.kv.Batch(func(tx kv.RwTx) error {
 		return db._storeUint64(tx, key, n)
 	})
 }
@@ -336,7 +333,7 @@ func (db *DB) UpdateNode(node *Node) error {
 	if err != nil {
 		return err
 	}
-	return db.kv.Update(db.ctx, func(tx kv.RwTx) error {
+	return db.kv.Batch(func(tx kv.RwTx) error {
 		err = tx.Put(kv.NodeRecords, nodeKey(node.ID()), blob)
 		if err != nil {
 			return err
@@ -365,7 +362,7 @@ func (db *DB) DeleteNode(id ID) {
 }
 
 func (db *DB) deleteRange(prefix []byte) {
-	if err := db.kv.Update(db.ctx, func(tx kv.RwTx) error {
+	if err := db.kv.Batch(func(tx kv.RwTx) error {
 		for bucket := range bucketsConfig(nil) {
 			if err := deleteRangeInBucket(tx, prefix, bucket); err != nil {
 				return err
@@ -567,7 +564,7 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 		}
 	seek:
 		for seeks := 0; len(nodes) < n && seeks < n*5; seeks++ {
-			// Seek to a random entry. The first byte is incremented by a
+			// seekInFiles to a random entry. The first byte is incremented by a
 			// random amount each time in order to increase the likelihood
 			// of hitting all existing nodes in very small databases.
 			ctr := id[0]

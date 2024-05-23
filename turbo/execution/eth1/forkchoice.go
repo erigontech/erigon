@@ -2,6 +2,7 @@ package eth1
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"runtime"
 	"slices"
@@ -10,11 +11,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
+	execution "github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
 	"github.com/ledgerwatch/erigon/eth/consensuschain"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -39,6 +42,15 @@ func sendForkchoiceErrorWithoutWaiting(ch chan forkchoiceOutcome, err error) {
 	case ch <- forkchoiceOutcome{err: err}:
 	default:
 	}
+}
+
+func isDomainAheadOfBlocks(tx kv.RwTx) bool {
+	doms, err := state.NewSharedDomains(tx, log.New())
+	if err != nil {
+		return errors.Is(err, state.ErrBehindCommitment)
+	}
+	defer doms.Close()
+	return false
 }
 
 // verifyForkchoiceHashes verifies the finalized and safe hash of the forkchoice state
@@ -110,6 +122,7 @@ func writeForkChoiceHashes(tx kv.RwTx, blockHash, safeHash, finalizedHash common
 
 func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, originalBlockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) {
 	if !e.semaphore.TryAcquire(1) {
+		e.logger.Trace("ethereumExecutionModule.updateForkChoice: ExecutionStatus_Busy")
 		sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
 			LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
 			Status:          execution.ExecutionStatus_Busy,
@@ -119,6 +132,21 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	defer e.semaphore.Release(1)
 
 	if err := stages2.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline); err != nil {
+		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+		return
+	}
+
+	defer e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
+
+	// Update the last new block seen.
+	// This is used by eth_syncing as an heuristic to determine if the node is syncing or not.
+	if err := e.db.Update(ctx, func(tx kv.RwTx) error {
+		num := rawdb.ReadHeaderNumber(tx, originalBlockHash)
+		if num == nil {
+			return nil
+		}
+		return rawdb.WriteLastNewBlockSeen(tx, *num)
+	}); err != nil {
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
@@ -133,13 +161,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
-	defer func() {
-		if tx != nil {
-			tx.Rollback()
-		}
-	}()
-
-	defer e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
+	defer tx.Rollback()
 
 	blockHash := originalBlockHash
 
@@ -153,7 +175,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
-	isSynced := finishProgressBefore > 0 && finishProgressBefore > e.blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
 
 	// Step one, find reconnection point, and mark all of those headers as canonical.
 	fcuHeader, err := e.blockReader.HeaderByHash(ctx, tx, originalBlockHash)
@@ -166,10 +187,11 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		return
 	}
 
-	tooBigJump := e.syncCfg.LoopBlockLimit > 0 && finishProgressBefore > 0 && fcuHeader.Number.Uint64()-finishProgressBefore > uint64(e.syncCfg.LoopBlockLimit)
-
-	if tooBigJump {
+	limitedBigJump := e.syncCfg.LoopBlockLimit > 0 && finishProgressBefore > 0 && fcuHeader.Number.Uint64()-finishProgressBefore > uint64(e.syncCfg.LoopBlockLimit-2)
+	isSynced := finishProgressBefore > 0 && finishProgressBefore > e.blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
+	if limitedBigJump {
 		isSynced = false
+		log.Info("[sync] limited big jump", "from", finishProgressBefore, "amount", uint64(e.syncCfg.LoopBlockLimit))
 	}
 
 	canonicalHash, err := e.blockReader.CanonicalHash(ctx, tx, fcuHeader.Number.Uint64())
@@ -177,7 +199,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
-
+	var unwindToGenesis bool
 	if fcuHeader.Number.Uint64() > 0 {
 		if canonicalHash == blockHash {
 			// if block hash is part of the canonical chain treat it as no-op.
@@ -256,12 +278,14 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
-
 		if e.hook != nil {
 			if err = e.hook.BeforeRun(tx, isSynced); err != nil {
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 				return
 			}
+		}
+		if e.executionPipeline.HasUnwindPoint() {
+			unwindToGenesis = e.executionPipeline.UnwindPoint() == 0
 		}
 
 		// Run the unwind
@@ -270,12 +294,16 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
-		if e.historyV3 {
-			if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
-				//if err := rawdbv3.TxNums.Truncate(tx, fcuHeader.Number.Uint64()); err != nil {
+		if unwindToGenesis {
+			if err := rawdbreset.ResetExecWithTx(ctx, tx, e.config.ChainName, "", e.logger); err != nil {
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 				return
 			}
+		}
+
+		if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
 		}
 		// Mark all new canonicals as canonicals
 		for _, canonicalSegment := range newCanonicals {
@@ -304,61 +332,25 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				return
 			}
 		}
-		if e.historyV3 {
-			if len(newCanonicals) > 0 {
-				if err := rawdbv3.TxNums.Truncate(tx, newCanonicals[0].number); err != nil {
-					sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-					return
-				}
-				if err := rawdb.AppendCanonicalTxNums(tx, newCanonicals[len(newCanonicals)-1].number); err != nil {
-					sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-					return
-				}
-			}
-			//} else {
-			//if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
-			//	sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			//	return
-			//}
-			//}
-		}
-	}
 
-TooBigJumpStep:
-	if tx == nil {
-		tx, err = e.db.BeginRwNosync(ctx)
-		if err != nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
-		defer func() {
-			if tx == nil {
-				tx.Rollback()
+		if len(newCanonicals) > 0 {
+			if err := rawdbv3.TxNums.Truncate(tx, newCanonicals[0].number); err != nil {
+				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+				return
 			}
-		}()
+			if err := rawdb.AppendCanonicalTxNums(tx, newCanonicals[len(newCanonicals)-1].number); err != nil {
+				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+				return
+			}
+		}
 	}
-	finishProgressBefore, err = stages.GetStageProgress(tx, stages.Finish)
-	if err != nil {
-		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+	if isDomainAheadOfBlocks(tx) {
+		sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
+			LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
+			Status:          execution.ExecutionStatus_TooFarAway,
+			ValidationError: "domain ahead of blocks",
+		})
 		return
-	}
-	tooBigJump = e.syncCfg.LoopBlockLimit > 0 && finishProgressBefore > 0 && fcuHeader.Number.Uint64() > finishProgressBefore && fcuHeader.Number.Uint64()-finishProgressBefore > uint64(e.syncCfg.LoopBlockLimit)
-	if tooBigJump { //jump forward by 1K blocks
-		log.Info("[sync] jump by 1K blocks", "currentJumpTo", finishProgressBefore+uint64(e.syncCfg.LoopBlockLimit), "bigJumpTo", fcuHeader.Number.Uint64())
-		blockHash, err = e.blockReader.CanonicalHash(ctx, tx, finishProgressBefore+uint64(e.syncCfg.LoopBlockLimit))
-		if err != nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
-		fcuHeader, err = e.blockReader.HeaderByHash(ctx, tx, blockHash)
-		if err != nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
-		if fcuHeader == nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, fmt.Errorf("forkchoice: block %x not found or was marked invalid", blockHash))
-			return
-		}
 	}
 
 	// Set Progress for headers and bodies accordingly.
@@ -378,7 +370,7 @@ TooBigJumpStep:
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
-	if blockHash == e.forkValidator.ExtendingForkHeadHash() {
+	if blockHash == e.forkValidator.ExtendingForkHeadHash() && !unwindToGenesis {
 		e.logger.Info("[updateForkchoice] Fork choice update: flushing in-memory state (built by previous newPayload)")
 		if err := e.forkValidator.FlushExtendingFork(tx, e.accumulator); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
@@ -386,12 +378,13 @@ TooBigJumpStep:
 		}
 	}
 	// Run the forkchoice
-	initialCycle := tooBigJump
+	initialCycle := limitedBigJump
 	if _, err := e.executionPipeline.Run(e.db, wrap.TxContainer{Tx: tx}, initialCycle); err != nil {
 		err = fmt.Errorf("updateForkChoice: %w", err)
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
+
 	timings := slices.Clone(e.executionPipeline.PrintTimings())
 
 	// if head hash was set then success otherwise no
@@ -401,6 +394,7 @@ TooBigJumpStep:
 	// Update forks...
 	writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
 	status := execution.ExecutionStatus_Success
+
 	if headHash != blockHash {
 		status = execution.ExecutionStatus_BadBlock
 		validationError = "headHash and blockHash mismatch"
@@ -408,30 +402,32 @@ TooBigJumpStep:
 			e.logger.Warn("bad forkchoice", "head", headHash, "hash", blockHash)
 		}
 	} else {
-		if !tooBigJump {
-			valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
-			if err != nil {
-				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-				return
-			}
-			if !valid {
-				sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
-					Status:          execution.ExecutionStatus_InvalidForkchoice,
-					LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
-				})
-				return
-			}
-			if err := rawdb.TruncateCanonicalChain(ctx, tx, *headNumber+1); err != nil {
-				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-				return
-			}
+		valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
+		if err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
+		}
+		if !valid {
+			sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
+				Status:          execution.ExecutionStatus_InvalidForkchoice,
+				LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
+			})
+			return
+		}
+		if err := rawdb.TruncateCanonicalChain(ctx, tx, *headNumber+1); err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
+		}
+
+		if err := rawdbv3.TxNums.Truncate(tx, *headNumber+1); err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
 		}
 
 		if err := tx.Commit(); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
-		tx = nil
 
 		if e.hook != nil {
 			if err := e.db.View(ctx, func(tx kv.Tx) error {
@@ -442,7 +438,7 @@ TooBigJumpStep:
 			}
 		}
 		if log {
-			e.logger.Info("head updated", "hash", headHash, "number", *headNumber)
+			e.logger.Info("head updated", "number", *headNumber, "hash", headHash)
 		}
 
 		var commitStart time.Time
@@ -464,9 +460,6 @@ TooBigJumpStep:
 		dbg.ReadMemStats(&m)
 		timings = append(timings, "commit", time.Since(commitStart), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 		e.logger.Info("Timings (slower than 50ms)", timings...)
-	}
-	if tooBigJump {
-		goto TooBigJumpStep
 	}
 
 	sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{

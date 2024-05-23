@@ -2,6 +2,7 @@ package block_collector_test
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/antiquary/tests"
@@ -32,7 +33,7 @@ func TestBlockCollectorAccumulateAndFlush(t *testing.T) {
 		}
 		return nil
 	})
-	bc := block_collector.NewBlockCollector(log.Root(), engine, &clparams.MainnetBeaconConfig, ".")
+	bc := block_collector.NewBlockCollector(log.Root(), engine, &clparams.MainnetBeaconConfig, math.MaxUint64, ".")
 	for _, block := range blocks {
 		err := bc.AddBlock(block.Block)
 		if err != nil {

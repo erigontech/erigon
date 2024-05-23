@@ -20,23 +20,26 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"embed"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"os"
 	"slices"
-	"sync"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/config3"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal"
+	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/common"
@@ -47,7 +50,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
 //go:embed allocs
@@ -88,6 +90,10 @@ func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, override
 }
 
 func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *big.Int, tmpDir string, logger log.Logger) (*chain.Config, *types.Block, error) {
+	if err := rawdb.WriteGenesis(tx, genesis); err != nil {
+		return nil, nil, err
+	}
+
 	var storedBlock *types.Block
 	if genesis != nil && genesis.Config == nil {
 		return params.AllProtocolChanges, nil, types.ErrGenesisNoConfig
@@ -186,27 +192,9 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string, logger log.L
 	if err != nil {
 		return nil, nil, err
 	}
-	histV3, err := kvcfg.HistoryV3.Enabled(tx)
-	if err != nil {
-		panic(err)
-	}
 
 	var stateWriter state.StateWriter
-	if histV3 {
-		stateWriter = state.NewNoopWriter()
-	} else {
-		for addr, account := range g.Alloc {
-			if len(account.Code) > 0 || len(account.Storage) > 0 {
-				// Special case for weird tests - inaccessible storage
-				var b [8]byte
-				binary.BigEndian.PutUint64(b[:], state.FirstContractIncarnation)
-				if err := tx.Put(kv.IncarnationMap, addr[:], b[:]); err != nil {
-					return nil, nil, err
-				}
-			}
-		}
-		stateWriter = state.NewPlainStateWriter(tx, tx, 0)
-	}
+	stateWriter = state.NewNoopWriter()
 
 	if block.Number().Sign() != 0 {
 		return nil, statedb, fmt.Errorf("can't commit genesis block with number > 0")
@@ -215,16 +203,6 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string, logger log.L
 		return nil, statedb, fmt.Errorf("cannot write state: %w", err)
 	}
 
-	if !histV3 {
-		if csw, ok := stateWriter.(state.WriterWithChangeSets); ok {
-			if err := csw.WriteChangeSets(); err != nil {
-				return nil, statedb, fmt.Errorf("cannot write change sets: %w", err)
-			}
-			if err := csw.WriteHistory(); err != nil {
-				return nil, statedb, fmt.Errorf("cannot write history: %w", err)
-			}
-		}
-	}
 	return block, statedb, nil
 }
 
@@ -267,9 +245,6 @@ func write(tx kv.RwTx, g *types.Genesis, tmpDir string, logger log.Logger) (*typ
 		return nil, nil, err
 	}
 	if err := rawdbv3.TxNums.WriteForGenesis(tx, uint64(block.Transactions().Len()+1)); err != nil {
-		return nil, nil, err
-	}
-	if err := rawdb.WriteReceipts(tx, block.NumberU64(), nil); err != nil {
 		return nil, nil, err
 	}
 
@@ -548,25 +523,51 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 		}
 	}
 
-	var root libcommon.Hash
-	var statedb *state.IntraBlockState
-	wg := sync.WaitGroup{}
-	wg.Add(1)
+	var requests []*types.Request // TODO(racytech): revisit this after merge, make sure everythin is correct
+	if g.Config != nil && g.Config.IsPrague(g.Timestamp) {
+		requests = []*types.Request{}
+	}
 
-	var err error
-	go func() { // we may run inside write tx, can't open 2nd write tx in same goroutine
-		defer wg.Done()
+	var root libcommon.Hash
+	var statedb *state.IntraBlockState // reader behind this statedb is dead at the moment of return, tx is rolled back
+
+	ctx := context.Background()
+	wg, ctx := errgroup.WithContext(ctx)
+	// we may run inside write tx, can't open 2nd write tx in same goroutine
+	wg.Go(func() error {
+		if tmpDir == "" {
+			tmpDir = os.TempDir()
+		}
 		// some users creaing > 1Gb custome genesis by `erigon init`
 		genesisTmpDB := mdbx.NewMDBX(logger).InMem(tmpDir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
 		defer genesisTmpDB.Close()
 
-		tx, err := genesisTmpDB.BeginRw(context.Background())
+		agg, err := state2.NewAggregator(context.Background(), datadir.New(tmpDir), config3.HistoryV3AggregationStep, genesisTmpDB, logger)
 		if err != nil {
-			return
+			return err
+		}
+		defer agg.Close()
+
+		tdb, err := temporal.New(genesisTmpDB, agg)
+		if err != nil {
+			return err
+		}
+		defer tdb.Close()
+
+		tx, err := tdb.BeginTemporalRw(ctx)
+		if err != nil {
+			return err
 		}
 		defer tx.Rollback()
 
-		r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
+		sd, err := state2.NewSharedDomains(tx, logger)
+		if err != nil {
+			return err
+		}
+		defer sd.Close()
+
+		//r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
+		r, w := state.NewReaderV4(sd), state.NewWriterV4(sd)
 		statedb = state.New(r)
 		statedb.SetTrace(false)
 
@@ -602,7 +603,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 
 			if len(account.Constructor) > 0 {
 				if _, err = SysCreate(addr, account.Constructor, *g.Config, statedb, head); err != nil {
-					return
+					return err
 				}
 			}
 
@@ -611,20 +612,24 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 			}
 		}
 		if err = statedb.FinalizeTx(&chain.Rules{}, w); err != nil {
-			return
+			return err
 		}
-		if root, err = trie.CalcRoot("genesis", tx); err != nil {
-			return
+
+		rh, err := sd.ComputeCommitment(context.Background(), true, 0, "genesis")
+		if err != nil {
+			return err
 		}
-	}()
-	wg.Wait()
-	if err != nil {
+		root = libcommon.BytesToHash(rh)
+		return nil
+	})
+
+	if err := wg.Wait(); err != nil {
 		return nil, nil, err
 	}
 
 	head.Root = root
 
-	return types.NewBlock(head, nil, nil, nil, withdrawals), statedb, nil
+	return types.NewBlock(head, nil, nil, nil, withdrawals, requests), statedb, nil
 }
 
 func sortedAllocKeys(m types.GenesisAlloc) []string {

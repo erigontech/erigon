@@ -24,16 +24,17 @@ import (
 	"runtime"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
+
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
@@ -160,7 +161,7 @@ func (db *DB) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	}
 
 	if semErr := db.roTxsLimiter.Acquire(ctx, 1); semErr != nil {
-		return nil, semErr
+		return nil, fmt.Errorf("remotedb.DB.BeginRo: roTxsLimiter error %w", semErr)
 	}
 
 	defer func() {
@@ -548,7 +549,7 @@ func (c *remoteCursor) Current() ([]byte, []byte, error) {
 	return c.getCurrent()
 }
 
-// Seek - doesn't start streaming (because much of code does only several .Seek calls without reading sequence of data)
+// Seek - doesn't start streaming (because much of code does only several .seekInFiles calls without reading sequence of data)
 // .Next() - does request streaming (if configured by user)
 func (c *remoteCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	return c.setRange(seek)
@@ -673,8 +674,8 @@ func (tx *tx) DomainRange(name kv.Domain, fromKey, toKey []byte, ts uint64, asc 
 		return reply.Keys, reply.Values, reply.NextPageToken, nil
 	}), nil
 }
-func (tx *tx) HistoryGet(name kv.History, k []byte, ts uint64) (v []byte, ok bool, err error) {
-	reply, err := tx.db.remoteKV.HistoryGet(tx.ctx, &remote.HistoryGetReq{TxId: tx.id, Table: string(name), K: k, Ts: ts})
+func (tx *tx) HistorySeek(name kv.History, k []byte, ts uint64) (v []byte, ok bool, err error) {
+	reply, err := tx.db.remoteKV.HistorySeek(tx.ctx, &remote.HistorySeekReq{TxId: tx.id, Table: string(name), K: k, Ts: ts})
 	if err != nil {
 		return nil, false, err
 	}
