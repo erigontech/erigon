@@ -5,10 +5,10 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -27,10 +27,10 @@ type TxGasLogger struct {
 	logPrefix       string
 	batch           *kv.PendingMutations
 	tx              kv.RwTx
-	metric          *metrics.Counter
+	metric          metrics.Gauge
 }
 
-func NewTxGasLogger(logInterval time.Duration, logBlock, total, gasLimit uint64, logPrefix string, batch *kv.PendingMutations, tx kv.RwTx, metric *metrics.Counter) *TxGasLogger {
+func NewTxGasLogger(logInterval time.Duration, logBlock, total, gasLimit uint64, logPrefix string, batch *kv.PendingMutations, tx kv.RwTx, metric metrics.Gauge) *TxGasLogger {
 	return &TxGasLogger{
 		logEvery:     time.NewTicker(logInterval),
 		initialBlock: logBlock,
@@ -58,7 +58,7 @@ func (g *TxGasLogger) Start() {
 			if g.tx != nil {
 				g.tx.CollectMetrics()
 			}
-			g.metric.Set(g.logBlock)
+			g.metric.SetUint64(g.logBlock)
 		}
 	}()
 

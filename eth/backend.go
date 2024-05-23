@@ -68,7 +68,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon-lib/txpool"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
@@ -165,7 +164,7 @@ type Ethereum struct {
 	ethBackendRPC      *privateapi.EthBackendServer
 	engineBackendRPC   *engineapi.EngineServer
 	miningRPC          txpoolproto.MiningServer
-	stateChangesClient txpool.StateChangesClient
+	stateChangesClient txpool2.StateChangesClient
 
 	miningSealingQuit chan struct{}
 	pendingBlocks     chan *types.Block
@@ -620,7 +619,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	var miningRPC txpoolproto.MiningServer
 	stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
 	if config.DeprecatedTxPool.Disable {
-		backend.txPool2GrpcServer = &txpool.GrpcDisabled{}
+		backend.txPool2GrpcServer = &txpool2.GrpcDisabled{}
 	} else {
 		//cacheConfig := kvcache.DefaultCoherentCacheConfig
 		//cacheConfig.MetricsLabel = "txpool"

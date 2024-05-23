@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/membatch"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/zk/erigon_db"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
@@ -34,8 +33,6 @@ import (
 	rawdbZk "github.com/ledgerwatch/erigon/zk/rawdb"
 	"github.com/ledgerwatch/erigon/zk/utils"
 )
-
-var Metrics = map[stages.SyncStage]*metrics.Counter{}
 
 func SpawnExecuteBlocksStageZk(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
 	if cfg.historyV3 {
@@ -107,7 +104,7 @@ func SpawnExecuteBlocksStageZk(s *StageState, u Unwinder, tx kv.RwTx, toBlock ui
 
 	stateStream := !initialCycle && cfg.stateStream && to-s.BlockNumber < stateStreamLimit
 
-	logger := utils.NewTxGasLogger(logInterval, s.BlockNumber, total, gasState, s.LogPrefix(), &batch, tx, Metrics[stages.Execution])
+	logger := utils.NewTxGasLogger(logInterval, s.BlockNumber, total, gasState, s.LogPrefix(), &batch, tx, stages.SyncMetrics[stages.Execution])
 	logger.Start()
 	defer logger.Stop()
 
