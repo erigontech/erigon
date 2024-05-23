@@ -96,6 +96,7 @@ func TestUnwindBatches(t *testing.T) {
 	/////////
 	err = SpawnStageBatches(s, u, ctx, tx, cfg, true, true)
 	require.NoError(t, err)
+	tx.Commit()
 
 	tx2 := memdb.BeginRw(t, db1)
 

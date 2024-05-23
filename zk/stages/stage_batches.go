@@ -116,6 +116,8 @@ func SpawnStageBatches(
 	}
 	defer log.Info(fmt.Sprintf("[%s] Finished Batches stage", logPrefix))
 
+	useExternalTx := tx != nil
+
 	if tx == nil {
 		log.Debug(fmt.Sprintf("[%s] batches: no tx provided, creating a new one", logPrefix))
 		var err error
@@ -403,7 +405,7 @@ LOOP:
 		return fmt.Errorf("save stage progress error: %v", err)
 	}
 
-	if firstCycle {
+	if firstCycle && !useExternalTx {
 		log.Debug(fmt.Sprintf("[%s] batches: first cycle, committing tx", logPrefix))
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("failed to commit tx, %w", err)

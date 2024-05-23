@@ -81,6 +81,8 @@ func SpawnStageL1Syncer(
 	}
 	defer log.Info(fmt.Sprintf("[%s] Finished L1 sync stage ", logPrefix))
 
+	useExternalTx := tx != nil
+
 	if tx == nil {
 		log.Debug("l1 sync: no tx provided, creating a new one")
 		var err error
@@ -190,7 +192,7 @@ Loop:
 		log.Info(fmt.Sprintf("[%s] No new L1 blocks to sync", logPrefix))
 	}
 
-	if firstCycle {
+	if firstCycle && !useExternalTx {
 		log.Debug("l1 sync: first cycle, committing tx")
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("failed to commit tx, %w", err)
