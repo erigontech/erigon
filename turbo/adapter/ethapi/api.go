@@ -112,7 +112,7 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 			gasFeeCap, gasTipCap = gasPrice, gasPrice
 		} else {
 			// User specified 1559 gas fields (or none), use those
-			gasFeeCap = baseFee
+			gasFeeCap = uint256.MustFromBig(baseFee.ToBig())
 			if args.MaxFeePerGas != nil {
 				overflow := gasFeeCap.SetFromBig(args.MaxFeePerGas.ToInt())
 				if overflow {
@@ -133,7 +133,11 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 			}
 		}
 		if args.MaxFeePerBlobGas != nil {
-			maxFeePerBlobGas.SetFromBig(args.MaxFeePerBlobGas.ToInt())
+			blobFee, overflow := uint256.FromBig(args.MaxFeePerBlobGas.ToInt())
+			if overflow {
+				return types.Message{}, fmt.Errorf("args.MaxFeePerBlobGas higher than 2^256-1")
+			}
+			maxFeePerBlobGas = blobFee
 		}
 	}
 
