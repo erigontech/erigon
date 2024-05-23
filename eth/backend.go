@@ -608,7 +608,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
-	sentryMcDisableBlockDownload := config.PolygonSync
+	sentryMcDisableBlockDownload := config.PolygonSync || config.PolygonSyncStage
 	backend.sentriesClient, err = sentry_multi_client.NewMultiClient(
 		backend.chainDB,
 		chainConfig,
