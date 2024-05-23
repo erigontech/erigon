@@ -18,12 +18,26 @@ func BuildWitness(s *SMT, rd trie.RetainDecider, ctx context.Context) (*trie.Wit
 
 	action := func(prefix []byte, k utils.NodeKey, v utils.NodeValue12) (bool, error) {
 		if rd != nil {
+			/*
+				This function is invoked for every node in the tree. We must decide whether to retain it or not in the witness.
+				Retaining means adding node's data. Not retaining means adding only its hash.
+				If a path (or rather a prefix of a path) must be retained then rd.Retain(prefix of a path) returns true. Otherwise it returns false.
+				If a node (leaf or not) must be retained then rd.Retain returns true for all of the prefixes of its path => rd.Retains returns true for all node's ancestors all the way up to the root. (1)
+				Therefore if a leaf must be retained then rd.Retain will return true not only for leaf's path but it will return true for all leaf's ancestors' paths.
+				If a node must be retained it could be either because of a modification or because of a deletion.
+				In case of modification it is enough to retain only the node but in case of deletion the witness must includes the node's sibling.
+				Because of (1) if a node must be retained then its parent must be retained too => we're safe to decide whether a node must be retained or not by using its parent's parent.
+				Using a parent's path will ensure that if a node is included in the witness then its sibling will also be included, because they have the same parent.
+				As a result, if node must be included in the witness the code will always include its sibling.
+				Using this approach we prepare the witness like we're going to deleting all node, because we actually do not have information whether a node is modified or deleted.
+				This algorithm adds a little bit more nodes to the witness but it ensures that all requiring nodes are included.
+			*/
+
 			retain := true
-			if v.IsFinalNode() {
-				prefixLen := len(prefix)
-				if prefixLen > 0 {
-					retain = rd.Retain(prefix[:prefixLen-1])
-				}
+
+			prefixLen := len(prefix)
+			if prefixLen > 0 {
+				retain = rd.Retain(prefix[:prefixLen-1])
 			} else {
 				retain = rd.Retain(prefix)
 			}

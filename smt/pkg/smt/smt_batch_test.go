@@ -69,7 +69,7 @@ func TestBatchSimpleInsert(t *testing.T) {
 		smtIncremental.InsertKA(k, valuesRaw[i])
 	}
 
-	_, err := smtBatch.InsertBatch("", keyPointers, valuePointers, nil, nil)
+	_, err := smtBatch.InsertBatch(context.Background(), "", keyPointers, valuePointers, nil, nil)
 	assert.NilError(t, err)
 
 	smtIncremental.DumpTree()
@@ -252,7 +252,7 @@ func TestBatchWitness(t *testing.T) {
 
 	for i, k := range keys {
 		smtIncremental.Insert(k, values[i])
-		_, err := smtBatch.InsertBatch("", []*utils.NodeKey{&k}, []*utils.NodeValue8{&values[i]}, nil, nil)
+		_, err := smtBatch.InsertBatch(context.Background(), "", []*utils.NodeKey{&k}, []*utils.NodeValue8{&values[i]}, nil, nil)
 		assert.NilError(t, err)
 
 		smtIncrementalRootHash, _ := smtIncremental.Db.GetLastRoot()
@@ -316,7 +316,7 @@ func TestBatchDelete(t *testing.T) {
 
 	for i, k := range keys {
 		smtIncremental.Insert(k, values[i])
-		_, err := smtBatch.InsertBatch("", []*utils.NodeKey{&k}, []*utils.NodeValue8{&values[i]}, nil, nil)
+		_, err := smtBatch.InsertBatch(context.Background(), "", []*utils.NodeKey{&k}, []*utils.NodeValue8{&values[i]}, nil, nil)
 		assert.NilError(t, err)
 
 		smtIncrementalRootHash, _ := smtIncremental.Db.GetLastRoot()
@@ -367,7 +367,7 @@ func TestBatchRawInsert(t *testing.T) {
 	t.Logf("Incremental insert %d values in %v\n", len(keysForIncremental), time.Since(startTime))
 
 	startTime = time.Now()
-	_, err := smtBatch.InsertBatch("", keysForBatch, valuesForBatch, nil, nil)
+	_, err := smtBatch.InsertBatch(context.Background(), "", keysForBatch, valuesForBatch, nil, nil)
 	assert.NilError(t, err)
 	t.Logf("Batch insert %d values in %v\n", len(keysForBatch), time.Since(startTime))
 
@@ -409,7 +409,7 @@ func TestBatchRawInsert(t *testing.T) {
 	t.Logf("Incremental delete %d values in %v\n", len(keysForIncrementalDelete), time.Since(startTime))
 
 	startTime = time.Now()
-	_, err = smtBatch.InsertBatch("", keysForBatchDelete, valuesForBatchDelete, nil, nil)
+	_, err = smtBatch.InsertBatch(context.Background(), "", keysForBatchDelete, valuesForBatchDelete, nil, nil)
 	assert.NilError(t, err)
 	t.Logf("Batch delete %d values in %v\n", len(keysForBatchDelete), time.Since(startTime))
 
@@ -491,7 +491,7 @@ func compareAllTreesInsertTimesAndFinalHashes(t *testing.T, smtIncremental, smtB
 	t.Logf("Incremental insert %d values in %v\n", totalInserts, time.Since(startTime))
 
 	startTime = time.Now()
-	keyPointers, valuePointers, err := smtBatch.SetStorage("", accChanges, codeChanges, storageChanges)
+	keyPointers, valuePointers, err := smtBatch.SetStorage(context.Background(), "", accChanges, codeChanges, storageChanges)
 	assert.NilError(t, err)
 	t.Logf("Batch insert %d values in %v\n", totalInserts, time.Since(startTime))
 

@@ -128,6 +128,12 @@ func SpawnSequencingStage(
 	decodedBlocksSize := uint64(0)
 
 	if l1Recovery {
+		if cfg.zk.L1SyncStopBatch > 0 && thisBatch > cfg.zk.L1SyncStopBatch {
+			log.Info(fmt.Sprintf("[%s] L1 recovery has completed!", logPrefix), "batch", thisBatch)
+			time.Sleep(1 * time.Second)
+			return nil
+		}
+
 		// let's check if we have any L1 data to recover
 		decodedBlocks, coinbase, workRemaining, err = getNextL1BatchData(thisBatch, forkId, sdb.hermezDb)
 		if err != nil {

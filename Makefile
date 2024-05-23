@@ -42,6 +42,8 @@ endif
 
 GOPRIVATE = github.com/erigontech/silkworm-go
 
+# about netgo see: https://github.com/golang/go/issues/30310#issuecomment-471669125
+BUILD_TAGS = nosqlite,noboltdb,netgo
 PACKAGE = github.com/ledgerwatch/erigon
 
 GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false

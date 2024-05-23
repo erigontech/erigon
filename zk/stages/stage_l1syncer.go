@@ -33,9 +33,11 @@ type IL1Syncer interface {
 	GetLogsChan() chan []ethTypes.Log
 	GetProgressMessageChan() chan string
 
-	L1QueryBlocks(logPrefix string, logs []ethTypes.Log) (map[uint64]*ethTypes.Block, error)
+	L1QueryHeaders(logs []ethTypes.Log) (map[uint64]*ethTypes.Header, error)
 	GetBlock(number uint64) (*ethTypes.Block, error)
+	GetHeader(number uint64) (*ethTypes.Header, error)
 	Run(lastCheckedBlock uint64)
+	Stop()
 }
 
 var ErrStateRootMismatch = fmt.Errorf("state root mismatch")
@@ -108,20 +110,6 @@ func SpawnStageL1Syncer(
 		cfg.syncer.Run(l1BlockProgress)
 	}
 
-	latestL1InfoTreeUpdate, found, err := hermezDb.GetLatestL1InfoTreeUpdate()
-	if err != nil {
-		return err
-	}
-	infoTreeUpdates := 0
-
-	// because the info tree updates are used by the RPC node and the sequencer, and we can switch between
-	// the two, we need to ensure consistency when migrating from RPC to sequencer modes of operation,
-	// so we keep track of these block numbers outside of the usual stage progress
-	latestL1InfoTreeBlockNumber, err := hermezDb.GetL1InfoTreeHighestBlock()
-	if err != nil {
-		return err
-	}
-
 	logsChan := cfg.syncer.GetLogsChan()
 	progressMessageChan := cfg.syncer.GetProgressMessageChan()
 	highestVerification := types.L1BatchInfo{}
@@ -144,11 +132,6 @@ Loop:
 				}
 			}
 
-			blocksMap, err := cfg.syncer.L1QueryBlocks(logPrefix, logsForQueryBlocks)
-			if err != nil {
-				return err
-			}
-
 			for i, l := range logs {
 				info := *infos[i]
 				batchLogType := batchLogTypes[i]
@@ -166,18 +149,6 @@ Loop:
 						return fmt.Errorf("failed to write verification for block %d, %w", info.L1BlockNo, err)
 					}
 					newVerificationsCount++
-				case logL1InfoTreeUpdate:
-					if latestL1InfoTreeBlockNumber > 0 && l.BlockNumber <= latestL1InfoTreeBlockNumber {
-						continue
-					}
-					block := blocksMap[l.BlockNumber]
-					latestL1InfoTreeUpdate, err = HandleL1InfoTreeUpdate(cfg.syncer, hermezDb, l, latestL1InfoTreeUpdate, found, block)
-					if err != nil {
-						return err
-					}
-					found = true
-					infoTreeUpdates++
-					latestL1InfoTreeBlockNumber = l.BlockNumber
 				case logIncompatible:
 					continue
 				default:
@@ -193,10 +164,6 @@ Loop:
 		}
 	}
 
-	if err = hermezDb.WriteL1InfoTreeHighestBlock(latestL1InfoTreeBlockNumber); err != nil {
-		return err
-	}
-
 	latestCheckedBlock := cfg.syncer.GetLastCheckedL1Block()
 	if latestCheckedBlock > l1BlockProgress {
 		log.Info(fmt.Sprintf("[%s] Saving L1 syncer progress", logPrefix), "latestCheckedBlock", latestCheckedBlock, "newVerificationsCount", newVerificationsCount, "newSequencesCount", newSequencesCount)
@@ -209,10 +176,6 @@ Loop:
 			if err := stages.SaveStageProgress(tx, stages.L1VerificationsBatchNo, highestVerification.BatchNo); err != nil {
 				return fmt.Errorf("failed to save stage progress, %w", err)
 			}
-		}
-
-		if infoTreeUpdates > 0 {
-			log.Info(fmt.Sprintf("[%s] Info tree updates", logPrefix), "count", infoTreeUpdates)
 		}
 
 		// State Root Verifications Check

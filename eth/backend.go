@@ -985,17 +985,16 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		var l1Topics [][]libcommon.Hash
 		var l1Contracts []libcommon.Address
 		if isSequencer {
-			l1Topics = [][]libcommon.Hash{{contracts.UpdateL1InfoTreeTopic, contracts.InitialSequenceBatchesTopic}}
-			l1Contracts = []libcommon.Address{cfg.AddressGerManager, cfg.AddressZkevm}
+			l1Topics = [][]libcommon.Hash{{contracts.InitialSequenceBatchesTopic}}
+			l1Contracts = []libcommon.Address{cfg.AddressZkevm}
 		} else {
 			l1Topics = [][]libcommon.Hash{{
 				contracts.SequencedBatchTopicPreEtrog,
 				contracts.SequencedBatchTopicEtrog,
 				contracts.VerificationTopicPreEtrog,
 				contracts.VerificationTopicEtrog,
-				contracts.UpdateL1InfoTreeTopic,
 			}}
-			l1Contracts = []libcommon.Address{cfg.AddressRollup, cfg.AddressAdmin, cfg.AddressGerManager}
+			l1Contracts = []libcommon.Address{cfg.AddressRollup, cfg.AddressAdmin}
 		}
 
 		ethermanClients := make([]syncer.IEtherman, len(backend.etherManClients))
@@ -1009,7 +1008,14 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			l1Topics,
 			cfg.L1BlockRange,
 			cfg.L1QueryDelay,
-			cfg.L1QueryBlocksThreads,
+		)
+
+		l1InfoTreeSyncer := syncer.NewL1Syncer(
+			ethermanClients,
+			[]libcommon.Address{cfg.AddressGerManager},
+			[][]libcommon.Hash{{contracts.UpdateL1InfoTreeTopic}},
+			cfg.L1BlockRange,
+			cfg.L1QueryDelay,
 		)
 
 		if isSequencer {
@@ -1029,6 +1035,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 					GrpcUrls:              cfg.ExecutorUrls,
 					Timeout:               cfg.ExecutorRequestTimeout,
 					MaxConcurrentRequests: cfg.ExecutorMaxConcurrentRequests,
+					OutputLocation:        cfg.ExecutorPayloadOutput,
 				}
 				executors := legacy_executor_verifier.NewExecutors(levCfg)
 				for _, e := range executors {
@@ -1056,7 +1063,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				[][]libcommon.Hash{{contracts.SequenceBatchesTopic}},
 				cfg.L1BlockRange,
 				cfg.L1QueryDelay,
-				cfg.L1QueryBlocksThreads,
 			)
 
 			backend.syncStages = stages2.NewSequencerZkStages(
@@ -1072,6 +1078,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				backend.engine,
 				backend.dataStream,
 				backend.l1Syncer,
+				l1InfoTreeSyncer,
 				l1BlockSyncer,
 				backend.txPool2,
 				backend.txPool2DB,
@@ -1106,6 +1113,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				backend.forkValidator,
 				backend.engine,
 				backend.l1Syncer,
+				l1InfoTreeSyncer,
 				streamClient,
 				backend.dataStream,
 			)

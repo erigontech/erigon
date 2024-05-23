@@ -1,6 +1,8 @@
 package smt
 
 import (
+	"context"
+	"fmt"
 	"math/big"
 	"strings"
 	"sync"
@@ -201,7 +203,7 @@ func (s *SMT) SetContractStorage(ethAddr string, storage map[string]string, prog
 	return auxRes.NewRootScalar.ToBigInt(), nil
 }
 
-func (s *SMT) SetStorage(logPrefix string, accChanges map[libcommon.Address]*accounts.Account, codeChanges map[libcommon.Address]string, storageChanges map[libcommon.Address]map[string]string) ([]*utils.NodeKey, []*utils.NodeValue8, error) {
+func (s *SMT) SetStorage(ctx context.Context, logPrefix string, accChanges map[libcommon.Address]*accounts.Account, codeChanges map[libcommon.Address]string, storageChanges map[libcommon.Address]map[string]string) ([]*utils.NodeKey, []*utils.NodeValue8, error) {
 	var isDelete bool
 
 	initialCapacity := len(accChanges) + len(codeChanges) + len(storageChanges)
@@ -209,6 +211,11 @@ func (s *SMT) SetStorage(logPrefix string, accChanges map[libcommon.Address]*acc
 	valuesBatchStorage := make([]*utils.NodeValue8, 0, initialCapacity)
 
 	for addr, acc := range accChanges {
+		select {
+		case <-ctx.Done():
+			return nil, nil, fmt.Errorf(fmt.Sprintf("[%s] Context done", logPrefix))
+		default:
+		}
 		ethAddr := addr.String()
 		keyBalance, err := utils.KeyEthAddrBalance(ethAddr)
 		if err != nil {
@@ -257,6 +264,12 @@ func (s *SMT) SetStorage(logPrefix string, accChanges map[libcommon.Address]*acc
 	}
 
 	for addr, code := range codeChanges {
+		select {
+		case <-ctx.Done():
+			return nil, nil, fmt.Errorf(fmt.Sprintf("[%s] Context done", logPrefix))
+		default:
+		}
+
 		ethAddr := addr.String()
 		keyContractCode, err := utils.KeyContractCode(ethAddr)
 		if err != nil {
@@ -302,6 +315,11 @@ func (s *SMT) SetStorage(logPrefix string, accChanges map[libcommon.Address]*acc
 	}
 
 	for addr, storage := range storageChanges {
+		select {
+		case <-ctx.Done():
+			return nil, nil, fmt.Errorf(fmt.Sprintf("[%s] Context done", logPrefix))
+		default:
+		}
 		ethAddr := addr.String()
 		ethAddrBigInt := utils.ConvertHexToBigInt(ethAddr)
 		ethAddrBigIngArray := utils.ScalarToArrayBig(ethAddrBigInt)
@@ -331,7 +349,7 @@ func (s *SMT) SetStorage(logPrefix string, accChanges map[libcommon.Address]*acc
 		}
 	}
 
-	_, err := s.InsertBatch(logPrefix, keysBatchStorage, valuesBatchStorage, nil, nil)
+	_, err := s.InsertBatch(ctx, logPrefix, keysBatchStorage, valuesBatchStorage, nil, nil)
 	return keysBatchStorage, valuesBatchStorage, err
 }
 

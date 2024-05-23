@@ -11,13 +11,18 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
+	"github.com/dustin/go-humanize"
 	"google.golang.org/grpc/credentials/insecure"
+	"encoding/json"
+	"os"
+	"path"
 )
 
 type Config struct {
 	GrpcUrls              []string
 	Timeout               time.Duration
 	MaxConcurrentRequests int
+	OutputLocation        string
 }
 
 type Payload struct {
@@ -48,17 +53,21 @@ type Executor struct {
 	connCancel context.CancelFunc
 	client     executor.ExecutorServiceClient
 	semaphore  chan struct{}
+
+	// if not empty then the executor will write the payload to this location before sending it to the
+	// remote executor
+	outputLocation string
 }
 
 func NewExecutors(cfg Config) []*Executor {
 	executors := make([]*Executor, len(cfg.GrpcUrls))
 	for i, grpcUrl := range cfg.GrpcUrls {
-		executors[i] = NewExecutor(grpcUrl, cfg.Timeout, cfg.MaxConcurrentRequests)
+		executors[i] = NewExecutor(grpcUrl, cfg.Timeout, cfg.MaxConcurrentRequests, cfg.OutputLocation)
 	}
 	return executors
 }
 
-func NewExecutor(grpcUrl string, timeout time.Duration, maxConcurrentRequests int) *Executor {
+func NewExecutor(grpcUrl string, timeout time.Duration, maxConcurrentRequests int, outputLocation string) *Executor {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
@@ -72,11 +81,12 @@ func NewExecutor(grpcUrl string, timeout time.Duration, maxConcurrentRequests in
 	client := executor.NewExecutorServiceClient(conn)
 
 	e := &Executor{
-		grpcUrl:    grpcUrl,
-		conn:       conn,
-		connCancel: cancel,
-		client:     client,
-		semaphore:  make(chan struct{}, maxConcurrentRequests),
+		grpcUrl:        grpcUrl,
+		conn:           conn,
+		connCancel:     cancel,
+		client:         client,
+		semaphore:      make(chan struct{}, maxConcurrentRequests),
+		outputLocation: outputLocation,
 	}
 
 	return e
@@ -139,10 +149,13 @@ func (e *Executor) Verify(p *Payload, request *VerifierRequest, oldStateRoot com
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	log.Info("Sending request to grpc server", "grpcUrl", e.grpcUrl, "ourRoot", request.StateRoot, "oldRoot", oldStateRoot, "batch", request.BatchNumber)
+	witnessSize := humanize.Bytes(uint64(len(p.Witness)))
+	dataStreamSize := humanize.Bytes(uint64(len(p.DataStream)))
+	log.Info("Sending request to grpc server", "grpcUrl", e.grpcUrl, "ourRoot", request.StateRoot, "oldRoot", oldStateRoot, "batch", request.BatchNumber, "witness-size", witnessSize, "data-stream-size", dataStreamSize)
 
 	size := 1024 * 1024 * 256 // 256mb maximum size - hack for now until trimmed witness is proved off
-	resp, err := e.client.ProcessStatelessBatchV2(ctx, &executor.ProcessStatelessBatchRequestV2{
+
+	grpcRequest := &executor.ProcessStatelessBatchRequestV2{
 		Witness:                     p.Witness,
 		DataStream:                  p.DataStream,
 		Coinbase:                    p.Coinbase,
@@ -152,14 +165,21 @@ func (e *Executor) Verify(p *Payload, request *VerifierRequest, oldStateRoot com
 		ForcedBlockhashL1:           p.ForcedBlockhashL1,
 		ContextId:                   p.ContextId,
 		L1InfoTreeIndexMinTimestamp: p.L1InfoTreeMinTimestamps,
-		//TraceConfig: &executor.TraceConfigV2{
-		//	DisableStorage:            0,
-		//	DisableStack:              0,
-		//	EnableMemory:              0,
-		//	EnableReturnData:          0,
-		//	TxHashToGenerateFullTrace: nil,
-		//},
-	}, grpc.MaxCallSendMsgSize(size), grpc.MaxCallRecvMsgSize(size))
+	}
+
+	if e.outputLocation != "" {
+		asJson, err := json.Marshal(grpcRequest)
+		if err != nil {
+			return false, err
+		}
+		file := path.Join(e.outputLocation, fmt.Sprintf("payload_%d.json", request.BatchNumber))
+		err = os.WriteFile(file, asJson, 0644)
+		if err != nil {
+			return false, err
+		}
+	}
+
+	resp, err := e.client.ProcessStatelessBatchV2(ctx, grpcRequest, grpc.MaxCallSendMsgSize(size), grpc.MaxCallRecvMsgSize(size))
 	if err != nil {
 		return false, fmt.Errorf("failed to process stateless batch: %w", err)
 	}
@@ -175,7 +195,10 @@ func (e *Executor) Verify(p *Payload, request *VerifierRequest, oldStateRoot com
 		"D":   int(resp.CntPoseidonPaddings),
 	}
 
+	match := bytes.Equal(resp.NewStateRoot, request.StateRoot.Bytes())
+
 	log.Info("executor result",
+		"match", match,
 		"grpcUrl", e.grpcUrl,
 		"batch", request.BatchNumber,
 		"counters", counters,

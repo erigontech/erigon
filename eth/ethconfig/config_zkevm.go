@@ -12,6 +12,7 @@ type Zk struct {
 	L2DataStreamerUrl                      string
 	L2DataStreamerTimeout                  time.Duration
 	L1SyncStartBlock                       uint64
+	L1SyncStopBatch                        uint64
 	L1ChainId                              uint64
 	L1RpcUrl                               string
 	AddressSequencer                       common.Address
@@ -34,7 +35,6 @@ type Zk struct {
 	ExecutorStrictMode                     bool
 	ExecutorRequestTimeout                 time.Duration
 	ExecutorMaxConcurrentRequests          int
-	L1QueryBlocksThreads                   uint64
 	AllowFreeTransactions                  bool
 	AllowPreEIP155Transactions             bool
 	EffectiveGasPriceForEthTransfer        uint8
@@ -57,6 +57,7 @@ type Zk struct {
 
 	PoolManagerUrl         string
 	DisableVirtualCounters bool
+	ExecutorPayloadOutput  string
 }
 
 var DefaultZkConfig = &Zk{}

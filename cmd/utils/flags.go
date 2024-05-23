@@ -410,6 +410,11 @@ var (
 		Usage: "Designed for recovery of the network from the L1 batch data, slower mode of operation than the datastream.  If set the datastream will not be used",
 		Value: 0,
 	}
+	L1SyncStopBatch = cli.Uint64Flag{
+		Name:  "zkevm.l1-sync-stop-batch",
+		Usage: "Designed mainly for debugging, this will stop the L1 sync going on for too long when you only want to pull a handful of batches from the L1 during recovery",
+		Value: 0,
+	}
 	L1ChainIdFlag = cli.Uint64Flag{
 		Name:  "zkevm.l1-chain-id",
 		Usage: "Ethereum L1 chain ID",
@@ -536,11 +541,6 @@ var (
 		Usage: "Define the host used for the zkevm data stream",
 		Value: "",
 	}
-	L1QueryBlocksThreads = cli.Uint64Flag{
-		Name:  "zkevm.l1-query-blocks-threads",
-		Usage: "Define the number of threads used to query blocks from L1",
-		Value: 1,
-	}
 	AllowFreeTransactions = cli.BoolFlag{
 		Name:  "zkevm.allow-free-transactions",
 		Usage: "Allow the sequencer to proceed transactions with 0 gas price",
@@ -610,6 +610,11 @@ var (
 		Name:  "zkevm.gasless",
 		Usage: "Support gasless transactions",
 		Value: false,
+	}
+	ExecutorPayloadOutput = cli.StringFlag{
+		Name:  "zkevm.executor-payload-output",
+		Usage: "Output the payload of the executor, serialised requests stored to disk by batch number",
+		Value: "",
 	}
 	DebugNoSync = cli.BoolFlag{
 		Name:  "debug.no-sync",

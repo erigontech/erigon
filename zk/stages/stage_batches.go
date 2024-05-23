@@ -58,6 +58,7 @@ type HermezDb interface {
 	DeleteGlobalExitRoots(l1BlockHashes *[]common.Hash) error
 
 	WriteReusedL1InfoTreeIndex(l2BlockNo uint64) error
+	DeleteReusedL1InfoTreeIndexes(fromBlockNum, toBlockNum uint64) error
 	WriteBlockL1BlockHash(l2BlockNo uint64, l1BlockHash common.Hash) error
 	DeleteBlockL1BlockHashes(fromBlockNum, toBlockNum uint64) error
 	WriteL1BlockHash(l1BlockHash common.Hash) error
@@ -548,8 +549,8 @@ func UnwindBatchesStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg BatchesCfg, c
 		return fmt.Errorf("delete block l1 block hashes error: %v", err)
 	}
 
-	if err := hermezDb.DeleteBlockL1InfoTreeIndexes(fromBlock, toBlock); err != nil {
-		return fmt.Errorf("delete block l1 block hashes error: %v", err)
+	if err = hermezDb.DeleteReusedL1InfoTreeIndexes(fromBlock, toBlock); err != nil {
+		return fmt.Errorf("write reused l1 info tree index error: %w", err)
 	}
 	///////////////////////////////////////////////////////
 
@@ -601,6 +602,27 @@ func UnwindBatchesStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg BatchesCfg, c
 	/////////////////////////////////////////
 	// finish store the highest seen forkid//
 	/////////////////////////////////////////
+
+	/////////////////////////////////////////
+	// store the highest used l1 info index//
+	/////////////////////////////////////////
+
+	highestL1InfoTreeIndex, err := hermezDb.GetLatestL1InfoTreeIndex()
+	if err != nil {
+		return fmt.Errorf("get latest l1 info tree index error: %v", err)
+	}
+
+	if err := stages.SaveStageProgress(tx, stages.HighestUsedL1InfoIndex, highestL1InfoTreeIndex); err != nil {
+		return err
+	}
+
+	if err := hermezDb.DeleteBlockL1InfoTreeIndexes(fromBlock, toBlock); err != nil {
+		return fmt.Errorf("delete block l1 block hashes error: %v", err)
+	}
+
+	////////////////////////////////////////////////
+	// finish store the highest used l1 info index//
+	////////////////////////////////////////////////
 
 	if err = stages.SaveStageProgress(tx, stages.HighestSeenBatchNumber, fromBatchPrev); err != nil {
 		return fmt.Errorf("save stage progress error: %v", err)
