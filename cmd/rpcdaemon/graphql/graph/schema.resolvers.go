@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/graphql/graph/model"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -93,7 +94,6 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 			block.Nonce = *blockNonce
 		}
 		block.Number = *convertDataToUint64P(blk, "number")
-		block.Ommers = []*model.Block{}
 		block.Parent = &model.Block{}
 		block.Parent.Hash = *convertDataToStringP(blk, "parentHash")
 		block.ReceiptsRoot = *convertDataToStringP(blk, "receiptsRoot")
@@ -108,6 +108,16 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 		block.LogsBloom = "0x" + *convertDataToStringP(blk, "logsBloom")
 		block.OmmerHash = *convertDataToStringP(blk, "sha3Uncles")
 
+		// Ommers
+		block.Ommers = []*model.Block{}
+		for _, ommerHash := range blk["uncles"].([]common.Hash) {
+			block.Ommers = append(block.Ommers, &model.Block{Hash: ommerHash.String()})
+		}
+
+		ommerCount := len(block.Ommers)
+		block.OmmerCount = &ommerCount
+
+		// Transactions
 		absRcp := res["receipts"]
 		rcp := absRcp.([]map[string]interface{})
 		for _, transReceipt := range rcp {
