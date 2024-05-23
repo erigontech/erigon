@@ -239,8 +239,6 @@ func (s *polygonSyncStageService) runBgComponents(ctx context.Context) {
 }
 
 func (s *polygonSyncStageService) handleInsertBlocks(tx kv.RwTx, stageState *StageState, blocks []*types.Block) error {
-	s.logger.Info(s.appendLogPrefix("handle insert blocks"), "len", len(blocks))
-
 	for _, block := range blocks {
 		height := block.NumberU64()
 		header := block.Header()
