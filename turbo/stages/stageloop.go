@@ -14,6 +14,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/direct"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
@@ -30,6 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/p2p/sentry"
 	"github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/polygon/bor/finality"
@@ -784,6 +786,7 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 
 func NewPolygonSyncStages(
 	ctx context.Context,
+	logger log.Logger,
 	db kv.RwDB,
 	config *ethconfig.Config,
 	chainConfig *chain.Config,
@@ -796,6 +799,10 @@ func NewPolygonSyncStages(
 	silkworm *silkworm.Silkworm,
 	forkValidator *engine_helpers.ForkValidator,
 	heimdallClient heimdall.HeimdallClient,
+	sentry direct.SentryClient,
+	maxPeers int,
+	statusDataProvider *sentry.StatusDataProvider,
+	stopNode func() error,
 ) []*stagedsync.Stage {
 	loopBreakCheck := NewLoopBreakCheck(config, heimdallClient)
 	return stagedsync.PolygonSyncStages(
@@ -814,6 +821,18 @@ func NewPolygonSyncStages(
 			config.CaplinConfig.BlobBackfilling,
 			silkworm,
 			config.Prune,
+		),
+		stagedsync.NewPolygonSyncStageCfg(
+			logger,
+			chainConfig,
+			db,
+			heimdallClient,
+			sentry,
+			maxPeers,
+			statusDataProvider,
+			blockReader,
+			stopNode,
+			bor.GenesisContractStateReceiverABI(),
 		),
 		stagedsync.StageBlockHashesCfg(
 			db,
