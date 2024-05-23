@@ -201,7 +201,7 @@ func (s *polygonSyncStageService) Run(ctx context.Context, tx kv.RwTx, stageStat
 				err = errors.New("unrecognized data")
 			}
 			if err != nil {
-				return nil
+				return err
 			}
 		}
 	}
