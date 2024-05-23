@@ -9,7 +9,7 @@ import (
 )
 
 func TestUpdateFileDownloadingStats(t *testing.T) {
-	d, err := diagnostics.NewDiagnosticClient(context.TODO(), nil, "test")
+	d, err := diagnostics.NewDiagnosticClient(context.TODO(), nil, "test", true)
 
 	require.NoError(t, err)
 
