@@ -577,6 +577,11 @@ var (
 		Usage: "Support gasless transactions",
 		Value: false,
 	}
+	ExecutorPayloadOutput = cli.StringFlag{
+		Name:  "zkevm.executor-payload-output",
+		Usage: "Output the payload of the executor, serialised requests stored to disk by batch number",
+		Value: "",
+	}
 	DebugNoSync = cli.BoolFlag{
 		Name:  "debug.no-sync",
 		Usage: "Disable syncing",
