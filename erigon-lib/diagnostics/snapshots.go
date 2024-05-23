@@ -8,6 +8,11 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+var (
+	SnapshotDownloadStatisticsKey = []byte("diagSnapshotDownloadStatistics")
+	SnapshotIndexingStatisticsKey = []byte("diagSnapshotIndexingStatistics")
+)
+
 func (d *DiagnosticClient) setupSnapshotDiagnostics(rootCtx context.Context) {
 	d.runSnapshotListener(rootCtx)
 	d.runSegmentDownloadingListener(rootCtx)
@@ -107,6 +112,9 @@ func (d *DiagnosticClient) runSegmentIndexingListener(rootCtx context.Context) {
 				return
 			case info := <-ch:
 				d.addOrUpdateSegmentIndexingState(info)
+				if err := d.db.Update(d.ctx, SnapshotIndexingUpdater(d.syncStats.SnapshotIndexing)); err != nil {
+					log.Error("[Diagnostics] Failed to update snapshot indexing info", "err", err)
+				}
 			}
 		}
 	}()
@@ -140,6 +148,11 @@ func (d *DiagnosticClient) runSegmentIndexingFinishedListener(rootCtx context.Co
 						Sys:         0,
 					})
 				}
+
+				if err := d.db.Update(d.ctx, SnapshotIndexingUpdater(d.syncStats.SnapshotIndexing)); err != nil {
+					log.Error("[Diagnostics] Failed to update snapshot indexing info", "err", err)
+				}
+
 				d.mu.Unlock()
 			}
 		}
@@ -297,6 +310,21 @@ func ReadSnapshotDownloadInfo(db kv.RoDB) (info SnapshotDownloadStatistics) {
 	}
 }
 
+func ReadSnapshotIndexingInfo(db kv.RoDB) (info SnapshotIndexingStatistics) {
+	data := ReadDataFromTable(db, kv.DiagSyncStages, SnapshotIndexingStatisticsKey)
+	err := json.Unmarshal(data, &info)
+
+	if err != nil {
+		return SnapshotIndexingStatistics{}
+	} else {
+		return info
+	}
+}
+
 func SnapshotDownloadUpdater(info SnapshotDownloadStatistics) func(tx kv.RwTx) error {
 	return PutDataToTable(kv.DiagSyncStages, SnapshotDownloadStatisticsKey, info)
+}
+
+func SnapshotIndexingUpdater(info SnapshotIndexingStatistics) func(tx kv.RwTx) error {
+	return PutDataToTable(kv.DiagSyncStages, SnapshotIndexingStatisticsKey, info)
 }

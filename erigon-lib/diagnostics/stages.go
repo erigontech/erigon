@@ -9,9 +9,8 @@ import (
 )
 
 var (
-	StagesListKey                 = []byte("diagStagesList")
-	CurrentStageKey               = []byte("diagCurrentStage")
-	SnapshotDownloadStatisticsKey = []byte("diagSnapshotDownloadStatistics")
+	StagesListKey   = []byte("diagStagesList")
+	CurrentStageKey = []byte("diagCurrentStage")
 )
 
 func (d *DiagnosticClient) setupStagesDiagnostics(rootCtx context.Context) {
