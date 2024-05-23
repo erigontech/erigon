@@ -3,6 +3,7 @@ package vm
 var (
 	forkID4InstructionSet            = newForkID4InstructionSet()
 	forkID5DragonfruitInstructionSet = newForkID5DragonfruitInstructionSet()
+	forkID8ElderberryInstructionSet  = newForkID8InstructionSet()
 )
 
 // newForkID4InstructionSet returns the instruction set for the forkID4
@@ -13,10 +14,10 @@ func newForkID4InstructionSet() JumpTable {
 
 	// zkevm logs have data length multiple of 32
 	// zeroes are added to the end in order to fill the 32 bytes if needed
-	instructionSet[LOG1].execute = makeLog_zkevm(1)
-	instructionSet[LOG2].execute = makeLog_zkevm(2)
-	instructionSet[LOG3].execute = makeLog_zkevm(3)
-	instructionSet[LOG4].execute = makeLog_zkevm(4)
+	instructionSet[LOG1].execute = makeLog_zkevm_logIndexFromZero(1)
+	instructionSet[LOG2].execute = makeLog_zkevm_logIndexFromZero(2)
+	instructionSet[LOG3].execute = makeLog_zkevm_logIndexFromZero(3)
+	instructionSet[LOG4].execute = makeLog_zkevm_logIndexFromZero(4)
 
 	instructionSet[DELEGATECALL].execute = opDelegateCall_zkevm
 	instructionSet[CALLCODE].execute = opCallCode_zkevm
@@ -60,6 +61,21 @@ func newForkID5DragonfruitInstructionSet() JumpTable {
 	instructionSet[STATICCALL].execute = opStaticCall
 
 	enable3855(&instructionSet) // EIP-3855: Enable PUSH0 opcode
+
+	validateAndFillMaxStack(&instructionSet)
+	return instructionSet
+}
+
+// newForkID4InstructionSet returns the instruction set for the forkID4
+func newForkID8InstructionSet() JumpTable {
+	instructionSet := newForkID5DragonfruitInstructionSet()
+
+	// zkevm logs have data length multiple of 32
+	// zeroes are added to the end in order to fill the 32 bytes if needed
+	instructionSet[LOG1].execute = makeLog_zkevm_regularLogIndexes(1)
+	instructionSet[LOG2].execute = makeLog_zkevm_regularLogIndexes(2)
+	instructionSet[LOG3].execute = makeLog_zkevm_regularLogIndexes(3)
+	instructionSet[LOG4].execute = makeLog_zkevm_regularLogIndexes(4)
 
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
