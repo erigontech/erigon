@@ -111,6 +111,7 @@ func TestDeriveFields_zkEvm_preForkId8(t *testing.T) {
 	// Iterate over all the computed fields and check that they're correct
 	signer := MakeSigner(params.TestChainConfig, number.Uint64())
 
+	logIndex := uint(0)
 	for i := range receipts {
 		if receipts[i].Type != txs[i].Type() {
 			t.Errorf("receipts[%d].Type = %d, want %d", i, receipts[i].Type, txs[i].Type())
@@ -139,7 +140,6 @@ func TestDeriveFields_zkEvm_preForkId8(t *testing.T) {
 			t.Errorf("receipts[%d].ContractAddress = %s, want %s", i, receipts[i].ContractAddress.String(), contractAddress.String())
 		}
 
-		logIndex := uint(0)
 		for j := range receipts[i].Logs {
 			if receipts[i].Logs[j].BlockNumber != number.Uint64() {
 				t.Errorf("receipts[%d].Logs[%d].BlockNumber = %d, want %d", i, j, receipts[i].Logs[j].BlockNumber, number.Uint64())
@@ -247,6 +247,7 @@ func TestDeriveFields_zkEvmForkid8(t *testing.T) {
 	// Iterate over all the computed fields and check that they're correct
 	signer := MakeSigner(params.TestChainConfig, number.Uint64())
 
+	logIndex := uint(0)
 	for i := range receipts {
 		if receipts[i].Type != txs[i].Type() {
 			t.Errorf("receipts[%d].Type = %d, want %d", i, receipts[i].Type, txs[i].Type())
@@ -275,7 +276,6 @@ func TestDeriveFields_zkEvmForkid8(t *testing.T) {
 			t.Errorf("receipts[%d].ContractAddress = %s, want %s", i, receipts[i].ContractAddress.String(), contractAddress.String())
 		}
 
-		logIndex := uint(0)
 		for j := range receipts[i].Logs {
 			if receipts[i].Logs[j].BlockNumber != number.Uint64() {
 				t.Errorf("receipts[%d].Logs[%d].BlockNumber = %d, want %d", i, j, receipts[i].Logs[j].BlockNumber, number.Uint64())
