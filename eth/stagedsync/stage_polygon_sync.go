@@ -292,8 +292,6 @@ func (s *polygonSyncStageService) handleInsertBlocks(tx kv.RwTx, stageState *Sta
 		return err
 	}
 
-	s.logger.Info(s.appendLogPrefix("stage progress updated"), "blockNum", tipBlockNum, "blockHash", tipBlockHash)
-
 	return nil
 }
 
