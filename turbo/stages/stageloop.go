@@ -475,16 +475,8 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 		}
 	}() // avoid crash because Erigon's core does many things
 	shouldUnwind := unwindPoint > 0
-	var txNum, blockNum uint64
 	// Construct side fork if we have one
 	if shouldUnwind {
-		// Persist block number and tx number
-		var err error
-		txc.Doms, err = state.NewSharedDomains(txc.Tx, log.New())
-		if err != nil {
-			return err
-		}
-		defer txc.Doms.Close()
 		// Run it through the unwind
 		if err := stateSync.UnwindTo(unwindPoint, stagedsync.StagedUnwind, nil); err != nil {
 			return err
@@ -492,10 +484,6 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 		if err = stateSync.RunUnwind(nil, txc); err != nil {
 			return err
 		}
-		txNum = txc.Doms.TxNum() - 1
-		blockNum = txc.Doms.BlockNum()
-		txc.Doms.Close()
-		txc.Doms = nil
 	}
 	if err := rawdb.TruncateCanonicalChain(ctx, txc.Tx, header.Number.Uint64()+1); err != nil {
 		return err
@@ -529,15 +517,7 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 	if err := addAndVerifyBlockStep(txc.Tx, engine, chainReader, header, body); err != nil {
 		return err
 	}
-	if shouldUnwind {
-		txc.Doms, err = state.NewSharedDomains(txc.Tx, log.New())
-		if err != nil {
-			return err
-		}
-		defer txc.Doms.Close()
-		txc.Doms.SetTxNum(txNum)
-		txc.Doms.SetBlockNum(blockNum)
-	}
+
 	if err = stateSync.RunNoInterrupt(nil, txc, false /* firstCycle */); err != nil {
 		if !test {
 			if err := cleanupProgressIfNeeded(txc.Tx, header); err != nil {
