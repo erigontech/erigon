@@ -28,7 +28,7 @@ type ProbablyHexBytes struct {
 
 func NewProbablyHexBytes(b []byte) ProbablyHexBytes {
 	// TODO: what about isHex?
-	return ProbablyHexBytes{Inner: b}
+	return ProbablyHexBytes{Inner: b, isHex: !IsJsonObject(b)}
 }
 
 // MarshalText implements encoding.TextMarshaler
@@ -38,6 +38,10 @@ func (b ProbablyHexBytes) MarshalText() ([]byte, error) {
 	}
 
 	return b.Inner, nil
+}
+
+func (b ProbablyHexBytes) MarshalJSON() ([]byte, error) {
+	return b.MarshalText()
 }
 
 // UnmarshalJSON implements json.Unmarshaler.

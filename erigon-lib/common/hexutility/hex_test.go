@@ -41,3 +41,15 @@ func TestEncode(t *testing.T) {
 		}
 	}
 }
+
+func TestJsonMarshal(t *testing.T) {
+	p := NewProbablyHexBytes([]byte{0, 0, 1, 2})
+	enc, err := p.MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(enc) != "0x00000102" {
+		t.Errorf("wrong encoding %s", enc)
+	}
+}
