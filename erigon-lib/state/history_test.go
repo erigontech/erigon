@@ -461,7 +461,7 @@ func TestHistoryCanPrune(t *testing.T) {
 	t.Run("withoutFiles", func(t *testing.T) {
 		db, h := testDbAndHistory(t, false, logger)
 		h.dontProduceHistoryFiles = true
-		h.keepTxInDB = stepKeepInDB * h.aggregationStep
+		h.keepRecentTxInDB = stepKeepInDB * h.aggregationStep
 
 		defer db.Close()
 

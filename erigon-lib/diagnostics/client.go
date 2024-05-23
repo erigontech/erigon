@@ -19,6 +19,7 @@ type DiagnosticClient struct {
 	db          kv.RwDB
 	metricsMux  *http.ServeMux
 	dataDirPath string
+	speedTest   bool
 
 	syncStats           SyncStatistics
 	snapshotFileList    SnapshoFilesList
@@ -35,9 +36,7 @@ type DiagnosticClient struct {
 	networkSpeedMutex   sync.Mutex
 }
 
-func NewDiagnosticClient(ctx context.Context, metricsMux *http.ServeMux, dataDirPath string) (*DiagnosticClient, error) {
-
-	// Create a new DiagnosticClient
+func NewDiagnosticClient(ctx context.Context, metricsMux *http.ServeMux, dataDirPath string, speedTest bool) (*DiagnosticClient, error) {
 	dirPath := filepath.Join(dataDirPath, "diagnostics")
 	db, err := createDb(ctx, dirPath)
 	if err != nil {
@@ -54,6 +53,7 @@ func NewDiagnosticClient(ctx context.Context, metricsMux *http.ServeMux, dataDir
 		db:          db,
 		metricsMux:  metricsMux,
 		dataDirPath: dataDirPath,
+		speedTest:   speedTest,
 		syncStats: SyncStatistics{
 			SyncStages:       ss,
 			SnapshotDownload: snpdwl,

@@ -1203,6 +1203,9 @@ func (srv *Server) PeersInfo() []*PeerInfo {
 }
 
 func (srv *Server) addError(err error) {
+	if err == nil {
+		return
+	}
 	srv.errorsMu.Lock()
 	defer srv.errorsMu.Unlock()
 	if srv.errors == nil {

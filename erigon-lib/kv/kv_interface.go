@@ -155,7 +155,8 @@ const (
 	ConsensusDB   Label = 3
 	DownloaderDB  Label = 4
 	InMem         Label = 5
-	DiagnosticsDB Label = 6
+	HeimdallDB    Label = 6
+	DiagnosticsDB Label = 7
 )
 
 func (l Label) String() string {
@@ -172,6 +173,8 @@ func (l Label) String() string {
 		return "downloader"
 	case InMem:
 		return "inMem"
+	case HeimdallDB:
+		return "heimdall"
 	case DiagnosticsDB:
 		return "diagnostics"
 	default:
@@ -192,6 +195,8 @@ func UnmarshalLabel(s string) Label {
 		return DownloaderDB
 	case "inMem":
 		return InMem
+	case "heimdall":
+		return HeimdallDB
 	case "diagnostics":
 		return DiagnosticsDB
 	default:
@@ -541,6 +546,8 @@ type (
 	Domain      uint16
 	History     string
 	InvertedIdx string
+
+	InvertedIdxPos uint16
 )
 
 type TemporalGetter interface {

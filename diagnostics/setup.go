@@ -20,6 +20,7 @@ var (
 	metricsPortFlag         = "metrics.port"
 	pprofPortFlag           = "pprof.port"
 	pprofAddrFlag           = "pprof.addr"
+	diagnoticsSpeedTestFlag = "diagnostics.speedtest"
 )
 
 func Setup(ctx *cli.Context, node *node.ErigonNode, metricsMux *http.ServeMux, pprofMux *http.ServeMux) {
@@ -48,10 +49,10 @@ func Setup(ctx *cli.Context, node *node.ErigonNode, metricsMux *http.ServeMux, p
 		diagMux = SetupDiagnosticsEndpoint(nil, diagAddress)
 	}
 
-	diagnostic, err := diaglib.NewDiagnosticClient(ctx.Context, diagMux, node.Backend().DataDir())
+	speedTest := ctx.Bool(diagnoticsSpeedTestFlag)
+	diagnostic, err := diaglib.NewDiagnosticClient(ctx.Context, diagMux, node.Backend().DataDir(), speedTest)
 	if err == nil {
 		diagnostic.Setup()
-
 		SetupEndpoints(ctx, node, diagMux, diagnostic)
 	} else {
 		log.Error("[Diagnostics] Failure in setting up diagnostics", "err", err)

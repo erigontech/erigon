@@ -53,11 +53,12 @@ func (f *entityFetcherImpl[TEntity]) FetchLastEntityId(ctx context.Context) (uin
 	return uint64(id), err
 }
 
+const entityFetcherBatchFetchThreshold = 100
+
 func (f *entityFetcherImpl[TEntity]) FetchEntitiesRange(ctx context.Context, idRange ClosedRange) ([]TEntity, error) {
 	count := idRange.Len()
 
-	const batchFetchThreshold = 100
-	if (count > batchFetchThreshold) && (f.fetchEntitiesPage != nil) {
+	if (count > entityFetcherBatchFetchThreshold) && (f.fetchEntitiesPage != nil) {
 		allEntities, err := f.FetchAllEntities(ctx)
 		if err != nil {
 			return nil, err

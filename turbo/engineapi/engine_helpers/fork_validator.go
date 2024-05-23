@@ -24,7 +24,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
-	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -58,7 +57,6 @@ type ForkValidator struct {
 	tmpDir        string
 	// block hashes that are deemed valid
 	validHashes *lru.Cache[libcommon.Hash, bool]
-	stateV3     bool
 
 	ctx context.Context
 
@@ -66,7 +64,7 @@ type ForkValidator struct {
 	lock sync.Mutex
 }
 
-func NewForkValidatorMock(currentHeight uint64, stateV3 bool) *ForkValidator {
+func NewForkValidatorMock(currentHeight uint64) *ForkValidator {
 	validHashes, err := lru.New[libcommon.Hash, bool]("validHashes", maxForkDepth*8)
 	if err != nil {
 		panic(err)
@@ -74,7 +72,6 @@ func NewForkValidatorMock(currentHeight uint64, stateV3 bool) *ForkValidator {
 	return &ForkValidator{
 		currentHeight: currentHeight,
 		validHashes:   validHashes,
-		stateV3:       stateV3,
 	}
 }
 
@@ -163,12 +160,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 		m := membatchwithdb.NewMemoryBatch(tx, fv.tmpDir, logger)
 		defer m.Close()
 		txc.Tx = m
-		var err error
-		txc.Doms, err = state.NewSharedDomains(tx, logger)
-		if err != nil {
-			return "", [32]byte{}, nil, err
-		}
-		defer txc.Doms.Close()
+
 		fv.extendingForkNotifications = &shards.Notifications{
 			Events:      shards.NewEvents(),
 			Accumulator: shards.NewAccumulator(),
@@ -262,12 +254,6 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 	batch := membatchwithdb.NewMemoryBatch(tx, fv.tmpDir, logger)
 	defer batch.Rollback()
 	txc.Tx = batch
-	sd, err := state.NewSharedDomains(tx, logger)
-	if err != nil {
-		return "", [32]byte{}, nil, err
-	}
-	defer sd.Close()
-	txc.Doms = sd
 	notifications := &shards.Notifications{
 		Events:      shards.NewEvents(),
 		Accumulator: shards.NewAccumulator(),
@@ -306,11 +292,8 @@ func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *t
 	latestValidHash = header.Hash()
 	if validationError != nil {
 		var latestValidNumber uint64
-		if fv.stateV3 {
-			latestValidNumber, criticalError = stages.GetStageProgress(txc.Tx, stages.Execution)
-		} else {
-			latestValidNumber, criticalError = stages.GetStageProgress(txc.Tx, stages.IntermediateHashes)
-		}
+		latestValidNumber, criticalError = stages.GetStageProgress(txc.Tx, stages.Execution)
+
 		if criticalError != nil {
 			return
 		}
