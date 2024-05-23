@@ -9,8 +9,9 @@ import (
 )
 
 var (
-	StagesListKey   = []byte("diagStagesList")
-	CurrentStageKey = []byte("diagCurrentStage")
+	StagesListKey                 = []byte("diagStagesList")
+	CurrentStageKey               = []byte("diagCurrentStage")
+	SnapshotDownloadStatisticsKey = []byte("diagSnapshotDownloadStatistics")
 )
 
 func (d *DiagnosticClient) setupStagesDiagnostics(rootCtx context.Context) {
@@ -109,39 +110,3 @@ func StagesListUpdater(info []string) func(tx kv.RwTx) error {
 func CurrentStageUpdater(info uint) func(tx kv.RwTx) error {
 	return PutDataToTable(kv.DiagSyncStages, StagesListKey, info)
 }
-
-/*func ReadCPUInfo(db kv.RoDB) CPUInfo {
-	data := ReadDataFromTable(db, kv.DiagSystemInfo, SystemCpuInfoKey)
-	var info CPUInfo
-	err := json.Unmarshal(data, &info)
-
-	if err != nil {
-		return CPUInfo{}
-	} else {
-		return info
-	}
-}
-
-func ReadDickInfo(db kv.RoDB) DiskInfo {
-	data := ReadDataFromTable(db, kv.DiagSystemInfo, SystemDiskInfoKey)
-	var info DiskInfo
-	err := json.Unmarshal(data, &info)
-
-	if err != nil {
-		return DiskInfo{}
-	} else {
-		return info
-	}
-}
-
-func RAMInfoUpdater(info RAMInfo) func(tx kv.RwTx) error {
-	return PutDataToTable(kv.DiagSystemInfo, SystemRamInfoKey, info)
-}
-
-func CPUInfoUpdater(info CPUInfo) func(tx kv.RwTx) error {
-	return PutDataToTable(kv.DiagSystemInfo, SystemCpuInfoKey, info)
-}
-
-func DiskInfoUpdater(info DiskInfo) func(tx kv.RwTx) error {
-	return PutDataToTable(kv.DiagSystemInfo, SystemDiskInfoKey, info)
-}*/

@@ -2,7 +2,9 @@ package diagnostics
 
 import (
 	"context"
+	"encoding/json"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -26,6 +28,7 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
+
 				d.mu.Lock()
 				d.syncStats.SnapshotDownload.Downloaded = info.Downloaded
 				d.syncStats.SnapshotDownload.Total = info.Total
@@ -39,6 +42,11 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 				d.syncStats.SnapshotDownload.Sys = info.Sys
 				d.syncStats.SnapshotDownload.DownloadFinished = info.DownloadFinished
 				d.syncStats.SnapshotDownload.TorrentMetadataReady = info.TorrentMetadataReady
+
+				if err := d.db.Update(d.ctx, SnapshotDownloadUpdater(d.syncStats.SnapshotDownload)); err != nil {
+					log.Error("[Diagnostics] Failed to update snapshot download info", "err", err)
+				}
+
 				d.mu.Unlock()
 
 				if info.DownloadFinished {
@@ -75,6 +83,10 @@ func (d *DiagnosticClient) runSegmentDownloadingListener(rootCtx context.Context
 					d.syncStats.SnapshotDownload.SegmentsDownloading[info.Name] = val
 				} else {
 					d.syncStats.SnapshotDownload.SegmentsDownloading[info.Name] = info
+				}
+
+				if err := d.db.Update(d.ctx, SnapshotDownloadUpdater(d.syncStats.SnapshotDownload)); err != nil {
+					log.Error("[Diagnostics] Failed to update snapshot download info", "err", err)
 				}
 
 				d.mu.Unlock()
@@ -274,35 +286,17 @@ func (d *DiagnosticClient) SnapshotFilesList() SnapshoFilesList {
 	return d.snapshotFileList
 }
 
-/*func ReadSyncStagesInfo(db kv.RoDB) (info SyncStages) {
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		infoBytes, err := tx.GetOne(kv.HardwareInfo, []byte("diagSyncInfo"))
+func ReadSnapshotDownloadInfo(db kv.RoDB) (info SnapshotDownloadStatistics) {
+	data := ReadDataFromTable(db, kv.DiagSyncStages, SnapshotDownloadStatisticsKey)
+	err := json.Unmarshal(data, &info)
 
-		if err != nil {
-			return err
-		}
-
-		err = json.Unmarshal(infoBytes, &info)
-
-		if err != nil {
-			return err
-		}
-
-		return nil
-	}); err != nil {
-		return HardwareInfo{}
+	if err != nil {
+		return SnapshotDownloadStatistics{}
+	} else {
+		return info
 	}
-	return info
 }
 
-func SyncStagesInfoUpdater(info SyncStages) func(tx kv.RwTx) error {
-	return func(tx kv.RwTx) error {
-		infoBytes, err := json.Marshal(info)
-
-		if err != nil {
-			return err
-		}
-
-		return tx.Put(kv.HardwareInfo, []byte("diagSyncInfo"), infoBytes)
-	}
-}*/
+func SnapshotDownloadUpdater(info SnapshotDownloadStatistics) func(tx kv.RwTx) error {
+	return PutDataToTable(kv.DiagSyncStages, SnapshotDownloadStatisticsKey, info)
+}
