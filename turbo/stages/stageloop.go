@@ -492,9 +492,10 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 		if err = stateSync.RunUnwind(nil, txc); err != nil {
 			return err
 		}
-		txNum = txc.Doms.TxNum()
+		txNum = txc.Doms.TxNum() - 1
 		blockNum = txc.Doms.BlockNum()
 		txc.Doms.Close()
+		txc.Doms = nil
 	}
 	if err := rawdb.TruncateCanonicalChain(ctx, txc.Tx, header.Number.Uint64()+1); err != nil {
 		return err
