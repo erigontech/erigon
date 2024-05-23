@@ -133,7 +133,11 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 			}
 		}
 		if args.MaxFeePerBlobGas != nil {
-			maxFeePerBlobGas.SetFromBig(args.MaxFeePerBlobGas.ToInt())
+			blobFee, overflow := uint256.FromBig(args.MaxFeePerBlobGas.ToInt())
+			if overflow {
+				return types.Message{}, fmt.Errorf("args.MaxFeePerBlobGas higher than 2^256-1")
+			}
+			maxFeePerBlobGas = blobFee
 		}
 	}
 
