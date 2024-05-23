@@ -364,17 +364,14 @@ func (s *polygonSyncStageService) downloadStateSyncEvents(ctx context.Context, t
 }
 
 func (s *polygonSyncStageService) handleSpan(ctx context.Context, tx kv.RwTx, sp *heimdall.Span) error {
-	s.logger.Info(s.appendLogPrefix("handle span"), "id", sp.Id, "start", sp.StartBlock, "end", sp.EndBlock)
 	return heimdall.NewTxStore(s.blockReader, tx).PutSpan(ctx, sp)
 }
 
 func (s *polygonSyncStageService) handleCheckpoint(ctx context.Context, tx kv.RwTx, cp *heimdall.Checkpoint) error {
-	s.logger.Info(s.appendLogPrefix("handle checkpoint"), "id", cp.Id, "start", cp.StartBlock, "end", cp.EndBlock)
 	return heimdall.NewTxStore(s.blockReader, tx).PutCheckpoint(ctx, cp.Id, cp)
 }
 
 func (s *polygonSyncStageService) handleMilestone(ctx context.Context, tx kv.RwTx, ms *heimdall.Milestone) error {
-	s.logger.Info(s.appendLogPrefix("handle milestone"), "id", ms.Id, "start", ms.StartBlock, "end", ms.EndBlock)
 	return heimdall.NewTxStore(s.blockReader, tx).PutMilestone(ctx, ms.Id, ms)
 }
 
