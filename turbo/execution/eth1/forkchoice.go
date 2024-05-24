@@ -448,12 +448,11 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		dbg.ReadMemStats(&m)
 		timings = append(timings, e.forkValidator.GetTimings(headHash)...)
 		timings = append(timings, "commit", commitTime, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-		if *headNumber >= startPruneFrom {
-			defer e.runPostForkchoiceInBackground(initialCycle)
-		}
 		e.logger.Info("Timings (slower than 50ms)", timings...)
 	}
-
+	if *headNumber >= startPruneFrom {
+		e.runPostForkchoiceInBackground(initialCycle)
+	}
 	sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
 		LatestValidHash: gointerfaces.ConvertHashToH256(headHash),
 		Status:          status,
@@ -462,10 +461,9 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 }
 
 func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle bool) {
-	if e.doingPostForkchoice.Load() {
+	if e.doingPostForkchoice.CompareAndSwap(true, false) {
 		return
 	}
-	e.doingPostForkchoice.Store(true)
 	go func() {
 		defer e.doingPostForkchoice.Store(false)
 		timings := []interface{}{}
