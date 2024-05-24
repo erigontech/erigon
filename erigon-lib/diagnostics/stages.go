@@ -84,6 +84,7 @@ func ReadStagesList(db kv.RoDB) []string {
 	err := json.Unmarshal(data, &info)
 
 	if err != nil {
+		log.Error("[Diagnostics] Failed to read stages list", "err", err)
 		return []string{}
 	} else {
 		return info
@@ -96,6 +97,7 @@ func ReadCurrentStage(db kv.RoDB) uint {
 	err := json.Unmarshal(data, &info)
 
 	if err != nil {
+		log.Error("[Diagnostics] Failed to read current stage", "err", err)
 		return 0
 	} else {
 		return info

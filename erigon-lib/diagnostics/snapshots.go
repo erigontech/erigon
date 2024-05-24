@@ -304,6 +304,7 @@ func ReadSnapshotDownloadInfo(db kv.RoDB) (info SnapshotDownloadStatistics) {
 	err := json.Unmarshal(data, &info)
 
 	if err != nil {
+		log.Error("[Diagnostics] Failed to read snapshot download info", "err", err)
 		return SnapshotDownloadStatistics{}
 	} else {
 		return info
@@ -315,6 +316,7 @@ func ReadSnapshotIndexingInfo(db kv.RoDB) (info SnapshotIndexingStatistics) {
 	err := json.Unmarshal(data, &info)
 
 	if err != nil {
+		log.Error("[Diagnostics] Failed to read snapshot indexing info", "err", err)
 		return SnapshotIndexingStatistics{}
 	} else {
 		return info
