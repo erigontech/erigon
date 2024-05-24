@@ -25,6 +25,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+const startPruneFrom = 1024
+
 type forkchoiceOutcome struct {
 	receipt *execution.ForkChoiceReceipt
 	err     error
@@ -423,7 +425,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
-
 		commitStart := time.Now()
 		if err := tx.Commit(); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
@@ -447,8 +448,10 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		dbg.ReadMemStats(&m)
 		timings = append(timings, e.forkValidator.GetTimings(headHash)...)
 		timings = append(timings, "commit", commitTime, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+		if *headNumber >= startPruneFrom {
+			defer e.runPostForkchoiceInBackground(initialCycle)
+		}
 		e.logger.Info("Timings (slower than 50ms)", timings...)
-		defer e.runPostForkchoiceInBackground(initialCycle)
 	}
 
 	sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
