@@ -349,3 +349,11 @@ func (f *ForkChoiceStorageMock) ProcessAttestingIndicies(
 	attestionIndicies []uint64,
 ) {
 }
+
+func (f *ForkChoiceStorageMock) IsRootOptimistic(root common.Hash) bool {
+	return false
+}
+
+func (f *ForkChoiceStorageMock) IsHeadOptimistic() bool {
+	return false
+}

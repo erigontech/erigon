@@ -5,8 +5,6 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
-
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/polygon/bor"
@@ -33,7 +31,7 @@ func NewDifficultyCalculator(
 ) DifficultyCalculator {
 	if signaturesCache == nil {
 		var err error
-		signaturesCache, err = lru.NewARC[libcommon.Hash, libcommon.Address](stagedsync.InMemorySignatures)
+		signaturesCache, err = lru.NewARC[libcommon.Hash, libcommon.Address](InMemorySignatures)
 		if err != nil {
 			panic(err)
 		}

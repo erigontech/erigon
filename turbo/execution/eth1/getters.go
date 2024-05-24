@@ -147,6 +147,7 @@ func (e *EthereumExecutionModule) GetBodiesByHashes(ctx context.Context, req *ex
 		bodies = append(bodies, &execution.BlockBody{
 			Transactions: txs,
 			Withdrawals:  eth1_utils.ConvertWithdrawalsToRpc(body.Withdrawals),
+			//TODO(racytech): Requests
 		})
 	}
 
@@ -189,6 +190,7 @@ func (e *EthereumExecutionModule) GetBodiesByRange(ctx context.Context, req *exe
 		bodies = append(bodies, &execution.BlockBody{
 			Transactions: txs,
 			Withdrawals:  eth1_utils.ConvertWithdrawalsToRpc(body.Withdrawals),
+			//TODO(racytech): Requests
 		})
 	}
 	// Remove trailing nil values as per spec

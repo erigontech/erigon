@@ -10,47 +10,55 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-type entityFetcher interface {
+type entityFetcher[TEntity Entity] interface {
 	FetchLastEntityId(ctx context.Context) (uint64, error)
-	FetchEntitiesRange(ctx context.Context, idRange ClosedRange) ([]Entity, error)
+	FetchEntitiesRange(ctx context.Context, idRange ClosedRange) ([]TEntity, error)
+	FetchAllEntities(ctx context.Context) ([]TEntity, error)
 }
 
-type entityFetcherImpl struct {
+type entityFetcherImpl[TEntity Entity] struct {
 	name string
 
 	fetchLastEntityId func(ctx context.Context) (int64, error)
-	fetchEntity       func(ctx context.Context, id int64) (Entity, error)
-	fetchEntitiesPage func(ctx context.Context, page uint64, limit uint64) ([]Entity, error)
+	fetchEntity       func(ctx context.Context, id int64) (TEntity, error)
+
+	fetchEntitiesPage      func(ctx context.Context, page uint64, limit uint64) ([]TEntity, error)
+	fetchEntitiesPageLimit uint64
 
 	logger log.Logger
 }
 
-func newEntityFetcher(
+func newEntityFetcher[TEntity Entity](
 	name string,
 	fetchLastEntityId func(ctx context.Context) (int64, error),
-	fetchEntity func(ctx context.Context, id int64) (Entity, error),
-	fetchEntitiesPage func(ctx context.Context, page uint64, limit uint64) ([]Entity, error),
+	fetchEntity func(ctx context.Context, id int64) (TEntity, error),
+	fetchEntitiesPage func(ctx context.Context, page uint64, limit uint64) ([]TEntity, error),
+	fetchEntitiesPageLimit uint64,
 	logger log.Logger,
-) entityFetcher {
-	return &entityFetcherImpl{
+) entityFetcher[TEntity] {
+	return &entityFetcherImpl[TEntity]{
 		name:              name,
 		fetchLastEntityId: fetchLastEntityId,
 		fetchEntity:       fetchEntity,
-		fetchEntitiesPage: fetchEntitiesPage,
-		logger:            logger,
+
+		fetchEntitiesPage:      fetchEntitiesPage,
+		fetchEntitiesPageLimit: fetchEntitiesPageLimit,
+
+		logger: logger,
 	}
 }
 
-func (f *entityFetcherImpl) FetchLastEntityId(ctx context.Context) (uint64, error) {
+func (f *entityFetcherImpl[TEntity]) FetchLastEntityId(ctx context.Context) (uint64, error) {
 	id, err := f.fetchLastEntityId(ctx)
 	return uint64(id), err
 }
 
-func (f *entityFetcherImpl) FetchEntitiesRange(ctx context.Context, idRange ClosedRange) ([]Entity, error) {
+const entityFetcherBatchFetchThreshold = 100
+
+func (f *entityFetcherImpl[TEntity]) FetchEntitiesRange(ctx context.Context, idRange ClosedRange) ([]TEntity, error) {
 	count := idRange.Len()
 
-	const batchFetchThreshold = 100
-	if (count > batchFetchThreshold) && (f.fetchEntitiesPage != nil) {
+	if (count > entityFetcherBatchFetchThreshold) && (f.fetchEntitiesPage != nil) {
 		allEntities, err := f.FetchAllEntities(ctx)
 		if err != nil {
 			return nil, err
@@ -62,27 +70,27 @@ func (f *entityFetcherImpl) FetchEntitiesRange(ctx context.Context, idRange Clos
 	return f.FetchEntitiesRangeSequentially(ctx, idRange)
 }
 
-func (f *entityFetcherImpl) FetchEntitiesRangeSequentially(ctx context.Context, idRange ClosedRange) ([]Entity, error) {
-	return ClosedRangeMap(idRange, func(id uint64) (Entity, error) {
+func (f *entityFetcherImpl[TEntity]) FetchEntitiesRangeSequentially(ctx context.Context, idRange ClosedRange) ([]TEntity, error) {
+	return ClosedRangeMap(idRange, func(id uint64) (TEntity, error) {
 		return f.fetchEntity(ctx, int64(id))
 	})
 }
 
-func (f *entityFetcherImpl) FetchAllEntities(ctx context.Context) ([]Entity, error) {
+func (f *entityFetcherImpl[TEntity]) FetchAllEntities(ctx context.Context) ([]TEntity, error) {
 	// TODO: once heimdall API is fixed to return sorted items in pages we can only fetch
 	//
 	//	the new pages after lastStoredCheckpointId using the checkpoints/list paging API
 	//	(for now we have to fetch all of them)
 	//	and also remove sorting we do after fetching
 
-	var entities []Entity
+	var entities []TEntity
 
 	fetchStartTime := time.Now()
 	progressLogTicker := time.NewTicker(30 * time.Second)
 	defer progressLogTicker.Stop()
 
 	for page := uint64(1); ; page++ {
-		entitiesPage, err := f.fetchEntitiesPage(ctx, page, 10_000)
+		entitiesPage, err := f.fetchEntitiesPage(ctx, page, f.fetchEntitiesPageLimit)
 		if err != nil {
 			return nil, err
 		}
@@ -106,7 +114,7 @@ func (f *entityFetcherImpl) FetchAllEntities(ctx context.Context) ([]Entity, err
 		}
 	}
 
-	slices.SortFunc(entities, func(e1, e2 Entity) int {
+	slices.SortFunc(entities, func(e1, e2 TEntity) int {
 		n1 := e1.BlockNumRange().Start
 		n2 := e2.BlockNumRange().Start
 		return cmp.Compare(n1, n2)

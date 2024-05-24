@@ -8,7 +8,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/backup"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
@@ -140,25 +139,28 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string, log
 		if err := backup.ClearTables(ctx, db, tx, cleanupList...); err != nil {
 			return nil
 		}
-		v3db := db.(*temporal.DB)
-		agg := v3db.Agg()
-		aggTx := agg.BeginFilesRo()
-		defer aggTx.Close()
-		doms, err := state.NewSharedDomains(tx, logger)
-		if err != nil {
-			return err
-		}
-		defer doms.Close()
-
-		_ = stages.SaveStageProgress(tx, stages.Execution, doms.BlockNum())
-		mxs := agg.EndTxNumMinimax() / agg.StepSize()
-		if mxs > 0 {
-			mxs--
-		}
-		log.Info("[reset] exec", "toBlock", doms.BlockNum(), "toTxNum", doms.TxNum(), "maxStepInFiles", mxs)
-
+		// corner case: state files may be ahead of block files - so, can't use SharedDomains here. juts leave progress as 0.
 		return nil
 	})
+}
+
+func ResetExecWithTx(ctx context.Context, tx kv.RwTx, chain string, tmpDir string, logger log.Logger) (err error) {
+	cleanupList := make([]string, 0)
+	cleanupList = append(cleanupList, stateBuckets...)
+	cleanupList = append(cleanupList, stateHistoryBuckets...)
+	cleanupList = append(cleanupList, stateHistoryV3Buckets...)
+	cleanupList = append(cleanupList, stateV3Buckets...)
+
+	if err := clearStageProgress(tx, stages.Execution, stages.HashState, stages.IntermediateHashes); err != nil {
+		return err
+	}
+	for _, tbl := range cleanupList {
+		if err := tx.ClearBucket(tbl); err != nil {
+			return err
+		}
+	}
+	// corner case: state files may be ahead of block files - so, can't use SharedDomains here. juts leave progress as 0.
+	return nil
 }
 
 func ResetTxLookup(tx kv.RwTx) error {

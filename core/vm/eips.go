@@ -29,7 +29,6 @@ import (
 )
 
 var activators = map[int]func(*JumpTable){
-	2935: enable2935,
 	7516: enable7516,
 	6780: enable6780,
 	5656: enable5656,
@@ -38,6 +37,7 @@ var activators = map[int]func(*JumpTable){
 	3855: enable3855,
 	3529: enable3529,
 	3198: enable3198,
+	2935: enable2935,
 	2929: enable2929,
 	2200: enable2200,
 	1884: enable1884,
@@ -298,13 +298,7 @@ func opMcopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 
 // enable6780 applies EIP-6780 (deactivate SELFDESTRUCT)
 func enable6780(jt *JumpTable) {
-	jt[SELFDESTRUCT] = &operation{
-		execute:     opSelfdestruct6780,
-		dynamicGas:  gasSelfdestructEIP3529,
-		constantGas: params.SelfdestructGasEIP150,
-		numPop:      1,
-		numPush:     0,
-	}
+	jt[SELFDESTRUCT].execute = opSelfdestruct6780
 }
 
 // opBlobBaseFee implements the BLOBBASEFEE opcode
@@ -331,11 +325,5 @@ func enable7516(jt *JumpTable) {
 
 // enable2935 applies EIP-2935 (Historical block hashes in state)
 func enable2935(jt *JumpTable) {
-	jt[BLOCKHASH] = &operation{
-		execute:     opBlockhash2935,
-		constantGas: GasExtStep,
-		dynamicGas:  gasOpBlockhashEIP2935,
-		numPop:      1,
-		numPush:     1,
-	}
+	jt[BLOCKHASH].execute = opBlockhash2935
 }

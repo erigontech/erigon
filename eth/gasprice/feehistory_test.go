@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func TestFeeHistory(t *testing.T) {
@@ -60,7 +61,7 @@ func TestFeeHistory(t *testing.T) {
 		}
 		backend := newTestBackend(t) //, big.NewInt(16), c.pending)
 		cache := jsonrpc.NewGasPriceCache()
-		oracle := gasprice.NewOracle(backend, config, cache)
+		oracle := gasprice.NewOracle(backend, config, cache, log.New())
 
 		first, reward, baseFee, ratio, err := oracle.FeeHistory(context.Background(), c.count, c.last, c.percent)
 
