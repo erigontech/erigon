@@ -32,7 +32,7 @@ func newBlockDownloaderTestWithOpts(t *testing.T, opts blockDownloaderTestOpts) 
 	p2pService.EXPECT().MaxPeers().Return(100).Times(1)
 	logger := testlog.Logger(t, log.LvlDebug)
 	checkpointVerifier := opts.getOrCreateDefaultCheckpointVerifier()
-	milestoneVerifier := opts.getOrCreateDefaultCheckpointVerifier()
+	milestoneVerifier := opts.getOrCreateDefaultMilestoneVerifier()
 	blocksVerifier := opts.getOrCreateDefaultBlocksVerifier()
 	store := NewMockStore(ctrl)
 	headerDownloader := newBlockDownloader(
