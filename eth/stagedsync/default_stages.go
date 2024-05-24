@@ -740,7 +740,6 @@ func PolygonSyncStages(
 	ctx context.Context,
 	snapshots SnapshotsCfg,
 	polygonSyncStageCfg PolygonSyncStageCfg,
-	blockHashCfg BlockHashesCfg,
 	senders SendersCfg,
 	exec ExecuteBlockCfg,
 	txLookup TxLookupCfg,
@@ -774,19 +773,6 @@ func PolygonSyncStages(
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return PrunePolygonSyncStage()
-			},
-		},
-		{
-			ID:          stages.BlockHashes,
-			Description: "Write block hashes",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnBlockHashStage(s, txc.Tx, blockHashCfg, ctx, logger)
-			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindBlockHashStage(u, txc.Tx, blockHashCfg, ctx)
-			},
-			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneBlockHashStage(p, tx, blockHashCfg, ctx)
 			},
 		},
 		{
@@ -929,7 +915,6 @@ var PolygonSyncUnwindOrder = UnwindOrder{
 	stages.TxLookup,
 	stages.Execution,
 	stages.Senders,
-	stages.BlockHashes,
 	stages.PolygonSync,
 }
 
@@ -979,7 +964,6 @@ var PolygonSyncPruneOrder = PruneOrder{
 	stages.TxLookup,
 	stages.Execution,
 	stages.Senders,
-	stages.BlockHashes,
 	stages.PolygonSync,
 	stages.Snapshots,
 }
