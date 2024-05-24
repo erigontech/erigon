@@ -440,7 +440,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			}
 		}
 		if log {
-			e.logger.Info("head updated", "hash", headHash, "number", *headNumber)
+			e.logger.Info("head updated", "number", *headNumber, "hash", headHash)
 		}
 
 		var m runtime.MemStats

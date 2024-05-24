@@ -87,9 +87,14 @@ func TestGraphQLQueryBlock(t *testing.T) {
 		},
 		{ // Should return baseFeePerGas
 			body: `{"query": "{block{number,baseFeePerGas}}","variables": null}`,
-			want: `{"data":{"block":{"number":\d{8,},"baseFeePerGas":\w+}}`,
+			want: `{"data":{"block":{"number":\d{8,},"baseFeePerGas":"\w+"}}`,
 			code: 200,
 			comp: "regexp",
+		},
+		{ // Should return ommerHash, ommerCount and ommers
+			body: `{"query": "{block(number:15537381){ommerHash,ommerCount,ommers{hash}}}","variables": null}`,
+			want: `{"data":{"block":{"ommerHash":"0x22f29046fa689683c504ad6fd9a7a9d5803f8e6bb66de435438b563f586651fe","ommerCount":1,"ommers":[{"hash":"0xf4af15465ca81e65866c6e64cbc446b735a06fb2118dda69a7c21d4ab0b1e217"}]}}}`,
+			code: 200,
 		},
 		// should return `estimateGas` as decimal
 		/*
