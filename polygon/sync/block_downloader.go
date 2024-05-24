@@ -149,7 +149,7 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 				"sleepSeconds", d.notEnoughPeersBackOffDuration.Seconds(),
 			)
 
-			time.Sleep(d.notEnoughPeersBackOffDuration)
+			common.Sleep(ctx, d.notEnoughPeersBackOffDuration)
 			continue
 		}
 
