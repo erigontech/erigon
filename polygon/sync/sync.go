@@ -32,7 +32,7 @@ func NewSync(
 	blocksVerifier BlocksVerifier,
 	p2pService p2p.Service,
 	blockDownloader BlockDownloader,
-	ccBuilderFactory func(root *types.Header, span *heimdall.Span) CanonicalChainBuilder,
+	ccBuilderFactory CanonicalChainBuilderFactory,
 	spansCache *SpansCache,
 	fetchLatestSpan func(ctx context.Context) (*heimdall.Span, error),
 	events <-chan Event,
@@ -260,8 +260,8 @@ func (s *Sync) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	s.spansCache.Add(latestSpan)
 
+	s.spansCache.Add(latestSpan)
 	ccBuilder := s.ccBuilderFactory(tip, latestSpan)
 
 	for {

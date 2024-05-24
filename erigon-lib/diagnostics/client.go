@@ -10,6 +10,7 @@ import (
 type DiagnosticClient struct {
 	metricsMux  *http.ServeMux
 	dataDirPath string
+	speedTest   bool
 
 	syncStats           SyncStatistics
 	snapshotFileList    SnapshoFilesList
@@ -26,10 +27,11 @@ type DiagnosticClient struct {
 	networkSpeedMutex   sync.Mutex
 }
 
-func NewDiagnosticClient(metricsMux *http.ServeMux, dataDirPath string) *DiagnosticClient {
+func NewDiagnosticClient(metricsMux *http.ServeMux, dataDirPath string, speedTest bool) *DiagnosticClient {
 	return &DiagnosticClient{
 		metricsMux:       metricsMux,
 		dataDirPath:      dataDirPath,
+		speedTest:        speedTest,
 		syncStats:        SyncStatistics{},
 		hardwareInfo:     HardwareInfo{},
 		snapshotFileList: SnapshoFilesList{},

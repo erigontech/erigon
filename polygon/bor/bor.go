@@ -807,11 +807,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 // VerifyUncles implements consensus.Engine, always returning an error for any
 // uncles as this consensus mechanism doesn't permit uncles.
 func (c *Bor) VerifyUncles(_ consensus.ChainReader, _ *types.Header, uncles []*types.Header) error {
-	if len(uncles) > 0 {
-		return errUncleDetected
-	}
-
-	return nil
+	return VerifyUncles(uncles)
 }
 
 // VerifySeal implements consensus.Engine, checking whether the signature contained
@@ -1668,4 +1664,12 @@ func GetValidatorBytes(h *types.Header, config *borcfg.BorConfig) []byte {
 	}
 
 	return blockExtraData.ValidatorBytes
+}
+
+func VerifyUncles(uncles []*types.Header) error {
+	if len(uncles) > 0 {
+		return errUncleDetected
+	}
+
+	return nil
 }
