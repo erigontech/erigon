@@ -77,16 +77,13 @@ func syncEntity[TEntity Entity](
 			return err
 		}
 
-		var idRange ClosedRange
-		if hasLastKnownId {
-			idRange.Start = lastKnownId + 1
-		} else {
-			idRange.Start = 1
-		}
-
-		idRange.End, err = fetcher.FetchLastEntityId(ctx)
+		idRange, err := fetcher.FetchEntityIdRange(ctx)
 		if err != nil {
 			return err
+		}
+
+		if hasLastKnownId {
+			idRange.Start = max(idRange.Start, lastKnownId+1)
 		}
 
 		if idRange.Start > idRange.End {
@@ -118,6 +115,7 @@ func syncEntity[TEntity Entity](
 func newCheckpointFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Checkpoint] {
 	return newEntityFetcher(
 		"CheckpointFetcher",
+		nil,
 		client.FetchCheckpointCount,
 		client.FetchCheckpoint,
 		client.FetchCheckpoints,
@@ -129,6 +127,7 @@ func newCheckpointFetcher(client HeimdallClient, logger log.Logger) entityFetche
 func newMilestoneFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Milestone] {
 	return newEntityFetcher(
 		"MilestoneFetcher",
+		client.FetchFirstMilestoneNum,
 		client.FetchMilestoneCount,
 		client.FetchMilestone,
 		nil,
@@ -152,6 +151,7 @@ func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Spa
 
 	return newEntityFetcher(
 		"SpanFetcher",
+		nil,
 		fetchLastEntityId,
 		fetchEntity,
 		nil,
