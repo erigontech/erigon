@@ -137,7 +137,8 @@ func (fv *ForkValidator) FlushExtendingFork(tx kv.RwTx, accumulator *shards.Accu
 	if err := fv.memoryDiff.Flush(tx); err != nil {
 		return err
 	}
-	fv.timingsCache.Add(fv.extendingForkHeadHash, []interface{}{"FlushExtendingFork", time.Since(start)})
+	timings, _ := fv.timingsCache.Get(fv.extendingForkHeadHash)
+	fv.timingsCache.Add(fv.extendingForkHeadHash, append(timings, "FlushExtendingFork", time.Since(start)))
 	fv.extendingForkNotifications.Accumulator.CopyAndReset(accumulator)
 	// Clean extending fork data
 	fv.memoryDiff = nil
