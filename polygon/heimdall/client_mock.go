@@ -193,6 +193,45 @@ func (c *MockHeimdallClientFetchCheckpointsCall) DoAndReturn(f func(context.Cont
 	return c
 }
 
+// FetchFirstMilestoneNum mocks base method.
+func (m *MockHeimdallClient) FetchFirstMilestoneNum(arg0 context.Context) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FetchFirstMilestoneNum", arg0)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FetchFirstMilestoneNum indicates an expected call of FetchFirstMilestoneNum.
+func (mr *MockHeimdallClientMockRecorder) FetchFirstMilestoneNum(arg0 any) *MockHeimdallClientFetchFirstMilestoneNumCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchFirstMilestoneNum", reflect.TypeOf((*MockHeimdallClient)(nil).FetchFirstMilestoneNum), arg0)
+	return &MockHeimdallClientFetchFirstMilestoneNumCall{Call: call}
+}
+
+// MockHeimdallClientFetchFirstMilestoneNumCall wrap *gomock.Call
+type MockHeimdallClientFetchFirstMilestoneNumCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockHeimdallClientFetchFirstMilestoneNumCall) Return(arg0 int64, arg1 error) *MockHeimdallClientFetchFirstMilestoneNumCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockHeimdallClientFetchFirstMilestoneNumCall) Do(f func(context.Context) (int64, error)) *MockHeimdallClientFetchFirstMilestoneNumCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockHeimdallClientFetchFirstMilestoneNumCall) DoAndReturn(f func(context.Context) (int64, error)) *MockHeimdallClientFetchFirstMilestoneNumCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // FetchLastNoAckMilestone mocks base method.
 func (m *MockHeimdallClient) FetchLastNoAckMilestone(arg0 context.Context) (string, error) {
 	m.ctrl.T.Helper()
