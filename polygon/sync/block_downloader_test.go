@@ -31,14 +31,16 @@ func newBlockDownloaderTestWithOpts(t *testing.T, opts blockDownloaderTestOpts) 
 	p2pService := p2p.NewMockService(ctrl)
 	p2pService.EXPECT().MaxPeers().Return(100).Times(1)
 	logger := testlog.Logger(t, log.LvlDebug)
-	headersVerifier := opts.getOrCreateDefaultHeadersVerifier()
+	checkpointVerifier := opts.getOrCreateDefaultCheckpointVerifier()
+	milestoneVerifier := opts.getOrCreateDefaultCheckpointVerifier()
 	blocksVerifier := opts.getOrCreateDefaultBlocksVerifier()
 	store := NewMockStore(ctrl)
 	headerDownloader := newBlockDownloader(
 		logger,
 		p2pService,
 		heimdallService,
-		headersVerifier,
+		checkpointVerifier,
+		milestoneVerifier,
 		blocksVerifier,
 		store,
 		time.Millisecond,
@@ -53,19 +55,30 @@ func newBlockDownloaderTestWithOpts(t *testing.T, opts blockDownloaderTestOpts) 
 }
 
 type blockDownloaderTestOpts struct {
-	headersVerifier AccumulatedHeadersVerifier
-	blocksVerifier  BlocksVerifier
-	maxWorkers      int
+	checkpointVerifier WaypointHeadersVerifier
+	milestoneVerifier  WaypointHeadersVerifier
+	blocksVerifier     BlocksVerifier
+	maxWorkers         int
 }
 
-func (opts blockDownloaderTestOpts) getOrCreateDefaultHeadersVerifier() AccumulatedHeadersVerifier {
-	if opts.headersVerifier == nil {
+func (opts blockDownloaderTestOpts) getOrCreateDefaultCheckpointVerifier() WaypointHeadersVerifier {
+	if opts.checkpointVerifier == nil {
 		return func(_ heimdall.Waypoint, _ []*types.Header) error {
 			return nil
 		}
 	}
 
-	return opts.headersVerifier
+	return opts.checkpointVerifier
+}
+
+func (opts blockDownloaderTestOpts) getOrCreateDefaultMilestoneVerifier() WaypointHeadersVerifier {
+	if opts.milestoneVerifier == nil {
+		return func(_ heimdall.Waypoint, _ []*types.Header) error {
+			return nil
+		}
+	}
+
+	return opts.milestoneVerifier
 }
 
 func (opts blockDownloaderTestOpts) getOrCreateDefaultBlocksVerifier() BlocksVerifier {
@@ -273,7 +286,7 @@ func TestBlockDownloaderDownloadBlocksWhenInvalidHeadersThenPenalizePeerAndReDow
 	var firstTimeInvalidReturned bool
 	firstTimeInvalidReturnedPtr := &firstTimeInvalidReturned
 	test := newBlockDownloaderTestWithOpts(t, blockDownloaderTestOpts{
-		headersVerifier: func(waypoint heimdall.Waypoint, headers []*types.Header) error {
+		checkpointVerifier: func(waypoint heimdall.Waypoint, headers []*types.Header) error {
 			if waypoint.StartBlock().Cmp(new(big.Int).SetUint64(2)) == 0 && !*firstTimeInvalidReturnedPtr {
 				*firstTimeInvalidReturnedPtr = true
 				return errors.New("invalid checkpoint")
