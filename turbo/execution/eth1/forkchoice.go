@@ -445,6 +445,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 
 		var m runtime.MemStats
 		dbg.ReadMemStats(&m)
+		timings = append(timings, e.forkValidator.GetTimings(headHash)...)
 		timings = append(timings, "commit", commitTime, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 		e.logger.Info("Timings (slower than 50ms)", timings...)
 		defer e.runPostForkchoiceInBackground(initialCycle)

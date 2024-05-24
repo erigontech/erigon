@@ -5,7 +5,6 @@ import (
 	"errors"
 	"math/big"
 	"sync/atomic"
-	"time"
 
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
@@ -210,12 +209,10 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 
 	extendingHash := e.forkValidator.ExtendingForkHeadHash()
 	extendCanonical := extendingHash == libcommon.Hash{} && header.ParentHash == currentHeadHash
-	startValidate := time.Now()
 	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), extendCanonical, e.logger)
 	if criticalError != nil {
 		return nil, criticalError
 	}
-	e.logger.Info("ethereumExecutionModule.ValidateChain: ValidatePayload", "time", time.Since(startValidate))
 
 	// if the block is deemed invalid then we delete it. perhaps we want to keep bad blocks and just keep an index of bad ones.
 	validationStatus := execution.ExecutionStatus_Success

@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 
@@ -35,6 +36,8 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/log/v3"
 )
+
+const timingsCacheSize = 16
 
 // the maximum point from the current head, past which side forks are not validated anymore.
 const maxForkDepth = 32 // 32 slots is the duration of an epoch thus there cannot be side forks in PoS deeper than 32 blocks from head.
@@ -62,6 +65,8 @@ type ForkValidator struct {
 
 	// we want fork validator to be thread safe so let
 	lock sync.Mutex
+
+	timingsCache *lru.Cache[libcommon.Hash, []interface{}]
 }
 
 func NewForkValidatorMock(currentHeight uint64) *ForkValidator {
@@ -69,14 +74,24 @@ func NewForkValidatorMock(currentHeight uint64) *ForkValidator {
 	if err != nil {
 		panic(err)
 	}
+	timingsCache, err := lru.New[libcommon.Hash, []interface{}]("timingsCache", timingsCacheSize)
+	if err != nil {
+		panic(err)
+	}
 	return &ForkValidator{
 		currentHeight: currentHeight,
 		validHashes:   validHashes,
+		timingsCache:  timingsCache,
 	}
 }
 
 func NewForkValidator(ctx context.Context, currentHeight uint64, validatePayload validatePayloadFunc, tmpDir string, blockReader services.FullBlockReader) *ForkValidator {
 	validHashes, err := lru.New[libcommon.Hash, bool]("validHashes", maxForkDepth*8)
+	if err != nil {
+		panic(err)
+	}
+
+	timingsCache, err := lru.New[libcommon.Hash, []interface{}]("timingsCache", timingsCacheSize)
 	if err != nil {
 		panic(err)
 	}
@@ -87,6 +102,7 @@ func NewForkValidator(ctx context.Context, currentHeight uint64, validatePayload
 		blockReader:     blockReader,
 		ctx:             ctx,
 		validHashes:     validHashes,
+		timingsCache:    timingsCache,
 	}
 }
 
@@ -116,10 +132,12 @@ func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 func (fv *ForkValidator) FlushExtendingFork(tx kv.RwTx, accumulator *shards.Accumulator) error {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
+	start := time.Now()
 	// Flush changes to db.
 	if err := fv.memoryDiff.Flush(tx); err != nil {
 		return err
 	}
+	fv.timingsCache.Add(fv.extendingForkHeadHash, []interface{}{"FlushExtendingFork", time.Since(start)})
 	fv.extendingForkNotifications.Accumulator.CopyAndReset(accumulator)
 	// Clean extending fork data
 	fv.memoryDiff = nil
@@ -280,6 +298,7 @@ func (fv *ForkValidator) ClearWithUnwind(accumulator *shards.Accumulator, c shar
 // validateAndStorePayload validate and store a payload fork chain if such chain results valid.
 func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 	notifications *shards.Notifications) (status engine_types.EngineStatus, latestValidHash libcommon.Hash, validationError error, criticalError error) {
+	start := time.Now()
 	if err := fv.validatePayload(txc, header, body, unwindPoint, headersChain, bodiesChain, notifications); err != nil {
 		if errors.Is(err, consensus.ErrInvalidBlock) {
 			validationError = err
@@ -288,6 +307,7 @@ func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *t
 			return
 		}
 	}
+	fv.timingsCache.Add(header.Hash(), []interface{}{"BlockValidation", time.Since(start)})
 
 	latestValidHash = header.Hash()
 	if validationError != nil {
@@ -318,4 +338,14 @@ func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *t
 
 	status = engine_types.ValidStatus
 	return
+}
+
+// GetTimings returns the timings of the last block validation.
+func (fv *ForkValidator) GetTimings(hash libcommon.Hash) []interface{} {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	if timings, ok := fv.timingsCache.Get(hash); ok {
+		return timings
+	}
+	return nil
 }
