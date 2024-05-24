@@ -461,7 +461,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 }
 
 func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle bool) {
-	if e.doingPostForkchoice.CompareAndSwap(true, false) {
+	if e.doingPostForkchoice.CompareAndSwap(false, true) {
 		return
 	}
 	go func() {
