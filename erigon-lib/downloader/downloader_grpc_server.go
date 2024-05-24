@@ -64,7 +64,7 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 			return nil, fmt.Errorf("field 'path' is required")
 		}
 
-		const bor_dltest = true
+		const bor_dltest = false
 
 		if bor_dltest {
 			if !strings.HasSuffix(it.Path, "v1-storage.0-2048.kv") {
