@@ -96,6 +96,12 @@ func TestGraphQLQueryBlock(t *testing.T) {
 			want: `{"data":{"block":{"ommerHash":"0x22f29046fa689683c504ad6fd9a7a9d5803f8e6bb66de435438b563f586651fe","ommerCount":1,"ommers":[{"hash":"0xf4af15465ca81e65866c6e64cbc446b735a06fb2118dda69a7c21d4ab0b1e217"}]}}}`,
 			code: 200,
 		},
+		{ // Should return withdrawals
+			body: `{"query": "{block{withdrawals{index,validator,address,amount}}}","variables": null}`,
+			want: `{"data":{"block":{"withdrawals":\[({"index":\d+,"validator":\d+,"address":"0x[0-9a-fA-F]+","amount":"0x[0-9a-fA-F]+"},?)*\]}}}`,
+			code: 200,
+			comp: "regexp",
+		},
 		// should return `estimateGas` as decimal
 		/*
 			{

@@ -47,6 +47,7 @@ type Block struct {
 	EstimateGas       uint64         `json:"estimateGas"`
 	RawHeader         string         `json:"rawHeader"`
 	Raw               string         `json:"raw"`
+	Withdrawals       []*Withdrawal  `json:"withdrawals,omitempty"`
 }
 
 type BlockFilterCriteria struct {
@@ -86,12 +87,18 @@ type Log struct {
 	Transaction *Transaction `json:"transaction"`
 }
 
+type Mutation struct {
+}
+
 type Pending struct {
 	TransactionCount int            `json:"transactionCount"`
 	Transactions     []*Transaction `json:"transactions,omitempty"`
 	Account          *Account       `json:"account"`
 	Call             *CallResult    `json:"call,omitempty"`
 	EstimateGas      uint64         `json:"estimateGas"`
+}
+
+type Query struct {
 }
 
 type SyncState struct {
@@ -127,4 +134,11 @@ type Transaction struct {
 	AccessList           []*AccessTuple `json:"accessList,omitempty"`
 	Raw                  string         `json:"raw"`
 	RawReceipt           string         `json:"rawReceipt"`
+}
+
+type Withdrawal struct {
+	Index     int    `json:"index"`
+	Validator int    `json:"validator"`
+	Address   string `json:"address"`
+	Amount    string `json:"amount"`
 }
