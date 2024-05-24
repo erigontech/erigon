@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
+	"errors"
 )
 
 func getNextPoolTransactions(cfg SequenceBlockCfg, executionAt, forkId uint64, alreadyYielded mapset.Set[[32]byte]) ([]types.Transaction, error) {
@@ -176,6 +177,11 @@ func attemptAddTransaction(
 
 	if err != nil {
 		return nil, false, err
+	}
+
+	//TODO: remove this after bug is fixed
+	if errors.Is(execResult.Err, vm.ErrUnsupportedPrecompile) {
+		receipt.Status = 1
 	}
 
 	// we need to keep hold of the effective percentage used
