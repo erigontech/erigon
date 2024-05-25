@@ -339,10 +339,12 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		fmt.Println("AQ")
 		if len(newCanonicals) > 0 {
 			if err := rawdbv3.TxNums.Truncate(tx, newCanonicals[0].number); err != nil {
+				fmt.Println("ERR4", err)
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 				return
 			}
 			if err := rawdb.AppendCanonicalTxNums(tx, newCanonicals[len(newCanonicals)-1].number); err != nil {
+				fmt.Println("ERR5", err)
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 				return
 			}
