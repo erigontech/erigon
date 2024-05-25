@@ -843,7 +843,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		return nil
 	}
 
-	return db.Update(ctx, func(tx kv.RwTx) error {
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		if reset {
 			if casted, ok := tx.(kv.CanWarmupDB); ok {
 				if err := casted.WarmupDB(false); err != nil {
@@ -852,6 +852,9 @@ func stageHeaders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 			}
 
 			if err := reset2.ResetBlocks(tx, db, agg, br, bw, dirs, *chainConfig, logger); err != nil {
+				return err
+			}
+			if err := printStages(tx, br.Snapshots().(*freezeblocks.RoSnapshots), br.BorSnapshots().(*freezeblocks.BorRoSnapshots), agg); err != nil {
 				return err
 			}
 			return nil
@@ -906,7 +909,13 @@ func stageHeaders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 		logger.Info("Progress", "headers", progress)
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	if err := printAllStages(db, ctx, logger); err != nil {
+		return err
+	}
+	return nil
 }
 
 func stageBorHeimdall(db kv.RwDB, ctx context.Context, unwindTypes []string, logger log.Logger) error {
