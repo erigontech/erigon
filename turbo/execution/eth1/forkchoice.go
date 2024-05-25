@@ -135,6 +135,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 
 	if err := stages2.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline); err != nil {
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+		e.logger.Warn("ProcessFrozenBlocks", "error", err)
 		return
 	}
 

@@ -334,6 +334,8 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			if err := blockReader.HeadersRange(ctx, func(header *types.Header) error {
 				blockNum, blockHash := header.Number.Uint64(), header.Hash()
 				td.Add(td, header.Difficulty)
+				// What can happen if chaindata is deleted is that maybe header.seg progress is lower or higher than
+				// body.seg progress. In this case we need to skip the header, and "normalize" the progress to keep them in sync.
 				if blockNum > blocksAvailable {
 					return nil // This can actually happen as FrozenBlocks() is SegmentIdMax() and not the last .seg
 				}
@@ -395,6 +397,8 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 					panic(baseTxNum + txAmount) //uint-underflow
 				}
 				maxTxNum := baseTxNum + txAmount - 1
+				// What can happen if chaindata is deleted is that maybe header.seg progress is lower or higher than
+				// body.seg progress. In this case we need to skip the header, and "normalize" the progress to keep them in sync.
 				if blockNum > blocksAvailable {
 					return nil // This can actually happen as FrozenBlocks() is SegmentIdMax() and not the last .seg
 				}
