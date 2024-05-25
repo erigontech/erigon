@@ -393,6 +393,9 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 					panic(baseTxNum + txAmount) //uint-underflow
 				}
 				maxTxNum := baseTxNum + txAmount - 1
+				if blockNum > blocksAvailable {
+					return nil // This can actually happen as FrozenBlocks() is SegmentIdMax() and not the last .seg
+				}
 
 				if err := rawdbv3.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
 					return fmt.Errorf("%w. blockNum=%d, maxTxNum=%d", err, blockNum, maxTxNum)
