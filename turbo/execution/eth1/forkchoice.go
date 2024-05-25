@@ -386,6 +386,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
+	log.Info("[dbg] after executionPipeline.Run")
 
 	timings := slices.Clone(e.executionPipeline.PrintTimings())
 
