@@ -53,6 +53,7 @@ func ReadCanonicalHash(db kv.Getter, number uint64) (common.Hash, error) {
 	if len(data) == 0 {
 		return common.Hash{}, nil
 	}
+	fmt.Println("ReadCanonicalHash", number, "yes")
 	return common.BytesToHash(data), nil
 }
 
