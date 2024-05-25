@@ -423,6 +423,26 @@ func BorSnapshotTypes() []snaptype.Type {
 	return []snaptype.Type{BorEvents, BorSpans}
 }
 
+func CheckpointsEnabled() bool {
+	for _, snapType := range BorSnapshotTypes() {
+		if snapType.Enum() == BorCheckpoints.Enum() {
+			return true
+		}
+	}
+
+	return false
+}
+
+func MilestonesEnabled() bool {
+	for _, snapType := range BorSnapshotTypes() {
+		if snapType.Enum() == BorMilestones.Enum() {
+			return true
+		}
+	}
+
+	return false
+}
+
 func extractValueRange(ctx context.Context, table string, valueFrom, valueTo uint64, db kv.RoDB, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
