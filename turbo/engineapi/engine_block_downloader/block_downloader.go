@@ -251,6 +251,7 @@ func (e *EngineBlockDownloader) insertHeadersAndBodies(ctx context.Context, tx k
 			isForkChoiceNeeded := currentHeader == nil || lastBlockNumber > currentHeader.Number.Uint64()
 			inserted += uint64(len(blocksBatch))
 			if inserted >= uint64(e.syncCfg.LoopBlockLimit) {
+				log.Warn("[dbg] caplin UpdateForkChoice", "from", blocksBatch[0].NumberU64(), "to", blocksBatch[len(blocksBatch)-1].NumberU64())
 				lastHash := blocksBatch[len(blocksBatch)-1].Hash()
 				if isForkChoiceNeeded {
 					if _, _, _, err := e.chainRW.UpdateForkChoice(ctx, lastHash, lastHash, lastHash); err != nil {
