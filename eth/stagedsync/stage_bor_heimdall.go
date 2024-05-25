@@ -897,6 +897,7 @@ func BorHeimdallUnwind(u *UnwindState, ctx context.Context, _ *StageState, tx kv
 			}
 		}
 	}
+
 	// Removing checkpoints
 	if borsnaptype.CheckpointsEnabled() {
 		if len(cfg.unwindTypes) == 0 || slices.Contains(cfg.unwindTypes, "checkpoints") {
