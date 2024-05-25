@@ -205,7 +205,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	var unwindToGenesis bool
 	if fcuHeader.Number.Uint64() > 0 {
 		if canonicalHash == blockHash {
-			fmt.Println("X")
 			// if block hash is part of the canonical chain treat it as no-op.
 			writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
 			valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
@@ -336,9 +335,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				return
 			}
 		}
-		fmt.Println("AQ")
 		if len(newCanonicals) > 0 {
-			fmt.Println("newCanonicals", newCanonicals[0].number, newCanonicals[len(newCanonicals)-1].number)
 			if err := rawdbv3.TxNums.Truncate(tx, newCanonicals[0].number); err != nil {
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 				return
@@ -347,7 +344,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 				return
 			}
-			fmt.Println("newCanonicals", newCanonicals[len(newCanonicals)-1].number)
 		}
 	}
 	if isDomainAheadOfBlocks(tx) {
@@ -363,29 +359,23 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		return
 	}
 
-	fmt.Println("Y")
 	// Set Progress for headers and bodies accordingly.
 	if err := stages.SaveStageProgress(tx, stages.Headers, fcuHeader.Number.Uint64()); err != nil {
-		fmt.Println("ERR3", err)
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
 	if err := stages.SaveStageProgress(tx, stages.BlockHashes, fcuHeader.Number.Uint64()); err != nil {
-		fmt.Println("ERR2", err)
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
 	if err := stages.SaveStageProgress(tx, stages.Bodies, fcuHeader.Number.Uint64()); err != nil {
-		fmt.Println("ERR1", err)
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
 	if err = rawdb.WriteHeadHeaderHash(tx, blockHash); err != nil {
-		fmt.Println("ERR", err)
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
-	fmt.Println("YA")
 	if blockHash == e.forkValidator.ExtendingForkHeadHash() && !unwindToGenesis {
 		e.logger.Info("[updateForkchoice] Fork choice update: flushing in-memory state (built by previous newPayload)")
 		if err := e.forkValidator.FlushExtendingFork(tx, e.accumulator); err != nil {
@@ -395,14 +385,12 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	}
 	// Run the forkchoice
 	initialCycle := limitedBigJump
-	fmt.Println("RECORD")
 	if _, err := e.executionPipeline.Run(e.db, wrap.TxContainer{Tx: tx}, initialCycle); err != nil {
 		err = fmt.Errorf("updateForkChoice: %w", err)
 		e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
-	fmt.Println("STOP_RECORD")
 
 	timings := slices.Clone(e.executionPipeline.PrintTimings())
 

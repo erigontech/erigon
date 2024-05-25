@@ -53,13 +53,11 @@ func ReadCanonicalHash(db kv.Getter, number uint64) (common.Hash, error) {
 	if len(data) == 0 {
 		return common.Hash{}, nil
 	}
-	fmt.Println("ReadCanonicalHash", number, "yes")
 	return common.BytesToHash(data), nil
 }
 
 // WriteCanonicalHash stores the hash assigned to a canonical block number.
 func WriteCanonicalHash(db kv.Putter, hash common.Hash, number uint64) error {
-	fmt.Println(number, hash)
 	if err := db.Put(kv.HeaderCanonical, hexutility.EncodeTs(number), hash.Bytes()); err != nil {
 		return fmt.Errorf("failed to store number to hash mapping: %w", err)
 	}
@@ -729,7 +727,6 @@ func AppendCanonicalTxNums(tx kv.RwTx, from uint64) (err error) {
 
 		data := ReadStorageBodyRLP(tx, h, blockNum)
 		if len(data) == 0 {
-			fmt.Println("XB", blockNum)
 			break
 		}
 		bodyForStorage := types.BodyForStorage{}
