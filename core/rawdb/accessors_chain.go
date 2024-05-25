@@ -722,11 +722,13 @@ func AppendCanonicalTxNums(tx kv.RwTx, from uint64) (err error) {
 			return err
 		}
 		if h == (common.Hash{}) {
+			fmt.Println("XA", blockNum)
 			break
 		}
 
 		data := ReadStorageBodyRLP(tx, h, blockNum)
 		if len(data) == 0 {
+			fmt.Println("XB", blockNum)
 			break
 		}
 		bodyForStorage := types.BodyForStorage{}
