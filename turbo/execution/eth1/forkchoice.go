@@ -466,7 +466,7 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle boo
 	}
 	go func() {
 		defer e.doingPostForkchoice.Store(false)
-		timings := []interface{}{}
+		var timings []interface{}
 		// Wait for semaphore to be available
 		if e.semaphore.Acquire(e.bacgroundCtx, 1) != nil {
 			return
