@@ -350,15 +350,16 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		}
 	}
 	if isDomainAheadOfBlocks(tx) {
+		fmt.Println("X")
 		sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
 			LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
 			Status:          execution.ExecutionStatus_TooFarAway,
 			ValidationError: "domain ahead of blocks",
 		})
-		fmt.Println("X")
 		return
 	}
 
+	fmt.Println("Y")
 	// Set Progress for headers and bodies accordingly.
 	if err := stages.SaveStageProgress(tx, stages.Headers, fcuHeader.Number.Uint64()); err != nil {
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
@@ -376,6 +377,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
+	fmt.Println("YA")
 	if blockHash == e.forkValidator.ExtendingForkHeadHash() && !unwindToGenesis {
 		e.logger.Info("[updateForkchoice] Fork choice update: flushing in-memory state (built by previous newPayload)")
 		if err := e.forkValidator.FlushExtendingFork(tx, e.accumulator); err != nil {
