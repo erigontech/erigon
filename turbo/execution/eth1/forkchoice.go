@@ -344,7 +344,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 				return
 			}
-			fmt.Println("newCanonicals", len(newCanonicals))
+			fmt.Println("newCanonicals", newCanonicals[len(newCanonicals)-1].number)
 		}
 	}
 	if isDomainAheadOfBlocks(tx) {
