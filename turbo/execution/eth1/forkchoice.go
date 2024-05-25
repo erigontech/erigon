@@ -344,7 +344,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				return
 			}
 			fmt.Println("newCanonicals", newCanonicals[0].number)
-			if err := rawdb.AppendCanonicalTxNums(tx, newCanonicals[len(newCanonicals)-1].number); err != nil {
+			if err := rawdb.AppendCanonicalTxNums(tx, newCanonicals[0].number); err != nil {
 				fmt.Println("ERR5", err)
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 				return
