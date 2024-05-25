@@ -362,18 +362,22 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	fmt.Println("Y")
 	// Set Progress for headers and bodies accordingly.
 	if err := stages.SaveStageProgress(tx, stages.Headers, fcuHeader.Number.Uint64()); err != nil {
+		fmt.Println("ERR3", err)
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
 	if err := stages.SaveStageProgress(tx, stages.BlockHashes, fcuHeader.Number.Uint64()); err != nil {
+		fmt.Println("ERR2", err)
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
 	if err := stages.SaveStageProgress(tx, stages.Bodies, fcuHeader.Number.Uint64()); err != nil {
+		fmt.Println("ERR1", err)
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
 	if err = rawdb.WriteHeadHeaderHash(tx, blockHash); err != nil {
+		fmt.Println("ERR", err)
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
