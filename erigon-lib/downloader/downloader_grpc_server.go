@@ -64,13 +64,20 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 			return nil, fmt.Errorf("field 'path' is required")
 		}
 
-		const bor_dltest = false
+		// For local Perf Testing
+		const bor_dltest = ""
 
-		if bor_dltest {
+		switch bor_dltest {
+		case "last":
 			if !strings.HasSuffix(it.Path, "v1-storage.0-2048.kv") {
 				continue
 			}
+		case "headers":
+			if !(strings.Contains(it.Path, "-headers") || strings.Contains(it.Path, "-bodies")) {
+				continue
+			}
 		}
+		// To Here
 
 		select {
 		case <-logEvery.C:
