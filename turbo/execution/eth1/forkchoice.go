@@ -40,6 +40,8 @@ func sendForkchoiceReceiptWithoutWaiting(ch chan forkchoiceOutcome, receipt *exe
 }
 
 func sendForkchoiceErrorWithoutWaiting(ch chan forkchoiceOutcome, err error) {
+	log.Info("[dbg] sendForkchoiceErrorWithoutWaiting", "stack", dbg.Stack())
+
 	select {
 	case ch <- forkchoiceOutcome{err: err}:
 	default:
@@ -201,6 +203,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
+
 	var unwindToGenesis bool
 	if fcuHeader.Number.Uint64() > 0 {
 		if canonicalHash == blockHash {
