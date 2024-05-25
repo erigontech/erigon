@@ -190,6 +190,7 @@ func ExecV3(ctx context.Context,
 		// if we are behind the commitment, we can't execute anything
 		// this can heppen if progress in domain is higher than progress in blocks
 		if errors.Is(err, state2.ErrBehindCommitment) {
+			fmt.Println(err)
 			return nil
 		}
 		if err != nil {
