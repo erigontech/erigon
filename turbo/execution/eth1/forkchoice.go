@@ -383,11 +383,13 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	}
 	// Run the forkchoice
 	initialCycle := limitedBigJump
+	fmt.Println("RECORD")
 	if _, err := e.executionPipeline.Run(e.db, wrap.TxContainer{Tx: tx}, initialCycle); err != nil {
 		err = fmt.Errorf("updateForkChoice: %w", err)
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
+	fmt.Println("STOP_RECORD")
 
 	timings := slices.Clone(e.executionPipeline.PrintTimings())
 
