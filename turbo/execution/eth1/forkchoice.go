@@ -25,6 +25,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+const startPruneFrom = 1024
+
 type forkchoiceOutcome struct {
 	receipt *execution.ForkChoiceReceipt
 	err     error
@@ -423,11 +425,12 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
-
+		commitStart := time.Now()
 		if err := tx.Commit(); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
+		commitTime := time.Since(commitStart)
 
 		if e.hook != nil {
 			if err := e.db.View(ctx, func(tx kv.Tx) error {
@@ -441,30 +444,48 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			e.logger.Info("head updated", "number", *headNumber, "hash", headHash)
 		}
 
-		var commitStart time.Time
-		if err := e.db.Update(ctx, func(tx kv.RwTx) error {
+		var m runtime.MemStats
+		dbg.ReadMemStats(&m)
+		timings = append(timings, e.forkValidator.GetTimings(headHash)...)
+		timings = append(timings, "commit", commitTime, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+		e.logger.Info("Timings (slower than 50ms)", timings...)
+	}
+	if *headNumber >= startPruneFrom {
+		e.runPostForkchoiceInBackground(initialCycle)
+	}
+	sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
+		LatestValidHash: gointerfaces.ConvertHashToH256(headHash),
+		Status:          status,
+		ValidationError: validationError,
+	})
+}
+
+func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle bool) {
+	if e.doingPostForkchoice.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		defer e.doingPostForkchoice.Store(false)
+		timings := []interface{}{}
+		// Wait for semaphore to be available
+		if e.semaphore.Acquire(e.bacgroundCtx, 1) != nil {
+			return
+		}
+		defer e.semaphore.Release(1)
+		if err := e.db.Update(e.bacgroundCtx, func(tx kv.RwTx) error {
 			if err := e.executionPipeline.RunPrune(e.db, tx, initialCycle); err != nil {
 				return err
 			}
 			if pruneTimings := e.executionPipeline.PrintTimings(); len(pruneTimings) > 0 {
 				timings = append(timings, pruneTimings...)
 			}
-			commitStart = time.Now()
 			return nil
 		}); err != nil {
-			err = fmt.Errorf("updateForkChoice: %w", err)
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			e.logger.Error("runPostForkchoiceInBackground", "error", err)
 			return
 		}
-		var m runtime.MemStats
-		dbg.ReadMemStats(&m)
-		timings = append(timings, "commit", time.Since(commitStart), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-		e.logger.Info("Timings (slower than 50ms)", timings...)
-	}
-
-	sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
-		LatestValidHash: gointerfaces.ConvertHashToH256(headHash),
-		Status:          status,
-		ValidationError: validationError,
-	})
+		if len(timings) > 0 {
+			e.logger.Info("Timings: Post-Forkchoice (slower than 50ms)", timings...)
+		}
+	}()
 }
