@@ -360,27 +360,12 @@ func (r *BlockReader) LastNonCanonicalHeaderNumber(ctx context.Context, tx kv.Ge
 }
 
 func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (h *types.Header, err error) {
-	//TODO: investigate why code blolow causing getting error `Could not set forkchoice                 app=caplin stage=ForkChoice err="execution Client RPC failed to retrieve ForkChoiceUpdate response, err: unknown ancestor"`
-	//maxBlockNumInFiles := r.sn.BlocksAvailable()
-	//if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
-	//	if tx == nil {
-	//		return nil, nil
-	//	}
-	//	blockHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
-	//	if err != nil {
-	//		return nil, err
-	//	}
-	//	if blockHash == (common.Hash{}) {
-	//		return nil, nil
-	//	}
-	//	h = rawdb.ReadHeader(tx, blockHash, blockHeight)
-	//	return h, nil
-	//}
 	if tx != nil {
 		blockHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
 		if err != nil {
 			return nil, err
 		}
+		// if no canonical marker - still can try read from files
 		if blockHash != emptyHash {
 			h = rawdb.ReadHeader(tx, blockHash, blockHeight)
 			if h != nil {
@@ -1100,9 +1085,6 @@ func (r *BlockReader) BlockByNumber(ctx context.Context, db kv.Tx, number uint64
 	hash, err := rawdb.ReadCanonicalHash(db, number)
 	if err != nil {
 		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
-	}
-	if hash == emptyHash {
-		return nil, nil
 	}
 	block, _, err := r.BlockWithSenders(ctx, db, hash, number)
 	return block, err
