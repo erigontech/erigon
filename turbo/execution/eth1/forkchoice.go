@@ -386,6 +386,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	fmt.Println("RECORD")
 	if _, err := e.executionPipeline.Run(e.db, wrap.TxContainer{Tx: tx}, initialCycle); err != nil {
 		err = fmt.Errorf("updateForkChoice: %w", err)
+		fmt.Println(err)
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
