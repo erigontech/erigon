@@ -722,7 +722,6 @@ func AppendCanonicalTxNums(tx kv.RwTx, from uint64) (err error) {
 			return err
 		}
 		if h == (common.Hash{}) {
-			fmt.Println("XA", blockNum)
 			break
 		}
 
