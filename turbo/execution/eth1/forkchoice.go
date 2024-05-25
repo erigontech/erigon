@@ -205,6 +205,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	var unwindToGenesis bool
 	if fcuHeader.Number.Uint64() > 0 {
 		if canonicalHash == blockHash {
+			fmt.Println("X")
 			// if block hash is part of the canonical chain treat it as no-op.
 			writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
 			valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
@@ -335,7 +336,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				return
 			}
 		}
-
+		fmt.Println("AQ")
 		if len(newCanonicals) > 0 {
 			if err := rawdbv3.TxNums.Truncate(tx, newCanonicals[0].number); err != nil {
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
