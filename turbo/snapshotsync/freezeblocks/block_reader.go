@@ -79,7 +79,7 @@ func (r *RemoteBlockReader) BlockByNumber(ctx context.Context, db kv.Tx, number 
 	if err != nil {
 		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
 	}
-	if hash == (common.Hash{}) {
+	if hash == emptyHash {
 		return nil, nil
 	}
 	block, _, err := r.BlockWithSenders(ctx, db, hash, number)
@@ -381,12 +381,11 @@ func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHei
 		if err != nil {
 			return nil, err
 		}
-		if blockHash == (common.Hash{}) {
-			return nil, nil
-		}
-		h = rawdb.ReadHeader(tx, blockHash, blockHeight)
-		if h != nil {
-			return h, nil
+		if blockHash != emptyHash {
+			h = rawdb.ReadHeader(tx, blockHash, blockHeight)
+			if h != nil {
+				return h, nil
+			}
 		}
 	}
 
