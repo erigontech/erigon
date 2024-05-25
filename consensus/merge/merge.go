@@ -168,6 +168,8 @@ func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, 
 	if !misc.IsPoSHeader(header) {
 		return s.eth1Engine.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, withdrawals, requests, chain, syscall, call, logger)
 	}
+	// get the deposits (TODO @somnathb1) and withdrawals and append it to requests
+	requests = append(requests, misc.DequeueWithdrawalRequests7002(syscall)...)
 	outTxs, outReceipts, err := s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, requests, chain, syscall, logger)
 	if err != nil {
 		return nil, nil, nil, err

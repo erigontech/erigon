@@ -11,6 +11,7 @@ import (
 
 const (
 	DepositRequestType byte = 0x00
+	WithdrawalRequestType byte = 0x01
 )
 
 type Request struct {

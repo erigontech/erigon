@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -105,6 +106,7 @@ func ExecuteBlockEphemerally(
 	var rejectedTxs []*RejectedTx
 	includedTxs := make(types.Transactions, 0, block.Transactions().Len())
 	receipts := make(types.Receipts, 0, block.Transactions().Len())
+	// requests := make(types.Requests, 0, misc.TargetWithdrawalReqsPerBlock)
 	noop := state.NewNoopWriter()
 	var allLogs types.Logs
 	for i, tx := range block.Transactions() {
@@ -209,6 +211,12 @@ func ExecuteBlockEphemerally(
 		if err != nil {
 			return nil, fmt.Errorf("error: could not parse requests logs: %v", err)
 		}
+
+		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
+			return SysCallContract(contract, data, chainConfig, ibs, header, engine, false /* constCall */)
+		}
+		wrs := misc.DequeueWithdrawalRequests7002(syscall)
+		requests = append(requests, wrs...)
 
 		rh := types.DeriveSha(requests)
 		if *block.Header().RequestsRoot != rh && !vmConfig.NoReceipts {
@@ -338,7 +346,9 @@ func FinalizeBlockExecution(
 	syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 		return SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */)
 	}
+	// get a local requests struct and put in requests
 	if isMining {
+		// TODO @somnathb1 pass the requests in
 		newBlock, newTxs, newReceipt, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, nil, logger)
 	} else {
 		_, _, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, logger)
