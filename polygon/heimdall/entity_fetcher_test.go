@@ -51,6 +51,7 @@ func testEntityFetcher_FetchAllEntities(t *testing.T, count uint64, fetchEntitie
 		"fetcher",
 		nil,
 		nil,
+		nil,
 		fetchEntitiesPage,
 		fetchEntitiesPageLimit,
 		logger,
@@ -91,6 +92,7 @@ func newEntityFetcherFetchEntitiesRangeTest(count uint64, withPaging bool, testR
 
 	fetcher := newEntityFetcher[*Checkpoint](
 		"fetcher",
+		nil,
 		nil,
 		fetchEntity,
 		fetchEntitiesPage,

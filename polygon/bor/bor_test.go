@@ -128,6 +128,10 @@ func (h test_heimdall) FetchMilestoneCount(ctx context.Context) (int64, error) {
 	return 0, fmt.Errorf("TODO")
 }
 
+func (h test_heimdall) FetchFirstMilestoneNum(ctx context.Context) (int64, error) {
+	return 0, fmt.Errorf("TODO")
+}
+
 func (h test_heimdall) FetchNoAckMilestone(ctx context.Context, milestoneID string) error {
 	return fmt.Errorf("TODO")
 }
