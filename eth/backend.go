@@ -905,7 +905,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	executionRpc := direct.NewExecutionClientDirect(backend.eth1ExecutionServer)
 
 	var executionEngine executionclient.ExecutionEngine
-	caplinUseEngineAPI := config.NetworkID == uint64(clparams.GnosisNetwork) || config.NetworkID == uint64(clparams.HoleskyNetwork) || config.NetworkID == uint64(clparams.GoerliNetwork)
+	caplinUseEngineAPI := config.NetworkID == uint64(clparams.HoleskyNetwork) || config.NetworkID == uint64(clparams.GoerliNetwork)
 	// Gnosis has too few blocks on his network for phase2 to work. Once we have proper snapshot automation, it can go back to normal.
 	if caplinUseEngineAPI {
 		// Read the jwt secret
