@@ -127,10 +127,12 @@ type AggStats struct {
 	LocalFileHashes            int
 	LocalFileHashTime          time.Duration
 
-	WebseedTripCount     *atomic.Int64
-	WebseedDiscardCount  *atomic.Int64
-	WebseedServerFails   *atomic.Int64
-	WebseedBytesDownload *atomic.Int64
+	WebseedActiveTrips    *atomic.Int64
+	WebseedMaxActiveTrips *atomic.Int64
+	WebseedTripCount      *atomic.Int64
+	WebseedDiscardCount   *atomic.Int64
+	WebseedServerFails    *atomic.Int64
+	WebseedBytesDownload  *atomic.Int64
 
 	lastTorrentStatus time.Time
 }
@@ -177,6 +179,11 @@ func calcBackoff(min, max time.Duration, attemptNum int, resp *http.Response) ti
 }
 
 func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err error) {
+	activeTrips := r.downloader.stats.WebseedActiveTrips.Add(1)
+	if activeTrips > r.downloader.stats.WebseedMaxActiveTrips.Load() {
+		r.downloader.stats.WebseedMaxActiveTrips.Store(activeTrips)
+	}
+
 	defer func() {
 		if r := recover(); r != nil {
 			if resp != nil && resp.Body != nil {
@@ -186,6 +193,8 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 
 			err = fmt.Errorf("http client panic: %s", r)
 		}
+
+		r.downloader.stats.WebseedActiveTrips.Add(-1)
 	}()
 
 	insertCloudflareHeaders(req)
@@ -288,10 +297,12 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 
 	mutex := &sync.RWMutex{}
 	stats := AggStats{
-		WebseedTripCount:     &atomic.Int64{},
-		WebseedBytesDownload: &atomic.Int64{},
-		WebseedDiscardCount:  &atomic.Int64{},
-		WebseedServerFails:   &atomic.Int64{},
+		WebseedActiveTrips:    &atomic.Int64{},
+		WebseedMaxActiveTrips: &atomic.Int64{},
+		WebseedTripCount:      &atomic.Int64{},
+		WebseedBytesDownload:  &atomic.Int64{},
+		WebseedDiscardCount:   &atomic.Int64{},
+		WebseedServerFails:    &atomic.Int64{},
 	}
 
 	snapLock, err := getSnapshotLock(ctx, cfg, db, &stats, mutex, logger)
@@ -2117,13 +2128,15 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	}
 
 	if !stats.Completed {
-		logger.Debug("[snapshots] info",
+		logger.Debug("[snapshots] download info",
 			"len", len(torrents),
 			"webTransfers", webTransfers,
 			"torrent", torrentInfo,
 			"db", dbInfo,
 			"t-complete", tComplete,
 			"webseed-trips", stats.WebseedTripCount.Load(),
+			"webseed-active", stats.WebseedActiveTrips.Load(),
+			"webseed-max-active", stats.WebseedMaxActiveTrips.Load(),
 			"webseed-discards", stats.WebseedDiscardCount.Load(),
 			"webseed-fails", stats.WebseedServerFails.Load(),
 			"webseed-bytes", common.ByteCount(uint64(stats.WebseedBytesDownload.Load())),
