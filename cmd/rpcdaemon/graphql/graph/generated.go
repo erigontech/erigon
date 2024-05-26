@@ -92,6 +92,7 @@ type ComplexityRoot struct {
 		TransactionCount  func(childComplexity int) int
 		Transactions      func(childComplexity int) int
 		TransactionsRoot  func(childComplexity int) int
+		Withdrawals       func(childComplexity int) int
 	}
 
 	CallResult struct {
@@ -165,6 +166,13 @@ type ComplexityRoot struct {
 		Type                 func(childComplexity int) int
 		V                    func(childComplexity int) int
 		Value                func(childComplexity int) int
+	}
+
+	Withdrawal struct {
+		Address   func(childComplexity int) int
+		Amount    func(childComplexity int) int
+		Index     func(childComplexity int) int
+		Validator func(childComplexity int) int
 	}
 }
 
@@ -507,6 +515,13 @@ func (e *executableSchema) Complexity(typeName, field string, childComplexity in
 		}
 
 		return e.complexity.Block.TransactionsRoot(childComplexity), true
+
+	case "Block.withdrawals":
+		if e.complexity.Block.Withdrawals == nil {
+			break
+		}
+
+		return e.complexity.Block.Withdrawals(childComplexity), true
 
 	case "CallResult.data":
 		if e.complexity.CallResult.Data == nil {
@@ -931,6 +946,34 @@ func (e *executableSchema) Complexity(typeName, field string, childComplexity in
 		}
 
 		return e.complexity.Transaction.Value(childComplexity), true
+
+	case "Withdrawal.address":
+		if e.complexity.Withdrawal.Address == nil {
+			break
+		}
+
+		return e.complexity.Withdrawal.Address(childComplexity), true
+
+	case "Withdrawal.amount":
+		if e.complexity.Withdrawal.Amount == nil {
+			break
+		}
+
+		return e.complexity.Withdrawal.Amount(childComplexity), true
+
+	case "Withdrawal.index":
+		if e.complexity.Withdrawal.Index == nil {
+			break
+		}
+
+		return e.complexity.Withdrawal.Index(childComplexity), true
+
+	case "Withdrawal.validator":
+		if e.complexity.Withdrawal.Validator == nil {
+			break
+		}
+
+		return e.complexity.Withdrawal.Validator(childComplexity), true
 
 	}
 	return 0, false
@@ -1461,7 +1504,7 @@ func (ec *executionContext) _AccessTuple_address(ctx context.Context, field grap
 	return ec.marshalNAddress2string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_AccessTuple_address(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_AccessTuple_address(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "AccessTuple",
 		Field:      field,
@@ -1505,7 +1548,7 @@ func (ec *executionContext) _AccessTuple_storageKeys(ctx context.Context, field 
 	return ec.marshalNBytes322ᚕstringᚄ(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_AccessTuple_storageKeys(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_AccessTuple_storageKeys(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "AccessTuple",
 		Field:      field,
@@ -1549,7 +1592,7 @@ func (ec *executionContext) _Account_address(ctx context.Context, field graphql.
 	return ec.marshalNAddress2string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Account_address(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Account_address(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Account",
 		Field:      field,
@@ -1593,7 +1636,7 @@ func (ec *executionContext) _Account_balance(ctx context.Context, field graphql.
 	return ec.marshalNBigInt2string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Account_balance(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Account_balance(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Account",
 		Field:      field,
@@ -1637,7 +1680,7 @@ func (ec *executionContext) _Account_transactionCount(ctx context.Context, field
 	return ec.marshalNLong2uint64(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Account_transactionCount(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Account_transactionCount(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Account",
 		Field:      field,
@@ -1681,7 +1724,7 @@ func (ec *executionContext) _Account_code(ctx context.Context, field graphql.Col
 	return ec.marshalNBytes2string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Account_code(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Account_code(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Account",
 		Field:      field,
@@ -1780,7 +1823,7 @@ func (ec *executionContext) _Block_number(ctx context.Context, field graphql.Col
 	return ec.marshalNLong2uint64(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Block_number(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Block_number(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
@@ -1824,7 +1867,7 @@ func (ec *executionContext) _Block_hash(ctx context.Context, field graphql.Colle
 	return ec.marshalNBytes322string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Block_hash(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Block_hash(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
@@ -1865,7 +1908,7 @@ func (ec *executionContext) _Block_parent(ctx context.Context, field graphql.Col
 	return ec.marshalOBlock2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlock(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Block_parent(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Block_parent(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
@@ -1935,6 +1978,8 @@ func (ec *executionContext) fieldContext_Block_parent(ctx context.Context, field
 				return ec.fieldContext_Block_rawHeader(ctx, field)
 			case "raw":
 				return ec.fieldContext_Block_raw(ctx, field)
+			case "withdrawals":
+				return ec.fieldContext_Block_withdrawals(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Block", field.Name)
 		},
@@ -1973,7 +2018,7 @@ func (ec *executionContext) _Block_nonce(ctx context.Context, field graphql.Coll
 	return ec.marshalNBigInt2string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Block_nonce(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Block_nonce(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
@@ -2017,7 +2062,7 @@ func (ec *executionContext) _Block_transactionsRoot(ctx context.Context, field g
 	return ec.marshalNBytes322string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Block_transactionsRoot(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Block_transactionsRoot(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
@@ -2058,7 +2103,7 @@ func (ec *executionContext) _Block_transactionCount(ctx context.Context, field g
 	return ec.marshalOInt2ᚖint(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Block_transactionCount(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Block_transactionCount(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
@@ -2102,7 +2147,7 @@ func (ec *executionContext) _Block_stateRoot(ctx context.Context, field graphql.
 	return ec.marshalNBytes322string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Block_stateRoot(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Block_stateRoot(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
@@ -2146,7 +2191,7 @@ func (ec *executionContext) _Block_receiptsRoot(ctx context.Context, field graph
 	return ec.marshalNBytes322string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Block_receiptsRoot(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Block_receiptsRoot(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
@@ -2257,7 +2302,7 @@ func (ec *executionContext) _Block_extraData(ctx context.Context, field graphql.
 	return ec.marshalNBytes2string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Block_extraData(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Block_extraData(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
@@ -2301,7 +2346,7 @@ func (ec *executionContext) _Block_gasLimit(ctx context.Context, field graphql.C
 	return ec.marshalNLong2uint64(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Block_gasLimit(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Block_gasLimit(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
@@ -2345,7 +2390,7 @@ func (ec *executionContext) _Block_gasUsed(ctx context.Context, field graphql.Co
 	return ec.marshalNLong2uint64(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Block_gasUsed(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Block_gasUsed(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
@@ -2386,7 +2431,7 @@ func (ec *executionContext) _Block_baseFeePerGas(ctx context.Context, field grap
 	return ec.marshalOBigInt2ᚖstring(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Block_baseFeePerGas(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Block_baseFeePerGas(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
@@ -2427,7 +2472,7 @@ func (ec *executionContext) _Block_nextBaseFeePerGas(ctx context.Context, field 
 	return ec.marshalOBigInt2ᚖstring(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Block_nextBaseFeePerGas(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Block_nextBaseFeePerGas(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
@@ -2471,7 +2516,7 @@ func (ec *executionContext) _Block_timestamp(ctx context.Context, field graphql.
 	return ec.marshalNBigInt2string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Block_timestamp(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Block_timestamp(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
@@ -2515,7 +2560,7 @@ func (ec *executionContext) _Block_logsBloom(ctx context.Context, field graphql.
 	return ec.marshalNBytes2string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Block_logsBloom(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Block_logsBloom(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
@@ -2559,7 +2604,7 @@ func (ec *executionContext) _Block_mixHash(ctx context.Context, field graphql.Co
 	return ec.marshalNBytes322string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Block_mixHash(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Block_mixHash(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
@@ -2603,7 +2648,7 @@ func (ec *executionContext) _Block_difficulty(ctx context.Context, field graphql
 	return ec.marshalNBigInt2string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Block_difficulty(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Block_difficulty(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
@@ -2647,7 +2692,7 @@ func (ec *executionContext) _Block_totalDifficulty(ctx context.Context, field gr
 	return ec.marshalNBigInt2string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Block_totalDifficulty(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Block_totalDifficulty(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
@@ -2688,7 +2733,7 @@ func (ec *executionContext) _Block_ommerCount(ctx context.Context, field graphql
 	return ec.marshalOInt2ᚖint(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Block_ommerCount(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Block_ommerCount(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
@@ -2729,7 +2774,7 @@ func (ec *executionContext) _Block_ommers(ctx context.Context, field graphql.Col
 	return ec.marshalOBlock2ᚕᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlock(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Block_ommers(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Block_ommers(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
@@ -2799,6 +2844,8 @@ func (ec *executionContext) fieldContext_Block_ommers(ctx context.Context, field
 				return ec.fieldContext_Block_rawHeader(ctx, field)
 			case "raw":
 				return ec.fieldContext_Block_raw(ctx, field)
+			case "withdrawals":
+				return ec.fieldContext_Block_withdrawals(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Block", field.Name)
 		},
@@ -2904,6 +2951,8 @@ func (ec *executionContext) fieldContext_Block_ommerAt(ctx context.Context, fiel
 				return ec.fieldContext_Block_rawHeader(ctx, field)
 			case "raw":
 				return ec.fieldContext_Block_raw(ctx, field)
+			case "withdrawals":
+				return ec.fieldContext_Block_withdrawals(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Block", field.Name)
 		},
@@ -2953,7 +3002,7 @@ func (ec *executionContext) _Block_ommerHash(ctx context.Context, field graphql.
 	return ec.marshalNBytes322string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Block_ommerHash(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Block_ommerHash(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
@@ -2994,7 +3043,7 @@ func (ec *executionContext) _Block_transactions(ctx context.Context, field graph
 	return ec.marshalOTransaction2ᚕᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐTransactionᚄ(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Block_transactions(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Block_transactions(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
@@ -3447,7 +3496,7 @@ func (ec *executionContext) _Block_rawHeader(ctx context.Context, field graphql.
 	return ec.marshalNBytes2string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Block_rawHeader(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Block_rawHeader(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
@@ -3491,7 +3540,7 @@ func (ec *executionContext) _Block_raw(ctx context.Context, field graphql.Collec
 	return ec.marshalNBytes2string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Block_raw(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Block_raw(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
@@ -3499,6 +3548,57 @@ func (ec *executionContext) fieldContext_Block_raw(ctx context.Context, field gr
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type Bytes does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Block_withdrawals(ctx context.Context, field graphql.CollectedField, obj *model.Block) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Block_withdrawals(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (interface{}, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.Withdrawals, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.([]*model.Withdrawal)
+	fc.Result = res
+	return ec.marshalOWithdrawal2ᚕᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐWithdrawalᚄ(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Block_withdrawals(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Block",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "index":
+				return ec.fieldContext_Withdrawal_index(ctx, field)
+			case "validator":
+				return ec.fieldContext_Withdrawal_validator(ctx, field)
+			case "address":
+				return ec.fieldContext_Withdrawal_address(ctx, field)
+			case "amount":
+				return ec.fieldContext_Withdrawal_amount(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Withdrawal", field.Name)
 		},
 	}
 	return fc, nil
@@ -3535,7 +3635,7 @@ func (ec *executionContext) _CallResult_data(ctx context.Context, field graphql.
 	return ec.marshalNBytes2string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_CallResult_data(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_CallResult_data(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "CallResult",
 		Field:      field,
@@ -3579,7 +3679,7 @@ func (ec *executionContext) _CallResult_gasUsed(ctx context.Context, field graph
 	return ec.marshalNLong2uint64(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_CallResult_gasUsed(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_CallResult_gasUsed(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "CallResult",
 		Field:      field,
@@ -3623,7 +3723,7 @@ func (ec *executionContext) _CallResult_status(ctx context.Context, field graphq
 	return ec.marshalNLong2uint64(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_CallResult_status(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_CallResult_status(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "CallResult",
 		Field:      field,
@@ -3667,7 +3767,7 @@ func (ec *executionContext) _Log_index(ctx context.Context, field graphql.Collec
 	return ec.marshalNInt2int(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Log_index(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Log_index(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Log",
 		Field:      field,
@@ -3778,7 +3878,7 @@ func (ec *executionContext) _Log_topics(ctx context.Context, field graphql.Colle
 	return ec.marshalNBytes322ᚕstringᚄ(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Log_topics(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Log_topics(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Log",
 		Field:      field,
@@ -3822,7 +3922,7 @@ func (ec *executionContext) _Log_data(ctx context.Context, field graphql.Collect
 	return ec.marshalNBytes2string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Log_data(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Log_data(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Log",
 		Field:      field,
@@ -3866,7 +3966,7 @@ func (ec *executionContext) _Log_transaction(ctx context.Context, field graphql.
 	return ec.marshalNTransaction2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐTransaction(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Log_transaction(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Log_transaction(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Log",
 		Field:      field,
@@ -4019,7 +4119,7 @@ func (ec *executionContext) _Pending_transactionCount(ctx context.Context, field
 	return ec.marshalNInt2int(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Pending_transactionCount(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Pending_transactionCount(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Pending",
 		Field:      field,
@@ -4060,7 +4160,7 @@ func (ec *executionContext) _Pending_transactions(ctx context.Context, field gra
 	return ec.marshalOTransaction2ᚕᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐTransactionᚄ(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Pending_transactions(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Pending_transactions(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Pending",
 		Field:      field,
@@ -4407,6 +4507,8 @@ func (ec *executionContext) fieldContext_Query_block(ctx context.Context, field 
 				return ec.fieldContext_Block_rawHeader(ctx, field)
 			case "raw":
 				return ec.fieldContext_Block_raw(ctx, field)
+			case "withdrawals":
+				return ec.fieldContext_Block_withdrawals(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Block", field.Name)
 		},
@@ -4526,6 +4628,8 @@ func (ec *executionContext) fieldContext_Query_blocks(ctx context.Context, field
 				return ec.fieldContext_Block_rawHeader(ctx, field)
 			case "raw":
 				return ec.fieldContext_Block_raw(ctx, field)
+			case "withdrawals":
+				return ec.fieldContext_Block_withdrawals(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Block", field.Name)
 		},
@@ -4575,7 +4679,7 @@ func (ec *executionContext) _Query_pending(ctx context.Context, field graphql.Co
 	return ec.marshalNPending2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐPending(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Query_pending(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Query_pending(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Query",
 		Field:      field,
@@ -4804,7 +4908,7 @@ func (ec *executionContext) _Query_gasPrice(ctx context.Context, field graphql.C
 	return ec.marshalNBigInt2string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Query_gasPrice(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Query_gasPrice(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Query",
 		Field:      field,
@@ -4848,7 +4952,7 @@ func (ec *executionContext) _Query_maxPriorityFeePerGas(ctx context.Context, fie
 	return ec.marshalNBigInt2string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Query_maxPriorityFeePerGas(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Query_maxPriorityFeePerGas(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Query",
 		Field:      field,
@@ -4889,7 +4993,7 @@ func (ec *executionContext) _Query_syncing(ctx context.Context, field graphql.Co
 	return ec.marshalOSyncState2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐSyncState(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Query_syncing(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Query_syncing(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Query",
 		Field:      field,
@@ -4941,7 +5045,7 @@ func (ec *executionContext) _Query_chainID(ctx context.Context, field graphql.Co
 	return ec.marshalNBigInt2string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Query_chainID(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Query_chainID(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Query",
 		Field:      field,
@@ -5056,7 +5160,7 @@ func (ec *executionContext) _Query___schema(ctx context.Context, field graphql.C
 	return ec.marshalO__Schema2ᚖgithubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐSchema(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Query___schema(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Query___schema(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Query",
 		Field:      field,
@@ -5114,7 +5218,7 @@ func (ec *executionContext) _SyncState_startingBlock(ctx context.Context, field 
 	return ec.marshalNLong2uint64(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_SyncState_startingBlock(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_SyncState_startingBlock(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "SyncState",
 		Field:      field,
@@ -5158,7 +5262,7 @@ func (ec *executionContext) _SyncState_currentBlock(ctx context.Context, field g
 	return ec.marshalNLong2uint64(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_SyncState_currentBlock(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_SyncState_currentBlock(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "SyncState",
 		Field:      field,
@@ -5202,7 +5306,7 @@ func (ec *executionContext) _SyncState_highestBlock(ctx context.Context, field g
 	return ec.marshalNLong2uint64(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_SyncState_highestBlock(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_SyncState_highestBlock(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "SyncState",
 		Field:      field,
@@ -5246,7 +5350,7 @@ func (ec *executionContext) _Transaction_hash(ctx context.Context, field graphql
 	return ec.marshalNBytes322string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Transaction_hash(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Transaction_hash(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
@@ -5290,7 +5394,7 @@ func (ec *executionContext) _Transaction_nonce(ctx context.Context, field graphq
 	return ec.marshalNBigInt2string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Transaction_nonce(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Transaction_nonce(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
@@ -5331,7 +5435,7 @@ func (ec *executionContext) _Transaction_index(ctx context.Context, field graphq
 	return ec.marshalOInt2ᚖint(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Transaction_index(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Transaction_index(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
@@ -5506,7 +5610,7 @@ func (ec *executionContext) _Transaction_value(ctx context.Context, field graphq
 	return ec.marshalNBigInt2string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Transaction_value(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Transaction_value(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
@@ -5550,7 +5654,7 @@ func (ec *executionContext) _Transaction_gasPrice(ctx context.Context, field gra
 	return ec.marshalNBigInt2string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Transaction_gasPrice(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Transaction_gasPrice(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
@@ -5591,7 +5695,7 @@ func (ec *executionContext) _Transaction_maxFeePerGas(ctx context.Context, field
 	return ec.marshalOBigInt2ᚖstring(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Transaction_maxFeePerGas(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Transaction_maxFeePerGas(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
@@ -5632,7 +5736,7 @@ func (ec *executionContext) _Transaction_maxPriorityFeePerGas(ctx context.Contex
 	return ec.marshalOBigInt2ᚖstring(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Transaction_maxPriorityFeePerGas(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Transaction_maxPriorityFeePerGas(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
@@ -5673,7 +5777,7 @@ func (ec *executionContext) _Transaction_effectiveTip(ctx context.Context, field
 	return ec.marshalOBigInt2ᚖstring(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Transaction_effectiveTip(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Transaction_effectiveTip(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
@@ -5717,7 +5821,7 @@ func (ec *executionContext) _Transaction_gas(ctx context.Context, field graphql.
 	return ec.marshalNLong2uint64(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Transaction_gas(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Transaction_gas(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
@@ -5761,7 +5865,7 @@ func (ec *executionContext) _Transaction_inputData(ctx context.Context, field gr
 	return ec.marshalNBytes2string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Transaction_inputData(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Transaction_inputData(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
@@ -5802,7 +5906,7 @@ func (ec *executionContext) _Transaction_block(ctx context.Context, field graphq
 	return ec.marshalOBlock2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlock(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Transaction_block(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Transaction_block(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
@@ -5872,6 +5976,8 @@ func (ec *executionContext) fieldContext_Transaction_block(ctx context.Context, 
 				return ec.fieldContext_Block_rawHeader(ctx, field)
 			case "raw":
 				return ec.fieldContext_Block_raw(ctx, field)
+			case "withdrawals":
+				return ec.fieldContext_Block_withdrawals(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Block", field.Name)
 		},
@@ -5907,7 +6013,7 @@ func (ec *executionContext) _Transaction_status(ctx context.Context, field graph
 	return ec.marshalOLong2ᚖuint64(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Transaction_status(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Transaction_status(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
@@ -5948,7 +6054,7 @@ func (ec *executionContext) _Transaction_gasUsed(ctx context.Context, field grap
 	return ec.marshalOLong2ᚖuint64(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Transaction_gasUsed(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Transaction_gasUsed(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
@@ -5989,7 +6095,7 @@ func (ec *executionContext) _Transaction_cumulativeGasUsed(ctx context.Context, 
 	return ec.marshalOLong2ᚖuint64(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Transaction_cumulativeGasUsed(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Transaction_cumulativeGasUsed(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
@@ -6030,7 +6136,7 @@ func (ec *executionContext) _Transaction_effectiveGasPrice(ctx context.Context, 
 	return ec.marshalOBigInt2ᚖstring(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Transaction_effectiveGasPrice(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Transaction_effectiveGasPrice(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
@@ -6135,7 +6241,7 @@ func (ec *executionContext) _Transaction_logs(ctx context.Context, field graphql
 	return ec.marshalOLog2ᚕᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐLogᚄ(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Transaction_logs(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Transaction_logs(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
@@ -6191,7 +6297,7 @@ func (ec *executionContext) _Transaction_r(ctx context.Context, field graphql.Co
 	return ec.marshalNBigInt2string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Transaction_r(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Transaction_r(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
@@ -6235,7 +6341,7 @@ func (ec *executionContext) _Transaction_s(ctx context.Context, field graphql.Co
 	return ec.marshalNBigInt2string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Transaction_s(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Transaction_s(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
@@ -6279,7 +6385,7 @@ func (ec *executionContext) _Transaction_v(ctx context.Context, field graphql.Co
 	return ec.marshalNBigInt2string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Transaction_v(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Transaction_v(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
@@ -6320,7 +6426,7 @@ func (ec *executionContext) _Transaction_type(ctx context.Context, field graphql
 	return ec.marshalOInt2ᚖint(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Transaction_type(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Transaction_type(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
@@ -6361,7 +6467,7 @@ func (ec *executionContext) _Transaction_accessList(ctx context.Context, field g
 	return ec.marshalOAccessTuple2ᚕᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccessTupleᚄ(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Transaction_accessList(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Transaction_accessList(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
@@ -6411,7 +6517,7 @@ func (ec *executionContext) _Transaction_raw(ctx context.Context, field graphql.
 	return ec.marshalNBytes2string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Transaction_raw(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Transaction_raw(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
@@ -6455,7 +6561,7 @@ func (ec *executionContext) _Transaction_rawReceipt(ctx context.Context, field g
 	return ec.marshalNBytes2string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext_Transaction_rawReceipt(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Transaction_rawReceipt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
@@ -6463,6 +6569,182 @@ func (ec *executionContext) fieldContext_Transaction_rawReceipt(ctx context.Cont
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type Bytes does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Withdrawal_index(ctx context.Context, field graphql.CollectedField, obj *model.Withdrawal) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Withdrawal_index(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (interface{}, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.Index, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(int)
+	fc.Result = res
+	return ec.marshalNInt2int(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Withdrawal_index(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Withdrawal",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Withdrawal_validator(ctx context.Context, field graphql.CollectedField, obj *model.Withdrawal) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Withdrawal_validator(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (interface{}, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.Validator, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(int)
+	fc.Result = res
+	return ec.marshalNInt2int(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Withdrawal_validator(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Withdrawal",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Withdrawal_address(ctx context.Context, field graphql.CollectedField, obj *model.Withdrawal) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Withdrawal_address(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (interface{}, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.Address, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(string)
+	fc.Result = res
+	return ec.marshalNAddress2string(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Withdrawal_address(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Withdrawal",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Address does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Withdrawal_amount(ctx context.Context, field graphql.CollectedField, obj *model.Withdrawal) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Withdrawal_amount(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (interface{}, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.Amount, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(string)
+	fc.Result = res
+	return ec.marshalNBigInt2string(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Withdrawal_amount(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Withdrawal",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type BigInt does not have child fields")
 		},
 	}
 	return fc, nil
@@ -6499,7 +6781,7 @@ func (ec *executionContext) ___Directive_name(ctx context.Context, field graphql
 	return ec.marshalNString2string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___Directive_name(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___Directive_name(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__Directive",
 		Field:      field,
@@ -6540,7 +6822,7 @@ func (ec *executionContext) ___Directive_description(ctx context.Context, field 
 	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___Directive_description(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___Directive_description(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__Directive",
 		Field:      field,
@@ -6584,7 +6866,7 @@ func (ec *executionContext) ___Directive_locations(ctx context.Context, field gr
 	return ec.marshalN__DirectiveLocation2ᚕstringᚄ(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___Directive_locations(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___Directive_locations(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__Directive",
 		Field:      field,
@@ -6628,7 +6910,7 @@ func (ec *executionContext) ___Directive_args(ctx context.Context, field graphql
 	return ec.marshalN__InputValue2ᚕgithubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐInputValueᚄ(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___Directive_args(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___Directive_args(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__Directive",
 		Field:      field,
@@ -6682,7 +6964,7 @@ func (ec *executionContext) ___Directive_isRepeatable(ctx context.Context, field
 	return ec.marshalNBoolean2bool(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___Directive_isRepeatable(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___Directive_isRepeatable(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__Directive",
 		Field:      field,
@@ -6726,7 +7008,7 @@ func (ec *executionContext) ___EnumValue_name(ctx context.Context, field graphql
 	return ec.marshalNString2string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___EnumValue_name(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___EnumValue_name(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__EnumValue",
 		Field:      field,
@@ -6767,7 +7049,7 @@ func (ec *executionContext) ___EnumValue_description(ctx context.Context, field 
 	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___EnumValue_description(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___EnumValue_description(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__EnumValue",
 		Field:      field,
@@ -6811,7 +7093,7 @@ func (ec *executionContext) ___EnumValue_isDeprecated(ctx context.Context, field
 	return ec.marshalNBoolean2bool(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___EnumValue_isDeprecated(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___EnumValue_isDeprecated(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__EnumValue",
 		Field:      field,
@@ -6852,7 +7134,7 @@ func (ec *executionContext) ___EnumValue_deprecationReason(ctx context.Context, 
 	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___EnumValue_deprecationReason(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___EnumValue_deprecationReason(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__EnumValue",
 		Field:      field,
@@ -6896,7 +7178,7 @@ func (ec *executionContext) ___Field_name(ctx context.Context, field graphql.Col
 	return ec.marshalNString2string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___Field_name(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___Field_name(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__Field",
 		Field:      field,
@@ -6937,7 +7219,7 @@ func (ec *executionContext) ___Field_description(ctx context.Context, field grap
 	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___Field_description(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___Field_description(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__Field",
 		Field:      field,
@@ -6981,7 +7263,7 @@ func (ec *executionContext) ___Field_args(ctx context.Context, field graphql.Col
 	return ec.marshalN__InputValue2ᚕgithubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐInputValueᚄ(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___Field_args(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___Field_args(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__Field",
 		Field:      field,
@@ -7035,7 +7317,7 @@ func (ec *executionContext) ___Field_type(ctx context.Context, field graphql.Col
 	return ec.marshalN__Type2ᚖgithubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐType(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___Field_type(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___Field_type(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__Field",
 		Field:      field,
@@ -7101,7 +7383,7 @@ func (ec *executionContext) ___Field_isDeprecated(ctx context.Context, field gra
 	return ec.marshalNBoolean2bool(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___Field_isDeprecated(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___Field_isDeprecated(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__Field",
 		Field:      field,
@@ -7142,7 +7424,7 @@ func (ec *executionContext) ___Field_deprecationReason(ctx context.Context, fiel
 	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___Field_deprecationReason(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___Field_deprecationReason(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__Field",
 		Field:      field,
@@ -7186,7 +7468,7 @@ func (ec *executionContext) ___InputValue_name(ctx context.Context, field graphq
 	return ec.marshalNString2string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___InputValue_name(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___InputValue_name(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__InputValue",
 		Field:      field,
@@ -7227,7 +7509,7 @@ func (ec *executionContext) ___InputValue_description(ctx context.Context, field
 	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___InputValue_description(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___InputValue_description(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__InputValue",
 		Field:      field,
@@ -7271,7 +7553,7 @@ func (ec *executionContext) ___InputValue_type(ctx context.Context, field graphq
 	return ec.marshalN__Type2ᚖgithubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐType(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___InputValue_type(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___InputValue_type(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__InputValue",
 		Field:      field,
@@ -7334,7 +7616,7 @@ func (ec *executionContext) ___InputValue_defaultValue(ctx context.Context, fiel
 	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___InputValue_defaultValue(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___InputValue_defaultValue(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__InputValue",
 		Field:      field,
@@ -7375,7 +7657,7 @@ func (ec *executionContext) ___Schema_description(ctx context.Context, field gra
 	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___Schema_description(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___Schema_description(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__Schema",
 		Field:      field,
@@ -7419,7 +7701,7 @@ func (ec *executionContext) ___Schema_types(ctx context.Context, field graphql.C
 	return ec.marshalN__Type2ᚕgithubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐTypeᚄ(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___Schema_types(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___Schema_types(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__Schema",
 		Field:      field,
@@ -7485,7 +7767,7 @@ func (ec *executionContext) ___Schema_queryType(ctx context.Context, field graph
 	return ec.marshalN__Type2ᚖgithubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐType(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___Schema_queryType(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___Schema_queryType(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__Schema",
 		Field:      field,
@@ -7548,7 +7830,7 @@ func (ec *executionContext) ___Schema_mutationType(ctx context.Context, field gr
 	return ec.marshalO__Type2ᚖgithubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐType(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___Schema_mutationType(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___Schema_mutationType(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__Schema",
 		Field:      field,
@@ -7611,7 +7893,7 @@ func (ec *executionContext) ___Schema_subscriptionType(ctx context.Context, fiel
 	return ec.marshalO__Type2ᚖgithubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐType(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___Schema_subscriptionType(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___Schema_subscriptionType(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__Schema",
 		Field:      field,
@@ -7677,7 +7959,7 @@ func (ec *executionContext) ___Schema_directives(ctx context.Context, field grap
 	return ec.marshalN__Directive2ᚕgithubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐDirectiveᚄ(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___Schema_directives(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___Schema_directives(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__Schema",
 		Field:      field,
@@ -7733,7 +8015,7 @@ func (ec *executionContext) ___Type_kind(ctx context.Context, field graphql.Coll
 	return ec.marshalN__TypeKind2string(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___Type_kind(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___Type_kind(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__Type",
 		Field:      field,
@@ -7774,7 +8056,7 @@ func (ec *executionContext) ___Type_name(ctx context.Context, field graphql.Coll
 	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___Type_name(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___Type_name(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__Type",
 		Field:      field,
@@ -7815,7 +8097,7 @@ func (ec *executionContext) ___Type_description(ctx context.Context, field graph
 	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___Type_description(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___Type_description(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__Type",
 		Field:      field,
@@ -7922,7 +8204,7 @@ func (ec *executionContext) ___Type_interfaces(ctx context.Context, field graphq
 	return ec.marshalO__Type2ᚕgithubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐTypeᚄ(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___Type_interfaces(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___Type_interfaces(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__Type",
 		Field:      field,
@@ -7985,7 +8267,7 @@ func (ec *executionContext) ___Type_possibleTypes(ctx context.Context, field gra
 	return ec.marshalO__Type2ᚕgithubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐTypeᚄ(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___Type_possibleTypes(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___Type_possibleTypes(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__Type",
 		Field:      field,
@@ -8110,7 +8392,7 @@ func (ec *executionContext) ___Type_inputFields(ctx context.Context, field graph
 	return ec.marshalO__InputValue2ᚕgithubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐInputValueᚄ(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___Type_inputFields(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___Type_inputFields(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__Type",
 		Field:      field,
@@ -8161,7 +8443,7 @@ func (ec *executionContext) ___Type_ofType(ctx context.Context, field graphql.Co
 	return ec.marshalO__Type2ᚖgithubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐType(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___Type_ofType(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___Type_ofType(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__Type",
 		Field:      field,
@@ -8224,7 +8506,7 @@ func (ec *executionContext) ___Type_specifiedByURL(ctx context.Context, field gr
 	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
 }
 
-func (ec *executionContext) fieldContext___Type_specifiedByURL(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext___Type_specifiedByURL(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "__Type",
 		Field:      field,
@@ -8256,8 +8538,6 @@ func (ec *executionContext) unmarshalInputBlockFilterCriteria(ctx context.Contex
 		}
 		switch k {
 		case "addresses":
-			var err error
-
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("addresses"))
 			data, err := ec.unmarshalOAddress2ᚕstringᚄ(ctx, v)
 			if err != nil {
@@ -8265,8 +8545,6 @@ func (ec *executionContext) unmarshalInputBlockFilterCriteria(ctx context.Contex
 			}
 			it.Addresses = data
 		case "topics":
-			var err error
-
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("topics"))
 			data, err := ec.unmarshalOBytes322ᚕᚕstringᚄ(ctx, v)
 			if err != nil {
@@ -8294,8 +8572,6 @@ func (ec *executionContext) unmarshalInputCallData(ctx context.Context, obj inte
 		}
 		switch k {
 		case "from":
-			var err error
-
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("from"))
 			data, err := ec.unmarshalOAddress2ᚖstring(ctx, v)
 			if err != nil {
@@ -8303,8 +8579,6 @@ func (ec *executionContext) unmarshalInputCallData(ctx context.Context, obj inte
 			}
 			it.From = data
 		case "to":
-			var err error
-
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("to"))
 			data, err := ec.unmarshalOAddress2ᚖstring(ctx, v)
 			if err != nil {
@@ -8312,8 +8586,6 @@ func (ec *executionContext) unmarshalInputCallData(ctx context.Context, obj inte
 			}
 			it.To = data
 		case "gas":
-			var err error
-
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("gas"))
 			data, err := ec.unmarshalOLong2ᚖuint64(ctx, v)
 			if err != nil {
@@ -8321,8 +8593,6 @@ func (ec *executionContext) unmarshalInputCallData(ctx context.Context, obj inte
 			}
 			it.Gas = data
 		case "gasPrice":
-			var err error
-
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("gasPrice"))
 			data, err := ec.unmarshalOBigInt2ᚖstring(ctx, v)
 			if err != nil {
@@ -8330,8 +8600,6 @@ func (ec *executionContext) unmarshalInputCallData(ctx context.Context, obj inte
 			}
 			it.GasPrice = data
 		case "maxFeePerGas":
-			var err error
-
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("maxFeePerGas"))
 			data, err := ec.unmarshalOBigInt2ᚖstring(ctx, v)
 			if err != nil {
@@ -8339,8 +8607,6 @@ func (ec *executionContext) unmarshalInputCallData(ctx context.Context, obj inte
 			}
 			it.MaxFeePerGas = data
 		case "maxPriorityFeePerGas":
-			var err error
-
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("maxPriorityFeePerGas"))
 			data, err := ec.unmarshalOBigInt2ᚖstring(ctx, v)
 			if err != nil {
@@ -8348,8 +8614,6 @@ func (ec *executionContext) unmarshalInputCallData(ctx context.Context, obj inte
 			}
 			it.MaxPriorityFeePerGas = data
 		case "value":
-			var err error
-
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("value"))
 			data, err := ec.unmarshalOBigInt2ᚖstring(ctx, v)
 			if err != nil {
@@ -8357,8 +8621,6 @@ func (ec *executionContext) unmarshalInputCallData(ctx context.Context, obj inte
 			}
 			it.Value = data
 		case "data":
-			var err error
-
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("data"))
 			data, err := ec.unmarshalOBytes2ᚖstring(ctx, v)
 			if err != nil {
@@ -8386,8 +8648,6 @@ func (ec *executionContext) unmarshalInputFilterCriteria(ctx context.Context, ob
 		}
 		switch k {
 		case "fromBlock":
-			var err error
-
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("fromBlock"))
 			data, err := ec.unmarshalOLong2ᚖuint64(ctx, v)
 			if err != nil {
@@ -8395,8 +8655,6 @@ func (ec *executionContext) unmarshalInputFilterCriteria(ctx context.Context, ob
 			}
 			it.FromBlock = data
 		case "toBlock":
-			var err error
-
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("toBlock"))
 			data, err := ec.unmarshalOLong2ᚖuint64(ctx, v)
 			if err != nil {
@@ -8404,8 +8662,6 @@ func (ec *executionContext) unmarshalInputFilterCriteria(ctx context.Context, ob
 			}
 			it.ToBlock = data
 		case "addresses":
-			var err error
-
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("addresses"))
 			data, err := ec.unmarshalOAddress2ᚕstringᚄ(ctx, v)
 			if err != nil {
@@ -8413,8 +8669,6 @@ func (ec *executionContext) unmarshalInputFilterCriteria(ctx context.Context, ob
 			}
 			it.Addresses = data
 		case "topics":
-			var err error
-
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("topics"))
 			data, err := ec.unmarshalOBytes322ᚕᚕstringᚄ(ctx, v)
 			if err != nil {
@@ -8674,6 +8928,8 @@ func (ec *executionContext) _Block(ctx context.Context, sel ast.SelectionSet, ob
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
+		case "withdrawals":
+			out.Values[i] = ec._Block_withdrawals(ctx, field, obj)
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -8929,7 +9185,7 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 		case "block":
 			field := field
 
-			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+			innerFunc := func(ctx context.Context, _ *graphql.FieldSet) (res graphql.Marshaler) {
 				defer func() {
 					if r := recover(); r != nil {
 						ec.Error(ctx, ec.Recover(ctx, r))
@@ -8992,7 +9248,7 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 		case "transaction":
 			field := field
 
-			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+			innerFunc := func(ctx context.Context, _ *graphql.FieldSet) (res graphql.Marshaler) {
 				defer func() {
 					if r := recover(); r != nil {
 						ec.Error(ctx, ec.Recover(ctx, r))
@@ -9077,7 +9333,7 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 		case "syncing":
 			field := field
 
-			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+			innerFunc := func(ctx context.Context, _ *graphql.FieldSet) (res graphql.Marshaler) {
 				defer func() {
 					if r := recover(); r != nil {
 						ec.Error(ctx, ec.Recover(ctx, r))
@@ -9291,6 +9547,60 @@ func (ec *executionContext) _Transaction(ctx context.Context, sel ast.SelectionS
 			}
 		case "rawReceipt":
 			out.Values[i] = ec._Transaction_rawReceipt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var withdrawalImplementors = []string{"Withdrawal"}
+
+func (ec *executionContext) _Withdrawal(ctx context.Context, sel ast.SelectionSet, obj *model.Withdrawal) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, withdrawalImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("Withdrawal")
+		case "index":
+			out.Values[i] = ec._Withdrawal_index(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "validator":
+			out.Values[i] = ec._Withdrawal_validator(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "address":
+			out.Values[i] = ec._Withdrawal_address(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "amount":
+			out.Values[i] = ec._Withdrawal_amount(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
@@ -9960,6 +10270,16 @@ func (ec *executionContext) marshalNTransaction2ᚖgithubᚗcomᚋledgerwatchᚋ
 		return graphql.Null
 	}
 	return ec._Transaction(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNWithdrawal2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐWithdrawal(ctx context.Context, sel ast.SelectionSet, v *model.Withdrawal) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._Withdrawal(ctx, sel, v)
 }
 
 func (ec *executionContext) marshalN__Directive2githubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐDirective(ctx context.Context, sel ast.SelectionSet, v introspection.Directive) graphql.Marshaler {
@@ -10660,6 +10980,53 @@ func (ec *executionContext) marshalOTransaction2ᚖgithubᚗcomᚋledgerwatchᚋ
 		return graphql.Null
 	}
 	return ec._Transaction(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalOWithdrawal2ᚕᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐWithdrawalᚄ(ctx context.Context, sel ast.SelectionSet, v []*model.Withdrawal) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	ret := make(graphql.Array, len(v))
+	var wg sync.WaitGroup
+	isLen1 := len(v) == 1
+	if !isLen1 {
+		wg.Add(len(v))
+	}
+	for i := range v {
+		i := i
+		fc := &graphql.FieldContext{
+			Index:  &i,
+			Result: &v[i],
+		}
+		ctx := graphql.WithFieldContext(ctx, fc)
+		f := func(i int) {
+			defer func() {
+				if r := recover(); r != nil {
+					ec.Error(ctx, ec.Recover(ctx, r))
+					ret = nil
+				}
+			}()
+			if !isLen1 {
+				defer wg.Done()
+			}
+			ret[i] = ec.marshalNWithdrawal2ᚖgithubᚗcomᚋledgerwatchᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐWithdrawal(ctx, sel, v[i])
+		}
+		if isLen1 {
+			f(i)
+		} else {
+			go f(i)
+		}
+
+	}
+	wg.Wait()
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
 }
 
 func (ec *executionContext) marshalO__EnumValue2ᚕgithubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐEnumValueᚄ(ctx context.Context, sel ast.SelectionSet, v []introspection.EnumValue) graphql.Marshaler {

@@ -14,6 +14,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/direct"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
@@ -30,6 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/p2p/sentry"
 	"github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/polygon/bor/finality"
@@ -473,16 +475,8 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 		}
 	}() // avoid crash because Erigon's core does many things
 	shouldUnwind := unwindPoint > 0
-	var txNum, blockNum uint64
 	// Construct side fork if we have one
 	if shouldUnwind {
-		// Persist block number and tx number
-		var err error
-		txc.Doms, err = state.NewSharedDomains(txc.Tx, log.New())
-		if err != nil {
-			return err
-		}
-		defer txc.Doms.Close()
 		// Run it through the unwind
 		if err := stateSync.UnwindTo(unwindPoint, stagedsync.StagedUnwind, nil); err != nil {
 			return err
@@ -490,9 +484,6 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 		if err = stateSync.RunUnwind(nil, txc); err != nil {
 			return err
 		}
-		txNum = txc.Doms.TxNum()
-		blockNum = txc.Doms.BlockNum()
-		txc.Doms.Close()
 	}
 	if err := rawdb.TruncateCanonicalChain(ctx, txc.Tx, header.Number.Uint64()+1); err != nil {
 		return err
@@ -526,15 +517,7 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 	if err := addAndVerifyBlockStep(txc.Tx, engine, chainReader, header, body); err != nil {
 		return err
 	}
-	if shouldUnwind {
-		txc.Doms, err = state.NewSharedDomains(txc.Tx, log.New())
-		if err != nil {
-			return err
-		}
-		defer txc.Doms.Close()
-		txc.Doms.SetTxNum(txNum)
-		txc.Doms.SetBlockNum(blockNum)
-	}
+
 	if err = stateSync.RunNoInterrupt(nil, txc, false /* firstCycle */); err != nil {
 		if !test {
 			if err := cleanupProgressIfNeeded(txc.Tx, header); err != nil {
@@ -784,6 +767,7 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 
 func NewPolygonSyncStages(
 	ctx context.Context,
+	logger log.Logger,
 	db kv.RwDB,
 	config *ethconfig.Config,
 	chainConfig *chain.Config,
@@ -796,6 +780,10 @@ func NewPolygonSyncStages(
 	silkworm *silkworm.Silkworm,
 	forkValidator *engine_helpers.ForkValidator,
 	heimdallClient heimdall.HeimdallClient,
+	sentry direct.SentryClient,
+	maxPeers int,
+	statusDataProvider *sentry.StatusDataProvider,
+	stopNode func() error,
 ) []*stagedsync.Stage {
 	loopBreakCheck := NewLoopBreakCheck(config, heimdallClient)
 	return stagedsync.PolygonSyncStages(
@@ -814,6 +802,18 @@ func NewPolygonSyncStages(
 			config.CaplinConfig.BlobBackfilling,
 			silkworm,
 			config.Prune,
+		),
+		stagedsync.NewPolygonSyncStageCfg(
+			logger,
+			chainConfig,
+			db,
+			heimdallClient,
+			sentry,
+			maxPeers,
+			statusDataProvider,
+			blockReader,
+			stopNode,
+			bor.GenesisContractStateReceiverABI(),
 		),
 		stagedsync.StageBlockHashesCfg(
 			db,

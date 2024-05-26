@@ -11,7 +11,7 @@ import (
 )
 
 type entityFetcher[TEntity Entity] interface {
-	FetchLastEntityId(ctx context.Context) (uint64, error)
+	FetchEntityIdRange(ctx context.Context) (ClosedRange, error)
 	FetchEntitiesRange(ctx context.Context, idRange ClosedRange) ([]TEntity, error)
 	FetchAllEntities(ctx context.Context) ([]TEntity, error)
 }
@@ -19,8 +19,9 @@ type entityFetcher[TEntity Entity] interface {
 type entityFetcherImpl[TEntity Entity] struct {
 	name string
 
-	fetchLastEntityId func(ctx context.Context) (int64, error)
-	fetchEntity       func(ctx context.Context, id int64) (TEntity, error)
+	fetchFirstEntityId func(ctx context.Context) (int64, error)
+	fetchLastEntityId  func(ctx context.Context) (int64, error)
+	fetchEntity        func(ctx context.Context, id int64) (TEntity, error)
 
 	fetchEntitiesPage      func(ctx context.Context, page uint64, limit uint64) ([]TEntity, error)
 	fetchEntitiesPageLimit uint64
@@ -30,6 +31,7 @@ type entityFetcherImpl[TEntity Entity] struct {
 
 func newEntityFetcher[TEntity Entity](
 	name string,
+	fetchFirstEntityId func(ctx context.Context) (int64, error),
 	fetchLastEntityId func(ctx context.Context) (int64, error),
 	fetchEntity func(ctx context.Context, id int64) (TEntity, error),
 	fetchEntitiesPage func(ctx context.Context, page uint64, limit uint64) ([]TEntity, error),
@@ -37,9 +39,11 @@ func newEntityFetcher[TEntity Entity](
 	logger log.Logger,
 ) entityFetcher[TEntity] {
 	return &entityFetcherImpl[TEntity]{
-		name:              name,
-		fetchLastEntityId: fetchLastEntityId,
-		fetchEntity:       fetchEntity,
+		name: name,
+
+		fetchFirstEntityId: fetchFirstEntityId,
+		fetchLastEntityId:  fetchLastEntityId,
+		fetchEntity:        fetchEntity,
 
 		fetchEntitiesPage:      fetchEntitiesPage,
 		fetchEntitiesPageLimit: fetchEntitiesPageLimit,
@@ -48,9 +52,22 @@ func newEntityFetcher[TEntity Entity](
 	}
 }
 
-func (f *entityFetcherImpl[TEntity]) FetchLastEntityId(ctx context.Context) (uint64, error) {
-	id, err := f.fetchLastEntityId(ctx)
-	return uint64(id), err
+func (f *entityFetcherImpl[TEntity]) FetchEntityIdRange(ctx context.Context) (ClosedRange, error) {
+	var idRange ClosedRange
+
+	if f.fetchFirstEntityId == nil {
+		idRange.Start = 1
+	} else {
+		first, err := f.fetchFirstEntityId(ctx)
+		if err != nil {
+			return idRange, err
+		}
+		idRange.Start = uint64(first)
+	}
+
+	last, err := f.fetchLastEntityId(ctx)
+	idRange.End = uint64(last)
+	return idRange, err
 }
 
 const entityFetcherBatchFetchThreshold = 100
