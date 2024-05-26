@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math/big"
+	"sync/atomic"
 
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
@@ -62,6 +63,8 @@ type EthereumExecutionModule struct {
 	syncCfg ethconfig.Sync
 	// consensus
 	engine consensus.Engine
+
+	doingPostForkchoice atomic.Bool
 
 	execution.UnimplementedExecutionServer
 }
@@ -206,7 +209,6 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 
 	extendingHash := e.forkValidator.ExtendingForkHeadHash()
 	extendCanonical := extendingHash == libcommon.Hash{} && header.ParentHash == currentHeadHash
-
 	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), extendCanonical, e.logger)
 	if criticalError != nil {
 		return nil, criticalError

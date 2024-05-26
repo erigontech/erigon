@@ -131,6 +131,10 @@ func (h *HeimdallSimulator) FetchMilestoneCount(ctx context.Context) (int64, err
 	return 0, errors.New("method FetchMilestoneCount not implemented")
 }
 
+func (h *HeimdallSimulator) FetchFirstMilestoneNum(ctx context.Context) (int64, error) {
+	return 0, errors.New("method FetchFirstMilestoneNum not implemented")
+}
+
 func (h *HeimdallSimulator) FetchNoAckMilestone(ctx context.Context, milestoneID string) error {
 	return errors.New("method FetchNoAckMilestone not implemented")
 }
