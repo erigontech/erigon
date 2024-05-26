@@ -1952,11 +1952,8 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 			return stat, fmt.Errorf("prune domain value: %w", err)
 		}
 
-		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
-		if _, _, err = keysCursorForDeletes.SeekBothExact(k, v); err != nil {
-			return stat, err
-		}
-		if err = keysCursorForDeletes.DeleteCurrent(); err != nil {
+		// Delete needs to the last in the loop iteration, because it invalidates k and v
+		if err = keysCursorForDeletes.DeleteExact(k, v); err != nil {
 			return stat, err
 		}
 		stat.Values++
