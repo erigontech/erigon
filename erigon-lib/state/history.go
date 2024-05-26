@@ -1066,6 +1066,7 @@ func (ht *HistoryRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 		defer valsC.Close()
 	}
 
+	var pruned int
 	pruneValue := func(k, txnm []byte) error {
 		txNum := binary.BigEndian.Uint64(txnm)
 		if txNum >= txTo || txNum < txFrom { //[txFrom; txTo), but in this case idx record
@@ -1090,9 +1091,10 @@ func (ht *HistoryRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 			}
 		}
 
-		mxPruneSizeHistory.Inc()
+		pruned++
 		return nil
 	}
+	mxPruneSizeHistory.AddInt(pruned)
 
 	if !forced && ht.h.dontProduceHistoryFiles {
 		forced = true // or index.CanPrune will return false cuz no snapshots made
