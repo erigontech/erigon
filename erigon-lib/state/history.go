@@ -1078,6 +1078,15 @@ func (ht *HistoryRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 				return err
 			}
 		} else {
+			if asserts {
+				vv, err := valsCDup.SeekBothRange(k, txnm)
+				if err != nil {
+					return err
+				}
+				if binary.BigEndian.Uint64(vv) != txNum {
+					return fmt.Errorf("history invalid txNum: %d != %d", binary.BigEndian.Uint64(vv), txNum)
+				}
+			}
 			if err = valsCDup.DeleteExact(k, txnm); err != nil {
 				return err
 			}
