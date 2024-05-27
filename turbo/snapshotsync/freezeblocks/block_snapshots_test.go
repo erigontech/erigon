@@ -240,7 +240,7 @@ func TestRemoveOverlaps(t *testing.T) {
 	require.NoError(err)
 	require.Equal(45, len(list))
 
-	s.removeOverlaps()
+	s.removeOverlapsAfterMerge()
 
 	list, err = snaptype.Segments(s.dir)
 	require.NoError(err)

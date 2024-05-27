@@ -680,7 +680,7 @@ func (s *RoSnapshots) closeWhatNotInList(l []string) {
 	})
 }
 
-func (s *RoSnapshots) removeOverlaps() error {
+func (s *RoSnapshots) removeOverlapsAfterMerge() error {
 	s.lockSegments()
 	defer s.unlockSegments()
 
@@ -1260,8 +1260,6 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 			return ok, fmt.Errorf("DumpBlocks: %w", err)
 		}
 
-		snapshots.removeOverlaps()
-
 		if err := snapshots.ReopenFolder(); err != nil {
 			return ok, fmt.Errorf("reopen: %w", err)
 		}
@@ -1294,6 +1292,10 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 	}
 	err := merger.Merge(ctx, snapshots, snapshots.Types(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete)
 	if err != nil {
+		return ok, err
+	}
+
+	if err := snapshots.removeOverlapsAfterMerge(); err != nil {
 		return ok, err
 	}
 
