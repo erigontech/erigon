@@ -1962,7 +1962,6 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		stat.Values++
 		stat.MaxStep = max(stat.MaxStep, is)
 		stat.MinStep = min(stat.MinStep, is)
-		mxPruneSizeDomain.Inc()
 
 		k, v, err = keysCursor.Prev()
 
@@ -1977,6 +1976,8 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		default:
 		}
 	}
+	mxPruneSizeDomain.AddUint64(stat.Values)
+
 	if err := SaveExecV3PruneProgress(rwTx, dt.d.keysTable, nil); err != nil {
 		return stat, fmt.Errorf("save domain pruning progress: %s, %w", dt.d.filenameBase, err)
 	}

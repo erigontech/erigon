@@ -86,7 +86,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			if err == ErrEIP4844DataNotAvailable {
 				return err
 			}
-			return fmt.Errorf("OnBlock: data is not available for block %x: %v", blockRoot, err)
+			return fmt.Errorf("OnBlock: data is not available for block %x: %v", libcommon.Hash(blockRoot), err)
 		}
 	}
 
@@ -100,13 +100,13 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		payloadStatus, err := f.engine.NewPayload(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes)
 		switch payloadStatus {
 		case execution_client.PayloadStatusNotValidated:
-			log.Debug("OnBlock: block is not validated yet", "block", blockRoot)
+			log.Debug("OnBlock: block is not validated yet", "block", libcommon.Hash(blockRoot))
 			// optimistic block candidate
 			if err := f.optimisticStore.AddOptimisticCandidate(block.Block); err != nil {
 				return fmt.Errorf("failed to add block to optimistic store: %v", err)
 			}
 		case execution_client.PayloadStatusInvalidated:
-			log.Debug("OnBlock: block is invalid", "block", blockRoot)
+			log.Debug("OnBlock: block is invalid", "block", libcommon.Hash(blockRoot))
 			f.forkGraph.MarkHeaderAsInvalid(blockRoot)
 			// remove from optimistic candidate
 			if err := f.optimisticStore.InvalidateBlock(block.Block); err != nil {
@@ -114,7 +114,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			}
 			return fmt.Errorf("block is invalid")
 		case execution_client.PayloadStatusValidated:
-			log.Debug("OnBlock: block is validated", "block", blockRoot)
+			log.Debug("OnBlock: block is validated", "block", libcommon.Hash(blockRoot))
 			// remove from optimistic candidate
 			if err := f.optimisticStore.ValidateBlock(block.Block); err != nil {
 				return fmt.Errorf("failed to validate block in optimistic store: %v", err)

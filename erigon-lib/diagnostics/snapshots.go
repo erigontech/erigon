@@ -2,8 +2,15 @@ package diagnostics
 
 import (
 	"context"
+	"encoding/json"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
+)
+
+var (
+	SnapshotDownloadStatisticsKey = []byte("diagSnapshotDownloadStatistics")
+	SnapshotIndexingStatisticsKey = []byte("diagSnapshotIndexingStatistics")
 )
 
 func (d *DiagnosticClient) setupSnapshotDiagnostics(rootCtx context.Context) {
@@ -26,6 +33,7 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
+
 				d.mu.Lock()
 				d.syncStats.SnapshotDownload.Downloaded = info.Downloaded
 				d.syncStats.SnapshotDownload.Total = info.Total
@@ -39,6 +47,11 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 				d.syncStats.SnapshotDownload.Sys = info.Sys
 				d.syncStats.SnapshotDownload.DownloadFinished = info.DownloadFinished
 				d.syncStats.SnapshotDownload.TorrentMetadataReady = info.TorrentMetadataReady
+
+				if err := d.db.Update(d.ctx, SnapshotDownloadUpdater(d.syncStats.SnapshotDownload)); err != nil {
+					log.Error("[Diagnostics] Failed to update snapshot download info", "err", err)
+				}
+
 				d.mu.Unlock()
 
 				if info.DownloadFinished {
@@ -77,6 +90,10 @@ func (d *DiagnosticClient) runSegmentDownloadingListener(rootCtx context.Context
 					d.syncStats.SnapshotDownload.SegmentsDownloading[info.Name] = info
 				}
 
+				if err := d.db.Update(d.ctx, SnapshotDownloadUpdater(d.syncStats.SnapshotDownload)); err != nil {
+					log.Error("[Diagnostics] Failed to update snapshot download info", "err", err)
+				}
+
 				d.mu.Unlock()
 			}
 		}
@@ -95,6 +112,9 @@ func (d *DiagnosticClient) runSegmentIndexingListener(rootCtx context.Context) {
 				return
 			case info := <-ch:
 				d.addOrUpdateSegmentIndexingState(info)
+				if err := d.db.Update(d.ctx, SnapshotIndexingUpdater(d.syncStats.SnapshotIndexing)); err != nil {
+					log.Error("[Diagnostics] Failed to update snapshot indexing info", "err", err)
+				}
 			}
 		}
 	}()
@@ -128,6 +148,11 @@ func (d *DiagnosticClient) runSegmentIndexingFinishedListener(rootCtx context.Co
 						Sys:         0,
 					})
 				}
+
+				if err := d.db.Update(d.ctx, SnapshotIndexingUpdater(d.syncStats.SnapshotIndexing)); err != nil {
+					log.Error("[Diagnostics] Failed to update snapshot indexing info", "err", err)
+				}
+
 				d.mu.Unlock()
 			}
 		}
@@ -264,7 +289,6 @@ func (d *DiagnosticClient) UpdateFileDownloadedStatistics(downloadedInfo *FileDo
 			d.syncStats.SnapshotDownload.SegmentsDownloading[downloadingInfo.Name] = *downloadingInfo
 		}
 	}
-
 }
 
 func (d *DiagnosticClient) SyncStatistics() SyncStatistics {
@@ -273,4 +297,36 @@ func (d *DiagnosticClient) SyncStatistics() SyncStatistics {
 
 func (d *DiagnosticClient) SnapshotFilesList() SnapshoFilesList {
 	return d.snapshotFileList
+}
+
+func ReadSnapshotDownloadInfo(db kv.RoDB) (info SnapshotDownloadStatistics) {
+	data := ReadDataFromTable(db, kv.DiagSyncStages, SnapshotDownloadStatisticsKey)
+	err := json.Unmarshal(data, &info)
+
+	if err != nil {
+		log.Error("[Diagnostics] Failed to read snapshot download info", "err", err)
+		return SnapshotDownloadStatistics{}
+	} else {
+		return info
+	}
+}
+
+func ReadSnapshotIndexingInfo(db kv.RoDB) (info SnapshotIndexingStatistics) {
+	data := ReadDataFromTable(db, kv.DiagSyncStages, SnapshotIndexingStatisticsKey)
+	err := json.Unmarshal(data, &info)
+
+	if err != nil {
+		log.Error("[Diagnostics] Failed to read snapshot indexing info", "err", err)
+		return SnapshotIndexingStatistics{}
+	} else {
+		return info
+	}
+}
+
+func SnapshotDownloadUpdater(info SnapshotDownloadStatistics) func(tx kv.RwTx) error {
+	return PutDataToTable(kv.DiagSyncStages, SnapshotDownloadStatisticsKey, info)
+}
+
+func SnapshotIndexingUpdater(info SnapshotIndexingStatistics) func(tx kv.RwTx) error {
+	return PutDataToTable(kv.DiagSyncStages, SnapshotIndexingStatisticsKey, info)
 }
