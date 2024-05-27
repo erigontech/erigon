@@ -466,12 +466,12 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 }
 
 func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle bool) {
-	if e.doingPostForkchoice.CompareAndSwap(false, true) {
+	if !e.doingPostForkchoice.CompareAndSwap(false, true) {
 		return
 	}
 	go func() {
 		defer e.doingPostForkchoice.Store(false)
-		timings := []interface{}{}
+		var timings []interface{}
 		// Wait for semaphore to be available
 		if e.semaphore.Acquire(e.bacgroundCtx, 1) != nil {
 			return
