@@ -18,6 +18,8 @@ import (
 	"github.com/ledgerwatch/secp256k1"
 	"github.com/spf13/cobra"
 
+	"golang.org/x/sync/errgroup"
+
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -1621,6 +1623,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 		chainConfig,
 		genesisBlock,
 		chainConfig.ChainID.Uint64(),
+		logger,
 	)
 
 	maxBlockBroadcastPeers := func(header *types.Header) uint { return 0 }
