@@ -380,6 +380,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	// Validate initcode per EOF rules. If caller is EOF and initcode is legacy, fail.
 	isInitcodeEOF := hasEOFMagic(codeAndHash.code)
 	if evm.chainRules.IsPrague {
+		// TODO(racytech): revisit this part and double check!
 		if isInitcodeEOF {
 			// If the initcode is EOF, verify it is well-formed.
 			var c Container

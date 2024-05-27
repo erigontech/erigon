@@ -331,7 +331,7 @@ func enable2935(jt *JumpTable) {
 
 // enableEOF applies the EOF changes.
 func enableEOF(jt *JumpTable) {
-	// Deprecate opcodes
+	// TODO(racytech): Make sure everything is correct, add all EOF opcodes and remove deprecated ones
 	undefined := &operation{
 		execute:     opUndefined,
 		constantGas: 0,
@@ -344,9 +344,9 @@ func enableEOF(jt *JumpTable) {
 	jt[JUMP] = undefined
 	jt[JUMPI] = undefined
 	jt[PC] = undefined
+	// JUPMDEST?
+	// 0x38, 0x39, 0x3b, 0x3c, 0x3f, 0x5a, 0xf1, 0xf2, 0xf4, 0xfa, 0xff - rejected opcodes
 
-	// TODO(racytech): Make sure everything is correct
-	// New opcodes
 	jt[RJUMP] = &operation{
 		execute:     opRjump,
 		constantGas: GasQuickStep,
@@ -374,7 +374,7 @@ func enableEOF(jt *JumpTable) {
 	}
 	jt[RETF] = &operation{
 		execute:     opRetf,
-		constantGas: GasSwiftStep,
+		constantGas: GasFastestStep,
 		numPop:      0,
 		numPush:     0,
 		terminal:    true,

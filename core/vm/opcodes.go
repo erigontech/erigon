@@ -219,7 +219,7 @@ const (
 	DATALOADN      OpCode = 0xe9
 	DATASIZE       OpCode = 0xea
 	DATACOPY       OpCode = 0xeb
-	CREATE3        OpCode = 0xec
+	CREATE3        OpCode = 0xec // TODO(racytech): remove CREATE3 and CREATE4, add EOFCREATE instead
 	CREATE4        OpCode = 0xed
 	RETURNCONTRACT OpCode = 0xee
 )

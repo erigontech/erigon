@@ -29,9 +29,10 @@ const (
 	offsetTypesKind = 3
 	offsetCodeKind  = 6
 
-	kindTypes = 1
-	kindCode  = 2
-	kindData  = 3
+	kindTypes     = 1
+	kindCode      = 2
+	kindContainer = 3
+	kindData      = 4
 
 	eofFormatByte = 0xef
 	eof1Version   = 1
@@ -125,6 +126,8 @@ func (c *Container) MarshalBinary() []byte {
 
 // UnmarshalBinary decodes an EOF container.
 func (c *Container) UnmarshalBinary(b []byte) error {
+	// TODO(racytech): make sure this one is correct!
+
 	if !hasEOFMagic(b) {
 		return fmt.Errorf("%w: want %x", ErrInvalidMagic, eofMagic)
 	}
@@ -138,6 +141,7 @@ func (c *Container) UnmarshalBinary(b []byte) error {
 	var (
 		kind, typesSize, dataSize int
 		codeSizes                 []int
+		containerSizes            []int
 		err                       error
 	)
 
@@ -168,8 +172,29 @@ func (c *Container) UnmarshalBinary(b []byte) error {
 		return fmt.Errorf("%w: mismatch of code sections cound and type signatures, types %d, code %d", ErrInvalidCodeSize, typesSize/4, len(codeSizes))
 	}
 
+	// Parse optional container section here
+	offsetContainerKind := offsetCodeKind + 2 + 2*len(codeSizes) + 1
+	if b[offsetContainerKind] == kindContainer { // this if statement makes sure next section is container section
+		_, containerSizes, err = parseSectionList(b, offsetContainerKind)
+		if err != nil {
+			return err
+		}
+		if len(containerSizes) == 0 {
+			return fmt.Errorf("number of container sections may not be 0")
+		}
+		if len(containerSizes) > 256 {
+			return fmt.Errorf("number of container sections must not exceed 256")
+		}
+	}
+
 	// Parse data section header.
-	offsetDataKind := offsetCodeKind + 2 + 2*len(codeSizes) + 1
+	var offsetDataKind int
+	if len(containerSizes) != 0 { // we have containers, add kind_byte + 2*len(container_sizes) + container_size (2-bytes)
+		offsetDataKind = offsetContainerKind + 1 + 2*len(containerSizes) + 2
+	} else {
+		// no containers
+		offsetDataKind = offsetContainerKind
+	}
 	kind, dataSize, err = parseSection(b, offsetDataKind)
 	if err != nil {
 		return err
@@ -188,7 +213,7 @@ func (c *Container) UnmarshalBinary(b []byte) error {
 	}
 
 	// Verify overall container size.
-	expectedSize := offsetTerminator + typesSize + sum(codeSizes) + dataSize + 1
+	expectedSize := offsetTerminator + typesSize + sum(codeSizes) + sum(containerSizes) + dataSize + 1
 	if len(b) != expectedSize {
 		return fmt.Errorf("%w: have %d, want %d", ErrInvalidContainerSize, len(b), expectedSize)
 	}
@@ -229,6 +254,19 @@ func (c *Container) UnmarshalBinary(b []byte) error {
 		idx += size
 	}
 	c.Code = code
+
+	// Parse containers if any
+	if len(containerSizes) != 0 {
+		containers := make([][]byte, len(containerSizes))
+		for i, size := range containerSizes {
+			if size == 0 {
+				return fmt.Errorf("container size may not be 0, container#:%d", i)
+			}
+			containers[i] = b[idx : idx+size]
+			idx += size
+		}
+		c.SubContainer = containers
+	}
 
 	// Parse data section.
 	c.Data = b[idx : idx+dataSize]
@@ -280,7 +318,7 @@ func parseList(b []byte, idx int) ([]int, error) {
 	if len(b) <= idx+2+int(count)*2 {
 		return nil, io.ErrUnexpectedEOF
 	}
-	list := make([]int, count)
+	list := make([]int, count) // list of sizes
 	for i := 0; i < int(count); i++ {
 		list[i] = int(binary.BigEndian.Uint16(b[idx+2+2*i:]))
 	}
