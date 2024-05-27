@@ -8,22 +8,11 @@ import (
 )
 
 func (d *DiagnosticClient) setupSpeedtestDiagnostics(rootCtx context.Context) {
-	ticker := time.NewTicker(30 * time.Minute)
 	go func() {
-		d.networkSpeedMutex.Lock()
-		d.networkSpeed = d.runSpeedTest(rootCtx)
-		d.networkSpeedMutex.Unlock()
-
-		for {
-			select {
-			case <-ticker.C:
-				d.networkSpeedMutex.Lock()
-				d.networkSpeed = d.runSpeedTest(rootCtx)
-				d.networkSpeedMutex.Unlock()
-			case <-rootCtx.Done():
-				ticker.Stop()
-				return
-			}
+		if d.speedTest {
+			d.networkSpeedMutex.Lock()
+			d.networkSpeed = d.runSpeedTest(rootCtx)
+			d.networkSpeedMutex.Unlock()
 		}
 	}()
 }
