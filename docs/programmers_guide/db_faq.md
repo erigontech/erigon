@@ -8,7 +8,7 @@ There are 2 options exist:
    etc... Interface is here: https://github.com/ledgerwatch/interfaces/blob/master/remote/kv.proto
    Go/C++/Rust libs already exist. Names of buckets and their format you can find in `erigon-lib/kv/tables.go` You can
    do such calls by network.
-3. Read Erigon's db while Erigon is running - it's also ok - just need be careful - do not run too long read
+2. Read Erigon's db while Erigon is running - it's also ok - just need be careful - do not run too long read
    transactions (long read transactions do block free space in DB). Then your app will share with Erigon same OS-level
    PageCache where hot part of db stored. It may be great - if you read hot data (for example do incremental update of
    graph node) - then your reads will be super fast and almost never touch disk. But if you wanna read cold data - then
