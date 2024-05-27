@@ -185,7 +185,9 @@ func (crawler *Crawler) selectCandidates(ctx context.Context, nodes chan<- candi
 		}
 
 		if len(candidates) == 0 {
-			libcommon.Sleep(ctx, 1*time.Second)
+			if err := libcommon.Sleep(ctx, 1*time.Second); err != nil {
+				return err
+			}
 		}
 
 		for _, id := range candidates {
