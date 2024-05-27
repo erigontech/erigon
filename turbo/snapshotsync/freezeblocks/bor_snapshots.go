@@ -102,10 +102,21 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 	}
 
 	err := merger.Merge(ctx, &snapshots.RoSnapshots, borsnaptype.BorSnapshotTypes(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete)
-
 	if err != nil {
 		return blocksRetired, err
 	}
+
+	{
+		files, _, err := typedSegments(br.borSnapshots().dir, br.borSnapshots().segmentsMin.Load(), borsnaptype.BorSnapshotTypes(), false)
+		if err != nil {
+			return blocksRetired, err
+		}
+
+		// this is one off code to fix an issue in 2.49.x->2.52.x which missed
+		// removal of intermediate segments after a merge operation
+		removeBorOverlaps(br.borSnapshots().dir, files, br.borSnapshots().BlocksAvailable())
+	}
+
 	return blocksRetired, nil
 }
 
@@ -203,10 +214,6 @@ func (s *BorRoSnapshots) ReopenFolder() error {
 	if err != nil {
 		return err
 	}
-
-	// this is one off code to fix an issue in 2.49.x->2.52.x which missed
-	// removal of intermediate segments after a merge operation
-	removeBorOverlaps(s.dir, files, s.BlocksAvailable())
 
 	list := make([]string, 0, len(files))
 	for _, f := range files {
