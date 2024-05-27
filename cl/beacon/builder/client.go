@@ -1,14 +1,15 @@
 package builder
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 
-	"github.com/cockroachdb/errors"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
 )
 
 type BuilderClient struct {
@@ -24,10 +25,15 @@ func NewBuilderClient(httpClient *http.Client, baseUrl string) *BuilderClient {
 	}
 }
 
-func (b *BuilderClient) RegisterValidator() error {
+func (b *BuilderClient) RegisterValidator(ctx context.Context, registers []*ValidatorRegistration) error {
 	// https://ethereum.github.io/builder-specs/#/Builder/registerValidator
 	url := b.baseUrl + "/eth/v1/builder/validators"
-	return nil
+	payload, err := json.Marshal(registers)
+	if err != nil {
+		return err
+	}
+	_, err = httpCall[any](ctx, b.httpClient, http.MethodPost, url, nil, bytes.NewBuffer(payload))
+	return err
 }
 
 func (b *BuilderClient) GetExecutionPayloadHeader(ctx context.Context, slot int64, parentHash common.Hash, pubKey common.Bytes48) (*ExecutionPayloadHeader, error) {
@@ -40,9 +46,18 @@ func (b *BuilderClient) GetExecutionPayloadHeader(ctx context.Context, slot int6
 	return header, nil
 }
 
-func (b *BuilderClient) SubmitBlindedBlocks() error {
+func (b *BuilderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.SignedBlindedBeaconBlock) (*cltypes.Eth1Block, error) {
 	// https://ethereum.github.io/builder-specs/#/Builder/submitBlindedBlocks
-	return nil
+	path := b.baseUrl + "/eth/v1/builder/blinded_blocks"
+	payload, err := json.Marshal(block)
+	if err != nil {
+		return nil, err
+	}
+	blockResp, err := httpCall[BlindedBlockResponse](ctx, b.httpClient, http.MethodPost, path, nil, bytes.NewBuffer(payload))
+	if err != nil {
+		return nil, err
+	}
+	return &blockResp.Data, nil
 }
 
 func (b *BuilderClient) GetStatus(ctx context.Context) error {
@@ -72,7 +87,7 @@ func httpCall[T any](ctx context.Context, client *http.Client, method, url strin
 		if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 			return nil, err
 		}
-		return nil, errors.Newf("status code: %d. Response content %v", response.StatusCode, string(body))
+		return nil, fmt.Errorf("status code: %d. Response content %v", response.StatusCode, string(body))
 	}
 	// read response body
 	var body T
