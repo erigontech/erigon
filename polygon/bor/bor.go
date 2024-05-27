@@ -550,6 +550,10 @@ func ValidateHeaderUnusedFields(header *types.Header) error {
 		return consensus.ErrUnexpectedWithdrawals
 	}
 
+	if header.RequestsRoot != nil {
+		return consensus.ErrUnexpectedRequests
+	}
+
 	return misc.VerifyAbsenceOfCancunHeaderFields(header)
 }
 
@@ -803,11 +807,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 // VerifyUncles implements consensus.Engine, always returning an error for any
 // uncles as this consensus mechanism doesn't permit uncles.
 func (c *Bor) VerifyUncles(_ consensus.ChainReader, _ *types.Header, uncles []*types.Header) error {
-	if len(uncles) > 0 {
-		return errUncleDetected
-	}
-
-	return nil
+	return VerifyUncles(uncles)
 }
 
 // VerifySeal implements consensus.Engine, checking whether the signature contained
@@ -983,6 +983,10 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 		return nil, nil, consensus.ErrUnexpectedWithdrawals
 	}
 
+	if requests != nil || header.RequestsRoot != nil {
+		return nil, nil, consensus.ErrUnexpectedRequests
+	}
+
 	if isSprintStart(headerNumber, c.config.CalculateSprintLength(headerNumber)) {
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 
@@ -1047,6 +1051,10 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 
 	if withdrawals != nil || header.WithdrawalsHash != nil {
 		return nil, nil, nil, consensus.ErrUnexpectedWithdrawals
+	}
+
+	if requests != nil || header.RequestsRoot != nil {
+		return nil, nil, nil, consensus.ErrUnexpectedRequests
 	}
 
 	if isSprintStart(headerNumber, c.config.CalculateSprintLength(headerNumber)) {
@@ -1656,4 +1664,12 @@ func GetValidatorBytes(h *types.Header, config *borcfg.BorConfig) []byte {
 	}
 
 	return blockExtraData.ValidatorBytes
+}
+
+func VerifyUncles(uncles []*types.Header) error {
+	if len(uncles) > 0 {
+		return errUncleDetected
+	}
+
+	return nil
 }

@@ -487,6 +487,16 @@ func (iit *InvertedIndexRoTx) Close() {
 	}
 }
 
+type MergeRange struct {
+	needMerge bool
+	from      uint64
+	to        uint64
+}
+
+func (mr *MergeRange) String(prefix string, aggStep uint64) string {
+	return fmt.Sprintf("%s=%d-%d", prefix, mr.from/aggStep, mr.to/aggStep)
+}
+
 type InvertedIndexRoTx struct {
 	ii      *InvertedIndex
 	files   []ctxItem // have no garbage (overlaps, etc...)
@@ -709,7 +719,7 @@ type InvertedIndexPruneStat struct {
 }
 
 func (is *InvertedIndexPruneStat) String() string {
-	if is.MinTxNum == math.MaxUint64 && is.PruneCountTx == 0 {
+	if is == nil || is.MinTxNum == math.MaxUint64 && is.PruneCountTx == 0 {
 		return ""
 	}
 	return fmt.Sprintf("ii %d txs and %d vals in %.2fM-%.2fM", is.PruneCountTx, is.PruneCountValues, float64(is.MinTxNum)/1_000_000.0, float64(is.MaxTxNum)/1_000_000.0)
@@ -783,12 +793,12 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		return stat, fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
 	}
 	defer keysCursorForDel.Close()
-	idxC, err := rwTx.RwCursorDupSort(ii.indexTable)
+	idxCForDeletes, err := rwTx.RwCursorDupSort(ii.indexTable)
 	if err != nil {
 		return nil, err
 	}
-	defer idxC.Close()
-	idxValuesCount, err := idxC.Count()
+	defer idxCForDeletes.Close()
+	idxValuesCount, err := idxCForDeletes.Count()
 	if err != nil {
 		return nil, err
 	}
@@ -844,12 +854,6 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	if !indexWithValues {
 		return stat, nil
 	}
-
-	idxCForDeletes, err := rwTx.RwCursorDupSort(ii.indexTable)
-	if err != nil {
-		return nil, err
-	}
-	defer idxCForDeletes.Close()
 
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
 	err = collector.Load(nil, "", func(key, txnm []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {

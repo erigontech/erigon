@@ -14,9 +14,11 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/direct"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -29,6 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/p2p/sentry"
 	"github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/polygon/bor/finality"
@@ -382,15 +385,11 @@ func MiningStep(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, tmpDir
 	defer tx.Rollback()
 
 	var miningBatch kv.RwTx
-	//if histV3 {
-	//	sd := state.NewSharedDomains(tx)
-	//	defer sd.Close()
-	//	miningBatch = sd
-	//} else {
+
 	mb := membatchwithdb.NewMemoryBatch(tx, tmpDir, logger)
 	defer mb.Rollback()
 	miningBatch = mb
-	//}
+
 	txc := wrap.TxContainer{Tx: miningBatch}
 	sd, err := state.NewSharedDomains(mb, logger)
 	if err != nil {
@@ -437,10 +436,14 @@ func addAndVerifyBlockStep(batch kv.RwTx, engine consensus.Engine, chainReader c
 		return err
 	}
 	if prevHash != currentHash {
+		if err := rawdbv3.TxNums.Truncate(batch, currentHeight); err != nil {
+			return err
+		}
 		if err := rawdb.AppendCanonicalTxNums(batch, currentHeight); err != nil {
 			return err
 		}
 	}
+
 	if err := stages.SaveStageProgress(batch, stages.Headers, currentHeight); err != nil {
 		return err
 	}
@@ -450,15 +453,30 @@ func addAndVerifyBlockStep(batch kv.RwTx, engine consensus.Engine, chainReader c
 	return nil
 }
 
-func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine consensus.Engine, txc wrap.TxContainer, stateSync *stagedsync.Sync, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) (err error) {
+func cleanupProgressIfNeeded(batch kv.RwTx, header *types.Header) error {
+	// If we fail state root then we have wrong execution stage progress set (+1), we need to decrease by one!
+	progress, err := stages.GetStageProgress(batch, stages.Execution)
+	if err != nil {
+		return err
+	}
+	if progress == header.Number.Uint64() && progress > 0 {
+		progress--
+		if err := stages.SaveStageProgress(batch, stages.Execution, progress); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine consensus.Engine, txc wrap.TxContainer, stateSync *stagedsync.Sync, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody, test bool) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things
-
+	shouldUnwind := unwindPoint > 0
 	// Construct side fork if we have one
-	if unwindPoint > 0 {
+	if shouldUnwind {
 		// Run it through the unwind
 		if err := stateSync.UnwindTo(unwindPoint, stagedsync.StagedUnwind, nil); err != nil {
 			return err
@@ -479,9 +497,16 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 			return err
 		}
 		// Run state sync
-		if err = stateSync.RunNoInterrupt(nil, txc, false /* firstCycle */); err != nil {
-			return err
+		if !test {
+			if err = stateSync.RunNoInterrupt(nil, txc, false /* firstCycle */); err != nil {
+				if err := cleanupProgressIfNeeded(txc.Tx, currentHeader); err != nil {
+					return err
+
+				}
+				return err
+			}
 		}
+
 	}
 
 	// If we did not specify header we stop here
@@ -492,10 +517,16 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 	if err := addAndVerifyBlockStep(txc.Tx, engine, chainReader, header, body); err != nil {
 		return err
 	}
-	// Run state sync
+
 	if err = stateSync.RunNoInterrupt(nil, txc, false /* firstCycle */); err != nil {
+		if !test {
+			if err := cleanupProgressIfNeeded(txc.Tx, header); err != nil {
+				return err
+			}
+		}
 		return err
 	}
+
 	return nil
 }
 
@@ -736,6 +767,7 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 
 func NewPolygonSyncStages(
 	ctx context.Context,
+	logger log.Logger,
 	db kv.RwDB,
 	config *ethconfig.Config,
 	chainConfig *chain.Config,
@@ -748,6 +780,10 @@ func NewPolygonSyncStages(
 	silkworm *silkworm.Silkworm,
 	forkValidator *engine_helpers.ForkValidator,
 	heimdallClient heimdall.HeimdallClient,
+	sentry direct.SentryClient,
+	maxPeers int,
+	statusDataProvider *sentry.StatusDataProvider,
+	stopNode func() error,
 ) []*stagedsync.Stage {
 	loopBreakCheck := NewLoopBreakCheck(config, heimdallClient)
 	return stagedsync.PolygonSyncStages(
@@ -766,6 +802,18 @@ func NewPolygonSyncStages(
 			config.CaplinConfig.BlobBackfilling,
 			silkworm,
 			config.Prune,
+		),
+		stagedsync.NewPolygonSyncStageCfg(
+			logger,
+			chainConfig,
+			db,
+			heimdallClient,
+			sentry,
+			maxPeers,
+			statusDataProvider,
+			blockReader,
+			stopNode,
+			bor.GenesisContractStateReceiverABI(),
 		),
 		stagedsync.StageBlockHashesCfg(
 			db,

@@ -8,7 +8,6 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"github.com/ledgerwatch/erigon/polygon/bor/valset"
@@ -33,7 +32,7 @@ func NewHeaderTimeValidator(
 ) HeaderTimeValidator {
 	if signaturesCache == nil {
 		var err error
-		signaturesCache, err = lru.NewARC[libcommon.Hash, libcommon.Address](stagedsync.InMemorySignatures)
+		signaturesCache, err = lru.NewARC[libcommon.Hash, libcommon.Address](InMemorySignatures)
 		if err != nil {
 			panic(err)
 		}

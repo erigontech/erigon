@@ -385,7 +385,8 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 				if stop := func() bool {
 					ic := ii.BeginFilesRo()
 					defer ic.Close()
-					found, startTxNum, endTxNum = ic.findMergeRange(maxEndTxNum, maxSpan)
+					mr := ic.findMergeRange(maxEndTxNum, maxSpan)
+					found, startTxNum, endTxNum = mr.needMerge, mr.from, mr.to
 					if !found {
 						return true
 					}

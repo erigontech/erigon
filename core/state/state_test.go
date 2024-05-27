@@ -19,9 +19,10 @@ package state
 import (
 	"bytes"
 	"context"
+	"testing"
+
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal"
-	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"

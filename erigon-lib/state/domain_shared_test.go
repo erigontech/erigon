@@ -180,7 +180,6 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	stepSize := uint64(8)
 	require := require.New(t)
 	db, agg := testDbAndAggregatorv3(t, stepSize)
-	agg.keepInDB = 0
 
 	iterCount := func(domains *SharedDomains) int {
 		var list [][]byte

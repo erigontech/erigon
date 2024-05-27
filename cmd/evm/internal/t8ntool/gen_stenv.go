@@ -35,6 +35,7 @@ func (s stEnv) MarshalJSON() ([]byte, error) {
 		Withdrawals      []*types.Withdrawal                 `json:"withdrawals,omitempty"`
 		WithdrawalsHash  *common.Hash                        `json:"withdrawalsRoot,omitempty"`
 		Requests         []*types.Request                    `json:"requests,omitempty"`
+		RequestsRoot     *common.Hash                        `json:"requestsRoot,omitempty"`
 	}
 	var enc stEnv
 	enc.Coinbase = common0.UnprefixedAddress(s.Coinbase)
@@ -54,6 +55,7 @@ func (s stEnv) MarshalJSON() ([]byte, error) {
 	enc.Withdrawals = s.Withdrawals
 	enc.WithdrawalsHash = s.WithdrawalsHash
 	enc.Requests = s.Requests
+	enc.RequestsRoot = s.RequestsRoot
 	return json.Marshal(&enc)
 }
 
@@ -77,6 +79,7 @@ func (s *stEnv) UnmarshalJSON(input []byte) error {
 		Withdrawals      []*types.Withdrawal                 `json:"withdrawals,omitempty"`
 		WithdrawalsHash  *common.Hash                        `json:"withdrawalsRoot,omitempty"`
 		Requests         []*types.Request                    `json:"requests,omitempty"`
+		RequestsRoot     *common.Hash                        `json:"requestsRoot,omitempty"`
 	}
 	var dec stEnv
 	if err := json.Unmarshal(input, &dec); err != nil {
@@ -136,6 +139,9 @@ func (s *stEnv) UnmarshalJSON(input []byte) error {
 	}
 	if dec.Requests != nil {
 		s.Requests = dec.Requests
+	}
+	if dec.RequestsRoot != nil {
+		s.RequestsRoot = dec.RequestsRoot
 	}
 	return nil
 }

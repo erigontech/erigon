@@ -345,8 +345,9 @@ func (m *memoryMutationCursor) DeleteCurrent() error {
 	return nil
 }
 
-func (m *memoryMutationCursor) DeleteExact(_, _ []byte) error {
-	panic("DeleteExact Not implemented")
+func (m *memoryMutationCursor) DeleteExact(k, v []byte) error {
+	m.mutation.deleteDup(m.table, k, v)
+	return nil
 }
 
 func (m *memoryMutationCursor) DeleteCurrentDuplicates() error {

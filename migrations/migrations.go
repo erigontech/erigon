@@ -3,6 +3,7 @@ package migrations
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 
@@ -13,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/ugorji/go/codec"
 )
 
 // migrations apply sequentially in order of this array, skips applied migrations
@@ -213,7 +213,7 @@ func (m *Migrator) Apply(db kv.RwDB, dataDir string, logger log.Logger) error {
 			}
 			callbackCalled = true
 
-			stagesProgress, err := MarshalMigrationPayload(tx)
+			stagesProgress, err := json.Marshal(tx)
 			if err != nil {
 				return err
 			}
@@ -258,9 +258,6 @@ func (m *Migrator) Apply(db kv.RwDB, dataDir string, logger log.Logger) error {
 func MarshalMigrationPayload(db kv.Getter) ([]byte, error) {
 	s := map[string][]byte{}
 
-	buf := bytes.NewBuffer(nil)
-	encoder := codec.NewEncoder(buf, &codec.CborHandle{})
-
 	for _, stage := range stages.AllStages {
 		v, err := db.GetOne(kv.SyncStageProgress, []byte(stage))
 		if err != nil {
@@ -271,16 +268,17 @@ func MarshalMigrationPayload(db kv.Getter) ([]byte, error) {
 		}
 	}
 
-	if err := encoder.Encode(s); err != nil {
+	b, err := json.Marshal(s)
+	if err != nil {
 		return nil, err
 	}
-	return buf.Bytes(), nil
+	return b, nil
 }
 
 func UnmarshalMigrationPayload(data []byte) (map[string][]byte, error) {
 	s := map[string][]byte{}
 
-	if err := codec.NewDecoder(bytes.NewReader(data), &codec.CborHandle{}).Decode(&s); err != nil {
+	if err := json.Unmarshal(data, &s); err != nil {
 		return nil, err
 	}
 	return s, nil
