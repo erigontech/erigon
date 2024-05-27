@@ -4,7 +4,6 @@ import (
 	"context"
 	"sync"
 
-	"encoding/hex"
 	"fmt"
 	"strconv"
 
@@ -117,11 +116,15 @@ func (v *LegacyExecutorVerifier) AddRequestUnsafe(ctx context.Context, tx kv.RwT
 
 	hermezDb := hermez_db.NewHermezDbReader(tx)
 
+	log.Trace("[Verifier] starting add request unsafe", "batch", request.BatchNumber, "checkCount", request.CheckCount)
+
 	// get the data stream bytes
 	blocks, err := hermezDb.GetL2BlockNosByBatch(request.BatchNumber)
 	if err != nil {
 		return nil, err
 	}
+
+	log.Trace("[Verifier] got blocks", "batch", request.BatchNumber, "blocks", blocks)
 
 	// we might not have blocks yet as the underlying stage loop might still be running and the tx hasn't been
 	// committed yet so just requeue the request
@@ -140,8 +143,6 @@ func (v *LegacyExecutorVerifier) AddRequestUnsafe(ctx context.Context, tx kv.RwT
 	if err != nil {
 		return nil, err
 	}
-
-	log.Debug("witness generated", "data", hex.EncodeToString(witness))
 
 	// executor is perfectly happy with just an empty hash here
 	oldAccInputHash := common.HexToHash("0x0")
@@ -299,6 +300,7 @@ func (v *LegacyExecutorVerifier) GetStreamBytes(request *VerifierRequest, tx kv.
 		if err != nil {
 			return nil, err
 		}
+
 		streamBytes = append(streamBytes, sBytes...)
 		lastBlock = block
 		// we only put in the batch bookmark at the start of the stream data once
