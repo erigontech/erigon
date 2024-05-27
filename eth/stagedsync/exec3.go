@@ -141,15 +141,14 @@ When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rota
 */
 func ExecV3(ctx context.Context,
 	execStage *StageState, u Unwinder,
-	workerCount int,
 	cfg ExecuteBlockCfg,
 	txc wrap.TxContainer,
-	parallel bool,
 	maxBlockNum uint64,
 	logger log.Logger,
 ) error {
 	// TODO: e35 doesn't support parallel-exec yet
-	parallel = false //nolint
+	parallel := false //txc.Tx == nil
+	workerCount := 1
 
 	batchSize := cfg.batchSize
 	chainDb := cfg.db

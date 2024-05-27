@@ -257,28 +257,6 @@ func newStateReaderWriter(
 // ================ Erigon3 ================
 
 func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
-	workersCount := cfg.syncCfg.ExecWorkerCount
-	if s.CurrentSyncCycle().IsOnChainTip {
-		workersCount = 1
-	}
-
-	//if initialCycle {
-	//	reconstituteToBlock, found, err := reconstituteBlock(cfg.agg, cfg.db, txc.Tx)
-	//	if err != nil {
-	//		return err
-	//	}
-	//
-	//	if found && reconstituteToBlock > s.BlockNumber+1 {
-	//		reconWorkers := cfg.syncCfg.ReconWorkerCount
-	//		if err := ReconstituteState(ctx, s, cfg.dirs, reconWorkers, cfg.batchSize, cfg.db, cfg.blockReader, log.New(), cfg.agg, cfg.engine, cfg.chainConfig, cfg.genesis); err != nil {
-	//			return err
-	//		}
-	//		if dbg.StopAfterReconst() {
-	//			os.Exit(1)
-	//		}
-	//	}
-	//}
-
 	prevStageProgress, err := senderStageProgress(txc.Tx, cfg.db)
 	if err != nil {
 		return err
@@ -292,8 +270,7 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 		return nil
 	}
 
-	parallel := txc.Tx == nil
-	if err := ExecV3(ctx, s, u, workersCount, cfg, txc, parallel, to, logger); err != nil {
+	if err := ExecV3(ctx, s, u, cfg, txc, to, logger); err != nil {
 		return fmt.Errorf("ExecV3: %w", err)
 	}
 	return nil
