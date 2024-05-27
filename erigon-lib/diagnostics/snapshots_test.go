@@ -7,8 +7,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func NewTestDiagnosticClient() (*diagnostics.DiagnosticClient, error) {
+	return &diagnostics.DiagnosticClient{}, nil
+}
+
 func TestUpdateFileDownloadingStats(t *testing.T) {
-	d, err := diagnostics.NewTestDiagnosticClient()
+	d, err := NewTestDiagnosticClient()
 
 	require.NoError(t, err)
 
