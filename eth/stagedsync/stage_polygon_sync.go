@@ -322,9 +322,13 @@ func (s *polygonSyncStageService) downloadStateSyncEvents(ctx context.Context, t
 	tipBlockNum := tip.Number.Uint64()
 	sprintLen := borConfig.CalculateSprintLength(tipBlockNum)
 	sprintRemainder := tipBlockNum % sprintLen
-	if tipBlockNum > sprintLen && sprintRemainder > 0 {
-		tipBlockNum -= sprintRemainder
-		tip = rawdb.ReadHeaderByNumber(tx, tipBlockNum)
+	for tipBlockNum > sprintLen && sprintRemainder > 0 {
+		tipBlockNum--
+		sprintRemainder--
+		tip = rawdb.ReadHeader(tx, tip.ParentHash, tipBlockNum)
+		if tip == nil {
+			return errors.New("broken parent header chain")
+		}
 	}
 
 	s.logger.Info(
