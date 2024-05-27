@@ -510,6 +510,10 @@ const (
 	Proposers        = "BlockProposers"   // epoch => proposers indicies
 
 	StatesProcessingProgress = "StatesProcessingProgress"
+
+	//Diagnostics tables
+	DiagSystemInfo = "DiagSystemInfo"
+	DiagSyncStages = "DiagSyncStages"
 )
 
 // Keys
@@ -750,6 +754,12 @@ var ChaindataDeprecatedTables = []string{
 	TransitionBlockKey,
 }
 
+// Diagnostics tables
+var DiagnosticsTables = []string{
+	DiagSystemInfo,
+	DiagSyncStages,
+}
+
 type CmpFunc func(k1, k2, v1, v2 []byte) int
 
 type TableCfg map[string]TableCfgItem
@@ -854,6 +864,7 @@ var BorTablesCfg = TableCfg{
 var TxpoolTablesCfg = TableCfg{}
 var SentryTablesCfg = TableCfg{}
 var DownloaderTablesCfg = TableCfg{}
+var DiagnosticsTablesCfg = TableCfg{}
 var ReconTablesCfg = TableCfg{
 	PlainStateD:    {Flags: DupSort},
 	CodeD:          {Flags: DupSort},
@@ -870,6 +881,8 @@ func TablesCfgByLabel(label Label) TableCfg {
 		return SentryTablesCfg
 	case DownloaderDB:
 		return DownloaderTablesCfg
+	case DiagnosticsDB:
+		return DiagnosticsTablesCfg
 	default:
 		panic(fmt.Sprintf("unexpected label: %s", label))
 	}
@@ -929,6 +942,13 @@ func reinit() {
 		_, ok := ReconTablesCfg[name]
 		if !ok {
 			ReconTablesCfg[name] = TableCfgItem{}
+		}
+	}
+
+	for _, name := range DiagnosticsTables {
+		_, ok := DiagnosticsTablesCfg[name]
+		if !ok {
+			DiagnosticsTablesCfg[name] = TableCfgItem{}
 		}
 	}
 }

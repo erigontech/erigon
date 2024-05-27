@@ -50,6 +50,7 @@ type HeimdallClient interface {
 	FetchCheckpoints(ctx context.Context, page uint64, limit uint64) ([]*Checkpoint, error)
 	FetchMilestone(ctx context.Context, number int64) (*Milestone, error)
 	FetchMilestoneCount(ctx context.Context) (int64, error)
+	FetchFirstMilestoneNum(ctx context.Context) (int64, error)
 
 	// FetchNoAckMilestone fetches a bool value whether milestone corresponding to the given id failed in the Heimdall
 	FetchNoAckMilestone(ctx context.Context, milestoneID string) error
@@ -329,6 +330,26 @@ func (c *Client) FetchMilestoneCount(ctx context.Context) (int64, error) {
 	}
 
 	return response.Result.Count, nil
+}
+
+// Heimdall keeps only this amount of latest milestones
+// https://github.com/maticnetwork/heimdall/blob/master/helper/config.go#L141
+const milestonePruneNumber = int64(100)
+
+func (c *Client) FetchFirstMilestoneNum(ctx context.Context) (int64, error) {
+	count, err := c.FetchMilestoneCount(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	var first int64
+	if count < milestonePruneNumber {
+		first = 1
+	} else {
+		first = count - milestonePruneNumber + 1
+	}
+
+	return first, nil
 }
 
 // FetchLastNoAckMilestone fetches the last no-ack-milestone from heimdall

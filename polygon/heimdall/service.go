@@ -18,7 +18,9 @@ type Service interface {
 }
 
 type service struct {
-	scraper *Scraper
+	checkpointScraper *Scraper[*Checkpoint]
+	milestoneScraper  *Scraper[*Milestone]
+	spanScraper       *Scraper[*Span]
 
 	db              *Database
 	checkpointStore entityStore[*Checkpoint]
@@ -47,17 +49,35 @@ func NewService(
 	spanStore := newEntityStore(db, kv.BorSpans, makeType[Span], blockNumToIdIndexFactory)
 
 	client := NewHeimdallClient(heimdallUrl, logger)
-	scraper := NewScraper(
+	checkpointFetcher := newCheckpointFetcher(client, logger)
+	milestoneFetcher := newMilestoneFetcher(client, logger)
+	spanFetcher := newSpanFetcher(client, logger)
+
+	checkpointScraper := NewScraper(
 		checkpointStore,
+		checkpointFetcher,
+		1*time.Second,
+		logger,
+	)
+
+	milestoneScraper := NewScraper(
 		milestoneStore,
+		milestoneFetcher,
+		1*time.Second,
+		logger,
+	)
+
+	spanScraper := NewScraper(
 		spanStore,
-		client,
+		spanFetcher,
 		1*time.Second,
 		logger,
 	)
 
 	return &service{
-		scraper: scraper,
+		checkpointScraper: checkpointScraper,
+		milestoneScraper:  milestoneScraper,
+		spanScraper:       spanScraper,
 
 		db:              db,
 		checkpointStore: checkpointStore,
@@ -66,8 +86,56 @@ func NewService(
 	}
 }
 
+func newCheckpointFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Checkpoint] {
+	return newEntityFetcher(
+		"CheckpointFetcher",
+		nil,
+		client.FetchCheckpointCount,
+		client.FetchCheckpoint,
+		client.FetchCheckpoints,
+		10_000, // fetchEntitiesPageLimit
+		logger,
+	)
+}
+
+func newMilestoneFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Milestone] {
+	return newEntityFetcher(
+		"MilestoneFetcher",
+		client.FetchFirstMilestoneNum,
+		client.FetchMilestoneCount,
+		client.FetchMilestone,
+		nil,
+		0,
+		logger,
+	)
+}
+
+func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Span] {
+	fetchLastEntityId := func(ctx context.Context) (int64, error) {
+		span, err := client.FetchLatestSpan(ctx)
+		if err != nil {
+			return 0, err
+		}
+		return int64(span.Id), nil
+	}
+
+	fetchEntity := func(ctx context.Context, id int64) (*Span, error) {
+		return client.FetchSpan(ctx, uint64(id))
+	}
+
+	return newEntityFetcher(
+		"SpanFetcher",
+		nil,
+		fetchLastEntityId,
+		fetchEntity,
+		nil,
+		0,
+		logger,
+	)
+}
+
 func (s *service) FetchLatestSpan(ctx context.Context) (*Span, error) {
-	s.scraper.Synchronize(ctx)
+	s.checkpointScraper.Synchronize(ctx)
 	return s.spanStore.GetLastEntity(ctx)
 }
 
@@ -75,14 +143,20 @@ func castEntityToWaypoint[TEntity Waypoint](entity TEntity) Waypoint {
 	return entity
 }
 
+func (s *service) synchronizeScrapers(ctx context.Context) {
+	s.checkpointScraper.Synchronize(ctx)
+	s.milestoneScraper.Synchronize(ctx)
+	s.spanScraper.Synchronize(ctx)
+}
+
 func (s *service) FetchCheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
-	s.scraper.Synchronize(ctx)
+	s.synchronizeScrapers(ctx)
 	entities, err := s.checkpointStore.RangeFromBlockNum(ctx, startBlock)
 	return libcommon.SliceMap(entities, castEntityToWaypoint[*Checkpoint]), err
 }
 
 func (s *service) FetchMilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
-	s.scraper.Synchronize(ctx)
+	s.synchronizeScrapers(ctx)
 	entities, err := s.milestoneStore.RangeFromBlockNum(ctx, startBlock)
 	return libcommon.SliceMap(entities, castEntityToWaypoint[*Milestone]), err
 }
@@ -92,7 +166,7 @@ func (s *service) FetchMilestonesFromBlock(ctx context.Context, startBlock uint6
 const maxEntityEvents = 5
 
 func (s *service) RegisterMilestoneObserver(callback func(*Milestone)) polygoncommon.UnregisterFunc {
-	return s.scraper.RegisterMilestoneObserver(func(entities []*Milestone) {
+	return s.milestoneScraper.RegisterObserver(func(entities []*Milestone) {
 		for _, entity := range libcommon.SliceTakeLast(entities, maxEntityEvents) {
 			callback(entity)
 		}
@@ -100,7 +174,7 @@ func (s *service) RegisterMilestoneObserver(callback func(*Milestone)) polygonco
 }
 
 func (s *service) RegisterSpanObserver(callback func(*Span)) polygoncommon.UnregisterFunc {
-	return s.scraper.RegisterSpanObserver(func(entities []*Span) {
+	return s.spanScraper.RegisterObserver(func(entities []*Span) {
 		for _, entity := range libcommon.SliceTakeLast(entities, maxEntityEvents) {
 			callback(entity)
 		}
@@ -122,5 +196,9 @@ func (s *service) Run(ctx context.Context) error {
 		return err
 	}
 
-	return s.scraper.Run(ctx)
+	scrapersGroup, scrapersGroupCtx := errgroup.WithContext(ctx)
+	scrapersGroup.Go(func() error { return s.checkpointScraper.Run(scrapersGroupCtx) })
+	scrapersGroup.Go(func() error { return s.milestoneScraper.Run(scrapersGroupCtx) })
+	scrapersGroup.Go(func() error { return s.spanScraper.Run(scrapersGroupCtx) })
+	return scrapersGroup.Wait()
 }
