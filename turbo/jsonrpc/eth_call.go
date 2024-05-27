@@ -177,6 +177,8 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		feeCap = args.GasPrice.ToInt()
 	} else if args.MaxFeePerGas != nil {
 		feeCap = args.MaxFeePerGas.ToInt()
+	} else if header.BaseFee != nil {
+		feeCap = new(big.Int).Set(header.BaseFee)
 	} else {
 		feeCap = libcommon.Big0
 	}
