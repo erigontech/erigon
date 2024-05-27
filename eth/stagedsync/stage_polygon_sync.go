@@ -52,14 +52,16 @@ func NewPolygonSyncStageCfg(
 		dataStream:  dataStream,
 	}
 	p2pService := p2p.NewService(maxPeers, logger, sentry, statusDataProvider.GetStatusData)
-	headersVerifier := polygonsync.VerifyAccumulatedHeaders
+	checkpointVerifier := polygonsync.VerifyCheckpointHeaders
+	milestoneVerifier := polygonsync.VerifyMilestoneHeaders
 	blocksVerifier := polygonsync.VerifyBlocks
 	heimdallService := heimdall.NewHeimdall(heimdallClient, logger, heimdall.WithStore(storage))
 	blockDownloader := polygonsync.NewBlockDownloader(
 		logger,
 		p2pService,
 		heimdallService,
-		headersVerifier,
+		checkpointVerifier,
+		milestoneVerifier,
 		blocksVerifier,
 		storage,
 	)
@@ -69,7 +71,7 @@ func NewPolygonSyncStageCfg(
 	sync := polygonsync.NewSync(
 		storage,
 		executionEngine,
-		headersVerifier,
+		milestoneVerifier,
 		blocksVerifier,
 		p2pService,
 		blockDownloader,
