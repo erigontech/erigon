@@ -14,7 +14,7 @@ var mainnetStateSSZ []byte
 //go:embed sepolia.state.ssz
 var sepoliaStateSSZ []byte
 
-//go:embed sepolia.state.ssz
+//go:embed gnosis.state.ssz
 var gnosisStateSSZ []byte
 
 // Return genesis state
