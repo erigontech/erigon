@@ -12,23 +12,23 @@ import (
 )
 
 type Sync struct {
-	store            Store
-	execution        ExecutionClient
-	headersVerifier  AccumulatedHeadersVerifier
-	blocksVerifier   BlocksVerifier
-	p2pService       p2p.Service
-	blockDownloader  BlockDownloader
-	ccBuilderFactory func(root *types.Header, span *heimdall.Span) CanonicalChainBuilder
-	spansCache       *SpansCache
-	fetchLatestSpan  func(ctx context.Context) (*heimdall.Span, error)
-	events           <-chan Event
-	logger           log.Logger
+	store             Store
+	execution         ExecutionClient
+	milestoneVerifier WaypointHeadersVerifier
+	blocksVerifier    BlocksVerifier
+	p2pService        p2p.Service
+	blockDownloader   BlockDownloader
+	ccBuilderFactory  func(root *types.Header, span *heimdall.Span) CanonicalChainBuilder
+	spansCache        *SpansCache
+	fetchLatestSpan   func(ctx context.Context) (*heimdall.Span, error)
+	events            <-chan Event
+	logger            log.Logger
 }
 
 func NewSync(
 	store Store,
 	execution ExecutionClient,
-	headersVerifier AccumulatedHeadersVerifier,
+	milestoneVerifier WaypointHeadersVerifier,
 	blocksVerifier BlocksVerifier,
 	p2pService p2p.Service,
 	blockDownloader BlockDownloader,
@@ -39,17 +39,17 @@ func NewSync(
 	logger log.Logger,
 ) *Sync {
 	return &Sync{
-		store:            store,
-		execution:        execution,
-		headersVerifier:  headersVerifier,
-		blocksVerifier:   blocksVerifier,
-		p2pService:       p2pService,
-		blockDownloader:  blockDownloader,
-		ccBuilderFactory: ccBuilderFactory,
-		spansCache:       spansCache,
-		fetchLatestSpan:  fetchLatestSpan,
-		events:           events,
-		logger:           logger,
+		store:             store,
+		execution:         execution,
+		milestoneVerifier: milestoneVerifier,
+		blocksVerifier:    blocksVerifier,
+		p2pService:        p2pService,
+		blockDownloader:   blockDownloader,
+		ccBuilderFactory:  ccBuilderFactory,
+		spansCache:        spansCache,
+		fetchLatestSpan:   fetchLatestSpan,
+		events:            events,
+		logger:            logger,
 	}
 }
 
@@ -71,7 +71,7 @@ func (s *Sync) onMilestoneEvent(
 	}
 
 	milestoneHeaders := ccBuilder.HeadersInRange(milestone.StartBlock().Uint64(), milestone.Length())
-	err := s.headersVerifier(milestone, milestoneHeaders)
+	err := s.milestoneVerifier(milestone, milestoneHeaders)
 	if err == nil {
 		if err = ccBuilder.Prune(milestone.EndBlock().Uint64()); err != nil {
 			return err
