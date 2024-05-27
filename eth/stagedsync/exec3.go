@@ -140,11 +140,13 @@ rwloop does:
 When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rotate+agg.Flush)
 */
 func ExecV3(ctx context.Context,
-	execStage *StageState, u Unwinder, workerCount int, cfg ExecuteBlockCfg, txc wrap.TxContainer,
-	parallel bool, //nolint
+	execStage *StageState, u Unwinder,
+	workerCount int,
+	cfg ExecuteBlockCfg,
+	txc wrap.TxContainer,
+	parallel bool,
 	maxBlockNum uint64,
 	logger log.Logger,
-	initialCycle bool,
 ) error {
 	// TODO: e35 doesn't support parallel-exec yet
 	parallel = false //nolint
@@ -156,7 +158,7 @@ func ExecV3(ctx context.Context,
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
 	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
 
-	if initialCycle {
+	if !execStage.CurrentSyncCycle().IsOnChainTip {
 		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
 		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 		defer agg.DiscardHistory(kv.CommitmentDomain).EnableHistory(kv.CommitmentDomain)
@@ -292,7 +294,7 @@ func ExecV3(ctx context.Context,
 	outputTxNum.Store(doms.TxNum())
 	if maxBlockNum-blockNum > 16 {
 		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
-			"from", blockNum, "to", maxBlockNum, "fromTxNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx)
+			"from", blockNum, "to", maxBlockNum, "fromTxNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "isOnChainTip", execStage.CurrentSyncCycle().IsOnChainTip, "useExternalTx", useExternalTx)
 	}
 
 	if blocksFreezeCfg.Produce {

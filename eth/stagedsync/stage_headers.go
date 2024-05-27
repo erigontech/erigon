@@ -91,16 +91,7 @@ func StageHeadersCfg(
 	}
 }
 
-func SpawnStageHeaders(
-	s *StageState,
-	u Unwinder,
-	ctx context.Context,
-	tx kv.RwTx,
-	cfg HeadersCfg,
-	initialCycle bool,
-	test bool, // Returns true to allow the stage to stop rather than wait indefinitely
-	logger log.Logger,
-) error {
+func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg HeadersCfg, test bool, logger log.Logger) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -110,27 +101,20 @@ func SpawnStageHeaders(
 		}
 		defer tx.Rollback()
 	}
-	if initialCycle && cfg.blockReader.FreezingCfg().Enabled {
+	if s.CurrentSyncCycle().IsFirstCycle && cfg.blockReader.FreezingCfg().Enabled {
 		if err := cfg.hd.AddHeadersFromSnapshot(tx, cfg.blockReader); err != nil {
 			return err
 		}
 	}
 
-	return HeadersPOW(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx, logger)
+	return HeadersPOW(s, u, ctx, tx, cfg, test, useExternalTx, logger)
 
 }
 
 // HeadersPOW progresses Headers stage for Proof-of-Work headers
-func HeadersPOW(
-	s *StageState,
-	u Unwinder,
-	ctx context.Context,
-	tx kv.RwTx,
-	cfg HeadersCfg,
-	initialCycle bool,
-	test bool, // Returns true to allow the stage to stop rather than wait indefinitely
-	useExternalTx bool,
-	logger log.Logger,
+func HeadersPOW(s *StageState, u Unwinder,
+	ctx context.Context, tx kv.RwTx, cfg HeadersCfg,
+	test bool, useExternalTx bool, logger log.Logger,
 ) error {
 	var err error
 
@@ -164,7 +148,7 @@ func HeadersPOW(
 	}
 
 	// Allow other stages to run 1 cycle if no network available
-	if initialCycle && cfg.noP2PDiscovery {
+	if s.CurrentSyncCycle().IsFirstCycle && cfg.noP2PDiscovery {
 		return nil
 	}
 

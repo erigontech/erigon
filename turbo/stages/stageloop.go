@@ -57,7 +57,7 @@ func StageLoop(
 	hook *Hook,
 ) {
 	defer close(waitForDone)
-	initialCycle := true
+	firstCycle := true
 
 	for {
 		start := time.Now()
@@ -70,7 +70,7 @@ func StageLoop(
 		}
 
 		// Estimate the current top height seen from the peer
-		err := StageLoopIteration(ctx, db, wrap.TxContainer{}, sync, initialCycle, false, logger, blockReader, hook)
+		err := StageLoopIteration(ctx, db, wrap.TxContainer{}, sync, firstCycle, false, logger, blockReader, hook)
 
 		if err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
@@ -85,7 +85,7 @@ func StageLoop(
 			continue
 		}
 
-		initialCycle = false
+		firstCycle = false
 		hd.AfterInitialCycle()
 
 		if loopMinTime != 0 {
@@ -127,12 +127,12 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.F
 
 		log.Debug("[sync] processFrozenBlocks", "finStageProgress", finStageProgress, "frozenBlocks", blockReader.FrozenBlocks())
 
-		more, err := sync.Run(db, wrap.TxContainer{}, true)
+		more, err := sync.Run(db, wrap.TxContainer{}, true, false)
 		if err != nil {
 			return err
 		}
 
-		if err := sync.RunPrune(db, nil, true); err != nil {
+		if err := sync.RunPrune(db, nil, true, false); err != nil {
 			return err
 		}
 
@@ -143,7 +143,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.F
 	return nil
 }
 
-func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, sync *stagedsync.Sync, initialCycle bool, skipFrozenBlocks bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (err error) {
+func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, sync *stagedsync.Sync, firstCycle bool, skipFrozenBlocks bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
@@ -164,11 +164,11 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	// Sync from scratch must be able Commit partial progress
 	// In all other cases - process blocks batch in 1 RwTx
 	// 2 corner-cases: when sync with --snapshots=false and when executed only blocks from snapshots (in this case all stages progress is equal and > 0, but node is not synced)
-	isSynced := finishProgressBefore > 0 && finishProgressBefore > blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
+	isOnChainTip := finishProgressBefore > 0 && finishProgressBefore > blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
 	if blockReader.BorSnapshots() != nil {
-		isSynced = isSynced && borProgressBefore > blockReader.FrozenBorBlocks()
+		isOnChainTip = isOnChainTip && borProgressBefore > blockReader.FrozenBorBlocks()
 	}
-	canRunCycleInOneTransaction := isSynced
+	canRunCycleInOneTransaction := isOnChainTip
 	if externalTx {
 		canRunCycleInOneTransaction = true
 	}
@@ -189,11 +189,11 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	}
 
 	if hook != nil {
-		if err = hook.BeforeRun(txc.Tx, isSynced); err != nil {
+		if err = hook.BeforeRun(txc.Tx, isOnChainTip); err != nil {
 			return err
 		}
 	}
-	_, err = sync.Run(db, txc, initialCycle)
+	_, err = sync.Run(db, txc, firstCycle, isOnChainTip)
 	if err != nil {
 		return err
 	}
@@ -233,9 +233,9 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 
 	// -- Prune+commit(sync)
 	if externalTx {
-		err = sync.RunPrune(db, txc.Tx, initialCycle)
+		err = sync.RunPrune(db, txc.Tx, firstCycle, isOnChainTip)
 	} else {
-		err = db.Update(ctx, func(tx kv.RwTx) error { return sync.RunPrune(db, tx, initialCycle) })
+		err = db.Update(ctx, func(tx kv.RwTx) error { return sync.RunPrune(db, tx, firstCycle, isOnChainTip) })
 	}
 	if err != nil {
 		return err
@@ -398,7 +398,7 @@ func MiningStep(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, tmpDir
 	defer sd.Close()
 	txc.Doms = sd
 
-	if _, err = mining.Run(nil, txc, false /* firstCycle */); err != nil {
+	if _, err = mining.Run(nil, txc, false /* firstCycle */, true); err != nil {
 		return err
 	}
 	tx.Rollback()
@@ -498,7 +498,7 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 		}
 		// Run state sync
 		if !test {
-			if err = stateSync.RunNoInterrupt(nil, txc, false /* firstCycle */); err != nil {
+			if err = stateSync.RunNoInterrupt(nil, txc, false /* firstCycle */, false); err != nil {
 				if err := cleanupProgressIfNeeded(txc.Tx, currentHeader); err != nil {
 					return err
 
@@ -518,7 +518,7 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 		return err
 	}
 
-	if err = stateSync.RunNoInterrupt(nil, txc, false /* firstCycle */); err != nil {
+	if err = stateSync.RunNoInterrupt(nil, txc, false /* firstCycle */, true); err != nil {
 		if !test {
 			if err := cleanupProgressIfNeeded(txc.Tx, header); err != nil {
 				return err

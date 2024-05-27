@@ -61,12 +61,12 @@ func (s *Sync) PrevUnwindPoint() *uint64 {
 	return s.prevUnwindPoint
 }
 
-func (s *Sync) NewUnwindState(id stages.SyncStage, unwindPoint, currentProgress uint64) *UnwindState {
-	return &UnwindState{id, unwindPoint, currentProgress, UnwindReason{nil, nil}, s}
+func (s *Sync) NewUnwindState(id stages.SyncStage, unwindPoint, currentProgress uint64, firstCycle, isOnChainTip bool) *UnwindState {
+	return &UnwindState{id, unwindPoint, currentProgress, UnwindReason{nil, nil}, s, CurrentSyncCycleInfo{firstCycle, isOnChainTip}}
 }
 
 // Get the current prune status from the DB
-func (s *Sync) PruneStageState(id stages.SyncStage, forwardProgress uint64, tx kv.Tx, db kv.RwDB) (*PruneState, error) {
+func (s *Sync) PruneStageState(id stages.SyncStage, forwardProgress uint64, tx kv.Tx, db kv.RwDB, firstCycle, isOnChainTip bool) (*PruneState, error) {
 	var pruneProgress uint64
 	var err error
 	useExternalTx := tx != nil
@@ -87,7 +87,7 @@ func (s *Sync) PruneStageState(id stages.SyncStage, forwardProgress uint64, tx k
 		}
 	}
 
-	return &PruneState{id, forwardProgress, pruneProgress, s}, nil
+	return &PruneState{id, forwardProgress, pruneProgress, s, CurrentSyncCycleInfo{firstCycle, isOnChainTip}}, nil
 }
 
 func (s *Sync) NextStage() {
@@ -239,7 +239,7 @@ func New(cfg ethconfig.Sync, stagesList []*Stage, unwindOrder UnwindOrder, prune
 	}
 }
 
-func (s *Sync) StageState(stage stages.SyncStage, tx kv.Tx, db kv.RoDB) (*StageState, error) {
+func (s *Sync) StageState(stage stages.SyncStage, tx kv.Tx, db kv.RoDB, firstCycle, isOnChainTip bool) (*StageState, error) {
 	var blockNum uint64
 	var err error
 	useExternalTx := tx != nil
@@ -260,7 +260,7 @@ func (s *Sync) StageState(stage stages.SyncStage, tx kv.Tx, db kv.RoDB) (*StageS
 		}
 	}
 
-	return &StageState{s, stage, blockNum}, nil
+	return &StageState{s, stage, blockNum, CurrentSyncCycleInfo{firstCycle, isOnChainTip}}, nil
 }
 
 func (s *Sync) RunUnwind(db kv.RwDB, txc wrap.TxContainer) error {
@@ -271,7 +271,7 @@ func (s *Sync) RunUnwind(db kv.RwDB, txc wrap.TxContainer) error {
 		if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
 			continue
 		}
-		if err := s.unwindStage(false, s.unwindOrder[j], db, txc); err != nil {
+		if err := s.unwindStage(false, true, s.unwindOrder[j], db, txc); err != nil {
 			return err
 		}
 	}
@@ -284,7 +284,7 @@ func (s *Sync) RunUnwind(db kv.RwDB, txc wrap.TxContainer) error {
 	return nil
 }
 
-func (s *Sync) RunNoInterrupt(db kv.RwDB, txc wrap.TxContainer, firstCycle bool) error {
+func (s *Sync) RunNoInterrupt(db kv.RwDB, txc wrap.TxContainer, firstCycle, isOnChainTip bool) error {
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
 
@@ -295,7 +295,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, txc wrap.TxContainer, firstCycle bool)
 				if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
 					continue
 				}
-				if err := s.unwindStage(firstCycle, s.unwindOrder[j], db, txc); err != nil {
+				if err := s.unwindStage(firstCycle, isOnChainTip, s.unwindOrder[j], db, txc); err != nil {
 					return err
 				}
 			}
@@ -327,7 +327,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, txc wrap.TxContainer, firstCycle bool)
 			continue
 		}
 
-		if err := s.runStage(stage, db, txc, firstCycle, badBlockUnwind); err != nil {
+		if err := s.runStage(stage, db, txc, firstCycle, isOnChainTip, badBlockUnwind); err != nil {
 			return err
 		}
 
@@ -352,7 +352,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, txc wrap.TxContainer, firstCycle bool)
 	return nil
 }
 
-func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, firstCycle bool) (bool, error) {
+func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, firstCycle, isOnChainTip bool) (bool, error) {
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
 
@@ -365,7 +365,7 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, firstCycle bool) (bool, err
 				if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
 					continue
 				}
-				if err := s.unwindStage(firstCycle, s.unwindOrder[j], db, txc); err != nil {
+				if err := s.unwindStage(firstCycle, isOnChainTip, s.unwindOrder[j], db, txc); err != nil {
 					return false, err
 				}
 			}
@@ -402,7 +402,7 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, firstCycle bool) (bool, err
 			continue
 		}
 
-		if err := s.runStage(stage, db, txc, firstCycle, badBlockUnwind); err != nil {
+		if err := s.runStage(stage, db, txc, firstCycle, isOnChainTip, badBlockUnwind); err != nil {
 			return false, err
 		}
 
@@ -446,13 +446,13 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, firstCycle bool) (bool, err
 }
 
 // Run pruning for stages as per the defined pruning order, if enabled for that stage
-func (s *Sync) RunPrune(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
+func (s *Sync) RunPrune(db kv.RwDB, tx kv.RwTx, firstCycle, isOnChainTip bool) error {
 	s.timings = s.timings[:0]
 	for i := 0; i < len(s.pruningOrder); i++ {
 		if s.pruningOrder[i] == nil || s.pruningOrder[i].Disabled || s.pruningOrder[i].Prune == nil {
 			continue
 		}
-		if err := s.pruneStage(firstCycle, s.pruningOrder[i], db, tx); err != nil {
+		if err := s.pruneStage(firstCycle, isOnChainTip, s.pruningOrder[i], db, tx); err != nil {
 			return err
 		}
 	}
@@ -525,14 +525,14 @@ func CollectTableSizes(db kv.RoDB, tx kv.Tx, buckets []string) []interface{} {
 	return bucketSizes
 }
 
-func (s *Sync) runStage(stage *Stage, db kv.RwDB, txc wrap.TxContainer, firstCycle bool, badBlockUnwind bool) (err error) {
+func (s *Sync) runStage(stage *Stage, db kv.RwDB, txc wrap.TxContainer, firstCycle, isOnChainTip bool, badBlockUnwind bool) (err error) {
 	start := time.Now()
-	stageState, err := s.StageState(stage.ID, txc.Tx, db)
+	stageState, err := s.StageState(stage.ID, txc.Tx, db, firstCycle, isOnChainTip)
 	if err != nil {
 		return err
 	}
 
-	if err = stage.Forward(firstCycle, badBlockUnwind, stageState, s, txc, s.logger); err != nil {
+	if err = stage.Forward(badBlockUnwind, stageState, s, txc, s.logger); err != nil {
 		wrappedError := fmt.Errorf("[%s] %w", s.LogPrefix(), err)
 		s.logger.Debug("Error while executing stage", "err", wrappedError)
 		return wrappedError
@@ -549,15 +549,15 @@ func (s *Sync) runStage(stage *Stage, db kv.RwDB, txc wrap.TxContainer, firstCyc
 	return nil
 }
 
-func (s *Sync) unwindStage(firstCycle bool, stage *Stage, db kv.RwDB, txc wrap.TxContainer) error {
+func (s *Sync) unwindStage(firstCycle, isOnChainTip bool, stage *Stage, db kv.RwDB, txc wrap.TxContainer) error {
 	start := time.Now()
 	s.logger.Trace("Unwind...", "stage", stage.ID)
-	stageState, err := s.StageState(stage.ID, txc.Tx, db)
+	stageState, err := s.StageState(stage.ID, txc.Tx, db, firstCycle, isOnChainTip)
 	if err != nil {
 		return err
 	}
 
-	unwind := s.NewUnwindState(stage.ID, *s.unwindPoint, stageState.BlockNumber)
+	unwind := s.NewUnwindState(stage.ID, *s.unwindPoint, stageState.BlockNumber, firstCycle, isOnChainTip)
 	unwind.Reason = s.unwindReason
 
 	if stageState.BlockNumber <= unwind.UnwindPoint {
@@ -568,7 +568,7 @@ func (s *Sync) unwindStage(firstCycle bool, stage *Stage, db kv.RwDB, txc wrap.T
 		return err
 	}
 
-	err = stage.Unwind(firstCycle, unwind, stageState, txc, s.logger)
+	err = stage.Unwind(unwind, stageState, txc, s.logger)
 	if err != nil {
 		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
 	}
@@ -583,16 +583,16 @@ func (s *Sync) unwindStage(firstCycle bool, stage *Stage, db kv.RwDB, txc wrap.T
 }
 
 // Run the pruning function for the given stage
-func (s *Sync) pruneStage(firstCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx) error {
+func (s *Sync) pruneStage(firstCycle, isOnChainTip bool, stage *Stage, db kv.RwDB, tx kv.RwTx) error {
 	start := time.Now()
 	s.logger.Debug("Prune...", "stage", stage.ID)
 
-	stageState, err := s.StageState(stage.ID, tx, db)
+	stageState, err := s.StageState(stage.ID, tx, db, firstCycle, isOnChainTip)
 	if err != nil {
 		return err
 	}
 
-	pruneState, err := s.PruneStageState(stage.ID, stageState.BlockNumber, tx, db)
+	pruneState, err := s.PruneStageState(stage.ID, stageState.BlockNumber, tx, db, firstCycle, isOnChainTip)
 	if err != nil {
 		return err
 	}
@@ -600,7 +600,7 @@ func (s *Sync) pruneStage(firstCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx)
 		return err
 	}
 
-	err = stage.Prune(firstCycle, pruneState, tx, s.logger)
+	err = stage.Prune(pruneState, tx, s.logger)
 	if err != nil {
 		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
 	}

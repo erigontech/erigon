@@ -384,8 +384,8 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		}
 	}
 	// Run the forkchoice
-	initialCycle := limitedBigJump
-	if _, err := e.executionPipeline.Run(e.db, wrap.TxContainer{Tx: tx}, initialCycle); err != nil {
+	isOnChainTip := !limitedBigJump
+	if _, err := e.executionPipeline.Run(e.db, wrap.TxContainer{Tx: tx}, false, isOnChainTip); err != nil {
 		err = fmt.Errorf("updateForkChoice: %w", err)
 		e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
@@ -456,7 +456,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		e.logger.Info("Timings (slower than 50ms)", timings...)
 	}
 	if *headNumber >= startPruneFrom {
-		e.runPostForkchoiceInBackground(initialCycle)
+		e.runPostForkchoiceInBackground(isOnChainTip)
 	}
 	sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
 		LatestValidHash: gointerfaces.ConvertHashToH256(headHash),
@@ -465,7 +465,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	})
 }
 
-func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle bool) {
+func (e *EthereumExecutionModule) runPostForkchoiceInBackground(isOnChainTip bool) {
 	if !e.doingPostForkchoice.CompareAndSwap(false, true) {
 		return
 	}
@@ -478,7 +478,7 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle boo
 		}
 		defer e.semaphore.Release(1)
 		if err := e.db.Update(e.bacgroundCtx, func(tx kv.RwTx) error {
-			if err := e.executionPipeline.RunPrune(e.db, tx, initialCycle); err != nil {
+			if err := e.executionPipeline.RunPrune(e.db, tx, false, isOnChainTip); err != nil {
 				return err
 			}
 			if pruneTimings := e.executionPipeline.PrintTimings(); len(pruneTimings) > 0 {
