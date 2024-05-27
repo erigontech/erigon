@@ -1,7 +1,6 @@
 package diagnostics_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
@@ -9,7 +8,7 @@ import (
 )
 
 func TestUpdateFileDownloadingStats(t *testing.T) {
-	d, err := diagnostics.NewDiagnosticClient(context.TODO(), nil, "test", true)
+	d, err := diagnostics.NewTestDiagnosticClient()
 
 	require.NoError(t, err)
 

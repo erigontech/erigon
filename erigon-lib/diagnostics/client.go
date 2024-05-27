@@ -36,6 +36,10 @@ type DiagnosticClient struct {
 	networkSpeedMutex   sync.Mutex
 }
 
+func NewTestDiagnosticClient() (*DiagnosticClient, error) {
+	return &DiagnosticClient{}, nil
+}
+
 func NewDiagnosticClient(ctx context.Context, metricsMux *http.ServeMux, dataDirPath string, speedTest bool) (*DiagnosticClient, error) {
 	dirPath := filepath.Join(dataDirPath, "diagnostics")
 	db, err := createDb(ctx, dirPath)
