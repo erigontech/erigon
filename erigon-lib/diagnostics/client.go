@@ -8,15 +8,9 @@ import (
 )
 
 type DiagnosticClient struct {
-<<<<<<< HEAD
 	metricsMux  *http.ServeMux
 	dataDirPath string
 	speedTest   bool
-=======
-	metricsMux   *http.ServeMux
-	dataDirPath  string
-	noDownloader bool
->>>>>>> 420cfbfc94 (disable speedtest if)
 
 	syncStats           SyncStatistics
 	snapshotFileList    SnapshoFilesList
@@ -61,10 +55,7 @@ func (d *DiagnosticClient) Setup() {
 	d.setupHeadersDiagnostics(rootCtx)
 	d.setupBodiesDiagnostics(rootCtx)
 	d.setupResourcesUsageDiagnostics(rootCtx)
-
-	if !d.noDownloader {
-		d.setupSpeedtestDiagnostics(rootCtx)
-	}
+	d.setupSpeedtestDiagnostics(rootCtx)
 
 	//d.logDiagMsgs()
 }
