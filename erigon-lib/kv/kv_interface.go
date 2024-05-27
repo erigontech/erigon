@@ -149,12 +149,14 @@ type DBVerbosityLvl int8
 type Label uint8
 
 const (
-	ChainDB      Label = 0
-	TxPoolDB     Label = 1
-	SentryDB     Label = 2
-	ConsensusDB  Label = 3
-	DownloaderDB Label = 4
-	InMem        Label = 5
+	ChainDB       Label = 0
+	TxPoolDB      Label = 1
+	SentryDB      Label = 2
+	ConsensusDB   Label = 3
+	DownloaderDB  Label = 4
+	InMem         Label = 5
+	HeimdallDB    Label = 6
+	DiagnosticsDB Label = 7
 )
 
 func (l Label) String() string {
@@ -171,6 +173,10 @@ func (l Label) String() string {
 		return "downloader"
 	case InMem:
 		return "inMem"
+	case HeimdallDB:
+		return "heimdall"
+	case DiagnosticsDB:
+		return "diagnostics"
 	default:
 		return "unknown"
 	}
@@ -189,6 +195,10 @@ func UnmarshalLabel(s string) Label {
 		return DownloaderDB
 	case "inMem":
 		return InMem
+	case "heimdall":
+		return HeimdallDB
+	case "diagnostics":
+		return DiagnosticsDB
 	default:
 		panic(fmt.Sprintf("unexpected label: %s", s))
 	}
@@ -449,7 +459,7 @@ type BucketMigrator interface {
 // Cursor - class for navigating through a database
 // CursorDupSort are inherit this class
 //
-// If methods (like First/Next/Seek) return error, then returned key SHOULD not be nil (can be []byte{} for example).
+// If methods (like First/Next/seekInFiles) return error, then returned key SHOULD not be nil (can be []byte{} for example).
 // Then looping code will look as:
 // c := kv.Cursor(bucketName)
 //
@@ -536,6 +546,8 @@ type (
 	Domain      uint16
 	History     string
 	InvertedIdx string
+
+	InvertedIdxPos uint16
 )
 
 type TemporalGetter interface {
@@ -545,7 +557,7 @@ type TemporalTx interface {
 	Tx
 	TemporalGetter
 	DomainGetAsOf(name Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error)
-	HistoryGet(name History, k []byte, ts uint64) (v []byte, ok bool, err error)
+	HistorySeek(name History, k []byte, ts uint64) (v []byte, ok bool, err error)
 
 	// IndexRange - return iterator over range of inverted index for given key `k`
 	// Asc semantic:  [from, to) AND from > to
@@ -555,12 +567,21 @@ type TemporalTx interface {
 	// Example: IndexRange("IndexName", 10, 5, order.Desc, -1)
 	// Example: IndexRange("IndexName", -1, -1, order.Asc, 10)
 	IndexRange(name InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error)
-	HistoryRange(name History, fromTs, toTs int, asc order.By, limit int) (it iter.KV, err error)
 	DomainRange(name Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error)
+
+	// HistoryRange - producing "state patch" - sorted list of keys updated at [fromTs,toTs) with their most-recent value.
+	//   no duplicates
+	HistoryRange(name History, fromTs, toTs int, asc order.By, limit int) (it iter.KV, err error)
 }
 type TemporalCommitment interface {
 	ComputeCommitment(ctx context.Context, saveStateAfter, trace bool) (rootHash []byte, err error)
 }
+
+type TemporalRwTx interface {
+	RwTx
+	TemporalTx
+}
+
 type TemporalPutDel interface {
 	// DomainPut
 	// Optimizations:

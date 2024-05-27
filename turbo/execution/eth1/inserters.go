@@ -36,20 +36,26 @@ func (s *EthereumExecutionModule) validatePayloadBlobs(expectedBlobHashes []libc
 
 func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *execution.InsertBlocksRequest) (*execution.InsertionResult, error) {
 	if !e.semaphore.TryAcquire(1) {
-		e.logger.Warn("ethereumExecutionModule.InsertBlocks: ExecutionStatus_Busy")
+		e.logger.Trace("ethereumExecutionModule.InsertBlocks: ExecutionStatus_Busy")
 		return &execution.InsertionResult{
 			Result: execution.ExecutionStatus_Busy,
 		}, nil
 	}
 	defer e.semaphore.Release(1)
+	e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
+	frozenBlocks := e.blockReader.FrozenBlocks()
+
 	tx, err := e.db.BeginRw(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not begin transaction: %s", err)
 	}
 	defer tx.Rollback()
-	e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
 
 	for _, block := range req.Blocks {
+		// Skip frozen blocks.
+		if block.Header.BlockNumber < frozenBlocks {
+			continue
+		}
 		header, err := eth1_utils.HeaderRpcToHeader(block.Header)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: cannot convert headers: %s", err)
@@ -89,5 +95,5 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 
 	return &execution.InsertionResult{
 		Result: execution.ExecutionStatus_Success,
-	}, tx.Commit()
+	}, nil
 }

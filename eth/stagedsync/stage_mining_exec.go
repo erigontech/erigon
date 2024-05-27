@@ -20,7 +20,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
@@ -87,17 +86,11 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	current := cfg.miningState.MiningBlock
 	txs := current.PreparedTxs
 	noempty := true
-
-	histV3, _ := kvcfg.HistoryV3.Enabled(txc.Tx)
 	var domains *state2.SharedDomains
 	var (
 		stateReader state.StateReader
 	)
-	if histV3 {
-		stateReader = state.NewReaderV4(txc.Doms)
-	} else {
-		stateReader = state.NewPlainStateReader(txc.Tx)
-	}
+	stateReader = state.NewReaderV4(txc.Doms)
 	ibs := state.New(stateReader)
 
 	// Create an empty block based on temporary copied state for
@@ -113,6 +106,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	// But if we disable empty precommit already, ignore it. Since
 	// empty block is necessary to keep the liveness of the network.
 	if noempty {
+
 		if txs != nil && !txs.Empty() {
 			logs, _, err := addTransactionsToMiningBlock(logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txs, cfg.miningState.MiningConfig.Etherbase, ibs, ctx, cfg.interrupt, cfg.payloadId, logger)
 			if err != nil {
@@ -124,22 +118,17 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 			yielded := mapset.NewSet[[32]byte]()
 			var simStateReader state.StateReader
 			var simStateWriter state.StateWriter
-
 			m := membatchwithdb.NewMemoryBatch(txc.Tx, cfg.tmpdir, logger)
 			defer m.Rollback()
-			if histV3 {
-				var err error
-				domains, err = state2.NewSharedDomains(m, logger)
-				if err != nil {
-					return err
-				}
-				defer domains.Close()
-				simStateReader = state.NewReaderV4(domains)
-				simStateWriter = state.NewWriterV4(domains)
-			} else {
-				simStateReader = state.NewPlainStateReader(m)
-				simStateWriter = state.NewPlainStateWriterNoHistory(m)
+			var err error
+			domains, err = state2.NewSharedDomains(m, logger)
+			if err != nil {
+				return err
 			}
+			defer domains.Close()
+			simStateReader = state.NewReaderV4(domains)
+			simStateWriter = state.NewWriterV4(domains)
+
 			executionAt, err := s.ExecutionAt(txc.Tx)
 			if err != nil {
 				return err
@@ -186,12 +175,12 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	}
 
 	var err error
-	_, current.Txs, current.Receipts, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txs, current.Uncles, &state.NoopWriter{}, &cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, ChainReaderImpl{config: &cfg.chainConfig, tx: txc.Tx, blockReader: cfg.blockReader, logger: logger}, true, logger)
+	_, current.Txs, current.Receipts, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txs, current.Uncles, &state.NoopWriter{}, &cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, current.Requests, ChainReaderImpl{config: &cfg.chainConfig, tx: txc.Tx, blockReader: cfg.blockReader, logger: logger}, true, logger)
 	if err != nil {
 		return err
 	}
 
-	block := types.NewBlock(current.Header, current.Txs, current.Uncles, current.Receipts, current.Withdrawals)
+	block := types.NewBlock(current.Header, current.Txs, current.Uncles, current.Receipts, current.Withdrawals, current.Requests)
 	// Simulate the block execution to get the final state root
 	if err := rawdb.WriteHeader(txc.Tx, block.Header()); err != nil {
 		return fmt.Errorf("cannot write header: %s", err)
@@ -207,10 +196,8 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	if _, err = rawdb.WriteRawBodyIfNotExists(txc.Tx, block.Hash(), blockHeight, block.RawBody()); err != nil {
 		return fmt.Errorf("cannot write body: %s", err)
 	}
-	if histV3 {
-		if err := rawdb.AppendCanonicalTxNums(txc.Tx, blockHeight); err != nil {
-			return err
-		}
+	if err := rawdb.AppendCanonicalTxNums(txc.Tx, blockHeight); err != nil {
+		return err
 	}
 	if err := stages.SaveStageProgress(txc.Tx, kv.Headers, blockHeight); err != nil {
 		return err
@@ -416,7 +403,7 @@ func filterBadTransactions(transactions []types.Transaction, config chain.Config
 		filtered = append(filtered, transaction)
 		transactions = transactions[1:]
 	}
-	logger.Debug("Filtration", "initial", initialCnt, "no sender", noSenderCnt, "no account", noAccountCnt, "nonce too low", nonceTooLowCnt, "nonceTooHigh", missedTxs, "sender not EOA", notEOACnt, "fee too low", feeTooLowCnt, "overflow", overflowCnt, "balance too low", balanceTooLowCnt, "filtered", len(filtered))
+	logger.Info("Filtration", "initial", initialCnt, "no sender", noSenderCnt, "no account", noAccountCnt, "nonce too low", nonceTooLowCnt, "nonceTooHigh", missedTxs, "sender not EOA", notEOACnt, "fee too low", feeTooLowCnt, "overflow", overflowCnt, "balance too low", balanceTooLowCnt, "filtered", len(filtered))
 	return filtered, nil
 }
 

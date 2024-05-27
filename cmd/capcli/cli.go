@@ -18,17 +18,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	lg "github.com/anacrolix/log"
-
-	"github.com/ledgerwatch/erigon-lib/direct"
-	downloader3 "github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/metrics"
-	state2 "github.com/ledgerwatch/erigon-lib/state"
-
-	"github.com/c2h5oh/datasize"
-
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
-	"github.com/ledgerwatch/erigon-lib/downloader"
 
 	"github.com/ledgerwatch/erigon/cl/antiquary"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -37,16 +27,12 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/caplin/caplin1"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
-	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
 	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format/getters"
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
@@ -69,7 +55,6 @@ var CLI struct {
 	Chain                   Chain                   `cmd:"" help:"download the entire chain from reqresp network"`
 	DumpSnapshots           DumpSnapshots           `cmd:"" help:"generate caplin snapshots"`
 	CheckSnapshots          CheckSnapshots          `cmd:"" help:"check snapshot folder against content of chain data"`
-	DownloadSnapshots       DownloadSnapshots       `cmd:"" help:"download snapshots from webseed"`
 	LoopSnapshots           LoopSnapshots           `cmd:"" help:"loop over snapshots"`
 	RetrieveHistoricalState RetrieveHistoricalState `cmd:"" help:"retrieve historical state from db"`
 	ChainEndpoint           ChainEndpoint           `cmd:"" help:"chain endpoint"`
@@ -147,7 +132,7 @@ func (c *Chain) Run(ctx *Context) error {
 		return err
 	}
 	ethClock := eth_clock.NewEthereumClock(bs.GenesisTime(), bs.GenesisValidatorsRoot(), beaconConfig)
-	db, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, ethClock, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
+	db, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, ethClock, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {
 		return err
 	}
@@ -199,7 +184,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 	ethClock := eth_clock.NewEthereumClock(bs.GenesisTime(), bs.GenesisValidatorsRoot(), beaconConfig)
 
 	dirs := datadir.New(c.Datadir)
-	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, ethClock, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
+	db, _, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, ethClock, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {
 		return err
 	}
@@ -320,7 +305,7 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
-	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
+	db, _, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {
 		return err
 	}
@@ -360,7 +345,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
-	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
+	db, _, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {
 		return err
 	}
@@ -440,7 +425,7 @@ func (c *LoopSnapshots) Run(ctx *Context) error {
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
-	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
+	db, _, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {
 		return err
 	}
@@ -473,67 +458,6 @@ func (c *LoopSnapshots) Run(ctx *Context) error {
 	return nil
 }
 
-type DownloadSnapshots struct {
-	chainCfg
-	outputFolder
-}
-
-func (d *DownloadSnapshots) Run(ctx *Context) error {
-	webSeeds := snapcfg.KnownWebseeds[d.Chain]
-	dirs := datadir.New(d.Datadir)
-
-	_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(d.Chain)
-	if err != nil {
-		return err
-	}
-
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
-
-	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
-	if err != nil {
-		return err
-	}
-	tx, err := db.BeginRw(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	downloadRate, err := datasize.ParseString("16mb")
-	if err != nil {
-		return err
-	}
-
-	uploadRate, err := datasize.ParseString("0mb")
-	if err != nil {
-		return err
-	}
-	version := "erigon: " + params.VersionWithCommit(params.GitCommit)
-
-	downloaderCfg, err := downloadercfg.New(dirs, version, lg.Info, downloadRate, uploadRate, 42069, 10, 3, nil, webSeeds, d.Chain, true)
-	if err != nil {
-		return err
-	}
-	downlo, err := downloader.New(ctx, downloaderCfg, log.Root(), log.LvlInfo, true)
-	if err != nil {
-		return err
-	}
-	s, err := state2.NewAggregator(ctx, dirs, 200000, db, log.Root())
-	if err != nil {
-		return err
-	}
-	downlo.MainLoopInBackground(false)
-	bittorrentServer, err := downloader3.NewGrpcServer(downlo)
-	if err != nil {
-		return fmt.Errorf("new server: %w", err)
-	}
-
-	return snapshotsync.WaitForDownloader(ctx, "CapCliDownloader", false, false, snapshotsync.OnlyCaplin, s, tx,
-		freezeblocks.NewBlockReader(
-			freezeblocks.NewRoSnapshots(ethconfig.NewSnapCfg(false, false, false), dirs.Snap, 0, log.Root()),
-			freezeblocks.NewBorRoSnapshots(ethconfig.NewSnapCfg(false, false, false), dirs.Snap, 0, log.Root())),
-		params.ChainConfigByChainName(d.Chain), direct.NewDownloaderClient(bittorrentServer), []string{})
-}
-
 type RetrieveHistoricalState struct {
 	chainCfg
 	outputFolder
@@ -549,7 +473,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 	dirs := datadir.New(r.Datadir)
-	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
+	db, _, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {
 		return err
 	}
@@ -897,7 +821,7 @@ func (b *BlobArchiveStoreCheck) Run(ctx *Context) error {
 
 	dirs := datadir.New(b.Datadir)
 
-	db, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
+	db, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {
 		return err
 	}
@@ -967,7 +891,7 @@ func (c *DumpBlobsSnapshots) Run(ctx *Context) error {
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
-	db, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
+	db, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {
 		return err
 	}
@@ -1008,7 +932,7 @@ func (c *CheckBlobsSnapshots) Run(ctx *Context) error {
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
-	db, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
+	db, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {
 		return err
 	}

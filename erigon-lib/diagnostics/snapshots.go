@@ -2,8 +2,15 @@ package diagnostics
 
 import (
 	"context"
+	"encoding/json"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
+)
+
+var (
+	SnapshotDownloadStatisticsKey = []byte("diagSnapshotDownloadStatistics")
+	SnapshotIndexingStatisticsKey = []byte("diagSnapshotIndexingStatistics")
 )
 
 func (d *DiagnosticClient) setupSnapshotDiagnostics(rootCtx context.Context) {
@@ -12,6 +19,7 @@ func (d *DiagnosticClient) setupSnapshotDiagnostics(rootCtx context.Context) {
 	d.runSegmentIndexingListener(rootCtx)
 	d.runSegmentIndexingFinishedListener(rootCtx)
 	d.runSnapshotFilesListListener(rootCtx)
+	d.runFileDownloadedListener(rootCtx)
 }
 
 func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
@@ -25,6 +33,7 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
+
 				d.mu.Lock()
 				d.syncStats.SnapshotDownload.Downloaded = info.Downloaded
 				d.syncStats.SnapshotDownload.Total = info.Total
@@ -38,6 +47,11 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 				d.syncStats.SnapshotDownload.Sys = info.Sys
 				d.syncStats.SnapshotDownload.DownloadFinished = info.DownloadFinished
 				d.syncStats.SnapshotDownload.TorrentMetadataReady = info.TorrentMetadataReady
+
+				if err := d.db.Update(d.ctx, SnapshotDownloadUpdater(d.syncStats.SnapshotDownload)); err != nil {
+					log.Error("[Diagnostics] Failed to update snapshot download info", "err", err)
+				}
+
 				d.mu.Unlock()
 
 				if info.DownloadFinished {
@@ -65,7 +79,21 @@ func (d *DiagnosticClient) runSegmentDownloadingListener(rootCtx context.Context
 					d.syncStats.SnapshotDownload.SegmentsDownloading = map[string]SegmentDownloadStatistics{}
 				}
 
-				d.syncStats.SnapshotDownload.SegmentsDownloading[info.Name] = info
+				if val, ok := d.syncStats.SnapshotDownload.SegmentsDownloading[info.Name]; ok {
+					val.TotalBytes = info.TotalBytes
+					val.DownloadedBytes = info.DownloadedBytes
+					val.Webseeds = info.Webseeds
+					val.Peers = info.Peers
+
+					d.syncStats.SnapshotDownload.SegmentsDownloading[info.Name] = val
+				} else {
+					d.syncStats.SnapshotDownload.SegmentsDownloading[info.Name] = info
+				}
+
+				if err := d.db.Update(d.ctx, SnapshotDownloadUpdater(d.syncStats.SnapshotDownload)); err != nil {
+					log.Error("[Diagnostics] Failed to update snapshot download info", "err", err)
+				}
+
 				d.mu.Unlock()
 			}
 		}
@@ -84,6 +112,9 @@ func (d *DiagnosticClient) runSegmentIndexingListener(rootCtx context.Context) {
 				return
 			case info := <-ch:
 				d.addOrUpdateSegmentIndexingState(info)
+				if err := d.db.Update(d.ctx, SnapshotIndexingUpdater(d.syncStats.SnapshotIndexing)); err != nil {
+					log.Error("[Diagnostics] Failed to update snapshot indexing info", "err", err)
+				}
 			}
 		}
 	}()
@@ -117,6 +148,11 @@ func (d *DiagnosticClient) runSegmentIndexingFinishedListener(rootCtx context.Co
 						Sys:         0,
 					})
 				}
+
+				if err := d.db.Update(d.ctx, SnapshotIndexingUpdater(d.syncStats.SnapshotIndexing)); err != nil {
+					log.Error("[Diagnostics] Failed to update snapshot indexing info", "err", err)
+				}
+
 				d.mu.Unlock()
 			}
 		}
@@ -173,10 +209,124 @@ func (d *DiagnosticClient) runSnapshotFilesListListener(rootCtx context.Context)
 	}()
 }
 
+func (d *DiagnosticClient) runFileDownloadedListener(rootCtx context.Context) {
+	go func() {
+		ctx, ch, closeChannel := Context[FileDownloadedStatisticsUpdate](rootCtx, 1)
+		defer closeChannel()
+
+		StartProviders(ctx, TypeOf(FileDownloadedStatisticsUpdate{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				return
+			case info := <-ch:
+				d.mu.Lock()
+
+				if d.syncStats.SnapshotDownload.SegmentsDownloading == nil {
+					d.syncStats.SnapshotDownload.SegmentsDownloading = map[string]SegmentDownloadStatistics{}
+				}
+
+				if val, ok := d.syncStats.SnapshotDownload.SegmentsDownloading[info.FileName]; ok {
+					val.DownloadedStats = FileDownloadedStatistics{
+						TimeTook:    info.TimeTook,
+						AverageRate: info.AverageRate,
+					}
+
+					d.syncStats.SnapshotDownload.SegmentsDownloading[info.FileName] = val
+				} else {
+					d.syncStats.SnapshotDownload.SegmentsDownloading[info.FileName] = SegmentDownloadStatistics{
+						Name:            info.FileName,
+						TotalBytes:      0,
+						DownloadedBytes: 0,
+						Webseeds:        nil,
+						Peers:           nil,
+						DownloadedStats: FileDownloadedStatistics{
+							TimeTook:    info.TimeTook,
+							AverageRate: info.AverageRate,
+						},
+					}
+				}
+
+				d.mu.Unlock()
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) UpdateFileDownloadedStatistics(downloadedInfo *FileDownloadedStatisticsUpdate, downloadingInfo *SegmentDownloadStatistics) {
+	if d.syncStats.SnapshotDownload.SegmentsDownloading == nil {
+		d.syncStats.SnapshotDownload.SegmentsDownloading = map[string]SegmentDownloadStatistics{}
+	}
+
+	if downloadedInfo != nil {
+		dwStats := FileDownloadedStatistics{
+			TimeTook:    downloadedInfo.TimeTook,
+			AverageRate: downloadedInfo.AverageRate,
+		}
+		if val, ok := d.syncStats.SnapshotDownload.SegmentsDownloading[downloadedInfo.FileName]; ok {
+			val.DownloadedStats = dwStats
+
+			d.syncStats.SnapshotDownload.SegmentsDownloading[downloadedInfo.FileName] = val
+		} else {
+			d.syncStats.SnapshotDownload.SegmentsDownloading[downloadedInfo.FileName] = SegmentDownloadStatistics{
+				Name:            downloadedInfo.FileName,
+				TotalBytes:      0,
+				DownloadedBytes: 0,
+				Webseeds:        make([]SegmentPeer, 0),
+				Peers:           make([]SegmentPeer, 0),
+				DownloadedStats: dwStats,
+			}
+		}
+	} else {
+		if val, ok := d.syncStats.SnapshotDownload.SegmentsDownloading[downloadingInfo.Name]; ok {
+			val.TotalBytes = downloadingInfo.TotalBytes
+			val.DownloadedBytes = downloadingInfo.DownloadedBytes
+			val.Webseeds = downloadingInfo.Webseeds
+			val.Peers = downloadingInfo.Peers
+
+			d.syncStats.SnapshotDownload.SegmentsDownloading[downloadingInfo.Name] = val
+		} else {
+			d.syncStats.SnapshotDownload.SegmentsDownloading[downloadingInfo.Name] = *downloadingInfo
+		}
+	}
+}
+
 func (d *DiagnosticClient) SyncStatistics() SyncStatistics {
 	return d.syncStats
 }
 
 func (d *DiagnosticClient) SnapshotFilesList() SnapshoFilesList {
 	return d.snapshotFileList
+}
+
+func ReadSnapshotDownloadInfo(db kv.RoDB) (info SnapshotDownloadStatistics) {
+	data := ReadDataFromTable(db, kv.DiagSyncStages, SnapshotDownloadStatisticsKey)
+	err := json.Unmarshal(data, &info)
+
+	if err != nil {
+		log.Error("[Diagnostics] Failed to read snapshot download info", "err", err)
+		return SnapshotDownloadStatistics{}
+	} else {
+		return info
+	}
+}
+
+func ReadSnapshotIndexingInfo(db kv.RoDB) (info SnapshotIndexingStatistics) {
+	data := ReadDataFromTable(db, kv.DiagSyncStages, SnapshotIndexingStatisticsKey)
+	err := json.Unmarshal(data, &info)
+
+	if err != nil {
+		log.Error("[Diagnostics] Failed to read snapshot indexing info", "err", err)
+		return SnapshotIndexingStatistics{}
+	} else {
+		return info
+	}
+}
+
+func SnapshotDownloadUpdater(info SnapshotDownloadStatistics) func(tx kv.RwTx) error {
+	return PutDataToTable(kv.DiagSyncStages, SnapshotDownloadStatisticsKey, info)
+}
+
+func SnapshotIndexingUpdater(info SnapshotIndexingStatistics) func(tx kv.RwTx) error {
+	return PutDataToTable(kv.DiagSyncStages, SnapshotIndexingStatisticsKey, info)
 }

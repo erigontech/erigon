@@ -8,10 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/backup"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
@@ -121,25 +118,18 @@ func WarmupExec(ctx context.Context, db kv.RwDB) (err error) {
 	for _, tbl := range stateBuckets {
 		backup.WarmupTable(ctx, db, tbl, log.LvlInfo, backup.ReadAheadThreads)
 	}
-	historyV3 := kvcfg.HistoryV3.FromDB(db)
-	if historyV3 { //hist v2 is too big, if you have so much ram, just use `cat mdbx.dat > /dev/null` to warmup
-		for _, tbl := range stateHistoryV3Buckets {
-			backup.WarmupTable(ctx, db, tbl, log.LvlInfo, backup.ReadAheadThreads)
-		}
+	for _, tbl := range stateHistoryV3Buckets {
+		backup.WarmupTable(ctx, db, tbl, log.LvlInfo, backup.ReadAheadThreads)
 	}
 	return
 }
 
 func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string, logger log.Logger) (err error) {
-	historyV3 := kvcfg.HistoryV3.FromDB(db)
-
 	cleanupList := make([]string, 0)
-	if historyV3 {
-		cleanupList = append(cleanupList, stateBuckets...)
-		cleanupList = append(cleanupList, stateHistoryBuckets...)
-		cleanupList = append(cleanupList, stateHistoryV3Buckets...)
-		cleanupList = append(cleanupList, stateV3Buckets...)
-	}
+	cleanupList = append(cleanupList, stateBuckets...)
+	cleanupList = append(cleanupList, stateHistoryBuckets...)
+	cleanupList = append(cleanupList, stateHistoryV3Buckets...)
+	cleanupList = append(cleanupList, stateV3Buckets...)
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if err := clearStageProgress(tx, stages.Execution, stages.HashState, stages.IntermediateHashes); err != nil {
@@ -149,33 +139,28 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string, log
 		if err := backup.ClearTables(ctx, db, tx, cleanupList...); err != nil {
 			return nil
 		}
-		if !historyV3 {
-			_ = stages.SaveStageProgress(tx, stages.Execution, 0)
-			genesis := core.GenesisBlockByChainName(chain)
-			if _, _, err := core.WriteGenesisState(genesis, tx, tmpDir, logger); err != nil {
-				return err
-			}
-		} else {
-			v3db := db.(*temporal.DB)
-			agg := v3db.Agg()
-			aggTx := agg.BeginFilesRo()
-			defer aggTx.Close()
-			doms, err := state.NewSharedDomains(tx, logger)
-			if err != nil {
-				return err
-			}
-			defer doms.Close()
-
-			_ = stages.SaveStageProgress(tx, stages.Execution, doms.BlockNum())
-			mxs := agg.EndTxNumMinimax() / agg.StepSize()
-			if mxs > 0 {
-				mxs--
-			}
-			log.Info("[reset] exec", "toBlock", doms.BlockNum(), "toTxNum", doms.TxNum(), "maxStepInFiles", mxs)
-		}
-
+		// corner case: state files may be ahead of block files - so, can't use SharedDomains here. juts leave progress as 0.
 		return nil
 	})
+}
+
+func ResetExecWithTx(ctx context.Context, tx kv.RwTx, chain string, tmpDir string, logger log.Logger) (err error) {
+	cleanupList := make([]string, 0)
+	cleanupList = append(cleanupList, stateBuckets...)
+	cleanupList = append(cleanupList, stateHistoryBuckets...)
+	cleanupList = append(cleanupList, stateHistoryV3Buckets...)
+	cleanupList = append(cleanupList, stateV3Buckets...)
+
+	if err := clearStageProgress(tx, stages.Execution, stages.HashState, stages.IntermediateHashes); err != nil {
+		return err
+	}
+	for _, tbl := range cleanupList {
+		if err := tx.ClearBucket(tbl); err != nil {
+			return err
+		}
+	}
+	// corner case: state files may be ahead of block files - so, can't use SharedDomains here. juts leave progress as 0.
+	return nil
 }
 
 func ResetTxLookup(tx kv.RwTx) error {
@@ -226,6 +211,7 @@ var stateV3Buckets = []string{
 	kv.TblAccountKeys, kv.TblStorageKeys, kv.TblCodeKeys, kv.TblCommitmentKeys,
 	kv.TblAccountVals, kv.TblStorageVals, kv.TblCodeVals, kv.TblCommitmentVals,
 	kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx,
+	//kv.TblGasUsedHistoryKeys, kv.TblGasUsedHistoryVals, kv.TblGasUsedIdx,
 	kv.TblPruningProgress,
 }
 

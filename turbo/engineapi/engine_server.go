@@ -42,6 +42,9 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
+var caplinEnabledLog = "Caplin is enabled, so the engine API cannot be used. for external CL use --externalcl"
+var errCaplinEnabled = &rpc.UnsupportedForkError{Message: "caplin is enabled"}
+
 type EngineServer struct {
 	hd              *headerdownload.HeaderDownload
 	blockDownloader *engine_block_downloader.EngineBlockDownloader
@@ -49,6 +52,7 @@ type EngineServer struct {
 	// Block proposing for proof-of-stake
 	proposing        bool
 	test             bool
+	caplin           bool // we need to send errors for caplin.
 	executionService execution.ExecutionClient
 
 	chainRW eth1_chain_reader.ChainReaderWriterEth1
@@ -60,7 +64,7 @@ const fcuTimeout = 1000 // according to mathematics: 1000 millisecods = 1 second
 
 func NewEngineServer(logger log.Logger, config *chain.Config, executionService execution.ExecutionClient,
 	hd *headerdownload.HeaderDownload,
-	blockDownloader *engine_block_downloader.EngineBlockDownloader, test bool, proposing bool) *EngineServer {
+	blockDownloader *engine_block_downloader.EngineBlockDownloader, caplin, test, proposing bool) *EngineServer {
 	chainRW := eth1_chain_reader.NewChainReaderEth1(config, executionService, fcuTimeout)
 	return &EngineServer{
 		logger:           logger,
@@ -70,6 +74,7 @@ func NewEngineServer(logger log.Logger, config *chain.Config, executionService e
 		chainRW:          chainRW,
 		proposing:        proposing,
 		hd:               hd,
+		caplin:           caplin,
 	}
 }
 
@@ -110,12 +115,22 @@ func (e *EngineServer) Start(
 	}
 }
 
-func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {
+func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals types.Withdrawals) error {
 	if !s.config.IsShanghai(time) && withdrawals != nil {
-		return &rpc.InvalidParamsError{Message: "withdrawals before shanghai"}
+		return &rpc.InvalidParamsError{Message: "withdrawals before Shanghai"}
 	}
 	if s.config.IsShanghai(time) && withdrawals == nil {
 		return &rpc.InvalidParamsError{Message: "missing withdrawals list"}
+	}
+	return nil
+}
+
+func (s *EngineServer) checkRequestsPresence(time uint64, requests types.Requests) error {
+	if !s.config.IsPrague(time) && requests != nil {
+		return &rpc.InvalidParamsError{Message: "requests before Prague"}
+	}
+	if s.config.IsPrague(time) && requests == nil {
+		return &rpc.InvalidParamsError{Message: "missing requests list"}
 	}
 	return nil
 }
@@ -124,6 +139,10 @@ func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals []*type
 func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
 	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, version clparams.StateVersion,
 ) (*engine_types.PayloadStatus, error) {
+	if s.caplin {
+		s.logger.Crit(caplinEnabledLog)
+		return nil, errCaplinEnabled
+	}
 	var bloom types.Bloom
 	copy(bloom[:], req.LogsBloom)
 
@@ -150,18 +169,29 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		ReceiptHash: req.ReceiptsRoot,
 		TxHash:      types.DeriveSha(types.BinaryTransactions(txs)),
 	}
-	var withdrawals []*types.Withdrawal
+
+	var withdrawals types.Withdrawals
 	if version >= clparams.CapellaVersion {
 		withdrawals = req.Withdrawals
 	}
-
+	if err := s.checkWithdrawalsPresence(header.Time, withdrawals); err != nil {
+		return nil, err
+	}
 	if withdrawals != nil {
-		wh := types.DeriveSha(types.Withdrawals(withdrawals))
+		wh := types.DeriveSha(withdrawals)
 		header.WithdrawalsHash = &wh
 	}
 
-	if err := s.checkWithdrawalsPresence(header.Time, withdrawals); err != nil {
+	var requests types.Requests
+	if version >= clparams.ElectraVersion && req.DepositRequests != nil {
+		requests = req.DepositRequests.ToRequests()
+	}
+	if err := s.checkRequestsPresence(header.Time, requests); err != nil {
 		return nil, err
+	}
+	if requests != nil {
+		rh := types.DeriveSha(requests)
+		header.RequestsRoot = &rh
 	}
 
 	if version <= clparams.CapellaVersion {
@@ -251,7 +281,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	defer s.lock.Unlock()
 
 	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
-	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
+	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals, requests)
 
 	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes)
 	if err != nil {
@@ -391,6 +421,10 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 
 // EngineGetPayload retrieves previously assembled payload (Validators only)
 func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version clparams.StateVersion) (*engine_types.GetPayloadResponse, error) {
+	if s.caplin {
+		s.logger.Crit("[NewPayload] caplin is enabled")
+		return nil, errCaplinEnabled
+	}
 	if !s.proposing {
 		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
 	}
@@ -437,6 +471,10 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 // engineForkChoiceUpdated either states new block head or request the assembling of a new block
 func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes, version clparams.StateVersion,
 ) (*engine_types.ForkChoiceUpdatedResponse, error) {
+	if s.caplin {
+		s.logger.Crit("[NewPayload] caplin is enabled")
+		return nil, errCaplinEnabled
+	}
 	status, err := s.getQuickPayloadStatusIfPossible(ctx, forkchoiceState.HeadHash, 0, libcommon.Hash{}, forkchoiceState, false)
 	if err != nil {
 		return nil, err
@@ -569,7 +607,10 @@ func (s *EngineServer) getPayloadBodiesByRange(ctx context.Context, start, count
 // Returns the most recent version of the payload(for the payloadID) at the time of receiving the call
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#engine_getpayloadv1
 func (e *EngineServer) GetPayloadV1(ctx context.Context, payloadId hexutility.Bytes) (*engine_types.ExecutionPayload, error) {
-
+	if e.caplin {
+		e.logger.Crit(caplinEnabledLog)
+		return nil, errCaplinEnabled
+	}
 	decodedPayloadId := binary.BigEndian.Uint64(payloadId)
 	e.logger.Info("Received GetPayloadV1", "payloadId", decodedPayloadId)
 
@@ -595,6 +636,14 @@ func (e *EngineServer) GetPayloadV3(ctx context.Context, payloadID hexutility.By
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
 	e.logger.Info("Received GetPayloadV3", "payloadId", decodedPayloadId)
 	return e.getPayload(ctx, decodedPayloadId, clparams.DenebVersion)
+}
+
+// Same as [GetPayloadV3], but returning ExecutionPayloadV4 (= ExecutionPayloadV3 + requests)
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_getpayloadv4
+func (e *EngineServer) GetPayloadV4(ctx context.Context, payloadID hexutility.Bytes) (*engine_types.GetPayloadResponse, error) {
+	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
+	e.logger.Info("Received GetPayloadV4", "payloadId", decodedPayloadId)
+	return e.getPayload(ctx, decodedPayloadId, clparams.ElectraVersion)
 }
 
 // Updates the forkchoice state after validating the headBlockHash
@@ -636,12 +685,24 @@ func (e *EngineServer) NewPayloadV3(ctx context.Context, payload *engine_types.E
 	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, clparams.DenebVersion)
 }
 
+// NewPayloadV4 processes new payloads (blocks) from the beacon chain with withdrawals, blob gas and requests.
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_newpayloadv4
+func (e *EngineServer) NewPayloadV4(ctx context.Context, payload *engine_types.ExecutionPayload,
+	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash) (*engine_types.PayloadStatus, error) {
+	// TODO(racytech): add proper version or refactor this part
+	// add all version ralated checks here so the newpayload doesn't have to deal with checks
+	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, clparams.ElectraVersion)
+}
+
 // Receives consensus layer's transition configuration and checks if the execution layer has the correct configuration.
 // Can also be used to ping the execution layer (heartbeats).
 // See https://github.com/ethereum/execution-apis/blob/v1.0.0-beta.1/src/engine/specification.md#engine_exchangetransitionconfigurationv1
 func (e *EngineServer) ExchangeTransitionConfigurationV1(ctx context.Context, beaconConfig *engine_types.TransitionConfiguration) (*engine_types.TransitionConfiguration, error) {
 	terminalTotalDifficulty := e.config.TerminalTotalDifficulty
-
+	if e.caplin {
+		e.logger.Crit(caplinEnabledLog)
+		return nil, errCaplinEnabled
+	}
 	if terminalTotalDifficulty == nil {
 		return nil, fmt.Errorf("the execution layer doesn't have a terminal total difficulty. expected: %v", beaconConfig.TerminalTotalDifficulty)
 	}
@@ -687,9 +748,11 @@ var ourCapabilities = []string{
 	"engine_newPayloadV1",
 	"engine_newPayloadV2",
 	"engine_newPayloadV3",
+	"engine_newPayloadV4",
 	"engine_getPayloadV1",
 	"engine_getPayloadV2",
 	"engine_getPayloadV3",
+	"engine_getPayloadV4",
 	"engine_exchangeTransitionConfigurationV1",
 	"engine_getPayloadBodiesByHashV1",
 	"engine_getPayloadBodiesByRangeV1",

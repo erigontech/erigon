@@ -6,7 +6,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -164,7 +163,7 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:          stages.IntermediateHashes,
 			Description: "Generate intermediate hashes and computing state root",
-			Disabled:    bodies.historyV3 || config3.EnableHistoryV4InTest || dbg.StagesOnlyBlocks,
+			Disabled:    true,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				if exec.chainConfig.IsOsaka(0) {
 					_, err := SpawnVerkleTrie(s, u, txc.Tx, trieCfg, ctx, logger)
@@ -187,7 +186,7 @@ func DefaultStages(ctx context.Context,
 			ID:                  stages.CallTraces,
 			Description:         "Generate call traces index",
 			DisabledDescription: "Work In Progress",
-			Disabled:            bodies.historyV3 || dbg.StagesOnlyBlocks,
+			Disabled:            true,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				return SpawnCallTraces(s, txc.Tx, callTraces, ctx, logger)
 			},
@@ -201,7 +200,7 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:          stages.AccountHistoryIndex,
 			Description: "Generate account history index",
-			Disabled:    bodies.historyV3 || dbg.StagesOnlyBlocks,
+			Disabled:    true,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				return SpawnAccountHistoryIndex(s, txc.Tx, history, ctx, logger)
 			},
@@ -215,7 +214,7 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:          stages.StorageHistoryIndex,
 			Description: "Generate storage history index",
-			Disabled:    bodies.historyV3 || dbg.StagesOnlyBlocks,
+			Disabled:    true,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				return SpawnStorageHistoryIndex(s, txc.Tx, history, ctx, logger)
 			},
@@ -229,7 +228,7 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:          stages.LogIndex,
 			Description: "Generate receipt logs index",
-			Disabled:    bodies.historyV3 || dbg.StagesOnlyBlocks,
+			Disabled:    true,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				return SpawnLogIndex(s, txc.Tx, logIndex, ctx, 0, logger)
 			},
@@ -539,7 +538,7 @@ func UploaderPipelineStages(ctx context.Context, snapshots SnapshotsCfg, headers
 		{
 			ID:          stages.HashState,
 			Description: "Hash the key in the state",
-			Disabled:    exec.historyV3 && config3.EnableHistoryV4InTest,
+			Disabled:    true,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				return SpawnHashStateStage(s, txc.Tx, hashState, ctx, logger)
 			},
@@ -553,7 +552,7 @@ func UploaderPipelineStages(ctx context.Context, snapshots SnapshotsCfg, headers
 		{
 			ID:          stages.IntermediateHashes,
 			Description: "Generate intermediate hashes and computing state root",
-			Disabled:    exec.historyV3 && config3.EnableHistoryV4InTest,
+			Disabled:    true,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				if exec.chainConfig.IsOsaka(0) {
 					_, err := SpawnVerkleTrie(s, u, txc.Tx, trieCfg, ctx, logger)
@@ -576,7 +575,7 @@ func UploaderPipelineStages(ctx context.Context, snapshots SnapshotsCfg, headers
 			ID:                  stages.CallTraces,
 			Description:         "Generate call traces index",
 			DisabledDescription: "Work In Progress",
-			Disabled:            exec.historyV3,
+			Disabled:            true,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				return SpawnCallTraces(s, txc.Tx, callTraces, ctx, logger)
 			},
@@ -590,7 +589,7 @@ func UploaderPipelineStages(ctx context.Context, snapshots SnapshotsCfg, headers
 		{
 			ID:          stages.AccountHistoryIndex,
 			Description: "Generate account history index",
-			Disabled:    exec.historyV3,
+			Disabled:    true,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				return SpawnAccountHistoryIndex(s, txc.Tx, history, ctx, logger)
 			},
@@ -714,7 +713,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 		{
 			ID:          stages.HashState,
 			Description: "Hash the key in the state",
-			Disabled:    bodies.historyV3,
+			Disabled:    true,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				return SpawnHashStateStage(s, txc.Tx, hashState, ctx, logger)
 			},
@@ -725,7 +724,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 		{
 			ID:          stages.IntermediateHashes,
 			Description: "Generate intermediate hashes and computing state root",
-			Disabled:    bodies.historyV3,
+			Disabled:    true,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				_, err := SpawnIntermediateHashesStage(s, u, txc.Tx, trieCfg, ctx, logger)
 				return err
@@ -740,6 +739,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 func PolygonSyncStages(
 	ctx context.Context,
 	snapshots SnapshotsCfg,
+	polygonSyncStageCfg PolygonSyncStageCfg,
 	blockHashCfg BlockHashesCfg,
 	senders SendersCfg,
 	exec ExecuteBlockCfg,
@@ -767,7 +767,7 @@ func PolygonSyncStages(
 			ID:          stages.PolygonSync,
 			Description: "Use polygon sync component to sync headers, bodies and heimdall data",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, unwinder Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnPolygonSyncStage()
+				return SpawnPolygonSyncStage(ctx, txc.Tx, s, polygonSyncStageCfg)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
 				return UnwindPolygonSyncStage()

@@ -1203,6 +1203,9 @@ func (srv *Server) PeersInfo() []*PeerInfo {
 }
 
 func (srv *Server) addError(err error) {
+	if err == nil {
+		return
+	}
 	srv.errorsMu.Lock()
 	defer srv.errorsMu.Unlock()
 	if srv.errors == nil {
@@ -1221,7 +1224,7 @@ func (srv *Server) listErrors() []interface{} {
 	srv.errorsMu.Lock()
 	defer srv.errorsMu.Unlock()
 
-	list := make([]interface{}, len(srv.errors)*2)
+	list := make([]interface{}, 0, len(srv.errors)*2)
 	for err, count := range srv.errors {
 		list = append(list, err, count)
 	}

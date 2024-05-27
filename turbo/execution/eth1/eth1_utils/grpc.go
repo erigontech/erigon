@@ -57,6 +57,10 @@ func HeaderToHeaderRPC(header *types.Header) *execution.Header {
 		h.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(*header.ParentBeaconBlockRoot)
 	}
 
+	if header.RequestsRoot != nil {
+		h.RequestsRoot = gointerfaces.ConvertHashToH256(*header.RequestsRoot)
+	}
+
 	if len(header.AuRaSeal) > 0 {
 		h.AuraSeal = header.AuRaSeal
 		h.AuraStep = &header.AuRaStep
@@ -131,6 +135,10 @@ func HeaderRpcToHeader(header *execution.Header) (*types.Header, error) {
 		h.ParentBeaconBlockRoot = new(libcommon.Hash)
 		*h.ParentBeaconBlockRoot = gointerfaces.ConvertH256ToHash(header.ParentBeaconBlockRoot)
 	}
+	if header.RequestsRoot != nil {
+		h.RequestsRoot = new(libcommon.Hash)
+		*h.RequestsRoot = gointerfaces.ConvertH256ToHash(header.RequestsRoot)
+	}
 	blockHash := gointerfaces.ConvertH256ToHash(header.BlockHash)
 	if blockHash != h.Hash() {
 		return nil, fmt.Errorf("block %d, %x has invalid hash. expected: %x", header.BlockNumber, h.Hash(), blockHash)
@@ -197,6 +205,7 @@ func ConvertRawBlockBodyToRpc(in *types.RawBody, blockNumber uint64, blockHash l
 		Transactions: in.Transactions,
 		Uncles:       HeadersToHeadersRPC(in.Uncles),
 		Withdrawals:  ConvertWithdrawalsToRpc(in.Withdrawals),
+		//TODO(racytech): Requests
 	}
 }
 
@@ -221,6 +230,7 @@ func ConvertRawBlockBodyFromRpc(in *execution.BlockBody) (*types.RawBody, error)
 		Transactions: in.Transactions,
 		Uncles:       uncles,
 		Withdrawals:  ConvertWithdrawalsFromRpc(in.Withdrawals),
+		//TODO(racytech): Requests
 	}, nil
 }
 

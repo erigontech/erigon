@@ -33,7 +33,6 @@ import (
 	txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedb"
@@ -279,7 +278,7 @@ func EmbeddedServices(ctx context.Context,
 		// ... adding back in place to see about the above statement
 		stateCache = kvcache.New(stateCacheCfg)
 	} else {
-		stateCache = kvcache.NewDummy(stateCacheCfg.StateV3)
+		stateCache = kvcache.NewDummy()
 	}
 
 	subscribeToStateChangesLoop(ctx, stateDiffClient, stateCache)
@@ -382,7 +381,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		allSnapshots.OptimisticReopenWithDB(db)
 		allBorSnapshots.OptimisticalyReopenWithDB(db)
 		allSnapshots.LogStat("remote")
-		allBorSnapshots.LogStat("remote")
+		allBorSnapshots.LogStat("bor:remote")
 
 		if agg, err = libstate.NewAggregator(ctx, cfg.Dirs, config3.HistoryV3AggregationStep, db, logger); err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("create aggregator: %w", err)
@@ -413,7 +412,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 				if err := allBorSnapshots.ReopenList(reply.BlocksFiles, true); err != nil {
 					logger.Error("[bor snapshots] reopen", "err", err)
 				} else {
-					allBorSnapshots.LogStat("reopen")
+					allBorSnapshots.LogStat("bor:reopen")
 				}
 
 				//if err = agg.OpenList(reply.HistoryFiles, true); err != nil {
@@ -435,20 +434,11 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		onNewSnapshot()
 		blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 
-		var histV3Enabled bool
-		_ = db.View(ctx, func(tx kv.Tx) error {
-			histV3Enabled, _ = kvcfg.HistoryV3.Enabled(tx)
-			return nil
-		})
-		cfg.StateCache.StateV3 = histV3Enabled
-		if histV3Enabled {
-			logger.Info("HistoryV3", "enable", histV3Enabled)
-			db, err = temporal.New(rwKv, agg)
-			if err != nil {
-				return nil, nil, nil, nil, nil, nil, nil, nil, nil, err
-			}
+		db, err = temporal.New(rwKv, agg)
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, nil, nil, err
 		}
-		stateCache = kvcache.NewDummy(cfg.StateCache.StateV3)
+		stateCache = kvcache.NewDummy()
 	}
 	// If DB can't be configured - used PrivateApiAddr as remote DB
 	if db == nil {
@@ -459,7 +449,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if cfg.StateCache.CacheSize > 0 {
 			stateCache = kvcache.New(cfg.StateCache)
 		} else {
-			stateCache = kvcache.NewDummy(cfg.StateCache.StateV3)
+			stateCache = kvcache.NewDummy()
 		}
 		logger.Info("if you run RPCDaemon on same machine with Erigon add --datadir option")
 	}

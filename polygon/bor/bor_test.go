@@ -116,7 +116,7 @@ func (h test_heimdall) FetchCheckpointCount(ctx context.Context) (int64, error) 
 	return 0, fmt.Errorf("TODO")
 }
 
-func (h *test_heimdall) FetchCheckpoints(ctx context.Context, page uint64, limit uint64) (heimdall.Checkpoints, error) {
+func (h *test_heimdall) FetchCheckpoints(ctx context.Context, page uint64, limit uint64) ([]*heimdall.Checkpoint, error) {
 	return nil, fmt.Errorf("TODO")
 }
 
@@ -125,6 +125,10 @@ func (h test_heimdall) FetchMilestone(ctx context.Context, number int64) (*heimd
 }
 
 func (h test_heimdall) FetchMilestoneCount(ctx context.Context) (int64, error) {
+	return 0, fmt.Errorf("TODO")
+}
+
+func (h test_heimdall) FetchFirstMilestoneNum(ctx context.Context) (int64, error) {
 	return 0, fmt.Errorf("TODO")
 }
 

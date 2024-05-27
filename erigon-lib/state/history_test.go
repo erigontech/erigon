@@ -461,7 +461,7 @@ func TestHistoryCanPrune(t *testing.T) {
 	t.Run("withoutFiles", func(t *testing.T) {
 		db, h := testDbAndHistory(t, false, logger)
 		h.dontProduceHistoryFiles = true
-		h.keepTxInDB = stepKeepInDB * h.aggregationStep
+		h.keepRecentTxInDB = stepKeepInDB * h.aggregationStep
 
 		defer db.Close()
 
@@ -622,7 +622,7 @@ func checkHistoryHistory(t *testing.T, h *History, txs uint64) {
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], valNum)
 			k[0], v[0] = 0x01, 0xff
-			val, ok, err := hc.GetNoState(k[:], txNum+1)
+			val, ok, err := hc.historySeekInFiles(k[:], txNum+1)
 			//require.Equal(t, ok, txNum < 976)
 			if ok {
 				require.NoError(t, err, label)
@@ -1088,15 +1088,15 @@ func TestIterateChanged2(t *testing.T) {
 			require.NoError(err)
 			defer tx.Rollback()
 
-			v, ok, err := hc.GetNoStateWithRecent(hexutility.MustDecodeHex("0100000000000001"), 900, tx)
+			v, ok, err := hc.HistorySeek(hexutility.MustDecodeHex("0100000000000001"), 900, tx)
 			require.NoError(err)
 			require.True(ok)
 			require.Equal(hexutility.MustDecodeHex("ff00000000000383"), v)
-			v, ok, err = hc.GetNoStateWithRecent(hexutility.MustDecodeHex("0100000000000001"), 0, tx)
+			v, ok, err = hc.HistorySeek(hexutility.MustDecodeHex("0100000000000001"), 0, tx)
 			require.NoError(err)
 			require.True(ok)
 			require.Equal([]byte{}, v)
-			v, ok, err = hc.GetNoStateWithRecent(hexutility.MustDecodeHex("0100000000000001"), 1000, tx)
+			v, ok, err = hc.HistorySeek(hexutility.MustDecodeHex("0100000000000001"), 1000, tx)
 			require.NoError(err)
 			require.True(ok)
 			require.Equal(hexutility.MustDecodeHex("ff000000000003e7"), v)
@@ -1142,15 +1142,15 @@ func TestIterateChanged2(t *testing.T) {
 			require.NoError(err)
 			defer tx.Rollback()
 
-			v, ok, err := hc.GetNoStateWithRecent(hexutility.MustDecodeHex("0100000000000001"), 900, tx)
+			v, ok, err := hc.HistorySeek(hexutility.MustDecodeHex("0100000000000001"), 900, tx)
 			require.NoError(err)
 			require.True(ok)
 			require.Equal(hexutility.MustDecodeHex("ff00000000000383"), v)
-			v, ok, err = hc.GetNoStateWithRecent(hexutility.MustDecodeHex("0100000000000001"), 0, tx)
+			v, ok, err = hc.HistorySeek(hexutility.MustDecodeHex("0100000000000001"), 0, tx)
 			require.NoError(err)
 			require.True(ok)
 			require.Equal([]byte{}, v)
-			v, ok, err = hc.GetNoStateWithRecent(hexutility.MustDecodeHex("0100000000000001"), 1000, tx)
+			v, ok, err = hc.HistorySeek(hexutility.MustDecodeHex("0100000000000001"), 1000, tx)
 			require.NoError(err)
 			require.True(ok)
 			require.Equal(hexutility.MustDecodeHex("ff000000000003e7"), v)

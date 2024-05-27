@@ -58,7 +58,7 @@ func TestState(t *testing.T) {
 	//if ethconfig.EnableHistoryV3InTest {
 	//}
 
-	_, db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	st.walk(t, stateTestDir, func(t *testing.T, name string, test *StateTest) {
 		for _, subtest := range test.Subtests() {
 			subtest := subtest

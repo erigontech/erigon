@@ -35,18 +35,20 @@ type blockCollector struct {
 	size           uint64
 	logger         log.Logger
 	engine         execution_client.ExecutionEngine
+	syncBackLoop   uint64
 
 	mu sync.Mutex
 }
 
 // NewBlockCollector creates a new block collector
-func NewBlockCollector(logger log.Logger, engine execution_client.ExecutionEngine, beaconChainCfg *clparams.BeaconChainConfig, tmpdir string) BlockCollector {
+func NewBlockCollector(logger log.Logger, engine execution_client.ExecutionEngine, beaconChainCfg *clparams.BeaconChainConfig, syncBackLoopAmount uint64, tmpdir string) BlockCollector {
 	return &blockCollector{
 		collector:      etl.NewCollector(etlPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger),
 		tmpdir:         tmpdir,
 		beaconChainCfg: beaconChainCfg,
 		logger:         logger,
 		engine:         engine,
+		syncBackLoop:   syncBackLoopAmount,
 	}
 }
 
@@ -83,6 +85,8 @@ func (b *blockCollector) Flush(ctx context.Context) error {
 	defer tmpTx.Rollback()
 	blocksBatch := []*types.Block{}
 
+	inserted := uint64(0)
+
 	if err := b.collector.Load(tmpTx, kv.Headers, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if len(v) == 0 {
 			return nil
@@ -109,12 +113,29 @@ func (b *blockCollector) Flush(ctx context.Context) error {
 			b.logger.Warn("bad blocks segment received", "err", err)
 			return err
 		}
-		blocksBatch = append(blocksBatch, types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals))
+		blocksBatch = append(blocksBatch, types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals, body.Requests))
 		if len(blocksBatch) >= batchSize {
+			b.logger.Info("[Caplin] Inserting blocks", "from", blocksBatch[0].NumberU64(), "to", blocksBatch[len(blocksBatch)-1].NumberU64())
 			if err := b.engine.InsertBlocks(ctx, blocksBatch, true); err != nil {
 				b.logger.Warn("failed to insert blocks", "err", err)
 			}
+			inserted += uint64(len(blocksBatch))
 			b.logger.Info("[Caplin] Inserted blocks", "progress", blocksBatch[len(blocksBatch)-1].NumberU64())
+			// If we have inserted enough blocks, update fork choice (Optimation for E35)
+			lastBlockHash := blocksBatch[len(blocksBatch)-1].Hash()
+			currentHeader, err := b.engine.CurrentHeader(ctx)
+			if err != nil {
+				b.logger.Warn("failed to get current header", "err", err)
+			}
+			isForkchoiceNeeded := currentHeader == nil || blocksBatch[len(blocksBatch)-1].NumberU64() > currentHeader.Number.Uint64()
+			if inserted >= b.syncBackLoop {
+				if isForkchoiceNeeded {
+					if _, err := b.engine.ForkChoiceUpdate(ctx, lastBlockHash, lastBlockHash, nil); err != nil {
+						b.logger.Warn("failed to update fork choice", "err", err)
+					}
+				}
+				inserted = 0
+			}
 			blocksBatch = []*types.Block{}
 		}
 		return next(k, nil, nil)

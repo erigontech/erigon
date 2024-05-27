@@ -85,12 +85,11 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 			require.NoError(t, err)
 		}
 	}
-	//})
-	//t.Run("GetHistory", func(t *testing.B) {
+
 	for ik := 0; ik < t.N; ik++ {
 		for i := 0; i < len(keys); i++ {
 			ts := uint64(rnd.Intn(int(maxTx)))
-			v, ok, err := ac2.HistoryGet(kv.AccountsHistory, keys[i], ts, rwTx)
+			v, ok, err := ac2.HistorySeek(kv.AccountsHistory, keys[i], ts, rwTx)
 
 			require.True(t, ok)
 			require.NotNil(t, v)
@@ -98,6 +97,47 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 			require.NoError(t, err)
 		}
 	}
-	//})
+}
 
+func BenchmarkSharedDomains_ComputeCommitment(b *testing.B) {
+	b.StopTimer()
+
+	stepSize := uint64(100)
+	db, agg := testDbAndAggregatorBench(b, stepSize)
+
+	ctx := context.Background()
+	rwTx, err := db.BeginRw(ctx)
+	require.NoError(b, err)
+	defer rwTx.Rollback()
+
+	ac := agg.BeginFilesRo()
+	defer ac.Close()
+
+	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	require.NoError(b, err)
+	defer domains.Close()
+
+	maxTx := stepSize * 17
+	data := generateTestDataForDomainCommitment(b, length.Addr, length.Addr+length.Hash, maxTx, 15, 100)
+	require.NotNil(b, data)
+
+	for domName, d := range data {
+		fom := kv.AccountsDomain
+		if domName == "storage" {
+			fom = kv.StorageDomain
+		}
+		for key, upd := range d {
+			for _, u := range upd {
+				domains.SetTxNum(u.txNum)
+				err := domains.DomainPut(fom, []byte(key), nil, u.value, nil, 0)
+				require.NoError(b, err)
+			}
+		}
+	}
+
+	b.StartTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
+		require.NoError(b, err)
+	}
 }

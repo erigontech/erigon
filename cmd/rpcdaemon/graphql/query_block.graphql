@@ -8,6 +8,7 @@
     baseFeePerGas
     logsBloom
     ommerHash
+    ommerCount
     ommers {
       hash
     }
@@ -53,6 +54,12 @@
         address
       }
       status
+    }
+    withdrawals {
+      index
+      validator
+      address
+      amount
     }
   }
 }
