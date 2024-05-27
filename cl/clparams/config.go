@@ -1055,6 +1055,9 @@ func GetAllCheckpointSyncEndpoints(net NetworkType) []string {
 	// order: custom URLs -> default URLs
 	urls := []string{}
 	urls = append(urls, shuffle(ConfigurableCheckpointsURLs)...)
+	if len(ConfigurableCheckpointsURLs) > 0 {
+		return urls
+	}
 	if checkpoints, ok := CheckpointSyncEndpoints[net]; ok {
 		urls = append(urls, shuffle(checkpoints)...)
 	}
