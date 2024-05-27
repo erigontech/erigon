@@ -50,7 +50,7 @@ func StageCustomTraceCfg(db kv.RwDB, prune prune.Mode, dirs datadir.Dirs, br ser
 	}
 }
 
-func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, ctx context.Context, initialCycle bool, prematureEndBlock uint64, logger log.Logger) error {
+func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, ctx context.Context, prematureEndBlock uint64, logger log.Logger) error {
 	useExternalTx := txc.Ttx != nil
 	var tx kv.TemporalTx
 	if !useExternalTx {
