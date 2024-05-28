@@ -301,11 +301,12 @@ func (d *DiagnosticClient) SnapshotFilesList() SnapshoFilesList {
 
 func ReadSnapshotDownloadInfo(db kv.RoDB) (info SnapshotDownloadStatistics) {
 	data := ReadDataFromTable(db, kv.DiagSyncStages, SnapshotDownloadStatisticsKey)
-	err := json.Unmarshal(data, &info)
 
 	if len(data) == 0 {
 		return SnapshotDownloadStatistics{}
 	}
+
+	err := json.Unmarshal(data, &info)
 
 	if err != nil {
 		log.Error("[Diagnostics] Failed to read snapshot download info", "err", err)
@@ -317,11 +318,12 @@ func ReadSnapshotDownloadInfo(db kv.RoDB) (info SnapshotDownloadStatistics) {
 
 func ReadSnapshotIndexingInfo(db kv.RoDB) (info SnapshotIndexingStatistics) {
 	data := ReadDataFromTable(db, kv.DiagSyncStages, SnapshotIndexingStatisticsKey)
-	err := json.Unmarshal(data, &info)
 
 	if len(data) == 0 {
 		return SnapshotIndexingStatistics{}
 	}
+
+	err := json.Unmarshal(data, &info)
 
 	if err != nil {
 		log.Error("[Diagnostics] Failed to read snapshot indexing info", "err", err)
