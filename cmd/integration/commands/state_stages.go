@@ -226,8 +226,8 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, changeSetHook, chainConfig, engine, vmConfig, changesAcc, false, true, dirs,
 		br, nil, genesis, syncCfg, agg, nil)
 
-	execUntilFunc := func(execToBlock uint64) func(firstCycle bool, badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-		return func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, unwinder stagedsync.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+	execUntilFunc := func(execToBlock uint64) func(badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+		return func(badBlockUnwind bool, s *stagedsync.StageState, unwinder stagedsync.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 			if err := stagedsync.SpawnExecuteBlocksStage(s, unwinder, txc, execToBlock, ctx, execCfg, logger); err != nil {
 				return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
 			}
@@ -350,7 +350,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 		if miner.MiningConfig.Enabled && nextBlock != nil && nextBlock.Coinbase() != (common2.Address{}) {
 			miner.MiningConfig.Etherbase = nextBlock.Coinbase()
 			miner.MiningConfig.ExtraData = nextBlock.Extra()
-			miningStages.MockExecFunc(stages.MiningCreateBlock, func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			miningStages.MockExecFunc(stages.MiningCreateBlock, func(badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				err = stagedsync.SpawnMiningCreateBlockStage(s, txc.Tx,
 					stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, dirs.Tmp, br),
 					quit, logger)
@@ -563,7 +563,7 @@ func loopExec(db kv.RwDB, ctx context.Context, unwind uint64, logger log.Logger)
 		/*badBlockHalt=*/ true, dirs, br, nil, genesis, syncCfg, agg, nil)
 
 	// set block limit of execute stage
-	sync.MockExecFunc(stages.Execution, func(firstCycle bool, badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+	sync.MockExecFunc(stages.Execution, func(badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 		if err = stagedsync.SpawnExecuteBlocksStage(stageState, sync, txc, to, ctx, cfg, logger); err != nil {
 			return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
 		}
