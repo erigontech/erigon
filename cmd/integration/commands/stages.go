@@ -1198,7 +1198,7 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber)
-		err := stagedsync.UnwindExecutionStage(u, s, txc, ctx, cfg, true, logger)
+		err := stagedsync.UnwindExecutionStage(u, s, txc, ctx, cfg, logger)
 		if err != nil {
 			return err
 		}
@@ -1210,14 +1210,14 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		if err != nil {
 			return err
 		}
-		err = stagedsync.PruneExecutionStage(p, tx, cfg, ctx, true)
+		err = stagedsync.PruneExecutionStage(p, tx, cfg, ctx)
 		if err != nil {
 			return err
 		}
 		return nil
 	}
 
-	err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, block, ctx, cfg, true /* initialCycle */, logger)
+	err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, block, ctx, cfg, logger)
 	if err != nil {
 		return err
 	}
@@ -1713,7 +1713,7 @@ func stageTxLookup(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		if err != nil {
 			return err
 		}
-		err = stagedsync.PruneTxLookup(p, tx, cfg, ctx, true, logger)
+		err = stagedsync.PruneTxLookup(p, tx, cfg, ctx, logger)
 		if err != nil {
 			return err
 		}

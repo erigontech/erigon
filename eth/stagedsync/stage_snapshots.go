@@ -143,7 +143,6 @@ func SpawnStageSnapshots(
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg SnapshotsCfg,
-	initialCycle bool,
 	logger log.Logger,
 ) (err error) {
 	useExternalTx := tx != nil
@@ -154,7 +153,7 @@ func SpawnStageSnapshots(
 		}
 		defer tx.Rollback()
 	}
-	if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg, initialCycle, logger); err != nil {
+	if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg, logger); err != nil {
 		return err
 	}
 	var minProgress uint64
@@ -186,8 +185,8 @@ func SpawnStageSnapshots(
 	return nil
 }
 
-func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, initialCycle bool, logger log.Logger) error {
-	if !initialCycle {
+func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, logger log.Logger) error {
+	if !s.CurrentSyncCycle.IsInitialCycle {
 		return nil
 	}
 	if !cfg.blockReader.FreezingCfg().Enabled {
@@ -438,7 +437,7 @@ func computeBlocksToPrune(cfg SnapshotsCfg) (blocksToPrune uint64, historyToPrun
 /* ====== PRUNING ====== */
 // snapshots pruning sections works more as a retiring of blocks
 // retiring blocks means moving block data from db into snapshots
-func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx, logger log.Logger) (err error) {
+func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx, logger log.Logger) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -469,7 +468,7 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 				minBlockNumber = cfg.snapshotUploader.minBlockNumber()
 			}
 
-			if initialCycle {
+			if s.CurrentSyncCycle.IsInitialCycle {
 				cfg.blockRetire.SetWorkers(estimate.CompressSnapshot.Workers())
 			} else {
 				cfg.blockRetire.SetWorkers(1)
@@ -506,7 +505,7 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 		}
 
 		pruneLimit := 100
-		if initialCycle {
+		if s.CurrentSyncCycle.IsInitialCycle {
 			pruneLimit = 10_000
 		}
 		if err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit); err != nil {
