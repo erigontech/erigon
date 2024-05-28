@@ -165,7 +165,7 @@ func UnmarshalRequestsFromBinary(requests [][]byte) (reqs Requests, err error) {
 			reqs = append(reqs, w)
 		default:
 			continue
-		}	
+		}
 	}
 	return
 }

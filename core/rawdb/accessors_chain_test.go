@@ -599,7 +599,8 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	deposits := make(types.Deposits, 0)
 	deposits = append(deposits, &r1)
 	deposits = append(deposits, &r2)
-	reqs := deposits.ToRequests()
+	var reqs types.Requests
+	reqs = deposits.Requests()
 	// Create a test block to move around the database and make sure it's really new
 	block := types.NewBlockWithHeader(&types.Header{
 		Number:      big.NewInt(1),

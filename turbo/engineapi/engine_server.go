@@ -184,7 +184,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	var requests types.Requests
 	if version >= clparams.ElectraVersion && req.DepositRequests != nil {
-		requests = append(requests, req.DepositRequests.ToRequests()...)
+		requests = append(requests, req.DepositRequests.Requests()...)
 		requests = append(requests, req.WithdrawalRequests...)
 	}
 	if err := s.checkRequestsPresence(header.Time, requests); err != nil {

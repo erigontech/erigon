@@ -31,7 +31,6 @@ func (w *WithdrawalRequest) EncodingSize() (encodingSize int) {
 	encodingSize += 1 // RequestType
 	return
 }
-func (w *WithdrawalRequest) requestType() byte { return WithdrawalRequestType }
 func (w *WithdrawalRequest) EncodeRLP(b io.Writer) (err error) {
 	var buf bytes.Buffer
 	bb := make([]byte, 10)
@@ -46,7 +45,7 @@ func (w *WithdrawalRequest) EncodeRLP(b io.Writer) (err error) {
 	}
 	rlp2.EncodeListPrefix(buf.Len(), bb)
 
-	if _, err = b.Write([]byte{0x01}); err != nil {
+	if _, err = b.Write([]byte{WithdrawalRequestType}); err != nil {
 		return err
 	}
 	if _, err = b.Write(bb[0:2]); err != nil {

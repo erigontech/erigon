@@ -1,6 +1,7 @@
 package types
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -40,11 +41,38 @@ type Deposit struct {
 }
 
 func (d *Deposit) RequestType() byte { return DepositRequestType }
-func (d *Deposit) EncodeRLP(w io.Writer) error {
+func (d *Deposit) EncodeRLP(w io.Writer) (err error) {
 	// todo @somnathb1 fix this
-	return rlp.Encode(w, d)
+	var buf bytes.Buffer
+	bb := make([]byte, 10)
+	if err = rlp.Encode(&buf, d.Pubkey); err != nil {
+		return err
+	}
+	if err = rlp.Encode(&buf, d.WithdrawalCredentials); err != nil {
+		return err
+	}
+	if err = rlp.EncodeInt(d.Amount, &buf, bb); err != nil {
+		return err
+	}
+	if err = rlp.Encode(&buf, d.Signature); err != nil {
+		return err
+	}
+	if err = rlp.EncodeInt(d.Index, &buf, bb); err != nil {
+		return err
+	}
+	rlp2.EncodeListPrefix(buf.Len(), bb)
+	if _, err = w.Write([]byte{DepositRequestType}); err != nil {
+		return err
+	}
+	if _, err = w.Write(bb[0:2]); err != nil {
+		return err
+	}
+	if _, err = w.Write(buf.Bytes()); err != nil {
+		return err
+	}
+	return
 }
-func (d *Deposit) DecodeRLP(data []byte) error { return rlp.DecodeBytes(data, d) }
+func (d *Deposit) DecodeRLP(input []byte) error { return rlp.DecodeBytes(input[1:], d) }
 func (d *Deposit) copy() Request {
 	return &Deposit{
 		Pubkey:                d.Pubkey,
@@ -62,7 +90,7 @@ func (d *Deposit) EncodingSize() (encodingSize int) {
 	encodingSize += rlp.IntLenExcludingHead(d.Index)
 
 	encodingSize += 180 // 1 + 48 + 1 + 32 + 1 + 1 + 96 (0x80 + pLen, 0x80 + wLen, 0xb8 + 2 + sLen)
-	encodingSize = rlp2.ListPrefixLen(encodingSize)
+	encodingSize += rlp2.ListPrefixLen(encodingSize)
 	encodingSize += 1 //RequestType
 	return
 }
@@ -110,8 +138,18 @@ func ParseDepositLogs(logs []*Log, depositContractAddress *libcommon.Address) (R
 
 type Deposits []*Deposit
 
-func (ds Deposits) ToRequests() (reqs Requests) {
-	for _, d := range ds {
+// Len returns the length of s.
+func (s Deposits) Len() int { return len(s) }
+
+// EncodeIndex encodes the i'th withdrawal request to w.
+func (s Deposits) EncodeIndex(i int, w *bytes.Buffer) {
+	s[i].EncodeRLP(w)
+}
+
+// Requests creates a deep copy of each deposit and returns a slice of the
+// withdrwawal requests as Request objects.
+func (s Deposits) Requests() (reqs Requests) {
+	for _, d := range s {
 		reqs = append(reqs, d)
 	}
 	return
