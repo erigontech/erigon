@@ -30,7 +30,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
 	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
-	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 )
 
@@ -644,7 +643,7 @@ func (s *CaplinSnapshots) FrozenBlobs() uint64 {
 		if seg.from == minSegFrom {
 			foundMinSeg = true
 		}
-		ret = utils.Max64(ret, seg.to)
+		ret = max(ret, seg.to)
 	}
 	if !foundMinSeg {
 		return 0
