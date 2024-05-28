@@ -108,4 +108,9 @@ var (
 		Usage: "Path to the token that ensures safe connection between CL and EL",
 		Value: "",
 	}
+	MevRelayUrl = cli.StringFlag{
+		Name:  "mev-relay-url",
+		Usage: "Http URL of the MEV relay",
+		Value: "",
+	}
 )
