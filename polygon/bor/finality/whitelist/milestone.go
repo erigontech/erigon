@@ -216,8 +216,7 @@ func (m *milestone) GetMilestoneIDsList() []string {
 func (m *milestone) purgeMilestoneIDsList() {
 	// try is used here as the finality lock is preserved over calls - so the lock state
 	// is not clearly defined in the local code - this likely needs to be revised
-	if !m.finality.TryLock() {
-		m.finality.Lock()
+	if m.finality.TryLock() {
 		defer m.finality.Unlock()
 	}
 
