@@ -200,9 +200,11 @@ func postBlockStateHandling(
 	parentHash common.Hash,
 	txInfos []blockinfo.ExecutedTxInfo,
 ) error {
+	blockNumber := header.Number.Uint64()
+
 	blokInfoRootHash, err := blockinfo.BuildBlockInfoTree(
 		&header.Coinbase,
-		header.Number.Uint64(),
+		blockNumber,
 		header.Time,
 		header.GasLimit,
 		header.GasUsed,
