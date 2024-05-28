@@ -63,8 +63,8 @@ func printDownloadStatus(cliCtx *cli.Context) error {
 	data, err := getData(cliCtx)
 
 	if err != nil {
-
-		return err
+		util.RenderError(err)
+		return nil
 	}
 
 	snapshotDownloadStatus := getSnapshotStatusRow(data.SnapshotDownload)
@@ -92,9 +92,8 @@ func printFiles(cliCtx *cli.Context) error {
 	data, err := getData(cliCtx)
 
 	if err != nil {
-		txt := text.Colors{text.FgWhite, text.BgRed}
-		fmt.Printf("%s %s", txt.Sprint("[ERROR]"), "Failed to connect to Erigon node.")
-		return err
+		util.RenderError(err)
+		return nil
 	}
 
 	snapshotDownloadStatus := getSnapshotStatusRow(data.SnapshotDownload)
