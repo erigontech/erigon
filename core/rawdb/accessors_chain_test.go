@@ -677,8 +677,8 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	require.True(len(entry.Requests) == 2)
 	rd1 := readRequests[0]
 	rd2 := readRequests[1]
-	require.True(rd1.Type() == types.DepositRequestType)
-	require.True(rd2.Type() == types.DepositRequestType)
+	require.True(rd1.RequestType() == types.DepositRequestType)
+	require.True(rd2.RequestType() == types.DepositRequestType)
 
 	readDeposits := (types.Requests)(readRequests).Deposits()
 	d1 := readDeposits[0]

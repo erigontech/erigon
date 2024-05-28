@@ -627,7 +627,7 @@ type Body struct {
 	Transactions []Transaction
 	Uncles       []*Header
 	Withdrawals  []*Withdrawal
-	Requests     []*Request
+	Requests     Requests
 }
 
 // RawBody is semi-parsed variant of Body, where transactions are still unparsed RLP strings
@@ -637,7 +637,7 @@ type RawBody struct {
 	Transactions [][]byte
 	Uncles       []*Header
 	Withdrawals  []*Withdrawal
-	Requests     []*Request
+	Requests     Requests
 }
 
 type BodyForStorage struct {
@@ -645,7 +645,7 @@ type BodyForStorage struct {
 	TxAmount    uint32
 	Uncles      []*Header
 	Withdrawals []*Withdrawal
-	Requests    []*Request
+	Requests    Requests
 }
 
 // Alternative representation of the Block.
@@ -678,7 +678,7 @@ type Block struct {
 	uncles       []*Header
 	transactions Transactions
 	withdrawals  []*Withdrawal
-	requests     []*Request
+	requests     Requests
 
 	// caches
 	hash atomic.Value
@@ -805,8 +805,8 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode Requests
-	rb.Requests = []*Request{}
-	if err := decodeRequests(&rb.Requests, s); err != nil {
+	rb.Requests = []Request{}
+	if err := decodeRequests(rb.Requests, s); err != nil {
 		return err
 	}
 
@@ -902,8 +902,8 @@ func (bfs *BodyForStorage) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode Requests
-	bfs.Requests = []*Request{}
-	if err := decodeRequests(&bfs.Requests, s); err != nil {
+	bfs.Requests = Requests{}
+	if err := decodeRequests(bfs.Requests, s); err != nil {
 		return err
 	}
 	return s.ListEnd()
@@ -987,7 +987,7 @@ func (bb *Body) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode Requests
-	if err := decodeRequests(&bb.Requests, s); err != nil {
+	if err := decodeRequests(bb.Requests, s); err != nil {
 		return err
 	}
 
@@ -1000,7 +1000,7 @@ func (bb *Body) DecodeRLP(s *rlp.Stream) error {
 // The values of TxHash, UncleHash, ReceiptHash, Bloom, and WithdrawalHash
 // in the header are ignored and set to the values derived from
 // the given txs, uncles, receipts, and withdrawals.
-func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt, withdrawals []*Withdrawal, requests []*Request) *Block {
+func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt, withdrawals []*Withdrawal, requests Requests) *Block {
 	b := &Block{header: CopyHeader(header)}
 
 	// TODO: panic if len(txs) != len(receipts)
@@ -1057,8 +1057,8 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 		b.header.RequestsRoot = &h
 		b.requests = make(Requests, len(requests))
 		for i, r := range requests {
-			rCopy := *r
-			b.requests[i] = &rCopy
+			rCopy := r.copy()
+			b.requests[i] = rCopy
 		}
 	}
 
@@ -1067,7 +1067,7 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 
 // NewBlockFromStorage like NewBlock but used to create Block object when read it from DB
 // in this case no reason to copy parts, or re-calculate headers fields - they are all stored in DB
-func NewBlockFromStorage(hash libcommon.Hash, header *Header, txs []Transaction, uncles []*Header, withdrawals []*Withdrawal, requests []*Request) *Block {
+func NewBlockFromStorage(hash libcommon.Hash, header *Header, txs []Transaction, uncles []*Header, withdrawals []*Withdrawal, requests []Request) *Block {
 	b := &Block{header: header, transactions: txs, uncles: uncles, withdrawals: withdrawals, requests: requests}
 	b.hash.Store(hash)
 	return b
@@ -1166,8 +1166,8 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode Requests
-	bb.requests = []*Request{}
-	if err := decodeRequests(&bb.requests, s); err != nil {
+	bb.requests = Requests{}
+	if err := decodeRequests(bb.requests, s); err != nil {
 		return err
 	}
 
@@ -1448,12 +1448,11 @@ func (b *Block) Copy() *Block {
 		}
 	}
 
-	var requests []*Request
+	var requests []Request
 	if b.requests != nil {
-		requests = make([]*Request, 0, len(b.requests))
+		requests = make([]Request, 0, len(b.requests))
 		for _, request := range b.requests {
-			rCopy := *request
-			requests = append(requests, &rCopy)
+			requests = append(requests, request.copy())
 		}
 	}
 
@@ -1600,22 +1599,23 @@ func decodeWithdrawals(appendList *[]*Withdrawal, s *rlp.Stream) error {
 	return checkErrListEnd(s, err)
 }
 
-func decodeRequests(appendList *[]*Request, s *rlp.Stream) error {
-	var err error
-	if _, err = s.List(); err != nil {
-		if errors.Is(err, rlp.EOL) {
-			*appendList = nil
-			return nil
-		}
-		return fmt.Errorf("read requests: %v", err)
-	}
-	for err == nil {
-		var r Request
-		if err = r.DecodeRLP(s); err != nil {
-			break
-		}
-		*appendList = append(*appendList, &r)
-	}
+func decodeRequests(r Requests, s *rlp.Stream) error {
+	// var err error
+	// if _, err = s.List(); err != nil {
+	// 	if errors.Is(err, rlp.EOL) {
+	// 		*appendList = nil
+	// 		return nil
+	// 	}
+	// 	return fmt.Errorf("read requests: %v", err)
+	// }
+	// for err == nil {
+	// 	var r Request
+	// 	if err = r.DecodeRLP(s); err != nil {
+	// 		break
+	// 	}
+	// 	*appendList = append(*appendList, &r)
+	// }
+	err := r.DecodeRLP(s)
 	return checkErrListEnd(s, err)
 }
 
