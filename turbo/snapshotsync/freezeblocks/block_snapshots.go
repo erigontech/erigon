@@ -1298,7 +1298,6 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 	if err := snapshots.removeOverlapsAfterMerge(); err != nil {
 		return ok, err
 	}
-
 	return ok, nil
 }
 
