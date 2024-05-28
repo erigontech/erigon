@@ -295,6 +295,10 @@ func ExecV3(ctx context.Context,
 			"from", blockNum, "to", maxBlockNum, "fromTxNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx)
 	}
 
+	if useExternalTx && blockNum < cfg.blockReader.FrozenBlocks() {
+		defer agg.LimitRecentHistoryWithoutFiles(0).LimitRecentHistoryWithoutFiles(agg.StepSize() / 10)
+	}
+
 	if blocksFreezeCfg.Produce {
 		//log.Info(fmt.Sprintf("[snapshots] db has steps amount: %s", agg.StepsRangeInDBAsStr(applyTx)))
 		agg.BuildFilesInBackground(outputTxNum.Load())
@@ -559,10 +563,6 @@ func ExecV3(ctx context.Context,
 			}()
 			return rwLoop(rwLoopCtx)
 		})
-	}
-
-	if useExternalTx && blockNum < cfg.blockReader.FrozenBlocks() {
-		defer agg.LimitRecentHistoryWithoutFiles(0).LimitRecentHistoryWithoutFiles(agg.StepSize() / 2)
 	}
 
 	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {
