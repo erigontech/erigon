@@ -27,7 +27,7 @@ func MakeHttpGetCall(ctx context.Context, url string, data interface{}) error {
 	resp, err := client.Do(req)
 	if err != nil {
 		if strings.Contains(err.Error(), "connection refused") {
-			return fmt.Errorf("looks like Erigon node is not running or it running or you specified wrong diagnostics URL \n if you run Erigon node with specifying '--diagnostics.endpoint.addr' or '--diagnostics.endpoint.port' falgs you must specify '--debug.addr' flag with the same address and port")
+			return fmt.Errorf("it looks like the Erigon node is not running, is running incorrectly, or you have specified the wrong diagnostics URL. If you run the Erigon node with the '--diagnostics.endpoint.addr' or '--diagnostics.endpoint.port' flags, you must also specify the '--debug.addr' flag with the same address and port")
 		}
 		return err
 	}
@@ -41,7 +41,7 @@ func MakeHttpGetCall(ctx context.Context, url string, data interface{}) error {
 	err = json.Unmarshal(body, &data)
 	if err != nil {
 		if err.Error() == "invalid character 'p' after top-level value" {
-			return fmt.Errorf("diagnostics not initialized yet, try again in a few seconds")
+			return fmt.Errorf("diagnostics have not been initialized yet. Please try again in a few seconds")
 		}
 
 		return err
