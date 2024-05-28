@@ -1,19 +1,21 @@
 package types
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
 const (
-	pLen = 48 // pubkey size
-	wLen = 32 // withdrawalCredentials size
-	sLen = 96 // signature size
+	DepositRequestType       byte = 0x00
+	BLSPubKeyLen                  = 48
+	WithdrawalCredentialsLen      = 32 // withdrawalCredentials size
+	BLSSigLen                     = 96 // signature size
 )
 
 var (
@@ -30,17 +32,20 @@ var (
 )
 
 type Deposit struct {
-	Pubkey                [pLen]byte     `json:"pubkey"`                // public key of validator
-	WithdrawalCredentials libcommon.Hash `json:"withdrawalCredentials"` // beneficiary of the validator
-	Amount                uint64         `json:"amount"`                // deposit size in Gwei
-	Signature             [sLen]byte     `json:"signature"`             // signature over deposit msg
-	Index                 uint64         `json:"index"`                 // deposit count value
+	Pubkey                [BLSPubKeyLen]byte `json:"pubkey"`                // public key of validator
+	WithdrawalCredentials libcommon.Hash     `json:"withdrawalCredentials"` // beneficiary of the validator
+	Amount                uint64             `json:"amount"`                // deposit size in Gwei
+	Signature             [BLSSigLen]byte    `json:"signature"`             // signature over deposit msg
+	Index                 uint64             `json:"index"`                 // deposit count value
 }
 
-func (d *Deposit) requestType() byte               { return DepositRequestType }
-func (d *Deposit) encodeRLP(w *bytes.Buffer) error { return rlp.Encode(w, d) }
-func (d *Deposit) decodeRLP(data []byte) error     { return rlp.DecodeBytes(data, d) }
-func (d *Deposit) copy() RequestData {
+func (d *Deposit) RequestType() byte { return DepositRequestType }
+func (d *Deposit) EncodeRLP(w io.Writer) error {
+	// todo @somnathb1 fix this
+	return rlp.Encode(w, d)
+}
+func (d *Deposit) DecodeRLP(data []byte) error { return rlp.DecodeBytes(data, d) }
+func (d *Deposit) copy() Request {
 	return &Deposit{
 		Pubkey:                d.Pubkey,
 		WithdrawalCredentials: d.WithdrawalCredentials,
@@ -50,14 +55,16 @@ func (d *Deposit) copy() RequestData {
 	}
 }
 
-func (d *Deposit) encodingSize() (encodingSize int) {
+func (d *Deposit) EncodingSize() (encodingSize int) {
 	encodingSize++
 	encodingSize += rlp.IntLenExcludingHead(d.Amount)
 	encodingSize++
 	encodingSize += rlp.IntLenExcludingHead(d.Index)
 
 	encodingSize += 180 // 1 + 48 + 1 + 32 + 1 + 1 + 96 (0x80 + pLen, 0x80 + wLen, 0xb8 + 2 + sLen)
-	return encodingSize
+	encodingSize = rlp2.ListPrefixLen(encodingSize)
+	encodingSize += 1 //RequestType
+	return
 }
 
 // field type overrides for abi upacking
@@ -95,7 +102,7 @@ func ParseDepositLogs(logs []*Log, depositContractAddress *libcommon.Address) (R
 			if err != nil {
 				return nil, fmt.Errorf("unable to parse deposit data: %v", err)
 			}
-			deposits = append(deposits, NewRequest(d))
+			deposits = append(deposits, d)
 		}
 	}
 	return deposits, nil
@@ -105,7 +112,7 @@ type Deposits []*Deposit
 
 func (ds Deposits) ToRequests() (reqs Requests) {
 	for _, d := range ds {
-		reqs = append(reqs, NewRequest(d))
+		reqs = append(reqs, d)
 	}
 	return
 }

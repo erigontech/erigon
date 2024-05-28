@@ -165,15 +165,17 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
 ) (*types.Block, types.Transactions, types.Receipts, error) {
+	
 	if !misc.IsPoSHeader(header) {
 		return s.eth1Engine.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, withdrawals, requests, chain, syscall, call, logger)
 	}
 	// get the deposits (TODO @somnathb1) and withdrawals and append it to requests
-	requests = append(requests, misc.DequeueWithdrawalRequests7002(syscall)...)
+	requests = append(types.Requests{}, misc.DequeueWithdrawalRequests7002(syscall)...)
 	outTxs, outReceipts, err := s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, requests, chain, syscall, logger)
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	*header.RequestsRoot = types.DeriveSha(requests)
 	return types.NewBlock(header, outTxs, uncles, outReceipts, withdrawals, requests), outTxs, outReceipts, nil
 }
 

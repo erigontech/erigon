@@ -87,7 +87,7 @@ func ExecuteBlockEphemerally(
 	stateReader state.StateReader, stateWriter state.WriterWithChangeSets,
 	chainReader consensus.ChainReader, getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error),
 	logger log.Logger,
-) (*EphemeralExecResult, error) {
+) (*EphemeralExecResult, types.Requests, error) {
 
 	defer blockExecutionTimer.ObserveDuration(time.Now())
 	block.Uncles()
@@ -100,7 +100,7 @@ func ExecuteBlockEphemerally(
 	gp.AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock())
 
 	if err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, logger); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var rejectedTxs []*RejectedTx
@@ -115,7 +115,7 @@ func ExecuteBlockEphemerally(
 		if vmConfig.Debug && vmConfig.Tracer == nil {
 			tracer, err := getTracer(i, tx.Hash())
 			if err != nil {
-				return nil, fmt.Errorf("could not obtain tracer: %w", err)
+				return nil, nil, fmt.Errorf("could not obtain tracer: %w", err)
 			}
 			vmConfig.Tracer = tracer
 			writeTrace = true
@@ -130,7 +130,7 @@ func ExecuteBlockEphemerally(
 		}
 		if err != nil {
 			if !vmConfig.StatelessExec {
-				return nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), tx.Hash().Hex(), err)
+				return nil, nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), tx.Hash().Hex(), err)
 			}
 			rejectedTxs = append(rejectedTxs, &RejectedTx{i, err.Error()})
 		} else {
@@ -148,28 +148,28 @@ func ExecuteBlockEphemerally(
 			logReceipts(receipts, includedTxs, chainConfig, header, logger)
 		}
 
-		return nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", block.NumberU64(), receiptSha.Hex(), block.ReceiptHash().Hex())
+		return nil, nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", block.NumberU64(), receiptSha.Hex(), block.ReceiptHash().Hex())
 	}
 
 	if !vmConfig.StatelessExec && *usedGas != header.GasUsed {
-		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
+		return nil, nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
 	}
 
 	if header.BlobGasUsed != nil && *usedBlobGas != *header.BlobGasUsed {
-		return nil, fmt.Errorf("blob gas used by execution: %d, in header: %d", *usedBlobGas, *header.BlobGasUsed)
+		return nil, nil, fmt.Errorf("blob gas used by execution: %d, in header: %d", *usedBlobGas, *header.BlobGasUsed)
 	}
 
 	var bloom types.Bloom
 	if !vmConfig.NoReceipts {
 		bloom = types.CreateBloom(receipts)
 		if !vmConfig.StatelessExec && bloom != header.Bloom {
-			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
+			return nil, nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
 		}
 	}
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
 		if _, _, _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), block.Requests(), chainReader, false, logger); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	blockLogs := ibs.Logs()
@@ -206,11 +206,13 @@ func ExecuteBlockEphemerally(
 		execRs.StateSyncReceipt = stateSyncReceipt
 	}
 
+	var requests types.Requests
 	if chainConfig.IsPrague(block.Time()) {
-		requests, err := types.ParseDepositLogs(allLogs, chainConfig.DepositContract)
+		ds, err := types.ParseDepositLogs(allLogs, chainConfig.DepositContract)
 		if err != nil {
-			return nil, fmt.Errorf("error: could not parse requests logs: %v", err)
+			return nil, nil, fmt.Errorf("error: could not parse requests logs: %v", err)
 		}
+		requests = append(requests, ds...)
 
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 			return SysCallContract(contract, data, chainConfig, ibs, header, engine, false /* constCall */)
@@ -221,11 +223,11 @@ func ExecuteBlockEphemerally(
 		rh := types.DeriveSha(requests)
 		if *block.Header().RequestsRoot != rh && !vmConfig.NoReceipts {
 			// TODO(racytech): do we have to check it here?
-			return nil, fmt.Errorf("error: invalid requests root hash, expected: %v, got :%v", *block.Header().RequestsRoot, rh)
+			return nil, nil, fmt.Errorf("error: invalid requests root hash, expected: %v, got :%v", *block.Header().RequestsRoot, rh)
 		}
 	}
 
-	return execRs, nil
+	return execRs, requests, nil
 }
 
 func logReceipts(receipts types.Receipts, txns types.Transactions, cc *chain.Config, header *types.Header, logger log.Logger) {
@@ -339,7 +341,7 @@ func FinalizeBlockExecution(
 	header *types.Header, txs types.Transactions, uncles []*types.Header,
 	stateWriter state.StateWriter, cc *chain.Config,
 	ibs *state.IntraBlockState, receipts types.Receipts,
-	withdrawals []*types.Withdrawal, requests []*types.Request, chainReader consensus.ChainReader,
+	withdrawals []*types.Withdrawal, requests types.Requests, chainReader consensus.ChainReader,
 	isMining bool,
 	logger log.Logger,
 ) (newBlock *types.Block, newTxs types.Transactions, newReceipt types.Receipts, err error) {
@@ -349,7 +351,27 @@ func FinalizeBlockExecution(
 	// get a local requests struct and put in requests
 	if isMining {
 		// TODO @somnathb1 pass the requests in
+		if cc.IsPrague(header.Time) {
+			allLogs := types.Logs{}
+			for _, r := range receipts {
+				allLogs = append(allLogs, r.Logs...)
+			}
+			requests = types.Requests{}
+			ds, err := types.ParseDepositLogs(allLogs, cc.DepositContract)
+			requests = append(requests, ds...)
+			if err != nil {
+				return nil, nil, nil, fmt.Errorf("error: could not parse requests logs: %v", err)
+			}
+
+			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
+				return SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */)
+			}
+			wrs := misc.DequeueWithdrawalRequests7002(syscall)
+			requests = append(requests, wrs...)
+		}
 		newBlock, newTxs, newReceipt, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, nil, logger)
+		// newBlock.header
+
 	} else {
 		_, _, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, logger)
 	}

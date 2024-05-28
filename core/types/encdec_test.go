@@ -79,11 +79,11 @@ func (tr *TRand) RandDeposit() *Deposit {
 	}
 }
 
-func (tr *TRand) RandRequest() *Request {
-	d := tr.RandDeposit()
-	var r Request
-	r.inner = d.copy()
-	return &r
+func (tr *TRand) RandRequest() Request {
+	return tr.RandDeposit()
+	// var r Request
+	// r.inner = d.copy()
+	// return &r
 }
 
 func (tr *TRand) RandHeader() *Header {
@@ -228,8 +228,8 @@ func (tr *TRand) RandWithdrawals(size int) []*Withdrawal {
 	return withdrawals
 }
 
-func (tr *TRand) RandRequests(size int) []*Request {
-	requests := make([]*Request, size)
+func (tr *TRand) RandRequests(size int) []Request {
+	requests := make([]Request, size)
 	for i := 0; i < size; i++ {
 		requests[i] = tr.RandRequest()
 	}
@@ -347,18 +347,22 @@ func compareDeposits(t *testing.T, a, b *Deposit) {
 	check(t, "Deposit.Index", a.Index, b.Index)
 }
 
-func checkRequests(t *testing.T, a, b *Request) {
-	if a.Type() != b.Type() {
-		t.Errorf("request type mismatch: request-a: %v, request-b: %v", a.Type(), b.Type())
+func checkRequests(t *testing.T, a, b Request) {
+	if a.RequestType() != b.RequestType() {
+		t.Errorf("request type mismatch: request-a: %v, request-b: %v", a.RequestType(), b.RequestType())
 	}
 
-	switch a.Type() {
+	switch a.RequestType() {
 	case DepositRequestType:
-		c := a.inner.(*Deposit)
-		d := b.inner.(*Deposit)
-		compareDeposits(t, c, d)
+		a, aok := a.(*Deposit)
+		b, bok := b.(*Deposit)
+		if aok && bok {
+			compareDeposits(t, a, b)
+		} else {
+			t.Errorf("type assertion failed: %v %v", a.RequestType(), b.RequestType())
+		}
 	default:
-		t.Errorf("unknown request type: %v", a.Type())
+		t.Errorf("unknown request type: %v", a.RequestType())
 	}
 }
 
@@ -386,7 +390,7 @@ func compareWithdrawals(t *testing.T, a, b []*Withdrawal) error {
 	return nil
 }
 
-func compareRequests(t *testing.T, a, b []*Request) error {
+func compareRequests(t *testing.T, a, b Requests) error {
 	arLen, brLen := len(a), len(b)
 	if arLen != brLen {
 		return fmt.Errorf("requests len mismatch: expected: %v, got: %v", arLen, brLen)
@@ -492,13 +496,90 @@ func TestDepositEncodeDecode(t *testing.T) {
 		if err := enc.EncodeRLP(&buf); err != nil {
 			t.Errorf("error: deposit.EncodeRLP(): %v", err)
 		}
-		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
-		dec := &Request{}
-		if err := dec.DecodeRLP(s); err != nil {
+		// s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
+		var dec Request
+		if err := dec.DecodeRLP(buf.Bytes()); err != nil {
 			t.Errorf("error: Deposit.DecodeRLP(): %v", err)
 		}
-		a := enc.inner.(*Deposit)
-		b := dec.inner.(*Deposit)
+		a := enc.(*Deposit)
+		b := dec.(*Deposit)
 		compareDeposits(t, a, b)
 	}
 }
+
+func TestWithdrawalReqsEncodeDecode(t *testing.T) {
+	wx1 := WithdrawalRequest{
+		SourceAddress:   libcommon.HexToAddress("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"),
+		ValidatorPubkey: [48]byte{},
+		Amount:          0,
+	}
+	wx1.ValidatorPubkey[47] = 0x01
+	wx2 := WithdrawalRequest{
+		SourceAddress:   libcommon.HexToAddress("0x8a0a19589531694250d570040a0c4b74576919b8"),
+		ValidatorPubkey: [48]byte{},
+		Amount:          0xfffffffffffffffe,
+	}
+	wx2.ValidatorPubkey[47] = 0x02
+	wxs := append(Requests{}, &wx1, &wx2)
+
+	root := DeriveSha(wxs)
+	if root.String() != "0x143e24a803c0dc2ae5381184ad5fe9e45ac2c82c671bc3eafdc090642fc16501" {
+		t.Errorf("Root mismatch %s", root.String())
+	}
+
+	var wx3, wx4 WithdrawalRequest
+	var buf1, buf2 bytes.Buffer
+	wx1.EncodeRLP(&buf1)
+	wx2.EncodeRLP(&buf2)
+	wx3.DecodeRLP(buf1.Bytes())
+	wx4.DecodeRLP(buf2.Bytes())
+	wxs = Requests{}
+	wxs = append(wxs, &wx3, &wx4)
+	root = DeriveSha(wxs)
+	if root.String() != "0x143e24a803c0dc2ae5381184ad5fe9e45ac2c82c671bc3eafdc090642fc16501" {
+		t.Errorf("Root mismatch %s", root.String())
+	}
+
+
+	/*
+		// Breakdown of block encoding with withdrawal requests
+		c0c0f8a0
+
+		b84a
+		01
+		f84794
+		a94f5374fce5edbc8e2a8697c15331677e6ebf0b
+		b0
+		000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001
+		80
+
+		b852
+		01
+		f84f94
+		8a0a19589531694250d570040a0c4b74576919b8
+		b0
+		000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002
+		88
+		fffffffffffffffe
+
+
+		*/
+
+		// Required root
+		// 0x143e24a803c0dc2ae5381184ad5fe9e45ac2c82c671bc3eafdc090642fc16501
+
+		// Root with validatorPubkey used with hex2Bytes
+		// 0xfaeb6ee3cbbf2d030297970453ae0c20d5798a516d5000e3f7d138f89b063cca
+
+		// Root with validatorPubkey used with just a single byte thing
+		// 0x4900948a710bf0a4e947c029d7a0208fe7d6e0c9fbdebae62a46fda652d5375b
+
+		// Root without Request wrapper
+		// 0xc2d9bf6dd7e0b4c4140cb56e4be95db4c0602271441c9f58fe0e50cf113a9a3d
+
+		// Root when appending 0x01 before rlp encoding of wx obj
+		// 0x3e6c078b35a59eae5288a976081f696acff8347971615cf9b008c727dc3abd91
+
+
+}
+

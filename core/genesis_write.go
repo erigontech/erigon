@@ -22,6 +22,10 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"math/big"
+	"os"
+	"slices"
+
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -30,9 +34,6 @@ import (
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
-	"math/big"
-	"os"
-	"slices"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
@@ -484,6 +485,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 		ExcessBlobGas: g.ExcessBlobGas,
 		AuRaStep:      g.AuRaStep,
 		AuRaSeal:      g.AuRaSeal,
+		RequestsRoot:  g.RequestsRoot,
 	}
 	if g.GasLimit == 0 {
 		head.GasLimit = params.GenesisGasLimit
@@ -522,9 +524,14 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 		}
 	}
 
-	var requests []*types.Request // TODO(racytech): revisit this after merge, make sure everythin is correct
+	var requests types.Requests // TODO(racytech): revisit this after merge, make sure everythin is correct
 	if g.Config != nil && g.Config.IsPrague(g.Timestamp) {
-		requests = []*types.Request{}
+		requests = types.Requests{}
+		if g.RequestsRoot != nil {
+			head.RequestsRoot = g.RequestsRoot
+		} else {
+			head.RequestsRoot = &types.EmptyRootHash
+		}
 	}
 
 	var root libcommon.Hash

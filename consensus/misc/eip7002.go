@@ -78,7 +78,7 @@ func DequeueWithdrawalRequests7002(syscall consensus.SystemCall) types.Requests 
 			ValidatorPubkey: pubkey,
 			Amount:          binary.BigEndian.Uint64(res[i+68:]),
 		}
-		reqs = append(reqs, types.NewRequest(wr))
+		reqs = append(reqs, wr)
 	}
 	return reqs
 

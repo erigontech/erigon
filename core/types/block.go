@@ -806,7 +806,7 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 	}
 	// decode Requests
 	rb.Requests = []Request{}
-	if err := decodeRequests(rb.Requests, s); err != nil {
+	if err := decodeRequests(&rb.Requests, s); err != nil {
 		return err
 	}
 
@@ -903,7 +903,7 @@ func (bfs *BodyForStorage) DecodeRLP(s *rlp.Stream) error {
 	}
 	// decode Requests
 	bfs.Requests = Requests{}
-	if err := decodeRequests(bfs.Requests, s); err != nil {
+	if err := decodeRequests(&bfs.Requests, s); err != nil {
 		return err
 	}
 	return s.ListEnd()
@@ -987,7 +987,8 @@ func (bb *Body) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode Requests
-	if err := decodeRequests(bb.Requests, s); err != nil {
+	bb.Requests = []Request{}
+	if err := decodeRequests(&bb.Requests, s); err != nil {
 		return err
 	}
 
@@ -1167,7 +1168,7 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 	}
 	// decode Requests
 	bb.requests = Requests{}
-	if err := decodeRequests(bb.requests, s); err != nil {
+	if err := decodeRequests(&bb.requests, s); err != nil {
 		return err
 	}
 
@@ -1375,6 +1376,7 @@ func (b *Block) HashCheck() error {
 	if b.Withdrawals() == nil {
 		return errors.New("body missing Withdrawals")
 	}
+
 	if hash := DeriveSha(b.Withdrawals()); hash != *b.WithdrawalsHash() {
 		return fmt.Errorf("block has invalid withdrawals hash: have %x, exp: %x", hash, b.WithdrawalsHash())
 	}
@@ -1388,6 +1390,7 @@ func (b *Block) HashCheck() error {
 	if b.Requests() == nil {
 		return errors.New("body missing Requests")
 	}
+
 	if hash := DeriveSha(b.Requests()); hash != *b.RequestsRoot() {
 		return fmt.Errorf("block has invalid requests root: have %x, exp: %x", hash, b.RequestsRoot())
 	}
@@ -1599,7 +1602,7 @@ func decodeWithdrawals(appendList *[]*Withdrawal, s *rlp.Stream) error {
 	return checkErrListEnd(s, err)
 }
 
-func decodeRequests(r Requests, s *rlp.Stream) error {
+func decodeRequests(r *Requests, s *rlp.Stream) error {
 	// var err error
 	// if _, err = s.List(); err != nil {
 	// 	if errors.Is(err, rlp.EOL) {

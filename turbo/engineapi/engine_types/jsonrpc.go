@@ -35,7 +35,7 @@ type ExecutionPayload struct {
 	BlobGasUsed        *hexutil.Uint64          `json:"blobGasUsed"`
 	ExcessBlobGas      *hexutil.Uint64          `json:"excessBlobGas"`
 	DepositRequests    types.Deposits           `json:"depositRequests"` // do not forget to add it into erigon-lib/gointerfaces/types if needed
-	WithdrawalRequests types.WithdrawalRequests `json:"withdrawalRequests"`
+	WithdrawalRequests types.Requests `json:"withdrawalRequests"`
 }
 
 // PayloadAttributes represent the attributes required to start assembling a payload
