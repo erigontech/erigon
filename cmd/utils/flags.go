@@ -833,6 +833,11 @@ var (
 		Usage: "TCP Port for Caplin DISCV5 protocol",
 		Value: 4001,
 	}
+	CaplinCheckpointSyncUrlFlag = cli.StringSliceFlag{
+		Name:  "caplin.checkpoint-sync-url",
+		Usage: "checkpoint sync endpoint",
+		Value: cli.NewStringSlice(),
+	}
 
 	SentinelAddrFlag = cli.StringFlag{
 		Name:  "sentinel.addr",
@@ -1663,6 +1668,9 @@ func setCaplin(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.CaplinConfig.BlobBackfilling = ctx.Bool(CaplinBlobBackfillingFlag.Name)
 	cfg.CaplinConfig.BlobPruningDisabled = ctx.Bool(CaplinDisableBlobPruningFlag.Name)
 	cfg.CaplinConfig.Archive = ctx.Bool(CaplinArchiveFlag.Name)
+	if checkpointUrls := ctx.StringSlice(CaplinCheckpointSyncUrlFlag.Name); len(checkpointUrls) > 0 {
+		clparams.ConfigurableCheckpointsURLs = checkpointUrls
+	}
 }
 
 func setSilkworm(ctx *cli.Context, cfg *ethconfig.Config) {

@@ -14,6 +14,9 @@ var mainnetStateSSZ []byte
 //go:embed sepolia.state.ssz
 var sepoliaStateSSZ []byte
 
+//go:embed gnosis.state.ssz
+var gnosisStateSSZ []byte
+
 // Return genesis state
 func GetGenesisState(network clparams.NetworkType) (*state.CachingBeaconState, error) {
 	_, config := clparams.GetConfigsByNetwork(network)
@@ -28,19 +31,16 @@ func GetGenesisState(network clparams.NetworkType) (*state.CachingBeaconState, e
 		if err := returnState.DecodeSSZ(sepoliaStateSSZ, int(clparams.Phase0Version)); err != nil {
 			return nil, err
 		}
-	case clparams.GoerliNetwork:
+	case clparams.GnosisNetwork:
+		if err := returnState.DecodeSSZ(gnosisStateSSZ, int(clparams.Phase0Version)); err != nil {
+			return nil, err
+		}
+	default:
 		return nil, nil
 	}
 	return returnState, nil
 }
 
 func IsGenesisStateSupported(network clparams.NetworkType) bool {
-	switch network {
-	case clparams.MainnetNetwork:
-		return true
-	case clparams.SepoliaNetwork:
-		return true
-	default:
-		return false
-	}
+	return network == clparams.MainnetNetwork || network == clparams.SepoliaNetwork || network == clparams.GnosisNetwork
 }
