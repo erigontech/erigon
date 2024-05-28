@@ -298,6 +298,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 			voluntaryExitService,
 			blsToExecutionChangeService,
 			proposerSlashingService,
+			option.builderClient,
 		)
 		go beacon.ListenAndServe(&beacon.LayeredBeaconHandler{
 			ArchiveApi: apiHandler,

@@ -12,16 +12,6 @@ type ExecutionPayloadHeader struct {
 	} `json:"data"`
 }
 
-type ValidatorRegistration struct {
-	Message struct {
-		FeeRecipient string `json:"fee_recipient"`
-		GasLimit     string `json:"gas_limit"`
-		Timestamp    string `json:"timestamp"`
-		PubKey       string `json:"pubkey"`
-	} `json:"message"`
-	Sginature string `json:"signature"`
-}
-
 type BlindedBlockResponse struct {
 	Version string            `json:"version"`
 	Data    cltypes.Eth1Block `json:"data"`

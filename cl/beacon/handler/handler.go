@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
+	"github.com/ledgerwatch/erigon/cl/beacon/builder"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -87,6 +88,7 @@ type ApiHandler struct {
 	voluntaryExitService             services.VoluntaryExitService
 	blsToExecutionChangeService      services.BLSToExecutionChangeService
 	proposerSlashingService          services.ProposerSlashingService
+	builderClient                    *builder.BlockBuilderClient
 }
 
 func NewApiHandler(
@@ -119,6 +121,7 @@ func NewApiHandler(
 	voluntaryExitService services.VoluntaryExitService,
 	blsToExecutionChangeService services.BLSToExecutionChangeService,
 	proposerSlashingService services.ProposerSlashingService,
+	builderClient *builder.BlockBuilderClient,
 ) *ApiHandler {
 	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("blobs", maxBlobBundleCacheSize)
 	if err != nil {
@@ -159,6 +162,7 @@ func NewApiHandler(
 		voluntaryExitService:             voluntaryExitService,
 		blsToExecutionChangeService:      blsToExecutionChangeService,
 		proposerSlashingService:          proposerSlashingService,
+		builderClient:                    builderClient,
 	}
 }
 
@@ -183,6 +187,7 @@ func (a *ApiHandler) init() {
 		r.Route("/v1", func(r chi.Router) {
 			if a.routerCfg.Builder {
 				r.Get("/builder/states/{state_id}/expected_withdrawals", beaconhttp.HandleEndpointFunc(a.GetEth1V1BuilderStatesExpectedWithdrawals))
+				r.Post("/validator/register_validator", beaconhttp.HandleEndpointFunc(a.PostEthV1BuilderRegisterValidator))
 			}
 			if a.routerCfg.Events {
 				r.Get("/events", a.EventSourceGetV1Events)

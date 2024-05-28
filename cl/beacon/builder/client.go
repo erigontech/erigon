@@ -26,7 +26,7 @@ func NewBlockBuilderClient(baseUrl string) *BlockBuilderClient {
 	}
 }
 
-func (b *BlockBuilderClient) RegisterValidator(ctx context.Context, registers []*ValidatorRegistration) error {
+func (b *BlockBuilderClient) RegisterValidator(ctx context.Context, registers []*cltypes.ValidatorRegistration) error {
 	// https://ethereum.github.io/builder-specs/#/Builder/registerValidator
 	url := b.baseUrl + "/eth/v1/builder/validators"
 	payload, err := json.Marshal(registers)
