@@ -12,19 +12,19 @@ import (
 	"sync/atomic"
 
 	"github.com/klauspost/compress/zstd"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/seg"
+
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
@@ -107,7 +107,7 @@ func (s *CaplinSnapshots) SegFilePaths(from, to uint64) []string {
 }
 
 func (s *CaplinSnapshots) BlocksAvailable() uint64 {
-	return cmp.Min(s.segmentsMax.Load(), s.idxMax.Load())
+	return min(s.segmentsMax.Load(), s.idxMax.Load())
 }
 
 func (s *CaplinSnapshots) Close() {

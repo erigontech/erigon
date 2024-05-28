@@ -11,17 +11,18 @@ import (
 	"sync/atomic"
 	"time"
 
-	common2 "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/backup"
-	mdbx2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
+
+	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/backup"
+	mdbx2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
+
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/turbo/debug"
 )
 
 var stateBuckets = []string{
@@ -262,7 +263,7 @@ func mdbxTopDup(ctx context.Context, chaindata string, bucket string, logger log
 
 	var _max int
 	for _, i := range cnt {
-		_max = cmp.Max(i, _max)
+		_max = max(i, _max)
 	}
 	for k, i := range cnt {
 		if i > _max-10 {

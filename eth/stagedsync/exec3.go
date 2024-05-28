@@ -1099,7 +1099,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	if err != nil {
 		return false, err
 	}
-	minBlockNum = cmp.Max(minBlockNum, unwindToLimit)
+	minBlockNum = max(minBlockNum, unwindToLimit)
 
 	// Binary search, but not too deep
 	jump := cmp.InRange(1, 1000, (maxBlockNum-minBlockNum)/2)

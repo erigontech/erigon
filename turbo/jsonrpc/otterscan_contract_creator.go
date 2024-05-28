@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -127,7 +127,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 			return false
 		}
 		if len(v) == 0 {
-			creationTxnID = cmp.Max(creationTxnID, txnID)
+			creationTxnID = max(creationTxnID, txnID)
 			return false
 		}
 
@@ -136,7 +136,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 			return false
 		}
 		if acc.Incarnation < plainStateAcc.Incarnation {
-			creationTxnID = cmp.Max(creationTxnID, txnID)
+			creationTxnID = max(creationTxnID, txnID)
 			return false
 		}
 		return true

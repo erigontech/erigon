@@ -17,14 +17,12 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
 	"github.com/spf13/cobra"
-	"golang.org/x/sync/semaphore"
-
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/config3"
@@ -866,7 +864,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		if unwind > progress {
 			unwindTo = 1 // keep genesis
 		} else {
-			unwindTo = uint64(cmp.Max(1, int(progress)-int(unwind)))
+			unwindTo = uint64(max(1, int(progress)-int(unwind)))
 		}
 
 		if err = stages.SaveStageProgress(tx, stages.Headers, unwindTo); err != nil {
