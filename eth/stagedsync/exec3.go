@@ -160,6 +160,7 @@ func ExecV3(ctx context.Context,
 		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
 		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 		defer agg.DiscardHistory(kv.CommitmentDomain).EnableHistory(kv.CommitmentDomain)
+		defer agg.LimitRecentHistoryWithoutFiles(0).LimitRecentHistoryWithoutFiles(agg.StepSize() / 10)
 	} else {
 		agg.SetCompressWorkers(1)
 		agg.SetCollateAndBuildWorkers(1)
@@ -293,10 +294,6 @@ func ExecV3(ctx context.Context,
 	if maxBlockNum-blockNum > 16 {
 		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
 			"from", blockNum, "to", maxBlockNum, "fromTxNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx)
-	}
-
-	if initialCycle && blockNum < cfg.blockReader.FrozenBlocks() {
-		defer agg.LimitRecentHistoryWithoutFiles(0).LimitRecentHistoryWithoutFiles(agg.StepSize() / 10)
 	}
 
 	if blocksFreezeCfg.Produce {
