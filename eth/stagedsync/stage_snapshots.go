@@ -186,8 +186,9 @@ func SpawnStageSnapshots(
 	return nil
 }
 
+var downaloadedOnce = false //temporary fix for the fact that E3 does pass `initialCycle=true` multiple times. Need split it to 2 variables: isFirstCycle, isOnChainTip
 func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, initialCycle bool, logger log.Logger) error {
-	if !initialCycle {
+	if !initialCycle || downaloadedOnce {
 		return nil
 	}
 	if !cfg.blockReader.FreezingCfg().Enabled {
@@ -300,6 +301,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		})
 	}
 
+	downaloadedOnce = true
 	return nil
 }
 
