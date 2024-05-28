@@ -173,7 +173,7 @@ type Account struct {
 	Nonce     *hexutil.Uint64                    `json:"nonce"`
 	Code      *hexutility.Bytes                  `json:"code"`
 	Balance   **hexutil.Big                      `json:"balance"`
-	State     *map[libcommon.Hash]uint256.Int    `json:"state"`
+	State     *map[libcommon.Hash]libcommon.Hash `json:"state"`
 	StateDiff *map[libcommon.Hash]libcommon.Hash `json:"stateDiff"`
 }
 
