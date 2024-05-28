@@ -35,7 +35,7 @@ type SelectedStaticFilesV3 struct {
 	dHist [kv.DomainLen][]*filesItem
 	dIdx  [kv.DomainLen][]*filesItem
 	dI    [kv.DomainLen]int
-	ii    [kv.StandaloneIdxLen]*filesItemI
+	ii    [kv.StandaloneIdxLen]filesItemI
 }
 
 func (sf SelectedStaticFilesV3) Close() {
@@ -45,9 +45,6 @@ func (sf SelectedStaticFilesV3) Close() {
 	}
 
 	for _, i := range sf.ii {
-		if i == nil {
-			continue
-		}
 		clist = append(clist, i.fi)
 	}
 	for _, group := range clist {
@@ -73,7 +70,8 @@ func (ac *AggregatorRoTx) staticFilesInRange(r RangesV3) (sf SelectedStaticFiles
 	for id, rng := range r.ranges {
 		if rng != nil && rng.needMerge {
 			fi, i := ac.iis[id].staticFilesInRange(rng.from, rng.to)
-			sf.ii[id] = &filesItemI{fi, i}
+			sf.ii[id].fi = fi
+			sf.ii[id].i = i
 		}
 	}
 	return sf, err
