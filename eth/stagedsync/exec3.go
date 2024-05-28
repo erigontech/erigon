@@ -295,7 +295,7 @@ func ExecV3(ctx context.Context,
 			"from", blockNum, "to", maxBlockNum, "fromTxNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx)
 	}
 
-	if useExternalTx && blockNum < cfg.blockReader.FrozenBlocks() {
+	if initialCycle && blockNum < cfg.blockReader.FrozenBlocks() {
 		defer agg.LimitRecentHistoryWithoutFiles(0).LimitRecentHistoryWithoutFiles(agg.StepSize() / 10)
 	}
 
