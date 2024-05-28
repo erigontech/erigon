@@ -424,13 +424,19 @@ func (h *heimdall) pollSpans(ctx context.Context, tip SpanId, cb func(*Span)) {
 				"err", err,
 			)
 
-			h.waitPollingDelay(ctx)
+			if err := common.Sleep(ctx, h.pollDelay); err != nil {
+				h.logPollerSleepCancelled(err)
+				return
+			}
 			// keep background goroutine alive in case of heimdall errors
 			continue
 		}
 
 		if latestSpan.Id <= tip {
-			h.waitPollingDelay(ctx)
+			if err := common.Sleep(ctx, h.pollDelay); err != nil {
+				h.logPollerSleepCancelled(err)
+				return
+			}
 			continue
 		}
 
@@ -441,7 +447,10 @@ func (h *heimdall) pollSpans(ctx context.Context, tip SpanId, cb func(*Span)) {
 				"err", err,
 			)
 
-			h.waitPollingDelay(ctx)
+			if err := common.Sleep(ctx, h.pollDelay); err != nil {
+				h.logPollerSleepCancelled(err)
+				return
+			}
 			// keep background goroutine alive in case of heimdall errors
 			continue
 		}
@@ -489,13 +498,19 @@ func (h *heimdall) pollMilestones(ctx context.Context, tip MilestoneId, cb func(
 				"err", err,
 			)
 
-			h.waitPollingDelay(ctx)
+			if err := common.Sleep(ctx, h.pollDelay); err != nil {
+				h.logPollerSleepCancelled(err)
+				return
+			}
 			// keep background goroutine alive in case of heimdall errors
 			continue
 		}
 
 		if count <= int64(tip) {
-			h.waitPollingDelay(ctx)
+			if err := common.Sleep(ctx, h.pollDelay); err != nil {
+				h.logPollerSleepCancelled(err)
+				return
+			}
 			continue
 		}
 
@@ -506,7 +521,10 @@ func (h *heimdall) pollMilestones(ctx context.Context, tip MilestoneId, cb func(
 				"err", err,
 			)
 
-			h.waitPollingDelay(ctx)
+			if err := common.Sleep(ctx, h.pollDelay); err != nil {
+				h.logPollerSleepCancelled(err)
+				return
+			}
 			// keep background goroutine alive in case of heimdall errors
 			continue
 		}
@@ -576,6 +594,6 @@ func (h *heimdall) batchFetchCheckpoints(
 	return checkpoints, nil
 }
 
-func (h *heimdall) waitPollingDelay(ctx context.Context) {
-	common.Sleep(ctx, h.pollDelay)
+func (h *heimdall) logPollerSleepCancelled(err error) {
+	h.logger.Info("poller sleep cancelled", "err", err)
 }

@@ -17,7 +17,9 @@ func StatusLoggerLoop(ctx context.Context, db database.DB, networkID uint, perio
 	var prevDistinctIPCount uint
 
 	for ctx.Err() == nil {
-		libcommon.Sleep(ctx, period)
+		if err := libcommon.Sleep(ctx, period); err != nil {
+			break
+		}
 
 		totalCount, err := db.CountNodes(ctx, maxPingTries, networkID)
 		if err != nil {

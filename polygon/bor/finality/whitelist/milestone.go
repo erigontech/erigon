@@ -154,6 +154,7 @@ func (m *milestone) UnlockSprint(endBlockNum uint64) {
 	}
 
 	m.Locked = false
+
 	m.purgeMilestoneIDsList()
 
 	err := rawdb.WriteLockField(m.db, m.Locked, m.LockedMilestoneNumber, m.LockedMilestoneHash, m.LockedMilestoneIDs)
@@ -213,6 +214,12 @@ func (m *milestone) GetMilestoneIDsList() []string {
 
 // This is remove the milestoneIDs stored in the list.
 func (m *milestone) purgeMilestoneIDsList() {
+	// try is used here as the finality lock is preserved over calls - so the lock state
+	// is not clearly defined in the local code - this likely needs to be revised
+	if m.finality.TryLock() {
+		defer m.finality.Unlock()
+	}
+
 	m.LockedMilestoneIDs = make(map[string]struct{})
 }
 
