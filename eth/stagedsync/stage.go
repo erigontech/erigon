@@ -40,11 +40,17 @@ type Stage struct {
 	Disabled bool
 }
 
+type CurrentSyncCycleInfo struct {
+	IsInitialCycle bool
+}
+
 // StageState is the state of the stage.
 type StageState struct {
 	state       *Sync
 	ID          stages.SyncStage
 	BlockNumber uint64 // BlockNumber is the current block number of the stage at the beginning of the state execution.
+
+	CurrentSyncCycle CurrentSyncCycleInfo
 }
 
 func (s *StageState) LogPrefix() string { return s.state.LogPrefix() }
@@ -103,6 +109,8 @@ type UnwindState struct {
 	CurrentBlockNumber uint64
 	Reason             UnwindReason
 	state              *Sync
+
+	CurrentSyncCycle CurrentSyncCycleInfo
 }
 
 func (u *UnwindState) LogPrefix() string { return u.state.LogPrefix() }
@@ -117,6 +125,8 @@ type PruneState struct {
 	ForwardProgress uint64 // progress of stage forward move
 	PruneProgress   uint64 // progress of stage prune move. after sync cycle it become equal to ForwardProgress by Done() method
 	state           *Sync
+
+	CurrentSyncCycle CurrentSyncCycleInfo
 }
 
 func (s *PruneState) LogPrefix() string { return s.state.LogPrefix() + " Prune" }
