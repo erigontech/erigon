@@ -145,6 +145,10 @@ func ReadRAMInfo(db kv.RoDB) RAMInfo {
 	var info RAMInfo
 	err := json.Unmarshal(data, &info)
 
+	if len(data) == 0 {
+		return RAMInfo{}
+	}
+
 	if err != nil {
 		log.Error("[Diagnostics] Failed to read RAM info", "err", err)
 		return RAMInfo{}
@@ -158,6 +162,10 @@ func ReadCPUInfo(db kv.RoDB) CPUInfo {
 	var info CPUInfo
 	err := json.Unmarshal(data, &info)
 
+	if len(data) == 0 {
+		return CPUInfo{}
+	}
+
 	if err != nil {
 		log.Error("[Diagnostics] Failed to read CPU info", "err", err)
 		return CPUInfo{}
@@ -170,6 +178,10 @@ func ReadDickInfo(db kv.RoDB) DiskInfo {
 	data := ReadDataFromTable(db, kv.DiagSystemInfo, SystemDiskInfoKey)
 	var info DiskInfo
 	err := json.Unmarshal(data, &info)
+
+	if len(data) == 0 {
+		return DiskInfo{}
+	}
 
 	if err != nil {
 		log.Error("[Diagnostics] Failed to read Disk info", "err", err)
