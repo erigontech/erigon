@@ -19,6 +19,8 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
 
+	"golang.org/x/sync/errgroup"
+
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -59,7 +61,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
-	"golang.org/x/sync/errgroup"
 )
 
 var cmdStageSnapshots = &cobra.Command{
@@ -1867,6 +1868,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 		chainConfig,
 		genesisBlock,
 		chainConfig.ChainID.Uint64(),
+		logger,
 	)
 
 	maxBlockBroadcastPeers := func(header *types.Header) uint { return 0 }
