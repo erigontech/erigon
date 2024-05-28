@@ -380,10 +380,10 @@ func (c *Clique) CalculateRewards(config *chain.Config, header *types.Header, un
 func (c *Clique) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests,
 	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
-) (types.Transactions, types.Receipts, error) {
+) (types.Transactions, types.Receipts, types.Requests, error) {
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
 	header.UncleHash = types.CalcUncleHash(nil)
-	return txs, r, nil
+	return txs, r, nil, nil
 }
 
 // FinalizeAndAssemble implements consensus.Engine, ensuring no uncles are set,

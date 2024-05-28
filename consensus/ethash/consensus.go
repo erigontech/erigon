@@ -568,10 +568,10 @@ func (ethash *Ethash) Initialize(config *chain.Config, chain consensus.ChainHead
 func (ethash *Ethash) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests,
 	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
-) (types.Transactions, types.Receipts, error) {
+) (types.Transactions, types.Receipts, types.Requests, error) {
 	// Accumulate any block and uncle rewards and commit the final state root
 	accumulateRewards(config, state, header, uncles)
-	return txs, r, nil
+	return txs, r, nil, nil
 }
 
 // FinalizeAndAssemble implements consensus.Engine, accumulating the block and
@@ -582,7 +582,7 @@ func (ethash *Ethash) FinalizeAndAssemble(chainConfig *chain.Config, header *typ
 ) (*types.Block, types.Transactions, types.Receipts, error) {
 
 	// Finalize block
-	outTxs, outR, err := ethash.Finalize(chainConfig, header, state, txs, uncles, r, withdrawals, requests, chain, syscall, logger)
+	outTxs, outR, _, err := ethash.Finalize(chainConfig, header, state, txs, uncles, r, withdrawals, requests, chain, syscall, logger)
 	if err != nil {
 		return nil, nil, nil, err
 	}

@@ -133,14 +133,14 @@ func (s *Merge) CalculateRewards(config *chain.Config, header *types.Header, unc
 func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests,
 	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
-) (types.Transactions, types.Receipts, error) {
+) (types.Transactions, types.Receipts, types.Requests, error) {
 	if !misc.IsPoSHeader(header) {
 		return s.eth1Engine.Finalize(config, header, state, txs, uncles, r, withdrawals, requests, chain, syscall, logger)
 	}
 
 	rewards, err := s.CalculateRewards(config, header, uncles, syscall)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	for _, r := range rewards {
 		state.AddBalance(r.Beneficiary, &r.Amount)
@@ -149,7 +149,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 	if withdrawals != nil {
 		if auraEngine, ok := s.eth1Engine.(*aura.AuRa); ok {
 			if err := auraEngine.ExecuteSystemWithdrawals(withdrawals, syscall); err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 		} else {
 			for _, w := range withdrawals {
@@ -159,7 +159,10 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		}
 	}
 
-	return txs, r, nil
+	requests = append(types.Requests{}, misc.DequeueWithdrawalRequests7002(syscall)...)
+
+
+	return txs, r, requests, nil
 }
 
 func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState,
@@ -170,8 +173,8 @@ func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, 
 		return s.eth1Engine.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, withdrawals, requests, chain, syscall, call, logger)
 	}
 	// get the deposits (TODO @somnathb1) and withdrawals and append it to requests
-	requests = append(types.Requests{}, misc.DequeueWithdrawalRequests7002(syscall)...)
-	outTxs, outReceipts, err := s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, requests, chain, syscall, logger)
+	// requests = append(types.Requests{}, misc.DequeueWithdrawalRequests7002(syscall)...)
+	outTxs, outReceipts, requests, err := s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, requests, chain, syscall, logger)
 	if err != nil {
 		return nil, nil, nil, err
 	}

@@ -373,7 +373,7 @@ func FinalizeBlockExecution(
 		// newBlock.header
 
 	} else {
-		_, _, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, logger)
+		_, _, _, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, logger)
 	}
 	if err != nil {
 		return nil, nil, nil, err

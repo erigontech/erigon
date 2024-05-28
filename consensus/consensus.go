@@ -155,7 +155,7 @@ type EngineWriter interface {
 	// consensus rules that happen at finalization (e.g. block rewards).
 	Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests, chain ChainReader, syscall SystemCall, logger log.Logger,
-	) (types.Transactions, types.Receipts, error)
+	) (types.Transactions, types.Receipts, types.Requests, error)
 
 	// FinalizeAndAssemble runs any post-transaction state modifications (e.g. block
 	// rewards) and assembles the final block.
