@@ -40,7 +40,7 @@ func StageFinishCfg(db kv.RwDB, tmpDir string, forkValidator *engine_helpers.For
 	}
 }
 
-func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg, initialCycle bool) error {
+func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -72,7 +72,7 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg, initialCycle bool) 
 		cfg.forkValidator.NotifyCurrentHeight(executionAt)
 	}
 
-	if initialCycle {
+	if s.CurrentSyncCycle.IsInitialCycle {
 		if err := params.SetErigonVersion(tx, params.VersionKeyFinished); err != nil {
 			return err
 		}
