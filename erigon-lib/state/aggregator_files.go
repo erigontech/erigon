@@ -25,17 +25,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
-type filesItemI struct {
-	fi []*filesItem
-	i  int
-}
-
 type SelectedStaticFilesV3 struct {
 	d     [kv.DomainLen][]*filesItem
 	dHist [kv.DomainLen][]*filesItem
 	dIdx  [kv.DomainLen][]*filesItem
 	dI    [kv.DomainLen]int
-	ii    [kv.StandaloneIdxLen]filesItemI
+	ii    [kv.StandaloneIdxLen][]*filesItem
 }
 
 func (sf SelectedStaticFilesV3) Close() {
@@ -45,7 +40,7 @@ func (sf SelectedStaticFilesV3) Close() {
 	}
 
 	for _, i := range sf.ii {
-		clist = append(clist, i.fi)
+		clist = append(clist, i)
 	}
 	for _, group := range clist {
 		for _, item := range group {
@@ -69,9 +64,8 @@ func (ac *AggregatorRoTx) staticFilesInRange(r RangesV3) (sf SelectedStaticFiles
 	}
 	for id, rng := range r.ranges {
 		if rng != nil && rng.needMerge {
-			fi, i := ac.iis[id].staticFilesInRange(rng.from, rng.to)
-			sf.ii[id].fi = fi
-			sf.ii[id].i = i
+			fi, _ := ac.iis[id].staticFilesInRange(rng.from, rng.to)
+			sf.ii[id] = fi
 		}
 	}
 	return sf, err
