@@ -18,8 +18,6 @@ import (
 	"github.com/ledgerwatch/secp256k1"
 	"github.com/spf13/cobra"
 
-	"golang.org/x/sync/errgroup"
-
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
