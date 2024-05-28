@@ -53,12 +53,8 @@ func NewUint64Slice(limit int) *byteBasedUint64Slice {
 // Clear clears the slice by setting its length to 0 and zeroing out its backing array.
 func (arr *byteBasedUint64Slice) Clear() {
 	arr.l = 0
-	for i := range arr.u {
-		arr.u[i] = 0
-	}
-	for i := range arr.treeCacheBuffer {
-		arr.treeCacheBuffer[i] = 0
-	}
+	clear(arr.u)
+	clear(arr.treeCacheBuffer)
 }
 
 // CopyTo copies the slice to a target slice.
