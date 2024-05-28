@@ -4,6 +4,9 @@ on:
   schedule:
     - cron: '0 8 * * *'  # Run every day at 8:00 UTC
   workflow_dispatch:     # Run manually
+  push:
+    branches:
+      - qa_tests_rpc_integration  # only to debug the workflow
 
 jobs:
   integration-test-suite:
@@ -63,7 +66,7 @@ jobs:
           rm -rf ./mainnet/results/
           
           # Run RPC integration test runner via http
-          python3 ./run_tests.py --continue --blockchain mainnet --display-only-fail --port 8545 -x debug_trace,trace_ --transport_type http,websocket
+          python3 ./run_tests.py --continue --blockchain mainnet --display-only-fail --port 8545 -x debug_,trace_,admin_ --transport_type http,websocket
          
           # Capture test runner script exit status
           test_exit_status=$?
