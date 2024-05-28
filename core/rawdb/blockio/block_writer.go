@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/polygon/bor/bordb"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -116,5 +117,5 @@ func (w *BlockWriter) PruneBlocks(ctx context.Context, tx kv.RwTx, blockTo uint6
 // doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
 func (w *BlockWriter) PruneBorBlocks(ctx context.Context, tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt func(number uint64) uint64) error {
-	return rawdb.PruneBorBlocks(tx, blockTo, blocksDeleteLimit, SpanIdAt)
+	return bordb.PruneBorBlocks(tx, blockTo, blocksDeleteLimit, SpanIdAt)
 }
