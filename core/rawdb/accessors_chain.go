@@ -377,7 +377,7 @@ func ReadBodyRLP(db kv.Tx, hash common.Hash, number uint64) rlp.RawValue {
 	return bodyRlp
 }
 
-// deprecated. use readBodyForStorage
+// Deprecated: use readBodyForStorage
 func ReadStorageBodyRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawValue {
 	bodyRlp, err := db.GetOne(kv.BlockBody, dbutils.BlockBodyKey(number, hash))
 	if err != nil {
