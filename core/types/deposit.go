@@ -70,6 +70,9 @@ func (d *Deposit) EncodeRLP(w io.Writer) (err error) {
 	if _, err = w.Write(buf.Bytes()); err != nil {
 		return err
 	}
+	SpidermanEsize := d.EncodingSize()
+	fmt.Printf("[SPIDERMAN] Deposit enc size %v", SpidermanEsize)
+
 	return
 }
 func (d *Deposit) DecodeRLP(input []byte) error { return rlp.DecodeBytes(input[1:], d) }

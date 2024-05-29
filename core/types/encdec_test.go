@@ -69,6 +69,14 @@ func (tr *TRand) RandWithdrawal() *Withdrawal {
 	}
 }
 
+func (tr *TRand) RandWithdrawalRequest() *WithdrawalRequest {
+	return &WithdrawalRequest{
+		SourceAddress:   [20]byte(tr.RandBytes(20)),
+		ValidatorPubkey: [48]byte(tr.RandBytes(48)),
+		Amount:          *tr.RandUint64(),
+	}
+}
+
 func (tr *TRand) RandDeposit() *Deposit {
 	return &Deposit{
 		Pubkey:                [48]byte(tr.RandBytes(48)),
@@ -80,10 +88,12 @@ func (tr *TRand) RandDeposit() *Deposit {
 }
 
 func (tr *TRand) RandRequest() Request {
-	return tr.RandDeposit()
-	// var r Request
-	// r.inner = d.copy()
-	// return &r
+	switch tr.rnd.Intn(2) {
+	case 1:
+		return tr.RandWithdrawalRequest()
+	default:
+		return tr.RandDeposit()
+	}
 }
 
 func (tr *TRand) RandHeader() *Header {
@@ -268,7 +278,8 @@ func (tr *TRand) RandBody() *Body {
 		Transactions: tr.RandTransactions(tr.RandIntInRange(1, 6)),
 		Uncles:       tr.RandHeaders(tr.RandIntInRange(1, 6)),
 		Withdrawals:  tr.RandWithdrawals(tr.RandIntInRange(1, 6)),
-		Requests:     tr.RandRequests(tr.RandIntInRange(1, 6)),
+		// Requests:     tr.RandRequests(tr.RandIntInRange(1, 6)),
+		Requests: tr.RandRequests(tr.RandIntInRange(1, 6)),
 	}
 }
 
@@ -347,6 +358,12 @@ func compareDeposits(t *testing.T, a, b *Deposit) {
 	check(t, "Deposit.Index", a.Index, b.Index)
 }
 
+func compareWithdrawalRequests(t *testing.T, a, b *WithdrawalRequest) {
+	check(t, "Deposit.SourceAddress", a.SourceAddress, b.SourceAddress)
+	check(t, "WithdrawalRequest.ValidatorPubkey", a.ValidatorPubkey, b.ValidatorPubkey)
+	check(t, "Deposit.Amount", a.Amount, b.Amount)
+}
+
 func checkRequests(t *testing.T, a, b Request) {
 	if a.RequestType() != b.RequestType() {
 		t.Errorf("request type mismatch: request-a: %v, request-b: %v", a.RequestType(), b.RequestType())
@@ -359,7 +376,15 @@ func checkRequests(t *testing.T, a, b Request) {
 		if aok && bok {
 			compareDeposits(t, a, b)
 		} else {
-			t.Errorf("type assertion failed: %v %v", a.RequestType(), b.RequestType())
+			t.Errorf("type assertion failed: %v %v %v %v", a.RequestType(), aok, b.RequestType(), bok)
+		}
+	case WithdrawalRequestType:
+		a, aok := a.(*WithdrawalRequest)
+		b, bok := b.(*WithdrawalRequest)
+		if aok && bok {
+			compareWithdrawalRequests(t, a, b)
+		} else {
+			t.Errorf("type assertion failed: %v %v %v %v", a.RequestType(), aok, b.RequestType(), bok)
 		}
 	default:
 		t.Errorf("unknown request type: %v", a.RequestType())
@@ -491,18 +516,16 @@ func TestDepositEncodeDecode(t *testing.T) {
 	tr := NewTRand()
 	var buf bytes.Buffer
 	for i := 0; i < RUNS; i++ {
-		enc := tr.RandRequest()
+		a := tr.RandDeposit()
 		buf.Reset()
-		if err := enc.EncodeRLP(&buf); err != nil {
+		if err := a.EncodeRLP(&buf); err != nil {
 			t.Errorf("error: deposit.EncodeRLP(): %v", err)
 		}
 		// s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
-		var dec Request
-		if err := dec.DecodeRLP(buf.Bytes()); err != nil {
+		b := new(Deposit)
+		if err := b.DecodeRLP(buf.Bytes()); err != nil {
 			t.Errorf("error: Deposit.DecodeRLP(): %v", err)
 		}
-		a := enc.(*Deposit)
-		b := dec.(*Deposit)
 		compareDeposits(t, a, b)
 	}
 }

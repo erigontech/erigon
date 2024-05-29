@@ -5,10 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/bits"
 
 	// "io"
 
 	// rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
+	"github.com/ledgerwatch/erigon-lib/common"
+	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -124,6 +127,28 @@ func (r *Requests) DecodeRLP(s *rlp.Stream) (err error) {
 		}
 	}
 	return err
+}
+
+func (r *Requests) EncodeRLP(w io.Writer) {
+	var c int
+	for _, req := range *r {
+		e := req.EncodingSize()
+		c += e + 1 + common.BitLenToByteLen(bits.Len(uint(e)))
+	}
+	b := make([]byte, 10)
+	l := rlp2.EncodeListPrefix(c, b)
+	w.Write(b[0:l])
+	for _, req := range *r {
+		buf := new(bytes.Buffer)
+		// buf2 := new(bytes.Buffer)
+		req.EncodeRLP(buf)
+		buf2 := make([]byte, buf.Len()+2)
+		written := rlp2.EncodeString(buf.Bytes(), buf2)
+		w.Write(buf2)
+		if written != len(buf2) {
+
+		}
+	}
 }
 
 func (r Requests) Deposits() Deposits {

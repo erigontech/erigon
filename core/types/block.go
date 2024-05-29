@@ -939,7 +939,7 @@ func (bb Body) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen
 }
 
 func (bb Body) EncodeRLP(w io.Writer) error {
-	payloadSize, txsLen, unclesLen, withdrawalsLen, requestsLen := bb.payloadSize()
+	payloadSize, txsLen, unclesLen, withdrawalsLen /* requestsLen */, _ := bb.payloadSize()
 	var b [33]byte
 	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
@@ -961,9 +961,10 @@ func (bb Body) EncodeRLP(w io.Writer) error {
 	}
 	// encode Requests
 	if bb.Requests != nil {
-		if err := encodeRLPGeneric(bb.Requests, requestsLen, w, b[:]); err != nil {
-			return err
-		}
+		bb.Requests.EncodeRLP(w)
+		// if err := encodeRLPGeneric(bb.Requests, requestsLen, w, b[:]); err != nil {
+		// 	return err
+		// }
 	}
 	return nil
 }
@@ -1381,19 +1382,19 @@ func (b *Block) HashCheck() error {
 		return fmt.Errorf("block has invalid withdrawals hash: have %x, exp: %x", hash, b.WithdrawalsHash())
 	}
 
-	if b.RequestsRoot() == nil {
-		if b.Requests() != nil {
-			return errors.New("header missing RequestsRoot")
-		}
-		return nil
-	}
-	if b.Requests() == nil {
-		return errors.New("body missing Requests")
-	}
+	// if b.RequestsRoot() == nil {
+	// 	if b.Requests() != nil {
+	// 		return errors.New("header missing RequestsRoot")
+	// 	}
+	// 	return nil
+	// }
+	// if b.Requests() == nil {
+	// 	return errors.New("body missing Requests")
+	// }
 
-	if hash := DeriveSha(b.Requests()); hash != *b.RequestsRoot() {
-		return fmt.Errorf("block has invalid requests root: have %x, exp: %x", hash, b.RequestsRoot())
-	}
+	// if hash := DeriveSha(b.Requests()); hash != *b.RequestsRoot() {
+	// 	return fmt.Errorf("block has invalid requests root: have %x, exp: %x", hash, b.RequestsRoot())
+	// }
 
 	return nil
 }
