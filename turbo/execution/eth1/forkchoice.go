@@ -385,7 +385,8 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	}
 	// Run the forkchoice
 	initialCycle := limitedBigJump
-	if _, err := e.executionPipeline.Run(e.db, wrap.TxContainer{Tx: tx}, initialCycle); err != nil {
+	firstCycle := false
+	if _, err := e.executionPipeline.Run(e.db, wrap.TxContainer{Tx: tx}, initialCycle, firstCycle); err != nil {
 		err = fmt.Errorf("updateForkChoice: %w", err)
 		e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
@@ -466,12 +467,12 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 }
 
 func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle bool) {
-	if e.doingPostForkchoice.CompareAndSwap(false, true) {
+	if !e.doingPostForkchoice.CompareAndSwap(false, true) {
 		return
 	}
 	go func() {
 		defer e.doingPostForkchoice.Store(false)
-		timings := []interface{}{}
+		var timings []interface{}
 		// Wait for semaphore to be available
 		if e.semaphore.Acquire(e.bacgroundCtx, 1) != nil {
 			return

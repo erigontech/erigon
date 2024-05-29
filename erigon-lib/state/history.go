@@ -29,7 +29,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/kv/backup"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -37,10 +36,10 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/backup"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
@@ -1066,6 +1065,7 @@ func (ht *HistoryRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 		defer valsC.Close()
 	}
 
+	var pruned int
 	pruneValue := func(k, txnm []byte) error {
 		txNum := binary.BigEndian.Uint64(txnm)
 		if txNum >= txTo || txNum < txFrom { //[txFrom; txTo), but in this case idx record
@@ -1090,9 +1090,10 @@ func (ht *HistoryRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 			}
 		}
 
-		mxPruneSizeHistory.Inc()
+		pruned++
 		return nil
 	}
+	mxPruneSizeHistory.AddInt(pruned)
 
 	if !forced && ht.h.dontProduceHistoryFiles {
 		forced = true // or index.CanPrune will return false cuz no snapshots made
@@ -1334,6 +1335,7 @@ func (ht *HistoryRoTx) WalkAsOf(startTxNum uint64, from, to []byte, roTx kv.Tx, 
 	}
 	binary.BigEndian.PutUint64(hi.startTxKey[:], startTxNum)
 	if err := hi.advanceInFiles(); err != nil {
+		hi.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
 
@@ -1347,7 +1349,8 @@ func (ht *HistoryRoTx) WalkAsOf(startTxNum uint64, from, to []byte, roTx kv.Tx, 
 	}
 	binary.BigEndian.PutUint64(dbit.startTxKey[:], startTxNum)
 	if err := dbit.advance(); err != nil {
-		panic(err)
+		dbit.Close() //it's responsibility of constructor (our) to close resource on error
+		return nil, err
 	}
 	return iter.UnionKV(hi, dbit, limit), nil
 }
@@ -1594,14 +1597,14 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 		return iter.EmptyKV, nil
 	}
 
-	hi := &HistoryChangesIterFiles{
+	s := &HistoryChangesIterFiles{
 		hc:         ht,
-		startTxNum: cmp.Max(0, uint64(fromTxNum)),
+		startTxNum: max(0, uint64(fromTxNum)),
 		endTxNum:   toTxNum,
 		limit:      limit,
 	}
 	if fromTxNum >= 0 {
-		binary.BigEndian.PutUint64(hi.startTxKey[:], uint64(fromTxNum))
+		binary.BigEndian.PutUint64(s.startTxKey[:], uint64(fromTxNum))
 	}
 	for _, item := range ht.iit.files {
 		if fromTxNum >= 0 && item.endTxNum <= uint64(fromTxNum) {
@@ -1614,13 +1617,14 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 		g.Reset(0)
 		if g.HasNext() {
 			key, offset := g.Next(nil)
-			heap.Push(&hi.h, &ReconItem{g: g, key: key, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, startOffset: offset, lastOffset: offset})
+			heap.Push(&s.h, &ReconItem{g: g, key: key, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, startOffset: offset, lastOffset: offset})
 		}
 	}
-	if err := hi.advance(); err != nil {
+	if err := s.advance(); err != nil {
+		s.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
-	return hi, nil
+	return s, nil
 }
 
 func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.KVS, error) {
@@ -1631,7 +1635,7 @@ func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By
 	if rangeIsInFiles {
 		return iter.EmptyKVS, nil
 	}
-	dbi := &HistoryChangesIterDB{
+	s := &HistoryChangesIterDB{
 		endTxNum:    toTxNum,
 		roTx:        roTx,
 		largeValues: ht.h.historyLargeValues,
@@ -1639,12 +1643,13 @@ func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By
 		limit:       limit,
 	}
 	if fromTxNum >= 0 {
-		binary.BigEndian.PutUint64(dbi.startTxKey[:], uint64(fromTxNum))
+		binary.BigEndian.PutUint64(s.startTxKey[:], uint64(fromTxNum))
 	}
-	if err := dbi.advance(); err != nil {
+	if err := s.advance(); err != nil {
+		s.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
-	return dbi, nil
+	return s, nil
 }
 
 func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.KVS, error) {

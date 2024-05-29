@@ -70,7 +70,7 @@ func writeLogsList(w http.ResponseWriter, dirPath string) {
 		Size int64  `json:"size"`
 	}
 
-	files := make([]file, len(infos))
+	files := make([]file, 0, len(infos))
 
 	for _, fileInfo := range infos {
 		files = append(files, file{Name: fileInfo.Name(), Size: fileInfo.Size()})

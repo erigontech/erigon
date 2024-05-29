@@ -340,7 +340,7 @@ func (b *CachingBeaconState) GetAttestingIndicies(
 // See: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#get_validator_churn_limit
 func (b *CachingBeaconState) GetValidatorChurnLimit() uint64 {
 	activeIndsCount := uint64(len(b.GetActiveValidatorsIndices(Epoch(b))))
-	return utils.Max64(
+	return max(
 		activeIndsCount/b.BeaconConfig().ChurnLimitQuotient,
 		b.BeaconConfig().MinPerEpochChurnLimit,
 	)
@@ -349,7 +349,7 @@ func (b *CachingBeaconState) GetValidatorChurnLimit() uint64 {
 // https://github.com/ethereum/consensus-specs/blob/dev/specs/deneb/beacon-chain.md#new-get_validator_activation_churn_limit
 func (b *CachingBeaconState) GetValidatorActivationChurnLimit() uint64 {
 	if b.Version() >= clparams.DenebVersion {
-		return utils.Min64(
+		return min(
 			b.BeaconConfig().MaxPerEpochActivationChurnLimit,
 			b.GetValidatorChurnLimit(),
 		)

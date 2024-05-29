@@ -12,12 +12,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/urfave/cli/v2"
+
 	"github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon/cmd/snapshots/sync"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/turbo/logging"
-	"github.com/urfave/cli/v2"
 )
 
 var (
@@ -286,7 +287,7 @@ func verifyManifest(ctx context.Context, srcSession *downloader.RCloneSession, v
 	var extra string
 
 	if len(manifestFiles) != 0 {
-		files := make([]string, len(manifestFiles))
+		files := make([]string, 0, len(manifestFiles))
 
 		for file := range manifestFiles {
 			files = append(files, file)
@@ -296,7 +297,7 @@ func verifyManifest(ctx context.Context, srcSession *downloader.RCloneSession, v
 	}
 
 	if len(dirFiles) != 0 {
-		files := make([]string, len(dirFiles))
+		files := make([]string, 0, len(dirFiles))
 
 		for file := range dirFiles {
 			files = append(files, file)

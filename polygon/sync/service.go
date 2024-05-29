@@ -43,7 +43,8 @@ func NewService(
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	execution := NewExecutionClient(executionClient)
 	store := NewStore(logger, execution)
-	headersVerifier := VerifyAccumulatedHeaders
+	checkpointVerifier := VerifyCheckpointHeaders
+	milestoneVerifier := VerifyMilestoneHeaders
 	blocksVerifier := VerifyBlocks
 	p2pService := p2p.NewService(maxPeers, logger, sentryClient, statusDataProvider.GetStatusData)
 	heimdallClient := heimdall.NewHeimdallClient(heimdallUrl, logger)
@@ -58,7 +59,8 @@ func NewService(
 		logger,
 		p2pService,
 		heimdallService,
-		headersVerifier,
+		checkpointVerifier,
+		milestoneVerifier,
 		blocksVerifier,
 		store,
 	)
@@ -68,7 +70,7 @@ func NewService(
 	sync := NewSync(
 		store,
 		execution,
-		headersVerifier,
+		milestoneVerifier,
 		blocksVerifier,
 		p2pService,
 		blockDownloader,

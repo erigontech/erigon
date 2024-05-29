@@ -26,17 +26,15 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
-
 	"github.com/gballet/go-verkle"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 
 	"github.com/ledgerwatch/erigon/core/types"
@@ -1037,7 +1035,7 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
 		return err
 	}
 	blockFrom := binary.BigEndian.Uint64(firstK)
-	stopAtBlock := cmp.Min(blockTo, blockFrom+uint64(blocksDeleteLimit))
+	stopAtBlock := min(blockTo, blockFrom+uint64(blocksDeleteLimit))
 
 	var b *types.BodyForStorage
 
