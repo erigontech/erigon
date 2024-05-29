@@ -368,6 +368,9 @@ const (
 	BorCheckpoints    = "BorCheckpoints"            // checkpoint_id -> checkpoint (in JSON encoding)
 	BorCheckpointEnds = "BorCheckpointEnds"         // start block_num -> checkpoint_id (first block of checkpoint)
 
+	// Polygon Bridge
+	PolygonBridge = "PolygonBridge" // bridge event.ID -> event
+
 	// Downloader
 	BittorrentCompletion = "BittorrentCompletion"
 	BittorrentInfo       = "BittorrentInfo"
@@ -621,6 +624,7 @@ var ChaindataTables = []string{
 	BorMilestoneEnds,
 	BorCheckpoints,
 	BorCheckpointEnds,
+	PolygonBridge,
 	TblAccountKeys,
 	TblAccountVals,
 	TblAccountHistoryKeys,
@@ -859,6 +863,7 @@ var BorTablesCfg = TableCfg{
 	BorCheckpointEnds: {Flags: DupSort},
 	BorMilestones:     {Flags: DupSort},
 	BorMilestoneEnds:  {Flags: DupSort},
+	PolygonBridge:     {Flags: DupSort},
 }
 
 var TxpoolTablesCfg = TableCfg{}

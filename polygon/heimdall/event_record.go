@@ -28,6 +28,57 @@ type EventRecordWithTime struct {
 	Time time.Time `json:"record_time" yaml:"record_time"`
 }
 
+func (e *EventRecordWithTime) toIntTime() eventRecordWithIntTime {
+	return eventRecordWithIntTime{
+		EventRecord: EventRecord{
+			ID:       e.ID,
+			Contract: e.Contract,
+			Data:     e.Data,
+			TxHash:   e.TxHash,
+			LogIndex: e.LogIndex,
+			ChainID:  e.ChainID,
+		},
+		Time: big.NewInt(e.Time.Unix()),
+	}
+}
+
+func (e *EventRecordWithTime) EncodeRLP() (rlp.RawValue, error) {
+	r := e.toIntTime()
+	return rlp.EncodeToBytes(&r)
+}
+
+// DecodeEventRecord RLP decodes the given bytes to EventRecordWithTime
+func DecodeEventRecord(v rlp.RawValue) (*EventRecordWithTime, error) {
+	var event eventRecordWithIntTime
+	err := rlp.DecodeBytes(v, &event)
+	if err != nil {
+		return nil, err
+	}
+
+	e := event.toTime()
+
+	return &e, nil
+}
+
+type eventRecordWithIntTime struct {
+	EventRecord
+	Time *big.Int `json:"record_time" yaml:"record_time"` // use this instead of uint256 to allow for rlp encoding
+}
+
+func (e *eventRecordWithIntTime) toTime() EventRecordWithTime {
+	return EventRecordWithTime{
+		EventRecord: EventRecord{
+			ID:       e.ID,
+			Contract: e.Contract,
+			Data:     e.Data,
+			TxHash:   e.TxHash,
+			LogIndex: e.LogIndex,
+			ChainID:  e.ChainID,
+		},
+		Time: time.Unix(e.Time.Int64(), 0),
+	}
+}
+
 var ErrEventRecordNotFound = fmt.Errorf("event record not found")
 
 // String returns the string representatin of a state record
