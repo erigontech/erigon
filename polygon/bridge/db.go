@@ -125,7 +125,8 @@ func GetEvents(db kv.RwDB, id IDRange) ([][]byte, error) {
 			return err
 		}
 
-		k, v, err := cursor.Seek(kStart)
+		var k, v []byte
+		k, v, err = cursor.Seek(kStart)
 		if err != nil {
 			return err
 		}
