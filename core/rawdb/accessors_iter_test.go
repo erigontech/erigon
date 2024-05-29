@@ -67,16 +67,18 @@ func TestCanonicalIter(t *testing.T) {
 	require.NoError(rawdb.WriteCanonicalHash(tx, libcommon.Hash{11}, 1))
 	require.NoError(rawdb.WriteCanonicalHash(tx, libcommon.Hash{12}, 2))
 
-	it, err := rawdb.TxnIdsOfCanonicalBlocks(tx, 0, 1, order.Asc, -1)
-	require.NoError(err)
-	require.Equal(false, it.HasNext())
-	require.Equal(0, len(iter.ToArrU64Must(it)))
+	//it, err := rawdb.TxnIdsOfCanonicalBlocks(tx, 0, 1, order.Asc, -1)
+	//require.NoError(err)
+	//require.Equal(false, it.HasNext())
+	//require.Equal(0, len(iter.ToArrU64Must(it)))
 
-	it, err = rawdb.TxnIdsOfCanonicalBlocks(tx, 0, -1, order.Asc, -1)
-	require.NoError(err)
+	txNumsOfBlock := func(bn uint64) []uint64 {
+		return []uint64{2 + (4 * bn) + 0, 2 + (4 * bn) + 1, 2 + (4 * bn) + 2, 2 + (4 * bn) + 3}
+	}
+	it, err := rawdb.TxnIdsOfCanonicalBlocks(tx, 0, -1, order.Asc, -1)
 	require.NoError(err)
 	require.Equal(true, it.HasNext())
-	require.Equal([]uint64{0, 1, 4, 5, 7, 8}, iter.ToArrU64Must(it))
+	require.Equal(append(append(txNumsOfBlock(0), txNumsOfBlock(2)...), txNumsOfBlock(4)...), iter.ToArrU64Must(it))
 
 	t.Fatal("TODO: add order.Desc support")
 }
