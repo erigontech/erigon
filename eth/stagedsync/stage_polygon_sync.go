@@ -188,9 +188,9 @@ func (s *polygonSyncStageService) Run(ctx context.Context, tx kv.RwTx, stageStat
 			var err error
 			if data.updateForkChoice != nil {
 				// exit stage upon update fork choice
-				return s.handleUpdateForkChoice(ctx, tx, data.updateForkChoice)
+				return s.handleUpdateForkChoice(tx, data.updateForkChoice)
 			} else if len(data.insertBlocks) > 0 {
-				err = s.handleInsertBlocks(tx, data.insertBlocks)
+				err = s.handleInsertBlocks(ctx, tx, data.insertBlocks)
 			} else if data.span != nil {
 				err = s.handleSpan(ctx, tx, data.span)
 			} else if data.checkpoint != nil {
@@ -238,7 +238,10 @@ func (s *polygonSyncStageService) runBgComponents(ctx context.Context) {
 	}()
 }
 
-func (s *polygonSyncStageService) handleInsertBlocks(tx kv.RwTx, blocks []*types.Block) error {
+func (s *polygonSyncStageService) handleInsertBlocks(ctx context.Context, tx kv.RwTx, blocks []*types.Block) error {
+	stateSyncEventsLogTicker := time.NewTicker(logInterval)
+	defer stateSyncEventsLogTicker.Stop()
+
 	for _, block := range blocks {
 		height := block.NumberU64()
 		header := block.Header()
@@ -263,32 +266,30 @@ func (s *polygonSyncStageService) handleInsertBlocks(tx kv.RwTx, blocks []*types
 
 		td := parentTd.Add(parentTd, header.Difficulty)
 		if err := rawdb.WriteHeader(tx, header); err != nil {
-			return fmt.Errorf("InsertHeaders: writeHeader: %s", err)
+			return err
 		}
 
 		if err := rawdb.WriteTd(tx, header.Hash(), height, td); err != nil {
-			return fmt.Errorf("InsertHeaders: writeTd: %s", err)
+			return err
 		}
 
 		if _, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), height, body.RawBody()); err != nil {
-			return fmt.Errorf("InsertBlocks: writeBody: %s", err)
+			return err
+		}
+
+		if err := s.downloadStateSyncEvents(ctx, tx, header, stateSyncEventsLogTicker); err != nil {
+			return err
 		}
 	}
 
 	return nil
 }
 
-func (s *polygonSyncStageService) handleUpdateForkChoice(ctx context.Context, tx kv.RwTx, tip *types.Header) error {
+func (s *polygonSyncStageService) handleUpdateForkChoice(tx kv.RwTx, tip *types.Header) error {
 	tipBlockNum := tip.Number.Uint64()
 	tipHash := tip.Hash()
 
 	s.logger.Info(s.appendLogPrefix("handle update fork choice"), "block", tipBlockNum, "hash", tipHash)
-
-	// make sure all state sync events for the given tip are downloaded to mdbx
-	// NOTE: remove this once we integrate the bridge component in sync.Run
-	if err := s.downloadStateSyncEvents(ctx, tx, tip); err != nil {
-		return err
-	}
 
 	logPrefix := s.stageState.LogPrefix()
 	logTicker := time.NewTicker(logInterval)
@@ -302,7 +303,6 @@ func (s *polygonSyncStageService) handleUpdateForkChoice(ctx context.Context, tx
 		return err
 	}
 
-	// update stage progress
 	if err := s.stageState.Update(tx, tipBlockNum); err != nil {
 		return err
 	}
@@ -322,7 +322,13 @@ func (s *polygonSyncStageService) handleUpdateForkChoice(ctx context.Context, tx
 	return nil
 }
 
-func (s *polygonSyncStageService) downloadStateSyncEvents(ctx context.Context, tx kv.RwTx, tip *types.Header) (err error) {
+func (s *polygonSyncStageService) downloadStateSyncEvents(
+	ctx context.Context,
+	tx kv.RwTx,
+	header *types.Header,
+	logTicker *time.Ticker,
+) error {
+	var err error
 	if !s.lastStateSyncEventIdInit {
 		s.lastStateSyncEventId, _, err = s.blockReader.LastEventId(ctx, tx)
 	}
@@ -330,51 +336,41 @@ func (s *polygonSyncStageService) downloadStateSyncEvents(ctx context.Context, t
 		return err
 	}
 
-	borConfig := s.chainConfig.Bor.(*borcfg.BorConfig)
-	// need to use latest sprint start block num
-	tipBlockNum := tip.Number.Uint64()
-	sprintLen := borConfig.CalculateSprintLength(tipBlockNum)
-	sprintRemainder := tipBlockNum % sprintLen
-	for tipBlockNum > sprintLen && sprintRemainder > 0 {
-		tipBlockNum--
-		sprintRemainder--
-		tip = rawdb.ReadHeader(tx, tip.ParentHash, tipBlockNum)
-		if tip == nil {
-			return errors.New("broken parent header chain")
-		}
-	}
-
-	s.logger.Info(
-		s.appendLogPrefix("downloading state sync events"),
-		"sprintStartBlockNum", tip.Number.Uint64(),
-		"lastStateSyncEventId", s.lastStateSyncEventId,
-	)
-
-	var records int
-	var duration time.Duration
-	s.lastStateSyncEventId, records, duration, err = fetchAndWriteHeimdallStateSyncEvents(
+	s.lastStateSyncEventIdInit = true
+	newStateSyncEventId, records, duration, err := fetchRequiredHeimdallStateSyncEventsIfNeeded(
 		ctx,
-		tip,
-		s.lastStateSyncEventId,
+		header,
 		tx,
-		borConfig,
+		s.chainConfig.Bor.(*borcfg.BorConfig),
 		s.blockReader,
 		s.heimdallClient,
 		s.chainConfig.ChainID.String(),
 		s.stateReceiverABI,
 		s.stageState.LogPrefix(),
 		s.logger,
+		s.lastStateSyncEventId,
 	)
 	if err != nil {
 		return err
 	}
 
-	s.logger.Info(
-		s.appendLogPrefix("finished downloading state sync events"),
-		"records", records,
-		"duration", duration,
-	)
+	if s.lastStateSyncEventId == newStateSyncEventId {
+		return nil
+	}
 
+	select {
+	case <-logTicker.C:
+		s.logger.Info(
+			s.appendLogPrefix("downloading state sync events progress"),
+			"blockNum", header.Number,
+			"records", records,
+			"duration", duration,
+		)
+	default:
+		// carry on
+	}
+
+	s.lastStateSyncEventId = newStateSyncEventId
 	return nil
 }
 
