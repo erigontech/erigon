@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -220,7 +219,7 @@ func validateControlFlow(code []byte, section int, metadata []*FunctionMetadata,
 					pos += 1
 				}
 			}
-			maxStackHeight = cmp.Max(maxStackHeight, height)
+			maxStackHeight = max(maxStackHeight, height)
 		}
 	}
 	if maxStackHeight != int(metadata[section].MaxStackHeight) {
