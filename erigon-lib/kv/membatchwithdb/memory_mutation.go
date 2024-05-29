@@ -350,7 +350,7 @@ func (m *MemoryMutation) RangeDupSort(table string, key []byte, fromPrefix, toPr
 	if s.iterMem, err = m.memTx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, limit); err != nil {
 		return s, err
 	}
-	if _, err := s.init(); err != nil {
+	if err := s.init(); err != nil {
 		s.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
