@@ -148,7 +148,7 @@ func (s *CanonicalTxnIds) HasNext() bool {
 	if s.currentTxNum < 0 { // EndOfTable
 		return false
 	}
-	if s.toTxNum == 0 {
+	if s.toTxNum < 0 { //no boundaries
 		return true
 	}
 
