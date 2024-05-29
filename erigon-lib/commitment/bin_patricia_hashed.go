@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"io"
 	"math/bits"
-	"os"
 	"path/filepath"
 	"sort"
 
@@ -119,7 +118,7 @@ type BinPatriciaHashed struct {
 	storageFn func(plainKey []byte, cell *BinaryCell) error
 }
 
-func NewBinPatriciaHashed(accountKeyLen int, ctx PatriciaContext) *BinPatriciaHashed {
+func NewBinPatriciaHashed(accountKeyLen int, ctx PatriciaContext, tmpdir string) *BinPatriciaHashed {
 	bph := &BinPatriciaHashed{
 		keccak:        sha3.NewLegacyKeccak256().(keccakState),
 		keccak2:       sha3.NewLegacyKeccak256().(keccakState),
@@ -129,13 +128,7 @@ func NewBinPatriciaHashed(accountKeyLen int, ctx PatriciaContext) *BinPatriciaHa
 		auxBuffer:     bytes.NewBuffer(make([]byte, 8192)),
 		ctx:           ctx,
 	}
-	tdir := os.TempDir()
-	if ctx != nil {
-		tdir = ctx.TempDir()
-	}
-
-	tdir = filepath.Join(tdir, "branch-encoder")
-	bph.branchEncoder = NewBranchEncoder(1024, tdir)
+	bph.branchEncoder = NewBranchEncoder(1024, filepath.Join(tmpdir, "branch-encoder"))
 
 	return bph
 
