@@ -301,6 +301,11 @@ func (d *DiagnosticClient) SnapshotFilesList() SnapshoFilesList {
 
 func ReadSnapshotDownloadInfo(db kv.RoDB) (info SnapshotDownloadStatistics) {
 	data := ReadDataFromTable(db, kv.DiagSyncStages, SnapshotDownloadStatisticsKey)
+
+	if len(data) == 0 {
+		return SnapshotDownloadStatistics{}
+	}
+
 	err := json.Unmarshal(data, &info)
 
 	if err != nil {
@@ -313,6 +318,11 @@ func ReadSnapshotDownloadInfo(db kv.RoDB) (info SnapshotDownloadStatistics) {
 
 func ReadSnapshotIndexingInfo(db kv.RoDB) (info SnapshotIndexingStatistics) {
 	data := ReadDataFromTable(db, kv.DiagSyncStages, SnapshotIndexingStatisticsKey)
+
+	if len(data) == 0 {
+		return SnapshotIndexingStatistics{}
+	}
+
 	err := json.Unmarshal(data, &info)
 
 	if err != nil {

@@ -158,7 +158,10 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(
 				"sleepSeconds", d.notEnoughPeersBackOffDuration.Seconds(),
 			)
 
-			time.Sleep(d.notEnoughPeersBackOffDuration)
+			if err := common.Sleep(ctx, d.notEnoughPeersBackOffDuration); err != nil {
+				return nil, err
+			}
+
 			continue
 		}
 

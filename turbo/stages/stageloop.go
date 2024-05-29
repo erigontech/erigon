@@ -815,12 +815,6 @@ func NewPolygonSyncStages(
 			stopNode,
 			bor.GenesisContractStateReceiverABI(),
 		),
-		stagedsync.StageBlockHashesCfg(
-			db,
-			config.Dirs.Tmp,
-			chainConfig,
-			blockio.NewBlockWriter(),
-		),
 		stagedsync.StageSendersCfg(
 			db,
 			chainConfig,

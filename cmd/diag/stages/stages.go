@@ -34,7 +34,8 @@ func printCurentStage(cliCtx *cli.Context) error {
 
 	err := util.MakeHttpGetCall(cliCtx.Context, url, &data)
 	if err != nil {
-		return err
+		util.RenderError(err)
+		return nil
 	}
 
 	stagesRows := getStagesRows(data.SyncStages)
