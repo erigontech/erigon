@@ -54,9 +54,9 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 
 				d.mu.Unlock()
 
-				if info.DownloadFinished {
+				/*if info.DownloadFinished {
 					return
-				}
+				}*/
 			}
 		}
 
