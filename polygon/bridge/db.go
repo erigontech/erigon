@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 )
 
-// GetLatestEventID the latest state sync event ID in given DB, 1 if DB is empty
+// GetLatestEventID the latest state sync event ID in given DB, 0 if DB is empty
 // NOTE: Polygon sync events start at index 1
 func GetLatestEventID(db kv.RoDB) (uint64, error) {
 	var eventID uint64

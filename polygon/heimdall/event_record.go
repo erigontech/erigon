@@ -62,7 +62,7 @@ func DecodeEventRecord(v rlp.RawValue) (*EventRecordWithTime, error) {
 
 type eventRecordWithIntTime struct {
 	EventRecord
-	Time *big.Int `json:"record_time" yaml:"record_time"` // use this instead of uint256 to allow for rlp encoding
+	Time *big.Int `json:"record_time" yaml:"record_time"` // use big.Int as time.Time is not RLP encodable
 }
 
 func (e *eventRecordWithIntTime) toTime() EventRecordWithTime {
@@ -81,7 +81,7 @@ func (e *eventRecordWithIntTime) toTime() EventRecordWithTime {
 
 var ErrEventRecordNotFound = fmt.Errorf("event record not found")
 
-// String returns the string representatin of a state record
+// String returns the string representation of a state record
 func (e *EventRecordWithTime) String() string {
 	return fmt.Sprintf(
 		"id %v, contract %v, data: %v, txHash: %v, logIndex: %v, chainId: %v, time %s",
