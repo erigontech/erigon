@@ -185,20 +185,7 @@ func SpawnStageSnapshots(
 	return nil
 }
 
-var downaloadedOnce = false //temporary fix for the fact that E3 does pass `initialCycle=true` multiple times. Need split it to 2 variables: isFirstCycle, isOnChainTip
-
 func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, logger log.Logger) error {
-	if !s.CurrentSyncCycle.IsInitialCycle || downaloadedOnce {
-		return nil
-	}
-	if !cfg.blockReader.FreezingCfg().Enabled {
-		return nil
-	}
-	cstate := snapshotsync.NoCaplin
-	if cfg.caplin {
-		cstate = snapshotsync.AlsoCaplin
-	}
-
 	if cfg.snapshotUploader != nil {
 		u := cfg.snapshotUploader
 
@@ -233,19 +220,29 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 				return err
 			}
 		}
-	} else {
+	}
 
-		// Download only the snapshots that are for the header chain.
-		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, true, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
-			return err
-		}
-		if err := cfg.blockReader.Snapshots().ReopenSegments([]snaptype.Type{coresnaptype.Headers, coresnaptype.Bodies}, true); err != nil {
-			return err
-		}
+	if !s.CurrentSyncCycle.IsFirstCycle {
+		return nil
+	}
+	if !cfg.blockReader.FreezingCfg().Enabled {
+		return nil
+	}
+	cstate := snapshotsync.NoCaplin
+	if cfg.caplin {
+		cstate = snapshotsync.AlsoCaplin
+	}
 
-		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, false, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
-			return err
-		}
+	// Download only the snapshots that are for the header chain.
+	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, true, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
+		return err
+	}
+	if err := cfg.blockReader.Snapshots().ReopenSegments([]snaptype.Type{coresnaptype.Headers, coresnaptype.Bodies}, true); err != nil {
+		return err
+	}
+
+	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, false, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
+		return err
 	}
 
 	// It's ok to notify before tx.Commit(), because RPCDaemon does read list of files by gRPC (not by reading from db)
@@ -301,7 +298,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		})
 	}
 
-	downaloadedOnce = true
 	return nil
 }
 
