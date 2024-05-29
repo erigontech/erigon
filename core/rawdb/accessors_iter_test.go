@@ -69,6 +69,14 @@ func TestCanonicalIter(t *testing.T) {
 
 	it, err := rawdb.TxnIdsOfCanonicalBlocks(tx, 0, 1, order.Asc, -1)
 	require.NoError(err)
+	require.Equal(false, it.HasNext())
+	require.Equal(0, len(iter.ToArrU64Must(it)))
+
+	it, err = rawdb.TxnIdsOfCanonicalBlocks(tx, 0, -1, order.Asc, -1)
+	require.NoError(err)
+	require.NoError(err)
+	require.Equal(true, it.HasNext())
 	require.Equal([]uint64{0, 1, 4, 5, 7, 8}, iter.ToArrU64Must(it))
 
+	t.Fatal("TODO: add order.Desc support")
 }

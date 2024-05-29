@@ -145,9 +145,6 @@ func (s *CanonicalTxnIds) HasNext() bool {
 	if s.limit == 0 { // limit reached
 		return false
 	}
-	if s.currentTxNum < 0 {
-		return false
-	}
 	if s.currentTxNum < 0 { // EndOfTable
 		return false
 	}
@@ -157,8 +154,8 @@ func (s *CanonicalTxnIds) HasNext() bool {
 
 	//Asc:  [from, to) AND from < to
 	//Desc: [from, to) AND from > to
-	return (bool(s.orderAscend) && s.currentTxNum < int(s.toTxNum)) ||
-		(!bool(s.orderAscend) && s.currentTxNum > int(s.toTxNum))
+	return (bool(s.orderAscend) && s.currentTxNum < s.toTxNum) ||
+		(!bool(s.orderAscend) && s.currentTxNum > s.toTxNum)
 }
 
 func (s *CanonicalTxnIds) Next() (uint64, error) {
