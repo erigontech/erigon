@@ -2,7 +2,7 @@ name: QA - Tip tracking
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # Run every day at 00:00 AM UTC
+    - cron: '0 0 * * 1-6'  # Run every day at 00:00 AM UTC except Sunday
   workflow_dispatch:     # Run manually
 
 jobs:
