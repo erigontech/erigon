@@ -5,30 +5,29 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon/cmd/state/exec3"
-
 	"github.com/RoaringBitmap/roaring"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon/eth/ethutils"
-	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
 
+	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/eth/ethutils"
 	"github.com/ledgerwatch/erigon/eth/filters"
+	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
@@ -603,11 +602,11 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 	}
 
 	if !chainConfig.IsLondon(header.Number.Uint64()) {
-		fields["effectiveGasPrice"] = hexutil.Uint64(txn.GetPrice().Uint64())
+		fields["effectiveGasPrice"] = (*hexutil.Big)(txn.GetPrice().ToBig())
 	} else {
 		baseFee, _ := uint256.FromBig(header.BaseFee)
 		gasPrice := new(big.Int).Add(header.BaseFee, txn.GetEffectiveGasTip(baseFee).ToBig())
-		fields["effectiveGasPrice"] = hexutil.Uint64(gasPrice.Uint64())
+		fields["effectiveGasPrice"] = (*hexutil.Big)(gasPrice)
 	}
 	// Assign receipt status.
 	fields["status"] = hexutil.Uint64(receipt.Status)
@@ -628,7 +627,7 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 			if err != nil {
 				log.Error(err.Error())
 			}
-			fields["blobGasPrice"] = blobGasPrice
+			fields["blobGasPrice"] = (*hexutil.Big)(blobGasPrice.ToBig())
 			fields["blobGasUsed"] = hexutil.Uint64(misc.GetBlobGasUsed(numBlobs))
 		}
 	}
