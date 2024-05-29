@@ -9,8 +9,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
+	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/p2p/sentry"
+	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
+	"github.com/ledgerwatch/erigon/polygon/bridge"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/polygon/p2p"
 )
@@ -27,6 +30,7 @@ type service struct {
 	events     *TipEvents
 
 	heimdallService heimdall.Service
+	bridge          *bridge.Bridge
 }
 
 func NewService(
@@ -39,7 +43,8 @@ func NewService(
 	statusDataProvider *sentry.StatusDataProvider,
 	heimdallUrl string,
 	executionClient executionproto.ExecutionClient,
-) Service {
+	nodeCfg *nodecfg.Config,
+) (Service, error) {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	execution := NewExecutionClient(executionClient)
 	store := NewStore(logger, execution)
@@ -55,10 +60,17 @@ func NewService(
 		tmpDir,
 		logger,
 	)
+
+	b, err := bridge.NewBridge(context.Background(), dataDir, logger, borConfig, heimdallClient.FetchStateSyncEvents, bor.GenesisContractStateReceiverABI())
+	if err != nil {
+		return nil, err
+	}
+
 	blockDownloader := NewBlockDownloader(
 		logger,
 		p2pService,
 		heimdallService,
+		b,
 		checkpointVerifier,
 		milestoneVerifier,
 		blocksVerifier,
@@ -87,7 +99,8 @@ func NewService(
 		events:     events,
 
 		heimdallService: heimdallServiceV2,
-	}
+		bridge:          b,
+	}, nil
 }
 
 func (s *service) Run(parentCtx context.Context) error {
@@ -100,6 +113,7 @@ func (s *service) Run(parentCtx context.Context) error {
 	if s.heimdallService != nil {
 		group.Go(func() error { return s.heimdallService.Run(ctx) })
 	}
+	group.Go(func() error { return s.bridge.Run(ctx) })
 	group.Go(func() error { return s.sync.Run(ctx) })
 
 	return group.Wait()

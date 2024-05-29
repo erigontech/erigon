@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
+	"github.com/ledgerwatch/erigon/polygon/bridge"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/polygon/p2p"
 )
@@ -30,12 +31,14 @@ const (
 type BlockDownloader interface {
 	DownloadBlocksUsingCheckpoints(ctx context.Context, start uint64) (tip *types.Header, err error)
 	DownloadBlocksUsingMilestones(ctx context.Context, start uint64) (tip *types.Header, err error)
+	UseBridge(bridge *bridge.Bridge)
 }
 
 func NewBlockDownloader(
 	logger log.Logger,
 	p2pService p2p.Service,
 	heimdall heimdall.Heimdall,
+	bridge *bridge.Bridge,
 	checkpointVerifier WaypointHeadersVerifier,
 	milestoneVerifier WaypointHeadersVerifier,
 	blocksVerifier BlocksVerifier,
@@ -45,6 +48,7 @@ func NewBlockDownloader(
 		logger,
 		p2pService,
 		heimdall,
+		bridge,
 		checkpointVerifier,
 		milestoneVerifier,
 		blocksVerifier,
@@ -54,10 +58,15 @@ func NewBlockDownloader(
 	)
 }
 
+func (d *blockDownloader) UseBridge(bridge *bridge.Bridge) {
+	d.bridge = bridge
+}
+
 func newBlockDownloader(
 	logger log.Logger,
 	p2pService p2p.Service,
 	heimdall heimdall.Heimdall,
+	bridge *bridge.Bridge,
 	checkpointVerifier WaypointHeadersVerifier,
 	milestoneVerifier WaypointHeadersVerifier,
 	blocksVerifier BlocksVerifier,
@@ -69,6 +78,7 @@ func newBlockDownloader(
 		logger:                        logger,
 		p2pService:                    p2pService,
 		heimdall:                      heimdall,
+		bridge:                        bridge,
 		checkpointVerifier:            checkpointVerifier,
 		milestoneVerifier:             milestoneVerifier,
 		blocksVerifier:                blocksVerifier,
@@ -82,6 +92,7 @@ type blockDownloader struct {
 	logger                        log.Logger
 	p2pService                    p2p.Service
 	heimdall                      heimdall.Heimdall
+	bridge                        *bridge.Bridge
 	checkpointVerifier            WaypointHeadersVerifier
 	milestoneVerifier             WaypointHeadersVerifier
 	blocksVerifier                BlocksVerifier
@@ -267,6 +278,12 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(
 
 		if err := d.store.InsertBlocks(ctx, blocks); err != nil {
 			return nil, err
+		}
+
+		if d.bridge != nil {
+			if err := d.bridge.ProcessNewBlocks(ctx, blocks); err != nil {
+				return nil, err
+			}
 		}
 
 		lastBlock = blocks[len(blocks)-1]

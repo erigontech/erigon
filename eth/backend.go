@@ -864,6 +864,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			p2pConfig.MaxPeers,
 			statusDataProvider,
 			backend.stopNode,
+			stack.Config(),
 		)
 		backend.syncUnwindOrder = stagedsync.PolygonSyncUnwindOrder
 		backend.syncPruneOrder = stagedsync.PolygonSyncPruneOrder
@@ -970,7 +971,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	if config.PolygonSync {
-		backend.polygonSyncService = polygonsync.NewService(
+		backend.polygonSyncService, err = polygonsync.NewService(
 			logger,
 			chainConfig,
 			dirs.DataDir,
@@ -980,7 +981,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			statusDataProvider,
 			config.HeimdallURL,
 			executionRpc,
+			stack.Config(),
 		)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return backend, nil

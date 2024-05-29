@@ -27,16 +27,56 @@ type IDRange struct {
 
 type Bridge struct {
 	db                       *polygoncommon.Database
-	log                      log.Logger
-	borConfig                *borcfg.BorConfig
 	ready                    bool
 	eventMap                 map[uint64]IDRange // block num to eventID range
 	lastProcessedBlockNumber uint64
 	lastProcessedEventID     uint64
-	stateClientAddress       libcommon.Address
-	stateReceiverABI         abi.ABI
 
-	fetchSyncEvents fetchSyncEventsType
+	log                log.Logger
+	borConfig          *borcfg.BorConfig
+	stateClientAddress libcommon.Address
+	stateReceiverABI   abi.ABI
+	fetchSyncEvents    fetchSyncEventsType
+}
+
+type Config struct {
+	logger             log.Logger
+	borConfig          *borcfg.BorConfig
+	stateClientAddress libcommon.Address
+	stateReceiverABI   abi.ABI
+	fetchSyncEvents    fetchSyncEventsType
+
+	dataDir string
+}
+
+func NewBridgeCfg(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, fetchSyncEvents fetchSyncEventsType, stateReceiverABI abi.ABI) Config {
+	return Config{
+		logger:           logger,
+		borConfig:        borConfig,
+		stateReceiverABI: stateReceiverABI,
+		fetchSyncEvents:  fetchSyncEvents,
+		dataDir:          dataDir,
+	}
+}
+
+func NewBridgeFromCfg(ctx context.Context, config Config) (*Bridge, error) {
+	db := polygoncommon.NewDatabase(config.dataDir, config.logger)
+	err := db.OpenOnce(ctx, kv.PolygonBridgeDB, databaseTablesCfg)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Bridge{
+		db:                       db,
+		log:                      config.logger,
+		borConfig:                config.borConfig,
+		fetchSyncEvents:          config.fetchSyncEvents,
+		eventMap:                 map[uint64]IDRange{},
+		lastProcessedBlockNumber: 0,
+		lastProcessedEventID:     0,
+		stateClientAddress:       libcommon.HexToAddress(config.borConfig.StateReceiverContract),
+		stateReceiverABI:         config.stateReceiverABI,
+	}, nil
 }
 
 func NewBridge(ctx context.Context, dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, fetchSyncEvents fetchSyncEventsType, stateReceiverABI abi.ABI) (*Bridge, error) {
@@ -62,7 +102,7 @@ func NewBridge(ctx context.Context, dataDir string, logger log.Logger, borConfig
 
 func (b *Bridge) Run(ctx context.Context) error {
 	// start syncing
-	b.log.Debug(bridgeLogPrefix("Bridge is running"))
+	b.log.Warn(bridgeLogPrefix("Bridge is running"))
 
 	// get last known sync ID
 	lastEventID, err := GetLatestEventID(ctx, b.db)
@@ -98,7 +138,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 			}
 		}
 
-		b.log.Debug(bridgeLogPrefix(fmt.Sprintf("got %v new events, last event ID: %v, ready: %v", len(events), lastEventID, b.ready)))
+		b.log.Warn(bridgeLogPrefix(fmt.Sprintf("got %v new events, last event ID: %v, ready: %v", len(events), lastEventID, b.ready)))
 	}
 }
 

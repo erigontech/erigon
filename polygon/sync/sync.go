@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/polygon/bridge"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/polygon/p2p"
 )
@@ -51,6 +52,10 @@ func NewSync(
 		events:            events,
 		logger:            logger,
 	}
+}
+
+func (s *Sync) UpdateBridge(bridge *bridge.Bridge) {
+	s.blockDownloader.UseBridge(bridge)
 }
 
 func (s *Sync) commitExecution(ctx context.Context, newTip *types.Header, finalizedHeader *types.Header) error {
