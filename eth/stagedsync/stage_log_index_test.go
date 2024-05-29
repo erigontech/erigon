@@ -9,6 +9,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/log/v3"
 
@@ -91,6 +92,34 @@ func genReceipts(t *testing.T, tx kv.RwTx, blocks uint64) (map[libcommon.Address
 	return expectAddrs, expectTopics
 }
 
+func TestPromoteLogIndex(t *testing.T) {
+	logger := log.New()
+	require, ctx := require.New(t), context.Background()
+	_, tx := memdb.NewTestTx(t)
+
+	expectAddrs, expectTopics := genReceipts(t, tx, 100)
+
+	cfg := StageLogIndexCfg(nil, prune.DefaultMode, "", nil)
+	cfgCopy := cfg
+	cfgCopy.bufLimit = 10
+	cfgCopy.flushEvery = time.Nanosecond
+
+	err := promoteLogIndex("logPrefix", tx, 0, 0, 0, cfgCopy, ctx, logger)
+	require.NoError(err)
+
+	// Check indices GetCardinality (in how many blocks they meet)
+	for addr, expect := range expectAddrs {
+		m, err := bitmapdb.Get(tx, kv.LogAddressIndex, addr[:], 0, 10_000_000)
+		require.NoError(err)
+		require.Equal(expect, m.GetCardinality())
+	}
+	for topic, expect := range expectTopics {
+		m, err := bitmapdb.Get(tx, kv.LogTopicIndex, topic[:], 0, 10_000_000)
+		require.NoError(err)
+		require.Equal(expect, m.GetCardinality())
+	}
+}
+
 func TestPruneLogIndex(t *testing.T) {
 	logger := log.New()
 	require, tmpDir, ctx := require.New(t), t.TempDir(), context.Background()
@@ -137,5 +166,39 @@ func TestPruneLogIndex(t *testing.T) {
 		})
 		require.NoError(err)
 		require.Equal(total, 60) // 1/3rd of 45 not pruned as it has address "1", so 30 Pruned in total, remaining 90-30
+	}
+}
+
+func TestUnwindLogIndex(t *testing.T) {
+	logger := log.New()
+	require, tmpDir, ctx := require.New(t), t.TempDir(), context.Background()
+	_, tx := memdb.NewTestTx(t)
+
+	expectAddrs, expectTopics := genReceipts(t, tx, 100)
+
+	cfg := StageLogIndexCfg(nil, prune.DefaultMode, "", nil)
+	cfgCopy := cfg
+	cfgCopy.bufLimit = 10
+	cfgCopy.flushEvery = time.Nanosecond
+	err := promoteLogIndex("logPrefix", tx, 0, 0, 0, cfgCopy, ctx, logger)
+	require.NoError(err)
+
+	// Mode test
+	err = pruneLogIndex("", tx, tmpDir, 0, 50, ctx, logger, nil)
+	require.NoError(err)
+
+	// Unwind test
+	err = unwindLogIndex("logPrefix", tx, 70, cfg, nil)
+	require.NoError(err)
+
+	for addr := range expectAddrs {
+		m, err := bitmapdb.Get(tx, kv.LogAddressIndex, addr[:], 0, 10_000_000)
+		require.NoError(err)
+		require.True(m.Maximum() <= 700)
+	}
+	for topic := range expectTopics {
+		m, err := bitmapdb.Get(tx, kv.LogTopicIndex, topic[:], 0, 10_000_000)
+		require.NoError(err)
+		require.True(m.Maximum() <= 700)
 	}
 }
