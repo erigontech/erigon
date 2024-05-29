@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
@@ -165,7 +164,7 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(
 			continue
 		}
 
-		numWorkers := cmp.Min(cmp.Min(d.maxWorkers, len(peers)), len(waypoints))
+		numWorkers := min(d.maxWorkers, len(peers), len(waypoints))
 		waypointsBatch := waypoints[:numWorkers]
 
 		select {
@@ -194,7 +193,7 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(
 		maxWaypointLength := uint64(0)
 		wg := sync.WaitGroup{}
 		for i, waypoint := range waypointsBatch {
-			maxWaypointLength = cmp.Max(waypoint.Length(), maxWaypointLength)
+			maxWaypointLength = max(waypoint.Length(), maxWaypointLength)
 			wg.Add(1)
 			go func(i int, waypoint heimdall.Waypoint, peerId *p2p.PeerId) {
 				defer wg.Done()
