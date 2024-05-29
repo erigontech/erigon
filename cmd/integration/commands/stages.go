@@ -1961,7 +1961,7 @@ func progress(tx kv.Getter, stage stages.SyncStage) uint64 {
 }
 
 func stage(st *stagedsync.Sync, tx kv.Tx, db kv.RoDB, stage stages.SyncStage) *stagedsync.StageState {
-	res, err := st.StageState(stage, tx, db, true)
+	res, err := st.StageState(stage, tx, db, true, false)
 	if err != nil {
 		panic(err)
 	}
