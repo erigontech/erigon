@@ -40,24 +40,27 @@ const (
 	maxInputItems  = 127
 	maxOutputItems = 127
 	maxStackHeight = 1023
+
+	nonReturningFunction = 0x80
 )
 
 var (
-	ErrInvalidMagic           = errors.New("invalid magic")
-	ErrInvalidVersion         = errors.New("invalid version")
-	ErrMissingTypeHeader      = errors.New("missing type header")
-	ErrInvalidTypeSize        = errors.New("invalid type section size")
-	ErrMissingCodeHeader      = errors.New("missing code header")
-	ErrInvalidCodeHeader      = errors.New("invalid code header")
-	ErrInvalidCodeSize        = errors.New("invalid code size")
-	ErrMissingDataHeader      = errors.New("missing data header")
-	ErrMissingTerminator      = errors.New("missing header terminator")
-	ErrTooManyInputs          = errors.New("invalid type content, too many inputs")
-	ErrTooManyOutputs         = errors.New("invalid type content, too many inputs")
-	ErrInvalidSection0Type    = errors.New("invalid section 0 type, input and output should be zero")
-	ErrTooLargeMaxStackHeight = errors.New("invalid type content, max stack height exceeds limit")
-	ErrInvalidContainerSize   = errors.New("invalid container size")
-	ErrInvalidMemoryAccess    = errors.New("invalid memory access")
+	ErrIncompleteEOF           = errors.New("incomplete EOF code")
+	ErrInvalidMagic            = errors.New("invalid magic")
+	ErrInvalidVersion          = errors.New("invalid version")
+	ErrMissingTypeHeader       = errors.New("missing type header")
+	ErrInvalidTypeSize         = errors.New("invalid type section size")
+	ErrMissingCodeHeader       = errors.New("missing code header")
+	ErrInvalidCodeHeader       = errors.New("invalid code header")
+	ErrInvalidCodeSize         = errors.New("invalid code size")
+	ErrMissingDataHeader       = errors.New("missing data header")
+	ErrMissingTerminator       = errors.New("missing header terminator")
+	ErrTooManyInputs           = errors.New("invalid type content, too many inputs")
+	ErrTooManyOutputs          = errors.New("invalid type content, too many outputs")
+	ErrInvalidFirstSectionType = errors.New("invalid section 0 type, input should be 0 and output should 128")
+	ErrTooLargeMaxStackHeight  = errors.New("invalid type content, max stack height exceeds limit")
+	ErrInvalidContainerSize    = errors.New("invalid container size")
+	ErrInvalidMemoryAccess     = errors.New("invalid memory access")
 )
 
 var eofMagic = []byte{0xef, 0x00}
@@ -132,7 +135,7 @@ func (c *Container) UnmarshalBinary(b []byte) error {
 		return fmt.Errorf("%w: want %x", ErrInvalidMagic, eofMagic)
 	}
 	if len(b) < 14 {
-		return io.ErrUnexpectedEOF
+		return ErrIncompleteEOF
 	}
 	if !isEOFVersion1(b) {
 		return fmt.Errorf("%w: have %d, want %d", ErrInvalidVersion, b[2], eof1Version)
@@ -206,7 +209,7 @@ func (c *Container) UnmarshalBinary(b []byte) error {
 	// Check for terminator.
 	offsetTerminator := offsetDataKind + 3
 	if len(b) < offsetTerminator {
-		return io.ErrUnexpectedEOF
+		return ErrMissingTerminator
 	}
 	if b[offsetTerminator] != 0 {
 		return fmt.Errorf("%w: have %x", ErrMissingTerminator, b[offsetTerminator])
@@ -238,8 +241,8 @@ func (c *Container) UnmarshalBinary(b []byte) error {
 		}
 		types = append(types, sig)
 	}
-	if types[0].Input != 0 || types[0].Output != 0 {
-		return fmt.Errorf("%w: have %d, %d", ErrInvalidSection0Type, types[0].Input, types[0].Output)
+	if types[0].Input != 0 || types[0].Output != nonReturningFunction {
+		return fmt.Errorf("%w: have %d, %d", ErrInvalidFirstSectionType, types[0].Input, types[0].Output)
 	}
 	c.Types = types
 

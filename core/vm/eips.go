@@ -423,22 +423,7 @@ func enableEOF(jt *JumpTable) {
 		numPush:     0,
 		memorySize:  memoryDataCopy,
 	}
-	jt[CREATE3] = &operation{
-		execute:     opCreate3,
-		constantGas: params.Create3Gas,
-		// dynamicGas:  gasCreate2,
-		numPop:     4,
-		numPush:    1,
-		memorySize: memoryCreate2,
-	}
-	jt[CREATE4] = &operation{
-		execute:     opCreate4,
-		constantGas: params.Create4Gas,
-		// dynamicGas:  gasCreate2,
-		numPop:     4,
-		numPush:    1,
-		memorySize: memoryCreate2,
-	}
+	// TODO(racytech): add EOFCREATE
 	jt[RETURNCONTRACT] = &operation{}
 }
 

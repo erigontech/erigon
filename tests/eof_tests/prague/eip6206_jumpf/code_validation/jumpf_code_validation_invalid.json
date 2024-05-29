@@ -1,0 +1,1042 @@
+{
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-jump_too_large0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100030400000000800000e50401",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa1226d793467c6d1f5a3f3feabd4c1c75436d68fafb49a6b7c0c309db94b154d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-jump_too_large1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100030400000000800000e50401",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa1226d793467c6d1f5a3f3feabd4c1c75436d68fafb49a6b7c0c309db94b154d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-jump_non_existent_section]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100030400000000800000e50005",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xdad6c73de1a3f1c33ef13de54041397948e044b6c4d69df61a145c9194d9252a",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-callf_non_returning]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000802000200030001040000000080000000800000e3000100",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x6b433416b887fca6e3037a1c746bb51f906bc214499955bf5fea14124e679540",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-target_co-N_to-0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100100200040003000a000400060400000000800000008000010000000000000002e50001600035e1000100e50002e30003e46001600055e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x2375171369bd087b1d742e116875e578b66e92ca3a295c28f57e0e589436af93",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-target_co-N_to-2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100100200040003000a000400060400000000800000008000010002000000000002e50001600035e1000100e50002e30003e46001600055e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x8a95dc4b32278a93471722c2c888e1faf60f388c726547c0bdeb221f1848e771",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-target_co-N_to-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100100200040003000a000400060400000000800000008000010004000000000002e50001600035e1000100e50002e30003e46001600055e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xb766bd8dd58691051915824456bd104466a38f28c8bfad5adfa10570a2567946",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-target_co-0_to-2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100100200040008000a00060006040000000080000200000001000200020000000260006000e3000100600035e10001e4e500025f5fe30003e46001600055e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xae4e522b901294a7ec410ec28afdcbfc57f438a6dc038739e3c7c17da82c8da6",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-target_co-0_to-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100100200040008000a00080006040000000080000200000001000400040000000260006000e3000100600035e10001e4e500025f5f5f5fe30003e46001600055e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x0f01ffe2c203e49780bb6e43c0de1523a0f0719eeb1515ff605bde6f868b1b0e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-target_co-2_to-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100100200040008000c00060006040000000080000400020003020400040000000260006000e30001005f5f600035e10001e4e500025f5fe30003e46001600055e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x65a004454ecd07d12b55597830142bf369fd6763a71ac83da7697973248f241e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-0_to-0_ti-0_diff-1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090004000104000000008000020000000000000000e300016001600055005fe50002e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x7966c9de4d15831c4050e5f3df9000a62f8ce7688d0ca150b1fc334d87efce73",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-0_to-0_ti-2_diff--1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090004000304000000008000020000000202000002e300016001600055005fe500025050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x4aa1c5adae3d85477c2a9fbd67054ddc730508835ec4f18c586bfb2c4b7d3289",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-0_to-0_ti-2_diff-1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090006000304000000008000020000000202000002e300016001600055005f5f5fe500025050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x11c778223a31d2d13fda8dbc54fc17454276952b2ac2c1a0b8c581ca54d7298b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-0_to-0_ti-4_diff--1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090006000504000000008000020000000404000004e300016001600055005f5f5fe5000250505050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x9e9d30506761b9ff1fd66db5e535aa1f3e4dacf89994cc3361cd6265d437995d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-0_to-0_ti-4_diff-1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090008000504000000008000020000000404000004e300016001600055005f5f5f5f5fe5000250505050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xca713ed8070acec71ed21f666ccfead4c89a5d4ae58f7e0842697ea98d124fba",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-2_to-0_ti-0_diff-0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090003000104000000008000040002000000000000e30001600160005500e50002e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x0226292f49b8c99f2b53e43706a33b9e332548f1776e7c4294c682c589d0b4f7",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-2_to-0_ti-0_diff-1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090004000104000000008000040002000000000000e300016001600055005fe50002e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x20df58405ebbc50caa70f0eb6d6e2e38f12f8b45082dada47d4dd58d5b2d015e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-2_to-0_ti-2_diff--1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090004000304000000008000040002000202000002e300016001600055005fe500025050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x5bda57f70ed790ff73348f6f193ca58ab1f566ea7f397d110eb376949b92f3e3",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-2_to-0_ti-2_diff-0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090005000304000000008000040002000202000002e300016001600055005f5fe500025050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x21eea6ce2e51f0e88886596a7ab9388eeb039f6e925fe2c7821a69b5fb0eb1f4",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-2_to-0_ti-2_diff-1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090006000304000000008000040002000202000002e300016001600055005f5f5fe500025050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x6178606f9229347955d3ff2913942862cb95a4e448dfac4bf088a54eacd7a3a9",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-2_to-0_ti-4_diff--1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090006000504000000008000040002000404000004e300016001600055005f5f5fe5000250505050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x031aff880e75eaa1ebe687a319995b5ec83a09f576ea1a427487e384a2414ee2",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-2_to-0_ti-4_diff-0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090007000504000000008000040002000404000004e300016001600055005f5f5f5fe5000250505050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xb7cb4dea321aa56a9ff145c01863d2c6c31ed5055e071e5779c974bfde9e0af4",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-2_to-0_ti-4_diff-1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090008000504000000008000040002000404000004e300016001600055005f5f5f5f5fe5000250505050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xfb31a4f2df01127ffa6848c3628ef1999de856a7deafa8028ecb5e277b2b02ec",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-2_to-2_ti-0_diff-1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090004000304000000008000040002000000020002e300016001600055005fe500025f5fe4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xc1d49e4de83806f1920c13e29653fd833d0640e6e5e1beef611bab65e18c8fe1",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-2_to-2_ti-2_diff--1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090004000104000000008000040002000202020002e300016001600055005fe50002e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x0563bfe95c0b89ebb5a0cb97671cd8ed5c08a3a3e63b9573c55a834a8025ca76",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-2_to-2_ti-2_diff-1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090006000104000000008000040002000202020002e300016001600055005f5f5fe50002e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa1fab7091deda6aa92d419d2e1cc30092c3758415469717f808c2a59cb52711e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-2_to-2_ti-4_diff--1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090006000304000000008000040002000404020004e300016001600055005f5f5fe500025050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xcee66456d1bb44ccecce3b0fd8e319d2ecd226ddb39d065ea65d48c21dc73601",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-2_to-2_ti-4_diff-1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090008000304000000008000040002000404020004e300016001600055005f5f5f5f5fe500025050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x7b5ccb3a42d45381e4b51de1b9e7f38cf1ab59289af8239900cb99c17dcb444f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-4_to-0_ti-0_diff-0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090003000104000000008000060004000000000000e30001600160005500e50002e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x87c098d2dce986faa8163fe6a513bea86bcb14b6199314a40acd0bc6ce901349",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-4_to-0_ti-0_diff-1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090004000104000000008000060004000000000000e300016001600055005fe50002e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x34e954cf7b72fd916ff68de2073629c91cd8f40a834bfe5fcc259b8af22ef31c",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-4_to-0_ti-2_diff--1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090004000304000000008000060004000202000002e300016001600055005fe500025050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x001dbbdf8fe433172da190a6f983fa44fedf0701d17e3a194e8c435c5dc4a878",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-4_to-0_ti-2_diff-0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090005000304000000008000060004000202000002e300016001600055005f5fe500025050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xecb4327cd57fcebcc3bdba0374189db39b403a2590b37fdcf0d7b1a6a10765f9",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-4_to-0_ti-2_diff-1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090006000304000000008000060004000202000002e300016001600055005f5f5fe500025050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xaae4e7aa84a9b82ef6a8b35e001a94251999e2edcfa19042769aab39d536efea",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-4_to-0_ti-4_diff--1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090006000504000000008000060004000404000004e300016001600055005f5f5fe5000250505050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x1c58f486b65097628da8dcf843a86dd6760c149b594e9b26d66ba72ebfbfb5a0",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-4_to-0_ti-4_diff-0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090007000504000000008000060004000404000004e300016001600055005f5f5f5fe5000250505050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x409359d131d9322240ce54b1a7ab3599538ecd750e82089cff1e9754867e450f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-4_to-0_ti-4_diff-1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090008000504000000008000060004000404000004e300016001600055005f5f5f5f5fe5000250505050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x8aced2b3462de9e065bae417e50833a6a61cdca890d2d945de8ec33c5ecbc7f9",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-4_to-2_ti-0_diff-0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090003000304000000008000060004000000020002e30001600160005500e500025f5fe4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xd29e15e47df473339e307746421de87ad226a2ce0759d9c870638f9ccf257e62",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-4_to-2_ti-0_diff-1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090004000304000000008000060004000000020002e300016001600055005fe500025f5fe4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x2ba4246124e5bfb3b6f4e3c41cad9fb7d7b7a768b4d0bfc7bbe89d025c44bf13",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-4_to-2_ti-2_diff--1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090004000104000000008000060004000202020002e300016001600055005fe50002e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa72c667db49519a03308c75db283ca48429518e054250adacb9d4906bc2bced0",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-4_to-2_ti-2_diff-0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090005000104000000008000060004000202020002e300016001600055005f5fe50002e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xe5dad88fe979a22670af14af75740bdfefa258ebb3c12b8212fd2f0aa4253e71",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-4_to-2_ti-2_diff-1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090006000104000000008000060004000202020002e300016001600055005f5f5fe50002e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x6855206bc2d84443a20e153e7961f3c6207dbcc3ea6f38694a64c4bec95b61e5",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-4_to-2_ti-4_diff--1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090006000304000000008000060004000404020004e300016001600055005f5f5fe500025050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x7890f51f80047549e8406801eccd429a30c4d10e937166f808b58b02226c890b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-4_to-2_ti-4_diff-0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090007000304000000008000060004000404020004e300016001600055005f5f5f5fe500025050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x7cb155efe31cdde2557ee651512a27580d36c34e44a032a4893df24814baef87",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-4_to-2_ti-4_diff-1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090008000304000000008000060004000404020004e300016001600055005f5f5f5f5fe500025050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x8dc9e823f3181dbec34c5f70c9650ae03307128a1c4cef2e5fb9541a171986cd",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-4_to-4_ti-0_diff-1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090004000504000000008000060004000000040004e300016001600055005fe500025f5f5f5fe4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x77a875042a96e0cf1e9fa7c5568d3a8efdcdedaca40de2a83e1b8f64762fa2df",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-4_to-4_ti-2_diff--1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090004000304000000008000060004000202040004e300016001600055005fe500025f5fe4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x14fa56fade9b405679e6d80b546a26b2791751a7393d2b2b746741aebb5a6514",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-4_to-4_ti-2_diff-1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090006000304000000008000060004000202040004e300016001600055005f5f5fe500025f5fe4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x2621846d0e3707874ad265220c72ebba05f05318d8f9d51a6a8ca0afde808d26",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-4_to-4_ti-4_diff--1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090006000104000000008000060004000404040004e300016001600055005f5f5fe50002e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x6fd0d4d1266c7560c8f7e78c32536f60de149396f9feb5372069d583ccfe3515",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-retuning_co-4_to-4_ti-4_diff-1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300090008000104000000008000060004000404040004e300016001600055005f5f5f5f5fe50002e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x1eda061f89bf0c46a6e4858937e0803a6e2276a34ec28dd87afcec5f750fa0ab",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-non-retuning_h-0_ti-2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300030003000804000000008000000080000002800002e50001e500025050600160005500",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x651a8fcdb5368167665b517bc3fe244ddea683a1f1fd4b6e3f9c555edffa541a",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-non-retuning_h-0_ti-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300030003000a04000000008000000080000004800004e50001e5000250505050600160005500",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x23cb25417b4cfa89937aec5173c843b389d09285d9a457c28c1e953f49f4d05d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    },
+    "tests/prague/eip6206_jumpf/test_code_validation.py::test_jumpf_code_validation_invalid[fork_Prague-eof_test-stack-non-retuning_h-2_ti-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300030005000a04000000008000000080000204800004e500015f5fe5000250505050600160005500",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xfb31e7fb3d49f02ab145f470651c3cd838d4ce81753487e23e1af76810bba75e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.7ad882ca",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "a1775816657df4093787fb9fe83c2f7cc17ecf47"
+        }
+    }
+}

@@ -70,7 +70,7 @@ var (
 	napoliInstructionSet           = newNapoliInstructionSet()
 	cancunInstructionSet           = newCancunInstructionSet()
 	pragueInstructionSet           = newPragueInstructionSet()
-	pragueEOFInstructionSet        = newPragueEOFInstructionSet()
+	pragueEOFInstructionSet        = NewPragueEOFInstructionSet()
 )
 
 // JumpTable contains the EVM opcodes supported at a given fork.
@@ -104,8 +104,8 @@ func newPragueInstructionSet() JumpTable {
 	return instructionSet
 }
 
-func newPragueEOFInstructionSet() JumpTable {
-	instructionSet := newCancunInstructionSet()
+func NewPragueEOFInstructionSet() JumpTable {
+	instructionSet := newPragueInstructionSet()
 	enableEOF(&instructionSet)
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
