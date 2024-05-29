@@ -595,5 +595,5 @@ func (h *heimdall) batchFetchCheckpoints(
 }
 
 func (h *heimdall) logPollerSleepCancelled(err error) {
-	h.logger.Info("poller sleep cancelled", "err", err)
+	h.logger.Info(heimdallLogPrefix("poller sleep cancelled"), "err", err)
 }
