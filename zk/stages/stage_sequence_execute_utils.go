@@ -200,7 +200,7 @@ func prepareHeader(tx kv.RwTx, previousBlockNumber, deltaTimestamp, forkId uint6
 		Coinbase:   coinbase,
 		Difficulty: blockDifficulty,
 		Number:     new(big.Int).SetUint64(nextBlockNum),
-		GasLimit:   getGasLimit(uint16(forkId)),
+		GasLimit:   getGasLimit(forkId),
 		Time:       newBlockTimestamp,
 	}, parentBlock, nil
 }

@@ -14,16 +14,18 @@ import (
 )
 
 type DataStreamCatchupCfg struct {
-	db      kv.RwDB
-	stream  *datastreamer.StreamServer
-	chainId uint64
+	db            kv.RwDB
+	stream        *datastreamer.StreamServer
+	chainId       uint64
+	streamVersion int
 }
 
-func StageDataStreamCatchupCfg(stream *datastreamer.StreamServer, db kv.RwDB, chainId uint64) DataStreamCatchupCfg {
+func StageDataStreamCatchupCfg(stream *datastreamer.StreamServer, db kv.RwDB, chainId uint64, streamVersion int) DataStreamCatchupCfg {
 	return DataStreamCatchupCfg{
-		stream:  stream,
-		db:      db,
-		chainId: chainId,
+		stream:        stream,
+		db:            db,
+		chainId:       chainId,
+		streamVersion: streamVersion,
 	}
 }
 
@@ -55,7 +57,7 @@ func SpawnStageDataStreamCatchup(
 		createdTx = true
 	}
 
-	finalBlockNumber, err := CatchupDatastream(logPrefix, tx, stream, cfg.chainId)
+	finalBlockNumber, err := CatchupDatastream(logPrefix, tx, stream, cfg.chainId, cfg.streamVersion)
 	if err != nil {
 		return err
 	}
@@ -71,7 +73,7 @@ func SpawnStageDataStreamCatchup(
 	return err
 }
 
-func CatchupDatastream(logPrefix string, tx kv.RwTx, stream *datastreamer.StreamServer, chainId uint64) (uint64, error) {
+func CatchupDatastream(logPrefix string, tx kv.RwTx, stream *datastreamer.StreamServer, chainId uint64, streamVersion int) (uint64, error) {
 	srv := server.NewDataStreamServer(stream, chainId, server.StandardOperationMode)
 	reader := hermez_db.NewHermezDbReader(tx)
 
@@ -96,19 +98,19 @@ func CatchupDatastream(logPrefix string, tx kv.RwTx, stream *datastreamer.Stream
 		"previousProgress", previousProgress,
 	)
 
-	// skip genesis if we have no data in the stream yet
+	// write genesis if we have no data in the stream yet
 	if previousProgress == 0 {
 		genesis, err := rawdb.ReadBlockByNumber(tx, 0)
 		if err != nil {
 			return 0, err
 		}
-		if err = server.WriteGenesisToStream(genesis, reader, stream, srv); err != nil {
+		if err = server.WriteGenesisToStream(genesis, reader, stream, srv, streamVersion, chainId); err != nil {
 			return 0, err
 		}
+		previousProgress++
 	}
 
-	err = server.WriteBlocksToStream(tx, reader, srv, stream, previousProgress+1, finalBlockNumber, logPrefix)
-	if err != nil {
+	if err = server.WriteBlocksToStream(tx, reader, srv, stream, previousProgress, finalBlockNumber, logPrefix); err != nil {
 		return 0, err
 	}
 

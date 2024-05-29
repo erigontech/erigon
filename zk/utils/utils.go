@@ -70,7 +70,8 @@ func ShouldShortCircuitExecution(tx kv.RwTx, logPrefix string) (bool, uint64, er
 }
 
 type ForkReader interface {
-	GetForkIdBlock(forkId uint64) (uint64, bool, error)
+	GetLowestBatchByFork(forkId uint64) (uint64, error)
+	GetLowestBlockInBatch(batchNo uint64) (blockNo uint64, found bool, err error)
 }
 
 type ForkConfigWriter interface {
@@ -82,9 +83,12 @@ func UpdateZkEVMBlockCfg(cfg ForkConfigWriter, hermezDb ForkReader, logPrefix st
 	var foundAny bool = false
 
 	for _, forkId := range chain.ForkIdsOrdered {
-		blockNum, found, err := hermezDb.GetForkIdBlock(uint64(forkId))
+		batch, err := hermezDb.GetLowestBatchByFork(uint64(forkId))
 		if err != nil {
-			log.Error(fmt.Sprintf("[%s] Error getting fork id %v from db: %v", logPrefix, forkId, err))
+			return err
+		}
+		blockNum, found, err := hermezDb.GetLowestBlockInBatch(batch)
+		if err != nil {
 			return err
 		}
 

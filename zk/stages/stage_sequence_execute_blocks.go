@@ -143,7 +143,7 @@ func finaliseBlock(
 	finalHeader := finalBlock.Header()
 	finalHeader.Root = newRoot
 	finalHeader.Coinbase = cfg.zk.AddressSequencer
-	finalHeader.GasLimit = getGasLimit(uint16(forkId))
+	finalHeader.GasLimit = getGasLimit(forkId)
 	finalHeader.ReceiptHash = types.DeriveSha(receipts)
 	finalHeader.Bloom = types.CreateBloom(receipts)
 	newNum := finalBlock.Number()

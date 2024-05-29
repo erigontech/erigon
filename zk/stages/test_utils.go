@@ -14,6 +14,7 @@ type TestDatastreamClient struct {
 	l2BlockChan           chan types.FullL2Block
 	gerUpdatesChan        chan types.GerUpdate
 	errChan               chan error
+	batchStartChan        chan types.BatchStart
 }
 
 func NewTestDatastreamClient(fullL2Blocks []types.FullL2Block, gerUpdates []types.GerUpdate) *TestDatastreamClient {
@@ -23,12 +24,13 @@ func NewTestDatastreamClient(fullL2Blocks []types.FullL2Block, gerUpdates []type
 		l2BlockChan:    make(chan types.FullL2Block, 100),
 		gerUpdatesChan: make(chan types.GerUpdate, 100),
 		errChan:        make(chan error, 100),
+		batchStartChan: make(chan types.BatchStart, 100),
 	}
 
 	return client
 }
 
-func (c *TestDatastreamClient) ReadAllEntriesToChannel(bookmark *types.Bookmark) error {
+func (c *TestDatastreamClient) ReadAllEntriesToChannel(bookmark *types.BookmarkProto) error {
 	c.streamingAtomic.Store(true)
 
 	for _, block := range c.fullL2Blocks {
@@ -51,6 +53,10 @@ func (c *TestDatastreamClient) GetGerUpdatesChan() chan types.GerUpdate {
 
 func (c *TestDatastreamClient) GetErrChan() chan error {
 	return c.errChan
+}
+
+func (c *TestDatastreamClient) GetBatchStartChan() chan types.BatchStart {
+	return c.batchStartChan
 }
 
 func (c *TestDatastreamClient) GetLastWrittenTimeAtomic() *atomic.Int64 {

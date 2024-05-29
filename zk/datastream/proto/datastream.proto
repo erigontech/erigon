@@ -1,0 +1,89 @@
+syntax = "proto3";
+
+package datastream.v1;
+
+option go_package = "github.com/0xPolygonHermez/zkevm-node/state/datastream";
+
+message BatchStart {
+  uint64 number = 1;
+  BatchType type = 2;
+  uint64 fork_id = 3;
+  uint64 chain_id = 4;
+  Debug debug = 5;
+}
+
+message BatchEnd {
+  uint64 number = 1;
+  bytes local_exit_root = 2;
+  bytes state_root = 3;
+  Debug debug = 4;
+}
+
+message L2Block {
+  uint64 number = 1;
+  uint64 batch_number = 2;
+  uint64 timestamp = 3;
+  uint32 delta_timestamp = 4;
+  uint64 min_timestamp = 5;
+  bytes l1_blockhash = 6;
+  uint32 l1_infotree_index = 7;
+  bytes hash = 8;
+  bytes state_root = 9;
+  bytes global_exit_root = 10;
+  bytes coinbase = 11;
+  uint64 block_gas_limit = 12;
+  bytes block_info_root = 13;
+  Debug debug = 14;
+}
+
+message Transaction {
+  uint64 l2block_number = 1;
+  uint64 index = 2;
+  bool is_valid = 3;
+  bytes encoded = 4;
+  uint32 effective_gas_price_percentage = 5;
+  bytes im_state_root = 6;
+  Debug debug = 7;
+}
+
+message UpdateGER {
+  uint64 batch_number = 1;
+  uint64 timestamp = 2;
+  bytes global_exit_root = 3;
+  bytes coinbase = 4;
+  uint64 fork_id = 5;
+  uint64 chain_id = 6;
+  bytes state_root = 7;
+  Debug debug = 8;
+}
+
+message BookMark {
+  BookmarkType type = 1;
+  uint64 value = 2;
+}
+
+message Debug {
+  string message = 1;
+}
+
+enum BookmarkType {
+  BOOKMARK_TYPE_UNSPECIFIED = 0;
+  BOOKMARK_TYPE_BATCH = 1;
+  BOOKMARK_TYPE_L2_BLOCK = 2;
+}
+
+enum EntryType {
+  ENTRY_TYPE_UNSPECIFIED = 0;
+  ENTRY_TYPE_BATCH_START = 1;
+  ENTRY_TYPE_L2_BLOCK = 2;
+  ENTRY_TYPE_TRANSACTION = 3;
+  ENTRY_TYPE_BATCH_END = 4;
+  ENTRY_TYPE_UPDATE_GER = 5;
+}
+
+enum BatchType {
+  BATCH_TYPE_UNSPECIFIED = 0;
+  BATCH_TYPE_REGULAR = 1;
+  BATCH_TYPE_FORCED = 2;
+  BATCH_TYPE_INJECTED = 3;
+}

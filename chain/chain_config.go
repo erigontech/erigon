@@ -268,6 +268,10 @@ func (c *Config) IsForkID8Elderberry(num uint64) bool {
 	return isForked(c.ForkID88ElderberryBlock, num)
 }
 
+func (c *Config) IsForkId9Elderberry2(num uint64) bool {
+	return isForked(c.ForkID9Elderberry2Block, num)
+}
+
 // CheckCompatible checks whether scheduled fork transitions have been imported
 // with a mismatching chain configuration.
 func (c *Config) CheckCompatible(newcfg *Config, height uint64) *chain.ConfigCompatError {

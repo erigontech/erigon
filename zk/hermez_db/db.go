@@ -173,6 +173,26 @@ func (db *HermezDbReader) GetHighestBlockInBatch(batchNo uint64) (uint64, error)
 	return max, nil
 }
 
+func (db *HermezDbReader) GetLowestBlockInBatch(batchNo uint64) (blockNo uint64, found bool, err error) {
+	blocks, err := db.GetL2BlockNosByBatch(batchNo)
+	if err != nil {
+		return 0, false, err
+	}
+
+	if len(blocks) == 0 {
+		return 0, false, nil
+	}
+
+	min := uint64(0)
+	for _, block := range blocks {
+		if block < min || min == 0 {
+			min = block
+		}
+	}
+
+	return min, true, nil
+}
+
 func (db *HermezDbReader) GetHighestVerifiedBlockNo() (uint64, error) {
 	v, err := db.GetLatestVerification()
 	if err != nil {
@@ -671,6 +691,21 @@ func (db *HermezDbReader) GetBatchGlobalExitRoots(fromBatchNum, toBatchNum uint6
 	return &gers, err
 }
 
+func (db *HermezDbReader) GetBatchGlobalExitRootsProto(fromBatchNum, toBatchNum uint64) ([]dstypes.GerUpdateProto, error) {
+	gers, err := db.GetBatchGlobalExitRoots(fromBatchNum, toBatchNum)
+	if err != nil {
+		return nil, err
+	}
+
+	var gersProto []dstypes.GerUpdateProto
+	for _, ger := range *gers {
+		proto := dstypes.ConvertGerUpdateToProto(ger)
+		gersProto = append(gersProto, proto)
+	}
+
+	return gersProto, nil
+}
+
 func (db *HermezDbReader) GetBatchGlobalExitRoot(batchNum uint64) (*dstypes.GerUpdate, error) {
 	gerUpdateBytes, err := db.tx.GetOne(GLOBAL_EXIT_ROOTS_BATCHES, Uint64ToBytes(batchNum))
 	if err != nil {
@@ -743,6 +778,31 @@ func (db *HermezDbReader) GetForkId(batchNo uint64) (uint64, error) {
 
 func (db *HermezDb) WriteForkId(batchNo, forkId uint64) error {
 	return db.tx.Put(FORKIDS, Uint64ToBytes(batchNo), Uint64ToBytes(forkId))
+}
+
+func (db *HermezDbReader) GetLowestBatchByFork(forkId uint64) (uint64, error) {
+	c, err := db.tx.Cursor(FORKIDS)
+	if err != nil {
+		return 0, err
+	}
+	defer c.Close()
+
+	var batchNo uint64 = 0
+	var k, v []byte
+
+	for k, v, err = c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			break
+		}
+		currentForkId := BytesToUint64(v)
+		if currentForkId == forkId {
+			batchNo = BytesToUint64(k)
+			break
+		}
+	}
+
+	return batchNo, err
+
 }
 
 func (db *HermezDbReader) GetForkIdBlock(forkId uint64) (uint64, bool, error) {

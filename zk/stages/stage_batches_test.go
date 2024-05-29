@@ -34,17 +34,16 @@ func TestUnwindBatches(t *testing.T) {
 			L1InfoTreeIndex: uint32(i) + 20,
 			GlobalExitRoot:  common.Hash{byte(i)},
 			Coinbase:        common.Address{byte(i)},
-			ForkId:          uint16(i) / 3,
-			ChainId:         uint32(1),
+			ForkId:          uint64(i) / 3,
+			ChainId:         uint64(1),
 			L1BlockHash:     common.Hash{byte(i)},
 			L2Blockhash:     common.Hash{byte(i)},
 			StateRoot:       common.Hash{byte(i)},
-			L2Txs: []types.L2Transaction{
+			L2Txs: []types.L2TransactionProto{
 				{
 					EffectiveGasPricePercentage: 255,
-					IsValid:                     1,
-					StateRoot:                   common.Hash{byte(i + 1)},
-					EncodedLength:               uint32(len(post155Bytes)),
+					IsValid:                     true,
+					IntermediateStateRoot:       common.Hash{byte(i + 1)},
 					Encoded:                     post155Bytes,
 				},
 			},
@@ -96,6 +95,7 @@ func TestUnwindBatches(t *testing.T) {
 	/////////
 	err = SpawnStageBatches(s, u, ctx, tx, cfg, true, true)
 	require.NoError(t, err)
+	tx.Commit()
 
 	tx2 := memdb.BeginRw(t, db1)
 
