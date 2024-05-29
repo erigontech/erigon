@@ -26,8 +26,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
-const hashProgressKeySuffix = "_hash"
-
 func NewPolygonSyncStageCfg(
 	logger log.Logger,
 	chainConfig *chain.Config,
@@ -52,14 +50,16 @@ func NewPolygonSyncStageCfg(
 		dataStream:  dataStream,
 	}
 	p2pService := p2p.NewService(maxPeers, logger, sentry, statusDataProvider.GetStatusData)
-	headersVerifier := polygonsync.VerifyAccumulatedHeaders
+	checkpointVerifier := polygonsync.VerifyCheckpointHeaders
+	milestoneVerifier := polygonsync.VerifyMilestoneHeaders
 	blocksVerifier := polygonsync.VerifyBlocks
 	heimdallService := heimdall.NewHeimdall(heimdallClient, logger, heimdall.WithStore(storage))
 	blockDownloader := polygonsync.NewBlockDownloader(
 		logger,
 		p2pService,
 		heimdallService,
-		headersVerifier,
+		checkpointVerifier,
+		milestoneVerifier,
 		blocksVerifier,
 		storage,
 	)
@@ -69,7 +69,7 @@ func NewPolygonSyncStageCfg(
 	sync := polygonsync.NewSync(
 		storage,
 		executionEngine,
-		headersVerifier,
+		milestoneVerifier,
 		blocksVerifier,
 		p2pService,
 		blockDownloader,
@@ -190,7 +190,7 @@ func (s *polygonSyncStageService) Run(ctx context.Context, tx kv.RwTx, stageStat
 				// exit stage upon update fork choice
 				return s.handleUpdateForkChoice(ctx, tx, data.updateForkChoice)
 			} else if len(data.insertBlocks) > 0 {
-				err = s.handleInsertBlocks(tx, stageState, data.insertBlocks)
+				err = s.handleInsertBlocks(tx, data.insertBlocks)
 			} else if data.span != nil {
 				err = s.handleSpan(ctx, tx, data.span)
 			} else if data.checkpoint != nil {
@@ -238,7 +238,7 @@ func (s *polygonSyncStageService) runBgComponents(ctx context.Context) {
 	}()
 }
 
-func (s *polygonSyncStageService) handleInsertBlocks(tx kv.RwTx, stageState *StageState, blocks []*types.Block) error {
+func (s *polygonSyncStageService) handleInsertBlocks(tx kv.RwTx, blocks []*types.Block) error {
 	for _, block := range blocks {
 		height := block.NumberU64()
 		header := block.Header()
@@ -275,32 +275,39 @@ func (s *polygonSyncStageService) handleInsertBlocks(tx kv.RwTx, stageState *Sta
 		}
 	}
 
-	if len(blocks) == 0 {
-		return nil
-	}
-
-	// update stage progress
-	tip := blocks[len(blocks)-1]
-	tipBlockNum := tip.NumberU64()
-	tipBlockHash := tip.Hash()
-
-	if err := stageState.Update(tx, tipBlockNum); err != nil {
-		return err
-	}
-
-	if err := saveStageHashProgress(tx, stageState.ID, tipBlockHash); err != nil {
-		return err
-	}
-
 	return nil
 }
 
 func (s *polygonSyncStageService) handleUpdateForkChoice(ctx context.Context, tx kv.RwTx, tip *types.Header) error {
-	s.logger.Info(s.appendLogPrefix("handle update fork choice"), "block", tip.Number.Uint64())
+	tipBlockNum := tip.Number.Uint64()
+	tipHash := tip.Hash()
+
+	s.logger.Info(s.appendLogPrefix("handle update fork choice"), "block", tipBlockNum, "hash", tipHash)
 
 	// make sure all state sync events for the given tip are downloaded to mdbx
 	// NOTE: remove this once we integrate the bridge component in sync.Run
 	if err := s.downloadStateSyncEvents(ctx, tx, tip); err != nil {
+		return err
+	}
+
+	// update stage progress
+	if err := s.stageState.Update(tx, tipBlockNum); err != nil {
+		return err
+	}
+
+	if err := stages.SaveStageProgress(tx, stages.Headers, tipBlockNum); err != nil {
+		return err
+	}
+
+	if err := stages.SaveStageProgress(tx, stages.BlockHashes, tipBlockNum); err != nil {
+		return err
+	}
+
+	if err := stages.SaveStageProgress(tx, stages.Bodies, tipBlockNum); err != nil {
+		return err
+	}
+
+	if err := rawdb.WriteHeadHeaderHash(tx, tipHash); err != nil {
 		return err
 	}
 
@@ -320,9 +327,13 @@ func (s *polygonSyncStageService) downloadStateSyncEvents(ctx context.Context, t
 	tipBlockNum := tip.Number.Uint64()
 	sprintLen := borConfig.CalculateSprintLength(tipBlockNum)
 	sprintRemainder := tipBlockNum % sprintLen
-	if tipBlockNum > sprintLen && sprintRemainder > 0 {
-		tipBlockNum -= sprintRemainder
-		tip = rawdb.ReadHeaderByNumber(tx, tipBlockNum)
+	for tipBlockNum > sprintLen && sprintRemainder > 0 {
+		tipBlockNum--
+		sprintRemainder--
+		tip = rawdb.ReadHeader(tx, tip.ParentHash, tipBlockNum)
+		if tip == nil {
+			return errors.New("broken parent header chain")
+		}
 	}
 
 	s.logger.Info(
@@ -505,34 +516,13 @@ func (e *polygonSyncStageExecutionEngine) CurrentHeader(ctx context.Context) (*t
 		return e.blockReader.HeaderByNumber(ctx, tx, snapshotBlockNum)
 	}
 
-	stageHash, err := readStageHashProgress(tx, stages.PolygonSync)
-	if err != nil {
-		return nil, err
-	}
-
-	header := rawdb.ReadHeader(tx, stageHash, stageBlockNum)
+	hash := rawdb.ReadHeadHeaderHash(tx)
+	header := rawdb.ReadHeader(tx, hash, stageBlockNum)
 	if header == nil {
 		return nil, errors.New("header not found")
 	}
 
 	return header, nil
-}
-
-func saveStageHashProgress(db kv.Putter, stageId stages.SyncStage, progress common.Hash) error {
-	return db.Put(kv.SyncStageProgress, hashProgressKey(stageId), progress[:])
-}
-
-func readStageHashProgress(db kv.Getter, stageId stages.SyncStage) (common.Hash, error) {
-	hashBytes, err := db.GetOne(kv.SyncStageProgress, hashProgressKey(stageId))
-	if err != nil {
-		return common.Hash{}, err
-	}
-
-	return common.BytesToHash(hashBytes), nil
-}
-
-func hashProgressKey(stageId stages.SyncStage) []byte {
-	return []byte(stageId + hashProgressKeySuffix)
 }
 
 func newAppendLogPrefix(logPrefix string) func(msg string) string {

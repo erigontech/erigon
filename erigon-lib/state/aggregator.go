@@ -1495,7 +1495,7 @@ func (ac *AggregatorRoTx) mergeFiles(ctx context.Context, files SelectedStaticFi
 		if rng.needMerge {
 			g.Go(func() error {
 				var err error
-				mf.iis[id], err = ac.iis[id].mergeFiles(ctx, files.ii[id].fi, rng.from, rng.to, ac.a.ps)
+				mf.iis[id], err = ac.iis[id].mergeFiles(ctx, files.ii[id], rng.from, rng.to, ac.a.ps)
 				return err
 			})
 		}
@@ -1523,7 +1523,7 @@ func (a *Aggregator) integrateMergedDirtyFiles(outs SelectedStaticFilesV3, in Me
 	}
 
 	for id, ii := range a.iis {
-		ii.integrateMergedDirtyFiles(outs.ii[id].fi, in.iis[id])
+		ii.integrateMergedDirtyFiles(outs.ii[id], in.iis[id])
 	}
 	return frozen
 }

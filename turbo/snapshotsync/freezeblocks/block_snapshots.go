@@ -670,7 +670,7 @@ func (s *RoSnapshots) closeWhatNotInList(l []string) {
 	})
 }
 
-func (s *RoSnapshots) removeOverlaps() error {
+func (s *RoSnapshots) removeOverlapsAfterMerge() error {
 	s.lockSegments()
 	defer s.unlockSegments()
 
@@ -1140,7 +1140,7 @@ func chooseSegmentEnd(from, to uint64, snapType snaptype.Enum, chainConfig *chai
 	blocksPerFile := snapcfg.MergeLimit(chainName, snapType, from)
 
 	next := (from/blocksPerFile + 1) * blocksPerFile
-	to = cmp.Min(next, to)
+	to = min(next, to)
 
 	if to < snaptype.Erigon2MinSegmentSize {
 		return to
@@ -1246,7 +1246,7 @@ func canRetire(from, to uint64, snapType snaptype.Enum, chainConfig *chain.Confi
 		maxJump = 10_000
 	}
 	//roundedTo1K := (to / 1_000) * 1_000
-	jump := cmp.Min(maxJump, roundedTo1K-blockFrom)
+	jump := min(maxJump, roundedTo1K-blockFrom)
 	switch { // only next segment sizes are allowed
 	case jump >= mergeLimit:
 		blockTo = blockFrom + mergeLimit
@@ -1267,13 +1267,13 @@ func CanDeleteTo(curBlockNum uint64, blocksInSnapshots uint64) (blockTo uint64) 
 		return 0
 	}
 
-	var keep uint64 = params.FullImmutabilityThreshold / 20 //TODO: we will remove `/20` after some db optimizations
+	var keep uint64 = 1024 // params.FullImmutabilityThreshold //TODO: we will increase this value after db optimizations - about on-chain-tip prune speed
 	if curBlockNum+999 < keep {
 		// To prevent overflow of uint64 below
 		return blocksInSnapshots + 1
 	}
 	hardLimit := (curBlockNum/1_000)*1_000 - keep
-	return cmp.Min(hardLimit, blocksInSnapshots+1)
+	return min(hardLimit, blocksInSnapshots+1)
 }
 
 func (br *BlockRetire) dbHasEnoughDataForBlocksRetire(ctx context.Context) (bool, error) {
@@ -1323,8 +1323,6 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 			return ok, fmt.Errorf("DumpBlocks: %w", err)
 		}
 
-		snapshots.removeOverlaps()
-
 		if err := snapshots.ReopenFolder(); err != nil {
 			return ok, fmt.Errorf("reopen: %w", err)
 		}
@@ -1360,6 +1358,10 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 		return ok, err
 	}
 
+	// remove old garbage files
+	if err := snapshots.removeOverlapsAfterMerge(); err != nil {
+		return false, err
+	}
 	return ok, nil
 }
 
@@ -1435,7 +1437,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, max
 	for {
 		var ok, okBor bool
 
-		minBlockNum = cmp.Max(br.blockReader.FrozenBlocks(), minBlockNum)
+		minBlockNum = max(br.blockReader.FrozenBlocks(), minBlockNum)
 		maxBlockNum = br.maxScheduledBlock.Load()
 
 		if includeBor {
@@ -1452,7 +1454,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, max
 		}
 
 		if includeBor {
-			minBorBlockNum := cmp.Max(br.blockReader.FrozenBorBlocks(), minBlockNum)
+			minBorBlockNum := max(br.blockReader.FrozenBorBlocks(), minBlockNum)
 			okBor, err = br.retireBorBlocks(ctx, minBorBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 			if err != nil {
 				return err

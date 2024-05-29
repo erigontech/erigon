@@ -29,7 +29,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/kv/backup"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -37,10 +36,10 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/backup"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
@@ -1066,6 +1065,7 @@ func (ht *HistoryRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 		defer valsC.Close()
 	}
 
+	var pruned int
 	pruneValue := func(k, txnm []byte) error {
 		txNum := binary.BigEndian.Uint64(txnm)
 		if txNum >= txTo || txNum < txFrom { //[txFrom; txTo), but in this case idx record
@@ -1090,9 +1090,10 @@ func (ht *HistoryRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 			}
 		}
 
-		mxPruneSizeHistory.Inc()
+		pruned++
 		return nil
 	}
+	mxPruneSizeHistory.AddInt(pruned)
 
 	if !forced && ht.h.dontProduceHistoryFiles {
 		forced = true // or index.CanPrune will return false cuz no snapshots made
@@ -1596,7 +1597,7 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 
 	hi := &HistoryChangesIterFiles{
 		hc:         ht,
-		startTxNum: cmp.Max(0, uint64(fromTxNum)),
+		startTxNum: max(0, uint64(fromTxNum)),
 		endTxNum:   toTxNum,
 		limit:      limit,
 	}

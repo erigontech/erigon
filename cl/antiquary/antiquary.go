@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -17,9 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/ledgerwatch/log/v3"
 )
 
 const safetyMargin = 2_000 // We retire snapshots 2k blocks after the finalized head
@@ -214,7 +213,7 @@ func (a *Antiquary) Loop() error {
 			if from >= to {
 				continue
 			}
-			to = utils.Min64(to, to-safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
+			to = min(to, to-safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
 			to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
 			if to-from < snaptype.Erigon2MergeLimit {
 				continue
@@ -320,7 +319,7 @@ func (a *Antiquary) antiquateBlobs() error {
 	// perform blob antiquation if it is time to.
 	currentBlobsProgress := a.sn.FrozenBlobs()
 	minimunBlobsProgress := ((a.cfg.DenebForkEpoch * a.cfg.SlotsPerEpoch) / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
-	currentBlobsProgress = utils.Max64(currentBlobsProgress, minimunBlobsProgress)
+	currentBlobsProgress = max(currentBlobsProgress, minimunBlobsProgress)
 	// read the finalized head
 	to, err := beacon_indicies.ReadHighestFinalized(roTx)
 	if err != nil {

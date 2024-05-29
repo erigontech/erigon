@@ -12,16 +12,16 @@ import (
 // ExecFunc is the execution function for the stage to move forward.
 // * state - is the current state of the stage and contains stage data.
 // * unwinder - if the stage needs to cause unwinding, `unwinder` methods can be used.
-type ExecFunc func(firstCycle bool, badBlockUnwind bool, s *StageState, unwinder Unwinder, txc wrap.TxContainer, logger log.Logger) error
+type ExecFunc func(badBlockUnwind bool, s *StageState, unwinder Unwinder, txc wrap.TxContainer, logger log.Logger) error
 
 // UnwindFunc is the unwinding logic of the stage.
 // * unwindState - contains information about the unwind itself.
 // * stageState - represents the state of this stage at the beginning of unwind.
-type UnwindFunc func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error
+type UnwindFunc func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error
 
 // PruneFunc is the execution function for the stage to prune old data.
 // * state - is the current state of the stage and contains stage data.
-type PruneFunc func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error
+type PruneFunc func(p *PruneState, tx kv.RwTx, logger log.Logger) error
 
 // Stage is a single sync stage in staged sync.
 type Stage struct {
@@ -40,11 +40,17 @@ type Stage struct {
 	Disabled bool
 }
 
+type CurrentSyncCycleInfo struct {
+	IsInitialCycle bool
+}
+
 // StageState is the state of the stage.
 type StageState struct {
 	state       *Sync
 	ID          stages.SyncStage
 	BlockNumber uint64 // BlockNumber is the current block number of the stage at the beginning of the state execution.
+
+	CurrentSyncCycle CurrentSyncCycleInfo
 }
 
 func (s *StageState) LogPrefix() string { return s.state.LogPrefix() }
@@ -103,6 +109,8 @@ type UnwindState struct {
 	CurrentBlockNumber uint64
 	Reason             UnwindReason
 	state              *Sync
+
+	CurrentSyncCycle CurrentSyncCycleInfo
 }
 
 func (u *UnwindState) LogPrefix() string { return u.state.LogPrefix() }
@@ -117,6 +125,8 @@ type PruneState struct {
 	ForwardProgress uint64 // progress of stage forward move
 	PruneProgress   uint64 // progress of stage prune move. after sync cycle it become equal to ForwardProgress by Done() method
 	state           *Sync
+
+	CurrentSyncCycle CurrentSyncCycleInfo
 }
 
 func (s *PruneState) LogPrefix() string { return s.state.LogPrefix() + " Prune" }
