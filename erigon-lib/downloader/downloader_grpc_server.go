@@ -65,7 +65,7 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 		}
 
 		// For local Perf Testing
-		const bor_dltest = ""
+		const bor_dltest = "headers"
 
 		switch bor_dltest {
 		case "last":
