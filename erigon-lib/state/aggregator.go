@@ -1073,6 +1073,8 @@ func (ac *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, w
 		limit = uint64(math.MaxUint64)
 	}
 
+	log.Info("[dbg] Prune1")
+
 	var txFrom, step uint64 // txFrom is always 0 to avoid dangling keys in indices/hist
 	txTo := ac.a.visibleFilesMinimaxTxNum.Load()
 	if txTo > 0 {
@@ -1081,8 +1083,10 @@ func (ac *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, w
 	}
 
 	if txFrom == txTo || !ac.CanPrune(tx, txTo) {
+		log.Info("[dbg] Prune2 exit", "txTo", txTo)
 		return nil, nil
 	}
+	log.Info("[dbg] Prune2")
 
 	if logEvery == nil {
 		logEvery = time.NewTicker(30 * time.Second)
