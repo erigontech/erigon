@@ -3,12 +3,10 @@ package state
 import (
 	"sort"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
-
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 )
 
 func copyLRU[K comparable, V any](dst *lru.Cache[K, V], src *lru.Cache[K, V]) *lru.Cache[K, V] {
@@ -37,7 +35,7 @@ func GetIndexedAttestation(attestation *solid.Attestation, attestingIndicies []u
 
 func ValidatorFromDeposit(conf *clparams.BeaconChainConfig, deposit *cltypes.Deposit) solid.Validator {
 	amount := deposit.Data.Amount
-	effectiveBalance := utils.Min64(amount-amount%conf.EffectiveBalanceIncrement, conf.MaxEffectiveBalance)
+	effectiveBalance := min(amount-amount%conf.EffectiveBalanceIncrement, conf.MaxEffectiveBalance)
 
 	validator := solid.NewValidator()
 	validator.SetPublicKey(deposit.Data.PubKey)

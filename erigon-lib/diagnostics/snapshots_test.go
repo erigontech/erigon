@@ -1,15 +1,18 @@
 package diagnostics_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/stretchr/testify/require"
 )
 
+func NewTestDiagnosticClient() (*diagnostics.DiagnosticClient, error) {
+	return &diagnostics.DiagnosticClient{}, nil
+}
+
 func TestUpdateFileDownloadingStats(t *testing.T) {
-	d, err := diagnostics.NewDiagnosticClient(context.TODO(), nil, "test", true)
+	d, err := NewTestDiagnosticClient()
 
 	require.NoError(t, err)
 

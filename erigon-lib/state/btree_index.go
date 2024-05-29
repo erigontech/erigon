@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common"
 	"math"
 	"os"
 	"path"
@@ -21,6 +20,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spaolacci/murmur3"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -39,13 +39,6 @@ var ErrBtIndexLookupBounds = errors.New("BtIndex: lookup di bounds error")
 
 func logBase(n, base uint64) uint64 {
 	return uint64(math.Ceil(math.Log(float64(n)) / math.Log(float64(base))))
-}
-
-func min64(a, b uint64) uint64 {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 type markupCursor struct {
@@ -183,7 +176,7 @@ func newBtAlloc(k, M uint64, trace bool, dataLookup dataLookupFunc, keyCmp keyCm
 		//nnc := a.vx[i+1] / M
 		//nvc := a.vx[i+1] / m
 		//bvc := a.vx[i+1] / (m + (m >> 1))
-		a.vx[i] = min64(uint64(math.Pow(float64(M), float64(i))), nnc)
+		a.vx[i] = min(uint64(math.Pow(float64(M), float64(i))), nnc)
 	}
 
 	ncount := uint64(0)

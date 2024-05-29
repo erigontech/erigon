@@ -22,43 +22,62 @@ func extractSlotFromSerializedBeaconState(beaconState []byte) (uint64, error) {
 	return binary.LittleEndian.Uint64(beaconState[40:48]), nil
 }
 
-func RetrieveBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, uri string) (*state.CachingBeaconState, error) {
-	log.Info("[Checkpoint Sync] Requesting beacon state", "uri", uri)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
-	if err != nil {
-		return nil, err
+func RetrieveBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, net clparams.NetworkType) (*state.CachingBeaconState, error) {
+	uris := clparams.GetAllCheckpointSyncEndpoints(net)
+	if len(uris) == 0 {
+		return nil, fmt.Errorf("no uris for checkpoint sync")
 	}
 
-	req.Header.Set("Accept", "application/octet-stream")
-	if err != nil {
-		return nil, fmt.Errorf("checkpoint sync request failed %s", err)
-	}
-	r, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		err = r.Body.Close()
-	}()
-	if r.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("checkpoint sync failed, bad status code %d", r.StatusCode)
-	}
-	marshaled, err := io.ReadAll(r.Body)
-	if err != nil {
-		return nil, fmt.Errorf("checkpoint sync read failed %s", err)
+	fetchBeaconState := func(uri string) (*state.CachingBeaconState, error) {
+		log.Info("[Checkpoint Sync] Requesting beacon state", "uri", uri)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Set("Accept", "application/octet-stream")
+		if err != nil {
+			return nil, fmt.Errorf("checkpoint sync request failed %s", err)
+		}
+		r, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer func() {
+			err = r.Body.Close()
+		}()
+		if r.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("checkpoint sync failed, bad status code %d", r.StatusCode)
+		}
+		marshaled, err := io.ReadAll(r.Body)
+		if err != nil {
+			return nil, fmt.Errorf("checkpoint sync read failed %s", err)
+		}
+
+		epoch, err := extractSlotFromSerializedBeaconState(marshaled)
+		if err != nil {
+			return nil, fmt.Errorf("checkpoint sync read failed %s", err)
+		}
+
+		beaconState := state.New(beaconConfig)
+		err = beaconState.DecodeSSZ(marshaled, int(beaconConfig.GetCurrentStateVersion(epoch)))
+		if err != nil {
+			return nil, fmt.Errorf("checkpoint sync decode failed %s", err)
+		}
+		return beaconState, nil
 	}
 
-	epoch, err := extractSlotFromSerializedBeaconState(marshaled)
-	if err != nil {
-		return nil, fmt.Errorf("checkpoint sync read failed %s", err)
+	// Try all uris until one succeeds
+	var err error
+	var beaconState *state.CachingBeaconState
+	for _, uri := range uris {
+		beaconState, err = fetchBeaconState(uri)
+		if err == nil {
+			return beaconState, nil
+		}
+		log.Warn("[Checkpoint Sync] Failed to fetch beacon state", "uri", uri, "err", err)
 	}
-
-	beaconState := state.New(beaconConfig)
-	err = beaconState.DecodeSSZ(marshaled, int(beaconConfig.GetCurrentStateVersion(epoch)))
-	if err != nil {
-		return nil, fmt.Errorf("checkpoint sync decode failed %s", err)
-	}
-	return beaconState, nil
+	return nil, err
 }
 
 func RetrieveBlock(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, uri string, expectedBlockRoot *libcommon.Hash) (*cltypes.SignedBeaconBlock, error) {

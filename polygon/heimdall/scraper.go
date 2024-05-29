@@ -64,9 +64,9 @@ func (s *Scraper[TEntity]) Run(ctx context.Context) error {
 
 		if idRange.Start > idRange.End {
 			s.syncEvent.SetAndBroadcast()
-			libcommon.Sleep(ctx, s.pollDelay)
-			if ctx.Err() != nil {
+			if err := libcommon.Sleep(ctx, s.pollDelay); err != nil {
 				s.syncEvent.Reset()
+				return err
 			}
 		} else {
 			entities, err := s.fetcher.FetchEntitiesRange(ctx, idRange)
