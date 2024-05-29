@@ -13,25 +13,20 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/turbo/debug"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/afero"
+	"google.golang.org/grpc"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
+	sentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/metrics"
 
 	"github.com/ledgerwatch/erigon/cl/antiquary"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/clparams/initial_state"
-	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
-	"github.com/ledgerwatch/erigon/cmd/caplin/caplin1"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
-
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
 	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format/getters"
@@ -42,13 +37,13 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/phase1/stages"
 	"github.com/ledgerwatch/erigon/cl/rpc"
-	"github.com/ledgerwatch/erigon/cl/utils"
-
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/afero"
-	"google.golang.org/grpc"
-
-	sentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
+	"github.com/ledgerwatch/erigon/cmd/caplin/caplin1"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
+	"github.com/ledgerwatch/erigon/turbo/debug"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 var CLI struct {
@@ -127,7 +122,7 @@ func (c *Chain) Run(ctx *Context) error {
 	dirs := datadir.New(c.Datadir)
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
-	bs, err := core.RetrieveBeaconState(ctx, beaconConfig, clparams.GetCheckpointSyncEndpoint(networkType))
+	bs, err := core.RetrieveBeaconState(ctx, beaconConfig, networkType)
 	if err != nil {
 		return err
 	}
@@ -177,7 +172,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 		return err
 	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
-	bs, err := core.RetrieveBeaconState(ctx, beaconConfig, clparams.GetCheckpointSyncEndpoint(ntype))
+	bs, err := core.RetrieveBeaconState(ctx, beaconConfig, ntype)
 	if err != nil {
 		return err
 	}
@@ -378,7 +373,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 	}
 	previousBlockSlot := genesisHeader.Header.Slot
 	for i := uint64(1); i < to; i++ {
-		if utils.Min64(0, i-320) > previousBlockSlot {
+		if min(0, i-320) > previousBlockSlot {
 			return fmt.Errorf("snapshot %d has invalid slot", i)
 		}
 		// Checking of snapshots is a chain contiguity problem

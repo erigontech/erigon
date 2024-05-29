@@ -23,9 +23,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
-
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/emptypb"
+
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
@@ -34,9 +36,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/rlp"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/log/v3"
-	"google.golang.org/grpc"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // Fetch connects to sentry and implements eth/66 protocol regarding the transaction
@@ -285,7 +284,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 
 		// limit to max 256 transactions in a reply
 		const hashSize = 32
-		hashes = hashes[:cmp.Min(len(hashes), 256*hashSize)]
+		hashes = hashes[:min(len(hashes), 256*hashSize)]
 
 		var txs [][]byte
 		responseSize := 0
@@ -298,7 +297,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 				break
 			}
 
-			txnHash := hashes[i:cmp.Min(i+hashSize, len(hashes))]
+			txnHash := hashes[i:min(i+hashSize, len(hashes))]
 			txn, err := f.pool.GetRlp(tx, txnHash)
 			if err != nil {
 				return err

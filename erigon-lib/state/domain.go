@@ -185,15 +185,15 @@ func (d *Domain) openList(names []string, readonly bool) error {
 		return fmt.Errorf("Domain.openList: %w, %s", err, d.filenameBase)
 	}
 	d.reCalcVisibleFiles()
-	d.protectFromHistoryFilesAheadOfDomainFiles(readonly)
+	d.protectFromHistoryFilesAheadOfDomainFiles()
 	return nil
 }
 
 // protectFromHistoryFilesAheadOfDomainFiles - in some corner-cases app may see more .ef/.v files than .kv:
 //   - `kill -9` in the middle of `buildFiles()`, then `rm -f db` (restore from backup)
 //   - `kill -9` in the middle of `buildFiles()`, then `stage_exec --reset` (drop progress - as a hot-fix)
-func (d *Domain) protectFromHistoryFilesAheadOfDomainFiles(readonly bool) {
-	d.removeFilesAfterStep(d.dirtyFilesEndTxNumMinimax()/d.aggregationStep, readonly)
+func (d *Domain) protectFromHistoryFilesAheadOfDomainFiles() {
+	d.closeFilesAfterStep(d.dirtyFilesEndTxNumMinimax() / d.aggregationStep)
 }
 
 func (d *Domain) OpenFolder(readonly bool) error {
@@ -215,7 +215,7 @@ func (d *Domain) GetAndResetStats() DomainStats {
 	return r
 }
 
-func (d *Domain) removeFilesAfterStep(lowerBound uint64, readonly bool) {
+func (d *Domain) closeFilesAfterStep(lowerBound uint64) {
 	var toDelete []*filesItem
 	d.dirtyFiles.Scan(func(item *filesItem) bool {
 		if item.startTxNum/d.aggregationStep >= lowerBound {
@@ -225,13 +225,8 @@ func (d *Domain) removeFilesAfterStep(lowerBound uint64, readonly bool) {
 	})
 	for _, item := range toDelete {
 		d.dirtyFiles.Delete(item)
-		if !readonly {
-			log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete). stack: %s", item.decompressor.FileName(), lowerBound, dbg.Stack()))
-			item.closeFilesAndRemove()
-		} else {
-			log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d has not enough files (was not complete). stack: %s", item.decompressor.FileName(), lowerBound, dbg.Stack()))
-			item.closeFiles()
-		}
+		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d has not enough files (was not complete). stack: %s", item.decompressor.FileName(), lowerBound, dbg.Stack()))
+		item.closeFiles()
 	}
 
 	toDelete = toDelete[:0]
@@ -243,13 +238,8 @@ func (d *Domain) removeFilesAfterStep(lowerBound uint64, readonly bool) {
 	})
 	for _, item := range toDelete {
 		d.History.dirtyFiles.Delete(item)
-		if !readonly {
-			log.Debug(fmt.Sprintf("[snapshots] deleting some histor files - because step %d has not enough files (was not complete)", lowerBound))
-			item.closeFilesAndRemove()
-		} else {
-			log.Debug(fmt.Sprintf("[snapshots] closing some histor files - because step %d has not enough files (was not complete)", lowerBound))
-			item.closeFiles()
-		}
+		log.Debug(fmt.Sprintf("[snapshots] closing some histor files - because step %d has not enough files (was not complete)", lowerBound))
+		item.closeFiles()
 	}
 
 	toDelete = toDelete[:0]
@@ -261,13 +251,8 @@ func (d *Domain) removeFilesAfterStep(lowerBound uint64, readonly bool) {
 	})
 	for _, item := range toDelete {
 		d.History.InvertedIndex.dirtyFiles.Delete(item)
-		if !readonly {
-			log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
-			item.closeFilesAndRemove()
-		} else {
-			log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
-			item.closeFiles()
-		}
+		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
+		item.closeFiles()
 	}
 }
 
@@ -1962,7 +1947,6 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		stat.Values++
 		stat.MaxStep = max(stat.MaxStep, is)
 		stat.MinStep = min(stat.MinStep, is)
-		mxPruneSizeDomain.Inc()
 
 		k, v, err = keysCursor.Prev()
 
@@ -1977,6 +1961,8 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		default:
 		}
 	}
+	mxPruneSizeDomain.AddUint64(stat.Values)
+
 	if err := SaveExecV3PruneProgress(rwTx, dt.d.keysTable, nil); err != nil {
 		return stat, fmt.Errorf("save domain pruning progress: %s, %w", dt.d.filenameBase, err)
 	}

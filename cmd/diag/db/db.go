@@ -61,7 +61,8 @@ var Command = cli.Command{
 func startPrintDBsInfo(cliCtx *cli.Context) error {
 	data, err := DBsInfo(cliCtx)
 	if err != nil {
-		return err
+		util.RenderError(err)
+		return nil
 	}
 
 	dbToPrint := cliCtx.String(DBNameFlag.Name)

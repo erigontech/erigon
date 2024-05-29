@@ -39,10 +39,11 @@ import (
 	"github.com/google/btree"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/assert"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
@@ -57,8 +58,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	"github.com/ledgerwatch/erigon-lib/types"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/log/v3"
 )
 
 const DefaultBlockGasLimit = uint64(30000000)
@@ -717,7 +716,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 
 	isShanghai := p.isShanghai() || p.isAgra()
 
-	txs.Resize(uint(cmp.Min(int(n), len(best.ms))))
+	txs.Resize(uint(min(int(n), len(best.ms))))
 	var toRemove []*metaTx
 	count := 0
 	i := 0
@@ -1630,7 +1629,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		}
 		mt.minFeeCap = *minFeeCap
 		if mt.Tx.Tip.IsUint64() {
-			minTip = cmp.Min(minTip, mt.Tx.Tip.Uint64())
+			minTip = min(minTip, mt.Tx.Tip.Uint64())
 		}
 		mt.minTip = minTip
 
@@ -1864,7 +1863,7 @@ func MainLoop(ctx context.Context, db kv.RwDB, p *TxPool, newTxs chan types.Anno
 							continue
 						}
 						// Strip away blob wrapper, if applicable
-						slotRlp, err2 := types2.UnwrapTxPlayloadRlp(slotRlp)
+						slotRlp, err2 := types.UnwrapTxPlayloadRlp(slotRlp)
 						if err2 != nil {
 							continue
 						}

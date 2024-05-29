@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
@@ -90,7 +90,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 			return false
 		}
 		if len(v) == 0 {
-			creationTxnID = cmp.Max(creationTxnID, txnID)
+			creationTxnID = max(creationTxnID, txnID)
 			return false
 		}
 
@@ -104,7 +104,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 		// previous history block contains the actual change; it may contain multiple
 		// nonce changes.
 		if acc.Nonce <= nonce {
-			creationTxnID = cmp.Max(creationTxnID, txnID)
+			creationTxnID = max(creationTxnID, txnID)
 			return false
 		}
 		return true

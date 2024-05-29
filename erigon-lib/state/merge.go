@@ -27,14 +27,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/common/background"
-
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 	"github.com/ledgerwatch/erigon-lib/seg"
@@ -68,7 +66,7 @@ func (ii *InvertedIndex) endIndexedTxNumMinimax(needFrozen bool) uint64 {
 			if item.index == nil || (needFrozen && !item.frozen) {
 				continue
 			}
-			_max = cmp.Max(_max, item.endTxNum)
+			_max = max(_max, item.endTxNum)
 		}
 		return true
 	})
@@ -98,11 +96,11 @@ func (h *History) endIndexedTxNumMinimax(needFrozen bool) uint64 {
 			if item.index == nil || (needFrozen && !item.frozen) {
 				continue
 			}
-			_max = cmp.Max(_max, item.endTxNum)
+			_max = max(_max, item.endTxNum)
 		}
 		return true
 	})
-	return cmp.Min(_max, h.InvertedIndex.endIndexedTxNumMinimax(needFrozen))
+	return min(_max, h.InvertedIndex.endIndexedTxNumMinimax(needFrozen))
 }
 
 type DomainRanges struct {
@@ -194,7 +192,7 @@ func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges
 		}
 		endStep := item.endTxNum / ht.h.aggregationStep
 		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
-		span := cmp.Min(spanStep*ht.h.aggregationStep, maxSpan)
+		span := min(spanStep*ht.h.aggregationStep, maxSpan)
 		start := item.endTxNum - span
 		foundSuperSet := r.indexStartTxNum == item.startTxNum && item.endTxNum >= r.historyEndTxNum
 		if foundSuperSet {
@@ -243,7 +241,7 @@ func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Merge
 		}
 		endStep := item.endTxNum / iit.ii.aggregationStep
 		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
-		span := cmp.Min(spanStep*iit.ii.aggregationStep, maxSpan)
+		span := min(spanStep*iit.ii.aggregationStep, maxSpan)
 		start := item.endTxNum - span
 		foundSuperSet := startTxNum == item.startTxNum && item.endTxNum >= endTxNum
 		if foundSuperSet {
@@ -328,7 +326,7 @@ func (ht *HistoryRoTx) maxTxNumInFiles(onlyFrozen bool) uint64 {
 	} else {
 		_max = ht.files[len(ht.files)-1].endTxNum
 	}
-	return cmp.Min(_max, ht.iit.maxTxNumInFiles(onlyFrozen))
+	return min(_max, ht.iit.maxTxNumInFiles(onlyFrozen))
 }
 
 func (iit *InvertedIndexRoTx) maxTxNumInFiles(onlyFrozen bool) uint64 {

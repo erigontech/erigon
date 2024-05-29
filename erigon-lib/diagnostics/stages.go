@@ -80,6 +80,11 @@ func ReadSyncStagesInfo(db kv.RoDB) (info SyncStages) {
 
 func ReadStagesList(db kv.RoDB) []string {
 	data := ReadDataFromTable(db, kv.DiagSyncStages, StagesListKey)
+
+	if len(data) == 0 {
+		return []string{}
+	}
+
 	var info []string
 	err := json.Unmarshal(data, &info)
 
@@ -92,7 +97,12 @@ func ReadStagesList(db kv.RoDB) []string {
 }
 
 func ReadCurrentStage(db kv.RoDB) uint {
-	data := ReadDataFromTable(db, kv.DiagSyncStages, StagesListKey)
+	data := ReadDataFromTable(db, kv.DiagSyncStages, CurrentStageKey)
+
+	if len(data) == 0 {
+		return 0
+	}
+
 	var info uint
 	err := json.Unmarshal(data, &info)
 
@@ -109,5 +119,5 @@ func StagesListUpdater(info []string) func(tx kv.RwTx) error {
 }
 
 func CurrentStageUpdater(info uint) func(tx kv.RwTx) error {
-	return PutDataToTable(kv.DiagSyncStages, StagesListKey, info)
+	return PutDataToTable(kv.DiagSyncStages, CurrentStageKey, info)
 }
