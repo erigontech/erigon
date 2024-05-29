@@ -1693,15 +1693,16 @@ func (dt *DomainRoTx) IteratePrefix2(roTx kv.Tx, fromKey, toKey []byte, limit in
 }
 
 func (dt *DomainRoTx) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit int) (iter.KV, error) {
-	fit := &DomainLatestIterFile{from: fromKey, to: toKey, limit: limit, dc: dt,
+	s := &DomainLatestIterFile{from: fromKey, to: toKey, limit: limit, dc: dt,
 		roTx:         roTx,
 		idxKeysTable: dt.d.keysTable,
 		h:            &CursorHeap{},
 	}
-	if err := fit.init(dt); err != nil {
+	if err := s.init(dt); err != nil {
+		s.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
-	return fit, nil
+	return s, nil
 }
 
 // CanPruneUntil returns true if domain OR history tables can be pruned until txNum
