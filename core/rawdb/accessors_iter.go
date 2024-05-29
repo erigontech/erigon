@@ -60,7 +60,7 @@ func (s *CanonicalTxnIds) init() (err error) {
 			return err
 		}
 		if ok {
-			to = hexutility.EncodeTs(blockFrom)
+			from = hexutility.EncodeTs(blockFrom)
 		}
 	}
 
