@@ -30,7 +30,7 @@ func Epoch(b abstract.BeaconStateBasic) uint64 {
 }
 
 func IsAggregator(cfg *clparams.BeaconChainConfig, committeeLength, committeeIndex uint64, slotSignature libcommon.Bytes96) bool {
-	modulo := utils.Max64(1, committeeLength/cfg.TargetAggregatorsPerCommittee)
+	modulo := max(1, committeeLength/cfg.TargetAggregatorsPerCommittee)
 	hashSlotSignatue := utils.Sha256(slotSignature[:])
 	return binary.LittleEndian.Uint64(hashSlotSignatue[:8])%modulo == 0
 }
@@ -208,7 +208,7 @@ func ExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) []*cltypes
 	// Determine the upper bound for the loop and initialize the withdrawals slice with a capacity of bound
 	maxValidators := uint64(b.ValidatorLength())
 	maxValidatorsPerWithdrawalsSweep := b.BeaconConfig().MaxValidatorsPerWithdrawalsSweep
-	bound := utils.Min64(maxValidators, maxValidatorsPerWithdrawalsSweep)
+	bound := min(maxValidators, maxValidatorsPerWithdrawalsSweep)
 	withdrawals := make([]*cltypes.Withdrawal, 0, bound)
 
 	// Loop through the validators to calculate expected withdrawals

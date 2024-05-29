@@ -10,7 +10,6 @@ import (
 	"github.com/cenkalti/backoff/v4"
 
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 )
@@ -92,7 +91,7 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 	headers := make([]*types.Header, 0, amount)
 	for chunkNum := uint64(0); chunkNum < numChunks; chunkNum++ {
 		chunkStart := start + chunkNum*eth.MaxHeadersServe
-		chunkEnd := cmp.Min(end, chunkStart+eth.MaxHeadersServe)
+		chunkEnd := min(end, chunkStart+eth.MaxHeadersServe)
 		for chunkStart < chunkEnd {
 			// a node may not respond with all MaxHeadersServe in 1 response,
 			// so we keep on consuming from last received number (akin to consuming a paging api)
