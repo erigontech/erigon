@@ -1707,8 +1707,8 @@ func (dt *DomainRoTx) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit
 // CanPruneUntil returns true if domain OR history tables can be pruned until txNum
 func (dt *DomainRoTx) CanPruneUntil(tx kv.Tx, untilTx uint64) bool {
 	canDomain, _ := dt.canPruneDomainTables(tx, untilTx)
-	canHistory, _ := dt.ht.canPruneUntil(tx, untilTx)
-	log.Info("[dbg] DomainRoTx CanPruneUntil", "name", dt.d.filenameBase, "canDomain", canDomain, "canHistory", canHistory)
+	canHistory, histCanPruneToTx := dt.ht.canPruneUntil(tx, untilTx)
+	log.Info("[dbg] DomainRoTx CanPruneUntil", "name", dt.d.filenameBase, "canDomain", canDomain, "canHistory", canHistory, "histCanPruneToTx", histCanPruneToTx)
 	return canHistory || canDomain
 }
 
@@ -1716,7 +1716,8 @@ func (dt *DomainRoTx) CanPruneUntil(tx kv.Tx, untilTx uint64) bool {
 // everything that aggregated is prunable.
 // history.CanPrune should be called separately because it responsible for different tables
 func (dt *DomainRoTx) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, maxStepToPrune uint64) {
-	if m := dt.maxTxNumInDomainFiles(false); m > 0 {
+	m := dt.maxTxNumInDomainFiles(false)
+	if m > 0 {
 		maxStepToPrune = (m - 1) / dt.d.aggregationStep
 	}
 	var untilStep uint64
@@ -1736,6 +1737,7 @@ func (dt *DomainRoTx) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, 
 	case "commitment":
 		mxPrunableDComm.Set(delta)
 	}
+	log.Warn("[dbg] DomainRoTx.canPruneDomainTables", "maxStepToPrune", maxStepToPrune, "untilStep", untilStep, "sm", sm, "maxTxNumToPrune", m, "untilTx", untilTx)
 	//fmt.Printf("smallestToPrune[%s] minInDB %d inFiles %d until %d\n", dt.d.filenameBase, sm, maxStepToPrune, untilStep)
 	return sm <= min(maxStepToPrune, untilStep), maxStepToPrune
 }
