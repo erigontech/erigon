@@ -82,6 +82,7 @@ func InitMiner(ctx context.Context, genesis *types.Genesis, privKey *ecdsa.Priva
 	ddir, _ := os.MkdirTemp("", "")
 
 	logger := log.New()
+	inat, err := nat.Parse("stun")
 
 	nodeCfg := &nodecfg.Config{
 		Name:    "erigon",
@@ -94,7 +95,7 @@ func InitMiner(ctx context.Context, genesis *types.Genesis, privKey *ecdsa.Priva
 			MaxPendingPeers: 1000,
 			AllowedPorts:    []uint{30303, 30304, 30305, 30306, 30307, 30308, 30309, 30310},
 			PrivateKey:      privKey,
-			NAT:             nat.Any(),
+			NAT:             inat,
 		},
 
 		// These are set to prevent disk and page size churn which can be excessive
