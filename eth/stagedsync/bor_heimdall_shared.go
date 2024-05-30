@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
 	"strconv"
 	"time"
 
@@ -17,7 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 )
@@ -478,14 +476,7 @@ func fetchAndWriteHeimdallStateSyncEvents(
 			)
 		}
 
-		eventRecordWithoutTime := eventRecord.BuildEventRecord()
-
-		recordBytes, err := rlp.EncodeToBytes(eventRecordWithoutTime)
-		if err != nil {
-			return lastStateSyncEventID, i, time.Since(fetchStart), err
-		}
-
-		data, err := stateReceiverABI.Pack("commitState", big.NewInt(eventRecord.Time.Unix()), recordBytes)
+		data, err := eventRecord.Pack(stateReceiverABI)
 		if err != nil {
 			logger.Error(fmt.Sprintf("[%s] Unable to pack tx for commitState", logPrefix), "err", err)
 			return lastStateSyncEventID, i, time.Since(fetchStart), err

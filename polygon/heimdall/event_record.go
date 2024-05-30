@@ -28,57 +28,6 @@ type EventRecordWithTime struct {
 	Time time.Time `json:"record_time" yaml:"record_time"`
 }
 
-func (e *EventRecordWithTime) toIntTime() eventRecordWithIntTime {
-	return eventRecordWithIntTime{
-		EventRecord: EventRecord{
-			ID:       e.ID,
-			Contract: e.Contract,
-			Data:     e.Data,
-			TxHash:   e.TxHash,
-			LogIndex: e.LogIndex,
-			ChainID:  e.ChainID,
-		},
-		Time: big.NewInt(e.Time.Unix()),
-	}
-}
-
-func (e *EventRecordWithTime) EncodeRLP() (rlp.RawValue, error) {
-	r := e.toIntTime()
-	return rlp.EncodeToBytes(&r)
-}
-
-// DecodeEventRecord RLP decodes the given bytes to EventRecordWithTime
-func DecodeEventRecord(v rlp.RawValue) (*EventRecordWithTime, error) {
-	var event eventRecordWithIntTime
-	err := rlp.DecodeBytes(v, &event)
-	if err != nil {
-		return nil, err
-	}
-
-	e := event.toTime()
-
-	return &e, nil
-}
-
-type eventRecordWithIntTime struct { // TODO: remove, use GenesisContractsClient.Pack and UnpackIntoInterface
-	EventRecord
-	Time *big.Int `json:"record_time" yaml:"record_time"` // use big.Int as time.Time is not RLP encodable
-}
-
-func (e *eventRecordWithIntTime) toTime() EventRecordWithTime {
-	return EventRecordWithTime{
-		EventRecord: EventRecord{
-			ID:       e.ID,
-			Contract: e.Contract,
-			Data:     e.Data,
-			TxHash:   e.TxHash,
-			LogIndex: e.LogIndex,
-			ChainID:  e.ChainID,
-		},
-		Time: time.Unix(e.Time.Int64(), 0),
-	}
-}
-
 var ErrEventRecordNotFound = fmt.Errorf("event record not found")
 
 // String returns the string representation of a state record
@@ -104,6 +53,21 @@ func (e *EventRecordWithTime) BuildEventRecord() *EventRecord {
 		LogIndex: e.LogIndex,
 		ChainID:  e.ChainID,
 	}
+}
+
+func (e *EventRecordWithTime) Pack(stateContract abi.ABI) (rlp.RawValue, error) {
+	eventRecordWithoutTime := e.BuildEventRecord()
+	recordBytes, err := rlp.EncodeToBytes(eventRecordWithoutTime)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := stateContract.Pack("commitState", big.NewInt(e.Time.Unix()), recordBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	return data, nil
 }
 
 func UnpackEventRecordWithTime(stateContract abi.ABI, encodedEvent rlp.RawValue) (*EventRecordWithTime, error) {

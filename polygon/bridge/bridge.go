@@ -9,6 +9,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -34,11 +35,12 @@ type Bridge struct {
 	lastProcessedBlockNumber uint64
 	lastProcessedEventID     uint64
 	stateClientAddress       libcommon.Address
+	stateReceiverABI         abi.ABI
 
 	fetchSyncEvents fetchSyncEventsType
 }
 
-func NewBridge(ctx context.Context, config *nodecfg.Config, name string, readonly bool, logger log.Logger, borConfig *borcfg.BorConfig, fetchSyncEvents fetchSyncEventsType) (*Bridge, error) {
+func NewBridge(ctx context.Context, config *nodecfg.Config, name string, readonly bool, logger log.Logger, borConfig *borcfg.BorConfig, fetchSyncEvents fetchSyncEventsType, stateReceiverABI abi.ABI) (*Bridge, error) {
 	// create new db
 	db, err := node.OpenDatabase(ctx, config, kv.PolygonBridgeDB, name, readonly, logger)
 	if err != nil {
@@ -54,6 +56,7 @@ func NewBridge(ctx context.Context, config *nodecfg.Config, name string, readonl
 		lastProcessedBlockNumber: 0,
 		lastProcessedEventID:     0,
 		stateClientAddress:       libcommon.HexToAddress(borConfig.StateReceiverContract),
+		stateReceiverABI:         stateReceiverABI,
 	}, nil
 }
 
@@ -83,7 +86,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 
 		if len(events) != 0 {
 			b.ready = false
-			if err := AddEvents(ctx, b.db, events); err != nil {
+			if err := AddEvents(ctx, b.db, events, b.stateReceiverABI); err != nil {
 				return err
 			}
 
@@ -113,8 +116,8 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 			continue
 		}
 
-		t := time.Unix(int64(block.Time()), 0)
-		lastDBID, err := GetLastSpanEventID(ctx, b.db, b.lastProcessedEventID, t)
+		blockTimestamp := time.Unix(int64(block.Time()), 0)
+		lastDBID, err := GetLastSpanEventID(ctx, b.db, b.lastProcessedEventID, blockTimestamp, b.stateReceiverABI)
 		if err != nil {
 			return err
 		}

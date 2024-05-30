@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 )
 
@@ -39,7 +40,7 @@ func GetLatestEventID(ctx context.Context, db kv.RoDB) (uint64, error) {
 }
 
 // GetLastSpanEventID gets the last event id where event.ID >= lastID and event.Time < time
-func GetLastSpanEventID(ctx context.Context, db kv.RoDB, lastID uint64, timeLimit time.Time) (uint64, error) {
+func GetLastSpanEventID(ctx context.Context, db kv.RoDB, lastID uint64, timeLimit time.Time, stateContract abi.ABI) (uint64, error) {
 	var eventID uint64
 
 	err := db.View(ctx, func(tx kv.Tx) error {
@@ -73,13 +74,12 @@ func GetLastSpanEventID(ctx context.Context, db kv.RoDB, lastID uint64, timeLimi
 				return err
 			}
 
-			event, err := heimdall.DecodeEventRecord(v)
+			event, err := heimdall.UnpackEventRecordWithTime(stateContract, v)
 			if err != nil {
 				return err
 			}
 
-			t := time.Unix(event.Time.Unix(), 0)
-			if t.After(timeLimit) {
+			if event.Time.After(timeLimit) {
 				return nil
 			}
 
@@ -91,10 +91,10 @@ func GetLastSpanEventID(ctx context.Context, db kv.RoDB, lastID uint64, timeLimi
 	return eventID, err
 }
 
-func AddEvents(ctx context.Context, db kv.RwDB, events []*heimdall.EventRecordWithTime) error {
+func AddEvents(ctx context.Context, db kv.RwDB, events []*heimdall.EventRecordWithTime, stateContract abi.ABI) error {
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		for _, event := range events {
-			v, err := event.EncodeRLP()
+			v, err := event.Pack(stateContract)
 			if err != nil {
 				return err
 			}
