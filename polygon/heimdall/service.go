@@ -22,7 +22,7 @@ type service struct {
 	milestoneScraper  *Scraper[*Milestone]
 	spanScraper       *Scraper[*Span]
 
-	db              *Database
+	db              *polygoncommon.Database
 	checkpointStore entityStore[*Checkpoint]
 	milestoneStore  entityStore[*Milestone]
 	spanStore       entityStore[*Span]
@@ -38,15 +38,15 @@ func NewService(
 	tmpDir string,
 	logger log.Logger,
 ) Service {
-	db := NewDatabase(dataDir, logger)
+	db := polygoncommon.NewDatabase(dataDir, logger)
 
 	blockNumToIdIndexFactory := func(ctx context.Context) (*RangeIndex, error) {
 		return NewRangeIndex(ctx, tmpDir, logger)
 	}
 
-	checkpointStore := newEntityStore(db, kv.BorCheckpoints, makeType[Checkpoint], blockNumToIdIndexFactory)
-	milestoneStore := newEntityStore(db, kv.BorMilestones, makeType[Milestone], blockNumToIdIndexFactory)
-	spanStore := newEntityStore(db, kv.BorSpans, makeType[Span], blockNumToIdIndexFactory)
+	checkpointStore := newEntityStore(db, kv.HeimdallDB, kv.BorCheckpoints, makeType[Checkpoint], blockNumToIdIndexFactory)
+	milestoneStore := newEntityStore(db, kv.HeimdallDB, kv.BorMilestones, makeType[Milestone], blockNumToIdIndexFactory)
+	spanStore := newEntityStore(db, kv.HeimdallDB, kv.BorSpans, makeType[Span], blockNumToIdIndexFactory)
 
 	client := NewHeimdallClient(heimdallUrl, logger)
 	checkpointFetcher := newCheckpointFetcher(client, logger)

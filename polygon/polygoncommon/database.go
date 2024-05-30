@@ -1,4 +1,4 @@
-package heimdall
+package polygoncommon
 
 import (
 	"context"
@@ -29,13 +29,13 @@ func NewDatabase(
 }
 
 var databaseTablesCfg = kv.TableCfg{
-	kv.BorCheckpoints: {},
-	kv.BorMilestones:  {},
-	kv.BorSpans:       {},
+	kv.BorCheckpoints:      {},
+	kv.BorMilestones:       {},
+	kv.BorSpans:            {},
+	kv.PolygonBridgeEvents: {},
 }
 
-func (db *Database) open(ctx context.Context) error {
-	label := kv.HeimdallDB
+func (db *Database) open(ctx context.Context, label kv.Label) error {
 	dbPath := filepath.Join(db.dataDir, label.String())
 	db.logger.Info("Opening Database", "label", label.String(), "path", dbPath)
 
@@ -50,10 +50,10 @@ func (db *Database) open(ctx context.Context) error {
 	return err
 }
 
-func (db *Database) OpenOnce(ctx context.Context) error {
+func (db *Database) OpenOnce(ctx context.Context, label kv.Label) error {
 	var err error
 	db.openOnce.Do(func() {
-		err = db.open(ctx)
+		err = db.open(ctx, label)
 	})
 	return err
 }

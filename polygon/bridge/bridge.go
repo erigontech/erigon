@@ -14,10 +14,9 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/node"
-	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
+	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
 )
 
 type fetchSyncEventsType func(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error)
@@ -27,7 +26,7 @@ type IDRange struct {
 }
 
 type Bridge struct {
-	db                       kv.RwDB
+	db                       *polygoncommon.Database
 	log                      log.Logger
 	borConfig                *borcfg.BorConfig
 	ready                    bool
@@ -40,9 +39,10 @@ type Bridge struct {
 	fetchSyncEvents fetchSyncEventsType
 }
 
-func NewBridge(ctx context.Context, config *nodecfg.Config, name string, readonly bool, logger log.Logger, borConfig *borcfg.BorConfig, fetchSyncEvents fetchSyncEventsType, stateReceiverABI abi.ABI) (*Bridge, error) {
+func NewBridge(ctx context.Context, dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, fetchSyncEvents fetchSyncEventsType, stateReceiverABI abi.ABI) (*Bridge, error) {
 	// create new db
-	db, err := node.OpenDatabase(ctx, config, kv.PolygonBridgeDB, name, readonly, logger)
+	db := polygoncommon.NewDatabase(dataDir, logger)
+	err := db.OpenOnce(ctx, kv.PolygonBridgeDB)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +117,7 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		}
 
 		blockTimestamp := time.Unix(int64(block.Time()), 0)
-		lastDBID, err := GetLastSpanEventID(ctx, b.db, b.lastProcessedEventID, blockTimestamp, b.stateReceiverABI)
+		lastDBID, err := GetSprintLastEventID(ctx, b.db, b.lastProcessedEventID, blockTimestamp, b.stateReceiverABI)
 		if err != nil {
 			return err
 		}
@@ -153,6 +153,10 @@ func (b *Bridge) Synchronize(ctx context.Context, tip *types.Header) error {
 func (b *Bridge) Unwind(ctx context.Context, tip *types.Header) error {
 	for k := range b.eventMap {
 		if k <= tip.Number.Uint64() {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+
 			delete(b.eventMap, k)
 		}
 	}

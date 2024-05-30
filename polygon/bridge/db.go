@@ -9,110 +9,113 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
+	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
 )
 
 // GetLatestEventID the latest state sync event ID in given DB, 0 if DB is empty
 // NOTE: Polygon sync events start at index 1
-func GetLatestEventID(ctx context.Context, db kv.RoDB) (uint64, error) {
-	var eventID uint64
-	err := db.View(ctx, func(tx kv.Tx) error {
-		cursor, err := tx.Cursor(kv.PolygonBridgeEvents)
-		if err != nil {
-			return err
-		}
-		defer cursor.Close()
+func GetLatestEventID(ctx context.Context, db *polygoncommon.Database) (uint64, error) {
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
 
-		k, _, err := cursor.Last()
-		if err != nil {
-			return err
-		}
+	cursor, err := tx.Cursor(kv.PolygonBridgeEvents)
+	if err != nil {
+		return 0, err
+	}
+	defer cursor.Close()
 
-		if len(k) == 0 {
-			eventID = 0
-			return nil
-		}
+	k, _, err := cursor.Last()
+	if err != nil {
+		return 0, err
+	}
 
-		eventID = binary.BigEndian.Uint64(k)
-		return nil
-	})
+	if len(k) == 0 {
+		return 0, nil
+	}
 
-	return eventID, err
+	return binary.BigEndian.Uint64(k), err
 }
 
-// GetLastSpanEventID gets the last event id where event.ID >= lastID and event.Time < time
-func GetLastSpanEventID(ctx context.Context, db kv.RoDB, lastID uint64, timeLimit time.Time, stateContract abi.ABI) (uint64, error) {
+// GetSprintLastEventID gets the last event id where event.ID >= lastID and event.Time < time
+func GetSprintLastEventID(ctx context.Context, db *polygoncommon.Database, lastID uint64, timeLimit time.Time, stateContract abi.ABI) (uint64, error) {
 	var eventID uint64
 
-	err := db.View(ctx, func(tx kv.Tx) error {
-		cursor, err := tx.Cursor(kv.PolygonBridgeEvents)
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return eventID, err
+	}
+	defer tx.Rollback()
+
+	cursor, err := tx.Cursor(kv.PolygonBridgeEvents)
+	if err != nil {
+		return eventID, err
+	}
+	defer cursor.Close()
+
+	kDBLast, _, err := cursor.Last()
+	if err != nil {
+		return eventID, err
+	}
+
+	kLastID := make([]byte, 8)
+	binary.BigEndian.PutUint64(kLastID, lastID)
+
+	if bytes.Equal(kLastID, kDBLast) {
+		return lastID, nil
+	}
+
+	_, _, err = cursor.Seek(kLastID)
+	if err != nil {
+		return eventID, err
+	}
+
+	for {
+		_, v, err := cursor.Next()
 		if err != nil {
-			return err
+			return eventID, err
 		}
-		defer cursor.Close()
 
-		kDBLast, _, err := cursor.Last()
+		event, err := heimdall.UnpackEventRecordWithTime(stateContract, v)
 		if err != nil {
-			return err
+			return eventID, err
 		}
 
-		kLastID := make([]byte, 8)
-		binary.BigEndian.PutUint64(kLastID, lastID)
-
-		if bytes.Equal(kLastID, kDBLast) {
-			eventID = lastID
-			return nil
+		if event.Time.After(timeLimit) {
+			return eventID, nil
 		}
 
-		_, _, err = cursor.Seek(kLastID)
-		if err != nil {
-			return err
-		}
-
-		for {
-			_, v, err := cursor.Next()
-			if err != nil {
-				return err
-			}
-
-			event, err := heimdall.UnpackEventRecordWithTime(stateContract, v)
-			if err != nil {
-				return err
-			}
-
-			if event.Time.After(timeLimit) {
-				return nil
-			}
-
-			eventID = event.ID
-		}
-
-	})
-
-	return eventID, err
+		eventID = event.ID
+	}
 }
 
-func AddEvents(ctx context.Context, db kv.RwDB, events []*heimdall.EventRecordWithTime, stateContract abi.ABI) error {
-	return db.Update(ctx, func(tx kv.RwTx) error {
-		for _, event := range events {
-			v, err := event.Pack(stateContract)
-			if err != nil {
-				return err
-			}
+func AddEvents(ctx context.Context, db *polygoncommon.Database, events []*heimdall.EventRecordWithTime, stateContract abi.ABI) error {
+	tx, err := db.BeginRw(ctx)
+	if err != nil {
+		return err
+	}
 
-			k := make([]byte, 8)
-			binary.BigEndian.PutUint64(k, event.ID)
-			err = tx.Put(kv.PolygonBridgeEvents, k, v)
-			if err != nil {
-				return err
-			}
+	for _, event := range events {
+		v, err := event.Pack(stateContract)
+		if err != nil {
+			return err
 		}
 
-		return nil
-	})
+		k := make([]byte, 8)
+		binary.BigEndian.PutUint64(k, event.ID)
+		err = tx.Put(kv.PolygonBridgeEvents, k, v)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
 }
 
 // GetEvents gets raw events, start and end inclusive
-func GetEvents(ctx context.Context, db kv.RwDB, id IDRange) ([][]byte, error) {
+func GetEvents(ctx context.Context, db *polygoncommon.Database, id IDRange) ([][]byte, error) {
 	var events [][]byte
 
 	kStart := make([]byte, 8)
@@ -121,31 +124,35 @@ func GetEvents(ctx context.Context, db kv.RwDB, id IDRange) ([][]byte, error) {
 	kEnd := make([]byte, 8)
 	binary.BigEndian.PutUint64(kEnd, id.end+1)
 
-	err := db.View(ctx, func(tx kv.Tx) error {
-		cursor, err := tx.Cursor(kv.PolygonBridgeEvents)
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	cursor, err := tx.Cursor(kv.PolygonBridgeEvents)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close()
+
+	var k, v []byte
+	_, v, err = cursor.Seek(kStart)
+	if err != nil {
+		return nil, err
+	}
+
+	for {
+		events = append(events, v)
+
+		k, v, err = cursor.Next()
 		if err != nil {
-			return err
+			return nil, err
 		}
-		defer cursor.Close()
-
-		var k, v []byte
-		_, v, err = cursor.Seek(kStart)
-		if err != nil {
-			return err
+		if bytes.Equal(k, kEnd) {
+			break
 		}
-
-		for {
-			events = append(events, v)
-
-			k, v, err = cursor.Next()
-			if err != nil {
-				return err
-			}
-			if bytes.Equal(k, kEnd) {
-				return nil
-			}
-		}
-	})
+	}
 
 	return events, err
 }
