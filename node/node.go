@@ -299,6 +299,8 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 		name = "chaindata"
 	case kv.TxPoolDB:
 		name = "txpool"
+	case kv.PolygonBridgeDB:
+		name = "polygon-bridge"
 	case kv.ConsensusDB:
 		if len(name) == 0 {
 			return nil, fmt.Errorf("expected a consensus name")
