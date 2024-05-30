@@ -96,6 +96,7 @@ func AddEvents(ctx context.Context, db *polygoncommon.Database, events []*heimda
 	if err != nil {
 		return err
 	}
+	defer tx.Rollback()
 
 	for _, event := range events {
 		v, err := event.Pack(stateContract)
