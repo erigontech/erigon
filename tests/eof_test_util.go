@@ -56,11 +56,11 @@ func getError(err error) error {
 		vm.ErrTooLargeMaxStackHeight,
 		vm.ErrInvalidContainerSize,
 		vm.ErrInvalidMemoryAccess,
+		vm.ErrInvalidCodeTermination,
 	}
 
 	for _, _err := range _errors {
 		if errors.Is(err, _err) {
-			fmt.Println("found err: ", _err)
 			return _err
 		}
 	}
@@ -81,6 +81,7 @@ var errorsMap = map[string][]error{
 	"EOFException.INVALID_VERSION":             []error{vm.ErrInvalidVersion, vm.ErrIncompleteEOF},
 	"EOFException.MISSING_TERMINATOR":          []error{vm.ErrMissingTerminator},
 	"EOFException.MISSING_TYPE_HEADER":         []error{vm.ErrIncompleteEOF, vm.ErrMissingTypeHeader},
+	"EOFException.MISSING_STOP_OPCODE":         []error{vm.ErrInvalidCodeTermination},
 }
 
 func mapError(exception string, cmp error) bool {
@@ -98,66 +99,45 @@ func mapError(exception string, cmp error) bool {
 	return false
 }
 
+func compareExceptionToErr(exc string, err error) error {
+	_err := getError(err)
+	if _err == nil {
+		fmt.Println("Add err to the error array", err)
+		panic("add err to getError func")
+	}
+	if exc != "" {
+		if mapError(exc, _err) {
+			return nil
+		}
+		return nil
+	}
+	fmt.Println("------------------ Error not found: ", err)
+	return err
+}
+
 func (e *EOFTest) Run(t *testing.T) error {
 	hexCode := e.json.Vector.Index.Code
-	result := e.json.Vector.Index.Result.Prague.Result
+	// result := e.json.Vector.Index.Result.Prague.Result // TODO(racytech): revisit this part, think about result=true -> what to expect from test?
 	exception := e.json.Vector.Index.Result.Prague.Exception
-	fmt.Println("result: ", result)
-	fmt.Println("exception: ", exception)
 	code, err := hexutil.Decode(hexCode)
 	if err != nil {
 		return fmt.Errorf("error decoding hex string: %v", hexCode)
 	}
-	fmt.Println("code size: ", len(code))
 	eofJt := vm.NewPragueEOFInstructionSet()
 	var c vm.Container
 	if err := c.UnmarshalBinary(code); err != nil {
-		_err := getError(err)
-		fmt.Println(_err)
-		if _err == nil {
-			fmt.Println("Add err to the error array", err)
-			panic("add err to getError func")
-		}
-		// mappedErr := mapError(exception, _err)
-		if exception != "" {
-			if mapError(exception, _err) {
-				return nil
-			}
+		if err = compareExceptionToErr(exception, err); err != nil {
+			return fmt.Errorf("%w: %v", vm.ErrInvalidEOFInitcode, err)
+		} else {
 			return nil
 		}
-		return fmt.Errorf("%w: %v", vm.ErrInvalidEOFInitcode, err)
 	}
 	if err := c.ValidateCode(&eofJt); err != nil {
-		return fmt.Errorf("%w: %v", vm.ErrInvalidEOFInitcode, err)
+		if err = compareExceptionToErr(exception, err); err != nil {
+			return fmt.Errorf("%w: %v", vm.ErrInvalidEOFInitcode, err)
+		} else {
+			return nil
+		}
 	}
 	return nil
 }
-
-// type vectors struct {
-// 	Num0 num0 `json:"vectors"`
-// }
-
-// type num0 struct {
-
-// }
-// 			Code    string `json:"code"`
-// 			Results struct {
-// 				Prague struct {
-// 					Exception string `json:"exception"`
-// 					Result    bool   `json:"result"`
-// 				} `json:"Prague"`
-// 			} `json:"results"`
-// 		} `json:"0"`
-// 	} `json:"vectors"`
-
-// type	Vectors struct {
-// 	Num0 struct {
-// 			Code    string `json:"code"`
-// 			Results struct {
-// 				Prague struct {
-// 					Exception string `json:"exception"`
-// 					Result    bool   `json:"result"`
-// 				} `json:"Prague"`
-// 			} `json:"results"`
-// 		} `json:"0"`
-// 	} `json:"vectors"`

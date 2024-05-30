@@ -224,25 +224,41 @@ func (c *Container) UnmarshalBinary(b []byte) error {
 	// Parse types section.
 	idx := offsetTerminator + 1
 	var types []*FunctionMetadata
-	for i := 0; i < typesSize/4; i++ {
-		sig := &FunctionMetadata{
+
+	// first, parse the first section and check if it meets the boundries
+	i := 0
+	typ := &FunctionMetadata{
+		Input:          b[idx+i*4],
+		Output:         b[idx+i*4+1],
+		MaxStackHeight: binary.BigEndian.Uint16(b[idx+i*4+2:]),
+	}
+	if typ.Input != 0 || typ.Output != nonReturningFunction {
+		return fmt.Errorf("%w: have %d, %d", ErrInvalidFirstSectionType, typ.Input, typ.Output)
+	}
+	if typ.MaxStackHeight > maxStackHeight {
+		return fmt.Errorf("%w for section %d: have %d", ErrTooLargeMaxStackHeight, i, typ.MaxStackHeight)
+	}
+	types = append(types, typ)
+
+	i = 1 // go to the next section
+	for ; i < typesSize/4; i++ {
+		typ := &FunctionMetadata{
 			Input:          b[idx+i*4],
 			Output:         b[idx+i*4+1],
 			MaxStackHeight: binary.BigEndian.Uint16(b[idx+i*4+2:]),
 		}
-		if sig.Input > maxInputItems {
-			return fmt.Errorf("%w for section %d: have %d", ErrTooManyInputs, i, sig.Input)
+
+		if typ.Input > maxInputItems {
+			return fmt.Errorf("%w for section %d: have %d", ErrTooManyInputs, i, typ.Input)
 		}
-		if sig.Output > maxOutputItems {
-			return fmt.Errorf("%w for section %d: have %d", ErrTooManyOutputs, i, sig.Output)
+		if typ.Output > maxOutputItems {
+			return fmt.Errorf("%w for section %d: have %d", ErrTooManyOutputs, i, typ.Output)
 		}
-		if sig.MaxStackHeight > maxStackHeight {
-			return fmt.Errorf("%w for section %d: have %d", ErrTooLargeMaxStackHeight, i, sig.MaxStackHeight)
+		if typ.MaxStackHeight > maxStackHeight {
+			return fmt.Errorf("%w for section %d: have %d", ErrTooLargeMaxStackHeight, i, typ.MaxStackHeight)
 		}
-		types = append(types, sig)
-	}
-	if types[0].Input != 0 || types[0].Output != nonReturningFunction {
-		return fmt.Errorf("%w: have %d, %d", ErrInvalidFirstSectionType, types[0].Input, types[0].Output)
+
+		types = append(types, typ)
 	}
 	c.Types = types
 
