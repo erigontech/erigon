@@ -8,6 +8,24 @@
 
 ## Support
 
+This command connects erigon to diagnostics tools by establishing websocket connection. 
+
+In order to conect diagnostics run 
+```
+./build/bin/erigon support --debug.addrs <value> --diagnostics.addr <value> --diagnostics.sessions <PINs>
+```
+
+|   |   |
+|---|---|
+|diagnostics.addr|Address of the diagnostics system provided by the support team, include unique session PIN. [Instructions how to get proper adderess](https://github.com/ledgerwatch/diagnostics?tab=readme-ov-file#step-4)|
+|debug.addrs|Comma separated list of URLs to the debug endpoints thats are being diagnosed. This endpoints must mutch values of `diagnostics.endpoint.addr:diagnostics.endpoint.port` by default its `localhost:6060`|
+|diagnostics.sessions|Comma separated list of session PINs to connect to [Instructions how to obtain PIN](https://github.com/ledgerwatch/diagnostics?tab=readme-ov-file#step-2)|
+|||
+
+
+Available configuration:
+
+
 ## Snapshots
 
 This sub command can be used for manipulating snapshot files
