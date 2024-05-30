@@ -105,7 +105,8 @@ func (r *Requests) DecodeRLP(s *rlp.Stream) (err error) {
 		}
 		return fmt.Errorf("read requests: %v", err)
 	}
-	for err == nil {
+	r = new(Requests)
+	for err == nil{
 		var req Request
 		kind, _, err := s.Kind()
 		switch {
@@ -130,6 +131,9 @@ func (r *Requests) DecodeRLP(s *rlp.Stream) (err error) {
 }
 
 func (r *Requests) EncodeRLP(w io.Writer) {
+	if r == nil {
+		return
+	}
 	var c int
 	for _, req := range *r {
 		e := req.EncodingSize()
@@ -149,6 +153,15 @@ func (r *Requests) EncodeRLP(w io.Writer) {
 
 		}
 	}
+}
+
+func (r * Requests) EncodingSize() int{
+	var c int
+	for _, req := range *r {
+		e := req.EncodingSize()
+		c += e + 1 + common.BitLenToByteLen(bits.Len(uint(e)))
+	}
+	return c
 }
 
 func (r Requests) Deposits() Deposits {

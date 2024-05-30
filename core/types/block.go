@@ -730,7 +730,8 @@ func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen,
 
 	// size of requests
 	if rb.Requests != nil {
-		requestsLen += encodingSizeGeneric(rb.Requests)
+		requestsLen = rb.Requests.EncodingSize()
+		// requestsLen += encodingSizeGeneric(rb.Requests)
 		payloadSize += rlp2.ListPrefixLen(requestsLen) + requestsLen
 	}
 
@@ -738,7 +739,7 @@ func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen,
 }
 
 func (rb RawBody) EncodeRLP(w io.Writer) error {
-	payloadSize, txsLen, unclesLen, withdrawalsLen, requestsLen := rb.payloadSize()
+	payloadSize, txsLen, unclesLen, withdrawalsLen, _ /* requestsLen */ := rb.payloadSize()
 	var b [33]byte
 	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
@@ -765,9 +766,11 @@ func (rb RawBody) EncodeRLP(w io.Writer) error {
 	}
 	// encode Requests
 	if rb.Requests != nil {
-		if err := encodeRLPGeneric(rb.Requests, requestsLen, w, b[:]); err != nil {
-			return err
-		}
+		rb.Requests.EncodeRLP(w)
+
+		// if err := encodeRLPGeneric(rb.Requests, requestsLen, w, b[:]); err != nil {
+		// 	return err
+		// }
 	}
 	return nil
 }
@@ -805,7 +808,7 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode Requests
-	rb.Requests = []Request{}
+	// rb.Requests = []Request{}
 	if err := decodeRequests(&rb.Requests, s); err != nil {
 		return err
 	}
@@ -832,7 +835,11 @@ func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen,
 
 	// size of Requests
 	if bfs.Requests != nil {
-		requestsLen += encodingSizeGeneric(bfs.Requests)
+		// requestsLen += encodingSizeGeneric(bfs.Requests)
+		// payloadSize += rlp2.ListPrefixLen(requestsLen) + requestsLen
+
+		requestsLen = bfs.Requests.EncodingSize()
+		// requestsLen += encodingSizeGeneric(rb.Requests)
 		payloadSize += rlp2.ListPrefixLen(requestsLen) + requestsLen
 	}
 
@@ -840,7 +847,7 @@ func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen,
 }
 
 func (bfs BodyForStorage) EncodeRLP(w io.Writer) error {
-	payloadSize, unclesLen, withdrawalsLen, requestsLen := bfs.payloadSize()
+	payloadSize, unclesLen, withdrawalsLen, _ /* requestsLen */ := bfs.payloadSize()
 	var b [33]byte
 
 	// prefix
@@ -871,9 +878,11 @@ func (bfs BodyForStorage) EncodeRLP(w io.Writer) error {
 	}
 	// encode Requests
 	if bfs.Requests != nil {
-		if err := encodeRLPGeneric(bfs.Requests, requestsLen, w, b[:]); err != nil {
-			return err
-		}
+		bfs.Requests.EncodeRLP(w)
+
+		// if err := encodeRLPGeneric(bfs.Requests, requestsLen, w, b[:]); err != nil {
+		// 	return err
+		// }
 	}
 	return nil
 }
@@ -902,7 +911,7 @@ func (bfs *BodyForStorage) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode Requests
-	bfs.Requests = Requests{}
+	// bfs.Requests = Requests{}
 	if err := decodeRequests(&bfs.Requests, s); err != nil {
 		return err
 	}
@@ -931,8 +940,9 @@ func (bb Body) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen
 
 	// size of Requests
 	if bb.Requests != nil {
-		requestsLen += encodingSizeGeneric(bb.Requests)
+		requestsLen = bb.Requests.EncodingSize()
 		payloadSize += rlp2.ListPrefixLen(requestsLen) + requestsLen
+		
 	}
 
 	return payloadSize, txsLen, unclesLen, withdrawalsLen, requestsLen
@@ -988,7 +998,7 @@ func (bb *Body) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode Requests
-	bb.Requests = []Request{}
+	// bb.Requests = []Request{}
 	if err := decodeRequests(&bb.Requests, s); err != nil {
 		return err
 	}
@@ -1168,7 +1178,6 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode Requests
-	bb.requests = Requests{}
 	if err := decodeRequests(&bb.requests, s); err != nil {
 		return err
 	}
@@ -1197,8 +1206,10 @@ func (bb Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLe
 
 	// size of Requests
 	if bb.requests != nil {
-		requestsLen += encodingSizeGeneric(bb.requests)
+		requestsLen = bb.requests.EncodingSize()
 		payloadSize += rlp2.ListPrefixLen(requestsLen) + requestsLen
+
+		
 	}
 
 	return payloadSize, txsLen, unclesLen, withdrawalsLen, requestsLen
@@ -1211,7 +1222,7 @@ func (bb Block) EncodingSize() int {
 
 // EncodeRLP serializes b into the Ethereum RLP block format.
 func (bb Block) EncodeRLP(w io.Writer) error {
-	payloadSize, txsLen, unclesLen, withdrawalsLen, requestsLen := bb.payloadSize()
+	payloadSize, txsLen, unclesLen, withdrawalsLen, _ /* requestsLen */ := bb.payloadSize()
 	var b [33]byte
 	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
@@ -1237,9 +1248,11 @@ func (bb Block) EncodeRLP(w io.Writer) error {
 	}
 	// encode Requests
 	if bb.requests != nil {
-		if err := encodeRLPGeneric(bb.requests, requestsLen, w, b[:]); err != nil {
-			return err
-		}
+		bb.requests.EncodeRLP(w)
+
+		// if err := encodeRLPGeneric(bb.requests, requestsLen, w, b[:]); err != nil {
+		// 	return err
+		// }
 	}
 	return nil
 }
