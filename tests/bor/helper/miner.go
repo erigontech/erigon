@@ -83,6 +83,9 @@ func InitMiner(ctx context.Context, genesis *types.Genesis, privKey *ecdsa.Priva
 
 	logger := log.New()
 	inat, err := nat.Parse("stun")
+	if err != nil {
+		return nil, nil, err
+	}
 
 	nodeCfg := &nodecfg.Config{
 		Name:    "erigon",
