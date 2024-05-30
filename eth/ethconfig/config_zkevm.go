@@ -23,6 +23,7 @@ type Zk struct {
 	L1RollupId                             uint64
 	L1BlockRange                           uint64
 	L1QueryDelay                           uint64
+	L1HighestBlockType                     string
 	L1MaticContractAddress                 common.Address
 	L1FirstBlock                           uint64
 	RpcRateLimits                          int

@@ -87,6 +87,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		L1RollupId:                             ctx.Uint64(utils.L1RollupIdFlag.Name),
 		L1BlockRange:                           ctx.Uint64(utils.L1BlockRangeFlag.Name),
 		L1QueryDelay:                           ctx.Uint64(utils.L1QueryDelayFlag.Name),
+		L1HighestBlockType:                     ctx.String(utils.L1HighestBlockTypeFlag.Name),
 		L1MaticContractAddress:                 libcommon.HexToAddress(ctx.String(utils.L1MaticContractAddressFlag.Name)),
 		L1FirstBlock:                           ctx.Uint64(utils.L1FirstBlockFlag.Name),
 		RpcRateLimits:                          ctx.Int(utils.RpcRateLimitsFlag.Name),

@@ -180,6 +180,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.L1RollupIdFlag,
 	&utils.L1BlockRangeFlag,
 	&utils.L1QueryDelayFlag,
+	&utils.L1HighestBlockTypeFlag,
 	&utils.L1MaticContractAddressFlag,
 	&utils.L1FirstBlockFlag,
 	&utils.RpcRateLimitsFlag,
