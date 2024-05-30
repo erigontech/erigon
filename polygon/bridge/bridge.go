@@ -42,7 +42,7 @@ type Bridge struct {
 func NewBridge(ctx context.Context, dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, fetchSyncEvents fetchSyncEventsType, stateReceiverABI abi.ABI) (*Bridge, error) {
 	// create new db
 	db := polygoncommon.NewDatabase(dataDir, logger)
-	err := db.OpenOnce(ctx, kv.PolygonBridgeDB)
+	err := db.OpenOnce(ctx, kv.PolygonBridgeDB, databaseTablesCfg)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +94,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 		} else {
 			b.ready = true
 			if err := libcommon.Sleep(ctx, 30*time.Second); err != nil {
-				return ctx.Err()
+				return err
 			}
 		}
 

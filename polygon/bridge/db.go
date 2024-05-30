@@ -12,6 +12,10 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
 )
 
+var databaseTablesCfg = kv.TableCfg{
+	kv.PolygonBridgeEvents: {},
+}
+
 // GetLatestEventID the latest state sync event ID in given DB, 0 if DB is empty
 // NOTE: Polygon sync events start at index 1
 func GetLatestEventID(ctx context.Context, db *polygoncommon.Database) (uint64, error) {

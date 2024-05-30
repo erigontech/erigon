@@ -11,6 +11,12 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
 )
 
+var databaseTablesCfg = kv.TableCfg{
+	kv.BorCheckpoints: {},
+	kv.BorMilestones:  {},
+	kv.BorSpans:       {},
+}
+
 type entityStore[TEntity Entity] interface {
 	Prepare(ctx context.Context) error
 	Close()
@@ -58,7 +64,7 @@ func newEntityStore[TEntity Entity](
 func (s *entityStoreImpl[TEntity]) Prepare(ctx context.Context) error {
 	var err error
 	s.prepareOnce.Do(func() {
-		err = s.db.OpenOnce(ctx, s.label)
+		err = s.db.OpenOnce(ctx, s.label, databaseTablesCfg)
 		if err != nil {
 			return
 		}

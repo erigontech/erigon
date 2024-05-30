@@ -28,14 +28,7 @@ func NewDatabase(
 	return &Database{dataDir: dataDir, logger: logger}
 }
 
-var databaseTablesCfg = kv.TableCfg{
-	kv.BorCheckpoints:      {},
-	kv.BorMilestones:       {},
-	kv.BorSpans:            {},
-	kv.PolygonBridgeEvents: {},
-}
-
-func (db *Database) open(ctx context.Context, label kv.Label) error {
+func (db *Database) open(ctx context.Context, label kv.Label, tableCfg kv.TableCfg) error {
 	dbPath := filepath.Join(db.dataDir, label.String())
 	db.logger.Info("Opening Database", "label", label.String(), "path", dbPath)
 
@@ -43,17 +36,17 @@ func (db *Database) open(ctx context.Context, label kv.Label) error {
 	db.db, err = mdbx.NewMDBX(db.logger).
 		Label(label).
 		Path(dbPath).
-		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return databaseTablesCfg }).
+		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return tableCfg }).
 		MapSize(16 * datasize.GB).
 		GrowthStep(16 * datasize.MB).
 		Open(ctx)
 	return err
 }
 
-func (db *Database) OpenOnce(ctx context.Context, label kv.Label) error {
+func (db *Database) OpenOnce(ctx context.Context, label kv.Label, tableCfg kv.TableCfg) error {
 	var err error
 	db.openOnce.Do(func() {
-		err = db.open(ctx, label)
+		err = db.open(ctx, label, tableCfg)
 	})
 	return err
 }
