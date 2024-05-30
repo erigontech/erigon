@@ -666,51 +666,17 @@ func (api *ZkEvmAPIImpl) GetLatestGlobalExitRoot(ctx context.Context) (common.Ha
 }
 
 func getLastBlockInBatchNumber(tx kv.Tx, batchNumber uint64) (uint64, error) {
-	c, err := tx.Cursor(hermez_db.BLOCKBATCHES)
+	reader := hermez_db.NewHermezDbReader(tx)
+	blocks, err := reader.GetL2BlockNosByBatch(batchNumber)
 	if err != nil {
 		return 0, err
 	}
-	defer c.Close()
-	var k, v []byte
-	for k, v, err = c.Last(); k != nil; k, v, err = c.Prev() {
-		if err != nil {
-			return 0, err
-		}
-		val := hermez_db.BytesToUint64(v)
-		if val == batchNumber {
-			return hermez_db.BytesToUint64(k), nil
-		}
-	}
-
-	return 0, nil
+	return blocks[len(blocks)-1], nil
 }
 
 func getAllBlocksInBatchNumber(tx kv.Tx, batchNumber uint64) ([]uint64, error) {
-	c, err := tx.Cursor(hermez_db.BLOCKBATCHES)
-	if err != nil {
-		return nil, err
-	}
-	defer c.Close()
-	result := make([]uint64, 0)
-	var k, v []byte
-	inScope := false
-	for k, v, err = c.Last(); k != nil; k, v, err = c.Prev() {
-		if err != nil {
-			return nil, err
-		}
-		val := hermez_db.BytesToUint64(v)
-		if val == batchNumber {
-			inScope = true
-			result = append(result, hermez_db.BytesToUint64(k))
-		} else {
-			if inScope {
-				// reached the end of block of batches
-				break
-			}
-		}
-	}
-
-	return result, nil
+	reader := hermez_db.NewHermezDbReader(tx)
+	return reader.GetL2BlockNosByBatch(batchNumber)
 }
 
 func getLatestBatchNumber(tx kv.Tx) (uint64, error) {
@@ -733,34 +699,8 @@ func getLatestBatchNumber(tx kv.Tx) (uint64, error) {
 }
 
 func getBatchNoByL2Block(tx kv.Tx, l2BlockNo uint64) (uint64, error) {
-	c, err := tx.Cursor(hermez_db.BLOCKBATCHES)
-	if err != nil {
-		return 0, err
-	}
-	defer c.Close()
-
-	k, v, err := c.Seek(hermez_db.Uint64ToBytes(l2BlockNo))
-	if err != nil {
-		return 0, err
-	}
-
-	if k == nil {
-		return 0, nil
-	}
-
-	if hermez_db.BytesToUint64(k) != l2BlockNo {
-		return 0, nil
-	}
-
-	return hermez_db.BytesToUint64(v), nil
-}
-
-func getGlobalExitRoot(tx kv.Tx, l2Block uint64) (common.Hash, error) {
-	d, err := tx.GetOne(hermez_db.BLOCK_GLOBAL_EXIT_ROOTS, hermez_db.Uint64ToBytes(l2Block))
-	if err != nil {
-		return common.Hash{}, err
-	}
-	return common.BytesToHash(d), nil
+	reader := hermez_db.NewHermezDbReader(tx)
+	return reader.GetBatchNoByL2Block(l2BlockNo)
 }
 
 func convertBlockToRpcBlock(
