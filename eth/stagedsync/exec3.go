@@ -312,6 +312,9 @@ func ExecV3(ctx context.Context,
 	var accumulator *shards.Accumulator
 	if shouldReportToTxPool {
 		accumulator = cfg.accumulator
+		if accumulator == nil {
+			accumulator = shards.NewAccumulator()
+		}
 	}
 	rs := state.NewStateV3(doms, logger)
 
@@ -674,7 +677,7 @@ Loop:
 			if err != nil {
 				return err
 			}
-			cfg.accumulator.StartChange(b.NumberU64(), b.Hash(), txs, false)
+			accumulator.StartChange(b.NumberU64(), b.Hash(), txs, false)
 		}
 
 		rules := chainConfig.Rules(blockNum, b.Time())
