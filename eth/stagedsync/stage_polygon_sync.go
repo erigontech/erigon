@@ -102,7 +102,13 @@ type PolygonSyncStageCfg struct {
 	service *polygonSyncStageService
 }
 
-func SpawnPolygonSyncStage(ctx context.Context, tx kv.RwTx, stageState *StageState, cfg PolygonSyncStageCfg) error {
+func SpawnPolygonSyncStage(
+	ctx context.Context,
+	tx kv.RwTx,
+	stageState *StageState,
+	unwinder Unwinder,
+	cfg PolygonSyncStageCfg,
+) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -113,7 +119,7 @@ func SpawnPolygonSyncStage(ctx context.Context, tx kv.RwTx, stageState *StageSta
 		defer tx.Rollback()
 	}
 
-	if err := cfg.service.Run(ctx, tx, stageState); err != nil {
+	if err := cfg.service.Run(ctx, tx, stageState, unwinder); err != nil {
 		return err
 	}
 
@@ -129,10 +135,12 @@ func SpawnPolygonSyncStage(ctx context.Context, tx kv.RwTx, stageState *StageSta
 }
 
 func UnwindPolygonSyncStage() error {
+	// TODO - headers, bodies (including txnums index), checkpoints, milestones, spans, state sync events
 	return nil
 }
 
 func PrunePolygonSyncStage() error {
+	// TODO - headers, bodies (including txnums index), checkpoints, milestones, spans, state sync events
 	return nil
 }
 
@@ -158,19 +166,32 @@ type polygonSyncStageService struct {
 	// internal
 	appendLogPrefix          func(string) string
 	stageState               *StageState
+	unwinder                 Unwinder
+	cachedForkChoice         *types.Header
 	lastStateSyncEventId     uint64
 	lastStateSyncEventIdInit bool
 	bgComponentsRun          bool
 	bgComponentsErr          chan error
 }
 
-func (s *polygonSyncStageService) Run(ctx context.Context, tx kv.RwTx, stageState *StageState) error {
+func (s *polygonSyncStageService) Run(ctx context.Context, tx kv.RwTx, stageState *StageState, unwinder Unwinder) error {
 	s.appendLogPrefix = newAppendLogPrefix(stageState.LogPrefix())
 	s.stageState = stageState
+	s.unwinder = unwinder
 	s.logger.Info(s.appendLogPrefix("begin..."), "progress", stageState.BlockNumber)
 
 	if !s.bgComponentsRun {
 		s.runBgComponents(ctx)
+	}
+
+	if s.cachedForkChoice != nil {
+		err := s.handleUpdateForkChoice(tx, s.cachedForkChoice)
+		if err != nil {
+			return err
+		}
+
+		s.cachedForkChoice = nil
+		return nil
 	}
 
 	for {
@@ -295,8 +316,32 @@ func (s *polygonSyncStageService) handleUpdateForkChoice(tx kv.RwTx, tip *types.
 	logTicker := time.NewTicker(logInterval)
 	defer logTicker.Stop()
 
-	if err := fixCanonicalChain(logPrefix, logTicker, tipBlockNum, tipHash, tx, s.blockReader, s.logger); err != nil {
+	var emptyHash common.Hash
+	currentCanonical := rawdb.ReadHeadBlockHash(tx)
+	if currentCanonical == emptyHash {
+		return errors.New("unexpected empty canonical hash")
+	}
+
+	if tip.Hash() == currentCanonical {
+		return nil
+	}
+
+	newNodes, badNodes, err := fixCanonicalChain(logPrefix, logTicker, tipBlockNum, tipHash, tx, s.blockReader, s.logger)
+	if err != nil {
 		return err
+	}
+
+	if len(badNodes) > 0 {
+		badNode := badNodes[len(badNodes)-1]
+		s.cachedForkChoice = tip
+		return s.unwinder.UnwindTo(badNode.number, ForkReset(badNode.hash), tx)
+	}
+
+	if len(newNodes) > 0 {
+		err := rawdb.AppendCanonicalTxNums(tx, newNodes[0].number)
+		if err != nil {
+			return err
+		}
 	}
 
 	if err := rawdb.WriteHeadHeaderHash(tx, tipHash); err != nil {
