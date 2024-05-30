@@ -2,7 +2,7 @@ name: QA - Snapshot Download
 
 on:
   schedule:
-    - cron: '0 5 * * *'  # Run every day at 05:00 AM UTC
+    - cron: '0 5 * * 1-6'  # Run every day at 05:00 AM UTC except Sunday
   workflow_dispatch:     # Run manually
 
 jobs:
