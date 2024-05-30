@@ -57,8 +57,21 @@ func StageLoop(
 	hook *Hook,
 ) {
 	defer close(waitForDone)
-	initialCycle, firstCycle := true, true
 
+	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync); err != nil {
+		if err != nil {
+			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
+				return
+			}
+
+			logger.Error("Staged Sync", "err", err)
+			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
+				logger.Error("Failed to recover header sentriesClient", "err", recoveryErr)
+			}
+		}
+	}
+
+	initialCycle := true
 	for {
 		start := time.Now()
 
@@ -70,7 +83,7 @@ func StageLoop(
 		}
 
 		// Estimate the current top height seen from the peer
-		err := StageLoopIteration(ctx, db, wrap.TxContainer{}, sync, initialCycle, firstCycle, false, logger, blockReader, hook)
+		err := StageLoopIteration(ctx, db, wrap.TxContainer{}, sync, initialCycle, false, logger, blockReader, hook)
 
 		if err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
@@ -86,7 +99,6 @@ func StageLoop(
 		}
 
 		initialCycle = false
-		firstCycle = false
 		hd.AfterInitialCycle()
 
 		if loopMinTime != 0 {
@@ -145,18 +157,12 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.F
 	return nil
 }
 
-func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, sync *stagedsync.Sync, initialCycle, firstCycle bool, skipFrozenBlocks bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (err error) {
+func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, sync *stagedsync.Sync, initialCycle, firstCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things
-
-	if !skipFrozenBlocks {
-		if err := ProcessFrozenBlocks(ctx, db, blockReader, sync); err != nil {
-			return err
-		}
-	}
 
 	externalTx := txc.Tx != nil
 	finishProgressBefore, borProgressBefore, headersProgressBefore, err := stagesHeadersAndFinish(db, txc.Tx)
