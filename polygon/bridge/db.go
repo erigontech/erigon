@@ -12,13 +12,14 @@ import (
 
 // GetLatestEventID the latest state sync event ID in given DB, 0 if DB is empty
 // NOTE: Polygon sync events start at index 1
-func GetLatestEventID(db kv.RoDB) (uint64, error) {
+func GetLatestEventID(ctx context.Context, db kv.RoDB) (uint64, error) {
 	var eventID uint64
-	err := db.View(context.Background(), func(tx kv.Tx) error {
-		cursor, err := tx.Cursor(kv.PolygonBridge)
+	err := db.View(ctx, func(tx kv.Tx) error {
+		cursor, err := tx.Cursor(kv.PolygonBridgeEvents)
 		if err != nil {
 			return err
 		}
+		defer cursor.Close()
 
 		k, _, err := cursor.Last()
 		if err != nil {
@@ -38,14 +39,15 @@ func GetLatestEventID(db kv.RoDB) (uint64, error) {
 }
 
 // GetLastSpanEventID gets the last event id where event.ID >= lastID and event.Time < time
-func GetLastSpanEventID(db kv.RoDB, lastID uint64, timeLimit time.Time) (uint64, error) {
+func GetLastSpanEventID(ctx context.Context, db kv.RoDB, lastID uint64, timeLimit time.Time) (uint64, error) {
 	var eventID uint64
 
-	err := db.View(context.Background(), func(tx kv.Tx) error {
-		cursor, err := tx.Cursor(kv.PolygonBridge)
+	err := db.View(ctx, func(tx kv.Tx) error {
+		cursor, err := tx.Cursor(kv.PolygonBridgeEvents)
 		if err != nil {
 			return err
 		}
+		defer cursor.Close()
 
 		kDBLast, _, err := cursor.Last()
 		if err != nil {
@@ -89,8 +91,8 @@ func GetLastSpanEventID(db kv.RoDB, lastID uint64, timeLimit time.Time) (uint64,
 	return eventID, err
 }
 
-func AddEvents(db kv.RwDB, events []*heimdall.EventRecordWithTime) error {
-	return db.Update(context.Background(), func(tx kv.RwTx) error {
+func AddEvents(ctx context.Context, db kv.RwDB, events []*heimdall.EventRecordWithTime) error {
+	return db.Update(ctx, func(tx kv.RwTx) error {
 		for _, event := range events {
 			v, err := event.EncodeRLP()
 			if err != nil {
@@ -99,7 +101,7 @@ func AddEvents(db kv.RwDB, events []*heimdall.EventRecordWithTime) error {
 
 			k := make([]byte, 8)
 			binary.BigEndian.PutUint64(k, event.ID)
-			err = tx.Put(kv.PolygonBridge, k, v)
+			err = tx.Put(kv.PolygonBridgeEvents, k, v)
 			if err != nil {
 				return err
 			}
@@ -110,7 +112,7 @@ func AddEvents(db kv.RwDB, events []*heimdall.EventRecordWithTime) error {
 }
 
 // GetEvents gets raw events, start and end inclusive
-func GetEvents(db kv.RwDB, id IDRange) ([][]byte, error) {
+func GetEvents(ctx context.Context, db kv.RwDB, id IDRange) ([][]byte, error) {
 	var events [][]byte
 
 	kStart := make([]byte, 8)
@@ -119,11 +121,12 @@ func GetEvents(db kv.RwDB, id IDRange) ([][]byte, error) {
 	kEnd := make([]byte, 8)
 	binary.BigEndian.PutUint64(kEnd, id.end+1)
 
-	err := db.View(context.Background(), func(tx kv.Tx) error {
-		cursor, err := tx.Cursor(kv.PolygonBridge)
+	err := db.View(ctx, func(tx kv.Tx) error {
+		cursor, err := tx.Cursor(kv.PolygonBridgeEvents)
 		if err != nil {
 			return err
 		}
+		defer cursor.Close()
 
 		var k, v []byte
 		_, v, err = cursor.Seek(kStart)

@@ -26,7 +26,7 @@ type IDRange struct {
 }
 
 type Bridge struct {
-	DB                       kv.RwDB
+	db                       kv.RwDB
 	log                      log.Logger
 	borConfig                *borcfg.BorConfig
 	ready                    bool
@@ -46,7 +46,7 @@ func NewBridge(ctx context.Context, config *nodecfg.Config, name string, readonl
 	}
 
 	return &Bridge{
-		DB:                       db,
+		db:                       db,
 		log:                      logger,
 		borConfig:                borConfig,
 		fetchSyncEvents:          fetchSyncEvents,
@@ -62,7 +62,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 	b.log.Debug(bridgeLogPrefix("Bridge is running"))
 
 	// get last known sync ID
-	lastEventID, err := GetLatestEventID(b.DB)
+	lastEventID, err := GetLatestEventID(ctx, b.db)
 	if err != nil {
 		return err
 	}
@@ -83,14 +83,16 @@ func (b *Bridge) Run(ctx context.Context) error {
 
 		if len(events) != 0 {
 			b.ready = false
-			if err := AddEvents(b.DB, events); err != nil {
+			if err := AddEvents(ctx, b.db, events); err != nil {
 				return err
 			}
 
 			lastEventID = events[len(events)-1].ID
 		} else {
 			b.ready = true
-			time.Sleep(30 * time.Second)
+			if err := libcommon.Sleep(ctx, 30*time.Second); err != nil {
+				return ctx.Err()
+			}
 		}
 
 		b.log.Debug(bridgeLogPrefix(fmt.Sprintf("got %v new events, last event ID: %v, ready: %v", len(events), lastEventID, b.ready)))
@@ -98,7 +100,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 }
 
 func (b *Bridge) Close() {
-	b.DB.Close()
+	b.db.Close()
 }
 
 // EngineService interface implementations
@@ -112,7 +114,7 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		}
 
 		t := time.Unix(int64(block.Time()), 0)
-		lastDBID, err := GetLastSpanEventID(b.DB, b.lastProcessedEventID, t)
+		lastDBID, err := GetLastSpanEventID(ctx, b.db, b.lastProcessedEventID, t)
 		if err != nil {
 			return err
 		}
@@ -165,7 +167,7 @@ func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) []*types.Messag
 	eventsRaw := make([]*types.Message, eventIDs.end-eventIDs.start+1)
 
 	// get events from DB
-	events, err := GetEvents(b.DB, eventIDs)
+	events, err := GetEvents(ctx, b.db, eventIDs)
 	if err != nil {
 		return nil
 	}

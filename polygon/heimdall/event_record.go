@@ -60,7 +60,7 @@ func DecodeEventRecord(v rlp.RawValue) (*EventRecordWithTime, error) {
 	return &e, nil
 }
 
-type eventRecordWithIntTime struct {
+type eventRecordWithIntTime struct { // TODO: remove, use GenesisContractsClient.Pack and UnpackIntoInterface
 	EventRecord
 	Time *big.Int `json:"record_time" yaml:"record_time"` // use big.Int as time.Time is not RLP encodable
 }
