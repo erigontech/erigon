@@ -290,6 +290,18 @@ func (s *polygonSyncStageService) handleUpdateForkChoice(ctx context.Context, tx
 		return err
 	}
 
+	logPrefix := s.stageState.LogPrefix()
+	logTicker := time.NewTicker(logInterval)
+	defer logTicker.Stop()
+
+	if err := fixCanonicalChain(logPrefix, logTicker, tipBlockNum, tipHash, tx, s.blockReader, s.logger); err != nil {
+		return err
+	}
+
+	if err := rawdb.WriteHeadHeaderHash(tx, tipHash); err != nil {
+		return err
+	}
+
 	// update stage progress
 	if err := s.stageState.Update(tx, tipBlockNum); err != nil {
 		return err
@@ -304,10 +316,6 @@ func (s *polygonSyncStageService) handleUpdateForkChoice(ctx context.Context, tx
 	}
 
 	if err := stages.SaveStageProgress(tx, stages.Bodies, tipBlockNum); err != nil {
-		return err
-	}
-
-	if err := rawdb.WriteHeadHeaderHash(tx, tipHash); err != nil {
 		return err
 	}
 
