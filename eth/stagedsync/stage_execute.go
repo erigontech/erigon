@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon/core/rawdb/rawdbhelpers"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
@@ -855,6 +856,8 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		}
 		defer tx.Rollback()
 	}
+
+	execStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx) * 100)
 
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()

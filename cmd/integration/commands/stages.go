@@ -947,7 +947,7 @@ func stageBorHeimdall(db kv.RwDB, ctx context.Context, unwindTypes []string, log
 				return fmt.Errorf("cannot unwind to a point beyond stage: %d", stageState.BlockNumber)
 			}
 
-			unwindState := sync.NewUnwindState(stages.BorHeimdall, stageState.BlockNumber-unwind, stageState.BlockNumber, true)
+			unwindState := sync.NewUnwindState(stages.BorHeimdall, stageState.BlockNumber-unwind, stageState.BlockNumber, true, false)
 			cfg := stagedsync.StageBorHeimdallCfg(db, nil, miningState, *chainConfig, nil, nil, nil, nil, nil, nil, nil, false, unwindTypes)
 			if err := stagedsync.BorHeimdallUnwind(unwindState, ctx, stageState, tx, cfg); err != nil {
 				return err
@@ -1011,7 +1011,7 @@ func stageBodies(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 				return fmt.Errorf("cannot unwind past 0")
 			}
 
-			u := sync.NewUnwindState(stages.Bodies, s.BlockNumber-unwind, s.BlockNumber, true)
+			u := sync.NewUnwindState(stages.Bodies, s.BlockNumber-unwind, s.BlockNumber, true, false)
 			cfg := stagedsync.StageBodiesCfg(db, nil, nil, nil, nil, 0, *chainConfig, br, bw, nil)
 			if err := stagedsync.UnwindBodiesStage(u, tx, cfg, ctx); err != nil {
 				return err
@@ -1104,7 +1104,7 @@ func stageSenders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 	cfg := stagedsync.StageSendersCfg(db, chainConfig, sync.Cfg(), false, tmpdir, pm, br, nil, nil)
 	if unwind > 0 {
-		u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber, true)
+		u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber, true, false)
 		if err = stagedsync.UnwindSendersStage(u, tx, cfg, ctx); err != nil {
 			return err
 		}
@@ -1205,7 +1205,7 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	txc := wrap.TxContainer{Tx: tx}
 
 	if unwind > 0 {
-		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber, true)
+		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber, true, false)
 		err := stagedsync.UnwindExecutionStage(u, s, txc, ctx, cfg, logger)
 		if err != nil {
 			return err
@@ -1312,7 +1312,7 @@ func stageCustomTrace(db kv.RwDB, ctx context.Context, logger log.Logger) error 
 	txc := wrap.TxContainer{Tx: tx}
 
 	if unwind > 0 {
-		u := sync.NewUnwindState(stages.CustomTrace, s.BlockNumber-unwind, s.BlockNumber, true)
+		u := sync.NewUnwindState(stages.CustomTrace, s.BlockNumber-unwind, s.BlockNumber, true, false)
 		err := stagedsync.UnwindCustomTrace(u, s, txc, cfg, ctx, logger)
 		if err != nil {
 			return err
@@ -1377,7 +1377,7 @@ func stageTrie(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	historyV3 := true
 	cfg := stagedsync.StageTrieCfg(db, true /* checkRoot */, true /* saveHashesToDb */, false /* badBlockHalt */, dirs.Tmp, br, nil /* hd */, historyV3, agg)
 	if unwind > 0 {
-		u := sync.NewUnwindState(stages.IntermediateHashes, s.BlockNumber-unwind, s.BlockNumber, true)
+		u := sync.NewUnwindState(stages.IntermediateHashes, s.BlockNumber-unwind, s.BlockNumber, true, false)
 		if err := stagedsync.UnwindIntermediateHashesStage(u, s, tx, cfg, ctx, logger); err != nil {
 			return err
 		}
@@ -1711,7 +1711,7 @@ func stageTxLookup(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	br, _ := blocksIO(db, logger)
 	cfg := stagedsync.StageTxLookupCfg(db, pm, dirs.Tmp, chainConfig.Bor, br)
 	if unwind > 0 {
-		u := sync.NewUnwindState(stages.TxLookup, s.BlockNumber-unwind, s.BlockNumber, true)
+		u := sync.NewUnwindState(stages.TxLookup, s.BlockNumber-unwind, s.BlockNumber, true, false)
 		err = stagedsync.UnwindTxLookup(u, s, tx, cfg, ctx, logger)
 		if err != nil {
 			return err
@@ -1970,7 +1970,7 @@ func progress(tx kv.Getter, stage stages.SyncStage) uint64 {
 }
 
 func stage(st *stagedsync.Sync, tx kv.Tx, db kv.RoDB, stage stages.SyncStage) *stagedsync.StageState {
-	res, err := st.StageState(stage, tx, db, true)
+	res, err := st.StageState(stage, tx, db, true, false)
 	if err != nil {
 		panic(err)
 	}
