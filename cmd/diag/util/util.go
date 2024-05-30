@@ -41,7 +41,7 @@ func MakeHttpGetCall(ctx context.Context, url string, data interface{}) error {
 	err = json.Unmarshal(body, &data)
 	if err != nil {
 		if err.Error() == "invalid character 'p' after top-level value" {
-			return fmt.Errorf("diagnostics have not been initialized yet. Please try again in a few seconds")
+			return fmt.Errorf("diagnostics was not initialized yet. Please try again in a few seconds")
 		}
 
 		return err
@@ -105,5 +105,5 @@ func RenderUseDiagUI() {
 
 func RenderError(err error) {
 	txt := text.Colors{text.FgWhite, text.BgRed}
-	fmt.Printf("%s %s", txt.Sprint("[ERROR]"), err)
+	fmt.Printf("%s %s\n", txt.Sprint("[ERROR]"), err)
 }
