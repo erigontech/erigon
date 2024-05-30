@@ -1184,13 +1184,11 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 
 		ic, err := dt.ht.IdxRange(k, int(txNumUnwindTo)-1, 0, order.Desc, -1, rwTx)
 		if err != nil {
-			ic.Close()
 			return err
 		}
 		if ic.HasNext() {
 			nextTxn, err := ic.Next()
 			if err != nil {
-				ic.Close()
 				return err
 			}
 			restored.SetTxNum(nextTxn) // todo what if we actually had to decrease current step to provide correct update?
