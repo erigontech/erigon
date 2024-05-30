@@ -1417,8 +1417,8 @@ func (dt *DomainRoTx) statefulBtree(i int) *Cursor {
 	}
 	r := dt.btcursors[i]
 	if r == nil {
-		// r = NewArchiveGetter(dt.files[i].src.decompressor.MakeGetter(), dt.d.compression)
-		dt.btcursors[i] = dt.statelessBtree(i).newCursor(context.Background(), nil, nil, 0, dt.statelessGetter(i))
+		r = dt.statelessBtree(i).newCursor(context.Background(), nil, nil, 0, dt.statelessGetter(i))
+		dt.btcursors[i] = r
 	}
 	return r
 }
