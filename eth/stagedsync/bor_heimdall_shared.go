@@ -355,14 +355,18 @@ func fetchRequiredHeimdallStateSyncEventsIfNeeded(
 	ctx context.Context,
 	header *types.Header,
 	tx kv.RwTx,
-	cfg BorHeimdallCfg,
+	borConfig *borcfg.BorConfig,
+	blockReader services.FullBlockReader,
+	heimdallClient heimdall.HeimdallClient,
+	chainID string,
+	stateReceiverABI abi.ABI,
 	logPrefix string,
 	logger log.Logger,
 	lastStateSyncEventID uint64,
 ) (uint64, int, time.Duration, error) {
 
 	headerNum := header.Number.Uint64()
-	if headerNum%cfg.borConfig.CalculateSprintLength(headerNum) != 0 || headerNum == 0 {
+	if headerNum%borConfig.CalculateSprintLength(headerNum) != 0 || headerNum == 0 {
 		// we fetch events only at beginning of each sprint
 		return lastStateSyncEventID, 0, 0, nil
 	}
@@ -372,11 +376,11 @@ func fetchRequiredHeimdallStateSyncEventsIfNeeded(
 		header,
 		lastStateSyncEventID,
 		tx,
-		cfg.borConfig,
-		cfg.blockReader,
-		cfg.heimdallClient,
-		cfg.chainConfig.ChainID.String(),
-		cfg.stateReceiverABI,
+		borConfig,
+		blockReader,
+		heimdallClient,
+		chainID,
+		stateReceiverABI,
 		logPrefix,
 		logger,
 	)
