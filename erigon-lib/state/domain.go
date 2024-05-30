@@ -610,6 +610,7 @@ type DomainRoTx struct {
 	ht         *HistoryRoTx
 	d          *Domain
 	files      []ctxItem
+	btcursors  []*Cursor
 	getters    []ArchiveGetter
 	readers    []*BtIndex
 	idxReaders []*recsplit.IndexReader
@@ -620,6 +621,35 @@ type DomainRoTx struct {
 
 	keysC kv.CursorDupSort
 	valsC kv.Cursor
+}
+
+func (dt *DomainRoTx) getCursorFromFile(i int, filekey []byte) ([]byte, bool, error) {
+	// g := dt.statelessGetter(i)
+	if !(UseBtree || UseBpsTree) {
+		panic("not implemented")
+	}
+
+	cur := dt.statefulBtree(i)
+	found, err := cur.LookAround(filekey)
+	if err != nil {
+		return nil, false, err
+	}
+	if found {
+		return cur.Value(), true, nil
+	}
+	return nil, false, nil
+}
+func (dt *DomainRoTx) DebugKVFilesWithKey(k []byte) (res []string, err error) {
+	for i := len(dt.files) - 1; i >= 0; i-- {
+		_, ok, err := dt.getFromFile(i, k)
+		if err != nil {
+			return res, err
+		}
+		if ok {
+			res = append(res, dt.files[i].src.decompressor.FileName())
+		}
+	}
+	return res, nil
 }
 
 func (dt *DomainRoTx) getFromFile(i int, filekey []byte) ([]byte, bool, error) {
@@ -1310,7 +1340,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 		}
 
 		//t := time.Now()
-		v, found, err = dt.getFromFile(i, filekey)
+		v, found, err = dt.getCursorFromFile(i, filekey)
 		if err != nil {
 			return nil, false, 0, 0, err
 		}
@@ -1389,6 +1419,18 @@ func (dt *DomainRoTx) statelessGetter(i int) ArchiveGetter {
 	if r == nil {
 		r = NewArchiveGetter(dt.files[i].src.decompressor.MakeGetter(), dt.d.compression)
 		dt.getters[i] = r
+	}
+	return r
+}
+
+func (dt *DomainRoTx) statefulBtree(i int) *Cursor {
+	if dt.btcursors == nil {
+		dt.btcursors = make([]*Cursor, len(dt.files))
+	}
+	r := dt.btcursors[i]
+	if r == nil {
+		// r = NewArchiveGetter(dt.files[i].src.decompressor.MakeGetter(), dt.d.compression)
+		dt.btcursors[i] = dt.statelessBtree(i).newCursor(context.Background(), nil, nil, 0, dt.statelessGetter(i))
 	}
 	return r
 }

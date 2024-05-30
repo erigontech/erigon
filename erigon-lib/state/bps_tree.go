@@ -186,6 +186,63 @@ func (b *BpsTree) bs(x []byte) (n Node, dl, dr uint64) {
 	return n, dl, dr
 }
 
+func (b *BpsTree) LookAround(g ArchiveGetter, ci uint64, key []byte) (skey []byte, di uint64, found bool, err error) {
+	var cmp int
+
+	cmp, skey, err = b.keyCmpFunc(key, ci, g)
+	if err != nil {
+		return nil, 0, false, err
+	}
+
+	l, r := uint64(0), b.offt.Count()
+	if cmp > 0 {
+		l = ci
+	} else if cmp < 0 {
+		r = ci
+	}
+
+	if b.trace {
+		fmt.Printf("lookAround [ci=%d] %x [%d %d]\n", ci, key, l, r)
+	}
+	defer func() {
+		if b.trace {
+			fmt.Printf("found %x [%d %d]\n", key, l, r)
+		}
+	}()
+
+	var m uint64
+	for l < r {
+		m = (l + r) >> 1
+		cmp, skey, err = b.keyCmpFunc(key, m, g)
+		if err != nil {
+			return nil, 0, false, err
+		}
+		if b.trace {
+			fmt.Printf("lr %x [%d %d]\n", skey, l, r)
+		}
+
+		switch cmp {
+		case 0:
+			return skey, m, true, nil
+			//return &BpsTreeIterator{t: b, i: m}, nil
+		case 1:
+			r = m
+		case -1:
+			l = m + 1
+		}
+	}
+	if l == r {
+		m = l
+		//return &BpsTreeIterator{t: b, i: l}, nil
+	}
+
+	cmp, skey, err = b.keyCmpFunc(key, m, g)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	return skey, m, cmp == 0, nil
+}
+
 // Seek returns first key which is >= key.
 // Found is true iff exact key match is found.
 // If key is nil, returns first key and found=true

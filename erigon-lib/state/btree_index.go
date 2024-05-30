@@ -94,6 +94,24 @@ func (c *Cursor) Value() []byte {
 	return c.value
 }
 
+func (c *Cursor) LookAround(key []byte) (found bool, err error) {
+	_, kdi, found, err := c.btt.bplus.LookAround(c.getter, c.d, key)
+	if err != nil {
+		return false, err
+	}
+	if found {
+		c.d = kdi
+		key, value, err := c.btt.dataLookup(c.d, c.getter)
+		if err != nil {
+			return false
+		}
+		c.key, c.value = key, value
+
+	}
+
+	return found, nil
+}
+
 func (c *Cursor) Next() bool {
 	if !c.next() {
 		return false
@@ -1028,6 +1046,43 @@ func (b *BtIndex) Seek(g ArchiveGetter, x []byte) (*Cursor, error) {
 	return b.newCursor(context.Background(), k, v, dt, g), nil
 }
 
+func (b *BtIndex) SeekAround(g ArchiveGetter, ci uint64, x []byte) (*Cursor, error) {
+	if b.Empty() || ci >= b.ef.Count() {
+		return nil, nil
+	}
+
+	// defer func() {
+	// 	fmt.Printf("[Bindex][%s] seekInFiles '%x' -> '%x' di=%d\n", b.FileName(), x, cursor.Value(), cursor.d)
+	// }()
+	var (
+		k     []byte
+		dt    uint64
+		found bool
+		err   error
+	)
+
+	if UseBpsTree {
+		_, dt, found, err = b.bplus.LookAround(g, ci, x)
+	} else {
+		_, dt, found, err = b.alloc.Seek(g, x)
+	}
+	_ = found
+	if err != nil /*|| !found*/ {
+		if errors.Is(err, ErrBtIndexLookupBounds) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	k, v, err := b.dataLookup(dt, g)
+	if err != nil {
+		if errors.Is(err, ErrBtIndexLookupBounds) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return b.newCursor(context.Background(), k, v, dt, g), nil
+}
 func (b *BtIndex) OrdinalLookup(getter ArchiveGetter, i uint64) *Cursor {
 	k, v, err := b.dataLookup(i, getter)
 	if err != nil {
