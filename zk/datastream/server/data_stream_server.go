@@ -10,6 +10,8 @@ import (
 	"github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zk/datastream/proto/github.com/0xPolygonHermez/zkevm-node/state/datastream"
+	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
 )
 
 type BookmarkType byte
@@ -19,6 +21,7 @@ type OperationMode int
 const (
 	StandardOperationMode OperationMode = iota
 	ExecutorOperationMode
+	EtrogBatchNumber = 7
 )
 
 type DataStreamServer struct {
@@ -89,6 +92,7 @@ func (srv *DataStreamServer) CreateL2BlockBookmarkEntryProto(blockNo uint64) *ty
 
 func (srv *DataStreamServer) CreateL2BlockProto(
 	block *eritypes.Block,
+	blockHash []byte,
 	batchNumber uint64,
 	ger libcommon.Hash,
 	deltaTimestamp uint32,
@@ -106,7 +110,7 @@ func (srv *DataStreamServer) CreateL2BlockProto(
 			MinTimestamp:    minTimestamp,
 			L1Blockhash:     l1BlockHash.Bytes(),
 			L1InfotreeIndex: l1InfoIndex,
-			Hash:            block.Hash().Bytes(),
+			Hash:            blockHash,
 			StateRoot:       block.Root().Bytes(),
 			GlobalExitRoot:  ger.Bytes(),
 			Coinbase:        block.Coinbase().Bytes(),
@@ -187,6 +191,7 @@ func (srv *DataStreamServer) CreateGerUpdateProto(
 func (srv *DataStreamServer) CreateStreamEntriesProto(
 	block *eritypes.Block,
 	reader *hermez_db.HermezDbReader,
+	tx kv.Tx,
 	lastBlock *eritypes.Block,
 	batchNumber uint64,
 	lastBatchNumber uint64,
@@ -224,9 +229,31 @@ func (srv *DataStreamServer) CreateStreamEntriesProto(
 				}
 			}
 
+			// now to fetch the LER for the batch - based on the last block of the batch
+			var localExitRoot libcommon.Hash
+			if workingBatch > 0 {
+				checkBatch := workingBatch
+				for ; checkBatch > 0; checkBatch-- {
+					blocks, err := reader.GetL2BlockNosByBatch(checkBatch)
+					if err != nil {
+						return nil, err
+					}
+					if len(blocks) == 0 {
+						continue
+					}
+					lastBlockNumber := blocks[len(blocks)-1]
+					stateReader := state.NewPlainState(tx, lastBlockNumber, nil)
+					rawLer, err := stateReader.ReadAccountStorage(state.GER_MANAGER_ADDRESS, 1, &state.GLOBAL_EXIT_ROOT_POS_1)
+					if err != nil {
+						return nil, err
+					}
+					localExitRoot = libcommon.BytesToHash(rawLer)
+				}
+			}
+
 			// seal off the last batch
 			root := lastBlock.Root()
-			end := srv.CreateBatchEndProto(root, root, workingBatch)
+			end := srv.CreateBatchEndProto(localExitRoot, root, workingBatch)
 			entries[index] = end
 			index++
 
@@ -289,13 +316,20 @@ func (srv *DataStreamServer) CreateStreamEntriesProto(
 		}
 	}
 
+	forkId, err := reader.GetForkId(batchNumber)
+	if err != nil {
+		return nil, err
+	}
+
 	blockInfoRoot, err := reader.GetBlockInfoRoot(blockNum)
 	if err != nil {
 		return nil, err
 	}
 
+	blockHash := block.Hash().Bytes()
+
 	// L2 BLOCK
-	l2Block := srv.CreateL2BlockProto(block, batchNumber, ger, uint32(deltaTimestamp), uint32(l1InfoIndex), l1BlockHash, l1InfoTreeMinTimestamps[l1InfoIndex], blockInfoRoot)
+	l2Block := srv.CreateL2BlockProto(block, blockHash, batchNumber, ger, uint32(deltaTimestamp), uint32(l1InfoIndex), l1BlockHash, l1InfoTreeMinTimestamps[l1InfoIndex], blockInfoRoot)
 	entries[index] = l2Block
 	index++
 
@@ -304,9 +338,13 @@ func (srv *DataStreamServer) CreateStreamEntriesProto(
 		if err != nil {
 			return nil, err
 		}
-		intermediateRoot, err := reader.GetIntermediateTxStateRoot(block.NumberU64(), tx.Hash())
-		if err != nil {
-			return nil, err
+
+		var intermediateRoot libcommon.Hash
+		if forkId < EtrogBatchNumber {
+			intermediateRoot, err = reader.GetIntermediateTxStateRoot(block.NumberU64(), tx.Hash())
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		// TRANSACTION
@@ -321,6 +359,7 @@ func (srv *DataStreamServer) CreateStreamEntriesProto(
 func (srv *DataStreamServer) CreateAndBuildStreamEntryBytesProto(
 	block *eritypes.Block,
 	reader *hermez_db.HermezDbReader,
+	tx kv.Tx,
 	lastBlock *eritypes.Block,
 	batchNumber uint64,
 	lastBatchNumber uint64,
@@ -331,7 +370,7 @@ func (srv *DataStreamServer) CreateAndBuildStreamEntryBytesProto(
 		return nil, err
 	}
 
-	entries, err := srv.CreateStreamEntriesProto(block, reader, lastBlock, batchNumber, lastBatchNumber, gersInBetween, l1InfoTreeMinTimestamps)
+	entries, err := srv.CreateStreamEntriesProto(block, reader, tx, lastBlock, batchNumber, lastBatchNumber, gersInBetween, l1InfoTreeMinTimestamps)
 	if err != nil {
 		return nil, err
 	}

@@ -15,6 +15,8 @@ import (
 	"github.com/ledgerwatch/erigon/zk/datastream/proto/github.com/0xPolygonHermez/zkevm-node/state/datastream"
 )
 
+const GenesisForkId = 0 // genesis fork is always 0 in the datastream
+
 func getLatestBlockNumberWritten(stream *datastreamer.StreamServer, header *datastreamer.HeaderEntry) (uint64, error) {
 	total := header.TotalEntries
 	if total == 0 {
@@ -130,7 +132,7 @@ func WriteBlocksToStream(
 
 		l1InfoMinTimestamps := make(map[uint64]uint64)
 
-		blockEntries, err := srv.CreateStreamEntriesProto(block, reader, lastBlock, batchNum, prevBatchNum, gersInBetween, l1InfoMinTimestamps)
+		blockEntries, err := srv.CreateStreamEntriesProto(block, reader, tx, lastBlock, batchNum, prevBatchNum, gersInBetween, l1InfoMinTimestamps)
 		if err != nil {
 			return err
 		}
@@ -183,11 +185,6 @@ func WriteGenesisToStream(
 		return err
 	}
 
-	forkId, err := reader.GetForkId(batchNo)
-	if err != nil {
-		return err
-	}
-
 	err = stream.StartAtomicOp()
 	if err != nil {
 		return err
@@ -195,8 +192,9 @@ func WriteGenesisToStream(
 
 	batchBookmark := srv.CreateBatchBookmarkEntryProto(genesis.NumberU64())
 	l2BlockBookmark := srv.CreateL2BlockBookmarkEntryProto(genesis.NumberU64())
-	l2Block := srv.CreateL2BlockProto(genesis, batchNo, ger, 0, 0, common.Hash{}, 0, common.Hash{})
-	batchStart := srv.CreateBatchStartProto(batchNo, chainId, forkId, datastream.BatchType_BATCH_TYPE_REGULAR)
+
+	l2Block := srv.CreateL2BlockProto(genesis, genesis.Hash().Bytes(), batchNo, ger, 0, 0, common.Hash{}, 0, common.Hash{})
+	batchStart := srv.CreateBatchStartProto(batchNo, chainId, GenesisForkId, datastream.BatchType_BATCH_TYPE_REGULAR)
 
 	if err = srv.CommitEntriesToStreamProto([]DataStreamEntryProto{batchBookmark, batchStart, l2BlockBookmark, l2Block}); err != nil {
 		return err
