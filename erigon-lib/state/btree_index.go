@@ -103,10 +103,9 @@ func (c *Cursor) LookAround(key []byte) (found bool, err error) {
 		c.d = kdi
 		key, value, err := c.btt.dataLookup(c.d, c.getter)
 		if err != nil {
-			return false
+			return false, err
 		}
 		c.key, c.value = key, value
-
 	}
 
 	return found, nil

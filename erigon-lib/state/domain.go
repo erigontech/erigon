@@ -639,18 +639,6 @@ func (dt *DomainRoTx) getCursorFromFile(i int, filekey []byte) ([]byte, bool, er
 	}
 	return nil, false, nil
 }
-func (dt *DomainRoTx) DebugKVFilesWithKey(k []byte) (res []string, err error) {
-	for i := len(dt.files) - 1; i >= 0; i-- {
-		_, ok, err := dt.getFromFile(i, k)
-		if err != nil {
-			return res, err
-		}
-		if ok {
-			res = append(res, dt.files[i].src.decompressor.FileName())
-		}
-	}
-	return res, nil
-}
 
 func (dt *DomainRoTx) getFromFile(i int, filekey []byte) ([]byte, bool, error) {
 	g := dt.statelessGetter(i)
