@@ -185,6 +185,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.RpcRateLimitsFlag,
 	&utils.DatastreamVersionFlag,
 	&utils.RebuildTreeAfterFlag,
+	&utils.IncrementTreeAlways,
 	&utils.SequencerInitialForkId,
 	&utils.SequencerBlockSealTime,
 	&utils.SequencerBatchSealTime,

@@ -447,6 +447,11 @@ var (
 		Usage: "Rebuild the state tree after this many blocks behind",
 		Value: 10000,
 	}
+	IncrementTreeAlways = cli.BoolFlag{
+		Name:  "zkevm.increment-tree-always",
+		Usage: "Increment the state tree, never rebuild",
+		Value: false,
+	}
 	SequencerInitialForkId = cli.Uint64Flag{
 		Name:  "zkevm.sequencer-initial-fork-id",
 		Usage: "The initial fork id to launch the sequencer with",

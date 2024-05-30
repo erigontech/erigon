@@ -45,10 +45,11 @@ type Zk struct {
 	MaxGasPrice                            uint64
 	GasPriceFactor                         float64
 
-	RebuildTreeAfter uint64
-	WitnessFull      bool
-	SyncLimit        uint64
-	Gasless          bool
+	RebuildTreeAfter    uint64
+	IncrementTreeAlways bool
+	WitnessFull         bool
+	SyncLimit           uint64
+	Gasless             bool
 
 	DebugNoSync    bool
 	DebugLimit     uint64

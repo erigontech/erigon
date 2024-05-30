@@ -92,6 +92,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		RpcRateLimits:                          ctx.Int(utils.RpcRateLimitsFlag.Name),
 		DatastreamVersion:                      ctx.Int(utils.DatastreamVersionFlag.Name),
 		RebuildTreeAfter:                       ctx.Uint64(utils.RebuildTreeAfterFlag.Name),
+		IncrementTreeAlways:                    ctx.Bool(utils.IncrementTreeAlways.Name),
 		SequencerInitialForkId:                 ctx.Uint64(utils.SequencerInitialForkId.Name),
 		SequencerBlockSealTime:                 sequencerBlockSealTime,
 		SequencerBatchSealTime:                 sequencerBatchSealTime,
