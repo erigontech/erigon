@@ -137,7 +137,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	//	e.logger.Warn("ProcessFrozenBlocks", "error", err)
 	//	return
 	//}
-
 	defer e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
 
 	// Update the last new block seen.
