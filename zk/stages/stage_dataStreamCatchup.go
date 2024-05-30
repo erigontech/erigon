@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/datastream/server"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon/zk/sequencer"
 )
 
 type DataStreamCatchupCfg struct {
@@ -78,14 +79,23 @@ func CatchupDatastream(logPrefix string, tx kv.RwTx, stream *datastreamer.Stream
 	reader := hermez_db.NewHermezDbReader(tx)
 
 	// get the latest verified batch number
-	latestBatch, err := stages.GetStageProgress(tx, stages.SequenceExecutorVerify)
-	if err != nil {
-		return 0, err
-	}
-
-	finalBlockNumber, err := reader.GetHighestBlockInBatch(latestBatch)
-	if err != nil {
-		return 0, err
+	var err error
+	var latestBatch uint64
+	var finalBlockNumber uint64
+	if sequencer.IsSequencer() {
+		latestBatch, err = stages.GetStageProgress(tx, stages.SequenceExecutorVerify)
+		if err != nil {
+			return 0, err
+		}
+		finalBlockNumber, err = reader.GetHighestBlockInBatch(latestBatch)
+		if err != nil {
+			return 0, err
+		}
+	} else {
+		finalBlockNumber, err = stages.GetStageProgress(tx, stages.Execution)
+		if err != nil {
+			return 0, err
+		}
 	}
 
 	previousProgress, err := stages.GetStageProgress(tx, stages.DataStream)
@@ -107,10 +117,9 @@ func CatchupDatastream(logPrefix string, tx kv.RwTx, stream *datastreamer.Stream
 		if err = server.WriteGenesisToStream(genesis, reader, stream, srv, streamVersion, chainId); err != nil {
 			return 0, err
 		}
-		previousProgress++
 	}
 
-	if err = server.WriteBlocksToStream(tx, reader, srv, stream, previousProgress, finalBlockNumber, logPrefix); err != nil {
+	if err = server.WriteBlocksToStream(tx, reader, srv, stream, previousProgress+1, finalBlockNumber, logPrefix); err != nil {
 		return 0, err
 	}
 

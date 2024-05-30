@@ -279,7 +279,7 @@ func (srv *DataStreamServer) CreateStreamEntriesProto(
 	// this could go into the DB as a quick lookup to check for injected batches
 	if block.NumberU64() == 1 {
 		deltaTimestamp = block.Time()
-		l1InfoTreeMinTimestamps[0] = block.Time()
+		l1InfoTreeMinTimestamps[0] = 0
 	}
 
 	// L2 BLOCK BOOKMARK
