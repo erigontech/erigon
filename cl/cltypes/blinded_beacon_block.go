@@ -209,6 +209,16 @@ func (b *BlindedBeaconBody) getSchema(storage bool) []interface{} {
 	return s
 }
 
+func (b *BlindedBeaconBody) SetHeader(header *Eth1Header) *BlindedBeaconBody {
+	b.ExecutionPayload = header
+	return b
+}
+
+func (b *BlindedBeaconBody) SetBlobKzgCommitments(commitments *solid.ListSSZ[*KZGCommitment]) *BlindedBeaconBody {
+	b.BlobKzgCommitments = commitments
+	return b
+}
+
 func (b *BlindedBeaconBody) Full(txs *solid.TransactionsSSZ, withdrawals *solid.ListSSZ[*Withdrawal]) *BeaconBody {
 	// Recover the execution payload
 	executionPayload := &Eth1Block{
