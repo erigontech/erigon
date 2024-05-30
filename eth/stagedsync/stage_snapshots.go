@@ -233,8 +233,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cstate = snapshotsync.AlsoCaplin
 	}
 
-	log.Info(fmt.Sprintf("[%s] dbg Requesting downloads: %t, %t, %s", s.LogPrefix(), s.CurrentSyncCycle.IsFirstCycle, s.CurrentSyncCycle.IsInitialCycle), dbg.Stack())
-
 	// Download only the snapshots that are for the header chain.
 	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, true, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
 		return err
