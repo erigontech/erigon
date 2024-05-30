@@ -195,10 +195,13 @@ func (b *BpsTree) LookAround(g ArchiveGetter, ci uint64, key []byte) (skey []byt
 	}
 
 	l, r := uint64(0), b.offt.Count()
-	if cmp > 0 {
-		l = ci
-	} else if cmp < 0 {
+	switch cmp {
+	case 0:
+		return skey, m, true, nil
+	case 1:
 		r = ci
+	case -1:
+		l = ci + 1
 	}
 
 	if b.trace {
