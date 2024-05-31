@@ -1123,14 +1123,14 @@ func (ac *AggregatorRoTx) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint6
 
 	domainBlockNumProgress, err := tx2block(maxTxNum)
 	if err != nil {
-		ac.a.logger.Info("[snapshots] History Stat", "err", err)
+		ac.a.logger.Warn("[snapshots:history] Stat", "err", err)
 		return
 	}
 	str := make([]string, 0, len(ac.d[kv.AccountsDomain].files))
 	for _, item := range ac.d[kv.AccountsDomain].files {
 		bn, err := tx2block(item.endTxNum)
 		if err != nil {
-			ac.a.logger.Info("[snapshots] History Stat", "err", err)
+			ac.a.logger.Warn("[snapshots:history] Stat", "err", err)
 			return
 		}
 		str = append(str, fmt.Sprintf("%d=%dK", item.endTxNum/ac.a.StepSize(), bn/1_000))
@@ -1148,19 +1148,19 @@ func (ac *AggregatorRoTx) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint6
 		lastCommitmentTxNum = ac.d[kv.CommitmentDomain].files[len(ac.d[kv.CommitmentDomain].files)-1].endTxNum
 		lastCommitmentBlockNum, err = tx2block(lastCommitmentTxNum)
 		if err != nil {
-			ac.a.logger.Info("[snapshots] History Stat", "err", err)
+			ac.a.logger.Warn("[snapshots:history] Stat", "err", err)
 			return
 		}
 	}
 	firstHistoryIndexBlockInDB, err := tx2block(ac.d[kv.AccountsDomain].d.FirstStepInDB(tx) * ac.a.StepSize())
 	if err != nil {
-		ac.a.logger.Info("[snapshots] History Stat", "err", err)
+		ac.a.logger.Warn("[snapshots:history] Stat", "err", err)
 		return
 	}
 
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
-	ac.a.logger.Info("[snapshots] History Stat",
+	ac.a.logger.Info("[snapshots:history] Stat",
 		"blocks", fmt.Sprintf("%dk", (domainBlockNumProgress+1)/1000),
 		"txs", fmt.Sprintf("%dm", ac.a.visibleFilesMinimaxTxNum.Load()/1_000_000),
 		"txNum2blockNum", strings.Join(str, ","),
