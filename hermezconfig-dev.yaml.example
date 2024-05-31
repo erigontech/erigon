@@ -24,7 +24,6 @@ zkevm.data-stream-host: localhost
 zkevm.executor-strict: true
 zkevm.executor-urls: 51.210.116.237:50071
 
-externalcl: true
 http.api: [eth, debug, net, trace, web3, erigon, txpool, zkevm]
 http.addr: 0.0.0.0
 http.vhosts: any
