@@ -180,7 +180,7 @@ func (txNums) FindBlockNum(tx kv.Tx, endTxNumMinimax uint64) (ok bool, blockNum 
 		found, v, err = c.SeekExact(seek[:])
 		if len(v) != 8 {
 			_lb, _lt, _ := TxNums.Last(tx)
-			panic(fmt.Errorf("seems broken TxNum value: %x -> (%x, %x); last in db: (%x, %x)", seek, found, v, _lb, _lt))
+			panic(fmt.Errorf("seems broken TxNum value: %x -> (%x, %x); last in db: (%d, %d)", seek, found, v, _lb, _lt))
 		}
 		return binary.BigEndian.Uint64(v) >= endTxNumMinimax
 	}))
