@@ -64,14 +64,19 @@ func SpawnSequencingStage(
 		return err
 	}
 
-	if err := utils.UpdateZkEVMBlockCfg(cfg.chainConfig, sdb.hermezDb, logPrefix); err != nil {
-		return err
-	}
-
 	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(sdb.tx, hash, number) }
+
+	l1Recovery := cfg.zk.L1SyncStartBlock > 0
 
 	// injected batch
 	if executionAt == 0 {
+		// set the block height for the fork we're running at if we're in L1 recovery
+		if l1Recovery {
+			if err = utils.RecoverySetBlockConfigForks(1, forkId, cfg.chainConfig, logPrefix); err != nil {
+				return err
+			}
+		}
+
 		header, parentBlock, err := prepareHeader(tx, executionAt, math.MaxUint64, forkId, cfg.zk.AddressSequencer)
 		if err != nil {
 			return err
@@ -99,6 +104,10 @@ func SpawnSequencingStage(
 		return nil
 	}
 
+	if err := utils.UpdateZkEVMBlockCfg(cfg.chainConfig, sdb.hermezDb, logPrefix); err != nil {
+		return err
+	}
+
 	var header *types.Header
 	var parentBlock *types.Block
 
@@ -111,7 +120,6 @@ func SpawnSequencingStage(
 	var decodedBlocks []zktx.DecodedBatchL2Data // only used in l1 recovery
 	var blockTransactions []types.Transaction
 	var l1EffectiveGases, effectiveGases []uint8
-	l1Recovery := cfg.zk.L1SyncStartBlock > 0
 
 	batchTicker := time.NewTicker(cfg.zk.SequencerBatchSealTime)
 	defer batchTicker.Stop()

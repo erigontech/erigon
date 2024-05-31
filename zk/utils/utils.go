@@ -110,3 +110,16 @@ func UpdateZkEVMBlockCfg(cfg ForkConfigWriter, hermezDb ForkReader, logPrefix st
 
 	return nil
 }
+
+func RecoverySetBlockConfigForks(blockNum uint64, forkId uint64, cfg ForkConfigWriter, logPrefix string) error {
+	for _, fork := range chain.ForkIdsOrdered {
+		if uint64(fork) <= forkId {
+			if err := cfg.SetForkIdBlock(fork, blockNum); err != nil {
+				log.Error(fmt.Sprintf("[%s] Error setting fork id %v to block %v", logPrefix, forkId, blockNum))
+				return err
+			}
+		}
+	}
+
+	return nil
+}
