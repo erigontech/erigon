@@ -14,7 +14,7 @@ func TestEOFv1(t *testing.T) {
 
 	et := new(testMatcher)
 
-	dir := filepath.Join(".", "eof_tests/prague/eip3540_eof_v1")
+	dir := filepath.Join(".", "eof_tests/prague/eip6206_jumpf")
 
 	et.walk(t, dir, func(t *testing.T, name string, test *EOFTest) {
 		// import pre accounts & construct test genesis block & state root

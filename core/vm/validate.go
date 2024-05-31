@@ -33,10 +33,11 @@ var (
 	ErrInvalidMaxStackHeight  = errors.New("invalid max stack height")
 	ErrInvalidCodeTermination = errors.New("invalid code termination")
 	ErrUnreachableCode        = errors.New("unreachable code")
+	ErrInvalidDataLoadN       = errors.New("invalid DATALOADN index")
 )
 
 // validateCode validates the code parameter against the EOF v1 validity requirements.
-func validateCode(code []byte, section int, metadata []*FunctionMetadata, jt *JumpTable) error {
+func validateCode(code []byte, section int, metadata []*FunctionMetadata, jt *JumpTable, data []byte) error {
 	var (
 		i = 0
 		// Tracks the number of actual instructions in the code (e.g.
@@ -99,6 +100,16 @@ func validateCode(code []byte, section int, metadata []*FunctionMetadata, jt *Ju
 				return fmt.Errorf("%w: arg %d, last %d, pos %d", ErrInvalidSectionArgument, arg, len(metadata), i)
 			}
 			i += 2
+		case op == DATALOADN:
+			if i+2 >= len(code) {
+				return fmt.Errorf("%w: op %s, pos %d", ErrTruncatedImmediate, op, i)
+			}
+			arg, _ := parseUint16(code[i+1:]) // read index
+			if len(data) < 32 || arg > len(data)-32 {
+				return fmt.Errorf("%w: op %s, pos %d", ErrInvalidDataLoadN, op, i)
+			}
+			fmt.Println("DATA SIZE, INDEX: ", len(data), arg)
+			i += 2
 		}
 		i += 1
 	}
@@ -111,6 +122,7 @@ func validateCode(code []byte, section int, metadata []*FunctionMetadata, jt *Ju
 		return err
 	} else if paths != count {
 		// TODO(matt): return actual position of unreachable code
+		fmt.Println("paths, count: ", paths, count)
 		return ErrUnreachableCode
 	}
 	return nil
@@ -142,6 +154,7 @@ func validateControlFlow(code []byte, section int, metadata []*FunctionMetadata,
 		pos    int
 		height int
 	}
+	// TODO(racytech): compares this to EVMone's stack validation
 	var (
 		heights        = make(map[int]int)
 		worklist       = []item{{0, int(metadata[section].Input)}}

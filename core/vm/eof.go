@@ -87,6 +87,7 @@ type Container struct {
 	Code         [][]byte
 	SubContainer [][]byte
 	Data         []byte
+	// OffsetData   int // TODO(racytech): consider adding this for DATALOADN check, find out if offset is from the beginning of the code or from the start of data section
 }
 
 // FunctionMetadata is an EOF function signature.
@@ -251,7 +252,7 @@ func (c *Container) UnmarshalBinary(b []byte) error {
 		if typ.Input > maxInputItems {
 			return fmt.Errorf("%w for section %d: have %d", ErrTooManyInputs, i, typ.Input)
 		}
-		if typ.Output > maxOutputItems {
+		if typ.Output > maxOutputItems && typ.Output != nonReturningFunction {
 			return fmt.Errorf("%w for section %d: have %d", ErrTooManyOutputs, i, typ.Output)
 		}
 		if typ.MaxStackHeight > maxStackHeight {
@@ -297,7 +298,7 @@ func (c *Container) UnmarshalBinary(b []byte) error {
 // rule set.
 func (c *Container) ValidateCode(jt *JumpTable) error {
 	for i, code := range c.Code {
-		if err := validateCode(code, i, c.Types, jt); err != nil {
+		if err := validateCode(code, i, c.Types, jt, c.Data); err != nil {
 			return err
 		}
 	}

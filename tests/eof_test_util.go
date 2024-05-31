@@ -57,6 +57,10 @@ func getError(err error) error {
 		vm.ErrInvalidContainerSize,
 		vm.ErrInvalidMemoryAccess,
 		vm.ErrInvalidCodeTermination,
+		vm.ErrInvalidSectionArgument,
+		vm.ErrInvalidMaxStackHeight,
+		vm.ErrInvalidOutputs,
+		vm.ErrInvalidDataLoadN,
 	}
 
 	for _, _err := range _errors {
@@ -82,6 +86,8 @@ var errorsMap = map[string][]error{
 	"EOFException.MISSING_TERMINATOR":          []error{vm.ErrMissingTerminator},
 	"EOFException.MISSING_TYPE_HEADER":         []error{vm.ErrIncompleteEOF, vm.ErrMissingTypeHeader},
 	"EOFException.MISSING_STOP_OPCODE":         []error{vm.ErrInvalidCodeTermination},
+	"EOFException.UNDEFINED_EXCEPTION":         []error{vm.ErrTooManyOutputs, vm.ErrInvalidSectionArgument, vm.ErrInvalidCodeTermination, vm.ErrInvalidMaxStackHeight, vm.ErrInvalidOutputs},
+	"EOFException.INVALID_DATALOADN_INDEX":     []error{vm.ErrInvalidDataLoadN},
 }
 
 func mapError(exception string, cmp error) bool {
@@ -117,15 +123,19 @@ func compareExceptionToErr(exc string, err error) error {
 
 func (e *EOFTest) Run(t *testing.T) error {
 	hexCode := e.json.Vector.Index.Code
-	// result := e.json.Vector.Index.Result.Prague.Result // TODO(racytech): revisit this part, think about result=true -> what to expect from test?
+	fmt.Println("hexCode: ", hexCode)
+	result := e.json.Vector.Index.Result.Prague.Result // TODO(racytech): revisit this part, think about result=true -> what to expect from test?
 	exception := e.json.Vector.Index.Result.Prague.Exception
 	code, err := hexutil.Decode(hexCode)
 	if err != nil {
 		return fmt.Errorf("error decoding hex string: %v", hexCode)
 	}
+	fmt.Println("result: ", result)
+	fmt.Println("exception: ", exception)
 	eofJt := vm.NewPragueEOFInstructionSet()
 	var c vm.Container
 	if err := c.UnmarshalBinary(code); err != nil {
+		fmt.Println("err unmarshal: ", err)
 		if err = compareExceptionToErr(exception, err); err != nil {
 			return fmt.Errorf("%w: %v", vm.ErrInvalidEOFInitcode, err)
 		} else {
@@ -133,6 +143,7 @@ func (e *EOFTest) Run(t *testing.T) error {
 		}
 	}
 	if err := c.ValidateCode(&eofJt); err != nil {
+		fmt.Println("err validate: ", err)
 		if err = compareExceptionToErr(exception, err); err != nil {
 			return fmt.Errorf("%w: %v", vm.ErrInvalidEOFInitcode, err)
 		} else {
@@ -141,3 +152,51 @@ func (e *EOFTest) Run(t *testing.T) error {
 	}
 	return nil
 }
+
+// given code 0xef00010100100200040008000a00040006040000000080000200000001008000000000000260006000e3000100600035e10001e4e50002e30003006001600055e4
+// 0x
+// ef00 - magic
+// 01 - version
+// 01 - kind type
+// 0010 - type sizes (16/4=4 type sections)
+// 02 - kind code
+// 0004 - num code sections (4)
+// 0008 - 1st code section size
+// 000a - 2nd
+// 0004 - 3d
+// 0006 - 4th
+// 04 - kind data
+// 0000 - data size
+// 00 - terminator
+// 00 - inputs 1st type section
+// 80 - outputs 1st type section (non returning function)
+// 0002 - max stack height 1st section
+// 00 - inputs 2nd
+// 00 - outputs 2nd
+// 0001 - max stack height 2nd
+// 00 - inputs 3d
+// 80 - outputs 3d (non returning function)
+// 0000 - max stack height 3d
+// 00 - inputs 4th
+// 00 - outputs 4th
+// 0002 - max stack heitgh 4th
+// 60006000e3000100 - 1st code
+// 600035e10001e4e50002 - 2nd code
+// e3000300 - 3d code
+// 6001600055e4 - 4th code
+
+// 0x
+// ef00
+// 01
+// 01
+// 0004
+// 02
+// 0001
+// 0005
+// 04
+// 0000
+// 00
+// 00
+// 80
+// 0001
+// d1ffdf5000

@@ -205,22 +205,27 @@ const (
 	LOG4
 )
 
-// 0xe0 range - eof ops.
+// 0xd0 and 0xe0 range - eof ops.
 const (
-	RJUMP          OpCode = 0xe0
-	RJUMPI         OpCode = 0xe1
-	RJUMPV         OpCode = 0xe2
-	CALLF          OpCode = 0xe3
-	RETF           OpCode = 0xe4
-	JUMPF          OpCode = 0xe5
-	DUPN           OpCode = 0xe6
-	SWAPN          OpCode = 0xe7
-	DATALOAD       OpCode = 0xe8
-	DATALOADN      OpCode = 0xe9
-	DATASIZE       OpCode = 0xea
-	DATACOPY       OpCode = 0xeb
-	CREATE3        OpCode = 0xec // TODO(racytech): remove CREATE3 and CREATE4, add EOFCREATE instead
-	CREATE4        OpCode = 0xed
+	DATALOAD  OpCode = 0xd0
+	DATALOADN OpCode = 0xd1
+	DATASIZE  OpCode = 0xd2
+	DATACOPY  OpCode = 0xd3
+
+	RJUMP  OpCode = 0xe0
+	RJUMPI OpCode = 0xe1
+	RJUMPV OpCode = 0xe2
+	CALLF  OpCode = 0xe3
+	RETF   OpCode = 0xe4
+	JUMPF  OpCode = 0xe5
+	DUPN   OpCode = 0xe6
+	SWAPN  OpCode = 0xe7
+	// DATALOAD       OpCode = 0xe8
+	// DATALOADN      OpCode = 0xe9
+	// DATASIZE       OpCode = 0xea
+	// DATACOPY       OpCode = 0xeb
+	// CREATE3        OpCode = 0xec // TODO(racytech): remove CREATE3 and CREATE4, add EOFCREATE instead
+	// CREATE4        OpCode = 0xed
 	RETURNCONTRACT OpCode = 0xee
 )
 
@@ -398,20 +403,20 @@ var opCodeToString = map[OpCode]string{
 	LOG4:   "LOG4",
 
 	// 0xe0 range.
-	RJUMP:          "RJUMP",
-	RJUMPI:         "RJUMPI",
-	RJUMPV:         "RJUMPV",
-	CALLF:          "CALLF",
-	RETF:           "RETF",
-	JUMPF:          "JUMPF",
-	DUPN:           "DUPN",
-	SWAPN:          "SWAPN",
-	DATALOAD:       "DATALOAD",
-	DATALOADN:      "DATALOADN",
-	DATASIZE:       "DATASIZE",
-	DATACOPY:       "DATACOPY",
-	CREATE3:        "CREATE3",
-	CREATE4:        "CREATE4",
+	RJUMP:     "RJUMP",
+	RJUMPI:    "RJUMPI",
+	RJUMPV:    "RJUMPV",
+	CALLF:     "CALLF",
+	RETF:      "RETF",
+	JUMPF:     "JUMPF",
+	DUPN:      "DUPN",
+	SWAPN:     "SWAPN",
+	DATALOAD:  "DATALOAD",
+	DATALOADN: "DATALOADN",
+	DATASIZE:  "DATASIZE",
+	DATACOPY:  "DATACOPY",
+	// CREATE3:        "CREATE3",
+	// CREATE4:        "CREATE4",
 	RETURNCONTRACT: "RETURNCONTRACT",
 
 	// 0xf0 range.
@@ -590,8 +595,8 @@ var stringToOp = map[string]OpCode{
 	"DATALOADN":      DATALOADN,
 	"DATASIZE":       DATASIZE,
 	"DATACOPY":       DATACOPY,
-	"CREATE3":        CREATE3,
-	"CREATE4":        CREATE4,
+	// "CREATE3":        CREATE3,
+	// "CREATE4":        CREATE4,
 	"RETURNCONTRACT": RETURNCONTRACT,
 	"CREATE":         CREATE,
 	"CREATE2":        CREATE2,

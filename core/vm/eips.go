@@ -384,6 +384,7 @@ func enableEOF(jt *JumpTable) {
 		constantGas: GasFastStep,
 		numPop:      0,
 		numPush:     0,
+		terminal:    true,
 	}
 	jt[DUPN] = &operation{
 		execute:     opDupN,
