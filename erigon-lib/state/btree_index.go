@@ -95,20 +95,7 @@ func (c *Cursor) Value() []byte {
 }
 
 func (c *Cursor) LookAround(key []byte) (found bool, err error) {
-	_, kdi, found, err := c.btt.bplus.LookAround(c.getter, c.d, key)
-	if err != nil {
-		return false, err
-	}
-	if found {
-		c.d = kdi
-		key, value, err := c.btt.dataLookup(c.d, c.getter)
-		if err != nil {
-			return false, err
-		}
-		c.key, c.value = key, value
-	}
-
-	return found, nil
+	return c.btt.LookAround(c, key)
 }
 
 func (c *Cursor) Next() bool {
@@ -1045,42 +1032,42 @@ func (b *BtIndex) Seek(g ArchiveGetter, x []byte) (*Cursor, error) {
 	return b.newCursor(context.Background(), k, v, dt, g), nil
 }
 
-func (b *BtIndex) SeekAround(g ArchiveGetter, ci uint64, x []byte) (*Cursor, error) {
-	if b.Empty() || ci >= b.ef.Count() {
-		return nil, nil
+func (b *BtIndex) LookAround(c *Cursor, x []byte) (found bool, err error) {
+	if b.Empty() || c.d >= b.ef.Count() {
+		return false, nil
 	}
 
 	// defer func() {
 	// 	fmt.Printf("[Bindex][%s] seekInFiles '%x' -> '%x' di=%d\n", b.FileName(), x, cursor.Value(), cursor.d)
 	// }()
-	var (
-		k     []byte
-		dt    uint64
-		found bool
-		err   error
-	)
-
+	var dt uint64
 	if UseBpsTree {
-		_, dt, found, err = b.bplus.LookAround(g, ci, x)
+		_, dt, found, err = b.bplus.LookAround(c.getter, c.d, x)
 	} else {
-		_, dt, found, err = b.alloc.Seek(g, x)
+		_, dt, found, err = b.alloc.Seek(c.getter, x)
 	}
 	_ = found
 	if err != nil /*|| !found*/ {
 		if errors.Is(err, ErrBtIndexLookupBounds) {
-			return nil, nil
+			return false, nil
 		}
-		return nil, err
+		return false, err
 	}
 
-	k, v, err := b.dataLookup(dt, g)
+	k, v, err := b.dataLookup(dt, c.getter)
 	if err != nil {
 		if errors.Is(err, ErrBtIndexLookupBounds) {
-			return nil, nil
+			return false, nil
 		}
-		return nil, err
+		return false, err
 	}
-	return b.newCursor(context.Background(), k, v, dt, g), nil
+	if !bytes.Equal(k, x) {
+		return false, nil
+	}
+	c.key = append(c.key[:0], k...)
+	c.value = append(c.value[:0], v...)
+	c.d = dt
+	return true, nil
 }
 func (b *BtIndex) OrdinalLookup(getter ArchiveGetter, i uint64) *Cursor {
 	k, v, err := b.dataLookup(i, getter)

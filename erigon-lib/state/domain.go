@@ -624,7 +624,6 @@ type DomainRoTx struct {
 }
 
 func (dt *DomainRoTx) getCursorFromFile(i int, filekey []byte) ([]byte, bool, error) {
-	// g := dt.statelessGetter(i)
 	if !(UseBtree || UseBpsTree) {
 		panic("not implemented")
 	}
@@ -1329,6 +1328,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 
 		//t := time.Now()
 		v, found, err = dt.getCursorFromFile(i, filekey)
+		//v, found, err = dt.getFromFile(i, filekey)
 		if err != nil {
 			return nil, false, 0, 0, err
 		}

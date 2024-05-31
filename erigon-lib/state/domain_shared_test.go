@@ -5,16 +5,14 @@ import (
 	"encoding/binary"
 	"fmt"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 	"math/rand"
 	"testing"
-	"time"
-
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/types"
 )
 
 func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
@@ -455,13 +453,17 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 		require.NoError(t, err)
 
 		missed := 0
+		checked := false
 		err = domains.IterateStoragePrefix(k0, func(k []byte, v []byte, step uint64) error {
+			checked = true
+			//fmt.Printf("checking %x\n", k)
 			if _, been := existed[string(k)]; !been {
 				missed++
 			}
 			return nil
 		})
 		require.NoError(t, err)
+		require.True(t, checked)
 		require.Zero(t, missed)
 
 		err = domains.deleteAccount(k0, pv, step)
