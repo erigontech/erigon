@@ -427,7 +427,7 @@ func BorHeimdallForward(
 	}
 
 	logger.Info(
-		fmt.Sprintf("[%s] Sync events processed", s.LogPrefix()),
+		fmt.Sprintf("[%s] Sync events", s.LogPrefix()),
 		"progress", blockNum-1,
 		"lastSpanID", lastSpanID,
 		"lastSpanID", lastSpanID,
