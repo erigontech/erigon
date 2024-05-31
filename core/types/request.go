@@ -105,16 +105,17 @@ func (r *Requests) DecodeRLP(s *rlp.Stream) (err error) {
 		}
 		return fmt.Errorf("read requests: %v", err)
 	}
-	r = new(Requests)
-	for err == nil{
+	*r = make(Requests, 0)
+	for {
 		var req Request
 		kind, _, err := s.Kind()
-		switch {
-		case err != nil:
+		if err != nil {
 			return err
-		case kind == rlp.List:
+		}
+		switch kind {
+		case rlp.List:
 			return fmt.Errorf("error: untyped request (unexpected lit)")
-		case kind == rlp.Byte:
+		case rlp.Byte:
 			return fmt.Errorf("error: too short request")
 		default:
 			var buf []byte
@@ -122,12 +123,11 @@ func (r *Requests) DecodeRLP(s *rlp.Stream) (err error) {
 				return err
 			}
 			if req, err = decode(buf); err != nil {
-				break
+				return err
 			}
 			*r = append(*r, req)
 		}
 	}
-	return err
 }
 
 func (r *Requests) EncodeRLP(w io.Writer) {
@@ -155,7 +155,7 @@ func (r *Requests) EncodeRLP(w io.Writer) {
 	}
 }
 
-func (r * Requests) EncodingSize() int{
+func (r *Requests) EncodingSize() int {
 	var c int
 	for _, req := range *r {
 		e := req.EncodingSize()

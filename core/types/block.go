@@ -942,7 +942,7 @@ func (bb Body) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen
 	if bb.Requests != nil {
 		requestsLen = bb.Requests.EncodingSize()
 		payloadSize += rlp2.ListPrefixLen(requestsLen) + requestsLen
-		
+
 	}
 
 	return payloadSize, txsLen, unclesLen, withdrawalsLen, requestsLen
@@ -1209,7 +1209,6 @@ func (bb Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLe
 		requestsLen = bb.requests.EncodingSize()
 		payloadSize += rlp2.ListPrefixLen(requestsLen) + requestsLen
 
-		
 	}
 
 	return payloadSize, txsLen, unclesLen, withdrawalsLen, requestsLen
@@ -1395,19 +1394,19 @@ func (b *Block) HashCheck() error {
 		return fmt.Errorf("block has invalid withdrawals hash: have %x, exp: %x", hash, b.WithdrawalsHash())
 	}
 
-	// if b.RequestsRoot() == nil {
-	// 	if b.Requests() != nil {
-	// 		return errors.New("header missing RequestsRoot")
-	// 	}
-	// 	return nil
-	// }
+	if b.RequestsRoot() == nil {
+		if b.Requests() != nil {
+			return errors.New("header missing RequestsRoot")
+		}
+		return nil
+	}
 	// if b.Requests() == nil {
 	// 	return errors.New("body missing Requests")
 	// }
 
-	// if hash := DeriveSha(b.Requests()); hash != *b.RequestsRoot() {
-	// 	return fmt.Errorf("block has invalid requests root: have %x, exp: %x", hash, b.RequestsRoot())
-	// }
+	if hash := DeriveSha(b.Requests()); hash != *b.RequestsRoot() {
+		return fmt.Errorf("block has invalid requests root: have %x, exp: %x", hash, b.RequestsRoot())
+	}
 
 	return nil
 }

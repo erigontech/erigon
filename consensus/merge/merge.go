@@ -171,7 +171,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("error: could not parse requests logs: %v", err)
 		}
-	
+
 		rs = append(rs, misc.DequeueWithdrawalRequests7002(syscall)...)
 	}
 
