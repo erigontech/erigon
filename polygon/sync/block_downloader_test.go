@@ -242,12 +242,13 @@ func TestBlockDownloaderDownloadBlocksUsingMilestones(t *testing.T) {
 
 	tip, err := test.blockDownloader.DownloadBlocksUsingMilestones(context.Background(), 1)
 	require.NoError(t, err)
-	require.Len(t, blocks, 4)
+	require.Len(t, blocks, 48) // 4 milestones x 12 blocks each
 	// check blocks are written in order
 	require.Equal(t, uint64(1), blocks[0].Header().Number.Uint64())
 	require.Equal(t, uint64(2), blocks[1].Header().Number.Uint64())
 	require.Equal(t, uint64(3), blocks[2].Header().Number.Uint64())
 	require.Equal(t, uint64(4), blocks[3].Header().Number.Uint64())
+	require.Equal(t, uint64(48), blocks[47].Header().Number.Uint64())
 	require.Equal(t, blocks[len(blocks)-1].Header(), tip)
 }
 
@@ -277,7 +278,7 @@ func TestBlockDownloaderDownloadBlocksUsingCheckpoints(t *testing.T) {
 
 	tip, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1)
 	require.NoError(t, err)
-	require.Len(t, blocks, 8)
+	require.Len(t, blocks, 8192) // 8 checkpoints x 1024 blocks each
 	// check blocks are written in order
 	require.Equal(t, uint64(1), blocks[0].Header().Number.Uint64())
 	require.Equal(t, uint64(2), blocks[1].Header().Number.Uint64())
@@ -287,6 +288,7 @@ func TestBlockDownloaderDownloadBlocksUsingCheckpoints(t *testing.T) {
 	require.Equal(t, uint64(6), blocks[5].Header().Number.Uint64())
 	require.Equal(t, uint64(7), blocks[6].Header().Number.Uint64())
 	require.Equal(t, uint64(8), blocks[7].Header().Number.Uint64())
+	require.Equal(t, uint64(8192), blocks[8191].Header().Number.Uint64())
 	require.Equal(t, blocks[len(blocks)-1].Header(), tip)
 }
 
@@ -295,7 +297,8 @@ func TestBlockDownloaderDownloadBlocksWhenInvalidHeadersThenPenalizePeerAndReDow
 	firstTimeInvalidReturnedPtr := &firstTimeInvalidReturned
 	test := newBlockDownloaderTestWithOpts(t, blockDownloaderTestOpts{
 		checkpointVerifier: func(waypoint heimdall.Waypoint, headers []*types.Header) error {
-			if waypoint.StartBlock().Cmp(new(big.Int).SetUint64(2)) == 0 && !*firstTimeInvalidReturnedPtr {
+			// 1025 is start of 2nd checkpoint
+			if waypoint.StartBlock().Cmp(new(big.Int).SetUint64(1025)) == 0 && !*firstTimeInvalidReturnedPtr {
 				*firstTimeInvalidReturnedPtr = true
 				return errors.New("invalid checkpoint")
 			}
@@ -351,8 +354,8 @@ func TestBlockDownloaderDownloadBlocksWhenInvalidHeadersThenPenalizePeerAndReDow
 
 	_, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1)
 	require.NoError(t, err)
-	require.Len(t, blocksBatch1, 1)
-	require.Len(t, blocksBatch2, 5)
+	require.Len(t, blocksBatch1, 1024)
+	require.Len(t, blocksBatch2, 5120)
 }
 
 func TestBlockDownloaderDownloadBlocksWhenZeroPeersTriesAgain(t *testing.T) {
@@ -389,7 +392,7 @@ func TestBlockDownloaderDownloadBlocksWhenZeroPeersTriesAgain(t *testing.T) {
 
 	tip, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1)
 	require.NoError(t, err)
-	require.Len(t, blocks, 8)
+	require.Len(t, blocks, 8192)
 	require.Equal(t, blocks[len(blocks)-1].Header(), tip)
 }
 
@@ -398,7 +401,8 @@ func TestBlockDownloaderDownloadBlocksWhenInvalidBodiesThenPenalizePeerAndReDown
 	firstTimeInvalidReturnedPtr := &firstTimeInvalidReturned
 	test := newBlockDownloaderTestWithOpts(t, blockDownloaderTestOpts{
 		blocksVerifier: func(blocks []*types.Block) error {
-			if blocks[0].NumberU64() == 2 && !*firstTimeInvalidReturnedPtr {
+			// 1025 is beginning of 2nd checkpoint
+			if blocks[0].NumberU64() == 1025 && !*firstTimeInvalidReturnedPtr {
 				*firstTimeInvalidReturnedPtr = true
 				return errors.New("invalid block body")
 			}
@@ -454,8 +458,8 @@ func TestBlockDownloaderDownloadBlocksWhenInvalidBodiesThenPenalizePeerAndReDown
 
 	_, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1)
 	require.NoError(t, err)
-	require.Len(t, blocksBatch1, 1)
-	require.Len(t, blocksBatch2, 5)
+	require.Len(t, blocksBatch1, 1024)
+	require.Len(t, blocksBatch2, 5120)
 }
 
 func TestBlockDownloaderDownloadBlocksWhenMissingBodiesThenPenalizePeerAndReDownload(t *testing.T) {
@@ -515,8 +519,8 @@ func TestBlockDownloaderDownloadBlocksWhenMissingBodiesThenPenalizePeerAndReDown
 
 	_, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1)
 	require.NoError(t, err)
-	require.Len(t, blocksBatch1, 1)
-	require.Len(t, blocksBatch2, 5)
+	require.Len(t, blocksBatch1, 1024)
+	require.Len(t, blocksBatch2, 5120)
 }
 
 func TestBlockDownloaderDownloadBlocksRespectsMaxWorkers(t *testing.T) {
@@ -557,8 +561,8 @@ func TestBlockDownloaderDownloadBlocksRespectsMaxWorkers(t *testing.T) {
 	// the downloader should fetch the 2 waypoints in 2 separate batches
 	_, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1)
 	require.NoError(t, err)
-	require.Len(t, blocksBatch1, 1)
-	require.Len(t, blocksBatch2, 1)
+	require.Len(t, blocksBatch1, 1024)
+	require.Len(t, blocksBatch2, 1024)
 }
 
 func TestBlockDownloaderDownloadBlocksRespectsBlockLimit(t *testing.T) {
