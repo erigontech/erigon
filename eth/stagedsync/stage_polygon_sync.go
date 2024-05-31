@@ -316,16 +316,6 @@ func (s *polygonSyncStageService) handleUpdateForkChoice(tx kv.RwTx, tip *types.
 	logTicker := time.NewTicker(logInterval)
 	defer logTicker.Stop()
 
-	var emptyHash common.Hash
-	currentCanonical := rawdb.ReadHeadBlockHash(tx)
-	if currentCanonical == emptyHash {
-		return errors.New("unexpected empty canonical hash")
-	}
-
-	if tip.Hash() == currentCanonical {
-		return nil
-	}
-
 	newNodes, badNodes, err := fixCanonicalChain(logPrefix, logTicker, tipBlockNum, tipHash, tx, s.blockReader, s.logger)
 	if err != nil {
 		return err
@@ -337,11 +327,12 @@ func (s *polygonSyncStageService) handleUpdateForkChoice(tx kv.RwTx, tip *types.
 		return s.unwinder.UnwindTo(badNode.number, ForkReset(badNode.hash), tx)
 	}
 
-	if len(newNodes) > 0 {
-		err := rawdb.AppendCanonicalTxNums(tx, newNodes[0].number)
-		if err != nil {
-			return err
-		}
+	if len(newNodes) == 0 {
+		return nil
+	}
+
+	if err := rawdb.AppendCanonicalTxNums(tx, newNodes[len(newNodes)-1].number); err != nil {
+		return err
 	}
 
 	if err := rawdb.WriteHeadHeaderHash(tx, tipHash); err != nil {
