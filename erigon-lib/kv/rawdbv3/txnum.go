@@ -175,9 +175,16 @@ func (txNums) FindBlockNum(tx kv.Tx, endTxNumMinimax uint64) (ok bool, blockNum 
 	lastBlockNum := binary.BigEndian.Uint64(lastK)
 
 	blockNum = uint64(sort.Search(int(lastBlockNum+1), func(i int) bool {
+		if err != nil { // don't loose errors from prev iterations
+			return true
+		}
+
 		binary.BigEndian.PutUint64(seek[:], uint64(i))
 		var v, found []byte
 		found, v, err = c.SeekExact(seek[:])
+		if err != nil {
+			return true
+		}
 		if len(v) != 8 {
 			_lb, _lt, _ := TxNums.Last(tx)
 			err = fmt.Errorf("FindBlockNum(%d): seems broken TxNum value: %x -> (%x, %x); last in db: (%d, %d)", endTxNumMinimax, seek, found, v, _lb, _lt)
