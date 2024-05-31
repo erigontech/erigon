@@ -1300,7 +1300,7 @@ var (
 	UseBtree = true // if true, will use btree for all files
 )
 
-func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
+func (dt *DomainRoTx) getFromFilesCursor(filekey []byte) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	hi, _ := dt.ht.iit.hashKey(filekey)
 
 	for i := len(dt.files) - 1; i >= 0; i-- {
@@ -1328,7 +1328,59 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 
 		//t := time.Now()
 		v, found, err = dt.getCursorFromFile(i, filekey)
-		//v, found, err = dt.getFromFile(i, filekey)
+		// v, found, err = dt.getFromFile(i, filekey)
+		if err != nil {
+			return nil, false, 0, 0, err
+		}
+		if !found {
+			if traceGetLatest == dt.d.filenameBase {
+				fmt.Printf("GetLatest(%s, %x) -> not found in file %s\n", dt.d.filenameBase, filekey, dt.files[i].src.decompressor.FileName())
+			}
+			//	LatestStateReadGrindNotFound.ObserveDuration(t)
+			continue
+		}
+		if traceGetLatest == dt.d.filenameBase {
+			fmt.Printf("GetLatest(%s, %x) -> found in file %s\n", dt.d.filenameBase, filekey, dt.files[i].src.decompressor.FileName())
+		}
+		//LatestStateReadGrind.ObserveDuration(t)
+		return v, true, dt.files[i].startTxNum, dt.files[i].endTxNum, nil
+	}
+	if traceGetLatest == dt.d.filenameBase {
+		fmt.Printf("GetLatest(%s, %x) -> not found in %d files\n", dt.d.filenameBase, filekey, len(dt.files))
+	}
+
+	return nil, false, 0, 0, nil
+}
+
+func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
+	hi, _ := dt.ht.iit.hashKey(filekey)
+
+	for i := len(dt.files) - 1; i >= 0; i-- {
+		if dt.d.indexList&withExistence != 0 {
+			//if dt.files[i].src.existence == nil {
+			//	panic(dt.files[i].src.decompressor.FileName())
+			//}
+			if dt.files[i].src.existence != nil {
+				if !dt.files[i].src.existence.ContainsHash(hi) {
+					if traceGetLatest == dt.d.filenameBase {
+						fmt.Printf("GetLatest(%s, %x) -> existence index %s -> false\n", dt.d.filenameBase, filekey, dt.files[i].src.existence.FileName)
+					}
+					continue
+				} else {
+					if traceGetLatest == dt.d.filenameBase {
+						fmt.Printf("GetLatest(%s, %x) -> existence index %s -> true\n", dt.d.filenameBase, filekey, dt.files[i].src.existence.FileName)
+					}
+				}
+			} else {
+				if traceGetLatest == dt.d.filenameBase {
+					fmt.Printf("GetLatest(%s, %x) -> existence index is nil %s\n", dt.d.filenameBase, filekey, dt.files[i].src.decompressor.FileName())
+				}
+			}
+		}
+
+		//t := time.Now()
+		// v, found, err = dt.getCursorFromFile(i, filekey)
+		v, found, err = dt.getFromFile(i, filekey)
 		if err != nil {
 			return nil, false, 0, 0, err
 		}
