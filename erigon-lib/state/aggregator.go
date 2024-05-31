@@ -1115,16 +1115,24 @@ func (ac *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, w
 	return aggStat, nil
 }
 
-func (ac *AggregatorRoTx) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint64) uint64) {
+func (ac *AggregatorRoTx) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint64) (uint64, error)) {
 	maxTxNum := ac.minimaxTxNumInDomainFiles(false)
 	if maxTxNum == 0 {
 		return
 	}
 
-	domainBlockNumProgress := tx2block(maxTxNum)
+	domainBlockNumProgress, err := tx2block(maxTxNum)
+	if err != nil {
+		log.Info("[snapshots] History Stat", "err", err)
+		return
+	}
 	str := make([]string, 0, len(ac.d[kv.AccountsDomain].files))
 	for _, item := range ac.d[kv.AccountsDomain].files {
-		bn := tx2block(item.endTxNum)
+		bn, err := tx2block(item.endTxNum)
+		if err != nil {
+			log.Info("[snapshots] History Stat", "err", err)
+			return
+		}
 		str = append(str, fmt.Sprintf("%d=%dK", item.endTxNum/ac.a.StepSize(), bn/1_000))
 	}
 	//str2 := make([]string, 0, len(ac.storage.files))
