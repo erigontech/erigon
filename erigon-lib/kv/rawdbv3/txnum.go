@@ -179,7 +179,6 @@ func (txNums) FindBlockNum(tx kv.Tx, endTxNumMinimax uint64) (ok bool, blockNum 
 		var v, found []byte
 		found, v, err = c.SeekExact(seek[:])
 		if len(v) != 8 {
-			c.Last()
 			_lb, _lt, _ := TxNums.Last(tx)
 			panic(fmt.Errorf("seems broken TxNum value: %x -> (%x, %x); last in db: (%x, %x)", seek, found, v, _lb, _lt))
 		}
