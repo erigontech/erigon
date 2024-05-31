@@ -4,6 +4,10 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math/rand"
+	"testing"
+	"time"
+
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -11,8 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
-	"math/rand"
-	"testing"
 )
 
 func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
