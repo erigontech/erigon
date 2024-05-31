@@ -372,7 +372,7 @@ func (a *Aggregator) BuildOptionalMissedIndicesInBackground(ctx context.Context,
 			if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
 				return
 			}
-			log.Warn("[snapshots] BuildOptionalMissedIndicesInBackground", "err", err)
+			a.logger.Warn("[snapshots] BuildOptionalMissedIndicesInBackground", "err", err)
 		}
 	}()
 }
@@ -423,7 +423,7 @@ func (a *Aggregator) BuildMissedIndices(ctx context.Context, workers int) error 
 				case <-logEvery.C:
 					var m runtime.MemStats
 					dbg.ReadMemStats(&m)
-					log.Info("[snapshots] Indexing", "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+					a.logger.Info("[snapshots] Indexing", "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 				}
 			}
 		}()
@@ -458,7 +458,7 @@ func (a *Aggregator) BuildMissedIndicesInBackground(ctx context.Context, workers
 			if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
 				return
 			}
-			log.Warn("[snapshots] BuildOptionalMissedIndicesInBackground", "err", err)
+			a.logger.Warn("[snapshots] BuildOptionalMissedIndicesInBackground", "err", err)
 		}
 	}()
 }
@@ -640,7 +640,7 @@ Loop:
 				break Loop
 			}
 			if a.HasBackgroundFilesBuild() {
-				log.Info("[snapshots] Files build", "progress", a.BackgroundProgress())
+				a.logger.Info("[snapshots] Files build", "progress", a.BackgroundProgress())
 			}
 		}
 	}
@@ -1115,16 +1115,24 @@ func (ac *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, w
 	return aggStat, nil
 }
 
-func (ac *AggregatorRoTx) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint64) uint64) {
+func (ac *AggregatorRoTx) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint64) (uint64, error)) {
 	maxTxNum := ac.minimaxTxNumInDomainFiles(false)
 	if maxTxNum == 0 {
 		return
 	}
 
-	domainBlockNumProgress := tx2block(maxTxNum)
+	domainBlockNumProgress, err := tx2block(maxTxNum)
+	if err != nil {
+		ac.a.logger.Warn("[snapshots:history] Stat", "err", err)
+		return
+	}
 	str := make([]string, 0, len(ac.d[kv.AccountsDomain].files))
 	for _, item := range ac.d[kv.AccountsDomain].files {
-		bn := tx2block(item.endTxNum)
+		bn, err := tx2block(item.endTxNum)
+		if err != nil {
+			ac.a.logger.Warn("[snapshots:history] Stat", "err", err)
+			return
+		}
 		str = append(str, fmt.Sprintf("%d=%dK", item.endTxNum/ac.a.StepSize(), bn/1_000))
 	}
 	//str2 := make([]string, 0, len(ac.storage.files))
@@ -1138,12 +1146,21 @@ func (ac *AggregatorRoTx) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint6
 	var lastCommitmentBlockNum, lastCommitmentTxNum uint64
 	if len(ac.d[kv.CommitmentDomain].files) > 0 {
 		lastCommitmentTxNum = ac.d[kv.CommitmentDomain].files[len(ac.d[kv.CommitmentDomain].files)-1].endTxNum
-		lastCommitmentBlockNum = tx2block(lastCommitmentTxNum)
+		lastCommitmentBlockNum, err = tx2block(lastCommitmentTxNum)
+		if err != nil {
+			ac.a.logger.Warn("[snapshots:history] Stat", "err", err)
+			return
+		}
 	}
-	firstHistoryIndexBlockInDB := tx2block(ac.d[kv.AccountsDomain].d.FirstStepInDB(tx) * ac.a.StepSize())
+	firstHistoryIndexBlockInDB, err := tx2block(ac.d[kv.AccountsDomain].d.FirstStepInDB(tx) * ac.a.StepSize())
+	if err != nil {
+		ac.a.logger.Warn("[snapshots:history] Stat", "err", err)
+		return
+	}
+
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
-	log.Info("[snapshots] History Stat",
+	ac.a.logger.Info("[snapshots:history] Stat",
 		"blocks", fmt.Sprintf("%dk", (domainBlockNumProgress+1)/1000),
 		"txs", fmt.Sprintf("%dm", ac.a.visibleFilesMinimaxTxNum.Load()/1_000_000),
 		"txNum2blockNum", strings.Join(str, ","),
@@ -1319,13 +1336,13 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 			}
 		}
 		if ai == len(accountFiles) || si == len(storageFiles) {
-			log.Info("SqueezeCommitmentFiles: commitment file has no corresponding account or storage file", "commitment", cf.decompressor.FileName())
+			ac.a.logger.Info("SqueezeCommitmentFiles: commitment file has no corresponding account or storage file", "commitment", cf.decompressor.FileName())
 			continue
 		}
 		af, sf := accountFiles[ai], storageFiles[si]
 
 		err := func() error {
-			log.Info("SqueezeCommitmentFiles: file start", "original", cf.decompressor.FileName(),
+			ac.a.logger.Info("SqueezeCommitmentFiles: file start", "original", cf.decompressor.FileName(),
 				"progress", fmt.Sprintf("%d/%d", ci+1, len(accountFiles)))
 
 			originalPath := cf.decompressor.FilePath()
@@ -1372,7 +1389,7 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 
 				select {
 				case <-logEvery.C:
-					log.Info("SqueezeCommitmentFiles", "file", cf.decompressor.FileName(), "k", fmt.Sprintf("%x", k),
+					ac.a.logger.Info("SqueezeCommitmentFiles", "file", cf.decompressor.FileName(), "k", fmt.Sprintf("%x", k),
 						"progress", fmt.Sprintf("%d/%d", i, cf.decompressor.Count()))
 				default:
 				}
@@ -1395,7 +1412,7 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 			}
 			sizeDelta += delta
 
-			log.Info("SqueezeCommitmentFiles: file done", "original", filepath.Base(originalPath),
+			ac.a.logger.Info("SqueezeCommitmentFiles: file done", "original", filepath.Base(originalPath),
 				"sizeDelta", fmt.Sprintf("%s (%.1f%%)", delta.HR(), deltaP))
 
 			fromStep, toStep := af.startTxNum/ac.a.StepSize(), af.endTxNum/ac.a.StepSize()
@@ -1415,23 +1432,23 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 		}
 	}
 
-	log.Info("SqueezeCommitmentFiles: squeezed files has been produced, removing obsolete files",
+	ac.a.logger.Info("SqueezeCommitmentFiles: squeezed files has been produced, removing obsolete files",
 		"toRemove", len(obsoleteFiles), "processed", fmt.Sprintf("%d/%d", processedFiles, len(commitFiles)))
 	for _, path := range obsoleteFiles {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		log.Debug("SqueezeCommitmentFiles: obsolete file removal", "path", path)
+		ac.a.logger.Debug("SqueezeCommitmentFiles: obsolete file removal", "path", path)
 	}
-	log.Info("SqueezeCommitmentFiles: indices removed, renaming temporal files ")
+	ac.a.logger.Info("SqueezeCommitmentFiles: indices removed, renaming temporal files ")
 
 	for _, path := range temporalFiles {
 		if err := os.Rename(path, strings.TrimSuffix(path, sqExt)); err != nil {
 			return err
 		}
-		log.Debug("SqueezeCommitmentFiles: temporal file renaming", "path", path)
+		ac.a.logger.Debug("SqueezeCommitmentFiles: temporal file renaming", "path", path)
 	}
-	log.Info("SqueezeCommitmentFiles: done", "sizeDelta", sizeDelta.HR(), "files", len(accountFiles))
+	ac.a.logger.Info("SqueezeCommitmentFiles: done", "sizeDelta", sizeDelta.HR(), "files", len(accountFiles))
 
 	return nil
 }
@@ -1583,7 +1600,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 		if a.snapshotBuildSema != nil {
 			//we are inside own goroutine - it's fine to block here
 			if err := a.snapshotBuildSema.Acquire(a.ctx, 1); err != nil {
-				log.Warn("[snapshots] buildFilesInBackground", "err", err)
+				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
 				return //nolint
 			}
 			defer a.snapshotBuildSema.Release(1)
@@ -1607,7 +1624,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 					close(fin)
 					return
 				}
-				log.Warn("[snapshots] buildFilesInBackground", "err", err)
+				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
 				break
 			}
 		}
@@ -1633,7 +1650,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 				if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
 					return
 				}
-				log.Warn("[snapshots] merge", "err", err)
+				a.logger.Warn("[snapshots] merge", "err", err)
 			}
 
 			a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
@@ -1781,7 +1798,7 @@ func (ac *AggregatorRoTx) DebugKey(domain kv.Domain, k []byte) error {
 		return err
 	}
 	if len(l) > 0 {
-		log.Info("[dbg] found in", "files", l)
+		ac.a.logger.Info("[dbg] found in", "files", l)
 	}
 	return nil
 }

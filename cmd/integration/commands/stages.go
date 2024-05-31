@@ -1803,9 +1803,9 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			_ = db.View(context.Background(), func(tx kv.Tx) error {
 				ac := _aggSingleton.BeginFilesRo()
 				defer ac.Close()
-				ac.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
-					_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
-					return histBlockNumProgress
+				ac.LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
+					_, histBlockNumProgress, err := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+					return histBlockNumProgress, err
 				})
 				return nil
 			})
