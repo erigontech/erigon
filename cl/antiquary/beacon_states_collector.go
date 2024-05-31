@@ -59,7 +59,7 @@ func newBeaconStatesCollector(beaconCfg *clparams.BeaconChainConfig, tmpdir stri
 	if err != nil {
 		panic(err)
 	}
-	c := &beaconStatesCollector{
+	return &beaconStatesCollector{
 		effectiveBalanceCollector:        etl.NewCollector(kv.ValidatorEffectiveBalance, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
 		balancesCollector:                etl.NewCollector(kv.ValidatorBalance, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
 		randaoMixesCollector:             etl.NewCollector(kv.RandaoMixes, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
@@ -84,7 +84,6 @@ func newBeaconStatesCollector(beaconCfg *clparams.BeaconChainConfig, tmpdir stri
 		buf:        buf,
 		compressor: compressor,
 	}
-	return c
 }
 
 func (i *beaconStatesCollector) addGenesisState(ctx context.Context, state *state.CachingBeaconState) error {
