@@ -1307,7 +1307,7 @@
           "refId": "B"
         }
       ],
-      "title": "Delay - network involved",
+      "title": "Delay - Network",
       "type": "timeseries"
     },
     {
@@ -1418,7 +1418,7 @@
           "refId": "B"
         }
       ],
-      "title": "Delay - no network involved",
+      "title": "Delay - Execution",
       "type": "timeseries"
     },
     {
