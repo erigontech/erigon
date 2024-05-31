@@ -37,6 +37,7 @@ func NewPolygonSyncStageCfg(
 	blockReader services.FullBlockReader,
 	stopNode func() error,
 	stateReceiverABI abi.ABI,
+	blockLimit uint,
 ) PolygonSyncStageCfg {
 	dataStream := make(chan polygonSyncStageDataItem)
 	storage := &polygonSyncStageStorage{
@@ -62,6 +63,7 @@ func NewPolygonSyncStageCfg(
 		milestoneVerifier,
 		blocksVerifier,
 		storage,
+		blockLimit,
 	)
 	spansCache := polygonsync.NewSpansCache()
 	events := polygonsync.NewTipEvents(logger, p2pService, heimdallService)
