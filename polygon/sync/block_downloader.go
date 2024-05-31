@@ -351,6 +351,7 @@ func (d *blockDownloader) limitWaypoints(waypoints []heimdall.Waypoint) []heimda
 
 	startBlockNum := waypoints[0].StartBlock().Uint64()
 	for i, waypoint := range waypoints {
+		// we allow a bit of surplus to overflow above the block limit at checkpoint boundary
 		if waypoint.EndBlock().Uint64()-startBlockNum < uint64(d.blockLimit) {
 			continue
 		}
