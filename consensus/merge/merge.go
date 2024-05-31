@@ -131,11 +131,11 @@ func (s *Merge) CalculateRewards(config *chain.Config, header *types.Header, unc
 }
 
 func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests,
+	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests,
 	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
 ) (types.Transactions, types.Receipts, types.Requests, error) {
 	if !misc.IsPoSHeader(header) {
-		return s.eth1Engine.Finalize(config, header, state, txs, uncles, r, withdrawals, requests, chain, syscall, logger)
+		return s.eth1Engine.Finalize(config, header, state, txs, uncles, receipts, withdrawals, requests, chain, syscall, logger)
 	}
 
 	rewards, err := s.CalculateRewards(config, header, uncles, syscall)
@@ -159,9 +159,23 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		}
 	}
 
-	requests = append(types.Requests{}, misc.DequeueWithdrawalRequests7002(syscall)...)
+	var rs types.Requests
+	if config.IsPrague(header.Time) {
+		rs = types.Requests{}
+		allLogs := types.Logs{}
+		for _, rec := range receipts {
+			allLogs = append(allLogs, rec.Logs...)
+		}
+		ds, err := types.ParseDepositLogs(allLogs, config.DepositContract)
+		rs = append(rs, ds...)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("error: could not parse requests logs: %v", err)
+		}
+	
+		rs = append(rs, misc.DequeueWithdrawalRequests7002(syscall)...)
+	}
 
-	return txs, r, requests, nil
+	return txs, receipts, rs, nil
 }
 
 func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState,
@@ -173,12 +187,12 @@ func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, 
 	}
 	// get the deposits (TODO @somnathb1) and withdrawals and append it to requests
 	// requests = append(types.Requests{}, misc.DequeueWithdrawalRequests7002(syscall)...)
-	outTxs, outReceipts, requests, err := s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, requests, chain, syscall, logger)
+	outTxs, outReceipts, rs, err := s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, requests, chain, syscall, logger)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	*header.RequestsRoot = types.DeriveSha(requests)
-	return types.NewBlock(header, outTxs, uncles, outReceipts, withdrawals, requests), outTxs, outReceipts, nil
+	return types.NewBlock(header, outTxs, uncles, outReceipts, withdrawals, rs), outTxs, outReceipts, nil
 }
 
 func (s *Merge) SealHash(header *types.Header) (hash libcommon.Hash) {

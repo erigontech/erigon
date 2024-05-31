@@ -20,6 +20,7 @@ package core
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 	"time"
 
@@ -348,32 +349,15 @@ func FinalizeBlockExecution(
 	syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 		return SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */)
 	}
-	// get a local requests struct and put in requests
 	if isMining {
-		// TODO @somnathb1 pass the requests in
-		if cc.IsPrague(header.Time) {
-			allLogs := types.Logs{}
-			for _, r := range receipts {
-				allLogs = append(allLogs, r.Logs...)
-			}
-			requests = types.Requests{}
-			ds, err := types.ParseDepositLogs(allLogs, cc.DepositContract)
-			requests = append(requests, ds...)
-			if err != nil {
-				return nil, nil, nil, fmt.Errorf("error: could not parse requests logs: %v", err)
-			}
-
-			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-				return SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */)
-			}
-			wrs := misc.DequeueWithdrawalRequests7002(syscall)
-			requests = append(requests, wrs...)
-		}
 		newBlock, newTxs, newReceipt, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, nil, logger)
-		// newBlock.header
 
 	} else {
-		_, _, _, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, logger)
+		var rss types.Requests
+		_, _, rss, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, logger)
+		if !reflect.DeepEqual(rss, requests) {
+			return nil, nil, nil, fmt.Errorf("invalid requests for block %d", header.Number.Uint64())
+		}
 	}
 	if err != nil {
 		return nil, nil, nil, err

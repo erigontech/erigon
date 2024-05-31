@@ -123,10 +123,10 @@ func unpackIntoDeposit(data []byte) (*Deposit, error) {
 
 // ParseDepositLogs extracts the EIP-6110 deposit values from logs emitted by
 // BeaconDepositContract.
-func ParseDepositLogs(logs []*Log, depositContractAddress *libcommon.Address) (Requests, error) {
-	var deposits Requests
+func ParseDepositLogs(logs []*Log, depositContractAddress libcommon.Address) (Requests, error) {
+	deposits := Requests{}
 	for _, log := range logs {
-		if log.Address == *depositContractAddress {
+		if log.Address == depositContractAddress {
 			d, err := unpackIntoDeposit(log.Data)
 			if err != nil {
 				return nil, fmt.Errorf("unable to parse deposit data: %v", err)
