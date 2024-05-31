@@ -371,7 +371,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 
 		case stages.Bodies:
 			firstTxNum := blockReader.FirstTxnNumNotInSnapshots()
-			log.Info("[dbg] FillDBFromSnapshots", "firstTxNum", firstTxNum, "FirstTxnNumNotInSnapshots", blockReader.FirstTxnNumNotInSnapshots())
+			log.Info("[dbg] FillDBFromSnapshots", "blockReader.FirstTxnNumNotInSnapshots()", firstTxNum)
 			// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
 			if err := rawdb.ResetSequence(tx, kv.EthTx, firstTxNum); err != nil {
 				return err
