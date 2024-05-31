@@ -629,6 +629,7 @@ func (dt *DomainRoTx) getCursorFromFile(i int, filekey []byte) ([]byte, bool, er
 	}
 
 	cur := dt.statefulBtree(i)
+	cur.getter = dt.statelessGetter(i)
 	found, err := cur.LookAround(filekey)
 	if err != nil {
 		return nil, false, err
@@ -1379,8 +1380,8 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 		}
 
 		//t := time.Now()
-		// v, found, err = dt.getCursorFromFile(i, filekey)
-		v, found, err = dt.getFromFile(i, filekey)
+		v, found, err = dt.getCursorFromFile(i, filekey)
+		// v, found, err = dt.getFromFile(i, filekey)
 		if err != nil {
 			return nil, false, 0, 0, err
 		}

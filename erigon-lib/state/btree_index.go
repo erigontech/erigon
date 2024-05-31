@@ -107,7 +107,8 @@ func (c *Cursor) Next() bool {
 	if err != nil {
 		return false
 	}
-	c.key, c.value = key, value
+	c.key = append(c.key[:0], key...)
+	c.value = append(c.value[:0], value...)
 	return true
 }
 
@@ -870,6 +871,7 @@ func (b *BtIndex) dataLookup(di uint64, g ArchiveGetter) ([]byte, []byte, error)
 }
 
 // comparing `k` with item of index `di`. using buffer `kBuf` to avoid allocations
+// resulting int is 1 when key[di] > k; -1 when key[di] < k
 func (b *BtIndex) keyCmp(k []byte, di uint64, g ArchiveGetter) (int, []byte, error) {
 	if di >= b.ef.Count() {
 		return 0, nil, fmt.Errorf("%w: keyCount=%d, but key %d requested. file: %s", ErrBtIndexLookupBounds, b.ef.Count(), di+1, b.FileName())
