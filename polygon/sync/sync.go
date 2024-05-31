@@ -274,7 +274,7 @@ func (s *Sync) syncToTip(ctx context.Context) (*types.Header, error) {
 		return nil, err
 	}
 
-	tip, err = s.syncToTipUsingCheckpoints(ctx, tip)
+	tip, err = s.syncToTipUsingMilestones(ctx, tip)
 	if err != nil {
 		return nil, err
 	}
