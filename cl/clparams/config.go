@@ -15,7 +15,6 @@ package clparams
 
 import (
 	"crypto/rand"
-	"encoding/binary"
 	"fmt"
 	"math"
 	"math/big"
@@ -24,9 +23,10 @@ import (
 	"path"
 	"time"
 
+	"gopkg.in/yaml.v2"
+
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"gopkg.in/yaml.v2"
 
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
@@ -320,9 +320,7 @@ func (b ConfigByte) MarshalJSON() ([]byte, error) {
 type ConfigForkVersion uint32
 
 func (v ConfigForkVersion) MarshalJSON() ([]byte, error) {
-	tmp := make([]byte, 4)
-	binary.BigEndian.PutUint32(tmp, uint32(v))
-	return []byte(fmt.Sprintf("\"0x%x\"", tmp)), nil
+	return []byte(fmt.Sprintf("\"0x%08x\"", v)), nil
 }
 
 // BeaconChainConfig contains constant configs for node to participate in beacon chain.
