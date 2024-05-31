@@ -1146,9 +1146,18 @@ func (ac *AggregatorRoTx) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint6
 	var lastCommitmentBlockNum, lastCommitmentTxNum uint64
 	if len(ac.d[kv.CommitmentDomain].files) > 0 {
 		lastCommitmentTxNum = ac.d[kv.CommitmentDomain].files[len(ac.d[kv.CommitmentDomain].files)-1].endTxNum
-		lastCommitmentBlockNum = tx2block(lastCommitmentTxNum)
+		lastCommitmentBlockNum, err = tx2block(lastCommitmentTxNum)
+		if err != nil {
+			log.Info("[snapshots] History Stat", "err", err)
+			return
+		}
 	}
-	firstHistoryIndexBlockInDB := tx2block(ac.d[kv.AccountsDomain].d.FirstStepInDB(tx) * ac.a.StepSize())
+	firstHistoryIndexBlockInDB, err := tx2block(ac.d[kv.AccountsDomain].d.FirstStepInDB(tx) * ac.a.StepSize())
+	if err != nil {
+		log.Info("[snapshots] History Stat", "err", err)
+		return
+	}
+
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	log.Info("[snapshots] History Stat",
