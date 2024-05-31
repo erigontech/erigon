@@ -132,6 +132,11 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	}
 	defer e.semaphore.Release(1)
 
+	//if err := stages2.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline); err != nil {
+	//	sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+	//	e.logger.Warn("ProcessFrozenBlocks", "error", err)
+	//	return
+	//}
 	defer e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
 
 	// Update the last new block seen.
