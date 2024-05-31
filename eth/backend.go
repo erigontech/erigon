@@ -776,7 +776,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				contracts.VerificationTopicPreEtrog,
 				contracts.VerificationTopicEtrog,
 			}}
-			l1Contracts = []libcommon.Address{cfg.AddressRollup, cfg.AddressAdmin}
+			l1Contracts = []libcommon.Address{cfg.AddressRollup, cfg.AddressAdmin, cfg.AddressZkevm}
 		}
 
 		ethermanClients := make([]syncer.IEtherman, len(backend.etherManClients))
