@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"sync"
 	"time"
 
 	btree2 "github.com/tidwall/btree"
@@ -209,6 +210,7 @@ func (h *History) scanStateFiles(fNames []string) (garbageFiles []*filesItem) {
 }
 
 func (h *History) openFiles() error {
+	invalidFilesMu := sync.Mutex{}
 	invalidFileItems := make([]*filesItem, 0)
 	h.dirtyFiles.Walk(func(items []*filesItem) bool {
 		var err error
@@ -219,16 +221,34 @@ func (h *History) openFiles() error {
 				if !dir.FileExist(fPath) {
 					_, fName := filepath.Split(fPath)
 					h.logger.Debug("[agg] History.openFiles: file does not exists", "f", fName)
+					invalidFilesMu.Lock()
 					invalidFileItems = append(invalidFileItems, item)
+					invalidFilesMu.Unlock()
 					continue
 				}
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 					_, fName := filepath.Split(fPath)
 					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
 						h.logger.Debug("[agg] History.openFiles", "err", err, "f", fName)
+						// TODO we do not restore those files so we could just remove them along with indices. Same for domains/indices.
+						//      Those files will keep space on disk and closed automatically as corrupted. So better to remove them, and maybe remove downloading prohibiter to allow downloading them again?
+						//
+						// itemPaths := []string{
+						// 	fPath,
+						// 	h.vAccessorFilePath(fromStep, toStep),
+						// }
+						// for _, fp := range itemPaths {
+						// 	err = os.Remove(fp)
+						// 	if err != nil {
+						// 		h.logger.Warn("[agg] History.openFiles cannot remove corrupted file", "err", err, "f", fp)
+						// 	}
+						// }
 					} else {
 						h.logger.Warn("[agg] History.openFiles", "err", err, "f", fName)
 					}
+					invalidFilesMu.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFilesMu.Unlock()
 					// don't interrupt on error. other files may be good. but skip indices open.
 					continue
 				}
@@ -244,7 +264,6 @@ func (h *History) openFiles() error {
 					}
 				}
 			}
-
 		}
 		return true
 	})
@@ -512,11 +531,10 @@ func (ht *HistoryRoTx) newWriter(tmpdir string, discard bool) *historyBufferedWr
 		historyKey:       make([]byte, 128),
 		largeValues:      ht.h.historyLargeValues,
 		historyValsTable: ht.h.historyValsTable,
-		historyVals:      etl.NewCollector("flush "+ht.h.historyValsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), ht.h.logger),
+		historyVals:      etl.NewCollector("flush "+ht.h.historyValsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), ht.h.logger).LogLvl(log.LvlTrace),
 
 		ii: ht.iit.newWriter(tmpdir, discard),
 	}
-	w.historyVals.LogLvl(log.LvlTrace)
 	w.historyVals.SortAndFlushInBackground(true)
 	return w
 }
@@ -597,6 +615,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
 	collector := etl.NewCollector("collate hist "+h.filenameBase, h.iiCfg.dirs.Tmp, etl.NewSortableBuffer(CollateETLRAM), h.logger)
 	defer collector.Close()
+	collector.LogLvl(log.LvlTrace)
 
 	for txnmb, k, err := keysCursor.Seek(txKey[:]); err == nil && txnmb != nil; txnmb, k, err = keysCursor.Next() {
 		if err != nil {
@@ -1082,8 +1101,8 @@ func (ht *HistoryRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 			if err != nil {
 				return err
 			}
-			if binary.BigEndian.Uint64(vv) != txNum {
-				return fmt.Errorf("history invalid txNum: %d != %d", binary.BigEndian.Uint64(vv), txNum)
+			if vtx := binary.BigEndian.Uint64(vv); vtx != txNum {
+				return fmt.Errorf("prune history %s got invalid txNum: found %d != %d wanted", ht.h.filenameBase, vtx, txNum)
 			}
 			if err = valsCDup.DeleteCurrent(); err != nil {
 				return err

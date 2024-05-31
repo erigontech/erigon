@@ -8,7 +8,14 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
 )
+
+var databaseTablesCfg = kv.TableCfg{
+	kv.BorCheckpoints: {},
+	kv.BorMilestones:  {},
+	kv.BorSpans:       {},
+}
 
 type entityStore[TEntity Entity] interface {
 	Prepare(ctx context.Context) error
@@ -25,7 +32,8 @@ type entityStore[TEntity Entity] interface {
 type RangeIndexFactory func(ctx context.Context) (*RangeIndex, error)
 
 type entityStoreImpl[TEntity Entity] struct {
-	db    *Database
+	db    *polygoncommon.Database
+	label kv.Label
 	table string
 
 	makeEntity func() TEntity
@@ -36,13 +44,15 @@ type entityStoreImpl[TEntity Entity] struct {
 }
 
 func newEntityStore[TEntity Entity](
-	db *Database,
+	db *polygoncommon.Database,
+	label kv.Label,
 	table string,
 	makeEntity func() TEntity,
 	blockNumToIdIndexFactory RangeIndexFactory,
 ) entityStore[TEntity] {
 	return &entityStoreImpl[TEntity]{
 		db:    db,
+		label: label,
 		table: table,
 
 		makeEntity: makeEntity,
@@ -54,7 +64,7 @@ func newEntityStore[TEntity Entity](
 func (s *entityStoreImpl[TEntity]) Prepare(ctx context.Context) error {
 	var err error
 	s.prepareOnce.Do(func() {
-		err = s.db.OpenOnce(ctx)
+		err = s.db.OpenOnce(ctx, s.label, databaseTablesCfg)
 		if err != nil {
 			return
 		}
