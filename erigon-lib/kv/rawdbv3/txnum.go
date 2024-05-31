@@ -20,7 +20,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/log/v3"
 	"sort"
 
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -193,7 +192,6 @@ func (txNums) FindBlockNum(tx kv.Tx, endTxNumMinimax uint64) (ok bool, blockNum 
 		}
 		return binary.BigEndian.Uint64(v) >= endTxNumMinimax
 	}))
-	log.Warn("[dbg] FindBlockNum2", "err", err)
 	if err != nil {
 		return false, 0, err
 	}
