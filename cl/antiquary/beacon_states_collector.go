@@ -59,31 +59,32 @@ func newBeaconStatesCollector(beaconCfg *clparams.BeaconChainConfig, tmpdir stri
 	if err != nil {
 		panic(err)
 	}
-	return &beaconStatesCollector{
-		effectiveBalanceCollector:        etl.NewCollector(kv.ValidatorEffectiveBalance, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger),
-		balancesCollector:                etl.NewCollector(kv.ValidatorBalance, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger),
-		randaoMixesCollector:             etl.NewCollector(kv.RandaoMixes, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger),
-		intraRandaoMixesCollector:        etl.NewCollector(kv.IntraRandaoMixes, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger),
-		proposersCollector:               etl.NewCollector(kv.Proposers, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger),
-		slashingsCollector:               etl.NewCollector(kv.ValidatorSlashings, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger),
-		blockRootsCollector:              etl.NewCollector(kv.BlockRoot, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger),
-		stateRootsCollector:              etl.NewCollector(kv.StateRoot, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger),
-		slotDataCollector:                etl.NewCollector(kv.SlotData, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger),
-		epochDataCollector:               etl.NewCollector(kv.EpochData, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger),
-		inactivityScoresCollector:        etl.NewCollector(kv.InactivityScores, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger),
-		nextSyncCommitteeCollector:       etl.NewCollector(kv.NextSyncCommittee, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger),
-		currentSyncCommitteeCollector:    etl.NewCollector(kv.CurrentSyncCommittee, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger),
-		eth1DataVotesCollector:           etl.NewCollector(kv.Eth1DataVotes, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger),
-		stateEventsCollector:             etl.NewCollector(kv.StateEvents, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger),
-		activeValidatorIndiciesCollector: etl.NewCollector(kv.ActiveValidatorIndicies, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger),
-		balancesDumpsCollector:           etl.NewCollector(kv.BalancesDump, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger),
-		effectiveBalancesDumpCollector:   etl.NewCollector(kv.EffectiveBalancesDump, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger),
+	c := &beaconStatesCollector{
+		effectiveBalanceCollector:        etl.NewCollector(kv.ValidatorEffectiveBalance, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
+		balancesCollector:                etl.NewCollector(kv.ValidatorBalance, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
+		randaoMixesCollector:             etl.NewCollector(kv.RandaoMixes, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
+		intraRandaoMixesCollector:        etl.NewCollector(kv.IntraRandaoMixes, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
+		proposersCollector:               etl.NewCollector(kv.Proposers, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
+		slashingsCollector:               etl.NewCollector(kv.ValidatorSlashings, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
+		blockRootsCollector:              etl.NewCollector(kv.BlockRoot, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
+		stateRootsCollector:              etl.NewCollector(kv.StateRoot, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
+		slotDataCollector:                etl.NewCollector(kv.SlotData, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
+		epochDataCollector:               etl.NewCollector(kv.EpochData, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
+		inactivityScoresCollector:        etl.NewCollector(kv.InactivityScores, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
+		nextSyncCommitteeCollector:       etl.NewCollector(kv.NextSyncCommittee, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
+		currentSyncCommitteeCollector:    etl.NewCollector(kv.CurrentSyncCommittee, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
+		eth1DataVotesCollector:           etl.NewCollector(kv.Eth1DataVotes, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
+		stateEventsCollector:             etl.NewCollector(kv.StateEvents, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
+		activeValidatorIndiciesCollector: etl.NewCollector(kv.ActiveValidatorIndicies, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
+		balancesDumpsCollector:           etl.NewCollector(kv.BalancesDump, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
+		effectiveBalancesDumpCollector:   etl.NewCollector(kv.EffectiveBalancesDump, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
 		logger:                           logger,
 		beaconCfg:                        beaconCfg,
 
 		buf:        buf,
 		compressor: compressor,
 	}
+	return c
 }
 
 func (i *beaconStatesCollector) addGenesisState(ctx context.Context, state *state.CachingBeaconState) error {
