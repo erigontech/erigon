@@ -1208,7 +1208,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			}
 		}
 		for _, kv := range valsKV {
-			if kv.Value == nil {
+			if len(kv.Value) == 0 {
 				if err := rwTx.Delete(d.valsTable, kv.Key); err != nil {
 					return err
 				}
