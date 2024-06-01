@@ -3,7 +3,9 @@ package state
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"sort"
+	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -20,9 +22,11 @@ type StateChangeSet struct {
 }
 
 func (s *StateChangeSet) Compress() {
+	start := time.Now()
 	for i := range s.Diffs {
 		s.Diffs[i].Compress()
 	}
+	fmt.Println("DEBUG: StateChangeSet.Compress() took", time.Since(start))
 }
 
 type KVPair struct {
@@ -90,6 +94,7 @@ func (d *StateDiffDomain) Compress() {
 	for k, v := range mapPrevValues {
 		d.prevValues = append(d.prevValues, KVPair{Key: []byte(k), Value: v})
 	}
+	fmt.Println("DEBUG: StateDiffDomain.Compress() d.keys:", len(d.keys), len(d.prevValues))
 	d.compressed = true
 	d.sorted = false
 }
