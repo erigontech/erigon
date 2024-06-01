@@ -206,8 +206,8 @@ func logDownloadingBodies(logPrefix string, committed, remaining uint64, totalDe
 
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
-	logger.Info(fmt.Sprintf("[%s] Downloading block bodies", logPrefix),
-		"block_num", committed,
+	logger.Info(fmt.Sprintf("[%s] Downloading bodies", logPrefix),
+		"block", committed,
 		"delivery/sec", libcommon.ByteCount(uint64(speed)),
 		"wasted/sec", libcommon.ByteCount(uint64(wastedSpeed)),
 		"remaining", remaining,
@@ -222,8 +222,8 @@ func logWritingBodies(logPrefix string, committed, headerProgress uint64, logger
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	remaining := headerProgress - committed
-	logger.Info(fmt.Sprintf("[%s] Writing block bodies", logPrefix),
-		"block_num", committed,
+	logger.Info(fmt.Sprintf("[%s] Writing bodies", logPrefix),
+		"block", committed,
 		"remaining", remaining,
 		"alloc", libcommon.ByteCount(m.Alloc),
 		"sys", libcommon.ByteCount(m.Sys),

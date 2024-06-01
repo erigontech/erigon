@@ -384,7 +384,7 @@ func logWritingBodies(logPrefix string, committed, headerProgress uint64, logger
 		Sys:         m.Sys,
 	})
 
-	logger.Info(fmt.Sprintf("[%s] Writing block bodies", logPrefix),
+	logger.Info(fmt.Sprintf("[%s] Writing bodies", logPrefix),
 		"block_num", committed,
 		"remaining", remaining,
 		"alloc", libcommon.ByteCount(m.Alloc),
