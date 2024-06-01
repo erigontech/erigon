@@ -49,7 +49,6 @@ func (d *StateDiffDomain) DomainUpdate(key1, key2, prevValue, stepBytes []byte, 
 	prevValue = common.Copy(prevValue)
 
 	d.keys[string(key)] = prevStepBytes
-	fmt.Println(prevValue)
 	if bytes.Equal(stepBytes, prevStepBytes) {
 		d.prevValues[string(append(key, stepBytes...))] = prevValue
 	} else {
