@@ -282,7 +282,7 @@ func ExecV3(ctx context.Context,
 	blockNum = doms.BlockNum()
 	outputTxNum.Store(doms.TxNum())
 	fmt.Println(maxBlockNum, blockNum)
-	shouldGenerateChangesets := maxBlockNum-blockNum == 1
+	shouldGenerateChangesets := maxBlockNum-blockNum == 0
 	if maxBlockNum-blockNum > 16 {
 		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
 			"from", blockNum, "to", maxBlockNum, "fromTxNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx)
