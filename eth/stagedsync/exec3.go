@@ -884,7 +884,6 @@ Loop:
 					break Loop
 				}
 				if shouldGenerateChangesets {
-					changeset.Compress()
 					state2.GlobalChangesetStorage.Put(b.Hash(), changeset)
 				}
 				t1 = time.Since(tt)
@@ -968,7 +967,6 @@ Loop:
 				return err
 			}
 			if shouldGenerateChangesets {
-				changeset.Compress()
 				state2.GlobalChangesetStorage.Put(b.Hash(), changeset)
 			}
 			doms.SetChangesetAccumulator(nil)
