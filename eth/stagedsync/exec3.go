@@ -281,6 +281,7 @@ func ExecV3(ctx context.Context,
 
 	blockNum = doms.BlockNum()
 	outputTxNum.Store(doms.TxNum())
+	shouldGenerateChangesets := maxBlockNum-blockNum == 1
 	if maxBlockNum-blockNum > 16 {
 		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
 			"from", blockNum, "to", maxBlockNum, "fromTxNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx)
@@ -607,6 +608,12 @@ func ExecV3(ctx context.Context,
 	}
 
 	//fmt.Printf("exec blocks: %d -> %d\n", blockNum, maxBlockNum)
+	changeset := &state2.StateChangeSet{
+		BeginTxIndex: doms.TxNum(),
+	}
+	if shouldGenerateChangesets {
+		doms.SetChangesetAccumulator(changeset)
+	}
 
 	var b *types.Block
 Loop:
@@ -688,10 +695,6 @@ Loop:
 		skipPostEvaluation := false
 		var usedGas, blobGasUsed uint64
 
-		changeset := &state2.StateChangeSet{
-			BeginTxIndex: doms.TxNum(),
-		}
-		doms.SetChangesetAccumulator(changeset)
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &state.TxTask{
@@ -842,8 +845,6 @@ Loop:
 			stageProgress = blockNum
 			inputTxNum++
 		}
-		changeset.Compress()
-		state2.GlobalChangesetStorage.Put(b.Hash(), changeset)
 
 		if offsetFromBlockBeginning > 0 {
 			// after history execution no offset will be required
@@ -879,6 +880,10 @@ Loop:
 					return err
 				} else if !ok {
 					break Loop
+				}
+				if shouldGenerateChangesets {
+					changeset.Compress()
+					state2.GlobalChangesetStorage.Put(b.Hash(), changeset)
 				}
 				t1 = time.Since(tt)
 

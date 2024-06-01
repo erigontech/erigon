@@ -979,6 +979,9 @@ func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte,
 		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
 	}
 	sdc.branches[string(prefix)] = cachedBranch{data: data, step: prevStep}
+	if sdc.sd.changesAccumulator != nil {
+		sdc.sd.changesAccumulator.Diffs[kv.CommitmentDomain].DomainUpdate(prefix, nil, prevData, prevStep)
+	}
 	return sdc.sd.updateCommitmentData(prefix, data, prevData, prevStep)
 }
 
