@@ -5,14 +5,24 @@ import (
 	"encoding/binary"
 	"sort"
 
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 )
+
+const MaxFastChangesets = 64
 
 type StateDiffKind uint8
 
 type StateChangeSet struct {
-	BeginTxIndex uint64             // Txn index to unwind to
-	Diffs        [4]StateDiffDomain // there are 4 domains of state changes
+	BeginTxIndex uint64                        // Txn index to unwind to
+	Diffs        [kv.DomainLen]StateDiffDomain // there are 4 domains of state changes
+}
+
+func (s *StateChangeSet) Compress() {
+	for i := range s.Diffs {
+		s.Diffs[i].Compress()
+	}
 }
 
 type KVPair struct {
@@ -26,6 +36,7 @@ type StateDiffDomain struct {
 	keys       []KVPair
 	prevValues []KVPair
 	sorted     bool
+	compressed bool
 }
 
 // RecordDelta records a state change.
@@ -38,6 +49,7 @@ func (d *StateDiffDomain) DomainUpdate(key1, key2, prevValue []byte, prevStep ui
 	d.keys = append(d.keys, KVPair{Key: key, Value: prevStepBytes})                                   // Key -> Step
 	d.prevValues = append(d.prevValues, KVPair{Key: append(key, prevStepBytes...), Value: prevValue}) // Key + Step -> Value
 	d.sorted = false
+	d.compressed = false
 }
 
 func (d *StateDiffDomain) sort() {
@@ -53,7 +65,59 @@ func (d *StateDiffDomain) sort() {
 	d.sorted = true
 }
 
+func (d *StateDiffDomain) Compress() {
+	if d.compressed {
+		return
+	}
+	// map reduce value in backward order
+	mapPrevValues := make(map[string][]byte)
+	for i := len(d.prevValues) - 1; i >= 0; i-- {
+		kv := d.prevValues[i]
+		mapPrevValues[string(kv.Key)] = kv.Value
+	}
+
+	mapPrevKeys := make(map[string][]byte)
+	for i := len(d.keys) - 1; i >= 0; i-- {
+		kv := d.keys[i]
+		mapPrevKeys[string(kv.Key)] = kv.Value
+	}
+	d.prevValues = d.prevValues[:0]
+	d.keys = d.keys[:0]
+
+	for k, v := range mapPrevKeys {
+		d.keys = append(d.keys, KVPair{Key: []byte(k), Value: v})
+	}
+	for k, v := range mapPrevValues {
+		d.prevValues = append(d.prevValues, KVPair{Key: []byte(k), Value: v})
+	}
+	d.compressed = true
+	d.sorted = false
+}
+
 func (d *StateDiffDomain) GetKeys() (keysToSteps []KVPair, keysToValue []KVPair) {
+	d.Compress()
 	d.sort()
 	return d.keys, d.prevValues
 }
+
+type ChangesetStorage struct {
+	st *lru.Cache[common.Hash, *StateChangeSet]
+}
+
+func NewChangesetStorage() *ChangesetStorage {
+	st, _ := lru.New[common.Hash, *StateChangeSet](MaxFastChangesets)
+	return &ChangesetStorage{st: st}
+}
+
+func (s *ChangesetStorage) Get(hash common.Hash) (*StateChangeSet, bool) {
+	return s.st.Get(hash)
+}
+
+func (s *ChangesetStorage) Put(hash common.Hash, cs *StateChangeSet) {
+	if cs == nil {
+		return
+	}
+	s.st.Add(hash, cs)
+}
+
+var GlobalChangesetStorage = NewChangesetStorage()

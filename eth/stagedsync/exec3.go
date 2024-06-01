@@ -343,11 +343,6 @@ func ExecV3(ctx context.Context,
 	applyLoopWg := sync.WaitGroup{} // to wait for finishing of applyLoop after applyCtx cancel
 	defer applyLoopWg.Wait()
 
-	changeset := &state2.StateChangeSet{
-		BeginTxIndex: doms.TxNum(),
-	}
-	doms.SetChangesetAccumulator(changeset)
-
 	applyLoopInner := func(ctx context.Context) error {
 		tx, err := chainDb.BeginRo(ctx)
 		if err != nil {
@@ -723,6 +718,10 @@ Loop:
 			}
 			doms.SetTxNum(txTask.TxNum)
 			doms.SetBlockNum(txTask.BlockNum)
+			changeset := &state2.StateChangeSet{
+				BeginTxIndex: doms.TxNum(),
+			}
+			doms.SetChangesetAccumulator(changeset)
 
 			//if txTask.HistoryExecution { // nolint
 			//	fmt.Printf("[dbg] txNum: %d, hist=%t\n", txTask.TxNum, txTask.HistoryExecution)
@@ -839,8 +838,13 @@ Loop:
 				execTriggers.AddInt(rs.CommitTxNum(txTask.Sender, txTask.TxNum, in))
 				outputTxNum.Add(1)
 			}
+
+			changeset.Compress()
+			state2.GlobalChangesetStorage.Put(txTask.BlockHash, changeset)
+
 			stageProgress = blockNum
 			inputTxNum++
+
 		}
 		if offsetFromBlockBeginning > 0 {
 			// after history execution no offset will be required
