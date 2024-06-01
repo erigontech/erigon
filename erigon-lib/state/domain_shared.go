@@ -1149,6 +1149,9 @@ func (sdc *SharedDomainsCommitmentContext) storeCommitmentState(blockNum uint64,
 	if sdc.sd.trace {
 		fmt.Printf("[commitment] store txn %d block %d rh %x\n", sdc.sd.txNum, blockNum, rh)
 	}
+	if sdc.sd.changesAccumulator != nil {
+		sdc.sd.changesAccumulator.Diffs[kv.CommitmentDomain].DomainUpdate(keyCommitmentState, nil, prevState, sdc.sd.dWriter[kv.CommitmentDomain].stepBytes[:], prevStep)
+	}
 	return sdc.sd.dWriter[kv.CommitmentDomain].PutWithPrev(keyCommitmentState, nil, encodedState, prevState, prevStep)
 }
 
