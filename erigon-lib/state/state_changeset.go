@@ -3,6 +3,7 @@ package state
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"sort"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -97,6 +98,15 @@ func (s *ChangesetStorage) Put(hash common.Hash, cs *StateChangeSet) {
 	if cs == nil {
 		return
 	}
+	fmt.Println("ChangesetStorage.Put", hash, cs.BeginTxIndex,
+		"diffs[0].keys", len(cs.Diffs[0].keys),
+		"diffs[1].keys", len(cs.Diffs[1].keys),
+		"diffs[2].keys", len(cs.Diffs[2].keys),
+		"diffs[3].keys", len(cs.Diffs[3].keys),
+		"diffs[0].prevValues", len(cs.Diffs[0].prevValues),
+		"diffs[1].prevValues", len(cs.Diffs[1].prevValues),
+		"diffs[2].prevValues", len(cs.Diffs[2].prevValues),
+		"diffs[3].prevValues", len(cs.Diffs[3].prevValues))
 	s.st.Add(hash, cs)
 }
 
