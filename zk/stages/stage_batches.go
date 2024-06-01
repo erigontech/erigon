@@ -222,28 +222,34 @@ LOOP:
 		// if both download routine stopped and channel empty - stop loop
 		select {
 		case batchStart := <-batchStartChan:
-			if batchStart.Number > highestSeenBatchNo && lastForkId < batchStart.ForkId {
-				if batchStart.ForkId > HIGHEST_KNOWN_FORK {
-					message := fmt.Sprintf("unsupported fork id %v received from the data stream", batchStart.ForkId)
-					panic(message)
-				}
-				err = stages.SaveStageProgress(tx, stages.ForkId, batchStart.ForkId)
-				if err != nil {
-					return fmt.Errorf("save stage progress error: %v", err)
-				}
-				lastForkId = batchStart.ForkId
-				err = hermezDb.WriteForkId(batchStart.Number, batchStart.ForkId)
-				if err != nil {
-					return fmt.Errorf("write fork id error: %v", err)
-				}
-				// NOTE (RPC): avoided use of 'writeForkIdBlockOnce' by reading instead batch by forkId, and then lowest block number in batch
-			}
-
+			// do nothing for now.  We have a channel read race so handle fork/batch related changes in the handling
+			// of the l2 block below
+			_ = batchStart
 		case l2Block := <-l2BlockChan:
 			if cfg.zkCfg.SyncLimit > 0 && l2Block.L2BlockNumber >= cfg.zkCfg.SyncLimit {
 				// stop the node going into a crazy loop
 				time.Sleep(2 * time.Second)
 				break LOOP
+			}
+
+			// handle batch boundary changes - we do this here instead of reading the batch start channel because
+			// channels can be read in random orders which then creates problems in detecting fork changes during
+			// execution
+			if l2Block.BatchNumber > highestSeenBatchNo && lastForkId < l2Block.ForkId {
+				if l2Block.ForkId > HIGHEST_KNOWN_FORK {
+					message := fmt.Sprintf("unsupported fork id %v received from the data stream", l2Block.ForkId)
+					panic(message)
+				}
+				err = stages.SaveStageProgress(tx, stages.ForkId, l2Block.ForkId)
+				if err != nil {
+					return fmt.Errorf("save stage progress error: %v", err)
+				}
+				lastForkId = l2Block.ForkId
+				err = hermezDb.WriteForkId(l2Block.BatchNumber, l2Block.ForkId)
+				if err != nil {
+					return fmt.Errorf("write fork id error: %v", err)
+				}
+				// NOTE (RPC): avoided use of 'writeForkIdBlockOnce' by reading instead batch by forkId, and then lowest block number in batch
 			}
 
 			l2Block.ChainId = cfg.zkCfg.L2ChainId

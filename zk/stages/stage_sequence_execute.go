@@ -70,11 +70,9 @@ func SpawnSequencingStage(
 
 	// injected batch
 	if executionAt == 0 {
-		// set the block height for the fork we're running at if we're in L1 recovery
-		if l1Recovery {
-			if err = utils.RecoverySetBlockConfigForks(1, forkId, cfg.chainConfig, logPrefix); err != nil {
-				return err
-			}
+		// set the block height for the fork we're running at to ensure contract interactions are correct
+		if err = utils.RecoverySetBlockConfigForks(1, forkId, cfg.chainConfig, logPrefix); err != nil {
+			return err
 		}
 
 		header, parentBlock, err := prepareHeader(tx, executionAt, math.MaxUint64, forkId, cfg.zk.AddressSequencer)
