@@ -134,7 +134,13 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 
 	withWarmup := false
 	for idx, d := range sd.aggTx.d {
-		if err := d.Unwind(ctx, rwTx, step, txUnwindTo, &changeset.Diffs[idx]); err != nil {
+		if changeset != nil {
+			if err := d.Unwind(ctx, rwTx, step, txUnwindTo, &changeset.Diffs[idx]); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := d.Unwind(ctx, rwTx, step, txUnwindTo, nil); err != nil {
 			return err
 		}
 	}
