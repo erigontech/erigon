@@ -281,6 +281,7 @@ func ExecV3(ctx context.Context,
 
 	blockNum = doms.BlockNum()
 	outputTxNum.Store(doms.TxNum())
+	fmt.Println(maxBlockNum, blockNum)
 	shouldGenerateChangesets := maxBlockNum-blockNum == 1
 	if maxBlockNum-blockNum > 16 {
 		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
@@ -879,6 +880,10 @@ Loop:
 				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
 					return err
 				} else if !ok {
+					if shouldGenerateChangesets {
+						changeset.Compress()
+						state2.GlobalChangesetStorage.Put(b.Hash(), changeset)
+					}
 					break Loop
 				}
 				if shouldGenerateChangesets {
