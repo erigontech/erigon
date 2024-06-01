@@ -77,6 +77,8 @@ type SharedDomains struct {
 
 	dWriter   [kv.DomainLen]*domainBufferedWriter
 	iiWriters [kv.StandaloneIdxLen]*invertedIndexBufferedWriter
+
+	changesAccumulator *StateChangeSet
 }
 
 type HasAggTx interface {
@@ -107,6 +109,10 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 		return nil, err
 	}
 	return sd, nil
+}
+
+func (sd *SharedDomains) SetChangesetAccumulator(acc *StateChangeSet) {
+	sd.changesAccumulator = acc
 }
 
 func (sd *SharedDomains) AggTx() interface{} { return sd.aggTx }
@@ -812,6 +818,10 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 			return err
 		}
 	}
+	if sd.changesAccumulator != nil {
+		sd.changesAccumulator.Diffs[domain].DomainUpdate(k1, k2, prevVal, prevStep)
+	}
+
 	switch domain {
 	case kv.AccountsDomain:
 		return sd.updateAccountData(k1, val, prevVal, prevStep)
@@ -834,13 +844,15 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
 func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error {
-
 	if prevVal == nil {
 		var err error
 		prevVal, prevStep, err = sd.DomainGet(domain, k1, k2)
 		if err != nil {
 			return err
 		}
+	}
+	if sd.changesAccumulator != nil {
+		sd.changesAccumulator.Diffs[domain].DomainUpdate(k1, k2, prevVal, prevStep)
 	}
 	switch domain {
 	case kv.AccountsDomain:

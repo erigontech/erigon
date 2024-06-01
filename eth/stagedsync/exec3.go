@@ -343,6 +343,11 @@ func ExecV3(ctx context.Context,
 	applyLoopWg := sync.WaitGroup{} // to wait for finishing of applyLoop after applyCtx cancel
 	defer applyLoopWg.Wait()
 
+	changeset := &state2.StateChangeSet{
+		BeginTxIndex: doms.TxNum(),
+	}
+	doms.SetChangesetAccumulator(changeset)
+
 	applyLoopInner := func(ctx context.Context) error {
 		tx, err := chainDb.BeginRo(ctx)
 		if err != nil {
