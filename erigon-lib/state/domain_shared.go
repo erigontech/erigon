@@ -118,7 +118,7 @@ func (sd *SharedDomains) SetChangesetAccumulator(acc *StateChangeSet) {
 func (sd *SharedDomains) AggTx() interface{} { return sd.aggTx }
 
 // aggregator context should call aggTx.Unwind before this one.
-func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo, txUnwindTo uint64) error {
+func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo, txUnwindTo uint64, changeset *StateChangeSet) error {
 	step := txUnwindTo / sd.aggTx.a.StepSize()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -133,8 +133,8 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 	}
 
 	withWarmup := false
-	for _, d := range sd.aggTx.d {
-		if err := d.Unwind(ctx, rwTx, step, txUnwindTo); err != nil {
+	for idx, d := range sd.aggTx.d {
+		if err := d.Unwind(ctx, rwTx, step, txUnwindTo, &changeset.Diffs[idx]); err != nil {
 			return err
 		}
 	}
@@ -819,7 +819,7 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 		}
 	}
 	if sd.changesAccumulator != nil {
-		sd.changesAccumulator.Diffs[domain].DomainUpdate(k1, k2, prevVal, prevStep)
+		sd.changesAccumulator.Diffs[domain].DomainUpdate(k1, k2, prevVal, sd.dWriter[domain].stepBytes[:], prevStep)
 	}
 
 	switch domain {
@@ -852,7 +852,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []by
 		}
 	}
 	if sd.changesAccumulator != nil {
-		sd.changesAccumulator.Diffs[domain].DomainUpdate(k1, k2, prevVal, prevStep)
+		sd.changesAccumulator.Diffs[domain].DomainUpdate(k1, k2, prevVal, sd.dWriter[domain].stepBytes[:], prevStep)
 	}
 	switch domain {
 	case kv.AccountsDomain:
@@ -980,7 +980,7 @@ func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte,
 	}
 	sdc.branches[string(prefix)] = cachedBranch{data: data, step: prevStep}
 	if sdc.sd.changesAccumulator != nil {
-		sdc.sd.changesAccumulator.Diffs[kv.CommitmentDomain].DomainUpdate(prefix, nil, prevData, prevStep)
+		sdc.sd.changesAccumulator.Diffs[kv.CommitmentDomain].DomainUpdate(prefix, nil, prevData, sdc.sd.dWriter[kv.CommitmentDomain].stepBytes[:], prevStep)
 	}
 	return sdc.sd.updateCommitmentData(prefix, data, prevData, prevStep)
 }

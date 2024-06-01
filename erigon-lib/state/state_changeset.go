@@ -3,9 +3,7 @@ package state
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"sort"
-	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -21,14 +19,6 @@ type StateChangeSet struct {
 	Diffs        [kv.DomainLen]StateDiffDomain // there are 4 domains of state changes
 }
 
-func (s *StateChangeSet) Compress() {
-	start := time.Now()
-	for i := range s.Diffs {
-		s.Diffs[i].Compress()
-	}
-	fmt.Println("DEBUG: StateChangeSet.Compress() took", time.Since(start))
-}
-
 type KVPair struct {
 	Key   []byte
 	Value []byte
@@ -37,72 +27,57 @@ type KVPair struct {
 // StateDiffDomain represents a domain of state changes.
 type StateDiffDomain struct {
 	// We can probably flatten these into single slices for GC/cache optimization
-	keys       []KVPair
-	prevValues []KVPair
-	sorted     bool
-	compressed bool
+	keys          map[string][]byte
+	prevValues    map[string][]byte
+	keysSlice     []KVPair
+	prevValsSlice []KVPair
 }
 
 // RecordDelta records a state change.
-func (d *StateDiffDomain) DomainUpdate(key1, key2, prevValue []byte, prevStep uint64) {
+func (d *StateDiffDomain) DomainUpdate(key1, key2, prevValue, stepBytes []byte, prevStep uint64) {
+	if d.keys == nil {
+		d.keys = make(map[string][]byte)
+	}
+	if d.prevValues == nil {
+		d.prevValues = make(map[string][]byte)
+	}
 	prevStepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(prevStepBytes, ^prevStep)
+
 	key := append(key1, key2...)
 	prevValue = common.Copy(prevValue)
 
-	d.keys = append(d.keys, KVPair{Key: key, Value: prevStepBytes})                                   // Key -> Step
-	d.prevValues = append(d.prevValues, KVPair{Key: append(key, prevStepBytes...), Value: prevValue}) // Key + Step -> Value
-	d.sorted = false
-	d.compressed = false
-}
-
-func (d *StateDiffDomain) sort() {
-	if d.sorted {
-		return
+	d.keys[string(key)] = prevStepBytes
+	if bytes.Equal(stepBytes, prevStepBytes) {
+		d.prevValues[string(append(key, stepBytes...))] = prevValue
+	} else {
+		d.prevValues[string(append(key, stepBytes...))] = nil
 	}
-	sort.Slice(d.keys, func(i, j int) bool {
-		return bytes.Compare(d.keys[i].Key, d.keys[j].Key) < 0
-	})
-	sort.Slice(d.prevValues, func(i, j int) bool {
-		return bytes.Compare(d.prevValues[i].Key, d.prevValues[j].Key) < 0
-	})
-	d.sorted = true
-}
-
-func (d *StateDiffDomain) Compress() {
-	if d.compressed {
-		return
-	}
-	// map reduce value in backward order
-	mapPrevValues := make(map[string][]byte)
-	for i := len(d.prevValues) - 1; i >= 0; i-- {
-		kv := d.prevValues[i]
-		mapPrevValues[string(kv.Key)] = kv.Value
-	}
-
-	mapPrevKeys := make(map[string][]byte)
-	for i := len(d.keys) - 1; i >= 0; i-- {
-		kv := d.keys[i]
-		mapPrevKeys[string(kv.Key)] = kv.Value
-	}
-	d.prevValues = d.prevValues[:0]
-	d.keys = d.keys[:0]
-
-	for k, v := range mapPrevKeys {
-		d.keys = append(d.keys, KVPair{Key: []byte(k), Value: v})
-	}
-	for k, v := range mapPrevValues {
-		d.prevValues = append(d.prevValues, KVPair{Key: []byte(k), Value: v})
-	}
-	fmt.Println("DEBUG: StateDiffDomain.Compress() d.keys:", len(d.keys), len(d.prevValues))
-	d.compressed = true
-	d.sorted = false
+	d.keysSlice = nil
+	d.prevValsSlice = nil
 }
 
 func (d *StateDiffDomain) GetKeys() (keysToSteps []KVPair, keysToValue []KVPair) {
-	d.Compress()
-	d.sort()
-	return d.keys, d.prevValues
+	if d.keysSlice != nil && d.prevValsSlice != nil {
+		return d.keysSlice, d.prevValsSlice
+	}
+	d.keysSlice = make([]KVPair, 0, len(d.keys))
+	d.prevValsSlice = make([]KVPair, 0, len(d.prevValues))
+
+	for k, v := range d.keys {
+		d.keysSlice = append(d.keysSlice, KVPair{Key: []byte(k), Value: v})
+	}
+	for k, v := range d.prevValues {
+		d.prevValsSlice = append(d.prevValsSlice, KVPair{Key: []byte(k), Value: v})
+	}
+	sort.Slice(d.keysSlice, func(i, j int) bool {
+		return string(d.keysSlice[i].Key) < string(d.keysSlice[j].Key)
+	})
+	sort.Slice(d.prevValsSlice, func(i, j int) bool {
+		return string(d.prevValsSlice[i].Key) < string(d.prevValsSlice[j].Key)
+	})
+
+	return d.keysSlice, d.prevValsSlice
 }
 
 type ChangesetStorage struct {
