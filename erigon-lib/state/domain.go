@@ -1174,7 +1174,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 
 	seen := make(map[string]struct{})
 	restored := dt.NewWriter()
-
+	start := time.Now()
 	for histRng.HasNext() && txNumUnwindTo > 0 {
 		k, v, _, err := histRng.Next()
 		if err != nil {
@@ -1253,6 +1253,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			return err
 		}
 	}
+	fmt.Println("unwind domain", time.Since(start))
 
 	logEvery := time.NewTicker(time.Second * 30)
 	defer logEvery.Stop()
