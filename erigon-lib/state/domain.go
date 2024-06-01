@@ -1177,6 +1177,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 
 	stepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
+	start := time.Now()
 
 	// Attempt to use the diff to unwind the domain
 	if diff != nil {
@@ -1218,6 +1219,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 				}
 			}
 		}
+		fmt.Println("unwind domain", time.Since(start))
 		if _, err := dt.ht.Prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, false, logEvery); err != nil {
 			return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dt.d.filenameBase, txNumUnwindTo, step, err)
 		}
@@ -1225,7 +1227,6 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	}
 
 	seen := make(map[string]struct{})
-	start := time.Now()
 	for histRng.HasNext() && txNumUnwindTo > 0 {
 		k, v, _, err := histRng.Next()
 		if err != nil {
@@ -1303,7 +1304,6 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			return err
 		}
 	}
-	fmt.Println("unwind domain", time.Since(start))
 
 	if _, err := dt.ht.Prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, false, logEvery); err != nil {
 		return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dt.d.filenameBase, txNumUnwindTo, step, err)
