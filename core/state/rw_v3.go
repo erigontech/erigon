@@ -276,7 +276,7 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwi
 	stateChanges.SortAndFlushInBackground(true)
 
 	ttx := tx.(kv.TemporalTx)
-
+	start := time.Now()
 	// todo these updates could be collected during rs.domains.Unwind (as passed collect function eg)
 	{
 		iter, err := ttx.HistoryRange(kv.AccountsHistory, int(txUnwindTo), -1, order.Asc, -1)
@@ -310,6 +310,7 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwi
 			}
 		}
 	}
+	fmt.Println("stateChanges.Load", time.Since(start))
 
 	if err := stateChanges.Load(tx, "", handle, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
