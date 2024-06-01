@@ -112,6 +112,16 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, ethCfg *ethconfig.
 		return nil, nil, nil, nil, nil, err
 	}
 
+	aclDB, err := mdbx.NewMDBX(log.New()).Label(txpool.ACLDB).Path(cfg.DBDir).
+		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return txpool.ACLTablesCfg }).
+		Flags(func(f uint) uint { return f ^ mdbx2.Durable | mdbx2.SafeNoSync }).
+		GrowthStep(16 * datasize.MB).
+		SyncPeriod(30 * time.Second).
+		Open(ctx)
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+
 	chainConfig, _, err := SaveChainConfigIfNeed(ctx, chainDB, txPoolDB, true)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
@@ -124,7 +134,7 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, ethCfg *ethconfig.
 		shanghaiTime = cfg.OverrideShanghaiTime
 	}
 
-	txPool, err := txpool.New(newTxs, chainDB, cfg, ethCfg, cache, *chainID, shanghaiTime, chainConfig.LondonBlock)
+	txPool, err := txpool.New(newTxs, chainDB, cfg, ethCfg, cache, *chainID, shanghaiTime, chainConfig.LondonBlock, aclDB)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
