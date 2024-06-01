@@ -881,10 +881,6 @@ Loop:
 				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
 					return err
 				} else if !ok {
-					if shouldGenerateChangesets {
-						changeset.Compress()
-						state2.GlobalChangesetStorage.Put(b.Hash(), changeset)
-					}
 					break Loop
 				}
 				if shouldGenerateChangesets {
@@ -971,6 +967,11 @@ Loop:
 			if err != nil {
 				return err
 			}
+			if shouldGenerateChangesets {
+				changeset.Compress()
+				state2.GlobalChangesetStorage.Put(b.Hash(), changeset)
+			}
+			doms.SetChangesetAccumulator(nil)
 		} else {
 			fmt.Printf("[dbg] mmmm... do we need action here????\n")
 		}
