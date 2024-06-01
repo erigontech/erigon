@@ -291,7 +291,7 @@ func SpawnSequencingStage(
 						}
 						effectiveGases = append(effectiveGases, effectiveGas)
 
-						receipt, overflow, err = attemptAddTransaction(cfg, sdb, ibs, batchCounters, &blockContext, header, transaction, effectiveGas, l1Recovery)
+						receipt, overflow, err = attemptAddTransaction(cfg, sdb, ibs, batchCounters, &blockContext, header, transaction, effectiveGas, l1Recovery, forkId)
 						if err != nil {
 							// if we are in recovery just log the error as a warning.  If the data is on the L1 then we should consider it as confirmed.
 							// The executor/prover would simply skip a TX with an invalid nonce for example so we don't need to worry about that here.
@@ -351,7 +351,7 @@ func SpawnSequencingStage(
 		} else {
 			for idx, transaction := range addedTransactions {
 				effectiveGas := effectiveGases[idx]
-				receipt, innerOverflow, err := attemptAddTransaction(cfg, sdb, ibs, batchCounters, &blockContext, header, transaction, effectiveGas, false)
+				receipt, innerOverflow, err := attemptAddTransaction(cfg, sdb, ibs, batchCounters, &blockContext, header, transaction, effectiveGas, false, forkId)
 				if err != nil {
 					return err
 				}

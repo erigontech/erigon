@@ -34,6 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"errors"
 )
 
 type EphemeralExecResultZk struct {
@@ -114,9 +115,8 @@ func ExecuteBlockEphemerallyZk(
 			vmConfig.Tracer = nil
 		}
 
-		//TODO: remove this after bug is fixed
 		localReceipt := *receipt
-		if execResult.Err == vm.ErrUnsupportedPrecompile {
+		if !chainConfig.IsForkID8Elderberry(blockNum) && errors.Is(execResult.Err, vm.ErrUnsupportedPrecompile) {
 			localReceipt.Status = 1
 		}
 
