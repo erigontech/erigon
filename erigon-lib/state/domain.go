@@ -1521,7 +1521,7 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 	}
 	fmt.Printf("Doing %x\n", key)
 	fmt.Println(fmt.Sprintf("%x", foundInvStep), foundInvStep != nil)
-	if foundInvStep != nil {
+	if len(foundInvStep) > 0 {
 		foundStep := ^binary.BigEndian.Uint64(foundInvStep)
 		if LastTxNumOfStep(foundStep, dt.d.aggregationStep) >= dt.maxTxNumInDomainFiles(false) {
 			valsC, err := dt.valsCursor(roTx)
