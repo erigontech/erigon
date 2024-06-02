@@ -1220,6 +1220,11 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 				if err := keysCursor.DeleteCurrent(); err != nil {
 					return err
 				}
+				a, b, err = keysCursor.SeekBothExact(strippedKey, stepBytes)
+				if err != nil {
+					return err
+				}
+				fmt.Println(fmt.Sprintf("deleting key3 %x %x", a, b))
 			} else {
 				if err := rwTx.Put(d.valsTable, kv.Key, kv.Value); err != nil {
 					return err
@@ -1519,9 +1524,8 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 	if err != nil {
 		return nil, 0, false, err
 	}
-	fmt.Printf("Doing %x\n", key)
-	fmt.Println(fmt.Sprintf("%x", foundInvStep), foundInvStep != nil)
-	if len(foundInvStep) > 0 {
+
+	if foundInvStep != nil {
 		foundStep := ^binary.BigEndian.Uint64(foundInvStep)
 		if LastTxNumOfStep(foundStep, dt.d.aggregationStep) >= dt.maxTxNumInDomainFiles(false) {
 			valsC, err := dt.valsCursor(roTx)
