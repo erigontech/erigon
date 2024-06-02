@@ -48,14 +48,19 @@ func (d *StateDiffDomain) DomainUpdate(key1, key2, prevValue, stepBytes []byte, 
 	key := append(key1, key2...)
 	prevValue = common.Copy(prevValue)
 
-	d.keys[string(key)] = prevStepBytes
-	if bytes.Equal(stepBytes, prevStepBytes) {
-		d.prevValues[string(append(key, stepBytes...))] = prevValue
-	} else {
-		d.prevValues[string(append(key, stepBytes...))] = nil
+	if _, ok := d.keys[string(key)]; !ok {
+		d.keys[string(key)] = prevStepBytes
+		d.keysSlice = nil
 	}
-	d.keysSlice = nil
-	d.prevValsSlice = nil
+
+	if _, ok := d.prevValues[string(append(key, stepBytes...))]; !ok {
+		if bytes.Equal(stepBytes, prevStepBytes) {
+			d.prevValues[string(append(key, stepBytes...))] = prevValue
+		} else {
+			d.prevValues[string(append(key, stepBytes...))] = nil
+			d.prevValsSlice = nil
+		}
+	}
 }
 
 func (d *StateDiffDomain) GetKeys() (keysToSteps []KVPair, keysToValue []KVPair) {
