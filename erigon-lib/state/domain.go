@@ -1204,7 +1204,6 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 
 		for _, kv := range valsKV {
 			if len(kv.Value) == 0 {
-				fmt.Println("Delete", d.valsTable, fmt.Sprintf("%x", kv.Key))
 				if err := rwTx.Delete(d.valsTable, kv.Key); err != nil {
 					return err
 				}
@@ -1215,12 +1214,13 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 				if err != nil {
 					return err
 				}
-				fmt.Println(a, b)
+				fmt.Println(fmt.Sprintf("deleting key %x %x", strippedKey, stepBytes))
+				fmt.Println(fmt.Sprintf("deleting key2 %x %x", a, b))
+
 				if err := keysCursor.DeleteCurrent(); err != nil {
 					return err
 				}
 			} else {
-				fmt.Println("Put", d.valsTable, fmt.Sprintf("%x", kv.Key), kv.Value)
 				if err := rwTx.Put(d.valsTable, kv.Key, kv.Value); err != nil {
 					return err
 				}
@@ -1232,12 +1232,9 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 				if err != nil {
 					return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
 				}
-				fmt.Println(fmt.Sprintf("Check %x == %x", stepBytes, v))
-
 				if bytes.Equal(v, stepBytes) {
 					break
 				}
-				fmt.Println("Delete", d.keysTable, fmt.Sprintf("%x", k))
 				if err := keysCursor.DeleteCurrent(); err != nil {
 					return err
 				}
