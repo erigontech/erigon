@@ -690,7 +690,7 @@ func (r *HistoricalStatesReader) readPendingEpochs(tx kv.Tx, slot uint64) (*soli
 }
 
 // ReadPartecipations shuffles active indicies and returns the participation flags for the given epoch.
-func (r *HistoricalStatesReader) ReadPartecipations(tx kv.Tx, slot uint64) (*solid.BitList, *solid.BitList, error) {
+func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, slot uint64) (*solid.BitList, *solid.BitList, error) {
 	var beginSlot uint64
 	epoch, prevEpoch := r.computeRelevantEpochs(slot)
 	beginSlot = prevEpoch * r.cfg.SlotsPerEpoch
