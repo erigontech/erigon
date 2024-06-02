@@ -113,6 +113,13 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 
 func (sd *SharedDomains) SetChangesetAccumulator(acc *StateChangeSet) {
 	sd.changesAccumulator = acc
+	for idx, d := range sd.dWriter {
+		if sd.changesAccumulator == nil {
+			d.diff = nil
+		} else {
+			d.diff = &sd.changesAccumulator.Diffs[idx]
+		}
+	}
 }
 
 func (sd *SharedDomains) AggTx() interface{} { return sd.aggTx }
@@ -824,9 +831,6 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 			return err
 		}
 	}
-	if sd.changesAccumulator != nil {
-		sd.changesAccumulator.Diffs[domain].DomainUpdate(k1, k2, prevVal, sd.dWriter[domain].stepBytes[:], prevStep)
-	}
 
 	switch domain {
 	case kv.AccountsDomain:
@@ -857,9 +861,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []by
 			return err
 		}
 	}
-	if sd.changesAccumulator != nil {
-		sd.changesAccumulator.Diffs[domain].DomainUpdate(k1, k2, prevVal, sd.dWriter[domain].stepBytes[:], prevStep)
-	}
+
 	switch domain {
 	case kv.AccountsDomain:
 		return sd.deleteAccount(k1, prevVal, prevStep)
@@ -985,9 +987,7 @@ func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte,
 		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
 	}
 	sdc.branches[string(prefix)] = cachedBranch{data: data, step: prevStep}
-	if sdc.sd.changesAccumulator != nil {
-		sdc.sd.changesAccumulator.Diffs[kv.CommitmentDomain].DomainUpdate(prefix, nil, prevData, sdc.sd.dWriter[kv.CommitmentDomain].stepBytes[:], prevStep)
-	}
+
 	return sdc.sd.updateCommitmentData(prefix, data, prevData, prevStep)
 }
 
@@ -1149,9 +1149,7 @@ func (sdc *SharedDomainsCommitmentContext) storeCommitmentState(blockNum uint64,
 	if sdc.sd.trace {
 		fmt.Printf("[commitment] store txn %d block %d rh %x\n", sdc.sd.txNum, blockNum, rh)
 	}
-	if sdc.sd.changesAccumulator != nil {
-		sdc.sd.changesAccumulator.Diffs[kv.CommitmentDomain].DomainUpdate(keyCommitmentState, nil, prevState, sdc.sd.dWriter[kv.CommitmentDomain].stepBytes[:], prevStep)
-	}
+
 	return sdc.sd.dWriter[kv.CommitmentDomain].PutWithPrev(keyCommitmentState, nil, encodedState, prevState, prevStep)
 }
 

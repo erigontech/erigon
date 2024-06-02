@@ -413,7 +413,9 @@ func (w *domainBufferedWriter) PutWithPrev(key1, key2, val, preval []byte, prevS
 	if err := w.h.AddPrevValue(key1, key2, preval, prevStep); err != nil {
 		return err
 	}
-
+	if w.diff != nil {
+		w.diff.DomainUpdate(key1, key2, preval, w.stepBytes[:], prevStep)
+	}
 	return w.addValue(key1, key2, val)
 }
 
@@ -424,6 +426,9 @@ func (w *domainBufferedWriter) DeleteWithPrev(key1, key2, prev []byte, prevStep 
 	}
 	if err := w.h.AddPrevValue(key1, key2, prev, prevStep); err != nil {
 		return err
+	}
+	if w.diff != nil {
+		w.diff.DomainUpdate(key1, key2, prev, w.stepBytes[:], prevStep)
 	}
 	return w.addValue(key1, key2, nil)
 }
@@ -462,6 +467,7 @@ type domainBufferedWriter struct {
 
 	stepBytes [8]byte // current inverted step representation
 	aux       []byte
+	diff      *StateDiffDomain
 
 	h *historyBufferedWriter
 }
