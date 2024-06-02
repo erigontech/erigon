@@ -281,7 +281,11 @@ func (m *memoryMutationCursor) Seek(seek []byte) ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 
-	return m.resolveCursorPriority(memKey, memValue, dbKey, dbValue, Normal)
+	k, v, err := m.resolveCursorPriority(memKey, memValue, dbKey, dbValue, Normal)
+	if m.isEntryDeleted(k, v, Normal) {
+		fmt.Println("WTF")
+	}
+	return k, v, err
 }
 
 // Seek move pointer to a key at a certain position.
