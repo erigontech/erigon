@@ -1185,6 +1185,11 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	binary.BigEndian.PutUint64(stepBytes, ^step)
 	start := time.Now()
 
+	keysCursor, err := dt.keysCursor(rwTx)
+	if err != nil {
+		return err
+	}
+
 	// Attempt to use the diff to unwind the domain
 	if diff != nil {
 		keysKV, valsKV := diff.GetKeys()
@@ -1245,7 +1250,6 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		// 		}
 		// 	}
 		// }
-
 		fmt.Println("unwind domain", time.Since(start))
 		if _, err := dt.ht.Prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, false, logEvery); err != nil {
 			return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dt.d.filenameBase, txNumUnwindTo, step, err)
@@ -1279,11 +1283,6 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		}
 		ic.Close()
 		seen[string(k)] = struct{}{}
-	}
-
-	keysCursor, err := dt.keysCursor(rwTx)
-	if err != nil {
-		return err
 	}
 
 	keysCursorForDeletes, err := rwTx.RwCursorDupSort(d.keysTable)
@@ -1535,6 +1534,9 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 			_, v, err = valsC.SeekExact(append(append(dt.valBuf[:0], key...), foundInvStep...))
 			if err != nil {
 				return nil, foundStep, false, fmt.Errorf("GetLatest value: %w", err)
+			}
+			if len(v) == 0 {
+				fmt.Printf("SeekExact(%x) -> found in db, but value is empty\n", append(append(dt.valBuf[:0], key...), foundInvStep...))
 			}
 			return v, foundStep, true, nil
 		}
