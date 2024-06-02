@@ -1199,21 +1199,21 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			return err
 		}
 		defer valsC.Close()
-
-		for _, kv := range keysKV {
-			// so stepBytes is ^step so we need to iterate from the beggining down until we find the stepBytes
-			for k, v, err := keysCursor.Seek(kv.Key); k != nil; k, v, err = keysCursor.NextDup() {
-				if err != nil {
-					return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
-				}
-				if bytes.Equal(v, stepBytes) {
-					break
-				}
-				if err := keysCursor.DeleteCurrent(); err != nil {
-					return err
-				}
-			}
-		}
+		_ = keysKV
+		// for _, kv := range keysKV {
+		// 	// so stepBytes is ^step so we need to iterate from the beggining down until we find the stepBytes
+		// 	for k, v, err := keysCursor.Seek(kv.Key); k != nil; k, v, err = keysCursor.NextDup() {
+		// 		if err != nil {
+		// 			return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
+		// 		}
+		// 		if bytes.Equal(v, stepBytes) {
+		// 			break
+		// 		}
+		// 		if err := keysCursor.DeleteCurrent(); err != nil {
+		// 			return err
+		// 		}
+		// 	}
+		// }
 		for _, kv := range valsKV {
 			if len(kv.Value) == 0 {
 				if err := rwTx.Delete(d.valsTable, kv.Key); err != nil {
