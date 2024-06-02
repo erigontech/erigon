@@ -730,12 +730,12 @@ type flusher interface {
 	Flush(ctx context.Context, tx kv.RwTx) error
 }
 
-func (ac *AggregatorRoTx) minimaxTxNumInDomainFiles(cold bool) uint64 {
+func (ac *AggregatorRoTx) minimaxTxNumInDomainFiles(onlyFrozen bool) uint64 {
 	return min(
-		ac.d[kv.AccountsDomain].maxTxNumInDomainFiles(cold),
-		ac.d[kv.CodeDomain].maxTxNumInDomainFiles(cold),
-		ac.d[kv.StorageDomain].maxTxNumInDomainFiles(cold),
-		ac.d[kv.CommitmentDomain].maxTxNumInDomainFiles(cold),
+		ac.d[kv.AccountsDomain].maxTxNumInDomainFiles(onlyFrozen),
+		ac.d[kv.CodeDomain].maxTxNumInDomainFiles(onlyFrozen),
+		ac.d[kv.StorageDomain].maxTxNumInDomainFiles(onlyFrozen),
+		ac.d[kv.CommitmentDomain].maxTxNumInDomainFiles(onlyFrozen),
 	)
 }
 
