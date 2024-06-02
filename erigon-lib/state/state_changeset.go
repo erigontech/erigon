@@ -45,7 +45,7 @@ func (d *StateDiffDomain) DomainUpdate(key1, key2, prevValue, stepBytes []byte, 
 	prevStepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(prevStepBytes, ^prevStep)
 
-	key := append(key1, key2...)
+	key := append(common.Copy(key1), key2...)
 	prevValue = common.Copy(prevValue)
 
 	if _, ok := d.keys[string(key)]; !ok {
