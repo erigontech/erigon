@@ -1216,10 +1216,12 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		// }
 		for _, kv := range valsKV {
 			if len(kv.Value) == 0 {
+				fmt.Println("Delete", d.valsTable, fmt.Sprintf("%x"), kv.Key)
 				if err := rwTx.Delete(d.valsTable, kv.Key); err != nil {
 					return err
 				}
 			} else {
+				fmt.Println("Put", d.valsTable, fmt.Sprintf("%x"), kv.Key, kv.Value)
 				if err := rwTx.Put(d.valsTable, kv.Key, kv.Value); err != nil {
 					return err
 				}
