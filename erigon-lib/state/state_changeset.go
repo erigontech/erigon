@@ -20,6 +20,25 @@ type StateChangeSet struct {
 	Diffs        [kv.DomainLen]StateDiffDomain // there are 4 domains of state changes
 }
 
+func (s *StateChangeSet) Copy() *StateChangeSet {
+	res := *s
+	for i := range s.Diffs {
+		res.Diffs[i] = *s.Diffs[i].Copy()
+	}
+	return &res
+}
+
+func (s *StateChangeSet) Merge(older *StateChangeSet) {
+	if older == nil {
+		return
+	}
+	for i := range s.Diffs {
+		s.Diffs[i].Merge(&older.Diffs[i])
+	}
+
+	s.BeginTxIndex = older.BeginTxIndex
+}
+
 type KVPair struct {
 	Key   []byte
 	Value []byte
@@ -32,6 +51,44 @@ type StateDiffDomain struct {
 	prevValues    map[string][]byte
 	keysSlice     []KVPair
 	prevValsSlice []KVPair
+}
+
+func (d *StateDiffDomain) Copy() *StateDiffDomain {
+	res := &StateDiffDomain{}
+	res.keys = make(map[string][]byte)
+	res.prevValues = make(map[string][]byte)
+	for k, v := range d.keys {
+		res.keys[k] = v
+	}
+	for k, v := range d.prevValues {
+		res.prevValues[k] = v
+	}
+	// copy slices
+	res.keysSlice = make([]KVPair, len(d.keysSlice))
+	copy(res.keysSlice, d.keysSlice)
+	res.prevValsSlice = make([]KVPair, len(d.prevValsSlice))
+	copy(res.prevValsSlice, d.prevValsSlice)
+	return res
+}
+
+func (d *StateDiffDomain) Merge(older *StateDiffDomain) {
+	if older == nil {
+		return
+	}
+	if d.keys == nil {
+		d.keys = make(map[string][]byte)
+	}
+	if d.prevValues == nil {
+		d.prevValues = make(map[string][]byte)
+	}
+	for k, v := range older.keys {
+		d.keys[k] = v
+	}
+	for k, v := range older.prevValues {
+		d.prevValues[k] = v
+	}
+	d.keysSlice = nil
+	d.prevValsSlice = nil
 }
 
 // RecordDelta records a state change.
@@ -49,17 +106,18 @@ func (d *StateDiffDomain) DomainUpdate(key1, key2, prevValue, stepBytes []byte, 
 	prevValue = common.Copy(prevValue)
 
 	if _, ok := d.keys[string(key)]; !ok {
-		d.keys[string(key)] = prevStepBytes
+		d.keys[string(key)] = nil
 		d.keysSlice = nil
 	}
 
-	if _, ok := d.prevValues[string(append(key, stepBytes...))]; !ok {
+	valsKey := string(append(common.Copy(key), stepBytes...))
+	if _, ok := d.prevValues[valsKey]; !ok {
 		if bytes.Equal(stepBytes, prevStepBytes) {
-			d.prevValues[string(append(key, stepBytes...))] = prevValue
+			d.prevValues[valsKey] = prevValue
 		} else {
-			d.prevValues[string(append(key, stepBytes...))] = nil
-			d.prevValsSlice = nil
+			d.prevValues[valsKey] = nil
 		}
+		d.prevValsSlice = nil
 	}
 }
 
@@ -112,6 +170,15 @@ func (s *ChangesetStorage) Put(hash common.Hash, cs *StateChangeSet) {
 		"diffs[1].prevValues", len(cs.Diffs[1].prevValues),
 		"diffs[2].prevValues", len(cs.Diffs[2].prevValues),
 		"diffs[3].prevValues", len(cs.Diffs[3].prevValues))
+	// List all of kv pairs
+	for i := 0; i < int(kv.DomainLen); i++ {
+		keys, prevVals := cs.Diffs[i].GetKeys()
+		fmt.Println("==== Domain", i, "====")
+		for j := range keys {
+			fmt.Println("key", fmt.Sprintf("%x", keys[j].Key), "prevValue", fmt.Sprintf("%x", prevVals[j].Value))
+		}
+	}
+
 	s.st.Add(hash, cs)
 }
 

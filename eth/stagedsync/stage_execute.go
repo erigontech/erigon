@@ -361,12 +361,21 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	}
 	t := time.Now()
 	var changeset *state2.StateChangeSet
-	if u.CurrentBlockNumber-u.UnwindPoint == 1 {
-		currentHash, err := rawdb.ReadCanonicalHash(txc.Tx, u.CurrentBlockNumber)
+	for currentBlock := u.CurrentBlockNumber; currentBlock > u.UnwindPoint; currentBlock-- {
+		currentHash, err := rawdb.ReadCanonicalHash(txc.Tx, currentBlock)
 		if err != nil {
 			return err
 		}
-		changeset, _ = state2.GlobalChangesetStorage.Get(currentHash)
+		currChangeset, ok := state2.GlobalChangesetStorage.Get(currentHash)
+		if !ok {
+			changeset = nil
+			break
+		}
+		if changeset == nil {
+			changeset = currChangeset.Copy()
+		} else {
+			changeset.Merge(currChangeset)
+		}
 	}
 	if err := rs.Unwind(ctx, txc.Tx, u.UnwindPoint, txNum, accumulator, changeset); err != nil {
 		return fmt.Errorf("StateV3.Unwind(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
