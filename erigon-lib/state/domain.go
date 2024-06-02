@@ -416,7 +416,6 @@ func (w *domainBufferedWriter) PutWithPrev(key1, key2, val, preval []byte, prevS
 	if w.diff != nil {
 		w.diff.DomainUpdate(key1, key2, preval, w.stepBytes[:], prevStep)
 	}
-	fmt.Printf("PutWithPrev %x, %x, %x\n", key1, key2, val)
 	return w.addValue(key1, key2, val)
 }
 
@@ -1226,7 +1225,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 				if err := keysCursor.DeleteCurrent(); err != nil {
 					return err
 				}
-				a, b, err = keysCursor.SeekBothExact(strippedKey, stepBytes)
+				a, b, err = keysCursor.Seek(strippedKey)
 				if err != nil {
 					return err
 				}
