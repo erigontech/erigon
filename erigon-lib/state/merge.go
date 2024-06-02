@@ -294,11 +294,11 @@ func (iit *InvertedIndexRoTx) BuildOptionalMissedIndices(ctx context.Context, ps
 }
 
 // endTxNum is always a multiply of aggregation step but this txnum is not available in file (it will be first tx of file to follow after that)
-func (dt *DomainRoTx) maxTxNumInDomainFiles(cold bool) uint64 {
+func (dt *DomainRoTx) maxTxNumInDomainFiles(onlyFrozen bool) uint64 {
 	if len(dt.files) == 0 {
 		return 0
 	}
-	if !cold {
+	if !onlyFrozen {
 		return dt.files[len(dt.files)-1].endTxNum
 	}
 	for i := len(dt.files) - 1; i >= 0; i-- {
