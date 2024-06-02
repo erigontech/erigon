@@ -1200,6 +1200,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		}
 		defer valsC.Close()
 		_ = keysKV
+		fmt.Println("keys", len(keysKV), "vals", len(valsKV))
 
 		for _, kv := range valsKV {
 			if len(kv.Value) == 0 {
