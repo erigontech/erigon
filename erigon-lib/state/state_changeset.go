@@ -121,7 +121,7 @@ func (d *StateDiffDomain) DomainUpdate(key1, key2, prevValue, stepBytes []byte, 
 }
 
 func (d *StateDiffDomain) GetKeys() (keysToSteps []KVPair, keysToValue []KVPair) {
-	if d.keysSlice != nil && d.prevValsSlice != nil {
+	if len(d.keysSlice) != 0 && len(d.prevValsSlice) != 0 {
 		return d.keysSlice, d.prevValsSlice
 	}
 	d.keysSlice = make([]KVPair, 0, len(d.keys))
