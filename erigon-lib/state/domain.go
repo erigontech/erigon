@@ -1200,20 +1200,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		}
 		defer valsC.Close()
 		_ = keysKV
-		// for _, kv := range keysKV {
-		// 	// so stepBytes is ^step so we need to iterate from the beggining down until we find the stepBytes
-		// 	for k, v, err := keysCursor.Seek(kv.Key); k != nil; k, v, err = keysCursor.NextDup() {
-		// 		if err != nil {
-		// 			return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
-		// 		}
-		// 		if !bytes.Equal(v, stepBytes) {
-		// 			continue
-		// 		}
-		// 		if err := keysCursor.DeleteCurrent(); err != nil {
-		// 			return err
-		// 		}
-		// 	}
-		// }
+
 		for _, kv := range valsKV {
 			if len(kv.Value) == 0 {
 				fmt.Println("Delete", d.valsTable, fmt.Sprintf("%x", kv.Key))
@@ -1227,6 +1214,24 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 				}
 			}
 		}
+		for _, kv := range keysKV {
+			// so stepBytes is ^step so we need to iterate from the beggining down until we find the stepBytes
+			for k, v, err := keysCursor.Seek(kv.Key); k != nil; k, v, err = keysCursor.NextDup() {
+				if err != nil {
+					return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
+				}
+				fmt.Println(fmt.Sprintf("Check %x == %x", stepBytes, v))
+
+				if bytes.Equal(v, stepBytes) {
+					break
+				}
+				fmt.Println("Delete", d.keysTable, fmt.Sprintf("%x", k))
+				if err := keysCursor.DeleteCurrent(); err != nil {
+					return err
+				}
+			}
+		}
+
 		fmt.Println("unwind domain", time.Since(start))
 		if _, err := dt.ht.Prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, false, logEvery); err != nil {
 			return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dt.d.filenameBase, txNumUnwindTo, step, err)
