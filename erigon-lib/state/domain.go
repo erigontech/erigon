@@ -1208,8 +1208,8 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 					return err
 				}
 				// If we delete the entry here, we also need to delete it from the keys table
-				strippedKey := kv.Key[:len(kv.Key)-8]
-				stepBytes := kv.Key[len(kv.Key)-8:]
+				strippedKey := common.Copy(kv.Key[:len(kv.Key)-8])
+				stepBytes := common.Copy(kv.Key[len(kv.Key)-8:])
 				a, b, err := keysCursor.SeekBothExact(strippedKey, stepBytes)
 				if err != nil {
 					return err
