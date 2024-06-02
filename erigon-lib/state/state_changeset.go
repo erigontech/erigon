@@ -62,11 +62,6 @@ func (d *StateDiffDomain) Copy() *StateDiffDomain {
 	for k, v := range d.prevValues {
 		res.prevValues[k] = v
 	}
-	// copy slices
-	res.keysSlice = make([]KVPair, len(d.keysSlice))
-	copy(res.keysSlice, d.keysSlice)
-	res.prevValsSlice = make([]KVPair, len(d.prevValsSlice))
-	copy(res.prevValsSlice, d.prevValsSlice)
 	return res
 }
 
