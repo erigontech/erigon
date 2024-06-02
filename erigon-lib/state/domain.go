@@ -416,6 +416,7 @@ func (w *domainBufferedWriter) PutWithPrev(key1, key2, val, preval []byte, prevS
 	if w.diff != nil {
 		w.diff.DomainUpdate(key1, key2, preval, w.stepBytes[:], prevStep)
 	}
+	fmt.Printf("PutWithPrev %x, %x", key1, key2, val)
 	return w.addValue(key1, key2, val)
 }
 
