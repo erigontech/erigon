@@ -812,6 +812,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 		d.wg.Add(1)
 		go func() {
 			defer d.wg.Done()
+			time.Sleep(10 * time.Second)
 			// webseeds.Discover may create new .torrent files on disk
 			d.webseeds.Discover(d.ctx, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap)
 			// apply webseeds to existing torrents
