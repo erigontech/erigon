@@ -283,7 +283,7 @@ func (m *memoryMutationCursor) Seek(seek []byte) ([]byte, []byte, error) {
 
 	k, v, err := m.resolveCursorPriority(memKey, memValue, dbKey, dbValue, Normal)
 	if m.isEntryDeleted(k, v, Normal) {
-		fmt.Println("WTF")
+		return nil, nil, nil
 	}
 	return k, v, err
 }
