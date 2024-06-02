@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
@@ -66,6 +67,24 @@ type BlobsBundleV1 struct {
 	Commitments []hexutility.Bytes `json:"commitments" gencodec:"required"`
 	Proofs      []hexutility.Bytes `json:"proofs"      gencodec:"required"`
 	Blobs       []hexutility.Bytes `json:"blobs"       gencodec:"required"`
+}
+
+func (b *BlobsBundleV1) Check() error {
+	if len(b.Commitments) != len(b.Proofs) || len(b.Commitments) != len(b.Blobs) {
+		return errors.New("commitments, proofs and blobs must have the same length")
+	}
+	for i := range b.Commitments {
+		if len(b.Commitments[i]) != length.Bytes48 {
+			return errors.New("commitment must be 48 bytes long")
+		}
+		if len(b.Proofs[i]) != length.Bytes48 {
+			return errors.New("proof must be 48 bytes long")
+		}
+		if len(b.Blobs[i]) != 4096*32 {
+			return errors.New("blob must be 4096 * 32 bytes long")
+		}
+	}
+	return nil
 }
 
 type ExecutionPayloadBodyV1 struct {

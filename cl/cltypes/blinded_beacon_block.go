@@ -323,6 +323,21 @@ func (b *BlindedBeaconBody) ExecutionPayloadMerkleProof() ([][32]byte, error) {
 	return merkle_tree.MerkleProof(4, 9, b.getSchema(false)...)
 }
 
+func (b *SignedBlindedBeaconBlock) Unblind(blockPayload *Eth1Block) (*SignedBeaconBlock, error) {
+	if b == nil {
+		return nil, fmt.Errorf("nil block")
+	}
+	// check root
+	blindedRoot := b.Block.StateRoot
+	payloadRoot := blockPayload.StateRoot
+	if blindedRoot != payloadRoot {
+		return nil, fmt.Errorf("root mismatch: %s != %s", blindedRoot, payloadRoot)
+	}
+
+	signedBeaconBlock := b.Full(blockPayload.Transactions, blockPayload.Withdrawals)
+	return signedBeaconBlock, nil
+}
+
 // make sure that the type implements the interface ssz2.ObjectSSZ
 var _ ssz2.ObjectSSZ = (*BlindedBeaconBody)(nil)
 var _ ssz2.ObjectSSZ = (*BlindedBeaconBlock)(nil)

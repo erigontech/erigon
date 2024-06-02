@@ -10,6 +10,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 )
 
 type BlockBuilderClient struct {
@@ -47,18 +48,41 @@ func (b *BlockBuilderClient) GetExecutionPayloadHeader(ctx context.Context, slot
 	return header, nil
 }
 
-func (b *BlockBuilderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.SignedBlindedBeaconBlock) (*cltypes.Eth1Block, error) {
+func (b *BlockBuilderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.SignedBlindedBeaconBlock) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, error) {
 	// https://ethereum.github.io/builder-specs/#/Builder/submitBlindedBlocks
 	path := b.baseUrl + "/eth/v1/builder/blinded_blocks"
 	payload, err := json.Marshal(block)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	blockResp, err := httpCall[BlindedBlockResponse](ctx, b.httpClient, http.MethodPost, path, nil, bytes.NewBuffer(payload))
+	headers := map[string]string{
+		"Eth-Consensus-Version": block.Version().String(),
+	}
+	resp, err := httpCall[BlindedBlockResponse](ctx, b.httpClient, http.MethodPost, path, headers, bytes.NewBuffer(payload))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return &blockResp.Data, nil
+
+	var eth1Block *cltypes.Eth1Block
+	var blobsBundle *engine_types.BlobsBundleV1
+	switch resp.Version {
+	case "bellatrix", "capella":
+		eth1Block = &cltypes.Eth1Block{}
+		if err := json.Unmarshal(resp.Data, block); err != nil {
+			return nil, nil, err
+		}
+	case "deneb":
+		denebResp := &struct {
+			ExecutionPayload *cltypes.Eth1Block          `json:"execution_payload"`
+			BlobsBundle      *engine_types.BlobsBundleV1 `json:"blobs_bundle"`
+		}{}
+		if err := json.Unmarshal(resp.Data, denebResp); err != nil {
+			return nil, nil, err
+		}
+		eth1Block = denebResp.ExecutionPayload
+		blobsBundle = denebResp.BlobsBundle
+	}
+	return eth1Block, blobsBundle, nil
 }
 
 func (b *BlockBuilderClient) GetStatus(ctx context.Context) error {

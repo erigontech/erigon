@@ -2,6 +2,7 @@ package builder
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -31,6 +32,6 @@ func (h ExecutionPayloadHeader) BlockValue() *big.Int {
 }
 
 type BlindedBlockResponse struct {
-	Version string            `json:"version"`
-	Data    cltypes.Eth1Block `json:"data"`
+	Version string          `json:"version"`
+	Data    json.RawMessage `json:"data"`
 }

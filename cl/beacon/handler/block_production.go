@@ -183,42 +183,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	if err != nil {
 		return nil, err
 	}
-	/*
-		beaconBody, executionValue, err := a.produceBeaconBody(
-			ctx,
-			3,
-			sourceBlock.Block,
-			baseState,
-			targetSlot,
-			randaoReveal,
-			graffiti,
-		)
-		if err != nil {
-			return nil, err
-		}
 
-		proposerIndex, err := baseState.GetBeaconProposerIndex()
-		if err != nil {
-			return nil, err
-		}
-
-		block := &cltypes.BeaconBlock{
-			Slot:          targetSlot,
-			ProposerIndex: proposerIndex,
-			ParentRoot:    baseBlockRoot,
-			Body:          beaconBody,
-		}
-
-		log.Info(
-			"BlockProduction: Computing HashSSZ block",
-			"slot",
-			targetSlot,
-			"execution_value",
-			executionValue,
-			"proposerIndex",
-			proposerIndex,
-		)
-	*/
 	if !block.IsBlinded() {
 		// compute the state root now
 		signedBeaconBlock := &cltypes.SignedBeaconBlock{
@@ -237,6 +202,13 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			return nil, err
 		}
 	}
+	log.Info("BlockProduction: Block produced",
+		"proposerIndex", block.ProposerIndex,
+		"slot", targetSlot,
+		"state_root", block.StateRoot,
+		"execution_value", block.GetExecutionValue().Uint64())
+
+	// todo: consensusValue
 	rewardsCollector := &eth2.BlockRewardsCollector{}
 	consensusValue := rewardsCollector.Attestations + rewardsCollector.ProposerSlashings + rewardsCollector.AttesterSlashings + rewardsCollector.SyncAggregate
 	a.setupHeaderReponseForBlockProduction(
@@ -725,6 +697,96 @@ func (a *ApiHandler) postBeaconBlocks(w http.ResponseWriter, r *http.Request, ap
 	}
 	w.WriteHeader(http.StatusOK)
 
+}
+
+func (a *ApiHandler) PostEthV1BlindedBlocks(w http.ResponseWriter, r *http.Request) {
+	a.publishBlindedBlocks(w, r, 1)
+}
+
+func (a *ApiHandler) PostEthV2BlindedBlocks(w http.ResponseWriter, r *http.Request) {
+	a.publishBlindedBlocks(w, r, 2)
+}
+
+func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request, apiVersion int) {
+	ethVersion := r.Header.Get("Eth-Consensus-Version")
+	version, err := a.parseEthConsensusVersion(ethVersion, apiVersion)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// todo: broadcast_validation
+
+	// submit and unblind the signedBlindedBlock
+	signedBlindedBlock := cltypes.NewSignedBlindedBeaconBlock(a.beaconChainCfg)
+	signedBlindedBlock.Block.Body.Version = version
+	b, err := io.ReadAll(r.Body)
+	defer r.Body.Close()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if r.Header.Get("Content-Type") == "application/json" {
+		if err := json.Unmarshal(b, signedBlindedBlock); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	} else {
+		if err := signedBlindedBlock.DecodeSSZ(b, int(version)); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+	blockPayload, blobsBundle, err := a.builderClient.SubmitBlindedBlocks(r.Context(), signedBlindedBlock)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// unblind the block
+	signedBlock, err := signedBlindedBlock.Unblind(blockPayload)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// check blobs
+	if blobsBundle != nil && blockPayload.Version() >= clparams.DenebVersion {
+		if err := blobsBundle.Check(); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		// check commitments
+		blockCommitments := signedBlindedBlock.Block.Body.BlobKzgCommitments
+		if len(blobsBundle.Commitments) != blockCommitments.Len() {
+			http.Error(w, "commitments length mismatch", http.StatusBadRequest)
+			return
+		}
+		for i, commitment := range blobsBundle.Commitments {
+			blockCommitment := blockCommitments.Get(i)
+			blockCommitmentBytes, err := blockCommitment.MarshalJSON()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if !bytes.Equal(commitment, blockCommitmentBytes) {
+				http.Error(w, fmt.Sprintf("commitment mismatch: %d", i), http.StatusBadRequest)
+				return
+			}
+			// add the bundle to recently produced blobs
+			a.blobBundles.Add(libcommon.Bytes48(blobsBundle.Commitments[i]), BlobBundle{
+				Blob:       (*cltypes.Blob)(blobsBundle.Blobs[i]),
+				KzgProof:   libcommon.Bytes48(blobsBundle.Proofs[i]),
+				Commitment: libcommon.Bytes48(blobsBundle.Commitments[i]),
+			})
+		}
+	}
+
+	// broadcast the block
+	if err := a.broadcastBlock(r.Context(), signedBlock); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 func (a *ApiHandler) parseEthConsensusVersion(
