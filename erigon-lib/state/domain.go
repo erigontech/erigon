@@ -1226,20 +1226,20 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 				}
 			}
 		}
-		for _, kv := range keysKV {
-			// so stepBytes is ^step so we need to iterate from the beggining down until we find the stepBytes
-			for k, v, err := keysCursor.Seek(kv.Key); k != nil; k, v, err = keysCursor.NextDup() {
-				if err != nil {
-					return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
-				}
-				if bytes.Equal(v, stepBytes) {
-					break
-				}
-				if err := keysCursor.DeleteCurrent(); err != nil {
-					return err
-				}
-			}
-		}
+		// for _, kv := range keysKV {
+		// 	// so stepBytes is ^step so we need to iterate from the beggining down until we find the stepBytes
+		// 	for k, v, err := keysCursor.Seek(kv.Key); k != nil; k, v, err = keysCursor.NextDup() {
+		// 		if err != nil {
+		// 			return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
+		// 		}
+		// 		if bytes.Equal(v, stepBytes) {
+		// 			break
+		// 		}
+		// 		if err := keysCursor.DeleteCurrent(); err != nil {
+		// 			return err
+		// 		}
+		// 	}
+		// }
 
 		fmt.Println("unwind domain", time.Since(start))
 		if _, err := dt.ht.Prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, false, logEvery); err != nil {
@@ -1519,6 +1519,8 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 	if err != nil {
 		return nil, 0, false, err
 	}
+	fmt.Printf("Doing %x\n", key)
+	fmt.Println(fmt.Sprintf("%x", foundInvStep), foundInvStep != nil)
 	if foundInvStep != nil {
 		foundStep := ^binary.BigEndian.Uint64(foundInvStep)
 		if LastTxNumOfStep(foundStep, dt.d.aggregationStep) >= dt.maxTxNumInDomainFiles(false) {
