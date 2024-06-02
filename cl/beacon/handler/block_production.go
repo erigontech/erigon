@@ -717,7 +717,6 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 
 	// todo: broadcast_validation
 
-	// submit and unblind the signedBlindedBlock
 	signedBlindedBlock := cltypes.NewSignedBlindedBeaconBlock(a.beaconChainCfg)
 	signedBlindedBlock.Block.Body.Version = version
 	b, err := io.ReadAll(r.Body)
@@ -737,19 +736,19 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
+	// submit and unblind the signedBlindedBlock
 	blockPayload, blobsBundle, err := a.builderClient.SubmitBlindedBlocks(r.Context(), signedBlindedBlock)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	// unblind the block
 	signedBlock, err := signedBlindedBlock.Unblind(blockPayload)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// check blobs
+	// check blob bundle
 	if blobsBundle != nil && blockPayload.Version() >= clparams.DenebVersion {
 		if err := blobsBundle.Check(); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
