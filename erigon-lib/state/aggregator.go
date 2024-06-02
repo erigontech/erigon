@@ -572,27 +572,27 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 	closeCollations = false
 
 	// indices are built concurrently
-	for _, d := range a.iis {
-		d := d
+	for _, ii := range a.iis {
+		ii := ii
 		a.wg.Add(1)
 		g.Go(func() error {
 			defer a.wg.Done()
 
 			var collation InvertedIndexCollation
 			err := a.db.View(ctx, func(tx kv.Tx) (err error) {
-				collation, err = d.collate(ctx, step, tx)
+				collation, err = ii.collate(ctx, step, tx)
 				return err
 			})
 			if err != nil {
-				return fmt.Errorf("index collation %q has failed: %w", d.filenameBase, err)
+				return fmt.Errorf("index collation %q has failed: %w", ii.filenameBase, err)
 			}
-			sf, err := d.buildFiles(ctx, step, collation, a.ps)
+			sf, err := ii.buildFiles(ctx, step, collation, a.ps)
 			if err != nil {
 				sf.CleanupOnError()
 				return err
 			}
 
-			switch d.indexKeysTable {
+			switch ii.indexKeysTable {
 			case kv.TblLogTopicsKeys:
 				static.ivfs[kv.LogTopicIdxPos] = sf
 			case kv.TblLogAddressKeys:
@@ -602,7 +602,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 			case kv.TblTracesToKeys:
 				static.ivfs[kv.TracesToIdxPos] = sf
 			default:
-				panic("unknown index " + d.indexKeysTable)
+				panic("unknown index " + ii.indexKeysTable)
 			}
 			return nil
 		})
@@ -730,12 +730,12 @@ type flusher interface {
 	Flush(ctx context.Context, tx kv.RwTx) error
 }
 
-func (ac *AggregatorRoTx) minimaxTxNumInDomainFiles(cold bool) uint64 {
+func (ac *AggregatorRoTx) minimaxTxNumInDomainFiles(onlyFrozen bool) uint64 {
 	return min(
-		ac.d[kv.AccountsDomain].maxTxNumInDomainFiles(cold),
-		ac.d[kv.CodeDomain].maxTxNumInDomainFiles(cold),
-		ac.d[kv.StorageDomain].maxTxNumInDomainFiles(cold),
-		ac.d[kv.CommitmentDomain].maxTxNumInDomainFiles(cold),
+		ac.d[kv.AccountsDomain].maxTxNumInDomainFiles(onlyFrozen),
+		ac.d[kv.CodeDomain].maxTxNumInDomainFiles(onlyFrozen),
+		ac.d[kv.StorageDomain].maxTxNumInDomainFiles(onlyFrozen),
+		ac.d[kv.CommitmentDomain].maxTxNumInDomainFiles(onlyFrozen),
 	)
 }
 
