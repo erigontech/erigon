@@ -1165,6 +1165,8 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 }
 
 var prevSeenKeys []KVPair
+var prevDeletedKeys1 []KVPair
+var prevDeletedKeys2 []KVPair
 
 // unwind is similar to prune but the difference is that it restores domain values from the history as of txFrom
 // context Flush should be managed by caller.
@@ -1228,6 +1230,8 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		// 		}
 		// 	}
 		// }
+		prevDeletedKeys1 = nil
+		prevDeletedKeys2 = nil
 		for _, kv := range valsKV {
 			strippedKey := common.Copy(kv.Key[:len(kv.Key)-8])
 			stepBytes := common.Copy(kv.Key[len(kv.Key)-8:])
@@ -1246,6 +1250,8 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 				if err := keysCursor.DeleteExact(strippedKey, stepBytes); err != nil {
 					return err
 				}
+				prevDeletedKeys1 = append(prevDeletedKeys1, KVPair{Key: kv.Key})
+				prevDeletedKeys2 = append(prevDeletedKeys2, KVPair{Key: strippedKey})
 			} else {
 				if err := rwTx.Put(d.valsTable, kv.Key, kv.Value); err != nil {
 					return err
@@ -1305,6 +1311,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		return bytes.Compare(seenKeys[i].Key, seenKeys[j].Key) < 0
 	})
 	if len(prevSeenKeys) > 0 {
+		fmt.Println("seenKeys", len(seenKeys), "prevSeenKeys", len(prevSeenKeys))
 		for idx, kva := range seenKeys {
 			cmpKey := seenKeys[idx].Key
 			if !bytes.Equal(kva.Key, cmpKey) || !bytes.Equal(kva.Value, seenKeys[idx].Value) {
@@ -1314,6 +1321,9 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			}
 		}
 	}
+
+	currDeletedKeys1 := make([]KVPair, 0, len(prevDeletedKeys1))
+	currDeletedKeys2 := make([]KVPair, 0, len(prevDeletedKeys2))
 
 	keysCursorForDeletes, err := rwTx.RwCursorDupSort(d.keysTable)
 	if err != nil {
@@ -1346,6 +1356,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			return err
 		}
 		if kk != nil {
+			currDeletedKeys1 = append(currDeletedKeys1, KVPair{Key: kk})
 			//fmt.Printf("[domain][%s] rm large value %x v %x\n", d.filenameBase, kk, vv)
 			if err = valsC.DeleteCurrent(); err != nil {
 				return err
@@ -1356,8 +1367,24 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		if _, _, err = keysCursorForDeletes.SeekBothExact(k, v); err != nil {
 			return err
 		}
+		currDeletedKeys2 = append(currDeletedKeys1, KVPair{Key: k})
 		if err = keysCursorForDeletes.DeleteCurrent(); err != nil {
 			return err
+		}
+	}
+	// Compare currDeletedKeys with prevDeletedKeys
+	for idx, kv := range prevDeletedKeys1 {
+		if !bytes.Equal(kv.Key, currDeletedKeys1[idx].Key) {
+			fmt.Printf("prevDeletedKeys1[%d] = %x\n", idx, kv.Key)
+			fmt.Printf("currDeletedKeys1[%d] = %x\n", idx, currDeletedKeys1[idx].Key)
+			break
+		}
+	}
+	for idx, kv := range prevDeletedKeys2 {
+		if !bytes.Equal(kv.Key, currDeletedKeys2[idx].Key) {
+			fmt.Printf("prevDeletedKeys2[%d] = %x\n", idx, kv.Key)
+			fmt.Printf("currDeletedKeys2[%d] = %x\n", idx, currDeletedKeys2[idx].Key)
+			break
 		}
 	}
 
