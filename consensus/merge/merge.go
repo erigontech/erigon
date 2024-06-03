@@ -180,7 +180,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 				return nil, nil, nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got :%v", header.RequestsRoot, rh)
 			}
 			sds := requests.Deposits()
-			if !reflect.DeepEqual(sds, ds) {
+			if !reflect.DeepEqual(sds, ds.Deposits()) {
 				return nil, nil, nil, fmt.Errorf("error: invalid deposits in block")
 			}
 		}
