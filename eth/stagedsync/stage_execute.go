@@ -372,7 +372,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 			break
 		}
 		if changeset == nil {
-			changeset = currChangeset.Copy()
+			changeset = currChangeset
 		} else {
 			changeset.Merge(currChangeset)
 		}

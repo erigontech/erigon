@@ -1542,9 +1542,6 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 			if err != nil {
 				return nil, foundStep, false, fmt.Errorf("GetLatest value: %w", err)
 			}
-			if len(v) == 0 {
-				fmt.Printf("SeekExact(%x) -> found in db, but value is empty\n", append(append(dt.valBuf[:0], key...), foundInvStep...))
-			}
 			return v, foundStep, true, nil
 		}
 	}
