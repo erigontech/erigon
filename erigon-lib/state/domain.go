@@ -1242,7 +1242,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 				if !bytes.Equal(v, stepBytes) {
 					continue
 				}
-				if _, replaced := seen[string(k)]; !replaced {
+				if _, replaced := seen[string(k)]; !replaced && txNumUnwindTo > 0 {
 					continue
 				}
 				kk, _, err := valsC.SeekExact(common.Append(k, stepBytes))
