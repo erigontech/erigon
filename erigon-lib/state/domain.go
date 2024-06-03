@@ -1164,9 +1164,9 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 	d.dirtyFiles.Set(fi)
 }
 
-var prevSeenKeys []KVPair
-var prevDeletedKeys1 []KVPair
-var prevDeletedKeys2 []KVPair
+var prevSeenKeys map[string][]KVPair
+var prevDeletedKeys1 map[string][]KVPair
+var prevDeletedKeys2 map[string][]KVPair
 
 // unwind is similar to prune but the difference is that it restores domain values from the history as of txFrom
 // context Flush should be managed by caller.
@@ -1193,6 +1193,9 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 
 	// Attempt to use the diff to unwind the domain
 	if diff != nil {
+		prevSeenKeys = map[string][]KVPair{}
+		prevDeletedKeys1 = map[string][]KVPair{}
+		prevDeletedKeys2 = map[string][]KVPair{}
 		keysKV, valsKV := diff.GetKeys()
 		keysCursor, err := rwTx.RwCursorDupSort(d.keysTable)
 		if err != nil {
@@ -1250,8 +1253,8 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 				if err := keysCursor.DeleteExact(strippedKey, stepBytes); err != nil {
 					return err
 				}
-				prevDeletedKeys1 = append(prevDeletedKeys1, KVPair{Key: kv.Key})
-				prevDeletedKeys2 = append(prevDeletedKeys2, KVPair{Key: strippedKey, Value: stepBytes})
+				prevDeletedKeys1[dt.d.valsTable] = append(prevDeletedKeys1[dt.d.valsTable], KVPair{Key: kv.Key})
+				prevDeletedKeys2[dt.d.valsTable] = append(prevDeletedKeys2[dt.d.valsTable], KVPair{Key: strippedKey, Value: stepBytes})
 			} else {
 				if err := rwTx.Put(d.valsTable, kv.Key, kv.Value); err != nil {
 					return err
@@ -1262,7 +1265,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			}
 		}
 		// Compare valsKV with prevSeenKeys
-		prevSeenKeys = valsKV
+		prevSeenKeys[dt.d.valsTable] = valsKV
 		fmt.Println("unwind domain", time.Since(start))
 		if _, err := dt.ht.Prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, false, logEvery); err != nil {
 			return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dt.d.filenameBase, txNumUnwindTo, step, err)
@@ -1313,6 +1316,10 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	if len(prevSeenKeys) > 0 {
 		fmt.Println("seenKeys", len(seenKeys), "prevSeenKeys", len(prevSeenKeys))
 		for idx, kva := range seenKeys {
+			if len(prevSeenKeys) <= idx {
+				fmt.Println("size mismatch", len(prevSeenKeys), len(seenKeys))
+				break
+			}
 			cmpKey := seenKeys[idx].Key
 			if !bytes.Equal(kva.Key, cmpKey) || !bytes.Equal(kva.Value, seenKeys[idx].Value) {
 				fmt.Printf("valsKV[%d] = %x -> %x\n", idx, seenKeys[idx].Key, seenKeys[idx].Value)
@@ -1373,14 +1380,22 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		}
 	}
 	// Compare currDeletedKeys with prevDeletedKeys
-	for idx, kv := range prevDeletedKeys1 {
+	for idx, kv := range prevDeletedKeys1[dt.d.valsTable] {
+		if len(currDeletedKeys1) <= idx {
+			fmt.Sprintf("d1 size mismatch %d %d\n", len(prevDeletedKeys1[dt.d.valsTable]), len(currDeletedKeys1))
+			break
+		}
 		if !bytes.Equal(kv.Key, currDeletedKeys1[idx].Key) {
 			fmt.Printf("prevDeletedKeys1[%d] = %x\n", idx, kv.Key)
 			fmt.Printf("currDeletedKeys1[%d] = %x\n", idx, currDeletedKeys1[idx].Key)
 			break
 		}
 	}
-	for idx, kv := range prevDeletedKeys2 {
+	for idx, kv := range prevDeletedKeys2[dt.d.valsTable] {
+		if len(currDeletedKeys1) <= idx {
+			fmt.Sprintf("d2 size mismatch %d %d\n", len(prevDeletedKeys1[dt.d.valsTable]), len(currDeletedKeys1))
+			break
+		}
 		if !bytes.Equal(kv.Key, currDeletedKeys2[idx].Key) || !bytes.Equal(kv.Value, currDeletedKeys2[idx].Value) {
 			fmt.Printf("prevDeletedKeys2[%d] = %x, %x\n", idx, kv.Key, kv.Value)
 			fmt.Printf("currDeletedKeys2[%d] = %x, %x\n", idx, currDeletedKeys2[idx].Key, currDeletedKeys2[idx].Value)
