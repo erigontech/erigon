@@ -14,6 +14,7 @@ import (
 	"errors"
 
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/ledgerwatch/erigon-lib/chain"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -143,6 +144,7 @@ func attemptAddTransaction(
 	transaction types.Transaction,
 	effectiveGasPrice uint8,
 	l1Recovery bool,
+	forkId uint64,
 ) (*types.Receipt, bool, error) {
 	txCounters := vm.NewTransactionCounter(transaction, sdb.smt.GetDepth(), cfg.zk.ShouldCountersBeUnlimited(l1Recovery))
 	overflow, err := batchCounters.AddNewTransactionCounters(txCounters)
@@ -180,8 +182,7 @@ func attemptAddTransaction(
 		return nil, false, err
 	}
 
-	//TODO: remove this after bug is fixed
-	if errors.Is(execResult.Err, vm.ErrUnsupportedPrecompile) {
+	if forkId <= uint64(chain.ForkID7Etrog) && errors.Is(execResult.Err, vm.ErrUnsupportedPrecompile) {
 		receipt.Status = 1
 	}
 

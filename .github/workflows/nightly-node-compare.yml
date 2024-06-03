@@ -1,0 +1,38 @@
+name: Nightly - Compare Blocks
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  compare-blocks:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-pairs:
+          - name: "Integration 2"
+            node1: "http://34.175.214.161:8525"
+            node2: "http://34.175.214.161:8234"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: '1.22'
+
+      - name: Install dependencies
+        run: |
+          go get github.com/google/go-cmp/cmp
+
+      - name: Build the compare_blocks binary
+        run: go build -o compare_blocks compare_blocks.go
+
+      - name: Run block comparison
+        run: |
+          echo "Comparing blocks for pair: ${{ matrix.node-pairs.name }}"
+          ./compare_blocks -node1 ${{ matrix.node-pairs.node1 }} -node2 ${{ matrix.node-pairs.node2 }} -blocks 1000 -diff 10

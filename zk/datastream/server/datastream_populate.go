@@ -171,7 +171,6 @@ func WriteGenesisToStream(
 	reader *hermez_db.HermezDbReader,
 	stream *datastreamer.StreamServer,
 	srv *DataStreamServer,
-	streamVersion int,
 	chainId uint64,
 ) error {
 

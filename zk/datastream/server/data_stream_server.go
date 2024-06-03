@@ -243,6 +243,7 @@ func (srv *DataStreamServer) CreateStreamEntriesProto(
 					if err != nil {
 						return nil, err
 					}
+					stateReader.Close()
 					localExitRoot = libcommon.BytesToHash(rawLer)
 				}
 			}

@@ -1,0 +1,52 @@
+name: Nightly - ETH Bench
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        profile: [network2]
+
+    steps:
+      - name: Checkout current repository
+        uses: actions/checkout@v3
+
+      - name: Clone eth-bench repository
+        run: git clone https://github.com/xavier-romero/eth-bench.git
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Cache Docker layers
+        uses: actions/cache@v3
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
+      - name: Set PROFILE_UPPER environment variable
+        run: |
+          echo "PROFILE_UPPER=$(echo ${{ matrix.profile }} | tr '[:lower:]' '[:upper:]')" >> $GITHUB_ENV
+
+      - name: Set RPC_URL and PRIVATE_KEY environment variables
+        run: |
+          echo "RPC_URL=${{ secrets[format('{0}_RPC_URL', env.PROFILE_UPPER)] }}" >> $GITHUB_ENV
+          echo "PRIVATE_KEY=${{ secrets[format('{0}_PRIVATE_KEY', env.PROFILE_UPPER)] }}" >> $GITHUB_ENV
+
+      - name: Build and run benchmarks
+        run: |
+          cd eth-bench
+          ./run_benchmarks.sh ${{ matrix.profile }} ${{ env.RPC_URL }} ${{ env.PRIVATE_KEY }}
+
+      - name: Upload benchmark log
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: benchmark-log-${{ matrix.profile }}
+          path: ./eth-bench/bench_${{ matrix.profile }}.log
