@@ -1307,7 +1307,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	if len(prevSeenKeys) > 0 {
 		for idx, kva := range seenKeys {
 			cmpKey := seenKeys[idx].Key
-			if dt.d.valsTable != kv.TblCommitmentVals {
+			if len(cmpKey) < 8 {
 				cmpKey = cmpKey[:len(cmpKey)-8]
 			}
 			if !bytes.Equal(kva.Key, cmpKey) || !bytes.Equal(kva.Value, seenKeys[idx].Value) {
