@@ -524,7 +524,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 		}
 	}
 
-	var requests types.Requests // TODO(racytech): revisit this after merge, make sure everythin is correct
+	var requests types.Requests
 	if g.Config != nil && g.Config.IsPrague(g.Timestamp) {
 		requests = types.Requests{}
 		if g.RequestsRoot != nil {

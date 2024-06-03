@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"reflect"
 
 	"github.com/holiman/uint256"
 
@@ -161,7 +162,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 
 	var rs types.Requests
 	if config.IsPrague(header.Time) {
-		rs = types.Requests{}
+		rs = make(types.Requests, 0)
 		allLogs := types.Logs{}
 		for _, rec := range receipts {
 			allLogs = append(allLogs, rec.Logs...)
@@ -173,6 +174,16 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		}
 
 		rs = append(rs, misc.DequeueWithdrawalRequests7002(syscall)...)
+		if requests != nil || header.RequestsRoot != nil {
+			rh := types.DeriveSha(rs)
+			if *header.RequestsRoot != rh {
+				return nil, nil, nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got :%v", header.RequestsRoot, rh)
+			}
+			sds := requests.Deposits()
+			if !reflect.DeepEqual(sds, ds) {
+				return nil, nil, nil, fmt.Errorf("error: invalid deposits in block")
+			}
+		}
 	}
 
 	return txs, receipts, rs, nil
@@ -187,6 +198,7 @@ func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, 
 	}
 	// get the deposits (TODO @somnathb1) and withdrawals and append it to requests
 	// requests = append(types.Requests{}, misc.DequeueWithdrawalRequests7002(syscall)...)
+	header.RequestsRoot = nil
 	outTxs, outReceipts, rs, err := s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, requests, chain, syscall, logger)
 	if err != nil {
 		return nil, nil, nil, err

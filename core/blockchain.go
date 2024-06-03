@@ -36,7 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/misc"
+	// "github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -167,6 +167,8 @@ func ExecuteBlockEphemerally(
 			return nil, nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
 		}
 	}
+
+	// var reqs types.Requests
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
 		if _, _, _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), block.Requests(), chainReader, false, logger); err != nil {
@@ -209,23 +211,22 @@ func ExecuteBlockEphemerally(
 
 	var requests types.Requests
 	if chainConfig.IsPrague(block.Time()) {
-		ds, err := types.ParseDepositLogs(allLogs, chainConfig.DepositContract)
-		if err != nil {
-			return nil, nil, fmt.Errorf("error: could not parse requests logs: %v", err)
-		}
-		requests = append(requests, ds...)
+		// ds, err := types.ParseDepositLogs(allLogs, chainConfig.DepositContract)
+		// if err != nil {
+		// 	return nil, nil, fmt.Errorf("error: could not parse requests logs: %v", err)
+		// }
+		// requests = append(requests, ds...)
 
-		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			return SysCallContract(contract, data, chainConfig, ibs, header, engine, false /* constCall */)
-		}
-		wrs := misc.DequeueWithdrawalRequests7002(syscall)
-		requests = append(requests, wrs...)
+		// syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
+		// 	return SysCallContract(contract, data, chainConfig, ibs, header, engine, false /* constCall */)
+		// }
+		// wrs := misc.DequeueWithdrawalRequests7002(syscall)
+		// requests = append(requests, wrs...)
 
-		rh := types.DeriveSha(requests)
-		if *block.Header().RequestsRoot != rh && !vmConfig.NoReceipts {
-			// TODO(racytech): do we have to check it here?
-			return nil, nil, fmt.Errorf("error: invalid requests root hash, expected: %v, got :%v", *block.Header().RequestsRoot, rh)
-		}
+		// rh := types.DeriveSha(requests)
+		// if *block.Header().RequestsRoot != rh && !vmConfig.NoReceipts {
+		// 	return nil, nil, fmt.Errorf("error: invalid requests root hash, expected: %v, got :%v", *block.Header().RequestsRoot, rh)
+		// }
 	}
 
 	return execRs, requests, nil
@@ -355,6 +356,7 @@ func FinalizeBlockExecution(
 	} else {
 		var rss types.Requests
 		_, _, rss, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, logger)
+
 		if !reflect.DeepEqual(rss, requests) {
 			return nil, nil, nil, fmt.Errorf("invalid requests for block %d", header.Number.Uint64())
 		}

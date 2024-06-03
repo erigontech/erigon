@@ -153,7 +153,6 @@ func (e *EthereumExecutionModule) GetBodiesByHashes(ctx context.Context, req *ex
 			Transactions: txs,
 			Withdrawals:  eth1_utils.ConvertWithdrawalsToRpc(body.Withdrawals),
 			Requests:     reqs,
-			//TODO(racytech): Requests
 		})
 	}
 
