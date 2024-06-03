@@ -1170,6 +1170,7 @@ var prevSeenKeys []KVPair
 // context Flush should be managed by caller.
 func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwindTo uint64, diff *StateDiffDomain) error {
 	d := dt.d
+	fmt.Println("DOMAIN")
 	//fmt.Printf("[domain][%s] unwinding domain to txNum=%d, step %d\n", d.filenameBase, txNumUnwindTo, step)
 	histRng, err := dt.ht.HistoryRange(int(txNumUnwindTo), -1, order.Asc, -1, rwTx)
 	if err != nil {
