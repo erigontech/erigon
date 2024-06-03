@@ -1227,7 +1227,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 					return err
 				}
 			} else {
-				seen[string(kv.Key)] = struct{}{}
+				seen[string(kv.Key[:len(kv.Key)-8])] = struct{}{}
 				if err := rwTx.Put(d.valsTable, kv.Key, kv.Value); err != nil {
 					return err
 				}
