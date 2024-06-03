@@ -112,12 +112,7 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, ethCfg *ethconfig.
 		return nil, nil, nil, nil, nil, err
 	}
 
-	aclDB, err := mdbx.NewMDBX(log.New()).Label(txpool.ACLDB).Path(cfg.DBDir).
-		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return txpool.ACLTablesCfg }).
-		Flags(func(f uint) uint { return f ^ mdbx2.Durable | mdbx2.SafeNoSync }).
-		GrowthStep(16 * datasize.MB).
-		SyncPeriod(30 * time.Second).
-		Open(ctx)
+	aclDB, err := txpool.OpenACLDB(ctx, cfg.DBDir)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
