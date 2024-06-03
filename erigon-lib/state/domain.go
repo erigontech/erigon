@@ -26,6 +26,7 @@ import (
 	"math"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -1193,7 +1194,6 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	if err != nil {
 		return err
 	}
-	seen := make(map[string]struct{})
 
 	// Attempt to use the diff to unwind the domain
 	if diff != nil {
@@ -1229,41 +1229,43 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 					return err
 				}
 			} else {
+				fmt.Printf("OPERATED %x -> %x\n", kv.Key, kv.Value)
 				if err := rwTx.Put(d.valsTable, kv.Key, kv.Value); err != nil {
 					return err
 				}
 			}
 		}
-		for _, kv := range keysKV {
-			// so stepBytes is ^step so we need to iterate from the beggining down until we find the stepBytes
-			for k, v, err := keysCursor.Seek(kv.Key); k != nil; k, v, err = keysCursor.NextDup() {
-				if err != nil {
-					return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
-				}
-				if bytes.Equal(v, kv.Value) {
-					break
-				}
+		// for _, kv := range keysKV {
+		// 	// so stepBytes is ^step so we need to iterate from the beggining down until we find the stepBytes
+		// 	for k, v, err := keysCursor.Seek(kv.Key); k != nil; k, v, err = keysCursor.NextDup() {
+		// 		if err != nil {
+		// 			return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
+		// 		}
+		// 		if bytes.Equal(v, kv.Value) {
+		// 			break
+		// 		}
 
-				kk, _, err := valsC.SeekExact(common.Append(k, stepBytes))
-				if err != nil {
-					return err
-				}
-				if kk != nil {
-					if err = valsC.DeleteCurrent(); err != nil {
-						return err
-					}
-				}
-				if err := keysCursor.DeleteCurrent(); err != nil {
-					return err
-				}
-			}
-		}
+		// 		kk, _, err := valsC.SeekExact(common.Append(k, stepBytes))
+		// 		if err != nil {
+		// 			return err
+		// 		}
+		// 		if kk != nil {
+		// 			if err = valsC.DeleteCurrent(); err != nil {
+		// 				return err
+		// 			}
+		// 		}
+		// 		if err := keysCursor.DeleteCurrent(); err != nil {
+		// 			return err
+		// 		}
+		// 	}
+		// }
 		fmt.Println("unwind domain", time.Since(start))
 		if _, err := dt.ht.Prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, false, logEvery); err != nil {
 			return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dt.d.filenameBase, txNumUnwindTo, step, err)
 		}
 		return nil
 	}
+	seen := make(map[string][]byte)
 
 	for histRng.HasNext() && txNumUnwindTo > 0 {
 		k, v, _, err := histRng.Next()
@@ -1289,7 +1291,16 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			return err
 		}
 		ic.Close()
-		seen[string(k)] = struct{}{}
+		seen[string(k)] = v
+	}
+	// convert seen to sorted slice
+	seenKeys := make([]string, 0, len(seen))
+	for k := range seen {
+		seenKeys = append(seenKeys, k)
+	}
+	sort.Strings(seenKeys)
+	for _, k := range seenKeys {
+		fmt.Printf("OPERATED %x -> %x \n", k, v)
 	}
 
 	keysCursorForDeletes, err := rwTx.RwCursorDupSort(d.keysTable)
