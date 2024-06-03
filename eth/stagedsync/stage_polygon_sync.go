@@ -179,10 +179,7 @@ func (s *polygonSyncStageService) Run(ctx context.Context, tx kv.RwTx, stageStat
 	s.stageState = stageState
 	s.unwinder = unwinder
 	s.logger.Info(s.appendLogPrefix("begin..."), "progress", stageState.BlockNumber)
-
-	if !s.bgComponentsRun {
-		s.runBgComponents(ctx)
-	}
+	s.runBgComponentsOnce(ctx)
 
 	if s.cachedForkChoice != nil {
 		err := s.handleUpdateForkChoice(tx, s.cachedForkChoice)
@@ -199,12 +196,17 @@ func (s *polygonSyncStageService) Run(ctx context.Context, tx kv.RwTx, stageStat
 		case <-ctx.Done():
 			return ctx.Err()
 		case err := <-s.bgComponentsErr:
-			s.logger.Error(s.appendLogPrefix("stopping node"), "err", err)
-			stopErr := s.stopNode()
-			if stopErr != nil {
-				return fmt.Errorf("%w: %w", stopErr, err)
-			}
-			return err
+			// call stop in separate goroutine to avoid deadlock due to "waitForStageLoopStop"
+			go func() {
+				s.logger.Error(s.appendLogPrefix("stopping node"), "err", err)
+				err = s.stopNode()
+				if err != nil {
+					s.logger.Error(s.appendLogPrefix("could not stop node cleanly"), "err", err)
+				}
+			}()
+
+			// use ErrStopped to exit the stage loop
+			return fmt.Errorf("%w: %w", common.ErrStopped, err)
 		case data := <-s.dataStream:
 			var err error
 			if data.updateForkChoice != nil {
@@ -228,12 +230,17 @@ func (s *polygonSyncStageService) Run(ctx context.Context, tx kv.RwTx, stageStat
 	}
 }
 
-func (s *polygonSyncStageService) runBgComponents(ctx context.Context) {
+func (s *polygonSyncStageService) runBgComponentsOnce(ctx context.Context) {
+	if s.bgComponentsRun {
+		return
+	}
+
 	s.logger.Info(s.appendLogPrefix("running background components"))
 	s.bgComponentsRun = true
+	s.bgComponentsErr = make(chan error)
 
 	go func() {
-		eg := errgroup.Group{}
+		eg, ctx := errgroup.WithContext(ctx)
 
 		eg.Go(func() error {
 			return s.events.Run(ctx)
