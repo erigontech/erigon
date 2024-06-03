@@ -1495,17 +1495,11 @@ func (c *Bor) CommitStates(
 			}
 
 			for _, ev := range merged {
-				eventRecordWithoutTime := ev.BuildEventRecord()
-
-				recordBytes, err := rlp.EncodeToBytes(eventRecordWithoutTime)
+				data, err := ev.Pack(stateReceiverABI)
 				if err != nil {
 					panic(err)
 				}
 
-				data, err := stateReceiverABI.Pack("commitState", big.NewInt(ev.Time.Unix()), recordBytes)
-				if err != nil {
-					panic(err)
-				}
 				events = append(events, data)
 			}
 		}

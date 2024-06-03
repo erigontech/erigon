@@ -3,6 +3,7 @@ package handler
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -51,13 +52,33 @@ func (a *ApiHandler) GetEthV1BeaconBlobSidecars(w http.ResponseWriter, r *http.R
 	if err != nil {
 		return nil, err
 	}
-
+	strIdxs, err := beaconhttp.StringListFromQueryParams(r, "indices")
+	if err != nil {
+		return nil, err
+	}
 	resp := solid.NewStaticListSSZ[*cltypes.BlobSidecar](696969, blobSidecarSSZLenght)
 	if !found {
 		return beaconhttp.NewBeaconResponse(resp), nil
 	}
-	for _, v := range out {
-		resp.Append(v)
+	if len(strIdxs) == 0 {
+		for _, v := range out {
+			resp.Append(v)
+		}
+	} else {
+		included := make(map[uint64]struct{})
+		for _, idx := range strIdxs {
+			i, err := strconv.ParseUint(idx, 10, 64)
+			if err != nil {
+				return nil, err
+			}
+			included[i] = struct{}{}
+		}
+		for _, v := range out {
+			if _, ok := included[v.Index]; ok {
+				resp.Append(v)
+			}
+		}
 	}
+
 	return beaconhttp.NewBeaconResponse(resp), nil
 }

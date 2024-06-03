@@ -312,6 +312,9 @@ func ExecV3(ctx context.Context,
 	var accumulator *shards.Accumulator
 	if shouldReportToTxPool {
 		accumulator = cfg.accumulator
+		if accumulator == nil {
+			accumulator = shards.NewAccumulator()
+		}
 	}
 	rs := state.NewStateV3(doms, logger)
 
@@ -674,7 +677,7 @@ Loop:
 			if err != nil {
 				return err
 			}
-			cfg.accumulator.StartChange(b.NumberU64(), b.Hash(), txs, false)
+			accumulator.StartChange(b.NumberU64(), b.Hash(), txs, false)
 		}
 
 		rules := chainConfig.Rules(blockNum, b.Time())
@@ -842,20 +845,18 @@ Loop:
 		// MA commitTx
 		if !parallel {
 			metrics2.UpdateBlockConsumerPostExecutionDelay(b.Time(), blockNum, logger)
-			//if blockNum%1000 == 0 {
-			//	if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u); err != nil {
-			//		return err
-			//	} else if !ok {
-			//		break Loop
-			//	}
-			//}
-
 			outputBlockNum.SetUint64(blockNum)
 
 			select {
 			case <-logEvery.C:
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
 				progress.Log(rs, in, rws, count, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB)
+				if applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).CanPrune(applyTx, outputTxNum.Load()) {
+					//small prune cause MDBX_TXN_FULL
+					if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Hour, applyTx); err != nil {
+						return err
+					}
+				}
 				// If we skip post evaluation, then we should compute root hash ASAP for fail-fast
 				if !skipPostEvaluation && (rs.SizeEstimate() < commitThreshold || inMemExec) {
 					break
