@@ -441,13 +441,11 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *domainBufferedWrit
 		aux:       make([]byte, 0, 128),
 		keysTable: dt.d.keysTable,
 		valsTable: dt.d.valsTable,
-		keys:      etl.NewCollector("flush "+dt.d.keysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), dt.d.logger),
-		values:    etl.NewCollector("flush "+dt.d.valsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), dt.d.logger),
+		keys:      etl.NewCollector("flush "+dt.d.keysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), dt.d.logger).LogLvl(log.LvlTrace),
+		values:    etl.NewCollector("flush "+dt.d.valsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), dt.d.logger).LogLvl(log.LvlTrace),
 
 		h: dt.ht.newWriter(tmpdir, discardHistory),
 	}
-	w.keys.LogLvl(log.LvlTrace)
-	w.values.LogLvl(log.LvlTrace)
 	w.keys.SortAndFlushInBackground(true)
 	w.values.SortAndFlushInBackground(true)
 	return w
@@ -1185,13 +1183,11 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 
 		ic, err := dt.ht.IdxRange(k, int(txNumUnwindTo)-1, 0, order.Desc, -1, rwTx)
 		if err != nil {
-			ic.Close()
 			return err
 		}
 		if ic.HasNext() {
 			nextTxn, err := ic.Next()
 			if err != nil {
-				ic.Close()
 				return err
 			}
 			restored.SetTxNum(nextTxn) // todo what if we actually had to decrease current step to provide correct update?
@@ -1200,7 +1196,6 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		}
 		//fmt.Printf("[%s] unwinding %x ->'%x'\n", dt.d.filenameBase, k, v)
 		if err := restored.addValue(k, nil, v); err != nil {
-			ic.Close()
 			return err
 		}
 		ic.Close()
@@ -1694,15 +1689,16 @@ func (dt *DomainRoTx) IteratePrefix2(roTx kv.Tx, fromKey, toKey []byte, limit in
 }
 
 func (dt *DomainRoTx) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit int) (iter.KV, error) {
-	fit := &DomainLatestIterFile{from: fromKey, to: toKey, limit: limit, dc: dt,
+	s := &DomainLatestIterFile{from: fromKey, to: toKey, limit: limit, dc: dt,
 		roTx:         roTx,
 		idxKeysTable: dt.d.keysTable,
 		h:            &CursorHeap{},
 	}
-	if err := fit.init(dt); err != nil {
+	if err := s.init(dt); err != nil {
+		s.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
-	return fit, nil
+	return s, nil
 }
 
 // CanPruneUntil returns true if domain OR history tables can be pruned until txNum

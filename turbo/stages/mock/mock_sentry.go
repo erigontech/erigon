@@ -737,10 +737,10 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 	if ms.TxPool != nil {
 		ms.ReceiveWg.Add(1)
 	}
-	initialCycle := MockInsertAsInitialCycle
+	initialCycle, firstCycle := MockInsertAsInitialCycle, false
 	hook := stages2.NewHook(ms.Ctx, ms.DB, ms.Notifications, ms.Sync, ms.BlockReader, ms.ChainConfig, ms.Log, nil)
 
-	if err = stages2.StageLoopIteration(ms.Ctx, ms.DB, wrap.TxContainer{}, ms.Sync, initialCycle, true, ms.Log, ms.BlockReader, hook); err != nil {
+	if err = stages2.StageLoopIteration(ms.Ctx, ms.DB, wrap.TxContainer{}, ms.Sync, initialCycle, firstCycle, ms.Log, ms.BlockReader, hook); err != nil {
 		return err
 	}
 	if ms.TxPool != nil {

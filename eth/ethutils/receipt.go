@@ -53,11 +53,11 @@ func MarshalReceipt(
 	}
 
 	if !chainConfig.IsLondon(header.Number.Uint64()) {
-		fields["effectiveGasPrice"] = hexutil.Uint64(txn.GetPrice().Uint64())
+		fields["effectiveGasPrice"] = (*hexutil.Big)(txn.GetPrice().ToBig())
 	} else {
 		baseFee, _ := uint256.FromBig(header.BaseFee)
 		gasPrice := new(big.Int).Add(header.BaseFee, txn.GetEffectiveGasTip(baseFee).ToBig())
-		fields["effectiveGasPrice"] = hexutil.Uint64(gasPrice.Uint64())
+		fields["effectiveGasPrice"] = (*hexutil.Big)(gasPrice)
 	}
 
 	// Assign receipt status.
@@ -81,7 +81,7 @@ func MarshalReceipt(
 			if err != nil {
 				log.Error(err.Error())
 			}
-			fields["blobGasPrice"] = blobGasPrice
+			fields["blobGasPrice"] = (*hexutil.Big)(blobGasPrice.ToBig())
 			fields["blobGasUsed"] = hexutil.Uint64(misc.GetBlobGasUsed(numBlobs))
 		}
 	}
