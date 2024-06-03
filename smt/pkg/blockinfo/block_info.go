@@ -11,6 +11,7 @@ import (
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/log/v3"
 )
 
 const (
@@ -39,6 +40,15 @@ func BuildBlockInfoTree(
 	if err := infoTree.InitBlockHeader(&previousStateRoot, coinbase, blockNumber, blockGasLimit, blockTime, &ger, &l1BlockHash); err != nil {
 		return nil, err
 	}
+	log.Trace("info-tree-header",
+		"blockNumber", blockNumber,
+		"previousStateRoot", previousStateRoot.String(),
+		"coinbase", coinbase.String(),
+		"blockGasLimit", blockGasLimit,
+		"blockTime", blockTime,
+		"ger", ger.String(),
+		"l1BlockHash", l1BlockHash.String(),
+	)
 	var err error
 	var logIndex int64 = 0
 	for i, txInfo := range *transactionInfos {
@@ -59,6 +69,8 @@ func BuildBlockInfoTree(
 			return nil, err
 		}
 
+		log.Trace("info-tree-tx", "block", blockNumber, "idx", i, "hash", l2TxHash.String())
+
 		_, err = infoTree.SetBlockTx(&l2TxHash, i, receipt, logIndex, receipt.CumulativeGasUsed, txInfo.EffectiveGasPrice)
 		if err != nil {
 			return nil, err
@@ -72,6 +84,8 @@ func BuildBlockInfoTree(
 	}
 
 	rootHash := common.BigToHash(root)
+
+	log.Trace("info-tree-root", "block", blockNumber, "root", rootHash.String())
 
 	return &rootHash, nil
 }
@@ -149,14 +163,22 @@ func (b *BlockInfoTree) SetBlockTx(
 		return nil, err
 	}
 
+	log.Trace("info-tree-tx-inner",
+		"tx-index", txIndex,
+		"log-index", logIndex,
+		"cumulativeGasUsed", cumulativeGasUsed,
+		"effective-percentage", effectivePercentage,
+		"receipt-status", receipt.Status,
+	)
+
 	// now encode the logs
-	for _, log := range receipt.Logs {
+	for _, rLog := range receipt.Logs {
 		reducedTopics := ""
-		for _, topic := range log.Topics {
+		for _, topic := range rLog.Topics {
 			reducedTopics += fmt.Sprintf("%x", topic)
 		}
 
-		logToEncode := fmt.Sprintf("0x%x%s", log.Data, reducedTopics)
+		logToEncode := fmt.Sprintf("0x%x%s", rLog.Data, reducedTopics)
 
 		hash, err := utils.HashContractBytecode(logToEncode)
 		if err != nil {
@@ -168,6 +190,12 @@ func (b *BlockInfoTree) SetBlockTx(
 		if err != nil {
 			return nil, err
 		}
+
+		log.Trace("info-tree-tx-receipt-log",
+			"topics", reducedTopics,
+			"to-encode", logToEncode,
+			"log-index", logIndex,
+		)
 
 		// increment log index
 		logIndex += 1

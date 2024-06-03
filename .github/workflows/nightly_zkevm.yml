@@ -1,0 +1,92 @@
+name: Nightly - Build and Push Docker
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Runs every night at midnight UTC
+
+env:
+  DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+  DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+  IMAGE_NAME: hermeznetwork/cdk-erigon
+
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/zkevm'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.prep.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Prepare
+        id: prep
+        run: |
+          SHORT_SHA=$(echo ${{ github.sha }} | head -c 7)
+          DATE_TIME=$(date +"%Y%m%d%H%M%S")
+          TAG=$DATE_TIME-$SHORT_SHA
+          echo "version=$TAG" >> $GITHUB_OUTPUT
+
+  build-amd64:
+    if: github.ref == 'refs/heads/zkevm'
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+      - name: Build and push AMD64 image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }}-amd64
+          platforms: linux/amd64
+
+  build-arm64:
+    if: github.ref == 'refs/heads/zkevm'
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+      - name: Build and push ARM64 image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }}-arm64
+          platforms: linux/arm64
+
+  create-and-push-manifest:
+    if: github.ref == 'refs/heads/zkevm'
+    needs: [prepare, build-amd64, build-arm64]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+      - name: Create and push manifest
+        run: |
+          docker buildx create --use
+          docker buildx build --push --platform linux/amd64,linux/arm64 --tag ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }} --file Dockerfile .

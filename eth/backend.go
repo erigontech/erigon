@@ -944,7 +944,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				Outputs:     nil,
 			}
 			// todo [zkevm] read the stream version from config and figure out what system id is used for
-			backend.dataStream, err = datastreamer.NewServer(uint16(httpCfg.DataStreamPort), uint8(2), 1, datastreamer.StreamType(1), file, logConfig)
+			backend.dataStream, err = datastreamer.NewServer(uint16(httpCfg.DataStreamPort), uint8(backend.config.DatastreamVersion), 1, datastreamer.StreamType(1), file, logConfig)
 			if err != nil {
 				return nil, err
 			}
@@ -953,7 +953,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			// the stream re-populated from scratch.  So we check the stream for the latest header and if it is
 			// 0 we can just set the datastream progress to 0 also which will force a re-population of the stream
 			latestHeader := backend.dataStream.GetHeader()
-			if latestHeader.TotalEntries == 0 {
+			if latestHeader.TotalEntries == 0 && executionProgress > 0 {
 				log.Info("[dataStream] setting the stream progress to 0")
 				if err := stages.SaveStageProgress(tx, stages.DataStream, 0); err != nil {
 					return nil, err
@@ -1007,6 +1007,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			l1Topics,
 			cfg.L1BlockRange,
 			cfg.L1QueryDelay,
+			cfg.L1HighestBlockType,
 		)
 
 		l1InfoTreeSyncer := syncer.NewL1Syncer(
@@ -1015,6 +1016,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			[][]libcommon.Hash{{contracts.UpdateL1InfoTreeTopic}},
 			cfg.L1BlockRange,
 			cfg.L1QueryDelay,
+			cfg.L1HighestBlockType,
 		)
 
 		if isSequencer {
@@ -1062,6 +1064,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				[][]libcommon.Hash{{contracts.SequenceBatchesTopic}},
 				cfg.L1BlockRange,
 				cfg.L1QueryDelay,
+				cfg.L1HighestBlockType,
 			)
 
 			backend.syncStages = stages2.NewSequencerZkStages(
@@ -1263,7 +1266,7 @@ func (s *Ethereum) PreStart() error {
 		// so here we loop and take a brief pause waiting for it to be ready
 		attempts := 0
 		for {
-			_, err = zkStages.CatchupDatastream("stream-catchup", tx, s.dataStream, s.chainConfig.ChainID.Uint64())
+			_, err = zkStages.CatchupDatastream("stream-catchup", tx, s.dataStream, s.chainConfig.ChainID.Uint64(), s.config.DatastreamVersion)
 			if err != nil {
 				if errors.Is(err, datastreamer.ErrAtomicOpNotAllowed) {
 					attempts++

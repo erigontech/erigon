@@ -177,6 +177,22 @@ func (e *Executor) Verify(p *Payload, request *VerifierRequest, oldStateRoot com
 		if err != nil {
 			return false, err
 		}
+
+		// now save the witness as a hex string along with the datastream
+		// this is to allow for easy debugging of the witness and datastream
+		witnessHexFile := path.Join(e.outputLocation, fmt.Sprintf("witness_%d.hex", request.BatchNumber))
+		witnessAsHex := fmt.Sprintf("0x%x", p.Witness)
+		err = os.WriteFile(witnessHexFile, []byte(witnessAsHex), 0644)
+		if err != nil {
+			return false, err
+		}
+
+		dataStreamHexFile := path.Join(e.outputLocation, fmt.Sprintf("datastream_%d.hex", request.BatchNumber))
+		dataStreamAsHex := fmt.Sprintf("0x%x", p.DataStream)
+		err = os.WriteFile(dataStreamHexFile, []byte(dataStreamAsHex), 0644)
+		if err != nil {
+			return false, err
+		}
 	}
 
 	resp, err := e.client.ProcessStatelessBatchV2(ctx, grpcRequest, grpc.MaxCallSendMsgSize(size), grpc.MaxCallRecvMsgSize(size))

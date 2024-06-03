@@ -117,13 +117,6 @@ func SpawnSequencerL1BlockSyncStage(
 
 	logChan := cfg.syncer.GetLogsChan()
 	progressChan := cfg.syncer.GetProgressMessageChan()
-	totalBlocks := 0
-	if highestKnownBatch == 0 {
-		// if we don't have any batches, we need to start from the beginning, and we know batch 1 won't be
-		// in the contract data, so we can start at block 1 for reporting purposes as this will always be added
-		// in the first batch
-		totalBlocks = 1
-	}
 
 	logTicker := time.NewTicker(10 * time.Second)
 	defer logTicker.Stop()
@@ -182,12 +175,9 @@ LOOP:
 						return err
 					}
 
-					decoded, err := zktx.DecodeBatchL2Blocks(batch, cfg.zkCfg.SequencerInitialForkId)
-					if err != nil {
-						return err
-					}
-					totalBlocks += len(decoded)
-					log.Debug(fmt.Sprintf("[%s] Wrote L1 batch", logPrefix), "batch", b, "blocks", len(decoded), "totalBlocks", totalBlocks)
+					// disabled for now as it adds extra work into the process
+					// todo: find a way to only call this if debug logging is enabled
+					// debugLogProgress(batch, cfg, totalBlocks, logPrefix, b)
 
 					// check if we need to stop here based on config
 					if cfg.zkCfg.L1SyncStopBatch > 0 {
@@ -226,6 +216,15 @@ LOOP:
 	}
 
 	return nil
+}
+
+func debugLogProgress(batch []byte, cfg SequencerL1BlockSyncCfg, totalBlocks int, logPrefix string, b uint64) {
+	decoded, err := zktx.DecodeBatchL2Blocks(batch, cfg.zkCfg.SequencerInitialForkId)
+	if err != nil {
+		log.Error("Error decoding L1 batch", "batch", b, "err", err)
+	}
+	totalBlocks += len(decoded)
+	log.Debug(fmt.Sprintf("[%s] Wrote L1 batch", logPrefix), "batch", b, "blocks", len(decoded), "totalBlocks", totalBlocks)
 }
 
 func haveAllBatchesInDb(highestBatch uint64, cfg SequencerL1BlockSyncCfg, hermezDb *hermez_db.HermezDb) (bool, error) {

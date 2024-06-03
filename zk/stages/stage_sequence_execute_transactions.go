@@ -11,6 +11,10 @@ import (
 	"bytes"
 	"io"
 
+	"errors"
+
+	"errors"
+
 	mapset "github.com/deckarep/golang-set/v2"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/core"
@@ -38,7 +42,7 @@ LOOP:
 		}
 		if err := cfg.txPoolDb.View(context.Background(), func(poolTx kv.Tx) error {
 			slots := types2.TxsRlp{}
-			_, count, err = cfg.txPool.YieldBest(yieldSize, &slots, poolTx, executionAt, getGasLimit(uint16(forkId)), 0, alreadyYielded)
+			_, count, err = cfg.txPool.YieldBest(yieldSize, &slots, poolTx, executionAt, getGasLimit(forkId), alreadyYielded)
 			if err != nil {
 				return err
 			}
@@ -176,6 +180,11 @@ func attemptAddTransaction(
 
 	if err != nil {
 		return nil, false, err
+	}
+
+	//TODO: remove this after bug is fixed
+	if errors.Is(execResult.Err, vm.ErrUnsupportedPrecompile) {
+		receipt.Status = 1
 	}
 
 	// we need to keep hold of the effective percentage used

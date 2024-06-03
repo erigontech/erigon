@@ -57,12 +57,12 @@ func SpawnL1SequencerSyncStage(
 	if err != nil {
 		return err
 	}
-	if progress == 0 {
-		progress = cfg.zkCfg.L1FirstBlock - 1
-	}
 	if progress > 0 {
 		// if we have progress then we can assume that we have the single injected batch already so can just return here
 		return nil
+	}
+	if progress == 0 {
+		progress = cfg.zkCfg.L1FirstBlock - 1
 	}
 
 	hermezDb := hermez_db.NewHermezDb(tx)
@@ -109,8 +109,11 @@ Loop:
 	cfg.syncer.Stop()
 
 	progress = cfg.syncer.GetLastCheckedL1Block()
-	if err = stages.SaveStageProgress(tx, stages.L1SequencerSync, progress); err != nil {
-		return err
+	if progress >= cfg.zkCfg.L1FirstBlock {
+		// do not save progress if progress less than L1FirstBlock
+		if err = stages.SaveStageProgress(tx, stages.L1SequencerSync, progress); err != nil {
+			return err
+		}
 	}
 
 	log.Info(fmt.Sprintf("[%s] L1 Sequencer sync finished", logPrefix))
