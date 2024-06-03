@@ -1193,7 +1193,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 
 	// Attempt to use the diff to unwind the domain
 	if diff != nil {
-		_, valsKV := diff.GetKeys()
+		keysKV, valsKV := diff.GetKeys()
 		keysCursor, err := rwTx.RwCursorDupSort(d.keysTable)
 		if err != nil {
 			return fmt.Errorf("create %s domain delete cursor: %w", d.filenameBase, err)
@@ -1206,6 +1206,30 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		}
 		defer valsC.Close()
 
+		for _, kv := range keysKV {
+			// so stepBytes is ^step so we need to iterate from the beggining down until we find the stepBytes
+			for k, v, err := keysCursor.Seek(kv.Key); k != nil; k, v, err = keysCursor.NextDup() {
+				if err != nil {
+					return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
+				}
+				if !bytes.Equal(v, kv.Value) {
+					continue
+				}
+
+				kk, _, err := valsC.SeekExact(common.Append(k, stepBytes))
+				if err != nil {
+					return err
+				}
+				if kk != nil {
+					if err = valsC.DeleteCurrent(); err != nil {
+						return err
+					}
+				}
+				if err := keysCursor.DeleteCurrent(); err != nil {
+					return err
+				}
+			}
+		}
 		for _, kv := range valsKV {
 			strippedKey := common.Copy(kv.Key[:len(kv.Key)-8])
 			stepBytes := common.Copy(kv.Key[len(kv.Key)-8:])
@@ -1234,30 +1258,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 				}
 			}
 		}
-		// for _, kv := range keysKV {
-		// 	// so stepBytes is ^step so we need to iterate from the beggining down until we find the stepBytes
-		// 	for k, v, err := keysCursor.Seek(kv.Key); k != nil; k, v, err = keysCursor.NextDup() {
-		// 		if err != nil {
-		// 			return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
-		// 		}
-		// 		if bytes.Equal(v, kv.Value) {
-		// 			break
-		// 		}
 
-		// 		kk, _, err := valsC.SeekExact(common.Append(k, stepBytes))
-		// 		if err != nil {
-		// 			return err
-		// 		}
-		// 		if kk != nil {
-		// 			if err = valsC.DeleteCurrent(); err != nil {
-		// 				return err
-		// 			}
-		// 		}
-		// 		if err := keysCursor.DeleteCurrent(); err != nil {
-		// 			return err
-		// 		}
-		// 	}
-		// }
 		fmt.Println("unwind domain", time.Since(start))
 		if _, err := dt.ht.Prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, false, logEvery); err != nil {
 			return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dt.d.filenameBase, txNumUnwindTo, step, err)
