@@ -803,7 +803,6 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode Requests
-	// rb.Requests = []Request{}
 	if err := decodeRequests(&rb.Requests, s); err != nil {
 		return err
 	}
@@ -898,7 +897,6 @@ func (bfs *BodyForStorage) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode Requests
-	// bfs.Requests = Requests{}
 	if err := decodeRequests(&bfs.Requests, s); err != nil {
 		return err
 	}
@@ -982,7 +980,6 @@ func (bb *Body) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode Requests
-	// bb.Requests = []Request{}
 	if err := decodeRequests(&bb.Requests, s); err != nil {
 		return err
 	}

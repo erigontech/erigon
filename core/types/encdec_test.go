@@ -278,8 +278,7 @@ func (tr *TRand) RandBody() *Body {
 		Transactions: tr.RandTransactions(tr.RandIntInRange(1, 6)),
 		Uncles:       tr.RandHeaders(tr.RandIntInRange(1, 6)),
 		Withdrawals:  tr.RandWithdrawals(tr.RandIntInRange(1, 6)),
-		// Requests:     tr.RandRequests(tr.RandIntInRange(1, 6)),
-		Requests: tr.RandRequests(tr.RandIntInRange(1, 6)),
+		Requests:     tr.RandRequests(tr.RandIntInRange(1, 6)),
 	}
 }
 
@@ -521,7 +520,6 @@ func TestDepositEncodeDecode(t *testing.T) {
 		if err := a.EncodeRLP(&buf); err != nil {
 			t.Errorf("error: deposit.EncodeRLP(): %v", err)
 		}
-		// s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
 		b := new(Deposit)
 		if err := b.DecodeRLP(buf.Bytes()); err != nil {
 			t.Errorf("error: Deposit.DecodeRLP(): %v", err)

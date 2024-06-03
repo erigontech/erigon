@@ -10,7 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	execution "github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
-	// "github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
