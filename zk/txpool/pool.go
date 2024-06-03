@@ -713,37 +713,25 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		return InsufficientFunds
 	}
 
-	var mode string
-	p.aclDB.View(context.TODO(), func(tx kv.Tx) error {
-		value, err := tx.GetOne(Config, []byte("mode"))
+	switch resolvePolicy(txn) {
+	case SendTx:
+		var allow bool
+		allow, err := p.checkPolicy(from, SendTx)
 		if err != nil {
 			panic(err)
 		}
-		mode = string(value)
-		return nil
-	})
-
-	if mode != "disabled" {
-		switch resolvePolicy(txn) {
-		case SendTx:
-			var allow bool
-			allow, err := p.checkPolicy(from, SendTx, mode)
-			if err != nil {
-				panic(err)
-			}
-			if !allow {
-				return SenderDisallowedSendTx
-			}
-		case Deploy:
-			var allow bool
-			// check that sender may deploy contracts
-			allow, err := p.checkPolicy(from, Deploy, mode)
-			if err != nil {
-				panic(err)
-			}
-			if !allow {
-				return SenderDisallowedDeploy
-			}
+		if !allow {
+			return SenderDisallowedSendTx
+		}
+	case Deploy:
+		var allow bool
+		// check that sender may deploy contracts
+		allow, err := p.checkPolicy(from, Deploy)
+		if err != nil {
+			panic(err)
+		}
+		if !allow {
+			return SenderDisallowedDeploy
 		}
 	}
 

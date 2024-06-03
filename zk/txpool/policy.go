@@ -25,16 +25,38 @@ func containsPolicy(policies []byte, policy PolicyName) bool {
 }
 
 // create a method checkpolicy to check an address according to passed policy in the method
-func (p *TxPool) checkPolicy(addr common.Address, policy PolicyName, mode string) (bool, error) {
-	var table string
+func (p *TxPool) checkPolicy(addr common.Address, policy PolicyName) (bool, error) {
+	// Retrieve the mode configuration
+	var mode string
+	err := p.aclDB.View(context.TODO(), func(tx kv.Tx) error {
+		value, err := tx.GetOne(Config, []byte("mode"))
+		if err != nil {
+			return err
+		}
+		if value == nil || string(value) == "disabled" {
+			mode = "disabled"
+			return nil
+		}
+
+		mode = string(value)
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+
+	if mode == "disabled" {
+		return true, nil
+	}
+
+	// Determine the appropriate table based on the mode
+	table := Blacklist
 	if mode == "allowlist" {
 		table = Whitelist
-	} else {
-		table = Blacklist
 	}
 
 	var policyBytes []byte
-	err := p.aclDB.View(context.TODO(), func(tx kv.Tx) error {
+	err = p.aclDB.View(context.TODO(), func(tx kv.Tx) error {
 		value, err := tx.GetOne(table, addr.Bytes())
 		if err != nil {
 			return err
