@@ -283,24 +283,24 @@ func (s *Sync) syncToTip(ctx context.Context) (*types.Header, error) {
 }
 
 func (s *Sync) syncToTipUsingCheckpoints(ctx context.Context, tip *types.Header) (*types.Header, error) {
-	return s.sync(ctx, tip, func(ctx context.Context) (*types.Header, error) {
-		return s.blockDownloader.DownloadBlocksUsingCheckpoints(ctx, tip.Number.Uint64()+1)
+	return s.sync(ctx, tip, func(ctx context.Context, startBlockNum uint64) (*types.Header, error) {
+		return s.blockDownloader.DownloadBlocksUsingCheckpoints(ctx, startBlockNum)
 	})
 }
 
 func (s *Sync) syncToTipUsingMilestones(ctx context.Context, tip *types.Header) (*types.Header, error) {
-	return s.sync(ctx, tip, func(ctx context.Context) (*types.Header, error) {
-		return s.blockDownloader.DownloadBlocksUsingMilestones(ctx, tip.Number.Uint64()+1)
+	return s.sync(ctx, tip, func(ctx context.Context, startBlockNum uint64) (*types.Header, error) {
+		return s.blockDownloader.DownloadBlocksUsingMilestones(ctx, startBlockNum)
 	})
 }
 
 func (s *Sync) sync(
 	ctx context.Context,
 	tip *types.Header,
-	tipDownloader func(ctx context.Context) (*types.Header, error),
+	tipDownloader func(ctx context.Context, startBlockNum uint64) (*types.Header, error),
 ) (*types.Header, error) {
 	for {
-		newTip, err := tipDownloader(ctx)
+		newTip, err := tipDownloader(ctx, tip.Number.Uint64()+1)
 		if err != nil {
 			return nil, err
 		}
