@@ -1251,7 +1251,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 					return err
 				}
 				prevDeletedKeys1 = append(prevDeletedKeys1, KVPair{Key: kv.Key})
-				prevDeletedKeys2 = append(prevDeletedKeys2, KVPair{Key: strippedKey})
+				prevDeletedKeys2 = append(prevDeletedKeys2, KVPair{Key: strippedKey, Value: stepBytes})
 			} else {
 				if err := rwTx.Put(d.valsTable, kv.Key, kv.Value); err != nil {
 					return err
@@ -1367,7 +1367,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		if _, _, err = keysCursorForDeletes.SeekBothExact(k, v); err != nil {
 			return err
 		}
-		currDeletedKeys2 = append(currDeletedKeys1, KVPair{Key: k})
+		currDeletedKeys2 = append(currDeletedKeys1, KVPair{Key: k, Value: v})
 		if err = keysCursorForDeletes.DeleteCurrent(); err != nil {
 			return err
 		}
@@ -1381,9 +1381,9 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		}
 	}
 	for idx, kv := range prevDeletedKeys2 {
-		if !bytes.Equal(kv.Key, currDeletedKeys2[idx].Key) {
-			fmt.Printf("prevDeletedKeys2[%d] = %x\n", idx, kv.Key)
-			fmt.Printf("currDeletedKeys2[%d] = %x\n", idx, currDeletedKeys2[idx].Key)
+		if !bytes.Equal(kv.Key, currDeletedKeys2[idx].Key) || !bytes.Equal(kv.Value, currDeletedKeys2[idx].Value) {
+			fmt.Printf("prevDeletedKeys2[%d] = %x, %x\n", idx, kv.Key, kv.Value)
+			fmt.Printf("currDeletedKeys2[%d] = %x, %x\n", idx, currDeletedKeys2[idx].Key, currDeletedKeys2[idx].Value)
 			break
 		}
 	}
