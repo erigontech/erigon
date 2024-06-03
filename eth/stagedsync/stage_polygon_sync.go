@@ -57,12 +57,12 @@ func NewPolygonSyncStageCfg(
 	blocksVerifier := polygonsync.VerifyBlocks
 	heimdallService := heimdall.NewHeimdall(heimdallClient, logger, heimdall.WithStore(storage))
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
-	b := bridge.NewBridge(dataDir, logger, borConfig, heimdallClient.FetchStateSyncEvents, stateReceiverABI)
+	polygonBridge := bridge.NewBridge(dataDir, logger, borConfig, heimdallClient.FetchStateSyncEvents, stateReceiverABI)
 	blockDownloader := polygonsync.NewBlockDownloader(
 		logger,
 		p2pService,
 		heimdallService,
-		b,
+		polygonBridge,
 		checkpointVerifier,
 		milestoneVerifier,
 		blocksVerifier,
@@ -87,7 +87,7 @@ func NewPolygonSyncStageCfg(
 		logger:           logger,
 		chainConfig:      chainConfig,
 		blockReader:      blockReader,
-		bridge:           b,
+		bridge:           polygonBridge,
 		sync:             sync,
 		events:           events,
 		p2p:              p2pService,

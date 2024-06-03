@@ -59,12 +59,12 @@ func NewService(
 		logger,
 	)
 
-	b := bridge.NewBridge(dataDir, logger, borConfig, heimdallClient.FetchStateSyncEvents, bor.GenesisContractStateReceiverABI())
+	polygonBridge := bridge.NewBridge(dataDir, logger, borConfig, heimdallClient.FetchStateSyncEvents, bor.GenesisContractStateReceiverABI())
 	blockDownloader := NewBlockDownloader(
 		logger,
 		p2pService,
 		heimdallService,
-		b,
+		polygonBridge,
 		checkpointVerifier,
 		milestoneVerifier,
 		blocksVerifier,
@@ -93,8 +93,8 @@ func NewService(
 		events:     events,
 
 		heimdallService: heimdallServiceV2,
-		bridge:          b,
-	}, nil
+		bridge:          polygonBridge,
+	}
 }
 
 func (s *service) Run(parentCtx context.Context) error {
