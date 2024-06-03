@@ -1193,9 +1193,20 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 
 	// Attempt to use the diff to unwind the domain
 	if diff != nil {
-		prevSeenKeys = map[string][]KVPair{}
-		prevDeletedKeys1 = map[string][]KVPair{}
-		prevDeletedKeys2 = map[string][]KVPair{}
+		if prevSeenKeys == nil {
+			prevSeenKeys = map[string][]KVPair{}
+		}
+		if prevDeletedKeys1 == nil {
+			prevDeletedKeys1 = map[string][]KVPair{}
+		}
+		if prevDeletedKeys2 == nil {
+			prevDeletedKeys2 = map[string][]KVPair{}
+		}
+
+		prevSeenKeys[dt.d.keysTable] = nil
+		prevDeletedKeys1[dt.d.keysTable] = nil
+		prevDeletedKeys2[dt.d.keysTable] = nil
+
 		keysKV, valsKV := diff.GetKeys()
 		keysCursor, err := rwTx.RwCursorDupSort(d.keysTable)
 		if err != nil {
@@ -1314,19 +1325,17 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	if prevSeenKeys == nil {
 		prevSeenKeys = make(map[string][]KVPair)
 	}
-	if len(prevSeenKeys) > 0 {
-		fmt.Println("seenKeys", len(seenKeys), "prevSeenKeys", len(prevSeenKeys[dt.d.valsTable]))
-		for idx, kva := range seenKeys {
-			if len(prevSeenKeys) <= idx {
-				fmt.Println("size mismatch", len(prevSeenKeys[dt.d.valsTable]), len(seenKeys))
-				break
-			}
-			cmpKey := prevSeenKeys[dt.d.valsTable][idx].Key
-			if !bytes.Equal(kva.Key, cmpKey) || !bytes.Equal(kva.Value, seenKeys[idx].Value) {
-				fmt.Printf("valsKV[%d] = %x -> %x\n", idx, seenKeys[idx].Key, seenKeys[idx].Value)
-				fmt.Printf("prevSeenKeys[%d] = %x -> %x\n", idx, kva.Key, kva.Value)
-				break
-			}
+	fmt.Println("seenKeys", len(seenKeys), "prevSeenKeys", len(prevSeenKeys[dt.d.valsTable]))
+	for idx, kva := range seenKeys {
+		if len(prevSeenKeys[dt.d.valsTable]) <= idx {
+			fmt.Println("size mismatch", len(prevSeenKeys[dt.d.valsTable]), len(seenKeys))
+			break
+		}
+		cmpKey := prevSeenKeys[dt.d.valsTable][idx].Key
+		if !bytes.Equal(kva.Key, cmpKey) || !bytes.Equal(kva.Value, seenKeys[idx].Value) {
+			fmt.Printf("valsKV[%d] = %x -> %x\n", idx, seenKeys[idx].Key, seenKeys[idx].Value)
+			fmt.Printf("prevSeenKeys[%d] = %x -> %x\n", idx, kva.Key, kva.Value)
+			break
 		}
 	}
 
