@@ -82,6 +82,13 @@ func (h *heimdall) FetchCheckpointsFromBlock(ctx context.Context, startBlock uin
 		if err != nil {
 			return nil, err
 		}
+		if len(checkpoints) == 0 {
+			return nil, errors.New("unexpected empty checkpoints")
+		}
+		if checkpoints[len(checkpoints)-1].CmpRange(startBlock) > 0 {
+			// the start block is past the last checkpoint
+			return nil, nil
+		}
 
 		startCheckpointIdx, found := sort.Find(len(checkpoints), func(i int) int {
 			return checkpoints[i].CmpRange(startBlock)
