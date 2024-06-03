@@ -2,7 +2,6 @@ package legacy_executor_verifier
 
 import (
 	"context"
-	"encoding/hex"
 	"strconv"
 	"sync"
 

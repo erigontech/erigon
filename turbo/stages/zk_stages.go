@@ -55,7 +55,7 @@ func NewDefaultZkStages(ctx context.Context,
 		zkStages.StageBatchesCfg(db, datastreamClient, cfg.Zk),
 		zkStages.StageDataStreamCatchupCfg(datastreamServer, db, cfg.Genesis.Config.ChainID.Uint64(), cfg.DatastreamVersion),
 		stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
-		stagedsync.StageSendersCfg(db, controlServer.ChainConfig, false, dirs.Tmp, cfg.Prune, blockRetire, controlServer.Hd, nil),
+		stagedsync.StageSendersCfg(db, controlServer.ChainConfig, false, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd, nil),
 		stagedsync.StageExecuteBlocksCfg(
 			db,
 			cfg.Prune,

@@ -255,9 +255,6 @@ func getExecRange(cfg ExecuteBlockCfg, tx kv.RwTx, stageProgress, toBlock uint64
 			return 0, 0, err
 		}
 		to := prevStageProgress
-		if !quiet {
-			log.Info(fmt.Sprintf("[%s] Debug limit set, switching to it", logPrefix), "regularTo", to, "debugTo", cfg.zk.DebugLimit)
-		}
 		if cfg.zk.DebugLimit < to {
 			to = cfg.zk.DebugLimit
 		}

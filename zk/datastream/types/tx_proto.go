@@ -1,9 +1,9 @@
 package types
 
 import (
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/zk/datastream/proto/github.com/0xPolygonHermez/zkevm-node/state/datastream"
 	"google.golang.org/protobuf/proto"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 )
 
 type TxProto struct {
