@@ -1328,13 +1328,12 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	fmt.Println("seenKeys", len(seenKeys), "prevSeenKeys", len(prevSeenKeys[dt.d.valsTable]))
 	for idx, kva := range seenKeys {
 		if len(prevSeenKeys[dt.d.valsTable]) <= idx {
-			fmt.Println("size mismatch", len(prevSeenKeys[dt.d.valsTable]), len(seenKeys))
+			fmt.Println("seenKeys", len(seenKeys), "prevSeenKeys", len(prevSeenKeys[dt.d.valsTable]))
 			break
 		}
-		cmpKey := prevSeenKeys[dt.d.valsTable][idx].Key
-		if !bytes.Equal(kva.Key, cmpKey) || !bytes.Equal(kva.Value, seenKeys[idx].Value) {
-			fmt.Printf("valsKV[%d] = %x -> %x\n", idx, seenKeys[idx].Key, seenKeys[idx].Value)
-			fmt.Printf("prevSeenKeys[%d] = %x -> %x\n", idx, kva.Key, kva.Value)
+		if !bytes.Equal(kva.Key, prevSeenKeys[dt.d.valsTable][idx].Key) || !bytes.Equal(kva.Value, prevSeenKeys[dt.d.valsTable][idx].Value) {
+			fmt.Printf("seenKeys[%d] = %x, %x\n", idx, kva.Key, kva.Value)
+			fmt.Printf("prevSeenKeys[%d] = %x, %x\n", idx, prevSeenKeys[dt.d.valsTable][idx].Key, prevSeenKeys[dt.d.valsTable][idx].Value)
 			break
 		}
 	}
