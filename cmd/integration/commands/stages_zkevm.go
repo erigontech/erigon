@@ -58,6 +58,7 @@ func newSyncZk(ctx context.Context, db kv.RwDB) (consensus.Engine, *vm.Config, *
 		chainConfig,
 		genesisBlock,
 		chainConfig.ChainID.Uint64(),
+		logger,
 	)
 
 	maxBlockBroadcastPeers := func(header *types.Header) uint { return 0 }
@@ -73,6 +74,7 @@ func newSyncZk(ctx context.Context, db kv.RwDB) (consensus.Engine, *vm.Config, *
 		statusDataProvider,
 		false,
 		maxBlockBroadcastPeers,
+		false,
 		logger,
 	)
 	if err != nil {

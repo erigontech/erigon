@@ -43,7 +43,7 @@ type Generator struct {
 	tx          kv.Tx
 	dirs        datadir.Dirs
 	historyV3   bool
-	agg         *libstate.AggregatorV3
+	agg         *libstate.Aggregator
 	blockReader services.FullBlockReader
 	chainCfg    *chain.Config
 	engine      consensus.EngineReader
@@ -52,7 +52,7 @@ type Generator struct {
 func NewGenerator(
 	dirs datadir.Dirs,
 	historyV3 bool,
-	agg *libstate.AggregatorV3,
+	agg *libstate.Aggregator,
 	blockReader services.FullBlockReader,
 	chainCfg *chain.Config,
 	engine consensus.EngineReader,

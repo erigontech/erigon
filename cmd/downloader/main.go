@@ -13,6 +13,9 @@ import (
 	"strings"
 	"time"
 
+	_ "github.com/ledgerwatch/erigon/core/snaptype"        //hack
+	_ "github.com/ledgerwatch/erigon/polygon/bor/snaptype" //hack
+
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/c2h5oh/datasize"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
@@ -279,10 +282,11 @@ var createTorrent = &cobra.Command{
 	Example: "go run ./cmd/downloader torrent_create --datadir=<your_datadir> --file=<relative_file_path>",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dirs := datadir.New(datadirCli)
-		err := downloader.BuildTorrentFilesIfNeed(cmd.Context(), dirs, downloader.NewAtomicTorrentFiles(dirs.Snap), chain, nil)
+		createdAmount, err := downloader.BuildTorrentFilesIfNeed(cmd.Context(), dirs, downloader.NewAtomicTorrentFS(dirs.Snap), chain, nil)
 		if err != nil {
 			return err
 		}
+		log.Info("created .torent files", "amount", createdAmount)
 		return nil
 	},
 }
@@ -403,8 +407,10 @@ var torrentMagnet = &cobra.Command{
 
 func manifestVerify(ctx context.Context, logger log.Logger) error {
 	webseedsList := common.CliString2Array(webseeds)
-	if known, ok := snapcfg.KnownWebseeds[chain]; ok {
-		webseedsList = append(webseedsList, known...)
+	if len(webseedsList) == 0 {
+		if known, ok := snapcfg.KnownWebseeds[chain]; ok {
+			webseedsList = append(webseedsList, known...)
+		}
 	}
 
 	webseedUrlsOrFiles := webseedsList
@@ -438,9 +444,9 @@ func manifestVerify(ctx context.Context, logger log.Logger) error {
 			continue
 		}
 	}
-
-	_ = webseedFileProviders // todo add support of file providers
-	logger.Warn("file providers are not supported yet", "fileProviders", webseedFileProviders)
+	if len(webseedFileProviders) > 0 {
+		logger.Warn("file providers are not supported yet", "fileProviders", webseedFileProviders)
+	}
 
 	wseed := downloader.NewWebSeeds(webseedHttpProviders, log.LvlDebug, logger)
 	return wseed.VerifyManifestedBuckets(ctx, verifyFailfast)
@@ -502,7 +508,7 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 
-	tf := downloader.NewAtomicTorrentFiles(dirs.Snap)
+	tf := downloader.NewAtomicTorrentFS(dirs.Snap)
 
 	if forceRebuild { // remove and create .torrent files (will re-read all snapshots)
 		//removePieceCompletionStorage(snapDir)
@@ -515,9 +521,11 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 				return err
 			}
 		}
-		if err := downloader.BuildTorrentFilesIfNeed(ctx, dirs, tf, chain, nil); err != nil {
+		createdAmount, err := downloader.BuildTorrentFilesIfNeed(ctx, dirs, tf, chain, nil)
+		if err != nil {
 			return fmt.Errorf("BuildTorrentFilesIfNeed: %w", err)
 		}
+		log.Info("created .torent files", "amount", createdAmount)
 	}
 
 	res := map[string]string{}

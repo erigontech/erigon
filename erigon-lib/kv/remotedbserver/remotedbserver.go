@@ -91,7 +91,7 @@ type threadSafeTx struct {
 	sync.Mutex
 }
 
-//go:generate mockgen -destination=./snapshots_mock.go -package=remotedbserver . Snapshots
+//go:generate mockgen -typed=true -destination=./snapshots_mock.go -package=remotedbserver . Snapshots
 type Snapshots interface {
 	Files() []string
 }
@@ -136,7 +136,7 @@ func (s *KvServer) begin(ctx context.Context) (id uint64, err error) {
 	}
 	s.txsMapLock.Lock()
 	defer s.txsMapLock.Unlock()
-	tx, errBegin := s.kv.BeginRo(ctx)
+	tx, errBegin := s.kv.BeginRo(ctx) //nolint:gocritic
 	if errBegin != nil {
 		return 0, errBegin
 	}
@@ -158,7 +158,7 @@ func (s *KvServer) renew(ctx context.Context, id uint64) (err error) {
 		defer tx.Unlock()
 		tx.Rollback()
 	}
-	newTx, errBegin := s.kv.BeginRo(ctx)
+	newTx, errBegin := s.kv.BeginRo(ctx) //nolint:gocritic
 	if errBegin != nil {
 		return fmt.Errorf("kvserver: %w", err)
 	}

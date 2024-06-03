@@ -6,13 +6,13 @@ import (
 	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	borfinality "github.com/ledgerwatch/erigon/polygon/bor/finality"
 	"github.com/ledgerwatch/erigon/polygon/bor/finality/whitelist"
@@ -38,7 +38,7 @@ func GetCanonicalBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, filt
 
 func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, filters *Filters) (blockNumber uint64, hash libcommon.Hash, latest bool, err error) {
 	// Due to changed semantics of `lastest` block in RPC request, it is now distinct
-	// from the block block number corresponding to the plain state
+	// from the block number corresponding to the plain state
 	var plainStateBlockNumber uint64
 	if plainStateBlockNumber, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
 		return 0, libcommon.Hash{}, false, fmt.Errorf("getting plain state block number: %w", err)
@@ -149,14 +149,14 @@ func CreateHistoryStateReader(tx kv.Tx, blockNumber uint64, txnIndex int, histor
 }
 
 func NewLatestStateReader(tx kv.Getter) state.StateReader {
-	if ethconfig.EnableHistoryV4InTest {
+	if config3.EnableHistoryV4InTest {
 		panic("implement me")
 		//b.pendingReader = state.NewReaderV4(b.pendingReaderTx.(kv.TemporalTx))
 	}
 	return state.NewPlainStateReader(tx)
 }
 func NewLatestStateWriter(tx kv.RwTx, blockNum uint64) state.StateWriter {
-	if ethconfig.EnableHistoryV4InTest {
+	if config3.EnableHistoryV4InTest {
 		panic("implement me")
 	}
 	return state.NewPlainStateWriter(tx, tx, blockNum)

@@ -254,7 +254,7 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 		return nil, err
 	}
 
-	block, err := api.ethApi.BaseAPI.blockByNumberWithSenders(tx, blockNo)
+	block, err := api.ethApi.BaseAPI.blockByNumberWithSenders(ctx, tx, blockNo)
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +275,7 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	batch.Transactions = []interface{}{}
 	// handle genesis - not in the hermez tables so requires special treament
 	if batchNumber == 0 {
-		blk, err := api.ethApi.BaseAPI.blockByNumberWithSenders(tx, 0)
+		blk, err := api.ethApi.BaseAPI.blockByNumberWithSenders(ctx, tx, 0)
 		if err != nil {
 			return nil, err
 		}
@@ -283,7 +283,7 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 		// no txs in genesis
 	}
 	for _, blkNo := range blocksInBatch {
-		blk, err := api.ethApi.BaseAPI.blockByNumberWithSenders(tx, blkNo)
+		blk, err := api.ethApi.BaseAPI.blockByNumberWithSenders(ctx, tx, blkNo)
 		if err != nil {
 			return nil, err
 		}
@@ -359,7 +359,7 @@ func (api *ZkEvmAPIImpl) GetFullBlockByNumber(ctx context.Context, number rpc.Bl
 	}
 	defer tx.Rollback()
 
-	baseBlock, err := api.ethApi.BaseAPI.blockByRPCNumber(number, tx)
+	baseBlock, err := api.ethApi.BaseAPI.blockByRPCNumber(ctx, number, tx)
 	if err != nil {
 		return types.Block{}, err
 	}
@@ -379,7 +379,7 @@ func (api *ZkEvmAPIImpl) GetFullBlockByHash(ctx context.Context, hash libcommon.
 	}
 	defer tx.Rollback()
 
-	baseBlock, err := api.ethApi.BaseAPI.blockByHashWithSenders(tx, hash)
+	baseBlock, err := api.ethApi.BaseAPI.blockByHashWithSenders(ctx, tx, hash)
 	if err != nil {
 		return types.Block{}, err
 	}
@@ -417,7 +417,7 @@ func (api *ZkEvmAPIImpl) populateBlockDetail(
 	baseBlock *eritypes.Block,
 	fullTx bool,
 ) (types.Block, error) {
-	cc, err := api.ethApi.chainConfig(tx)
+	cc, err := api.ethApi.chainConfig(ctx, tx)
 	if err != nil {
 		return types.Block{}, err
 	}
@@ -447,7 +447,7 @@ func (api *ZkEvmAPIImpl) populateBlockDetail(
 		}
 	}
 
-	receipts, err := api.ethApi.BaseAPI.getReceipts(ctx, tx, cc, baseBlock, baseBlock.Body().SendersFromTxs())
+	receipts, err := api.ethApi.BaseAPI.getReceipts(ctx, tx, baseBlock, baseBlock.Body().SendersFromTxs())
 	if err != nil {
 		return types.Block{}, err
 	}
@@ -516,7 +516,7 @@ func (api *ZkEvmAPIImpl) getBlockRangeWitness(ctx context.Context, db kv.RoDB, s
 		return nil, fmt.Errorf("start block number must be less than or equal to end block number, start=%d end=%d", blockNr, endBlockNr)
 	}
 
-	chainConfig, err := api.ethApi.chainConfig(tx)
+	chainConfig, err := api.ethApi.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}

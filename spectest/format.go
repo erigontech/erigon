@@ -1,7 +1,7 @@
 package spectest
 
 import (
-	"golang.org/x/exp/slices"
+	"slices"
 )
 
 type Format struct {

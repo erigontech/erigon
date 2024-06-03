@@ -21,10 +21,12 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -32,7 +34,6 @@ import (
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/log/v3"
 	btree2 "github.com/tidwall/btree"
-	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -55,7 +56,7 @@ type History struct {
 	// Files:
 	//  .v - list of values
 	//  .vi - txNum+key -> offset in .v
-	dirtyFiles *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
+	dirtyFiles *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in Aggregator
 
 	// roFiles derivative from field `file`, but without garbage (canDelete=true, overlaps, etc...)
 	// BeginFilesRo() using this field in zero-copy way
@@ -117,7 +118,7 @@ func (h *History) openList(fNames []string) error {
 	h.closeWhatNotInList(fNames)
 	h.garbageFiles = h.scanStateFiles(fNames)
 	if err := h.openFiles(); err != nil {
-		return fmt.Errorf("History.OpenList: %s, %w", h.filenameBase, err)
+		return fmt.Errorf("History.OpenList: %w, %s", err, h.filenameBase)
 	}
 	return nil
 }
@@ -216,7 +217,11 @@ func (h *History) openFiles() error {
 				continue
 			}
 			if item.decompressor, err = seg.NewDecompressor(datPath); err != nil {
-				h.logger.Debug("Hisrory.openFiles: %w, %s", err, datPath)
+				h.logger.Debug("History.openFiles:", "err", err, "file", datPath)
+				if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
+					err = nil
+					continue
+				}
 				return false
 			}
 
@@ -226,7 +231,7 @@ func (h *History) openFiles() error {
 			idxPath := filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, fromStep, toStep))
 			if dir.FileExist(idxPath) {
 				if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
-					h.logger.Debug(fmt.Errorf("Hisrory.openFiles: %w, %s", err, idxPath).Error())
+					h.logger.Debug("History.openFiles:", "err", err, "file", idxPath)
 					return false
 				}
 				totalKeys += item.index.KeyCount()
@@ -1048,7 +1053,7 @@ func (h *History) isEmpty(tx kv.Tx) (bool, error) {
 	return k == nil && k2 == nil, nil
 }
 
-func (h *History) prune(ctx context.Context, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
+func (h *History) prune(ctx context.Context, txFrom, txTo, limit uint64, _ *time.Ticker) error {
 	historyKeysCursorForDeletes, err := h.tx.RwCursorDupSort(h.indexKeysTable)
 	if err != nil {
 		return fmt.Errorf("create %s history cursor: %w", h.filenameBase, err)

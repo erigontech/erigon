@@ -121,16 +121,30 @@ func IsBitOn(b []byte, idx int) bool {
 	return b[idx/8]&i == i
 }
 
-func IsSupersetBitlist(a, b []byte) bool {
+// IsNonStrictSupersetBitlist checks if bitlist 'a' is a non-strict superset of bitlist 'b'
+func IsNonStrictSupersetBitlist(a, b []byte) bool {
+	// Ensure 'a' is at least as long as 'b'
 	if len(a) < len(b) {
 		return false
 	}
-	for i := range b {
-		if a[i]&b[i] != b[i] {
+
+	// Check each bit in 'b' to ensure it is also set in 'a'
+	for i := 0; i < len(b); i++ {
+		if (a[i] & b[i]) != b[i] {
 			return false
 		}
 	}
+
+	// If all bits required by 'b' are present in 'a', return true
 	return true
+}
+
+func BitsOnCount(b []byte) int {
+	count := 0
+	for _, v := range b {
+		count += bits.OnesCount8(v)
+	}
+	return count
 }
 
 func MergeBitlists(a, b []byte) {

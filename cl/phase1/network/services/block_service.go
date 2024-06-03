@@ -15,7 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/ledgerwatch/log/v3"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -34,7 +34,7 @@ type blockJob struct {
 type blockService struct {
 	forkchoiceStore forkchoice.ForkChoiceStorage
 	syncedData      *synced_data.SyncedDataManager
-	genesisCfg      *clparams.GenesisConfig
+	ethClock        eth_clock.EthereumClock
 	beaconCfg       *clparams.BeaconChainConfig
 
 	// reference: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#beacon_block
@@ -53,18 +53,18 @@ func NewBlockService(
 	db kv.RwDB,
 	forkchoiceStore forkchoice.ForkChoiceStorage,
 	syncedData *synced_data.SyncedDataManager,
-	genesisCfg *clparams.GenesisConfig,
+	ethClock eth_clock.EthereumClock,
 	beaconCfg *clparams.BeaconChainConfig,
 	emitter *beaconevents.Emitters,
 ) Service[*cltypes.SignedBeaconBlock] {
-	seenBlocksCache, err := lru.New[proposerIndexAndSlot, struct{}]("seenblocks", SeenBlockCacheSize)
+	seenBlocksCache, err := lru.New[proposerIndexAndSlot, struct{}]("seenblocks", seenBlockCacheSize)
 	if err != nil {
 		panic(err)
 	}
 	b := &blockService{
 		forkchoiceStore: forkchoiceStore,
 		syncedData:      syncedData,
-		genesisCfg:      genesisCfg,
+		ethClock:        ethClock,
 		beaconCfg:       beaconCfg,
 		seenBlocksCache: seenBlocksCache,
 		emitter:         emitter,
@@ -84,10 +84,11 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 
 	blockEpoch := msg.Block.Slot / b.beaconCfg.SlotsPerEpoch
 
-	currentSlot := utils.GetCurrentSlot(b.genesisCfg.GenesisTime, b.beaconCfg.SecondsPerSlot)
+	currentSlot := b.ethClock.GetCurrentSlot()
+
 	// [IGNORE] The block is not from a future slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. validate that
 	//signed_beacon_block.message.slot <= current_slot (a client MAY queue future blocks for processing at the appropriate slot).
-	if currentSlot < msg.Block.Slot && !utils.IsCurrentSlotWithMaximumClockDisparity(b.genesisCfg.GenesisTime, b.beaconCfg.SecondsPerSlot, msg.Block.Slot) {
+	if currentSlot < msg.Block.Slot && !b.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.Block.Slot) {
 		return ErrIgnore
 	}
 	// [IGNORE] The block is from a slot greater than the latest finalized slot -- i.e. validate that signed_beacon_block.message.slot > compute_start_slot_at_epoch(store.finalized_checkpoint.epoch)
@@ -175,21 +176,22 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 	if err := b.forkchoiceStore.OnBlock(ctx, block, true, true, true); err != nil {
 		return err
 	}
-	go b.importBlockAttestations(block)
+	go b.importBlockOperations(block)
 	return b.db.Update(ctx, func(tx kv.RwTx) error {
 		return beacon_indicies.WriteHighestFinalized(tx, b.forkchoiceStore.FinalizedSlot())
 	})
 
 }
 
-// importBlockAttestationsInParallel imports block attestations in parallel
-func (b *blockService) importBlockAttestations(block *cltypes.SignedBeaconBlock) {
+// importBlockOperations imports block operations in parallel
+func (b *blockService) importBlockOperations(block *cltypes.SignedBeaconBlock) {
 	defer func() { // Would prefer this not to crash but rather log the error
 		r := recover()
 		if r != nil {
 			log.Warn("recovered from panic", "err", r)
 		}
 	}()
+	start := time.Now()
 	block.Block.Body.Attestations.Range(func(idx int, a *solid.Attestation, total int) bool {
 		if err := b.forkchoiceStore.OnAttestation(a, true, false); err != nil {
 			log.Debug("bad attestation received", "err", err)
@@ -197,6 +199,13 @@ func (b *blockService) importBlockAttestations(block *cltypes.SignedBeaconBlock)
 
 		return true
 	})
+	block.Block.Body.AttesterSlashings.Range(func(idx int, a *cltypes.AttesterSlashing, total int) bool {
+		if err := b.forkchoiceStore.OnAttesterSlashing(a, false); err != nil {
+			log.Debug("bad attester slashing received", "err", err)
+		}
+		return true
+	})
+	log.Debug("import operations", "time", time.Since(start))
 }
 
 // loop is the main loop of the block service

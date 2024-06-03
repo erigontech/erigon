@@ -38,6 +38,7 @@ var migrations = map[kv.Label][]Migration{
 		TxsV3,
 		ProhibitNewDownloadsLock,
 		refactorTableLastRoot,
+		ProhibitNewDownloadsLock2,
 	},
 	kv.TxPoolDB: {},
 	kv.SentryDB: {},
@@ -52,7 +53,9 @@ type Migration struct {
 var (
 	ErrMigrationNonUniqueName   = fmt.Errorf("please provide unique migration name")
 	ErrMigrationCommitNotCalled = fmt.Errorf("migration before-commit function was not called")
-	ErrMigrationETLFilesDeleted = fmt.Errorf("db migration progress was interrupted after extraction step and ETL files was deleted, please contact development team for help or re-sync from scratch")
+	ErrMigrationETLFilesDeleted = fmt.Errorf(
+		"db migration progress was interrupted after extraction step and ETL files was deleted, please contact development team for help or re-sync from scratch",
+	)
 )
 
 func NewMigrator(label kv.Label) *Migrator {
@@ -239,7 +242,16 @@ func (m *Migrator) Apply(db kv.RwDB, dataDir string, logger log.Logger) error {
 	}); err != nil {
 		return fmt.Errorf("migrator.Apply: %w", err)
 	}
-	logger.Info("Updated DB schema to", "version", fmt.Sprintf("%d.%d.%d", kv.DBSchemaVersion.Major, kv.DBSchemaVersion.Minor, kv.DBSchemaVersion.Patch))
+	logger.Info(
+		"Updated DB schema to",
+		"version",
+		fmt.Sprintf(
+			"%d.%d.%d",
+			kv.DBSchemaVersion.Major,
+			kv.DBSchemaVersion.Minor,
+			kv.DBSchemaVersion.Patch,
+		),
+	)
 	return nil
 }
 

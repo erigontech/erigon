@@ -125,7 +125,7 @@ func NewTestSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, c
 	return b
 }
 func (b *SimulatedBackend) DB() kv.RwDB                           { return b.m.DB }
-func (b *SimulatedBackend) Agg() *state2.AggregatorV3             { return b.m.HistoryV3Components() }
+func (b *SimulatedBackend) Agg() *state2.Aggregator               { return b.m.HistoryV3Components() }
 func (b *SimulatedBackend) HistoryV3() bool                       { return b.m.HistoryV3 }
 func (b *SimulatedBackend) Engine() consensus.Engine              { return b.m.Engine }
 func (b *SimulatedBackend) BlockReader() services.FullBlockReader { return b.m.BlockReader }

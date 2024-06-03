@@ -28,12 +28,12 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -95,7 +95,7 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, mi
 	wg.Add(workers)
 	suffixCollectors := make([]*etl.Collector, workers)
 	for i := 0; i < workers; i++ {
-		collector := etl.NewCollector(logPrefix+"_dict", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize/2), logger)
+		collector := etl.NewCollector(logPrefix+"_dict", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize/2), logger) //nolint:gocritic
 		collector.LogLvl(lvl)
 
 		suffixCollectors[i] = collector

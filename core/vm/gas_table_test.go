@@ -27,6 +27,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -34,7 +35,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -144,7 +144,7 @@ var createGasTests = []struct {
 
 func TestCreateGas(t *testing.T) {
 	t.Parallel()
-	_, db, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
+	_, db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	for i, tt := range createGasTests {
 		address := libcommon.BytesToAddress([]byte("contract"))
 

@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	mock_aggregation "github.com/ledgerwatch/erigon/cl/aggregation/mock"
+	mockaggregation "github.com/ledgerwatch/erigon/cl/aggregation/mock_services"
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/pool"
@@ -20,13 +20,13 @@ import (
 type validatorTestSuite struct {
 	suite.Suite
 	apiHandler   *ApiHandler
-	mockAggrPool *mock_aggregation.MockAggregationPool
+	mockAggrPool *mockaggregation.MockAggregationPool
 	gomockCtrl   *gomock.Controller
 }
 
 func (t *validatorTestSuite) SetupTest() {
 	gomockCtrl := gomock.NewController(t.T())
-	t.mockAggrPool = mock_aggregation.NewMockAggregationPool(gomockCtrl)
+	t.mockAggrPool = mockaggregation.NewMockAggregationPool(gomockCtrl)
 	t.apiHandler = NewApiHandler(
 		nil,
 		nil,
@@ -50,6 +50,10 @@ func (t *validatorTestSuite) SetupTest() {
 		nil,
 		nil,
 		t.mockAggrPool,
+		nil,
+		nil,
+		nil,
+		nil,
 		nil,
 		nil,
 		nil,

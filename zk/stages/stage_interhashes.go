@@ -51,7 +51,7 @@ type ZkInterHashesCfg struct {
 	hd                *headerdownload.HeaderDownload
 
 	historyV3 bool
-	agg       *state.AggregatorV3
+	agg       *state.Aggregator
 	zk        *ethconfig.Zk
 }
 
@@ -62,7 +62,7 @@ func StageZkInterHashesCfg(
 	blockReader services.FullBlockReader,
 	hd *headerdownload.HeaderDownload,
 	historyV3 bool,
-	agg *state.AggregatorV3,
+	agg *state.Aggregator,
 	zk *ethconfig.Zk,
 ) ZkInterHashesCfg {
 	return ZkInterHashesCfg{

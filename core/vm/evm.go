@@ -223,6 +223,12 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		v := value
 		if typ == STATICCALL {
 			v = nil
+		} else if typ == DELEGATECALL {
+			// NOTE: caller must, at all times be a contract. It should never happen
+			// that caller is something other than a Contract.
+			parent := caller.(*Contract)
+			// DELEGATECALL inherits value from parent call
+			v = parent.value
 		}
 		if depth == 0 {
 			evm.config.Tracer.CaptureStart(evm, caller.Address(), addr, isPrecompile, false /* create */, input, gas+intrinsicGas, v, code)
@@ -463,10 +469,9 @@ func (evm *EVM) create_disabled(caller ContractRef, codeAndHash *codeAndHash, ga
 
 // Create creates a new contract using code as deployment code.
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
-// [zkevm] intrinsicGas is passed for the sake of correct gas in tracing
-func (evm *EVM) Create(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int, intrinsicGas uint64) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
+func (evm *EVM) Create(caller ContractRef, code []byte, gasRemaining uint64, endowment *uint256.Int, intrinsicGas uint64) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
 	contractAddr = crypto.CreateAddress(caller.Address(), evm.intraBlockState.GetNonce(caller.Address()))
-	return evm.create(caller, &codeAndHash{code: code}, gas, endowment, contractAddr, CREATE, true /* incrementNonce */, intrinsicGas)
+	return evm.create(caller, &codeAndHash{code: code}, gasRemaining, endowment, contractAddr, CREATE, true /* incrementNonce */, intrinsicGas)
 }
 
 // Create2 creates a new contract using code as deployment code.
@@ -474,10 +479,10 @@ func (evm *EVM) Create(caller ContractRef, code []byte, gas uint64, endowment *u
 // The different between Create2 with Create is Create2 uses keccak256(0xff ++ msg.sender ++ salt ++ keccak256(init_code))[12:]
 // instead of the usual sender-and-nonce-hash as the address where the contract is initialized at.
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
-func (evm *EVM) Create2(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int, salt *uint256.Int) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
+func (evm *EVM) Create2(caller ContractRef, code []byte, gasRemaining uint64, endowment *uint256.Int, salt *uint256.Int, intrinsicGas uint64) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
 	codeAndHash := &codeAndHash{code: code}
 	contractAddr = crypto.CreateAddress2(caller.Address(), salt.Bytes32(), codeAndHash.Hash().Bytes())
-	return evm.create(caller, codeAndHash, gas, endowment, contractAddr, CREATE2, true /* incrementNonce */, 0 /* intrinsicGas is zero here*/)
+	return evm.create(caller, codeAndHash, gasRemaining, endowment, contractAddr, CREATE2, true /* incrementNonce */, 0 /* intrinsicGas is zero here*/)
 }
 
 // SysCreate is a special (system) contract creation methods for genesis constructors.

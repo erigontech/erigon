@@ -72,8 +72,8 @@ func New(datadir string) Dirs {
 		Downloader:      filepath.Join(datadir, "downloader"),
 		TxPool:          filepath.Join(datadir, "txpool"),
 		Nodes:           filepath.Join(datadir, "nodes"),
-		CaplinBlobs:     filepath.Join(datadir, "caplin/blobs"),
-		CaplinIndexing:  filepath.Join(datadir, "caplin/indexing"),
+		CaplinBlobs:     filepath.Join(datadir, "caplin", "blobs"),
+		CaplinIndexing:  filepath.Join(datadir, "caplin", "indexing"),
 	}
 
 	dir.MustExist(dirs.Chaindata, dirs.Tmp,
@@ -151,7 +151,7 @@ func downloaderV2Migration(dirs Dirs) error {
 
 // nolint
 func moveFiles(from, to string, ext string) error {
-	files, err := os.ReadDir(from)
+	files, err := dir.ReadDir(from)
 	if err != nil {
 		return fmt.Errorf("ReadDir: %w, %s", err, from)
 	}

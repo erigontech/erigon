@@ -9,20 +9,20 @@ import (
 	"testing"
 
 	"github.com/golang/snappy"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/antiquary/tests"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
-	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
-	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
-	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/stretchr/testify/require"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/cl/antiquary/tests"
+	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/mock_services"
+	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
+	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
+	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
 func TestBlocksByRootHandler(t *testing.T) {
@@ -55,7 +55,8 @@ func TestBlocksByRootHandler(t *testing.T) {
 	expBlocks := populateDatabaseWithBlocks(t, store, tx, startSlot, count)
 	tx.Commit()
 
-	genesisCfg, _, beaconCfg := clparams.GetConfigsByNetwork(1)
+	ethClock := getEthClock(t)
+	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
 		ctx,
 		store,
@@ -65,8 +66,8 @@ func TestBlocksByRootHandler(t *testing.T) {
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,
-		genesisCfg,
-		nil, &forkchoice.ForkChoiceStorageMock{}, nil, true,
+		ethClock,
+		nil, &mock_services.ForkChoiceStorageMock{}, nil, true,
 	)
 	c.Start()
 	req := &cltypes.BeaconBlocksByRangeRequest{
@@ -121,10 +122,8 @@ func TestBlocksByRootHandler(t *testing.T) {
 			require.NoError(t, fmt.Errorf("null fork digest"))
 		}
 
-		version, err := fork.ForkDigestVersion(utils.Uint32ToBytes4(respForkDigest), beaconCfg, genesisCfg.GenesisValidatorRoot)
-		if err != nil {
-			require.NoError(t, err)
-		}
+		version, err := ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
+		require.NoError(t, err)
 
 		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
 		if err = block.DecodeSSZ(raw, int(version)); err != nil {

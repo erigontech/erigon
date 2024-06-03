@@ -61,6 +61,7 @@ In order to retrieve data from the L1, the L1 syncer must be configured to know 
 ## Sequencer (WIP)
 
 Enable Sequencer: `CDK_ERIGON_SEQUENCER=1 ./build/bin/cdk-erigon <flags>`
+[Golang version >= 1.21](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4
 
 ### Special mode - L1 recovery
 The sequencer supports a special recovery mode which allows it to continue the chain using data from the L1.  To enable

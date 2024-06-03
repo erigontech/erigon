@@ -12,7 +12,7 @@ import (
 
 func TestGetChainConfig(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	db := m.DB
+	db, ctx := m.DB, m.Ctx
 	api := newBaseApiForTest(m)
 	config := m.ChainConfig
 
@@ -22,14 +22,14 @@ func TestGetChainConfig(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	config1, err1 := api.chainConfig(tx)
+	config1, err1 := api.chainConfig(ctx, tx)
 	if err1 != nil {
 		t.Fatalf("reading chain config: %v", err1)
 	}
 	if config.String() != config1.String() {
 		t.Fatalf("read different config: %s, expected %s", config1.String(), config.String())
 	}
-	config2, err2 := api.chainConfig(tx)
+	config2, err2 := api.chainConfig(ctx, tx)
 	if err2 != nil {
 		t.Fatalf("reading chain config: %v", err2)
 	}

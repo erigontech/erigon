@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -404,6 +405,9 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		txsAllDoneOnCloseCond: sync.NewCond(txsCountMutex),
 
 		leakDetector: dbg.NewLeakDetector("db."+opts.label.String(), dbg.SlowTx()),
+
+		MaxBatchSize:  DefaultMaxBatchSize,
+		MaxBatchDelay: DefaultMaxBatchDelay,
 	}
 
 	customBuckets := opts.bucketsCfg(kv.ChaindataTablesCfg)
@@ -478,6 +482,158 @@ type MdbxKV struct {
 	txsAllDoneOnCloseCond *sync.Cond
 
 	leakDetector *dbg.LeakDetector
+
+	// MaxBatchSize is the maximum size of a batch. Default value is
+	// copied from DefaultMaxBatchSize in Open.
+	//
+	// If <=0, disables batching.
+	//
+	// Do not change concurrently with calls to Batch.
+	MaxBatchSize int
+
+	// MaxBatchDelay is the maximum delay before a batch starts.
+	// Default value is copied from DefaultMaxBatchDelay in Open.
+	//
+	// If <=0, effectively disables batching.
+	//
+	// Do not change concurrently with calls to Batch.
+	MaxBatchDelay time.Duration
+
+	batchMu sync.Mutex
+	batch   *batch
+}
+
+// Default values if not set in a DB instance.
+const (
+	DefaultMaxBatchSize  int = 1000
+	DefaultMaxBatchDelay     = 10 * time.Millisecond
+)
+
+type batch struct {
+	db    *MdbxKV
+	timer *time.Timer
+	start sync.Once
+	calls []call
+}
+
+type call struct {
+	fn  func(kv.RwTx) error
+	err chan<- error
+}
+
+// trigger runs the batch if it hasn't already been run.
+func (b *batch) trigger() {
+	b.start.Do(b.run)
+}
+
+// run performs the transactions in the batch and communicates results
+// back to DB.Batch.
+func (b *batch) run() {
+	b.db.batchMu.Lock()
+	b.timer.Stop()
+	// Make sure no new work is added to this batch, but don't break
+	// other batches.
+	if b.db.batch == b {
+		b.db.batch = nil
+	}
+	b.db.batchMu.Unlock()
+
+retry:
+	for len(b.calls) > 0 {
+		var failIdx = -1
+		err := b.db.Update(context.Background(), func(tx kv.RwTx) error {
+			for i, c := range b.calls {
+				if err := safelyCall(c.fn, tx); err != nil {
+					failIdx = i
+					return err
+				}
+			}
+			return nil
+		})
+
+		if failIdx >= 0 {
+			// take the failing transaction out of the batch. it's
+			// safe to shorten b.calls here because db.batch no longer
+			// points to us, and we hold the mutex anyway.
+			c := b.calls[failIdx]
+			b.calls[failIdx], b.calls = b.calls[len(b.calls)-1], b.calls[:len(b.calls)-1]
+			// tell the submitter re-run it solo, continue with the rest of the batch
+			c.err <- trySolo
+			continue retry
+		}
+
+		// pass success, or bolt internal errors, to all callers
+		for _, c := range b.calls {
+			c.err <- err
+		}
+		break retry
+	}
+}
+
+// trySolo is a special sentinel error value used for signaling that a
+// transaction function should be re-run. It should never be seen by
+// callers.
+var trySolo = errors.New("batch function returned an error and should be re-run solo")
+
+type panicked struct {
+	reason interface{}
+}
+
+func (p panicked) Error() string {
+	if err, ok := p.reason.(error); ok {
+		return err.Error()
+	}
+	return fmt.Sprintf("panic: %v", p.reason)
+}
+
+func safelyCall(fn func(tx kv.RwTx) error, tx kv.RwTx) (err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			err = panicked{p}
+		}
+	}()
+	return fn(tx)
+}
+
+// Batch is only useful when there are multiple goroutines calling it.
+// It behaves similar to Update, except:
+//
+// 1. concurrent Batch calls can be combined into a single RwTx.
+//
+// 2. the function passed to Batch may be called multiple times,
+// regardless of whether it returns error or not.
+//
+// This means that Batch function side effects must be idempotent and
+// take permanent effect only after a successful return is seen in
+// caller.
+//
+// Example of bad side-effects: print messages, mutate external counters `i++`
+//
+// The maximum batch size and delay can be adjusted with DB.MaxBatchSize
+// and DB.MaxBatchDelay, respectively.
+func (db *MdbxKV) Batch(fn func(tx kv.RwTx) error) error {
+	errCh := make(chan error, 1)
+
+	db.batchMu.Lock()
+	if (db.batch == nil) || (db.batch != nil && len(db.batch.calls) >= db.MaxBatchSize) {
+		// There is no existing batch, or the existing batch is full; start a new one.
+		db.batch = &batch{
+			db: db,
+		}
+		db.batch.timer = time.AfterFunc(db.MaxBatchDelay, db.batch.trigger)
+	}
+	db.batch.calls = append(db.batch.calls, call{fn: fn, err: errCh})
+	if len(db.batch.calls) >= db.MaxBatchSize {
+		// wake up batch, it's ready to run
+		go db.batch.trigger()
+	}
+	db.batchMu.Unlock()
+
+	err := <-errCh
+	if errors.Is(err, trySolo) {
+		err = db.Update(context.Background(), fn)
+	}
+	return err
 }
 
 func (db *MdbxKV) Path() string     { return db.opts.path }
@@ -594,7 +750,7 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	// will return nil err if context is cancelled (may appear to acquire the semaphore)
 	if semErr := db.roTxsLimiter.Acquire(ctx, 1); semErr != nil {
 		db.trackTxEnd()
-		return nil, semErr
+		return nil, fmt.Errorf("mdbx.MdbxKV.BeginRo: roTxsLimiter error %w", semErr)
 	}
 
 	defer func() {
@@ -912,7 +1068,7 @@ func (tx *MdbxTx) Commit() error {
 
 	latency, err := tx.tx.Commit()
 	if err != nil {
-		return fmt.Errorf("lable: %s, %w", tx.db.opts.label, err)
+		return fmt.Errorf("label: %s, %w", tx.db.opts.label, err)
 	}
 
 	if tx.db.opts.label == kv.ChainDB {
@@ -1812,7 +1968,6 @@ type cursor2iter struct {
 	tx *MdbxTx
 
 	fromPrefix, toPrefix, nextK, nextV []byte
-	err                                error
 	orderAscend                        order.By
 	limit                              int64
 	ctx                                context.Context
@@ -1842,31 +1997,40 @@ func (s *cursor2iter) init(table string, tx kv.Tx) (*cursor2iter, error) {
 
 	if s.fromPrefix == nil { // no initial position
 		if s.orderAscend {
-			s.nextK, s.nextV, s.err = s.c.First()
+			s.nextK, s.nextV, err = s.c.First()
 		} else {
-			s.nextK, s.nextV, s.err = s.c.Last()
+			s.nextK, s.nextV, err = s.c.Last()
 		}
-		return s, s.err
+		return s, err
 	}
 
 	if s.orderAscend {
-		s.nextK, s.nextV, s.err = s.c.Seek(s.fromPrefix)
-		return s, s.err
+		s.nextK, s.nextV, err = s.c.Seek(s.fromPrefix)
+		return s, err
 	} else {
 		// seek exactly to given key or previous one
-		s.nextK, s.nextV, s.err = s.c.SeekExact(s.fromPrefix)
-		if s.err != nil {
-			return s, s.err
+		s.nextK, s.nextV, err = s.c.SeekExact(s.fromPrefix)
+		if err != nil {
+			return s, err
 		}
 		if s.nextK != nil { // go to last value of this key
 			if casted, ok := s.c.(kv.CursorDupSort); ok {
-				s.nextV, s.err = casted.LastDup()
+				s.nextV, err = casted.LastDup()
 			}
 		} else { // key not found, go to prev one
-			s.nextK, s.nextV, s.err = s.c.Prev()
+			s.nextK, s.nextV, err = s.c.Prev()
 		}
-		return s, s.err
+		return s, err
 	}
+}
+
+func (s *cursor2iter) advance() (err error) {
+	if s.orderAscend {
+		s.nextK, s.nextV, err = s.c.Next()
+	} else {
+		s.nextK, s.nextV, err = s.c.Prev()
+	}
+	return err
 }
 
 func (s *cursor2iter) Close() {
@@ -1876,10 +2040,8 @@ func (s *cursor2iter) Close() {
 		s.c = nil
 	}
 }
+
 func (s *cursor2iter) HasNext() bool {
-	if s.err != nil { // always true, then .Next() call will return this error
-		return true
-	}
 	if s.limit == 0 { // limit reached
 		return false
 	}
@@ -1895,6 +2057,7 @@ func (s *cursor2iter) HasNext() bool {
 	cmp := bytes.Compare(s.nextK, s.toPrefix)
 	return (bool(s.orderAscend) && cmp < 0) || (!bool(s.orderAscend) && cmp > 0)
 }
+
 func (s *cursor2iter) Next() (k, v []byte, err error) {
 	select {
 	case <-s.ctx.Done():
@@ -1902,13 +2065,11 @@ func (s *cursor2iter) Next() (k, v []byte, err error) {
 	default:
 	}
 	s.limit--
-	k, v, err = s.nextK, s.nextV, s.err
-	if s.orderAscend {
-		s.nextK, s.nextV, s.err = s.c.Next()
-	} else {
-		s.nextK, s.nextV, s.err = s.c.Prev()
+	k, v = s.nextK, s.nextV
+	if err = s.advance(); err != nil {
+		return nil, nil, err
 	}
-	return k, v, err
+	return k, v, nil
 }
 
 func (tx *MdbxTx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (iter.KV, error) {
@@ -1928,7 +2089,6 @@ type cursorDup2iter struct {
 
 	key                         []byte
 	fromPrefix, toPrefix, nextV []byte
-	err                         error
 	orderAscend                 bool
 	limit                       int64
 	ctx                         context.Context
@@ -1956,24 +2116,33 @@ func (s *cursorDup2iter) init(table string, tx kv.Tx) (*cursorDup2iter, error) {
 
 	if s.fromPrefix == nil { // no initial position
 		if s.orderAscend {
-			s.nextV, s.err = s.c.FirstDup()
+			s.nextV, err = s.c.FirstDup()
 		} else {
-			s.nextV, s.err = s.c.LastDup()
+			s.nextV, err = s.c.LastDup()
 		}
-		return s, s.err
+		return s, err
 	}
 
 	if s.orderAscend {
-		s.nextV, s.err = s.c.SeekBothRange(s.key, s.fromPrefix)
-		return s, s.err
+		s.nextV, err = s.c.SeekBothRange(s.key, s.fromPrefix)
+		return s, err
 	} else {
 		// seek exactly to given key or previous one
-		_, s.nextV, s.err = s.c.SeekBothExact(s.key, s.fromPrefix)
+		_, s.nextV, err = s.c.SeekBothExact(s.key, s.fromPrefix)
 		if s.nextV == nil { // no such key
-			_, s.nextV, s.err = s.c.PrevDup()
+			_, s.nextV, err = s.c.PrevDup()
 		}
-		return s, s.err
+		return s, err
 	}
+}
+
+func (s *cursorDup2iter) advance() (err error) {
+	if s.orderAscend {
+		_, s.nextV, err = s.c.NextDup()
+	} else {
+		_, s.nextV, err = s.c.PrevDup()
+	}
+	return err
 }
 
 func (s *cursorDup2iter) Close() {
@@ -1984,9 +2153,6 @@ func (s *cursorDup2iter) Close() {
 	}
 }
 func (s *cursorDup2iter) HasNext() bool {
-	if s.err != nil { // always true, then .Next() call will return this error
-		return true
-	}
 	if s.limit == 0 { // limit reached
 		return false
 	}
@@ -2009,13 +2175,11 @@ func (s *cursorDup2iter) Next() (k, v []byte, err error) {
 	default:
 	}
 	s.limit--
-	v, err = s.nextV, s.err
-	if s.orderAscend {
-		_, s.nextV, s.err = s.c.NextDup()
-	} else {
-		_, s.nextV, s.err = s.c.PrevDup()
+	v = s.nextV
+	if err = s.advance(); err != nil {
+		return nil, nil, err
 	}
-	return s.key, v, err
+	return s.key, v, nil
 }
 
 func (tx *MdbxTx) ForAmount(bucket string, fromPrefix []byte, amount uint32, walker func(k, v []byte) error) error {

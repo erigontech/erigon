@@ -20,7 +20,6 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
@@ -34,8 +33,8 @@ func TestNewFilters(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	mining := txpool.NewMiningClient(conn)
-	ff := rpchelper.New(ctx, nil, nil, mining, func() {}, log.New())
-	api := NewEthAPI(NewBaseApi(ff, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil, nil, nil, 5000000, 100_000, &ethconfig.Defaults, false, 100_000, log.New())
+	ff := rpchelper.New(ctx, nil, nil, mining, func() {}, m.Log)
+	api := NewEthAPI(NewBaseApi(ff, stateCache, m.BlockReader, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil, nil, nil, 5000000, 100_000, false, 100_000, 128, log.New())
 
 	ptf, err := api.NewPendingTransactionFilter(ctx)
 	assert.Nil(err)

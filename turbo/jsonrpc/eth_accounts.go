@@ -98,7 +98,7 @@ func (api *APIImpl) GetCode(ctx context.Context, address libcommon.Address, bloc
 		return nil, fmt.Errorf("getCode cannot open tx: %w", err1)
 	}
 	defer tx.Rollback()
-	chainConfig, err := api.chainConfig(tx)
+	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, fmt.Errorf("read chain config: %v", err)
 	}

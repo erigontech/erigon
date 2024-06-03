@@ -1130,65 +1130,6 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
 	return nil
 }
 
-// PruneBorBlocks - delete [1, to) old blocks after moving it to snapshots.
-// keeps genesis in db: [1, to)
-// doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
-// doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
-func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt func(number uint64) uint64) error {
-	c, err := tx.Cursor(kv.BorEventNums)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	var blockNumBytes [8]byte
-	binary.BigEndian.PutUint64(blockNumBytes[:], blockTo)
-	k, v, err := c.Seek(blockNumBytes[:])
-	if err != nil {
-		return err
-	}
-	var eventIdTo uint64 = math.MaxUint64
-	if k != nil {
-		eventIdTo = binary.BigEndian.Uint64(v)
-	}
-	c1, err := tx.RwCursor(kv.BorEvents)
-	if err != nil {
-		return err
-	}
-	defer c1.Close()
-	counter := blocksDeleteLimit
-	for k, _, err = c1.First(); err == nil && k != nil && counter > 0; k, _, err = c1.Next() {
-		eventId := binary.BigEndian.Uint64(k)
-		if eventId >= eventIdTo {
-			break
-		}
-		if err = c1.DeleteCurrent(); err != nil {
-			return err
-		}
-		counter--
-	}
-	if err != nil {
-		return err
-	}
-	firstSpanToKeep := SpanIdAt(blockTo)
-	c2, err := tx.RwCursor(kv.BorSpans)
-	if err != nil {
-		return err
-	}
-	defer c2.Close()
-	counter = blocksDeleteLimit
-	for k, _, err := c2.First(); err == nil && k != nil && counter > 0; k, _, err = c2.Next() {
-		spanId := binary.BigEndian.Uint64(k)
-		if spanId >= firstSpanToKeep {
-			break
-		}
-		if err = c2.DeleteCurrent(); err != nil {
-			return err
-		}
-		counter--
-	}
-	return nil
-}
-
 func TruncateCanonicalChain(ctx context.Context, db kv.RwTx, from uint64) error {
 	return db.ForEach(kv.HeaderCanonical, hexutility.EncodeTs(from), func(k, _ []byte) error {
 		return db.Delete(kv.HeaderCanonical, k)

@@ -8,27 +8,16 @@ import (
 )
 
 func (d *DiagnosticClient) setupSpeedtestDiagnostics(rootCtx context.Context) {
-	d.networkSpeedMutex.Lock()
-	d.networkSpeed = d.runSpeedTest()
-	d.networkSpeedMutex.Unlock()
-
-	ticker := time.NewTicker(180 * time.Second)
 	go func() {
-		for {
-			select {
-			case <-ticker.C:
-				d.networkSpeedMutex.Lock()
-				d.networkSpeed = d.runSpeedTest()
-				d.networkSpeedMutex.Unlock()
-			case <-rootCtx.Done():
-				ticker.Stop()
-				return
-			}
+		if d.speedTest {
+			d.networkSpeedMutex.Lock()
+			d.networkSpeed = d.runSpeedTest(rootCtx)
+			d.networkSpeedMutex.Unlock()
 		}
 	}()
 }
 
-func (d *DiagnosticClient) runSpeedTest() NetworkSpeedTestResult {
+func (d *DiagnosticClient) runSpeedTest(rootCtx context.Context) NetworkSpeedTestResult {
 	var speedtestClient = speedtest.New()
 	serverList, _ := speedtestClient.FetchServers()
 	targets, _ := serverList.FindServer([]int{})
@@ -39,17 +28,17 @@ func (d *DiagnosticClient) runSpeedTest() NetworkSpeedTestResult {
 
 	if len(targets) > 0 {
 		s := targets[0]
-		err := s.PingTest(nil)
+		err := s.PingTestContext(rootCtx, nil)
 		if err == nil {
 			latency = s.Latency
 		}
 
-		err = s.DownloadTest()
+		err = s.DownloadTestContext(rootCtx)
 		if err == nil {
 			downloadSpeed = s.DLSpeed
 		}
 
-		err = s.UploadTest()
+		err = s.UploadTestContext(rootCtx)
 		if err == nil {
 			uploadSpeed = s.ULSpeed
 		}

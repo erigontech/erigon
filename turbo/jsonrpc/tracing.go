@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/tracers"
+	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -54,13 +55,19 @@ func (api *PrivateDebugAPIImpl) traceBlock_deprecated(ctx context.Context, block
 		hashOk   bool
 	)
 	if number, numberOk = blockNrOrHash.Number(); numberOk {
-		block, err = api.blockByRPCNumber(number, tx)
+		block, err = api.blockByRPCNumber(ctx, number, tx)
 	} else if hash, hashOk = blockNrOrHash.Hash(); hashOk {
-		block, err = api.blockByHashWithSenders(tx, hash)
+		block, err = api.blockByHashWithSenders(ctx, tx, hash)
 	} else {
 		return fmt.Errorf("invalid arguments; neither block nor hash specified")
 	}
 
+	blockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber(blockNrOrHash, tx, api.filters)
+	if err != nil {
+		stream.WriteNil()
+		return err
+	}
+	block, err = api.blockWithSenders(ctx, tx, hash, blockNumber)
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -89,7 +96,7 @@ func (api *PrivateDebugAPIImpl) traceBlock_deprecated(ctx context.Context, block
 		config.BorTraceEnabled = newBoolPtr(false)
 	}
 
-	chainConfig, err := api.chainConfig(tx)
+	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -110,11 +117,22 @@ func (api *PrivateDebugAPIImpl) traceBlock_deprecated(ctx context.Context, block
 
 	borTx := rawdb.ReadBorTransactionForBlock(tx, block.NumberU64())
 	txns := block.Transactions()
-	if borTx != nil && *config.BorTraceEnabled {
-		txns = append(txns, borTx)
-	}
 
 	hermezReader := hermez_db.NewHermezDbReader(tx)
+
+	var borStateSyncTxn types.Transaction
+	if *config.BorTraceEnabled {
+		borStateSyncTxHash := bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
+		_, ok, err := api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)
+		if err != nil {
+			stream.WriteArrayEnd()
+			return err
+		}
+		if ok {
+			borStateSyncTxn = bortypes.NewBorTransaction()
+			txns = append(txns, borStateSyncTxn)
+		}
+	}
 
 	for idx, txn := range txns {
 		stream.WriteObjectStart()
@@ -126,8 +144,14 @@ func (api *PrivateDebugAPIImpl) traceBlock_deprecated(ctx context.Context, block
 			return ctx.Err()
 		}
 
-		txHash := txn.Hash()
-		evm, effectiveGasPricePercentage, err := core.PrepareForTxExecution(chainConfig, &vm.Config{}, &blockCtx, hermezReader, ibs, block, &txHash, idx)
+		isBorStateSyncTxn := borStateSyncTxn == txn
+		var txnHash common.Hash
+		if isBorStateSyncTxn {
+			txnHash = bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
+		} else {
+			txnHash = txn.Hash()
+		}
+		evm, effectiveGasPricePercentage, err := core.PrepareForTxExecution(chainConfig, &vm.Config{}, &blockCtx, hermezReader, ibs, block, &txnHash, idx)
 		if err != nil {
 			stream.WriteNil()
 			return err
@@ -186,20 +210,40 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		return err
 	}
 	defer tx.Rollback()
-	chainConfig, err := api.chainConfig(tx)
+	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		stream.WriteNil()
 		return err
 	}
 	// Retrieve the transaction and assemble its EVM context
-	blockNum, ok, err := api.txnLookup(tx, hash)
+	var isBorStateSyncTxn bool
+	blockNum, ok, err := api.txnLookup(ctx, tx, hash)
 	if err != nil {
 		stream.WriteNil()
 		return err
 	}
 	if !ok {
-		stream.WriteNil()
-		return nil
+		if chainConfig.Bor == nil {
+			stream.WriteNil()
+			return nil
+		}
+
+		// otherwise this may be a bor state sync transaction - check
+		blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, hash)
+		if err != nil {
+			stream.WriteNil()
+			return err
+		}
+		if !ok {
+			stream.WriteNil()
+			return nil
+		}
+		if config == nil || config.BorTraceEnabled == nil || *config.BorTraceEnabled == false {
+			stream.WriteEmptyArray() // matches maticnetwork/bor API behaviour for consistency
+			return nil
+		}
+
+		isBorStateSyncTxn = true
 	}
 
 	// check pruning to ensure we have history at this block level
@@ -209,20 +253,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		return err
 	}
 
-	// Private API returns 0 if transaction is not found.
-	if blockNum == 0 && chainConfig.Bor != nil {
-		blockNumPtr, err := rawdb.ReadBorTxLookupEntry(tx, hash)
-		if err != nil {
-			stream.WriteNil()
-			return err
-		}
-		if blockNumPtr == nil {
-			stream.WriteNil()
-			return nil
-		}
-		blockNum = *blockNumPtr
-	}
-	block, err := api.blockByNumberWithSenders(tx, blockNum)
+	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -231,24 +262,27 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		stream.WriteNil()
 		return nil
 	}
-	var txnIndex uint64
+
+	var txnIndex int
 	var txn types.Transaction
-	for i, transaction := range block.Transactions() {
+	for i := 0; i < block.Transactions().Len() && !isBorStateSyncTxn; i++ {
+		transaction := block.Transactions()[i]
 		if transaction.Hash() == hash {
-			txnIndex = uint64(i)
+			txnIndex = i
 			txn = transaction
 			break
 		}
 	}
 	if txn == nil {
-		borTx := rawdb.ReadBorTransactionForBlock(tx, blockNum)
-		if borTx != nil {
+		if isBorStateSyncTxn {
+			// bor state sync tx is appended at the end of the block
+			txnIndex = block.Transactions().Len()
+		} else {
 			stream.WriteNil()
-			return nil
+			return fmt.Errorf("transaction %#x not found", hash)
 		}
-		stream.WriteNil()
-		return fmt.Errorf("transaction %#x not found", hash)
 	}
+
 	engine := api.engine()
 
 	txEnv, err := transactions.ComputeTxEnv_ZkEvm(ctx, engine, block, chainConfig, api._blockReader, tx, int(txnIndex), api.historyV3(tx))
@@ -267,13 +301,13 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 	}
 	defer dbtx.Rollback()
 
-	chainConfig, err := api.chainConfig(dbtx)
+	chainConfig, err := api.chainConfig(ctx, dbtx)
 	if err != nil {
 		return fmt.Errorf("read chain config: %v", err)
 	}
 	engine := api.engine()
 
-	blockNumber, hash, _, err := rpchelper.GetBlockNumber(blockNrOrHash, dbtx, api.filters)
+	blockNumber, hash, isLatest, err := rpchelper.GetBlockNumber(blockNrOrHash, dbtx, api.filters)
 	if err != nil {
 		return fmt.Errorf("get block number: %v", err)
 	}
@@ -283,11 +317,16 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 		return err
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(dbtx), chainConfig.ChainName)
+	var stateReader state.StateReader
+	if config == nil || config.TxIndex == nil || isLatest {
+		stateReader, err = rpchelper.CreateStateReader(ctx, dbtx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(dbtx), chainConfig.ChainName)
+	} else {
+		stateReader, err = rpchelper.CreateHistoryStateReader(dbtx, blockNumber, int(*config.TxIndex), api.historyV3(dbtx), chainConfig.ChainName)
+	}
 	if err != nil {
 		return fmt.Errorf("create state reader: %v", err)
 	}
-	header, err := api._blockReader.Header(context.Background(), dbtx, hash, blockNumber)
+	header, err := api._blockReader.Header(ctx, dbtx, hash, blockNumber)
 	if err != nil {
 		return fmt.Errorf("could not fetch header %d(%x): %v", blockNumber, hash, err)
 	}
@@ -343,7 +382,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany_deprecated(ctx context.Context, bu
 		return err
 	}
 	defer tx.Rollback()
-	chainConfig, err := api.chainConfig(tx)
+	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -377,7 +416,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany_deprecated(ctx context.Context, bu
 		return err
 	}
 
-	block, err := api.blockByNumberWithSenders(tx, blockNum)
+	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
 	if err != nil {
 		stream.WriteNil()
 		return err

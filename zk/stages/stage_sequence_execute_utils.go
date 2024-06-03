@@ -75,7 +75,7 @@ type SequenceBlockCfg struct {
 	historyV3 bool
 	syncCfg   ethconfig.Sync
 	genesis   *types.Genesis
-	agg       *libstate.AggregatorV3
+	agg       *libstate.Aggregator
 	stream    *datastreamer.StreamServer
 	zk        *ethconfig.Zk
 
@@ -100,7 +100,7 @@ func StageSequenceBlocksCfg(
 	blockReader services.FullBlockReader,
 	genesis *types.Genesis,
 	syncCfg ethconfig.Sync,
-	agg *libstate.AggregatorV3,
+	agg *libstate.Aggregator,
 	stream *datastreamer.StreamServer,
 	zk *ethconfig.Zk,
 

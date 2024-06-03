@@ -90,14 +90,14 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 
 	var subscription *sentinel.GossipSubscription
 
-	// TODO: this is still wrong... we should build a subscription here to match exactly, meaning that downstream consumers should be
-	// in charge of keeping track of fork id.
 	switch msg.Name {
 	case gossip.TopicNameBeaconBlock,
 		gossip.TopicNameBeaconAggregateAndProof,
 		gossip.TopicNameVoluntaryExit,
 		gossip.TopicNameProposerSlashing,
-		gossip.TopicNameAttesterSlashing:
+		gossip.TopicNameSyncCommitteeContributionAndProof,
+		gossip.TopicNameAttesterSlashing,
+		gossip.TopicNameBlsToExecutionChange:
 		subscription = manager.GetMatchingSubscription(msg.Name)
 	default:
 		// check subnets
@@ -106,23 +106,23 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 			if msg.SubnetId == nil {
 				return nil, fmt.Errorf("subnetId is required for blob sidecar")
 			}
-			subscription = manager.GetMatchingSubscription(fmt.Sprintf(gossip.TopicNamePrefixBlobSidecar, *msg.SubnetId))
+			subscription = manager.GetMatchingSubscription(gossip.TopicNameBlobSidecar(*msg.SubnetId))
 		case gossip.IsTopicSyncCommittee(msg.Name):
 			if msg.SubnetId == nil {
 				return nil, fmt.Errorf("subnetId is required for sync_committee")
 			}
-			subscription = manager.GetMatchingSubscription(gossip.TopicNameBlobSidecar(*msg.SubnetId))
+			subscription = manager.GetMatchingSubscription(gossip.TopicNameSyncCommittee(int(*msg.SubnetId)))
 		case gossip.IsTopicBeaconAttestation(msg.Name):
 			if msg.SubnetId == nil {
 				return nil, fmt.Errorf("subnetId is required for beacon attestation")
 			}
 			subscription = manager.GetMatchingSubscription(gossip.TopicNameBeaconAttestation(*msg.SubnetId))
 		default:
-			return &sentinelrpc.EmptyMessage{}, nil
+			return &sentinelrpc.EmptyMessage{}, fmt.Errorf("unknown topic %s", msg.Name)
 		}
 	}
 	if subscription == nil {
-		return &sentinelrpc.EmptyMessage{}, nil
+		return &sentinelrpc.EmptyMessage{}, fmt.Errorf("unknown topic %s", msg.Name)
 	}
 	return &sentinelrpc.EmptyMessage{}, subscription.Publish(compressedData)
 }

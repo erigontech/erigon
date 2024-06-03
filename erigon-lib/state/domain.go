@@ -21,6 +21,7 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"path/filepath"
@@ -56,7 +57,7 @@ type Domain struct {
 	*/
 
 	*History
-	dirtyFiles *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
+	dirtyFiles *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in Aggregator
 	// roFiles derivative from field `file`, but without garbage (canDelete=true, overlaps, etc...)
 	// BeginFilesRo() using this field in zero-copy way
 	visibleFiles atomic.Pointer[[]ctxItem]
@@ -123,7 +124,7 @@ func (d *Domain) openList(fNames []string) error {
 	d.closeWhatNotInList(fNames)
 	d.garbageFiles = d.scanStateFiles(fNames)
 	if err := d.openFiles(); err != nil {
-		return fmt.Errorf("History.OpenList: %s, %w", d.filenameBase, err)
+		return fmt.Errorf("Domain.openList: %w, %s", err, d.filenameBase)
 	}
 	return nil
 }
@@ -228,6 +229,11 @@ func (d *Domain) openFiles() (err error) {
 				continue
 			}
 			if item.decompressor, err = seg.NewDecompressor(datPath); err != nil {
+				d.logger.Debug("Domain.openFiles:", "err", err, "file", datPath)
+				if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
+					err = nil
+					continue
+				}
 				return false
 			}
 
@@ -237,7 +243,7 @@ func (d *Domain) openFiles() (err error) {
 			idxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, fromStep, toStep))
 			if dir.FileExist(idxPath) {
 				if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
-					d.logger.Debug("InvertedIndex.openFiles: %w, %s", err, idxPath)
+					d.logger.Debug("InvertedIndex.openFiles:", "err", err, "file", idxPath)
 					return false
 				}
 				totalKeys += item.index.KeyCount()
@@ -245,7 +251,11 @@ func (d *Domain) openFiles() (err error) {
 			if item.bindex == nil {
 				bidxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.bt", d.filenameBase, fromStep, toStep))
 				if item.bindex, err = OpenBtreeIndexWithDecompressor(bidxPath, 2048, item.decompressor); err != nil {
-					d.logger.Debug("InvertedIndex.openFiles: %w, %s", err, bidxPath)
+					d.logger.Debug("InvertedIndex.openFiles:", "err", err, "file", bidxPath)
+					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
+						err = nil
+						continue
+					}
 					return false
 				}
 				//totalKeys += item.bindex.KeyCount()
@@ -344,7 +354,7 @@ func (dt *DomainRoTx) Get(key1, key2 []byte, roTx kv.Tx) ([]byte, error) {
 	return v, err
 }
 
-func (d *Domain) update(key, original []byte) error {
+func (d *Domain) update(key, _ []byte) error {
 	var invertedStep [8]byte
 	binary.BigEndian.PutUint64(invertedStep[:], ^(d.txNum / d.aggregationStep))
 	if err := d.tx.Put(d.keysTable, key, invertedStep[:]); err != nil {
@@ -570,7 +580,7 @@ func (c Collation) Close() {
 // collate gathers domain changes over the specified step, using read-only transaction,
 // and returns compressors, elias fano, and bitmaps
 // [txFrom; txTo)
-func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv.Tx, logEvery *time.Ticker) (Collation, error) {
+func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv.Tx, _ *time.Ticker) (Collation, error) {
 	started := time.Now()
 	defer func() {
 		d.stats.LastCollationTook = time.Since(started)

@@ -93,7 +93,7 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (interface{}, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	cc, err := api.chainConfig(tx)
+	cc, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +169,7 @@ func (api *TxPoolAPIImpl) ContentFrom(ctx context.Context, addr libcommon.Addres
 		return nil, err
 	}
 	defer tx.Rollback()
-	cc, err := api.chainConfig(tx)
+	cc, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}

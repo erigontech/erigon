@@ -38,10 +38,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	borsnaptype "github.com/ledgerwatch/erigon/polygon/bor/snaptype"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -63,7 +65,7 @@ type SnapshotsCfg struct {
 	historyV3        bool
 	caplin           bool
 	blobs            bool
-	agg              *state.AggregatorV3
+	agg              *state.Aggregator
 	silkworm         *silkworm.Silkworm
 	snapshotUploader *snapshotUploader
 	syncConfig       ethconfig.Sync
@@ -78,7 +80,7 @@ func StageSnapshotsCfg(db kv.RwDB,
 	blockReader services.FullBlockReader,
 	notifier *shards.Notifications,
 	historyV3 bool,
-	agg *state.AggregatorV3,
+	agg *state.Aggregator,
 	caplin bool,
 	blobs bool,
 	silkworm *silkworm.Silkworm,
@@ -104,7 +106,7 @@ func StageSnapshotsCfg(db kv.RwDB,
 		cfg.snapshotUploader = &snapshotUploader{
 			cfg:          &cfg,
 			uploadFs:     uploadFs,
-			torrentFiles: downloader.NewAtomicTorrentFiles(cfg.dirs.Snap),
+			torrentFiles: downloader.NewAtomicTorrentFS(cfg.dirs.Snap),
 		}
 
 		cfg.blockRetire.SetWorkers(estimate.CompressSnapshot.Workers())
@@ -287,7 +289,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	return nil
 }
 
-func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, blockReader services.FullBlockReader, agg *state.AggregatorV3, logger log.Logger) error {
+func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, blockReader services.FullBlockReader, agg *state.Aggregator, logger log.Logger) error {
 	blocksAvailable := blockReader.FrozenBlocks()
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
@@ -516,7 +518,7 @@ type snapshotUploader struct {
 	uploadScheduled atomic.Bool
 	uploading       atomic.Bool
 	manifestMutex   sync.Mutex
-	torrentFiles    *downloader.TorrentFiles
+	torrentFiles    *downloader.AtomicTorrentFS
 }
 
 func (u *snapshotUploader) init(ctx context.Context, logger log.Logger) {
@@ -537,14 +539,14 @@ func (u *snapshotUploader) maxUploadedHeader() uint64 {
 		for _, state := range u.files {
 			if state.local && state.remote {
 				if state.info != nil {
-					if state.info.Type.Enum() == snaptype.Enums.Headers {
+					if state.info.Type.Enum() == coresnaptype.Enums.Headers {
 						if state.info.To > max {
 							max = state.info.To
 						}
 					}
 				} else {
 					if info, _, ok := snaptype.ParseFileName(u.cfg.dirs.Snap, state.file); ok {
-						if info.Type.Enum() == snaptype.Enums.Headers {
+						if info.Type.Enum() == coresnaptype.Enums.Headers {
 							if info.To > max {
 								max = info.To
 							}
@@ -1016,7 +1018,8 @@ func (u *snapshotUploader) removeBefore(before uint64) {
 	for _, f := range list {
 		if f.To > before {
 			switch f.Type.Enum() {
-			case snaptype.Enums.BorEvents, snaptype.Enums.BorSpans:
+			case borsnaptype.Enums.BorEvents, borsnaptype.Enums.BorSpans,
+				borsnaptype.Enums.BorCheckpoints, borsnaptype.Enums.BorMilestones:
 				borToReopen = append(borToReopen, filepath.Base(f.Path))
 			default:
 				toReopen = append(toReopen, filepath.Base(f.Path))
@@ -1153,7 +1156,7 @@ func (u *snapshotUploader) upload(ctx context.Context, logger log.Logger) {
 				g.Go(func() error {
 					defer i.Add(1)
 
-					err := downloader.BuildTorrentIfNeed(gctx, state.file, u.cfg.dirs.Snap, u.torrentFiles)
+					_, err := downloader.BuildTorrentIfNeed(gctx, state.file, u.cfg.dirs.Snap, u.torrentFiles)
 
 					state.Lock()
 					state.buildingTorrent = false

@@ -55,7 +55,7 @@ var (
 		Required: true,
 	}
 	BackupLabelsFlag = cli.StringFlag{
-		Name:  "lables",
+		Name:  "labels",
 		Usage: "Name of component to backup. Example: chaindata,txpool,downloader",
 	}
 	BackupTablesFlag = cli.StringFlag{
@@ -77,7 +77,7 @@ CloudDrives (and ssd) have bad-latency and good-parallel-throughput - then havin
 )
 
 func doBackup(cliCtx *cli.Context) error {
-	logger, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}

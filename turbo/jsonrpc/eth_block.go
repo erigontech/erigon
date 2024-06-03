@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/crypto/cryptopool"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
+	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -35,7 +36,7 @@ func (api *APIImpl) CallBundle_deprecated(ctx context.Context, txHashes []common
 	}
 	defer tx.Rollback()
 
-	chainConfig, err := api.chainConfig(tx)
+	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -48,14 +49,14 @@ func (api *APIImpl) CallBundle_deprecated(ctx context.Context, txHashes []common
 	var txs types.Transactions
 
 	for _, txHash := range txHashes {
-		blockNum, ok, err := api.txnLookup(tx, txHash)
+		blockNum, ok, err := api.txnLookup(ctx, tx, txHash)
 		if err != nil {
 			return nil, err
 		}
 		if !ok {
 			return nil, nil
 		}
-		block, err := api.blockByNumberWithSenders(tx, blockNum)
+		block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
 		if err != nil {
 			return nil, err
 		}
@@ -95,7 +96,7 @@ func (api *APIImpl) CallBundle_deprecated(ctx context.Context, txHashes []common
 	}
 	ibs := state.New(stateReader)
 
-	parent := rawdb.ReadHeader(tx, hash, stateBlockNumber)
+	parent, _ := api.headerByRPCNumber(ctx, rpc.BlockNumber(stateBlockNumber), tx)
 	if parent == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", stateBlockNumber, hash)
 	}
@@ -232,7 +233,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 		additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
 	}
 
-	chainConfig, err := api.chainConfig(tx)
+	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +242,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	if chainConfig.Bor != nil {
 		borTx = rawdb.ReadBorTransactionForBlock(tx, b.NumberU64())
 		if borTx != nil {
-			borTxHash = types.ComputeBorTxHash(b.NumberU64(), b.Hash())
+			borTxHash = bortypes.ComputeBorTxHash(b.NumberU64(), b.Hash())
 		}
 	}
 
@@ -276,7 +277,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 
 	additionalFields := make(map[string]interface{})
 
-	block, err := api.blockByHashWithSenders(tx, hash)
+	block, err := api.blockByHashWithSenders(ctx, tx, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -291,7 +292,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	}
 	additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
 
-	chainConfig, err := api.chainConfig(tx)
+	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -300,7 +301,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	if chainConfig.Bor != nil {
 		borTx = rawdb.ReadBorTransactionForBlock(tx, block.NumberU64())
 		if borTx != nil {
-			borTxHash = types.ComputeBorTxHash(block.NumberU64(), block.Hash())
+			borTxHash = bortypes.ComputeBorTxHash(number, block.Hash())
 		}
 	}
 
@@ -329,7 +330,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 	defer tx.Rollback()
 
 	if blockNr == rpc.PendingBlockNumber {
-		b, err := api.blockByRPCNumber(blockNr, tx)
+		b, err := api.blockByRPCNumber(ctx, blockNr, tx)
 		if err != nil {
 			return nil, err
 		}
@@ -357,6 +358,23 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 	if err != nil {
 		return nil, err
 	}
+
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+
+	if chainConfig.Bor != nil {
+		borStateSyncTxHash := bortypes.ComputeBorTxHash(blockNum, blockHash)
+		_, ok, err := api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			txAmount++
+		}
+	}
+
 	numOfTx := hexutil.Uint(txAmount)
 
 	return &numOfTx, nil
@@ -381,6 +399,23 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 	if err != nil {
 		return nil, err
 	}
+
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+
+	if chainConfig.Bor != nil {
+		borStateSyncTxHash := bortypes.ComputeBorTxHash(blockNum, blockHash)
+		_, ok, err := api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			txAmount++
+		}
+	}
+
 	numOfTx := hexutil.Uint(txAmount)
 
 	return &numOfTx, nil
@@ -388,7 +423,7 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 
 func (api *APIImpl) blockByNumber(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
 	if number != rpc.PendingBlockNumber {
-		return api.blockByRPCNumber(number, tx)
+		return api.blockByRPCNumber(ctx, number, tx)
 	}
 
 	if block := api.pendingBlock(); block != nil {
@@ -403,5 +438,5 @@ func (api *APIImpl) blockByNumber(ctx context.Context, number rpc.BlockNumber, t
 		return block, nil
 	}
 
-	return api.blockByRPCNumber(number, tx)
+	return api.blockByRPCNumber(ctx, number, tx)
 }

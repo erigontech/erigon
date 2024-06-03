@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/phase1/network/services"
 	"github.com/ledgerwatch/erigon/cl/pool"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/ledgerwatch/erigon/cl/validator/attestation_producer"
 	"github.com/ledgerwatch/erigon/cl/validator/committee_subscription"
 	"github.com/ledgerwatch/erigon/cl/validator/sync_contribution_pool"
@@ -46,7 +47,7 @@ type ApiHandler struct {
 	blockReader     freezeblocks.BeaconSnapshotReader
 	indiciesDB      kv.RwDB
 	netConfig       *clparams.NetworkConfig
-	genesisCfg      *clparams.GenesisConfig
+	ethClock        eth_clock.EthereumClock
 	beaconChainCfg  *clparams.BeaconChainConfig
 	forkchoiceStore forkchoice.ForkChoiceStorage
 	operationsPool  pool.OperationsPool
@@ -81,12 +82,16 @@ type ApiHandler struct {
 	syncCommitteeMessagesService     services.SyncCommitteeMessagesService
 	syncContributionAndProofsService services.SyncContributionService
 	aggregateAndProofsService        services.AggregateAndProofService
+	attestationService               services.AttestationService
+	voluntaryExitService             services.VoluntaryExitService
+	blsToExecutionChangeService      services.BLSToExecutionChangeService
+	proposerSlashingService          services.ProposerSlashingService
 }
 
 func NewApiHandler(
 	logger log.Logger,
 	netConfig *clparams.NetworkConfig,
-	genesisConfig *clparams.GenesisConfig,
+	ethClock eth_clock.EthereumClock,
 	beaconChainConfig *clparams.BeaconChainConfig,
 	indiciesDB kv.RwDB,
 	forkchoiceStore forkchoice.ForkChoiceStorage,
@@ -109,6 +114,10 @@ func NewApiHandler(
 	syncCommitteeMessagesService services.SyncCommitteeMessagesService,
 	syncContributionAndProofs services.SyncContributionService,
 	aggregateAndProofs services.AggregateAndProofService,
+	attestationService services.AttestationService,
+	voluntaryExitService services.VoluntaryExitService,
+	blsToExecutionChangeService services.BLSToExecutionChangeService,
+	proposerSlashingService services.ProposerSlashingService,
 ) *ApiHandler {
 	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("blobs", maxBlobBundleCacheSize)
 	if err != nil {
@@ -119,7 +128,7 @@ func NewApiHandler(
 		validatorParams: validatorParams,
 		o:               sync.Once{},
 		netConfig:       netConfig,
-		genesisCfg:      genesisConfig,
+		ethClock:        ethClock,
 		beaconChainCfg:  beaconChainConfig,
 		indiciesDB:      indiciesDB,
 		forkchoiceStore: forkchoiceStore,
@@ -145,6 +154,10 @@ func NewApiHandler(
 		syncCommitteeMessagesService:     syncCommitteeMessagesService,
 		syncContributionAndProofsService: syncContributionAndProofs,
 		aggregateAndProofsService:        aggregateAndProofs,
+		attestationService:               attestationService,
+		voluntaryExitService:             voluntaryExitService,
+		blsToExecutionChangeService:      blsToExecutionChangeService,
+		proposerSlashingService:          proposerSlashingService,
 	}
 }
 

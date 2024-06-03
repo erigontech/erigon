@@ -694,7 +694,7 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 	scope.Contract.UseGas(gas)
 	// reuse size int for stackvalue
 	stackValue := size
-	res, addr, returnGas, suberr := interpreter.evm.Create2(scope.Contract, input, gas, &endowment, &salt)
+	res, addr, returnGas, suberr := interpreter.evm.Create2(scope.Contract, input, gas, &endowment, &salt, gas)
 
 	// Push item on the stack based on the returned error.
 	if suberr != nil {

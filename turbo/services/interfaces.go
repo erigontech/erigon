@@ -119,6 +119,7 @@ type BlockSnapshots interface {
 	ReopenFolder() error
 	SegmentsMax() uint64
 	SegmentsMin() uint64
+	Types() []snaptype.Type
 	Close()
 }
 

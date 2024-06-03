@@ -6,20 +6,33 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/clparams/initial_state"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/mock_services"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 )
+
+func getEthClock(t *testing.T) eth_clock.EthereumClock {
+	s, err := initial_state.GetGenesisState(clparams.MainnetNetwork)
+	require.NoError(t, err)
+	return eth_clock.NewEthereumClock(s.GenesisTime(), s.GenesisValidatorsRoot(), s.BeaconConfig())
+}
 
 func TestSentinelGossipOnHardFork(t *testing.T) {
 	listenAddrHost := "127.0.0.1"
 
 	ctx := context.Background()
 	db, _, _, _, _, reader := loadChain(t)
-	genesisConfig, networkConfig, beaconConfig := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
+	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
 	bcfg := *beaconConfig
+
+	s, err := initial_state.GetGenesisState(clparams.MainnetNetwork)
+	require.NoError(t, err)
+	ethClock := eth_clock.NewEthereumClock(s.GenesisTime(), s.GenesisValidatorsRoot(), &bcfg)
 
 	bcfg.AltairForkEpoch = math.MaxUint64
 	bcfg.BellatrixForkEpoch = math.MaxUint64
@@ -30,11 +43,10 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 	sentinel1, err := New(ctx, &SentinelConfig{
 		NetworkConfig: networkConfig,
 		BeaconConfig:  &bcfg,
-		GenesisConfig: genesisConfig,
 		IpAddr:        listenAddrHost,
 		Port:          7070,
 		EnableBlocks:  true,
-	}, reader, nil, db, log.New(), &forkchoice.ForkChoiceStorageMock{})
+	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel1.Stop()
 
@@ -44,12 +56,11 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 	sentinel2, err := New(ctx, &SentinelConfig{
 		NetworkConfig: networkConfig,
 		BeaconConfig:  &bcfg,
-		GenesisConfig: genesisConfig,
 		IpAddr:        listenAddrHost,
 		Port:          7077,
 		EnableBlocks:  true,
 		TCPPort:       9123,
-	}, reader, nil, db, log.New(), &forkchoice.ForkChoiceStorageMock{})
+	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel2.Stop()
 
