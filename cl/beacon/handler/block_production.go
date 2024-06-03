@@ -688,20 +688,27 @@ func (a *ApiHandler) postBeaconBlocks(w http.ResponseWriter, r *http.Request, ap
 
 }
 
-func (a *ApiHandler) PostEthV1BlindedBlocks(w http.ResponseWriter, r *http.Request) {
-	a.publishBlindedBlocks(w, r, 1)
+func (a *ApiHandler) PostEthV1BlindedBlocks(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	resp, err := a.publishBlindedBlocks(w, r, 1)
+	if err != nil {
+		log.Warn("Failed to publish blinded block in v1 path", "err", err)
+	}
+	return resp, err
 }
 
-func (a *ApiHandler) PostEthV2BlindedBlocks(w http.ResponseWriter, r *http.Request) {
-	a.publishBlindedBlocks(w, r, 2)
+func (a *ApiHandler) PostEthV2BlindedBlocks(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	resp, err := a.publishBlindedBlocks(w, r, 2)
+	if err != nil {
+		log.Warn("Failed to publish blinded block in v2 path", "err", err)
+	}
+	return resp, err
 }
 
-func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request, apiVersion int) {
+func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request, apiVersion int) (*beaconhttp.BeaconResponse, error) {
 	ethVersion := r.Header.Get("Eth-Consensus-Version")
 	version, err := a.parseEthConsensusVersion(ethVersion, apiVersion)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
 	// todo: broadcast_validation
@@ -711,54 +718,46 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 	b, err := io.ReadAll(r.Body)
 	defer r.Body.Close()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	if r.Header.Get("Content-Type") == "application/json" {
 		if err := json.Unmarshal(b, signedBlindedBlock); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 		}
 	} else {
 		if err := signedBlindedBlock.DecodeSSZ(b, int(version)); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 		}
 	}
 	// submit and unblind the signedBlindedBlock
 	blockPayload, blobsBundle, err := a.builderClient.SubmitBlindedBlocks(r.Context(), signedBlindedBlock)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
 	signedBlock, err := signedBlindedBlock.Unblind(blockPayload)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
 
 	// check blob bundle
 	if blobsBundle != nil && blockPayload.Version() >= clparams.DenebVersion {
 		if err := blobsBundle.Check(); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 		}
 		// check commitments
 		blockCommitments := signedBlindedBlock.Block.Body.BlobKzgCommitments
 		if len(blobsBundle.Commitments) != blockCommitments.Len() {
-			http.Error(w, "commitments length mismatch", http.StatusBadRequest)
-			return
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("commitments length mismatch"))
 		}
 		for i, commitment := range blobsBundle.Commitments {
 			blockCommitment := blockCommitments.Get(i)
 			blockCommitmentBytes, err := blockCommitment.MarshalJSON()
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
+				//http.Error(w, err.Error(), http.StatusInternalServerError)
+				return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 			}
 			if !bytes.Equal(commitment, blockCommitmentBytes) {
-				http.Error(w, fmt.Sprintf("commitment mismatch: %d", i), http.StatusBadRequest)
-				return
+				return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("commitment mismatch: %d", i))
 			}
 			// add the bundle to recently produced blobs
 			a.blobBundles.Add(libcommon.Bytes48(blobsBundle.Commitments[i]), BlobBundle{
@@ -771,10 +770,9 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 
 	// broadcast the block
 	if err := a.broadcastBlock(r.Context(), signedBlock); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
-	w.WriteHeader(http.StatusOK)
+	return newBeaconResponse(nil), nil
 }
 
 func (a *ApiHandler) parseEthConsensusVersion(

@@ -143,6 +143,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	if rcfg.Builder {
 		if cfg.MevRelayUrl == "" {
 			log.Warn("builder mode requires mev_relay_url, but it is not set. Skipping builder mode")
+			rcfg.Builder = false
 		} else {
 			log.Info("Starting with builder mode")
 			options = append(options, caplin1.WithBuilder(cfg.MevRelayUrl))
