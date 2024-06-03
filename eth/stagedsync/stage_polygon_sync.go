@@ -20,7 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/p2p/sentry"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
-	bridge2 "github.com/ledgerwatch/erigon/polygon/bridge"
+	"github.com/ledgerwatch/erigon/polygon/bridge"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/polygon/p2p"
 	polygonsync "github.com/ledgerwatch/erigon/polygon/sync"
@@ -57,12 +57,12 @@ func NewPolygonSyncStageCfg(
 	blocksVerifier := polygonsync.VerifyBlocks
 	heimdallService := heimdall.NewHeimdall(heimdallClient, logger, heimdall.WithStore(storage))
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
-	bridgeCfg := bridge2.NewBridgeCfg(dataDir, logger, borConfig, heimdallClient.FetchStateSyncEvents, stateReceiverABI)
+	b := bridge.NewBridge(dataDir, logger, borConfig, heimdallClient.FetchStateSyncEvents, stateReceiverABI)
 	blockDownloader := polygonsync.NewBlockDownloader(
 		logger,
 		p2pService,
 		heimdallService,
-		nil,
+		b,
 		checkpointVerifier,
 		milestoneVerifier,
 		blocksVerifier,
@@ -87,7 +87,7 @@ func NewPolygonSyncStageCfg(
 		logger:           logger,
 		chainConfig:      chainConfig,
 		blockReader:      blockReader,
-		bridgeCfg:        bridgeCfg,
+		bridge:           b,
 		sync:             sync,
 		events:           events,
 		p2p:              p2pService,
@@ -161,7 +161,7 @@ type polygonSyncStageService struct {
 	logger           log.Logger
 	chainConfig      *chain.Config
 	blockReader      services.FullBlockReader
-	bridgeCfg        bridge2.Config
+	bridge           *bridge.Bridge
 	sync             *polygonsync.Sync
 	events           *polygonsync.TipEvents
 	p2p              p2p.Service
@@ -186,15 +186,8 @@ func (s *polygonSyncStageService) Run(ctx context.Context, tx kv.RwTx, stageStat
 	s.unwinder = unwinder
 	s.logger.Info(s.appendLogPrefix("begin..."), "progress", stageState.BlockNumber)
 
-	b, err := bridge2.NewBridgeFromCfg(ctx, s.bridgeCfg)
-	if err != nil {
-		return err
-	}
-
-	s.sync.UpdateBridge(b)
-
 	if !s.bgComponentsRun {
-		s.runBgComponents(ctx, b)
+		s.runBgComponents(ctx)
 	}
 
 	if s.cachedForkChoice != nil {
@@ -241,7 +234,7 @@ func (s *polygonSyncStageService) Run(ctx context.Context, tx kv.RwTx, stageStat
 	}
 }
 
-func (s *polygonSyncStageService) runBgComponents(ctx context.Context, bridge *bridge2.Bridge) {
+func (s *polygonSyncStageService) runBgComponents(ctx context.Context) {
 	s.logger.Info(s.appendLogPrefix("running background components"))
 	s.bgComponentsRun = true
 
@@ -253,8 +246,7 @@ func (s *polygonSyncStageService) runBgComponents(ctx context.Context, bridge *b
 		})
 
 		eg.Go(func() error {
-
-			return bridge.Run(ctx)
+			return s.bridge.Run(ctx)
 		})
 
 		eg.Go(func() error {

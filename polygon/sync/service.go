@@ -61,10 +61,7 @@ func NewService(
 		logger,
 	)
 
-	b, err := bridge.NewBridge(context.Background(), dataDir, logger, borConfig, heimdallClient.FetchStateSyncEvents, bor.GenesisContractStateReceiverABI())
-	if err != nil {
-		return nil, err
-	}
+	b := bridge.NewBridge(dataDir, logger, borConfig, heimdallClient.FetchStateSyncEvents, bor.GenesisContractStateReceiverABI())
 
 	blockDownloader := NewBlockDownloader(
 		logger,

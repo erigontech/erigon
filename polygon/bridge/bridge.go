@@ -49,43 +49,9 @@ type Config struct {
 	dataDir string
 }
 
-func NewBridgeCfg(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, fetchSyncEvents fetchSyncEventsType, stateReceiverABI abi.ABI) Config {
-	return Config{
-		logger:           logger,
-		borConfig:        borConfig,
-		stateReceiverABI: stateReceiverABI,
-		fetchSyncEvents:  fetchSyncEvents,
-		dataDir:          dataDir,
-	}
-}
-
-func NewBridgeFromCfg(ctx context.Context, config Config) (*Bridge, error) {
-	db := polygoncommon.NewDatabase(config.dataDir, config.logger)
-	err := db.OpenOnce(ctx, kv.PolygonBridgeDB, databaseTablesCfg)
-	if err != nil {
-		return nil, err
-	}
-
-	return &Bridge{
-		db:                       db,
-		log:                      config.logger,
-		borConfig:                config.borConfig,
-		fetchSyncEvents:          config.fetchSyncEvents,
-		eventMap:                 map[uint64]IDRange{},
-		lastProcessedBlockNumber: 0,
-		lastProcessedEventID:     0,
-		stateClientAddress:       libcommon.HexToAddress(config.borConfig.StateReceiverContract),
-		stateReceiverABI:         config.stateReceiverABI,
-	}, nil
-}
-
-func NewBridge(ctx context.Context, dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, fetchSyncEvents fetchSyncEventsType, stateReceiverABI abi.ABI) (*Bridge, error) {
+func NewBridge(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, fetchSyncEvents fetchSyncEventsType, stateReceiverABI abi.ABI) *Bridge {
 	// create new db
 	db := polygoncommon.NewDatabase(dataDir, logger)
-	err := db.OpenOnce(ctx, kv.PolygonBridgeDB, databaseTablesCfg)
-	if err != nil {
-		return nil, err
-	}
 
 	return &Bridge{
 		db:                       db,
@@ -97,10 +63,15 @@ func NewBridge(ctx context.Context, dataDir string, logger log.Logger, borConfig
 		lastProcessedEventID:     0,
 		stateClientAddress:       libcommon.HexToAddress(borConfig.StateReceiverContract),
 		stateReceiverABI:         stateReceiverABI,
-	}, nil
+	}
 }
 
 func (b *Bridge) Run(ctx context.Context) error {
+	err := b.db.OpenOnce(ctx, kv.PolygonBridgeDB, databaseTablesCfg)
+	if err != nil {
+		return err
+	}
+
 	// start syncing
 	b.log.Warn(bridgeLogPrefix("Bridge is running"))
 
