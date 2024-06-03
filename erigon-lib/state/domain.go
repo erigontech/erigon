@@ -1233,8 +1233,6 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		// 		}
 		// 	}
 		// }
-		prevDeletedKeys1 = nil
-		prevDeletedKeys2 = nil
 		for _, kv := range valsKV {
 			strippedKey := common.Copy(kv.Key[:len(kv.Key)-8])
 			stepBytes := common.Copy(kv.Key[len(kv.Key)-8:])
@@ -1313,14 +1311,17 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	sort.Slice(seenKeys, func(i, j int) bool {
 		return bytes.Compare(seenKeys[i].Key, seenKeys[j].Key) < 0
 	})
+	if prevSeenKeys == nil {
+		prevSeenKeys = make(map[string][]KVPair)
+	}
 	if len(prevSeenKeys) > 0 {
-		fmt.Println("seenKeys", len(seenKeys), "prevSeenKeys", len(prevSeenKeys))
+		fmt.Println("seenKeys", len(seenKeys), "prevSeenKeys", len(prevSeenKeys[dt.d.valsTable]))
 		for idx, kva := range seenKeys {
 			if len(prevSeenKeys) <= idx {
-				fmt.Println("size mismatch", len(prevSeenKeys), len(seenKeys))
+				fmt.Println("size mismatch", len(prevSeenKeys[dt.d.valsTable]), len(seenKeys))
 				break
 			}
-			cmpKey := seenKeys[idx].Key
+			cmpKey := prevSeenKeys[dt.d.valsTable][idx].Key
 			if !bytes.Equal(kva.Key, cmpKey) || !bytes.Equal(kva.Value, seenKeys[idx].Value) {
 				fmt.Printf("valsKV[%d] = %x -> %x\n", idx, seenKeys[idx].Key, seenKeys[idx].Value)
 				fmt.Printf("prevSeenKeys[%d] = %x -> %x\n", idx, kva.Key, kva.Value)
@@ -1378,6 +1379,12 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		if err = keysCursorForDeletes.DeleteCurrent(); err != nil {
 			return err
 		}
+	}
+	if prevDeletedKeys1 == nil {
+		prevDeletedKeys1 = make(map[string][]KVPair)
+	}
+	if prevDeletedKeys2 == nil {
+		prevDeletedKeys2 = make(map[string][]KVPair)
 	}
 	// Compare currDeletedKeys with prevDeletedKeys
 	for idx, kv := range prevDeletedKeys1[dt.d.valsTable] {
