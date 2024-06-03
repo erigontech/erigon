@@ -216,7 +216,7 @@ func (a *ApiHandler) init() {
 			}
 			if a.routerCfg.Beacon {
 				r.Route("/beacon", func(r chi.Router) {
-					r.Post("blinded_blocks", a.PostEthV1BlindedBlocks)
+					r.Post("/blinded_blocks", a.PostEthV1BlindedBlocks)
 					r.Route("/rewards", func(r chi.Router) {
 						r.Post("/sync_committee/{block_id}", beaconhttp.HandleEndpointFunc(a.PostEthV1BeaconRewardsSyncCommittees))
 						r.Get("/blocks/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconRewardsBlocks))
@@ -303,7 +303,7 @@ func (a *ApiHandler) init() {
 				r.Route("/beacon", func(r chi.Router) {
 					r.Get("/blocks/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconBlock))
 					r.Post("/blocks", a.PostEthV2BeaconBlocks)
-					r.Post("blinded_blocks", a.PostEthV2BlindedBlocks)
+					r.Post("/blinded_blocks", a.PostEthV2BlindedBlocks)
 				})
 			}
 			if a.routerCfg.Validator {

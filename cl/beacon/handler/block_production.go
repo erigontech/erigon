@@ -239,20 +239,12 @@ func (a *ApiHandler) produceBlock(
 	// produce beacon body
 	var (
 		beaconBody     *cltypes.BeaconBody
-		executionValue uint64
+		localExecValue uint64
 		localErr       error
 	)
 	go func() {
 		defer wg.Done()
-		beaconBody, executionValue, localErr = a.produceBeaconBody(
-			ctx,
-			3,
-			baseBlock,
-			baseState,
-			targetSlot,
-			randaoReveal,
-			graffiti,
-		)
+		beaconBody, localExecValue, localErr = a.produceBeaconBody(ctx, 3, baseBlock, baseState, targetSlot, randaoReveal, graffiti)
 	}()
 
 	// get the builder payload
@@ -263,20 +255,14 @@ func (a *ApiHandler) produceBlock(
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		builderHeader, builderErr = a.getBuilderPayload(
-			ctx,
-			baseBlock,
-			baseState,
-			targetSlot,
-			randaoReveal,
-			graffiti,
-		)
+		builderHeader, builderErr = a.getBuilderPayload(ctx, baseBlock, baseState, targetSlot)
 	}()
 	wg.Wait()
+
 	if localErr != nil {
+		// if we failed to locally produce the beacon body, we should not proceed with the block production
 		return nil, localErr
 	}
-
 	// prepare basic block
 	stateRoot, err := baseState.HashSSZ()
 	if err != nil {
@@ -292,13 +278,18 @@ func (a *ApiHandler) produceBlock(
 		ParentRoot:    baseBlock.StateRoot,
 		StateRoot:     stateRoot,
 	}
-	if builderErr != nil {
+	if !a.routerCfg.Builder || builderErr != nil {
+		// directly return the block if:
+		// 1. builder is not enabled
+		// 2. failed to get builder payload
 		block.BeaconBody = beaconBody
+		block.ExecutionValue = new(big.Int).SetUint64(localExecValue)
 		return block, nil
 	}
+	// determine whether to use local execution node or builder
 	// if exec_node_payload_value >= builder_boost_factor * (builder_payload_value // 100), then return a full (unblinded) block containing the execution node payload.
 	// otherwise, return a blinded block containing the builder payload header.
-	execValue := new(big.Int).SetUint64(executionValue)
+	execValue := new(big.Int).SetUint64(localExecValue)
 	builderValue := builderHeader.BlockValue()
 	boostFactorBig := new(big.Int).SetInt64(boostFactor)
 	useLocalExec := new(big.Int).Mul(execValue, big.NewInt(100)).Cmp(new(big.Int).Mul(builderValue, boostFactorBig)) >= 0
@@ -324,10 +315,8 @@ func (a *ApiHandler) getBuilderPayload(
 	baseBlock *cltypes.BeaconBlock,
 	baseState *state.CachingBeaconState,
 	targetSlot uint64,
-	randaoReveal common.Bytes96,
-	graffiti common.Hash,
 ) (*builder.ExecutionPayloadHeader, error) {
-	if !(a.routerCfg.Builder && a.builderClient != nil) {
+	if !a.routerCfg.Builder || a.builderClient == nil {
 		return nil, errors.New("builder is not enabled")
 	}
 
