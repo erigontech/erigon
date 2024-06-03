@@ -25,43 +25,34 @@ func containsPolicy(policies []byte, policy PolicyName) bool {
 }
 
 // create a method checkpolicy to check an address according to passed policy in the method
-func (p *TxPool) checkPolicy(addr common.Address, policy PolicyName) (bool, error) {
-	var whitelistPolicy []byte
+func (p *TxPool) checkPolicy(addr common.Address, policy PolicyName, mode string) (bool, error) {
+	var table string
+	if mode == "allowlist" {
+		table = Whitelist
+	} else {
+		table = Blacklist
+	}
+
+	var policyBytes []byte
 	err := p.aclDB.View(context.TODO(), func(tx kv.Tx) error {
-		value, err := tx.GetOne("Whitelist", addr.Bytes())
+		value, err := tx.GetOne(table, addr.Bytes())
 		if err != nil {
 			return err
 		}
-		whitelistPolicy = value
+		policyBytes = value
 		return nil
 	})
 	if err != nil {
 		return false, err
 	}
-	if whitelistPolicy != nil && containsPolicy(whitelistPolicy, policy) {
+
+	if policyBytes != nil && containsPolicy(policyBytes, policy) {
 		// If address is in the whitelist and has the policy, return true
-		return true, nil
-	}
-
-	var blacklistPolicy []byte
-	err = p.aclDB.View(context.TODO(), func(tx kv.Tx) error {
-		value, err := tx.GetOne("Blacklist", addr.Bytes())
-		if err != nil {
-			return err
-		}
-		blacklistPolicy = value
-		return nil
-	})
-	if err != nil {
-		return false, err
-	}
-	if blacklistPolicy != nil && containsPolicy(blacklistPolicy, policy) {
 		// If address is in the blacklist and has the policy, return false
-		return false, nil
+		return mode == "allowlist", nil
 	}
 
-	// If the address is not in either list, return false
-	return false, nil
+	return true, nil
 }
 
 // create a method to resolve policy which will decode a tx to either sendTx or deploy policy
@@ -125,5 +116,11 @@ func (p *TxPool) removepolicy(addr common.Address, policy PolicyName, bucket str
 		// Join the updated policies back into a single byte slice
 		updatedValue := bytes.Join(updatedPolicies, []byte(","))
 		return tx.Put(bucket, addr.Bytes(), updatedValue)
+	})
+}
+
+func (p *TxPool) setMode(val string) error {
+	return p.aclDB.Update(context.TODO(), func(tx kv.RwTx) error {
+		return tx.Put(Config, []byte("mode"), []byte(val))
 	})
 }

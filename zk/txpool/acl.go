@@ -5,11 +5,13 @@ import (
 )
 
 const (
+	Config    = "Config"
 	Whitelist = "Whitelist"
 	Blacklist = "Blacklist"
 )
 
 var ACLTables = []string{
+	Config,
 	Whitelist,
 	Blacklist,
 }
