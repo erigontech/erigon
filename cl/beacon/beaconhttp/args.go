@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -168,9 +169,13 @@ func Uint64FromQueryParams(r *http.Request, name string) (*uint64, error) {
 
 // decode a list of strings from the query params
 func StringListFromQueryParams(r *http.Request, name string) ([]string, error) {
-	str := r.URL.Query().Get(name)
-	if str == "" {
+	values := r.URL.Query()[name]
+	if len(values) == 0 {
 		return nil, nil
 	}
+
+	// Combine all values into a single string, separating by comma
+	str := strings.Join(values, ",")
+
 	return regexp.MustCompile(`\s*,\s*`).Split(str, -1), nil
 }

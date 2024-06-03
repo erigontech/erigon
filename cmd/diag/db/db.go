@@ -27,7 +27,7 @@ type BDTableInfo struct {
 
 var (
 	DBPopulatedFlag = cli.BoolFlag{
-		Name:     "db.appearence.populated",
+		Name:     "db.appearance.populated",
 		Aliases:  []string{"dbap"},
 		Usage:    "Print populated table content only",
 		Required: false,

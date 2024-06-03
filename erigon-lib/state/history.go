@@ -531,11 +531,10 @@ func (ht *HistoryRoTx) newWriter(tmpdir string, discard bool) *historyBufferedWr
 		historyKey:       make([]byte, 128),
 		largeValues:      ht.h.historyLargeValues,
 		historyValsTable: ht.h.historyValsTable,
-		historyVals:      etl.NewCollector("flush "+ht.h.historyValsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), ht.h.logger),
+		historyVals:      etl.NewCollector("flush "+ht.h.historyValsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), ht.h.logger).LogLvl(log.LvlTrace),
 
 		ii: ht.iit.newWriter(tmpdir, discard),
 	}
-	w.historyVals.LogLvl(log.LvlTrace)
 	w.historyVals.SortAndFlushInBackground(true)
 	return w
 }
@@ -616,6 +615,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
 	collector := etl.NewCollector("collate hist "+h.filenameBase, h.iiCfg.dirs.Tmp, etl.NewSortableBuffer(CollateETLRAM), h.logger)
 	defer collector.Close()
+	collector.LogLvl(log.LvlTrace)
 
 	for txnmb, k, err := keysCursor.Seek(txKey[:]); err == nil && txnmb != nil; txnmb, k, err = keysCursor.Next() {
 		if err != nil {

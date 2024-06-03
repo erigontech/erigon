@@ -294,11 +294,11 @@ func (iit *InvertedIndexRoTx) BuildOptionalMissedIndices(ctx context.Context, ps
 }
 
 // endTxNum is always a multiply of aggregation step but this txnum is not available in file (it will be first tx of file to follow after that)
-func (dt *DomainRoTx) maxTxNumInDomainFiles(cold bool) uint64 {
+func (dt *DomainRoTx) maxTxNumInDomainFiles(onlyFrozen bool) uint64 {
 	if len(dt.files) == 0 {
 		return 0
 	}
-	if !cold {
+	if !onlyFrozen {
 		return dt.files[len(dt.files)-1].endTxNum
 	}
 	for i := len(dt.files) - 1; i >= 0; i-- {
@@ -349,10 +349,10 @@ func (iit *InvertedIndexRoTx) maxTxNumInFiles(onlyFrozen bool) uint64 {
 
 // staticFilesInRange returns list of static files with txNum in specified range [startTxNum; endTxNum)
 // files are in the descending order of endTxNum
-func (dt *DomainRoTx) staticFilesInRange(r DomainRanges) (valuesFiles, indexFiles, historyFiles []*filesItem, startJ int) {
+func (dt *DomainRoTx) staticFilesInRange(r DomainRanges) (valuesFiles, indexFiles, historyFiles []*filesItem) {
 	if r.index || r.history {
 		var err error
-		indexFiles, historyFiles, startJ, err = dt.ht.staticFilesInRange(HistoryRanges{
+		indexFiles, historyFiles, err = dt.ht.staticFilesInRange(HistoryRanges{
 			historyStartTxNum: r.historyStartTxNum,
 			historyEndTxNum:   r.historyEndTxNum,
 			history:           r.history,
@@ -367,7 +367,6 @@ func (dt *DomainRoTx) staticFilesInRange(r DomainRanges) (valuesFiles, indexFile
 	if r.values {
 		for _, item := range dt.files {
 			if item.startTxNum < r.valuesStartTxNum {
-				startJ++
 				continue
 			}
 			if item.endTxNum > r.valuesEndTxNum {
@@ -384,13 +383,11 @@ func (dt *DomainRoTx) staticFilesInRange(r DomainRanges) (valuesFiles, indexFile
 	return
 }
 
-func (iit *InvertedIndexRoTx) staticFilesInRange(startTxNum, endTxNum uint64) ([]*filesItem, int) {
+func (iit *InvertedIndexRoTx) staticFilesInRange(startTxNum, endTxNum uint64) []*filesItem {
 	files := make([]*filesItem, 0, len(iit.files))
-	var startJ int
 
 	for _, item := range iit.files {
 		if item.startTxNum < startTxNum {
-			startJ++
 			continue
 		}
 		if item.endTxNum > endTxNum {
@@ -404,7 +401,7 @@ func (iit *InvertedIndexRoTx) staticFilesInRange(startTxNum, endTxNum uint64) ([
 		}
 	}
 
-	return files, startJ
+	return files
 }
 
 // nolint
@@ -412,19 +409,17 @@ func (ii *InvertedIndex) staticFilesInRange(startTxNum, endTxNum uint64, ic *Inv
 	panic("deprecated: use InvertedIndexRoTx.staticFilesInRange")
 }
 
-func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyFiles []*filesItem, startJ int, err error) {
+func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyFiles []*filesItem, err error) {
 	if !r.history && r.index {
-		indexFiles, startJ = ht.iit.staticFilesInRange(r.indexStartTxNum, r.indexEndTxNum)
-		return indexFiles, historyFiles, startJ, nil
+		indexFiles = ht.iit.staticFilesInRange(r.indexStartTxNum, r.indexEndTxNum)
+		return indexFiles, historyFiles, nil
 	}
 
 	if r.history {
 		// Get history files from HistoryRoTx (no "garbage/overalps"), but index files not from InvertedIndexRoTx
 		// because index files may already be merged (before `kill -9`) and it means not visible in InvertedIndexRoTx
-		startJ = 0
 		for _, item := range ht.files {
 			if item.startTxNum < r.historyStartTxNum {
-				startJ++
 				continue
 			}
 			if item.endTxNum > r.historyEndTxNum {
@@ -437,7 +432,7 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 				indexFiles = append(indexFiles, idxFile)
 			} else {
 				walkErr := fmt.Errorf("History.staticFilesInRange: required file not found: v1-%s.%d-%d.efi", ht.h.filenameBase, item.startTxNum/ht.h.aggregationStep, item.endTxNum/ht.h.aggregationStep)
-				return nil, nil, 0, walkErr
+				return nil, nil, walkErr
 			}
 		}
 

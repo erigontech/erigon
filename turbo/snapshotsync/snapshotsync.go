@@ -371,15 +371,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 			if stats, err = snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
 				log.Warn("Error while waiting for snapshots progress", "err", err)
 			} else {
-				reason := "download"
-				if headerchain {
-					reason = "downloading header-chain"
-				}
-				logEnd := "download finished"
-				if headerchain {
-					logEnd = "header-chain download finished"
-				}
-				logStats(ctx, stats, downloadStartTime, stagesIdsList, logPrefix, reason, logEnd)
+				logStats(ctx, stats, downloadStartTime, stagesIdsList, logPrefix, headerchain)
 			}
 		}
 	}
@@ -402,15 +394,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 			if stats, err = snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
 				log.Warn("Error while waiting for snapshots progress", "err", err)
 			} else {
-				reason := "download"
-				if headerchain {
-					reason = "downloading header-chain"
-				}
-				logEnd := "download finished"
-				if headerchain {
-					logEnd = "header-chain download finished"
-				}
-				logStats(ctx, stats, downloadStartTime, stagesIdsList, logPrefix, reason, logEnd)
+				logStats(ctx, stats, downloadStartTime, stagesIdsList, logPrefix, headerchain)
 			}
 		}
 	}
@@ -500,8 +484,17 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 	return nil
 }
 
-func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime time.Time, stagesIdsList []string, logPrefix string, logReason string, logEnd string) {
+func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime time.Time, stagesIdsList []string, logPrefix string, headerchain bool) {
 	var m runtime.MemStats
+
+	logReason := "download"
+	if headerchain {
+		logReason = "downloading header-chain"
+	}
+	logEnd := "download finished"
+	if headerchain {
+		logEnd = "header-chain download finished"
+	}
 
 	diagnostics.Send(diagnostics.SyncStagesList{Stages: stagesIdsList})
 	diagnostics.Send(diagnostics.SnapshotDownloadStatistics{

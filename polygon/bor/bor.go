@@ -1458,12 +1458,11 @@ func (c *Bor) CommitStates(
 	chain statefull.ChainContext,
 	syscall consensus.SystemCall,
 ) error {
-	events := chain.Chain.BorEventsByBlock(header.Hash(), header.Number.Uint64())
+	blockNum := header.Number.Uint64()
+	events := chain.Chain.BorEventsByBlock(header.Hash(), blockNum)
 
 	//if len(events) == 50 || len(events) == 0 { // we still sometime could get 0 events from borevent file
-	if len(events) == 50 { // we still sometime could get 0 events from borevent file
-		blockNum := header.Number.Uint64()
-
+	if blockNum < chain.Chain.FrozenBorBlocks() && len(events) == 50 { // we still sometime could get 0 events from borevent file
 		var to time.Time
 		if c.config.IsIndore(blockNum) {
 			stateSyncDelay := c.config.CalculateStateSyncDelay(blockNum)
