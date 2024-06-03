@@ -30,7 +30,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/sentry"
 	"github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
@@ -795,7 +794,6 @@ func NewPolygonSyncStages(
 	maxPeers int,
 	statusDataProvider *sentry.StatusDataProvider,
 	stopNode func() error,
-	nodeCfg *nodecfg.Config,
 ) []*stagedsync.Stage {
 	loopBreakCheck := NewLoopBreakCheck(config, heimdallClient)
 	return stagedsync.PolygonSyncStages(

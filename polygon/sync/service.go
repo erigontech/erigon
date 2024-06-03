@@ -9,7 +9,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
-	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/p2p/sentry"
 	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
@@ -43,8 +42,7 @@ func NewService(
 	statusDataProvider *sentry.StatusDataProvider,
 	heimdallUrl string,
 	executionClient executionproto.ExecutionClient,
-	nodeCfg *nodecfg.Config,
-) (Service, error) {
+) Service {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	execution := NewExecutionClient(executionClient)
 	store := NewStore(logger, execution)
@@ -62,7 +60,6 @@ func NewService(
 	)
 
 	b := bridge.NewBridge(dataDir, logger, borConfig, heimdallClient.FetchStateSyncEvents, bor.GenesisContractStateReceiverABI())
-
 	blockDownloader := NewBlockDownloader(
 		logger,
 		p2pService,

@@ -73,7 +73,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 	}
 
 	// start syncing
-	b.log.Warn(bridgeLogPrefix("Bridge is running"))
+	b.log.Debug(bridgeLogPrefix("Bridge is running"))
 
 	// get last known sync ID
 	lastEventID, err := GetLatestEventID(ctx, b.db)
@@ -109,7 +109,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 			}
 		}
 
-		b.log.Warn(bridgeLogPrefix(fmt.Sprintf("got %v new events, last event ID: %v, ready: %v", len(events), lastEventID, b.ready)))
+		b.log.Debug(bridgeLogPrefix(fmt.Sprintf("got %v new events, last event ID: %v, ready: %v", len(events), lastEventID, b.ready)))
 	}
 }
 

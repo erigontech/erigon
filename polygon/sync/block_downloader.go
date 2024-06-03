@@ -31,7 +31,6 @@ const (
 type BlockDownloader interface {
 	DownloadBlocksUsingCheckpoints(ctx context.Context, start uint64) (tip *types.Header, err error)
 	DownloadBlocksUsingMilestones(ctx context.Context, start uint64) (tip *types.Header, err error)
-	UseBridge(bridge *bridge.Bridge)
 }
 
 func NewBlockDownloader(
@@ -56,10 +55,6 @@ func NewBlockDownloader(
 		notEnoughPeersBackOffDuration,
 		blockDownloaderEstimatedRamPerWorker.WorkersByRAMOnly(),
 	)
-}
-
-func (d *blockDownloader) UseBridge(bridge *bridge.Bridge) {
-	d.bridge = bridge
 }
 
 func newBlockDownloader(
