@@ -27,6 +27,16 @@ func (p Policy) ToByteArray() []byte {
 	return []byte{byte(p)}
 }
 
+// IsSupportedPolicy checks if the given policy is supported
+func IsSupportedPolicy(policy Policy) bool {
+	switch policy {
+	case SendTx, Deploy:
+		return true
+	default:
+		return false
+	}
+}
+
 func ResolvePolicy(policy string) (Policy, error) {
 	switch policy {
 	case "sendTx":
@@ -45,6 +55,10 @@ func containsPolicy(policies []byte, policy Policy) bool {
 
 // CheckPolicy checks if the given address has the given policy for the online ACL mode
 func CheckPolicy(ctx context.Context, aclDB kv.RwDB, addr common.Address, policy Policy) (bool, error) {
+	if !IsSupportedPolicy(policy) {
+		return false, errUnknownPolicy
+	}
+
 	// Retrieve the mode configuration
 	var hasPolicy bool
 	err := aclDB.View(ctx, func(tx kv.Tx) error {
@@ -127,6 +141,10 @@ func UpdatePolicies(ctx context.Context, aclDB kv.RwDB, aclType string, addrs []
 
 // AddPolicy adds a policy to the ACL of given address
 func AddPolicy(ctx context.Context, aclDB kv.RwDB, aclType string, addr common.Address, policy Policy) error {
+	if !IsSupportedPolicy(policy) {
+		return errUnknownPolicy
+	}
+
 	table, err := resolveTable(aclType)
 	if err != nil {
 		return err
@@ -197,6 +215,22 @@ func SetMode(ctx context.Context, aclDB kv.RwDB, mode string) error {
 	return aclDB.Update(ctx, func(tx kv.RwTx) error {
 		return tx.Put(Config, []byte(modeKey), []byte(m))
 	})
+}
+
+// GetMode gets the mode of the ACL
+func GetMode(ctx context.Context, aclDB kv.RwDB) (ACLMode, error) {
+	var mode ACLMode
+	err := aclDB.View(ctx, func(tx kv.Tx) error {
+		value, err := tx.GetOne(Config, []byte(modeKey))
+		if err != nil {
+			return err
+		}
+
+		mode = ACLMode(value)
+		return nil
+	})
+
+	return mode, err
 }
 
 // resolveTable resolves the ACL table based on aclType
