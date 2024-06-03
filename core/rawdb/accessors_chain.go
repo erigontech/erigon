@@ -1019,23 +1019,23 @@ func WriteBlock(db kv.RwTx, block *types.Block) error {
 // keeps genesis in db: [1, to)
 // doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
-// Returns true if there is nothing to prune
-func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (bool, error) {
-	nothingToPrune := false
+// Returns false if there is nothing to prune
+func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (existBlocksToPrune bool, err error) {
+	existBlocksToPrune = true // assume there are blocks to prune
 
 	c, err := tx.Cursor(kv.Headers)
 	if err != nil {
-		return false, err
+		return existBlocksToPrune, err
 	}
 	defer c.Close()
 
 	// find first non-genesis block
 	firstK, _, err := c.Seek(hexutility.EncodeTs(1))
 	if err != nil {
-		return false, err
+		return existBlocksToPrune, err
 	}
 	if firstK == nil { //nothing to delete
-		return false, err
+		return existBlocksToPrune, err
 	}
 	blockFrom := binary.BigEndian.Uint64(firstK)
 	stopAtBlock := min(blockTo, blockFrom+uint64(blocksDeleteLimit))
@@ -1044,12 +1044,12 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (bool, error
 
 	for k, _, err := c.Current(); k != nil; k, _, err = c.Next() {
 		if err != nil {
-			return false, err
+			return existBlocksToPrune, err
 		}
 
 		n := binary.BigEndian.Uint64(k)
 		if n >= stopAtBlock { // [from, to)
-			nothingToPrune = true
+			existBlocksToPrune = false
 			break
 		}
 
@@ -1082,7 +1082,7 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (bool, error
 		}
 	}
 
-	return nothingToPrune, nil
+	return existBlocksToPrune, nil
 }
 
 func TruncateCanonicalChain(ctx context.Context, db kv.RwTx, from uint64) error {

@@ -113,7 +113,7 @@ var (
 // keeps genesis in db
 // doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
-func (w *BlockWriter) PruneBlocks(ctx context.Context, tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (bool, error) {
+func (w *BlockWriter) PruneBlocks(ctx context.Context, tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (existBlocksToPrune bool, err error) {
 	defer mxPruneTookBlocks.ObserveDuration(time.Now())
 	return rawdb.PruneBlocks(tx, blockTo, blocksDeleteLimit)
 }

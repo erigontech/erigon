@@ -1378,11 +1378,11 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
 
 	if canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBlocks()); canDeleteTo > 0 {
 		br.logger.Debug("[snapshots] Prune Blocks", "to", canDeleteTo, "limit", limit)
-		nothingToPrune, err := br.blockWriter.PruneBlocks(context.Background(), tx, canDeleteTo, limit)
+		existBlocksToPrune, err := br.blockWriter.PruneBlocks(context.Background(), tx, canDeleteTo, limit)
 		if err != nil {
 			return err
 		}
-		if nothingToPrune {
+		if !existBlocksToPrune {
 			return ErrNothingToPrune
 		}
 	}
