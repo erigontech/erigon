@@ -99,7 +99,7 @@ func (d *StateDiffDomain) DomainUpdate(key1, key2, prevValue, stepBytes []byte, 
 	key := append(common.Copy(key1), key2...)
 
 	if _, ok := d.keys[string(key)]; !ok {
-		d.keys[string(key)] = nil
+		d.keys[string(key)] = prevStepBytes
 		d.keysSlice = nil
 	}
 

@@ -1205,8 +1205,6 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			return err
 		}
 		defer valsC.Close()
-		_ = keysKV
-		fmt.Println("keys", len(keysKV), "vals", len(valsKV))
 
 		for _, kv := range valsKV {
 			if len(kv.Value) == 0 {
@@ -1231,7 +1229,6 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 					return err
 				}
 			}
-			seen[string(kv.Key[:len(kv.Key)-8])] = struct{}{}
 		}
 		for _, kv := range keysKV {
 			// so stepBytes is ^step so we need to iterate from the beggining down until we find the stepBytes
@@ -1239,12 +1236,10 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 				if err != nil {
 					return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
 				}
-				if !bytes.Equal(v, stepBytes) {
-					continue
+				if bytes.Equal(v, kv.Value) {
+					break
 				}
-				if _, replaced := seen[string(k)]; !replaced && txNumUnwindTo > 0 {
-					continue
-				}
+
 				kk, _, err := valsC.SeekExact(common.Append(k, stepBytes))
 				if err != nil {
 					return err
