@@ -805,9 +805,8 @@ func doRetireCommand(cliCtx *cli.Context) error {
 			break
 		}
 		err = db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-			var pruneErr error
-			if existBlocksToPrune, pruneErr = br.PruneAncientBlocks(tx, 100); pruneErr != nil {
-				return pruneErr
+			if existBlocksToPrune, err = br.PruneAncientBlocks(tx, 100); err != nil {
+				return err
 			}
 
 			return nil
@@ -818,6 +817,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 
 	logger.Info("Pruning has ended")
+
 	db, err = temporal.New(db, agg)
 	if err != nil {
 		return err

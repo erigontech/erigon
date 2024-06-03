@@ -1049,7 +1049,9 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (existBlocks
 
 		n := binary.BigEndian.Uint64(k)
 		if n >= stopAtBlock { // [from, to)
-			existBlocksToPrune = false
+			if stopAtBlock == blockTo { // in order to prevent situation when we quit the cycle before reaching blockTo
+				existBlocksToPrune = false // and think that there is nothing to prune but there is
+			}
 			break
 		}
 
