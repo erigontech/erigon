@@ -201,7 +201,6 @@ func (e *EthereumExecutionModule) GetBodiesByRange(ctx context.Context, req *exe
 			Transactions: txs,
 			Withdrawals:  eth1_utils.ConvertWithdrawalsToRpc(body.Withdrawals),
 			Requests:     reqs,
-			//TODO(racytech): Requests
 		})
 	}
 	// Remove trailing nil values as per spec

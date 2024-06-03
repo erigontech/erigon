@@ -63,10 +63,10 @@ const (
 // ]`
 
 func DequeueWithdrawalRequests7002(syscall consensus.SystemCall) types.Requests {
-	res, _ := syscall(params.WithdrawalRequestAddress, nil)
-
-	//TODO(@somnathb1) - handle err
-
+	res, err := syscall(params.WithdrawalRequestAddress, nil)
+	if err != nil {
+		return nil
+	}
 	// Parse out the exits - using the bytes array returned
 	var reqs types.Requests
 	lenPerReq := 20 + 48 + 8 // addr + pubkey + amt

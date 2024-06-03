@@ -88,7 +88,7 @@ func ExecuteBlockEphemerally(
 	stateReader state.StateReader, stateWriter state.WriterWithChangeSets,
 	chainReader consensus.ChainReader, getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error),
 	logger log.Logger,
-) (*EphemeralExecResult, types.Requests, error) {
+) (*EphemeralExecResult, error) {
 
 	defer blockExecutionTimer.ObserveDuration(time.Now())
 	block.Uncles()
@@ -101,13 +101,12 @@ func ExecuteBlockEphemerally(
 	gp.AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock())
 
 	if err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, logger); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	var rejectedTxs []*RejectedTx
 	includedTxs := make(types.Transactions, 0, block.Transactions().Len())
 	receipts := make(types.Receipts, 0, block.Transactions().Len())
-	// requests := make(types.Requests, 0, misc.TargetWithdrawalReqsPerBlock)
 	noop := state.NewNoopWriter()
 	var allLogs types.Logs
 	for i, tx := range block.Transactions() {
@@ -116,7 +115,7 @@ func ExecuteBlockEphemerally(
 		if vmConfig.Debug && vmConfig.Tracer == nil {
 			tracer, err := getTracer(i, tx.Hash())
 			if err != nil {
-				return nil, nil, fmt.Errorf("could not obtain tracer: %w", err)
+				return nil, fmt.Errorf("could not obtain tracer: %w", err)
 			}
 			vmConfig.Tracer = tracer
 			writeTrace = true
@@ -131,7 +130,7 @@ func ExecuteBlockEphemerally(
 		}
 		if err != nil {
 			if !vmConfig.StatelessExec {
-				return nil, nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), tx.Hash().Hex(), err)
+				return nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), tx.Hash().Hex(), err)
 			}
 			rejectedTxs = append(rejectedTxs, &RejectedTx{i, err.Error()})
 		} else {
@@ -149,22 +148,22 @@ func ExecuteBlockEphemerally(
 			logReceipts(receipts, includedTxs, chainConfig, header, logger)
 		}
 
-		return nil, nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", block.NumberU64(), receiptSha.Hex(), block.ReceiptHash().Hex())
+		return nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", block.NumberU64(), receiptSha.Hex(), block.ReceiptHash().Hex())
 	}
 
 	if !vmConfig.StatelessExec && *usedGas != header.GasUsed {
-		return nil, nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
+		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
 	}
 
 	if header.BlobGasUsed != nil && *usedBlobGas != *header.BlobGasUsed {
-		return nil, nil, fmt.Errorf("blob gas used by execution: %d, in header: %d", *usedBlobGas, *header.BlobGasUsed)
+		return nil, fmt.Errorf("blob gas used by execution: %d, in header: %d", *usedBlobGas, *header.BlobGasUsed)
 	}
 
 	var bloom types.Bloom
 	if !vmConfig.NoReceipts {
 		bloom = types.CreateBloom(receipts)
 		if !vmConfig.StatelessExec && bloom != header.Bloom {
-			return nil, nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
+			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
 		}
 	}
 
@@ -172,7 +171,7 @@ func ExecuteBlockEphemerally(
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
 		if _, _, _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), block.Requests(), chainReader, false, logger); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 	}
 	blockLogs := ibs.Logs()
@@ -209,27 +208,7 @@ func ExecuteBlockEphemerally(
 		execRs.StateSyncReceipt = stateSyncReceipt
 	}
 
-	var requests types.Requests
-	if chainConfig.IsPrague(block.Time()) {
-		// ds, err := types.ParseDepositLogs(allLogs, chainConfig.DepositContract)
-		// if err != nil {
-		// 	return nil, nil, fmt.Errorf("error: could not parse requests logs: %v", err)
-		// }
-		// requests = append(requests, ds...)
-
-		// syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-		// 	return SysCallContract(contract, data, chainConfig, ibs, header, engine, false /* constCall */)
-		// }
-		// wrs := misc.DequeueWithdrawalRequests7002(syscall)
-		// requests = append(requests, wrs...)
-
-		// rh := types.DeriveSha(requests)
-		// if *block.Header().RequestsRoot != rh && !vmConfig.NoReceipts {
-		// 	return nil, nil, fmt.Errorf("error: invalid requests root hash, expected: %v, got :%v", *block.Header().RequestsRoot, rh)
-		// }
-	}
-
-	return execRs, requests, nil
+	return execRs, nil
 }
 
 func logReceipts(receipts types.Receipts, txns types.Transactions, cc *chain.Config, header *types.Header, logger log.Logger) {

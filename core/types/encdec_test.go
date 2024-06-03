@@ -564,7 +564,7 @@ func TestWithdrawalReqsEncodeDecode(t *testing.T) {
 	}
 
 	/*
-		// Breakdown of block encoding with withdrawal requests
+		// Breakdown of block encoding with withdrawal requests - expected
 		c0c0f8a0
 
 		b84a
@@ -583,23 +583,6 @@ func TestWithdrawalReqsEncodeDecode(t *testing.T) {
 		000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002
 		88
 		fffffffffffffffe
-
-
 	*/
-
-	// Required root
-	// 0x143e24a803c0dc2ae5381184ad5fe9e45ac2c82c671bc3eafdc090642fc16501
-
-	// Root with validatorPubkey used with hex2Bytes
-	// 0xfaeb6ee3cbbf2d030297970453ae0c20d5798a516d5000e3f7d138f89b063cca
-
-	// Root with validatorPubkey used with just a single byte thing
-	// 0x4900948a710bf0a4e947c029d7a0208fe7d6e0c9fbdebae62a46fda652d5375b
-
-	// Root without Request wrapper
-	// 0xc2d9bf6dd7e0b4c4140cb56e4be95db4c0602271441c9f58fe0e50cf113a9a3d
-
-	// Root when appending 0x01 before rlp encoding of wx obj
-	// 0x3e6c078b35a59eae5288a976081f696acff8347971615cf9b008c727dc3abd91
 
 }
