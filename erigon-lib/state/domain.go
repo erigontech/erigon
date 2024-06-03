@@ -1164,6 +1164,8 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 	d.dirtyFiles.Set(fi)
 }
 
+var prevSeenKeys []KVPair
+
 // unwind is similar to prune but the difference is that it restores domain values from the history as of txFrom
 // context Flush should be managed by caller.
 func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwindTo uint64, diff *StateDiffDomain) error {
@@ -1186,11 +1188,6 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	binary.BigEndian.PutUint64(stepBytes, ^step)
 	start := time.Now()
 
-	keysCursor, err := dt.keysCursor(rwTx)
-	if err != nil {
-		return err
-	}
-
 	// Attempt to use the diff to unwind the domain
 	if diff != nil {
 		keysKV, valsKV := diff.GetKeys()
@@ -1205,31 +1202,31 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			return err
 		}
 		defer valsC.Close()
+		_ = keysKV
+		// for _, kv := range keysKV {
+		// 	// so stepBytes is ^step so we need to iterate from the beggining down until we find the stepBytes
+		// 	for k, v, err := keysCursor.Seek(kv.Key); k != nil; k, v, err = keysCursor.NextDup() {
+		// 		if err != nil {
+		// 			return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
+		// 		}
+		// 		if !bytes.Equal(v, kv.Value) {
+		// 			continue
+		// 		}
 
-		for _, kv := range keysKV {
-			// so stepBytes is ^step so we need to iterate from the beggining down until we find the stepBytes
-			for k, v, err := keysCursor.Seek(kv.Key); k != nil; k, v, err = keysCursor.NextDup() {
-				if err != nil {
-					return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
-				}
-				if !bytes.Equal(v, kv.Value) {
-					continue
-				}
-
-				kk, _, err := valsC.SeekExact(common.Append(k, stepBytes))
-				if err != nil {
-					return err
-				}
-				if kk != nil {
-					if err = valsC.DeleteCurrent(); err != nil {
-						return err
-					}
-				}
-				if err := keysCursor.DeleteCurrent(); err != nil {
-					return err
-				}
-			}
-		}
+		// 		kk, _, err := valsC.SeekExact(common.Append(k, stepBytes))
+		// 		if err != nil {
+		// 			return err
+		// 		}
+		// 		if kk != nil {
+		// 			if err = valsC.DeleteCurrent(); err != nil {
+		// 				return err
+		// 			}
+		// 		}
+		// 		if err := keysCursor.DeleteCurrent(); err != nil {
+		// 			return err
+		// 		}
+		// 	}
+		// }
 		for _, kv := range valsKV {
 			strippedKey := common.Copy(kv.Key[:len(kv.Key)-8])
 			stepBytes := common.Copy(kv.Key[len(kv.Key)-8:])
@@ -1249,7 +1246,6 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 					return err
 				}
 			} else {
-				fmt.Printf("OPERATED %x -> %x\n", kv.Key, kv.Value)
 				if err := rwTx.Put(d.valsTable, kv.Key, kv.Value); err != nil {
 					return err
 				}
@@ -1258,12 +1254,18 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 				}
 			}
 		}
-
+		// Compare valsKV with prevSeenKeys
+		prevSeenKeys = valsKV
 		fmt.Println("unwind domain", time.Since(start))
 		if _, err := dt.ht.Prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, false, logEvery); err != nil {
 			return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dt.d.filenameBase, txNumUnwindTo, step, err)
 		}
 		return nil
+	}
+
+	keysCursor, err := dt.keysCursor(rwTx)
+	if err != nil {
+		return err
 	}
 	seen := make(map[string][]byte)
 
@@ -1301,8 +1303,14 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	sort.Slice(seenKeys, func(i, j int) bool {
 		return bytes.Compare(seenKeys[i].Key, seenKeys[j].Key) < 0
 	})
-	for _, kv := range seenKeys {
-		fmt.Printf("OPERATED %x -> %x \n", kv.Key, kv.Value)
+	if len(prevSeenKeys) > 0 {
+		for idx, kv := range seenKeys {
+			if !bytes.Equal(kv.Key, seenKeys[idx].Key) || !bytes.Equal(kv.Value, seenKeys[idx].Value) {
+				fmt.Printf("valsKV[%d] = %x -> %x\n", idx, seenKeys[idx].Key, seenKeys[idx].Value)
+				fmt.Printf("prevSeenKeys[%d] = %x -> %x\n", idx, kv.Key, kv.Value)
+				break
+			}
+		}
 	}
 
 	keysCursorForDeletes, err := rwTx.RwCursorDupSort(d.keysTable)
