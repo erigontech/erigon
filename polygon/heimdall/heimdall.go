@@ -586,7 +586,9 @@ func (h *heimdall) batchFetchCheckpoints(
 	sort.Sort(checkpoints)
 
 	for i, checkpoint := range checkpoints[lastStored:] {
-		err := store.PutCheckpoint(ctx, CheckpointId(i+1), checkpoint)
+		// checkpoint list API does not return "id" in the json response
+		checkpoint.Id = CheckpointId(i + 1)
+		err := store.PutCheckpoint(ctx, checkpoint.Id, checkpoint)
 		if err != nil {
 			return nil, err
 		}
