@@ -55,6 +55,9 @@ func (m *memoryMutationCursor) isTableCleared() bool {
 }
 
 func (m *memoryMutationCursor) isEntryDeleted(key []byte, value []byte, t NextType) bool {
+	if m.pureDupSort && m.mutation.isDupDeleted(m.table, key, value) {
+		return true
+	}
 	if t == Normal {
 		return m.mutation.isEntryDeleted(m.table, key)
 	} else {
@@ -293,6 +296,7 @@ func (m *memoryMutationCursor) SeekExact(seek []byte) ([]byte, []byte, error) {
 	if !bytes.Equal(key, seek) {
 		return nil, nil, nil
 	}
+
 	return key, value, nil
 }
 
