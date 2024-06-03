@@ -110,7 +110,8 @@ func (d *StateDiffDomain) DomainUpdate(key1, key2, prevValue, stepBytes []byte, 
 		if bytes.Equal(stepBytes, prevStepBytes) {
 			d.prevValues[valsKey] = prevValue
 		} else {
-			d.prevValues[valsKey] = []byte{}
+			d.prevValues[valsKey] = []byte{} // We need to delete the current step but restore the previous one
+			d.prevValues[string(append(common.Copy(key), prevStepBytes...))] = prevValue
 		}
 		d.prevValsSlice = nil
 	}
