@@ -99,6 +99,8 @@ func StageLoop(
 		}
 		if time.Since(t) < 5*time.Minute {
 			initialCycle = false
+		}
+		if !initialCycle {
 			hd.AfterInitialCycle()
 		}
 
