@@ -13,21 +13,23 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 )
 
-type BlockBuilderClient struct {
+var _ BuilderClient = &builderClient{}
+
+type builderClient struct {
 	// ref: https://ethereum.github.io/builder-specs/#/
 	httpClient *http.Client
 	baseUrl    string
 }
 
-func NewBlockBuilderClient(baseUrl string) *BlockBuilderClient {
+func NewBlockBuilderClient(baseUrl string) *builderClient {
 	httpC := &http.Client{}
-	return &BlockBuilderClient{
+	return &builderClient{
 		httpClient: httpC,
 		baseUrl:    baseUrl,
 	}
 }
 
-func (b *BlockBuilderClient) RegisterValidator(ctx context.Context, registers []*cltypes.ValidatorRegistration) error {
+func (b *builderClient) RegisterValidator(ctx context.Context, registers []*cltypes.ValidatorRegistration) error {
 	// https://ethereum.github.io/builder-specs/#/Builder/registerValidator
 	url := b.baseUrl + "/eth/v1/builder/validators"
 	payload, err := json.Marshal(registers)
@@ -38,7 +40,7 @@ func (b *BlockBuilderClient) RegisterValidator(ctx context.Context, registers []
 	return err
 }
 
-func (b *BlockBuilderClient) GetExecutionPayloadHeader(ctx context.Context, slot int64, parentHash common.Hash, pubKey common.Bytes48) (*ExecutionPayloadHeader, error) {
+func (b *builderClient) GetExecutionPayloadHeader(ctx context.Context, slot int64, parentHash common.Hash, pubKey common.Bytes48) (*ExecutionPayloadHeader, error) {
 	// https://ethereum.github.io/builder-specs/#/Builder/getHeader
 	url := fmt.Sprintf("%s/eth/v1/builder/header/%d/%s/%s", b.baseUrl, slot, parentHash.Hex(), pubKey.Hex())
 	header, err := httpCall[ExecutionPayloadHeader](ctx, b.httpClient, http.MethodGet, url, nil, nil)
@@ -48,7 +50,7 @@ func (b *BlockBuilderClient) GetExecutionPayloadHeader(ctx context.Context, slot
 	return header, nil
 }
 
-func (b *BlockBuilderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.SignedBlindedBeaconBlock) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, error) {
+func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.SignedBlindedBeaconBlock) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, error) {
 	// https://ethereum.github.io/builder-specs/#/Builder/submitBlindedBlocks
 	path := b.baseUrl + "/eth/v1/builder/blinded_blocks"
 	payload, err := json.Marshal(block)
@@ -85,7 +87,7 @@ func (b *BlockBuilderClient) SubmitBlindedBlocks(ctx context.Context, block *clt
 	return eth1Block, blobsBundle, nil
 }
 
-func (b *BlockBuilderClient) GetStatus(ctx context.Context) error {
+func (b *builderClient) GetStatus(ctx context.Context) error {
 	url := b.baseUrl + "/eth/v1/builder/status"
 	_, err := httpCall[any](ctx, b.httpClient, http.MethodGet, url, nil, nil)
 	return err

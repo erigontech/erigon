@@ -235,7 +235,7 @@ func (a *ApiHandler) produceBlock(
 	graffiti common.Hash,
 ) (*cltypes.BlindOrExecutionBeaconBlock, error) {
 	wg := sync.WaitGroup{}
-	wg.Add(1)
+	wg.Add(2)
 	// produce beacon body
 	var (
 		beaconBody     *cltypes.BeaconBody
@@ -252,7 +252,6 @@ func (a *ApiHandler) produceBlock(
 		builderHeader *builder.ExecutionPayloadHeader
 		builderErr    error
 	)
-	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		builderHeader, builderErr = a.getBuilderPayload(ctx, baseBlock, baseState, targetSlot)
@@ -286,6 +285,7 @@ func (a *ApiHandler) produceBlock(
 		block.ExecutionValue = new(big.Int).SetUint64(localExecValue)
 		return block, nil
 	}
+
 	// determine whether to use local execution node or builder
 	// if exec_node_payload_value >= builder_boost_factor * (builder_payload_value // 100), then return a full (unblinded) block containing the execution node payload.
 	// otherwise, return a blinded block containing the builder payload header.
@@ -305,7 +305,7 @@ func (a *ApiHandler) produceBlock(
 		block.BlindedBeaconBody = blindedBody.
 			SetHeader(builderHeader.Data.Message.Header).
 			SetBlobKzgCommitments(builderHeader.Data.Message.BlobKzgCommitments)
-		block.ExecutionValue = builderHeader.BlockValue()
+		block.ExecutionValue = builderValue
 	}
 	return block, nil
 }

@@ -3,7 +3,7 @@ package caplin1
 import "github.com/ledgerwatch/erigon/cl/beacon/builder"
 
 type option struct {
-	builderClient *builder.BlockBuilderClient
+	builderClient builder.BuilderClient
 }
 
 type CaplinOption func(*option)
