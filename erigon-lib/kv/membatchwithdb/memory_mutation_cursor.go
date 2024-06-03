@@ -55,9 +55,6 @@ func (m *memoryMutationCursor) isTableCleared() bool {
 }
 
 func (m *memoryMutationCursor) isEntryDeleted(key []byte, value []byte, t NextType) bool {
-	if m.pureDupSort && m.mutation.isDupDeleted(m.table, key, value) {
-		return true
-	}
 	if t == Normal {
 		return m.mutation.isEntryDeleted(m.table, key)
 	} else {
@@ -289,15 +286,34 @@ func (m *memoryMutationCursor) Seek(seek []byte) ([]byte, []byte, error) {
 
 // Seek move pointer to a key at a certain position.
 func (m *memoryMutationCursor) SeekExact(seek []byte) ([]byte, []byte, error) {
-	key, value, err := m.Seek(seek)
+	memKey, memValue, err := m.memCursor.SeekExact(seek)
+	if err != nil || m.isTableCleared() {
+		return memKey, memValue, err
+	}
+
+	if memKey != nil {
+		m.currentMemEntry.key = memKey
+		m.currentMemEntry.value = memValue
+		m.currentDbEntry.key, m.currentDbEntry.value, err = m.cursor.Seek(seek)
+		m.isPrevFromDb = false
+		m.currentPair = cursorEntry{memKey, memValue}
+		return memKey, memValue, err
+	}
+
+	dbKey, dbValue, err := m.cursor.SeekExact(seek)
 	if err != nil {
 		return nil, nil, err
 	}
-	if !bytes.Equal(key, seek) {
-		return nil, nil, nil
-	}
 
-	return key, value, nil
+	if dbKey != nil && !m.mutation.isEntryDeleted(m.table, seek) {
+		m.currentDbEntry.key = dbKey
+		m.currentDbEntry.value = dbValue
+		m.currentMemEntry.key, m.currentMemEntry.value, err = m.memCursor.Seek(seek)
+		m.isPrevFromDb = true
+		m.currentPair = cursorEntry{dbKey, dbValue}
+		return dbKey, dbValue, err
+	}
+	return nil, nil, nil
 }
 
 func (m *memoryMutationCursor) Put(k, v []byte) error {

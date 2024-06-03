@@ -1215,21 +1215,10 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 				// If we delete the entry here, we also need to delete it from the keys table
 				strippedKey := common.Copy(kv.Key[:len(kv.Key)-8])
 				stepBytes := common.Copy(kv.Key[len(kv.Key)-8:])
-				a, b, err := keysCursor.SeekBothExact(strippedKey, stepBytes)
-				if err != nil {
-					return err
-				}
-				fmt.Println(fmt.Sprintf("deleting key %x %x", strippedKey, stepBytes))
-				fmt.Println(fmt.Sprintf("deleting key2 %x %x", a, b))
 
-				if err := keysCursor.DeleteCurrent(); err != nil {
+				if err := keysCursor.DeleteExact(strippedKey, stepBytes); err != nil {
 					return err
 				}
-				a, b, err = keysCursor.Seek(strippedKey)
-				if err != nil {
-					return err
-				}
-				fmt.Println(fmt.Sprintf("deleting key3 %x %x", a, b))
 			} else {
 				if err := rwTx.Put(d.valsTable, kv.Key, kv.Value); err != nil {
 					return err
