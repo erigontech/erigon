@@ -1209,8 +1209,15 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 
 		for _, kv := range valsKV {
 			if len(kv.Value) == 0 {
-				if err := rwTx.Delete(d.valsTable, kv.Key); err != nil {
+				fmt.Printf("Deleted key %x\n", kv.Key)
+				kk, _, err := valsC.SeekExact(kv.Key)
+				if err != nil {
 					return err
+				}
+				if kk != nil {
+					if err = valsC.DeleteCurrent(); err != nil {
+						return err
+					}
 				}
 				// If we delete the entry here, we also need to delete it from the keys table
 				strippedKey := common.Copy(kv.Key[:len(kv.Key)-8])
