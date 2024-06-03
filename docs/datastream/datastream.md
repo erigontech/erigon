@@ -78,11 +78,15 @@ There are bookmarks for Batches (type = 1) and L2Blocks (type = 2).
 
   - Final state root of the L2Block (For ForkIDs < 7: see also *IntermediateStateRoot* in *L1Transacton*)
 
-* **L1BlockHash**, only For ForkIDs >= 7
-  
-     - For regular batches: ParentHash of the L1 block when the GER was inserted in the L1InfoTree
+* **L1BlockHash**
 
-     - If batch is Forced or Injected: BlockHash of the parent L1 block when the forced or injected happen in L1
+     - For ForkIDs >= 7
+  
+       - For regular batches: ParentHash of the L1 block when the GER was inserted in the L1InfoTree
+
+       - If batch is Forced or Injected: BlockHash of the parent L1 block when the forced or injected happen in L1
+      
+     - For ForkIDs < 7: 0x00...000, unused.
 
 * **DeltaTimestamp**: difference between current and previous block timestamps
 
@@ -96,7 +100,11 @@ There are bookmarks for Batches (type = 1) and L2Blocks (type = 2).
 
 * **BlockGasLimit**: Currently unused (set to 0)
 
-* **BlockInfoRoot**: Only for ForkIDs >= 7, 0x0000… for ForKIDs < 7
+* **BlockInfoRoot**:
+
+  - For ForkIDs >= 7: actual BlockInfoRoot
+
+  - For ForkIDs < 7: 0x000…00,unused 
 
 ### Transaction
 
@@ -118,7 +126,11 @@ There are bookmarks for Batches (type = 1) and L2Blocks (type = 2).
 
 * EffectiveGasPricePercentage: Only available for ForkIDs >= 5, 0 in other ForkIDs.
 
-* IntermediateStateRoot: (Only for ForkIDs < 7) is the resulting SR_A of the TX execution, previous to storing it in the system SC and so getting a new SR_B.
+* IntermediateStateRoot: 
+
+   - ForkIDs < 7: is the resulting SR_A of the TX execution, previous to storing it in the system SC and so getting a new SR_B.
+ 
+   - ForkIDs >= 7: 0x0..0, unused
 
 ### UpdateGER
 
