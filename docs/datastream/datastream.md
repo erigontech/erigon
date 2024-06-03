@@ -128,9 +128,9 @@ There are bookmarks for Batches (type = 1) and L2Blocks (type = 2).
 
 * IntermediateStateRoot: 
 
-   - ForkIDs < 7: is the resulting SR_A of the TX execution, previous to storing it in the system SC and so getting a new SR_B.
+   - ForkIDs <= 7: is the resulting SR_A of the TX execution, previous to storing it in the system SC and so getting a new SR_B.
  
-   - ForkIDs >= 7: 0x0..0, unused
+   - ForkIDs > 7: 0x0..0, unused
 
 ### UpdateGER
 

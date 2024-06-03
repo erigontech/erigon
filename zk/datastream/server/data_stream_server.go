@@ -278,7 +278,7 @@ func (srv *DataStreamServer) CreateStreamEntriesProto(
 
 	// todo: temporary for now whilst we aren't handling more than one injected batch as a sequencer
 	// this could go into the DB as a quick lookup to check for injected batches
-	if block.NumberU64() == 1 {
+	if blockNum == 1 {
 		deltaTimestamp = block.Time()
 		l1InfoTreeMinTimestamps[0] = 0
 	}
@@ -337,8 +337,8 @@ func (srv *DataStreamServer) CreateStreamEntriesProto(
 		}
 
 		var intermediateRoot libcommon.Hash
-		if forkId < EtrogBatchNumber {
-			intermediateRoot, err = reader.GetIntermediateTxStateRoot(block.NumberU64(), tx.Hash())
+		if forkId <= EtrogBatchNumber {
+			intermediateRoot, err = reader.GetIntermediateTxStateRoot(blockNum, tx.Hash())
 			if err != nil {
 				return nil, err
 			}
