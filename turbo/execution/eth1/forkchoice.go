@@ -295,6 +295,10 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
+		if _, err := e.executionPipeline.Run(e.db, wrap.TxContainer{Tx: tx}, false, false); err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
+		}
 		if unwindToGenesis {
 			if err := rawdbreset.ResetExecWithTx(ctx, tx, e.config.ChainName, "", e.logger); err != nil {
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
