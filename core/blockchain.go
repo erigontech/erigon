@@ -108,7 +108,6 @@ func ExecuteBlockEphemerally(
 	includedTxs := make(types.Transactions, 0, block.Transactions().Len())
 	receipts := make(types.Receipts, 0, block.Transactions().Len())
 	noop := state.NewNoopWriter()
-	var allLogs types.Logs
 	for i, tx := range block.Transactions() {
 		ibs.SetTxContext(tx.Hash(), block.Hash(), i)
 		writeTrace := false
@@ -139,7 +138,6 @@ func ExecuteBlockEphemerally(
 				receipts = append(receipts, receipt)
 			}
 		}
-		allLogs = append(allLogs, receipt.Logs...)
 	}
 
 	receiptSha := types.DeriveSha(receipts)

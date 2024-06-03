@@ -10,8 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-const WithdrawalRequestType byte = 0x01
-
 type WithdrawalRequest struct {
 	SourceAddress   libcommon.Address
 	ValidatorPubkey [BLSPubKeyLen]byte // bls

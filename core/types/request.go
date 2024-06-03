@@ -12,6 +12,9 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
+const WithdrawalRequestType byte = 0x01
+const DepositRequestType byte = 0x00
+
 type Request interface {
 	EncodeRLP(io.Writer) error
 	DecodeRLP([]byte) error
@@ -45,7 +48,7 @@ type Requests []Request
 func (r *Requests) DecodeRLP(s *rlp.Stream) (err error) {
 	if _, err = s.List(); err != nil {
 		if errors.Is(err, rlp.EOL) {
-			r = nil
+			*r = nil
 			return nil
 		}
 		return fmt.Errorf("read requests: %v", err)
@@ -92,11 +95,8 @@ func (r *Requests) EncodeRLP(w io.Writer) {
 		// buf2 := new(bytes.Buffer)
 		req.EncodeRLP(buf)
 		buf2 := make([]byte, buf.Len()+2)
-		written := rlp2.EncodeString(buf.Bytes(), buf2)
+		_ = rlp2.EncodeString(buf.Bytes(), buf2)
 		w.Write(buf2)
-		if written != len(buf2) {
-
-		}
 	}
 }
 
@@ -120,7 +120,7 @@ func (r Requests) Deposits() Deposits {
 }
 
 func MarshalRequestsBinary(requests Requests) ([][]byte, error) {
-	var ret [][]byte
+	ret := make([][]byte, 0)
 	for _, req := range requests {
 		buf := new(bytes.Buffer)
 		if err := req.EncodeRLP(buf); err != nil {

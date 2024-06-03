@@ -13,10 +13,9 @@ import (
 )
 
 const (
-	DepositRequestType       byte = 0x00
-	BLSPubKeyLen                  = 48
-	WithdrawalCredentialsLen      = 32 // withdrawalCredentials size
-	BLSSigLen                     = 96 // signature size
+	BLSPubKeyLen             = 48
+	WithdrawalCredentialsLen = 32 // withdrawalCredentials size
+	BLSSigLen                = 96 // signature size
 )
 
 var (
@@ -42,7 +41,6 @@ type Deposit struct {
 
 func (d *Deposit) RequestType() byte { return DepositRequestType }
 func (d *Deposit) EncodeRLP(w io.Writer) (err error) {
-	// todo @somnathb1 fix this
 	var buf bytes.Buffer
 	bb := make([]byte, 10)
 	if err = rlp.Encode(&buf, d.Pubkey); err != nil {

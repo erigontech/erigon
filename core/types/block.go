@@ -1046,7 +1046,7 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 		b.header.RequestsRoot = &EmptyRootHash
 		b.requests = make(Requests, len(requests))
 	} else {
-		h := DeriveSha(Requests(requests))
+		h := DeriveSha(requests)
 		b.header.RequestsRoot = &h
 		b.requests = make(Requests, len(requests))
 		for i, r := range requests {
