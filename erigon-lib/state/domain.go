@@ -1207,6 +1207,8 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		defer valsC.Close()
 
 		for _, kv := range valsKV {
+			strippedKey := common.Copy(kv.Key[:len(kv.Key)-8])
+			stepBytes := common.Copy(kv.Key[len(kv.Key)-8:])
 			if len(kv.Value) == 0 {
 				kk, _, err := valsC.SeekExact(kv.Key)
 				if err != nil {
@@ -1218,8 +1220,6 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 					}
 				}
 				// If we delete the entry here, we also need to delete it from the keys table
-				strippedKey := common.Copy(kv.Key[:len(kv.Key)-8])
-				stepBytes := common.Copy(kv.Key[len(kv.Key)-8:])
 
 				if err := keysCursor.DeleteExact(strippedKey, stepBytes); err != nil {
 					return err
@@ -1227,6 +1227,9 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			} else {
 				fmt.Printf("OPERATED %x -> %x\n", kv.Key, kv.Value)
 				if err := rwTx.Put(d.valsTable, kv.Key, kv.Value); err != nil {
+					return err
+				}
+				if err := keysCursor.Put(strippedKey, stepBytes); err != nil {
 					return err
 				}
 			}
