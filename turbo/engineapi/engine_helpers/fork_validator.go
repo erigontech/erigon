@@ -203,7 +203,6 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 		}
 		return status, latestValidHash, validationError, criticalError
 	}
-	return engine_types.ValidStatus, header.Hash(), nil, nil
 
 	// if the block is not in range of maxForkDepth from head then we do not validate it.
 	if math.AbsoluteDifference(fv.currentHeight, header.Number.Uint64()) > maxForkDepth {
