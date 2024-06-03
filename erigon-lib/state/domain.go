@@ -1331,9 +1331,13 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			fmt.Println("seenKeys", len(seenKeys), "prevSeenKeys", len(prevSeenKeys[dt.d.valsTable]))
 			break
 		}
-		if !bytes.Equal(kva.Key, prevSeenKeys[dt.d.valsTable][idx].Key) || !bytes.Equal(kva.Value, prevSeenKeys[dt.d.valsTable][idx].Value) {
+		le := len(prevSeenKeys[dt.d.valsTable][idx].Key)
+		if le > 8 {
+			le -= 8
+		}
+		if !bytes.Equal(kva.Key, prevSeenKeys[dt.d.valsTable][idx].Key[:le]) || !bytes.Equal(kva.Value, prevSeenKeys[dt.d.valsTable][idx].Value) {
 			fmt.Printf("seenKeys[%d] = %x, %x\n", idx, kva.Key, kva.Value)
-			fmt.Printf("prevSeenKeys[%d] = %x, %x\n", idx, prevSeenKeys[dt.d.valsTable][idx].Key, prevSeenKeys[dt.d.valsTable][idx].Value)
+			fmt.Printf("prevSeenKeys[%d] = %x, %x\n", idx, prevSeenKeys[dt.d.valsTable][idx].Key[:le], prevSeenKeys[dt.d.valsTable][idx].Value)
 			break
 		}
 	}
