@@ -1227,11 +1227,11 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 					return err
 				}
 			} else {
-				seen[string(kv.Key[:len(kv.Key)-8])] = struct{}{}
 				if err := rwTx.Put(d.valsTable, kv.Key, kv.Value); err != nil {
 					return err
 				}
 			}
+			seen[string(kv.Key[:len(kv.Key)-8])] = struct{}{}
 		}
 		for _, kv := range keysKV {
 			// so stepBytes is ^step so we need to iterate from the beggining down until we find the stepBytes
