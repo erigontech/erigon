@@ -1197,7 +1197,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 
 	// Attempt to use the diff to unwind the domain
 	if diff != nil {
-		keysKV, valsKV := diff.GetKeys()
+		_, valsKV := diff.GetKeys()
 		keysCursor, err := rwTx.RwCursorDupSort(d.keysTable)
 		if err != nil {
 			return fmt.Errorf("create %s domain delete cursor: %w", d.filenameBase, err)
@@ -1294,13 +1294,15 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		seen[string(k)] = v
 	}
 	// convert seen to sorted slice
-	seenKeys := make([]string, 0, len(seen))
+	seenKeys := make([]KVPair, 0, len(seen))
 	for k := range seen {
-		seenKeys = append(seenKeys, k)
+		seenKeys = append(seenKeys, KVPair{Key: []byte(k), Value: seen[k]})
 	}
-	sort.Strings(seenKeys)
-	for _, k := range seenKeys {
-		fmt.Printf("OPERATED %x -> %x \n", k, v)
+	sort.Slice(seenKeys, func(i, j int) bool {
+		return bytes.Compare(seenKeys[i].Key, seenKeys[j].Key) < 0
+	})
+	for _, kv := range seenKeys {
+		fmt.Printf("OPERATED %x -> %x \n", kv.Key, kv.Value)
 	}
 
 	keysCursorForDeletes, err := rwTx.RwCursorDupSort(d.keysTable)
