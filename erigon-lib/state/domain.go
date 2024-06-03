@@ -1372,7 +1372,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			return err
 		}
 		if kk != nil {
-			currDeletedKeys1 = append(currDeletedKeys1, KVPair{Key: kk})
+			currDeletedKeys1 = append(currDeletedKeys1, KVPair{Key: common.Copy(kk)})
 			//fmt.Printf("[domain][%s] rm large value %x v %x\n", d.filenameBase, kk, vv)
 			if err = valsC.DeleteCurrent(); err != nil {
 				return err
@@ -1383,7 +1383,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		if _, _, err = keysCursorForDeletes.SeekBothExact(k, v); err != nil {
 			return err
 		}
-		currDeletedKeys2 = append(currDeletedKeys1, KVPair{Key: k, Value: v})
+		currDeletedKeys2 = append(currDeletedKeys1, KVPair{Key: common.Copy(k), Value: common.Copy(v)})
 		if err = keysCursorForDeletes.DeleteCurrent(); err != nil {
 			return err
 		}
