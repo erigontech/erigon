@@ -1365,6 +1365,8 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 	return ok, nil
 }
 
+var ErrNothingToPrune = errors.New("nothing to prune")
+
 func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
 	if br.blockReader.FreezingCfg().KeepBlocks {
 		return nil
@@ -1376,8 +1378,12 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
 
 	if canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBlocks()); canDeleteTo > 0 {
 		br.logger.Debug("[snapshots] Prune Blocks", "to", canDeleteTo, "limit", limit)
-		if err := br.blockWriter.PruneBlocks(context.Background(), tx, canDeleteTo, limit); err != nil {
+		nothingToPrune, err := br.blockWriter.PruneBlocks(context.Background(), tx, canDeleteTo, limit)
+		if err != nil {
 			return err
+		}
+		if nothingToPrune {
+			return ErrNothingToPrune
 		}
 	}
 
