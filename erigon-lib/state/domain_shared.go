@@ -113,11 +113,11 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 
 func (sd *SharedDomains) SetChangesetAccumulator(acc *StateChangeSet) {
 	sd.changesAccumulator = acc
-	for idx, d := range sd.dWriter {
+	for idx := range sd.dWriter {
 		if sd.changesAccumulator == nil {
-			d.diff = nil
+			sd.dWriter[idx].diff = nil
 		} else {
-			d.diff = &sd.changesAccumulator.Diffs[idx]
+			sd.dWriter[idx].diff = &sd.changesAccumulator.Diffs[idx]
 		}
 	}
 }
