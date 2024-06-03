@@ -1305,10 +1305,14 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		return bytes.Compare(seenKeys[i].Key, seenKeys[j].Key) < 0
 	})
 	if len(prevSeenKeys) > 0 {
-		for idx, kv := range seenKeys {
-			if !bytes.Equal(kv.Key, seenKeys[idx].Key[:len(seenKeys[idx].Key)-8]) || !bytes.Equal(kv.Value, seenKeys[idx].Value) {
+		for idx, kva := range seenKeys {
+			cmpKey := seenKeys[idx].Key
+			if dt.d.valsTable != kv.TblCommitmentVals {
+				cmpKey = cmpKey[:len(cmpKey)-8]
+			}
+			if !bytes.Equal(kva.Key, cmpKey) || !bytes.Equal(kva.Value, seenKeys[idx].Value) {
 				fmt.Printf("valsKV[%d] = %x -> %x\n", idx, seenKeys[idx].Key, seenKeys[idx].Value)
-				fmt.Printf("prevSeenKeys[%d] = %x -> %x\n", idx, kv.Key, kv.Value)
+				fmt.Printf("prevSeenKeys[%d] = %x -> %x\n", idx, kva.Key, kva.Value)
 				break
 			}
 		}
