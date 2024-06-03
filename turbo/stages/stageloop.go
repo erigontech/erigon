@@ -99,9 +99,8 @@ func StageLoop(
 		}
 		if time.Since(t) < 5*time.Minute {
 			initialCycle = false
+			hd.AfterInitialCycle()
 		}
-
-		hd.AfterInitialCycle()
 
 		if loopMinTime != 0 {
 			waitTime := loopMinTime - time.Since(start)
