@@ -1306,7 +1306,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	})
 	if len(prevSeenKeys) > 0 {
 		for idx, kv := range seenKeys {
-			if !bytes.Equal(kv.Key, seenKeys[idx].Key) || !bytes.Equal(kv.Value, seenKeys[idx].Value) {
+			if !bytes.Equal(kv.Key, seenKeys[idx].Key[:len(seenKeys[idx].Key)-8]) || !bytes.Equal(kv.Value, seenKeys[idx].Value) {
 				fmt.Printf("valsKV[%d] = %x -> %x\n", idx, seenKeys[idx].Key, seenKeys[idx].Value)
 				fmt.Printf("prevSeenKeys[%d] = %x -> %x\n", idx, kv.Key, kv.Value)
 				break
