@@ -853,6 +853,9 @@ Loop:
 			if _, err := doms.ComputeCommitment(ctx, false, blockNum, execStage.LogPrefix()); err != nil {
 				return err
 			}
+			for _, d := range changeset.Diffs {
+				d.GetKeys()
+			}
 			state2.GlobalChangesetStorage.Put(b.Hash(), changeset)
 			doms.SetChangesetAccumulator(nil)
 		}
