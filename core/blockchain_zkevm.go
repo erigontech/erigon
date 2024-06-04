@@ -34,7 +34,13 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"errors"
 )
+
+type EphemeralExecResultZk struct {
+	*EphemeralExecResult
+	BlockInfoTree *common.Hash `json:"blockInfoTree,omitempty"`
+}
 
 // ExecuteBlockEphemerally runs a block from provided stateReader and
 // writes the result to the provided stateWriter
@@ -50,7 +56,7 @@ func ExecuteBlockEphemerallyZk(
 	getTracer func(txIndex int, txHash common.Hash) (vm.EVMLogger, error),
 	roHermezDb state.ReadOnlyHermezDb,
 	prevBlockRoot *common.Hash,
-) (*EphemeralExecResult, error) {
+) (*EphemeralExecResultZk, error) {
 
 	defer BlockExecutionTimer.UpdateDuration(time.Now())
 	block.Uncles()
@@ -109,9 +115,8 @@ func ExecuteBlockEphemerallyZk(
 			vmConfig.Tracer = nil
 		}
 
-		//TODO: remove this after bug is fixed
 		localReceipt := *receipt
-		if execResult.Err == vm.ErrUnsupportedPrecompile {
+		if !chainConfig.IsForkID8Elderberry(blockNum) && errors.Is(execResult.Err, vm.ErrUnsupportedPrecompile) {
 			localReceipt.Status = 1
 		}
 
@@ -226,15 +231,18 @@ func ExecuteBlockEphemerallyZk(
 		}
 	}
 	blockLogs := ibs.Logs()
-	execRs := &EphemeralExecResult{
-		TxRoot:      types.DeriveSha(includedTxs),
-		ReceiptRoot: receiptSha,
-		Bloom:       bloom,
-		LogsHash:    rlpHash(blockLogs),
-		Receipts:    receipts,
-		Difficulty:  (*math.HexOrDecimal256)(header.Difficulty),
-		GasUsed:     math.HexOrDecimal64(*usedGas),
-		Rejected:    rejectedTxs,
+	execRs := &EphemeralExecResultZk{
+		EphemeralExecResult: &EphemeralExecResult{
+			TxRoot:      types.DeriveSha(includedTxs),
+			ReceiptRoot: receiptSha,
+			Bloom:       bloom,
+			LogsHash:    rlpHash(blockLogs),
+			Receipts:    receipts,
+			Difficulty:  (*math.HexOrDecimal256)(header.Difficulty),
+			GasUsed:     math.HexOrDecimal64(*usedGas),
+			Rejected:    rejectedTxs,
+		},
+		BlockInfoTree: l2InfoRoot,
 	}
 
 	return execRs, nil

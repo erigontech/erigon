@@ -432,6 +432,11 @@ var (
 		Usage:    "Ethereum L1 delay between queries for verifications and sequences - in milliseconds",
 		Value:    6000,
 	}
+	L1HighestBlockTypeFlag = cli.StringFlag{
+		Name:  "zkevm.l1-highest-block-type",
+		Usage: "The type of the highest block in the L1 chain. latest, safe, or finalized",
+		Value: "finalized",
+	}
 	L1MaticContractAddressFlag = cli.StringFlag{
 		Name:  "zkevm.l1-matic-contract-address",
 		Usage: "Ethereum L1 Matic contract address",
@@ -446,6 +451,11 @@ var (
 		Name:  "zkevm.rebuild-tree-after",
 		Usage: "Rebuild the state tree after this many blocks behind",
 		Value: 10000,
+	}
+	IncrementTreeAlways = cli.BoolFlag{
+		Name:  "zkevm.increment-tree-always",
+		Usage: "Increment the state tree, never rebuild",
+		Value: false,
 	}
 	SequencerInitialForkId = cli.Uint64Flag{
 		Name:  "zkevm.sequencer-initial-fork-id",

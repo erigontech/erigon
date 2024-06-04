@@ -305,6 +305,7 @@ automated-tests:
 .PHONY: protobuf
 protobuf:
 	protoc -I=zk/legacy_executor_verifier/proto --go_out=zk/legacy_executor_verifier/proto zk/legacy_executor_verifier/proto/process_batch.proto
+	protoc -I=zk/datastream/proto --go_out=zk/datastream/proto zk/datastream/proto/datastream.proto
 
 ## help:                              print commands help
 help	:	Makefile

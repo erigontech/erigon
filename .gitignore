@@ -82,6 +82,8 @@ coverage.out
 hermezconfig*.yaml
 debugToolsConfig.yaml
 local.yml
+cache.db
+stream/*
 
 dist
 __debug_bin

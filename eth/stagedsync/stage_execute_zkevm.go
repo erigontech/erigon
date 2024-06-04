@@ -147,6 +147,12 @@ Loop:
 			break Loop
 		}
 
+		if execRs.BlockInfoTree != nil {
+			if err = hermezDb.WriteBlockInfoRoot(blockNum, *execRs.BlockInfoTree); err != nil {
+				return err
+			}
+		}
+
 		// exec loop variables
 		header := block.HeaderNoCopy()
 		header.GasUsed = uint64(execRs.GasUsed)
@@ -246,6 +252,22 @@ func getBlockHashValues(cfg ExecuteBlockCfg, ctx context.Context, tx kv.RwTx, nu
 
 // returns calculated "to" block number for execution and the total blocks to be executed
 func getExecRange(cfg ExecuteBlockCfg, tx kv.RwTx, stageProgress, toBlock uint64, quiet bool, logPrefix string) (uint64, uint64, error) {
+	if cfg.zk.DebugLimit > 0 {
+		prevStageProgress, err := stages.GetStageProgress(tx, stages.Senders)
+		if err != nil {
+			return 0, 0, err
+		}
+		to := prevStageProgress
+		if !quiet {
+			log.Info(fmt.Sprintf("[%s] Debug limit set, switching to it", logPrefix), "regularTo", to, "debugTo", cfg.zk.DebugLimit)
+		}
+		if cfg.zk.DebugLimit < to {
+			to = cfg.zk.DebugLimit
+		}
+		total := to - stageProgress
+		return to, total, nil
+	}
+
 	shouldShortCircuit, noProgressTo, err := utils.ShouldShortCircuitExecution(tx, logPrefix)
 	if err != nil {
 		return 0, 0, err
@@ -262,16 +284,6 @@ func getExecRange(cfg ExecuteBlockCfg, tx kv.RwTx, stageProgress, toBlock uint64
 
 	if shouldShortCircuit {
 		to = noProgressTo
-	}
-
-	// if debug limit set, use it
-	if cfg.zk.DebugLimit > 0 {
-		if !quiet {
-			log.Info(fmt.Sprintf("[%s] Debug limit set, switching to it", logPrefix), "regularTo", to, "debugTo", cfg.zk.DebugLimit)
-		}
-		if cfg.zk.DebugLimit < to {
-			to = cfg.zk.DebugLimit
-		}
 	}
 
 	total := to - stageProgress
@@ -383,7 +395,7 @@ func executeBlockZk(
 	initialCycle bool,
 	stateStream bool,
 	roHermezDb state.ReadOnlyHermezDb,
-) (*core.EphemeralExecResult, error) {
+) (*core.EphemeralExecResultZk, error) {
 	blockNum := block.NumberU64()
 
 	stateReader, stateWriter, err := newStateReaderWriter(batch, tx, block, writeChangesets, cfg.accumulator, initialCycle, stateStream)

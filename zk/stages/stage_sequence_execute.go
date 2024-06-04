@@ -64,14 +64,17 @@ func SpawnSequencingStage(
 		return err
 	}
 
-	if err := utils.UpdateZkEVMBlockCfg(cfg.chainConfig, sdb.hermezDb, logPrefix); err != nil {
-		return err
-	}
-
 	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(sdb.tx, hash, number) }
+
+	l1Recovery := cfg.zk.L1SyncStartBlock > 0
 
 	// injected batch
 	if executionAt == 0 {
+		// set the block height for the fork we're running at to ensure contract interactions are correct
+		if err = utils.RecoverySetBlockConfigForks(1, forkId, cfg.chainConfig, logPrefix); err != nil {
+			return err
+		}
+
 		header, parentBlock, err := prepareHeader(tx, executionAt, math.MaxUint64, forkId, cfg.zk.AddressSequencer)
 		if err != nil {
 			return err
@@ -99,6 +102,10 @@ func SpawnSequencingStage(
 		return nil
 	}
 
+	if err := utils.UpdateZkEVMBlockCfg(cfg.chainConfig, sdb.hermezDb, logPrefix); err != nil {
+		return err
+	}
+
 	var header *types.Header
 	var parentBlock *types.Block
 
@@ -111,7 +118,6 @@ func SpawnSequencingStage(
 	var decodedBlocks []zktx.DecodedBatchL2Data // only used in l1 recovery
 	var blockTransactions []types.Transaction
 	var l1EffectiveGases, effectiveGases []uint8
-	l1Recovery := cfg.zk.L1SyncStartBlock > 0
 
 	batchTicker := time.NewTicker(cfg.zk.SequencerBatchSealTime)
 	defer batchTicker.Stop()
@@ -285,7 +291,7 @@ func SpawnSequencingStage(
 						}
 						effectiveGases = append(effectiveGases, effectiveGas)
 
-						receipt, overflow, err = attemptAddTransaction(cfg, sdb, ibs, batchCounters, &blockContext, header, transaction, effectiveGas, l1Recovery)
+						receipt, overflow, err = attemptAddTransaction(cfg, sdb, ibs, batchCounters, &blockContext, header, transaction, effectiveGas, l1Recovery, forkId)
 						if err != nil {
 							// if we are in recovery just log the error as a warning.  If the data is on the L1 then we should consider it as confirmed.
 							// The executor/prover would simply skip a TX with an invalid nonce for example so we don't need to worry about that here.
@@ -345,7 +351,7 @@ func SpawnSequencingStage(
 		} else {
 			for idx, transaction := range addedTransactions {
 				effectiveGas := effectiveGases[idx]
-				receipt, innerOverflow, err := attemptAddTransaction(cfg, sdb, ibs, batchCounters, &blockContext, header, transaction, effectiveGas, false)
+				receipt, innerOverflow, err := attemptAddTransaction(cfg, sdb, ibs, batchCounters, &blockContext, header, transaction, effectiveGas, false, forkId)
 				if err != nil {
 					return err
 				}

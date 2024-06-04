@@ -67,9 +67,11 @@ type L1Syncer struct {
 	logsChan            chan []ethTypes.Log
 	progressMessageChan chan string
 	quit                chan struct{}
+
+	highestBlockType string // finalized, latest, safe
 }
 
-func NewL1Syncer(etherMans []IEtherman, l1ContractAddresses []common.Address, topics [][]common.Hash, blockRange, queryDelay uint64) *L1Syncer {
+func NewL1Syncer(etherMans []IEtherman, l1ContractAddresses []common.Address, topics [][]common.Hash, blockRange, queryDelay uint64, highestBlockType string) *L1Syncer {
 	return &L1Syncer{
 		etherMans:           etherMans,
 		ethermanIndex:       0,
@@ -81,6 +83,7 @@ func NewL1Syncer(etherMans []IEtherman, l1ContractAddresses []common.Address, to
 		progressMessageChan: make(chan string),
 		logsChan:            make(chan []ethTypes.Log),
 		quit:                make(chan struct{}),
+		highestBlockType:    highestBlockType,
 	}
 }
 
@@ -280,7 +283,19 @@ func tryToLogL1QueryBlocks(logPrefix string, current, total, threadNum int, dura
 
 func (s *L1Syncer) getLatestL1Block() (uint64, error) {
 	em := s.getNextEtherman()
-	latestBlock, err := em.BlockByNumber(context.Background(), big.NewInt(rpc.FinalizedBlockNumber.Int64()))
+
+	var blockNumber *big.Int
+
+	switch s.highestBlockType {
+	case "finalized":
+		blockNumber = big.NewInt(rpc.FinalizedBlockNumber.Int64())
+	case "safe":
+		blockNumber = big.NewInt(rpc.SafeBlockNumber.Int64())
+	case "latest":
+		blockNumber = nil
+	}
+
+	latestBlock, err := em.BlockByNumber(context.Background(), blockNumber)
 	if err != nil {
 		return 0, err
 	}

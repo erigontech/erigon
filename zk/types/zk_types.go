@@ -10,6 +10,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	ethTypes "github.com/ledgerwatch/erigon/core/types"
+	"fmt"
 )
 
 const EFFECTIVE_GAS_PRICE_PERCENTAGE_DISABLED = 0
@@ -98,6 +99,9 @@ func (ib *L1InjectedBatch) Marshall() []byte {
 }
 
 func (ib *L1InjectedBatch) Unmarshall(input []byte) error {
+	if len(input) < 132 {
+		return fmt.Errorf("unmarshall error, input is too short")
+	}
 	err := binary.Read(bytes.NewReader(input[:8]), binary.LittleEndian, &ib.L1BlockNumber)
 	if err != nil {
 		return err

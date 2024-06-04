@@ -53,6 +53,11 @@ Using the Makefile command: `make build-libs` will install these for the relevan
 
 Due to dependency requirements Go 1.19 is required to build.
 
+## L1 Interaction
+In order to retrieve data from the L1, the L1 syncer must be configured to know how to request the highest block, this can be configured by flag:
+
+- `zkevm.l1-highest-block-type` which defaults to retrieving the 'finalized' block, however there are cases where you may wish to pass 'safe' or 'latest'.
+
 ## Sequencer (WIP)
 
 Enable Sequencer: `CDK_ERIGON_SEQUENCER=1 ./build/bin/cdk-erigon <flags>`

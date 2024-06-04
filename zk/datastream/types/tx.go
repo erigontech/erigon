@@ -9,8 +9,6 @@ import (
 
 const (
 	l2TxMinDataLength = 38
-	// EntryTypeL2Tx represents a L2 transaction
-	EntryTypeL2Tx EntryType = 2
 )
 
 // L2Transaction represents a zkEvm transaction

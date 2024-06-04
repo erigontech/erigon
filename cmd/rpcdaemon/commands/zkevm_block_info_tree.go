@@ -18,6 +18,7 @@ import (
 
 	"github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/holiman/uint256"
+	"errors"
 )
 
 type TxInfo struct {
@@ -123,9 +124,8 @@ func (api *ZkEvmAPIImpl) GetL2BlockInfoTree(ctx context.Context, blockNum rpc.Bl
 			return nil, err
 		}
 
-		//TODO: remove this after bug is fixed
 		localReceipt := *receipt
-		if execResult.Err == vm.ErrUnsupportedPrecompile {
+		if !chainConfig.IsForkID8Elderberry(block.NumberU64()) && errors.Is(execResult.Err, vm.ErrUnsupportedPrecompile) {
 			localReceipt.Status = 1
 		}
 
