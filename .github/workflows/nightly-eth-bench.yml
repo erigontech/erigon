@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        profile: [network2]
+        profile: [network5]
 
     steps:
       - name: Checkout current repository

@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/holiman/uint256"
 	erigonchain "github.com/gateway-fm/cdk-erigon-lib/chain"
 	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/common/datadir"
@@ -28,6 +27,7 @@ import (
 	libstate "github.com/gateway-fm/cdk-erigon-lib/state"
 	"github.com/gateway-fm/cdk-erigon-lib/txpool/txpoolcfg"
 	types2 "github.com/gateway-fm/cdk-erigon-lib/types"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/zk/txpool"
 	"github.com/ledgerwatch/log/v3"
@@ -317,7 +317,8 @@ func MockWithEverything(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKe
 		chainID, _ := uint256.FromBig(mock.ChainConfig.ChainID)
 		londonBlock := mock.ChainConfig.LondonBlock
 		shanghaiTime := mock.ChainConfig.ShanghaiTime
-		mock.TxPool, err = txpool.New(newTxs, mock.DB, txpoolcfg.DefaultConfig, &ethconfig.Defaults, kvcache.NewDummy(), *chainID, shanghaiTime, londonBlock)
+
+		mock.TxPool, err = txpool.New(newTxs, mock.DB, txpoolcfg.DefaultConfig, &ethconfig.Defaults, kvcache.NewDummy(), *chainID, shanghaiTime, londonBlock, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -12,9 +12,9 @@ jobs:
     strategy:
       matrix:
         node-pairs:
-          - name: "Integration 2"
-            node1: "http://34.175.214.161:8525"
-            node2: "http://34.175.214.161:8234"
+          - name: "Integration 5"
+            node1: "http://34.175.214.161:8500"
+            node2: "http://34.175.214.161:8505"
 
     steps:
       - name: Checkout code
