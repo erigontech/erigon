@@ -848,7 +848,7 @@ du -hsc /erigon/snapshots/*
 230G	/erigon/snapshots/domain
 250G	/erigon/snapshots/history
 400G	/erigon/snapshots/idx
-1.7T	total
+1.7T	/erigon/snapshots
 ```
 
 ```
@@ -865,7 +865,7 @@ du -hsc /erigon/snapshots/*
 680G	/erigon/snapshots/domain
 580G	/erigon/snapshots/history
 1.3T	/erigon/snapshots/idx
-3.7T	total
+3.7T	/erigon/snapshots
 ```
 
 ### E3 other perf trics

@@ -278,6 +278,7 @@ func (cr *FakeChainHeaderReader) GetBlock(hash libcommon.Hash, number uint64) *t
 func (cr *FakeChainHeaderReader) HasBlock(hash libcommon.Hash, number uint64) bool  { return false }
 func (cr *FakeChainHeaderReader) GetTd(hash libcommon.Hash, number uint64) *big.Int { return nil }
 func (cr *FakeChainHeaderReader) FrozenBlocks() uint64                              { return 0 }
+func (cr *FakeChainHeaderReader) FrozenBorBlocks() uint64                           { return 0 }
 func (cr *FakeChainHeaderReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
 	return nil
 }

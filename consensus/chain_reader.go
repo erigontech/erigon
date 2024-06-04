@@ -75,9 +75,8 @@ func (cr ChainReaderImpl) GetTd(hash libcommon.Hash, number uint64) *big.Int {
 	return td
 }
 
-func (cr ChainReaderImpl) FrozenBlocks() uint64 {
-	return cr.BlockReader.FrozenBlocks()
-}
+func (cr ChainReaderImpl) FrozenBlocks() uint64    { return cr.BlockReader.FrozenBlocks() }
+func (cr ChainReaderImpl) FrozenBorBlocks() uint64 { return cr.BlockReader.FrozenBorBlocks() }
 
 func (cr ChainReaderImpl) BorSpan(spanId uint64) []byte {
 	spanBytes, err := cr.BlockReader.Span(context.Background(), cr.Db, spanId)
