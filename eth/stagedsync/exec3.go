@@ -610,14 +610,14 @@ func ExecV3(ctx context.Context,
 	}
 
 	//fmt.Printf("exec blocks: %d -> %d\n", blockNum, maxBlockNum)
-	changeset := &state2.StateChangeSet{
-		BeginTxIndex: doms.TxNum(),
-	}
 
 	var b *types.Block
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
 		if shouldGenerateChangesets {
+			changeset := &state2.StateChangeSet{
+				BeginTxIndex: doms.TxNum(),
+			}
 			doms.SetChangesetAccumulator(changeset)
 		}
 		//time.Sleep(50 * time.Microsecond)
