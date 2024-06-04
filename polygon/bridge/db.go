@@ -179,7 +179,7 @@ func StoreMap(ctx context.Context, db *polygoncommon.Database, eventMap map[uint
 	kByte := make([]byte, 8)
 
 	for k, v := range eventMap {
-		r, err := v.ToBytes()
+		r, err := v.MarshalBytes()
 		if err != nil {
 			return err
 		}
@@ -209,7 +209,13 @@ func GetMap(ctx context.Context, db *polygoncommon.Database, blockNum uint64) (I
 		return IDRange{}, err
 	}
 
-	return IDRangeFromBytes(v)
+	var r IDRange
+	err = r.UnmarshalBytes(v)
+	if err != nil {
+		return IDRange{}, err
+	}
+
+	return r, nil
 }
 
 func DumpMap(ctx context.Context, db *polygoncommon.Database) (map[uint64]IDRange, error) {
@@ -232,7 +238,8 @@ func DumpMap(ctx context.Context, db *polygoncommon.Database) (map[uint64]IDRang
 			return nil, err
 		}
 
-		r, err := IDRangeFromBytes(v)
+		var r IDRange
+		err = r.UnmarshalBytes(v)
 		if err != nil {
 			return nil, err
 		}

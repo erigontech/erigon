@@ -9,8 +9,8 @@ type IDRange struct {
 	Start, End uint64
 }
 
-// ToBytes converts IDRange to []byte
-func (r IDRange) ToBytes() ([]byte, error) {
+// MarshalBytes converts IDRange to []byte
+func (r *IDRange) MarshalBytes() ([]byte, error) {
 	var buffer bytes.Buffer
 	err := binary.Write(&buffer, binary.BigEndian, r)
 	if err != nil {
@@ -19,12 +19,11 @@ func (r IDRange) ToBytes() ([]byte, error) {
 	return buffer.Bytes(), nil
 }
 
-// IDRangeFromBytes converts []byte to IDRange
-func IDRangeFromBytes(data []byte) (IDRange, error) {
-	var r IDRange
-	err := binary.Read(bytes.NewReader(data), binary.BigEndian, &r)
+// UnmarshalBytes converts []byte to IDRange
+func (r *IDRange) UnmarshalBytes(data []byte) error {
+	err := binary.Read(bytes.NewReader(data), binary.BigEndian, r)
 	if err != nil {
-		return IDRange{}, err
+		return err
 	}
-	return r, nil
+	return nil
 }
