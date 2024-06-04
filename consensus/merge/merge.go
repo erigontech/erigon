@@ -202,10 +202,9 @@ func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, 
 		return nil, nil, nil, err
 	}
 	if config.IsPrague(header.Time) {
-		if requests == nil {
-			requests = make(types.Requests, 0)
+		if rs == nil {
+			rs = make(types.Requests, 0)
 		}
-		*header.RequestsRoot = types.DeriveSha(requests)
 	}
 	return types.NewBlock(header, outTxs, uncles, outReceipts, withdrawals, rs), outTxs, outReceipts, nil
 }
