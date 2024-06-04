@@ -39,6 +39,7 @@ func NewService(
 	statusDataProvider *sentry.StatusDataProvider,
 	heimdallUrl string,
 	executionClient executionproto.ExecutionClient,
+	blockLimit uint,
 ) Service {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	execution := NewExecutionClient(executionClient)
@@ -63,6 +64,7 @@ func NewService(
 		milestoneVerifier,
 		blocksVerifier,
 		store,
+		blockLimit,
 	)
 	spansCache := NewSpansCache()
 	ccBuilderFactory := NewCanonicalChainBuilderFactory(chainConfig, borConfig, spansCache)
