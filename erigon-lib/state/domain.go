@@ -1176,18 +1176,6 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	restored := dt.NewWriter()
 	logEvery := time.NewTicker(time.Second * 30)
 	defer logEvery.Stop()
-	if txNumUnwindTo == 0 {
-		if err := rwTx.ClearBucket(d.keysTable); err != nil {
-			return err
-		}
-		if err := rwTx.ClearBucket(d.valsTable); err != nil {
-			return err
-		}
-		if _, err := dt.ht.Prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, false, logEvery); err != nil {
-			return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dt.d.filenameBase, txNumUnwindTo, step, err)
-		}
-		return nil
-	}
 
 	stepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
