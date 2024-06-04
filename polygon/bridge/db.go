@@ -129,10 +129,10 @@ func GetEvents(ctx context.Context, db *polygoncommon.Database, id IDRange) ([][
 	var events [][]byte
 
 	kStart := make([]byte, 8)
-	binary.BigEndian.PutUint64(kStart, id.start)
+	binary.BigEndian.PutUint64(kStart, id.Start)
 
 	kEnd := make([]byte, 8)
-	binary.BigEndian.PutUint64(kEnd, id.end+1)
+	binary.BigEndian.PutUint64(kEnd, id.End+1)
 
 	tx, err := db.BeginRo(ctx)
 	if err != nil {

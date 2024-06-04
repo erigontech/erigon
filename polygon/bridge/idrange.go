@@ -6,7 +6,7 @@ import (
 )
 
 type IDRange struct {
-	start, end uint64
+	Start, End uint64
 }
 
 // ToBytes converts IDRange to []byte

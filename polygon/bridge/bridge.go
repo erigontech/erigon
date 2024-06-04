@@ -183,7 +183,7 @@ func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) []*types.Messag
 		return []*types.Message{}
 	}
 
-	eventsRaw := make([]*types.Message, eventIDs.end-eventIDs.start+1)
+	eventsRaw := make([]*types.Message, eventIDs.End-eventIDs.Start+1)
 
 	// get events from DB
 	events, err := GetEvents(ctx, b.db, eventIDs)
