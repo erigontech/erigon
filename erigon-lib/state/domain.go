@@ -1253,9 +1253,9 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 				if err := rwTx.Put(d.valsTable, kv.Key, kv.Value); err != nil {
 					return err
 				}
-				if err := keysCursor.Put(strippedKey, stepBytes); err != nil {
-					return err
-				}
+				// if err := keysCursor.Put(strippedKey, stepBytes); err != nil {
+				// 	return err
+				// }
 			}
 		}
 		// Compare valsKV with prevSeenKeys
