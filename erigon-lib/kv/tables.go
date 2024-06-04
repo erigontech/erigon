@@ -370,6 +370,7 @@ const (
 
 	// Polygon Bridge
 	PolygonBridgeEvents = "PolygonBridgeEvents" // bridge event.ID -> event
+	PolygonBridgeMap    = "PolygonBridgeMap"    // bridge blockNum -> startEventID, endEventID
 
 	// Downloader
 	BittorrentCompletion = "BittorrentCompletion"
@@ -625,6 +626,7 @@ var ChaindataTables = []string{
 	BorCheckpoints,
 	BorCheckpointEnds,
 	PolygonBridgeEvents,
+	PolygonBridgeMap,
 	TblAccountKeys,
 	TblAccountVals,
 	TblAccountHistoryKeys,
@@ -864,6 +866,7 @@ var BorTablesCfg = TableCfg{
 	BorMilestones:       {Flags: DupSort},
 	BorMilestoneEnds:    {Flags: DupSort},
 	PolygonBridgeEvents: {Flags: DupSort},
+	PolygonBridgeMap:    {Flags: DupSort},
 }
 
 var TxpoolTablesCfg = TableCfg{}

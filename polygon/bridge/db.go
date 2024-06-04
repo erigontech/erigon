@@ -14,6 +14,7 @@ import (
 
 var databaseTablesCfg = kv.TableCfg{
 	kv.PolygonBridgeEvents: {},
+	kv.PolygonBridgeMap:    {},
 }
 
 // GetLatestEventID the latest state sync event ID in given DB, 0 if DB is empty
@@ -164,4 +165,82 @@ func GetEvents(ctx context.Context, db *polygoncommon.Database, id IDRange) ([][
 	}
 
 	return events, err
+}
+
+// Map operations
+
+func StoreMap(ctx context.Context, db *polygoncommon.Database, eventMap map[uint64]IDRange) error {
+	tx, err := db.BeginRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	kByte := make([]byte, 8)
+
+	for k, v := range eventMap {
+		r, err := v.ToBytes()
+		if err != nil {
+			return err
+		}
+
+		binary.BigEndian.PutUint64(kByte, k)
+		err = tx.Put(kv.PolygonBridgeMap, kByte, r)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func GetMap(ctx context.Context, db *polygoncommon.Database, blockNum uint64) (IDRange, error) {
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return IDRange{}, err
+	}
+	defer tx.Rollback()
+
+	kByte := make([]byte, 8)
+	binary.BigEndian.PutUint64(kByte, blockNum)
+
+	v, err := tx.GetOne(kv.PolygonBridgeMap, kByte)
+	if err != nil {
+		return IDRange{}, err
+	}
+
+	return IDRangeFromBytes(v)
+}
+
+func DumpMap(ctx context.Context, db *polygoncommon.Database) (map[uint64]IDRange, error) {
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	m := make(map[uint64]IDRange)
+
+	it, err := tx.Range(kv.PolygonBridgeMap, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	for it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			return nil, err
+		}
+
+		r, err := IDRangeFromBytes(v)
+		if err != nil {
+			return nil, err
+		}
+
+		var blockNum uint64
+		err = binary.Read(bytes.NewBuffer(k), binary.BigEndian, blockNum)
+		m[blockNum] = r
+	}
+
+	return m, nil
 }

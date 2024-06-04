@@ -21,10 +21,6 @@ import (
 
 type fetchSyncEventsType func(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error)
 
-type IDRange struct {
-	start, end uint64
-}
-
 type Bridge struct {
 	db                       *polygoncommon.Database
 	ready                    bool
@@ -63,7 +59,16 @@ func (b *Bridge) Run(ctx context.Context) error {
 	}
 
 	// start syncing
-	b.log.Debug(bridgeLogPrefix("Bridge is running"))
+	b.log.Warn(bridgeLogPrefix("Bridge is running"))
+
+	m, err := DumpMap(ctx, b.db)
+	if err != nil {
+		return err
+	}
+	b.log.Warn(fmt.Sprintf("existing map"))
+	for k, v := range m {
+		b.log.Warn("entry", "k", k, "v", v)
+	}
 
 	// get last known sync ID
 	lastEventID, err := GetLatestEventID(ctx, b.db)
@@ -99,7 +104,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 			}
 		}
 
-		b.log.Debug(bridgeLogPrefix(fmt.Sprintf("got %v new events, last event ID: %v, ready: %v", len(events), lastEventID, b.ready)))
+		b.log.Warn(bridgeLogPrefix(fmt.Sprintf("got %v new events, last event ID: %v, ready: %v", len(events), lastEventID, b.ready)))
 	}
 }
 
@@ -111,6 +116,7 @@ func (b *Bridge) Close() {
 
 // ProcessNewBlocks iterates through all blocks and constructs a map from block number to sync events
 func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) error {
+	eventMap := make(map[uint64]IDRange)
 	for _, block := range blocks {
 		// check if block is start of span
 		if b.isSprintStart(block.NumberU64()) {
@@ -124,13 +130,18 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		}
 
 		if lastDBID != 0 && lastDBID > b.lastProcessedEventID {
-			b.log.Debug(bridgeLogPrefix(fmt.Sprintf("Creating map for block %d, start ID %d, end ID %d", block.NumberU64(), b.lastProcessedEventID, lastDBID)))
-			b.eventMap[block.NumberU64()] = IDRange{b.lastProcessedEventID, lastDBID}
+			b.log.Warn(bridgeLogPrefix(fmt.Sprintf("Creating map for block %d, start ID %d, end ID %d", block.NumberU64(), b.lastProcessedEventID, lastDBID)))
+			eventMap[block.NumberU64()] = IDRange{b.lastProcessedEventID, lastDBID}
 
 			b.lastProcessedEventID = lastDBID
 		}
 
 		b.lastProcessedBlockNumber = block.NumberU64()
+	}
+
+	err := StoreMap(ctx, b.db, eventMap)
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -167,8 +178,8 @@ func (b *Bridge) Unwind(ctx context.Context, tip *types.Header) error {
 
 // GetEvents returns all sync events at blockNum
 func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) []*types.Message {
-	eventIDs, ok := b.eventMap[blockNum]
-	if !ok {
+	eventIDs, err := GetMap(ctx, b.db, blockNum)
+	if err != nil {
 		return []*types.Message{}
 	}
 
@@ -180,7 +191,7 @@ func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) []*types.Messag
 		return nil
 	}
 
-	b.log.Debug(bridgeLogPrefix(fmt.Sprintf("got %v events for block %v", len(events), blockNum)))
+	b.log.Warn(bridgeLogPrefix(fmt.Sprintf("got %v events for block %v", len(events), blockNum)))
 
 	// convert to message
 	for _, event := range events {
