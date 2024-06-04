@@ -29,7 +29,7 @@ type service struct {
 	events     *TipEvents
 
 	heimdallService heimdall.Service
-	bridge          *bridge.Bridge
+	bridge          bridge.Service
 }
 
 func NewService(

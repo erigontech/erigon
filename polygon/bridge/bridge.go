@@ -63,7 +63,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 	}
 
 	// start syncing
-	b.log.Warn(bridgeLogPrefix("Bridge is running"))
+	b.log.Debug(bridgeLogPrefix("Bridge is running"))
 
 	// get last known sync ID
 	lastEventID, err := GetLatestEventID(ctx, b.db)
@@ -99,7 +99,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 			}
 		}
 
-		b.log.Warn(bridgeLogPrefix(fmt.Sprintf("got %v new events, last event ID: %v, ready: %v", len(events), lastEventID, b.ready)))
+		b.log.Debug(bridgeLogPrefix(fmt.Sprintf("got %v new events, last event ID: %v, ready: %v", len(events), lastEventID, b.ready)))
 	}
 }
 
@@ -124,7 +124,7 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		}
 
 		if lastDBID != 0 && lastDBID > b.lastProcessedEventID {
-			b.log.Warn(bridgeLogPrefix(fmt.Sprintf("Creating map for block %d, start ID %d, end ID %d", block.NumberU64(), b.lastProcessedEventID, lastDBID)))
+			b.log.Debug(bridgeLogPrefix(fmt.Sprintf("Creating map for block %d, start ID %d, end ID %d", block.NumberU64(), b.lastProcessedEventID, lastDBID)))
 			b.eventMap[block.NumberU64()] = IDRange{b.lastProcessedEventID, lastDBID}
 
 			b.lastProcessedEventID = lastDBID
@@ -179,6 +179,8 @@ func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) []*types.Messag
 	if err != nil {
 		return nil
 	}
+
+	b.log.Debug(bridgeLogPrefix(fmt.Sprintf("got %v events for block %v", len(events), blockNum)))
 
 	// convert to message
 	for _, event := range events {

@@ -25,7 +25,7 @@ type Store interface {
 type executionClientStore struct {
 	logger        log.Logger
 	execution     ExecutionClient
-	polygonBridge bridge.EngineService
+	polygonBridge bridge.Service
 	queue         chan []*types.Block
 
 	// tasksCount includes both tasks pending in the queue and a task that was taken and hasn't finished yet
@@ -35,7 +35,7 @@ type executionClientStore struct {
 	tasksDoneSignal chan bool
 }
 
-func NewStore(logger log.Logger, execution ExecutionClient, polygonBridge bridge.EngineService) Store {
+func NewStore(logger log.Logger, execution ExecutionClient, polygonBridge bridge.Service) Store {
 	return &executionClientStore{
 		logger:          logger,
 		execution:       execution,
