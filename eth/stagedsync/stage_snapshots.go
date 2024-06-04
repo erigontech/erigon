@@ -153,9 +153,6 @@ func SpawnStageSnapshots(
 		}
 		defer tx.Rollback()
 	}
-	if useExternalTx {
-
-	}
 	if s.CurrentSyncCycle.IsInitialCycle {
 		log.Info("[dbg] FillDBFromSnapshots", "useExternalTx", useExternalTx, "s.CurrentSyncCycle.IsInitialCycle", s.CurrentSyncCycle.IsInitialCycle, "s.CurrentSyncCycle.First", s.CurrentSyncCycle.IsFirstCycle)
 	}
@@ -184,6 +181,7 @@ func SpawnStageSnapshots(
 		}
 	}
 	if !useExternalTx {
+		log.Info("[dbg] FillDBFromSnapshots commit!")
 		if err := tx.Commit(); err != nil {
 			return err
 		}
