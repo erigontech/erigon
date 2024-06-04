@@ -1236,8 +1236,6 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			}
 		}
 		for _, kv := range valsKV {
-			strippedKey := common.Copy(kv.Key[:len(kv.Key)-8])
-			stepBytes := common.Copy(kv.Key[len(kv.Key)-8:])
 			if len(kv.Value) == 0 {
 				kk, _, err := valsC.SeekExact(kv.Key)
 				if err != nil {
