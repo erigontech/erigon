@@ -1202,7 +1202,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		for _, kv := range valsKV {
 			fullKey := kv.Key[:len(kv.Key)-8]
 			if bytes.Equal(common.Hex2Bytes("913f7cE002716d5FaeBe6101216C56478Dec7b87"), fullKey) {
-				fmt.Printf("prevStep %x", kv.PrevStepBytes)
+				fmt.Printf("prevStep %x\n", kv.PrevStepBytes)
 				fmt.Println(types.DecodeAccountBytesV3(kv.Value))
 			}
 			// so stepBytes is ^step so we need to iterate from the begining down until we find the stepBytes
