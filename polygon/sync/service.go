@@ -10,7 +10,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
 	"github.com/ledgerwatch/erigon/p2p/sentry"
+	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
+	"github.com/ledgerwatch/erigon/polygon/bridge"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/polygon/p2p"
 )
@@ -27,6 +29,7 @@ type service struct {
 	events     *TipEvents
 
 	heimdallService heimdall.Service
+	bridge          bridge.Service
 }
 
 func NewService(
@@ -42,8 +45,6 @@ func NewService(
 	blockLimit uint,
 ) Service {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
-	execution := NewExecutionClient(executionClient)
-	store := NewStore(logger, execution)
 	checkpointVerifier := VerifyCheckpointHeaders
 	milestoneVerifier := VerifyMilestoneHeaders
 	blocksVerifier := VerifyBlocks
@@ -56,6 +57,10 @@ func NewService(
 		tmpDir,
 		logger,
 	)
+	execution := NewExecutionClient(executionClient)
+	polygonBridge := bridge.NewBridge(dataDir, logger, borConfig, heimdallClient.FetchStateSyncEvents, bor.GenesisContractStateReceiverABI())
+	store := NewStore(logger, execution, polygonBridge)
+
 	blockDownloader := NewBlockDownloader(
 		logger,
 		p2pService,
@@ -89,6 +94,7 @@ func NewService(
 		events:     events,
 
 		heimdallService: heimdallServiceV2,
+		bridge:          polygonBridge,
 	}
 }
 
@@ -102,6 +108,7 @@ func (s *service) Run(parentCtx context.Context) error {
 	if s.heimdallService != nil {
 		group.Go(func() error { return s.heimdallService.Run(ctx) })
 	}
+	group.Go(func() error { return s.bridge.Run(ctx) })
 	group.Go(func() error { return s.sync.Run(ctx) })
 
 	return group.Wait()
