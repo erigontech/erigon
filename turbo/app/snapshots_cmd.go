@@ -799,7 +799,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		return err
 	}
 	existBlocksToPrune := true
-	for j := 0; !existBlocksToPrune || j < 10_000; j++ { // prune happens by small steps, so need many runs
+	for j := 0; existBlocksToPrune || j < 10_000; j++ { // prune happens by small steps, so need many runs
 		err = db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 			if existBlocksToPrune, err = br.PruneAncientBlocks(tx, 100); err != nil {
 				return err
