@@ -122,7 +122,11 @@ func (d *StateDiffDomain) GetKeys() (keysToValue []KVPair) {
 	d.prevValsSlice = make([]KVPair, 0, len(d.prevValues))
 	var l2 int
 	for k, v := range d.prevValues {
-		d.prevValsSlice = append(d.prevValsSlice, KVPair{Key: []byte(k), Value: v, PrevStepBytes: d.keys[k[len(k)-8:]]})
+		d.prevValsSlice = append(d.prevValsSlice, KVPair{
+			Key:           []byte(k),
+			Value:         v,
+			PrevStepBytes: d.keys[k[:len(k)-8]],
+		})
 		l2 += len(k) + len(v) + 8
 	}
 	sort.Slice(d.prevValsSlice, func(i, j int) bool {
