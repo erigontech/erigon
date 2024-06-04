@@ -63,6 +63,7 @@ func (d *StateDiffDomain) Copy() *StateDiffDomain {
 	for k, v := range d.prevValues {
 		res.prevValues[k] = v
 	}
+	fmt.Println("prevValsSlice", len(d.prevValsSlice), len(d.prevValues))
 	return res
 }
 
