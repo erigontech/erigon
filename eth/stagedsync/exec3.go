@@ -612,7 +612,6 @@ func ExecV3(ctx context.Context,
 	changeset := &state2.StateChangeSet{
 		BeginTxIndex: doms.TxNum(),
 	}
-	fmt.Println(shouldGenerateChangesets)
 	if shouldGenerateChangesets {
 		doms.SetChangesetAccumulator(changeset)
 	}
