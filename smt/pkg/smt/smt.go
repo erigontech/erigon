@@ -41,6 +41,7 @@ type RoDB interface {
 	GetHashKey(key utils.NodeKey) (utils.NodeKey, error)
 	GetKeySource(key utils.NodeKey) ([]byte, error)
 	Get(key utils.NodeKey) (utils.NodeValue12, error)
+	GetAccountValue(key utils.NodeKey) (utils.NodeValue8, error)
 }
 
 type DebuggableDB interface {

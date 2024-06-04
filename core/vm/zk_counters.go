@@ -59,6 +59,16 @@ func (c *Counter) Clone() *Counter {
 
 func (c *Counter) Used() int { return c.used }
 
+func (c *Counter) Limit() int { return c.initialAmount }
+
+func (c *Counter) AsMap() map[string]int {
+	return map[string]int{
+		"remaining":     c.remaining,
+		"used":          c.used,
+		"initialAmount": c.initialAmount,
+	}
+}
+
 type Counters map[CounterKey]*Counter
 
 func (c Counters) UsedAsString() string {
@@ -84,6 +94,38 @@ func (c Counters) UsedAsMap() map[string]int {
 		"S":   c[S].used,
 		"D":   c[D].used,
 	}
+}
+
+func (c *Counters) GetArithmetics() *Counter {
+	return (*c)[A]
+}
+
+func (c *Counters) GetBinaries() *Counter {
+	return (*c)[B]
+}
+
+func (c *Counters) GetSHA256Hashes() *Counter {
+	return (*c)[SHA]
+}
+
+func (c *Counters) GetKeccakHashes() *Counter {
+	return (*c)[K]
+}
+
+func (c *Counters) GetMemAligns() *Counter {
+	return (*c)[M]
+}
+
+func (c *Counters) GetPoseidonHashes() *Counter {
+	return (*c)[P]
+}
+
+func (c *Counters) GetSteps() *Counter {
+	return (*c)[S]
+}
+
+func (c *Counters) GetPoseidonPaddings() *Counter {
+	return (*c)[D]
 }
 
 type CounterKey string

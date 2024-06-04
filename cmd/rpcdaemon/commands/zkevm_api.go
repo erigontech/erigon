@@ -54,6 +54,7 @@ type ZkEvmAPI interface {
 	GetLatestGlobalExitRoot(ctx context.Context) (common.Hash, error)
 	GetExitRootsByGER(ctx context.Context, globalExitRoot common.Hash) (*ZkExitRoots, error)
 	GetL2BlockInfoTree(ctx context.Context, blockNum rpc.BlockNumberOrHash) (json.RawMessage, error)
+	EstimateCounters(ctx context.Context, argsOrNil *zkevmRPCTransaction) (json.RawMessage, error)
 }
 
 // APIImpl is implementation of the ZkEvmAPI interface based on remote Db access
