@@ -72,6 +72,7 @@ func CreateEriDbBuckets(tx kv.RwTx) error {
 func NewEriDb(tx kv.RwTx) *EriDb {
 	return &EriDb{
 		tx:      tx,
+		kvTx:    tx,
 		EriRoDb: NewRoEriDb(tx),
 	}
 }
