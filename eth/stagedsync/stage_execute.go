@@ -369,12 +369,12 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 		currChangeset, ok := state2.GlobalChangesetStorage.Get(currentHash)
 		if !ok || currChangeset == nil {
 			changeset = nil
-			fmt.Println("borked")
 			break
 		}
 		if changeset == nil {
 			changeset = currChangeset.Copy()
 		} else {
+			fmt.Println("MIERGE")
 			changeset.Merge(currChangeset)
 		}
 	}
