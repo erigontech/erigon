@@ -51,6 +51,7 @@ import (
 var execStepsInDB = metrics.NewGauge(`exec_steps_in_db`) //nolint
 var execRepeats = metrics.NewCounter(`exec_repeats`)     //nolint
 var execTriggers = metrics.NewCounter(`exec_triggers`)   //nolint
+const changesetBlockRange = 256                          // Generate changeset only if execution of blocks <= changesetBlockRange
 
 func NewProgress(prevOutputBlockNum, commitThreshold uint64, workersCount int, logPrefix string, logger log.Logger) *Progress {
 	return &Progress{prevTime: time.Now(), prevOutputBlockNum: prevOutputBlockNum, commitThreshold: commitThreshold, workersCount: workersCount, logPrefix: logPrefix, logger: logger}
@@ -281,7 +282,7 @@ func ExecV3(ctx context.Context,
 
 	blockNum = doms.BlockNum()
 	outputTxNum.Store(doms.TxNum())
-	shouldGenerateChangesets := maxBlockNum-blockNum == 0
+	shouldGenerateChangesets := maxBlockNum-blockNum <= changesetBlockRange
 
 	if maxBlockNum-blockNum > 16 {
 		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
@@ -612,13 +613,13 @@ func ExecV3(ctx context.Context,
 	changeset := &state2.StateChangeSet{
 		BeginTxIndex: doms.TxNum(),
 	}
-	if shouldGenerateChangesets {
-		doms.SetChangesetAccumulator(changeset)
-	}
 
 	var b *types.Block
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
+		if shouldGenerateChangesets {
+			doms.SetChangesetAccumulator(changeset)
+		}
 		//time.Sleep(50 * time.Microsecond)
 		if !parallel {
 			select {
@@ -847,6 +848,13 @@ Loop:
 			stageProgress = blockNum
 			inputTxNum++
 		}
+		if shouldGenerateChangesets {
+			if _, err := doms.ComputeCommitment(ctx, false, blockNum, execStage.LogPrefix()); err != nil {
+				return err
+			}
+			state2.GlobalChangesetStorage.Put(b.Hash(), changeset)
+			doms.SetChangesetAccumulator(nil)
+		}
 
 		if offsetFromBlockBeginning > 0 {
 			// after history execution no offset will be required
@@ -884,9 +892,7 @@ Loop:
 				} else if !ok {
 					break Loop
 				}
-				if shouldGenerateChangesets {
-					state2.GlobalChangesetStorage.Put(b.Hash(), changeset)
-				}
+
 				t1 = time.Since(tt)
 
 				tt = time.Now()
@@ -967,10 +973,6 @@ Loop:
 			if err != nil {
 				return err
 			}
-			if shouldGenerateChangesets {
-				state2.GlobalChangesetStorage.Put(b.Hash(), changeset)
-			}
-			doms.SetChangesetAccumulator(nil)
 		} else {
 			fmt.Printf("[dbg] mmmm... do we need action here????\n")
 		}
