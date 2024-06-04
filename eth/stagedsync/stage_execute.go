@@ -367,8 +367,9 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 			return err
 		}
 		currChangeset, ok := state2.GlobalChangesetStorage.Get(currentHash)
-		if !ok {
+		if !ok || currChangeset == nil {
 			changeset = nil
+			fmt.Println("borked")
 			break
 		}
 		if changeset == nil {
