@@ -331,15 +331,26 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 	if !sd.aggTx.a.commitmentValuesTransform ||
 		len(branch) == 0 ||
 		sd.aggTx.minimaxTxNumInDomainFiles(false) == 0 ||
-		bytes.Equal(prefix, keyCommitmentState) {
+		bytes.Equal(prefix, keyCommitmentState) || ((fEndTxNum-fStartTxNum)/sd.aggTx.a.StepSize())%2 != 0 {
 
 		return branch, nil // do not transform, return as is
 	}
 
 	sto := sd.aggTx.d[kv.StorageDomain]
 	acc := sd.aggTx.d[kv.AccountsDomain]
+	com := sd.aggTx.d[kv.CommitmentDomain]
+	commItem := com.lookupFileByItsRange(fStartTxNum, fEndTxNum)
+	_ = commItem
 	storageItem := sto.lookupFileByItsRange(fStartTxNum, fEndTxNum)
+	if storageItem == nil {
+		sd.logger.Crit("storage file of steps %d-%d not found\n", fStartTxNum/sd.aggTx.a.aggregationStep, fEndTxNum/sd.aggTx.a.aggregationStep)
+		return nil, fmt.Errorf("storage file not found")
+	}
 	accountItem := acc.lookupFileByItsRange(fStartTxNum, fEndTxNum)
+	if accountItem == nil {
+		sd.logger.Crit("storage file of steps %d-%d not found\n", fStartTxNum/sd.aggTx.a.aggregationStep, fEndTxNum/sd.aggTx.a.aggregationStep)
+		return nil, fmt.Errorf("account file not found")
+	}
 	storageGetter := NewArchiveGetter(storageItem.decompressor.MakeGetter(), sto.d.compression)
 	accountGetter := NewArchiveGetter(accountItem.decompressor.MakeGetter(), acc.d.compression)
 
@@ -1055,11 +1066,12 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 
 // Evaluates commitment for processed state.
 func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, saveState bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
-	defer sdc.ResetBranchCache()
 	if dbg.DiscardCommitment() {
 		sdc.updates.List(true)
 		return nil, nil
 	}
+	sdc.ResetBranchCache()
+	defer sdc.ResetBranchCache()
 
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()

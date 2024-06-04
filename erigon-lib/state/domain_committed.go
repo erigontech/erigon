@@ -153,31 +153,25 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter ArchiveGetter,
 
 func (dt *DomainRoTx) lookupFileByItsRange(txFrom uint64, txTo uint64) *filesItem {
 	var item *filesItem
-	items := make([]*filesItem, 0)
 	for _, f := range dt.files {
 		if f.startTxNum == txFrom && f.endTxNum == txTo {
-			items = append(items, f.src)
 			item = f.src
 			break
 		}
 	}
-	//if item == nil {
-	dt.d.dirtyFiles.Walk(func(files []*filesItem) bool {
-		for _, f := range files {
-			if f.startTxNum == txFrom && f.endTxNum == txTo {
-				item = f
-				items = append(items, f)
-				dt.d.logger.Info("lookupFileByItsRange: dirty file found", "path", f.decompressor.FileName())
-				return false
+	if item == nil {
+		dt.d.dirtyFiles.Walk(func(files []*filesItem) bool {
+			for _, f := range files {
+				if f.startTxNum == txFrom && f.endTxNum == txTo {
+					item = f
+					dt.d.logger.Info("lookupFileByItsRange: dirty file found", "path", f.decompressor.FileName())
+					return false
+				}
 			}
-		}
-		return true
-	})
-	//}
-
-	if len(items) > 0 {
-		dt.d.logger.Info("lookupFileByItsRange: more similar items found", "size", len(items))
+			return true
+		})
 	}
+
 	if item == nil {
 		fileStepsss := ""
 		for _, item := range dt.d.dirtyFiles.Items() {
@@ -239,7 +233,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(accounts, storage *DomainRoTx
 	}
 
 	return func(valBuf []byte, keyFromTxNum, keyEndTxNum uint64) (transValBuf []byte, err error) {
-		if !dt.d.replaceKeysInValues || len(valBuf) == 0 {
+		if !dt.d.replaceKeysInValues || len(valBuf) == 0 || ((keyEndTxNum-keyFromTxNum)/dt.d.aggregationStep)%2 != 0 {
 			return valBuf, nil
 		}
 		si := storage.lookupFileByItsRange(keyFromTxNum, keyEndTxNum)
@@ -261,7 +255,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(accounts, storage *DomainRoTx
 		sig := NewArchiveGetter(si.decompressor.MakeGetter(), storage.d.compression)
 		aig := NewArchiveGetter(ai.decompressor.MakeGetter(), accounts.d.compression)
 		ms := NewArchiveGetter(mergedStorage.decompressor.MakeGetter(), storage.d.compression)
-		ma := NewArchiveGetter(mergedAccount.decompressor.MakeGetter(), storage.d.compression)
+		ma := NewArchiveGetter(mergedAccount.decompressor.MakeGetter(), accounts.d.compression)
 
 		replacer := func(key []byte, isStorage bool) ([]byte, error) {
 			var found bool
