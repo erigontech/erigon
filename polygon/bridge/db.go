@@ -237,8 +237,7 @@ func DumpMap(ctx context.Context, db *polygoncommon.Database) (map[uint64]IDRang
 			return nil, err
 		}
 
-		var blockNum uint64
-		err = binary.Read(bytes.NewBuffer(k), binary.BigEndian, blockNum)
+		blockNum := binary.BigEndian.Uint64(k)
 		m[blockNum] = r
 	}
 
