@@ -1035,6 +1035,8 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (existBlocks
 		return existBlocksToPrune, err
 	}
 	if firstK == nil { //nothing to delete
+		existBlocksToPrune = false
+
 		return existBlocksToPrune, err
 	}
 	blockFrom := binary.BigEndian.Uint64(firstK)
