@@ -3,7 +3,6 @@ package state
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"sort"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -76,12 +75,8 @@ func (d *StateDiffDomain) Merge(older *StateDiffDomain) {
 	if d.prevValues == nil {
 		d.prevValues = make(map[string][]byte)
 	}
-	fmt.Println("older.keys", len(older.keys))
 
 	for k, v := range older.keys {
-		if bytes.Equal([]byte(k), common.Hex2Bytes("0x913f7cE002716d5FaeBe6101216C56478Dec7b87")) {
-			fmt.Println("key", k)
-		}
 		d.keys[k] = v
 	}
 
