@@ -480,7 +480,6 @@ func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte, origin
 		panic("History value is too large while largeValues=false")
 	}
 
-	// key -> {txnums, value}
 	if err := w.historyVals.Collect(historyKey1, historyVal); err != nil {
 		return err
 	}

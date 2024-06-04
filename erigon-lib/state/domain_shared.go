@@ -115,10 +115,8 @@ func (sd *SharedDomains) SetChangesetAccumulator(acc *StateChangeSet) {
 	sd.changesAccumulator = acc
 	for idx := range sd.dWriter {
 		if sd.changesAccumulator == nil {
-			fmt.Println("UNSET")
 			sd.dWriter[idx].diff = nil
 		} else {
-			fmt.Println("SET")
 			sd.dWriter[idx].diff = &sd.changesAccumulator.Diffs[idx]
 		}
 	}
