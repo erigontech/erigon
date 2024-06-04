@@ -166,7 +166,7 @@ test: test-erigon-lib
 	$(GOTEST) --timeout 10m -coverprofile=coverage.out
 
 ## test-integration:                  run integration tests with a 30m timeout
-test-integration: 
+test-integration: test-erigon-lib
 	$(GOTEST) --timeout 240m -tags $(BUILD_TAGS),integration
 
 ## lint-deps:                         install lint dependencies
