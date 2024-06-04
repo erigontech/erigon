@@ -618,7 +618,7 @@ Loop:
 			BeginTxIndex: doms.TxNum(),
 		}
 		if shouldGenerateChangesets {
-			fmt.Println("XA")
+			fmt.Println("XA", blockNum)
 			doms.SetChangesetAccumulator(changeset)
 		}
 		//time.Sleep(50 * time.Microsecond)
@@ -853,10 +853,6 @@ Loop:
 			if _, err := doms.ComputeCommitment(ctx, false, blockNum, execStage.LogPrefix()); err != nil {
 				return err
 			}
-			for _, d := range changeset.Diffs {
-				d.GetKeys()
-			}
-			fmt.Println("changeset", changeset.BeginTxIndex, doms.TxNum())
 			state2.GlobalChangesetStorage.Put(b.Hash(), changeset)
 			doms.SetChangesetAccumulator(nil)
 		}
