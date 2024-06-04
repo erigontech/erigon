@@ -390,6 +390,7 @@ func (api *ZkEvmAPIImpl) GetFullBlockByHash(ctx context.Context, hash libcommon.
 	return api.populateBlockDetail(tx, ctx, baseBlock, fullTx)
 }
 
+// zkevm_getExitRootsByGER returns the exit roots accordingly to the provided Global Exit Root
 func (api *ZkEvmAPIImpl) GetExitRootsByGER(ctx context.Context, globalExitRoot common.Hash) (*ZkExitRoots, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
@@ -401,6 +402,10 @@ func (api *ZkEvmAPIImpl) GetExitRootsByGER(ctx context.Context, globalExitRoot c
 	infoTreeUpdate, err := hermezDb.GetL1InfoTreeUpdateByGer(globalExitRoot)
 	if err != nil {
 		return nil, err
+	}
+
+	if infoTreeUpdate == nil {
+		return nil, nil
 	}
 
 	return &ZkExitRoots{
