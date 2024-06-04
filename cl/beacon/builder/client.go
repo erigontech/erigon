@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
+	"github.com/ledgerwatch/log/v3"
 )
 
 var _ BuilderClient = &builderClient{}
@@ -18,20 +20,29 @@ var _ BuilderClient = &builderClient{}
 type builderClient struct {
 	// ref: https://ethereum.github.io/builder-specs/#/
 	httpClient *http.Client
-	baseUrl    string
+	url        *url.URL
 }
 
 func NewBlockBuilderClient(baseUrl string) *builderClient {
-	httpC := &http.Client{}
-	return &builderClient{
-		httpClient: httpC,
-		baseUrl:    baseUrl,
+	u, err := url.Parse(baseUrl)
+	if err != nil {
+		panic(err)
 	}
+	c := &builderClient{
+		httpClient: &http.Client{},
+		url:        u,
+	}
+	if err := c.GetStatus(context.Background()); err != nil {
+		log.Crit("mev relay is not ready", "url", baseUrl, "err", err)
+	}
+	log.Info("Builder client is ready", "url", baseUrl)
+	return c
 }
 
 func (b *builderClient) RegisterValidator(ctx context.Context, registers []*cltypes.ValidatorRegistration) error {
 	// https://ethereum.github.io/builder-specs/#/Builder/registerValidator
-	url := b.baseUrl + "/eth/v1/builder/validators"
+	path := "/eth/v1/builder/validators"
+	url := b.url.JoinPath(path).String()
 	payload, err := json.Marshal(registers)
 	if err != nil {
 		return err
@@ -42,7 +53,8 @@ func (b *builderClient) RegisterValidator(ctx context.Context, registers []*clty
 
 func (b *builderClient) GetExecutionPayloadHeader(ctx context.Context, slot int64, parentHash common.Hash, pubKey common.Bytes48) (*ExecutionPayloadHeader, error) {
 	// https://ethereum.github.io/builder-specs/#/Builder/getHeader
-	url := fmt.Sprintf("%s/eth/v1/builder/header/%d/%s/%s", b.baseUrl, slot, parentHash.Hex(), pubKey.Hex())
+	path := fmt.Sprintf("/eth/v1/builder/header/%d/%s/%s", slot, parentHash.Hex(), pubKey.Hex())
+	url := b.url.JoinPath(path).String()
 	header, err := httpCall[ExecutionPayloadHeader](ctx, b.httpClient, http.MethodGet, url, nil, nil)
 	if err != nil {
 		return nil, err
@@ -52,7 +64,8 @@ func (b *builderClient) GetExecutionPayloadHeader(ctx context.Context, slot int6
 
 func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.SignedBlindedBeaconBlock) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, error) {
 	// https://ethereum.github.io/builder-specs/#/Builder/submitBlindedBlocks
-	path := b.baseUrl + "/eth/v1/builder/blinded_blocks"
+	path := "/eth/v1/builder/blinded_blocks"
+	url := b.url.JoinPath(path).String()
 	payload, err := json.Marshal(block)
 	if err != nil {
 		return nil, nil, err
@@ -60,7 +73,7 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 	headers := map[string]string{
 		"Eth-Consensus-Version": block.Version().String(),
 	}
-	resp, err := httpCall[BlindedBlockResponse](ctx, b.httpClient, http.MethodPost, path, headers, bytes.NewBuffer(payload))
+	resp, err := httpCall[BlindedBlockResponse](ctx, b.httpClient, http.MethodPost, url, headers, bytes.NewBuffer(payload))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -88,7 +101,8 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 }
 
 func (b *builderClient) GetStatus(ctx context.Context) error {
-	url := b.baseUrl + "/eth/v1/builder/status"
+	path := "/eth/v1/builder/status"
+	url := b.url.JoinPath(path).String()
 	_, err := httpCall[any](ctx, b.httpClient, http.MethodGet, url, nil, nil)
 	return err
 }
@@ -118,7 +132,9 @@ func httpCall[T any](ctx context.Context, client *http.Client, method, url strin
 	}
 	// read response body
 	var body T
-	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(response.Body).Decode(&body); err == io.EOF {
+		return nil, nil
+	} else if err != nil {
 		return nil, err
 	}
 	return &body, nil

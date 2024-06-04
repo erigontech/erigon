@@ -20,6 +20,7 @@ var CliFlags = []cli.Flag{
 	&RunEngineAPI,
 	&EngineApiHostFlag,
 	&EngineApiPortFlag,
+	&MevRelayUrl,
 	&JwtSecret,
 	&utils.DataDirFlag,
 	&utils.BeaconApiAllowCredentialsFlag,
