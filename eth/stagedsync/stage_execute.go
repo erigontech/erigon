@@ -372,10 +372,10 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 			break
 		}
 		if changeset == nil {
-			fmt.Println("COPY", currentHash)
+			fmt.Println("COPY", currentHash, currentBlock)
 			changeset = currChangeset.Copy()
 		} else {
-			fmt.Println("MIERGE", currentHash)
+			fmt.Println("MIERGE", currentHash, currentBlock)
 			changeset.Merge(currChangeset)
 		}
 	}
