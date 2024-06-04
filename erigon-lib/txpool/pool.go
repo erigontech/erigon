@@ -835,10 +835,8 @@ func toBlobs(_blobs [][]byte) []gokzg4844.Blob {
 
 func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.CacheView) txpoolcfg.DiscardReason {
 	isShanghai := p.isShanghai() || p.isAgra()
-	if isShanghai {
-		if txn.DataLen > fixedgas.MaxInitCodeSize {
-			return txpoolcfg.InitCodeTooLarge
-		}
+	if isShanghai && txn.Creation && txn.DataLen > fixedgas.MaxInitCodeSize {
+		return txpoolcfg.InitCodeTooLarge // EIP-3860
 	}
 	if txn.Type == types.BlobTxType {
 		if !p.isCancun() {
