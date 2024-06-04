@@ -904,7 +904,7 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader servic
 	// Parent's total difficulty
 	parentTd, err := rawdb.ReadTd(db, header.ParentHash, blockHeight-1)
 	if err != nil || parentTd == nil {
-		return nil, fmt.Errorf("[%s] 1parent's total difficulty not found with hash %x and height %d for header %x %d: %v", hi.logPrefix, header.ParentHash, blockHeight-1, hash, blockHeight, err)
+		return nil, fmt.Errorf("[%s] 1parent's total difficulty not found with hash %x and height %d for header %x %d: %v, stack: %s", hi.logPrefix, header.ParentHash, blockHeight-1, hash, blockHeight, err, dbg.Stack())
 	}
 	// Calculate total difficulty of this header using parent's total difficulty
 	td = new(big.Int).Add(parentTd, header.Difficulty)
