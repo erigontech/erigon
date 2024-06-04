@@ -44,8 +44,6 @@ func NewService(
 	executionClient executionproto.ExecutionClient,
 ) Service {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
-	execution := NewExecutionClient(executionClient)
-	store := NewStore(logger, execution)
 	checkpointVerifier := VerifyCheckpointHeaders
 	milestoneVerifier := VerifyMilestoneHeaders
 	blocksVerifier := VerifyBlocks
@@ -58,13 +56,14 @@ func NewService(
 		tmpDir,
 		logger,
 	)
-
+	execution := NewExecutionClient(executionClient)
 	polygonBridge := bridge.NewBridge(dataDir, logger, borConfig, heimdallClient.FetchStateSyncEvents, bor.GenesisContractStateReceiverABI())
+	store := NewStore(logger, execution, polygonBridge)
+
 	blockDownloader := NewBlockDownloader(
 		logger,
 		p2pService,
 		heimdallService,
-		polygonBridge,
 		checkpointVerifier,
 		milestoneVerifier,
 		blocksVerifier,

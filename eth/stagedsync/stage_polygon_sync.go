@@ -62,7 +62,6 @@ func NewPolygonSyncStageCfg(
 		logger,
 		p2pService,
 		heimdallService,
-		polygonBridge,
 		checkpointVerifier,
 		milestoneVerifier,
 		blocksVerifier,
@@ -311,6 +310,11 @@ func (s *polygonSyncStageService) handleInsertBlocks(ctx context.Context, tx kv.
 		if err := s.downloadStateSyncEvents(ctx, tx, header, stateSyncEventsLogTicker); err != nil {
 			return err
 		}
+	}
+
+	err := s.bridge.ProcessNewBlocks(ctx, blocks)
+	if err != nil {
+		return err
 	}
 
 	return nil
