@@ -172,7 +172,6 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 		latestValidHash = hash
 		return
 	}
-	return engine_types.ValidStatus, header.Hash(), nil, nil
 
 	log.Debug("Execution ForkValidator.ValidatePayload", "extendCanonical", extendCanonical)
 	if extendCanonical {
