@@ -20,13 +20,13 @@ Current status of cdk-erigon's support for running various chains and fork ids:
 ## Dynamic Chain Configuration
 To use chains other than the defaults above, a set of configuration files can be supplied to run any chain.
 
-1. Create a directory `~/dynamic-configs` (in the user home directory)
-2. Ensure your chain name starts with the word `dynamic` e.g. `dynamic-mynetwork`
-3. Create 3 files in dynamic configs (examples for Cardona in `zk/examples/dynamic-configs`, copy these into your dynamic-configs folder and edit as required)
+1. Ensure your chain name starts with the word `dynamic` e.g. `dynamic-mynetwork`
+3. Create 3 files for dynamic configs (examples for Cardona in `zk/examples/dynamic-configs`, edit as required)
    - `dynamic-{network}-allocs.json` - the allocs file
    - `dynamic-{network}-chainspec.json` - the chainspec file
    - `dynamic-{network}-conf.json` - an additional configuration file
    - `dynamic-{network}.yaml` - the run config file for erigon.  You can use any of the example yaml files at the root of the repo as a base and edit as required, but ensure the `chain` field is in the format `dynamic-{network}` and matches the names of the config files above.
+4. Place the erigon config file along with the other files in the directory of your choice, for example `dynamic-mynetwork`.
 
 **Tip**: if you have allocs in the format from Polygon when originally launching the network you can save this file to the root of the cdk-erigon code
 base and run `go run cmd/hack/allocs/main.go [your-file-name]` to convert it to the format needed by erigon, this will form the `dynamic-{network}-allocs.json` file.
@@ -38,9 +38,9 @@ base and run `go run cmd/hack/allocs/main.go [your-file-name]` to convert it to 
 - zkevm.address-rollup => deploy_output.json => `polygonRollupManagerAddress`
 - zkevm.address-ger-manager => deploy_output.json => `polygonZkEVMGlobalExitRootAddress`
 
-Mount point for this folder on docker container: `~/dynamic-configs` (home directory of erigon user)
+Mount the directory containing the config files on docker container: `/dynamic-mynetwork` for example
 
-To use the new config when starting erigon use the `--config` flag with the path to the config file e.g. `--config="/path/to/home-dir/dynamic-networks/dynamic-mynetwork.yaml"`
+To use the new config when starting erigon use the `--cfg` flag with the path to the config file e.g. `--cfg="/dynamic-mynetwork/dynamic-mynetwork.yaml"`
 
 ## Prereqs
 In order to use the optimal vectorized poseidon hashing for the Sparse Merkle Tree, on x86 the following packages are required (for Apple silicon it will fall back to the iden3 library and as such these dependencies are not required in that case.

@@ -1,17 +1,17 @@
 package core
 
 import (
+	"encoding/json"
+	"fmt"
 	"math/big"
+	"os"
+	"path"
 
 	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/smt/pkg/smt"
 	"github.com/ledgerwatch/erigon/zkevm/hex"
-	"fmt"
-	"os"
-	"path"
-	"encoding/json"
 )
 
 func HermezMainnetGenesisBlock() *types.Genesis {
@@ -147,13 +147,7 @@ func DynamicGenesisBlock(chain string) *types.Genesis {
 }
 
 func dynamicPrealloc(ch string) types.GenesisAlloc {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		panic(err)
-	}
-
-	basePath := path.Join(homeDir, "dynamic-configs")
-	filename := path.Join(basePath, ch+"-allocs.json")
+	filename := path.Join(params.DynamicChainConfigPath, ch+"-allocs.json")
 
 	f, err := os.Open(filename)
 	if err != nil {
