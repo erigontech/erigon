@@ -825,6 +825,7 @@ func NewPolygonSyncStages(
 			blockReader,
 			stopNode,
 			bor.GenesisContractStateReceiverABI(),
+			config.LoopBlockLimit,
 		),
 		stagedsync.StageSendersCfg(
 			db,
