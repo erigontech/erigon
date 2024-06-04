@@ -1220,30 +1220,21 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		}
 		defer valsC.Close()
 		_ = keysKV
-		// for _, kv := range keysKV {
-		// 	// so stepBytes is ^step so we need to iterate from the beggining down until we find the stepBytes
-		// 	for k, v, err := keysCursor.Seek(kv.Key); k != nil; k, v, err = keysCursor.NextDup() {
-		// 		if err != nil {
-		// 			return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
-		// 		}
-		// 		if !bytes.Equal(v, kv.Value) {
-		// 			continue
-		// 		}
+		for _, kv := range keysKV {
+			// so stepBytes is ^step so we need to iterate from the beggining down until we find the stepBytes
+			for k, v, err := keysCursor.Seek(kv.Key); k != nil; k, v, err = keysCursor.NextDup() {
+				if err != nil {
+					return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
+				}
+				if bytes.Equal(v, kv.Value) { // remove all values up to the previous step
+					break
+				}
 
-		// 		kk, _, err := valsC.SeekExact(common.Append(k, stepBytes))
-		// 		if err != nil {
-		// 			return err
-		// 		}
-		// 		if kk != nil {
-		// 			if err = valsC.DeleteCurrent(); err != nil {
-		// 				return err
-		// 			}
-		// 		}
-		// 		if err := keysCursor.DeleteCurrent(); err != nil {
-		// 			return err
-		// 		}
-		// 	}
-		// }
+				if err := keysCursor.DeleteCurrent(); err != nil {
+					return err
+				}
+			}
+		}
 		for _, kv := range valsKV {
 			strippedKey := common.Copy(kv.Key[:len(kv.Key)-8])
 			stepBytes := common.Copy(kv.Key[len(kv.Key)-8:])
@@ -1257,13 +1248,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 						return err
 					}
 				}
-				// If we delete the entry here, we also need to delete it from the keys table
-
-				if err := keysCursor.DeleteExact(strippedKey, stepBytes); err != nil {
-					return err
-				}
 				prevDeletedKeys1[dt.d.valsTable] = append(prevDeletedKeys1[dt.d.valsTable], KVPair{Key: kv.Key})
-				prevDeletedKeys2[dt.d.valsTable] = append(prevDeletedKeys2[dt.d.valsTable], KVPair{Key: strippedKey, Value: stepBytes})
 			} else {
 				if err := rwTx.Put(d.valsTable, kv.Key, kv.Value); err != nil {
 					return err
