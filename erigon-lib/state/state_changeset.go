@@ -3,6 +3,7 @@ package state
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"sort"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -122,12 +123,14 @@ func (d *StateDiffDomain) GetKeys() (keysToSteps []KVPair, keysToValue []KVPair)
 	}
 	d.keysSlice = make([]KVPair, 0, len(d.keys))
 	d.prevValsSlice = make([]KVPair, 0, len(d.prevValues))
-
+	var l1, l2 int
 	for k, v := range d.keys {
 		d.keysSlice = append(d.keysSlice, KVPair{Key: []byte(k), Value: v})
+		l1 += len(k) + len(v)
 	}
 	for k, v := range d.prevValues {
 		d.prevValsSlice = append(d.prevValsSlice, KVPair{Key: []byte(k), Value: v})
+		l2 += len(k) + len(v)
 	}
 	sort.Slice(d.keysSlice, func(i, j int) bool {
 		return string(d.keysSlice[i].Key) < string(d.keysSlice[j].Key)
@@ -135,6 +138,7 @@ func (d *StateDiffDomain) GetKeys() (keysToSteps []KVPair, keysToValue []KVPair)
 	sort.Slice(d.prevValsSlice, func(i, j int) bool {
 		return string(d.prevValsSlice[i].Key) < string(d.prevValsSlice[j].Key)
 	})
+	fmt.Println("keysSlice", l1, "prevValsSlice", l2)
 
 	return d.keysSlice, d.prevValsSlice
 }

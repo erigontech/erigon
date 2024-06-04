@@ -1200,7 +1200,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		defer valsC.Close()
 		_ = keysKV
 		for _, kv := range keysKV {
-			// so stepBytes is ^step so we need to iterate from the beggining down until we find the stepBytes
+			// so stepBytes is ^step so we need to iterate from the begining down until we find the stepBytes
 			for k, v, err := keysCursor.Seek(kv.Key); k != nil; k, v, err = keysCursor.NextDup() {
 				if err != nil {
 					return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
