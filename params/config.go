@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"os"
 	"path"
 
 	erigonchain "github.com/gateway-fm/cdk-erigon-lib/chain"
@@ -28,7 +29,6 @@ import (
 	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/params/networkname"
-	"os"
 	"github.com/ledgerwatch/erigon/zk/zkchainconfig"
 )
 
@@ -193,6 +193,8 @@ var (
 	}
 
 	TestRules = TestChainConfig.Rules(0, 0)
+
+	DynamicChainConfigPath string
 )
 
 type ConsensusSnapshotConfig struct {
@@ -206,13 +208,7 @@ type ConsensusSnapshotConfig struct {
 const cliquePath = "clique"
 
 func DynamicChainConfig(ch string) *chain.Config {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		panic(err)
-	}
-
-	basePath := path.Join(homeDir, "dynamic-configs")
-	filename := path.Join(basePath, ch+"-chainspec.json")
+	filename := path.Join(DynamicChainConfigPath, ch+"-chainspec.json")
 
 	f, err := os.Open(filename)
 	if err != nil {
