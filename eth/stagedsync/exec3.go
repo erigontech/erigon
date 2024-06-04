@@ -850,7 +850,7 @@ Loop:
 			inputTxNum++
 		}
 		if shouldGenerateChangesets {
-			if _, err := doms.ComputeCommitment(ctx, false, blockNum, execStage.LogPrefix()); err != nil {
+			if _, err := doms.ComputeCommitment(ctx, true, blockNum, execStage.LogPrefix()); err != nil {
 				return err
 			}
 			for _, d := range changeset.Diffs {
