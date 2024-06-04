@@ -39,7 +39,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/tests"
-	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
 var stateTestCommand = cli.Command{
@@ -163,15 +162,7 @@ func aggregateResultsFromStateTests(
 			// Run the test and aggregate the result
 			result := &StatetestResult{Name: key, Fork: st.Fork, Pass: true}
 
-			var root libcommon.Hash
-			var calcRootErr error
-
-			statedb, err := test.Run(tx, st, cfg)
-			// print state root for evmlab tracing
-			root, calcRootErr = trie.CalcRoot("", tx)
-			if err == nil && calcRootErr != nil {
-				err = calcRootErr
-			}
+			statedb, root, err := test.Run(tx, st, cfg)
 			if err != nil {
 				// Test failed, mark as so and dump any state to aid debugging
 				result.Pass, result.Error = false, err.Error()
