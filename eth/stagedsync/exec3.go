@@ -848,9 +848,12 @@ Loop:
 			inputTxNum++
 		}
 		if shouldGenerateChangesets {
+			aggTx := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+			aggTx.RestrictSubsetFileDeletions(true)
 			if _, err := doms.ComputeCommitment(ctx, true, blockNum, execStage.LogPrefix()); err != nil {
 				return err
 			}
+			aggTx.RestrictSubsetFileDeletions(false)
 			for _, d := range changeset.Diffs {
 				d.GetKeys()
 			}
