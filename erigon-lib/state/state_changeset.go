@@ -80,7 +80,7 @@ func (d *StateDiffDomain) Merge(older *StateDiffDomain) {
 
 	for k, v := range older.keys {
 		if len(k) == 20 {
-			fmt.Println("key", k)
+			fmt.Println("key", common.BytesToAddress([]byte(k)))
 		}
 		if bytes.Equal([]byte(k), common.Hex2Bytes("0x722531F1EB8a0Cb8a6E223F297d9F942600FcC9d")) {
 			fmt.Println("key", k)
