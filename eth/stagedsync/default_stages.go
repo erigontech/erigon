@@ -27,6 +27,7 @@ func DefaultStages(ctx context.Context,
 	txLookup TxLookupCfg,
 	finish FinishCfg,
 	test bool) []*Stage {
+
 	return []*Stage{
 		{
 			ID:          stages.Snapshots,
