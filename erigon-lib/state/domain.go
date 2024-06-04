@@ -33,6 +33,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv/backup"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
+	"github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/log/v3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
@@ -1200,6 +1201,10 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		// First revert keys
 		for _, kv := range valsKV {
 			fullKey := kv.Key[:len(kv.Key)-8]
+			if bytes.Equal(common.Hex2Bytes("0x913f7cE002716d5FaeBe6101216C56478Dec7b87"), fullKey) {
+				fmt.Printf("prevStep %x", kv.PrevStepBytes)
+				fmt.Println(types.DecodeAccountBytesV3(kv.Value))
+			}
 			// so stepBytes is ^step so we need to iterate from the begining down until we find the stepBytes
 			for k, v, err := keysCursor.SeekExact(fullKey); k != nil; k, v, err = keysCursor.NextDup() {
 				if err != nil {
