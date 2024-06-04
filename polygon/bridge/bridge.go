@@ -163,17 +163,7 @@ func (b *Bridge) Synchronize(ctx context.Context, tip *types.Header) error {
 
 // Unwind deletes map entries till tip
 func (b *Bridge) Unwind(ctx context.Context, tip *types.Header) error {
-	for k := range b.eventMap {
-		if k <= tip.Number.Uint64() {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-
-			delete(b.eventMap, k)
-		}
-	}
-
-	return nil
+	return UnwindMap(ctx, b.db, tip.Number.Uint64())
 }
 
 // GetEvents returns all sync events at blockNum
