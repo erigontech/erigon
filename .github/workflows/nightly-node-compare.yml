@@ -30,7 +30,7 @@ jobs:
           go get github.com/google/go-cmp/cmp
 
       - name: Build the compare_blocks binary
-        run: go build -o compare_blocks compare_blocks.go
+        run: go build -o compare_blocks zk/debug_tools/nightly-block-compare/main.go
 
       - name: Run block comparison
         run: |
