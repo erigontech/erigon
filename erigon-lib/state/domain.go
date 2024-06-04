@@ -1168,18 +1168,26 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwindTo uint64, diff *StateDiffDomain) error {
 	d := dt.d
 	//fmt.Printf("[domain][%s] unwinding domain to txNum=%d, step %d\n", d.filenameBase, txNumUnwindTo, step)
-	histRng, err := dt.ht.HistoryRange(int(txNumUnwindTo), -1, order.Asc, -1, rwTx)
-	if err != nil {
-		return fmt.Errorf("historyRange %s: %w", dt.ht.h.filenameBase, err)
-	}
+
 	sf := time.Now()
 	defer mxUnwindTook.ObserveDuration(sf)
 	mxRunningUnwind.Inc()
 	defer mxRunningUnwind.Dec()
-	defer histRng.Close()
 	restored := dt.NewWriter()
 	logEvery := time.NewTicker(time.Second * 30)
 	defer logEvery.Stop()
+	if txNumUnwindTo == 0 {
+		if err := rwTx.ClearBucket(d.keysTable); err != nil {
+			return err
+		}
+		if err := rwTx.ClearBucket(d.valsTable); err != nil {
+			return err
+		}
+		if _, err := dt.ht.Prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, false, logEvery); err != nil {
+			return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dt.d.filenameBase, txNumUnwindTo, step, err)
+		}
+		return nil
+	}
 
 	stepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
@@ -1192,11 +1200,6 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		}
 		defer keysCursor.Close()
 
-		valsC, err := rwTx.RwCursor(d.valsTable)
-		if err != nil {
-			return err
-		}
-		defer valsC.Close()
 		// First revert keys
 		for _, kv := range valsKV {
 			fullKey := kv.Key[:len(kv.Key)-8]
@@ -1231,6 +1234,12 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		}
 		return nil
 	}
+
+	histRng, err := dt.ht.HistoryRange(int(txNumUnwindTo), -1, order.Asc, -1, rwTx)
+	if err != nil {
+		return fmt.Errorf("historyRange %s: %w", dt.ht.h.filenameBase, err)
+	}
+	defer histRng.Close()
 
 	keysCursor, err := dt.keysCursor(rwTx)
 	if err != nil {
