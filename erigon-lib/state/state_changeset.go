@@ -148,7 +148,6 @@ func NewChangesetStorage() *ChangesetStorage {
 
 func (s *ChangesetStorage) Get(hash common.Hash) (*StateChangeSet, bool) {
 	v, ok := s.st.Get(hash)
-	s.st.Remove(hash)
 	return v, ok
 }
 
