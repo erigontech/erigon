@@ -164,7 +164,6 @@ func (dt *DomainRoTx) lookupFileByItsRange(txFrom uint64, txTo uint64) *filesIte
 			for _, f := range files {
 				if f.startTxNum == txFrom && f.endTxNum == txTo {
 					item = f
-					dt.d.logger.Info("lookupFileByItsRange: dirty file found", "path", f.decompressor.FileName())
 					return false
 				}
 			}
