@@ -75,7 +75,7 @@ func SpawnStageDataStreamCatchup(
 }
 
 func CatchupDatastream(logPrefix string, tx kv.RwTx, stream *datastreamer.StreamServer, chainId uint64, streamVersion int) (uint64, error) {
-	srv := server.NewDataStreamServer(stream, chainId, server.StandardOperationMode)
+	srv := server.NewDataStreamServer(stream, chainId)
 	reader := hermez_db.NewHermezDbReader(tx)
 
 	// get the latest verified batch number
