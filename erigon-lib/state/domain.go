@@ -1201,7 +1201,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		// First revert keys
 		for _, kv := range valsKV {
 			fullKey := kv.Key[:len(kv.Key)-8]
-			if bytes.Equal(common.Hex2Bytes("0x913f7cE002716d5FaeBe6101216C56478Dec7b87"), fullKey) {
+			if bytes.Equal(common.Hex2Bytes("0x722531F1EB8a0Cb8a6E223F297d9F942600FcC9d"), fullKey) {
 				fmt.Printf("prevStep %x", kv.PrevStepBytes)
 				fmt.Println(types.DecodeAccountBytesV3(kv.Value))
 			}
