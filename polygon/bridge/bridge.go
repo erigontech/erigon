@@ -39,16 +39,6 @@ type Bridge struct {
 	fetchSyncEvents    fetchSyncEventsType
 }
 
-type Config struct {
-	logger             log.Logger
-	borConfig          *borcfg.BorConfig
-	stateClientAddress libcommon.Address
-	stateReceiverABI   abi.ABI
-	fetchSyncEvents    fetchSyncEventsType
-
-	dataDir string
-}
-
 func NewBridge(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, fetchSyncEvents fetchSyncEventsType, stateReceiverABI abi.ABI) *Bridge {
 	// create new db
 	db := polygoncommon.NewDatabase(dataDir, logger)
