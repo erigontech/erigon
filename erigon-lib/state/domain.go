@@ -1206,7 +1206,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 				if err != nil {
 					return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
 				}
-				if bytes.Equal(v, kv.PrevStepBytes) { // remove all values up to the previous step
+				if bytes.Compare(v, kv.PrevStepBytes) >= 0 { // remove all values up to the previous step
 					break
 				}
 
