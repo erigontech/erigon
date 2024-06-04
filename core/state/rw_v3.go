@@ -275,7 +275,6 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwi
 	stateChanges := etl.NewCollector("", "", etl.NewOldestEntryBuffer(etl.BufferOptimalSize), rs.logger)
 	defer stateChanges.Close()
 	stateChanges.SortAndFlushInBackground(true)
-	start := time.Now()
 	if changeset == nil {
 		ttx := tx.(kv.TemporalTx)
 		// todo these updates could be collected during rs.domains.Unwind (as passed collect function eg)
