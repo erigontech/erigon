@@ -1186,7 +1186,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	binary.BigEndian.PutUint64(stepBytes, ^step)
 	// Attempt to use the diff to unwind the domain
 	if diff != nil {
-		keysKV, valsKV := diff.GetKeys()
+		valsKV := diff.GetKeys()
 		keysCursor, err := rwTx.RwCursorDupSort(d.keysTable)
 		if err != nil {
 			return fmt.Errorf("create %s domain delete cursor: %w", d.filenameBase, err)
@@ -1198,14 +1198,15 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			return err
 		}
 		defer valsC.Close()
-		_ = keysKV
-		for _, kv := range keysKV {
+		// First revert keys
+		for _, kv := range valsKV {
+			fullKey := kv.Key[:len(kv.Key)-8]
 			// so stepBytes is ^step so we need to iterate from the begining down until we find the stepBytes
-			for k, v, err := keysCursor.Seek(kv.Key); k != nil; k, v, err = keysCursor.NextDup() {
+			for k, v, err := keysCursor.SeekExact(fullKey); k != nil; k, v, err = keysCursor.NextDup() {
 				if err != nil {
 					return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
 				}
-				if bytes.Equal(v, kv.Value) { // remove all values up to the previous step
+				if bytes.Equal(v, kv.PrevStepBytes) { // remove all values up to the previous step
 					break
 				}
 

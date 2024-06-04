@@ -40,8 +40,9 @@ func (s *StateChangeSet) Merge(older *StateChangeSet) {
 }
 
 type KVPair struct {
-	Key   []byte
-	Value []byte
+	Key           []byte
+	Value         []byte
+	PrevStepBytes []byte
 }
 
 // StateDiffDomain represents a domain of state changes.
@@ -49,7 +50,6 @@ type StateDiffDomain struct {
 	// We can probably flatten these into single slices for GC/cache optimization
 	keys          map[string][]byte
 	prevValues    map[string][]byte
-	keysSlice     []KVPair
 	prevValsSlice []KVPair
 }
 
@@ -82,7 +82,6 @@ func (d *StateDiffDomain) Merge(older *StateDiffDomain) {
 	for k, v := range older.prevValues {
 		d.prevValues[k] = v
 	}
-	d.keysSlice = nil
 	d.prevValsSlice = nil
 }
 
@@ -101,7 +100,6 @@ func (d *StateDiffDomain) DomainUpdate(key1, key2, prevValue, stepBytes []byte, 
 
 	if _, ok := d.keys[string(key)]; !ok {
 		d.keys[string(key)] = prevStepBytes
-		d.keysSlice = nil
 	}
 
 	prevValue = common.Copy(prevValue)
@@ -117,30 +115,22 @@ func (d *StateDiffDomain) DomainUpdate(key1, key2, prevValue, stepBytes []byte, 
 	}
 }
 
-func (d *StateDiffDomain) GetKeys() (keysToSteps []KVPair, keysToValue []KVPair) {
-	if len(d.keysSlice) != 0 && len(d.prevValsSlice) != 0 {
-		return d.keysSlice, d.prevValsSlice
+func (d *StateDiffDomain) GetKeys() (keysToValue []KVPair) {
+	if len(d.prevValsSlice) != 0 {
+		return d.prevValsSlice
 	}
-	d.keysSlice = make([]KVPair, 0, len(d.keys))
 	d.prevValsSlice = make([]KVPair, 0, len(d.prevValues))
-	var l1, l2 int
-	for k, v := range d.keys {
-		d.keysSlice = append(d.keysSlice, KVPair{Key: []byte(k), Value: v})
-		l1 += len(k) + len(v)
-	}
+	var l2 int
 	for k, v := range d.prevValues {
-		d.prevValsSlice = append(d.prevValsSlice, KVPair{Key: []byte(k), Value: v})
-		l2 += len(k) + len(v)
+		d.prevValsSlice = append(d.prevValsSlice, KVPair{Key: []byte(k), Value: v, PrevStepBytes: d.keys[k[len(k)-8:]]})
+		l2 += len(k) + len(v) + 8
 	}
-	sort.Slice(d.keysSlice, func(i, j int) bool {
-		return string(d.keysSlice[i].Key) < string(d.keysSlice[j].Key)
-	})
 	sort.Slice(d.prevValsSlice, func(i, j int) bool {
 		return string(d.prevValsSlice[i].Key) < string(d.prevValsSlice[j].Key)
 	})
-	fmt.Println("keysSlice", l1, "prevValsSlice", l2)
+	fmt.Println("prevValsSlice", l2)
 
-	return d.keysSlice, d.prevValsSlice
+	return d.prevValsSlice
 }
 
 type ChangesetStorage struct {
