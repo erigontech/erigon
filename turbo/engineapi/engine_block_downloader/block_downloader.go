@@ -209,7 +209,7 @@ func saveHeader(db kv.RwTx, header *types.Header, hash libcommon.Hash) error {
 
 	parentTd, err := rawdb.ReadTd(db, header.ParentHash, blockHeight-1)
 	if err != nil || parentTd == nil {
-		return fmt.Errorf("[saveHeader] parent's total difficulty not found with hash %x and height %d for header %x %d: %v", header.ParentHash, blockHeight-1, hash, blockHeight, err)
+		return fmt.Errorf("[saveHeader] 2parent's total difficulty not found with hash %x and height %d for header %x %d: %v", header.ParentHash, blockHeight-1, hash, blockHeight, err)
 	}
 	td := new(big.Int).Add(parentTd, header.Difficulty)
 	if err = rawdb.WriteHeader(db, header); err != nil {
