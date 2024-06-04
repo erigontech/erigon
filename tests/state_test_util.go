@@ -48,7 +48,6 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -162,21 +161,21 @@ func (t *StateTest) Subtests() []StateSubtest {
 }
 
 // Run executes a specific subtest and verifies the post-state and logs
-func (t *StateTest) Run(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, error) {
+func (t *StateTest) Run(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, libcommon.Hash, error) {
 	state, root, err := t.RunNoVerify(tx, subtest, vmconfig)
 	if err != nil {
-		return state, err
+		return state, types.EmptyRootHash, err
 	}
 	post := t.json.Post[subtest.Fork][subtest.Index]
 	// N.B: We need to do this in a two-step process, because the first Commit takes care
 	// of suicides, and we need to touch the coinbase _after_ it has potentially suicided.
 	if root != libcommon.Hash(post.Root) {
-		return state, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
+		return state, root, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
 	}
 	if logs := rlpHash(state.Logs()); logs != libcommon.Hash(post.Logs) {
-		return state, fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
+		return state, root, fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
 	}
-	return state, nil
+	return state, root, nil
 }
 
 // RunNoVerify runs a specific subtest and returns the statedb and post-state root
@@ -319,11 +318,11 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	}
 	c.Close()
 
-	root, err := trie.CalcRoot("", tx)
+	root, err := txc.Doms.ComputeCommitment(context2.Background(), true, writeBlockNr, "")
 	if err != nil {
 		return nil, libcommon.Hash{}, fmt.Errorf("error calculating state root: %w", err)
 	}
-	return statedb, root, nil
+	return statedb, libcommon.CastToHash(root), nil
 }
 
 func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, blockNr uint64, histV3 bool) (*state.IntraBlockState, error) {

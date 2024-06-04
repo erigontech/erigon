@@ -18,14 +18,15 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/urfave/cli/v2"
+	"golang.org/x/sync/semaphore"
+
 	"github.com/ledgerwatch/erigon-lib/common/disk"
 	"github.com/ledgerwatch/erigon-lib/common/mem"
 	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli/v2"
-	"golang.org/x/sync/semaphore"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -797,17 +798,21 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}); err != nil {
 		return err
 	}
-
-	for j := 0; j < 10_000; j++ { // prune happens by small steps, so need many runs
-		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-			if err := br.PruneAncientBlocks(tx, 100); err != nil {
+	existBlocksToPrune := true
+	for existBlocksToPrune { // prune happens by small steps, so need many runs
+		err = db.UpdateNosync(ctx, func(tx kv.RwTx) error {
+			if existBlocksToPrune, err = br.PruneAncientBlocks(tx, 100); err != nil {
 				return err
 			}
+
 			return nil
-		}); err != nil {
+		})
+		if err != nil {
 			return err
 		}
 	}
+
+	logger.Info("Pruning has ended")
 
 	db, err = temporal.New(db, agg)
 	if err != nil {

@@ -82,9 +82,9 @@ func StageLoop(
 			// continue
 		}
 
+		t := time.Now()
 		// Estimate the current top height seen from the peer
 		err := StageLoopIteration(ctx, db, wrap.TxContainer{}, sync, initialCycle, false, logger, blockReader, hook)
-
 		if err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
 				return
@@ -97,9 +97,12 @@ func StageLoop(
 			time.Sleep(500 * time.Millisecond) // just to avoid too much similar errors in logs
 			continue
 		}
-
-		initialCycle = false
-		hd.AfterInitialCycle()
+		if time.Since(t) < 5*time.Minute {
+			initialCycle = false
+		}
+		if !initialCycle {
+			hd.AfterInitialCycle()
+		}
 
 		if loopMinTime != 0 {
 			waitTime := loopMinTime - time.Since(start)
@@ -822,6 +825,8 @@ func NewPolygonSyncStages(
 			blockReader,
 			stopNode,
 			bor.GenesisContractStateReceiverABI(),
+			config.LoopBlockLimit,
+			config.Dirs.DataDir,
 		),
 		stagedsync.StageSendersCfg(
 			db,
