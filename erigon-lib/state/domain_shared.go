@@ -556,7 +556,10 @@ func (sd *SharedDomains) SetTrace(b bool) {
 }
 
 func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
-	return sd.sdCtx.ComputeCommitment(ctx, saveStateAfter, blockNum, logPrefix)
+	sd.aggTx.RestrictSubsetFileDeletions(true)
+	rootHash, err = sd.sdCtx.ComputeCommitment(ctx, saveStateAfter, blockNum, logPrefix)
+	sd.aggTx.RestrictSubsetFileDeletions(false)
+	return
 }
 
 // IterateStoragePrefix iterates over key-value pairs of the storage domain that start with given prefix
