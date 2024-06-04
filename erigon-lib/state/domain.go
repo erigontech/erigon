@@ -1220,6 +1220,10 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			}
 		}
 		for _, kv := range valsKV {
+			if bytes.Equal(common.Hex2Bytes("913f7cE002716d5FaeBe6101216C56478Dec7b87"), kv.Key[:len(kv.Key)-8]) {
+				fmt.Printf("prevStep %x\n", kv.PrevStepBytes)
+				fmt.Println(types.DecodeAccountBytesV3(kv.Value))
+			}
 			if len(kv.Value) == 0 {
 				if err := rwTx.Delete(d.valsTable, kv.Key); err != nil {
 					return err
