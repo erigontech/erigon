@@ -376,7 +376,7 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime time.Time) (*HeaderRequ
 	var penalties []PenaltyItem
 	var req *HeaderRequest
 	hd.anchorTree.Ascend(func(anchor *Anchor) bool {
-		if anchor.blockHeight == 0 {
+		if anchor.blockHeight == 0 { //no parents
 			return true
 		}
 		if anchor.nextRetryTime.After(currentTime) {
