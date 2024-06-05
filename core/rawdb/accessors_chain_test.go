@@ -26,6 +26,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	// "github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
@@ -599,7 +600,8 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	deposits := make(types.Deposits, 0)
 	deposits = append(deposits, &r1)
 	deposits = append(deposits, &r2)
-	reqs := deposits.ToRequests()
+	var reqs types.Requests
+	reqs = deposits.Requests()
 	// Create a test block to move around the database and make sure it's really new
 	block := types.NewBlockWithHeader(&types.Header{
 		Number:      big.NewInt(1),
@@ -677,10 +679,10 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	require.True(len(entry.Requests) == 2)
 	rd1 := readRequests[0]
 	rd2 := readRequests[1]
-	require.True(rd1.Type() == types.DepositRequestType)
-	require.True(rd2.Type() == types.DepositRequestType)
+	require.True(rd1.RequestType() == types.DepositRequestType)
+	require.True(rd2.RequestType() == types.DepositRequestType)
 
-	readDeposits := (types.Requests)(readRequests).Deposits()
+	readDeposits := readRequests.Deposits()
 	d1 := readDeposits[0]
 	d2 := readDeposits[1]
 	require.Equal(d1.Pubkey, r1.Pubkey)

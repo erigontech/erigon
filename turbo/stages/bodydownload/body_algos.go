@@ -152,7 +152,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 				}
 				if header.RequestsRoot != nil {
 					// implies *header.RequestsRoot == types.EmptyRootHash
-					body.Requests = make([]*types.Request, 0)
+					body.Requests = make(types.Requests, 0)
 				}
 				bd.addBodyToCache(blockNum, body)
 				dataflow.BlockBodyDownloadStates.AddChange(blockNum, dataflow.BlockBodyEmpty)

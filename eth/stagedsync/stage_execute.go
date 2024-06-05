@@ -209,11 +209,11 @@ func gatherNoPruneReceipts(receipts *types.Receipts, chainCfg *chain.Config) boo
 	cr := types.Receipts{}
 	for _, r := range *receipts {
 		toStore := false
-		if chainCfg.DepositContract != nil && *chainCfg.DepositContract == r.ContractAddress {
+		if chainCfg.DepositContract == r.ContractAddress {
 			toStore = true
 		} else {
 			for _, l := range r.Logs {
-				if chainCfg.DepositContract != nil && *chainCfg.DepositContract == l.Address {
+				if chainCfg.DepositContract == l.Address {
 					toStore = true
 					break
 				}
