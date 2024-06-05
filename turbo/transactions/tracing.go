@@ -213,6 +213,13 @@ func TraceTx(
 	}
 	if streaming {
 		stream.WriteObjectStart()
+
+		if config != nil && config.CounterCollector != nil {
+			stream.WriteObjectField("smtLevels")
+			stream.WriteInt(config.CounterCollector.GetSmtLevels())
+			stream.WriteMore()
+		}
+
 		stream.WriteObjectField("structLogs")
 		stream.WriteArrayStart()
 	}

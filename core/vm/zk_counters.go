@@ -193,6 +193,10 @@ func (cc *CounterCollector) Clone() *CounterCollector {
 	}
 }
 
+func (cc *CounterCollector) GetSmtLevels() int {
+	return cc.smtLevels
+}
+
 func (cc *CounterCollector) Deduct(key CounterKey, amount int) {
 	cc.counters[key].used += amount
 	cc.counters[key].remaining -= amount
