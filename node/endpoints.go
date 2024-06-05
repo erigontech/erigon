@@ -91,7 +91,7 @@ func isIgnoredHttpServerError(serveErr error) bool {
 
 }
 
-// StartHTTPEndpoint starts the HTTP RPC endpoint.
+// StartHTTPSEndpoint starts the HTTPS RPC endpoint.
 func StartHTTPSEndpoint(urlEndpoint string,
 	keyFile string, certFile string,
 	timeouts rpccfg.HTTPTimeouts, handler http.Handler,

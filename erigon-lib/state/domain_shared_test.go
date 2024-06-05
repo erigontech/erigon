@@ -4,14 +4,15 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math/rand"
+	"testing"
+	"time"
+
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
-	"math/rand"
-	"testing"
-	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/types"
@@ -106,6 +107,9 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
+	stateChangeset := &StateChangeSet{}
+	domains.SetChangesetAccumulator(stateChangeset)
+
 	maxTx := stepSize
 	hashes := make([][]byte, maxTx)
 	count := 10
@@ -156,9 +160,10 @@ Loop:
 	require.NoError(t, err)
 
 	unwindTo := uint64(commitStep * rnd.Intn(int(maxTx)/commitStep))
+	domains.changesAccumulator = nil
 
 	acu := agg.BeginFilesRo()
-	err = domains.Unwind(ctx, rwTx, 0, unwindTo)
+	err = domains.Unwind(ctx, rwTx, 0, unwindTo, stateChangeset)
 	require.NoError(t, err)
 	acu.Close()
 

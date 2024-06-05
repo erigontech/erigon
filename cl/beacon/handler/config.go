@@ -31,7 +31,7 @@ func (a *ApiHandler) getForkSchedule(w http.ResponseWriter, r *http.Request) (*b
 			Epoch:          epoch,
 		})
 	}
-	// Sort the respnses by epoch
+	// Sort the responses by epoch
 	sort.Slice(response, func(i, j int) bool {
 		if response[i].Epoch == response[j].Epoch {
 			return bytes.Compare(response[i].CurrentVersion[:], response[j].CurrentVersion[:]) < 0

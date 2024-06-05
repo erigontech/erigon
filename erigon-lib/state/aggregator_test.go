@@ -1158,7 +1158,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	domains, err = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
-	err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom)
+	err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom, nil)
 	require.NoError(t, err)
 
 	for i = int(pruneFrom); i < len(vals); i++ {
@@ -1193,7 +1193,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom)
+	err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom, nil)
 	require.NoError(t, err)
 
 	for i = int(pruneFrom); i < len(vals); i++ {
