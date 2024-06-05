@@ -183,6 +183,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 			if !reflect.DeepEqual(sds, ds.Deposits()) {
 				return nil, nil, nil, fmt.Errorf("error: invalid deposits in block")
 			}
+			//TODO @somnathb1 add DeepEqual check for WithdrawaRequests too, because in future there could be other types of requests
 		}
 	}
 

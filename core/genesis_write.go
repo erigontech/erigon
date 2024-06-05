@@ -527,6 +527,8 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 	var requests types.Requests
 	if g.Config != nil && g.Config.IsPrague(g.Timestamp) {
 		requests = types.Requests{}
+
+		// TODO @somnathb1 - if later iterations and/or tests don't need this from genesis.json, remove the following
 		if g.RequestsRoot != nil {
 			head.RequestsRoot = g.RequestsRoot
 		} else {
