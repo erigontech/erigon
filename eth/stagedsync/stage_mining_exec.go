@@ -180,6 +180,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	if err != nil {
 		return err
 	}
+	current.Requests = make(types.Requests, block.Requests().Len())
 	copy(current.Requests, block.Requests())
 
 	// Simulate the block execution to get the final state root
