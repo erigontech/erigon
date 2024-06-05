@@ -69,6 +69,14 @@ func (tr *TRand) RandWithdrawal() *Withdrawal {
 	}
 }
 
+func (tr *TRand) RandWithdrawalRequest() *WithdrawalRequest {
+	return &WithdrawalRequest{
+		SourceAddress:   [20]byte(tr.RandBytes(20)),
+		ValidatorPubkey: [48]byte(tr.RandBytes(48)),
+		Amount:          *tr.RandUint64(),
+	}
+}
+
 func (tr *TRand) RandDeposit() *Deposit {
 	return &Deposit{
 		Pubkey:                [48]byte(tr.RandBytes(48)),
@@ -79,11 +87,13 @@ func (tr *TRand) RandDeposit() *Deposit {
 	}
 }
 
-func (tr *TRand) RandRequest() *Request {
-	d := tr.RandDeposit()
-	var r Request
-	r.inner = d.copy()
-	return &r
+func (tr *TRand) RandRequest() Request {
+	switch tr.rnd.Intn(2) {
+	case 1:
+		return tr.RandWithdrawalRequest()
+	default:
+		return tr.RandDeposit()
+	}
 }
 
 func (tr *TRand) RandHeader() *Header {
@@ -228,8 +238,8 @@ func (tr *TRand) RandWithdrawals(size int) []*Withdrawal {
 	return withdrawals
 }
 
-func (tr *TRand) RandRequests(size int) []*Request {
-	requests := make([]*Request, size)
+func (tr *TRand) RandRequests(size int) []Request {
+	requests := make([]Request, size)
 	for i := 0; i < size; i++ {
 		requests[i] = tr.RandRequest()
 	}
@@ -347,18 +357,36 @@ func compareDeposits(t *testing.T, a, b *Deposit) {
 	check(t, "Deposit.Index", a.Index, b.Index)
 }
 
-func checkRequests(t *testing.T, a, b *Request) {
-	if a.Type() != b.Type() {
-		t.Errorf("request type mismatch: request-a: %v, request-b: %v", a.Type(), b.Type())
+func compareWithdrawalRequests(t *testing.T, a, b *WithdrawalRequest) {
+	check(t, "Deposit.SourceAddress", a.SourceAddress, b.SourceAddress)
+	check(t, "WithdrawalRequest.ValidatorPubkey", a.ValidatorPubkey, b.ValidatorPubkey)
+	check(t, "Deposit.Amount", a.Amount, b.Amount)
+}
+
+func checkRequests(t *testing.T, a, b Request) {
+	if a.RequestType() != b.RequestType() {
+		t.Errorf("request type mismatch: request-a: %v, request-b: %v", a.RequestType(), b.RequestType())
 	}
 
-	switch a.Type() {
+	switch a.RequestType() {
 	case DepositRequestType:
-		c := a.inner.(*Deposit)
-		d := b.inner.(*Deposit)
-		compareDeposits(t, c, d)
+		a, aok := a.(*Deposit)
+		b, bok := b.(*Deposit)
+		if aok && bok {
+			compareDeposits(t, a, b)
+		} else {
+			t.Errorf("type assertion failed: %v %v %v %v", a.RequestType(), aok, b.RequestType(), bok)
+		}
+	case WithdrawalRequestType:
+		a, aok := a.(*WithdrawalRequest)
+		b, bok := b.(*WithdrawalRequest)
+		if aok && bok {
+			compareWithdrawalRequests(t, a, b)
+		} else {
+			t.Errorf("type assertion failed: %v %v %v %v", a.RequestType(), aok, b.RequestType(), bok)
+		}
 	default:
-		t.Errorf("unknown request type: %v", a.Type())
+		t.Errorf("unknown request type: %v", a.RequestType())
 	}
 }
 
@@ -386,7 +414,7 @@ func compareWithdrawals(t *testing.T, a, b []*Withdrawal) error {
 	return nil
 }
 
-func compareRequests(t *testing.T, a, b []*Request) error {
+func compareRequests(t *testing.T, a, b Requests) error {
 	arLen, brLen := len(a), len(b)
 	if arLen != brLen {
 		return fmt.Errorf("requests len mismatch: expected: %v, got: %v", arLen, brLen)
@@ -487,18 +515,72 @@ func TestDepositEncodeDecode(t *testing.T) {
 	tr := NewTRand()
 	var buf bytes.Buffer
 	for i := 0; i < RUNS; i++ {
-		enc := tr.RandRequest()
+		a := tr.RandDeposit()
 		buf.Reset()
-		if err := enc.EncodeRLP(&buf); err != nil {
+		if err := a.EncodeRLP(&buf); err != nil {
 			t.Errorf("error: deposit.EncodeRLP(): %v", err)
 		}
-		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
-		dec := &Request{}
-		if err := dec.DecodeRLP(s); err != nil {
+		b := new(Deposit)
+		if err := b.DecodeRLP(buf.Bytes()); err != nil {
 			t.Errorf("error: Deposit.DecodeRLP(): %v", err)
 		}
-		a := enc.inner.(*Deposit)
-		b := dec.inner.(*Deposit)
 		compareDeposits(t, a, b)
 	}
+}
+
+func TestWithdrawalReqsEncodeDecode(t *testing.T) {
+	wx1 := WithdrawalRequest{
+		SourceAddress:   libcommon.HexToAddress("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"),
+		ValidatorPubkey: [48]byte{},
+		Amount:          0,
+	}
+	wx1.ValidatorPubkey[47] = 0x01
+	wx2 := WithdrawalRequest{
+		SourceAddress:   libcommon.HexToAddress("0x8a0a19589531694250d570040a0c4b74576919b8"),
+		ValidatorPubkey: [48]byte{},
+		Amount:          0xfffffffffffffffe,
+	}
+	wx2.ValidatorPubkey[47] = 0x02
+	wxs := append(Requests{}, &wx1, &wx2)
+
+	root := DeriveSha(wxs)
+	if root.String() != "0x143e24a803c0dc2ae5381184ad5fe9e45ac2c82c671bc3eafdc090642fc16501" {
+		t.Errorf("Root mismatch %s", root.String())
+	}
+
+	var wx3, wx4 WithdrawalRequest
+	var buf1, buf2 bytes.Buffer
+	wx1.EncodeRLP(&buf1)
+	wx2.EncodeRLP(&buf2)
+	wx3.DecodeRLP(buf1.Bytes())
+	wx4.DecodeRLP(buf2.Bytes())
+	wxs = Requests{}
+	wxs = append(wxs, &wx3, &wx4)
+	root = DeriveSha(wxs)
+	if root.String() != "0x143e24a803c0dc2ae5381184ad5fe9e45ac2c82c671bc3eafdc090642fc16501" {
+		t.Errorf("Root mismatch %s", root.String())
+	}
+
+	/*
+		// Breakdown of block encoding with withdrawal requests - expected
+		c0c0f8a0
+
+		b84a
+		01
+		f84794
+		a94f5374fce5edbc8e2a8697c15331677e6ebf0b
+		b0
+		000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001
+		80
+
+		b852
+		01
+		f84f94
+		8a0a19589531694250d570040a0c4b74576919b8
+		b0
+		000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002
+		88
+		fffffffffffffffe
+	*/
+
 }

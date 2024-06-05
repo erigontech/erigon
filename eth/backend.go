@@ -454,7 +454,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 			// pick port from allowed list
 			var picked bool
-			for ; pi < len(cfg.AllowedPorts) && !picked; pi++ {
+			for ; pi < len(cfg.AllowedPorts); pi++ {
 				pc := int(cfg.AllowedPorts[pi])
 				if pc == 0 {
 					// For ephemeral ports probing to see if the port is taken does not
@@ -981,6 +981,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			statusDataProvider,
 			config.HeimdallURL,
 			executionRpc,
+			config.LoopBlockLimit,
 		)
 	}
 

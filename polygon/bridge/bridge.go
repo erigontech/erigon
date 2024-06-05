@@ -27,25 +27,21 @@ type IDRange struct {
 
 type Bridge struct {
 	db                       *polygoncommon.Database
-	log                      log.Logger
-	borConfig                *borcfg.BorConfig
 	ready                    bool
 	eventMap                 map[uint64]IDRange // block num to eventID range
 	lastProcessedBlockNumber uint64
 	lastProcessedEventID     uint64
-	stateClientAddress       libcommon.Address
-	stateReceiverABI         abi.ABI
 
-	fetchSyncEvents fetchSyncEventsType
+	log                log.Logger
+	borConfig          *borcfg.BorConfig
+	stateClientAddress libcommon.Address
+	stateReceiverABI   abi.ABI
+	fetchSyncEvents    fetchSyncEventsType
 }
 
-func NewBridge(ctx context.Context, dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, fetchSyncEvents fetchSyncEventsType, stateReceiverABI abi.ABI) (*Bridge, error) {
+func NewBridge(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, fetchSyncEvents fetchSyncEventsType, stateReceiverABI abi.ABI) *Bridge {
 	// create new db
 	db := polygoncommon.NewDatabase(dataDir, logger)
-	err := db.OpenOnce(ctx, kv.PolygonBridgeDB, databaseTablesCfg)
-	if err != nil {
-		return nil, err
-	}
 
 	return &Bridge{
 		db:                       db,
@@ -57,10 +53,15 @@ func NewBridge(ctx context.Context, dataDir string, logger log.Logger, borConfig
 		lastProcessedEventID:     0,
 		stateClientAddress:       libcommon.HexToAddress(borConfig.StateReceiverContract),
 		stateReceiverABI:         stateReceiverABI,
-	}, nil
+	}
 }
 
 func (b *Bridge) Run(ctx context.Context) error {
+	err := b.db.OpenOnce(ctx, kv.PolygonBridgeDB, databaseTablesCfg)
+	if err != nil {
+		return err
+	}
+
 	// start syncing
 	b.log.Debug(bridgeLogPrefix("Bridge is running"))
 
@@ -123,7 +124,7 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		}
 
 		if lastDBID != 0 && lastDBID > b.lastProcessedEventID {
-			b.log.Warn(bridgeLogPrefix(fmt.Sprintf("Creating map for block %d, start ID %d, end ID %d", block.NumberU64(), b.lastProcessedEventID, lastDBID)))
+			b.log.Debug(bridgeLogPrefix(fmt.Sprintf("Creating map for block %d, start ID %d, end ID %d", block.NumberU64(), b.lastProcessedEventID, lastDBID)))
 			b.eventMap[block.NumberU64()] = IDRange{b.lastProcessedEventID, lastDBID}
 
 			b.lastProcessedEventID = lastDBID
@@ -178,6 +179,8 @@ func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) []*types.Messag
 	if err != nil {
 		return nil
 	}
+
+	b.log.Debug(bridgeLogPrefix(fmt.Sprintf("got %v events for block %v", len(events), blockNum)))
 
 	// convert to message
 	for _, event := range events {

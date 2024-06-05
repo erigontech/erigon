@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/p2p/sentry"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
+	"github.com/ledgerwatch/erigon/polygon/bridge"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/polygon/p2p"
 	polygonsync "github.com/ledgerwatch/erigon/polygon/sync"
@@ -37,6 +38,8 @@ func NewPolygonSyncStageCfg(
 	blockReader services.FullBlockReader,
 	stopNode func() error,
 	stateReceiverABI abi.ABI,
+	blockLimit uint,
+	dataDir string,
 ) PolygonSyncStageCfg {
 	dataStream := make(chan polygonSyncStageDataItem)
 	storage := &polygonSyncStageStorage{
@@ -54,6 +57,8 @@ func NewPolygonSyncStageCfg(
 	milestoneVerifier := polygonsync.VerifyMilestoneHeaders
 	blocksVerifier := polygonsync.VerifyBlocks
 	heimdallService := heimdall.NewHeimdall(heimdallClient, logger, heimdall.WithStore(storage))
+	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
+	polygonBridge := bridge.NewBridge(dataDir, logger, borConfig, heimdallClient.FetchStateSyncEvents, stateReceiverABI)
 	blockDownloader := polygonsync.NewBlockDownloader(
 		logger,
 		p2pService,
@@ -62,10 +67,10 @@ func NewPolygonSyncStageCfg(
 		milestoneVerifier,
 		blocksVerifier,
 		storage,
+		blockLimit,
 	)
 	spansCache := polygonsync.NewSpansCache()
 	events := polygonsync.NewTipEvents(logger, p2pService, heimdallService)
-	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	sync := polygonsync.NewSync(
 		storage,
 		executionEngine,
@@ -83,6 +88,7 @@ func NewPolygonSyncStageCfg(
 		logger:           logger,
 		chainConfig:      chainConfig,
 		blockReader:      blockReader,
+		bridge:           polygonBridge,
 		sync:             sync,
 		events:           events,
 		p2p:              p2pService,
@@ -156,6 +162,7 @@ type polygonSyncStageService struct {
 	logger           log.Logger
 	chainConfig      *chain.Config
 	blockReader      services.FullBlockReader
+	bridge           bridge.Service
 	sync             *polygonsync.Sync
 	events           *polygonsync.TipEvents
 	p2p              p2p.Service
@@ -179,10 +186,7 @@ func (s *polygonSyncStageService) Run(ctx context.Context, tx kv.RwTx, stageStat
 	s.stageState = stageState
 	s.unwinder = unwinder
 	s.logger.Info(s.appendLogPrefix("begin..."), "progress", stageState.BlockNumber)
-
-	if !s.bgComponentsRun {
-		s.runBgComponents(ctx)
-	}
+	s.runBgComponentsOnce(ctx)
 
 	if s.cachedForkChoice != nil {
 		err := s.handleUpdateForkChoice(tx, s.cachedForkChoice)
@@ -199,12 +203,17 @@ func (s *polygonSyncStageService) Run(ctx context.Context, tx kv.RwTx, stageStat
 		case <-ctx.Done():
 			return ctx.Err()
 		case err := <-s.bgComponentsErr:
-			s.logger.Error(s.appendLogPrefix("stopping node"), "err", err)
-			stopErr := s.stopNode()
-			if stopErr != nil {
-				return fmt.Errorf("%w: %w", stopErr, err)
-			}
-			return err
+			// call stop in separate goroutine to avoid deadlock due to "waitForStageLoopStop"
+			go func() {
+				s.logger.Error(s.appendLogPrefix("stopping node"), "err", err)
+				err = s.stopNode()
+				if err != nil {
+					s.logger.Error(s.appendLogPrefix("could not stop node cleanly"), "err", err)
+				}
+			}()
+
+			// use ErrStopped to exit the stage loop
+			return fmt.Errorf("%w: %w", common.ErrStopped, err)
 		case data := <-s.dataStream:
 			var err error
 			if data.updateForkChoice != nil {
@@ -228,15 +237,24 @@ func (s *polygonSyncStageService) Run(ctx context.Context, tx kv.RwTx, stageStat
 	}
 }
 
-func (s *polygonSyncStageService) runBgComponents(ctx context.Context) {
+func (s *polygonSyncStageService) runBgComponentsOnce(ctx context.Context) {
+	if s.bgComponentsRun {
+		return
+	}
+
 	s.logger.Info(s.appendLogPrefix("running background components"))
 	s.bgComponentsRun = true
+	s.bgComponentsErr = make(chan error)
 
 	go func() {
-		eg := errgroup.Group{}
+		eg, ctx := errgroup.WithContext(ctx)
 
 		eg.Go(func() error {
 			return s.events.Run(ctx)
+		})
+
+		eg.Go(func() error {
+			return s.bridge.Run(ctx)
 		})
 
 		eg.Go(func() error {
@@ -301,6 +319,11 @@ func (s *polygonSyncStageService) handleInsertBlocks(ctx context.Context, tx kv.
 		if err := s.downloadStateSyncEvents(ctx, tx, header, stateSyncEventsLogTicker); err != nil {
 			return err
 		}
+	}
+
+	err := s.bridge.ProcessNewBlocks(ctx, blocks)
+	if err != nil {
+		return err
 	}
 
 	return nil

@@ -184,7 +184,8 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	var requests types.Requests
 	if version >= clparams.ElectraVersion && req.DepositRequests != nil {
-		requests = req.DepositRequests.ToRequests()
+		requests = append(requests, req.DepositRequests.Requests()...)
+		requests = append(requests, req.WithdrawalRequests...)
 	}
 	if err := s.checkRequestsPresence(header.Time, requests); err != nil {
 		return nil, err
@@ -830,7 +831,18 @@ func (e *EngineServer) HandleNewPayload(
 			if !success {
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			}
-			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &headerHash}, nil
+
+			status, _, latestValidHash, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
+			if err != nil {
+				return nil, err
+			}
+
+			if status == execution.ExecutionStatus_Busy || status == execution.ExecutionStatus_TooFarAway {
+				e.logger.Debug(fmt.Sprintf("[%s] New payload: Client is still syncing", logPrefix))
+				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
+			} else {
+				return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &latestValidHash}, nil
+			}
 		} else {
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
