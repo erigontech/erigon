@@ -178,7 +178,7 @@ func makeLog_zkevm(size int, logIndexPerTx bool) executionFunc {
 		}
 		blockNo := interpreter.VM.evm.Context().BlockNumber
 
-		// APPLY BUG ONLY ABOVE FORKID9
+		// [hack] APPLY BUG ONLY ABOVE FORKID9
 		if forkBlock == 0 || blockNo < forkBlock {
 			// [zkEvm] fill 0 at the end
 			dataLen := len(d)
