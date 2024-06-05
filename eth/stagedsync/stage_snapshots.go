@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/anacrolix/torrent"
+	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
@@ -232,6 +233,39 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if cfg.caplin {
 		cstate = snapshotsync.AlsoCaplin
 	}
+
+	diagnostics.Send(diagnostics.UpdateSyncSubStageList{
+		List: []diagnostics.UpdateSyncSubStage{
+			{
+				StageId: string(stages.Snapshots),
+				SubStage: diagnostics.SyncSubStage{
+					ID:    "Download header-chain",
+					State: diagnostics.Queued,
+				},
+			},
+			{
+				StageId: string(stages.Snapshots),
+				SubStage: diagnostics.SyncSubStage{
+					ID:    "Download snapshots",
+					State: diagnostics.Queued,
+				},
+			},
+			{
+				StageId: string(stages.Snapshots),
+				SubStage: diagnostics.SyncSubStage{
+					ID:    "Indexing",
+					State: diagnostics.Queued,
+				},
+			},
+			{
+				StageId: string(stages.Snapshots),
+				SubStage: diagnostics.SyncSubStage{
+					ID:    "Fill DB",
+					State: diagnostics.Queued,
+				},
+			},
+		},
+	})
 
 	// Download only the snapshots that are for the header chain.
 	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, true, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {

@@ -1546,7 +1546,6 @@ func (s *Ethereum) Start() error {
 	}
 
 	stages := diagnostics.InitStagesFromList(nodeStages)
-	fmt.Println("stages", stages)
 	diagnostics.Send(diagnostics.SyncStageList{StagesList: stages})
 
 	if s.chainConfig.Bor != nil {

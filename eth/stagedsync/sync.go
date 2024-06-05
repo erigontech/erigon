@@ -97,7 +97,7 @@ func (s *Sync) NextStage() {
 	s.currentStage++
 
 	if s.currentStage < uint(len(s.stages)) {
-		diagnostics.Send(diagnostics.CurrentSyncStage{Stage: s.stages[s.currentStage].ID})
+		diagnostics.Send(diagnostics.CurrentSyncStage{Stage: string(s.stages[s.currentStage].ID)})
 	}
 }
 
@@ -190,7 +190,7 @@ func (s *Sync) SetCurrentStage(id stages.SyncStage) error {
 		if stage.ID == id {
 			s.currentStage = uint(i)
 
-			diagnostics.Send(diagnostics.CurrentSyncStage{Stage: id})
+			diagnostics.Send(diagnostics.CurrentSyncStage{Stage: string(id)})
 
 			return nil
 		}
