@@ -22,4 +22,5 @@ type TraceConfig_ZkEvm struct {
 	BorTx           *bool
 
 	CounterCollector *vm.CounterCollector
+	SmtDepth         *int
 }

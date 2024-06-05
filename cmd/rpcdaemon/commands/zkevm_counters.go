@@ -360,17 +360,22 @@ func (api *ZkEvmAPIImpl) TraceTransactionCounters(ctx context.Context, hash comm
 		return errors.New("the network cannot have a 0 fork id")
 	}
 
-	depthBlockNum, smtDepth, err := hermezDb.GetClosestSmtDepth(block.NumberU64())
-	if err != nil {
-		return err
-	}
+	var smtDepth int
+	if config != nil && config.SmtDepth != nil {
+		smtDepth = *config.SmtDepth
+	} else {
+		depthBlockNum, smtDepth, err := hermezDb.GetClosestSmtDepth(block.NumberU64())
+		if err != nil {
+			return err
+		}
 
-	if depthBlockNum < block.NumberU64() {
-		smtDepth += smtDepth / 10
-	}
+		if depthBlockNum < block.NumberU64() {
+			smtDepth += smtDepth / 10
+		}
 
-	if smtDepth == 0 || smtDepth > 256 {
-		smtDepth = 256
+		if smtDepth == 0 || smtDepth > 256 {
+			smtDepth = 256
+		}
 	}
 
 	batchCounters := vm.NewBatchCounterCollector(int(smtDepth), uint16(forkId), false)
