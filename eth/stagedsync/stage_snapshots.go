@@ -115,7 +115,7 @@ func StageSnapshotsCfg(db kv.RwDB,
 
 		freezingCfg := cfg.blockReader.FreezingCfg()
 
-		if freezingCfg.Enabled && freezingCfg.Produce {
+		if freezingCfg.Enabled && freezingCfg.ProduceE2 {
 			u := cfg.snapshotUploader
 
 			if maxSeedable := u.maxSeedableHeader(); u.cfg.syncConfig.FrozenBlockLimit > 0 && maxSeedable > u.cfg.syncConfig.FrozenBlockLimit {
@@ -449,18 +449,19 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 
 	freezingCfg := cfg.blockReader.FreezingCfg()
 	if freezingCfg.Enabled {
-		if freezingCfg.Produce {
-			//TODO: initialSync maybe save files progress here
-			if cfg.blockRetire.HasNewFrozenFiles() || cfg.agg.HasNewFrozenFiles() {
-				ac := cfg.agg.BeginFilesRo()
-				defer ac.Close()
-				aggFiles := ac.Files()
-				ac.Close()
+		if cfg.blockRetire.HasNewFrozenFiles() || cfg.agg.HasNewFrozenFiles() {
+			ac := cfg.agg.BeginFilesRo()
+			defer ac.Close()
+			aggFiles := ac.Files()
+			ac.Close()
 
-				if err := rawdb.WriteSnapshots(tx, cfg.blockReader.FrozenFiles(), aggFiles); err != nil {
-					return err
-				}
+			if err := rawdb.WriteSnapshots(tx, cfg.blockReader.FrozenFiles(), aggFiles); err != nil {
+				return err
 			}
+		}
+
+		if freezingCfg.ProduceE2 {
+			//TODO: initialSync maybe save files progress here
 
 			var minBlockNumber uint64
 
@@ -468,7 +469,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 				minBlockNumber = cfg.snapshotUploader.minBlockNumber()
 			}
 
-			if s.CurrentSyncCycle.IsInitialCycle {
+			if s.CurrentSyncCycle.IsFirstCycle {
 				cfg.blockRetire.SetWorkers(estimate.CompressSnapshot.Workers())
 			} else {
 				cfg.blockRetire.SetWorkers(1)
@@ -501,7 +502,10 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 				return err
 			})
 
-			//cfg.agg.BuildFilesInBackground()
+			//if freezingCfg.ProduceE3{
+			//	cfg.agg.BuildFilesInBackground()
+			//}
+
 		}
 
 		pruneLimit := 100
@@ -634,7 +638,7 @@ func (u *snapshotUploader) init(ctx context.Context, logger log.Logger) {
 	if u.files == nil {
 		freezingCfg := u.cfg.blockReader.FreezingCfg()
 
-		if freezingCfg.Enabled && freezingCfg.Produce {
+		if freezingCfg.Enabled && freezingCfg.ProduceE2 {
 			u.files = map[string]*uploadState{}
 			u.start(ctx, logger)
 		}

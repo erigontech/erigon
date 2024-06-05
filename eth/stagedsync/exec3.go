@@ -15,10 +15,11 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
-	metrics2 "github.com/ledgerwatch/erigon-lib/common/metrics"
-	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
+
+	metrics2 "github.com/ledgerwatch/erigon-lib/common/metrics"
+	"github.com/ledgerwatch/erigon-lib/config3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -105,7 +106,7 @@ state changes (updates) and can "atomically commit all changes to underlying lay
 
 Layers from top to bottom:
 - IntraBlockState - used to exec txs. It does store inside all updates of given txn.
-Can understan if txn failed or OutOfGas - then revert all changes.
+Can understand if txn failed or OutOfGas - then revert all changes.
 Each parallel-worker hav own IntraBlockState.
 IntraBlockState does commit changes to lower-abstraction-level by method `ibs.MakeWriteSet()`
 
@@ -113,7 +114,7 @@ IntraBlockState does commit changes to lower-abstraction-level by method `ibs.Ma
 This writer does accumulate updates and then send them to conflict-resolution.
 Until conflict-resolution succeed - none of execution updates must pass to lower-abstraction-level.
 Object TxTask it's just set of small buffers (readset + writeset) for each transaction.
-Write to TxTask happends by code like `txTask.ReadLists = rw.stateReader.ReadSet()`.
+Write to TxTask happens by code like `txTask.ReadLists = rw.stateReader.ReadSet()`.
 
 - TxTask - objects coming from parallel-workers to conflict-resolution goroutine (ApplyLoop and method ReadsValid).
 Flush of data to lower-level-of-abstraction is done by method `agg.ApplyState` (method agg.ApplyHistory exists
@@ -298,7 +299,7 @@ func ExecV3(ctx context.Context,
 		agg.SetCollateAndBuildWorkers(1)
 	}
 
-	if blocksFreezeCfg.Produce {
+	if blocksFreezeCfg.ProduceE3 {
 		//log.Info(fmt.Sprintf("[snapshots] db has steps amount: %s", agg.StepsRangeInDBAsStr(applyTx)))
 		agg.BuildFilesInBackground(outputTxNum.Load())
 	}
@@ -896,7 +897,7 @@ Loop:
 						}
 
 						t2 = time.Since(tt)
-						if blocksFreezeCfg.Produce {
+						if blocksFreezeCfg.ProduceE3 {
 							agg.BuildFilesInBackground(outputTxNum.Load())
 						}
 
@@ -927,7 +928,7 @@ Loop:
 			}
 		}
 
-		if parallel && blocksFreezeCfg.Produce { // sequential exec - does aggregate right after commit
+		if parallel && blocksFreezeCfg.ProduceE3 { // sequential exec - does aggregate right after commit
 			agg.BuildFilesInBackground(outputTxNum.Load())
 		}
 		select {
@@ -966,7 +967,7 @@ Loop:
 		}
 	}
 
-	if blocksFreezeCfg.Produce {
+	if blocksFreezeCfg.ProduceE3 {
 		agg.BuildFilesInBackground(outputTxNum.Load())
 	}
 
