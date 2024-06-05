@@ -619,7 +619,6 @@ Loop:
 			BeginTxIndex: doms.TxNum(),
 		}
 		if shouldGenerateChangesets && blockNum > 0 {
-			fmt.Println(blockNum)
 			doms.SetChangesetAccumulator(changeset)
 		}
 		//time.Sleep(50 * time.Microsecond)
