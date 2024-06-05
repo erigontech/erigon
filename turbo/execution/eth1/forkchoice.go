@@ -274,7 +274,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			}
 		}
 
-		if err := e.executionPipeline.UnwindTo(currentParentNumber-1, stagedsync.ForkChoice, tx); err != nil {
+		if err := e.executionPipeline.UnwindTo(currentParentNumber, stagedsync.ForkChoice, tx); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
@@ -295,7 +295,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			return
 		}
 
-		if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber); err != nil {
+		if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
