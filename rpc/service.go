@@ -25,8 +25,8 @@ import (
 	"sync"
 	"unicode"
 
-	jsoniter "github.com/json-iterator/go"
 	"github.com/gateway-fm/cdk-erigon-lib/common/dbg"
+	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -215,6 +215,11 @@ func (c *callback) call(ctx context.Context, method string, args []reflect.Value
 	defer func() {
 		if err := recover(); err != nil {
 			log.Error("RPC method " + method + " crashed: " + fmt.Sprintf("%v\n%s", err, dbg.Stack()))
+			messageString := "RPC method " + method + " arguments:\n"
+			for _, arg := range args {
+				messageString += fmt.Sprintf("\t%v: %v\n", arg.Type(), arg)
+			}
+			log.Debug(messageString)
 			errRes = errors.New("method handler crashed")
 		}
 	}()

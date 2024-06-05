@@ -80,6 +80,7 @@ docker-compose.*.yml
 .env
 coverage.out
 hermezconfig*.yaml
+.dynamic-configs
 debugToolsConfig.yaml
 local.yml
 cache.db

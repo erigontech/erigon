@@ -11,10 +11,11 @@ jobs:
 
     strategy:
       matrix:
-        node-pairs:
+        nodes:
           - name: "Integration 5"
-            node1: "http://34.175.214.161:8500"
-            node2: "http://34.175.214.161:8505"
+            erigon: "http://34.175.214.161:8500"
+            zkevm: "http://34.175.214.161:8505"
+            sequencer: "http://34.175.214.161:8005"
 
     steps:
       - name: Checkout code
@@ -26,13 +27,12 @@ jobs:
           go-version: '1.22'
 
       - name: Install dependencies
-        run: |
-          go get github.com/google/go-cmp/cmp
+        run: go get github.com/google/go-cmp/cmp
 
       - name: Build the compare_blocks binary
         run: go build -o compare_blocks zk/debug_tools/nightly-block-compare/main.go
 
       - name: Run block comparison
         run: |
-          echo "Comparing blocks for pair: ${{ matrix.node-pairs.name }}"
-          ./compare_blocks -node1 ${{ matrix.node-pairs.node1 }} -node2 ${{ matrix.node-pairs.node2 }} -blocks 1000 -diff 10
+          echo "Comparing blocks for pair: ${{ matrix.nodes.name }}"
+          ./compare_blocks -erigon ${{ matrix.nodes.erigon }} -zkevm ${{ matrix.nodes.zkevm }} -sequencer ${{ matrix.nodes.sequencer }} -blocks 1000 -diff 10
