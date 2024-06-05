@@ -89,6 +89,7 @@ In order to enable the zkevm_ namespace, please add 'zkevm' to the http.api flag
 - `zkevm_getFullBlockByHash`
 - `zkevm_getFullBlockByNumber`
 - `zkevm_virtualCounters`
+- `zkevm_traceTransactionCounters`
 
 ### Supported (remote)
 - `zkevm_getBatchByNumber`
