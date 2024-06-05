@@ -93,14 +93,14 @@ var (
 	subStagesListMock = diagnostics.UpdateSyncSubStageList{
 		List: []diagnostics.UpdateSyncSubStage{
 			{
-				StageId: string(stages.Snapshots),
+				StageId: "Snapshots",
 				SubStage: diagnostics.SyncSubStage{
 					ID:    "Download header-chain",
 					State: diagnostics.Queued,
 				},
 			},
 			{
-				StageId: string(stages.Snapshots),
+				StageId: "Snapshots",
 				SubStage: diagnostics.SyncSubStage{
 					ID:    "Download snapshots",
 					State: diagnostics.Queued,
