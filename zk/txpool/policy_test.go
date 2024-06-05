@@ -7,20 +7,25 @@ import (
 	"testing"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/gateway-fm/cdk-erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
+	mdbx2 "github.com/torquem-ch/mdbx-go/mdbx"
 )
 
 // newTestState creates new instance of state used by tests.
-func newTestACLDB(tb testing.TB) kv.RwDB {
+func newTestACLDB(tb testing.TB, dir string) kv.RwDB {
 	tb.Helper()
 
-	dir := fmt.Sprintf("/tmp/acl-db-temp_%v", time.Now().UTC().Format(time.RFC3339Nano))
-	err := os.Mkdir(dir, 0775)
+	if dir == "" {
+		dir = fmt.Sprintf("/tmp/acl-db-temp_%v", time.Now().UTC().Format(time.RFC3339Nano))
 
-	if err != nil {
-		tb.Fatal(err)
+		if err := os.Mkdir(dir, 0775); err != nil {
+			tb.Fatal(err)
+		}
 	}
 
 	state, err := OpenACLDB(context.Background(), dir)
@@ -37,10 +42,54 @@ func newTestACLDB(tb testing.TB) kv.RwDB {
 	return state
 }
 
+func newTestTxPoolDB(tb testing.TB, dir string) kv.RwDB {
+	tb.Helper()
+
+	if dir == "" {
+		dir = fmt.Sprintf("/tmp/txpool-db-temp_%v", time.Now().UTC().Format(time.RFC3339Nano))
+	}
+
+	err := os.Mkdir(dir, 0775)
+	if err != nil {
+		tb.Fatal(err)
+	}
+
+	txPoolDB, err := mdbx.NewMDBX(log.New()).Label(kv.TxPoolDB).Path(dir).
+		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).
+		Flags(func(f uint) uint { return f ^ mdbx2.Durable | mdbx2.SafeNoSync }).
+		GrowthStep(16 * datasize.MB).
+		SyncPeriod(30 * time.Second).
+		Open()
+	if err != nil {
+		tb.Fatal(err)
+	}
+
+	tb.Cleanup(func() {
+		if err := os.RemoveAll(dir); err != nil {
+			tb.Fatal(err)
+		}
+	})
+
+	return txPoolDB
+}
+
+func TestCheckDBsCreation(t *testing.T) {
+	t.Parallel()
+
+	path := fmt.Sprintf("/tmp/db-test-%v", time.Now().UTC().Format(time.RFC3339Nano))
+
+	txPoolDB := newTestTxPoolDB(t, path)
+	aclsDB := newTestACLDB(t, path)
+
+	// Check if the dbs are created
+	require.NotNil(t, txPoolDB)
+	require.NotNil(t, aclsDB)
+}
+
 func TestSetMode(t *testing.T) {
 	t.Parallel()
 
-	db := newTestACLDB(t)
+	db := newTestACLDB(t, "")
 	ctx := context.Background()
 
 	t.Run("SetMode - Valid Mode", func(t *testing.T) {
@@ -70,7 +119,7 @@ func TestSetMode(t *testing.T) {
 func TestRemovePolicy(t *testing.T) {
 	t.Parallel()
 
-	db := newTestACLDB(t)
+	db := newTestACLDB(t, "")
 	ctx := context.Background()
 
 	SetMode(ctx, db, BlocklistMode)
@@ -147,7 +196,7 @@ func TestRemovePolicy(t *testing.T) {
 func TestAddPolicy(t *testing.T) {
 	t.Parallel()
 
-	db := newTestACLDB(t)
+	db := newTestACLDB(t, "")
 	ctx := context.Background()
 
 	SetMode(ctx, db, BlocklistMode)
@@ -214,7 +263,7 @@ func TestAddPolicy(t *testing.T) {
 func TestUpdatePolicies(t *testing.T) {
 	t.Parallel()
 
-	db := newTestACLDB(t)
+	db := newTestACLDB(t, "")
 	ctx := context.Background()
 
 	SetMode(ctx, db, BlocklistMode)
