@@ -502,9 +502,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 				return err
 			})
 
-			//if freezingCfg.ProduceE3{
 			//	cfg.agg.BuildFilesInBackground()
-			//}
 
 		}
 

@@ -157,6 +157,8 @@ func ExecV3(ctx context.Context,
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
 	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
 
+	agg.SetProduceMod(blocksFreezeCfg.ProduceE3)
+
 	applyTx := txc.Tx
 	useExternalTx := applyTx != nil
 	if !useExternalTx {
@@ -299,10 +301,7 @@ func ExecV3(ctx context.Context,
 		agg.SetCollateAndBuildWorkers(1)
 	}
 
-	if blocksFreezeCfg.ProduceE3 {
-		//log.Info(fmt.Sprintf("[snapshots] db has steps amount: %s", agg.StepsRangeInDBAsStr(applyTx)))
-		agg.BuildFilesInBackground(outputTxNum.Load())
-	}
+	agg.BuildFilesInBackground(outputTxNum.Load())
 
 	var outputBlockNum = stages.SyncMetrics[stages.Execution]
 	inputBlockNum := &atomic.Uint64{}
@@ -897,9 +896,7 @@ Loop:
 						}
 
 						t2 = time.Since(tt)
-						if blocksFreezeCfg.ProduceE3 {
-							agg.BuildFilesInBackground(outputTxNum.Load())
-						}
+						agg.BuildFilesInBackground(outputTxNum.Load())
 
 						applyTx, err = cfg.db.BeginRw(context.Background()) //nolint
 						if err != nil {
@@ -928,7 +925,7 @@ Loop:
 			}
 		}
 
-		if parallel && blocksFreezeCfg.ProduceE3 { // sequential exec - does aggregate right after commit
+		if parallel { // sequential exec - does aggregate right after commit
 			agg.BuildFilesInBackground(outputTxNum.Load())
 		}
 		select {
@@ -967,9 +964,7 @@ Loop:
 		}
 	}
 
-	if blocksFreezeCfg.ProduceE3 {
-		agg.BuildFilesInBackground(outputTxNum.Load())
-	}
+	agg.BuildFilesInBackground(outputTxNum.Load())
 
 	return nil
 }
