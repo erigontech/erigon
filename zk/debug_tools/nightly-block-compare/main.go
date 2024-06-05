@@ -29,14 +29,18 @@ func getLatestBlockNumber(url string) (*big.Int, error) {
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
-	if body == nil {
-		return nil, fmt.Errorf("failed to read response body")
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %v", err)
 	}
 
 	var result map[string]interface{}
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal response: %v", err)
+	}
+
+	if errorField, ok := result["error"]; ok {
+		return nil, fmt.Errorf("node error: %v", errorField)
 	}
 
 	blockNumberHex, ok := result["result"].(string)
@@ -65,14 +69,18 @@ func getBlockByNumber(url string, number *big.Int) (map[string]interface{}, erro
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
-	if body == nil {
-		return nil, fmt.Errorf("failed to read response body")
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %v", err)
 	}
 
 	var result map[string]interface{}
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal response: %v", err)
+	}
+
+	if errorField, ok := result["error"]; ok {
+		return nil, fmt.Errorf("node error: %v", errorField)
 	}
 
 	blockData, ok := result["result"].(map[string]interface{})
@@ -83,66 +91,169 @@ func getBlockByNumber(url string, number *big.Int) (map[string]interface{}, erro
 	return blockData, nil
 }
 
-func compareBlocks(node1URL, node2URL string, blockNumber *big.Int, diffs chan<- string, wg *sync.WaitGroup) {
+func getClientVersion(url string) (string, error) {
+	requestBody, _ := json.Marshal(map[string]interface{}{
+		"jsonrpc": "2.0",
+		"method":  "web3_clientVersion",
+		"params":  []interface{}{},
+		"id":      1,
+	})
+
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(requestBody))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response body: %v", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("failed to unmarshal response: %v", err)
+	}
+
+	if errorField, ok := result["error"]; ok {
+		return "", fmt.Errorf("node error: %v", errorField)
+	}
+
+	clientVersion, ok := result["result"].(string)
+	if !ok {
+		return "", fmt.Errorf("invalid response format")
+	}
+
+	return clientVersion, nil
+}
+
+func compareBlocks(erigonURL, zkevmURL, sequencerURL string, blockNumber *big.Int, compareMode string, diffs chan<- string, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	block1, err := getBlockByNumber(node1URL, blockNumber)
+	block1, err := getBlockByNumber(erigonURL, blockNumber)
 	if err != nil {
-		log.Printf("Error getting block %d from node 1: %v", blockNumber, err)
+		log.Printf("Error getting block %d from Erigon node: %v", blockNumber, err)
 		return
 	}
 
-	block2, err := getBlockByNumber(node2URL, blockNumber)
+	block2, err := getBlockByNumber(zkevmURL, blockNumber)
 	if err != nil {
-		log.Printf("Error getting block %d from node 2: %v", blockNumber, err)
+		log.Printf("Error getting block %d from zkEVM node: %v", blockNumber, err)
 		return
 	}
 
-	if !cmp.Equal(block1, block2) {
-		diff := cmp.Diff(block1, block2)
-		diffs <- fmt.Sprintf("Mismatch at block %d:\n%s", blockNumber, diff)
+	block3, err := getBlockByNumber(sequencerURL, blockNumber)
+	if err != nil {
+		log.Printf("Error getting block %d from Sequencer node: %v", blockNumber, err)
+		return
+	}
+
+	if compareMode == "full" {
+		if !cmp.Equal(block1, block2) || !cmp.Equal(block1, block3) || !cmp.Equal(block2, block3) {
+			diff := fmt.Sprintf("Mismatch at block %d:\nErigon vs zkEVM vs Sequencer:\n%s", blockNumber,
+				cmp.Diff(block1, block2)+cmp.Diff(block1, block3)+cmp.Diff(block2, block3))
+			diffs <- diff
+		}
+	} else {
+		hash1, hash2, hash3 := block1["hash"].(string), block2["hash"].(string), block3["hash"].(string)
+		stateRoot1, stateRoot2, stateRoot3 := block1["stateRoot"].(string), block2["stateRoot"].(string), block3["stateRoot"].(string)
+
+		if hash1 != hash2 || hash1 != hash3 || stateRoot1 != stateRoot2 || stateRoot1 != stateRoot3 {
+			diff := fmt.Sprintf("Mismatch at block %d:\nErigon vs zkEVM vs Sequencer:\nHash:\n%s vs %s vs %s\nStateRoot:\n%s vs %s vs %s",
+				blockNumber, hash1, hash2, hash3, stateRoot1, stateRoot2, stateRoot3)
+			diffs <- diff
+		}
 	}
 }
 
 func main() {
-	node1URL := flag.String("node1", "http://localhost:8545", "RPC URL of the first node")
-	node2URL := flag.String("node2", "http://localhost:8546", "RPC URL of the second node")
+	erigonURL := flag.String("erigon", "http://localhost:8545", "RPC URL of the Erigon node")
+	zkevmURL := flag.String("zkevm", "http://localhost:8546", "RPC URL of the zkEVM node")
+	sequencerURL := flag.String("sequencer", "http://localhost:8547", "RPC URL of the Sequencer node")
 	numBlocks := flag.Int("blocks", 1000, "Number of blocks to check")
 	blockHeightDiff := flag.Int("diff", 10, "Allowed block height difference between nodes")
+	compareMode := flag.String("mode", "full", "Comparison mode: 'full' or 'root_and_hash'")
 	flag.Parse()
 
-	node1LatestBlock, err := getLatestBlockNumber(*node1URL)
+	var (
+		erigonLatestBlock, zkevmLatestBlock, sequencerLatestBlock *big.Int
+		erigonVersion, zkevmVersion, sequencerVersion             string
+		err                                                       error
+	)
+
+	erigonLatestBlock, err = getLatestBlockNumber(*erigonURL)
 	if err != nil {
-		log.Fatalf("Failed to get latest block number from node 1: %v", err)
+		log.Printf("Warning: Failed to get latest block number from Erigon node: %v", err)
+	} else {
+		erigonVersion, err = getClientVersion(*erigonURL)
+		if err != nil {
+			log.Printf("Warning: Failed to get client version from Erigon node: %v", err)
+		} else {
+			log.Println("Erigon latest block number: ", erigonLatestBlock)
+			log.Println("Erigon client version: ", erigonVersion)
+		}
 	}
 
-	node2LatestBlock, err := getLatestBlockNumber(*node2URL)
+	zkevmLatestBlock, err = getLatestBlockNumber(*zkevmURL)
 	if err != nil {
-		log.Fatalf("Failed to get latest block number from node 2: %v", err)
+		log.Printf("Warning: Failed to get latest block number from zkEVM node: %v", err)
+	} else {
+		zkevmVersion, err = getClientVersion(*zkevmURL)
+		if err != nil {
+			log.Printf("Warning: Failed to get client version from zkEVM node: %v", err)
+		} else {
+			log.Println("zkEVM latest block number: ", zkevmLatestBlock)
+			log.Println("zkEVM client version: ", zkevmVersion)
+		}
 	}
 
-	// print the block numbers
-	log.Println("Node 1 latest block number: ", node1LatestBlock)
-	log.Println("Node 2 latest block number: ", node2LatestBlock)
+	sequencerLatestBlock, err = getLatestBlockNumber(*sequencerURL)
+	if err != nil {
+		log.Fatalf("Failed to get latest block number from Sequencer: %v", err)
+	} else {
+		sequencerVersion, err = getClientVersion(*sequencerURL)
+		if err != nil {
+			log.Fatalf("Failed to get client version from Sequencer: %v", err)
+		} else {
+			log.Println("Sequencer latest block number: ", sequencerLatestBlock)
+			log.Println("Sequencer client version: ", sequencerVersion)
+		}
+	}
 
-	// log out the check height
 	log.Printf("Checking %d blocks\n", *numBlocks)
 
-	if new(big.Int).Abs(new(big.Int).Sub(node1LatestBlock, node2LatestBlock)).Cmp(big.NewInt(int64(*blockHeightDiff))) > 0 {
-		log.Fatalf("Nodes are more than %d blocks apart: node 1 at %d, node 2 at %d", *blockHeightDiff, node1LatestBlock, node2LatestBlock)
+	// sequencer as 'reference block height'
+	if erigonLatestBlock != nil && new(big.Int).Abs(new(big.Int).Sub(erigonLatestBlock, sequencerLatestBlock)).Cmp(big.NewInt(int64(*blockHeightDiff))) > 0 {
+		log.Printf("Warning: Erigon node is more than %d blocks apart from Sequencer: Erigon at %d, Sequencer at %d", *blockHeightDiff, erigonLatestBlock, sequencerLatestBlock)
 	}
 
-	startBlock := node1LatestBlock
-	if node2LatestBlock.Cmp(startBlock) < 0 {
-		startBlock = node2LatestBlock
+	if zkevmLatestBlock != nil && new(big.Int).Abs(new(big.Int).Sub(zkevmLatestBlock, sequencerLatestBlock)).Cmp(big.NewInt(int64(*blockHeightDiff))) > 0 {
+		log.Printf("Warning: zkEVM node is more than %d blocks apart from Sequencer: zkEVM at %d, Sequencer at %d", *blockHeightDiff, zkevmLatestBlock, sequencerLatestBlock)
+	}
+
+	startBlock := sequencerLatestBlock
+	if erigonLatestBlock != nil && erigonLatestBlock.Cmp(startBlock) < 0 {
+		startBlock = erigonLatestBlock
+	}
+
+	if zkevmLatestBlock != nil && zkevmLatestBlock.Cmp(startBlock) < 0 {
+		startBlock = zkevmLatestBlock
+	}
+
+	log.Println("Starting block number: ", startBlock)
+
+	if erigonLatestBlock == nil && zkevmLatestBlock == nil {
+		log.Fatalf("Failed to get latest block number from both Erigon and zkEVM nodes")
 	}
 
 	var wg sync.WaitGroup
 	diffs := make(chan string, *numBlocks)
 	for i := 0; i < *numBlocks; i++ {
 		blockNumber := new(big.Int).Sub(startBlock, big.NewInt(int64(i)))
-		wg.Add(1)
-		go compareBlocks(*node1URL, *node2URL, blockNumber, diffs, &wg)
+		if erigonLatestBlock != nil && zkevmLatestBlock != nil {
+			wg.Add(1)
+			go compareBlocks(*erigonURL, *zkevmURL, *sequencerURL, blockNumber, *compareMode, diffs, &wg)
+		}
 	}
 	wg.Wait()
 	close(diffs)

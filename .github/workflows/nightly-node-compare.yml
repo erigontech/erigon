@@ -11,10 +11,11 @@ jobs:
 
     strategy:
       matrix:
-        node-pairs:
+        nodes:
           - name: "Integration 5"
-            node1: "http://34.175.214.161:8500"
-            node2: "http://34.175.214.161:8505"
+            erigon: "http://34.175.214.161:8500"
+            zkevm: "http://34.175.214.161:8505"
+            sequencer: "http://34.175.214.161:8005"
 
     steps:
       - name: Checkout code
@@ -35,4 +36,4 @@ jobs:
       - name: Run block comparison
         run: |
           echo "Comparing blocks for pair: ${{ matrix.node-pairs.name }}"
-          ./compare_blocks -node1 ${{ matrix.node-pairs.node1 }} -node2 ${{ matrix.node-pairs.node2 }} -blocks 1000 -diff 10
+          ./compare_blocks -erigon ${{ matrix.node-pairs.erigon }} -zkevm ${{ matrix.node-pairs.zkevm }} -sequencer ${{ matrix.node-pairs.sequencer }} -blocks 1000 -diff 10
