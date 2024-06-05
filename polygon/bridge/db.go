@@ -247,36 +247,3 @@ func UnwindMap(ctx context.Context, db *polygoncommon.Database, blockNum uint64)
 
 	return nil
 }
-
-func DumpMap(ctx context.Context, db *polygoncommon.Database) (map[uint64]IDRange, error) {
-	tx, err := db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	m := make(map[uint64]IDRange)
-
-	it, err := tx.Range(kv.PolygonBridgeMap, nil, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	for it.HasNext() {
-		k, v, err := it.Next()
-		if err != nil {
-			return nil, err
-		}
-
-		var r IDRange
-		err = r.UnmarshalBytes(v)
-		if err != nil {
-			return nil, err
-		}
-
-		blockNum := binary.BigEndian.Uint64(k)
-		m[blockNum] = r
-	}
-
-	return m, nil
-}
