@@ -137,7 +137,7 @@ func init() {
 type BlocksFreezing struct {
 	Enabled        bool
 	KeepBlocks     bool // produce new snapshots of blocks but don't remove blocks from DB
-	ProduceE2      bool // produce new snapshots
+	ProduceE2      bool // produce new block files
 	ProduceE3      bool // produce new state files
 	NoDownloader   bool // possible to use snapshots without calling Downloader
 	Verify         bool // verify snapshots on startup
@@ -164,8 +164,8 @@ var (
 	FlagSnapStateStop  = "snap.state.stop"
 )
 
-func NewSnapCfg(enabled, keepBlocks, produce bool) BlocksFreezing {
-	return BlocksFreezing{Enabled: enabled, KeepBlocks: keepBlocks, ProduceE2: produce}
+func NewSnapCfg(enabled, keepBlocks, produceE2, produceE3 bool) BlocksFreezing {
+	return BlocksFreezing{Enabled: enabled, KeepBlocks: keepBlocks, ProduceE2: produceE2, ProduceE3: produceE3}
 }
 
 // Config contains configuration options for ETH protocol.

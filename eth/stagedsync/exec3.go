@@ -136,7 +136,7 @@ rwloop does:
   - commit
   - open new RoTx
   - set new RoTx to all Workers
-  - start Workersстартует воркеры
+  - start Worker start workers
 
 When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rotate+agg.Flush)
 */
@@ -155,9 +155,6 @@ func ExecV3(ctx context.Context,
 	blockReader := cfg.blockReader
 	agg, engine := cfg.agg, cfg.engine
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
-	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
-
-	agg.SetProduceMod(blocksFreezeCfg.ProduceE3)
 
 	applyTx := txc.Tx
 	useExternalTx := applyTx != nil

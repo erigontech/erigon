@@ -469,7 +469,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 				minBlockNumber = cfg.snapshotUploader.minBlockNumber()
 			}
 
-			if s.CurrentSyncCycle.IsFirstCycle {
+			if s.CurrentSyncCycle.IsInitialCycle {
 				cfg.blockRetire.SetWorkers(estimate.CompressSnapshot.Workers())
 			} else {
 				cfg.blockRetire.SetWorkers(1)
