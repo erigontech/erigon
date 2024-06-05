@@ -15,6 +15,7 @@ import (
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/erigon/core/types"
+	"errors"
 )
 
 type SequencerL1BlockSyncCfg struct {
@@ -151,6 +152,12 @@ LOOP:
 				lastBatchSequenced := l.Topics[1].Big().Uint64()
 				latestBatch = lastBatchSequenced
 
+				l1InfoRoot := l.Data
+				if len(l1InfoRoot) != 32 {
+					log.Error(fmt.Sprintf("[%s] L1 info root is not 32 bytes", logPrefix), "tx-hash", l.TxHash.String())
+					return errors.New("l1 info root is not 32 bytes")
+				}
+
 				batches, coinbase, err := l1_data.DecodeL1BatchData(transaction.GetData())
 				if err != nil {
 					return err
@@ -170,7 +177,11 @@ LOOP:
 				// this is important because the batches are written in reverse order
 				for idx, batch := range batches {
 					b := initBatch + uint64(idx)
-					data := append(coinbase.Bytes(), batch...)
+					data := make([]byte, 20+32+len(batch))
+					copy(data, coinbase.Bytes())
+					copy(data[20:], l1InfoRoot)
+					copy(data[52:], batch)
+
 					if err := hermezDb.WriteL1BatchData(b, data); err != nil {
 						return err
 					}

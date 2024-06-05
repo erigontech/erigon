@@ -41,6 +41,8 @@ const REUSED_L1_INFO_TREE_INDEX = "reused_l1_info_tree_index"          // block 
 const LATEST_USED_GER = "latest_used_ger"                              // batch number -> GER latest used GER
 const BATCH_BLOCKS = "batch_blocks"                                    // batch number -> block numbers (concatenated together)
 const SMT_DEPTHS = "smt_depths"                                        // block number -> smt depth
+const L1_INFO_LEAVES = "l1_info_leaves"                                // l1 info tree index -> l1 info tree leaf
+const L1_INFO_ROOTS = "l1_info_roots"                                  // root hash -> l1 info tree index
 
 type HermezDb struct {
 	tx kv.RwTx
@@ -93,6 +95,8 @@ func CreateHermezBuckets(tx kv.RwTx) error {
 		LATEST_USED_GER,
 		BATCH_BLOCKS,
 		SMT_DEPTHS,
+		L1_INFO_LEAVES,
+		L1_INFO_ROOTS,
 	}
 	for _, t := range tables {
 		if err := tx.CreateBucket(t); err != nil {
@@ -1327,4 +1331,38 @@ func (db *HermezDb) TruncateSmtDepths(fromBlock uint64) error {
 	}
 
 	return nil
+}
+
+func (db *HermezDb) WriteL1InfoTreeLeaf(l1Index uint64, leaf common.Hash) error {
+	return db.tx.Put(L1_INFO_LEAVES, Uint64ToBytes(l1Index), leaf.Bytes())
+}
+
+func (db *HermezDb) GetAllL1InfoTreeLeaves() ([]common.Hash, error) {
+	c, err := db.tx.Cursor(L1_INFO_LEAVES)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+
+	var leaves []common.Hash
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return nil, err
+		}
+		leaves = append(leaves, common.BytesToHash(v))
+	}
+
+	return leaves, nil
+}
+
+func (db *HermezDb) WriteL1InfoTreeRoot(hash common.Hash, index uint64) error {
+	return db.tx.Put(L1_INFO_ROOTS, hash.Bytes(), Uint64ToBytes(index))
+}
+
+func (db *HermezDb) GetL1InfoTreeIndexByRoot(hash common.Hash) (uint64, bool, error) {
+	data, err := db.tx.GetOne(L1_INFO_ROOTS, hash.Bytes())
+	if err != nil {
+		return 0, false, err
+	}
+	return BytesToUint64(data), data != nil, nil
 }

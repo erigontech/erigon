@@ -34,6 +34,7 @@ import (
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
 	"github.com/ledgerwatch/erigon/zk/txpool"
 	zktypes "github.com/ledgerwatch/erigon/zk/types"
+	"github.com/ledgerwatch/log/v3"
 )
 
 const (
@@ -333,7 +334,13 @@ type batchChecker interface {
 	GetL1InfoTreeUpdate(idx uint64) (*zktypes.L1InfoTreeUpdate, error)
 }
 
-func checkForBadBatch(hermezDb batchChecker, latestTimestamp uint64, decodedBlocks []zktx.DecodedBatchL2Data) (bool, error) {
+func checkForBadBatch(
+	batchNo uint64,
+	hermezDb batchChecker,
+	latestTimestamp uint64,
+	highestAllowedInfoTreeIndex uint64,
+	decodedBlocks []zktx.DecodedBatchL2Data,
+) (bool, error) {
 	timestamp := latestTimestamp
 
 	for _, decodedBlock := range decodedBlocks {
@@ -346,16 +353,25 @@ func checkForBadBatch(hermezDb batchChecker, latestTimestamp uint64, decodedBloc
 			}
 			if l1Info == nil {
 				// can't use an index that doesn't exist, so we have a bad batch
+				log.Error("batch used info tree index that doesn't exist", "batch", batchNo, "index", decodedBlock.L1InfoTreeIndex)
 				return true, nil
 			}
 
 			// we have an invalid batch if the block timestamp is lower than the l1 info min timestamp value
 			if timestamp < l1Info.Timestamp {
+				log.Error("batch used info tree index with timestamp lower than allowed", "batch", batchNo, "index", decodedBlock.L1InfoTreeIndex, "timestamp", timestamp, "min_timestamp", l1Info.Timestamp)
 				return true, nil
 			}
 
 			// now check the limit timestamp we can't have used l1 info tree index from the future
 			if l1Info.Timestamp > timestamp {
+				log.Error("batch used info tree index with timestamp higher than allowed", "batch", batchNo, "index", decodedBlock.L1InfoTreeIndex, "timestamp", timestamp, "max_timestamp", l1Info.Timestamp)
+				return true, nil
+			}
+
+			// now finally check that the index used is lower or equal to the highest allowed index
+			if uint64(decodedBlock.L1InfoTreeIndex) > highestAllowedInfoTreeIndex {
+				log.Error("batch used info tree index higher than the current info tree root allows", "batch", batchNo, "index", decodedBlock.L1InfoTreeIndex, "highest_allowed", highestAllowedInfoTreeIndex)
 				return true, nil
 			}
 		}

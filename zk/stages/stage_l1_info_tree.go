@@ -13,6 +13,8 @@ import (
 	"github.com/ledgerwatch/erigon/zk/contracts"
 	"sort"
 	"time"
+	"github.com/ledgerwatch/erigon/zk/l1infotree"
+	"github.com/gateway-fm/cdk-erigon-lib/common"
 )
 
 type L1InfoTreeCfg struct {
@@ -101,6 +103,10 @@ LOOP:
 	defer ticker.Stop()
 	processed := 0
 
+	var tree *l1infotree.L1InfoTree
+	var allLeaves [][32]byte
+	treeInitialised := false
+
 	// process the logs in chunks
 	for _, chunk := range chunks {
 		select {
@@ -118,11 +124,40 @@ LOOP:
 			header := headersMap[l.BlockNumber]
 			switch l.Topics[0] {
 			case contracts.UpdateL1InfoTreeTopic:
+				if !treeInitialised {
+					tree, allLeaves, err = initialiseL1InfoTree(hermezDb)
+					if err != nil {
+						return err
+					}
+					treeInitialised = true
+				}
+
 				latestUpdate, err = HandleL1InfoTreeUpdate(cfg.syncer, hermezDb, l, latestUpdate, found, header)
 				if err != nil {
 					return err
 				}
 				found = true
+
+				leafHash := l1infotree.HashLeafData(latestUpdate.GER, latestUpdate.ParentHash, latestUpdate.Timestamp)
+
+				err = hermezDb.WriteL1InfoTreeLeaf(latestUpdate.Index, leafHash)
+				if err != nil {
+					return err
+				}
+
+				// we do not want to add index 0 to the tree
+				allLeaves = append(allLeaves, leafHash)
+
+				newRoot, err := tree.BuildL1InfoRoot(allLeaves)
+				if err != nil {
+					return err
+				}
+
+				err = hermezDb.WriteL1InfoTreeRoot(common.BytesToHash(newRoot[:]), latestUpdate.Index)
+				if err != nil {
+					return err
+				}
+
 				processed++
 			default:
 				log.Warn("received unexpected topic from l1 info tree stage", "topic", l.Topics[0])
@@ -162,6 +197,25 @@ func chunkLogs(slice []types.Log, chunkSize int) [][]types.Log {
 		chunks = append(chunks, slice[i:end])
 	}
 	return chunks
+}
+
+func initialiseL1InfoTree(hermezDb *hermez_db.HermezDb) (*l1infotree.L1InfoTree, [][32]byte, error) {
+	leaves, err := hermezDb.GetAllL1InfoTreeLeaves()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	allLeaves := make([][32]byte, len(leaves))
+	for i, l := range leaves {
+		allLeaves[i] = l
+	}
+
+	tree, err := l1infotree.NewL1InfoTree(32, allLeaves)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return tree, allLeaves, nil
 }
 
 func UnwindL1InfoTreeStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg L1InfoTreeCfg, ctx context.Context) error {

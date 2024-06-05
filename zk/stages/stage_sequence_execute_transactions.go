@@ -65,30 +65,31 @@ LOOP:
 	return transactions, err
 }
 
-func getNextL1BatchData(batchNumber uint64, forkId uint64, hermezDb *hermez_db.HermezDb) ([]zktx.DecodedBatchL2Data, common.Address, bool, error) {
+func getNextL1BatchData(batchNumber uint64, forkId uint64, hermezDb *hermez_db.HermezDb) ([]zktx.DecodedBatchL2Data, common.Address, common.Hash, bool, error) {
 	// we expect that the batch we're going to load in next should be in the db already because of the l1 block sync
 	// stage, if it is not there we need to panic as we're in a bad state
 	batchL2Data, err := hermezDb.GetL1BatchData(batchNumber)
 	if err != nil {
-		return nil, common.Address{}, true, err
+		return nil, common.Address{}, common.Hash{}, true, err
 	}
 
 	if len(batchL2Data) == 0 {
 		// end of the line for batch recovery so return empty
-		return nil, common.Address{}, false, nil
+		return nil, common.Address{}, common.Hash{}, false, nil
 	}
 
 	coinbase := common.BytesToAddress(batchL2Data[:length.Addr])
-	batchL2Data = batchL2Data[length.Addr:]
+	l1InfoRoot := common.BytesToHash(batchL2Data[length.Addr : length.Addr+length.Hash])
+	batchL2Data = batchL2Data[length.Addr+length.Hash:]
 
 	decodedBlockData, err := zktx.DecodeBatchL2Blocks(batchL2Data, forkId)
 	if err != nil {
-		return nil, common.Address{}, true, err
+		return nil, common.Address{}, common.Hash{}, true, err
 	}
 
 	// no data means no more work to do - end of the line
 	if len(decodedBlockData) == 0 {
-		return nil, common.Address{}, false, nil
+		return nil, common.Address{}, common.Hash{}, false, nil
 	}
 
 	isWorkRemaining := true
@@ -101,14 +102,14 @@ func getNextL1BatchData(batchNumber uint64, forkId uint64, hermezDb *hermez_db.H
 		// highest known batch number to see if we have work to do still
 		highestKnown, err := hermezDb.GetLastL1BatchData()
 		if err != nil {
-			return nil, common.Address{}, true, err
+			return nil, common.Address{}, common.Hash{}, true, err
 		}
 		if batchNumber >= highestKnown {
 			isWorkRemaining = false
 		}
 	}
 
-	return decodedBlockData, coinbase, isWorkRemaining, err
+	return decodedBlockData, coinbase, l1InfoRoot, isWorkRemaining, err
 }
 
 func extractTransactionsFromSlot(slot types2.TxsRlp) ([]types.Transaction, error) {
