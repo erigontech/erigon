@@ -311,14 +311,14 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwi
 			}
 		}
 	} else {
-		prevValuesAccounts := changeset.Diffs[kv.AccountsDomain].GetKeys()
-		for _, kv := range prevValuesAccounts {
+		accountDiffs := changeset.Diffs[kv.AccountsDomain].GetDiffSet()
+		for _, kv := range accountDiffs {
 			if err := stateChanges.Collect(kv.Key[:length.Addr], kv.Value); err != nil {
 				return err
 			}
 		}
-		prevValuesStorage := changeset.Diffs[kv.StorageDomain].GetKeys()
-		for _, kv := range prevValuesStorage {
+		storageDiffs := changeset.Diffs[kv.StorageDomain].GetDiffSet()
+		for _, kv := range storageDiffs {
 			if err := stateChanges.Collect(kv.Key, kv.Value); err != nil {
 				return err
 			}

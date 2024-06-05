@@ -116,7 +116,7 @@ func (d *StateDiffDomain) DomainUpdate(key1, key2, prevValue, stepBytes []byte, 
 	}
 }
 
-func (d *StateDiffDomain) GetKeys() (keysToValue []KVPair) {
+func (d *StateDiffDomain) GetDiffSet() (keysToValue []KVPair) {
 	if len(d.prevValsSlice) != 0 {
 		return d.prevValsSlice
 	}

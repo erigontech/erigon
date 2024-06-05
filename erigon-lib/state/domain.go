@@ -1181,7 +1181,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	binary.BigEndian.PutUint64(stepBytes, ^step)
 	// Attempt to use the diff to unwind the domain
 	if diff != nil {
-		valsKV := diff.GetKeys()
+		domainDiffs := diff.GetDiffSet()
 		keysCursor, err := rwTx.RwCursorDupSort(d.keysTable)
 		if err != nil {
 			return fmt.Errorf("create %s domain delete cursor: %w", d.filenameBase, err)
@@ -1189,14 +1189,16 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		defer keysCursor.Close()
 
 		// First revert keys
-		for _, kv := range valsKV {
-			fullKey := kv.Key[:len(kv.Key)-8]
+		for i := range domainDiffs {
+			key, value, prevStepBytes := domainDiffs[i].Key, domainDiffs[i].Value, domainDiffs[i].PrevStepBytes
+			// First, we need to evict from the keysCursor all keys that have a too high step
+			fullKey := key[:len(key)-8]
 			// so stepBytes is ^step so we need to iterate from the begining down until we find the stepBytes
 			for k, v, err := keysCursor.SeekExact(fullKey); k != nil; k, v, err = keysCursor.NextDup() {
 				if err != nil {
 					return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
 				}
-				if bytes.Compare(v, kv.PrevStepBytes) >= 0 { // remove all values up to the previous step
+				if bytes.Compare(v, prevStepBytes) >= 0 { // remove all values up to the previous step
 					break
 				}
 
@@ -1204,14 +1206,13 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 					return err
 				}
 			}
-		}
-		for _, kv := range valsKV {
-			if len(kv.Value) == 0 {
-				if err := rwTx.Delete(d.valsTable, kv.Key); err != nil {
+			// Second, we need to restore the previous value
+			if len(value) == 0 {
+				if err := rwTx.Delete(d.valsTable, key); err != nil {
 					return err
 				}
 			} else {
-				if err := rwTx.Put(d.valsTable, kv.Key, kv.Value); err != nil {
+				if err := rwTx.Put(d.valsTable, key, value); err != nil {
 					return err
 				}
 			}
@@ -1233,7 +1234,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	if err != nil {
 		return err
 	}
-	seen := make(map[string][]byte)
+	seen := make(map[string]struct{})
 
 	for histRng.HasNext() && txNumUnwindTo > 0 {
 		k, v, _, err := histRng.Next()
@@ -1259,7 +1260,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			return err
 		}
 		ic.Close()
-		seen[string(k)] = v
+		seen[string(k)] = struct{}{}
 	}
 
 	keysCursorForDeletes, err := rwTx.RwCursorDupSort(d.keysTable)
