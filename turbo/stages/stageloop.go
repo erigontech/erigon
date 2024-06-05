@@ -157,10 +157,11 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.F
 		}
 
 		if !more {
-			log.Warn("[dbg] ProcessFrozenBlocks exit3", "finStageProgress", finStageProgress, "blockReader.FrozenBlocks() ", blockReader.FrozenBlocks())
+			log.Warn("[dbg] ProcessFrozenBlocks exit3")
 			break
 		}
 	}
+	log.Warn("[dbg] ProcessFrozenBlocks exit4")
 	return nil
 }
 
