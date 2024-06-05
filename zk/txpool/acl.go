@@ -3,6 +3,7 @@ package txpool
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,7 +14,10 @@ import (
 	mdbx2 "github.com/torquem-ch/mdbx-go/mdbx"
 )
 
-const modeKey = "mode"
+const (
+	aclFolder = "acls"
+	modeKey   = "mode"
+)
 
 type ACLTable string
 
@@ -108,7 +112,12 @@ func init() {
 
 // OpenACLDB opens the ACL database
 func OpenACLDB(ctx context.Context, dbDir string) (kv.RwDB, error) {
-	aclDB, err := mdbx.NewMDBX(log.New()).Label(ACLDB).Path(dbDir).
+	path := dbDir
+	if !IsACLsPath(dbDir) {
+		path = filepath.Join(dbDir, aclFolder)
+	}
+
+	aclDB, err := mdbx.NewMDBX(log.New()).Label(ACLDB).Path(path).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return ACLTablesCfg }).
 		Flags(func(f uint) uint { return f ^ mdbx2.Durable | mdbx2.SafeNoSync }).
 		GrowthStep(16 * datasize.MB).
@@ -119,4 +128,9 @@ func OpenACLDB(ctx context.Context, dbDir string) (kv.RwDB, error) {
 	}
 
 	return aclDB, nil
+}
+
+// IsACLsPath checks if the given path is an ACLs path
+func IsACLsPath(path string) bool {
+	return strings.HasSuffix(filepath.ToSlash(path), "/"+aclFolder)
 }
