@@ -66,10 +66,6 @@ func NewZKEVMInterpreter(evm VMInterpreter, cfg ZkConfig) *EVMInterpreter {
 	// the EVM
 	if cfg.CounterCollector != nil {
 		WrapJumpTableWithZkCounters(jt, SimpleCounterOperations(cfg.CounterCollector))
-
-		// if cfg.TracerCollector {
-		// 	WrapJumpTableWithTracerCounters(jt)
-		// }
 	}
 
 	return &EVMInterpreter{

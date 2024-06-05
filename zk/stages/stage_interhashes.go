@@ -13,6 +13,7 @@ import (
 	db2 "github.com/ledgerwatch/erigon/smt/pkg/db"
 	"github.com/ledgerwatch/erigon/smt/pkg/smt"
 	"github.com/ledgerwatch/erigon/smt/pkg/utils"
+	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/log/v3"
 
 	"strings"
@@ -139,7 +140,7 @@ func SpawnZkIntermediateHashesStage(s *stagedsync.StageState, u stagedsync.Unwin
 	} else {
 		// default behaviour
 		if s.BlockNumber == 0 || shouldRegenerate {
-			if root, err = regenerateIntermediateHashes(logPrefix, tx, eridb, smt); err != nil {
+			if root, err = regenerateIntermediateHashes(logPrefix, tx, eridb, smt, to); err != nil {
 				return trie.EmptyRoot, err
 			}
 		} else {
@@ -231,6 +232,11 @@ func UnwindZkIntermediateHashesStage(u *stagedsync.UnwindState, s *stagedsync.St
 	}
 	_ = root
 
+	hermezDb := hermez_db.NewHermezDb(tx)
+	if err := hermezDb.TruncateSmtDepths(u.UnwindPoint); err != nil {
+		return err
+	}
+
 	if err := u.Done(tx); err != nil {
 		return err
 	}
@@ -242,7 +248,7 @@ func UnwindZkIntermediateHashesStage(u *stagedsync.UnwindState, s *stagedsync.St
 	return nil
 }
 
-func regenerateIntermediateHashes(logPrefix string, db kv.RwTx, eridb *db2.EriDb, smtIn *smt.SMT) (common.Hash, error) {
+func regenerateIntermediateHashes(logPrefix string, db kv.RwTx, eridb *db2.EriDb, smtIn *smt.SMT, toBlock uint64) (common.Hash, error) {
 	log.Info(fmt.Sprintf("[%s] Regeneration trie hashes started", logPrefix))
 	defer log.Info(fmt.Sprintf("[%s] Regeneration ended", logPrefix))
 
@@ -336,6 +342,12 @@ func regenerateIntermediateHashes(logPrefix string, db kv.RwTx, eridb *db2.EriDb
 	}
 
 	root := smtIn.LastRoot()
+
+	// save it here so we don't
+	hermezDb := hermez_db.NewHermezDb(db)
+	if err := hermezDb.WriteSmtDepth(toBlock, uint64(smtIn.GetDepth())); err != nil {
+		return trie.EmptyRoot, err
+	}
 
 	return common.BigToHash(root), nil
 }
@@ -440,6 +452,13 @@ func zkIncrementIntermediateHashes(ctx context.Context, logPrefix string, s *sta
 	lr := dbSmt.LastRoot()
 
 	hash := common.BigToHash(lr)
+
+	// do not put this outside, because sequencer uses this function to calculate root for each block
+	hermezDb := hermez_db.NewHermezDb(db)
+	if err := hermezDb.WriteSmtDepth(to, uint64(dbSmt.GetDepth())); err != nil {
+		return trie.EmptyRoot, err
+	}
+
 	return hash, nil
 }
 

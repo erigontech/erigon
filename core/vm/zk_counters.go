@@ -325,6 +325,34 @@ func WrapJumpTableWithZkCounters(originalTable *JumpTable, counterCalls *[256]ex
 	return result
 }
 
+// func WrapJumpTableWithTracerCounters(originalTable *JumpTable) *JumpTable {
+// 	wrapper := func(original, counter executionFunc) executionFunc {
+// 		return func(p *uint64, i *EVMInterpreter, s *ScopeContext) ([]byte, error) {
+// 			b, err := counter(p, i, s)
+// 			if err != nil {
+// 				return b, err
+// 			}
+// 			return original(p, i, s)
+// 		}
+// 	}
+
+// 	result := &JumpTable{}
+
+// 	for idx := range originalTable {
+// 		original := originalTable[idx]
+// 		// if we have something in the Counter table to process wrap the function call
+// 		if counterCalls[idx] != nil {
+// 			originalExec := originalTable[idx].execute
+// 			counterExec := counterCalls[idx]
+// 			wrappedExec := wrapper(originalExec, counterExec)
+// 			original.execute = wrappedExec
+// 		}
+// 		result[idx] = original
+// 	}
+
+// 	return result
+// }
+
 func SimpleCounterOperations(cc *CounterCollector) *[256]executionFunc {
 	calls := &[256]executionFunc{
 		ADD:            cc.opAdd,
