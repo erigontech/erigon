@@ -815,12 +815,10 @@ Loop:
 						return err
 					}
 					if errors.Is(err, consensus.ErrInvalidBlock) {
-						log.Warn("[dbg] requequest unwind1", "blockNum", blockNum)
 						if err := u.UnwindTo(blockNum-1, BadBlock(header.Hash(), err), applyTx); err != nil {
 							return err
 						}
 					} else {
-						log.Warn("[dbg] requequest unwind2", "blockNum", blockNum)
 						if err := u.UnwindTo(blockNum-1, ExecUnwind, applyTx); err != nil {
 							return err
 						}
