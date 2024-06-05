@@ -123,6 +123,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.F
 	initialCycle, firstCycle := true, true
 	for {
 		// run stages first time - it will download blocks
+		log.Warn("[dbg] ProcessFrozenBlocks iter", "initialCycle", initialCycle, "firstCycle", firstCycle)
 		more, err := sync.Run(db, wrap.TxContainer{}, initialCycle, firstCycle)
 		if err != nil {
 			return err
@@ -142,6 +143,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.F
 				return err
 			}
 			if finStageProgress >= blockReader.FrozenBlocks() {
+				log.Warn("[dbg] ProcessFrozenBlocks exit", "finStageProgress", finStageProgress, "blockReader.FrozenBlocks() ", blockReader.FrozenBlocks())
 				break
 			}
 		} else {
