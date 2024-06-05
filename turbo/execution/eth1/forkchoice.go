@@ -294,7 +294,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
-		if _, err := e.executionPipeline.Run(e.db, wrap.TxContainer{Tx: tx}, limitedBigJump, true); err != nil {
+		if _, err := e.executionPipeline.Run(e.db, wrap.TxContainer{Tx: tx}, false, false); err != nil {
 			err = fmt.Errorf("updateForkChoice: %w", err)
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
