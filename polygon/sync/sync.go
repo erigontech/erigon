@@ -54,7 +54,7 @@ func NewSync(
 }
 
 func (s *Sync) commitExecution(ctx context.Context, newTip *types.Header, finalizedHeader *types.Header) error {
-	if err := s.store.Flush(ctx); err != nil {
+	if err := s.store.Flush(ctx, newTip); err != nil {
 		return err
 	}
 	return s.execution.UpdateForkChoice(ctx, newTip, finalizedHeader)

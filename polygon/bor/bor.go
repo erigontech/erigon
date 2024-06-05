@@ -43,6 +43,7 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/bor/finality/whitelist"
 	"github.com/ledgerwatch/erigon/polygon/bor/statefull"
 	"github.com/ledgerwatch/erigon/polygon/bor/valset"
+	"github.com/ledgerwatch/erigon/polygon/bridge"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -308,6 +309,7 @@ type Bor struct {
 	frozenSnapshotsInit sync.Once
 	rootHashCache       *lru.ARCCache[string, string]
 	headerProgress      HeaderProgress
+	polygonBridge       bridge.PolygonBridge
 }
 
 type signer struct {
@@ -324,6 +326,7 @@ func New(
 	heimdallClient heimdall.HeimdallClient,
 	genesisContracts GenesisContracts,
 	logger log.Logger,
+	polygonBridge bridge.Service,
 ) *Bor {
 	// get bor config
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
@@ -350,6 +353,7 @@ func New(
 		execCtx:                context.Background(),
 		logger:                 logger,
 		closeCh:                make(chan struct{}),
+		polygonBridge:          polygonBridge,
 	}
 
 	c.authorizedSigner.Store(&signer{
@@ -975,7 +979,7 @@ func (c *Bor) CalculateRewards(config *chain.Config, header *types.Header, uncle
 // rewards given.
 func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal, requests []*types.Request,
-	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
+	chain consensus.ChainReader, syscall consensus.SystemCall, syscall2 consensus.SystemCall2, logger log.Logger,
 ) (types.Transactions, types.Receipts, error) {
 	headerNumber := header.Number.Uint64()
 
@@ -998,7 +1002,7 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 				return nil, types.Receipts{}, err
 			}
 			// commit states
-			if err := c.CommitStates(state, header, cx, syscall); err != nil {
+			if err := c.CommitStates(state, header, cx, syscall, syscall2); err != nil {
 				err := fmt.Errorf("Finalize.CommitStates: %w", err)
 				c.logger.Error("[bor] Error while committing states", "err", err)
 				return nil, types.Receipts{}, err
@@ -1043,7 +1047,7 @@ func (c *Bor) changeContractCodeIfNeeded(headerNumber uint64, state *state.Intra
 // nor block rewards given, and returns the final block.
 func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests []*types.Request,
-	chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
+	chain consensus.ChainReader, syscall consensus.SystemCall, syscall2 consensus.SystemCall2, call consensus.Call, logger log.Logger,
 ) (*types.Block, types.Transactions, types.Receipts, error) {
 	// stateSyncData := []*types.StateSyncData{}
 
@@ -1068,7 +1072,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 				return nil, nil, types.Receipts{}, err
 			}
 			// commit states
-			if err := c.CommitStates(state, header, cx, syscall); err != nil {
+			if err := c.CommitStates(state, header, cx, syscall, syscall2); err != nil {
 				err := fmt.Errorf("FinalizeAndAssemble.CommitStates: %w", err)
 				c.logger.Error("[bor] committing states", "err", err)
 				return nil, nil, types.Receipts{}, err
@@ -1457,8 +1461,23 @@ func (c *Bor) CommitStates(
 	header *types.Header,
 	chain statefull.ChainContext,
 	syscall consensus.SystemCall,
+	syscall2 consensus.SystemCall2,
 ) error {
 	blockNum := header.Number.Uint64()
+
+	if c.polygonBridge != nil {
+		events := c.polygonBridge.GetEvents(context.Background(), blockNum) // TODO: pass context
+		c.logger.Warn("using polygon bridge", "len(events)", len(events))
+
+		for _, event := range events {
+			_, err := syscall2(event)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
 	events := chain.Chain.BorEventsByBlock(header.Hash(), blockNum)
 
 	//if len(events) == 50 || len(events) == 0 { // we still sometime could get 0 events from borevent file

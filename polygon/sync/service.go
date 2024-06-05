@@ -10,7 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
 	"github.com/ledgerwatch/erigon/p2p/sentry"
-	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"github.com/ledgerwatch/erigon/polygon/bridge"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
@@ -43,6 +42,7 @@ func NewService(
 	heimdallUrl string,
 	executionClient executionproto.ExecutionClient,
 	blockLimit uint,
+	polygonBridge bridge.Service,
 ) Service {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	checkpointVerifier := VerifyCheckpointHeaders
@@ -58,7 +58,6 @@ func NewService(
 		logger,
 	)
 	execution := NewExecutionClient(executionClient)
-	polygonBridge := bridge.NewBridge(dataDir, logger, borConfig, heimdallClient.FetchStateSyncEvents, bor.GenesisContractStateReceiverABI())
 	store := NewStore(logger, execution, polygonBridge)
 
 	blockDownloader := NewBlockDownloader(

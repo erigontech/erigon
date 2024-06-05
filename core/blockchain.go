@@ -296,6 +296,36 @@ func SysCallContract(contract libcommon.Address, data []byte, chainConfig *chain
 	return ret, err
 }
 
+func SysCallContractMsg(msg *types.Message, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine consensus.EngineReader, constCall bool) (result []byte, err error) {
+	vmConfig := vm.Config{NoReceipts: true, RestoreState: constCall}
+	// Create a new context to be used in the EVM environment
+	isBor := chainConfig.Bor != nil
+	var txContext evmtypes.TxContext
+	var author *libcommon.Address
+	if isBor {
+		author = &header.Coinbase
+		txContext = evmtypes.TxContext{}
+	} else {
+		author = &state.SystemAddress
+		txContext = NewEVMTxContext(msg)
+	}
+	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, author)
+	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
+
+	ret, _, err := evm.Call(
+		vm.AccountRef(msg.From()),
+		*msg.To(),
+		msg.Data(),
+		msg.Gas(),
+		msg.Value(),
+		false,
+	)
+	if isBor && err != nil {
+		return nil, nil
+	}
+	return ret, err
+}
+
 // SysCreate is a special (system) contract creation methods for genesis constructors.
 func SysCreate(contract libcommon.Address, data []byte, chainConfig chain.Config, ibs *state.IntraBlockState, header *types.Header) (result []byte, err error) {
 	msg := types.NewMessage(
@@ -338,10 +368,14 @@ func FinalizeBlockExecution(
 	syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 		return SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */)
 	}
+	syscall2 := func(msg *types.Message) ([]byte, error) {
+		return SysCallContractMsg(msg, cc, ibs, header, engine, false /* constCall */)
+	}
+
 	if isMining {
-		newBlock, newTxs, newReceipt, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, nil, logger)
+		newBlock, newTxs, newReceipt, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, syscall2, nil, logger)
 	} else {
-		_, _, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, logger)
+		_, _, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, syscall2, logger)
 	}
 	if err != nil {
 		return nil, nil, nil, err

@@ -17,7 +17,7 @@ type Store interface {
 	// InsertBlocks queues blocks for writing into the local canonical chain.
 	InsertBlocks(ctx context.Context, blocks []*types.Block) error
 	// Flush makes sure that all queued blocks have been written.
-	Flush(ctx context.Context) error
+	Flush(ctx context.Context, newTip *types.Header) error
 	// Run performs the block writing.
 	Run(ctx context.Context) error
 }
@@ -57,7 +57,7 @@ func (s *executionClientStore) InsertBlocks(ctx context.Context, blocks []*types
 	}
 }
 
-func (s *executionClientStore) Flush(ctx context.Context) error {
+func (s *executionClientStore) Flush(ctx context.Context, newTip *types.Header) error {
 	for s.tasksCount.Load() > 0 {
 		select {
 		case _, ok := <-s.tasksDoneSignal:
@@ -67,6 +67,11 @@ func (s *executionClientStore) Flush(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		}
+	}
+
+	err := s.polygonBridge.Synchronize(ctx, newTip)
+	if err != nil {
+		return err
 	}
 
 	return nil
