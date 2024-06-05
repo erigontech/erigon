@@ -38,7 +38,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
 
-	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -1489,8 +1488,6 @@ func ReadLastNewBlockSeen(tx kv.Tx) (uint64, error) {
 func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet *state.StateChangeSet) error {
 	// Write the diffSet to the database
 	keys := diffSet.SerializeKeys(nil)
-	fmt.Println("keys", len(keys))
-	fmt.Println("keys", len(utils.CompressSnappy(keys)))
 
 	return tx.Put(kv.ChangeSets3, dbutils.BlockBodyKey(blockNumber, blockHash), keys)
 }
