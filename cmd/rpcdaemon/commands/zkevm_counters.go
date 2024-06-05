@@ -275,8 +275,7 @@ func (api *ZkEvmAPIImpl) TraceTransactionCounters(ctx context.Context, hash comm
 	}
 
 	// check pruning to ensure we have history at this block level
-	err = api.ethApi.BaseAPI.checkPruneHistory(tx, blockNum)
-	if err != nil {
+	if err = api.ethApi.BaseAPI.checkPruneHistory(tx, blockNum); err != nil {
 		stream.WriteNil()
 		return err
 	}
@@ -313,8 +312,7 @@ func (api *ZkEvmAPIImpl) TraceTransactionCounters(ctx context.Context, hash comm
 		}
 	}
 	if txn == nil {
-		var borTx types.Transaction
-		borTx, _, _, _, err = rawdb.ReadBorTransaction(tx, hash)
+		borTx, _, _, _, err := rawdb.ReadBorTransaction(tx, hash)
 		if err != nil {
 			stream.WriteNil()
 			return err
@@ -339,18 +337,20 @@ func (api *ZkEvmAPIImpl) TraceTransactionCounters(ctx context.Context, hash comm
 	hermezDb := hermez_db.NewHermezDbReader(tx)
 	forkId, err := hermezDb.GetForkIdByBlockNum(blockNum)
 	if err != nil {
+		stream.WriteNil()
 		return err
 	}
 
 	smtDepth, err := getSmtDepth(hermezDb, blockNum, config)
 	if err != nil {
+		stream.WriteNil()
 		return err
 	}
 
 	txCounters := vm.NewTransactionCounter(txn, int(smtDepth), false)
 	batchCounters := vm.NewBatchCounterCollector(int(smtDepth), uint16(forkId), false)
-	_, err = batchCounters.AddNewTransactionCounters(txCounters)
-	if err != nil {
+	if _, err = batchCounters.AddNewTransactionCounters(txCounters); err != nil {
+		stream.WriteNil()
 		return err
 	}
 
