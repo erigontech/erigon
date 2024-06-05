@@ -232,6 +232,9 @@ func (d *DiagnosticClient) SetCurrentSyncStage(css CurrentSyncStage) {
 				isSet = true
 			} else {
 				d.syncStats.SyncStages[idx].State = Completed
+				for subIdx := range d.syncStats.SyncStages[idx].SubStages {
+					d.syncStats.SyncStages[idx].SubStages[subIdx].State = Completed
+				}
 			}
 		} else {
 			d.syncStats.SyncStages[idx].State = Queued

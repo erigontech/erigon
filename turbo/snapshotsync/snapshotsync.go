@@ -274,17 +274,11 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 		return nil
 	}
 
-	diagnostics.Send(diagnostics.CurrentSyncStage{Stage: "Snapshots"})
-
 	if headerchain {
 		snapshots.Close()
 		if cc.Bor != nil {
 			borSnapshots.Close()
 		}
-
-		diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download header-chain"})
-	} else {
-		diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download snapshots"})
 	}
 
 	//Corner cases:

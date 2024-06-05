@@ -67,6 +67,11 @@ func TestStageAdd(t *testing.T) {
 	d.SetCurrentSyncSubStage(diagnostics.CurrentSyncSubStage{SubStage: "Download header-chain"})
 	require.Equal(t, d.SyncStatistics().SyncStages[0].SubStages[0].State, diagnostics.Running)
 	require.Equal(t, d.SyncStatistics().SyncStages[0].SubStages[1].State, diagnostics.Queued)
+
+	//Test make all subStages completed after stage completed
+	d.SetCurrentSyncStage(diagnostics.CurrentSyncStage{Stage: "BlockHashes"})
+	require.Equal(t, d.SyncStatistics().SyncStages[0].SubStages[0].State, diagnostics.Completed)
+	require.Equal(t, d.SyncStatistics().SyncStages[0].SubStages[1].State, diagnostics.Completed)
 }
 
 var (
