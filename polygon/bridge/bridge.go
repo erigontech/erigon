@@ -156,10 +156,10 @@ func (b *Bridge) Unwind(ctx context.Context, tip *types.Header) error {
 }
 
 // GetEvents returns all sync events at blockNum
-func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) []*types.Message {
+func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
 	eventIDs, err := GetMap(ctx, b.db, blockNum)
 	if err != nil {
-		return []*types.Message{}
+		return nil, err
 	}
 
 	eventsRaw := make([]*types.Message, eventIDs.End-eventIDs.Start+1)
@@ -167,7 +167,7 @@ func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) []*types.Messag
 	// get events from DB
 	events, err := GetEvents(ctx, b.db, eventIDs)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 
 	b.log.Debug(bridgeLogPrefix(fmt.Sprintf("got %v events for block %v", len(events), blockNum)))
@@ -189,7 +189,7 @@ func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) []*types.Messag
 		eventsRaw = append(eventsRaw, &msg)
 	}
 
-	return eventsRaw
+	return eventsRaw, nil
 }
 
 // Helper functions
