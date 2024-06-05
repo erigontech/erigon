@@ -584,6 +584,7 @@ var ChaindataTables = []string{
 	PlainContractCode,
 	AccountChangeSet,
 	StorageChangeSet,
+	ChangeSets3,
 	Senders,
 	HeadBlockKey,
 	HeadHeaderKey,
