@@ -27,7 +27,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 
 	"github.com/ledgerwatch/erigon/consensus"
@@ -360,21 +359,24 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 		return err
 	}
 	t := time.Now()
-	var changeset *state2.StateChangeSet
+	var changeset *[kv.DomainLen][]libstate.DomainEntryDiff
 	for currentBlock := u.CurrentBlockNumber; currentBlock > u.UnwindPoint; currentBlock-- {
 		currentHash, err := rawdb.ReadCanonicalHash(txc.Tx, currentBlock)
 		if err != nil {
 			return err
 		}
-		currChangeset, ok := state2.GlobalChangesetStorage.Get(currentHash)
-		if !ok || currChangeset == nil {
+		var ok bool
+		var currentKeys [kv.DomainLen][]libstate.DomainEntryDiff
+		currentKeys, ok, err = libstate.ReadDiffSet(txc.Tx, currentBlock, currentHash)
+		if !ok {
 			changeset = nil
-			break
 		}
 		if changeset == nil {
-			changeset = currChangeset.Copy()
+			changeset = &currentKeys
 		} else {
-			changeset.Merge(currChangeset)
+			for i := range currentKeys {
+				(*changeset)[i] = libstate.MergeDiffSets((*changeset)[i], currentKeys[i])
+			}
 		}
 	}
 	if err := rs.Unwind(ctx, txc.Tx, u.UnwindPoint, txNum, accumulator, changeset); err != nil {

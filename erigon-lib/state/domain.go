@@ -1165,7 +1165,7 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 
 // unwind is similar to prune but the difference is that it restores domain values from the history as of txFrom
 // context Flush should be managed by caller.
-func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwindTo uint64, diff *StateDiffDomain) error {
+func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwindTo uint64, domainDiffs []DomainEntryDiff) error {
 	d := dt.d
 	//fmt.Printf("[domain][%s] unwinding domain to txNum=%d, step %d\n", d.filenameBase, txNumUnwindTo, step)
 
@@ -1180,8 +1180,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	stepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
 	// Attempt to use the diff to unwind the domain
-	if diff != nil {
-		domainDiffs := diff.GetDiffSet()
+	if domainDiffs != nil {
 		keysCursor, err := rwTx.RwCursorDupSort(d.keysTable)
 		if err != nil {
 			return fmt.Errorf("create %s domain delete cursor: %w", d.filenameBase, err)

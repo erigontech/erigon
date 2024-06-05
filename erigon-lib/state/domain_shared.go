@@ -125,7 +125,7 @@ func (sd *SharedDomains) SetChangesetAccumulator(acc *StateChangeSet) {
 func (sd *SharedDomains) AggTx() interface{} { return sd.aggTx }
 
 // aggregator context should call aggTx.Unwind before this one.
-func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo, txUnwindTo uint64, changeset *StateChangeSet) error {
+func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo, txUnwindTo uint64, changeset *[kv.DomainLen][]DomainEntryDiff) error {
 	step := txUnwindTo / sd.aggTx.a.StepSize()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -143,7 +143,7 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 	for idx, d := range sd.aggTx.d {
 		txUnwindTo := txUnwindTo
 		if changeset != nil {
-			if err := d.Unwind(ctx, rwTx, step, txUnwindTo, &changeset.Diffs[idx]); err != nil {
+			if err := d.Unwind(ctx, rwTx, step, txUnwindTo, (*changeset)[idx]); err != nil {
 				return err
 			}
 			continue
