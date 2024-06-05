@@ -311,13 +311,13 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwi
 			}
 		}
 	} else {
-		accountDiffs := (*changeset)[kv.AccountsDomain]
+		accountDiffs := changeset[kv.AccountsDomain]
 		for _, kv := range accountDiffs {
 			if err := stateChanges.Collect(kv.Key[:length.Addr], kv.Value); err != nil {
 				return err
 			}
 		}
-		storageDiffs := (*changeset)[kv.StorageDomain]
+		storageDiffs := changeset[kv.StorageDomain]
 		for _, kv := range storageDiffs {
 			if err := stateChanges.Collect(kv.Key, kv.Value); err != nil {
 				return err

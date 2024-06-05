@@ -378,7 +378,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 			changeset = &currentKeys
 		} else {
 			for i := range currentKeys {
-				(*changeset)[i] = libstate.MergeDiffSets((*changeset)[i], currentKeys[i])
+				changeset[i] = libstate.MergeDiffSets(changeset[i], currentKeys[i])
 			}
 		}
 	}
