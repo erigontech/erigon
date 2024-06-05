@@ -143,7 +143,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.F
 				return err
 			}
 			if finStageProgress >= blockReader.FrozenBlocks() {
-				log.Warn("[dbg] ProcessFrozenBlocks exit", "finStageProgress", finStageProgress, "blockReader.FrozenBlocks() ", blockReader.FrozenBlocks())
+				log.Warn("[dbg] ProcessFrozenBlocks exit1", "finStageProgress", finStageProgress, "blockReader.FrozenBlocks() ", blockReader.FrozenBlocks())
 				break
 			}
 		} else {
@@ -151,11 +151,13 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.F
 			// during testing we may have 0 frozen blocks and firstCycle expected to be false
 			sawZeroBlocksTimes++
 			if sawZeroBlocksTimes > 2 {
+				log.Warn("[dbg] ProcessFrozenBlocks exit2", "finStageProgress", finStageProgress, "blockReader.FrozenBlocks() ", blockReader.FrozenBlocks())
 				break
 			}
 		}
 
 		if !more {
+			log.Warn("[dbg] ProcessFrozenBlocks exit3", "finStageProgress", finStageProgress, "blockReader.FrozenBlocks() ", blockReader.FrozenBlocks())
 			break
 		}
 	}
