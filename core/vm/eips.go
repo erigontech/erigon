@@ -24,7 +24,6 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -303,11 +302,7 @@ func enable6780(jt *JumpTable) {
 
 // opBlobBaseFee implements the BLOBBASEFEE opcode
 func opBlobBaseFee(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeContext) ([]byte, error) {
-	excessBlobGas := interpreter.evm.Context.ExcessBlobGas
-	blobBaseFee, err := misc.GetBlobGasPrice(interpreter.evm.ChainConfig(), *excessBlobGas)
-	if err != nil {
-		return nil, err
-	}
+	blobBaseFee := interpreter.evm.Context.BlobBaseFee
 	callContext.Stack.Push(blobBaseFee)
 	return nil, nil
 }

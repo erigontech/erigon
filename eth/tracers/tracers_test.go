@@ -20,11 +20,14 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"encoding/json"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -34,8 +37,6 @@ import (
 	"github.com/ledgerwatch/erigon/tests"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 	"github.com/stretchr/testify/require"
-
-	"github.com/holiman/uint256"
 
 	// Force-load native and js packages, to trigger registration
 	"github.com/ledgerwatch/erigon/eth/tracers"
@@ -70,18 +71,17 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		Origin:   origin,
 		GasPrice: uint256.NewInt(1),
 	}
-	excessBlobGas := uint64(50000)
 	context := evmtypes.BlockContext{
-		CanTransfer:   core.CanTransfer,
-		Transfer:      core.Transfer,
-		Coinbase:      libcommon.Address{},
-		BlockNumber:   8000000,
-		Time:          5,
-		Difficulty:    big.NewInt(0x30000),
-		GasLimit:      uint64(6000000),
-		ExcessBlobGas: &excessBlobGas,
+		CanTransfer: core.CanTransfer,
+		Transfer:    core.Transfer,
+		Coinbase:    libcommon.Address{},
+		BlockNumber: 8000000,
+		Time:        5,
+		Difficulty:  big.NewInt(0x30000),
+		GasLimit:    uint64(6000000),
+		BaseFee:     uint256.NewInt(0),
+		BlobBaseFee: uint256.NewInt(50000),
 	}
-	context.BaseFee = uint256.NewInt(0)
 	alloc := types.GenesisAlloc{}
 
 	// The code pushes 'deadbeef' into memory, then the other params, and calls CREATE2, then returns
