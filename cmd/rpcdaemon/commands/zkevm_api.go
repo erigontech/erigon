@@ -590,8 +590,8 @@ func (api *ZkEvmAPIImpl) GetBatchWitness(ctx context.Context, batchNumber uint64
 		return nil, errors.New("batch not found")
 	}
 
-	endBlock := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blocks[0]))
-	startBlock := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blocks[len(blocks)-1]))
+	startBlock := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blocks[0]))
+	endBlock := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blocks[len(blocks)-1]))
 	return api.getBlockRangeWitness(ctx, api.db, startBlock, endBlock, false, checkedMode)
 }
 
