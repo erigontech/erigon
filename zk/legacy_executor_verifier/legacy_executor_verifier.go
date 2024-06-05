@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/legacy_executor_verifier/proto/github.com/0xPolygonHermez/zkevm-node/state/runtime/executor"
 	"github.com/ledgerwatch/erigon/zk/syncer"
 	"github.com/ledgerwatch/log/v3"
+	"errors"
 )
 
 const (
@@ -186,7 +187,7 @@ func (v *LegacyExecutorVerifier) AddRequestUnsafe(ctx context.Context, tx kv.RwT
 
 		e := v.getNextOnlineAvailableExecutor()
 		if e == nil {
-			return nil, ErrNoExecutorAvailable
+			return failureResponse, ErrNoExecutorAvailable
 		}
 
 		ok, err2 := e.Verify(p, r, blockCopy.Root())
@@ -202,6 +203,8 @@ func (v *LegacyExecutorVerifier) AddRequestUnsafe(ctx context.Context, tx kv.RwT
 
 		return response, nil
 	})
+
+	promise.ExtraInfo = request
 
 	// add batch to the list of batches we've added
 	v.addedBatches[request.BatchNumber] = struct{}{}
@@ -226,6 +229,8 @@ func writeBatchToStream(result *VerifierResponse, hdb *hermez_db.HermezDbReader,
 func (v *LegacyExecutorVerifier) ConsumeResultsUnsafe(tx kv.RwTx) ([]*VerifierResponse, error) {
 	hdb := hermez_db.NewHermezDbReader(tx)
 
+	periodWithNoExecutors := false
+
 	results := make([]*VerifierResponse, 0, len(v.promises))
 	for _, promise := range v.promises {
 		result, err := promise.GetNonBlocking()
@@ -233,18 +238,29 @@ func (v *LegacyExecutorVerifier) ConsumeResultsUnsafe(tx kv.RwTx) ([]*VerifierRe
 			break
 		}
 		if err != nil {
-			log.Error("error getting verifier result", "err", err)
-		}
-		if result != nil {
-			err = writeBatchToStream(result, hdb, tx, v)
-			if err != nil {
+			if errors.Is(err, ErrNoExecutorAvailable) {
+				periodWithNoExecutors = true
+			} else {
 				log.Error("error getting verifier result", "err", err)
 			}
 		}
+		if result != nil {
+			// remove from addedBatches
+			delete(v.addedBatches, result.BatchNumber)
 
-		results = append(results, result)
-		// remove from addedBatches
-		delete(v.addedBatches, result.BatchNumber)
+			results = append(results, result)
+
+			if result.Valid {
+				err = writeBatchToStream(result, hdb, tx, v)
+				if err != nil {
+					log.Error("error writing batch to stream", "err", err)
+				}
+			}
+		}
+	}
+
+	if periodWithNoExecutors {
+		log.Warn("at least one batch had no executor available to process, will attempt again...")
 	}
 
 	// leave only non-processed promises
