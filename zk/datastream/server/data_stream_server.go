@@ -3,15 +3,16 @@ package server
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 
 	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	eritypes "github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/zk/datastream/types"
-	"github.com/ledgerwatch/erigon/zk/hermez_db"
-	"github.com/ledgerwatch/erigon/zk/datastream/proto/github.com/0xPolygonHermez/zkevm-node/state/datastream"
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/state"
+	eritypes "github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/zk/datastream/proto/github.com/0xPolygonHermez/zkevm-node/state/datastream"
+	"github.com/ledgerwatch/erigon/zk/datastream/types"
+	"github.com/ledgerwatch/erigon/zk/hermez_db"
 )
 
 type BookmarkType byte
@@ -315,6 +316,10 @@ func (srv *DataStreamServer) CreateStreamEntriesProto(
 	forkId, err := reader.GetForkId(batchNumber)
 	if err != nil {
 		return nil, err
+	}
+
+	if forkId == 0 {
+		return nil, errors.New("the network cannot have a 0 fork id")
 	}
 
 	blockInfoRoot, err := reader.GetBlockInfoRoot(blockNum)

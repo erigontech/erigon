@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 
 	"github.com/gateway-fm/cdk-erigon-lib/common"
@@ -136,17 +135,9 @@ func (zkapi *ZkEvmAPIImpl) EstimateCounters(ctx context.Context, rpcTx *zkevmRPC
 	smt := smt.NewRoSMT(eriDb)
 	hermezDb := hermez_db.NewHermezDbReader(dbtx)
 
-	lastBatch, err := hermezDb.GetBatchNoByL2Block(header.Number.Uint64())
+	forkId, err := hermezDb.GetForkIdByBlockNum(block.NumberU64())
 	if err != nil {
 		return nil, err
-	}
-
-	forkId, err := hermezDb.GetForkId(lastBatch)
-	if err != nil {
-		return nil, err
-	}
-	if forkId == 0 {
-		return nil, errors.New("the network cannot have a 0 fork id")
 	}
 
 	smtDepth := smt.GetDepth()
@@ -346,40 +337,18 @@ func (api *ZkEvmAPIImpl) TraceTransactionCounters(ctx context.Context, hash comm
 
 	// counters work
 	hermezDb := hermez_db.NewHermezDbReader(tx)
-
-	lastBatch, err := hermezDb.GetBatchNoByL2Block(block.NumberU64())
+	forkId, err := hermezDb.GetForkIdByBlockNum(blockNum)
 	if err != nil {
 		return err
 	}
 
-	forkId, err := hermezDb.GetForkId(lastBatch)
+	smtDepth, err := getSmtDepth(hermezDb, blockNum, config)
 	if err != nil {
 		return err
 	}
-	if forkId == 0 {
-		return errors.New("the network cannot have a 0 fork id")
-	}
 
-	var smtDepth int
-	if config != nil && config.SmtDepth != nil {
-		smtDepth = *config.SmtDepth
-	} else {
-		depthBlockNum, smtDepth, err := hermezDb.GetClosestSmtDepth(block.NumberU64())
-		if err != nil {
-			return err
-		}
-
-		if depthBlockNum < block.NumberU64() {
-			smtDepth += smtDepth / 10
-		}
-
-		if smtDepth == 0 || smtDepth > 256 {
-			smtDepth = 256
-		}
-	}
-
-	batchCounters := vm.NewBatchCounterCollector(int(smtDepth), uint16(forkId), false)
 	txCounters := vm.NewTransactionCounter(txn, int(smtDepth), false)
+	batchCounters := vm.NewBatchCounterCollector(int(smtDepth), uint16(forkId), false)
 	_, err = batchCounters.AddNewTransactionCounters(txCounters)
 	if err != nil {
 		return err
@@ -393,4 +362,26 @@ func (api *ZkEvmAPIImpl) TraceTransactionCounters(ctx context.Context, hash comm
 
 	// Trace the transaction and return
 	return transactions.TraceTx(ctx, txEnv.Msg, txEnv.BlockContext, txEnv.TxContext, txEnv.Ibs, config, chainConfig, stream, api.ethApi.evmCallTimeout)
+}
+
+func getSmtDepth(hermezDb *hermez_db.HermezDbReader, blockNum uint64, config *tracers.TraceConfig_ZkEvm) (int, error) {
+	var smtDepth int
+	if config != nil && config.SmtDepth != nil {
+		smtDepth = *config.SmtDepth
+	} else {
+		depthBlockNum, smtDepth, err := hermezDb.GetClosestSmtDepth(blockNum)
+		if err != nil {
+			return 0, err
+		}
+
+		if depthBlockNum < blockNum {
+			smtDepth += smtDepth / 10
+		}
+
+		if smtDepth == 0 || smtDepth > 256 {
+			smtDepth = 256
+		}
+	}
+
+	return smtDepth, nil
 }

@@ -1,6 +1,7 @@
 package hermez_db
 
 import (
+	"errors"
 	"fmt"
 	"math"
 
@@ -1337,7 +1338,7 @@ func (db *HermezDb) WriteL1InfoTreeLeaf(l1Index uint64, leaf common.Hash) error 
 	return db.tx.Put(L1_INFO_LEAVES, Uint64ToBytes(l1Index), leaf.Bytes())
 }
 
-func (db *HermezDb) GetAllL1InfoTreeLeaves() ([]common.Hash, error) {
+func (db *HermezDbReader) GetAllL1InfoTreeLeaves() ([]common.Hash, error) {
 	c, err := db.tx.Cursor(L1_INFO_LEAVES)
 	if err != nil {
 		return nil, err
@@ -1365,4 +1366,21 @@ func (db *HermezDb) GetL1InfoTreeIndexByRoot(hash common.Hash) (uint64, bool, er
 		return 0, false, err
 	}
 	return BytesToUint64(data), data != nil, nil
+}
+
+func (db *HermezDbReader) GetForkIdByBlockNum(blockNum uint64) (uint64, error) {
+	blockbatch, err := db.GetBatchNoByL2Block(blockNum)
+	if err != nil {
+		return 0, err
+	}
+
+	forkId, err := db.GetForkId(blockbatch)
+	if err != nil {
+		return 0, err
+	}
+	if forkId == 0 {
+		return 0, errors.New("the network cannot have a 0 fork id")
+	}
+
+	return forkId, nil
 }

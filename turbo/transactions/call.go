@@ -2,7 +2,6 @@ package transactions
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/big"
 	"time"
@@ -234,14 +233,9 @@ func NewReusableCaller(
 	smt := smt.NewRoSMT(eriDb)
 	hermezDb := hermez_db.NewHermezDbReader(tx)
 
-	lastBatch, err := hermezDb.GetBatchNoByL2Block(header.Number.Uint64())
-
-	forkId, err := hermezDb.GetForkId(lastBatch)
+	forkId, err := hermezDb.GetForkIdByBlockNum(header.Number.Uint64())
 	if err != nil {
 		return nil, err
-	}
-	if forkId == 0 {
-		return nil, errors.New("the network cannot have a 0 fork id")
 	}
 
 	smtDepth := smt.GetDepth()

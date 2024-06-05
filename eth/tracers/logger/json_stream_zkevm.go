@@ -11,6 +11,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/stack"
 )
 
 // JsonStreamLogger is an EVM state logger and implements Tracer.
@@ -48,8 +49,10 @@ func NewJsonStreamLogger_ZkEvm(cfg *LogConfig, ctx context.Context, stream *json
 	return logger
 }
 
+// not needed for this tracer
 func (l *JsonStreamLogger_ZkEvm) CaptureTxStart(gasLimit uint64) {}
 
+// not needed for this tracer
 func (l *JsonStreamLogger_ZkEvm) CaptureTxEnd(restGas uint64) {}
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
@@ -57,6 +60,7 @@ func (l *JsonStreamLogger_ZkEvm) CaptureStart(env vm.VMInterface, from libcommon
 	l.env = env
 }
 
+// not needed for this tracer
 func (l *JsonStreamLogger_ZkEvm) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }
 
@@ -64,10 +68,6 @@ func (l *JsonStreamLogger_ZkEvm) CaptureEnter(typ vm.OpCode, from libcommon.Addr
 //
 // CaptureState also tracks SLOAD/SSTORE ops to track storage change.
 func (l *JsonStreamLogger_ZkEvm) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
-	contract := scope.Contract
-	memory := scope.Memory
-	stack := scope.Stack
-
 	select {
 	case <-l.ctx.Done():
 		return
@@ -82,6 +82,29 @@ func (l *JsonStreamLogger_ZkEvm) CaptureState(pc uint64, op vm.OpCode, gas, cost
 	} else {
 		l.firstCapture = false
 	}
+
+	outputStorage := l.prepareStorage(scope, scope.Contract, op)
+
+	l.writeOpSnapshot(pc, op, gas, cost, depth, err)
+
+	l.writeError(err)
+
+	l.writeStack(scope.Stack)
+
+	l.writeMemory(scope.Memory)
+
+	if outputStorage {
+		l.writeStorage(scope.Contract)
+	}
+
+	l.writeCounters()
+
+	l.stream.WriteObjectEnd()
+	_ = l.stream.Flush()
+}
+
+func (l *JsonStreamLogger_ZkEvm) prepareStorage(scope *vm.ScopeContext, contract *vm.Contract, op vm.OpCode) bool {
+	stack := scope.Stack
 	var outputStorage bool
 	if !l.cfg.DisableStorage {
 		// initialise new changed values storage container for this contract
@@ -109,6 +132,11 @@ func (l *JsonStreamLogger_ZkEvm) CaptureState(pc uint64, op vm.OpCode, gas, cost
 			outputStorage = true
 		}
 	}
+
+	return outputStorage
+}
+
+func (l *JsonStreamLogger_ZkEvm) writeOpSnapshot(pc uint64, op vm.OpCode, gas, cost uint64, depth int, err error) {
 	// create a new snapshot of the EVM.
 	l.stream.WriteObjectStart()
 	l.stream.WriteObjectField("pc")
@@ -125,25 +153,45 @@ func (l *JsonStreamLogger_ZkEvm) CaptureState(pc uint64, op vm.OpCode, gas, cost
 	l.stream.WriteMore()
 	l.stream.WriteObjectField("depth")
 	l.stream.WriteInt(depth)
-	if err != nil {
+}
+
+func (l *JsonStreamLogger_ZkEvm) writeError(err error) {
+	if err == nil {
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("error")
 		l.stream.WriteObjectStart()
 		l.stream.WriteObjectEnd()
 		//l.stream.WriteString(err.Error())
 	}
-	if !l.cfg.DisableStack {
-		l.stream.WriteMore()
-		l.stream.WriteObjectField("stack")
-		l.stream.WriteArrayStart()
-		for i, stackValue := range stack.Data {
-			if i > 0 {
-				l.stream.WriteMore()
-			}
-			l.stream.WriteString(stackValue.String())
-		}
-		l.stream.WriteArrayEnd()
+}
+
+func (l *JsonStreamLogger_ZkEvm) writeStorage(contract *vm.Contract) {
+	l.stream.WriteMore()
+	l.stream.WriteObjectField("storage")
+	l.stream.WriteObjectStart()
+	first := true
+	// Sort storage by locations for easier comparison with geth
+	if l.locations != nil {
+		l.locations = l.locations[:0]
 	}
+	s := l.storage[contract.Address()]
+	for loc := range s {
+		l.locations = append(l.locations, loc)
+	}
+	sort.Sort(l.locations)
+	for _, loc := range l.locations {
+		value := s[loc]
+		if first {
+			first = false
+		} else {
+			l.stream.WriteMore()
+		}
+		l.stream.WriteObjectField(string(l.hexEncodeBuf[0:hex.Encode(l.hexEncodeBuf[:], loc[:])]))
+		l.stream.WriteString(string(l.hexEncodeBuf[0:hex.Encode(l.hexEncodeBuf[:], value[:])]))
+	}
+	l.stream.WriteObjectEnd()
+}
+func (l *JsonStreamLogger_ZkEvm) writeMemory(memory *vm.Memory) {
 	if !l.cfg.DisableMemory {
 		memData := memory.Data()
 		l.stream.WriteMore()
@@ -157,33 +205,24 @@ func (l *JsonStreamLogger_ZkEvm) CaptureState(pc uint64, op vm.OpCode, gas, cost
 		}
 		l.stream.WriteArrayEnd()
 	}
-	if outputStorage {
+}
+
+func (l *JsonStreamLogger_ZkEvm) writeStack(stack *stack.Stack) {
+	if !l.cfg.DisableStack {
 		l.stream.WriteMore()
-		l.stream.WriteObjectField("storage")
-		l.stream.WriteObjectStart()
-		first := true
-		// Sort storage by locations for easier comparison with geth
-		if l.locations != nil {
-			l.locations = l.locations[:0]
-		}
-		s := l.storage[contract.Address()]
-		for loc := range s {
-			l.locations = append(l.locations, loc)
-		}
-		sort.Sort(l.locations)
-		for _, loc := range l.locations {
-			value := s[loc]
-			if first {
-				first = false
-			} else {
+		l.stream.WriteObjectField("stack")
+		l.stream.WriteArrayStart()
+		for i, stackValue := range stack.Data {
+			if i > 0 {
 				l.stream.WriteMore()
 			}
-			l.stream.WriteObjectField(string(l.hexEncodeBuf[0:hex.Encode(l.hexEncodeBuf[:], loc[:])]))
-			l.stream.WriteString(string(l.hexEncodeBuf[0:hex.Encode(l.hexEncodeBuf[:], value[:])]))
+			l.stream.WriteString(stackValue.String())
 		}
-		l.stream.WriteObjectEnd()
+		l.stream.WriteArrayEnd()
 	}
+}
 
+func (l *JsonStreamLogger_ZkEvm) writeCounters() {
 	if l.counterCollector != nil {
 		differences := l.counterCollector.Counters().UsedAsMap()
 
@@ -202,19 +241,19 @@ func (l *JsonStreamLogger_ZkEvm) CaptureState(pc uint64, op vm.OpCode, gas, cost
 		}
 		l.stream.WriteObjectEnd()
 	}
-
-	l.stream.WriteObjectEnd()
-	_ = l.stream.Flush()
 }
 
 // CaptureFault implements the Tracer interface to trace an execution fault
 // while running an opcode.
+// not needed for this tracer
 func (l *JsonStreamLogger_ZkEvm) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
 }
 
 // CaptureEnd is called after the call finishes to finalize the tracing.
+// not needed for this tracer
 func (l *JsonStreamLogger_ZkEvm) CaptureEnd(output []byte, usedGas uint64, err error) {
 }
 
+// not needed for this tracer
 func (l *JsonStreamLogger_ZkEvm) CaptureExit(output []byte, usedGas uint64, err error) {
 }
