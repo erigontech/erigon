@@ -154,9 +154,7 @@ func SpawnStageSnapshots(
 		}
 		defer tx.Rollback()
 	}
-	if s.CurrentSyncCycle.IsInitialCycle {
-		log.Info("[dbg] FillDBFromSnapshots", "useExternalTx", useExternalTx, "s.CurrentSyncCycle.IsInitialCycle", s.CurrentSyncCycle.IsInitialCycle, "s.CurrentSyncCycle.First", s.CurrentSyncCycle.IsFirstCycle)
-	}
+	log.Info("[dbg] FillDBFromSnapshots", "useExternalTx", useExternalTx, "s.CurrentSyncCycle.IsInitialCycle", s.CurrentSyncCycle.IsInitialCycle, "s.CurrentSyncCycle.First", s.CurrentSyncCycle.IsFirstCycle)
 
 	if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg, logger); err != nil {
 		return err
