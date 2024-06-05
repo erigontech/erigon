@@ -50,10 +50,14 @@ func NewJsonStreamLogger_ZkEvm(cfg *LogConfig, ctx context.Context, stream *json
 }
 
 // not needed for this tracer
-func (l *JsonStreamLogger_ZkEvm) CaptureTxStart(gasLimit uint64) {}
+func (l *JsonStreamLogger_ZkEvm) CaptureTxStart(gasLimit uint64) {
+	// not needed for this tracer
+}
 
 // not needed for this tracer
-func (l *JsonStreamLogger_ZkEvm) CaptureTxEnd(restGas uint64) {}
+func (l *JsonStreamLogger_ZkEvm) CaptureTxEnd(restGas uint64) {
+	// not needed for this tracer
+}
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
 func (l *JsonStreamLogger_ZkEvm) CaptureStart(env vm.VMInterface, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
@@ -62,6 +66,7 @@ func (l *JsonStreamLogger_ZkEvm) CaptureStart(env vm.VMInterface, from libcommon
 
 // not needed for this tracer
 func (l *JsonStreamLogger_ZkEvm) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	// not needed for this tracer
 }
 
 // CaptureState logs a new structured log message and pushes it out to the environment
@@ -241,19 +246,21 @@ func (l *JsonStreamLogger_ZkEvm) writeCounters() {
 		}
 		l.stream.WriteObjectEnd()
 	}
+	// not needed for this tracer
 }
 
 // CaptureFault implements the Tracer interface to trace an execution fault
 // while running an opcode.
-// not needed for this tracer
 func (l *JsonStreamLogger_ZkEvm) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
+	// not needed for this tracer
 }
 
 // CaptureEnd is called after the call finishes to finalize the tracing.
-// not needed for this tracer
 func (l *JsonStreamLogger_ZkEvm) CaptureEnd(output []byte, usedGas uint64, err error) {
+	// not needed for this tracer
 }
 
 // not needed for this tracer
 func (l *JsonStreamLogger_ZkEvm) CaptureExit(output []byte, usedGas uint64, err error) {
+	// not needed for this tracer
 }
