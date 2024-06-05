@@ -280,6 +280,7 @@ func ExecV3(ctx context.Context,
 		}
 	}
 
+	ts := time.Duration(0)
 	blockNum = doms.BlockNum()
 	outputTxNum.Store(doms.TxNum())
 	shouldGenerateChangesets := maxBlockNum-blockNum <= changesetBlockRange
@@ -617,7 +618,8 @@ Loop:
 		changeset := &state2.StateChangeSet{
 			BeginTxIndex: doms.TxNum(),
 		}
-		if shouldGenerateChangesets {
+		if shouldGenerateChangesets && blockNum > 0 {
+			fmt.Println(blockNum)
 			doms.SetChangesetAccumulator(changeset)
 		}
 		//time.Sleep(50 * time.Microsecond)
@@ -850,13 +852,12 @@ Loop:
 		if shouldGenerateChangesets {
 			aggTx := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 			aggTx.RestrictSubsetFileDeletions(true)
+			start := time.Now()
 			if _, err := doms.ComputeCommitment(ctx, true, blockNum, execStage.LogPrefix()); err != nil {
 				return err
 			}
+			ts += time.Since(start)
 			aggTx.RestrictSubsetFileDeletions(false)
-			for _, d := range changeset.Diffs {
-				d.GetKeys()
-			}
 			state2.GlobalChangesetStorage.Put(b.Hash(), changeset)
 			doms.SetChangesetAccumulator(nil)
 		}
@@ -898,7 +899,7 @@ Loop:
 					break Loop
 				}
 
-				t1 = time.Since(tt)
+				t1 = time.Since(tt) + ts
 
 				tt = time.Now()
 				if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Hour, applyTx); err != nil {
