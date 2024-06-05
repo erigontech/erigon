@@ -180,6 +180,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	if err != nil {
 		return err
 	}
+	copy(current.Requests, block.Requests())
 
 	// Simulate the block execution to get the final state root
 	if err := rawdb.WriteHeader(txc.Tx, block.Header()); err != nil {
