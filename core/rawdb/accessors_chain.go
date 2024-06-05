@@ -36,7 +36,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/state"
 
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -1482,4 +1484,25 @@ func ReadLastNewBlockSeen(tx kv.Tx) (uint64, error) {
 		return 0, nil
 	}
 	return dbutils.DecodeBlockNumber(v)
+}
+
+func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet *state.StateChangeSet) error {
+	// Write the diffSet to the database
+	keys := diffSet.SerializeKeys(nil)
+	fmt.Println("keys", len(keys))
+	fmt.Println("keys", len(utils.CompressSnappy(keys)))
+
+	return tx.Put(kv.ChangeSets3, dbutils.BlockBodyKey(blockNumber, blockHash), keys)
+}
+
+func ReadDiffSet(tx kv.Tx, blockNumber uint64, blockHash common.Hash) ([kv.DomainLen][]state.DomainEntryDiff, bool, error) {
+	// Read the diffSet from the database
+	keys, err := tx.GetOne(kv.ChangeSets3, dbutils.BlockBodyKey(blockNumber, blockHash))
+	if err != nil {
+		return [kv.DomainLen][]state.DomainEntryDiff{}, false, err
+	}
+	if len(keys) == 0 {
+		return [kv.DomainLen][]state.DomainEntryDiff{}, false, nil
+	}
+	return state.DeserializeKeys(keys), true, nil
 }

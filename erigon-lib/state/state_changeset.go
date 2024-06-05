@@ -3,12 +3,10 @@ package state
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"sort"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 )
 
 const MaxFastChangesets = 64
@@ -164,7 +162,6 @@ func DeserializeDiffSet(in []byte) []DomainEntryDiff {
 		return nil
 	}
 	dictLen := int(in[0])
-	fmt.Println(dictLen)
 	in = in[1:]
 	dict := make(map[byte][]byte)
 	for i := 0; i < dictLen; i++ {
@@ -173,7 +170,6 @@ func DeserializeDiffSet(in []byte) []DomainEntryDiff {
 		dict[value] = key
 		in = in[9:]
 	}
-	fmt.Println(dict)
 	diffSetLen := binary.BigEndian.Uint32(in)
 	in = in[4:]
 	diffSet := make([]DomainEntryDiff, diffSetLen)
@@ -254,22 +250,4 @@ func DeserializeKeys(in []byte) [kv.DomainLen][]DomainEntryDiff {
 		in = in[diffSetLen:]
 	}
 	return ret
-}
-
-func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet *StateChangeSet) error {
-	// Write the diffSet to the database
-	keys := diffSet.SerializeKeys(nil)
-	return tx.Put(kv.ChangeSets3, dbutils.BlockBodyKey(blockNumber, blockHash), keys)
-}
-
-func ReadDiffSet(tx kv.Tx, blockNumber uint64, blockHash common.Hash) ([kv.DomainLen][]DomainEntryDiff, bool, error) {
-	// Read the diffSet from the database
-	keys, err := tx.GetOne(kv.ChangeSets3, dbutils.BlockBodyKey(blockNumber, blockHash))
-	if err != nil {
-		return [kv.DomainLen][]DomainEntryDiff{}, false, err
-	}
-	if len(keys) == 0 {
-		return [kv.DomainLen][]DomainEntryDiff{}, false, nil
-	}
-	return DeserializeKeys(keys), true, nil
 }
