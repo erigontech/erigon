@@ -56,12 +56,12 @@ System Requirements
 * For an Archive node of Ethereum Mainnet we recommend >=3.5TB storage space: 2.3TiB state (as of March 2024),
   643GiB snapshots (can symlink or mount folder `<datadir>/snapshots` to another disk), 200GB temp files (can symlink or
   mount folder `<datadir>/temp` to another disk).
-  Ethereum Mainnet Full node (see [Pruned Node][pruned_node]): 1.5TiB not including temp files (April 2024).
+  Ethereum Mainnet Full node (see [Pruned Node][pruned_node]): 1.1TiB not including temp files (June 2024).
 
 * Goerli Full node (see [Pruned Node][pruned_node]): 189GB on Beta, 114GB on Alpha (April 2022).
 
 * Gnosis Chain Archive: 1.7TiB (March 2024).
-  Gnosis Chain Full node (see [Pruned Node][pruned_node]): 530GiB (March 2024).
+  Gnosis Chain Full node (see [Pruned Node][pruned_node]): 300GiB (June 2024).
 
 * Polygon Mainnet Archive: 8.5TiB (December 2023).
   Polygon Mainnet Full node (see [Pruned Node][pruned_node]) with `--prune.*.older 15768000`: 5.1Tb (September 2023).

@@ -82,6 +82,13 @@ func (h *heimdall) FetchCheckpointsFromBlock(ctx context.Context, startBlock uin
 		if err != nil {
 			return nil, err
 		}
+		if len(checkpoints) == 0 {
+			return nil, errors.New("unexpected empty checkpoints")
+		}
+		if checkpoints[len(checkpoints)-1].CmpRange(startBlock) > 0 {
+			// the start block is past the last checkpoint
+			return nil, nil
+		}
 
 		startCheckpointIdx, found := sort.Find(len(checkpoints), func(i int) int {
 			return checkpoints[i].CmpRange(startBlock)
@@ -588,7 +595,9 @@ func (h *heimdall) batchFetchCheckpoints(
 	sort.Sort(checkpoints)
 
 	for i, checkpoint := range checkpoints[lastStored:] {
-		err := store.PutCheckpoint(ctx, CheckpointId(i+1), checkpoint)
+		// checkpoint list API does not return "id" in the json response
+		checkpoint.Id = CheckpointId(i + 1)
+		err := store.PutCheckpoint(ctx, checkpoint.Id, checkpoint)
 		if err != nil {
 			return nil, err
 		}

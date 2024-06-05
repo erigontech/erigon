@@ -77,7 +77,7 @@ func GetSprintLastEventID(ctx context.Context, db *polygoncommon.Database, lastI
 	}
 
 	for {
-		_, v, err := cursor.Next()
+		k, v, err := cursor.Next()
 		if err != nil {
 			return eventID, err
 		}
@@ -92,6 +92,10 @@ func GetSprintLastEventID(ctx context.Context, db *polygoncommon.Database, lastI
 		}
 
 		eventID = event.ID
+
+		if bytes.Equal(k, kDBLast) {
+			return eventID, nil
+		}
 	}
 }
 

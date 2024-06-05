@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/p2p/sentry"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
+	"github.com/ledgerwatch/erigon/polygon/bridge"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/polygon/p2p"
 	polygonsync "github.com/ledgerwatch/erigon/polygon/sync"
@@ -38,6 +39,7 @@ func NewPolygonSyncStageCfg(
 	stopNode func() error,
 	stateReceiverABI abi.ABI,
 	blockLimit uint,
+	dataDir string,
 ) PolygonSyncStageCfg {
 	dataStream := make(chan polygonSyncStageDataItem)
 	storage := &polygonSyncStageStorage{
@@ -55,6 +57,8 @@ func NewPolygonSyncStageCfg(
 	milestoneVerifier := polygonsync.VerifyMilestoneHeaders
 	blocksVerifier := polygonsync.VerifyBlocks
 	heimdallService := heimdall.NewHeimdall(heimdallClient, logger, heimdall.WithStore(storage))
+	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
+	polygonBridge := bridge.NewBridge(dataDir, logger, borConfig, heimdallClient.FetchStateSyncEvents, stateReceiverABI)
 	blockDownloader := polygonsync.NewBlockDownloader(
 		logger,
 		p2pService,
@@ -67,7 +71,6 @@ func NewPolygonSyncStageCfg(
 	)
 	spansCache := polygonsync.NewSpansCache()
 	events := polygonsync.NewTipEvents(logger, p2pService, heimdallService)
-	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	sync := polygonsync.NewSync(
 		storage,
 		executionEngine,
@@ -85,6 +88,7 @@ func NewPolygonSyncStageCfg(
 		logger:           logger,
 		chainConfig:      chainConfig,
 		blockReader:      blockReader,
+		bridge:           polygonBridge,
 		sync:             sync,
 		events:           events,
 		p2p:              p2pService,
@@ -158,6 +162,7 @@ type polygonSyncStageService struct {
 	logger           log.Logger
 	chainConfig      *chain.Config
 	blockReader      services.FullBlockReader
+	bridge           bridge.Service
 	sync             *polygonsync.Sync
 	events           *polygonsync.TipEvents
 	p2p              p2p.Service
@@ -249,6 +254,10 @@ func (s *polygonSyncStageService) runBgComponentsOnce(ctx context.Context) {
 		})
 
 		eg.Go(func() error {
+			return s.bridge.Run(ctx)
+		})
+
+		eg.Go(func() error {
 			s.p2p.Run(ctx)
 			select {
 			case <-ctx.Done():
@@ -310,6 +319,11 @@ func (s *polygonSyncStageService) handleInsertBlocks(ctx context.Context, tx kv.
 		if err := s.downloadStateSyncEvents(ctx, tx, header, stateSyncEventsLogTicker); err != nil {
 			return err
 		}
+	}
+
+	err := s.bridge.ProcessNewBlocks(ctx, blocks)
+	if err != nil {
+		return err
 	}
 
 	return nil
