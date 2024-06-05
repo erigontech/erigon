@@ -87,7 +87,7 @@ func SpawnSequencingStage(
 			return err
 		}
 
-		srv := server.NewDataStreamServer(cfg.stream, cfg.chainConfig.ChainID.Uint64(), server.StandardOperationMode)
+		srv := server.NewDataStreamServer(cfg.stream, cfg.chainConfig.ChainID.Uint64())
 		if err = server.WriteBlocksToStream(tx, sdb.hermezDb.HermezDbReader, srv, cfg.stream, 1, 1, logPrefix); err != nil {
 			return err
 		}
@@ -151,6 +151,27 @@ func SpawnSequencingStage(
 			time.Sleep(1 * time.Second)
 			return nil
 		}
+
+		// now let's detect a bad batch and skip it if we have to
+		currentBlock, err := rawdb.ReadBlockByNumber(sdb.tx, executionAt)
+		if err != nil {
+			return err
+		}
+		badBatch, err := checkForBadBatch(sdb.hermezDb, currentBlock.Time(), decodedBlocks)
+		if err != nil {
+			return err
+		}
+
+		if badBatch {
+			log.Info(fmt.Sprintf("[%s] Skipping bad batch %d...", logPrefix, thisBatch))
+			if err = stages.SaveStageProgress(tx, stages.HighestSeenBatchNumber, thisBatch); err != nil {
+				return err
+			}
+			if err = sdb.hermezDb.WriteForkId(thisBatch, forkId); err != nil {
+				return err
+			}
+			return nil
+		}
 	}
 
 	log.Info(fmt.Sprintf("[%s] Starting batch %d...", logPrefix, thisBatch))
@@ -208,7 +229,7 @@ func SpawnSequencingStage(
 
 		thisBlockNumber := header.Number.Uint64()
 
-		infoTreeIndexProgress, l1TreeUpdate, l1TreeUpdateIndex, l1BlockHash, ger, shouldWriteGerToContract, err := prepareL1AndInfoTreeRelatedStuff(sdb, &decodedBlock, l1Recovery)
+		infoTreeIndexProgress, l1TreeUpdate, l1TreeUpdateIndex, l1BlockHash, ger, shouldWriteGerToContract, err := prepareL1AndInfoTreeRelatedStuff(sdb, &decodedBlock, l1Recovery, header.Time)
 		if err != nil {
 			return err
 		}
@@ -388,7 +409,7 @@ func SpawnSequencingStage(
 	// if we do not have an executors in the zk config then we can populate the stream immediately with the latest
 	// batch information
 	if !cfg.zk.HasExecutors() {
-		srv := server.NewDataStreamServer(cfg.stream, cfg.chainConfig.ChainID.Uint64(), server.StandardOperationMode)
+		srv := server.NewDataStreamServer(cfg.stream, cfg.chainConfig.ChainID.Uint64())
 		if err = server.WriteBlocksToStream(tx, sdb.hermezDb.HermezDbReader, srv, cfg.stream, executionAt+1, blockNumber, logPrefix); err != nil {
 			return err
 		}

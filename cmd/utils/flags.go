@@ -19,8 +19,11 @@ package utils
 
 import (
 	"crypto/ecdsa"
+	"encoding/json"
 	"fmt"
 	"math/big"
+	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -33,7 +36,6 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -44,10 +46,7 @@ import (
 	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 
-	"encoding/json"
-	"os"
-	"path"
-
+	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadernat"
 	"github.com/ledgerwatch/erigon/cmd/utils/flags"
@@ -2102,17 +2101,18 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	// Override any default configs for hard coded networks.
 	chain = ctx.String(ChainFlag.Name)
 	if strings.HasPrefix(chain, "dynamic") {
+		configFilePath := ctx.String(ConfigFlag.Name)
+		if configFilePath == "" {
+			Fatalf("Config file is required for dynamic chain")
+		}
+
+		// Be sure to set this first
+		params.DynamicChainConfigPath = filepath.Dir(configFilePath)
+		filename := path.Join(params.DynamicChainConfigPath, chain+"-conf.json")
+
 		genesis := core.GenesisBlockByChainName(chain)
 
 		dConf := DynamicConfig{}
-
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			panic(err)
-		}
-
-		basePath := path.Join(homeDir, "dynamic-configs")
-		filename := path.Join(basePath, chain+"-conf.json")
 
 		if _, err := os.Stat(filename); err == nil {
 			dConfBytes, err := os.ReadFile(filename)

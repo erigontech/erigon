@@ -1,10 +1,9 @@
 package core
 
 import (
-	"math/big"
-
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"os"
 	"path"
 
@@ -148,13 +147,7 @@ func DynamicGenesisBlock(chain string) *types.Genesis {
 }
 
 func dynamicPrealloc(ch string) types.GenesisAlloc {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		panic(err)
-	}
-
-	basePath := path.Join(homeDir, "dynamic-configs")
-	filename := path.Join(basePath, ch+"-allocs.json")
+	filename := path.Join(params.DynamicChainConfigPath, ch+"-allocs.json")
 
 	f, err := os.Open(filename)
 	if err != nil {

@@ -140,9 +140,8 @@ COMMANDS += txpool
 COMMANDS += verkle
 COMMANDS += evm
 COMMANDS += sentinel
-COMMANDS += caplin
-COMMANDS += snapshots
-COMMANDS += diag
+COMMANDS += erigon-el
+COMMANDS += acl
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd

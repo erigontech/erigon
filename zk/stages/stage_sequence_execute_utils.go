@@ -205,7 +205,7 @@ func prepareHeader(tx kv.RwTx, previousBlockNumber, deltaTimestamp, forkId uint6
 	}, parentBlock, nil
 }
 
-func prepareL1AndInfoTreeRelatedStuff(sdb *stageDb, decodedBlock *zktx.DecodedBatchL2Data, l1Recovery bool) (uint64, *zktypes.L1InfoTreeUpdate, uint64, common.Hash, common.Hash, bool, error) {
+func prepareL1AndInfoTreeRelatedStuff(sdb *stageDb, decodedBlock *zktx.DecodedBatchL2Data, l1Recovery bool, proposedTimestamp uint64) (uint64, *zktypes.L1InfoTreeUpdate, uint64, common.Hash, common.Hash, bool, error) {
 	var l1TreeUpdateIndex uint64
 	var l1TreeUpdate *zktypes.L1InfoTreeUpdate
 	var err error
@@ -233,7 +233,7 @@ func prepareL1AndInfoTreeRelatedStuff(sdb *stageDb, decodedBlock *zktx.DecodedBa
 			shouldWriteGerToContract = false
 		}
 	} else {
-		l1TreeUpdateIndex, l1TreeUpdate, err = calculateNextL1TreeUpdateToUse(infoTreeIndexProgress, sdb.hermezDb)
+		l1TreeUpdateIndex, l1TreeUpdate, err = calculateNextL1TreeUpdateToUse(infoTreeIndexProgress, sdb.hermezDb, proposedTimestamp)
 		if err != nil {
 			return infoTreeIndexProgress, l1TreeUpdate, l1TreeUpdateIndex, l1BlockHash, ger, shouldWriteGerToContract, err
 		}
@@ -254,7 +254,7 @@ func prepareL1AndInfoTreeRelatedStuff(sdb *stageDb, decodedBlock *zktx.DecodedBa
 // will be called at the start of every new block created within a batch to figure out if there is a new GER
 // we can use or not.  In the special case that this is the first block we just return 0 as we need to use the
 // 0 index first before we can use 1+
-func calculateNextL1TreeUpdateToUse(lastInfoIndex uint64, hermezDb *hermez_db.HermezDb) (uint64, *zktypes.L1InfoTreeUpdate, error) {
+func calculateNextL1TreeUpdateToUse(lastInfoIndex uint64, hermezDb *hermez_db.HermezDb, proposedTimestamp uint64) (uint64, *zktypes.L1InfoTreeUpdate, error) {
 	// always default to 0 and only update this if the next available index has reached finality
 	var nextL1Index uint64 = 0
 
@@ -264,11 +264,8 @@ func calculateNextL1TreeUpdateToUse(lastInfoIndex uint64, hermezDb *hermez_db.He
 		return 0, nil, err
 	}
 
-	// check that we have reached finality on the l1 info tree event before using it
-	// todo: [zkevm] think of a better way to handle finality
-	now := time.Now()
-	target := now.Add(-(12 * time.Minute))
-	if l1Info != nil && l1Info.Timestamp < uint64(target.Unix()) {
+	// ensure that we are above the min timestamp for this index to use it
+	if l1Info != nil && l1Info.Timestamp <= proposedTimestamp {
 		nextL1Index = l1Info.Index
 	}
 
@@ -330,4 +327,39 @@ func doFinishBlockAndUpdateState(
 	}
 
 	return nil
+}
+
+type batchChecker interface {
+	GetL1InfoTreeUpdate(idx uint64) (*zktypes.L1InfoTreeUpdate, error)
+}
+
+func checkForBadBatch(hermezDb batchChecker, latestTimestamp uint64, decodedBlocks []zktx.DecodedBatchL2Data) (bool, error) {
+	timestamp := latestTimestamp
+
+	for _, decodedBlock := range decodedBlocks {
+		timestamp += uint64(decodedBlock.DeltaTimestamp)
+		if decodedBlock.L1InfoTreeIndex > 0 {
+			// first check if we have knowledge of this index or not
+			l1Info, err := hermezDb.GetL1InfoTreeUpdate(uint64(decodedBlock.L1InfoTreeIndex))
+			if err != nil {
+				return false, err
+			}
+			if l1Info == nil {
+				// can't use an index that doesn't exist, so we have a bad batch
+				return true, nil
+			}
+
+			// we have an invalid batch if the block timestamp is lower than the l1 info min timestamp value
+			if timestamp < l1Info.Timestamp {
+				return true, nil
+			}
+
+			// now check the limit timestamp we can't have used l1 info tree index from the future
+			if l1Info.Timestamp > timestamp {
+				return true, nil
+			}
+		}
+	}
+
+	return false, nil
 }

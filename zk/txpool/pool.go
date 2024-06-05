@@ -116,31 +116,33 @@ const (
 type DiscardReason uint8
 
 const (
-	NotSet              DiscardReason = 0 // analog of "nil-value", means it will be set in future
-	Success             DiscardReason = 1
-	AlreadyKnown        DiscardReason = 2
-	Mined               DiscardReason = 3
-	ReplacedByHigherTip DiscardReason = 4
-	UnderPriced         DiscardReason = 5
-	ReplaceUnderpriced  DiscardReason = 6 // if a transaction is attempted to be replaced with a different one without the required price bump.
-	FeeTooLow           DiscardReason = 7
-	OversizedData       DiscardReason = 8
-	InvalidSender       DiscardReason = 9
-	NegativeValue       DiscardReason = 10 // ensure no one is able to specify a transaction with a negative value.
-	Spammer             DiscardReason = 11
-	PendingPoolOverflow DiscardReason = 12
-	BaseFeePoolOverflow DiscardReason = 13
-	QueuedPoolOverflow  DiscardReason = 14
-	GasUintOverflow     DiscardReason = 15
-	IntrinsicGas        DiscardReason = 16
-	RLPTooLong          DiscardReason = 17
-	NonceTooLow         DiscardReason = 18
-	InsufficientFunds   DiscardReason = 19
-	NotReplaced         DiscardReason = 20 // There was an existing transaction with the same sender and nonce, not enough price bump to replace
-	DuplicateHash       DiscardReason = 21 // There was an existing transaction with the same hash
-	InitCodeTooLarge    DiscardReason = 22 // EIP-3860 - transaction init code is too large
-	UnsupportedTx       DiscardReason = 23 // unsupported transaction type
-	OverflowZkCounters  DiscardReason = 24 // unsupported transaction type
+	NotSet                 DiscardReason = 0 // analog of "nil-value", means it will be set in future
+	Success                DiscardReason = 1
+	AlreadyKnown           DiscardReason = 2
+	Mined                  DiscardReason = 3
+	ReplacedByHigherTip    DiscardReason = 4
+	UnderPriced            DiscardReason = 5
+	ReplaceUnderpriced     DiscardReason = 6 // if a transaction is attempted to be replaced with a different one without the required price bump.
+	FeeTooLow              DiscardReason = 7
+	OversizedData          DiscardReason = 8
+	InvalidSender          DiscardReason = 9
+	NegativeValue          DiscardReason = 10 // ensure no one is able to specify a transaction with a negative value.
+	Spammer                DiscardReason = 11
+	PendingPoolOverflow    DiscardReason = 12
+	BaseFeePoolOverflow    DiscardReason = 13
+	QueuedPoolOverflow     DiscardReason = 14
+	GasUintOverflow        DiscardReason = 15
+	IntrinsicGas           DiscardReason = 16
+	RLPTooLong             DiscardReason = 17
+	NonceTooLow            DiscardReason = 18
+	InsufficientFunds      DiscardReason = 19
+	NotReplaced            DiscardReason = 20 // There was an existing transaction with the same sender and nonce, not enough price bump to replace
+	DuplicateHash          DiscardReason = 21 // There was an existing transaction with the same hash
+	InitCodeTooLarge       DiscardReason = 22 // EIP-3860 - transaction init code is too large
+	UnsupportedTx          DiscardReason = 23 // unsupported transaction type
+	OverflowZkCounters     DiscardReason = 24 // unsupported transaction type
+	SenderDisallowedSendTx DiscardReason = 25 // sender is not allowed to send transactions by ACL policy
+	SenderDisallowedDeploy DiscardReason = 26 // sender is not allowed to deploy contracts by ACL policy
 )
 
 func (r DiscardReason) String() string {
@@ -195,6 +197,10 @@ func (r DiscardReason) String() string {
 		return "unsupported transaction type"
 	case OverflowZkCounters:
 		return "overflow zk-counters"
+	case SenderDisallowedSendTx:
+		return "sender disallowed to send tx by ACL policy"
+	case SenderDisallowedDeploy:
+		return "sender disallowed to deploy contract by ACL policy"
 	default:
 		panic(fmt.Sprintf("discard reason: %d", r))
 	}
@@ -303,6 +309,7 @@ type TxPool struct {
 	shanghaiTime            *big.Int
 	isPostShanghai          atomic.Bool
 	allowFreeTransactions   bool
+	aclDB                   kv.RwDB
 
 	// we cannot be in a flushing state whilst getting transactions from the pool, so we have this mutex which is
 	// exposed publicly so anything wanting to get "best" transactions can ensure a flush isn't happening and
@@ -310,7 +317,7 @@ type TxPool struct {
 	flushMtx *sync.Mutex
 }
 
-func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, ethCfg *ethconfig.Config, cache kvcache.Cache, chainID uint256.Int, shanghaiTime *big.Int, londonBlock *big.Int) (*TxPool, error) {
+func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, ethCfg *ethconfig.Config, cache kvcache.Cache, chainID uint256.Int, shanghaiTime *big.Int, londonBlock *big.Int, aclDB kv.RwDB) (*TxPool, error) {
 	var err error
 	localsHistory, err := simplelru.NewLRU[string, struct{}](10_000, nil)
 	if err != nil {
@@ -352,6 +359,7 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		shanghaiTime:            shanghaiTime,
 		allowFreeTransactions:   ethCfg.Zk.AllowFreeTransactions,
 		flushMtx:                &sync.Mutex{},
+		aclDB:                   aclDB,
 	}, nil
 }
 
@@ -643,7 +651,7 @@ func (p *TxPool) AddRemoteTxs(_ context.Context, newTxs types.TxSlots) {
 	}
 }
 
-func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.CacheView) DiscardReason {
+func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.CacheView, from common.Address) DiscardReason {
 	isShanghai := p.isShanghai()
 	if isShanghai {
 		if txn.DataLen > fixedgas.MaxInitCodeSize {
@@ -704,6 +712,29 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		}
 		return InsufficientFunds
 	}
+
+	switch resolvePolicy(txn) {
+	case SendTx:
+		var allow bool
+		allow, err := p.checkPolicy(context.TODO(), from, SendTx)
+		if err != nil {
+			panic(err)
+		}
+		if !allow {
+			return SenderDisallowedSendTx
+		}
+	case Deploy:
+		var allow bool
+		// check that sender may deploy contracts
+		allow, err := p.checkPolicy(context.TODO(), from, Deploy)
+		if err != nil {
+			panic(err)
+		}
+		if !allow {
+			return SenderDisallowedDeploy
+		}
+	}
+
 	return Success
 }
 
@@ -775,7 +806,7 @@ func (p *TxPool) validateTxs(txs *types.TxSlots, stateCache kvcache.CacheView) (
 
 	goodCount := 0
 	for i, txn := range txs.Txs {
-		reason := p.validateTx(txn, txs.IsLocal[i], stateCache)
+		reason := p.validateTx(txn, txs.IsLocal[i], stateCache, txs.Senders.AddressAt(i))
 		if reason == Success {
 			goodCount++
 			// Success here means no DiscardReason yet, so leave it NotSet
@@ -1535,7 +1566,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 
 		isLocalTx := p.isLocalLRU.Contains(string(k))
 
-		if reason := p.validateTx(txn, isLocalTx, cacheView); reason != NotSet && reason != Success {
+		if reason := p.validateTx(txn, isLocalTx, cacheView, addr); reason != NotSet && reason != Success {
 			return nil
 		}
 		txs.Resize(uint(i + 1))

@@ -390,6 +390,7 @@ func (api *ZkEvmAPIImpl) GetFullBlockByHash(ctx context.Context, hash libcommon.
 	return api.populateBlockDetail(tx, ctx, baseBlock, fullTx)
 }
 
+// zkevm_getExitRootsByGER returns the exit roots accordingly to the provided Global Exit Root
 func (api *ZkEvmAPIImpl) GetExitRootsByGER(ctx context.Context, globalExitRoot common.Hash) (*ZkExitRoots, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
@@ -401,6 +402,10 @@ func (api *ZkEvmAPIImpl) GetExitRootsByGER(ctx context.Context, globalExitRoot c
 	infoTreeUpdate, err := hermezDb.GetL1InfoTreeUpdateByGer(globalExitRoot)
 	if err != nil {
 		return nil, err
+	}
+
+	if infoTreeUpdate == nil {
+		return nil, nil
 	}
 
 	return &ZkExitRoots{
@@ -585,8 +590,8 @@ func (api *ZkEvmAPIImpl) GetBatchWitness(ctx context.Context, batchNumber uint64
 		return nil, errors.New("batch not found")
 	}
 
-	endBlock := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blocks[0]))
-	startBlock := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blocks[len(blocks)-1]))
+	startBlock := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blocks[0]))
+	endBlock := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blocks[len(blocks)-1]))
 	return api.getBlockRangeWitness(ctx, api.db, startBlock, endBlock, false, checkedMode)
 }
 
