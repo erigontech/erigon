@@ -785,17 +785,11 @@ func (ac *AggregatorRoTx) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx) (ui
 	blockNumWithCommitment, _, _, err := domains.LatestCommitmentState(tx, ac.CanUnwindDomainsToTxNum(), unwindToTxNum)
 	if err != nil {
 		_minBlockNum, _ := ac.MinUnwindDomainsBlockNum(tx)
-		if blockNum >= _minBlockNum {
-			return blockNum, true, nil
-		}
-		return _minBlockNum, false, nil //nolint
+		return _minBlockNum, blockNum >= _minBlockNum, nil //nolint
 	}
 	if blockNumWithCommitment == 0 && ac.CanUnwindDomainsToTxNum() > 0 { // don't allow unwind beyond files progress
 		_minBlockNum, _ := ac.MinUnwindDomainsBlockNum(tx)
-		if blockNum >= _minBlockNum {
-			return blockNum, true, nil
-		}
-		return _minBlockNum, false, nil
+		return _minBlockNum, blockNum >= _minBlockNum, nil //nolint
 	}
 
 	return blockNumWithCommitment, true, nil
