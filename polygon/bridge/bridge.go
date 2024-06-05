@@ -24,7 +24,6 @@ type fetchSyncEventsType func(ctx context.Context, fromId uint64, to time.Time, 
 type Bridge struct {
 	db                       *polygoncommon.Database
 	ready                    bool
-	eventMap                 map[uint64]IDRange // block num to eventID range
 	lastProcessedBlockNumber uint64
 	lastProcessedEventID     uint64
 
@@ -44,7 +43,6 @@ func NewBridge(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, f
 		log:                      logger,
 		borConfig:                borConfig,
 		fetchSyncEvents:          fetchSyncEvents,
-		eventMap:                 map[uint64]IDRange{},
 		lastProcessedBlockNumber: 0,
 		lastProcessedEventID:     0,
 		stateClientAddress:       libcommon.HexToAddress(borConfig.StateReceiverContract),
