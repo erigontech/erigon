@@ -62,6 +62,9 @@ func (s *Sync) PrevUnwindPoint() *uint64 {
 }
 
 func (s *Sync) NewUnwindState(id stages.SyncStage, unwindPoint, currentProgress uint64, initialCycle, firstCycle bool) *UnwindState {
+	if unwindPoint == 0 {
+		panic(fmt.Errorf("unwindPoint cannot be zero: %s, currentProgress=%d", id, currentProgress))
+	}
 	return &UnwindState{id, unwindPoint, currentProgress, UnwindReason{nil, nil}, s, CurrentSyncCycleInfo{initialCycle, firstCycle}}
 }
 
