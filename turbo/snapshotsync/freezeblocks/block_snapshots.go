@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1388,13 +1387,13 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) (existBlocksToP
 	}
 
 	if br.chainConfig.Bor != nil {
-		if canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBorBlocks()); canDeleteTo > 0 {
-			br.logger.Debug("[snapshots] Prune Bor Blocks", "to", canDeleteTo, "limit", limit)
-			if err = br.blockWriter.PruneBorBlocks(context.Background(), tx, canDeleteTo, limit,
-				func(block uint64) uint64 { return uint64(heimdall.SpanIdAt(block)) }); err != nil {
-				return existBlocksToPrune, err
-			}
-		}
+		//if canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBorBlocks()); canDeleteTo > 0 {
+		//	br.logger.Debug("[snapshots] Prune Bor Blocks", "to", canDeleteTo, "limit", limit)
+		//	if err = br.blockWriter.PruneBorBlocks(context.Background(), tx, canDeleteTo, limit,
+		//		func(block uint64) uint64 { return uint64(heimdall.SpanIdAt(block)) }); err != nil {
+		//		return existBlocksToPrune, err
+		//	}
+		//}
 		//existBlocksToPrune = true // because we want to continue pruning if we have bor blocks in cfg
 	}
 
