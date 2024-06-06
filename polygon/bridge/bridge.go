@@ -52,14 +52,20 @@ func NewBridge(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, f
 	}
 }
 
-func (b *Bridge) Run(ctx context.Context) error {
+func (b *Bridge) Run(ctx context.Context, startTime uint64) error {
 	err := b.db.OpenOnce(ctx, kv.PolygonBridgeDB, databaseTablesCfg)
 	if err != nil {
 		return err
 	}
 
+	id, err := GetSprintLastEventID(ctx, b.db, b.lastProcessedEventID, time.Unix(int64(startTime), 0), b.stateReceiverABI)
+	if err != nil {
+		return err
+	}
+	b.lastProcessedEventID = id - 1
+
 	// start syncing
-	b.log.Warn(bridgeLogPrefix("Bridge is running"))
+	b.log.Warn(bridgeLogPrefix("Bridge is running"), "lastID", b.lastProcessedEventID)
 
 	// get last known sync ID
 	lastEventID, err := GetLatestEventID(ctx, b.db)

@@ -15,5 +15,5 @@ type PolygonBridge interface {
 
 type Service interface {
 	PolygonBridge
-	Run(ctx context.Context) error
+	Run(ctx context.Context, startTime uint64) error
 }

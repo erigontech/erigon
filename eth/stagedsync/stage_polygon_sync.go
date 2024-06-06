@@ -185,7 +185,13 @@ func (s *polygonSyncStageService) Run(ctx context.Context, tx kv.RwTx, stageStat
 	s.stageState = stageState
 	s.unwinder = unwinder
 	s.logger.Info(s.appendLogPrefix("begin..."), "progress", stageState.BlockNumber)
-	s.runBgComponentsOnce(ctx)
+
+	block, err := s.blockReader.BlockByNumber(ctx, tx, stageState.BlockNumber)
+	if err != nil {
+		return err
+	}
+
+	s.runBgComponentsOnce(ctx, block.Time())
 
 	if s.cachedForkChoice != nil {
 		err := s.handleUpdateForkChoice(tx, s.cachedForkChoice)
@@ -236,7 +242,7 @@ func (s *polygonSyncStageService) Run(ctx context.Context, tx kv.RwTx, stageStat
 	}
 }
 
-func (s *polygonSyncStageService) runBgComponentsOnce(ctx context.Context) {
+func (s *polygonSyncStageService) runBgComponentsOnce(ctx context.Context, startTime uint64) {
 	if s.bgComponentsRun {
 		return
 	}
@@ -254,7 +260,7 @@ func (s *polygonSyncStageService) runBgComponentsOnce(ctx context.Context) {
 
 		if s.bridge != nil {
 			eg.Go(func() error {
-				return s.bridge.Run(ctx)
+				return s.bridge.Run(ctx, startTime)
 			})
 		}
 

@@ -107,7 +107,7 @@ func (s *service) Run(parentCtx context.Context) error {
 	if s.heimdallService != nil {
 		group.Go(func() error { return s.heimdallService.Run(ctx) })
 	}
-	group.Go(func() error { return s.bridge.Run(ctx) })
+	group.Go(func() error { return s.bridge.Run(ctx, 0) })
 	group.Go(func() error { return s.sync.Run(ctx) })
 
 	return group.Wait()
