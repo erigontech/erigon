@@ -964,8 +964,16 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 
 		go func() {
+			caplinOpt := []caplin1.CaplinOption{}
+			if config.CaplinConfig.BuilderMode() {
+				config.BeaconRouter.Builder = true
+				caplinOpt = append(caplinOpt, caplin1.WithBuilder(config.CaplinConfig.MevRelayUrl))
+			}
 			eth1Getter := getters.NewExecutionSnapshotReader(ctx, beaconCfg, blockReader, backend.chainDB)
-			if err := caplin1.RunCaplinPhase1(ctx, executionEngine, config, networkCfg, beaconCfg, ethClock, state, dirs, eth1Getter, backend.downloaderClient, config.CaplinConfig.Backfilling, config.CaplinConfig.BlobBackfilling, config.CaplinConfig.Archive, indiciesDB, blobStorage, creds, blockSnapBuildSema); err != nil {
+			if err := caplin1.RunCaplinPhase1(ctx, executionEngine, config, networkCfg, beaconCfg, ethClock,
+				state, dirs, eth1Getter, backend.downloaderClient, config.CaplinConfig.Backfilling,
+				config.CaplinConfig.BlobBackfilling, config.CaplinConfig.Archive, indiciesDB, blobStorage, creds,
+				blockSnapBuildSema, caplinOpt...); err != nil {
 				logger.Error("could not start caplin", "err", err)
 			}
 			ctxCancel()
