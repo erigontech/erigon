@@ -28,15 +28,15 @@ type CanonicalTxnIds struct {
 }
 
 // TxnIdsOfCanonicalBlocks - returns non-canonical txnIds of canonical block range
+// [fromTxNum, toTxNum)
+// To get all canonical blocks, use fromTxNum=0, toTxNum=-1
+// For reverse iteration use order.Desc and fromTxNum=-1, toTxNum=-1
 func TxnIdsOfCanonicalBlocks(tx kv.Tx, fromTxNum, toTxNum int, asc order.By, limit int) (iter.U64, error) {
 	if asc && fromTxNum > 0 && toTxNum > 0 && fromTxNum >= toTxNum {
 		return nil, fmt.Errorf("fromTxNum >= toTxNum: %d, %d", fromTxNum, toTxNum)
 	}
 	if !asc && fromTxNum > 0 && toTxNum > 0 && fromTxNum <= toTxNum {
 		return nil, fmt.Errorf("fromTxNum <= toTxNum: %d, %d", fromTxNum, toTxNum)
-	}
-	if !asc {
-		return nil, fmt.Errorf("CanonicalTxNums: iteration Desc not supported yet")
 	}
 
 	it := &CanonicalTxnIds{tx: tx, fromTxNum: fromTxNum, toTxNum: toTxNum, orderAscend: asc, limit: limit, currentTxNum: -1}
@@ -75,7 +75,7 @@ func (s *CanonicalTxnIds) init() (err error) {
 	}
 
 	if s.orderAscend {
-		s.canonicalMarkers, err = s.tx.RangeAscend(kv.HeaderCanonical, from, to, -1)
+		s.canonicalMarkers, err = tx.RangeAscend(kv.HeaderCanonical, from, to, -1)
 		if err != nil {
 			return err
 		}
@@ -120,9 +120,6 @@ func (s *CanonicalTxnIds) advance() (err error) {
 	}
 	blockNum := binary.BigEndian.Uint64(k)
 	blockHash := common2.BytesToHash(v)
-	//if blockNum >= blockTo { // [from, to)
-	//	return false, nil
-	//}
 	body, err := readBodyForStorage(s.tx, blockHash, blockNum)
 	if err != nil {
 		return err
@@ -133,10 +130,10 @@ func (s *CanonicalTxnIds) advance() (err error) {
 
 	if s.orderAscend {
 		s.currentTxNum = int(body.BaseTxId)
-		s.endOfCurrentBlock = body.BaseTxId + uint64(body.TxAmount) + 2 // 2 system txs
+		s.endOfCurrentBlock = body.BaseTxId + uint64(body.TxAmount) // 2 system txs already included in TxAmount
 	} else {
-		s.currentTxNum = int(body.BaseTxId) + int(body.TxAmount) + 2 // 2 system txs
-		s.endOfCurrentBlock = body.BaseTxId
+		s.currentTxNum = int(body.BaseTxId) + int(body.TxAmount) - 1 // 2 system txs already included in TxAmount
+		s.endOfCurrentBlock = body.BaseTxId - 1                      // and one of them is baseTxId
 	}
 	return nil
 }
