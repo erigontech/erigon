@@ -39,7 +39,7 @@ type Dumper struct {
 	hashedState bool
 }
 
-// DumpAccount represents an account in the state.
+// DumpAccount represents tan account in the state.
 type DumpAccount struct {
 	Balance   string             `json:"balance"`
 	Nonce     uint64             `json:"nonce"`
