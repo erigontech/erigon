@@ -172,14 +172,11 @@ func makeLog_zkevm(size int, logIndexPerTx bool) executionFunc {
 
 		d := scope.Memory.GetCopy(int64(mStart.Uint64()), int64(mSize.Uint64()))
 
-		forkBlock := uint64(0)
-		if interpreter.evm.ChainConfig().ForkID88ElderberryBlock != nil {
-			forkBlock = interpreter.VM.evm.ChainConfig().ForkID88ElderberryBlock.Uint64()
-		}
 		blockNo := interpreter.VM.evm.Context().BlockNumber
+		bugHeight := interpreter.evm.ChainConfig().IsForkID8Elderberry(blockNo)
 
-		// [hack] APPLY BUG ONLY ABOVE FORKID9
-		if forkBlock == 0 || blockNo < forkBlock {
+		// [hack] APPLY BUG ONLY ABOVE FORKID8
+		if !bugHeight {
 			// [zkEvm] fill 0 at the end
 			dataLen := len(d)
 			lenMod32 := dataLen & 31
