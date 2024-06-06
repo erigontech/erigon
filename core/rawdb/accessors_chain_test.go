@@ -252,16 +252,20 @@ func TestBlockStorage(t *testing.T) {
 	}
 
 	// prune: [1: N)
-	_, err = bw.PruneBlocks(ctx, tx, 0, 1)
+	deleted := 0
+	deleted, err = bw.PruneBlocks(ctx, tx, 0, 1)
 	require.NoError(err)
+	require.Equal(0, deleted)
 	entry, _ := br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
 	require.NotNil(entry)
-	_, err = bw.PruneBlocks(ctx, tx, 1, 1)
+	deleted, err = bw.PruneBlocks(ctx, tx, 1, 1)
 	require.NoError(err)
+	require.Equal(0, deleted)
 	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
 	require.NotNil(entry)
-	_, err = bw.PruneBlocks(ctx, tx, 2, 1)
+	deleted, err = bw.PruneBlocks(ctx, tx, 2, 1)
 	require.NoError(err)
+	require.Equal(1, deleted)
 	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
 	require.Nil(entry)
 }
@@ -723,16 +727,20 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 		t.Fatalf("Could not write block: %v", err)
 	}
 	// prune: [1: N)
-	_, err = bw.PruneBlocks(ctx, tx, 0, 1)
+	deleted := 0
+	deleted, err = bw.PruneBlocks(ctx, tx, 0, 1)
 	require.NoError(err)
+	require.Equal(0, deleted)
 	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
 	require.NotNil(entry)
-	_, err = bw.PruneBlocks(ctx, tx, 1, 1)
+	deleted, err = bw.PruneBlocks(ctx, tx, 1, 1)
 	require.NoError(err)
+	require.Equal(0, deleted)
 	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
 	require.NotNil(entry)
-	_, err = bw.PruneBlocks(ctx, tx, 2, 1)
+	deleted, err = bw.PruneBlocks(ctx, tx, 2, 1)
 	require.NoError(err)
+	require.Equal(1, deleted)
 	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
 	require.Nil(entry)
 }
