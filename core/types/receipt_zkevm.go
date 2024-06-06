@@ -20,14 +20,14 @@ import (
 	"fmt"
 	"math/big"
 
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/crypto"
 )
 
 // DeriveFields fills the receipts with their computed fields based on consensus
 // data and contextual infos like containing block and transactions.
-func (r Receipts) DeriveFields_zkEvm(forkId8BlockNum uint64, hash libcommon.Hash, number uint64, txs Transactions, senders []libcommon.Address) error {
+func (r Receipts) DeriveFields_zkEvm(forkId8BlockNum uint64, hash common.Hash, number uint64, txs Transactions, senders []common.Address) error {
 	if len(txs) != len(r) {
 		return fmt.Errorf("transaction and receipt count mismatch, tx count = %d, receipts count = %d", len(txs), len(r))
 	}
@@ -74,4 +74,16 @@ func (r Receipts) DeriveFields_zkEvm(forkId8BlockNum uint64, hash libcommon.Hash
 		}
 	}
 	return nil
+}
+
+func (rs Receipts) ReceiptForTx(txHash common.Hash) *Receipt {
+	var receipt *Receipt
+	for i := range rs {
+		if rs[i].TxHash == txHash {
+			receipt = rs[i]
+			break
+		}
+	}
+
+	return receipt
 }
