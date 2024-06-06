@@ -38,32 +38,7 @@ func printCurentStage(cliCtx *cli.Context) error {
 		return nil
 	}
 
-	/*testData := []diagnostics.SyncStage{
-		{
-			ID:    "Snapshots",
-			State: diagnostics.Running,
-			SubStages: []diagnostics.SyncSubStage{
-				{ID: "Download header-chain", State: diagnostics.Running},
-				{ID: "Download snapshots", State: diagnostics.Queued},
-				{ID: "Indexing", State: diagnostics.Queued},
-				{ID: "Fill DB", State: diagnostics.Queued},
-			},
-		},
-		{ID: "BlockHashes", State: diagnostics.Queued},
-		{ID: "Senders", State: diagnostics.Queued},
-		{ID: "Execution", State: diagnostics.Queued},
-		{ID: "HashState", State: diagnostics.Queued},
-		{ID: "IntermediateHashes", State: diagnostics.Queued},
-		{ID: "CallTraces", State: diagnostics.Queued},
-		{ID: "AccountHistoryIndex", State: diagnostics.Queued},
-		{ID: "StorageHistoryIndex", State: diagnostics.Queued},
-		{ID: "LogIndex", State: diagnostics.Queued},
-		{ID: "TxLookup", State: diagnostics.Queued},
-		{ID: "Finish", State: diagnostics.Queued},
-	}*/
-
 	stagesRows := getStagesRows(data.SyncStages)
-	//stagesRows := getStagesRows(testData)
 
 	switch cliCtx.String(flags.OutputFlag.Name) {
 	case "json":
