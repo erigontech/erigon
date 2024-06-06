@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -255,6 +256,7 @@ func (a *ApiHandler) produceBlock(
 	go func() {
 		defer wg.Done()
 		builderHeader, builderErr = a.getBuilderPayload(ctx, baseBlock, baseState, targetSlot)
+
 	}()
 	wg.Wait()
 
@@ -334,11 +336,38 @@ func (a *ApiHandler) getBuilderPayload(
 	if err != nil {
 		return nil, err
 	}
-	blindedPayload, err := a.builderClient.GetExecutionPayloadHeader(ctx, int64(targetSlot), parentHash, pubKey)
+	header, err := a.builderClient.GetExecutionPayloadHeader(ctx, int64(targetSlot), parentHash, pubKey)
 	if err != nil {
 		return nil, err
 	}
-	return blindedPayload, nil
+
+	// check the version
+	curVersion := baseState.Version().String()
+	if !strings.EqualFold(header.Version, curVersion) {
+		return nil, fmt.Errorf("invalid version %s, expected %s", header.Version, curVersion)
+	}
+
+	// check kzg commitments
+	version, err := clparams.StringToClVersion(header.Version)
+	if err != nil {
+		return nil, err
+	}
+	if header != nil && version >= clparams.DenebVersion {
+		if header.Data.Message.BlobKzgCommitments.Len() >= cltypes.MaxBlobsCommittmentsPerBlock {
+			return nil, fmt.Errorf("too many blob kzg commitments: %d", header.Data.Message.BlobKzgCommitments.Len())
+		}
+		for i := 0; i < header.Data.Message.BlobKzgCommitments.Len(); i++ {
+			c := header.Data.Message.BlobKzgCommitments.Get(i)
+			if c == nil {
+				return nil, fmt.Errorf("nil blob kzg commitment")
+			}
+			if len(c) != length.Bytes48 {
+				return nil, fmt.Errorf("invalid blob kzg commitment length")
+			}
+		}
+	}
+
+	return header, nil
 }
 
 func (a *ApiHandler) produceBeaconBody(
