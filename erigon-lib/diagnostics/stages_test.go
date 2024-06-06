@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/stretchr/testify/require"
 )
 
@@ -44,7 +43,7 @@ func TestStageAdd(t *testing.T) {
 	d.AddOrUpdateSugStages(diagnostics.UpdateSyncSubStageList{
 		List: []diagnostics.UpdateSyncSubStage{
 			{
-				StageId: string(stages.Snapshots),
+				StageId: string("Snapshots"),
 				SubStage: diagnostics.SyncSubStage{
 					ID:    "Download header-chain",
 					State: diagnostics.Running,
