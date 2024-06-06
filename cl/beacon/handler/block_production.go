@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -49,6 +48,10 @@ const (
 	BlockPublishingValidationGossip                   BlockPublishingValidation = "gossip"
 	BlockPublishingValidationConsensus                BlockPublishingValidation = "consensus"
 	BlockPublishingValidationConsensusAndEquivocation BlockPublishingValidation = "consensus_and_equivocation"
+)
+
+var (
+	errBuilderNotEnabled = fmt.Errorf("builder is not enabled")
 )
 
 var defaultGraffitiString = "Caplin"
@@ -256,7 +259,9 @@ func (a *ApiHandler) produceBlock(
 	go func() {
 		defer wg.Done()
 		builderHeader, builderErr = a.getBuilderPayload(ctx, baseBlock, baseState, targetSlot)
-
+		if builderErr != nil && builderErr != errBuilderNotEnabled {
+			log.Error("Failed to get builder payload", "err", builderErr)
+		}
 	}()
 	wg.Wait()
 
@@ -319,7 +324,7 @@ func (a *ApiHandler) getBuilderPayload(
 	targetSlot uint64,
 ) (*builder.ExecutionPayloadHeader, error) {
 	if !a.routerCfg.Builder || a.builderClient == nil {
-		return nil, errors.New("builder is not enabled")
+		return nil, errBuilderNotEnabled
 	}
 
 	proposerIndex, err := baseState.GetBeaconProposerIndexForSlot(targetSlot)
@@ -348,11 +353,7 @@ func (a *ApiHandler) getBuilderPayload(
 	}
 
 	// check kzg commitments
-	version, err := clparams.StringToClVersion(header.Version)
-	if err != nil {
-		return nil, err
-	}
-	if header != nil && version >= clparams.DenebVersion {
+	if header != nil && baseState.Version() >= clparams.DenebVersion {
 		if header.Data.Message.BlobKzgCommitments.Len() >= cltypes.MaxBlobsCommittmentsPerBlock {
 			return nil, fmt.Errorf("too many blob kzg commitments: %d", header.Data.Message.BlobKzgCommitments.Len())
 		}
