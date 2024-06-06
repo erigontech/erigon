@@ -37,7 +37,7 @@ type EriDb struct {
 }
 
 type EriRoDb struct {
-	kvTx kv.Tx
+	kvTxRo kv.Getter
 }
 
 func CreateEriDbBuckets(tx kv.RwTx) error {
@@ -77,9 +77,9 @@ func NewEriDb(tx kv.RwTx) *EriDb {
 	}
 }
 
-func NewRoEriDb(tx kv.Tx) *EriRoDb {
+func NewRoEriDb(tx kv.Getter) *EriRoDb {
 	return &EriRoDb{
-		kvTx: tx,
+		kvTxRo: tx,
 	}
 }
 
@@ -89,6 +89,7 @@ func (m *EriDb) OpenBatch(quitCh <-chan struct{}) {
 		batch.Rollback()
 	}()
 	m.tx = batch
+	m.kvTxRo = batch
 }
 
 func (m *EriDb) CommitBatch() error {
@@ -101,6 +102,7 @@ func (m *EriDb) CommitBatch() error {
 		return err
 	}
 	m.tx = m.kvTx
+	m.kvTxRo = m.kvTx
 	return nil
 }
 
@@ -113,7 +115,7 @@ func (m *EriDb) RollbackBatch() {
 }
 
 func (m *EriRoDb) GetLastRoot() (*big.Int, error) {
-	data, err := m.kvTx.GetOne(TableStats, []byte("lastRoot"))
+	data, err := m.kvTxRo.GetOne(TableStats, []byte("lastRoot"))
 	if err != nil {
 		return big.NewInt(0), err
 	}
@@ -131,7 +133,7 @@ func (m *EriDb) SetLastRoot(r *big.Int) error {
 }
 
 func (m *EriRoDb) GetDepth() (uint8, error) {
-	data, err := m.kvTx.GetOne(TableStats, []byte("depth"))
+	data, err := m.kvTxRo.GetOne(TableStats, []byte("depth"))
 	if err != nil {
 		return 0, err
 	}
@@ -151,7 +153,7 @@ func (m *EriRoDb) Get(key utils.NodeKey) (utils.NodeValue12, error) {
 	keyConc := utils.ArrayToScalar(key[:])
 	k := utils.ConvertBigIntToHex(keyConc)
 
-	data, err := m.kvTx.GetOne(TableSmt, []byte(k))
+	data, err := m.kvTxRo.GetOne(TableSmt, []byte(k))
 	if err != nil {
 		return utils.NodeValue12{}, err
 	}
@@ -193,7 +195,7 @@ func (m *EriRoDb) GetAccountValue(key utils.NodeKey) (utils.NodeValue8, error) {
 	keyConc := utils.ArrayToScalar(key[:])
 	k := utils.ConvertBigIntToHex(keyConc)
 
-	data, err := m.kvTx.GetOne(TableAccountValues, []byte(k))
+	data, err := m.kvTxRo.GetOne(TableAccountValues, []byte(k))
 	if err != nil {
 		return utils.NodeValue8{}, err
 	}
@@ -236,7 +238,7 @@ func (m *EriDb) DeleteKeySource(key utils.NodeKey) error {
 func (m *EriRoDb) GetKeySource(key utils.NodeKey) ([]byte, error) {
 	keyConc := utils.ArrayToScalar(key[:])
 
-	data, err := m.kvTx.GetOne(TableMetadata, keyConc.Bytes())
+	data, err := m.kvTxRo.GetOne(TableMetadata, keyConc.Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -264,7 +266,7 @@ func (m *EriDb) DeleteHashKey(key utils.NodeKey) error {
 func (m *EriRoDb) GetHashKey(key utils.NodeKey) (utils.NodeKey, error) {
 	keyConc := utils.ArrayToScalar(key[:])
 
-	data, err := m.kvTx.GetOne(TableHashKey, keyConc.Bytes())
+	data, err := m.kvTxRo.GetOne(TableHashKey, keyConc.Bytes())
 	if err != nil {
 		return utils.NodeKey{}, err
 	}
@@ -283,7 +285,7 @@ func (m *EriRoDb) GetHashKey(key utils.NodeKey) (utils.NodeKey, error) {
 func (m *EriRoDb) GetCode(codeHash []byte) ([]byte, error) {
 	codeHash = utils.ResizeHashTo32BytesByPrefixingWithZeroes(codeHash)
 
-	data, err := m.kvTx.GetOne(kv.Code, codeHash)
+	data, err := m.kvTxRo.GetOne(kv.Code, codeHash)
 	if err != nil {
 		return nil, err
 	}
@@ -296,7 +298,7 @@ func (m *EriRoDb) GetCode(codeHash []byte) ([]byte, error) {
 }
 
 func (m *EriRoDb) PrintDb() {
-	err := m.kvTx.ForEach(TableSmt, []byte{}, func(k, v []byte) error {
+	err := m.kvTxRo.ForEach(TableSmt, []byte{}, func(k, v []byte) error {
 		println(string(k), string(v))
 		return nil
 	})
@@ -308,7 +310,7 @@ func (m *EriRoDb) PrintDb() {
 func (m *EriRoDb) GetDb() map[string][]string {
 	transformedDb := make(map[string][]string)
 
-	err := m.kvTx.ForEach(TableSmt, []byte{}, func(k, v []byte) error {
+	err := m.kvTxRo.ForEach(TableSmt, []byte{}, func(k, v []byte) error {
 		hk := string(k)
 
 		vConc := utils.ConvertHexToBigInt(string(v))
