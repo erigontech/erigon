@@ -1546,6 +1546,7 @@ func ReadDiffSet(tx kv.Tx, blockNumber uint64, blockHash common.Hash) ([kv.Domai
 		}
 		val = append(val, chunk...)
 	}
+
 	return state.DeserializeKeys(val), true, nil
 
 }
