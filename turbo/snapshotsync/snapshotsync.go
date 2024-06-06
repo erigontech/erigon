@@ -496,7 +496,6 @@ func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime
 		logEnd = "header-chain download finished"
 	}
 
-	diagnostics.Send(diagnostics.SyncStagesList{Stages: stagesIdsList})
 	diagnostics.Send(diagnostics.SnapshotDownloadStatistics{
 		Downloaded:           stats.BytesCompleted,
 		Total:                stats.BytesTotal,

@@ -55,20 +55,23 @@ func printCurentStage(cliCtx *cli.Context) error {
 	return nil
 }
 
-func getStagesRows(syncStages diagnostics.SyncStages) []table.Row {
+func getStagesRows(stages []diagnostics.SyncStage) []table.Row {
 	rows := []table.Row{}
-	for idx, stage := range syncStages.StagesList {
-		row := table.Row{
-			stage,
-			"Queued",
-		}
-		if idx == int(syncStages.CurrentStage) {
-			row[1] = "Running"
-		} else if idx < int(syncStages.CurrentStage) {
-			row[1] = "Completed"
+	for _, stage := range stages {
+		stageRow := table.Row{
+			stage.ID,
+			stage.State.String(),
 		}
 
-		rows = append(rows, row)
+		for _, substage := range stage.SubStages {
+			subStageRow := table.Row{
+				substage.ID,
+				substage.State.String(),
+			}
+			rows = append(rows, subStageRow)
+		}
+
+		rows = append(rows, stageRow)
 	}
 
 	return rows
