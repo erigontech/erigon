@@ -54,7 +54,7 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 
 				d.mu.Unlock()
 
-				if d.isSnapshotStageFinished() {
+				if d.snapshotStageFinished() {
 					return
 				}
 			}
@@ -63,7 +63,7 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 	}()
 }
 
-func (d *DiagnosticClient) isSnapshotStageFinished() bool {
+func (d *DiagnosticClient) snapshotStageFinished() bool {
 	idx := d.getCurrentSyncIdxs()
 	if idx.Stage > 0 {
 		return true
