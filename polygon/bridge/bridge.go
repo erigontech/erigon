@@ -105,7 +105,7 @@ func (b *Bridge) Close() {
 
 // ProcessNewBlocks iterates through all blocks and constructs a map from block number to sync events
 func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) error {
-	eventMap := make(map[uint64]IDRange)
+	eventMap := make(map[uint64]uint64)
 	for _, block := range blocks {
 		// check if block is start of span
 		if b.isSprintStart(block.NumberU64()) {
@@ -120,7 +120,7 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 
 		if lastDBID != 0 && lastDBID > b.lastProcessedEventID {
 			b.log.Debug(bridgeLogPrefix(fmt.Sprintf("Creating map for block %d, start ID %d, end ID %d", block.NumberU64(), b.lastProcessedEventID, lastDBID)))
-			eventMap[block.NumberU64()] = IDRange{b.lastProcessedEventID, lastDBID}
+			eventMap[block.NumberU64()] = b.lastProcessedEventID
 
 			b.lastProcessedEventID = lastDBID
 		}
@@ -128,7 +128,7 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		b.lastProcessedBlockNumber = block.NumberU64()
 	}
 
-	err := StoreMap(ctx, b.db, eventMap)
+	err := StoreEventID(ctx, b.db, eventMap)
 	if err != nil {
 		return err
 	}
@@ -152,20 +152,20 @@ func (b *Bridge) Synchronize(ctx context.Context, tip *types.Header) error {
 
 // Unwind deletes map entries till tip
 func (b *Bridge) Unwind(ctx context.Context, tip *types.Header) error {
-	return UnwindMap(ctx, b.db, tip.Number.Uint64())
+	return PruneEventIDs(ctx, b.db, tip.Number.Uint64())
 }
 
 // GetEvents returns all sync events at blockNum
 func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
-	eventIDs, err := GetMap(ctx, b.db, blockNum)
+	start, end, err := GetEventIDRange(ctx, b.db, blockNum)
 	if err != nil {
 		return nil, err
 	}
 
-	eventsRaw := make([]*types.Message, eventIDs.End-eventIDs.Start+1)
+	eventsRaw := make([]*types.Message, end-start+1)
 
 	// get events from DB
-	events, err := GetEvents(ctx, b.db, eventIDs)
+	events, err := GetEvents(ctx, b.db, start, end)
 	if err != nil {
 		return nil, err
 	}

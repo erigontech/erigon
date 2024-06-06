@@ -368,10 +368,6 @@ const (
 	BorCheckpoints    = "BorCheckpoints"            // checkpoint_id -> checkpoint (in JSON encoding)
 	BorCheckpointEnds = "BorCheckpointEnds"         // start block_num -> checkpoint_id (first block of checkpoint)
 
-	// Polygon Bridge
-	PolygonBridgeEvents = "PolygonBridgeEvents" // bridge event.ID -> event
-	PolygonBridgeMap    = "PolygonBridgeMap"    // bridge blockNum -> startEventID, endEventID
-
 	// Downloader
 	BittorrentCompletion = "BittorrentCompletion"
 	BittorrentInfo       = "BittorrentInfo"
