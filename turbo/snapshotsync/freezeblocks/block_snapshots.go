@@ -1386,7 +1386,8 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) (existBlocksToP
 		existBlocksToPrune = false
 	}
 
-	existBorBlocksToPrune := true
+	existBorBlocksToPrune := false // to exit the loop if there is no bor
+
 	if br.chainConfig.Bor != nil {
 		if canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBorBlocks()); canDeleteTo > 0 {
 			br.logger.Debug("[snapshots] Prune Bor Blocks", "to", canDeleteTo, "limit", limit)
