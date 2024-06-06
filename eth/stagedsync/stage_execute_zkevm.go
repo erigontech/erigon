@@ -155,11 +155,16 @@ Loop:
 
 		// exec loop variables
 		header := block.HeaderNoCopy()
+		preChangeBlockHash := header.Hash()
 		header.GasUsed = uint64(execRs.GasUsed)
 		header.ReceiptHash = types.DeriveSha(execRs.Receipts)
 		header.Bloom = execRs.Bloom
+		newBlockHash := block.Hash()
+		if cfg.chainConfig.IsForkId9Elderberry2(blockNum) && preChangeBlockHash != newBlockHash {
+			log.Warn(fmt.Sprintf("[%s] Blockhash mismatch", s.LogPrefix()), "datastreamBlockHash", preChangeBlockHash, "calculatedBlockHash", newBlockHash)
+		}
 		// don't move above header values setting - wrong hash will be calculated
-		prevBlockHash = header.Hash()
+		prevBlockHash = newBlockHash
 		prevBlockRoot = header.Root
 		stageProgress = blockNum
 		currentStateGas = currentStateGas + header.GasUsed
