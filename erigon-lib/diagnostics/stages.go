@@ -100,9 +100,7 @@ func (d *DiagnosticClient) runSyncStagesListListener(rootCtx context.Context) {
 				d.SetStagesList(info.StagesList)
 				d.mu.Unlock()
 
-				if err := d.db.Update(d.ctx, StagesListUpdater(d.syncStats.SyncStages)); err != nil {
-					log.Error("[Diagnostics] Failed to update stages list", "err", err)
-				}
+				d.saveSyncStagesToDB()
 			}
 		}
 	}()
@@ -123,9 +121,7 @@ func (d *DiagnosticClient) runCurrentSyncStageListener(rootCtx context.Context) 
 				d.SetCurrentSyncStage(info)
 				d.mu.Unlock()
 
-				if err := d.db.Update(d.ctx, StagesListUpdater(d.syncStats.SyncStages)); err != nil {
-					log.Error("[Diagnostics] Failed to update stages list", "err", err)
-				}
+				d.saveSyncStagesToDB()
 			}
 		}
 	}()
@@ -146,9 +142,7 @@ func (d *DiagnosticClient) runCurrentSyncSubStageListener(rootCtx context.Contex
 				d.SetCurrentSyncSubStage(info)
 				d.mu.Unlock()
 
-				if err := d.db.Update(d.ctx, StagesListUpdater(d.syncStats.SyncStages)); err != nil {
-					log.Error("[Diagnostics] Failed to update stages list", "err", err)
-				}
+				d.saveSyncStagesToDB()
 			}
 		}
 	}()
@@ -169,12 +163,16 @@ func (d *DiagnosticClient) runSubStageListener(rootCtx context.Context) {
 				d.AddOrUpdateSugStages(info)
 				d.mu.Unlock()
 
-				if err := d.db.Update(d.ctx, StagesListUpdater(d.syncStats.SyncStages)); err != nil {
-					log.Error("[Diagnostics] Failed to update stages list", "err", err)
-				}
+				d.saveSyncStagesToDB()
 			}
 		}
 	}()
+}
+
+func (d *DiagnosticClient) saveSyncStagesToDB() {
+	if err := d.db.Update(d.ctx, StagesListUpdater(d.syncStats.SyncStages)); err != nil {
+		log.Error("[Diagnostics] Failed to update stages list", "err", err)
+	}
 }
 
 func (d *DiagnosticClient) getCurrentSyncIdxs() CurrentSyncStagesIdxs {
