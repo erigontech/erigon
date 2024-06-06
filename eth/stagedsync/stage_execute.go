@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 
 	"github.com/ledgerwatch/erigon/consensus"
@@ -204,11 +205,11 @@ func gatherNoPruneReceipts(receipts *types.Receipts, chainCfg *chain.Config) boo
 	cr := types.Receipts{}
 	for _, r := range *receipts {
 		toStore := false
-		if chainCfg.DepositContract != nil && *chainCfg.DepositContract == r.ContractAddress {
+		if chainCfg.DepositContract == r.ContractAddress {
 			toStore = true
 		} else {
 			for _, l := range r.Logs {
-				if chainCfg.DepositContract != nil && *chainCfg.DepositContract == l.Address {
+				if chainCfg.DepositContract == l.Address {
 					toStore = true
 					break
 				}
@@ -359,7 +360,24 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 		return err
 	}
 	t := time.Now()
-	if err := rs.Unwind(ctx, txc.Tx, u.UnwindPoint, txNum, accumulator); err != nil {
+	var changeset *state2.StateChangeSet
+	for currentBlock := u.CurrentBlockNumber; currentBlock > u.UnwindPoint; currentBlock-- {
+		currentHash, err := rawdb.ReadCanonicalHash(txc.Tx, currentBlock)
+		if err != nil {
+			return err
+		}
+		currChangeset, ok := state2.GlobalChangesetStorage.Get(currentHash)
+		if !ok || currChangeset == nil {
+			changeset = nil
+			break
+		}
+		if changeset == nil {
+			changeset = currChangeset.Copy()
+		} else {
+			changeset.Merge(currChangeset)
+		}
+	}
+	if err := rs.Unwind(ctx, txc.Tx, u.UnwindPoint, txNum, accumulator, changeset); err != nil {
 		return fmt.Errorf("StateV3.Unwind(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
 	}
 	if err := rawdb.TruncateReceipts(txc.Tx, u.UnwindPoint+1); err != nil {

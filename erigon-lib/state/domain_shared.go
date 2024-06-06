@@ -77,6 +77,8 @@ type SharedDomains struct {
 
 	dWriter   [kv.DomainLen]*domainBufferedWriter
 	iiWriters [kv.StandaloneIdxLen]*invertedIndexBufferedWriter
+
+	changesAccumulator *StateChangeSet
 }
 
 type HasAggTx interface {
@@ -109,10 +111,21 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 	return sd, nil
 }
 
+func (sd *SharedDomains) SetChangesetAccumulator(acc *StateChangeSet) {
+	sd.changesAccumulator = acc
+	for idx := range sd.dWriter {
+		if sd.changesAccumulator == nil {
+			sd.dWriter[idx].diff = nil
+		} else {
+			sd.dWriter[idx].diff = &sd.changesAccumulator.Diffs[idx]
+		}
+	}
+}
+
 func (sd *SharedDomains) AggTx() interface{} { return sd.aggTx }
 
 // aggregator context should call aggTx.Unwind before this one.
-func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo, txUnwindTo uint64) error {
+func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo, txUnwindTo uint64, changeset *StateChangeSet) error {
 	step := txUnwindTo / sd.aggTx.a.StepSize()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -127,8 +140,15 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 	}
 
 	withWarmup := false
-	for _, d := range sd.aggTx.d {
-		if err := d.Unwind(ctx, rwTx, step, txUnwindTo); err != nil {
+	for idx, d := range sd.aggTx.d {
+		txUnwindTo := txUnwindTo
+		if changeset != nil {
+			if err := d.Unwind(ctx, rwTx, step, txUnwindTo, &changeset.Diffs[idx]); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := d.Unwind(ctx, rwTx, step, txUnwindTo, nil); err != nil {
 			return err
 		}
 	}
@@ -826,6 +846,7 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 			return err
 		}
 	}
+
 	switch domain {
 	case kv.AccountsDomain:
 		return sd.updateAccountData(k1, val, prevVal, prevStep)
@@ -848,7 +869,6 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
 func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error {
-
 	if prevVal == nil {
 		var err error
 		prevVal, prevStep, err = sd.DomainGet(domain, k1, k2)
@@ -856,6 +876,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []by
 			return err
 		}
 	}
+
 	switch domain {
 	case kv.AccountsDomain:
 		return sd.deleteAccount(k1, prevVal, prevStep)
@@ -981,6 +1002,7 @@ func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte,
 		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
 	}
 	sdc.branches[string(prefix)] = cachedBranch{data: data, step: prevStep}
+
 	return sdc.sd.updateCommitmentData(prefix, data, prevData, prevStep)
 }
 
@@ -1143,6 +1165,7 @@ func (sdc *SharedDomainsCommitmentContext) storeCommitmentState(blockNum uint64,
 	if sdc.sd.trace {
 		fmt.Printf("[commitment] store txn %d block %d rh %x\n", sdc.sd.txNum, blockNum, rh)
 	}
+
 	return sdc.sd.dWriter[kv.CommitmentDomain].PutWithPrev(keyCommitmentState, nil, encodedState, prevState, prevStep)
 }
 
