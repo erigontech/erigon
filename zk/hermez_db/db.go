@@ -130,6 +130,26 @@ func (db *HermezDbReader) GetBatchNoByL2Block(l2BlockNo uint64) (uint64, error) 
 	return BytesToUint64(v), nil
 }
 
+func (db *HermezDbReader) CheckBatchNoByL2Block(l2BlockNo uint64) (uint64, bool, error) {
+	c, err := db.tx.Cursor(BLOCKBATCHES)
+	if err != nil {
+		return 0, false, err
+	}
+	defer c.Close()
+
+	k, v, err := c.Seek(Uint64ToBytes(l2BlockNo))
+	if err != nil {
+		return 0, false, err
+	}
+	if k == nil {
+		return 0, false, nil
+	}
+	if BytesToUint64(k) != l2BlockNo {
+		return 0, false, nil
+	}
+	return BytesToUint64(v), true, nil
+}
+
 func (db *HermezDbReader) GetL2BlockNosByBatch(batchNo uint64) ([]uint64, error) {
 	v, err := db.tx.GetOne(BATCH_BLOCKS, Uint64ToBytes(batchNo))
 	if err != nil {

@@ -169,7 +169,7 @@ func SpawnStageBatches(
 			if stageProgressBlockNo == 0 {
 				bookmark = types.NewBookmarkProto(0, datastream.BookmarkType_BOOKMARK_TYPE_BATCH)
 			} else {
-				bookmark = types.NewBookmarkProto(stageProgressBlockNo+1, datastream.BookmarkType_BOOKMARK_TYPE_L2_BLOCK)
+				bookmark = types.NewBookmarkProto(stageProgressBlockNo, datastream.BookmarkType_BOOKMARK_TYPE_L2_BLOCK)
 			}
 			cfg.dsClient.ReadAllEntriesToChannel(bookmark)
 		}()
@@ -256,7 +256,17 @@ LOOP:
 
 			atLeastOneBlockWritten = true
 
+			// ignore genesis or a repeat of the last block
 			if l2Block.L2BlockNumber == 0 {
+				continue
+			}
+			// skip but warn on already processed blocks
+			if l2Block.L2BlockNumber <= stageProgressBlockNo {
+				if l2Block.L2BlockNumber < stageProgressBlockNo {
+					// only warn if the block is very old, we expect the very latest block to be requested
+					// when the stage is fired up for the first time
+					log.Warn(fmt.Sprintf("[%s] Skipping block %d, already processed", logPrefix, l2Block.L2BlockNumber))
+				}
 				continue
 			}
 
