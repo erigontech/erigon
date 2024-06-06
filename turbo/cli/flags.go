@@ -488,6 +488,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		DBReadConcurrency:                 ctx.Int(utils.DBReadConcurrencyFlag.Name),
 		RpcAllowListFilePath:              ctx.String(utils.RpcAccessListFlag.Name),
 		Gascap:                            ctx.Uint64(utils.RpcGasCapFlag.Name),
+		Feecap:                            ctx.Float64(utils.RPCGlobalTxFeeCapFlag.Name),
 		MaxTraces:                         ctx.Uint64(utils.TraceMaxtracesFlag.Name),
 		TraceCompatibility:                ctx.Bool(utils.RpcTraceCompatFlag.Name),
 		BatchLimit:                        ctx.Int(utils.RpcBatchLimit.Name),
