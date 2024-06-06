@@ -54,13 +54,22 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 
 				d.mu.Unlock()
 
-				/*if info.DownloadFinished {
+				if d.isSnapshotStageFinished() {
 					return
-				}*/
+				}
 			}
 		}
 
 	}()
+}
+
+func (d *DiagnosticClient) isSnapshotStageFinished() bool {
+	idx := d.getCurrentSyncIdxs()
+	if idx.Stage > 0 {
+		return true
+	} else {
+		return false
+	}
 }
 
 func (d *DiagnosticClient) runSegmentDownloadingListener(rootCtx context.Context) {
