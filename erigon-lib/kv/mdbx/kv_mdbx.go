@@ -1093,24 +1093,22 @@ func (tx *MdbxTx) Commit() error {
 	}
 
 	_ = latency
-	/*
-		if tx.db.opts.label == kv.ChainDB {
-			kv.DbCommitPreparation.Observe(latency.Preparation.Seconds())
-			//kv.DbCommitAudit.Update(latency.Audit.Seconds())
-			kv.DbCommitWrite.Observe(latency.Write.Seconds())
-			kv.DbCommitSync.Observe(latency.Sync.Seconds())
-			kv.DbCommitEnding.Observe(latency.Ending.Seconds())
-			kv.DbCommitTotal.Observe(latency.Whole.Seconds())
+	if tx.db.opts.label == kv.ChainDB {
+		kv.DbCommitPreparation.Observe(latency.Preparation.Seconds())
+		//kv.DbCommitAudit.Update(latency.Audit.Seconds())
+		kv.DbCommitWrite.Observe(latency.Write.Seconds())
+		kv.DbCommitSync.Observe(latency.Sync.Seconds())
+		kv.DbCommitEnding.Observe(latency.Ending.Seconds())
+		kv.DbCommitTotal.Observe(latency.Whole.Seconds())
 
-			//kv.DbGcWorkPnlMergeTime.Update(latency.GCDetails.WorkPnlMergeTime.Seconds())
-			//kv.DbGcWorkPnlMergeVolume.Set(uint64(latency.GCDetails.WorkPnlMergeVolume))
-			//kv.DbGcWorkPnlMergeCalls.Set(uint64(latency.GCDetails.WorkPnlMergeCalls))
-			//
-			//kv.DbGcSelfPnlMergeTime.Update(latency.GCDetails.SelfPnlMergeTime.Seconds())
-			//kv.DbGcSelfPnlMergeVolume.Set(uint64(latency.GCDetails.SelfPnlMergeVolume))
-			//kv.DbGcSelfPnlMergeCalls.Set(uint64(latency.GCDetails.SelfPnlMergeCalls))
-		}
-	*/
+		//kv.DbGcWorkPnlMergeTime.Update(latency.GCDetails.WorkPnlMergeTime.Seconds())
+		//kv.DbGcWorkPnlMergeVolume.Set(uint64(latency.GCDetails.WorkPnlMergeVolume))
+		//kv.DbGcWorkPnlMergeCalls.Set(uint64(latency.GCDetails.WorkPnlMergeCalls))
+		//
+		//kv.DbGcSelfPnlMergeTime.Update(latency.GCDetails.SelfPnlMergeTime.Seconds())
+		//kv.DbGcSelfPnlMergeVolume.Set(uint64(latency.GCDetails.SelfPnlMergeVolume))
+		//kv.DbGcSelfPnlMergeCalls.Set(uint64(latency.GCDetails.SelfPnlMergeCalls))
+	}
 
 	return nil
 }
