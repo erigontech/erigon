@@ -2,19 +2,28 @@ package vm
 
 import (
 	"github.com/ledgerwatch/erigon/chain"
-	"github.com/ledgerwatch/erigon/zk/sequencer"
 	"github.com/ledgerwatch/log/v3"
 )
 
 type ZkConfig struct {
 	Config Config
 
+	TracerCollector  bool
 	CounterCollector *CounterCollector
 }
 
 func NewZkConfig(config Config, counterCollector *CounterCollector) ZkConfig {
 	return ZkConfig{
 		Config:           config,
+		TracerCollector:  false,
+		CounterCollector: counterCollector,
+	}
+}
+
+func NewTracerZkConfig(config Config, counterCollector *CounterCollector) ZkConfig {
+	return ZkConfig{
+		Config:           config,
+		TracerCollector:  true,
 		CounterCollector: counterCollector,
 	}
 }
@@ -52,10 +61,10 @@ func NewZKEVMInterpreter(evm VMInterpreter, cfg ZkConfig) *EVMInterpreter {
 		}
 	}
 
-	// if we're a sequencer and have an active counter collector for the call then we need
+	// if we have an active counter collector for the call then we need
 	// to wrap the jump table so that we can process counters as op codes are called within
 	// the EVM
-	if sequencer.IsSequencer() && cfg.CounterCollector != nil {
+	if cfg.CounterCollector != nil {
 		WrapJumpTableWithZkCounters(jt, SimpleCounterOperations(cfg.CounterCollector))
 	}
 

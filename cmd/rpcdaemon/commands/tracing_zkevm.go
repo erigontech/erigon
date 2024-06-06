@@ -26,7 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 )
 
-func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, config *tracers.TraceConfig, stream *jsoniter.Stream) error {
+func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, config *tracers.TraceConfig_ZkEvm, stream *jsoniter.Stream) error {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		stream.WriteNil()
@@ -69,7 +69,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	}
 
 	if config == nil {
-		config = &tracers.TraceConfig{}
+		config = &tracers.TraceConfig_ZkEvm{}
 	}
 
 	if config.BorTraceEnabled == nil {
@@ -167,7 +167,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	return nil
 }
 
-func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, config *tracers.TraceConfig, stream *jsoniter.Stream) error {
+func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, config *tracers.TraceConfig_ZkEvm, stream *jsoniter.Stream) error {
 	var (
 		hash               common.Hash
 		replayTransactions types.Transactions
@@ -179,7 +179,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 	)
 
 	if config == nil {
-		config = &tracers.TraceConfig{}
+		config = &tracers.TraceConfig_ZkEvm{}
 	}
 
 	overrideBlockHash = make(map[uint64]common.Hash)

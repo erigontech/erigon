@@ -59,6 +59,16 @@ func (c *Counter) Clone() *Counter {
 
 func (c *Counter) Used() int { return c.used }
 
+func (c *Counter) Limit() int { return c.initialAmount }
+
+func (c *Counter) AsMap() map[string]int {
+	return map[string]int{
+		"remaining":     c.remaining,
+		"used":          c.used,
+		"initialAmount": c.initialAmount,
+	}
+}
+
 type Counters map[CounterKey]*Counter
 
 func (c Counters) UsedAsString() string {
@@ -84,6 +94,38 @@ func (c Counters) UsedAsMap() map[string]int {
 		"S":   c[S].used,
 		"D":   c[D].used,
 	}
+}
+
+func (c *Counters) GetArithmetics() *Counter {
+	return (*c)[A]
+}
+
+func (c *Counters) GetBinaries() *Counter {
+	return (*c)[B]
+}
+
+func (c *Counters) GetSHA256Hashes() *Counter {
+	return (*c)[SHA]
+}
+
+func (c *Counters) GetKeccakHashes() *Counter {
+	return (*c)[K]
+}
+
+func (c *Counters) GetMemAligns() *Counter {
+	return (*c)[M]
+}
+
+func (c *Counters) GetPoseidonHashes() *Counter {
+	return (*c)[P]
+}
+
+func (c *Counters) GetSteps() *Counter {
+	return (*c)[S]
+}
+
+func (c *Counters) GetPoseidonPaddings() *Counter {
+	return (*c)[D]
 }
 
 type CounterKey string
@@ -149,6 +191,10 @@ func (cc *CounterCollector) Clone() *CounterCollector {
 		isDeploy:    cc.isDeploy,
 		transaction: cc.transaction, // no need to make deep clone of a transaction
 	}
+}
+
+func (cc *CounterCollector) GetSmtLevels() int {
+	return cc.smtLevels
 }
 
 func (cc *CounterCollector) Deduct(key CounterKey, amount int) {
@@ -282,6 +328,34 @@ func WrapJumpTableWithZkCounters(originalTable *JumpTable, counterCalls *[256]ex
 
 	return result
 }
+
+// func WrapJumpTableWithTracerCounters(originalTable *JumpTable) *JumpTable {
+// 	wrapper := func(original, counter executionFunc) executionFunc {
+// 		return func(p *uint64, i *EVMInterpreter, s *ScopeContext) ([]byte, error) {
+// 			b, err := counter(p, i, s)
+// 			if err != nil {
+// 				return b, err
+// 			}
+// 			return original(p, i, s)
+// 		}
+// 	}
+
+// 	result := &JumpTable{}
+
+// 	for idx := range originalTable {
+// 		original := originalTable[idx]
+// 		// if we have something in the Counter table to process wrap the function call
+// 		if counterCalls[idx] != nil {
+// 			originalExec := originalTable[idx].execute
+// 			counterExec := counterCalls[idx]
+// 			wrappedExec := wrapper(originalExec, counterExec)
+// 			original.execute = wrappedExec
+// 		}
+// 		result[idx] = original
+// 	}
+
+// 	return result
+// }
 
 func SimpleCounterOperations(cc *CounterCollector) *[256]executionFunc {
 	calls := &[256]executionFunc{

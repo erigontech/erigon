@@ -11,6 +11,7 @@ import (
 	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	jsoniter "github.com/json-iterator/go"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -19,6 +20,7 @@ import (
 	eritypes "github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
@@ -54,6 +56,8 @@ type ZkEvmAPI interface {
 	GetLatestGlobalExitRoot(ctx context.Context) (common.Hash, error)
 	GetExitRootsByGER(ctx context.Context, globalExitRoot common.Hash) (*ZkExitRoots, error)
 	GetL2BlockInfoTree(ctx context.Context, blockNum rpc.BlockNumberOrHash) (json.RawMessage, error)
+	EstimateCounters(ctx context.Context, argsOrNil *zkevmRPCTransaction) (json.RawMessage, error)
+	TraceTransactionCounters(ctx context.Context, hash common.Hash, config *tracers.TraceConfig_ZkEvm, stream *jsoniter.Stream) error
 }
 
 // APIImpl is implementation of the ZkEvmAPI interface based on remote Db access

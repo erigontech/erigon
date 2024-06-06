@@ -9,9 +9,9 @@ import (
 	"math/big"
 	"time"
 
-	jsoniter "github.com/json-iterator/go"
 	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/log/v3"
 
 	ethereum "github.com/ledgerwatch/erigon"
@@ -145,7 +145,7 @@ func TraceTx(
 	blockCtx evmtypes.BlockContext,
 	txCtx evmtypes.TxContext,
 	ibs evmtypes.IntraBlockState,
-	config *tracers.TraceConfig,
+	config *tracers.TraceConfig_ZkEvm,
 	chainConfig *chain.Config,
 	stream *jsoniter.Stream,
 	callTimeout time.Duration,
@@ -156,6 +156,11 @@ func TraceTx(
 		err    error
 	)
 	var streaming bool
+
+	var counterCollector *vm.CounterCollector
+	if config != nil {
+		counterCollector = config.CounterCollector
+	}
 	switch {
 	case config != nil && config.Tracer != nil:
 		// Define a meaningful timeout of a single transaction trace
@@ -190,21 +195,31 @@ func TraceTx(
 		streaming = false
 
 	case config == nil:
-		tracer = logger.NewJsonStreamLogger(nil, ctx, stream)
+		tracer = logger.NewJsonStreamLogger_ZkEvm(nil, ctx, stream, counterCollector)
 		streaming = true
 
 	default:
-		tracer = logger.NewJsonStreamLogger(config.LogConfig, ctx, stream)
+		tracer = logger.NewJsonStreamLogger_ZkEvm(config.LogConfig, ctx, stream, counterCollector)
 		streaming = true
 	}
+
+	zkConfig := vm.NewZkConfig(vm.Config{Debug: true, Tracer: tracer}, counterCollector)
+
 	// Run the transaction with tracing enabled.
-	vmenv := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: true, Tracer: tracer})
+	vmenv := vm.NewZkEVM(blockCtx, txCtx, ibs, chainConfig, zkConfig)
 	var refunds = true
 	if config != nil && config.NoRefunds != nil && *config.NoRefunds {
 		refunds = false
 	}
 	if streaming {
 		stream.WriteObjectStart()
+
+		if config != nil && config.CounterCollector != nil {
+			stream.WriteObjectField("smtLevels")
+			stream.WriteInt(config.CounterCollector.GetSmtLevels())
+			stream.WriteMore()
+		}
+
 		stream.WriteObjectField("structLogs")
 		stream.WriteArrayStart()
 	}

@@ -6,9 +6,12 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/holiman/uint256"
 	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/chain"
+	db2 "github.com/ledgerwatch/erigon/smt/pkg/db"
+	"github.com/ledgerwatch/erigon/smt/pkg/smt"
+	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
@@ -142,6 +145,7 @@ type ReusableCaller struct {
 	stateReader     state.StateReader
 	callTimeout     time.Duration
 	message         *types.Message
+	batchCounters   *vm.BatchCounterCollector
 }
 
 func (r *ReusableCaller) DoCallWithNewGas(
@@ -225,7 +229,37 @@ func NewReusableCaller(
 	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader)
 	txCtx := core.NewEVMTxContext(msg)
 
-	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{NoBaseFee: true})
+	eriDb := db2.NewRoEriDb(tx)
+	smt := smt.NewRoSMT(eriDb)
+	hermezDb := hermez_db.NewHermezDbReader(tx)
+
+	forkId, err := hermezDb.GetForkIdByBlockNum(header.Number.Uint64())
+	if err != nil {
+		return nil, err
+	}
+
+	smtDepth := smt.GetDepth()
+
+	// transaction from message
+	transaction := types.NewTransaction(
+		msg.Nonce(),
+		*msg.To(),
+		msg.Value(),
+		msg.Gas(),
+		msg.GasPrice(),
+		msg.Data(),
+	)
+
+	batchCounters := vm.NewBatchCounterCollector(smtDepth, uint16(forkId), false)
+	txCounters := vm.NewTransactionCounter(transaction, smtDepth, false)
+
+	_, err = batchCounters.AddNewTransactionCounters(txCounters)
+	if err != nil {
+		return nil, err
+	}
+
+	zkConfig := vm.ZkConfig{Config: vm.Config{NoBaseFee: true}, CounterCollector: txCounters.ExecutionCounters()}
+	evm := vm.NewZkEVM(blockCtx, txCtx, ibs, chainConfig, zkConfig)
 
 	return &ReusableCaller{
 		evm:             evm,
@@ -235,5 +269,6 @@ func NewReusableCaller(
 		callTimeout:     callTimeout,
 		stateReader:     stateReader,
 		message:         &msg,
+		batchCounters:   batchCounters,
 	}, nil
 }

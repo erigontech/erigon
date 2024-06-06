@@ -2,7 +2,10 @@ package stages
 
 import (
 	"context"
+	"errors"
 	"sort"
+
+	"fmt"
 
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -12,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/zk/legacy_executor_verifier"
 	"github.com/ledgerwatch/erigon/zk/txpool"
 	"github.com/ledgerwatch/log/v3"
-	"fmt"
 )
 
 type SequencerExecutorVerifyCfg struct {
@@ -177,6 +179,10 @@ func SpawnSequencerExecutorVerifyStage(
 			forkId, err := hermezDb.GetForkId(batch)
 			if err != nil {
 				return err
+			}
+
+			if forkId == 0 {
+				return errors.New("the network cannot have a 0 fork id")
 			}
 
 			_, addErr := cfg.verifier.AddRequestUnsafe(ctx, tx, &legacy_executor_verifier.VerifierRequest{BatchNumber: batch, ForkId: forkId, StateRoot: block.Root(), Counters: counters})
