@@ -31,7 +31,10 @@ func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt 
 	var eventIdTo uint64 = math.MaxUint64
 	if k != nil {
 		eventIdTo = binary.BigEndian.Uint64(v)
+	} else {
+		existsBlocksToPrune = false
 	}
+
 	c1, err := tx.RwCursor(kv.BorEvents)
 	if err != nil {
 		return existsBlocksToPrune, err
