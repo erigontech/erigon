@@ -37,7 +37,6 @@ type Dumper struct {
 	blockNumber uint64
 	db          kv.Tx
 	hashedState bool
-	historyV3   bool
 }
 
 // DumpAccount represents an account in the state.
