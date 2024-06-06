@@ -1380,24 +1380,28 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) (existBlocksToP
 		br.logger.Debug("[snapshots] Prune Blocks", "to", canDeleteTo, "limit", limit)
 		existBlocksToPrune, err = br.blockWriter.PruneBlocks(context.Background(), tx, canDeleteTo, limit)
 		if err != nil {
-			return existBlocksToPrune, err
+			return true, err
 		}
 	} else {
 		existBlocksToPrune = false
 	}
 
+	existBorBlocksToPrune := false // to exit the loop if there is no bor
+
 	if br.chainConfig.Bor != nil {
 		if canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBorBlocks()); canDeleteTo > 0 {
 			br.logger.Debug("[snapshots] Prune Bor Blocks", "to", canDeleteTo, "limit", limit)
-			if err = br.blockWriter.PruneBorBlocks(context.Background(), tx, canDeleteTo, limit,
+			if existBorBlocksToPrune, err = br.blockWriter.PruneBorBlocks(context.Background(), tx, canDeleteTo, limit,
 				func(block uint64) uint64 { return uint64(heimdall.SpanIdAt(block)) }); err != nil {
-				return existBlocksToPrune, err
+				return true, err
 			}
+		} else {
+			existBorBlocksToPrune = false
 		}
-		existBlocksToPrune = true // because we want to continue pruning if we have bor blocks in cfg
+
 	}
 
-	return existBlocksToPrune, nil
+	return existBlocksToPrune || existBorBlocksToPrune, nil
 }
 
 func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error, onFinishRetire func() error) {
