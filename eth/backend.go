@@ -554,7 +554,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			heimdallClient = heimdall.NewHeimdallClient(config.HeimdallURL, logger)
 		}
 
-		if config.PolygonSync {
+		if config.PolygonSync || config.PolygonSyncStage {
 			polygonBridge = bridge.NewBridge(config.Dirs.DataDir, logger, consensusConfig.(*borcfg.BorConfig), heimdallClient.FetchStateSyncEvents, bor.GenesisContractStateReceiverABI())
 		}
 
