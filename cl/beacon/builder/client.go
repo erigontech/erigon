@@ -33,7 +33,8 @@ func NewBlockBuilderClient(baseUrl string) *builderClient {
 		url:        u,
 	}
 	if err := c.GetStatus(context.Background()); err != nil {
-		log.Crit("mev relay is not ready", "url", baseUrl, "err", err)
+		log.Error("cannot connect to builder client", "url", baseUrl, "error", err)
+		panic("cannot connect to builder client")
 	}
 	log.Info("Builder client is ready", "url", baseUrl)
 	return c
@@ -47,7 +48,7 @@ func (b *builderClient) RegisterValidator(ctx context.Context, registers []*clty
 	if err != nil {
 		return err
 	}
-	_, err = httpCall[any](ctx, b.httpClient, http.MethodPost, url, nil, bytes.NewBuffer(payload))
+	_, err = httpCall[json.RawMessage](ctx, b.httpClient, http.MethodPost, url, nil, bytes.NewBuffer(payload))
 	return err
 }
 
@@ -131,10 +132,16 @@ func httpCall[T any](ctx context.Context, client *http.Client, method, url strin
 		return nil, fmt.Errorf("status code: %d. Response content %v", response.StatusCode, string(body))
 	}
 	// read response body
+	bytes, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, err
+	}
 	var body T
-	if err := json.NewDecoder(response.Body).Decode(&body); err == io.EOF {
-		return nil, nil
-	} else if err != nil {
+	if len(bytes) == 0 {
+		return &body, nil
+	}
+	if err := json.Unmarshal(bytes, &body); err != nil {
+		log.Warn("json.Unmarshal error", "err", err, "content", string(bytes))
 		return nil, err
 	}
 	return &body, nil
