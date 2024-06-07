@@ -48,6 +48,8 @@ func NewLogsFilterAggregator() *LogsFilterAggregator {
 }
 
 func (a *LogsFilterAggregator) insertLogsFilter(sender Sub[*types2.Log]) (LogsSubID, *LogsFilter) {
+	a.logsFilterLock.Lock()
+	defer a.logsFilterLock.Unlock()
 	filterId := LogsSubID(generateSubscriptionID())
 	filter := &LogsFilter{addrs: map[libcommon.Address]int{}, topics: map[libcommon.Hash]int{}, sender: sender}
 	a.logsFilters.Put(filterId, filter)
@@ -124,6 +126,8 @@ func (a *LogsFilterAggregator) getAggMaps() (map[libcommon.Address]int, map[libc
 }
 
 func (a *LogsFilterAggregator) distributeLog(eventLog *remote.SubscribeLogsReply) error {
+	a.logsFilterLock.RLock()
+	defer a.logsFilterLock.RUnlock()
 	a.logsFilters.Range(func(k LogsSubID, filter *LogsFilter) error {
 		if filter.allAddrs == 0 {
 			_, addrOk := filter.addrs[gointerfaces.ConvertH160toAddress(eventLog.Address)]
