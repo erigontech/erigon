@@ -24,7 +24,6 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -45,8 +44,6 @@ const maxForkDepth = 32 // 32 slots is the duration of an epoch thus there canno
 type validatePayloadFunc func(wrap.TxContainer, *types.Header, *types.RawBody, uint64, []*types.Header, []*types.RawBody, *shards.Notifications) error
 
 type ForkValidator struct {
-	// current memory batch containing chain head that extend canonical fork.
-	memoryDiff *membatchwithdb.MemoryDiff
 	// notifications accumulated for the extending fork
 	extendingForkNotifications *shards.Notifications
 	// hash of chain head that extend canonical fork.
@@ -122,41 +119,32 @@ func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 	}
 	fv.currentHeight = currentHeight
 	// If the head changed,e previous assumptions on head are incorrect now.
-	fv.memoryDiff = nil
 	fv.extendingForkNotifications = nil
 	fv.extendingForkNumber = 0
 	fv.extendingForkHeadHash = libcommon.Hash{}
 }
 
 // FlushExtendingFork flush the current extending fork if fcu chooses its head hash as the its forkchoice.
-func (fv *ForkValidator) FlushExtendingFork(tx kv.RwTx, accumulator *shards.Accumulator) error {
+func (fv *ForkValidator) LoadNotifications(tx kv.RwTx, accumulator *shards.Accumulator) error {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	start := time.Now()
 	// Flush changes to db.
-	if err := fv.memoryDiff.Flush(tx); err != nil {
-		return err
-	}
 	timings, _ := fv.timingsCache.Get(fv.extendingForkHeadHash)
 	fv.timingsCache.Add(fv.extendingForkHeadHash, append(timings, "FlushExtendingFork", time.Since(start)))
 	fv.extendingForkNotifications.Accumulator.CopyAndReset(accumulator)
 	// Clean extending fork data
-	fv.memoryDiff = nil
 	fv.extendingForkHeadHash = libcommon.Hash{}
 	fv.extendingForkNumber = 0
 	fv.extendingForkNotifications = nil
 	return nil
 }
 
-type HasDiff interface {
-	Diff() (*membatchwithdb.MemoryDiff, error)
-}
-
 // ValidatePayload returns whether a payload is valid or invalid, or if cannot be determined, it will be accepted.
 // if the payload extends the canonical chain, then we stack it in extendingFork without any unwind.
 // if the payload is a fork then we unwind to the point where the fork meets the canonical chain, and there we check whether it is valid.
 // if for any reason none of the actions above can be performed due to lack of information, we accept the payload and avoid validation.
-func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *types.RawBody, extendCanonical bool, logger log.Logger) (status engine_types.EngineStatus, latestValidHash libcommon.Hash, validationError error, criticalError error) {
+func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, extendCanonical bool, logger log.Logger) (status engine_types.EngineStatus, latestValidHash libcommon.Hash, validationError error, criticalError error) {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	if fv.validatePayload == nil {
@@ -176,9 +164,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 	log.Debug("Execution ForkValidator.ValidatePayload", "extendCanonical", extendCanonical)
 	if extendCanonical {
 		var txc wrap.TxContainer
-		m := membatchwithdb.NewMemoryBatch(tx, fv.tmpDir, logger)
-		defer m.Close()
-		txc.Tx = m
+		txc.Tx = tx
 
 		fv.extendingForkNotifications = &shards.Notifications{
 			Events:      shards.NewEvents(),
@@ -187,21 +173,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 		// Update fork head hash.
 		fv.extendingForkHeadHash = hash
 		fv.extendingForkNumber = number
-		status, latestValidHash, validationError, criticalError = fv.validateAndStorePayload(txc, header, body, 0, nil, nil, fv.extendingForkNotifications)
-		if criticalError != nil {
-			return
-		}
-		if validationError == nil {
-			if casted, ok := txc.Tx.(HasDiff); ok {
-				fv.memoryDiff, criticalError = casted.Diff()
-				if criticalError != nil {
-					return
-				}
-			} else {
-				panic(fmt.Sprintf("type %T doesn't have method Diff - like in MemoryMutation", casted))
-			}
-		}
-		return status, latestValidHash, validationError, criticalError
+		return fv.validateAndStorePayload(txc, header, body, 0, nil, nil, fv.extendingForkNotifications)
 	}
 
 	// if the block is not in range of maxForkDepth from head then we do not validate it.
@@ -269,10 +241,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 	if unwindPoint == fv.currentHeight {
 		unwindPoint = 0
 	}
-	var txc wrap.TxContainer
-	batch := membatchwithdb.NewMemoryBatch(tx, fv.tmpDir, logger)
-	defer batch.Rollback()
-	txc.Tx = batch
+	txc := wrap.TxContainer{Tx: tx}
 	notifications := &shards.Notifications{
 		Events:      shards.NewEvents(),
 		Accumulator: shards.NewAccumulator(),
@@ -286,7 +255,6 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 func (fv *ForkValidator) clear() {
 	fv.extendingForkHeadHash = libcommon.Hash{}
 	fv.extendingForkNumber = 0
-	fv.memoryDiff = nil
 }
 
 // Clear wipes out current extending fork data.
@@ -323,7 +291,6 @@ func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *t
 			return
 		}
 		status = engine_types.InvalidStatus
-		fv.memoryDiff = nil
 		fv.extendingForkHeadHash = libcommon.Hash{}
 		fv.extendingForkNumber = 0
 		return
