@@ -36,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/state"
 
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
@@ -376,6 +377,8 @@ func ReadBodyRLP(db kv.Tx, hash common.Hash, number uint64) rlp.RawValue {
 	}
 	return bodyRlp
 }
+
+// Deprecated: use readBodyForStorage
 func ReadStorageBodyRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawValue {
 	bodyRlp, err := db.GetOne(kv.BlockBody, dbutils.BlockBodyKey(number, hash))
 	if err != nil {
@@ -383,17 +386,17 @@ func ReadStorageBodyRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawVa
 	}
 	return bodyRlp
 }
-
-func ReadStorageBody(db kv.Getter, hash common.Hash, number uint64) (types.BodyForStorage, error) {
-	bodyRlp, err := db.GetOne(kv.BlockBody, dbutils.BlockBodyKey(number, hash))
+func readBodyForStorage(db kv.Getter, hash common.Hash, number uint64) (*types.BodyForStorage, error) {
+	data, err := db.GetOne(kv.BlockBody, dbutils.BlockBodyKey(number, hash))
 	if err != nil {
-		log.Error("ReadBodyRLP failed", "err", err)
+		return nil, err
 	}
 	bodyForStorage := new(types.BodyForStorage)
-	if err := rlp.DecodeBytes(bodyRlp, bodyForStorage); err != nil {
-		return types.BodyForStorage{}, err
+	err = rlp.DecodeBytes(data, bodyForStorage)
+	if err != nil {
+		return nil, fmt.Errorf("readBodyForStorage: %w, %d, %x", err, number, hash)
 	}
-	return *bodyForStorage, nil
+	return bodyForStorage, nil
 }
 
 func TxnByIdxInBlock(db kv.Getter, blockHash common.Hash, blockNum uint64, txIdxInBlock int) (types.Transaction, error) {
@@ -1019,20 +1022,21 @@ func WriteBlock(db kv.RwTx, block *types.Block) error {
 // keeps genesis in db: [1, to)
 // doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
-func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
+// Returns false if there is nothing to prune
+func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int, err error) {
 	c, err := tx.Cursor(kv.Headers)
 	if err != nil {
-		return err
+		return deleted, err
 	}
 	defer c.Close()
 
 	// find first non-genesis block
 	firstK, _, err := c.Seek(hexutility.EncodeTs(1))
 	if err != nil {
-		return err
+		return deleted, err
 	}
 	if firstK == nil { //nothing to delete
-		return err
+		return deleted, err
 	}
 	blockFrom := binary.BigEndian.Uint64(firstK)
 	stopAtBlock := min(blockTo, blockFrom+uint64(blocksDeleteLimit))
@@ -1041,7 +1045,7 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
 
 	for k, _, err := c.Current(); k != nil; k, _, err = c.Next() {
 		if err != nil {
-			return err
+			return deleted, err
 		}
 
 		n := binary.BigEndian.Uint64(k)
@@ -1051,7 +1055,7 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
 
 		b, err = ReadBodyForStorageByKey(tx, k)
 		if err != nil {
-			return err
+			return deleted, err
 		}
 		if b == nil {
 			log.Debug("PruneBlocks: block body not found", "height", n)
@@ -1060,7 +1064,7 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
 			for txID := b.BaseTxId; txID < b.BaseTxId+uint64(b.TxAmount); txID++ {
 				binary.BigEndian.PutUint64(txIDBytes, txID)
 				if err = tx.Delete(kv.EthTx, txIDBytes); err != nil {
-					return err
+					return deleted, err
 				}
 			}
 		}
@@ -1068,17 +1072,19 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
 		// for the next key and Delete below will end up deleting 1 more record than required
 		kCopy := common.Copy(k)
 		if err = tx.Delete(kv.Senders, kCopy); err != nil {
-			return err
+			return deleted, err
 		}
 		if err = tx.Delete(kv.BlockBody, kCopy); err != nil {
-			return err
+			return deleted, err
 		}
 		if err = tx.Delete(kv.Headers, kCopy); err != nil {
-			return err
+			return deleted, err
 		}
+
+		deleted++
 	}
 
-	return nil
+	return deleted, nil
 }
 
 func TruncateCanonicalChain(ctx context.Context, db kv.RwTx, from uint64) error {
@@ -1474,4 +1480,70 @@ func ReadLastNewBlockSeen(tx kv.Tx) (uint64, error) {
 		return 0, nil
 	}
 	return dbutils.DecodeBlockNumber(v)
+}
+
+const diffChunkLen = 8 * 1024
+
+func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet *state.StateChangeSet) error {
+	// Write the diffSet to the database
+	keys := diffSet.SerializeKeys(nil)
+	chunkCount := (len(keys) + diffChunkLen - 1) / diffChunkLen
+	// Data Format
+	// dbutils.BlockBodyKey(blockNumber, blockHash) -> chunkCount
+	// dbutils.BlockBodyKey(blockNumber, blockHash) + index -> chunk
+	// Write the chunk count
+	if err := tx.Put(kv.ChangeSets3, dbutils.BlockBodyKey(blockNumber, blockHash), dbutils.EncodeBlockNumber(uint64(chunkCount))); err != nil {
+		return err
+	}
+
+	key := make([]byte, 48)
+	for i := 0; i < chunkCount; i++ {
+		start := i * diffChunkLen
+		end := (i + 1) * diffChunkLen
+		if end > len(keys) {
+			end = len(keys)
+		}
+		binary.BigEndian.PutUint64(key, blockNumber)
+		copy(key[8:], blockHash[:])
+		binary.BigEndian.PutUint64(key[40:], uint64(i))
+
+		if err := tx.Put(kv.ChangeSets3, key, keys[start:end]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ReadDiffSet(tx kv.Tx, blockNumber uint64, blockHash common.Hash) ([kv.DomainLen][]state.DomainEntryDiff, bool, error) {
+	// Read the diffSet from the database
+	chunkCountBytes, err := tx.GetOne(kv.ChangeSets3, dbutils.BlockBodyKey(blockNumber, blockHash))
+	if err != nil {
+		return [kv.DomainLen][]state.DomainEntryDiff{}, false, err
+	}
+	if len(chunkCountBytes) == 0 {
+		return [kv.DomainLen][]state.DomainEntryDiff{}, false, nil
+	}
+	chunkCount, err := dbutils.DecodeBlockNumber(chunkCountBytes)
+	if err != nil {
+		return [kv.DomainLen][]state.DomainEntryDiff{}, false, err
+	}
+
+	key := make([]byte, 48)
+	val := make([]byte, 0, diffChunkLen*chunkCount)
+	for i := uint64(0); i < chunkCount; i++ {
+		binary.BigEndian.PutUint64(key, blockNumber)
+		copy(key[8:], blockHash[:])
+		binary.BigEndian.PutUint64(key[40:], i)
+		chunk, err := tx.GetOne(kv.ChangeSets3, key)
+		if err != nil {
+			return [kv.DomainLen][]state.DomainEntryDiff{}, false, err
+		}
+		if len(chunk) == 0 {
+			return [kv.DomainLen][]state.DomainEntryDiff{}, false, nil
+		}
+		val = append(val, chunk...)
+	}
+
+	return state.DeserializeKeys(val), true, nil
+
 }

@@ -3,14 +3,12 @@ package jsonrpc
 import (
 	"context"
 	"fmt"
-	"math/big"
 	"runtime"
 	"sync"
 	"time"
 
 	"github.com/RoaringBitmap/roaring"
 	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -80,7 +78,6 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		blockCtx           evmtypes.BlockContext
 		txCtx              evmtypes.TxContext
 		overrideBlockHash  map[uint64]common.Hash
-		baseFee            uint256.Int
 	)
 
 	tx, err := api.db.BeginRo(ctx)
@@ -142,9 +139,9 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 
 	statedb := state.New(stateReader)
 
-	parent := block.Header()
+	header := block.Header()
 
-	if parent == nil {
+	if header == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", blockNum, block.Hash())
 	}
 
@@ -159,21 +156,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		return hash
 	}
 
-	if parent.BaseFee != nil {
-		baseFee.SetFromBig(parent.BaseFee)
-	}
-
-	blockCtx = evmtypes.BlockContext{
-		CanTransfer: core.CanTransfer,
-		Transfer:    core.Transfer,
-		GetHash:     getHash,
-		Coinbase:    parent.Coinbase,
-		BlockNumber: parent.Number.Uint64(),
-		Time:        parent.Time,
-		Difficulty:  new(big.Int).Set(parent.Difficulty),
-		GasLimit:    parent.GasLimit,
-		BaseFee:     &baseFee,
-	}
+	blockCtx = core.NewEVMBlockContext(header, getHash, api.engine(), nil, chainConfig)
 
 	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, statedb, chainConfig, vm.Config{Debug: false})
@@ -413,7 +396,6 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 		blockCtx           evmtypes.BlockContext
 		txCtx              evmtypes.TxContext
 		overrideBlockHash  map[uint64]common.Hash
-		baseFee            uint256.Int
 	)
 
 	blockLogs := []*types.Log{}
@@ -433,9 +415,9 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	replayTransactions = block.Transactions()
 	log.Debug("[replayBlock] replayTx", "length", len(replayTransactions))
 
-	parent := block.Header()
+	header := block.Header()
 
-	if parent == nil {
+	if header == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", blockNum, hash)
 	}
 
@@ -450,23 +432,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 		return hash
 	}
 
-	if parent.BaseFee != nil {
-		baseFee.SetFromBig(parent.BaseFee)
-	}
-
-	var excessBlobGas uint64 = 0
-	blockCtx = evmtypes.BlockContext{
-		CanTransfer:   core.CanTransfer,
-		Transfer:      core.Transfer,
-		GetHash:       getHash,
-		Coinbase:      parent.Coinbase,
-		BlockNumber:   parent.Number.Uint64(),
-		Time:          parent.Time,
-		Difficulty:    new(big.Int).Set(parent.Difficulty),
-		GasLimit:      parent.GasLimit,
-		BaseFee:       &baseFee,
-		ExcessBlobGas: &excessBlobGas,
-	}
+	blockCtx = core.NewEVMBlockContext(header, getHash, api.engine(), nil, chainConfig)
 
 	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
 	rules := chainConfig.Rules(blockNum, blockCtx.Time)

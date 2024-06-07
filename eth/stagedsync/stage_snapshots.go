@@ -21,9 +21,11 @@ import (
 	"time"
 
 	"github.com/anacrolix/torrent"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/ledgerwatch/erigon-lib/diagnostics"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
@@ -233,6 +235,41 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cstate = snapshotsync.AlsoCaplin
 	}
 
+	diagnostics.Send(diagnostics.CurrentSyncStage{Stage: string(stages.Snapshots)})
+
+	diagnostics.Send(diagnostics.UpdateSyncSubStageList{
+		List: []diagnostics.UpdateSyncSubStage{
+			{
+				StageId: string(stages.Snapshots),
+				SubStage: diagnostics.SyncSubStage{
+					ID:    "Download header-chain",
+					State: diagnostics.Running,
+				},
+			},
+			{
+				StageId: string(stages.Snapshots),
+				SubStage: diagnostics.SyncSubStage{
+					ID:    "Download snapshots",
+					State: diagnostics.Queued,
+				},
+			},
+			{
+				StageId: string(stages.Snapshots),
+				SubStage: diagnostics.SyncSubStage{
+					ID:    "Indexing",
+					State: diagnostics.Queued,
+				},
+			},
+			{
+				StageId: string(stages.Snapshots),
+				SubStage: diagnostics.SyncSubStage{
+					ID:    "Fill DB",
+					State: diagnostics.Queued,
+				},
+			},
+		},
+	})
+
 	// Download only the snapshots that are for the header chain.
 	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, true, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
 		return err
@@ -241,6 +278,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
+	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download snapshots"})
 	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, false, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
 		return err
 	}
@@ -250,6 +288,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cfg.notifier.Events.OnNewSnapshot()
 	}
 
+	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Indexing"})
 	if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.notifier.Events, &cfg.chainConfig); err != nil {
 		return err
 	}
@@ -283,6 +322,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		s.BlockNumber = frozenBlocks
 	}
 
+	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Fill DB"})
 	if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, cfg.blockReader, cfg.agg, logger); err != nil {
 		return err
 	}
@@ -507,7 +547,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 		if s.CurrentSyncCycle.IsInitialCycle {
 			pruneLimit = 10_000
 		}
-		if err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit); err != nil {
+		if _, err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit); err != nil {
 			return err
 		}
 	}

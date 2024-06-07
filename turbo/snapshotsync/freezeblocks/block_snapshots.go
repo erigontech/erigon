@@ -1365,33 +1365,40 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 	return ok, nil
 }
 
-func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
+var ErrNothingToPrune = errors.New("nothing to prune")
+
+func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) (deleted int, err error) {
 	if br.blockReader.FreezingCfg().KeepBlocks {
-		return nil
+		return deleted, nil
 	}
 	currentProgress, err := stages.GetStageProgress(tx, stages.Senders)
 	if err != nil {
-		return err
+		return deleted, err
 	}
 
 	if canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBlocks()); canDeleteTo > 0 {
 		br.logger.Debug("[snapshots] Prune Blocks", "to", canDeleteTo, "limit", limit)
-		if err := br.blockWriter.PruneBlocks(context.Background(), tx, canDeleteTo, limit); err != nil {
-			return err
+		deletedBlocks, err := br.blockWriter.PruneBlocks(context.Background(), tx, canDeleteTo, limit)
+		if err != nil {
+			return deleted, err
 		}
+		deleted += deletedBlocks
 	}
 
 	if br.chainConfig.Bor != nil {
 		if canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBorBlocks()); canDeleteTo > 0 {
 			br.logger.Debug("[snapshots] Prune Bor Blocks", "to", canDeleteTo, "limit", limit)
-			if err := br.blockWriter.PruneBorBlocks(context.Background(), tx, canDeleteTo, limit,
-				func(block uint64) uint64 { return uint64(heimdall.SpanIdAt(block)) }); err != nil {
-				return err
+			deletedBorBlocks, err := br.blockWriter.PruneBorBlocks(context.Background(), tx, canDeleteTo, limit,
+				func(block uint64) uint64 { return uint64(heimdall.SpanIdAt(block)) })
+			if err != nil {
+				return deleted, err
 			}
+			deleted += deletedBorBlocks
 		}
+
 	}
 
-	return nil
+	return deleted, nil
 }
 
 func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error, onFinishRetire func() error) {

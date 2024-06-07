@@ -15,12 +15,13 @@ import (
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli/v2"
+
+	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/ledgerwatch/erigon/cmd/utils"
@@ -522,6 +523,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		DBReadConcurrency:                 ctx.Int(utils.DBReadConcurrencyFlag.Name),
 		RpcAllowListFilePath:              ctx.String(utils.RpcAccessListFlag.Name),
 		Gascap:                            ctx.Uint64(utils.RpcGasCapFlag.Name),
+		Feecap:                            ctx.Float64(utils.RPCGlobalTxFeeCapFlag.Name),
 		MaxTraces:                         ctx.Uint64(utils.TraceMaxtracesFlag.Name),
 		TraceCompatibility:                ctx.Bool(utils.RpcTraceCompatFlag.Name),
 		BatchLimit:                        ctx.Int(utils.RpcBatchLimit.Name),
@@ -568,6 +570,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		rootCmd.PersistentFlags().IntVar(&cfg.GRPCPort, "grpc.port", node.DefaultGRPCPort, "GRPC server listening port")
 		rootCmd.PersistentFlags().BoolVar(&cfg.GRPCHealthCheckEnabled, "grpc.healthcheck", false, "Enable GRPC health check")
 	*/
+
 	cfg.Http = *c
 }
 
