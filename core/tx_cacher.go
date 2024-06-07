@@ -45,7 +45,7 @@ type TxSenderCacher struct {
 	wg      *sync.WaitGroup
 }
 
-// newTxSenderCacher creates a new transaction sender background cacher and starts
+// NewTxSenderCacher creates a new transaction sender background cacher and starts
 // as many processing goroutines as allowed by the GOMAXPROCS on construction.
 func NewTxSenderCacher(threads int) *TxSenderCacher {
 	cacher := &TxSenderCacher{

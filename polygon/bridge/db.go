@@ -13,7 +13,8 @@ import (
 )
 
 var databaseTablesCfg = kv.TableCfg{
-	kv.PolygonBridgeEvents: {},
+	kv.BorEvents:    {},
+	kv.BorEventNums: {},
 }
 
 // GetLatestEventID the latest state sync event ID in given DB, 0 if DB is empty
@@ -25,7 +26,7 @@ func GetLatestEventID(ctx context.Context, db *polygoncommon.Database) (uint64, 
 	}
 	defer tx.Rollback()
 
-	cursor, err := tx.Cursor(kv.PolygonBridgeEvents)
+	cursor, err := tx.Cursor(kv.BorEvents)
 	if err != nil {
 		return 0, err
 	}
@@ -43,7 +44,7 @@ func GetLatestEventID(ctx context.Context, db *polygoncommon.Database) (uint64, 
 	return binary.BigEndian.Uint64(k), err
 }
 
-// GetSprintLastEventID gets the last event id where event.ID >= lastID and event.Time < time
+// GetSprintLastEventID gets the last event id where event.ID >= lastID and event.Time <= time
 func GetSprintLastEventID(ctx context.Context, db *polygoncommon.Database, lastID uint64, timeLimit time.Time, stateContract abi.ABI) (uint64, error) {
 	var eventID uint64
 
@@ -53,7 +54,7 @@ func GetSprintLastEventID(ctx context.Context, db *polygoncommon.Database, lastI
 	}
 	defer tx.Rollback()
 
-	cursor, err := tx.Cursor(kv.PolygonBridgeEvents)
+	cursor, err := tx.Cursor(kv.BorEvents)
 	if err != nil {
 		return eventID, err
 	}
@@ -87,7 +88,10 @@ func GetSprintLastEventID(ctx context.Context, db *polygoncommon.Database, lastI
 			return eventID, err
 		}
 
-		if event.Time.After(timeLimit) {
+		// The table stores the first event ID for the range. In the
+		// case where event.Time == block.Time, we would want the table to
+		// store the current ID instead of the previous one
+		if !event.Time.Before(timeLimit) {
 			return eventID, nil
 		}
 
@@ -114,7 +118,7 @@ func AddEvents(ctx context.Context, db *polygoncommon.Database, events []*heimda
 
 		k := make([]byte, 8)
 		binary.BigEndian.PutUint64(k, event.ID)
-		err = tx.Put(kv.PolygonBridgeEvents, k, v)
+		err = tx.Put(kv.BorEvents, k, v)
 		if err != nil {
 			return err
 		}
@@ -123,15 +127,15 @@ func AddEvents(ctx context.Context, db *polygoncommon.Database, events []*heimda
 	return tx.Commit()
 }
 
-// GetEvents gets raw events, start and end inclusive
-func GetEvents(ctx context.Context, db *polygoncommon.Database, id IDRange) ([][]byte, error) {
+// GetEvents gets raw events, start inclusive, end exclusive
+func GetEvents(ctx context.Context, db *polygoncommon.Database, start, end uint64) ([][]byte, error) {
 	var events [][]byte
 
 	kStart := make([]byte, 8)
-	binary.BigEndian.PutUint64(kStart, id.start)
+	binary.BigEndian.PutUint64(kStart, start)
 
 	kEnd := make([]byte, 8)
-	binary.BigEndian.PutUint64(kEnd, id.end+1)
+	binary.BigEndian.PutUint64(kEnd, end)
 
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
@@ -139,29 +143,108 @@ func GetEvents(ctx context.Context, db *polygoncommon.Database, id IDRange) ([][
 	}
 	defer tx.Rollback()
 
-	cursor, err := tx.Cursor(kv.PolygonBridgeEvents)
-	if err != nil {
-		return nil, err
-	}
-	defer cursor.Close()
-
-	var k, v []byte
-	_, v, err = cursor.Seek(kStart)
+	it, err := tx.Range(kv.BorEvents, kStart, kEnd)
 	if err != nil {
 		return nil, err
 	}
 
-	for {
-		events = append(events, v)
-
-		k, v, err = cursor.Next()
+	for it.HasNext() {
+		_, v, err := it.Next()
 		if err != nil {
 			return nil, err
 		}
-		if bytes.Equal(k, kEnd) {
-			break
-		}
+
+		events = append(events, v)
 	}
 
 	return events, err
+}
+
+func StoreEventID(ctx context.Context, db *polygoncommon.Database, eventMap map[uint64]uint64) error {
+	tx, err := db.BeginRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	kByte := make([]byte, 8)
+	vByte := make([]byte, 8)
+
+	for k, v := range eventMap {
+		binary.BigEndian.PutUint64(kByte, k)
+		binary.BigEndian.PutUint64(vByte, v)
+
+		err = tx.Put(kv.BorEventNums, kByte, vByte)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func GetEventIDRange(ctx context.Context, db *polygoncommon.Database, blockNum uint64) (uint64, uint64, error) {
+	var start, end uint64
+
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return start, end, err
+	}
+	defer tx.Rollback()
+
+	kByte := make([]byte, 8)
+	binary.BigEndian.PutUint64(kByte, blockNum)
+
+	it, err := tx.RangeAscend(kv.BorEventNums, kByte, nil, 2)
+	if err != nil {
+		return start, end, err
+	}
+
+	for it.HasNext() {
+		_, v, err := it.Next()
+		if err != nil {
+			return start, end, err
+		}
+
+		if start == 0 {
+			err = binary.Read(bytes.NewReader(v), binary.BigEndian, &start)
+		} else {
+			err = binary.Read(bytes.NewReader(v), binary.BigEndian, &end)
+		}
+		if err != nil {
+			return start, end, err
+		}
+	}
+
+	return start, end, nil
+}
+
+func PruneEventIDs(ctx context.Context, db *polygoncommon.Database, blockNum uint64) error {
+	tx, err := db.BeginRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	kByte := make([]byte, 8)
+	binary.BigEndian.PutUint64(kByte, blockNum)
+
+	it, err := tx.RangeDescend(kv.BorEvents, nil, kByte, 0)
+	if err != nil {
+		return err
+	}
+
+	for it.HasNext() {
+		k, _, err := it.Next()
+		if err != nil {
+			return err
+		}
+
+		err = tx.Delete(kv.BorEventNums, k)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
