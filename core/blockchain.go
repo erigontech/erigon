@@ -20,6 +20,7 @@ package core
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 	"time"
 
@@ -35,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
+
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -106,7 +108,6 @@ func ExecuteBlockEphemerally(
 	includedTxs := make(types.Transactions, 0, block.Transactions().Len())
 	receipts := make(types.Receipts, 0, block.Transactions().Len())
 	noop := state.NewNoopWriter()
-	var allLogs types.Logs
 	for i, tx := range block.Transactions() {
 		ibs.SetTxContext(tx.Hash(), block.Hash(), i)
 		writeTrace := false
@@ -137,7 +138,6 @@ func ExecuteBlockEphemerally(
 				receipts = append(receipts, receipt)
 			}
 		}
-		allLogs = append(allLogs, receipt.Logs...)
 	}
 
 	receiptSha := types.DeriveSha(receipts)
@@ -164,6 +164,7 @@ func ExecuteBlockEphemerally(
 			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
 		}
 	}
+
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
 		if _, _, _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), block.Requests(), chainReader, false, logger); err != nil {
@@ -202,19 +203,6 @@ func ExecuteBlockEphemerally(
 		}
 
 		execRs.StateSyncReceipt = stateSyncReceipt
-	}
-
-	if chainConfig.IsPrague(block.Time()) {
-		requests, err := types.ParseDepositLogs(allLogs, chainConfig.DepositContract)
-		if err != nil {
-			return nil, fmt.Errorf("error: could not parse requests logs: %v", err)
-		}
-
-		rh := types.DeriveSha(requests)
-		if *block.Header().RequestsRoot != rh && !vmConfig.NoReceipts {
-			// TODO(racytech): do we have to check it here?
-			return nil, fmt.Errorf("error: invalid requests root hash, expected: %v, got :%v", *block.Header().RequestsRoot, rh)
-		}
 	}
 
 	return execRs, nil
@@ -279,7 +267,7 @@ func SysCallContract(contract libcommon.Address, data []byte, chainConfig *chain
 		author = &state.SystemAddress
 		txContext = NewEVMTxContext(msg)
 	}
-	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, author)
+	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, author, chainConfig)
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 
 	ret, _, err := evm.Call(
@@ -309,7 +297,7 @@ func SysCallContractMsg(msg *types.Message, chainConfig *chain.Config, ibs *stat
 		author = &state.SystemAddress
 		txContext = NewEVMTxContext(msg)
 	}
-	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, author)
+	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, author, chainConfig)
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 
 	ret, _, err := evm.Call(
@@ -327,7 +315,7 @@ func SysCallContractMsg(msg *types.Message, chainConfig *chain.Config, ibs *stat
 }
 
 // SysCreate is a special (system) contract creation methods for genesis constructors.
-func SysCreate(contract libcommon.Address, data []byte, chainConfig chain.Config, ibs *state.IntraBlockState, header *types.Header) (result []byte, err error) {
+func SysCreate(contract libcommon.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header) (result []byte, err error) {
 	msg := types.NewMessage(
 		contract,
 		nil, // to
@@ -343,8 +331,8 @@ func SysCreate(contract libcommon.Address, data []byte, chainConfig chain.Config
 	// Create a new context to be used in the EVM environment
 	author := &contract
 	txContext := NewEVMTxContext(msg)
-	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), nil, author)
-	evm := vm.NewEVM(blockContext, txContext, ibs, &chainConfig, vmConfig)
+	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), nil, author, chainConfig)
+	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 
 	ret, _, err := evm.SysCreate(
 		vm.AccountRef(msg.From()),
@@ -361,7 +349,7 @@ func FinalizeBlockExecution(
 	header *types.Header, txs types.Transactions, uncles []*types.Header,
 	stateWriter state.StateWriter, cc *chain.Config,
 	ibs *state.IntraBlockState, receipts types.Receipts,
-	withdrawals []*types.Withdrawal, requests []*types.Request, chainReader consensus.ChainReader,
+	withdrawals []*types.Withdrawal, requests types.Requests, chainReader consensus.ChainReader,
 	isMining bool,
 	logger log.Logger,
 ) (newBlock *types.Block, newTxs types.Transactions, newReceipt types.Receipts, err error) {
@@ -375,7 +363,12 @@ func FinalizeBlockExecution(
 	if isMining {
 		newBlock, newTxs, newReceipt, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, syscall2, nil, logger)
 	} else {
-		_, _, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, syscall2, logger)
+		var rss types.Requests
+		_, _, _, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, syscall2, logger)
+
+		if !reflect.DeepEqual(rss, requests) {
+			return nil, nil, nil, fmt.Errorf("invalid requests for block %d", header.Number.Uint64())
+		}
 	}
 	if err != nil {
 		return nil, nil, nil, err

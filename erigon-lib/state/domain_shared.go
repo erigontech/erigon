@@ -77,6 +77,8 @@ type SharedDomains struct {
 
 	dWriter   [kv.DomainLen]*domainBufferedWriter
 	iiWriters [kv.StandaloneIdxLen]*invertedIndexBufferedWriter
+
+	changesAccumulator *StateChangeSet
 }
 
 type HasAggTx interface {
@@ -109,10 +111,21 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 	return sd, nil
 }
 
+func (sd *SharedDomains) SetChangesetAccumulator(acc *StateChangeSet) {
+	sd.changesAccumulator = acc
+	for idx := range sd.dWriter {
+		if sd.changesAccumulator == nil {
+			sd.dWriter[idx].diff = nil
+		} else {
+			sd.dWriter[idx].diff = &sd.changesAccumulator.Diffs[idx]
+		}
+	}
+}
+
 func (sd *SharedDomains) AggTx() interface{} { return sd.aggTx }
 
 // aggregator context should call aggTx.Unwind before this one.
-func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo, txUnwindTo uint64) error {
+func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo, txUnwindTo uint64, changeset *StateChangeSet) error {
 	step := txUnwindTo / sd.aggTx.a.StepSize()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -127,8 +140,15 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 	}
 
 	withWarmup := false
-	for _, d := range sd.aggTx.d {
-		if err := d.Unwind(ctx, rwTx, step, txUnwindTo); err != nil {
+	for idx, d := range sd.aggTx.d {
+		txUnwindTo := txUnwindTo
+		if changeset != nil {
+			if err := d.Unwind(ctx, rwTx, step, txUnwindTo, &changeset.Diffs[idx]); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := d.Unwind(ctx, rwTx, step, txUnwindTo, nil); err != nil {
 			return err
 		}
 	}
@@ -331,15 +351,26 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 	if !sd.aggTx.a.commitmentValuesTransform ||
 		len(branch) == 0 ||
 		sd.aggTx.minimaxTxNumInDomainFiles(false) == 0 ||
-		bytes.Equal(prefix, keyCommitmentState) {
+		bytes.Equal(prefix, keyCommitmentState) || ((fEndTxNum-fStartTxNum)/sd.aggTx.a.StepSize())%2 != 0 {
 
 		return branch, nil // do not transform, return as is
 	}
 
 	sto := sd.aggTx.d[kv.StorageDomain]
 	acc := sd.aggTx.d[kv.AccountsDomain]
+	com := sd.aggTx.d[kv.CommitmentDomain]
+	commItem := com.lookupFileByItsRange(fStartTxNum, fEndTxNum)
+	_ = commItem
 	storageItem := sto.lookupFileByItsRange(fStartTxNum, fEndTxNum)
+	if storageItem == nil {
+		sd.logger.Crit("storage file of steps %d-%d not found\n", fStartTxNum/sd.aggTx.a.aggregationStep, fEndTxNum/sd.aggTx.a.aggregationStep)
+		return nil, fmt.Errorf("storage file not found")
+	}
 	accountItem := acc.lookupFileByItsRange(fStartTxNum, fEndTxNum)
+	if accountItem == nil {
+		sd.logger.Crit("storage file of steps %d-%d not found\n", fStartTxNum/sd.aggTx.a.aggregationStep, fEndTxNum/sd.aggTx.a.aggregationStep)
+		return nil, fmt.Errorf("account file not found")
+	}
 	storageGetter := NewArchiveGetter(storageItem.decompressor.MakeGetter(), sto.d.compression)
 	accountGetter := NewArchiveGetter(accountItem.decompressor.MakeGetter(), acc.d.compression)
 
@@ -556,7 +587,10 @@ func (sd *SharedDomains) SetTrace(b bool) {
 }
 
 func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
-	return sd.sdCtx.ComputeCommitment(ctx, saveStateAfter, blockNum, logPrefix)
+	sd.aggTx.RestrictSubsetFileDeletions(true)
+	rootHash, err = sd.sdCtx.ComputeCommitment(ctx, saveStateAfter, blockNum, logPrefix)
+	sd.aggTx.RestrictSubsetFileDeletions(false)
+	return
 }
 
 // IterateStoragePrefix iterates over key-value pairs of the storage domain that start with given prefix
@@ -812,6 +846,7 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 			return err
 		}
 	}
+
 	switch domain {
 	case kv.AccountsDomain:
 		return sd.updateAccountData(k1, val, prevVal, prevStep)
@@ -834,7 +869,6 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
 func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error {
-
 	if prevVal == nil {
 		var err error
 		prevVal, prevStep, err = sd.DomainGet(domain, k1, k2)
@@ -842,6 +876,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []by
 			return err
 		}
 	}
+
 	switch domain {
 	case kv.AccountsDomain:
 		return sd.deleteAccount(k1, prevVal, prevStep)
@@ -967,6 +1002,7 @@ func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte,
 		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
 	}
 	sdc.branches[string(prefix)] = cachedBranch{data: data, step: prevStep}
+
 	return sdc.sd.updateCommitmentData(prefix, data, prevData, prevStep)
 }
 
@@ -1052,11 +1088,12 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 
 // Evaluates commitment for processed state.
 func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, saveState bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
-	defer sdc.ResetBranchCache()
 	if dbg.DiscardCommitment() {
 		sdc.updates.List(true)
 		return nil, nil
 	}
+	sdc.ResetBranchCache()
+	defer sdc.ResetBranchCache()
 
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
@@ -1128,6 +1165,7 @@ func (sdc *SharedDomainsCommitmentContext) storeCommitmentState(blockNum uint64,
 	if sdc.sd.trace {
 		fmt.Printf("[commitment] store txn %d block %d rh %x\n", sdc.sd.txNum, blockNum, rh)
 	}
+
 	return sdc.sd.dWriter[kv.CommitmentDomain].PutWithPrev(keyCommitmentState, nil, encodedState, prevState, prevStep)
 }
 

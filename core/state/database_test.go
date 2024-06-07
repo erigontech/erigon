@@ -1265,7 +1265,6 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	rh1, err := sd.ComputeCommitment(context.Background(), true, 0, "")
-	// _, err := trie.CalcRoot("test", tx)
 	require.NoError(t, err)
 	t.Logf("stateRoot %x", rh1)
 
@@ -1290,7 +1289,6 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	assert.Equal(t, newCode, trieCode, "new code should be received")
 
 	rh2, err := sd.ComputeCommitment(context.Background(), true, 1, "")
-	// _, err := trie.CalcRoot("test", tx)
 	require.NoError(t, err)
 	require.NotEqual(t, rh1, rh2)
 }
