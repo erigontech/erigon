@@ -1462,7 +1462,7 @@ func (c *Bor) CommitStates(
 	events := chain.Chain.BorEventsByBlock(header.Hash(), blockNum)
 
 	//if len(events) == 50 || len(events) == 0 { // we still sometime could get 0 events from borevent file
-	if blockNum < chain.Chain.FrozenBorBlocks() && len(events) == 50 { // we still sometime could get 0 events from borevent file
+	if blockNum <= chain.Chain.FrozenBorBlocks() && len(events) == 50 { // we still sometime could get 0 events from borevent file
 		var to time.Time
 		if c.config.IsIndore(blockNum) {
 			stateSyncDelay := c.config.CalculateStateSyncDelay(blockNum)
