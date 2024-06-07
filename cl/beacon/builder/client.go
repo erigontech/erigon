@@ -162,12 +162,14 @@ func httpCall[T any](ctx context.Context, client *http.Client, method, url strin
 	if err != nil {
 		return nil, err
 	}
+	log.Info("[mev builder] httpCall", "url", url, "method", method, "response", string(bytes))
+
 	var body T
 	if len(bytes) == 0 {
 		return &body, nil
 	}
 	if err := json.Unmarshal(bytes, &body); err != nil {
-		log.Warn("json.Unmarshal error", "err", err, "content", string(bytes))
+		log.Warn("[mev builder] json.Unmarshal error", "err", err, "content", string(bytes))
 		return nil, err
 	}
 	return &body, nil
