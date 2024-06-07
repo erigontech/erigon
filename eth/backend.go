@@ -965,10 +965,15 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 		go func() {
 			caplinOpt := []caplin1.CaplinOption{}
-			if config.CaplinConfig.BuilderMode() {
-				config.BeaconRouter.Builder = true
-				caplinOpt = append(caplinOpt, caplin1.WithBuilder(config.CaplinConfig.MevRelayUrl))
+			if config.BeaconRouter.Builder {
+				if config.CaplinConfig.RelayUrlExist() {
+					caplinOpt = append(caplinOpt, caplin1.WithBuilder(config.CaplinConfig.MevRelayUrl))
+				} else {
+					log.Warn("builder api enable but relay url not set. Skipping builder mode")
+					config.BeaconRouter.Builder = false
+				}
 			}
+			log.Info("Starting caplin")
 			eth1Getter := getters.NewExecutionSnapshotReader(ctx, beaconCfg, blockReader, backend.chainDB)
 			if err := caplin1.RunCaplinPhase1(ctx, executionEngine, config, networkCfg, beaconCfg, ethClock,
 				state, dirs, eth1Getter, backend.downloaderClient, config.CaplinConfig.Backfilling,

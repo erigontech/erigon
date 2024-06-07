@@ -41,7 +41,7 @@ type CaplinConfig struct {
 	MevRelayUrl string
 }
 
-func (c CaplinConfig) BuilderMode() bool {
+func (c CaplinConfig) RelayUrlExist() bool {
 	return c.MevRelayUrl != ""
 }
 
