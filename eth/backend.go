@@ -775,6 +775,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				contracts.SequencedBatchTopicEtrog,
 				contracts.VerificationTopicPreEtrog,
 				contracts.VerificationTopicEtrog,
+				contracts.VerificationValidiumTopicEtrog,
 			}}
 			l1Contracts = []libcommon.Address{cfg.AddressRollup, cfg.AddressAdmin, cfg.AddressZkevm}
 		}

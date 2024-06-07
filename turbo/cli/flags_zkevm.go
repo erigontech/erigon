@@ -121,6 +121,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		PoolManagerUrl:                         ctx.String(utils.PoolManagerUrl.Name),
 		DisableVirtualCounters:                 ctx.Bool(utils.DisableVirtualCounters.Name),
 		ExecutorPayloadOutput:                  ctx.String(utils.ExecutorPayloadOutput.Name),
+		DAUrl:                                  ctx.String(utils.DAUrl.Name),
 	}
 
 	checkFlag(utils.L2ChainIdFlag.Name, cfg.L2ChainId)

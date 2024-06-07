@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"time"
 
+	"errors"
+
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -14,8 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon/zk/syncer"
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/ledgerwatch/erigon/core/types"
-	"errors"
 )
 
 type SequencerL1BlockSyncCfg struct {
@@ -158,7 +159,7 @@ LOOP:
 					return errors.New("l1 info root is not 32 bytes")
 				}
 
-				batches, coinbase, err := l1_data.DecodeL1BatchData(transaction.GetData())
+				batches, coinbase, err := l1_data.DecodeL1BatchData(transaction.GetData(), cfg.zkCfg.DAUrl)
 				if err != nil {
 					return err
 				}

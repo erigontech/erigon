@@ -591,6 +591,11 @@ var (
 		Usage: "Output the payload of the executor, serialised requests stored to disk by batch number",
 		Value: "",
 	}
+	DAUrl = cli.StringFlag{
+		Name:  "zkevm.da-url",
+		Usage: "The URL of the data availability service",
+		Value: "",
+	}
 	DebugNoSync = cli.BoolFlag{
 		Name:  "debug.no-sync",
 		Usage: "Disable syncing",
