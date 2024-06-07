@@ -163,7 +163,7 @@ func httpCall[T any](ctx context.Context, client *http.Client, method, url strin
 	if err != nil {
 		return nil, err
 	}
-	log.Info("[mev builder] httpCall", "url", url, "method", method, "response", string(bytes))
+	log.Info("[mev builder] httpCall success", "url", url, "method", method, "response", string(bytes), "statusCode", response.StatusCode)
 
 	var body T
 	if len(bytes) == 0 {
