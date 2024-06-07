@@ -201,7 +201,8 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	}
 	var unwindToGenesis bool
 	if fcuHeader.Number.Uint64() > 0 {
-		if canonicalHash == blockHash {
+		doHeadHashNeedUpdate := rawdb.ReadHeadBlockHash(tx) != blockHash
+		if canonicalHash == blockHash && !doHeadHashNeedUpdate {
 			// if block hash is part of the canonical chain treat it as no-op.
 			writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
 			valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
@@ -216,6 +217,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				})
 				return
 			}
+
 			sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
 				LatestValidHash: gointerfaces.ConvertHashToH256(blockHash),
 				Status:          execution.ExecutionStatus_Success,
