@@ -352,7 +352,6 @@ func enableEOF(jt *JumpTable) {
 		constantGas: GasQuickStep,
 		numPop:      0,
 		numPush:     0,
-		terminal:    true,
 	}
 	jt[RJUMPI] = &operation{
 		execute:     opRjumpi,
@@ -425,7 +424,9 @@ func enableEOF(jt *JumpTable) {
 		memorySize:  memoryDataCopy,
 	}
 	// TODO(racytech): add EOFCREATE
-	jt[RETURNCONTRACT] = &operation{}
+	jt[RETURNCONTRACT] = &operation{
+		terminal: true,
+	}
 }
 
 // opRjump implements the rjump opcode.

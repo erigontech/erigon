@@ -87,7 +87,7 @@ type Container struct {
 	Code         [][]byte
 	SubContainer [][]byte
 	Data         []byte
-	// OffsetData   int // TODO(racytech): consider adding this for DATALOADN check, find out if offset is from the beginning of the code or from the start of data section
+	// OffsetData   int // TODO(racytech): consider adding this for DATALOADN check, find out if offset starts from the beginning of the code or from the start of data section
 }
 
 // FunctionMetadata is an EOF function signature.

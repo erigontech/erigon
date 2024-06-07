@@ -147,6 +147,20 @@ func checkDest(code []byte, analysis *bitvec, imm, from, length int) error {
 	return nil
 }
 
+// func validateControlFlow2(code []byte, section int, metadata []*FunctionMetadata, jt *JumpTable) error {
+
+// 	for pos := 0; pos < len(code); {
+// 		op := OpCode(code[pos])
+
+// 		pops := jt[op].numPop
+// 		pushes := jt[op].numPush
+// 		_maxStack := jt[op].maxStack
+
+// 	}
+
+// 	return nil
+// }
+
 // validateControlFlow iterates through all possible branches the provided code
 // value and determines if it is valid per EOF v1.
 func validateControlFlow(code []byte, section int, metadata []*FunctionMetadata, jt *JumpTable) (int, error) {
