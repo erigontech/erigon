@@ -1484,13 +1484,6 @@ func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstK
 	return lastKeyValue, nil
 }
 
-var bufPool = sync.Pool{
-	New: func() any {
-		bytes := [16 * 4096]byte{}
-		return &bytes
-	},
-}
-
 // DumpTxs - [from, to)
 // Format: hash[0]_1byte + sender_address_2bytes + txnRlp
 func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, _ firstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (lastTx uint64, err error) {
@@ -1502,12 +1495,12 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
 	numBuf := make([]byte, 8)
-
-	parse := func(ctx *types2.TxParseContext, v, valueBuf []byte, senders []common2.Address, j int) ([]byte, error) {
-		var sender [20]byte
-		slot := types2.TxSlot{}
-
-		if _, err := ctx.ParseTransaction(v, 0, &slot, sender[:], false /* hasEnvelope */, false /* wrappedWithBlobs */, nil); err != nil {
+	parseCtx := types2.NewTxParseContext(*chainID)
+	parseCtx.WithSender(false)
+	slot := types2.TxSlot{}
+	var sender [20]byte
+	parse := func(v, valueBuf []byte, senders []common2.Address, j int) ([]byte, error) {
+		if _, err := parseCtx.ParseTransaction(v, 0, &slot, sender[:], false /* hasEnvelope */, false /* wrappedWithBlobs */, nil); err != nil {
 			return valueBuf, err
 		}
 		if len(senders) > 0 {
@@ -1520,8 +1513,8 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		valueBuf = append(valueBuf, v...)
 		return valueBuf, nil
 	}
-
-	addSystemTx := func(ctx *types2.TxParseContext, tx kv.Tx, txId uint64) error {
+	valueBuf := make([]byte, 16*4096)
+	addSystemTx := func(tx kv.Tx, txId uint64) error {
 		binary.BigEndian.PutUint64(numBuf, txId)
 		tv, err := tx.GetOne(kv.EthTx, numBuf)
 		if err != nil {
@@ -1534,16 +1527,12 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			return nil
 		}
 
-		ctx.WithSender(false)
-
-		valueBuf := bufPool.Get().(*[16 * 4096]byte)
-		defer bufPool.Put(valueBuf)
-
-		parsed, err := parse(ctx, tv, valueBuf[:], nil, 0)
+		parseCtx.WithSender(false)
+		valueBuf, err = parse(tv, valueBuf, nil, 0)
 		if err != nil {
 			return err
 		}
-		if err := collect(parsed); err != nil {
+		if err := collect(valueBuf); err != nil {
 			return err
 		}
 		return nil
@@ -1583,89 +1572,30 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			return false, err
 		}
 
-		workers := estimate.AlmostAllCPUs()
+		j := 0
 
-		if workers > 3 {
-			workers = workers / 3 * 2
-		}
-
-		if workers > int(body.TxAmount-2) {
-			if int(body.TxAmount-2) > 1 {
-				workers = int(body.TxAmount - 2)
-			} else {
-				workers = 1
-			}
-		}
-
-		parsers := errgroup.Group{}
-		parsers.SetLimit(workers)
-
-		valueBufs := make([][]byte, workers)
-		parseCtxs := make([]*types2.TxParseContext, workers)
-
-		for i := 0; i < workers; i++ {
-			valueBuf := bufPool.Get().(*[16 * 4096]byte)
-			defer bufPool.Put(valueBuf)
-			valueBufs[i] = valueBuf[:]
-			parseCtxs[i] = types2.NewTxParseContext(*chainID)
-		}
-
-		if err := addSystemTx(parseCtxs[0], tx, body.BaseTxId); err != nil {
+		if err := addSystemTx(tx, body.BaseTxId); err != nil {
 			return false, err
 		}
-
 		binary.BigEndian.PutUint64(numBuf, body.BaseTxId+1)
-
-		collected := -1
-		collectorLock := sync.Mutex{}
-		collections := sync.NewCond(&collectorLock)
-
-		var j int
-
 		if err := tx.ForAmount(kv.EthTx, numBuf, body.TxAmount-2, func(_, tv []byte) error {
-			tx := j
+			parseCtx.WithSender(len(senders) == 0)
+			valueBuf, err = parse(tv, valueBuf, senders, j)
+			if err != nil {
+				return fmt.Errorf("%w, block: %d", err, blockNum)
+			}
+			// first tx byte => sender adress => tx rlp
+			if err := collect(valueBuf); err != nil {
+				return err
+			}
 			j++
-
-			parsers.Go(func() error {
-				parseCtx := parseCtxs[tx%workers]
-
-				parseCtx.WithSender(len(senders) == 0)
-				parseCtx.WithAllowPreEip2s(blockNum <= chainConfig.HomesteadBlock.Uint64())
-
-				valueBuf, err := parse(parseCtx, tv, valueBufs[tx%workers], senders, tx)
-
-				if err != nil {
-					return fmt.Errorf("%w, block: %d", err, blockNum)
-				}
-
-				collectorLock.Lock()
-				defer collectorLock.Unlock()
-
-				for collected < tx-1 {
-					collections.Wait()
-				}
-
-				// first tx byte => sender adress => tx rlp
-				if err := collect(valueBuf); err != nil {
-					return err
-				}
-
-				collected = tx
-				collections.Broadcast()
-
-				return nil
-			})
 
 			return nil
 		}); err != nil {
 			return false, fmt.Errorf("ForAmount: %w", err)
 		}
 
-		if err := parsers.Wait(); err != nil {
-			return false, fmt.Errorf("ForAmount parser: %w", err)
-		}
-
-		if err := addSystemTx(parseCtxs[0], tx, body.BaseTxId+uint64(body.TxAmount)-1); err != nil {
+		if err := addSystemTx(tx, body.BaseTxId+uint64(body.TxAmount)-1); err != nil {
 			return false, err
 		}
 
