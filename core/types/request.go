@@ -30,7 +30,7 @@ func decode(data []byte) (Request, error) {
 	var req Request
 	switch data[0] {
 	case DepositRequestType:
-		req = new(Deposit)
+		req = new(DepositRequest)
 	case WithdrawalRequestType:
 		req = new(WithdrawalRequest)
 	default:
@@ -109,11 +109,11 @@ func (r *Requests) EncodingSize() int {
 	return c
 }
 
-func (r Requests) Deposits() Deposits {
-	deposits := make(Deposits, 0, len(r))
+func (r Requests) Deposits() DepositRequests {
+	deposits := make(DepositRequests, 0, len(r))
 	for _, req := range r {
 		if req.RequestType() == DepositRequestType {
-			deposits = append(deposits, req.(*Deposit))
+			deposits = append(deposits, req.(*DepositRequest))
 		}
 	}
 	return deposits
@@ -135,7 +135,7 @@ func UnmarshalRequestsFromBinary(requests [][]byte) (reqs Requests, err error) {
 	for _, b := range requests {
 		switch b[0] {
 		case DepositRequestType:
-			d := new(Deposit)
+			d := new(DepositRequest)
 			if err = d.DecodeRLP(b); err != nil {
 				return nil, err
 			}

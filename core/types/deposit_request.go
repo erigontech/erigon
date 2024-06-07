@@ -31,7 +31,7 @@ var (
 	)
 )
 
-type Deposit struct {
+type DepositRequest struct {
 	Pubkey                [BLSPubKeyLen]byte `json:"pubkey"`                // public key of validator
 	WithdrawalCredentials libcommon.Hash     `json:"withdrawalCredentials"` // beneficiary of the validator
 	Amount                uint64             `json:"amount"`                // deposit size in Gwei
@@ -39,8 +39,8 @@ type Deposit struct {
 	Index                 uint64             `json:"index"`                 // deposit count value
 }
 
-func (d *Deposit) RequestType() byte { return DepositRequestType }
-func (d *Deposit) EncodeRLP(w io.Writer) (err error) {
+func (d *DepositRequest) RequestType() byte { return DepositRequestType }
+func (d *DepositRequest) EncodeRLP(w io.Writer) (err error) {
 	var buf bytes.Buffer
 	bb := make([]byte, 10)
 	if err = rlp.Encode(&buf, d.Pubkey); err != nil {
@@ -71,9 +71,9 @@ func (d *Deposit) EncodeRLP(w io.Writer) (err error) {
 
 	return
 }
-func (d *Deposit) DecodeRLP(input []byte) error { return rlp.DecodeBytes(input[1:], d) }
-func (d *Deposit) copy() Request {
-	return &Deposit{
+func (d *DepositRequest) DecodeRLP(input []byte) error { return rlp.DecodeBytes(input[1:], d) }
+func (d *DepositRequest) copy() Request {
+	return &DepositRequest{
 		Pubkey:                d.Pubkey,
 		WithdrawalCredentials: d.WithdrawalCredentials,
 		Amount:                d.Amount,
@@ -82,7 +82,7 @@ func (d *Deposit) copy() Request {
 	}
 }
 
-func (d *Deposit) EncodingSize() (encodingSize int) {
+func (d *DepositRequest) EncodingSize() (encodingSize int) {
 	encodingSize++
 	encodingSize += rlp.IntLenExcludingHead(d.Amount)
 	encodingSize++
@@ -104,12 +104,12 @@ type depositUnpacking struct {
 }
 
 // unpackIntoDeposit unpacks a serialized DepositEvent.
-func unpackIntoDeposit(data []byte) (*Deposit, error) {
+func unpackIntoDeposit(data []byte) (*DepositRequest, error) {
 	var du depositUnpacking
 	if err := DepositABI.UnpackIntoInterface(&du, "DepositEvent", data); err != nil {
 		return nil, err
 	}
-	var d Deposit
+	var d DepositRequest
 	copy(d.Pubkey[:], du.Pubkey)
 	copy(d.WithdrawalCredentials[:], du.WithdrawalCredentials)
 	d.Amount = binary.LittleEndian.Uint64(du.Amount)
@@ -135,19 +135,19 @@ func ParseDepositLogs(logs []*Log, depositContractAddress libcommon.Address) (Re
 	return deposits, nil
 }
 
-type Deposits []*Deposit
+type DepositRequests []*DepositRequest
 
 // Len returns the length of s.
-func (s Deposits) Len() int { return len(s) }
+func (s DepositRequests) Len() int { return len(s) }
 
 // EncodeIndex encodes the i'th withdrawal request to w.
-func (s Deposits) EncodeIndex(i int, w *bytes.Buffer) {
+func (s DepositRequests) EncodeIndex(i int, w *bytes.Buffer) {
 	s[i].EncodeRLP(w)
 }
 
 // Requests creates a deep copy of each deposit and returns a slice of the
 // withdrwawal requests as Request objects.
-func (s Deposits) Requests() (reqs Requests) {
+func (s DepositRequests) Requests() (reqs Requests) {
 	for _, d := range s {
 		reqs = append(reqs, d)
 	}
