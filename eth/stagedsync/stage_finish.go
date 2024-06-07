@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
+	"math"
 )
 
 type FinishCfg struct {
@@ -134,22 +135,29 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 	// Notify all headers we have (either canonical or not) in a maximum range span of 1024
 	var notifyFrom uint64
 	var isUnwind bool
+	var heightSpan uint64
 	if unwindTo != nil && *unwindTo != 0 && (*unwindTo) < finishStageBeforeSync {
 		notifyFrom = *unwindTo
 		isUnwind = true
 	} else {
-		heightSpan := finishStageAfterSync - finishStageBeforeSync
+		heightSpan = finishStageAfterSync - finishStageBeforeSync
 		if heightSpan > 1024 {
 			heightSpan = 1024
 		}
 		notifyFrom = finishStageAfterSync - heightSpan
+
+		// check if the height span is greater than the max uint32 value and cap it there if it is
+		if heightSpan > math.MaxUint32 {
+			heightSpan = math.MaxUint32
+		}
 	}
 	notifyFrom++
 
 	var notifyTo = notifyFrom
 	var notifyToHash libcommon.Hash
 	var headersRlp [][]byte
-	if err := tx.ForEach(kv.Headers, hexutility.EncodeTs(notifyFrom), func(k, headerRLP []byte) error {
+
+	if err := tx.ForAmount(kv.Headers, hexutility.EncodeTs(notifyFrom), uint32(heightSpan), func(k, headerRLP []byte) error {
 		if len(headerRLP) == 0 {
 			return nil
 		}
