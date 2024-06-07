@@ -163,7 +163,11 @@ Loop:
 	domains.changesAccumulator = nil
 
 	acu := agg.BeginFilesRo()
-	err = domains.Unwind(ctx, rwTx, 0, unwindTo, stateChangeset)
+	var a [kv.DomainLen][]DomainEntryDiff
+	for idx, d := range stateChangeset.Diffs {
+		a[idx] = d.GetDiffSet()
+	}
+	err = domains.Unwind(ctx, rwTx, 0, unwindTo, &a)
 	require.NoError(t, err)
 	acu.Close()
 

@@ -107,6 +107,7 @@ StorageChangeSet:
 */
 const AccountChangeSet = "AccountChangeSet"
 const StorageChangeSet = "StorageChangeSet"
+const ChangeSets3 = "ChangeSets3"
 
 const (
 
@@ -580,6 +581,7 @@ var ChaindataTables = []string{
 	PlainContractCode,
 	AccountChangeSet,
 	StorageChangeSet,
+	ChangeSets3,
 	Senders,
 	HeadBlockKey,
 	HeadHeaderKey,
