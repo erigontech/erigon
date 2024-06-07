@@ -1467,7 +1467,7 @@ func (c *Bor) CommitStates(
 
 	if c.polygonBridge != nil {
 		events := c.polygonBridge.GetEvents(context.Background(), blockNum) // TODO: pass context
-		c.logger.Warn("using polygon bridge", "len(events)", len(events))
+		c.logger.Warn("using polygon bridge", "len(events)", len(events), "blockNum", blockNum)
 
 		for _, event := range events {
 			_, err := syscall2(event)

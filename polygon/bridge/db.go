@@ -60,6 +60,14 @@ func GetSprintLastEventID(ctx context.Context, db *polygoncommon.Database, lastI
 	}
 	defer cursor.Close()
 
+	count, err := cursor.Count()
+	if err != nil {
+		return eventID, err
+	}
+	if count == 0 {
+		return eventID, nil
+	}
+
 	kDBLast, _, err := cursor.Last()
 	if err != nil {
 		return eventID, err
