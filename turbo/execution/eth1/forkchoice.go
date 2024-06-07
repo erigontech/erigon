@@ -247,7 +247,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			hash:   fcuHeader.Hash(),
 			number: fcuHeader.Number.Uint64(),
 		})
-		for !isCanonicalHash && canonicalHash != blockHash {
+		for !isCanonicalHash {
 			newCanonicals = append(newCanonicals, &canonicalEntry{
 				hash:   currentParentHash,
 				number: currentParentNumber,
@@ -276,31 +276,34 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			}
 		}
 
-		if err := e.executionPipeline.UnwindTo(currentParentNumber, stagedsync.ForkChoice, tx); err != nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
-		if e.hook != nil {
-			if err = e.hook.BeforeRun(tx, isSynced); err != nil {
+		if canonicalHash != blockHash {
+			if err := e.executionPipeline.UnwindTo(currentParentNumber, stagedsync.ForkChoice, tx); err != nil {
+				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+				return
+			}
+			if e.hook != nil {
+				if err = e.hook.BeforeRun(tx, isSynced); err != nil {
+					sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+					return
+				}
+			}
+			if e.executionPipeline.HasUnwindPoint() {
+				unwindToGenesis = e.executionPipeline.UnwindPoint() == 0
+			}
+
+			// Run the unwind
+			if err := e.executionPipeline.RunUnwind(e.db, wrap.TxContainer{Tx: tx}); err != nil {
+				err = fmt.Errorf("updateForkChoice: %w", err)
+				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+				return
+			}
+
+			if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 				return
 			}
 		}
-		if e.executionPipeline.HasUnwindPoint() {
-			unwindToGenesis = e.executionPipeline.UnwindPoint() == 0
-		}
 
-		// Run the unwind
-		if err := e.executionPipeline.RunUnwind(e.db, wrap.TxContainer{Tx: tx}); err != nil {
-			err = fmt.Errorf("updateForkChoice: %w", err)
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
-
-		if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
 		// Mark all new canonicals as canonicals
 		for _, canonicalSegment := range newCanonicals {
 			chainReader := consensuschain.NewReader(e.config, tx, e.blockReader, e.logger)
