@@ -247,7 +247,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			hash:   fcuHeader.Hash(),
 			number: fcuHeader.Number.Uint64(),
 		})
-		for !isCanonicalHash {
+		for !isCanonicalHash && canonicalHash != blockHash {
 			newCanonicals = append(newCanonicals, &canonicalEntry{
 				hash:   currentParentHash,
 				number: currentParentNumber,
