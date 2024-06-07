@@ -49,6 +49,9 @@ func (b *builderClient) RegisterValidator(ctx context.Context, registers []*clty
 		return err
 	}
 	_, err = httpCall[json.RawMessage](ctx, b.httpClient, http.MethodPost, url, nil, bytes.NewBuffer(payload))
+	if err != nil {
+		log.Warn("[mev builder] httpCall error", "err", err, "payload", string(payload))
+	}
 	return err
 }
 
@@ -59,6 +62,13 @@ func (b *builderClient) GetExecutionPayloadHeader(ctx context.Context, slot int6
 	header, err := httpCall[ExecutionPayloadHeader](ctx, b.httpClient, http.MethodGet, url, nil, nil)
 	if err != nil {
 		return nil, err
+	}
+	builderHeaderBytes, err := json.Marshal(header)
+	if err != nil {
+		log.Warn("[mev builder] json.Marshal error", "err", err)
+		return nil, err
+	} else {
+		log.Info("[mev builder] builderHeaderBytes", "builderHeaderBytes", string(builderHeaderBytes))
 	}
 	return header, nil
 }
@@ -76,6 +86,7 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 	}
 	resp, err := httpCall[BlindedBlockResponse](ctx, b.httpClient, http.MethodPost, url, headers, bytes.NewBuffer(payload))
 	if err != nil {
+		log.Warn("[mev builder] httpCall error", "err", err, "payload", string(payload))
 		return nil, nil, err
 	}
 
@@ -98,13 +109,28 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 		eth1Block = denebResp.ExecutionPayload
 		blobsBundle = denebResp.BlobsBundle
 	}
+	// log
+	eth1blockBytes, err := json.Marshal(eth1Block)
+	if err != nil {
+		log.Warn("[mev builder] json.Marshal error", "err", err)
+		return nil, nil, err
+	} else {
+		log.Info("[mev builder] eth1blockBytes", "eth1blockBytes", string(eth1blockBytes))
+	}
+	blobsBundleBytes, err := json.Marshal(blobsBundle)
+	if err != nil {
+		log.Warn("[mev builder] json.Marshal error", "err", err)
+		return nil, nil, err
+	} else {
+		log.Info("[mev builder] blobsBundleBytes", "blobsBundleBytes", string(blobsBundleBytes))
+	}
 	return eth1Block, blobsBundle, nil
 }
 
 func (b *builderClient) GetStatus(ctx context.Context) error {
 	path := "/eth/v1/builder/status"
 	url := b.url.JoinPath(path).String()
-	_, err := httpCall[any](ctx, b.httpClient, http.MethodGet, url, nil, nil)
+	_, err := httpCall[json.RawMessage](ctx, b.httpClient, http.MethodGet, url, nil, nil)
 	return err
 }
 
