@@ -61,6 +61,7 @@ func (b *builderClient) GetExecutionPayloadHeader(ctx context.Context, slot int6
 	url := b.url.JoinPath(path).String()
 	header, err := httpCall[ExecutionPayloadHeader](ctx, b.httpClient, http.MethodGet, url, nil, nil)
 	if err != nil {
+		log.Warn("[mev builder] httpCall error", "err", err, "path", path)
 		return nil, err
 	}
 	builderHeaderBytes, err := json.Marshal(header)
