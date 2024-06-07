@@ -1,0 +1,65 @@
+---
+- name: Send a legacy transaction
+  ansible.builtin.shell: |
+    cast send --legacy --private-key {{ private_key }} --rpc-url {{ rpc_url }} --gas-limit 100000 -j {{ eth_address }} "0x646174613a2c7b226d7367223a226c6567616379227d" >> {{ log_file }}
+  args:
+    executable: /bin/bash
+
+- name: Send an eip 1559 transaction
+  ansible.builtin.shell: |
+    cast send --private-key {{ private_key }} --rpc-url {{ rpc_url }} --gas-limit 100000 -j {{ eth_address }} "0x646174613a2c7b226d7367223a226569702d31353539227d" >> {{ log_file }}
+  args:
+    executable: /bin/bash
+
+- name: Fill three blocks
+  ansible.builtin.shell: |
+    cast send --private-key {{ private_key }} --rpc-url {{ rpc_url }} --gas-limit {{ max_block_size }} -j --create "0x60005B60010180405060405A1163000000025700" >> {{ log_file }}
+    cast send --private-key {{ private_key }} --rpc-url {{ rpc_url }} --gas-limit {{ max_block_size }} -j --create "0x60005B60010180405060405A1163000000025700" >> {{ log_file }}
+    cast send --private-key {{ private_key }} --rpc-url {{ rpc_url }} --gas-limit {{ max_block_size }} -j --create "0x60005B60010180405060405A1163000000025700" >> {{ log_file }}
+  args:
+    executable: /bin/bash
+
+- name: Try to send tx below base fee and replace it
+  ansible.builtin.shell: |
+    cast send --async --private-key {{ private_key }} --rpc-url {{ rpc_url }} \
+        --gas-price 1 --priority-gas-price 0 \
+        --gas-limit 100000 -j {{ eth_address }} "0x646174613a2c7b226d7367223a226569702d3135353920756e646572707269636564227d" &>> {{ log_file }}
+
+    sleep 2
+
+    cast send --private-key {{ private_key }} --rpc-url {{ rpc_url }} \
+        --gas-limit 100000 -j {{ eth_address }} "0x646174613a2c7b226d7367223a226569702d31353539207265706c6163656d656e74227d" &>> {{ log_file }}
+  args:
+    executable: /bin/bash
+
+- name: Try to send a tx where the priority fee and base fee are equal
+  ansible.builtin.shell: |
+    gas_price="$(cast gas-price --rpc-url {{ rpc_url }})"
+    cast send --async --private-key {{ private_key }} --rpc-url {{ rpc_url }} \
+        --gas-price $gas_price --priority-gas-price $gas_price \
+        --gas-limit 100000 -j {{ eth_address }} "0x646174613a2c7b226d7367223a226569702d3135353920657175616c20666565227d" &>> {{ log_file }}
+  args:
+    executable: /bin/bash
+
+- name: Try to send a tx where the priority fee is above the cap
+  ansible.builtin.shell: |
+    gas_price="$(cast gas-price --rpc-url {{ rpc_url }})"
+    cast send --async --private-key {{ private_key }} --rpc-url {{ rpc_url }} \
+        --gas-price $gas_price --priority-gas-price $(( gas_price * 2)) \
+        --gas-limit 100000 -j {{ eth_address }} "0x646174613a2c7b226d7367223a226569702d31353539206d6178207072696f7269747920666565207065722067617320686967686572207468616e206d6178206665652070657220676173227d" &>> {{ log_file }}
+    retVal=$?
+    if [[ $retVal -ne 0 ]]; then
+        echo "Task failed successfully"
+    else
+        echo "Expected failure, but somehow this worked"
+        exit 1;
+    fi
+  args:
+    executable: /bin/bash
+
+- name: Add inscription to mark test end
+  ansible.builtin.include_role:
+    name: common
+    tasks_from: clear_chain
+  vars:
+    inscription_message: Finished {{ ansible_role_name }}

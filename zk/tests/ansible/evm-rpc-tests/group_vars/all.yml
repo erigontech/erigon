@@ -1,0 +1,31 @@
+---
+
+# this is the json RPC URL that we'll use for all tests that require
+# an RPC. It doesn't matter if this is L1 or L2.
+rpc_url: http://127.0.0.1:32773
+
+# this is the hex private key that we'll use for sending
+# transactions. It's expected that this key has some value
+private_key: ""
+
+# the eth address can be determined from the private key, but it's
+# convent to have both as variables here
+eth_address: ""
+
+# Some of the commands will write out logs. This is the file where
+# they should go
+log_file: /tmp/rpc-tests.log
+
+# Some of the commands will create files / directories, this is the
+# location for working
+work_dir: /tmp/rpc-tests.d
+
+# A configuration that we should use for configure the largest size of
+# tx
+max_block_size: 25_000_000
+
+# Specifically a flag to send eip-1559 tx
+legacy_flag: "--legacy"
+
+# A block interval that's used for setting a timeout period
+block_interval: 12

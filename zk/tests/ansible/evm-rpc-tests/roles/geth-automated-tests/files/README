@@ -1,0 +1,3 @@
+The files come from the compiled data from evm-testing:
+
+find  ~/code/jhilliard/evm-testing/out/ -type f -name 'geth-*deploy.bin' | xargs -I xxx cp xxx .

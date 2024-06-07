@@ -1,0 +1,29 @@
+---
+- name: Basic requirements checking
+  hosts: all
+  roles:
+    - requirements
+
+- name: Edge case tests
+  hosts: all
+  roles:
+    - transfer-to-special-addresses
+    - deploy-and-call-immediately
+    - pool-race-conditions
+
+- name: Standard EVM Tests
+  hosts: all
+  roles:
+    - prover-stress
+    - every-opcode
+    - snowball
+    - large-contracts
+    - polycli-cases
+    - eip-1559
+    - access-list-tx
+    - geth-automated-tests
+    - random-contracts
+
+
+
+

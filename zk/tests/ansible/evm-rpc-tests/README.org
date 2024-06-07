@@ -1,0 +1,71 @@
+Adding some tests which are runnable via ansible
+
+
+#+begin_src bash
+echo -n 'data:,{"msg":"eip-1559 equal fee"}' | xxd -p | tr -d "\n";echo
+#+end_src
+
+
+#+begin_src bash
+# build the jerigon image (in a different repo)
+docker build -t erigon:local .
+
+# run kurtosis
+kurtosis run --enclave my-testnet github.com/kurtosis-tech/ethereum-package@3.0.0 --args-file network_params.yml
+
+# Run the loads
+ansible-playbook -i hosts site.yml
+
+# Extract some witnesses
+$(kurtosis port print my-testnet el-2-erigon-lighthouse ws-rpc)
+./rpc fetch --rpc-url $(kurtosis port print my-testnet el-2-erigon-lighthouse ws-rpc) --block-number 363  --checkpoint-block-number 362 > initial-contract-deploy.json
+./rpc fetch --rpc-url $(kurtosis port print my-testnet el-2-erigon-lighthouse ws-rpc) --block-number 364  --checkpoint-block-number 363 > ec-pairing.json
+./rpc fetch --rpc-url $(kurtosis port print my-testnet el-2-erigon-lighthouse ws-rpc) --block-number 365  --checkpoint-block-number 364 > ed25519verifier.json
+./rpc fetch --rpc-url $(kurtosis port print my-testnet el-2-erigon-lighthouse ws-rpc) --block-number 366  --checkpoint-block-number 365 > large-30m-sha3.json
+./rpc fetch --rpc-url $(kurtosis port print my-testnet el-2-erigon-lighthouse ws-rpc) --block-number 367  --checkpoint-block-number 366 > large-identity.json
+./rpc fetch --rpc-url $(kurtosis port print my-testnet el-2-erigon-lighthouse ws-rpc) --block-number 368  --checkpoint-block-number 367 > large-sha2.json
+./rpc fetch --rpc-url $(kurtosis port print my-testnet el-2-erigon-lighthouse ws-rpc) --block-number 369  --checkpoint-block-number 368 > large-sha3.json
+./rpc fetch --rpc-url $(kurtosis port print my-testnet el-2-erigon-lighthouse ws-rpc) --block-number 370  --checkpoint-block-number 369 > loop-log0.json
+./rpc fetch --rpc-url $(kurtosis port print my-testnet el-2-erigon-lighthouse ws-rpc) --block-number 371  --checkpoint-block-number 370 > loop-sload.json
+./rpc fetch --rpc-url $(kurtosis port print my-testnet el-2-erigon-lighthouse ws-rpc) --block-number 372  --checkpoint-block-number 371 > modexp-256-huge-precompile.json
+./rpc fetch --rpc-url $(kurtosis port print my-testnet el-2-erigon-lighthouse ws-rpc) --block-number 373  --checkpoint-block-number 372 > modexp-slow-precompile.json
+./rpc fetch --rpc-url $(kurtosis port print my-testnet el-2-erigon-lighthouse ws-rpc) --block-number 374  --checkpoint-block-number 373 > simple-fibonacci.json
+
+./rpc fetch --rpc-url $(kurtosis port print my-testnet el-2-erigon-lighthouse ws-rpc) --block-number 375  --checkpoint-block-number 374 > loop-sload-access-list.json
+
+
+# Get all of the witnesses using the zero-bin rpc binary
+seq 0 240 | awk '{print "./rpc fetch --rpc-url $(kurtosis port print my-testnet el-2-erigon-lighthouse ws-rpc) --block-number " $1 " --checkpoint-block-number 0 > " sprintf("witness-%04d", $1) ".json"}' | bash
+seq 0 240 | awk '{print "cast block -j --full --rpc-url $(kurtosis port print my-testnet el-2-erigon-lighthouse ws-rpc) " $1 " > " sprintf("block-%04d", $1) ".json"}' | bash
+tar caf testchain-witnesses.tbz2 block-* witness-*
+
+
+wit=large-sha2.json
+atop -w $wit.atop 10 &
+echo $! > atop.pid
+
+env RUST_BACKTRACE=full \
+    RUST_LOG=info \
+    RUST_MIN_STACK=33554432 \
+    ARITHMETIC_CIRCUIT_SIZE="15..28" \
+    BYTE_PACKING_CIRCUIT_SIZE="9..28" \
+    CPU_CIRCUIT_SIZE="12..28" \
+    KECCAK_CIRCUIT_SIZE="14..28" \
+    KECCAK_SPONGE_CIRCUIT_SIZE="9..28" \
+    LOGIC_CIRCUIT_SIZE="12..28" \
+    MEMORY_CIRCUIT_SIZE="17..30" \
+    ./leader \
+    --runtime in-memory \
+    --num-workers 1 \
+    stdio \
+    < $wit | tee $wit.out
+
+sleep 10
+kill $(cat atop.pid)
+
+#+end_src
+
+
+
+erigon --networkid=3151908 --log.console.verbosity=3 --datadir=/data/erigon/execution-data --port=30303 --http.api=eth,erigon,engine,web3,net,debug,trace,txpool,admin --http.vhosts=* --ws --allow-insecure-unlock --nat=extip:172.16.0.12 --http --http.addr=0.0.0.0 --http.corsdomain=* --http.port=8545 --authrpc.jwtsecret=/jwt/jwtsecret --authrpc.addr=0.0.0.0 --authrpc.port=8551 --authrpc.vhosts=* --metrics --metrics.addr=0.0.0.0 --metrics.port=9001 --db.size.limit=3000MB --bootnodes=enode://f96c94d23764060bdf8beb9c374c4570e1c542e378880087cffa9e8268f5e4ec7d3513de717a18da5328fd808cc572204dbbf819cf5640d3b564507c25a5ad6a@172.16.0.11:30303
+
