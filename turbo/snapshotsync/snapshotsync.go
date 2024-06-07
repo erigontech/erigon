@@ -351,10 +351,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	/*diagnostics.RegisterProvider(diagnostics.ProviderFunc(func(ctx context.Context) error {
-		return nil
-	}), diagnostics.TypeOf(diagnostics.DownloadStatistics{}), log.Root())*/
-
 	// Check once without delay, for faster erigon re-start
 	stats, err := snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{})
 	if err != nil {
