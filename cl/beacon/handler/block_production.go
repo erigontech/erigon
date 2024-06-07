@@ -206,6 +206,10 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			return nil, err
 		}
 	}
+	if block.IsBlinded() {
+		log.Info("BlockProduction: produced a blinded block")
+	}
+
 	log.Info("BlockProduction: Block produced",
 		"proposerIndex", block.ProposerIndex,
 		"slot", targetSlot,
@@ -802,6 +806,8 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 	if err := a.broadcastBlock(r.Context(), signedBlock); err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
+
+	log.Info("successfully publish blinded block", "block_num", signedBlock.Block.Body.ExecutionPayload.BlockNumber, "api_version", apiVersion)
 	return newBeaconResponse(nil), nil
 }
 

@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -87,5 +88,6 @@ func (a *ApiHandler) PostEthV1BuilderRegisterValidator(w http.ResponseWriter, r 
 	for _, v := range registerReq {
 		a.logger.Debug("[Caplin] Registred new validator", "fee_recipient", v.Message.FeeRecipient)
 	}
+	log.Info("Registered new validator", "count", len(registerReq))
 	return newBeaconResponse(nil), nil
 }
