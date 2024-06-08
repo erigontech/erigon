@@ -517,15 +517,15 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle boo
 		defer e.doingPostForkchoice.Store(false)
 		var timings []interface{}
 		if err := e.db.Update(e.bacgroundCtx, func(tx kv.RwTx) error {
-			if err := e.executionPipeline.RunPrune(e.db, tx, initialCycle); err != nil {
-				return err
-			}
-			if pruneTimings := e.executionPipeline.PrintTimings(); len(pruneTimings) > 0 {
-				timings = append(timings, pruneTimings...)
-			}
-			if err := tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx).PruneCommitHistory(e.bacgroundCtx, tx, false, nil); err != nil {
-				return err
-			}
+			// if err := e.executionPipeline.RunPrune(e.db, tx, initialCycle); err != nil {
+			// 	return err
+			// }
+			// if pruneTimings := e.executionPipeline.PrintTimings(); len(pruneTimings) > 0 {
+			// 	timings = append(timings, pruneTimings...)
+			// }
+			// if err := tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx).PruneCommitHistory(e.bacgroundCtx, tx, false, nil); err != nil {
+			// 	return err
+			// }
 			return nil
 		}); err != nil {
 			e.logger.Error("runPostForkchoiceInBackground", "error", err)
