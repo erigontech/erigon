@@ -190,7 +190,6 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	previousHeadHash := rawdb.ReadHeadBlockHash(tx)
 
 	if executionHash != (libcommon.Hash{}) {
-		fmt.Println(executionHash)
 		if criticalError = rawdb.WriteHeadHeaderHash(tx, executionHash); criticalError != nil {
 			return
 		}

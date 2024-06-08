@@ -495,7 +495,6 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things
-	fmt.Println("StateStep")
 	shouldUnwind := unwindPoint != math.MaxUint64
 	// Construct side fork if we have one
 	if shouldUnwind {
@@ -532,7 +531,6 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 	if header == nil {
 		return nil
 	}
-	fmt.Println("EOOO")
 
 	// Prepare memory state for block execution
 	if err := addAndVerifyBlockStep(txc.Tx, engine, chainReader, header, body); err != nil {
