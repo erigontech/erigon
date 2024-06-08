@@ -812,7 +812,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		}
 	}
 
-	logger.Info(fmt.Sprintf("Pruning has ended. Deleted %d blocks", deletedBlocks))
+	logger.Info("Pruning has ended", "deleted blocks", deletedBlocks)
 
 	db, err = temporal.New(db, agg)
 	if err != nil {
