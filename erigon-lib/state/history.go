@@ -119,6 +119,7 @@ func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTabl
 		integrityCheck:          integrityCheck,
 		historyLargeValues:      cfg.historyLargeValues,
 		dontProduceHistoryFiles: cfg.dontProduceHistoryFiles,
+		historyDisabled:         cfg.dontProduceHistoryFiles,
 		keepRecentTxInDB:        cfg.keepTxInDB,
 	}
 	h._visibleFiles = []ctxItem{}

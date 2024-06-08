@@ -369,7 +369,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 		var currentKeys [kv.DomainLen][]libstate.DomainEntryDiff
 		currentKeys, ok, err = rawdb.ReadDiffSet(txc.Tx, currentBlock, currentHash)
 		if !ok {
-			changeset = nil
+			return fmt.Errorf("ReadDiffSet(%d, %x): not found", currentBlock, currentHash)
 		}
 		if err != nil {
 			return err

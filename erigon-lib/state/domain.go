@@ -1173,145 +1173,52 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	defer mxUnwindTook.ObserveDuration(sf)
 	mxRunningUnwind.Inc()
 	defer mxRunningUnwind.Dec()
-	restored := dt.NewWriter()
 	logEvery := time.NewTicker(time.Second * 30)
 	defer logEvery.Stop()
 
 	stepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
 	// Attempt to use the diff to unwind the domain
-	if domainDiffs != nil {
-		keysCursor, err := rwTx.RwCursorDupSort(d.keysTable)
-		if err != nil {
-			return fmt.Errorf("create %s domain delete cursor: %w", d.filenameBase, err)
-		}
-		defer keysCursor.Close()
-
-		// First revert keys
-		for i := range domainDiffs {
-			key, value, prevStepBytes := domainDiffs[i].Key, domainDiffs[i].Value, domainDiffs[i].PrevStepBytes
-			// First, we need to evict from the keysCursor all keys that have a too high step
-			fullKey := key[:len(key)-8]
-			// so stepBytes is ^step so we need to iterate from the begining down until we find the stepBytes
-			for k, v, err := keysCursor.SeekExact(fullKey); k != nil; k, v, err = keysCursor.NextDup() {
-				if err != nil {
-					return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
-				}
-				if bytes.Compare(v, prevStepBytes) >= 0 { // remove all values up to the previous step
-					break
-				}
-
-				if err := keysCursor.DeleteCurrent(); err != nil {
-					return err
-				}
-			}
-			// Second, we need to restore the previous value
-			if len(value) == 0 {
-				if err := rwTx.Delete(d.valsTable, key); err != nil {
-					return err
-				}
-			} else {
-				if err := rwTx.Put(d.valsTable, key, value); err != nil {
-					return err
-				}
-			}
-		}
-		// Compare valsKV with prevSeenKeys
-		if _, err := dt.ht.Prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, false, logEvery); err != nil {
-			return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dt.d.filenameBase, txNumUnwindTo, step, err)
-		}
-		return nil
-	}
-
-	histRng, err := dt.ht.HistoryRange(int(txNumUnwindTo), -1, order.Asc, -1, rwTx)
-	if err != nil {
-		return fmt.Errorf("historyRange %s: %w", dt.ht.h.filenameBase, err)
-	}
-	defer histRng.Close()
-
-	keysCursor, err := dt.keysCursor(rwTx)
-	if err != nil {
-		return err
-	}
-	seen := make(map[string]struct{})
-
-	for histRng.HasNext() && txNumUnwindTo > 0 {
-		k, v, _, err := histRng.Next()
-		if err != nil {
-			return err
-		}
-
-		ic, err := dt.ht.IdxRange(k, int(txNumUnwindTo)-1, 0, order.Desc, -1, rwTx)
-		if err != nil {
-			return err
-		}
-		if ic.HasNext() {
-			nextTxn, err := ic.Next()
-			if err != nil {
-				return err
-			}
-			restored.SetTxNum(nextTxn) // todo what if we actually had to decrease current step to provide correct update?
-		} else {
-			restored.SetTxNum(txNumUnwindTo - 1)
-		}
-		//fmt.Printf("[%s] unwinding %x ->'%x'\n", dt.d.filenameBase, k, v)
-		if err := restored.addValue(k, nil, v); err != nil {
-			return err
-		}
-		ic.Close()
-		seen[string(k)] = struct{}{}
-	}
-
-	keysCursorForDeletes, err := rwTx.RwCursorDupSort(d.keysTable)
+	keysCursor, err := rwTx.RwCursorDupSort(d.keysTable)
 	if err != nil {
 		return fmt.Errorf("create %s domain delete cursor: %w", d.filenameBase, err)
 	}
-	defer keysCursorForDeletes.Close()
+	defer keysCursor.Close()
 
-	var valsC kv.RwCursor
-	valsC, err = rwTx.RwCursor(d.valsTable)
-	if err != nil {
-		return err
-	}
-	defer valsC.Close()
+	// First revert keys
+	for i := range domainDiffs {
+		key, value, prevStepBytes := domainDiffs[i].Key, domainDiffs[i].Value, domainDiffs[i].PrevStepBytes
+		// First, we need to evict from the keysCursor all keys that have a too high step
+		fullKey := key[:len(key)-8]
+		// so stepBytes is ^step so we need to iterate from the begining down until we find the stepBytes
+		for k, v, err := keysCursor.SeekExact(fullKey); k != nil; k, v, err = keysCursor.NextDup() {
+			if err != nil {
+				return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
+			}
+			if bytes.Compare(v, prevStepBytes) >= 0 { // remove all values up to the previous step
+				break
+			}
 
-	var k, v []byte
-
-	for k, v, err = keysCursor.First(); k != nil; k, v, err = keysCursor.Next() {
-		if err != nil {
-			return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
-		}
-		if !bytes.Equal(v, stepBytes) {
-			continue
-		}
-		if _, replaced := seen[string(k)]; !replaced && txNumUnwindTo > 0 {
-			continue
-		}
-
-		kk, _, err := valsC.SeekExact(common.Append(k, stepBytes))
-		if err != nil {
-			return err
-		}
-		if kk != nil {
-			//fmt.Printf("[domain][%s] rm large value %x v %x\n", d.filenameBase, kk, vv)
-			if err = valsC.DeleteCurrent(); err != nil {
+			if err := keysCursor.DeleteCurrent(); err != nil {
 				return err
 			}
 		}
-
-		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
-		if _, _, err = keysCursorForDeletes.SeekBothExact(k, v); err != nil {
-			return err
-		}
-		if err = keysCursorForDeletes.DeleteCurrent(); err != nil {
-			return err
+		// Second, we need to restore the previous value
+		if len(value) == 0 {
+			if err := rwTx.Delete(d.valsTable, key); err != nil {
+				return err
+			}
+		} else {
+			if err := rwTx.Put(d.valsTable, key, value); err != nil {
+				return err
+			}
 		}
 	}
-
+	// Compare valsKV with prevSeenKeys
 	if _, err := dt.ht.Prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, false, logEvery); err != nil {
 		return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dt.d.filenameBase, txNumUnwindTo, step, err)
 	}
-	return restored.Flush(ctx, rwTx)
+	return nil
 }
 
 func (d *Domain) isEmpty(tx kv.Tx) (bool, error) {
