@@ -799,20 +799,22 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		return err
 	}
 	deletedBlocks := math.MaxInt // To pass the first iteration
-	for deletedBlocks > 0 {      // prune happens by small steps, so need many runs
+	allDeletedBlocks := 0
+	for deletedBlocks > 0 { // prune happens by small steps, so need many runs
 		err = db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 			if deletedBlocks, err = br.PruneAncientBlocks(tx, 100); err != nil {
 				return err
 			}
-
 			return nil
 		})
 		if err != nil {
 			return err
 		}
+
+		allDeletedBlocks += deletedBlocks
 	}
 
-	logger.Info("Pruning has ended", "deleted blocks", deletedBlocks)
+	logger.Info("Pruning has ended", "deleted blocks", allDeletedBlocks)
 
 	db, err = temporal.New(db, agg)
 	if err != nil {
