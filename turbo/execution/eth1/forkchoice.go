@@ -476,12 +476,10 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
-		commitStart := time.Now()
 		if err := tx.Commit(); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
-		commitTime := time.Since(commitStart)
 
 		if e.hook != nil {
 			if err := e.db.View(ctx, func(tx kv.Tx) error {
@@ -498,7 +496,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		var m runtime.MemStats
 		dbg.ReadMemStats(&m)
 		timings = append(timings, e.forkValidator.GetTimings(headHash)...)
-		timings = append(timings, "commit", commitTime, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+		timings = append(timings, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 		e.logger.Info("Timings (slower than 50ms)", timings...)
 	}
 	if *headNumber >= startPruneFrom {
@@ -524,6 +522,9 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle boo
 			}
 			if pruneTimings := e.executionPipeline.PrintTimings(); len(pruneTimings) > 0 {
 				timings = append(timings, pruneTimings...)
+			}
+			if err := tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx).PruneCommitHistory(e.bacgroundCtx, tx, false, nil); err != nil {
+				return err
 			}
 			return nil
 		}); err != nil {

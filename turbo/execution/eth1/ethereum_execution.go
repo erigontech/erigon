@@ -243,7 +243,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	e.forkValidator.AddTiming(header.Hash(), "Commit-Execution", time.Since(t))
+	e.forkValidator.AddTiming(header.Hash(), "commit", time.Since(t))
 	return validationReceipt, err
 }
 
