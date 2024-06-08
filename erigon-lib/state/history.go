@@ -120,7 +120,6 @@ func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTabl
 		historyLargeValues:      cfg.historyLargeValues,
 		dontProduceHistoryFiles: cfg.dontProduceHistoryFiles,
 		keepRecentTxInDB:        cfg.keepTxInDB,
-		historyDisabled:         cfg.dontProduceHistoryFiles,
 	}
 	h._visibleFiles = []ctxItem{}
 	var err error
