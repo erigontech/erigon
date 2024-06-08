@@ -1547,3 +1547,18 @@ func ReadDiffSet(tx kv.Tx, blockNumber uint64, blockHash common.Hash) ([kv.Domai
 	return state.DeserializeKeys(val), true, nil
 
 }
+
+func WriteExecutionDBHash(tx kv.RwTx, blockHash common.Hash) error {
+	return tx.Put(kv.HeadBlockKey, kv.ExecutionDBHash, blockHash[:])
+}
+
+func ReadExecutionDBHash(tx kv.Tx) (common.Hash, error) {
+	v, err := tx.GetOne(kv.HeadBlockKey, kv.ExecutionDBHash)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	if len(v) == 0 {
+		return common.Hash{}, nil
+	}
+	return common.BytesToHash(v), nil
+}

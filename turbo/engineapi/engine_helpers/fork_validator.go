@@ -128,10 +128,7 @@ func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 func (fv *ForkValidator) LoadNotifications(tx kv.RwTx, accumulator *shards.Accumulator) error {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
-	start := time.Now()
 	// Flush changes to db.
-	timings, _ := fv.timingsCache.Get(fv.extendingForkHeadHash)
-	fv.timingsCache.Add(fv.extendingForkHeadHash, append(timings, "FlushExtendingFork", time.Since(start)))
 	fv.extendingForkNotifications.Accumulator.CopyAndReset(accumulator)
 	// Clean extending fork data
 	fv.extendingForkHeadHash = libcommon.Hash{}
@@ -144,7 +141,7 @@ func (fv *ForkValidator) LoadNotifications(tx kv.RwTx, accumulator *shards.Accum
 // if the payload extends the canonical chain, then we stack it in extendingFork without any unwind.
 // if the payload is a fork then we unwind to the point where the fork meets the canonical chain, and there we check whether it is valid.
 // if for any reason none of the actions above can be performed due to lack of information, we accept the payload and avoid validation.
-func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, extendCanonical bool, logger log.Logger) (status engine_types.EngineStatus, latestValidHash libcommon.Hash, validationError error, criticalError error) {
+func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, logger log.Logger) (status engine_types.EngineStatus, latestValidHash libcommon.Hash, validationError error, criticalError error) {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	if fv.validatePayload == nil {
@@ -159,21 +156,6 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		status = engine_types.ValidStatus
 		latestValidHash = hash
 		return
-	}
-
-	log.Debug("Execution ForkValidator.ValidatePayload", "extendCanonical", extendCanonical)
-	if extendCanonical {
-		var txc wrap.TxContainer
-		txc.Tx = tx
-
-		fv.extendingForkNotifications = &shards.Notifications{
-			Events:      shards.NewEvents(),
-			Accumulator: shards.NewAccumulator(),
-		}
-		// Update fork head hash.
-		fv.extendingForkHeadHash = hash
-		fv.extendingForkNumber = number
-		return fv.validateAndStorePayload(txc, header, body, 0, nil, nil, fv.extendingForkNotifications)
 	}
 
 	// if the block is not in range of maxForkDepth from head then we do not validate it.
@@ -197,6 +179,64 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash, unwindPoint)
 	if criticalError != nil {
 		return
+	}
+	var executionHash libcommon.Hash
+	executionHash, criticalError = rawdb.ReadExecutionDBHash(tx)
+	if criticalError != nil {
+		return
+	}
+	var previousCanonicalSegments []canonicalSegment
+
+	previousHeadHash := rawdb.ReadHeadBlockHash(tx)
+
+	if executionHash != (libcommon.Hash{}) {
+		fmt.Println(executionHash)
+		if criticalError = rawdb.WriteHeadHeaderHash(tx, executionHash); criticalError != nil {
+			return
+		}
+		currHash := executionHash
+		currNumber := rawdb.ReadHeaderNumber(tx, currHash)
+		var canonicalHash libcommon.Hash
+		var isCanonical bool
+		canonicalHash, criticalError = rawdb.ReadCanonicalHash(tx, *currNumber)
+		if criticalError != nil {
+			return
+		}
+		isCanonical = canonicalHash == currHash
+		if criticalError != nil {
+			return
+		}
+		previousCanonicalSegments, criticalError = previousCanonicalSegmentsToTruncate(fv.ctx, tx, *currNumber+1)
+		if criticalError != nil {
+			return
+		}
+		if criticalError = rawdb.TruncateCanonicalChain(fv.ctx, tx, *currNumber+1); criticalError != nil {
+			return
+		}
+
+		for !isCanonical {
+			currentHeader := rawdb.ReadHeader(tx, currHash, *currNumber)
+			if currentHeader == nil {
+				criticalError = fmt.Errorf("header not found")
+				return
+			}
+			canonicalHash, criticalError = fv.blockReader.CanonicalHash(fv.ctx, tx, currentHeader.Number.Uint64())
+			if criticalError != nil {
+				return
+			}
+			previousCanonicalSegments = append(previousCanonicalSegments, canonicalSegment{Number: *currNumber, Hash: canonicalHash})
+			if criticalError = rawdb.WriteCanonicalHash(tx, currentHeader.Hash(), *currNumber); criticalError != nil {
+				return
+			}
+
+			currHash = currentHeader.ParentHash
+			*currNumber = currentHeader.Number.Uint64() - 1
+			canonicalHash, criticalError = fv.blockReader.CanonicalHash(fv.ctx, tx, *currNumber)
+			if criticalError != nil {
+				return
+			}
+			isCanonical = canonicalHash == currHash
+		}
 	}
 
 	logger.Debug("Execution ForkValidator.ValidatePayload", "foundCanonical", foundCanonical, "currentHash", currentHash, "unwindPoint", unwindPoint)
@@ -228,7 +268,6 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 
 		headersChain = append([]*types.Header{header}, headersChain...)
 		bodiesChain = append([]*types.RawBody{body.RawBody()}, bodiesChain...)
-
 		currentHash = header.ParentHash
 		unwindPoint = header.Number.Uint64() - 1
 		foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash, unwindPoint)
@@ -237,16 +276,29 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		}
 		logger.Debug("Execution ForkValidator.ValidatePayload", "foundCanonical", foundCanonical, "currentHash", currentHash, "unwindPoint", unwindPoint)
 	}
-	// Do not set an unwind point if we are already there.
-	if unwindPoint == fv.currentHeight {
-		unwindPoint = 0
-	}
+
 	txc := wrap.TxContainer{Tx: tx}
 	notifications := &shards.Notifications{
 		Events:      shards.NewEvents(),
 		Accumulator: shards.NewAccumulator(),
 	}
-	return fv.validateAndStorePayload(txc, header, body, unwindPoint, headersChain, bodiesChain, notifications)
+	//fv.validateAndStorePayload(txc, header, body, unwindPoint, headersChain, bodiesChain, notifications)
+	status, latestValidHash, validationError, criticalError = fv.validateAndStorePayload(txc, header, body, unwindPoint, headersChain, bodiesChain, notifications)
+	if criticalError != nil {
+		return
+	}
+	if latestValidHash == header.Hash() {
+		fv.extendingForkNotifications = notifications
+		fv.extendingForkHeadHash = header.Hash()
+		fv.extendingForkNumber = header.Number.Uint64()
+	}
+	if criticalError = restoreCanonicalChain(fv.ctx, tx, previousCanonicalSegments); criticalError != nil {
+		return
+	}
+	if criticalError = rawdb.WriteHeadHeaderHash(tx, previousHeadHash); criticalError != nil {
+		return
+	}
+	return status, latestValidHash, validationError, criticalError
 }
 
 // Clear wipes out current extending fork data, this method is called after fcu is called,
@@ -264,9 +316,55 @@ func (fv *ForkValidator) ClearWithUnwind(accumulator *shards.Accumulator, c shar
 	fv.clear()
 }
 
+type canonicalSegment struct {
+	Number uint64
+	Hash   libcommon.Hash
+}
+
+func previousCanonicalSegmentsToTruncate(ctx context.Context, tx kv.RwTx, from uint64) ([]canonicalSegment, error) {
+	var segments []canonicalSegment
+	current := from
+	currentHash, err := rawdb.ReadCanonicalHash(tx, current)
+	if err != nil {
+		return nil, err
+	}
+	for currentHash != (libcommon.Hash{}) {
+		segments = append(segments, canonicalSegment{Number: current, Hash: currentHash})
+		current++
+		currentHash, err = rawdb.ReadCanonicalHash(tx, current)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return segments, nil
+}
+
+func restoreCanonicalChain(ctx context.Context, tx kv.RwTx, seg []canonicalSegment) error {
+	for _, s := range seg {
+		if err := rawdb.WriteCanonicalHash(tx, s.Hash, s.Number); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // validateAndStorePayload validate and store a payload fork chain if such chain results valid.
 func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 	notifications *shards.Notifications) (status engine_types.EngineStatus, latestValidHash libcommon.Hash, validationError error, criticalError error) {
+	// Save canonicals to truncate in case of failure.
+	tx := txc.Tx
+	var previousCanononicalSegments []canonicalSegment
+	startHeadHash := rawdb.ReadHeadBlockHash(tx)
+	startHeadNumer := rawdb.ReadHeaderNumber(tx, startHeadHash)
+	// Do not set an unwind point if we are already there.
+	if unwindPoint == fv.currentHeight {
+		unwindPoint = math.MaxUint64
+	} else {
+		previousCanononicalSegments, criticalError = previousCanonicalSegmentsToTruncate(fv.ctx, tx, unwindPoint+1)
+		if criticalError != nil {
+			return
+		}
+	}
 	start := time.Now()
 	if err := fv.validatePayload(txc, header, body, unwindPoint, headersChain, bodiesChain, notifications); err != nil {
 		if errors.Is(err, consensus.ErrInvalidBlock) {
@@ -276,6 +374,7 @@ func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *t
 			return
 		}
 	}
+
 	fv.timingsCache.Add(header.Hash(), []interface{}{"BlockValidation", time.Since(start)})
 
 	latestValidHash = header.Hash()
@@ -293,18 +392,31 @@ func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *t
 		status = engine_types.InvalidStatus
 		fv.extendingForkHeadHash = libcommon.Hash{}
 		fv.extendingForkNumber = 0
-		return
-	}
-	fv.validHashes.Add(header.Hash(), true)
+	} else {
+		fv.validHashes.Add(header.Hash(), true)
 
-	// If we do not have the body we can recover it from the batch.
-	if body != nil {
-		if _, criticalError = rawdb.WriteRawBodyIfNotExists(txc.Tx, header.Hash(), header.Number.Uint64(), body); criticalError != nil {
+		// If we do not have the body we can recover it from the batch.
+		if body != nil {
+			if _, criticalError = rawdb.WriteRawBodyIfNotExists(txc.Tx, header.Hash(), header.Number.Uint64(), body); criticalError != nil {
+				return
+			}
+		}
+
+		status = engine_types.ValidStatus
+	}
+	// Revert canonical chain to the previous state.
+	if startHeadNumer != nil {
+		if criticalError = rawdb.TruncateCanonicalChain(fv.ctx, txc.Tx, *startHeadNumer+1); criticalError != nil {
 			return
 		}
 	}
+	if criticalError = restoreCanonicalChain(fv.ctx, txc.Tx, previousCanononicalSegments); criticalError != nil {
+		return
+	}
+	if criticalError = rawdb.WriteHeadHeaderHash(txc.Tx, startHeadHash); criticalError != nil {
+		return
+	}
 
-	status = engine_types.ValidStatus
 	return
 }
 
@@ -316,4 +428,16 @@ func (fv *ForkValidator) GetTimings(hash libcommon.Hash) []interface{} {
 		return timings
 	}
 	return nil
+}
+
+func (fv *ForkValidator) AddTiming(hash libcommon.Hash, name string, t time.Duration) {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	var newTimings []interface{}
+	timings, _ := fv.timingsCache.Get(hash)
+	if timings != nil {
+		newTimings = append(newTimings, timings...)
+	}
+	newTimings = append(newTimings, name, t)
+	fv.timingsCache.Add(hash, newTimings)
 }

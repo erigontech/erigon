@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"runtime"
 	"time"
 
@@ -460,6 +461,9 @@ func addAndVerifyBlockStep(batch kv.RwTx, engine consensus.Engine, chainReader c
 			return err
 		}
 	}
+	if err := rawdb.TruncateCanonicalChain(context.TODO(), batch, currentHeight+1); err != nil {
+		return err
+	}
 
 	if err := stages.SaveStageProgress(batch, stages.Headers, currentHeight); err != nil {
 		return err
@@ -491,7 +495,8 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things
-	shouldUnwind := unwindPoint > 0
+	fmt.Println("StateStep")
+	shouldUnwind := unwindPoint != math.MaxUint64
 	// Construct side fork if we have one
 	if shouldUnwind {
 		// Run it through the unwind
@@ -502,9 +507,7 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 			return err
 		}
 	}
-	if err := rawdb.TruncateCanonicalChain(ctx, txc.Tx, header.Number.Uint64()+1); err != nil {
-		return err
-	}
+
 	// Once we unwound we can start constructing the chain (assumption: len(headersChain) == len(bodiesChain))
 	for i := range headersChain {
 		currentHeader := headersChain[i]
@@ -518,7 +521,6 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 			if err = stateSync.RunNoInterrupt(nil, txc); err != nil {
 				if err := cleanupProgressIfNeeded(txc.Tx, currentHeader); err != nil {
 					return err
-
 				}
 				return err
 			}
@@ -530,6 +532,8 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 	if header == nil {
 		return nil
 	}
+	fmt.Println("EOOO")
+
 	// Prepare memory state for block execution
 	if err := addAndVerifyBlockStep(txc.Tx, engine, chainReader, header, body); err != nil {
 		return err

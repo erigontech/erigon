@@ -42,6 +42,7 @@ func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash,
 	if plainStateBlockNumber, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
 		return 0, libcommon.Hash{}, false, fmt.Errorf("getting plain state block number: %w", err)
 	}
+
 	var ok bool
 	hash, ok = blockNrOrHash.Hash()
 	if !ok {

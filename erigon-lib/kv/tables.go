@@ -553,6 +553,7 @@ var (
 	LastNewBlockSeen            = []byte("LastNewBlockSeen") // last seen block hash
 
 	StatesProcessingKey = []byte("StatesProcessing")
+	ExecutionDBHash     = []byte("ExecutionDBHash")
 )
 
 // ChaindataTables - list of all buckets. App will panic if some bucket is not in this list.

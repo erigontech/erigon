@@ -634,8 +634,9 @@ Loop:
 			return err
 		}
 		if b == nil {
+			hash, _ := rawdb.ReadCanonicalHash(applyTx, blockNum)
 			// TODO: panic here and see that overall process deadlock
-			return fmt.Errorf("nil block %d", blockNum)
+			return fmt.Errorf("nil block %d, %x", blockNum, hash)
 		}
 		metrics2.UpdateBlockConsumerPreExecutionDelay(b.Time(), blockNum, logger)
 		txs := b.Transactions()
@@ -695,7 +696,6 @@ Loop:
 		// So we skip that check for the first block, if we find half-executed data.
 		skipPostEvaluation := false
 		var usedGas, blobGasUsed uint64
-		a := time.Now()
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &state.TxTask{
@@ -846,7 +846,6 @@ Loop:
 			stageProgress = blockNum
 			inputTxNum++
 		}
-		fmt.Println("block", time.Since(a))
 		if shouldGenerateChangesets {
 			aggTx := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 			aggTx.RestrictSubsetFileDeletions(true)
@@ -859,8 +858,10 @@ Loop:
 			if err := rawdb.WriteDiffSet(applyTx, blockNum, b.Hash(), changeset); err != nil {
 				return err
 			}
-			fmt.Println("root", ts)
 			doms.SetChangesetAccumulator(nil)
+		}
+		if err := rawdb.WriteExecutionDBHash(applyTx, b.Hash()); err != nil {
+			return err
 		}
 
 		if offsetFromBlockBeginning > 0 {
@@ -975,7 +976,6 @@ Loop:
 	}
 
 	if u != nil && !u.HasUnwindPoint() {
-		r := time.Now()
 		if b != nil {
 			_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
 			if err != nil {
@@ -984,7 +984,6 @@ Loop:
 		} else {
 			fmt.Printf("[dbg] mmmm... do we need action here????\n")
 		}
-		fmt.Println("flush", time.Since(r))
 	}
 
 	//dumpPlainStateDebug(applyTx, doms)

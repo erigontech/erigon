@@ -824,7 +824,14 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 	logPrefix := u.LogPrefix()
 	logger.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
 
+	newExecutionHash, err := rawdb.ReadCanonicalHash(txc.Tx, u.UnwindPoint)
+	if err != nil {
+		return err
+	}
 	if err = unwindExecutionStage(u, s, txc, ctx, cfg, logger); err != nil {
+		return err
+	}
+	if err := rawdb.WriteExecutionDBHash(txc.Tx, newExecutionHash); err != nil {
 		return err
 	}
 	if err = u.Done(txc.Tx); err != nil {

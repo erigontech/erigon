@@ -510,16 +510,12 @@ func (w *domainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if err := w.h.Flush(ctx, tx); err != nil {
 		return err
 	}
-	s := time.Now()
 	if err := w.keys.Load(tx, w.keysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	fmt.Println("keys.Load", time.Since(s))
-	s = time.Now()
 	if err := w.values.Load(tx, w.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	fmt.Println("values.Load", time.Since(s))
 	w.close()
 	return nil
 }

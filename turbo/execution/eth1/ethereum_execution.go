@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math/big"
 	"sync/atomic"
+	"time"
 
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
@@ -205,11 +206,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		}, tx.Commit()
 	}
 
-	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
-
-	extendingHash := e.forkValidator.ExtendingForkHeadHash()
-	extendCanonical := extendingHash == libcommon.Hash{} && header.ParentHash == currentHeadHash
-	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), extendCanonical, e.logger)
+	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), e.logger)
 	if criticalError != nil {
 		return nil, criticalError
 	}
@@ -221,6 +218,12 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	}
 	isInvalidChain := status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil
 	if isInvalidChain && (lvh != libcommon.Hash{}) && lvh != blockHash {
+		tx.Rollback()
+		tx, err = e.db.BeginRw(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback()
 		if err := e.purgeBadChain(ctx, tx, lvh, blockHash); err != nil {
 			return nil, err
 		}
@@ -236,7 +239,12 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	if validationError != nil {
 		validationReceipt.ValidationError = validationError.Error()
 	}
-	return validationReceipt, tx.Commit()
+	t := time.Now()
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	e.forkValidator.AddTiming(header.Hash(), "Commit-Execution", time.Since(t))
+	return validationReceipt, err
 }
 
 func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash libcommon.Hash) error {
