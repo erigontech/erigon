@@ -10,8 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 )
 
-const MaxFastChangesets = 64
-
 type StateDiffKind uint8
 
 type StateChangeSet struct {
