@@ -298,6 +298,7 @@ func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *t
 	fv.timingsCache.Add(header.Hash(), []interface{}{"BlockValidation", time.Since(start)})
 
 	latestValidHash = header.Hash()
+	fv.extendingForkHeadHash = header.Hash()
 	if validationError != nil {
 		var latestValidNumber uint64
 		latestValidNumber, criticalError = stages.GetStageProgress(txc.Tx, stages.Execution)
