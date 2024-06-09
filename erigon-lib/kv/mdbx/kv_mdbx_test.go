@@ -48,47 +48,6 @@ func BaseCaseDB(t *testing.T) kv.RwDB {
 	return db
 }
 
-func BaseCase(t *testing.T) (kv.RwDB, kv.RwTx, kv.RwCursorDupSort) {
-	t.Helper()
-	db := BaseCaseDB(t)
-	table := "Table"
-
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
-	t.Cleanup(tx.Rollback)
-
-	c, err := tx.RwCursorDupSort(table)
-	require.NoError(t, err)
-	t.Cleanup(c.Close)
-
-	// Insert some dupsorted records
-	require.NoError(t, c.Put([]byte("key1"), []byte("value1.1")))
-	require.NoError(t, c.Put([]byte("key3"), []byte("value3.1")))
-	require.NoError(t, c.Put([]byte("key1"), []byte("value1.3")))
-	require.NoError(t, c.Put([]byte("key3"), []byte("value3.3")))
-
-	return db, tx, c
-}
-
-func iteration(t *testing.T, c kv.RwCursorDupSort, start []byte, val []byte) ([]string, []string) {
-	t.Helper()
-	var keys []string
-	var values []string
-	var err error
-	i := 0
-	for k, v, err := start, val, err; k != nil; k, v, err = c.Next() {
-		require.Nil(t, err)
-		keys = append(keys, string(k))
-		values = append(values, string(v))
-		i += 1
-	}
-	for ind := i; ind > 1; ind-- {
-		c.Prev()
-	}
-
-	return keys, values
-}
-
 func TestSeekBothRange(t *testing.T) {
 	_, _, c := BaseCase(t)
 
@@ -436,65 +395,6 @@ func TestAppendFirstLast(t *testing.T) {
 	keys, values = iteration(t, c, k, v)
 	require.Equal(t, []string{"key6"}, keys)
 	require.Equal(t, []string{"value6.1"}, values)
-}
-
-func TestNextPrevCurrent(t *testing.T) {
-	_, _, c := BaseCase(t)
-	require := require.New(t)
-
-	k, v, err := c.First()
-	require.NoError(err)
-	keys, values := iteration(t, c, k, v)
-	require.Equal([]string{"key1", "key1", "key3", "key3"}, keys)
-	require.Equal([]string{"value1.1", "value1.3", "value3.1", "value3.3"}, values)
-
-	k, v, err = c.Next()
-	require.Equal(t, []byte("key1"), k)
-	require.NoError(err)
-	keys, values = iteration(t, c, k, v)
-	require.Equal([]string{"key1", "key3", "key3"}, keys)
-	require.Equal([]string{"value1.3", "value3.1", "value3.3"}, values)
-
-	k, v, err = c.Current()
-	require.NoError(err)
-	keys, values = iteration(t, c, k, v)
-	require.Equal([]string{"key1", "key3", "key3"}, keys)
-	require.Equal([]string{"value1.3", "value3.1", "value3.3"}, values)
-	require.Equal(k, []byte("key1"))
-	require.Equal(v, []byte("value1.3"))
-
-	k, v, err = c.Next()
-	require.NoError(err)
-	keys, values = iteration(t, c, k, v)
-	require.Equal([]string{"key3", "key3"}, keys)
-	require.Equal([]string{"value3.1", "value3.3"}, values)
-
-	k, v, err = c.Prev()
-	require.NoError(err)
-	keys, values = iteration(t, c, k, v)
-	require.Equal([]string{"key1", "key3", "key3"}, keys)
-	require.Equal([]string{"value1.3", "value3.1", "value3.3"}, values)
-
-	k, v, err = c.Current()
-	require.NoError(err)
-	keys, values = iteration(t, c, k, v)
-	require.Equal([]string{"key1", "key3", "key3"}, keys)
-	require.Equal([]string{"value1.3", "value3.1", "value3.3"}, values)
-
-	k, v, err = c.Prev()
-	require.NoError(err)
-	keys, values = iteration(t, c, k, v)
-	require.Equal([]string{"key1", "key1", "key3", "key3"}, keys)
-	require.Equal([]string{"value1.1", "value1.3", "value3.1", "value3.3"}, values)
-
-	err = c.DeleteCurrent()
-	require.NoError(err)
-	k, v, err = c.Current()
-	require.Nil(err)
-	keys, values = iteration(t, c, k, v)
-	require.Equal([]string{"key1", "key3", "key3"}, keys)
-	require.Equal([]string{"value1.3", "value3.1", "value3.3"}, values)
-
 }
 
 func TestSeek(t *testing.T) {
@@ -1091,4 +991,103 @@ func TestDB_BatchTime(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestNextPrevCurrent(t *testing.T) {
+	_, _, c := BaseCase(t)
+	require := require.New(t)
+
+	k, v, err := c.First()
+	require.NoError(err)
+	keys, values := iteration(t, c, k, v)
+	require.Equal([]string{"key1", "key1", "key3", "key3"}, keys)
+	require.Equal([]string{"value1.1", "value1.3", "value3.1", "value3.3"}, values)
+
+	k, v, err = c.Next()
+	require.NoError(err)
+	require.Equal("key1", string(k))
+	keys, values = iteration(t, c, k, v)
+	require.Equal([]string{"key1", "key3", "key3"}, keys)
+	require.Equal([]string{"value1.3", "value3.1", "value3.3"}, values)
+
+	k, v, err = c.Current()
+	require.NoError(err)
+	keys, values = iteration(t, c, k, v)
+	require.Equal([]string{"key1", "key3", "key3"}, keys)
+	require.Equal([]string{"value1.3", "value3.1", "value3.3"}, values)
+	require.Equal(k, []byte("key1"))
+	require.Equal(v, []byte("value1.3"))
+
+	k, v, err = c.Next()
+	require.NoError(err)
+	keys, values = iteration(t, c, k, v)
+	require.Equal([]string{"key3", "key3"}, keys)
+	require.Equal([]string{"value3.1", "value3.3"}, values)
+
+	k, v, err = c.Prev()
+	require.NoError(err)
+	keys, values = iteration(t, c, k, v)
+	require.Equal([]string{"key1", "key3", "key3"}, keys)
+	require.Equal([]string{"value1.3", "value3.1", "value3.3"}, values)
+
+	k, v, err = c.Current()
+	require.NoError(err)
+	keys, values = iteration(t, c, k, v)
+	require.Equal([]string{"key1", "key3", "key3"}, keys)
+	require.Equal([]string{"value1.3", "value3.1", "value3.3"}, values)
+
+	k, v, err = c.Prev()
+	require.NoError(err)
+	keys, values = iteration(t, c, k, v)
+	require.Equal([]string{"key1", "key1", "key3", "key3"}, keys)
+	require.Equal([]string{"value1.1", "value1.3", "value3.1", "value3.3"}, values)
+
+	err = c.DeleteCurrent()
+	require.NoError(err)
+	k, v, err = c.Current()
+	require.Nil(err)
+	keys, values = iteration(t, c, k, v)
+	require.Equal([]string{"key1", "key3", "key3"}, keys)
+	require.Equal([]string{"value1.3", "value3.1", "value3.3"}, values)
+
+}
+
+func BaseCase(t *testing.T) (kv.RwDB, kv.RwTx, kv.RwCursorDupSort) {
+	t.Helper()
+	db := BaseCaseDB(t)
+	table := "Table"
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+
+	c, err := tx.RwCursorDupSort(table)
+	require.NoError(t, err)
+	t.Cleanup(c.Close)
+
+	// Insert some dupsorted records
+	require.NoError(t, c.Put([]byte("key1"), []byte("value1.1")))
+	require.NoError(t, c.Put([]byte("key3"), []byte("value3.1")))
+	require.NoError(t, c.Put([]byte("key1"), []byte("value1.3")))
+	require.NoError(t, c.Put([]byte("key3"), []byte("value3.3")))
+
+	return db, tx, c
+}
+
+func iteration(t *testing.T, c kv.RwCursorDupSort, start []byte, val []byte) (keys []string, values []string) {
+	t.Helper()
+	var err error
+	i := 0
+	for k, v, err := start, val, err; k != nil; k, v, err = c.Next() {
+		require.NoError(t, err)
+		keys = append(keys, string(k))
+		values = append(values, string(v))
+		i += 1
+	}
+	for ind := i; ind > 1; ind-- {
+		_, _, err = c.Prev()
+		require.NoError(t, err)
+	}
+
+	return keys, values
 }
