@@ -1482,7 +1482,7 @@ func ReadLastNewBlockSeen(tx kv.Tx) (uint64, error) {
 	return dbutils.DecodeBlockNumber(v)
 }
 
-const diffChunkLen = 8*1024 - 128 // 8kb is db pagsize, and need leave a bit space for key and page-metadata
+const diffChunkLen = 8*1024 - 256 // 8kb is db pagsize, and need leave a bit space for key and page-metadata
 
 func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet *state.StateChangeSet) error {
 	// Write the diffSet to the database
