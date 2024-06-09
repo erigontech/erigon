@@ -1482,7 +1482,7 @@ func ReadLastNewBlockSeen(tx kv.Tx) (uint64, error) {
 	return dbutils.DecodeBlockNumber(v)
 }
 
-const diffChunkLen = 8 * 1024
+const diffChunkLen = 8*1024 - 32 // 8kb is db pagsize. ofverflow pages have 20bytes page-header. so, chunk will fit in 1 overflow page.
 
 func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet *state.StateChangeSet) error {
 	// Write the diffSet to the database
