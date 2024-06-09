@@ -78,7 +78,8 @@ type SharedDomains struct {
 	dWriter   [kv.DomainLen]*domainBufferedWriter
 	iiWriters [kv.StandaloneIdxLen]*invertedIndexBufferedWriter
 
-	changesAccumulator *StateChangeSet
+	currentChangesAccumulator *StateChangeSet
+	pastChangesAccumulator    map[string]*StateChangeSet
 }
 
 type HasAggTx interface {
@@ -112,14 +113,24 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 }
 
 func (sd *SharedDomains) SetChangesetAccumulator(acc *StateChangeSet) {
-	sd.changesAccumulator = acc
+	sd.currentChangesAccumulator = acc
 	for idx := range sd.dWriter {
-		if sd.changesAccumulator == nil {
+		if sd.currentChangesAccumulator == nil {
 			sd.dWriter[idx].diff = nil
 		} else {
-			sd.dWriter[idx].diff = &sd.changesAccumulator.Diffs[idx]
+			sd.dWriter[idx].diff = &sd.currentChangesAccumulator.Diffs[idx]
 		}
 	}
+}
+
+func (sd *SharedDomains) SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *StateChangeSet) {
+	if sd.pastChangesAccumulator == nil {
+		sd.pastChangesAccumulator = make(map[string]*StateChangeSet)
+	}
+	var key [40]byte
+	binary.BigEndian.PutUint64(key[:8], blockNumber)
+	copy(key[8:], blockHash[:])
+	sd.pastChangesAccumulator[string(key[:])] = acc
 }
 
 func (sd *SharedDomains) AggTx() interface{} { return sd.aggTx }
@@ -768,6 +779,14 @@ func (sd *SharedDomains) Close() {
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	if sd.noFlush > 0 {
 		sd.noFlush--
+	}
+
+	for key, changeset := range sd.pastChangesAccumulator {
+		blockNum := binary.BigEndian.Uint64([]byte(key[:8]))
+		blockHash := common.BytesToHash([]byte(key[8:]))
+		if err := WriteDiffSet(tx, blockNum, blockHash, changeset); err != nil {
+			return err
+		}
 	}
 
 	if sd.noFlush == 0 {
