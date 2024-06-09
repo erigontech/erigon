@@ -880,7 +880,13 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		defer tx.Rollback()
 	}
 	if s.ForwardProgress > config3.MaxReorgDepthV3 {
-		if err := rawdb.PruneTable(tx, kv.ChangeSets3, s.ForwardProgress-config3.MaxReorgDepthV3, ctx, config3.MaxReorgDepthV3); err != nil {
+		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
+		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
+		var pruneDiffsLimitOnChainTip = 1_000
+		if s.CurrentSyncCycle.IsInitialCycle {
+			pruneDiffsLimitOnChainTip *= 10
+		}
+		if err := rawdb.PruneTable(tx, kv.ChangeSets3, s.ForwardProgress-config3.MaxReorgDepthV3, ctx, pruneDiffsLimitOnChainTip); err != nil {
 			return err
 		}
 	}
