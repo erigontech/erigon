@@ -10,8 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 )
 
-type StateDiffKind uint8
-
 type StateChangeSet struct {
 	Diffs [kv.DomainLen]StateDiffDomain // there are 4 domains of state changes
 }
