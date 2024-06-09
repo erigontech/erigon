@@ -65,11 +65,11 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 		}
 
 		// For local Perf Testing
-		const bor_dltest = ""
+		const bor_dltest = "storage"
 
 		switch bor_dltest {
-		case "last":
-			if !strings.HasSuffix(it.Path, "v1-storage.0-2048.kv") {
+		case "storage":
+			if !strings.Contains(it.Path, "domain/v1-storage") {
 				continue
 			}
 		case "headers":
