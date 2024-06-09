@@ -257,11 +257,11 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	var txc wrap.TxContainer
 	txc.Tx = tx
 	txc.Doms = fv.sharedDom
-	notifications := &shards.Notifications{
+	fv.extendingForkNotifications = &shards.Notifications{
 		Events:      shards.NewEvents(),
 		Accumulator: shards.NewAccumulator(),
 	}
-	return fv.validateAndStorePayload(txc, header, body, unwindPoint, headersChain, bodiesChain, notifications)
+	return fv.validateAndStorePayload(txc, header, body, unwindPoint, headersChain, bodiesChain, fv.extendingForkNotifications)
 }
 
 // Clear wipes out current extending fork data, this method is called after fcu is called,
