@@ -150,6 +150,9 @@ func (fv *ForkValidator) FlushExtendingFork(tx kv.RwTx, accumulator *shards.Accu
 	fv.extendingForkNotifications.Accumulator.CopyAndReset(accumulator)
 	// Clean extending fork data
 	fv.sharedDom = nil
+	if err := rawdb.WriteHeadHeaderHash(tx, fv.extendingForkHeadHash); err != nil {
+		return err
+	}
 	fv.extendingForkHeadHash = libcommon.Hash{}
 	fv.extendingForkNumber = 0
 	fv.extendingForkNotifications = nil
