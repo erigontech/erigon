@@ -3,6 +3,7 @@ package eth1
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 	"sync/atomic"
 
@@ -161,6 +162,9 @@ func (e *EthereumExecutionModule) unwindToCommonCanonical(tx kv.RwTx, header *ty
 	for isCanonical, err := e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()); !isCanonical && err == nil; isCanonical, err = e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()) {
 		if err != nil {
 			return err
+		}
+		if currentHeader == nil {
+			return fmt.Errorf("header %v not found", currentHeader.Hash())
 		}
 		currentHeader, err = e.getHeader(e.bacgroundCtx, tx, currentHeader.ParentHash, currentHeader.Number.Uint64()-1)
 		if err != nil {
