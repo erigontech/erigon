@@ -144,8 +144,9 @@ func (fv *ForkValidator) FlushExtendingFork(tx kv.RwTx, accumulator *shards.Accu
 			return err
 		}
 		fv.sharedDom.Close()
-		rawdb.WriteHeadBlockHash(tx, fv.extendingForkHeadHash)
-		rawdb.WriteHeadHeaderHash(tx, fv.extendingForkHeadHash)
+		if err := stages.SaveStageProgress(tx, stages.Execution, fv.extendingForkNumber); err != nil {
+			return err
+		}
 	}
 	timings, _ := fv.timingsCache.Get(fv.extendingForkHeadHash)
 	fv.timingsCache.Add(fv.extendingForkHeadHash, append(timings, "FlushExtendingFork", time.Since(start)))
