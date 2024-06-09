@@ -2,11 +2,11 @@ name: QA - Snapshot Download
 
 on:
   schedule:
-    - cron: '5 0 * * *'  # Run every day at 05:00 AM UTC
+    - cron: '0 5 * * 1-6'  # Run every day at 05:00 AM UTC except Sunday
   workflow_dispatch:     # Run manually
 
 jobs:
-  long-running-test:
+  snap-download-test:
     runs-on: [self-hosted, Erigon3]
     timeout-minutes: 800
     env:
@@ -83,7 +83,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: test-results
-        path: ${{ github.workspace }}/result.json
+        path: ${{ github.workspace }}/result-${{ env.CHAIN }}.json
 
     - name: Action for Success
       if: steps.test_step.outputs.TEST_RESULT == 'success'

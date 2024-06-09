@@ -54,13 +54,22 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 
 				d.mu.Unlock()
 
-				if info.DownloadFinished {
+				if d.snapshotStageFinished() {
 					return
 				}
 			}
 		}
 
 	}()
+}
+
+func (d *DiagnosticClient) snapshotStageFinished() bool {
+	idx := d.getCurrentSyncIdxs()
+	if idx.Stage > 0 {
+		return true
+	} else {
+		return false
+	}
 }
 
 func (d *DiagnosticClient) runSegmentDownloadingListener(rootCtx context.Context) {
@@ -301,6 +310,11 @@ func (d *DiagnosticClient) SnapshotFilesList() SnapshoFilesList {
 
 func ReadSnapshotDownloadInfo(db kv.RoDB) (info SnapshotDownloadStatistics) {
 	data := ReadDataFromTable(db, kv.DiagSyncStages, SnapshotDownloadStatisticsKey)
+
+	if len(data) == 0 {
+		return SnapshotDownloadStatistics{}
+	}
+
 	err := json.Unmarshal(data, &info)
 
 	if err != nil {
@@ -313,6 +327,11 @@ func ReadSnapshotDownloadInfo(db kv.RoDB) (info SnapshotDownloadStatistics) {
 
 func ReadSnapshotIndexingInfo(db kv.RoDB) (info SnapshotIndexingStatistics) {
 	data := ReadDataFromTable(db, kv.DiagSyncStages, SnapshotIndexingStatisticsKey)
+
+	if len(data) == 0 {
+		return SnapshotIndexingStatistics{}
+	}
+
 	err := json.Unmarshal(data, &info)
 
 	if err != nil {

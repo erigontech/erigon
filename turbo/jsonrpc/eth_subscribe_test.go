@@ -54,11 +54,11 @@ func TestEthSubscribe(t *testing.T) {
 	newHeads, id := ff.SubscribeNewHeads(16)
 	defer ff.UnsubscribeHeads(id)
 
-	initialCycle := mock.MockInsertAsInitialCycle
+	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
 	highestSeenHeader := chain.TopBlock.NumberU64()
 
 	hook := stages.NewHook(m.Ctx, m.DB, m.Notifications, m.Sync, m.BlockReader, m.ChainConfig, m.Log, nil)
-	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.TxContainer{}, m.Sync, initialCycle, true, logger, m.BlockReader, hook); err != nil {
+	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.TxContainer{}, m.Sync, initialCycle, firstCycle, logger, m.BlockReader, hook); err != nil {
 		t.Fatal(err)
 	}
 

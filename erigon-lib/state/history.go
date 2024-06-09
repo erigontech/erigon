@@ -27,9 +27,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/kv/backup"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -37,10 +37,10 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/backup"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
@@ -210,6 +210,7 @@ func (h *History) scanStateFiles(fNames []string) (garbageFiles []*filesItem) {
 }
 
 func (h *History) openFiles() error {
+	invalidFilesMu := sync.Mutex{}
 	invalidFileItems := make([]*filesItem, 0)
 	h.dirtyFiles.Walk(func(items []*filesItem) bool {
 		var err error
@@ -220,16 +221,34 @@ func (h *History) openFiles() error {
 				if !dir.FileExist(fPath) {
 					_, fName := filepath.Split(fPath)
 					h.logger.Debug("[agg] History.openFiles: file does not exists", "f", fName)
+					invalidFilesMu.Lock()
 					invalidFileItems = append(invalidFileItems, item)
+					invalidFilesMu.Unlock()
 					continue
 				}
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 					_, fName := filepath.Split(fPath)
 					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
 						h.logger.Debug("[agg] History.openFiles", "err", err, "f", fName)
+						// TODO we do not restore those files so we could just remove them along with indices. Same for domains/indices.
+						//      Those files will keep space on disk and closed automatically as corrupted. So better to remove them, and maybe remove downloading prohibiter to allow downloading them again?
+						//
+						// itemPaths := []string{
+						// 	fPath,
+						// 	h.vAccessorFilePath(fromStep, toStep),
+						// }
+						// for _, fp := range itemPaths {
+						// 	err = os.Remove(fp)
+						// 	if err != nil {
+						// 		h.logger.Warn("[agg] History.openFiles cannot remove corrupted file", "err", err, "f", fp)
+						// 	}
+						// }
 					} else {
 						h.logger.Warn("[agg] History.openFiles", "err", err, "f", fName)
 					}
+					invalidFilesMu.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFilesMu.Unlock()
 					// don't interrupt on error. other files may be good. but skip indices open.
 					continue
 				}
@@ -245,7 +264,6 @@ func (h *History) openFiles() error {
 					}
 				}
 			}
-
 		}
 		return true
 	})
@@ -513,11 +531,10 @@ func (ht *HistoryRoTx) newWriter(tmpdir string, discard bool) *historyBufferedWr
 		historyKey:       make([]byte, 128),
 		largeValues:      ht.h.historyLargeValues,
 		historyValsTable: ht.h.historyValsTable,
-		historyVals:      etl.NewCollector("flush "+ht.h.historyValsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), ht.h.logger),
+		historyVals:      etl.NewCollector("flush "+ht.h.historyValsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), ht.h.logger).LogLvl(log.LvlTrace),
 
 		ii: ht.iit.newWriter(tmpdir, discard),
 	}
-	w.historyVals.LogLvl(log.LvlTrace)
 	w.historyVals.SortAndFlushInBackground(true)
 	return w
 }
@@ -598,6 +615,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
 	collector := etl.NewCollector("collate hist "+h.filenameBase, h.iiCfg.dirs.Tmp, etl.NewSortableBuffer(CollateETLRAM), h.logger)
 	defer collector.Close()
+	collector.LogLvl(log.LvlTrace)
 
 	for txnmb, k, err := keysCursor.Seek(txKey[:]); err == nil && txnmb != nil; txnmb, k, err = keysCursor.Next() {
 		if err != nil {
@@ -1066,6 +1084,7 @@ func (ht *HistoryRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 		defer valsC.Close()
 	}
 
+	var pruned int
 	pruneValue := func(k, txnm []byte) error {
 		txNum := binary.BigEndian.Uint64(txnm)
 		if txNum >= txTo || txNum < txFrom { //[txFrom; txTo), but in this case idx record
@@ -1082,17 +1101,18 @@ func (ht *HistoryRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 			if err != nil {
 				return err
 			}
-			if binary.BigEndian.Uint64(vv) != txNum {
-				return fmt.Errorf("history invalid txNum: %d != %d", binary.BigEndian.Uint64(vv), txNum)
+			if vtx := binary.BigEndian.Uint64(vv); vtx != txNum {
+				return fmt.Errorf("prune history %s got invalid txNum: found %d != %d wanted", ht.h.filenameBase, vtx, txNum)
 			}
 			if err = valsCDup.DeleteCurrent(); err != nil {
 				return err
 			}
 		}
 
-		mxPruneSizeHistory.Inc()
+		pruned++
 		return nil
 	}
+	mxPruneSizeHistory.AddInt(pruned)
 
 	if !forced && ht.h.dontProduceHistoryFiles {
 		forced = true // or index.CanPrune will return false cuz no snapshots made
@@ -1334,6 +1354,7 @@ func (ht *HistoryRoTx) WalkAsOf(startTxNum uint64, from, to []byte, roTx kv.Tx, 
 	}
 	binary.BigEndian.PutUint64(hi.startTxKey[:], startTxNum)
 	if err := hi.advanceInFiles(); err != nil {
+		hi.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
 
@@ -1347,7 +1368,8 @@ func (ht *HistoryRoTx) WalkAsOf(startTxNum uint64, from, to []byte, roTx kv.Tx, 
 	}
 	binary.BigEndian.PutUint64(dbit.startTxKey[:], startTxNum)
 	if err := dbit.advance(); err != nil {
-		panic(err)
+		dbit.Close() //it's responsibility of constructor (our) to close resource on error
+		return nil, err
 	}
 	return iter.UnionKV(hi, dbit, limit), nil
 }
@@ -1594,14 +1616,14 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 		return iter.EmptyKV, nil
 	}
 
-	hi := &HistoryChangesIterFiles{
+	s := &HistoryChangesIterFiles{
 		hc:         ht,
-		startTxNum: cmp.Max(0, uint64(fromTxNum)),
+		startTxNum: max(0, uint64(fromTxNum)),
 		endTxNum:   toTxNum,
 		limit:      limit,
 	}
 	if fromTxNum >= 0 {
-		binary.BigEndian.PutUint64(hi.startTxKey[:], uint64(fromTxNum))
+		binary.BigEndian.PutUint64(s.startTxKey[:], uint64(fromTxNum))
 	}
 	for _, item := range ht.iit.files {
 		if fromTxNum >= 0 && item.endTxNum <= uint64(fromTxNum) {
@@ -1614,13 +1636,14 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 		g.Reset(0)
 		if g.HasNext() {
 			key, offset := g.Next(nil)
-			heap.Push(&hi.h, &ReconItem{g: g, key: key, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, startOffset: offset, lastOffset: offset})
+			heap.Push(&s.h, &ReconItem{g: g, key: key, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, startOffset: offset, lastOffset: offset})
 		}
 	}
-	if err := hi.advance(); err != nil {
+	if err := s.advance(); err != nil {
+		s.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
-	return hi, nil
+	return s, nil
 }
 
 func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.KVS, error) {
@@ -1631,7 +1654,7 @@ func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By
 	if rangeIsInFiles {
 		return iter.EmptyKVS, nil
 	}
-	dbi := &HistoryChangesIterDB{
+	s := &HistoryChangesIterDB{
 		endTxNum:    toTxNum,
 		roTx:        roTx,
 		largeValues: ht.h.historyLargeValues,
@@ -1639,12 +1662,13 @@ func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By
 		limit:       limit,
 	}
 	if fromTxNum >= 0 {
-		binary.BigEndian.PutUint64(dbi.startTxKey[:], uint64(fromTxNum))
+		binary.BigEndian.PutUint64(s.startTxKey[:], uint64(fromTxNum))
 	}
-	if err := dbi.advance(); err != nil {
+	if err := s.advance(); err != nil {
+		s.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
-	return dbi, nil
+	return s, nil
 }
 
 func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.KVS, error) {

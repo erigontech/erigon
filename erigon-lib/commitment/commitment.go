@@ -60,8 +60,6 @@ type PatriciaContext interface {
 	GetAccount(plainKey []byte, cell *Cell) error
 	// fetch storage with given plain key
 	GetStorage(plainKey []byte, cell *Cell) error
-	// Returns temp directory to use for update collecting
-	TempDir() string
 	// store branch data
 	PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error
 }
@@ -78,14 +76,15 @@ const (
 func InitializeTrieAndUpdateTree(tv TrieVariant, mode Mode, tmpdir string) (Trie, *UpdateTree) {
 	switch tv {
 	case VariantBinPatriciaTrie:
-		trie := NewBinPatriciaHashed(length.Addr, nil)
+		trie := NewBinPatriciaHashed(length.Addr, nil, tmpdir)
 		fn := func(key []byte) []byte { return hexToBin(key) }
 		tree := NewUpdateTree(mode, tmpdir, fn)
 		return trie, tree
 	case VariantHexPatriciaTrie:
 		fallthrough
 	default:
-		trie := NewHexPatriciaHashed(length.Addr, nil)
+
+		trie := NewHexPatriciaHashed(length.Addr, nil, tmpdir)
 		tree := NewUpdateTree(mode, tmpdir, trie.hashAndNibblizeKey)
 		return trie, tree
 	}

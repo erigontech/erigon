@@ -391,9 +391,9 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		db.View(context.Background(), func(tx kv.Tx) error {
 			aggTx := agg.BeginFilesRo()
 			defer aggTx.Close()
-			aggTx.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
-				_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
-				return histBlockNumProgress
+			aggTx.LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
+				_, histBlockNumProgress, err := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+				return histBlockNumProgress, err
 			})
 			return nil
 		})
@@ -422,9 +422,9 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 					db.View(context.Background(), func(tx kv.Tx) error {
 						ac := agg.BeginFilesRo()
 						defer ac.Close()
-						ac.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
-							_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
-							return histBlockNumProgress
+						ac.LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
+							_, histBlockNumProgress, err := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+							return histBlockNumProgress, err
 						})
 						return nil
 					})
@@ -991,7 +991,7 @@ func (e *remoteConsensusEngine) Prepare(_ consensus.ChainHeaderReader, _ *types.
 	panic("remoteConsensusEngine.Prepare not supported")
 }
 
-func (e *remoteConsensusEngine) Finalize(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ types.Transactions, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ consensus.ChainReader, _ consensus.SystemCall, _ log.Logger) (types.Transactions, types.Receipts, error) {
+func (e *remoteConsensusEngine) Finalize(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ types.Transactions, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ consensus.ChainReader, _ consensus.SystemCall, _ log.Logger) (types.Transactions, types.Receipts, types.Requests, error) {
 	panic("remoteConsensusEngine.Finalize not supported")
 }
 

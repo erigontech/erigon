@@ -33,28 +33,26 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/assert"
-
 	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/ledgerwatch/erigon-lib/kv/backup"
-	"github.com/ledgerwatch/erigon-lib/seg"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/backup"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
+	"github.com/ledgerwatch/erigon-lib/seg"
 )
 
 type InvertedIndex struct {
@@ -427,11 +425,9 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *invertedIn
 		indexKeysTable: iit.ii.indexKeysTable,
 		indexTable:     iit.ii.indexTable,
 		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
-		indexKeys: etl.NewCollector("flush "+iit.ii.indexKeysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), iit.ii.logger),
-		index:     etl.NewCollector("flush "+iit.ii.indexTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), iit.ii.logger),
+		indexKeys: etl.NewCollector("flush "+iit.ii.indexKeysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), iit.ii.logger).LogLvl(log.LvlTrace),
+		index:     etl.NewCollector("flush "+iit.ii.indexTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), iit.ii.logger).LogLvl(log.LvlTrace),
 	}
-	w.indexKeys.LogLvl(log.LvlTrace)
-	w.index.LogLvl(log.LvlTrace)
 	w.indexKeys.SortAndFlushInBackground(true)
 	w.index.SortAndFlushInBackground(true)
 	return w
@@ -580,6 +576,8 @@ func (iit *InvertedIndexRoTx) lastTxNumInFiles() uint64 {
 // is to be used in public API, therefore it relies on read-only transaction
 // so that iteration can be done even when the inverted index is being updated.
 // [startTxNum; endNumTx)
+
+// todo IdxRange operates over ii.indexTable . Passing `nil` as a key will not return all keys
 func (iit *InvertedIndexRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.U64, error) {
 	frozenIt, err := iit.iterateRangeFrozen(key, startTxNum, endTxNum, asc, limit)
 	if err != nil {
@@ -693,7 +691,7 @@ func (iit *InvertedIndexRoTx) smallestTxNum(tx kv.Tx) uint64 {
 	fst, _ := kv.FirstKey(tx, iit.ii.indexKeysTable)
 	if len(fst) > 0 {
 		fstInDb := binary.BigEndian.Uint64(fst)
-		return cmp.Min(fstInDb, math.MaxUint64)
+		return min(fstInDb, math.MaxUint64)
 	}
 	return math.MaxUint64
 }
@@ -702,7 +700,7 @@ func (iit *InvertedIndexRoTx) highestTxNum(tx kv.Tx) uint64 {
 	lst, _ := kv.LastKey(tx, iit.ii.indexKeysTable)
 	if len(lst) > 0 {
 		lstInDb := binary.BigEndian.Uint64(lst)
-		return cmp.Max(lstInDb, 0)
+		return max(lstInDb, 0)
 	}
 	return 0
 }
@@ -769,7 +767,7 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		defer cleanup()
 	}
 
-	if limit == 0 {
+	if limit == 0 { // limits amount of Tx to be pruned
 		limit = math.MaxUint64
 	}
 
@@ -783,26 +781,16 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	//		"tx until limit", limit)
 	//}()
 
-	keysCursor, err := rwTx.RwCursorDupSort(ii.indexKeysTable)
+	keysCursor, err := rwTx.CursorDupSort(ii.indexKeysTable)
 	if err != nil {
 		return stat, fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
 	}
 	defer keysCursor.Close()
-	keysCursorForDel, err := rwTx.RwCursorDupSort(ii.indexKeysTable)
-	if err != nil {
-		return stat, fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
-	}
-	defer keysCursorForDel.Close()
-	idxCForDeletes, err := rwTx.RwCursorDupSort(ii.indexTable)
+	idxDelCursor, err := rwTx.RwCursorDupSort(ii.indexTable)
 	if err != nil {
 		return nil, err
 	}
-	defer idxCForDeletes.Close()
-	idxValuesCount, err := idxCForDeletes.Count()
-	if err != nil {
-		return nil, err
-	}
-	indexWithValues := idxValuesCount != 0 || fn != nil
+	defer idxDelCursor.Close()
 
 	collector := etl.NewCollector("prune idx "+ii.filenameBase, ii.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/8), ii.logger)
 	defer collector.Close()
@@ -823,49 +811,36 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		if txNum >= txTo || limit == 0 {
 			break
 		}
-		if txNum < txFrom {
+		if asserts && txNum < txFrom {
 			panic(fmt.Errorf("assert: index pruning txn=%d [%d-%d)", txNum, txFrom, txTo))
 		}
+
 		limit--
 		stat.MinTxNum = min(stat.MinTxNum, txNum)
 		stat.MaxTxNum = max(stat.MaxTxNum, txNum)
 
-		if indexWithValues {
-			for ; v != nil; _, v, err = keysCursor.NextDup() {
-				if err != nil {
-					return nil, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
-				}
-				if err := collector.Collect(v, k); err != nil {
-					return nil, err
-				}
+		for ; v != nil; _, v, err = keysCursor.NextDup() {
+			if err != nil {
+				return nil, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
 			}
-		}
-
-		stat.PruneCountTx++
-		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
-		if err = rwTx.Delete(ii.indexKeysTable, k); err != nil {
-			return nil, err
+			if err := collector.Collect(v, k); err != nil {
+				return nil, err
+			}
 		}
 
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 	}
-	if !indexWithValues {
-		return stat, nil
-	}
 
-	binary.BigEndian.PutUint64(txKey[:], txFrom)
 	err = collector.Load(nil, "", func(key, txnm []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if fn != nil {
 			if err = fn(key, txnm); err != nil {
 				return fmt.Errorf("fn error: %w", err)
 			}
 		}
-		if idxValuesCount > 0 {
-			if err = idxCForDeletes.DeleteExact(key, txnm); err != nil {
-				return err
-			}
+		if err = idxDelCursor.DeleteExact(key, txnm); err != nil {
+			return err
 		}
 		mxPruneSizeIndex.Inc()
 		stat.PruneCountValues++
@@ -880,6 +855,23 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		}
 		return nil
 	}, etl.TransformArgs{Quit: ctx.Done()})
+
+	if stat.MinTxNum != math.MaxUint64 {
+		binary.BigEndian.PutUint64(txKey[:], stat.MinTxNum)
+		// This deletion iterator goes last to preserve invariant: if some `txNum=N` pruned - it's pruned Fully
+		for txnb, _, err := keysCursor.Seek(txKey[:]); txnb != nil; txnb, _, err = keysCursor.NextNoDup() {
+			if err != nil {
+				return nil, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
+			}
+			if binary.BigEndian.Uint64(txnb) > stat.MaxTxNum {
+				break
+			}
+			stat.PruneCountTx++
+			if err = rwTx.Delete(ii.indexKeysTable, txnb); err != nil {
+				return nil, err
+			}
+		}
+	}
 
 	return stat, err
 }

@@ -82,6 +82,13 @@ func (h *heimdall) FetchCheckpointsFromBlock(ctx context.Context, startBlock uin
 		if err != nil {
 			return nil, err
 		}
+		if len(checkpoints) == 0 {
+			return nil, errors.New("unexpected empty checkpoints")
+		}
+		if checkpoints[len(checkpoints)-1].CmpRange(startBlock) > 0 {
+			// the start block is past the last checkpoint
+			return nil, nil
+		}
 
 		startCheckpointIdx, found := sort.Find(len(checkpoints), func(i int) int {
 			return checkpoints[i].CmpRange(startBlock)
@@ -424,13 +431,19 @@ func (h *heimdall) pollSpans(ctx context.Context, tip SpanId, cb func(*Span)) {
 				"err", err,
 			)
 
-			h.waitPollingDelay(ctx)
+			if err := common.Sleep(ctx, h.pollDelay); err != nil {
+				h.logPollerSleepCancelled("spans", err)
+				return
+			}
 			// keep background goroutine alive in case of heimdall errors
 			continue
 		}
 
 		if latestSpan.Id <= tip {
-			h.waitPollingDelay(ctx)
+			if err := common.Sleep(ctx, h.pollDelay); err != nil {
+				h.logPollerSleepCancelled("spans", err)
+				return
+			}
 			continue
 		}
 
@@ -441,7 +454,10 @@ func (h *heimdall) pollSpans(ctx context.Context, tip SpanId, cb func(*Span)) {
 				"err", err,
 			)
 
-			h.waitPollingDelay(ctx)
+			if err := common.Sleep(ctx, h.pollDelay); err != nil {
+				h.logPollerSleepCancelled("spans", err)
+				return
+			}
 			// keep background goroutine alive in case of heimdall errors
 			continue
 		}
@@ -489,24 +505,42 @@ func (h *heimdall) pollMilestones(ctx context.Context, tip MilestoneId, cb func(
 				"err", err,
 			)
 
-			h.waitPollingDelay(ctx)
+			if err := common.Sleep(ctx, h.pollDelay); err != nil {
+				h.logPollerSleepCancelled("milestones", err)
+				return
+			}
 			// keep background goroutine alive in case of heimdall errors
 			continue
 		}
 
 		if count <= int64(tip) {
-			h.waitPollingDelay(ctx)
+			if err := common.Sleep(ctx, h.pollDelay); err != nil {
+				h.logPollerSleepCancelled("milestones", err)
+				return
+			}
 			continue
 		}
 
-		m, err := h.FetchMilestones(ctx, tip+1, MilestoneId(count))
+		// heimdall keeps only last 100 milestones
+		var start MilestoneId
+		end := MilestoneId(count)
+		if end > 100 {
+			start = end - 99
+		} else {
+			start = 1
+		}
+		start = max(tip+1, start)
+		m, err := h.FetchMilestones(ctx, start, end)
 		if err != nil {
 			h.logger.Warn(
 				heimdallLogPrefix("heimdall.pollMilestones FetchMilestones failed"),
 				"err", err,
 			)
 
-			h.waitPollingDelay(ctx)
+			if err := common.Sleep(ctx, h.pollDelay); err != nil {
+				h.logPollerSleepCancelled("milestones", err)
+				return
+			}
 			// keep background goroutine alive in case of heimdall errors
 			continue
 		}
@@ -561,7 +595,9 @@ func (h *heimdall) batchFetchCheckpoints(
 	sort.Sort(checkpoints)
 
 	for i, checkpoint := range checkpoints[lastStored:] {
-		err := store.PutCheckpoint(ctx, CheckpointId(i+1), checkpoint)
+		// checkpoint list API does not return "id" in the json response
+		checkpoint.Id = CheckpointId(i + 1)
+		err := store.PutCheckpoint(ctx, checkpoint.Id, checkpoint)
 		if err != nil {
 			return nil, err
 		}
@@ -576,6 +612,6 @@ func (h *heimdall) batchFetchCheckpoints(
 	return checkpoints, nil
 }
 
-func (h *heimdall) waitPollingDelay(ctx context.Context) {
-	common.Sleep(ctx, h.pollDelay)
+func (h *heimdall) logPollerSleepCancelled(poller string, err error) {
+	h.logger.Info(heimdallLogPrefix("poller sleep cancelled"), "poller", poller, "err", err)
 }

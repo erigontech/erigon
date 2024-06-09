@@ -25,7 +25,6 @@ import (
 	"hash"
 	"io"
 	"math/bits"
-	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -86,7 +85,7 @@ type HexPatriciaHashed struct {
 	branchEncoder *BranchEncoder
 }
 
-func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext) *HexPatriciaHashed {
+func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext, tmpdir string) *HexPatriciaHashed {
 	hph := &HexPatriciaHashed{
 		ctx:           ctx,
 		keccak:        sha3.NewLegacyKeccak256().(keccakState),
@@ -94,12 +93,7 @@ func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext) *HexPatriciaHa
 		accountKeyLen: accountKeyLen,
 		auxBuffer:     bytes.NewBuffer(make([]byte, 8192)),
 	}
-	tdir := os.TempDir()
-	if ctx != nil {
-		tdir = ctx.TempDir()
-	}
-	tdir = filepath.Join(tdir, "branch-encoder")
-	hph.branchEncoder = NewBranchEncoder(1024, tdir)
+	hph.branchEncoder = NewBranchEncoder(1024, filepath.Join(tmpdir, "branch-encoder"))
 	return hph
 }
 

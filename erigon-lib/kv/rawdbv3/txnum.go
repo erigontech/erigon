@@ -31,6 +31,7 @@ import (
 type ErrTxNumsAppendWithGap struct {
 	appendBlockNum uint64
 	lastBlockNum   uint64
+	stack          string
 }
 
 func (e ErrTxNumsAppendWithGap) LastBlock() uint64 {
@@ -40,7 +41,7 @@ func (e ErrTxNumsAppendWithGap) LastBlock() uint64 {
 func (e ErrTxNumsAppendWithGap) Error() string {
 	return fmt.Sprintf(
 		"append with gap blockNum=%d, but current height=%d, stack: %s",
-		e.appendBlockNum, e.lastBlockNum, dbg.Stack(),
+		e.appendBlockNum, e.lastBlockNum, e.stack,
 	)
 }
 
@@ -115,7 +116,7 @@ func (txNums) Append(tx kv.RwTx, blockNum, maxTxNum uint64) (err error) {
 	if len(lastK) != 0 {
 		lastBlockNum := binary.BigEndian.Uint64(lastK)
 		if lastBlockNum > 1 && lastBlockNum+1 != blockNum { //allow genesis
-			return ErrTxNumsAppendWithGap{appendBlockNum: blockNum, lastBlockNum: lastBlockNum}
+			return ErrTxNumsAppendWithGap{appendBlockNum: blockNum, lastBlockNum: lastBlockNum, stack: dbg.Stack()}
 		}
 	}
 
@@ -175,11 +176,20 @@ func (txNums) FindBlockNum(tx kv.Tx, endTxNumMinimax uint64) (ok bool, blockNum 
 	lastBlockNum := binary.BigEndian.Uint64(lastK)
 
 	blockNum = uint64(sort.Search(int(lastBlockNum+1), func(i int) bool {
+		if err != nil { // don't loose errors from prev iterations
+			return true
+		}
+
 		binary.BigEndian.PutUint64(seek[:], uint64(i))
-		var v []byte
-		_, v, err = c.SeekExact(seek[:])
+		var v, found []byte
+		found, v, err = c.SeekExact(seek[:])
+		if err != nil {
+			return true
+		}
 		if len(v) != 8 {
-			panic(fmt.Errorf("seems broken TxNum value: %x -> %x", seek, v))
+			_lb, _lt, _ := TxNums.Last(tx)
+			err = fmt.Errorf("FindBlockNum(%d): seems broken TxNum value: %x -> (%x, %x); last in db: (%d, %d)", endTxNumMinimax, seek, found, v, _lb, _lt)
+			return true
 		}
 		return binary.BigEndian.Uint64(v) >= endTxNumMinimax
 	}))

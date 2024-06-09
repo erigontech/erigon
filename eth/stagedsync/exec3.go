@@ -51,6 +51,7 @@ import (
 var execStepsInDB = metrics.NewGauge(`exec_steps_in_db`) //nolint
 var execRepeats = metrics.NewCounter(`exec_repeats`)     //nolint
 var execTriggers = metrics.NewCounter(`exec_triggers`)   //nolint
+const changesetBlockRange = 256                          // Generate changeset only if execution of blocks <= changesetBlockRange
 
 func NewProgress(prevOutputBlockNum, commitThreshold uint64, workersCount int, logPrefix string, logger log.Logger) *Progress {
 	return &Progress{prevTime: time.Now(), prevOutputBlockNum: prevOutputBlockNum, commitThreshold: commitThreshold, workersCount: workersCount, logPrefix: logPrefix, logger: logger}
@@ -155,15 +156,6 @@ func ExecV3(ctx context.Context,
 	agg, engine := cfg.agg, cfg.engine
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
 	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
-
-	if initialCycle {
-		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
-		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
-		defer agg.DiscardHistory(kv.CommitmentDomain).EnableHistory(kv.CommitmentDomain)
-	} else {
-		agg.SetCompressWorkers(1)
-		agg.SetCollateAndBuildWorkers(1)
-	}
 
 	applyTx := txc.Tx
 	useExternalTx := applyTx != nil
@@ -288,11 +280,26 @@ func ExecV3(ctx context.Context,
 		}
 	}
 
+	ts := time.Duration(0)
 	blockNum = doms.BlockNum()
 	outputTxNum.Store(doms.TxNum())
+	shouldGenerateChangesets := maxBlockNum-blockNum <= changesetBlockRange
+
 	if maxBlockNum-blockNum > 16 {
 		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
 			"from", blockNum, "to", maxBlockNum, "fromTxNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx)
+	}
+
+	if initialCycle {
+		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
+		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+		if blockNum < cfg.blockReader.FrozenBlocks() {
+			defer agg.DiscardHistory(kv.CommitmentDomain).EnableHistory(kv.CommitmentDomain)
+			defer agg.LimitRecentHistoryWithoutFiles(0).LimitRecentHistoryWithoutFiles(agg.StepSize() / 10)
+		}
+	} else {
+		agg.SetCompressWorkers(1)
+		agg.SetCollateAndBuildWorkers(1)
 	}
 
 	if blocksFreezeCfg.Produce {
@@ -309,6 +316,9 @@ func ExecV3(ctx context.Context,
 	var accumulator *shards.Accumulator
 	if shouldReportToTxPool {
 		accumulator = cfg.accumulator
+		if accumulator == nil {
+			accumulator = shards.NewAccumulator()
+		}
 	}
 	rs := state.NewStateV3(doms, logger)
 
@@ -561,10 +571,6 @@ func ExecV3(ctx context.Context,
 		})
 	}
 
-	if useExternalTx && blockNum < cfg.blockReader.FrozenBlocks() {
-		defer agg.LimitRecentHistoryWithoutFiles(0).LimitRecentHistoryWithoutFiles(agg.StepSize() / 2)
-	}
-
 	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {
 		var err error
 		if parallel {
@@ -609,6 +615,10 @@ func ExecV3(ctx context.Context,
 	var b *types.Block
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
+		changeset := &state2.StateChangeSet{}
+		if shouldGenerateChangesets && blockNum > 0 {
+			doms.SetChangesetAccumulator(changeset)
+		}
 		//time.Sleep(50 * time.Microsecond)
 		if !parallel {
 			select {
@@ -640,7 +650,7 @@ Loop:
 			defer getHashFnMute.Unlock()
 			return f(n)
 		}
-		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */)
+		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */, chainConfig)
 		if parallel {
 			select {
 			case err := <-rwLoopErrCh:
@@ -675,7 +685,7 @@ Loop:
 			if err != nil {
 				return err
 			}
-			cfg.accumulator.StartChange(b.NumberU64(), b.Hash(), txs, false)
+			accumulator.StartChange(b.NumberU64(), b.Hash(), txs, false)
 		}
 
 		rules := chainConfig.Rules(blockNum, b.Time())
@@ -685,6 +695,7 @@ Loop:
 		// So we skip that check for the first block, if we find half-executed data.
 		skipPostEvaluation := false
 		var usedGas, blobGasUsed uint64
+
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &state.TxTask{
@@ -835,6 +846,21 @@ Loop:
 			stageProgress = blockNum
 			inputTxNum++
 		}
+		if shouldGenerateChangesets {
+			aggTx := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+			aggTx.RestrictSubsetFileDeletions(true)
+			start := time.Now()
+			if _, err := doms.ComputeCommitment(ctx, true, blockNum, execStage.LogPrefix()); err != nil {
+				return err
+			}
+			ts += time.Since(start)
+			aggTx.RestrictSubsetFileDeletions(false)
+			if err := rawdb.WriteDiffSet(applyTx, blockNum, b.Hash(), changeset); err != nil {
+				return err
+			}
+			doms.SetChangesetAccumulator(nil)
+		}
+
 		if offsetFromBlockBeginning > 0 {
 			// after history execution no offset will be required
 			offsetFromBlockBeginning = 0
@@ -843,20 +869,18 @@ Loop:
 		// MA commitTx
 		if !parallel {
 			metrics2.UpdateBlockConsumerPostExecutionDelay(b.Time(), blockNum, logger)
-			//if blockNum%1000 == 0 {
-			//	if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u); err != nil {
-			//		return err
-			//	} else if !ok {
-			//		break Loop
-			//	}
-			//}
-
 			outputBlockNum.SetUint64(blockNum)
 
 			select {
 			case <-logEvery.C:
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
 				progress.Log(rs, in, rws, count, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB)
+				if applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).CanPrune(applyTx, outputTxNum.Load()) {
+					//small prune cause MDBX_TXN_FULL
+					if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Hour, applyTx); err != nil {
+						return err
+					}
+				}
 				// If we skip post evaluation, then we should compute root hash ASAP for fail-fast
 				if !skipPostEvaluation && (rs.SizeEstimate() < commitThreshold || inMemExec) {
 					break
@@ -873,7 +897,8 @@ Loop:
 				} else if !ok {
 					break Loop
 				}
-				t1 = time.Since(tt)
+
+				t1 = time.Since(tt) + ts
 
 				tt = time.Now()
 				if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Hour, applyTx); err != nil {
@@ -1044,11 +1069,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
 
-	aggTx := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
-
-	aggTx.RestrictSubsetFileDeletions(true)
 	rh, err := doms.ComputeCommitment(ctx, true, header.Number.Uint64(), u.LogPrefix())
-	aggTx.RestrictSubsetFileDeletions(false)
 	if err != nil {
 		return false, fmt.Errorf("StateV3.Apply: %w", err)
 	}
@@ -1096,11 +1117,12 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		return false, nil
 	}
 
+	aggTx := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 	unwindToLimit, err := aggTx.CanUnwindDomainsToBlockNum(applyTx)
 	if err != nil {
 		return false, err
 	}
-	minBlockNum = cmp.Max(minBlockNum, unwindToLimit)
+	minBlockNum = max(minBlockNum, unwindToLimit)
 
 	// Binary search, but not too deep
 	jump := cmp.InRange(1, 1000, (maxBlockNum-minBlockNum)/2)
@@ -1448,7 +1470,7 @@ func reconstituteStep(last bool,
 				defer getHashFnMute.Unlock()
 				return f(n)
 			}
-			blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */)
+			blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */, chainConfig)
 			rules := chainConfig.Rules(bn, b.Time())
 
 			for txIndex := -1; txIndex <= len(txs); txIndex++ {

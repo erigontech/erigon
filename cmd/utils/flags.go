@@ -36,7 +36,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
 	libkzg "github.com/ledgerwatch/erigon-lib/crypto/kzg"
@@ -408,7 +407,7 @@ var (
 	DBReadConcurrencyFlag = cli.IntFlag{
 		Name:  "db.read.concurrency",
 		Usage: "Does limit amount of parallel db reads. Default: equal to GOMAXPROCS (or number of CPU)",
-		Value: cmp.Min(cmp.Max(10, runtime.GOMAXPROCS(-1)*64), 9_000),
+		Value: min(max(10, runtime.GOMAXPROCS(-1)*64), 9_000),
 	}
 	RpcAccessListFlag = cli.StringFlag{
 		Name:  "rpc.accessList",
@@ -832,6 +831,11 @@ var (
 		Name:  "caplin.discovery.tcpport",
 		Usage: "TCP Port for Caplin DISCV5 protocol",
 		Value: 4001,
+	}
+	CaplinCheckpointSyncUrlFlag = cli.StringSliceFlag{
+		Name:  "caplin.checkpoint-sync-url",
+		Usage: "checkpoint sync endpoint",
+		Value: cli.NewStringSlice(),
 	}
 
 	SentinelAddrFlag = cli.StringFlag{
@@ -1663,6 +1667,9 @@ func setCaplin(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.CaplinConfig.BlobBackfilling = ctx.Bool(CaplinBlobBackfillingFlag.Name)
 	cfg.CaplinConfig.BlobPruningDisabled = ctx.Bool(CaplinDisableBlobPruningFlag.Name)
 	cfg.CaplinConfig.Archive = ctx.Bool(CaplinArchiveFlag.Name)
+	if checkpointUrls := ctx.StringSlice(CaplinCheckpointSyncUrlFlag.Name); len(checkpointUrls) > 0 {
+		clparams.ConfigurableCheckpointsURLs = checkpointUrls
+	}
 }
 
 func setSilkworm(ctx *cli.Context, cfg *ethconfig.Config) {

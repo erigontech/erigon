@@ -3,7 +3,6 @@ package app
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -50,14 +49,9 @@ var (
 		Value:    cli.NewStringSlice("localhost:6060"),
 	}
 
-	insecureFlag = cli.BoolFlag{
-		Name:  "insecure",
-		Usage: "Allows communication with diagnostics system using self-signed TLS certificates",
-	}
-
 	sessionsFlag = cli.StringSliceFlag{
 		Name:  "diagnostics.sessions",
-		Usage: "Comma separated list of support session ids to connect to",
+		Usage: "Comma separated list of session PINs to connect to",
 	}
 )
 
@@ -77,7 +71,6 @@ var supportCommand = cli.Command{
 		&debugURLsFlag,
 		&diagnosticsURLFlag,
 		&sessionsFlag,
-		&insecureFlag,
 	}, debug.Flags...),
 	//Category: "SUPPORT COMMANDS",
 	Description: `The support command connects a running Erigon instances to a diagnostics system specified by the URL.`,
@@ -104,17 +97,11 @@ func ConnectDiagnostics(cliCtx *cli.Context, logger log.Logger) error {
 
 	diagnosticsUrl := cliCtx.String(diagnosticsURLFlag.Name) + "/bridge"
 
-	// Create TLS configuration with the certificate of the server
-	insecure := cliCtx.Bool(insecureFlag.Name)
-	tlsConfig := &tls.Config{
-		InsecureSkipVerify: insecure, //nolint:gosec
-	}
-
 	sessionIds := cliCtx.StringSlice(sessionsFlag.Name)
 
 	// Perform the requests in a loop (reconnect)
 	for {
-		if err := tunnel(ctx, cancel, sigs, tlsConfig, diagnosticsUrl, sessionIds, debugURLs, logger); err != nil {
+		if err := tunnel(ctx, cancel, sigs, diagnosticsUrl, sessionIds, debugURLs, logger); err != nil {
 			return err
 		}
 		select {
@@ -146,9 +133,7 @@ func (c *conn) SetWriteDeadline(time time.Time) error {
 
 // tunnel operates the tunnel from diagnostics system to the metrics URL for one http/2 request
 // needs to be called repeatedly to implement re-connect logic
-// tunnel operates the tunnel from diagnostics system to the metrics URL for one http/2 request
-// needs to be called repeatedly to implement re-connect logic
-func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal, tlsConfig *tls.Config, diagnosticsUrl string, sessionIds []string, debugURLs []string, logger log.Logger) error {
+func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal, diagnosticsUrl string, sessionIds []string, debugURLs []string, logger log.Logger) error {
 	metricsClient := &http.Client{}
 	defer metricsClient.CloseIdleConnections()
 

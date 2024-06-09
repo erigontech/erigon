@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/polygon/bridge"
 )
 
 //go:generate mockgen -typed=true -destination=./store_mock.go -package=sync . Store
@@ -22,9 +23,10 @@ type Store interface {
 }
 
 type executionClientStore struct {
-	logger    log.Logger
-	execution ExecutionClient
-	queue     chan []*types.Block
+	logger        log.Logger
+	execution     ExecutionClient
+	polygonBridge bridge.Service
+	queue         chan []*types.Block
 
 	// tasksCount includes both tasks pending in the queue and a task that was taken and hasn't finished yet
 	tasksCount atomic.Int32
@@ -33,10 +35,11 @@ type executionClientStore struct {
 	tasksDoneSignal chan bool
 }
 
-func NewStore(logger log.Logger, execution ExecutionClient) Store {
+func NewStore(logger log.Logger, execution ExecutionClient, polygonBridge bridge.Service) Store {
 	return &executionClientStore{
 		logger:          logger,
 		execution:       execution,
+		polygonBridge:   polygonBridge,
 		queue:           make(chan []*types.Block),
 		tasksDoneSignal: make(chan bool, 1),
 	}
@@ -96,6 +99,11 @@ func (s *executionClientStore) insertBlocks(ctx context.Context, blocks []*types
 
 	insertStartTime := time.Now()
 	err := s.execution.InsertBlocks(ctx, blocks)
+	if err != nil {
+		return err
+	}
+
+	err = s.polygonBridge.ProcessNewBlocks(ctx, blocks)
 	if err != nil {
 		return err
 	}

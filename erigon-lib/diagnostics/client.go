@@ -44,7 +44,7 @@ func NewDiagnosticClient(ctx context.Context, metricsMux *http.ServeMux, dataDir
 	}
 
 	hInfo := ReadSysInfo(db)
-	ss := ReadSyncStagesInfo(db)
+	ss := ReadSyncStages(db)
 	snpdwl := ReadSnapshotDownloadInfo(db)
 	snpidx := ReadSnapshotIndexingInfo(db)
 
