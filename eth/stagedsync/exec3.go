@@ -442,7 +442,7 @@ func ExecV3(ctx context.Context,
 						}
 						ac.Close()
 						if !inMemExec {
-							if err = doms.Flush(ctx, tx); err != nil {
+							if err = doms.Flush(ctx, tx, false); err != nil {
 								return err
 							}
 						}
@@ -503,7 +503,7 @@ func ExecV3(ctx context.Context,
 						t2 = time.Since(tt)
 						tt = time.Now()
 
-						if err := doms.Flush(ctx, tx); err != nil {
+						if err := doms.Flush(ctx, tx, false); err != nil {
 							return err
 						}
 						doms.ClearRam(true)
@@ -544,7 +544,7 @@ func ExecV3(ctx context.Context,
 					logger.Info("Committed", "time", time.Since(commitStart), "drain", t0, "drain_and_lock", t1, "rs.flush", t2, "agg.flush", t3, "tx.commit", t4)
 				}
 			}
-			if err = doms.Flush(ctx, tx); err != nil {
+			if err = doms.Flush(ctx, tx, false); err != nil {
 				return err
 			}
 			if err = execStage.Update(tx, outputBlockNum.GetValueUint64()); err != nil {
@@ -860,8 +860,10 @@ Loop:
 			}
 			doms.SetChangesetAccumulator(nil)
 		}
-		if err := rawdb.WriteExecutionDBHash(applyTx, b.Hash()); err != nil {
-			return err
+		if !inMemExec {
+			if err := rawdb.WriteExecutionDBHash(applyTx, b.Hash()); err != nil {
+				return err
+			}
 		}
 
 		if offsetFromBlockBeginning > 0 {
@@ -1004,7 +1006,7 @@ Loop:
 // nolint
 func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
 	if doms != nil {
-		doms.Flush(context.Background(), tx)
+		doms.Flush(context.Background(), tx, false)
 	}
 	{
 		it, err := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
@@ -1081,7 +1083,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	}
 	if bytes.Equal(rh, header.Root.Bytes()) {
 		if !inMemExec {
-			if err := doms.Flush(ctx, applyTx); err != nil {
+			if err := doms.Flush(ctx, applyTx, false); err != nil {
 				return false, err
 			}
 		}

@@ -124,7 +124,7 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 		"processed", processed.Load(),
 		"total", totalKeys.Load())
 
-	if err := domains.Flush(ctx, tx); err != nil {
+	if err := domains.Flush(ctx, tx, false); err != nil {
 		return nil, err
 	}
 

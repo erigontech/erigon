@@ -155,7 +155,7 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 		return err
 	}
 
-	if err := doms.Flush(ctx, txc.Tx); err != nil {
+	if err := doms.Flush(ctx, txc.Tx, false); err != nil {
 		return err
 	}
 

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"math/big"
 	"sync/atomic"
-	"time"
 
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
@@ -239,12 +238,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	if validationError != nil {
 		validationReceipt.ValidationError = validationError.Error()
 	}
-	t := time.Now()
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	e.forkValidator.AddTiming(header.Hash(), "commit", time.Since(t))
-	return validationReceipt, err
+	return validationReceipt, tx.Commit()
 }
 
 func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash libcommon.Hash) error {

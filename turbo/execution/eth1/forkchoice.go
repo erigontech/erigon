@@ -421,13 +421,18 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
+
+	needToFlushCommitment := false
+	t := time.Now()
 	if blockHash == e.forkValidator.ExtendingForkHeadHash() && !unwindToGenesis {
+		needToFlushCommitment = true
 		e.logger.Info("[updateForkchoice] Fork choice update: flushing in-memory state (built by previous newPayload)")
-		if err := e.forkValidator.LoadNotifications(tx, e.accumulator); err != nil {
+		if err := e.forkValidator.FlushExtendingFork(tx, e.accumulator, true); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
 	}
+	flushExtendingForkTime := time.Since(t)
 	// Run the forkchoice
 	initialCycle := limitedBigJump
 	firstCycle := false
@@ -439,6 +444,9 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	}
 
 	timings := slices.Clone(e.executionPipeline.PrintTimings())
+	if flushExtendingForkTime > 50*time.Millisecond {
+		timings = append(timings, "FlushExtendingFork", flushExtendingForkTime)
+	}
 
 	// if head hash was set then success otherwise no
 	headHash := rawdb.ReadHeadBlockHash(tx)
@@ -476,6 +484,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
+		t := time.Now()
 		if err := tx.Commit(); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
@@ -485,10 +494,11 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			if err := e.db.View(ctx, func(tx kv.Tx) error {
 				return e.hook.AfterRun(tx, finishProgressBefore)
 			}); err != nil {
-				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-				return
+				e.logger.Warn("hook.AfterRun", "error", err)
 			}
 		}
+
+		commitTimes := time.Since(t)
 		if log {
 			e.logger.Info("head updated", "number", *headNumber, "hash", headHash)
 		}
@@ -496,7 +506,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		var m runtime.MemStats
 		dbg.ReadMemStats(&m)
 		timings = append(timings, e.forkValidator.GetTimings(headHash)...)
-		timings = append(timings, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+		timings = append(timings, "commit", commitTimes, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 		e.logger.Info("Timings (slower than 50ms)", timings...)
 	}
 	if *headNumber >= startPruneFrom {
@@ -507,6 +517,13 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		Status:          status,
 		ValidationError: validationError,
 	})
+	if needToFlushCommitment {
+		if err := e.db.Update(ctx, func(tx kv.RwTx) error {
+			return e.forkValidator.FlushExtendingFork(tx, e.accumulator, false)
+		}); err != nil {
+			e.logger.Warn("Could not flush commitment", "err", err)
+		}
+	}
 }
 
 func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle bool) {

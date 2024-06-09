@@ -135,7 +135,7 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 	sf := time.Now()
 	defer mxUnwindSharedTook.ObserveDuration(sf)
 
-	if err := sd.Flush(ctx, rwTx); err != nil {
+	if err := sd.Flush(ctx, rwTx, false); err != nil {
 		return err
 	}
 
@@ -161,7 +161,7 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 	sd.ClearRam(true)
 	sd.SetTxNum(txUnwindTo)
 	sd.SetBlockNum(blockUnwindTo)
-	return sd.Flush(ctx, rwTx)
+	return sd.Flush(ctx, rwTx, false)
 }
 
 func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Tx, blockNum uint64) ([]byte, error) {
@@ -765,7 +765,7 @@ func (sd *SharedDomains) Close() {
 	}
 }
 
-func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
+func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx, noCommitment bool) error {
 	if sd.noFlush > 0 {
 		sd.noFlush--
 	}
@@ -780,17 +780,22 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 			_, f, l, _ := runtime.Caller(1)
 			fmt.Printf("[SD aggTx=%d] FLUSHING at tx %d [%x], caller %s:%d\n", sd.aggTx.id, sd.TxNum(), fh, filepath.Base(f), l)
 		}
-		for _, d := range sd.dWriter {
+		for idx, d := range sd.dWriter {
+			if noCommitment && idx == int(kv.CommitmentDomain) {
+				continue
+			}
 			if d != nil {
 				if err := d.Flush(ctx, tx); err != nil {
 					return err
 				}
+				sd.dWriter[idx] = sd.aggTx.d[idx].newWriter(sd.aggTx.a.dirs.Tmp, false)
 			}
 		}
-		for _, iiWriter := range sd.iiWriters {
+		for idx, iiWriter := range sd.iiWriters {
 			if err := iiWriter.Flush(ctx, tx); err != nil {
 				return err
 			}
+			sd.iiWriters[idx] = sd.aggTx.iis[idx].newWriter(sd.aggTx.a.dirs.Tmp, false)
 		}
 		if dbg.PruneOnFlushTimeout != 0 {
 			_, err = sd.aggTx.PruneSmallBatches(ctx, dbg.PruneOnFlushTimeout, tx)
@@ -799,14 +804,14 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 			}
 		}
 
-		for _, d := range sd.dWriter {
-			if d != nil {
-				d.close()
-			}
-		}
-		for _, iiWriter := range sd.iiWriters {
-			iiWriter.close()
-		}
+		// for _, d := range sd.dWriter {
+		// 	if d != nil {
+		// 		d.close()
+		// 	}
+		// }
+		// for _, iiWriter := range sd.iiWriters {
+		// 	iiWriter.close()
+		// }
 	}
 	return nil
 }

@@ -24,6 +24,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -58,8 +59,8 @@ type ForkValidator struct {
 	// block hashes that are deemed valid
 	validHashes *lru.Cache[libcommon.Hash, bool]
 
-	ctx context.Context
-
+	ctx       context.Context
+	sharedDom *state.SharedDomains
 	// we want fork validator to be thread safe so let
 	lock sync.Mutex
 
@@ -125,7 +126,7 @@ func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 }
 
 // FlushExtendingFork flush the current extending fork if fcu chooses its head hash as the its forkchoice.
-func (fv *ForkValidator) LoadNotifications(tx kv.RwTx, accumulator *shards.Accumulator) error {
+func (fv *ForkValidator) FlushExtendingFork(tx kv.RwTx, accumulator *shards.Accumulator, noCommitment bool) error {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	// Flush changes to db.
@@ -134,7 +135,10 @@ func (fv *ForkValidator) LoadNotifications(tx kv.RwTx, accumulator *shards.Accum
 	fv.extendingForkHeadHash = libcommon.Hash{}
 	fv.extendingForkNumber = 0
 	fv.extendingForkNotifications = nil
-	return nil
+	if fv.sharedDom == nil {
+		return nil
+	}
+	return fv.sharedDom.Flush(fv.ctx, tx, noCommitment)
 }
 
 // ValidatePayload returns whether a payload is valid or invalid, or if cannot be determined, it will be accepted.
@@ -276,7 +280,15 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		logger.Debug("Execution ForkValidator.ValidatePayload", "foundCanonical", foundCanonical, "currentHash", currentHash, "unwindPoint", unwindPoint)
 	}
 
-	txc := wrap.TxContainer{Tx: tx}
+	if fv.sharedDom != nil {
+		fv.sharedDom.ClearRam(true)
+		fv.sharedDom.Close()
+	}
+	fv.sharedDom, criticalError = state.NewSharedDomains(tx, logger)
+	if criticalError != nil {
+		return
+	}
+	txc := wrap.TxContainer{Tx: tx, Doms: fv.sharedDom}
 	notifications := &shards.Notifications{
 		Events:      shards.NewEvents(),
 		Accumulator: shards.NewAccumulator(),
@@ -304,6 +316,8 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 // because fcu decides what the head is and after the call is done all the non-chosen forks are
 // to be considered obsolete.
 func (fv *ForkValidator) clear() {
+	fv.sharedDom.Close()
+	fv.sharedDom = nil
 	fv.extendingForkHeadHash = libcommon.Hash{}
 	fv.extendingForkNumber = 0
 }
