@@ -33,28 +33,26 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/assert"
-
 	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/ledgerwatch/erigon-lib/kv/backup"
-	"github.com/ledgerwatch/erigon-lib/seg"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/backup"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
+	"github.com/ledgerwatch/erigon-lib/seg"
 )
 
 type InvertedIndex struct {
@@ -427,11 +425,9 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *invertedIn
 		indexKeysTable: iit.ii.indexKeysTable,
 		indexTable:     iit.ii.indexTable,
 		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
-		indexKeys: etl.NewCollector("flush "+iit.ii.indexKeysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), iit.ii.logger),
-		index:     etl.NewCollector("flush "+iit.ii.indexTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), iit.ii.logger),
+		indexKeys: etl.NewCollector("flush "+iit.ii.indexKeysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), iit.ii.logger).LogLvl(log.LvlTrace),
+		index:     etl.NewCollector("flush "+iit.ii.indexTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), iit.ii.logger).LogLvl(log.LvlTrace),
 	}
-	w.indexKeys.LogLvl(log.LvlTrace)
-	w.index.LogLvl(log.LvlTrace)
 	w.indexKeys.SortAndFlushInBackground(true)
 	w.index.SortAndFlushInBackground(true)
 	return w
@@ -693,7 +689,7 @@ func (iit *InvertedIndexRoTx) smallestTxNum(tx kv.Tx) uint64 {
 	fst, _ := kv.FirstKey(tx, iit.ii.indexKeysTable)
 	if len(fst) > 0 {
 		fstInDb := binary.BigEndian.Uint64(fst)
-		return cmp.Min(fstInDb, math.MaxUint64)
+		return min(fstInDb, math.MaxUint64)
 	}
 	return math.MaxUint64
 }
@@ -702,7 +698,7 @@ func (iit *InvertedIndexRoTx) highestTxNum(tx kv.Tx) uint64 {
 	lst, _ := kv.LastKey(tx, iit.ii.indexKeysTable)
 	if len(lst) > 0 {
 		lstInDb := binary.BigEndian.Uint64(lst)
-		return cmp.Max(lstInDb, 0)
+		return max(lstInDb, 0)
 	}
 	return 0
 }
@@ -862,10 +858,8 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 				return fmt.Errorf("fn error: %w", err)
 			}
 		}
-		if idxValuesCount > 0 {
-			if err = idxCForDeletes.DeleteExact(key, txnm); err != nil {
-				return err
-			}
+		if err = idxCForDeletes.DeleteExact(key, txnm); err != nil {
+			return err
 		}
 		mxPruneSizeIndex.Inc()
 		stat.PruneCountValues++

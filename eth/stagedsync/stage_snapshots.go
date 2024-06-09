@@ -143,7 +143,6 @@ func SpawnStageSnapshots(
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg SnapshotsCfg,
-	initialCycle bool,
 	logger log.Logger,
 ) (err error) {
 	useExternalTx := tx != nil
@@ -154,7 +153,7 @@ func SpawnStageSnapshots(
 		}
 		defer tx.Rollback()
 	}
-	if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg, initialCycle, logger); err != nil {
+	if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg, logger); err != nil {
 		return err
 	}
 	var minProgress uint64
@@ -186,18 +185,7 @@ func SpawnStageSnapshots(
 	return nil
 }
 
-func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, initialCycle bool, logger log.Logger) error {
-	if !initialCycle {
-		return nil
-	}
-	if !cfg.blockReader.FreezingCfg().Enabled {
-		return nil
-	}
-	cstate := snapshotsync.NoCaplin
-	if cfg.caplin { //TODO(Giulio2002): uncomment
-		cstate = snapshotsync.AlsoCaplin
-	}
-
+func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, logger log.Logger) error {
 	if cfg.snapshotUploader != nil {
 		u := cfg.snapshotUploader
 
@@ -232,19 +220,29 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 				return err
 			}
 		}
-	} else {
+	}
 
-		// Download only the snapshots that are for the header chain.
-		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, true, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
-			return err
-		}
-		if err := cfg.blockReader.Snapshots().ReopenSegments([]snaptype.Type{coresnaptype.Headers, coresnaptype.Bodies}, true); err != nil {
-			return err
-		}
+	if !s.CurrentSyncCycle.IsFirstCycle {
+		return nil
+	}
+	if !cfg.blockReader.FreezingCfg().Enabled {
+		return nil
+	}
+	cstate := snapshotsync.NoCaplin
+	if cfg.caplin {
+		cstate = snapshotsync.AlsoCaplin
+	}
 
-		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, false, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
-			return err
-		}
+	// Download only the snapshots that are for the header chain.
+	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, true, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
+		return err
+	}
+	if err := cfg.blockReader.Snapshots().ReopenSegments([]snaptype.Type{coresnaptype.Headers, coresnaptype.Bodies}, true); err != nil {
+		return err
+	}
+
+	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, false, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
+		return err
 	}
 
 	// It's ok to notify before tx.Commit(), because RPCDaemon does read list of files by gRPC (not by reading from db)
@@ -294,9 +292,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 	{
 		cfg.blockReader.Snapshots().LogStat("download")
-		tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx).LogStats(tx, func(endTxNumMinimax uint64) uint64 {
-			_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
-			return histBlockNumProgress
+		tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx).LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
+			_, histBlockNumProgress, err := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+			return histBlockNumProgress, err
 		})
 	}
 
@@ -334,7 +332,11 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			if err := blockReader.HeadersRange(ctx, func(header *types.Header) error {
 				blockNum, blockHash := header.Number.Uint64(), header.Hash()
 				td.Add(td, header.Difficulty)
-
+				// What can happen if chaindata is deleted is that maybe header.seg progress is lower or higher than
+				// body.seg progress. In this case we need to skip the header, and "normalize" the progress to keep them in sync.
+				if blockNum > blocksAvailable {
+					return nil // This can actually happen as FrozenBlocks() is SegmentIdMax() and not the last .seg
+				}
 				if err := rawdb.WriteTd(tx, blockHash, blockNum, td); err != nil {
 					return err
 				}
@@ -393,6 +395,11 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 					panic(baseTxNum + txAmount) //uint-underflow
 				}
 				maxTxNum := baseTxNum + txAmount - 1
+				// What can happen if chaindata is deleted is that maybe header.seg progress is lower or higher than
+				// body.seg progress. In this case we need to skip the header, and "normalize" the progress to keep them in sync.
+				if blockNum > blocksAvailable {
+					return nil // This can actually happen as FrozenBlocks() is SegmentIdMax() and not the last .seg
+				}
 
 				if err := rawdbv3.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
 					return fmt.Errorf("%w. blockNum=%d, maxTxNum=%d", err, blockNum, maxTxNum)
@@ -429,7 +436,7 @@ func computeBlocksToPrune(cfg SnapshotsCfg) (blocksToPrune uint64, historyToPrun
 /* ====== PRUNING ====== */
 // snapshots pruning sections works more as a retiring of blocks
 // retiring blocks means moving block data from db into snapshots
-func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx, logger log.Logger) (err error) {
+func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx, logger log.Logger) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -460,7 +467,7 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 				minBlockNumber = cfg.snapshotUploader.minBlockNumber()
 			}
 
-			if initialCycle {
+			if s.CurrentSyncCycle.IsInitialCycle {
 				cfg.blockRetire.SetWorkers(estimate.CompressSnapshot.Workers())
 			} else {
 				cfg.blockRetire.SetWorkers(1)
@@ -497,7 +504,7 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 		}
 
 		pruneLimit := 100
-		if initialCycle {
+		if s.CurrentSyncCycle.IsInitialCycle {
 			pruneLimit = 10_000
 		}
 		if err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit); err != nil {

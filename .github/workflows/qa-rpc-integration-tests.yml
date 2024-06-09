@@ -2,7 +2,7 @@ name: QA - RPC Integration Tests
 
 on:
   schedule:
-    - cron: '0 23 * * *'  # Run every day at 23:00 UTC
+    - cron: '0 8 * * *'  # Run every day at 8:00 UTC
   workflow_dispatch:     # Run manually
 
 jobs:

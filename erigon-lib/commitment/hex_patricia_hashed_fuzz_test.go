@@ -36,8 +36,8 @@ func Fuzz_ProcessUpdate(f *testing.F) {
 
 		ms := NewMockState(t)
 		ms2 := NewMockState(t)
-		hph := NewHexPatriciaHashed(20, ms)
-		hphAnother := NewHexPatriciaHashed(20, ms2)
+		hph := NewHexPatriciaHashed(20, ms, ms.TempDir())
+		hphAnother := NewHexPatriciaHashed(20, ms2, ms2.TempDir())
 
 		hph.SetTrace(false)
 		hphAnother.SetTrace(false)
@@ -142,8 +142,8 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount(f *testing.F) {
 
 		ms := NewMockState(t)
 		ms2 := NewMockState(t)
-		hph := NewHexPatriciaHashed(20, ms)
-		hphAnother := NewHexPatriciaHashed(20, ms2)
+		hph := NewHexPatriciaHashed(20, ms, ms.TempDir())
+		hphAnother := NewHexPatriciaHashed(20, ms2, ms2.TempDir())
 
 		plainKeys, updates := builder.Build()
 
@@ -199,7 +199,7 @@ func Fuzz_HexPatriciaHashed_ReviewKeys(f *testing.F) {
 		}
 
 		ms := NewMockState(t)
-		hph := NewHexPatriciaHashed(length.Addr, ms)
+		hph := NewHexPatriciaHashed(length.Addr, ms, ms.TempDir())
 
 		hph.SetTrace(false)
 

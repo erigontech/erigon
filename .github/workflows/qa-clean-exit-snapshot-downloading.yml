@@ -14,7 +14,7 @@ on:
   workflow_dispatch:     # Run manually
 
 jobs:
-  long-running-test:
+  clean-exit-sd-test:
     runs-on: self-hosted
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data

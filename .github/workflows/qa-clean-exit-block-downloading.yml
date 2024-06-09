@@ -1,20 +1,12 @@
 name: QA - Clean exit (block downloading)
 
 on:
-  push:
-    branches:
-      - main
-      - 'release/3.*'
-  pull_request:
-    branches:
-      - main
-      - 'release/3.*'
-    types:
-      - ready_for_review
+  schedule:
+    - cron: '0 8 * * 1-6'  # Run every day at 08:00 AM UTC except Sunday
   workflow_dispatch:     # Run manually
 
 jobs:
-  long-running-test:
+  clean-exit-bd-test:
     runs-on: [self-hosted, Erigon3]
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir

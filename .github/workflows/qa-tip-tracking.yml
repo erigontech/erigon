@@ -2,11 +2,11 @@ name: QA - Tip tracking
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # Run every day at 00:00 AM UTC
+    - cron: '0 0 * * 1-6'  # Run every day at 00:00 AM UTC except Sunday
   workflow_dispatch:     # Run manually
 
 jobs:
-  long-running-test:
+  tip-tracking-test:
     runs-on: [self-hosted, Erigon3]
     timeout-minutes: 600
     env:
@@ -90,7 +90,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: test-results
-        path: ${{ github.workspace }}/result.json
+        path: ${{ github.workspace }}/result-$CHAIN.json
 
     - name: Action for Success
       if: steps.test_step.outputs.TEST_RESULT == 'success'

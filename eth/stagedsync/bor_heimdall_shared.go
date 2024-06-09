@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
 	"strconv"
 	"time"
 
@@ -17,7 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 )
@@ -357,14 +355,18 @@ func fetchRequiredHeimdallStateSyncEventsIfNeeded(
 	ctx context.Context,
 	header *types.Header,
 	tx kv.RwTx,
-	cfg BorHeimdallCfg,
+	borConfig *borcfg.BorConfig,
+	blockReader services.FullBlockReader,
+	heimdallClient heimdall.HeimdallClient,
+	chainID string,
+	stateReceiverABI abi.ABI,
 	logPrefix string,
 	logger log.Logger,
 	lastStateSyncEventID uint64,
 ) (uint64, int, time.Duration, error) {
 
 	headerNum := header.Number.Uint64()
-	if headerNum%cfg.borConfig.CalculateSprintLength(headerNum) != 0 || headerNum == 0 {
+	if headerNum%borConfig.CalculateSprintLength(headerNum) != 0 || headerNum == 0 {
 		// we fetch events only at beginning of each sprint
 		return lastStateSyncEventID, 0, 0, nil
 	}
@@ -374,11 +376,11 @@ func fetchRequiredHeimdallStateSyncEventsIfNeeded(
 		header,
 		lastStateSyncEventID,
 		tx,
-		cfg.borConfig,
-		cfg.blockReader,
-		cfg.heimdallClient,
-		cfg.chainConfig.ChainID.String(),
-		cfg.stateReceiverABI,
+		borConfig,
+		blockReader,
+		heimdallClient,
+		chainID,
+		stateReceiverABI,
 		logPrefix,
 		logger,
 	)
@@ -478,14 +480,7 @@ func fetchAndWriteHeimdallStateSyncEvents(
 			)
 		}
 
-		eventRecordWithoutTime := eventRecord.BuildEventRecord()
-
-		recordBytes, err := rlp.EncodeToBytes(eventRecordWithoutTime)
-		if err != nil {
-			return lastStateSyncEventID, i, time.Since(fetchStart), err
-		}
-
-		data, err := stateReceiverABI.Pack("commitState", big.NewInt(eventRecord.Time.Unix()), recordBytes)
+		data, err := eventRecord.Pack(stateReceiverABI)
 		if err != nil {
 			logger.Error(fmt.Sprintf("[%s] Unable to pack tx for commitState", logPrefix), "err", err)
 			return lastStateSyncEventID, i, time.Since(fetchStart), err

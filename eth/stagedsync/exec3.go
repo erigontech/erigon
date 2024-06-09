@@ -156,15 +156,6 @@ func ExecV3(ctx context.Context,
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
 	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
 
-	if initialCycle {
-		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
-		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
-		defer agg.DiscardHistory(kv.CommitmentDomain).EnableHistory(kv.CommitmentDomain)
-	} else {
-		agg.SetCompressWorkers(1)
-		agg.SetCollateAndBuildWorkers(1)
-	}
-
 	applyTx := txc.Tx
 	useExternalTx := applyTx != nil
 	if !useExternalTx {
@@ -295,6 +286,18 @@ func ExecV3(ctx context.Context,
 			"from", blockNum, "to", maxBlockNum, "fromTxNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx)
 	}
 
+	if initialCycle {
+		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
+		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+		if blockNum < cfg.blockReader.FrozenBlocks() {
+			defer agg.DiscardHistory(kv.CommitmentDomain).EnableHistory(kv.CommitmentDomain)
+			defer agg.LimitRecentHistoryWithoutFiles(0).LimitRecentHistoryWithoutFiles(agg.StepSize() / 10)
+		}
+	} else {
+		agg.SetCompressWorkers(1)
+		agg.SetCollateAndBuildWorkers(1)
+	}
+
 	if blocksFreezeCfg.Produce {
 		//log.Info(fmt.Sprintf("[snapshots] db has steps amount: %s", agg.StepsRangeInDBAsStr(applyTx)))
 		agg.BuildFilesInBackground(outputTxNum.Load())
@@ -309,6 +312,9 @@ func ExecV3(ctx context.Context,
 	var accumulator *shards.Accumulator
 	if shouldReportToTxPool {
 		accumulator = cfg.accumulator
+		if accumulator == nil {
+			accumulator = shards.NewAccumulator()
+		}
 	}
 	rs := state.NewStateV3(doms, logger)
 
@@ -561,10 +567,6 @@ func ExecV3(ctx context.Context,
 		})
 	}
 
-	if useExternalTx && blockNum < cfg.blockReader.FrozenBlocks() {
-		defer agg.LimitRecentHistoryWithoutFiles(0).LimitRecentHistoryWithoutFiles(agg.StepSize() / 2)
-	}
-
 	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {
 		var err error
 		if parallel {
@@ -675,7 +677,7 @@ Loop:
 			if err != nil {
 				return err
 			}
-			cfg.accumulator.StartChange(b.NumberU64(), b.Hash(), txs, false)
+			accumulator.StartChange(b.NumberU64(), b.Hash(), txs, false)
 		}
 
 		rules := chainConfig.Rules(blockNum, b.Time())
@@ -843,20 +845,17 @@ Loop:
 		// MA commitTx
 		if !parallel {
 			metrics2.UpdateBlockConsumerPostExecutionDelay(b.Time(), blockNum, logger)
-			//if blockNum%1000 == 0 {
-			//	if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u); err != nil {
-			//		return err
-			//	} else if !ok {
-			//		break Loop
-			//	}
-			//}
-
 			outputBlockNum.SetUint64(blockNum)
 
 			select {
 			case <-logEvery.C:
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
 				progress.Log(rs, in, rws, count, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB)
+				if applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).CanPrune(applyTx, outputTxNum.Load()) {
+					if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 5*time.Minute, applyTx); err != nil {
+						return err
+					}
+				}
 				// If we skip post evaluation, then we should compute root hash ASAP for fail-fast
 				if !skipPostEvaluation && (rs.SizeEstimate() < commitThreshold || inMemExec) {
 					break
@@ -1100,7 +1099,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	if err != nil {
 		return false, err
 	}
-	minBlockNum = cmp.Max(minBlockNum, unwindToLimit)
+	minBlockNum = max(minBlockNum, unwindToLimit)
 
 	// Binary search, but not too deep
 	jump := cmp.InRange(1, 1000, (maxBlockNum-minBlockNum)/2)

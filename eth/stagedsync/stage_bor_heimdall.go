@@ -364,7 +364,11 @@ func BorHeimdallForward(
 					ctx,
 					header,
 					tx,
-					cfg,
+					cfg.borConfig,
+					cfg.blockReader,
+					cfg.heimdallClient,
+					cfg.chainConfig.ChainID.String(),
+					cfg.stateReceiverABI,
 					s.LogPrefix(),
 					logger,
 					lastStateSyncEventID,
@@ -423,7 +427,7 @@ func BorHeimdallForward(
 	}
 
 	logger.Info(
-		fmt.Sprintf("[%s] Sync events processed", s.LogPrefix()),
+		fmt.Sprintf("[%s] Sync events", s.LogPrefix()),
 		"progress", blockNum-1,
 		"lastSpanID", lastSpanID,
 		"lastSpanID", lastSpanID,

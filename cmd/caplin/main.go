@@ -86,7 +86,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	if cfg.InitialSync {
 		state = cfg.InitalState
 	} else {
-		state, err = core.RetrieveBeaconState(ctx, cfg.BeaconCfg, cfg.CheckpointUri)
+		state, err = core.RetrieveBeaconState(ctx, cfg.BeaconCfg, cfg.NetworkType)
 		if err != nil {
 			return err
 		}

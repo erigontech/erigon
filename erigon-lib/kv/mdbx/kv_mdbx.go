@@ -87,7 +87,7 @@ func NewMDBX(log log.Logger) MdbxOpts {
 
 		mapSize:         DefaultMapSize,
 		growthStep:      DefaultGrowthStep,
-		mergeThreshold:  3 * 8192,
+		mergeThreshold:  2 * 8192,
 		shrinkThreshold: -1, // default
 		label:           kv.InMem,
 	}
@@ -2002,7 +2002,7 @@ func (tx *MdbxTx) rangeOrderLimit(table string, fromPrefix, toPrefix []byte, ord
 	}
 	tx.streams[s.id] = s
 	if err := s.init(table, tx); err != nil {
-		s.Close()
+		s.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
 	return s, nil
@@ -2145,7 +2145,7 @@ func (tx *MdbxTx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []
 	}
 	tx.streams[s.id] = s
 	if err := s.init(table, tx); err != nil {
-		s.Close()
+		s.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
 	return s, nil

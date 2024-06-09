@@ -22,9 +22,11 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"io/fs"
 	"math"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -656,7 +658,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 			if !r.any() {
 				return true
 			}
-			valuesOuts, indexOuts, historyOuts, _ := dc.staticFilesInRange(r)
+			valuesOuts, indexOuts, historyOuts := dc.staticFilesInRange(r)
 			valuesIn, indexIn, historyIn, err := dc.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
 			require.NoError(t, err)
 			if valuesIn != nil && valuesIn.decompressor != nil {
@@ -707,7 +709,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64, prune
 			dc.Close()
 			break
 		}
-		valuesOuts, indexOuts, historyOuts, _ := dc.staticFilesInRange(r)
+		valuesOuts, indexOuts, historyOuts := dc.staticFilesInRange(r)
 		valuesIn, indexIn, historyIn, err := dc.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
 		require.NoError(t, err)
 
@@ -978,6 +980,102 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 	require.Equal(t, 3, int(from))
 	require.Equal(t, 4, int(to))
 
+}
+
+func TestDomain_OpenFilesWithDeletions(t *testing.T) {
+	logger := log.New()
+	keyCount, txCount := uint64(4), uint64(125)
+	db, dom, data := filledDomainFixedSize(t, keyCount, txCount, 16, logger)
+	defer db.Close()
+	clear(data)
+
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	ctx := context.Background()
+
+	err := db.Update(ctx, func(tx kv.RwTx) error {
+		for step := uint64(0); step < txCount/dom.aggregationStep-1; step++ {
+			s, ns := step*dom.aggregationStep, (step+1)*dom.aggregationStep
+			c, err := dom.collate(ctx, step, s, ns, tx)
+			require.NoError(t, err)
+			sf, err := dom.buildFiles(ctx, step, c, background.NewProgressSet())
+			require.NoError(t, err)
+			dom.integrateDirtyFiles(sf, s, ns)
+			dom.reCalcVisibleFiles()
+
+			dc := dom.BeginFilesRo()
+			_, err = dc.Prune(ctx, tx, step, s, ns, math.MaxUint64, false, logEvery)
+			dc.Close()
+			require.NoError(t, err)
+		}
+		return nil
+	})
+
+	require.NoError(t, err)
+
+	run1Doms, run1Hist := make([]string, 0), make([]string, 0)
+	for i := 0; i < len(dom._visibleFiles); i++ {
+		run1Doms = append(run1Doms, dom._visibleFiles[i].src.decompressor.FileName())
+		// should be equal length
+		run1Hist = append(run1Hist, dom.History._visibleFiles[i].src.decompressor.FileName())
+	}
+
+	removedHist := make(map[string]struct{})
+	for i := len(dom.History._visibleFiles) - 1; i > 3; i-- {
+		removedHist[dom.History._visibleFiles[i].src.decompressor.FileName()] = struct{}{}
+		t.Logf("rm hist: %s\n", dom.History._visibleFiles[i].src.decompressor.FileName())
+
+		dom.History._visibleFiles[i].src.closeFilesAndRemove()
+	}
+	dom.Close()
+
+	err = dom.OpenFolder(false)
+	require.NoError(t, err)
+
+	// domain files for same range should not be available so lengths should match
+	require.Len(t, dom._visibleFiles, len(run1Doms)-len(removedHist))
+	require.Len(t, dom.History._visibleFiles, len(dom._visibleFiles))
+	require.Len(t, dom.History._visibleFiles, len(run1Hist)-len(removedHist))
+
+	for i := 0; i < len(dom._visibleFiles); i++ {
+		require.EqualValuesf(t, run1Doms[i], dom._visibleFiles[i].src.decompressor.FileName(), "kv i=%d", i)
+		require.EqualValuesf(t, run1Hist[i], dom.History._visibleFiles[i].src.decompressor.FileName(), " v i=%d", i)
+	}
+
+	danglingDomains := make(map[string]bool, len(removedHist))
+	for i := len(run1Doms) - len(removedHist); i < len(run1Doms); i++ {
+		t.Logf("dangling: %s\n", run1Doms[i])
+		danglingDomains[run1Doms[i]] = false
+	}
+
+	//dom.dirtyFiles.Walk(func(items []*filesItem) bool {
+	//	for _, item := range items {
+	//		if _, found := danglingDomains[item.decompressor.FileName()]; found {
+	//			danglingDomains[item.decompressor.FileName()] = true
+	//		}
+	//	}
+	//	return true
+	//})
+	//
+	//for f, persists := range danglingDomains {
+	//	require.True(t, persists, f)
+	//}
+
+	// check files persist on the disk
+	persistingDomains := make(map[string]bool, 0)
+	err = fs.WalkDir(os.DirFS(dom.dirs.SnapDomain), ".", func(path string, d fs.DirEntry, err error) error {
+		persistingDomains[filepath.Base(path)] = false
+		return nil
+	})
+	require.NoError(t, err)
+
+	// check all "invalid" kv files persists on disk
+	for fname := range danglingDomains {
+		_, found := persistingDomains[fname]
+		require.True(t, found, fname)
+	}
+
+	dom.Close()
 }
 
 func TestScanStaticFilesD(t *testing.T) {
@@ -1308,7 +1406,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		require.NoError(t, err)
 
 		ranges := dc.findMergeRange(txFrom, txTo)
-		vl, il, hl, _ := dc.staticFilesInRange(ranges)
+		vl, il, hl := dc.staticFilesInRange(ranges)
 
 		dv, di, dh, err := dc.mergeFiles(ctx, vl, il, hl, ranges, nil, ps)
 		require.NoError(t, err)
