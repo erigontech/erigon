@@ -82,7 +82,6 @@ func (r ChainSegmentInsertionResult) String() string {
 	}
 }
 
-
 type savedStateRecord struct {
 	slot uint64
 }
