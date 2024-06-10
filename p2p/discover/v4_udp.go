@@ -605,14 +605,15 @@ func (t *UDPv4) loop() {
 			return
 
 		case p := <-t.addReplyMatcher:
-			func() {
-				mutex.Lock()
-				defer mutex.Unlock()
-				p.deadline = time.Now().Add(t.replyTimeout)
-				listUpdate <- plist.PushBack(p)
-			}()
+			mutex.Lock()
+			p.deadline = time.Now().Add(t.replyTimeout)
+			back := plist.PushBack(p)
+			mutex.Unlock()
+			listUpdate <- back
 
 		case r := <-t.gotreply:
+			var removals []*list.Element
+
 			func() {
 				mutex.Lock()
 				defer mutex.Unlock()
@@ -628,7 +629,7 @@ func (t *UDPv4) loop() {
 						if requestDone {
 							p.errc <- nil
 							plist.Remove(el)
-							listUpdate <- el
+							removals = append(removals, el)
 						}
 						// Reset the continuous timeout counter (time drift detection)
 						contTimeouts = 0
@@ -636,6 +637,10 @@ func (t *UDPv4) loop() {
 				}
 				r.matched <- matched
 			}()
+
+			for _, el := range removals {
+				listUpdate <- el
+			}
 
 		case key := <-t.gotkey:
 			go func() {
