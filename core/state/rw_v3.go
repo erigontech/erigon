@@ -226,7 +226,7 @@ var (
 	mxState3Unwind        = metrics.GetOrCreateSummary("state3_unwind")
 )
 
-func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwindTo uint64, accumulator *shards.Accumulator, changeset *state.StateChangeSet) error {
+func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwindTo uint64, accumulator *shards.Accumulator, changeset *[kv.DomainLen][]state.DomainEntryDiff) error {
 	unwindToLimit := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).CanUnwindDomainsToTxNum()
 	if txUnwindTo < unwindToLimit {
 		return fmt.Errorf("can't unwind to txNum=%d, limit is %d", txUnwindTo, unwindToLimit)
@@ -311,13 +311,13 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwi
 			}
 		}
 	} else {
-		accountDiffs := changeset.Diffs[kv.AccountsDomain].GetDiffSet()
+		accountDiffs := changeset[kv.AccountsDomain]
 		for _, kv := range accountDiffs {
 			if err := stateChanges.Collect(kv.Key[:length.Addr], kv.Value); err != nil {
 				return err
 			}
 		}
-		storageDiffs := changeset.Diffs[kv.StorageDomain].GetDiffSet()
+		storageDiffs := changeset[kv.StorageDomain]
 		for _, kv := range storageDiffs {
 			if err := stateChanges.Collect(kv.Key, kv.Value); err != nil {
 				return err

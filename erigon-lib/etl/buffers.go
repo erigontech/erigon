@@ -45,6 +45,7 @@ const (
 var BufferOptimalSize = 256 * datasize.MB /*  var because we want to sometimes change it from tests or command-line flags */
 
 type Buffer interface {
+	// Put does copy `k` and `v`
 	Put(k, v []byte)
 	Get(i int, keyBuf, valBuf []byte) ([]byte, []byte)
 	Len() int
