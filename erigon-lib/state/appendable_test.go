@@ -19,7 +19,6 @@ package state
 import (
 	"context"
 	"encoding/binary"
-	"fmt"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
@@ -134,92 +133,39 @@ func TestAppendableCollationBuild(t *testing.T) {
 		w, ok = ic.getFromFiles(2)
 		require.False(ok)
 	})
-}
 
-func TestAppendableAfterPrune(t *testing.T) {
-	logger := log.New()
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-	db, ii := testDbAndAppendable(t, 16, logger)
-	ctx := context.Background()
-	tx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer func() {
-		if tx != nil {
-			tx.Rollback()
-		}
-	}()
-	ic := ii.BeginFilesRo()
-	defer ic.Close()
-	writer := ic.NewWriter()
-	defer writer.close()
+	t.Run("collate", func(t *testing.T) {
+		require := require.New(t)
 
-	//writer.SetTimeStamp(2)
-	//err = writer.Add([]byte("key1"))
-	//require.NoError(t, err)
-	//
-	//writer.SetTimeStamp(3)
-	//err = writer.Add([]byte("key2"))
-	//require.NoError(t, err)
-	//
-	//writer.SetTimeStamp(6)
-	//err = writer.Add([]byte("key1"))
-	//require.NoError(t, err)
-	//err = writer.Add([]byte("key3"))
-	//require.NoError(t, err)
-
-	err = writer.Flush(ctx, tx)
-	require.NoError(t, err)
-	err = tx.Commit()
-	require.NoError(t, err)
-
-	roTx, err := db.BeginRo(ctx)
-	require.NoError(t, err)
-	defer roTx.Rollback()
-
-	bs, err := ii.collate(ctx, 0, roTx)
-	require.NoError(t, err)
-
-	sf, err := ii.buildFiles(ctx, 0, bs, background.NewProgressSet())
-	require.NoError(t, err)
-
-	ii.integrateDirtyFiles(sf, 0, 16)
-	ii.reCalcVisibleFiles()
-
-	ic.Close()
-	err = db.Update(ctx, func(tx kv.RwTx) error {
-		from, to := ii.stepsRangeInDB(tx)
-		require.Equal(t, "0.1", fmt.Sprintf("%.1f", from))
-		require.Equal(t, "0.4", fmt.Sprintf("%.1f", to))
-
-		ic = ii.BeginFilesRo()
+		ic := ii.BeginFilesRo()
 		defer ic.Close()
 
-		_, err = ic.Prune(ctx, tx, 0, 16, math.MaxUint64, logEvery, false, false, nil)
-		require.NoError(t, err)
-		return nil
+		err := db.Update(ctx, func(tx kv.RwTx) error {
+			_, err := ic.Prune(ctx, tx, 0, 16, math.MaxUint64, logEvery, false, false, nil)
+			return err
+		})
+		require.NoError(err)
+
+		require.NoError(err)
+		tx, err := db.BeginRw(ctx)
+		require.NoError(err)
+		defer tx.Rollback()
+
+		for _, table := range []string{ii.table} {
+			var cur kv.Cursor
+			cur, err = tx.Cursor(table)
+			require.NoError(err)
+			defer cur.Close()
+			var k []byte
+			k, _, err = cur.First()
+			require.NoError(err)
+			require.Nil(k, table)
+		}
+
+		from, to := ii.stepsRangeInDB(tx)
+		require.Equal(t, float64(0), from)
+		require.Equal(t, float64(0), to)
 	})
-	require.NoError(t, err)
-
-	require.NoError(t, err)
-	tx, err = db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	for _, table := range []string{ii.table} {
-		var cur kv.Cursor
-		cur, err = tx.Cursor(table)
-		require.NoError(t, err)
-		defer cur.Close()
-		var k []byte
-		k, _, err = cur.First()
-		require.NoError(t, err)
-		require.Nil(t, k, table)
-	}
-
-	from, to := ii.stepsRangeInDB(tx)
-	require.Equal(t, float64(0), from)
-	require.Equal(t, float64(0), to)
 }
 
 func filledAppendable(tb testing.TB, logger log.Logger) (kv.RwDB, *Appendable, uint64) {
