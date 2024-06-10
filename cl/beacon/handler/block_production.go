@@ -227,8 +227,13 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		consensusValue,
 	)
 
-	return newBeaconResponse(block).
-		With("execution_payload_blinded", block.IsBlinded()).
+	var resp *beaconhttp.BeaconResponse
+	if block.IsBlinded() {
+		resp = newBeaconResponse(block.ToBlinded())
+	} else {
+		resp = newBeaconResponse(block.ToExecution())
+	}
+	return resp.With("execution_payload_blinded", block.IsBlinded()).
 		With("execution_payload_value", strconv.FormatUint(block.GetExecutionValue().Uint64(), 10)).
 		With("consensus_block_value", strconv.FormatUint(consensusValue, 10)), nil
 }

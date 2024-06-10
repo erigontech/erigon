@@ -19,6 +19,26 @@ type BlindOrExecutionBeaconBlock struct {
 	ExecutionValue    *big.Int           `json:"-"`
 }
 
+func (b *BlindOrExecutionBeaconBlock) ToBlinded() *BlindedBeaconBlock {
+	return &BlindedBeaconBlock{
+		Slot:          b.Slot,
+		ProposerIndex: b.ProposerIndex,
+		ParentRoot:    b.ParentRoot,
+		StateRoot:     b.StateRoot,
+		Body:          b.BlindedBeaconBody,
+	}
+}
+
+func (b *BlindOrExecutionBeaconBlock) ToExecution() *BeaconBlock {
+	return &BeaconBlock{
+		Slot:          b.Slot,
+		ProposerIndex: b.ProposerIndex,
+		ParentRoot:    b.ParentRoot,
+		StateRoot:     b.StateRoot,
+		Body:          b.BeaconBody,
+	}
+}
+
 func (b *BlindOrExecutionBeaconBlock) MarshalJSON() ([]byte, error) {
 	// if b.BeaconBody != nil, then marshal BeaconBody
 	// if b.BlindedBeaconBody != nil, then marshal BlindedBeaconBody
