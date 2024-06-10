@@ -195,14 +195,11 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 				Slot:          block.Slot,
 				ProposerIndex: block.ProposerIndex,
 				ParentRoot:    block.ParentRoot,
+				StateRoot:     block.StateRoot,
 				Body:          block.BeaconBody,
 			},
 		}
 		if err := machine.ProcessBlock(transition.DefaultMachine, baseState, signedBeaconBlock); err != nil {
-			return nil, err
-		}
-		block.StateRoot, err = baseState.HashSSZ()
-		if err != nil {
 			return nil, err
 		}
 	}
@@ -271,6 +268,7 @@ func (a *ApiHandler) produceBlock(
 
 	if localErr != nil {
 		// if we failed to locally produce the beacon body, we should not proceed with the block production
+		log.Error("Failed to produce beacon body", "err", localErr)
 		return nil, localErr
 	}
 	// prepare basic block
