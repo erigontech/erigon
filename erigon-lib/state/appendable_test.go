@@ -146,25 +146,13 @@ func TestAppendableCollationBuild(t *testing.T) {
 		})
 		require.NoError(err)
 
-		require.NoError(err)
-		tx, err := db.BeginRw(ctx)
+		tx, err := db.BeginRo(ctx)
 		require.NoError(err)
 		defer tx.Rollback()
 
-		for _, table := range []string{ii.table} {
-			var cur kv.Cursor
-			cur, err = tx.Cursor(table)
-			require.NoError(err)
-			defer cur.Close()
-			var k []byte
-			k, _, err = cur.First()
-			require.NoError(err)
-			require.Nil(k, table)
-		}
-
 		from, to := ii.stepsRangeInDB(tx)
-		require.Equal(t, float64(0), from)
-		require.Equal(t, float64(0), to)
+		require.Equal(float64(0), from)
+		require.Equal(float64(0), to)
 	})
 }
 

@@ -649,24 +649,65 @@ func (tx *AppendableRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 		limit = math.MaxUint64
 	}
 
-	fk := tx.fk
-
-	it, err := fk.cfg.iters.TxnIdsOfCanonicalBlocks(rwTx, int(txFrom), int(txTo), order.Asc, -1)
+	fromID, toID, ok, err := tx.txNum2id(rwTx, txFrom, txTo)
 	if err != nil {
-		return nil, fmt.Errorf("collate %s: %w", fk.filenameBase, err)
+		return nil, err
 	}
-	defer it.Close()
-
-	for it.HasNext() {
-		k, err := it.Next()
+	if !ok {
+		panic(ok)
+	}
+	// [from:to)
+	r, err := rwTx.Range(tx.fk.table, hexutility.EncodeTs(fromID), hexutility.EncodeTs(toID))
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	for r.HasNext() {
+		k, _, err := r.Next()
 		if err != nil {
-			return nil, fmt.Errorf("collate %s: %w", fk.filenameBase, err)
+			return nil, err
 		}
-		if err := tx.Delete(k, rwTx); err != nil {
+		if err = rwTx.Delete(tx.fk.table, k); err != nil {
 			return nil, err
 		}
 	}
+
+	fmt.Printf("prune: %d-%d\n", fromID, toID)
+	//if err := tx.Delete(k, rwTx); err != nil {
+	//	return nil, err
+	//}
 	return stat, err
+}
+func (tx *AppendableRoTx) txNum2id(rwTx kv.RwTx, txFrom, txTo uint64) (fromID, toID uint64, ok bool, err error) {
+	var found1, found2 bool
+	it, err := tx.fk.cfg.iters.TxnIdsOfCanonicalBlocks(rwTx, int(txFrom), -1, order.Asc, 1)
+	if err != nil {
+		return fromID, toID, ok, err
+	}
+	defer it.Close()
+	if it.HasNext() {
+		fromID, err = it.Next()
+		if err != nil {
+			return fromID, toID, ok, err
+		}
+		found1 = true
+	}
+	it.Close()
+
+	it, err = tx.fk.cfg.iters.TxnIdsOfCanonicalBlocks(rwTx, int(txTo), -1, order.Asc, 1)
+	if err != nil {
+		return fromID, toID, ok, err
+	}
+	defer it.Close()
+	if it.HasNext() {
+		toID, err = it.Next()
+		if err != nil {
+			return fromID, toID, ok, err
+		}
+		found2 = true
+	}
+
+	return fromID, toID, found1 && found2, nil
 }
 
 func (tx *AppendableRoTx) DebugEFAllValuesAreInRange(ctx context.Context) error {
