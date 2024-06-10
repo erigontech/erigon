@@ -40,6 +40,8 @@ func (m *SyncMap[K, T]) Do(k K, fn func(T, bool) (T, bool)) (after T, ok bool) {
 	nv, save := fn(val, ok)
 	if save {
 		m.m[k] = nv
+	} else {
+		delete(m.m, k)
 	}
 	return nv, ok
 }

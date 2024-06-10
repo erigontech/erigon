@@ -73,6 +73,9 @@ func (a *LogsFilterAggregator) insertLogsFilter(sender Sub[*types2.Log]) (LogsSu
 // removeLogsFilter removes a log filter identified by filterId from the LogsFilterAggregator.
 // It closes the filter and subtracts its addresses and topics from the aggregated filter.
 func (a *LogsFilterAggregator) removeLogsFilter(filterId LogsSubID) bool {
+	a.logsFilterLock.Lock()
+	defer a.logsFilterLock.Unlock()
+
 	filter, ok := a.logsFilters.Get(filterId)
 	if !ok {
 		return false
@@ -101,14 +104,12 @@ func (a *LogsFilterAggregator) createFilterRequest() *remote.LogsFilterRequest {
 // It decrements the counters for each address and topic in the aggregated filter by the corresponding counts in the
 // provided LogsFilter. If the count for any address or topic reaches zero, it is removed from the aggregated filter.
 func (a *LogsFilterAggregator) subtractLogFilters(f *LogsFilter) {
-	a.logsFilterLock.Lock()
-	defer a.logsFilterLock.Unlock()
 	a.aggLogsFilter.allAddrs -= f.allAddrs
 	f.addrs.Range(func(addr libcommon.Address, count int) error {
 		a.aggLogsFilter.addrs.Do(addr, func(value int, exists bool) (int, bool) {
 			if exists {
 				newValue := value - count
-				if newValue == 0 {
+				if newValue <= 0 {
 					return 0, false
 				}
 				return newValue, true
@@ -122,7 +123,7 @@ func (a *LogsFilterAggregator) subtractLogFilters(f *LogsFilter) {
 		a.aggLogsFilter.topics.Do(topic, func(value int, exists bool) (int, bool) {
 			if exists {
 				newValue := value - count
-				if newValue == 0 {
+				if newValue <= 0 {
 					return 0, false
 				}
 				return newValue, true

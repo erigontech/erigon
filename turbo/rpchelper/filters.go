@@ -401,32 +401,43 @@ func (ff *Filters) UnsubscribePendingTxs(id PendingTxsSubID) bool {
 
 // SubscribeLogs subscribes to logs using the specified filter criteria and returns a channel to receive the logs
 // and a subscription ID to manage the subscription.
-func (ff *Filters) SubscribeLogs(size int, crit filters.FilterCriteria) (<-chan *types.Log, LogsSubID) {
+func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria) (<-chan *types.Log, LogsSubID) {
 	sub := newChanSub[*types.Log](size)
 	id, f := ff.logsSubs.insertLogsFilter(sub)
+
+	// Initialize address and topic maps
 	f.addrs = concurrent.NewSyncMap[libcommon.Address, int]()
-	if len(crit.Addresses) == 0 {
+	f.topics = concurrent.NewSyncMap[libcommon.Hash, int]()
+
+	// Handle addresses
+	if len(criteria.Addresses) == 0 {
+		// If no addresses are specified, it means all addresses should be included
 		f.allAddrs = 1
 	} else {
-		for _, addr := range crit.Addresses {
+		for _, addr := range criteria.Addresses {
 			f.addrs.Put(addr, 1)
 		}
 	}
-	f.topics = concurrent.NewSyncMap[libcommon.Hash, int]()
-	if len(crit.Topics) == 0 {
+
+	// Handle topics
+	if len(criteria.Topics) == 0 {
+		// If no topics are specified, it means all topics should be included
 		f.allTopics = 1
 	} else {
-		for _, topics := range crit.Topics {
+		for _, topics := range criteria.Topics {
 			for _, topic := range topics {
 				f.topics.Put(topic, 1)
 			}
 		}
 	}
-	f.topicsOriginal = crit.Topics
+
+	// Store original topics for reference
+	f.topicsOriginal = criteria.Topics
+
+	// Add the filter to the list of log filters
 	ff.logsSubs.addLogsFilters(f)
 
-	// if any filter in the aggregate needs all addresses or all topics then the global log subscription needs to
-	// allow all addresses or topics through
+	// Create a filter request based on the aggregated filters
 	lfr := ff.logsSubs.createFilterRequest()
 	addresses, topics := ff.logsSubs.getAggMaps()
 	for addr := range addresses {
