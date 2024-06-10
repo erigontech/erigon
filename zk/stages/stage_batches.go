@@ -77,7 +77,6 @@ type DatastreamClient interface {
 	ReadAllEntriesToChannel(bookmark *types.BookmarkProto) error
 	GetL2BlockChan() chan types.FullL2Block
 	GetBatchStartChan() chan types.BatchStart
-	GetErrChan() chan error
 	GetGerUpdatesChan() chan types.GerUpdate
 	GetLastWrittenTimeAtomic() *atomic.Int64
 	GetStreamingAtomic() *atomic.Bool
@@ -155,23 +154,28 @@ func SpawnStageBatches(
 	}
 
 	startSyncTime := time.Now()
+	stopChan := make(chan struct{}, 1)
 	// start routine to download blocks and push them in a channel
 	if !cfg.dsClient.GetStreamingAtomic().Load() {
 		log.Info(fmt.Sprintf("[%s] Starting stream", logPrefix), "startBlock", stageProgressBlockNo)
+		// this will download all blocks from datastream and push them in a channel
+		// if no error, break, else continue trying to get them
+		// Create bookmark
+		var bookmark *types.BookmarkProto
+		if stageProgressBlockNo == 0 {
+			bookmark = types.NewBookmarkProto(0, datastream.BookmarkType_BOOKMARK_TYPE_BATCH)
+		} else {
+			bookmark = types.NewBookmarkProto(stageProgressBlockNo, datastream.BookmarkType_BOOKMARK_TYPE_L2_BLOCK)
+		}
+
 		go func() {
 			log.Info(fmt.Sprintf("[%s] Started downloading L2Blocks routine", logPrefix))
 			defer log.Info(fmt.Sprintf("[%s] Finished downloading L2Blocks routine", logPrefix))
 
-			// this will download all blocks from datastream and push them in a channel
-			// if no error, break, else continue trying to get them
-			// Create bookmark
-			var bookmark *types.BookmarkProto
-			if stageProgressBlockNo == 0 {
-				bookmark = types.NewBookmarkProto(0, datastream.BookmarkType_BOOKMARK_TYPE_BATCH)
-			} else {
-				bookmark = types.NewBookmarkProto(stageProgressBlockNo, datastream.BookmarkType_BOOKMARK_TYPE_L2_BLOCK)
+			if err := cfg.dsClient.ReadAllEntriesToChannel(bookmark); err != nil {
+				log.Error(fmt.Sprintf("[%s] Error downloading blocks from datastream", logPrefix), "error", err)
+				stopChan <- struct{}{}
 			}
-			cfg.dsClient.ReadAllEntriesToChannel(bookmark)
 		}()
 	}
 
@@ -217,7 +221,6 @@ func SpawnStageBatches(
 	gerUpdateChan := cfg.dsClient.GetGerUpdatesChan()
 	lastWrittenTimeAtomic := cfg.dsClient.GetLastWrittenTimeAtomic()
 	streamingAtomic := cfg.dsClient.GetStreamingAtomic()
-	errChan := cfg.dsClient.GetErrChan()
 
 LOOP:
 	for {
@@ -227,6 +230,8 @@ LOOP:
 		// if download routine finished, should continue to read from channel until it's empty
 		// if both download routine stopped and channel empty - stop loop
 		select {
+		case <-stopChan:
+			break LOOP
 		case batchStart := <-batchStartChan:
 			// do nothing for now.  We have a channel read race so handle fork/batch related changes in the handling
 			// of the l2 block below
@@ -357,10 +362,6 @@ LOOP:
 			if err := hermezDb.WriteBatchGlobalExitRoot(gerUpdate.BatchNumber, gerUpdate); err != nil {
 				return fmt.Errorf("write batch global exit root error: %v", err)
 			}
-		case err := <-errChan:
-			if err != nil {
-				return fmt.Errorf("l2blocks download routine error: %v", err)
-			}
 		case <-ctx.Done():
 			log.Warn(fmt.Sprintf("[%s] Context done", logPrefix))
 			endLoop = true
@@ -386,6 +387,11 @@ LOOP:
 					// 	endLoop = true
 					// 	break
 					// }
+
+					if !cfg.dsClient.GetStreamingAtomic().Load() {
+						log.Info(fmt.Sprintf("[%s] Datastream disconnected. Ending the stage.", logPrefix))
+						break LOOP
+					}
 
 					log.Info(fmt.Sprintf("[%s] Waiting for at least one new block.", logPrefix))
 					startTime = time.Now()

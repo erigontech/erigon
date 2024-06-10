@@ -42,7 +42,6 @@ type StreamClient struct {
 	batchStartChan chan types.BatchStart
 	l2BlockChan    chan types.FullL2Block
 	gerUpdatesChan chan types.GerUpdate // NB: unused from etrog onwards (forkid 7)
-	errChan        chan error
 
 	// keeps track of the latest fork from the stream to assign to l2 blocks
 	currentFork uint64
@@ -72,15 +71,11 @@ func NewClient(ctx context.Context, server string, version int, checkTimeout tim
 		batchStartChan: make(chan types.BatchStart, 1000),
 		l2BlockChan:    make(chan types.FullL2Block, 100000),
 		gerUpdatesChan: make(chan types.GerUpdate, 1000),
-		errChan:        make(chan error),
 	}
 
 	return c
 }
 
-func (c *StreamClient) GetErrChan() chan error {
-	return c.errChan
-}
 func (c *StreamClient) GetBatchStartChan() chan types.BatchStart {
 	return c.batchStartChan
 }
@@ -184,30 +179,40 @@ func (c *StreamClient) ReadEntries(bookmark *types.BookmarkProto, l2BlocksAmount
 // reads entries to the end of the stream
 // at end will wait for new entries to arrive
 func (c *StreamClient) ReadAllEntriesToChannel(bookmark *types.BookmarkProto) error {
+	c.streaming.Store(true)
+	defer c.streaming.Store(false)
+
 	// if connection is lost, try to reconnect
 	// this occurs when all 5 attempts failed on previous run
 	if c.conn == nil {
 		if err := c.tryReConnect(); err != nil {
-			c.errChan <- err
 			return fmt.Errorf("failed to reconnect the datastream client: %W", err)
 		}
 	}
 
 	protoBookmark, err := bookmark.Marshal()
 	if err != nil {
-		c.errChan <- fmt.Errorf("failed to marshal bookmark: %v", err)
 		return err
 	}
 
 	// send start command
 	if err := c.initiateDownloadBookmark(protoBookmark); err != nil {
-		c.errChan <- err
 		return err
 	}
 
 	if err := c.readAllFullL2BlocksToChannel(); err != nil {
 		err2 := fmt.Errorf("%s read full L2 blocks error: %v", c.id, err)
-		c.errChan <- err2
+
+		if c.conn != nil {
+			if err2 := c.conn.Close(); err2 != nil {
+				log.Error("failed to close connection after error", "original-error", err, "new-error", err2)
+			}
+			c.conn = nil
+		}
+
+		// reset the channels as there could be data ahead of the bookmark we want to track here.
+		c.resetChannels()
+
 		return err2
 	}
 
@@ -252,6 +257,7 @@ func (c *StreamClient) afterStartCommand() error {
 // sends the parsed FullL2Blocks with transactions to a channel
 func (c *StreamClient) readAllFullL2BlocksToChannel() error {
 	var err error
+
 LOOP:
 	for {
 		select {
@@ -306,19 +312,17 @@ LOOP:
 		}
 
 		c.lastWrittenTime.Store(time.Now().UnixNano())
-		c.streaming.Store(true)
 		log.Trace("writing block to channel", "blockNumber", fullBlock.L2BlockNumber, "batchNumber", fullBlock.BatchNumber)
 		c.l2BlockChan <- *fullBlock
 	}
 
-	c.streaming.Store(false)
-	if c.conn != nil {
-		if err2 := c.conn.Close(); err2 != nil {
-			return fmt.Errorf("failed to close connection after error: %W, close error: %W", err, err2)
-		}
-		c.conn = nil
-	}
 	return err
+}
+
+func (c *StreamClient) resetChannels() {
+	c.batchStartChan = make(chan types.BatchStart, 1000)
+	c.l2BlockChan = make(chan types.FullL2Block, 100000)
+	c.gerUpdatesChan = make(chan types.GerUpdate, 1000)
 }
 
 func (c *StreamClient) tryReConnect() error {
@@ -334,11 +338,9 @@ func (c *StreamClient) tryReConnect() error {
 			time.Sleep(5 * time.Second)
 			continue
 		}
-		c.streaming.Store(true)
 		return nil
 	}
 
-	c.streaming.Store(false)
 	return err
 }
 
