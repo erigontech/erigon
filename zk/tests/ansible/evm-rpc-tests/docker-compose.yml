@@ -1,0 +1,18 @@
+version: '3'
+services:
+  ansible:
+    build: .
+    volumes:
+      - .:/ansible
+      - ./logs:/tmp/rpc-tests.d  # Bind mount for logs
+    environment:
+      RPC_URL: ${RPC_URL}
+      PRIVATE_KEY: ${PRIVATE_KEY}
+      ETH_ADDRESS: ${ETH_ADDRESS}
+      LOG_FILE: /tmp/rpc-tests.d/evm-rpc-tests.log
+      WORK_DIR: /tmp/rpc-tests.d
+      MAX_BLOCK_SIZE: "25000000"
+      LEGACY_FLAG: "--legacy"
+      BLOCK_INTERVAL: "12"
+    working_dir: /ansible
+    entrypoint: ["/usr/local/bin/run_playbooks.sh"]

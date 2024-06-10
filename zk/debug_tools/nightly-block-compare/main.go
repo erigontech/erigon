@@ -9,7 +9,6 @@ import (
 	"math/big"
 	"net/http"
 	"os"
-	"sync"
 
 	"github.com/google/go-cmp/cmp"
 	"io"
@@ -127,43 +126,67 @@ func getClientVersion(url string) (string, error) {
 	return clientVersion, nil
 }
 
-func compareBlocks(erigonURL, zkevmURL, sequencerURL string, blockNumber *big.Int, compareMode string, diffs chan<- string, wg *sync.WaitGroup) {
-	defer wg.Done()
-
+func compareBlocks(erigonURL, zkevmURL, sequencerURL string, blockNumber *big.Int, compareMode string) (string, error) {
 	block1, err := getBlockByNumber(erigonURL, blockNumber)
 	if err != nil {
-		log.Printf("Error getting block %d from Erigon node: %v", blockNumber, err)
-		return
+		return "", fmt.Errorf("Error getting block %d from Erigon node: %v", blockNumber, err)
 	}
 
 	block2, err := getBlockByNumber(zkevmURL, blockNumber)
 	if err != nil {
-		log.Printf("Error getting block %d from zkEVM node: %v", blockNumber, err)
-		return
+		return "", fmt.Errorf("Error getting block %d from zkEVM node: %v", blockNumber, err)
 	}
 
 	block3, err := getBlockByNumber(sequencerURL, blockNumber)
 	if err != nil {
-		log.Printf("Error getting block %d from Sequencer node: %v", blockNumber, err)
-		return
+		return "", fmt.Errorf("Error getting block %d from Sequencer node: %v", blockNumber, err)
 	}
 
 	if compareMode == "full" {
 		if !cmp.Equal(block1, block2) || !cmp.Equal(block1, block3) || !cmp.Equal(block2, block3) {
-			diff := fmt.Sprintf("Mismatch at block %d:\nErigon vs zkEVM vs Sequencer:\n%s", blockNumber,
-				cmp.Diff(block1, block2)+cmp.Diff(block1, block3)+cmp.Diff(block2, block3))
-			diffs <- diff
+			matching := ""
+			nonMatching := ""
+			if cmp.Equal(block1, block2) {
+				matching = "Erigon and zkEVM"
+				nonMatching = "Sequencer"
+			} else if cmp.Equal(block1, block3) {
+				matching = "Erigon and Sequencer"
+				nonMatching = "zkEVM"
+			} else if cmp.Equal(block2, block3) {
+				matching = "zkEVM and Sequencer"
+				nonMatching = "Erigon"
+			} else {
+				matching = "None"
+				nonMatching = "All nodes are different"
+			}
+			return fmt.Sprintf("Mismatch at block %d:\nMatching nodes: %s\nNon-matching nodes: %s\nErigon vs zkEVM:\n%s\nErigon vs Sequencer:\n%s\nzkEVM vs Sequencer:\n%s",
+				blockNumber, matching, nonMatching, cmp.Diff(block1, block2), cmp.Diff(block1, block3), cmp.Diff(block2, block3)), nil
 		}
 	} else {
 		hash1, hash2, hash3 := block1["hash"].(string), block2["hash"].(string), block3["hash"].(string)
 		stateRoot1, stateRoot2, stateRoot3 := block1["stateRoot"].(string), block2["stateRoot"].(string), block3["stateRoot"].(string)
 
 		if hash1 != hash2 || hash1 != hash3 || stateRoot1 != stateRoot2 || stateRoot1 != stateRoot3 {
-			diff := fmt.Sprintf("Mismatch at block %d:\nErigon vs zkEVM vs Sequencer:\nHash:\n%s vs %s vs %s\nStateRoot:\n%s vs %s vs %s",
-				blockNumber, hash1, hash2, hash3, stateRoot1, stateRoot2, stateRoot3)
-			diffs <- diff
+			matching := ""
+			nonMatching := ""
+			if hash1 == hash2 && stateRoot1 == stateRoot2 {
+				matching = "Erigon and zkEVM"
+				nonMatching = "Sequencer"
+			} else if hash1 == hash3 && stateRoot1 == stateRoot3 {
+				matching = "Erigon and Sequencer"
+				nonMatching = "zkEVM"
+			} else if hash2 == hash3 && stateRoot2 == stateRoot3 {
+				matching = "zkEVM and Sequencer"
+				nonMatching = "Erigon"
+			} else {
+				matching = "None"
+				nonMatching = "All nodes are different"
+			}
+			return fmt.Sprintf("Mismatch at block %d:\nMatching nodes: %s\nNon-matching nodes: %s\nErigon vs zkEVM:\nHash: %s vs %s\nStateRoot: %s vs %s\nErigon vs Sequencer:\nHash: %s vs %s\nStateRoot: %s vs %s\nzkEVM vs Sequencer:\nHash: %s vs %s\nStateRoot: %s vs %s",
+				blockNumber, matching, nonMatching, hash1, hash2, stateRoot1, stateRoot2, hash1, hash3, stateRoot1, stateRoot3, hash2, hash3, stateRoot2, stateRoot3), nil
 		}
 	}
+	return "", nil
 }
 
 func main() {
@@ -222,7 +245,6 @@ func main() {
 
 	log.Printf("Checking %d blocks\n", *numBlocks)
 
-	// sequencer as 'reference block height'
 	if erigonLatestBlock != nil && new(big.Int).Abs(new(big.Int).Sub(erigonLatestBlock, sequencerLatestBlock)).Cmp(big.NewInt(int64(*blockHeightDiff))) > 0 {
 		log.Printf("Warning: Erigon node is more than %d blocks apart from Sequencer: Erigon at %d, Sequencer at %d", *blockHeightDiff, erigonLatestBlock, sequencerLatestBlock)
 	}
@@ -246,25 +268,28 @@ func main() {
 		log.Fatalf("Failed to get latest block number from both Erigon and zkEVM nodes")
 	}
 
-	var wg sync.WaitGroup
-	diffs := make(chan string, *numBlocks)
 	for i := 0; i < *numBlocks; i++ {
 		blockNumber := new(big.Int).Sub(startBlock, big.NewInt(int64(i)))
 		if erigonLatestBlock != nil && zkevmLatestBlock != nil {
-			wg.Add(1)
-			go compareBlocks(*erigonURL, *zkevmURL, *sequencerURL, blockNumber, *compareMode, diffs, &wg)
+			diff, err := compareBlocks(*erigonURL, *zkevmURL, *sequencerURL, blockNumber, *compareMode)
+			if err != nil {
+				log.Println(err)
+				os.Exit(1)
+			}
+			if diff != "" {
+				log.Println(diff)
+				os.Exit(1)
+			}
 		}
 	}
-	wg.Wait()
-	close(diffs)
 
-	var foundDiffs bool
-	for diff := range diffs {
-		foundDiffs = true
-		log.Println(diff)
+	if erigonLatestBlock == nil {
+		log.Println("Erigon node was down during the check")
+		os.Exit(1)
 	}
 
-	if foundDiffs {
+	if zkevmLatestBlock == nil {
+		log.Println("zkEVM node was down during the check")
 		os.Exit(1)
 	}
 
