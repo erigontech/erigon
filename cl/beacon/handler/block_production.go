@@ -280,10 +280,14 @@ func (a *ApiHandler) produceBlock(
 	if err != nil {
 		return nil, err
 	}
+	baseBlockRoot, err := baseBlock.HashSSZ()
+	if err != nil {
+		return nil, err
+	}
 	block := &cltypes.BlindOrExecutionBeaconBlock{
 		Slot:          targetSlot,
 		ProposerIndex: proposerIndex,
-		ParentRoot:    baseBlock.StateRoot,
+		ParentRoot:    baseBlockRoot,
 		StateRoot:     stateRoot,
 	}
 	if !a.routerCfg.Builder || builderErr != nil {
