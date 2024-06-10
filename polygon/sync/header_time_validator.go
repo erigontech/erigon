@@ -6,6 +6,7 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
+	"github.com/ledgerwatch/log/v3"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -57,7 +58,7 @@ func NewHeaderTimeValidator(
 }
 
 func (htv *headerTimeValidator) makeValidatorSet(headerNum uint64) validatorSetInterface {
-	if htv.validatorSetFactory == nil {
+	if htv.spanFetcher == nil {
 		span := htv.spans.SpanAt(headerNum)
 		if span == nil {
 			return nil
@@ -69,6 +70,7 @@ func (htv *headerTimeValidator) makeValidatorSet(headerNum uint64) validatorSetI
 	if err != nil {
 		return nil
 	}
+	log.Warn("span for block number", "blockNum", headerNum, "span", span)
 	return valset.NewValidatorSet(span.ValidatorSet.Validators)
 }
 
