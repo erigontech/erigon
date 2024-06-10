@@ -116,7 +116,7 @@ func TestAppendableCollationBuild(t *testing.T) {
 
 	mergeAppendable(t, db, ii, txs)
 
-	t.Run("collate", func(t *testing.T) {
+	t.Run("read after collate", func(t *testing.T) {
 		require := require.New(t)
 
 		ic := ii.BeginFilesRo()
@@ -134,7 +134,7 @@ func TestAppendableCollationBuild(t *testing.T) {
 		require.False(ok)
 	})
 
-	t.Run("collate", func(t *testing.T) {
+	t.Run("read after prune", func(t *testing.T) {
 		require := require.New(t)
 
 		ic := ii.BeginFilesRo()
