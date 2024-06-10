@@ -60,7 +60,7 @@ func (b *Bridge) Run(ctx context.Context, startTime uint64) error {
 	if err != nil {
 		return err
 	}
-	b.lastProcessedEventID = id - 1
+	b.lastProcessedEventID = id + 1
 
 	// start syncing
 	b.log.Warn(bridgeLogPrefix("Bridge is running"), "lastID", b.lastProcessedEventID)
