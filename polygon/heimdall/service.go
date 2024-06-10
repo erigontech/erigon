@@ -153,7 +153,7 @@ func (s *service) FetchSpanAt(ctx context.Context, blockNum uint64) (*Span, erro
 			return nil, err
 		}
 
-		if blockNum >= span.StartBlock && blockNum < span.EndBlock {
+		if blockNum >= span.StartBlock && blockNum <= span.EndBlock {
 			return span, nil
 		}
 
