@@ -101,6 +101,7 @@ func (f *entityFetcherImpl[TEntity]) FetchAllEntities(ctx context.Context) ([]TE
 	//	and also remove sorting we do after fetching
 
 	var entities []TEntity
+	checkpointId := uint64(1)
 
 	fetchStartTime := time.Now()
 	progressLogTicker := time.NewTicker(30 * time.Second)
@@ -116,11 +117,9 @@ func (f *entityFetcherImpl[TEntity]) FetchAllEntities(ctx context.Context) ([]TE
 		}
 
 		for _, entity := range entitiesPage {
-			if entity.RawId() == 0 {
-				// TODO use workaround from heimdall.Heimdall FetchCheckpointsFromBlock
-				//      to set entity id or fix heimdall API to return "id" as part of json
-				panic("unexpected 0 id for entity - pending fix")
-			}
+			entity.SetRawId(checkpointId)
+			checkpointId++
+
 			entities = append(entities, entity)
 		}
 

@@ -21,6 +21,10 @@ func (s *Span) RawId() uint64 {
 	return uint64(s.Id)
 }
 
+func (s *Span) SetRawId(id uint64) {
+	return
+}
+
 func (s *Span) BlockNumRange() ClosedRange {
 	return ClosedRange{
 		Start: s.StartBlock,

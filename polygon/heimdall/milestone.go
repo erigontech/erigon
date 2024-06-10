@@ -25,6 +25,10 @@ func (m *Milestone) RawId() uint64 {
 	return uint64(m.Id)
 }
 
+func (m *Milestone) SetRawId(id uint64) {
+	return
+}
+
 func (m *Milestone) StartBlock() *big.Int {
 	return m.Fields.StartBlock
 }
