@@ -17,6 +17,7 @@ import (
 //go:generate mockgen -typed=true -destination=./heimdall_mock.go -package=heimdall . Heimdall
 type Heimdall interface {
 	FetchLatestSpan(ctx context.Context) (*Span, error)
+	FetchSpanAt(ctx context.Context, blockNum uint64) (*Span, error)
 
 	FetchCheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
 	FetchMilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
@@ -345,6 +346,10 @@ func (h *heimdall) LastSpanId(ctx context.Context) (SpanId, bool, error) {
 
 func (h *heimdall) FetchLatestSpan(ctx context.Context) (*Span, error) {
 	return h.client.FetchLatestSpan(ctx)
+}
+
+func (h *heimdall) FetchSpanAt(ctx context.Context, blockNum uint64) (*Span, error) {
+	return nil, errors.New("unsupported")
 }
 
 func (h *heimdall) FetchSpans(ctx context.Context, start SpanId, end SpanId) ([]*Span, error) {

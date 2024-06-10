@@ -230,6 +230,7 @@ func (s *Sync) Run(ctx context.Context) error {
 		return err
 	}
 
+	// THEORY: we need to get span at current tip instead of latest span
 	latestSpan, err := s.fetchLatestSpan(ctx)
 	if err != nil {
 		return err

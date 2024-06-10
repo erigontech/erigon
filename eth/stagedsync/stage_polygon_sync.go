@@ -77,7 +77,7 @@ func NewPolygonSyncStageCfg(
 		blocksVerifier,
 		p2pService,
 		blockDownloader,
-		polygonsync.NewCanonicalChainBuilderFactory(chainConfig, borConfig, spansCache),
+		polygonsync.NewCanonicalChainBuilderFactory(chainConfig, borConfig, spansCache, nil),
 		spansCache,
 		heimdallService.FetchLatestSpan,
 		events.Events(),

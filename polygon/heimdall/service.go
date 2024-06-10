@@ -2,6 +2,7 @@ package heimdall
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
@@ -137,6 +138,30 @@ func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Spa
 func (s *service) FetchLatestSpan(ctx context.Context) (*Span, error) {
 	s.checkpointScraper.Synchronize(ctx)
 	return s.spanStore.GetLastEntity(ctx)
+}
+
+func (s *service) FetchSpanAt(ctx context.Context, blockNum uint64) (*Span, error) {
+	s.checkpointScraper.Synchronize(ctx)
+	id, ok, err := s.spanStore.GetLastEntityId(ctx)
+	if err != nil || !ok {
+		return nil, err
+	}
+
+	for {
+		span, err := s.spanStore.GetEntity(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+
+		if blockNum >= span.StartBlock && blockNum < span.EndBlock {
+			return span, nil
+		}
+
+		id--
+		if id == 0 {
+			return nil, errors.New("reached span 0 searching for block")
+		}
+	}
 }
 
 func castEntityToWaypoint[TEntity Waypoint](entity TEntity) Waypoint {
