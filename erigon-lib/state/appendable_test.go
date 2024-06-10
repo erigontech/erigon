@@ -129,7 +129,7 @@ func TestAppendableCollationBuild(t *testing.T) {
 
 		w, ok = ic.getFromFiles(1)
 		require.True(ok)
-		require.Equal(3, int(binary.BigEndian.Uint64(w)))
+		require.Equal(int(aggStep+1), int(binary.BigEndian.Uint64(w)))
 
 		w, ok = ic.getFromFiles(2)
 		require.False(ok)
@@ -369,7 +369,7 @@ func mergeAppendable(tb testing.TB, db kv.RwDB, ii *Appendable, txs uint64) {
 					outs, _ := ic.staticFilesInRange(startTxNum, endTxNum)
 					in, err := ic.mergeFiles(ctx, outs, startTxNum, endTxNum, background.NewProgressSet())
 					require.NoError(tb, err)
-					fmt.Printf("merge: %s, %d\n", in.index.FileName(), in.index.KeyCount())
+					fmt.Printf("after merge: %s, %d\n", in.index.FileName(), in.index.KeyCount())
 					ii.integrateMergedDirtyFiles(outs, in)
 					ii.reCalcVisibleFiles()
 					return false

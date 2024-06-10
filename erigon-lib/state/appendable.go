@@ -114,7 +114,7 @@ func NewAppendable(cfg AppendableCfg, aggregationStep uint64, filenameBase, tabl
 		compressWorkers: 1,
 		integrityCheck:  integrityCheck,
 		logger:          logger,
-		compression:     CompressKeys | CompressVals,
+		compression:     CompressNone, //CompressKeys | CompressVals,
 	}
 	fk.indexList = withHashMap
 	fk._visibleFiles = []ctxItem{}
@@ -373,12 +373,12 @@ func (tx *AppendableRoTx) getFromFiles(ts uint64) (v []byte, ok bool) {
 		return nil, false
 	}
 
-	fmt.Printf("alex: %d, %d, %d\n", tx.files[i].src.index.KeyCount(), tx.files[i].startTxNum, tx.files[i].endTxNum)
 	lookup := ts - tx.files[i].startTxNum
-	if tx.files[i].src.index.KeyCount() < lookup {
+	idx := tx.files[i].src.index
+	if idx.KeyCount() <= lookup {
 		return nil, false
 	}
-	offset := tx.files[i].src.index.OrdinalLookup(ts - tx.files[i].startTxNum)
+	offset := idx.OrdinalLookup(ts - tx.files[i].startTxNum)
 	g := tx.statelessGetter(i)
 	g.Reset(offset)
 	k, _ := g.Next(nil)

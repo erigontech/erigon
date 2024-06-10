@@ -1157,18 +1157,15 @@ func (tx *AppendableRoTx) mergeFiles(ctx context.Context, files []*filesItem, st
 	var word = make([]byte, 0, 4096)
 
 	for _, item := range files {
-		fmt.Printf("merge file: %s \n", item.decompressor.FileName())
 		g := NewArchiveGetter(item.decompressor.MakeGetter(), tx.fk.compression)
 		g.Reset(0)
-		if g.HasNext() {
+		for g.HasNext() {
 			word, _ = g.Next(word[:0])
-			fmt.Printf("has next: %x\n", word)
 			if err := write.AddWord(word); err != nil {
 				return nil, err
 			}
 		}
 	}
-	fmt.Printf("merge done: \n")
 	if err = write.Compress(); err != nil {
 		return nil, err
 	}
