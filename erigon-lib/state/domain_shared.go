@@ -272,10 +272,10 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 	sd.estSize = 0
 }
 
-func (sd *SharedDomains) put(domain kv.Domain, key string, prevStepBytes uint64, val []byte) {
+func (sd *SharedDomains) put(domain kv.Domain, key string, prevStep uint64, val []byte) {
 	// disable mutex - because work on parallel execution postponed after E3 release.
 	//sd.muMaps.Lock()
-	valWithPrevStep := dataWithPrevStep{data: val, prevStep: prevStepBytes}
+	valWithPrevStep := dataWithPrevStep{data: val, prevStep: prevStep}
 	if domain == kv.StorageDomain {
 		if old, ok := sd.storage.Set(key, valWithPrevStep); ok {
 			sd.estSize += len(val) - len(old.data)
