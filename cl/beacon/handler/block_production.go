@@ -132,10 +132,10 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	}
 
 	// builder boost factor controls block choice between local execution node or builder
-	var builderBoostFactor int64
+	var builderBoostFactor uint64
 	builderBoostFactorStr := r.URL.Query().Get("builder_boost_factor")
 	if builderBoostFactorStr != "" {
-		builderBoostFactor, err = strconv.ParseInt(builderBoostFactorStr, 10, 64)
+		builderBoostFactor, err = strconv.ParseUint(builderBoostFactorStr, 10, 64)
 		if err != nil {
 			return nil, beaconhttp.NewEndpointError(
 				http.StatusBadRequest,
@@ -240,7 +240,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 
 func (a *ApiHandler) produceBlock(
 	ctx context.Context,
-	boostFactor int64,
+	boostFactor uint64,
 	baseBlock *cltypes.BeaconBlock,
 	baseState *state.CachingBeaconState,
 	targetSlot uint64,
@@ -307,7 +307,7 @@ func (a *ApiHandler) produceBlock(
 	// otherwise, return a blinded block containing the builder payload header.
 	execValue := new(big.Int).SetUint64(localExecValue)
 	builderValue := builderHeader.BlockValue()
-	boostFactorBig := new(big.Int).SetInt64(boostFactor)
+	boostFactorBig := new(big.Int).SetUint64(boostFactor)
 	useLocalExec := new(big.Int).Mul(execValue, big.NewInt(100)).Cmp(new(big.Int).Mul(builderValue, boostFactorBig)) >= 0
 	if useLocalExec {
 		block.BeaconBody = beaconBody
