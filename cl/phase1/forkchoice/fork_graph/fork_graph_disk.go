@@ -63,6 +63,26 @@ const (
 	PreValidated   ChainSegmentInsertionResult = 5
 )
 
+func (r ChainSegmentInsertionResult) String() string {
+	switch r {
+	case Success:
+		return "Success"
+	case InvalidBlock:
+		return "block has invalid parent"
+	case MissingSegment:
+		return "chain missing segment"
+	case BelowAnchor:
+		return "block below anchor slot"
+	case LogisticError:
+		return "error occured"
+	case PreValidated:
+		return "already validated"
+	default:
+		return fmt.Sprintf("%d <unknown>", r)
+	}
+}
+
+
 type savedStateRecord struct {
 	slot uint64
 }
