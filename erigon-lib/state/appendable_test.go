@@ -99,8 +99,8 @@ func TestAppendableCollationBuild(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	iters := NewMockIterFactory(ctrl)
 	//see only canonical records in files
+	iters := NewMockIterFactory(ctrl)
 	iters.EXPECT().TxnIdsOfCanonicalBlocks(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(func(tx kv.Tx, txFrom, txTo int, by order.By, i3 int) (iter.U64, error) {
 			var it iter.U64 = iter.EmptyU64
@@ -345,7 +345,6 @@ func mergeAppendable(tb testing.TB, db kv.RwDB, ii *Appendable, txs uint64) {
 			require.NoError(tb, err)
 			sf, err := ii.buildFiles(ctx, step, bs, background.NewProgressSet())
 			require.NoError(tb, err)
-			fmt.Printf("build: %s, %d\n", sf.index.FileName(), sf.index.KeyCount())
 
 			ii.integrateDirtyFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
 			ii.reCalcVisibleFiles()
@@ -369,7 +368,6 @@ func mergeAppendable(tb testing.TB, db kv.RwDB, ii *Appendable, txs uint64) {
 					outs, _ := ic.staticFilesInRange(startTxNum, endTxNum)
 					in, err := ic.mergeFiles(ctx, outs, startTxNum, endTxNum, background.NewProgressSet())
 					require.NoError(tb, err)
-					fmt.Printf("after merge: %s, %d\n", in.index.FileName(), in.index.KeyCount())
 					ii.integrateMergedDirtyFiles(outs, in)
 					ii.reCalcVisibleFiles()
 					return false
