@@ -52,6 +52,7 @@ func (b *builderClient) RegisterValidator(ctx context.Context, registers []*clty
 	if err != nil {
 		log.Warn("[mev builder] httpCall error", "err", err, "payload", string(payload))
 	}
+	log.Info("[mev builder] RegisterValidator", "url", url, "payload", string(payload))
 	return err
 }
 
