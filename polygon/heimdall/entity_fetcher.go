@@ -101,7 +101,6 @@ func (f *entityFetcherImpl[TEntity]) FetchAllEntities(ctx context.Context) ([]TE
 	//	and also remove sorting we do after fetching
 
 	var entities []TEntity
-	checkpointId := uint64(1)
 
 	fetchStartTime := time.Now()
 	progressLogTicker := time.NewTicker(30 * time.Second)
@@ -117,9 +116,6 @@ func (f *entityFetcherImpl[TEntity]) FetchAllEntities(ctx context.Context) ([]TE
 		}
 
 		for _, entity := range entitiesPage {
-			entity.SetRawId(checkpointId)
-			checkpointId++
-
 			entities = append(entities, entity)
 		}
 
@@ -140,6 +136,10 @@ func (f *entityFetcherImpl[TEntity]) FetchAllEntities(ctx context.Context) ([]TE
 		n2 := e2.BlockNumRange().Start
 		return cmp.Compare(n1, n2)
 	})
+
+	for i, entity := range entities {
+		entity.SetRawId(uint64(i + 1))
+	}
 
 	f.logger.Debug(
 		heimdallLogPrefix(fmt.Sprintf("%s done", f.name)),
