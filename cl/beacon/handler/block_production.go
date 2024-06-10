@@ -195,11 +195,14 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 				Slot:          block.Slot,
 				ProposerIndex: block.ProposerIndex,
 				ParentRoot:    block.ParentRoot,
-				StateRoot:     block.StateRoot,
 				Body:          block.BeaconBody,
 			},
 		}
 		if err := machine.ProcessBlock(transition.DefaultMachine, baseState, signedBeaconBlock); err != nil {
+			return nil, err
+		}
+		block.StateRoot, err = baseState.HashSSZ()
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -272,10 +275,6 @@ func (a *ApiHandler) produceBlock(
 		return nil, localErr
 	}
 	// prepare basic block
-	stateRoot, err := baseState.HashSSZ()
-	if err != nil {
-		return nil, err
-	}
 	proposerIndex, err := baseState.GetBeaconProposerIndex()
 	if err != nil {
 		return nil, err
@@ -288,7 +287,6 @@ func (a *ApiHandler) produceBlock(
 		Slot:          targetSlot,
 		ProposerIndex: proposerIndex,
 		ParentRoot:    baseBlockRoot,
-		StateRoot:     stateRoot,
 	}
 	if !a.routerCfg.Builder || builderErr != nil {
 		// directly return the block if:
