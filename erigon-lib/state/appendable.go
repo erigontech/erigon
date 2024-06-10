@@ -662,7 +662,7 @@ func (tx *AppendableRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 		if err != nil {
 			return nil, fmt.Errorf("collate %s: %w", fk.filenameBase, err)
 		}
-		if err := rwTx.Delete(fk.table, hexutility.EncodeTs(k)); err != nil {
+		if err := tx.Delete(k, rwTx); err != nil {
 			return nil, err
 		}
 	}
