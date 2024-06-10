@@ -51,7 +51,7 @@ import (
 var execStepsInDB = metrics.NewGauge(`exec_steps_in_db`) //nolint
 var execRepeats = metrics.NewCounter(`exec_repeats`)     //nolint
 var execTriggers = metrics.NewCounter(`exec_triggers`)   //nolint
-const changesetBlockRange = 256                          // Generate changeset only if execution of blocks <= changesetBlockRange
+const changesetBlockRange = 1_000                        // Generate changeset only if execution of blocks <= changesetBlockRange
 
 func NewProgress(prevOutputBlockNum, commitThreshold uint64, workersCount int, logPrefix string, logger log.Logger) *Progress {
 	return &Progress{prevTime: time.Now(), prevOutputBlockNum: prevOutputBlockNum, commitThreshold: commitThreshold, workersCount: workersCount, logPrefix: logPrefix, logger: logger}
@@ -283,7 +283,12 @@ func ExecV3(ctx context.Context,
 	ts := time.Duration(0)
 	blockNum = doms.BlockNum()
 	outputTxNum.Store(doms.TxNum())
-	shouldGenerateChangesets := !initialCycle // maxBlockNum-blockNum <= changesetBlockRange
+
+	shouldGenerateChangesets := maxBlockNum-blockNum <= changesetBlockRange
+	if blockNum < cfg.blockReader.FrozenBlocks() {
+		shouldGenerateChangesets = false
+	}
+	agg.DiscardHistory(kv.CommitmentDomain)
 
 	if maxBlockNum-blockNum > 16 {
 		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
@@ -293,10 +298,10 @@ func ExecV3(ctx context.Context,
 	if initialCycle {
 		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
 		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
-		if blockNum < cfg.blockReader.FrozenBlocks() {
-			defer agg.DiscardHistory(kv.CommitmentDomain).EnableHistory(kv.CommitmentDomain)
-			defer agg.LimitRecentHistoryWithoutFiles(0).LimitRecentHistoryWithoutFiles(agg.StepSize() / 10)
-		}
+		//if blockNum < cfg.blockReader.FrozenBlocks() {
+		//defer agg.DiscardHistory(kv.CommitmentDomain).EnableHistory(kv.CommitmentDomain)
+		//defer agg.LimitRecentHistoryWithoutFiles(0).LimitRecentHistoryWithoutFiles(agg.StepSize() / 10)
+		//}
 	} else {
 		agg.SetCompressWorkers(1)
 		agg.SetCollateAndBuildWorkers(1)
