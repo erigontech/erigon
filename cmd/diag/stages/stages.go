@@ -47,7 +47,7 @@ func printCurentStage(cliCtx *cli.Context) error {
 	case "text":
 		util.RenderTableWithHeader(
 			"Sync stages:",
-			table.Row{"Stage", "Status"},
+			table.Row{"Stage", "SubStage", "Status"},
 			stagesRows,
 		)
 	}
@@ -60,18 +60,23 @@ func getStagesRows(stages []diagnostics.SyncStage) []table.Row {
 	for _, stage := range stages {
 		stageRow := table.Row{
 			stage.ID,
+			"",
 			stage.State.String(),
 		}
+		rows = append(rows, stageRow)
 
 		for _, substage := range stage.SubStages {
 			subStageRow := table.Row{
+				"",
 				substage.ID,
 				substage.State.String(),
 			}
 			rows = append(rows, subStageRow)
 		}
 
-		rows = append(rows, stageRow)
+		if len(stage.SubStages) != 0 {
+			rows = append(rows, table.Row{"", "", ""})
+		}
 	}
 
 	return rows

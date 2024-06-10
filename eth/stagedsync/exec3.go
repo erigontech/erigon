@@ -284,7 +284,7 @@ func ExecV3(ctx context.Context,
 	blockNum = doms.BlockNum()
 	outputTxNum.Store(doms.TxNum())
 
-	shouldGenerateChangesets := maxBlockNum-blockNum <= changesetBlockRange
+	shouldGenerateChangesets := !initialCycle // maxBlockNum-blockNum <= changesetBlockRange
 	agg.DiscardHistory(kv.CommitmentDomain)
 
 	if maxBlockNum-blockNum > 16 {
