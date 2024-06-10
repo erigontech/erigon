@@ -272,10 +272,10 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 	sd.estSize = 0
 }
 
-func (sd *SharedDomains) put(domain kv.Domain, key string, prevStep uint64, val []byte) {
+func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte) {
 	// disable mutex - because work on parallel execution postponed after E3 release.
 	//sd.muMaps.Lock()
-	valWithPrevStep := dataWithPrevStep{data: val, prevStep: prevStep}
+	valWithPrevStep := dataWithPrevStep{data: val, prevStep: sd.txNum / sd.aggTx.a.StepSize()}
 	if domain == kv.StorageDomain {
 		if old, ok := sd.storage.Set(key, valWithPrevStep); ok {
 			sd.estSize += len(val) - len(old.data)
@@ -468,14 +468,14 @@ func (sd *SharedDomains) ReadsValid(readLists map[string]*KvList) bool {
 func (sd *SharedDomains) updateAccountData(addr []byte, account, prevAccount []byte, prevStep uint64) error {
 	addrS := string(addr)
 	sd.sdCtx.TouchKey(kv.AccountsDomain, addrS, account)
-	sd.put(kv.AccountsDomain, addrS, prevStep, account)
+	sd.put(kv.AccountsDomain, addrS, account)
 	return sd.dWriter[kv.AccountsDomain].PutWithPrev(addr, nil, account, prevAccount, prevStep)
 }
 
 func (sd *SharedDomains) updateAccountCode(addr, code, prevCode []byte, prevStep uint64) error {
 	addrS := string(addr)
 	sd.sdCtx.TouchKey(kv.CodeDomain, addrS, code)
-	sd.put(kv.CodeDomain, addrS, prevStep, code)
+	sd.put(kv.CodeDomain, addrS, code)
 	if len(code) == 0 {
 		return sd.dWriter[kv.CodeDomain].DeleteWithPrev(addr, nil, prevCode, prevStep)
 	}
@@ -483,7 +483,7 @@ func (sd *SharedDomains) updateAccountCode(addr, code, prevCode []byte, prevStep
 }
 
 func (sd *SharedDomains) updateCommitmentData(prefix []byte, data, prev []byte, prevStep uint64) error {
-	sd.put(kv.CommitmentDomain, string(prefix), prevStep, data)
+	sd.put(kv.CommitmentDomain, string(prefix), data)
 	return sd.dWriter[kv.CommitmentDomain].PutWithPrev(prefix, nil, data, prev, prevStep)
 }
 
@@ -499,7 +499,7 @@ func (sd *SharedDomains) deleteAccount(addr, prev []byte, prevStep uint64) error
 	}
 
 	sd.sdCtx.TouchKey(kv.AccountsDomain, addrS, nil)
-	sd.put(kv.AccountsDomain, addrS, prevStep, nil)
+	sd.put(kv.AccountsDomain, addrS, nil)
 	if err := sd.dWriter[kv.AccountsDomain].DeleteWithPrev(addr, nil, prev, prevStep); err != nil {
 		return err
 	}
@@ -515,7 +515,7 @@ func (sd *SharedDomains) writeAccountStorage(addr, loc []byte, value, preVal []b
 	}
 	compositeS := string(composite)
 	sd.sdCtx.TouchKey(kv.StorageDomain, compositeS, value)
-	sd.put(kv.StorageDomain, compositeS, prevStep, value)
+	sd.put(kv.StorageDomain, compositeS, value)
 	return sd.dWriter[kv.StorageDomain].PutWithPrev(composite, nil, value, preVal, prevStep)
 }
 func (sd *SharedDomains) delAccountStorage(addr, loc []byte, preVal []byte, prevStep uint64) error {
@@ -526,7 +526,7 @@ func (sd *SharedDomains) delAccountStorage(addr, loc []byte, preVal []byte, prev
 	}
 	compositeS := string(composite)
 	sd.sdCtx.TouchKey(kv.StorageDomain, compositeS, nil)
-	sd.put(kv.StorageDomain, compositeS, prevStep, nil)
+	sd.put(kv.StorageDomain, compositeS, nil)
 	return sd.dWriter[kv.StorageDomain].DeleteWithPrev(composite, nil, preVal, prevStep)
 }
 
@@ -865,7 +865,7 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 		}
 		return sd.updateAccountCode(k1, val, prevVal, prevStep)
 	default:
-		sd.put(domain, string(append(k1, k2...)), prevStep, val)
+		sd.put(domain, string(append(k1, k2...)), val)
 		return sd.dWriter[domain].PutWithPrev(k1, k2, val, prevVal, prevStep)
 	}
 }
@@ -897,7 +897,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []by
 	case kv.CommitmentDomain:
 		return sd.updateCommitmentData(k1, nil, prevVal, prevStep)
 	default:
-		sd.put(domain, string(append(k1, k2...)), prevStep, nil)
+		sd.put(domain, string(append(k1, k2...)), nil)
 		return sd.dWriter[domain].DeleteWithPrev(k1, k2, prevVal, prevStep)
 	}
 }
@@ -1172,7 +1172,7 @@ func (sdc *SharedDomainsCommitmentContext) storeCommitmentState(blockNum uint64,
 	if sdc.sd.trace {
 		fmt.Printf("[commitment] store txn %d block %d rh %x\n", sdc.sd.txNum, blockNum, rh)
 	}
-	sdc.sd.put(kv.CommitmentDomain, string(keyCommitmentState), prevStep, encodedState)
+	sdc.sd.put(kv.CommitmentDomain, string(keyCommitmentState), encodedState)
 	return sdc.sd.dWriter[kv.CommitmentDomain].PutWithPrev(keyCommitmentState, nil, encodedState, prevState, prevStep)
 }
 
