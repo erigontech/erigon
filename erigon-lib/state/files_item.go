@@ -143,6 +143,7 @@ type ctxItem struct {
 	src *filesItem
 }
 
+func (i *ctxItem) hasTS(ts uint64) bool       { return i.startTxNum <= ts && i.endTxNum > ts }
 func (i *ctxItem) isSubSetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) } //nolint
 func (i *ctxItem) isSubsetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) } //nolint
 
