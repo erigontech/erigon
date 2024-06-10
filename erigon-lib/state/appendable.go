@@ -833,32 +833,30 @@ func (fk *Appendable) collate(ctx context.Context, step uint64, roTx kv.Tx) (App
 	}()
 	comp, err := seg.NewCompressor(ctx, "collate "+fk.filenameBase, coll.iiPath, fk.cfg.Dirs.Tmp, seg.MinPatternScore, fk.compressWorkers, log.LvlTrace, fk.logger)
 	if err != nil {
-		return AppendableCollation{}, fmt.Errorf("create %s compressor: %w", fk.filenameBase, err)
+		return coll, fmt.Errorf("create %s compressor: %w", fk.filenameBase, err)
 	}
 	coll.writer = NewArchiveWriter(comp, fk.compression)
 
 	it, err := fk.cfg.iters.TxnIdsOfCanonicalBlocks(roTx, int(txFrom), int(txTo), order.Asc, -1)
 	if err != nil {
-		return AppendableCollation{}, fmt.Errorf("collate %s: %w", fk.filenameBase, err)
+		return coll, fmt.Errorf("collate %s: %w", fk.filenameBase, err)
 	}
 	defer it.Close()
 
 	for it.HasNext() {
 		k, err := it.Next()
 		if err != nil {
-			return AppendableCollation{}, fmt.Errorf("collate %s: %w", fk.filenameBase, err)
+			return coll, fmt.Errorf("collate %s: %w", fk.filenameBase, err)
 		}
 		v, ok, err := fk.getFromDBByTs(k, roTx)
 		if err != nil {
-			return AppendableCollation{}, fmt.Errorf("collate %s: %w", fk.filenameBase, err)
+			return coll, fmt.Errorf("collate %s: %w", fk.filenameBase, err)
 		}
 		if !ok {
-			fmt.Printf("collate: %d, not found\n", k)
 			continue
 		}
-		fmt.Printf("collate: %d, %x\n", k, v)
 		if err = coll.writer.AddWord(v); err != nil {
-			return AppendableCollation{}, fmt.Errorf("collate %s: %w", fk.filenameBase, err)
+			return coll, fmt.Errorf("collate %s: %w", fk.filenameBase, err)
 		}
 	}
 
@@ -905,8 +903,10 @@ type AppendableCollation struct {
 }
 
 func (ic AppendableCollation) Close() {
+
 	if ic.writer != nil {
 		ic.writer.Close()
+		ic.writer = nil
 	}
 }
 
