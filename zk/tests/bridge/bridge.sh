@@ -8,6 +8,8 @@
 # Examples
 # env DRY_RUN=false ./test.sh deposit
 
+set -e
+
 readonly skey=${RAW_PRIVATE_KEY:-"bc6a95c870cce28fe9686fdd70a3a595769e019bb396cd725bc16ec553f07c83"}
 readonly destination_net=${DESTINATION_NET:-"1"}
 readonly destination_addr=${DESTINATION_ADDRESS:-"0x0bb7AA0b4FdC2D2862c088424260e99ed6299148"}

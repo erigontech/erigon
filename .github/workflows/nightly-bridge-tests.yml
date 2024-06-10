@@ -1,4 +1,4 @@
-name: Nightly Bridge Tests
+name: Nightly - Bridge Tests
 
 on:
   schedule:
@@ -26,7 +26,7 @@ jobs:
             destination_net: "8282"
             destination_address: "0x814764FD16DDA0052a09BAccf4939524EE308FE1" # this is a L1 sepolia address (funded via L1)
             ether_value: "0.02"
-            token_address: "0x0f25eE4CA85Db4362a9749782872c558873566e4"
+            token_address: ""
             is_forced: "true"
             bridge_address: "0xb566BE17B22404BD46F389030ec5592F8ffAde12"
             meta_bytes: "0x"
@@ -55,4 +55,4 @@ jobs:
           BRIDGE_API_URL: ${{ matrix.config.bridge_api_url }}
           DRY_RUN: ${{ matrix.config.dry_run }}
         run: |
-          cd zk/tests/bridge && docker-compose up --build
+          cd zk/tests/bridge && docker-compose up --build --exit-code-from bridge-script
