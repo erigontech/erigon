@@ -26,7 +26,7 @@ func (m *Milestone) RawId() uint64 {
 }
 
 func (m *Milestone) SetRawId(id uint64) {
-	return
+	panic("unimplemented")
 }
 
 func (m *Milestone) StartBlock() *big.Int {
