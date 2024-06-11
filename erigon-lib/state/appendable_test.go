@@ -116,6 +116,7 @@ func TestAppendableCollationBuild(t *testing.T) {
 		ic := ii.BeginFilesRo()
 		defer ic.Close()
 
+		//existing keys
 		w, ok := ic.getFromFiles(0)
 		require.True(ok)
 		require.Equal(1, int(binary.BigEndian.Uint64(w)))
@@ -135,12 +136,6 @@ func TestAppendableCollationBuild(t *testing.T) {
 		ic := ii.BeginFilesRo()
 		defer ic.Close()
 
-		err := db.Update(ctx, func(tx kv.RwTx) error {
-			_, err := ic.Prune(ctx, tx, 0, 16, math.MaxUint64, logEvery, false, false, nil)
-			return err
-		})
-		require.NoError(err)
-
 		tx, err := db.BeginRo(ctx)
 		require.NoError(err)
 		defer tx.Rollback()
@@ -148,6 +143,20 @@ func TestAppendableCollationBuild(t *testing.T) {
 		from, to := ii.stepsRangeInDB(tx)
 		require.Equal(float64(0), from)
 		require.Equal(62.4375, to)
+
+		//existing keys
+		w, ok, err := ic.Get(0, tx)
+		require.NoError(err)
+		require.True(ok)
+		require.Equal(1, int(binary.BigEndian.Uint64(w)))
+
+		w, ok, err = ic.Get(1, tx)
+		require.True(ok)
+		require.Equal(int(aggStep+1), int(binary.BigEndian.Uint64(w)))
+
+		//non existing key
+		w, ok = ic.getFromFiles(63)
+		require.False(ok)
 	})
 }
 

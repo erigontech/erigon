@@ -672,10 +672,6 @@ func (tx *AppendableRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 		}
 	}
 
-	fmt.Printf("prune: %d-%d\n", fromID, toID)
-	//if err := tx.Delete(k, rwTx); err != nil {
-	//	return nil, err
-	//}
 	return stat, err
 }
 func (tx *AppendableRoTx) txNum2id(rwTx kv.RwTx, txFrom, txTo uint64) (fromID, toID uint64, ok bool, err error) {
