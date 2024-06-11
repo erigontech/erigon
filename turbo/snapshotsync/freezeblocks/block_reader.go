@@ -798,7 +798,7 @@ func (r *BlockReader) bodyFromSnapshot(blockHeight uint64, sn *Segment, buf []by
 	if b.TxAmount >= 2 {
 		txsAmount = b.TxAmount - 2
 	}
-	return body, b.BaseTxId + 1, txsAmount, buf, nil // empty txs in the beginning and end of block
+	return body, b.BaseTxId.First(), txsAmount, buf, nil // empty txs in the beginning and end of block
 }
 
 func (r *BlockReader) bodyForStorageFromSnapshot(blockHeight uint64, sn *Segment, buf []byte) (*types.BodyForStorage, []byte, error) {
@@ -985,7 +985,7 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 		return
 	}
 	// +1 because block has system-txn in the beginning of block
-	return r.txnByID(b.BaseTxId+1+uint64(txIdxInBlock), txnSeg, nil)
+	return r.txnByID(b.BaseTxId.At(txIdxInBlock), txnSeg, nil)
 }
 
 // TxnLookup - find blockNumber and txnID by txnHash
@@ -1039,7 +1039,7 @@ func (r *BlockReader) IterateFrozenBodies(f func(blockNum, baseTxNum, txAmount u
 			if err := rlp.DecodeBytes(buf, &b); err != nil {
 				return err
 			}
-			if err := f(blockNum, b.BaseTxId, uint64(b.TxAmount)); err != nil {
+			if err := f(blockNum, b.BaseTxId.U64(), uint64(b.TxAmount)); err != nil {
 				return err
 			}
 			blockNum++
@@ -1061,7 +1061,7 @@ func (r *BlockReader) IntegrityTxnID(failFast bool) error {
 		if err != nil {
 			return err
 		}
-		if b.BaseTxId != expectedFirstTxnID {
+		if b.BaseTxId.U64() != expectedFirstTxnID {
 			err := fmt.Errorf("[integrity] IntegrityTxnID: bn=%d, baseID=%d, cnt=%d, expectedFirstTxnID=%d", firstBlockNum, b.BaseTxId, sn.Count(), expectedFirstTxnID)
 			if failFast {
 				return err
@@ -1069,7 +1069,7 @@ func (r *BlockReader) IntegrityTxnID(failFast bool) error {
 				log.Error(err.Error())
 			}
 		}
-		expectedFirstTxnID = b.BaseTxId + uint64(sn.Count())
+		expectedFirstTxnID = b.BaseTxId.LastSystemTx(uint32(sn.Count()))+1 // +1 to move to first baseTxId of next block aka its first system tx
 	}
 	return nil
 }

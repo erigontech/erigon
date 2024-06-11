@@ -147,7 +147,7 @@ var (
 				}
 				defer bodiesSegment.Close()
 
-				firstTxID, expectedCount, err := txsAmountBasedOnBodiesSnapshots(bodiesSegment, sn.Len()-1)
+				baseTxID, expectedCount, err := txsAmountBasedOnBodiesSnapshots(bodiesSegment, sn.Len()-1)
 				if err != nil {
 					return err
 				}
@@ -177,7 +177,7 @@ var (
 					LeafSize:   8,
 					TmpDir:     tmpDir,
 					IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To)),
-					BaseDataID: firstTxID,
+					BaseDataID: baseTxID.U64(),
 				}, logger)
 				if err != nil {
 					return err
@@ -210,7 +210,7 @@ var (
 
 				for {
 					g, bodyGetter := d.MakeGetter(), bodiesSegment.MakeGetter()
-					var i, offset, nextPos uint64
+					var ti, offset, nextPos uint64
 					blockNum := firstBlockNum
 					body := &types.BodyForStorage{}
 
@@ -231,7 +231,8 @@ var (
 						default:
 						}
 
-						for body.BaseTxId+uint64(body.TxAmount) <= firstTxID+i { // skip empty blocks
+						// TODO review this code
+						for body.BaseTxId.LastSystemTx(body.TxAmount) < baseTxID.U64()+ti { // skip empty blocks; ti here is not transaction index in one block, but total transaction index counter
 							if !bodyGetter.HasNext() {
 								return fmt.Errorf("not enough bodies")
 							}
@@ -248,10 +249,10 @@ var (
 						isSystemTx := len(word) == 0
 						if isSystemTx { // system-txs hash:pad32(txnID)
 							slot.IDHash = common.Hash{}
-							binary.BigEndian.PutUint64(slot.IDHash[:], firstTxID+i)
+							binary.BigEndian.PutUint64(slot.IDHash[:], baseTxID.U64()+ti)
 						} else {
 							if _, err = parseCtx.ParseTransaction(word[firstTxByteAndlengthOfAddress:], 0, &slot, nil, true /* hasEnvelope */, false /* wrappedWithBlobs */, nil /* validateHash */); err != nil {
-								return fmt.Errorf("ParseTransaction: %w, blockNum: %d, i: %d", err, blockNum, i)
+								return fmt.Errorf("ParseTransaction: %w, blockNum: %d, i: %d", err, blockNum, ti)
 							}
 						}
 
@@ -262,12 +263,12 @@ var (
 							return err
 						}
 
-						i++
+						ti++
 						offset = nextPos
 					}
 
-					if int(i) != expectedCount {
-						return fmt.Errorf("TransactionsIdx: at=%d-%d, post index building, expect: %d, got %d", sn.From, sn.To, expectedCount, i)
+					if int(ti) != expectedCount {
+						return fmt.Errorf("TransactionsIdx: at=%d-%d, post index building, expect: %d, got %d", sn.From, sn.To, expectedCount, ti)
 					}
 
 					if err := txnHashIdx.Build(ctx); err != nil {
@@ -297,14 +298,14 @@ var (
 	BlockSnapshotTypes = []snaptype.Type{Headers, Bodies, Transactions}
 )
 
-func txsAmountBasedOnBodiesSnapshots(bodiesSegment *seg.Decompressor, len uint64) (firstTxID uint64, expectedCount int, err error) {
+func txsAmountBasedOnBodiesSnapshots(bodiesSegment *seg.Decompressor, len uint64) (baseTxID types.BaseTxID, expectedCount int, err error) {
 	gg := bodiesSegment.MakeGetter()
 	buf, _ := gg.Next(nil)
 	firstBody := &types.BodyForStorage{}
 	if err = rlp.DecodeBytes(buf, firstBody); err != nil {
 		return
 	}
-	firstTxID = firstBody.BaseTxId
+	baseTxID = firstBody.BaseTxId
 
 	lastBody := new(types.BodyForStorage)
 	i := uint64(0)
@@ -327,6 +328,7 @@ func txsAmountBasedOnBodiesSnapshots(bodiesSegment *seg.Decompressor, len uint64
 		return 0, 0, fmt.Errorf("negative txs count %s: lastBody.BaseTxId=%d < firstBody.BaseTxId=%d", bodiesSegment.FileName(), lastBody.BaseTxId, firstBody.BaseTxId)
 	}
 
-	expectedCount = int(lastBody.BaseTxId+uint64(lastBody.TxAmount)) - int(firstBody.BaseTxId)
+	// TODO: check if it is correct
+	expectedCount = int(lastBody.BaseTxId.LastSystemTx(lastBody.TxAmount) - firstBody.BaseTxId.U64())
 	return
 }

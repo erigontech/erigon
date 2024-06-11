@@ -186,7 +186,7 @@ func TestDump(t *testing.T) {
 			require := require.New(t)
 			i := 0
 			txsAmount := uint64(0)
-			var baseIdList []uint64
+			var baseIdList []types.BaseTxID
 			firstTxNum := uint64(0)
 			_, err := freezeblocks.DumpBodies(m.Ctx, m.DB, m.ChainConfig, 0, uint64(test.chainSize-3),
 				func(context.Context) uint64 { return firstTxNum },
@@ -201,7 +201,7 @@ func TestDump(t *testing.T) {
 			require.NoError(err)
 			require.Equal(test.chainSize-3, i)
 			require.Equal(3*(test.chainSize-3)-1, int(txsAmount))
-			require.Equal(append([]uint64{0}, baseIdRange(2, 3, test.chainSize-4)...), baseIdList)
+			require.EqualValues(append([]uint64{0}, baseIdRange(2, 3, test.chainSize-4)...), baseIdList)
 
 			firstTxNum += txsAmount
 			i = 0
@@ -217,7 +217,7 @@ func TestDump(t *testing.T) {
 			require.NoError(err)
 			require.Equal(test.chainSize-1, i)
 			require.Equal(firstTxNum+uint64(3*(test.chainSize-1)), txsAmount)
-			require.Equal(baseIdRange(int(firstTxNum), 3, test.chainSize-1), baseIdList)
+			require.EqualValues(baseIdRange(int(firstTxNum), 3, test.chainSize-1), baseIdList)
 		})
 		t.Run("body_not_from_zero", func(t *testing.T) {
 			require := require.New(t)

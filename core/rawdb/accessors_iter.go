@@ -105,7 +105,7 @@ func (s *CanonicalTxnIds) advance() (err error) {
 		}
 	}
 
-	if !endOfBlock {
+	if !endOfBlock || s.currentTxNum == int(s.endOfCurrentBlock) {
 		return nil
 	}
 
@@ -130,10 +130,10 @@ func (s *CanonicalTxnIds) advance() (err error) {
 
 	if s.orderAscend {
 		s.currentTxNum = int(body.BaseTxId)
-		s.endOfCurrentBlock = body.BaseTxId.U64() + uint64(body.TxAmount) // 2 system txs already included in TxAmount
+		s.endOfCurrentBlock = body.BaseTxId.LastSystemTx(body.TxAmount) // 2 system txs already included in TxAmount
 	} else {
-		s.currentTxNum = int(body.BaseTxId) + int(body.TxAmount) - 1 // 2 system txs already included in TxAmount
-		s.endOfCurrentBlock = body.BaseTxId - 1                      // and one of them is baseTxId
+		s.currentTxNum = int(body.BaseTxId.LastSystemTx(body.TxAmount))
+		s.endOfCurrentBlock = body.BaseTxId.U64()
 	}
 	return nil
 }

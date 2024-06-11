@@ -408,7 +408,7 @@ func TxnByIdxInBlock(db kv.Getter, blockHash common.Hash, blockNum uint64, txIdx
 		return nil, nil
 	}
 
-	v, err := db.GetOne(kv.EthTx, hexutility.EncodeTs(b.BaseTxId+1+uint64(txIdxInBlock)))
+	v, err := db.GetOne(kv.EthTx, hexutility.EncodeTs(b.BaseTxId.At(txIdxInBlock)))
 	if err != nil {
 		return nil, err
 	}
@@ -422,13 +422,13 @@ func TxnByIdxInBlock(db kv.Getter, blockHash common.Hash, blockNum uint64, txIdx
 	return txn, nil
 }
 
-func CanonicalTransactions(db kv.Getter, baseTxId types.BaseTxID, amount uint32) ([]types.Transaction, error) {
+func CanonicalTransactions(db kv.Getter, txId uint64, amount uint32) ([]types.Transaction, error) {
 	if amount == 0 {
 		return []types.Transaction{}, nil
 	}
 	txs := make([]types.Transaction, amount)
 	i := uint32(0)
-	if err := db.ForAmount(kv.EthTx, baseTxId.Bytes(), amount, func(k, v []byte) error {
+	if err := db.ForAmount(kv.EthTx, hexutility.EncodeTs(txId), amount, func(k, v []byte) error {
 		var decodeErr error
 		if txs[i], decodeErr = types.UnmarshalTransactionFromBinary(v, false /* blobTxnsAreWrappedWithBlobs */); decodeErr != nil {
 			return decodeErr
@@ -462,17 +462,17 @@ func NonCanonicalTransactions(db kv.Getter, baseTxId types.BaseTxID, amount uint
 	return txs, nil
 }
 
+// Write transactions to the database and use txId as first identifier
 func WriteTransactions(rwTx kv.RwTx, txs []types.Transaction, txId uint64) error {
 	txIdKey := make([]byte, 8)
 	buf := bytes.NewBuffer(nil)
 	for _, tx := range txs {
-		binary.BigEndian.PutUint64(txIdKey, txId)
-
 		buf.Reset()
 		if err := rlp.Encode(buf, tx); err != nil {
 			return fmt.Errorf("broken tx rlp: %w", err)
 		}
 
+		binary.BigEndian.PutUint64(txIdKey, txId)
 		if err := rwTx.Append(kv.EthTx, txIdKey, buf.Bytes()); err != nil {
 			return err
 		}
@@ -514,16 +514,17 @@ func ReadBodyByNumber(db kv.Tx, number uint64) (*types.Body, uint64, uint32, err
 		return nil, 0, 0, nil
 	}
 	body, baseTxId, txAmount := ReadBody(db, hash, number)
+	// TODO baseTxid from ReadBody is baseTxId+1, but we could expect original baseTxId here
 	return body, baseTxId, txAmount, nil
 }
 
 func ReadBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) (*types.Body, error) {
-	body, baseTxId, txAmount := ReadBody(db, hash, number)
+	body, firstTxId, txAmount := ReadBody(db, hash, number)
 	if body == nil {
 		return nil, nil
 	}
 	var err error
-	body.Transactions, err = CanonicalTransactions(db, baseTxId, txAmount)
+	body.Transactions, err = CanonicalTransactions(db, firstTxId, txAmount)
 	if err != nil {
 		return nil, err
 	}
@@ -613,7 +614,7 @@ func ReadBody(db kv.Getter, hash common.Hash, number uint64) (*types.Body, uint6
 	if bodyForStorage.TxAmount < 2 {
 		panic(fmt.Sprintf("block body hash too few txs amount: %d, %d", number, bodyForStorage.TxAmount))
 	}
-	return body, bodyForStorage.BaseTxId + 1, bodyForStorage.TxAmount - 2 // 1 system txn in the begining of block, and 1 at the end
+	return body, bodyForStorage.BaseTxId.First(), bodyForStorage.TxAmount - 2 // 1 system txn in the begining of block, and 1 at the end
 }
 
 func HasSenders(db kv.Getter, hash common.Hash, number uint64) (bool, error) {
@@ -672,7 +673,7 @@ func WriteBody(db kv.RwTx, hash common.Hash, number uint64, body *types.Body) (e
 		return err
 	}
 	data := types.BodyForStorage{
-		BaseTxId:    baseTxId,
+		BaseTxId:    types.BaseTxID(baseTxId),
 		TxAmount:    uint32(len(body.Transactions)) + 2,
 		Uncles:      body.Uncles,
 		Withdrawals: body.Withdrawals,
@@ -681,7 +682,7 @@ func WriteBody(db kv.RwTx, hash common.Hash, number uint64, body *types.Body) (e
 	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return fmt.Errorf("failed to write body: %w", err)
 	}
-	if err = WriteTransactions(db, body.Transactions, baseTxId+1); err != nil {
+	if err = WriteTransactions(db, body.Transactions, data.BaseTxId.First()); err != nil {
 		return fmt.Errorf("failed to WriteTransactions: %w", err)
 	}
 	return nil
@@ -1059,7 +1060,7 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int
 			log.Debug("PruneBlocks: block body not found", "height", n)
 		} else {
 			txIDBytes := make([]byte, 8)
-			for txID := uint64(b.BaseTxId); txID < uint64(b.BaseTxId)+uint64(b.TxAmount); txID++ {
+			for txID := b.BaseTxId.U64(); txID <= b.BaseTxId.LastSystemTx(b.TxAmount); txID++ {
 				binary.BigEndian.PutUint64(txIDBytes, txID)
 				if err = tx.Delete(kv.EthTx, txIDBytes); err != nil {
 					return deleted, err
@@ -1107,7 +1108,7 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 		}
 		if b != nil {
 			txIDBytes := make([]byte, 8)
-			for txID := b.BaseTxId; txID < b.BaseTxId+uint64(b.TxAmount); txID++ {
+			for txID := b.BaseTxId.U64(); txID <= b.BaseTxId.LastSystemTx(b.TxAmount); txID++ {
 				binary.BigEndian.PutUint64(txIDBytes, txID)
 				if err = tx.Delete(kv.EthTx, txIDBytes); err != nil {
 					return err

@@ -1601,8 +1601,8 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		return valueBuf, nil
 	}
 
-	addSystemTx := func(ctx *types2.TxParseContext, tx kv.Tx, txId uint64) error {
-		binary.BigEndian.PutUint64(numBuf, txId)
+	addSystemTx := func(ctx *types2.TxParseContext, tx kv.Tx, txId types.BaseTxID) error {
+		binary.BigEndian.PutUint64(numBuf, txId.U64())
 		tv, err := tx.GetOne(kv.EthTx, numBuf)
 		if err != nil {
 			return err
@@ -1655,7 +1655,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			defer clean()
 		}
 		if doWarmup && !warmupTxs.Load() && blockNum%1_000 == 0 {
-			clean := kv.ReadAhead(warmupCtx, db, warmupTxs, kv.EthTx, hexutility.EncodeTs(body.BaseTxId), 100*10_000)
+			clean := kv.ReadAhead(warmupCtx, db, warmupTxs, kv.EthTx, body.BaseTxId.Bytes(), 100*10_000)
 			defer clean()
 		}
 		senders, err := rawdb.ReadSenders(tx, h, blockNum)
@@ -1694,7 +1694,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			return false, err
 		}
 
-		binary.BigEndian.PutUint64(numBuf, body.BaseTxId+1)
+		binary.BigEndian.PutUint64(numBuf, body.BaseTxId.First())
 
 		collected := -1
 		collectorLock := sync.Mutex{}
@@ -1745,7 +1745,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			return false, fmt.Errorf("ForAmount parser: %w", err)
 		}
 
-		if err := addSystemTx(parseCtxs[0], tx, body.BaseTxId+uint64(body.TxAmount)-1); err != nil {
+		if err := addSystemTx(parseCtxs[0], tx, types.BaseTxID(body.BaseTxId.LastSystemTx(body.TxAmount))); err != nil {
 			return false, err
 		}
 
@@ -1856,8 +1856,8 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 			return true, nil
 		}
 
-		body.BaseTxId = lastTxNum
-		lastTxNum += uint64(body.TxAmount)
+		body.BaseTxId = types.BaseTxID(lastTxNum)
+		lastTxNum = body.BaseTxId.LastSystemTx(body.TxAmount)
 
 		dataRLP, err := rlp.EncodeToBytes(body)
 		if err != nil {
