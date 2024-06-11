@@ -102,13 +102,7 @@ func TestAppendableCollationBuild(t *testing.T) {
 	iters := NewMockIterFactory(ctrl)
 	iters.EXPECT().TxnIdsOfCanonicalBlocks(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(func(tx kv.Tx, txFrom, txTo int, by order.By, i3 int) (iter.U64, error) {
-			var it iter.U64 = iter.EmptyU64
-			if txFrom == 0 {
-				it = iter.Array[uint64]([]uint64{1})
-			}
-			if txFrom == 16 {
-				it = iter.Array[uint64]([]uint64{aggStep + 1})
-			}
+			it := iter.Array[uint64]([]uint64{aggStep*(uint64(txFrom)/aggStep) + 1})
 			return it, nil
 		}).
 		AnyTimes()
@@ -130,7 +124,8 @@ func TestAppendableCollationBuild(t *testing.T) {
 		require.True(ok)
 		require.Equal(int(aggStep+1), int(binary.BigEndian.Uint64(w)))
 
-		w, ok = ic.getFromFiles(2)
+		//non existing key
+		w, ok = ic.getFromFiles(63)
 		require.False(ok)
 	})
 
@@ -152,7 +147,7 @@ func TestAppendableCollationBuild(t *testing.T) {
 
 		from, to := ii.stepsRangeInDB(tx)
 		require.Equal(float64(0), from)
-		require.Equal(float64(0), to)
+		require.Equal(62.4375, to)
 	})
 }
 
