@@ -998,7 +998,7 @@ func (d *Domain) buildMapIdx(ctx context.Context, fromStep, toStep uint64, data 
 		Salt:       d.salt,
 		NoFsync:    d.noFsync,
 	}
-	return buildIndex(ctx, data, d.compression, idxPath, false, cfg, ps, d.logger)
+	return buildAccessor(ctx, data, d.compression, idxPath, false, cfg, ps, d.logger)
 }
 
 func (d *Domain) missedBtreeIdxFiles() (l []*filesItem) {
@@ -1020,7 +1020,7 @@ func (d *Domain) missedBtreeIdxFiles() (l []*filesItem) {
 	})
 	return l
 }
-func (d *Domain) missedKviIdxFiles() (l []*filesItem) {
+func (d *Domain) missedAccessors() (l []*filesItem) {
 	d.dirtyFiles.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
@@ -1048,15 +1048,15 @@ func (d *Domain) missedKviIdxFiles() (l []*filesItem) {
 //	return l
 //}
 
-// BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
-func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
-	d.History.BuildMissedIndices(ctx, g, ps)
+// BuildMissedAccessors - produce .efi/.vi/.kvi from .ef/.v/.kv
+func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
+	d.History.BuildMissedAccessors(ctx, g, ps)
 	for _, item := range d.missedBtreeIdxFiles() {
 		if !UseBpsTree {
 			continue
 		}
 		if item.decompressor == nil {
-			log.Warn(fmt.Sprintf("[dbg] BuildMissedIndices: item with nil decompressor %s %d-%d", d.filenameBase, item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep))
+			log.Warn(fmt.Sprintf("[dbg] BuildMissedAccessors: item with nil decompressor %s %d-%d", d.filenameBase, item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep))
 		}
 		item := item
 
@@ -1069,12 +1069,12 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 			return nil
 		})
 	}
-	for _, item := range d.missedKviIdxFiles() {
+	for _, item := range d.missedAccessors() {
 		if UseBpsTree {
 			continue
 		}
 		if item.decompressor == nil {
-			log.Warn(fmt.Sprintf("[dbg] BuildMissedIndices: item with nil decompressor %s %d-%d", d.filenameBase, item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep))
+			log.Warn(fmt.Sprintf("[dbg] BuildMissedAccessors: item with nil decompressor %s %d-%d", d.filenameBase, item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep))
 		}
 		item := item
 		g.Go(func() error {
@@ -1092,7 +1092,7 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 	}
 }
 
-func buildIndex(ctx context.Context, d *seg.Decompressor, compressed FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {
+func buildAccessor(ctx context.Context, d *seg.Decompressor, compressed FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {
 	_, fileName := filepath.Split(idxPath)
 	count := d.Count()
 	if !values {
