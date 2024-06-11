@@ -158,7 +158,7 @@ func TestAppendableCollationBuild(t *testing.T) {
 		var err error
 		salt := uint32(1)
 		cfg := AppendableCfg{Salt: &salt, Dirs: ii.cfg.Dirs, DB: db, CanonicalMarkersTable: kv.HeaderCanonical}
-		ii, err = NewAppendable(cfg, ii.aggregationStep, ii.filenameBase, ii.table, nil, logger)
+		ii, err = NewAppendable(cfg, ii.aggregationStep, ii.filenameBase, ii.table, nil, log.New())
 		require.NoError(t, err)
 		defer ii.Close()
 
