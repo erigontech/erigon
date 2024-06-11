@@ -242,7 +242,7 @@ func (ap *Appendable) buildAccessor(ctx context.Context, fromStep, toStep uint64
 	defer ps.Delete(p)
 
 	num := make([]byte, binary.MaxVarintLen64)
-	return buildSimpleMapAccessor(ctx, d, cfg, ap.logger, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+	return buildSimpleMapAccessor(ctx, d, ap.compression, cfg, ap.logger, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		if p != nil {
 			p.Processed.Add(1)
 		}
@@ -415,7 +415,8 @@ func (w *appendableBufferedWriter) Add(blockNum uint64, blockHash common.Hash, v
 		return nil
 	}
 	k := make([]byte, length.BlockNum+length.Hash)
-	binary.BigEndian.PutUint64(k, blockNum)
+	w.SetTimeStamp(blockNum)
+	copy(k[:length.BlockNum], w.timestampBytes[:])
 	copy(k[length.BlockNum:], blockHash[:])
 	if err := w.tableCollector.Collect(k, v); err != nil {
 		return err
@@ -636,6 +637,10 @@ func (tx *AppendableRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 		k, _, err := r.Next()
 		if err != nil {
 			return nil, err
+		}
+		limit--
+		if limit == 0 {
+			break
 		}
 		if err = rwTx.Delete(tx.ap.table, k); err != nil {
 			return nil, err

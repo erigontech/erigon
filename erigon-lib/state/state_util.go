@@ -9,7 +9,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func buildSimpleMapAccessor(ctx context.Context, d *seg.Decompressor, cfg recsplit.RecSplitArgs, logger log.Logger, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error) error {
+func buildSimpleMapAccessor(ctx context.Context, d *seg.Decompressor, compression FileCompression, cfg recsplit.RecSplitArgs, logger log.Logger, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error) error {
 	count := d.Count()
 
 	defer d.EnableReadAhead().DisableReadAhead()
@@ -24,7 +24,7 @@ func buildSimpleMapAccessor(ctx context.Context, d *seg.Decompressor, cfg recspl
 	rs.LogLvl(log.LvlTrace)
 
 	for {
-		g := d.MakeGetter()
+		g := NewArchiveGetter(d.MakeGetter(), compression)
 		var i, offset, nextPos uint64
 		word := make([]byte, 0, 256)
 		for g.HasNext() {
