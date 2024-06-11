@@ -343,69 +343,6 @@ func mergeAppendable(tb testing.TB, db kv.RwDB, ii *Appendable, txs uint64) {
 
 }
 
-func TestAppendableKeysIterator(t *testing.T) {
-	logger := log.New()
-	db, ii, txs := filledAppendable(t, logger)
-	ctx := context.Background()
-	mergeAppendable(t, db, ii, txs)
-	roTx, err := db.BeginRo(ctx)
-	require.NoError(t, err)
-	defer func() {
-		roTx.Rollback()
-	}()
-	ic := ii.BeginFilesRo()
-	defer ic.Close()
-	panic("implement me")
-	//it := ic.IterateChangedKeys(0, 20, roTx)
-	//defer func() {
-	//	it.Close()
-	//}()
-	//var keys []string
-	//for it.HasNext() {
-	//	k := it.Next(nil)
-	//	keys = append(keys, fmt.Sprintf("%x", k))
-	//}
-	//it.Close()
-	//require.Equal(t, []string{
-	//	"0000000000000001",
-	//	"0000000000000002",
-	//	"0000000000000003",
-	//	"0000000000000004",
-	//	"0000000000000005",
-	//	"0000000000000006",
-	//	"0000000000000007",
-	//	"0000000000000008",
-	//	"0000000000000009",
-	//	"000000000000000a",
-	//	"000000000000000b",
-	//	"000000000000000c",
-	//	"000000000000000d",
-	//	"000000000000000e",
-	//	"000000000000000f",
-	//	"0000000000000010",
-	//	"0000000000000011",
-	//	"0000000000000012",
-	//	"0000000000000013"}, keys)
-	//it = ic.IterateChangedKeys(995, 1000, roTx)
-	//keys = keys[:0]
-	//for it.HasNext() {
-	//	k := it.Next(nil)
-	//	keys = append(keys, fmt.Sprintf("%x", k))
-	//}
-	//it.Close()
-	//require.Equal(t, []string{
-	//	"0000000000000001",
-	//	"0000000000000002",
-	//	"0000000000000003",
-	//	"0000000000000004",
-	//	"0000000000000005",
-	//	"0000000000000006",
-	//	"0000000000000009",
-	//	"000000000000000c",
-	//	"000000000000001b",
-	//}, keys)
-}
-
 func emptyTestAppendable(aggStep uint64) *Appendable {
 	salt := uint32(1)
 	logger := log.New()
@@ -417,12 +354,12 @@ func emptyTestAppendable(aggStep uint64) *Appendable {
 func TestAppendableScanStaticFiles(t *testing.T) {
 	ii := emptyTestAppendable(1)
 	files := []string{
-		"v1-test.0-1.ef",
-		"v1-test.1-2.ef",
-		"v1-test.0-4.ef",
-		"v1-test.2-3.ef",
-		"v1-test.3-4.ef",
-		"v1-test.4-5.ef",
+		"v1-test.0-1.ap",
+		"v1-test.1-2.ap",
+		"v1-test.0-4.ap",
+		"v1-test.2-3.ap",
+		"v1-test.3-4.ap",
+		"v1-test.4-5.ap",
 	}
 	ii.scanStateFiles(files)
 	require.Equal(t, 6, ii.dirtyFiles.Len())

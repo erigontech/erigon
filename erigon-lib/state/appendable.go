@@ -164,7 +164,7 @@ func (fk *Appendable) OpenFolder(readonly bool) error {
 }
 
 func (fk *Appendable) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
-	re := regexp.MustCompile("^v([0-9]+)-" + fk.filenameBase + ".([0-9]+)-([0-9]+).ef$")
+	re := regexp.MustCompile("^v([0-9]+)-" + fk.filenameBase + ".([0-9]+)-([0-9]+).ap$")
 	var err error
 	for _, name := range fileNames {
 		subs := re.FindStringSubmatch(name)
