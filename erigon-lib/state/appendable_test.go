@@ -165,7 +165,6 @@ func TestAppendableCollationBuild(t *testing.T) {
 		mergeAppendable(t, db, ii, txs)
 		checkRangesAppendable(t, db, ii, txs)
 	})
-
 }
 
 func filledAppendable(tb testing.TB, logger log.Logger) (kv.RwDB, *Appendable, uint64) {
