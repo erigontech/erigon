@@ -73,9 +73,9 @@ func (ii *InvertedIndex) endIndexedTxNumMinimax(needFrozen bool) uint64 {
 	return _max
 }
 
-func (fk *Appendable) endTxNumMinimax() uint64 {
+func (ap *Appendable) endTxNumMinimax() uint64 {
 	var minimax uint64
-	if _max, ok := fk.dirtyFiles.Max(); ok {
+	if _max, ok := ap.dirtyFiles.Max(); ok {
 		endTxNum := _max.endTxNum
 		if minimax == 0 || endTxNum < minimax {
 			minimax = endTxNum
@@ -83,9 +83,9 @@ func (fk *Appendable) endTxNumMinimax() uint64 {
 	}
 	return minimax
 }
-func (fk *Appendable) endIndexedTxNumMinimax(needFrozen bool) uint64 {
+func (ap *Appendable) endIndexedTxNumMinimax(needFrozen bool) uint64 {
 	var _max uint64
-	fk.dirtyFiles.Walk(func(items []*filesItem) bool {
+	ap.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.index == nil || (needFrozen && !item.frozen) {
 				continue
@@ -1212,14 +1212,14 @@ func (ii *InvertedIndex) integrateMergedDirtyFiles(outs []*filesItem, in *filesI
 		out.canDelete.Store(true)
 	}
 }
-func (fk *Appendable) integrateMergedDirtyFiles(outs []*filesItem, in *filesItem) {
+func (ap *Appendable) integrateMergedDirtyFiles(outs []*filesItem, in *filesItem) {
 	if in != nil {
-		fk.dirtyFiles.Set(in)
+		ap.dirtyFiles.Set(in)
 
 		// `kill -9` may leave some garbage
 		// but it still may be useful for merges, until we finish merge frozen file
 		if in.frozen {
-			fk.dirtyFiles.Walk(func(items []*filesItem) bool {
+			ap.dirtyFiles.Walk(func(items []*filesItem) bool {
 				for _, item := range items {
 					if item.frozen || item.endTxNum > in.endTxNum {
 						continue
@@ -1232,12 +1232,12 @@ func (fk *Appendable) integrateMergedDirtyFiles(outs []*filesItem, in *filesItem
 	}
 	for _, out := range outs {
 		if out == nil {
-			panic("must not happen: " + fk.filenameBase)
+			panic("must not happen: " + ap.filenameBase)
 		}
-		fk.dirtyFiles.Delete(out)
+		ap.dirtyFiles.Delete(out)
 
-		if fk.filenameBase == traceFileLife {
-			fk.logger.Warn(fmt.Sprintf("[agg] mark can delete: %s, triggered by merge of: %s", out.decompressor.FileName(), in.decompressor.FileName()))
+		if ap.filenameBase == traceFileLife {
+			ap.logger.Warn(fmt.Sprintf("[agg] mark can delete: %s, triggered by merge of: %s", out.decompressor.FileName(), in.decompressor.FileName()))
 		}
 		out.canDelete.Store(true)
 	}

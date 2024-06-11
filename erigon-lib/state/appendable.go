@@ -121,97 +121,97 @@ func NewAppendable(cfg AppendableCfg, aggregationStep uint64, filenameBase, tabl
 	return &fk, nil
 }
 
-func (fk *Appendable) accessorFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(fk.cfg.Dirs.SnapAccessors, fmt.Sprintf("v1-%s.%d-%d.api", fk.filenameBase, fromStep, toStep))
+func (ap *Appendable) accessorFilePath(fromStep, toStep uint64) string {
+	return filepath.Join(ap.cfg.Dirs.SnapAccessors, fmt.Sprintf("v1-%s.%d-%d.api", ap.filenameBase, fromStep, toStep))
 }
-func (fk *Appendable) fkFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(fk.cfg.Dirs.SnapHistory, fmt.Sprintf("v1-%s.%d-%d.ap", fk.filenameBase, fromStep, toStep))
+func (ap *Appendable) fkFilePath(fromStep, toStep uint64) string {
+	return filepath.Join(ap.cfg.Dirs.SnapHistory, fmt.Sprintf("v1-%s.%d-%d.ap", ap.filenameBase, fromStep, toStep))
 }
 
-func (fk *Appendable) fileNamesOnDisk() (idx, hist, domain []string, err error) {
-	idx, err = filesFromDir(fk.cfg.Dirs.SnapIdx)
+func (ap *Appendable) fileNamesOnDisk() (idx, hist, domain []string, err error) {
+	idx, err = filesFromDir(ap.cfg.Dirs.SnapIdx)
 	if err != nil {
 		return
 	}
-	hist, err = filesFromDir(fk.cfg.Dirs.SnapHistory)
+	hist, err = filesFromDir(ap.cfg.Dirs.SnapHistory)
 	if err != nil {
 		return
 	}
-	domain, err = filesFromDir(fk.cfg.Dirs.SnapDomain)
+	domain, err = filesFromDir(ap.cfg.Dirs.SnapDomain)
 	if err != nil {
 		return
 	}
 	return
 }
 
-func (fk *Appendable) OpenList(fNames []string, readonly bool) error {
-	fk.closeWhatNotInList(fNames)
-	fk.scanStateFiles(fNames)
-	if err := fk.openFiles(); err != nil {
-		return fmt.Errorf("NewHistory.openFiles: %w, %s", err, fk.filenameBase)
+func (ap *Appendable) OpenList(fNames []string, readonly bool) error {
+	ap.closeWhatNotInList(fNames)
+	ap.scanStateFiles(fNames)
+	if err := ap.openFiles(); err != nil {
+		return fmt.Errorf("NewHistory.openFiles: %w, %s", err, ap.filenameBase)
 	}
 	_ = readonly // for future safety features. RPCDaemon must not delte files
 	return nil
 }
 
-func (fk *Appendable) OpenFolder(readonly bool) error {
-	idxFiles, _, _, err := fk.fileNamesOnDisk()
+func (ap *Appendable) OpenFolder(readonly bool) error {
+	idxFiles, _, _, err := ap.fileNamesOnDisk()
 	if err != nil {
 		return err
 	}
-	return fk.OpenList(idxFiles, readonly)
+	return ap.OpenList(idxFiles, readonly)
 }
 
-func (fk *Appendable) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
-	re := regexp.MustCompile("^v([0-9]+)-" + fk.filenameBase + ".([0-9]+)-([0-9]+).ap$")
+func (ap *Appendable) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
+	re := regexp.MustCompile("^v([0-9]+)-" + ap.filenameBase + ".([0-9]+)-([0-9]+).ap$")
 	var err error
 	for _, name := range fileNames {
 		subs := re.FindStringSubmatch(name)
 		if len(subs) != 4 {
 			if len(subs) != 0 {
-				fk.logger.Warn("File ignored by inverted index scan, more than 3 submatches", "name", name, "submatches", len(subs))
+				ap.logger.Warn("File ignored by inverted index scan, more than 3 submatches", "name", name, "submatches", len(subs))
 			}
 			continue
 		}
 		var startStep, endStep uint64
 		if startStep, err = strconv.ParseUint(subs[2], 10, 64); err != nil {
-			fk.logger.Warn("File ignored by inverted index scan, parsing startTxNum", "error", err, "name", name)
+			ap.logger.Warn("File ignored by inverted index scan, parsing startTxNum", "error", err, "name", name)
 			continue
 		}
 		if endStep, err = strconv.ParseUint(subs[3], 10, 64); err != nil {
-			fk.logger.Warn("File ignored by inverted index scan, parsing endTxNum", "error", err, "name", name)
+			ap.logger.Warn("File ignored by inverted index scan, parsing endTxNum", "error", err, "name", name)
 			continue
 		}
 		if startStep > endStep {
-			fk.logger.Warn("File ignored by inverted index scan, startTxNum > endTxNum", "name", name)
+			ap.logger.Warn("File ignored by inverted index scan, startTxNum > endTxNum", "name", name)
 			continue
 		}
 
-		startTxNum, endTxNum := startStep*fk.aggregationStep, endStep*fk.aggregationStep
-		var newFile = newFilesItem(startTxNum, endTxNum, fk.aggregationStep)
+		startTxNum, endTxNum := startStep*ap.aggregationStep, endStep*ap.aggregationStep
+		var newFile = newFilesItem(startTxNum, endTxNum, ap.aggregationStep)
 
-		if fk.integrityCheck != nil && !fk.integrityCheck(startStep, endStep) {
+		if ap.integrityCheck != nil && !ap.integrityCheck(startStep, endStep) {
 			continue
 		}
 
-		if _, has := fk.dirtyFiles.Get(newFile); has {
+		if _, has := ap.dirtyFiles.Get(newFile); has {
 			continue
 		}
 
-		fk.dirtyFiles.Set(newFile)
+		ap.dirtyFiles.Set(newFile)
 	}
 	return garbageFiles
 }
 
-func (fk *Appendable) reCalcVisibleFiles() {
-	fk._visibleFiles = calcVisibleFiles(fk.dirtyFiles, fk.indexList, false)
+func (ap *Appendable) reCalcVisibleFiles() {
+	ap._visibleFiles = calcVisibleFiles(ap.dirtyFiles, ap.indexList, false)
 }
 
-func (fk *Appendable) missedAccessors() (l []*filesItem) {
-	fk.dirtyFiles.Walk(func(items []*filesItem) bool {
+func (ap *Appendable) missedAccessors() (l []*filesItem) {
+	ap.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
-			fromStep, toStep := item.startTxNum/fk.aggregationStep, item.endTxNum/fk.aggregationStep
-			if !dir.FileExist(fk.accessorFilePath(fromStep, toStep)) {
+			fromStep, toStep := item.startTxNum/ap.aggregationStep, item.endTxNum/ap.aggregationStep
+			if !dir.FileExist(ap.accessorFilePath(fromStep, toStep)) {
 				l = append(l, item)
 			}
 		}
@@ -220,20 +220,20 @@ func (fk *Appendable) missedAccessors() (l []*filesItem) {
 	return l
 }
 
-func (fk *Appendable) buildAccessor(ctx context.Context, fromStep, toStep uint64, d *seg.Decompressor, ps *background.ProgressSet) error {
+func (ap *Appendable) buildAccessor(ctx context.Context, fromStep, toStep uint64, d *seg.Decompressor, ps *background.ProgressSet) error {
 	if d == nil {
-		return fmt.Errorf("buildAccessor: passed item with nil decompressor %s %d-%d", fk.filenameBase, fromStep, toStep)
+		return fmt.Errorf("buildAccessor: passed item with nil decompressor %s %d-%d", ap.filenameBase, fromStep, toStep)
 	}
-	idxPath := fk.accessorFilePath(fromStep, toStep)
+	idxPath := ap.accessorFilePath(fromStep, toStep)
 	cfg := recsplit.RecSplitArgs{
 		Enums: true,
 
 		BucketSize: 2000,
 		LeafSize:   8,
-		TmpDir:     fk.cfg.Dirs.Tmp,
+		TmpDir:     ap.cfg.Dirs.Tmp,
 		IndexFile:  idxPath,
-		Salt:       fk.cfg.Salt,
-		NoFsync:    fk.noFsync,
+		Salt:       ap.cfg.Salt,
+		NoFsync:    ap.noFsync,
 
 		KeyCount: d.Count(),
 	}
@@ -243,7 +243,7 @@ func (fk *Appendable) buildAccessor(ctx context.Context, fromStep, toStep uint64
 	defer ps.Delete(p)
 
 	num := make([]byte, binary.MaxVarintLen64)
-	return buildSimpleMapAccessor(ctx, d, cfg, fk.logger, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+	return buildSimpleMapAccessor(ctx, d, cfg, ap.logger, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		if p != nil {
 			p.Processed.Add(1)
 		}
@@ -255,29 +255,29 @@ func (fk *Appendable) buildAccessor(ctx context.Context, fromStep, toStep uint64
 	})
 }
 
-func (fk *Appendable) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
-	for _, item := range fk.missedAccessors() {
+func (ap *Appendable) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
+	for _, item := range ap.missedAccessors() {
 		item := item
 		g.Go(func() error {
-			fromStep, toStep := item.startTxNum/fk.aggregationStep, item.endTxNum/fk.aggregationStep
-			return fk.buildAccessor(ctx, fromStep, toStep, item.decompressor, ps)
+			fromStep, toStep := item.startTxNum/ap.aggregationStep, item.endTxNum/ap.aggregationStep
+			return ap.buildAccessor(ctx, fromStep, toStep, item.decompressor, ps)
 		})
 	}
 }
 
-func (fk *Appendable) openFiles() error {
+func (ap *Appendable) openFiles() error {
 	var invalidFileItems []*filesItem
 	invalidFileItemsLock := sync.Mutex{}
-	fk.dirtyFiles.Walk(func(items []*filesItem) bool {
+	ap.dirtyFiles.Walk(func(items []*filesItem) bool {
 		var err error
 		for _, item := range items {
 			item := item
-			fromStep, toStep := item.startTxNum/fk.aggregationStep, item.endTxNum/fk.aggregationStep
+			fromStep, toStep := item.startTxNum/ap.aggregationStep, item.endTxNum/ap.aggregationStep
 			if item.decompressor == nil {
-				fPath := fk.fkFilePath(fromStep, toStep)
+				fPath := ap.fkFilePath(fromStep, toStep)
 				if !dir.FileExist(fPath) {
 					_, fName := filepath.Split(fPath)
-					fk.logger.Debug("[agg] Appendable.openFiles: file does not exists", "f", fName)
+					ap.logger.Debug("[agg] Appendable.openFiles: file does not exists", "f", fName)
 					invalidFileItemsLock.Lock()
 					invalidFileItems = append(invalidFileItems, item)
 					invalidFileItemsLock.Unlock()
@@ -287,9 +287,9 @@ func (fk *Appendable) openFiles() error {
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 					_, fName := filepath.Split(fPath)
 					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
-						fk.logger.Debug("[agg] Appendable.openFiles", "err", err, "f", fName)
+						ap.logger.Debug("[agg] Appendable.openFiles", "err", err, "f", fName)
 					} else {
-						fk.logger.Warn("[agg] Appendable.openFiles", "err", err, "f", fName)
+						ap.logger.Warn("[agg] Appendable.openFiles", "err", err, "f", fName)
 					}
 					invalidFileItemsLock.Lock()
 					invalidFileItems = append(invalidFileItems, item)
@@ -300,11 +300,11 @@ func (fk *Appendable) openFiles() error {
 			}
 
 			if item.index == nil {
-				fPath := fk.accessorFilePath(fromStep, toStep)
+				fPath := ap.accessorFilePath(fromStep, toStep)
 				if dir.FileExist(fPath) {
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
-						fk.logger.Warn("[agg] Appendable.openFiles", "err", err, "f", fName)
+						ap.logger.Warn("[agg] Appendable.openFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
 					}
 				}
@@ -315,15 +315,15 @@ func (fk *Appendable) openFiles() error {
 	})
 	for _, item := range invalidFileItems {
 		item.closeFiles()
-		fk.dirtyFiles.Delete(item)
+		ap.dirtyFiles.Delete(item)
 	}
 
 	return nil
 }
 
-func (fk *Appendable) closeWhatNotInList(fNames []string) {
+func (ap *Appendable) closeWhatNotInList(fNames []string) {
 	var toDelete []*filesItem
-	fk.dirtyFiles.Walk(func(items []*filesItem) bool {
+	ap.dirtyFiles.Walk(func(items []*filesItem) bool {
 	Loop1:
 		for _, item := range items {
 			for _, protectName := range fNames {
@@ -337,16 +337,16 @@ func (fk *Appendable) closeWhatNotInList(fNames []string) {
 	})
 	for _, item := range toDelete {
 		item.closeFiles()
-		fk.dirtyFiles.Delete(item)
+		ap.dirtyFiles.Delete(item)
 	}
 }
 
-func (fk *Appendable) Close() {
-	fk.closeWhatNotInList([]string{})
+func (ap *Appendable) Close() {
+	ap.closeWhatNotInList([]string{})
 }
 
 // DisableFsync - just for tests
-func (fk *Appendable) DisableFsync() { fk.noFsync = true }
+func (ap *Appendable) DisableFsync() { ap.noFsync = true }
 
 func (tx *AppendableRoTx) Files() (res []string) {
 	for _, item := range tx.files {
@@ -398,11 +398,11 @@ func (tx *AppendableRoTx) fileByTS(ts uint64) (i int, ok bool) {
 	return 0, false
 }
 
-func (fk *Appendable) getFromDBByTs(ts uint64, dbtx kv.Tx) ([]byte, bool, error) {
-	return fk.getFromDB(hexutility.EncodeTs(ts), dbtx)
+func (ap *Appendable) getFromDBByTs(ts uint64, dbtx kv.Tx) ([]byte, bool, error) {
+	return ap.getFromDB(hexutility.EncodeTs(ts), dbtx)
 }
-func (fk *Appendable) getFromDB(k []byte, dbtx kv.Tx) ([]byte, bool, error) {
-	v, err := dbtx.GetOne(fk.table, k)
+func (ap *Appendable) getFromDB(k []byte, dbtx kv.Tx) ([]byte, bool, error) {
+	v, err := dbtx.GetOne(ap.table, k)
 	if err != nil {
 		return nil, false, err
 	}
@@ -483,15 +483,15 @@ func (tx *AppendableRoTx) newWriter(tmpdir string, discard bool) *appendableBuff
 	return w
 }
 
-func (fk *Appendable) BeginFilesRo() *AppendableRoTx {
-	files := fk._visibleFiles
+func (ap *Appendable) BeginFilesRo() *AppendableRoTx {
+	files := ap._visibleFiles
 	for i := 0; i < len(files); i++ {
 		if !files[i].src.frozen {
 			files[i].src.refcount.Add(1)
 		}
 	}
 	return &AppendableRoTx{
-		ap:    fk,
+		ap:    ap,
 		files: files,
 	}
 }
@@ -702,15 +702,15 @@ func (tx *AppendableRoTx) txNum2id(rwTx kv.RwTx, txFrom, txTo uint64) (fromID, t
 	return fromID, toID, found1 && found2, nil
 }
 
-func (fk *Appendable) collate(ctx context.Context, step uint64, roTx kv.Tx) (AppendableCollation, error) {
+func (ap *Appendable) collate(ctx context.Context, step uint64, roTx kv.Tx) (AppendableCollation, error) {
 	stepTo := step + 1
-	txFrom, txTo := step*fk.aggregationStep, stepTo*fk.aggregationStep
+	txFrom, txTo := step*ap.aggregationStep, stepTo*ap.aggregationStep
 	start := time.Now()
 	defer mxCollateTookIndex.ObserveDuration(start)
 
 	var (
 		coll = AppendableCollation{
-			iiPath: fk.fkFilePath(step, stepTo),
+			iiPath: ap.fkFilePath(step, stepTo),
 		}
 		closeComp bool
 	)
@@ -719,32 +719,32 @@ func (fk *Appendable) collate(ctx context.Context, step uint64, roTx kv.Tx) (App
 			coll.Close()
 		}
 	}()
-	comp, err := seg.NewCompressor(ctx, "collate "+fk.filenameBase, coll.iiPath, fk.cfg.Dirs.Tmp, seg.MinPatternScore, fk.compressWorkers, log.LvlTrace, fk.logger)
+	comp, err := seg.NewCompressor(ctx, "collate "+ap.filenameBase, coll.iiPath, ap.cfg.Dirs.Tmp, seg.MinPatternScore, ap.compressWorkers, log.LvlTrace, ap.logger)
 	if err != nil {
-		return coll, fmt.Errorf("create %s compressor: %w", fk.filenameBase, err)
+		return coll, fmt.Errorf("create %s compressor: %w", ap.filenameBase, err)
 	}
-	coll.writer = NewArchiveWriter(comp, fk.compression)
+	coll.writer = NewArchiveWriter(comp, ap.compression)
 
-	it, err := fk.cfg.iters.TxnIdsOfCanonicalBlocks(roTx, int(txFrom), int(txTo), order.Asc, -1)
+	it, err := ap.cfg.iters.TxnIdsOfCanonicalBlocks(roTx, int(txFrom), int(txTo), order.Asc, -1)
 	if err != nil {
-		return coll, fmt.Errorf("collate %s: %w", fk.filenameBase, err)
+		return coll, fmt.Errorf("collate %s: %w", ap.filenameBase, err)
 	}
 	defer it.Close()
 
 	for it.HasNext() {
 		k, err := it.Next()
 		if err != nil {
-			return coll, fmt.Errorf("collate %s: %w", fk.filenameBase, err)
+			return coll, fmt.Errorf("collate %s: %w", ap.filenameBase, err)
 		}
-		v, ok, err := fk.getFromDBByTs(k, roTx)
+		v, ok, err := ap.getFromDBByTs(k, roTx)
 		if err != nil {
-			return coll, fmt.Errorf("collate %s: %w", fk.filenameBase, err)
+			return coll, fmt.Errorf("collate %s: %w", ap.filenameBase, err)
 		}
 		if !ok {
 			continue
 		}
 		if err = coll.writer.AddWord(v); err != nil {
-			return coll, fmt.Errorf("collate %s: %w", fk.filenameBase, err)
+			return coll, fmt.Errorf("collate %s: %w", ap.filenameBase, err)
 		}
 	}
 
@@ -752,18 +752,18 @@ func (fk *Appendable) collate(ctx context.Context, step uint64, roTx kv.Tx) (App
 	return coll, nil
 }
 
-func (fk *Appendable) stepsRangeInDBAsStr(tx kv.Tx) string {
-	a1, a2 := fk.stepsRangeInDB(tx)
-	return fmt.Sprintf("%s: %.1f", fk.filenameBase, a2-a1)
+func (ap *Appendable) stepsRangeInDBAsStr(tx kv.Tx) string {
+	a1, a2 := ap.stepsRangeInDB(tx)
+	return fmt.Sprintf("%s: %.1f", ap.filenameBase, a2-a1)
 }
-func (fk *Appendable) stepsRangeInDB(tx kv.Tx) (from, to float64) {
-	fst, _ := kv.FirstKey(tx, fk.table)
+func (ap *Appendable) stepsRangeInDB(tx kv.Tx) (from, to float64) {
+	fst, _ := kv.FirstKey(tx, ap.table)
 	if len(fst) > 0 {
-		from = float64(binary.BigEndian.Uint64(fst)) / float64(fk.aggregationStep)
+		from = float64(binary.BigEndian.Uint64(fst)) / float64(ap.aggregationStep)
 	}
-	lst, _ := kv.LastKey(tx, fk.table)
+	lst, _ := kv.LastKey(tx, ap.table)
 	if len(lst) > 0 {
-		to = float64(binary.BigEndian.Uint64(lst)) / float64(fk.aggregationStep)
+		to = float64(binary.BigEndian.Uint64(lst)) / float64(ap.aggregationStep)
 	}
 	if to == 0 {
 		to = from
@@ -799,7 +799,7 @@ func (ic AppendableCollation) Close() {
 }
 
 // buildFiles - `step=N` means build file `[N:N+1)` which is equal to [N:N+1)
-func (fk *Appendable) buildFiles(ctx context.Context, step uint64, coll AppendableCollation, ps *background.ProgressSet) (AppendableFiles, error) {
+func (ap *Appendable) buildFiles(ctx context.Context, step uint64, coll AppendableCollation, ps *background.ProgressSet) (AppendableFiles, error) {
 	var (
 		decomp *seg.Decompressor
 		index  *recsplit.Index
@@ -822,7 +822,7 @@ func (fk *Appendable) buildFiles(ctx context.Context, step uint64, coll Appendab
 
 	if assert.Enable {
 		if coll.iiPath == "" && reflect.ValueOf(coll.writer).IsNil() {
-			panic("assert: collation is not initialized " + fk.filenameBase)
+			panic("assert: collation is not initialized " + ap.filenameBase)
 		}
 	}
 
@@ -830,20 +830,20 @@ func (fk *Appendable) buildFiles(ctx context.Context, step uint64, coll Appendab
 		p := ps.AddNew(path.Base(coll.iiPath), 1)
 		if err = coll.writer.Compress(); err != nil {
 			ps.Delete(p)
-			return AppendableFiles{}, fmt.Errorf("compress %s: %w", fk.filenameBase, err)
+			return AppendableFiles{}, fmt.Errorf("compress %s: %w", ap.filenameBase, err)
 		}
 		coll.Close()
 		ps.Delete(p)
 	}
 
 	if decomp, err = seg.NewDecompressor(coll.iiPath); err != nil {
-		return AppendableFiles{}, fmt.Errorf("open %s decompressor: %w", fk.filenameBase, err)
+		return AppendableFiles{}, fmt.Errorf("open %s decompressor: %w", ap.filenameBase, err)
 	}
 
-	if err := fk.buildAccessor(ctx, step, step+1, decomp, ps); err != nil {
-		return AppendableFiles{}, fmt.Errorf("build %s api: %w", fk.filenameBase, err)
+	if err := ap.buildAccessor(ctx, step, step+1, decomp, ps); err != nil {
+		return AppendableFiles{}, fmt.Errorf("build %s api: %w", ap.filenameBase, err)
 	}
-	if index, err = recsplit.OpenIndex(fk.accessorFilePath(step, step+1)); err != nil {
+	if index, err = recsplit.OpenIndex(ap.accessorFilePath(step, step+1)); err != nil {
 		return AppendableFiles{}, err
 	}
 
@@ -851,9 +851,9 @@ func (fk *Appendable) buildFiles(ctx context.Context, step uint64, coll Appendab
 	return AppendableFiles{decomp: decomp, index: index}, nil
 }
 
-func (fk *Appendable) integrateDirtyFiles(sf AppendableFiles, txNumFrom, txNumTo uint64) {
-	fi := newFilesItem(txNumFrom, txNumTo, fk.aggregationStep)
+func (ap *Appendable) integrateDirtyFiles(sf AppendableFiles, txNumFrom, txNumTo uint64) {
+	fi := newFilesItem(txNumFrom, txNumTo, ap.aggregationStep)
 	fi.decompressor = sf.decomp
 	fi.index = sf.index
-	fk.dirtyFiles.Set(fi)
+	ap.dirtyFiles.Set(fi)
 }
