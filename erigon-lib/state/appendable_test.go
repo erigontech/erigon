@@ -150,6 +150,9 @@ func TestAppendableCollationBuild(t *testing.T) {
 		require.NoError(err)
 		require.True(ok)
 	})
+
+	checkRangesAppendable(t, db, ii, txs)
+
 }
 
 func filledAppendable(tb testing.TB, logger log.Logger) (kv.RwDB, *Appendable, uint64) {
@@ -309,37 +312,7 @@ func mergeAppendable(tb testing.TB, db kv.RwDB, ii *Appendable, txs uint64) {
 	}
 	err = tx.Commit()
 	require.NoError(tb, err)
-}
 
-func TestAppendableRanges(t *testing.T) {
-	logger := log.New()
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-	db, ii, txs := filledAppendable(t, logger)
-	ctx := context.Background()
-	tx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	// Leave the last 2 aggregation steps un-collated
-	for step := uint64(0); step < txs/ii.aggregationStep-1; step++ {
-		func() {
-			bs, err := ii.collate(ctx, step, tx)
-			require.NoError(t, err)
-			sf, err := ii.buildFiles(ctx, step, bs, background.NewProgressSet())
-			require.NoError(t, err)
-			ii.integrateDirtyFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
-			ii.reCalcVisibleFiles()
-			ic := ii.BeginFilesRo()
-			defer ic.Close()
-			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, false, nil)
-			require.NoError(t, err)
-		}()
-	}
-	err = tx.Commit()
-	require.NoError(t, err)
-
-	checkRangesAppendable(t, db, ii, txs)
 }
 
 func TestAppendableMerge(t *testing.T) {
