@@ -649,7 +649,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", dt.d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}
 	} else {
-		if err = dt.d.buildMapIdx(ctx, fromStep, toStep, valuesIn.decompressor, ps); err != nil {
+		if err = dt.d.buildAccessor(ctx, fromStep, toStep, valuesIn.decompressor, ps); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s buildAccessor [%d-%d]: %w", dt.d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}
 		if valuesIn.index, err = recsplit.OpenIndex(dt.d.kvAccessorFilePath(fromStep, toStep)); err != nil {

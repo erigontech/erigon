@@ -950,7 +950,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	}
 
 	if !UseBpsTree {
-		if err = d.buildMapAccessor(ctx, step, step+1, valuesDecomp, ps); err != nil {
+		if err = d.buildAccessor(ctx, step, step+1, valuesDecomp, ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
 		}
 		valuesIdx, err = recsplit.OpenIndex(d.efAccessorFilePath(step, step+1))
@@ -985,7 +985,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	}, nil
 }
 
-func (d *Domain) buildMapAccessor(ctx context.Context, fromStep, toStep uint64, data *seg.Decompressor, ps *background.ProgressSet) error {
+func (d *Domain) buildAccessor(ctx context.Context, fromStep, toStep uint64, data *seg.Decompressor, ps *background.ProgressSet) error {
 	idxPath := d.kvAccessorFilePath(fromStep, toStep)
 	cfg := recsplit.RecSplitArgs{
 		Enums:              false,
@@ -1001,7 +1001,7 @@ func (d *Domain) buildMapAccessor(ctx context.Context, fromStep, toStep uint64, 
 	return buildAccessor(ctx, data, d.compression, idxPath, false, cfg, ps, d.logger)
 }
 
-func (d *Domain) missedBtreeIdxFiles() (l []*filesItem) {
+func (d *Domain) missedBtreeAccessors() (l []*filesItem) {
 	d.dirtyFiles.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
@@ -1051,7 +1051,7 @@ func (d *Domain) missedAccessors() (l []*filesItem) {
 // BuildMissedAccessors - produce .efi/.vi/.kvi from .ef/.v/.kv
 func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
 	d.History.BuildMissedAccessors(ctx, g, ps)
-	for _, item := range d.missedBtreeIdxFiles() {
+	for _, item := range d.missedBtreeAccessors() {
 		if !UseBpsTree {
 			continue
 		}
@@ -1083,7 +1083,7 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 			}
 
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
-			err := d.buildMapAccessor(ctx, fromStep, toStep, item.decompressor, ps)
+			err := d.buildAccessor(ctx, fromStep, toStep, item.decompressor, ps)
 			if err != nil {
 				return fmt.Errorf("build %s values recsplit index: %w", d.filenameBase, err)
 			}
