@@ -140,6 +140,7 @@ func (b *builderClient) GetStatus(ctx context.Context) error {
 func httpCall[T any](ctx context.Context, client *http.Client, method, url string, headers map[string]string, payloadReader io.Reader) (*T, error) {
 	request, err := http.NewRequestWithContext(ctx, method, url, payloadReader)
 	if err != nil {
+		log.Warn("[mev builder] http.NewRequest failed", "err", err, "url", url, "method", method)
 		return nil, err
 	}
 	request.Header.Set("Content-Type", "application/json")
@@ -149,6 +150,7 @@ func httpCall[T any](ctx context.Context, client *http.Client, method, url strin
 	// send request
 	response, err := client.Do(request)
 	if err != nil {
+		log.Warn("[mev builder] client.Do failed", "err", err, "url", url, "method", method)
 		return nil, err
 	}
 	defer response.Body.Close()
@@ -163,6 +165,7 @@ func httpCall[T any](ctx context.Context, client *http.Client, method, url strin
 	// read response body
 	bytes, err := io.ReadAll(response.Body)
 	if err != nil {
+		log.Warn("[mev builder] io.ReadAll failed", "err", err, "url", url, "method", method)
 		return nil, err
 	}
 	log.Info("[mev builder] httpCall success", "url", url, "method", method, "response", string(bytes), "statusCode", response.StatusCode)
