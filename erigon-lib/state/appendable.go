@@ -47,7 +47,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 )
 
 // Appendable - data type allows store data for different blockchain forks.
@@ -701,56 +700,6 @@ func (tx *AppendableRoTx) txNum2id(rwTx kv.RwTx, txFrom, txTo uint64) (fromID, t
 	}
 
 	return fromID, toID, found1 && found2, nil
-}
-
-func (tx *AppendableRoTx) DebugEFAllValuesAreInRange(ctx context.Context) error {
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-	iterStep := func(item ctxItem) error {
-		g := item.src.decompressor.MakeGetter()
-		g.Reset(0)
-		defer item.src.decompressor.EnableReadAhead().DisableReadAhead()
-
-		for g.HasNext() {
-			k, _ := g.NextUncompressed()
-			_ = k
-			eliasVal, _ := g.NextUncompressed()
-			ef, _ := eliasfano32.ReadEliasFano(eliasVal)
-			if ef.Count() == 0 {
-				continue
-			}
-			if item.startTxNum > ef.Min() {
-				err := fmt.Errorf("DebugEFAllValuesAreInRange1: %d > %d, %s, %x", item.startTxNum, ef.Min(), g.FileName(), k)
-				log.Warn(err.Error())
-				//return err
-			}
-			if item.endTxNum < ef.Max() {
-				err := fmt.Errorf("DebugEFAllValuesAreInRange2: %d < %d, %s, %x", item.endTxNum, ef.Max(), g.FileName(), k)
-				log.Warn(err.Error())
-				//return err
-			}
-
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-logEvery.C:
-				log.Info(fmt.Sprintf("[integrity] EFAllValuesAreInRange: %s, k=%x", g.FileName(), k))
-			default:
-			}
-		}
-		return nil
-	}
-
-	for _, item := range tx.files {
-		if item.src.decompressor == nil {
-			continue
-		}
-		if err := iterStep(item); err != nil {
-			return err
-		}
-		//log.Warn(fmt.Sprintf("[dbg] see1: %s, min=%d,max=%d, before_max=%d, all: %d\n", item.src.decompressor.FileName(), ef.Min(), ef.Max(), last2, iter.ToArrU64Must(ef.Iterator())))
-	}
-	return nil
 }
 
 func (fk *Appendable) collate(ctx context.Context, step uint64, roTx kv.Tx) (AppendableCollation, error) {
