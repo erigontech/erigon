@@ -61,11 +61,24 @@ func printCurentStage(cliCtx *cli.Context) error {
 func printSyncStages(cliCtx *cli.Context, isCurrent bool) error {
 	autoupdate := cliCtx.Bool(flags.AutoUpdateFlag.Name)
 
+	syncStages, err := querySyncInfo(cliCtx)
+	if err != nil {
+		util.RenderError(err)
+		return nil
+	} else {
+		var stagesRows []table.Row
+		if isCurrent {
+			stagesRows = getCurrentStageRow(syncStages)
+		} else {
+			stagesRows = getStagesRows(syncStages)
+		}
+		printData(cliCtx, stagesRows)
+	}
+
 	if autoupdate {
 		interval := time.Duration(cliCtx.Int(flags.AutoUpdateIntervalFlag.Name)) * time.Millisecond
 		var wg sync.WaitGroup
 		wg.Add(1)
-		defer wg.Done()
 
 		ticker := time.NewTicker(interval)
 		go func() {
@@ -82,6 +95,10 @@ func printSyncStages(cliCtx *cli.Context, isCurrent bool) error {
 						}
 
 						printData(cliCtx, stagesRows)
+					} else {
+						util.RenderError(err)
+						wg.Done()
+						return
 					}
 
 				case <-cliCtx.Done():
@@ -92,20 +109,6 @@ func printSyncStages(cliCtx *cli.Context, isCurrent bool) error {
 		}()
 
 		wg.Wait()
-	} else {
-		syncStages, err := querySyncInfo(cliCtx)
-		if err != nil {
-			util.RenderError(err)
-			return nil
-		}
-
-		var stagesRows []table.Row
-		if isCurrent {
-			stagesRows = getCurrentStageRow(syncStages)
-		} else {
-			stagesRows = getStagesRows(syncStages)
-		}
-		printData(cliCtx, stagesRows)
 	}
 
 	return nil
