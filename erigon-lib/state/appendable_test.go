@@ -87,8 +87,13 @@ func TestAppendableCollationBuild(t *testing.T) {
 		require.True(ok)
 		require.Equal(2, int(binary.BigEndian.Uint64(v)))
 
-		//can see existing forks
+		//never existed key
 		v, ok, err = ic.Get(txs+1, tx)
+		require.NoError(err)
+		require.False(ok)
+
+		//non-canonical key: must exist before collate+prune
+		v, ok, err = ic.Get(63, tx)
 		require.NoError(err)
 		require.False(ok)
 
@@ -125,7 +130,7 @@ func TestAppendableCollationBuild(t *testing.T) {
 		require.True(ok)
 		require.Equal(int(aggStep+1), int(binary.BigEndian.Uint64(w)))
 
-		//key which existed before collate+prune
+		//non-canonical key: must exist before collate+prune
 		w, ok = ic.getFromFiles(63)
 		require.False(ok)
 	})
@@ -154,7 +159,7 @@ func TestAppendableCollationBuild(t *testing.T) {
 		require.True(ok)
 		require.Equal(int(aggStep+1), int(binary.BigEndian.Uint64(w)))
 
-		//key which existed before collate+prune
+		//non-canonical key: must exist before collate+prune
 		w, ok, err = ic.Get(63, tx)
 		require.False(ok)
 	})
