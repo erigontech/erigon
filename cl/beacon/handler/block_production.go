@@ -346,10 +346,7 @@ func (a *ApiHandler) getBuilderPayload(
 		return nil, err
 	}
 	// get the parent hash of base execution block
-	parentHash, err := baseBlock.Body.Eth1Data.HashSSZ()
-	if err != nil {
-		return nil, err
-	}
+	parentHash := baseBlock.Body.Eth1Data.BlockHash
 	header, err := a.builderClient.GetExecutionPayloadHeader(ctx, int64(targetSlot), parentHash, pubKey)
 	if err != nil {
 		return nil, err
