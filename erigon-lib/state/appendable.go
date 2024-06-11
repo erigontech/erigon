@@ -364,13 +364,13 @@ func (tx *AppendableRoTx) Get(ts uint64, dbtx kv.Tx) ([]byte, bool, error) {
 	if ok {
 		return v, true, nil
 	}
-	return tx.fk.getFromDBByTs(ts, dbtx)
+	return tx.ap.getFromDBByTs(ts, dbtx)
 }
 func (tx *AppendableRoTx) Put(ts uint64, v []byte, dbtx kv.RwTx) error {
-	return dbtx.Put(tx.fk.table, hexutility.EncodeTs(ts), v)
+	return dbtx.Put(tx.ap.table, hexutility.EncodeTs(ts), v)
 }
 func (tx *AppendableRoTx) Delete(ts uint64, dbtx kv.RwTx) error {
-	return dbtx.Delete(tx.fk.table, hexutility.EncodeTs(ts))
+	return dbtx.Delete(tx.ap.table, hexutility.EncodeTs(ts))
 }
 
 func (tx *AppendableRoTx) getFromFiles(ts uint64) (v []byte, ok bool) {
@@ -426,7 +426,7 @@ func (w *appendableBufferedWriter) Add(blockNum uint64, blockHash common.Hash, v
 }
 
 func (tx *AppendableRoTx) NewWriter() *appendableBufferedWriter {
-	return tx.newWriter(tx.fk.cfg.Dirs.Tmp, false)
+	return tx.newWriter(tx.ap.cfg.Dirs.Tmp, false)
 }
 
 type appendableBufferedWriter struct {
@@ -473,12 +473,12 @@ func (tx *AppendableRoTx) newWriter(tmpdir string, discard bool) *appendableBuff
 	w := &appendableBufferedWriter{
 		discard:         discard,
 		tmpdir:          tmpdir,
-		filenameBase:    tx.fk.filenameBase,
-		aggregationStep: tx.fk.aggregationStep,
+		filenameBase:    tx.ap.filenameBase,
+		aggregationStep: tx.ap.aggregationStep,
 
-		table: tx.fk.table,
+		table: tx.ap.table,
 		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
-		tableCollector: etl.NewCollector("flush "+tx.fk.table, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), tx.fk.logger),
+		tableCollector: etl.NewCollector("flush "+tx.ap.table, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), tx.ap.logger),
 	}
 	w.tableCollector.LogLvl(log.LvlTrace)
 	w.tableCollector.SortAndFlushInBackground(true)
@@ -493,7 +493,7 @@ func (fk *Appendable) BeginFilesRo() *AppendableRoTx {
 		}
 	}
 	return &AppendableRoTx{
-		fk:    fk,
+		ap:    fk,
 		files: files,
 	}
 }
@@ -511,8 +511,8 @@ func (tx *AppendableRoTx) Close() {
 		refCnt := files[i].src.refcount.Add(-1)
 		//GC: last reader responsible to remove useles files: close it and delete
 		if refCnt == 0 && files[i].src.canDelete.Load() {
-			if tx.fk.filenameBase == traceFileLife {
-				tx.fk.logger.Warn(fmt.Sprintf("[agg] real remove at ctx close: %s", files[i].src.decompressor.FileName()))
+			if tx.ap.filenameBase == traceFileLife {
+				tx.ap.logger.Warn(fmt.Sprintf("[agg] real remove at ctx close: %s", files[i].src.decompressor.FileName()))
 			}
 			files[i].src.closeFilesAndRemove()
 		}
@@ -524,7 +524,7 @@ func (tx *AppendableRoTx) Close() {
 }
 
 type AppendableRoTx struct {
-	fk      *Appendable
+	ap      *Appendable
 	files   []ctxItem // have no garbage (overlaps, etc...)
 	getters []ArchiveGetter
 	readers []*recsplit.IndexReader
@@ -534,7 +534,7 @@ type AppendableRoTx struct {
 
 func (tx *AppendableRoTx) statelessHasher() murmur3.Hash128 {
 	if tx._hasher == nil {
-		tx._hasher = murmur3.New128WithSeed(*tx.fk.cfg.Salt)
+		tx._hasher = murmur3.New128WithSeed(*tx.ap.cfg.Salt)
 	}
 	return tx._hasher
 }
@@ -552,7 +552,7 @@ func (tx *AppendableRoTx) statelessGetter(i int) ArchiveGetter {
 	r := tx.getters[i]
 	if r == nil {
 		g := tx.files[i].src.decompressor.MakeGetter()
-		r = NewArchiveGetter(g, tx.fk.compression)
+		r = NewArchiveGetter(g, tx.ap.compression)
 		tx.getters[i] = r
 	}
 	return r
@@ -570,7 +570,7 @@ func (tx *AppendableRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 }
 
 func (tx *AppendableRoTx) smallestTxNum(dbtx kv.Tx) uint64 {
-	fst, _ := kv.FirstKey(dbtx, tx.fk.table)
+	fst, _ := kv.FirstKey(dbtx, tx.ap.table)
 	if len(fst) > 0 {
 		fstInDb := binary.BigEndian.Uint64(fst)
 		return min(fstInDb, math.MaxUint64)
@@ -579,7 +579,7 @@ func (tx *AppendableRoTx) smallestTxNum(dbtx kv.Tx) uint64 {
 }
 
 func (tx *AppendableRoTx) highestTxNum(dbtx kv.Tx) uint64 {
-	lst, _ := kv.LastKey(dbtx, tx.fk.table)
+	lst, _ := kv.LastKey(dbtx, tx.ap.table)
 	if len(lst) > 0 {
 		lstInDb := binary.BigEndian.Uint64(lst)
 		return max(lstInDb, 0)
@@ -657,7 +657,7 @@ func (tx *AppendableRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 		panic(ok)
 	}
 	// [from:to)
-	r, err := rwTx.Range(tx.fk.table, hexutility.EncodeTs(fromID), hexutility.EncodeTs(toID))
+	r, err := rwTx.Range(tx.ap.table, hexutility.EncodeTs(fromID), hexutility.EncodeTs(toID))
 	if err != nil {
 		return nil, err
 	}
@@ -667,7 +667,7 @@ func (tx *AppendableRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 		if err != nil {
 			return nil, err
 		}
-		if err = rwTx.Delete(tx.fk.table, k); err != nil {
+		if err = rwTx.Delete(tx.ap.table, k); err != nil {
 			return nil, err
 		}
 	}
@@ -676,7 +676,7 @@ func (tx *AppendableRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 }
 func (tx *AppendableRoTx) txNum2id(rwTx kv.RwTx, txFrom, txTo uint64) (fromID, toID uint64, ok bool, err error) {
 	var found1, found2 bool
-	it, err := tx.fk.cfg.iters.TxnIdsOfCanonicalBlocks(rwTx, int(txFrom), -1, order.Asc, 1)
+	it, err := tx.ap.cfg.iters.TxnIdsOfCanonicalBlocks(rwTx, int(txFrom), -1, order.Asc, 1)
 	if err != nil {
 		return fromID, toID, ok, err
 	}
@@ -690,7 +690,7 @@ func (tx *AppendableRoTx) txNum2id(rwTx kv.RwTx, txFrom, txTo uint64) (fromID, t
 	}
 	it.Close()
 
-	it, err = tx.fk.cfg.iters.TxnIdsOfCanonicalBlocks(rwTx, int(txTo), -1, order.Asc, 1)
+	it, err = tx.ap.cfg.iters.TxnIdsOfCanonicalBlocks(rwTx, int(txTo), -1, order.Asc, 1)
 	if err != nil {
 		return fromID, toID, ok, err
 	}

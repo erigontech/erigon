@@ -289,9 +289,9 @@ func (tx *AppendableRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) (bool, uin
 		if item.endTxNum > maxEndTxNum {
 			continue
 		}
-		endStep := item.endTxNum / tx.fk.aggregationStep
+		endStep := item.endTxNum / tx.ap.aggregationStep
 		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
-		span := min(spanStep*tx.fk.aggregationStep, maxSpan)
+		span := min(spanStep*tx.ap.aggregationStep, maxSpan)
 		start := item.endTxNum - span
 		foundSuperSet := startTxNum == item.startTxNum && item.endTxNum >= endTxNum
 		if foundSuperSet {
@@ -1139,17 +1139,17 @@ func (tx *AppendableRoTx) mergeFiles(ctx context.Context, files []*filesItem, st
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	fromStep, toStep := startTxNum/tx.fk.aggregationStep, endTxNum/tx.fk.aggregationStep
+	fromStep, toStep := startTxNum/tx.ap.aggregationStep, endTxNum/tx.ap.aggregationStep
 
-	datPath := tx.fk.fkFilePath(fromStep, toStep)
-	if comp, err = seg.NewCompressor(ctx, "merge fk "+tx.fk.filenameBase, datPath, tx.fk.cfg.Dirs.Tmp, seg.MinPatternScore, tx.fk.compressWorkers, log.LvlTrace, tx.fk.logger); err != nil {
-		return nil, fmt.Errorf("merge %s inverted index compressor: %w", tx.fk.filenameBase, err)
+	datPath := tx.ap.fkFilePath(fromStep, toStep)
+	if comp, err = seg.NewCompressor(ctx, "merge fk "+tx.ap.filenameBase, datPath, tx.ap.cfg.Dirs.Tmp, seg.MinPatternScore, tx.ap.compressWorkers, log.LvlTrace, tx.ap.logger); err != nil {
+		return nil, fmt.Errorf("merge %s inverted index compressor: %w", tx.ap.filenameBase, err)
 	}
 	defer comp.Close()
-	if tx.fk.noFsync {
+	if tx.ap.noFsync {
 		comp.DisableFsync()
 	}
-	write := NewArchiveWriter(comp, tx.fk.compression)
+	write := NewArchiveWriter(comp, tx.ap.compression)
 	defer write.Close()
 	p := ps.AddNew(path.Base(datPath), 1)
 	defer ps.Delete(p)
@@ -1157,7 +1157,7 @@ func (tx *AppendableRoTx) mergeFiles(ctx context.Context, files []*filesItem, st
 	var word = make([]byte, 0, 4096)
 
 	for _, item := range files {
-		g := NewArchiveGetter(item.decompressor.MakeGetter(), tx.fk.compression)
+		g := NewArchiveGetter(item.decompressor.MakeGetter(), tx.ap.compression)
 		g.Reset(0)
 		for g.HasNext() {
 			word, _ = g.Next(word[:0])
@@ -1170,16 +1170,16 @@ func (tx *AppendableRoTx) mergeFiles(ctx context.Context, files []*filesItem, st
 		return nil, err
 	}
 
-	outItem = newFilesItem(startTxNum, endTxNum, tx.fk.aggregationStep)
+	outItem = newFilesItem(startTxNum, endTxNum, tx.ap.aggregationStep)
 	if outItem.decompressor, err = seg.NewDecompressor(datPath); err != nil {
-		return nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", tx.fk.filenameBase, startTxNum, endTxNum, err)
+		return nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", tx.ap.filenameBase, startTxNum, endTxNum, err)
 	}
 	ps.Delete(p)
 
-	if err := tx.fk.buildIdx(ctx, fromStep, toStep, outItem.decompressor, ps); err != nil {
-		return nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", tx.fk.filenameBase, startTxNum, endTxNum, err)
+	if err := tx.ap.buildIdx(ctx, fromStep, toStep, outItem.decompressor, ps); err != nil {
+		return nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", tx.ap.filenameBase, startTxNum, endTxNum, err)
 	}
-	if outItem.index, err = recsplit.OpenIndex(tx.fk.fkAccessorFilePath(fromStep, toStep)); err != nil {
+	if outItem.index, err = recsplit.OpenIndex(tx.ap.fkAccessorFilePath(fromStep, toStep)); err != nil {
 		return nil, err
 	}
 

@@ -123,21 +123,30 @@ func TestAppendableCollationBuild(t *testing.T) {
 		require.NoError(err)
 		defer tx.Rollback()
 
+		checkAppendableGet(t, tx, ic, txs)
 	})
 
 	t.Run("scan files", func(t *testing.T) {
-		checkRangesAppendable(t, db, ii, txs)
+		require := require.New(t)
 
 		// Recreate to scan the files
 		var err error
 		salt := uint32(1)
 		cfg := AppendableCfg{Salt: &salt, Dirs: ii.cfg.Dirs, DB: db, CanonicalMarkersTable: kv.HeaderCanonical, iters: ii.cfg.iters}
 		ii, err = NewAppendable(cfg, ii.aggregationStep, ii.filenameBase, ii.table, nil, log.New())
-		require.NoError(t, err)
+		require.NoError(err)
 		defer ii.Close()
 
 		mergeAppendable(t, db, ii, txs)
-		checkRangesAppendable(t, db, ii, txs)
+
+		ic := ii.BeginFilesRo()
+		defer ic.Close()
+
+		tx, err := db.BeginRo(ctx)
+		require.NoError(err)
+		defer tx.Rollback()
+
+		checkAppendableGet(t, tx, ic, txs)
 	})
 }
 
@@ -165,35 +174,36 @@ func filledAppendableOfSize(tb testing.TB, txs, aggStep uint64, logger log.Logge
 	return db, ii, txs
 }
 
-func checkAppendableGet(t *testing.T, tx kv.Tx, ic *AppendableRoTx) {
+func checkAppendableGet(t *testing.T, dbtx kv.Tx, tx *AppendableRoTx, txs uint64) {
 	t.Helper()
-	aggStep := ic.fk.aggregationStep
+	aggStep := tx.ap.aggregationStep
+	steps := txs / aggStep
 
 	require := require.New(t)
 	//canonical keys
-	w, ok, err := ic.Get(0, tx)
+	w, ok, err := tx.Get(0, dbtx)
 	require.NoError(err)
 	require.True(ok)
 	require.Equal(1, int(binary.BigEndian.Uint64(w)))
 
-	w, ok, err = ic.Get(1, tx)
+	w, ok, err = tx.Get(1, dbtx)
 	require.True(ok)
 	require.Equal(int(aggStep+1), int(binary.BigEndian.Uint64(w)))
 
 	//non-canonical key: must exist before collate+prune
-	w, ok = ic.getFromFiles(steps + 1)
+	w, ok = tx.getFromFiles(steps + 1)
 	require.False(ok)
 
-	from, to := ii.stepsRangeInDB(tx)
+	from, to := tx.ap.stepsRangeInDB(dbtx)
 	require.Equal(float64(0), from)
 	require.Equal(62.4375, to)
 
 	//non-canonical key: must exist before collate+prune
-	w, ok, err = ic.Get(steps+1, tx)
+	w, ok, err = tx.Get(steps+1, dbtx)
 	require.False(ok)
 
 	//non-canonical keys of last step: must exist after collate+prune
-	w, ok, err = ic.Get(aggStep*steps+2, tx)
+	w, ok, err = tx.Get(aggStep*steps+2, dbtx)
 	require.NoError(err)
 	require.True(ok)
 }
