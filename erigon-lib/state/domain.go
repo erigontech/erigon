@@ -673,24 +673,24 @@ func (dt *DomainRoTx) DebugEFKey(k []byte) error {
 			if item.decompressor == nil {
 				continue
 			}
-			idx := item.index
-			if idx == nil {
+			accessor := item.index
+			if accessor == nil {
 				fPath := dt.d.efAccessorFilePath(item.startTxNum/dt.d.aggregationStep, item.endTxNum/dt.d.aggregationStep)
 				if dir.FileExist(fPath) {
 					var err error
-					idx, err = recsplit.OpenIndex(fPath)
+					accessor, err = recsplit.OpenIndex(fPath)
 					if err != nil {
 						_, fName := filepath.Split(fPath)
 						dt.d.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
 						continue
 					}
-					defer idx.Close()
+					defer accessor.Close()
 				} else {
 					continue
 				}
 			}
 
-			offset, ok := idx.GetReaderFromPool().Lookup(k)
+			offset, ok := accessor.GetReaderFromPool().Lookup(k)
 			if !ok {
 				continue
 			}
