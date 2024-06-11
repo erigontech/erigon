@@ -151,7 +151,20 @@ func TestAppendableCollationBuild(t *testing.T) {
 		require.True(ok)
 	})
 
-	checkRangesAppendable(t, db, ii, txs)
+	t.Run("scan files", func(t *testing.T) {
+		checkRangesAppendable(t, db, ii, txs)
+
+		// Recreate to scan the files
+		var err error
+		salt := uint32(1)
+		cfg := AppendableCfg{Salt: &salt, Dirs: ii.cfg.Dirs, DB: db, CanonicalMarkersTable: kv.HeaderCanonical}
+		ii, err = NewAppendable(cfg, ii.aggregationStep, ii.filenameBase, ii.table, nil, logger)
+		require.NoError(t, err)
+		defer ii.Close()
+
+		mergeAppendable(t, db, ii, txs)
+		checkRangesAppendable(t, db, ii, txs)
+	})
 
 }
 
@@ -313,30 +326,6 @@ func mergeAppendable(tb testing.TB, db kv.RwDB, ii *Appendable, txs uint64) {
 	err = tx.Commit()
 	require.NoError(tb, err)
 
-}
-
-func TestAppendableMerge(t *testing.T) {
-	logger := log.New()
-	db, ii, txs := filledAppendable(t, logger)
-
-	mergeAppendable(t, db, ii, txs)
-	checkRangesAppendable(t, db, ii, txs)
-}
-
-func TestAppendableScanFiles(t *testing.T) {
-	logger := log.New()
-	db, ii, txs := filledAppendable(t, logger)
-
-	// Recreate to scan the files
-	var err error
-	salt := uint32(1)
-	cfg := AppendableCfg{Salt: &salt, Dirs: ii.cfg.Dirs, DB: db, CanonicalMarkersTable: kv.HeaderCanonical}
-	ii, err = NewAppendable(cfg, ii.aggregationStep, ii.filenameBase, ii.table, nil, logger)
-	require.NoError(t, err)
-	defer ii.Close()
-
-	mergeAppendable(t, db, ii, txs)
-	checkRangesAppendable(t, db, ii, txs)
 }
 
 func TestAppendableKeysIterator(t *testing.T) {
