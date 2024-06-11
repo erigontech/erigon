@@ -219,20 +219,21 @@ func (b *BeaconBody) Blinded() (*BlindedBeaconBody, error) {
 		return nil, err
 	}
 	return &BlindedBeaconBody{
-		RandaoReveal:       b.RandaoReveal,
-		Eth1Data:           b.Eth1Data,
-		Graffiti:           b.Graffiti,
-		ProposerSlashings:  b.ProposerSlashings,
-		AttesterSlashings:  b.AttesterSlashings,
-		Attestations:       b.Attestations,
-		Deposits:           b.Deposits,
-		VoluntaryExits:     b.VoluntaryExits,
-		SyncAggregate:      b.SyncAggregate,
-		ExecutionPayload:   header,
-		ExecutionChanges:   b.ExecutionChanges,
-		BlobKzgCommitments: b.BlobKzgCommitments,
-		Version:            b.Version,
-		beaconCfg:          b.beaconCfg,
+		RandaoReveal:          b.RandaoReveal,
+		Eth1Data:              b.Eth1Data,
+		Graffiti:              b.Graffiti,
+		ProposerSlashings:     b.ProposerSlashings,
+		AttesterSlashings:     b.AttesterSlashings,
+		Attestations:          b.Attestations,
+		Deposits:              b.Deposits,
+		VoluntaryExits:        b.VoluntaryExits,
+		SyncAggregate:         b.SyncAggregate,
+		ExecutionPayload:      header,
+		ExecutionChanges:      b.ExecutionChanges,
+		BlsToExecutionChanges: b.ExecutionChanges,
+		BlobKzgCommitments:    b.BlobKzgCommitments,
+		Version:               b.Version,
+		beaconCfg:             b.beaconCfg,
 	}, nil
 }
 
