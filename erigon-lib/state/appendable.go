@@ -376,12 +376,12 @@ func (tx *AppendableRoTx) getFromFiles(ts uint64) (v []byte, ok bool) {
 		return nil, false
 	}
 
-	lookup := ts - tx.files[i].startTxNum
+	lookup := ts - tx.iters.BaseTxNum()
 	idx := tx.files[i].src.index
 	if idx.KeyCount() <= lookup {
 		return nil, false
 	}
-	offset := idx.OrdinalLookup(ts - tx.files[i].startTxNum)
+	offset := idx.OrdinalLookup(lookup)
 	g := tx.statelessGetter(i)
 	g.Reset(offset)
 	k, _ := g.Next(nil)
