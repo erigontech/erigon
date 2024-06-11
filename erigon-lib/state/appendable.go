@@ -256,7 +256,6 @@ func (fk *Appendable) buildIdx(ctx context.Context, fromStep, toStep uint64, d *
 	})
 }
 
-// BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
 func (fk *Appendable) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
 	for _, item := range fk.missedIdxFiles() {
 		item := item
