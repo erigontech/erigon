@@ -208,7 +208,7 @@ func (fk *Appendable) reCalcVisibleFiles() {
 	fk._visibleFiles = calcVisibleFiles(fk.dirtyFiles, fk.indexList, false)
 }
 
-func (fk *Appendable) missedIdxFiles() (l []*filesItem) {
+func (fk *Appendable) missedAccessors() (l []*filesItem) {
 	fk.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/fk.aggregationStep, item.endTxNum/fk.aggregationStep
@@ -256,8 +256,8 @@ func (fk *Appendable) buildAccessor(ctx context.Context, fromStep, toStep uint64
 	})
 }
 
-func (fk *Appendable) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
-	for _, item := range fk.missedIdxFiles() {
+func (fk *Appendable) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
+	for _, item := range fk.missedAccessors() {
 		item := item
 		g.Go(func() error {
 			fromStep, toStep := item.startTxNum/fk.aggregationStep, item.endTxNum/fk.aggregationStep
@@ -278,7 +278,7 @@ func (fk *Appendable) openFiles() error {
 				fPath := fk.fkFilePath(fromStep, toStep)
 				if !dir.FileExist(fPath) {
 					_, fName := filepath.Split(fPath)
-					fk.logger.Debug("[agg] InvertedIndex.openFiles: file does not exists", "f", fName)
+					fk.logger.Debug("[agg] Appendable.openFiles: file does not exists", "f", fName)
 					invalidFileItemsLock.Lock()
 					invalidFileItems = append(invalidFileItems, item)
 					invalidFileItemsLock.Unlock()
@@ -288,9 +288,9 @@ func (fk *Appendable) openFiles() error {
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 					_, fName := filepath.Split(fPath)
 					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
-						fk.logger.Debug("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
+						fk.logger.Debug("[agg] Appendable.openFiles", "err", err, "f", fName)
 					} else {
-						fk.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
+						fk.logger.Warn("[agg] Appendable.openFiles", "err", err, "f", fName)
 					}
 					invalidFileItemsLock.Lock()
 					invalidFileItems = append(invalidFileItems, item)
@@ -305,7 +305,7 @@ func (fk *Appendable) openFiles() error {
 				if dir.FileExist(fPath) {
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
-						fk.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
+						fk.logger.Warn("[agg] Appendable.openFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
 					}
 				}
@@ -607,27 +607,25 @@ func (tx *AppendableRoTx) maxTxNumInFiles(cold bool) uint64 {
 }
 
 type AppendablePruneStat struct {
-	MinTxNum         uint64
-	MaxTxNum         uint64
-	PruneCountTx     uint64
-	PruneCountValues uint64
+	MinTxNum     uint64
+	MaxTxNum     uint64
+	PruneCountTx uint64
 }
 
 func (is *AppendablePruneStat) String() string {
 	if is.MinTxNum == math.MaxUint64 && is.PruneCountTx == 0 {
 		return ""
 	}
-	return fmt.Sprintf("ii %d txs and %d vals in %.2fM-%.2fM", is.PruneCountTx, is.PruneCountValues, float64(is.MinTxNum)/1_000_000.0, float64(is.MaxTxNum)/1_000_000.0)
+	return fmt.Sprintf("ap %d txs in %.2fM-%.2fM", is.PruneCountTx, float64(is.MinTxNum)/1_000_000.0, float64(is.MaxTxNum)/1_000_000.0)
 }
 
-func (is *AppendablePruneStat) Accumulate(other *InvertedIndexPruneStat) {
+func (is *AppendablePruneStat) Accumulate(other *AppendablePruneStat) {
 	if other == nil {
 		return
 	}
 	is.MinTxNum = min(is.MinTxNum, other.MinTxNum)
 	is.MaxTxNum = max(is.MaxTxNum, other.MaxTxNum)
 	is.PruneCountTx += other.PruneCountTx
-	is.PruneCountValues += other.PruneCountValues
 }
 
 // [txFrom; txTo)
