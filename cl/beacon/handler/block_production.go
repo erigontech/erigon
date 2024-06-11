@@ -188,20 +188,19 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		return nil, err
 	}
 
-	//if !block.IsBlinded() {
-	// compute the state root now
-	signedBeaconBlock := &cltypes.SignedBeaconBlock{
-		Block: &cltypes.BeaconBlock{
-			Slot:          block.Slot,
-			ProposerIndex: block.ProposerIndex,
-			ParentRoot:    block.ParentRoot,
-			Body:          block.BeaconBody,
-		},
+	if !block.IsBlinded() {
+		signedBeaconBlock := &cltypes.SignedBeaconBlock{
+			Block: &cltypes.BeaconBlock{
+				Slot:          block.Slot,
+				ProposerIndex: block.ProposerIndex,
+				ParentRoot:    block.ParentRoot,
+				Body:          block.BeaconBody,
+			},
+		}
+		if err := machine.ProcessBlock(transition.DefaultMachine, baseState, signedBeaconBlock); err != nil {
+			return nil, err
+		}
 	}
-	if err := machine.ProcessBlock(transition.DefaultMachine, baseState, signedBeaconBlock); err != nil {
-		return nil, err
-	}
-	//}
 	block.StateRoot, err = baseState.HashSSZ()
 	if err != nil {
 		return nil, err

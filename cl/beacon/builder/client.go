@@ -89,7 +89,7 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 	}
 	resp, err := httpCall[BlindedBlockResponse](ctx, b.httpClient, http.MethodPost, url, headers, bytes.NewBuffer(payload))
 	if err != nil {
-		log.Warn("[mev builder] httpCall error", "err", err, "payload", string(payload))
+		log.Warn("[mev builder] httpCall error", "headers", headers, "err", err, "payload", string(payload))
 		return nil, nil, err
 	}
 
