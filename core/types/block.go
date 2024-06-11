@@ -667,12 +667,13 @@ func (b BaseTxID) FirstSystemTx() BaseTxID { return b }
 
 // LastSystemTx returns last system tx number in block. result+1 will be baseID of next block a.k.a. beginning system tx number
 // eg txAmount = 3+2/*systemTx*/ = 5 therefore:
-//	 0 - base tx/systemBegin
-//	 1 - tx0
-//	 2 - tx1
-//	 3 - tx2
-//	 4 - systemEnd
-func (b BaseTxID) LastSystemTx(txAmount uint32) uint64{ return b.U64() + uint64(txAmount) -1 }
+//
+//	0 - base tx/systemBegin
+//	1 - tx0
+//	2 - tx1
+//	3 - tx2
+//	4 - systemEnd
+func (b BaseTxID) LastSystemTx(txAmount uint32) uint64 { return b.U64() + uint64(txAmount) - 1 }
 
 type BodyForStorage struct {
 	BaseTxId    BaseTxID

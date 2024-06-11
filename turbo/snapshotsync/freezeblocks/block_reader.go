@@ -1069,7 +1069,7 @@ func (r *BlockReader) IntegrityTxnID(failFast bool) error {
 				log.Error(err.Error())
 			}
 		}
-		expectedFirstTxnID = b.BaseTxId.LastSystemTx(uint32(sn.Count()))+1 // +1 to move to first baseTxId of next block aka its first system tx
+		expectedFirstTxnID = b.BaseTxId.LastSystemTx(uint32(sn.Count())) + 1 // +1 to move to first baseTxId of next block aka its first system tx
 	}
 	return nil
 }

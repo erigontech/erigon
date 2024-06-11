@@ -228,7 +228,7 @@ func TestDump(t *testing.T) {
 				i++
 				body := &types.BodyForStorage{}
 				require.NoError(rlp.DecodeBytes(v, body))
-				baseIdList = append(baseIdList, body.BaseTxId)
+				baseIdList = append(baseIdList, body.BaseTxId.U64())
 				return nil
 			}, 1, log.LvlInfo, log.New())
 			require.NoError(err)

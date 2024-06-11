@@ -81,7 +81,7 @@ func TestCanonicalIter(t *testing.T) {
 		if bn > 0 {
 			s += bn * txns
 		}
-		s++// system
+		s++ // system
 		for i := uint64(0); i < txns; i++ {
 			res = append(res, s+i)
 		}
