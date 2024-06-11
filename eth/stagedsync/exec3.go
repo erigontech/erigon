@@ -860,9 +860,7 @@ Loop:
 			}
 			ts += time.Since(start)
 			aggTx.RestrictSubsetFileDeletions(false)
-			if err := rawdb.WriteDiffSet(applyTx, blockNum, b.Hash(), changeset); err != nil {
-				return err
-			}
+			doms.SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
 			doms.SetChangesetAccumulator(nil)
 		}
 
