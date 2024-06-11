@@ -65,6 +65,7 @@ func TestAppendableCollationBuild(t *testing.T) {
 	db, ii, txs := filledAppendable(t, log.New())
 	ctx := context.Background()
 	aggStep := uint64(16)
+	steps := uint64(txs) / aggStep
 
 	t.Run("can see own writes", func(t *testing.T) {
 		//nonbuf api can see own writes
@@ -88,9 +89,9 @@ func TestAppendableCollationBuild(t *testing.T) {
 		require.False(ok)
 
 		//non-canonical key: must exist before collate+prune
-		v, ok, err = ic.Get(2, tx)
+		v, ok, err = ic.Get(steps+1, tx)
 		require.NoError(err)
-		require.False(ok)
+		require.True(ok)
 
 		err = tx.Commit()
 		require.NoError(err)
@@ -110,27 +111,7 @@ func TestAppendableCollationBuild(t *testing.T) {
 
 	mergeAppendable(t, db, ii, txs)
 
-	t.Run("read after collate", func(t *testing.T) {
-		require := require.New(t)
-
-		ic := ii.BeginFilesRo()
-		defer ic.Close()
-
-		//existing keys
-		w, ok := ic.getFromFiles(0)
-		require.True(ok)
-		require.Equal(1, int(binary.BigEndian.Uint64(w)))
-
-		w, ok = ic.getFromFiles(1)
-		require.True(ok)
-		require.Equal(int(aggStep+1), int(binary.BigEndian.Uint64(w)))
-
-		//non-canonical key: must exist before collate+prune
-		w, ok = ic.getFromFiles(63)
-		require.False(ok)
-	})
-
-	t.Run("read after prune", func(t *testing.T) {
+	t.Run("read after collate and prune", func(t *testing.T) {
 		require := require.New(t)
 
 		ic := ii.BeginFilesRo()
@@ -140,11 +121,7 @@ func TestAppendableCollationBuild(t *testing.T) {
 		require.NoError(err)
 		defer tx.Rollback()
 
-		from, to := ii.stepsRangeInDB(tx)
-		require.Equal(float64(0), from)
-		require.Equal(62.4375, to)
-
-		//existing keys
+		//canonical keys
 		w, ok, err := ic.Get(0, tx)
 		require.NoError(err)
 		require.True(ok)
@@ -155,8 +132,21 @@ func TestAppendableCollationBuild(t *testing.T) {
 		require.Equal(int(aggStep+1), int(binary.BigEndian.Uint64(w)))
 
 		//non-canonical key: must exist before collate+prune
-		w, ok, err = ic.Get(63, tx)
+		w, ok = ic.getFromFiles(steps + 1)
 		require.False(ok)
+
+		from, to := ii.stepsRangeInDB(tx)
+		require.Equal(float64(0), from)
+		require.Equal(62.4375, to)
+
+		//non-canonical key: must exist before collate+prune
+		w, ok, err = ic.Get(steps+1, tx)
+		require.False(ok)
+
+		//non-canonical keys of last step: must exist after collate+prune
+		w, ok, err = ic.Get(aggStep*steps+2, tx)
+		require.NoError(err)
+		require.True(ok)
 	})
 }
 
