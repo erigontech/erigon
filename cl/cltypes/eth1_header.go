@@ -31,9 +31,9 @@ type Eth1Header struct {
 	// Extra fields
 	BlockHash        libcommon.Hash `json:"block_hash"`
 	TransactionsRoot libcommon.Hash `json:"transactions_root"`
-	WithdrawalsRoot  libcommon.Hash `json:"withdrawals_root,omitempty"`
-	BlobGasUsed      uint64         `json:"blob_gas_used,omitempty,string"`
-	ExcessBlobGas    uint64         `json:"excess_blob_gas,omitempty,string"`
+	WithdrawalsRoot  libcommon.Hash `json:"withdrawals_root"`
+	BlobGasUsed      uint64         `json:"blob_gas_used,string"`
+	ExcessBlobGas    uint64         `json:"excess_blob_gas,string"`
 	// internals
 	version clparams.StateVersion
 }
