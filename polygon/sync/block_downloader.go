@@ -40,6 +40,7 @@ func NewBlockDownloader(
 	milestoneVerifier WaypointHeadersVerifier,
 	blocksVerifier BlocksVerifier,
 	store Store,
+	blockLimit uint,
 ) BlockDownloader {
 	return newBlockDownloader(
 		logger,
@@ -51,6 +52,7 @@ func NewBlockDownloader(
 		store,
 		notEnoughPeersBackOffDuration,
 		blockDownloaderEstimatedRamPerWorker.WorkersByRAMOnly(),
+		blockLimit,
 	)
 }
 
@@ -64,6 +66,7 @@ func newBlockDownloader(
 	store Store,
 	notEnoughPeersBackOffDuration time.Duration,
 	maxWorkers int,
+	blockLimit uint,
 ) *blockDownloader {
 	return &blockDownloader{
 		logger:                        logger,
@@ -75,6 +78,7 @@ func newBlockDownloader(
 		store:                         store,
 		notEnoughPeersBackOffDuration: notEnoughPeersBackOffDuration,
 		maxWorkers:                    maxWorkers,
+		blockLimit:                    blockLimit,
 	}
 }
 
@@ -88,6 +92,7 @@ type blockDownloader struct {
 	store                         Store
 	notEnoughPeersBackOffDuration time.Duration
 	maxWorkers                    int
+	blockLimit                    uint
 }
 
 func (d *blockDownloader) DownloadBlocksUsingCheckpoints(ctx context.Context, start uint64) (*types.Header, error) {
@@ -117,12 +122,15 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(
 		return nil, nil
 	}
 
+	waypoints = d.limitWaypoints(waypoints)
+
 	d.logger.Debug(
 		syncLogPrefix("downloading blocks using waypoints"),
 		"waypointsLen", len(waypoints),
 		"start", waypoints[0].StartBlock().Uint64(),
 		"end", waypoints[len(waypoints)-1].EndBlock().Uint64(),
 		"kind", reflect.TypeOf(waypoints[0]),
+		"blockLimit", d.blockLimit,
 	)
 
 	// waypoint rootHash->[blocks part of waypoint]
@@ -334,4 +342,23 @@ func (d *blockDownloader) fetchVerifiedBlocks(
 	}
 
 	return blocks, headers.TotalSize + bodies.TotalSize, nil
+}
+
+func (d *blockDownloader) limitWaypoints(waypoints []heimdall.Waypoint) []heimdall.Waypoint {
+	if d.blockLimit == 0 {
+		return waypoints
+	}
+
+	startBlockNum := waypoints[0].StartBlock().Uint64()
+	for i, waypoint := range waypoints {
+		// we allow a bit of surplus to overflow above the block limit at waypoint boundary
+		if waypoint.EndBlock().Uint64()-startBlockNum < uint64(d.blockLimit) {
+			continue
+		}
+
+		waypoints = waypoints[:i+1]
+		break
+	}
+
+	return waypoints
 }

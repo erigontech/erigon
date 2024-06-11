@@ -2149,7 +2149,7 @@ func TestDomain_Unwind(t *testing.T) {
 		writer := dc.NewWriter()
 		defer writer.close()
 
-		err = dc.Unwind(ctx, tx, unwindTo/d.aggregationStep, unwindTo)
+		err = dc.Unwind(ctx, tx, unwindTo/d.aggregationStep, unwindTo, nil)
 		require.NoError(t, err)
 		dc.Close()
 		tx.Commit()

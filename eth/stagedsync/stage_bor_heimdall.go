@@ -830,6 +830,8 @@ func checkBorHeaderExtraData(chr consensus.ChainHeaderReader, header *types.Head
 }
 
 func BorHeimdallUnwind(u *UnwindState, ctx context.Context, _ *StageState, tx kv.RwTx, cfg BorHeimdallCfg) (err error) {
+	u.UnwindPoint = max(u.UnwindPoint, cfg.blockReader.FrozenBorBlocks()) // protect from unwind behind files
+
 	if cfg.borConfig == nil {
 		return
 	}
