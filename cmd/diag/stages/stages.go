@@ -29,8 +29,8 @@ var Command = cli.Command{
 }
 
 func printCurentStage(cliCtx *cli.Context) error {
-	var data diagnostics.SyncStatistics
-	url := "http://" + cliCtx.String(flags.DebugURLFlag.Name) + flags.ApiPath + "/snapshot-sync"
+	var data []diagnostics.SyncStage
+	url := "http://" + cliCtx.String(flags.DebugURLFlag.Name) + flags.ApiPath + "/sync-stages"
 
 	err := util.MakeHttpGetCall(cliCtx.Context, url, &data)
 	if err != nil {
@@ -38,7 +38,7 @@ func printCurentStage(cliCtx *cli.Context) error {
 		return nil
 	}
 
-	stagesRows := getStagesRows(data.SyncStages)
+	stagesRows := getStagesRows(data)
 
 	switch cliCtx.String(flags.OutputFlag.Name) {
 	case "json":
