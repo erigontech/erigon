@@ -1316,14 +1316,14 @@ func stageCustomTrace(db kv.RwDB, ctx context.Context, logger log.Logger) error 
 		if err != nil {
 			return err
 		}
-		err = stagedsync.PruneCustomTrace(p, tx, cfg, ctx, true, logger)
+		err = stagedsync.PruneCustomTrace(p, tx, cfg, ctx, logger)
 		if err != nil {
 			return err
 		}
 		return nil
 	}
 
-	err := stagedsync.SpawnCustomTrace(s, txc, cfg, ctx, true /* initialCycle */, block, logger)
+	err := stagedsync.SpawnCustomTrace(s, txc, cfg, ctx, block, logger)
 	if err != nil {
 		return err
 	}

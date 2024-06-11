@@ -132,10 +132,10 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:          stages.CustomTrace,
 			Description: "Re-Execute blocks on history state - with custom tracer",
-			Disabled:    !bodies.historyV3 || dbg.StagesOnlyBlocks,
+			Disabled:    dbg.StagesOnlyBlocks,
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				cfg := StageCustomTraceCfg(exec.db, exec.prune, exec.dirs, exec.blockReader, exec.chainConfig, exec.engine, exec.genesis, &exec.syncCfg)
-				return SpawnCustomTrace(s, txc, cfg, ctx, firstCycle, 0, logger)
+				return SpawnCustomTrace(s, txc, cfg, ctx, 0, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
 				cfg := StageCustomTraceCfg(exec.db, exec.prune, exec.dirs, exec.blockReader, exec.chainConfig, exec.engine, exec.genesis, &exec.syncCfg)
@@ -143,7 +143,7 @@ func DefaultStages(ctx context.Context,
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				cfg := StageCustomTraceCfg(exec.db, exec.prune, exec.dirs, exec.blockReader, exec.chainConfig, exec.engine, exec.genesis, &exec.syncCfg)
-				return PruneCustomTrace(p, tx, cfg, ctx, firstCycle, logger)
+				return PruneCustomTrace(p, tx, cfg, ctx, logger)
 			},
 		},
 		{
