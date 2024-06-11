@@ -84,12 +84,12 @@ func TestAppendableCollationBuild(t *testing.T) {
 		require.Equal(1, int(binary.BigEndian.Uint64(v)))
 
 		//never existed key
-		v, ok, err = ic.Get(txs+1, tx)
+		_, ok, err = ic.Get(txs+1, tx)
 		require.NoError(err)
 		require.False(ok)
 
 		//non-canonical key: must exist before collate+prune
-		v, ok, err = ic.Get(steps+1, tx)
+		_, ok, err = ic.Get(steps+1, tx)
 		require.NoError(err)
 		require.True(ok)
 
@@ -187,11 +187,12 @@ func checkAppendableGet(t *testing.T, dbtx kv.Tx, tx *AppendableRoTx, txs uint64
 	require.Equal(1, int(binary.BigEndian.Uint64(w)))
 
 	w, ok, err = tx.Get(1, dbtx)
+	require.NoError(err)
 	require.True(ok)
 	require.Equal(int(aggStep+1), int(binary.BigEndian.Uint64(w)))
 
 	//non-canonical key: must exist before collate+prune
-	w, ok = tx.getFromFiles(steps + 1)
+	_, ok = tx.getFromFiles(steps + 1)
 	require.False(ok)
 
 	from, to := tx.ap.stepsRangeInDB(dbtx)
@@ -199,11 +200,12 @@ func checkAppendableGet(t *testing.T, dbtx kv.Tx, tx *AppendableRoTx, txs uint64
 	require.Equal(62.4375, to)
 
 	//non-canonical key: must exist before collate+prune
-	w, ok, err = tx.Get(steps+1, dbtx)
+	_, ok, err = tx.Get(steps+1, dbtx)
+	require.NoError(err)
 	require.False(ok)
 
 	//non-canonical keys of last step: must exist after collate+prune
-	w, ok, err = tx.Get(aggStep*steps+2, dbtx)
+	_, ok, err = tx.Get(aggStep*steps+2, dbtx)
 	require.NoError(err)
 	require.True(ok)
 }

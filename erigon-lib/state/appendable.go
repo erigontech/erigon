@@ -539,17 +539,6 @@ func (tx *AppendableRoTx) statelessGetter(i int) ArchiveGetter {
 	}
 	return r
 }
-func (tx *AppendableRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
-	if tx.readers == nil {
-		tx.readers = make([]*recsplit.IndexReader, len(tx.files))
-	}
-	r := tx.readers[i]
-	if r == nil {
-		r = tx.files[i].src.index.GetReaderFromPool()
-		tx.readers[i] = r
-	}
-	return r
-}
 
 func (tx *AppendableRoTx) smallestTxNum(dbtx kv.Tx) uint64 {
 	fst, _ := kv.FirstKey(dbtx, tx.ap.table)
