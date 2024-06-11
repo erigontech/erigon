@@ -270,7 +270,7 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	if lastFilterRequest.AllTopics == false {
 		t.Error("2: expected all topics to be true")
 	}
-	if len(lastFilterRequest.Addresses) != 1 && lastFilterRequest.Addresses[0] != address1H160 {
+	if len(lastFilterRequest.Addresses) != 1 && gointerfaces.ConvertH160toAddress(lastFilterRequest.Addresses[0]) != gointerfaces.ConvertH160toAddress(address1H160) {
 		t.Error("2: expected the address to match the last request")
 	}
 
@@ -288,10 +288,10 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	if lastFilterRequest.AllTopics == false {
 		t.Error("3: expected all topics to be true")
 	}
-	if len(lastFilterRequest.Addresses) != 1 && lastFilterRequest.Addresses[0] != address1H160 {
+	if len(lastFilterRequest.Addresses) != 1 && gointerfaces.ConvertH160toAddress(lastFilterRequest.Addresses[0]) != gointerfaces.ConvertH160toAddress(address1H160) {
 		t.Error("3: expected the address to match the previous request")
 	}
-	if len(lastFilterRequest.Topics) != 1 && lastFilterRequest.Topics[0] != topic1H256 {
+	if len(lastFilterRequest.Topics) != 1 && gointerfaces.ConvertH256ToHash(lastFilterRequest.Topics[0]) != gointerfaces.ConvertH256ToHash(topic1H256) {
 		t.Error("3: expected the topics to match the last request")
 	}
 
@@ -307,10 +307,10 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	if lastFilterRequest.AllTopics == false {
 		t.Error("4: expected all topics to be true")
 	}
-	if len(lastFilterRequest.Addresses) != 1 && lastFilterRequest.Addresses[0] != address1H160 {
+	if len(lastFilterRequest.Addresses) != 1 && gointerfaces.ConvertH160toAddress(lastFilterRequest.Addresses[0]) != gointerfaces.ConvertH160toAddress(address1H160) {
 		t.Error("4: expected an address to be present")
 	}
-	if len(lastFilterRequest.Topics) != 1 && lastFilterRequest.Topics[0] != topic1H256 {
+	if len(lastFilterRequest.Topics) != 1 && gointerfaces.ConvertH256ToHash(lastFilterRequest.Topics[0]) != gointerfaces.ConvertH256ToHash(topic1H256) {
 		t.Error("4: expected a topic to be present")
 	}
 
@@ -327,7 +327,7 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	if len(lastFilterRequest.Addresses) != 0 {
 		t.Error("5: expected addresses to be empty")
 	}
-	if len(lastFilterRequest.Topics) != 1 && lastFilterRequest.Topics[0] != topic1H256 {
+	if len(lastFilterRequest.Topics) != 1 && gointerfaces.ConvertH256ToHash(lastFilterRequest.Topics[0]) != gointerfaces.ConvertH256ToHash(topic1H256) {
 		t.Error("5: expected a topic to be present")
 	}
 
@@ -335,15 +335,15 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	// and nothing in the address or topics lists
 	f.UnsubscribeLogs(id3)
 	if lastFilterRequest.AllAddresses == true {
-		t.Error("5: expected all addresses to be false")
+		t.Error("6: expected all addresses to be false")
 	}
 	if lastFilterRequest.AllTopics == true {
-		t.Error("5: expected all topics to be false")
+		t.Error("6: expected all topics to be false")
 	}
 	if len(lastFilterRequest.Addresses) != 0 {
-		t.Error("5: expected addresses to be empty")
+		t.Error("6: expected addresses to be empty")
 	}
 	if len(lastFilterRequest.Topics) != 0 {
-		t.Error("5: expected topics to be empty")
+		t.Error("6: expected topics to be empty")
 	}
 }
