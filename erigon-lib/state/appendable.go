@@ -376,12 +376,13 @@ func (tx *AppendableRoTx) getFromFiles(ts uint64) (v []byte, ok bool) {
 		return nil, false
 	}
 
-	lookup := ts - tx.files[i].startTxNum // we are very lucky: each txNum has 1 appendable
-	idx := tx.files[i].src.index
-	if idx.KeyCount() <= lookup {
+	baseTxNum := tx.files[i].startTxNum // we are very lucky: each txNum has 1 appendable
+	lookup := ts - baseTxNum
+	accessor := tx.files[i].src.index
+	if accessor.KeyCount() <= lookup {
 		return nil, false
 	}
-	offset := idx.OrdinalLookup(lookup)
+	offset := accessor.OrdinalLookup(lookup)
 	g := tx.statelessGetter(i)
 	g.Reset(offset)
 	k, _ := g.Next(nil)
