@@ -188,7 +188,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	if err := a.registerII(kv.TracesToIdxPos, salt, dirs, db, aggregationStep, kv.FileTracesToIdx, kv.TblTracesToKeys, kv.TblTracesToIdx, logger); err != nil {
 		return nil, err
 	}
-	a.LimitRecentHistoryWithoutFiles(aggregationStep / 2)
+	a.LimitRecentHistoryWithoutFiles(10_000)
 	a.recalcVisibleFiles()
 
 	if dbg.NoSync() {
