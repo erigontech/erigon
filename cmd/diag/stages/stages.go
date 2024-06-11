@@ -65,7 +65,7 @@ func printSyncStages(cliCtx *cli.Context, isCurrent bool) error {
 		interval := time.Duration(cliCtx.Int(flags.AutoUpdateIntervalFlag.Name)) * time.Millisecond
 		var wg sync.WaitGroup
 		wg.Add(1)
-		defer wg.Done() // Signal that the goroutine has completed
+		defer wg.Done()
 
 		ticker := time.NewTicker(interval)
 		go func() {
@@ -91,7 +91,7 @@ func printSyncStages(cliCtx *cli.Context, isCurrent bool) error {
 			}
 		}()
 
-		wg.Wait() // Wait for the server goroutine to finish
+		wg.Wait()
 	} else {
 		syncStages, err := querySyncInfo(cliCtx)
 		if err != nil {
