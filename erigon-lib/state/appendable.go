@@ -37,7 +37,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/seg"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -526,21 +525,6 @@ type AppendableRoTx struct {
 	files   []ctxItem // have no garbage (overlaps, etc...)
 	getters []ArchiveGetter
 	readers []*recsplit.IndexReader
-
-	_hasher murmur3.Hash128
-}
-
-func (tx *AppendableRoTx) statelessHasher() murmur3.Hash128 {
-	if tx._hasher == nil {
-		tx._hasher = murmur3.New128WithSeed(*tx.ap.cfg.Salt)
-	}
-	return tx._hasher
-}
-func (tx *AppendableRoTx) hashKey(k []byte) (hi, lo uint64) {
-	hasher := tx.statelessHasher()
-	tx._hasher.Reset()
-	_, _ = hasher.Write(k) //nolint:errcheck
-	return hasher.Sum128()
 }
 
 func (tx *AppendableRoTx) statelessGetter(i int) ArchiveGetter {
