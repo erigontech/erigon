@@ -19,7 +19,10 @@ package downloader
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
+	"sync"
 
+	"github.com/RoaringBitmap/roaring"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
 	"github.com/anacrolix/torrent/types/infohash"
@@ -33,17 +36,31 @@ const (
 )
 
 type mdbxPieceCompletion struct {
-	db kv.RwDB
+	db        *mdbx.MdbxKV
+	mu        sync.RWMutex
+	completed map[infohash.T]*roaring.Bitmap
 }
 
 var _ storage.PieceCompletion = (*mdbxPieceCompletion)(nil)
 
 func NewMdbxPieceCompletion(db kv.RwDB) (ret storage.PieceCompletion, err error) {
-	ret = &mdbxPieceCompletion{db: db}
+	ret = &mdbxPieceCompletion{db: db.(*mdbx.MdbxKV), completed: map[infohash.T]*roaring.Bitmap{}}
 	return
 }
 
-func (m mdbxPieceCompletion) Get(pk metainfo.PieceKey) (cn storage.Completion, err error) {
+func (m *mdbxPieceCompletion) Get(pk metainfo.PieceKey) (cn storage.Completion, err error) {
+	m.mu.RLock()
+	if completed, ok := m.completed[pk.InfoHash]; ok {
+		if completed.Contains(uint32(pk.Index)) {
+			m.mu.RUnlock()
+			return storage.Completion{
+				Complete: true,
+				Ok:       true,
+			}, nil
+		}
+	}
+	m.mu.RUnlock()
+
 	err = m.db.View(context.Background(), func(tx kv.Tx) error {
 		var key [infohash.Size + 4]byte
 		copy(key[:], pk.InfoHash[:])
@@ -66,10 +83,13 @@ func (m mdbxPieceCompletion) Get(pk metainfo.PieceKey) (cn storage.Completion, e
 	return
 }
 
-func (m mdbxPieceCompletion) Set(pk metainfo.PieceKey, b bool) error {
+func (m *mdbxPieceCompletion) Set(pk metainfo.PieceKey, b bool) error {
 	if c, err := m.Get(pk); err == nil && c.Ok && c.Complete == b {
 		return nil
 	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	var tx kv.RwTx
 	var err error
@@ -84,6 +104,15 @@ func (m mdbxPieceCompletion) Set(pk metainfo.PieceKey, b bool) error {
 	//  1K fsyncs/2minutes it's quite expensive, but even on cloud (high latency) drive it allow download 100mb/s
 	//  and Erigon doesn't do anything when downloading snapshots
 	if b {
+		completed, ok := m.completed[pk.InfoHash]
+
+		if !ok {
+			completed = &roaring.Bitmap{}
+			m.completed[pk.InfoHash] = completed
+		}
+
+		completed.Add(uint32(pk.Index))
+
 		tx, err = m.db.BeginRwNosync(context.Background())
 		if err != nil {
 			return err
@@ -112,23 +141,59 @@ func (m mdbxPieceCompletion) Set(pk metainfo.PieceKey, b bool) error {
 	return tx.Commit()
 }
 
+func (m *mdbxPieceCompletion) Flushed(infoHash infohash.T, flushed *roaring.Bitmap) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if completed, ok := m.completed[infoHash]; ok {
+		setters := flushed.Clone()
+		setters.And(completed)
+
+		if setters.GetCardinality() > 0 {
+			setters.Iterate(func(piece uint32) bool {
+				//fmt.Println("Set", piece)
+				return true
+			})
+		}
+
+		completed.AndNot(setters)
+
+		if completed.IsEmpty() {
+			delete(m.completed, infoHash)
+		}
+	}
+}
+
 func (m *mdbxPieceCompletion) Close() error {
 	m.db.Close()
 	return nil
 }
 
 type mdbxPieceCompletionBatch struct {
-	db *mdbx.MdbxKV
+	mdbxPieceCompletion
 }
 
 var _ storage.PieceCompletion = (*mdbxPieceCompletionBatch)(nil)
 
 func NewMdbxPieceCompletionBatch(db kv.RwDB) (ret storage.PieceCompletion, err error) {
-	ret = &mdbxPieceCompletionBatch{db: db.(*mdbx.MdbxKV)}
-	return
+	return &mdbxPieceCompletionBatch{mdbxPieceCompletion{
+		db:        db.(*mdbx.MdbxKV),
+		completed: map[infohash.T]*roaring.Bitmap{}}}, nil
 }
 
 func (m *mdbxPieceCompletionBatch) Get(pk metainfo.PieceKey) (cn storage.Completion, err error) {
+	m.mu.RLock()
+	if completed, ok := m.completed[pk.InfoHash]; ok {
+		if completed.Contains(uint32(pk.Index)) {
+			m.mu.RUnlock()
+			return storage.Completion{
+				Complete: true,
+				Ok:       true,
+			}, nil
+		}
+	}
+	m.mu.RUnlock()
+
 	err = m.db.View(context.Background(), func(tx kv.Tx) error {
 		var key [infohash.Size + 4]byte
 		copy(key[:], pk.InfoHash[:])
@@ -155,9 +220,24 @@ func (m *mdbxPieceCompletionBatch) Set(pk metainfo.PieceKey, b bool) error {
 	if c, err := m.Get(pk); err == nil && c.Ok && c.Complete == b {
 		return nil
 	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	var key [infohash.Size + 4]byte
 	copy(key[:], pk.InfoHash[:])
 	binary.BigEndian.PutUint32(key[infohash.Size:], uint32(pk.Index))
+
+	if b {
+		completed, ok := m.completed[pk.InfoHash]
+
+		if !ok {
+			completed = &roaring.Bitmap{}
+			m.completed[pk.InfoHash] = completed
+		}
+
+		completed.Add(uint32(pk.Index))
+	}
 
 	v := []byte(incomplete)
 	if b {
