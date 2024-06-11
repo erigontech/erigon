@@ -640,8 +640,28 @@ type RawBody struct {
 	Requests     Requests
 }
 
+// Represents original transaction number in blockchain (do not includes system txs in block)
+type BaseTxID uint64
+
+func CapBaseTxID(tx int) uint64 {
+	return uint64(tx) + 2
+}
+
+func (b BaseTxID) U64() uint64 { return uint64(b)}
+
+func (b BaseTxID) Bytes() []byte { return hexutility.EncodeTs(uint64(b))}
+
+// First returns first non-system tx number in block
+// as if basetxId is first original transaction in block
+func (b BaseTxID) First() uint64 { return uint64(b)+1}
+
+// Returns last non-system tx number in block. txns is length of block transactions (does not include system txs)
+// From the other hand, TxAmount includes 2 system txs as well as all txs in block.
+func (b BaseTxID) Last(txns int) uint64 { return b.First()+uint64(txns)}
+
+
 type BodyForStorage struct {
-	BaseTxId    uint64
+	BaseTxId    BaseTxID
 	TxAmount    uint32
 	Uncles      []*Header
 	Withdrawals []*Withdrawal
