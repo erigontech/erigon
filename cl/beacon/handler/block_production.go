@@ -345,8 +345,8 @@ func (a *ApiHandler) getBuilderPayload(
 	if err != nil {
 		return nil, err
 	}
-	// get the parent hash
-	parentHash, err := baseBlock.HashSSZ()
+	// get the parent hash of base execution block
+	parentHash, err := baseBlock.Body.Eth1Data.HashSSZ()
 	if err != nil {
 		return nil, err
 	}
