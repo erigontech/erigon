@@ -157,6 +157,8 @@ func ExecV3(ctx context.Context,
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
 	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
 
+	agg.DiscardHistory(kv.CommitmentDomain)
+
 	applyTx := txc.Tx
 	useExternalTx := applyTx != nil
 	if !useExternalTx {
@@ -288,7 +290,6 @@ func ExecV3(ctx context.Context,
 	if blockNum < cfg.blockReader.FrozenBlocks() {
 		shouldGenerateChangesets = false
 	}
-	agg.DiscardHistory(kv.CommitmentDomain)
 
 	if maxBlockNum-blockNum > 16 {
 		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
