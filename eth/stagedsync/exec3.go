@@ -157,8 +157,6 @@ func ExecV3(ctx context.Context,
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
 	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
 
-	agg.DiscardHistory(kv.CommitmentDomain)
-
 	applyTx := txc.Tx
 	useExternalTx := applyTx != nil
 	if !useExternalTx {
