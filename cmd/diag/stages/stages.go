@@ -103,6 +103,7 @@ func printSyncStages(cliCtx *cli.Context, isCurrent bool) error {
 
 				case <-cliCtx.Done():
 					ticker.Stop()
+					wg.Done()
 					return
 				}
 			}
