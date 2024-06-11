@@ -19,7 +19,6 @@ package downloader
 import (
 	"context"
 	"encoding/binary"
-	"fmt"
 	"sync"
 
 	"github.com/RoaringBitmap/roaring"
