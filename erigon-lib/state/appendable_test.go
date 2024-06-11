@@ -154,8 +154,8 @@ func TestAppendableCollationBuild(t *testing.T) {
 		require.True(ok)
 		require.Equal(int(aggStep+1), int(binary.BigEndian.Uint64(w)))
 
-		//non existing key
-		w, ok = ic.getFromFiles(63)
+		//key which existed before collate+prune
+		w, ok, err = ic.Get(63, tx)
 		require.False(ok)
 	})
 }
