@@ -388,7 +388,7 @@ func TestAppendableCtxFiles(t *testing.T) {
 	ii.scanStateFiles(files)
 	require.Equal(t, 10, ii.dirtyFiles.Len())
 	ii.dirtyFiles.Scan(func(item *filesItem) bool {
-		fName := ii.fkFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
+		fName := ii.apFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
 		item.decompressor = &seg.Decompressor{FileName1: fName}
 		return true
 	})

@@ -1137,7 +1137,7 @@ func (tx *AppendableRoTx) mergeFiles(ctx context.Context, files []*filesItem, st
 	}
 	fromStep, toStep := startTxNum/tx.ap.aggregationStep, endTxNum/tx.ap.aggregationStep
 
-	datPath := tx.ap.fkFilePath(fromStep, toStep)
+	datPath := tx.ap.apFilePath(fromStep, toStep)
 	if comp, err = seg.NewCompressor(ctx, "merge fk "+tx.ap.filenameBase, datPath, tx.ap.cfg.Dirs.Tmp, seg.MinPatternScore, tx.ap.compressWorkers, log.LvlTrace, tx.ap.logger); err != nil {
 		return nil, fmt.Errorf("merge %s inverted index compressor: %w", tx.ap.filenameBase, err)
 	}

@@ -124,7 +124,7 @@ func NewAppendable(cfg AppendableCfg, aggregationStep uint64, filenameBase, tabl
 func (ap *Appendable) accessorFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(ap.cfg.Dirs.SnapAccessors, fmt.Sprintf("v1-%s.%d-%d.api", ap.filenameBase, fromStep, toStep))
 }
-func (ap *Appendable) fkFilePath(fromStep, toStep uint64) string {
+func (ap *Appendable) apFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(ap.cfg.Dirs.SnapHistory, fmt.Sprintf("v1-%s.%d-%d.ap", ap.filenameBase, fromStep, toStep))
 }
 
@@ -274,7 +274,7 @@ func (ap *Appendable) openFiles() error {
 			item := item
 			fromStep, toStep := item.startTxNum/ap.aggregationStep, item.endTxNum/ap.aggregationStep
 			if item.decompressor == nil {
-				fPath := ap.fkFilePath(fromStep, toStep)
+				fPath := ap.apFilePath(fromStep, toStep)
 				if !dir.FileExist(fPath) {
 					_, fName := filepath.Split(fPath)
 					ap.logger.Debug("[agg] Appendable.openFiles: file does not exists", "f", fName)
@@ -710,7 +710,7 @@ func (ap *Appendable) collate(ctx context.Context, step uint64, roTx kv.Tx) (App
 
 	var (
 		coll = AppendableCollation{
-			iiPath: ap.fkFilePath(step, stepTo),
+			iiPath: ap.apFilePath(step, stepTo),
 		}
 		closeComp bool
 	)
@@ -790,11 +790,10 @@ type AppendableCollation struct {
 	writer ArchiveWriter
 }
 
-func (ic AppendableCollation) Close() {
-
-	if ic.writer != nil {
-		ic.writer.Close()
-		ic.writer = nil
+func (collation AppendableCollation) Close() {
+	if collation.writer != nil {
+		collation.writer.Close()
+		collation.writer = nil
 	}
 }
 
