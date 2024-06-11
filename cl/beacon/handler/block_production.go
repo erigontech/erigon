@@ -214,7 +214,10 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		"proposerIndex", block.ProposerIndex,
 		"slot", targetSlot,
 		"state_root", block.StateRoot,
-		"execution_value", block.GetExecutionValue().Uint64())
+		"execution_value", block.GetExecutionValue().Uint64(),
+		"version", block.Version(),
+		"blinded", block.IsBlinded(),
+	)
 
 	// todo: consensusValue
 	rewardsCollector := &eth2.BlockRewardsCollector{}

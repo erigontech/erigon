@@ -232,6 +232,7 @@ func (b *BeaconBody) Blinded() (*BlindedBeaconBody, error) {
 		ExecutionChanges:   b.ExecutionChanges,
 		BlobKzgCommitments: b.BlobKzgCommitments,
 		Version:            b.Version,
+		beaconCfg:          b.beaconCfg,
 	}, nil
 }
 
