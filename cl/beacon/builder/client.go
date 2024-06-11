@@ -156,11 +156,11 @@ func httpCall[T any](ctx context.Context, client *http.Client, method, url strin
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode > 299 {
 		// read response body
-		var body []byte
-		if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
-			return nil, err
+		bytes, err := io.ReadAll(response.Body)
+		if err != nil {
+			log.Warn("[mev builder] io.ReadAll failed", "err", err, "url", url, "method", method)
 		}
-		return nil, fmt.Errorf("status code: %d. Response content %v", response.StatusCode, string(body))
+		return nil, fmt.Errorf("status code: %d. Response content %v", response.StatusCode, string(bytes))
 	}
 	// read response body
 	bytes, err := io.ReadAll(response.Body)
