@@ -950,7 +950,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	}
 
 	if !UseBpsTree {
-		if err = d.buildMapIdx(ctx, step, step+1, valuesDecomp, ps); err != nil {
+		if err = d.buildMapAccessor(ctx, step, step+1, valuesDecomp, ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
 		}
 		valuesIdx, err = recsplit.OpenIndex(d.efAccessorFilePath(step, step+1))
@@ -985,7 +985,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	}, nil
 }
 
-func (d *Domain) buildMapIdx(ctx context.Context, fromStep, toStep uint64, data *seg.Decompressor, ps *background.ProgressSet) error {
+func (d *Domain) buildMapAccessor(ctx context.Context, fromStep, toStep uint64, data *seg.Decompressor, ps *background.ProgressSet) error {
 	idxPath := d.kvAccessorFilePath(fromStep, toStep)
 	cfg := recsplit.RecSplitArgs{
 		Enums:              false,
@@ -1083,7 +1083,7 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 			}
 
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
-			err := d.buildMapIdx(ctx, fromStep, toStep, item.decompressor, ps)
+			err := d.buildMapAccessor(ctx, fromStep, toStep, item.decompressor, ps)
 			if err != nil {
 				return fmt.Errorf("build %s values recsplit index: %w", d.filenameBase, err)
 			}
