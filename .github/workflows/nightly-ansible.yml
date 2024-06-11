@@ -10,16 +10,16 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        nodes:
-          - name: "Integration 5"
-            rpc_url: "http://34.175.214.161:8500"
-            private_key: "${{ secrets.NETWORK5_PRIVATE_KEY }}"
-            eth_address: "0x41BB6960a5156aC29d6e9E04273837AD19d6691A"
-            log_file: "/tmp/rpc-tests.d/evm-rpc-tests.log"
-            work_dir: "/tmp/rpc-tests.d"
-            max_block_size: "25000000"
-            legacy_flag: "--legacy"
-            block_interval: "12"
+          include:
+            - name: "Integration 5"
+              rpc_url: "http://34.175.214.161:8500"
+              eth_address: "0x41BB6960a5156aC29d6e9E04273837AD19d6691A"
+              secret_name: "NETWORK5_PRIVATE_KEY"
+              log_file: "/tmp/rpc-tests.d/evm-rpc-tests.log"
+              work_dir: "/tmp/rpc-tests.d"
+              max_block_size: "25000000"
+              legacy_flag: "--legacy"
+              block_interval: "12"
 
     steps:
       - name: Checkout repository
@@ -30,16 +30,16 @@ jobs:
 
       - name: Run Docker Compose
         env:
-          RPC_URL: ${{ matrix.nodes.rpc_url }}
-          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-          ETH_ADDRESS: ${{ matrix.nodes.eth_address }}
-          LOG_FILE: ${{ matrix.nodes.log_file }}
-          WORK_DIR: ${{ matrix.nodes.work_dir }}
-          MAX_BLOCK_SIZE: ${{ matrix.nodes.max_block_size }}
-          LEGACY_FLAG: ${{ matrix.nodes.legacy_flag }}
-          BLOCK_INTERVAL: ${{ matrix.nodes.block_interval }}
+          RPC_URL: ${{ matrix.rpc_url }}
+          PRIVATE_KEY: ${{ secrets[matrix.secret_name] }}
+          ETH_ADDRESS: ${{ matrix.eth_address }}
+          LOG_FILE: ${{ matrix.log_file }}
+          WORK_DIR: ${{ matrix.work_dir }}
+          MAX_BLOCK_SIZE: ${{ matrix.max_block_size }}
+          LEGACY_FLAG: ${{ matrix.legacy_flag }}
+          BLOCK_INTERVAL: ${{ matrix.block_interval }}
         run: |
-          docker-compose up --build
+          cd zk/tests/ansible/evm-rpc-tests && docker-compose up --build
 
       - name: Upload logs
         uses: actions/upload-artifact@v3
