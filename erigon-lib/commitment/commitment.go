@@ -210,7 +210,7 @@ func (be *BranchEncoder) CollectUpdate(
 	if err != nil {
 		return 0, err
 	}
-	if len(prev) > 0  {
+	if len(prev) > 0 {
 		if bytes.Equal(prev, update) {
 			return lastNibble, nil // do not write the same data for prefix
 		}
