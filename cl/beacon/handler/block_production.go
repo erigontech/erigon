@@ -201,10 +201,10 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		if err := machine.ProcessBlock(transition.DefaultMachine, baseState, signedBeaconBlock); err != nil {
 			return nil, err
 		}
-		block.StateRoot, err = baseState.HashSSZ()
-		if err != nil {
-			return nil, err
-		}
+	}
+	block.StateRoot, err = baseState.HashSSZ()
+	if err != nil {
+		return nil, err
 	}
 	if block.IsBlinded() {
 		log.Info("BlockProduction: produced a blinded block")
