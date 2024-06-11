@@ -36,7 +36,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon-lib/state"
 
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
@@ -1480,70 +1479,4 @@ func ReadLastNewBlockSeen(tx kv.Tx) (uint64, error) {
 		return 0, nil
 	}
 	return dbutils.DecodeBlockNumber(v)
-}
-
-const diffChunkLen = 8*1024 - 32 // 8kb is db pagsize. ofverflow pages have 20bytes page-header. so, chunk will fit in 1 overflow page.
-
-func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet *state.StateChangeSet) error {
-	// Write the diffSet to the database
-	keys := diffSet.SerializeKeys(nil)
-	chunkCount := (len(keys) + diffChunkLen - 1) / diffChunkLen
-	// Data Format
-	// dbutils.BlockBodyKey(blockNumber, blockHash) -> chunkCount
-	// dbutils.BlockBodyKey(blockNumber, blockHash) + index -> chunk
-	// Write the chunk count
-	if err := tx.Put(kv.ChangeSets3, dbutils.BlockBodyKey(blockNumber, blockHash), dbutils.EncodeBlockNumber(uint64(chunkCount))); err != nil {
-		return err
-	}
-
-	key := make([]byte, 48)
-	for i := 0; i < chunkCount; i++ {
-		start := i * diffChunkLen
-		end := (i + 1) * diffChunkLen
-		if end > len(keys) {
-			end = len(keys)
-		}
-		binary.BigEndian.PutUint64(key, blockNumber)
-		copy(key[8:], blockHash[:])
-		binary.BigEndian.PutUint64(key[40:], uint64(i))
-
-		if err := tx.Put(kv.ChangeSets3, key, keys[start:end]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func ReadDiffSet(tx kv.Tx, blockNumber uint64, blockHash common.Hash) ([kv.DomainLen][]state.DomainEntryDiff, bool, error) {
-	// Read the diffSet from the database
-	chunkCountBytes, err := tx.GetOne(kv.ChangeSets3, dbutils.BlockBodyKey(blockNumber, blockHash))
-	if err != nil {
-		return [kv.DomainLen][]state.DomainEntryDiff{}, false, err
-	}
-	if len(chunkCountBytes) == 0 {
-		return [kv.DomainLen][]state.DomainEntryDiff{}, false, nil
-	}
-	chunkCount, err := dbutils.DecodeBlockNumber(chunkCountBytes)
-	if err != nil {
-		return [kv.DomainLen][]state.DomainEntryDiff{}, false, err
-	}
-
-	key := make([]byte, 48)
-	val := make([]byte, 0, diffChunkLen*chunkCount)
-	for i := uint64(0); i < chunkCount; i++ {
-		binary.BigEndian.PutUint64(key, blockNumber)
-		copy(key[8:], blockHash[:])
-		binary.BigEndian.PutUint64(key[40:], i)
-		chunk, err := tx.GetOne(kv.ChangeSets3, key)
-		if err != nil {
-			return [kv.DomainLen][]state.DomainEntryDiff{}, false, err
-		}
-		if len(chunk) == 0 {
-			return [kv.DomainLen][]state.DomainEntryDiff{}, false, nil
-		}
-		val = append(val, chunk...)
-	}
-
-	return state.DeserializeKeys(val), true, nil
-
 }
