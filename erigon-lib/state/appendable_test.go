@@ -65,7 +65,7 @@ func TestAppendableCollationBuild(t *testing.T) {
 	db, ii, txs := filledAppendable(t, log.New())
 	ctx := context.Background()
 	aggStep := uint64(16)
-	steps := uint64(txs) / aggStep
+	steps := txs / aggStep
 
 	t.Run("can see own writes", func(t *testing.T) {
 		//nonbuf api can see own writes
@@ -103,7 +103,9 @@ func TestAppendableCollationBuild(t *testing.T) {
 	iters := NewMockIterFactory(ctrl)
 	iters.EXPECT().TxnIdsOfCanonicalBlocks(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(func(tx kv.Tx, txFrom, txTo int, by order.By, i3 int) (iter.U64, error) {
-			it := iter.Array[uint64]([]uint64{aggStep*(uint64(txFrom)/aggStep) + 1})
+			currentStep := uint64(txFrom) / aggStep
+			canonicalBlockTxNum := aggStep*currentStep + 1
+			it := iter.Array[uint64]([]uint64{canonicalBlockTxNum})
 			return it, nil
 		}).
 		AnyTimes()
