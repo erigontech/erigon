@@ -104,7 +104,7 @@ func NewAppendable(cfg AppendableCfg, aggregationStep uint64, filenameBase, tabl
 	if cfg.Dirs.SnapDomain == "" {
 		panic("empty `dirs` varialbe")
 	}
-	fk := Appendable{
+	ap := Appendable{
 		cfg:             cfg,
 		dirtyFiles:      btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		aggregationStep: aggregationStep,
@@ -115,10 +115,10 @@ func NewAppendable(cfg AppendableCfg, aggregationStep uint64, filenameBase, tabl
 		logger:          logger,
 		compression:     CompressNone, //CompressKeys | CompressVals,
 	}
-	fk.indexList = withHashMap
-	fk._visibleFiles = []ctxItem{}
+	ap.indexList = withHashMap
+	ap._visibleFiles = []ctxItem{}
 
-	return &fk, nil
+	return &ap, nil
 }
 
 func (ap *Appendable) accessorFilePath(fromStep, toStep uint64) string {
