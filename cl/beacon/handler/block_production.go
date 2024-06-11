@@ -309,6 +309,7 @@ func (a *ApiHandler) produceBlock(
 	builderValue := builderHeader.BlockValue()
 	boostFactorBig := new(big.Int).SetUint64(boostFactor)
 	useLocalExec := new(big.Int).Mul(execValue, big.NewInt(100)).Cmp(new(big.Int).Mul(builderValue, boostFactorBig)) >= 0
+	log.Info("[mev] check bid", "useLocalExec", useLocalExec, "execValue", execValue, "builderValue", builderValue, "boostFactor", boostFactor, "targetSlot", targetSlot)
 	if useLocalExec {
 		block.BeaconBody = beaconBody
 		block.ExecutionValue = execValue
