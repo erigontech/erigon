@@ -17,11 +17,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
 	"github.com/ledgerwatch/erigon/eth/consensuschain"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -133,12 +131,11 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	}
 	defer e.semaphore.Release(1)
 
-	if err := stages2.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline); err != nil {
-		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-		e.logger.Warn("ProcessFrozenBlocks", "error", err)
-		return
-	}
-
+	//if err := stages2.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline); err != nil {
+	//	sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+	//	e.logger.Warn("ProcessFrozenBlocks", "error", err)
+	//	return
+	//}
 	defer e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
 
 	// Update the last new block seen.
@@ -296,12 +293,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			err = fmt.Errorf("updateForkChoice: %w", err)
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
-		}
-		if unwindToGenesis {
-			if err := rawdbreset.ResetExecWithTx(ctx, tx, e.config.ChainName, "", e.logger); err != nil {
-				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-				return
-			}
 		}
 
 		if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {

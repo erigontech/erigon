@@ -658,7 +658,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 			if !r.any() {
 				return true
 			}
-			valuesOuts, indexOuts, historyOuts, _ := dc.staticFilesInRange(r)
+			valuesOuts, indexOuts, historyOuts := dc.staticFilesInRange(r)
 			valuesIn, indexIn, historyIn, err := dc.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
 			require.NoError(t, err)
 			if valuesIn != nil && valuesIn.decompressor != nil {
@@ -709,7 +709,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64, prune
 			dc.Close()
 			break
 		}
-		valuesOuts, indexOuts, historyOuts, _ := dc.staticFilesInRange(r)
+		valuesOuts, indexOuts, historyOuts := dc.staticFilesInRange(r)
 		valuesIn, indexIn, historyIn, err := dc.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
 		require.NoError(t, err)
 
@@ -1406,7 +1406,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		require.NoError(t, err)
 
 		ranges := dc.findMergeRange(txFrom, txTo)
-		vl, il, hl, _ := dc.staticFilesInRange(ranges)
+		vl, il, hl := dc.staticFilesInRange(ranges)
 
 		dv, di, dh, err := dc.mergeFiles(ctx, vl, il, hl, ranges, nil, ps)
 		require.NoError(t, err)
@@ -2149,7 +2149,7 @@ func TestDomain_Unwind(t *testing.T) {
 		writer := dc.NewWriter()
 		defer writer.close()
 
-		err = dc.Unwind(ctx, tx, unwindTo/d.aggregationStep, unwindTo)
+		err = dc.Unwind(ctx, tx, unwindTo/d.aggregationStep, unwindTo, nil)
 		require.NoError(t, err)
 		dc.Close()
 		tx.Commit()

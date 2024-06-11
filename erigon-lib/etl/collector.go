@@ -106,11 +106,15 @@ func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 	return c.flushBuffer(false)
 }
 
+// Collect does copy `k` and `v`
 func (c *Collector) Collect(k, v []byte) error {
 	return c.extractNextFunc(k, k, v)
 }
 
-func (c *Collector) LogLvl(v log.Lvl) { c.logLvl = v }
+func (c *Collector) LogLvl(v log.Lvl) *Collector {
+	c.logLvl = v
+	return c
+}
 
 func (c *Collector) flushBuffer(canStoreInRam bool) error {
 	if c.buf.Len() == 0 {

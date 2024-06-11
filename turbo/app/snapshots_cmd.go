@@ -18,14 +18,15 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/urfave/cli/v2"
+	"golang.org/x/sync/semaphore"
+
 	"github.com/ledgerwatch/erigon-lib/common/disk"
 	"github.com/ledgerwatch/erigon-lib/common/mem"
 	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli/v2"
-	"golang.org/x/sync/semaphore"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -604,9 +605,9 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	err = chainDB.View(ctx, func(tx kv.Tx) error {
 		ac := agg.BeginFilesRo()
 		defer ac.Close()
-		ac.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
-			_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
-			return histBlockNumProgress
+		ac.LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
+			_, histBlockNumProgress, err := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+			return histBlockNumProgress, err
 		})
 		return nil
 	})
@@ -797,17 +798,23 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}); err != nil {
 		return err
 	}
-
-	for j := 0; j < 10_000; j++ { // prune happens by small steps, so need many runs
-		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-			if err := br.PruneAncientBlocks(tx, 100); err != nil {
+	deletedBlocks := math.MaxInt // To pass the first iteration
+	allDeletedBlocks := 0
+	for deletedBlocks > 0 { // prune happens by small steps, so need many runs
+		err = db.UpdateNosync(ctx, func(tx kv.RwTx) error {
+			if deletedBlocks, err = br.PruneAncientBlocks(tx, 100); err != nil {
 				return err
 			}
 			return nil
-		}); err != nil {
+		})
+		if err != nil {
 			return err
 		}
+
+		allDeletedBlocks += deletedBlocks
 	}
+
+	logger.Info("Pruning has ended", "deleted blocks", allDeletedBlocks)
 
 	db, err = temporal.New(db, agg)
 	if err != nil {

@@ -413,6 +413,9 @@ func (w *domainBufferedWriter) PutWithPrev(key1, key2, val, preval []byte, prevS
 	if err := w.h.AddPrevValue(key1, key2, preval, prevStep); err != nil {
 		return err
 	}
+	if w.diff != nil {
+		w.diff.DomainUpdate(key1, key2, preval, w.stepBytes[:], prevStep)
+	}
 	return w.addValue(key1, key2, val)
 }
 
@@ -423,6 +426,9 @@ func (w *domainBufferedWriter) DeleteWithPrev(key1, key2, prev []byte, prevStep 
 	}
 	if err := w.h.AddPrevValue(key1, key2, prev, prevStep); err != nil {
 		return err
+	}
+	if w.diff != nil {
+		w.diff.DomainUpdate(key1, key2, prev, w.stepBytes[:], prevStep)
 	}
 	return w.addValue(key1, key2, nil)
 }
@@ -441,13 +447,11 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *domainBufferedWrit
 		aux:       make([]byte, 0, 128),
 		keysTable: dt.d.keysTable,
 		valsTable: dt.d.valsTable,
-		keys:      etl.NewCollector("flush "+dt.d.keysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), dt.d.logger),
-		values:    etl.NewCollector("flush "+dt.d.valsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), dt.d.logger),
+		keys:      etl.NewCollector("flush "+dt.d.keysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), dt.d.logger).LogLvl(log.LvlTrace),
+		values:    etl.NewCollector("flush "+dt.d.valsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), dt.d.logger).LogLvl(log.LvlTrace),
 
 		h: dt.ht.newWriter(tmpdir, discardHistory),
 	}
-	w.keys.LogLvl(log.LvlTrace)
-	w.values.LogLvl(log.LvlTrace)
 	w.keys.SortAndFlushInBackground(true)
 	w.values.SortAndFlushInBackground(true)
 	return w
@@ -463,6 +467,7 @@ type domainBufferedWriter struct {
 
 	stepBytes [8]byte // current inverted step representation
 	aux       []byte
+	diff      *StateDiffDomain
 
 	h *historyBufferedWriter
 }
@@ -1160,21 +1165,75 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 
 // unwind is similar to prune but the difference is that it restores domain values from the history as of txFrom
 // context Flush should be managed by caller.
-func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwindTo uint64) error {
+func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwindTo uint64, domainDiffs []DomainEntryDiff) error {
 	d := dt.d
 	//fmt.Printf("[domain][%s] unwinding domain to txNum=%d, step %d\n", d.filenameBase, txNumUnwindTo, step)
-	histRng, err := dt.ht.HistoryRange(int(txNumUnwindTo), -1, order.Asc, -1, rwTx)
-	if err != nil {
-		return fmt.Errorf("historyRange %s: %w", dt.ht.h.filenameBase, err)
-	}
+
 	sf := time.Now()
 	defer mxUnwindTook.ObserveDuration(sf)
 	mxRunningUnwind.Inc()
 	defer mxRunningUnwind.Dec()
+	restored := dt.NewWriter()
+	logEvery := time.NewTicker(time.Second * 30)
+	defer logEvery.Stop()
+
+	stepBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(stepBytes, ^step)
+	// Attempt to use the diff to unwind the domain
+	if domainDiffs != nil {
+		keysCursor, err := rwTx.RwCursorDupSort(d.keysTable)
+		if err != nil {
+			return fmt.Errorf("create %s domain delete cursor: %w", d.filenameBase, err)
+		}
+		defer keysCursor.Close()
+
+		// First revert keys
+		for i := range domainDiffs {
+			key, value, prevStepBytes := domainDiffs[i].Key, domainDiffs[i].Value, domainDiffs[i].PrevStepBytes
+			// First, we need to evict from the keysCursor all keys that have a too high step
+			fullKey := key[:len(key)-8]
+			// so stepBytes is ^step so we need to iterate from the begining down until we find the stepBytes
+			for k, v, err := keysCursor.SeekExact(fullKey); k != nil; k, v, err = keysCursor.NextDup() {
+				if err != nil {
+					return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
+				}
+				if bytes.Compare(v, prevStepBytes) >= 0 { // remove all values up to the previous step
+					break
+				}
+
+				if err := keysCursor.DeleteCurrent(); err != nil {
+					return err
+				}
+			}
+			// Second, we need to restore the previous value
+			if len(value) == 0 {
+				if err := rwTx.Delete(d.valsTable, key); err != nil {
+					return err
+				}
+			} else {
+				if err := rwTx.Put(d.valsTable, key, value); err != nil {
+					return err
+				}
+			}
+		}
+		// Compare valsKV with prevSeenKeys
+		if _, err := dt.ht.Prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, false, logEvery); err != nil {
+			return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dt.d.filenameBase, txNumUnwindTo, step, err)
+		}
+		return nil
+	}
+
+	histRng, err := dt.ht.HistoryRange(int(txNumUnwindTo), -1, order.Asc, -1, rwTx)
+	if err != nil {
+		return fmt.Errorf("historyRange %s: %w", dt.ht.h.filenameBase, err)
+	}
 	defer histRng.Close()
 
+	keysCursor, err := dt.keysCursor(rwTx)
+	if err != nil {
+		return err
+	}
 	seen := make(map[string]struct{})
-	restored := dt.NewWriter()
 
 	for histRng.HasNext() && txNumUnwindTo > 0 {
 		k, v, _, err := histRng.Next()
@@ -1184,13 +1243,11 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 
 		ic, err := dt.ht.IdxRange(k, int(txNumUnwindTo)-1, 0, order.Desc, -1, rwTx)
 		if err != nil {
-			ic.Close()
 			return err
 		}
 		if ic.HasNext() {
 			nextTxn, err := ic.Next()
 			if err != nil {
-				ic.Close()
 				return err
 			}
 			restored.SetTxNum(nextTxn) // todo what if we actually had to decrease current step to provide correct update?
@@ -1199,17 +1256,12 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		}
 		//fmt.Printf("[%s] unwinding %x ->'%x'\n", dt.d.filenameBase, k, v)
 		if err := restored.addValue(k, nil, v); err != nil {
-			ic.Close()
 			return err
 		}
 		ic.Close()
 		seen[string(k)] = struct{}{}
 	}
 
-	keysCursor, err := dt.keysCursor(rwTx)
-	if err != nil {
-		return err
-	}
 	keysCursorForDeletes, err := rwTx.RwCursorDupSort(d.keysTable)
 	if err != nil {
 		return fmt.Errorf("create %s domain delete cursor: %w", d.filenameBase, err)
@@ -1223,8 +1275,6 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	}
 	defer valsC.Close()
 
-	stepBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(stepBytes, ^step)
 	var k, v []byte
 
 	for k, v, err = keysCursor.First(); k != nil; k, v, err = keysCursor.Next() {
@@ -1258,8 +1308,6 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		}
 	}
 
-	logEvery := time.NewTicker(time.Second * 30)
-	defer logEvery.Stop()
 	if _, err := dt.ht.Prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, false, logEvery); err != nil {
 		return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dt.d.filenameBase, txNumUnwindTo, step, err)
 	}
@@ -1452,6 +1500,7 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 	if err != nil {
 		return nil, 0, false, err
 	}
+
 	if foundInvStep != nil {
 		foundStep := ^binary.BigEndian.Uint64(foundInvStep)
 		if LastTxNumOfStep(foundStep, dt.d.aggregationStep) >= dt.maxTxNumInDomainFiles(false) {
