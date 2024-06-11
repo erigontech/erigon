@@ -1176,7 +1176,7 @@ func (tx *AppendableRoTx) mergeFiles(ctx context.Context, files []*filesItem, st
 	}
 	ps.Delete(p)
 
-	if err := tx.ap.buildIdx(ctx, fromStep, toStep, outItem.decompressor, ps); err != nil {
+	if err := tx.ap.buildAccessor(ctx, fromStep, toStep, outItem.decompressor, ps); err != nil {
 		return nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", tx.ap.filenameBase, startTxNum, endTxNum, err)
 	}
 	if outItem.index, err = recsplit.OpenIndex(tx.ap.fkAccessorFilePath(fromStep, toStep)); err != nil {

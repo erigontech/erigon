@@ -221,9 +221,9 @@ func (fk *Appendable) missedIdxFiles() (l []*filesItem) {
 	return l
 }
 
-func (fk *Appendable) buildIdx(ctx context.Context, fromStep, toStep uint64, d *seg.Decompressor, ps *background.ProgressSet) error {
+func (fk *Appendable) buildAccessor(ctx context.Context, fromStep, toStep uint64, d *seg.Decompressor, ps *background.ProgressSet) error {
 	if d == nil {
-		return fmt.Errorf("buildIdx: passed item with nil decompressor %s %d-%d", fk.filenameBase, fromStep, toStep)
+		return fmt.Errorf("buildAccessor: passed item with nil decompressor %s %d-%d", fk.filenameBase, fromStep, toStep)
 	}
 	idxPath := fk.fkAccessorFilePath(fromStep, toStep)
 	cfg := recsplit.RecSplitArgs{
@@ -244,7 +244,7 @@ func (fk *Appendable) buildIdx(ctx context.Context, fromStep, toStep uint64, d *
 	defer ps.Delete(p)
 
 	num := make([]byte, binary.MaxVarintLen64)
-	return buildSimpleIndex(ctx, d, cfg, fk.logger, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+	return buildSimpleMapAccessor(ctx, d, cfg, fk.logger, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		if p != nil {
 			p.Processed.Add(1)
 		}
@@ -261,7 +261,7 @@ func (fk *Appendable) BuildMissedIndices(ctx context.Context, g *errgroup.Group,
 		item := item
 		g.Go(func() error {
 			fromStep, toStep := item.startTxNum/fk.aggregationStep, item.endTxNum/fk.aggregationStep
-			return fk.buildIdx(ctx, fromStep, toStep, item.decompressor, ps)
+			return fk.buildAccessor(ctx, fromStep, toStep, item.decompressor, ps)
 		})
 	}
 }
@@ -893,7 +893,7 @@ func (fk *Appendable) buildFiles(ctx context.Context, step uint64, coll Appendab
 		return AppendableFiles{}, fmt.Errorf("open %s decompressor: %w", fk.filenameBase, err)
 	}
 
-	if err := fk.buildIdx(ctx, step, step+1, decomp, ps); err != nil {
+	if err := fk.buildAccessor(ctx, step, step+1, decomp, ps); err != nil {
 		return AppendableFiles{}, fmt.Errorf("build %s api: %w", fk.filenameBase, err)
 	}
 	if index, err = recsplit.OpenIndex(fk.fkAccessorFilePath(step, step+1)); err != nil {

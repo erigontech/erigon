@@ -9,7 +9,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func buildSimpleIndex(ctx context.Context, d *seg.Decompressor, cfg recsplit.RecSplitArgs, logger log.Logger, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error) error {
+func buildSimpleMapAccessor(ctx context.Context, d *seg.Decompressor, cfg recsplit.RecSplitArgs, logger log.Logger, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error) error {
 	count := d.Count()
 
 	defer d.EnableReadAhead().DisableReadAhead()
