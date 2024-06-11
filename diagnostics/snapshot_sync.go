@@ -45,7 +45,7 @@ func SetupStagesAccess(metricsMux *http.ServeMux, diag *diaglib.DiagnosticClient
 	metricsMux.HandleFunc("/sync-stages", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
-		writeNetworkSpeed(w, diag)
+		writeSyncStages(w, diag)
 	})
 }
 
