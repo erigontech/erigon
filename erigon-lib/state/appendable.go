@@ -121,7 +121,7 @@ func NewAppendable(cfg AppendableCfg, aggregationStep uint64, filenameBase, tabl
 	return &fk, nil
 }
 
-func (fk *Appendable) fkAccessorFilePath(fromStep, toStep uint64) string {
+func (fk *Appendable) accessorFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(fk.cfg.Dirs.SnapAccessors, fmt.Sprintf("v1-%s.%d-%d.api", fk.filenameBase, fromStep, toStep))
 }
 func (fk *Appendable) fkFilePath(fromStep, toStep uint64) string {
@@ -211,7 +211,7 @@ func (fk *Appendable) missedAccessors() (l []*filesItem) {
 	fk.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/fk.aggregationStep, item.endTxNum/fk.aggregationStep
-			if !dir.FileExist(fk.fkAccessorFilePath(fromStep, toStep)) {
+			if !dir.FileExist(fk.accessorFilePath(fromStep, toStep)) {
 				l = append(l, item)
 			}
 		}
@@ -224,7 +224,7 @@ func (fk *Appendable) buildAccessor(ctx context.Context, fromStep, toStep uint64
 	if d == nil {
 		return fmt.Errorf("buildAccessor: passed item with nil decompressor %s %d-%d", fk.filenameBase, fromStep, toStep)
 	}
-	idxPath := fk.fkAccessorFilePath(fromStep, toStep)
+	idxPath := fk.accessorFilePath(fromStep, toStep)
 	cfg := recsplit.RecSplitArgs{
 		Enums: true,
 
@@ -300,7 +300,7 @@ func (fk *Appendable) openFiles() error {
 			}
 
 			if item.index == nil {
-				fPath := fk.fkAccessorFilePath(fromStep, toStep)
+				fPath := fk.accessorFilePath(fromStep, toStep)
 				if dir.FileExist(fPath) {
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
@@ -843,7 +843,7 @@ func (fk *Appendable) buildFiles(ctx context.Context, step uint64, coll Appendab
 	if err := fk.buildAccessor(ctx, step, step+1, decomp, ps); err != nil {
 		return AppendableFiles{}, fmt.Errorf("build %s api: %w", fk.filenameBase, err)
 	}
-	if index, err = recsplit.OpenIndex(fk.fkAccessorFilePath(step, step+1)); err != nil {
+	if index, err = recsplit.OpenIndex(fk.accessorFilePath(step, step+1)); err != nil {
 		return AppendableFiles{}, err
 	}
 
@@ -856,23 +856,4 @@ func (fk *Appendable) integrateDirtyFiles(sf AppendableFiles, txNumFrom, txNumTo
 	fi.decompressor = sf.decomp
 	fi.index = sf.index
 	fk.dirtyFiles.Set(fi)
-}
-
-func (fk *Appendable) collectFilesStat() (filesCount, filesSize, idxSize uint64) {
-	if fk.dirtyFiles == nil {
-		return 0, 0, 0
-	}
-	fk.dirtyFiles.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			if item.index == nil {
-				return false
-			}
-			filesSize += uint64(item.decompressor.Size())
-			idxSize += uint64(item.index.Size())
-			idxSize += uint64(item.bindex.Size())
-			filesCount += 3
-		}
-		return true
-	})
-	return filesCount, filesSize, idxSize
 }

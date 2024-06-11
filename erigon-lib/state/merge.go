@@ -1120,16 +1120,12 @@ func (tx *AppendableRoTx) mergeFiles(ctx context.Context, files []*filesItem, st
 
 	var outItem *filesItem
 	var comp *seg.Compressor
-	var decomp *seg.Decompressor
 	var err error
 	var closeItem = true
 	defer func() {
 		if closeItem {
 			if comp != nil {
 				comp.Close()
-			}
-			if decomp != nil {
-				decomp.Close()
 			}
 			if outItem != nil {
 				outItem.closeFilesAndRemove()
@@ -1179,7 +1175,7 @@ func (tx *AppendableRoTx) mergeFiles(ctx context.Context, files []*filesItem, st
 	if err := tx.ap.buildAccessor(ctx, fromStep, toStep, outItem.decompressor, ps); err != nil {
 		return nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", tx.ap.filenameBase, startTxNum, endTxNum, err)
 	}
-	if outItem.index, err = recsplit.OpenIndex(tx.ap.fkAccessorFilePath(fromStep, toStep)); err != nil {
+	if outItem.index, err = recsplit.OpenIndex(tx.ap.accessorFilePath(fromStep, toStep)); err != nil {
 		return nil, err
 	}
 
