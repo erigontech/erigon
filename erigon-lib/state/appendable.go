@@ -376,7 +376,7 @@ func (tx *AppendableRoTx) getFromFiles(ts uint64) (v []byte, ok bool) {
 		return nil, false
 	}
 
-	lookup := ts - tx.iters.BaseTxNum()
+	lookup := ts - tx.files[i].startTxNum // we are very lucky: each txNum has 1 appendable
 	idx := tx.files[i].src.index
 	if idx.KeyCount() <= lookup {
 		return nil, false
