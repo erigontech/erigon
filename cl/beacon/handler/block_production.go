@@ -240,7 +240,8 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		bytes, _ := json.Marshal(block.ToExecution())
 		log.Info("[mev] execution block", "block", string(bytes))
 	}
-	return resp.With("execution_payload_blinded", block.IsBlinded()).
+	return resp.With("version", block.Version().String()).
+		With("execution_payload_blinded", block.IsBlinded()).
 		With("execution_payload_value", strconv.FormatUint(block.GetExecutionValue().Uint64(), 10)).
 		With("consensus_block_value", strconv.FormatUint(consensusValue, 10)), nil
 }
