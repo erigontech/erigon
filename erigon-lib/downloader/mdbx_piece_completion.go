@@ -112,27 +112,18 @@ func (m *mdbxPieceCompletion) Set(pk metainfo.PieceKey, b bool) error {
 
 		completed.Add(uint32(pk.Index))
 
-		tx, err = m.db.BeginRwNosync(context.Background())
-		if err != nil {
-			return err
-		}
-	} else {
-		tx, err = m.db.BeginRw(context.Background())
-		if err != nil {
-			return err
-		}
+		return nil
 	}
+
+	tx, err = m.db.BeginRw(context.Background())
+	if err != nil {
+		return err
+	}
+
 	defer tx.Rollback()
 
-	var key [infohash.Size + 4]byte
-	copy(key[:], pk.InfoHash[:])
-	binary.BigEndian.PutUint32(key[infohash.Size:], uint32(pk.Index))
+	err = putCompletion(tx, pk.InfoHash, uint32(pk.Index), b)
 
-	v := []byte(incomplete)
-	if b {
-		v = []byte(complete)
-	}
-	err = tx.Put(kv.BittorrentCompletion, key[:], v)
 	if err != nil {
 		return err
 	}
@@ -140,17 +131,45 @@ func (m *mdbxPieceCompletion) Set(pk metainfo.PieceKey, b bool) error {
 	return tx.Commit()
 }
 
+func putCompletion(tx kv.RwTx, infoHash infohash.T, index uint32, c bool) error {
+	var key [infohash.Size + 4]byte
+	copy(key[:], infoHash[:])
+	binary.BigEndian.PutUint32(key[infohash.Size:], index)
+
+	v := []byte(incomplete)
+	if c {
+		v = []byte(complete)
+	}
+	//fmt.Println("PUT", infoHash, index, c)
+	return tx.Put(kv.BittorrentCompletion, key[:], v)
+}
+
 func (m *mdbxPieceCompletion) Flushed(infoHash infohash.T, flushed *roaring.Bitmap) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	tx, err := m.db.BeginRwNosync(context.Background())
+
+	if err != nil {
+		return
+	}
+
+	defer tx.Rollback()
+
+	m.putFlushed(tx, infoHash, flushed)
+
+	tx.Commit()
+}
+
+func (m *mdbxPieceCompletion) putFlushed(tx kv.RwTx, infoHash infohash.T, flushed *roaring.Bitmap) {
 	if completed, ok := m.completed[infoHash]; ok {
 		setters := flushed.Clone()
 		setters.And(completed)
 
 		if setters.GetCardinality() > 0 {
 			setters.Iterate(func(piece uint32) bool {
-				//fmt.Println("Set", piece)
+				// TODO deal with error (? don't remove from bitset ?)
+				_ = putCompletion(tx, infoHash, piece, true)
 				return true
 			})
 		}
@@ -180,41 +199,6 @@ func NewMdbxPieceCompletionBatch(db kv.RwDB) (ret storage.PieceCompletion, err e
 		completed: map[infohash.T]*roaring.Bitmap{}}}, nil
 }
 
-func (m *mdbxPieceCompletionBatch) Get(pk metainfo.PieceKey) (cn storage.Completion, err error) {
-	m.mu.RLock()
-	if completed, ok := m.completed[pk.InfoHash]; ok {
-		if completed.Contains(uint32(pk.Index)) {
-			m.mu.RUnlock()
-			return storage.Completion{
-				Complete: true,
-				Ok:       true,
-			}, nil
-		}
-	}
-	m.mu.RUnlock()
-
-	err = m.db.View(context.Background(), func(tx kv.Tx) error {
-		var key [infohash.Size + 4]byte
-		copy(key[:], pk.InfoHash[:])
-		binary.BigEndian.PutUint32(key[infohash.Size:], uint32(pk.Index))
-		cn.Ok = true
-		v, err := tx.GetOne(kv.BittorrentCompletion, key[:])
-		if err != nil {
-			return err
-		}
-		switch string(v) {
-		case complete:
-			cn.Complete = true
-		case incomplete:
-			cn.Complete = false
-		default:
-			cn.Ok = false
-		}
-		return nil
-	})
-	return
-}
-
 func (m *mdbxPieceCompletionBatch) Set(pk metainfo.PieceKey, b bool) error {
 	if c, err := m.Get(pk); err == nil && c.Ok && c.Complete == b {
 		return nil
@@ -222,10 +206,6 @@ func (m *mdbxPieceCompletionBatch) Set(pk metainfo.PieceKey, b bool) error {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	var key [infohash.Size + 4]byte
-	copy(key[:], pk.InfoHash[:])
-	binary.BigEndian.PutUint32(key[infohash.Size:], uint32(pk.Index))
 
 	if b {
 		completed, ok := m.completed[pk.InfoHash]
@@ -236,18 +216,28 @@ func (m *mdbxPieceCompletionBatch) Set(pk metainfo.PieceKey, b bool) error {
 		}
 
 		completed.Add(uint32(pk.Index))
+
+		return nil
 	}
 
-	v := []byte(incomplete)
-	if b {
-		v = []byte(complete)
-	}
 	return m.db.Batch(func(tx kv.RwTx) error {
-		return tx.Put(kv.BittorrentCompletion, key[:], v)
+		return putCompletion(tx, pk.InfoHash, uint32(pk.Index), b)
+	})
+}
+
+func (m *mdbxPieceCompletionBatch) Flushed(infoHash infohash.T, flushed *roaring.Bitmap) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	//fmt.Println("FLUSH", infoHash)
+	m.db.Batch(func(tx kv.RwTx) error {
+		m.putFlushed(tx, infoHash, flushed)
+		return nil
 	})
 }
 
 func (m *mdbxPieceCompletionBatch) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.db.Close()
 	return nil
 }
