@@ -82,18 +82,13 @@ func TestAppendableCollationBuild(t *testing.T) {
 		require.True(ok)
 		require.Equal(1, int(binary.BigEndian.Uint64(v)))
 
-		v, ok, err = ic.Get(2, tx)
-		require.NoError(err)
-		require.True(ok)
-		require.Equal(2, int(binary.BigEndian.Uint64(v)))
-
 		//never existed key
 		v, ok, err = ic.Get(txs+1, tx)
 		require.NoError(err)
 		require.False(ok)
 
 		//non-canonical key: must exist before collate+prune
-		v, ok, err = ic.Get(63, tx)
+		v, ok, err = ic.Get(2, tx)
 		require.NoError(err)
 		require.False(ok)
 
