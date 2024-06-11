@@ -56,6 +56,7 @@ type Aggregator struct {
 	db               kv.RoDB
 	d                [kv.DomainLen]*Domain
 	iis              [kv.StandaloneIdxLen]*InvertedIndex
+	ap               [kv.AppendableLen]*Appendable
 	backgroundResult *BackgroundResult
 	dirs             datadir.Dirs
 	tmpdir           string
