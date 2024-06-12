@@ -756,7 +756,7 @@ type AppendableCollation struct {
 func (collation AppendableCollation) Close() {
 	if collation.writer != nil {
 		collation.writer.Close()
-		collation.writer = nil
+		collation.writer = nil //nolint
 	}
 }
 
