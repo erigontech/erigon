@@ -54,6 +54,8 @@ type operation struct {
 
 	// terminal denotes if the instruction can be the final opcode in a code section
 	terminal bool
+
+	immediateSize uint8
 }
 
 var (
@@ -100,6 +102,7 @@ func validateAndFillMaxStack(jt *JumpTable) {
 func newPragueInstructionSet() JumpTable {
 	instructionSet := newCancunInstructionSet()
 	enable2935(&instructionSet)
+	// enableEOF(&instructionSet)
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }

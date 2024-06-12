@@ -34,10 +34,16 @@ var (
 	ErrInvalidCodeTermination = errors.New("invalid code termination")
 	ErrUnreachableCode        = errors.New("unreachable code")
 	ErrInvalidDataLoadN       = errors.New("invalid DATALOADN index")
+	ErrEOFStackOverflow       = errors.New("stack overflow")
+	ErrJUMPFOutputs           = errors.New("current secion outputs less then target section outputs")
+	ErrStackHeightHigher      = errors.New("stack height higher then outputs required")
+	ErrNoTerminalInstruction  = errors.New("expected terminal instruction")
+	ErrStackHeightMismatch    = errors.New("stack height mismatch")
+	ErrCALLFtoNonReturning    = errors.New("op CALLF to non returning function")
 )
 
 // validateCode validates the code parameter against the EOF v1 validity requirements.
-func validateCode(code []byte, section int, metadata []*FunctionMetadata, jt *JumpTable, data []byte) error {
+func validateCode(code []byte, section int, metadata []*FunctionMetadata, jt *JumpTable, dataSize int) error {
 	var (
 		i = 0
 		// Tracks the number of actual instructions in the code (e.g.
@@ -91,24 +97,49 @@ func validateCode(code []byte, section int, metadata []*FunctionMetadata, jt *Ju
 				}
 			}
 			i += 1 + 2*count
-		case op == CALLF || op == JUMPF:
+		case op == CALLF:
+
+			// const auto fid = read_uint16_be(&code[i + 1]);
+			// if (fid >= header.types.size())
+			//     return EOFValidationError::invalid_code_section_index;
+			// if (header.types[fid].outputs == NON_RETURNING_FUNCTION)
+			//     return EOFValidationError::callf_to_non_returning_function;
+			// if (code_idx != fid)
+			//     accessed_code_sections.insert(fid);
+			// i += 2;
+
 			if i+2 >= len(code) {
 				return fmt.Errorf("%w: op %s, pos %d", ErrTruncatedImmediate, op, i)
 			}
-			arg, _ := parseUint16(code[i+1:])
-			if arg >= len(metadata) {
-				return fmt.Errorf("%w: arg %d, last %d, pos %d", ErrInvalidSectionArgument, arg, len(metadata), i)
+			fid, _ := parseUint16(code[i+1:]) // function id
+			if fid >= len(metadata) {
+				return fmt.Errorf("%w: arg %d, last %d, pos %d", ErrInvalidSectionArgument, fid, len(metadata), i)
 			}
+			if metadata[fid].Output == nonReturningFunction {
+				return fmt.Errorf("%w, op: %s, pos: %d", ErrCALLFtoNonReturning, op, i)
+			}
+			count += 2
+			i += 2
+		case op == JUMPF:
+			if i+2 >= len(code) {
+				return fmt.Errorf("%w: op %s, pos %d", ErrTruncatedImmediate, op, i)
+			}
+			fid, _ := parseUint16(code[i+1:]) // function id
+			fmt.Println("FID: ", fid)
+			if fid >= len(metadata) {
+				return fmt.Errorf("%w: arg %d, last %d, pos %d", ErrInvalidSectionArgument, fid, len(metadata), i)
+			}
+			count += 2
 			i += 2
 		case op == DATALOADN:
 			if i+2 >= len(code) {
 				return fmt.Errorf("%w: op %s, pos %d", ErrTruncatedImmediate, op, i)
 			}
 			arg, _ := parseUint16(code[i+1:]) // read index
-			if len(data) < 32 || arg > len(data)-32 {
+			if dataSize < 32 || arg > dataSize-32 {
 				return fmt.Errorf("%w: op %s, pos %d", ErrInvalidDataLoadN, op, i)
 			}
-			fmt.Println("DATA SIZE, INDEX: ", len(data), arg)
+			fmt.Println("DATA SIZE, INDEX: ", dataSize, arg)
 			i += 2
 		}
 		i += 1
@@ -118,13 +149,14 @@ func validateCode(code []byte, section int, metadata []*FunctionMetadata, jt *Ju
 	if !jt[op].terminal {
 		return fmt.Errorf("%w: end with %s, pos %d", ErrInvalidCodeTermination, op, i)
 	}
-	if paths, err := validateControlFlow(code, section, metadata, jt); err != nil {
+	if _, err := validateControlFlow2(code, section, metadata, jt); err != nil {
 		return err
-	} else if paths != count {
-		// TODO(matt): return actual position of unreachable code
-		fmt.Println("paths, count: ", paths, count)
-		return ErrUnreachableCode
 	}
+	//  else if paths != count {
+	// 	// TODO(matt): return actual position of unreachable code
+	// 	fmt.Println("paths, count: ", paths, count)
+	// 	return ErrUnreachableCode
+	// }
 	return nil
 }
 
@@ -147,19 +179,157 @@ func checkDest(code []byte, analysis *bitvec, imm, from, length int) error {
 	return nil
 }
 
-// func validateControlFlow2(code []byte, section int, metadata []*FunctionMetadata, jt *JumpTable) error {
+type stackHeightRange struct {
+	min int
+	max int
+}
 
-// 	for pos := 0; pos < len(code); {
-// 		op := OpCode(code[pos])
+func (st *stackHeightRange) visited() bool { return st.min != -1 }
 
-// 		pops := jt[op].numPop
-// 		pushes := jt[op].numPush
-// 		_maxStack := jt[op].maxStack
+func visitSuccessor(currentOffset, nextOffset int, stackRequired stackHeightRange, stackHeights *[]stackHeightRange) bool {
+	fmt.Printf("Visitin successor: currentOffset: %v, nextOffset: %v, stckRequire.max: %v, stckRequired.min: %v\n", currentOffset, nextOffset, stackRequired.max, stackRequired.min)
+	nextStackHeight := (*stackHeights)[nextOffset]
+	fmt.Printf("next stack: nextStack.max: %v, nextStack.min: %v\n", nextStackHeight.max, nextStackHeight.min)
+	if nextOffset <= currentOffset { // backwards jump
+		if !nextStackHeight.visited() {
+			panic("successor wasn't visited")
+		}
+		return nextStackHeight.min == stackRequired.min && nextStackHeight.max == stackRequired.max
+	} else if !nextStackHeight.visited() { // forwards jump, new target
+		fmt.Println("NOT VISITED")
+		nextStackHeight = stackRequired
+	} else { // forwards jump, target known
+		nextStackHeight.min = min(stackRequired.min, nextStackHeight.min)
+		nextStackHeight.max = max(stackRequired.max, nextStackHeight.max)
+	}
+	(*stackHeights)[nextOffset] = nextStackHeight
+	fmt.Printf("Setting nextStackHeight.max: %v, nextStackHeigh.min: %v, offset: %v\n", nextStackHeight.max, nextStackHeight.min, nextOffset)
+	return true
+}
 
-// 	}
+func validateControlFlow2(code []byte, section int, metadata []*FunctionMetadata, jt *JumpTable) (int, error) {
+	fmt.Printf("section: %v, len(code): %v\n", section, len(code))
+	stackHeights := make([]stackHeightRange, len(code))
+	for i := 1; i < len(code); i++ {
+		stackHeights[i] = stackHeightRange{min: -1, max: -1}
+	}
+	stackHeights[0] = stackHeightRange{min: int(metadata[section].Input), max: int(metadata[section].Input)}
 
-// 	return nil
-// }
+	for pos := 0; pos < len(code); {
+		op := OpCode(code[pos])
+		fmt.Printf("At position: %v, op: %v, opcodeHex: %v\n", pos, opCodeToString[op], code[pos])
+		stackHeightRequired := jt[op].numPop // how many stack items required by the instruction
+		stackHeightChange := jt[op].numPush
+		fmt.Println("STACK HEIGHT REQUIRED: ", stackHeightRequired)
+		stackHeight := stackHeights[pos]
+
+		if !stackHeight.visited() {
+			fmt.Println("HITTING THIS")
+			return 0, ErrUnreachableCode
+		}
+
+		if op == CALLF {
+			fid := parseInt16(code[pos+1:]) // function id
+			stackHeightRequired = int(metadata[fid].Input)
+			if stackHeight.max+int(metadata[fid].MaxStackHeight)+stackHeightRequired > stackSizeLimit {
+				return 0, ErrEOFStackOverflow
+			}
+			if metadata[fid].Output == nonReturningFunction {
+				panic("CALLF returning")
+			}
+			stackHeightChange = int(metadata[fid].Output)
+		} else if op == JUMPF {
+			fid := parseInt16(code[pos+1:]) // function id
+			if stackHeight.max+int(metadata[fid].MaxStackHeight)-int(metadata[fid].Input) > stackSizeLimit {
+				return 0, ErrEOFStackOverflow
+			}
+
+			if metadata[fid].Output == nonReturningFunction {
+				stackHeightRequired = int(metadata[fid].Input)
+			} else { // returning function
+				// type[current_section_index].outputs MUST be greater or equal type[target_section_index].outputs,
+				// or type[target_section_index].outputs MUST be 0x80, checked above
+				if metadata[section].Output < metadata[fid].Output {
+					return 0, ErrJUMPFOutputs
+				}
+
+				stackHeightRequired = int(metadata[section].Output) + int(metadata[fid].Input) - int(metadata[fid].Output)
+
+				if stackHeight.max > stackHeightRequired {
+					return 0, ErrStackHeightHigher
+				}
+			}
+		} else if op == RETF {
+			stackHeightRequired = int(metadata[section].Output)
+			if stackHeight.max > stackHeightRequired {
+				fmt.Printf("RETF: stackHeight.max: %v, stackHeightRequired: %v\n", stackHeight.max, stackHeightRequired)
+				return 0, ErrStackHeightHigher
+			}
+		} else if op == DUPN {
+			stackHeightRequired = int(code[pos+1]) + 1
+		} else if op == SWAPN {
+			stackHeightRequired = int(code[pos+1]) + 1
+		} else if op == EXCHANAGE {
+			n := (int(code[pos+1]) >> 4) + 1
+			m := (int(code[pos+1]) & 0x0F) + 1
+			stackHeightRequired = n + m + 1
+		}
+
+		if stackHeight.min < stackHeightRequired {
+			return 0, ErrEOFStackOverflow
+		}
+		fmt.Printf("before setting next: StackHeight.Max: %v, StackHeight: %v\n", stackHeight.max, stackHeight.min)
+		nextStackHeight := stackHeightRange{min: stackHeight.min + stackHeightChange, max: stackHeight.max + stackHeightChange}
+
+		var immSize int // immediate size
+		if op == RJUMPV {
+			immSize = 1 + int(code[pos+1]) + 1*2 // (size of int16)
+		} else {
+			immSize = int(jt[op].immediateSize)
+		}
+		fmt.Println("immSize: ", immSize)
+
+		next := pos + immSize + 1 // offset of the next instruction (may be invalid)
+		fmt.Println("next: ", next)
+		// check validity of next instuction, skip RJUMP and termination instructions
+		if !jt[op].terminal && op != RJUMP {
+			fmt.Println("VISITIN NEXXT")
+			if next >= len(code) {
+				fmt.Println("next >= len(code)")
+				return 0, ErrNoTerminalInstruction
+			}
+			if !visitSuccessor(pos, next, nextStackHeight, &stackHeights) {
+				return 0, ErrStackHeightMismatch
+			}
+		}
+
+		if op == RJUMP || op == RJUMPI {
+			targetRelOffset := parseInt16(code[pos+1:])
+			target := pos + int(targetRelOffset) + 3
+
+			if !visitSuccessor(pos, target, nextStackHeight, &stackHeights) {
+				return 0, ErrStackHeightMismatch
+			}
+		} else if op == RJUMPV {
+			maxIndex := code[pos+1]
+			for i := 0; i <= int(maxIndex); i++ {
+				targetRelOffset := parseInt16(code[pos+i*2+2:])
+				target := pos + int(next) + int(targetRelOffset)
+
+				if !visitSuccessor(pos, target, nextStackHeight, &stackHeights) {
+					return 0, ErrStackHeightMismatch
+				}
+			}
+		}
+
+		pos = next
+	}
+
+	// const auto max_stack_height_it = std::max_element(stack_heights.begin(), stack_heights.end(),
+	//     [](StackHeightRange lhs, StackHeightRange rhs) noexcept { return lhs.max < rhs.max; });
+	// return max_stack_height_it->max;
+	return len(stackHeights), nil
+}
 
 // validateControlFlow iterates through all possible branches the provided code
 // value and determines if it is valid per EOF v1.

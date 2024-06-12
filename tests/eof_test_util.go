@@ -61,6 +61,11 @@ func getError(err error) error {
 		vm.ErrInvalidMaxStackHeight,
 		vm.ErrInvalidOutputs,
 		vm.ErrInvalidDataLoadN,
+		vm.ErrUnreachableCode,
+		vm.ErrNoTerminalInstruction,
+		vm.ErrCALLFtoNonReturning,
+		vm.ErrEOFStackOverflow,
+		vm.ErrStackHeightHigher,
 	}
 
 	for _, _err := range _errors {
@@ -86,8 +91,9 @@ var errorsMap = map[string][]error{
 	"EOFException.MISSING_TERMINATOR":          []error{vm.ErrMissingTerminator},
 	"EOFException.MISSING_TYPE_HEADER":         []error{vm.ErrIncompleteEOF, vm.ErrMissingTypeHeader},
 	"EOFException.MISSING_STOP_OPCODE":         []error{vm.ErrInvalidCodeTermination},
-	"EOFException.UNDEFINED_EXCEPTION":         []error{vm.ErrTooManyOutputs, vm.ErrInvalidSectionArgument, vm.ErrInvalidCodeTermination, vm.ErrInvalidMaxStackHeight, vm.ErrInvalidOutputs},
+	"EOFException.UNDEFINED_EXCEPTION":         []error{vm.ErrTooManyOutputs, vm.ErrInvalidSectionArgument, vm.ErrInvalidCodeTermination, vm.ErrInvalidMaxStackHeight, vm.ErrInvalidOutputs, vm.ErrNoTerminalInstruction, vm.ErrCALLFtoNonReturning, vm.ErrEOFStackOverflow, vm.ErrStackHeightHigher},
 	"EOFException.INVALID_DATALOADN_INDEX":     []error{vm.ErrInvalidDataLoadN},
+	// ErrNoTerminalInstruction
 }
 
 func mapError(exception string, cmp error) bool {
@@ -189,14 +195,29 @@ func (e *EOFTest) Run(t *testing.T) error {
 // ef00
 // 01
 // 01
-// 0004
+// 0010
 // 02
-// 0001
-// 0005
+// 0004
+// 0003
+// 000a
+// 0004
+// 0006
 // 04
 // 0000
 // 00
 // 00
 // 80
+// 0000
+// 00
+// 80
 // 0001
-// d1ffdf5000
+// 00
+// 80
+// 0000
+// 00
+// 00
+// 0002
+// e50001
+// 600035e1000100e50002
+// e3000300
+// 6001600055e4

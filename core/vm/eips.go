@@ -327,6 +327,7 @@ func enable2935(jt *JumpTable) {
 // enableEOF applies the EOF changes.
 func enableEOF(jt *JumpTable) {
 	// TODO(racytech): Make sure everything is correct, add all EOF opcodes and remove deprecated ones
+	// add them to `opCodeToString` as well
 	undefined := &operation{
 		execute:     opUndefined,
 		constantGas: 0,
@@ -343,28 +344,32 @@ func enableEOF(jt *JumpTable) {
 	// 0x38, 0x39, 0x3b, 0x3c, 0x3f, 0x5a, 0xf1, 0xf2, 0xf4, 0xfa, 0xff - rejected opcodes
 
 	jt[RJUMP] = &operation{
-		execute:     opRjump,
-		constantGas: GasQuickStep,
-		numPop:      0,
-		numPush:     0,
+		execute:       opRjump,
+		constantGas:   GasQuickStep,
+		numPop:        0,
+		numPush:       0,
+		immediateSize: 2,
 	}
 	jt[RJUMPI] = &operation{
-		execute:     opRjumpi,
-		constantGas: GasSwiftStep,
-		numPop:      1,
-		numPush:     0,
+		execute:       opRjumpi,
+		constantGas:   GasSwiftStep,
+		numPop:        1,
+		numPush:       0,
+		immediateSize: 2,
 	}
 	jt[RJUMPV] = &operation{
-		execute:     opRjumpv,
-		constantGas: GasSwiftStep,
-		numPop:      1,
-		numPush:     0,
+		execute:       opRjumpv,
+		constantGas:   GasSwiftStep,
+		numPop:        1,
+		numPush:       0,
+		immediateSize: 1,
 	}
 	jt[CALLF] = &operation{
-		execute:     opCallf,
-		constantGas: GasFastStep,
-		numPop:      0,
-		numPush:     0,
+		execute:       opCallf,
+		constantGas:   GasFastStep,
+		numPop:        0,
+		numPush:       0,
+		immediateSize: 2,
 	}
 	jt[RETF] = &operation{
 		execute:     opRetf,
@@ -374,23 +379,26 @@ func enableEOF(jt *JumpTable) {
 		terminal:    true,
 	}
 	jt[JUMPF] = &operation{
-		execute:     opJumpf,
-		constantGas: GasFastStep,
-		numPop:      0,
-		numPush:     0,
-		terminal:    true,
+		execute:       opJumpf,
+		constantGas:   GasFastStep,
+		numPop:        0,
+		numPush:       0,
+		terminal:      true,
+		immediateSize: 2,
 	}
 	jt[DUPN] = &operation{
-		execute:     opDupN,
-		constantGas: GasFastestStep,
-		numPop:      0,
-		numPush:     1,
+		execute:       opDupN,
+		constantGas:   GasFastestStep,
+		numPop:        0,
+		numPush:       1,
+		immediateSize: 1,
 	}
 	jt[SWAPN] = &operation{
-		execute:     opSwapN,
-		constantGas: GasFastestStep,
-		numPop:      0,
-		numPush:     0,
+		execute:       opSwapN,
+		constantGas:   GasFastestStep,
+		numPop:        0,
+		numPush:       0,
+		immediateSize: 1,
 	}
 	jt[DATALOAD] = &operation{
 		execute:     opDataLoad,
@@ -399,10 +407,11 @@ func enableEOF(jt *JumpTable) {
 		numPush:     1,
 	}
 	jt[DATALOADN] = &operation{
-		execute:     opDataLoad,
-		constantGas: GasFastestStep,
-		numPop:      0,
-		numPush:     1,
+		execute:       opDataLoad,
+		constantGas:   GasFastestStep,
+		numPop:        0,
+		numPush:       1,
+		immediateSize: 2,
 	}
 	jt[DATASIZE] = &operation{
 		execute:     opDataSize,
@@ -418,9 +427,19 @@ func enableEOF(jt *JumpTable) {
 		numPush:     0,
 		memorySize:  memoryDataCopy,
 	}
-	// TODO(racytech): add EOFCREATE
+	// TODO(racytech): add EOFCREATE, TXCREATE and RETURNCONTRACT
+	jt[EOFCREATE] = &operation{
+		immediateSize: 1,
+	}
+	jt[TXCREATE] = &operation{}
 	jt[RETURNCONTRACT] = &operation{
 		terminal: true,
+	}
+
+	immSize := uint8(1)
+	for op := 0x60; op < 0x60+32; op++ {
+		jt[op].immediateSize = immSize
+		immSize++
 	}
 }
 

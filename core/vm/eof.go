@@ -42,6 +42,8 @@ const (
 	maxStackHeight = 1023
 
 	nonReturningFunction = 0x80
+
+	stackSizeLimit = 1024
 )
 
 var (
@@ -298,7 +300,7 @@ func (c *Container) UnmarshalBinary(b []byte) error {
 // rule set.
 func (c *Container) ValidateCode(jt *JumpTable) error {
 	for i, code := range c.Code {
-		if err := validateCode(code, i, c.Types, jt, c.Data); err != nil {
+		if err := validateCode(code, i, c.Types, jt, len(c.Data)); err != nil {
 			return err
 		}
 	}
@@ -364,6 +366,13 @@ func max(a, b int) int {
 		return b
 	}
 	return a
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // sum computes the sum of a slice.
