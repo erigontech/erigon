@@ -1224,6 +1224,7 @@ func (ap *Appendable) integrateMergedDirtyFiles(outs []*filesItem, in *filesItem
 		if out == nil {
 			panic("must not happen: " + ap.filenameBase)
 		}
+		out.closeFiles()
 		ap.dirtyFiles.Delete(out)
 
 		if ap.filenameBase == traceFileLife {
