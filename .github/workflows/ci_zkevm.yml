@@ -90,3 +90,19 @@ jobs:
         working-directory: ./kurtosis-cdk
         shell: bash
         run: .github/actions/monitor-cdk-verified-batches/batch_verification_monitor.sh 20 600 cdk-erigon-node-001
+
+      - name: Prepare logs
+        working-directory: ./kurtosis-cdk
+        if: failure()
+        run: |
+          mkdir -p ci_logs
+          cd ci_logs
+          kurtosis service logs cdk-v1 cdk-erigon-node-001 --all > cdk-erigon-node-001.log
+          kurtosis service logs cdk-v1 cdk-erigon-sequencer-001 --all > cdk-erigon-sequencer-001.log
+
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: logs_${{ github.run_id }}
+          path: ./kurtosis-cdk/ci_logs
