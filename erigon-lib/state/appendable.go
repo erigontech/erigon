@@ -321,7 +321,7 @@ func (ap *Appendable) openFiles() error {
 }
 
 func (ap *Appendable) closeWhatNotInList(fNames []string) {
-	var toDelete []*filesItem
+	var toClose []*filesItem
 	ap.dirtyFiles.Walk(func(items []*filesItem) bool {
 	Loop1:
 		for _, item := range items {
@@ -330,11 +330,11 @@ func (ap *Appendable) closeWhatNotInList(fNames []string) {
 					continue Loop1
 				}
 			}
-			toDelete = append(toDelete, item)
+			toClose = append(toClose, item)
 		}
 		return true
 	})
-	for _, item := range toDelete {
+	for _, item := range toClose {
 		item.closeFiles()
 		ap.dirtyFiles.Delete(item)
 	}
