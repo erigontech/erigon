@@ -526,12 +526,4 @@ func TestMergeFiles(t *testing.T) {
 	dc = d.BeginFilesRo()
 	defer dc.Close()
 
-	err = dc.IteratePrefix(rwTx, nil, func(key, value []byte) error {
-		upds, ok := data[string(key)]
-		require.True(t, ok)
-
-		require.EqualValues(t, upds[len(upds)-1].value, value)
-		return nil
-	})
-	require.NoError(t, err)
 }

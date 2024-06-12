@@ -1249,49 +1249,9 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(tx kv.Tx, cd *D
 	if sdc.patriciaTrie.Variant() != commitment.VariantHexPatriciaTrie {
 		return 0, 0, nil, fmt.Errorf("state storing is only supported hex patricia trie")
 	}
-
-	// Domain storing only 1 latest commitment (for each step). Erigon can unwind behind this - it means we must look into History (instead of Domain)
-	// IdxRange: looking into DB and Files (.ef). Using `order.Desc` to find latest txNum with commitment
-	it, err := cd.ht.IdxRange(keyCommitmentState, int(untilTx), int(sinceTx)-1, order.Desc, -1, tx) //[from, to)
+	state, _, err = sdc.GetBranch(keyCommitmentState)
 	if err != nil {
-		return 0, 0, nil, fmt.Errorf("IdxRange: %w", err)
-	}
-	if it.HasNext() {
-		txn, err := it.Next()
-		if err != nil {
-			return 0, 0, nil, err
-		}
-		state, err = cd.GetAsOf(keyCommitmentState, txn+1, tx) //WHYYY +1 ???
-		if err != nil {
-			return 0, 0, nil, err
-		}
-		if len(state) >= 16 {
-			txNum, blockNum = _decodeTxBlockNums(state)
-			return blockNum, txNum, state, nil
-		}
-	}
-
-	// corner-case:
-	// it's normal to not have commitment.ef and commitment.v files. They are not determenistic - depend on batchSize, and not very useful.
-	// in this case `IdxRange` will be empty
-	// and can fallback to reading latest commitment from .kv file
-	if err = cd.IteratePrefix(tx, keyCommitmentState, func(key, value []byte) error {
-		if len(value) < 16 {
-			return fmt.Errorf("invalid state value size %d [%x]", len(value), value)
-		}
-
-		txn, _ := _decodeTxBlockNums(value)
-		//fmt.Printf("[commitment] seekInFiles found committed txn %d block %d\n", txn, bn)
-		if txn >= sinceTx && txn <= untilTx {
-			state = value
-		}
-		return nil
-	}); err != nil {
-		return 0, 0, nil, fmt.Errorf("failed to seek commitment, IteratePrefix: %w", err)
-	}
-
-	if len(state) < 16 {
-		return 0, 0, nil, nil
+		return 0, 0, nil, err
 	}
 
 	txNum, blockNum = _decodeTxBlockNums(state)
