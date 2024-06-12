@@ -117,7 +117,7 @@ func TestDomain_OpenFolder(t *testing.T) {
 	err = os.WriteFile(fn, make([]byte, 33), 0644)
 	require.NoError(t, err)
 
-	err = d.OpenFolder(true)
+	err = d.OpenFolder()
 	require.NoError(t, err)
 	d.Close()
 }
@@ -741,7 +741,7 @@ func TestDomain_ScanFiles(t *testing.T) {
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 	d.closeWhatNotInList([]string{})
-	require.NoError(t, d.OpenFolder(false))
+	require.NoError(t, d.OpenFolder())
 
 	// Check the history
 	checkHistory(t, db, d, txs)
@@ -1029,7 +1029,7 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 	}
 	dom.Close()
 
-	err = dom.OpenFolder(false)
+	err = dom.OpenFolder()
 	require.NoError(t, err)
 
 	// domain files for same range should not be available so lengths should match
@@ -2149,7 +2149,7 @@ func TestDomain_Unwind(t *testing.T) {
 		writer := dc.NewWriter()
 		defer writer.close()
 
-		err = dc.Unwind(ctx, tx, unwindTo/d.aggregationStep, unwindTo)
+		err = dc.Unwind(ctx, tx, unwindTo/d.aggregationStep, unwindTo, nil)
 		require.NoError(t, err)
 		dc.Close()
 		tx.Commit()

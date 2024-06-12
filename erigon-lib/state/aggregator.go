@@ -56,6 +56,7 @@ type Aggregator struct {
 	db               kv.RoDB
 	d                [kv.DomainLen]*Domain
 	iis              [kv.StandaloneIdxLen]*InvertedIndex
+	ap               [kv.AppendableLen]*Appendable //nolint
 	backgroundResult *BackgroundResult
 	dirs             datadir.Dirs
 	tmpdir           string
@@ -245,7 +246,7 @@ func (a *Aggregator) DisableFsync() {
 	}
 }
 
-func (a *Aggregator) OpenFolder(readonly bool) error {
+func (a *Aggregator) OpenFolder() error {
 	defer a.recalcVisibleFiles()
 
 	a.dirtyFilesLock.Lock()
@@ -259,12 +260,12 @@ func (a *Aggregator) OpenFolder(readonly bool) error {
 				return a.ctx.Err()
 			default:
 			}
-			return d.OpenFolder(readonly)
+			return d.OpenFolder()
 		})
 	}
 	for _, ii := range a.iis {
 		ii := ii
-		eg.Go(func() error { return ii.OpenFolder(readonly) })
+		eg.Go(func() error { return ii.OpenFolder() })
 	}
 	if err := eg.Wait(); err != nil {
 		return fmt.Errorf("OpenFolder: %w", err)
@@ -280,11 +281,11 @@ func (a *Aggregator) OpenList(files []string, readonly bool) error {
 	eg := &errgroup.Group{}
 	for _, d := range a.d {
 		d := d
-		eg.Go(func() error { return d.OpenFolder(readonly) })
+		eg.Go(func() error { return d.OpenFolder() })
 	}
 	for _, ii := range a.iis {
 		ii := ii
-		eg.Go(func() error { return ii.OpenFolder(readonly) })
+		eg.Go(func() error { return ii.OpenFolder() })
 	}
 	if err := eg.Wait(); err != nil {
 		return fmt.Errorf("OpenList: %w", err)
@@ -428,16 +429,16 @@ func (a *Aggregator) BuildMissedIndices(ctx context.Context, workers int) error 
 			}
 		}()
 		for _, d := range a.d {
-			d.BuildMissedIndices(ctx, g, ps)
+			d.BuildMissedAccessors(ctx, g, ps)
 		}
 		for _, ii := range a.iis {
-			ii.BuildMissedIndices(ctx, g, ps)
+			ii.BuildMissedAccessors(ctx, g, ps)
 		}
 
 		if err := g.Wait(); err != nil {
 			return err
 		}
-		if err := a.OpenFolder(true); err != nil {
+		if err := a.OpenFolder(); err != nil {
 			return err
 		}
 	}
@@ -572,27 +573,27 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 	closeCollations = false
 
 	// indices are built concurrently
-	for _, d := range a.iis {
-		d := d
+	for _, ii := range a.iis {
+		ii := ii
 		a.wg.Add(1)
 		g.Go(func() error {
 			defer a.wg.Done()
 
 			var collation InvertedIndexCollation
 			err := a.db.View(ctx, func(tx kv.Tx) (err error) {
-				collation, err = d.collate(ctx, step, tx)
+				collation, err = ii.collate(ctx, step, tx)
 				return err
 			})
 			if err != nil {
-				return fmt.Errorf("index collation %q has failed: %w", d.filenameBase, err)
+				return fmt.Errorf("index collation %q has failed: %w", ii.filenameBase, err)
 			}
-			sf, err := d.buildFiles(ctx, step, collation, a.ps)
+			sf, err := ii.buildFiles(ctx, step, collation, a.ps)
 			if err != nil {
 				sf.CleanupOnError()
 				return err
 			}
 
-			switch d.indexKeysTable {
+			switch ii.indexKeysTable {
 			case kv.TblLogTopicsKeys:
 				static.ivfs[kv.LogTopicIdxPos] = sf
 			case kv.TblLogAddressKeys:
@@ -602,7 +603,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 			case kv.TblTracesToKeys:
 				static.ivfs[kv.TracesToIdxPos] = sf
 			default:
-				panic("unknown index " + d.indexKeysTable)
+				panic("unknown index " + ii.indexKeysTable)
 			}
 			return nil
 		})
@@ -730,12 +731,12 @@ type flusher interface {
 	Flush(ctx context.Context, tx kv.RwTx) error
 }
 
-func (ac *AggregatorRoTx) minimaxTxNumInDomainFiles(cold bool) uint64 {
+func (ac *AggregatorRoTx) minimaxTxNumInDomainFiles(onlyFrozen bool) uint64 {
 	return min(
-		ac.d[kv.AccountsDomain].maxTxNumInDomainFiles(cold),
-		ac.d[kv.CodeDomain].maxTxNumInDomainFiles(cold),
-		ac.d[kv.StorageDomain].maxTxNumInDomainFiles(cold),
-		ac.d[kv.CommitmentDomain].maxTxNumInDomainFiles(cold),
+		ac.d[kv.AccountsDomain].maxTxNumInDomainFiles(onlyFrozen),
+		ac.d[kv.CodeDomain].maxTxNumInDomainFiles(onlyFrozen),
+		ac.d[kv.StorageDomain].maxTxNumInDomainFiles(onlyFrozen),
+		ac.d[kv.CommitmentDomain].maxTxNumInDomainFiles(onlyFrozen),
 	)
 }
 
@@ -785,8 +786,13 @@ func (ac *AggregatorRoTx) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx) (ui
 	blockNumWithCommitment, _, _, err := domains.LatestCommitmentState(tx, ac.CanUnwindDomainsToTxNum(), unwindToTxNum)
 	if err != nil {
 		_minBlockNum, _ := ac.MinUnwindDomainsBlockNum(tx)
-		return _minBlockNum, false, nil //nolint
+		return _minBlockNum, blockNum >= _minBlockNum, nil //nolint
 	}
+	if blockNumWithCommitment == 0 && ac.CanUnwindDomainsToTxNum() > 0 { // don't allow unwind beyond files progress
+		_minBlockNum, _ := ac.MinUnwindDomainsBlockNum(tx)
+		return _minBlockNum, blockNum >= _minBlockNum, nil //nolint
+	}
+
 	return blockNumWithCommitment, true, nil
 }
 
@@ -1528,7 +1534,7 @@ func (ac *AggregatorRoTx) mergeFiles(ctx context.Context, files SelectedStaticFi
 	return mf, err
 }
 
-func (a *Aggregator) integrateMergedDirtyFiles(outs SelectedStaticFilesV3, in MergedFilesV3) (frozen []string) {
+func (a *Aggregator) integrateMergedDirtyFiles(outs SelectedStaticFilesV3, in MergedFilesV3) {
 	defer a.needSaveFilesListInDB.Store(true)
 	defer a.recalcVisibleFiles()
 
@@ -1542,7 +1548,6 @@ func (a *Aggregator) integrateMergedDirtyFiles(outs SelectedStaticFilesV3, in Me
 	for id, ii := range a.iis {
 		ii.integrateMergedDirtyFiles(outs.ii[id], in.iis[id])
 	}
-	return frozen
 }
 
 func (a *Aggregator) cleanAfterMerge(in MergedFilesV3) {

@@ -14,25 +14,26 @@ import (
 // keeps genesis in db: [1, to)
 // doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
-func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt func(number uint64) uint64) error {
+func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt func(number uint64) uint64) (deleted int, err error) {
 	c, err := tx.Cursor(kv.BorEventNums)
 	if err != nil {
-		return err
+		return deleted, err
 	}
 	defer c.Close()
 	var blockNumBytes [8]byte
 	binary.BigEndian.PutUint64(blockNumBytes[:], blockTo)
 	k, v, err := c.Seek(blockNumBytes[:])
 	if err != nil {
-		return err
+		return deleted, err
 	}
 	var eventIdTo uint64 = math.MaxUint64
 	if k != nil {
 		eventIdTo = binary.BigEndian.Uint64(v)
 	}
+
 	c1, err := tx.RwCursor(kv.BorEvents)
 	if err != nil {
-		return err
+		return deleted, err
 	}
 	defer c1.Close()
 	counter := blocksDeleteLimit
@@ -42,17 +43,18 @@ func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt 
 			break
 		}
 		if err = c1.DeleteCurrent(); err != nil {
-			return err
+			return deleted, err
 		}
+		deleted++
 		counter--
 	}
 	if err != nil {
-		return err
+		return deleted, err
 	}
 	firstSpanToKeep := SpanIdAt(blockTo)
 	c2, err := tx.RwCursor(kv.BorSpans)
 	if err != nil {
-		return err
+		return deleted, err
 	}
 	defer c2.Close()
 	counter = blocksDeleteLimit
@@ -62,30 +64,32 @@ func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt 
 			break
 		}
 		if err = c2.DeleteCurrent(); err != nil {
-			return err
+			return deleted, err
 		}
+		deleted++
 		counter--
 	}
 
 	if snaptype.CheckpointsEnabled() {
 		checkpointCursor, err := tx.RwCursor(kv.BorCheckpoints)
 		if err != nil {
-			return err
+			return deleted, err
 		}
 
 		defer checkpointCursor.Close()
 		lastCheckpointToRemove, err := heimdall.CheckpointIdAt(tx, blockTo)
 
 		if err != nil {
-			return err
+			return deleted, err
 		}
 
 		var checkpointIdBytes [8]byte
 		binary.BigEndian.PutUint64(checkpointIdBytes[:], uint64(lastCheckpointToRemove))
 		for k, _, err := checkpointCursor.Seek(checkpointIdBytes[:]); err == nil && k != nil; k, _, err = checkpointCursor.Prev() {
 			if err = checkpointCursor.DeleteCurrent(); err != nil {
-				return err
+				return deleted, err
 			}
+			deleted++
 		}
 	}
 
@@ -93,7 +97,7 @@ func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt 
 		milestoneCursor, err := tx.RwCursor(kv.BorMilestones)
 
 		if err != nil {
-			return err
+			return deleted, err
 		}
 
 		defer milestoneCursor.Close()
@@ -104,10 +108,10 @@ func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt 
 			lastMilestoneToRemove, err = heimdall.MilestoneIdAt(tx, blockTo-uint64(blockCount))
 
 			if !errors.Is(err, heimdall.ErrMilestoneNotFound) {
-				return err
+				return deleted, err
 			} else {
 				if blockCount == blocksDeleteLimit-1 {
-					return nil
+					return deleted, nil
 				}
 			}
 		}
@@ -116,10 +120,11 @@ func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt 
 		binary.BigEndian.PutUint64(milestoneIdBytes[:], uint64(lastMilestoneToRemove))
 		for k, _, err := milestoneCursor.Seek(milestoneIdBytes[:]); err == nil && k != nil; k, _, err = milestoneCursor.Prev() {
 			if err = milestoneCursor.DeleteCurrent(); err != nil {
-				return err
+				return deleted, err
 			}
+			deleted++
 		}
 	}
 
-	return nil
+	return deleted, nil
 }

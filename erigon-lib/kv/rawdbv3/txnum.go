@@ -31,6 +31,7 @@ import (
 type ErrTxNumsAppendWithGap struct {
 	appendBlockNum uint64
 	lastBlockNum   uint64
+	stack          string
 }
 
 func (e ErrTxNumsAppendWithGap) LastBlock() uint64 {
@@ -40,7 +41,7 @@ func (e ErrTxNumsAppendWithGap) LastBlock() uint64 {
 func (e ErrTxNumsAppendWithGap) Error() string {
 	return fmt.Sprintf(
 		"append with gap blockNum=%d, but current height=%d, stack: %s",
-		e.appendBlockNum, e.lastBlockNum, dbg.Stack(),
+		e.appendBlockNum, e.lastBlockNum, e.stack,
 	)
 }
 
@@ -115,7 +116,7 @@ func (txNums) Append(tx kv.RwTx, blockNum, maxTxNum uint64) (err error) {
 	if len(lastK) != 0 {
 		lastBlockNum := binary.BigEndian.Uint64(lastK)
 		if lastBlockNum > 1 && lastBlockNum+1 != blockNum { //allow genesis
-			return ErrTxNumsAppendWithGap{appendBlockNum: blockNum, lastBlockNum: lastBlockNum}
+			return ErrTxNumsAppendWithGap{appendBlockNum: blockNum, lastBlockNum: lastBlockNum, stack: dbg.Stack()}
 		}
 	}
 

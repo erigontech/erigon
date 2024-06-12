@@ -17,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
 	"github.com/ledgerwatch/erigon/eth/consensuschain"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -200,7 +199,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
-	var unwindToGenesis bool
 	if fcuHeader.Number.Uint64() > 0 {
 		if canonicalHash == blockHash {
 			// if block hash is part of the canonical chain treat it as no-op.
@@ -285,21 +283,11 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				return
 			}
 		}
-		if e.executionPipeline.HasUnwindPoint() {
-			unwindToGenesis = e.executionPipeline.UnwindPoint() == 0
-		}
-
 		// Run the unwind
 		if err := e.executionPipeline.RunUnwind(e.db, wrap.TxContainer{Tx: tx}); err != nil {
 			err = fmt.Errorf("updateForkChoice: %w", err)
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
-		}
-		if unwindToGenesis {
-			if err := rawdbreset.ResetExecWithTx(ctx, tx, e.config.ChainName, "", e.logger); err != nil {
-				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-				return
-			}
 		}
 
 		if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
@@ -374,7 +362,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
-	if blockHash == e.forkValidator.ExtendingForkHeadHash() && !unwindToGenesis {
+	if blockHash == e.forkValidator.ExtendingForkHeadHash() {
 		e.logger.Info("[updateForkchoice] Fork choice update: flushing in-memory state (built by previous newPayload)")
 		if err := e.forkValidator.FlushExtendingFork(tx, e.accumulator); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)

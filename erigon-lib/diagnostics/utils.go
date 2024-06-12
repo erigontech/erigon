@@ -35,3 +35,17 @@ func PutDataToTable(table string, key []byte, info any) func(tx kv.RwTx) error {
 		return tx.Put(table, key, infoBytes)
 	}
 }
+
+func InitStagesFromList(list []string) []SyncStage {
+	stages := make([]SyncStage, 0, len(list))
+
+	for _, stage := range list {
+		stages = append(stages, SyncStage{
+			ID:        stage,
+			State:     Queued,
+			SubStages: []SyncSubStage{},
+		})
+	}
+
+	return stages
+}

@@ -107,6 +107,7 @@ StorageChangeSet:
 */
 const AccountChangeSet = "AccountChangeSet"
 const StorageChangeSet = "StorageChangeSet"
+const ChangeSets3 = "ChangeSets3"
 
 const (
 
@@ -368,9 +369,6 @@ const (
 	BorCheckpoints    = "BorCheckpoints"            // checkpoint_id -> checkpoint (in JSON encoding)
 	BorCheckpointEnds = "BorCheckpointEnds"         // start block_num -> checkpoint_id (first block of checkpoint)
 
-	// Polygon Bridge
-	PolygonBridgeEvents = "PolygonBridgeEvents" // bridge event.ID -> event
-
 	// Downloader
 	BittorrentCompletion = "BittorrentCompletion"
 	BittorrentInfo       = "BittorrentInfo"
@@ -583,6 +581,7 @@ var ChaindataTables = []string{
 	PlainContractCode,
 	AccountChangeSet,
 	StorageChangeSet,
+	ChangeSets3,
 	Senders,
 	HeadBlockKey,
 	HeadHeaderKey,
@@ -624,7 +623,6 @@ var ChaindataTables = []string{
 	BorMilestoneEnds,
 	BorCheckpoints,
 	BorCheckpointEnds,
-	PolygonBridgeEvents,
 	TblAccountKeys,
 	TblAccountVals,
 	TblAccountHistoryKeys,
@@ -853,17 +851,16 @@ var ChaindataTablesCfg = TableCfg{
 }
 
 var BorTablesCfg = TableCfg{
-	BorReceipts:         {Flags: DupSort},
-	BorFinality:         {Flags: DupSort},
-	BorTxLookup:         {Flags: DupSort},
-	BorEvents:           {Flags: DupSort},
-	BorEventNums:        {Flags: DupSort},
-	BorSpans:            {Flags: DupSort},
-	BorCheckpoints:      {Flags: DupSort},
-	BorCheckpointEnds:   {Flags: DupSort},
-	BorMilestones:       {Flags: DupSort},
-	BorMilestoneEnds:    {Flags: DupSort},
-	PolygonBridgeEvents: {Flags: DupSort},
+	BorReceipts:       {Flags: DupSort},
+	BorFinality:       {Flags: DupSort},
+	BorTxLookup:       {Flags: DupSort},
+	BorEvents:         {Flags: DupSort},
+	BorEventNums:      {Flags: DupSort},
+	BorSpans:          {Flags: DupSort},
+	BorCheckpoints:    {Flags: DupSort},
+	BorCheckpointEnds: {Flags: DupSort},
+	BorMilestones:     {Flags: DupSort},
+	BorMilestoneEnds:  {Flags: DupSort},
 }
 
 var TxpoolTablesCfg = TableCfg{}
@@ -995,6 +992,12 @@ const (
 	TracesFromIdxPos InvertedIdxPos = 2
 	TracesToIdxPos   InvertedIdxPos = 3
 	StandaloneIdxLen uint16         = 4
+)
+
+const (
+	ReceiptsAppendable Appendable = 0
+
+	AppendableLen Appendable = 1
 )
 
 func (iip InvertedIdxPos) String() string {

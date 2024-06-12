@@ -17,6 +17,7 @@
 package state
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -59,6 +60,94 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	ii.DisableFsync()
 	tb.Cleanup(ii.Close)
 	return db, ii
+}
+
+func TestInvIndexPruningCorrectness(t *testing.T) {
+	db, ii, _ := filledInvIndexOfSize(t, 1000, 16, 1, log.New())
+	defer ii.Close()
+
+	ic := ii.BeginFilesRo()
+	defer ic.Close()
+
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	pruneLimit := uint64(10)
+	pruneIters := 8
+
+	rwTx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	var from, to [8]byte
+	binary.BigEndian.PutUint64(from[:], uint64(0))
+	binary.BigEndian.PutUint64(to[:], uint64(pruneIters)*pruneLimit)
+
+	icc, err := rwTx.CursorDupSort(ii.indexKeysTable)
+	require.NoError(t, err)
+
+	count := 0
+	for txn, _, err := icc.Seek(from[:]); txn != nil; txn, _, err = icc.Next() {
+		require.NoError(t, err)
+		if bytes.Compare(txn, to[:]) > 0 {
+			break
+		}
+		count++
+	}
+	icc.Close()
+	require.EqualValues(t, count, pruneIters*int(pruneLimit))
+
+	// this one should not prune anything due to forced=false but no files built
+	stat, err := ic.Prune(context.Background(), rwTx, 0, 10, pruneLimit, logEvery, false, false, nil)
+	require.NoError(t, err)
+	require.Zero(t, stat.PruneCountTx)
+	require.Zero(t, stat.PruneCountValues)
+
+	// this one should not prune anything as well due to given range [0,1) even it is forced
+	stat, err = ic.Prune(context.Background(), rwTx, 0, 1, pruneLimit, logEvery, true, false, nil)
+	require.NoError(t, err)
+	require.Zero(t, stat.PruneCountTx)
+	require.Zero(t, stat.PruneCountValues)
+
+	// this should prune exactly pruneLimit*pruneIter transactions
+	for i := 0; i < pruneIters; i++ {
+		stat, err = ic.Prune(context.Background(), rwTx, 0, 1000, pruneLimit, logEvery, true, false, nil)
+		require.NoError(t, err)
+		t.Logf("[%d] stats: %v", i, stat)
+	}
+
+	// ascending - empty
+	it, err := ic.IdxRange(nil, 0, pruneIters*int(pruneLimit), order.Asc, -1, rwTx)
+	require.NoError(t, err)
+	require.False(t, it.HasNext())
+	it.Close()
+
+	// descending - empty
+	it, err = ic.IdxRange(nil, pruneIters*int(pruneLimit), 0, order.Desc, -1, rwTx)
+	require.NoError(t, err)
+	require.False(t, it.HasNext())
+	it.Close()
+
+	// straight from pruned - not empty
+	icc, err = rwTx.CursorDupSort(ii.indexKeysTable)
+	require.NoError(t, err)
+	txn, _, err := icc.Seek(from[:])
+	require.NoError(t, err)
+	// we pruned by limit so next transaction after prune should be equal to `pruneIters*pruneLimit+1`
+	// If we would prune by txnum then txTo prune should be available after prune is finished
+	require.EqualValues(t, pruneIters*int(pruneLimit), binary.BigEndian.Uint64(txn)-1)
+	icc.Close()
+
+	// check second table
+	icc, err = rwTx.CursorDupSort(ii.indexTable)
+	require.NoError(t, err)
+	key, txn, err := icc.First()
+	t.Logf("key: %x, txn: %x", key, txn)
+	require.NoError(t, err)
+	// we pruned by limit so next transaction after prune should be equal to `pruneIters*pruneLimit+1`
+	// If we would prune by txnum then txTo prune should be available after prune is finished
+	require.EqualValues(t, pruneIters*int(pruneLimit), binary.BigEndian.Uint64(txn)-1)
+	icc.Close()
 }
 
 func TestInvIndexCollationBuild(t *testing.T) {
@@ -228,46 +317,49 @@ func filledInvIndex(tb testing.TB, logger log.Logger) (kv.RwDB, *InvertedIndex, 
 	return filledInvIndexOfSize(tb, uint64(1000), 16, 31, logger)
 }
 
+// Creates InvertedIndex instance and fills it with generated data.
+// Txs - amount of transactions to generate
+// AggStep - aggregation step for InvertedIndex
+// Module - amount of keys to generate
 func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log.Logger) (kv.RwDB, *InvertedIndex, uint64) {
 	tb.Helper()
 	db, ii := testDbAndInvertedIndex(tb, aggStep, logger)
 	ctx, require := context.Background(), require.New(tb)
-	tx, err := db.BeginRw(ctx)
-	require.NoError(err)
-	defer tx.Rollback()
-	ic := ii.BeginFilesRo()
-	defer ic.Close()
-	writer := ic.NewWriter()
-	defer writer.close()
+	tb.Cleanup(db.Close)
 
-	var flusher flusher
+	err := db.Update(ctx, func(tx kv.RwTx) error {
+		ic := ii.BeginFilesRo()
+		defer ic.Close()
+		writer := ic.NewWriter()
+		defer writer.close()
 
-	// keys are encodings of numbers 1..31
-	// each key changes value on every txNum which is multiple of the key
-	for txNum := uint64(1); txNum <= txs; txNum++ {
-		writer.SetTxNum(txNum)
-		for keyNum := uint64(1); keyNum <= module; keyNum++ {
-			if txNum%keyNum == 0 {
-				var k [8]byte
-				binary.BigEndian.PutUint64(k[:], keyNum)
-				err = writer.Add(k[:])
-				require.NoError(err)
+		var flusher flusher
+
+		// keys are encodings of numbers 1..31
+		// each key changes value on every txNum which is multiple of the key
+		for txNum := uint64(1); txNum <= txs; txNum++ {
+			writer.SetTxNum(txNum)
+			for keyNum := uint64(1); keyNum <= module; keyNum++ {
+				if txNum%keyNum == 0 {
+					var k [8]byte
+					binary.BigEndian.PutUint64(k[:], keyNum)
+					err := writer.Add(k[:])
+					require.NoError(err)
+				}
+			}
+			if flusher != nil {
+				require.NoError(flusher.Flush(ctx, tx))
+			}
+			if txNum%10 == 0 {
+				flusher = writer
+				writer = ic.NewWriter()
 			}
 		}
 		if flusher != nil {
 			require.NoError(flusher.Flush(ctx, tx))
 		}
-		if txNum%10 == 0 {
-			flusher = writer
-			writer = ic.NewWriter()
-		}
-	}
-	if flusher != nil {
-		require.NoError(flusher.Flush(ctx, tx))
-	}
-	err = writer.Flush(ctx, tx)
-	require.NoError(err)
-	err = tx.Commit()
+		return writer.Flush(ctx, tx)
+	})
 	require.NoError(err)
 	return db, ii, txs
 }
@@ -446,7 +538,7 @@ func TestInvIndexMerge(t *testing.T) {
 }
 
 func TestInvIndexScanFiles(t *testing.T) {
-	logger := log.New()
+	logger, require := log.New(), require.New(t)
 	db, ii, txs := filledInvIndex(t, logger)
 
 	// Recreate InvertedIndex to scan the files
@@ -454,8 +546,10 @@ func TestInvIndexScanFiles(t *testing.T) {
 	salt := uint32(1)
 	cfg := iiCfg{salt: &salt, dirs: ii.dirs, db: db}
 	ii, err = NewInvertedIndex(cfg, ii.aggregationStep, ii.filenameBase, ii.indexKeysTable, ii.indexTable, nil, logger)
-	require.NoError(t, err)
+	require.NoError(err)
 	defer ii.Close()
+	err = ii.OpenFolder()
+	require.NoError(err)
 
 	mergeInverted(t, db, ii, txs)
 	checkRanges(t, db, ii, txs)
@@ -629,7 +723,7 @@ func TestInvIndex_OpenFolder(t *testing.T) {
 	err = os.WriteFile(fn, make([]byte, 33), 0644)
 	require.NoError(t, err)
 
-	err = ii.OpenFolder(true)
+	err = ii.OpenFolder()
 	require.NoError(t, err)
 	ii.Close()
 }
