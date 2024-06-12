@@ -6,6 +6,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon/cl/abstract"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -71,7 +72,7 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, signedBlock *clty
 	return nil
 }
 
-func ProcessBlindedBlock(impl BlockProcessor, s abstract.BeaconState, signedBlock *cltypes.SignedBlindedBeaconBlock, expectWithdrawals *solid.ListSSZ[*cltypes.Withdrawal]) error {
+func ProcessBlindedBlock(impl BlockProcessor, s abstract.BeaconState, signedBlock *cltypes.SignedBlindedBeaconBlock, _ *solid.ListSSZ[*cltypes.Withdrawal]) error {
 	var (
 		block   = signedBlock.Block
 		version = s.Version()
@@ -95,6 +96,11 @@ func ProcessBlindedBlock(impl BlockProcessor, s abstract.BeaconState, signedBloc
 	if version >= clparams.BellatrixVersion && executionEnabled(s, block.Body.ExecutionPayload.BlockHash) {
 		if s.Version() >= clparams.CapellaVersion {
 			// Process withdrawals in the execution payload.
+			expect := state.ExpectedWithdrawals(s, state.Epoch(s))
+			expectWithdrawals := &solid.ListSSZ[*cltypes.Withdrawal]{}
+			for _, w := range expect {
+				expectWithdrawals.Append(w)
+			}
 			if err := impl.ProcessWithdrawals(s, expectWithdrawals); err != nil {
 				return fmt.Errorf("processBlock: failed to process withdrawals: %v", err)
 			}
