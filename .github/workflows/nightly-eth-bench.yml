@@ -70,6 +70,16 @@ jobs:
             --env PROFILE=${PROFILE} \
             --workdir /app \
             eth-bench-temp-${{ matrix.profile_name}} \
+            python bench.py -p "$PROFILE" -c 5 -t 12 --all --recover
+
+          docker run --rm \
+            --volume "$(pwd):/app" \
+            --volume "$(pwd)/profiles.json:/app/profiles.json" \
+            --volume "$(pwd)/logs:/app/logs" \
+            --env PYTHONUNBUFFERED=1 \
+            --env PROFILE=${PROFILE} \
+            --workdir /app \
+            eth-bench-temp-${{ matrix.profile_name}} \
             python bench.py -p "$PROFILE" --bridge2l2
 
           docker run --rm \
@@ -81,16 +91,6 @@ jobs:
             --workdir /app \
             eth-bench-temp-${{ matrix.profile_name}} \
             python bench.py -p "$PROFILE" --bridge2l1
-
-          docker run --rm \
-            --volume "$(pwd):/app" \
-            --volume "$(pwd)/profiles.json:/app/profiles.json" \
-            --volume "$(pwd)/logs:/app/logs" \
-            --env PYTHONUNBUFFERED=1 \
-            --env PROFILE=${PROFILE} \
-            --workdir /app \
-            eth-bench-temp-${{ matrix.profile_name}} \
-            python bench.py -p "$PROFILE" -c 5 -t 12 --all --recover
 
           EXIT_CODE=$?
           
