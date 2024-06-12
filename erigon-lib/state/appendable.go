@@ -154,11 +154,11 @@ func (ap *Appendable) OpenList(fNames []string, readonly bool) error {
 }
 
 func (ap *Appendable) OpenFolder(readonly bool) error {
-	idxFiles, _, _, err := ap.fileNamesOnDisk()
+	_, histFiles, _, err := ap.fileNamesOnDisk()
 	if err != nil {
 		return err
 	}
-	return ap.OpenList(idxFiles, readonly)
+	return ap.OpenList(histFiles, readonly)
 }
 
 func (ap *Appendable) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
