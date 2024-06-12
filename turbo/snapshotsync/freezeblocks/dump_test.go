@@ -186,7 +186,7 @@ func TestDump(t *testing.T) {
 			require := require.New(t)
 			i := 0
 			txsAmount := uint64(0)
-			var baseIdList []types.BaseTxnID
+			var baseIdList []uint64
 			firstTxNum := uint64(0)
 			_, err := freezeblocks.DumpBodies(m.Ctx, m.DB, m.ChainConfig, 0, uint64(test.chainSize-3),
 				func(context.Context) uint64 { return firstTxNum },
@@ -195,7 +195,7 @@ func TestDump(t *testing.T) {
 					body := &types.BodyForStorage{}
 					require.NoError(rlp.DecodeBytes(v, body))
 					txsAmount += uint64(body.TxAmount)
-					baseIdList = append(baseIdList, body.BaseTxId)
+					baseIdList = append(baseIdList, body.BaseTxnID.U64())
 					return nil
 				}, 1, log.LvlInfo, log.New())
 			require.NoError(err)
@@ -211,7 +211,7 @@ func TestDump(t *testing.T) {
 				body := &types.BodyForStorage{}
 				require.NoError(rlp.DecodeBytes(v, body))
 				txsAmount += uint64(body.TxAmount)
-				baseIdList = append(baseIdList, body.BaseTxId)
+				baseIdList = append(baseIdList, body.BaseTxnID.U64())
 				return nil
 			}, 1, log.LvlInfo, log.New())
 			require.NoError(err)
@@ -228,12 +228,12 @@ func TestDump(t *testing.T) {
 				i++
 				body := &types.BodyForStorage{}
 				require.NoError(rlp.DecodeBytes(v, body))
-				baseIdList = append(baseIdList, body.BaseTxId.U64())
+				baseIdList = append(baseIdList, body.BaseTxnID.U64())
 				return nil
 			}, 1, log.LvlInfo, log.New())
 			require.NoError(err)
 			require.Equal(test.chainSize-2, i)
-			require.Equal(baseIdRange(int(firstTxNum), 3, test.chainSize-2), baseIdList)
+			require.EqualValues(baseIdRange(int(firstTxNum), 3, test.chainSize-2), baseIdList)
 			require.Equal(lastTxNum, baseIdList[len(baseIdList)-1]+3)
 			require.Equal(lastTxNum, firstTxNum+uint64(i*3))
 		})

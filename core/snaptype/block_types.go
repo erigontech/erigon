@@ -147,7 +147,7 @@ var (
 				}
 				defer bodiesSegment.Close()
 
-				baseTxID, expectedCount, err := txsAmountBasedOnBodiesSnapshots(bodiesSegment, sn.Len()-1)
+				baseTxnID, expectedCount, err := txsAmountBasedOnBodiesSnapshots(bodiesSegment, sn.Len()-1)
 				if err != nil {
 					return err
 				}
@@ -177,7 +177,7 @@ var (
 					LeafSize:   8,
 					TmpDir:     tmpDir,
 					IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To)),
-					BaseDataID: baseTxID.U64(),
+					BaseDataID: baseTxnID.U64(),
 				}, logger)
 				if err != nil {
 					return err
@@ -249,7 +249,7 @@ var (
 						isSystemTx := len(word) == 0
 						if isSystemTx { // system-txs hash:pad32(txnID)
 							slot.IDHash = common.Hash{}
-							binary.BigEndian.PutUint64(slot.IDHash[:], baseTxID.U64()+ti)
+							binary.BigEndian.PutUint64(slot.IDHash[:], baseTxnID.U64()+ti)
 						} else {
 							if _, err = parseCtx.ParseTransaction(word[firstTxByteAndlengthOfAddress:], 0, &slot, nil, true /* hasEnvelope */, false /* wrappedWithBlobs */, nil /* validateHash */); err != nil {
 								return fmt.Errorf("ParseTransaction: %w, blockNum: %d, i: %d", err, blockNum, ti)
@@ -305,7 +305,7 @@ func txsAmountBasedOnBodiesSnapshots(bodiesSegment *seg.Decompressor, len uint64
 	if err = rlp.DecodeBytes(buf, firstBody); err != nil {
 		return
 	}
-	baseTxID = firstBody.BaseTxId
+	baseTxID = firstBody.BaseTxnID
 
 	lastBody := new(types.BodyForStorage)
 	i := uint64(0)
@@ -324,11 +324,12 @@ func txsAmountBasedOnBodiesSnapshots(bodiesSegment *seg.Decompressor, len uint64
 		}
 	}
 
-	if lastBody.BaseTxId < firstBody.BaseTxId {
-		return 0, 0, fmt.Errorf("negative txs count %s: lastBody.BaseTxId=%d < firstBody.BaseTxId=%d", bodiesSegment.FileName(), lastBody.BaseTxId, firstBody.BaseTxId)
+	if lastBody.BaseTxnID < firstBody.BaseTxnID {
+		return 0, 0, fmt.Errorf("negative txs count %s: lastBody.BaseTxId=%d < firstBody.BaseTxId=%d", bodiesSegment.FileName(), lastBody.BaseTxnID, firstBody.BaseTxnID)
 	}
 
 	// TODO: check if it is correct
-	expectedCount = int(lastBody.BaseTxId.LastSystemTx(lastBody.TxAmount) - firstBody.BaseTxId.U64())
+	magic := uint64(1)
+	expectedCount = int(lastBody.BaseTxnID.LastSystemTx(lastBody.TxAmount) + magic - firstBody.BaseTxnID.U64())
 	return
 }

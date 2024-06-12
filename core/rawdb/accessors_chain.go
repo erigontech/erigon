@@ -407,7 +407,7 @@ func TxnByIdxInBlock(db kv.Getter, blockHash common.Hash, blockNum uint64, txIdx
 		return nil, nil
 	}
 
-	v, err := db.GetOne(kv.EthTx, hexutility.EncodeTs(b.BaseTxId.At(txIdxInBlock)))
+	v, err := db.GetOne(kv.EthTx, hexutility.EncodeTs(b.BaseTxnID.At(txIdxInBlock)))
 	if err != nil {
 		return nil, err
 	}
@@ -441,13 +441,13 @@ func CanonicalTransactions(db kv.Getter, txnID uint64, amount uint32) ([]types.T
 	return txs, nil
 }
 
-func NonCanonicalTransactions(db kv.Getter, baseTxId types.BaseTxnID, amount uint32) ([]types.Transaction, error) {
+func NonCanonicalTransactions(db kv.Getter, baseTxnID types.BaseTxnID, amount uint32) ([]types.Transaction, error) {
 	if amount == 0 {
 		return []types.Transaction{}, nil
 	}
 	txs := make([]types.Transaction, amount)
 	i := uint32(0)
-	if err := db.ForAmount(kv.NonCanonicalTxs, baseTxId.Bytes(), amount, func(k, v []byte) error {
+	if err := db.ForAmount(kv.NonCanonicalTxs, baseTxnID.Bytes(), amount, func(k, v []byte) error {
 		var decodeErr error
 		if txs[i], decodeErr = types.DecodeTransaction(v); decodeErr != nil {
 			return decodeErr
@@ -487,7 +487,7 @@ func WriteRawTransactions(rwTx kv.RwTx, txs [][]byte, txnID uint64) error {
 		binary.BigEndian.PutUint64(txIdKey, txnID)
 		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
 		if err := rwTx.Append(kv.EthTx, txIdKey, txn); err != nil {
-			return fmt.Errorf("txnID=%d, baseTxId=%d, %w", txnID, stx, err)
+			return fmt.Errorf("txnID=%d, firstNonSysTxn=%d, %w", txnID, stx, err)
 		}
 		txnID++
 	}
@@ -512,9 +512,9 @@ func ReadBodyByNumber(db kv.Tx, number uint64) (*types.Body, uint64, uint32, err
 	if hash == (common.Hash{}) {
 		return nil, 0, 0, nil
 	}
-	body, baseTxId, txAmount := ReadBody(db, hash, number)
-	// TODO baseTxid from ReadBody is baseTxId+1, but we could expect original baseTxId here
-	return body, baseTxId, txAmount, nil
+	body, baseTxnID, txAmount := ReadBody(db, hash, number)
+	// TODO baseTxnID from ReadBody is baseTxnID+1, but we could expect original baseTxnID here
+	return body, baseTxnID, txAmount, nil
 }
 
 func ReadBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) (*types.Body, error) {
@@ -552,12 +552,12 @@ func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err erro
 		if len(bodyRlp) == 0 {
 			continue
 		}
-		baseTxId, txAmount, err := types.DecodeOnlyTxMetadataFromBody(bodyRlp)
+		baseTxnID, txAmount, err := types.DecodeOnlyTxMetadataFromBody(bodyRlp)
 		if err != nil {
 			return nil, err
 		}
 
-		binary.BigEndian.PutUint64(encNum, baseTxId)
+		binary.BigEndian.PutUint64(encNum, baseTxnID.U64())
 		if err = db.ForAmount(kv.EthTx, encNum, txAmount, func(k, v []byte) error {
 			res = append(res, v)
 			return nil
@@ -613,7 +613,7 @@ func ReadBody(db kv.Getter, hash common.Hash, number uint64) (*types.Body, uint6
 	if bodyForStorage.TxAmount < 2 {
 		panic(fmt.Sprintf("block body hash too few txs amount: %d, %d", number, bodyForStorage.TxAmount))
 	}
-	return body, bodyForStorage.BaseTxId.First(), bodyForStorage.TxAmount - 2 // 1 system txn in the begining of block, and 1 at the end
+	return body, bodyForStorage.BaseTxnID.First(), bodyForStorage.TxAmount - 2 // 1 system txn in the begining of block, and 1 at the end
 }
 
 func HasSenders(db kv.Getter, hash common.Hash, number uint64) (bool, error) {
@@ -649,7 +649,7 @@ func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBo
 		return false, err
 	}
 	data := types.BodyForStorage{
-		BaseTxId:    types.BaseTxnID(baseTxnID),
+		BaseTxnID:   types.BaseTxnID(baseTxnID),
 		TxAmount:    types.TxCountToTxAmount(len(body.Transactions)), /*system txs*/
 		Uncles:      body.Uncles,
 		Withdrawals: body.Withdrawals,
@@ -658,7 +658,7 @@ func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBo
 	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return false, fmt.Errorf("WriteBodyForStorage: %w", err)
 	}
-	if err = WriteRawTransactions(db, body.Transactions, data.BaseTxId.First()); err != nil {
+	if err = WriteRawTransactions(db, body.Transactions, data.BaseTxnID.First()); err != nil {
 		return false, fmt.Errorf("WriteRawTransactions: %w", err)
 	}
 	return true, nil
@@ -667,12 +667,12 @@ func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBo
 func WriteBody(db kv.RwTx, hash common.Hash, number uint64, body *types.Body) (err error) {
 	// Pre-processing
 	body.SendersFromTxs()
-	baseTxId, err := db.IncrementSequence(kv.EthTx, uint64(types.TxCountToTxAmount(len(body.Transactions))))
+	baseTxnID, err := db.IncrementSequence(kv.EthTx, uint64(types.TxCountToTxAmount(len(body.Transactions))))
 	if err != nil {
 		return err
 	}
 	data := types.BodyForStorage{
-		BaseTxId:    types.BaseTxnID(baseTxId),
+		BaseTxnID:   types.BaseTxnID(baseTxnID),
 		TxAmount:    types.TxCountToTxAmount(len(body.Transactions)),
 		Uncles:      body.Uncles,
 		Withdrawals: body.Withdrawals,
@@ -681,7 +681,7 @@ func WriteBody(db kv.RwTx, hash common.Hash, number uint64, body *types.Body) (e
 	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return fmt.Errorf("failed to write body: %w", err)
 	}
-	if err = WriteTransactions(db, body.Transactions, data.BaseTxId.First()); err != nil {
+	if err = WriteTransactions(db, body.Transactions, data.BaseTxnID.First()); err != nil {
 		return fmt.Errorf("failed to WriteTransactions: %w", err)
 	}
 	return nil

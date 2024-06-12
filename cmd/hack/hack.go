@@ -901,7 +901,7 @@ func trimTxs(chaindata string) error {
 			return err
 		}
 		// Remove from the map
-		toDelete.RemoveRange(body.BaseTxId.U64(), body.BaseTxId.LastSystemTx(body.TxAmount)+1) //+1 to include last system tx in block into delete range
+		toDelete.RemoveRange(body.BaseTxnID.U64(), body.BaseTxnID.LastSystemTx(body.TxAmount)+1) //+1 to include last system tx in block into delete range
 	}
 	fmt.Printf("Number of tx records to delete: %d\n", toDelete.GetCardinality())
 	// Takes 20min to iterate 1.4b

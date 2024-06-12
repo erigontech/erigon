@@ -675,7 +675,7 @@ func (b BaseTxnID) FirstSystemTx() BaseTxnID { return b }
 func (b BaseTxnID) LastSystemTx(txAmount uint32) uint64 { return b.U64() + uint64(txAmount) - 1 }
 
 type BodyForStorage struct {
-	BaseTxId    BaseTxnID
+	BaseTxnID   BaseTxnID
 	TxAmount    uint32
 	Uncles      []*Header
 	Withdrawals []*Withdrawal
@@ -845,10 +845,10 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 }
 
 func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen, requestsLen int) {
-	baseTxIdLen := 1 + rlp.IntLenExcludingHead(bfs.BaseTxId.U64())
+	baseTxnIDLen := 1 + rlp.IntLenExcludingHead(bfs.BaseTxnID.U64())
 	txAmountLen := 1 + rlp.IntLenExcludingHead(uint64(bfs.TxAmount))
 
-	payloadSize += baseTxIdLen
+	payloadSize += baseTxnIDLen
 	payloadSize += txAmountLen
 
 	// size of Uncles
@@ -880,7 +880,7 @@ func (bfs BodyForStorage) EncodeRLP(w io.Writer) error {
 	}
 
 	// encode BaseTxId
-	if err := rlp.Encode(w, bfs.BaseTxId); err != nil {
+	if err := rlp.Encode(w, bfs.BaseTxnID); err != nil {
 		return err
 	}
 
@@ -914,7 +914,7 @@ func (bfs *BodyForStorage) DecodeRLP(s *rlp.Stream) error {
 	}
 
 	// decode BaseTxId
-	if err = s.Decode(&bfs.BaseTxId); err != nil {
+	if err = s.Decode(&bfs.BaseTxnID); err != nil {
 		return err
 	}
 	// decode TxAmount
@@ -1530,18 +1530,21 @@ func (b *Block) Hash() libcommon.Hash {
 
 type Blocks []*Block
 
-func DecodeOnlyTxMetadataFromBody(payload []byte) (baseTxId uint64, txAmount uint32, err error) {
+func DecodeOnlyTxMetadataFromBody(payload []byte) (baseTxnID BaseTxnID, txAmount uint32, err error) {
 	pos, _, err := rlp2.List(payload, 0)
 	if err != nil {
-		return baseTxId, txAmount, err
+		return baseTxnID, txAmount, err
 	}
-	pos, baseTxId, err = rlp2.U64(payload, pos)
+	var btID uint64
+	pos, btID, err = rlp2.U64(payload, pos)
 	if err != nil {
-		return baseTxId, txAmount, err
+		return baseTxnID, txAmount, err
 	}
+	baseTxnID = BaseTxnID(btID)
+
 	_, txAmount, err = rlp2.U32(payload, pos)
 	if err != nil {
-		return baseTxId, txAmount, err
+		return baseTxnID, txAmount, err
 	}
 	return
 }
