@@ -100,6 +100,17 @@ func (h *History) endTxNumMinimax() uint64 {
 	}
 	return minimax
 }
+
+func (ap *Appendable) endTxNumMinimax() uint64 {
+	var minimax uint64
+	if _max, ok := ap.dirtyFiles.Max(); ok {
+		endTxNum := _max.endTxNum
+		if minimax == 0 || endTxNum < minimax {
+			minimax = endTxNum
+		}
+	}
+	return minimax
+}
 func (h *History) endIndexedTxNumMinimax(needFrozen bool) uint64 {
 	var _max uint64
 	if h.dontProduceHistoryFiles && h.dirtyFiles.Len() == 0 {
