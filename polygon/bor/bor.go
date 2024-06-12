@@ -995,12 +995,15 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 
 		if c.blockReader != nil {
+			fmt.Println("committing span")
 			// check and commit span
 			if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {
 				err := fmt.Errorf("Finalize.checkAndCommitSpan: %w", err)
 				c.logger.Error("[bor] committing span", "err", err)
 				return nil, types.Receipts{}, nil, err
 			}
+
+			fmt.Println("committing state")
 			// commit states
 			if err := c.CommitStates(state, header, cx, syscall, syscall2); err != nil {
 				err := fmt.Errorf("Finalize.CommitStates: %w", err)
