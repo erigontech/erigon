@@ -22,11 +22,15 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, signedBlock *clty
 	}
 	h := metrics.NewHistTimer("beacon_process_block")
 	// Process the block header.
-	if err := impl.ProcessBlockHeader(s, block); err != nil {
+	bodyRoot, err := block.Body.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("processBlock: failed to hash block body: %v", err)
+	}
+	if err := impl.ProcessBlockHeader(s, block.Slot, block.ProposerIndex, block.ParentRoot, bodyRoot); err != nil {
 		return fmt.Errorf("processBlock: failed to process block header: %v", err)
 	}
 	// Process execution payload if enabled.
-	if version >= clparams.BellatrixVersion && executionEnabled(s, block.Body.ExecutionPayload) {
+	if version >= clparams.BellatrixVersion && executionEnabled(s, block.Body.ExecutionPayload.BlockHash) {
 		if s.Version() >= clparams.CapellaVersion {
 			// Process withdrawals in the execution payload.
 			if err := impl.ProcessWithdrawals(s, block.Body.ExecutionPayload.Withdrawals); err != nil {
@@ -48,6 +52,63 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, signedBlock *clty
 	}
 	// Process block body operations.
 	if err := ProcessOperations(impl, s, block.Body); err != nil {
+		return fmt.Errorf("processBlock: failed to process block body operations: %v", err)
+	}
+	// Process sync aggregate in case of Altair version.
+	if version >= clparams.AltairVersion {
+		if err := impl.ProcessSyncAggregate(s, block.Body.SyncAggregate); err != nil {
+			return fmt.Errorf("processBlock: failed to process sync aggregate: %v", err)
+		}
+	}
+
+	h.PutSince()
+	return nil
+}
+
+func ProcessBlindedBlock(impl BlockProcessor, s abstract.BeaconState, signedBlock *cltypes.SignedBlindedBeaconBlock) error {
+	var (
+		block   = signedBlock.Block
+		version = s.Version()
+		// Process the execution payload. Note that the execution payload does not contain txs and withdrawals.
+		partialExecutionBody    = block.Body.Full(nil, nil)
+		partialExecutionPayload = partialExecutionBody.ExecutionPayload
+	)
+
+	// Check the state version is correct.
+	if signedBlock.Version() != version {
+		return fmt.Errorf("processBlindedBlock: wrong state version for block at slot %d", block.Slot)
+	}
+	h := metrics.NewHistTimer("beacon_process_blinded_block")
+	bodyRoot, err := block.Body.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("processBlindedBlock: failed to hash block body: %v", err)
+	}
+	if err := impl.ProcessBlockHeader(s, block.Slot, block.ProposerIndex, block.ParentRoot, bodyRoot); err != nil {
+		return fmt.Errorf("processBlindedBlock: failed to process block header: %v", err)
+	}
+	// Process execution payload if enabled.
+	if version >= clparams.BellatrixVersion && executionEnabled(s, block.Body.ExecutionPayload.BlockHash) {
+		/*if s.Version() >= clparams.CapellaVersion {
+			// Process withdrawals in the execution payload.
+			if err := impl.ProcessWithdrawals(s, block.Body.ExecutionPayload.Withdrawals); err != nil {
+				return fmt.Errorf("processBlock: failed to process withdrawals: %v", err)
+			}
+		}*/
+		if err := impl.ProcessExecutionPayload(s, partialExecutionPayload); err != nil {
+			return fmt.Errorf("processBlock: failed to process execution payload: %v", err)
+		}
+	}
+
+	// Process RANDAO reveal.
+	if err := impl.ProcessRandao(s, block.Body.RandaoReveal, block.ProposerIndex); err != nil {
+		return fmt.Errorf("processBlock: failed to process RANDAO reveal: %v", err)
+	}
+	// Process Eth1 data.
+	if err := impl.ProcessEth1Data(s, block.Body.Eth1Data); err != nil {
+		return fmt.Errorf("processBlock: failed to process Eth1 data: %v", err)
+	}
+	// Process block body operations.
+	if err := ProcessOperations(impl, s, partialExecutionBody); err != nil {
 		return fmt.Errorf("processBlock: failed to process block body operations: %v", err)
 	}
 	// Process sync aggregate in case of Altair version.

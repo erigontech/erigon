@@ -188,7 +188,19 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		return nil, err
 	}
 
-	if !block.IsBlinded() {
+	if block.IsBlinded() {
+		signedBlock := &cltypes.SignedBlindedBeaconBlock{
+			Block: &cltypes.BlindedBeaconBlock{
+				Slot:          block.Slot,
+				ProposerIndex: block.ProposerIndex,
+				ParentRoot:    block.ParentRoot,
+				Body:          block.BlindedBeaconBody,
+			},
+		}
+		if err := machine.ProcessBlindedBlock(transition.DefaultMachine, baseState, signedBlock); err != nil {
+			return nil, err
+		}
+	} else {
 		signedBeaconBlock := &cltypes.SignedBeaconBlock{
 			Block: &cltypes.BeaconBlock{
 				Slot:          block.Slot,
