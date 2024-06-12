@@ -20,4 +20,20 @@ var (
 		Required: false,
 		Value:    "text",
 	}
+
+	AutoUpdateFlag = cli.BoolFlag{
+		Name:     "autoupdate",
+		Aliases:  []string{"au"},
+		Usage:    "Auto update the output",
+		Required: false,
+		Value:    false,
+	}
+
+	AutoUpdateIntervalFlag = cli.IntFlag{
+		Name:     "autoupdate.interval",
+		Aliases:  []string{"aui"},
+		Usage:    "Auto update interval in milliseconds",
+		Required: false,
+		Value:    20000,
+	}
 )
