@@ -1066,7 +1066,7 @@ func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log
 	if err != nil {
 		panic(err)
 	}
-	if err = agg.OpenFolder(true); err != nil {
+	if err = agg.OpenFolder(); err != nil {
 		panic(err)
 	}
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())

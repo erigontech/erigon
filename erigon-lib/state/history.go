@@ -142,8 +142,8 @@ func (h *History) vAccessorFilePath(fromStep, toStep uint64) string {
 // It's ok if some files was open earlier.
 // If some file already open: noop.
 // If some file already open but not in provided list: close and remove from `files` field.
-func (h *History) OpenList(idxFiles, histNames []string, readonly bool) error {
-	if err := h.InvertedIndex.OpenList(idxFiles, readonly); err != nil {
+func (h *History) OpenList(idxFiles, histNames []string) error {
+	if err := h.InvertedIndex.OpenList(idxFiles); err != nil {
 		return err
 	}
 	return h.openList(histNames)
@@ -164,7 +164,7 @@ func (h *History) OpenFolder(readonly bool) error {
 	if err != nil {
 		return err
 	}
-	return h.OpenList(idxFiles, histFiles, readonly)
+	return h.OpenList(idxFiles, histFiles)
 }
 
 // scanStateFiles
@@ -276,7 +276,7 @@ func (h *History) openFiles() error {
 }
 
 func (h *History) closeWhatNotInList(fNames []string) {
-	var toDelete []*filesItem
+	var toClose []*filesItem
 	h.dirtyFiles.Walk(func(items []*filesItem) bool {
 	Loop1:
 		for _, item := range items {
@@ -285,11 +285,11 @@ func (h *History) closeWhatNotInList(fNames []string) {
 					continue Loop1
 				}
 			}
-			toDelete = append(toDelete, item)
+			toClose = append(toClose, item)
 		}
 		return true
 	})
-	for _, item := range toDelete {
+	for _, item := range toClose {
 		item.closeFiles()
 		h.dirtyFiles.Delete(item)
 	}

@@ -1460,7 +1460,7 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		return nil
 	})
 	g.Go(func() error {
-		return agg.OpenFolder(false)
+		return agg.OpenFolder()
 	})
 	if err = g.Wait(); err != nil {
 		return nil, nil, nil, nil, nil, err

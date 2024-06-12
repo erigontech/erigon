@@ -538,7 +538,7 @@ func TestInvIndexMerge(t *testing.T) {
 }
 
 func TestInvIndexScanFiles(t *testing.T) {
-	logger := log.New()
+	logger, require := log.New(), require.New(t)
 	db, ii, txs := filledInvIndex(t, logger)
 
 	// Recreate InvertedIndex to scan the files
@@ -546,8 +546,10 @@ func TestInvIndexScanFiles(t *testing.T) {
 	salt := uint32(1)
 	cfg := iiCfg{salt: &salt, dirs: ii.dirs, db: db}
 	ii, err = NewInvertedIndex(cfg, ii.aggregationStep, ii.filenameBase, ii.indexKeysTable, ii.indexTable, nil, logger)
-	require.NoError(t, err)
+	require.NoError(err)
 	defer ii.Close()
+	err = ii.OpenFolder(true)
+	require.NoError(err)
 
 	mergeInverted(t, db, ii, txs)
 	checkRanges(t, db, ii, txs)
@@ -721,7 +723,7 @@ func TestInvIndex_OpenFolder(t *testing.T) {
 	err = os.WriteFile(fn, make([]byte, 33), 0644)
 	require.NoError(t, err)
 
-	err = ii.OpenFolder(true)
+	err = ii.OpenFolder()
 	require.NoError(t, err)
 	ii.Close()
 }
