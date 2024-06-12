@@ -22,7 +22,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	btree2 "github.com/tidwall/btree"
 	"math"
 	"path"
 	"path/filepath"
@@ -1202,7 +1201,7 @@ func (ii *InvertedIndex) integrateMergedDirtyFiles(outs []*filesItem, in *filesI
 			})
 		}
 	}
-	deleteMergeFile(ii.dirtyFiles, outs, ii.filenameBase)
+	deleteMergeFile(ii.dirtyFiles, outs, ii.filenameBase, ii.logger)
 }
 func (ap *Appendable) integrateMergedDirtyFiles(outs []*filesItem, in *filesItem) {
 	if in != nil {
@@ -1222,7 +1221,7 @@ func (ap *Appendable) integrateMergedDirtyFiles(outs []*filesItem, in *filesItem
 			})
 		}
 	}
-	deleteMergeFile(ap.dirtyFiles, outs, ap.filenameBase)
+	deleteMergeFile(ap.dirtyFiles, outs, ap.filenameBase, ap.logger)
 }
 
 func (h *History) integrateMergedFiles(indexOuts, historyOuts []*filesItem, indexIn, historyIn *filesItem) {
@@ -1245,24 +1244,7 @@ func (h *History) integrateMergedFiles(indexOuts, historyOuts []*filesItem, inde
 			})
 		}
 	}
-	deleteMergeFile(h.dirtyFiles, historyOuts, h.filenameBase)
-}
-
-func deleteMergeFile(dirtyFiles *btree2.BTreeG[*filesItem], outs []*filesItem, filenameBase string) {
-	for _, out := range outs {
-		if out == nil {
-			panic("must not happen: " + filenameBase)
-		}
-		dirtyFiles.Delete(out)
-
-		// if merged file not visible for any alive reader (even for us): can remove it immediately
-		// otherwise: mark it as `canDelete=true` and last reader of this file - will remove it inside `aggRoTx.Close()`
-		if out.refcount.Load() == 0 {
-			out.closeFilesAndRemove()
-		} else {
-			out.canDelete.Store(true)
-		}
-	}
+	deleteMergeFile(h.dirtyFiles, historyOuts, h.filenameBase, h.logger)
 }
 
 func (dt *DomainRoTx) cleanAfterMerge(mergedDomain, mergedHist, mergedIdx *filesItem) {
@@ -1271,24 +1253,7 @@ func (dt *DomainRoTx) cleanAfterMerge(mergedDomain, mergedHist, mergedIdx *files
 		return
 	}
 	outs := dt.garbage(mergedDomain)
-	for _, out := range outs {
-		if out == nil {
-			panic("must not happen: " + dt.d.filenameBase)
-		}
-		dt.d.dirtyFiles.Delete(out)
-		out.canDelete.Store(true)
-		if out.refcount.Load() == 0 {
-			if dt.d.filenameBase == traceFileLife && out.decompressor != nil {
-				dt.d.logger.Info(fmt.Sprintf("[agg] cleanAfterMerge remove: %s", out.decompressor.FileName()))
-			}
-			// if it has no readers (invisible even for us) - it's safe to remove file right here
-			out.closeFilesAndRemove()
-		} else {
-			if dt.d.filenameBase == traceFileLife && out.decompressor != nil {
-				dt.d.logger.Warn(fmt.Sprintf("[agg] cleanAfterMerge mark as delete: %s, refcnt=%d", out.decompressor.FileName(), out.refcount.Load()))
-			}
-		}
-	}
+	deleteMergeFile(dt.d.dirtyFiles, outs, dt.d.filenameBase, dt.d.logger)
 }
 
 // cleanAfterMerge - sometime inverted_index may be already merged, but history not yet. and power-off happening.
@@ -1302,25 +1267,7 @@ func (ht *HistoryRoTx) cleanAfterMerge(merged, mergedIdx *filesItem) {
 		return
 	}
 	outs := ht.garbage(merged)
-	for _, out := range outs {
-		if out == nil {
-			panic("must not happen: " + ht.h.filenameBase)
-		}
-		ht.h.dirtyFiles.Delete(out)
-		out.canDelete.Store(true)
-
-		// if it has no readers (invisible even for us) - it's safe to remove file right here
-		if out.refcount.Load() == 0 {
-			if ht.h.filenameBase == traceFileLife && out.decompressor != nil {
-				ht.h.logger.Info(fmt.Sprintf("[agg] cleanAfterMerge remove: %s", out.decompressor.FileName()))
-			}
-			out.closeFilesAndRemove()
-		} else {
-			if ht.h.filenameBase == traceFileLife && out.decompressor != nil {
-				ht.h.logger.Info(fmt.Sprintf("[agg] cleanAfterMerge mark as delete: %s", out.decompressor.FileName()))
-			}
-		}
-	}
+	deleteMergeFile(ht.h.dirtyFiles, outs, ht.h.filenameBase, ht.h.logger)
 	ht.iit.cleanAfterMerge(mergedIdx)
 }
 
@@ -1333,24 +1280,7 @@ func (iit *InvertedIndexRoTx) cleanAfterMerge(merged *filesItem) {
 		return
 	}
 	outs := iit.garbage(merged)
-	for _, out := range outs {
-		if out == nil {
-			panic("must not happen: " + iit.ii.filenameBase)
-		}
-		iit.ii.dirtyFiles.Delete(out)
-		out.canDelete.Store(true)
-		if out.refcount.Load() == 0 {
-			if iit.ii.filenameBase == traceFileLife && out.decompressor != nil {
-				iit.ii.logger.Info(fmt.Sprintf("[agg] cleanAfterMerge remove: %s", out.decompressor.FileName()))
-			}
-			// if it has no readers (invisible even for us) - it's safe to remove file right here
-			out.closeFilesAndRemove()
-		} else {
-			if iit.ii.filenameBase == traceFileLife && out.decompressor != nil {
-				iit.ii.logger.Info(fmt.Sprintf("[agg] cleanAfterMerge mark as delete: %s\n", out.decompressor.FileName()))
-			}
-		}
-	}
+	deleteMergeFile(iit.ii.dirtyFiles, outs, iit.ii.filenameBase, iit.ii.logger)
 }
 
 // garbage - returns list of garbage files after merge step is done. at startup pass here last frozen file
