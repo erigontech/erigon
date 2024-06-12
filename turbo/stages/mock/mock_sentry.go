@@ -524,6 +524,8 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			stagedsync.StageCallTracesCfg(mock.DB, prune, 0, dirs.Tmp),
 			stagedsync.StageTxLookupCfg(mock.DB, prune, dirs.Tmp, mock.ChainConfig.Bor, mock.BlockReader),
 			stagedsync.StageFinishCfg(mock.DB, dirs.Tmp, forkValidator),
+			stagedsync.StageDbAwareCfg(mock.DB, mock.agg, dirs.Tmp, mock.ChainConfig, mock.BlockReader, mock.Engine),
+			false,
 			!withPosDownloader),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,

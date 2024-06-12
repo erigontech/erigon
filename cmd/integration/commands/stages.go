@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
+	"github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
 	reset2 "github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -357,6 +358,31 @@ var cmdStageTxLookup = &cobra.Command{
 			return
 		}
 	},
+}
+
+func runResetStage(stg stages.SyncStage) func(cmd *cobra.Command, args []string) {
+	return func(cmd *cobra.Command, args []string) {
+		ctx := cmd.Context()
+		logger := debug.SetupCobra(cmd, "integration")
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		// Force reset stage and associated buckets
+		if err := rawdbreset.Reset(ctx, db, stg); err != nil {
+			log.Error("Error", "err", err)
+			return
+		}
+	}
+}
+
+var cmdResetOtsTest = &cobra.Command{
+	Use:   "reset_ots_test",
+	Short: "",
+	Run:   runResetStage(stages.OtsTestStage),
 }
 
 var cmdPrintStages = &cobra.Command{
@@ -718,6 +744,10 @@ func init() {
 	rootCmd.AddCommand(cmdStageTxLookup)
 
 	withConfig(cmdPrintMigrations)
+
+	withDataDir(cmdResetOtsTest)
+	rootCmd.AddCommand(cmdResetOtsTest)
+
 	withDataDir(cmdPrintMigrations)
 	rootCmd.AddCommand(cmdPrintMigrations)
 
@@ -1857,6 +1887,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 	cfg.Dirs = datadir.New(datadirCli)
 	allSn, _, agg := allSnapshots(ctx, db, logger)
 	cfg.Snapshot = allSn.Cfg()
+	cfg.Ots2 = true
 
 	blockReader, blockWriter := blocksIO(db, logger)
 	engine, heimdallClient := initConsensusEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, blockReader, logger)

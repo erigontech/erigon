@@ -416,6 +416,9 @@ const (
 	TblTracesToKeys   = "TracesToKeys"
 	TblTracesToIdx    = "TracesToIdx"
 
+	TblTestIIKeys = "TestIIKeys"
+	TblTestIIIdx  = "TestIIIdx"
+
 	// Prune progress of execution: tableName -> [8bytes of invStep]latest pruned key
 	// Could use table constants `Tbl{Account,Storage,Code,Commitment}Keys` for domains
 	// corresponding history tables `Tbl{Account,Storage,Code,Commitment}HistoryKeys` for history
@@ -662,6 +665,8 @@ var ChaindataTables = []string{
 	TblTracesFromIdx,
 	TblTracesToKeys,
 	TblTracesToIdx,
+	TblTestIIKeys,
+	TblTestIIIdx,
 
 	TblPruningProgress,
 
@@ -840,6 +845,8 @@ var ChaindataTablesCfg = TableCfg{
 	TblTracesFromIdx:   {Flags: DupSort},
 	TblTracesToKeys:    {Flags: DupSort},
 	TblTracesToIdx:     {Flags: DupSort},
+	TblTestIIKeys:      {Flags: DupSort},
+	TblTestIIIdx:       {Flags: DupSort},
 	TblPruningProgress: {Flags: DupSort},
 
 	RAccountKeys: {Flags: DupSort},
@@ -986,12 +993,16 @@ const (
 	LogAddrIdx    InvertedIdx = "LogAddrIdx"
 	TracesFromIdx InvertedIdx = "TracesFromIdx"
 	TracesToIdx   InvertedIdx = "TracesToIdx"
+	TestIIIdx     InvertedIdx = "TestIIIdx"
 
 	LogAddrIdxPos    InvertedIdxPos = 0
 	LogTopicIdxPos   InvertedIdxPos = 1
 	TracesFromIdxPos InvertedIdxPos = 2
 	TracesToIdxPos   InvertedIdxPos = 3
 	StandaloneIdxLen uint16         = 4
+
+	TestIIIdxPos            InvertedIdxPos = 0
+	StandaloneDerivedIdxLen uint16         = 1
 )
 
 const (

@@ -28,4 +28,5 @@ const (
 	FileLogTopicsIdx  = "logtopics"
 	FileTracesFromIdx = "tracesfrom"
 	FileTracesToIdx   = "tracesto"
+	FileTestIIIdx     = "testii"
 )

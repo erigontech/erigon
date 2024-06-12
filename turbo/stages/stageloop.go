@@ -168,6 +168,10 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	}() // avoid crash because Erigon's core does many things
 
 	externalTx := txc.Tx != nil
+	otsProgressBefore, err := stagesOtsIndexers(db, txc.Tx)
+	if err != nil {
+		return err
+	}
 	finishProgressBefore, borProgressBefore, headersProgressBefore, err := stagesHeadersAndFinish(db, txc.Tx)
 	if err != nil {
 		return err
@@ -175,7 +179,7 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	// Sync from scratch must be able Commit partial progress
 	// In all other cases - process blocks batch in 1 RwTx
 	// 2 corner-cases: when sync with --snapshots=false and when executed only blocks from snapshots (in this case all stages progress is equal and > 0, but node is not synced)
-	isSynced := finishProgressBefore > 0 && finishProgressBefore > blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
+	isSynced := finishProgressBefore > 0 && finishProgressBefore > blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore && otsProgressBefore == headersProgressBefore
 	if blockReader.BorSnapshots() != nil {
 		isSynced = isSynced && borProgressBefore > blockReader.FrozenBorBlocks()
 	}
@@ -259,6 +263,26 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	}
 
 	return nil
+}
+
+var lastOtsStage = stages.OtsTestStage
+
+func stagesOtsIndexers(db kv.RoDB, tx kv.Tx) (lastIdx uint64, err error) {
+	if tx != nil {
+		if lastIdx, err = stages.GetStageProgress(tx, lastOtsStage); err != nil {
+			return lastIdx, err
+		}
+		return lastIdx, nil
+	}
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		if lastIdx, err = stages.GetStageProgress(tx, lastOtsStage); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return lastIdx, err
+	}
+	return lastIdx, nil
 }
 
 func stagesHeadersAndFinish(db kv.RoDB, tx kv.Tx) (head, bor, fin uint64, err error) {
@@ -641,6 +665,8 @@ func NewDefaultStages(ctx context.Context,
 		stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, dirs.Tmp),
 		stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, controlServer.ChainConfig.Bor, blockReader),
 		stagedsync.StageFinishCfg(db, dirs.Tmp, forkValidator),
+		stagedsync.StageDbAwareCfg(db, agg, dirs.Tmp, controlServer.ChainConfig, blockReader, controlServer.Engine),
+		cfg.Ots2,
 		runInTestMode)
 }
 
@@ -704,6 +730,8 @@ func NewPipelineStages(ctx context.Context,
 			stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, dirs.Tmp),
 			stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, controlServer.ChainConfig.Bor, blockReader),
 			stagedsync.StageFinishCfg(db, dirs.Tmp, forkValidator),
+			stagedsync.StageDbAwareCfg(db, agg, dirs.Tmp, controlServer.ChainConfig, blockReader, controlServer.Engine),
+			cfg.Ots2,
 			runInTestMode)
 	}
 

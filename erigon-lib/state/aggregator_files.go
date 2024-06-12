@@ -30,6 +30,7 @@ type SelectedStaticFilesV3 struct {
 	dHist [kv.DomainLen][]*filesItem
 	dIdx  [kv.DomainLen][]*filesItem
 	ii    [kv.StandaloneIdxLen][]*filesItem
+	dii   [kv.StandaloneDerivedIdxLen][]*filesItem
 }
 
 func (sf SelectedStaticFilesV3) Close() {
@@ -39,6 +40,9 @@ func (sf SelectedStaticFilesV3) Close() {
 	}
 
 	for _, i := range sf.ii {
+		clist = append(clist, i)
+	}
+	for _, i := range sf.dii {
 		clist = append(clist, i)
 	}
 	for _, group := range clist {
@@ -67,6 +71,12 @@ func (ac *AggregatorRoTx) staticFilesInRange(r RangesV3) (sf SelectedStaticFiles
 			sf.ii[id] = fi
 		}
 	}
+	for id, rng := range r.dranges {
+		if rng != nil && rng.needMerge {
+			fi := ac.diis[id].staticFilesInRange(rng.from, rng.to)
+			sf.dii[id] = fi
+		}
+	}
 	return sf, err
 }
 
@@ -75,6 +85,7 @@ type MergedFilesV3 struct {
 	dHist [kv.DomainLen]*filesItem
 	dIdx  [kv.DomainLen]*filesItem
 	iis   [kv.StandaloneIdxLen]*filesItem
+	diis  [kv.StandaloneDerivedIdxLen]*filesItem
 }
 
 func (mf MergedFilesV3) FrozenList() (frozen []string) {
@@ -93,6 +104,11 @@ func (mf MergedFilesV3) FrozenList() (frozen []string) {
 	}
 
 	for _, ii := range mf.iis {
+		if ii != nil && ii.frozen {
+			frozen = append(frozen, ii.decompressor.FileName())
+		}
+	}
+	for _, ii := range mf.diis {
 		if ii != nil && ii.frozen {
 			frozen = append(frozen, ii.decompressor.FileName())
 		}

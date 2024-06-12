@@ -854,6 +854,11 @@ var (
 		Usage: "Max allowed page size for search methods",
 		Value: 25,
 	}
+	OtsV2Flag = cli.BoolFlag{
+		Name:  "experimental.ots2",
+		Usage: "Enable experimental Otterscan API V2",
+		Value: false,
+	}
 
 	DiagnosticsURLFlag = cli.StringFlag{
 		Name:  "diagnostics.addr",
@@ -1873,6 +1878,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	if ctx.IsSet(TxPoolGossipDisableFlag.Name) {
 		cfg.DisableTxPoolGossip = ctx.Bool(TxPoolGossipDisableFlag.Name)
 	}
+
+	cfg.Ots2 = ctx.Bool(OtsV2Flag.Name)
 }
 
 // SetDNSDiscoveryDefaults configures DNS discovery with the given URL if

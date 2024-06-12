@@ -6,6 +6,9 @@ import (
 	"math/big"
 
 	hexutil2 "github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/holiman/uint256"
@@ -48,6 +51,161 @@ type OtterscanAPI interface {
 	GetTransactionError(ctx context.Context, hash common.Hash) (hexutility.Bytes, error)
 	GetTransactionBySenderAndNonce(ctx context.Context, addr common.Address, nonce uint64) (*common.Hash, error)
 	GetContractCreator(ctx context.Context, addr common.Address) (*ContractCreatorData, error)
+	Debug(ctx context.Context) error
+	Debug2(ctx context.Context) error
+	Debug3(ctx context.Context) error
+	Debug4(ctx context.Context) error
+}
+
+// TEST ADDR with 10 creation/self-destructs on sepolia
+var addr = common.HexToAddress("0xC4a96da3483Ccd935944a0eeCdB20aE42476C296")
+
+func (api *OtterscanAPIImpl) Debug(ctx context.Context) error {
+	tx, err := api.db.BeginRo(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	ttx := tx.(kv.TemporalTx)
+
+	startBlock := uint64(0)
+	minTxNum, err := rawdbv3.TxNums.Min(ttx, startBlock)
+	if err != nil {
+		return err
+	}
+	maxTxNum, err := rawdbv3.TxNums.Max(ttx, ^uint64(0))
+	if err != nil {
+		return err
+	}
+	log.Info("Range", "startBlock", startBlock, "minTxNum", minTxNum, "maxTxNum", maxTxNum, "diff", maxTxNum-minTxNum+1)
+
+	return nil
+}
+
+func (api *OtterscanAPIImpl) Debug2(ctx context.Context) error {
+	tx, err := api.db.BeginRo(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	ttx := tx.(kv.TemporalTx)
+
+	startBlock := uint64(0)
+	minTxNum, err := rawdbv3.TxNums.Min(ttx, startBlock)
+	if err != nil {
+		return err
+	}
+	maxTxNum, err := rawdbv3.TxNums.Max(ttx, ^uint64(0))
+	if err != nil {
+		return err
+	}
+	log.Info("Range", "startBlock", startBlock, "minTxNum", minTxNum, "maxTxNum", maxTxNum, "diff", maxTxNum-minTxNum+1)
+
+	addr := common.HexToAddress("0x35b7f08dc14d16c47c0ae202c901fd64b739966c")
+
+	it2, err := ttx.IndexRange(kv.CodeHistoryIdx, addr.Bytes(), int(minTxNum), int(maxTxNum+1), order.Asc, kv.Unlim)
+	if err != nil {
+		return err
+	}
+	log.Info("CHANGES", "addr", addr)
+	it3 := rawdbv3.TxNums2BlockNums(ttx, it2, order.Asc)
+	for it3.HasNext() {
+		_, blockNum, txIdx, isFinalTxn, _, err := it3.Next()
+		if err != nil {
+			return err
+		}
+		log.Info("TX", "blockNum", blockNum, "txIdx", txIdx, "isFinal", isFinalTxn)
+	}
+
+	return nil
+}
+
+func (api *OtterscanAPIImpl) Debug3(ctx context.Context) error {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	ttx := tx.(kv.TemporalTx)
+
+	testKey := []byte("test")
+
+	// startBlock := uint64(0)
+	// txNum, err := rawdbv3.TxNums.Min(ttx, startBlock)
+	// if err != nil {
+	// 	return err
+	// }
+	// k := dbutils.EncodeBlockNumber(txNum)
+	ts, err := ttx.IndexRange(kv.TblTestIIIdx, testKey, -1, -1, order.Asc, kv.Unlim)
+	if err != nil {
+		return err
+	}
+	it := rawdbv3.TxNums2BlockNums(tx, ts, order.Asc)
+	log.Info("XXXXX")
+	count := 0
+	for it.HasNext() && count < 100 {
+		count++
+		txNum, blockNum, txIndex, _, _, err := it.Next()
+		if err != nil {
+			return err
+		}
+		log.Info("AAAAA", "txNum", txNum, "blockNum", blockNum, "txIndex", txIndex)
+	}
+	log.Info("YYYYY")
+
+	return nil
+}
+
+func (api *OtterscanAPIImpl) Debug4(ctx context.Context) error {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if err := api.printDupTable(tx, kv.TblTestIIKeys, 100); err != nil {
+		return err
+	}
+	if err := api.printDupTable(tx, kv.TblTestIIIdx, 100); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (api *OtterscanAPIImpl) printDupTable(tx kv.Tx, table string, limit int) error {
+	c, err := tx.CursorDupSort(table)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	log.Info("TABLE", "t", table)
+	count := 0
+	k, v, err := c.First()
+	if err != nil {
+		return err
+	}
+	for k != nil && (limit != -1 && count < limit) {
+		count++
+		log.Info("W", "k", hexutility.Encode(k), "v", hexutility.Encode(v), "c", count)
+		k, v, err = c.NextDup()
+		if err != nil {
+			return err
+		}
+		if k == nil {
+			k, v, err = c.NextNoDup()
+			if err != nil {
+				return err
+			}
+			log.Info("D")
+		}
+	}
+
+	return nil
 }
 
 type OtterscanAPIImpl struct {
