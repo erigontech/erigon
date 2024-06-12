@@ -71,7 +71,7 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, signedBlock *clty
 	return nil
 }
 
-func ProcessBlindedBlock(impl BlockProcessor, s abstract.BeaconState, signedBlock *cltypes.SignedBlindedBeaconBlock) error {
+func ProcessBlindedBlock(impl BlockProcessor, s abstract.BeaconState, signedBlock *cltypes.SignedBlindedBeaconBlock, expectWithdrawals *solid.ListSSZ[*cltypes.Withdrawal]) error {
 	var (
 		block   = signedBlock.Block
 		version = s.Version()
@@ -93,12 +93,12 @@ func ProcessBlindedBlock(impl BlockProcessor, s abstract.BeaconState, signedBloc
 	}
 	// Process execution payload if enabled.
 	if version >= clparams.BellatrixVersion && executionEnabled(s, block.Body.ExecutionPayload.BlockHash) {
-		/*if s.Version() >= clparams.CapellaVersion {
+		if s.Version() >= clparams.CapellaVersion {
 			// Process withdrawals in the execution payload.
-			if err := impl.ProcessWithdrawals(s, block.Body.ExecutionPayload.Withdrawals); err != nil {
+			if err := impl.ProcessWithdrawals(s, expectWithdrawals); err != nil {
 				return fmt.Errorf("processBlock: failed to process withdrawals: %v", err)
 			}
-		}*/
+		}
 		parentHash := block.Body.ExecutionPayload.ParentHash
 		prevRandao := block.Body.ExecutionPayload.PrevRandao
 		time := block.Body.ExecutionPayload.Time

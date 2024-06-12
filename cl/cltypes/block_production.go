@@ -6,6 +6,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 )
 
 type BlindOrExecutionBeaconBlock struct {
@@ -17,6 +18,8 @@ type BlindOrExecutionBeaconBlock struct {
 	BeaconBody        *BeaconBody        `json:"-"`
 	BlindedBeaconBody *BlindedBeaconBody `json:"-"`
 	ExecutionValue    *big.Int           `json:"-"`
+	// ExpectedWithdrawals is only used as this block is representing a blinded block
+	ExpectedWithdrawals *solid.ListSSZ[*Withdrawal] `json:"-"`
 }
 
 func (b *BlindOrExecutionBeaconBlock) ToBlinded() *BlindedBeaconBlock {
