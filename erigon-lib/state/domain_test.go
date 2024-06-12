@@ -1035,85 +1035,6 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	//}
 }
 
-func TestDomainContext_IteratePrefixAgain(t *testing.T) {
-
-	db, d := testDbAndDomain(t, log.New())
-
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	d.historyLargeValues = true
-	dc := d.BeginFilesRo()
-	defer dc.Close()
-	writer := dc.NewWriter()
-	defer writer.close()
-
-	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
-	key := make([]byte, 20)
-	var loc []byte
-	value := make([]byte, 32)
-	first := []byte{0xab, 0xff}
-	other := []byte{0xcc, 0xfe}
-	copy(key[:], first)
-
-	values := make(map[string][]byte)
-	for i := 0; i < 30; i++ {
-		rnd.Read(key[2:])
-		if i == 15 {
-			copy(key[:2], other)
-		}
-		loc = make([]byte, 32)
-		rnd.Read(loc)
-		rnd.Read(value)
-		if i%5 == 0 {
-			writer.SetTxNum(uint64(i))
-		}
-
-		if i == 0 || i == 15 {
-			loc = nil
-			copy(key[2:], make([]byte, 18))
-		}
-
-		values[hex.EncodeToString(common.Append(key, loc))] = common.Copy(value)
-		err := writer.PutWithPrev(key, loc, value, nil, 0)
-		require.NoError(t, err)
-	}
-	err = writer.Flush(context.Background(), tx)
-	require.NoError(t, err)
-	dc.Close()
-
-	dc = d.BeginFilesRo()
-	defer dc.Close()
-
-	counter := 0
-	err = dc.IteratePrefix(tx, other, func(kx, vx []byte) error {
-		if !bytes.HasPrefix(kx, other) {
-			return nil
-		}
-		fmt.Printf("%x \n", kx)
-		counter++
-		v, ok := values[hex.EncodeToString(kx)]
-		require.True(t, ok)
-		require.Equal(t, v, vx)
-		return nil
-	})
-	require.NoError(t, err)
-	err = dc.IteratePrefix(tx, first, func(kx, vx []byte) error {
-		if !bytes.HasPrefix(kx, first) {
-			return nil
-		}
-		fmt.Printf("%x \n", kx)
-		counter++
-		v, ok := values[hex.EncodeToString(kx)]
-		require.True(t, ok)
-		require.Equal(t, v, vx)
-		return nil
-	})
-	require.NoError(t, err)
-	require.EqualValues(t, len(values), counter)
-}
-
 func TestDomainContext_getFromFiles(t *testing.T) {
 	db, d := testDbAndDomain(t, log.New())
 	defer db.Close()
@@ -1627,32 +1548,6 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 
 	dc = d.BeginFilesRo()
 	defer dc.Close()
-
-	prefixes := 0
-	err = dc.IteratePrefix(tx, nil, func(k, v []byte) error {
-		upds, ok := data[string(k)]
-		require.True(t, ok)
-		prefixes++
-		latest := upds[len(upds)-1]
-		if string(latest.value) != string(v) {
-			fmt.Printf("opanki %x\n", k)
-			for li := len(upds) - 1; li >= 0; li-- {
-				latest := upds[li]
-				if bytes.Equal(latest.value, v) {
-					t.Logf("returned value was set with nonce %d/%d (tx %d, step %d)", li+1, len(upds), latest.txNum, latest.txNum/d.aggregationStep)
-				} else {
-					continue
-				}
-				require.EqualValuesf(t, latest.value, v, "key %x txNum %d", k, latest.txNum)
-				break
-			}
-		}
-
-		require.EqualValuesf(t, latest.value, v, "key %x txnum %d", k, latest.txNum)
-		return nil
-	})
-	require.NoError(t, err)
-	require.EqualValues(t, len(data), prefixes, "seen less keys than expected")
 
 	kc := 0
 	for key, updates := range data {

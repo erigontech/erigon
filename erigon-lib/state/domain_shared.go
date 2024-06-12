@@ -1253,6 +1253,9 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(tx kv.Tx, cd *D
 	if err != nil {
 		return 0, 0, nil, err
 	}
+	if len(state) < 16 {
+		return 0, 0, nil, nil
+	}
 
 	txNum, blockNum = _decodeTxBlockNums(state)
 	return blockNum, txNum, state, nil
