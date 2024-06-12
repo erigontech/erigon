@@ -366,9 +366,6 @@ func (tx *AppendableRoTx) Get(ts uint64, dbtx kv.Tx) ([]byte, bool, error) {
 func (tx *AppendableRoTx) Append(ts uint64, v []byte, dbtx kv.RwTx) error {
 	return dbtx.Put(tx.ap.table, hexutility.EncodeTs(ts), v)
 }
-func (tx *AppendableRoTx) delete(ts uint64, dbtx kv.RwTx) error {
-	return dbtx.Delete(tx.ap.table, hexutility.EncodeTs(ts))
-}
 
 func (tx *AppendableRoTx) getFromFiles(ts uint64) (v []byte, ok bool) {
 	i, ok := tx.fileByTS(ts)
