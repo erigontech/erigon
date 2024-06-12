@@ -356,8 +356,8 @@ func (tx *AppendableRoTx) Files() (res []string) {
 	return res
 }
 
-func (tx *AppendableRoTx) Get(ts uint64, dbtx kv.Tx) ([]byte, bool, error) {
-	v, ok := tx.getFromFiles(ts)
+func (tx *AppendableRoTx) Get(ts uint64, dbtx kv.Tx) (v []byte, ok bool, err error) {
+	v, ok = tx.getFromFiles(ts)
 	if ok {
 		return v, true, nil
 	}

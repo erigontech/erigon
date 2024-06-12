@@ -130,18 +130,23 @@ func TestAppendableCollationBuild(t *testing.T) {
 	t.Run("scan files", func(t *testing.T) {
 		require := require.New(t)
 
+		require.Equal(5, ii.dirtyFiles.Len())
+		require.Equal(5, len(ii._visibleFiles))
+
 		// Recreate to scan the files
-		var err error
-		salt := uint32(1)
-		cfg := AppendableCfg{Salt: &salt, Dirs: ii.cfg.Dirs, DB: db, CanonicalMarkersTable: kv.HeaderCanonical, iters: ii.cfg.iters}
-		ii, err = NewAppendable(cfg, ii.aggregationStep, ii.filenameBase, ii.table, nil, log.New())
+		ii, err := NewAppendable(ii.cfg, ii.aggregationStep, ii.filenameBase, ii.table, nil, log.New())
 		require.NoError(err)
 		defer ii.Close()
+		err = ii.OpenFolder(true)
+		require.NoError(err)
+		require.Equal(1, ii.dirtyFiles.Len())
 
-		mergeAppendable(t, db, ii, txs)
+		//mergeAppendable(t, db, ii, txs)
 
 		ic := ii.BeginFilesRo()
 		defer ic.Close()
+
+		require.Equal(1, len(ii._visibleFiles))
 
 		tx, err := db.BeginRo(ctx)
 		require.NoError(err)
@@ -149,6 +154,26 @@ func TestAppendableCollationBuild(t *testing.T) {
 
 		checkAppendableGet(t, tx, ic, txs)
 	})
+
+	t.Run("OpenFolder", func(t *testing.T) {
+		require := require.New(t)
+
+		list := ii._visibleFiles
+		require.NotEmpty(list)
+		ff := list[len(list)-1]
+		fn := ff.src.decompressor.FilePath()
+		ii.Close()
+
+		err := os.Remove(fn)
+		require.NoError(err)
+		err = os.WriteFile(fn, make([]byte, 33), 0644)
+		require.NoError(err)
+
+		err = ii.OpenFolder(true)
+		require.NoError(err)
+		ii.Close()
+	})
+
 }
 
 func filledAppendable(tb testing.TB, logger log.Logger) (kv.RwDB, *Appendable, uint64) {
@@ -338,25 +363,4 @@ func TestAppendableCtxFiles(t *testing.T) {
 
 	require.Equal(t, 480, int(visibleFiles[2].startTxNum))
 	require.Equal(t, 512, int(visibleFiles[2].endTxNum))
-}
-
-func TestAppendable_OpenFolder(t *testing.T) {
-	db, ii, txs := filledAppendable(t, log.New())
-
-	mergeAppendable(t, db, ii, txs)
-
-	list := ii._visibleFiles
-	require.NotEmpty(t, list)
-	ff := list[len(list)-1]
-	fn := ff.src.decompressor.FilePath()
-	ii.Close()
-
-	err := os.Remove(fn)
-	require.NoError(t, err)
-	err = os.WriteFile(fn, make([]byte, 33), 0644)
-	require.NoError(t, err)
-
-	err = ii.OpenFolder(true)
-	require.NoError(t, err)
-	ii.Close()
 }
