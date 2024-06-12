@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon-lib
 go 1.21
 
 require (
-	github.com/erigontech/mdbx-go v0.38.0
+	github.com/erigontech/mdbx-go v0.38.1-0.20240612080356-6f9a27c0dbed
 	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240610035052-3dc3004df7a0
 	github.com/ledgerwatch/interfaces v0.0.0-20240517122128-635f85ab7b28
 	github.com/ledgerwatch/log/v3 v3.9.0
@@ -50,8 +50,10 @@ require (
 )
 
 require (
+	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b // indirect
 	github.com/cespare/xxhash v1.1.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
+	github.com/ianlancetaylor/cgosymbolizer v0.0.0-20240503222823-736c933a666d // indirect
 	github.com/opencontainers/runtime-spec v1.2.0 // indirect
 	github.com/pion/udp v0.1.4 // indirect
 	golang.org/x/mod v0.17.0 // indirect
