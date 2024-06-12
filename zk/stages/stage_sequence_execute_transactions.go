@@ -23,6 +23,7 @@ import (
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
 	"errors"
 	"github.com/ledgerwatch/erigon/zk/constants"
+	"encoding/binary"
 )
 
 func getNextPoolTransactions(cfg SequenceBlockCfg, executionAt, forkId uint64, alreadyYielded mapset.Set[[32]byte]) ([]types.Transaction, error) {
@@ -65,36 +66,47 @@ LOOP:
 	return transactions, err
 }
 
-func getNextL1BatchData(batchNumber uint64, forkId uint64, hermezDb *hermez_db.HermezDb) ([]zktx.DecodedBatchL2Data, common.Address, common.Hash, bool, error) {
+type nextBatchL1Data struct {
+	DecodedData     []zktx.DecodedBatchL2Data
+	Coinbase        common.Address
+	L1InfoRoot      common.Hash
+	IsWorkRemaining bool
+	LimitTimestamp  uint64
+}
+
+func getNextL1BatchData(batchNumber uint64, forkId uint64, hermezDb *hermez_db.HermezDb) (nextBatchL1Data, error) {
+	nextData := nextBatchL1Data{}
 	// we expect that the batch we're going to load in next should be in the db already because of the l1 block sync
 	// stage, if it is not there we need to panic as we're in a bad state
 	batchL2Data, err := hermezDb.GetL1BatchData(batchNumber)
 	if err != nil {
-		return nil, common.Address{}, common.Hash{}, true, err
+		return nextData, err
 	}
 
 	if len(batchL2Data) == 0 {
 		// end of the line for batch recovery so return empty
-		return nil, common.Address{}, common.Hash{}, false, nil
+		return nextData, nil
 	}
 
-	coinbase := common.BytesToAddress(batchL2Data[:length.Addr])
-	l1InfoRoot := common.BytesToHash(batchL2Data[length.Addr : length.Addr+length.Hash])
-	batchL2Data = batchL2Data[length.Addr+length.Hash:]
+	nextData.Coinbase = common.BytesToAddress(batchL2Data[:length.Addr])
+	nextData.L1InfoRoot = common.BytesToHash(batchL2Data[length.Addr : length.Addr+length.Hash])
+	tsBytes := batchL2Data[length.Addr+length.Hash : length.Addr+length.Hash+8]
+	nextData.LimitTimestamp = binary.BigEndian.Uint64(tsBytes)
+	batchL2Data = batchL2Data[length.Addr+length.Hash+8:]
 
-	decodedBlockData, err := zktx.DecodeBatchL2Blocks(batchL2Data, forkId)
+	nextData.DecodedData, err = zktx.DecodeBatchL2Blocks(batchL2Data, forkId)
 	if err != nil {
-		return nil, common.Address{}, common.Hash{}, true, err
+		return nextData, err
 	}
 
 	// no data means no more work to do - end of the line
-	if len(decodedBlockData) == 0 {
-		return nil, common.Address{}, common.Hash{}, false, nil
+	if len(nextData.DecodedData) == 0 {
+		return nextData, nil
 	}
 
-	isWorkRemaining := true
+	nextData.IsWorkRemaining = true
 	transactionsInBatch := 0
-	for _, batch := range decodedBlockData {
+	for _, batch := range nextData.DecodedData {
 		transactionsInBatch += len(batch.Transactions)
 	}
 	if transactionsInBatch == 0 {
@@ -102,14 +114,14 @@ func getNextL1BatchData(batchNumber uint64, forkId uint64, hermezDb *hermez_db.H
 		// highest known batch number to see if we have work to do still
 		highestKnown, err := hermezDb.GetLastL1BatchData()
 		if err != nil {
-			return nil, common.Address{}, common.Hash{}, true, err
+			return nextData, err
 		}
 		if batchNumber >= highestKnown {
-			isWorkRemaining = false
+			nextData.IsWorkRemaining = false
 		}
 	}
 
-	return decodedBlockData, coinbase, l1InfoRoot, isWorkRemaining, err
+	return nextData, err
 }
 
 func extractTransactionsFromSlot(slot types2.TxsRlp) ([]types.Transaction, error) {

@@ -110,12 +110,18 @@ func CatchupDatastream(logPrefix string, tx kv.RwTx, stream *datastreamer.Stream
 
 	// write genesis if we have no data in the stream yet
 	if previousProgress == 0 {
-		genesis, err := rawdb.ReadBlockByNumber(tx, 0)
-		if err != nil {
-			return 0, err
-		}
-		if err = server.WriteGenesisToStream(genesis, reader, tx, stream, srv, chainId); err != nil {
-			return 0, err
+		// a quick check that we haven't written anything to the stream yet.  Stage progress is a little misleading
+		// for genesis as we are in fact at block 0 here!  Getting the header has some performance overhead, so
+		// we only want to do this when we know the previous progress is 0.
+		header := stream.GetHeader()
+		if header.TotalEntries == 0 {
+			genesis, err := rawdb.ReadBlockByNumber(tx, 0)
+			if err != nil {
+				return 0, err
+			}
+			if err = server.WriteGenesisToStream(genesis, reader, tx, stream, srv, chainId); err != nil {
+				return 0, err
+			}
 		}
 	}
 
