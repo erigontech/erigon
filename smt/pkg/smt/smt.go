@@ -56,7 +56,7 @@ type SMT struct {
 }
 
 type RoSMT struct {
-	Db           RoDB
+	DbRo         RoDB
 	clearUpMutex sync.Mutex
 }
 
@@ -82,14 +82,14 @@ func NewRoSMT(database RoDB) *RoSMT {
 	}
 
 	return &RoSMT{
-		Db: database,
+		DbRo: database,
 	}
 }
 
 func (s *RoSMT) LastRoot() *big.Int {
 	s.clearUpMutex.Lock()
 	defer s.clearUpMutex.Unlock()
-	lr, err := s.Db.GetLastRoot()
+	lr, err := s.DbRo.GetLastRoot()
 	if err != nil {
 		panic(err)
 	}
@@ -565,7 +565,7 @@ func (s *SMT) hashcalc(in [8]uint64, capacity [4]uint64) ([4]uint64, error) {
 }
 
 func (s *RoSMT) getLastRoot() (utils.NodeKey, error) {
-	or, err := s.Db.GetLastRoot()
+	or, err := s.DbRo.GetLastRoot()
 	if err != nil {
 		return utils.NodeKey{}, err
 	}
@@ -579,13 +579,13 @@ func (s *SMT) setLastRoot(newRoot utils.NodeKey) error {
 // Utility functions for debugging
 
 func (s *RoSMT) PrintDb() {
-	if debugDB, ok := s.Db.(DebuggableDB); ok {
+	if debugDB, ok := s.DbRo.(DebuggableDB); ok {
 		debugDB.PrintDb()
 	}
 }
 
 func (s *RoSMT) PrintTree() {
-	if debugDB, ok := s.Db.(DebuggableDB); ok {
+	if debugDB, ok := s.DbRo.(DebuggableDB); ok {
 		data := debugDB.GetDb()
 		str, err := json.Marshal(data)
 		if err != nil {
@@ -667,7 +667,7 @@ depths are 0 based
 0 means either only root leaf or empty tree
 */
 func (s *RoSMT) GetDepth() int {
-	depth, err := s.Db.GetDepth()
+	depth, err := s.DbRo.GetDepth()
 	if err != nil {
 		return 0
 	}
@@ -693,7 +693,7 @@ func (s *RoSMT) traverse(ctx context.Context, node *big.Int, action TraverseActi
 
 	ky := utils.ScalarToRoot(node)
 
-	nodeValue, err := s.Db.Get(ky)
+	nodeValue, err := s.DbRo.Get(ky)
 
 	if err != nil {
 		return err

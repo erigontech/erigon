@@ -7,18 +7,22 @@ import (
 
 	"github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
+	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/eth/tracers"
+	"github.com/ledgerwatch/erigon/rpc"
 	db2 "github.com/ledgerwatch/erigon/smt/pkg/db"
+	"github.com/ledgerwatch/erigon/smt/pkg/smt"
 
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/smt/pkg/smt"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
@@ -347,8 +351,8 @@ func (api *ZkEvmAPIImpl) TraceTransactionCounters(ctx context.Context, hash comm
 		return err
 	}
 
-	txCounters := vm.NewTransactionCounter(txn, int(smtDepth), false)
-	batchCounters := vm.NewBatchCounterCollector(int(smtDepth), uint16(forkId), false)
+	txCounters := vm.NewTransactionCounter(txn, smtDepth, false)
+	batchCounters := vm.NewBatchCounterCollector(smtDepth, uint16(forkId), false)
 	if _, err = batchCounters.AddNewTransactionCounters(txCounters); err != nil {
 		stream.WriteNil()
 		return err
@@ -384,4 +388,215 @@ func getSmtDepth(hermezDb *hermez_db.HermezDbReader, blockNum uint64, config *tr
 	}
 
 	return smtDepth, nil
+}
+
+// implements zkevm_getBatchCountersByNumber - returns the batch counters for a given batch number
+func (api *ZkEvmAPIImpl) GetBatchCountersByNumber(ctx context.Context, batchNumRpc rpc.BlockNumber) (res json.RawMessage, err error) {
+	var (
+		dbtx              kv.Tx
+		chainConfig       *chain.Config
+		batchBlockNumbers []uint64
+		latestbatch       bool
+		smtDepth          int
+		batchNum,
+		forkId,
+		earliestBlockNum,
+		latestBlockNum uint64
+	)
+
+	// setup env up until the batch
+	if dbtx, err = api.db.BeginRo(ctx); err != nil {
+		return nil, err
+	}
+	defer dbtx.Rollback()
+
+	// get batch number from rpc
+	if batchNum, _, err = rpchelper.GetBatchNumber(batchNumRpc, dbtx, api.ethApi.filters); err != nil {
+		return nil, err
+	}
+
+	roHermezDb := hermez_db.NewHermezDbReader(dbtx)
+	if forkId, err = roHermezDb.GetForkId(batchNum); err != nil {
+		return nil, err
+	}
+
+	// get the block range to execute
+	if batchBlockNumbers, err = roHermezDb.GetL2BlockNosByBatch(batchNum); err != nil {
+		return nil, err
+	}
+
+	// get the earliest and latest block number
+	for _, blockNum := range batchBlockNumbers {
+		if earliestBlockNum == 0 || blockNum < earliestBlockNum {
+			earliestBlockNum = blockNum
+		}
+		if blockNum > latestBlockNum {
+			latestBlockNum = blockNum
+		}
+	}
+
+	// if we've pruned this history away for this block then just return early
+	// to save any red herring errors
+	if err = api.ethApi.BaseAPI.checkPruneHistory(dbtx, latestBlockNum); err != nil {
+		return nil, err
+	}
+
+	if chainConfig, err = api.ethApi.chainConfig(dbtx); err != nil {
+		return nil, err
+	}
+	engine := api.ethApi.engine()
+
+	// setup counters
+	if smtDepth, err = getSmtDepth(roHermezDb, earliestBlockNum, nil); err != nil {
+		return nil, err
+	}
+
+	batchCounters := vm.NewBatchCounterCollector(smtDepth, uint16(forkId), false)
+
+	var (
+		block                      *types.Block
+		stateReader                state.StateReader
+		collected                  vm.Counters
+		receipts                   types.Receipts
+		blockGasUsed, totalGasUsed uint64
+	)
+
+	for i, blockNum := range batchBlockNumbers {
+		//get block with senders
+		if block, err = api.ethApi.blockByNumberWithSenders(dbtx, blockNum); err != nil {
+			return nil, err
+		}
+		if block == nil {
+			return nil, fmt.Errorf("could not find block %d", blockNum)
+		}
+
+		isLatestBlock := i == len(batchBlockNumbers)-1 && latestbatch
+
+		canBlockNumber := blockNum - 1
+		if blockNum == 0 {
+			canBlockNumber = 0
+		}
+
+		if stateReader, err = rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, canBlockNumber, isLatestBlock, 0, api.ethApi.stateCache, api.ethApi.historyV3(dbtx), chainConfig.ChainName); err != nil {
+			return nil, err
+		}
+
+		header := block.Header()
+		ibs := state.New(stateReader)
+		blockCtx := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), engine, nil, nil)
+		rules := chainConfig.Rules(blockNum, header.Time)
+		signer := types.MakeSigner(chainConfig, blockNum)
+		if receipts, err = rawdb.ReadReceiptsByHash(dbtx, header.Hash()); err != nil {
+			return nil, err
+		}
+		// execute blocks
+		var txGasUsed uint64
+		for _, tx := range block.Transactions() {
+			if txGasUsed, err = execTransaction(tx, batchCounters, smtDepth, ibs, signer, header, rules, chainConfig, blockCtx, receipts); err != nil {
+				return nil, err
+			}
+			blockGasUsed += txGasUsed
+		}
+
+		totalGasUsed += blockGasUsed
+	}
+
+	if collected, err = batchCounters.CombineCollectors(); err != nil {
+		return nil, err
+	}
+
+	return populateBatchCounters(&collected, smtDepth, batchNum, earliestBlockNum, latestBlockNum, totalGasUsed)
+}
+
+func execTransaction(
+	tx types.Transaction,
+	batchCounters *vm.BatchCounterCollector,
+	smtDepth int,
+	ibs *state.IntraBlockState,
+	signer *types.Signer,
+	header *types.Header,
+	rules *chain.Rules,
+	chainConfig *chain.Config,
+	blockCtx evmtypes.BlockContext,
+	receipts types.Receipts,
+) (gasUsed uint64, err error) {
+	var (
+		msg        core.Message
+		execResult *core.ExecutionResult
+	)
+	txCounters := vm.NewTransactionCounter(tx, smtDepth, false)
+
+	if _, err = batchCounters.AddNewTransactionCounters(txCounters); err != nil {
+		return 0, err
+	}
+
+	if msg, err = tx.AsMessage(*signer, header.BaseFee, rules); err != nil {
+		return 0, err
+	}
+	zkConfig := vm.ZkConfig{Config: vm.Config{NoBaseFee: true}, CounterCollector: txCounters.ExecutionCounters()}
+	evm := vm.NewZkEVM(blockCtx, core.NewEVMTxContext(msg), ibs, chainConfig, zkConfig)
+	gp := new(core.GasPool).AddGas(msg.Gas())
+	ibs.Prepare(tx.Hash(), header.Hash(), 0)
+
+	if execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */); err != nil {
+		return 0, err
+	}
+
+	// checks to see if we executed txs correctly
+	receiptForTx := receipts.ReceiptForTx(tx.Hash())
+	if receiptForTx == nil {
+		return 0, fmt.Errorf("receipt not found for tx %s", tx.Hash().String())
+	}
+
+	if execResult == nil {
+		return 0, fmt.Errorf("execResult is nil")
+	}
+
+	if (execResult.Err == nil) != (receiptForTx.Status == 1) {
+		return 0, fmt.Errorf("execResult error and receipt status mismatch")
+	}
+
+	return execResult.UsedGas, nil
+}
+
+type batchCountersResponse struct {
+	SmtDepth       int              `json:"smtDepth"`
+	BatchNumber    uint64           `json:"batchNumber"`
+	BlockFrom      uint64           `json:"blockFrom"`
+	BlockTo        uint64           `json:"blockTo"`
+	CountersUsed   combinecCounters `json:"countersUsed"`
+	CoutnersLimits combinecCounters `json:"countersLimits"`
+}
+
+func populateBatchCounters(collected *vm.Counters, smtDepth int, batchNum, blockFrom, blockTo, totalGasUsed uint64) (jsonRes json.RawMessage, err error) {
+
+	res := batchCountersResponse{
+		SmtDepth:    smtDepth,
+		BatchNumber: batchNum,
+		BlockFrom:   blockFrom,
+		BlockTo:     blockTo,
+		CountersUsed: combinecCounters{
+			Gas:              totalGasUsed,
+			KeccakHashes:     collected.GetKeccakHashes().Used(),
+			Poseidonhashes:   collected.GetPoseidonHashes().Used(),
+			PoseidonPaddings: collected.GetPoseidonPaddings().Used(),
+			MemAligns:        collected.GetMemAligns().Used(),
+			Arithmetics:      collected.GetArithmetics().Used(),
+			Binaries:         collected.GetBinaries().Used(),
+			Steps:            collected.GetSteps().Used(),
+			SHA256hashes:     collected.GetSHA256Hashes().Used(),
+		},
+		CoutnersLimits: combinecCounters{
+			KeccakHashes:     collected.GetKeccakHashes().Limit(),
+			Poseidonhashes:   collected.GetPoseidonHashes().Limit(),
+			PoseidonPaddings: collected.GetPoseidonPaddings().Limit(),
+			MemAligns:        collected.GetMemAligns().Limit(),
+			Arithmetics:      collected.GetArithmetics().Limit(),
+			Binaries:         collected.GetBinaries().Limit(),
+			Steps:            collected.GetSteps().Limit(),
+			SHA256hashes:     collected.GetSHA256Hashes().Limit(),
+		},
+	}
+
+	return json.Marshal(res)
 }
