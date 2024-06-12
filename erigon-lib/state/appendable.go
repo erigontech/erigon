@@ -100,7 +100,7 @@ type AppendableCfg struct {
 }
 
 func NewAppendable(cfg AppendableCfg, aggregationStep uint64, filenameBase, table string, integrityCheck func(fromStep uint64, toStep uint64) bool, logger log.Logger) (*Appendable, error) {
-	if cfg.Dirs.SnapDomain == "" {
+	if cfg.Dirs.SnapHistory == "" {
 		panic("empty `dirs` varialbe")
 	}
 	ap := Appendable{
