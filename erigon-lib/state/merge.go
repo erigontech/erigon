@@ -73,18 +73,6 @@ func (ii *InvertedIndex) endIndexedTxNumMinimax(needFrozen bool) uint64 {
 	return _max
 }
 
-func (ap *Appendable) endIndexedTxNumMinimax(needFrozen bool) uint64 {
-	var _max uint64
-	ap.dirtyFiles.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			if item.index == nil || (needFrozen && !item.frozen) {
-				continue
-			}
-			_max = max(_max, item.endTxNum)
-		}
-		return true
-	})
-	return _max
 }
 func (h *History) endTxNumMinimax() uint64 {
 	if h.dontProduceHistoryFiles {
