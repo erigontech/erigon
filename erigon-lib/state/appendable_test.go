@@ -139,14 +139,16 @@ func TestAppendableCollationBuild(t *testing.T) {
 		defer ii.Close()
 		err = ii.OpenFolder(true)
 		require.NoError(err)
-		require.Equal(1, ii.dirtyFiles.Len())
+		require.Equal(5, ii.dirtyFiles.Len())
 
-		//mergeAppendable(t, db, ii, txs)
+		mergeAppendable(t, db, ii, txs)
+		require.Equal(5, ii.dirtyFiles.Len())
 
 		ic := ii.BeginFilesRo()
 		defer ic.Close()
 
-		require.Equal(1, len(ii._visibleFiles))
+		require.Equal(5, len(ii._visibleFiles))
+		require.Equal(5, len(ii._visibleFiles))
 
 		tx, err := db.BeginRo(ctx)
 		require.NoError(err)
