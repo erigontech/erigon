@@ -18,7 +18,8 @@ import (
 func TestFiltersDeadlock_Test(t *testing.T) {
 	t.Parallel()
 	logger := log.New()
-	f := rpchelper.New(context.TODO(), nil, nil, nil, func() {}, logger)
+	config := rpchelper.FiltersConfig{}
+	f := rpchelper.New(context.TODO(), config, nil, nil, nil, func() {}, logger)
 	crit := filters.FilterCriteria{
 		Addresses: nil,
 		Topics:    [][]libcommon.Hash{},
