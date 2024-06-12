@@ -127,20 +127,8 @@ func (ap *Appendable) apFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(ap.cfg.Dirs.SnapHistory, fmt.Sprintf("v1-%s.%d-%d.ap", ap.filenameBase, fromStep, toStep))
 }
 
-func (ap *Appendable) fileNamesOnDisk() (idx, hist, domain []string, err error) {
-	idx, err = filesFromDir(ap.cfg.Dirs.SnapIdx)
-	if err != nil {
-		return
-	}
-	hist, err = filesFromDir(ap.cfg.Dirs.SnapHistory)
-	if err != nil {
-		return
-	}
-	domain, err = filesFromDir(ap.cfg.Dirs.SnapDomain)
-	if err != nil {
-		return
-	}
-	return
+func (ap *Appendable) fileNamesOnDisk() ([]string, error) {
+	return filesFromDir(ap.cfg.Dirs.SnapHistory)
 }
 
 func (ap *Appendable) OpenList(fNames []string, readonly bool) error {
@@ -154,11 +142,11 @@ func (ap *Appendable) OpenList(fNames []string, readonly bool) error {
 }
 
 func (ap *Appendable) OpenFolder(readonly bool) error {
-	_, histFiles, _, err := ap.fileNamesOnDisk()
+	files, err := ap.fileNamesOnDisk()
 	if err != nil {
 		return err
 	}
-	return ap.OpenList(histFiles, readonly)
+	return ap.OpenList(files, readonly)
 }
 
 func (ap *Appendable) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
