@@ -376,6 +376,8 @@ func ReadBodyRLP(db kv.Tx, hash common.Hash, number uint64) rlp.RawValue {
 	}
 	return bodyRlp
 }
+
+// Deprecated: use readBodyForStorage
 func ReadStorageBodyRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawValue {
 	bodyRlp, err := db.GetOne(kv.BlockBody, dbutils.BlockBodyKey(number, hash))
 	if err != nil {
@@ -383,17 +385,17 @@ func ReadStorageBodyRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawVa
 	}
 	return bodyRlp
 }
-
-func ReadStorageBody(db kv.Getter, hash common.Hash, number uint64) (types.BodyForStorage, error) {
-	bodyRlp, err := db.GetOne(kv.BlockBody, dbutils.BlockBodyKey(number, hash))
+func readBodyForStorage(db kv.Getter, hash common.Hash, number uint64) (*types.BodyForStorage, error) {
+	data, err := db.GetOne(kv.BlockBody, dbutils.BlockBodyKey(number, hash))
 	if err != nil {
-		log.Error("ReadBodyRLP failed", "err", err)
+		return nil, err
 	}
 	bodyForStorage := new(types.BodyForStorage)
-	if err := rlp.DecodeBytes(bodyRlp, bodyForStorage); err != nil {
-		return types.BodyForStorage{}, err
+	err = rlp.DecodeBytes(data, bodyForStorage)
+	if err != nil {
+		return nil, fmt.Errorf("readBodyForStorage: %w, %d, %x", err, number, hash)
 	}
-	return *bodyForStorage, nil
+	return bodyForStorage, nil
 }
 
 func TxnByIdxInBlock(db kv.Getter, blockHash common.Hash, blockNum uint64, txIdxInBlock int) (types.Transaction, error) {
@@ -1020,24 +1022,20 @@ func WriteBlock(db kv.RwTx, block *types.Block) error {
 // doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
 // Returns false if there is nothing to prune
-func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (existBlocksToPrune bool, err error) {
-	existBlocksToPrune = true // assume there are blocks to prune
-
+func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int, err error) {
 	c, err := tx.Cursor(kv.Headers)
 	if err != nil {
-		return existBlocksToPrune, err
+		return deleted, err
 	}
 	defer c.Close()
 
 	// find first non-genesis block
 	firstK, _, err := c.Seek(hexutility.EncodeTs(1))
 	if err != nil {
-		return existBlocksToPrune, err
+		return deleted, err
 	}
 	if firstK == nil { //nothing to delete
-		existBlocksToPrune = false
-
-		return existBlocksToPrune, err
+		return deleted, err
 	}
 	blockFrom := binary.BigEndian.Uint64(firstK)
 	stopAtBlock := min(blockTo, blockFrom+uint64(blocksDeleteLimit))
@@ -1046,20 +1044,17 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (existBlocks
 
 	for k, _, err := c.Current(); k != nil; k, _, err = c.Next() {
 		if err != nil {
-			return existBlocksToPrune, err
+			return deleted, err
 		}
 
 		n := binary.BigEndian.Uint64(k)
 		if n >= stopAtBlock { // [from, to)
-			if stopAtBlock == blockTo { // in order to prevent situation when we quit the cycle before reaching blockTo
-				existBlocksToPrune = false // and think that there is nothing to prune but there is
-			}
 			break
 		}
 
 		b, err = ReadBodyForStorageByKey(tx, k)
 		if err != nil {
-			return false, err
+			return deleted, err
 		}
 		if b == nil {
 			log.Debug("PruneBlocks: block body not found", "height", n)
@@ -1068,7 +1063,7 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (existBlocks
 			for txID := b.BaseTxId; txID < b.BaseTxId+uint64(b.TxAmount); txID++ {
 				binary.BigEndian.PutUint64(txIDBytes, txID)
 				if err = tx.Delete(kv.EthTx, txIDBytes); err != nil {
-					return false, err
+					return deleted, err
 				}
 			}
 		}
@@ -1076,17 +1071,19 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (existBlocks
 		// for the next key and Delete below will end up deleting 1 more record than required
 		kCopy := common.Copy(k)
 		if err = tx.Delete(kv.Senders, kCopy); err != nil {
-			return false, err
+			return deleted, err
 		}
 		if err = tx.Delete(kv.BlockBody, kCopy); err != nil {
-			return false, err
+			return deleted, err
 		}
 		if err = tx.Delete(kv.Headers, kCopy); err != nil {
-			return false, err
+			return deleted, err
 		}
+
+		deleted++
 	}
 
-	return existBlocksToPrune, nil
+	return deleted, nil
 }
 
 func TruncateCanonicalChain(ctx context.Context, db kv.RwTx, from uint64) error {

@@ -21,14 +21,9 @@ import (
 
 type fetchSyncEventsType func(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error)
 
-type IDRange struct {
-	start, end uint64
-}
-
 type Bridge struct {
 	db                       *polygoncommon.Database
 	ready                    bool
-	eventMap                 map[uint64]IDRange // block num to eventID range
 	lastProcessedBlockNumber uint64
 	lastProcessedEventID     uint64
 
@@ -48,7 +43,6 @@ func NewBridge(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, f
 		log:                      logger,
 		borConfig:                borConfig,
 		fetchSyncEvents:          fetchSyncEvents,
-		eventMap:                 map[uint64]IDRange{},
 		lastProcessedBlockNumber: 0,
 		lastProcessedEventID:     0,
 		stateClientAddress:       libcommon.HexToAddress(borConfig.StateReceiverContract),
@@ -111,6 +105,7 @@ func (b *Bridge) Close() {
 
 // ProcessNewBlocks iterates through all blocks and constructs a map from block number to sync events
 func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) error {
+	eventMap := make(map[uint64]uint64)
 	for _, block := range blocks {
 		// check if block is start of span
 		if b.isSprintStart(block.NumberU64()) {
@@ -125,12 +120,17 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 
 		if lastDBID != 0 && lastDBID > b.lastProcessedEventID {
 			b.log.Debug(bridgeLogPrefix(fmt.Sprintf("Creating map for block %d, start ID %d, end ID %d", block.NumberU64(), b.lastProcessedEventID, lastDBID)))
-			b.eventMap[block.NumberU64()] = IDRange{b.lastProcessedEventID, lastDBID}
+			eventMap[block.NumberU64()] = b.lastProcessedEventID
 
 			b.lastProcessedEventID = lastDBID
 		}
 
 		b.lastProcessedBlockNumber = block.NumberU64()
+	}
+
+	err := StoreEventID(ctx, b.db, eventMap)
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -152,32 +152,22 @@ func (b *Bridge) Synchronize(ctx context.Context, tip *types.Header) error {
 
 // Unwind deletes map entries till tip
 func (b *Bridge) Unwind(ctx context.Context, tip *types.Header) error {
-	for k := range b.eventMap {
-		if k <= tip.Number.Uint64() {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-
-			delete(b.eventMap, k)
-		}
-	}
-
-	return nil
+	return PruneEventIDs(ctx, b.db, tip.Number.Uint64())
 }
 
 // GetEvents returns all sync events at blockNum
-func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) []*types.Message {
-	eventIDs, ok := b.eventMap[blockNum]
-	if !ok {
-		return []*types.Message{}
+func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
+	start, end, err := GetEventIDRange(ctx, b.db, blockNum)
+	if err != nil {
+		return nil, err
 	}
 
-	eventsRaw := make([]*types.Message, eventIDs.end-eventIDs.start+1)
+	eventsRaw := make([]*types.Message, end-start+1)
 
 	// get events from DB
-	events, err := GetEvents(ctx, b.db, eventIDs)
+	events, err := GetEvents(ctx, b.db, start, end)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 
 	b.log.Debug(bridgeLogPrefix(fmt.Sprintf("got %v events for block %v", len(events), blockNum)))
@@ -199,7 +189,7 @@ func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) []*types.Messag
 		eventsRaw = append(eventsRaw, &msg)
 	}
 
-	return eventsRaw
+	return eventsRaw, nil
 }
 
 // Helper functions
