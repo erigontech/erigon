@@ -428,10 +428,10 @@ func (a *Aggregator) BuildMissedIndices(ctx context.Context, workers int) error 
 			}
 		}()
 		for _, d := range a.d {
-			d.BuildMissedIndices(ctx, g, ps)
+			d.BuildMissedAccessors(ctx, g, ps)
 		}
 		for _, ii := range a.iis {
-			ii.BuildMissedIndices(ctx, g, ps)
+			ii.BuildMissedAccessors(ctx, g, ps)
 		}
 
 		if err := g.Wait(); err != nil {

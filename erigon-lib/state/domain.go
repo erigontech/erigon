@@ -561,7 +561,7 @@ const (
 // over storage of a given account
 type CursorItem struct {
 	c            kv.CursorDupSort
-	iter         btree2.MapIter[string, []byte]
+	iter         btree2.MapIter[string, dataWithPrevStep]
 	dg           ArchiveGetter
 	dg2          ArchiveGetter
 	btCursor     *Cursor
@@ -673,24 +673,24 @@ func (dt *DomainRoTx) DebugEFKey(k []byte) error {
 			if item.decompressor == nil {
 				continue
 			}
-			idx := item.index
-			if idx == nil {
+			accessor := item.index
+			if accessor == nil {
 				fPath := dt.d.efAccessorFilePath(item.startTxNum/dt.d.aggregationStep, item.endTxNum/dt.d.aggregationStep)
 				if dir.FileExist(fPath) {
 					var err error
-					idx, err = recsplit.OpenIndex(fPath)
+					accessor, err = recsplit.OpenIndex(fPath)
 					if err != nil {
 						_, fName := filepath.Split(fPath)
 						dt.d.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
 						continue
 					}
-					defer idx.Close()
+					defer accessor.Close()
 				} else {
 					continue
 				}
 			}
 
-			offset, ok := idx.GetReaderFromPool().Lookup(k)
+			offset, ok := accessor.GetReaderFromPool().Lookup(k)
 			if !ok {
 				continue
 			}
@@ -950,7 +950,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	}
 
 	if !UseBpsTree {
-		if err = d.buildMapIdx(ctx, step, step+1, valuesDecomp, ps); err != nil {
+		if err = d.buildAccessor(ctx, step, step+1, valuesDecomp, ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
 		}
 		valuesIdx, err = recsplit.OpenIndex(d.efAccessorFilePath(step, step+1))
@@ -985,7 +985,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	}, nil
 }
 
-func (d *Domain) buildMapIdx(ctx context.Context, fromStep, toStep uint64, data *seg.Decompressor, ps *background.ProgressSet) error {
+func (d *Domain) buildAccessor(ctx context.Context, fromStep, toStep uint64, data *seg.Decompressor, ps *background.ProgressSet) error {
 	idxPath := d.kvAccessorFilePath(fromStep, toStep)
 	cfg := recsplit.RecSplitArgs{
 		Enums:              false,
@@ -998,10 +998,10 @@ func (d *Domain) buildMapIdx(ctx context.Context, fromStep, toStep uint64, data 
 		Salt:       d.salt,
 		NoFsync:    d.noFsync,
 	}
-	return buildIndex(ctx, data, d.compression, idxPath, false, cfg, ps, d.logger)
+	return buildAccessor(ctx, data, d.compression, idxPath, false, cfg, ps, d.logger)
 }
 
-func (d *Domain) missedBtreeIdxFiles() (l []*filesItem) {
+func (d *Domain) missedBtreeAccessors() (l []*filesItem) {
 	d.dirtyFiles.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
@@ -1020,7 +1020,7 @@ func (d *Domain) missedBtreeIdxFiles() (l []*filesItem) {
 	})
 	return l
 }
-func (d *Domain) missedKviIdxFiles() (l []*filesItem) {
+func (d *Domain) missedAccessors() (l []*filesItem) {
 	d.dirtyFiles.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
@@ -1048,15 +1048,15 @@ func (d *Domain) missedKviIdxFiles() (l []*filesItem) {
 //	return l
 //}
 
-// BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
-func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
-	d.History.BuildMissedIndices(ctx, g, ps)
-	for _, item := range d.missedBtreeIdxFiles() {
+// BuildMissedAccessors - produce .efi/.vi/.kvi from .ef/.v/.kv
+func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
+	d.History.BuildMissedAccessors(ctx, g, ps)
+	for _, item := range d.missedBtreeAccessors() {
 		if !UseBpsTree {
 			continue
 		}
 		if item.decompressor == nil {
-			log.Warn(fmt.Sprintf("[dbg] BuildMissedIndices: item with nil decompressor %s %d-%d", d.filenameBase, item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep))
+			log.Warn(fmt.Sprintf("[dbg] BuildMissedAccessors: item with nil decompressor %s %d-%d", d.filenameBase, item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep))
 		}
 		item := item
 
@@ -1069,12 +1069,12 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 			return nil
 		})
 	}
-	for _, item := range d.missedKviIdxFiles() {
+	for _, item := range d.missedAccessors() {
 		if UseBpsTree {
 			continue
 		}
 		if item.decompressor == nil {
-			log.Warn(fmt.Sprintf("[dbg] BuildMissedIndices: item with nil decompressor %s %d-%d", d.filenameBase, item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep))
+			log.Warn(fmt.Sprintf("[dbg] BuildMissedAccessors: item with nil decompressor %s %d-%d", d.filenameBase, item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep))
 		}
 		item := item
 		g.Go(func() error {
@@ -1083,7 +1083,7 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 			}
 
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
-			err := d.buildMapIdx(ctx, fromStep, toStep, item.decompressor, ps)
+			err := d.buildAccessor(ctx, fromStep, toStep, item.decompressor, ps)
 			if err != nil {
 				return fmt.Errorf("build %s values recsplit index: %w", d.filenameBase, err)
 			}
@@ -1092,7 +1092,7 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 	}
 }
 
-func buildIndex(ctx context.Context, d *seg.Decompressor, compressed FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {
+func buildAccessor(ctx context.Context, d *seg.Decompressor, compressed FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {
 	_, fileName := filepath.Split(idxPath)
 	count := d.Count()
 	if !values {
