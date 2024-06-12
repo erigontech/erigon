@@ -157,22 +157,21 @@ func (ii *InvertedIndex) fileNamesOnDisk() (idx, hist, domain []string, err erro
 	return
 }
 
-func (ii *InvertedIndex) OpenList(fNames []string, readonly bool) error {
+func (ii *InvertedIndex) OpenList(fNames []string) error {
 	ii.closeWhatNotInList(fNames)
 	ii.scanStateFiles(fNames)
 	if err := ii.openFiles(); err != nil {
 		return fmt.Errorf("NewHistory.openFiles: %w, %s", err, ii.filenameBase)
 	}
-	_ = readonly // for future safety features. RPCDaemon must not delte files
 	return nil
 }
 
-func (ii *InvertedIndex) OpenFolder(readonly bool) error {
+func (ii *InvertedIndex) OpenFolder() error {
 	idxFiles, _, _, err := ii.fileNamesOnDisk()
 	if err != nil {
 		return err
 	}
-	return ii.OpenList(idxFiles, readonly)
+	return ii.OpenList(idxFiles)
 }
 
 func (ii *InvertedIndex) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {

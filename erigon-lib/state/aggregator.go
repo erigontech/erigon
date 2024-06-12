@@ -246,7 +246,7 @@ func (a *Aggregator) DisableFsync() {
 	}
 }
 
-func (a *Aggregator) OpenFolder(readonly bool) error {
+func (a *Aggregator) OpenFolder() error {
 	defer a.recalcVisibleFiles()
 
 	a.dirtyFilesLock.Lock()
@@ -260,12 +260,12 @@ func (a *Aggregator) OpenFolder(readonly bool) error {
 				return a.ctx.Err()
 			default:
 			}
-			return d.OpenFolder(readonly)
+			return d.OpenFolder()
 		})
 	}
 	for _, ii := range a.iis {
 		ii := ii
-		eg.Go(func() error { return ii.OpenFolder(readonly) })
+		eg.Go(func() error { return ii.OpenFolder() })
 	}
 	if err := eg.Wait(); err != nil {
 		return fmt.Errorf("OpenFolder: %w", err)
@@ -281,11 +281,11 @@ func (a *Aggregator) OpenList(files []string, readonly bool) error {
 	eg := &errgroup.Group{}
 	for _, d := range a.d {
 		d := d
-		eg.Go(func() error { return d.OpenFolder(readonly) })
+		eg.Go(func() error { return d.OpenFolder() })
 	}
 	for _, ii := range a.iis {
 		ii := ii
-		eg.Go(func() error { return ii.OpenFolder(readonly) })
+		eg.Go(func() error { return ii.OpenFolder() })
 	}
 	if err := eg.Wait(); err != nil {
 		return fmt.Errorf("OpenList: %w", err)
@@ -438,7 +438,7 @@ func (a *Aggregator) BuildMissedIndices(ctx context.Context, workers int) error 
 		if err := g.Wait(); err != nil {
 			return err
 		}
-		if err := a.OpenFolder(true); err != nil {
+		if err := a.OpenFolder(); err != nil {
 			return err
 		}
 	}
