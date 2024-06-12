@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	btree2 "github.com/tidwall/btree"
 	"math"
 	"path"
 	"path/filepath"
@@ -1190,17 +1191,7 @@ func (ii *InvertedIndex) integrateMergedDirtyFiles(outs []*filesItem, in *filesI
 			})
 		}
 	}
-	for _, out := range outs {
-		if out == nil {
-			panic("must not happen: " + ii.filenameBase)
-		}
-		ii.dirtyFiles.Delete(out)
-
-		if ii.filenameBase == traceFileLife {
-			ii.logger.Warn(fmt.Sprintf("[agg] mark can delete: %s, triggered by merge of: %s", out.decompressor.FileName(), in.decompressor.FileName()))
-		}
-		out.canDelete.Store(true)
-	}
+	deleteMergeFile(ii.dirtyFiles, outs)
 }
 func (ap *Appendable) integrateMergedDirtyFiles(outs []*filesItem, in *filesItem) {
 	if in != nil {
@@ -1220,19 +1211,9 @@ func (ap *Appendable) integrateMergedDirtyFiles(outs []*filesItem, in *filesItem
 			})
 		}
 	}
-	for _, out := range outs {
-		if out == nil {
-			panic("must not happen: " + ap.filenameBase)
-		}
-		out.closeFiles()
-		ap.dirtyFiles.Delete(out)
-
-		if ap.filenameBase == traceFileLife {
-			ap.logger.Warn(fmt.Sprintf("[agg] mark can delete: %s, triggered by merge of: %s", out.decompressor.FileName(), in.decompressor.FileName()))
-		}
-		out.canDelete.Store(true)
-	}
+	deleteMergeFile(ap.dirtyFiles, outs)
 }
+
 func (h *History) integrateMergedFiles(indexOuts, historyOuts []*filesItem, indexIn, historyIn *filesItem) {
 	h.InvertedIndex.integrateMergedDirtyFiles(indexOuts, indexIn)
 	//TODO: handle collision
@@ -1253,12 +1234,23 @@ func (h *History) integrateMergedFiles(indexOuts, historyOuts []*filesItem, inde
 			})
 		}
 	}
-	for _, out := range historyOuts {
-		if out == nil {
-			panic("must not happen: " + h.filenameBase)
+	deleteMergeFile(h.dirtyFiles, historyOuts)
+}
+
+func deleteMergeFile(dirtyFiles *btree2.BTreeG[*filesItem], outs []*filesItem) {
+	for _, out := range outs {
+		//if out == nil {
+		//	panic("must not happen: " + ap.filenameBase)
+		//}
+		dirtyFiles.Delete(out)
+
+		// if merged file not visible for any alive reader (even for us): can remove it immediately
+		// otherwise: mark it as `canDelete=true` and last reader of this file - will remove it inside `aggRoTx.Close()`
+		if out.refcount.Load() == 0 {
+			out.closeFilesAndRemove()
+		} else {
+			out.canDelete.Store(true)
 		}
-		h.dirtyFiles.Delete(out)
-		out.canDelete.Store(true)
 	}
 }
 
