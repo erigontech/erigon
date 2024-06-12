@@ -133,7 +133,7 @@ func (s *CanonicalTxnIds) advance() (err error) {
 		s.endOfCurrentBlock = body.BaseTxId + uint64(body.TxCount) // 2 system txs already included in TxAmount
 	} else {
 		s.currentTxNum = int(body.BaseTxId) + int(body.TxCount) - 1 // 2 system txs already included in TxAmount
-		s.endOfCurrentBlock = body.BaseTxId - 1                      // and one of them is baseTxId
+		s.endOfCurrentBlock = body.BaseTxId - 1                     // and one of them is baseTxId
 	}
 	return nil
 }
