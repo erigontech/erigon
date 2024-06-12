@@ -721,7 +721,7 @@ func TestInvIndex_OpenFolder(t *testing.T) {
 	err = os.WriteFile(fn, make([]byte, 33), 0644)
 	require.NoError(t, err)
 
-	err = ii.OpenFolder(true)
+	err = ii.OpenFolder()
 	require.NoError(t, err)
 	ii.Close()
 }
