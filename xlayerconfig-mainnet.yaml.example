@@ -16,8 +16,8 @@ zkevm.address-ger-manager: "0x580bda1e7A0CFAe92Fa7F6c20A3794F169CE3CFb"
 
 zkevm.l1-rollup-id: 3
 zkevm.l1-first-block: 19218658
-zkevm.l1-block-range: 100
-zkevm.l1-query-delay: 6000
+zkevm.l1-block-range: 2000
+zkevm.l1-query-delay: 1000
 zkevm.rpc-ratelimit: 250
 zkevm.datastream-version: 2
 
