@@ -341,25 +341,21 @@ func (I *impl) ProcessWithdrawals(
 }
 
 // ProcessExecutionPayload sets the latest payload header accordinly.
-func (I *impl) ProcessExecutionPayload(s abstract.BeaconState, payload *cltypes.Eth1Block) error {
+func (I *impl) ProcessExecutionPayload(s abstract.BeaconState, parentHash, prevRandao common.Hash, time uint64, payloadHeader *cltypes.Eth1Header) error {
 	if state.IsMergeTransitionComplete(s) {
-		if payload.ParentHash != s.LatestExecutionPayloadHeader().BlockHash {
+		if parentHash != s.LatestExecutionPayloadHeader().BlockHash {
 			return fmt.Errorf("ProcessExecutionPayload: invalid eth1 chain. mismatching parent")
 		}
 	}
-	if payload.PrevRandao != s.GetRandaoMixes(state.Epoch(s)) {
+	if prevRandao != s.GetRandaoMixes(state.Epoch(s)) {
 		return fmt.Errorf(
 			"ProcessExecutionPayload: randao mix mismatches with mix digest, expected %x, got %x",
 			s.GetRandaoMixes(state.Epoch(s)),
-			payload.PrevRandao,
+			prevRandao,
 		)
 	}
-	if payload.Time != state.ComputeTimestampAtSlot(s, s.Slot()) {
+	if time != state.ComputeTimestampAtSlot(s, s.Slot()) {
 		return fmt.Errorf("ProcessExecutionPayload: invalid Eth1 timestamp")
-	}
-	payloadHeader, err := payload.PayloadHeader()
-	if err != nil {
-		return err
 	}
 	s.SetLatestExecutionPayloadHeader(payloadHeader)
 	return nil

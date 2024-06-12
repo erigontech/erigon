@@ -38,7 +38,13 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, signedBlock *clty
 			}
 		}
 		// Process the execution payload.
-		if err := impl.ProcessExecutionPayload(s, block.Body.ExecutionPayload); err != nil {
+		header, err := block.Body.ExecutionPayload.PayloadHeader()
+		if err != nil {
+			return fmt.Errorf("processBlock: failed to extract execution payload header: %v", err)
+		}
+		if err := impl.ProcessExecutionPayload(s, block.Body.ExecutionPayload.ParentHash,
+			block.Body.ExecutionPayload.PrevRandao,
+			block.Body.ExecutionPayload.Time, header); err != nil {
 			return fmt.Errorf("processBlock: failed to process execution payload: %v", err)
 		}
 	}
@@ -70,8 +76,7 @@ func ProcessBlindedBlock(impl BlockProcessor, s abstract.BeaconState, signedBloc
 		block   = signedBlock.Block
 		version = s.Version()
 		// Process the execution payload. Note that the execution payload does not contain txs and withdrawals.
-		partialExecutionBody    = block.Body.Full(nil, nil)
-		partialExecutionPayload = partialExecutionBody.ExecutionPayload
+		partialExecutionBody = block.Body.Full(nil, nil)
 	)
 
 	// Check the state version is correct.
@@ -94,7 +99,11 @@ func ProcessBlindedBlock(impl BlockProcessor, s abstract.BeaconState, signedBloc
 				return fmt.Errorf("processBlock: failed to process withdrawals: %v", err)
 			}
 		}*/
-		if err := impl.ProcessExecutionPayload(s, partialExecutionPayload); err != nil {
+		parentHash := block.Body.ExecutionPayload.ParentHash
+		prevRandao := block.Body.ExecutionPayload.PrevRandao
+		time := block.Body.ExecutionPayload.Time
+		header := block.Body.ExecutionPayload
+		if err := impl.ProcessExecutionPayload(s, parentHash, prevRandao, time, header); err != nil {
 			return fmt.Errorf("processBlock: failed to process execution payload: %v", err)
 		}
 	}
