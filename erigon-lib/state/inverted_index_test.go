@@ -548,7 +548,7 @@ func TestInvIndexScanFiles(t *testing.T) {
 	ii, err = NewInvertedIndex(cfg, ii.aggregationStep, ii.filenameBase, ii.indexKeysTable, ii.indexTable, nil, logger)
 	require.NoError(err)
 	defer ii.Close()
-	err = ii.OpenFolder(true)
+	err = ii.OpenFolder()
 	require.NoError(err)
 
 	mergeInverted(t, db, ii, txs)
