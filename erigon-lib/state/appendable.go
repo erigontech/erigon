@@ -551,15 +551,6 @@ func (tx *AppendableRoTx) smallestTxNum(dbtx kv.Tx) uint64 {
 	return math.MaxUint64
 }
 
-func (tx *AppendableRoTx) highestTxNum(dbtx kv.Tx) uint64 {
-	lst, _ := kv.LastKey(dbtx, tx.ap.table)
-	if len(lst) > 0 {
-		lstInDb := binary.BigEndian.Uint64(lst)
-		return max(lstInDb, 0)
-	}
-	return 0
-}
-
 func (tx *AppendableRoTx) CanPrune(dbtx kv.Tx) bool {
 	return tx.smallestTxNum(dbtx) < tx.maxTxNumInFiles(false)
 }
@@ -731,10 +722,6 @@ func (ap *Appendable) collate(ctx context.Context, step uint64, roTx kv.Tx) (App
 	return coll, nil
 }
 
-func (ap *Appendable) stepsRangeInDBAsStr(tx kv.Tx) string {
-	a1, a2 := ap.stepsRangeInDB(tx)
-	return fmt.Sprintf("%s: %.1f", ap.filenameBase, a2-a1)
-}
 func (ap *Appendable) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 	fst, _ := kv.FirstKey(tx, ap.table)
 	if len(fst) > 0 {
