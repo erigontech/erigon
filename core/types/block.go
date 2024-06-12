@@ -640,43 +640,42 @@ type RawBody struct {
 	Requests     Requests
 }
 
-// Represents original transaction number in blockchain (do not includes system txs in block)
-type BaseTxID uint64
-
-func CapBaseTxID(tx int) uint64 {
-	return uint64(tx) + 2
-}
-
-func (b BaseTxID) U64() uint64 { return uint64(b) }
-
-func (b BaseTxID) Bytes() []byte { return hexutility.EncodeTs(uint64(b)) }
-
-// First returns first non-system tx number in block
-// as if basetxId is first original transaction in block
-func (b BaseTxID) First() uint64 { return uint64(b + 1) }
-
-// At returns tx number at block position `ti`.
-func (b BaseTxID) At(ti int) uint64 { return b.First() + uint64(ti) }
-
-// Returns last non-system tx number in block. txns is length of block transactions (does not include system txs)
-// From the other hand, TxAmount includes 2 system txs as well as all txs in block.
-func (b BaseTxID) Last(txns int) uint64 { return b.First() + uint64(txns) }
-
-// FirstSystemTx returns first system tx number in block
-func (b BaseTxID) FirstSystemTx() BaseTxID { return b }
-
-// LastSystemTx returns last system tx number in block. result+1 will be baseID of next block a.k.a. beginning system tx number
-// eg txAmount = 3+2/*systemTx*/ = 5 therefore:
+// BaseTxnID represents internal auto-incremented transaction number in block, may be different across the nodes
+// e.g. block has 3 transactions, then txAmount = 3+2/*systemTx*/ = 5 therefore:
 //
 //	0 - base tx/systemBegin
 //	1 - tx0
 //	2 - tx1
 //	3 - tx2
 //	4 - systemEnd
-func (b BaseTxID) LastSystemTx(txAmount uint32) uint64 { return b.U64() + uint64(txAmount) - 1 }
+//
+//	System transactions are used to write history of state changes done by consensus (not by eth-transactions) - for example "miner rewards"
+type BaseTxnID uint64
+
+// TxCountToTxAmount converts number of transactions in block to TxAmount
+func TxCountToTxAmount(txsLen int) uint32 {
+	return uint32(txsLen + 2)
+}
+
+func (b BaseTxnID) U64() uint64 { return uint64(b) }
+
+func (b BaseTxnID) Bytes() []byte { return hexutility.EncodeTs(uint64(b)) }
+
+// First non-system tx number in block
+// as if basetxId is first original transaction in block
+func (b BaseTxnID) First() uint64 { return uint64(b + 1) }
+
+// At returns tx number at block position `ti`.
+func (b BaseTxnID) At(ti int) uint64 { return b.First() + uint64(ti) }
+
+// FirstSystemTx returns first system tx number in block
+func (b BaseTxnID) FirstSystemTx() BaseTxnID { return b }
+
+// LastSystemTx returns last system tx number in block. result+1 will be baseID of next block a.k.a. beginning system tx number
+func (b BaseTxnID) LastSystemTx(txAmount uint32) uint64 { return b.U64() + uint64(txAmount) - 1 }
 
 type BodyForStorage struct {
-	BaseTxId    BaseTxID
+	BaseTxId    BaseTxnID
 	TxAmount    uint32
 	Uncles      []*Header
 	Withdrawals []*Withdrawal

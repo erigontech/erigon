@@ -186,7 +186,7 @@ func TestDump(t *testing.T) {
 			require := require.New(t)
 			i := 0
 			txsAmount := uint64(0)
-			var baseIdList []types.BaseTxID
+			var baseIdList []types.BaseTxnID
 			firstTxNum := uint64(0)
 			_, err := freezeblocks.DumpBodies(m.Ctx, m.DB, m.ChainConfig, 0, uint64(test.chainSize-3),
 				func(context.Context) uint64 { return firstTxNum },

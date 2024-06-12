@@ -583,7 +583,7 @@ func extractBodies(datadir string) error {
 	}
 	defer c.Close()
 	i := 0
-	var txId uint64
+	var txnID uint64
 	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 		if err != nil {
 			return err
@@ -594,19 +594,19 @@ func extractBodies(datadir string) error {
 		if hash, err = br.CanonicalHash(context.Background(), tx, blockNumber); err != nil {
 			return err
 		}
-		_, baseTxId, txAmount := rawdb.ReadBody(tx, blockHash, blockNumber)
-		fmt.Printf("Body %d %x: baseTxId %d, txAmount %d\n", blockNumber, blockHash, baseTxId, txAmount)
+		_, baseTxnID, txAmount := rawdb.ReadBody(tx, blockHash, blockNumber)
+		fmt.Printf("Body %d %x: baseTxnID %d, txAmount %d\n", blockNumber, blockHash, baseTxnID, txAmount)
 		if hash != blockHash {
 			fmt.Printf("Non-canonical\n")
 			continue
 		}
 		i++
-		if txId > 0 {
-			if txId != baseTxId {
-				fmt.Printf("Mismatch txId for block %d, txId = %d, baseTxId = %d\n", blockNumber, txId, baseTxId)
+		if txnID > 0 {
+			if txnID != baseTxnID {
+				fmt.Printf("Mismatch txnID for block %d, txnID = %d, baseTxnID = %d\n", blockNumber, txnID, baseTxnID)
 			}
 		}
-		txId = baseTxId + uint64(txAmount) + 2
+		txnID = baseTxnID + uint64(txAmount) + 2
 		if i == 50 {
 			break
 		}

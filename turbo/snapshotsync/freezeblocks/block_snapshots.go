@@ -1601,7 +1601,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		return valueBuf, nil
 	}
 
-	addSystemTx := func(ctx *types2.TxParseContext, tx kv.Tx, txId types.BaseTxID) error {
+	addSystemTx := func(ctx *types2.TxParseContext, tx kv.Tx, txId types.BaseTxnID) error {
 		binary.BigEndian.PutUint64(numBuf, txId.U64())
 		tv, err := tx.GetOne(kv.EthTx, numBuf)
 		if err != nil {
@@ -1745,7 +1745,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			return false, fmt.Errorf("ForAmount parser: %w", err)
 		}
 
-		if err := addSystemTx(parseCtxs[0], tx, types.BaseTxID(body.BaseTxId.LastSystemTx(body.TxAmount))); err != nil {
+		if err := addSystemTx(parseCtxs[0], tx, types.BaseTxnID(body.BaseTxId.LastSystemTx(body.TxAmount))); err != nil {
 			return false, err
 		}
 
@@ -1842,8 +1842,8 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 		copy(key, k)
 		copy(key[8:], v)
 
-		// Important: DB does store canonical and non-canonical txs in same table. And using same body.BaseTxID
-		// But snapshots using canonical TxNum in field body.BaseTxID
+		// Important: DB does store canonical and non-canonical txs in same table. And using same body.BaseTxnID
+		// But snapshots using canonical TxNum in field body.BaseTxnID
 		// So, we manually calc this field here and serialize again.
 		//
 		// FYI: we also have other table to map canonical BlockNum->TxNum: kv.MaxTxNum
@@ -1856,7 +1856,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 			return true, nil
 		}
 
-		body.BaseTxId = types.BaseTxID(lastTxNum)
+		body.BaseTxId = types.BaseTxnID(lastTxNum)
 		lastTxNum = body.BaseTxId.LastSystemTx(body.TxAmount)
 
 		dataRLP, err := rlp.EncodeToBytes(body)
