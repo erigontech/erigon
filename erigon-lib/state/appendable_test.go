@@ -140,15 +140,14 @@ func TestAppendableCollationBuild(t *testing.T) {
 		err = ii.OpenFolder(true)
 		require.NoError(err)
 		require.Equal(5, ii.dirtyFiles.Len())
-
-		mergeAppendable(t, db, ii, txs)
-		require.Equal(5, ii.dirtyFiles.Len())
+		require.Equal(0, len(ii._visibleFiles))
+		ii.reCalcVisibleFiles()
+		require.Equal(5, len(ii._visibleFiles))
 
 		ic := ii.BeginFilesRo()
 		defer ic.Close()
 
-		require.Equal(5, len(ii._visibleFiles))
-		require.Equal(5, len(ii._visibleFiles))
+		require.Equal(5, len(ic.files))
 
 		tx, err := db.BeginRo(ctx)
 		require.NoError(err)
@@ -157,7 +156,7 @@ func TestAppendableCollationBuild(t *testing.T) {
 		checkAppendableGet(t, tx, ic, txs)
 	})
 
-	t.Run("OpenFolder", func(t *testing.T) {
+	t.Run("open_folder_can_handle_broken_files", func(t *testing.T) {
 		require := require.New(t)
 
 		list := ii._visibleFiles
