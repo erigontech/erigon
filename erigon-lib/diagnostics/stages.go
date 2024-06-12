@@ -19,13 +19,13 @@ type CurrentSyncStagesIdxs struct {
 }
 
 type SyncStage struct {
-	ID        string         `json:"stage"`
+	ID        string         `json:"id"`
 	State     StageState     `json:"state"`
 	SubStages []SyncSubStage `json:"subStages"`
 }
 
 type SyncSubStage struct {
-	ID    string     `json:"subStage"`
+	ID    string     `json:"id"`
 	State StageState `json:"state"`
 }
 

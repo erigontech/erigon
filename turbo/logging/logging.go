@@ -30,9 +30,9 @@ func LogDirPath(ctx *cli.Context) string {
 }
 
 // SetupLoggerCtx performs the logging setup according to the parameters
-// containted in the given urfave context. It returns either root logger,
+// contained in the given urfave context. It returns either root logger,
 // if rootHandler argument is set to true, or a newly created logger.
-// This is to ensure gradual transition to the use of non-root logger thoughout
+// This is to ensure gradual transition to the use of non-root logger throughout
 // the erigon code without a huge change at once.
 // This function which is used in Erigon itself.
 // Note: urfave and cobra are two CLI frameworks/libraries for the same functionalities
@@ -146,7 +146,7 @@ func SetupLoggerCmd(filePrefix string, cmd *cobra.Command) log.Logger {
 }
 
 // SetupLoggerCmd perform the logging using parametrs specifying by `flag` package, and sets it to the root logger
-// This is the function which is NOT used by Erigon itself, but instead by utility commans
+// This is the function which is NOT used by Erigon itself, but instead by utility commands
 func SetupLogger(filePrefix string) log.Logger {
 	var logConsoleVerbosity = flag.String(LogConsoleVerbosityFlag.Name, "", LogConsoleVerbosityFlag.Usage)
 	var logDirVerbosity = flag.String(LogDirVerbosityFlag.Name, "", LogDirVerbosityFlag.Usage)

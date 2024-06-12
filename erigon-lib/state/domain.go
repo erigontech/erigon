@@ -561,7 +561,7 @@ const (
 // over storage of a given account
 type CursorItem struct {
 	c            kv.CursorDupSort
-	iter         btree2.MapIter[string, []byte]
+	iter         btree2.MapIter[string, dataWithPrevStep]
 	dg           ArchiveGetter
 	dg2          ArchiveGetter
 	btCursor     *Cursor
