@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/anacrolix/torrent/metainfo"
@@ -63,21 +62,6 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 		if it.Path == "" {
 			return nil, fmt.Errorf("field 'path' is required")
 		}
-
-		// For local Perf Testing
-		const bor_dltest = "storage"
-
-		switch bor_dltest {
-		case "storage":
-			if !strings.Contains(it.Path, "domain/v1-storage") {
-				continue
-			}
-		case "headers":
-			if !(strings.Contains(it.Path, "-headers") || strings.Contains(it.Path, "-bodies")) {
-				continue
-			}
-		}
-		// To Here
 
 		select {
 		case <-logEvery.C:
