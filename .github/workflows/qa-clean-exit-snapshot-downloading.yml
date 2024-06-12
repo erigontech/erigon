@@ -11,8 +11,6 @@ on:
       - 'release/3.*'
     types:
       - ready_for_review
-      - opened
-      - synchronize
   workflow_dispatch:     # Run manually
 
 jobs:
