@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.21.5
 
 require (
-	github.com/erigontech/mdbx-go v0.38.1-0.20240612083034-a86986fef731
+	github.com/erigontech/mdbx-go v0.38.1-0.20240612085237-ca514b2384a4
 	github.com/erigontech/silkworm-go v0.18.0
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -62,7 +62,7 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/klauspost/compress v1.17.8
-	github.com/ledgerwatch/erigon-lib v1.0.0
+	github.com/ledgerwatch/erigon-lib v0.0.0-00010101000000-000000000000
 	github.com/libp2p/go-libp2p v0.34.0
 	github.com/libp2p/go-libp2p-mplex v0.9.0
 	github.com/libp2p/go-libp2p-pubsub v0.11.0
