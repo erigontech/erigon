@@ -363,10 +363,10 @@ func (tx *AppendableRoTx) Get(ts uint64, dbtx kv.Tx) ([]byte, bool, error) {
 	}
 	return tx.ap.getFromDBByTs(ts, dbtx)
 }
-func (tx *AppendableRoTx) Put(ts uint64, v []byte, dbtx kv.RwTx) error {
+func (tx *AppendableRoTx) Append(ts uint64, v []byte, dbtx kv.RwTx) error {
 	return dbtx.Put(tx.ap.table, hexutility.EncodeTs(ts), v)
 }
-func (tx *AppendableRoTx) Delete(ts uint64, dbtx kv.RwTx) error {
+func (tx *AppendableRoTx) delete(ts uint64, dbtx kv.RwTx) error {
 	return dbtx.Delete(tx.ap.table, hexutility.EncodeTs(ts))
 }
 

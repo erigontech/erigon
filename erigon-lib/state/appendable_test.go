@@ -167,7 +167,7 @@ func filledAppendableOfSize(tb testing.TB, txs, aggStep uint64, logger log.Logge
 	defer ic.Close()
 
 	for i := uint64(0); i < txs; i++ {
-		err = ic.Put(i, hexutility.EncodeTs(i), tx)
+		err = ic.Append(i, hexutility.EncodeTs(i), tx)
 		require.NoError(err)
 	}
 	err = tx.Commit()

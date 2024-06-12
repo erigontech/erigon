@@ -1191,7 +1191,7 @@ func (ii *InvertedIndex) integrateMergedDirtyFiles(outs []*filesItem, in *filesI
 			})
 		}
 	}
-	deleteMergeFile(ii.dirtyFiles, outs)
+	deleteMergeFile(ii.dirtyFiles, outs, ii.filenameBase)
 }
 func (ap *Appendable) integrateMergedDirtyFiles(outs []*filesItem, in *filesItem) {
 	if in != nil {
@@ -1211,7 +1211,7 @@ func (ap *Appendable) integrateMergedDirtyFiles(outs []*filesItem, in *filesItem
 			})
 		}
 	}
-	deleteMergeFile(ap.dirtyFiles, outs)
+	deleteMergeFile(ap.dirtyFiles, outs, ap.filenameBase)
 }
 
 func (h *History) integrateMergedFiles(indexOuts, historyOuts []*filesItem, indexIn, historyIn *filesItem) {
@@ -1234,14 +1234,14 @@ func (h *History) integrateMergedFiles(indexOuts, historyOuts []*filesItem, inde
 			})
 		}
 	}
-	deleteMergeFile(h.dirtyFiles, historyOuts)
+	deleteMergeFile(h.dirtyFiles, historyOuts, h.filenameBase)
 }
 
-func deleteMergeFile(dirtyFiles *btree2.BTreeG[*filesItem], outs []*filesItem) {
+func deleteMergeFile(dirtyFiles *btree2.BTreeG[*filesItem], outs []*filesItem, filenameBase string) {
 	for _, out := range outs {
-		//if out == nil {
-		//	panic("must not happen: " + ap.filenameBase)
-		//}
+		if out == nil {
+			panic("must not happen: " + filenameBase)
+		}
 		dirtyFiles.Delete(out)
 
 		// if merged file not visible for any alive reader (even for us): can remove it immediately
