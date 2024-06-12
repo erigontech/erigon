@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/log/v3"
+	"strings"
 )
 
 func opCallDataLoad_zkevmIncompatible(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -196,42 +197,43 @@ func makeLog_zkevm(size int, logIndexPerTx bool) executionFunc {
 			  \  /
 			   \/
 			*/
-
 			dataHex := hex.EncodeToString(d)
 
-			bugPossible := false
-
-			// if the first part of datahex < 16 (mSize < 32), remove leading zero
-			if len(dataHex) > 0 && dataHex[0] == '0' && dataHex[1] != '0' && mSize.Uint64() < 32 {
-				bugPossible = true
-				log.Warn("Possible bug detected in log data", "block", blockNo, "data", dataHex, "size", mSize.Uint64())
-			}
-
-			if bugPossible {
-				dataHex = dataHex[1:]
-
-				// pad the hex out
-				dataHex = appendZerosHex(dataHex, 64)
-
+			if len(dataHex) > 0 {
 				msInt := mSize.Uint64()
 
-				// conditional padding to match C++ bug
-				if int(msInt*2) > len(dataHex) {
-					dataHex = prependZerosHex(dataHex, int(msInt*2))
+				words := []string{}
+				for i := 0; i < len(dataHex); i += 64 {
+					end := i + 64
+					if end > len(dataHex) {
+						end = len(dataHex)
+					}
+					word := dataHex[i:end]
+					words = append(words, word)
 				}
 
-				if len(dataHex) > int(msInt*2) {
-					dataHex = dataHex[:msInt*2]
+				var lastWord string
+				lastWordIndex := 0
+				if len(words) > 0 {
+					lastWordIndex = len(words) - 1
+					lastWord = words[lastWordIndex]
+				} else {
+					log.Warn("Words is empty", "block", blockNo, "data", dataHex, "size", msInt)
 				}
 
-				d, _ = hex.DecodeString(dataHex)
-			} else {
-				// erigon behaviour
-				// [zkEvm] fill 0 at the end
-				dataLen := len(d)
-				lenMod32 := dataLen & 31
-				if lenMod32 != 0 {
-					d = append(d, make([]byte, 32-lenMod32)...)
+				if len(lastWord) > 0 && lastWord[0] == '0' && lastWord[1] != '0' {
+					tempLastWord := lastWord[1:]
+					if uint64(len(tempLastWord)) < msInt*2 {
+						log.Warn("Possible bug detected in log data", "block", blockNo, "data", dataHex, "size", msInt)
+						lastWord = tempLastWord + "0"
+					}
+				}
+				words[lastWordIndex] = lastWord
+				dataHex = strings.Join(words, "")
+				var err error
+				d, err = hex.DecodeString(dataHex)
+				if err != nil {
+					return nil, err
 				}
 			}
 			/*
@@ -275,6 +277,10 @@ func appendZerosHex(s string, length int) string {
 		s = s + "0"
 	}
 	return s
+}
+
+func appendOneZero(s string) string {
+	return s + "0"
 }
 
 func opCreate_zkevm(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
