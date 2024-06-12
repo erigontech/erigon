@@ -73,7 +73,6 @@ func (ii *InvertedIndex) endIndexedTxNumMinimax(needFrozen bool) uint64 {
 	return _max
 }
 
-}
 func (h *History) endTxNumMinimax() uint64 {
 	if h.dontProduceHistoryFiles {
 		return math.MaxUint64
