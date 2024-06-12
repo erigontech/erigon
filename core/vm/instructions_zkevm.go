@@ -199,7 +199,7 @@ func makeLog_zkevm(size int, logIndexPerTx bool) executionFunc {
 			*/
 			dataHex := hex.EncodeToString(d)
 
-			if len(dataHex) > 0 {
+			if len(dataHex) > 0 && uint64(len(dataHex))%(mSize.Uint64()*2) != 0 {
 				msInt := mSize.Uint64()
 
 				words := []string{}
