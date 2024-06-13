@@ -148,9 +148,9 @@ func (h *Eth1Header) MarshalJSON() ([]byte, error) {
 		BaseFeePerGas    string            `json:"base_fee_per_gas"`
 		BlockHash        libcommon.Hash    `json:"block_hash"`
 		TransactionsRoot libcommon.Hash    `json:"transactions_root"`
-		WithdrawalsRoot  libcommon.Hash    `json:"withdrawals_root,omitempty"`
-		BlobGasUsed      uint64            `json:"blob_gas_used,omitempty,string"`
-		ExcessBlobGas    uint64            `json:"excess_blob_gas,omitempty,string"`
+		WithdrawalsRoot  libcommon.Hash    `json:"withdrawals_root"`
+		BlobGasUsed      uint64            `json:"blob_gas_used,string"`
+		ExcessBlobGas    uint64            `json:"excess_blob_gas,string"`
 	}{
 		ParentHash:       h.ParentHash,
 		FeeRecipient:     h.FeeRecipient,
@@ -188,9 +188,9 @@ func (h *Eth1Header) UnmarshalJSON(data []byte) error {
 		BaseFeePerGas    string            `json:"base_fee_per_gas"`
 		BlockHash        libcommon.Hash    `json:"block_hash"`
 		TransactionsRoot libcommon.Hash    `json:"transactions_root"`
-		WithdrawalsRoot  libcommon.Hash    `json:"withdrawals_root,omitempty"`
-		BlobGasUsed      uint64            `json:"blob_gas_used,omitempty,string"`
-		ExcessBlobGas    uint64            `json:"excess_blob_gas,omitempty,string"`
+		WithdrawalsRoot  libcommon.Hash    `json:"withdrawals_root"`
+		BlobGasUsed      uint64            `json:"blob_gas_used,string"`
+		ExcessBlobGas    uint64            `json:"excess_blob_gas,string"`
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
