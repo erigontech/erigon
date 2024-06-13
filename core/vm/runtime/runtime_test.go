@@ -465,16 +465,16 @@ func TestBlockHashEip2935(t *testing.T) {
 	defer agg.Close()
 
 	_db, err := temporal.New(db, agg)
-	defer _db.Close()
 	require.NoError(t, err)
+	defer _db.Close()
 
 	tx, err := _db.BeginTemporalRw(context.Background())
-	defer tx.Rollback()
 	require.NoError(t, err)
+	defer tx.Rollback()
 
 	sd, err := state3.NewSharedDomains(tx, log.New())
-	defer sd.Close()
 	require.NoError(t, err)
+	defer sd.Close()
 
 	cfg.r = state.NewReaderV4(sd)
 	cfg.w = state.NewWriterV4(sd)
