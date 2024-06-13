@@ -994,6 +994,12 @@ const (
 	StandaloneIdxLen uint16         = 4
 )
 
+const (
+	ReceiptsAppendable Appendable = 0
+
+	AppendableLen Appendable = 1
+)
+
 func (iip InvertedIdxPos) String() string {
 	switch iip {
 	case LogAddrIdxPos:

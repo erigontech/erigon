@@ -167,17 +167,17 @@ func (dt *DomainRoTx) NewWriter() *domainBufferedWriter { return dt.newWriter(dt
 // It's ok if some files was open earlier.
 // If some file already open: noop.
 // If some file already open but not in provided list: close and remove from `files` field.
-func (d *Domain) OpenList(idxFiles, histFiles, domainFiles []string, readonly bool) error {
-	if err := d.History.OpenList(idxFiles, histFiles, readonly); err != nil {
+func (d *Domain) OpenList(idxFiles, histFiles, domainFiles []string) error {
+	if err := d.History.OpenList(idxFiles, histFiles); err != nil {
 		return err
 	}
-	if err := d.openList(domainFiles, readonly); err != nil {
+	if err := d.openList(domainFiles); err != nil {
 		return fmt.Errorf("Domain(%s).OpenFolder: %w", d.filenameBase, err)
 	}
 	return nil
 }
 
-func (d *Domain) openList(names []string, readonly bool) error {
+func (d *Domain) openList(names []string) error {
 	defer d.reCalcVisibleFiles()
 	d.closeWhatNotInList(names)
 	d.scanStateFiles(names)
@@ -196,12 +196,12 @@ func (d *Domain) protectFromHistoryFilesAheadOfDomainFiles() {
 	d.closeFilesAfterStep(d.dirtyFilesEndTxNumMinimax() / d.aggregationStep)
 }
 
-func (d *Domain) OpenFolder(readonly bool) error {
+func (d *Domain) OpenFolder() error {
 	idx, histFiles, domainFiles, err := d.fileNamesOnDisk()
 	if err != nil {
 		return fmt.Errorf("Domain(%s).OpenFolder: %w", d.filenameBase, err)
 	}
-	if err := d.OpenList(idx, histFiles, domainFiles, readonly); err != nil {
+	if err := d.OpenList(idx, histFiles, domainFiles); err != nil {
 		return err
 	}
 	return nil
@@ -216,40 +216,40 @@ func (d *Domain) GetAndResetStats() DomainStats {
 }
 
 func (d *Domain) closeFilesAfterStep(lowerBound uint64) {
-	var toDelete []*filesItem
+	var toClose []*filesItem
 	d.dirtyFiles.Scan(func(item *filesItem) bool {
 		if item.startTxNum/d.aggregationStep >= lowerBound {
-			toDelete = append(toDelete, item)
+			toClose = append(toClose, item)
 		}
 		return true
 	})
-	for _, item := range toDelete {
+	for _, item := range toClose {
 		d.dirtyFiles.Delete(item)
 		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d has not enough files (was not complete). stack: %s", item.decompressor.FileName(), lowerBound, dbg.Stack()))
 		item.closeFiles()
 	}
 
-	toDelete = toDelete[:0]
+	toClose = toClose[:0]
 	d.History.dirtyFiles.Scan(func(item *filesItem) bool {
 		if item.startTxNum/d.aggregationStep >= lowerBound {
-			toDelete = append(toDelete, item)
+			toClose = append(toClose, item)
 		}
 		return true
 	})
-	for _, item := range toDelete {
+	for _, item := range toClose {
 		d.History.dirtyFiles.Delete(item)
 		log.Debug(fmt.Sprintf("[snapshots] closing some histor files - because step %d has not enough files (was not complete)", lowerBound))
 		item.closeFiles()
 	}
 
-	toDelete = toDelete[:0]
+	toClose = toClose[:0]
 	d.History.InvertedIndex.dirtyFiles.Scan(func(item *filesItem) bool {
 		if item.startTxNum/d.aggregationStep >= lowerBound {
-			toDelete = append(toDelete, item)
+			toClose = append(toClose, item)
 		}
 		return true
 	})
-	for _, item := range toDelete {
+	for _, item := range toClose {
 		d.History.InvertedIndex.dirtyFiles.Delete(item)
 		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
 		item.closeFiles()
@@ -376,7 +376,7 @@ func (d *Domain) openFiles() (err error) {
 }
 
 func (d *Domain) closeWhatNotInList(fNames []string) {
-	var toDelete []*filesItem
+	var toClose []*filesItem
 	d.dirtyFiles.Walk(func(items []*filesItem) bool {
 	Loop1:
 		for _, item := range items {
@@ -385,11 +385,11 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 					continue Loop1
 				}
 			}
-			toDelete = append(toDelete, item)
+			toClose = append(toClose, item)
 		}
 		return true
 	})
-	for _, item := range toDelete {
+	for _, item := range toClose {
 		item.closeFiles()
 		d.dirtyFiles.Delete(item)
 	}

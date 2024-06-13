@@ -425,7 +425,7 @@ func TestHistoryCanPrune(t *testing.T) {
 	}
 	t.Run("withFiles", func(t *testing.T) {
 		db, h := testDbAndHistory(t, true, logger)
-		h.dontProduceHistoryFiles = false
+		h.snapshotsDisabled = false
 
 		defer db.Close()
 		writeKey(t, h, db)
@@ -460,8 +460,8 @@ func TestHistoryCanPrune(t *testing.T) {
 	})
 	t.Run("withoutFiles", func(t *testing.T) {
 		db, h := testDbAndHistory(t, false, logger)
-		h.dontProduceHistoryFiles = true
-		h.keepRecentTxInDB = stepKeepInDB * h.aggregationStep
+		h.snapshotsDisabled = true
+		h.keepRecentTxnInDB = stepKeepInDB * h.aggregationStep
 
 		defer db.Close()
 

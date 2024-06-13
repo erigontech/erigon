@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/prometheus/client_golang/prometheus"
 	"io"
 	"reflect"
 	"sync"
@@ -48,12 +49,14 @@ type Filters struct {
 	pendingHeadsStores *concurrent.SyncMap[HeadsSubID, []*types.Header]
 	pendingTxsStores   *concurrent.SyncMap[PendingTxsSubID, [][]types.Transaction]
 	logger             log.Logger
+
+	config FiltersConfig
 }
 
 // New creates a new Filters instance, initializes it, and starts subscription goroutines for Ethereum events.
 // It requires a context, Ethereum backend, transaction pool client, mining client, snapshot callback function,
 // and a logger for logging events.
-func New(ctx context.Context, ethBackend ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, onNewSnapshot func(), logger log.Logger) *Filters {
+func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, onNewSnapshot func(), logger log.Logger) *Filters {
 	logger.Info("rpc filters: subscribing to Erigon events")
 
 	ff := &Filters{
@@ -67,15 +70,18 @@ func New(ctx context.Context, ethBackend ApiBackend, txPool txpool.TxpoolClient,
 		pendingHeadsStores: concurrent.NewSyncMap[HeadsSubID, []*types.Header](),
 		pendingTxsStores:   concurrent.NewSyncMap[PendingTxsSubID, [][]types.Transaction](),
 		logger:             logger,
+		config:             config,
 	}
 
 	go func() {
 		if ethBackend == nil {
 			return
 		}
+		activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "ethBackend_Events"}).Inc()
 		for {
 			select {
 			case <-ctx.Done():
+				activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "ethBackend_Events"}).Dec()
 				return
 			default:
 			}
@@ -83,6 +89,7 @@ func New(ctx context.Context, ethBackend ApiBackend, txPool txpool.TxpoolClient,
 			if err := ethBackend.Subscribe(ctx, ff.OnNewEvent); err != nil {
 				select {
 				case <-ctx.Done():
+					activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "ethBackend_Events"}).Dec()
 					return
 				default:
 				}
@@ -99,15 +106,18 @@ func New(ctx context.Context, ethBackend ApiBackend, txPool txpool.TxpoolClient,
 		if ethBackend == nil {
 			return
 		}
+		activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "ethBackend_Logs"}).Inc()
 		for {
 			select {
 			case <-ctx.Done():
+				activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "ethBackend_Logs"}).Dec()
 				return
 			default:
 			}
 			if err := ethBackend.SubscribeLogs(ctx, ff.OnNewLogs, &ff.logsRequestor); err != nil {
 				select {
 				case <-ctx.Done():
+					activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "ethBackend_Logs"}).Dec()
 					return
 				default:
 				}
@@ -122,15 +132,18 @@ func New(ctx context.Context, ethBackend ApiBackend, txPool txpool.TxpoolClient,
 
 	if txPool != nil {
 		go func() {
+			activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "txPool_PendingTxs"}).Inc()
 			for {
 				select {
 				case <-ctx.Done():
+					activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "txPool_PendingTxs"}).Dec()
 					return
 				default:
 				}
 				if err := ff.subscribeToPendingTransactions(ctx, txPool); err != nil {
 					select {
 					case <-ctx.Done():
+						activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "txPool_PendingTxs"}).Dec()
 						return
 					default:
 					}
@@ -145,15 +158,18 @@ func New(ctx context.Context, ethBackend ApiBackend, txPool txpool.TxpoolClient,
 
 		if !reflect.ValueOf(mining).IsNil() { //https://groups.google.com/g/golang-nuts/c/wnH302gBa4I
 			go func() {
+				activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "txPool_PendingBlock"}).Inc()
 				for {
 					select {
 					case <-ctx.Done():
+						activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "txPool_PendingBlock"}).Dec()
 						return
 					default:
 					}
 					if err := ff.subscribeToPendingBlocks(ctx, mining); err != nil {
 						select {
 						case <-ctx.Done():
+							activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "txPool_PendingBlock"}).Dec()
 							return
 						default:
 						}
@@ -166,15 +182,18 @@ func New(ctx context.Context, ethBackend ApiBackend, txPool txpool.TxpoolClient,
 				}
 			}()
 			go func() {
+				activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "txPool_PendingLogs"}).Inc()
 				for {
 					select {
 					case <-ctx.Done():
+						activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "txPool_PendingLogs"}).Dec()
 						return
 					default:
 					}
 					if err := ff.subscribeToPendingLogs(ctx, mining); err != nil {
 						select {
 						case <-ctx.Done():
+							activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "txPool_PendingLogs"}).Dec()
 							return
 						default:
 						}
@@ -414,25 +433,43 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria) (<-c
 		// If no addresses are specified, it means all addresses should be included
 		f.allAddrs = 1
 	} else {
+		// Limit the number of addresses
+		addressCount := 0
 		for _, addr := range criteria.Addresses {
-			f.addrs.Put(addr, 1)
-		}
-	}
-
-	// Handle topics
-	if len(criteria.Topics) == 0 {
-		// If no topics are specified, it means all topics should be included
-		f.allTopics = 1
-	} else {
-		for _, topics := range criteria.Topics {
-			for _, topic := range topics {
-				f.topics.Put(topic, 1)
+			if ff.config.RpcSubscriptionFiltersMaxAddresses == 0 || addressCount < ff.config.RpcSubscriptionFiltersMaxAddresses {
+				f.addrs.Put(addr, 1)
+				addressCount++
+			} else {
+				break
 			}
 		}
 	}
 
-	// Store original topics for reference
-	f.topicsOriginal = criteria.Topics
+	// Handle topics and track the allowed topics
+	if len(criteria.Topics) == 0 {
+		// If no topics are specified, it means all topics should be included
+		f.allTopics = 1
+	} else {
+		// Limit the number of topics
+		topicCount := 0
+		allowedTopics := [][]libcommon.Hash{}
+		for _, topics := range criteria.Topics {
+			allowedTopicsRow := []libcommon.Hash{}
+			for _, topic := range topics {
+				if ff.config.RpcSubscriptionFiltersMaxTopics == 0 || topicCount < ff.config.RpcSubscriptionFiltersMaxTopics {
+					f.topics.Put(topic, 1)
+					allowedTopicsRow = append(allowedTopicsRow, topic)
+					topicCount++
+				} else {
+					break
+				}
+			}
+			if len(allowedTopicsRow) > 0 {
+				allowedTopics = append(allowedTopics, allowedTopicsRow)
+			}
+		}
+		f.topicsOriginal = allowedTopics
+	}
 
 	// Add the filter to the list of log filters
 	ff.logsSubs.addLogsFilters(f)
@@ -602,12 +639,17 @@ func (ff *Filters) OnNewLogs(reply *remote.SubscribeLogsReply) {
 }
 
 // AddLogs adds logs to the store associated with the given subscription ID.
-func (ff *Filters) AddLogs(id LogsSubID, logs *types.Log) {
+func (ff *Filters) AddLogs(id LogsSubID, log *types.Log) {
 	ff.logsStores.DoAndStore(id, func(st []*types.Log, ok bool) []*types.Log {
 		if !ok {
 			st = make([]*types.Log, 0)
 		}
-		st = append(st, logs)
+
+		maxLogs := ff.config.RpcSubscriptionFiltersMaxLogs
+		if maxLogs > 0 && len(st)+1 > maxLogs {
+			st = st[len(st)+1-maxLogs:] // Remove oldest logs to make space
+		}
+		st = append(st, log)
 		return st
 	})
 }
@@ -627,6 +669,11 @@ func (ff *Filters) AddPendingBlock(id HeadsSubID, block *types.Header) {
 	ff.pendingHeadsStores.DoAndStore(id, func(st []*types.Header, ok bool) []*types.Header {
 		if !ok {
 			st = make([]*types.Header, 0)
+		}
+
+		maxHeaders := ff.config.RpcSubscriptionFiltersMaxHeaders
+		if maxHeaders > 0 && len(st) >= maxHeaders {
+			st = st[1:] // Remove the oldest header to make space
 		}
 		st = append(st, block)
 		return st
@@ -649,6 +696,32 @@ func (ff *Filters) AddPendingTxs(id PendingTxsSubID, txs []types.Transaction) {
 		if !ok {
 			st = make([][]types.Transaction, 0)
 		}
+
+		// Calculate the total number of transactions in st
+		totalTxs := 0
+		for _, txBatch := range st {
+			totalTxs += len(txBatch)
+		}
+
+		maxTxs := ff.config.RpcSubscriptionFiltersMaxTxs
+		// If adding the new transactions would exceed maxTxs, remove oldest transactions
+		if maxTxs > 0 && totalTxs+len(txs) > maxTxs {
+			// Flatten st to a single slice
+			flatSt := make([]types.Transaction, 0, totalTxs)
+			for _, txBatch := range st {
+				flatSt = append(flatSt, txBatch...)
+			}
+
+			// Remove the oldest transactions to make space for new ones
+			if len(flatSt)+len(txs) > maxTxs {
+				flatSt = flatSt[len(flatSt)+len(txs)-maxTxs:]
+			}
+
+			// Convert flatSt back to [][]types.Transaction with a single batch
+			st = [][]types.Transaction{flatSt}
+		}
+
+		// Append the new transactions as a new batch
 		st = append(st, txs)
 		return st
 	})
