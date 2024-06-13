@@ -198,6 +198,9 @@ func main() {
 	compareMode := flag.String("mode", "full", "Comparison mode: 'full' or 'root_and_hash'")
 	flag.Parse()
 
+	exitCode := 0
+	failureReason := ""
+
 	var (
 		erigonLatestBlock, zkevmLatestBlock, sequencerLatestBlock *big.Int
 		erigonVersion, zkevmVersion, sequencerVersion             string
@@ -246,11 +249,15 @@ func main() {
 	log.Printf("Checking %d blocks\n", *numBlocks)
 
 	if erigonLatestBlock != nil && new(big.Int).Abs(new(big.Int).Sub(erigonLatestBlock, sequencerLatestBlock)).Cmp(big.NewInt(int64(*blockHeightDiff))) > 0 {
-		log.Printf("Warning: Erigon node is more than %d blocks apart from Sequencer: Erigon at %d, Sequencer at %d", *blockHeightDiff, erigonLatestBlock, sequencerLatestBlock)
+		log.Printf("Error: Erigon node is more than %d blocks apart from Sequencer: Erigon at %d, Sequencer at %d", *blockHeightDiff, erigonLatestBlock, sequencerLatestBlock)
+		failureReason = fmt.Sprintf("out of sync (Erigon) by %d blocks", new(big.Int).Abs(new(big.Int).Sub(erigonLatestBlock, sequencerLatestBlock)).Int64())
+		exitCode = 1
 	}
 
 	if zkevmLatestBlock != nil && new(big.Int).Abs(new(big.Int).Sub(zkevmLatestBlock, sequencerLatestBlock)).Cmp(big.NewInt(int64(*blockHeightDiff))) > 0 {
-		log.Printf("Warning: zkEVM node is more than %d blocks apart from Sequencer: zkEVM at %d, Sequencer at %d", *blockHeightDiff, zkevmLatestBlock, sequencerLatestBlock)
+		log.Printf("Error: zkEVM node is more than %d blocks apart from Sequencer: zkEVM at %d, Sequencer at %d", *blockHeightDiff, zkevmLatestBlock, sequencerLatestBlock)
+		failureReason = fmt.Sprintf("out of sync (zkEVM) by %d blocks", new(big.Int).Abs(new(big.Int).Sub(zkevmLatestBlock, sequencerLatestBlock)).Int64())
+		exitCode = 1
 	}
 
 	startBlock := sequencerLatestBlock
@@ -294,4 +301,8 @@ func main() {
 	}
 
 	log.Println("No differences found")
+	if failureReason != "" {
+		log.Println("Failure reason:", failureReason)
+	}
+	os.Exit(exitCode)
 }

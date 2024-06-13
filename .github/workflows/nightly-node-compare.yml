@@ -16,6 +16,8 @@ jobs:
             erigon: "http://34.175.214.161:8500"
             zkevm: "http://34.175.214.161:8505"
             sequencer: "http://34.175.214.161:8005"
+            compare-blocks: 1000
+            allowed-block-diff: 2000
 
     steps:
       - name: Checkout code
@@ -35,4 +37,4 @@ jobs:
       - name: Run block comparison
         run: |
           echo "Comparing blocks for pair: ${{ matrix.nodes.name }}"
-          ./compare_blocks -erigon ${{ matrix.nodes.erigon }} -zkevm ${{ matrix.nodes.zkevm }} -sequencer ${{ matrix.nodes.sequencer }} -blocks 1000 -diff 10
+          ./compare_blocks -erigon ${{ matrix.nodes.erigon }} -zkevm ${{ matrix.nodes.zkevm }} -sequencer ${{ matrix.nodes.sequencer }} -blocks ${{matrix.nodes.compare-blocks}} -diff ${{ matrix.nodes.allowed-block-diff }}
