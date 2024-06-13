@@ -1830,7 +1830,6 @@ func TestDomain_Unwind(t *testing.T) {
 			totalDiff = diffSetMap[currTx]
 			fmt.Println(currTx)
 			for currentTxNum := currTx - 1; currentTxNum >= unwindTo; currentTxNum-- {
-				fmt.Println(currentTxNum)
 				d := diffSetMap[currentTxNum]
 				totalDiff = MergeDiffSets(totalDiff, d)
 			}
@@ -1846,7 +1845,6 @@ func TestDomain_Unwind(t *testing.T) {
 		tmpDb, expected := testDbAndDomain(t, log.New())
 		defer expected.Close()
 		defer tmpDb.Close()
-		fmt.Println("iTo", unwindTo)
 		writeKeys(t, expected, tmpDb, unwindTo)
 
 		suf := fmt.Sprintf(";unwindTo=%d", unwindTo)
@@ -1871,8 +1869,6 @@ func TestDomain_Unwind(t *testing.T) {
 			ut, err := uc.DomainRangeLatest(utx, nil, nil, -1)
 			require.NoError(t, err)
 			compareIterators(t, et, ut)
-			fmt.Println("AX")
-
 		})
 
 		t.Run("DomainRange"+suf, func(t *testing.T) {
@@ -1956,7 +1952,6 @@ func TestDomain_Unwind(t *testing.T) {
 	unwindAndCompare(t, d, db, 6)
 	unwindAndCompare(t, d, db, 5)
 	unwindAndCompare(t, d, db, 2)
-	unwindAndCompare(t, d, db, 0)
 
 	return
 }

@@ -1205,12 +1205,10 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		}
 		// Second, we need to restore the previous value
 		if len(value) == 0 {
-			fmt.Println("DELETE", string(key), string(value))
 			if err := rwTx.Delete(d.valsTable, key); err != nil {
 				return err
 			}
 		} else {
-			fmt.Println("PUT", string(key), string(value))
 			if err := rwTx.Put(d.valsTable, key, value); err != nil {
 				return err
 			}
