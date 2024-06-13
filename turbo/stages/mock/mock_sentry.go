@@ -489,6 +489,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 
 	blockRetire := freezeblocks.NewBlockRetire(1, dirs, mock.BlockReader, blockWriter, mock.DB, mock.ChainConfig, mock.Notifications.Events, blockSnapBuildSema, logger)
 	historyV3 := true
+	mock.agg.SetProduceMod(mock.BlockReader.FreezingCfg().ProduceE3)
 	mock.Sync = stagedsync.New(
 		cfg.Sync,
 		stagedsync.DefaultStages(mock.Ctx,

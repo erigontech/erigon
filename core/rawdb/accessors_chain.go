@@ -513,17 +513,17 @@ func ReadBodyByNumber(db kv.Tx, number uint64) (*types.Body, uint64, uint32, err
 	if hash == (common.Hash{}) {
 		return nil, 0, 0, nil
 	}
-	body, baseTxId, txAmount := ReadBody(db, hash, number)
-	return body, baseTxId, txAmount, nil
+	body, baseTxId, txCount := ReadBody(db, hash, number)
+	return body, baseTxId, txCount, nil
 }
 
 func ReadBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) (*types.Body, error) {
-	body, baseTxId, txAmount := ReadBody(db, hash, number)
+	body, baseTxId, txCount := ReadBody(db, hash, number)
 	if body == nil {
 		return nil, nil
 	}
 	var err error
-	body.Transactions, err = CanonicalTransactions(db, baseTxId, txAmount)
+	body.Transactions, err = CanonicalTransactions(db, baseTxId, txCount)
 	if err != nil {
 		return nil, err
 	}
@@ -552,13 +552,13 @@ func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err erro
 		if len(bodyRlp) == 0 {
 			continue
 		}
-		baseTxId, txAmount, err := types.DecodeOnlyTxMetadataFromBody(bodyRlp)
+		baseTxId, txCount, err := types.DecodeOnlyTxMetadataFromBody(bodyRlp)
 		if err != nil {
 			return nil, err
 		}
 
 		binary.BigEndian.PutUint64(encNum, baseTxId)
-		if err = db.ForAmount(kv.EthTx, encNum, txAmount, func(k, v []byte) error {
+		if err = db.ForAmount(kv.EthTx, encNum, txCount, func(k, v []byte) error {
 			res = append(res, v)
 			return nil
 		}); err != nil {
@@ -610,10 +610,10 @@ func ReadBody(db kv.Getter, hash common.Hash, number uint64) (*types.Body, uint6
 	body.Withdrawals = bodyForStorage.Withdrawals
 	body.Requests = bodyForStorage.Requests
 
-	if bodyForStorage.TxAmount < 2 {
-		panic(fmt.Sprintf("block body hash too few txs amount: %d, %d", number, bodyForStorage.TxAmount))
+	if bodyForStorage.TxCount < 2 {
+		panic(fmt.Sprintf("block body hash too few txs amount: %d, %d", number, bodyForStorage.TxCount))
 	}
-	return body, bodyForStorage.BaseTxId + 1, bodyForStorage.TxAmount - 2 // 1 system txn in the begining of block, and 1 at the end
+	return body, bodyForStorage.BaseTxId + 1, bodyForStorage.TxCount - 2 // 1 system txn in the begining of block, and 1 at the end
 }
 
 func HasSenders(db kv.Getter, hash common.Hash, number uint64) (bool, error) {
@@ -650,7 +650,7 @@ func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBo
 	}
 	data := types.BodyForStorage{
 		BaseTxId:    baseTxnID,
-		TxAmount:    uint32(len(body.Transactions)) + 2, /*system txs*/
+		TxCount:     uint32(len(body.Transactions)) + 2, /*system txs*/
 		Uncles:      body.Uncles,
 		Withdrawals: body.Withdrawals,
 		Requests:    body.Requests,
@@ -674,7 +674,7 @@ func WriteBody(db kv.RwTx, hash common.Hash, number uint64, body *types.Body) (e
 	}
 	data := types.BodyForStorage{
 		BaseTxId:    baseTxId,
-		TxAmount:    uint32(len(body.Transactions)) + 2,
+		TxCount:     uint32(len(body.Transactions)) + 2,
 		Uncles:      body.Uncles,
 		Withdrawals: body.Withdrawals,
 		Requests:    body.Requests,
@@ -734,7 +734,7 @@ func AppendCanonicalTxNums(tx kv.RwTx, from uint64) (err error) {
 			return err
 		}
 
-		nextBaseTxNum += int(bodyForStorage.TxAmount)
+		nextBaseTxNum += int(bodyForStorage.TxCount)
 		err = rawdbv3.TxNums.Append(tx, blockNum, uint64(nextBaseTxNum-1))
 		if err != nil {
 			return err
@@ -1060,7 +1060,7 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int
 			log.Debug("PruneBlocks: block body not found", "height", n)
 		} else {
 			txIDBytes := make([]byte, 8)
-			for txID := b.BaseTxId; txID < b.BaseTxId+uint64(b.TxAmount); txID++ {
+			for txID := b.BaseTxId; txID < b.BaseTxId+uint64(b.TxCount); txID++ {
 				binary.BigEndian.PutUint64(txIDBytes, txID)
 				if err = tx.Delete(kv.EthTx, txIDBytes); err != nil {
 					return deleted, err
@@ -1108,7 +1108,7 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 		}
 		if b != nil {
 			txIDBytes := make([]byte, 8)
-			for txID := b.BaseTxId; txID < b.BaseTxId+uint64(b.TxAmount); txID++ {
+			for txID := b.BaseTxId; txID < b.BaseTxId+uint64(b.TxCount); txID++ {
 				binary.BigEndian.PutUint64(txIDBytes, txID)
 				if err = tx.Delete(kv.EthTx, txIDBytes); err != nil {
 					return err

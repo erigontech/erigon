@@ -74,7 +74,7 @@ func (ii *InvertedIndex) endIndexedTxNumMinimax(needFrozen bool) uint64 {
 }
 
 func (h *History) endTxNumMinimax() uint64 {
-	if h.dontProduceHistoryFiles {
+	if h.snapshotsDisabled {
 		return math.MaxUint64
 	}
 	minimax := h.InvertedIndex.endTxNumMinimax()
@@ -99,7 +99,7 @@ func (ap *Appendable) endTxNumMinimax() uint64 {
 }
 func (h *History) endIndexedTxNumMinimax(needFrozen bool) uint64 {
 	var _max uint64
-	if h.dontProduceHistoryFiles && h.dirtyFiles.Len() == 0 {
+	if h.snapshotsDisabled && h.dirtyFiles.Len() == 0 {
 		_max = math.MaxUint64
 	}
 	h.dirtyFiles.Walk(func(items []*filesItem) bool {
