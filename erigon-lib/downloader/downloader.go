@@ -552,7 +552,7 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
-	var i atomic.Int32
+	var done atomic.Int32
 
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -561,8 +561,7 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 		file := file
 
 		g.Go(func() error {
-			i.Add(1)
-
+			defer done.Add(1)
 			fileInfo, isStateFile, ok := snaptype.ParseFileName(snapDir, file)
 
 			if !ok {
@@ -671,15 +670,15 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 	}
 
 	func() {
-		for int(i.Load()) < len(files) {
+		for int(done.Load()) < len(files) {
 			select {
 			case <-ctx.Done():
 				return // g.Wait() will return right error
 			case <-logEvery.C:
-				if int(i.Load()) == len(files) {
+				if int(done.Load()) == len(files) {
 					return
 				}
-				log.Info("[snapshots] Initiating snapshot-lock", "progress", fmt.Sprintf("%d/%d", i.Load(), len(files)))
+				log.Info("[snapshots] Initiating snapshot-lock", "progress", fmt.Sprintf("%d/%d", done.Load(), len(files)))
 			}
 		}
 	}()
@@ -2744,6 +2743,9 @@ func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientC
 	//})
 	cfg.DefaultStorage = m
 
+	dnsResolver := &downloadercfg.DnsCacheResolver{RefreshTimeout: 24 * time.Hour}
+	cfg.TrackerDialContext = dnsResolver.DialContext
+
 	err = func() error {
 		defer func() {
 			if err := recover(); err != nil {
@@ -2761,6 +2763,10 @@ func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientC
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("torrentcfg.openClient: %w", err)
 	}
+
+	go func() {
+		dnsResolver.Run(ctx)
+	}()
 
 	return db, c, m, torrentClient, nil
 }

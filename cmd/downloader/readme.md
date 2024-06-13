@@ -1,6 +1,6 @@
 ## Snapshots (synonym of segments/shards) overview
 
-- What is "snaphots"? - It's way to store "cold" data outside of main database. It's not 'temporary' files -
+- What are "snapshots"? - It's a way to store "cold" data outside of main database. It's not 'temporary' files -
   it's `frozen db` where stored old blocks/history/etc... Most important: it's "building block" for future "sync Archive
   node without execution all blocks from genesis" (will release this feature in Erigon3).
 
@@ -19,7 +19,7 @@
   there is no incentive. Polygon mainnet is 12Tb now. Also Beacon network is very bad in serving old data.
 
 - How does it benefit current nodes? - Erigon's db is 1-file (doesens of Tb of nvme) - which is not friendly for
-  maintainance. Can't mount `hot` data to 1 type of disk and `cold` to another. Erigon2 moving only Blocks to snaps
+  maintenance. Can't mount `hot` data to 1 type of disk and `cold` to another. Erigon2 moving only Blocks to snaps
   but Erigon3 also moving there `cold latest state` and `state history` - means new node doesn't need re-exec all blocks
   from genesis.
 
@@ -147,10 +147,10 @@ downloader --verify --verify.files=v1-1-2-transaction.seg --datadir=<your_datadi
 ## Create cheap seedbox
 
 Usually Erigon's network is self-sufficient - peers automatically producing and
-seeding snapshots. But new network or new type of snapshots need Bootstraping
+seeding snapshots. But new network or new type of snapshots need Bootstrapping
 step - no peers yet have this files.
 
-**Seedbox** - machie which ony seeding archive files:
+**Seedbox** - machine which only seeds archive files:
 
 - Doesn't need synced erigon
 - Can work on very cheap disks, cpu, ram
@@ -215,7 +215,7 @@ downloader --datadir=<your> --chain=mainnet
 ## Launch new network or new type of snapshots
 
 Usually Erigon's network is self-sufficient - peers automatically producing and
-seedingsnapshots. But new network or new type of snapshots need Bootstraping
+seedingsnapshots. But new network or new type of snapshots need Bootstrapping
 step - no peers yet have this files.
 
 **WebSeed** - is centralized file-storage - used to Bootstrap network. For

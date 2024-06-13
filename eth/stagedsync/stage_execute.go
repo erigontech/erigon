@@ -367,9 +367,9 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 		}
 		var ok bool
 		var currentKeys [kv.DomainLen][]libstate.DomainEntryDiff
-		currentKeys, ok, err = libstate.ReadDiffSet(txc.Tx, currentBlock, currentHash)
+		currentKeys, ok, err = domains.GetDiffset(txc.Tx, currentHash, currentBlock)
 		if !ok {
-			changeset = nil
+			return fmt.Errorf("domains.GetDiffset(%d, %s): not found", currentBlock, currentHash)
 		}
 		if err != nil {
 			return err

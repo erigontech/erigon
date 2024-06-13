@@ -461,7 +461,7 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 
 				f1snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
 					Enabled:      true,
-					Produce:      false,
+					ProduceE2:    false,
 					NoDownloader: true,
 				}, info1.Dir(), info1.From, logger)
 
@@ -471,7 +471,7 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 
 				f2snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
 					Enabled:      true,
-					Produce:      false,
+					ProduceE2:    false,
 					NoDownloader: true,
 				}, info2.Dir(), info2.From, logger)
 
@@ -742,7 +742,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 
 				f1snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
 					Enabled:      true,
-					Produce:      false,
+					ProduceE2:    false,
 					NoDownloader: true,
 				}, info1.Dir(), info1.From, logger)
 
@@ -752,7 +752,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 
 				f2snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
 					Enabled:      true,
-					Produce:      false,
+					ProduceE2:    false,
 					NoDownloader: true,
 				}, info2.Dir(), info2.From, logger)
 
