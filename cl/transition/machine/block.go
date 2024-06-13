@@ -72,7 +72,7 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, signedBlock *clty
 	return nil
 }
 
-func ProcessBlindedBlock(impl BlockProcessor, s abstract.BeaconState, signedBlock *cltypes.SignedBlindedBeaconBlock, _ *solid.ListSSZ[*cltypes.Withdrawal]) error {
+func ProcessBlindedBlock(impl BlockProcessor, s abstract.BeaconState, signedBlock *cltypes.SignedBlindedBeaconBlock) error {
 	var (
 		block   = signedBlock.Block
 		version = s.Version()

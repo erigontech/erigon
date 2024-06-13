@@ -197,7 +197,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 				Body:          block.BlindedBeaconBody,
 			},
 		}
-		if err := machine.ProcessBlindedBlock(transition.DefaultMachine, baseState, signedBlock, block.ExpectedWithdrawals); err != nil {
+		if err := machine.ProcessBlindedBlock(transition.DefaultMachine, baseState, signedBlock); err != nil {
 			return nil, err
 		}
 	} else {
@@ -341,7 +341,6 @@ func (a *ApiHandler) produceBlock(
 			SetHeader(builderHeader.Data.Message.Header).
 			SetBlobKzgCommitments(builderHeader.Data.Message.BlobKzgCommitments)
 		block.ExecutionValue = builderValue
-		block.ExpectedWithdrawals = beaconBody.ExecutionPayload.Withdrawals
 	}
 	return block, nil
 }
