@@ -383,7 +383,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
-	cfg := ethconfig.NewSnapCfg(true, false, true)
+	cfg := ethconfig.NewSnapCfg(true, false, true, true)
 
 	blockSnaps, borSnaps, caplinSnaps, blockRetire, agg, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
@@ -549,7 +549,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 		return err
 	}
 
-	cfg := ethconfig.NewSnapCfg(true, false, true)
+	cfg := ethconfig.NewSnapCfg(true, false, true, true)
 	chainConfig := fromdb.ChainConfig(chainDB)
 	blockSnaps, borSnaps, caplinSnaps, br, agg, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
@@ -743,7 +743,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
 
-	cfg := ethconfig.NewSnapCfg(true, false, true)
+	cfg := ethconfig.NewSnapCfg(true, false, true, true)
 	blockSnaps, borSnaps, caplinSnaps, br, agg, err := openSnaps(ctx, cfg, dirs, db, logger)
 	if err != nil {
 		return err
@@ -799,20 +799,22 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		return err
 	}
 	deletedBlocks := math.MaxInt // To pass the first iteration
-	for deletedBlocks > 0 {      // prune happens by small steps, so need many runs
+	allDeletedBlocks := 0
+	for deletedBlocks > 0 { // prune happens by small steps, so need many runs
 		err = db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 			if deletedBlocks, err = br.PruneAncientBlocks(tx, 100); err != nil {
 				return err
 			}
-
 			return nil
 		})
 		if err != nil {
 			return err
 		}
+
+		allDeletedBlocks += deletedBlocks
 	}
 
-	logger.Info(fmt.Sprintf("Pruning has ended. Deleted %d blocks", deletedBlocks))
+	logger.Info("Pruning has ended", "deleted blocks", allDeletedBlocks)
 
 	db, err = temporal.New(db, agg)
 	if err != nil {
@@ -1064,7 +1066,7 @@ func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log
 	if err != nil {
 		panic(err)
 	}
-	if err = agg.OpenFolder(true); err != nil {
+	if err = agg.OpenFolder(); err != nil {
 		panic(err)
 	}
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())

@@ -106,6 +106,7 @@ func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 	return c.flushBuffer(false)
 }
 
+// Collect does copy `k` and `v`
 func (c *Collector) Collect(k, v []byte) error {
 	return c.extractNextFunc(k, k, v)
 }
