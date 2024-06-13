@@ -15,7 +15,7 @@ type ExecutionPayloadHeader struct {
 	Data    struct {
 		Message struct {
 			Header             *cltypes.Eth1Header                    `json:"header"`
-			BlobKzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment] `json:"blob_kzg_commitments,omitempty"`
+			BlobKzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment] `json:"blob_kzg_commitments"`
 			Value              string                                 `json:"value"`
 			PubKey             common.Bytes48                         `json:"pubkey"`
 		} `json:"message"`

@@ -364,12 +364,11 @@ func (a *ApiHandler) getBuilderPayload(
 	}
 	// get the parent hash of base execution block
 	parentHash := baseBlock.Body.ExecutionPayload.BlockHash
-	//baseBlockBytes, _ := json.Marshal(baseBlock)
-	//log.Warn("[mev] base block", "baseBlock", string(baseBlockBytes))
-	//parentHash := baseBlock.Body.Eth1Data.BlockHash
 	header, err := a.builderClient.GetExecutionPayloadHeader(ctx, int64(targetSlot), parentHash, pubKey)
 	if err != nil {
 		return nil, err
+	} else if header == nil {
+		return nil, fmt.Errorf("nil header")
 	}
 
 	// check the version
@@ -377,7 +376,10 @@ func (a *ApiHandler) getBuilderPayload(
 	if !strings.EqualFold(header.Version, curVersion) {
 		return nil, fmt.Errorf("invalid version %s, expected %s", header.Version, curVersion)
 	}
-
+	if header.Data.Message.Header == nil {
+		return nil, fmt.Errorf("nil header")
+	}
+	header.Data.Message.Header.SetVersion(baseState.Version())
 	// check kzg commitments
 	if header != nil && baseState.Version() >= clparams.DenebVersion {
 		if header.Data.Message.BlobKzgCommitments.Len() >= cltypes.MaxBlobsCommittmentsPerBlock {
