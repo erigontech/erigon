@@ -255,14 +255,14 @@ func ValidateHeaderTime(
 		return err
 	}
 
-	succession, err := validatorSet.GetSignerSuccessionNumber(signer, header.Number.Uint64())
+	_, err = validatorSet.GetSignerSuccessionNumber(signer, header.Number.Uint64())
 	if err != nil {
 		return err
 	}
 
-	if header.Time < MinNextBlockTime(parent, succession, config) {
-		return &BlockTooSoonError{header.Number.Uint64(), succession}
-	}
+	//if header.Time < MinNextBlockTime(parent, succession, config) {
+	//	return &BlockTooSoonError{header.Number.Uint64(), succession}
+	//}
 
 	return nil
 }
