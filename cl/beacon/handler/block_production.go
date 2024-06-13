@@ -376,10 +376,9 @@ func (a *ApiHandler) getBuilderPayload(
 	if !strings.EqualFold(header.Version, curVersion) {
 		return nil, fmt.Errorf("invalid version %s, expected %s", header.Version, curVersion)
 	}
-	if header.Data.Message.Header == nil {
-		return nil, fmt.Errorf("nil header")
+	if ethHeader := header.Data.Message.Header; ethHeader != nil {
+		ethHeader.SetVersion(baseState.Version())
 	}
-	header.Data.Message.Header.SetVersion(baseState.Version())
 	// check kzg commitments
 	if header != nil && baseState.Version() >= clparams.DenebVersion {
 		if header.Data.Message.BlobKzgCommitments.Len() >= cltypes.MaxBlobsCommittmentsPerBlock {
