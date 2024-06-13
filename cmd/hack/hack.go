@@ -541,11 +541,11 @@ func extractBodies(datadir string) error {
 			var lastBlockNum, lastBaseTxNum, lastAmount uint64
 			var prevBlockNum, prevBaseTxNum, prevAmount uint64
 			first := true
-			sn.Iterate(func(blockNum uint64, baseTxNum uint64, txAmount uint64) error {
+			sn.Iterate(func(blockNum uint64, baseTxNum uint64, txCount uint64) error {
 				if first {
 					firstBlockNum = blockNum
 					firstBaseTxNum = baseTxNum
-					firstAmount = txAmount
+					firstAmount = txCount
 					first = false
 				} else {
 					if blockNum != prevBlockNum+1 {
@@ -559,8 +559,8 @@ func extractBodies(datadir string) error {
 				lastBlockNum = blockNum
 				prevBaseTxNum = baseTxNum
 				lastBaseTxNum = baseTxNum
-				prevAmount = txAmount
-				lastAmount = txAmount
+				prevAmount = txCount
+				lastAmount = txCount
 				return nil
 			})
 			fmt.Printf("Seg: [%d, %d, %d] => [%d, %d, %d]\n", firstBlockNum, firstBaseTxNum, firstAmount, lastBlockNum, lastBaseTxNum, lastAmount)
@@ -594,8 +594,8 @@ func extractBodies(datadir string) error {
 		if hash, err = br.CanonicalHash(context.Background(), tx, blockNumber); err != nil {
 			return err
 		}
-		_, baseTxId, txAmount := rawdb.ReadBody(tx, blockHash, blockNumber)
-		fmt.Printf("Body %d %x: baseTxId %d, txAmount %d\n", blockNumber, blockHash, baseTxId, txAmount)
+		_, baseTxId, txCount := rawdb.ReadBody(tx, blockHash, blockNumber)
+		fmt.Printf("Body %d %x: baseTxId %d, txCount %d\n", blockNumber, blockHash, baseTxId, txCount)
 		if hash != blockHash {
 			fmt.Printf("Non-canonical\n")
 			continue
@@ -606,7 +606,7 @@ func extractBodies(datadir string) error {
 				fmt.Printf("Mismatch txId for block %d, txId = %d, baseTxId = %d\n", blockNumber, txId, baseTxId)
 			}
 		}
-		txId = baseTxId + uint64(txAmount) + 2
+		txId = baseTxId + uint64(txCount) + 2
 		if i == 50 {
 			break
 		}
@@ -901,7 +901,7 @@ func trimTxs(chaindata string) error {
 			return err
 		}
 		// Remove from the map
-		toDelete.RemoveRange(body.BaseTxId, body.BaseTxId+uint64(body.TxAmount))
+		toDelete.RemoveRange(body.BaseTxId, body.BaseTxId+uint64(body.TxCount))
 	}
 	fmt.Printf("Number of tx records to delete: %d\n", toDelete.GetCardinality())
 	// Takes 20min to iterate 1.4b
