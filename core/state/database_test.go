@@ -30,7 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	state2 "github.com/ledgerwatch/erigon-lib/state"
+	state3 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
@@ -847,17 +847,17 @@ func TestReproduceCrash(t *testing.T) {
 	storageKey2 := libcommon.HexToHash("0x0e4c0e7175f9d22279a4f63ff74f7fa28b7a954a6454debaa62ce43dd9132542")
 	value2 := uint256.NewInt(0x58c00a51)
 
-	//_, tx := memdb.NewTestTx(t)
 	_, tx, _ := state.NewTestTemporalDb(t)
-	sd, err := state2.NewSharedDomains(tx, log.New())
+	sd, err := state3.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
 	tsw := state.NewWriterV4(sd)
+	tsr := state.NewReaderV4(sd)
 	sd.SetTxNum(1)
 	sd.SetBlockNum(1)
 
-	intraBlockState := state.New(state.NewPlainState(tx, 1, nil))
+	intraBlockState := state.New(tsr)
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
@@ -1248,7 +1248,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	contract := libcommon.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 
 	_, tx, _ := state.NewTestTemporalDb(t)
-	sd, err := state2.NewSharedDomains(tx, log.New())
+	sd, err := state3.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
@@ -1300,7 +1300,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	//root := libcommon.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
 	_, tx, _ := state.NewTestTemporalDb(t)
-	sd, err := state2.NewSharedDomains(tx, log.New())
+	sd, err := state3.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
@@ -1339,7 +1339,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	root := libcommon.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
 	_, tx, _ := state.NewTestTemporalDb(t)
-	sd, err := state2.NewSharedDomains(tx, log.New())
+	sd, err := state3.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
