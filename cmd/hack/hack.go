@@ -530,7 +530,7 @@ func extractBodies(datadir string) error {
 	snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
 		Enabled:    true,
 		KeepBlocks: true,
-		Produce:    false,
+		ProduceE2:  false,
 	}, filepath.Join(datadir, "snapshots"), 0, log.New())
 	snaps.ReopenFolder()
 
@@ -541,11 +541,11 @@ func extractBodies(datadir string) error {
 			var lastBlockNum, lastBaseTxNum, lastAmount uint64
 			var prevBlockNum, prevBaseTxNum, prevAmount uint64
 			first := true
-			sn.Iterate(func(blockNum uint64, baseTxNum uint64, txAmount uint64) error {
+			sn.Iterate(func(blockNum uint64, baseTxNum uint64, txCount uint64) error {
 				if first {
 					firstBlockNum = blockNum
 					firstBaseTxNum = baseTxNum
-					firstAmount = txAmount
+					firstAmount = txCount
 					first = false
 				} else {
 					if blockNum != prevBlockNum+1 {
@@ -559,8 +559,8 @@ func extractBodies(datadir string) error {
 				lastBlockNum = blockNum
 				prevBaseTxNum = baseTxNum
 				lastBaseTxNum = baseTxNum
-				prevAmount = txAmount
-				lastAmount = txAmount
+				prevAmount = txCount
+				lastAmount = txCount
 				return nil
 			})
 			fmt.Printf("Seg: [%d, %d, %d] => [%d, %d, %d]\n", firstBlockNum, firstBaseTxNum, firstAmount, lastBlockNum, lastBaseTxNum, lastAmount)
@@ -594,8 +594,8 @@ func extractBodies(datadir string) error {
 		if hash, err = br.CanonicalHash(context.Background(), tx, blockNumber); err != nil {
 			return err
 		}
-		_, baseTxnID, txAmount := rawdb.ReadBody(tx, blockHash, blockNumber)
-		fmt.Printf("Body %d %x: baseTxnID %d, txAmount %d\n", blockNumber, blockHash, baseTxnID, txAmount)
+		_, baseTxnID, txCount := rawdb.ReadBody(tx, blockHash, blockNumber)
+		fmt.Printf("Body %d %x: baseTxnID %d, txCount %d\n", blockNumber, blockHash, baseTxnID, txCount)
 		if hash != blockHash {
 			fmt.Printf("Non-canonical\n")
 			continue
@@ -606,7 +606,7 @@ func extractBodies(datadir string) error {
 				fmt.Printf("Mismatch txnID for block %d, txnID = %d, baseTxnID = %d\n", blockNumber, txnID, baseTxnID)
 			}
 		}
-		txnID = baseTxnID + uint64(txAmount) + 2
+		txnID = baseTxnID + uint64(txCount) + 2
 		if i == 50 {
 			break
 		}
@@ -901,7 +901,7 @@ func trimTxs(chaindata string) error {
 			return err
 		}
 		// Remove from the map
-		toDelete.RemoveRange(body.BaseTxnID.U64(), body.BaseTxnID.LastSystemTx(body.TxAmount)+1) //+1 to include last system tx in block into delete range
+		toDelete.RemoveRange(body.BaseTxnID.U64(), body.BaseTxnID.LastSystemTx(body.TxCount)+1) //+1 to include last system tx in block into delete range
 	}
 	fmt.Printf("Number of tx records to delete: %d\n", toDelete.GetCardinality())
 	// Takes 20min to iterate 1.4b

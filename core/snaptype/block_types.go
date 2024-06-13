@@ -232,7 +232,7 @@ var (
 						}
 
 						// TODO review this code, test pass with lhs+1 <= baseTxnID.U64()+ti
-						for body.BaseTxnID.LastSystemTx(body.TxAmount) < baseTxnID.U64()+ti { // skip empty blocks; ti here is not transaction index in one block, but total transaction index counter
+						for body.BaseTxnID.LastSystemTx(body.TxCount) < baseTxnID.U64()+ti { // skip empty blocks; ti here is not transaction index in one block, but total transaction index counter
 							if !bodyGetter.HasNext() {
 								return fmt.Errorf("not enough bodies")
 							}
@@ -330,6 +330,6 @@ func txsAmountBasedOnBodiesSnapshots(bodiesSegment *seg.Decompressor, len uint64
 
 	// TODO: check if it is correct
 	magic := uint64(1)
-	expectedCount = int(lastBody.BaseTxnID.LastSystemTx(lastBody.TxAmount) + magic - firstBody.BaseTxnID.U64())
+	expectedCount = int(lastBody.BaseTxnID.LastSystemTx(lastBody.TxCount) + magic - firstBody.BaseTxnID.U64())
 	return
 }

@@ -194,7 +194,7 @@ func TestDump(t *testing.T) {
 					i++
 					body := &types.BodyForStorage{}
 					require.NoError(rlp.DecodeBytes(v, body))
-					txsAmount += uint64(body.TxAmount)
+					txsAmount += uint64(body.TxCount)
 					baseIdList = append(baseIdList, body.BaseTxnID.U64())
 					return nil
 				}, 1, log.LvlInfo, log.New())
@@ -210,7 +210,7 @@ func TestDump(t *testing.T) {
 				i++
 				body := &types.BodyForStorage{}
 				require.NoError(rlp.DecodeBytes(v, body))
-				txsAmount += uint64(body.TxAmount)
+				txsAmount += uint64(body.TxCount)
 				baseIdList = append(baseIdList, body.BaseTxnID.U64())
 				return nil
 			}, 1, log.LvlInfo, log.New())
