@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -79,6 +80,7 @@ func ProcessBlindedBlock(impl BlockProcessor, s abstract.BeaconState, signedBloc
 		// Process the execution payload. Note that the execution payload does not contain txs and withdrawals.
 		partialExecutionBody = block.Body.Full(nil, nil)
 	)
+	log.Info("processBlindedBlock", "header", block.Body.ExecutionPayload)
 
 	// Check the state version is correct.
 	if signedBlock.Version() != version {
