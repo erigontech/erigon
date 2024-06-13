@@ -199,7 +199,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
-	var unwindToGenesis bool
 	if fcuHeader.Number.Uint64() > 0 {
 		if canonicalHash == blockHash {
 			// if block hash is part of the canonical chain treat it as no-op.
@@ -284,10 +283,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				return
 			}
 		}
-		if e.executionPipeline.HasUnwindPoint() {
-			unwindToGenesis = e.executionPipeline.UnwindPoint() == 0
-		}
-
 		// Run the unwind
 		if err := e.executionPipeline.RunUnwind(e.db, wrap.TxContainer{Tx: tx}); err != nil {
 			err = fmt.Errorf("updateForkChoice: %w", err)
@@ -367,7 +362,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
-	if blockHash == e.forkValidator.ExtendingForkHeadHash() && !unwindToGenesis {
+	if blockHash == e.forkValidator.ExtendingForkHeadHash() {
 		e.logger.Info("[updateForkchoice] Fork choice update: flushing in-memory state (built by previous newPayload)")
 		if err := e.forkValidator.FlushExtendingFork(tx, e.accumulator); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
