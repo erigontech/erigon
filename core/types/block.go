@@ -672,7 +672,7 @@ func (b BaseTxnID) At(ti int) uint64 { return b.First() + uint64(ti) }
 func (b BaseTxnID) FirstSystemTx() BaseTxnID { return b }
 
 // LastSystemTx returns last system tx number in block. result+1 will be baseID of next block a.k.a. beginning system tx number
-// Supposed that txAmount includes 2 system txns.jk
+// Supposed that txAmount includes 2 system txns.
 func (b BaseTxnID) LastSystemTx(txAmount uint32) uint64 { return b.U64() + uint64(txAmount) - 1 }
 
 type BodyForStorage struct {
