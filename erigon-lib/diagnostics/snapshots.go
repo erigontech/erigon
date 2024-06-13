@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/diag/util"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -53,7 +52,7 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 
 				downloadedPercent := getPercentDownloaded(info.Downloaded, info.Total)
 				remainingBytes := info.Total - info.Downloaded
-				downloadTimeLeft := util.CalculateTime(remainingBytes, info.DownloadRate)
+				downloadTimeLeft := CalculateTime(remainingBytes, info.DownloadRate)
 				totalDownloadTimeString := time.Duration(info.TotalTime) * time.Second
 
 				d.updateSnapshotStageStats(SyncStageStats{
