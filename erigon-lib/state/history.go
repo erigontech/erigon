@@ -142,8 +142,8 @@ func (h *History) vAccessorFilePath(fromStep, toStep uint64) string {
 // It's ok if some files was open earlier.
 // If some file already open: noop.
 // If some file already open but not in provided list: close and remove from `files` field.
-func (h *History) OpenList(idxFiles, histNames []string, readonly bool) error {
-	if err := h.InvertedIndex.OpenList(idxFiles, readonly); err != nil {
+func (h *History) OpenList(idxFiles, histNames []string) error {
+	if err := h.InvertedIndex.OpenList(idxFiles); err != nil {
 		return err
 	}
 	return h.openList(histNames)
@@ -164,7 +164,7 @@ func (h *History) OpenFolder(readonly bool) error {
 	if err != nil {
 		return err
 	}
-	return h.OpenList(idxFiles, histFiles, readonly)
+	return h.OpenList(idxFiles, histFiles)
 }
 
 // scanStateFiles
@@ -276,7 +276,7 @@ func (h *History) openFiles() error {
 }
 
 func (h *History) closeWhatNotInList(fNames []string) {
-	var toDelete []*filesItem
+	var toClose []*filesItem
 	h.dirtyFiles.Walk(func(items []*filesItem) bool {
 	Loop1:
 		for _, item := range items {
@@ -285,11 +285,11 @@ func (h *History) closeWhatNotInList(fNames []string) {
 					continue Loop1
 				}
 			}
-			toDelete = append(toDelete, item)
+			toClose = append(toClose, item)
 		}
 		return true
 	})
-	for _, item := range toDelete {
+	for _, item := range toClose {
 		item.closeFiles()
 		h.dirtyFiles.Delete(item)
 	}
@@ -309,7 +309,7 @@ func (ht *HistoryRoTx) Files() (res []string) {
 	return append(res, ht.iit.Files()...)
 }
 
-func (h *History) missedIdxFiles() (l []*filesItem) {
+func (h *History) missedAccessors() (l []*filesItem) {
 	h.dirtyFiles.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
@@ -426,9 +426,9 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	return historyIdxPath, nil
 }
 
-func (h *History) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
-	h.InvertedIndex.BuildMissedIndices(ctx, g, ps)
-	missedFiles := h.missedIdxFiles()
+func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
+	h.InvertedIndex.BuildMissedAccessors(ctx, g, ps)
+	missedFiles := h.missedAccessors()
 	for _, item := range missedFiles {
 		item := item
 		g.Go(func() error {
@@ -860,7 +860,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		return HistoryFiles{}, fmt.Errorf("open %s .ef history decompressor: %w", h.filenameBase, err)
 	}
 	{
-		if err := h.InvertedIndex.buildMapIdx(ctx, step, step+1, efHistoryDecomp, ps); err != nil {
+		if err := h.InvertedIndex.buildMapAccessor(ctx, step, step+1, efHistoryDecomp, ps); err != nil {
 			return HistoryFiles{}, fmt.Errorf("build %s .ef history idx: %w", h.filenameBase, err)
 		}
 		if efHistoryIdx, err = recsplit.OpenIndex(h.InvertedIndex.efAccessorFilePath(step, step+1)); err != nil {
