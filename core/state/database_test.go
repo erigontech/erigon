@@ -570,7 +570,6 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-
 	// REORG of block 2 and 3, and insert new (empty) BLOCK 2, 3, and 4
 	if err = m.InsertChain(longerChain.Slice(1, 4)); err != nil {
 		t.Fatal(err)
