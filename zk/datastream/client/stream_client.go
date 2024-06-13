@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/ledgerwatch/erigon/zk/datastream/proto/github.com/0xPolygonHermez/zkevm-node/state/datastream"
+	"github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -60,7 +60,7 @@ const (
 
 // Creates a new client fo datastream
 // server must be in format "url:port"
-func NewClient(ctx context.Context, server string, version int, checkTimeout time.Duration) *StreamClient {
+func NewClient(ctx context.Context, server string, version int, checkTimeout time.Duration, latestDownloadedForkId uint16) *StreamClient {
 	c := &StreamClient{
 		ctx:            ctx,
 		checkTimeout:   checkTimeout,
@@ -71,6 +71,7 @@ func NewClient(ctx context.Context, server string, version int, checkTimeout tim
 		batchStartChan: make(chan types.BatchStart, 1000),
 		l2BlockChan:    make(chan types.FullL2Block, 100000),
 		gerUpdatesChan: make(chan types.GerUpdate, 1000),
+		currentFork:    uint64(latestDownloadedForkId),
 	}
 
 	return c
@@ -365,6 +366,11 @@ func (c *StreamClient) readFullL2Blocks(l2BlocksAmount int) (*[]types.FullL2Bloc
 			return nil, nil, nil, nil, 0, fmt.Errorf("failed to read full block: %v", err)
 		}
 
+		// skip over bookmarks (but only when fullblock is nil or will miss l2 blocks)
+		if (batchBookmark != nil || blockBookmark != nil) && fullBlock == nil {
+			continue
+		}
+
 		if fromEntry == 0 {
 			fromEntry = fe
 		}
@@ -373,9 +379,15 @@ func (c *StreamClient) readFullL2Blocks(l2BlocksAmount int) (*[]types.FullL2Bloc
 			totalGerUpdates = append(totalGerUpdates, *gerUpdates...)
 		}
 		entriesRead += er
-		fullL2Blocks = append(fullL2Blocks, *fullBlock)
-		batchBookmarks = append(batchBookmarks, *batchBookmark)
-		blockBookmarks = append(blockBookmarks, *blockBookmark)
+		if fullBlock != nil {
+			fullL2Blocks = append(fullL2Blocks, *fullBlock)
+		}
+		if batchBookmark != nil {
+			batchBookmarks = append(batchBookmarks, *batchBookmark)
+		}
+		if blockBookmark != nil {
+			blockBookmarks = append(blockBookmarks, *blockBookmark)
+		}
 	}
 
 	return &fullL2Blocks, &totalGerUpdates, batchBookmarks, blockBookmarks, entriesRead, nil

@@ -6,10 +6,10 @@ import (
 
 	"github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/ledgerwatch/erigon/zk/datastream/client"
+	"github.com/ledgerwatch/erigon/zk/datastream/proto/github.com/0xPolygonHermez/zkevm-node/state/datastream"
 	"github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/ledgerwatch/erigon/zk/debug_tools"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/ledgerwatch/erigon/zk/datastream/proto/github.com/0xPolygonHermez/zkevm-node/state/datastream"
 )
 
 const localDatastream = "localhost:6900"
@@ -25,8 +25,8 @@ func main() {
 	}
 
 	// Create client
-	localClient := client.NewClient(ctx, localDatastream, 3, 500)
-	remoteClient := client.NewClient(ctx, cfg.Datastream, 3, 500)
+	localClient := client.NewClient(ctx, localDatastream, 3, 500, 0)
+	remoteClient := client.NewClient(ctx, cfg.Datastream, 3, 500, 0)
 
 	// Start client (connect to the server)
 	defer localClient.Stop()

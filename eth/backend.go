@@ -884,8 +884,11 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			  ZZZZZZZ  K   K  R   R   P       CCCC
 
 			*/
-
-			streamClient := initDataStreamClient(ctx, cfg.Zk)
+			latestForkId, err := stages.GetStageProgress(tx, stages.ForkId)
+			if err != nil {
+				return nil, err
+			}
+			streamClient := initDataStreamClient(ctx, cfg.Zk, uint16(latestForkId))
 
 			backend.syncStages = stages2.NewDefaultZkStages(
 				backend.sentryCtx,
@@ -942,12 +945,12 @@ func newEtherMan(cfg *ethconfig.Config, l2ChainName, url string) *etherman.Clien
 }
 
 // creates a datastream client with default parameters
-func initDataStreamClient(ctx context.Context, cfg *ethconfig.Zk) *client.StreamClient {
+func initDataStreamClient(ctx context.Context, cfg *ethconfig.Zk, latestForkId uint16) *client.StreamClient {
 	// datastream
 	// Create client
 	log.Info("Starting datastream client...")
 	// retry connection
-	datastreamClient := client.NewClient(ctx, cfg.L2DataStreamerUrl, cfg.DatastreamVersion, cfg.L2DataStreamerTimeout)
+	datastreamClient := client.NewClient(ctx, cfg.L2DataStreamerUrl, cfg.DatastreamVersion, cfg.L2DataStreamerTimeout, latestForkId)
 
 	for i := 0; i < 30; i++ {
 		// Start client (connect to the server)
