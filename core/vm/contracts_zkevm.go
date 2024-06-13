@@ -409,8 +409,9 @@ func (c *bn256AddIstanbul_zkevm) Run(input []byte) ([]byte, error) {
 	}
 
 	//increment the counters
-	c.cc.preECAdd()
-
+	if c.cc != nil {
+		c.cc.preECAdd()
+	}
 	return runBn256Add(input)
 }
 
@@ -443,8 +444,9 @@ func (c *bn256AddByzantium_zkevm) Run(input []byte) ([]byte, error) {
 	}
 
 	//increment the counters
-	c.cc.preECAdd()
-
+	if c.cc != nil {
+		c.cc.preECAdd()
+	}
 	return runBn256Add(input)
 }
 
@@ -477,8 +479,9 @@ func (c *bn256ScalarMulIstanbul_zkevm) Run(input []byte) ([]byte, error) {
 	}
 
 	//increment the counters
-	c.cc.preECMul()
-
+	if c.cc != nil {
+		c.cc.preECMul()
+	}
 	return runBn256ScalarMul(input)
 }
 
@@ -510,8 +513,9 @@ func (c *bn256ScalarMulByzantium_zkevm) Run(input []byte) ([]byte, error) {
 	}
 
 	//increment the counters
-	c.cc.preECMul()
-
+	if c.cc != nil {
+		c.cc.preECMul()
+	}
 	return runBn256ScalarMul(input)
 }
 
@@ -542,11 +546,12 @@ func (c *bn256PairingIstanbul_zkevm) Run(input []byte) ([]byte, error) {
 		return []byte{}, ErrUnsupportedPrecompile
 	}
 
-	//increment the counters
-	// no need to care about non-divisible-by-192, because bn128.pairing will properly fail in that case
-	inputDataSize := len(input) / 192
-	c.cc.preECPairing(inputDataSize)
-
+	if c.cc != nil {
+		//increment the counters
+		// no need to care about non-divisible-by-192, because bn128.pairing will properly fail in that case
+		inputDataSize := len(input) / 192
+		c.cc.preECPairing(inputDataSize)
+	}
 	return runBn256Pairing(input)
 }
 
@@ -569,11 +574,12 @@ func (c *bn256PairingByzantium_zkevm) RequiredGas(input []byte) uint64 {
 }
 
 func (c *bn256PairingByzantium_zkevm) Run(input []byte) ([]byte, error) {
-	//increment the counters
-	// no need to care about non-divisible-by-192, because bn128.pairing will properly fail in that case
-	inputDataSize := len(input) / 192
-	c.cc.preECPairing(inputDataSize)
-
+	if c.cc != nil {
+		//increment the counters
+		// no need to care about non-divisible-by-192, because bn128.pairing will properly fail in that case
+		inputDataSize := len(input) / 192
+		c.cc.preECPairing(inputDataSize)
+	}
 	return runBn256Pairing(input)
 }
 
