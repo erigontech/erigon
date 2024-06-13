@@ -3,8 +3,6 @@ package server
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
-
 	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
@@ -227,13 +225,26 @@ func (srv *DataStreamServer) CreateStreamEntriesProto(
 	// we might have a series of empty batches to account for, so we need to know the gap
 	batchGap := batchNumber - lastBatchNumber
 
+	batchesToForks := make(map[uint64]uint64)
+	for i := lastBatchNumber + 1; i <= batchNumber; i++ {
+		forkId, err := reader.GetForkId(i)
+		if err != nil {
+			return nil, err
+		}
+		batchesToForks[i] = forkId
+	}
+
 	if batchNumber != lastBatchNumber {
 		// we will add in a batch bookmark and a batch start entry
 		entryCount += 2
 
 		// a gap of 1 is normal but if greater than we need to account for the empty batches which will each
-		// have a batch bookmark, batch start and batch end
-		entryCount += int(3 * (batchGap - 1))
+		// have a batch bookmark, batch start and batch end - but only if we're operating pre-etrog
+		for i := lastBatchNumber + 1; i < batchNumber; i++ {
+			if batchesToForks[i] < EtrogBatchNumber {
+				entryCount += 3
+			}
+		}
 	}
 
 	if isBatchEnd {
@@ -248,6 +259,13 @@ func (srv *DataStreamServer) CreateStreamEntriesProto(
 		if batchGap > 1 {
 			for i := 1; i < int(batchGap); i++ {
 				workingBatch := lastBatchNumber + uint64(i)
+
+				// check the fork of the batch being skipped - if it is etrog+ then we can skip this
+				// as we don't want empty batches there
+				workingFork := batchesToForks[workingBatch]
+				if workingFork >= EtrogBatchNumber {
+					continue
+				}
 
 				// bookmark for new batch
 				err = srv.addBatchStartEntries(reader, workingBatch, entries)
@@ -318,14 +336,7 @@ func (srv *DataStreamServer) CreateStreamEntriesProto(
 		}
 	}
 
-	forkId, err := reader.GetForkId(batchNumber)
-	if err != nil {
-		return nil, err
-	}
-
-	if forkId == 0 {
-		return nil, errors.New("the network cannot have a 0 fork id")
-	}
+	forkId := batchesToForks[batchNumber]
 
 	blockInfoRoot, err := reader.GetBlockInfoRoot(blockNum)
 	if err != nil {
