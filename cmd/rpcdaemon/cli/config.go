@@ -386,7 +386,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if agg, err = libstate.NewAggregator(ctx, cfg.Dirs, config3.HistoryV3AggregationStep, db, logger); err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("create aggregator: %w", err)
 		}
-		_ = agg.OpenFolder(true) //TODO: must use analog of `OptimisticReopenWithDB`
+		_ = agg.OpenFolder() //TODO: must use analog of `OptimisticReopenWithDB`
 
 		db.View(context.Background(), func(tx kv.Tx) error {
 			aggTx := agg.BeginFilesRo()
@@ -416,7 +416,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 				}
 
 				//if err = agg.OpenList(reply.HistoryFiles, true); err != nil {
-				if err = agg.OpenFolder(true); err != nil {
+				if err = agg.OpenFolder(); err != nil {
 					logger.Error("[snapshots] reopen", "err", err)
 				} else {
 					db.View(context.Background(), func(tx kv.Tx) error {

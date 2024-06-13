@@ -34,7 +34,7 @@ var SqueezeCommitmentFiles = Migration{
 			return err
 		}
 		defer agg.Close()
-		if err = agg.OpenFolder(false); err != nil {
+		if err = agg.OpenFolder(); err != nil {
 			return err
 		}
 
