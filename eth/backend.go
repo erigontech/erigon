@@ -351,6 +351,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	if err != nil {
 		return nil, err
 	}
+
 	backend.agg, backend.blockSnapshots, backend.blockReader, backend.blockWriter = agg, allSnapshots, blockReader, blockWriter
 
 	backend.chainDB, err = temporal.New(backend.chainDB, agg)
@@ -1022,7 +1023,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	}
 	// start HTTP API
 	httpRpcCfg := stack.Config().Http
-	ethRpcClient, txPoolRpcClient, miningRpcClient, stateCache, ff, err := cli.EmbeddedServices(ctx, chainKv, httpRpcCfg.StateCache, blockReader, ethBackendRPC,
+	ethRpcClient, txPoolRpcClient, miningRpcClient, stateCache, ff, err := cli.EmbeddedServices(ctx, chainKv, httpRpcCfg.StateCache, httpRpcCfg.RpcFiltersConfig, blockReader, ethBackendRPC,
 		s.txPoolGrpcServer, miningRPC, stateDiffClient, s.logger)
 	if err != nil {
 		return err
@@ -1448,6 +1449,8 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		return nil, nil, nil, nil, nil, err
 	}
 
+	agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
+
 	g := &errgroup.Group{}
 	g.Go(func() error {
 		allSnapshots.OptimisticalyReopenFolder()
@@ -1460,7 +1463,7 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		return nil
 	})
 	g.Go(func() error {
-		return agg.OpenFolder(false)
+		return agg.OpenFolder()
 	})
 	if err = g.Wait(); err != nil {
 		return nil, nil, nil, nil, nil, err

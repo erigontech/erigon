@@ -157,22 +157,21 @@ func (ii *InvertedIndex) fileNamesOnDisk() (idx, hist, domain []string, err erro
 	return
 }
 
-func (ii *InvertedIndex) OpenList(fNames []string, readonly bool) error {
+func (ii *InvertedIndex) OpenList(fNames []string) error {
 	ii.closeWhatNotInList(fNames)
 	ii.scanStateFiles(fNames)
 	if err := ii.openFiles(); err != nil {
 		return fmt.Errorf("NewHistory.openFiles: %w, %s", err, ii.filenameBase)
 	}
-	_ = readonly // for future safety features. RPCDaemon must not delte files
 	return nil
 }
 
-func (ii *InvertedIndex) OpenFolder(readonly bool) error {
+func (ii *InvertedIndex) OpenFolder() error {
 	idxFiles, _, _, err := ii.fileNamesOnDisk()
 	if err != nil {
 		return err
 	}
-	return ii.OpenList(idxFiles, readonly)
+	return ii.OpenList(idxFiles)
 }
 
 func (ii *InvertedIndex) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
@@ -317,7 +316,7 @@ func (ii *InvertedIndex) openFiles() error {
 }
 
 func (ii *InvertedIndex) closeWhatNotInList(fNames []string) {
-	var toDelete []*filesItem
+	var toClose []*filesItem
 	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
 	Loop1:
 		for _, item := range items {
@@ -326,11 +325,11 @@ func (ii *InvertedIndex) closeWhatNotInList(fNames []string) {
 					continue Loop1
 				}
 			}
-			toDelete = append(toDelete, item)
+			toClose = append(toClose, item)
 		}
 		return true
 	})
-	for _, item := range toDelete {
+	for _, item := range toClose {
 		item.closeFiles()
 		ii.dirtyFiles.Delete(item)
 	}
