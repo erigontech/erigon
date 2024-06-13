@@ -502,6 +502,7 @@ func SimpleCounterOperations(cc *CounterCollector) *[256]executionFunc {
 		MSIZE:          cc.opMSize,
 		SLOAD:          cc.opSLoad,
 		SSTORE:         cc.opSSTore,
+		BALANCE:        cc.opBalance,
 	}
 	return calls
 }
@@ -528,8 +529,8 @@ func (cc *CounterCollector) SHRarith() {
 }
 
 func (cc *CounterCollector) SHLarith() {
-	cc.Deduct(S, 40)
-	cc.Deduct(B, 2)
+	cc.Deduct(S, 100)
+	cc.Deduct(B, 4)
 	cc.Deduct(A, 2)
 }
 
@@ -541,7 +542,7 @@ func (cc *CounterCollector) divArith() {
 
 func (cc *CounterCollector) opCode(scope *ScopeContext) {
 	cc.Deduct(S, 12)
-	if scope.Contract.IsCreate {
+	if scope.Contract.IsCreate || scope.Contract.IsCreate2 || cc.isDeploy {
 		cc.mLoadX()
 		cc.SHRarith()
 	}
@@ -643,17 +644,6 @@ func (cc *CounterCollector) finishBatchProcessing() {
 	cc.Deduct(K, 2)
 	cc.Deduct(P, cc.smtLevels)
 	cc.Deduct(B, 1)
-}
-
-func (cc *CounterCollector) decodeChangeL2Block() {
-	cc.Deduct(S, 20)
-	cc.multiCall(cc.addBatchHashData, 3)
-}
-
-func (cc *CounterCollector) invFnEc() {
-	cc.Deduct(S, 12)
-	cc.Deduct(B, 2)
-	cc.Deduct(A, 2)
 }
 
 func (cc *CounterCollector) isColdAddress() {

@@ -22,8 +22,8 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/holiman/uint256"
 	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -35,8 +35,15 @@ import (
 	//lint:ignore SA1019 Needed for precompile
 )
 
+type PrecompiledContract_zkEvm interface {
+	RequiredGas(input []byte) uint64  // RequiredPrice calculates the contract gas use
+	Run(input []byte) ([]byte, error) // Run runs the precompiled contract
+	SetCounterCollector(cc *CounterCollector)
+	SetOutputLength(outLength int)
+}
+
 // PrecompiledContractsForkID5Dragonfruit contains the default set of pre-compiled ForkID5 Dragonfruit
-var PrecompiledContractsForkID5Dragonfruit = map[libcommon.Address]PrecompiledContract{
+var PrecompiledContractsForkID5Dragonfruit = map[libcommon.Address]PrecompiledContract_zkEvm{
 	libcommon.BytesToAddress([]byte{1}): &ecrecover_zkevm{enabled: true},
 	libcommon.BytesToAddress([]byte{2}): &sha256hash_zkevm{},
 	libcommon.BytesToAddress([]byte{3}): &ripemd160hash_zkevm{},
@@ -49,7 +56,7 @@ var PrecompiledContractsForkID5Dragonfruit = map[libcommon.Address]PrecompiledCo
 }
 
 // PrecompiledContractForkID7Etrog contains the default set of pre-compiled ForkID7 Etrog.
-var PrecompiledContractForkID7Etrog = map[libcommon.Address]PrecompiledContract{
+var PrecompiledContractForkID7Etrog = map[libcommon.Address]PrecompiledContract_zkEvm{
 	libcommon.BytesToAddress([]byte{1}): &ecrecover_zkevm{enabled: true},
 	libcommon.BytesToAddress([]byte{2}): &sha256hash_zkevm{enabled: true},
 	libcommon.BytesToAddress([]byte{3}): &ripemd160hash_zkevm{enabled: false},
@@ -62,7 +69,7 @@ var PrecompiledContractForkID7Etrog = map[libcommon.Address]PrecompiledContract{
 }
 
 // PrecompiledContractsForkID8 contains the default set of pre-compiled ForkID8.
-var PrecompiledContractsForkID88Elderberry = map[libcommon.Address]PrecompiledContract{
+var PrecompiledContractsForkID8Elderberry = map[libcommon.Address]PrecompiledContract_zkEvm{
 	libcommon.BytesToAddress([]byte{1}): &ecrecover_zkevm{enabled: true},
 	libcommon.BytesToAddress([]byte{2}): &sha256hash_zkevm{enabled: true},
 	libcommon.BytesToAddress([]byte{3}): &ripemd160hash_zkevm{enabled: false},
@@ -77,8 +84,15 @@ var PrecompiledContractsForkID88Elderberry = map[libcommon.Address]PrecompiledCo
 // ECRECOVER implemented as a native contract.
 type ecrecover_zkevm struct {
 	enabled bool
+	cc      *CounterCollector
 }
 
+func (c *ecrecover_zkevm) SetCounterCollector(cc *CounterCollector) {
+	c.cc = cc
+}
+
+func (c *ecrecover_zkevm) SetOutputLength(outLength int) {
+}
 func (c *ecrecover_zkevm) RequiredGas(input []byte) uint64 {
 	if !c.enabled {
 		return 0
@@ -107,6 +121,10 @@ func (c *ecrecover_zkevm) Run(input []byte) ([]byte, error) {
 	s := new(uint256.Int).SetBytes(input[96:128])
 	v := input[63] - 27
 
+	if c.cc != nil {
+		c.cc.preEcRecover(new(uint256.Int).SetBytes([]byte{v}), r, s)
+	}
+
 	// tighter sig s values input homestead only apply to tx sigs
 	if !allZero(input[32:63]) || !crypto.ValidateSignatureValues(v, r, s, false) {
 		return nil, nil
@@ -130,6 +148,14 @@ func (c *ecrecover_zkevm) Run(input []byte) ([]byte, error) {
 // SHA256 implemented as a native contract.
 type sha256hash_zkevm struct {
 	enabled bool
+	cc      *CounterCollector
+}
+
+func (c *sha256hash_zkevm) SetCounterCollector(cc *CounterCollector) {
+	c.cc = cc
+}
+
+func (c *sha256hash_zkevm) SetOutputLength(outLength int) {
 }
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
@@ -148,12 +174,24 @@ func (c *sha256hash_zkevm) Run(input []byte) ([]byte, error) {
 		return []byte{}, ErrUnsupportedPrecompile
 	}
 	h := sha256.Sum256(input)
+
+	if c.cc != nil {
+		c.cc.preSha256(len(input))
+	}
+
 	return h[:], nil
 }
 
 // RIPEMD160 implemented as a native contract.
 type ripemd160hash_zkevm struct {
 	enabled bool
+}
+
+// ripemd160hash doesn't have counters
+func (c *ripemd160hash_zkevm) SetCounterCollector(cc *CounterCollector) {
+}
+
+func (c *ripemd160hash_zkevm) SetOutputLength(outLength int) {
 }
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
@@ -179,6 +217,14 @@ func (c *ripemd160hash_zkevm) Run(input []byte) ([]byte, error) {
 // data copy implemented as a native contract.
 type dataCopy_zkevm struct {
 	enabled bool
+	cc      *CounterCollector
+}
+
+func (c *dataCopy_zkevm) SetCounterCollector(cc *CounterCollector) {
+	c.cc = cc
+}
+
+func (c *dataCopy_zkevm) SetOutputLength(outLength int) {
 }
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
@@ -202,6 +248,16 @@ func (c *dataCopy_zkevm) Run(in []byte) ([]byte, error) {
 type bigModExp_zkevm struct {
 	eip2565 bool
 	enabled bool
+	cc      *CounterCollector
+	outLen  int
+}
+
+func (c *bigModExp_zkevm) SetCounterCollector(cc *CounterCollector) {
+	c.cc = cc
+}
+
+func (c *bigModExp_zkevm) SetOutputLength(outLength int) {
+	c.outLen = outLength
 }
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
@@ -318,6 +374,10 @@ func (c *bigModExp_zkevm) Run(input []byte) ([]byte, error) {
 		// Modulo is odd
 		v = base.Exp(base, exp, mod).Bytes()
 	}
+
+	if c.cc != nil {
+		c.cc.preModExp(len(input), c.outLen, int(baseLen), int(modLen), int(expLen), base, exp, mod)
+	}
 	return common.LeftPadBytes(v, int(modLen)), nil
 }
 
@@ -325,6 +385,14 @@ func (c *bigModExp_zkevm) Run(input []byte) ([]byte, error) {
 // Istanbul consensus rules.
 type bn256AddIstanbul_zkevm struct {
 	enabled bool
+	cc      *CounterCollector
+}
+
+func (c *bn256AddIstanbul_zkevm) SetCounterCollector(cc *CounterCollector) {
+	c.cc = cc
+}
+
+func (c *bn256AddIstanbul_zkevm) SetOutputLength(outLength int) {
 }
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
@@ -340,6 +408,9 @@ func (c *bn256AddIstanbul_zkevm) Run(input []byte) ([]byte, error) {
 		return []byte{}, ErrUnsupportedPrecompile
 	}
 
+	//increment the counters
+	c.cc.preECAdd()
+
 	return runBn256Add(input)
 }
 
@@ -347,6 +418,14 @@ func (c *bn256AddIstanbul_zkevm) Run(input []byte) ([]byte, error) {
 // conforming to Byzantium consensus rules.
 type bn256AddByzantium_zkevm struct {
 	enabled bool
+	cc      *CounterCollector
+}
+
+func (c *bn256AddByzantium_zkevm) SetCounterCollector(cc *CounterCollector) {
+	c.cc = cc
+}
+
+func (c *bn256AddByzantium_zkevm) SetOutputLength(outLength int) {
 }
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
@@ -362,6 +441,10 @@ func (c *bn256AddByzantium_zkevm) Run(input []byte) ([]byte, error) {
 	if !c.enabled {
 		return []byte{}, ErrUnsupportedPrecompile
 	}
+
+	//increment the counters
+	c.cc.preECAdd()
+
 	return runBn256Add(input)
 }
 
@@ -369,6 +452,14 @@ func (c *bn256AddByzantium_zkevm) Run(input []byte) ([]byte, error) {
 // multiplication conforming to Istanbul consensus rules.
 type bn256ScalarMulIstanbul_zkevm struct {
 	enabled bool
+	cc      *CounterCollector
+}
+
+func (c *bn256ScalarMulIstanbul_zkevm) SetCounterCollector(cc *CounterCollector) {
+	c.cc = cc
+}
+
+func (c *bn256ScalarMulIstanbul_zkevm) SetOutputLength(outLength int) {
 }
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
@@ -385,6 +476,9 @@ func (c *bn256ScalarMulIstanbul_zkevm) Run(input []byte) ([]byte, error) {
 		return []byte{}, ErrUnsupportedPrecompile
 	}
 
+	//increment the counters
+	c.cc.preECMul()
+
 	return runBn256ScalarMul(input)
 }
 
@@ -392,6 +486,14 @@ func (c *bn256ScalarMulIstanbul_zkevm) Run(input []byte) ([]byte, error) {
 // multiplication conforming to Byzantium consensus rules.
 type bn256ScalarMulByzantium_zkevm struct {
 	enabled bool
+	cc      *CounterCollector
+}
+
+func (c *bn256ScalarMulByzantium_zkevm) SetCounterCollector(cc *CounterCollector) {
+	c.cc = cc
+}
+
+func (c *bn256ScalarMulByzantium_zkevm) SetOutputLength(outLength int) {
 }
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
@@ -406,6 +508,10 @@ func (c *bn256ScalarMulByzantium_zkevm) Run(input []byte) ([]byte, error) {
 	if !c.enabled {
 		return []byte{}, ErrUnsupportedPrecompile
 	}
+
+	//increment the counters
+	c.cc.preECMul()
+
 	return runBn256ScalarMul(input)
 }
 
@@ -413,6 +519,14 @@ func (c *bn256ScalarMulByzantium_zkevm) Run(input []byte) ([]byte, error) {
 // conforming to Istanbul consensus rules.
 type bn256PairingIstanbul_zkevm struct {
 	enabled bool
+	cc      *CounterCollector
+}
+
+func (c *bn256PairingIstanbul_zkevm) SetCounterCollector(cc *CounterCollector) {
+	c.cc = cc
+}
+
+func (c *bn256PairingIstanbul_zkevm) SetOutputLength(outLength int) {
 }
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
@@ -427,12 +541,27 @@ func (c *bn256PairingIstanbul_zkevm) Run(input []byte) ([]byte, error) {
 	if !c.enabled {
 		return []byte{}, ErrUnsupportedPrecompile
 	}
+
+	//increment the counters
+	// no need to care about non-divisible-by-192, because bn128.pairing will properly fail in that case
+	inputDataSize := len(input) / 192
+	c.cc.preECPairing(inputDataSize)
+
 	return runBn256Pairing(input)
 }
 
 // bn256PairingByzantium implements a pairing pre-compile for the bn256 curve
 // conforming to Byzantium consensus rules.
-type bn256PairingByzantium_zkevm struct{}
+type bn256PairingByzantium_zkevm struct {
+	cc *CounterCollector
+}
+
+func (c *bn256PairingByzantium_zkevm) SetCounterCollector(cc *CounterCollector) {
+	c.cc = cc
+}
+
+func (c *bn256PairingByzantium_zkevm) SetOutputLength(outLength int) {
+}
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
 func (c *bn256PairingByzantium_zkevm) RequiredGas(input []byte) uint64 {
@@ -440,11 +569,24 @@ func (c *bn256PairingByzantium_zkevm) RequiredGas(input []byte) uint64 {
 }
 
 func (c *bn256PairingByzantium_zkevm) Run(input []byte) ([]byte, error) {
+	//increment the counters
+	// no need to care about non-divisible-by-192, because bn128.pairing will properly fail in that case
+	inputDataSize := len(input) / 192
+	c.cc.preECPairing(inputDataSize)
+
 	return runBn256Pairing(input)
 }
 
 type blake2F_zkevm struct {
 	enabled bool
+	cc      *CounterCollector
+}
+
+func (c *blake2F_zkevm) SetCounterCollector(cc *CounterCollector) {
+	c.cc = cc
+}
+
+func (c *blake2F_zkevm) SetOutputLength(outLength int) {
 }
 
 func (c *blake2F_zkevm) RequiredGas(input []byte) uint64 {
@@ -503,7 +645,16 @@ func (c *blake2F_zkevm) Run(input []byte) ([]byte, error) {
 }
 
 // bls12381G1Add implements EIP-2537 G1Add precompile.
-type bls12381G1Add_zkevm struct{}
+type bls12381G1Add_zkevm struct {
+	cc *CounterCollector
+}
+
+func (c *bls12381G1Add_zkevm) SetCounterCollector(cc *CounterCollector) {
+	c.cc = cc
+}
+
+func (c *bls12381G1Add_zkevm) SetOutputLength(outLength int) {
+}
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
 func (c *bls12381G1Add_zkevm) RequiredGas(input []byte) uint64 {
@@ -541,7 +692,16 @@ func (c *bls12381G1Add_zkevm) Run(input []byte) ([]byte, error) {
 }
 
 // bls12381G1Mul implements EIP-2537 G1Mul precompile.
-type bls12381G1Mul_zkevm struct{}
+type bls12381G1Mul_zkevm struct {
+	cc *CounterCollector
+}
+
+func (c *bls12381G1Mul_zkevm) SetCounterCollector(cc *CounterCollector) {
+	c.cc = cc
+}
+
+func (c *bls12381G1Mul_zkevm) SetOutputLength(outLength int) {
+}
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
 func (c *bls12381G1Mul_zkevm) RequiredGas(input []byte) uint64 {
@@ -577,7 +737,16 @@ func (c *bls12381G1Mul_zkevm) Run(input []byte) ([]byte, error) {
 }
 
 // bls12381G1MultiExp implements EIP-2537 G1MultiExp precompile.
-type bls12381G1MultiExp_zkevm struct{}
+type bls12381G1MultiExp_zkevm struct {
+	cc *CounterCollector
+}
+
+func (c *bls12381G1MultiExp_zkevm) SetCounterCollector(cc *CounterCollector) {
+	c.cc = cc
+}
+
+func (c *bls12381G1MultiExp_zkevm) SetOutputLength(outLength int) {
+}
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
 func (c *bls12381G1MultiExp_zkevm) RequiredGas(input []byte) uint64 {
@@ -636,7 +805,16 @@ func (c *bls12381G1MultiExp_zkevm) Run(input []byte) ([]byte, error) {
 }
 
 // bls12381G2Add implements EIP-2537 G2Add precompile.
-type bls12381G2Add_zkevm struct{}
+type bls12381G2Add_zkevm struct {
+	cc *CounterCollector
+}
+
+func (c *bls12381G2Add_zkevm) SetCounterCollector(cc *CounterCollector) {
+	c.cc = cc
+}
+
+func (c *bls12381G2Add_zkevm) SetOutputLength(outLength int) {
+}
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
 func (c *bls12381G2Add_zkevm) RequiredGas(input []byte) uint64 {
@@ -674,7 +852,16 @@ func (c *bls12381G2Add_zkevm) Run(input []byte) ([]byte, error) {
 }
 
 // bls12381G2Mul implements EIP-2537 G2Mul precompile.
-type bls12381G2Mul_zkevm struct{}
+type bls12381G2Mul_zkevm struct {
+	cc *CounterCollector
+}
+
+func (c *bls12381G2Mul_zkevm) SetCounterCollector(cc *CounterCollector) {
+	c.cc = cc
+}
+
+func (c *bls12381G2Mul_zkevm) SetOutputLength(outLength int) {
+}
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
 func (c *bls12381G2Mul_zkevm) RequiredGas(input []byte) uint64 {
@@ -710,7 +897,16 @@ func (c *bls12381G2Mul_zkevm) Run(input []byte) ([]byte, error) {
 }
 
 // bls12381G2MultiExp implements EIP-2537 G2MultiExp precompile.
-type bls12381G2MultiExp_zkevm struct{}
+type bls12381G2MultiExp_zkevm struct {
+	cc *CounterCollector
+}
+
+func (c *bls12381G2MultiExp_zkevm) SetCounterCollector(cc *CounterCollector) {
+	c.cc = cc
+}
+
+func (c *bls12381G2MultiExp_zkevm) SetOutputLength(outLength int) {
+}
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
 func (c *bls12381G2MultiExp_zkevm) RequiredGas(input []byte) uint64 {
@@ -769,7 +965,16 @@ func (c *bls12381G2MultiExp_zkevm) Run(input []byte) ([]byte, error) {
 }
 
 // bls12381Pairing implements EIP-2537 Pairing precompile.
-type bls12381Pairing_zkevm struct{}
+type bls12381Pairing_zkevm struct {
+	cc *CounterCollector
+}
+
+func (c *bls12381Pairing_zkevm) SetCounterCollector(cc *CounterCollector) {
+	c.cc = cc
+}
+
+func (c *bls12381Pairing_zkevm) SetOutputLength(outLength int) {
+}
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
 func (c *bls12381Pairing_zkevm) RequiredGas(input []byte) uint64 {
@@ -831,7 +1036,16 @@ func (c *bls12381Pairing_zkevm) Run(input []byte) ([]byte, error) {
 }
 
 // bls12381MapG1 implements EIP-2537 MapG1 precompile.
-type bls12381MapG1_zkevm struct{}
+type bls12381MapG1_zkevm struct {
+	cc *CounterCollector
+}
+
+func (c *bls12381MapG1_zkevm) SetCounterCollector(cc *CounterCollector) {
+	c.cc = cc
+}
+
+func (c *bls12381MapG1_zkevm) SetOutputLength(outLength int) {
+}
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
 func (c *bls12381MapG1_zkevm) RequiredGas(input []byte) uint64 {
@@ -866,7 +1080,16 @@ func (c *bls12381MapG1_zkevm) Run(input []byte) ([]byte, error) {
 }
 
 // bls12381MapG2 implements EIP-2537 MapG2 precompile.
-type bls12381MapG2_zkevm struct{}
+type bls12381MapG2_zkevm struct {
+	cc *CounterCollector
+}
+
+func (c *bls12381MapG2_zkevm) SetCounterCollector(cc *CounterCollector) {
+	c.cc = cc
+}
+
+func (c *bls12381MapG2_zkevm) SetOutputLength(outLength int) {
+}
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
 func (c *bls12381MapG2_zkevm) RequiredGas(input []byte) uint64 {

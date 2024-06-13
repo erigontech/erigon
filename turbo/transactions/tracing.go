@@ -227,7 +227,7 @@ func TraceTx(
 	var result *core.ExecutionResult
 	if config != nil && config.BorTx != nil && *config.BorTx {
 		callmsg := prepareCallMessage(message)
-		result, err = statefull.ApplyBorMessage(*vmenv, callmsg)
+		result, err = statefull.ApplyBorMessage(vmenv, callmsg)
 	} else {
 		result, err = core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()), refunds, false /* gasBailout */)
 	}

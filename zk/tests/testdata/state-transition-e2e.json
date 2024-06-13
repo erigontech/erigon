@@ -367,15 +367,19 @@
     "timestampLimit": 1944498031,
     "expectedNewAccInputHash": "0x3a4cec6944500dc8fb7c0ecf6f371c3e60cdd40002d98d0c5e36885b9fbe8cf4",
     "virtualCounters": {
-      "steps": 952639,
+      "steps": 1000519,
       "arith": 13062,
-      "binary": 41032,
+      "binary": 42628,
       "memAlign": 1273,
       "keccaks": 376,
       "padding": 1108,
       "poseidon": 13346,
       "sha256": 0
     },
-    "smtDepths": [8, 8, 10]
+    "smtDepths": [8, 8, 10],    
+    "oldBatchAccInputHash": "0x2761798d338f390fa233a5ff12c7fd6a50ab8a82e559c25e2895516c3e4213c6",
+    "newBatchAccInputHash": "0x8d2a66911f2ef58f3cc3fe33f9c8513c0f9b534b0a448e6789a377db5d580eed",
+    "oldStateRoot": "0x24c02821c526d801fd1d6d99afd57fdf862f4d3e2109fc36eb85bd5e2f5c508e",
+    "newStateRoot": "0x895f95fa944da09237bb1b9711a0e66f7bc3fd27b08eb4e2b2b94726d0b2d0cd"
   }
 ]

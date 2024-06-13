@@ -19,8 +19,8 @@ package vm
 import (
 	"math/big"
 
-	"github.com/holiman/uint256"
 	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/chain"
 
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
@@ -43,7 +43,9 @@ type CallContext interface {
 type VMInterface interface {
 	Reset(txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState)
 	Create(caller ContractRef, code []byte, gas uint64, value *uint256.Int, intrinsicGas uint64) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error)
+	Deploy(caller ContractRef, code []byte, gas uint64, value *uint256.Int, intrinsicGas uint64) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error)
 	Call(caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int, bailout bool, intrinsicGas uint64) (ret []byte, leftOverGas uint64, err error)
+	Call_zkEvm(caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int, bailout bool, intrinsicGas uint64, retSize int) (ret []byte, leftOverGas uint64, err error)
 	Cancel()
 	Config() Config
 	ChainConfig() *chain.Config
@@ -62,5 +64,8 @@ type VMInterpreter interface {
 	StaticCall(caller ContractRef, addr libcommon.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error)
 	DelegateCall(caller ContractRef, addr libcommon.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error)
 	CallCode(caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int) (ret []byte, leftOverGas uint64, err error)
+	StaticCall_zkEvm(caller ContractRef, addr libcommon.Address, input []byte, gas uint64, retSize int) (ret []byte, leftOverGas uint64, err error)
+	DelegateCall_zkEvm(caller ContractRef, addr libcommon.Address, input []byte, gas uint64, retSize int) (ret []byte, leftOverGas uint64, err error)
+	CallCode_zkEvm(caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int, retSize int) (ret []byte, leftOverGas uint64, err error)
 	Create2(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int, salt *uint256.Int) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error)
 }

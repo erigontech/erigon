@@ -22,35 +22,44 @@ import (
 	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 )
 
 // [zkevm] contains the list of zkevm precompiles
-func (evm *EVM) precompile(addr libcommon.Address) (PrecompiledContract, bool) {
-	var precompiles map[libcommon.Address]PrecompiledContract
+func (evm *EVM) precompile(addr libcommon.Address, retSize int) (PrecompiledContract_zkEvm, bool) {
+	var precompiles map[libcommon.Address]PrecompiledContract_zkEvm
 	switch {
 	case evm.chainRules.IsForkID8Elderberry:
-		precompiles = PrecompiledContractsForkID88Elderberry
+		precompiles = PrecompiledContractsForkID8Elderberry
 	case evm.chainRules.IsForkID7Etrog:
 		precompiles = PrecompiledContractForkID7Etrog
 	default:
 		precompiles = PrecompiledContractsForkID5Dragonfruit
 	}
 	p, ok := precompiles[addr]
+
+	if evm.zkConfig != nil && evm.zkConfig.CounterCollector != nil && ok {
+		p.SetCounterCollector(evm.zkConfig.CounterCollector)
+		p.SetOutputLength(retSize)
+	}
+
 	return p, ok
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
 // only ever be used *once*.
 func NewZkEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmtypes.IntraBlockState, chainConfig *chain.Config, zkVmConfig ZkConfig) *EVM {
-	evm := &EVM{
-		context:         blockCtx,
-		txContext:       txCtx,
-		intraBlockState: state,
-		config:          zkVmConfig.Config,
-		chainConfig:     chainConfig,
-		chainRules:      chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time),
-	}
+	evm :=
+		&EVM{
+			context:         blockCtx,
+			txContext:       txCtx,
+			intraBlockState: state,
+			config:          zkVmConfig.Config,
+			chainConfig:     chainConfig,
+			chainRules:      chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time),
+			zkConfig:        &zkVmConfig,
+		}
 
 	// [zkevm] change
 	evm.interpreter = NewZKEVMInterpreter(evm, zkVmConfig)
@@ -58,8 +67,13 @@ func NewZkEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state ev
 	return evm
 }
 
+func (evm *EVM) Deploy(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int, intrinsicGas uint64) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
+	contractAddr = crypto.CreateAddress(caller.Address(), evm.intraBlockState.GetNonce(caller.Address()))
+	return evm.createZkEvm(caller, &codeAndHash{code: code}, gas, endowment, contractAddr, CREATE, true /* incrementNonce */, intrinsicGas, true)
+}
+
 // create creates a new contract using code as deployment code.
-func (evm *EVM) createZkEvm(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value *uint256.Int, address libcommon.Address, typ OpCode, incrementNonce bool, intrinsicGas uint64) ([]byte, libcommon.Address, uint64, error) {
+func (evm *EVM) createZkEvm(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value *uint256.Int, address libcommon.Address, typ OpCode, incrementNonce bool, intrinsicGas uint64, isMsgDeploy bool) ([]byte, libcommon.Address, uint64, error) {
 	var ret []byte
 	var err error
 	var gasConsumption uint64
@@ -123,6 +137,14 @@ func (evm *EVM) createZkEvm(caller ContractRef, codeAndHash *codeAndHash, gas ui
 	contract := NewContract(caller, AccountRef(address), value, gas, evm.config.SkipAnalysis)
 	contract.SetCodeOptionalHash(&address, codeAndHash)
 
+	if !isMsgDeploy {
+		if typ == CREATE {
+			contract.IsCreate = true
+		} else if typ == CREATE2 {
+			contract.IsCreate2 = true
+		}
+	}
+
 	if evm.config.NoRecursion && depth > 0 {
 		return nil, address, gas, nil
 	}
@@ -171,7 +193,39 @@ func (evm *EVM) createZkEvm(caller ContractRef, codeAndHash *codeAndHash, gas ui
 	return ret, address, contract.Gas, err
 }
 
-func (evm *EVM) call_zkevm(typ OpCode, caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int, bailout bool, intrinsicGas uint64) (ret []byte, leftOverGas uint64, err error) {
+func (evm *EVM) Call_zkEvm(caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int, bailout bool, intrinsicGas uint64, retSize int) (ret []byte, leftOverGas uint64, err error) {
+	return evm.call_zkevm(CALL, caller, addr, input, gas, value, bailout, intrinsicGas, retSize)
+}
+
+// CallCode executes the contract associated with the addr with the given input
+// as parameters. It also handles any necessary value transfer required and takes
+// the necessary steps to create accounts and reverses the state in case of an
+// execution error or failed value transfer.
+//
+// CallCode differs from Call in the sense that it executes the given address'
+// code with the caller as context.
+func (evm *EVM) CallCode_zkEvm(caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int, retSize int) (ret []byte, leftOverGas uint64, err error) {
+	return evm.call_zkevm(CALLCODE, caller, addr, input, gas, value, false, 0 /* intrinsicGas is zero here */, retSize)
+}
+
+// DelegateCall executes the contract associated with the addr with the given input
+// as parameters. It reverses the state in case of an execution error.
+//
+// DelegateCall differs from CallCode in the sense that it executes the given address'
+// code with the caller as context and the caller is set to the caller of the caller.
+func (evm *EVM) DelegateCall_zkEvm(caller ContractRef, addr libcommon.Address, input []byte, gas uint64, retSize int) (ret []byte, leftOverGas uint64, err error) {
+	return evm.call_zkevm(DELEGATECALL, caller, addr, input, gas, nil, false, 0 /* intrinsicGas is zero here */, retSize)
+}
+
+// StaticCall executes the contract associated with the addr with the given input
+// as parameters while disallowing any modifications to the state during the call.
+// Opcodes that attempt to perform such modifications will result in exceptions
+// instead of performing the modifications.
+func (evm *EVM) StaticCall_zkEvm(caller ContractRef, addr libcommon.Address, input []byte, gas uint64, retSize int) (ret []byte, leftOverGas uint64, err error) {
+	return evm.call_zkevm(STATICCALL, caller, addr, input, gas, new(uint256.Int), false, 0 /* intrinsicGas is zero here */, retSize)
+}
+
+func (evm *EVM) call_zkevm(typ OpCode, caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int, bailout bool, intrinsicGas uint64, retSize int) (ret []byte, leftOverGas uint64, err error) {
 	depth := evm.interpreter.Depth()
 
 	if evm.config.NoRecursion && depth > 0 {
@@ -189,7 +243,7 @@ func (evm *EVM) call_zkevm(typ OpCode, caller ContractRef, addr libcommon.Addres
 			}
 		}
 	}
-	p, isPrecompile := evm.precompile(addr)
+	p, isPrecompile := evm.precompile(addr, retSize)
 	var code []byte
 	if !isPrecompile {
 		code = evm.intraBlockState.GetCode(addr)

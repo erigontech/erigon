@@ -138,7 +138,7 @@ func MakeHeaderGetter(requireCanonical bool, tx kv.Tx, headerReader services.Hea
 }
 
 type ReusableCaller struct {
-	evm             *vm.EVM
+	evm             vm.VMInterface
 	intraBlockState *state.IntraBlockState
 	gasCap          uint64
 	baseFee         *uint256.Int

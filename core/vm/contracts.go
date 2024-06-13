@@ -22,8 +22,8 @@ import (
 	"errors"
 	"math/big"
 
-	"github.com/holiman/uint256"
 	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/chain"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -139,7 +139,7 @@ func init() {
 	for k := range PrecompiledContractForkID7Etrog {
 		PrecompiledAddressesEtrog = append(PrecompiledAddressesEtrog, k)
 	}
-	for k := range PrecompiledContractsForkID88Elderberry {
+	for k := range PrecompiledContractsForkID8Elderberry {
 		PrecompiledAddressesForkID88Elderberry = append(PrecompiledAddressesForkID88Elderberry, k)
 	}
 }

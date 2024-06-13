@@ -381,7 +381,7 @@ func opCall_zkevm(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) 
 		gas += params.CallStipend
 	}
 
-	ret, returnGas, err := interpreter.evm.Call(scope.Contract, toAddr, args, gas, &value, false /* bailout */, 0)
+	ret, returnGas, err := interpreter.evm.Call_zkEvm(scope.Contract, toAddr, args, gas, &value, false /* bailout */, 0, int(retSize.Uint64()))
 
 	if err != nil {
 		temp.Clear()
@@ -416,7 +416,7 @@ func opCallCode_zkevm(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 		gas += params.CallStipend
 	}
 
-	ret, returnGas, err := interpreter.evm.CallCode(scope.Contract, toAddr, args, gas, &value)
+	ret, returnGas, err := interpreter.evm.CallCode_zkEvm(scope.Contract, toAddr, args, gas, &value, int(retSize.Uint64()))
 	if err != nil {
 		temp.Clear()
 	} else {

@@ -1,9 +1,9 @@
 package statefull
 
 import (
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/holiman/uint256"
 	ethereum "github.com/ledgerwatch/erigon"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -37,7 +37,7 @@ func (m Callmsg) Gas() uint64             { return m.CallMsg.Gas }
 func (m Callmsg) Value() *uint256.Int     { return m.CallMsg.Value }
 func (m Callmsg) Data() []byte            { return m.CallMsg.Data }
 
-func ApplyBorMessage(vmenv vm.EVM, msg Callmsg) (*core.ExecutionResult, error) {
+func ApplyBorMessage(vmenv vm.VMInterface, msg Callmsg) (*core.ExecutionResult, error) {
 	initialGas := msg.Gas()
 
 	// Apply the transaction to the current state (included in the env)

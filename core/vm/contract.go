@@ -17,8 +17,8 @@
 package vm
 
 import (
-	"github.com/holiman/uint256"
 	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/holiman/uint256"
 )
 
 // ContractRef is a reference to the contract's backing object
@@ -60,7 +60,8 @@ type Contract struct {
 	value *uint256.Int
 
 	// zkevm
-	IsCreate bool
+	IsCreate  bool
+	IsCreate2 bool
 }
 
 // NewContract returns a new contract environment for the execution of EVM.

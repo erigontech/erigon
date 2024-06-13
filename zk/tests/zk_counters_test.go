@@ -208,6 +208,12 @@ func runTest(t *testing.T, test vector, err error, fileName string, idx int) {
 	chainConfig := params.ChainConfigByChainName("hermez-dev")
 	chainConfig.ChainID = big.NewInt(test.ChainId)
 
+	chainConfig.ForkID4Block = big.NewInt(0)
+	chainConfig.ForkID5DragonfruitBlock = big.NewInt(0)
+	chainConfig.ForkID6IncaBerryBlock = big.NewInt(0)
+	chainConfig.ForkID7EtrogBlock = big.NewInt(0)
+	chainConfig.ForkID88ElderberryBlock = big.NewInt(0)
+
 	ethashCfg := &ethashcfg.Config{
 		CachesInMem:      1,
 		CachesLockMmap:   true,
