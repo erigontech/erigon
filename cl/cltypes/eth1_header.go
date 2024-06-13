@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // ETH1Header represents the ethereum 1 header structure CL-side.
@@ -121,6 +122,7 @@ func (h *Eth1Header) HashSSZ() ([32]byte, error) {
 }
 
 func (h *Eth1Header) getSchema() []interface{} {
+	log.Info("[Eth1Header] getSchema", "version", h.version)
 	s := []interface{}{
 		h.ParentHash[:], h.FeeRecipient[:], h.StateRoot[:], h.ReceiptsRoot[:], h.LogsBloom[:],
 		h.PrevRandao[:], &h.BlockNumber, &h.GasLimit, &h.GasUsed, &h.Time, h.Extra, h.BaseFeePerGas[:], h.BlockHash[:], h.TransactionsRoot[:],
