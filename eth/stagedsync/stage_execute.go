@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon/core/rawdb/rawdbhelpers"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
@@ -203,11 +204,11 @@ func gatherNoPruneReceipts(receipts *types.Receipts, chainCfg *chain.Config) boo
 	cr := types.Receipts{}
 	for _, r := range *receipts {
 		toStore := false
-		if chainCfg.DepositContract != nil && *chainCfg.DepositContract == r.ContractAddress {
+		if chainCfg.DepositContract == r.ContractAddress {
 			toStore = true
 		} else {
 			for _, l := range r.Logs {
-				if chainCfg.DepositContract != nil && *chainCfg.DepositContract == l.Address {
+				if chainCfg.DepositContract == l.Address {
 					toStore = true
 					break
 				}
@@ -358,7 +359,30 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 		return err
 	}
 	t := time.Now()
-	if err := rs.Unwind(ctx, txc.Tx, u.UnwindPoint, txNum, accumulator); err != nil {
+	var changeset *[kv.DomainLen][]libstate.DomainEntryDiff
+	for currentBlock := u.CurrentBlockNumber; currentBlock > u.UnwindPoint; currentBlock-- {
+		currentHash, err := rawdb.ReadCanonicalHash(txc.Tx, currentBlock)
+		if err != nil {
+			return err
+		}
+		var ok bool
+		var currentKeys [kv.DomainLen][]libstate.DomainEntryDiff
+		currentKeys, ok, err = libstate.ReadDiffSet(txc.Tx, currentBlock, currentHash)
+		if !ok {
+			changeset = nil
+		}
+		if err != nil {
+			return err
+		}
+		if changeset == nil {
+			changeset = &currentKeys
+		} else {
+			for i := range currentKeys {
+				changeset[i] = libstate.MergeDiffSets(changeset[i], currentKeys[i])
+			}
+		}
+	}
+	if err := rs.Unwind(ctx, txc.Tx, u.UnwindPoint, txNum, accumulator, changeset); err != nil {
 		return fmt.Errorf("StateV3.Unwind(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
 	}
 	if err := rawdb.TruncateReceipts(txc.Tx, u.UnwindPoint+1); err != nil {
@@ -855,6 +879,19 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		}
 		defer tx.Rollback()
 	}
+	if s.ForwardProgress > config3.MaxReorgDepthV3 {
+		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
+		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
+		var pruneDiffsLimitOnChainTip = 1_000
+		if s.CurrentSyncCycle.IsInitialCycle {
+			pruneDiffsLimitOnChainTip *= 10
+		}
+		if err := rawdb.PruneTable(tx, kv.ChangeSets3, s.ForwardProgress-config3.MaxReorgDepthV3, ctx, pruneDiffsLimitOnChainTip); err != nil {
+			return err
+		}
+	}
+
+	execStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx) * 100)
 
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()

@@ -299,6 +299,8 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 		name = "chaindata"
 	case kv.TxPoolDB:
 		name = "txpool"
+	case kv.PolygonBridgeDB:
+		name = "polygon-bridge"
 	case kv.ConsensusDB:
 		if len(name) == 0 {
 			return nil, fmt.Errorf("expected a consensus name")
@@ -345,7 +347,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 			if config.MdbxGrowthStep > 0 {
 				opts = opts.GrowthStep(config.MdbxGrowthStep)
 			}
-			opts = opts.DirtySpace(uint64(512 * datasize.MB))
+			opts = opts.DirtySpace(uint64(1024 * datasize.MB))
 		case kv.ConsensusDB:
 			if config.MdbxPageSize.Bytes() > 0 {
 				opts = opts.PageSize(config.MdbxPageSize.Bytes())

@@ -31,7 +31,7 @@ func (d *DiagnosticClient) runMemoryStatsListener(rootCtx context.Context) {
 				return
 			case info := <-ch:
 				d.resourcesUsageMutex.Lock()
-				info.StageIndex = int(d.syncStats.SyncStages.CurrentStage)
+				info.StageIndex = d.getCurrentSyncIdxs()
 				d.resourcesUsage.MemoryUsage = append(d.resourcesUsage.MemoryUsage, info)
 				d.resourcesUsageMutex.Unlock()
 			}

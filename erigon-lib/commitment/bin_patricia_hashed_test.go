@@ -19,8 +19,8 @@ func Test_BinPatriciaTrie_UniqueRepresentation(t *testing.T) {
 	ms := NewMockState(t)
 	ms2 := NewMockState(t)
 
-	trie := NewBinPatriciaHashed(length.Addr, ms)
-	trieBatch := NewBinPatriciaHashed(length.Addr, ms2)
+	trie := NewBinPatriciaHashed(length.Addr, ms, ms.TempDir())
+	trieBatch := NewBinPatriciaHashed(length.Addr, ms2, ms2.TempDir())
 
 	plainKeys, updates := NewUpdateBuilder().
 		Balance("e25652aaa6b9417973d325f9a1246b48ff9420bf", 12).
@@ -109,8 +109,8 @@ func Test_BinPatriciaHashed_UniqueRepresentation(t *testing.T) {
 		Storage("f5", "04", "9898").
 		Build()
 
-	trieOne := NewBinPatriciaHashed(1, ms)
-	trieTwo := NewBinPatriciaHashed(1, ms2)
+	trieOne := NewBinPatriciaHashed(1, ms, ms.TempDir())
+	trieTwo := NewBinPatriciaHashed(1, ms2, ms2.TempDir())
 
 	trieOne.SetTrace(true)
 	trieTwo.SetTrace(true)
@@ -155,7 +155,7 @@ func Test_BinPatriciaHashed_UniqueRepresentation(t *testing.T) {
 func Test_BinPatriciaHashed_EmptyState(t *testing.T) {
 	ctx := context.Background()
 	ms := NewMockState(t)
-	hph := NewBinPatriciaHashed(1, ms)
+	hph := NewBinPatriciaHashed(1, ms, ms.TempDir())
 	hph.SetTrace(false)
 	plainKeys, updates := NewUpdateBuilder().
 		Balance("00", 4).
@@ -222,7 +222,7 @@ func Test_BinPatriciaHashed_EmptyState(t *testing.T) {
 func Test_BinPatriciaHashed_EmptyUpdateState(t *testing.T) {
 	ctx := context.Background()
 	ms := NewMockState(t)
-	hph := NewBinPatriciaHashed(1, ms)
+	hph := NewBinPatriciaHashed(1, ms, ms.TempDir())
 	hph.SetTrace(false)
 	plainKeys, updates := NewUpdateBuilder().
 		Balance("00", 4).

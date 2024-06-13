@@ -57,8 +57,21 @@ func StageLoop(
 	hook *Hook,
 ) {
 	defer close(waitForDone)
-	initialCycle := true
 
+	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync); err != nil {
+		if err != nil {
+			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
+				return
+			}
+
+			logger.Error("Staged Sync", "err", err)
+			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
+				logger.Error("Failed to recover header sentriesClient", "err", recoveryErr)
+			}
+		}
+	}
+
+	initialCycle := true
 	for {
 		start := time.Now()
 
@@ -69,9 +82,9 @@ func StageLoop(
 			// continue
 		}
 
+		t := time.Now()
 		// Estimate the current top height seen from the peer
 		err := StageLoopIteration(ctx, db, wrap.TxContainer{}, sync, initialCycle, false, logger, blockReader, hook)
-
 		if err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
 				return
@@ -84,9 +97,12 @@ func StageLoop(
 			time.Sleep(500 * time.Millisecond) // just to avoid too much similar errors in logs
 			continue
 		}
-
-		initialCycle = false
-		hd.AfterInitialCycle()
+		if time.Since(t) < 5*time.Minute {
+			initialCycle = false
+		}
+		if !initialCycle {
+			hd.AfterInitialCycle()
+		}
 
 		if loopMinTime != 0 {
 			waitTime := loopMinTime - time.Since(start)
@@ -104,7 +120,19 @@ func StageLoop(
 // ProcessFrozenBlocks - withuot global rwtx
 func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync) error {
 	sawZeroBlocksTimes := 0
+	initialCycle, firstCycle := true, true
 	for {
+		// run stages first time - it will download blocks
+		more, err := sync.Run(db, wrap.TxContainer{}, initialCycle, firstCycle)
+		if err != nil {
+			return err
+		}
+
+		if err := sync.RunPrune(db, nil, initialCycle); err != nil {
+			return err
+		}
+		firstCycle = false
+
 		var finStageProgress uint64
 		if blockReader.FrozenBlocks() > 0 {
 			if err := db.View(ctx, func(tx kv.Tx) (err error) {
@@ -125,17 +153,6 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.F
 			}
 		}
 
-		log.Debug("[sync] processFrozenBlocks", "finStageProgress", finStageProgress, "frozenBlocks", blockReader.FrozenBlocks())
-
-		more, err := sync.Run(db, wrap.TxContainer{}, true)
-		if err != nil {
-			return err
-		}
-
-		if err := sync.RunPrune(db, nil, true); err != nil {
-			return err
-		}
-
 		if !more {
 			break
 		}
@@ -143,18 +160,12 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.F
 	return nil
 }
 
-func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, sync *stagedsync.Sync, initialCycle bool, skipFrozenBlocks bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (err error) {
+func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, sync *stagedsync.Sync, initialCycle, firstCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things
-
-	if !skipFrozenBlocks {
-		if err := ProcessFrozenBlocks(ctx, db, blockReader, sync); err != nil {
-			return err
-		}
-	}
 
 	externalTx := txc.Tx != nil
 	finishProgressBefore, borProgressBefore, headersProgressBefore, err := stagesHeadersAndFinish(db, txc.Tx)
@@ -171,6 +182,12 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	canRunCycleInOneTransaction := isSynced
 	if externalTx {
 		canRunCycleInOneTransaction = true
+	}
+	if firstCycle {
+		canRunCycleInOneTransaction = false
+	}
+	if dbg.CommitEachStage {
+		canRunCycleInOneTransaction = false
 	}
 
 	// Main steps:
@@ -193,7 +210,7 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 			return err
 		}
 	}
-	_, err = sync.Run(db, txc, initialCycle)
+	_, err = sync.Run(db, txc, initialCycle, firstCycle)
 	if err != nil {
 		return err
 	}
@@ -398,7 +415,7 @@ func MiningStep(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, tmpDir
 	defer sd.Close()
 	txc.Doms = sd
 
-	if _, err = mining.Run(nil, txc, false /* firstCycle */); err != nil {
+	if _, err = mining.Run(nil, txc, false /* firstCycle */, false); err != nil {
 		return err
 	}
 	tx.Rollback()
@@ -498,7 +515,7 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 		}
 		// Run state sync
 		if !test {
-			if err = stateSync.RunNoInterrupt(nil, txc, false /* firstCycle */); err != nil {
+			if err = stateSync.RunNoInterrupt(nil, txc); err != nil {
 				if err := cleanupProgressIfNeeded(txc.Tx, currentHeader); err != nil {
 					return err
 
@@ -518,7 +535,7 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 		return err
 	}
 
-	if err = stateSync.RunNoInterrupt(nil, txc, false /* firstCycle */); err != nil {
+	if err = stateSync.RunNoInterrupt(nil, txc); err != nil {
 		if !test {
 			if err := cleanupProgressIfNeeded(txc.Tx, header); err != nil {
 				return err
@@ -585,7 +602,7 @@ func NewDefaultStages(ctx context.Context,
 		}
 	}
 
-	var depositContract *libcommon.Address
+	var depositContract libcommon.Address
 	if cfg.Genesis != nil {
 		depositContract = cfg.Genesis.Config.DepositContract
 	}
@@ -620,7 +637,7 @@ func NewDefaultStages(ctx context.Context,
 		stagedsync.StageHashStateCfg(db, dirs),
 		stagedsync.StageTrieCfg(db, true, true, false, dirs.Tmp, blockReader, controlServer.Hd, historyV3, agg),
 		stagedsync.StageHistoryCfg(db, cfg.Prune, dirs.Tmp),
-		stagedsync.StageLogIndexCfg(db, cfg.Prune, dirs.Tmp, depositContract),
+		stagedsync.StageLogIndexCfg(db, cfg.Prune, dirs.Tmp, &depositContract),
 		stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, dirs.Tmp),
 		stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, controlServer.ChainConfig.Bor, blockReader),
 		stagedsync.StageFinishCfg(db, dirs.Tmp, forkValidator),
@@ -650,7 +667,7 @@ func NewPipelineStages(ctx context.Context,
 	runInTestMode := cfg.ImportMode
 	loopBreakCheck := NewLoopBreakCheck(cfg, nil)
 
-	var depositContract *libcommon.Address
+	var depositContract libcommon.Address
 	if cfg.Genesis != nil {
 		depositContract = cfg.Genesis.Config.DepositContract
 	}
@@ -683,7 +700,7 @@ func NewPipelineStages(ctx context.Context,
 			stagedsync.StageHashStateCfg(db, dirs),
 			stagedsync.StageTrieCfg(db, checkStateRoot, true, false, dirs.Tmp, blockReader, controlServer.Hd, historyV3, agg),
 			stagedsync.StageHistoryCfg(db, cfg.Prune, dirs.Tmp),
-			stagedsync.StageLogIndexCfg(db, cfg.Prune, dirs.Tmp, depositContract),
+			stagedsync.StageLogIndexCfg(db, cfg.Prune, dirs.Tmp, &depositContract),
 			stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, dirs.Tmp),
 			stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, controlServer.ChainConfig.Bor, blockReader),
 			stagedsync.StageFinishCfg(db, dirs.Tmp, forkValidator),
@@ -719,7 +736,7 @@ func NewPipelineStages(ctx context.Context,
 		stagedsync.StageHashStateCfg(db, dirs),
 		stagedsync.StageTrieCfg(db, checkStateRoot, true, false, dirs.Tmp, blockReader, controlServer.Hd, historyV3, agg),
 		stagedsync.StageHistoryCfg(db, cfg.Prune, dirs.Tmp),
-		stagedsync.StageLogIndexCfg(db, cfg.Prune, dirs.Tmp, depositContract),
+		stagedsync.StageLogIndexCfg(db, cfg.Prune, dirs.Tmp, &depositContract),
 		stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, dirs.Tmp),
 		stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, controlServer.ChainConfig.Bor, blockReader),
 		stagedsync.StageFinishCfg(db, dirs.Tmp, forkValidator),
@@ -814,6 +831,8 @@ func NewPolygonSyncStages(
 			blockReader,
 			stopNode,
 			bor.GenesisContractStateReceiverABI(),
+			config.LoopBlockLimit,
+			config.Dirs.DataDir,
 		),
 		stagedsync.StageSendersCfg(
 			db,

@@ -25,7 +25,7 @@ func (d *DiagnosticClient) runBlockExecutionListener(rootCtx context.Context) {
 				d.syncStats.BlockExecution = info
 				d.mu.Unlock()
 
-				if int(d.syncStats.SyncStages.CurrentStage) >= len(d.syncStats.SyncStages.StagesList) {
+				if d.syncStats.SyncFinished {
 					return
 				}
 			}

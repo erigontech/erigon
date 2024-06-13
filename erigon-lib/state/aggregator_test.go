@@ -347,7 +347,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	require.NoError(t, err)
 	defer anotherAgg.Close()
 
-	require.NoError(t, anotherAgg.OpenFolder(false))
+	require.NoError(t, anotherAgg.OpenFolder())
 
 	rwTx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
@@ -784,7 +784,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 
 	newAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, newDb, logger)
 	require.NoError(t, err)
-	require.NoError(t, newAgg.OpenFolder(false))
+	require.NoError(t, newAgg.OpenFolder())
 
 	newTx, err := newDb.BeginRw(context.Background())
 	require.NoError(t, err)
@@ -1077,7 +1077,7 @@ func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (kv.RwDB, *Aggregator) 
 	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, logger)
 	require.NoError(err)
 	t.Cleanup(agg.Close)
-	err = agg.OpenFolder(false)
+	err = agg.OpenFolder()
 	require.NoError(err)
 	agg.DisableFsync()
 	return db, agg
@@ -1158,7 +1158,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	domains, err = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
-	err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom)
+	err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom, nil)
 	require.NoError(t, err)
 
 	for i = int(pruneFrom); i < len(vals); i++ {
@@ -1193,7 +1193,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom)
+	err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom, nil)
 	require.NoError(t, err)
 
 	for i = int(pruneFrom); i < len(vals); i++ {

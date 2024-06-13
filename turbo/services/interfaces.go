@@ -23,7 +23,7 @@ type BlockReader interface {
 	BlockByHash(ctx context.Context, db kv.Tx, hash common.Hash) (*types.Block, error)
 	CurrentBlock(db kv.Tx) (*types.Block, error)
 	BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (block *types.Block, senders []common.Address, err error)
-	IterateFrozenBodies(f func(blockNum, baseTxNum, txAmount uint64) error) error
+	IterateFrozenBodies(f func(blockNum, baseTxNum, txCount uint64) error) error
 }
 
 type HeaderReader interface {
@@ -69,7 +69,7 @@ type CanonicalReader interface {
 type BodyReader interface {
 	BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, err error)
 	BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bodyRlp rlp.RawValue, err error)
-	Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, txAmount uint32, err error)
+	Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, txCount uint32, err error)
 	HasSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bool, error)
 }
 
@@ -126,7 +126,7 @@ type BlockSnapshots interface {
 
 // BlockRetire - freezing blocks: moving old data from DB to snapshot files
 type BlockRetire interface {
-	PruneAncientBlocks(tx kv.RwTx, limit int) error
+	PruneAncientBlocks(tx kv.RwTx, limit int) (deleted int, err error)
 	RetireBlocksInBackground(ctx context.Context, miBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []DownloadRequest) error, onDelete func(l []string) error, onFinishRetire func() error)
 	HasNewFrozenFiles() bool
 	BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier DBEventNotifier, cc *chain.Config) error

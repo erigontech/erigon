@@ -107,6 +107,7 @@ StorageChangeSet:
 */
 const AccountChangeSet = "AccountChangeSet"
 const StorageChangeSet = "StorageChangeSet"
+const ChangeSets3 = "ChangeSets3"
 
 const (
 
@@ -580,6 +581,7 @@ var ChaindataTables = []string{
 	PlainContractCode,
 	AccountChangeSet,
 	StorageChangeSet,
+	ChangeSets3,
 	Senders,
 	HeadBlockKey,
 	HeadHeaderKey,
@@ -990,6 +992,12 @@ const (
 	TracesFromIdxPos InvertedIdxPos = 2
 	TracesToIdxPos   InvertedIdxPos = 3
 	StandaloneIdxLen uint16         = 4
+)
+
+const (
+	ReceiptsAppendable Appendable = 0
+
+	AppendableLen Appendable = 1
 )
 
 func (iip InvertedIdxPos) String() string {
