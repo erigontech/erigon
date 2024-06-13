@@ -46,7 +46,8 @@ jobs:
         # 1. Launch the testbed Erigon instance
         # 2. Allow time for the Erigon to achieve synchronization
         # 3. Begin timing the duration that Erigon maintains synchronization
-        python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN
+        python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
+          ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN
   
         # Capture monitoring script exit status
         test_exit_status=$?
@@ -83,7 +84,16 @@ jobs:
       if: steps.test_step.outputs.test_executed == 'true'
       env:
         TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
-      run: python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --branch ${{ github.ref_name }} --test_name tip-tracking --chain $CHAIN --outcome $TEST_RESULT --result_file ${{ github.workspace }}/result-$CHAIN.json
+      run: |
+        python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
+          --repo erigon \
+          --commit $(git rev-parse HEAD) \
+          --branch ${{ github.ref_name }} \
+          --test_name tip-tracking \
+          --chain $CHAIN \
+          --runner ${{ runner.name }} \
+          --outcome $TEST_RESULT \
+          --result_file ${{ github.workspace }}/result-$CHAIN.json
 
     - name: Upload test results
       if: steps.test_step.outputs.test_executed == 'true'
