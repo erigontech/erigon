@@ -21,21 +21,19 @@ jobs:
             
     steps:
       - name: Clone bridge repository
-        uses: actions/checkout@v3
-        with:
-          repository: git@github.com:0xPolygonHermez/zkevm-bridge-service.git
-          ref: feature/cdk263-test_bridge_real_network 
-          token: ${{ secrets.GITHUB_TOKEN }}
-
+        run:  git clone --recurse-submodules -j8 https://github.com/0xPolygonHermez/zkevm-bridge-service.git -b develop  bridge
+        
       - name: Build docker image
         run: |
+          cd bridge
           make build-docker-e2e-real_network
 
       - name: Run test ERC20 Bridge
         run: |
           #!/bin/bash
-          mkdir config
-          cat <<EOF > ./tmp_profiles.json
+          cd bridge
+          mkdir tmp
+          cat <<EOF > ./tmp/test.toml
           TestAddrPrivate= "${{ secrets[matrix.l1_pk_secret_name] }}"
           [ConnectionConfig]
           L1NodeURL="${{ matrix.l1_ep }}"
@@ -44,5 +42,5 @@ jobs:
           L1BridgeAddr="${{ matrix.bridge_addr }}"
           L2BridgeAddr="${{ matrix.bridge_addr }}"
           EOF
-          docker run  --volume "./config/:/config/" --env BRIDGE_TEST_CONFIG_FILE=/config/test.toml bridge-e2e-realnetwork-erc20
+          docker run  --volume "./tmp/:/config/" --env BRIDGE_TEST_CONFIG_FILE=/config/test.toml bridge-e2e-realnetwork-erc20
         
