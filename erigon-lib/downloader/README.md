@@ -23,9 +23,9 @@ The sections below describe the roles of the various control structures shown in
 
 * Definition of verified well know hashes for segment files - which identifies a known trusted universe of files (**chain.toml**)
 
-* Management of the competion state of the local download process (**BittorrentInfo**)
+* Management of the completion state of the local download process (**BittorrentInfo**)
 
-* Definition of the accepted local hash set which are used to ensure that the local snapshots retain a consistent specified view as other defenitions in the environment changes.  i.e. chain.toml gets re-versioned or BittorentInfo gets reset (**snapshot-lock.json**).  
+* Definition of the accepted local hash set which are used to ensure that the local snapshots retain a consistent specified view as other definitions in the environment changes.  i.e. chain.toml gets re-versioned or BittorentInfo gets reset (**snapshot-lock.json**).
 
 * Ability to override downloaded files with locally defined alternatives, for development or to fix errors and omissions (**snapshot-lock.json**)
 
