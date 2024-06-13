@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -16,15 +17,23 @@ type namedMetric struct {
 	isAux  bool
 }
 
+type namedMetricVec struct {
+	name   string
+	metric *prometheus.GaugeVec
+	isAux  bool
+}
+
 // Set is a set of metrics.
 //
 // Metrics belonging to a set are exported separately from global metrics.
 //
 // Set.WritePrometheus must be called for exporting metrics from the set.
 type Set struct {
-	mu sync.Mutex
-	a  []*namedMetric
-	m  map[string]*namedMetric
+	mu   sync.Mutex
+	a    []*namedMetric
+	av   []*namedMetricVec
+	m    map[string]*namedMetric
+	vecs map[string]*namedMetricVec
 }
 
 var defaultSet = NewSet()
@@ -34,7 +43,8 @@ var defaultSet = NewSet()
 // Pass the set to RegisterSet() function in order to export its metrics via global WritePrometheus() call.
 func NewSet() *Set {
 	return &Set{
-		m: make(map[string]*namedMetric),
+		m:    make(map[string]*namedMetric),
+		vecs: make(map[string]*namedMetricVec),
 	}
 }
 
@@ -46,10 +56,17 @@ func (s *Set) Describe(ch chan<- *prometheus.Desc) {
 	if !sort.SliceIsSorted(s.a, lessFunc) {
 		sort.Slice(s.a, lessFunc)
 	}
+	if !sort.SliceIsSorted(s.av, lessFunc) {
+		sort.Slice(s.av, lessFunc)
+	}
 	sa := append([]*namedMetric(nil), s.a...)
+	sav := append([]*namedMetricVec(nil), s.av...)
 	s.mu.Unlock()
 	for _, nm := range sa {
 		ch <- nm.metric.Desc()
+	}
+	for _, nmv := range sav {
+		nmv.metric.Describe(ch)
 	}
 }
 
@@ -61,10 +78,17 @@ func (s *Set) Collect(ch chan<- prometheus.Metric) {
 	if !sort.SliceIsSorted(s.a, lessFunc) {
 		sort.Slice(s.a, lessFunc)
 	}
+	if !sort.SliceIsSorted(s.av, lessFunc) {
+		sort.Slice(s.av, lessFunc)
+	}
 	sa := append([]*namedMetric(nil), s.a...)
+	sav := append([]*namedMetricVec(nil), s.av...)
 	s.mu.Unlock()
 	for _, nm := range sa {
 		ch <- nm.metric
+	}
+	for _, nmv := range sav {
+		nmv.metric.Collect(ch)
 	}
 }
 
@@ -307,6 +331,78 @@ func (s *Set) GetOrCreateGauge(name string, help ...string) (prometheus.Gauge, e
 	return g, nil
 }
 
+// GetOrCreateGaugeVec returns registered GaugeVec in s with the given name
+// or creates new GaugeVec if s doesn't contain GaugeVec with the given name.
+//
+// name must be valid Prometheus-compatible metric with possible labels.
+// For instance,
+//
+//   - foo
+//   - foo{bar="baz"}
+//   - foo{bar="baz",aaa="b"}
+//
+// labels are the labels associated with the GaugeVec.
+//
+// The returned GaugeVec is safe to use from concurrent goroutines.
+func (s *Set) GetOrCreateGaugeVec(name string, labels []string, help ...string) (*prometheus.GaugeVec, error) {
+	s.mu.Lock()
+	nm := s.vecs[name]
+	s.mu.Unlock()
+	if nm == nil {
+		metric, err := newGaugeVec(name, labels, help...)
+		if err != nil {
+			return nil, fmt.Errorf("invalid metric name %q: %w", name, err)
+		}
+
+		nmNew := &namedMetricVec{
+			name:   name,
+			metric: metric,
+		}
+
+		s.mu.Lock()
+		nm = s.vecs[name]
+		if nm == nil {
+			nm = nmNew
+			s.vecs[name] = nm
+			s.av = append(s.av, nm)
+		}
+		s.mu.Unlock()
+		s.registerMetricVec(name, metric, false)
+	}
+
+	if nm.metric == nil {
+		return nil, fmt.Errorf("metric %q is nil", name)
+	}
+
+	metricType := reflect.TypeOf(nm.metric)
+	if metricType != reflect.TypeOf(&prometheus.GaugeVec{}) {
+		return nil, fmt.Errorf("metric %q isn't a GaugeVec. It is %s", name, metricType)
+	}
+
+	return nm.metric, nil
+}
+
+// newGaugeVec creates a new Prometheus GaugeVec.
+func newGaugeVec(name string, labels []string, help ...string) (*prometheus.GaugeVec, error) {
+	name, constLabels, err := parseMetric(name)
+	if err != nil {
+		return nil, err
+	}
+
+	helpStr := "gauge metric"
+	if len(help) > 0 {
+		helpStr = strings.Join(help, ", ")
+	}
+
+	gv := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name:        name,
+		Help:        helpStr,
+		ConstLabels: constLabels,
+	}, labels)
+
+	return gv, nil
+}
+
 const defaultSummaryWindow = 5 * time.Minute
 
 var defaultSummaryQuantiles = map[float64]float64{0.5: 0.05, 0.9: 0.01, 0.97: 0.003, 0.99: 0.001}
@@ -429,6 +525,21 @@ func (s *Set) registerMetric(name string, m prometheus.Metric) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.mustRegisterLocked(name, m)
+}
+
+func (s *Set) registerMetricVec(name string, mv *prometheus.GaugeVec, isAux bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.vecs[name]; !exists {
+		nmv := &namedMetricVec{
+			name:   name,
+			metric: mv,
+			isAux:  isAux,
+		}
+		s.vecs[name] = nmv
+		s.av = append(s.av, nmv)
+	}
 }
 
 // mustRegisterLocked registers given metric with the given name.

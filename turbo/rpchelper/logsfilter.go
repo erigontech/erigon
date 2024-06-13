@@ -105,9 +105,15 @@ func (a *LogsFilterAggregator) createFilterRequest() *remote.LogsFilterRequest {
 // provided LogsFilter. If the count for any address or topic reaches zero, it is removed from the aggregated filter.
 func (a *LogsFilterAggregator) subtractLogFilters(f *LogsFilter) {
 	a.aggLogsFilter.allAddrs -= f.allAddrs
+	if f.allAddrs > 0 {
+		// Decrement the count for AllAddresses
+		activeSubscriptionsLogsAllAddressesGauge.Dec()
+	}
 	f.addrs.Range(func(addr libcommon.Address, count int) error {
 		a.aggLogsFilter.addrs.Do(addr, func(value int, exists bool) (int, bool) {
 			if exists {
+				// Decrement the count for subscribed address
+				activeSubscriptionsLogsAddressesGauge.Dec()
 				newValue := value - count
 				if newValue <= 0 {
 					return 0, false
@@ -119,9 +125,15 @@ func (a *LogsFilterAggregator) subtractLogFilters(f *LogsFilter) {
 		return nil
 	})
 	a.aggLogsFilter.allTopics -= f.allTopics
+	if f.allTopics > 0 {
+		// Decrement the count for AllTopics
+		activeSubscriptionsLogsAllTopicsGauge.Dec()
+	}
 	f.topics.Range(func(topic libcommon.Hash, count int) error {
 		a.aggLogsFilter.topics.Do(topic, func(value int, exists bool) (int, bool) {
 			if exists {
+				// Decrement the count for subscribed topic
+				activeSubscriptionsLogsTopicsGauge.Dec()
 				newValue := value - count
 				if newValue <= 0 {
 					return 0, false
@@ -141,14 +153,26 @@ func (a *LogsFilterAggregator) addLogsFilters(f *LogsFilter) {
 	a.logsFilterLock.Lock()
 	defer a.logsFilterLock.Unlock()
 	a.aggLogsFilter.allAddrs += f.allAddrs
+	if f.allAddrs > 0 {
+		// Increment the count for AllAddresses
+		activeSubscriptionsLogsAllAddressesGauge.Inc()
+	}
 	f.addrs.Range(func(addr libcommon.Address, count int) error {
+		// Increment the count for subscribed address
+		activeSubscriptionsLogsAddressesGauge.Inc()
 		a.aggLogsFilter.addrs.DoAndStore(addr, func(value int, exists bool) int {
 			return value + count
 		})
 		return nil
 	})
 	a.aggLogsFilter.allTopics += f.allTopics
+	if f.allTopics > 0 {
+		// Increment the count for AllTopics
+		activeSubscriptionsLogsAllTopicsGauge.Inc()
+	}
 	f.topics.Range(func(topic libcommon.Hash, count int) error {
+		// Increment the count for subscribed topic
+		activeSubscriptionsLogsTopicsGauge.Inc()
 		a.aggLogsFilter.topics.DoAndStore(topic, func(value int, exists bool) int {
 			return value + count
 		})
@@ -179,6 +203,10 @@ func (a *LogsFilterAggregator) getAggMaps() (map[libcommon.Address]int, map[libc
 func (a *LogsFilterAggregator) distributeLog(eventLog *remote.SubscribeLogsReply) error {
 	a.logsFilterLock.RLock()
 	defer a.logsFilterLock.RUnlock()
+
+	var lg types2.Log
+	var topics []libcommon.Hash
+
 	a.logsFilters.Range(func(k LogsSubID, filter *LogsFilter) error {
 		if filter.allAddrs == 0 {
 			_, addrOk := filter.addrs.Get(gointerfaces.ConvertH160toAddress(eventLog.Address))
@@ -186,27 +214,34 @@ func (a *LogsFilterAggregator) distributeLog(eventLog *remote.SubscribeLogsReply
 				return nil
 			}
 		}
-		var topics []libcommon.Hash
+
+		// Pre-allocate topics slice to the required size to avoid multiple allocations
+		topics = topics[:0]
+		if cap(topics) < len(eventLog.Topics) {
+			topics = make([]libcommon.Hash, 0, len(eventLog.Topics))
+		}
 		for _, topic := range eventLog.Topics {
 			topics = append(topics, gointerfaces.ConvertH256ToHash(topic))
 		}
+
 		if filter.allTopics == 0 {
 			if !a.chooseTopics(filter, topics) {
 				return nil
 			}
 		}
-		lg := &types2.Log{
-			Address:     gointerfaces.ConvertH160toAddress(eventLog.Address),
-			Topics:      topics,
-			Data:        eventLog.Data,
-			BlockNumber: eventLog.BlockNumber,
-			TxHash:      gointerfaces.ConvertH256ToHash(eventLog.TransactionHash),
-			TxIndex:     uint(eventLog.TransactionIndex),
-			BlockHash:   gointerfaces.ConvertH256ToHash(eventLog.BlockHash),
-			Index:       uint(eventLog.LogIndex),
-			Removed:     eventLog.Removed,
-		}
-		filter.sender.Send(lg)
+
+		// Reuse lg object to avoid creating new instances
+		lg.Address = gointerfaces.ConvertH160toAddress(eventLog.Address)
+		lg.Topics = topics
+		lg.Data = eventLog.Data
+		lg.BlockNumber = eventLog.BlockNumber
+		lg.TxHash = gointerfaces.ConvertH256ToHash(eventLog.TransactionHash)
+		lg.TxIndex = uint(eventLog.TransactionIndex)
+		lg.BlockHash = gointerfaces.ConvertH256ToHash(eventLog.BlockHash)
+		lg.Index = uint(eventLog.LogIndex)
+		lg.Removed = eventLog.Removed
+
+		filter.sender.Send(&lg)
 		return nil
 	})
 	return nil

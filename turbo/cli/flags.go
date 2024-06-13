@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
 
 var (
@@ -244,6 +245,32 @@ var (
 		Name:  "rpc.overlay.replayblocktimeout",
 		Usage: "Maximum amount of time to wait for the answer to replay a single block when called from an overlay_getLogs call.",
 		Value: rpccfg.DefaultOverlayReplayBlockTimeout,
+	}
+
+	RpcSubscriptionFiltersMaxLogsFlag = cli.IntFlag{
+		Name:  "rpc.subscription.filters.maxlogs",
+		Usage: "Maximum number of logs to store per subscription.",
+		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxLogs,
+	}
+	RpcSubscriptionFiltersMaxHeadersFlag = cli.IntFlag{
+		Name:  "rpc.subscription.filters.maxheaders",
+		Usage: "Maximum number of block headers to store per subscription.",
+		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxHeaders,
+	}
+	RpcSubscriptionFiltersMaxTxsFlag = cli.IntFlag{
+		Name:  "rpc.subscription.filters.maxtxs",
+		Usage: "Maximum number of transactions to store per subscription.",
+		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxTxs,
+	}
+	RpcSubscriptionFiltersMaxAddressesFlag = cli.IntFlag{
+		Name:  "rpc.subscription.filters.maxaddresses",
+		Usage: "Maximum number of addresses per subscription to filter logs by.",
+		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxAddresses,
+	}
+	RpcSubscriptionFiltersMaxTopicsFlag = cli.IntFlag{
+		Name:  "rpc.subscription.filters.maxtopics",
+		Usage: "Maximum number of topics per subscription to filter logs by.",
+		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxTopics,
 	}
 
 	TxPoolCommitEvery = cli.DurationFlag{
@@ -487,14 +514,21 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		RpcStreamingDisable:               ctx.Bool(utils.RpcStreamingDisableFlag.Name),
 		DBReadConcurrency:                 ctx.Int(utils.DBReadConcurrencyFlag.Name),
 		RpcAllowListFilePath:              ctx.String(utils.RpcAccessListFlag.Name),
-		Gascap:                            ctx.Uint64(utils.RpcGasCapFlag.Name),
-		Feecap:                            ctx.Float64(utils.RPCGlobalTxFeeCapFlag.Name),
-		MaxTraces:                         ctx.Uint64(utils.TraceMaxtracesFlag.Name),
-		TraceCompatibility:                ctx.Bool(utils.RpcTraceCompatFlag.Name),
-		BatchLimit:                        ctx.Int(utils.RpcBatchLimit.Name),
-		ReturnDataLimit:                   ctx.Int(utils.RpcReturnDataLimit.Name),
-		AllowUnprotectedTxs:               ctx.Bool(utils.AllowUnprotectedTxs.Name),
-		MaxGetProofRewindBlockCount:       ctx.Int(utils.RpcMaxGetProofRewindBlockCount.Name),
+		RpcFiltersConfig: rpchelper.FiltersConfig{
+			RpcSubscriptionFiltersMaxLogs:      ctx.Int(RpcSubscriptionFiltersMaxLogsFlag.Name),
+			RpcSubscriptionFiltersMaxHeaders:   ctx.Int(RpcSubscriptionFiltersMaxHeadersFlag.Name),
+			RpcSubscriptionFiltersMaxTxs:       ctx.Int(RpcSubscriptionFiltersMaxTxsFlag.Name),
+			RpcSubscriptionFiltersMaxAddresses: ctx.Int(RpcSubscriptionFiltersMaxAddressesFlag.Name),
+			RpcSubscriptionFiltersMaxTopics:    ctx.Int(RpcSubscriptionFiltersMaxTopicsFlag.Name),
+		},
+		Gascap:                      ctx.Uint64(utils.RpcGasCapFlag.Name),
+		Feecap:                      ctx.Float64(utils.RPCGlobalTxFeeCapFlag.Name),
+		MaxTraces:                   ctx.Uint64(utils.TraceMaxtracesFlag.Name),
+		TraceCompatibility:          ctx.Bool(utils.RpcTraceCompatFlag.Name),
+		BatchLimit:                  ctx.Int(utils.RpcBatchLimit.Name),
+		ReturnDataLimit:             ctx.Int(utils.RpcReturnDataLimit.Name),
+		AllowUnprotectedTxs:         ctx.Bool(utils.AllowUnprotectedTxs.Name),
+		MaxGetProofRewindBlockCount: ctx.Int(utils.RpcMaxGetProofRewindBlockCount.Name),
 
 		OtsMaxPageSize: ctx.Uint64(utils.OtsSearchMaxCapFlag.Name),
 
