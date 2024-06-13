@@ -530,7 +530,7 @@ func extractBodies(datadir string) error {
 	snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
 		Enabled:    true,
 		KeepBlocks: true,
-		Produce:    false,
+		ProduceE2:  false,
 	}, filepath.Join(datadir, "snapshots"), 0, log.New())
 	snaps.ReopenFolder()
 

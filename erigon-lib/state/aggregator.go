@@ -95,6 +95,8 @@ type Aggregator struct {
 	logger       log.Logger
 
 	ctxAutoIncrement atomic.Uint64
+
+	produce bool
 }
 
 type OnFreezeFunc func(frozenFileNames []string)
@@ -125,6 +127,8 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		mergeWorkers:           1,
 
 		commitmentValuesTransform: AggregatorSqueezeCommitmentValues,
+
+		produce: true,
 	}
 	cfg := domainCfg{
 		hist: histCfg{
@@ -1582,9 +1586,19 @@ func (a *Aggregator) SetSnapshotBuildSema(semaphore *semaphore.Weighted) {
 	a.snapshotBuildSema = semaphore
 }
 
+// SetProduceMod allows setting produce to false in order to stop making state files (default value is true)
+func (a *Aggregator) SetProduceMod(produce bool) {
+	a.produce = produce
+}
+
 // Returns channel which is closed when aggregation is done
 func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 	fin := make(chan struct{})
+
+	if !a.produce {
+		close(fin)
+		return fin
+	}
 
 	if (txNum + 1) <= a.visibleFilesMinimaxTxNum.Load()+a.aggregationStep {
 		close(fin)

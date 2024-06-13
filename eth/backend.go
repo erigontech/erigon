@@ -351,6 +351,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	if err != nil {
 		return nil, err
 	}
+
 	backend.agg, backend.blockSnapshots, backend.blockReader, backend.blockWriter = agg, allSnapshots, blockReader, blockWriter
 
 	backend.chainDB, err = temporal.New(backend.chainDB, agg)
@@ -1447,6 +1448,8 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
+
+	agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
 
 	g := &errgroup.Group{}
 	g.Go(func() error {
