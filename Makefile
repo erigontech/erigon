@@ -267,7 +267,7 @@ install:
 	@ls -al "$(DIST)"
 
 PACKAGE_NAME          := github.com/ledgerwatch/erigon
-GOLANG_CROSS_VERSION  ?= v1.21.6
+GOLANG_CROSS_VERSION  ?= v1.22.4
 
 .PHONY: release-dry-run
 release-dry-run: git-submodules
