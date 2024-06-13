@@ -19,10 +19,10 @@ package clique
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/erigon/eth/consensuschain"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -46,7 +46,7 @@ func (api *API) GetSnapshot(ctx context.Context, number *rpc.BlockNumber) (*Snap
 		return nil, err
 	}
 	defer tx.Rollback()
-	chain := consensus.ChainReaderImpl{Cfg: *api.clique.ChainConfig, Db: tx, BlockReader: api.blockReader}
+	chain := consensuschain.NewReader(api.clique.ChainConfig, tx, api.blockReader, api.logger)
 
 	// Retrieve the requested block number (or current if none requested)
 	var header *types.Header
@@ -75,7 +75,7 @@ func (api *API) GetSnapshotAtHash(ctx context.Context, hash libcommon.Hash) (*Sn
 		return nil, err
 	}
 	defer tx.Rollback()
-	chain := consensus.ChainReaderImpl{Cfg: *api.clique.ChainConfig, Db: tx, BlockReader: api.blockReader}
+	chain := consensuschain.NewReader(api.clique.ChainConfig, tx, api.blockReader, api.logger)
 
 	header := chain.GetHeaderByHash(hash)
 	if header == nil {
@@ -97,7 +97,7 @@ func (api *API) GetSigners(ctx context.Context, number *rpc.BlockNumber) ([]libc
 		return nil, err
 	}
 	defer tx.Rollback()
-	chain := consensus.ChainReaderImpl{Cfg: *api.clique.ChainConfig, Db: tx, BlockReader: api.blockReader}
+	chain := consensuschain.NewReader(api.clique.ChainConfig, tx, api.blockReader, api.logger)
 
 	// Retrieve the requested block number (or current if none requested)
 	var header *types.Header
@@ -125,7 +125,7 @@ func (api *API) GetSignersAtHash(ctx context.Context, hash libcommon.Hash) ([]li
 		return nil, err
 	}
 	defer tx.Rollback()
-	chain := consensus.ChainReaderImpl{Cfg: *api.clique.ChainConfig, Db: tx, BlockReader: api.blockReader}
+	chain := consensuschain.NewReader(api.clique.ChainConfig, tx, api.blockReader, api.logger)
 
 	header := chain.GetHeaderByHash(hash)
 	if header == nil {
@@ -184,7 +184,7 @@ func (api *API) Status(ctx context.Context) (*status, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	chain := consensus.ChainReaderImpl{Cfg: *api.clique.ChainConfig, Db: tx, BlockReader: api.blockReader}
+	chain := consensuschain.NewReader(api.clique.ChainConfig, tx, api.blockReader, api.logger)
 
 	var (
 		numBlocks = uint64(64)
