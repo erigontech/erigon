@@ -129,6 +129,8 @@ func SpawnZkIntermediateHashesStage(s *stagedsync.StageState, u stagedsync.Unwin
 	eridb := db2.NewEriDb(tx)
 	smt := smt.NewSMT(eridb)
 
+	eridb.OpenBatch(quit)
+
 	if cfg.zk.IncrementTreeAlways {
 		// increment only behaviour
 		log.Debug(fmt.Sprintf("[%s] IncrementTreeAlways true - incrementing tree", logPrefix), "previousRootHeight", s.BlockNumber, "calculatingRootHeight", to)
@@ -353,9 +355,6 @@ func regenerateIntermediateHashes(logPrefix string, db kv.RwTx, eridb *db2.EriDb
 func zkIncrementIntermediateHashes(ctx context.Context, logPrefix string, s *stagedsync.StageState, db kv.RwTx, eridb *db2.EriDb, dbSmt *smt.SMT, from, to uint64) (common.Hash, error) {
 	log.Info(fmt.Sprintf("[%s] Increment trie hashes started", logPrefix), "previousRootHeight", s.BlockNumber, "calculatingRootHeight", to)
 	defer log.Info(fmt.Sprintf("[%s] Increment ended", logPrefix))
-
-	quit := ctx.Done()
-	eridb.OpenBatch(quit)
 
 	ac, err := db.CursorDupSort(kv.AccountChangeSet)
 	if err != nil {

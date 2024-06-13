@@ -112,6 +112,7 @@ func (m *EriDb) RollbackBatch() {
 	}
 	m.tx.Rollback()
 	m.tx = m.kvTx
+	m.kvTxRo = m.kvTx
 }
 
 func (m *EriRoDb) GetLastRoot() (*big.Int, error) {
