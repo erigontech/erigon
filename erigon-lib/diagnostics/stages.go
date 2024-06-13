@@ -22,11 +22,19 @@ type SyncStage struct {
 	ID        string         `json:"id"`
 	State     StageState     `json:"state"`
 	SubStages []SyncSubStage `json:"subStages"`
+	Stats     SyncStageStats `json:"stats"`
 }
 
 type SyncSubStage struct {
-	ID    string     `json:"id"`
-	State StageState `json:"state"`
+	ID    string         `json:"id"`
+	State StageState     `json:"state"`
+	Stats SyncStageStats `json:"stats"`
+}
+
+type SyncStageStats struct {
+	TimeElapsed string `json:"timeElapsed"`
+	TimeLeft    string `json:"timeLeft"`
+	Progress    string `json:"progress"`
 }
 
 type UpdateSyncSubStageList struct {
@@ -199,26 +207,6 @@ func (d *DiagnosticClient) getCurrentSyncIdxs() CurrentSyncStagesIdxs {
 
 func (d *DiagnosticClient) SetStagesList(stages []SyncStage) {
 	d.syncStages = stages
-}
-
-func (d *DiagnosticClient) AddOrUpdateStagesList(stages []SyncStage, stage SyncStage) []SyncStage {
-	resultArr := stages
-	stageExists := false
-
-	for _, st := range resultArr {
-		if st.ID == stage.ID {
-			st.State = stage.State
-			st.SubStages = stage.SubStages
-			stageExists = true
-			break
-		}
-	}
-
-	if !stageExists {
-		resultArr = append(resultArr, stage)
-	}
-
-	return resultArr
 }
 
 func (d *DiagnosticClient) SetCurrentSyncStage(css CurrentSyncStage) {

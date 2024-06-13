@@ -44,6 +44,7 @@ func InitStagesFromList(list []string) []SyncStage {
 			ID:        stage,
 			State:     Queued,
 			SubStages: []SyncSubStage{},
+			Stats:     SyncStageStats{},
 		})
 	}
 
