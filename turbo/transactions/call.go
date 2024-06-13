@@ -240,10 +240,15 @@ func NewReusableCaller(
 
 	smtDepth := smt.GetDepth()
 
+	to := msg.To()
+	if to == nil {
+		to = &libcommon.Address{}
+	}
+
 	// transaction from message
 	transaction := types.NewTransaction(
 		msg.Nonce(),
-		*msg.To(),
+		*to,
 		msg.Value(),
 		msg.Gas(),
 		msg.GasPrice(),
