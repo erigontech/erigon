@@ -8,6 +8,7 @@ require (
 	github.com/ledgerwatch/interfaces v0.0.0-20240320062914-b57f05746087
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
+	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
 )
 
 require (
@@ -125,7 +126,6 @@ require (
 	github.com/prometheus/common v0.48.0 // indirect
 	github.com/prometheus/procfs v0.12.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417 // indirect
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
 	github.com/showwin/speedtest-go v1.6.12
 	github.com/sirupsen/logrus v1.9.3 // indirect

@@ -2591,10 +2591,17 @@ func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientC
 	//})
 	cfg.DefaultStorage = m
 
+	dnsResolver := &downloadercfg.DnsCacheResolver{RefreshTimeout: 24 * time.Hour}
+	cfg.TrackerDialContext = dnsResolver.DialContext
+
 	torrentClient, err = torrent.NewClient(cfg)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("torrent.NewClient: %w", err)
 	}
+
+	go func() {
+		dnsResolver.Run(ctx)
+	}()
 
 	return db, c, m, torrentClient, nil
 }
