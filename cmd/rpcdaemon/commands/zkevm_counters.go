@@ -462,6 +462,11 @@ func (api *ZkEvmAPIImpl) GetBatchCountersByNumber(ctx context.Context, batchNumR
 	)
 
 	for i, blockNum := range batchBlockNumbers {
+		_, err := batchCounters.StartNewBlock()
+		if err != nil {
+			return nil, err
+		}
+
 		//get block with senders
 		if block, err = api.ethApi.blockByNumberWithSenders(dbtx, blockNum); err != nil {
 			return nil, err
