@@ -194,7 +194,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 	signer := types.MakeSigner(cfg, blockNum, block.Time())
 	traces, syscall, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, -1 /* all tx indices */, *gasBailOut /* gasBailOut */, signer, cfg)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("blockNum=%d, %w", blockNum, err)
 	}
 
 	out := make([]ParityTrace, 0, len(traces))
