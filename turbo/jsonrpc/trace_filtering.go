@@ -194,9 +194,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 	signer := types.MakeSigner(cfg, blockNum, block.Time())
 	traces, syscall, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, -1 /* all tx indices */, *gasBailOut /* gasBailOut */, signer, cfg)
 	if err != nil {
-		_min, _ := rawdbv3.TxNums.Min(tx, blockNum)
-		_max, _ := rawdbv3.TxNums.Max(tx, blockNum)
-		return nil, fmt.Errorf("blockNum=%d (%d-%d), %w", blockNum, _min, _max, err)
+		return nil, err
 	}
 
 	out := make([]ParityTrace, 0, len(traces))

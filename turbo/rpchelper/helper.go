@@ -135,7 +135,6 @@ func CreateHistoryStateReader(tx kv.Tx, blockNumber uint64, txnIndex int, chainN
 		return nil, err
 	}
 	r.SetTxNum(uint64(int(minTxNum) + txnIndex + /* 1 system txNum in begining of block */ 1))
-
 	return r, nil
 }
 
