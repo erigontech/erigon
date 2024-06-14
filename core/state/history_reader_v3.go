@@ -20,6 +20,9 @@ func NewHistoryReaderV3() *HistoryReaderV3 {
 	return &HistoryReaderV3{}
 }
 
+func (hr *HistoryReaderV3) String() string {
+	return fmt.Sprintf("txNum:%d", hr.txNum)
+}
 func (hr *HistoryReaderV3) SetTx(tx kv.Tx) {
 	if ttx, casted := tx.(kv.TemporalTx); casted {
 		hr.ttx = ttx
