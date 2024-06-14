@@ -43,13 +43,13 @@ the `well know` hash for a particular segment file in the following format.
 
 Where multiple version of files exists there may be several likes per segment and the code in the released Erigon version will select the version that it is interesting.
 
-As this file ise versioned as part of the Erigon release process the file to hash mapping can potentially change between releases.  This can potentially cause an issue for running Erigon node which expect the downloads in the snapshots directory to remain constant, which is why a seperate file is used to record the hases used by the process when it originally downloaded its files.
+As this file is versioned as part of the Erigon release process the file to hash mapping can potentially change between releases.  This can potentially cause an issue for running Erigon node which expect the downloads in the snapshots directory to remain constant, which is why a seperate file is used to record the hases used by the process when it originally downloaded its files.
 
 ## snapshot-lock.json
 
 This is a file which resides in the <data-dir>/snapshots directory for an Erigon node.  It is created when the node performs its initial download.  It contains the list of downloaded files and their respective hashes.
 
-When a `snapshot-lock` file exists it is used reather than the chain.toml file to determine which files should be downloaded.  This means that the directory contents can be maintained event if Erigon is re-versioned and the chain.toml contents change.
+When a `snapshot-lock` file exists it is used reather than the chain.toml file to determine which files should be downloaded.  This means that the directory contents can be maintained even if Erigon is re-versioned and the chain.toml contents change.
 
 ### Deleting snapshot-lock.json
 
@@ -57,16 +57,16 @@ If the snapshot-lock file is deleted it will be reacreated from the `chain.toml`
 
 ### How to override downloads
 
-As the `snapshot-lock` is used as the master hash list by the executing process the `.seg` file used by the process can be changes by changing its associated hash.  there are two models of operation here:
+As the `snapshot-lock` is used as the master hash list by the executing process, the `.seg` file used by the process can be changed by changing its associated hash.  There are two models of operation here. Both involve updating the hash in snapshot-lock.json first. 
 
-* If the associated `.seg.` file is deleted and the hash changes and new file will be deleted.
+* First method involves deleting the old file (`.seg` file), this will trigger download of new file
 
-* If a replacement file is incerted into the directory and the hash changes to the hash of that file, the file will be used - with no download.
-    * If no other method to determing the file hash exists, the hash of the new file will be printed by the process on start-up if it does not match the `snapshot-lock` entry and this can be used to insert the hash into the ``snapshot-lock`
+* Second method involves inserting the new replacement file into the directory. This file will be used - with no download.
+    * If no other method to determine the file hash exists, the hash of the new file will be printed by the process on start-up if it does not match the `snapshot-lock` entry and this can be used to insert the hash into the ``snapshot-lock`
 
 ## BittorrentInfo (in the downloader db)
 
-This is an internal db table used for managing the state of the download from either the torrent or its associated web host.  It has been created to manage the fact that the internal torrent library does not necessarily manage the overall download state of the file assocaited with a has completely consistently.
+This is an internal db table used for managing the state of the download from either the torrent or its associated web host.  It has been created to manage the fact that the internal torrent library does not necessarily manage the overall download state of the file associated with a has completely consistently.
 
 It contains the following entries
 
@@ -74,7 +74,7 @@ It contains the following entries
 |----|------|
 | Name | The unqualified name of the file being downloaded.  e.g. `v1-000000-000500-transactions.seg`.  This field is treated as the primary key for the table, there can only be one download per file. |
 | Hash | The hash of the file being downloaded.  This value can change if the external hash received either from `chain.toml` or `snapshot-lock.json` changes.  If the hash changes the entry is treated as a new download and the `Length` and `Completed` fields are reset. 
-| Length | The length of the file downloaded.  This may be avilible from the torrent info - but in general is only completed once the file has been downloaded. |
+| Length | The length of the file downloaded.  This may be available from the torrent info - but in general is only completed once the file has been downloaded. |
 | Created | The date and time that this record was created, or that the `Hash` field changed, effectively making this an new download. |
 | Completed | This is the date and time that the download was completed.  The presence of a completion date is also used as an indication of completion.  If the field is nil then the download is treated as incomplete |
 
