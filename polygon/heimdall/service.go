@@ -157,8 +157,9 @@ func (s *service) FetchLatestSpans(ctx context.Context, count uint) ([]*Span, er
 	for count > 0 {
 		prevSpanRawId := span.RawId()
 		if prevSpanRawId == 0 {
-			return latestSpans, nil
+			break
 		}
+
 		span, err = s.spanStore.GetEntity(ctx, prevSpanRawId-1)
 		if err != nil {
 			return nil, err
@@ -168,6 +169,7 @@ func (s *service) FetchLatestSpans(ctx context.Context, count uint) ([]*Span, er
 		count--
 	}
 
+	libcommon.SliceReverse(latestSpans)
 	return latestSpans, nil
 }
 

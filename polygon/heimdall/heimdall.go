@@ -364,8 +364,9 @@ func (h *heimdall) FetchLatestSpans(ctx context.Context, count uint) ([]*Span, e
 	for count > 0 {
 		prevSpanRawId := span.RawId()
 		if prevSpanRawId == 0 {
-			return latestSpans, nil
+			break
 		}
+
 		span, err = h.client.FetchSpan(ctx, prevSpanRawId-1)
 		if err != nil {
 			return nil, err
@@ -375,6 +376,7 @@ func (h *heimdall) FetchLatestSpans(ctx context.Context, count uint) ([]*Span, e
 		count--
 	}
 
+	common.SliceReverse(latestSpans)
 	return latestSpans, nil
 }
 
