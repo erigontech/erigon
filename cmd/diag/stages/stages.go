@@ -116,15 +116,15 @@ func printSyncStages(cliCtx *cli.Context, isCurrent bool) error {
 }
 
 func querySyncInfo(cliCtx *cli.Context) ([]diagnostics.SyncStage, error) {
-	var data diagnostics.SyncStatistics
-	url := "http://" + cliCtx.String(flags.DebugURLFlag.Name) + flags.ApiPath + "/snapshot-sync"
+	var data []diagnostics.SyncStage
+	url := "http://" + cliCtx.String(flags.DebugURLFlag.Name) + flags.ApiPath + "/sync-stages"
 
 	err := util.MakeHttpGetCall(cliCtx.Context, url, &data)
 	if err != nil {
 		return nil, err
 	}
 
-	return data.SyncStages, nil
+	return data, nil
 }
 
 func printData(cliCtx *cli.Context, data []table.Row) {
@@ -135,66 +135,70 @@ func printData(cliCtx *cli.Context, data []table.Row) {
 	case "text":
 		util.RenderTableWithHeader(
 			"",
-			table.Row{"Stage", "SubStage", "Status"},
+			table.Row{"Stage", "SubStage", "Status", "Time Elapsed", "Time Left", "Progress"},
 			data,
 		)
 	}
 }
 
 func getStagesRows(stages []diagnostics.SyncStage) []table.Row {
+	rows := createSyncStageRows(stages, false)
+	return rows
+}
+
+func getCurrentStageRow(stages []diagnostics.SyncStage) []table.Row {
+	rows := createSyncStageRows(stages, true)
+
+	return rows
+}
+
+func createSyncStageRows(stages []diagnostics.SyncStage, isCurrent bool) []table.Row {
 	rows := []table.Row{}
 	for _, stage := range stages {
-		stageRow := table.Row{
-			stage.ID,
-			"",
-			stage.State.String(),
+
+		if isCurrent {
+			if stage.State != diagnostics.Running {
+				continue
+			}
 		}
+
+		stageRow := createStageRowFromStage(stage)
 		rows = append(rows, stageRow)
 
 		for _, substage := range stage.SubStages {
-			subStageRow := table.Row{
-				"",
-				substage.ID,
-				substage.State.String(),
-			}
+			subStageRow := createSubStageRowFromSubstageStage(substage)
 			rows = append(rows, subStageRow)
 		}
 
 		if len(stage.SubStages) != 0 {
-			rows = append(rows, table.Row{"", "", ""})
+			rows = append(rows, table.Row{"", "", "", "", ""})
 		}
+
+		if isCurrent {
+			break
+		}
+
 	}
 
 	return rows
 }
 
-func getCurrentStageRow(stages []diagnostics.SyncStage) []table.Row {
-	rows := []table.Row{}
-	for _, stage := range stages {
-		if stage.State == diagnostics.Running {
-			stageRow := table.Row{
-				stage.ID,
-				"",
-				stage.State.String(),
-			}
-			rows = append(rows, stageRow)
-
-			for _, substage := range stage.SubStages {
-				subStageRow := table.Row{
-					"",
-					substage.ID,
-					substage.State.String(),
-				}
-				rows = append(rows, subStageRow)
-			}
-
-			if len(stage.SubStages) != 0 {
-				rows = append(rows, table.Row{"", "", ""})
-			}
-
-			break
-		}
+func createStageRowFromStage(stage diagnostics.SyncStage) table.Row {
+	return table.Row{
+		stage.ID,
+		"",
+		stage.State.String(),
+		stage.Stats.TimeElapsed,
+		stage.Stats.Progress,
 	}
+}
 
-	return rows
+func createSubStageRowFromSubstageStage(substage diagnostics.SyncSubStage) table.Row {
+	return table.Row{
+		"",
+		substage.ID,
+		substage.State.String(),
+		substage.Stats.TimeElapsed,
+		substage.Stats.Progress,
+	}
 }
