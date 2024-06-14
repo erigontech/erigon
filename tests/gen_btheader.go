@@ -6,9 +6,8 @@ import (
 	"encoding/json"
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -19,27 +18,27 @@ var _ = (*btHeaderMarshaling)(nil)
 func (b btHeader) MarshalJSON() ([]byte, error) {
 	type btHeader struct {
 		Bloom                 types.Bloom
-		Coinbase              libcommon.Address
-		MixHash               libcommon.Hash
+		Coinbase              common.Address
+		MixHash               common.Hash
 		Nonce                 types.BlockNonce
 		Number                *math.HexOrDecimal256
-		Hash                  libcommon.Hash
-		ParentHash            libcommon.Hash
-		ReceiptTrie           libcommon.Hash
-		StateRoot             libcommon.Hash
-		TransactionsTrie      libcommon.Hash
-		UncleHash             libcommon.Hash
+		Hash                  common.Hash
+		ParentHash            common.Hash
+		ReceiptTrie           common.Hash
+		StateRoot             common.Hash
+		TransactionsTrie      common.Hash
+		UncleHash             common.Hash
 		ExtraData             hexutility.Bytes
 		Difficulty            *math.HexOrDecimal256
 		GasLimit              math.HexOrDecimal64
 		GasUsed               math.HexOrDecimal64
 		Timestamp             math.HexOrDecimal64
 		BaseFeePerGas         *math.HexOrDecimal256
-		WithdrawalsRoot       *libcommon.Hash
+		WithdrawalsRoot       *common.Hash
 		BlobGasUsed           *math.HexOrDecimal64
 		ExcessBlobGas         *math.HexOrDecimal64
-		ParentBeaconBlockRoot *libcommon.Hash
-		RequestsRoot          *libcommon.Hash
+		ParentBeaconBlockRoot *common.Hash
+		RequestsRoot          *common.Hash
 	}
 	var enc btHeader
 	enc.Bloom = b.Bloom
@@ -71,27 +70,27 @@ func (b btHeader) MarshalJSON() ([]byte, error) {
 func (b *btHeader) UnmarshalJSON(input []byte) error {
 	type btHeader struct {
 		Bloom                 *types.Bloom
-		Coinbase              *libcommon.Address
-		MixHash               *libcommon.Hash
+		Coinbase              *common.Address
+		MixHash               *common.Hash
 		Nonce                 *types.BlockNonce
 		Number                *math.HexOrDecimal256
-		Hash                  *libcommon.Hash
-		ParentHash            *libcommon.Hash
-		ReceiptTrie           *libcommon.Hash
-		StateRoot             *libcommon.Hash
-		TransactionsTrie      *libcommon.Hash
-		UncleHash             *libcommon.Hash
+		Hash                  *common.Hash
+		ParentHash            *common.Hash
+		ReceiptTrie           *common.Hash
+		StateRoot             *common.Hash
+		TransactionsTrie      *common.Hash
+		UncleHash             *common.Hash
 		ExtraData             *hexutility.Bytes
 		Difficulty            *math.HexOrDecimal256
 		GasLimit              *math.HexOrDecimal64
 		GasUsed               *math.HexOrDecimal64
 		Timestamp             *math.HexOrDecimal64
 		BaseFeePerGas         *math.HexOrDecimal256
-		WithdrawalsRoot       *libcommon.Hash
+		WithdrawalsRoot       *common.Hash
 		BlobGasUsed           *math.HexOrDecimal64
 		ExcessBlobGas         *math.HexOrDecimal64
-		ParentBeaconBlockRoot *libcommon.Hash
-		RequestsRoot          *libcommon.Hash
+		ParentBeaconBlockRoot *common.Hash
+		RequestsRoot          *common.Hash
 	}
 	var dec btHeader
 	if err := json.Unmarshal(input, &dec); err != nil {

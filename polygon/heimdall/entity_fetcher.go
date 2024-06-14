@@ -137,6 +137,10 @@ func (f *entityFetcherImpl[TEntity]) FetchAllEntities(ctx context.Context) ([]TE
 		return cmp.Compare(n1, n2)
 	})
 
+	for i, entity := range entities {
+		entity.SetRawId(uint64(i + 1))
+	}
+
 	f.logger.Debug(
 		heimdallLogPrefix(fmt.Sprintf("%s done", f.name)),
 		"len", len(entities),

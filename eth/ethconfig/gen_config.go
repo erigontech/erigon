@@ -3,15 +3,19 @@
 package ethconfig
 
 import (
-	"time"
+	"math/big"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
+	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
+	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
-
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 )
@@ -25,22 +29,51 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		Prune                          prune.Mode
 		BatchSize                      datasize.ByteSize
 		ImportMode                     bool
-		BadBlockHash                   libcommon.Hash
+		BadBlockHash                   common.Hash
 		Snapshot                       BlocksFreezing
-		BlockDownloaderWindow          int
+		Downloader                     *downloadercfg.Cfg
+		BeaconRouter                   beacon_router_configuration.RouterConfiguration
+		CaplinConfig                   clparams.CaplinConfig
+		Dirs                           datadir.Dirs
 		ExternalSnapshotDownloaderAddr string
-		Whitelist                      map[uint64]libcommon.Hash `toml:"-"`
+		Whitelist                      map[uint64]common.Hash `toml:"-"`
 		Miner                          params.MiningConfig
 		Ethash                         ethashcfg.Config
 		Clique                         params.ConsensusSnapshotConfig
 		Aura                           chain.AuRaConfig
-		TxPool                         DeprecatedTxPoolConfig
+		DeprecatedTxPool               DeprecatedTxPoolConfig
+		TxPool                         txpoolcfg.Config
 		GPO                            gaspricecfg.Config
 		RPCGasCap                      uint64  `toml:",omitempty"`
 		RPCTxFeeCap                    float64 `toml:",omitempty"`
 		StateStream                    bool
-		BodyDownloadTimeoutSeconds     int
-		SyncLoopThrottle               time.Duration
+		HeimdallURL                    string
+		WithoutHeimdall                bool
+		WithHeimdallMilestones         bool
+		WithHeimdallWaypointRecording  bool
+		PolygonSync                    bool
+		PolygonSyncStage               bool
+		Ethstats                       string
+		InternalCL                     bool
+		CaplinDiscoveryAddr            string
+		CaplinDiscoveryPort            uint64
+		CaplinDiscoveryTCPPort         uint64
+		SentinelAddr                   string
+		SentinelPort                   uint64
+		OverridePragueTime             *big.Int `toml:",omitempty"`
+		SilkwormExecution              bool
+		SilkwormRpcDaemon              bool
+		SilkwormSentry                 bool
+		SilkwormVerbosity              string
+		SilkwormNumContexts            uint32
+		SilkwormRpcLogEnabled          bool
+		SilkwormRpcLogDirPath          string
+		SilkwormRpcLogMaxFileSize      uint16
+		SilkwormRpcLogMaxFiles         uint16
+		SilkwormRpcLogDumpResponse     bool
+		SilkwormRpcNumWorkers          uint32
+		SilkwormRpcJsonCompatibility   bool
+		DisableTxPoolGossip            bool
 	}
 	var enc Config
 	enc.Genesis = c.Genesis
@@ -51,17 +84,49 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.ImportMode = c.ImportMode
 	enc.BadBlockHash = c.BadBlockHash
 	enc.Snapshot = c.Snapshot
+	enc.Downloader = c.Downloader
+	enc.BeaconRouter = c.BeaconRouter
+	enc.CaplinConfig = c.CaplinConfig
+	enc.Dirs = c.Dirs
 	enc.ExternalSnapshotDownloaderAddr = c.ExternalSnapshotDownloaderAddr
 	enc.Whitelist = c.Whitelist
 	enc.Miner = c.Miner
 	enc.Ethash = c.Ethash
 	enc.Clique = c.Clique
 	enc.Aura = c.Aura
-	enc.TxPool = c.DeprecatedTxPool
+	enc.DeprecatedTxPool = c.DeprecatedTxPool
+	enc.TxPool = c.TxPool
 	enc.GPO = c.GPO
 	enc.RPCGasCap = c.RPCGasCap
 	enc.RPCTxFeeCap = c.RPCTxFeeCap
 	enc.StateStream = c.StateStream
+	enc.HeimdallURL = c.HeimdallURL
+	enc.WithoutHeimdall = c.WithoutHeimdall
+	enc.WithHeimdallMilestones = c.WithHeimdallMilestones
+	enc.WithHeimdallWaypointRecording = c.WithHeimdallWaypointRecording
+	enc.PolygonSync = c.PolygonSync
+	enc.PolygonSyncStage = c.PolygonSyncStage
+	enc.Ethstats = c.Ethstats
+	enc.InternalCL = c.InternalCL
+	enc.CaplinDiscoveryAddr = c.CaplinDiscoveryAddr
+	enc.CaplinDiscoveryPort = c.CaplinDiscoveryPort
+	enc.CaplinDiscoveryTCPPort = c.CaplinDiscoveryTCPPort
+	enc.SentinelAddr = c.SentinelAddr
+	enc.SentinelPort = c.SentinelPort
+	enc.OverridePragueTime = c.OverridePragueTime
+	enc.SilkwormExecution = c.SilkwormExecution
+	enc.SilkwormRpcDaemon = c.SilkwormRpcDaemon
+	enc.SilkwormSentry = c.SilkwormSentry
+	enc.SilkwormVerbosity = c.SilkwormVerbosity
+	enc.SilkwormNumContexts = c.SilkwormNumContexts
+	enc.SilkwormRpcLogEnabled = c.SilkwormRpcLogEnabled
+	enc.SilkwormRpcLogDirPath = c.SilkwormRpcLogDirPath
+	enc.SilkwormRpcLogMaxFileSize = c.SilkwormRpcLogMaxFileSize
+	enc.SilkwormRpcLogMaxFiles = c.SilkwormRpcLogMaxFiles
+	enc.SilkwormRpcLogDumpResponse = c.SilkwormRpcLogDumpResponse
+	enc.SilkwormRpcNumWorkers = c.SilkwormRpcNumWorkers
+	enc.SilkwormRpcJsonCompatibility = c.SilkwormRpcJsonCompatibility
+	enc.DisableTxPoolGossip = c.DisableTxPoolGossip
 	return &enc, nil
 }
 
@@ -74,22 +139,51 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		Prune                          *prune.Mode
 		BatchSize                      *datasize.ByteSize
 		ImportMode                     *bool
-		BadBlockHash                   *libcommon.Hash
+		BadBlockHash                   *common.Hash
 		Snapshot                       *BlocksFreezing
-		BlockDownloaderWindow          *int
+		Downloader                     *downloadercfg.Cfg
+		BeaconRouter                   *beacon_router_configuration.RouterConfiguration
+		CaplinConfig                   *clparams.CaplinConfig
+		Dirs                           *datadir.Dirs
 		ExternalSnapshotDownloaderAddr *string
-		Whitelist                      map[uint64]libcommon.Hash `toml:"-"`
+		Whitelist                      map[uint64]common.Hash `toml:"-"`
 		Miner                          *params.MiningConfig
 		Ethash                         *ethashcfg.Config
 		Clique                         *params.ConsensusSnapshotConfig
 		Aura                           *chain.AuRaConfig
-		TxPool                         *DeprecatedTxPoolConfig
+		DeprecatedTxPool               *DeprecatedTxPoolConfig
+		TxPool                         *txpoolcfg.Config
 		GPO                            *gaspricecfg.Config
 		RPCGasCap                      *uint64  `toml:",omitempty"`
 		RPCTxFeeCap                    *float64 `toml:",omitempty"`
 		StateStream                    *bool
-		BodyDownloadTimeoutSeconds     *int
-		SyncLoopThrottle               *time.Duration
+		HeimdallURL                    *string
+		WithoutHeimdall                *bool
+		WithHeimdallMilestones         *bool
+		WithHeimdallWaypointRecording  *bool
+		PolygonSync                    *bool
+		PolygonSyncStage               *bool
+		Ethstats                       *string
+		InternalCL                     *bool
+		CaplinDiscoveryAddr            *string
+		CaplinDiscoveryPort            *uint64
+		CaplinDiscoveryTCPPort         *uint64
+		SentinelAddr                   *string
+		SentinelPort                   *uint64
+		OverridePragueTime             *big.Int `toml:",omitempty"`
+		SilkwormExecution              *bool
+		SilkwormRpcDaemon              *bool
+		SilkwormSentry                 *bool
+		SilkwormVerbosity              *string
+		SilkwormNumContexts            *uint32
+		SilkwormRpcLogEnabled          *bool
+		SilkwormRpcLogDirPath          *string
+		SilkwormRpcLogMaxFileSize      *uint16
+		SilkwormRpcLogMaxFiles         *uint16
+		SilkwormRpcLogDumpResponse     *bool
+		SilkwormRpcNumWorkers          *uint32
+		SilkwormRpcJsonCompatibility   *bool
+		DisableTxPoolGossip            *bool
 	}
 	var dec Config
 	if err := unmarshal(&dec); err != nil {
@@ -119,6 +213,18 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.Snapshot != nil {
 		c.Snapshot = *dec.Snapshot
 	}
+	if dec.Downloader != nil {
+		c.Downloader = dec.Downloader
+	}
+	if dec.BeaconRouter != nil {
+		c.BeaconRouter = *dec.BeaconRouter
+	}
+	if dec.CaplinConfig != nil {
+		c.CaplinConfig = *dec.CaplinConfig
+	}
+	if dec.Dirs != nil {
+		c.Dirs = *dec.Dirs
+	}
 	if dec.ExternalSnapshotDownloaderAddr != nil {
 		c.ExternalSnapshotDownloaderAddr = *dec.ExternalSnapshotDownloaderAddr
 	}
@@ -137,8 +243,11 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.Aura != nil {
 		c.Aura = *dec.Aura
 	}
+	if dec.DeprecatedTxPool != nil {
+		c.DeprecatedTxPool = *dec.DeprecatedTxPool
+	}
 	if dec.TxPool != nil {
-		c.DeprecatedTxPool = *dec.TxPool
+		c.TxPool = *dec.TxPool
 	}
 	if dec.GPO != nil {
 		c.GPO = *dec.GPO
@@ -151,6 +260,87 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.StateStream != nil {
 		c.StateStream = *dec.StateStream
+	}
+	if dec.HeimdallURL != nil {
+		c.HeimdallURL = *dec.HeimdallURL
+	}
+	if dec.WithoutHeimdall != nil {
+		c.WithoutHeimdall = *dec.WithoutHeimdall
+	}
+	if dec.WithHeimdallMilestones != nil {
+		c.WithHeimdallMilestones = *dec.WithHeimdallMilestones
+	}
+	if dec.WithHeimdallWaypointRecording != nil {
+		c.WithHeimdallWaypointRecording = *dec.WithHeimdallWaypointRecording
+	}
+	if dec.PolygonSync != nil {
+		c.PolygonSync = *dec.PolygonSync
+	}
+	if dec.PolygonSyncStage != nil {
+		c.PolygonSyncStage = *dec.PolygonSyncStage
+	}
+	if dec.Ethstats != nil {
+		c.Ethstats = *dec.Ethstats
+	}
+	if dec.InternalCL != nil {
+		c.InternalCL = *dec.InternalCL
+	}
+	if dec.CaplinDiscoveryAddr != nil {
+		c.CaplinDiscoveryAddr = *dec.CaplinDiscoveryAddr
+	}
+	if dec.CaplinDiscoveryPort != nil {
+		c.CaplinDiscoveryPort = *dec.CaplinDiscoveryPort
+	}
+	if dec.CaplinDiscoveryTCPPort != nil {
+		c.CaplinDiscoveryTCPPort = *dec.CaplinDiscoveryTCPPort
+	}
+	if dec.SentinelAddr != nil {
+		c.SentinelAddr = *dec.SentinelAddr
+	}
+	if dec.SentinelPort != nil {
+		c.SentinelPort = *dec.SentinelPort
+	}
+	if dec.OverridePragueTime != nil {
+		c.OverridePragueTime = dec.OverridePragueTime
+	}
+	if dec.SilkwormExecution != nil {
+		c.SilkwormExecution = *dec.SilkwormExecution
+	}
+	if dec.SilkwormRpcDaemon != nil {
+		c.SilkwormRpcDaemon = *dec.SilkwormRpcDaemon
+	}
+	if dec.SilkwormSentry != nil {
+		c.SilkwormSentry = *dec.SilkwormSentry
+	}
+	if dec.SilkwormVerbosity != nil {
+		c.SilkwormVerbosity = *dec.SilkwormVerbosity
+	}
+	if dec.SilkwormNumContexts != nil {
+		c.SilkwormNumContexts = *dec.SilkwormNumContexts
+	}
+	if dec.SilkwormRpcLogEnabled != nil {
+		c.SilkwormRpcLogEnabled = *dec.SilkwormRpcLogEnabled
+	}
+	if dec.SilkwormRpcLogDirPath != nil {
+		c.SilkwormRpcLogDirPath = *dec.SilkwormRpcLogDirPath
+	}
+	if dec.SilkwormRpcLogMaxFileSize != nil {
+		c.SilkwormRpcLogMaxFileSize = *dec.SilkwormRpcLogMaxFileSize
+	}
+	if dec.SilkwormRpcLogMaxFiles != nil {
+		c.SilkwormRpcLogMaxFiles = *dec.SilkwormRpcLogMaxFiles
+	}
+	if dec.SilkwormRpcLogDumpResponse != nil {
+		c.SilkwormRpcLogDumpResponse = *dec.SilkwormRpcLogDumpResponse
+	}
+	if dec.SilkwormRpcNumWorkers != nil {
+		c.SilkwormRpcNumWorkers = *dec.SilkwormRpcNumWorkers
+	}
+	if dec.SilkwormRpcJsonCompatibility != nil {
+		c.SilkwormRpcJsonCompatibility = *dec.SilkwormRpcJsonCompatibility
+	}
+	if dec.DisableTxPoolGossip != nil {
+		c.DisableTxPoolGossip = *dec.DisableTxPoolGossip
 	}
 	return nil
 }

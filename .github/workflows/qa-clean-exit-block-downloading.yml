@@ -42,7 +42,8 @@ jobs:
         set +e # Disable exit on error
         
         # Run Erigon, send ctrl-c and check logs
-        python3 $ERIGON_QA_PATH/test_system/qa-tests/clean-exit/run_and_check_clean_exit.py ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $WORKING_TIME_SECONDS Erigon3
+        python3 $ERIGON_QA_PATH/test_system/qa-tests/clean-exit/run_and_check_clean_exit.py \
+            ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $WORKING_TIME_SECONDS Erigon3
   
         # Capture monitoring script exit status
         test_exit_status=$?
@@ -79,7 +80,16 @@ jobs:
       if: steps.test_step.outputs.test_executed == 'true'
       env:
         TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
-      run: python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --branch ${{ github.ref_name }} --test_name clean-exit-block-downloading --chain $CHAIN --outcome $TEST_RESULT --result_file ${{ github.workspace }}/result.json
+      run: |
+        python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
+          --repo erigon \
+          --commit $(git rev-parse HEAD) \
+          --branch ${{ github.ref_name }} \
+          --test_name clean-exit-block-downloading \
+          --chain $CHAIN \ 
+          --runner ${{ runner.name }} \
+          --outcome $TEST_RESULT \
+          --result_file ${{ github.workspace }}/result.json
 
     - name: Upload test results
       if: steps.test_step.outputs.test_executed == 'true'

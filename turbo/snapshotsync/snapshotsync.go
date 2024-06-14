@@ -351,10 +351,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	/*diagnostics.RegisterProvider(diagnostics.ProviderFunc(func(ctx context.Context) error {
-		return nil
-	}), diagnostics.TypeOf(diagnostics.DownloadStatistics{}), log.Root())*/
-
 	// Check once without delay, for faster erigon re-start
 	stats, err := snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{})
 	if err != nil {
@@ -371,15 +367,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 			if stats, err = snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
 				log.Warn("Error while waiting for snapshots progress", "err", err)
 			} else {
-				reason := "download"
-				if headerchain {
-					reason = "downloading header-chain"
-				}
-				logEnd := "download finished"
-				if headerchain {
-					logEnd = "header-chain download finished"
-				}
-				logStats(ctx, stats, downloadStartTime, stagesIdsList, logPrefix, reason, logEnd)
+				logStats(ctx, stats, downloadStartTime, stagesIdsList, logPrefix, headerchain)
 			}
 		}
 	}
@@ -402,15 +390,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 			if stats, err = snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
 				log.Warn("Error while waiting for snapshots progress", "err", err)
 			} else {
-				reason := "download"
-				if headerchain {
-					reason = "downloading header-chain"
-				}
-				logEnd := "download finished"
-				if headerchain {
-					logEnd = "header-chain download finished"
-				}
-				logStats(ctx, stats, downloadStartTime, stagesIdsList, logPrefix, reason, logEnd)
+				logStats(ctx, stats, downloadStartTime, stagesIdsList, logPrefix, headerchain)
 			}
 		}
 	}
@@ -425,7 +405,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 		}
 	}
 
-	if err := agg.OpenFolder(true); err != nil {
+	if err := agg.OpenFolder(); err != nil {
 		return err
 	}
 
@@ -500,10 +480,18 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 	return nil
 }
 
-func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime time.Time, stagesIdsList []string, logPrefix string, logReason string, logEnd string) {
+func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime time.Time, stagesIdsList []string, logPrefix string, headerchain bool) {
 	var m runtime.MemStats
 
-	diagnostics.Send(diagnostics.SyncStagesList{Stages: stagesIdsList})
+	logReason := "download"
+	if headerchain {
+		logReason = "downloading header-chain"
+	}
+	logEnd := "download finished"
+	if headerchain {
+		logEnd = "header-chain download finished"
+	}
+
 	diagnostics.Send(diagnostics.SnapshotDownloadStatistics{
 		Downloaded:           stats.BytesCompleted,
 		Total:                stats.BytesTotal,

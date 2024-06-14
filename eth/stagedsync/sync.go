@@ -2,7 +2,6 @@ package stagedsync
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -12,7 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -95,9 +93,9 @@ func (s *Sync) NextStage() {
 		return
 	}
 	s.currentStage++
-	isDiagEnabled := diagnostics.TypeOf(diagnostics.CurrentSyncStage{}).Enabled()
-	if isDiagEnabled {
-		diagnostics.Send(diagnostics.CurrentSyncStage{Stage: s.currentStage})
+
+	if s.currentStage < uint(len(s.stages)) {
+		diagnostics.Send(diagnostics.CurrentSyncStage{Stage: string(s.stages[s.currentStage].ID)})
 	}
 }
 
@@ -137,25 +135,6 @@ func (s *Sync) IsAfter(stage1, stage2 stages.SyncStage) bool {
 
 func (s *Sync) HasUnwindPoint() bool { return s.unwindPoint != nil }
 func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error {
-	if tx != nil {
-		if casted, ok := tx.(state.HasAggTx); ok {
-			// protect from too far unwind
-			unwindPointWithCommitment, ok, err := casted.AggTx().(*state.AggregatorRoTx).CanUnwindBeforeBlockNum(unwindPoint, tx)
-			// Ignore in the case that snapshots are ahead of commitment, it will be resolved later.
-			// This can be a problem if snapshots include a wrong chain so it is ok to ignore it.
-			if errors.Is(err, state.ErrBehindCommitment) {
-				return nil
-			}
-			if err != nil {
-				return err
-			}
-			if !ok {
-				return fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindPoint, unwindPointWithCommitment)
-			}
-			unwindPoint = unwindPointWithCommitment
-		}
-	}
-
 	if reason.Block != nil {
 		s.logger.Debug("UnwindTo", "block", unwindPoint, "block_hash", reason.Block.String(), "err", reason.Err, "stack", dbg.Stack())
 	} else {
@@ -189,10 +168,8 @@ func (s *Sync) SetCurrentStage(id stages.SyncStage) error {
 	for i, stage := range s.stages {
 		if stage.ID == id {
 			s.currentStage = uint(i)
-			isDiagEnabled := diagnostics.TypeOf(diagnostics.CurrentSyncStage{}).Enabled()
-			if isDiagEnabled {
-				diagnostics.Send(diagnostics.CurrentSyncStage{Stage: s.currentStage})
-			}
+
+			diagnostics.Send(diagnostics.CurrentSyncStage{Stage: string(id)})
 
 			return nil
 		}
@@ -552,7 +529,6 @@ func (s *Sync) runStage(stage *Stage, db kv.RwDB, txc wrap.TxContainer, initialC
 
 func (s *Sync) unwindStage(initialCycle bool, stage *Stage, db kv.RwDB, txc wrap.TxContainer) error {
 	start := time.Now()
-	s.logger.Trace("Unwind...", "stage", stage.ID)
 	stageState, err := s.StageState(stage.ID, txc.Tx, db, initialCycle, false)
 	if err != nil {
 		return err
@@ -586,8 +562,6 @@ func (s *Sync) unwindStage(initialCycle bool, stage *Stage, db kv.RwDB, txc wrap
 // Run the pruning function for the given stage
 func (s *Sync) pruneStage(initialCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx) error {
 	start := time.Now()
-	s.logger.Debug("Prune...", "stage", stage.ID)
-
 	stageState, err := s.StageState(stage.ID, tx, db, initialCycle, false)
 	if err != nil {
 		return err
@@ -608,11 +582,11 @@ func (s *Sync) pruneStage(initialCycle bool, stage *Stage, db kv.RwDB, tx kv.RwT
 
 	took := time.Since(start)
 	if took > 30*time.Second {
-		logPrefix := s.LogPrefix()
-		s.logger.Info(fmt.Sprintf("[%s] Prune done", logPrefix), "in", took)
+		s.logger.Info(fmt.Sprintf("[%s] Prune done", s.LogPrefix()), "in", took)
+	} else {
+		s.logger.Debug(fmt.Sprintf("[%s] Prune done", s.LogPrefix()), "in", took)
 	}
 	s.timings = append(s.timings, Timing{isPrune: true, stage: stage.ID, took: took})
-	s.logger.Debug("Prune DONE", "stage", stage.ID)
 	return nil
 }
 

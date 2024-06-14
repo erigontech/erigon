@@ -23,9 +23,6 @@ In order to conect diagnostics run
 |||
 
 
-Available configuration:
-
-
 ## Snapshots
 
 This sub command can be used for manipulating snapshot files

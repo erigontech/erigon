@@ -208,8 +208,9 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter ArchiveGetter
 
 	//getter := NewArchiveGetter(item.decompressor.MakeGetter(), dt.d.compression)
 	getter.Reset(offset)
-	if !getter.HasNext() || uint64(getter.Size()) <= offset {
-		dt.d.logger.Warn("lookupByShortenedKey failed", "short", shortKey, "offset", offset, "file", getter.FileName())
+	n := getter.HasNext()
+	if !n || uint64(getter.Size()) <= offset {
+		dt.d.logger.Warn("lookupByShortenedKey failed", "file", getter.FileName(), "short", fmt.Sprintf("%x", shortKey), "offset", offset, "hasNext", n, "size", getter.Size(), "offsetBigger", uint64(getter.Size()) <= offset)
 		return nil, false
 	}
 
@@ -231,7 +232,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(accounts, storage *DomainRoTx
 	}
 
 	return func(valBuf []byte, keyFromTxNum, keyEndTxNum uint64) (transValBuf []byte, err error) {
-		if !dt.d.replaceKeysInValues || len(valBuf) == 0 {
+		if !dt.d.replaceKeysInValues || len(valBuf) == 0 || ((keyEndTxNum-keyFromTxNum)/dt.d.aggregationStep)%2 != 0 {
 			return valBuf, nil
 		}
 		si := storage.lookupFileByItsRange(keyFromTxNum, keyEndTxNum)
@@ -253,7 +254,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(accounts, storage *DomainRoTx
 		sig := NewArchiveGetter(si.decompressor.MakeGetter(), storage.d.compression)
 		aig := NewArchiveGetter(ai.decompressor.MakeGetter(), accounts.d.compression)
 		ms := NewArchiveGetter(mergedStorage.decompressor.MakeGetter(), storage.d.compression)
-		ma := NewArchiveGetter(mergedAccount.decompressor.MakeGetter(), storage.d.compression)
+		ma := NewArchiveGetter(mergedAccount.decompressor.MakeGetter(), accounts.d.compression)
 
 		replacer := func(key []byte, isStorage bool) ([]byte, error) {
 			var found bool

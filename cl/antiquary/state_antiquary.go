@@ -410,7 +410,7 @@ func (s *Antiquary) antiquateField(ctx context.Context, slot uint64, uncompresse
 		return err
 	}
 	roundedSlot := slot - (slot % clparams.SlotsPerDump)
-	return collector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), common.Copy(buffer.Bytes()))
+	return collector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), buffer.Bytes())
 }
 
 func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.Tx) error {

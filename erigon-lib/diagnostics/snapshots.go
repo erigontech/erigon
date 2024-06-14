@@ -3,6 +3,8 @@ package diagnostics
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
@@ -48,19 +50,58 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 				d.syncStats.SnapshotDownload.DownloadFinished = info.DownloadFinished
 				d.syncStats.SnapshotDownload.TorrentMetadataReady = info.TorrentMetadataReady
 
+				downloadedPercent := getPercentDownloaded(info.Downloaded, info.Total)
+				remainingBytes := info.Total - info.Downloaded
+				downloadTimeLeft := CalculateTime(remainingBytes, info.DownloadRate)
+				totalDownloadTimeString := time.Duration(info.TotalTime) * time.Second
+
+				d.updateSnapshotStageStats(SyncStageStats{
+					TimeElapsed: totalDownloadTimeString.String(),
+					TimeLeft:    downloadTimeLeft,
+					Progress:    downloadedPercent,
+				})
+
 				if err := d.db.Update(d.ctx, SnapshotDownloadUpdater(d.syncStats.SnapshotDownload)); err != nil {
 					log.Error("[Diagnostics] Failed to update snapshot download info", "err", err)
 				}
 
 				d.mu.Unlock()
 
-				/*if info.DownloadFinished {
+				if d.snapshotStageFinished() {
 					return
-				}*/
+				}
 			}
 		}
-
 	}()
+}
+
+func getPercentDownloaded(downloaded, total uint64) string {
+	percent := float32(downloaded) / float32(total/100)
+
+	if percent > 100 {
+		percent = 100
+	}
+
+	return fmt.Sprintf("%.2f%%", percent)
+}
+
+func (d *DiagnosticClient) updateSnapshotStageStats(stats SyncStageStats) {
+	idxs := d.getCurrentSyncIdxs()
+	if idxs.Stage == -1 || idxs.SubStage == -1 {
+		log.Warn("[Diagnostics] Cant find running stage or substage while updateing Snapshots stage stats.", "stages", d.syncStages)
+		return
+	}
+
+	d.syncStages[idxs.Stage].SubStages[idxs.SubStage].Stats = stats
+}
+
+func (d *DiagnosticClient) snapshotStageFinished() bool {
+	idx := d.getCurrentSyncIdxs()
+	if idx.Stage > 0 {
+		return true
+	} else {
+		return false
+	}
 }
 
 func (d *DiagnosticClient) runSegmentDownloadingListener(rootCtx context.Context) {

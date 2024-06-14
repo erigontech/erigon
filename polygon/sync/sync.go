@@ -11,6 +11,8 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/p2p"
 )
 
+type latestSpanFetcher func(ctx context.Context, count uint) ([]*heimdall.Span, error)
+
 type Sync struct {
 	store             Store
 	execution         ExecutionClient
@@ -18,9 +20,9 @@ type Sync struct {
 	blocksVerifier    BlocksVerifier
 	p2pService        p2p.Service
 	blockDownloader   BlockDownloader
-	ccBuilderFactory  func(root *types.Header, span *heimdall.Span) CanonicalChainBuilder
+	ccBuilderFactory  CanonicalChainBuilderFactory
 	spansCache        *SpansCache
-	fetchLatestSpan   func(ctx context.Context) (*heimdall.Span, error)
+	fetchLatestSpans  latestSpanFetcher
 	events            <-chan Event
 	logger            log.Logger
 }
@@ -34,7 +36,7 @@ func NewSync(
 	blockDownloader BlockDownloader,
 	ccBuilderFactory CanonicalChainBuilderFactory,
 	spansCache *SpansCache,
-	fetchLatestSpan func(ctx context.Context) (*heimdall.Span, error),
+	fetchLatestSpans latestSpanFetcher,
 	events <-chan Event,
 	logger log.Logger,
 ) *Sync {
@@ -47,7 +49,7 @@ func NewSync(
 		blockDownloader:   blockDownloader,
 		ccBuilderFactory:  ccBuilderFactory,
 		spansCache:        spansCache,
-		fetchLatestSpan:   fetchLatestSpan,
+		fetchLatestSpans:  fetchLatestSpans,
 		events:            events,
 		logger:            logger,
 	}
@@ -225,44 +227,21 @@ func (s *Sync) onNewBlockHashesEvent(
 func (s *Sync) Run(ctx context.Context) error {
 	s.logger.Debug(syncLogPrefix("running sync component"))
 
-	tip, err := s.execution.CurrentHeader(ctx)
+	tip, err := s.syncToTip(ctx)
 	if err != nil {
 		return err
 	}
 
-	// loop until we converge at the latest checkpoint & milestone
-	var prevTip *types.Header
-	for tip != prevTip {
-		prevTip = tip
-
-		newTip, err := s.blockDownloader.DownloadBlocksUsingCheckpoints(ctx, tip.Number.Uint64()+1)
-		if err != nil {
-			return err
-		}
-		if newTip != nil {
-			tip = newTip
-		}
-
-		newTip, err = s.blockDownloader.DownloadBlocksUsingMilestones(ctx, tip.Number.Uint64()+1)
-		if err != nil {
-			return err
-		}
-		if newTip != nil {
-			tip = newTip
-		}
-
-		if err = s.commitExecution(ctx, tip, tip); err != nil {
-			return err
-		}
-	}
-
-	latestSpan, err := s.fetchLatestSpan(ctx)
+	latestSpans, err := s.fetchLatestSpans(ctx, 2)
 	if err != nil {
 		return err
 	}
 
-	s.spansCache.Add(latestSpan)
-	ccBuilder := s.ccBuilderFactory(tip, latestSpan)
+	for _, span := range latestSpans {
+		s.spansCache.Add(span)
+	}
+
+	ccBuilder := s.ccBuilderFactory(tip)
 
 	for {
 		select {
@@ -287,4 +266,60 @@ func (s *Sync) Run(ctx context.Context) error {
 			return ctx.Err()
 		}
 	}
+}
+
+func (s *Sync) syncToTip(ctx context.Context) (*types.Header, error) {
+	tip, err := s.execution.CurrentHeader(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	tip, err = s.syncToTipUsingCheckpoints(ctx, tip)
+	if err != nil {
+		return nil, err
+	}
+
+	tip, err = s.syncToTipUsingMilestones(ctx, tip)
+	if err != nil {
+		return nil, err
+	}
+
+	return tip, nil
+}
+
+func (s *Sync) syncToTipUsingCheckpoints(ctx context.Context, tip *types.Header) (*types.Header, error) {
+	return s.sync(ctx, tip, func(ctx context.Context, startBlockNum uint64) (*types.Header, error) {
+		return s.blockDownloader.DownloadBlocksUsingCheckpoints(ctx, startBlockNum)
+	})
+}
+
+func (s *Sync) syncToTipUsingMilestones(ctx context.Context, tip *types.Header) (*types.Header, error) {
+	return s.sync(ctx, tip, func(ctx context.Context, startBlockNum uint64) (*types.Header, error) {
+		return s.blockDownloader.DownloadBlocksUsingMilestones(ctx, startBlockNum)
+	})
+}
+
+func (s *Sync) sync(
+	ctx context.Context,
+	tip *types.Header,
+	tipDownloader func(ctx context.Context, startBlockNum uint64) (*types.Header, error),
+) (*types.Header, error) {
+	for {
+		newTip, err := tipDownloader(ctx, tip.Number.Uint64()+1)
+		if err != nil {
+			return nil, err
+		}
+
+		if newTip == nil {
+			// we've reached the tip
+			break
+		}
+
+		tip = newTip
+		if err = s.commitExecution(ctx, tip, tip); err != nil {
+			return nil, err
+		}
+	}
+
+	return tip, nil
 }

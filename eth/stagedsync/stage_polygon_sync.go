@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
@@ -20,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/p2p/sentry"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
+	"github.com/ledgerwatch/erigon/polygon/bridge"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/polygon/p2p"
 	polygonsync "github.com/ledgerwatch/erigon/polygon/sync"
@@ -37,6 +39,8 @@ func NewPolygonSyncStageCfg(
 	blockReader services.FullBlockReader,
 	stopNode func() error,
 	stateReceiverABI abi.ABI,
+	blockLimit uint,
+	dataDir string,
 ) PolygonSyncStageCfg {
 	dataStream := make(chan polygonSyncStageDataItem)
 	storage := &polygonSyncStageStorage{
@@ -54,6 +58,8 @@ func NewPolygonSyncStageCfg(
 	milestoneVerifier := polygonsync.VerifyMilestoneHeaders
 	blocksVerifier := polygonsync.VerifyBlocks
 	heimdallService := heimdall.NewHeimdall(heimdallClient, logger, heimdall.WithStore(storage))
+	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
+	polygonBridge := bridge.NewBridge(dataDir, logger, borConfig, heimdallClient.FetchStateSyncEvents, stateReceiverABI)
 	blockDownloader := polygonsync.NewBlockDownloader(
 		logger,
 		p2pService,
@@ -62,10 +68,10 @@ func NewPolygonSyncStageCfg(
 		milestoneVerifier,
 		blocksVerifier,
 		storage,
+		blockLimit,
 	)
 	spansCache := polygonsync.NewSpansCache()
 	events := polygonsync.NewTipEvents(logger, p2pService, heimdallService)
-	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	sync := polygonsync.NewSync(
 		storage,
 		executionEngine,
@@ -75,7 +81,7 @@ func NewPolygonSyncStageCfg(
 		blockDownloader,
 		polygonsync.NewCanonicalChainBuilderFactory(chainConfig, borConfig, spansCache),
 		spansCache,
-		heimdallService.FetchLatestSpan,
+		heimdallService.FetchLatestSpans,
 		events.Events(),
 		logger,
 	)
@@ -83,6 +89,7 @@ func NewPolygonSyncStageCfg(
 		logger:           logger,
 		chainConfig:      chainConfig,
 		blockReader:      blockReader,
+		bridge:           polygonBridge,
 		sync:             sync,
 		events:           events,
 		p2p:              p2pService,
@@ -102,7 +109,13 @@ type PolygonSyncStageCfg struct {
 	service *polygonSyncStageService
 }
 
-func SpawnPolygonSyncStage(ctx context.Context, tx kv.RwTx, stageState *StageState, cfg PolygonSyncStageCfg) error {
+func SpawnPolygonSyncStage(
+	ctx context.Context,
+	tx kv.RwTx,
+	stageState *StageState,
+	unwinder Unwinder,
+	cfg PolygonSyncStageCfg,
+) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -113,7 +126,7 @@ func SpawnPolygonSyncStage(ctx context.Context, tx kv.RwTx, stageState *StageSta
 		defer tx.Rollback()
 	}
 
-	if err := cfg.service.Run(ctx, tx, stageState); err != nil {
+	if err := cfg.service.Run(ctx, tx, stageState, unwinder); err != nil {
 		return err
 	}
 
@@ -129,10 +142,12 @@ func SpawnPolygonSyncStage(ctx context.Context, tx kv.RwTx, stageState *StageSta
 }
 
 func UnwindPolygonSyncStage() error {
+	// TODO - headers, bodies (including txnums index), checkpoints, milestones, spans, state sync events
 	return nil
 }
 
 func PrunePolygonSyncStage() error {
+	// TODO - headers, bodies (including txnums index), checkpoints, milestones, spans, state sync events
 	return nil
 }
 
@@ -148,6 +163,7 @@ type polygonSyncStageService struct {
 	logger           log.Logger
 	chainConfig      *chain.Config
 	blockReader      services.FullBlockReader
+	bridge           bridge.Service
 	sync             *polygonsync.Sync
 	events           *polygonsync.TipEvents
 	p2p              p2p.Service
@@ -158,19 +174,29 @@ type polygonSyncStageService struct {
 	// internal
 	appendLogPrefix          func(string) string
 	stageState               *StageState
+	unwinder                 Unwinder
+	cachedForkChoice         *types.Header
 	lastStateSyncEventId     uint64
 	lastStateSyncEventIdInit bool
 	bgComponentsRun          bool
 	bgComponentsErr          chan error
 }
 
-func (s *polygonSyncStageService) Run(ctx context.Context, tx kv.RwTx, stageState *StageState) error {
+func (s *polygonSyncStageService) Run(ctx context.Context, tx kv.RwTx, stageState *StageState, unwinder Unwinder) error {
 	s.appendLogPrefix = newAppendLogPrefix(stageState.LogPrefix())
 	s.stageState = stageState
+	s.unwinder = unwinder
 	s.logger.Info(s.appendLogPrefix("begin..."), "progress", stageState.BlockNumber)
+	s.runBgComponentsOnce(ctx)
 
-	if !s.bgComponentsRun {
-		s.runBgComponents(ctx)
+	if s.cachedForkChoice != nil {
+		err := s.handleUpdateForkChoice(tx, s.cachedForkChoice)
+		if err != nil {
+			return err
+		}
+
+		s.cachedForkChoice = nil
+		return nil
 	}
 
 	for {
@@ -178,12 +204,17 @@ func (s *polygonSyncStageService) Run(ctx context.Context, tx kv.RwTx, stageStat
 		case <-ctx.Done():
 			return ctx.Err()
 		case err := <-s.bgComponentsErr:
-			s.logger.Error(s.appendLogPrefix("stopping node"), "err", err)
-			stopErr := s.stopNode()
-			if stopErr != nil {
-				return fmt.Errorf("%w: %w", stopErr, err)
-			}
-			return err
+			// call stop in separate goroutine to avoid deadlock due to "waitForStageLoopStop"
+			go func() {
+				s.logger.Error(s.appendLogPrefix("stopping node"), "err", err)
+				err = s.stopNode()
+				if err != nil {
+					s.logger.Error(s.appendLogPrefix("could not stop node cleanly"), "err", err)
+				}
+			}()
+
+			// use ErrStopped to exit the stage loop
+			return fmt.Errorf("%w: %w", common.ErrStopped, err)
 		case data := <-s.dataStream:
 			var err error
 			if data.updateForkChoice != nil {
@@ -207,15 +238,24 @@ func (s *polygonSyncStageService) Run(ctx context.Context, tx kv.RwTx, stageStat
 	}
 }
 
-func (s *polygonSyncStageService) runBgComponents(ctx context.Context) {
+func (s *polygonSyncStageService) runBgComponentsOnce(ctx context.Context) {
+	if s.bgComponentsRun {
+		return
+	}
+
 	s.logger.Info(s.appendLogPrefix("running background components"))
 	s.bgComponentsRun = true
+	s.bgComponentsErr = make(chan error)
 
 	go func() {
-		eg := errgroup.Group{}
+		eg, ctx := errgroup.WithContext(ctx)
 
 		eg.Go(func() error {
 			return s.events.Run(ctx)
+		})
+
+		eg.Go(func() error {
+			return s.bridge.Run(ctx)
 		})
 
 		eg.Go(func() error {
@@ -250,10 +290,11 @@ func (s *polygonSyncStageService) handleInsertBlocks(ctx context.Context, tx kv.
 		metrics.UpdateBlockConsumerHeaderDownloadDelay(header.Time, height-1, s.logger)
 		metrics.UpdateBlockConsumerBodyDownloadDelay(header.Time, height-1, s.logger)
 
-		parentTd := common.Big0
+		var parentTd *big.Int
+		var err error
 		if height > 0 {
 			// Parent's total difficulty
-			parentTd, err := rawdb.ReadTd(tx, header.ParentHash, height-1)
+			parentTd, err = rawdb.ReadTd(tx, header.ParentHash, height-1)
 			if err != nil || parentTd == nil {
 				return fmt.Errorf(
 					"parent's total difficulty not found with hash %x and height %d: %v",
@@ -262,6 +303,8 @@ func (s *polygonSyncStageService) handleInsertBlocks(ctx context.Context, tx kv.
 					err,
 				)
 			}
+		} else {
+			parentTd = big.NewInt(0)
 		}
 
 		td := parentTd.Add(parentTd, header.Difficulty)
@@ -282,6 +325,11 @@ func (s *polygonSyncStageService) handleInsertBlocks(ctx context.Context, tx kv.
 		}
 	}
 
+	err := s.bridge.ProcessNewBlocks(ctx, blocks)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -295,7 +343,22 @@ func (s *polygonSyncStageService) handleUpdateForkChoice(tx kv.RwTx, tip *types.
 	logTicker := time.NewTicker(logInterval)
 	defer logTicker.Stop()
 
-	if err := fixCanonicalChain(logPrefix, logTicker, tipBlockNum, tipHash, tx, s.blockReader, s.logger); err != nil {
+	newNodes, badNodes, err := fixCanonicalChain(logPrefix, logTicker, tipBlockNum, tipHash, tx, s.blockReader, s.logger)
+	if err != nil {
+		return err
+	}
+
+	if len(badNodes) > 0 {
+		badNode := badNodes[len(badNodes)-1]
+		s.cachedForkChoice = tip
+		return s.unwinder.UnwindTo(badNode.number, ForkReset(badNode.hash), tx)
+	}
+
+	if len(newNodes) == 0 {
+		return nil
+	}
+
+	if err := rawdb.AppendCanonicalTxNums(tx, newNodes[len(newNodes)-1].number); err != nil {
 		return err
 	}
 

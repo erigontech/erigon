@@ -65,6 +65,7 @@ type Genesis struct {
 	BlobGasUsed           *uint64      `json:"blobGasUsed"`           // EIP-4844
 	ExcessBlobGas         *uint64      `json:"excessBlobGas"`         // EIP-4844
 	ParentBeaconBlockRoot *common.Hash `json:"parentBeaconBlockRoot"` // EIP-4788
+	RequestsRoot          *common.Hash `json:"requestsRoot"`          // EIP-7685
 }
 
 // GenesisAlloc specifies the initial state that is part of the genesis block.
