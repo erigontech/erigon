@@ -37,6 +37,10 @@ type StateReader interface {
 	ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error)
 	ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error)
 	ReadAccountIncarnation(address common.Address) (uint64, error)
+}
+
+type HistoricalStateReader interface {
+	GetTxNum() uint64
 	SetTxNum(txNum uint64)
 }
 

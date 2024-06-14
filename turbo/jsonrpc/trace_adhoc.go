@@ -1120,7 +1120,6 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	if err != nil {
 		return nil, nil, err
 	}
-	typedStateReader := stateReader.(*state.HistoryReaderV3)
 	//stateCache := shards.NewStateCache(32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
 	cachedReader := stateReader
 	//cachedReader := state.NewCachedReader(stateReader, stateCache)
@@ -1157,9 +1156,15 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 		useParent = true
 	}
 
-	baseTxNum := typedStateReader.GetTxNum()
+	var baseTxNum uint64
+	historicalStateReader, isHistoricalStateReader := stateReader.(state.HistoricalStateReader)
+	if isHistoricalStateReader {
+		baseTxNum = historicalStateReader.GetTxNum()
+	}
 	for txIndex, msg := range msgs {
-		typedStateReader.SetTxNum(baseTxNum + uint64(txIndex))
+		if isHistoricalStateReader {
+			historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
+		}
 		if err := libcommon.Stopped(ctx.Done()); err != nil {
 			return nil, nil, err
 		}
@@ -1209,7 +1214,9 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			//cloneCache := stateCache.Clone()
 			//cloneReader = state.NewCachedReader(stateReader, cloneCache)
 			cloneReader = stateReader
-			typedStateReader.SetTxNum(baseTxNum + uint64(txIndex))
+			if isHistoricalStateReader {
+				historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
+			}
 			sdMap := make(map[libcommon.Address]*StateDiffAccount)
 			traceResult.StateDiff = sdMap
 			sd = &StateDiff{sdMap: sdMap}
