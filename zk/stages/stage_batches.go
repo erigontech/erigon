@@ -233,8 +233,13 @@ LOOP:
 		case <-stopChan:
 			break LOOP
 		case batchStart := <-batchStartChan:
-			// do nothing for now.  We have a channel read race so handle fork/batch related changes in the handling
-			// of the l2 block below
+			// check if the batch is invalid so that we can replicate this over in the stream
+			// when we re-populate it
+			if batchStart.BatchType == types.BatchTypeInvalid {
+				if err = hermezDb.WriteInvalidBatch(batchStart.Number); err != nil {
+					return err
+				}
+			}
 			_ = batchStart
 		case l2Block := <-l2BlockChan:
 			if cfg.zkCfg.SyncLimit > 0 && l2Block.L2BlockNumber >= cfg.zkCfg.SyncLimit {
