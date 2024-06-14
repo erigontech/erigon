@@ -1,6 +1,3 @@
-//go:build notzkevm
-// +build notzkevm
-
 package vm
 
 import (
@@ -16,7 +13,91 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
 	"github.com/ledgerwatch/erigon/params"
+	"encoding/hex"
 )
+
+func TestApplyHexPadBug(t *testing.T) {
+	type testScenario struct {
+		data     string
+		mSize    int
+		bug      bool
+		expected string
+	}
+
+	scenarios := map[string]testScenario{
+		// expected verified via zkevm node rpc
+		"cardona-block-3177498": {
+			data:     "0x010203",
+			mSize:    3,
+			bug:      true,
+			expected: "102030",
+		},
+		"longHexWithBug": {
+			data:     "0x0102030405060708090a0b0c0d0e0f0102030405060708090a0b0c0d0e0f0102030405060708090a0b0c0d0e0f0102030405060708090a0b0c0d0e0f",
+			mSize:    64,
+			bug:      true,
+			expected: "0102030405060708090a0b0c0d0e0f0102030405060708090a0b0c0d0e0f010230405060708090a0b0c0d0e0f0102030405060708090a0b0c0d0e0f0",
+		},
+		"singleByteHexWithoutBug": {
+			data:     "0x11",
+			mSize:    1,
+			bug:      false,
+			expected: "11",
+		},
+		"longHexWithoutBug1": {
+			data:     "0x00000000000000000000000000000000000000000000000000000000000001ff",
+			mSize:    32,
+			bug:      false,
+			expected: "00000000000000000000000000000000000000000000000000000000000001ff",
+		},
+		"longHexWithoutBug2": {
+			data:     "0x00000000000000000000000000000000000000000000000000005af3107a4000",
+			mSize:    32,
+			bug:      false,
+			expected: "00000000000000000000000000000000000000000000000000005af3107a4000",
+		},
+		"randomHexWithoutBug": {
+			data:     "0x060303e606c27f9cddd90a7f129f525c83a0be7108fd5209174a77ffa7809e1c",
+			mSize:    32,
+			bug:      false,
+			expected: "060303e606c27f9cddd90a7f129f525c83a0be7108fd5209174a77ffa7809e1c",
+		},
+		// expected verified via zkevm node rpc
+		"cardona-901721": {
+			data:     "0x000c0d08908319bb1f124d95d1e890847956013e989b3a0d8cbcb3a923dc12010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008908319bb1f124d95d1e890847956013e989b3a0d8cbcb3a923dc81f23aa91d",
+			mSize:    128,
+			bug:      false,
+			expected: "000c0d08908319bb1f124d95d1e890847956013e989b3a0d8cbcb3a923dc12010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008908319bb1f124d95d1e890847956013e989b3a0d8cbcb3a923dc81f23aa91d",
+		},
+		// expected verified via zkevm node rpc
+		"cardona-1498495": {
+			data:     "0x0000000000000000000000000000000000000000000000000000000005f7cf60000000000000000000000000e6386158ecc340d79439f0398a1085502c13993b00000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000140000000000000000000000067a061fb72554db38869a048db9d915600000bc70200000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000005f5ca880000000000000000000000000000000000000000000000000000000005f5d7820000000000000000000000000000000000000000000000000000000005f7cf600000000000000000000000000000000000000000000000000000000005f7cf6000000000000000000000000000000000000000000000000000000000000000040300010200000000000000000000000000000000000000000000000000000000",
+			mSize:    384,
+			bug:      false,
+			expected: "0000000000000000000000000000000000000000000000000000000005f7cf60000000000000000000000000e6386158ecc340d79439f0398a1085502c13993b00000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000140000000000000000000000067a061fb72554db38869a048db9d915600000bc70200000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000005f5ca880000000000000000000000000000000000000000000000000000000005f5d7820000000000000000000000000000000000000000000000000000000005f7cf600000000000000000000000000000000000000000000000000000000005f7cf6000000000000000000000000000000000000000000000000000000000000000040300010200000000000000000000000000000000000000000000000000000000",
+		},
+	}
+
+	for name, scenario := range scenarios {
+		t.Run(name, func(t *testing.T) {
+			d := common.FromHex(scenario.data)
+			result, bug, err := applyHexPadBug(d, uint64(scenario.mSize), 0)
+			if err != nil {
+				t.Fatalf("Error in applyHexPadBug: %v", err)
+			}
+
+			resultHex := hex.EncodeToString(result)
+
+			if scenario.bug != bug {
+				t.Errorf("Expected %t but got %t", scenario.bug, bug)
+			} else {
+				if resultHex != scenario.expected {
+					t.Errorf("Expected %s but got %s", scenario.expected, resultHex)
+				}
+			}
+		})
+	}
+}
 
 func TestBlockhashV2(t *testing.T) {
 
@@ -125,6 +206,35 @@ func TestExtCodeHashV2(t *testing.T) {
 }
 
 type TestIntraBlockState struct{}
+
+func (ibs TestIntraBlockState) HasLiveAccount(addr libcommon.Address) bool {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (ibs TestIntraBlockState) HasLiveState(addr libcommon.Address, key *libcommon.Hash) bool {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (ibs TestIntraBlockState) AddLog(log *types.Log) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (ibs TestIntraBlockState) GetLogs(hash libcommon.Hash) []*types.Log {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (ibs TestIntraBlockState) GetBlockStateRoot(blockNum uint64) libcommon.Hash {
+	return libcommon.BigToHash(new(big.Int).SetUint64(blockNum))
+}
+
+func (ibs TestIntraBlockState) GetBlockNumber() *uint256.Int {
+	//TODO implement me
+	panic("implement me")
+}
 
 func (ibs TestIntraBlockState) CreateAccount(libcommon.Address, bool) {}
 func (ibs TestIntraBlockState) GetTxCount() (uint64, error)           { return 0, nil }
