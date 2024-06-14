@@ -1252,9 +1252,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */)
 		}
 		if err != nil {
-
-			log.Warn(fmt.Sprintf("[dbg] createHistoryReader: reader=(%s)\n", stateReader.(*state.HistoryReaderV3).String()))
-			return nil, nil, fmt.Errorf("first run for txIndex %d, blockNum %d error: %w", txIndex, blockNumber, err)
+			return nil, nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
 		}
 
 		chainRules := chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time)
