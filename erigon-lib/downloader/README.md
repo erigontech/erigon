@@ -57,11 +57,11 @@ If the snapshot-lock file is deleted it will be reacreated from the `chain.toml`
 
 ### How to override downloads
 
-As the `snapshot-lock` is used as the master hash list by the executing process, the `.seg` file used by the process can be changed by changing its associated hash.  There are two models of operation here:
+As the `snapshot-lock` is used as the master hash list by the executing process, the `.seg` file used by the process can be changed by changing its associated hash.  There are two models of operation here. Both involve updating the hash in snapshot-lock.json first. 
 
-* If the associated `.seg.` file is deleted and the hash updated, the new file will be downloaded.
+* First method involves deleting the old file (`.seg` file), this will trigger download of new file
 
-* If a replacement file is inserted into the directory and the hash updated to point to the hash of that file, the file will be used - with no download.
+* Second method involves inserting the new replacement file into the directory. This file will be used - with no download.
     * If no other method to determine the file hash exists, the hash of the new file will be printed by the process on start-up if it does not match the `snapshot-lock` entry and this can be used to insert the hash into the ``snapshot-lock`
 
 ## BittorrentInfo (in the downloader db)
