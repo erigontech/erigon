@@ -1772,7 +1772,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		dirs := datadir.New(datadirCli)
 
 		//useSnapshots = true
-		snapCfg := ethconfig.NewSnapCfg(useSnapshots, true, true)
+		snapCfg := ethconfig.NewSnapCfg(useSnapshots, true, true, true)
 
 		_allSnapshotsSingleton = freezeblocks.NewRoSnapshots(snapCfg, dirs.Snap, 0, logger)
 		_allBorSnapshotsSingleton = freezeblocks.NewBorRoSnapshots(snapCfg, dirs.Snap, 0, logger)
@@ -1781,6 +1781,8 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		if err != nil {
 			panic(err)
 		}
+
+		_aggSingleton.SetProduceMod(snapCfg.ProduceE3)
 
 		if useSnapshots {
 			g := &errgroup.Group{}
@@ -1792,7 +1794,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 				_allBorSnapshotsSingleton.OptimisticalyReopenFolder()
 				return nil
 			})
-			g.Go(func() error { return _aggSingleton.OpenFolder(true) }) //TODO: open in read-only if erigon running?
+			g.Go(func() error { return _aggSingleton.OpenFolder() }) //TODO: open in read-only if erigon running?
 			err := g.Wait()
 			if err != nil {
 				panic(err)

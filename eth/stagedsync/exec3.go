@@ -13,12 +13,15 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
+
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
-	metrics2 "github.com/ledgerwatch/erigon-lib/common/metrics"
-	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
+
+	metrics2 "github.com/ledgerwatch/erigon-lib/common/metrics"
+	"github.com/ledgerwatch/erigon-lib/config3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -42,7 +45,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -106,7 +108,7 @@ state changes (updates) and can "atomically commit all changes to underlying lay
 
 Layers from top to bottom:
 - IntraBlockState - used to exec txs. It does store inside all updates of given txn.
-Can understan if txn failed or OutOfGas - then revert all changes.
+Can understand if txn failed or OutOfGas - then revert all changes.
 Each parallel-worker hav own IntraBlockState.
 IntraBlockState does commit changes to lower-abstraction-level by method `ibs.MakeWriteSet()`
 
@@ -114,7 +116,7 @@ IntraBlockState does commit changes to lower-abstraction-level by method `ibs.Ma
 This writer does accumulate updates and then send them to conflict-resolution.
 Until conflict-resolution succeed - none of execution updates must pass to lower-abstraction-level.
 Object TxTask it's just set of small buffers (readset + writeset) for each transaction.
-Write to TxTask happends by code like `txTask.ReadLists = rw.stateReader.ReadSet()`.
+Write to TxTask happens by code like `txTask.ReadLists = rw.stateReader.ReadSet()`.
 
 - TxTask - objects coming from parallel-workers to conflict-resolution goroutine (ApplyLoop and method ReadsValid).
 Flush of data to lower-level-of-abstraction is done by method `agg.ApplyState` (method agg.ApplyHistory exists
@@ -136,7 +138,7 @@ rwloop does:
   - commit
   - open new RoTx
   - set new RoTx to all Workers
-  - start Workersстартует воркеры
+  - start Worker start workers
 
 When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rotate+agg.Flush)
 */
@@ -155,7 +157,6 @@ func ExecV3(ctx context.Context,
 	blockReader := cfg.blockReader
 	agg, engine := cfg.agg, cfg.engine
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
-	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
 
 	applyTx := txc.Tx
 	useExternalTx := applyTx != nil
@@ -171,6 +172,19 @@ func ExecV3(ctx context.Context,
 			}()
 		}
 	}
+
+	if initialCycle {
+		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
+		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+		//if blockNum < cfg.blockReader.FrozenBlocks() {
+		//defer agg.DiscardHistory(kv.CommitmentDomain).EnableHistory(kv.CommitmentDomain)
+		//defer agg.LimitRecentHistoryWithoutFiles(0).LimitRecentHistoryWithoutFiles(agg.StepSize() / 10)
+		//}
+	} else {
+		agg.SetCompressWorkers(1)
+		agg.SetCollateAndBuildWorkers(1)
+	}
+
 	var err error
 	inMemExec := txc.Doms != nil
 	var doms *state2.SharedDomains
@@ -288,29 +302,13 @@ func ExecV3(ctx context.Context,
 	if blockNum < cfg.blockReader.FrozenBlocks() {
 		shouldGenerateChangesets = false
 	}
-	agg.DiscardHistory(kv.CommitmentDomain)
 
 	if maxBlockNum-blockNum > 16 {
 		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
 			"from", blockNum, "to", maxBlockNum, "fromTxNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx)
 	}
 
-	if initialCycle {
-		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
-		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
-		//if blockNum < cfg.blockReader.FrozenBlocks() {
-		//defer agg.DiscardHistory(kv.CommitmentDomain).EnableHistory(kv.CommitmentDomain)
-		//defer agg.LimitRecentHistoryWithoutFiles(0).LimitRecentHistoryWithoutFiles(agg.StepSize() / 10)
-		//}
-	} else {
-		agg.SetCompressWorkers(1)
-		agg.SetCollateAndBuildWorkers(1)
-	}
-
-	if blocksFreezeCfg.Produce {
-		//log.Info(fmt.Sprintf("[snapshots] db has steps amount: %s", agg.StepsRangeInDBAsStr(applyTx)))
-		agg.BuildFilesInBackground(outputTxNum.Load())
-	}
+	agg.BuildFilesInBackground(outputTxNum.Load())
 
 	var outputBlockNum = stages.SyncMetrics[stages.Execution]
 	inputBlockNum := &atomic.Uint64{}
@@ -860,9 +858,13 @@ Loop:
 			}
 			ts += time.Since(start)
 			aggTx.RestrictSubsetFileDeletions(false)
-			if err := rawdb.WriteDiffSet(applyTx, blockNum, b.Hash(), changeset); err != nil {
-				return err
+			doms.SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
+			if !inMemExec {
+				if err := state2.WriteDiffSet(applyTx, blockNum, b.Hash(), changeset); err != nil {
+					return err
+				}
 			}
+
 			doms.SetChangesetAccumulator(nil)
 		}
 
@@ -880,12 +882,12 @@ Loop:
 			case <-logEvery.C:
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
 				progress.Log(rs, in, rws, count, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB)
-				if applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).CanPrune(applyTx, outputTxNum.Load()) {
-					//small prune cause MDBX_TXN_FULL
-					if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Hour, applyTx); err != nil {
-						return err
-					}
-				}
+				//if applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).CanPrune(applyTx, outputTxNum.Load()) {
+				//	//small prune cause MDBX_TXN_FULL
+				//	if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Hour, applyTx); err != nil {
+				//		return err
+				//	}
+				//}
 				// If we skip post evaluation, then we should compute root hash ASAP for fail-fast
 				if !skipPostEvaluation && (rs.SizeEstimate() < commitThreshold || inMemExec) {
 					break
@@ -926,9 +928,7 @@ Loop:
 						}
 
 						t2 = time.Since(tt)
-						if blocksFreezeCfg.Produce {
-							agg.BuildFilesInBackground(outputTxNum.Load())
-						}
+						agg.BuildFilesInBackground(outputTxNum.Load())
 
 						applyTx, err = cfg.db.BeginRw(context.Background()) //nolint
 						if err != nil {
@@ -957,7 +957,7 @@ Loop:
 			}
 		}
 
-		if parallel && blocksFreezeCfg.Produce { // sequential exec - does aggregate right after commit
+		if parallel { // sequential exec - does aggregate right after commit
 			agg.BuildFilesInBackground(outputTxNum.Load())
 		}
 		select {
@@ -996,9 +996,7 @@ Loop:
 		}
 	}
 
-	if blocksFreezeCfg.Produce {
-		agg.BuildFilesInBackground(outputTxNum.Load())
-	}
+	agg.BuildFilesInBackground(outputTxNum.Load())
 
 	return nil
 }

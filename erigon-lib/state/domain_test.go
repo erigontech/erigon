@@ -117,7 +117,7 @@ func TestDomain_OpenFolder(t *testing.T) {
 	err = os.WriteFile(fn, make([]byte, 33), 0644)
 	require.NoError(t, err)
 
-	err = d.OpenFolder(true)
+	err = d.OpenFolder()
 	require.NoError(t, err)
 	d.Close()
 }
@@ -267,66 +267,6 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		//	w, _ = g.Next(nil)
 		//	require.Equal(t, words[i+1], string(w))
 		//}
-	}
-}
-
-func TestDomain_IterationBasic(t *testing.T) {
-	logger := log.New()
-	db, d := testDbAndDomain(t, logger)
-	ctx := context.Background()
-	tx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-	dc := d.BeginFilesRo()
-	defer dc.Close()
-	writer := dc.NewWriter()
-	defer writer.close()
-
-	writer.SetTxNum(2)
-	err = writer.PutWithPrev([]byte("addr1"), []byte("loc1"), []byte("value1"), nil, 0)
-	require.NoError(t, err)
-	err = writer.PutWithPrev([]byte("addr1"), []byte("loc2"), []byte("value1"), nil, 0)
-	require.NoError(t, err)
-	err = writer.PutWithPrev([]byte("addr1"), []byte("loc3"), []byte("value1"), nil, 0)
-	require.NoError(t, err)
-	err = writer.PutWithPrev([]byte("addr2"), []byte("loc1"), []byte("value1"), nil, 0)
-	require.NoError(t, err)
-	err = writer.PutWithPrev([]byte("addr2"), []byte("loc2"), []byte("value1"), nil, 0)
-	require.NoError(t, err)
-	err = writer.PutWithPrev([]byte("addr3"), []byte("loc1"), []byte("value1"), nil, 0)
-	require.NoError(t, err)
-	err = writer.PutWithPrev([]byte("addr3"), []byte("loc2"), []byte("value1"), nil, 0)
-	require.NoError(t, err)
-	err = writer.Flush(ctx, tx)
-	require.NoError(t, err)
-	dc.Close()
-
-	dc = d.BeginFilesRo()
-	defer dc.Close()
-
-	{
-		var keys, vals []string
-		err = dc.IteratePrefix(tx, []byte("addr2"), func(k, v []byte) error {
-			keys = append(keys, string(k))
-			vals = append(vals, string(v))
-			return nil
-		})
-		require.NoError(t, err)
-		require.Equal(t, []string{"addr2loc1", "addr2loc2"}, keys)
-		require.Equal(t, []string{"value1", "value1"}, vals)
-	}
-	{
-		var keys, vals []string
-		iter2, err := dc.IteratePrefix2(tx, []byte("addr2"), []byte("addr3"), -1)
-		require.NoError(t, err)
-		for iter2.HasNext() {
-			k, v, err := iter2.Next()
-			require.NoError(t, err)
-			keys = append(keys, string(k))
-			vals = append(vals, string(v))
-		}
-		require.Equal(t, []string{"addr2loc1", "addr2loc2"}, keys)
-		require.Equal(t, []string{"value1", "value1"}, vals)
 	}
 }
 
@@ -525,100 +465,6 @@ func TestHistory(t *testing.T) {
 	checkHistory(t, db, d, txs)
 }
 
-func TestIterationMultistep(t *testing.T) {
-	logger := log.New()
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-	db, d := testDbAndDomain(t, logger)
-	ctx := context.Background()
-	tx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-	dc := d.BeginFilesRo()
-	defer dc.Close()
-	writer := dc.NewWriter()
-	defer writer.close()
-
-	writer.SetTxNum(2)
-	err = writer.PutWithPrev([]byte("addr1"), []byte("loc1"), []byte("value1"), nil, 0)
-	require.NoError(t, err)
-	err = writer.PutWithPrev([]byte("addr1"), []byte("loc2"), []byte("value1"), nil, 0)
-	require.NoError(t, err)
-	err = writer.PutWithPrev([]byte("addr1"), []byte("loc3"), []byte("value1"), nil, 0)
-	require.NoError(t, err)
-	err = writer.PutWithPrev([]byte("addr2"), []byte("loc1"), []byte("value1"), nil, 0)
-	require.NoError(t, err)
-	err = writer.PutWithPrev([]byte("addr2"), []byte("loc2"), []byte("value1"), nil, 0)
-	require.NoError(t, err)
-	err = writer.PutWithPrev([]byte("addr3"), []byte("loc1"), []byte("value1"), nil, 0)
-	require.NoError(t, err)
-	err = writer.PutWithPrev([]byte("addr3"), []byte("loc2"), []byte("value1"), nil, 0)
-	require.NoError(t, err)
-
-	writer.SetTxNum(2 + 16)
-	err = writer.PutWithPrev([]byte("addr2"), []byte("loc1"), []byte("value1"), nil, 0)
-	require.NoError(t, err)
-	err = writer.PutWithPrev([]byte("addr2"), []byte("loc2"), []byte("value1"), nil, 0)
-	require.NoError(t, err)
-	err = writer.PutWithPrev([]byte("addr2"), []byte("loc3"), []byte("value1"), nil, 0)
-	require.NoError(t, err)
-	err = writer.PutWithPrev([]byte("addr2"), []byte("loc4"), []byte("value1"), nil, 0)
-	require.NoError(t, err)
-
-	writer.SetTxNum(2 + 16 + 16)
-	err = writer.DeleteWithPrev([]byte("addr2"), []byte("loc1"), nil, 0)
-	require.NoError(t, err)
-
-	err = writer.Flush(ctx, tx)
-	require.NoError(t, err)
-	dc.Close()
-
-	for step := uint64(0); step <= 2; step++ {
-		func() {
-			c, err := d.collate(ctx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, tx)
-			require.NoError(t, err)
-			sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
-			require.NoError(t, err)
-			d.integrateDirtyFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
-			d.reCalcVisibleFiles()
-
-			dc := d.BeginFilesRo()
-			_, err = dc.Prune(ctx, tx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64, false, logEvery)
-			dc.Close()
-			require.NoError(t, err)
-		}()
-	}
-	dc.Close()
-
-	dc = d.BeginFilesRo()
-	defer dc.Close()
-
-	{
-		var keys, vals []string
-		err = dc.IteratePrefix(tx, []byte("addr2"), func(k, v []byte) error {
-			keys = append(keys, string(k))
-			vals = append(vals, string(v))
-			return nil
-		})
-		require.NoError(t, err)
-		require.Equal(t, []string{"addr2loc2", "addr2loc3", "addr2loc4"}, keys)
-		require.Equal(t, []string{"value1", "value1", "value1"}, vals)
-	}
-	{
-		var keys, vals []string
-		iter2, err := dc.IteratePrefix2(tx, []byte("addr2"), []byte("addr3"), -1)
-		require.NoError(t, err)
-		for iter2.HasNext() {
-			k, v, err := iter2.Next()
-			require.NoError(t, err)
-			keys = append(keys, string(k))
-			vals = append(vals, string(v))
-		}
-		require.Equal(t, []string{"addr2loc2", "addr2loc3", "addr2loc4"}, keys)
-		require.Equal(t, []string{"value1", "value1", "value1"}, vals)
-	}
-}
-
 func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64) {
 	t.Helper()
 
@@ -741,7 +587,7 @@ func TestDomain_ScanFiles(t *testing.T) {
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 	d.closeWhatNotInList([]string{})
-	require.NoError(t, d.OpenFolder(false))
+	require.NoError(t, d.OpenFolder())
 
 	// Check the history
 	checkHistory(t, db, d, txs)
@@ -1029,7 +875,7 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 	}
 	dom.Close()
 
-	err = dom.OpenFolder(false)
+	err = dom.OpenFolder()
 	require.NoError(t, err)
 
 	// domain files for same range should not be available so lengths should match
@@ -1187,155 +1033,6 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	//	w, _ = g.Next(nil)
 	//	require.Equal(t, words[i+1], string(w))
 	//}
-}
-
-func TestDomainContext_IteratePrefixAgain(t *testing.T) {
-
-	db, d := testDbAndDomain(t, log.New())
-
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	d.historyLargeValues = true
-	dc := d.BeginFilesRo()
-	defer dc.Close()
-	writer := dc.NewWriter()
-	defer writer.close()
-
-	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
-	key := make([]byte, 20)
-	var loc []byte
-	value := make([]byte, 32)
-	first := []byte{0xab, 0xff}
-	other := []byte{0xcc, 0xfe}
-	copy(key[:], first)
-
-	values := make(map[string][]byte)
-	for i := 0; i < 30; i++ {
-		rnd.Read(key[2:])
-		if i == 15 {
-			copy(key[:2], other)
-		}
-		loc = make([]byte, 32)
-		rnd.Read(loc)
-		rnd.Read(value)
-		if i%5 == 0 {
-			writer.SetTxNum(uint64(i))
-		}
-
-		if i == 0 || i == 15 {
-			loc = nil
-			copy(key[2:], make([]byte, 18))
-		}
-
-		values[hex.EncodeToString(common.Append(key, loc))] = common.Copy(value)
-		err := writer.PutWithPrev(key, loc, value, nil, 0)
-		require.NoError(t, err)
-	}
-	err = writer.Flush(context.Background(), tx)
-	require.NoError(t, err)
-	dc.Close()
-
-	dc = d.BeginFilesRo()
-	defer dc.Close()
-
-	counter := 0
-	err = dc.IteratePrefix(tx, other, func(kx, vx []byte) error {
-		if !bytes.HasPrefix(kx, other) {
-			return nil
-		}
-		fmt.Printf("%x \n", kx)
-		counter++
-		v, ok := values[hex.EncodeToString(kx)]
-		require.True(t, ok)
-		require.Equal(t, v, vx)
-		return nil
-	})
-	require.NoError(t, err)
-	err = dc.IteratePrefix(tx, first, func(kx, vx []byte) error {
-		if !bytes.HasPrefix(kx, first) {
-			return nil
-		}
-		fmt.Printf("%x \n", kx)
-		counter++
-		v, ok := values[hex.EncodeToString(kx)]
-		require.True(t, ok)
-		require.Equal(t, v, vx)
-		return nil
-	})
-	require.NoError(t, err)
-	require.EqualValues(t, len(values), counter)
-}
-
-func TestDomainContext_IteratePrefix(t *testing.T) {
-	t.Parallel()
-
-	db, d := testDbAndDomain(t, log.New())
-
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	d.historyLargeValues = true
-	dc := d.BeginFilesRo()
-	defer dc.Close()
-	writer := dc.NewWriter()
-	defer writer.close()
-
-	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
-	key := make([]byte, 20)
-	value := make([]byte, 32)
-	copy(key[:], []byte{0xff, 0xff})
-
-	dctx := d.BeginFilesRo()
-	defer dctx.Close()
-
-	values := make(map[string][]byte)
-	for i := 0; i < 3000; i++ {
-		rnd.Read(key[2:])
-		rnd.Read(value)
-
-		values[hex.EncodeToString(key)] = common.Copy(value)
-
-		writer.SetTxNum(uint64(i))
-		err := writer.PutWithPrev(key, nil, value, nil, 0)
-		require.NoError(t, err)
-	}
-	err = writer.Flush(context.Background(), tx)
-	require.NoError(t, err)
-
-	{
-		counter := 0
-		err = dctx.IteratePrefix(tx, key[:2], func(kx, vx []byte) error {
-			if !bytes.HasPrefix(kx, key[:2]) {
-				return nil
-			}
-			counter++
-			v, ok := values[hex.EncodeToString(kx)]
-			require.True(t, ok)
-			require.Equal(t, v, vx)
-			return nil
-		})
-		require.NoError(t, err)
-		require.EqualValues(t, len(values), counter)
-	}
-	{
-		counter := 0
-		iter2, err := dctx.IteratePrefix2(tx, []byte("addr2"), []byte("addr3"), -1)
-		require.NoError(t, err)
-		for iter2.HasNext() {
-			kx, vx, err := iter2.Next()
-			require.NoError(t, err)
-			if !bytes.HasPrefix(kx, key[:2]) {
-				return
-			}
-			counter++
-			v, ok := values[hex.EncodeToString(kx)]
-			require.True(t, ok)
-			require.Equal(t, v, vx)
-		}
-	}
 }
 
 func TestDomainContext_getFromFiles(t *testing.T) {
@@ -1852,32 +1549,6 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	dc = d.BeginFilesRo()
 	defer dc.Close()
 
-	prefixes := 0
-	err = dc.IteratePrefix(tx, nil, func(k, v []byte) error {
-		upds, ok := data[string(k)]
-		require.True(t, ok)
-		prefixes++
-		latest := upds[len(upds)-1]
-		if string(latest.value) != string(v) {
-			fmt.Printf("opanki %x\n", k)
-			for li := len(upds) - 1; li >= 0; li-- {
-				latest := upds[li]
-				if bytes.Equal(latest.value, v) {
-					t.Logf("returned value was set with nonce %d/%d (tx %d, step %d)", li+1, len(upds), latest.txNum, latest.txNum/d.aggregationStep)
-				} else {
-					continue
-				}
-				require.EqualValuesf(t, latest.value, v, "key %x txNum %d", k, latest.txNum)
-				break
-			}
-		}
-
-		require.EqualValuesf(t, latest.value, v, "key %x txnum %d", k, latest.txNum)
-		return nil
-	})
-	require.NoError(t, err)
-	require.EqualValues(t, len(data), prefixes, "seen less keys than expected")
-
 	kc := 0
 	for key, updates := range data {
 		kc++
@@ -2091,6 +1762,8 @@ func TestDomain_Unwind(t *testing.T) {
 	d.aggregationStep = 16
 	//maxTx := uint64(float64(d.aggregationStep) * 1.5)
 	maxTx := d.aggregationStep - 2
+	currTx := maxTx - 1
+	diffSetMap := map[uint64][]DomainEntryDiff{}
 
 	writeKeys := func(t *testing.T, d *Domain, db kv.RwDB, maxTx uint64) {
 		t.Helper()
@@ -2103,19 +1776,21 @@ func TestDomain_Unwind(t *testing.T) {
 		defer writer.close()
 		var preval1, preval2, preval3, preval4 []byte
 		for i := uint64(0); i < maxTx; i++ {
+			writer.diff = &StateDiffDomain{}
 			writer.SetTxNum(i)
 			if i%3 == 0 && i > 0 { // once in 3 tx put key3 -> value3.i and skip other keys update
 				if i%12 == 0 { // once in 12 tx delete key3 before update
 					err = writer.DeleteWithPrev([]byte("key3"), nil, preval3, 0)
 					require.NoError(t, err)
 					preval3 = nil
-
+					diffSetMap[i] = writer.diff.GetDiffSet()
 					continue
 				}
 				v3 := []byte(fmt.Sprintf("value3.%d", i))
 				err = writer.PutWithPrev([]byte("key3"), nil, v3, preval3, 0)
 				require.NoError(t, err)
 				preval3 = v3
+				diffSetMap[i] = writer.diff.GetDiffSet()
 				continue
 			}
 
@@ -2129,6 +1804,7 @@ func TestDomain_Unwind(t *testing.T) {
 			require.NoError(t, err)
 			err = writer.PutWithPrev([]byte("k4"), nil, nv3, preval4, 0)
 			require.NoError(t, err)
+			diffSetMap[i] = writer.diff.GetDiffSet()
 
 			preval1, preval2, preval4 = v1, v2, nv3
 		}
@@ -2149,7 +1825,18 @@ func TestDomain_Unwind(t *testing.T) {
 		writer := dc.NewWriter()
 		defer writer.close()
 
-		err = dc.Unwind(ctx, tx, unwindTo/d.aggregationStep, unwindTo, nil)
+		totalDiff := []DomainEntryDiff{}
+		if currTx > unwindTo {
+			totalDiff = diffSetMap[currTx]
+			fmt.Println(currTx)
+			for currentTxNum := currTx - 1; currentTxNum >= unwindTo; currentTxNum-- {
+				d := diffSetMap[currentTxNum]
+				totalDiff = MergeDiffSets(totalDiff, d)
+			}
+		}
+
+		err = dc.Unwind(ctx, tx, unwindTo/d.aggregationStep, unwindTo, totalDiff)
+		currTx = unwindTo
 		require.NoError(t, err)
 		dc.Close()
 		tx.Commit()
@@ -2181,10 +1868,9 @@ func TestDomain_Unwind(t *testing.T) {
 
 			ut, err := uc.DomainRangeLatest(utx, nil, nil, -1)
 			require.NoError(t, err)
-
 			compareIterators(t, et, ut)
-
 		})
+
 		t.Run("DomainRange"+suf, func(t *testing.T) {
 			t.Helper()
 
@@ -2207,7 +1893,6 @@ func TestDomain_Unwind(t *testing.T) {
 			require.NoError(t, err)
 
 			compareIterators(t, et, ut)
-
 		})
 		t.Run("WalkAsOf"+suf, func(t *testing.T) {
 			t.Helper()
@@ -2257,40 +1942,6 @@ func TestDomain_Unwind(t *testing.T) {
 
 			compareIteratorsS(t, et, ut)
 		})
-		t.Run("IteratePrefix2"+suf, func(t *testing.T) {
-			t.Helper()
-
-			etx, err := tmpDb.BeginRo(ctx)
-			defer etx.Rollback()
-			require.NoError(t, err)
-
-			utx, err := db.BeginRo(ctx)
-			defer utx.Rollback()
-			require.NoError(t, err)
-
-			ectx := expected.BeginFilesRo()
-			defer ectx.Close()
-			uc := d.BeginFilesRo()
-			defer uc.Close()
-			et, err := ectx.IteratePrefix2(etx, nil, nil, -1)
-			require.NoError(t, err)
-
-			ut, err := uc.IteratePrefix2(utx, nil, nil, -1)
-			require.NoError(t, err)
-
-			for {
-				ek, ev, err1 := et.Next()
-				uk, uv, err2 := ut.Next()
-				require.EqualValues(t, err1, err2)
-				require.EqualValues(t, ek, uk)
-				require.EqualValues(t, ev, uv)
-				if !et.HasNext() {
-					require.False(t, ut.HasNext())
-					break
-				}
-			}
-
-		})
 	}
 
 	writeKeys(t, d, db, maxTx)
@@ -2301,7 +1952,6 @@ func TestDomain_Unwind(t *testing.T) {
 	unwindAndCompare(t, d, db, 6)
 	unwindAndCompare(t, d, db, 5)
 	unwindAndCompare(t, d, db, 2)
-	unwindAndCompare(t, d, db, 0)
 
 	return
 }
@@ -2333,8 +1983,8 @@ func compareIterators(t *testing.T, et, ut iter.KV) {
 		ek, ev, err1 := et.Next()
 		uk, uv, err2 := ut.Next()
 		require.EqualValues(t, err1, err2)
-		require.EqualValues(t, ek, uk)
-		require.EqualValues(t, ev, uv)
+		require.EqualValues(t, string(ek), string(uk))
+		require.EqualValues(t, string(ev), string(uv))
 		if !et.HasNext() {
 			require.False(t, ut.HasNext(), "unwindedIter has more keys than expectedIter got\n")
 			break
