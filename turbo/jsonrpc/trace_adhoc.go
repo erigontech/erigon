@@ -1157,8 +1157,9 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 		useParent = true
 	}
 
+	baseTxNum := stateReader.(*state.HistoryReaderV3).GetTxNum()
 	for txIndex, msg := range msgs {
-		log.Warn(fmt.Sprintf("txIdx: %d\n", txIndex))
+		stateReader.(*state.HistoryReaderV3).SetTxNum(baseTxNum + uint64(txIndex))
 		if err := libcommon.Stopped(ctx.Done()); err != nil {
 			return nil, nil, err
 		}
