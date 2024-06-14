@@ -25,7 +25,7 @@ import (
 )
 
 // AccountRangeMaxResults is the maximum number of results to be returned per call
-const AccountRangeMaxResults = 256
+const AccountRangeMaxResults = 8192
 
 // PrivateDebugAPI Exposed RPC endpoints for debugging use
 type PrivateDebugAPI interface {
