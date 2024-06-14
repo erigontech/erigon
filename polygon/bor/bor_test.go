@@ -128,6 +128,10 @@ func (h test_heimdall) FetchMilestoneCount(ctx context.Context) (int64, error) {
 	return 0, fmt.Errorf("TODO")
 }
 
+func (h test_heimdall) FetchFirstMilestoneNum(ctx context.Context) (int64, error) {
+	return 0, fmt.Errorf("TODO")
+}
+
 func (h test_heimdall) FetchNoAckMilestone(ctx context.Context, milestoneID string) error {
 	return fmt.Errorf("TODO")
 }
@@ -164,9 +168,8 @@ func (r headerReader) Config() *chain.Config {
 	return r.validator.ChainConfig
 }
 
-func (r headerReader) FrozenBlocks() uint64 {
-	return 0
-}
+func (r headerReader) FrozenBlocks() uint64    { return 0 }
+func (r headerReader) FrozenBorBlocks() uint64 { return 0 }
 
 func (r headerReader) CurrentHeader() *types.Header {
 	return nil

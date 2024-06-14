@@ -34,10 +34,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/common/disk"
-	"github.com/ledgerwatch/erigon-lib/common/mem"
-
 	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
@@ -54,7 +50,11 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/common/disk"
+	"github.com/ledgerwatch/erigon-lib/common/mem"
 	"github.com/ledgerwatch/erigon-lib/config3"
+	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
@@ -290,6 +290,15 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	var chainConfig *chain.Config
 	var genesis *types.Block
 	if err := backend.chainDB.Update(context.Background(), func(tx kv.RwTx) error {
+
+		if config.Genesis == nil {
+			genesisConfig, err := rawdb.ReadGenesis(tx)
+			if err != nil {
+				return err
+			}
+			config.Genesis = genesisConfig
+		}
+
 		h, err := rawdb.ReadCanonicalHash(tx, 0)
 		if err != nil {
 			panic(err)
@@ -342,6 +351,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	if err != nil {
 		return nil, err
 	}
+
 	backend.agg, backend.blockSnapshots, backend.blockReader, backend.blockWriter = agg, allSnapshots, blockReader, blockWriter
 
 	backend.chainDB, err = temporal.New(backend.chainDB, agg)
@@ -445,7 +455,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 			// pick port from allowed list
 			var picked bool
-			for ; pi < len(cfg.AllowedPorts) && !picked; pi++ {
+			for ; pi < len(cfg.AllowedPorts); pi++ {
 				pc := int(cfg.AllowedPorts[pi])
 				if pc == 0 {
 					// For ephemeral ports probing to see if the port is taken does not
@@ -557,9 +567,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			dirs, notifications, blockReader, blockWriter, backend.agg, backend.silkworm, terseLogger)
 		chainReader := consensuschain.NewReader(chainConfig, txc.Tx, blockReader, logger)
 		// We start the mining step
-		if err := stages2.StateStep(ctx, chainReader, backend.engine, txc, stateSync, header, body, unwindPoint, headersChain, bodiesChain); err != nil {
+		if err := stages2.StateStep(ctx, chainReader, backend.engine, txc, stateSync, header, body, unwindPoint, headersChain, bodiesChain, config.ImportMode); err != nil {
 			logger.Warn("Could not validate block", "err", err)
-			return err
+			return errors.Join(consensus.ErrInvalidBlock, err)
 		}
 		var progress uint64
 		progress, err = stages.GetStageProgress(txc.Tx, stages.Execution)
@@ -578,6 +588,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		chainConfig,
 		genesis,
 		backend.config.NetworkID,
+		logger,
 	)
 
 	// limit "new block" broadcasts to at most 10 random peers at time
@@ -600,7 +611,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
-	sentryMcDisableBlockDownload := config.PolygonSync
+	sentryMcDisableBlockDownload := config.PolygonSync || config.PolygonSyncStage
 	backend.sentriesClient, err = sentry_multi_client.NewMultiClient(
 		backend.chainDB,
 		chainConfig,
@@ -838,6 +849,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	if config.PolygonSyncStage {
 		backend.syncStages = stages2.NewPolygonSyncStages(
 			backend.sentryCtx,
+			logger,
 			backend.chainDB,
 			config,
 			backend.chainConfig,
@@ -850,6 +862,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			backend.silkworm,
 			backend.forkValidator,
 			heimdallClient,
+			polygonSyncSentry(sentries),
+			p2pConfig.MaxPeers,
+			statusDataProvider,
+			backend.stopNode,
 		)
 		backend.syncUnwindOrder = stagedsync.PolygonSyncUnwindOrder
 		backend.syncPruneOrder = stagedsync.PolygonSyncPruneOrder
@@ -892,7 +908,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	executionRpc := direct.NewExecutionClientDirect(backend.eth1ExecutionServer)
 
 	var executionEngine executionclient.ExecutionEngine
-	caplinUseEngineAPI := config.NetworkID == uint64(clparams.GnosisNetwork) || config.NetworkID == uint64(clparams.HoleskyNetwork) || config.NetworkID == uint64(clparams.GoerliNetwork)
+	caplinUseEngineAPI := config.NetworkID == uint64(clparams.HoleskyNetwork) || config.NetworkID == uint64(clparams.GoerliNetwork)
 	// Gnosis has too few blocks on his network for phase2 to work. Once we have proper snapshot automation, it can go back to normal.
 	if caplinUseEngineAPI {
 		// Read the jwt secret
@@ -930,8 +946,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if err != nil {
 			return nil, err
 		}
-		state, err := clcore.RetrieveBeaconState(ctx, beaconCfg,
-			clparams.GetCheckpointSyncEndpoint(clparams.NetworkType(config.NetworkID)))
+		state, err := clcore.RetrieveBeaconState(ctx, beaconCfg, clparams.NetworkType(config.NetworkID))
 		if err != nil {
 			return nil, err
 		}
@@ -957,30 +972,17 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	if config.PolygonSync {
-		// TODO - pending sentry multi client refactor
-		//      - sentry multi client should conform to the SentryClient interface and internally
-		//        multiplex
-		//      - for now we just use 1 sentry
-		var sentryClient direct.SentryClient
-		for _, client := range sentries {
-			if client.Protocol() == direct.ETH68 {
-				sentryClient = client
-				break
-			}
-		}
-		if sentryClient == nil {
-			return nil, errors.New("nil sentryClient for polygon sync")
-		}
-
 		backend.polygonSyncService = polygonsync.NewService(
 			logger,
 			chainConfig,
+			dirs.DataDir,
 			tmpdir,
-			sentryClient,
+			polygonSyncSentry(sentries),
 			p2pConfig.MaxPeers,
 			statusDataProvider,
 			config.HeimdallURL,
 			executionRpc,
+			config.LoopBlockLimit,
 		)
 	}
 
@@ -1021,7 +1023,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	}
 	// start HTTP API
 	httpRpcCfg := stack.Config().Http
-	ethRpcClient, txPoolRpcClient, miningRpcClient, stateCache, ff, err := cli.EmbeddedServices(ctx, chainKv, httpRpcCfg.StateCache, blockReader, ethBackendRPC,
+	ethRpcClient, txPoolRpcClient, miningRpcClient, stateCache, ff, err := cli.EmbeddedServices(ctx, chainKv, httpRpcCfg.StateCache, httpRpcCfg.RpcFiltersConfig, blockReader, ethBackendRPC,
 		s.txPoolGrpcServer, miningRPC, stateDiffClient, s.logger)
 	if err != nil {
 		return err
@@ -1447,6 +1449,8 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		return nil, nil, nil, nil, nil, err
 	}
 
+	agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
+
 	g := &errgroup.Group{}
 	g.Go(func() error {
 		allSnapshots.OptimisticalyReopenFolder()
@@ -1459,7 +1463,7 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		return nil
 	})
 	g.Go(func() error {
-		return agg.OpenFolder(false)
+		return agg.OpenFolder()
 	})
 	if err = g.Wait(); err != nil {
 		return nil, nil, nil, nil, nil, err
@@ -1520,7 +1524,10 @@ func (s *Ethereum) Start() error {
 		return currentTD
 	}
 
+	nodeStages := s.stagedSync.StagesIdsList()
+
 	if params.IsChainPoS(s.chainConfig, currentTDProvider) {
+		nodeStages = s.pipelineStagedSync.StagesIdsList()
 		s.waitForStageLoopStop = nil // TODO: Ethereum.Stop should wait for execution_server shutdown
 		go s.eth1ExecutionServer.Start(s.sentryCtx)
 	} else if s.config.PolygonSync {
@@ -1541,6 +1548,9 @@ func (s *Ethereum) Start() error {
 	} else {
 		go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook)
 	}
+
+	stages := diagnostics.InitStagesFromList(nodeStages)
+	diagnostics.Send(diagnostics.SyncStageList{StagesList: stages})
 
 	if s.chainConfig.Bor != nil {
 		s.engine.(*bor.Bor).Start(s.chainDB)
@@ -1633,6 +1643,10 @@ func (s *Ethereum) StagedSync() *stagedsync.Sync {
 	return s.stagedSync
 }
 
+func (s *Ethereum) PipelineStagedSync() *stagedsync.Sync {
+	return s.pipelineStagedSync
+}
+
 func (s *Ethereum) Notifications() *shards.Notifications {
 	return s.notifications
 }
@@ -1718,7 +1732,7 @@ func (s *Ethereum) DataDir() string {
 
 // setBorDefaultMinerGasPrice enforces Miner.GasPrice to be equal to BorDefaultMinerGasPrice (30gwei by default)
 func setBorDefaultMinerGasPrice(chainConfig *chain.Config, config *ethconfig.Config, logger log.Logger) {
-	if chainConfig.Bor != nil && config.Miner.GasPrice == nil || config.Miner.GasPrice.Cmp(ethconfig.BorDefaultMinerGasPrice) != 0 {
+	if chainConfig.Bor != nil && (config.Miner.GasPrice == nil || config.Miner.GasPrice.Cmp(ethconfig.BorDefaultMinerGasPrice) != 0) {
 		logger.Warn("Sanitizing invalid bor miner gas price", "provided", config.Miner.GasPrice, "updated", ethconfig.BorDefaultMinerGasPrice)
 		config.Miner.GasPrice = ethconfig.BorDefaultMinerGasPrice
 	}
@@ -1730,4 +1744,24 @@ func setBorDefaultTxPoolPriceLimit(chainConfig *chain.Config, config txpoolcfg.C
 		logger.Warn("Sanitizing invalid bor min fee cap", "provided", config.MinFeeCap, "updated", txpoolcfg.BorDefaultTxPoolPriceLimit)
 		config.MinFeeCap = txpoolcfg.BorDefaultTxPoolPriceLimit
 	}
+}
+
+func polygonSyncSentry(sentries []direct.SentryClient) direct.SentryClient {
+	// TODO - pending sentry multi client refactor
+	//      - sentry multi client should conform to the SentryClient interface and internally
+	//        multiplex
+	//      - for now we just use 1 sentry
+	var sentryClient direct.SentryClient
+	for _, client := range sentries {
+		if client.Protocol() == direct.ETH68 {
+			sentryClient = client
+			break
+		}
+	}
+
+	if sentryClient == nil {
+		panic("nil sentryClient for polygon sync")
+	}
+
+	return sentryClient
 }

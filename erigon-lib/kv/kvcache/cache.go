@@ -49,7 +49,7 @@ type CacheValidationResult struct {
 }
 
 type Cache interface {
-	// View - returns CacheView consistent with givent kv.Tx
+	// View - returns CacheView consistent with given kv.Tx
 	View(ctx context.Context, tx kv.Tx) (CacheView, error)
 	OnNewBlock(sc *remote.StateChangeBatch)
 	Len() int
@@ -94,7 +94,7 @@ type CacheView interface {
 // Rules of set view.isCanonical value:
 //   - method View can't parent.Clone() - because parent view is not coherent with current kv.Tx
 //   - only OnNewBlock method may do parent.Clone() and apply StateChanges to create coherent view of kv.Tx
-//   - parent.Clone() can't be caled if parent.isCanonical=false
+//   - parent.Clone() can't be called if parent.isCanonical=false
 //   - only OnNewBlock method can set view.isCanonical=true
 //
 // Rules of filling cache.stateEvict:
@@ -280,6 +280,7 @@ func (c *Coherent) OnNewBlock(stateChanges *remote.StateChangeBatch) {
 	c.waitExceededCount.Store(0) // reset the circuit breaker
 	id := stateChanges.StateVersionId
 	r := c.advanceRoot(id)
+
 	for _, sc := range stateChanges.ChangeBatch {
 		for i := range sc.Changes {
 			switch sc.Changes[i].Action {
@@ -374,6 +375,7 @@ func (c *Coherent) getFromCache(k []byte, id uint64, code bool) (*Element, *Cohe
 	// performance under load
 	c.lock.Lock()
 	defer c.lock.Unlock()
+
 	r, ok := c.roots[id]
 	if !ok {
 		return nil, r, fmt.Errorf("too old ViewID: %d, latestStateVersionID=%d", id, c.latestStateVersionID)
@@ -389,7 +391,6 @@ func (c *Coherent) getFromCache(k []byte, id uint64, code bool) (*Element, *Cohe
 	if it != nil && isLatest {
 		c.stateEvict.MoveToFront(it)
 	}
-
 	return it, r, nil
 }
 func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) (v []byte, err error) {
@@ -416,6 +417,9 @@ func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) (v []byte, err error) {
 	}
 	if err != nil {
 		return nil, err
+	}
+	if len(v) == 0 {
+		return v, nil
 	}
 	//fmt.Printf("from db: %#x,%x\n", k, v)
 
@@ -469,6 +473,7 @@ func (c *Coherent) removeOldestCode(r *CoherentRoot) {
 }
 func (c *Coherent) add(k, v []byte, r *CoherentRoot, id uint64) *Element {
 	it := &Element{K: k, V: v}
+
 	replaced, _ := r.cache.Set(it)
 	if c.latestStateVersionID != id {
 		//fmt.Printf("add to non-last viewID: %d<%d\n", c.latestViewID, id)

@@ -231,7 +231,7 @@ var (
 						default:
 						}
 
-						for body.BaseTxId+uint64(body.TxAmount) <= firstTxID+i { // skip empty blocks
+						for body.BaseTxId+uint64(body.TxCount) <= firstTxID+i { // skip empty blocks
 							if !bodyGetter.HasNext() {
 								return fmt.Errorf("not enough bodies")
 							}
@@ -327,6 +327,6 @@ func txsAmountBasedOnBodiesSnapshots(bodiesSegment *seg.Decompressor, len uint64
 		return 0, 0, fmt.Errorf("negative txs count %s: lastBody.BaseTxId=%d < firstBody.BaseTxId=%d", bodiesSegment.FileName(), lastBody.BaseTxId, firstBody.BaseTxId)
 	}
 
-	expectedCount = int(lastBody.BaseTxId+uint64(lastBody.TxAmount)) - int(firstBody.BaseTxId)
+	expectedCount = int(lastBody.BaseTxId+uint64(lastBody.TxCount)) - int(firstBody.BaseTxId)
 	return
 }

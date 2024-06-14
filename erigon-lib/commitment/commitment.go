@@ -5,6 +5,9 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math/bits"
+	"strings"
+
 	"github.com/google/btree"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cryptozerocopy"
@@ -12,8 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
-	"math/bits"
-	"strings"
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -59,8 +60,6 @@ type PatriciaContext interface {
 	GetAccount(plainKey []byte, cell *Cell) error
 	// fetch storage with given plain key
 	GetStorage(plainKey []byte, cell *Cell) error
-	// Returns temp directory to use for update collecting
-	TempDir() string
 	// store branch data
 	PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error
 }
@@ -77,14 +76,15 @@ const (
 func InitializeTrieAndUpdateTree(tv TrieVariant, mode Mode, tmpdir string) (Trie, *UpdateTree) {
 	switch tv {
 	case VariantBinPatriciaTrie:
-		trie := NewBinPatriciaHashed(length.Addr, nil)
+		trie := NewBinPatriciaHashed(length.Addr, nil, tmpdir)
 		fn := func(key []byte) []byte { return hexToBin(key) }
 		tree := NewUpdateTree(mode, tmpdir, fn)
 		return trie, tree
 	case VariantHexPatriciaTrie:
 		fallthrough
 	default:
-		trie := NewHexPatriciaHashed(length.Addr, nil)
+
+		trie := NewHexPatriciaHashed(length.Addr, nil, tmpdir)
 		tree := NewUpdateTree(mode, tmpdir, trie.hashAndNibblizeKey)
 		return trie, tree
 	}
@@ -211,6 +211,9 @@ func (be *BranchEncoder) CollectUpdate(
 		return 0, err
 	}
 	if len(prev) > 0 {
+		if bytes.Equal(prev, update) {
+			return lastNibble, nil // do not write the same data for prefix
+		}
 		update, err = be.merger.Merge(prev, update)
 		if err != nil {
 			return 0, err

@@ -25,8 +25,13 @@ func NewReader(config *chain.Config, tx kv.Tx, blockReader services.FullBlockRea
 	return &Reader{config, tx, blockReader, logger}
 }
 
-func (cr Reader) Config() *chain.Config        { return cr.config }
-func (cr Reader) CurrentHeader() *types.Header { panic("") }
+func (cr Reader) Config() *chain.Config { return cr.config }
+func (cr Reader) CurrentHeader() *types.Header {
+	hash := rawdb.ReadHeadHeaderHash(cr.tx)
+	number := rawdb.ReadHeaderNumber(cr.tx, hash)
+	h, _ := cr.blockReader.Header(context.Background(), cr.tx, hash, *number)
+	return h
+}
 func (cr Reader) GetHeader(hash common.Hash, number uint64) *types.Header {
 	if cr.blockReader != nil {
 		h, _ := cr.blockReader.Header(context.Background(), cr.tx, hash, number)
@@ -61,15 +66,17 @@ func (cr Reader) GetTd(hash common.Hash, number uint64) *big.Int {
 	}
 	return td
 }
-func (cr Reader) FrozenBlocks() uint64 {
-	return cr.blockReader.FrozenBlocks()
-}
+func (cr Reader) FrozenBlocks() uint64    { return cr.blockReader.FrozenBlocks() }
+func (cr Reader) FrozenBorBlocks() uint64 { return cr.blockReader.FrozenBorBlocks() }
 func (cr Reader) GetBlock(hash common.Hash, number uint64) *types.Block {
-	panic("")
+	b, _, _ := cr.blockReader.BlockWithSenders(context.Background(), cr.tx, hash, number)
+	return b
 }
 func (cr Reader) HasBlock(hash common.Hash, number uint64) bool {
-	panic("")
+	b, _ := cr.blockReader.BodyRlp(context.Background(), cr.tx, hash, number)
+	return b != nil
 }
+
 func (cr Reader) BorStartEventID(hash common.Hash, number uint64) uint64 {
 	id, err := cr.blockReader.BorStartEventID(context.Background(), cr.tx, hash, number)
 	if err != nil {

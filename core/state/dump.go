@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -36,10 +37,9 @@ type Dumper struct {
 	blockNumber uint64
 	db          kv.Tx
 	hashedState bool
-	historyV3   bool
 }
 
-// DumpAccount represents an account in the state.
+// DumpAccount represents tan account in the state.
 type DumpAccount struct {
 	Balance   string             `json:"balance"`
 	Nonce     uint64             `json:"nonce"`

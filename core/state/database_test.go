@@ -30,7 +30,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	state3 "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
@@ -42,7 +43,6 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
-	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
 // Create revival problem
@@ -570,7 +570,6 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-
 	// REORG of block 2 and 3, and insert new (empty) BLOCK 2, 3, and 4
 	if err = m.InsertChain(longerChain.Slice(1, 4)); err != nil {
 		t.Fatal(err)
@@ -847,9 +846,17 @@ func TestReproduceCrash(t *testing.T) {
 	storageKey2 := libcommon.HexToHash("0x0e4c0e7175f9d22279a4f63ff74f7fa28b7a954a6454debaa62ce43dd9132542")
 	value2 := uint256.NewInt(0x58c00a51)
 
-	_, tx := memdb.NewTestTx(t)
-	tsw := state.NewPlainStateWriter(tx, nil, 1)
-	intraBlockState := state.New(state.NewPlainState(tx, 1, nil))
+	_, tx, _ := state.NewTestTemporalDb(t)
+	sd, err := state3.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd.Close)
+
+	tsw := state.NewWriterV4(sd)
+	tsr := state.NewReaderV4(sd)
+	sd.SetTxNum(1)
+	sd.SetBlockNum(1)
+
+	intraBlockState := state.New(tsr)
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
@@ -1239,8 +1246,12 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	t.Parallel()
 	contract := libcommon.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 
-	_, tx := memdb.NewTestTx(t)
-	r, tsw := state.NewPlainStateReader(tx), state.NewPlainStateWriter(tx, nil, 0)
+	_, tx, _ := state.NewTestTemporalDb(t)
+	sd, err := state3.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd.Close)
+
+	r, tsw := state.NewReaderV4(sd), state.NewWriterV4(sd)
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
@@ -1252,8 +1263,13 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
-	_, err := trie.CalcRoot("test", tx)
+	rh1, err := sd.ComputeCommitment(context.Background(), true, 0, "")
 	require.NoError(t, err)
+	t.Logf("stateRoot %x", rh1)
+
+	sd.SetTxNum(2)
+	sd.SetBlockNum(1)
+
 	oldCodeHash := libcommon.BytesToHash(crypto.Keccak256(oldCode))
 	trieCode, tcErr := r.ReadAccountCode(contract, 1, oldCodeHash)
 	assert.NoError(t, tcErr, "you can receive the new code")
@@ -1270,6 +1286,10 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	trieCode, tcErr = r.ReadAccountCode(contract, 1, newCodeHash)
 	assert.NoError(t, tcErr, "you can receive the new code")
 	assert.Equal(t, newCode, trieCode, "new code should be received")
+
+	rh2, err := sd.ComputeCommitment(context.Background(), true, 1, "")
+	require.NoError(t, err)
+	require.NotEqual(t, rh1, rh2)
 }
 
 // TestCacheCodeSizeSeparately makes sure that we don't store CodeNodes for code sizes
@@ -1278,8 +1298,13 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	contract := libcommon.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 	//root := libcommon.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
-	_, tx := memdb.NewTestTx(t)
-	r, w := state.NewPlainState(tx, 0, nil), state.NewPlainStateWriter(tx, nil, 0)
+	_, tx, _ := state.NewTestTemporalDb(t)
+	sd, err := state3.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd.Close)
+
+	r, w := state.NewReaderV4(sd), state.NewWriterV4(sd)
+
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
@@ -1308,12 +1333,17 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 // TestCacheCodeSizeInTrie makes sure that we dont just read from the DB all the time
 func TestCacheCodeSizeInTrie(t *testing.T) {
 	t.Parallel()
-	t.Skip("switch to TG state readers/writers")
+	//t.Skip("switch to TG state readers/writers")
 	contract := libcommon.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 	root := libcommon.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
-	_, tx := memdb.NewTestTx(t)
-	r, w := state.NewPlainState(tx, 0, nil), state.NewPlainStateWriter(tx, nil, 0)
+	_, tx, _ := state.NewTestTemporalDb(t)
+	sd, err := state3.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd.Close)
+
+	r, w := state.NewReaderV4(sd), state.NewWriterV4(sd)
+
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
@@ -1329,9 +1359,9 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 		t.Errorf("error committing block: %v", err)
 	}
 
-	r2, err := trie.CalcRoot("test", tx)
+	r2, err := sd.ComputeCommitment(context.Background(), true, 1, "")
 	require.NoError(t, err)
-	require.Equal(t, root, r2)
+	require.EqualValues(t, root, libcommon.CastToHash(r2))
 
 	codeHash := libcommon.BytesToHash(crypto.Keccak256(code))
 	codeSize, err := r.ReadAccountCodeSize(contract, 1, codeHash)
@@ -1344,9 +1374,9 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	assert.NoError(t, err, "you can still receive code size even with empty DB")
 	assert.Equal(t, len(code), codeSize2, "code size should be received even with empty DB")
 
-	r2, err = trie.CalcRoot("test", tx)
+	r2, err = sd.ComputeCommitment(context.Background(), true, 1, "")
 	require.NoError(t, err)
-	require.Equal(t, root, r2)
+	require.EqualValues(t, root, libcommon.CastToHash(r2))
 }
 
 func TestRecreateAndRewind(t *testing.T) {

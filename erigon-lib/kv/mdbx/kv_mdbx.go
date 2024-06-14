@@ -87,7 +87,7 @@ func NewMDBX(log log.Logger) MdbxOpts {
 
 		mapSize:         DefaultMapSize,
 		growthStep:      DefaultGrowthStep,
-		mergeThreshold:  3 * 8192,
+		mergeThreshold:  2 * 8192,
 		shrinkThreshold: -1, // default
 		label:           kv.InMem,
 	}
@@ -245,6 +245,10 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	}
 	if dbg.MdbxReadAhead() {
 		opts = opts.Flags(func(u uint) uint { return u &^ mdbx.NoReadahead }) //nolint
+	} else {
+		if opts.label == kv.ChainDB {
+			opts = opts.Flags(func(u uint) uint { return u &^ mdbx.NoReadahead }) //nolint
+		}
 	}
 	if opts.flags&mdbx.Accede != 0 || opts.flags&mdbx.Readonly != 0 {
 		for retry := 0; ; retry++ {
@@ -1002,7 +1006,7 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 	dbi, err = tx.tx.OpenDBI(name, nativeFlags, nil, nil)
 
 	if err != nil {
-		return fmt.Errorf("create table: %s, %w", name, err)
+		return fmt.Errorf("db-talbe doesn't exists: %s, %w. Tip: try run `integration run_migrations` to create non-existing tables", name, err)
 	}
 	cnfCopy.DBI = kv.DBI(dbi)
 
@@ -1998,7 +2002,7 @@ func (tx *MdbxTx) rangeOrderLimit(table string, fromPrefix, toPrefix []byte, ord
 	}
 	tx.streams[s.id] = s
 	if err := s.init(table, tx); err != nil {
-		s.Close()
+		s.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
 	return s, nil
@@ -2141,7 +2145,7 @@ func (tx *MdbxTx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []
 	}
 	tx.streams[s.id] = s
 	if err := s.init(table, tx); err != nil {
-		s.Close()
+		s.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
 	return s, nil

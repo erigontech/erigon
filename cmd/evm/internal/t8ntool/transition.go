@@ -39,6 +39,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	state3 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/merge"
@@ -237,7 +238,11 @@ func Main(ctx *cli.Context) error {
 	}
 
 	if chainConfig.IsShanghai(prestate.Env.Timestamp) && prestate.Env.Withdrawals == nil {
-		return NewError(ErrorVMConfig, errors.New("Shanghai config but missing 'withdrawals' in env section"))
+		return NewError(ErrorVMConfig, errors.New("shanghai config but missing 'withdrawals' in env section"))
+	}
+
+	if chainConfig.IsPrague(prestate.Env.Timestamp) && prestate.Env.Requests == nil {
+		return NewError(ErrorVMConfig, errors.New("prague config but missing 'requests' in env section"))
 	}
 
 	isMerged := chainConfig.TerminalTotalDifficulty != nil && chainConfig.TerminalTotalDifficulty.BitLen() == 0
@@ -302,7 +307,13 @@ func Main(ctx *cli.Context) error {
 	}
 	defer tx.Rollback()
 
-	reader, writer := MakePreState(chainConfig.Rules(0, 0), tx, prestate.Pre)
+	sd, err := state3.NewSharedDomains(tx, log.New())
+	if err != nil {
+		return err
+	}
+	defer sd.Close()
+
+	reader, writer := MakePreState(chainConfig.Rules(0, 0), tx, sd, prestate.Pre)
 	// Merge engine can be used for pre-merge blocks as well, as it
 	// redirects to the ethash engine based on the block number
 	engine := merge.New(&ethash.FakeEthash{})
@@ -310,7 +321,6 @@ func Main(ctx *cli.Context) error {
 	t8logger := log.New("t8ntool")
 	chainReader := consensuschain.NewReader(chainConfig, tx, nil, t8logger)
 	result, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, chainReader, getTracer, t8logger)
-
 	if hashError != nil {
 		return NewError(ErrorMissingBlockhash, fmt.Errorf("blockhash error: %v", err))
 	}
@@ -594,6 +604,7 @@ func NewHeader(env stEnv) *types.Header {
 
 	header.UncleHash = env.UncleHash
 	header.WithdrawalsHash = env.WithdrawalsHash
+	header.RequestsRoot = env.RequestsRoot
 
 	return &header
 }

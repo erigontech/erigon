@@ -1,7 +1,6 @@
 package utils_test
 
 import (
-	"math"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -92,56 +91,6 @@ func TestIntegerSquareRoot(t *testing.T) {
 		sqrt := utils.IntegerSquareRoot(tc.n)
 		if sqrt != tc.expectedSqrt {
 			t.Errorf("IntegerSquareRoot returned incorrect result for %d. Expected: %d, Got: %d", tc.n, tc.expectedSqrt, sqrt)
-		}
-	}
-}
-
-func TestMax64(t *testing.T) {
-	testCases := []struct {
-		a        uint64
-		b        uint64
-		expected uint64
-	}{
-		{0, 0, 0},
-		{0, 1, 1},
-		{1, 0, 1},
-		{1, 1, 1},
-		{10, 5, 10},
-		{5, 10, 10},
-		{math.MaxUint64, 0, math.MaxUint64},
-		{0, math.MaxUint64, math.MaxUint64},
-		{math.MaxUint64, math.MaxUint64, math.MaxUint64},
-	}
-
-	for _, tc := range testCases {
-		max := utils.Max64(tc.a, tc.b)
-		if max != tc.expected {
-			t.Errorf("Max64 returned incorrect result for %d and %d. Expected: %d, Got: %d", tc.a, tc.b, tc.expected, max)
-		}
-	}
-}
-
-func TestMin64(t *testing.T) {
-	testCases := []struct {
-		a        uint64
-		b        uint64
-		expected uint64
-	}{
-		{0, 0, 0},
-		{0, 1, 0},
-		{1, 0, 0},
-		{1, 1, 1},
-		{10, 5, 5},
-		{5, 10, 5},
-		{math.MaxUint64, 0, 0},
-		{0, math.MaxUint64, 0},
-		{math.MaxUint64, math.MaxUint64, math.MaxUint64},
-	}
-
-	for _, tc := range testCases {
-		min := utils.Min64(tc.a, tc.b)
-		if min != tc.expected {
-			t.Errorf("Min64 returned incorrect result for %d and %d. Expected: %d, Got: %d", tc.a, tc.b, tc.expected, min)
 		}
 	}
 }

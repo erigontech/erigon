@@ -144,6 +144,25 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string, log
 	})
 }
 
+func ResetExecWithTx(ctx context.Context, tx kv.RwTx, chain string, tmpDir string, logger log.Logger) (err error) {
+	cleanupList := make([]string, 0)
+	cleanupList = append(cleanupList, stateBuckets...)
+	cleanupList = append(cleanupList, stateHistoryBuckets...)
+	cleanupList = append(cleanupList, stateHistoryV3Buckets...)
+	cleanupList = append(cleanupList, stateV3Buckets...)
+
+	if err := clearStageProgress(tx, stages.Execution, stages.HashState, stages.IntermediateHashes); err != nil {
+		return err
+	}
+	for _, tbl := range cleanupList {
+		if err := tx.ClearBucket(tbl); err != nil {
+			return err
+		}
+	}
+	// corner case: state files may be ahead of block files - so, can't use SharedDomains here. juts leave progress as 0.
+	return nil
+}
+
 func ResetTxLookup(tx kv.RwTx) error {
 	if err := tx.ClearBucket(kv.TxLookup); err != nil {
 		return err
@@ -194,6 +213,7 @@ var stateV3Buckets = []string{
 	kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx,
 	//kv.TblGasUsedHistoryKeys, kv.TblGasUsedHistoryVals, kv.TblGasUsedIdx,
 	kv.TblPruningProgress,
+	kv.ChangeSets3,
 }
 
 func clearStageProgress(tx kv.RwTx, stagesList ...stages.SyncStage) error {

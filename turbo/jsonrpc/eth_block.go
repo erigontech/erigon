@@ -121,7 +121,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		return nil, err
 	}
 
-	blockCtx := transactions.NewEVMBlockContext(engine, header, stateBlockNumberOrHash.RequireCanonical, tx, api._blockReader)
+	blockCtx := transactions.NewEVMBlockContext(engine, header, stateBlockNumberOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
 	txCtx := core.NewEVMTxContext(firstMsg)
 	// Get a new instance of the EVM
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: false})
@@ -339,7 +339,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return nil, nil
 	}
 
-	_, txAmount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
+	_, txCount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -356,11 +356,11 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 			return nil, err
 		}
 		if ok {
-			txAmount++
+			txCount++
 		}
 	}
 
-	numOfTx := hexutil.Uint(txAmount)
+	numOfTx := hexutil.Uint(txCount)
 
 	return &numOfTx, nil
 }
@@ -380,7 +380,7 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 		return nil, nil
 	}
 
-	_, txAmount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
+	_, txCount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -397,11 +397,11 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 			return nil, err
 		}
 		if ok {
-			txAmount++
+			txCount++
 		}
 	}
 
-	numOfTx := hexutil.Uint(txAmount)
+	numOfTx := hexutil.Uint(txCount)
 
 	return &numOfTx, nil
 }

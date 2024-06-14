@@ -198,7 +198,6 @@ devtools:
 	$(GOBUILD) -o $(GOBIN)/gencodec github.com/fjl/gencodec
 	$(GOBUILD) -o $(GOBIN)/mockgen go.uber.org/mock/mockgen
 	$(GOBUILD) -o $(GOBIN)/abigen ./cmd/abigen
-	$(GOBUILD) -o $(GOBIN)/codecgen github.com/ugorji/go/codec/codecgen
 	@type "npm" 2> /dev/null || echo 'Please install node.js and npm'
 	@type "solc" 2> /dev/null || echo 'Please install solc'
 	@type "protoc" 2> /dev/null || echo 'Please install protoc'
@@ -227,17 +226,12 @@ gencodec:
 	$(GOBUILD) -o $(GOBIN)/gencodec github.com/fjl/gencodec
 	PATH="$(GOBIN):$(PATH)" go generate -run "gencodec" ./...
 
-## codecgen:                          generate encoder/decoder code using codecgen
-codecgen:
-	$(GOBUILD) -o $(GOBIN)/codecgen github.com/ugorji/go/codec/codecgen
-	PATH="$(GOBIN):$(PATH)" go generate -run "codecgen" ./...
-
 ## graphql:                           generate graphql code
 graphql:
 	PATH=$(GOBIN):$(PATH) cd ./cmd/rpcdaemon/graphql && go run github.com/99designs/gqlgen .
 
 ## gen:                               generate all auto-generated code in the codebase
-gen: mocks solc abigen gencodec codecgen graphql
+gen: mocks solc abigen gencodec graphql
 	@cd erigon-lib && $(MAKE) gen
 
 ## bindings:                          generate test contracts and core contracts
@@ -273,7 +267,7 @@ install:
 	@ls -al "$(DIST)"
 
 PACKAGE_NAME          := github.com/ledgerwatch/erigon
-GOLANG_CROSS_VERSION  ?= v1.21.6
+GOLANG_CROSS_VERSION  ?= v1.22.4
 
 .PHONY: release-dry-run
 release-dry-run: git-submodules

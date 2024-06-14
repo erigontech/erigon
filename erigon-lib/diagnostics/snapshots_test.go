@@ -7,42 +7,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func NewTestDiagnosticClient() (*diagnostics.DiagnosticClient, error) {
+	return &diagnostics.DiagnosticClient{}, nil
+}
+
 func TestUpdateFileDownloadingStats(t *testing.T) {
-	d := diagnostics.NewDiagnosticClient(nil, "test")
+	d, err := NewTestDiagnosticClient()
 
-	d.UpdateFileDownloadedStatistics(nil, &segmentDownloadStatsMock)
-
-	sd := d.SyncStatistics().SnapshotDownload.SegmentsDownloading
-	require.NotNil(t, sd)
-	require.NotEqual(t, len(sd), 0)
-
-	require.Equal(t, sd["test"], segmentDownloadStatsMock)
-}
-
-func TestUpdateFileDownloadedStats(t *testing.T) {
-	d := diagnostics.NewDiagnosticClient(nil, "test")
-
-	d.UpdateFileDownloadedStatistics(&fileDownloadedUpdMock, nil)
-
-	sd := d.SyncStatistics().SnapshotDownload.SegmentsDownloading
-	require.NotNil(t, sd)
-	require.NotEqual(t, len(sd), 0)
-
-	require.Equal(t, sd["test"], diagnostics.SegmentDownloadStatistics{
-		Name:            "test",
-		TotalBytes:      0,
-		DownloadedBytes: 0,
-		Webseeds:        make([]diagnostics.SegmentPeer, 0),
-		Peers:           make([]diagnostics.SegmentPeer, 0),
-		DownloadedStats: diagnostics.FileDownloadedStatistics{
-			TimeTook:    1.0,
-			AverageRate: 1,
-		},
-	})
-}
-
-func TestUpdateFileFullStatsUpdate(t *testing.T) {
-	d := diagnostics.NewDiagnosticClient(nil, "test")
+	require.NoError(t, err)
 
 	d.UpdateFileDownloadedStatistics(nil, &segmentDownloadStatsMock)
 

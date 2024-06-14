@@ -9,25 +9,26 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/config3"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal"
+	"github.com/ledgerwatch/erigon/core/rawdb/rawdbhelpers"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon-lib/kv/membatch"
 	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
+
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -203,11 +204,11 @@ func gatherNoPruneReceipts(receipts *types.Receipts, chainCfg *chain.Config) boo
 	cr := types.Receipts{}
 	for _, r := range *receipts {
 		toStore := false
-		if chainCfg.DepositContract != nil && *chainCfg.DepositContract == r.ContractAddress {
+		if chainCfg.DepositContract == r.ContractAddress {
 			toStore = true
 		} else {
 			for _, l := range r.Logs {
-				if chainCfg.DepositContract != nil && *chainCfg.DepositContract == l.Address {
+				if chainCfg.DepositContract == l.Address {
 					toStore = true
 					break
 				}
@@ -286,7 +287,7 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 
 	var to = prevStageProgress
 	if toBlock > 0 {
-		to = cmp.Min(prevStageProgress, toBlock)
+		to = min(prevStageProgress, toBlock)
 	}
 	if to < s.BlockNumber {
 		return nil
@@ -305,7 +306,7 @@ func reconstituteBlock(agg *libstate.Aggregator, db kv.RoDB, tx kv.Tx) (n uint64
 	if err != nil {
 		return 0, false, err
 	}
-	reconToBlock := cmp.Min(sendersProgress, agg.EndTxNumDomainsFrozen())
+	reconToBlock := min(sendersProgress, agg.EndTxNumDomainsFrozen())
 	if tx == nil {
 		if err = db.View(context.Background(), func(tx kv.Tx) error {
 			ok, n, err = rawdbv3.TxNums.FindBlockNum(tx, reconToBlock)
@@ -358,7 +359,30 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 		return err
 	}
 	t := time.Now()
-	if err := rs.Unwind(ctx, txc.Tx, u.UnwindPoint, txNum, accumulator); err != nil {
+	var changeset *[kv.DomainLen][]libstate.DomainEntryDiff
+	for currentBlock := u.CurrentBlockNumber; currentBlock > u.UnwindPoint; currentBlock-- {
+		currentHash, err := rawdb.ReadCanonicalHash(txc.Tx, currentBlock)
+		if err != nil {
+			return err
+		}
+		var ok bool
+		var currentKeys [kv.DomainLen][]libstate.DomainEntryDiff
+		currentKeys, ok, err = domains.GetDiffset(txc.Tx, currentHash, currentBlock)
+		if !ok {
+			return fmt.Errorf("domains.GetDiffset(%d, %s): not found", currentBlock, currentHash)
+		}
+		if err != nil {
+			return err
+		}
+		if changeset == nil {
+			changeset = &currentKeys
+		} else {
+			for i := range currentKeys {
+				changeset[i] = libstate.MergeDiffSets(changeset[i], currentKeys[i])
+			}
+		}
+	}
+	if err := rs.Unwind(ctx, txc.Tx, u.UnwindPoint, txNum, accumulator, changeset); err != nil {
 		return fmt.Errorf("StateV3.Unwind(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
 	}
 	if err := rawdb.TruncateReceipts(txc.Tx, u.UnwindPoint+1); err != nil {
@@ -396,12 +420,12 @@ func senderStageProgress(tx kv.Tx, db kv.RoDB) (prevStageProgress uint64, err er
 
 // ================ Erigon3 End ================
 
-func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, logger log.Logger) (err error) {
+func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
 	if dbg.StagesOnlyBlocks {
 		return nil
 	}
 	if cfg.historyV3 {
-		if err = ExecBlockV3(s, u, txc, toBlock, ctx, cfg, initialCycle, logger); err != nil {
+		if err = ExecBlockV3(s, u, txc, toBlock, ctx, cfg, s.CurrentSyncCycle.IsInitialCycle, logger); err != nil {
 			return err
 		}
 		return nil
@@ -434,7 +458,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 	var to = prevStageProgress
 
 	if toBlock > 0 {
-		to = cmp.Min(prevStageProgress, toBlock)
+		to = min(prevStageProgress, toBlock)
 	}
 
 	if cfg.syncCfg.LoopBlockLimit > 0 {
@@ -474,7 +498,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 	}()
 
 	var readAhead chan uint64
-	if initialCycle && cfg.silkworm == nil { // block read-ahead is not compatible w/ Silkworm one-shot block execution
+	if s.CurrentSyncCycle.IsInitialCycle && cfg.silkworm == nil { // block read-ahead is not compatible w/ Silkworm one-shot block execution
 		// snapshots are often stored on cheaper drives. don't expect low-read-latency and manually read-ahead.
 		// can't use OS-level ReadAhead - because Data >> RAM
 		// it also warmsup state a bit - by touching senders/coninbase accounts and code
@@ -490,7 +514,7 @@ Loop:
 			log.Warn("Execution interrupted", "err", stoppedErr)
 			break
 		}
-		if initialCycle && cfg.silkworm == nil { // block read-ahead is not compatible w/ Silkworm one-shot block execution
+		if s.CurrentSyncCycle.IsInitialCycle && cfg.silkworm == nil { // block read-ahead is not compatible w/ Silkworm one-shot block execution
 			select {
 			case readAhead <- blockNum:
 			default:
@@ -784,7 +808,7 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 	return currentBlock, currentTx, currentTime
 }
 
-func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, logger log.Logger) (err error) {
+func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
 	//fmt.Printf("unwind: %d -> %d\n", u.CurrentBlockNumber, u.UnwindPoint)
 	if u.UnwindPoint >= s.BlockNumber {
 		return nil
@@ -800,7 +824,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 	logPrefix := u.LogPrefix()
 	logger.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
 
-	if err = unwindExecutionStage(u, s, txc, ctx, cfg, initialCycle, logger); err != nil {
+	if err = unwindExecutionStage(u, s, txc, ctx, cfg, logger); err != nil {
 		return err
 	}
 	if err = u.Done(txc.Tx); err != nil {
@@ -816,7 +840,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 	return nil
 }
 
-func unwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, logger log.Logger) error {
+func unwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) error {
 	var accumulator *shards.Accumulator
 	if cfg.stateStream && s.BlockNumber-u.UnwindPoint < stateStreamLimit {
 		accumulator = cfg.accumulator
@@ -846,7 +870,7 @@ func recoverCodeHashPlain(acc *accounts.Account, db kv.Tx, key []byte) {
 	}
 }
 
-func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx context.Context, initialCycle bool) (err error) {
+func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -855,12 +879,25 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		}
 		defer tx.Rollback()
 	}
+	if s.ForwardProgress > config3.MaxReorgDepthV3 {
+		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
+		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
+		var pruneDiffsLimitOnChainTip = 1_000
+		if s.CurrentSyncCycle.IsInitialCycle {
+			pruneDiffsLimitOnChainTip *= 10
+		}
+		if err := rawdb.PruneTable(tx, kv.ChangeSets3, s.ForwardProgress-config3.MaxReorgDepthV3, ctx, pruneDiffsLimitOnChainTip); err != nil {
+			return err
+		}
+	}
+
+	execStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx) * 100)
 
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
 	pruneTimeout := 3 * time.Second
-	if initialCycle {
+	if s.CurrentSyncCycle.IsInitialCycle {
 		pruneTimeout = 12 * time.Hour
 	}
 	if _, err = tx.(*temporal.Tx).AggTx().(*libstate.AggregatorRoTx).PruneSmallBatches(ctx, pruneTimeout, tx); err != nil { // prune part of retired data, before commit

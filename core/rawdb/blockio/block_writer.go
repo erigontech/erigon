@@ -10,13 +10,15 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon-lib/metrics"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon/polygon/bor/bordb"
 )
 
 //Naming:
@@ -111,7 +113,7 @@ var (
 // keeps genesis in db
 // doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
-func (w *BlockWriter) PruneBlocks(ctx context.Context, tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
+func (w *BlockWriter) PruneBlocks(ctx context.Context, tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int, err error) {
 	defer mxPruneTookBlocks.ObserveDuration(time.Now())
 	return rawdb.PruneBlocks(tx, blockTo, blocksDeleteLimit)
 }
@@ -120,7 +122,7 @@ func (w *BlockWriter) PruneBlocks(ctx context.Context, tx kv.RwTx, blockTo uint6
 // keeps genesis in db
 // doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
-func (w *BlockWriter) PruneBorBlocks(ctx context.Context, tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt func(number uint64) uint64) error {
+func (w *BlockWriter) PruneBorBlocks(ctx context.Context, tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt func(number uint64) uint64) (deleted int, err error) {
 	defer mxPruneTookBor.ObserveDuration(time.Now())
-	return rawdb.PruneBorBlocks(tx, blockTo, blocksDeleteLimit, SpanIdAt)
+	return bordb.PruneBorBlocks(tx, blockTo, blocksDeleteLimit, SpanIdAt)
 }

@@ -107,6 +107,7 @@ StorageChangeSet:
 */
 const AccountChangeSet = "AccountChangeSet"
 const StorageChangeSet = "StorageChangeSet"
+const ChangeSets3 = "ChangeSets3"
 
 const (
 
@@ -510,6 +511,10 @@ const (
 	Proposers        = "BlockProposers"   // epoch => proposers indicies
 
 	StatesProcessingProgress = "StatesProcessingProgress"
+
+	//Diagnostics tables
+	DiagSystemInfo = "DiagSystemInfo"
+	DiagSyncStages = "DiagSyncStages"
 )
 
 // Keys
@@ -532,6 +537,7 @@ var (
 	PruneBlocksType     = []byte("pruneBlocksType")
 
 	DBSchemaVersionKey = []byte("dbVersion")
+	GenesisKey         = []byte("genesis")
 
 	BittorrentPeerID            = "peerID"
 	CurrentHeadersSnapshotHash  = []byte("CurrentHeadersSnapshotHash")
@@ -544,6 +550,7 @@ var (
 	LightClientStore            = []byte("LightClientStore")
 	LightClientFinalityUpdate   = []byte("LightClientFinalityUpdate")
 	LightClientOptimisticUpdate = []byte("LightClientOptimisticUpdate")
+	LastNewBlockSeen            = []byte("LastNewBlockSeen") // last seen block hash
 
 	StatesProcessingKey = []byte("StatesProcessing")
 )
@@ -574,6 +581,7 @@ var ChaindataTables = []string{
 	PlainContractCode,
 	AccountChangeSet,
 	StorageChangeSet,
+	ChangeSets3,
 	Senders,
 	HeadBlockKey,
 	HeadHeaderKey,
@@ -748,6 +756,12 @@ var ChaindataDeprecatedTables = []string{
 	TransitionBlockKey,
 }
 
+// Diagnostics tables
+var DiagnosticsTables = []string{
+	DiagSystemInfo,
+	DiagSyncStages,
+}
+
 type CmpFunc func(k1, k2, v1, v2 []byte) int
 
 type TableCfg map[string]TableCfgItem
@@ -852,6 +866,7 @@ var BorTablesCfg = TableCfg{
 var TxpoolTablesCfg = TableCfg{}
 var SentryTablesCfg = TableCfg{}
 var DownloaderTablesCfg = TableCfg{}
+var DiagnosticsTablesCfg = TableCfg{}
 var ReconTablesCfg = TableCfg{
 	PlainStateD:    {Flags: DupSort},
 	CodeD:          {Flags: DupSort},
@@ -868,6 +883,8 @@ func TablesCfgByLabel(label Label) TableCfg {
 		return SentryTablesCfg
 	case DownloaderDB:
 		return DownloaderTablesCfg
+	case DiagnosticsDB:
+		return DiagnosticsTablesCfg
 	default:
 		panic(fmt.Sprintf("unexpected label: %s", label))
 	}
@@ -929,6 +946,13 @@ func reinit() {
 			ReconTablesCfg[name] = TableCfgItem{}
 		}
 	}
+
+	for _, name := range DiagnosticsTables {
+		_, ok := DiagnosticsTablesCfg[name]
+		if !ok {
+			DiagnosticsTablesCfg[name] = TableCfgItem{}
+		}
+	}
 }
 
 // Temporal
@@ -962,7 +986,34 @@ const (
 	LogAddrIdx    InvertedIdx = "LogAddrIdx"
 	TracesFromIdx InvertedIdx = "TracesFromIdx"
 	TracesToIdx   InvertedIdx = "TracesToIdx"
+
+	LogAddrIdxPos    InvertedIdxPos = 0
+	LogTopicIdxPos   InvertedIdxPos = 1
+	TracesFromIdxPos InvertedIdxPos = 2
+	TracesToIdxPos   InvertedIdxPos = 3
+	StandaloneIdxLen uint16         = 4
 )
+
+const (
+	ReceiptsAppendable Appendable = 0
+
+	AppendableLen Appendable = 1
+)
+
+func (iip InvertedIdxPos) String() string {
+	switch iip {
+	case LogAddrIdxPos:
+		return "logAddr"
+	case LogTopicIdxPos:
+		return "logTopic"
+	case TracesFromIdxPos:
+		return "traceFrom"
+	case TracesToIdxPos:
+		return "traceTo"
+	default:
+		return "unknown inverted index"
+	}
+}
 
 func (d Domain) String() string {
 	switch d {

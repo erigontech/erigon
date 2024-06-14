@@ -3,6 +3,7 @@ package mock
 import (
 	"context"
 	"crypto/ecdsa"
+	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -353,9 +354,9 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			dirs, notifications, mock.BlockReader, blockWriter, mock.agg, nil, terseLogger)
 		chainReader := consensuschain.NewReader(mock.ChainConfig, txc.Tx, mock.BlockReader, logger)
 		// We start the mining step
-		if err := stages2.StateStep(ctx, chainReader, mock.Engine, txc, stateSync, header, body, unwindPoint, headersChain, bodiesChain); err != nil {
+		if err := stages2.StateStep(ctx, chainReader, mock.Engine, txc, stateSync, header, body, unwindPoint, headersChain, bodiesChain, true); err != nil {
 			logger.Warn("Could not validate block", "err", err)
-			return err
+			return errors.Join(consensus.ErrInvalidBlock, err)
 		}
 		var progress uint64
 		progress, err = stages.GetStageProgress(txc.Tx, stages.Execution)
@@ -374,6 +375,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		mock.ChainConfig,
 		mock.Genesis,
 		mock.ChainConfig.ChainID.Uint64(),
+		logger,
 	)
 
 	maxBlockBroadcastPeers := func(header *types.Header) uint { return 0 }
@@ -487,6 +489,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 
 	blockRetire := freezeblocks.NewBlockRetire(1, dirs, mock.BlockReader, blockWriter, mock.DB, mock.ChainConfig, mock.Notifications.Events, blockSnapBuildSema, logger)
 	historyV3 := true
+	mock.agg.SetProduceMod(mock.BlockReader.FreezingCfg().ProduceE3)
 	mock.Sync = stagedsync.New(
 		cfg.Sync,
 		stagedsync.DefaultStages(mock.Ctx,
@@ -675,7 +678,6 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 		// No Proof-of-Work blocks
 		return nil
 	}
-
 	for i := 0; i < chain.Length(); i++ {
 		if err := chain.Blocks[i].HashCheck(); err != nil {
 			return err
@@ -735,10 +737,10 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 	if ms.TxPool != nil {
 		ms.ReceiveWg.Add(1)
 	}
-	initialCycle := MockInsertAsInitialCycle
+	initialCycle, firstCycle := MockInsertAsInitialCycle, false
 	hook := stages2.NewHook(ms.Ctx, ms.DB, ms.Notifications, ms.Sync, ms.BlockReader, ms.ChainConfig, ms.Log, nil)
 
-	if err = stages2.StageLoopIteration(ms.Ctx, ms.DB, wrap.TxContainer{}, ms.Sync, initialCycle, true, ms.Log, ms.BlockReader, hook); err != nil {
+	if err = stages2.StageLoopIteration(ms.Ctx, ms.DB, wrap.TxContainer{}, ms.Sync, initialCycle, firstCycle, ms.Log, ms.BlockReader, hook); err != nil {
 		return err
 	}
 	if ms.TxPool != nil {

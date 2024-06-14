@@ -550,6 +550,10 @@ func ValidateHeaderUnusedFields(header *types.Header) error {
 		return consensus.ErrUnexpectedWithdrawals
 	}
 
+	if header.RequestsRoot != nil {
+		return consensus.ErrUnexpectedRequests
+	}
+
 	return misc.VerifyAbsenceOfCancunHeaderFields(header)
 }
 
@@ -803,11 +807,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 // VerifyUncles implements consensus.Engine, always returning an error for any
 // uncles as this consensus mechanism doesn't permit uncles.
 func (c *Bor) VerifyUncles(_ consensus.ChainReader, _ *types.Header, uncles []*types.Header) error {
-	if len(uncles) > 0 {
-		return errUncleDetected
-	}
-
-	return nil
+	return VerifyUncles(uncles)
 }
 
 // VerifySeal implements consensus.Engine, checking whether the signature contained
@@ -974,13 +974,17 @@ func (c *Bor) CalculateRewards(config *chain.Config, header *types.Header, uncle
 // Finalize implements consensus.Engine, ensuring no uncles are set, nor block
 // rewards given.
 func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal, requests []*types.Request,
+	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests,
 	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
-) (types.Transactions, types.Receipts, error) {
+) (types.Transactions, types.Receipts, types.Requests, error) {
 	headerNumber := header.Number.Uint64()
 
 	if withdrawals != nil || header.WithdrawalsHash != nil {
-		return nil, nil, consensus.ErrUnexpectedWithdrawals
+		return nil, nil, nil, consensus.ErrUnexpectedWithdrawals
+	}
+
+	if requests != nil || header.RequestsRoot != nil {
+		return nil, nil, nil, consensus.ErrUnexpectedRequests
 	}
 
 	if isSprintStart(headerNumber, c.config.CalculateSprintLength(headerNumber)) {
@@ -991,20 +995,20 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 			if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {
 				err := fmt.Errorf("Finalize.checkAndCommitSpan: %w", err)
 				c.logger.Error("[bor] committing span", "err", err)
-				return nil, types.Receipts{}, err
+				return nil, types.Receipts{}, nil, err
 			}
 			// commit states
 			if err := c.CommitStates(state, header, cx, syscall); err != nil {
 				err := fmt.Errorf("Finalize.CommitStates: %w", err)
 				c.logger.Error("[bor] Error while committing states", "err", err)
-				return nil, types.Receipts{}, err
+				return nil, types.Receipts{}, nil, err
 			}
 		}
 	}
 
 	if err := c.changeContractCodeIfNeeded(headerNumber, state); err != nil {
 		c.logger.Error("[bor] Error changing contract code", "err", err)
-		return nil, types.Receipts{}, err
+		return nil, types.Receipts{}, nil, err
 	}
 
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
@@ -1014,7 +1018,7 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 	// Set state sync data to blockchain
 	// bc := chain.(*core.BlockChain)
 	// bc.SetStateSync(stateSyncData)
-	return nil, types.Receipts{}, nil
+	return nil, types.Receipts{}, nil, nil
 }
 
 func (c *Bor) changeContractCodeIfNeeded(headerNumber uint64, state *state.IntraBlockState) error {
@@ -1038,7 +1042,7 @@ func (c *Bor) changeContractCodeIfNeeded(headerNumber uint64, state *state.Intra
 // FinalizeAndAssemble implements consensus.Engine, ensuring no uncles are set,
 // nor block rewards given, and returns the final block.
 func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests []*types.Request,
+	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests,
 	chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
 ) (*types.Block, types.Transactions, types.Receipts, error) {
 	// stateSyncData := []*types.StateSyncData{}
@@ -1047,6 +1051,10 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 
 	if withdrawals != nil || header.WithdrawalsHash != nil {
 		return nil, nil, nil, consensus.ErrUnexpectedWithdrawals
+	}
+
+	if requests != nil || header.RequestsRoot != nil {
+		return nil, nil, nil, consensus.ErrUnexpectedRequests
 	}
 
 	if isSprintStart(headerNumber, c.config.CalculateSprintLength(headerNumber)) {
@@ -1450,12 +1458,11 @@ func (c *Bor) CommitStates(
 	chain statefull.ChainContext,
 	syscall consensus.SystemCall,
 ) error {
-	events := chain.Chain.BorEventsByBlock(header.Hash(), header.Number.Uint64())
+	blockNum := header.Number.Uint64()
+	events := chain.Chain.BorEventsByBlock(header.Hash(), blockNum)
 
 	//if len(events) == 50 || len(events) == 0 { // we still sometime could get 0 events from borevent file
-	if len(events) == 50 { // we still sometime could get 0 events from borevent file
-		blockNum := header.Number.Uint64()
-
+	if blockNum <= chain.Chain.FrozenBorBlocks() && len(events) == 50 { // we still sometime could get 0 events from borevent file
 		var to time.Time
 		if c.config.IsIndore(blockNum) {
 			stateSyncDelay := c.config.CalculateStateSyncDelay(blockNum)
@@ -1487,17 +1494,11 @@ func (c *Bor) CommitStates(
 			}
 
 			for _, ev := range merged {
-				eventRecordWithoutTime := ev.BuildEventRecord()
-
-				recordBytes, err := rlp.EncodeToBytes(eventRecordWithoutTime)
+				data, err := ev.Pack(stateReceiverABI)
 				if err != nil {
 					panic(err)
 				}
 
-				data, err := stateReceiverABI.Pack("commitState", big.NewInt(ev.Time.Unix()), recordBytes)
-				if err != nil {
-					panic(err)
-				}
 				events = append(events, data)
 			}
 		}
@@ -1656,4 +1657,12 @@ func GetValidatorBytes(h *types.Header, config *borcfg.BorConfig) []byte {
 	}
 
 	return blockExtraData.ValidatorBytes
+}
+
+func VerifyUncles(uncles []*types.Header) error {
+	if len(uncles) > 0 {
+		return errUncleDetected
+	}
+
+	return nil
 }

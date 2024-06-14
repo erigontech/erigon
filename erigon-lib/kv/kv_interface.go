@@ -149,12 +149,15 @@ type DBVerbosityLvl int8
 type Label uint8
 
 const (
-	ChainDB      Label = 0
-	TxPoolDB     Label = 1
-	SentryDB     Label = 2
-	ConsensusDB  Label = 3
-	DownloaderDB Label = 4
-	InMem        Label = 5
+	ChainDB         Label = 0
+	TxPoolDB        Label = 1
+	SentryDB        Label = 2
+	ConsensusDB     Label = 3
+	DownloaderDB    Label = 4
+	InMem           Label = 5
+	HeimdallDB      Label = 6
+	DiagnosticsDB   Label = 7
+	PolygonBridgeDB Label = 8
 )
 
 func (l Label) String() string {
@@ -171,6 +174,12 @@ func (l Label) String() string {
 		return "downloader"
 	case InMem:
 		return "inMem"
+	case HeimdallDB:
+		return "heimdall"
+	case DiagnosticsDB:
+		return "diagnostics"
+	case PolygonBridgeDB:
+		return "polygon-bridge"
 	default:
 		return "unknown"
 	}
@@ -189,6 +198,12 @@ func UnmarshalLabel(s string) Label {
 		return DownloaderDB
 	case "inMem":
 		return InMem
+	case "heimdall":
+		return HeimdallDB
+	case "diagnostics":
+		return DiagnosticsDB
+	case "polygon-bridge":
+		return PolygonBridgeDB
 	default:
 		panic(fmt.Sprintf("unexpected label: %s", s))
 	}
@@ -534,8 +549,11 @@ type RwCursorDupSort interface {
 
 type (
 	Domain      uint16
+	Appendable  uint16
 	History     string
 	InvertedIdx string
+
+	InvertedIdxPos uint16
 )
 
 type TemporalGetter interface {

@@ -86,7 +86,6 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	current := cfg.miningState.MiningBlock
 	txs := current.PreparedTxs
 	noempty := true
-
 	var domains *state2.SharedDomains
 	var (
 		stateReader state.StateReader
@@ -107,6 +106,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	// But if we disable empty precommit already, ignore it. Since
 	// empty block is necessary to keep the liveness of the network.
 	if noempty {
+
 		if txs != nil && !txs.Empty() {
 			logs, _, err := addTransactionsToMiningBlock(logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txs, cfg.miningState.MiningConfig.Etherbase, ibs, ctx, cfg.interrupt, cfg.payloadId, logger)
 			if err != nil {
@@ -118,7 +118,6 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 			yielded := mapset.NewSet[[32]byte]()
 			var simStateReader state.StateReader
 			var simStateWriter state.StateWriter
-
 			m := membatchwithdb.NewMemoryBatch(txc.Tx, cfg.tmpdir, logger)
 			defer m.Rollback()
 			var err error
@@ -176,12 +175,13 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	}
 
 	var err error
-	_, current.Txs, current.Receipts, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txs, current.Uncles, &state.NoopWriter{}, &cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, current.Requests, ChainReaderImpl{config: &cfg.chainConfig, tx: txc.Tx, blockReader: cfg.blockReader, logger: logger}, true, logger)
+	var block *types.Block
+	block, current.Txs, current.Receipts, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txs, current.Uncles, &state.NoopWriter{}, &cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, current.Requests, ChainReaderImpl{config: &cfg.chainConfig, tx: txc.Tx, blockReader: cfg.blockReader, logger: logger}, true, logger)
 	if err != nil {
-		return err
+		return fmt.Errorf("cannot finalize block execution: %s", err)
 	}
+	current.Requests = block.Requests()
 
-	block := types.NewBlock(current.Header, current.Txs, current.Uncles, current.Receipts, current.Withdrawals, current.Requests)
 	// Simulate the block execution to get the final state root
 	if err := rawdb.WriteHeader(txc.Tx, block.Header()); err != nil {
 		return fmt.Errorf("cannot write header: %s", err)

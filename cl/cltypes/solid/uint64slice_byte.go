@@ -53,12 +53,8 @@ func NewUint64Slice(limit int) *byteBasedUint64Slice {
 // Clear clears the slice by setting its length to 0 and zeroing out its backing array.
 func (arr *byteBasedUint64Slice) Clear() {
 	arr.l = 0
-	for i := range arr.u {
-		arr.u[i] = 0
-	}
-	for i := range arr.treeCacheBuffer {
-		arr.treeCacheBuffer[i] = 0
-	}
+	clear(arr.u)
+	clear(arr.treeCacheBuffer)
 }
 
 // CopyTo copies the slice to a target slice.
@@ -199,14 +195,14 @@ func (arr *byteBasedUint64Slice) HashVectorSSZ() ([32]byte, error) {
 	for i := 0; i < maxTo; i += chunkSize {
 		offset = (i / chunkSize) * length.Hash
 		from := i
-		to := int(utils.Min64(uint64(from+chunkSize), uint64(maxTo)))
+		to := min(from+chunkSize, maxTo)
 
 		if !bytes.Equal(arr.treeCacheBuffer[offset:offset+length.Hash], emptyHashBytes) {
 			continue
 		}
 		layerBuffer = layerBuffer[:to-from]
 		copy(layerBuffer, arr.u[from:to])
-		if err := computeFlatRootsToBuffer(uint8(utils.Min64(treeCacheDepthUint64Slice, uint64(depth))), layerBuffer, arr.treeCacheBuffer[offset:]); err != nil {
+		if err := computeFlatRootsToBuffer(uint8(min(treeCacheDepthUint64Slice, uint64(depth))), layerBuffer, arr.treeCacheBuffer[offset:]); err != nil {
 			return [32]byte{}, err
 		}
 	}

@@ -36,7 +36,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
 	libkzg "github.com/ledgerwatch/erigon-lib/crypto/kzg"
@@ -408,7 +407,7 @@ var (
 	DBReadConcurrencyFlag = cli.IntFlag{
 		Name:  "db.read.concurrency",
 		Usage: "Does limit amount of parallel db reads. Default: equal to GOMAXPROCS (or number of CPU)",
-		Value: cmp.Min(cmp.Max(10, runtime.GOMAXPROCS(-1)*64), 9_000),
+		Value: min(max(10, runtime.GOMAXPROCS(-1)*64), 9_000),
 	}
 	RpcAccessListFlag = cli.StringFlag{
 		Name:  "rpc.accessList",
@@ -687,6 +686,10 @@ var (
 		Name:  ethconfig.FlagSnapStop,
 		Usage: "Workaround to stop producing new snapshots, if you meet some snapshots-related critical bug. It will stop move historical data from DB to new immutable snapshots. DB will grow and may slightly slow-down - and removing this flag in future will not fix this effect (db size will not greatly reduce).",
 	}
+	SnapStateStopFlag = cli.BoolFlag{
+		Name:  ethconfig.FlagSnapStateStop,
+		Usage: "Workaround to stop producing new state files, if you meet some state-related critical bug. It will stop aggregate DB history in a state files. DB will grow and may slightly slow-down - and removing this flag in future will not fix this effect (db size will not greatly reduce).",
+	}
 	TorrentVerbosityFlag = cli.IntFlag{
 		Name:  "torrent.verbosity",
 		Value: 2,
@@ -832,6 +835,11 @@ var (
 		Name:  "caplin.discovery.tcpport",
 		Usage: "TCP Port for Caplin DISCV5 protocol",
 		Value: 4001,
+	}
+	CaplinCheckpointSyncUrlFlag = cli.StringSliceFlag{
+		Name:  "caplin.checkpoint-sync-url",
+		Usage: "checkpoint sync endpoint",
+		Value: cli.NewStringSlice(),
 	}
 
 	SentinelAddrFlag = cli.StringFlag{
@@ -1008,9 +1016,14 @@ var (
 		Usage: "Diagnostics HTTP server listening port",
 		Value: 6060,
 	}
+	DiagSpeedTestFlag = cli.BoolFlag{
+		Name:  "diagnostics.speedtest",
+		Usage: "Enable speed test",
+		Value: false,
+	}
 )
 
-var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag, &DiagDisabledFlag, &DiagEndpointAddrFlag, &DiagEndpointPortFlag}
+var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag, &DiagDisabledFlag, &DiagEndpointAddrFlag, &DiagEndpointPortFlag, &DiagSpeedTestFlag}
 
 var DiagnosticsFlags = []cli.Flag{&DiagnosticsURLFlag, &DiagnosticsURLFlag, &DiagnosticsSessionsFlag}
 
@@ -1658,6 +1671,9 @@ func setCaplin(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.CaplinConfig.BlobBackfilling = ctx.Bool(CaplinBlobBackfillingFlag.Name)
 	cfg.CaplinConfig.BlobPruningDisabled = ctx.Bool(CaplinDisableBlobPruningFlag.Name)
 	cfg.CaplinConfig.Archive = ctx.Bool(CaplinArchiveFlag.Name)
+	if checkpointUrls := ctx.StringSlice(CaplinCheckpointSyncUrlFlag.Name); len(checkpointUrls) > 0 {
+		clparams.ConfigurableCheckpointsURLs = checkpointUrls
+	}
 }
 
 func setSilkworm(ctx *cli.Context, cfg *ethconfig.Config) {
@@ -1736,7 +1752,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	cfg.Dirs = nodeConfig.Dirs
 	cfg.Snapshot.KeepBlocks = ctx.Bool(SnapKeepBlocksFlag.Name)
-	cfg.Snapshot.Produce = !ctx.Bool(SnapStopFlag.Name)
+	cfg.Snapshot.ProduceE2 = !ctx.Bool(SnapStopFlag.Name)
+	cfg.Snapshot.ProduceE3 = !ctx.Bool(SnapStateStopFlag.Name)
 	cfg.Snapshot.NoDownloader = ctx.Bool(NoDownloaderFlag.Name)
 	cfg.Snapshot.Verify = ctx.Bool(DownloaderVerifyFlag.Name)
 	cfg.Snapshot.DownloaderAddr = strings.TrimSpace(ctx.String(DownloaderAddrFlag.Name))

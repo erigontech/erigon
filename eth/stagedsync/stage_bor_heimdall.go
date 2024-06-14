@@ -30,14 +30,15 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"github.com/ledgerwatch/erigon/polygon/bor/finality"
 	"github.com/ledgerwatch/erigon/polygon/bor/finality/whitelist"
+	borsnaptype "github.com/ledgerwatch/erigon/polygon/bor/snaptype"
 	"github.com/ledgerwatch/erigon/polygon/bor/valset"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
+	"github.com/ledgerwatch/erigon/polygon/sync"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
 const (
-	InMemorySignatures      = 4096 // Number of recent block signatures to keep in memory
 	inmemorySnapshots       = 128  // Number of recent vote snapshots to keep in memory
 	snapshotPersistInterval = 1024 // Number of blocks after which to persist the vote snapshot to the database
 )
@@ -172,7 +173,7 @@ func BorHeimdallForward(
 		return err
 	}
 
-	signatures, err := lru.NewARC[libcommon.Hash, libcommon.Address](InMemorySignatures)
+	signatures, err := lru.NewARC[libcommon.Hash, libcommon.Address](sync.InMemorySignatures)
 	if err != nil {
 		return err
 	}
@@ -363,7 +364,11 @@ func BorHeimdallForward(
 					ctx,
 					header,
 					tx,
-					cfg,
+					cfg.borConfig,
+					cfg.blockReader,
+					cfg.heimdallClient,
+					cfg.chainConfig.ChainID.String(),
+					cfg.stateReceiverABI,
 					s.LogPrefix(),
 					logger,
 					lastStateSyncEventID,
@@ -422,7 +427,7 @@ func BorHeimdallForward(
 	}
 
 	logger.Info(
-		fmt.Sprintf("[%s] Sync events processed", s.LogPrefix()),
+		fmt.Sprintf("[%s] Sync events", s.LogPrefix()),
 		"progress", blockNum-1,
 		"lastSpanID", lastSpanID,
 		"lastSpanID", lastSpanID,
@@ -825,6 +830,8 @@ func checkBorHeaderExtraData(chr consensus.ChainHeaderReader, header *types.Head
 }
 
 func BorHeimdallUnwind(u *UnwindState, ctx context.Context, _ *StageState, tx kv.RwTx, cfg BorHeimdallCfg) (err error) {
+	u.UnwindPoint = max(u.UnwindPoint, cfg.blockReader.FrozenBorBlocks()) // protect from unwind behind files
+
 	if cfg.borConfig == nil {
 		return
 	}
@@ -898,62 +905,66 @@ func BorHeimdallUnwind(u *UnwindState, ctx context.Context, _ *StageState, tx kv
 	}
 
 	// Removing checkpoints
-	if len(cfg.unwindTypes) == 0 || slices.Contains(cfg.unwindTypes, "checkpoints") {
-		checkpointCursor, err := tx.RwCursor(kv.BorCheckpoints)
+	if borsnaptype.CheckpointsEnabled() {
+		if len(cfg.unwindTypes) == 0 || slices.Contains(cfg.unwindTypes, "checkpoints") {
+			checkpointCursor, err := tx.RwCursor(kv.BorCheckpoints)
 
-		if err != nil {
-			return err
-		}
-
-		defer checkpointCursor.Close()
-		lastCheckpointToKeep, err := heimdall.CheckpointIdAt(tx, u.UnwindPoint)
-		hasCheckpoints := true
-
-		if err != nil {
-			if !errors.Is(err, heimdall.ErrCheckpointNotFound) {
+			if err != nil {
 				return err
 			}
 
-			hasCheckpoints = false
-		}
+			defer checkpointCursor.Close()
+			lastCheckpointToKeep, err := heimdall.CheckpointIdAt(tx, u.UnwindPoint)
+			hasCheckpoints := true
 
-		if hasCheckpoints {
-			var checkpointIdBytes [8]byte
-			binary.BigEndian.PutUint64(checkpointIdBytes[:], uint64(lastCheckpointToKeep+1))
-			for k, _, err := checkpointCursor.Seek(checkpointIdBytes[:]); err == nil && k != nil; k, _, err = checkpointCursor.Next() {
-				if err = checkpointCursor.DeleteCurrent(); err != nil {
+			if err != nil {
+				if !errors.Is(err, heimdall.ErrCheckpointNotFound) {
 					return err
+				}
+
+				hasCheckpoints = false
+			}
+
+			if hasCheckpoints {
+				var checkpointIdBytes [8]byte
+				binary.BigEndian.PutUint64(checkpointIdBytes[:], uint64(lastCheckpointToKeep+1))
+				for k, _, err := checkpointCursor.Seek(checkpointIdBytes[:]); err == nil && k != nil; k, _, err = checkpointCursor.Next() {
+					if err = checkpointCursor.DeleteCurrent(); err != nil {
+						return err
+					}
 				}
 			}
 		}
 	}
 
-	// Removing milestones
-	if len(cfg.unwindTypes) == 0 || slices.Contains(cfg.unwindTypes, "milestones") {
-		milestoneCursor, err := tx.RwCursor(kv.BorMilestones)
+	if borsnaptype.MilestonesEnabled() {
+		// Removing milestones
+		if len(cfg.unwindTypes) == 0 || slices.Contains(cfg.unwindTypes, "milestones") {
+			milestoneCursor, err := tx.RwCursor(kv.BorMilestones)
 
-		if err != nil {
-			return err
-		}
-
-		defer milestoneCursor.Close()
-		lastMilestoneToKeep, err := heimdall.MilestoneIdAt(tx, u.UnwindPoint)
-		hasMilestones := true
-
-		if err != nil {
-			if !errors.Is(err, heimdall.ErrMilestoneNotFound) {
+			if err != nil {
 				return err
 			}
 
-			hasMilestones = false
-		}
+			defer milestoneCursor.Close()
+			lastMilestoneToKeep, err := heimdall.MilestoneIdAt(tx, u.UnwindPoint)
+			hasMilestones := true
 
-		if hasMilestones {
-			var milestoneIdBytes [8]byte
-			binary.BigEndian.PutUint64(milestoneIdBytes[:], uint64(lastMilestoneToKeep+1))
-			for k, _, err := milestoneCursor.Seek(milestoneIdBytes[:]); err == nil && k != nil; k, _, err = milestoneCursor.Next() {
-				if err = milestoneCursor.DeleteCurrent(); err != nil {
+			if err != nil {
+				if !errors.Is(err, heimdall.ErrMilestoneNotFound) {
 					return err
+				}
+
+				hasMilestones = false
+			}
+
+			if hasMilestones {
+				var milestoneIdBytes [8]byte
+				binary.BigEndian.PutUint64(milestoneIdBytes[:], uint64(lastMilestoneToKeep+1))
+				for k, _, err := milestoneCursor.Seek(milestoneIdBytes[:]); err == nil && k != nil; k, _, err = milestoneCursor.Next() {
+					if err = milestoneCursor.DeleteCurrent(); err != nil {
+						return err
+					}
 				}
 			}
 		}

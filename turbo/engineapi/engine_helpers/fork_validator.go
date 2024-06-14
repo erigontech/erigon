@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 
@@ -37,6 +38,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+const timingsCacheSize = 16
+
 // the maximum point from the current head, past which side forks are not validated anymore.
 const maxForkDepth = 32 // 32 slots is the duration of an epoch thus there cannot be side forks in PoS deeper than 32 blocks from head.
 
@@ -44,7 +47,7 @@ type validatePayloadFunc func(wrap.TxContainer, *types.Header, *types.RawBody, u
 
 type ForkValidator struct {
 	// current memory batch containing chain head that extend canonical fork.
-	memoryDiff *membatchwithdb.MemoryDiff
+	sharedDom *state.SharedDomains
 	// notifications accumulated for the extending fork
 	extendingForkNotifications *shards.Notifications
 	// hash of chain head that extend canonical fork.
@@ -58,28 +61,38 @@ type ForkValidator struct {
 	tmpDir        string
 	// block hashes that are deemed valid
 	validHashes *lru.Cache[libcommon.Hash, bool]
-	stateV3     bool
 
 	ctx context.Context
 
 	// we want fork validator to be thread safe so let
 	lock sync.Mutex
+
+	timingsCache *lru.Cache[libcommon.Hash, []interface{}]
 }
 
-func NewForkValidatorMock(currentHeight uint64, stateV3 bool) *ForkValidator {
+func NewForkValidatorMock(currentHeight uint64) *ForkValidator {
 	validHashes, err := lru.New[libcommon.Hash, bool]("validHashes", maxForkDepth*8)
+	if err != nil {
+		panic(err)
+	}
+	timingsCache, err := lru.New[libcommon.Hash, []interface{}]("timingsCache", timingsCacheSize)
 	if err != nil {
 		panic(err)
 	}
 	return &ForkValidator{
 		currentHeight: currentHeight,
 		validHashes:   validHashes,
-		stateV3:       stateV3,
+		timingsCache:  timingsCache,
 	}
 }
 
 func NewForkValidator(ctx context.Context, currentHeight uint64, validatePayload validatePayloadFunc, tmpDir string, blockReader services.FullBlockReader) *ForkValidator {
 	validHashes, err := lru.New[libcommon.Hash, bool]("validHashes", maxForkDepth*8)
+	if err != nil {
+		panic(err)
+	}
+
+	timingsCache, err := lru.New[libcommon.Hash, []interface{}]("timingsCache", timingsCacheSize)
 	if err != nil {
 		panic(err)
 	}
@@ -90,6 +103,7 @@ func NewForkValidator(ctx context.Context, currentHeight uint64, validatePayload
 		blockReader:     blockReader,
 		ctx:             ctx,
 		validHashes:     validHashes,
+		timingsCache:    timingsCache,
 	}
 }
 
@@ -109,7 +123,10 @@ func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 	}
 	fv.currentHeight = currentHeight
 	// If the head changed,e previous assumptions on head are incorrect now.
-	fv.memoryDiff = nil
+	if fv.sharedDom != nil {
+		fv.sharedDom.Close()
+	}
+	fv.sharedDom = nil
 	fv.extendingForkNotifications = nil
 	fv.extendingForkNumber = 0
 	fv.extendingForkHeadHash = libcommon.Hash{}
@@ -119,13 +136,24 @@ func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 func (fv *ForkValidator) FlushExtendingFork(tx kv.RwTx, accumulator *shards.Accumulator) error {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
+	start := time.Now()
 	// Flush changes to db.
-	if err := fv.memoryDiff.Flush(tx); err != nil {
-		return err
+	if fv.sharedDom != nil {
+		fv.sharedDom.SetTx(tx)
+		if err := fv.sharedDom.Flush(fv.ctx, tx); err != nil {
+			return err
+		}
+		fv.sharedDom.Close()
+		if err := stages.SaveStageProgress(tx, stages.Execution, fv.extendingForkNumber); err != nil {
+			return err
+		}
 	}
+	timings, _ := fv.timingsCache.Get(fv.extendingForkHeadHash)
+	fv.timingsCache.Add(fv.extendingForkHeadHash, append(timings, "FlushExtendingFork", time.Since(start)))
 	fv.extendingForkNotifications.Accumulator.CopyAndReset(accumulator)
 	// Clean extending fork data
-	fv.memoryDiff = nil
+	fv.sharedDom = nil
+
 	fv.extendingForkHeadHash = libcommon.Hash{}
 	fv.extendingForkNumber = 0
 	fv.extendingForkNotifications = nil
@@ -140,7 +168,7 @@ type HasDiff interface {
 // if the payload extends the canonical chain, then we stack it in extendingFork without any unwind.
 // if the payload is a fork then we unwind to the point where the fork meets the canonical chain, and there we check whether it is valid.
 // if for any reason none of the actions above can be performed due to lack of information, we accept the payload and avoid validation.
-func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *types.RawBody, extendCanonical bool, logger log.Logger) (status engine_types.EngineStatus, latestValidHash libcommon.Hash, validationError error, criticalError error) {
+func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, logger log.Logger) (status engine_types.EngineStatus, latestValidHash libcommon.Hash, validationError error, criticalError error) {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	if fv.validatePayload == nil {
@@ -155,42 +183,6 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 		status = engine_types.ValidStatus
 		latestValidHash = hash
 		return
-	}
-
-	log.Debug("Execution ForkValidator.ValidatePayload", "extendCanonical", extendCanonical)
-	if extendCanonical {
-		var txc wrap.TxContainer
-		m := membatchwithdb.NewMemoryBatch(tx, fv.tmpDir, logger)
-		defer m.Close()
-		txc.Tx = m
-		var err error
-		txc.Doms, err = state.NewSharedDomains(tx, logger)
-		if err != nil {
-			return "", [32]byte{}, nil, err
-		}
-		defer txc.Doms.Close()
-		fv.extendingForkNotifications = &shards.Notifications{
-			Events:      shards.NewEvents(),
-			Accumulator: shards.NewAccumulator(),
-		}
-		// Update fork head hash.
-		fv.extendingForkHeadHash = hash
-		fv.extendingForkNumber = number
-		status, latestValidHash, validationError, criticalError = fv.validateAndStorePayload(txc, header, body, 0, nil, nil, fv.extendingForkNotifications)
-		if criticalError != nil {
-			return
-		}
-		if validationError == nil {
-			if casted, ok := txc.Tx.(HasDiff); ok {
-				fv.memoryDiff, criticalError = casted.Diff()
-				if criticalError != nil {
-					return
-				}
-			} else {
-				panic(fmt.Sprintf("type %T doesn't have method Diff - like in MemoryMutation", casted))
-			}
-		}
-		return status, latestValidHash, validationError, criticalError
 	}
 
 	// if the block is not in range of maxForkDepth from head then we do not validate it.
@@ -258,21 +250,22 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 	if unwindPoint == fv.currentHeight {
 		unwindPoint = 0
 	}
-	var txc wrap.TxContainer
-	batch := membatchwithdb.NewMemoryBatch(tx, fv.tmpDir, logger)
-	defer batch.Rollback()
-	txc.Tx = batch
-	sd, err := state.NewSharedDomains(tx, logger)
-	if err != nil {
-		return "", [32]byte{}, nil, err
+	if fv.sharedDom != nil {
+		fv.sharedDom.Close()
 	}
-	defer sd.Close()
-	txc.Doms = sd
-	notifications := &shards.Notifications{
+	fv.sharedDom, criticalError = state.NewSharedDomains(tx, logger)
+	if criticalError != nil {
+		criticalError = fmt.Errorf("failed to create shared domains: %w", criticalError)
+		return
+	}
+	var txc wrap.TxContainer
+	txc.Tx = tx
+	txc.Doms = fv.sharedDom
+	fv.extendingForkNotifications = &shards.Notifications{
 		Events:      shards.NewEvents(),
 		Accumulator: shards.NewAccumulator(),
 	}
-	return fv.validateAndStorePayload(txc, header, body, unwindPoint, headersChain, bodiesChain, notifications)
+	return fv.validateAndStorePayload(txc, header, body, unwindPoint, headersChain, bodiesChain, fv.extendingForkNotifications)
 }
 
 // Clear wipes out current extending fork data, this method is called after fcu is called,
@@ -281,7 +274,10 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 func (fv *ForkValidator) clear() {
 	fv.extendingForkHeadHash = libcommon.Hash{}
 	fv.extendingForkNumber = 0
-	fv.memoryDiff = nil
+	if fv.sharedDom != nil {
+		fv.sharedDom.Close()
+	}
+	fv.sharedDom = nil
 }
 
 // Clear wipes out current extending fork data.
@@ -294,6 +290,7 @@ func (fv *ForkValidator) ClearWithUnwind(accumulator *shards.Accumulator, c shar
 // validateAndStorePayload validate and store a payload fork chain if such chain results valid.
 func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 	notifications *shards.Notifications) (status engine_types.EngineStatus, latestValidHash libcommon.Hash, validationError error, criticalError error) {
+	start := time.Now()
 	if err := fv.validatePayload(txc, header, body, unwindPoint, headersChain, bodiesChain, notifications); err != nil {
 		if errors.Is(err, consensus.ErrInvalidBlock) {
 			validationError = err
@@ -302,15 +299,15 @@ func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *t
 			return
 		}
 	}
+	fv.timingsCache.Add(header.Hash(), []interface{}{"BlockValidation", time.Since(start)})
 
 	latestValidHash = header.Hash()
+	fv.extendingForkHeadHash = header.Hash()
+	fv.extendingForkNumber = header.Number.Uint64()
 	if validationError != nil {
 		var latestValidNumber uint64
-		if fv.stateV3 {
-			latestValidNumber, criticalError = stages.GetStageProgress(txc.Tx, stages.Execution)
-		} else {
-			latestValidNumber, criticalError = stages.GetStageProgress(txc.Tx, stages.IntermediateHashes)
-		}
+		latestValidNumber, criticalError = stages.GetStageProgress(txc.Tx, stages.Execution)
+
 		if criticalError != nil {
 			return
 		}
@@ -319,7 +316,10 @@ func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *t
 			return
 		}
 		status = engine_types.InvalidStatus
-		fv.memoryDiff = nil
+		if fv.sharedDom != nil {
+			fv.sharedDom.Close()
+		}
+		fv.sharedDom = nil
 		fv.extendingForkHeadHash = libcommon.Hash{}
 		fv.extendingForkNumber = 0
 		return
@@ -335,4 +335,14 @@ func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *t
 
 	status = engine_types.ValidStatus
 	return
+}
+
+// GetTimings returns the timings of the last block validation.
+func (fv *ForkValidator) GetTimings(hash libcommon.Hash) []interface{} {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	if timings, ok := fv.timingsCache.Get(hash); ok {
+		return timings
+	}
+	return nil
 }

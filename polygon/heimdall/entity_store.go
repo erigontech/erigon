@@ -8,7 +8,14 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
 )
+
+var databaseTablesCfg = kv.TableCfg{
+	kv.BorCheckpoints: {},
+	kv.BorMilestones:  {},
+	kv.BorSpans:       {},
+}
 
 type entityStore[TEntity Entity] interface {
 	Prepare(ctx context.Context) error
@@ -22,34 +29,33 @@ type entityStore[TEntity Entity] interface {
 	RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]TEntity, error)
 }
 
+type RangeIndexFactory func(ctx context.Context) (*RangeIndex, error)
+
 type entityStoreImpl[TEntity Entity] struct {
-	tx    kv.RwTx
+	db    *polygoncommon.Database
+	label kv.Label
 	table string
 
-	makeEntity      func() TEntity
-	getLastEntityId func(ctx context.Context, tx kv.Tx) (uint64, bool, error)
-	loadEntityBytes func(ctx context.Context, tx kv.Getter, id uint64) ([]byte, error)
+	makeEntity func() TEntity
 
-	blockNumToIdIndexFactory func(ctx context.Context) (*RangeIndex, error)
+	blockNumToIdIndexFactory RangeIndexFactory
 	blockNumToIdIndex        *RangeIndex
 	prepareOnce              sync.Once
 }
 
 func newEntityStore[TEntity Entity](
-	tx kv.RwTx,
+	db *polygoncommon.Database,
+	label kv.Label,
 	table string,
 	makeEntity func() TEntity,
-	getLastEntityId func(ctx context.Context, tx kv.Tx) (uint64, bool, error),
-	loadEntityBytes func(ctx context.Context, tx kv.Getter, id uint64) ([]byte, error),
-	blockNumToIdIndexFactory func(ctx context.Context) (*RangeIndex, error),
+	blockNumToIdIndexFactory RangeIndexFactory,
 ) entityStore[TEntity] {
 	return &entityStoreImpl[TEntity]{
-		tx:    tx,
+		db:    db,
+		label: label,
 		table: table,
 
-		makeEntity:      makeEntity,
-		getLastEntityId: getLastEntityId,
-		loadEntityBytes: loadEntityBytes,
+		makeEntity: makeEntity,
 
 		blockNumToIdIndexFactory: blockNumToIdIndexFactory,
 	}
@@ -58,12 +64,16 @@ func newEntityStore[TEntity Entity](
 func (s *entityStoreImpl[TEntity]) Prepare(ctx context.Context) error {
 	var err error
 	s.prepareOnce.Do(func() {
+		err = s.db.OpenOnce(ctx, s.label, databaseTablesCfg)
+		if err != nil {
+			return
+		}
 		s.blockNumToIdIndex, err = s.blockNumToIdIndexFactory(ctx)
 		if err != nil {
 			return
 		}
-		iteratorFactory := func() (iter.KV, error) { return s.tx.Range(s.table, nil, nil) }
-		err = buildBlockNumToIdIndex(ctx, s.blockNumToIdIndex, iteratorFactory, s.entityUnmarshalJSON)
+		iteratorFactory := func(tx kv.Tx) (iter.KV, error) { return tx.Range(s.table, nil, nil) }
+		err = buildBlockNumToIdIndex(ctx, s.blockNumToIdIndex, s.db.BeginRo, iteratorFactory, s.entityUnmarshalJSON)
 	})
 	return err
 }
@@ -73,7 +83,28 @@ func (s *entityStoreImpl[TEntity]) Close() {
 }
 
 func (s *entityStoreImpl[TEntity]) GetLastEntityId(ctx context.Context) (uint64, bool, error) {
-	return s.getLastEntityId(ctx, s.tx)
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return 0, false, err
+	}
+	defer tx.Rollback()
+
+	cursor, err := tx.Cursor(s.table)
+	if err != nil {
+		return 0, false, err
+	}
+	defer cursor.Close()
+
+	lastKey, _, err := cursor.Last()
+	if err != nil {
+		return 0, false, err
+	}
+	// not found
+	if lastKey == nil {
+		return 0, false, nil
+	}
+
+	return entityStoreKeyParse(lastKey), true, nil
 }
 
 // Zero value of any type T
@@ -102,6 +133,10 @@ func entityStoreKey(id uint64) [8]byte {
 	return key
 }
 
+func entityStoreKeyParse(key []byte) uint64 {
+	return binary.BigEndian.Uint64(key)
+}
+
 func (s *entityStoreImpl[TEntity]) entityUnmarshalJSON(jsonBytes []byte) (TEntity, error) {
 	entity := s.makeEntity()
 	if err := json.Unmarshal(jsonBytes, entity); err != nil {
@@ -111,7 +146,14 @@ func (s *entityStoreImpl[TEntity]) entityUnmarshalJSON(jsonBytes []byte) (TEntit
 }
 
 func (s *entityStoreImpl[TEntity]) GetEntity(ctx context.Context, id uint64) (TEntity, error) {
-	jsonBytes, err := s.loadEntityBytes(ctx, s.tx, id)
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return Zero[TEntity](), err
+	}
+	defer tx.Rollback()
+
+	key := entityStoreKey(id)
+	jsonBytes, err := tx.GetOne(s.table, key[:])
 	if err != nil {
 		return Zero[TEntity](), err
 	}
@@ -124,14 +166,22 @@ func (s *entityStoreImpl[TEntity]) GetEntity(ctx context.Context, id uint64) (TE
 }
 
 func (s *entityStoreImpl[TEntity]) PutEntity(ctx context.Context, id uint64, entity TEntity) error {
+	tx, err := s.db.BeginRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
 	jsonBytes, err := json.Marshal(entity)
 	if err != nil {
 		return err
 	}
 
 	key := entityStoreKey(id)
-	err = s.tx.Put(s.table, key[:], jsonBytes)
-	if err != nil {
+	if err = tx.Put(s.table, key[:], jsonBytes); err != nil {
+		return err
+	}
+	if err = tx.Commit(); err != nil {
 		return err
 	}
 
@@ -152,9 +202,15 @@ func (s *entityStoreImpl[TEntity]) FindByBlockNum(ctx context.Context, blockNum 
 	return s.GetEntity(ctx, id)
 }
 
-func (s *entityStoreImpl[TEntity]) RangeFromId(_ context.Context, startId uint64) ([]TEntity, error) {
+func (s *entityStoreImpl[TEntity]) RangeFromId(ctx context.Context, startId uint64) ([]TEntity, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
 	startKey := entityStoreKey(startId)
-	it, err := s.tx.Range(s.table, startKey[:], nil)
+	it, err := tx.Range(s.table, startKey[:], nil)
 	if err != nil {
 		return nil, err
 	}
@@ -191,10 +247,17 @@ func (s *entityStoreImpl[TEntity]) RangeFromBlockNum(ctx context.Context, startB
 func buildBlockNumToIdIndex[TEntity Entity](
 	ctx context.Context,
 	index *RangeIndex,
-	iteratorFactory func() (iter.KV, error),
+	txFactory func(context.Context) (kv.Tx, error),
+	iteratorFactory func(tx kv.Tx) (iter.KV, error),
 	entityUnmarshalJSON func([]byte) (TEntity, error),
 ) error {
-	it, err := iteratorFactory()
+	tx, err := txFactory(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	it, err := iteratorFactory(tx)
 	if err != nil {
 		return err
 	}

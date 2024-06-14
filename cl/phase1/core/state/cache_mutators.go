@@ -6,7 +6,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/math"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
 func (b *CachingBeaconState) getSlashingProposerReward(whistleBlowerReward uint64) uint64 {
@@ -34,7 +33,7 @@ func (b *CachingBeaconState) SlashValidator(slashedInd uint64, whistleblowerInd 
 		return 0, err
 	}
 
-	newWithdrawableEpoch := utils.Max64(currentWithdrawableEpoch, epoch+b.BeaconConfig().EpochsPerSlashingsVector)
+	newWithdrawableEpoch := max(currentWithdrawableEpoch, epoch+b.BeaconConfig().EpochsPerSlashingsVector)
 	if err := b.SetWithdrawableEpochForValidatorAtIndex(int(slashedInd), newWithdrawableEpoch); err != nil {
 		return 0, err
 	}

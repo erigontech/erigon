@@ -9,26 +9,25 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/secp256k1"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/ledgerwatch/secp256k1"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"github.com/ledgerwatch/erigon/common/debug"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
@@ -94,7 +93,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 
 	var to = prevStageProgress
 	if toBlock > 0 {
-		to = cmp.Min(prevStageProgress, toBlock)
+		to = min(prevStageProgress, toBlock)
 	}
 	if to < s.BlockNumber {
 		return nil
@@ -366,7 +365,9 @@ func recoverSenders(ctx context.Context, logPrefix string, cryptoContext *secp25
 	}
 }
 
-func UnwindSendersStage(s *UnwindState, tx kv.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
+func UnwindSendersStage(u *UnwindState, tx kv.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
+	u.UnwindPoint = max(u.UnwindPoint, cfg.blockReader.FrozenBlocks()) // protect from unwind behind files
+
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -376,7 +377,7 @@ func UnwindSendersStage(s *UnwindState, tx kv.RwTx, cfg SendersCfg, ctx context.
 		defer tx.Rollback()
 	}
 
-	if err = s.Done(tx); err != nil {
+	if err = u.Done(tx); err != nil {
 		return err
 	}
 	if !useExternalTx {

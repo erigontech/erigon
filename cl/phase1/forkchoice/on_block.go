@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2/statechange"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -85,11 +86,10 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			if err == ErrEIP4844DataNotAvailable {
 				return err
 			}
-			return fmt.Errorf("OnBlock: data is not available for block %x: %v", blockRoot, err)
+			return fmt.Errorf("OnBlock: data is not available for block %x: %v", libcommon.Hash(blockRoot), err)
 		}
 	}
 
-	var invalidBlock bool
 	startEngine := time.Now()
 	if newPayload && f.engine != nil {
 		if block.Version() >= clparams.DenebVersion {
@@ -97,16 +97,31 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 				return fmt.Errorf("OnBlock: failed to process kzg commitments: %v", err)
 			}
 		}
-
-		if invalidBlock, err = f.engine.NewPayload(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes); err != nil {
-			if invalidBlock {
-				f.forkGraph.MarkHeaderAsInvalid(blockRoot)
+		payloadStatus, err := f.engine.NewPayload(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes)
+		switch payloadStatus {
+		case execution_client.PayloadStatusNotValidated:
+			log.Debug("OnBlock: block is not validated yet", "block", libcommon.Hash(blockRoot))
+			// optimistic block candidate
+			if err := f.optimisticStore.AddOptimisticCandidate(block.Block); err != nil {
+				return fmt.Errorf("failed to add block to optimistic store: %v", err)
 			}
-			return fmt.Errorf("newPayload failed: %v", err)
-		}
-		if invalidBlock {
+		case execution_client.PayloadStatusInvalidated:
+			log.Debug("OnBlock: block is invalid", "block", libcommon.Hash(blockRoot))
 			f.forkGraph.MarkHeaderAsInvalid(blockRoot)
-			return fmt.Errorf("execution client failed")
+			// remove from optimistic candidate
+			if err := f.optimisticStore.InvalidateBlock(block.Block); err != nil {
+				return fmt.Errorf("failed to remove block from optimistic store: %v", err)
+			}
+			return fmt.Errorf("block is invalid")
+		case execution_client.PayloadStatusValidated:
+			log.Debug("OnBlock: block is validated", "block", libcommon.Hash(blockRoot))
+			// remove from optimistic candidate
+			if err := f.optimisticStore.ValidateBlock(block.Block); err != nil {
+				return fmt.Errorf("failed to validate block in optimistic store: %v", err)
+			}
+		}
+		if err != nil {
+			return fmt.Errorf("newPayload failed: %v", err)
 		}
 	}
 	log.Trace("OnBlock: engine", "elapsed", time.Since(startEngine))
@@ -120,10 +135,10 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	case fork_graph.Success:
 		f.updateChildren(block.Block.Slot-1, block.Block.ParentRoot, blockRoot) // parent slot can be innacurate
 	case fork_graph.BelowAnchor:
-		log.Debug("replay block", "code", status)
+		log.Debug("replay block", "status", status.String())
 		return nil
 	default:
-		return fmt.Errorf("replay block, code: %+v", status)
+		return fmt.Errorf("replay block, status %+v", status)
 	}
 	if block.Block.Body.ExecutionPayload != nil {
 		f.eth2Roots.Add(blockRoot, block.Block.Body.ExecutionPayload.BlockHash)

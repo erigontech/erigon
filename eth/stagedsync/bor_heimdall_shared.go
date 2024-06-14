@@ -6,16 +6,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
 	"strconv"
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 )
@@ -299,7 +299,7 @@ func fetchAndWriteHeimdallMilestonesIfNeeded(
 	}
 
 	for milestoneId := lastId + 1; milestoneId <= uint64(count) && (lastMilestone == nil || lastMilestone.EndBlock().Uint64() < toBlockNum); milestoneId++ {
-		if _, lastMilestone, err = fetchAndWriteHeimdallMilestone(ctx, milestoneId, uint64(count), tx, cfg.heimdallClient, logPrefix, logger); err != nil {
+		if _, lastMilestone, err = fetchAndWriteHeimdallMilestone(ctx, milestoneId, tx, cfg.heimdallClient, logPrefix, logger); err != nil {
 			if !errors.Is(err, heimdall.ErrNotInMilestoneList) {
 				return 0, err
 			}
@@ -318,7 +318,6 @@ var activeMilestones uint64 = 100
 func fetchAndWriteHeimdallMilestone(
 	ctx context.Context,
 	milestoneId uint64,
-	count uint64,
 	tx kv.RwTx,
 	heimdallClient heimdall.HeimdallClient,
 	logPrefix string,
@@ -356,19 +355,35 @@ func fetchRequiredHeimdallStateSyncEventsIfNeeded(
 	ctx context.Context,
 	header *types.Header,
 	tx kv.RwTx,
-	cfg BorHeimdallCfg,
+	borConfig *borcfg.BorConfig,
+	blockReader services.FullBlockReader,
+	heimdallClient heimdall.HeimdallClient,
+	chainID string,
+	stateReceiverABI abi.ABI,
 	logPrefix string,
 	logger log.Logger,
 	lastStateSyncEventID uint64,
 ) (uint64, int, time.Duration, error) {
 
 	headerNum := header.Number.Uint64()
-	if headerNum%cfg.borConfig.CalculateSprintLength(headerNum) != 0 || headerNum == 0 {
+	if headerNum%borConfig.CalculateSprintLength(headerNum) != 0 || headerNum == 0 {
 		// we fetch events only at beginning of each sprint
 		return lastStateSyncEventID, 0, 0, nil
 	}
 
-	return fetchAndWriteHeimdallStateSyncEvents(ctx, header, lastStateSyncEventID, tx, cfg, logPrefix, logger)
+	return fetchAndWriteHeimdallStateSyncEvents(
+		ctx,
+		header,
+		lastStateSyncEventID,
+		tx,
+		borConfig,
+		blockReader,
+		heimdallClient,
+		chainID,
+		stateReceiverABI,
+		logPrefix,
+		logger,
+	)
 }
 
 func fetchAndWriteHeimdallStateSyncEvents(
@@ -376,16 +391,15 @@ func fetchAndWriteHeimdallStateSyncEvents(
 	header *types.Header,
 	lastStateSyncEventID uint64,
 	tx kv.RwTx,
-	cfg BorHeimdallCfg,
+	config *borcfg.BorConfig,
+	blockReader services.FullBlockReader,
+	heimdallClient heimdall.HeimdallClient,
+	chainID string,
+	stateReceiverABI abi.ABI,
 	logPrefix string,
 	logger log.Logger,
 ) (uint64, int, time.Duration, error) {
 	fetchStart := time.Now()
-	config := cfg.borConfig
-	blockReader := cfg.blockReader
-	heimdallClient := cfg.heimdallClient
-	chainID := cfg.chainConfig.ChainID.String()
-	stateReceiverABI := cfg.stateReceiverABI
 	// Find out the latest eventId
 	var (
 		from uint64
@@ -466,14 +480,7 @@ func fetchAndWriteHeimdallStateSyncEvents(
 			)
 		}
 
-		eventRecordWithoutTime := eventRecord.BuildEventRecord()
-
-		recordBytes, err := rlp.EncodeToBytes(eventRecordWithoutTime)
-		if err != nil {
-			return lastStateSyncEventID, i, time.Since(fetchStart), err
-		}
-
-		data, err := stateReceiverABI.Pack("commitState", big.NewInt(eventRecord.Time.Unix()), recordBytes)
+		data, err := eventRecord.Pack(stateReceiverABI)
 		if err != nil {
 			logger.Error(fmt.Sprintf("[%s] Unable to pack tx for commitState", logPrefix), "err", err)
 			return lastStateSyncEventID, i, time.Since(fetchStart), err

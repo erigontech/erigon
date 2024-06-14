@@ -45,7 +45,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -670,7 +669,7 @@ func (s *RoSnapshots) closeWhatNotInList(l []string) {
 	})
 }
 
-func (s *RoSnapshots) removeOverlaps() error {
+func (s *RoSnapshots) removeOverlapsAfterMerge() error {
 	s.lockSegments()
 	defer s.unlockSegments()
 
@@ -697,10 +696,10 @@ func (s *RoSnapshots) buildMissedIndicesIfNeed(ctx context.Context, logPrefix st
 	if s.IndicesMax() >= s.SegmentsMax() {
 		return nil
 	}
-	if !s.Cfg().Produce && s.IndicesMax() == 0 {
+	if !s.Cfg().ProduceE2 && s.IndicesMax() == 0 {
 		return fmt.Errorf("please remove --snap.stop, erigon can't work without creating basic indices")
 	}
-	if !s.Cfg().Produce {
+	if !s.Cfg().ProduceE2 {
 		return nil
 	}
 	if !s.SegmentsReady() {
@@ -1140,7 +1139,7 @@ func chooseSegmentEnd(from, to uint64, snapType snaptype.Enum, chainConfig *chai
 	blocksPerFile := snapcfg.MergeLimit(chainName, snapType, from)
 
 	next := (from/blocksPerFile + 1) * blocksPerFile
-	to = cmp.Min(next, to)
+	to = min(next, to)
 
 	if to < snaptype.Erigon2MinSegmentSize {
 		return to
@@ -1214,7 +1213,7 @@ func (br *BlockRetire) HasNewFrozenFiles() bool {
 }
 
 func CanRetire(curBlockNum uint64, blocksInSnapshots uint64, snapType snaptype.Enum, chainConfig *chain.Config) (blockFrom, blockTo uint64, can bool) {
-	var keep uint64 = params.FullImmutabilityThreshold / 20 //TODO: we will remove `/20` after some db optimizations
+	var keep uint64 = 1024 //TODO: we will increase it to params.FullImmutabilityThreshold after some db optimizations
 	if curBlockNum <= keep {
 		return
 	}
@@ -1246,7 +1245,7 @@ func canRetire(from, to uint64, snapType snaptype.Enum, chainConfig *chain.Confi
 		maxJump = 10_000
 	}
 	//roundedTo1K := (to / 1_000) * 1_000
-	jump := cmp.Min(maxJump, roundedTo1K-blockFrom)
+	jump := min(maxJump, roundedTo1K-blockFrom)
 	switch { // only next segment sizes are allowed
 	case jump >= mergeLimit:
 		blockTo = blockFrom + mergeLimit
@@ -1267,13 +1266,13 @@ func CanDeleteTo(curBlockNum uint64, blocksInSnapshots uint64) (blockTo uint64) 
 		return 0
 	}
 
-	var keep uint64 = params.FullImmutabilityThreshold / 20 //TODO: we will remove `/20` after some db optimizations
+	var keep uint64 = 1024 // params.FullImmutabilityThreshold //TODO: we will increase this value after db optimizations - about on-chain-tip prune speed
 	if curBlockNum+999 < keep {
 		// To prevent overflow of uint64 below
 		return blocksInSnapshots + 1
 	}
 	hardLimit := (curBlockNum/1_000)*1_000 - keep
-	return cmp.Min(hardLimit, blocksInSnapshots+1)
+	return min(hardLimit, blocksInSnapshots+1)
 }
 
 func (br *BlockRetire) dbHasEnoughDataForBlocksRetire(ctx context.Context) (bool, error) {
@@ -1323,8 +1322,6 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 			return ok, fmt.Errorf("DumpBlocks: %w", err)
 		}
 
-		snapshots.removeOverlaps()
-
 		if err := snapshots.ReopenFolder(); err != nil {
 			return ok, fmt.Errorf("reopen: %w", err)
 		}
@@ -1360,36 +1357,47 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 		return ok, err
 	}
 
+	// remove old garbage files
+	if err := snapshots.removeOverlapsAfterMerge(); err != nil {
+		return false, err
+	}
 	return ok, nil
 }
 
-func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
+var ErrNothingToPrune = errors.New("nothing to prune")
+
+func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) (deleted int, err error) {
 	if br.blockReader.FreezingCfg().KeepBlocks {
-		return nil
+		return deleted, nil
 	}
 	currentProgress, err := stages.GetStageProgress(tx, stages.Senders)
 	if err != nil {
-		return err
+		return deleted, err
 	}
 
 	if canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBlocks()); canDeleteTo > 0 {
 		br.logger.Debug("[snapshots] Prune Blocks", "to", canDeleteTo, "limit", limit)
-		if err := br.blockWriter.PruneBlocks(context.Background(), tx, canDeleteTo, limit); err != nil {
-			return err
+		deletedBlocks, err := br.blockWriter.PruneBlocks(context.Background(), tx, canDeleteTo, limit)
+		if err != nil {
+			return deleted, err
 		}
+		deleted += deletedBlocks
 	}
 
 	if br.chainConfig.Bor != nil {
 		if canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBorBlocks()); canDeleteTo > 0 {
 			br.logger.Debug("[snapshots] Prune Bor Blocks", "to", canDeleteTo, "limit", limit)
-			if err := br.blockWriter.PruneBorBlocks(context.Background(), tx, canDeleteTo, limit,
-				func(block uint64) uint64 { return uint64(heimdall.SpanIdAt(block)) }); err != nil {
-				return err
+			deletedBorBlocks, err := br.blockWriter.PruneBorBlocks(context.Background(), tx, canDeleteTo, limit,
+				func(block uint64) uint64 { return uint64(heimdall.SpanIdAt(block)) })
+			if err != nil {
+				return deleted, err
 			}
+			deleted += deletedBorBlocks
 		}
+
 	}
 
-	return nil
+	return deleted, nil
 }
 
 func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error, onFinishRetire func() error) {
@@ -1435,7 +1443,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, max
 	for {
 		var ok, okBor bool
 
-		minBlockNum = cmp.Max(br.blockReader.FrozenBlocks(), minBlockNum)
+		minBlockNum = max(br.blockReader.FrozenBlocks(), minBlockNum)
 		maxBlockNum = br.maxScheduledBlock.Load()
 
 		if includeBor {
@@ -1452,7 +1460,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, max
 		}
 
 		if includeBor {
-			minBorBlockNum := cmp.Max(br.blockReader.FrozenBorBlocks(), minBlockNum)
+			minBorBlockNum := max(br.blockReader.FrozenBorBlocks(), minBlockNum)
 			okBor, err = br.retireBorBlocks(ctx, minBorBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 			if err != nil {
 				return err
@@ -1638,7 +1646,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		if e := rlp.DecodeBytes(dataRLP, &body); e != nil {
 			return false, e
 		}
-		if body.TxAmount == 0 {
+		if body.TxCount == 0 {
 			return true, nil
 		}
 
@@ -1661,9 +1669,9 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			workers = workers / 3 * 2
 		}
 
-		if workers > int(body.TxAmount-2) {
-			if int(body.TxAmount-2) > 1 {
-				workers = int(body.TxAmount - 2)
+		if workers > int(body.TxCount-2) {
+			if int(body.TxCount-2) > 1 {
+				workers = int(body.TxCount - 2)
 			} else {
 				workers = 1
 			}
@@ -1694,7 +1702,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 
 		var j int
 
-		if err := tx.ForAmount(kv.EthTx, numBuf, body.TxAmount-2, func(_, tv []byte) error {
+		if err := tx.ForAmount(kv.EthTx, numBuf, body.TxCount-2, func(_, tv []byte) error {
 			tx := j
 			j++
 
@@ -1737,7 +1745,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			return false, fmt.Errorf("ForAmount parser: %w", err)
 		}
 
-		if err := addSystemTx(parseCtxs[0], tx, body.BaseTxId+uint64(body.TxAmount)-1); err != nil {
+		if err := addSystemTx(parseCtxs[0], tx, body.BaseTxId+uint64(body.TxCount)-1); err != nil {
 			return false, err
 		}
 
@@ -1849,7 +1857,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 		}
 
 		body.BaseTxId = lastTxNum
-		lastTxNum += uint64(body.TxAmount)
+		lastTxNum += uint64(body.TxCount)
 
 		dataRLP, err := rlp.EncodeToBytes(body)
 		if err != nil {
@@ -1982,8 +1990,46 @@ func (m *Merger) filesByRangeOfType(view *View, from, to uint64, snapshotType sn
 	return paths
 }
 
+func (m *Merger) mergeSubSegment(ctx context.Context, sn snaptype.FileInfo, toMerge []string, snapDir string, doIndex bool, onMerge func(r Range) error) (err error) {
+	defer func() {
+		if err == nil {
+			if rec := recover(); rec != nil {
+				err = fmt.Errorf("panic: %v", rec)
+			}
+		}
+		if err != nil {
+			f := sn.Path
+			_ = os.Remove(f)
+			_ = os.Remove(f + ".torrent")
+			ext := filepath.Ext(f)
+			withoutExt := f[:len(f)-len(ext)]
+			_ = os.Remove(withoutExt + ".idx")
+			isTxnType := strings.HasSuffix(withoutExt, coresnaptype.Transactions.Name())
+			if isTxnType {
+				_ = os.Remove(withoutExt + "-to-block.idx")
+			}
+		}
+	}()
+	if len(toMerge) == 0 {
+		return
+	}
+	if err = m.merge(ctx, toMerge, sn.Path, nil); err != nil {
+		err = fmt.Errorf("mergeByAppendSegments: %w", err)
+		return
+	}
+
+	if doIndex {
+		p := &background.Progress{}
+		if err = buildIdx(ctx, sn, m.chainConfig, m.tmpDir, p, m.lvl, m.logger); err != nil {
+			return
+		}
+	}
+
+	return
+}
+
 // Merge does merge segments in given ranges
-func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []snaptype.Type, mergeRanges []Range, snapDir string, doIndex bool, onMerge func(r Range) error, onDelete func(l []string) error) error {
+func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []snaptype.Type, mergeRanges []Range, snapDir string, doIndex bool, onMerge func(r Range) error, onDelete func(l []string) error) (err error) {
 	if len(mergeRanges) == 0 {
 		return nil
 	}
@@ -1996,16 +2042,8 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 		}
 
 		for _, t := range snapTypes {
-			f := t.FileInfo(snapDir, r.from, r.to)
-
-			if err := m.merge(ctx, toMerge[t.Enum()], f.Path, logEvery); err != nil {
-				return fmt.Errorf("mergeByAppendSegments: %w", err)
-			}
-			if doIndex {
-				p := &background.Progress{}
-				if err := buildIdx(ctx, f, m.chainConfig, m.tmpDir, p, m.lvl, m.logger); err != nil {
-					return err
-				}
+			if err := m.mergeSubSegment(ctx, t.FileInfo(snapDir, r.from, r.to), toMerge[t.Enum()], snapDir, doIndex, onMerge); err != nil {
+				return err
 			}
 		}
 		if err := snapshots.ReopenFolder(); err != nil {

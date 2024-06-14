@@ -24,9 +24,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal"
+	state3 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -39,6 +44,8 @@ import (
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDefaults(t *testing.T) {
@@ -136,6 +143,32 @@ func TestCall(t *testing.T) {
 	}
 }
 
+func testTemporalDB(t testing.TB) *temporal.DB {
+	db := memdb.NewStateDB(t.TempDir())
+
+	t.Cleanup(db.Close)
+
+	agg, err := state3.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, log.New())
+	require.NoError(t, err)
+	t.Cleanup(agg.Close)
+
+	_db, err := temporal.New(db, agg)
+	require.NoError(t, err)
+	return _db
+}
+
+func testTemporalTxSD(t testing.TB, db *temporal.DB) (kv.RwTx, *state3.SharedDomains) {
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+
+	sd, err := state3.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd.Close)
+
+	return tx, sd
+}
+
 func BenchmarkCall(b *testing.B) {
 	var definition = `[{"constant":true,"inputs":[],"name":"seller","outputs":[{"name":"","type":"address"}],"type":"function"},{"constant":false,"inputs":[],"name":"abort","outputs":[],"type":"function"},{"constant":true,"inputs":[],"name":"value","outputs":[{"name":"","type":"uint256"}],"type":"function"},{"constant":false,"inputs":[],"name":"refund","outputs":[],"type":"function"},{"constant":true,"inputs":[],"name":"buyer","outputs":[{"name":"","type":"address"}],"type":"function"},{"constant":false,"inputs":[],"name":"confirmReceived","outputs":[],"type":"function"},{"constant":true,"inputs":[],"name":"state","outputs":[{"name":"","type":"uint8"}],"type":"function"},{"constant":false,"inputs":[],"name":"confirmPurchase","outputs":[],"type":"function"},{"inputs":[],"type":"constructor"},{"anonymous":false,"inputs":[],"name":"Aborted","type":"event"},{"anonymous":false,"inputs":[],"name":"PurchaseConfirmed","type":"event"},{"anonymous":false,"inputs":[],"name":"ItemReceived","type":"event"},{"anonymous":false,"inputs":[],"name":"Refunded","type":"event"}]`
 
@@ -158,16 +191,12 @@ func BenchmarkCall(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	cfg := &Config{}
-	db := memdb.New("")
-	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
-	if err != nil {
-		panic(err)
-	}
+	cfg := &Config{ChainConfig: &chain.Config{}, BlockNumber: big.NewInt(0), Time: big.NewInt(0), Value: uint256.MustFromBig(big.NewInt(13377))}
+	db := testTemporalDB(b)
+	tx, sd := testTemporalTxSD(b, db)
 	defer tx.Rollback()
-	cfg.r = state.NewPlainStateReader(tx)
-	cfg.w = state.NewPlainStateWriter(tx, tx, 0)
+	cfg.r = state.NewReaderV4(sd)
+	cfg.w = state.NewWriterV4(sd)
 	cfg.State = state.New(cfg.r)
 
 	cfg.Debug = true
@@ -278,6 +307,7 @@ func (cr *FakeChainHeaderReader) GetBlock(hash libcommon.Hash, number uint64) *t
 func (cr *FakeChainHeaderReader) HasBlock(hash libcommon.Hash, number uint64) bool  { return false }
 func (cr *FakeChainHeaderReader) GetTd(hash libcommon.Hash, number uint64) *big.Int { return nil }
 func (cr *FakeChainHeaderReader) FrozenBlocks() uint64                              { return 0 }
+func (cr *FakeChainHeaderReader) FrozenBorBlocks() uint64                           { return 0 }
 func (cr *FakeChainHeaderReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
 	return nil
 }
@@ -426,8 +456,29 @@ func TestBlockHashEip2935(t *testing.T) {
 	}
 	setDefaults(cfg)
 	cfg.ChainConfig.PragueTime = big.NewInt(10000)
-	_, tx := memdb.NewTestTx(t)
-	cfg.State = state.New(state.NewPlainStateReader(tx))
+
+	db := memdb.NewStateDB(t.TempDir())
+	defer db.Close()
+
+	agg, err := state3.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, log.New())
+	require.NoError(t, err)
+	defer agg.Close()
+
+	_db, err := temporal.New(db, agg)
+	require.NoError(t, err)
+	defer _db.Close()
+
+	tx, err := _db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	sd, err := state3.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+
+	cfg.r = state.NewReaderV4(sd)
+	cfg.w = state.NewWriterV4(sd)
+	cfg.State = state.New(cfg.r)
 	cfg.State.CreateAccount(params.HistoryStorageAddress, true)
 	misc.StoreBlockHashesEip2935(header, cfg.State, cfg.ChainConfig, &FakeChainHeaderReader{})
 

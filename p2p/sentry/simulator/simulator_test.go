@@ -24,7 +24,7 @@ func TestSimulatorStart(t *testing.T) {
 	defer cancel()
 
 	logger := log.New()
-	logger.SetHandler(log.StdoutHandler)
+	// logger.SetHandler(log.StdoutHandler)
 	dataDir := t.TempDir()
 
 	sim, err := simulator.NewSentry(ctx, "mumbai", dataDir, 1, logger)

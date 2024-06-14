@@ -72,8 +72,8 @@ func oneBlockStep(mockSentry *mock.MockSentry, require *require.Assertions, t *t
 	}
 	mockSentry.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
 
-	initialCycle := mock.MockInsertAsInitialCycle
-	if err := stages.StageLoopIteration(mockSentry.Ctx, mockSentry.DB, wrap.TxContainer{}, mockSentry.Sync, initialCycle, true, log.New(), mockSentry.BlockReader, nil); err != nil {
+	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
+	if err := stages.StageLoopIteration(mockSentry.Ctx, mockSentry.DB, wrap.TxContainer{}, mockSentry.Sync, initialCycle, firstCycle, log.New(), mockSentry.BlockReader, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -90,8 +90,8 @@ func TestSendRawTransaction(t *testing.T) {
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mockSentry)
 	txPool := txpool.NewTxpoolClient(conn)
-	ff := rpchelper.New(ctx, nil, txPool, txpool.NewMiningClient(conn), func() {}, mockSentry.Log)
-	api := jsonrpc.NewEthAPI(newBaseApiForTest(mockSentry), mockSentry.DB, nil, txPool, nil, 5000000, 100_000, false, 100_000, 128, logger)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpool.NewMiningClient(conn), func() {}, mockSentry.Log)
+	api := jsonrpc.NewEthAPI(newBaseApiForTest(mockSentry), mockSentry.DB, nil, txPool, nil, 5000000, 1e18, 100_000, false, 100_000, 128, logger)
 
 	buf := bytes.NewBuffer(nil)
 	err = txn.MarshalBinary(buf)
@@ -142,8 +142,8 @@ func TestSendRawTransactionUnprotected(t *testing.T) {
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mockSentry)
 	txPool := txpool.NewTxpoolClient(conn)
-	ff := rpchelper.New(ctx, nil, txPool, txpool.NewMiningClient(conn), func() {}, mockSentry.Log)
-	api := jsonrpc.NewEthAPI(newBaseApiForTest(mockSentry), mockSentry.DB, nil, txPool, nil, 5000000, 100_000, false, 100_000, 128, logger)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpool.NewMiningClient(conn), func() {}, mockSentry.Log)
+	api := jsonrpc.NewEthAPI(newBaseApiForTest(mockSentry), mockSentry.DB, nil, txPool, nil, 5000000, 1e18, 100_000, false, 100_000, 128, logger)
 
 	// Enable unproteced txs flag
 	api.AllowUnprotectedTxs = true
