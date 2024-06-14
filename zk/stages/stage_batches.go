@@ -853,6 +853,10 @@ func writeL2Block(eriDb ErigonDb, hermezDb HermezDb, l2Block *types.FullL2Block,
 		return fmt.Errorf("write block batch error: %v", err)
 	}
 
+	if err := hermezDb.WriteForkIdBlockOnce(uint64(l2Block.ForkId), l2Block.L2BlockNumber); err != nil {
+		return fmt.Errorf("write fork id block error: %v", err)
+	}
+
 	if err := hermezDb.WriteBlockBatch(l2Block.L2BlockNumber, l2Block.BatchNumber); err != nil {
 		return fmt.Errorf("write block batch error: %v", err)
 	}
