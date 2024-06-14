@@ -43,7 +43,7 @@ the `well know` hash for a particular segment file in the following format.
 
 Where multiple version of files exists there may be several likes per segment and the code in the released Erigon version will select the version that it is interesting.
 
-As this file ise versioned as part of the Erigon release process the file to hash mapping can potentially change between releases.  This can potentially cause an issue for running Erigon node which expect the downloads in the snapshots directory to remain constant, which is why a seperate file is used to record the hases used by the process when it originally downloaded its files.
+As this file is versioned as part of the Erigon release process the file to hash mapping can potentially change between releases.  This can potentially cause an issue for running Erigon node which expect the downloads in the snapshots directory to remain constant, which is why a seperate file is used to record the hases used by the process when it originally downloaded its files.
 
 ## snapshot-lock.json
 
