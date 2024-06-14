@@ -312,14 +312,7 @@ Loop:
 		}
 		defer doms.Close()
 
-		allowedUnwindTo, ok, err := tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx).CanUnwindBeforeBlockNum(unwindTo, tx)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindTo, allowedUnwindTo)
-		}
-		if err := u.UnwindTo(allowedUnwindTo, StagedUnwind, tx); err != nil {
+		if err := u.UnwindTo(unwindTo, StagedUnwind, tx); err != nil {
 			return err
 		}
 

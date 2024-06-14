@@ -678,7 +678,6 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 		// No Proof-of-Work blocks
 		return nil
 	}
-
 	for i := 0; i < chain.Length(); i++ {
 		if err := chain.Blocks[i].HashCheck(); err != nil {
 			return err
