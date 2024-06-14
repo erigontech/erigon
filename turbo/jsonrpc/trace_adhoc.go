@@ -1250,6 +1250,8 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */)
 		}
 		if err != nil {
+
+			log.Warn(fmt.Sprintf("[dbg] createHistoryReader: reader=%#v\n", stateReader))
 			return nil, nil, fmt.Errorf("first run for txIndex %d, blockNum %d error: %w", txIndex, blockNumber, err)
 		}
 

@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/log/v3"
-
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
@@ -137,7 +135,6 @@ func CreateHistoryStateReader(tx kv.Tx, blockNumber uint64, txnIndex int, chainN
 		return nil, err
 	}
 	r.SetTxNum(uint64(int(minTxNum) + txnIndex + /* 1 system txNum in begining of block */ 1))
-	log.Warn(fmt.Sprintf("[dbg] createHistoryReader: blockNum=%d, txNum=%d\n", blockNumber, uint64(int(minTxNum)+txnIndex+ /* 1 system txNum in begining of block */ 1)))
 
 	return r, nil
 }
