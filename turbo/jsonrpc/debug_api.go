@@ -24,8 +24,13 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
 
-// AccountRangeMaxResults is the maximum number of results to be returned per call
+// AccountRangeMaxResults is the maximum number of results to be returned
 const AccountRangeMaxResults = 8192
+
+// AccountRangeMaxResultsWithStorage is the maximum number of results to be returned
+// if storage is asked to be enclosed. Contract storage is usually huge and we should
+// be careful not overwhelming our clients or being stuck in db.
+const AccountRangeMaxResultsWithStorage = 256
 
 // PrivateDebugAPI Exposed RPC endpoints for debugging use
 type PrivateDebugAPI interface {
@@ -113,8 +118,17 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		blockNumber = block.NumberU64()
 	}
 
-	if maxResults > AccountRangeMaxResults || maxResults <= 0 {
-		maxResults = AccountRangeMaxResults
+	// Determine how many results we will dump
+	if excludeStorage {
+		// Plain addresses
+		if maxResults > AccountRangeMaxResults || maxResults <= 0 {
+			maxResults = AccountRangeMaxResults
+		}
+	} else {
+		// With storage
+		if maxResults > AccountRangeMaxResultsWithStorage || maxResults <= 0 {
+			maxResults = AccountRangeMaxResultsWithStorage
+		}
 	}
 
 	dumper := state.NewDumper(tx, blockNumber)
