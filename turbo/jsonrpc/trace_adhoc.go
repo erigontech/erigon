@@ -1251,7 +1251,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 		}
 		if err != nil {
 
-			log.Warn(fmt.Sprintf("[dbg] createHistoryReader: reader=%#v\n", stateReader))
+			log.Warn(fmt.Sprintf("[dbg] createHistoryReader: reader=(%s)\n", stateReader.(*state.HistoryReaderV3).String()))
 			return nil, nil, fmt.Errorf("first run for txIndex %d, blockNum %d error: %w", txIndex, blockNumber, err)
 		}
 
