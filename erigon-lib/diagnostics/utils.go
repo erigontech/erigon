@@ -63,3 +63,14 @@ func CalculateTime(amountLeft, rate uint64) string {
 
 	return fmt.Sprintf("%dhrs:%dm", hours, minutes)
 }
+
+func SecondsToHHMMString(seconds uint64) string {
+	if seconds == 0 {
+		return "0hrs:0m"
+	}
+
+	hours := seconds / 3600
+	minutes := (seconds / 60) % 60
+
+	return fmt.Sprintf("%dhrs:%dm", hours, minutes)
+}
