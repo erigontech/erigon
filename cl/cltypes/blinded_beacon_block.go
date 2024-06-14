@@ -328,7 +328,7 @@ func (b *SignedBlindedBeaconBlock) Unblind(blockPayload *Eth1Block) (*SignedBeac
 		return nil, fmt.Errorf("nil block")
 	}
 	// check root
-	blindedRoot := b.Block.StateRoot
+	blindedRoot := b.Block.Body.ExecutionPayload.StateRoot
 	payloadRoot := blockPayload.StateRoot
 	if blindedRoot != payloadRoot {
 		return nil, fmt.Errorf("root mismatch: %s != %s", blindedRoot, payloadRoot)
