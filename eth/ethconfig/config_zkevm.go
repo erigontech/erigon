@@ -46,6 +46,8 @@ type Zk struct {
 	MaxGasPrice                            uint64
 	GasPriceFactor                         float64
 	DAUrl                                  string
+	DataStreamHost                         string
+	DataStreamPort                         uint
 
 	RebuildTreeAfter    uint64
 	IncrementTreeAlways bool

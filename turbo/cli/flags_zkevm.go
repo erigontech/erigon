@@ -122,6 +122,8 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		DisableVirtualCounters:                 ctx.Bool(utils.DisableVirtualCounters.Name),
 		ExecutorPayloadOutput:                  ctx.String(utils.ExecutorPayloadOutput.Name),
 		DAUrl:                                  ctx.String(utils.DAUrl.Name),
+		DataStreamHost:                         ctx.String(utils.DataStreamHost.Name),
+		DataStreamPort:                         ctx.Uint(utils.DataStreamPort.Name),
 	}
 
 	checkFlag(utils.L2ChainIdFlag.Name, cfg.L2ChainId)
@@ -133,6 +135,8 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		checkFlag(utils.SequencerInitialForkId.Name, cfg.SequencerInitialForkId)
 		checkFlag(utils.ExecutorUrls.Name, cfg.ExecutorUrls)
 		checkFlag(utils.ExecutorStrictMode.Name, cfg.ExecutorStrictMode)
+		checkFlag(utils.DataStreamHost.Name, cfg.DataStreamHost)
+		checkFlag(utils.DataStreamPort.Name, cfg.DataStreamPort)
 
 		// if we are running in strict mode, the default, and we have no executor URLs then we panic
 		if cfg.ExecutorStrictMode && !cfg.HasExecutors() {
