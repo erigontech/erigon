@@ -103,7 +103,8 @@ var Defaults = Config{
 	Snapshot: BlocksFreezing{
 		Enabled:    true,
 		KeepBlocks: false,
-		Produce:    true,
+		ProduceE2:  true,
+		ProduceE3:  true,
 	},
 }
 
@@ -136,7 +137,8 @@ func init() {
 type BlocksFreezing struct {
 	Enabled        bool
 	KeepBlocks     bool // produce new snapshots of blocks but don't remove blocks from DB
-	Produce        bool // produce new snapshots
+	ProduceE2      bool // produce new block files
+	ProduceE3      bool // produce new state files
 	NoDownloader   bool // possible to use snapshots without calling Downloader
 	Verify         bool // verify snapshots on startup
 	DownloaderAddr string
@@ -150,7 +152,7 @@ func (s BlocksFreezing) String() string {
 	if s.KeepBlocks {
 		out = append(out, "--"+FlagSnapKeepBlocks+"=true")
 	}
-	if !s.Produce {
+	if !s.ProduceE2 {
 		out = append(out, "--"+FlagSnapStop+"=true")
 	}
 	return strings.Join(out, " ")
@@ -159,10 +161,11 @@ func (s BlocksFreezing) String() string {
 var (
 	FlagSnapKeepBlocks = "snap.keepblocks"
 	FlagSnapStop       = "snap.stop"
+	FlagSnapStateStop  = "snap.state.stop"
 )
 
-func NewSnapCfg(enabled, keepBlocks, produce bool) BlocksFreezing {
-	return BlocksFreezing{Enabled: enabled, KeepBlocks: keepBlocks, Produce: produce}
+func NewSnapCfg(enabled, keepBlocks, produceE2, produceE3 bool) BlocksFreezing {
+	return BlocksFreezing{Enabled: enabled, KeepBlocks: keepBlocks, ProduceE2: produceE2, ProduceE3: produceE3}
 }
 
 // Config contains configuration options for ETH protocol.

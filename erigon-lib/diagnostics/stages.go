@@ -19,14 +19,22 @@ type CurrentSyncStagesIdxs struct {
 }
 
 type SyncStage struct {
-	ID        string         `json:"stage"`
+	ID        string         `json:"id"`
 	State     StageState     `json:"state"`
 	SubStages []SyncSubStage `json:"subStages"`
+	Stats     SyncStageStats `json:"stats"`
 }
 
 type SyncSubStage struct {
-	ID    string     `json:"subStage"`
-	State StageState `json:"state"`
+	ID    string         `json:"id"`
+	State StageState     `json:"state"`
+	Stats SyncStageStats `json:"stats"`
+}
+
+type SyncStageStats struct {
+	TimeElapsed string `json:"timeElapsed"`
+	TimeLeft    string `json:"timeLeft"`
+	Progress    string `json:"progress"`
 }
 
 type UpdateSyncSubStageList struct {
@@ -170,7 +178,7 @@ func (d *DiagnosticClient) runSubStageListener(rootCtx context.Context) {
 }
 
 func (d *DiagnosticClient) saveSyncStagesToDB() {
-	if err := d.db.Update(d.ctx, StagesListUpdater(d.syncStats.SyncStages)); err != nil {
+	if err := d.db.Update(d.ctx, StagesListUpdater(d.syncStages)); err != nil {
 		log.Error("[Diagnostics] Failed to update stages list", "err", err)
 	}
 }
@@ -181,7 +189,7 @@ func (d *DiagnosticClient) getCurrentSyncIdxs() CurrentSyncStagesIdxs {
 		SubStage: -1,
 	}
 
-	for sIdx, stage := range d.syncStats.SyncStages {
+	for sIdx, stage := range d.syncStages {
 		if stage.State == Running {
 			currentIdxs.Stage = sIdx
 
@@ -198,62 +206,42 @@ func (d *DiagnosticClient) getCurrentSyncIdxs() CurrentSyncStagesIdxs {
 }
 
 func (d *DiagnosticClient) SetStagesList(stages []SyncStage) {
-	d.syncStats.SyncStages = stages
-}
-
-func (d *DiagnosticClient) AddOrUpdateStagesList(stages []SyncStage, stage SyncStage) []SyncStage {
-	resultArr := stages
-	stageExists := false
-
-	for _, st := range resultArr {
-		if st.ID == stage.ID {
-			st.State = stage.State
-			st.SubStages = stage.SubStages
-			stageExists = true
-			break
-		}
-	}
-
-	if !stageExists {
-		resultArr = append(resultArr, stage)
-	}
-
-	return resultArr
+	d.syncStages = stages
 }
 
 func (d *DiagnosticClient) SetCurrentSyncStage(css CurrentSyncStage) {
 	isSet := false
-	for idx, stage := range d.syncStats.SyncStages {
+	for idx, stage := range d.syncStages {
 		if !isSet {
 			if stage.ID == css.Stage {
-				d.syncStats.SyncStages[idx].State = Running
+				d.syncStages[idx].State = Running
 				isSet = true
 			} else {
-				d.syncStats.SyncStages[idx].State = Completed
-				for subIdx := range d.syncStats.SyncStages[idx].SubStages {
-					d.syncStats.SyncStages[idx].SubStages[subIdx].State = Completed
+				d.syncStages[idx].State = Completed
+				for subIdx := range d.syncStages[idx].SubStages {
+					d.syncStages[idx].SubStages[subIdx].State = Completed
 				}
 			}
 		} else {
-			d.syncStats.SyncStages[idx].State = Queued
+			d.syncStages[idx].State = Queued
 		}
 	}
 }
 
 func (d *DiagnosticClient) SetCurrentSyncSubStage(css CurrentSyncSubStage) {
-	for idx, stage := range d.syncStats.SyncStages {
+	for idx, stage := range d.syncStages {
 		if stage.State == Running {
 			isSet := false
 			for subIdx, subStage := range stage.SubStages {
 				if !isSet {
 					if subStage.ID == css.SubStage {
-						d.syncStats.SyncStages[idx].SubStages[subIdx].State = Running
+						d.syncStages[idx].SubStages[subIdx].State = Running
 						isSet = true
 					} else {
-						d.syncStats.SyncStages[idx].SubStages[subIdx].State = Completed
+						d.syncStages[idx].SubStages[subIdx].State = Completed
 					}
 				} else {
-					d.syncStats.SyncStages[idx].SubStages[subIdx].State = Queued
+					d.syncStages[idx].SubStages[subIdx].State = Queued
 				}
 			}
 
@@ -269,19 +257,19 @@ func (d *DiagnosticClient) AddOrUpdateSugStages(subStages UpdateSyncSubStageList
 }
 
 func (d *DiagnosticClient) AddOrUpdateSugStage(subStage UpdateSyncSubStage) {
-	for idx, stage := range d.syncStats.SyncStages {
+	for idx, stage := range d.syncStages {
 		if stage.ID == subStage.StageId {
 			subStageExist := false
 			for subIdx, sub := range stage.SubStages {
 				if sub.ID == subStage.SubStage.ID {
 					subStageExist = true
-					d.syncStats.SyncStages[idx].SubStages[subIdx] = subStage.SubStage
+					d.syncStages[idx].SubStages[subIdx] = subStage.SubStage
 					break
 				}
 			}
 
 			if !subStageExist {
-				d.syncStats.SyncStages[idx].SubStages = append(d.syncStats.SyncStages[idx].SubStages, subStage.SubStage)
+				d.syncStages[idx].SubStages = append(d.syncStages[idx].SubStages, subStage.SubStage)
 			}
 
 			break
@@ -309,4 +297,8 @@ func ReadSyncStages(db kv.RoDB) []SyncStage {
 
 func StagesListUpdater(info []SyncStage) func(tx kv.RwTx) error {
 	return PutDataToTable(kv.DiagSyncStages, StagesListKey, info)
+}
+
+func (d *DiagnosticClient) GetSyncStages() []SyncStage {
+	return d.syncStages
 }

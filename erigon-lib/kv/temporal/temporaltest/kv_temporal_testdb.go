@@ -31,7 +31,7 @@ func NewTestDB(tb testing.TB, dirs datadir.Dirs) (db kv.RwDB, agg *state.Aggrega
 	if err != nil {
 		panic(err)
 	}
-	if err := agg.OpenFolder(false); err != nil {
+	if err := agg.OpenFolder(); err != nil {
 		panic(err)
 	}
 

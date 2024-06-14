@@ -45,7 +45,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -697,10 +696,10 @@ func (s *RoSnapshots) buildMissedIndicesIfNeed(ctx context.Context, logPrefix st
 	if s.IndicesMax() >= s.SegmentsMax() {
 		return nil
 	}
-	if !s.Cfg().Produce && s.IndicesMax() == 0 {
+	if !s.Cfg().ProduceE2 && s.IndicesMax() == 0 {
 		return fmt.Errorf("please remove --snap.stop, erigon can't work without creating basic indices")
 	}
-	if !s.Cfg().Produce {
+	if !s.Cfg().ProduceE2 {
 		return nil
 	}
 	if !s.SegmentsReady() {
@@ -1214,7 +1213,7 @@ func (br *BlockRetire) HasNewFrozenFiles() bool {
 }
 
 func CanRetire(curBlockNum uint64, blocksInSnapshots uint64, snapType snaptype.Enum, chainConfig *chain.Config) (blockFrom, blockTo uint64, can bool) {
-	var keep uint64 = params.FullImmutabilityThreshold / 20 //TODO: we will remove `/20` after some db optimizations
+	var keep uint64 = 1024 //TODO: we will increase it to params.FullImmutabilityThreshold after some db optimizations
 	if curBlockNum <= keep {
 		return
 	}
@@ -1647,7 +1646,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		if e := rlp.DecodeBytes(dataRLP, &body); e != nil {
 			return false, e
 		}
-		if body.TxAmount == 0 {
+		if body.TxCount == 0 {
 			return true, nil
 		}
 
@@ -1670,9 +1669,9 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			workers = workers / 3 * 2
 		}
 
-		if workers > int(body.TxAmount-2) {
-			if int(body.TxAmount-2) > 1 {
-				workers = int(body.TxAmount - 2)
+		if workers > int(body.TxCount-2) {
+			if int(body.TxCount-2) > 1 {
+				workers = int(body.TxCount - 2)
 			} else {
 				workers = 1
 			}
@@ -1703,7 +1702,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 
 		var j int
 
-		if err := tx.ForAmount(kv.EthTx, numBuf, body.TxAmount-2, func(_, tv []byte) error {
+		if err := tx.ForAmount(kv.EthTx, numBuf, body.TxCount-2, func(_, tv []byte) error {
 			tx := j
 			j++
 
@@ -1746,7 +1745,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			return false, fmt.Errorf("ForAmount parser: %w", err)
 		}
 
-		if err := addSystemTx(parseCtxs[0], tx, body.BaseTxId+uint64(body.TxAmount)-1); err != nil {
+		if err := addSystemTx(parseCtxs[0], tx, body.BaseTxId+uint64(body.TxCount)-1); err != nil {
 			return false, err
 		}
 
@@ -1858,7 +1857,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 		}
 
 		body.BaseTxId = lastTxNum
-		lastTxNum += uint64(body.TxAmount)
+		lastTxNum += uint64(body.TxCount)
 
 		dataRLP, err := rlp.EncodeToBytes(body)
 		if err != nil {

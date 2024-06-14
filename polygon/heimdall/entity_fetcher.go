@@ -116,11 +116,6 @@ func (f *entityFetcherImpl[TEntity]) FetchAllEntities(ctx context.Context) ([]TE
 		}
 
 		for _, entity := range entitiesPage {
-			if entity.RawId() == 0 {
-				// TODO use workaround from heimdall.Heimdall FetchCheckpointsFromBlock
-				//      to set entity id or fix heimdall API to return "id" as part of json
-				panic("unexpected 0 id for entity - pending fix")
-			}
 			entities = append(entities, entity)
 		}
 
@@ -141,6 +136,10 @@ func (f *entityFetcherImpl[TEntity]) FetchAllEntities(ctx context.Context) ([]TE
 		n2 := e2.BlockNumRange().Start
 		return cmp.Compare(n1, n2)
 	})
+
+	for i, entity := range entities {
+		entity.SetRawId(uint64(i + 1))
+	}
 
 	f.logger.Debug(
 		heimdallLogPrefix(fmt.Sprintf("%s done", f.name)),
