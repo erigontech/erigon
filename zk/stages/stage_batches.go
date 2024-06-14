@@ -239,6 +239,11 @@ LOOP:
 				if err = hermezDb.WriteInvalidBatch(batchStart.Number); err != nil {
 					return err
 				}
+				// we need to write the fork here as well because the batch will never get processed as it is invalid
+				// but, we need it re-populate our own stream
+				if err = hermezDb.WriteForkId(batchStart.Number, batchStart.ForkId); err != nil {
+					return err
+				}
 			}
 			_ = batchStart
 		case l2Block := <-l2BlockChan:
