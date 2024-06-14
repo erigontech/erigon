@@ -1156,6 +1156,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	}
 
 	for txIndex, msg := range msgs {
+		log.Warn(fmt.Sprintf("txIdx: %d\n", txIndex))
 		if err := libcommon.Stopped(ctx.Done()); err != nil {
 			return nil, nil, err
 		}
