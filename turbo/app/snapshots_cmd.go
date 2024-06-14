@@ -187,9 +187,9 @@ var snapshotCommand = cli.Command{
 					}
 					for _, filePath := range filePaths {
 						_, fName := filepath.Split(filePath)
-						res, _, ok := snaptype.ParseFileName(dirPath, fName)
-						if !ok {
-							fmt.Printf("skipping %s (cannot parse)\n", filePath)
+						res, isStateFile, ok := snaptype.ParseFileName(dirPath, fName)
+						if !ok || !isStateFile {
+							fmt.Printf("skipping %s\n", filePath)
 							continue
 						}
 						if res.From == 0 && res.To == 0 {
