@@ -1121,6 +1121,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	if err != nil {
 		return nil, nil, err
 	}
+	typedStateReader := stateReader.(*state.HistoryReaderV3)
 	stateCache := shards.NewStateCache(32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
 	cachedReader := state.NewCachedReader(stateReader, stateCache)
 	noop := state.NewNoopWriter()
@@ -1155,9 +1156,9 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 		useParent = true
 	}
 
-	baseTxNum := stateReader.(*state.HistoryReaderV3).GetTxNum()
+	baseTxNum := typedStateReader.GetTxNum()
 	for txIndex, msg := range msgs {
-		stateReader.(*state.HistoryReaderV3).SetTxNum(baseTxNum + uint64(txIndex))
+		typedStateReader.SetTxNum(baseTxNum + uint64(txIndex))
 		if err := libcommon.Stopped(ctx.Done()); err != nil {
 			return nil, nil, err
 		}
