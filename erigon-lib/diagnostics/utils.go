@@ -3,6 +3,7 @@ package diagnostics
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
@@ -44,8 +45,21 @@ func InitStagesFromList(list []string) []SyncStage {
 			ID:        stage,
 			State:     Queued,
 			SubStages: []SyncSubStage{},
+			Stats:     SyncStageStats{},
 		})
 	}
 
 	return stages
+}
+
+func CalculateTime(amountLeft, rate uint64) string {
+	if rate == 0 {
+		return "999hrs:99m"
+	}
+	timeLeftInSeconds := amountLeft / rate
+
+	hours := timeLeftInSeconds / 3600
+	minutes := (timeLeftInSeconds / 60) % 60
+
+	return fmt.Sprintf("%dhrs:%dm", hours, minutes)
 }
