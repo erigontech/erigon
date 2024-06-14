@@ -257,7 +257,7 @@ func isSubscriptionType(t reflect.Type) bool {
 	return t == subscriptionType
 }
 
-// isPubSub tests whether the given method has as as first argument a context.Context and
+// isPubSub tests whether the given method has as first argument a context.Context and
 // returns the pair (Subscription, error).
 func isPubSub(methodType reflect.Type) bool {
 	// numIn(0) is the receiver type
