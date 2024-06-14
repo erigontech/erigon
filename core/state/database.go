@@ -37,6 +37,7 @@ type StateReader interface {
 	ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error)
 	ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error)
 	ReadAccountIncarnation(address common.Address) (uint64, error)
+	SetTxNum(txNum uint64)
 }
 
 type StateWriter interface {

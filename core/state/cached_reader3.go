@@ -69,3 +69,4 @@ func (r *CachedReader3) ReadAccountCodeSize(address common.Address, incarnation 
 func (r *CachedReader3) ReadAccountIncarnation(address common.Address) (uint64, error) {
 	return 0, nil
 }
+func (r *CachedReader3) SetTxNum(txNum uint64) {} //noop
