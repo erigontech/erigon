@@ -79,41 +79,41 @@ func (c *MockHeimdallFetchCheckpointsFromBlockCall) DoAndReturn(f func(context.C
 	return c
 }
 
-// FetchLatestSpan mocks base method.
-func (m *MockHeimdall) FetchLatestSpan(arg0 context.Context) (*Span, error) {
+// FetchLatestSpans mocks base method.
+func (m *MockHeimdall) FetchLatestSpans(arg0 context.Context, arg1 uint) ([]*Span, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FetchLatestSpan", arg0)
-	ret0, _ := ret[0].(*Span)
+	ret := m.ctrl.Call(m, "FetchLatestSpans", arg0, arg1)
+	ret0, _ := ret[0].([]*Span)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// FetchLatestSpan indicates an expected call of FetchLatestSpan.
-func (mr *MockHeimdallMockRecorder) FetchLatestSpan(arg0 any) *MockHeimdallFetchLatestSpanCall {
+// FetchLatestSpans indicates an expected call of FetchLatestSpans.
+func (mr *MockHeimdallMockRecorder) FetchLatestSpans(arg0, arg1 any) *MockHeimdallFetchLatestSpansCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchLatestSpan", reflect.TypeOf((*MockHeimdall)(nil).FetchLatestSpan), arg0)
-	return &MockHeimdallFetchLatestSpanCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchLatestSpans", reflect.TypeOf((*MockHeimdall)(nil).FetchLatestSpans), arg0, arg1)
+	return &MockHeimdallFetchLatestSpansCall{Call: call}
 }
 
-// MockHeimdallFetchLatestSpanCall wrap *gomock.Call
-type MockHeimdallFetchLatestSpanCall struct {
+// MockHeimdallFetchLatestSpansCall wrap *gomock.Call
+type MockHeimdallFetchLatestSpansCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockHeimdallFetchLatestSpanCall) Return(arg0 *Span, arg1 error) *MockHeimdallFetchLatestSpanCall {
+func (c *MockHeimdallFetchLatestSpansCall) Return(arg0 []*Span, arg1 error) *MockHeimdallFetchLatestSpansCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockHeimdallFetchLatestSpanCall) Do(f func(context.Context) (*Span, error)) *MockHeimdallFetchLatestSpanCall {
+func (c *MockHeimdallFetchLatestSpansCall) Do(f func(context.Context, uint) ([]*Span, error)) *MockHeimdallFetchLatestSpansCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockHeimdallFetchLatestSpanCall) DoAndReturn(f func(context.Context) (*Span, error)) *MockHeimdallFetchLatestSpanCall {
+func (c *MockHeimdallFetchLatestSpansCall) DoAndReturn(f func(context.Context, uint) ([]*Span, error)) *MockHeimdallFetchLatestSpansCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
