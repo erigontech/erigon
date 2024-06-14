@@ -44,6 +44,7 @@ const BATCH_BLOCKS = "batch_blocks"                                    // batch 
 const SMT_DEPTHS = "smt_depths"                                        // block number -> smt depth
 const L1_INFO_LEAVES = "l1_info_leaves"                                // l1 info tree index -> l1 info tree leaf
 const L1_INFO_ROOTS = "l1_info_roots"                                  // root hash -> l1 info tree index
+const INVALID_BATCHES = "invalid_batches"                              // batch number -> true
 
 type HermezDb struct {
 	tx kv.RwTx
@@ -98,6 +99,7 @@ func CreateHermezBuckets(tx kv.RwTx) error {
 		SMT_DEPTHS,
 		L1_INFO_LEAVES,
 		L1_INFO_ROOTS,
+		INVALID_BATCHES,
 	}
 	for _, t := range tables {
 		if err := tx.CreateBucket(t); err != nil {
@@ -1403,4 +1405,16 @@ func (db *HermezDbReader) GetForkIdByBlockNum(blockNum uint64) (uint64, error) {
 	}
 
 	return forkId, nil
+}
+
+func (db *HermezDb) WriteInvalidBatch(batchNo uint64) error {
+	return db.tx.Put(INVALID_BATCHES, Uint64ToBytes(batchNo), []byte{1})
+}
+
+func (db *HermezDbReader) GetInvalidBatch(batchNo uint64) (bool, error) {
+	v, err := db.tx.GetOne(INVALID_BATCHES, Uint64ToBytes(batchNo))
+	if err != nil {
+		return false, err
+	}
+	return len(v) > 0, nil
 }

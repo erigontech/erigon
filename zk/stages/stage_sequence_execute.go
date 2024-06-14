@@ -186,6 +186,10 @@ func SpawnSequencingStage(
 
 		if badBatch {
 			log.Info(fmt.Sprintf("[%s] Skipping bad batch %d...", logPrefix, thisBatch))
+			// store the fact that this batch was invalid during recovery - will be used for the stream later
+			if err = sdb.hermezDb.WriteInvalidBatch(thisBatch); err != nil {
+				return err
+			}
 			if err = stages.SaveStageProgress(tx, stages.HighestSeenBatchNumber, thisBatch); err != nil {
 				return err
 			}
