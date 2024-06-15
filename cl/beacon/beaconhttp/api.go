@@ -103,6 +103,17 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 			return
 		}
 		switch {
+		case contentType == "*/*", contentType == "", strings.Contains(contentType, "text/html"), strings.Contains(contentType, "application/json"):
+			if !isNil(ans) {
+				w.Header().Add("content-type", "application/json")
+				err := json.NewEncoder(w).Encode(ans)
+				if err != nil {
+					// this error is fatal, log to console
+					log.Error("beaconapi failed to encode json", "type", reflect.TypeOf(ans), "err", err)
+				}
+			} else {
+				w.WriteHeader(200)
+			}
 		case strings.Contains(contentType, "application/octet-stream"):
 			sszMarshaler, ok := any(ans).(ssz.Marshaler)
 			if !ok {
@@ -116,17 +127,6 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 				return
 			}
 			w.Write(encoded)
-		case contentType == "*/*", contentType == "", strings.Contains(contentType, "text/html"), strings.Contains(contentType, "application/json"):
-			if !isNil(ans) {
-				w.Header().Add("content-type", "application/json")
-				err := json.NewEncoder(w).Encode(ans)
-				if err != nil {
-					// this error is fatal, log to console
-					log.Error("beaconapi failed to encode json", "type", reflect.TypeOf(ans), "err", err)
-				}
-			} else {
-				w.WriteHeader(200)
-			}
 		case strings.Contains(contentType, "text/event-stream"):
 			return
 		default:
