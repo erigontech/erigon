@@ -363,15 +363,6 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 			}
 		}
 
-		//TODO: why do we need it if we have `addTorrentFilesFromDisk`? what if they are conflict?
-		//TODO: why it's before `BuildTorrentFilesIfNeed`? what if they are conflict?
-		//TODO: even if hash is saved in "snapshots-snapLock.json" - it still must preserve `prohibit_new_downloads.snapLock` and don't download new files ("user restart" must be fast, "erigon3 has .kv files which never-ending merge and delete small files")
-		//for _, it := range snapLock.Downloads {
-		//	if err := d.AddMagnetLink(ctx, snaptype.Hex2InfoHash(it.Hash), it.Name); err != nil {
-		//		return nil, err
-		//	}
-		//}
-
 		if err := d.BuildTorrentFilesIfNeed(d.ctx, snapLock.Chain, snapLock.Downloads); err != nil {
 			return nil, err
 		}
