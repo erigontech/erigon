@@ -993,9 +993,51 @@ func TestDB_BatchTime(t *testing.T) {
 	}
 }
 
+func iteration(t *testing.T, c kv.RwCursorDupSort, start []byte, val []byte) (keys []string, values []string) {
+	t.Helper()
+	var err error
+	i := 0
+	for k, v, err := start, val, err; k != nil; k, v, err = c.Next() {
+		require.NoError(t, err)
+		keys = append(keys, string(k))
+		values = append(values, string(v))
+		i += 1
+	}
+	for ind := i; ind > 1; ind-- {
+		_, _, err = c.Prev()
+		require.NoError(t, err)
+	}
+
+	return keys, values
+}
+
 func TestNextPrevCurrent(t *testing.T) {
-	_, _, c := BaseCase(t)
 	require := require.New(t)
+	path := t.TempDir()
+	logger := log.New()
+
+	table := "Table"
+	db := NewMDBX(logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{
+			table:       kv.TableCfgItem{Flags: kv.DupSort},
+			kv.Sequence: kv.TableCfgItem{},
+		}
+	}).MapSize(128 * datasize.MB).MustOpen()
+	t.Cleanup(db.Close)
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(err)
+	t.Cleanup(tx.Rollback)
+
+	c, err := tx.RwCursorDupSort(table)
+	require.NoError(err)
+	t.Cleanup(c.Close)
+
+	// Insert some dupsorted records
+	require.NoError(c.Put([]byte("key1"), []byte("value1.1")))
+	require.NoError(c.Put([]byte("key3"), []byte("value3.1")))
+	require.NoError(c.Put([]byte("key1"), []byte("value1.3")))
+	require.NoError(c.Put([]byte("key3"), []byte("value3.3")))
 
 	k, v, err := c.First()
 	require.NoError(err)
@@ -1072,22 +1114,4 @@ func BaseCase(t *testing.T) (kv.RwDB, kv.RwTx, kv.RwCursorDupSort) {
 	require.NoError(t, c.Put([]byte("key3"), []byte("value3.3")))
 
 	return db, tx, c
-}
-
-func iteration(t *testing.T, c kv.RwCursorDupSort, start []byte, val []byte) (keys []string, values []string) {
-	t.Helper()
-	var err error
-	i := 0
-	for k, v, err := start, val, err; k != nil; k, v, err = c.Next() {
-		require.NoError(t, err)
-		keys = append(keys, string(k))
-		values = append(values, string(v))
-		i += 1
-	}
-	for ind := i; ind > 1; ind-- {
-		_, _, err = c.Prev()
-		require.NoError(t, err)
-	}
-
-	return keys, values
 }
