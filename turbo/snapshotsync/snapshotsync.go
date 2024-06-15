@@ -405,7 +405,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 		}
 	}
 
-	if err := agg.OpenFolder(true); err != nil {
+	if err := agg.OpenFolder(); err != nil {
 		return err
 	}
 

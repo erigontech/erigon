@@ -56,8 +56,8 @@ This table stores information about block headers. For each block there are thre
         * transactions root: 32-byte root hash of the trie structure made up of the block transactions
         * receipts root: 32-byte root hash of the trie structure made up of the transaction receipts
         * logs bloom: 256-byte Bloom filter composed from indexable information in each log entry from the transaction receipts
-        * difficulty: 8-byte scalar value corresponding to the diffculty level of this block
-        * block number: 8-byte scalar value equal to the number of ancestor blocks in the chain (aka block heigth)
+        * difficulty: 8-byte scalar value corresponding to the difficulty level of this block
+        * block number: 8-byte scalar value equal to the number of ancestor blocks in the chain (aka block height)
         * gas limit: 8-byte scalar value equal to the current limit of gas expenditure per block
         * gas used: 8-byte scalar value equal to the total gas used in transactions in this block
         * timestamp: 8-byte scalar value equal to the Unix epoch timestamp at the inception of this block
@@ -309,7 +309,7 @@ The next bucket is "PlainState":
 ![block1_db_accounts](changes_1_PlainState.png)
 
 The values are the current state of each account. 
-* The first record has a field set of `0x3` (`11`) meaning that this time the accound has a nonce as well. The nonce length is `0x01`, therefore the nonce is stored in the byte immediately after the length of the field: `0x01`. The balance is now changed to `0x7ce2ded23dbd8000`.
+* The first record has a field set of `0x3` (`11`) meaning that this time the account has a nonce as well. The nonce length is `0x01`, therefore the nonce is stored in the byte immediately after the length of the field: `0x01`. The balance is now changed to `0x7ce2ded23dbd8000`.
 The value `0x7ce2ded23dbd8000` is the hexadecimal value for:
 ````
 $ python
@@ -353,7 +353,7 @@ Here is how the database looks like. Since go-ethereum uses LevelDB, and LevelDB
 "tables"), go-ethereum emulates them by adding table-specific prefixes to all the keys, with the exception of the keys that
 describe the state trie (bucket "Hashes" in our example). In the illustration, these prefixes are mostly removed for better
 comparison with Erigon. They were not removed only for the buckets "LastBlock", "LastHeader" and "LastFast", because
-othewise they key would be empty.
+otherwise they key would be empty.
 
 ![geth_genesis_db](geth_changes_0.png)
 
@@ -385,8 +385,8 @@ What we see in the keys of these records are the results of `Keccak256` function
 this is similar to the "Preimages" bucket, with the different type of values.
 
 If you look closely, you may notice that the keys of the last 3 records are actually contained inside the value
-of the first record. This is because the first value correponds to that 3-way branch node, and the hashes of the
-leaf nodes are used like "pointers" to thoese nodes. Continuing the "pointer" analogy, you can say that
+of the first record. This is because the first value corresponds to that 3-way branch node, and the hashes of the
+leaf nodes are used like "pointers" to those nodes. Continuing the "pointer" analogy, you can say that
 "dereferencing" these pointers mean fetching the corresponding records from this "Hashes" bucket. Using such
 "derederencing" process, one can traverse the state trie from the top to any leaf at the bottom. Each step in
 such traversal requires finding the corresponding record in the "Hashes" bucket.
