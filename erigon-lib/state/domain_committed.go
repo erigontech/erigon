@@ -154,7 +154,7 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter ArchiveGetter,
 func (dt *DomainRoTx) lookupFileByItsRange(txFrom uint64, txTo uint64) *filesItem {
 	var item *filesItem
 	for _, f := range dt.files {
-		if f.startTxNum <= txFrom && f.endTxNum >= txTo {
+		if f.startTxNum <= txFrom && txTo <= f.endTxNum {
 			item = f.src
 			break
 		}
@@ -162,7 +162,7 @@ func (dt *DomainRoTx) lookupFileByItsRange(txFrom uint64, txTo uint64) *filesIte
 	if item == nil {
 		dt.d.dirtyFiles.Walk(func(files []*filesItem) bool {
 			for _, f := range files {
-				if f.startTxNum <= txFrom && f.endTxNum >= txTo {
+				if f.startTxNum <= txFrom && txTo <= f.endTxNum {
 					item = f
 					return false
 				}
