@@ -383,7 +383,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
-	cfg := ethconfig.NewSnapCfg(true, false, true)
+	cfg := ethconfig.NewSnapCfg(true, false, true, true)
 
 	blockSnaps, borSnaps, caplinSnaps, blockRetire, agg, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
@@ -549,7 +549,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 		return err
 	}
 
-	cfg := ethconfig.NewSnapCfg(true, false, true)
+	cfg := ethconfig.NewSnapCfg(true, false, true, true)
 	chainConfig := fromdb.ChainConfig(chainDB)
 	blockSnaps, borSnaps, caplinSnaps, br, agg, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
@@ -743,7 +743,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
 
-	cfg := ethconfig.NewSnapCfg(true, false, true)
+	cfg := ethconfig.NewSnapCfg(true, false, true, true)
 	blockSnaps, borSnaps, caplinSnaps, br, agg, err := openSnaps(ctx, cfg, dirs, db, logger)
 	if err != nil {
 		return err

@@ -21,6 +21,7 @@ type DiagnosticClient struct {
 	dataDirPath string
 	speedTest   bool
 
+	syncStages          []SyncStage
 	syncStats           SyncStatistics
 	snapshotFileList    SnapshoFilesList
 	mu                  sync.Mutex
@@ -54,8 +55,8 @@ func NewDiagnosticClient(ctx context.Context, metricsMux *http.ServeMux, dataDir
 		metricsMux:  metricsMux,
 		dataDirPath: dataDirPath,
 		speedTest:   speedTest,
+		syncStages:  ss,
 		syncStats: SyncStatistics{
-			SyncStages:       ss,
 			SnapshotDownload: snpdwl,
 			SnapshotIndexing: snpidx,
 		},

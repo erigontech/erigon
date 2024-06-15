@@ -69,7 +69,7 @@ func NewSentry(ctx context.Context, chain string, snapshotLocation string, peerC
 
 	knownSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
 		Enabled:      true,
-		Produce:      false,
+		ProduceE2:    false,
 		NoDownloader: true,
 	}, "", 0, logger)
 
@@ -84,7 +84,7 @@ func NewSentry(ctx context.Context, chain string, snapshotLocation string, peerC
 	//s.knownSnapshots.ReopenList([]string{ent2.Name()}, false)
 	activeSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
 		Enabled:      true,
-		Produce:      false,
+		ProduceE2:    false,
 		NoDownloader: true,
 	}, torrentDir, 0, logger)
 
