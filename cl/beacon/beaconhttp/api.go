@@ -97,14 +97,13 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 		}
 		// TODO: potentially add a context option to buffer these
 		contentType := r.Header.Get("Accept")
-		contentTypes := strings.Split(contentType, ",")
 
 		// early return for event stream
 		if slices.Contains(w.Header().Values("Content-Type"), "text/event-stream") {
 			return
 		}
 		switch {
-		case slices.Contains(contentTypes, "application/octet-stream"):
+		case strings.Contains(contentType, "application/octet-stream"):
 			sszMarshaler, ok := any(ans).(ssz.Marshaler)
 			if !ok {
 				NewEndpointError(http.StatusBadRequest, ErrorSszNotSupported).WriteTo(w)
@@ -117,7 +116,7 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 				return
 			}
 			w.Write(encoded)
-		case contentType == "*/*", contentType == "", slices.Contains(contentTypes, "text/html"), slices.Contains(contentTypes, "application/json"):
+		case contentType == "*/*", contentType == "", strings.Contains(contentType, "text/html"), strings.Contains(contentType, "application/json"):
 			if !isNil(ans) {
 				w.Header().Add("content-type", "application/json")
 				err := json.NewEncoder(w).Encode(ans)
@@ -128,7 +127,7 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 			} else {
 				w.WriteHeader(200)
 			}
-		case slices.Contains(contentTypes, "text/event-stream"):
+		case strings.Contains(contentType, "text/event-stream"):
 			return
 		default:
 			http.Error(w, fmt.Sprintf("content type must include application/json, application/octet-stream, or text/event-stream, got %s", contentType), http.StatusBadRequest)
