@@ -83,7 +83,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 			iiCfg:             iiCfg{salt: &salt, dirs: dirs, db: db},
 			withLocalityIndex: false, withExistenceIndex: false, compression: CompressNone, historyLargeValues: true,
 		}}
-	d, err := NewDomain(cfg, aggStep, kv.AccountsDomain.String(), keysTable, valsTable, historyKeysTable, historyValsTable, indexTable, logger)
+	d, err := NewDomain(cfg, aggStep, kv.AccountsDomain.String(), valsTable, historyKeysTable, historyValsTable, indexTable, logger)
 	require.NoError(t, err)
 	d.DisableFsync()
 	d.compressWorkers = 1
@@ -1705,11 +1705,11 @@ func TestDomain_PruneProgress(t *testing.T) {
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	cancel()
 
-	key, err := GetExecV3PruneProgress(rwTx, dc.d.keysTable)
+	key, err := GetExecV3PruneProgress(rwTx, dc.d.valsTable)
 	require.NoError(t, err)
 	require.NotNil(t, key)
 
-	keysCursor, err := rwTx.RwCursorDupSort(dc.d.keysTable)
+	keysCursor, err := rwTx.RwCursorDupSort(dc.d.valsTable)
 	require.NoError(t, err)
 
 	k, istep, err := keysCursor.Seek(key)
@@ -1731,13 +1731,13 @@ func TestDomain_PruneProgress(t *testing.T) {
 		}
 		cancel()
 
-		key, err := GetExecV3PruneProgress(rwTx, dc.d.keysTable)
+		key, err := GetExecV3PruneProgress(rwTx, dc.d.valsTable)
 		require.NoError(t, err)
 		if step == 0 && key == nil {
 
 			fmt.Printf("pruned in %d iterations\n", i)
 
-			keysCursor, err := rwTx.RwCursorDupSort(dc.d.keysTable)
+			keysCursor, err := rwTx.RwCursorDupSort(dc.d.valsTable)
 			require.NoError(t, err)
 
 			// check there are no keys with 0 step left

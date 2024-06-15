@@ -817,7 +817,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 			continue
 		}
 
-		if err = comp.AddWord(k); err != nil {
+		if err = comp.AddWord(k[:len(k)-8]); err != nil {
 			return coll, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, k, err)
 		}
 		if err = comp.AddWord(v); err != nil {
@@ -1610,24 +1610,24 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		dt.d.logger.Error("get domain pruning progress", "name", dt.d.filenameBase, "error", err)
 	}
 
-	var k, v []byte
+	var k []byte
 	if prunedKey != nil {
 		_, _, err = valsCursor.Seek(prunedKey)
 		if err != nil {
 			return stat, err
 		}
 	} else {
-		k, v, err = valsCursor.First()
+		k, _, err = valsCursor.First()
 	}
 	if err != nil {
 		return nil, err
 	}
 
-	for ; k != nil; k, v, err = valsCursor.Next() {
+	for ; k != nil; k, _, err = valsCursor.Next() {
 		if err != nil {
 			return stat, fmt.Errorf("iterate over %s domain keys: %w", dt.d.filenameBase, err)
 		}
-		stepBytes := v[len(v)-8:]
+		stepBytes := k[len(k)-8:]
 
 		is := ^binary.BigEndian.Uint64(stepBytes)
 		if is > step {

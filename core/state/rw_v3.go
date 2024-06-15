@@ -271,7 +271,7 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwi
 		}
 		return nil
 	}
-	fmt.Println(txUnwindTo)
+
 	stateChanges := etl.NewCollector("", "", etl.NewOldestEntryBuffer(etl.BufferOptimalSize), rs.logger)
 	defer stateChanges.Close()
 	stateChanges.SortAndFlushInBackground(true)
