@@ -89,7 +89,13 @@ jobs:
       env:
         TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
       run: |
+        python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/prod_info.py $ERIGON_REFERENCE_DATA_DIR/../production.ini production erigon_repo_commit
+        
         db_version=$(python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/prod_info.py $ERIGON_REFERENCE_DATA_DIR/../production.ini production erigon_repo_commit)
+        echo "DB version: $db_version"
+        if [ -z "$db_version" ]; then
+          db_version="no-version"
+        fi
         
         python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
           --repo erigon \
