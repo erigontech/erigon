@@ -41,6 +41,7 @@ var (
 
 	//state v3
 	noPrune           = EnvBool("NO_PRUNE", false)
+	NoFilesDelete     = EnvBool("NO_FILES_DELETE", false)
 	noMerge           = EnvBool("NO_MERGE", false)
 	discardHistory    = EnvBool("DISCARD_HISTORY", false)
 	discardCommitment = EnvBool("DISCARD_COMMITMENT", false)

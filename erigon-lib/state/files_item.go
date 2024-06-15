@@ -1,6 +1,7 @@
 package state
 
 import (
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"os"
 	"sync/atomic"
 
@@ -88,7 +89,7 @@ func (i *filesItem) closeFilesAndRemove() {
 	if i.decompressor != nil {
 		i.decompressor.Close()
 		// paranoic-mode on: don't delete frozen files
-		if !i.frozen {
+		if !i.frozen && !dbg.NoFilesDelete {
 			if err := os.Remove(i.decompressor.FilePath()); err != nil {
 				log.Trace("remove after close", "err", err, "file", i.decompressor.FileName())
 			}
@@ -101,28 +102,28 @@ func (i *filesItem) closeFilesAndRemove() {
 	if i.index != nil {
 		i.index.Close()
 		// paranoic-mode on: don't delete frozen files
-		if !i.frozen {
+		if !i.frozen && !dbg.NoFilesDelete {
 			if err := os.Remove(i.index.FilePath()); err != nil {
 				log.Trace("remove after close", "err", err, "file", i.index.FileName())
 			}
 		}
 		i.index = nil
 	}
-	if i.bindex != nil {
+	if i.bindex != nil && !dbg.NoFilesDelete {
 		i.bindex.Close()
 		if err := os.Remove(i.bindex.FilePath()); err != nil {
 			log.Trace("remove after close", "err", err, "file", i.bindex.FileName())
 		}
 		i.bindex = nil
 	}
-	if i.bm != nil {
+	if i.bm != nil && !dbg.NoFilesDelete {
 		i.bm.Close()
 		if err := os.Remove(i.bm.FilePath()); err != nil {
 			log.Trace("remove after close", "err", err, "file", i.bm.FileName())
 		}
 		i.bm = nil
 	}
-	if i.existence != nil {
+	if i.existence != nil && !dbg.NoFilesDelete {
 		i.existence.Close()
 		if err := os.Remove(i.existence.FilePath); err != nil {
 			log.Trace("remove after close", "err", err, "file", i.existence.FileName)
