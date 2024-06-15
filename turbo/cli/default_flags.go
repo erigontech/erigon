@@ -105,6 +105,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.SnapStateStopFlag,
 	&utils.DbPageSizeFlag,
 	&utils.DbSizeLimitFlag,
+	&utils.DbWriteMapFlag,
 	&utils.TorrentPortFlag,
 	&utils.TorrentMaxPeersFlag,
 	&utils.TorrentConnsPerFileFlag,
