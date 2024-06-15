@@ -1,6 +1,7 @@
 package state
 
 import (
+	"encoding/binary"
 	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -161,4 +162,37 @@ func GetExecV3PruneProgress(db kv.Getter, prunedTblName string) (pruned []byte, 
 	default:
 		return v[1:], nil
 	}
+}
+
+// SaveExecV3PrunableProgress saves latest pruned key in given table to the database.
+func SaveExecV3PrunableProgress(db kv.Putter, prunableKey []byte, step uint64) error {
+	v := make([]byte, 8)
+	binary.BigEndian.PutUint64(v, step)
+	return db.Put(kv.TblPruningProgress, prunableKey, v)
+}
+
+// SaveExecV3PrunableProgressIfDoesNotExist saves latest pruned key in given table to the database if it does not exist.
+func SaveExecV3PrunableProgressIfDoesNotExist(db kv.GetPut, prunableKey []byte, step uint64) error {
+	var has bool
+	var err error
+	if has, err = db.Has(kv.TblPruningProgress, prunableKey); err != nil {
+		return err
+	}
+	if has {
+		return nil
+	}
+
+	return SaveExecV3PrunableProgress(db, prunableKey, step)
+}
+
+// GetExecV3PrunableProgress retrieves saved progress of given table pruning from the database.
+func GetExecV3PrunableProgress(db kv.Getter, prunableKey []byte) (txNum uint64, err error) {
+	v, err := db.GetOne(kv.TblPruningProgress, prunableKey)
+	if err != nil {
+		return 0, err
+	}
+	if len(v) == 0 {
+		return 0, nil
+	}
+	return binary.BigEndian.Uint64(v), nil
 }

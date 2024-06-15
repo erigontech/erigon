@@ -2,9 +2,10 @@ package commitment
 
 import (
 	"encoding/binary"
+	"testing"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func BenchmarkBranchMerger_Merge(b *testing.B) {

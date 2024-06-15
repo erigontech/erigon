@@ -13,31 +13,31 @@ func TestStageAdd(t *testing.T) {
 
 	//Test Set Stages List
 	d.SetStagesList(stagesListMock)
-	require.Equal(t, d.SyncStatistics().SyncStages, stagesListMock)
+	require.Equal(t, d.GetSyncStages(), stagesListMock)
 
 	//Test adding array of SubStages for Stage
 	d.AddOrUpdateSugStages(subStagesListMock)
-	require.Equal(t, d.SyncStatistics().SyncStages, updatedStagesMock)
+	require.Equal(t, d.GetSyncStages(), updatedStagesMock)
 
 	//Test Set Current Sync Stage Update
 	d.SetCurrentSyncStage(diagnostics.CurrentSyncStage{Stage: "Snapshots"})
-	require.Equal(t, d.SyncStatistics().SyncStages[0].State, diagnostics.Running)
+	require.Equal(t, d.GetSyncStages()[0].State, diagnostics.Running)
 
 	//Test Set Current Sync Stage Update Previous stages to completed state
 	d.SetCurrentSyncStage(diagnostics.CurrentSyncStage{Stage: "BlockHashes"})
-	require.Equal(t, d.SyncStatistics().SyncStages[0].State, diagnostics.Completed)
-	require.Equal(t, d.SyncStatistics().SyncStages[1].State, diagnostics.Running)
-	require.Equal(t, d.SyncStatistics().SyncStages[2].State, diagnostics.Queued)
+	require.Equal(t, d.GetSyncStages()[0].State, diagnostics.Completed)
+	require.Equal(t, d.GetSyncStages()[1].State, diagnostics.Running)
+	require.Equal(t, d.GetSyncStages()[2].State, diagnostics.Queued)
 	d.SetCurrentSyncStage(diagnostics.CurrentSyncStage{Stage: "SnapSendersshots"})
-	require.Equal(t, d.SyncStatistics().SyncStages[0].State, diagnostics.Completed)
-	require.Equal(t, d.SyncStatistics().SyncStages[1].State, diagnostics.Completed)
-	require.Equal(t, d.SyncStatistics().SyncStages[2].State, diagnostics.Running)
+	require.Equal(t, d.GetSyncStages()[0].State, diagnostics.Completed)
+	require.Equal(t, d.GetSyncStages()[1].State, diagnostics.Completed)
+	require.Equal(t, d.GetSyncStages()[2].State, diagnostics.Running)
 
 	//Test Set Current Sync Stage To StageWhich was completed
 	d.SetCurrentSyncStage(diagnostics.CurrentSyncStage{Stage: "Snapshots"})
-	require.Equal(t, d.SyncStatistics().SyncStages[0].State, diagnostics.Running)
-	require.Equal(t, d.SyncStatistics().SyncStages[1].State, diagnostics.Queued)
-	require.Equal(t, d.SyncStatistics().SyncStages[2].State, diagnostics.Queued)
+	require.Equal(t, d.GetSyncStages()[0].State, diagnostics.Running)
+	require.Equal(t, d.GetSyncStages()[1].State, diagnostics.Queued)
+	require.Equal(t, d.GetSyncStages()[2].State, diagnostics.Queued)
 
 	//Test Update SubStage with different state
 	d.AddOrUpdateSugStages(diagnostics.UpdateSyncSubStageList{
@@ -51,26 +51,26 @@ func TestStageAdd(t *testing.T) {
 			},
 		},
 	})
-	require.Equal(t, d.SyncStatistics().SyncStages[0].SubStages[0].State, diagnostics.Running)
+	require.Equal(t, d.GetSyncStages()[0].SubStages[0].State, diagnostics.Running)
 
 	//Test set current SubStage
 	d.SetCurrentSyncStage(diagnostics.CurrentSyncStage{Stage: "Snapshots"})
 	d.SetCurrentSyncSubStage(diagnostics.CurrentSyncSubStage{SubStage: "Download header-chain"})
-	require.Equal(t, d.SyncStatistics().SyncStages[0].SubStages[0].State, diagnostics.Running)
-	require.Equal(t, d.SyncStatistics().SyncStages[0].SubStages[1].State, diagnostics.Queued)
+	require.Equal(t, d.GetSyncStages()[0].SubStages[0].State, diagnostics.Running)
+	require.Equal(t, d.GetSyncStages()[0].SubStages[1].State, diagnostics.Queued)
 	d.SetCurrentSyncSubStage(diagnostics.CurrentSyncSubStage{SubStage: "Download snapshots"})
-	require.Equal(t, d.SyncStatistics().SyncStages[0].SubStages[0].State, diagnostics.Completed)
-	require.Equal(t, d.SyncStatistics().SyncStages[0].SubStages[1].State, diagnostics.Running)
+	require.Equal(t, d.GetSyncStages()[0].SubStages[0].State, diagnostics.Completed)
+	require.Equal(t, d.GetSyncStages()[0].SubStages[1].State, diagnostics.Running)
 
 	//Test Set Current Sync SubStage To Stage Which was completed
 	d.SetCurrentSyncSubStage(diagnostics.CurrentSyncSubStage{SubStage: "Download header-chain"})
-	require.Equal(t, d.SyncStatistics().SyncStages[0].SubStages[0].State, diagnostics.Running)
-	require.Equal(t, d.SyncStatistics().SyncStages[0].SubStages[1].State, diagnostics.Queued)
+	require.Equal(t, d.GetSyncStages()[0].SubStages[0].State, diagnostics.Running)
+	require.Equal(t, d.GetSyncStages()[0].SubStages[1].State, diagnostics.Queued)
 
 	//Test make all subStages completed after stage completed
 	d.SetCurrentSyncStage(diagnostics.CurrentSyncStage{Stage: "BlockHashes"})
-	require.Equal(t, d.SyncStatistics().SyncStages[0].SubStages[0].State, diagnostics.Completed)
-	require.Equal(t, d.SyncStatistics().SyncStages[0].SubStages[1].State, diagnostics.Completed)
+	require.Equal(t, d.GetSyncStages()[0].SubStages[0].State, diagnostics.Completed)
+	require.Equal(t, d.GetSyncStages()[0].SubStages[1].State, diagnostics.Completed)
 }
 
 var (

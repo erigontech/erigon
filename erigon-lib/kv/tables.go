@@ -552,7 +552,8 @@ var (
 	LightClientOptimisticUpdate = []byte("LightClientOptimisticUpdate")
 	LastNewBlockSeen            = []byte("LastNewBlockSeen") // last seen block hash
 
-	StatesProcessingKey = []byte("StatesProcessing")
+	StatesProcessingKey          = []byte("StatesProcessing")
+	MinimumPrunableStepDomainKey = []byte("MinimumPrunableStepDomainKey")
 )
 
 // ChaindataTables - list of all buckets. App will panic if some bucket is not in this list.
@@ -992,6 +993,12 @@ const (
 	TracesFromIdxPos InvertedIdxPos = 2
 	TracesToIdxPos   InvertedIdxPos = 3
 	StandaloneIdxLen uint16         = 4
+)
+
+const (
+	ReceiptsAppendable Appendable = 0
+
+	AppendableLen Appendable = 1
 )
 
 func (iip InvertedIdxPos) String() string {

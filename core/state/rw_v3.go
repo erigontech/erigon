@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon-lib/state"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
@@ -272,62 +271,28 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwi
 		}
 		return nil
 	}
+	fmt.Println(txUnwindTo)
 	stateChanges := etl.NewCollector("", "", etl.NewOldestEntryBuffer(etl.BufferOptimalSize), rs.logger)
 	defer stateChanges.Close()
 	stateChanges.SortAndFlushInBackground(true)
-	if changeset == nil {
-		ttx := tx.(kv.TemporalTx)
-		// todo these updates could be collected during rs.domains.Unwind (as passed collect function eg)
-		{
-			iter, err := ttx.HistoryRange(kv.AccountsHistory, int(txUnwindTo), -1, order.Asc, -1)
-			if err != nil {
-				return err
-			}
-			defer iter.Close()
-			for iter.HasNext() {
-				k, v, err := iter.Next()
-				if err != nil {
-					return err
-				}
-				if err := stateChanges.Collect(k, v); err != nil {
-					return err
-				}
-			}
+
+	accountDiffs := changeset[kv.AccountsDomain]
+	for _, kv := range accountDiffs {
+		if err := stateChanges.Collect(kv.Key[:length.Addr], kv.Value); err != nil {
+			return err
 		}
-		{
-			iter, err := ttx.HistoryRange(kv.StorageHistory, int(txUnwindTo), -1, order.Asc, -1)
-			if err != nil {
-				return err
-			}
-			defer iter.Close()
-			for iter.HasNext() {
-				k, v, err := iter.Next()
-				if err != nil {
-					return err
-				}
-				if err := stateChanges.Collect(k, v); err != nil {
-					return err
-				}
-			}
-		}
-	} else {
-		accountDiffs := changeset[kv.AccountsDomain]
-		for _, kv := range accountDiffs {
-			if err := stateChanges.Collect(kv.Key[:length.Addr], kv.Value); err != nil {
-				return err
-			}
-		}
-		storageDiffs := changeset[kv.StorageDomain]
-		for _, kv := range storageDiffs {
-			if err := stateChanges.Collect(kv.Key, kv.Value); err != nil {
-				return err
-			}
+	}
+	storageDiffs := changeset[kv.StorageDomain]
+	for _, kv := range storageDiffs {
+		if err := stateChanges.Collect(kv.Key, kv.Value); err != nil {
+			return err
 		}
 	}
 
 	if err := stateChanges.Load(tx, "", handle, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
+	fmt.Println(txUnwindTo)
 	if err := rs.domains.Unwind(ctx, tx, blockUnwindTo, txUnwindTo, changeset); err != nil {
 		return err
 	}

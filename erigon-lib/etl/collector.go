@@ -38,6 +38,8 @@ type LoadNextFunc func(originalK, k, v []byte) error
 type LoadFunc func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error
 type simpleLoadFunc func(k, v []byte) error
 
+var NilVal = []byte{0x69}
+
 // Collector performs the job of ETL Transform, but can also be used without "E" (Extract) part
 // as a Collect Transform Load
 type Collector struct {
@@ -234,6 +236,9 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 				return err
 			}
 			return nil
+		}
+		if bytes.Equal(v, NilVal) {
+			v = nil // Append nil with NilVal
 		}
 		if canUseAppend {
 			if isDupSort {
