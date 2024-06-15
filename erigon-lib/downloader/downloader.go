@@ -354,9 +354,9 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 						fileHash := hex.EncodeToString(fileHashBytes)
 
 						if fileHash != download.Hash && fileHash != hash {
-							d.logger.Error("[snapshots] download db mismatch", "file", download.Name, "snapshotLock", download.Hash, "db", hash, "disk", fileHash, "downloaded", *info.Completed)
+							d.logger.Debug("[snapshots] download db mismatch", "file", download.Name, "snapshotLock", download.Hash, "db", hash, "disk", fileHash, "downloaded", *info.Completed)
 						} else {
-							d.logger.Warn("[snapshots] snapshotLock hash does not match completed download", "file", download.Name, "snapshotLock", hash, "download", download.Hash, "downloaded", *info.Completed)
+							d.logger.Debug("[snapshots] snapshotLock hash does not match completed download", "file", download.Name, "snapshotLock", hash, "download", download.Hash, "downloaded", *info.Completed)
 						}
 					}
 				}
