@@ -1517,6 +1517,7 @@ func (dt *DomainRoTx) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, 
 		dt.d.logger.Error("get domain pruning progress", "name", dt.d.filenameBase, "error", err)
 		return false, maxStepToPrune
 	}
+	fmt.Println(sm, untilStep, maxStepToPrune)
 
 	delta := float64(max(maxStepToPrune, sm) - min(maxStepToPrune, sm)) // maxStep could be 0
 	switch dt.d.filenameBase {
@@ -1626,7 +1627,7 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 
 	var k []byte
 	if prunedKey != nil {
-		_, _, err = valsCursor.Seek(prunedKey)
+		k, _, err = valsCursor.Seek(prunedKey)
 		if err != nil {
 			return stat, err
 		}
@@ -1636,7 +1637,6 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 	if err != nil {
 		return nil, err
 	}
-
 	for ; k != nil; k, _, err = valsCursor.Next() {
 		if err != nil {
 			return stat, fmt.Errorf("iterate over %s domain keys: %w", dt.d.filenameBase, err)
@@ -1654,7 +1654,6 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 			return stat, nil
 		}
 		limit--
-
 		if err := valsCursor.DeleteCurrent(); err != nil {
 			return stat, err
 		}
@@ -1675,8 +1674,8 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 	if err := SaveExecV3PruneProgress(rwTx, dt.d.valsTable, nil); err != nil {
 		return stat, fmt.Errorf("save domain pruning progress: %s, %w", dt.d.filenameBase, err)
 	}
-	if err := rwTx.Delete(kv.TblPruningProgress, kv.MinimumPrunableStepDomainKey); err != nil {
-		return stat, fmt.Errorf("delete domain pruning progress: %s, %w", dt.d.filenameBase, err)
+	if err := SaveExecV3PrunableProgress(rwTx, kv.MinimumPrunableStepDomainKey, step); err != nil {
+		return stat, err
 	}
 	mxPruneTookDomain.ObserveDuration(st)
 	return stat, nil

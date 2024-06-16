@@ -1346,6 +1346,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	d.historyLargeValues = false
 	d.History.compression = CompressKeys | CompressVals
 	d.compression = CompressKeys | CompressVals
+	d.filenameBase = kv.FileCommitmentDomain
 
 	dc := d.BeginFilesRo()
 	defer d.Close()
@@ -1416,6 +1417,7 @@ func TestDomain_CanPruneAfterAggregation(t *testing.T) {
 	d.historyLargeValues = false
 	d.History.compression = CompressKeys | CompressVals
 	d.compression = CompressKeys | CompressVals
+	d.filenameBase = kv.FileCommitmentDomain
 
 	dc := d.BeginFilesRo()
 	defer dc.Close()
@@ -1427,7 +1429,7 @@ func TestDomain_CanPruneAfterAggregation(t *testing.T) {
 	totalTx := uint64(5000)
 	keyTxsLimit := uint64(50)
 	keyLimit := uint64(200)
-
+	SaveExecV3PrunableProgress(tx, kv.MinimumPrunableStepDomainKey, 0)
 	// put some kvs
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	for key, updates := range data {
@@ -1520,6 +1522,9 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	totalTx := uint64(5000)
 	keyTxsLimit := uint64(50)
 	keyLimit := uint64(200)
+
+	// Key's lengths are variable so lookup should be in commitment mode.
+	d.filenameBase = kv.FileCommitmentDomain
 
 	// put some kvs
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)

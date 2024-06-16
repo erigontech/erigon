@@ -3,6 +3,7 @@ package state
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/seg"
@@ -192,7 +193,7 @@ func GetExecV3PrunableProgress(db kv.Getter, prunableKey []byte) (txNum uint64, 
 		return 0, err
 	}
 	if len(v) == 0 {
-		return 0, nil
+		return math.MaxUint64, nil
 	}
 	return binary.BigEndian.Uint64(v), nil
 }
