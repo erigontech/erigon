@@ -102,7 +102,7 @@ jobs:
           --commit $(git rev-parse HEAD) \
           --branch ${{ github.ref_name }} \
           --test_name clean-exit-block-downloading \
-          --chain $CHAIN \ 
+          --chain $CHAIN \
           --runner ${{ runner.name }} \
           --db_version $db_version \
           --outcome $TEST_RESULT \
