@@ -667,7 +667,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 	if k, v, err = valsCursor.Seek(prefix); err != nil {
 		return err
 	}
-	if k != nil && bytes.HasPrefix(k[:len(k)-8], prefix) {
+	if len(k) > 0 && bytes.HasPrefix(k[:len(k)-8], prefix) {
 		step := ^binary.BigEndian.Uint64(k[len(k)-8:])
 		endTxNum := step * sd.StepSize() // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
 		if haveRamUpdates && endTxNum >= sd.txNum {
@@ -748,7 +748,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 					}
 				}
 
-				if k != nil && bytes.HasPrefix(k[:len(k)-8], prefix) {
+				if len(k) > 0 && bytes.HasPrefix(k[:len(k)-8], prefix) {
 					ci1.key = common.Copy(k[:len(k)-8])
 					step := ^binary.BigEndian.Uint64(k[len(k)-8:])
 					endTxNum := step * sd.StepSize() // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
