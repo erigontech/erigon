@@ -429,7 +429,7 @@ func (w *domainBufferedWriter) DeleteWithPrev(key1, key2, prev []byte, prevStep 
 	if w.diff != nil {
 		w.diff.DomainUpdate(key1, key2, prev, w.stepBytes[:], prevStep)
 	}
-	return w.addValue(key1, key2, etl.NilVal)
+	return w.addValue(key1, key2, nil)
 }
 
 func (w *domainBufferedWriter) SetTxNum(v uint64) {
@@ -504,7 +504,7 @@ func (w *domainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 
-	if err := w.values.Load(tx, w.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := w.values.Load(tx, w.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 		return err
 	}
 	w.close()
@@ -1516,7 +1516,6 @@ func (dt *DomainRoTx) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, 
 		dt.d.logger.Error("get domain pruning progress", "name", dt.d.filenameBase, "error", err)
 		return false, maxStepToPrune
 	}
-	fmt.Println(sm, untilStep, maxStepToPrune)
 
 	delta := float64(max(maxStepToPrune, sm) - min(maxStepToPrune, sm)) // maxStep could be 0
 	switch dt.d.filenameBase {
@@ -1721,6 +1720,8 @@ func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 		return err
 	}
 	if key != nil && (hi.to == nil || bytes.Compare(key[:len(key)-8], hi.to) < 0) {
+		fmt.Println("O", key, value)
+
 		k := key[:len(key)-8]
 		stepBytes := key[len(key)-8:]
 		step := ^binary.BigEndian.Uint64(stepBytes)
@@ -1753,6 +1754,7 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 	for hi.h.Len() > 0 {
 		lastKey := (*hi.h)[0].key
 		lastVal := (*hi.h)[0].val
+		fmt.Println("START", lastKey, lastVal, (*hi.h)[0].t)
 
 		// Advance all the items that have this key (including the top)
 		for hi.h.Len() > 0 && bytes.Equal((*hi.h)[0].key, lastKey) {
@@ -1772,18 +1774,23 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 				if err != nil {
 					return err
 				}
+				fmt.Println("DBBEGIN", initial, v)
 				var k []byte
 				for initial != nil && (k == nil || bytes.Equal(initial[:len(initial)-8], k[:len(k)-8])) {
 					k, v, err = ci1.c.Next()
 					if err != nil {
 						return err
 					}
+					fmt.Println("DB", k, v)
 					if k == nil {
 						break
 					}
 				}
+				fmt.Println("DBEND", k, v)
+				fmt.Println(hi.to, bytes.Compare(k[:len(k)-8], hi.to) < 0)
 
-				if k != nil && (hi.to == nil || bytes.Compare(k[len(k)-8:], hi.to) < 0) {
+				if k != nil && (hi.to == nil || bytes.Compare(k[:len(k)-8], hi.to) < 0) {
+					fmt.Println("LOL")
 					stepBytes := k[len(k)-8:]
 					k = k[:len(k)-8]
 					ci1.key = common.Copy(k)
@@ -1797,10 +1804,12 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 			}
 		}
 		if len(lastVal) > 0 {
+			fmt.Println("ADD", lastKey, lastVal)
 			hi.nextKey, hi.nextVal = lastKey, lastVal
 			return nil // founc
 		}
 	}
+	fmt.Println("STOP", hi.nextKey)
 	hi.nextKey = nil
 	return nil
 }
@@ -1818,6 +1827,7 @@ func (hi *DomainLatestIterFile) Next() ([]byte, []byte, error) {
 	if err := hi.advanceInFiles(); err != nil {
 		return nil, nil, err
 	}
+	fmt.Println("N", hi.kBackup, hi.vBackup)
 	return hi.kBackup, hi.vBackup, nil
 }
 

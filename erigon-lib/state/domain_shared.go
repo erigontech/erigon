@@ -540,6 +540,7 @@ func (sd *SharedDomains) writeAccountStorage(addr, loc []byte, value, preVal []b
 	sd.put(kv.StorageDomain, compositeS, value)
 	return sd.dWriter[kv.StorageDomain].PutWithPrev(composite, nil, value, preVal, prevStep)
 }
+
 func (sd *SharedDomains) delAccountStorage(addr, loc []byte, preVal []byte, prevStep uint64) error {
 	composite := addr
 	if loc != nil { // if caller passed already `composite` key, then just use it. otherwise join parts

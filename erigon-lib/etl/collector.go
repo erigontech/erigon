@@ -38,8 +38,6 @@ type LoadNextFunc func(originalK, k, v []byte) error
 type LoadFunc func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error
 type simpleLoadFunc func(k, v []byte) error
 
-var NilVal = []byte{0x69}
-
 // Collector performs the job of ETL Transform, but can also be used without "E" (Extract) part
 // as a Collect Transform Load
 type Collector struct {
@@ -228,7 +226,7 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 		isNil := (c.bufType == SortableSliceBuffer && v == nil) ||
 			(c.bufType == SortableAppendBuffer && len(v) == 0) || //backward compatibility
 			(c.bufType == SortableOldestAppearedBuffer && len(v) == 0)
-		if isNil {
+		if isNil && !args.EmptyVals {
 			if canUseAppend {
 				return nil // nothing to delete after end of bucket
 			}
@@ -237,8 +235,8 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 			}
 			return nil
 		}
-		if bytes.Equal(v, NilVal) {
-			v = nil // Append nil with NilVal
+		if len(v) == 0 && args.EmptyVals {
+			v = nil // Append nil
 		}
 		if canUseAppend {
 			if isDupSort {
