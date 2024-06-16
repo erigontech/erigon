@@ -668,7 +668,6 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 	}
 	if k != nil && bytes.HasPrefix(k[:len(k)-8], prefix) {
 		step := ^binary.BigEndian.Uint64(k[len(k)-8:])
-		fmt.Println(step, binary.BigEndian.Uint64(k[len(k)-8:]))
 		endTxNum := step * sd.StepSize() // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
 		if haveRamUpdates && endTxNum >= sd.txNum {
 			return fmt.Errorf("probably you didn't set SharedDomains.SetTxNum(). ram must be ahead of db: %d, %d", sd.txNum, endTxNum)
