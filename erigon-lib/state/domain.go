@@ -1352,61 +1352,49 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 		return nil, 0, false, err
 	}
 
-	isCommitment := dt.d.filenameBase == kv.FileCommitmentDomain
 	var fullkey, v []byte
-	if !isCommitment {
-		fullkey, v, err = valsC.Seek(key)
+
+	// This is hell. i am sorry.
+	keyCopy := append(dt.valBuf[:0], key...)
+	keyWithStep := binary.BigEndian.AppendUint64(keyCopy, ^uint64(0))
+	var k []byte
+
+	k, v, err = valsC.Seek(keyWithStep)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	if k == nil {
+		k, v, err = valsC.Last()
 		if err != nil {
 			return nil, 0, false, err
 		}
-		if len(fullkey) == 0 {
-			return nil, 0, false, nil // This key is not in DB
-		}
-		if !bytes.Equal(fullkey[:len(fullkey)-8], key) {
-			return nil, 0, false, nil // This key is not in DB
-		}
+	}
+	if k == nil {
+		return nil, 0, false, nil
+	}
+	var prevK, prevV []byte
+	if bytes.Equal(k[:len(k)-8], key) {
+		prevK, prevV = k, v
 	} else {
-		// This is hell. i am sorry.
-		keyCopy := append(dt.valBuf[:0], key...)
-		keyWithStep := binary.BigEndian.AppendUint64(keyCopy, ^uint64(0))
-		var k []byte
-		k, v, err = valsC.Seek(keyWithStep)
+		prevK, prevV, err = valsC.Prev()
 		if err != nil {
 			return nil, 0, false, err
 		}
-		if k == nil {
-			k, v, err = valsC.Last()
-			if err != nil {
-				return nil, 0, false, err
-			}
-		}
-		if k == nil {
+		if prevK == nil || !bytes.Equal(prevK[:len(prevK)-8], key) {
 			return nil, 0, false, nil
 		}
-		var prevK, prevV []byte
-		if bytes.Equal(k[:len(k)-8], key) {
-			prevK, prevV = k, v
-		} else {
-			prevK, prevV, err = valsC.Prev()
-			if err != nil {
-				return nil, 0, false, err
-			}
-			if prevK == nil || !bytes.Equal(prevK[:len(prevK)-8], key) {
-				return nil, 0, false, nil
-			}
-		}
-		for k, v, err = valsC.Prev(); k != nil; k, v, err = valsC.Prev() {
-			if err != nil {
-				return nil, 0, false, err
-			}
-			if !bytes.Equal(k[:len(k)-8], key) {
-				break
-			}
-			prevK, prevV = k, v
-		}
-		fullkey = prevK
-		v = prevV
 	}
+	for k, v, err = valsC.Prev(); k != nil; k, v, err = valsC.Prev() {
+		if err != nil {
+			return nil, 0, false, err
+		}
+		if !bytes.Equal(k[:len(k)-8], key) {
+			break
+		}
+		prevK, prevV = k, v
+	}
+	fullkey = prevK
+	v = prevV
 
 	foundInvStep := fullkey[len(fullkey)-8:]
 	foundStep := ^binary.BigEndian.Uint64(foundInvStep)
