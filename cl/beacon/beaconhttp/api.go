@@ -105,7 +105,7 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 		switch {
 		case contentType == "*/*", contentType == "", strings.Contains(contentType, "text/html"), strings.Contains(contentType, "application/json"):
 			if !isNil(ans) {
-				w.Header().Add("content-type", "application/json")
+				w.Header().Set("Content-Type", "application/json")
 				err := json.NewEncoder(w).Encode(ans)
 				if err != nil {
 					// this error is fatal, log to console
@@ -120,6 +120,7 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 				NewEndpointError(http.StatusBadRequest, ErrorSszNotSupported).WriteTo(w)
 				return
 			}
+			w.Header().Set("Content-Type", "application/octet-stream")
 			// TODO: we should probably figure out some way to stream this in the future :)
 			encoded, err := sszMarshaler.EncodeSSZ(nil)
 			if err != nil {
