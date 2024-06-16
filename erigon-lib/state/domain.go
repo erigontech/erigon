@@ -1785,7 +1785,7 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 					}
 				}
 
-				if k != nil && (hi.to == nil || bytes.Compare(k[:len(k)-8], hi.to) < 0) {
+				if len(k) > 0 && (hi.to == nil || bytes.Compare(k[:len(k)-8], hi.to) < 0) {
 					stepBytes := k[len(k)-8:]
 					k = k[:len(k)-8]
 					ci1.key = common.Copy(k)
