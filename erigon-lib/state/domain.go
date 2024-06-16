@@ -26,6 +26,7 @@ import (
 	"math"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -808,6 +809,10 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 	}
 	defer valsCursor.Close()
 
+	kvs := []struct {
+		k, v []byte
+	}{}
+
 	for k, v, err := valsCursor.First(); k != nil; k, v, err = valsCursor.Next() {
 		if err != nil {
 			return coll, err
@@ -817,11 +822,20 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 			continue
 		}
 
-		if err = comp.AddWord(k[:len(k)-8]); err != nil {
-			return coll, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, k, err)
+		kvs = append(kvs, struct {
+			k, v []byte
+		}{common.Copy(k[:len(k)-8]), common.Copy(v)})
+	}
+
+	sort.Slice(kvs, func(i, j int) bool {
+		return bytes.Compare(kvs[i].k, kvs[j].k) < 0
+	})
+	for _, kv := range kvs {
+		if err = comp.AddWord(kv.k); err != nil {
+			return coll, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, kv.k, err)
 		}
-		if err = comp.AddWord(v); err != nil {
-			return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, k, v, err)
+		if err = comp.AddWord(kv.v); err != nil {
+			return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, kv.k, kv.v, err)
 		}
 	}
 
