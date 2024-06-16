@@ -1352,51 +1352,63 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 		return nil, 0, false, err
 	}
 
+	isCommitment := dt.d.filenameBase == kv.FileCommitmentDomain
 	var fullkey, v []byte
-
-	// This is hell. i am sorry.
-	keyCopy := append(dt.valBuf[:0], key...)
-	keyWithStep := binary.BigEndian.AppendUint64(keyCopy, ^uint64(0))
-	var k []byte
-
-	k, v, err = valsC.Seek(keyWithStep)
-	if err != nil {
-		return nil, 0, false, err
-	}
-	if k == nil {
-		k, v, err = valsC.Last()
+	if !isCommitment {
+		fullkey, v, err = valsC.Seek(key)
 		if err != nil {
 			return nil, 0, false, err
 		}
-	}
-	if k == nil {
-		fmt.Println("nil1", "key", key, "k", k)
-		return nil, 0, false, nil
-	}
-	var prevK, prevV []byte
-	if bytes.Equal(k[:len(k)-8], key) {
-		prevK, prevV = k, v
+		if len(fullkey) == 0 {
+			return nil, 0, false, nil // This key is not in DB
+		}
+		if !bytes.Equal(fullkey[:len(fullkey)-8], key) {
+			return nil, 0, false, nil // This key is not in DB
+		}
 	} else {
-		prevK, prevV, err = valsC.Prev()
+		// This is hell. i am sorry.
+		keyCopy := append(dt.valBuf[:0], key...)
+		keyWithStep := binary.BigEndian.AppendUint64(keyCopy, ^uint64(0))
+		var k []byte
+		k, v, err = valsC.Seek(keyWithStep)
 		if err != nil {
 			return nil, 0, false, err
 		}
-		if prevK == nil || !bytes.Equal(prevK[:len(prevK)-8], key) {
-			fmt.Println("nil2", "key", key, "k", k, "prevK", prevK)
+		if k == nil {
+			k, v, err = valsC.Last()
+			if err != nil {
+				return nil, 0, false, err
+			}
+		}
+		if k == nil {
 			return nil, 0, false, nil
 		}
-	}
-	for k, v, err = valsC.Prev(); k != nil; k, v, err = valsC.Prev() {
-		if err != nil {
-			return nil, 0, false, err
+		var prevK, prevV []byte
+		if bytes.Equal(k[:len(k)-8], key) {
+			prevK, prevV = k, v
+		} else {
+			for prevK, prevV, err = valsC.Prev(); err != nil && prevK != nil && len(key) < len(prevK)-8; {
+				prevK, prevV, err = valsC.Prev()
+			}
+			if err != nil {
+				return nil, 0, false, err
+			}
+			if prevK == nil || !bytes.Equal(prevK[:len(prevK)-8], key) {
+				return nil, 0, false, nil
+			}
 		}
-		if !bytes.Equal(k[:len(k)-8], key) {
-			break
+		for k, v, err = valsC.Prev(); k != nil; k, v, err = valsC.Prev() {
+			if err != nil {
+				return nil, 0, false, err
+			}
+			if !bytes.Equal(k[:len(k)-8], key) {
+				break
+			}
+			prevK, prevV = k, v
 		}
-		prevK, prevV = k, v
+		fullkey = prevK
+		v = prevV
 	}
-	fullkey = prevK
-	v = prevV
 
 	foundInvStep := fullkey[len(fullkey)-8:]
 	foundStep := ^binary.BigEndian.Uint64(foundInvStep)
@@ -1404,7 +1416,7 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 	if LastTxNumOfStep(foundStep, dt.d.aggregationStep) >= dt.maxTxNumInDomainFiles(false) {
 		return v, foundStep, true, nil
 	}
-	fmt.Println("test!")
+
 	return nil, 0, false, nil
 }
 
