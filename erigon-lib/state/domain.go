@@ -1370,6 +1370,7 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 		}
 	}
 	if k == nil {
+		fmt.Println("nil1", "key", key, "k", k)
 		return nil, 0, false, nil
 	}
 	var prevK, prevV []byte
@@ -1381,6 +1382,7 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 			return nil, 0, false, err
 		}
 		if prevK == nil || !bytes.Equal(prevK[:len(prevK)-8], key) {
+			fmt.Println("nil2", "key", key, "k", k, "prevK", prevK)
 			return nil, 0, false, nil
 		}
 	}
@@ -1402,7 +1404,7 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 	if LastTxNumOfStep(foundStep, dt.d.aggregationStep) >= dt.maxTxNumInDomainFiles(false) {
 		return v, foundStep, true, nil
 	}
-
+	fmt.Println("test!")
 	return nil, 0, false, nil
 }
 
