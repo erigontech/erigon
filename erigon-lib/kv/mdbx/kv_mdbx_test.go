@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -166,6 +167,15 @@ func TestRangeDupSort(t *testing.T) {
 	t.Run("Desc", func(t *testing.T) {
 		_, tx, _ := BaseCase(t)
 
+		{
+			it, err := tx.RangeDupSort("Table", []byte("key1"), []byte("value1"), []byte("value0"), order.Desc, -1)
+			require.NoError(t, err)
+			_, vals, err := iter.ToArrayKV(it)
+			require.NoError(t, err)
+			require.Equal(t, 2, len(vals))
+
+			fmt.Printf("vals: %s\n", vals)
+		}
 		//[from, to)
 		it, err := tx.RangeDupSort("Table", []byte("key1"), nil, nil, order.Desc, -1)
 		require.NoError(t, err)
