@@ -1774,23 +1774,18 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 				if err != nil {
 					return err
 				}
-				fmt.Println("DBBEGIN", initial, v)
 				var k []byte
 				for initial != nil && (k == nil || bytes.Equal(initial[:len(initial)-8], k[:len(k)-8])) {
 					k, v, err = ci1.c.Next()
 					if err != nil {
 						return err
 					}
-					fmt.Println("DB", k, v)
 					if k == nil {
 						break
 					}
 				}
-				fmt.Println("DBEND", k, v)
-				fmt.Println(hi.to, bytes.Compare(k[:len(k)-8], hi.to) < 0)
 
 				if k != nil && (hi.to == nil || bytes.Compare(k[:len(k)-8], hi.to) < 0) {
-					fmt.Println("LOL")
 					stepBytes := k[len(k)-8:]
 					k = k[:len(k)-8]
 					ci1.key = common.Copy(k)
@@ -1804,12 +1799,10 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 			}
 		}
 		if len(lastVal) > 0 {
-			fmt.Println("ADD", lastKey, lastVal)
 			hi.nextKey, hi.nextVal = lastKey, lastVal
 			return nil // founc
 		}
 	}
-	fmt.Println("STOP", hi.nextKey)
 	hi.nextKey = nil
 	return nil
 }
