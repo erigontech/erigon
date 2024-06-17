@@ -52,6 +52,21 @@ func InitStagesFromList(list []string) []SyncStage {
 	return stages
 }
 
+func InitSubStagesFromList(list []string) []SyncSubStage {
+	subStages := make([]SyncSubStage, 0, len(list))
+
+	for _, subStage := range list {
+		subStages = append(subStages,
+			SyncSubStage{
+				ID:    subStage,
+				State: Queued,
+			},
+		)
+	}
+
+	return subStages
+}
+
 func CalculateTime(amountLeft, rate uint64) string {
 	if rate == 0 {
 		return "999hrs:99m"
