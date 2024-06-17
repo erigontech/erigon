@@ -910,7 +910,7 @@ func (iit *InvertedIndexRoTx) DebugEFAllValuesAreInRange(ctx context.Context) er
 				if len(shortK) > 8 {
 					shortK = shortK[:8]
 				}
-				log.Info(fmt.Sprintf("[integrity] progress EFAllValuesAreInRange: %s, prefix=%x", g.FileName(), k))
+				log.Info(fmt.Sprintf("[integrity] progress EFAllValuesAreInRange: %s, prefix=%x", g.FileName(), shortK))
 			default:
 			}
 		}
