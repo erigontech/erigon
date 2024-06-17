@@ -26,6 +26,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
+	"github.com/ledgerwatch/erigon/core/tracing"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -270,7 +271,7 @@ func (so *stateObject) printTrie() {
 
 // AddBalance adds amount to so's balance.
 // It is used to add funds to the destination account of a transfer.
-func (so *stateObject) AddBalance(amount *uint256.Int) {
+func (so *stateObject) AddBalance(amount *uint256.Int, reason tracing.BalanceChangeReason) {
 	// EIP161: We must check emptiness for the objects such that the account
 	// clearing (0,0,0 objects) can take effect.
 	if amount.IsZero() {
@@ -281,19 +282,19 @@ func (so *stateObject) AddBalance(amount *uint256.Int) {
 		return
 	}
 
-	so.SetBalance(new(uint256.Int).Add(so.Balance(), amount))
+	so.SetBalance(new(uint256.Int).Add(so.Balance(), amount), reason)
 }
 
 // SubBalance removes amount from so's balance.
 // It is used to remove funds from the origin account of a transfer.
-func (so *stateObject) SubBalance(amount *uint256.Int) {
+func (so *stateObject) SubBalance(amount *uint256.Int, reason tracing.BalanceChangeReason) {
 	if amount.IsZero() {
 		return
 	}
-	so.SetBalance(new(uint256.Int).Sub(so.Balance(), amount))
+	so.SetBalance(new(uint256.Int).Sub(so.Balance(), amount), reason)
 }
 
-func (so *stateObject) SetBalance(amount *uint256.Int) {
+func (so *stateObject) SetBalance(amount *uint256.Int, reason tracing.BalanceChangeReason) {
 	so.db.journal.append(balanceChange{
 		account: &so.address,
 		prev:    so.data.Balance,

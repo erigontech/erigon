@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/tracing"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -144,7 +145,14 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		return nil, nil, nil, err
 	}
 	for _, r := range rewards {
-		state.AddBalance(r.Beneficiary, &r.Amount)
+		switch r.Kind {
+		case consensus.RewardAuthor:
+			state.AddBalance(r.Beneficiary, &r.Amount, tracing.BalanceIncreaseRewardMineBlock)
+		case consensus.RewardUncle:
+			state.AddBalance(r.Beneficiary, &r.Amount, tracing.BalanceIncreaseRewardMineUncle)
+		default:
+			state.AddBalance(r.Beneficiary, &r.Amount, tracing.BalanceChangeUnspecified)
+		}
 	}
 
 	if withdrawals != nil {
@@ -155,7 +163,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		} else {
 			for _, w := range withdrawals {
 				amountInWei := new(uint256.Int).Mul(uint256.NewInt(w.Amount), uint256.NewInt(params.GWei))
-				state.AddBalance(w.Address, amountInWei)
+				state.AddBalance(w.Address, amountInWei, tracing.BalanceIncreaseWithdrawal)
 			}
 		}
 	}
