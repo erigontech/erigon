@@ -18,6 +18,7 @@ package runtime
 
 import (
 	"github.com/ledgerwatch/erigon/core/vm/runtime"
+	"os"
 )
 
 // Fuzz is the basic entry point for the go-fuzz tool
@@ -27,7 +28,7 @@ import (
 func Fuzz(input []byte) int {
 	_, _, err := runtime.Execute(input, input, &runtime.Config{
 		GasLimit: 12000000,
-	})
+	}, os.TempDir())
 	// invalid opcode
 	if err != nil && len(err.Error()) > 6 && err.Error()[:7] == "invalid" {
 		return 0
