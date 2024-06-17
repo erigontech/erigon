@@ -116,7 +116,7 @@ func setDefaults(cfg *Config) {
 //
 // Execute sets up an in-memory, temporary, environment for the execution of
 // the given code. It makes sure that it's restored to its original state afterwards.
-func Execute(code, input []byte, cfg *Config, bn uint64) ([]byte, *state.IntraBlockState, error) {
+func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.IntraBlockState, error) {
 	if cfg == nil {
 		cfg = new(Config)
 		setDefaults(cfg)
@@ -126,12 +126,9 @@ func Execute(code, input []byte, cfg *Config, bn uint64) ([]byte, *state.IntraBl
 	var tx kv.RwTx
 	var err error
 	if !externalState {
-		tmp := filepath.Join(os.TempDir(), "execute-vm")
-		defer os.RemoveAll(tmp) //nolint
-
-		db := memdb.NewStateDB(tmp)
+		db := memdb.NewStateDB(tempdir)
 		defer db.Close()
-		agg, err := state3.NewAggregator(context.Background(), datadir.New(tmp), config3.HistoryV3AggregationStep, db, log.New())
+		agg, err := state3.NewAggregator(context.Background(), datadir.New(tempdir), config3.HistoryV3AggregationStep, db, log.New())
 		if err != nil {
 			return nil, nil, err
 		}
