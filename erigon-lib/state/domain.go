@@ -1763,7 +1763,7 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		return stat, fmt.Errorf("save domain pruning progress: %s, %w", dt.d.filenameBase, err)
 	}
 	fmt.Println("SaveExecV3PruneProgress", dt.d.valsTable, step+1)
-	if err := SaveExecV3PrunableProgress(rwTx, kv.MinimumPrunableStepDomainKey, step+1); err != nil {
+	if err := SaveExecV3PrunableProgress(rwTx, []byte(dt.d.valsTable), step+1); err != nil {
 		return stat, err
 	}
 	mxPruneTookDomain.ObserveDuration(st)
