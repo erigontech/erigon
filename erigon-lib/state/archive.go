@@ -173,17 +173,23 @@ func SaveExecV3PrunableProgress(db kv.Putter, prunableKey []byte, step uint64) e
 }
 
 // SaveExecV3PrunableProgressIfDoesNotExist saves latest pruned key in given table to the database if it does not exist.
-func SaveExecV3PrunableProgressIfDoesNotExist(db kv.GetPut, prunableKey []byte, step uint64) error {
+func SaveExecV3PrunableProgressIfDoesNotExist(db kv.GetPut, step uint64) error {
 	var has bool
 	var err error
-	if has, err = db.Has(kv.TblPruningProgress, prunableKey); err != nil {
-		return err
-	}
-	if has {
-		return nil
-	}
+	tbls := []string{kv.TblAccountVals, kv.TblStorageVals, kv.TblCodeVals, kv.TblCommitmentVals}
+	for _, tbl := range tbls {
+		if has, err = db.Has(kv.TblPruningProgress, append(kv.MinimumPrunableStepDomainKey, tbl...)); err != nil {
+			return err
+		}
+		if has {
+			continue
+		}
 
-	return SaveExecV3PrunableProgress(db, prunableKey, step)
+		if err := SaveExecV3PrunableProgress(db, []byte(tbl), step); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // GetExecV3PrunableProgress retrieves saved progress of given table pruning from the database.
