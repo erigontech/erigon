@@ -501,7 +501,7 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 	db, h := filledHistoryValues(t, true, values, log.New())
 	defer db.Close()
 	defer h.Close()
-	h.keepRecentTxInDB = 900 // should be ignored since files are built
+	h.keepRecentTxnInDB = 900 // should be ignored since files are built
 	t.Logf("step=%d\n", h.aggregationStep)
 
 	collateAndMergeHistory(t, db, h, 500, false)
