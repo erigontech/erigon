@@ -96,7 +96,7 @@ func TestEVM(t *testing.T) {
 		byte(vm.ORIGIN),
 		byte(vm.BLOCKHASH),
 		byte(vm.COINBASE),
-	}, nil, nil, 0); err != nil {
+	}, nil, nil, t.TempDir()); err != nil {
 		t.Fatal("didn't expect error", err)
 	}
 }
@@ -110,7 +110,7 @@ func TestExecute(t *testing.T) {
 		byte(vm.PUSH1), 32,
 		byte(vm.PUSH1), 0,
 		byte(vm.RETURN),
-	}, nil, nil, 0)
+	}, nil, nil, t.TempDir())
 	if err != nil {
 		t.Fatal("didn't expect error", err)
 	}
@@ -202,13 +202,14 @@ func BenchmarkCall(b *testing.B) {
 	cfg.w = state.NewWriterV4(sd)
 	cfg.State = state.New(cfg.r)
 
+	tmpdir := b.TempDir()
 	cfg.Debug = true
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for j := 0; j < 400; j++ {
-			_, _, _ = Execute(code, cpurchase, cfg, 0)
-			_, _, _ = Execute(code, creceived, cfg, 0)
-			_, _, _ = Execute(code, refund, cfg, 0)
+			_, _, _ = Execute(code, cpurchase, cfg, tmpdir)
+			_, _, _ = Execute(code, creceived, cfg, tmpdir)
+			_, _, _ = Execute(code, refund, cfg, tmpdir)
 		}
 	}
 }
@@ -406,7 +407,7 @@ func TestBlockhash(t *testing.T) {
 	}
 	setDefaults(cfg)
 	cfg.ChainConfig.PragueTime = big.NewInt(1)
-	ret, _, err := Execute(data, input, cfg, header.Number.Uint64())
+	ret, _, err := Execute(data, input, cfg, t.TempDir())
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -496,7 +497,7 @@ func TestBlockHashEip2935(t *testing.T) {
 	cfg.State.CreateAccount(params.HistoryStorageAddress, true)
 	misc.StoreBlockHashesEip2935(header, cfg.State, cfg.ChainConfig, &FakeChainHeaderReader{})
 
-	ret, _, err := Execute(data, input, cfg, header.Number.Uint64())
+	ret, _, err := Execute(data, input, cfg, t.TempDir())
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -692,6 +693,7 @@ func BenchmarkSimpleLoop(b *testing.B) {
 // EIP-2929 about gas repricings
 func TestEip2929Cases(t *testing.T) {
 
+	tmpdir := t.TempDir()
 	id := 1
 	prettyPrint := func(comment string, code []byte) {
 
@@ -719,7 +721,7 @@ func TestEip2929Cases(t *testing.T) {
 		}
 		setDefaults(cfg)
 		//nolint:errcheck
-		Execute(code, nil, cfg, 0)
+		Execute(code, nil, cfg, tmpdir)
 	}
 
 	{ // First eip testcase
