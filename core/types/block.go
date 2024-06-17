@@ -642,7 +642,7 @@ type RawBody struct {
 
 type BodyForStorage struct {
 	BaseTxId    uint64
-	TxAmount    uint32
+	TxCount     uint32
 	Uncles      []*Header
 	Withdrawals []*Withdrawal
 	Requests    Requests
@@ -812,10 +812,10 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 
 func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen, requestsLen int) {
 	baseTxIdLen := 1 + rlp.IntLenExcludingHead(bfs.BaseTxId)
-	txAmountLen := 1 + rlp.IntLenExcludingHead(uint64(bfs.TxAmount))
+	txCountLen := 1 + rlp.IntLenExcludingHead(uint64(bfs.TxCount))
 
 	payloadSize += baseTxIdLen
-	payloadSize += txAmountLen
+	payloadSize += txCountLen
 
 	// size of Uncles
 	unclesLen += encodingSizeGeneric(bfs.Uncles)
@@ -850,8 +850,8 @@ func (bfs BodyForStorage) EncodeRLP(w io.Writer) error {
 		return err
 	}
 
-	// encode TxAmount
-	if err := rlp.Encode(w, bfs.TxAmount); err != nil {
+	// encode TxCount
+	if err := rlp.Encode(w, bfs.TxCount); err != nil {
 		return err
 	}
 
@@ -883,8 +883,8 @@ func (bfs *BodyForStorage) DecodeRLP(s *rlp.Stream) error {
 	if err = s.Decode(&bfs.BaseTxId); err != nil {
 		return err
 	}
-	// decode TxAmount
-	if err = s.Decode(&bfs.TxAmount); err != nil {
+	// decode TxCount
+	if err = s.Decode(&bfs.TxCount); err != nil {
 		return err
 	}
 	// decode Uncles
@@ -1496,18 +1496,18 @@ func (b *Block) Hash() libcommon.Hash {
 
 type Blocks []*Block
 
-func DecodeOnlyTxMetadataFromBody(payload []byte) (baseTxId uint64, txAmount uint32, err error) {
+func DecodeOnlyTxMetadataFromBody(payload []byte) (baseTxId uint64, txCount uint32, err error) {
 	pos, _, err := rlp2.List(payload, 0)
 	if err != nil {
-		return baseTxId, txAmount, err
+		return baseTxId, txCount, err
 	}
 	pos, baseTxId, err = rlp2.U64(payload, pos)
 	if err != nil {
-		return baseTxId, txAmount, err
+		return baseTxId, txCount, err
 	}
-	_, txAmount, err = rlp2.U32(payload, pos)
+	_, txCount, err = rlp2.U32(payload, pos)
 	if err != nil {
-		return baseTxId, txAmount, err
+		return baseTxId, txCount, err
 	}
 	return
 }

@@ -160,7 +160,7 @@ Loop:
 	require.NoError(t, err)
 
 	unwindTo := uint64(commitStep * rnd.Intn(int(maxTx)/commitStep))
-	domains.changesAccumulator = nil
+	domains.currentChangesAccumulator = nil
 
 	acu := agg.BeginFilesRo()
 	var a [kv.DomainLen][]DomainEntryDiff

@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"os"
 	"testing"
 	"time"
