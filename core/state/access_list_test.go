@@ -3,8 +3,12 @@ package state
 import (
 	"testing"
 
+	"github.com/ledgerwatch/log/v3"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	stateLib "github.com/ledgerwatch/erigon-lib/state"
 )
 
 func verifyAddrs(t *testing.T, s *IntraBlockState, astrings ...string) {
@@ -68,8 +72,19 @@ func TestAccessList(t *testing.T) {
 	addr := common.HexToAddress
 	slot := common.HexToHash
 
-	_, tx := memdb.NewTestTx(t)
-	state := New(NewPlainState(tx, 1, nil))
+	_, tx, _ := NewTestTemporalDb(t)
+
+	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	domains.SetTxNum(1)
+	domains.SetBlockNum(1)
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	require.NoError(t, err)
+
+	state := New(NewReaderV4(domains))
+
 	state.accessList = newAccessList()
 
 	state.AddAddressToAccessList(addr("aa"))          // 1

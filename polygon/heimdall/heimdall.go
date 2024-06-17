@@ -16,7 +16,7 @@ import (
 //
 //go:generate mockgen -typed=true -destination=./heimdall_mock.go -package=heimdall . Heimdall
 type Heimdall interface {
-	FetchLatestSpan(ctx context.Context) (*Span, error)
+	FetchLatestSpans(ctx context.Context, count uint) ([]*Span, error)
 
 	FetchCheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
 	FetchMilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
@@ -345,6 +345,39 @@ func (h *heimdall) LastSpanId(ctx context.Context) (SpanId, bool, error) {
 
 func (h *heimdall) FetchLatestSpan(ctx context.Context) (*Span, error) {
 	return h.client.FetchLatestSpan(ctx)
+}
+
+func (h *heimdall) FetchLatestSpans(ctx context.Context, count uint) ([]*Span, error) {
+	if count == 0 {
+		return nil, errors.New("can't fetch 0 latest spans")
+	}
+
+	span, err := h.FetchLatestSpan(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	latestSpans := make([]*Span, 0, count)
+	latestSpans = append(latestSpans, span)
+	count--
+
+	for count > 0 {
+		prevSpanRawId := span.RawId()
+		if prevSpanRawId == 0 {
+			break
+		}
+
+		span, err = h.client.FetchSpan(ctx, prevSpanRawId-1)
+		if err != nil {
+			return nil, err
+		}
+
+		latestSpans = append(latestSpans, span)
+		count--
+	}
+
+	common.SliceReverse(latestSpans)
+	return latestSpans, nil
 }
 
 func (h *heimdall) FetchSpans(ctx context.Context, start SpanId, end SpanId) ([]*Span, error) {
