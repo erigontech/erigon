@@ -28,15 +28,17 @@ import (
 	"github.com/stretchr/testify/require"
 	checker "gopkg.in/check.v1"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
+	stateLib "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/log/v3"
 )
 
 var toAddr = common.BytesToAddress
@@ -112,15 +114,42 @@ func (s *StateSuite) TestDump(c *checker.C) {
 func (s *StateSuite) SetUpTest(c *checker.C) {
 	//var agg *state.Aggregator
 	//s.kv, s.tx, agg = memdb.NewTestTemporalDb(c.Logf)
-	s.kv = memdb.New("")
-	tx, err := s.kv.BeginRw(context.Background()) //nolint
+	db := memdb.NewStateDB("")
+	defer db.Close()
+
+	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
+	if err != nil {
+		panic(err)
+	}
+	defer agg.Close()
+
+	_db, err := temporal.New(db, agg)
+	if err != nil {
+		panic(err)
+	}
+
+	tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	if err != nil {
+		panic(err)
+	}
+	defer tx.Rollback()
+
+	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	if err != nil {
+		panic(err)
+	}
+	defer domains.Close()
+
+	domains.SetTxNum(1)
+	domains.SetBlockNum(1)
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	if err != nil {
 		panic(err)
 	}
 	s.tx = tx
 	//s.r = NewWriterV4(s.tx)
-	s.r = NewPlainState(tx, 1, nil)
-	s.w = NewPlainState(tx, 1, nil)
+	s.r = NewReaderV4(domains)
+	s.w = NewWriterV4(domains)
 	s.state = New(s.r)
 }
 
@@ -214,10 +243,22 @@ func (s *StateSuite) TestSnapshotEmpty(c *checker.C) {
 // use testing instead of checker because checker does not support
 // printing/logging in tests (-check.vv does not work)
 func TestSnapshot2(t *testing.T) {
+	//TODO: why I shouldn't recreate writer here? And why domains.SetBlockNum(1) is enough for green test?
 	t.Parallel()
-	_, tx := memdb.NewTestTx(t)
-	w := NewPlainState(tx, 1, nil)
-	state := New(NewPlainState(tx, 1, nil))
+	_, tx, _ := NewTestTemporalDb(t)
+
+	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	domains.SetTxNum(1)
+	domains.SetBlockNum(2)
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	require.NoError(t, err)
+
+	w := NewWriterV4(domains)
+
+	state := New(NewReaderV4(domains))
 
 	stateobjaddr0 := toAddr([]byte("so0"))
 	stateobjaddr1 := toAddr([]byte("so1"))
@@ -238,11 +279,10 @@ func TestSnapshot2(t *testing.T) {
 	so0.deleted = false
 	state.setStateObject(stateobjaddr0, so0)
 
-	err := state.FinalizeTx(&chain.Rules{}, w)
+	err = state.FinalizeTx(&chain.Rules{}, w)
 	if err != nil {
 		t.Fatal("error while finalizing transaction", err)
 	}
-	w = NewPlainState(tx, 2, nil)
 
 	err = state.CommitBlock(&chain.Rules{}, w)
 	if err != nil {
