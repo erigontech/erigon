@@ -92,8 +92,9 @@ type Domain struct {
 	replaceKeysInValues bool
 	// restricts subset file deletions on open/close. Needed to hold files until commitment is merged
 	restrictSubsetFileDeletions bool
+	largeVals                   bool
 
-	valsTable   string // key + invertedStep -> values
+	valsTable   string // key -> inverted_step + values (Dupsort)
 	stats       DomainStats
 	compression FileCompression
 	indexList   idxList
@@ -103,6 +104,7 @@ type domainCfg struct {
 	hist     histCfg
 	compress FileCompression
 
+	largeVals                   bool
 	replaceKeysInValues         bool
 	restrictSubsetFileDeletions bool
 }
@@ -120,6 +122,7 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, valsTable, i
 		indexList:                   withBTree | withExistence,
 		replaceKeysInValues:         cfg.replaceKeysInValues,         // for commitment domain only
 		restrictSubsetFileDeletions: cfg.restrictSubsetFileDeletions, // to prevent not merged 'garbage' to delete on start
+		largeVals:                   cfg.largeVals,
 	}
 
 	d._visibleFiles = []ctxItem{}
@@ -445,6 +448,7 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *domainBufferedWrit
 		discard:   discard,
 		aux:       make([]byte, 0, 128),
 		valsTable: dt.d.valsTable,
+		largeVals: dt.d.largeVals,
 		values:    etl.NewCollector("flush "+dt.d.valsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), dt.d.logger).LogLvl(log.LvlTrace),
 
 		h: dt.ht.newWriter(tmpdir, discardHistory),
@@ -460,9 +464,11 @@ type domainBufferedWriter struct {
 	discard      bool
 
 	valsTable string
+	largeVals bool
 
 	stepBytes [8]byte // current inverted step representation
-	aux       []byte
+	aux       []byte  // auxilary buffer for key1 + key2
+	aux2      []byte  // auxilary buffer for step + val
 	diff      *StateDiffDomain
 
 	h *historyBufferedWriter
@@ -504,7 +510,33 @@ func (w *domainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 
-	if err := w.values.Load(tx, w.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
+	if w.largeVals {
+		if err := w.values.Load(tx, w.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
+			return err
+		}
+		w.close()
+		return nil
+	}
+
+	valuesCursor, err := tx.RwCursorDupSort(w.valsTable)
+	if err != nil {
+		return err
+	}
+	defer valuesCursor.Close()
+
+	if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		foundVal, err := valuesCursor.SeekBothRange(k, v[:8])
+		if err != nil {
+			return err
+		}
+		if len(foundVal) == 0 || !bytes.Equal(foundVal[:8], v[:8]) {
+			return valuesCursor.Put(k, v)
+		}
+		if err := valuesCursor.DeleteCurrent(); err != nil {
+			return err
+		}
+		return valuesCursor.Put(k, v)
+	}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 		return err
 	}
 	w.close()
@@ -518,10 +550,23 @@ func (w *domainBufferedWriter) addValue(key1, key2, value []byte) error {
 	if !w.setTxNumOnce {
 		panic("you forgot to call SetTxNum")
 	}
+	if w.largeVals {
+		kl := len(key1) + len(key2)
+		w.aux = append(append(append(w.aux[:0], key1...), key2...), w.stepBytes[:]...)
+		fullkey := w.aux[:kl+8]
+		if asserts && (w.h.ii.txNum/w.h.ii.aggregationStep) != ^binary.BigEndian.Uint64(w.stepBytes[:]) {
+			panic(fmt.Sprintf("assert: %d != %d", w.h.ii.txNum/w.h.ii.aggregationStep, ^binary.BigEndian.Uint64(w.stepBytes[:])))
+		}
 
-	kl := len(key1) + len(key2)
-	w.aux = append(append(append(w.aux[:0], key1...), key2...), w.stepBytes[:]...)
-	fullkey := w.aux[:kl+8]
+		if err := w.values.Collect(fullkey, value); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	w.aux = append(append(w.aux[:0], key1...), key2...)
+	w.aux2 = append(append(w.aux2[:0], w.stepBytes[:]...), value...)
+
 	if asserts && (w.h.ii.txNum/w.h.ii.aggregationStep) != ^binary.BigEndian.Uint64(w.stepBytes[:]) {
 		panic(fmt.Sprintf("assert: %d != %d", w.h.ii.txNum/w.h.ii.aggregationStep, ^binary.BigEndian.Uint64(w.stepBytes[:])))
 	}
@@ -530,7 +575,7 @@ func (w *domainBufferedWriter) addValue(key1, key2, value []byte) error {
 	//	fmt.Printf("addValue     [%p;tx=%d] '%x' -> '%x'\n", w, w.h.ii.txNum, fullkey, value)
 	//}()
 
-	if err := w.values.Collect(fullkey, value); err != nil {
+	if err := w.values.Collect(w.aux, w.aux2); err != nil {
 		return err
 	}
 	return nil
@@ -547,7 +592,9 @@ const (
 // CursorItem is the item in the priority queue used to do merge interation
 // over storage of a given account
 type CursorItem struct {
-	c            kv.Cursor
+	cDup    kv.CursorDupSort
+	cNonDup kv.Cursor
+
 	iter         btree2.MapIter[string, dataWithPrevStep]
 	dg           ArchiveGetter
 	dg2          ArchiveGetter
@@ -607,7 +654,6 @@ type DomainRoTx struct {
 	idxReaders []*recsplit.IndexReader
 
 	keyBuf [60]byte // 52b key and 8b for inverted step
-	valBuf [128]byte
 	comBuf []byte
 
 	valsC kv.Cursor
@@ -802,28 +848,49 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 
 	stepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
-	valsCursor, err := roTx.Cursor(d.valsTable)
-	if err != nil {
-		return Collation{}, fmt.Errorf("create %s values cursorDupsort: %w", d.filenameBase, err)
+
+	var valsCursor kv.Cursor
+
+	if d.largeVals {
+		valsCursor, err = roTx.Cursor(d.valsTable)
+		if err != nil {
+			return Collation{}, fmt.Errorf("create %s values cursorDupsort: %w", d.filenameBase, err)
+		}
+	} else {
+		valsCursor, err = roTx.CursorDupSort(d.valsTable)
+		if err != nil {
+			return Collation{}, fmt.Errorf("create %s values cursorDupsort: %w", d.filenameBase, err)
+		}
 	}
 	defer valsCursor.Close()
 
 	kvs := []struct {
 		k, v []byte
 	}{}
-
+	var stepInDB []byte
 	for k, v, err := valsCursor.First(); k != nil; k, v, err = valsCursor.Next() {
 		if err != nil {
 			return coll, err
 		}
-		stepInDB := k[len(k)-8:]
+
+		if d.largeVals {
+			stepInDB = k[len(k)-8:]
+		} else {
+			stepInDB = v[:8]
+		}
 		if !bytes.Equal(stepBytes, stepInDB) { // [txFrom; txTo)
 			continue
 		}
 
-		kvs = append(kvs, struct {
-			k, v []byte
-		}{common.Copy(k[:len(k)-8]), common.Copy(v)})
+		if d.largeVals {
+			kvs = append(kvs, struct {
+				k, v []byte
+			}{common.Copy(k[:len(k)-8]), common.Copy(v)})
+		} else {
+			kvs = append(kvs, struct {
+				k, v []byte
+			}{common.Copy(k), common.Copy(v[8:])})
+		}
 	}
 
 	sort.Slice(kvs, func(i, j int) bool {
@@ -1156,26 +1223,54 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	logEvery := time.NewTicker(time.Second * 30)
 	defer logEvery.Stop()
 
-	// Attempt to use the diff to unwind the domain
-
+	valsCursor, err := rwTx.RwCursorDupSort(d.valsTable)
+	if err != nil {
+		return err
+	}
+	defer valsCursor.Close()
 	// First revert keys
 	for i := range domainDiffs {
 		key, value, prevStepBytes := domainDiffs[i].Key, domainDiffs[i].Value, domainDiffs[i].PrevStepBytes
-		// Second, we need to restore the previous value
-		if len(value) == 0 {
-			if !bytes.Equal(key[len(key)-8:], prevStepBytes) {
-				if err := rwTx.Delete(d.valsTable, key); err != nil {
-					return err
+		if dt.d.largeVals {
+			if len(value) == 0 {
+				if !bytes.Equal(key[len(key)-8:], prevStepBytes) {
+					if err := rwTx.Delete(d.valsTable, key); err != nil {
+						return err
+					}
+				} else {
+					if err := rwTx.Put(d.valsTable, key, []byte{}); err != nil {
+						return err
+					}
 				}
 			} else {
-				if err := rwTx.Put(d.valsTable, key, nil); err != nil {
+				if err := rwTx.Put(d.valsTable, key, value); err != nil {
 					return err
 				}
 			}
-		} else {
-			if err := rwTx.Put(d.valsTable, key, value); err != nil {
-				return err
+			continue
+		}
+		stepBytes := key[len(key)-8:]
+		fullKey := key[:len(key)-8]
+		// Second, we need to restore the previous value
+		valInDB, err := valsCursor.SeekBothRange(fullKey, stepBytes)
+		if err != nil {
+			return err
+		}
+		if len(valInDB) > 0 {
+			stepInDB := valInDB[:8]
+			if bytes.Equal(stepInDB, stepBytes) {
+				if err := valsCursor.DeleteCurrent(); err != nil {
+					return err
+				}
 			}
+		}
+
+		if !bytes.Equal(stepBytes, prevStepBytes) {
+			continue
+		}
+
+		if err := valsCursor.Put(fullKey, append(stepBytes, value...)); err != nil {
+			return err
 		}
 	}
 	// Compare valsKV with prevSeenKeys
@@ -1339,10 +1434,19 @@ func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	if dt.valsC != nil {
 		return dt.valsC, nil
 	}
-	dt.valsC, err = tx.Cursor(dt.d.valsTable)
-	if err != nil {
-		return nil, fmt.Errorf("valsCursor: %w", err)
+
+	if dt.d.largeVals {
+		dt.valsC, err = tx.Cursor(dt.d.valsTable)
+		if err != nil {
+			return nil, fmt.Errorf("valsCursor: %w", err)
+		}
+	} else {
+		dt.valsC, err = tx.CursorDupSort(dt.d.valsTable)
+		if err != nil {
+			return nil, fmt.Errorf("valsCursor: %w", err)
+		}
 	}
+
 	return dt.valsC, nil
 }
 
@@ -1351,10 +1455,10 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 	if err != nil {
 		return nil, 0, false, err
 	}
+	var v, foundInvStep []byte
 
-	isCommitment := dt.d.filenameBase == kv.FileCommitmentDomain
-	var fullkey, v []byte
-	if !isCommitment {
+	if dt.d.largeVals {
+		var fullkey []byte
 		fullkey, v, err = valsC.Seek(key)
 		if err != nil {
 			return nil, 0, false, err
@@ -1365,52 +1469,21 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 		if !bytes.Equal(fullkey[:len(fullkey)-8], key) {
 			return nil, 0, false, nil // This key is not in DB
 		}
+		foundInvStep = fullkey[len(fullkey)-8:]
 	} else {
-		// This is hell. i am sorry.
-		keyCopy := append(dt.valBuf[:0], key...)
-		keyWithStep := binary.BigEndian.AppendUint64(keyCopy, ^uint64(0))
-		var k []byte
-		k, v, err = valsC.Seek(keyWithStep)
+		_, stepWithVal, err := valsC.SeekExact(key)
 		if err != nil {
-			return nil, 0, false, err
+			return nil, 0, false, fmt.Errorf("valsCursor.SeekExact: %w", err)
 		}
-		if k == nil {
-			k, v, err = valsC.Last()
-			if err != nil {
-				return nil, 0, false, err
-			}
-		}
-		if k == nil {
+		if len(stepWithVal) == 0 {
 			return nil, 0, false, nil
 		}
-		var prevK, prevV []byte
-		if bytes.Equal(k[:len(k)-8], key) {
-			prevK, prevV = k, v
-		} else {
-			for prevK, prevV, err = valsC.Prev(); err != nil && prevK != nil && len(key) < len(prevK)-8; {
-				prevK, prevV, err = valsC.Prev()
-			}
-			if err != nil {
-				return nil, 0, false, err
-			}
-			if prevK == nil || !bytes.Equal(prevK[:len(prevK)-8], key) {
-				return nil, 0, false, nil
-			}
-		}
-		for k, v, err = valsC.Prev(); k != nil; k, v, err = valsC.Prev() {
-			if err != nil {
-				return nil, 0, false, err
-			}
-			if !bytes.Equal(k[:len(k)-8], key) {
-				break
-			}
-			prevK, prevV = k, v
-		}
-		fullkey = prevK
-		v = prevV
+
+		v = stepWithVal[8:]
+
+		foundInvStep = stepWithVal[:8]
 	}
 
-	foundInvStep := fullkey[len(fullkey)-8:]
 	foundStep := ^binary.BigEndian.Uint64(foundInvStep)
 
 	if LastTxNumOfStep(foundStep, dt.d.aggregationStep) >= dt.maxTxNumInDomainFiles(false) {
@@ -1613,10 +1686,18 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		cleanup := dt.Warmup(ctx)
 		defer cleanup()
 	}
+	var valsCursor kv.RwCursor
 
-	valsCursor, err := rwTx.RwCursor(dt.d.valsTable)
-	if err != nil {
-		return stat, fmt.Errorf("create %s domain values cursor: %w", dt.d.filenameBase, err)
+	if dt.d.largeVals {
+		valsCursor, err = rwTx.RwCursor(dt.d.valsTable)
+		if err != nil {
+			return stat, fmt.Errorf("create %s domain values cursor: %w", dt.d.filenameBase, err)
+		}
+	} else {
+		valsCursor, err = rwTx.RwCursorDupSort(dt.d.valsTable)
+		if err != nil {
+			return stat, fmt.Errorf("create %s domain values cursor: %w", dt.d.filenameBase, err)
+		}
 	}
 	defer valsCursor.Close()
 
@@ -1625,23 +1706,29 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		dt.d.logger.Error("get domain pruning progress", "name", dt.d.filenameBase, "error", err)
 	}
 
-	var k []byte
+	var k, v []byte
 	if prunedKey != nil {
-		k, _, err = valsCursor.Seek(prunedKey)
+		k, v, err = valsCursor.Seek(prunedKey)
 		if err != nil {
 			return stat, err
 		}
 	} else {
-		k, _, err = valsCursor.First()
+		k, v, err = valsCursor.First()
 	}
 	if err != nil {
 		return nil, err
 	}
-	for ; k != nil; k, _, err = valsCursor.Next() {
+	var stepBytes []byte
+	for ; k != nil; k, v, err = valsCursor.Next() {
 		if err != nil {
 			return stat, fmt.Errorf("iterate over %s domain keys: %w", dt.d.filenameBase, err)
 		}
-		stepBytes := k[len(k)-8:]
+
+		if dt.d.largeVals {
+			stepBytes = k[len(k)-8:]
+		} else {
+			stepBytes = v[:8]
+		}
 
 		is := ^binary.BigEndian.Uint64(stepBytes)
 		if is > step {
@@ -1696,6 +1783,7 @@ type DomainLatestIterFile struct {
 	h *CursorHeap
 
 	k, v, kBackup, vBackup []byte
+	largeVals              bool
 }
 
 func (hi *DomainLatestIterFile) Close() {
@@ -1709,27 +1797,42 @@ func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 	//     File endTxNum  = 15, because `0-2.kv` has steps 0 and 1, last txNum of step 1 is 15
 	//     DB endTxNum    = 16, because db has step 2, and first txNum of step 2 is 16.
 	//     RAM endTxNum   = 17, because current tcurrent txNum is 17
-
+	hi.largeVals = dc.d.largeVals
 	heap.Init(hi.h)
 	var key, value []byte
-	var err error
 
-	valsCursor, err := hi.roTx.Cursor(dc.d.valsTable)
-	if err != nil {
-		return err
-	}
-	if key, value, err = valsCursor.Seek(hi.from); err != nil {
-		return err
-	}
-	if key != nil && (hi.to == nil || bytes.Compare(key[:len(key)-8], hi.to) < 0) {
-		fmt.Println("O", key, value)
+	if dc.d.largeVals {
+		valsCursor, err := hi.roTx.Cursor(dc.d.valsTable)
+		if err != nil {
+			return err
+		}
+		if key, value, err = valsCursor.Seek(hi.from); err != nil {
+			return err
+		}
+		if key != nil && (hi.to == nil || bytes.Compare(key[:len(key)-8], hi.to) < 0) {
+			k := key[:len(key)-8]
+			stepBytes := key[len(key)-8:]
+			step := ^binary.BigEndian.Uint64(stepBytes)
+			endTxNum := step * dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
 
-		k := key[:len(key)-8]
-		stepBytes := key[len(key)-8:]
-		step := ^binary.BigEndian.Uint64(stepBytes)
-		endTxNum := step * dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+			heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(value), cNonDup: valsCursor, endTxNum: endTxNum, reverse: true})
+		}
+	} else {
+		valsCursor, err := hi.roTx.CursorDupSort(dc.d.valsTable)
+		if err != nil {
+			return err
+		}
+		if key, value, err = valsCursor.Seek(hi.from); err != nil {
+			return err
+		}
+		if key != nil && (hi.to == nil || bytes.Compare(key, hi.to) < 0) {
+			stepBytes := value[:8]
+			value = value[8:]
+			step := ^binary.BigEndian.Uint64(stepBytes)
+			endTxNum := step * dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
 
-		heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(value), c: valsCursor, endTxNum: endTxNum, reverse: true})
+			heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(key), val: common.Copy(value), cDup: valsCursor, endTxNum: endTxNum, reverse: true})
+		}
 	}
 
 	for i, item := range dc.files {
@@ -1756,7 +1859,6 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 	for hi.h.Len() > 0 {
 		lastKey := (*hi.h)[0].key
 		lastVal := (*hi.h)[0].val
-		fmt.Println("START", lastKey, lastVal, (*hi.h)[0].t)
 
 		// Advance all the items that have this key (including the top)
 		for hi.h.Len() > 0 && bytes.Equal((*hi.h)[0].key, lastKey) {
@@ -1771,33 +1873,54 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 					}
 				}
 			case DB_CURSOR:
-				// start from current go to next
-				initial, v, err := ci1.c.Current()
-				if err != nil {
-					return err
-				}
-				var k []byte
-				for initial != nil && (k == nil || bytes.Equal(initial[:len(initial)-8], k[:len(k)-8])) {
-					k, v, err = ci1.c.Next()
+				if hi.largeVals {
+					// start from current go to next
+					initial, v, err := ci1.cNonDup.Current()
 					if err != nil {
 						return err
 					}
-					if k == nil {
-						break
+					var k []byte
+					for initial != nil && (k == nil || bytes.Equal(initial[:len(initial)-8], k[:len(k)-8])) {
+						k, v, err = ci1.cNonDup.Next()
+						if err != nil {
+							return err
+						}
+						if k == nil {
+							break
+						}
+					}
+
+					if len(k) > 0 && (hi.to == nil || bytes.Compare(k[:len(k)-8], hi.to) < 0) {
+						stepBytes := k[len(k)-8:]
+						k = k[:len(k)-8]
+						ci1.key = common.Copy(k)
+						step := ^binary.BigEndian.Uint64(stepBytes)
+						endTxNum := step * hi.dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+						ci1.endTxNum = endTxNum
+
+						ci1.val = common.Copy(v)
+						heap.Push(hi.h, ci1)
+					}
+				} else {
+					// start from current go to next
+					k, stepBytesWithValue, err := ci1.cDup.NextNoDup()
+					if err != nil {
+						return err
+					}
+
+					if len(k) > 0 && (hi.to == nil || bytes.Compare(k, hi.to) < 0) {
+						stepBytes := stepBytesWithValue[:8]
+						v := stepBytesWithValue[8:]
+						ci1.key = common.Copy(k)
+						step := ^binary.BigEndian.Uint64(stepBytes)
+						endTxNum := step * hi.dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+						ci1.endTxNum = endTxNum
+
+						ci1.val = common.Copy(v)
+						heap.Push(hi.h, ci1)
 					}
 				}
 
-				if len(k) > 0 && (hi.to == nil || bytes.Compare(k[:len(k)-8], hi.to) < 0) {
-					stepBytes := k[len(k)-8:]
-					k = k[:len(k)-8]
-					ci1.key = common.Copy(k)
-					step := ^binary.BigEndian.Uint64(stepBytes)
-					endTxNum := step * hi.dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
-					ci1.endTxNum = endTxNum
-
-					ci1.val = common.Copy(v)
-					heap.Push(hi.h, ci1)
-				}
 			}
 		}
 		if len(lastVal) > 0 {

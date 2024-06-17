@@ -67,7 +67,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	db := mdbx.NewMDBX(logger).InMem(dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		tcfg := kv.TableCfg{
 			keysTable:             kv.TableCfgItem{Flags: kv.DupSort},
-			valsTable:             kv.TableCfgItem{},
+			valsTable:             kv.TableCfgItem{Flags: kv.DupSort},
 			historyKeysTable:      kv.TableCfgItem{Flags: kv.DupSort},
 			historyValsTable:      kv.TableCfgItem{Flags: kv.DupSort},
 			settingsTable:         kv.TableCfgItem{},

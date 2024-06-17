@@ -659,7 +659,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 	}
 
 	roTx := sd.roTx
-	valsCursor, err := roTx.Cursor(sd.aggTx.a.d[kv.StorageDomain].valsTable)
+	valsCursor, err := roTx.CursorDupSort(sd.aggTx.a.d[kv.StorageDomain].valsTable)
 	if err != nil {
 		return err
 	}
@@ -667,14 +667,15 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 	if k, v, err = valsCursor.Seek(prefix); err != nil {
 		return err
 	}
-	if len(k) > 0 && bytes.HasPrefix(k[:len(k)-8], prefix) {
-		step := ^binary.BigEndian.Uint64(k[len(k)-8:])
+	if len(k) > 0 && bytes.HasPrefix(k, prefix) {
+		step := ^binary.BigEndian.Uint64(v[:8])
+		val := v[8:]
 		endTxNum := step * sd.StepSize() // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
 		if haveRamUpdates && endTxNum >= sd.txNum {
 			return fmt.Errorf("probably you didn't set SharedDomains.SetTxNum(). ram must be ahead of db: %d, %d", sd.txNum, endTxNum)
 		}
 
-		heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: common.Copy(k[:len(k)-8]), val: common.Copy(v), step: step, c: valsCursor, endTxNum: endTxNum, reverse: true})
+		heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(val), step: step, cDup: valsCursor, endTxNum: endTxNum, reverse: true})
 	}
 
 	sctx := sd.aggTx.d[kv.StorageDomain]
@@ -734,29 +735,20 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 					}
 				}
 			case DB_CURSOR:
-				k = nil
-				initial, _, err := ci1.c.Current()
+				k, v, err := ci1.cDup.NextNoDup()
 				if err != nil {
 					return err
 				}
-				for initial != nil && (k == nil || bytes.Equal(initial[:len(initial)-8], k[:len(k)-8])) {
-					if k, v, err = ci1.c.Next(); err != nil {
-						return err
-					}
-					if k == nil {
-						break
-					}
-				}
 
-				if len(k) > 0 && bytes.HasPrefix(k[:len(k)-8], prefix) {
-					ci1.key = common.Copy(k[:len(k)-8])
-					step := ^binary.BigEndian.Uint64(k[len(k)-8:])
+				if len(k) > 0 && bytes.HasPrefix(k, prefix) {
+					ci1.key = common.Copy(k)
+					step := ^binary.BigEndian.Uint64(v[:8])
 					endTxNum := step * sd.StepSize() // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
 					if haveRamUpdates && endTxNum >= sd.txNum {
 						return fmt.Errorf("probably you didn't set SharedDomains.SetTxNum(). ram must be ahead of db: %d, %d", sd.txNum, endTxNum)
 					}
 					ci1.endTxNum = endTxNum
-					ci1.val = common.Copy(v)
+					ci1.val = common.Copy(v[8:])
 					ci1.step = step
 					heap.Push(cpPtr, ci1)
 				}

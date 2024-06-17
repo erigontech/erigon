@@ -236,7 +236,7 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 			return nil
 		}
 		if len(v) == 0 && args.EmptyVals {
-			v = nil // Append nil
+			v = []byte{} // Append empty value
 		}
 		if canUseAppend {
 			if isDupSort {
