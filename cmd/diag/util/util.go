@@ -50,18 +50,6 @@ func MakeHttpGetCall(ctx context.Context, url string, data interface{}) error {
 	return nil
 }
 
-func CalculateTime(amountLeft, rate uint64) string {
-	if rate == 0 {
-		return "999hrs:99m"
-	}
-	timeLeftInSeconds := amountLeft / rate
-
-	hours := timeLeftInSeconds / 3600
-	minutes := (timeLeftInSeconds / 60) % 60
-
-	return fmt.Sprintf("%dhrs:%dm", hours, minutes)
-}
-
 func RenderJson(data interface{}) {
 	bytes, err := json.Marshal(data)
 

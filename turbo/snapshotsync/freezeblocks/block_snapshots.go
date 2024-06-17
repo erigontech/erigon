@@ -798,6 +798,9 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 		}
 	}()
 
+	var fmu sync.Mutex
+	failedIndexes := make(map[string]error, 0)
+
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
 		for _, segment := range value.segments {
 			info := segment.FileInfo(dir)
@@ -814,7 +817,10 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 				defer notifySegmentIndexingFinished(info.Name())
 				defer ps.Delete(p)
 				if err := segtype.BuildIndexes(gCtx, info, chainConfig, tmpDir, p, log.LvlInfo, logger); err != nil {
-					return fmt.Errorf("%s: %w", info.Name(), err)
+					// unsuccessful indexing should allow other indexing to finish
+					fmu.Lock()
+					failedIndexes[info.Name()] = err
+					fmu.Unlock()
 				}
 				return nil
 			})
@@ -823,15 +829,27 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 		return true
 	})
 
+	var ie error
+
 	go func() {
 		defer close(finish)
 		g.Wait()
+
+		fmu.Lock()
+		for fname, err := range failedIndexes {
+			logger.Error(fmt.Sprintf("[%s] Indexing failed", logPrefix), "file", fname, "error", err)
+			ie = fmt.Errorf("%s: %w", fname, err) // report the last one anyway
+		}
+		fmu.Unlock()
 	}()
 
 	// Block main thread
 	select {
 	case <-finish:
-		return g.Wait()
+		if err := g.Wait(); err != nil {
+			return err
+		}
+		return ie
 	case <-ctx.Done():
 		return ctx.Err()
 	}
