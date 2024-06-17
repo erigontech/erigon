@@ -254,6 +254,7 @@ var snapshotCommand = cli.Command{
 			Action: doIntegrity,
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
+				&cli.StringFlag{Name: "action", Usage: fmt.Sprintf("one of: %s", integrity.AllActions)},
 			}),
 		},
 		//{
@@ -380,6 +381,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 
 	ctx := cliCtx.Context
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	requestedAction := integrity.Action(cliCtx.String("action"))
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
@@ -395,20 +397,27 @@ func doIntegrity(cliCtx *cli.Context) error {
 	defer agg.Close()
 
 	blockReader, _ := blockRetire.IO()
-	if err := integrity.SnapBlocksRead(chainDB, blockReader, ctx, false); err != nil {
-		return err
-	}
-
-	//if err := blockReader.IntegrityTxnID(false); err != nil {
-	//	return err
-	//}
-
-	if err := integrity.E3EfFiles(ctx, chainDB, agg); err != nil {
-		return err
-	}
-
-	if err := integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg); err != nil {
-		return err
+	for _, a := range integrity.AllActions {
+		if requestedAction != "" && requestedAction != a {
+			continue
+		}
+		switch a {
+		case integrity.BlocksRead:
+			if err := integrity.SnapBlocksRead(chainDB, blockReader, ctx, false); err != nil {
+				return err
+			}
+		case integrity.EfFiles:
+			if err := integrity.E3EfFiles(ctx, chainDB, agg); err != nil {
+				return err
+			}
+		case integrity.HistoryNoSystemTxs:
+			if err := integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg); err != nil {
+				return err
+			}
+		}
+		//if err := blockReader.IntegrityTxnID(false); err != nil {
+		//	return err
+		//}
 	}
 
 	return nil
