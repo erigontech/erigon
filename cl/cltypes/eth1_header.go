@@ -6,6 +6,7 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
@@ -185,13 +186,13 @@ func (h *Eth1Header) UnmarshalJSON(data []byte) error {
 		FeeRecipient     libcommon.Address `json:"fee_recipient"`
 		StateRoot        libcommon.Hash    `json:"state_root"`
 		ReceiptsRoot     libcommon.Hash    `json:"receipts_root"`
-		LogsBloom        types.Bloom       `json:"logs_bloom"`
+		LogsBloom        hexutility.Bytes  `json:"logs_bloom"`
 		PrevRandao       libcommon.Hash    `json:"prev_randao"`
 		BlockNumber      uint64            `json:"block_number,string"`
 		GasLimit         uint64            `json:"gas_limit,string"`
 		GasUsed          uint64            `json:"gas_used,string"`
 		Time             uint64            `json:"timestamp,string"`
-		Extra            *solid.ExtraData  `json:"extra_data"`
+		Extra            hexutility.Bytes  `json:"extra_data"`
 		BaseFeePerGas    string            `json:"base_fee_per_gas"`
 		BlockHash        libcommon.Hash    `json:"block_hash"`
 		TransactionsRoot libcommon.Hash    `json:"transactions_root"`
@@ -202,17 +203,19 @@ func (h *Eth1Header) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
+	extra := solid.NewExtraData()
+	extra.SetBytes(aux.Extra)
 	h.ParentHash = aux.ParentHash
 	h.FeeRecipient = aux.FeeRecipient
 	h.StateRoot = aux.StateRoot
 	h.ReceiptsRoot = aux.ReceiptsRoot
-	h.LogsBloom = aux.LogsBloom
+	h.LogsBloom = types.BytesToBloom(aux.LogsBloom)
 	h.PrevRandao = aux.PrevRandao
 	h.BlockNumber = aux.BlockNumber
 	h.GasLimit = aux.GasLimit
 	h.GasUsed = aux.GasUsed
 	h.Time = aux.Time
-	h.Extra = aux.Extra
+	h.Extra = extra
 	tmp := uint256.NewInt(0)
 	if err := tmp.SetFromDecimal(aux.BaseFeePerGas); err != nil {
 		return err
