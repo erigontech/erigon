@@ -1587,6 +1587,7 @@ func (dt *DomainRoTx) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, 
 		untilStep = (untilTx - 1) / dt.d.aggregationStep
 	}
 	sm, err := GetExecV3PrunableProgress(tx, kv.MinimumPrunableStepDomainKey)
+	fmt.Println("canPruneDomainTables", sm, maxStepToPrune, untilStep)
 	if err != nil {
 		dt.d.logger.Error("get domain pruning progress", "name", dt.d.filenameBase, "error", err)
 		return false, maxStepToPrune
@@ -1761,7 +1762,8 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 	if err := SaveExecV3PruneProgress(rwTx, dt.d.valsTable, nil); err != nil {
 		return stat, fmt.Errorf("save domain pruning progress: %s, %w", dt.d.filenameBase, err)
 	}
-	if err := SaveExecV3PrunableProgress(rwTx, kv.MinimumPrunableStepDomainKey, step); err != nil {
+	fmt.Println("SaveExecV3PruneProgress", dt.d.valsTable, step+1)
+	if err := SaveExecV3PrunableProgress(rwTx, kv.MinimumPrunableStepDomainKey, step+1); err != nil {
 		return stat, err
 	}
 	mxPruneTookDomain.ObserveDuration(st)
