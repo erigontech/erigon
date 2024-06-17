@@ -144,8 +144,8 @@ github.com/envoyproxy/go-control-plane v0.9.0/go.mod h1:YTl/9mNaCwkRvm6d1a2C3ymF
 github.com/envoyproxy/go-control-plane v0.9.1-0.20191026205805-5f8ba28d4473/go.mod h1:YTl/9mNaCwkRvm6d1a2C3ymFceY/DCBVvsKhRF0iEA4=
 github.com/envoyproxy/go-control-plane v0.9.4/go.mod h1:6rpuAdCZL397s3pYoYcLgu1mIlRU8Am5FuJP05cCM98=
 github.com/envoyproxy/protoc-gen-validate v0.1.0/go.mod h1:iSmxcyjqTsJpI2R4NaDN7+kN2VEUnK/pcBlmesArF7c=
-github.com/erigontech/mdbx-go v0.38.3 h1:T/2vt+jAyTEjxNUwMSEnjOHPYga5H89Hpntnb0FhM9c=
-github.com/erigontech/mdbx-go v0.38.3/go.mod h1:IcOLQDPw3VM/asP6T5JVPPN4FHHgJtY16XfYjzWKVNI=
+github.com/erigontech/mdbx-go v0.38.4-0.20240617112220-c88e3bf223a0 h1:pfMRxYWj5QfCYTQY8mIOzK1haE0CvWg9FYX68E1nU34=
+github.com/erigontech/mdbx-go v0.38.4-0.20240617112220-c88e3bf223a0/go.mod h1:byfuBnyiCY2p//xlROY2wbvZVkmETQOeaKxtKOIK9Tg=
 github.com/erigontech/torrent v1.54.2-alpha-10 h1:MqEorLDG5n2jsNAsSC+TKuZUyExO/KfGumHxh7GHG3o=
 github.com/erigontech/torrent v1.54.2-alpha-10/go.mod h1:nYNeuR4xPlEl4CturFD9/KRXBRJEcJGqjegDNWakwG4=
 github.com/fatih/color v1.16.0 h1:zmkK9Ngbjj+K0yRhTVONQh1p/HknKYSlNT+vZCzyokM=
