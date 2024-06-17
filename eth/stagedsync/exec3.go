@@ -732,7 +732,7 @@ Loop:
 			doms.SetBlockNum(txTask.BlockNum)
 
 			// Notify that there is prunable progress
-			if err := state2.SaveExecV3PrunableProgressIfDoesNotExist(applyTx, kv.MinimumPrunableStepDomainKey, doms.TxNum()/doms.StepSize()); err != nil {
+			if err := state2.SaveExecV3PrunableProgressIfDoesNotExist(applyTx, doms.TxNum()/doms.StepSize()); err != nil {
 				return err
 			}
 
