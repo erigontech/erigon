@@ -97,9 +97,9 @@ func ProcessBlindedBlock(impl BlockProcessor, s abstract.BeaconState, signedBloc
 		if s.Version() >= clparams.CapellaVersion {
 			// Process withdrawals in the execution payload.
 			expect := state.ExpectedWithdrawals(s, state.Epoch(s))
-			expectWithdrawals := solid.NewDynamicListSSZ[*cltypes.Withdrawal](int(s.BeaconConfig().MaxWithdrawalsPerPayload))
-			for _, w := range expect {
-				expectWithdrawals.Append(w)
+			expectWithdrawals := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(s.BeaconConfig().MaxWithdrawalsPerPayload), 44)
+			for i := range expect {
+				expectWithdrawals.Append(expect[i])
 			}
 			if err := impl.ProcessWithdrawals(s, expectWithdrawals); err != nil {
 				return fmt.Errorf("processBlock: failed to process withdrawals: %v", err)
