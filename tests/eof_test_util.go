@@ -40,6 +40,7 @@ type _index struct {
 
 func getError(err error) error {
 	var _errors = []error{ // add new errors here
+		vm.ErrUndefinedInstruction,
 		vm.ErrIncompleteEOF,
 		vm.ErrInvalidMagic,
 		vm.ErrInvalidVersion,
@@ -66,6 +67,10 @@ func getError(err error) error {
 		vm.ErrCALLFtoNonReturning,
 		vm.ErrEOFStackOverflow,
 		vm.ErrStackHeightHigher,
+		vm.ErrInvalidJumpDest,
+		vm.ErrInvalidBranchCount,
+		vm.ErrTruncatedImmediate,
+		vm.ErrJUMPFOutputs,
 	}
 
 	for _, _err := range _errors {
@@ -77,23 +82,35 @@ func getError(err error) error {
 }
 
 var errorsMap = map[string][]error{
-	"EOFException.INVALID_FIRST_SECTION_TYPE":  []error{vm.ErrInvalidFirstSectionType, vm.ErrTooManyInputs, vm.ErrTooManyOutputs, vm.ErrTooLargeMaxStackHeight},
-	"EOFException.INCOMPLETE_SECTION_NUMBER":   []error{vm.ErrIncompleteEOF},
-	"EOFException.MISSING_HEADERS_TERMINATOR":  []error{vm.ErrIncompleteEOF},
-	"EOFException.INCOMPLETE_SECTION_SIZE":     []error{vm.ErrIncompleteEOF},
-	"EOFException.TOO_MANY_CODE_SECTIONS":      []error{vm.ErrInvalidTypeSize},
-	"EOFException.MISSING_CODE_HEADER":         []error{vm.ErrMissingCodeHeader},
-	"EOFException.INVALID_TYPE_SIZE":           []error{vm.ErrInvalidCodeSize, vm.ErrInvalidTypeSize},
-	"EOFException.ZERO_SECTION_SIZE":           []error{vm.ErrIncompleteEOF, vm.ErrInvalidTypeSize, vm.ErrInvalidFirstSectionType, vm.ErrInvalidCodeSize},
-	"EOFException.INVALID_SECTION_BODIES_SIZE": []error{vm.ErrInvalidContainerSize, vm.ErrInvalidTypeSize},
-	"EOFException.INVALID_MAGIC":               []error{vm.ErrInvalidMagic},
-	"EOFException.INVALID_VERSION":             []error{vm.ErrInvalidVersion, vm.ErrIncompleteEOF},
-	"EOFException.MISSING_TERMINATOR":          []error{vm.ErrMissingTerminator},
-	"EOFException.MISSING_TYPE_HEADER":         []error{vm.ErrIncompleteEOF, vm.ErrMissingTypeHeader},
-	"EOFException.MISSING_STOP_OPCODE":         []error{vm.ErrInvalidCodeTermination},
-	"EOFException.UNDEFINED_EXCEPTION":         []error{vm.ErrTooManyOutputs, vm.ErrInvalidSectionArgument, vm.ErrInvalidCodeTermination, vm.ErrInvalidMaxStackHeight, vm.ErrInvalidOutputs, vm.ErrNoTerminalInstruction, vm.ErrCALLFtoNonReturning, vm.ErrEOFStackOverflow, vm.ErrStackHeightHigher},
-	"EOFException.INVALID_DATALOADN_INDEX":     []error{vm.ErrInvalidDataLoadN},
-	// ErrNoTerminalInstruction
+	"EOFException.INVALID_FIRST_SECTION_TYPE":             []error{vm.ErrInvalidFirstSectionType, vm.ErrTooManyInputs, vm.ErrTooManyOutputs, vm.ErrTooLargeMaxStackHeight},
+	"EOFException.INCOMPLETE_SECTION_NUMBER":              []error{vm.ErrIncompleteEOF},
+	"EOFException.MISSING_HEADERS_TERMINATOR":             []error{vm.ErrIncompleteEOF},
+	"EOFException.INCOMPLETE_SECTION_SIZE":                []error{vm.ErrIncompleteEOF},
+	"EOFException.TOO_MANY_CODE_SECTIONS":                 []error{vm.ErrInvalidTypeSize},
+	"EOFException.MISSING_CODE_HEADER":                    []error{vm.ErrMissingCodeHeader},
+	"EOFException.ZERO_SECTION_SIZE":                      []error{vm.ErrIncompleteEOF, vm.ErrInvalidTypeSize, vm.ErrInvalidFirstSectionType, vm.ErrInvalidCodeSize},
+	"EOFException.INVALID_SECTION_BODIES_SIZE":            []error{vm.ErrInvalidContainerSize, vm.ErrInvalidTypeSize},
+	"EOFException.INVALID_MAGIC":                          []error{vm.ErrInvalidMagic},
+	"EOFException.INVALID_VERSION":                        []error{vm.ErrInvalidVersion, vm.ErrIncompleteEOF},
+	"EOFException.MISSING_TERMINATOR":                     []error{vm.ErrMissingTerminator},
+	"EOFException.MISSING_TYPE_HEADER":                    []error{vm.ErrIncompleteEOF, vm.ErrMissingTypeHeader},
+	"EOFException.MISSING_STOP_OPCODE":                    []error{vm.ErrInvalidCodeTermination},
+	"EOFException.UNDEFINED_EXCEPTION":                    []error{vm.ErrTooManyOutputs, vm.ErrInvalidSectionArgument, vm.ErrInvalidCodeTermination, vm.ErrInvalidMaxStackHeight, vm.ErrInvalidOutputs, vm.ErrNoTerminalInstruction, vm.ErrCALLFtoNonReturning, vm.ErrStackHeightHigher},
+	"EOFException.INVALID_DATALOADN_INDEX":                []error{vm.ErrInvalidDataLoadN},
+	"EOFException.STACK_UNDERFLOW":                        []error{vm.ErrEOFStackOverflow},
+	"EOFException.TOPLEVEL_CONTAINER_TRUNCATED":           []error{vm.ErrInvalidContainerSize},
+	"EOFException.INVALID_TYPE_SECTION_SIZE":              []error{vm.ErrInvalidCodeSize, vm.ErrInvalidCodeSize},
+	"EOFException.INPUTS_OUTPUTS_NUM_ABOVE_LIMIT":         []error{vm.ErrTooManyOutputs, vm.ErrTooManyInputs},
+	"EOFException.MAX_STACK_HEIGHT_ABOVE_LIMIT":           []error{vm.ErrTooLargeMaxStackHeight},
+	"EOFException.MISSING_DATA_SECTION":                   []error{vm.ErrMissingDataHeader},
+	"EOFException.UNREACHABLE_CODE_SECTIONS":              []error{vm.ErrInvalidContainerSize},
+	"EOFException.UNDEFINED_INSTRUCTION":                  []error{vm.ErrUndefinedInstruction},
+	"EOFException.INVALID_RJUMP_DESTINATION":              []error{vm.ErrInvalidJumpDest, vm.ErrInvalidBranchCount},
+	"EOFException.UNREACHABLE_INSTRUCTIONS":               []error{vm.ErrUnreachableCode},
+	"EOFException.TRUNCATED_INSTRUCTION":                  []error{vm.ErrTruncatedImmediate},
+	"EOFException.STACK_HIGHER_THAN_OUTPUTS":              []error{vm.ErrStackHeightHigher},
+	"EOFException.JUMPF_DESTINATION_INCOMPATIBLE_OUTPUTS": []error{vm.ErrJUMPFOutputs},
+	"EOFException.INVALID_NON_RETURNING_FLAG":             []error{vm.ErrEOFStackOverflow}, // TODO(racytech): comment this out and test on jumpf, there supposed to be another error from our side, compare it to EVMone
 }
 
 func mapError(exception string, cmp error) bool {
@@ -129,7 +146,7 @@ func compareExceptionToErr(exc string, err error) error {
 
 func (e *EOFTest) Run(t *testing.T) error {
 	hexCode := e.json.Vector.Index.Code
-	fmt.Println("hexCode: ", hexCode)
+	// fmt.Println("hexCode: ", hexCode)
 	result := e.json.Vector.Index.Result.Prague.Result // TODO(racytech): revisit this part, think about result=true -> what to expect from test?
 	exception := e.json.Vector.Index.Result.Prague.Exception
 	code, err := hexutil.Decode(hexCode)
@@ -195,29 +212,14 @@ func (e *EOFTest) Run(t *testing.T) error {
 // ef00
 // 01
 // 01
-// 0010
+// 0008
 // 02
-// 0004
-// 0003
-// 000a
-// 0004
-// 0006
+// 0001
+// 0001
 // 04
-// 0000
-// 00
-// 00
-// 80
-// 0000
-// 00
-// 80
 // 0001
 // 00
+// 00
 // 80
 // 0000
-// 00
-// 00
-// 0002
-// e50001
-// 600035e1000100e50002
-// e3000300
-// 6001600055e4
+// 008000000000

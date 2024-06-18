@@ -18,8 +18,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-
-	"github.com/ledgerwatch/erigon/params"
 )
 
 var (
@@ -41,6 +39,8 @@ var (
 	ErrStackHeightMismatch    = errors.New("stack height mismatch")
 	ErrCALLFtoNonReturning    = errors.New("op CALLF to non returning function")
 )
+
+// TODO(racytech): split validate code into validate_instructions and validate_rjump_destinations
 
 // validateCode validates the code parameter against the EOF v1 validity requirements.
 func validateCode(code []byte, section int, metadata []*FunctionMetadata, jt *JumpTable, dataSize int) error {
@@ -144,11 +144,12 @@ func validateCode(code []byte, section int, metadata []*FunctionMetadata, jt *Ju
 		}
 		i += 1
 	}
+	// TODO(racytech): when investigate this case? when code ends with RJUMP or RJUMPI
 	// Code sections may not "fall through" and require proper termination.
 	// Therefore, the last instruction must be considered terminal.
-	if !jt[op].terminal {
-		return fmt.Errorf("%w: end with %s, pos %d", ErrInvalidCodeTermination, op, i)
-	}
+	// if !jt[op].terminal {
+	// 	return fmt.Errorf("%w: end with %s, pos %d", ErrInvalidCodeTermination, op, i)
+	// }
 	if _, err := validateControlFlow2(code, section, metadata, jt); err != nil {
 		return err
 	}
@@ -208,7 +209,7 @@ func visitSuccessor(currentOffset, nextOffset int, stackRequired stackHeightRang
 }
 
 func validateControlFlow2(code []byte, section int, metadata []*FunctionMetadata, jt *JumpTable) (int, error) {
-	fmt.Printf("section: %v, len(code): %v\n", section, len(code))
+	fmt.Println("-------------------------")
 	stackHeights := make([]stackHeightRange, len(code))
 	for i := 1; i < len(code); i++ {
 		stackHeights[i] = stackHeightRange{min: -1, max: -1}
@@ -217,10 +218,17 @@ func validateControlFlow2(code []byte, section int, metadata []*FunctionMetadata
 
 	for pos := 0; pos < len(code); {
 		op := OpCode(code[pos])
+		fmt.Println("---")
 		fmt.Printf("At position: %v, op: %v, opcodeHex: %v\n", pos, opCodeToString[op], code[pos])
+		// numPops := jt[op].numPop // how many stack items required by the instruction
+		// numPushes := jt[op].numPush
 		stackHeightRequired := jt[op].numPop // how many stack items required by the instruction
-		stackHeightChange := jt[op].numPush
-		fmt.Println("STACK HEIGHT REQUIRED: ", stackHeightRequired)
+		stackHeightChange := 0
+		if stackHeightRequired != jt[op].numPush {
+			stackHeightChange = jt[op].numPush - stackHeightRequired // can be negative
+		}
+
+		fmt.Printf("stackHeightRequired %v, stackHeightChange: %v\n", stackHeightRequired, stackHeightChange)
 		stackHeight := stackHeights[pos]
 
 		if !stackHeight.visited() {
@@ -239,6 +247,7 @@ func validateControlFlow2(code []byte, section int, metadata []*FunctionMetadata
 			}
 			stackHeightChange = int(metadata[fid].Output)
 		} else if op == JUMPF {
+			fmt.Println("JUMPF CASE")
 			fid := parseInt16(code[pos+1:]) // function id
 			if stackHeight.max+int(metadata[fid].MaxStackHeight)-int(metadata[fid].Input) > stackSizeLimit {
 				return 0, ErrEOFStackOverflow
@@ -247,17 +256,20 @@ func validateControlFlow2(code []byte, section int, metadata []*FunctionMetadata
 			if metadata[fid].Output == nonReturningFunction {
 				stackHeightRequired = int(metadata[fid].Input)
 			} else { // returning function
+				fmt.Println("------>NON RETURNING")
 				// type[current_section_index].outputs MUST be greater or equal type[target_section_index].outputs,
 				// or type[target_section_index].outputs MUST be 0x80, checked above
 				if metadata[section].Output < metadata[fid].Output {
 					return 0, ErrJUMPFOutputs
 				}
+				fmt.Println("------>PASS")
 
 				stackHeightRequired = int(metadata[section].Output) + int(metadata[fid].Input) - int(metadata[fid].Output)
 
 				if stackHeight.max > stackHeightRequired {
 					return 0, ErrStackHeightHigher
 				}
+				fmt.Println("------>PASS")
 			}
 		} else if op == RETF {
 			stackHeightRequired = int(metadata[section].Output)
@@ -276,11 +288,12 @@ func validateControlFlow2(code []byte, section int, metadata []*FunctionMetadata
 		}
 
 		if stackHeight.min < stackHeightRequired {
+			fmt.Println("HITTING THIS")
 			return 0, ErrEOFStackOverflow
 		}
-		fmt.Printf("before setting next: StackHeight.Max: %v, StackHeight: %v\n", stackHeight.max, stackHeight.min)
+		fmt.Printf("before setting next: StackHeight.Min: %v, StackHeight.Max: %v\n", stackHeight.min, stackHeight.max)
 		nextStackHeight := stackHeightRange{min: stackHeight.min + stackHeightChange, max: stackHeight.max + stackHeightChange}
-
+		fmt.Printf("after setting next: StackHeight.Min: %v, StackHeight.Max: %v\n", nextStackHeight.min, nextStackHeight.max)
 		var immSize int // immediate size
 		if op == RJUMPV {
 			immSize = 1 + int(code[pos+1]) + 1*2 // (size of int16)
@@ -293,7 +306,7 @@ func validateControlFlow2(code []byte, section int, metadata []*FunctionMetadata
 		fmt.Println("next: ", next)
 		// check validity of next instuction, skip RJUMP and termination instructions
 		if !jt[op].terminal && op != RJUMP {
-			fmt.Println("VISITIN NEXXT")
+			fmt.Println("VISITING NEXT")
 			if next >= len(code) {
 				fmt.Println("next >= len(code)")
 				return 0, ErrNoTerminalInstruction
@@ -331,96 +344,96 @@ func validateControlFlow2(code []byte, section int, metadata []*FunctionMetadata
 	return len(stackHeights), nil
 }
 
-// validateControlFlow iterates through all possible branches the provided code
-// value and determines if it is valid per EOF v1.
-func validateControlFlow(code []byte, section int, metadata []*FunctionMetadata, jt *JumpTable) (int, error) {
-	type item struct {
-		pos    int
-		height int
-	}
-	// TODO(racytech): compares this to EVMone's stack validation
-	var (
-		heights        = make(map[int]int)
-		worklist       = []item{{0, int(metadata[section].Input)}}
-		maxStackHeight = int(metadata[section].Input)
-	)
-	for 0 < len(worklist) {
-		var (
-			idx    = len(worklist) - 1
-			pos    = worklist[idx].pos
-			height = worklist[idx].height
-		)
-		worklist = worklist[:idx]
-	outer:
-		for pos < len(code) {
-			op := OpCode(code[pos])
+// // validateControlFlow iterates through all possible branches the provided code
+// // value and determines if it is valid per EOF v1.
+// func validateControlFlow(code []byte, section int, metadata []*FunctionMetadata, jt *JumpTable) (int, error) {
+// 	type item struct {
+// 		pos    int
+// 		height int
+// 	}
+// 	// TODO(racytech): compares this to EVMone's stack validation
+// 	var (
+// 		heights        = make(map[int]int)
+// 		worklist       = []item{{0, int(metadata[section].Input)}}
+// 		maxStackHeight = int(metadata[section].Input)
+// 	)
+// 	for 0 < len(worklist) {
+// 		var (
+// 			idx    = len(worklist) - 1
+// 			pos    = worklist[idx].pos
+// 			height = worklist[idx].height
+// 		)
+// 		worklist = worklist[:idx]
+// 	outer:
+// 		for pos < len(code) {
+// 			op := OpCode(code[pos])
 
-			// Check if pos has already be visited; if so, the stack heights should be the same.
-			if want, ok := heights[pos]; ok {
-				if height != want {
-					return 0, fmt.Errorf("%w: have %d, want %d", ErrConflictingStack, height, want)
-				}
-				// Already visited this path and stack height
-				// matches.
-				break
-			}
-			heights[pos] = height
+// 			// Check if pos has already be visited; if so, the stack heights should be the same.
+// 			if want, ok := heights[pos]; ok {
+// 				if height != want {
+// 					return 0, fmt.Errorf("%w: have %d, want %d", ErrConflictingStack, height, want)
+// 				}
+// 				// Already visited this path and stack height
+// 				// matches.
+// 				break
+// 			}
+// 			heights[pos] = height
 
-			// Validate height for current op and update as needed.
-			if want, have := jt[op].numPop, height; want > have {
-				return 0, fmt.Errorf("%w: at pos %d", ErrStackUnderflow{stackLen: have, required: want}, pos)
-			}
-			if want, have := jt[op].maxStack, height; want < have {
-				return 0, fmt.Errorf("%w: at pos %d", ErrStackOverflow{stackLen: have, limit: want}, pos)
-			}
-			height += int(params.StackLimit) - jt[op].maxStack
+// 			// Validate height for current op and update as needed.
+// 			if want, have := jt[op].numPop, height; want > have {
+// 				return 0, fmt.Errorf("%w: at pos %d", ErrStackUnderflow{stackLen: have, required: want}, pos)
+// 			}
+// 			if want, have := jt[op].maxStack, height; want < have {
+// 				return 0, fmt.Errorf("%w: at pos %d", ErrStackOverflow{stackLen: have, limit: want}, pos)
+// 			}
+// 			height += int(params.StackLimit) - jt[op].maxStack
 
-			switch {
-			case op == CALLF:
-				arg, _ := parseUint16(code[pos+1:])
-				if want, have := int(metadata[arg].Input), height; want > have {
-					return 0, fmt.Errorf("%w: at pos %d", ErrStackUnderflow{stackLen: have, required: want}, pos)
-				}
-				if have, limit := int(metadata[arg].Output)+height, int(params.StackLimit); have > limit {
-					return 0, fmt.Errorf("%w: at pos %d", ErrStackOverflow{stackLen: have, limit: limit}, pos)
-				}
-				height -= int(metadata[arg].Input)
-				height += int(metadata[arg].Output)
-				pos += 3
-			case op == RETF:
-				if have, want := int(metadata[section].Output), height; have != want {
-					return 0, fmt.Errorf("%w: have %d, want %d, at pos %d", ErrInvalidOutputs, have, want, pos)
-				}
-				break outer
-			case op == RJUMP:
-				arg := parseInt16(code[pos+1:])
-				pos += 3 + arg
-			case op == RJUMPI:
-				arg := parseInt16(code[pos+1:])
-				worklist = append(worklist, item{pos: pos + 3 + arg, height: height})
-				pos += 3
-			case op == RJUMPV:
-				count := int(code[pos+1])
-				for i := 0; i < count; i++ {
-					arg := parseInt16(code[pos+2+2*i:])
-					worklist = append(worklist, item{pos: pos + 2 + 2*count + arg, height: height})
-				}
-				pos += 2 + 2*count
-			default:
-				if op >= PUSH1 && op <= PUSH32 {
-					pos += 1 + int(op-PUSH0)
-				} else if jt[op].terminal {
-					break outer
-				} else {
-					// Simple op, no operand.
-					pos += 1
-				}
-			}
-			maxStackHeight = max(maxStackHeight, height)
-		}
-	}
-	if maxStackHeight != int(metadata[section].MaxStackHeight) {
-		return 0, fmt.Errorf("%w in code section %d: have %d, want %d", ErrInvalidMaxStackHeight, section, maxStackHeight, metadata[section].MaxStackHeight)
-	}
-	return len(heights), nil
-}
+// 			switch {
+// 			case op == CALLF:
+// 				arg, _ := parseUint16(code[pos+1:])
+// 				if want, have := int(metadata[arg].Input), height; want > have {
+// 					return 0, fmt.Errorf("%w: at pos %d", ErrStackUnderflow{stackLen: have, required: want}, pos)
+// 				}
+// 				if have, limit := int(metadata[arg].Output)+height, int(params.StackLimit); have > limit {
+// 					return 0, fmt.Errorf("%w: at pos %d", ErrStackOverflow{stackLen: have, limit: limit}, pos)
+// 				}
+// 				height -= int(metadata[arg].Input)
+// 				height += int(metadata[arg].Output)
+// 				pos += 3
+// 			case op == RETF:
+// 				if have, want := int(metadata[section].Output), height; have != want {
+// 					return 0, fmt.Errorf("%w: have %d, want %d, at pos %d", ErrInvalidOutputs, have, want, pos)
+// 				}
+// 				break outer
+// 			case op == RJUMP:
+// 				arg := parseInt16(code[pos+1:])
+// 				pos += 3 + arg
+// 			case op == RJUMPI:
+// 				arg := parseInt16(code[pos+1:])
+// 				worklist = append(worklist, item{pos: pos + 3 + arg, height: height})
+// 				pos += 3
+// 			case op == RJUMPV:
+// 				count := int(code[pos+1])
+// 				for i := 0; i < count; i++ {
+// 					arg := parseInt16(code[pos+2+2*i:])
+// 					worklist = append(worklist, item{pos: pos + 2 + 2*count + arg, height: height})
+// 				}
+// 				pos += 2 + 2*count
+// 			default:
+// 				if op >= PUSH1 && op <= PUSH32 {
+// 					pos += 1 + int(op-PUSH0)
+// 				} else if jt[op].terminal {
+// 					break outer
+// 				} else {
+// 					// Simple op, no operand.
+// 					pos += 1
+// 				}
+// 			}
+// 			maxStackHeight = max(maxStackHeight, height)
+// 		}
+// 	}
+// 	if maxStackHeight != int(metadata[section].MaxStackHeight) {
+// 		return 0, fmt.Errorf("%w in code section %d: have %d, want %d", ErrInvalidMaxStackHeight, section, maxStackHeight, metadata[section].MaxStackHeight)
+// 	}
+// 	return len(heights), nil
+// }

@@ -174,8 +174,8 @@ func (c *Container) UnmarshalBinary(b []byte) error {
 	if kind != kindCode {
 		return fmt.Errorf("%w: found section kind %x instead", ErrMissingCodeHeader, kind)
 	}
-	if len(codeSizes) != typesSize/4 {
-		return fmt.Errorf("%w: mismatch of code sections cound and type signatures, types %d, code %d", ErrInvalidCodeSize, typesSize/4, len(codeSizes))
+	if len(codeSizes) != typesSize/4 { // invalid code section count or type section count
+		return fmt.Errorf("%w: mismatch of code sections count and type signatures, types %d, code %d", ErrInvalidCodeSize, typesSize/4, len(codeSizes))
 	}
 
 	// Parse optional container section here
