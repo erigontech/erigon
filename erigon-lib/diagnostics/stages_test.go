@@ -7,104 +7,103 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestStageAdd(t *testing.T) {
+func TestInitSyncStages(t *testing.T) {
 	d, err := NewTestDiagnosticClient()
 	require.NoError(t, err)
 
-	//Test Set Stages List
-	d.SetStagesList(stagesListMock)
+	stages := diagnostics.InitStagesFromList(nodeStages)
+	d.SetStagesList(stages)
 	require.Equal(t, d.GetSyncStages(), stagesListMock)
 
-	//Test adding array of SubStages for Stage
-	d.AddOrUpdateSugStages(subStagesListMock)
-	require.Equal(t, d.GetSyncStages(), updatedStagesMock)
+	subStages := diagnostics.InitSubStagesFromList(snapshotsSubStages)
+	require.Equal(t, subStages, subStagesListMock)
+	d.SetSubStagesList("Snapshots", subStages)
 
-	//Test Set Current Sync Stage Update
+	require.Equal(t, d.GetSyncStages(), stagesListWithSnapshotsSubStagesMock)
+}
+
+func TestSetCurrentSyncStage(t *testing.T) {
+	d, err := NewTestDiagnosticClient()
+	require.NoError(t, err)
+
+	stages := diagnostics.InitStagesFromList(nodeStages)
+	d.SetStagesList(stages)
+	subStages := diagnostics.InitSubStagesFromList(snapshotsSubStages)
+	d.SetSubStagesList("Snapshots", subStages)
+
 	d.SetCurrentSyncStage(diagnostics.CurrentSyncStage{Stage: "Snapshots"})
 	require.Equal(t, d.GetSyncStages()[0].State, diagnostics.Running)
 
-	//Test Set Current Sync Stage Update Previous stages to completed state
 	d.SetCurrentSyncStage(diagnostics.CurrentSyncStage{Stage: "BlockHashes"})
 	require.Equal(t, d.GetSyncStages()[0].State, diagnostics.Completed)
 	require.Equal(t, d.GetSyncStages()[1].State, diagnostics.Running)
-	require.Equal(t, d.GetSyncStages()[2].State, diagnostics.Queued)
-	d.SetCurrentSyncStage(diagnostics.CurrentSyncStage{Stage: "SnapSendersshots"})
-	require.Equal(t, d.GetSyncStages()[0].State, diagnostics.Completed)
-	require.Equal(t, d.GetSyncStages()[1].State, diagnostics.Completed)
-	require.Equal(t, d.GetSyncStages()[2].State, diagnostics.Running)
 
-	//Test Set Current Sync Stage To StageWhich was completed
 	d.SetCurrentSyncStage(diagnostics.CurrentSyncStage{Stage: "Snapshots"})
 	require.Equal(t, d.GetSyncStages()[0].State, diagnostics.Running)
 	require.Equal(t, d.GetSyncStages()[1].State, diagnostics.Queued)
 	require.Equal(t, d.GetSyncStages()[2].State, diagnostics.Queued)
+}
 
-	//Test Update SubStage with different state
-	d.AddOrUpdateSugStages(diagnostics.UpdateSyncSubStageList{
-		List: []diagnostics.UpdateSyncSubStage{
-			{
-				StageId: string("Snapshots"),
-				SubStage: diagnostics.SyncSubStage{
-					ID:    "Download header-chain",
-					State: diagnostics.Running,
-				},
-			},
-		},
-	})
-	require.Equal(t, d.GetSyncStages()[0].SubStages[0].State, diagnostics.Running)
+func TestSetCurrentSyncSubStage(t *testing.T) {
+	d, err := NewTestDiagnosticClient()
+	require.NoError(t, err)
 
-	//Test set current SubStage
+	stages := diagnostics.InitStagesFromList(nodeStages)
+	d.SetStagesList(stages)
+	subStages := diagnostics.InitSubStagesFromList(snapshotsSubStages)
+	d.SetSubStagesList("Snapshots", subStages)
+
 	d.SetCurrentSyncStage(diagnostics.CurrentSyncStage{Stage: "Snapshots"})
 	d.SetCurrentSyncSubStage(diagnostics.CurrentSyncSubStage{SubStage: "Download header-chain"})
 	require.Equal(t, d.GetSyncStages()[0].SubStages[0].State, diagnostics.Running)
-	require.Equal(t, d.GetSyncStages()[0].SubStages[1].State, diagnostics.Queued)
+
 	d.SetCurrentSyncSubStage(diagnostics.CurrentSyncSubStage{SubStage: "Download snapshots"})
 	require.Equal(t, d.GetSyncStages()[0].SubStages[0].State, diagnostics.Completed)
 	require.Equal(t, d.GetSyncStages()[0].SubStages[1].State, diagnostics.Running)
 
-	//Test Set Current Sync SubStage To Stage Which was completed
 	d.SetCurrentSyncSubStage(diagnostics.CurrentSyncSubStage{SubStage: "Download header-chain"})
-	require.Equal(t, d.GetSyncStages()[0].SubStages[0].State, diagnostics.Running)
-	require.Equal(t, d.GetSyncStages()[0].SubStages[1].State, diagnostics.Queued)
-
-	//Test make all subStages completed after stage completed
-	d.SetCurrentSyncStage(diagnostics.CurrentSyncStage{Stage: "BlockHashes"})
 	require.Equal(t, d.GetSyncStages()[0].SubStages[0].State, diagnostics.Completed)
-	require.Equal(t, d.GetSyncStages()[0].SubStages[1].State, diagnostics.Completed)
+	require.Equal(t, d.GetSyncStages()[0].SubStages[1].State, diagnostics.Running)
+	require.Equal(t, d.GetSyncStages()[0].SubStages[2].State, diagnostics.Queued)
 }
 
 var (
+	nodeStages         = []string{"Snapshots", "BlockHashes", "Senders"}
+	snapshotsSubStages = []string{"Download header-chain", "Download snapshots", "Indexing", "Fill DB"}
+
 	stagesListMock = []diagnostics.SyncStage{
 		{ID: "Snapshots", State: diagnostics.Queued, SubStages: []diagnostics.SyncSubStage{}},
 		{ID: "BlockHashes", State: diagnostics.Queued, SubStages: []diagnostics.SyncSubStage{}},
-		{ID: "SnapSendersshots", State: diagnostics.Queued, SubStages: []diagnostics.SyncSubStage{}},
+		{ID: "Senders", State: diagnostics.Queued, SubStages: []diagnostics.SyncSubStage{}},
 	}
 
-	updatedStagesMock = []diagnostics.SyncStage{
+	subStagesListMock = []diagnostics.SyncSubStage{
+		{
+			ID:    "Download header-chain",
+			State: diagnostics.Queued,
+		},
+		{
+			ID:    "Download snapshots",
+			State: diagnostics.Queued,
+		},
+		{
+			ID:    "Indexing",
+			State: diagnostics.Queued,
+		},
+		{
+			ID:    "Fill DB",
+			State: diagnostics.Queued,
+		},
+	}
+
+	stagesListWithSnapshotsSubStagesMock = []diagnostics.SyncStage{
 		{ID: "Snapshots", State: diagnostics.Queued, SubStages: []diagnostics.SyncSubStage{
 			{ID: "Download header-chain", State: diagnostics.Queued},
 			{ID: "Download snapshots", State: diagnostics.Queued},
+			{ID: "Indexing", State: diagnostics.Queued},
+			{ID: "Fill DB", State: diagnostics.Queued},
 		}},
 		{ID: "BlockHashes", State: diagnostics.Queued, SubStages: []diagnostics.SyncSubStage{}},
-		{ID: "SnapSendersshots", State: diagnostics.Queued, SubStages: []diagnostics.SyncSubStage{}},
-	}
-
-	subStagesListMock = diagnostics.UpdateSyncSubStageList{
-		List: []diagnostics.UpdateSyncSubStage{
-			{
-				StageId: "Snapshots",
-				SubStage: diagnostics.SyncSubStage{
-					ID:    "Download header-chain",
-					State: diagnostics.Queued,
-				},
-			},
-			{
-				StageId: "Snapshots",
-				SubStage: diagnostics.SyncSubStage{
-					ID:    "Download snapshots",
-					State: diagnostics.Queued,
-				},
-			},
-		},
+		{ID: "Senders", State: diagnostics.Queued, SubStages: []diagnostics.SyncSubStage{}},
 	}
 )
