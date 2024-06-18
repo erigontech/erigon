@@ -12,8 +12,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
 	execution "github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"

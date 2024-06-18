@@ -5,13 +5,14 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/nxadm/tail"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cmd/observer/database"
 	"github.com/ledgerwatch/erigon/cmd/observer/observer/node_utils"
 	"github.com/ledgerwatch/erigon/cmd/observer/utils"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/nxadm/tail"
 )
 
 type Intake struct {

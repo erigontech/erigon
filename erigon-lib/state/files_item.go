@@ -4,11 +4,12 @@ import (
 	"os"
 	"sync/atomic"
 
+	btree2 "github.com/tidwall/btree"
+
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/seg"
-	"github.com/ledgerwatch/log/v3"
-	btree2 "github.com/tidwall/btree"
 )
 
 // filesItem is "dirty" file - means file which can be:

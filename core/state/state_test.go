@@ -28,7 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 	checker "gopkg.in/check.v1"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"

@@ -28,7 +28,8 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	mmap2 "github.com/edsrzf/mmap-go"
-	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 type FixedSizeBitmaps struct {

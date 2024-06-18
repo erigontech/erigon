@@ -30,10 +30,9 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/log/v3"
-
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/mmap"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano16"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"

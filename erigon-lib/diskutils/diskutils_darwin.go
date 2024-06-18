@@ -5,8 +5,6 @@ package diskutils
 import (
 	"os"
 	"syscall"
-
-	"github.com/ledgerwatch/log/v3"
 )
 
 func MountPointForDirPath(dirPath string) string {
