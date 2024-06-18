@@ -85,7 +85,13 @@ jobs:
       if: steps.test_step.outputs.test_executed == 'true'
       env:
         TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
-      run: python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --branch ${{ github.ref_name }} --test_name clean-exit-block-downloading --chain $CHAIN --outcome $TEST_RESULT --result_file ${{ github.workspace }}/result.json
+      run: |
+        db_version=$(python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/prod_info.py $ERIGON_REFERENCE_DATA_DIR/../production.ini production erigon_repo_commit)
+        if [ -z "$db_version" ]; then
+          db_version="no-version"
+        fi
+        
+        python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --branch ${{ github.ref_name }} --test_name clean-exit-block-downloading --chain $CHAIN --runner ${{ runner.name }} --db_version $db_version --outcome $TEST_RESULT --result_file ${{ github.workspace }}/result.json
 
     - name: Upload test results
       if: steps.test_step.outputs.test_executed == 'true'
