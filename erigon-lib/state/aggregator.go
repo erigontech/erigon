@@ -1903,6 +1903,9 @@ func (ac *AggregatorRoTx) Close() {
 	for _, ii := range ac.iis {
 		ii.Close()
 	}
+	for _, ap := range ac.appendable {
+		ap.Close()
+	}
 }
 
 // BackgroundResult - used only indicate that some work is done
