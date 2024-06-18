@@ -118,21 +118,6 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 		eth1Block = denebResp.ExecutionPayload
 		blobsBundle = denebResp.BlobsBundle
 	}
-	// log
-	eth1blockBytes, err := json.Marshal(eth1Block)
-	if err != nil {
-		log.Warn("[mev builder] json.Marshal error", "err", err)
-		return nil, nil, err
-	} else {
-		log.Info("[mev builder] eth1blockBytes", "eth1blockBytes", string(eth1blockBytes))
-	}
-	blobsBundleBytes, err := json.Marshal(blobsBundle)
-	if err != nil {
-		log.Warn("[mev builder] json.Marshal error", "err", err)
-		return nil, nil, err
-	} else {
-		log.Info("[mev builder] blobsBundleBytes", "blobsBundleBytes", string(blobsBundleBytes))
-	}
 	return eth1Block, blobsBundle, nil
 }
 

@@ -815,12 +815,11 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 		}
 		for i, commitment := range blobsBundle.Commitments {
 			blockCommitment := blockCommitments.Get(i)
-			blockCommitmentBytes, err := blockCommitment.MarshalJSON()
+			blockCommitmentBytes, err := blockCommitment.HashSSZ()
 			if err != nil {
-				//http.Error(w, err.Error(), http.StatusInternalServerError)
 				return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 			}
-			if !bytes.Equal(commitment, blockCommitmentBytes) {
+			if !bytes.Equal(commitment, blockCommitmentBytes[:]) {
 				return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("commitment mismatch: %d", i))
 			}
 			// add the bundle to recently produced blobs
