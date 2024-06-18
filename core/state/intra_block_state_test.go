@@ -32,9 +32,18 @@ import (
 	"testing/quick"
 
 	"github.com/holiman/uint256"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal"
+	stateLib "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/core/tracing"
 	"github.com/ledgerwatch/erigon/core/types"
+
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 )
 
 func TestSnapshotRandom(t *testing.T) {
@@ -80,14 +89,14 @@ func newTestAction(addr libcommon.Address, r *rand.Rand) testAction {
 		{
 			name: "SetBalance",
 			fn: func(a testAction, s *IntraBlockState) {
-				s.SetBalance(addr, uint256.NewInt(uint64(a.args[0])))
+				s.SetBalance(addr, uint256.NewInt(uint64(a.args[0])), tracing.BalanceChangeUnspecified)
 			},
 			args: make([]int64, 1),
 		},
 		{
 			name: "AddBalance",
 			fn: func(a testAction, s *IntraBlockState) {
-				s.AddBalance(addr, uint256.NewInt(uint64(a.args[0])))
+				s.AddBalance(addr, uint256.NewInt(uint64(a.args[0])), tracing.BalanceChangeUnspecified)
 			},
 			args: make([]int64, 1),
 		},
@@ -227,17 +236,45 @@ func (test *snapshotTest) String() string {
 
 func (test *snapshotTest) run() bool {
 	// Run all actions and create snapshots.
-	db := memdb.New("")
+	db := memdb.NewStateDB("")
 	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
+
+	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
+	if err != nil {
+		test.err = err
+		return false
+	}
+	defer agg.Close()
+
+	_db, err := temporal.New(db, agg)
+	if err != nil {
+		test.err = err
+		return false
+	}
+
+	tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	if err != nil {
 		test.err = err
 		return false
 	}
 	defer tx.Rollback()
+
+	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	if err != nil {
+		test.err = err
+		return false
+	}
+	defer domains.Close()
+
+	domains.SetTxNum(1)
+	domains.SetBlockNum(1)
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	if err != nil {
+		test.err = err
+		return false
+	}
 	var (
-		ds           = NewPlainState(tx, 1, nil)
-		state        = New(ds)
+		state        = New(NewReaderV4(domains))
 		snapshotRevs = make([]int, len(test.snapshots))
 		sindex       = 0
 	)
@@ -251,8 +288,7 @@ func (test *snapshotTest) run() bool {
 	// Revert all snapshots in reverse order. Each revert must yield a state
 	// that is equivalent to fresh state with all actions up the snapshot applied.
 	for sindex--; sindex >= 0; sindex-- {
-		checkds := NewPlainState(tx, 1, nil)
-		checkstate := New(checkds)
+		checkstate := New(NewReaderV4(domains))
 		for _, action := range test.actions[:test.snapshots[sindex]] {
 			action.fn(action, checkstate)
 		}

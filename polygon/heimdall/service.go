@@ -2,10 +2,12 @@ package heimdall
 
 import (
 	"context"
+	"errors"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -137,6 +139,39 @@ func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Spa
 func (s *service) FetchLatestSpan(ctx context.Context) (*Span, error) {
 	s.checkpointScraper.Synchronize(ctx)
 	return s.spanStore.GetLastEntity(ctx)
+}
+
+func (s *service) FetchLatestSpans(ctx context.Context, count uint) ([]*Span, error) {
+	if count == 0 {
+		return nil, errors.New("can't fetch 0 latest spans")
+	}
+
+	span, err := s.FetchLatestSpan(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	latestSpans := make([]*Span, 0, count)
+	latestSpans = append(latestSpans, span)
+	count--
+
+	for count > 0 {
+		prevSpanRawId := span.RawId()
+		if prevSpanRawId == 0 {
+			break
+		}
+
+		span, err = s.spanStore.GetEntity(ctx, prevSpanRawId-1)
+		if err != nil {
+			return nil, err
+		}
+
+		latestSpans = append(latestSpans, span)
+		count--
+	}
+
+	libcommon.SliceReverse(latestSpans)
+	return latestSpans, nil
 }
 
 func castEntityToWaypoint[TEntity Waypoint](entity TEntity) Waypoint {

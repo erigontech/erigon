@@ -22,7 +22,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
 	"math/big"
 	"net/http"
 	"regexp"
@@ -32,11 +31,14 @@ import (
 	"sync"
 	"time"
 
+	txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
+
 	"github.com/gorilla/websocket"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/rawdb"

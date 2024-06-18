@@ -19,7 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/eth/tracers"
-	tracerConfig "github.com/ledgerwatch/erigon/eth/tracers/config"
+	tracersConfig "github.com/ledgerwatch/erigon/eth/tracers/config"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -82,8 +82,8 @@ func TraceTx(
 	message core.Message,
 	blockCtx evmtypes.BlockContext,
 	txCtx evmtypes.TxContext,
-	ibs *state.IntraBlockState,
-	config *tracerConfig.TraceConfig,
+	ibs evmtypes.IntraBlockState,
+	config *tracersConfig.TraceConfig,
 	chainConfig *chain.Config,
 	stream *jsoniter.Stream,
 	callTimeout time.Duration,
@@ -119,7 +119,7 @@ func TraceTx(
 
 func AssembleTracer(
 	ctx context.Context,
-	config *tracerConfig.TraceConfig,
+	config *tracersConfig.TraceConfig,
 	txHash libcommon.Hash,
 	stream *jsoniter.Stream,
 	callTimeout time.Duration,
@@ -165,8 +165,8 @@ func AssembleTracer(
 func ExecuteTraceTx(
 	blockCtx evmtypes.BlockContext,
 	txCtx evmtypes.TxContext,
-	ibs *state.IntraBlockState,
-	config *tracerConfig.TraceConfig,
+	ibs evmtypes.IntraBlockState,
+	config *tracersConfig.TraceConfig,
 	chainConfig *chain.Config,
 	stream *jsoniter.Stream,
 	tracer *tracers.Tracer,

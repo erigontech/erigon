@@ -20,13 +20,22 @@ import (
 	"context"
 	"math"
 	"math/big"
+	"os"
+	"path/filepath"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/log/v3"
+
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal"
+	state3 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -109,7 +118,7 @@ func setDefaults(cfg *Config) {
 //
 // Execute sets up an in-memory, temporary, environment for the execution of
 // the given code. It makes sure that it's restored to its original state afterwards.
-func Execute(code, input []byte, cfg *Config, bn uint64) ([]byte, *state.IntraBlockState, error) {
+func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.IntraBlockState, error) {
 	if cfg == nil {
 		cfg = new(Config)
 		setDefaults(cfg)
@@ -119,15 +128,29 @@ func Execute(code, input []byte, cfg *Config, bn uint64) ([]byte, *state.IntraBl
 	var tx kv.RwTx
 	var err error
 	if !externalState {
-		db := memdb.New("")
+		db := memdb.NewStateDB(tempdir)
 		defer db.Close()
-		tx, err = db.BeginRw(context.Background())
+		agg, err := state3.NewAggregator(context.Background(), datadir.New(tempdir), config3.HistoryV3AggregationStep, db, log.New())
+		if err != nil {
+			return nil, nil, err
+		}
+		defer agg.Close()
+		_db, err := temporal.New(db, agg)
+		if err != nil {
+			return nil, nil, err
+		}
+		tx, err = _db.BeginTemporalRw(context.Background()) //nolint:gocritic
 		if err != nil {
 			return nil, nil, err
 		}
 		defer tx.Rollback()
-		cfg.r = state.NewPlainStateReader(tx)
-		cfg.w = state.NewPlainStateWriter(tx, tx, 0)
+		sd, err := state3.NewSharedDomains(tx, log.New())
+		if err != nil {
+			return nil, nil, err
+		}
+		defer sd.Close()
+		cfg.r = state.NewReaderV4(sd)
+		cfg.w = state.NewWriterV4(sd)
 		cfg.State = state.New(cfg.r)
 	}
 	var (
@@ -167,15 +190,32 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, libcommon.Addres
 	var tx kv.RwTx
 	var err error
 	if !externalState {
-		db := memdb.New("")
+		tmp := filepath.Join(os.TempDir(), "create-vm")
+		defer os.RemoveAll(tmp) //nolint
+
+		db := memdb.NewStateDB(tmp)
 		defer db.Close()
-		tx, err = db.BeginRw(context.Background())
+		agg, err := state3.NewAggregator(context.Background(), datadir.New(tmp), config3.HistoryV3AggregationStep, db, log.New())
+		if err != nil {
+			return nil, [20]byte{}, 0, err
+		}
+		defer agg.Close()
+		_db, err := temporal.New(db, agg)
+		if err != nil {
+			return nil, [20]byte{}, 0, err
+		}
+		tx, err = _db.BeginTemporalRw(context.Background()) //nolint:gocritic
 		if err != nil {
 			return nil, [20]byte{}, 0, err
 		}
 		defer tx.Rollback()
-		cfg.r = state.NewPlainStateReader(tx)
-		cfg.w = state.NewPlainStateWriter(tx, tx, 0)
+		sd, err := state3.NewSharedDomains(tx, log.New())
+		if err != nil {
+			return nil, [20]byte{}, 0, err
+		}
+		defer sd.Close()
+		cfg.r = state.NewReaderV4(sd)
+		cfg.w = state.NewWriterV4(sd)
 		cfg.State = state.New(cfg.r)
 	}
 	var (
