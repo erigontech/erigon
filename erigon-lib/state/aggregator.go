@@ -34,7 +34,6 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/log/v3"
 	rand2 "golang.org/x/exp/rand"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -49,6 +48,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/seg"
 )
 

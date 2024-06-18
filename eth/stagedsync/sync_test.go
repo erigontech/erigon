@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon-lib/wrap"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/ledgerwatch/erigon-lib/wrap"
 
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"

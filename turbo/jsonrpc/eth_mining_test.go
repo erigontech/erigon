@@ -8,8 +8,9 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"

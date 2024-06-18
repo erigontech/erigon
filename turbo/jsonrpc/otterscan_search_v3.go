@@ -9,10 +9,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethutils"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type txNumsIterFactory func(tx kv.TemporalTx, addr common.Address, fromTxNum int) (*rawdbv3.MapTxNum2BlockNumIter, error)

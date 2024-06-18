@@ -6,9 +6,10 @@ import (
 	"unsafe"
 
 	silkworm_go "github.com/erigontech/silkworm-go"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type Silkworm = silkworm_go.Silkworm

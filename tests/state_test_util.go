@@ -27,8 +27,9 @@ import (
 	"strings"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/config3"
 	"golang.org/x/crypto/sha3"
+
+	"github.com/ledgerwatch/erigon-lib/config3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -39,6 +40,7 @@ import (
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
@@ -48,7 +50,6 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // StateTest checks transaction processing without block context.

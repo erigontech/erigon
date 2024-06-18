@@ -39,7 +39,6 @@ import (
 	"github.com/google/btree"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -55,6 +54,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	"github.com/ledgerwatch/erigon-lib/types"

@@ -9,7 +9,8 @@ import (
 	"github.com/ledgerwatch/erigon/eth/consensuschain"
 
 	jsoniter "github.com/json-iterator/go"
-	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"

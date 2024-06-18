@@ -7,11 +7,12 @@ import (
 	"sync"
 
 	"github.com/c2h5oh/datasize"
+	"golang.org/x/sync/semaphore"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/sync/semaphore"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 type DiagnosticClient struct {

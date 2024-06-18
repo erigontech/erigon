@@ -27,7 +27,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -39,6 +38,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 // MaxTxTTL - kv interface provide high-consistancy guaranties: Serializable Isolations Level https://en.wikipedia.org/wiki/Isolation_(database_systems)
