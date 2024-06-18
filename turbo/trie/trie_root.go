@@ -1528,29 +1528,6 @@ func CastTrieNodeValue(hashes, rootHash []byte) []libcommon.Hash {
 	return to
 }
 
-// CalcRoot is a combination of `ResolveStateTrie` and `UpdateStateTrie`
-// DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree
-func CalcRoot(logPrefix string, tx kv.Tx) (libcommon.Hash, error) {
-	loader := NewFlatDBTrieLoader(logPrefix, NewRetainList(0), nil, nil, false)
-
-	h, err := loader.CalcTrieRoot(tx, nil)
-	if err != nil {
-		return EmptyRoot, err
-	}
-
-	return h, nil
-}
-func CalcRootTrace(logPrefix string, tx kv.Tx) (libcommon.Hash, error) {
-	loader := NewFlatDBTrieLoader(logPrefix, NewRetainList(0), nil, nil, true)
-
-	h, err := loader.CalcTrieRoot(tx, nil)
-	if err != nil {
-		return EmptyRoot, err
-	}
-
-	return h, nil
-}
-
 func makeCurrentKeyStr(k []byte) string {
 	var currentKeyStr string
 	if k == nil {
