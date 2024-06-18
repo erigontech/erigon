@@ -37,7 +37,8 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/debug"
 
 	"github.com/gofrs/flock"
-	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"

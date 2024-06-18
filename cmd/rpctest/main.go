@@ -7,10 +7,11 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/spf13/cobra"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
 	"github.com/ledgerwatch/erigon/turbo/logging"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
 )
 
 func main() {

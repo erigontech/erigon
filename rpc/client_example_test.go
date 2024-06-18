@@ -23,8 +23,8 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // In this example, our client wishes to track the latest 'block number'
