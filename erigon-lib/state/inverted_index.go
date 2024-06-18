@@ -44,6 +44,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/backup"
@@ -690,7 +691,7 @@ func (iit *InvertedIndexRoTx) smallestTxNum(tx kv.Tx) uint64 {
 	fst, _ := kv.FirstKey(tx, iit.ii.indexKeysTable)
 	if len(fst) > 0 {
 		fstInDb := binary.BigEndian.Uint64(fst)
-		fmt.Println("fstInDb", fstInDb)
+		fmt.Println("fstInDb", fstInDb/config3.HistoryV3AggregationStep)
 		return min(fstInDb, math.MaxUint64)
 	}
 	return math.MaxUint64
