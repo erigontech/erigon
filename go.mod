@@ -1,6 +1,6 @@
 module github.com/ledgerwatch/erigon
 
-go 1.22
+go 1.21.5
 
 toolchain go1.22.4
 
