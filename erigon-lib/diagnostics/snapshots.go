@@ -225,6 +225,17 @@ func (d *DiagnosticClient) addOrUpdateSegmentIndexingState(upd SnapshotIndexingS
 	}
 
 	d.syncStats.SnapshotIndexing.TimeElapsed = upd.TimeElapsed
+
+	totalProgress := 0
+	for _, seg := range d.syncStats.SnapshotIndexing.Segments {
+		totalProgress += seg.Percent
+	}
+
+	d.updateSnapshotStageStats(SyncStageStats{
+		TimeElapsed: SecondsToHHMMString(uint64(upd.TimeElapsed)),
+		TimeLeft:    "unknown",
+		Progress:    fmt.Sprintf("%d%%", totalProgress/len(d.syncStats.SnapshotIndexing.Segments)),
+	})
 }
 
 func (d *DiagnosticClient) runSnapshotFilesListListener(rootCtx context.Context) {

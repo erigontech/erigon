@@ -2208,20 +2208,37 @@ func (s *cursorDup2iter) init(table string, tx kv.Tx) error {
 
 	// to find LAST key with given prefix:
 	nextSubtree, ok := kv.NextSubtree(s.fromPrefix)
-	if ok {
-		_, s.nextV, err = s.c.SeekBothExact(s.key, nextSubtree)
-		if err != nil {
-			return err
-		}
+	if !ok {
 		_, s.nextV, err = s.c.PrevDup()
 		if err != nil {
 			return err
 		}
-	} else {
-		s.nextV, err = s.c.LastDup()
+		return nil
+	}
+
+	s.nextV, err = s.c.SeekBothRange(s.key, nextSubtree)
+	if err != nil {
+		return err
+	}
+	if s.nextV != nil {
+		_, s.nextV, err = s.c.PrevDup()
 		if err != nil {
 			return err
 		}
+		return nil
+	}
+
+	k, s.nextV, err = s.c.SeekExact(s.key)
+	if err != nil {
+		return err
+	}
+	if k == nil {
+		s.nextV = nil
+		return nil
+	}
+	s.nextV, err = s.c.LastDup()
+	if err != nil {
+		return err
 	}
 	return nil
 }
