@@ -10,6 +10,7 @@ import (
 	"net/url"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/log/v3"
@@ -19,18 +20,20 @@ var _ BuilderClient = &builderClient{}
 
 type builderClient struct {
 	// ref: https://ethereum.github.io/builder-specs/#/
-	httpClient *http.Client
-	url        *url.URL
+	httpClient   *http.Client
+	url          *url.URL
+	beaconConfig *clparams.BeaconChainConfig
 }
 
-func NewBlockBuilderClient(baseUrl string) *builderClient {
+func NewBlockBuilderClient(baseUrl string, beaconConfig *clparams.BeaconChainConfig) *builderClient {
 	u, err := url.Parse(baseUrl)
 	if err != nil {
 		panic(err)
 	}
 	c := &builderClient{
-		httpClient: &http.Client{},
-		url:        u,
+		httpClient:   &http.Client{},
+		url:          u,
+		beaconConfig: beaconConfig,
 	}
 	if err := c.GetStatus(context.Background()); err != nil {
 		log.Error("cannot connect to builder client", "url", baseUrl, "error", err)
@@ -105,7 +108,10 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 		denebResp := &struct {
 			ExecutionPayload *cltypes.Eth1Block          `json:"execution_payload"`
 			BlobsBundle      *engine_types.BlobsBundleV1 `json:"blobs_bundle"`
-		}{}
+		}{
+			ExecutionPayload: cltypes.NewEth1Block(clparams.DenebVersion, b.beaconConfig),
+			BlobsBundle:      &engine_types.BlobsBundleV1{},
+		}
 		if err := json.Unmarshal(resp.Data, denebResp); err != nil {
 			return nil, nil, err
 		}

@@ -146,7 +146,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 			rcfg.Builder = false
 		} else {
 			log.Info("Starting with builder mode")
-			options = append(options, caplin1.WithBuilder(cfg.MevRelayUrl))
+			options = append(options, caplin1.WithBuilder(cfg.MevRelayUrl, cfg.BeaconCfg))
 		}
 	}
 

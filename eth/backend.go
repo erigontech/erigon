@@ -967,7 +967,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			caplinOpt := []caplin1.CaplinOption{}
 			if config.BeaconRouter.Builder {
 				if config.CaplinConfig.RelayUrlExist() {
-					caplinOpt = append(caplinOpt, caplin1.WithBuilder(config.CaplinConfig.MevRelayUrl))
+					caplinOpt = append(caplinOpt, caplin1.WithBuilder(config.CaplinConfig.MevRelayUrl, beaconCfg))
 				} else {
 					log.Warn("builder api enable but relay url not set. Skipping builder mode")
 					config.BeaconRouter.Builder = false
