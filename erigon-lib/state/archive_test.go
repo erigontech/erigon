@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/seg"
 )
 
@@ -123,4 +124,16 @@ func TestArchiveWriter(t *testing.T) {
 		checkLatest(t, r, td)
 	})
 
+}
+
+func TestPrunableProgress(t *testing.T) {
+	_, tx := memdb.NewTestTx(t)
+	SaveExecV3PrunableProgress(tx, []byte("test"), 100)
+	s, err := GetExecV3PrunableProgress(tx, []byte("test"))
+	require.NoError(t, err)
+	require.EqualValues(t, s, 100)
+	SaveExecV3PrunableProgress(tx, []byte("test"), 120)
+	s, err = GetExecV3PrunableProgress(tx, []byte("test"))
+	require.NoError(t, err)
+	require.EqualValues(t, s, 120)
 }
