@@ -12,11 +12,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
+
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 )
@@ -332,6 +334,10 @@ func (s *Merge) Initialize(config *chain.Config, chain consensus.ChainHeaderRead
 
 func (s *Merge) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 	return s.eth1Engine.APIs(chain)
+}
+
+func (s *Merge) GetTransferFunc() evmtypes.TransferFunc {
+	return s.eth1Engine.GetTransferFunc()
 }
 
 func (s *Merge) Close() error {
