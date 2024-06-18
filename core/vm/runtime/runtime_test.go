@@ -25,13 +25,18 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	state3 "github.com/ledgerwatch/erigon-lib/state"
+	stateLib "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -44,8 +49,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/stretchr/testify/require"
 )
 
 func TestDefaults(t *testing.T) {
@@ -211,9 +214,20 @@ func BenchmarkCall(b *testing.B) {
 	}
 }
 func benchmarkEVM_Create(b *testing.B, code string) {
-	_, tx := memdb.NewTestTx(b)
+	db := testTemporalDB(b)
+	tx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(b, err)
+	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	require.NoError(b, err)
+	defer domains.Close()
+
+	domains.SetTxNum(1)
+	domains.SetBlockNum(1)
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	require.NoError(b, err)
+
 	var (
-		statedb  = state.New(state.NewPlainState(tx, 1, nil))
+		statedb  = state.New(state.NewReaderV4(domains))
 		sender   = libcommon.BytesToAddress([]byte("sender"))
 		receiver = libcommon.BytesToAddress([]byte("receiver"))
 	)
@@ -286,8 +300,10 @@ func (cr *FakeChainHeaderReader) GetHeaderByHash(hash libcommon.Hash) *types.Hea
 func (cr *FakeChainHeaderReader) GetHeaderByNumber(number uint64) *types.Header {
 	return cr.GetHeaderByHash(libcommon.BigToHash(big.NewInt(int64(number))))
 }
-func (cr *FakeChainHeaderReader) Config() *chain.Config        { return nil }
-func (cr *FakeChainHeaderReader) CurrentHeader() *types.Header { return nil }
+func (cr *FakeChainHeaderReader) Config() *chain.Config                 { return nil }
+func (cr *FakeChainHeaderReader) CurrentHeader() *types.Header          { return nil }
+func (cr *FakeChainHeaderReader) CurrentFinalizedHeader() *types.Header { return nil }
+func (cr *FakeChainHeaderReader) CurrentSafeHeader() *types.Header      { return nil }
 
 // GetHeader returns a fake header with the parentHash equal to the number - 1
 func (cr *FakeChainHeaderReader) GetHeader(hash libcommon.Hash, number uint64) *types.Header {
@@ -511,8 +527,19 @@ func TestBlockHashEip2935(t *testing.T) {
 func benchmarkNonModifyingCode(b *testing.B, gas uint64, code []byte, name string) { //nolint:unparam
 	cfg := new(Config)
 	setDefaults(cfg)
-	_, tx := memdb.NewTestTx(b)
-	cfg.State = state.New(state.NewPlainState(tx, 1, nil))
+	db := testTemporalDB(b)
+	tx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(b, err)
+	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	require.NoError(b, err)
+	defer domains.Close()
+
+	domains.SetTxNum(1)
+	domains.SetBlockNum(1)
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	require.NoError(b, err)
+
+	cfg.State = state.New(state.NewReaderV4(domains))
 	cfg.GasLimit = gas
 	var (
 		destination = libcommon.BytesToAddress([]byte("contract"))

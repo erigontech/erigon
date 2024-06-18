@@ -175,6 +175,13 @@ func (r headerReader) CurrentHeader() *types.Header {
 	return nil
 }
 
+func (r headerReader) CurrentFinalizedHeader() *types.Header {
+	return nil
+}
+func (r headerReader) CurrentSafeHeader() *types.Header {
+	return nil
+}
+
 func (r headerReader) GetHeader(_ libcommon.Hash, blockNo uint64) *types.Header {
 	return r.GetHeaderByNumber(blockNo)
 }
