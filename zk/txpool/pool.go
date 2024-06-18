@@ -1291,7 +1291,14 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 		select {
 		case <-ctx.Done():
 			p.LockFlusher()
-			_, _ = p.flush(ctx, db)
+			innerContext, innerContextcancel := context.WithCancel(context.Background())
+			written, err := p.flush(innerContext, db)
+			if err != nil {
+				log.Error("[txpool] flush is local history", "err", err)
+			} else {
+				writeToDBBytesCounter.Set(written)
+			}
+			innerContextcancel()
 			p.UnlockFlusher()
 			return
 		case <-logEvery.C:

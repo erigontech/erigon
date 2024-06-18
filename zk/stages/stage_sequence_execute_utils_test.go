@@ -19,10 +19,12 @@ func (m *mockChecker) GetL1InfoTreeUpdate(idx uint64) (*zktypes.L1InfoTreeUpdate
 
 func Test_CheckForBadBatch(t *testing.T) {
 	tests := map[string]struct {
-		data             map[uint64]zktypes.L1InfoTreeUpdate
-		blocks           []zktx.DecodedBatchL2Data
-		latestTimestamp  uint64
-		expectedBadBatch bool
+		data                map[uint64]zktypes.L1InfoTreeUpdate
+		blocks              []zktx.DecodedBatchL2Data
+		latestTimestamp     uint64
+		timestampLimit      uint64
+		highestAllowedIndex uint64
+		expectedBadBatch    bool
 	}{
 		"no_issues": {
 			latestTimestamp: 500,
@@ -38,7 +40,9 @@ func Test_CheckForBadBatch(t *testing.T) {
 					L1InfoTreeIndex: 1,
 				},
 			},
-			expectedBadBatch: false,
+			highestAllowedIndex: 100,
+			timestampLimit:      9999,
+			expectedBadBatch:    false,
 		},
 		"missing_l1_info_tree_update": {
 			latestTimestamp: 500,
@@ -49,7 +53,9 @@ func Test_CheckForBadBatch(t *testing.T) {
 					L1InfoTreeIndex: 1,
 				},
 			},
-			expectedBadBatch: true,
+			highestAllowedIndex: 100,
+			timestampLimit:      9999,
+			expectedBadBatch:    true,
 		},
 		"l1_info_update_in_the_future": {
 			latestTimestamp: 500,
@@ -65,7 +71,9 @@ func Test_CheckForBadBatch(t *testing.T) {
 					L1InfoTreeIndex: 1,
 				},
 			},
-			expectedBadBatch: true,
+			highestAllowedIndex: 100,
+			timestampLimit:      9999,
+			expectedBadBatch:    true,
 		},
 		"timestamp_exceeds_timestamp_limit": {
 			latestTimestamp: 500,
@@ -81,7 +89,27 @@ func Test_CheckForBadBatch(t *testing.T) {
 					L1InfoTreeIndex: 1,
 				},
 			},
-			expectedBadBatch: true,
+			highestAllowedIndex: 100,
+			timestampLimit:      100,
+			expectedBadBatch:    true,
+		},
+		"index_in_the_future": {
+			latestTimestamp: 500,
+			data: map[uint64]zktypes.L1InfoTreeUpdate{
+				1: {
+					Index:     1,
+					Timestamp: 3000,
+				},
+			},
+			blocks: []zktx.DecodedBatchL2Data{
+				{
+					DeltaTimestamp:  9000,
+					L1InfoTreeIndex: 1,
+				},
+			},
+			highestAllowedIndex: 0,
+			timestampLimit:      9999,
+			expectedBadBatch:    true,
 		},
 	}
 
@@ -90,7 +118,7 @@ func Test_CheckForBadBatch(t *testing.T) {
 			m := &mockChecker{
 				data: tt.data,
 			}
-			bad, err := checkForBadBatch(m, tt.latestTimestamp, tt.blocks)
+			bad, err := checkForBadBatch(1, m, tt.latestTimestamp, tt.highestAllowedIndex, tt.timestampLimit, tt.blocks)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

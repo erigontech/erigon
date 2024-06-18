@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/big"
 
+	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
@@ -19,6 +20,7 @@ import (
 	eritypes "github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
@@ -54,6 +56,9 @@ type ZkEvmAPI interface {
 	GetLatestGlobalExitRoot(ctx context.Context) (common.Hash, error)
 	GetExitRootsByGER(ctx context.Context, globalExitRoot common.Hash) (*ZkExitRoots, error)
 	GetL2BlockInfoTree(ctx context.Context, blockNum rpc.BlockNumberOrHash) (json.RawMessage, error)
+	EstimateCounters(ctx context.Context, argsOrNil *zkevmRPCTransaction) (json.RawMessage, error)
+	TraceTransactionCounters(ctx context.Context, hash common.Hash, config *tracers.TraceConfig_ZkEvm, stream *jsoniter.Stream) error
+	GetBatchCountersByNumber(ctx context.Context, batchNumRpc rpc.BlockNumber) (res json.RawMessage, err error)
 }
 
 // APIImpl is implementation of the ZkEvmAPI interface based on remote Db access
@@ -853,29 +858,18 @@ func populateBatchDetails(batch *types.Batch) (json.RawMessage, error) {
 	jBatch["timestamp"] = batch.Timestamp
 	jBatch["blocks"] = batch.Blocks
 	jBatch["transactions"] = batch.Transactions
-	if batch.GlobalExitRoot != (common.Hash{}) {
-		jBatch["globalExitRoot"] = batch.GlobalExitRoot
-	}
+	jBatch["globalExitRoot"] = batch.GlobalExitRoot
+	jBatch["mainnetExitRoot"] = batch.MainnetExitRoot
+	jBatch["rollupExitRoot"] = batch.RollupExitRoot
+	jBatch["localExitRoot"] = batch.LocalExitRoot
+	jBatch["sendSequencesTxHash"] = batch.SendSequencesTxHash
+	jBatch["verifyBatchTxHash"] = batch.VerifyBatchTxHash
+
 	if batch.ForcedBatchNumber != nil {
 		jBatch["forcedBatchNumber"] = batch.ForcedBatchNumber
 	}
-	if batch.MainnetExitRoot != (common.Hash{}) {
-		jBatch["mainnetExitRoot"] = batch.MainnetExitRoot
-	}
-	if batch.RollupExitRoot != (common.Hash{}) {
-		jBatch["rollupExitRoot"] = batch.RollupExitRoot
-	}
-	if batch.LocalExitRoot != (common.Hash{}) {
-		jBatch["localExitRoot"] = batch.LocalExitRoot
-	}
 	if batch.AccInputHash != (common.Hash{}) {
 		jBatch["accInputHash"] = batch.AccInputHash
-	}
-	if batch.SendSequencesTxHash != nil {
-		jBatch["sendSequencesTxHash"] = batch.SendSequencesTxHash
-	}
-	if batch.VerifyBatchTxHash != nil {
-		jBatch["verifyBatchTxHash"] = batch.VerifyBatchTxHash
 	}
 	jBatch["closed"] = batch.Closed
 	if len(batch.BatchL2Data) > 0 {

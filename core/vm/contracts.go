@@ -182,7 +182,7 @@ func init() {
 	for k := range PrecompiledContractForkID7Etrog {
 		PrecompiledAddressesEtrog = append(PrecompiledAddressesEtrog, k)
 	}
-	for k := range PrecompiledContractsForkID88Elderberry {
+	for k := range PrecompiledContractsForkID8Elderberry {
 		PrecompiledAddressesForkID88Elderberry = append(PrecompiledAddressesForkID88Elderberry, k)
 	}
 	for k := range PrecompiledContractsCancun {

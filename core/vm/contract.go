@@ -60,7 +60,8 @@ type Contract struct {
 	value *uint256.Int
 
 	// zkevm
-	IsCreate bool
+	IsCreate  bool
+	IsCreate2 bool
 }
 
 // NewContract returns a new contract environment for the execution of EVM.

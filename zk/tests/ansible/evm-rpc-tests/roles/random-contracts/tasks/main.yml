@@ -1,0 +1,30 @@
+---
+- name: Copy the raw random smart contracts
+  ansible.builtin.copy:
+    src: 500-random-contracts.txt
+    dest: "{{ work_dir }}"
+
+- name: Async loop deploy each contract
+  ansible.builtin.shell: |
+    pushd {{ work_dir }} || exit 1
+    cur_nonce=$(cast nonce --rpc-url {{ rpc_url }} {{ eth_address }})
+    gas_price="$(cast gas-price --rpc-url {{ rpc_url }})"
+    gas_price=$(bc <<< "2 * $gas_price")
+    cat 500-random-contracts.txt | while read -r line; do
+        cast send {{ legacy_flag }} --async --nonce $cur_nonce --private-key {{ private_key }} --gas-limit 250000 --gas-price $gas_price --rpc-url {{ rpc_url }} -j \
+            --create "$line" &>> 500-random-contracts.out
+        retVal=$?
+        if [[ $retVal -eq 0 ]]; then
+            cur_nonce=$((cur_nonce + 1))
+        fi
+    done
+  args:
+    executable: /bin/bash
+
+
+- name: Add inscription to mark test end
+  ansible.builtin.include_role:
+    name: common
+    tasks_from: clear_chain
+  vars:
+    inscription_message: Finished {{ ansible_role_name }}

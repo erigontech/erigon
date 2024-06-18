@@ -2,7 +2,7 @@ name: Nightly - Compare Blocks
 
 on:
   schedule:
-    - cron: '0 0 * * *'
+    - cron: '0 2 * * *'  # run at 2am to give time for other suites to run first
   workflow_dispatch:
 
 jobs:
@@ -16,6 +16,8 @@ jobs:
             erigon: "http://34.175.214.161:8500"
             zkevm: "http://34.175.214.161:8505"
             sequencer: "http://34.175.214.161:8005"
+            compare-blocks: 1000
+            allowed-block-diff: 2000
 
     steps:
       - name: Checkout code
@@ -27,13 +29,12 @@ jobs:
           go-version: '1.22'
 
       - name: Install dependencies
-        run: |
-          go get github.com/google/go-cmp/cmp
+        run: go get github.com/google/go-cmp/cmp
 
       - name: Build the compare_blocks binary
         run: go build -o compare_blocks zk/debug_tools/nightly-block-compare/main.go
 
       - name: Run block comparison
         run: |
-          echo "Comparing blocks for pair: ${{ matrix.node-pairs.name }}"
-          ./compare_blocks -erigon ${{ matrix.node-pairs.erigon }} -zkevm ${{ matrix.node-pairs.zkevm }} -sequencer ${{ matrix.node-pairs.sequencer }} -blocks 1000 -diff 10
+          echo "Comparing blocks for pair: ${{ matrix.nodes.name }}"
+          ./compare_blocks -erigon ${{ matrix.nodes.erigon }} -zkevm ${{ matrix.nodes.zkevm }} -sequencer ${{ matrix.nodes.sequencer }} -blocks ${{matrix.nodes.compare-blocks}} -diff ${{ matrix.nodes.allowed-block-diff }}

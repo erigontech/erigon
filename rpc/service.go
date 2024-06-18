@@ -217,6 +217,11 @@ func (c *callback) call(ctx context.Context, method string, args []reflect.Value
 	defer func() {
 		if err := recover(); err != nil {
 			c.logger.Error("RPC method " + method + " crashed: " + fmt.Sprintf("%v\n%s", err, dbg.Stack()))
+			messageString := "RPC method " + method + " arguments:\n"
+			for _, arg := range args {
+				messageString += fmt.Sprintf("\t%v: %v\n", arg.Type(), arg)
+			}
+			c.logger.Debug(messageString)
 			errRes = errors.New("method handler crashed")
 		}
 	}()

@@ -23,7 +23,7 @@ This command takes the following form:
 ```
 
 ## supported ACL Types
--`allowlist` - allow list type
+- `allowlist` - allow list type
 - `blocklist` - block list type
 
 ## supported policies
@@ -46,7 +46,7 @@ This command takes the following form:
 ```
 The `update` command will read the `.csv` file provided which should be in format `address,"policy1,policy2"`, and update the defined `acl` in the `db`. Note that the `.csv` file is considered as the final state of policies for given `acl` type for defined addresses, meaning, if an address in the `.csv` file has `sendTx` policy, but in `db` it had `deploy`, after this command, it will have `sendTx` in the `db`, there is no appending. Also, it is worth mentioning that using a `.csv` file user can delete addresses from an `acl` table by leaving policies string as empty `""`. This will tell the command that the user wants to remove an address completely from an `acl`.
 
-## add - add a policy to an account
+## add - adds a policy to an account
 
 This command can be used to add a policy to an account in the specified `acl`.
 
@@ -67,6 +67,6 @@ This command takes the following form:
 ```shell
     acl remove <data-dir> <type> <address> <policy>
 ```
-The `add` command will remove the given policy to an account in given access list table ifgiven account has that policy.
+The `remove` command will remove the given policy from an account in given access list table if given account has that policy assigned.
 
 

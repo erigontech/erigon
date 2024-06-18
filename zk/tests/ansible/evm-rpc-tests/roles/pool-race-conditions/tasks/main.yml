@@ -1,0 +1,121 @@
+---
+
+
+# https://github.com/0xPolygon/jhilliard/blob/main/random/nonce-race-condition/bali-race-condition.org
+- name: Making 10 pairs of conflicting contract calls
+  ansible.builtin.shell: |
+    i=0;
+    nonce=$(cast nonce --rpc-url {{ rpc_url }} {{ eth_address }})
+    gp=$(cast gas-price --rpc-url {{ rpc_url }})
+    while true ; do
+        i=$(($i+1));
+        if [[ $i -gt 20 ]] ; then
+            break;
+        fi;
+        # this should work
+        2>&1 cast send \
+            --nonce $nonce \
+            --rpc-url ${{ rpc_url }} \
+            --gas-limit 21000 \
+            --gas-price $gp \
+            --async \
+            --legacy \
+            --private-key {{ private_key }} \
+            --value $i \
+            0x0000000000000000000000000000000000000000 >> send.out &
+        i=$(($i+1));
+        # this should fail
+        2>&1 cast send \
+            --nonce $nonce \
+            --rpc-url {{ rpc_url }} \
+            --gas-limit 21000 \
+            --gas-price $gp \
+            --async \
+            --legacy \
+            --private-key {{ private_key }} \
+            --value $i \
+            0x0000000000000000000000000000000000000000 >> send.out &
+        nonce=$(($nonce + 1));
+    done
+    wait < <(jobs -p)
+    cat send.out >> {{ log_file }}
+  args:
+    executable: /bin/bash
+
+- name: Add inscription to mark test end
+  ansible.builtin.include_role:
+    name: common
+    tasks_from: clear_chain
+  vars:
+    inscription_message: Finished {{ ansible_role_name }} conflicting calls
+
+- name: Creating a temporary wallet for pool testing
+  ansible.builtin.shell: |
+    pushd {{ work_dir }} || exit 1
+    cast wallet new --json > pool-test-wallet.json
+    popd
+  args:
+    executable: /bin/bash
+
+- name: Sending some test ETH to the temporary wallet
+  ansible.builtin.shell: |
+    cast send --legacy --rpc-url {{ rpc_url }} --value 0.1ether --private-key {{ private_key }} $(jq -r '.[0].address' {{ work_dir }}/pool-test-wallet.json)
+  args:
+    executable: /bin/bash
+
+# https://github.com/0xPolygon/jhilliard/blob/main/random/failed-txs-in-pool/failed.org
+- name: Sending two conflicting transactions into the pool
+  ansible.builtin.shell: |
+    pushd {{ work_dir }} || exit 1
+
+    addr=$(jq -r '.[0].address' {{ work_dir }}/pool-test-wallet.json)
+    nonce=$(cast nonce --rpc-url {{ rpc_url }} $addr)
+    gp=$(cast gas-price --rpc-url {{ rpc_url }})
+
+    # Send a future transaction that uses a lot of more than half of my balance
+    cast send \
+            --nonce $(($nonce + 1)) \
+            --rpc-url {{ rpc_url }} \
+            --gas-limit 21000 \
+            --gas-price $gp \
+            --async \
+            --legacy \
+            --private-key $(jq -r '.[0].private_key' {{ work_dir }}/pool-test-wallet.json) \
+            --value 0.06ether \
+            0x8e9dE7Ee64533f9c9fA8e1c3F45eC3a2c9CbF814;
+
+    # let it process a bit
+    sleep 5
+
+    # send another transction that should fail and also use more than half of my balance
+    cast send \
+            --nonce $(($nonce)) \
+            --rpc-url {{ rpc_url }} \
+            --gas-limit 100000 \
+            --gas-price $gp \
+            --legacy \
+            --value 0.06ether\
+            --private-key $(jq -r '.[0].private_key' {{ work_dir }}/pool-test-wallet.json) \
+            --create \
+            0x60005B60010180405063000000025600
+  args:
+    executable: /bin/bash
+
+- name: Add inscription to mark test end
+  ansible.builtin.include_role:
+    name: common
+    tasks_from: clear_chain
+  vars:
+    inscription_message: Finished {{ ansible_role_name }}
+
+- name: Recollecting test ETH
+  ansible.builtin.shell: |
+    pushd {{ work_dir }} || exit 1
+    sleep 2
+    addr=$(jq -r '.[0].address' {{ work_dir }}/pool-test-wallet.json)
+    tot_wei=$(cast balance --block pending --rpc-url {{ rpc_url }} $addr)
+    gas_price=$(cast gas-price --rpc-url {{ rpc_url }})
+    cast send --legacy --value $((tot_wei - gas_price * 21000)) --rpc-url {{ rpc_url }} --private-key $(jq -r '.[0].private_key' {{ work_dir }}/pool-test-wallet.json) {{ eth_address }}
+  args:
+    executable: /bin/bash
+

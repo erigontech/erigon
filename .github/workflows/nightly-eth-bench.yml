@@ -2,7 +2,7 @@ name: Nightly - ETH Bench
 
 on:
   schedule:
-    - cron: '0 0 * * *'
+    - cron: '0 1 * * *' # run at 1am to stagger tests
   workflow_dispatch:
 
 jobs:
@@ -10,14 +10,21 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        profile: [network5]
-
+        include:
+          - profile_name: "network5"
+            l1_ep: "https://rpc.eu-central-1.gateway.fm/v4/ethereum/non-archival/sepolia"
+            l2_ep: "http://34.175.214.161:8500"
+            bridge_ep: "http://34.175.214.161:8085"
+            l1_pk_secret_name: "L1_SEPOLIA_FUNDED_PRIVATE_KEY"
+            l2_pk_secret_name: "NETWORK5_PRIVATE_KEY"
+            bridge_addr: "0xb566BE17B22404BD46F389030ec5592F8ffAde12"
+            
     steps:
       - name: Checkout current repository
         uses: actions/checkout@v3
 
       - name: Clone eth-bench repository
-        run: git clone https://github.com/xavier-romero/eth-bench.git
+        run: git clone --recurse-submodules -j8 https://github.com/xavier-romero/eth-bench.git
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
@@ -30,23 +37,69 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-buildx-
 
-      - name: Set PROFILE_UPPER environment variable
-        run: |
-          echo "PROFILE_UPPER=$(echo ${{ matrix.profile }} | tr '[:lower:]' '[:upper:]')" >> $GITHUB_ENV
-
-      - name: Set RPC_URL and PRIVATE_KEY environment variables
-        run: |
-          echo "RPC_URL=${{ secrets[format('{0}_RPC_URL', env.PROFILE_UPPER)] }}" >> $GITHUB_ENV
-          echo "PRIVATE_KEY=${{ secrets[format('{0}_PRIVATE_KEY', env.PROFILE_UPPER)] }}" >> $GITHUB_ENV
-
       - name: Build and run benchmarks
         run: |
+          #!/bin/bash
           cd eth-bench
-          ./run_benchmarks.sh ${{ matrix.profile }} ${{ env.RPC_URL }} ${{ env.PRIVATE_KEY }}
+          
+          cat <<EOF > ./tmp_profiles.json
+          {
+            "profiles": {
+              "${{ matrix.profile_name }}": {
+                "description": "Nightly Tests",
+                "node_url": "${{ matrix.l2_ep }}",
+                "l1_ep": "${{ matrix.l1_ep }}",
+                "bridge_addr": "${{ matrix.bridge_addr }}",
+                "bridge_ep": "${{ matrix.bridge_ep }}",
+                "funded_key": "${{ secrets[matrix.l2_pk_secret_name] }}",
+                "l1_funded_key": "${{ secrets[matrix.l1_pk_secret_name] }}"
+              }
+            }
+          }
+          EOF
+
+          export PROFILE=${{ matrix.profile_name }}
+
+          docker build . -t eth-bench-temp-${{ matrix.profile_name }}
+
+          docker run --rm \
+            --volume "$(pwd):/app" \
+            --volume "$(pwd)/profiles.json:/app/profiles.json" \
+            --volume "$(pwd)/logs:/app/logs" \
+            --env PYTHONUNBUFFERED=1 \
+            --env PROFILE=${PROFILE} \
+            --workdir /app \
+            eth-bench-temp-${{ matrix.profile_name}} \
+            python bench.py -p "$PROFILE" -c 5 -t 12 --all --recover
+
+          docker run --rm \
+            --volume "$(pwd):/app" \
+            --volume "$(pwd)/profiles.json:/app/profiles.json" \
+            --volume "$(pwd)/logs:/app/logs" \
+            --env PYTHONUNBUFFERED=1 \
+            --env PROFILE=${PROFILE} \
+            --workdir /app \
+            eth-bench-temp-${{ matrix.profile_name}} \
+            python bench.py -p "$PROFILE" --bridge2l2
+
+          docker run --rm \
+            --volume "$(pwd):/app" \
+            --volume "$(pwd)/profiles.json:/app/profiles.json" \
+            --volume "$(pwd)/logs:/app/logs" \
+            --env PYTHONUNBUFFERED=1 \
+            --env PROFILE=${PROFILE} \
+            --workdir /app \
+            eth-bench-temp-${{ matrix.profile_name}} \
+            python bench.py -p "$PROFILE" --bridge2l1
+
+          EXIT_CODE=$?
+          
+          echo "Benchmark exit code for profile ${PROFILE}: $EXIT_CODE"
+          exit $EXIT_CODE
 
       - name: Upload benchmark log
         if: always()
         uses: actions/upload-artifact@v3
         with:
-          name: benchmark-log-${{ matrix.profile }}
-          path: ./eth-bench/bench_${{ matrix.profile }}.log
+          name: benchmark-log-${{ matrix.profile_name }}
+          path: ./eth-bench/bench_${{ matrix.profile_name }}.log

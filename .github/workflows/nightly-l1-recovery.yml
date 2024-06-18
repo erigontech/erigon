@@ -1,0 +1,26 @@
+name: Nightly - L1 Recovery
+
+on:
+  schedule:
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  block-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          lfs: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Run Docker Compose
+        working-directory: ./zk/tests/nightly-l1-recovery
+        run: docker compose -f docker-compose-nightly.yml up --build --exit-code-from=block-checker

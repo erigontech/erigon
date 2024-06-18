@@ -11,6 +11,7 @@ import (
 
 	"github.com/boltdb/bolt"
 	url2 "net/url"
+	"flag"
 )
 
 var db *bolt.DB
@@ -34,9 +35,9 @@ var paramsToExpire = map[string]struct{}{
 	"finalized": {},
 }
 
-func initDB() {
+func initDB(file string) {
 	var err error
-	db, err = bolt.Open("cache.db", 0600, nil)
+	db, err = bolt.Open(file, 0600, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -249,7 +250,10 @@ func handleCacheLookup(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	initDB()
+	fileFlag := flag.String("file", "cache.db", "file to read")
+	flag.Parse()
+
+	initDB(*fileFlag)
 	defer db.Close()
 
 	http.HandleFunc("/", handleRequest)

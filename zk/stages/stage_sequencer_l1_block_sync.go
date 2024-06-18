@@ -2,8 +2,11 @@ package stages
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
+
+	"encoding/binary"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -151,10 +154,19 @@ LOOP:
 				lastBatchSequenced := l.Topics[1].Big().Uint64()
 				latestBatch = lastBatchSequenced
 
-				batches, coinbase, err := l1_data.DecodeL1BatchData(transaction.GetData())
+				l1InfoRoot := l.Data
+				if len(l1InfoRoot) != 32 {
+					log.Error(fmt.Sprintf("[%s] L1 info root is not 32 bytes", logPrefix), "tx-hash", l.TxHash.String())
+					return errors.New("l1 info root is not 32 bytes")
+				}
+
+				batches, coinbase, limitTimestamp, err := l1_data.DecodeL1BatchData(transaction.GetData(), cfg.zkCfg.DAUrl)
 				if err != nil {
 					return err
 				}
+
+				limitTimestampBytes := make([]byte, 8)
+				binary.BigEndian.PutUint64(limitTimestampBytes, limitTimestamp)
 
 				// here we find the first batch number that was sequenced by working backwards
 				// from the latest batch in the original event
@@ -170,7 +182,12 @@ LOOP:
 				// this is important because the batches are written in reverse order
 				for idx, batch := range batches {
 					b := initBatch + uint64(idx)
-					data := append(coinbase.Bytes(), batch...)
+					data := make([]byte, 20+32+8+len(batch))
+					copy(data, coinbase.Bytes())
+					copy(data[20:], l1InfoRoot)
+					copy(data[52:], limitTimestampBytes)
+					copy(data[60:], batch)
+
 					if err := hermezDb.WriteL1BatchData(b, data); err != nil {
 						return err
 					}

@@ -1,0 +1,58 @@
+name: Nightly - Bridge Tests
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # run at midnight
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Set dry run mode'
+        required: false
+        default: 'false'
+
+jobs:
+  build-and-run:
+    runs-on: ubuntu-latest
+
+    services:
+      docker:
+        image: docker:19.03.12
+        options: --privileged
+
+    strategy:
+      matrix:
+        config:
+          - name: "network5"
+            destination_net: "8282"
+            destination_address: "0x814764FD16DDA0052a09BAccf4939524EE308FE1" # this is a L1 sepolia address (funded via L1)
+            ether_value: "0.02"
+            token_address: ""
+            is_forced: "true"
+            bridge_address: "0xb566BE17B22404BD46F389030ec5592F8ffAde12"
+            meta_bytes: "0x"
+            eth_rpc_url: "http://34.175.214.161:8500"
+            bridge_api_url: "http://34.175.214.161:8085"
+            dry_run: "${{ github.event.inputs.dry_run || 'false' }}"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Run Docker Compose
+        env:
+          RAW_PRIVATE_KEY: ${{ secrets.L1_SEPOLIA_FUNDED_PRIVATE_KEY }}
+          DESTINATION_NET: ${{ matrix.config.destination_net }}
+          DESTINATION_ADDRESS: ${{ matrix.config.destination_address }}
+          ETHER_VALUE: ${{ matrix.config.ether_value }}
+          TOKEN_ADDRESS: ${{ matrix.config.token_address }}
+          IS_FORCED: ${{ matrix.config.is_forced }}
+          BRIDGE_ADDRESS: ${{ matrix.config.bridge_address }}
+          META_BYTES: ${{ matrix.config.meta_bytes }}
+          ETH_RPC_URL: ${{ matrix.config.eth_rpc_url }}
+          BRIDGE_API_URL: ${{ matrix.config.bridge_api_url }}
+          DRY_RUN: ${{ matrix.config.dry_run }}
+        run: |
+          cd zk/tests/bridge && docker-compose up --build --exit-code-from bridge-script

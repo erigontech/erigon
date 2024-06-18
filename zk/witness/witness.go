@@ -272,6 +272,8 @@ func populateDbTables(batch *membatchwithdb.MemoryMutation) error {
 		hermez_db.REUSED_L1_INFO_TREE_INDEX,
 		hermez_db.LATEST_USED_GER,
 		hermez_db.L1_INFO_TREE_UPDATES_BY_GER,
+		hermez_db.SMT_DEPTHS,
+		hermez_db.INVALID_BATCHES,
 	}
 
 	for _, t := range tables {

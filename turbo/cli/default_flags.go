@@ -256,4 +256,5 @@ var DefaultFlags = []cli.Flag{
 	&SyncLoopPruneLimitFlag,
 	&utils.PoolManagerUrl,
 	&utils.DisableVirtualCounters,
+	&utils.DAUrl,
 }

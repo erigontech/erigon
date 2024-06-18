@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -15,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/common/math"
 	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -140,34 +142,41 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 	// Notify all headers we have (either canonical or not) in a maximum range span of 1024
 	var notifyFrom uint64
 	var isUnwind bool
+	var heightSpan uint64
 	if unwindTo != nil && *unwindTo != 0 && (*unwindTo) < finishStageBeforeSync {
 		notifyFrom = *unwindTo
 		isUnwind = true
 	} else {
-		heightSpan := finishStageAfterSync - finishStageBeforeSync
+		heightSpan = finishStageAfterSync - finishStageBeforeSync
 		if heightSpan > 1024 {
 			heightSpan = 1024
 		}
 		notifyFrom = finishStageAfterSync - heightSpan
+
+		// check if the height span is greater than the max uint32 value and cap it there if it is
+		if heightSpan > math.MaxUint32 {
+			heightSpan = math.MaxUint32
+		}
 	}
 	notifyFrom++
 
 	var notifyTo = notifyFrom
 	var notifyToHash libcommon.Hash
 	var headersRlp [][]byte
-	if err := tx.ForEach(kv.HeaderCanonical, hexutility.EncodeTs(notifyFrom), func(k, hash []byte) (err error) {
-		if len(hash) == 0 {
+
+	if err := tx.ForAmount(kv.Headers, hexutility.EncodeTs(notifyFrom), uint32(heightSpan), func(k, headerRLP []byte) error {
+		if len(headerRLP) == 0 {
 			return nil
 		}
-		blockNum := binary.BigEndian.Uint64(k)
-		if blockNum > finishStageAfterSync { //[from,to)
-			return nil
+		notifyTo = binary.BigEndian.Uint64(k)
+		var err error
+		if notifyToHash, err = rawdb.ReadCanonicalHash(tx, notifyTo); err != nil {
+			log.Warn("[Finish] failed checking if header is cannonical")
 		}
-		notifyTo = blockNum
-		notifyToHash = libcommon.BytesToHash(hash)
-		headerRLP := rawdb.ReadHeaderRLP(tx, notifyToHash, notifyTo)
-		if headerRLP != nil {
-			headersRlp = append(headersRlp, libcommon.CopyBytes(headerRLP))
+
+		headerHash := libcommon.BytesToHash(k[8:])
+		if notifyToHash == headerHash {
+			headersRlp = append(headersRlp, common.CopyBytes(headerRLP))
 		}
 
 		return libcommon.Stopped(ctx.Done())

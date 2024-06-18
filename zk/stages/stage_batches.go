@@ -77,7 +77,6 @@ type DatastreamClient interface {
 	ReadAllEntriesToChannel(bookmark *types.BookmarkProto) error
 	GetL2BlockChan() chan types.FullL2Block
 	GetBatchStartChan() chan types.BatchStart
-	GetErrChan() chan error
 	GetGerUpdatesChan() chan types.GerUpdate
 	GetLastWrittenTimeAtomic() *atomic.Int64
 	GetStreamingAtomic() *atomic.Bool
@@ -157,23 +156,28 @@ func SpawnStageBatches(
 	}
 
 	startSyncTime := time.Now()
+	stopChan := make(chan struct{}, 1)
 	// start routine to download blocks and push them in a channel
 	if !cfg.dsClient.GetStreamingAtomic().Load() {
 		log.Info(fmt.Sprintf("[%s] Starting stream", logPrefix), "startBlock", stageProgressBlockNo)
+		// this will download all blocks from datastream and push them in a channel
+		// if no error, break, else continue trying to get them
+		// Create bookmark
+		var bookmark *types.BookmarkProto
+		if stageProgressBlockNo == 0 {
+			bookmark = types.NewBookmarkProto(0, datastream.BookmarkType_BOOKMARK_TYPE_BATCH)
+		} else {
+			bookmark = types.NewBookmarkProto(stageProgressBlockNo, datastream.BookmarkType_BOOKMARK_TYPE_L2_BLOCK)
+		}
+
 		go func() {
 			log.Info(fmt.Sprintf("[%s] Started downloading L2Blocks routine", logPrefix))
 			defer log.Info(fmt.Sprintf("[%s] Finished downloading L2Blocks routine", logPrefix))
 
-			// this will download all blocks from datastream and push them in a channel
-			// if no error, break, else continue trying to get them
-			// Create bookmark
-			var bookmark *types.BookmarkProto
-			if stageProgressBlockNo == 0 {
-				bookmark = types.NewBookmarkProto(0, datastream.BookmarkType_BOOKMARK_TYPE_BATCH)
-			} else {
-				bookmark = types.NewBookmarkProto(stageProgressBlockNo, datastream.BookmarkType_BOOKMARK_TYPE_L2_BLOCK)
+			if err := cfg.dsClient.ReadAllEntriesToChannel(bookmark); err != nil {
+				log.Error(fmt.Sprintf("[%s] Error downloading blocks from datastream", logPrefix), "error", err)
+				stopChan <- struct{}{}
 			}
-			cfg.dsClient.ReadAllEntriesToChannel(bookmark)
 		}()
 	}
 
@@ -202,6 +206,12 @@ func SpawnStageBatches(
 		return fmt.Errorf("failed to get stage exec progress, %w", err)
 	}
 
+	// just exit the stage early if there is more execution work to do
+	if stageExecProgress < lastBlockHeight {
+		log.Info(fmt.Sprintf("[%s] Execution behind, skipping stage", logPrefix))
+		return nil
+	}
+
 	lastHash := emptyHash
 	atLeastOneBlockWritten := false
 	startTime := time.Now()
@@ -213,7 +223,6 @@ func SpawnStageBatches(
 	gerUpdateChan := cfg.dsClient.GetGerUpdatesChan()
 	lastWrittenTimeAtomic := cfg.dsClient.GetLastWrittenTimeAtomic()
 	streamingAtomic := cfg.dsClient.GetStreamingAtomic()
-	errChan := cfg.dsClient.GetErrChan()
 
 LOOP:
 	for {
@@ -223,9 +232,21 @@ LOOP:
 		// if download routine finished, should continue to read from channel until it's empty
 		// if both download routine stopped and channel empty - stop loop
 		select {
+		case <-stopChan:
+			break LOOP
 		case batchStart := <-batchStartChan:
-			// do nothing for now.  We have a channel read race so handle fork/batch related changes in the handling
-			// of the l2 block below
+			// check if the batch is invalid so that we can replicate this over in the stream
+			// when we re-populate it
+			if batchStart.BatchType == types.BatchTypeInvalid {
+				if err = hermezDb.WriteInvalidBatch(batchStart.Number); err != nil {
+					return err
+				}
+				// we need to write the fork here as well because the batch will never get processed as it is invalid
+				// but, we need it re-populate our own stream
+				if err = hermezDb.WriteForkId(batchStart.Number, batchStart.ForkId); err != nil {
+					return err
+				}
+			}
 			_ = batchStart
 		case l2Block := <-l2BlockChan:
 			if cfg.zkCfg.SyncLimit > 0 && l2Block.L2BlockNumber >= cfg.zkCfg.SyncLimit {
@@ -258,7 +279,17 @@ LOOP:
 
 			atLeastOneBlockWritten = true
 
+			// ignore genesis or a repeat of the last block
 			if l2Block.L2BlockNumber == 0 {
+				continue
+			}
+			// skip but warn on already processed blocks
+			if l2Block.L2BlockNumber <= stageProgressBlockNo {
+				if l2Block.L2BlockNumber < stageProgressBlockNo {
+					// only warn if the block is very old, we expect the very latest block to be requested
+					// when the stage is fired up for the first time
+					log.Warn(fmt.Sprintf("[%s] Skipping block %d, already processed", logPrefix, l2Block.L2BlockNumber))
+				}
 				continue
 			}
 
@@ -343,17 +374,13 @@ LOOP:
 			if err := hermezDb.WriteBatchGlobalExitRoot(gerUpdate.BatchNumber, gerUpdate); err != nil {
 				return fmt.Errorf("write batch global exit root error: %v", err)
 			}
-		case err := <-errChan:
-			if err != nil {
-				return fmt.Errorf("l2blocks download routine error: %v", err)
-			}
 		case <-ctx.Done():
 			log.Warn(fmt.Sprintf("[%s] Context done", logPrefix))
 			endLoop = true
 		default:
-			// wait at least one block to be written, before continuing
-			// or if stage_exec is ahead - don't wait here, but rather continue so exec catches up
-			if atLeastOneBlockWritten || stageExecProgress < lastBlockHeight {
+			if atLeastOneBlockWritten {
+				// first check to see if anything has come in from the stream yet, if it has then wait a little longer
+				// because there could be more.
 				// if no blocks available should and time since last block written is > 500ms
 				// consider that we are at the tip and blocks come in the datastream as they are produced
 				// stop the current iteration of the stage
@@ -372,6 +399,11 @@ LOOP:
 					// 	endLoop = true
 					// 	break
 					// }
+
+					if !cfg.dsClient.GetStreamingAtomic().Load() {
+						log.Info(fmt.Sprintf("[%s] Datastream disconnected. Ending the stage.", logPrefix))
+						break LOOP
+					}
 
 					log.Info(fmt.Sprintf("[%s] Waiting for at least one new block.", logPrefix))
 					startTime = time.Now()
@@ -835,6 +867,10 @@ func writeL2Block(eriDb ErigonDb, hermezDb HermezDb, l2Block *types.FullL2Block,
 
 	if err := hermezDb.WriteForkId(l2Block.BatchNumber, uint64(l2Block.ForkId)); err != nil {
 		return fmt.Errorf("write block batch error: %v", err)
+	}
+
+	if err := hermezDb.WriteForkIdBlockOnce(uint64(l2Block.ForkId), l2Block.L2BlockNumber); err != nil {
+		return fmt.Errorf("write fork id block error: %v", err)
 	}
 
 	if err := hermezDb.WriteBlockBatch(l2Block.L2BlockNumber, l2Block.BatchNumber); err != nil {

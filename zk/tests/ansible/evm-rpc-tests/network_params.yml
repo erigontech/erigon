@@ -1,0 +1,35 @@
+---
+participants:
+  - el_type: geth
+    el_extra_params:
+      - "--http.api=admin,engine,net,eth,web3,debug,txpool"
+      - "--txpool.locals 0x8943545177806ED17B9F23F0a21ee5948eCaa776"
+
+  - el_type: erigon
+    el_image: "erigon:local"
+
+
+
+additional_services: []
+  # - assertoor
+  # - broadcaster
+  # - tx_spammer
+  # - blob_spammer
+  # - custom_flood
+  # - goomy_blob
+  # - el_forkmon
+  # - blockscout
+  # - beacon_metrics_gazer
+  # - dora
+  # - full_beaconchain_explorer
+  # - prometheus_grafana
+  # - blobscan
+  # - dugtrio
+  # - blutgang
+  # - apache
+
+# configured for shanghai right now. Set deneb_fork_epoch to trigger dencun
+network_params:
+  deneb_fork_epoch: 0
+  electra_fork_epoch: 100000001
+  eip7594_fork_epoch: 100000002

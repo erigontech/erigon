@@ -20,7 +20,7 @@ jobs:
   tests:
     strategy:
       matrix:
-        os: [ ubuntu-20.04, macos-11 ] # list of os: https://github.com/actions/virtual-environments
+        os: [ ubuntu-20.04, macos-14 ] # list of os: https://github.com/actions/virtual-environments
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -53,3 +53,56 @@ jobs:
 
       - name: Test
         run: make test
+
+  kurtosis-cdk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout cdk-erigon
+        uses: actions/checkout@v4
+        with:
+          path: cdk-erigon
+
+      - name: Checkout kurtosis-cdk
+        uses: actions/checkout@v4
+        with:
+          repository: 0xPolygon/kurtosis-cdk
+          ref: feat/cdk-erigon-zkevm
+          path: kurtosis-cdk
+
+      - name: Install Kurtosis CDK tools
+        uses: ./kurtosis-cdk/.github/actions/setup-kurtosis-cdk
+
+      - name: Build docker image
+        working-directory: ./cdk-erigon
+        run: docker build -t cdk-erigon:local --file Dockerfile .
+
+      - name: Configure Kurtosis CDK
+        working-directory: ./kurtosis-cdk
+        run: |
+          yq -Y --in-place '.args.data_availability_mode = "rollup"' params.yml
+          yq -Y --in-place '.args.cdk_erigon_node_image = "cdk-erigon:local"' params.yml
+
+      - name: Deploy Kurtosis CDK package
+        working-directory: ./kurtosis-cdk
+        run: kurtosis run --enclave cdk-v1 --args-file params.yml --image-download always .
+
+      - name: Monitor verified batches
+        working-directory: ./kurtosis-cdk
+        shell: bash
+        run: .github/actions/monitor-cdk-verified-batches/batch_verification_monitor.sh 20 600 cdk-erigon-node-001
+
+      - name: Prepare logs
+        working-directory: ./kurtosis-cdk
+        if: failure()
+        run: |
+          mkdir -p ci_logs
+          cd ci_logs
+          kurtosis service logs cdk-v1 cdk-erigon-node-001 --all > cdk-erigon-node-001.log
+          kurtosis service logs cdk-v1 cdk-erigon-sequencer-001 --all > cdk-erigon-sequencer-001.log
+
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: logs_${{ github.run_id }}
+          path: ./kurtosis-cdk/ci_logs

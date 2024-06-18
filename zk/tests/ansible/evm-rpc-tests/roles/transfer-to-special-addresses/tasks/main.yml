@@ -1,0 +1,55 @@
+---
+- name: Sending transactions to well known addresses
+  ansible.builtin.shell: |
+    cur_nonce=$(cast nonce --rpc-url {{ rpc_url }} {{ eth_address }})
+
+    cast send --async --nonce $cur_nonce --legacy --from {{ eth_address }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} --gas-limit 100000 --value 1 -j "0x0000000000000000000000000000000000000000" >> {{ log_file }}
+    cur_nonce=$((cur_nonce + 1))
+    cast send --async --nonce $cur_nonce --legacy --from {{ eth_address }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} --gas-limit 100000 --value 1 -j "0x0000000000000000000000000000000000000001" >> {{ log_file }}
+    cur_nonce=$((cur_nonce + 1))
+    cast send --async --nonce $cur_nonce --legacy --from {{ eth_address }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} --gas-limit 100000 --value 1 -j "0x0000000000000000000000000000000000000002" >> {{ log_file }}
+    cur_nonce=$((cur_nonce + 1))
+    cast send --async --nonce $cur_nonce --legacy --from {{ eth_address }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} --gas-limit 100000 --value 1 -j "0x0000000000000000000000000000000000000003" >> {{ log_file }}
+    cur_nonce=$((cur_nonce + 1))
+    cast send --async --nonce $cur_nonce --legacy --from {{ eth_address }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} --gas-limit 100000 --value 1 -j "0x0000000000000000000000000000000000000004" >> {{ log_file }}
+    cur_nonce=$((cur_nonce + 1))
+    cast send --async --nonce $cur_nonce --legacy --from {{ eth_address }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} --gas-limit 100000 --value 1 -j "0x0000000000000000000000000000000000000005" >> {{ log_file }}
+    cur_nonce=$((cur_nonce + 1))
+    cast send --async --nonce $cur_nonce --legacy --from {{ eth_address }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} --gas-limit 100000 --value 1 -j "0x0000000000000000000000000000000000000006" >> {{ log_file }}
+    cur_nonce=$((cur_nonce + 1))
+    cast send --async --nonce $cur_nonce --legacy --from {{ eth_address }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} --gas-limit 100000 --value 1 -j "0x0000000000000000000000000000000000000007" >> {{ log_file }}
+    cur_nonce=$((cur_nonce + 1))
+    cast send --async --nonce $cur_nonce --legacy --from {{ eth_address }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} --gas-limit 100000 --value 1 -j "0x0000000000000000000000000000000000000008" >> {{ log_file }}
+    cur_nonce=$((cur_nonce + 1))
+    cast send --async --nonce $cur_nonce --legacy --from {{ eth_address }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} --gas-limit 100000 --value 1 -j "0x0000000000000000000000000000000000000009" >> {{ log_file }}
+    cur_nonce=$((cur_nonce + 1))
+    cast send --async --nonce $cur_nonce --legacy --from {{ eth_address }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} --gas-limit 100000 --value 1 -j "0x000000000000000000000000000000000000000A" >> {{ log_file }}
+    cur_nonce=$((cur_nonce + 1))
+    cast send --async --nonce $cur_nonce --legacy --from {{ eth_address }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} --gas-limit 100000 --value 1 -j "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF" >> {{ log_file }}
+    cur_nonce=$((cur_nonce + 1))
+    cast send --async --nonce $cur_nonce --legacy --from {{ eth_address }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} --gas-limit 100000 --value 1 -j "0x4D1A2e2bB4F88F0250f26Ffff098B0b30B26BF38" >> {{ log_file }}
+    cur_nonce=$((cur_nonce + 1))
+    cast send --async --nonce $cur_nonce --legacy --from {{ eth_address }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} --gas-limit 100000 --value 1 -j "0xdeadbeef00000000000000000000000000000000" >> {{ log_file }}
+    cur_nonce=$((cur_nonce + 1))
+    cast send --async --nonce $cur_nonce --legacy --from {{ eth_address }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} --gas-limit 100000 --value 1 -j "0xB928f69Bb1D91Cd65274e3c79d8986362984fDA3" >> {{ log_file }}
+    cur_nonce=$((cur_nonce + 1))
+    cast send --async --nonce $cur_nonce --legacy --from {{ eth_address }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} --gas-limit 100000 --value 1 -j "0xD04116cDd17beBE565EB2422F2497E06cC1C9833" >> {{ log_file }}
+    cur_nonce=$((cur_nonce + 1))
+    cast send --async --nonce $cur_nonce --legacy --from {{ eth_address }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} --gas-limit 100000 --value 1 -j "0x70f2b2914A2a4b783FaEFb75f459A580616Fcb5e" >> {{ log_file }}
+    cur_nonce=$((cur_nonce + 1))
+    cast send --async --nonce $cur_nonce --legacy --from {{ eth_address }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} --gas-limit 100000 --value 1 -j "0x60f3f640a8508fC6a86d45DF051962668E1e8AC7" >> {{ log_file }}
+    cur_nonce=$((cur_nonce + 1))
+    cast send --async --nonce $cur_nonce --legacy --from {{ eth_address }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} --gas-limit 100000 --value 1 -j "0x1d8bfDC5D46DC4f61D6b6115972536eBE6A8854C" >> {{ log_file }}
+    cur_nonce=$((cur_nonce + 1))
+    cast send --async --nonce $cur_nonce --legacy --from {{ eth_address }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} --gas-limit 100000 --value 1 -j "0xE33C0C7F7df4809055C3ebA6c09CFe4BaF1BD9e0" >> {{ log_file }}
+    cur_nonce=$((cur_nonce + 1))
+    cast send --async --nonce $cur_nonce --legacy --from {{ eth_address }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} --gas-limit 100000 --value 1 -j "0x000000000000000000000000000000005ca1ab1e" >> {{ log_file }}
+  args:
+    executable: /bin/bash
+
+- name: Add inscription to mark test end
+  ansible.builtin.include_role:
+    name: common
+    tasks_from: clear_chain
+  vars:
+    inscription_message: Finished {{ ansible_role_name }}

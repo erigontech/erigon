@@ -24,6 +24,8 @@ import (
 	"github.com/ledgerwatch/erigon/zk/utils"
 )
 
+var SpecialZeroIndexHash = common.HexToHash("0x27AE5BA08D7291C96C8CBDDCC148BF48A6D68C7974B94356F53754EF6171D757")
+
 func SpawnSequencingStage(
 	s *stagedsync.StageState,
 	u stagedsync.Unwinder,
@@ -114,7 +116,6 @@ func SpawnSequencingStage(
 
 	var decodedBlock zktx.DecodedBatchL2Data
 	var deltaTimestamp uint64 = math.MaxUint64
-	var decodedBlocks []zktx.DecodedBatchL2Data // only used in l1 recovery
 	var blockTransactions []types.Transaction
 	var l1EffectiveGases, effectiveGases []uint8
 
@@ -129,8 +130,12 @@ func SpawnSequencingStage(
 	runLoopBlocks := true
 	lastStartedBn := executionAt - 1
 	yielded := mapset.NewSet[[32]byte]()
-	coinbase := cfg.zk.AddressSequencer
-	workRemaining := true
+
+	nextBatchData := nextBatchL1Data{
+		Coinbase:        cfg.zk.AddressSequencer,
+		IsWorkRemaining: true,
+	}
+
 	decodedBlocksSize := uint64(0)
 
 	if l1Recovery {
@@ -141,15 +146,31 @@ func SpawnSequencingStage(
 		}
 
 		// let's check if we have any L1 data to recover
-		decodedBlocks, coinbase, workRemaining, err = getNextL1BatchData(thisBatch, forkId, sdb.hermezDb)
+		nextBatchData, err = getNextL1BatchData(thisBatch, forkId, sdb.hermezDb)
 		if err != nil {
 			return err
 		}
-		decodedBlocksSize = uint64(len(decodedBlocks))
+
+		decodedBlocksSize = uint64(len(nextBatchData.DecodedData))
 		if decodedBlocksSize == 0 {
 			log.Info(fmt.Sprintf("[%s] L1 recovery has completed!", logPrefix), "batch", thisBatch)
 			time.Sleep(1 * time.Second)
 			return nil
+		}
+
+		// now look up the index associated with this info root
+		var infoTreeIndex uint64
+		if nextBatchData.L1InfoRoot == SpecialZeroIndexHash {
+			infoTreeIndex = 0
+		} else {
+			found := false
+			infoTreeIndex, found, err = sdb.hermezDb.GetL1InfoTreeIndexByRoot(nextBatchData.L1InfoRoot)
+			if err != nil {
+				return err
+			}
+			if !found {
+				return fmt.Errorf("could not find L1 info tree index for root %s", nextBatchData.L1InfoRoot.String())
+			}
 		}
 
 		// now let's detect a bad batch and skip it if we have to
@@ -157,13 +178,17 @@ func SpawnSequencingStage(
 		if err != nil {
 			return err
 		}
-		badBatch, err := checkForBadBatch(sdb.hermezDb, currentBlock.Time(), decodedBlocks)
+		badBatch, err := checkForBadBatch(thisBatch, sdb.hermezDb, currentBlock.Time(), infoTreeIndex, nextBatchData.LimitTimestamp, nextBatchData.DecodedData)
 		if err != nil {
 			return err
 		}
 
 		if badBatch {
 			log.Info(fmt.Sprintf("[%s] Skipping bad batch %d...", logPrefix, thisBatch))
+			// store the fact that this batch was invalid during recovery - will be used for the stream later
+			if err = sdb.hermezDb.WriteInvalidBatch(thisBatch); err != nil {
+				return err
+			}
 			if err = stages.SaveStageProgress(tx, stages.HighestSeenBatchNumber, thisBatch); err != nil {
 				return err
 			}
@@ -185,7 +210,7 @@ func SpawnSequencingStage(
 				break
 			}
 
-			decodedBlock = decodedBlocks[decodedBlocksIndex]
+			decodedBlock = nextBatchData.DecodedData[decodedBlocksIndex]
 			deltaTimestamp = uint64(decodedBlock.DeltaTimestamp)
 			l1EffectiveGases = decodedBlock.EffectiveGasPricePercentages
 			blockTransactions = decodedBlock.Transactions
@@ -201,7 +226,7 @@ func SpawnSequencingStage(
 			addedTransactions = []types.Transaction{}
 			addedReceipts = []*types.Receipt{}
 			effectiveGases = []uint8{}
-			header, parentBlock, err = prepareHeader(tx, blockNumber, deltaTimestamp, forkId, coinbase)
+			header, parentBlock, err = prepareHeader(tx, blockNumber, deltaTimestamp, forkId, nextBatchData.Coinbase)
 			if err != nil {
 				return err
 			}
@@ -316,7 +341,10 @@ func SpawnSequencingStage(
 							// if we are in recovery just log the error as a warning.  If the data is on the L1 then we should consider it as confirmed.
 							// The executor/prover would simply skip a TX with an invalid nonce for example so we don't need to worry about that here.
 							if l1Recovery {
-								log.Warn(fmt.Sprintf("[%s] error adding transaction to batch during recovery: %v", logPrefix, err))
+								log.Warn(fmt.Sprintf("[%s] error adding transaction to batch during recovery: %v", logPrefix, err),
+									"hash", transaction.Hash(),
+									"to", transaction.GetTo(),
+								)
 								continue
 							}
 							return err
@@ -356,7 +384,7 @@ func SpawnSequencingStage(
 					if l1Recovery {
 						// just go into the normal loop waiting for new transactions to signal that the recovery
 						// has finished as far as it can go
-						if len(blockTransactions) == 0 && !workRemaining {
+						if len(blockTransactions) == 0 && !nextBatchData.IsWorkRemaining {
 							log.Info(fmt.Sprintf("[%s] L1 recovery no more transactions to recover", logPrefix))
 						}
 

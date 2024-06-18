@@ -1,0 +1,122 @@
+---
+
+- name: Copy the polycli contracts to the working directory
+  ansible.builtin.copy:
+    src: polycli-contracts
+    dest: "{{ work_dir }}"
+
+
+- name: Deploy polycli ERC20 Contract
+  ansible.builtin.shell: |
+    pushd {{ work_dir }} || exit 1
+    cast send -j {{ legacy_flag }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} --create "$(cat polycli-contracts/ERC20.bin)" > erc20.out.json
+  args:
+    executable: /bin/bash
+
+- name: Deploy polycli ERC721 Contract
+  ansible.builtin.shell: |
+    pushd {{ work_dir }} || exit 1
+    cast send -j {{ legacy_flag }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} --create "$(cat polycli-contracts/ERC721.bin)" > erc721.out.json
+  args:
+    executable: /bin/bash
+
+- name: Deploy polycli Loadtest Contract
+  ansible.builtin.shell: |
+    pushd {{ work_dir }} || exit 1
+    cast send -j {{ legacy_flag }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} --create "$(cat polycli-contracts/LoadTester.bin)" > LoadTester.out.json
+  args:
+    executable: /bin/bash
+
+- name: Perform some ERC20 Transfers
+  ansible.builtin.shell: |
+    pushd {{ work_dir }} || exit 1
+    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode 2 --rate-limit 500 --requests 2 --concurrency 2 --erc20-address "$(jq -r '.contractAddress' erc20.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
+  args:
+    executable: /bin/bash
+
+- name: Perform some ERC721 Mints
+  ansible.builtin.shell: |
+    pushd {{ work_dir }} || exit 1
+    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode 7 --rate-limit 500 --requests 2 --concurrency 2 \
+        --iterations 1 --erc721-address "$(jq -r '.contractAddress' erc721.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
+    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode 7 --rate-limit 500 --requests 2 --concurrency 2 \
+        --iterations 2 --erc721-address "$(jq -r '.contractAddress' erc721.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
+    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode 7 --rate-limit 500 --requests 2 --concurrency 2 \
+        --iterations 4 --erc721-address "$(jq -r '.contractAddress' erc721.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
+    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode 7 --rate-limit 500 --requests 2 --concurrency 2 \
+        --iterations 8 --erc721-address "$(jq -r '.contractAddress' erc721.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
+    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode 7 --rate-limit 500 --requests 2 --concurrency 2 \
+        --iterations 16 --erc721-address "$(jq -r '.contractAddress' erc721.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
+    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode 7 --rate-limit 500 --requests 2 --concurrency 2 \
+        --iterations 32 --erc721-address "$(jq -r '.contractAddress' erc721.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
+    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode 7 --rate-limit 500 --requests 2 --concurrency 2 \
+        --iterations 64 --erc721-address "$(jq -r '.contractAddress' erc721.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
+  args:
+    executable: /bin/bash
+
+- name: Perform some Storage calls in the load tester contract
+  ansible.builtin.shell: |
+    pushd {{ work_dir }} || exit 1
+    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode s --rate-limit 500 --requests 1 --concurrency 1 \
+        --byte-count 1 --lt-address "$(jq -r '.contractAddress' LoadTester.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
+    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode s --rate-limit 500 --requests 1 --concurrency 1 \
+        --byte-count 2 --lt-address "$(jq -r '.contractAddress' LoadTester.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
+    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode s --rate-limit 500 --requests 1 --concurrency 1 \
+        --byte-count 4 --lt-address "$(jq -r '.contractAddress' LoadTester.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
+    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode s --rate-limit 500 --requests 1 --concurrency 1 \
+        --byte-count 8 --lt-address "$(jq -r '.contractAddress' LoadTester.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
+    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode s --rate-limit 500 --requests 1 --concurrency 1 \
+        --byte-count 16 --lt-address "$(jq -r '.contractAddress' LoadTester.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
+    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode s --rate-limit 500 --requests 1 --concurrency 1 \
+        --byte-count 32 --lt-address "$(jq -r '.contractAddress' LoadTester.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
+    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode s --rate-limit 500 --requests 1 --concurrency 1 \
+        --byte-count 64 --lt-address "$(jq -r '.contractAddress' LoadTester.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
+    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode s --rate-limit 500 --requests 1 --concurrency 1 \
+        --byte-count 128 --lt-address "$(jq -r '.contractAddress' LoadTester.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
+    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode s --rate-limit 500 --requests 1 --concurrency 1 \
+        --byte-count 256 --lt-address "$(jq -r '.contractAddress' LoadTester.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
+    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode s --rate-limit 500 --requests 1 --concurrency 1 \
+        --byte-count 512 --lt-address "$(jq -r '.contractAddress' LoadTester.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
+    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode s --rate-limit 500 --requests 1 --concurrency 1 \
+        --byte-count 1024 --lt-address "$(jq -r '.contractAddress' LoadTester.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
+    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode s --rate-limit 500 --requests 1 --concurrency 1 \
+        --byte-count 2048 --lt-address "$(jq -r '.contractAddress' LoadTester.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
+    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode s --rate-limit 500 --requests 1 --concurrency 1 \
+        --byte-count 4096 --lt-address "$(jq -r '.contractAddress' LoadTester.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
+    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode s --rate-limit 500 --requests 1 --concurrency 1 \
+        --byte-count 8192 --lt-address "$(jq -r '.contractAddress' LoadTester.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
+    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode s --rate-limit 500 --requests 1 --concurrency 1 \
+        --byte-count 16384 --lt-address "$(jq -r '.contractAddress' LoadTester.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
+  args:
+    executable: /bin/bash
+
+- name: Perform some uniswap v3 calls
+  ansible.builtin.shell: |
+    pushd {{ work_dir }} || exit 1
+    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode uniswapv3 --rate-limit 100 --requests 32 --concurrency 2 \
+        --rpc-url {{ rpc_url }} &>> {{ log_file }}
+  args:
+    executable: /bin/bash
+
+- name: Using polycli to call some precompiles
+  ansible.builtin.shell: |
+    pushd {{ work_dir }} || exit 1
+    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode p --rate-limit 100 --requests 8 --concurrency 16 \
+        --rpc-url {{ rpc_url }} &>> {{ log_file }}
+  args:
+    executable: /bin/bash
+
+- name: Using polycli to do some inscriptions
+  ansible.builtin.shell: |
+    pushd {{ work_dir }} || exit 1
+    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode inscription --rate-limit 1000 --requests 10 --concurrency 50 --eth-amount 0 \
+        --inscription-content 'data:,{"p":"prc-20","op":"mint","tick":"hava","amt":"100"}' --to-address {{ eth_address }} --rpc-url {{ rpc_url }} &>> {{ log_file }}
+  args:
+    executable: /bin/bash
+
+- name: Add inscription to mark test end
+  ansible.builtin.include_role:
+    name: common
+    tasks_from: clear_chain
+  vars:
+    inscription_message: Finished {{ ansible_role_name }}

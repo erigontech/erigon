@@ -10,9 +10,10 @@ type BatchType uint32
 
 var (
 	BatchTypeUnspecified BatchType = 0
-	BatchTypeRegular               = 1
-	BatchTypeForced                = 2
-	BatchTypeInjected              = 3
+	BatchTypeRegular     BatchType = 1
+	BatchTypeForced      BatchType = 2
+	BatchTypeInjected    BatchType = 3
+	BatchTypeInvalid     BatchType = 4
 )
 
 type BatchStartProto struct {
@@ -60,10 +61,11 @@ func UnmarshalBatchStart(data []byte) (*BatchStart, error) {
 	}
 
 	return &BatchStart{
-		Number:  batch.Number,
-		ForkId:  batch.ForkId,
-		ChainId: batch.ChainId,
-		Debug:   ProcessDebug(batch.Debug),
+		Number:    batch.Number,
+		ForkId:    batch.ForkId,
+		ChainId:   batch.ChainId,
+		Debug:     ProcessDebug(batch.Debug),
+		BatchType: BatchType(batch.Type),
 	}, nil
 }
 

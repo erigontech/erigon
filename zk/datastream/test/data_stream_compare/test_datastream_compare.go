@@ -8,9 +8,9 @@ import (
 	"reflect"
 
 	"github.com/ledgerwatch/erigon/zk/datastream/client"
+	"github.com/ledgerwatch/erigon/zk/datastream/proto/github.com/0xPolygonHermez/zkevm-node/state/datastream"
 	"github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/nsf/jsondiff"
-	"github.com/ledgerwatch/erigon/zk/datastream/proto/github.com/0xPolygonHermez/zkevm-node/state/datastream"
 )
 
 var (
@@ -26,8 +26,8 @@ func main() {
 	flag.StringVar(&stream2, "stream2", "", "the second stream to pull data from")
 	flag.Parse()
 
-	client1 := client.NewClient(ctx, stream1, 0, 0)
-	client2 := client.NewClient(ctx, stream2, 0, 0)
+	client1 := client.NewClient(ctx, stream1, 0, 0, 0)
+	client2 := client.NewClient(ctx, stream2, 0, 0, 0)
 
 	err := client1.Start()
 	if err != nil {
