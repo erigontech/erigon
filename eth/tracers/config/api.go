@@ -1,4 +1,4 @@
-package tracers
+package config
 
 import (
 	"encoding/json"

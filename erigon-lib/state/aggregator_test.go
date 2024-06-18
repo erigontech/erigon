@@ -1120,6 +1120,8 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
+	changesetAt5 := &StateChangeSet{}
+	changesetAt3 := &StateChangeSet{}
 
 	keys, vals := generateInputData(t, 20, 16, 10)
 	keys = keys[:2]
@@ -1133,6 +1135,12 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 
 	for i = 0; i < len(vals); i++ {
 		domains.SetTxNum(uint64(i))
+		if i == 3 {
+			domains.SetChangesetAccumulator(changesetAt3)
+		}
+		if i == 5 {
+			domains.SetChangesetAccumulator(changesetAt5)
+		}
 
 		for j := 0; j < len(keys); j++ {
 			buf := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
@@ -1158,9 +1166,14 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	domains, err = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
-	err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom, nil)
+	diffs := [kv.DomainLen][]DomainEntryDiff{}
+	for idx := range changesetAt5.Diffs {
+		diffs[idx] = changesetAt5.Diffs[idx].GetDiffSet()
+	}
+	err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom, &diffs)
 	require.NoError(t, err)
 
+	domains.SetChangesetAccumulator(changesetAt3)
 	for i = int(pruneFrom); i < len(vals); i++ {
 		domains.SetTxNum(uint64(i))
 
@@ -1192,8 +1205,10 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	domains, err = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
-
-	err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom, nil)
+	for idx := range changesetAt3.Diffs {
+		diffs[idx] = changesetAt3.Diffs[idx].GetDiffSet()
+	}
+	err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom, &diffs)
 	require.NoError(t, err)
 
 	for i = int(pruneFrom); i < len(vals); i++ {

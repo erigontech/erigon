@@ -1127,15 +1127,10 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
 
-	// TODO: can read here only parent header
-	parentBlock, err := api.blockWithSenders(ctx, dbtx, hash, blockNumber)
+	parentHeader, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNumber), dbtx)
 	if err != nil {
 		return nil, nil, err
 	}
-	if parentBlock == nil {
-		return nil, nil, fmt.Errorf("parent block %d(%x) not found", blockNumber, hash)
-	}
-	parentHeader := parentBlock.Header()
 	if parentHeader == nil {
 		return nil, nil, fmt.Errorf("parent header %d(%x) not found", blockNumber, hash)
 	}

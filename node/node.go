@@ -329,6 +329,10 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 			GrowthStep(16 * datasize.MB).
 			DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter)
 
+		if config.MdbxWriteMap {
+			opts = opts.WriteMap()
+		}
+
 		if readonly {
 			opts = opts.Readonly()
 		}
