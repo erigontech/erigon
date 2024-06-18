@@ -5,6 +5,8 @@ package diskutils
 import (
 	"os"
 	"syscall"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 func MountPointForDirPath(dirPath string) string {
