@@ -944,7 +944,6 @@ func (ac *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 			return false, nil
 		}
 		fullStat.Accumulate(stat)
-		fmt.Println(GetExecV3PrunableProgress(tx, []byte(kv.TblAccountVals)))
 
 		withWarmup = false // warmup once is enough
 
