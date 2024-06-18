@@ -32,7 +32,6 @@ const (
 	forkId7BlockGasLimit    = 18446744073709551615 // 0xffffffffffffffff
 	forkId8BlockGasLimit    = 1125899906842624     // 0x4000000000000
 	HIGHEST_KNOWN_FORK      = 9
-	newBlockTimeout         = 500
 )
 
 type ErigonDb interface {
@@ -384,7 +383,7 @@ LOOP:
 				// stop the current iteration of the stage
 				lastWrittenTs := lastWrittenTimeAtomic.Load()
 				timePassedAfterlastBlock := time.Since(time.Unix(0, lastWrittenTs))
-				if streamingAtomic.Load() && timePassedAfterlastBlock.Milliseconds() > newBlockTimeout {
+				if streamingAtomic.Load() && timePassedAfterlastBlock > cfg.zkCfg.DatastreamNewBlockTimeout {
 					log.Info(fmt.Sprintf("[%s] No new blocks in %d miliseconds. Ending the stage.", logPrefix, timePassedAfterlastBlock.Milliseconds()), "lastBlockHeight", lastBlockHeight)
 					endLoop = true
 				}
