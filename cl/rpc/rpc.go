@@ -14,11 +14,12 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/golang/snappy"
+	"go.uber.org/zap/buffer"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	sentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/ledgerwatch/log/v3"
-	"go.uber.org/zap/buffer"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"

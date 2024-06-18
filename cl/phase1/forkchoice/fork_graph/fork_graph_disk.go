@@ -8,7 +8,10 @@ import (
 	"sync/atomic"
 
 	"github.com/klauspost/compress/zstd"
+	"github.com/spf13/afero"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -19,8 +22,6 @@ import (
 	diffstorage "github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph/diff_storage"
 	"github.com/ledgerwatch/erigon/cl/transition"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/afero"
 )
 
 const dumpSlotFrequency = 4

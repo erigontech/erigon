@@ -26,12 +26,13 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
 
 	"github.com/ledgerwatch/erigon/turbo/testlog"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/types"
 )

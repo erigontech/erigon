@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 var (
@@ -59,7 +59,7 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 					TimeElapsed: totalDownloadTimeString.String(),
 					TimeLeft:    downloadTimeLeft,
 					Progress:    downloadedPercent,
-				})
+				}, "Downloading snapshots")
 
 				if err := d.db.Update(d.ctx, SnapshotDownloadUpdater(d.syncStats.SnapshotDownload)); err != nil {
 					log.Error("[Diagnostics] Failed to update snapshot download info", "err", err)
@@ -85,10 +85,10 @@ func getPercentDownloaded(downloaded, total uint64) string {
 	return fmt.Sprintf("%.2f%%", percent)
 }
 
-func (d *DiagnosticClient) updateSnapshotStageStats(stats SyncStageStats) {
+func (d *DiagnosticClient) updateSnapshotStageStats(stats SyncStageStats, subStageInfo string) {
 	idxs := d.getCurrentSyncIdxs()
 	if idxs.Stage == -1 || idxs.SubStage == -1 {
-		log.Warn("[Diagnostics] Cant find running stage or substage while updateing Snapshots stage stats.", "stages", d.syncStages)
+		log.Warn("[Diagnostics] Can't find running stage or substage while updating Snapshots stage stats.", "stages:", d.syncStages, "stats:", stats, "subStageInfo:", subStageInfo)
 		return
 	}
 
@@ -235,7 +235,7 @@ func (d *DiagnosticClient) addOrUpdateSegmentIndexingState(upd SnapshotIndexingS
 		TimeElapsed: SecondsToHHMMString(uint64(upd.TimeElapsed)),
 		TimeLeft:    "unknown",
 		Progress:    fmt.Sprintf("%d%%", totalProgress/len(d.syncStats.SnapshotIndexing.Segments)),
-	})
+	}, "Indexing snapshots")
 }
 
 func (d *DiagnosticClient) runSnapshotFilesListListener(rootCtx context.Context) {
