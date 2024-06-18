@@ -80,8 +80,9 @@ type SharedDomains struct {
 	domains [kv.DomainLen]map[string]dataWithPrevStep
 	storage *btree2.Map[string, dataWithPrevStep]
 
-	dWriter   [kv.DomainLen]*domainBufferedWriter
-	iiWriters [kv.StandaloneIdxLen]*invertedIndexBufferedWriter
+	dWriter          [kv.DomainLen]*domainBufferedWriter
+	iiWriters        [kv.StandaloneIdxLen]*invertedIndexBufferedWriter
+	appendableWriter [kv.AppendableLen]*appendableBufferedWriter
 
 	currentChangesAccumulator *StateChangeSet
 	pastChangesAccumulator    map[string]*StateChangeSet
@@ -109,6 +110,10 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 	for id, d := range sd.aggTx.d {
 		sd.domains[id] = map[string]dataWithPrevStep{}
 		sd.dWriter[id] = d.NewWriter()
+	}
+
+	for id, a := range sd.aggTx.appendable {
+		sd.appendableWriter[id] = a.NewWriter()
 	}
 
 	sd.SetTxNum(0)
@@ -787,6 +792,9 @@ func (sd *SharedDomains) Close() {
 		for _, iiWriter := range sd.iiWriters {
 			iiWriter.close()
 		}
+		for _, a := range sd.appendableWriter {
+			a.close()
+		}
 	}
 
 	if sd.sdCtx != nil {
@@ -844,6 +852,9 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 		}
 		for _, iiWriter := range sd.iiWriters {
 			iiWriter.close()
+		}
+		for _, a := range sd.appendableWriter {
+			a.close()
 		}
 	}
 	return nil
@@ -970,6 +981,10 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 	return nil
 }
 func (sd *SharedDomains) Tx() kv.Tx { return sd.roTx }
+
+func (sd *SharedDomains) AppendablePut(name kv.Appendable, ts uint64, v []byte) error {
+	return sd.appendableWriter[name].Append(ts, v)
+}
 
 type SharedDomainsCommitmentContext struct {
 	sd           *SharedDomains

@@ -30,10 +30,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/seg"
 	"github.com/ledgerwatch/log/v3"
@@ -395,15 +393,11 @@ func (ap *Appendable) getFromDB(k []byte, dbtx kv.Tx) ([]byte, bool, error) {
 }
 
 // Add - !NotThreadSafe. Must use WalRLock/BatchHistoryWriteEnd
-func (w *appendableBufferedWriter) Add(blockNum uint64, blockHash common.Hash, v []byte) error {
+func (w *appendableBufferedWriter) Append(ts uint64, v []byte) error {
 	if w.discard {
 		return nil
 	}
-	k := make([]byte, length.BlockNum+length.Hash)
-	w.SetTimeStamp(blockNum)
-	copy(k[:length.BlockNum], w.timestampBytes[:])
-	copy(k[length.BlockNum:], blockHash[:])
-	if err := w.tableCollector.Collect(k, v); err != nil {
+	if err := w.tableCollector.Collect(hexutility.EncodeTs(ts), v); err != nil {
 		return err
 	}
 	return nil
@@ -422,15 +416,6 @@ type appendableBufferedWriter struct {
 	table string
 
 	aggregationStep uint64
-
-	//current TimeStamp - BlockNum or TxNum
-	timestamp      uint64
-	timestampBytes [8]byte
-}
-
-func (w *appendableBufferedWriter) SetTimeStamp(ts uint64) {
-	w.timestamp = ts
-	binary.BigEndian.PutUint64(w.timestampBytes[:], w.timestamp)
 }
 
 func (w *appendableBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
