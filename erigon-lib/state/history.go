@@ -33,8 +33,6 @@ import (
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/log/v3"
-
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
@@ -44,6 +42,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 	"github.com/ledgerwatch/erigon-lib/seg"
@@ -88,9 +87,9 @@ type History struct {
 	//   vals: key1+key2+txNum -> value (not DupSort)
 	historyLargeValues bool // can't use DupSort optimization (aka. prefix-compression) if values size > 4kb
 
-	dontProduceHistoryFiles bool   // don't produce .v and .ef files. old data will be pruned anyway.
-	historyDisabled         bool   // skip all write operations to this History (even in DB)
-	keepRecentTxInDB        uint64 // When dontProduceHistoryFiles=true, keepRecentTxInDB is used to keep this amount of tx in db before pruning
+	snapshotsDisabled bool   // don't produce .v and .ef files, keep in db table. old data will be pruned anyway.
+	historyDisabled   bool   // skip all write operations to this History (even in DB)
+	keepRecentTxnInDB uint64 // When dontProduceHistoryFiles=true, keepRecentTxInDB is used to keep this amount of tx in db before pruning
 }
 
 type histCfg struct {
@@ -105,21 +104,21 @@ type histCfg struct {
 	withLocalityIndex  bool
 	withExistenceIndex bool // move to iiCfg
 
-	dontProduceHistoryFiles bool   // don't produce .v and .ef files. old data will be pruned anyway.
-	keepTxInDB              uint64 // When dontProduceHistoryFiles=true, keepTxInDB is used to keep this amount of tx in db before pruning
+	snapshotsDisabled bool   // don't produce .v and .ef files. old data will be pruned anyway.
+	keepTxInDB        uint64 // When dontProduceHistoryFiles=true, keepTxInDB is used to keep this amount of tx in db before pruning
 }
 
 func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTable, indexTable, historyValsTable string, integrityCheck func(fromStep, toStep uint64) bool, logger log.Logger) (*History, error) {
 	h := History{
-		dirtyFiles:              btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		historyValsTable:        historyValsTable,
-		compression:             cfg.compression,
-		compressWorkers:         1,
-		indexList:               withHashMap,
-		integrityCheck:          integrityCheck,
-		historyLargeValues:      cfg.historyLargeValues,
-		dontProduceHistoryFiles: cfg.dontProduceHistoryFiles,
-		keepRecentTxInDB:        cfg.keepTxInDB,
+		dirtyFiles:         btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		historyValsTable:   historyValsTable,
+		compression:        cfg.compression,
+		compressWorkers:    1,
+		indexList:          withHashMap,
+		integrityCheck:     integrityCheck,
+		historyLargeValues: cfg.historyLargeValues,
+		snapshotsDisabled:  cfg.snapshotsDisabled,
+		keepRecentTxnInDB:  cfg.keepTxInDB,
 	}
 	h._visibleFiles = []ctxItem{}
 	var err error
@@ -142,8 +141,8 @@ func (h *History) vAccessorFilePath(fromStep, toStep uint64) string {
 // It's ok if some files was open earlier.
 // If some file already open: noop.
 // If some file already open but not in provided list: close and remove from `files` field.
-func (h *History) OpenList(idxFiles, histNames []string, readonly bool) error {
-	if err := h.InvertedIndex.OpenList(idxFiles, readonly); err != nil {
+func (h *History) OpenList(idxFiles, histNames []string) error {
+	if err := h.InvertedIndex.OpenList(idxFiles); err != nil {
 		return err
 	}
 	return h.openList(histNames)
@@ -164,7 +163,7 @@ func (h *History) OpenFolder(readonly bool) error {
 	if err != nil {
 		return err
 	}
-	return h.OpenList(idxFiles, histFiles, readonly)
+	return h.OpenList(idxFiles, histFiles)
 }
 
 // scanStateFiles
@@ -276,7 +275,7 @@ func (h *History) openFiles() error {
 }
 
 func (h *History) closeWhatNotInList(fNames []string) {
-	var toDelete []*filesItem
+	var toClose []*filesItem
 	h.dirtyFiles.Walk(func(items []*filesItem) bool {
 	Loop1:
 		for _, item := range items {
@@ -285,11 +284,11 @@ func (h *History) closeWhatNotInList(fNames []string) {
 					continue Loop1
 				}
 			}
-			toDelete = append(toDelete, item)
+			toClose = append(toClose, item)
 		}
 		return true
 	})
-	for _, item := range toDelete {
+	for _, item := range toClose {
 		item.closeFiles()
 		h.dirtyFiles.Delete(item)
 	}
@@ -309,7 +308,7 @@ func (ht *HistoryRoTx) Files() (res []string) {
 	return append(res, ht.iit.Files()...)
 }
 
-func (h *History) missedIdxFiles() (l []*filesItem) {
+func (h *History) missedAccessors() (l []*filesItem) {
 	h.dirtyFiles.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
@@ -426,9 +425,9 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	return historyIdxPath, nil
 }
 
-func (h *History) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
-	h.InvertedIndex.BuildMissedIndices(ctx, g, ps)
-	missedFiles := h.missedIdxFiles()
+func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
+	h.InvertedIndex.BuildMissedAccessors(ctx, g, ps)
+	missedFiles := h.missedAccessors()
 	for _, item := range missedFiles {
 		item := item
 		g.Go(func() error {
@@ -573,7 +572,7 @@ func (c HistoryCollation) Close() {
 
 // [txFrom; txTo)
 func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollation, error) {
-	if h.dontProduceHistoryFiles {
+	if h.snapshotsDisabled {
 		return HistoryCollation{}, nil
 	}
 
@@ -794,7 +793,7 @@ func (h *History) reCalcVisibleFiles() {
 // buildFiles performs potentially resource intensive operations of creating
 // static files and their indices
 func (h *History) buildFiles(ctx context.Context, step uint64, collation HistoryCollation, ps *background.ProgressSet) (HistoryFiles, error) {
-	if h.dontProduceHistoryFiles {
+	if h.snapshotsDisabled {
 		return HistoryFiles{}, nil
 	}
 	var (
@@ -860,7 +859,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		return HistoryFiles{}, fmt.Errorf("open %s .ef history decompressor: %w", h.filenameBase, err)
 	}
 	{
-		if err := h.InvertedIndex.buildMapIdx(ctx, step, step+1, efHistoryDecomp, ps); err != nil {
+		if err := h.InvertedIndex.buildMapAccessor(ctx, step, step+1, efHistoryDecomp, ps); err != nil {
 			return HistoryFiles{}, fmt.Errorf("build %s .ef history idx: %w", h.filenameBase, err)
 		}
 		if efHistoryIdx, err = recsplit.OpenIndex(h.InvertedIndex.efAccessorFilePath(step, step+1)); err != nil {
@@ -893,7 +892,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 }
 
 func (h *History) integrateDirtyFiles(sf HistoryFiles, txNumFrom, txNumTo uint64) {
-	if h.dontProduceHistoryFiles {
+	if h.snapshotsDisabled {
 		return
 	}
 
@@ -1008,11 +1007,11 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 	//		ht.h.filenameBase, untilTx, ht.h.dontProduceHistoryFiles, txTo, minIdxTx, maxIdxTx, ht.h.keepRecentTxInDB, minIdxTx < txTo)
 	//}()
 
-	if ht.h.dontProduceHistoryFiles {
-		if ht.h.keepRecentTxInDB >= maxIdxTx {
+	if ht.h.snapshotsDisabled {
+		if ht.h.keepRecentTxnInDB >= maxIdxTx {
 			return false, 0
 		}
-		txTo = min(maxIdxTx-ht.h.keepRecentTxInDB, untilTx) // bound pruning
+		txTo = min(maxIdxTx-ht.h.keepRecentTxnInDB, untilTx) // bound pruning
 	} else {
 		canPruneIdx := ht.iit.CanPrune(tx)
 		if !canPruneIdx {
@@ -1114,7 +1113,7 @@ func (ht *HistoryRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 	}
 	mxPruneSizeHistory.AddInt(pruned)
 
-	if !forced && ht.h.dontProduceHistoryFiles {
+	if !forced && ht.h.snapshotsDisabled {
 		forced = true // or index.CanPrune will return false cuz no snapshots made
 	}
 

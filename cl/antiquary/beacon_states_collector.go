@@ -6,9 +6,11 @@ import (
 	"io"
 
 	"github.com/klauspost/compress/zstd"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
@@ -16,7 +18,6 @@ import (
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
-	"github.com/ledgerwatch/log/v3"
 )
 
 var stateAntiquaryBufSz = etl.BufferOptimalSize / 8 // 18 collectors * 256mb / 8 = 512mb in worst case
@@ -131,12 +132,12 @@ func (i *beaconStatesCollector) addGenesisState(ctx context.Context, state *stat
 		}
 		committeeSlot := i.beaconCfg.RoundSlotToSyncCommitteePeriod(slot)
 		committee := *state.CurrentSyncCommittee()
-		if err := i.currentSyncCommitteeCollector.Collect(base_encoding.Encode64ToBytes4(committeeSlot), libcommon.Copy(committee[:])); err != nil {
+		if err := i.currentSyncCommitteeCollector.Collect(base_encoding.Encode64ToBytes4(committeeSlot), committee[:]); err != nil {
 			return err
 		}
 
 		committee = *state.NextSyncCommittee()
-		if err := i.nextSyncCommitteeCollector.Collect(base_encoding.Encode64ToBytes4(committeeSlot), libcommon.Copy(committee[:])); err != nil {
+		if err := i.nextSyncCommitteeCollector.Collect(base_encoding.Encode64ToBytes4(committeeSlot), committee[:]); err != nil {
 			return err
 		}
 	}
@@ -156,7 +157,7 @@ func (i *beaconStatesCollector) storeEpochData(st *state.CachingBeaconState) err
 		return err
 	}
 	roundedSlot := i.beaconCfg.RoundSlotToEpoch(st.Slot())
-	return i.epochDataCollector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), libcommon.Copy(i.buf.Bytes()))
+	return i.epochDataCollector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), i.buf.Bytes())
 }
 
 func (i *beaconStatesCollector) storeSlotData(st *state.CachingBeaconState, rewardsCollector *eth2.BlockRewardsCollector) error {
@@ -171,7 +172,7 @@ func (i *beaconStatesCollector) storeSlotData(st *state.CachingBeaconState, rewa
 	if err := slotData.WriteTo(i.buf); err != nil {
 		return err
 	}
-	return i.slotDataCollector.Collect(base_encoding.Encode64ToBytes4(st.Slot()), libcommon.Copy(i.buf.Bytes()))
+	return i.slotDataCollector.Collect(base_encoding.Encode64ToBytes4(st.Slot()), i.buf.Bytes())
 }
 
 func (i *beaconStatesCollector) collectEffectiveBalancesDump(slot uint64, uncompressed []byte) error {
@@ -190,7 +191,7 @@ func (i *beaconStatesCollector) collectEffectiveBalancesDump(slot uint64, uncomp
 		return err
 	}
 	roundedSlot := slot - (slot % clparams.SlotsPerDump)
-	return i.effectiveBalancesDumpCollector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), libcommon.Copy(i.buf.Bytes()))
+	return i.effectiveBalancesDumpCollector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), i.buf.Bytes())
 }
 
 func (i *beaconStatesCollector) collectBalancesDump(slot uint64, uncompressed []byte) error {
@@ -222,7 +223,7 @@ func (i *beaconStatesCollector) collectActiveIndices(epoch uint64, activeIndices
 		return err
 	}
 	slot := epoch * i.beaconCfg.SlotsPerEpoch
-	return i.activeValidatorIndiciesCollector.Collect(base_encoding.Encode64ToBytes4(slot), libcommon.Copy(i.buf.Bytes()))
+	return i.activeValidatorIndiciesCollector.Collect(base_encoding.Encode64ToBytes4(slot), i.buf.Bytes())
 }
 
 func (i *beaconStatesCollector) collectFlattenedProposers(epoch uint64, proposers []byte) error {
@@ -360,7 +361,7 @@ func antiquateFullUint64List(collector *etl.Collector, slot uint64, raw []byte, 
 	if err := compressor.Close(); err != nil {
 		return err
 	}
-	return collector.Collect(base_encoding.Encode64ToBytes4(slot), libcommon.Copy(buffer.Bytes()))
+	return collector.Collect(base_encoding.Encode64ToBytes4(slot), buffer.Bytes())
 }
 
 func antiquateField(ctx context.Context, slot uint64, uncompressed []byte, buffer *bytes.Buffer, compressor *zstd.Encoder, collector *etl.Collector) error {
@@ -374,7 +375,7 @@ func antiquateField(ctx context.Context, slot uint64, uncompressed []byte, buffe
 		return err
 	}
 	roundedSlot := slot - (slot % clparams.SlotsPerDump)
-	return collector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), libcommon.Copy(buffer.Bytes()))
+	return collector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), buffer.Bytes())
 }
 
 func antiquateBytesListDiff(ctx context.Context, key []byte, old, new []byte, collector *etl.Collector, diffFn func(w io.Writer, old, new []byte) error) error {
@@ -387,5 +388,5 @@ func antiquateBytesListDiff(ctx context.Context, key []byte, old, new []byte, co
 		return err
 	}
 
-	return collector.Collect(key, libcommon.Copy(diffBuffer.Bytes()))
+	return collector.Collect(key, diffBuffer.Bytes())
 }

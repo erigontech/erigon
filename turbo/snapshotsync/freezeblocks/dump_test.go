@@ -9,10 +9,11 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/stretchr/testify/require"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -194,7 +195,7 @@ func TestDump(t *testing.T) {
 					i++
 					body := &types.BodyForStorage{}
 					require.NoError(rlp.DecodeBytes(v, body))
-					txsAmount += uint64(body.TxAmount)
+					txsAmount += uint64(body.TxCount)
 					baseIdList = append(baseIdList, body.BaseTxId)
 					return nil
 				}, 1, log.LvlInfo, log.New())
@@ -210,7 +211,7 @@ func TestDump(t *testing.T) {
 				i++
 				body := &types.BodyForStorage{}
 				require.NoError(rlp.DecodeBytes(v, body))
-				txsAmount += uint64(body.TxAmount)
+				txsAmount += uint64(body.TxCount)
 				baseIdList = append(baseIdList, body.BaseTxId)
 				return nil
 			}, 1, log.LvlInfo, log.New())

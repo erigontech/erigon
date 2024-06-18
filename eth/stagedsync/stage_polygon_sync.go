@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -80,7 +82,7 @@ func NewPolygonSyncStageCfg(
 		blockDownloader,
 		polygonsync.NewCanonicalChainBuilderFactory(chainConfig, borConfig, spansCache),
 		spansCache,
-		heimdallService.FetchLatestSpan,
+		heimdallService.FetchLatestSpans,
 		events.Events(),
 		logger,
 	)
@@ -289,10 +291,11 @@ func (s *polygonSyncStageService) handleInsertBlocks(ctx context.Context, tx kv.
 		metrics.UpdateBlockConsumerHeaderDownloadDelay(header.Time, height-1, s.logger)
 		metrics.UpdateBlockConsumerBodyDownloadDelay(header.Time, height-1, s.logger)
 
-		parentTd := common.Big0
+		var parentTd *big.Int
+		var err error
 		if height > 0 {
 			// Parent's total difficulty
-			parentTd, err := rawdb.ReadTd(tx, header.ParentHash, height-1)
+			parentTd, err = rawdb.ReadTd(tx, header.ParentHash, height-1)
 			if err != nil || parentTd == nil {
 				return fmt.Errorf(
 					"parent's total difficulty not found with hash %x and height %d: %v",
@@ -301,6 +304,8 @@ func (s *polygonSyncStageService) handleInsertBlocks(ctx context.Context, tx kv.
 					err,
 				)
 			}
+		} else {
+			parentTd = big.NewInt(0)
 		}
 
 		td := parentTd.Add(parentTd, header.Difficulty)

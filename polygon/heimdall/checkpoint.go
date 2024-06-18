@@ -25,6 +25,10 @@ func (c *Checkpoint) RawId() uint64 {
 	return uint64(c.Id)
 }
 
+func (c *Checkpoint) SetRawId(id uint64) {
+	c.Id = CheckpointId(id)
+}
+
 func (c *Checkpoint) StartBlock() *big.Int {
 	return c.Fields.StartBlock
 }

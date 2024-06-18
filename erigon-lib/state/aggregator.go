@@ -34,7 +34,6 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/log/v3"
 	rand2 "golang.org/x/exp/rand"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -49,6 +48,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/seg"
 )
 
@@ -56,6 +56,7 @@ type Aggregator struct {
 	db               kv.RoDB
 	d                [kv.DomainLen]*Domain
 	iis              [kv.StandaloneIdxLen]*InvertedIndex
+	ap               [kv.AppendableLen]*Appendable //nolint
 	backgroundResult *BackgroundResult
 	dirs             datadir.Dirs
 	tmpdir           string
@@ -94,6 +95,8 @@ type Aggregator struct {
 	logger       log.Logger
 
 	ctxAutoIncrement atomic.Uint64
+
+	produce bool
 }
 
 type OnFreezeFunc func(frozenFileNames []string)
@@ -124,6 +127,8 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		mergeWorkers:           1,
 
 		commitmentValuesTransform: AggregatorSqueezeCommitmentValues,
+
+		produce: true,
 	}
 	cfg := domainCfg{
 		hist: histCfg{
@@ -158,7 +163,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		hist: histCfg{
 			iiCfg:             iiCfg{salt: salt, dirs: dirs, db: db},
 			withLocalityIndex: false, withExistenceIndex: false, compression: CompressNone, historyLargeValues: false,
-			dontProduceHistoryFiles: true,
+			snapshotsDisabled: true,
 		},
 		replaceKeysInValues:         a.commitmentValuesTransform,
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
@@ -188,7 +193,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	if err := a.registerII(kv.TracesToIdxPos, salt, dirs, db, aggregationStep, kv.FileTracesToIdx, kv.TblTracesToKeys, kv.TblTracesToIdx, logger); err != nil {
 		return nil, err
 	}
-	a.LimitRecentHistoryWithoutFiles(aggregationStep / 2)
+	a.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(100_000) // ~1k blocks of history
 	a.recalcVisibleFiles()
 
 	if dbg.NoSync() {
@@ -245,7 +250,7 @@ func (a *Aggregator) DisableFsync() {
 	}
 }
 
-func (a *Aggregator) OpenFolder(readonly bool) error {
+func (a *Aggregator) OpenFolder() error {
 	defer a.recalcVisibleFiles()
 
 	a.dirtyFilesLock.Lock()
@@ -259,12 +264,12 @@ func (a *Aggregator) OpenFolder(readonly bool) error {
 				return a.ctx.Err()
 			default:
 			}
-			return d.OpenFolder(readonly)
+			return d.OpenFolder()
 		})
 	}
 	for _, ii := range a.iis {
 		ii := ii
-		eg.Go(func() error { return ii.OpenFolder(readonly) })
+		eg.Go(func() error { return ii.OpenFolder() })
 	}
 	if err := eg.Wait(); err != nil {
 		return fmt.Errorf("OpenFolder: %w", err)
@@ -280,11 +285,11 @@ func (a *Aggregator) OpenList(files []string, readonly bool) error {
 	eg := &errgroup.Group{}
 	for _, d := range a.d {
 		d := d
-		eg.Go(func() error { return d.OpenFolder(readonly) })
+		eg.Go(func() error { return d.OpenFolder() })
 	}
 	for _, ii := range a.iis {
 		ii := ii
-		eg.Go(func() error { return ii.OpenFolder(readonly) })
+		eg.Go(func() error { return ii.OpenFolder() })
 	}
 	if err := eg.Wait(); err != nil {
 		return fmt.Errorf("OpenList: %w", err)
@@ -428,16 +433,16 @@ func (a *Aggregator) BuildMissedIndices(ctx context.Context, workers int) error 
 			}
 		}()
 		for _, d := range a.d {
-			d.BuildMissedIndices(ctx, g, ps)
+			d.BuildMissedAccessors(ctx, g, ps)
 		}
 		for _, ii := range a.iis {
-			ii.BuildMissedIndices(ctx, g, ps)
+			ii.BuildMissedAccessors(ctx, g, ps)
 		}
 
 		if err := g.Wait(); err != nil {
 			return err
 		}
-		if err := a.OpenFolder(true); err != nil {
+		if err := a.OpenFolder(); err != nil {
 			return err
 		}
 	}
@@ -1564,14 +1569,14 @@ func (a *Aggregator) cleanAfterMerge(in MergedFilesV3) {
 	}
 }
 
-// LimitRecentHistoryWithoutFiles limits amount of recent transactions protected from prune in domains history.
+// KeepRecentTxnsOfHistoriesWithDisabledSnapshots limits amount of recent transactions protected from prune in domains history.
 // Affects only domains with dontProduceHistoryFiles=true.
 // Usually equal to one a.aggregationStep, but could be set to step/2 or step/4 to reduce size of history tables.
 // when we exec blocks from snapshots we can set it to 0, because no re-org on those blocks are possible
-func (a *Aggregator) LimitRecentHistoryWithoutFiles(recentTxs uint64) *Aggregator {
+func (a *Aggregator) KeepRecentTxnsOfHistoriesWithDisabledSnapshots(recentTxs uint64) *Aggregator {
 	for _, d := range a.d {
-		if d != nil && d.History.dontProduceHistoryFiles {
-			d.History.keepRecentTxInDB = recentTxs
+		if d != nil && d.History.snapshotsDisabled {
+			d.History.keepRecentTxnInDB = recentTxs
 		}
 	}
 	return a
@@ -1581,9 +1586,19 @@ func (a *Aggregator) SetSnapshotBuildSema(semaphore *semaphore.Weighted) {
 	a.snapshotBuildSema = semaphore
 }
 
+// SetProduceMod allows setting produce to false in order to stop making state files (default value is true)
+func (a *Aggregator) SetProduceMod(produce bool) {
+	a.produce = produce
+}
+
 // Returns channel which is closed when aggregation is done
 func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 	fin := make(chan struct{})
+
+	if !a.produce {
+		close(fin)
+		return fin
+	}
 
 	if (txNum + 1) <= a.visibleFilesMinimaxTxNum.Load()+a.aggregationStep {
 		close(fin)

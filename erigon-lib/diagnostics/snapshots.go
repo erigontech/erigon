@@ -3,9 +3,11 @@ package diagnostics
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 var (
@@ -48,6 +50,17 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 				d.syncStats.SnapshotDownload.DownloadFinished = info.DownloadFinished
 				d.syncStats.SnapshotDownload.TorrentMetadataReady = info.TorrentMetadataReady
 
+				downloadedPercent := getPercentDownloaded(info.Downloaded, info.Total)
+				remainingBytes := info.Total - info.Downloaded
+				downloadTimeLeft := CalculateTime(remainingBytes, info.DownloadRate)
+				totalDownloadTimeString := time.Duration(info.TotalTime) * time.Second
+
+				d.updateSnapshotStageStats(SyncStageStats{
+					TimeElapsed: totalDownloadTimeString.String(),
+					TimeLeft:    downloadTimeLeft,
+					Progress:    downloadedPercent,
+				}, "Downloading snapshots")
+
 				if err := d.db.Update(d.ctx, SnapshotDownloadUpdater(d.syncStats.SnapshotDownload)); err != nil {
 					log.Error("[Diagnostics] Failed to update snapshot download info", "err", err)
 				}
@@ -59,8 +72,27 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 				}
 			}
 		}
-
 	}()
+}
+
+func getPercentDownloaded(downloaded, total uint64) string {
+	percent := float32(downloaded) / float32(total/100)
+
+	if percent > 100 {
+		percent = 100
+	}
+
+	return fmt.Sprintf("%.2f%%", percent)
+}
+
+func (d *DiagnosticClient) updateSnapshotStageStats(stats SyncStageStats, subStageInfo string) {
+	idxs := d.getCurrentSyncIdxs()
+	if idxs.Stage == -1 || idxs.SubStage == -1 {
+		log.Warn("[Diagnostics] Can't find running stage or substage while updating Snapshots stage stats.", "stages:", d.syncStages, "stats:", stats, "subStageInfo:", subStageInfo)
+		return
+	}
+
+	d.syncStages[idxs.Stage].SubStages[idxs.SubStage].Stats = stats
 }
 
 func (d *DiagnosticClient) snapshotStageFinished() bool {
@@ -193,6 +225,17 @@ func (d *DiagnosticClient) addOrUpdateSegmentIndexingState(upd SnapshotIndexingS
 	}
 
 	d.syncStats.SnapshotIndexing.TimeElapsed = upd.TimeElapsed
+
+	totalProgress := 0
+	for _, seg := range d.syncStats.SnapshotIndexing.Segments {
+		totalProgress += seg.Percent
+	}
+
+	d.updateSnapshotStageStats(SyncStageStats{
+		TimeElapsed: SecondsToHHMMString(uint64(upd.TimeElapsed)),
+		TimeLeft:    "unknown",
+		Progress:    fmt.Sprintf("%d%%", totalProgress/len(d.syncStats.SnapshotIndexing.Segments)),
+	}, "Indexing snapshots")
 }
 
 func (d *DiagnosticClient) runSnapshotFilesListListener(rootCtx context.Context) {

@@ -15,13 +15,13 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -347,7 +347,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	require.NoError(t, err)
 	defer anotherAgg.Close()
 
-	require.NoError(t, anotherAgg.OpenFolder(false))
+	require.NoError(t, anotherAgg.OpenFolder())
 
 	rwTx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
@@ -784,7 +784,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 
 	newAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, newDb, logger)
 	require.NoError(t, err)
-	require.NoError(t, newAgg.OpenFolder(false))
+	require.NoError(t, newAgg.OpenFolder())
 
 	newTx, err := newDb.BeginRw(context.Background())
 	require.NoError(t, err)
@@ -1077,7 +1077,7 @@ func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (kv.RwDB, *Aggregator) 
 	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, logger)
 	require.NoError(err)
 	t.Cleanup(agg.Close)
-	err = agg.OpenFolder(false)
+	err = agg.OpenFolder()
 	require.NoError(err)
 	agg.DisableFsync()
 	return db, agg
@@ -1120,6 +1120,8 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
+	changesetAt5 := &StateChangeSet{}
+	changesetAt3 := &StateChangeSet{}
 
 	keys, vals := generateInputData(t, 20, 16, 10)
 	keys = keys[:2]
@@ -1133,6 +1135,12 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 
 	for i = 0; i < len(vals); i++ {
 		domains.SetTxNum(uint64(i))
+		if i == 3 {
+			domains.SetChangesetAccumulator(changesetAt3)
+		}
+		if i == 5 {
+			domains.SetChangesetAccumulator(changesetAt5)
+		}
 
 		for j := 0; j < len(keys); j++ {
 			buf := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
@@ -1158,9 +1166,14 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	domains, err = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
-	err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom, nil)
+	diffs := [kv.DomainLen][]DomainEntryDiff{}
+	for idx := range changesetAt5.Diffs {
+		diffs[idx] = changesetAt5.Diffs[idx].GetDiffSet()
+	}
+	err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom, &diffs)
 	require.NoError(t, err)
 
+	domains.SetChangesetAccumulator(changesetAt3)
 	for i = int(pruneFrom); i < len(vals); i++ {
 		domains.SetTxNum(uint64(i))
 
@@ -1192,8 +1205,10 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	domains, err = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
-
-	err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom, nil)
+	for idx := range changesetAt3.Diffs {
+		diffs[idx] = changesetAt3.Diffs[idx].GetDiffSet()
+	}
+	err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom, &diffs)
 	require.NoError(t, err)
 
 	for i = int(pruneFrom); i < len(vals); i++ {

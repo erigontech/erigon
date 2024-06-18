@@ -37,7 +37,8 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/debug"
 
 	"github.com/gofrs/flock"
-	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -328,6 +329,10 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 			Path(dbPath).Label(label).
 			GrowthStep(16 * datasize.MB).
 			DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter)
+
+		if config.MdbxWriteMap {
+			opts = opts.WriteMap()
+		}
 
 		if readonly {
 			opts = opts.Readonly()

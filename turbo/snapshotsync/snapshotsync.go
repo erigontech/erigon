@@ -22,8 +22,8 @@ import (
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
@@ -351,10 +351,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	/*diagnostics.RegisterProvider(diagnostics.ProviderFunc(func(ctx context.Context) error {
-		return nil
-	}), diagnostics.TypeOf(diagnostics.DownloadStatistics{}), log.Root())*/
-
 	// Check once without delay, for faster erigon re-start
 	stats, err := snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{})
 	if err != nil {
@@ -409,7 +405,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 		}
 	}
 
-	if err := agg.OpenFolder(true); err != nil {
+	if err := agg.OpenFolder(); err != nil {
 		return err
 	}
 

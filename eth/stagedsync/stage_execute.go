@@ -9,9 +9,10 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon/core/rawdb/rawdbhelpers"
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/ledgerwatch/erigon/core/rawdb/rawdbhelpers"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -367,9 +368,9 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 		}
 		var ok bool
 		var currentKeys [kv.DomainLen][]libstate.DomainEntryDiff
-		currentKeys, ok, err = rawdb.ReadDiffSet(txc.Tx, currentBlock, currentHash)
+		currentKeys, ok, err = domains.GetDiffset(txc.Tx, currentHash, currentBlock)
 		if !ok {
-			changeset = nil
+			return fmt.Errorf("domains.GetDiffset(%d, %s): not found", currentBlock, currentHash)
 		}
 		if err != nil {
 			return err
@@ -880,7 +881,13 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		defer tx.Rollback()
 	}
 	if s.ForwardProgress > config3.MaxReorgDepthV3 {
-		if err := rawdb.PruneTable(tx, kv.ChangeSets3, s.ForwardProgress-config3.MaxReorgDepthV3, ctx, config3.MaxReorgDepthV3); err != nil {
+		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
+		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
+		var pruneDiffsLimitOnChainTip = 1_000
+		if s.CurrentSyncCycle.IsInitialCycle {
+			pruneDiffsLimitOnChainTip *= 10
+		}
+		if err := rawdb.PruneTable(tx, kv.ChangeSets3, s.ForwardProgress-config3.MaxReorgDepthV3, ctx, pruneDiffsLimitOnChainTip); err != nil {
 			return err
 		}
 	}

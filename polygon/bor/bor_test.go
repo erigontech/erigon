@@ -11,7 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -172,6 +172,13 @@ func (r headerReader) FrozenBlocks() uint64    { return 0 }
 func (r headerReader) FrozenBorBlocks() uint64 { return 0 }
 
 func (r headerReader) CurrentHeader() *types.Header {
+	return nil
+}
+
+func (r headerReader) CurrentFinalizedHeader() *types.Header {
+	return nil
+}
+func (r headerReader) CurrentSafeHeader() *types.Header {
 	return nil
 }
 
