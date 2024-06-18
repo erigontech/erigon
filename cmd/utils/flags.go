@@ -759,6 +759,11 @@ var (
 		Usage: "Runtime limit of chaindata db size. You can change value of this flag at any time.",
 		Value: (12 * datasize.TB).String(),
 	}
+	DbWriteMapFlag = cli.BoolFlag{
+		Name:  "db.writemap",
+		Usage: "Enable WRITE_MAP feauture for fast database writes and fast commit times",
+		Value: true,
+	}
 
 	HealthCheckFlag = cli.BoolFlag{
 		Name:  "healthcheck",
@@ -1397,6 +1402,7 @@ func setDataDir(ctx *cli.Context, cfg *nodecfg.Config) {
 	if err := cfg.MdbxDBSizeLimit.UnmarshalText([]byte(ctx.String(DbSizeLimitFlag.Name))); err != nil {
 		panic(err)
 	}
+	cfg.MdbxWriteMap = ctx.Bool(DbWriteMapFlag.Name)
 	szLimit := cfg.MdbxDBSizeLimit.Bytes()
 	if szLimit%256 != 0 || szLimit < 256 {
 		panic(fmt.Errorf("invalid --db.size.limit: %s=%d, see: %s", ctx.String(DbSizeLimitFlag.Name), szLimit, DbSizeLimitFlag.Usage))

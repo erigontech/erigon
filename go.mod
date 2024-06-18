@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.21.5
 
 require (
-	github.com/erigontech/mdbx-go v0.38.3
+	github.com/erigontech/mdbx-go v0.38.4
 	github.com/erigontech/silkworm-go v0.18.0
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -88,7 +88,7 @@ require (
 	github.com/ugorji/go/codec v1.1.13
 	github.com/urfave/cli/v2 v2.27.2
 	github.com/valyala/fastjson v1.6.4
-	github.com/vektah/gqlparser/v2 v2.5.14
+	github.com/vektah/gqlparser/v2 v2.5.16
 	github.com/xsleonard/go-merkle v1.1.0
 	go.uber.org/mock v0.4.0
 	go.uber.org/zap v1.27.0
@@ -186,7 +186,7 @@ require (
 	github.com/koron/go-ssdp v0.0.4 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
-	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240614130019-fe930df7be33 // indirect
+	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240612040242-85c0e081d6ad // indirect
 	github.com/ledgerwatch/erigonwatch v0.1.0
 	github.com/libp2p/go-buffer-pool v0.1.0 // indirect
 	github.com/libp2p/go-flow-metrics v0.1.0 // indirect

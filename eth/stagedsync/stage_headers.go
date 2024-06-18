@@ -585,6 +585,32 @@ func NewChainReaderImpl(config *chain.Config, tx kv.Tx, blockReader services.Ful
 
 func (cr ChainReaderImpl) Config() *chain.Config        { return cr.config }
 func (cr ChainReaderImpl) CurrentHeader() *types.Header { panic("") }
+func (cr ChainReaderImpl) CurrentFinalizedHeader() *types.Header {
+	hash := rawdb.ReadForkchoiceFinalized(cr.tx)
+	if hash == (libcommon.Hash{}) {
+		return nil
+	}
+
+	number := rawdb.ReadHeaderNumber(cr.tx, hash)
+	if number == nil {
+		return nil
+	}
+
+	return rawdb.ReadHeader(cr.tx, hash, *number)
+}
+func (cr ChainReaderImpl) CurrentSafeHeader() *types.Header {
+	hash := rawdb.ReadForkchoiceSafe(cr.tx)
+	if hash == (libcommon.Hash{}) {
+		return nil
+	}
+
+	number := rawdb.ReadHeaderNumber(cr.tx, hash)
+	if number == nil {
+		return nil
+	}
+
+	return rawdb.ReadHeader(cr.tx, hash, *number)
+}
 func (cr ChainReaderImpl) GetHeader(hash libcommon.Hash, number uint64) *types.Header {
 	if cr.blockReader != nil {
 		h, _ := cr.blockReader.Header(context.Background(), cr.tx, hash, number)
