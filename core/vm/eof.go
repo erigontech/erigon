@@ -360,21 +360,6 @@ func parseInt16(b []byte) int {
 	return int(int16(b[1]) | int16(b[0])<<8)
 }
 
-// max returns the maximum of a and b.
-func max(a, b int) int {
-	if a < b {
-		return b
-	}
-	return a
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // sum computes the sum of a slice.
 func sum(list []int) (s int) {
 	for _, n := range list {
