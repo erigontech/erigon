@@ -690,6 +690,7 @@ func (iit *InvertedIndexRoTx) smallestTxNum(tx kv.Tx) uint64 {
 	fst, _ := kv.FirstKey(tx, iit.ii.indexKeysTable)
 	if len(fst) > 0 {
 		fstInDb := binary.BigEndian.Uint64(fst)
+		fmt.Println("fstInDb", fstInDb)
 		return min(fstInDb, math.MaxUint64)
 	}
 	return math.MaxUint64
