@@ -25,7 +25,6 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/tracer"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
 
@@ -1121,10 +1120,12 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	if err != nil {
 		return nil, nil, err
 	}
-	stateCache := shards.NewStateCache(32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
-	cachedReader := state.NewCachedReader(stateReader, stateCache)
+	//stateCache := shards.NewStateCache(32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
+	cachedReader := stateReader
+	//cachedReader := state.NewCachedReader(stateReader, stateCache)
 	noop := state.NewNoopWriter()
-	cachedWriter := state.NewCachedWriter(noop, stateCache)
+	cachedWriter := noop
+	//cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
 
 	parentHeader, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNumber), dbtx)
@@ -1155,7 +1156,15 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 		useParent = true
 	}
 
+	var baseTxNum uint64
+	historicalStateReader, isHistoricalStateReader := stateReader.(state.HistoricalStateReader)
+	if isHistoricalStateReader {
+		baseTxNum = historicalStateReader.GetTxNum()
+	}
 	for txIndex, msg := range msgs {
+		if isHistoricalStateReader {
+			historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
+		}
 		if err := libcommon.Stopped(ctx.Done()); err != nil {
 			return nil, nil, err
 		}
@@ -1202,9 +1211,12 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 		var cloneReader state.StateReader
 		var sd *StateDiff
 		if traceTypeStateDiff {
-			cloneCache := stateCache.Clone()
-			cloneReader = state.NewCachedReader(stateReader, cloneCache)
-
+			//cloneCache := stateCache.Clone()
+			//cloneReader = state.NewCachedReader(stateReader, cloneCache)
+			cloneReader = stateReader
+			if isHistoricalStateReader {
+				historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
+			}
 			sdMap := make(map[libcommon.Address]*StateDiffAccount)
 			traceResult.StateDiff = sdMap
 			sd = &StateDiff{sdMap: sdMap}

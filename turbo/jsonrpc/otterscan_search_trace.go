@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethutils"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/turbo/shards"
 )
 
 func (api *OtterscanAPIImpl) searchTraceBlock(ctx context.Context, addr common.Address, chainConfig *chain.Config, idx int, bNum uint64, results []*TransactionsWithReceipts) {
@@ -56,10 +55,12 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNu
 	if err != nil {
 		return false, nil, err
 	}
-	stateCache := shards.NewStateCache(32, 0 /* no limit */)
-	cachedReader := state.NewCachedReader(reader, stateCache)
+	//stateCache := shards.NewStateCache(32, 0 /* no limit */)
+	//cachedReader := state.NewCachedReader(reader, stateCache)
+	cachedReader := reader
 	noop := state.NewNoopWriter()
-	cachedWriter := state.NewCachedWriter(noop, stateCache)
+	//cachedWriter := state.NewCachedWriter(noop, stateCache)
+	cachedWriter := noop
 
 	ibs := state.New(cachedReader)
 	signer := types.MakeSigner(chainConfig, blockNum, block.Time())
