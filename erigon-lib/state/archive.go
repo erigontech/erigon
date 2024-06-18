@@ -169,6 +169,7 @@ func GetExecV3PruneProgress(db kv.Getter, prunedTblName string) (pruned []byte, 
 func SaveExecV3PrunableProgress(db kv.Putter, tbl []byte, step uint64) error {
 	v := make([]byte, 8)
 	binary.BigEndian.PutUint64(v, step)
+	fmt.Println("PUT", string(tbl), step)
 	return db.Put(kv.TblPruningProgress, append(kv.MinimumPrunableStepDomainKey, tbl...), v)
 }
 
@@ -184,8 +185,8 @@ func SaveExecV3PrunableProgressIfDoesNotExist(db kv.GetPut, step uint64) error {
 		if has {
 			continue
 		}
-
-		if err := SaveExecV3PrunableProgress(db, []byte(tbl), step); err != nil {
+		fmt.Println("PUT2", string(tbl), step)
+		if err := SaveExecV3PrunableProgress(db, append(kv.MinimumPrunableStepDomainKey, tbl...), step); err != nil {
 			return err
 		}
 	}
@@ -201,5 +202,6 @@ func GetExecV3PrunableProgress(db kv.Getter, tbl []byte) (txNum uint64, err erro
 	if len(v) == 0 {
 		return math.MaxUint64, nil
 	}
+	fmt.Println("GET", string(tbl), binary.BigEndian.Uint64(v))
 	return binary.BigEndian.Uint64(v), nil
 }
