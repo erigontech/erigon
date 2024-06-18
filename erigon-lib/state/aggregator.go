@@ -749,8 +749,8 @@ func (ac *AggregatorRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
 	if dbg.NoPrune() {
 		return false
 	}
-	for _, d := range ac.d {
-		fmt.Println(d.CanPruneUntil(tx, untilTx))
+	for idx, d := range ac.d {
+		fmt.Println("d", idx, d.CanPruneUntil(tx, untilTx))
 		if d.CanPruneUntil(tx, untilTx) {
 			return true
 		}
