@@ -5,7 +5,7 @@ go 1.22
 toolchain go1.22.4
 
 require (
-	github.com/erigontech/mdbx-go v0.38.4-0.20240617112220-c88e3bf223a0
+	github.com/erigontech/mdbx-go v0.38.4-0.20240618051348-c3db7eea2d04
 	github.com/erigontech/silkworm-go v0.18.0
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
