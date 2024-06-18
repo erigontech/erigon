@@ -335,9 +335,18 @@ func (a *ApiHandler) produceBlock(
 		if err != nil {
 			return nil, err
 		}
+		// cpy commitments
+		cpyCommitments := solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48)
+		for i := 0; i < builderHeader.Data.Message.BlobKzgCommitments.Len(); i++ {
+			c := builderHeader.Data.Message.BlobKzgCommitments.Get(i)
+			cpy := cltypes.KZGCommitment{}
+			copy(cpy[:], (*c)[:])
+			cpyCommitments.Append(&cpy)
+		}
+
 		block.BlindedBeaconBody = blindedBody.
 			SetHeader(builderHeader.Data.Message.Header).
-			SetBlobKzgCommitments(builderHeader.Data.Message.BlobKzgCommitments)
+			SetBlobKzgCommitments(cpyCommitments)
 		block.ExecutionValue = builderValue
 	}
 	return block, nil
