@@ -1587,7 +1587,6 @@ func (dt *DomainRoTx) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, 
 		untilStep = (untilTx - 1) / dt.d.aggregationStep
 	}
 	sm, err := GetExecV3PrunableProgress(tx, []byte(dt.d.valsTable))
-	fmt.Println("GetExecV3PrunableProgress", dt.d.valsTable, sm, maxStepToPrune, untilStep)
 	if err != nil {
 		dt.d.logger.Error("get domain pruning progress", "name", dt.d.filenameBase, "error", err)
 		return false, maxStepToPrune

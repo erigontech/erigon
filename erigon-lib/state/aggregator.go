@@ -750,11 +750,13 @@ func (ac *AggregatorRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
 		return false
 	}
 	for _, d := range ac.d {
+		fmt.Println(d.CanPruneUntil(tx, untilTx))
 		if d.CanPruneUntil(tx, untilTx) {
 			return true
 		}
 	}
 	for _, ii := range ac.iis {
+		fmt.Println(ii.CanPrune(tx))
 		if ii.CanPrune(tx) {
 			return true
 		}
