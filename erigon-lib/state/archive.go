@@ -166,10 +166,10 @@ func GetExecV3PruneProgress(db kv.Getter, prunedTblName string) (pruned []byte, 
 }
 
 // SaveExecV3PrunableProgress saves latest pruned key in given table to the database.
-func SaveExecV3PrunableProgress(db kv.Putter, prunableKey []byte, step uint64) error {
+func SaveExecV3PrunableProgress(db kv.Putter, tbl []byte, step uint64) error {
 	v := make([]byte, 8)
 	binary.BigEndian.PutUint64(v, step)
-	return db.Put(kv.TblPruningProgress, append(kv.MinimumPrunableStepDomainKey, prunableKey...), v)
+	return db.Put(kv.TblPruningProgress, append(kv.MinimumPrunableStepDomainKey, tbl...), v)
 }
 
 // SaveExecV3PrunableProgressIfDoesNotExist saves latest pruned key in given table to the database if it does not exist.
