@@ -194,7 +194,7 @@ func SaveExecV3PrunableProgressIfDoesNotExist(db kv.GetPut, step uint64) error {
 }
 
 // GetExecV3PrunableProgress retrieves saved progress of given table pruning from the database.
-func GetExecV3PrunableProgress(db kv.Getter, tbl []byte) (txNum uint64, err error) {
+func GetExecV3PrunableProgress(db kv.Getter, tbl []byte) (step uint64, err error) {
 	v, err := db.GetOne(kv.TblPruningProgress, append(kv.MinimumPrunableStepDomainKey, tbl...))
 	if err != nil {
 		return 0, err

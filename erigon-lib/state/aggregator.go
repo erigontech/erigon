@@ -854,6 +854,7 @@ func (ac *AggregatorRoTx) PruneSmallBatchesDb(ctx context.Context, timeout time.
 			fullStat.Accumulate(stat)
 
 			withWarmup = false // warmup once is enough
+			fmt.Println(GetExecV3PrunableProgress(tx, []byte(kv.TblAccountVals)))
 
 			if aggressivePrune {
 				took := time.Since(iterationStarted)
@@ -943,6 +944,7 @@ func (ac *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 			return false, nil
 		}
 		fullStat.Accumulate(stat)
+		fmt.Println(GetExecV3PrunableProgress(tx, []byte(kv.TblAccountVals)))
 
 		withWarmup = false // warmup once is enough
 
