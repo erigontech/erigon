@@ -171,6 +171,7 @@ func SaveExecV3PrunableProgress(db kv.Putter, tbl []byte, step uint64) error {
 	binary.BigEndian.PutUint64(v, step)
 	fmt.Println("PUT", string(tbl), step)
 	fmt.Println(string(append(kv.MinimumPrunableStepDomainKey, tbl...)))
+	fmt.Println(v)
 	return db.Put(kv.TblPruningProgress, append(kv.MinimumPrunableStepDomainKey, tbl...), v)
 }
 
@@ -204,6 +205,7 @@ func GetExecV3PrunableProgress(db kv.Getter, tbl []byte) (step uint64, err error
 	if len(v) == 0 {
 		return math.MaxUint64, nil
 	}
+	fmt.Println(v)
 	fmt.Println("GET", string(tbl), binary.BigEndian.Uint64(v))
 	return binary.BigEndian.Uint64(v), nil
 }
