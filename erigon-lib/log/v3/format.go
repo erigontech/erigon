@@ -39,12 +39,11 @@ func (f formatFunc) Format(r *Record) []byte {
 // a terminal with color-coded level output and terser human friendly timestamp.
 // This format should only be used for interactive programs or while developing.
 //
-//     [TIME] [LEVEL] MESSAGE key=value key=value ...
+//	[TIME] [LEVEL] MESSAGE key=value key=value ...
 //
 // Example:
 //
-//     [May 16 20:58:45] [DBUG] remove route ns=haproxy addr=127.0.0.1:50002
-//
+//	[May 16 20:58:45] [DBUG] remove route ns=haproxy addr=127.0.0.1:50002
 func TerminalFormat() Format {
 	return FormatFunc(func(r *Record) []byte {
 		var color = 0
@@ -101,7 +100,6 @@ func TerminalFormatNoColor() Format {
 // format for key/value pairs.
 //
 // For more details see: http://godoc.org/github.com/kr/logfmt
-//
 func LogfmtFormat() Format {
 	return FormatFunc(func(r *Record) []byte {
 		common := []interface{}{r.KeyNames.Time, r.Time, r.KeyNames.Lvl, r.Lvl, r.KeyNames.Msg, r.Msg}
@@ -216,7 +214,7 @@ func formatJSONValue(value interface{}) interface{} {
 	switch value.(type) {
 	case int, int8, int16, int32, int64, float32, float64, uint, uint8, uint16, uint32, uint64, string:
 		return value
-	case interface{}, map[string]interface{}, []interface{}:
+	case map[string]interface{}, []interface{}, interface{}:
 		return value
 	default:
 		return fmt.Sprintf("%+v", value)

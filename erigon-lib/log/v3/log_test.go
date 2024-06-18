@@ -284,14 +284,14 @@ func TestNetHandler(t *testing.T) {
 	go func() {
 		c, err := l.Accept()
 		if err != nil {
-			errs <- fmt.Errorf("Failed to accept connection: %v", err)
+			errs <- fmt.Errorf("Failed to accept connection: %w", err)
 			return
 		}
 
 		rd := bufio.NewReader(c)
 		s, err := rd.ReadString('\n')
 		if err != nil {
-			errs <- fmt.Errorf("Failed to read string: %v", err)
+			errs <- fmt.Errorf("Failed to read string: %w", err)
 			return
 		}
 

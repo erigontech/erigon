@@ -86,6 +86,9 @@ type rotatingWriter struct {
 // If limit outreached, file is truncated then write is called.
 func (r *rotatingWriter) Write(p []byte) (n int, err error) {
 	info, err := r.file.Stat()
+	if err != nil {
+		return 0, fmt.Errorf("rotating log %q stat: %w", r.file.Name(), err)
+	}
 	if uint64(info.Size())+uint64(len(p)) > r.logMaxSize {
 		if err := r.file.Truncate(0); err != nil {
 			return 0, fmt.Errorf("rotating log %q truncating: %w", r.file.Name(), err)
