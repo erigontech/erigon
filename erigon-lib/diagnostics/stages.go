@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 var (
@@ -37,16 +37,12 @@ type SyncStageStats struct {
 	Progress    string `json:"progress"`
 }
 
-type UpdateSyncSubStageList struct {
-	List []UpdateSyncSubStage
+type SetSyncSubStageList struct {
+	Stage string
+	List  []SyncSubStage
 }
 
-type UpdateSyncSubStage struct {
-	StageId  string
-	SubStage SyncSubStage
-}
-
-func (ti UpdateSyncSubStageList) Type() Type {
+func (ti SetSyncSubStageList) Type() Type {
 	return TypeOf(ti)
 }
 
@@ -158,17 +154,17 @@ func (d *DiagnosticClient) runCurrentSyncSubStageListener(rootCtx context.Contex
 
 func (d *DiagnosticClient) runSubStageListener(rootCtx context.Context) {
 	go func() {
-		ctx, ch, closeChannel := Context[UpdateSyncSubStageList](rootCtx, 1)
+		ctx, ch, closeChannel := Context[SetSyncSubStageList](rootCtx, 1)
 		defer closeChannel()
 
-		StartProviders(ctx, TypeOf(UpdateSyncSubStageList{}), log.Root())
+		StartProviders(ctx, TypeOf(SetSyncSubStageList{}), log.Root())
 		for {
 			select {
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
 				d.mu.Lock()
-				d.AddOrUpdateSugStages(info)
+				d.SetSubStagesList(info.Stage, info.List)
 				d.mu.Unlock()
 
 				d.saveSyncStagesToDB()
@@ -206,7 +202,20 @@ func (d *DiagnosticClient) getCurrentSyncIdxs() CurrentSyncStagesIdxs {
 }
 
 func (d *DiagnosticClient) SetStagesList(stages []SyncStage) {
-	d.syncStages = stages
+	if len(d.syncStages) != len(stages) {
+		d.syncStages = stages
+	}
+}
+
+func (d *DiagnosticClient) SetSubStagesList(stageId string, subStages []SyncSubStage) {
+	for idx, stage := range d.syncStages {
+		if stage.ID == stageId {
+			if len(d.syncStages[idx].SubStages) != len(subStages) {
+				d.syncStages[idx].SubStages = subStages
+				break
+			}
+		}
+	}
 }
 
 func (d *DiagnosticClient) SetCurrentSyncStage(css CurrentSyncStage) {
@@ -217,59 +226,40 @@ func (d *DiagnosticClient) SetCurrentSyncStage(css CurrentSyncStage) {
 				d.syncStages[idx].State = Running
 				isSet = true
 			} else {
-				d.syncStages[idx].State = Completed
-				for subIdx := range d.syncStages[idx].SubStages {
-					d.syncStages[idx].SubStages[subIdx].State = Completed
-				}
+				d.setStagesState(idx, Completed)
 			}
 		} else {
-			d.syncStages[idx].State = Queued
+			d.setStagesState(idx, Queued)
 		}
+	}
+}
+
+func (d *DiagnosticClient) setStagesState(stadeIdx int, state StageState) {
+	d.syncStages[stadeIdx].State = state
+	d.setSubStagesState(stadeIdx, state)
+}
+
+func (d *DiagnosticClient) setSubStagesState(stadeIdx int, state StageState) {
+	for subIdx := range d.syncStages[stadeIdx].SubStages {
+		d.syncStages[stadeIdx].SubStages[subIdx].State = state
 	}
 }
 
 func (d *DiagnosticClient) SetCurrentSyncSubStage(css CurrentSyncSubStage) {
 	for idx, stage := range d.syncStages {
 		if stage.State == Running {
-			isSet := false
 			for subIdx, subStage := range stage.SubStages {
-				if !isSet {
-					if subStage.ID == css.SubStage {
-						d.syncStages[idx].SubStages[subIdx].State = Running
-						isSet = true
-					} else {
-						d.syncStages[idx].SubStages[subIdx].State = Completed
+				if subStage.ID == css.SubStage {
+					if d.syncStages[idx].SubStages[subIdx].State == Completed {
+						return
 					}
-				} else {
-					d.syncStages[idx].SubStages[subIdx].State = Queued
+
+					if subIdx > 0 {
+						d.syncStages[idx].SubStages[subIdx-1].State = Completed
+					}
+
+					d.syncStages[idx].SubStages[subIdx].State = Running
 				}
-			}
-
-			break
-		}
-	}
-}
-
-func (d *DiagnosticClient) AddOrUpdateSugStages(subStages UpdateSyncSubStageList) {
-	for _, subStage := range subStages.List {
-		d.AddOrUpdateSugStage(subStage)
-	}
-}
-
-func (d *DiagnosticClient) AddOrUpdateSugStage(subStage UpdateSyncSubStage) {
-	for idx, stage := range d.syncStages {
-		if stage.ID == subStage.StageId {
-			subStageExist := false
-			for subIdx, sub := range stage.SubStages {
-				if sub.ID == subStage.SubStage.ID {
-					subStageExist = true
-					d.syncStages[idx].SubStages[subIdx] = subStage.SubStage
-					break
-				}
-			}
-
-			if !subStageExist {
-				d.syncStages[idx].SubStages = append(d.syncStages[idx].SubStages, subStage.SubStage)
 			}
 
 			break

@@ -9,10 +9,11 @@ import (
 	"io"
 	"sync/atomic"
 
-	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"

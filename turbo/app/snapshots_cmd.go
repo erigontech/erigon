@@ -17,10 +17,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
+
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common/disk"
 	"github.com/ledgerwatch/erigon-lib/common/mem"
@@ -167,28 +170,18 @@ var snapshotCommand = cli.Command{
 			Name: "rm-state-snapshots",
 			Action: func(cliCtx *cli.Context) error {
 				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+
+				removeLatest := cliCtx.Bool("latest")
 				steprm := cliCtx.String("step")
-				if steprm == "" {
-					return errors.New("step to remove is required (eg 0-2)")
+				if steprm == "" && !removeLatest {
+					return errors.New("step to remove is required (eg 0-2) OR flag --latest provided")
+				}
+				if steprm != "" {
+					removeLatest = false // --step has higher priority
 				}
 
-				parseStep := func(step string) (uint64, uint64, error) {
-					var from, to uint64
-					if _, err := fmt.Sscanf(step, "%d-%d", &from, &to); err != nil {
-						return 0, 0, fmt.Errorf("step expected in format from-to, got %s", step)
-					}
-					return from, to, nil
-				}
-				minS, maxS, err := parseStep(steprm)
-				if err != nil {
-					return err
-				}
-
-				var (
-					fmin, fmax uint64
-					removed    = 0
-				)
-
+				_maxFrom := uint64(0)
+				files := make([]snaptype.FileInfo, 0)
 				for _, dirPath := range []string{dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors} {
 					filePaths, err := dir.ListFiles(dirPath)
 					if err != nil {
@@ -196,34 +189,82 @@ var snapshotCommand = cli.Command{
 					}
 					for _, filePath := range filePaths {
 						_, fName := filepath.Split(filePath)
-
-						parts := strings.Split(fName, ".")
-						if len(parts) == 3 || len(parts) == 4 {
-							fsteps := strings.Split(parts[1], "-")
-
-							fmin, err = strconv.ParseUint(fsteps[0], 10, 64)
-							if err != nil {
-								return err
-							}
-							fmax, err = strconv.ParseUint(fsteps[1], 10, 64)
-							if err != nil {
-								return err
-							}
-
-							if fmin >= minS && fmax <= maxS {
-								if err := os.Remove(filePath); err != nil {
-									return fmt.Errorf("failed to remove %s: %w", fName, err)
+						res, isStateFile, ok := snaptype.ParseFileName(dirPath, fName)
+						if !ok || !isStateFile {
+							fmt.Printf("skipping %s\n", filePath)
+							continue
+						}
+						if res.From == 0 && res.To == 0 {
+							parts := strings.Split(fName, ".")
+							if len(parts) == 3 || len(parts) == 4 {
+								fsteps := strings.Split(parts[1], "-")
+								res.From, err = strconv.ParseUint(fsteps[0], 10, 64)
+								if err != nil {
+									return err
 								}
-								removed++
+								res.To, err = strconv.ParseUint(fsteps[1], 10, 64)
+								if err != nil {
+									return err
+								}
 							}
+						}
+
+						files = append(files, res)
+						if removeLatest {
+							_maxFrom = max(_maxFrom, res.From)
 						}
 					}
 				}
 
+				var minS, maxS uint64
+				if removeLatest {
+				AllowPruneSteps:
+					fmt.Printf("remove latest snapshot files with stepFrom=%d?\n1) Remove\n2) Exit\n (pick number): ", _maxFrom)
+					var ans uint8
+					_, err := fmt.Scanf("%d\n", &ans)
+					if err != nil {
+						return err
+					}
+					switch ans {
+					case 1:
+						minS, maxS = _maxFrom, math.MaxUint64
+						break
+					case 2:
+						return nil
+					default:
+						fmt.Printf("invalid input: %d; Just an answer number expected.\n", ans)
+						goto AllowPruneSteps
+					}
+				} else if steprm != "" {
+					parseStep := func(step string) (uint64, uint64, error) {
+						var from, to uint64
+						if _, err := fmt.Sscanf(step, "%d-%d", &from, &to); err != nil {
+							return 0, 0, fmt.Errorf("step expected in format from-to, got %s", step)
+						}
+						return from, to, nil
+					}
+					var err error
+					minS, maxS, err = parseStep(steprm)
+					if err != nil {
+						return err
+					}
+				} else {
+					panic("unexpected arguments")
+				}
+
+				var removed int
+				for _, res := range files {
+					if res.From >= minS && res.To <= maxS {
+						if err := os.Remove(res.Path); err != nil {
+							return fmt.Errorf("failed to remove %s: %w", res.Path, err)
+						}
+						removed++
+					}
+				}
 				fmt.Printf("removed %d state snapshot files\n", removed)
 				return nil
 			},
-			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag, &cli.StringFlag{Name: "step", Required: true}}),
+			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag, &cli.StringFlag{Name: "step", Required: false}, &cli.BoolFlag{Name: "latest", Required: false}}),
 		},
 		{
 			Name:   "diff",

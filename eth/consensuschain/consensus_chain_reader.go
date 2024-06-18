@@ -7,11 +7,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type Reader struct {
@@ -28,6 +28,18 @@ func NewReader(config *chain.Config, tx kv.Tx, blockReader services.FullBlockRea
 func (cr Reader) Config() *chain.Config { return cr.config }
 func (cr Reader) CurrentHeader() *types.Header {
 	hash := rawdb.ReadHeadHeaderHash(cr.tx)
+	number := rawdb.ReadHeaderNumber(cr.tx, hash)
+	h, _ := cr.blockReader.Header(context.Background(), cr.tx, hash, *number)
+	return h
+}
+func (cr Reader) CurrentFinalizedHeader() *types.Header {
+	hash := rawdb.ReadForkchoiceFinalized(cr.tx)
+	number := rawdb.ReadHeaderNumber(cr.tx, hash)
+	h, _ := cr.blockReader.Header(context.Background(), cr.tx, hash, *number)
+	return h
+}
+func (cr Reader) CurrentSafeHeader() *types.Header {
+	hash := rawdb.ReadForkchoiceSafe(cr.tx)
 	number := rawdb.ReadHeaderNumber(cr.tx, hash)
 	h, _ := cr.blockReader.Header(context.Background(), cr.tx, hash, *number)
 	return h

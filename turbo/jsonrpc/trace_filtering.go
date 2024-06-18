@@ -9,7 +9,8 @@ import (
 	"github.com/ledgerwatch/erigon/eth/consensuschain"
 
 	jsoniter "github.com/json-iterator/go"
-	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -28,7 +29,6 @@ import (
 	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
 
@@ -556,9 +556,12 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		}
 
 		stateReader.SetTxNum(txNum)
-		stateCache := shards.NewStateCache(32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
-		cachedReader := state.NewCachedReader(stateReader, stateCache)
-		cachedWriter := state.NewCachedWriter(noop, stateCache)
+		//stateCache := shards.NewStateCache(32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
+		//cachedReader := state.NewCachedReader(stateReader, stateCache)
+		cachedReader := stateReader
+		//cachedWriter := state.NewCachedWriter(noop, stateCache)
+		cachedWriter := noop
+
 		vmConfig.SkipAnalysis = core.SkipAnalysis(chainConfig, blockNum)
 		traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 		var ot OeTracer
