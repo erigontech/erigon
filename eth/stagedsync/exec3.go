@@ -731,11 +731,6 @@ Loop:
 			doms.SetTxNum(txTask.TxNum)
 			doms.SetBlockNum(txTask.BlockNum)
 
-			// Notify that there is prunable progress
-			if err := state2.SaveExecV3PrunableProgressIfDoesNotExist(applyTx, doms.TxNum()/doms.StepSize()); err != nil {
-				return err
-			}
-
 			//if txTask.HistoryExecution { // nolint
 			//	fmt.Printf("[dbg] txNum: %d, hist=%t\n", txTask.TxNum, txTask.HistoryExecution)
 			//}

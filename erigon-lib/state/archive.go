@@ -3,7 +3,6 @@ package state
 import (
 	"encoding/binary"
 	"fmt"
-	"math"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/seg"
@@ -175,26 +174,6 @@ func SaveExecV3PrunableProgress(db kv.RwTx, tbl []byte, step uint64) error {
 	return db.Put(kv.TblPruningProgress, append(kv.MinimumPrunableStepDomainKey, tbl...), v)
 }
 
-// SaveExecV3PrunableProgressIfDoesNotExist saves latest pruned key in given table to the database if it does not exist.
-func SaveExecV3PrunableProgressIfDoesNotExist(db kv.RwTx, step uint64) error {
-	var has bool
-	var err error
-	tbls := []string{kv.TblAccountVals, kv.TblStorageVals, kv.TblCodeVals, kv.TblCommitmentVals}
-	for _, tbl := range tbls {
-		if has, err = db.Has(kv.TblPruningProgress, append(kv.MinimumPrunableStepDomainKey, tbl...)); err != nil {
-			return err
-		}
-		if has {
-			continue
-		}
-		fmt.Println("PUT2", string(tbl), step)
-		if err := SaveExecV3PrunableProgress(db, append(kv.MinimumPrunableStepDomainKey, tbl...), step); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // GetExecV3PrunableProgress retrieves saved progress of given table pruning from the database.
 func GetExecV3PrunableProgress(db kv.Getter, tbl []byte) (step uint64, err error) {
 	fmt.Println(string(append(kv.MinimumPrunableStepDomainKey, tbl...)))
@@ -203,9 +182,7 @@ func GetExecV3PrunableProgress(db kv.Getter, tbl []byte) (step uint64, err error
 		return 0, err
 	}
 	if len(v) == 0 {
-		return math.MaxUint64, nil
+		return 0, nil
 	}
-	fmt.Println(v)
-	fmt.Println("GET", string(tbl), binary.BigEndian.Uint64(v))
 	return binary.BigEndian.Uint64(v), nil
 }
