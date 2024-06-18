@@ -1788,6 +1788,9 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 	for id, d := range a.d {
 		ac.d[id] = d.BeginFilesRo()
 	}
+	for id, ap := range a.ap {
+		ac.appendable[id] = ap.BeginFilesRo()
+	}
 	a.visibleFilesLock.RUnlock()
 
 	return ac
