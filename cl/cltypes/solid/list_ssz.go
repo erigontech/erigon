@@ -50,13 +50,7 @@ func (l ListSSZ[T]) MarshalJSON() ([]byte, error) {
 }
 
 func (l *ListSSZ[T]) UnmarshalJSON(data []byte) error {
-	err := json.Unmarshal(data, &l.list)
-	if err != nil {
-		return err
-	}
-	l.root = libcommon.Hash{}
-	l.limit = len(l.list)
-	return nil
+	return json.Unmarshal(data, &l.list)
 }
 
 func NewDynamicListSSZFromList[T encodableHashableSSZ](list []T, limit int) *ListSSZ[T] {
