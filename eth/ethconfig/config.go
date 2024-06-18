@@ -252,6 +252,7 @@ type Config struct {
 	SentinelPort           uint64
 
 	OverridePragueTime *big.Int `toml:",omitempty"`
+	PragueEOFTime      *big.Int `toml:",omitempty"`
 
 	// Embedded Silkworm support
 	SilkwormExecution            bool
