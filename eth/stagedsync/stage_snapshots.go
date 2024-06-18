@@ -230,46 +230,21 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if !cfg.blockReader.FreezingCfg().Enabled {
 		return nil
 	}
+
+	diagnostics.Send(diagnostics.CurrentSyncStage{Stage: string(stages.Snapshots)})
+
 	cstate := snapshotsync.NoCaplin
 	if cfg.caplin {
 		cstate = snapshotsync.AlsoCaplin
 	}
 
-	diagnostics.Send(diagnostics.CurrentSyncStage{Stage: string(stages.Snapshots)})
-
-	diagnostics.Send(diagnostics.UpdateSyncSubStageList{
-		List: []diagnostics.UpdateSyncSubStage{
-			{
-				StageId: string(stages.Snapshots),
-				SubStage: diagnostics.SyncSubStage{
-					ID:    "Download header-chain",
-					State: diagnostics.Running,
-				},
-			},
-			{
-				StageId: string(stages.Snapshots),
-				SubStage: diagnostics.SyncSubStage{
-					ID:    "Download snapshots",
-					State: diagnostics.Queued,
-				},
-			},
-			{
-				StageId: string(stages.Snapshots),
-				SubStage: diagnostics.SyncSubStage{
-					ID:    "Indexing",
-					State: diagnostics.Queued,
-				},
-			},
-			{
-				StageId: string(stages.Snapshots),
-				SubStage: diagnostics.SyncSubStage{
-					ID:    "Fill DB",
-					State: diagnostics.Queued,
-				},
-			},
-		},
+	subStages := diagnostics.InitSubStagesFromList([]string{"Download header-chain", "Download snapshots", "Indexing", "Fill DB"})
+	diagnostics.Send(diagnostics.SetSyncSubStageList{
+		Stage: string(stages.Snapshots),
+		List:  subStages,
 	})
 
+	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download header-chain"})
 	// Download only the snapshots that are for the header chain.
 	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, true, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
 		return err
