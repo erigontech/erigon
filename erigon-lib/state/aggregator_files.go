@@ -26,10 +26,11 @@ import (
 )
 
 type SelectedStaticFilesV3 struct {
-	d     [kv.DomainLen][]*filesItem
-	dHist [kv.DomainLen][]*filesItem
-	dIdx  [kv.DomainLen][]*filesItem
-	ii    [kv.StandaloneIdxLen][]*filesItem
+	d          [kv.DomainLen][]*filesItem
+	dHist      [kv.DomainLen][]*filesItem
+	dIdx       [kv.DomainLen][]*filesItem
+	ii         [kv.StandaloneIdxLen][]*filesItem
+	appendable [kv.AppendableLen][]*filesItem
 }
 
 func (sf SelectedStaticFilesV3) Close() {
@@ -57,24 +58,31 @@ func (sf SelectedStaticFilesV3) Close() {
 
 func (ac *AggregatorRoTx) staticFilesInRange(r RangesV3) (sf SelectedStaticFilesV3, err error) {
 	for id := range ac.d {
-		if r.d[id].any() {
-			sf.d[id], sf.dIdx[id], sf.dHist[id] = ac.d[id].staticFilesInRange(r.d[id])
+		if r.domain[id].any() {
+			sf.d[id], sf.dIdx[id], sf.dHist[id] = ac.d[id].staticFilesInRange(r.domain[id])
 		}
 	}
-	for id, rng := range r.ranges {
+	for id, rng := range r.invertedIndex {
 		if rng != nil && rng.needMerge {
 			fi := ac.iis[id].staticFilesInRange(rng.from, rng.to)
 			sf.ii[id] = fi
+		}
+	}
+	for id, rng := range r.invertedIndex {
+		if rng != nil && rng.needMerge {
+			fi := ac.appendable[id].staticFilesInRange(rng.from, rng.to)
+			sf.appendable[id] = fi
 		}
 	}
 	return sf, err
 }
 
 type MergedFilesV3 struct {
-	d     [kv.DomainLen]*filesItem
-	dHist [kv.DomainLen]*filesItem
-	dIdx  [kv.DomainLen]*filesItem
-	iis   [kv.StandaloneIdxLen]*filesItem
+	d          [kv.DomainLen]*filesItem
+	dHist      [kv.DomainLen]*filesItem
+	dIdx       [kv.DomainLen]*filesItem
+	iis        [kv.StandaloneIdxLen]*filesItem
+	appendable [kv.AppendableLen]*filesItem
 }
 
 func (mf MergedFilesV3) FrozenList() (frozen []string) {
