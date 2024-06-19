@@ -135,28 +135,25 @@ func printData(cliCtx *cli.Context, data []table.Row) {
 	case "text":
 		util.RenderTableWithHeader(
 			"",
-			table.Row{"Stage", "SubStage", "Status", "Time Elapsed", "Time Left", "Progress"},
+			table.Row{"Stage", "SubStage", "Status", "Time Elapsed", "Progress"},
 			data,
 		)
 	}
 }
 
 func getStagesRows(stages []diagnostics.SyncStage) []table.Row {
-	rows := createSyncStageRows(stages, false)
-	return rows
+	return createSyncStageRows(stages, false)
 }
 
 func getCurrentStageRow(stages []diagnostics.SyncStage) []table.Row {
-	rows := createSyncStageRows(stages, true)
-
-	return rows
+	return createSyncStageRows(stages, true)
 }
 
-func createSyncStageRows(stages []diagnostics.SyncStage, isCurrent bool) []table.Row {
+func createSyncStageRows(stages []diagnostics.SyncStage, forCurrentStage bool) []table.Row {
 	rows := []table.Row{}
 	for _, stage := range stages {
 
-		if isCurrent {
+		if forCurrentStage {
 			if stage.State != diagnostics.Running {
 				continue
 			}
@@ -174,7 +171,7 @@ func createSyncStageRows(stages []diagnostics.SyncStage, isCurrent bool) []table
 			rows = append(rows, table.Row{"", "", "", "", ""})
 		}
 
-		if isCurrent {
+		if forCurrentStage {
 			break
 		}
 

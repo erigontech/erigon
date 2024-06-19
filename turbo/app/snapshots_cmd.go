@@ -7,6 +7,19 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/config3"
+	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
+	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal"
+	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/ledgerwatch/erigon-lib/seg"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
+	"github.com/ledgerwatch/erigon/diagnostics"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/node"
 	"io"
 	"math"
 	"net/http"
@@ -17,43 +30,32 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
+	"github.com/ledgerwatch/erigon-lib/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/common/disk"
 	"github.com/ledgerwatch/erigon-lib/common/mem"
-	"github.com/ledgerwatch/erigon-lib/config3"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon-lib/metrics"
-	"github.com/ledgerwatch/erigon-lib/seg"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
-	"github.com/ledgerwatch/erigon/diagnostics"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/integrity"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/params"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
-	"github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -167,28 +169,18 @@ var snapshotCommand = cli.Command{
 			Name: "rm-state-snapshots",
 			Action: func(cliCtx *cli.Context) error {
 				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+
+				removeLatest := cliCtx.Bool("latest")
 				steprm := cliCtx.String("step")
-				if steprm == "" {
-					return errors.New("step to remove is required (eg 0-2)")
+				if steprm == "" && !removeLatest {
+					return errors.New("step to remove is required (eg 0-2) OR flag --latest provided")
+				}
+				if steprm != "" {
+					removeLatest = false // --step has higher priority
 				}
 
-				parseStep := func(step string) (uint64, uint64, error) {
-					var from, to uint64
-					if _, err := fmt.Sscanf(step, "%d-%d", &from, &to); err != nil {
-						return 0, 0, fmt.Errorf("step expected in format from-to, got %s", step)
-					}
-					return from, to, nil
-				}
-				minS, maxS, err := parseStep(steprm)
-				if err != nil {
-					return err
-				}
-
-				var (
-					fmin, fmax uint64
-					removed    = 0
-				)
-
+				_maxFrom := uint64(0)
+				files := make([]snaptype.FileInfo, 0)
 				for _, dirPath := range []string{dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors} {
 					filePaths, err := dir.ListFiles(dirPath)
 					if err != nil {
@@ -196,34 +188,82 @@ var snapshotCommand = cli.Command{
 					}
 					for _, filePath := range filePaths {
 						_, fName := filepath.Split(filePath)
-
-						parts := strings.Split(fName, ".")
-						if len(parts) == 3 || len(parts) == 4 {
-							fsteps := strings.Split(parts[1], "-")
-
-							fmin, err = strconv.ParseUint(fsteps[0], 10, 64)
-							if err != nil {
-								return err
-							}
-							fmax, err = strconv.ParseUint(fsteps[1], 10, 64)
-							if err != nil {
-								return err
-							}
-
-							if fmin >= minS && fmax <= maxS {
-								if err := os.Remove(filePath); err != nil {
-									return fmt.Errorf("failed to remove %s: %w", fName, err)
+						res, isStateFile, ok := snaptype.ParseFileName(dirPath, fName)
+						if !ok || !isStateFile {
+							fmt.Printf("skipping %s\n", filePath)
+							continue
+						}
+						if res.From == 0 && res.To == 0 {
+							parts := strings.Split(fName, ".")
+							if len(parts) == 3 || len(parts) == 4 {
+								fsteps := strings.Split(parts[1], "-")
+								res.From, err = strconv.ParseUint(fsteps[0], 10, 64)
+								if err != nil {
+									return err
 								}
-								removed++
+								res.To, err = strconv.ParseUint(fsteps[1], 10, 64)
+								if err != nil {
+									return err
+								}
 							}
+						}
+
+						files = append(files, res)
+						if removeLatest {
+							_maxFrom = max(_maxFrom, res.From)
 						}
 					}
 				}
 
+				var minS, maxS uint64
+				if removeLatest {
+				AllowPruneSteps:
+					fmt.Printf("remove latest snapshot files with stepFrom=%d?\n1) Remove\n2) Exit\n (pick number): ", _maxFrom)
+					var ans uint8
+					_, err := fmt.Scanf("%d\n", &ans)
+					if err != nil {
+						return err
+					}
+					switch ans {
+					case 1:
+						minS, maxS = _maxFrom, math.MaxUint64
+						break
+					case 2:
+						return nil
+					default:
+						fmt.Printf("invalid input: %d; Just an answer number expected.\n", ans)
+						goto AllowPruneSteps
+					}
+				} else if steprm != "" {
+					parseStep := func(step string) (uint64, uint64, error) {
+						var from, to uint64
+						if _, err := fmt.Sscanf(step, "%d-%d", &from, &to); err != nil {
+							return 0, 0, fmt.Errorf("step expected in format from-to, got %s", step)
+						}
+						return from, to, nil
+					}
+					var err error
+					minS, maxS, err = parseStep(steprm)
+					if err != nil {
+						return err
+					}
+				} else {
+					panic("unexpected arguments")
+				}
+
+				var removed int
+				for _, res := range files {
+					if res.From >= minS && res.To <= maxS {
+						if err := os.Remove(res.Path); err != nil {
+							return fmt.Errorf("failed to remove %s: %w", res.Path, err)
+						}
+						removed++
+					}
+				}
 				fmt.Printf("removed %d state snapshot files\n", removed)
 				return nil
 			},
-			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag, &cli.StringFlag{Name: "step", Required: true}}),
+			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag, &cli.StringFlag{Name: "step", Required: false}, &cli.BoolFlag{Name: "latest", Required: false}}),
 		},
 		{
 			Name:   "diff",
@@ -250,19 +290,16 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
-			Name:   "integrity",
-			Action: doIntegrity,
+			Name:        "integrity",
+			Action:      doIntegrity,
+			Description: "run slow validation of files. use --check to run single",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
+				&cli.StringFlag{Name: "check", Usage: fmt.Sprintf("one of: %s", integrity.AllChecks)},
+				&cli.BoolFlag{Name: "failFast", Value: true, Usage: "to stop after 1st problem or print WARN log and continue check"},
+				&cli.Uint64Flag{Name: "fromStep", Value: 0, Usage: "skip files before given step"},
 			}),
 		},
-		//{
-		//	Name:   "bodies_decrement_datafix",
-		//	Action: doBodiesDecrement,
-		//	Flags: joinFlags([]cli.Flag{
-		//		&utils.DataDirFlag,
-		//	}),
-		//},
 	},
 }
 
@@ -379,6 +416,9 @@ func doIntegrity(cliCtx *cli.Context) error {
 	}
 
 	ctx := cliCtx.Context
+	requestedCheck := integrity.Check(cliCtx.String("check"))
+	failFast := cliCtx.Bool("failFast")
+	fromStep := cliCtx.Uint64("fromStep")
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
@@ -395,20 +435,22 @@ func doIntegrity(cliCtx *cli.Context) error {
 	defer agg.Close()
 
 	blockReader, _ := blockRetire.IO()
-	if err := integrity.SnapBlocksRead(chainDB, blockReader, ctx, false); err != nil {
-		return err
-	}
-
-	//if err := blockReader.IntegrityTxnID(false); err != nil {
-	//	return err
-	//}
-
-	if err := integrity.E3EfFiles(ctx, chainDB, agg); err != nil {
-		return err
-	}
-
-	if err := integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg); err != nil {
-		return err
+	for _, chk := range integrity.AllChecks {
+		if requestedCheck != "" && requestedCheck != chk {
+			continue
+		}
+		switch chk {
+		case integrity.BlocksTxnID:
+			return blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(failFast)
+		case integrity.Blocks:
+			return integrity.SnapBlocksRead(chainDB, blockReader, ctx, failFast)
+		case integrity.InvertedIndex:
+			return integrity.E3EfFiles(ctx, chainDB, agg, failFast, fromStep)
+		case integrity.HistoryNoSystemTxs:
+			return integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg)
+		default:
+			return fmt.Errorf("unknown check: %s", chk)
+		}
 	}
 
 	return nil
@@ -953,104 +995,6 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 	}
 	return err
 }
-
-/*
-
-func doBodiesDecrement(cliCtx *cli.Context) error {
-	logger, _, err := debug.Setup(cliCtx, true)
-	if err != nil {
-		return err
-	}
-	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	ctx := cliCtx.Context
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-
-	list, err := snaptype.Segments(dirs.Snap, 1)
-	if err != nil {
-		return err
-	}
-	var l []snaptype.FileInfo
-	for _, f := range list {
-		if f.T != snaptype.Bodies {
-			continue
-		}
-		if f.From < 18_000_000 {
-			continue
-		}
-		l = append(l, f)
-	}
-	migrateSingleBody := func(srcF, dstF string) error {
-		src, err := seg.NewDecompressor(srcF)
-		if err != nil {
-			return err
-		}
-		defer src.Close()
-		dst, err := seg.NewCompressor(ctx, "compress", dstF, dirs.Tmp, seg.MinPatternScore, estimate.CompressSnapshot.Workers(), log.LvlInfo, logger)
-		if err != nil {
-			return err
-		}
-		defer dst.Close()
-
-		i := 0
-		srcG := src.MakeGetter()
-		var buf []byte
-		log.Info("start", "file", src.FileName())
-		dstBuf := bytes.NewBuffer(nil)
-		for srcG.HasNext() {
-			i++
-			if buf == nil {
-				panic(fmt.Sprintf("nil val at file: %s\n", srcG.FileName()))
-			}
-			buf, _ = srcG.Next(buf[:0])
-			if buf == nil {
-				panic(fmt.Sprintf("nil val at file: %s\n", srcG.FileName()))
-			}
-			body := &types.BodyForStorage{}
-			if err := rlp.Decode(bytes.NewReader(buf), body); err != nil {
-				return err
-			}
-			body.BaseTxId -= 1
-			dstBuf.Reset()
-			if err := rlp.Encode(dstBuf, body); err != nil {
-				return err
-			}
-
-			if err := dst.AddWord(dstBuf.Bytes()); err != nil {
-				return err
-			}
-
-			select {
-			case <-logEvery.C:
-				logger.Info("[bodies] progress", "f", src.FileName(), "progress", fmt.Sprintf("%dK/%dK", i/1_000, src.Count()/1_000))
-			default:
-			}
-		}
-		if err := dst.Compress(); err != nil {
-			return err
-		}
-		src.Close()
-		dst.Close()
-		os.Rename(srcF, srcF+".back")
-		os.Rename(dstF, srcF)
-		os.Remove(srcF + ".torrent")
-		os.Remove(srcF + ".idx")
-		ext := filepath.Ext(srcF)
-		withoutExt := srcF[:len(srcF)-len(ext)]
-		_ = os.Remove(withoutExt + ".idx")
-		log.Info("done", "file", src.FileName())
-		return nil
-	}
-	for _, f := range l {
-		srcF, dstF := f.Path, f.Path+"2"
-		if err := migrateSingleBody(srcF, dstF); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-*/
 
 func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 	const ThreadsLimit = 9_000

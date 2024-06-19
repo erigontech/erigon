@@ -3,8 +3,9 @@ package sync
 import (
 	"context"
 
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/direct"
@@ -83,7 +84,7 @@ func NewService(
 		blockDownloader,
 		ccBuilderFactory,
 		spansCache,
-		heimdallService.FetchLatestSpan,
+		heimdallService.FetchLatestSpans,
 		events.Events(),
 		logger,
 	)

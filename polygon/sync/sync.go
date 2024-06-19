@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/polygon/p2p"
 )
+
+type latestSpanFetcher func(ctx context.Context, count uint) ([]*heimdall.Span, error)
 
 type Sync struct {
 	store             Store
@@ -18,9 +20,9 @@ type Sync struct {
 	blocksVerifier    BlocksVerifier
 	p2pService        p2p.Service
 	blockDownloader   BlockDownloader
-	ccBuilderFactory  func(root *types.Header, span *heimdall.Span) CanonicalChainBuilder
+	ccBuilderFactory  CanonicalChainBuilderFactory
 	spansCache        *SpansCache
-	fetchLatestSpan   func(ctx context.Context) (*heimdall.Span, error)
+	fetchLatestSpans  latestSpanFetcher
 	events            <-chan Event
 	logger            log.Logger
 }
@@ -34,7 +36,7 @@ func NewSync(
 	blockDownloader BlockDownloader,
 	ccBuilderFactory CanonicalChainBuilderFactory,
 	spansCache *SpansCache,
-	fetchLatestSpan func(ctx context.Context) (*heimdall.Span, error),
+	fetchLatestSpans latestSpanFetcher,
 	events <-chan Event,
 	logger log.Logger,
 ) *Sync {
@@ -47,7 +49,7 @@ func NewSync(
 		blockDownloader:   blockDownloader,
 		ccBuilderFactory:  ccBuilderFactory,
 		spansCache:        spansCache,
-		fetchLatestSpan:   fetchLatestSpan,
+		fetchLatestSpans:  fetchLatestSpans,
 		events:            events,
 		logger:            logger,
 	}
@@ -230,13 +232,16 @@ func (s *Sync) Run(ctx context.Context) error {
 		return err
 	}
 
-	latestSpan, err := s.fetchLatestSpan(ctx)
+	latestSpans, err := s.fetchLatestSpans(ctx, 2)
 	if err != nil {
 		return err
 	}
 
-	s.spansCache.Add(latestSpan)
-	ccBuilder := s.ccBuilderFactory(tip, latestSpan)
+	for _, span := range latestSpans {
+		s.spansCache.Add(span)
+	}
+
+	ccBuilder := s.ccBuilderFactory(tip)
 
 	for {
 		select {
