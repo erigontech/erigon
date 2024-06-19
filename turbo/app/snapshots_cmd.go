@@ -440,7 +440,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 		}
 		switch a {
 		case integrity.Blocks:
-			if err := integrity.SnapBlocksRead(chainDB, blockReader, ctx, false); err != nil {
+			if err := integrity.SnapBlocksRead(chainDB, blockReader, ctx, failFast); err != nil {
 				return err
 			}
 		case integrity.InvertedIndex:
