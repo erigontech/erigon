@@ -1,9 +1,11 @@
 package db
 
 import (
-	"encoding/json"
 	"fmt"
+	"os"
 
+	"github.com/jedib0t/go-pretty/v6/table"
+	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/diag/flags"
 	"github.com/ledgerwatch/erigon/cmd/diag/util"
@@ -11,181 +13,110 @@ import (
 )
 
 type DBInfo struct {
-	name   string
-	tables []BDTableInfo
-	count  int
-	size   string
+	name   string        `header:"DB Name"`
+	tables []BDTableInfo `header:"Tables"`
+	count  int           `header:"Keys Count"`
+	size   string        `header:"Size"`
 }
 
 type BDTableInfo struct {
-	Name  string
-	Count int
-	Size  uint64
+	Name  string `header:"Table Name"`
+	Count int    `header:"Keys Count"`
+	Size  uint64 `header:"Size"`
 }
 
+var (
+	DBPopulatedFlag = cli.BoolFlag{
+		Name:     "db.appearance.populated",
+		Aliases:  []string{"dbap"},
+		Usage:    "Print populated table content only",
+		Required: false,
+		Value:    false,
+	}
+
+	DBNameFlag = cli.StringFlag{
+		Name:     "db.name",
+		Aliases:  []string{"dbn"},
+		Usage:    "DB name to print info about. If not set, all dbs will be printed.",
+		Required: false,
+		Value:    "",
+	}
+)
+
 var Command = cli.Command{
+	Action:    startPrintDBsInfo,
 	Name:      "databases",
 	Aliases:   []string{"dbs"},
+	Usage:     "Print database tables info.",
 	ArgsUsage: "",
-	Subcommands: []*cli.Command{
-		{
-			Name:      "all",
-			Aliases:   []string{"a"},
-			Action:    printAllDBsInfo,
-			Usage:     "Print database tables info.",
-			ArgsUsage: "",
-			Flags: []cli.Flag{
-				&flags.DebugURLFlag,
-				&flags.OutputFlag,
-			},
-		},
-		{
-			Name:      "populated",
-			Aliases:   []string{"pop"},
-			Action:    printPopuplatedDBsInfo,
-			Usage:     "Print database tables info which is not empty.",
-			ArgsUsage: "",
-			Flags: []cli.Flag{
-				&flags.DebugURLFlag,
-				&flags.OutputFlag,
-			},
-		},
+	Flags: []cli.Flag{
+		&flags.DebugURLFlag,
+		&flags.OutputFlag,
+		&DBPopulatedFlag,
+		&DBNameFlag,
 	},
 	Description: ``,
 }
 
-func printAllDBsInfo(cliCtx *cli.Context) error {
-	data, err := AllDBsInfo(cliCtx)
+func startPrintDBsInfo(cliCtx *cli.Context) error {
+	data, err := DBsInfo(cliCtx)
 	if err != nil {
-		return err
+		util.RenderError(err)
+		return nil
 	}
 
-	switch cliCtx.String(flags.OutputFlag.Name) {
-	case "json":
-		bytes, err := json.Marshal(data)
-		if err != nil {
-			return err
-		}
+	dbToPrint := cliCtx.String(DBNameFlag.Name)
 
-		fmt.Println(string(bytes))
-
-	case "text":
-		printDBsInfo(data)
-	}
-
-	return nil
-}
-
-func printPopuplatedDBsInfo(cliCtx *cli.Context) error {
-	data, err := AllDBsInfo(cliCtx)
-	if err != nil {
-		return err
-	}
-
-	// filter out empty tables
-	for i := 0; i < len(data); i++ {
-		tables := data[i].tables
-		for j := 0; j < len(tables); j++ {
-			if tables[j].Count == 0 {
-				tables = append(tables[:j], tables[j+1:]...)
-				j--
+	if dbToPrint != "" {
+		for _, db := range data {
+			if db.name == dbToPrint {
+				printDBsInfo([]DBInfo{db})
+				return nil
 			}
 		}
-		data[i].tables = tables
+
+		fmt.Printf("DB %s not found\n", dbToPrint)
+		return nil
 	}
 
-	//filter out empty dbs
-	for i := 0; i < len(data); i++ {
-		if len(data[i].tables) == 0 {
-			data = append(data[:i], data[i+1:]...)
-			i--
-		}
-	}
+	printDBsInfo(data)
 
-	switch cliCtx.String(flags.OutputFlag.Name) {
-	case "json":
-		bytes, err := json.Marshal(data)
-		if err != nil {
-			return err
-		}
-
-		fmt.Println(string(bytes))
-
-	case "text":
-		printDBsInfo(data)
-	}
-
+	txt := text.Colors{text.BgGreen, text.Bold}
+	fmt.Println(txt.Sprint("To get detailed info about Erigon node state use 'diag ui' command."))
 	return nil
 }
 
 func printDBsInfo(data []DBInfo) {
-	fmt.Print("\n")
-	fmt.Println("------------------------DBs-------------------")
-	fmt.Println("DB Name             Keys Count            Size")
-	fmt.Println("----------------------------------------------")
+	txt := text.Colors{text.FgBlue, text.Bold}
+	fmt.Println(txt.Sprint("Databases Info:"))
+	t := table.NewWriter()
+	t.SetOutputMirror(os.Stdout)
+	t.AppendHeader(table.Row{"DB Name", "Keys Count", "Size"})
+
 	for _, db := range data {
-		nLen := len(db.name)
-		fmt.Print(db.name)
-		for i := 0; i < 20-nLen; i++ {
-			fmt.Print(" ")
-		}
-
-		fmt.Printf("%d", db.count)
-		for i := 0; i < 22-len(fmt.Sprint(db.count)); i++ {
-			fmt.Print(" ")
-		}
-
-		fmt.Printf("%s\n", db.size)
+		t.AppendRow(table.Row{db.name, db.count, db.size})
 	}
 
-	fmt.Print("\n")
-	fmt.Print("\n")
+	t.AppendSeparator()
+	t.Render()
 
-	//db := data[0]
+	t.ResetHeaders()
+	t.AppendHeader(table.Row{"Table Name", "Keys Count", "Size"})
+
 	for _, db := range data {
-
-		nl := len(db.name)
-
-		dashCount := (60 - nl) / 2
-
-		for i := 0; i < dashCount; i++ {
-			fmt.Print("-")
+		t.ResetRows()
+		fmt.Println(txt.Sprint("DB " + db.name + " tables:"))
+		for _, tbl := range db.tables {
+			t.AppendRow(table.Row{tbl.Name, tbl.Count, common.ByteCount(tbl.Size)})
 		}
 
-		//fmt.Printf(" %s ", db.name)
-		fmt.Print("\033[1m " + db.name + " \033[0m")
-
-		for i := 0; i < dashCount; i++ {
-			fmt.Print("-")
-		}
-		fmt.Print("\n")
-
-		//fmt.Println("------------------------------------------------------------")
-		fmt.Println("Table Name                        Keys Count            Size")
-		for i := 0; i < 60; i++ {
-			fmt.Print("-")
-		}
-		fmt.Print("\n")
-
-		for _, table := range db.tables {
-			nLen := len(table.Name)
-			fmt.Printf("%s", table.Name)
-			for i := 0; i < 34-nLen; i++ {
-				fmt.Print(" ")
-			}
-
-			fmt.Printf("%d", table.Count)
-			for i := 0; i < 22-len(fmt.Sprint(table.Count)); i++ {
-				fmt.Print(" ")
-			}
-
-			fmt.Printf("%s\n", common.ByteCount(table.Size))
-		}
+		t.AppendSeparator()
+		t.Render()
 		fmt.Print("\n")
 	}
 }
 
-func AllDBsInfo(cliCtx *cli.Context) ([]DBInfo, error) {
+func DBsInfo(cliCtx *cli.Context) ([]DBInfo, error) {
 	data := make([]DBInfo, 0)
 
 	dbsNames, err := getAllDbsNames(cliCtx)
@@ -215,12 +146,35 @@ func AllDBsInfo(cliCtx *cli.Context) ([]DBInfo, error) {
 		data = append(data, dbInfo)
 	}
 
+	// filter out empty tables
+	if cliCtx.Bool(DBPopulatedFlag.Name) {
+		// filter out empty tables
+		for i := 0; i < len(data); i++ {
+			tables := data[i].tables
+			for j := 0; j < len(tables); j++ {
+				if tables[j].Count == 0 {
+					tables = append(tables[:j], tables[j+1:]...)
+					j--
+				}
+			}
+			data[i].tables = tables
+		}
+
+		//filter out empty dbs
+		for i := 0; i < len(data); i++ {
+			if len(data[i].tables) == 0 {
+				data = append(data[:i], data[i+1:]...)
+				i--
+			}
+		}
+	}
+
 	return data, nil
 }
 
 func getAllDbsNames(cliCtx *cli.Context) ([]string, error) {
 	var data []string
-	url := "http://" + cliCtx.String(flags.DebugURLFlag.Name) + "/debug/dbs"
+	url := "http://" + cliCtx.String(flags.DebugURLFlag.Name) + flags.ApiPath + "/dbs"
 
 	err := util.MakeHttpGetCall(cliCtx.Context, url, &data)
 	if err != nil {
@@ -232,7 +186,7 @@ func getAllDbsNames(cliCtx *cli.Context) ([]string, error) {
 
 func getDb(cliCtx *cli.Context, dbName string) ([]BDTableInfo, error) {
 	var data []BDTableInfo
-	url := "http://" + cliCtx.String(flags.DebugURLFlag.Name) + "/debug/dbs/" + dbName + "/tables"
+	url := "http://" + cliCtx.String(flags.DebugURLFlag.Name) + flags.ApiPath + "/dbs/" + dbName + "/tables"
 
 	err := util.MakeHttpGetCall(cliCtx.Context, url, &data)
 	if err != nil {

@@ -20,9 +20,22 @@ import (
 	"time"
 )
 
-type PeerStatisticsGetter interface {
-	GetPeersStatistics() map[string]*PeerStatistics
-}
+type SyncStageType string
+
+const (
+	Snapshots           SyncStageType = "Snapshots"
+	BlockHashes         SyncStageType = "BlockHashes"
+	Senders             SyncStageType = "Senders"
+	Execution           SyncStageType = "Execution"
+	HashState           SyncStageType = "HashState"
+	IntermediateHashes  SyncStageType = "IntermediateHashes"
+	CallTraces          SyncStageType = "CallTraces"
+	AccountHistoryIndex SyncStageType = "AccountHistoryIndex"
+	StorageHistoryIndex SyncStageType = "StorageHistoryIndex"
+	LogIndex            SyncStageType = "LogIndex"
+	TxLookup            SyncStageType = "TxLookup"
+	Finish              SyncStageType = "Finish"
+)
 
 type PeerStatistics struct {
 	PeerType     string
@@ -54,10 +67,10 @@ type PeerStatisticMsgUpdate struct {
 }
 
 type SyncStatistics struct {
-	SyncStages       SyncStages                 `json:"syncStages"`
 	SnapshotDownload SnapshotDownloadStatistics `json:"snapshotDownload"`
 	SnapshotIndexing SnapshotIndexingStatistics `json:"snapshotIndexing"`
 	BlockExecution   BlockExecutionStatistics   `json:"blockExecution"`
+	SyncFinished     bool                       `json:"syncFinished"`
 }
 
 type SnapshotDownloadStatistics struct {
@@ -77,11 +90,23 @@ type SnapshotDownloadStatistics struct {
 }
 
 type SegmentDownloadStatistics struct {
-	Name            string        `json:"name"`
-	TotalBytes      uint64        `json:"totalBytes"`
-	DownloadedBytes uint64        `json:"downloadedBytes"`
-	Webseeds        []SegmentPeer `json:"webseeds"`
-	Peers           []SegmentPeer `json:"peers"`
+	Name            string                   `json:"name"`
+	TotalBytes      uint64                   `json:"totalBytes"`
+	DownloadedBytes uint64                   `json:"downloadedBytes"`
+	Webseeds        []SegmentPeer            `json:"webseeds"`
+	Peers           []SegmentPeer            `json:"peers"`
+	DownloadedStats FileDownloadedStatistics `json:"downloadedStats"`
+}
+
+type FileDownloadedStatistics struct {
+	TimeTook    float64 `json:"timeTook"`
+	AverageRate uint64  `json:"averageRate"`
+}
+
+type FileDownloadedStatisticsUpdate struct {
+	FileName    string  `json:"fileName"`
+	TimeTook    float64 `json:"timeTook"`
+	AverageRate uint64  `json:"averageRate"`
 }
 
 type SegmentPeer struct {
@@ -103,19 +128,6 @@ type SnapshotSegmentIndexingStatistics struct {
 
 type SnapshotSegmentIndexingFinishedUpdate struct {
 	SegmentName string `json:"segmentName"`
-}
-
-type SyncStagesList struct {
-	Stages []string `json:"stages"`
-}
-
-type CurrentSyncStage struct {
-	Stage uint `json:"stage"`
-}
-
-type SyncStages struct {
-	StagesList   []string `json:"stagesList"`
-	CurrentStage uint     `json:"currentStage"`
 }
 
 type BlockExecutionStatistics struct {
@@ -237,14 +249,19 @@ type MemoryStats struct {
 	Alloc       uint64 `json:"alloc"`
 	Sys         uint64 `json:"sys"`
 	OtherFields []interface{}
-	Timestamp   time.Time `json:"timestamp"`
-	StageIndex  int       `json:"stageIndex"`
+	Timestamp   time.Time             `json:"timestamp"`
+	StageIndex  CurrentSyncStagesIdxs `json:"stageIndex"`
 }
 
 type NetworkSpeedTestResult struct {
 	Latency       time.Duration `json:"latency"`
 	DownloadSpeed float64       `json:"downloadSpeed"`
 	UploadSpeed   float64       `json:"uploadSpeed"`
+	PacketLoss    float64       `json:"packetLoss"`
+}
+
+func (ti FileDownloadedStatisticsUpdate) Type() Type {
+	return TypeOf(ti)
 }
 
 func (ti MemoryStats) Type() Type {
@@ -292,14 +309,6 @@ func (ti SnapshotIndexingStatistics) Type() Type {
 }
 
 func (ti SnapshotSegmentIndexingFinishedUpdate) Type() Type {
-	return TypeOf(ti)
-}
-
-func (ti SyncStagesList) Type() Type {
-	return TypeOf(ti)
-}
-
-func (ti CurrentSyncStage) Type() Type {
 	return TypeOf(ti)
 }
 
