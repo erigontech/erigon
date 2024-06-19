@@ -896,6 +896,12 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 	sort.Slice(kvs, func(i, j int) bool {
 		return bytes.Compare(kvs[i].k, kvs[j].k) < 0
 	})
+	// check if any key is duplicated
+	for i := 1; i < len(kvs); i++ {
+		if bytes.Equal(kvs[i].k, kvs[i-1].k) {
+			return coll, fmt.Errorf("duplicate key [%x]", kvs[i].k)
+		}
+	}
 	for _, kv := range kvs {
 		if err = comp.AddWord(kv.k); err != nil {
 			return coll, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, kv.k, err)
@@ -1665,6 +1671,7 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 	if limit == 0 {
 		limit = math.MaxUint64
 	}
+	fmt.Println("pruning", step)
 
 	stat = &DomainPruneStat{MinStep: math.MaxUint64}
 	if stat.History, err = dt.ht.Prune(ctx, rwTx, txFrom, txTo, limit, false, withWarmup, logEvery); err != nil {
