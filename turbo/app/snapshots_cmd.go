@@ -297,7 +297,7 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&cli.StringFlag{Name: "check", Usage: fmt.Sprintf("one of: %s", integrity.AllChecks)},
-				&cli.BoolFlag{Name: "failFast", Value: true, Usage: "To stop after 1st problem or print WARN log and continue check"},
+				&cli.BoolFlag{Name: "failFast", Value: true, Usage: "to stop after 1st problem or print WARN log and continue check"},
 			}),
 		},
 	},
