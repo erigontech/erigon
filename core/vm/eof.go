@@ -94,8 +94,8 @@ type Container struct {
 
 // FunctionMetadata is an EOF function signature.
 type FunctionMetadata struct {
-	Input          uint8
-	Output         uint8
+	Inputs         uint8
+	Outputs        uint8
 	MaxStackHeight uint16
 }
 
@@ -120,7 +120,7 @@ func (c *Container) MarshalBinary() []byte {
 
 	// Write section contents.
 	for _, ty := range c.Types {
-		b = append(b, []byte{ty.Input, ty.Output, byte(ty.MaxStackHeight >> 8), byte(ty.MaxStackHeight & 0x00ff)}...)
+		b = append(b, []byte{ty.Inputs, ty.Outputs, byte(ty.MaxStackHeight >> 8), byte(ty.MaxStackHeight & 0x00ff)}...)
 	}
 	for _, code := range c.Code {
 		b = append(b, code...)
@@ -231,12 +231,12 @@ func (c *Container) UnmarshalBinary(b []byte) error {
 	// first, parse the first section and check if it meets the boundries
 	i := 0
 	typ := &FunctionMetadata{
-		Input:          b[idx+i*4],
-		Output:         b[idx+i*4+1],
+		Inputs:         b[idx+i*4],
+		Outputs:        b[idx+i*4+1],
 		MaxStackHeight: binary.BigEndian.Uint16(b[idx+i*4+2:]),
 	}
-	if typ.Input != 0 || typ.Output != nonReturningFunction {
-		return fmt.Errorf("%w: have %d, %d", ErrInvalidFirstSectionType, typ.Input, typ.Output)
+	if typ.Inputs != 0 || typ.Outputs != nonReturningFunction {
+		return fmt.Errorf("%w: have %d, %d", ErrInvalidFirstSectionType, typ.Inputs, typ.Outputs)
 	}
 	if typ.MaxStackHeight > maxStackHeight {
 		return fmt.Errorf("%w for section %d: have %d", ErrTooLargeMaxStackHeight, i, typ.MaxStackHeight)
@@ -246,16 +246,16 @@ func (c *Container) UnmarshalBinary(b []byte) error {
 	i = 1 // go to the next section
 	for ; i < typesSize/4; i++ {
 		typ := &FunctionMetadata{
-			Input:          b[idx+i*4],
-			Output:         b[idx+i*4+1],
+			Inputs:         b[idx+i*4],
+			Outputs:        b[idx+i*4+1],
 			MaxStackHeight: binary.BigEndian.Uint16(b[idx+i*4+2:]),
 		}
 
-		if typ.Input > maxInputItems {
-			return fmt.Errorf("%w for section %d: have %d", ErrTooManyInputs, i, typ.Input)
+		if typ.Inputs > maxInputItems {
+			return fmt.Errorf("%w for section %d: have %d", ErrTooManyInputs, i, typ.Inputs)
 		}
-		if typ.Output > maxOutputItems && typ.Output != nonReturningFunction {
-			return fmt.Errorf("%w for section %d: have %d", ErrTooManyOutputs, i, typ.Output)
+		if typ.Outputs > maxOutputItems && typ.Outputs != nonReturningFunction {
+			return fmt.Errorf("%w for section %d: have %d", ErrTooManyOutputs, i, typ.Outputs)
 		}
 		if typ.MaxStackHeight > maxStackHeight {
 			return fmt.Errorf("%w for section %d: have %d", ErrTooLargeMaxStackHeight, i, typ.MaxStackHeight)
@@ -300,7 +300,7 @@ func (c *Container) UnmarshalBinary(b []byte) error {
 // rule set.
 func (c *Container) ValidateCode(jt *JumpTable) error {
 	for i, code := range c.Code {
-		if err := validateCode(code, i, c.Types, jt, len(c.Data)); err != nil {
+		if err := validateCode(code, i, c.Types, jt, len(c.Data), len(c.SubContainer)); err != nil {
 			return err
 		}
 	}
@@ -350,7 +350,8 @@ func parseList(b []byte, idx int) ([]int, error) {
 // parseUint16 parses a 16 bit BigEndian unsigned integer.
 func parseUint16(b []byte) (int, error) {
 	if len(b) < 2 {
-		return 0, io.ErrUnexpectedEOF
+		// return 0, io.ErrUnexpectedEOF
+		panic("parseUint16: len(b) < 2") // TODO(racytech): undo this when done with tests
 	}
 	return int(binary.BigEndian.Uint16(b)), nil
 }

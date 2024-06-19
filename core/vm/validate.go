@@ -17,166 +17,194 @@ package vm
 import (
 	"errors"
 	"fmt"
-	"io"
+)
+
+const (
+	REL_OFFSET_SIZE = 2 // size of uint16
 )
 
 var (
-	ErrUndefinedInstruction   = errors.New("undefined instrustion")
-	ErrTruncatedImmediate     = errors.New("truncated immediate")
-	ErrInvalidSectionArgument = errors.New("invalid section argument")
-	ErrInvalidJumpDest        = errors.New("invalid jump destination")
-	ErrConflictingStack       = errors.New("conflicting stack height")
-	ErrInvalidBranchCount     = errors.New("invalid number of branches in jump table")
-	ErrInvalidOutputs         = errors.New("invalid number of outputs")
-	ErrInvalidMaxStackHeight  = errors.New("invalid max stack height")
-	ErrInvalidCodeTermination = errors.New("invalid code termination")
-	ErrUnreachableCode        = errors.New("unreachable code")
-	ErrInvalidDataLoadN       = errors.New("invalid DATALOADN index")
-	ErrEOFStackOverflow       = errors.New("stack overflow")
-	ErrJUMPFOutputs           = errors.New("current secion outputs less then target section outputs")
-	ErrStackHeightHigher      = errors.New("stack height higher then outputs required")
-	ErrNoTerminalInstruction  = errors.New("expected terminal instruction")
-	ErrStackHeightMismatch    = errors.New("stack height mismatch")
-	ErrCALLFtoNonReturning    = errors.New("op CALLF to non returning function")
+	ErrUndefinedInstruction     = errors.New("undefined instrustion")
+	ErrTruncatedImmediate       = errors.New("truncated immediate")
+	ErrInvalidSectionArgument   = errors.New("invalid section argument")
+	ErrInvalidContainerArgument = errors.New("invalid container argument")
+	ErrInvalidJumpDest          = errors.New("invalid jump destination")
+	ErrConflictingStack         = errors.New("conflicting stack height")
+	ErrInvalidBranchCount       = errors.New("invalid number of branches in jump table")
+	ErrInvalidOutputs           = errors.New("invalid number of outputs")
+	ErrInvalidMaxStackHeight    = errors.New("invalid max stack height")
+	ErrInvalidCodeTermination   = errors.New("invalid code termination")
+	ErrUnreachableCode          = errors.New("unreachable code")
+	ErrInvalidDataLoadN         = errors.New("invalid DATALOADN index")
+	ErrEOFStackOverflow         = errors.New("stack overflow")
+	ErrEOFStackUnderflow        = errors.New("stack underflow")
+	ErrJUMPFOutputs             = errors.New("current secion outputs less then target section outputs")
+	ErrStackHeightHigher        = errors.New("stack height higher then outputs required")
+	ErrNoTerminalInstruction    = errors.New("expected terminal instruction")
+	ErrStackHeightMismatch      = errors.New("stack height mismatch")
+	ErrCALLFtoNonReturning      = errors.New("op CALLF to non returning function")
+	ErrInvalidNonReturning      = errors.New("declared returning code section does not return")
+	ErrInvalidRjumpDest         = errors.New("invalid relative jump")
 )
 
 // TODO(racytech): split validate code into validate_instructions and validate_rjump_destinations
 
+func makeEOFerr(errOrigin, pos int, op OpCode, err error) error {
+	errs := []string{"validateInstructions", "validateRjumpDestinations"}
+
+	return fmt.Errorf("%s: %s - %w, pos %d", errs[errOrigin], op, err, pos)
+}
+
 // validateCode validates the code parameter against the EOF v1 validity requirements.
-func validateCode(code []byte, section int, metadata []*FunctionMetadata, jt *JumpTable, dataSize int) error {
-	var (
-		i = 0
-		// Tracks the number of actual instructions in the code (e.g.
-		// non-immediate values). This is used at the end to determine
-		// if each instruction is reachable.
-		count    = 0
-		op       OpCode
-		analysis bitvec
-	)
-	// This loop visits every single instruction and verifies:
-	// * if the instruction is valid for the given jump table.
-	// * if the instruction has an immediate value, it is not truncated.
-	// * if performing a relative jump, all jump destinations are valid.
-	// * if changing code sections, the new code section index is valid and
-	//   will not cause a stack overflow.
-	for i < len(code) {
-		count++
-		op = OpCode(code[i])
-		if jt[op].undefined {
-			return fmt.Errorf("%w: op %s, pos %d", ErrUndefinedInstruction, op, i)
-		}
-		switch {
-		case op >= PUSH1 && op <= PUSH32:
-			size := int(op - PUSH0)
-			if len(code) <= i+size {
-				return fmt.Errorf("%w: op %s, pos %d", ErrTruncatedImmediate, op, i)
-			}
-			i += size
-		case op == RJUMP || op == RJUMPI:
-			if len(code) <= i+2 {
-				return fmt.Errorf("%w: op %s, pos %d", ErrTruncatedImmediate, op, i)
-			}
-			if err := checkDest(code, &analysis, i+1, i+3, len(code)); err != nil {
-				return err
-			}
-			i += 2
-		case op == RJUMPV:
-			if len(code) <= i+1 {
-				return fmt.Errorf("%w: jump table size missing, op %s, pos %d", ErrTruncatedImmediate, op, i)
-			}
-			count := int(code[i+1])
-			if count == 0 {
-				return fmt.Errorf("%w: must not be 0, pos %d", ErrInvalidBranchCount, i)
-			}
-			if len(code) <= i+count {
-				return fmt.Errorf("%w: jump table truncated, op %s, pos %d", ErrTruncatedImmediate, op, i)
-			}
-			for j := 0; j < count; j++ {
-				if err := checkDest(code, &analysis, i+2+j*2, i+2*count+2, len(code)); err != nil {
-					return err
-				}
-			}
-			i += 1 + 2*count
-		case op == CALLF:
-
-			// const auto fid = read_uint16_be(&code[i + 1]);
-			// if (fid >= header.types.size())
-			//     return EOFValidationError::invalid_code_section_index;
-			// if (header.types[fid].outputs == NON_RETURNING_FUNCTION)
-			//     return EOFValidationError::callf_to_non_returning_function;
-			// if (code_idx != fid)
-			//     accessed_code_sections.insert(fid);
-			// i += 2;
-
-			if i+2 >= len(code) {
-				return fmt.Errorf("%w: op %s, pos %d", ErrTruncatedImmediate, op, i)
-			}
-			fid, _ := parseUint16(code[i+1:]) // function id
-			if fid >= len(metadata) {
-				return fmt.Errorf("%w: arg %d, last %d, pos %d", ErrInvalidSectionArgument, fid, len(metadata), i)
-			}
-			if metadata[fid].Output == nonReturningFunction {
-				return fmt.Errorf("%w, op: %s, pos: %d", ErrCALLFtoNonReturning, op, i)
-			}
-			count += 2
-			i += 2
-		case op == JUMPF:
-			if i+2 >= len(code) {
-				return fmt.Errorf("%w: op %s, pos %d", ErrTruncatedImmediate, op, i)
-			}
-			fid, _ := parseUint16(code[i+1:]) // function id
-			fmt.Println("FID: ", fid)
-			if fid >= len(metadata) {
-				return fmt.Errorf("%w: arg %d, last %d, pos %d", ErrInvalidSectionArgument, fid, len(metadata), i)
-			}
-			count += 2
-			i += 2
-		case op == DATALOADN:
-			if i+2 >= len(code) {
-				return fmt.Errorf("%w: op %s, pos %d", ErrTruncatedImmediate, op, i)
-			}
-			arg, _ := parseUint16(code[i+1:]) // read index
-			if dataSize < 32 || arg > dataSize-32 {
-				return fmt.Errorf("%w: op %s, pos %d", ErrInvalidDataLoadN, op, i)
-			}
-			fmt.Println("DATA SIZE, INDEX: ", dataSize, arg)
-			i += 2
-		}
-		i += 1
-	}
-	// TODO(racytech): when investigate this case? when code ends with RJUMP or RJUMPI
-	// Code sections may not "fall through" and require proper termination.
-	// Therefore, the last instruction must be considered terminal.
-	// if !jt[op].terminal {
-	// 	return fmt.Errorf("%w: end with %s, pos %d", ErrInvalidCodeTermination, op, i)
-	// }
-	if _, err := validateControlFlow2(code, section, metadata, jt); err != nil {
+func validateCode(code []byte, section int, metadata []*FunctionMetadata, jt *JumpTable, dataSize, containerCount int) error {
+	fmt.Println("-------------------------")
+	if err := validateInstructions(code, section, metadata, jt, dataSize, containerCount); err != nil {
 		return err
 	}
-	//  else if paths != count {
-	// 	// TODO(matt): return actual position of unreachable code
-	// 	fmt.Println("paths, count: ", paths, count)
-	// 	return ErrUnreachableCode
-	// }
+	if err := validateRjumpDestinations(code, jt); err != nil {
+		return err
+	}
+	if _, err := validateMaxStackHeight(code, section, metadata, jt); err != nil {
+		return err
+	}
 	return nil
 }
 
-// checkDest parses a relative offset at code[0:2] and checks if it is a valid jump destination.
-func checkDest(code []byte, analysis *bitvec, imm, from, length int) error {
-	if len(code) < imm+2 {
-		return io.ErrUnexpectedEOF
+func validateInstructions(code []byte, section int, metadata []*FunctionMetadata, jt *JumpTable, dataSize, containerCount int) error {
+
+	var (
+		expectedReturning  = metadata[section].Outputs != nonReturningFunction
+		isReturning        = false
+		op                 OpCode
+		codeSize           = len(code)
+		accessCodeSections = map[int]bool{}
+		subcontainerRefs   = make([][2]int, 0, len(metadata))
+	)
+	fmt.Println("codeSize: ", codeSize)
+	for pos := 0; pos < codeSize; pos++ {
+		op = OpCode(code[pos])
+		if jt[op].undefined {
+			return makeEOFerr(0, pos, op, ErrUndefinedInstruction)
+		}
+		if pos+int(jt[op].immediateSize) >= codeSize {
+			return makeEOFerr(0, pos, op, ErrTruncatedImmediate)
+		}
+		fmt.Printf("%s ", op)
+		if op == RJUMPV {
+			count := int(code[pos+1]) + 1
+			pos += (1 + count*2)
+			if pos >= codeSize {
+				return makeEOFerr(0, pos, op, ErrTruncatedImmediate)
+			}
+			fmt.Printf("-> %s ", OpCode(code[pos]))
+		} else {
+			if op == CALLF {
+				fid, _ := parseUint16(code[pos+1:]) // function id
+				if fid >= len(metadata) {
+					return makeEOFerr(0, pos, op, ErrInvalidSectionArgument)
+				}
+				if metadata[fid].Outputs == nonReturningFunction {
+					return makeEOFerr(0, pos, op, ErrInvalidSectionArgument)
+				}
+				if section != fid {
+					accessCodeSections[fid] = true
+				}
+			} else if op == RETF {
+				isReturning = true
+			} else if op == JUMPF {
+				fid, _ := parseUint16(code[pos+1:])
+				if fid >= len(metadata) {
+					return makeEOFerr(0, pos, op, ErrInvalidSectionArgument)
+				}
+				if metadata[fid].Outputs != nonReturningFunction {
+					isReturning = true
+				}
+				if section != fid {
+					accessCodeSections[fid] = true
+				}
+			} else if op == DATALOADN {
+				index, _ := parseUint16(code[pos+1:])
+				if dataSize < 32 || index > dataSize-32 {
+					return makeEOFerr(0, pos, op, ErrInvalidDataLoadN)
+				}
+			} else if op == EOFCREATE || op == RETURNCONTRACT {
+				containerIDX := int(code[pos+1])
+				if containerIDX >= containerCount {
+					return makeEOFerr(0, pos, op, ErrInvalidContainerArgument)
+				}
+				subcontainerRefs = append(subcontainerRefs, [2]int{containerIDX, int(op)})
+			}
+			for j := pos + 1; j <= pos+int(jt[op].immediateSize); j++ {
+				fmt.Printf("(%x) ", code[j])
+			}
+			pos += int(jt[op].immediateSize)
+		}
 	}
-	if analysis != nil && *analysis == nil {
-		*analysis = eofCodeBitmap(code)
+
+	fmt.Println("")
+
+	if isReturning != expectedReturning {
+		return ErrInvalidNonReturning
 	}
-	offset := parseInt16(code[imm:])
-	dest := from + offset
-	if dest < 0 || dest >= length {
-		return fmt.Errorf("%w: out-of-bounds offset: offset %d, dest %d, pos %d", ErrInvalidJumpDest, offset, dest, imm)
+	return nil
+}
+
+func checkRjumpDest(codeSize, postPos, relOffset int, rjumpDests *[]int) bool {
+
+	jumpDest := postPos + relOffset
+	fmt.Printf("relOffset: %v, postPos: %v, jumpDest: %v\n", relOffset, postPos, postPos+relOffset)
+	if jumpDest < 0 || jumpDest >= codeSize {
+		return false
 	}
-	if !analysis.codeSegment(uint64(dest)) {
-		return fmt.Errorf("%w: offset into immediate: offset %d, dest %d, pos %d", ErrInvalidJumpDest, offset, dest, imm)
+
+	*rjumpDests = append(*rjumpDests, jumpDest)
+
+	return true
+}
+
+func validateRjumpDestinations(code []byte, jt *JumpTable) error {
+
+	var (
+		codeSize     = len(code)
+		rjumpDests   = make([]int, 0)
+		immediateMap = make([]bool, codeSize)
+		op           OpCode
+	)
+	fmt.Println("CODE SIZE: ", codeSize)
+	for pos := 0; pos < codeSize; pos++ {
+		op = OpCode(code[pos])
+		immSize := int(jt[op].immediateSize)
+		if op == RJUMP || op == RJUMPI { // both RJUMP and RJUMPI have 2 bytes immediates
+			relOffset := parseInt16(code[pos+1:])
+			postPos := pos + REL_OFFSET_SIZE + 1
+			if !checkRjumpDest(codeSize, postPos, relOffset, &rjumpDests) {
+				return makeEOFerr(1, pos, op, ErrInvalidRjumpDest)
+			}
+		} else if op == RJUMPV { // 1 byte immediate
+			fmt.Println("RJUMPV")
+			count := int(code[pos+1]) + 1
+			immSize += count * REL_OFFSET_SIZE
+			postPos := pos + 1 + immSize
+			for j := 0; j < count*REL_OFFSET_SIZE; j += REL_OFFSET_SIZE {
+				relOffset := parseInt16(code[pos+1+1+j:])
+				if !checkRjumpDest(codeSize, postPos, relOffset, &rjumpDests) {
+					return makeEOFerr(1, pos, op, ErrInvalidRjumpDest)
+				}
+			}
+		}
+		for j := pos + 1; j <= pos+immSize; j++ {
+			immediateMap[j] = true
+		}
+		pos += immSize
 	}
+	fmt.Println(rjumpDests)
+	fmt.Println(immediateMap)
+	for _, dest := range rjumpDests {
+		if immediateMap[dest] {
+			return fmt.Errorf("%w: immediateMap[dest] is true: dest-%v", ErrInvalidRjumpDest, dest)
+		}
+	}
+
 	return nil
 }
 
@@ -188,99 +216,86 @@ type stackHeightRange struct {
 func (st *stackHeightRange) visited() bool { return st.min != -1 }
 
 func visitSuccessor(currentOffset, nextOffset int, stackRequired stackHeightRange, stackHeights *[]stackHeightRange) bool {
-	fmt.Printf("Visitin successor: currentOffset: %v, nextOffset: %v, stckRequire.max: %v, stckRequired.min: %v\n", currentOffset, nextOffset, stackRequired.max, stackRequired.min)
 	nextStackHeight := (*stackHeights)[nextOffset]
-	fmt.Printf("next stack: nextStack.max: %v, nextStack.min: %v\n", nextStackHeight.max, nextStackHeight.min)
 	if nextOffset <= currentOffset { // backwards jump
 		if !nextStackHeight.visited() {
-			panic("successor wasn't visited")
+			fmt.Printf("current offset: %v, next offset %v\n", currentOffset, nextOffset)
+			panic("successor wasn't visited") // TODO(racytech): handle this better
 		}
 		return nextStackHeight.min == stackRequired.min && nextStackHeight.max == stackRequired.max
 	} else if !nextStackHeight.visited() { // forwards jump, new target
-		fmt.Println("NOT VISITED")
 		nextStackHeight = stackRequired
 	} else { // forwards jump, target known
 		nextStackHeight.min = min(stackRequired.min, nextStackHeight.min)
 		nextStackHeight.max = max(stackRequired.max, nextStackHeight.max)
 	}
 	(*stackHeights)[nextOffset] = nextStackHeight
-	fmt.Printf("Setting nextStackHeight.max: %v, nextStackHeigh.min: %v, offset: %v\n", nextStackHeight.max, nextStackHeight.min, nextOffset)
 	return true
 }
 
-func validateControlFlow2(code []byte, section int, metadata []*FunctionMetadata, jt *JumpTable) (int, error) {
-	fmt.Println("-------------------------")
+func validateMaxStackHeight(code []byte, section int, metadata []*FunctionMetadata, jt *JumpTable) (int, error) {
+
+	fmt.Println("outputs: ", metadata[section].Outputs)
 	stackHeights := make([]stackHeightRange, len(code))
 	for i := 1; i < len(code); i++ {
 		stackHeights[i] = stackHeightRange{min: -1, max: -1}
 	}
-	stackHeights[0] = stackHeightRange{min: int(metadata[section].Input), max: int(metadata[section].Input)}
+	stackHeights[0] = stackHeightRange{min: int(metadata[section].Inputs), max: int(metadata[section].Inputs)}
 
 	for pos := 0; pos < len(code); {
 		op := OpCode(code[pos])
-		fmt.Println("---")
-		fmt.Printf("At position: %v, op: %v, opcodeHex: %v\n", pos, opCodeToString[op], code[pos])
-		// numPops := jt[op].numPop // how many stack items required by the instruction
-		// numPushes := jt[op].numPush
 		stackHeightRequired := jt[op].numPop // how many stack items required by the instruction
 		stackHeightChange := 0
 		if stackHeightRequired != jt[op].numPush {
 			stackHeightChange = jt[op].numPush - stackHeightRequired // can be negative
 		}
-
-		fmt.Printf("stackHeightRequired %v, stackHeightChange: %v\n", stackHeightRequired, stackHeightChange)
 		stackHeight := stackHeights[pos]
 
 		if !stackHeight.visited() {
-			fmt.Println("HITTING THIS")
 			return 0, ErrUnreachableCode
 		}
 
 		if op == CALLF {
-			fid := parseInt16(code[pos+1:]) // function id
-			stackHeightRequired = int(metadata[fid].Input)
-			if stackHeight.max+int(metadata[fid].MaxStackHeight)+stackHeightRequired > stackSizeLimit {
+			fid, _ := parseUint16(code[pos+1:]) // function id
+			stackHeightRequired = int(metadata[fid].Inputs)
+			if stackHeight.max+int(metadata[fid].MaxStackHeight)-stackHeightRequired > stackSizeLimit {
 				return 0, ErrEOFStackOverflow
 			}
-			if metadata[fid].Output == nonReturningFunction {
+			if metadata[fid].Outputs == nonReturningFunction {
 				panic("CALLF returning")
 			}
-			stackHeightChange = int(metadata[fid].Output)
+			stackHeightChange = int(metadata[fid].Outputs) - stackHeightRequired
 		} else if op == JUMPF {
-			fmt.Println("JUMPF CASE")
-			fid := parseInt16(code[pos+1:]) // function id
-			if stackHeight.max+int(metadata[fid].MaxStackHeight)-int(metadata[fid].Input) > stackSizeLimit {
+			fid, _ := parseUint16(code[pos+1:]) // function id
+			if stackHeight.max+int(metadata[fid].MaxStackHeight)-int(metadata[fid].Inputs) > stackSizeLimit {
 				return 0, ErrEOFStackOverflow
 			}
 
-			if metadata[fid].Output == nonReturningFunction {
-				stackHeightRequired = int(metadata[fid].Input)
+			if metadata[fid].Outputs == nonReturningFunction {
+				stackHeightRequired = int(metadata[fid].Inputs)
 			} else { // returning function
-				fmt.Println("------>NON RETURNING")
 				// type[current_section_index].outputs MUST be greater or equal type[target_section_index].outputs,
 				// or type[target_section_index].outputs MUST be 0x80, checked above
-				if metadata[section].Output < metadata[fid].Output {
+				if metadata[section].Outputs < metadata[fid].Outputs {
 					return 0, ErrJUMPFOutputs
 				}
-				fmt.Println("------>PASS")
-
-				stackHeightRequired = int(metadata[section].Output) + int(metadata[fid].Input) - int(metadata[fid].Output)
-
+				stackHeightRequired = int(metadata[section].Outputs) + int(metadata[fid].Inputs) - int(metadata[fid].Outputs)
 				if stackHeight.max > stackHeightRequired {
+					fmt.Println("HITTING THIS 0")
 					return 0, ErrStackHeightHigher
 				}
-				fmt.Println("------>PASS")
 			}
 		} else if op == RETF {
-			stackHeightRequired = int(metadata[section].Output)
+			stackHeightRequired = int(metadata[section].Outputs)
+			fmt.Println("stack height max: ", stackHeight.max)
 			if stackHeight.max > stackHeightRequired {
-				fmt.Printf("RETF: stackHeight.max: %v, stackHeightRequired: %v\n", stackHeight.max, stackHeightRequired)
+				fmt.Println("HITTING THIS 2")
 				return 0, ErrStackHeightHigher
 			}
 		} else if op == DUPN {
 			stackHeightRequired = int(code[pos+1]) + 1
 		} else if op == SWAPN {
-			stackHeightRequired = int(code[pos+1]) + 1
+			stackHeightRequired = int(code[pos+1]) + 2
 		} else if op == EXCHANAGE {
 			n := (int(code[pos+1]) >> 4) + 1
 			m := (int(code[pos+1]) & 0x0F) + 1
@@ -288,27 +303,22 @@ func validateControlFlow2(code []byte, section int, metadata []*FunctionMetadata
 		}
 
 		if stackHeight.min < stackHeightRequired {
-			fmt.Println("HITTING THIS")
-			return 0, ErrEOFStackOverflow
+			return 0, ErrEOFStackUnderflow
 		}
-		fmt.Printf("before setting next: StackHeight.Min: %v, StackHeight.Max: %v\n", stackHeight.min, stackHeight.max)
+
 		nextStackHeight := stackHeightRange{min: stackHeight.min + stackHeightChange, max: stackHeight.max + stackHeightChange}
-		fmt.Printf("after setting next: StackHeight.Min: %v, StackHeight.Max: %v\n", nextStackHeight.min, nextStackHeight.max)
-		var immSize int // immediate size
+		immSize := int(jt[op].immediateSize)
 		if op == RJUMPV {
-			immSize = 1 + int(code[pos+1]) + 1*2 // (size of int16)
-		} else {
-			immSize = int(jt[op].immediateSize)
+			immSize = 1 + (int(code[pos+1])+1)*REL_OFFSET_SIZE // (size of int16)
 		}
-		fmt.Println("immSize: ", immSize)
+		// } else {
+		// 	immSize = int(jt[op].immediateSize)
+		// }
 
 		next := pos + immSize + 1 // offset of the next instruction (may be invalid)
-		fmt.Println("next: ", next)
 		// check validity of next instuction, skip RJUMP and termination instructions
 		if !jt[op].terminal && op != RJUMP {
-			fmt.Println("VISITING NEXT")
 			if next >= len(code) {
-				fmt.Println("next >= len(code)")
 				return 0, ErrNoTerminalInstruction
 			}
 			if !visitSuccessor(pos, next, nextStackHeight, &stackHeights) {
@@ -318,17 +328,16 @@ func validateControlFlow2(code []byte, section int, metadata []*FunctionMetadata
 
 		if op == RJUMP || op == RJUMPI {
 			targetRelOffset := parseInt16(code[pos+1:])
-			target := pos + int(targetRelOffset) + 3
+			target := pos + targetRelOffset + 3
 
 			if !visitSuccessor(pos, target, nextStackHeight, &stackHeights) {
 				return 0, ErrStackHeightMismatch
 			}
 		} else if op == RJUMPV {
-			maxIndex := code[pos+1]
-			for i := 0; i <= int(maxIndex); i++ {
-				targetRelOffset := parseInt16(code[pos+i*2+2:])
-				target := pos + int(next) + int(targetRelOffset)
-
+			maxIndex := int(code[pos+1])
+			for i := 0; i <= maxIndex; i++ {
+				targetRelOffset := parseInt16(code[pos+i*REL_OFFSET_SIZE+2:])
+				target := next + targetRelOffset
 				if !visitSuccessor(pos, target, nextStackHeight, &stackHeights) {
 					return 0, ErrStackHeightMismatch
 				}
@@ -338,102 +347,5 @@ func validateControlFlow2(code []byte, section int, metadata []*FunctionMetadata
 		pos = next
 	}
 
-	// const auto max_stack_height_it = std::max_element(stack_heights.begin(), stack_heights.end(),
-	//     [](StackHeightRange lhs, StackHeightRange rhs) noexcept { return lhs.max < rhs.max; });
-	// return max_stack_height_it->max;
 	return len(stackHeights), nil
 }
-
-// // validateControlFlow iterates through all possible branches the provided code
-// // value and determines if it is valid per EOF v1.
-// func validateControlFlow(code []byte, section int, metadata []*FunctionMetadata, jt *JumpTable) (int, error) {
-// 	type item struct {
-// 		pos    int
-// 		height int
-// 	}
-// 	// TODO(racytech): compares this to EVMone's stack validation
-// 	var (
-// 		heights        = make(map[int]int)
-// 		worklist       = []item{{0, int(metadata[section].Input)}}
-// 		maxStackHeight = int(metadata[section].Input)
-// 	)
-// 	for 0 < len(worklist) {
-// 		var (
-// 			idx    = len(worklist) - 1
-// 			pos    = worklist[idx].pos
-// 			height = worklist[idx].height
-// 		)
-// 		worklist = worklist[:idx]
-// 	outer:
-// 		for pos < len(code) {
-// 			op := OpCode(code[pos])
-
-// 			// Check if pos has already be visited; if so, the stack heights should be the same.
-// 			if want, ok := heights[pos]; ok {
-// 				if height != want {
-// 					return 0, fmt.Errorf("%w: have %d, want %d", ErrConflictingStack, height, want)
-// 				}
-// 				// Already visited this path and stack height
-// 				// matches.
-// 				break
-// 			}
-// 			heights[pos] = height
-
-// 			// Validate height for current op and update as needed.
-// 			if want, have := jt[op].numPop, height; want > have {
-// 				return 0, fmt.Errorf("%w: at pos %d", ErrStackUnderflow{stackLen: have, required: want}, pos)
-// 			}
-// 			if want, have := jt[op].maxStack, height; want < have {
-// 				return 0, fmt.Errorf("%w: at pos %d", ErrStackOverflow{stackLen: have, limit: want}, pos)
-// 			}
-// 			height += int(params.StackLimit) - jt[op].maxStack
-
-// 			switch {
-// 			case op == CALLF:
-// 				arg, _ := parseUint16(code[pos+1:])
-// 				if want, have := int(metadata[arg].Input), height; want > have {
-// 					return 0, fmt.Errorf("%w: at pos %d", ErrStackUnderflow{stackLen: have, required: want}, pos)
-// 				}
-// 				if have, limit := int(metadata[arg].Output)+height, int(params.StackLimit); have > limit {
-// 					return 0, fmt.Errorf("%w: at pos %d", ErrStackOverflow{stackLen: have, limit: limit}, pos)
-// 				}
-// 				height -= int(metadata[arg].Input)
-// 				height += int(metadata[arg].Output)
-// 				pos += 3
-// 			case op == RETF:
-// 				if have, want := int(metadata[section].Output), height; have != want {
-// 					return 0, fmt.Errorf("%w: have %d, want %d, at pos %d", ErrInvalidOutputs, have, want, pos)
-// 				}
-// 				break outer
-// 			case op == RJUMP:
-// 				arg := parseInt16(code[pos+1:])
-// 				pos += 3 + arg
-// 			case op == RJUMPI:
-// 				arg := parseInt16(code[pos+1:])
-// 				worklist = append(worklist, item{pos: pos + 3 + arg, height: height})
-// 				pos += 3
-// 			case op == RJUMPV:
-// 				count := int(code[pos+1])
-// 				for i := 0; i < count; i++ {
-// 					arg := parseInt16(code[pos+2+2*i:])
-// 					worklist = append(worklist, item{pos: pos + 2 + 2*count + arg, height: height})
-// 				}
-// 				pos += 2 + 2*count
-// 			default:
-// 				if op >= PUSH1 && op <= PUSH32 {
-// 					pos += 1 + int(op-PUSH0)
-// 				} else if jt[op].terminal {
-// 					break outer
-// 				} else {
-// 					// Simple op, no operand.
-// 					pos += 1
-// 				}
-// 			}
-// 			maxStackHeight = max(maxStackHeight, height)
-// 		}
-// 	}
-// 	if maxStackHeight != int(metadata[section].MaxStackHeight) {
-// 		return 0, fmt.Errorf("%w in code section %d: have %d, want %d", ErrInvalidMaxStackHeight, section, maxStackHeight, metadata[section].MaxStackHeight)
-// 	}
-// 	return len(heights), nil
-// }

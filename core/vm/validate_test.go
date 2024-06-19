@@ -37,7 +37,7 @@ func TestValidateCode(t *testing.T) {
 				byte(STOP),
 			},
 			section:  0,
-			metadata: []*FunctionMetadata{{Input: 0, Output: 0, MaxStackHeight: 1}},
+			metadata: []*FunctionMetadata{{Inputs: 0, Outputs: 0, MaxStackHeight: 1}},
 		},
 		{
 			code: []byte{
@@ -45,7 +45,7 @@ func TestValidateCode(t *testing.T) {
 				byte(STOP),
 			},
 			section:  0,
-			metadata: []*FunctionMetadata{{Input: 0, Output: 0, MaxStackHeight: 0}},
+			metadata: []*FunctionMetadata{{Inputs: 0, Outputs: 0, MaxStackHeight: 0}},
 		},
 		{
 			code: []byte{
@@ -54,7 +54,7 @@ func TestValidateCode(t *testing.T) {
 				byte(STOP),
 			},
 			section:  0,
-			metadata: []*FunctionMetadata{{Input: 0, Output: 0, MaxStackHeight: 1}},
+			metadata: []*FunctionMetadata{{Inputs: 0, Outputs: 0, MaxStackHeight: 1}},
 		},
 		{
 			code: []byte{
@@ -62,7 +62,7 @@ func TestValidateCode(t *testing.T) {
 				byte(POP),
 			},
 			section:  0,
-			metadata: []*FunctionMetadata{{Input: 0, Output: 0, MaxStackHeight: 1}},
+			metadata: []*FunctionMetadata{{Inputs: 0, Outputs: 0, MaxStackHeight: 1}},
 			err:      ErrInvalidCodeTermination,
 		},
 		{
@@ -74,7 +74,7 @@ func TestValidateCode(t *testing.T) {
 				byte(STOP),
 			},
 			section:  0,
-			metadata: []*FunctionMetadata{{Input: 0, Output: 0, MaxStackHeight: 0}},
+			metadata: []*FunctionMetadata{{Inputs: 0, Outputs: 0, MaxStackHeight: 0}},
 			err:      ErrUnreachableCode,
 		},
 		{
@@ -85,7 +85,7 @@ func TestValidateCode(t *testing.T) {
 				byte(STOP),
 			},
 			section:  0,
-			metadata: []*FunctionMetadata{{Input: 0, Output: 0, MaxStackHeight: 1}},
+			metadata: []*FunctionMetadata{{Inputs: 0, Outputs: 0, MaxStackHeight: 1}},
 			err:      ErrStackUnderflow{stackLen: 1, required: 2},
 		},
 		{
@@ -96,7 +96,7 @@ func TestValidateCode(t *testing.T) {
 				byte(STOP),
 			},
 			section:  0,
-			metadata: []*FunctionMetadata{{Input: 0, Output: 0, MaxStackHeight: 2}},
+			metadata: []*FunctionMetadata{{Inputs: 0, Outputs: 0, MaxStackHeight: 2}},
 			err:      ErrInvalidMaxStackHeight,
 		},
 		{
@@ -111,7 +111,7 @@ func TestValidateCode(t *testing.T) {
 				byte(STOP),
 			},
 			section:  0,
-			metadata: []*FunctionMetadata{{Input: 0, Output: 0, MaxStackHeight: 1}},
+			metadata: []*FunctionMetadata{{Inputs: 0, Outputs: 0, MaxStackHeight: 1}},
 			err:      ErrInvalidJumpDest,
 		},
 		{
@@ -129,7 +129,7 @@ func TestValidateCode(t *testing.T) {
 				byte(STOP),
 			},
 			section:  0,
-			metadata: []*FunctionMetadata{{Input: 0, Output: 0, MaxStackHeight: 1}},
+			metadata: []*FunctionMetadata{{Inputs: 0, Outputs: 0, MaxStackHeight: 1}},
 			err:      ErrInvalidJumpDest,
 		},
 		{
@@ -140,7 +140,7 @@ func TestValidateCode(t *testing.T) {
 				byte(STOP),
 			},
 			section:  0,
-			metadata: []*FunctionMetadata{{Input: 0, Output: 0, MaxStackHeight: 1}},
+			metadata: []*FunctionMetadata{{Inputs: 0, Outputs: 0, MaxStackHeight: 1}},
 			err:      ErrInvalidBranchCount,
 		},
 		{
@@ -158,7 +158,7 @@ func TestValidateCode(t *testing.T) {
 				byte(RJUMP), 0xff, 0xef,
 			},
 			section:  0,
-			metadata: []*FunctionMetadata{{Input: 0, Output: 0, MaxStackHeight: 3}},
+			metadata: []*FunctionMetadata{{Inputs: 0, Outputs: 0, MaxStackHeight: 3}},
 		},
 		{
 			code: []byte{
@@ -176,7 +176,7 @@ func TestValidateCode(t *testing.T) {
 				byte(RETURN),
 			},
 			section:  0,
-			metadata: []*FunctionMetadata{{Input: 0, Output: 0, MaxStackHeight: 3}},
+			metadata: []*FunctionMetadata{{Inputs: 0, Outputs: 0, MaxStackHeight: 3}},
 		},
 		{
 			code: []byte{
@@ -194,7 +194,7 @@ func TestValidateCode(t *testing.T) {
 				byte(RETURN),
 			},
 			section:  0,
-			metadata: []*FunctionMetadata{{Input: 0, Output: 0, MaxStackHeight: 3}},
+			metadata: []*FunctionMetadata{{Inputs: 0, Outputs: 0, MaxStackHeight: 3}},
 		},
 		{
 			code: []byte{
@@ -203,7 +203,7 @@ func TestValidateCode(t *testing.T) {
 				byte(INVALID),
 			},
 			section:  0,
-			metadata: []*FunctionMetadata{{Input: 0, Output: 0, MaxStackHeight: 0}},
+			metadata: []*FunctionMetadata{{Inputs: 0, Outputs: 0, MaxStackHeight: 0}},
 			err:      ErrUnreachableCode,
 		},
 		{
@@ -211,7 +211,7 @@ func TestValidateCode(t *testing.T) {
 				byte(RETF),
 			},
 			section:  0,
-			metadata: []*FunctionMetadata{{Input: 0, Output: 1, MaxStackHeight: 0}},
+			metadata: []*FunctionMetadata{{Inputs: 0, Outputs: 1, MaxStackHeight: 0}},
 			err:      ErrInvalidOutputs,
 		},
 		{
@@ -219,7 +219,7 @@ func TestValidateCode(t *testing.T) {
 				byte(RETF),
 			},
 			section:  0,
-			metadata: []*FunctionMetadata{{Input: 3, Output: 3, MaxStackHeight: 3}},
+			metadata: []*FunctionMetadata{{Inputs: 3, Outputs: 3, MaxStackHeight: 3}},
 		},
 		{
 			code: []byte{
@@ -228,7 +228,7 @@ func TestValidateCode(t *testing.T) {
 				byte(STOP),
 			},
 			section:  0,
-			metadata: []*FunctionMetadata{{Input: 0, Output: 0, MaxStackHeight: 1}, {Input: 0, Output: 1, MaxStackHeight: 0}},
+			metadata: []*FunctionMetadata{{Inputs: 0, Outputs: 0, MaxStackHeight: 1}, {Inputs: 0, Outputs: 1, MaxStackHeight: 0}},
 		},
 		{
 			code: []byte{
@@ -239,10 +239,10 @@ func TestValidateCode(t *testing.T) {
 				byte(RETF),
 			},
 			section:  0,
-			metadata: []*FunctionMetadata{{Input: 0, Output: 0, MaxStackHeight: 2}, {Input: 2, Output: 1, MaxStackHeight: 2}},
+			metadata: []*FunctionMetadata{{Inputs: 0, Outputs: 0, MaxStackHeight: 2}, {Inputs: 2, Outputs: 1, MaxStackHeight: 2}},
 		},
 	} {
-		err := validateCode(test.code, test.section, test.metadata, &pragueEOFInstructionSet, 0)
+		err := validateCode(test.code, test.section, test.metadata, &pragueEOFInstructionSet, 0, 0)
 		if !errors.Is(err, test.err) {
 			t.Errorf("test %d (%s): unexpected error (want: %v, got: %v)", i, common.Bytes2Hex(test.code), test.err, err)
 		}

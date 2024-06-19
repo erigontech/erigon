@@ -433,7 +433,8 @@ func enableEOF(jt *JumpTable) {
 	}
 	jt[TXCREATE] = &operation{}
 	jt[RETURNCONTRACT] = &operation{
-		terminal: true,
+		terminal:      true,
+		immediateSize: 1,
 	}
 
 	immSize := uint8(1)
@@ -497,7 +498,7 @@ func opCallf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 	retCtx := &ReturnContext{
 		Section:     scope.CodeSection,
 		Pc:          *pc + 3,
-		StackHeight: scope.Stack.Len() - int(typ.Input),
+		StackHeight: scope.Stack.Len() - int(typ.Inputs),
 	}
 	scope.ReturnStack = append(scope.ReturnStack, retCtx)
 	scope.CodeSection = uint64(idx)
