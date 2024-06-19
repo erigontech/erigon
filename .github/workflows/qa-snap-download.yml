@@ -2,18 +2,18 @@ name: QA - Snapshot Download
 
 on:
   schedule:
-    - cron: '5 0 * * *'  # Run every day at 05:00 AM UTC
+    - cron: '0 5 * * 1-6'  # Run every day at 05:00 AM UTC except Sunday
   workflow_dispatch:     # Run manually
 
 jobs:
-  long-running-test:
+  snap-download-test:
     runs-on: [self-hosted, Erigon3]
-    timeout-minutes: 600
+    timeout-minutes: 800
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
-      TRACKING_TIME_SECONDS: 14400 # 4 hours
-      TOTAL_TIME_SECONDS: 28800 # 8 hours
+      TOTAL_TIME_SECONDS: 43200 # 12 hours
+      CHAIN: mainnet
 
     steps:
     - name: Check out repository
@@ -39,7 +39,8 @@ jobs:
         set +e # Disable exit on error
              
         # Run Erigon, monitor snapshot downloading and check logs
-        python3 $ERIGON_QA_PATH/test_system/qa-tests/snap-download/run_and_check_snap_download.py ${{ github.workspace }}/build/bin $ERIGON_DATA_DIR $TOTAL_TIME_SECONDS Erigon3
+        python3 $ERIGON_QA_PATH/test_system/qa-tests/snap-download/run_and_check_snap_download.py \
+          ${{ github.workspace }}/build/bin $ERIGON_DATA_DIR $TOTAL_TIME_SECONDS Erigon3 $CHAIN
   
         # Capture monitoring script exit status
         test_exit_status=$?
@@ -76,14 +77,23 @@ jobs:
       if: steps.test_step.outputs.test_executed == 'true'
       env:
         TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
-      run: python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --test_name snap-download --outcome $TEST_RESULT --result_file ${{ github.workspace }}/result.json
+      run: |
+        python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
+          --repo erigon \
+          --commit $(git rev-parse HEAD) \
+          --branch ${{ github.ref_name }} \
+          --test_name snap-download \
+          --chain $CHAIN \
+          --runner ${{ runner.name }} \
+          --outcome $TEST_RESULT \
+          --result_file ${{ github.workspace }}/result-$CHAIN.json
 
     - name: Upload test results
       if: steps.test_step.outputs.test_executed == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: test-results
-        path: ${{ github.workspace }}/result.json
+        path: ${{ github.workspace }}/result-${{ env.CHAIN }}.json
 
     - name: Action for Success
       if: steps.test_step.outputs.TEST_RESULT == 'success'

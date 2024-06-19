@@ -8,8 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/observer/utils"
@@ -88,7 +89,9 @@ func (interrogator *Interrogator) Run(ctx context.Context) (*InterrogationResult
 	// We need to wait until Server sends a Pong reply to that.
 	// The remote side is waiting for this Pong no longer than v4_udp.respTimeout.
 	// If we don't wait, the ENRRequest/FindNode might fail due to errUnknownNode.
-	libcommon.Sleep(ctx, 500*time.Millisecond)
+	if err := libcommon.Sleep(ctx, 500*time.Millisecond); err != nil {
+		return nil, NewInterrogationError(InterrogationErrorCtxCancelled, err)
+	}
 
 	// request client ID
 	var handshakeResult *DiplomatResult
@@ -158,7 +161,9 @@ func (interrogator *Interrogator) Run(ctx context.Context) (*InterrogationResult
 			peersByID[node.ID()] = node
 		}
 
-		libcommon.Sleep(ctx, 1*time.Second)
+		if err := libcommon.Sleep(ctx, 1*time.Second); err != nil {
+			return nil, NewInterrogationError(InterrogationErrorCtxCancelled, err)
+		}
 	}
 
 	peers := valuesOfIDToNodeMap(peersByID)

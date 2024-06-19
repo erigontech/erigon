@@ -3,9 +3,9 @@ package eth1
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"reflect"
 
-	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
 	execution "github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
@@ -64,7 +64,7 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: cannot convert body: %s", err)
 		}
-		parentTd := common.Big0
+		var parentTd *big.Int
 		height := header.Number.Uint64()
 		if height > 0 {
 			// Parent's total difficulty
@@ -72,6 +72,8 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 			if err != nil || parentTd == nil {
 				return nil, fmt.Errorf("parent's total difficulty not found with hash %x and height %d: %v", header.ParentHash, height-1, err)
 			}
+		} else {
+			parentTd = big.NewInt(0)
 		}
 
 		metrics.UpdateBlockConsumerHeaderDownloadDelay(header.Time, height-1, e.logger)

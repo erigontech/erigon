@@ -37,7 +37,8 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/debug"
 
 	"github.com/gofrs/flock"
-	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -299,6 +300,8 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 		name = "chaindata"
 	case kv.TxPoolDB:
 		name = "txpool"
+	case kv.PolygonBridgeDB:
+		name = "polygon-bridge"
 	case kv.ConsensusDB:
 		if len(name) == 0 {
 			return nil, fmt.Errorf("expected a consensus name")
@@ -327,6 +330,10 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 			GrowthStep(16 * datasize.MB).
 			DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter)
 
+		if config.MdbxWriteMap {
+			opts = opts.WriteMap()
+		}
+
 		if readonly {
 			opts = opts.Readonly()
 		}
@@ -345,7 +352,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 			if config.MdbxGrowthStep > 0 {
 				opts = opts.GrowthStep(config.MdbxGrowthStep)
 			}
-			opts = opts.DirtySpace(uint64(512 * datasize.MB))
+			opts = opts.DirtySpace(uint64(1024 * datasize.MB))
 		case kv.ConsensusDB:
 			if config.MdbxPageSize.Bytes() > 0 {
 				opts = opts.PageSize(config.MdbxPageSize.Bytes())

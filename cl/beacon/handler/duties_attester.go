@@ -56,7 +56,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("could not decode request body: %w. request body is required", err))
 	}
 	if len(idxsStr) == 0 {
-		return newBeaconResponse([]string{}).WithOptimistic(false).With("dependent_root", dependentRoot), nil
+		return newBeaconResponse([]string{}).WithOptimistic(a.forkchoiceStore.IsHeadOptimistic()).With("dependent_root", dependentRoot), nil
 	}
 	idxSet := map[int]struct{}{}
 	// convert the request to uint64
@@ -122,7 +122,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 				}
 			}
 		}
-		return newBeaconResponse(resp).WithOptimistic(false).With("dependent_root", dependentRoot), nil
+		return newBeaconResponse(resp).WithOptimistic(a.forkchoiceStore.IsHeadOptimistic()).With("dependent_root", dependentRoot), nil
 	}
 
 	stageStateProgress, err := state_accessors.GetStateProcessingProgress(tx)
@@ -181,5 +181,5 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 			}
 		}
 	}
-	return newBeaconResponse(resp).WithOptimistic(false).With("dependent_root", dependentRoot), nil
+	return newBeaconResponse(resp).WithOptimistic(a.forkchoiceStore.IsHeadOptimistic()).With("dependent_root", dependentRoot), nil
 }

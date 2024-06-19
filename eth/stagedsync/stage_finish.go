@@ -15,10 +15,10 @@ import (
 	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -40,7 +40,7 @@ func StageFinishCfg(db kv.RwDB, tmpDir string, forkValidator *engine_helpers.For
 	}
 }
 
-func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg, initialCycle bool) error {
+func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -72,7 +72,7 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg, initialCycle bool) 
 		cfg.forkValidator.NotifyCurrentHeight(executionAt)
 	}
 
-	if initialCycle {
+	if s.CurrentSyncCycle.IsInitialCycle {
 		if err := params.SetErigonVersion(tx, params.VersionKeyFinished); err != nil {
 			return err
 		}

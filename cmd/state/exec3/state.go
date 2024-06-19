@@ -4,8 +4,9 @@ import (
 	"context"
 	"sync"
 
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon/eth/consensuschain"
@@ -177,7 +178,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 	switch {
 	case txTask.TxIndex == -1:
 		if txTask.BlockNum == 0 {
-			// Genesis block
+
 			//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 			_, ibs, err = core.GenesisToBlock(rw.genesis, rw.dirs.Tmp, rw.logger)
 			if err != nil {
@@ -206,7 +207,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 			return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */)
 		}
 
-		_, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, txTask.Requests, rw.chain, syscall, rw.logger)
+		_, _, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, txTask.Requests, rw.chain, syscall, rw.logger)
 		if err != nil {
 			txTask.Error = err
 		} else {

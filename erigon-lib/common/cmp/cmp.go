@@ -31,20 +31,6 @@ func InRange[T constraints.Ordered](min, max, val T) T {
 	return val
 }
 
-func Min[T constraints.Ordered](a, b T) T {
-	if a <= b {
-		return a
-	}
-	return b
-}
-
-func Max[T constraints.Ordered](a, b T) T {
-	if a >= b {
-		return a
-	}
-	return b
-}
-
 func Compare[T constraints.Ordered](a, b T) int {
 	switch {
 	case a < b:

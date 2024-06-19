@@ -7,7 +7,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
 	sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
@@ -24,7 +24,7 @@ func TestSimulatorStart(t *testing.T) {
 	defer cancel()
 
 	logger := log.New()
-	logger.SetHandler(log.StdoutHandler)
+	// logger.SetHandler(log.StdoutHandler)
 	dataDir := t.TempDir()
 
 	sim, err := simulator.NewSentry(ctx, "mumbai", dataDir, 1, logger)

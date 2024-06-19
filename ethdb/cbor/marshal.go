@@ -17,17 +17,3 @@ func Unmarshal(dst interface{}, data io.Reader) error {
 	returnDecoderToPool(d)
 	return err
 }
-
-func MustMarshal(dst io.Writer, v interface{}) {
-	err := Marshal(dst, v)
-	if err != nil {
-		panic(err)
-	}
-}
-
-func MustUnmarshal(dst interface{}, data io.Reader) {
-	err := Unmarshal(dst, data)
-	if err != nil {
-		panic(err)
-	}
-}

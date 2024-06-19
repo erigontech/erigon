@@ -16,6 +16,7 @@ import (
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/optimistic"
 	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
 	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
@@ -117,7 +118,8 @@ type ForkChoiceStore struct {
 	emitters *beaconevents.Emitters
 	synced   atomic.Bool
 
-	ethClock eth_clock.EthereumClock
+	ethClock        eth_clock.EthereumClock
+	optimisticStore optimistic.OptimisticStore
 }
 
 type LatestMessage struct {
@@ -237,6 +239,7 @@ func NewForkChoiceStore(
 		hotSidecars:           make(map[libcommon.Hash][]*cltypes.BlobSidecar),
 		blobStorage:           blobStorage,
 		ethClock:              ethClock,
+		optimisticStore:       optimistic.NewOptimisticStore(),
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint.Copy())
 	f.finalizedCheckpoint.Store(anchorCheckpoint.Copy())
@@ -502,4 +505,22 @@ func (f *ForkChoiceStore) GetValidatorSet(blockRoot libcommon.Hash) (*solid.Vali
 
 func (f *ForkChoiceStore) GetCurrentPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error) {
 	return f.forkGraph.GetCurrentPartecipationIndicies(blockRoot)
+}
+
+func (f *ForkChoiceStore) IsRootOptimistic(root libcommon.Hash) bool {
+	return f.optimisticStore.IsOptimistic(root)
+}
+
+func (f *ForkChoiceStore) IsHeadOptimistic() bool {
+	if f.ethClock.GetCurrentEpoch() < f.beaconCfg.BellatrixForkEpoch {
+		return false
+	}
+
+	headState := f.syncedDataManager.HeadState()
+	if headState == nil {
+		return true
+	}
+	// get latest root
+	latestRoot := headState.LatestBlockHeader().Root
+	return f.optimisticStore.IsOptimistic(latestRoot)
 }

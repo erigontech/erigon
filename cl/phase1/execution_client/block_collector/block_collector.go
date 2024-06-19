@@ -10,12 +10,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/log/v3"
 )
 
 var (
@@ -123,9 +123,16 @@ func (b *blockCollector) Flush(ctx context.Context) error {
 			b.logger.Info("[Caplin] Inserted blocks", "progress", blocksBatch[len(blocksBatch)-1].NumberU64())
 			// If we have inserted enough blocks, update fork choice (Optimation for E35)
 			lastBlockHash := blocksBatch[len(blocksBatch)-1].Hash()
+			currentHeader, err := b.engine.CurrentHeader(ctx)
+			if err != nil {
+				b.logger.Warn("failed to get current header", "err", err)
+			}
+			isForkchoiceNeeded := currentHeader == nil || blocksBatch[len(blocksBatch)-1].NumberU64() > currentHeader.Number.Uint64()
 			if inserted >= b.syncBackLoop {
-				if _, err := b.engine.ForkChoiceUpdate(ctx, lastBlockHash, lastBlockHash, nil); err != nil {
-					b.logger.Warn("failed to update fork choice", "err", err)
+				if isForkchoiceNeeded {
+					if _, err := b.engine.ForkChoiceUpdate(ctx, lastBlockHash, lastBlockHash, nil); err != nil {
+						b.logger.Warn("failed to update fork choice", "err", err)
+					}
 				}
 				inserted = 0
 			}

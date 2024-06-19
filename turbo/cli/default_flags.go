@@ -94,10 +94,18 @@ var DefaultFlags = []cli.Flag{
 	&OverlayGetLogsFlag,
 	&OverlayReplayBlockFlag,
 
+	&RpcSubscriptionFiltersMaxLogsFlag,
+	&RpcSubscriptionFiltersMaxHeadersFlag,
+	&RpcSubscriptionFiltersMaxTxsFlag,
+	&RpcSubscriptionFiltersMaxAddressesFlag,
+	&RpcSubscriptionFiltersMaxTopicsFlag,
+
 	&utils.SnapKeepBlocksFlag,
 	&utils.SnapStopFlag,
+	&utils.SnapStateStopFlag,
 	&utils.DbPageSizeFlag,
 	&utils.DbSizeLimitFlag,
+	&utils.DbWriteMapFlag,
 	&utils.TorrentPortFlag,
 	&utils.TorrentMaxPeersFlag,
 	&utils.TorrentConnsPerFileFlag,
@@ -158,12 +166,14 @@ var DefaultFlags = []cli.Flag{
 	&utils.WithHeimdallMilestones,
 	&utils.WithHeimdallWaypoints,
 	&utils.PolygonSyncFlag,
+	&utils.PolygonSyncStageFlag,
 	&utils.EthStatsURLFlag,
 	&utils.OverridePragueFlag,
 
 	&utils.CaplinDiscoveryAddrFlag,
 	&utils.CaplinDiscoveryPortFlag,
 	&utils.CaplinDiscoveryTCPPortFlag,
+	&utils.CaplinCheckpointSyncUrlFlag,
 	&utils.SentinelAddrFlag,
 	&utils.SentinelPortFlag,
 

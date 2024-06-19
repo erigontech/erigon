@@ -3,17 +3,18 @@ package bodydownload
 import (
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
-// TripleHash is type to be used for the mapping between TxHash, UncleHash, and WithdrawalsHash to the block header
-type TripleHash [3 * length.Hash]byte
+// BodyHashes is to be used for the mapping between TxHash, UncleHash, WithdrawalsHash, and RequestRoot to the block header
+type BodyHashes [4 * length.Hash]byte
 
 const MaxBodiesInRequest = 1024
 
@@ -22,6 +23,7 @@ type Delivery struct {
 	txs             [][][]byte
 	uncles          [][]*types.Header
 	withdrawals     []types.Withdrawals
+	requests        []types.Requests
 	lenOfP2PMessage uint64
 }
 
@@ -35,7 +37,7 @@ type BodyTreeItem struct {
 // BodyDownload represents the state of body downloading process
 type BodyDownload struct {
 	peerMap          map[[64]byte]int
-	requestedMap     map[TripleHash]uint64
+	requestedMap     map[BodyHashes]uint64
 	DeliveryNotify   chan struct{}
 	deliveryCh       chan Delivery
 	Engine           consensus.Engine
@@ -66,7 +68,7 @@ type BodyRequest struct {
 // NewBodyDownload create a new body download state object
 func NewBodyDownload(engine consensus.Engine, blockBufferSize, bodyCacheLimit int, br services.FullBlockReader, logger log.Logger) *BodyDownload {
 	bd := &BodyDownload{
-		requestedMap:     make(map[TripleHash]uint64),
+		requestedMap:     make(map[BodyHashes]uint64),
 		bodyCacheLimit:   bodyCacheLimit,
 		delivered:        roaring64.New(),
 		deliveriesH:      make(map[uint64]*types.Header),

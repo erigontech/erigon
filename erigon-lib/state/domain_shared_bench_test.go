@@ -6,11 +6,11 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 func Benchmark_SharedDomains_GetLatest(t *testing.B) {

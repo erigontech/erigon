@@ -12,11 +12,8 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 )
 
 func makeSegFilePath(path string, suffix string) string {
@@ -103,7 +100,7 @@ func NewRandPattern(r *rand.Rand, patternLen int) RandPattern {
 }
 
 func (p RandPattern) CopyTo(word []byte, offset int) {
-	copy(word[offset:cmp.Min(offset+len(p.pattern), len(word))], p.pattern)
+	copy(word[offset:min(offset+len(p.pattern), len(word))], p.pattern)
 }
 
 func generatePatterns(r *rand.Rand) []RandPattern {

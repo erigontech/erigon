@@ -101,7 +101,7 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 		return fmt.Errorf("contribution has no participants")
 	}
 
-	modulo := utils.Max64(1, s.beaconCfg.SyncCommitteeSize/s.beaconCfg.SyncCommitteeSubnetCount/s.beaconCfg.TargetAggregatorsPerSyncSubcommittee)
+	modulo := max(1, s.beaconCfg.SyncCommitteeSize/s.beaconCfg.SyncCommitteeSubnetCount/s.beaconCfg.TargetAggregatorsPerSyncSubcommittee)
 	hashSignature := utils.Sha256(selectionProof[:])
 	if !s.test && binary.LittleEndian.Uint64(hashSignature[:8])%modulo != 0 {
 		return fmt.Errorf("selects the validator as an aggregator")

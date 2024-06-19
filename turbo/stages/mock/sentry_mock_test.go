@@ -5,8 +5,9 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
@@ -59,8 +60,8 @@ func TestHeaderStep(t *testing.T) {
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
 
-	initialCycle := mock.MockInsertAsInitialCycle
-	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.TxContainer{}, m.Sync, initialCycle, true, m.Log, m.BlockReader, nil); err != nil {
+	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
+	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.TxContainer{}, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -98,8 +99,8 @@ func TestMineBlockWith1Tx(t *testing.T) {
 		}
 		m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-		initialCycle := mock.MockInsertAsInitialCycle
-		if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.TxContainer{}, m.Sync, initialCycle, true, log.New(), m.BlockReader, nil); err != nil {
+		initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
+		if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.TxContainer{}, m.Sync, initialCycle, firstCycle, log.New(), m.BlockReader, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -167,8 +168,8 @@ func TestReorg(t *testing.T) {
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-	initialCycle := mock.MockInsertAsInitialCycle
-	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.TxContainer{}, m.Sync, initialCycle, true, m.Log, m.BlockReader, nil); err != nil {
+	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
+	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.TxContainer{}, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -220,8 +221,7 @@ func TestReorg(t *testing.T) {
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-	initialCycle = false
-	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.TxContainer{}, m.Sync, initialCycle, true, m.Log, m.BlockReader, nil); err != nil {
+	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.TxContainer{}, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -264,7 +264,7 @@ func TestReorg(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	// This is unwind step
-	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.TxContainer{}, m.Sync, initialCycle, true, m.Log, m.BlockReader, nil); err != nil {
+	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.TxContainer{}, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -300,8 +300,7 @@ func TestReorg(t *testing.T) {
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-	initialCycle = mock.MockInsertAsInitialCycle
-	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.TxContainer{}, m.Sync, initialCycle, true, m.Log, m.BlockReader, nil); err != nil {
+	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.TxContainer{}, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -397,8 +396,8 @@ func TestAnchorReplace(t *testing.T) {
 
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-	initialCycle := mock.MockInsertAsInitialCycle
-	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.TxContainer{}, m.Sync, initialCycle, true, m.Log, m.BlockReader, nil); err != nil {
+	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
+	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.TxContainer{}, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -502,9 +501,9 @@ func TestAnchorReplace2(t *testing.T) {
 
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-	initialCycle := mock.MockInsertAsInitialCycle
+	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
 	hook := stages.NewHook(m.Ctx, m.DB, m.Notifications, m.Sync, m.BlockReader, m.ChainConfig, m.Log, nil)
-	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.TxContainer{}, m.Sync, initialCycle, true, m.Log, m.BlockReader, hook); err != nil {
+	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.TxContainer{}, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, hook); err != nil {
 		t.Fatal(err)
 	}
 }

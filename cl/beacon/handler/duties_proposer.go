@@ -60,7 +60,11 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 				Slot:           epoch*a.beaconChainCfg.SlotsPerEpoch + i,
 			}
 		}
-		return newBeaconResponse(duties).WithFinalized(true).WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)).With("dependent_root", dependentRoot), nil
+		return newBeaconResponse(duties).
+			WithOptimistic(a.forkchoiceStore.IsHeadOptimistic()).
+			WithFinalized(true).
+			WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)).
+			With("dependent_root", dependentRoot), nil
 	}
 
 	// We need to compute our duties

@@ -14,12 +14,15 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"golang.org/x/exp/slices"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	sentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -34,8 +37,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 )
 
 type BlockPublishingValidation string
@@ -715,7 +716,14 @@ func (a *ApiHandler) storeBlockAndBlobs(
 		return err
 	}
 
-	return a.forkchoiceStore.OnBlock(ctx, block, true, false, false)
+	if err := a.forkchoiceStore.OnBlock(ctx, block, true, false, false); err != nil {
+		return err
+	}
+	finalizedBlockRoot := a.forkchoiceStore.FinalizedCheckpoint().BlockRoot()
+	if _, err := a.engine.ForkChoiceUpdate(ctx, a.forkchoiceStore.GetEth1Hash(finalizedBlockRoot), a.forkchoiceStore.GetEth1Hash(blockRoot), nil); err != nil {
+		return err
+	}
+	return nil
 }
 
 type attestationCandidate struct {

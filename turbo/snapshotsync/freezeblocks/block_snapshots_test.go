@@ -6,9 +6,10 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/exp/slices"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
@@ -276,7 +277,7 @@ func TestRemoveOverlaps(t *testing.T) {
 	require.NoError(err)
 	require.Equal(45, len(list))
 
-	s.removeOverlaps()
+	s.removeOverlapsAfterMerge()
 
 	list, err = snaptype.Segments(s.dir)
 	require.NoError(err)

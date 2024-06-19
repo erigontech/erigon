@@ -14,7 +14,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -219,6 +220,10 @@ func (h *Heimdall) FetchMilestone(ctx context.Context, number int64) (*heimdall.
 }
 
 func (h *Heimdall) FetchMilestoneCount(ctx context.Context) (int64, error) {
+	return 0, fmt.Errorf("TODO")
+}
+
+func (h *Heimdall) FetchFirstMilestoneNum(ctx context.Context) (int64, error) {
 	return 0, fmt.Errorf("TODO")
 }
 

@@ -46,7 +46,6 @@ import (
 	"github.com/anacrolix/torrent/storage"
 	"github.com/anacrolix/torrent/types/infohash"
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -62,6 +61,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 // Downloader - component which downloading historical files. Can use BitTorrent, or other protocols
@@ -329,8 +329,6 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 	d.ctx, d.stopMainLoop = context.WithCancel(ctx)
 
 	if cfg.AddTorrentsFromDisk {
-		var downloadMismatches []string
-
 		for _, download := range snapLock.Downloads {
 			if info, err := d.torrentInfo(download.Name); err == nil {
 				if info.Completed != nil {
@@ -356,28 +354,14 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 						fileHash := hex.EncodeToString(fileHashBytes)
 
 						if fileHash != download.Hash && fileHash != hash {
-							d.logger.Error("[snapshots] download db mismatch", "file", download.Name, "snapshotLock", download.Hash, "db", hash, "disk", fileHash, "downloaded", *info.Completed)
-							downloadMismatches = append(downloadMismatches, download.Name)
+							d.logger.Debug("[snapshots] download db mismatch", "file", download.Name, "snapshotLock", download.Hash, "db", hash, "disk", fileHash, "downloaded", *info.Completed)
 						} else {
-							d.logger.Warn("[snapshots] snapshotLock hash does not match completed download", "file", download.Name, "snapshotLock", hash, "download", download.Hash, "downloaded", *info.Completed)
+							d.logger.Debug("[snapshots] snapshotLock hash does not match completed download", "file", download.Name, "snapshotLock", hash, "download", download.Hash, "downloaded", *info.Completed)
 						}
 					}
 				}
 			}
 		}
-
-		if len(downloadMismatches) > 0 {
-			return nil, fmt.Errorf("downloaded files have mismatched hashes: %s", strings.Join(downloadMismatches, ","))
-		}
-
-		//TODO: why do we need it if we have `addTorrentFilesFromDisk`? what if they are conflict?
-		//TODO: why it's before `BuildTorrentFilesIfNeed`? what if they are conflict?
-		//TODO: even if hash is saved in "snapshots-snapLock.json" - it still must preserve `prohibit_new_downloads.snapLock` and don't download new files ("user restart" must be fast, "erigon3 has .kv files which never-ending merge and delete small files")
-		//for _, it := range snapLock.Downloads {
-		//	if err := d.AddMagnetLink(ctx, snaptype.Hex2InfoHash(it.Hash), it.Name); err != nil {
-		//		return nil, err
-		//	}
-		//}
 
 		if err := d.BuildTorrentFilesIfNeed(d.ctx, snapLock.Chain, snapLock.Downloads); err != nil {
 			return nil, err
@@ -541,7 +525,7 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
-	var i atomic.Int32
+	var done atomic.Int32
 
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -550,8 +534,7 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 		file := file
 
 		g.Go(func() error {
-			i.Add(1)
-
+			defer done.Add(1)
 			fileInfo, isStateFile, ok := snaptype.ParseFileName(snapDir, file)
 
 			if !ok {
@@ -660,15 +643,15 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 	}
 
 	func() {
-		for int(i.Load()) < len(files) {
+		for int(done.Load()) < len(files) {
 			select {
 			case <-ctx.Done():
 				return // g.Wait() will return right error
 			case <-logEvery.C:
-				if int(i.Load()) == len(files) {
+				if int(done.Load()) == len(files) {
 					return
 				}
-				log.Info("[snapshots] Initiating snapshot-lock", "progress", fmt.Sprintf("%d/%d", i.Load(), len(files)))
+				log.Info("[snapshots] Initiating snapshot-lock", "progress", fmt.Sprintf("%d/%d", done.Load(), len(files)))
 			}
 		}
 	}()
@@ -2718,6 +2701,9 @@ func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientC
 	//})
 	cfg.DefaultStorage = m
 
+	dnsResolver := &downloadercfg.DnsCacheResolver{RefreshTimeout: 24 * time.Hour}
+	cfg.TrackerDialContext = dnsResolver.DialContext
+
 	err = func() error {
 		defer func() {
 			if err := recover(); err != nil {
@@ -2735,6 +2721,10 @@ func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientC
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("torrentcfg.openClient: %w", err)
 	}
+
+	go func() {
+		dnsResolver.Run(ctx)
+	}()
 
 	return db, c, m, torrentClient, nil
 }

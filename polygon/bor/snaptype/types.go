@@ -21,13 +21,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/seg"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
 	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func init() {
@@ -421,6 +421,26 @@ func BorSnapshotTypes() []snaptype.Type {
 	}
 
 	return []snaptype.Type{BorEvents, BorSpans}
+}
+
+func CheckpointsEnabled() bool {
+	for _, snapType := range BorSnapshotTypes() {
+		if snapType.Enum() == BorCheckpoints.Enum() {
+			return true
+		}
+	}
+
+	return false
+}
+
+func MilestonesEnabled() bool {
+	for _, snapType := range BorSnapshotTypes() {
+		if snapType.Enum() == BorMilestones.Enum() {
+			return true
+		}
+	}
+
+	return false
 }
 
 func extractValueRange(ctx context.Context, table string, valueFrom, valueTo uint64, db kv.RoDB, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {

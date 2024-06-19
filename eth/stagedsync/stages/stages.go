@@ -66,6 +66,7 @@ var AllStages = []SyncStage{
 	Snapshots,
 	Headers,
 	BorHeimdall,
+	PolygonSync,
 	BlockHashes,
 	Bodies,
 	Senders,

@@ -19,13 +19,13 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/log/v3"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 type MemoryMutation struct {
@@ -267,7 +267,11 @@ func (m *MemoryMutation) RangeDescend(table string, fromPrefix, toPrefix []byte,
 	if s.iterMem, err = m.memTx.RangeDescend(table, fromPrefix, toPrefix, limit); err != nil {
 		return s, err
 	}
-	return s.init()
+	if _, err := s.init(); err != nil {
+		s.Close() //it's responsibility of constructor (our) to close resource on error
+		return nil, err
+	}
+	return s, nil
 }
 
 type rangeIter struct {
@@ -346,7 +350,11 @@ func (m *MemoryMutation) RangeDupSort(table string, key []byte, fromPrefix, toPr
 	if s.iterMem, err = m.memTx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, limit); err != nil {
 		return s, err
 	}
-	return s.init()
+	if err := s.init(); err != nil {
+		s.Close() //it's responsibility of constructor (our) to close resource on error
+		return nil, err
+	}
+	return s, nil
 }
 
 type rangeDupSortIter struct {
@@ -369,21 +377,21 @@ func (s *rangeDupSortIter) Close() {
 	}
 }
 
-func (s *rangeDupSortIter) init() (*rangeDupSortIter, error) {
+func (s *rangeDupSortIter) init() error {
 	s.hasNextDb = s.iterDb.HasNext()
 	s.hasNextMem = s.iterMem.HasNext()
 	var err error
 	if s.hasNextDb {
 		if _, s.nextVdb, err = s.iterDb.Next(); err != nil {
-			return s, err
+			return err
 		}
 	}
 	if s.hasNextMem {
 		if _, s.nextVmem, err = s.iterMem.Next(); err != nil {
-			return s, err
+			return err
 		}
 	}
-	return s, nil
+	return nil
 }
 
 func (s *rangeDupSortIter) HasNext() bool {

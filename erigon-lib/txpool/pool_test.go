@@ -26,11 +26,12 @@ import (
 
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
@@ -47,7 +48,6 @@ import (
 )
 
 func TestNonceFromAddress(t *testing.T) {
-	t.Skip("TODO")
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan types.Announcements, 100)
 
@@ -74,8 +74,7 @@ func TestNonceFromAddress(t *testing.T) {
 	}
 	var addr [20]byte
 	addr[0] = 1
-	v := make([]byte, types.EncodeSenderLengthForStorage(2, *uint256.NewInt(1 * common.Ether)))
-	types.EncodeSender(2, *uint256.NewInt(1 * common.Ether), v)
+	v := types.EncodeAccountBytesV3(2, uint256.NewInt(1*common.Ether), make([]byte, 32), 1)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
 		Action:  remote.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
@@ -654,26 +653,43 @@ func TestShanghaiValidateTx(t *testing.T) {
 		expected   txpoolcfg.DiscardReason
 		dataLen    int
 		isShanghai bool
+		creation   bool
 	}{
 		"no shanghai": {
 			expected:   txpoolcfg.Success,
 			dataLen:    32,
 			isShanghai: false,
+			creation:   true,
 		},
 		"shanghai within bounds": {
 			expected:   txpoolcfg.Success,
 			dataLen:    32,
 			isShanghai: true,
+			creation:   true,
 		},
-		"shanghai exactly on bound": {
+		"shanghai exactly on bound - create tx": {
 			expected:   txpoolcfg.Success,
 			dataLen:    fixedgas.MaxInitCodeSize,
 			isShanghai: true,
+			creation:   true,
 		},
-		"shanghai one over bound": {
+		"shanghai one over bound - create tx": {
 			expected:   txpoolcfg.InitCodeTooLarge,
 			dataLen:    fixedgas.MaxInitCodeSize + 1,
 			isShanghai: true,
+			creation:   true,
+		},
+		"shanghai exactly on bound - calldata tx": {
+			expected:   txpoolcfg.Success,
+			dataLen:    fixedgas.MaxInitCodeSize,
+			isShanghai: true,
+			creation:   false,
+		},
+		"shanghai one over bound - calldata tx": {
+			expected:   txpoolcfg.Success,
+			dataLen:    fixedgas.MaxInitCodeSize + 1,
+			isShanghai: true,
+			creation:   false,
 		},
 	}
 
@@ -710,7 +726,7 @@ func TestShanghaiValidateTx(t *testing.T) {
 				FeeCap:   *uint256.NewInt(21000),
 				Gas:      500000,
 				SenderID: 0,
-				Creation: true,
+				Creation: test.creation,
 			}
 
 			txns := types.TxSlots{

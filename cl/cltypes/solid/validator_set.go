@@ -187,7 +187,7 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 	layerBuffer := make([]byte, validatorsLeafChunkSize*length.Hash)
 	for i := 0; i < v.l; i += validatorsLeafChunkSize {
 		from := uint64(i)
-		to := utils.Min64(from+uint64(validatorsLeafChunkSize), uint64(v.l))
+		to := min(from+uint64(validatorsLeafChunkSize), uint64(v.l))
 		offset := (i / validatorsLeafChunkSize) * length.Hash
 
 		if !bytes.Equal(v.treeCacheBuffer[offset:offset+length.Hash], emptyHashBytes) {

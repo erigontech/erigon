@@ -76,6 +76,8 @@ func (a *ApiHandler) GetEthV1BeaconBlock(w http.ResponseWriter, r *http.Request)
 		return nil, err
 	}
 
+	isOptimistic := a.forkchoiceStore.IsRootOptimistic(root)
+
 	blk, err := a.blockReader.ReadBlockByRoot(ctx, tx, root)
 	if err != nil {
 		return nil, err
@@ -91,7 +93,7 @@ func (a *ApiHandler) GetEthV1BeaconBlock(w http.ResponseWriter, r *http.Request)
 	}
 	return newBeaconResponse(blk).
 		WithFinalized(root == canonicalRoot && blk.Block.Slot <= a.forkchoiceStore.FinalizedSlot()).
-		WithVersion(blk.Version()), nil
+		WithVersion(blk.Version()).WithOptimistic(isOptimistic), nil
 }
 
 func (a *ApiHandler) GetEthV1BlindedBlock(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -110,7 +112,7 @@ func (a *ApiHandler) GetEthV1BlindedBlock(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		return nil, err
 	}
-
+	isOptimistic := a.forkchoiceStore.IsRootOptimistic(root)
 	blk, err := a.blockReader.ReadBlockByRoot(ctx, tx, root)
 	if err != nil {
 		return nil, err
@@ -130,7 +132,7 @@ func (a *ApiHandler) GetEthV1BlindedBlock(w http.ResponseWriter, r *http.Request
 	}
 	return newBeaconResponse(blinded).
 		WithFinalized(root == canonicalRoot && blk.Block.Slot <= a.forkchoiceStore.FinalizedSlot()).
-		WithVersion(blk.Version()), nil
+		WithVersion(blk.Version()).WithOptimistic(isOptimistic), nil
 }
 
 func (a *ApiHandler) GetEthV1BeaconBlockAttestations(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -148,6 +150,7 @@ func (a *ApiHandler) GetEthV1BeaconBlockAttestations(w http.ResponseWriter, r *h
 	if err != nil {
 		return nil, err
 	}
+	isOptimistic := a.forkchoiceStore.IsRootOptimistic(root)
 	blk, err := a.blockReader.ReadBlockByRoot(ctx, tx, root)
 	if err != nil {
 		return nil, err
@@ -162,7 +165,7 @@ func (a *ApiHandler) GetEthV1BeaconBlockAttestations(w http.ResponseWriter, r *h
 	}
 	return newBeaconResponse(blk.Block.Body.Attestations).
 		WithFinalized(root == canonicalRoot && blk.Block.Slot <= a.forkchoiceStore.FinalizedSlot()).
-		WithVersion(blk.Version()), nil
+		WithVersion(blk.Version()).WithOptimistic(isOptimistic), nil
 }
 
 func (a *ApiHandler) GetEthV1BeaconBlockRoot(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -180,6 +183,7 @@ func (a *ApiHandler) GetEthV1BeaconBlockRoot(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		return nil, err
 	}
+	isOptimistic := a.forkchoiceStore.IsRootOptimistic(root)
 	// check if the root exist
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
 	if err != nil {
@@ -196,5 +200,5 @@ func (a *ApiHandler) GetEthV1BeaconBlockRoot(w http.ResponseWriter, r *http.Requ
 	}
 	return newBeaconResponse(struct {
 		Root libcommon.Hash `json:"root"`
-	}{Root: root}).WithFinalized(canonicalRoot == root && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
+	}{Root: root}).WithFinalized(canonicalRoot == root && *slot <= a.forkchoiceStore.FinalizedSlot()).WithOptimistic(isOptimistic), nil
 }

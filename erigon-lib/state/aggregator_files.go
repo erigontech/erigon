@@ -26,27 +26,21 @@ import (
 )
 
 type SelectedStaticFilesV3 struct {
-	d           [kv.DomainLen][]*filesItem
-	dHist       [kv.DomainLen][]*filesItem
-	dIdx        [kv.DomainLen][]*filesItem
-	logTopics   []*filesItem
-	tracesTo    []*filesItem
-	tracesFrom  []*filesItem
-	logAddrs    []*filesItem
-	dI          [kv.DomainLen]int
-	logAddrsI   int
-	logTopicsI  int
-	tracesFromI int
-	tracesToI   int
+	d     [kv.DomainLen][]*filesItem
+	dHist [kv.DomainLen][]*filesItem
+	dIdx  [kv.DomainLen][]*filesItem
+	ii    [kv.StandaloneIdxLen][]*filesItem
 }
 
 func (sf SelectedStaticFilesV3) Close() {
-	clist := make([][]*filesItem, 0, kv.DomainLen+4)
+	clist := make([][]*filesItem, 0, uint16(kv.DomainLen)+kv.StandaloneIdxLen)
 	for id := range sf.d {
 		clist = append(clist, sf.d[id], sf.dIdx[id], sf.dHist[id])
 	}
 
-	clist = append(clist, sf.logAddrs, sf.logTopics, sf.tracesFrom, sf.tracesTo)
+	for _, i := range sf.ii {
+		clist = append(clist, i)
+	}
 	for _, group := range clist {
 		for _, item := range group {
 			if item != nil {
@@ -64,32 +58,23 @@ func (sf SelectedStaticFilesV3) Close() {
 func (ac *AggregatorRoTx) staticFilesInRange(r RangesV3) (sf SelectedStaticFilesV3, err error) {
 	for id := range ac.d {
 		if r.d[id].any() {
-			sf.d[id], sf.dIdx[id], sf.dHist[id], sf.dI[id] = ac.d[id].staticFilesInRange(r.d[id])
+			sf.d[id], sf.dIdx[id], sf.dHist[id] = ac.d[id].staticFilesInRange(r.d[id])
 		}
 	}
-	if r.logAddrs {
-		sf.logAddrs, sf.logAddrsI = ac.logAddrs.staticFilesInRange(r.logAddrsStartTxNum, r.logAddrsEndTxNum)
-	}
-	if r.logTopics {
-		sf.logTopics, sf.logTopicsI = ac.logTopics.staticFilesInRange(r.logTopicsStartTxNum, r.logTopicsEndTxNum)
-	}
-	if r.tracesFrom {
-		sf.tracesFrom, sf.tracesFromI = ac.tracesFrom.staticFilesInRange(r.tracesFromStartTxNum, r.tracesFromEndTxNum)
-	}
-	if r.tracesTo {
-		sf.tracesTo, sf.tracesToI = ac.tracesTo.staticFilesInRange(r.tracesToStartTxNum, r.tracesToEndTxNum)
+	for id, rng := range r.ranges {
+		if rng != nil && rng.needMerge {
+			fi := ac.iis[id].staticFilesInRange(rng.from, rng.to)
+			sf.ii[id] = fi
+		}
 	}
 	return sf, err
 }
 
 type MergedFilesV3 struct {
-	d          [kv.DomainLen]*filesItem
-	dHist      [kv.DomainLen]*filesItem
-	dIdx       [kv.DomainLen]*filesItem
-	logAddrs   *filesItem
-	logTopics  *filesItem
-	tracesFrom *filesItem
-	tracesTo   *filesItem
+	d     [kv.DomainLen]*filesItem
+	dHist [kv.DomainLen]*filesItem
+	dIdx  [kv.DomainLen]*filesItem
+	iis   [kv.StandaloneIdxLen]*filesItem
 }
 
 func (mf MergedFilesV3) FrozenList() (frozen []string) {
@@ -107,17 +92,10 @@ func (mf MergedFilesV3) FrozenList() (frozen []string) {
 		}
 	}
 
-	if mf.logAddrs != nil && mf.logAddrs.frozen {
-		frozen = append(frozen, mf.logAddrs.decompressor.FileName())
-	}
-	if mf.logTopics != nil && mf.logTopics.frozen {
-		frozen = append(frozen, mf.logTopics.decompressor.FileName())
-	}
-	if mf.tracesFrom != nil && mf.tracesFrom.frozen {
-		frozen = append(frozen, mf.tracesFrom.decompressor.FileName())
-	}
-	if mf.tracesTo != nil && mf.tracesTo.frozen {
-		frozen = append(frozen, mf.tracesTo.decompressor.FileName())
+	for _, ii := range mf.iis {
+		if ii != nil && ii.frozen {
+			frozen = append(frozen, ii.decompressor.FileName())
+		}
 	}
 	return frozen
 }
@@ -126,7 +104,7 @@ func (mf MergedFilesV3) Close() {
 	for id := range mf.d {
 		clist = append(clist, mf.d[id], mf.dHist[id], mf.dIdx[id])
 	}
-	clist = append(clist, mf.logAddrs, mf.logTopics, mf.tracesFrom, mf.tracesTo)
+	clist = append(clist, mf.iis[:]...)
 
 	for _, item := range clist {
 		if item != nil {

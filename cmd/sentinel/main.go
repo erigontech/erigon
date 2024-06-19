@@ -18,7 +18,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/disk"
 	"github.com/ledgerwatch/erigon-lib/common/mem"
-	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/phase1/core"
 	"github.com/ledgerwatch/erigon/cl/sentinel"
 	"github.com/ledgerwatch/erigon/cl/sentinel/service"
@@ -26,8 +25,9 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinelcli"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinelflags"
 
-	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	sentinelapp "github.com/ledgerwatch/erigon/turbo/app"
 )
@@ -55,7 +55,7 @@ func runSentinelNode(cliCtx *cli.Context) error {
 	go mem.LogMemStats(cliCtx.Context, log.Root())
 	go disk.UpdateDiskStats(cliCtx.Context, log.Root())
 
-	bs, err := core.RetrieveBeaconState(context.Background(), cfg.BeaconCfg, clparams.GetCheckpointSyncEndpoint(cfg.NetworkType))
+	bs, err := core.RetrieveBeaconState(context.Background(), cfg.BeaconCfg, cfg.NetworkType)
 	if err != nil {
 		return err
 	}

@@ -8,7 +8,8 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -32,7 +33,7 @@ type MiningBlock struct {
 	Receipts         types.Receipts
 	Withdrawals      []*types.Withdrawal
 	PreparedTxs      types.TransactionsStream
-	Requests         []*types.Request
+	Requests         types.Requests
 }
 
 type MiningState struct {
@@ -255,7 +256,6 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 		env.uncles.Add(uncle.Hash())
 		return nil
 	}
-
 	// Accumulate the miningUncles for the env block
 	// Prefer to locally generated uncle
 	uncles := make([]*types.Header, 0, 2)

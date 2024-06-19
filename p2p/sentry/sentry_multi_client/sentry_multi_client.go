@@ -12,12 +12,13 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -154,9 +155,7 @@ func SentryReconnectAndPumpStreamLoop[TMessage interface{}](
 		statusData, err := statusDataFactory(ctx)
 
 		if err != nil {
-			if !errors.Is(err, sentry.ErrNoHead) {
-				logger.Error("SentryReconnectAndPumpStreamLoop: statusDataFactory error", "stream", streamName, "err", err)
-			}
+			logger.Error("SentryReconnectAndPumpStreamLoop: statusDataFactory error", "stream", streamName, "err", err)
 			time.Sleep(time.Second)
 			continue
 		}
@@ -583,12 +582,12 @@ func (cs *MultiClient) blockBodies66(ctx context.Context, inreq *proto_sentry.In
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return fmt.Errorf("decode BlockBodiesPacket66: %w", err)
 	}
-	txs, uncles, withdrawals := request.BlockRawBodiesPacket.Unpack()
-	if len(txs) == 0 && len(uncles) == 0 && len(withdrawals) == 0 {
+	txs, uncles, withdrawals, requests := request.BlockRawBodiesPacket.Unpack()
+	if len(txs) == 0 && len(uncles) == 0 && len(withdrawals) == 0 && len(requests) == 0 {
 		// No point processing empty response
 		return nil
 	}
-	cs.Bd.DeliverBodies(txs, uncles, withdrawals, uint64(len(inreq.Data)), sentry.ConvertH512ToPeerID(inreq.PeerId))
+	cs.Bd.DeliverBodies(txs, uncles, withdrawals, requests, uint64(len(inreq.Data)), sentry.ConvertH512ToPeerID(inreq.PeerId))
 	return nil
 }
 

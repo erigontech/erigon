@@ -6,13 +6,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"github.com/ledgerwatch/erigon-lib/log/v3"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon/crypto"
 )
 
@@ -93,7 +93,7 @@ func (test heimdallTest) setupCheckpoints(count int) []*Checkpoint {
 					return nil, nil
 				}
 
-				limit = cmp.Min(10, limit)
+				limit = min(10, limit)
 				l := (page - 1) * limit
 				r := page * limit
 				return expectedCheckpoints[l:r], nil

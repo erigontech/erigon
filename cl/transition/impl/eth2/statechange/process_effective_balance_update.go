@@ -3,7 +3,6 @@ package statechange
 import (
 	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
 // ProcessEffectiveBalanceUpdates updates the effective balance of validators. Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#effective-balances-updates
@@ -24,7 +23,7 @@ func ProcessEffectiveBalanceUpdates(state abstract.BeaconState) error {
 		eb := validator.EffectiveBalance()
 		if balance+downwardThreshold < eb || eb+upwardThreshold < balance {
 			// Set new effective balance
-			effectiveBalance := utils.Min64(balance-(balance%beaconConfig.EffectiveBalanceIncrement), beaconConfig.MaxEffectiveBalance)
+			effectiveBalance := min(balance-(balance%beaconConfig.EffectiveBalanceIncrement), beaconConfig.MaxEffectiveBalance)
 			state.SetEffectiveBalanceForValidatorAtIndex(index, effectiveBalance)
 		}
 		return true

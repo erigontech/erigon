@@ -11,7 +11,8 @@ import (
 
 	"github.com/RoaringBitmap/roaring"
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -22,7 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 )
 
@@ -177,9 +177,9 @@ func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64
 
 		var ll types.Logs
 		reader.Reset(v)
-		if err := cbor.Unmarshal(&ll, reader); err != nil {
-			return fmt.Errorf("receipt unmarshal failed: %w, blocl=%d", err, blockNum)
-		}
+		//if err := cbor.Unmarshal(&ll, reader); err != nil {
+		//	return fmt.Errorf("receipt unmarshal failed: %w, blocl=%d", err, blockNum)
+		//}
 
 		toStore := true
 		// if pruning is enabled, and depositContract isn't configured for the chain, don't index
@@ -320,9 +320,9 @@ func unwindLogIndex(logPrefix string, db kv.RwTx, to uint64, cfg LogIndexCfg, qu
 		}
 		var logs types.Logs
 		reader.Reset(v)
-		if err := cbor.Unmarshal(&logs, reader); err != nil {
-			return fmt.Errorf("receipt unmarshal: %w, block=%d", err, binary.BigEndian.Uint64(k))
-		}
+		//if err := cbor.Unmarshal(&logs, reader); err != nil {
+		//	return fmt.Errorf("receipt unmarshal: %w, block=%d", err, binary.BigEndian.Uint64(k))
+		//}
 
 		for _, l := range logs {
 			for _, topic := range l.Topics {
@@ -486,9 +486,9 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneFrom, prune
 
 			var logs types.Logs
 			reader.Reset(v)
-			if err := cbor.Unmarshal(&logs, reader); err != nil {
-				return fmt.Errorf("receipt unmarshal failed: %w, block=%d", err, binary.BigEndian.Uint64(k))
-			}
+			//if err := cbor.Unmarshal(&logs, reader); err != nil {
+			//	return fmt.Errorf("receipt unmarshal failed: %w, block=%d", err, binary.BigEndian.Uint64(k))
+			//}
 
 			toPrune := true
 			for _, l := range logs {

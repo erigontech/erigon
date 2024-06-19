@@ -11,7 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -128,6 +128,10 @@ func (h test_heimdall) FetchMilestoneCount(ctx context.Context) (int64, error) {
 	return 0, fmt.Errorf("TODO")
 }
 
+func (h test_heimdall) FetchFirstMilestoneNum(ctx context.Context) (int64, error) {
+	return 0, fmt.Errorf("TODO")
+}
+
 func (h test_heimdall) FetchNoAckMilestone(ctx context.Context, milestoneID string) error {
 	return fmt.Errorf("TODO")
 }
@@ -164,11 +168,17 @@ func (r headerReader) Config() *chain.Config {
 	return r.validator.ChainConfig
 }
 
-func (r headerReader) FrozenBlocks() uint64 {
-	return 0
-}
+func (r headerReader) FrozenBlocks() uint64    { return 0 }
+func (r headerReader) FrozenBorBlocks() uint64 { return 0 }
 
 func (r headerReader) CurrentHeader() *types.Header {
+	return nil
+}
+
+func (r headerReader) CurrentFinalizedHeader() *types.Header {
+	return nil
+}
+func (r headerReader) CurrentSafeHeader() *types.Header {
 	return nil
 }
 

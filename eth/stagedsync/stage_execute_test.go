@@ -4,9 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/config3"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon-lib/config3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -60,7 +61,7 @@ func newAgg(t *testing.T, logger log.Logger) *libstate.Aggregator {
 	dirs, ctx := datadir.New(t.TempDir()), context.Background()
 	agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, nil, logger)
 	require.NoError(t, err)
-	err = agg.OpenFolder(false)
+	err = agg.OpenFolder()
 	require.NoError(t, err)
 	return agg
 }

@@ -29,11 +29,12 @@ import (
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/c2h5oh/datasize"
+	"golang.org/x/time/rate"
+
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/time/rate"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 // DefaultPieceSize - Erigon serves many big files, bigger pieces will reduce
@@ -65,7 +66,7 @@ func Default() *torrent.ClientConfig {
 	// better don't increase because erigon periodically producing "new seedable files" - and adding them to downloader.
 	// it must not impact chain tip sync - so, limit resources to minimum by default.
 	// but when downloader is started as a separated process - rise it to max
-	//torrentConfig.PieceHashersPerTorrent = cmp.Max(1, runtime.NumCPU()-1)
+	//torrentConfig.PieceHashersPerTorrent = max(1, runtime.NumCPU()-1)
 
 	torrentConfig.MinDialTimeout = 6 * time.Second    //default: 3s
 	torrentConfig.HandshakesTimeout = 8 * time.Second //default: 4s

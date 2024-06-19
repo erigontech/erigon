@@ -9,9 +9,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon/eth/ethutils"
 )
 
 type txNumsIterFactory func(tx kv.TemporalTx, addr common.Address, fromTxNum int) (*rawdbv3.MapTxNum2BlockNumIter, error)
@@ -102,7 +103,7 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 			receipt.Status = types.ReceiptStatusSuccessful
 		}
 
-		mReceipt := marshalReceipt(receipt, txn, chainConfig, header, txn.Hash(), true)
+		mReceipt := ethutils.MarshalReceipt(receipt, txn, chainConfig, header, txn.Hash(), true)
 		mReceipt["timestamp"] = header.Time
 		receipts = append(receipts, mReceipt)
 

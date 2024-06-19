@@ -12,6 +12,7 @@ const (
 	InterrogationErrorKeygen
 	InterrogationErrorFindNode
 	InterrogationErrorFindNodeTimeout
+	InterrogationErrorCtxCancelled
 )
 
 type InterrogationError struct {

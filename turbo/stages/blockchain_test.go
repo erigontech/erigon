@@ -27,7 +27,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/config3"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
@@ -821,9 +821,14 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 			require.Greater(found, uint64(0))
 		}
 	} else {
-		receiptsAvailable, err := rawdb.ReceiptsAvailableFrom(tx)
-		require.NoError(err)
-		require.Equal(uint64(0), receiptsAvailable)
+		if m.HistoryV3 {
+			// receipts are not stored in erigon3
+		} else {
+			receiptsAvailable, err := rawdb.ReceiptsAvailableFrom(tx)
+			require.NoError(err)
+			require.Equal(uint64(0), receiptsAvailable)
+		}
+
 	}
 
 	if m.HistoryV3 {

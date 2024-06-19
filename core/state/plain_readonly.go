@@ -18,7 +18,6 @@ package state
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 	"sort"
 
@@ -27,10 +26,7 @@ import (
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
-
 	"github.com/ledgerwatch/erigon/core/state/historyv2read"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
@@ -93,82 +89,6 @@ func (s *PlainState) SetBlockNr(blockNr uint64) {
 
 func (s *PlainState) GetBlockNr() uint64 {
 	return s.blockNr
-}
-
-func (s *PlainState) ForEachStorage(addr libcommon.Address, startLocation libcommon.Hash, cb func(key, seckey libcommon.Hash, value uint256.Int) bool, maxResults int) error {
-	st := btree.New(16)
-	var k [length.Addr + length.Incarnation + length.Hash]byte
-	copy(k[:], addr[:])
-	accData, _, err := historyv2read.GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, addr[:], s.blockNr)
-	if err != nil {
-		return err
-	}
-
-	var acc accounts.Account
-	if err := acc.DecodeForStorage(accData); err != nil {
-		log.Error("Error decoding account", "err", err)
-		return err
-	}
-	binary.BigEndian.PutUint64(k[length.Addr:], acc.Incarnation)
-	copy(k[length.Addr+length.Incarnation:], startLocation[:])
-	var lastKey libcommon.Hash
-	overrideCounter := 0
-	min := &storageItem{key: startLocation}
-	if t, ok := s.storage[addr]; ok {
-		t.AscendGreaterOrEqual(min, func(i btree.Item) bool {
-			item := i.(*storageItem)
-			st.ReplaceOrInsert(item)
-			if !item.value.IsZero() {
-				copy(lastKey[:], item.key[:])
-				// Only count non-zero items
-				overrideCounter++
-			}
-			return overrideCounter < maxResults
-		})
-	}
-	numDeletes := st.Len() - overrideCounter
-	if err := WalkAsOfStorage(s.tx, addr, acc.Incarnation, startLocation, s.blockNr, func(kAddr, kLoc, vs []byte) (bool, error) {
-		if !bytes.Equal(kAddr, addr[:]) {
-			return false, nil
-		}
-		if len(vs) == 0 {
-			// Skip deleted entries
-			return true, nil
-		}
-		keyHash, err1 := libcommon.HashData(kLoc)
-		if err1 != nil {
-			return false, err1
-		}
-		//fmt.Printf("seckey: %x\n", seckey)
-		si := storageItem{}
-		copy(si.key[:], kLoc)
-		copy(si.seckey[:], keyHash[:])
-		if st.Has(&si) {
-			return true, nil
-		}
-		si.value.SetBytes(vs)
-		st.ReplaceOrInsert(&si)
-		if bytes.Compare(kLoc, lastKey[:]) > 0 {
-			// Beyond overrides
-			return st.Len() < maxResults+numDeletes, nil
-		}
-		return st.Len() < maxResults+overrideCounter+numDeletes, nil
-	}); err != nil {
-		log.Error("ForEachStorage walk error", "err", err)
-		return err
-	}
-	results := 0
-	var innerErr error
-	st.AscendGreaterOrEqual(min, func(i btree.Item) bool {
-		item := i.(*storageItem)
-		if !item.value.IsZero() {
-			// Skip if value == 0
-			cb(item.key, item.seckey, item.value)
-			results++
-		}
-		return results < maxResults
-	})
-	return innerErr
 }
 
 func (s *PlainState) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {

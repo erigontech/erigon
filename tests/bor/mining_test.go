@@ -11,9 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/config3"
+
+	"github.com/holiman/uint256"
+
+	"github.com/ledgerwatch/erigon-lib/chain/networkname"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/fdlimit"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -22,7 +25,6 @@ import (
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/tests/bor/helper"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 

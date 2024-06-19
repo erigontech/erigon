@@ -46,4 +46,7 @@ var (
 
 	// ErrUnexpectedWithdrawals is returned if a pre-Shanghai block has withdrawals.
 	ErrUnexpectedWithdrawals = errors.New("unexpected withdrawals")
+
+	// ErrUnexpectedRequests is returned if a pre-Prague block has EIP-7685 requests.
+	ErrUnexpectedRequests = errors.New("unexpected requests")
 )

@@ -144,9 +144,15 @@ func (e *EthereumExecutionModule) GetBodiesByHashes(ctx context.Context, req *ex
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByHashes: MarshalTransactionsBinary error %w", err)
 		}
+
+		reqs, err := types.MarshalRequestsBinary(body.Requests)
+		if err != nil {
+			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByHashes: MarshalRequestsBinary error %w", err)
+		}
 		bodies = append(bodies, &execution.BlockBody{
 			Transactions: txs,
 			Withdrawals:  eth1_utils.ConvertWithdrawalsToRpc(body.Withdrawals),
+			Requests:     reqs,
 		})
 	}
 
@@ -186,9 +192,15 @@ func (e *EthereumExecutionModule) GetBodiesByRange(ctx context.Context, req *exe
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByRange: MarshalTransactionsBinary error %w", err)
 		}
+
+		reqs, err := types.MarshalRequestsBinary(body.Requests)
+		if err != nil {
+			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByHashes: MarshalRequestsBinary error %w", err)
+		}
 		bodies = append(bodies, &execution.BlockBody{
 			Transactions: txs,
 			Withdrawals:  eth1_utils.ConvertWithdrawalsToRpc(body.Withdrawals),
+			Requests:     reqs,
 		})
 	}
 	// Remove trailing nil values as per spec

@@ -38,7 +38,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -102,6 +102,7 @@ type btHeader struct {
 	BlobGasUsed           *uint64
 	ExcessBlobGas         *uint64
 	ParentBeaconBlockRoot *libcommon.Hash
+	RequestsRoot          *libcommon.Hash
 }
 
 type btHeaderMarshaling struct {
@@ -304,6 +305,9 @@ func validateHeader(h *btHeader, h2 *types.Header) error {
 	}
 	if !reflect.DeepEqual(h.ParentBeaconBlockRoot, h2.ParentBeaconBlockRoot) {
 		return fmt.Errorf("parentBeaconBlockRoot: want: %v have: %v", h.ParentBeaconBlockRoot, h2.ParentBeaconBlockRoot)
+	}
+	if !reflect.DeepEqual(h.RequestsRoot, h2.RequestsRoot) {
+		return fmt.Errorf("requestsRoot: want: %v have: %v", h.RequestsRoot, h2.RequestsRoot)
 	}
 	return nil
 }

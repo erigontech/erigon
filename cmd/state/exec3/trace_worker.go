@@ -69,7 +69,7 @@ func NewTraceWorker(tx kv.TemporalTx, cc *chain.Config, engine consensus.EngineR
 
 func (e *TraceWorker) ChangeBlock(header *types.Header) {
 	e.blockNum = header.Number.Uint64()
-	blockCtx := transactions.NewEVMBlockContext(e.engine, header, true /* requireCanonical */, e.tx, e.headerReader)
+	blockCtx := transactions.NewEVMBlockContext(e.engine, header, true /* requireCanonical */, e.tx, e.headerReader, e.evm.ChainConfig())
 	e.blockCtx = &blockCtx
 	e.blockHash = header.Hash()
 	e.header = header

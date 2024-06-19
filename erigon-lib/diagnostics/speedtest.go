@@ -9,22 +9,11 @@ import (
 )
 
 func (d *DiagnosticClient) setupSpeedtestDiagnostics(rootCtx context.Context) {
-	ticker := time.NewTicker(30 * time.Minute)
 	go func() {
-		d.networkSpeedMutex.Lock()
-		d.networkSpeed = d.runSpeedTest(rootCtx)
-		d.networkSpeedMutex.Unlock()
-
-		for {
-			select {
-			case <-ticker.C:
-				d.networkSpeedMutex.Lock()
-				d.networkSpeed = d.runSpeedTest(rootCtx)
-				d.networkSpeedMutex.Unlock()
-			case <-rootCtx.Done():
-				ticker.Stop()
-				return
-			}
+		if d.speedTest {
+			d.networkSpeedMutex.Lock()
+			d.networkSpeed = d.runSpeedTest(rootCtx)
+			d.networkSpeedMutex.Unlock()
 		}
 	}()
 }
@@ -66,6 +55,7 @@ func (d *DiagnosticClient) runSpeedTest(rootCtx context.Context) NetworkSpeedTes
 		}
 
 		ctx, cancel := context.WithTimeout(rootCtx, time.Second*15)
+
 		defer cancel()
 		_ = analyzer.RunWithContext(ctx, s.Host, func(pl *transport.PLoss) {
 			packetLoss = pl.Loss()
