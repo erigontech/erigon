@@ -19,9 +19,8 @@ package patricia
 import (
 	"fmt"
 	"math/bits"
+	"slices"
 	"strings"
-
-	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/seg/sais"
@@ -241,7 +240,7 @@ func (s *pathWalker) diverge(divergence uint32) {
 			s.head = 0
 			s.tail = 0
 			d32 <<= 27 - headLen
-			dLen -= (27 - headLen)
+			dLen -= 27 - headLen
 			headLen = 0
 		}
 		//fmt.Printf("headLen %d + dLen %d = %d\n", headLen, dLen, headLen+dLen)

@@ -5,8 +5,9 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -44,14 +45,27 @@ func runErigon(cliCtx *cli.Context) error {
 	var logger log.Logger
 	var err error
 	var metricsMux *http.ServeMux
+	var pprofMux *http.ServeMux
 
-	if logger, metricsMux, err = debug.Setup(cliCtx, true /* root logger */); err != nil {
+	if logger, metricsMux, pprofMux, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
 
 	// initializing the node and providing the current git commit there
 
 	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
+	if params.VersionMajor == 3 {
+		logger.Info(`
+	########b          oo                               d####b. 
+	##                                                      '## 
+	##aaaa    ##d###b. dP .d####b. .d####b. ##d###b.     aaad#' 
+	##        ##'  '## ## ##'  '## ##'  '## ##'  '##        '## 
+	##        ##       ## ##.  .## ##.  .## ##    ##        .## 
+	########P dP       dP '####P## '#####P' dP    dP    d#####P 
+	                           .##                              
+	                       d####P                               
+		`)
+	}
 	erigonInfoGauge := metrics.GetOrCreateGauge(fmt.Sprintf(`erigon_info{version="%s",commit="%s"}`, params.Version, params.GitCommit))
 	erigonInfoGauge.Set(1)
 
@@ -68,9 +82,7 @@ func runErigon(cliCtx *cli.Context) error {
 		return err
 	}
 
-	if metricsMux != nil {
-		diagnostics.Setup(cliCtx, metricsMux, ethNode)
-	}
+	diagnostics.Setup(cliCtx, ethNode, metricsMux, pprofMux)
 
 	err = ethNode.Serve()
 	if err != nil {

@@ -6,12 +6,12 @@ import (
 	"io/fs"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/spectest"
-
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
+	"github.com/ledgerwatch/erigon/spectest"
+
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"

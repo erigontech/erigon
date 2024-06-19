@@ -26,11 +26,12 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
+	"golang.org/x/crypto/sha3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -117,6 +118,9 @@ func (ethash *Ethash) VerifyHeader(chain consensus.ChainHeaderReader, header *ty
 	// Short circuit if the header is known, or its parent not
 	number := header.Number.Uint64()
 	if chain.GetHeader(header.Hash(), number) != nil {
+		return nil
+	}
+	if number == 0 {
 		return nil
 	}
 	parent := chain.GetHeader(header.ParentHash, number-1)
@@ -247,6 +251,10 @@ func VerifyHeaderBasics(chain consensus.ChainHeaderReader, header, parent *types
 
 	if header.WithdrawalsHash != nil {
 		return consensus.ErrUnexpectedWithdrawals
+	}
+
+	if header.RequestsRoot != nil {
+		return consensus.ErrUnexpectedRequests
 	}
 
 	// If all checks passed, validate any special fields for hard forks
@@ -559,28 +567,28 @@ func (ethash *Ethash) Initialize(config *chain.Config, chain consensus.ChainHead
 // Finalize implements consensus.Engine, accumulating the block and uncle rewards,
 // setting the final state on the header
 func (ethash *Ethash) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
+	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests,
 	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
-) (types.Transactions, types.Receipts, error) {
+) (types.Transactions, types.Receipts, types.Requests, error) {
 	// Accumulate any block and uncle rewards and commit the final state root
 	accumulateRewards(config, state, header, uncles)
-	return txs, r, nil
+	return txs, r, nil, nil
 }
 
 // FinalizeAndAssemble implements consensus.Engine, accumulating the block and
 // uncle rewards, setting the final state and assembling the block.
 func (ethash *Ethash) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
+	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests,
 	chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
 ) (*types.Block, types.Transactions, types.Receipts, error) {
 
 	// Finalize block
-	outTxs, outR, err := ethash.Finalize(chainConfig, header, state, txs, uncles, r, withdrawals, chain, syscall, logger)
+	outTxs, outR, _, err := ethash.Finalize(chainConfig, header, state, txs, uncles, r, withdrawals, requests, chain, syscall, logger)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	// Header seems complete, assemble into a block and return
-	return types.NewBlock(header, outTxs, uncles, outR, withdrawals), outTxs, outR, nil
+	return types.NewBlock(header, outTxs, uncles, outR, withdrawals, requests), outTxs, outR, nil
 }
 
 // SealHash returns the hash of a block prior to it being sealed.

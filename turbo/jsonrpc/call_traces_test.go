@@ -2,16 +2,18 @@ package jsonrpc
 
 import (
 	"context"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"sync"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fastjson"
+
+	"github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/ledgerwatch/erigon/core"

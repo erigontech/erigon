@@ -6,10 +6,17 @@ import (
 	"crypto/ecdsa"
 	"testing"
 
+	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/protocol"
+	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cl/sentinel/handshake"
@@ -17,11 +24,6 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/libp2p/go-libp2p"
-	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-libp2p/core/protocol"
-	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -68,7 +70,7 @@ func TestPing(t *testing.T) {
 	peersPool := peers.NewPool()
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := forkchoice.NewForkChoiceStorageMock(t)
+	f := mock_services.NewForkChoiceStorageMock(t)
 	ethClock := getEthClock(t)
 
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
@@ -123,7 +125,7 @@ func TestGoodbye(t *testing.T) {
 	peersPool := peers.NewPool()
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := forkchoice.NewForkChoiceStorageMock(t)
+	f := mock_services.NewForkChoiceStorageMock(t)
 	ethClock := getEthClock(t)
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
@@ -183,7 +185,7 @@ func TestMetadataV2(t *testing.T) {
 	peersPool := peers.NewPool()
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := forkchoice.NewForkChoiceStorageMock(t)
+	f := mock_services.NewForkChoiceStorageMock(t)
 	ethClock := getEthClock(t)
 	nc := clparams.NetworkConfigs[clparams.MainnetNetwork]
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
@@ -241,7 +243,7 @@ func TestMetadataV1(t *testing.T) {
 	peersPool := peers.NewPool()
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := forkchoice.NewForkChoiceStorageMock(t)
+	f := mock_services.NewForkChoiceStorageMock(t)
 
 	nc := clparams.NetworkConfigs[clparams.MainnetNetwork]
 	ethClock := getEthClock(t)
@@ -299,7 +301,7 @@ func TestStatus(t *testing.T) {
 	peersPool := peers.NewPool()
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := forkchoice.NewForkChoiceStorageMock(t)
+	f := mock_services.NewForkChoiceStorageMock(t)
 
 	hs := handshake.New(ctx, getEthClock(t), &clparams.MainnetBeaconConfig, nil)
 	s := &cltypes.Status{

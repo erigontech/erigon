@@ -17,6 +17,7 @@
 package common
 
 import (
+	"bytes"
 	"fmt"
 )
 
@@ -53,6 +54,14 @@ func Copy(b []byte) []byte {
 	return c
 }
 
+func Append(data ...[]byte) []byte {
+	s := new(bytes.Buffer)
+	for _, d := range data {
+		s.Write(d)
+	}
+	return s.Bytes()
+}
+
 func EnsureEnoughSize(in []byte, size int) []byte {
 	if cap(in) < size {
 		newBuf := make([]byte, size)
@@ -64,4 +73,10 @@ func EnsureEnoughSize(in []byte, size int) []byte {
 
 func BitLenToByteLen(bitLen int) (byteLen int) {
 	return (bitLen + 7) / 8
+}
+func Shorten(k []byte, l int) []byte {
+	if len(k) > l {
+		return k[:l]
+	}
+	return k
 }

@@ -1,6 +1,7 @@
 package subnets
 
 import (
+	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 )
@@ -64,7 +65,7 @@ func ComputeSubnetForAttestation(committeePerSlot, slot, committeeIndex, slotsPe
 	return (committeesSinceEpochStart + committeeIndex) % attSubnetCount
 }
 
-func ComputeCommitteeCountPerSlot(s state.BeaconStateReader, slot uint64, slotsPerEpoch uint64) uint64 {
+func ComputeCommitteeCountPerSlot(s abstract.BeaconStateReader, slot uint64, slotsPerEpoch uint64) uint64 {
 	epoch := slot / slotsPerEpoch
 	return s.CommitteeCount(epoch)
 }

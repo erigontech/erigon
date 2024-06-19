@@ -6,9 +6,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 
 	"github.com/Giulio2002/bls"
+
+	"github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -19,10 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/ledgerwatch/erigon/cl/validator/sync_contribution_pool"
-	"golang.org/x/exp/slices"
-
-	"github.com/ledgerwatch/erigon-lib/common"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 type seenSyncCommitteeContribution struct {
@@ -101,7 +101,7 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 		return fmt.Errorf("contribution has no participants")
 	}
 
-	modulo := utils.Max64(1, s.beaconCfg.SyncCommitteeSize/s.beaconCfg.SyncCommitteeSubnetCount/s.beaconCfg.TargetAggregatorsPerSyncSubcommittee)
+	modulo := max(1, s.beaconCfg.SyncCommitteeSize/s.beaconCfg.SyncCommitteeSubnetCount/s.beaconCfg.TargetAggregatorsPerSyncSubcommittee)
 	hashSignature := utils.Sha256(selectionProof[:])
 	if !s.test && binary.LittleEndian.Uint64(hashSignature[:8])%modulo != 0 {
 		return fmt.Errorf("selects the validator as an aggregator")

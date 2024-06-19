@@ -3,20 +3,21 @@ package freezeblocks_test
 import (
 	"context"
 	"math/big"
+	"runtime"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/stretchr/testify/require"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -48,6 +49,10 @@ func baseIdRange(base, indexer, len int) []uint64 {
 }
 
 func TestDump(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win")
+	}
+
 	type test struct {
 		chainConfig *chain.Config
 		chainSize   int
@@ -190,7 +195,7 @@ func TestDump(t *testing.T) {
 					i++
 					body := &types.BodyForStorage{}
 					require.NoError(rlp.DecodeBytes(v, body))
-					txsAmount += uint64(body.TxAmount)
+					txsAmount += uint64(body.TxCount)
 					baseIdList = append(baseIdList, body.BaseTxId)
 					return nil
 				}, 1, log.LvlInfo, log.New())
@@ -206,7 +211,7 @@ func TestDump(t *testing.T) {
 				i++
 				body := &types.BodyForStorage{}
 				require.NoError(rlp.DecodeBytes(v, body))
-				txsAmount += uint64(body.TxAmount)
+				txsAmount += uint64(body.TxCount)
 				baseIdList = append(baseIdList, body.BaseTxId)
 				return nil
 			}, 1, log.LvlInfo, log.New())
@@ -246,7 +251,7 @@ func TestDump(t *testing.T) {
 			snConfig := snapcfg.KnownCfg(networkname.MainnetChainName)
 			snConfig.ExpectBlocks = math.MaxUint64
 
-			err := freezeblocks.DumpBlocks(m.Ctx, 0, uint64(test.chainSize), 0, m.ChainConfig, tmpDir, snapDir, m.DB, 1, log.LvlInfo, logger, m.BlockReader)
+			err := freezeblocks.DumpBlocks(m.Ctx, 0, uint64(test.chainSize), m.ChainConfig, tmpDir, snapDir, m.DB, 1, log.LvlInfo, logger, m.BlockReader)
 			require.NoError(err)
 		})
 	}

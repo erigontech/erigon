@@ -7,9 +7,14 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"google.golang.org/grpc"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
+	sentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/gossip"
@@ -17,12 +22,8 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/network/services"
 	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/ledgerwatch/erigon/cl/validator/committee_subscription"
-	"google.golang.org/grpc"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 // Gossip manager is sending all messages to fork choice or others

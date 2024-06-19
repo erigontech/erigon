@@ -12,9 +12,10 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -23,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/snapshots/flags"
 	"github.com/ledgerwatch/erigon/cmd/snapshots/sync"
 	"github.com/ledgerwatch/erigon/cmd/utils"
+	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
@@ -259,13 +261,13 @@ func cmp(cliCtx *cli.Context) error {
 		})
 	} else {
 		for _, snapType := range snapTypes {
-			if snapType.Enum() == snaptype.Enums.Headers {
+			if snapType.Enum() == coresnaptype.Enums.Headers {
 				funcs = append(funcs, func(ctx context.Context) (time.Duration, time.Duration, time.Duration, error) {
 					return c.compareHeaders(ctx, h1ents, h2ents, headerWorkers, logger)
 				})
 			}
 
-			if snapType.Enum() == snaptype.Enums.Bodies {
+			if snapType.Enum() == coresnaptype.Enums.Bodies {
 				funcs = append(funcs, func(ctx context.Context) (time.Duration, time.Duration, time.Duration, error) {
 					return c.compareBodies(ctx, b1ents, b2ents, bodyWorkers, logger)
 				})
@@ -324,11 +326,11 @@ func splitEntries(files []fs.DirEntry, version snaptype.Version, firstBlock, las
 					(firstBlock == 0 || snapInfo.From() >= firstBlock) &&
 					(lastBlock == 0 || snapInfo.From() < lastBlock) {
 
-					if snapInfo.Type().Enum() == snaptype.Enums.Headers {
+					if snapInfo.Type().Enum() == coresnaptype.Enums.Headers {
 						hents = append(hents, ent)
 					}
 
-					if snapInfo.Type().Enum() == snaptype.Enums.Bodies {
+					if snapInfo.Type().Enum() == coresnaptype.Enums.Bodies {
 						found := false
 
 						for _, bent := range bents {
@@ -344,7 +346,7 @@ func splitEntries(files []fs.DirEntry, version snaptype.Version, firstBlock, las
 						}
 					}
 
-					if snapInfo.Type().Enum() == snaptype.Enums.Transactions {
+					if snapInfo.Type().Enum() == coresnaptype.Enums.Transactions {
 						found := false
 
 						for _, bent := range bents {
@@ -460,7 +462,7 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 
 				f1snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
 					Enabled:      true,
-					Produce:      false,
+					ProduceE2:    false,
 					NoDownloader: true,
 				}, info1.Dir(), info1.From, logger)
 
@@ -470,7 +472,7 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 
 				f2snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
 					Enabled:      true,
-					Produce:      false,
+					ProduceE2:    false,
 					NoDownloader: true,
 				}, info2.Dir(), info2.From, logger)
 
@@ -614,8 +616,8 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 					}()
 
 					logger.Info(fmt.Sprintf("Indexing %s", ent1.Body.Name()))
-					salt := freezeblocks.GetIndicesSalt(info.Dir())
-					return freezeblocks.BodiesIdx(ctx, info, salt, c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
+
+					return coresnaptype.Bodies.BuildIndexes(ctx, info, c.chainConfig(), c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
 				})
 
 				g.Go(func() error {
@@ -653,8 +655,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 					}()
 
 					logger.Info(fmt.Sprintf("Indexing %s", ent1.Transactions.Name()))
-					salt := freezeblocks.GetIndicesSalt(info.Dir())
-					return freezeblocks.TransactionsIdx(ctx, c.chainConfig(), info, salt, c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
+					return coresnaptype.Transactions.BuildIndexes(ctx, info, c.chainConfig(), c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
 				})
 
 				b2err := make(chan error, 1)
@@ -690,8 +691,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 					}()
 
 					logger.Info(fmt.Sprintf("Indexing %s", ent2.Body.Name()))
-					salt := freezeblocks.GetIndicesSalt(info.Dir())
-					return freezeblocks.BodiesIdx(ctx, info, salt, c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
+					return coresnaptype.Bodies.BuildIndexes(ctx, info, c.chainConfig(), c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
 				})
 
 				g.Go(func() error {
@@ -732,8 +732,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 					}()
 
 					logger.Info(fmt.Sprintf("Indexing %s", ent2.Transactions.Name()))
-					salt := freezeblocks.GetIndicesSalt(info.Dir())
-					return freezeblocks.TransactionsIdx(ctx, c.chainConfig(), info, salt, c.session2.LocalFsRoot(), nil, log.LvlDebug, logger)
+					return coresnaptype.Transactions.BuildIndexes(ctx, info, c.chainConfig(), c.session2.LocalFsRoot(), nil, log.LvlDebug, logger)
 				})
 
 				if err := g.Wait(); err != nil {
@@ -744,7 +743,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 
 				f1snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
 					Enabled:      true,
-					Produce:      false,
+					ProduceE2:    false,
 					NoDownloader: true,
 				}, info1.Dir(), info1.From, logger)
 
@@ -754,7 +753,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 
 				f2snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
 					Enabled:      true,
-					Produce:      false,
+					ProduceE2:    false,
 					NoDownloader: true,
 				}, info2.Dir(), info2.From, logger)
 

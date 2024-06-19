@@ -5,7 +5,7 @@ import (
 	"encoding/hex"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	erigonlibtypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	erigonlibtypes "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
 )
 
 func PeerIdFromH512(h512 *erigonlibtypes.H512) *PeerId {

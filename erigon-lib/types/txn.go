@@ -36,7 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/ledgerwatch/erigon-lib/crypto"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	types "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
 	"github.com/ledgerwatch/erigon-lib/rlp"
 )
 
@@ -1005,8 +1005,105 @@ func UnwrapTxPlayloadRlp(blobTxRlp []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	blobTxRlp = blobTxRlp[dataposPrev-1 : datapos+datalen] // Seek left an extra-bit
+	blobTxRlp = blobTxRlp[dataposPrev-1 : datapos+datalen] // seekInFiles left an extra-bit
 	blobTxRlp[0] = 0x3
 	// Include the prefix part of the rlp
 	return blobTxRlp, nil
+}
+
+func DecodeAccountBytesV3(enc []byte) (nonce uint64, balance *uint256.Int, hash []byte) {
+	if len(enc) == 0 {
+		return
+	}
+	pos := 0
+	nonceBytes := int(enc[pos])
+	balance = &uint256.Int{}
+	pos++
+	if nonceBytes > 0 {
+		nonce = bytesToUint64(enc[pos : pos+nonceBytes])
+		pos += nonceBytes
+	}
+	balanceBytes := int(enc[pos])
+	pos++
+	if balanceBytes > 0 {
+		balance.SetBytes(enc[pos : pos+balanceBytes])
+		pos += balanceBytes
+	}
+	codeHashBytes := int(enc[pos])
+	pos++
+	if codeHashBytes == length.Hash {
+		hash = make([]byte, codeHashBytes)
+		copy(hash, enc[pos:pos+codeHashBytes])
+		pos += codeHashBytes
+	}
+	if pos >= len(enc) {
+		panic(fmt.Errorf("deserialse2: %d >= %d ", pos, len(enc)))
+	}
+	return
+}
+
+func EncodeAccountBytesV3(nonce uint64, balance *uint256.Int, hash []byte, incarnation uint64) []byte {
+	l := int(1)
+	if nonce > 0 {
+		l += common.BitLenToByteLen(bits.Len64(nonce))
+	}
+	l++
+	if !balance.IsZero() {
+		l += balance.ByteLen()
+	}
+	l++
+	if len(hash) == length.Hash {
+		l += 32
+	}
+	l++
+	if incarnation > 0 {
+		l += common.BitLenToByteLen(bits.Len64(incarnation))
+	}
+	value := make([]byte, l)
+	pos := 0
+
+	if nonce == 0 {
+		value[pos] = 0
+		pos++
+	} else {
+		nonceBytes := common.BitLenToByteLen(bits.Len64(nonce))
+		value[pos] = byte(nonceBytes)
+		var nonce = nonce
+		for i := nonceBytes; i > 0; i-- {
+			value[pos+i] = byte(nonce)
+			nonce >>= 8
+		}
+		pos += nonceBytes + 1
+	}
+	if balance.IsZero() {
+		value[pos] = 0
+		pos++
+	} else {
+		balanceBytes := balance.ByteLen()
+		value[pos] = byte(balanceBytes)
+		pos++
+		balance.WriteToSlice(value[pos : pos+balanceBytes])
+		pos += balanceBytes
+	}
+	if len(hash) == 0 {
+		value[pos] = 0
+		pos++
+	} else {
+		value[pos] = 32
+		pos++
+		copy(value[pos:pos+32], hash)
+		pos += 32
+	}
+	if incarnation == 0 {
+		value[pos] = 0
+	} else {
+		incBytes := common.BitLenToByteLen(bits.Len64(incarnation))
+		value[pos] = byte(incBytes)
+		var inc = incarnation
+		for i := incBytes; i > 0; i-- {
+			value[pos+i] = byte(inc)
+			inc >>= 8
+		}
+	}
+	return value
 }

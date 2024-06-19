@@ -12,14 +12,15 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
+	"golang.org/x/exp/maps"
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
+
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	mdbx2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/maps"
-	"golang.org/x/sync/errgroup"
-	"golang.org/x/sync/semaphore"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize, logger log.Logger) (kv.RoDB, kv.RwDB) {
@@ -41,7 +42,7 @@ func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize,
 		Label(label).
 		PageSize(targetPageSize.Bytes()).
 		MapSize(datasize.ByteSize(info.Geo.Upper)).
-		GrowthStep(8 * datasize.GB).
+		GrowthStep(4 * datasize.GB).
 		Flags(func(flags uint) uint { return flags | mdbx.WriteMap }).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TablesCfgByLabel(label) }).
 		MustOpen()
@@ -161,7 +162,7 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 	return nil
 }
 
-const ReadAheadThreads = 1024
+const ReadAheadThreads = 2048
 
 func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, readAheadThreads int) {
 	var ThreadsLimit = readAheadThreads
@@ -191,6 +192,8 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, re
 					if err != nil {
 						return err
 					}
+					defer it.Close()
+					kNum := 0
 					for it.HasNext() {
 						k, v, err := it.Next()
 						if err != nil {
@@ -203,11 +206,15 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, re
 							_, _ = v[0], v[len(v)-1]
 						}
 						progress.Add(1)
+					}
+
+					kNum++
+					if kNum%1024 == 0 { // a bit reduce runtime cost
 						select {
 						case <-ctx.Done():
 							return ctx.Err()
 						case <-logEvery.C:
-							log.Log(lvl, fmt.Sprintf("Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
+							log.Log(lvl, fmt.Sprintf("[warmup] Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
 						default:
 						}
 					}
@@ -226,6 +233,8 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, re
 				if err != nil {
 					return err
 				}
+				defer it.Close()
+				kNum := 0
 				for it.HasNext() {
 					k, v, err := it.Next()
 					if err != nil {
@@ -237,14 +246,19 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, re
 					if len(v) > 0 {
 						_, _ = v[0], v[len(v)-1]
 					}
-					select {
-					case <-ctx.Done():
-						return ctx.Err()
-					case <-logEvery.C:
-						log.Log(lvl, fmt.Sprintf("Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
-					default:
+
+					kNum++
+					if kNum%1024 == 0 {
+						select {
+						case <-ctx.Done():
+							return ctx.Err()
+						case <-logEvery.C:
+							log.Log(lvl, fmt.Sprintf("[warmup] Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
+						default:
+						}
 					}
 				}
+
 				return nil
 			})
 		})

@@ -1,20 +1,18 @@
 package jsonrpc
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"sort"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon/turbo/services"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -103,7 +101,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	firstHeaderTime := firstHeader.Time
 
 	if currentHeaderTime <= uintTimestamp {
-		blockResponse, err := buildBlockResponse(api._blockReader, tx, highestNumber, fullTx)
+		blockResponse, err := buildBlockResponse(ctx, api._blockReader, tx, highestNumber, fullTx)
 		if err != nil {
 			return nil, err
 		}
@@ -112,7 +110,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	}
 
 	if firstHeaderTime >= uintTimestamp {
-		blockResponse, err := buildBlockResponse(api._blockReader, tx, 0, fullTx)
+		blockResponse, err := buildBlockResponse(ctx, api._blockReader, tx, 0, fullTx)
 		if err != nil {
 			return nil, err
 		}
@@ -156,7 +154,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 		resultingHeader = beforeHeader
 	}
 
-	response, err := buildBlockResponse(api._blockReader, tx, uint64(blockNum), fullTx)
+	response, err := buildBlockResponse(ctx, api._blockReader, tx, uint64(blockNum), fullTx)
 	if err != nil {
 		return nil, err
 	}
@@ -164,8 +162,8 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	return response, nil
 }
 
-func buildBlockResponse(br services.FullBlockReader, db kv.Tx, blockNum uint64, fullTx bool) (map[string]interface{}, error) {
-	header, err := br.HeaderByNumber(context.Background(), db, blockNum)
+func buildBlockResponse(ctx context.Context, br services.FullBlockReader, db kv.Tx, blockNum uint64, fullTx bool) (map[string]interface{}, error) {
+	header, err := br.HeaderByNumber(ctx, db, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +171,7 @@ func buildBlockResponse(br services.FullBlockReader, db kv.Tx, blockNum uint64, 
 		return nil, nil
 	}
 
-	block, _, err := br.BlockWithSenders(context.Background(), db, header.Hash(), blockNum)
+	block, _, err := br.BlockWithSenders(ctx, db, header.Hash(), blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -209,7 +207,7 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 	defer tx.Rollback()
 
 	balancesMapping := make(map[common.Address]*hexutil.Big)
-	latestState, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), "")
+	latestState, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, "")
 	if err != nil {
 		return nil, err
 	}
@@ -219,69 +217,27 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 		return nil, err
 	}
 
-	if api.historyV3(tx) {
-		minTxNum, _ := rawdbv3.TxNums.Min(tx, blockNumber)
-		it, err := tx.(kv.TemporalTx).HistoryRange(kv.AccountsHistory, int(minTxNum), -1, order.Asc, -1)
-		if err != nil {
-			return nil, err
-		}
-		for it.HasNext() {
-			addressBytes, v, err := it.Next()
-			if err != nil {
-				return nil, err
-			}
-
-			var oldAcc accounts.Account
-			if len(v) > 0 {
-				if err = accounts.DeserialiseV3(&oldAcc, v); err != nil {
-					return nil, err
-				}
-			}
-			oldBalance := oldAcc.Balance
-
-			address := common.BytesToAddress(addressBytes)
-			newAcc, err := latestState.ReadAccountData(address)
-			if err != nil {
-				return nil, err
-			}
-
-			newBalance := uint256.NewInt(0)
-			if newAcc != nil {
-				newBalance = &newAcc.Balance
-			}
-
-			if !oldBalance.Eq(newBalance) {
-				newBalanceDesc := (*hexutil.Big)(newBalance.ToBig())
-				balancesMapping[address] = newBalanceDesc
-			}
-		}
-	}
-
-	c, err := tx.Cursor(kv.AccountChangeSet)
+	minTxNum, _ := rawdbv3.TxNums.Min(tx, blockNumber)
+	it, err := tx.(kv.TemporalTx).HistoryRange(kv.AccountsHistory, int(minTxNum), -1, order.Asc, -1)
 	if err != nil {
 		return nil, err
 	}
-	defer c.Close()
-
-	startkey := hexutility.EncodeTs(blockNumber)
-
-	decodeFn := historyv2.Mapper[kv.AccountChangeSet].Decode
-
-	for dbKey, dbValue, err := c.Seek(startkey); bytes.Equal(dbKey, startkey) && dbKey != nil; dbKey, dbValue, err = c.Next() {
+	defer it.Close()
+	for it.HasNext() {
+		addressBytes, v, err := it.Next()
 		if err != nil {
 			return nil, err
 		}
-		_, addressBytes, v, err := decodeFn(dbKey, dbValue)
-		if err != nil {
-			return nil, err
-		}
+
 		var oldAcc accounts.Account
-		if err = oldAcc.DecodeForStorage(v); err != nil {
-			return nil, err
+		if len(v) > 0 {
+			if err = accounts.DeserialiseV3(&oldAcc, v); err != nil {
+				return nil, err
+			}
 		}
 		oldBalance := oldAcc.Balance
-		address := common.BytesToAddress(addressBytes)
 
+		address := common.BytesToAddress(addressBytes)
 		newAcc, err := latestState.ReadAccountData(address)
 		if err != nil {
 			return nil, err

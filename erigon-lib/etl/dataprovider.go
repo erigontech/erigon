@@ -24,8 +24,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 type dataProvider interface {
@@ -126,7 +127,7 @@ func (p *fileDataProvider) Dispose() {
 	if p.file != nil { //invariant: safe to call multiple time
 		p.Wait()
 		_ = p.file.Close()
-		_ = os.Remove(p.file.Name())
+		go func(fPath string) { _ = os.Remove(fPath) }(p.file.Name())
 		p.file = nil
 	}
 }

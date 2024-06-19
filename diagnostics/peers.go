@@ -37,6 +37,10 @@ type PeerResponse struct {
 }
 
 func SetupPeersAccess(ctxclient *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode, diag *diaglib.DiagnosticClient) {
+	if metricsMux == nil {
+		return
+	}
+
 	metricsMux.HandleFunc("/peers", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")

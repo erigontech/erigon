@@ -8,6 +8,10 @@ import (
 )
 
 func SetupMemAccess(metricsMux *http.ServeMux) {
+	if metricsMux == nil {
+		return
+	}
+
 	metricsMux.HandleFunc("/mem", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
@@ -16,8 +20,8 @@ func SetupMemAccess(metricsMux *http.ServeMux) {
 }
 
 func writeMem(w http.ResponseWriter) {
-	memStats, err := mem.ReadVirtualMemStats()
-	if err != nil {
+	memStats, err := mem.ReadVirtualMemStats() //nolint
+	if err != nil {                            //nolint
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

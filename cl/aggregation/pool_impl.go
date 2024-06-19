@@ -62,6 +62,7 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 	}
 
 	if utils.IsNonStrictSupersetBitlist(att.AggregationBits(), inAtt.AggregationBits()) {
+		// the on bit is already set, so ignore
 		return ErrIsSuperset
 	}
 

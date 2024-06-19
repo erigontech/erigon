@@ -8,8 +8,9 @@ import (
 	"sync"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/args"
@@ -140,6 +141,7 @@ func (n *devnetNode) run(ctx *cli.Context) error {
 	var logger log.Logger
 	var err error
 	var metricsMux *http.ServeMux
+	var pprofMux *http.ServeMux
 
 	defer n.done()
 	defer func() {
@@ -152,7 +154,7 @@ func (n *devnetNode) run(ctx *cli.Context) error {
 		n.Unlock()
 	}()
 
-	if logger, metricsMux, err = debug.Setup(ctx, false /* rootLogger */); err != nil {
+	if logger, metricsMux, pprofMux, err = debug.Setup(ctx, false /* rootLogger */); err != nil {
 		return err
 	}
 
@@ -184,9 +186,7 @@ func (n *devnetNode) run(ctx *cli.Context) error {
 
 	n.ethNode, err = enode.New(ctx.Context, n.nodeCfg, n.ethCfg, logger)
 
-	if metricsMux != nil {
-		diagnostics.Setup(ctx, metricsMux, n.ethNode)
-	}
+	diagnostics.Setup(ctx, n.ethNode, metricsMux, pprofMux)
 
 	n.Lock()
 	if n.startErr != nil {

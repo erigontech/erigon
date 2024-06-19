@@ -12,7 +12,7 @@ import (
 
 var maximumClockDisparity = 500 * time.Millisecond
 
-//go:generate mockgen -source=./ethereum_clock.go -destination=./ethereum_clock_mock.go -package=eth_clock . EthereumClock
+//go:generate mockgen -typed=true -source=./ethereum_clock.go -destination=./ethereum_clock_mock.go -package=eth_clock . EthereumClock
 type EthereumClock interface {
 	GetSlotTime(slot uint64) time.Time
 	GetCurrentSlot() uint64

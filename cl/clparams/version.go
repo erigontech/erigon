@@ -10,6 +10,7 @@ const (
 	BellatrixVersion StateVersion = 2
 	CapellaVersion   StateVersion = 3
 	DenebVersion     StateVersion = 4
+	ElectraVersion   StateVersion = 5
 )
 
 // stringToClVersion converts the string to the current state version.
@@ -25,6 +26,8 @@ func StringToClVersion(s string) (StateVersion, error) {
 		return CapellaVersion, nil
 	case "deneb":
 		return DenebVersion, nil
+	case "electra":
+		return ElectraVersion, nil
 	default:
 		return 0, fmt.Errorf("unsupported fork version %s", s)
 	}
@@ -42,6 +45,8 @@ func ClVersionToString(s StateVersion) string {
 		return "capella"
 	case DenebVersion:
 		return "deneb"
+	case ElectraVersion:
+		return "electra"
 	default:
 		panic("unsupported fork version")
 	}

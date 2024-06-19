@@ -23,19 +23,19 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 func TestSequence(t *testing.T) {
@@ -537,7 +537,7 @@ func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 //				}
 //
 //				c3 := tx.Cursor(dbutils.ChaindataTables[0])
-//				k, v, err := c3.Seek([]byte{5})
+//				k, v, err := c3.seekInFiles([]byte{5})
 //				if err != nil {
 //					return err
 //				}

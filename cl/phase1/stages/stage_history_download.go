@@ -10,6 +10,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cl/antiquary"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
@@ -17,8 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client/block_collector"
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
-
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -171,6 +170,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				logArgs = append(logArgs,
 					"slot", currProgress,
 					"blockNumber", currEth1Progress.Load(),
+					"frozenBlocks", cfg.engine.FrozenBlocks(ctx),
 					"blk/sec", fmt.Sprintf("%.1f", speed),
 					"snapshots", cfg.sn.SegmentsMax(),
 				)

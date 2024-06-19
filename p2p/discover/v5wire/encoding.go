@@ -304,7 +304,7 @@ func (c *Codec) encodeWhoareyou(toID enode.ID, packet *Whoareyou) (Header, error
 	return head, nil
 }
 
-// encodeHandshakeMessage encodes the handshake message packet header.
+// encodeHandshakeHeader encodes the handshake message packet header.
 func (c *Codec) encodeHandshakeHeader(toID enode.ID, addr string, challenge *Whoareyou) (Header, *session, error) {
 	// Ensure calling code sets challenge.node.
 	if challenge.Node == nil {

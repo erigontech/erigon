@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -48,7 +48,9 @@ func MiningBorHeimdallForward(
 			"err", err,
 		)
 		dataflow.HeaderDownloadStates.AddChange(headerNum, dataflow.HeaderInvalidated)
-		unwinder.UnwindTo(headerNum-1, ForkReset(hash))
+		if err := unwinder.UnwindTo(headerNum-1, ForkReset(hash), tx); err != nil {
+			return err
+		}
 		return fmt.Errorf("mining on a wrong fork %d:%x", headerNum, hash)
 	}
 
@@ -67,7 +69,11 @@ func MiningBorHeimdallForward(
 		ctx,
 		header,
 		tx,
-		cfg,
+		cfg.borConfig,
+		cfg.blockReader,
+		cfg.heimdallClient,
+		cfg.chainConfig.ChainID.String(),
+		cfg.stateReceiverABI,
 		logPrefix,
 		logger,
 		lastStateSyncEventID,

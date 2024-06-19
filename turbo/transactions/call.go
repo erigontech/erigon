@@ -6,7 +6,8 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -80,7 +81,7 @@ func DoCall(
 	if err != nil {
 		return nil, err
 	}
-	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader)
+	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
 	txCtx := core.NewEVMTxContext(msg)
 
 	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{NoBaseFee: true})
@@ -105,11 +106,13 @@ func DoCall(
 	return result, nil
 }
 
-func NewEVMBlockContext(engine consensus.EngineReader, header *types.Header, requireCanonical bool, tx kv.Tx, headerReader services.HeaderReader) evmtypes.BlockContext {
-	return core.NewEVMBlockContext(header, MakeHeaderGetter(requireCanonical, tx, headerReader), engine, nil /* author */)
+func NewEVMBlockContext(engine consensus.EngineReader, header *types.Header, requireCanonical bool, tx kv.Getter,
+	headerReader services.HeaderReader, config *chain.Config) evmtypes.BlockContext {
+	blockHashFunc := MakeHeaderGetter(requireCanonical, tx, headerReader)
+	return core.NewEVMBlockContext(header, blockHashFunc, engine, nil /* author */, config)
 }
 
-func MakeHeaderGetter(requireCanonical bool, tx kv.Tx, headerReader services.HeaderReader) func(uint64) libcommon.Hash {
+func MakeHeaderGetter(requireCanonical bool, tx kv.Getter, headerReader services.HeaderReader) func(uint64) libcommon.Hash {
 	return func(n uint64) libcommon.Hash {
 		h, err := headerReader.HeaderByNumber(context.Background(), tx, n)
 		if err != nil {
@@ -212,7 +215,7 @@ func NewReusableCaller(
 		return nil, err
 	}
 
-	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader)
+	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
 	txCtx := core.NewEVMTxContext(msg)
 
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{NoBaseFee: true})

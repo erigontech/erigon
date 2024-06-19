@@ -7,21 +7,21 @@ import (
 	"strings"
 	"time"
 
+	"github.com/urfave/cli/v2"
+
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cmd/caplin/caplinflags"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinelcli"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli/v2"
 )
 
 type CaplinCliCfg struct {
 	*sentinelcli.SentinelCliCfg
 
-	CheckpointUri         string        `json:"checkpoint_uri"`
 	Chaindata             string        `json:"chaindata"`
 	ErigonPrivateApi      string        `json:"erigon_private_api"`
 	TransitionChain       bool          `json:"transition_chain"`
@@ -99,10 +99,8 @@ func SetupCaplinCli(ctx *cli.Context) (cfg *CaplinCliCfg, err error) {
 		}
 	}
 
-	if ctx.String(caplinflags.CheckpointSyncUrlFlag.Name) != "" {
-		cfg.CheckpointUri = ctx.String(caplinflags.CheckpointSyncUrlFlag.Name)
-	} else {
-		cfg.CheckpointUri = clparams.GetCheckpointSyncEndpoint(cfg.NetworkType)
+	if checkpointUrls := ctx.StringSlice(utils.CaplinCheckpointSyncUrlFlag.Name); len(checkpointUrls) > 0 {
+		clparams.ConfigurableCheckpointsURLs = checkpointUrls
 	}
 
 	cfg.Chaindata = ctx.String(caplinflags.ChaindataFlag.Name)

@@ -14,7 +14,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -210,7 +211,7 @@ func (h *Heimdall) FetchCheckpointCount(ctx context.Context) (int64, error) {
 	return 0, fmt.Errorf("TODO")
 }
 
-func (h *Heimdall) FetchCheckpoints(ctx context.Context, page uint64, limit uint64) (heimdall.Checkpoints, error) {
+func (h *Heimdall) FetchCheckpoints(ctx context.Context, page uint64, limit uint64) ([]*heimdall.Checkpoint, error) {
 	return nil, fmt.Errorf("TODO")
 }
 
@@ -219,6 +220,10 @@ func (h *Heimdall) FetchMilestone(ctx context.Context, number int64) (*heimdall.
 }
 
 func (h *Heimdall) FetchMilestoneCount(ctx context.Context) (int64, error) {
+	return 0, fmt.Errorf("TODO")
+}
+
+func (h *Heimdall) FetchFirstMilestoneNum(ctx context.Context) (int64, error) {
 	return 0, fmt.Errorf("TODO")
 }
 
@@ -235,6 +240,10 @@ func (h *Heimdall) FetchMilestoneID(ctx context.Context, milestoneID string) err
 }
 
 func (h *Heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
+	return nil, fmt.Errorf("TODO")
+}
+
+func (h *Heimdall) FetchStateSyncEvent(ctx context.Context, id uint64) (*heimdall.EventRecordWithTime, error) {
 	return nil, fmt.Errorf("TODO")
 }
 

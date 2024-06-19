@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func SnapBlocksRead(db kv.RoDB, blockReader services.FullBlockReader, ctx context.Context, failFast bool) error {
@@ -23,11 +23,11 @@ func SnapBlocksRead(db kv.RoDB, blockReader services.FullBlockReader, ctx contex
 				return err
 			}
 			if b == nil {
-				err := fmt.Errorf("block not found in snapshots: %d\n", i)
+				err := fmt.Errorf("[integrity] block not found in snapshots: %d", i)
 				if failFast {
 					return err
 				}
-				log.Error("[integrity] SnapBlocksRead", "err", err)
+				log.Error(err.Error())
 			}
 			return nil
 		}); err != nil {

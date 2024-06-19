@@ -5,8 +5,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/net/context"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"

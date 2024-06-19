@@ -33,7 +33,6 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
@@ -44,6 +43,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 // udpOrHttpTrackers - torrent library spawning several goroutines and producing many requests for each tracker. So we limit amout of trackers by 8
@@ -86,8 +86,8 @@ func seedableSegmentFiles(dir string, chainName string) ([]string, error) {
 		if !snaptype.IsCorrectFileName(name) {
 			continue
 		}
-		ff, _, ok := snaptype.ParseFileName(dir, name)
-		if !ok {
+		ff, isStateFile, ok := snaptype.ParseFileName(dir, name)
+		if !ok || isStateFile {
 			continue
 		}
 		if !snapcfg.Seedable(chainName, ff) {
@@ -239,11 +239,22 @@ func AllTorrentPaths(dirs datadir.Dirs) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	files2, err := dir2.ListFiles(dirs.SnapHistory, ".torrent")
+	if dbg.DownloaderOnlyBlocks {
+		return files, nil
+	}
+	l1, err := dir2.ListFiles(dirs.SnapIdx, ".torrent")
 	if err != nil {
 		return nil, err
 	}
-	files = append(files, files2...)
+	l2, err := dir2.ListFiles(dirs.SnapHistory, ".torrent")
+	if err != nil {
+		return nil, err
+	}
+	l3, err := dir2.ListFiles(dirs.SnapDomain, ".torrent")
+	if err != nil {
+		return nil, err
+	}
+	files = append(append(append(files, l1...), l2...), l3...)
 	return files, nil
 }
 
@@ -284,7 +295,7 @@ func IsSnapNameAllowed(name string) bool {
 func addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient *torrent.Client, db kv.RwDB, webseeds *WebSeeds) (t *torrent.Torrent, ok bool, err error) {
 	ts.ChunkSize = downloadercfg.DefaultNetworkChunkSize
 	ts.DisallowDataDownload = true
-	ts.DisableInitialPieceCheck = true
+	//ts.DisableInitialPieceCheck = true
 	//re-try on panic, with 0 ChunkSize (lib doesn't allow change this field for existing torrents)
 	defer func() {
 		rec := recover()
@@ -344,7 +355,7 @@ func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient
 	} else {
 		t, _, err = torrentClient.AddTorrentSpec(ts)
 		if err != nil {
-			return nil, false, fmt.Errorf("add torrent file %s: %w", ts.DisplayName, err)
+			return t, true, fmt.Errorf("add torrent file %s: %w", ts.DisplayName, err)
 		}
 
 		db.Update(ctx, torrentInfoUpdater(ts.DisplayName, ts.InfoHash.Bytes(), 0, nil))

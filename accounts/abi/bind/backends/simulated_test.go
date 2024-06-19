@@ -19,6 +19,7 @@ package backends
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"math/big"
 	"reflect"
@@ -38,6 +39,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSimulatedBackend(t *testing.T) {
@@ -1123,5 +1125,72 @@ func TestSimulatedBackend_CallContractRevert(t *testing.T) {
 			t.Errorf("result from noRevert was nil")
 		}
 		sim.Commit()
+	}
+}
+
+func TestNewSimulatedBackend_AdjustTimeFailWithPostValidationSkip(t *testing.T) {
+	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
+	sim := simTestBackend(t, testAddr)
+	// Create tx and send
+	amount, _ := uint256.FromBig(big.NewInt(1000))
+	gasPrice, _ := uint256.FromBig(big.NewInt(1))
+	signer := types.MakeSigner(params.TestChainConfig, 1, 0)
+	var tx types.Transaction = types.NewTransaction(0, testAddr, amount, params.TxGas, gasPrice, nil)
+	signedTx, err := types.SignTx(tx, *signer, testKey)
+	if err != nil {
+		t.Errorf("could not sign tx: %v", err)
+	}
+	sim.SendTransaction(context.Background(), signedTx) //nolint:errcheck
+	// AdjustTime should fail on non-empty block
+	if err = sim.AdjustTime(time.Second); err == nil {
+		t.Error("Expected adjust time to error on non-empty block")
+	}
+	sim.Commit()
+
+	prevTime := sim.pendingBlock.Time()
+	if err = sim.AdjustTime(time.Minute); err != nil {
+		t.Error(err)
+	}
+	newTime := sim.pendingBlock.Time()
+	if newTime-prevTime != uint64(time.Minute.Seconds()) {
+		t.Errorf("adjusted time not equal to a minute. prev: %v, new: %v", prevTime, newTime)
+	}
+	// Put a transaction after adjusting time
+	amount2, _ := uint256.FromBig(big.NewInt(1000))
+	gasPrice2, _ := uint256.FromBig(big.NewInt(1))
+	var tx2 types.Transaction = types.NewTransaction(1, testAddr, amount2, params.TxGas, gasPrice2, nil)
+	signedTx2, err := types.SignTx(tx2, *signer, testKey)
+	if err != nil {
+		t.Errorf("could not sign tx: %v", err)
+	}
+	sim.SendTransaction(context.Background(), signedTx2) //nolint:errcheck
+	sim.Commit()
+	newTime = sim.pendingBlock.Time()
+	if newTime-prevTime >= uint64(time.Minute.Seconds()) {
+		t.Errorf("time adjusted, but shouldn't be: prev: %v, new: %v", prevTime, newTime)
+	}
+	txdb, err := sim.DB().BeginRw(sim.m.Ctx)
+	require.NoError(t, err)
+	defer txdb.Rollback()
+	// Set this artifically to make sure the we do skip post validation
+	var k [8]byte
+	var v [8]byte
+	binary.BigEndian.PutUint64(k[:], 1)
+	binary.BigEndian.PutUint64(v[:], 0)
+	require.NoError(t, txdb.Put(kv.MaxTxNum, k[:], v[:]))
+	require.NoError(t, txdb.Commit())
+	// Put a transaction after adjusting time
+	amount3, _ := uint256.FromBig(big.NewInt(1000))
+	gasPrice3, _ := uint256.FromBig(big.NewInt(1))
+	var tx3 types.Transaction = types.NewTransaction(2, testAddr, amount3, params.TxGas, gasPrice3, nil)
+	signedTx3, err := types.SignTx(tx3, *signer, testKey)
+	if err != nil {
+		t.Errorf("could not sign tx: %v", err)
+	}
+	sim.SendTransaction(context.Background(), signedTx3) //nolint:errcheck
+	sim.Commit()
+	newTime = sim.pendingBlock.Time()
+	if newTime-prevTime >= uint64(time.Minute.Seconds()) {
+		t.Errorf("time adjusted, but shouldn't be: prev: %v, new: %v", prevTime, newTime)
 	}
 }

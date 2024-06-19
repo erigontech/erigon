@@ -1,5 +1,5 @@
 {
-  "ChainName": "mumbai",
+  "chainName": "mumbai",
   "chainId": 80001,
   "consensus": "bor",
   "homesteadBlock": 0,

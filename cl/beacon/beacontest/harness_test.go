@@ -1,9 +1,8 @@
 package beacontest_test
 
 import (
-	"testing"
-
 	_ "embed"
+	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/beacon/beacontest"
 )

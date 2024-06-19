@@ -21,9 +21,10 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 func addTestAccount(tx kv.Putter, hash libcommon.Hash, balance uint64, incarnation uint64) error {

@@ -24,7 +24,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
@@ -112,7 +113,7 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 			gasFeeCap, gasTipCap = gasPrice, gasPrice
 		} else {
 			// User specified 1559 gas fields (or none), use those
-			gasFeeCap = baseFee
+			gasFeeCap = new(uint256.Int).Set(baseFee)
 			if args.MaxFeePerGas != nil {
 				overflow := gasFeeCap.SetFromBig(args.MaxFeePerGas.ToInt())
 				if overflow {
@@ -133,7 +134,11 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 			}
 		}
 		if args.MaxFeePerBlobGas != nil {
-			maxFeePerBlobGas.SetFromBig(args.MaxFeePerBlobGas.ToInt())
+			blobFee, overflow := uint256.FromBig(args.MaxFeePerBlobGas.ToInt())
+			if overflow {
+				return types.Message{}, fmt.Errorf("args.MaxFeePerBlobGas higher than 2^256-1")
+			}
+			maxFeePerBlobGas = blobFee
 		}
 	}
 
@@ -300,6 +305,9 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 	if head.ParentBeaconBlockRoot != nil {
 		result["parentBeaconBlockRoot"] = head.ParentBeaconBlockRoot
 	}
+	if head.RequestsRoot != nil {
+		result["requestsRoot"] = head.RequestsRoot
+	}
 
 	return result
 }
@@ -355,6 +363,10 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 
 	if block.Withdrawals() != nil {
 		fields["withdrawals"] = block.Withdrawals()
+	}
+
+	if block.Requests() != nil {
+		fields["requests"] = block.Requests()
 	}
 
 	return fields, nil
@@ -416,7 +428,7 @@ type RPCTransaction struct {
 func newRPCTransaction(tx types.Transaction, blockHash libcommon.Hash, blockNumber uint64, index uint64, baseFee *big.Int) *RPCTransaction {
 	// Determine the signer. For replay-protected transactions, use the most permissive
 	// signer, because we assume that signers are backwards-compatible with old
-	// transactions. For non-protected transactions, the homestead signer signer is used
+	// transactions. For non-protected transactions, the homestead signer is used
 	// because the return value of ChainId is zero for those transactions.
 	chainId := uint256.NewInt(0)
 	result := &RPCTransaction{

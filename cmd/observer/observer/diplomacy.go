@@ -8,11 +8,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/semaphore"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/observer/database"
 	"github.com/ledgerwatch/erigon/cmd/observer/observer/node_utils"
 	"github.com/ledgerwatch/erigon/cmd/observer/utils"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/sync/semaphore"
 )
 
 type Diplomacy struct {
@@ -80,7 +83,9 @@ func (diplomacy *Diplomacy) selectCandidates(ctx context.Context, candidatesChan
 		}
 
 		if len(candidates) == 0 {
-			utils.Sleep(ctx, 1*time.Second)
+			if err := libcommon.Sleep(ctx, 1*time.Second); err != nil {
+				return err
+			}
 		}
 
 		for _, id := range candidates {

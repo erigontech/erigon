@@ -8,6 +8,7 @@ import (
 )
 
 type Waypoint interface {
+	Entity
 	fmt.Stringer
 	StartBlock() *big.Int
 	EndBlock() *big.Int

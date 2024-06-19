@@ -28,10 +28,11 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/rs/cors"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/rs/cors"
 )
 
 // httpConfig is the JSON-RPC/HTTP configuration.
@@ -265,7 +266,7 @@ func (h *httpServer) enableRPC(apis []rpc.API, config httpConfig, allowList rpc.
 	}
 
 	// Create RPC server and handler.
-	srv := rpc.NewServer(50, false /* traceRequests */, true, h.logger, 0)
+	srv := rpc.NewServer(50, false /* traceRequests */, false /* traceSingleRequest */, true, h.logger, 0)
 	srv.SetAllowList(allowList)
 	if err := RegisterApisFromWhitelist(apis, config.Modules, srv, false, h.logger); err != nil {
 		return err
@@ -298,7 +299,7 @@ func (h *httpServer) enableWS(apis []rpc.API, config wsConfig, allowList rpc.All
 	}
 
 	// Create RPC server and handler.
-	srv := rpc.NewServer(50, false /* traceRequests */, true, h.logger, 0)
+	srv := rpc.NewServer(50, false /* traceRequests */, false /* debugSingleRequest */, true, h.logger, 0)
 	srv.SetAllowList(allowList)
 	if err := RegisterApisFromWhitelist(apis, config.Modules, srv, false, h.logger); err != nil {
 		return err

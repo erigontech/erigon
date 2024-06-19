@@ -34,21 +34,21 @@ func TestUnion(t *testing.T) {
 		s1 := iter.Array[uint64]([]uint64{1, 3, 6, 7})
 		s2 := iter.Array[uint64]([]uint64{2, 3, 7, 8})
 		s3 := iter.Union[uint64](s1, s2, order.Asc, -1)
-		res, err := iter.ToArr[uint64](s3)
+		res, err := iter.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Equal(t, []uint64{1, 2, 3, 6, 7, 8}, res)
 
 		s1 = iter.ReverseArray[uint64]([]uint64{1, 3, 6, 7})
 		s2 = iter.ReverseArray[uint64]([]uint64{2, 3, 7, 8})
 		s3 = iter.Union[uint64](s1, s2, order.Desc, -1)
-		res, err = iter.ToArr[uint64](s3)
+		res, err = iter.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Equal(t, []uint64{8, 7, 6, 3, 2, 1}, res)
 
 		s1 = iter.ReverseArray[uint64]([]uint64{1, 3, 6, 7})
 		s2 = iter.ReverseArray[uint64]([]uint64{2, 3, 7, 8})
 		s3 = iter.Union[uint64](s1, s2, order.Desc, 2)
-		res, err = iter.ToArr[uint64](s3)
+		res, err = iter.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Equal(t, []uint64{8, 7}, res)
 
@@ -57,7 +57,7 @@ func TestUnion(t *testing.T) {
 		s1 := iter.EmptyU64
 		s2 := iter.Array[uint64]([]uint64{2, 3, 7, 8})
 		s3 := iter.Union[uint64](s1, s2, order.Asc, -1)
-		res, err := iter.ToArr[uint64](s3)
+		res, err := iter.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Equal(t, []uint64{2, 3, 7, 8}, res)
 	})
@@ -65,7 +65,7 @@ func TestUnion(t *testing.T) {
 		s1 := iter.Array[uint64]([]uint64{1, 3, 4, 5, 6, 7})
 		s2 := iter.EmptyU64
 		s3 := iter.Union[uint64](s1, s2, order.Asc, -1)
-		res, err := iter.ToArr[uint64](s3)
+		res, err := iter.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Equal(t, []uint64{1, 3, 4, 5, 6, 7}, res)
 	})
@@ -73,7 +73,7 @@ func TestUnion(t *testing.T) {
 		s1 := iter.EmptyU64
 		s2 := iter.EmptyU64
 		s3 := iter.Union[uint64](s1, s2, order.Asc, -1)
-		res, err := iter.ToArr[uint64](s3)
+		res, err := iter.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Nil(t, res)
 	})
@@ -92,7 +92,7 @@ func TestUnionPairs(t *testing.T) {
 		_ = tx.Put(kv.PlainState, []byte{3}, []byte{9})
 		it, _ := tx.Range(kv.E2AccountsHistory, nil, nil)
 		it2, _ := tx.Range(kv.PlainState, nil, nil)
-		keys, values, err := iter.ToKVArray(iter.UnionKV(it, it2, -1))
+		keys, values, err := iter.ToArrayKV(iter.UnionKV(it, it2, -1))
 		require.NoError(err)
 		require.Equal([][]byte{{1}, {2}, {3}, {4}}, keys)
 		require.Equal([][]byte{{1}, {9}, {1}, {1}}, values)
@@ -105,7 +105,7 @@ func TestUnionPairs(t *testing.T) {
 		_ = tx.Put(kv.PlainState, []byte{3}, []byte{9})
 		it, _ := tx.Range(kv.E2AccountsHistory, nil, nil)
 		it2, _ := tx.Range(kv.PlainState, nil, nil)
-		keys, _, err := iter.ToKVArray(iter.UnionKV(it, it2, -1))
+		keys, _, err := iter.ToArrayKV(iter.UnionKV(it, it2, -1))
 		require.NoError(err)
 		require.Equal([][]byte{{2}, {3}}, keys)
 	})
@@ -118,7 +118,7 @@ func TestUnionPairs(t *testing.T) {
 		_ = tx.Put(kv.E2AccountsHistory, []byte{4}, []byte{1})
 		it, _ := tx.Range(kv.E2AccountsHistory, nil, nil)
 		it2, _ := tx.Range(kv.PlainState, nil, nil)
-		keys, _, err := iter.ToKVArray(iter.UnionKV(it, it2, -1))
+		keys, _, err := iter.ToArrayKV(iter.UnionKV(it, it2, -1))
 		require.NoError(err)
 		require.Equal([][]byte{{1}, {3}, {4}}, keys)
 	})
@@ -137,7 +137,7 @@ func TestUnionPairs(t *testing.T) {
 		defer tx.Rollback()
 		it := iter.PairsWithError(10)
 		it2 := iter.PairsWithError(12)
-		keys, _, err := iter.ToKVArray(iter.UnionKV(it, it2, -1))
+		keys, _, err := iter.ToArrayKV(iter.UnionKV(it, it2, -1))
 		require.Equal("expected error at iteration: 10", err.Error())
 		require.Equal(10, len(keys))
 	})
@@ -148,14 +148,14 @@ func TestIntersect(t *testing.T) {
 		s1 := iter.Array[uint64]([]uint64{1, 3, 4, 5, 6, 7})
 		s2 := iter.Array[uint64]([]uint64{2, 3, 7})
 		s3 := iter.Intersect[uint64](s1, s2, -1)
-		res, err := iter.ToArr[uint64](s3)
+		res, err := iter.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Equal(t, []uint64{3, 7}, res)
 
 		s1 = iter.Array[uint64]([]uint64{1, 3, 4, 5, 6, 7})
 		s2 = iter.Array[uint64]([]uint64{2, 3, 7})
 		s3 = iter.Intersect[uint64](s1, s2, 1)
-		res, err = iter.ToArr[uint64](s3)
+		res, err = iter.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Equal(t, []uint64{3}, res)
 	})
@@ -163,13 +163,13 @@ func TestIntersect(t *testing.T) {
 		s1 := iter.EmptyU64
 		s2 := iter.Array[uint64]([]uint64{2, 3, 7, 8})
 		s3 := iter.Intersect[uint64](s1, s2, -1)
-		res, err := iter.ToArr[uint64](s3)
+		res, err := iter.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Nil(t, res)
 
 		s2 = iter.Array[uint64]([]uint64{2, 3, 7, 8})
 		s3 = iter.Intersect[uint64](nil, s2, -1)
-		res, err = iter.ToArr[uint64](s3)
+		res, err = iter.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Nil(t, res)
 	})
@@ -177,13 +177,13 @@ func TestIntersect(t *testing.T) {
 		s1 := iter.Array[uint64]([]uint64{1, 3, 4, 5, 6, 7})
 		s2 := iter.EmptyU64
 		s3 := iter.Intersect[uint64](s1, s2, -1)
-		res, err := iter.ToArr[uint64](s3)
+		res, err := iter.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Nil(t, nil, res)
 
 		s1 = iter.Array[uint64]([]uint64{1, 3, 4, 5, 6, 7})
 		s3 = iter.Intersect[uint64](s1, nil, -1)
-		res, err = iter.ToArr[uint64](s3)
+		res, err = iter.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Nil(t, res)
 	})
@@ -191,12 +191,12 @@ func TestIntersect(t *testing.T) {
 		s1 := iter.EmptyU64
 		s2 := iter.EmptyU64
 		s3 := iter.Intersect[uint64](s1, s2, -1)
-		res, err := iter.ToArr[uint64](s3)
+		res, err := iter.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Nil(t, res)
 
 		s3 = iter.Intersect[uint64](nil, nil, -1)
-		res, err = iter.ToArr[uint64](s3)
+		res, err = iter.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Nil(t, res)
 	})
@@ -205,13 +205,13 @@ func TestIntersect(t *testing.T) {
 func TestRange(t *testing.T) {
 	t.Run("range", func(t *testing.T) {
 		s1 := iter.Range[uint64](1, 4)
-		res, err := iter.ToArr[uint64](s1)
+		res, err := iter.ToArray[uint64](s1)
 		require.NoError(t, err)
 		require.Equal(t, []uint64{1, 2, 3}, res)
 	})
 	t.Run("empty", func(t *testing.T) {
 		s1 := iter.Range[uint64](1, 1)
-		res, err := iter.ToArr[uint64](s1)
+		res, err := iter.ToArray[uint64](s1)
 		require.NoError(t, err)
 		require.Equal(t, []uint64{1}, res)
 	})
@@ -234,7 +234,7 @@ func TestPaginated(t *testing.T) {
 			}
 			return
 		})
-		res, err := iter.ToArr[uint64](s1)
+		res, err := iter.ToArray[uint64](s1)
 		require.NoError(t, err)
 		require.Equal(t, []uint64{1, 2, 3, 4, 5, 6, 7}, res)
 
@@ -257,7 +257,7 @@ func TestPaginated(t *testing.T) {
 			}
 			return
 		})
-		res, err := iter.ToArr[uint64](s1)
+		res, err := iter.ToArray[uint64](s1)
 		require.ErrorIs(t, err, testErr)
 		require.Equal(t, []uint64{1, 2, 3}, res)
 
@@ -271,7 +271,7 @@ func TestPaginated(t *testing.T) {
 		s1 := iter.Paginate[uint64](func(pageToken string) (arr []uint64, nextPageToken string, err error) {
 			return []uint64{}, "", nil
 		})
-		res, err := iter.ToArr[uint64](s1)
+		res, err := iter.ToArray[uint64](s1)
 		require.NoError(t, err)
 		require.Nil(t, res)
 
@@ -299,7 +299,7 @@ func TestPaginatedDual(t *testing.T) {
 			return
 		})
 
-		keys, values, err := iter.ToKVArray(s1)
+		keys, values, err := iter.ToArrayKV(s1)
 		require.NoError(t, err)
 		require.Equal(t, [][]byte{{1}, {2}, {3}, {4}, {5}, {6}, {7}}, keys)
 		require.Equal(t, [][]byte{{1}, {2}, {3}, {4}, {5}, {6}, {7}}, values)
@@ -323,7 +323,7 @@ func TestPaginatedDual(t *testing.T) {
 			}
 			return
 		})
-		keys, values, err := iter.ToKVArray(s1)
+		keys, values, err := iter.ToArrayKV(s1)
 		require.ErrorIs(t, err, testErr)
 		require.Equal(t, [][]byte{{1}, {2}, {3}}, keys)
 		require.Equal(t, [][]byte{{1}, {2}, {3}}, values)
@@ -338,7 +338,7 @@ func TestPaginatedDual(t *testing.T) {
 		s1 := iter.PaginateKV(func(pageToken string) (keys, values [][]byte, nextPageToken string, err error) {
 			return [][]byte{}, [][]byte{}, "", nil
 		})
-		keys, values, err := iter.ToKVArray(s1)
+		keys, values, err := iter.ToArrayKV(s1)
 		require.NoError(t, err)
 		require.Nil(t, keys)
 		require.Nil(t, values)
@@ -366,25 +366,25 @@ func TestFiler(t *testing.T) {
 	}
 	t.Run("dual", func(t *testing.T) {
 		s2 := iter.FilterKV(createKVIter(), func(k, v []byte) bool { return bytes.Equal(k, []byte{1}) })
-		keys, values, err := iter.ToKVArray(s2)
+		keys, values, err := iter.ToArrayKV(s2)
 		require.NoError(t, err)
 		require.Equal(t, [][]byte{{1}}, keys)
 		require.Equal(t, [][]byte{{1}}, values)
 
 		s2 = iter.FilterKV(createKVIter(), func(k, v []byte) bool { return bytes.Equal(k, []byte{3}) })
-		keys, values, err = iter.ToKVArray(s2)
+		keys, values, err = iter.ToArrayKV(s2)
 		require.NoError(t, err)
 		require.Equal(t, [][]byte{{3}}, keys)
 		require.Equal(t, [][]byte{{3}}, values)
 
 		s2 = iter.FilterKV(createKVIter(), func(k, v []byte) bool { return bytes.Equal(k, []byte{4}) })
-		keys, values, err = iter.ToKVArray(s2)
+		keys, values, err = iter.ToArrayKV(s2)
 		require.NoError(t, err)
 		require.Nil(t, keys)
 		require.Nil(t, values)
 
 		s2 = iter.FilterKV(iter.EmptyKV, func(k, v []byte) bool { return bytes.Equal(k, []byte{4}) })
-		keys, values, err = iter.ToKVArray(s2)
+		keys, values, err = iter.ToArrayKV(s2)
 		require.NoError(t, err)
 		require.Nil(t, keys)
 		require.Nil(t, values)
@@ -392,24 +392,24 @@ func TestFiler(t *testing.T) {
 	t.Run("unary", func(t *testing.T) {
 		s1 := iter.Array[uint64]([]uint64{1, 2, 3})
 		s2 := iter.FilterU64(s1, func(k uint64) bool { return k == 1 })
-		res, err := iter.ToU64Arr(s2)
+		res, err := iter.ToArrayU64(s2)
 		require.NoError(t, err)
 		require.Equal(t, []uint64{1}, res)
 
 		s1 = iter.Array[uint64]([]uint64{1, 2, 3})
 		s2 = iter.FilterU64(s1, func(k uint64) bool { return k == 3 })
-		res, err = iter.ToU64Arr(s2)
+		res, err = iter.ToArrayU64(s2)
 		require.NoError(t, err)
 		require.Equal(t, []uint64{3}, res)
 
 		s1 = iter.Array[uint64]([]uint64{1, 2, 3})
 		s2 = iter.FilterU64(s1, func(k uint64) bool { return k == 4 })
-		res, err = iter.ToU64Arr(s2)
+		res, err = iter.ToArrayU64(s2)
 		require.NoError(t, err)
 		require.Nil(t, res)
 
 		s2 = iter.FilterU64(iter.EmptyU64, func(k uint64) bool { return k == 4 })
-		res, err = iter.ToU64Arr(s2)
+		res, err = iter.ToArrayU64(s2)
 		require.NoError(t, err)
 		require.Nil(t, res)
 	})

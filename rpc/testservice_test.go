@@ -24,11 +24,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 func newTestServer(logger log.Logger) *Server {
-	server := NewServer(50, false /* traceRequests */, true, logger, 100)
+	server := NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, true, logger, 100)
 	server.idgen = sequentialIDGenerator()
 	if err := server.RegisterName("test", new(testService)); err != nil {
 		panic(err)

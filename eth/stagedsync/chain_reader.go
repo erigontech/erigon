@@ -4,7 +4,7 @@ import (
 	"context"
 	"math/big"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -34,6 +34,35 @@ func (cr ChainReader) CurrentHeader() *types.Header {
 	number := rawdb.ReadHeaderNumber(cr.Db, hash)
 	h, _ := cr.BlockReader.Header(context.Background(), cr.Db, hash, *number)
 	return h
+}
+
+// CurrentFinalizedHeader retrieves the current finalized header from the local chain.
+func (cr ChainReader) CurrentFinalizedHeader() *types.Header {
+	hash := rawdb.ReadForkchoiceFinalized(cr.Db)
+	if hash == (libcommon.Hash{}) {
+		return nil
+	}
+
+	number := rawdb.ReadHeaderNumber(cr.Db, hash)
+	if number == nil {
+		return nil
+	}
+
+	return rawdb.ReadHeader(cr.Db, hash, *number)
+}
+
+func (cr ChainReader) CurrentSafeHeader() *types.Header {
+	hash := rawdb.ReadForkchoiceSafe(cr.Db)
+	if hash == (libcommon.Hash{}) {
+		return nil
+	}
+
+	number := rawdb.ReadHeaderNumber(cr.Db, hash)
+	if number == nil {
+		return nil
+	}
+
+	return rawdb.ReadHeader(cr.Db, hash, *number)
 }
 
 // GetHeader retrieves a block header from the database by hash and number.
@@ -77,9 +106,8 @@ func (cr ChainReader) GetTd(hash libcommon.Hash, number uint64) *big.Int {
 	return td
 }
 
-func (cr ChainReader) FrozenBlocks() uint64 {
-	return cr.BlockReader.FrozenBlocks()
-}
+func (cr ChainReader) FrozenBlocks() uint64    { return cr.BlockReader.FrozenBlocks() }
+func (cr ChainReader) FrozenBorBlocks() uint64 { return cr.BlockReader.FrozenBorBlocks() }
 
 func (cr ChainReader) BorStartEventID(_ libcommon.Hash, _ uint64) uint64 {
 	panic("bor events by block not implemented")

@@ -50,6 +50,7 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}
 
+	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
 	slotPtr, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
 	if err != nil {
 		return nil, err
@@ -99,7 +100,7 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 				resp = append(resp, data)
 			}
 		}
-		return newBeaconResponse(resp).WithFinalized(isFinalized), nil
+		return newBeaconResponse(resp).WithFinalized(isFinalized).WithOptimistic(isOptimistic), nil
 	}
 	// finality case
 	activeIdxs, err := state_accessors.ReadActiveIndicies(tx, epoch*a.beaconChainCfg.SlotsPerEpoch)
@@ -142,5 +143,5 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 			resp = append(resp, data)
 		}
 	}
-	return newBeaconResponse(resp).WithFinalized(isFinalized), nil
+	return newBeaconResponse(resp).WithFinalized(isFinalized).WithOptimistic(isOptimistic), nil
 }

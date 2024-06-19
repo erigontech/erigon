@@ -27,12 +27,14 @@ import (
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/merge"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 )
 
 // NewEVMBlockContext creates a new context for use in the EVM.
-func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libcommon.Hash, engine consensus.EngineReader, author *libcommon.Address) evmtypes.BlockContext {
+func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libcommon.Hash,
+	engine consensus.EngineReader, author *libcommon.Address, config *chain.Config) evmtypes.BlockContext {
 	// If we don't have an explicit author (i.e. not mining), extract from the header
 	var beneficiary libcommon.Address
 	if author == nil {
@@ -55,10 +57,13 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 		*prevRandDao = header.MixDigest
 	}
 
-	var excessBlobGas *uint64
+	var blobBaseFee *uint256.Int
 	if header.ExcessBlobGas != nil {
-		excessBlobGas = new(uint64)
-		*excessBlobGas = *header.ExcessBlobGas
+		var err error
+		blobBaseFee, err = misc.GetBlobGasPrice(config, *header.ExcessBlobGas)
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	var transferFunc evmtypes.TransferFunc
@@ -68,17 +73,17 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 		transferFunc = Transfer
 	}
 	return evmtypes.BlockContext{
-		CanTransfer:   CanTransfer,
-		Transfer:      transferFunc,
-		GetHash:       blockHashFunc,
-		Coinbase:      beneficiary,
-		BlockNumber:   header.Number.Uint64(),
-		Time:          header.Time,
-		Difficulty:    new(big.Int).Set(header.Difficulty),
-		BaseFee:       &baseFee,
-		GasLimit:      header.GasLimit,
-		PrevRanDao:    prevRandDao,
-		ExcessBlobGas: excessBlobGas,
+		CanTransfer: CanTransfer,
+		Transfer:    transferFunc,
+		GetHash:     blockHashFunc,
+		Coinbase:    beneficiary,
+		BlockNumber: header.Number.Uint64(),
+		Time:        header.Time,
+		Difficulty:  new(big.Int).Set(header.Difficulty),
+		BaseFee:     &baseFee,
+		GasLimit:    header.GasLimit,
+		PrevRanDao:  prevRandDao,
+		BlobBaseFee: blobBaseFee,
 	}
 }
 

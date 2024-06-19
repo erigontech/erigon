@@ -10,19 +10,19 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 
-	"golang.org/x/exp/slices"
-
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-
 	"github.com/ledgerwatch/erigon/dataflow"
 	"github.com/ledgerwatch/erigon/turbo/services"
 
@@ -376,6 +376,9 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime time.Time) (*HeaderRequ
 	var penalties []PenaltyItem
 	var req *HeaderRequest
 	hd.anchorTree.Ascend(func(anchor *Anchor) bool {
+		if anchor.blockHeight == 0 { //has no parent
+			return true
+		}
 		if anchor.nextRetryTime.After(currentTime) {
 			// We are not ready to retry this anchor yet
 			dataflow.HeaderDownloadStates.AddChange(anchor.blockHeight-1, dataflow.HeaderRetryNotReady)
@@ -834,6 +837,9 @@ func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *type
 	}
 	if ch == header.ParentHash {
 		forkingPoint = blockHeight - 1
+		if forkingPoint == 0 {
+			log.Warn("[dbg] HeaderInserter.ForkPoint1", "blockHeight", blockHeight)
+		}
 	} else {
 		// Going further back
 		ancestorHash := parent.ParentHash
@@ -869,6 +875,9 @@ func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *type
 		}
 		// Loop above terminates when either err != nil (handled already) or ch == ancestorHash, therefore ancestorHeight is our forking point
 		forkingPoint = ancestorHeight
+		if forkingPoint == 0 {
+			log.Warn("[dbg] HeaderInserter.ForkPoint2", "blockHeight", blockHeight)
+		}
 	}
 	return
 }
@@ -930,7 +939,7 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader servic
 			hi.canonicalCache.Add(blockHeight, hash)
 			// See if the forking point affects the unwindPoint (the block number to which other stages will need to unwind before the new canonical chain is applied)
 			if forkingPoint < hi.unwindPoint {
-				hi.unwindPoint = forkingPoint
+				hi.SetUnwindPoint(forkingPoint)
 				hi.unwind = true
 			}
 			// This makes sure we end up choosing the chain with the max total difficulty
@@ -990,6 +999,11 @@ func (hi *HeaderInserter) GetHighestTimestamp() uint64 {
 
 func (hi *HeaderInserter) UnwindPoint() uint64 {
 	return hi.unwindPoint
+}
+
+func (hi *HeaderInserter) SetUnwindPoint(v uint64) {
+	log.Warn("[dbg] HeaderInserter: set unwind point", "v", v, "stack", dbg.Stack())
+	hi.unwindPoint = v
 }
 
 func (hi *HeaderInserter) Unwind() bool {

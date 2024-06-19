@@ -3,7 +3,7 @@ package stagedsync
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -52,7 +52,7 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 	//	continue
 	//}
 
-	block := types.NewBlock(current.Header, current.Txs, current.Uncles, current.Receipts, current.Withdrawals)
+	block := types.NewBlock(current.Header, current.Txs, current.Uncles, current.Receipts, current.Withdrawals, current.Requests)
 	blockWithReceipts := &types.BlockWithReceipts{Block: block, Receipts: current.Receipts}
 	*current = MiningBlock{} // hack to clean global data
 

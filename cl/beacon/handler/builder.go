@@ -28,6 +28,7 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWr
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}
+	isOptimistic := a.forkchoiceStore.IsRootOptimistic(root)
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
 	if err != nil {
 		return nil, err
@@ -64,7 +65,7 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWr
 		if err != nil {
 			return nil, err
 		}
-		return newBeaconResponse(blk.Block.Body.ExecutionPayload.Withdrawals).WithFinalized(false), nil
+		return newBeaconResponse(blk.Block.Body.ExecutionPayload.Withdrawals).WithFinalized(false).WithOptimistic(isOptimistic), nil
 	}
 
 	return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("state not found"))

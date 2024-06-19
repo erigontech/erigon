@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
@@ -14,18 +15,21 @@ import (
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/spf13/pflag"
+	"github.com/urfave/cli/v2"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/pflag"
-	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
 
 var (
@@ -37,7 +41,7 @@ var (
 	BatchSizeFlag = cli.StringFlag{
 		Name:  "batchSize",
 		Usage: "Batch size for the execution stage",
-		Value: "256M",
+		Value: "512M",
 	}
 	EtlBufferSizeFlag = cli.StringFlag{
 		Name:  "etl.bufferSize",
@@ -76,6 +80,10 @@ var (
 	Example: --prune=htc`,
 		Value: "disabled",
 	}
+	PruneBlocksFlag = cli.Uint64Flag{
+		Name:  "prune.b.older",
+		Usage: `Prune data older than this number of blocks from the tip of the chain (if --prune flag has 'b', then default is 90K)`,
+	}
 	PruneHistoryFlag = cli.Uint64Flag{
 		Name:  "prune.h.older",
 		Usage: `Prune data older than this number of blocks from the tip of the chain (if --prune flag has 'h', then default is 90K)`,
@@ -107,6 +115,10 @@ var (
 	}
 	PruneCallTracesBeforeFlag = cli.Uint64Flag{
 		Name:  "prune.c.before",
+		Usage: `Prune data before this block`,
+	}
+	PruneBlocksBeforeFlag = cli.Uint64Flag{
+		Name:  "prune.b.before",
 		Usage: `Prune data before this block`,
 	}
 
@@ -164,7 +176,7 @@ var (
 	SyncLoopBlockLimitFlag = cli.UintFlag{
 		Name:  "sync.loop.block.limit",
 		Usage: "Sets the maximum number of blocks to process per loop iteration",
-		Value: 0, // unlimited
+		Value: 5_000,
 	}
 
 	UploadLocationFlag = cli.StringFlag{
@@ -246,6 +258,32 @@ var (
 		Value: rpccfg.DefaultOverlayReplayBlockTimeout,
 	}
 
+	RpcSubscriptionFiltersMaxLogsFlag = cli.IntFlag{
+		Name:  "rpc.subscription.filters.maxlogs",
+		Usage: "Maximum number of logs to store per subscription.",
+		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxLogs,
+	}
+	RpcSubscriptionFiltersMaxHeadersFlag = cli.IntFlag{
+		Name:  "rpc.subscription.filters.maxheaders",
+		Usage: "Maximum number of block headers to store per subscription.",
+		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxHeaders,
+	}
+	RpcSubscriptionFiltersMaxTxsFlag = cli.IntFlag{
+		Name:  "rpc.subscription.filters.maxtxs",
+		Usage: "Maximum number of transactions to store per subscription.",
+		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxTxs,
+	}
+	RpcSubscriptionFiltersMaxAddressesFlag = cli.IntFlag{
+		Name:  "rpc.subscription.filters.maxaddresses",
+		Usage: "Maximum number of addresses per subscription to filter logs by.",
+		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxAddresses,
+	}
+	RpcSubscriptionFiltersMaxTopicsFlag = cli.IntFlag{
+		Name:  "rpc.subscription.filters.maxtopics",
+		Usage: "Maximum number of topics per subscription to filter logs by.",
+		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxTopics,
+	}
+
 	TxPoolCommitEvery = cli.DurationFlag{
 		Name:  "txpool.commit.every",
 		Usage: "How often transactions should be committed to the storage",
@@ -258,10 +296,15 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	if cfg.Genesis != nil {
 		chainId = cfg.Genesis.Config.ChainID.Uint64()
 	}
-
+	minimal := ctx.String(PruneFlag.Name) == "minimal"
+	pruneFlagString := ctx.String(PruneFlag.Name)
+	if minimal {
+		pruneFlagString = "htrcb"
+	}
 	mode, err := prune.FromCli(
 		chainId,
-		ctx.String(PruneFlag.Name),
+		pruneFlagString,
+		ctx.Uint64(PruneBlocksFlag.Name),
 		ctx.Uint64(PruneHistoryFlag.Name),
 		ctx.Uint64(PruneReceiptFlag.Name),
 		ctx.Uint64(PruneTxIndexFlag.Name),
@@ -270,8 +313,13 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		ctx.Uint64(PruneReceiptBeforeFlag.Name),
 		ctx.Uint64(PruneTxIndexBeforeFlag.Name),
 		ctx.Uint64(PruneCallTracesBeforeFlag.Name),
+		ctx.Uint64(PruneBlocksBeforeFlag.Name),
 		libcommon.CliString2Array(ctx.String(ExperimentsFlag.Name)),
 	)
+	if err != nil {
+		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
+	}
+
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
@@ -291,6 +339,15 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 			utils.Fatalf("Invalid batchSize provided: %v", err)
 		}
 		etl.BufferOptimalSize = *size
+	}
+
+	if minimal {
+		// Prune them all.
+		cfg.Prune.Blocks = prune.Before(math.MaxUint64)
+		cfg.Prune.History = prune.Before(math.MaxUint64)
+		cfg.Prune.Receipts = prune.Before(math.MaxUint64)
+		cfg.Prune.TxIndex = prune.Before(math.MaxUint64)
+		cfg.Prune.CallTraces = prune.Before(math.MaxUint64)
 	}
 
 	cfg.StateStream = !ctx.Bool(StateStreamDisableFlag.Name)
@@ -365,7 +422,10 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 		if exp := f.StringSlice(ExperimentsFlag.Name, nil, ExperimentsFlag.Usage); exp != nil {
 			experiments = *exp
 		}
-		var exactH, exactR, exactT, exactC uint64
+		var exactB, exactH, exactR, exactT, exactC uint64
+		if v := f.Uint64(PruneBlocksFlag.Name, PruneBlocksFlag.Value, PruneBlocksFlag.Usage); v != nil {
+			exactB = *v
+		}
 		if v := f.Uint64(PruneHistoryFlag.Name, PruneHistoryFlag.Value, PruneHistoryFlag.Usage); v != nil {
 			exactH = *v
 		}
@@ -379,7 +439,10 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 			exactC = *v
 		}
 
-		var beforeH, beforeR, beforeT, beforeC uint64
+		var beforeB, beforeH, beforeR, beforeT, beforeC uint64
+		if v := f.Uint64(PruneBlocksBeforeFlag.Name, PruneBlocksBeforeFlag.Value, PruneBlocksBeforeFlag.Usage); v != nil {
+			beforeB = *v
+		}
 		if v := f.Uint64(PruneHistoryBeforeFlag.Name, PruneHistoryBeforeFlag.Value, PruneHistoryBeforeFlag.Usage); v != nil {
 			beforeH = *v
 		}
@@ -398,7 +461,7 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 			chainId = cfg.Genesis.Config.ChainID.Uint64()
 		}
 
-		mode, err := prune.FromCli(chainId, *v, exactH, exactR, exactT, exactC, beforeH, beforeR, beforeT, beforeC, experiments)
+		mode, err := prune.FromCli(chainId, *v, exactB, exactH, exactR, exactT, exactC, beforeH, beforeR, beforeT, beforeC, beforeB, experiments)
 		if err != nil {
 			utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 		}
@@ -462,6 +525,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		AuthRpcPort:              ctx.Int(utils.AuthRpcPort.Name),
 		JWTSecretPath:            jwtSecretPath,
 		TraceRequests:            ctx.Bool(utils.HTTPTraceFlag.Name),
+		DebugSingleRequest:       ctx.Bool(utils.HTTPDebugSingleFlag.Name),
 		HttpCORSDomain:           libcommon.CliString2Array(ctx.String(utils.HTTPCORSDomainFlag.Name)),
 		HttpVirtualHost:          libcommon.CliString2Array(ctx.String(utils.HTTPVirtualHostsFlag.Name)),
 		AuthRpcVirtualHost:       libcommon.CliString2Array(ctx.String(utils.AuthRpcVirtualHostsFlag.Name)),
@@ -486,13 +550,21 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		RpcStreamingDisable:               ctx.Bool(utils.RpcStreamingDisableFlag.Name),
 		DBReadConcurrency:                 ctx.Int(utils.DBReadConcurrencyFlag.Name),
 		RpcAllowListFilePath:              ctx.String(utils.RpcAccessListFlag.Name),
-		Gascap:                            ctx.Uint64(utils.RpcGasCapFlag.Name),
-		MaxTraces:                         ctx.Uint64(utils.TraceMaxtracesFlag.Name),
-		TraceCompatibility:                ctx.Bool(utils.RpcTraceCompatFlag.Name),
-		BatchLimit:                        ctx.Int(utils.RpcBatchLimit.Name),
-		ReturnDataLimit:                   ctx.Int(utils.RpcReturnDataLimit.Name),
-		AllowUnprotectedTxs:               ctx.Bool(utils.AllowUnprotectedTxs.Name),
-		MaxGetProofRewindBlockCount:       ctx.Int(utils.RpcMaxGetProofRewindBlockCount.Name),
+		RpcFiltersConfig: rpchelper.FiltersConfig{
+			RpcSubscriptionFiltersMaxLogs:      ctx.Int(RpcSubscriptionFiltersMaxLogsFlag.Name),
+			RpcSubscriptionFiltersMaxHeaders:   ctx.Int(RpcSubscriptionFiltersMaxHeadersFlag.Name),
+			RpcSubscriptionFiltersMaxTxs:       ctx.Int(RpcSubscriptionFiltersMaxTxsFlag.Name),
+			RpcSubscriptionFiltersMaxAddresses: ctx.Int(RpcSubscriptionFiltersMaxAddressesFlag.Name),
+			RpcSubscriptionFiltersMaxTopics:    ctx.Int(RpcSubscriptionFiltersMaxTopicsFlag.Name),
+		},
+		Gascap:                      ctx.Uint64(utils.RpcGasCapFlag.Name),
+		Feecap:                      ctx.Float64(utils.RPCGlobalTxFeeCapFlag.Name),
+		MaxTraces:                   ctx.Uint64(utils.TraceMaxtracesFlag.Name),
+		TraceCompatibility:          ctx.Bool(utils.RpcTraceCompatFlag.Name),
+		BatchLimit:                  ctx.Int(utils.RpcBatchLimit.Name),
+		ReturnDataLimit:             ctx.Int(utils.RpcReturnDataLimit.Name),
+		AllowUnprotectedTxs:         ctx.Bool(utils.AllowUnprotectedTxs.Name),
+		MaxGetProofRewindBlockCount: ctx.Int(utils.RpcMaxGetProofRewindBlockCount.Name),
 
 		OtsMaxPageSize: ctx.Uint64(utils.OtsSearchMaxCapFlag.Name),
 
@@ -533,6 +605,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		rootCmd.PersistentFlags().IntVar(&cfg.GRPCPort, "grpc.port", node.DefaultGRPCPort, "GRPC server listening port")
 		rootCmd.PersistentFlags().BoolVar(&cfg.GRPCHealthCheckEnabled, "grpc.healthcheck", false, "Enable GRPC health check")
 	*/
+
 	cfg.Http = *c
 }
 

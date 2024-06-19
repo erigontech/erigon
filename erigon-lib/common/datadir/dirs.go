@@ -108,7 +108,7 @@ func TryFlock(dirs Dirs) (*flock.Flock, bool, error) {
 }
 
 // ApplyMigrations - if can get flock.
-func ApplyMigrations(dirs Dirs) error {
+func ApplyMigrations(dirs Dirs) error { //nolint
 	need := downloaderV2MigrationNeeded(dirs)
 	if !need {
 		return nil
@@ -151,7 +151,7 @@ func downloaderV2Migration(dirs Dirs) error {
 
 // nolint
 func moveFiles(from, to string, ext string) error {
-	files, err := os.ReadDir(from)
+	files, err := dir.ReadDir(from)
 	if err != nil {
 		return fmt.Errorf("ReadDir: %w, %s", err, from)
 	}

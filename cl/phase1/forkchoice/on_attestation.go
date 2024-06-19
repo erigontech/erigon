@@ -14,7 +14,11 @@ var (
 )
 
 // OnAttestation processes incoming attestations.
-func (f *ForkChoiceStore) OnAttestation(attestation *solid.Attestation, fromBlock bool, insert bool) error {
+func (f *ForkChoiceStore) OnAttestation(
+	attestation *solid.Attestation,
+	fromBlock bool,
+	insert bool,
+) error {
 	if !f.synced.Load() {
 		return nil
 	}
@@ -42,7 +46,11 @@ func (f *ForkChoiceStore) OnAttestation(attestation *solid.Attestation, fromBloc
 	target := data.Target()
 
 	if headState == nil {
-		attestationIndicies, err = f.verifyAttestationWithCheckpointState(target, attestation, fromBlock)
+		attestationIndicies, err = f.verifyAttestationWithCheckpointState(
+			target,
+			attestation,
+			fromBlock,
+		)
 	} else {
 		attestationIndicies, err = f.verifyAttestationWithState(headState, attestation, fromBlock)
 	}
@@ -56,7 +64,20 @@ func (f *ForkChoiceStore) OnAttestation(attestation *solid.Attestation, fromBloc
 	return nil
 }
 
-func (f *ForkChoiceStore) verifyAttestationWithCheckpointState(target solid.Checkpoint, attestation *solid.Attestation, fromBlock bool) (attestationIndicies []uint64, err error) {
+func (f *ForkChoiceStore) ProcessAttestingIndicies(
+	attestation *solid.Attestation,
+	attestionIndicies []uint64,
+) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.processAttestingIndicies(attestation, attestionIndicies)
+}
+
+func (f *ForkChoiceStore) verifyAttestationWithCheckpointState(
+	target solid.Checkpoint,
+	attestation *solid.Attestation,
+	fromBlock bool,
+) (attestationIndicies []uint64, err error) {
 	data := attestation.AttestantionData()
 	targetState, err := f.getCheckpointState(target)
 	if err != nil {
@@ -67,7 +88,10 @@ func (f *ForkChoiceStore) verifyAttestationWithCheckpointState(target solid.Chec
 		return nil, fmt.Errorf("target state does not exist")
 	}
 	// Now we need to find the attesting indicies.
-	attestationIndicies, err = targetState.getAttestingIndicies(&data, attestation.AggregationBits())
+	attestationIndicies, err = targetState.getAttestingIndicies(
+		&data,
+		attestation.AggregationBits(),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +112,11 @@ func (f *ForkChoiceStore) verifyAttestationWithCheckpointState(target solid.Chec
 	return attestationIndicies, nil
 }
 
-func (f *ForkChoiceStore) verifyAttestationWithState(s *state.CachingBeaconState, attestation *solid.Attestation, fromBlock bool) (attestationIndicies []uint64, err error) {
+func (f *ForkChoiceStore) verifyAttestationWithState(
+	s *state.CachingBeaconState,
+	attestation *solid.Attestation,
+	fromBlock bool,
+) (attestationIndicies []uint64, err error) {
 	data := attestation.AttestantionData()
 	if err != nil {
 		return nil, err
@@ -127,7 +155,8 @@ func (f *ForkChoiceStore) setLatestMessage(index uint64, message LatestMessage) 
 }
 
 func (f *ForkChoiceStore) getLatestMessage(validatorIndex uint64) (LatestMessage, bool) {
-	if validatorIndex >= uint64(len(f.latestMessages)) || f.latestMessages[validatorIndex] == (LatestMessage{}) {
+	if validatorIndex >= uint64(len(f.latestMessages)) ||
+		f.latestMessages[validatorIndex] == (LatestMessage{}) {
 		return LatestMessage{}, false
 	}
 	return f.latestMessages[validatorIndex], true
@@ -157,7 +186,10 @@ func (f *ForkChoiceStore) setUnequivocating(validatorIndex uint64) {
 	f.equivocatingIndicies[index] |= 1 << uint(subIndex)
 }
 
-func (f *ForkChoiceStore) processAttestingIndicies(attestation *solid.Attestation, indicies []uint64) {
+func (f *ForkChoiceStore) processAttestingIndicies(
+	attestation *solid.Attestation,
+	indicies []uint64,
+) {
 	beaconBlockRoot := attestation.AttestantionData().BeaconBlockRoot()
 	target := attestation.AttestantionData().Target()
 
@@ -184,7 +216,8 @@ func (f *ForkChoiceStore) ValidateOnAttestation(attestation *solid.Attestation) 
 	if _, has := f.forkGraph.GetHeader(target.BlockRoot()); !has {
 		return fmt.Errorf("target root is missing")
 	}
-	if blockHeader, has := f.forkGraph.GetHeader(attestation.AttestantionData().BeaconBlockRoot()); !has || blockHeader.Slot > attestation.AttestantionData().Slot() {
+	if blockHeader, has := f.forkGraph.GetHeader(attestation.AttestantionData().BeaconBlockRoot()); !has ||
+		blockHeader.Slot > attestation.AttestantionData().Slot() {
 		return fmt.Errorf("bad attestation data")
 	}
 	// LMD vote must be consistent with FFG vote target
@@ -200,7 +233,9 @@ func (f *ForkChoiceStore) ValidateOnAttestation(attestation *solid.Attestation) 
 	return nil
 }
 
-func (f *ForkChoiceStore) validateTargetEpochAgainstCurrentTime(attestation *solid.Attestation) error {
+func (f *ForkChoiceStore) validateTargetEpochAgainstCurrentTime(
+	attestation *solid.Attestation,
+) error {
 	target := attestation.AttestantionData().Target()
 	// Attestations must be from the current or previous epoch
 	currentEpoch := f.computeEpochAtSlot(f.Slot())

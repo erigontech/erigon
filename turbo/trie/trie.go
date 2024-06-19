@@ -23,7 +23,6 @@ import (
 	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -874,7 +873,7 @@ func (t *Trie) deleteRecursive(origNode node, key []byte, keyStart int, preserve
 	switch n := origNode.(type) {
 	case *shortNode:
 		matchlen := prefixLen(key[keyStart:], n.Key)
-		if matchlen == cmp.Min(len(n.Key), len(key[keyStart:])) || n.Key[matchlen] == 16 || key[keyStart+matchlen] == 16 {
+		if matchlen == min(len(n.Key), len(key[keyStart:])) || n.Key[matchlen] == 16 || key[keyStart+matchlen] == 16 {
 			fullMatch := matchlen == len(key)-keyStart
 			removeNodeEntirely := fullMatch
 			if preserveAccountNode {

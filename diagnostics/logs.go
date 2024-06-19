@@ -15,10 +15,15 @@ import (
 
 	"github.com/urfave/cli/v2"
 
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon/turbo/logging"
 )
 
 func SetupLogsAccess(ctx *cli.Context, metricsMux *http.ServeMux) {
+	if metricsMux == nil {
+		return
+	}
+
 	dirPath := ctx.String(logging.LogDirPathFlag.Name)
 	if dirPath == "" {
 		datadir := ctx.String("datadir")
@@ -40,7 +45,7 @@ func SetupLogsAccess(ctx *cli.Context, metricsMux *http.ServeMux) {
 }
 
 func writeLogsList(w http.ResponseWriter, dirPath string) {
-	entries, err := os.ReadDir(dirPath)
+	entries, err := dir.ReadDir(dirPath)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to list directory %s: %v", dirPath, err), http.StatusInternalServerError)
 		return
@@ -65,7 +70,7 @@ func writeLogsList(w http.ResponseWriter, dirPath string) {
 		Size int64  `json:"size"`
 	}
 
-	files := make([]file, len(infos))
+	files := make([]file, 0, len(infos))
 
 	for _, fileInfo := range infos {
 		files = append(files, file{Name: fileInfo.Name(), Size: fileInfo.Size()})

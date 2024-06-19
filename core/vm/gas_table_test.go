@@ -24,9 +24,18 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/ledgerwatch/erigon-lib/wrap"
+
+	"github.com/stretchr/testify/require"
+
+	state3 "github.com/ledgerwatch/erigon-lib/state"
 
 	"github.com/holiman/uint256"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
@@ -87,23 +96,52 @@ var eip2200Tests = []struct {
 	{1, 2307, "0x6001600055", 806, 0, nil},                                     // 1 -> 1 (2301 sentry + 2xPUSH)
 }
 
-func TestEIP2200(t *testing.T) {
+func testTemporalDB(t *testing.T) *temporal.DB {
+	db := memdb.NewStateDB(t.TempDir())
 
+	t.Cleanup(db.Close)
+
+	agg, err := state3.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, log.New())
+	require.NoError(t, err)
+	t.Cleanup(agg.Close)
+
+	_db, err := temporal.New(db, agg)
+	require.NoError(t, err)
+	return _db
+}
+
+func testTemporalTxSD(t *testing.T, db *temporal.DB) (kv.RwTx, *state3.SharedDomains) {
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+
+	sd, err := state3.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd.Close)
+
+	return tx, sd
+}
+
+func TestEIP2200(t *testing.T) {
 	for i, tt := range eip2200Tests {
 		tt := tt
 		i := i
 
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
 			t.Parallel()
-			address := libcommon.BytesToAddress([]byte("contract"))
-			_, tx := memdb.NewTestTx(t)
 
-			s := state.New(state.NewPlainStateReader(tx))
+			tx, sd := testTemporalTxSD(t, testTemporalDB(t))
+			defer tx.Rollback()
+
+			r, w := state.NewReaderV4(sd), state.NewWriterV4(sd)
+			s := state.New(r)
+
+			address := libcommon.BytesToAddress([]byte("contract"))
 			s.CreateAccount(address, true)
 			s.SetCode(address, hexutil.MustDecode(tt.input))
 			s.SetState(address, &libcommon.Hash{}, *uint256.NewInt(uint64(tt.original)))
 
-			_ = s.CommitBlock(params.AllProtocolChanges.Rules(0, 0), state.NewPlainStateWriter(tx, tx, 0))
+			_ = s.CommitBlock(params.AllProtocolChanges.Rules(0, 0), w)
 			vmctx := evmtypes.BlockContext{
 				CanTransfer: func(evmtypes.IntraBlockState, libcommon.Address, *uint256.Int) bool { return true },
 				Transfer:    func(evmtypes.IntraBlockState, libcommon.Address, libcommon.Address, *uint256.Int, bool) {},
@@ -141,15 +179,26 @@ var createGasTests = []struct {
 
 func TestCreateGas(t *testing.T) {
 	t.Parallel()
-	_, db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	for i, tt := range createGasTests {
 		address := libcommon.BytesToAddress([]byte("contract"))
 
-		tx, _ := db.BeginRw(context.Background())
+		tx, err := db.BeginRw(context.Background())
+		require.NoError(t, err)
 		defer tx.Rollback()
 
-		stateReader := rpchelper.NewLatestStateReader(tx)
-		stateWriter := rpchelper.NewLatestStateWriter(tx, 0)
+		var stateReader state.StateReader
+		var stateWriter state.StateWriter
+		var txc wrap.TxContainer
+		txc.Tx = tx
+
+		domains, err := state3.NewSharedDomains(tx, log.New())
+		require.NoError(t, err)
+		defer domains.Close()
+		txc.Doms = domains
+
+		stateReader = rpchelper.NewLatestStateReader(tx)
+		stateWriter = rpchelper.NewLatestStateWriter(txc, 0)
 
 		s := state.New(stateReader)
 		s.CreateAccount(address, true)

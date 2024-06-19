@@ -2,6 +2,7 @@ package health
 
 import (
 	"context"
+
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/ledgerwatch/erigon/rpc"

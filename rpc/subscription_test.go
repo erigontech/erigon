@@ -24,7 +24,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 func TestNewID(t *testing.T) {
@@ -56,7 +56,7 @@ func TestSubscriptions(t *testing.T) {
 		subCount          = len(namespaces)
 		notificationCount = 3
 
-		server                 = NewServer(50, false /* traceRequests */, true, logger, 100)
+		server                 = NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, true, logger, 100)
 		clientConn, serverConn = net.Pipe()
 		out                    = json.NewEncoder(clientConn)
 		in                     = json.NewDecoder(clientConn)

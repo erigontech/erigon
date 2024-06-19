@@ -331,6 +331,8 @@ func (txw *BlobTxWrapper) RawSignatureValues() (*uint256.Int, *uint256.Int, *uin
 	return txw.Tx.RawSignatureValues()
 }
 
+func (txw *BlobTxWrapper) cashedSender() (libcommon.Address, bool) { return txw.Tx.cashedSender() }
+
 func (txw *BlobTxWrapper) Sender(s Signer) (libcommon.Address, error) { return txw.Tx.Sender(s) }
 
 func (txw *BlobTxWrapper) GetSender() (libcommon.Address, bool) { return txw.Tx.GetSender() }

@@ -4,10 +4,11 @@ import (
 	"encoding/json"
 	"os"
 
+	"github.com/urfave/cli/v2"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/debug"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/utils"
@@ -37,7 +38,7 @@ It expects the genesis file as argument.`,
 func initGenesis(cliCtx *cli.Context) error {
 	var logger log.Logger
 	var err error
-	if logger, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+	if logger, _, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
 	// Make sure we have a valid genesis JSON

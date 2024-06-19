@@ -22,7 +22,7 @@ import (
 	"unsafe"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 type TemporaryMdbx struct {
@@ -36,7 +36,7 @@ func NewTemporaryMdbx(ctx context.Context, tempdir string) (kv.RwDB, error) {
 		return &TemporaryMdbx{}, err
 	}
 
-	db, err := NewMDBX(log.New()).Label(kv.InMem).Path(path).Open(ctx)
+	db, err := NewMDBX(log.Root()).Label(kv.InMem).Label(kv.InMem).Path(path).Open(ctx)
 	if err != nil {
 		return &TemporaryMdbx{}, err
 	}

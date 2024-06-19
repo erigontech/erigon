@@ -28,17 +28,19 @@ import (
 	"path/filepath"
 
 	"github.com/holiman/uint256"
+	"github.com/urfave/cli/v2"
+
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli/v2"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/ledgerwatch/erigon/eth/consensuschain"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/merge"
@@ -47,12 +49,10 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	trace_logger "github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/tests"
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
-	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
 const (
@@ -238,7 +238,11 @@ func Main(ctx *cli.Context) error {
 	}
 
 	if chainConfig.IsShanghai(prestate.Env.Timestamp) && prestate.Env.Withdrawals == nil {
-		return NewError(ErrorVMConfig, errors.New("Shanghai config but missing 'withdrawals' in env section"))
+		return NewError(ErrorVMConfig, errors.New("shanghai config but missing 'withdrawals' in env section"))
+	}
+
+	if chainConfig.IsPrague(prestate.Env.Timestamp) && prestate.Env.Requests == nil {
+		return NewError(ErrorVMConfig, errors.New("prague config but missing 'requests' in env section"))
 	}
 
 	isMerged := chainConfig.TerminalTotalDifficulty != nil && chainConfig.TerminalTotalDifficulty.BitLen() == 0
@@ -279,7 +283,7 @@ func Main(ctx *cli.Context) error {
 		ommerN.SetUint64(header.Number.Uint64() - ommer.Delta)
 		ommerHeaders[i] = &types.Header{Coinbase: ommer.Address, Number: &ommerN}
 	}
-	block := types.NewBlock(header, txs, ommerHeaders, nil /* receipts */, prestate.Env.Withdrawals)
+	block := types.NewBlock(header, txs, ommerHeaders, nil /* receipts */, prestate.Env.Withdrawals, prestate.Env.Requests)
 
 	var hashError error
 	getHash := func(num uint64) libcommon.Hash {
@@ -294,7 +298,7 @@ func Main(ctx *cli.Context) error {
 		return h
 	}
 
-	_, db, _ := temporaltest.NewTestDB(nil, datadir.New(""))
+	db, _ := temporaltest.NewTestDB(nil, datadir.New(""))
 	defer db.Close()
 
 	tx, err := db.BeginRw(context.Background())
@@ -303,15 +307,20 @@ func Main(ctx *cli.Context) error {
 	}
 	defer tx.Rollback()
 
-	reader, writer := MakePreState(chainConfig.Rules(0, 0), tx, prestate.Pre)
+	sd, err := libstate.NewSharedDomains(tx, log.New())
+	if err != nil {
+		return err
+	}
+	defer sd.Close()
+
+	reader, writer := MakePreState(chainConfig.Rules(0, 0), tx, sd, prestate.Pre)
 	// Merge engine can be used for pre-merge blocks as well, as it
 	// redirects to the ethash engine based on the block number
 	engine := merge.New(&ethash.FakeEthash{})
 
 	t8logger := log.New("t8ntool")
-	chainReader := stagedsync.NewChainReaderImpl(chainConfig, tx, nil, t8logger)
+	chainReader := consensuschain.NewReader(chainConfig, tx, nil, t8logger)
 	result, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, chainReader, getTracer, t8logger)
-
 	if hashError != nil {
 		return NewError(ErrorMissingBlockhash, fmt.Errorf("blockhash error: %v", err))
 	}
@@ -331,11 +340,7 @@ func Main(ctx *cli.Context) error {
 	body, _ := rlp.EncodeToBytes(txs)
 	collector := make(Alloc)
 
-	historyV3, err := kvcfg.HistoryV3.Enabled(tx)
-	if err != nil {
-		return err
-	}
-	dumper := state.NewDumper(tx, prestate.Env.Number, historyV3)
+	dumper := state.NewDumper(tx, prestate.Env.Number)
 	dumper.DumpToCollector(collector, false, false, libcommon.Address{}, 0)
 	return dispatchOutput(ctx, baseDir, result, collector, body)
 }
@@ -599,6 +604,7 @@ func NewHeader(env stEnv) *types.Header {
 
 	header.UncleHash = env.UncleHash
 	header.WithdrawalsHash = env.WithdrawalsHash
+	header.RequestsRoot = env.RequestsRoot
 
 	return &header
 }
@@ -611,6 +617,12 @@ func CalculateStateRoot(tx kv.RwTx) (*libcommon.Hash, error) {
 	}
 	h := libcommon.NewHasher()
 	defer libcommon.ReturnHasherToPool(h)
+	domains, err := libstate.NewSharedDomains(tx, log.New())
+	if err != nil {
+		return nil, fmt.Errorf("NewSharedDomains: %w", err)
+	}
+	defer domains.Close()
+
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return nil, fmt.Errorf("interate over plain state: %w", err)
@@ -643,10 +655,12 @@ func CalculateStateRoot(tx kv.RwTx) (*libcommon.Hash, error) {
 		}
 	}
 	c.Close()
-	root, err := trie.CalcRoot("", tx)
+	root, err := domains.ComputeCommitment(context.Background(), true, domains.BlockNum(), "")
 	if err != nil {
 		return nil, err
 	}
+	hashRoot := libcommon.Hash{}
+	hashRoot.SetBytes(root)
 
-	return &root, nil
+	return &hashRoot, nil
 }

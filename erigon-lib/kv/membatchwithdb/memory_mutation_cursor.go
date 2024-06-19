@@ -55,6 +55,9 @@ func (m *memoryMutationCursor) isTableCleared() bool {
 }
 
 func (m *memoryMutationCursor) isEntryDeleted(key []byte, value []byte, t NextType) bool {
+	if m.pureDupSort {
+		return m.mutation.isDupDeleted(m.table, key, value)
+	}
 	if t == Normal {
 		return m.mutation.isEntryDeleted(m.table, key)
 	} else {
@@ -286,32 +289,12 @@ func (m *memoryMutationCursor) Seek(seek []byte) ([]byte, []byte, error) {
 
 // Seek move pointer to a key at a certain position.
 func (m *memoryMutationCursor) SeekExact(seek []byte) ([]byte, []byte, error) {
-	memKey, memValue, err := m.memCursor.SeekExact(seek)
-	if err != nil || m.isTableCleared() {
-		return memKey, memValue, err
-	}
-
-	if memKey != nil {
-		m.currentMemEntry.key = memKey
-		m.currentMemEntry.value = memValue
-		m.currentDbEntry.key, m.currentDbEntry.value, err = m.cursor.Seek(seek)
-		m.isPrevFromDb = false
-		m.currentPair = cursorEntry{memKey, memValue}
-		return memKey, memValue, err
-	}
-
-	dbKey, dbValue, err := m.cursor.SeekExact(seek)
+	k, v, err := m.Seek(seek)
 	if err != nil {
 		return nil, nil, err
 	}
-
-	if dbKey != nil && !m.mutation.isEntryDeleted(m.table, seek) {
-		m.currentDbEntry.key = dbKey
-		m.currentDbEntry.value = dbValue
-		m.currentMemEntry.key, m.currentMemEntry.value, err = m.memCursor.Seek(seek)
-		m.isPrevFromDb = true
-		m.currentPair = cursorEntry{dbKey, dbValue}
-		return dbKey, dbValue, err
+	if k != nil && bytes.Equal(k, seek) {
+		return k, v, nil
 	}
 	return nil, nil, nil
 }
@@ -345,8 +328,9 @@ func (m *memoryMutationCursor) DeleteCurrent() error {
 	return nil
 }
 
-func (m *memoryMutationCursor) DeleteExact(_, _ []byte) error {
-	panic("DeleteExact Not implemented")
+func (m *memoryMutationCursor) DeleteExact(k, v []byte) error {
+	m.mutation.deleteDup(m.table, k, v)
+	return nil
 }
 
 func (m *memoryMutationCursor) DeleteCurrentDuplicates() error {
@@ -470,8 +454,17 @@ func (m *memoryMutationCursor) Close() {
 	}
 }
 
+// Count does not return accurate count, but overestimates
 func (m *memoryMutationCursor) Count() (uint64, error) {
-	panic("Not implemented")
+	cMem, err := m.memCursor.Count()
+	if err != nil {
+		return 0, err
+	}
+	cDb, err := m.cursor.Count()
+	if err != nil {
+		return 0, err
+	}
+	return cMem + cDb, nil
 }
 
 func (m *memoryMutationCursor) FirstDup() ([]byte, error) {

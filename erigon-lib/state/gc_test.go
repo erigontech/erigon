@@ -5,9 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 func TestGCReadAfterRemoveFile(t *testing.T) {
@@ -19,7 +20,7 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
 		t.Helper()
 		require := require.New(t)
-		collateAndMergeHistory(t, db, h, txs)
+		collateAndMergeHistory(t, db, h, txs, true)
 
 		t.Run("read after: remove when have reader", func(t *testing.T) {
 			tx, err := db.BeginRo(ctx)
@@ -33,11 +34,12 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 			// - open new view
 			// - make sure there is no canDelete file
 			hc := h.BeginFilesRo()
-			_ = hc
+
 			lastOnFs, _ := h.dirtyFiles.Max()
 			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
 			h.integrateMergedFiles(nil, []*filesItem{lastOnFs}, nil, nil)
 			require.NotNil(lastOnFs.decompressor)
+			h.reCalcVisibleFiles()
 
 			lastInView := hc.files[len(hc.files)-1]
 			g := lastInView.src.decompressor.MakeGetter()
@@ -85,11 +87,11 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 		})
 	}
 	t.Run("large_values", func(t *testing.T) {
-		_, db, h, txs := filledHistory(t, true, logger)
+		db, h, txs := filledHistory(t, true, logger)
 		test(t, h, db, txs)
 	})
 	t.Run("small_values", func(t *testing.T) {
-		_, db, h, txs := filledHistory(t, false, logger)
+		db, h, txs := filledHistory(t, false, logger)
 		test(t, h, db, txs)
 	})
 }
@@ -119,8 +121,9 @@ func TestDomainGCReadAfterRemoveFile(t *testing.T) {
 			_ = hc
 			lastOnFs, _ := h.dirtyFiles.Max()
 			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
-			h.integrateMergedFiles([]*filesItem{lastOnFs}, nil, nil, nil, nil, nil)
+			h.integrateMergedDirtyFiles([]*filesItem{lastOnFs}, nil, nil, nil, nil, nil)
 			require.NotNil(lastOnFs.decompressor)
+			h.reCalcVisibleFiles()
 
 			lastInView := hc.files[len(hc.files)-1]
 			g := lastInView.src.decompressor.MakeGetter()
@@ -159,7 +162,8 @@ func TestDomainGCReadAfterRemoveFile(t *testing.T) {
 			hc := h.BeginFilesRo()
 			lastOnFs, _ := h.dirtyFiles.Max()
 			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
-			h.integrateMergedFiles([]*filesItem{lastOnFs}, nil, nil, nil, nil, nil)
+			h.integrateMergedDirtyFiles([]*filesItem{lastOnFs}, nil, nil, nil, nil, nil)
+			h.reCalcVisibleFiles()
 
 			require.NotNil(lastOnFs.decompressor)
 			hc.Close()
@@ -167,6 +171,6 @@ func TestDomainGCReadAfterRemoveFile(t *testing.T) {
 		})
 	}
 	logger := log.New()
-	_, db, d, txs := filledDomain(t, logger)
+	db, d, txs := filledDomain(t, logger)
 	test(t, d, db, txs)
 }

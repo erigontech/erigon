@@ -25,7 +25,9 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -40,7 +42,7 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
-const DEBUG_LOG_FROM = 999_999_999
+var DEBUG_LOG_FROM = uint64(dbg.EnvInt("AURA_DEBUG_FROM", 999_999_999))
 
 /*
 Not implemented features from OS:
@@ -359,6 +361,9 @@ func (c *AuRa) Author(header *types.Header) (libcommon.Address, error) {
 // VerifyHeader checks whether a header conforms to the consensus rules.
 func (c *AuRa) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, _ bool) error {
 	number := header.Number.Uint64()
+	if number == 0 {
+		return nil
+	}
 	parent := chain.GetHeader(header.ParentHash, number-1)
 	if parent == nil {
 		log.Error("consensus.ErrUnknownAncestor", "parentNum", number-1, "hash", header.ParentHash.String())
@@ -699,11 +704,11 @@ func (c *AuRa) applyRewards(header *types.Header, state *state.IntraBlockState, 
 
 // word `signal epoch` == word `pending epoch`
 func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState, txs types.Transactions,
-	uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
+	uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests,
 	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
-) (types.Transactions, types.Receipts, error) {
+) (types.Transactions, types.Receipts, types.Requests, error) {
 	if err := c.applyRewards(header, state, syscall); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// check_and_lock_block -> check_epoch_end_signal (after enact)
@@ -712,14 +717,14 @@ func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state
 	}
 	pendingTransitionProof, err := c.cfg.Validators.signalEpochEnd(header.Number.Uint64() == 0, header, receipts)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if pendingTransitionProof != nil {
 		if header.Number.Uint64() >= DEBUG_LOG_FROM {
 			fmt.Printf("insert_pending_transition: %d,receipts=%d, lenProof=%d\n", header.Number.Uint64(), len(receipts), len(pendingTransitionProof))
 		}
 		if err = c.e.PutPendingEpoch(header.Hash(), header.Number.Uint64(), pendingTransitionProof); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 	}
 	// check_and_lock_block -> check_epoch_end_signal END
@@ -728,17 +733,17 @@ func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state
 	c.EpochManager.finalityChecker.print(header.Number.Uint64())
 	epochEndProof, err := isEpochEnd(chain, c.e, finalized, header)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if epochEndProof != nil {
 		c.EpochManager.noteNewEpoch()
 		logger.Info("[aura] epoch transition", "block_num", header.Number.Uint64())
 		if err := c.e.PutEpoch(header.Hash(), header.Number.Uint64(), epochEndProof); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 	}
 
-	return txs, receipts, nil
+	return txs, receipts, nil, nil
 }
 
 func buildFinality(e *EpochManager, chain consensus.ChainHeaderReader, er *NonTransactionalEpochReader, validators ValidatorSet, header *types.Header, syscall consensus.SystemCall) []unAssembledHeader {
@@ -838,14 +843,14 @@ func allHeadersUntil(chain consensus.ChainHeaderReader, from *types.Header, to l
 //}
 
 // FinalizeAndAssemble implements consensus.Engine
-func (c *AuRa) FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState, txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger) (*types.Block, types.Transactions, types.Receipts, error) {
-	outTxs, outReceipts, err := c.Finalize(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall, logger)
+func (c *AuRa) FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState, txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger) (*types.Block, types.Transactions, types.Receipts, error) {
+	outTxs, outReceipts, _, err := c.Finalize(config, header, state, txs, uncles, receipts, withdrawals, requests, chain, syscall, logger)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
 	// Assemble and return the final block for sealing
-	return types.NewBlock(header, outTxs, uncles, outReceipts, withdrawals), outTxs, outReceipts, nil
+	return types.NewBlock(header, outTxs, uncles, outReceipts, withdrawals, requests), outTxs, outReceipts, nil
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks

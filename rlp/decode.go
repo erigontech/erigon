@@ -28,7 +28,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/holiman/uint256"
 )
@@ -672,6 +672,11 @@ func NewListStream(r io.Reader, len uint64) *Stream {
 	return s
 }
 
+// Remaining returns number of bytes remaining to be read
+func (s *Stream) Remaining() uint64 {
+	return s.remaining
+}
+
 // Bytes reads an RLP string and returns its contents as a byte slice.
 // If the input does not contain an RLP string, the returned
 // error will be ErrExpectedString.
@@ -1058,9 +1063,7 @@ func (s *Stream) readUint(size byte) (uint64, error) {
 		return uint64(b), err
 	default:
 		buffer := s.uintbuf[:8]
-		for i := range buffer {
-			buffer[i] = 0
-		}
+		clear(buffer)
 		start := int(8 - size)
 		if err := s.readFull(buffer[start:]); err != nil {
 			return 0, err

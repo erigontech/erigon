@@ -20,11 +20,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/gossip"
-	"github.com/ledgerwatch/log/v3"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
+
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/ledgerwatch/erigon/cl/gossip"
 )
 
 const (
@@ -519,13 +520,9 @@ func (sub *GossipSubscription) Listen() {
 			case <-sub.ctx.Done():
 				return
 			case <-checkingInterval.C:
-
 				expirationTime := sub.expiration.Load().(time.Time)
 				if sub.subscribed.Load() && time.Now().After(expirationTime) {
 					sub.stopCh <- struct{}{}
-					if cancelFunc := sub.cf; cancelFunc != nil {
-						cancelFunc() // stop pubsub.Subscription.Next
-					}
 					sub.topic.Close()
 					sub.subscribed.Store(false)
 					log.Info("[Gossip] Unsubscribed from topic", "topic", sub.sub.Topic())

@@ -14,7 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	syncpoolmock "github.com/ledgerwatch/erigon/cl/validator/sync_contribution_pool/mock_services"
 	"github.com/stretchr/testify/require"
-	gomock "go.uber.org/mock/gomock"
+	"go.uber.org/mock/gomock"
 )
 
 func setupSyncContributionServiceTest(t *testing.T, ctrl *gomock.Controller) (SyncContributionService, *synced_data.SyncedDataManager, *eth_clock.MockEthereumClock) {

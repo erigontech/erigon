@@ -17,6 +17,7 @@
 package tests
 
 import (
+	context2 "context"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -26,16 +27,20 @@ import (
 	"strings"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/config3"
 	"golang.org/x/crypto/sha3"
+
+	"github.com/ledgerwatch/erigon-lib/config3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	state2 "github.com/ledgerwatch/erigon-lib/state"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/erigon-lib/wrap"
 
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
@@ -45,8 +50,6 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/turbo/trie"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // StateTest checks transaction processing without block context.
@@ -159,21 +162,21 @@ func (t *StateTest) Subtests() []StateSubtest {
 }
 
 // Run executes a specific subtest and verifies the post-state and logs
-func (t *StateTest) Run(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, error) {
+func (t *StateTest) Run(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, libcommon.Hash, error) {
 	state, root, err := t.RunNoVerify(tx, subtest, vmconfig)
 	if err != nil {
-		return state, err
+		return state, types.EmptyRootHash, err
 	}
 	post := t.json.Post[subtest.Fork][subtest.Index]
 	// N.B: We need to do this in a two-step process, because the first Commit takes care
 	// of suicides, and we need to touch the coinbase _after_ it has potentially suicided.
 	if root != libcommon.Hash(post.Root) {
-		return state, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
+		return state, root, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
 	}
 	if logs := rlpHash(state.Logs()); logs != libcommon.Hash(post.Logs) {
-		return state, fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
+		return state, root, fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
 	}
-	return state, nil
+	return state, root, nil
 }
 
 // RunNoVerify runs a specific subtest and returns the statedb and post-state root
@@ -191,20 +194,27 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	readBlockNr := block.NumberU64()
 	writeBlockNr := readBlockNr + 1
 
-	_, err = MakePreState(&chain.Rules{}, tx, t.json.Pre, readBlockNr)
+	_, err = MakePreState(&chain.Rules{}, tx, t.json.Pre, readBlockNr, config3.EnableHistoryV4InTest)
 	if err != nil {
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 
-	r := rpchelper.NewLatestStateReader(tx)
-	statedb := state.New(r)
-
+	var r state.StateReader
 	var w state.StateWriter
+	var domains *state2.SharedDomains
+	var txc wrap.TxContainer
+	txc.Tx = tx
 	if config3.EnableHistoryV4InTest {
-		panic("implement me")
-	} else {
-		w = state.NewPlainStateWriter(tx, nil, writeBlockNr)
+		domains, err = state2.NewSharedDomains(tx, log.New())
+		if err != nil {
+			return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
+		}
+		defer domains.Close()
+		txc.Doms = domains
 	}
+	r = rpchelper.NewLatestStateReader(tx)
+	w = rpchelper.NewLatestStateWriter(txc, writeBlockNr)
+	statedb := state.New(r)
 
 	var baseFee *big.Int
 	if config.IsLondon(0) {
@@ -233,8 +243,8 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 
 	// Prepare the EVM.
 	txContext := core.NewEVMTxContext(msg)
-	header := block.Header()
-	context := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &t.json.Env.Coinbase)
+	header := block.HeaderNoCopy()
+	context := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &t.json.Env.Coinbase, config)
 	context.GetHash = vmTestBlockHash
 	if baseFee != nil {
 		context.BaseFee = new(uint256.Int)
@@ -259,6 +269,15 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	}
 	if err = statedb.CommitBlock(evm.ChainRules(), w); err != nil {
 		return nil, libcommon.Hash{}, err
+	}
+
+	if config3.EnableHistoryV4InTest {
+		var root libcommon.Hash
+		rootBytes, err := domains.ComputeCommitment(context2.Background(), false, header.Number.Uint64(), "")
+		if err != nil {
+			return statedb, root, fmt.Errorf("ComputeCommitment: %w", err)
+		}
+		return statedb, libcommon.BytesToHash(rootBytes), nil
 	}
 	// Generate hashed state
 	c, err := tx.RwCursor(kv.PlainState)
@@ -300,14 +319,14 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	}
 	c.Close()
 
-	root, err := trie.CalcRoot("", tx)
+	root, err := txc.Doms.ComputeCommitment(context2.Background(), true, writeBlockNr, "")
 	if err != nil {
 		return nil, libcommon.Hash{}, fmt.Errorf("error calculating state root: %w", err)
 	}
-	return statedb, root, nil
+	return statedb, libcommon.CastToHash(root), nil
 }
 
-func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
+func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, blockNr uint64, histV3 bool) (*state.IntraBlockState, error) {
 	r := rpchelper.NewLatestStateReader(tx)
 	statedb := state.New(r)
 	for addr, a := range accounts {
@@ -336,11 +355,21 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, b
 	}
 
 	var w state.StateWriter
+	var domains *state2.SharedDomains
+	var txc wrap.TxContainer
+	txc.Tx = tx
 	if config3.EnableHistoryV4InTest {
-		panic("implement me")
-	} else {
-		w = state.NewPlainStateWriter(tx, nil, blockNr+1)
+		var err error
+		domains, err = state2.NewSharedDomains(tx, log.New())
+		if err != nil {
+			return nil, err
+		}
+		defer domains.Close()
+		defer domains.Flush(context2.Background(), tx)
+		txc.Doms = domains
 	}
+	w = rpchelper.NewLatestStateWriter(txc, blockNr-1)
+
 	// Commit and re-open to start with a clean state.
 	if err := statedb.FinalizeTx(rules, w); err != nil {
 		return nil, err

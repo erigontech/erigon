@@ -9,14 +9,16 @@ import (
 	"io"
 	"sync/atomic"
 
-	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/ledgerwatch/erigon-lib/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -26,6 +28,8 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
+
+var _ services.FullBlockReader = &RemoteBackend{}
 
 type RemoteBackend struct {
 	remoteEthBackend remote.ETHBACKENDClient
@@ -92,6 +96,7 @@ func (back *RemoteBackend) BlockByHash(ctx context.Context, db kv.Tx, hash commo
 func (back *RemoteBackend) TxsV3Enabled() bool                    { panic("not implemented") }
 func (back *RemoteBackend) Snapshots() services.BlockSnapshots    { panic("not implemented") }
 func (back *RemoteBackend) BorSnapshots() services.BlockSnapshots { panic("not implemented") }
+func (back *RemoteBackend) AllTypes() []snaptype.Type             { panic("not implemented") }
 func (back *RemoteBackend) FrozenBlocks() uint64                  { return back.blockReader.FrozenBlocks() }
 func (back *RemoteBackend) FrozenBorBlocks() uint64               { return back.blockReader.FrozenBorBlocks() }
 func (back *RemoteBackend) FrozenFiles() (list []string)          { return back.blockReader.FrozenFiles() }
@@ -252,7 +257,7 @@ func (back *RemoteBackend) BlockWithSenders(ctx context.Context, tx kv.Getter, h
 	return back.blockReader.BlockWithSenders(ctx, tx, hash, blockNum)
 }
 
-func (back *RemoteBackend) IterateFrozenBodies(_ func(blockNum uint64, baseTxNum uint64, txAmount uint64) error) error {
+func (back *RemoteBackend) IterateFrozenBodies(_ func(blockNum uint64, baseTxNum uint64, txCount uint64) error) error {
 	panic("not implemented")
 }
 
@@ -262,7 +267,7 @@ func (back *RemoteBackend) BodyWithTransactions(ctx context.Context, tx kv.Gette
 func (back *RemoteBackend) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bodyRlp rlp.RawValue, err error) {
 	return back.blockReader.BodyRlp(ctx, tx, hash, blockNum)
 }
-func (back *RemoteBackend) Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, txAmount uint32, err error) {
+func (back *RemoteBackend) Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, txCount uint32, err error) {
 	return back.blockReader.Body(ctx, tx, hash, blockNum)
 }
 func (back *RemoteBackend) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.Header, error) {

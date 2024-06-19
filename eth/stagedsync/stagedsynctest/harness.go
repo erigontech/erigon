@@ -12,9 +12,10 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -60,6 +61,8 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		nil, // loopBreakCheck
 		nil, // recent bor snapshots cached
 		nil, // signatures lru cache
+		false,
+		nil,
 	)
 	stateSyncStages := stagedsync.DefaultStages(
 		ctx,
@@ -90,9 +93,9 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		ctx,
 		stagedsync.MiningCreateBlockCfg{},
 		bhCfg,
+		stagedsync.ExecuteBlockCfg{},
+		stagedsync.SendersCfg{},
 		stagedsync.MiningExecCfg{},
-		stagedsync.HashStateCfg{},
-		stagedsync.TrieCfg{},
 		stagedsync.MiningFinishCfg{},
 	)
 	miningSync := stagedsync.New(
@@ -651,6 +654,13 @@ func (h *Harness) mockHeimdallClient() {
 			return []*heimdall.EventRecordWithTime{&newEvent}, nil
 		}).
 		AnyTimes()
+	h.heimdallClient.
+		EXPECT().
+		FetchStateSyncEvent(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ uint64) (*heimdall.EventRecordWithTime, error) {
+			return nil, heimdall.ErrEventRecordNotFound
+		}).
+		AnyTimes()
 }
 
 func (h *Harness) runSyncStageForwardWithErrorIs(
@@ -678,10 +688,10 @@ func (h *Harness) runSyncStageForwardWithReturnError(
 	stage, found := h.findSyncStageByID(id, syncStages)
 	require.True(t, found)
 
-	stageState, err := sync.StageState(id, txc.Tx, h.chainDataDB)
+	stageState, err := sync.StageState(id, txc.Tx, h.chainDataDB, true, false)
 	require.NoError(t, err)
 
-	return stage.Forward(true, false, stageState, sync, txc, h.logger)
+	return stage.Forward(false, stageState, sync, txc, h.logger)
 }
 
 func (h *Harness) findSyncStageByID(id stages.SyncStage, syncStages []*stagedsync.Stage) (*stagedsync.Stage, bool) {

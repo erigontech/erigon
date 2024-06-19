@@ -9,10 +9,10 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/ledgerwatch/erigon/core"
@@ -49,16 +49,16 @@ func TestEthSubscribe(t *testing.T) {
 	backendServer := privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications.Events, m.BlockReader, logger, builder.NewLatestBlockBuiltStore())
 	backendClient := direct.NewEthBackendClientDirect(backendServer)
 	backend := rpcservices.NewRemoteBackend(backendClient, m.DB, m.BlockReader)
-	ff := rpchelper.New(ctx, backend, nil, nil, func() {}, m.Log)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, backend, nil, nil, func() {}, m.Log)
 
 	newHeads, id := ff.SubscribeNewHeads(16)
 	defer ff.UnsubscribeHeads(id)
 
-	initialCycle := mock.MockInsertAsInitialCycle
+	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
 	highestSeenHeader := chain.TopBlock.NumberU64()
 
 	hook := stages.NewHook(m.Ctx, m.DB, m.Notifications, m.Sync, m.BlockReader, m.ChainConfig, m.Log, nil)
-	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.TxContainer{}, m.Sync, initialCycle, logger, m.BlockReader, hook, false); err != nil {
+	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.TxContainer{}, m.Sync, initialCycle, firstCycle, logger, m.BlockReader, hook); err != nil {
 		t.Fatal(err)
 	}
 

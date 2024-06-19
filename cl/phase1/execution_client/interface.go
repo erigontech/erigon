@@ -16,9 +16,9 @@ var errContextExceeded = "rpc error: code = DeadlineExceeded desc = context dead
 // ExecutionEngine is used only for syncing up very close to chain tip and to stay in sync.
 // It pretty much mimics engine API.
 
-//go:generate mockgen -source=./interface.go -destination=./execution_engine_mock.go -package=execution_client . ExecutionEngine
+//go:generate mockgen -typed=true -source=./interface.go -destination=./execution_engine_mock.go -package=execution_client . ExecutionEngine
 type ExecutionEngine interface {
-	NewPayload(ctx context.Context, payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash, versionedHashes []libcommon.Hash) (bool, error)
+	NewPayload(ctx context.Context, payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash, versionedHashes []libcommon.Hash) (PayloadStatus, error)
 	ForkChoiceUpdate(ctx context.Context, finalized libcommon.Hash, head libcommon.Hash, attributes *engine_types.PayloadAttributes) ([]byte, error)
 	SupportInsertion() bool
 	InsertBlocks(ctx context.Context, blocks []*types.Block, wait bool) error

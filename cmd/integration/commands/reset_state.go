@@ -9,15 +9,15 @@ import (
 	"text/tabwriter"
 
 	"github.com/ledgerwatch/erigon-lib/kv/backup"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
+
+	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/core/rawdb/rawdbhelpers"
 	reset2 "github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
@@ -121,16 +121,12 @@ func printStages(tx kv.Tx, snapshots *freezeblocks.RoSnapshots, borSn *freezeblo
 	}
 	fmt.Fprintf(w, "--\n")
 	fmt.Fprintf(w, "prune distance: %s\n\n", pm.String())
-	fmt.Fprintf(w, "blocks.v2: %t, blocks=%d, segments=%d, indices=%d\n", snapshots.Cfg().Enabled, snapshots.BlocksAvailable(), snapshots.SegmentsMax(), snapshots.IndicesMax())
+	fmt.Fprintf(w, "blocks.v2: %t, segments=%d, indices=%d\n", snapshots.Cfg().Enabled, snapshots.SegmentsMax(), snapshots.IndicesMax())
 	fmt.Fprintf(w, "blocks.bor.v2: segments=%d, indices=%d\n\n", borSn.SegmentsMax(), borSn.IndicesMax())
-	h3, err := kvcfg.HistoryV3.Enabled(tx)
-	if err != nil {
-		return err
-	}
 
 	_, lastBlockInHistSnap, _ := rawdbv3.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
 	_lb, _lt, _ := rawdbv3.TxNums.Last(tx)
-	fmt.Fprintf(w, "history.v3: %t,  idx steps: %.02f, lastBlockInSnap=%d, TxNums_Index(%d,%d)\n\n", h3, rawdbhelpers.IdxStepsCountV3(tx), lastBlockInHistSnap, _lb, _lt)
+	fmt.Fprintf(w, "state.history: idx steps: %.02f, lastBlockInSnap=%d, TxNums_Index(%d,%d), filesAmount: %d\n\n", rawdbhelpers.IdxStepsCountV3(tx), lastBlockInHistSnap, _lb, _lt, agg.FilesAmount())
 	s1, err := tx.ReadSequence(kv.EthTx)
 	if err != nil {
 		return err

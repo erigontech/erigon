@@ -14,6 +14,8 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
+//go:build integration_skip
+
 package discover
 
 import (
@@ -29,10 +31,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
-	"github.com/ledgerwatch/log/v3"
 )
 
 var nullNode *enode.Node

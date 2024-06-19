@@ -9,20 +9,21 @@ import (
 	"testing"
 
 	"github.com/golang/snappy"
+	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/protocol"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/libp2p/go-libp2p"
-	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-libp2p/core/protocol"
-	"github.com/stretchr/testify/require"
 )
 
 func TestLightClientOptimistic(t *testing.T) {
@@ -45,7 +46,7 @@ func TestLightClientOptimistic(t *testing.T) {
 	peersPool := peers.NewPool()
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := forkchoice.NewForkChoiceStorageMock(t)
+	f := mock_services.NewForkChoiceStorageMock(t)
 
 	f.NewestLCUpdate = &cltypes.LightClientUpdate{
 		AttestedHeader:    cltypes.NewLightClientHeader(clparams.AltairVersion),
@@ -115,7 +116,7 @@ func TestLightClientFinality(t *testing.T) {
 	peersPool := peers.NewPool()
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := forkchoice.NewForkChoiceStorageMock(t)
+	f := mock_services.NewForkChoiceStorageMock(t)
 
 	f.NewestLCUpdate = &cltypes.LightClientUpdate{
 		AttestedHeader:    cltypes.NewLightClientHeader(clparams.AltairVersion),
@@ -188,7 +189,7 @@ func TestLightClientBootstrap(t *testing.T) {
 	peersPool := peers.NewPool()
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := forkchoice.NewForkChoiceStorageMock(t)
+	f := mock_services.NewForkChoiceStorageMock(t)
 
 	f.NewestLCUpdate = &cltypes.LightClientUpdate{
 		AttestedHeader:    cltypes.NewLightClientHeader(clparams.AltairVersion),
@@ -270,7 +271,7 @@ func TestLightClientUpdates(t *testing.T) {
 	peersPool := peers.NewPool()
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := forkchoice.NewForkChoiceStorageMock(t)
+	f := mock_services.NewForkChoiceStorageMock(t)
 	ethClock := getEthClock(t)
 
 	up := &cltypes.LightClientUpdate{

@@ -3,7 +3,7 @@ package sync
 import (
 	"context"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
@@ -71,13 +71,13 @@ type TipEvents struct {
 	logger          log.Logger
 	events          *EventChannel[Event]
 	p2pService      p2p.Service
-	heimdallService heimdall.HeimdallNoStore
+	heimdallService heimdall.Heimdall
 }
 
 func NewTipEvents(
 	logger log.Logger,
 	p2pService p2p.Service,
-	heimdallService heimdall.HeimdallNoStore,
+	heimdallService heimdall.Heimdall,
 ) *TipEvents {
 	eventsCapacity := uint(1000) // more than 3 milestones
 
@@ -118,25 +118,21 @@ func (te *TipEvents) Run(ctx context.Context) error {
 	})
 	defer newBlockHashesObserverCancel()
 
-	err := te.heimdallService.OnMilestoneEvent(ctx, func(milestone *heimdall.Milestone) {
+	milestoneObserverCancel := te.heimdallService.RegisterMilestoneObserver(func(milestone *heimdall.Milestone) {
 		te.events.PushEvent(Event{
 			Type:         EventTypeNewMilestone,
 			newMilestone: milestone,
 		})
 	})
-	if err != nil {
-		return err
-	}
+	defer milestoneObserverCancel()
 
-	err = te.heimdallService.OnSpanEvent(ctx, func(span *heimdall.Span) {
+	spanObserverCancel := te.heimdallService.RegisterSpanObserver(func(span *heimdall.Span) {
 		te.events.PushEvent(Event{
 			Type:    EventTypeNewSpan,
 			newSpan: span,
 		})
 	})
-	if err != nil {
-		return err
-	}
+	defer spanObserverCancel()
 
 	return te.events.Run(ctx)
 }

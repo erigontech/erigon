@@ -6,18 +6,20 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/semaphore"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
+	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/ledgerwatch/log/v3"
 )
 
 const safetyMargin = 2_000 // We retire snapshots 2k blocks after the finalized head
@@ -31,6 +33,7 @@ type Antiquary struct {
 	logger                log.Logger
 	sn                    *freezeblocks.CaplinSnapshots
 	snReader              freezeblocks.BeaconSnapshotReader
+	snBuildSema           *semaphore.Weighted // semaphore for building only one type (blocks, caplin, v3) at a time
 	ctx                   context.Context
 	backfilled            *atomic.Bool
 	blobBackfilled        *atomic.Bool
@@ -43,7 +46,7 @@ type Antiquary struct {
 	balances32   []byte
 }
 
-func NewAntiquary(ctx context.Context, blobStorage blob_storage.BlobStorage, genesisState *state.CachingBeaconState, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, logger log.Logger, states, blocks, blobs bool) *Antiquary {
+func NewAntiquary(ctx context.Context, blobStorage blob_storage.BlobStorage, genesisState *state.CachingBeaconState, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, logger log.Logger, states, blocks, blobs bool, snBuildSema *semaphore.Weighted) *Antiquary {
 	backfilled := &atomic.Bool{}
 	blobBackfilled := &atomic.Bool{}
 	backfilled.Store(false)
@@ -61,6 +64,7 @@ func NewAntiquary(ctx context.Context, blobStorage blob_storage.BlobStorage, gen
 		cfg:             cfg,
 		states:          states,
 		snReader:        reader,
+		snBuildSema:     snBuildSema,
 		validatorsTable: validatorsTable,
 		genesisState:    genesisState,
 		blocks:          blocks,
@@ -210,7 +214,7 @@ func (a *Antiquary) Loop() error {
 			if from >= to {
 				continue
 			}
-			to = utils.Min64(to, to-safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
+			to = min(to, to-safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
 			to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
 			if to-from < snaptype.Erigon2MergeLimit {
 				continue
@@ -223,11 +227,22 @@ func (a *Antiquary) Loop() error {
 	}
 }
 
+// weight for the semaphore to build only one type of snapshots at a time
+// for now all of them have the same weight
+const caplinSnapshotBuildSemaWeight int64 = 1
+
 // Antiquate will antiquate a specific block range (aka. retire snapshots), this should be ran in the background.
 func (a *Antiquary) antiquate(from, to uint64) error {
 	if a.downloader == nil {
 		return nil // Just skip if we don't have a downloader
 	}
+	if a.snBuildSema != nil {
+		if !a.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight) {
+			return nil
+		}
+		defer a.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight)
+	}
+
 	log.Info("[Antiquary]: Antiquating", "from", from, "to", to)
 	if err := freezeblocks.DumpBeaconBlocks(a.ctx, a.mainDB, from, to, a.sn.Salt, a.dirs, 1, log.LvlDebug, a.logger); err != nil {
 		return err
@@ -305,7 +320,7 @@ func (a *Antiquary) antiquateBlobs() error {
 	// perform blob antiquation if it is time to.
 	currentBlobsProgress := a.sn.FrozenBlobs()
 	minimunBlobsProgress := ((a.cfg.DenebForkEpoch * a.cfg.SlotsPerEpoch) / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
-	currentBlobsProgress = utils.Max64(currentBlobsProgress, minimunBlobsProgress)
+	currentBlobsProgress = max(currentBlobsProgress, minimunBlobsProgress)
 	// read the finalized head
 	to, err := beacon_indicies.ReadHighestFinalized(roTx)
 	if err != nil {

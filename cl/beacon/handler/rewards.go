@@ -40,6 +40,7 @@ func (a *ApiHandler) GetEthV1BeaconRewardsBlocks(w http.ResponseWriter, r *http.
 	if err != nil {
 		return nil, err
 	}
+	isOptimistic := a.forkchoiceStore.IsRootOptimistic(root)
 	blk, err := a.blockReader.ReadHeaderByRoot(ctx, tx, root)
 	if err != nil {
 		return nil, err
@@ -62,7 +63,7 @@ func (a *ApiHandler) GetEthV1BeaconRewardsBlocks(w http.ResponseWriter, r *http.
 			AttesterSlashings: blkRewards.AttesterSlashings,
 			SyncAggregate:     blkRewards.SyncAggregate,
 			Total:             blkRewards.Attestations + blkRewards.ProposerSlashings + blkRewards.AttesterSlashings + blkRewards.SyncAggregate,
-		}).WithFinalized(isFinalized), nil
+		}).WithFinalized(isFinalized).WithOptimistic(isOptimistic), nil
 	}
 	slotData, err := state_accessors.ReadSlotData(tx, slot)
 	if err != nil {

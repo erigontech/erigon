@@ -19,13 +19,13 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/log/v3"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 type MemoryMutation struct {
@@ -267,7 +267,11 @@ func (m *MemoryMutation) RangeDescend(table string, fromPrefix, toPrefix []byte,
 	if s.iterMem, err = m.memTx.RangeDescend(table, fromPrefix, toPrefix, limit); err != nil {
 		return s, err
 	}
-	return s.init()
+	if _, err := s.init(); err != nil {
+		s.Close() //it's responsibility of constructor (our) to close resource on error
+		return nil, err
+	}
+	return s, nil
 }
 
 type rangeIter struct {
@@ -278,6 +282,16 @@ type rangeIter struct {
 	limit                                int64
 }
 
+func (s *rangeIter) Close() {
+	if s.iterDb != nil {
+		s.iterDb.Close()
+		s.iterDb = nil
+	}
+	if s.iterMem != nil {
+		s.iterMem.Close()
+		s.iterMem = nil
+	}
+}
 func (s *rangeIter) init() (*rangeIter, error) {
 	s.hasNextDb = s.iterDb.HasNext()
 	s.hasNextMem = s.iterMem.HasNext()
@@ -336,7 +350,11 @@ func (m *MemoryMutation) RangeDupSort(table string, key []byte, fromPrefix, toPr
 	if s.iterMem, err = m.memTx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, limit); err != nil {
 		return s, err
 	}
-	return s.init()
+	if err := s.init(); err != nil {
+		s.Close() //it's responsibility of constructor (our) to close resource on error
+		return nil, err
+	}
+	return s, nil
 }
 
 type rangeDupSortIter struct {
@@ -348,21 +366,32 @@ type rangeDupSortIter struct {
 	limit                 int64
 }
 
-func (s *rangeDupSortIter) init() (*rangeDupSortIter, error) {
+func (s *rangeDupSortIter) Close() {
+	if s.iterDb != nil {
+		s.iterDb.Close()
+		s.iterDb = nil
+	}
+	if s.iterMem != nil {
+		s.iterMem.Close()
+		s.iterMem = nil
+	}
+}
+
+func (s *rangeDupSortIter) init() error {
 	s.hasNextDb = s.iterDb.HasNext()
 	s.hasNextMem = s.iterMem.HasNext()
 	var err error
 	if s.hasNextDb {
 		if _, s.nextVdb, err = s.iterDb.Next(); err != nil {
-			return s, err
+			return err
 		}
 	}
 	if s.hasNextMem {
 		if _, s.nextVmem, err = s.iterMem.Next(); err != nil {
-			return s, err
+			return err
 		}
 	}
-	return s, nil
+	return nil
 }
 
 func (s *rangeDupSortIter) HasNext() bool {
@@ -484,7 +513,7 @@ func (m *MemoryMutation) CreateBucket(bucket string) error {
 	return m.memTx.CreateBucket(bucket)
 }
 
-func (m *MemoryMutation) Flush(tx kv.RwTx) error {
+func (m *MemoryMutation) Flush(ctx context.Context, tx kv.RwTx) error {
 	// Obtain buckets touched.
 	buckets, err := m.memTx.ListBuckets()
 	if err != nil {
@@ -492,6 +521,11 @@ func (m *MemoryMutation) Flush(tx kv.RwTx) error {
 	}
 	// Obliterate buckets who are to be deleted
 	for bucket := range m.clearedTables {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 		if err := tx.ClearBucket(bucket); err != nil {
 			return err
 		}
@@ -506,6 +540,11 @@ func (m *MemoryMutation) Flush(tx kv.RwTx) error {
 	}
 	// Iterate over each bucket and apply changes accordingly.
 	for _, bucket := range buckets {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 		if isTablePurelyDupsort(bucket) {
 			if err := func() error {
 				cbucket, err := m.memTx.CursorDupSort(bucket)
@@ -683,4 +722,35 @@ func (m *MemoryMutation) ViewID() uint64 {
 
 func (m *MemoryMutation) CHandle() unsafe.Pointer {
 	panic("CHandle not implemented")
+}
+
+type hasAggCtx interface {
+	AggTx() interface{}
+}
+
+func (m *MemoryMutation) AggTx() interface{} {
+	return m.db.(hasAggCtx).AggTx()
+}
+
+func (m *MemoryMutation) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, step uint64, err error) {
+	return m.db.(kv.TemporalTx).DomainGet(name, k, k2)
+}
+
+func (m *MemoryMutation) DomainGetAsOf(name kv.Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error) {
+	return m.db.(kv.TemporalTx).DomainGetAsOf(name, k, k2, ts)
+}
+func (m *MemoryMutation) HistorySeek(name kv.History, k []byte, ts uint64) (v []byte, ok bool, err error) {
+	return m.db.(kv.TemporalTx).HistorySeek(name, k, ts)
+}
+
+func (m *MemoryMutation) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error) {
+	return m.db.(kv.TemporalTx).IndexRange(name, k, fromTs, toTs, asc, limit)
+}
+
+func (m *MemoryMutation) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int) (it iter.KV, err error) {
+	return m.db.(kv.TemporalTx).HistoryRange(name, fromTs, toTs, asc, limit)
+}
+
+func (m *MemoryMutation) DomainRange(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error) {
+	return m.db.(kv.TemporalTx).DomainRange(name, fromKey, toKey, ts, asc, limit)
 }

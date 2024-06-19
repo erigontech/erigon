@@ -5,16 +5,18 @@ import (
 	"os"
 	"time"
 
+	"github.com/urfave/cli/v2"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
+	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli/v2"
-	"golang.org/x/sync/errgroup"
 )
 
 // Build snapshot indexes for given snapshot files.
@@ -55,7 +57,7 @@ func FindIf(segments []snaptype.FileInfo, predicate func(snaptype.FileInfo) bool
 }
 
 func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string, minBlock uint64) error {
-	logger, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -68,7 +70,6 @@ func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string, min
 	g.SetLimit(workers)
 
 	dirs := datadir.New(dataDir)
-	salt := freezeblocks.GetIndicesSalt(dirs.Snap)
 
 	chainDB := mdbx.NewMDBX(logger).Path(dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
@@ -92,26 +93,12 @@ func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string, min
 		}
 
 		switch segment.Type.Enum() {
-		case snaptype.Enums.Headers:
+		case coresnaptype.Enums.Headers, coresnaptype.Enums.Bodies, coresnaptype.Enums.Transactions:
 			g.Go(func() error {
 				jobProgress := &background.Progress{}
 				ps.Add(jobProgress)
 				defer ps.Delete(jobProgress)
-				return freezeblocks.HeadersIdx(ctx, segment, salt, dirs.Tmp, jobProgress, logLevel, logger)
-			})
-		case snaptype.Enums.Bodies:
-			g.Go(func() error {
-				jobProgress := &background.Progress{}
-				ps.Add(jobProgress)
-				defer ps.Delete(jobProgress)
-				return freezeblocks.BodiesIdx(ctx, segment, salt, dirs.Tmp, jobProgress, logLevel, logger)
-			})
-		case snaptype.Enums.Transactions:
-			g.Go(func() error {
-				jobProgress := &background.Progress{}
-				ps.Add(jobProgress)
-				defer ps.Delete(jobProgress)
-				return freezeblocks.TransactionsIdx(ctx, chainConfig, segment, salt, dirs.Tmp, jobProgress, logLevel, logger)
+				return segment.Type.BuildIndexes(ctx, segment, chainConfig, dirs.Tmp, jobProgress, logLevel, logger)
 			})
 		}
 	}

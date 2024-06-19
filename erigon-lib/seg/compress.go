@@ -28,17 +28,17 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 // Compressor is the main operating type for performing per-word compression

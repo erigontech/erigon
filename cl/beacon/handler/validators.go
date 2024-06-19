@@ -5,20 +5,21 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 
+	"github.com/pkg/errors"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/pkg/errors"
-	"golang.org/x/exp/slices"
 )
 
 var stringsBuilderPool = sync.Pool{
@@ -215,6 +216,7 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidators(w http.ResponseWriter, r *ht
 		return
 	}
 
+	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
 	queryFilters, err := beaconhttp.StringListFromQueryParams(r, "status")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -249,7 +251,7 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidators(w http.ResponseWriter, r *ht
 			http.Error(w, fmt.Errorf("node is not synced").Error(), http.StatusServiceUnavailable)
 			return
 		}
-		responseValidators(w, filterIndicies, statusFilters, state.Epoch(s), s.Balances(), s.Validators(), false)
+		responseValidators(w, filterIndicies, statusFilters, state.Epoch(s), s.Balances(), s.Validators(), false, isOptimistic)
 		return
 	}
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
@@ -275,7 +277,7 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidators(w http.ResponseWriter, r *ht
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		responseValidators(w, filterIndicies, statusFilters, stateEpoch, balances, validatorSet, true)
+		responseValidators(w, filterIndicies, statusFilters, stateEpoch, balances, validatorSet, true, isOptimistic)
 		return
 	}
 	balances, err := a.forkchoiceStore.GetBalances(blockRoot)
@@ -296,8 +298,7 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidators(w http.ResponseWriter, r *ht
 		http.Error(w, fmt.Errorf("validators not found").Error(), http.StatusNotFound)
 		return
 	}
-	responseValidators(w, filterIndicies, statusFilters, stateEpoch, balances, validators, *slot <= a.forkchoiceStore.FinalizedSlot())
-	return
+	responseValidators(w, filterIndicies, statusFilters, stateEpoch, balances, validators, *slot <= a.forkchoiceStore.FinalizedSlot(), isOptimistic)
 }
 
 func parseQueryValidatorIndex(tx kv.Tx, id string) (uint64, error) {
@@ -366,6 +367,8 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidator(w http.ResponseWriter, r *htt
 		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}
 
+	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
+
 	validatorId, err := beaconhttp.StringFromRequest(r, "validator_id")
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
@@ -387,7 +390,7 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidator(w http.ResponseWriter, r *htt
 		if s == nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("node is not synced"))
 		}
-		return responseValidator(validatorIndex, state.Epoch(s), s.Balances(), s.Validators(), false)
+		return responseValidator(validatorIndex, state.Epoch(s), s.Balances(), s.Validators(), false, isOptimistic)
 	}
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
 	if err != nil {
@@ -408,7 +411,7 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidator(w http.ResponseWriter, r *htt
 		if err != nil {
 			return nil, err
 		}
-		return responseValidator(validatorIndex, stateEpoch, balances, validatorSet, true)
+		return responseValidator(validatorIndex, stateEpoch, balances, validatorSet, true, isOptimistic)
 	}
 	balances, err := a.forkchoiceStore.GetBalances(blockRoot)
 	if err != nil {
@@ -424,7 +427,7 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidator(w http.ResponseWriter, r *htt
 	if validators == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("validators not found"))
 	}
-	return responseValidator(validatorIndex, stateEpoch, balances, validators, *slot <= a.forkchoiceStore.FinalizedSlot())
+	return responseValidator(validatorIndex, stateEpoch, balances, validators, *slot <= a.forkchoiceStore.FinalizedSlot(), isOptimistic)
 }
 
 func (a *ApiHandler) GetEthV1BeaconValidatorsBalances(w http.ResponseWriter, r *http.Request) {
@@ -449,6 +452,8 @@ func (a *ApiHandler) GetEthV1BeaconValidatorsBalances(w http.ResponseWriter, r *
 		return
 	}
 
+	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
+
 	validatorIds, err := beaconhttp.StringListFromQueryParams(r, "id")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -471,7 +476,7 @@ func (a *ApiHandler) GetEthV1BeaconValidatorsBalances(w http.ResponseWriter, r *
 			http.Error(w, fmt.Errorf("node is not synced").Error(), http.StatusServiceUnavailable)
 			return
 		}
-		responseValidatorsBalances(w, filterIndicies, state.Epoch(s), s.Balances(), false)
+		responseValidatorsBalances(w, filterIndicies, state.Epoch(s), s.Balances(), false, isOptimistic)
 		return
 	}
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
@@ -496,7 +501,7 @@ func (a *ApiHandler) GetEthV1BeaconValidatorsBalances(w http.ResponseWriter, r *
 
 			http.Error(w, fmt.Errorf("validators not found, node may node be running in archivial node").Error(), http.StatusNotFound)
 		}
-		responseValidatorsBalances(w, filterIndicies, stateEpoch, balances, true)
+		responseValidatorsBalances(w, filterIndicies, stateEpoch, balances, true, isOptimistic)
 		return
 	}
 	balances, err := a.forkchoiceStore.GetBalances(blockRoot)
@@ -508,7 +513,7 @@ func (a *ApiHandler) GetEthV1BeaconValidatorsBalances(w http.ResponseWriter, r *
 		http.Error(w, fmt.Errorf("balances not found").Error(), http.StatusNotFound)
 		return
 	}
-	responseValidatorsBalances(w, filterIndicies, stateEpoch, balances, *slot <= a.forkchoiceStore.FinalizedSlot())
+	responseValidatorsBalances(w, filterIndicies, stateEpoch, balances, *slot <= a.forkchoiceStore.FinalizedSlot(), isOptimistic)
 }
 
 type directString string
@@ -517,12 +522,16 @@ func (d directString) MarshalJSON() ([]byte, error) {
 	return []byte(d), nil
 }
 
-func responseValidators(w http.ResponseWriter, filterIndicies []uint64, filterStatuses []validatorStatus, stateEpoch uint64, balances solid.Uint64ListSSZ, validators *solid.ValidatorSet, finalized bool) {
+func responseValidators(w http.ResponseWriter, filterIndicies []uint64, filterStatuses []validatorStatus, stateEpoch uint64, balances solid.Uint64ListSSZ, validators *solid.ValidatorSet, finalized bool, optimistic bool) {
 	b := stringsBuilderPool.Get().(*strings.Builder)
 	defer stringsBuilderPool.Put(b)
 	b.Reset()
 
-	if _, err := b.WriteString("{\"execution_optimistic\":false,\"finalized\":" + strconv.FormatBool(finalized) + ",\"data\":"); err != nil {
+	var isOptimistic string = "false"
+	if optimistic {
+		isOptimistic = "true"
+	}
+	if _, err := b.WriteString("{\"execution_optimistic\":" + isOptimistic + ",\"finalized\":" + strconv.FormatBool(finalized) + ",\"data\":"); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -577,7 +586,7 @@ func responseValidators(w http.ResponseWriter, filterIndicies []uint64, filterSt
 
 }
 
-func responseValidator(idx uint64, stateEpoch uint64, balances solid.Uint64ListSSZ, validators *solid.ValidatorSet, finalized bool) (*beaconhttp.BeaconResponse, error) {
+func responseValidator(idx uint64, stateEpoch uint64, balances solid.Uint64ListSSZ, validators *solid.ValidatorSet, finalized bool, optimistic bool) (*beaconhttp.BeaconResponse, error) {
 	var b strings.Builder
 	var err error
 	if validators.Length() <= int(idx) {
@@ -596,15 +605,19 @@ func responseValidator(idx uint64, stateEpoch uint64, balances solid.Uint64ListS
 
 	_, err = b.WriteString("\n")
 
-	return newBeaconResponse(directString(b.String())).WithFinalized(finalized), err
+	return newBeaconResponse(directString(b.String())).WithFinalized(finalized).WithOptimistic(optimistic), err
 }
 
-func responseValidatorsBalances(w http.ResponseWriter, filterIndicies []uint64, stateEpoch uint64, balances solid.Uint64ListSSZ, finalized bool) {
+func responseValidatorsBalances(w http.ResponseWriter, filterIndicies []uint64, stateEpoch uint64, balances solid.Uint64ListSSZ, finalized bool, optimistic bool) {
 	b := stringsBuilderPool.Get().(*strings.Builder)
 	defer stringsBuilderPool.Put(b)
 	b.Reset()
 
-	if _, err := b.WriteString("{\"execution_optimistic\":false,\"finalized\":" + strconv.FormatBool(finalized) + ",\"data\":"); err != nil {
+	isOptimistic := "false"
+	if optimistic {
+		isOptimistic = "true"
+	}
+	if _, err := b.WriteString("{\"execution_optimistic\":" + isOptimistic + ",\"finalized\":" + strconv.FormatBool(finalized) + ",\"data\":"); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

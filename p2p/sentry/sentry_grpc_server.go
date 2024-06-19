@@ -18,11 +18,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -31,8 +32,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	proto_types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
+	proto_types "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/debug"

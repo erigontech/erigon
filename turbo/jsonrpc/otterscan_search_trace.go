@@ -4,19 +4,17 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethutils"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/turbo/shards"
 )
 
 func (api *OtterscanAPIImpl) searchTraceBlock(ctx context.Context, addr common.Address, chainConfig *chain.Config, idx int, bNum uint64, results []*TransactionsWithReceipts) {
@@ -48,19 +46,21 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNu
 		return false, nil, err
 	}
 
-	block, senders, err := api._blockReader.BlockWithSenders(ctx, dbtx, blockHash, blockNum)
+	block, err := api.blockWithSenders(ctx, dbtx, blockHash, blockNum)
 	if err != nil {
 		return false, nil, err
 	}
 
-	reader, err := rpchelper.CreateHistoryStateReader(dbtx, blockNum, 0, api.historyV3(dbtx), chainConfig.ChainName)
+	reader, err := rpchelper.CreateHistoryStateReader(dbtx, blockNum, 0, chainConfig.ChainName)
 	if err != nil {
 		return false, nil, err
 	}
-	stateCache := shards.NewStateCache(32, 0 /* no limit */)
-	cachedReader := state.NewCachedReader(reader, stateCache)
+	//stateCache := shards.NewStateCache(32, 0 /* no limit */)
+	//cachedReader := state.NewCachedReader(reader, stateCache)
+	cachedReader := reader
 	noop := state.NewNoopWriter()
-	cachedWriter := state.NewCachedWriter(noop, stateCache)
+	//cachedWriter := state.NewCachedWriter(noop, stateCache)
+	cachedWriter := noop
 
 	ibs := state.New(cachedReader)
 	signer := types.MakeSigner(chainConfig, blockNum, block.Time())
@@ -74,7 +74,10 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNu
 	}
 	engine := api.engine()
 
-	blockReceipts := rawdb.ReadReceipts(dbtx, block, senders)
+	blockReceipts, err := api.getReceipts(ctx, dbtx, block, block.Body().SendersFromTxs())
+	if err != nil {
+		return false, nil, err
+	}
 	header := block.Header()
 	rules := chainConfig.Rules(block.NumberU64(), header.Time)
 	found := false
@@ -89,7 +92,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNu
 		msg, _ := tx.AsMessage(*signer, header.BaseFee, rules)
 
 		tracer := NewTouchTracer(searchAddr)
-		BlockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil)
+		BlockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, chainConfig)
 		TxContext := core.NewEVMTxContext(msg)
 
 		vmenv := vm.NewEVM(BlockContext, TxContext, ibs, chainConfig, vm.Config{Debug: true, Tracer: tracer})

@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/erigontech/mdbx-go/mdbx"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 )
 
@@ -207,6 +208,7 @@ func LastKey(tx Tx, table string) ([]byte, error) {
 }
 
 // NextSubtree does []byte++. Returns false if overflow.
+// nil is marker of the table end, while []byte{} is in the table beginning
 func NextSubtree(in []byte) ([]byte, bool) {
 	r := make([]byte, len(in))
 	copy(r, in)

@@ -1,5 +1,5 @@
 {
-    "ChainName": "amoy",
+    "chainName": "amoy",
     "chainId": 80002,
     "consensus": "bor",
     "homesteadBlock": 0,

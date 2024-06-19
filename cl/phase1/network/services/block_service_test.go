@@ -4,24 +4,25 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
+
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cl/antiquary/tests"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
-	"github.com/stretchr/testify/require"
-	"go.uber.org/mock/gomock"
 )
 
-func setupBlockService(t *testing.T, ctrl *gomock.Controller) (BlockService, *synced_data.SyncedDataManager, *eth_clock.MockEthereumClock, *forkchoice.ForkChoiceStorageMock) {
+func setupBlockService(t *testing.T, ctrl *gomock.Controller) (BlockService, *synced_data.SyncedDataManager, *eth_clock.MockEthereumClock, *mock_services.ForkChoiceStorageMock) {
 	db := memdb.NewTestDB(t)
 	cfg := &clparams.MainnetBeaconConfig
 	syncedDataManager := synced_data.NewSyncedDataManager(true, cfg)
 	ethClock := eth_clock.NewMockEthereumClock(ctrl)
-	forkchoiceMock := forkchoice.NewForkChoiceStorageMock(t)
+	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	blockService := NewBlockService(context.Background(), db, forkchoiceMock, syncedDataManager, ethClock, cfg, nil)
 	return blockService, syncedDataManager, ethClock, forkchoiceMock
 }

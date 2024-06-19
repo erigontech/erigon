@@ -29,11 +29,12 @@ import (
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/c2h5oh/datasize"
+	"golang.org/x/time/rate"
+
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/time/rate"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 // DefaultPieceSize - Erigon serves many big files, bigger pieces will reduce
@@ -43,7 +44,7 @@ const DefaultPieceSize = 2 * 1024 * 1024
 
 // DefaultNetworkChunkSize - how much data request per 1 network call to peer.
 // default: 16Kb
-const DefaultNetworkChunkSize = 256 * 1024
+const DefaultNetworkChunkSize = 8 * 1024 * 1024
 
 type Cfg struct {
 	ClientConfig  *torrent.ClientConfig
@@ -65,7 +66,7 @@ func Default() *torrent.ClientConfig {
 	// better don't increase because erigon periodically producing "new seedable files" - and adding them to downloader.
 	// it must not impact chain tip sync - so, limit resources to minimum by default.
 	// but when downloader is started as a separated process - rise it to max
-	//torrentConfig.PieceHashersPerTorrent = cmp.Max(1, runtime.NumCPU()-1)
+	//torrentConfig.PieceHashersPerTorrent = max(1, runtime.NumCPU()-1)
 
 	torrentConfig.MinDialTimeout = 6 * time.Second    //default: 3s
 	torrentConfig.HandshakesTimeout = 8 * time.Second //default: 4s
@@ -73,6 +74,11 @@ func Default() *torrent.ClientConfig {
 	// default limit is 1MB, but we have 2MB pieces which brings us to:
 	//   *torrent.PeerConn: waiting for alloc limit reservation: reservation for 1802972 exceeds limiter max 1048576
 	torrentConfig.MaxAllocPeerRequestDataPerConn = int64(DefaultPieceSize)
+
+	// this limits the amount of unverified bytes - which will throttle the
+	// number of requests the torrent will handle - it acts as a brake on
+	// parallelism if set (default is 67,108,864)
+	torrentConfig.MaxUnverifiedBytes = 0
 
 	// enable dht
 	torrentConfig.NoDHT = true
@@ -98,6 +104,7 @@ func Default() *torrent.ClientConfig {
 
 func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile, downloadSlots int, staticPeers, webseeds []string, chainName string, lockSnapshots bool) (*Cfg, error) {
 	torrentConfig := Default()
+	//torrentConfig.PieceHashersPerTorrent = runtime.NumCPU()
 	torrentConfig.DataDir = dirs.Snap // `DataDir` of torrent-client-lib is different from Erigon's `DataDir`. Just same naming.
 
 	torrentConfig.ExtendedHandshakeClientVersion = version

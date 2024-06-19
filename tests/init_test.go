@@ -25,11 +25,11 @@ import (
 	"reflect"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
-	"golang.org/x/exp/slices"
 )
 
 var (

@@ -4,9 +4,12 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cl/antiquary"
 	"github.com/ledgerwatch/erigon/cl/antiquary/tests"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -14,8 +17,6 @@ import (
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/stretchr/testify/require"
 )
 
 func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postState *state.CachingBeaconState) {
@@ -24,7 +25,7 @@ func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postSt
 
 	ctx := context.Background()
 	vt := state_accessors.NewStaticValidatorTable()
-	a := antiquary.NewAntiquary(ctx, nil, preState, vt, &clparams.MainnetBeaconConfig, datadir.New("/tmp"), nil, db, nil, reader, log.New(), true, true, true)
+	a := antiquary.NewAntiquary(ctx, nil, preState, vt, &clparams.MainnetBeaconConfig, datadir.New("/tmp"), nil, db, nil, reader, log.New(), true, true, true, nil)
 	require.NoError(t, a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
 	// Now lets test it against the reader
 	tx, err := db.BeginRw(ctx)
@@ -45,19 +46,19 @@ func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postSt
 }
 
 func TestStateAntiquaryCapella(t *testing.T) {
-	//t.Skip()
+	t.Skip("oom on CI")
 	blocks, preState, postState := tests.GetCapellaRandom()
 	runTest(t, blocks, preState, postState)
 }
 
 func TestStateAntiquaryPhase0(t *testing.T) {
-	//t.Skip()
+	t.Skip("oom on CI")
 	blocks, preState, postState := tests.GetPhase0Random()
 	runTest(t, blocks, preState, postState)
 }
 
 func TestStateAntiquaryBellatrix(t *testing.T) {
-	//t.Skip()
+	t.Skip("oom on CI")
 	blocks, preState, postState := tests.GetBellatrixRandom()
 	runTest(t, blocks, preState, postState)
 }

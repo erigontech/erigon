@@ -25,12 +25,13 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -358,7 +359,7 @@ func makeBenchBlock() *Block {
 			Extra:      []byte("benchmark uncle"),
 		}
 	}
-	return NewBlock(header, txs, uncles, receipts, nil /* withdrawals */)
+	return NewBlock(header, txs, uncles, receipts, nil /* withdrawals */, nil /*requests*/)
 }
 
 func TestCanEncodeAndDecodeRawBody(t *testing.T) {
@@ -506,7 +507,7 @@ func TestWithdrawalsEncoding(t *testing.T) {
 		Amount:    5_000_000_000,
 	}
 
-	block := NewBlock(&header, nil, nil, nil, withdrawals)
+	block := NewBlock(&header, nil, nil, nil, withdrawals, nil /*requests*/)
 	_ = block.Size()
 
 	encoded, err := rlp.EncodeToBytes(block)
@@ -518,7 +519,7 @@ func TestWithdrawalsEncoding(t *testing.T) {
 	assert.Equal(t, block, &decoded)
 
 	// Now test with empty withdrawals
-	block2 := NewBlock(&header, nil, nil, nil, []*Withdrawal{})
+	block2 := NewBlock(&header, nil, nil, nil, []*Withdrawal{}, nil /*requests*/)
 	_ = block2.Size()
 
 	encoded2, err := rlp.EncodeToBytes(block2)

@@ -22,7 +22,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 
@@ -66,7 +65,7 @@ type eip1559Calculator struct{}
 func (f eip1559Calculator) CurrentFees(chainConfig *chain.Config, db kv.Getter) (baseFee, blobFee, minBlobGasPrice, blockGasLimit uint64, err error) {
 	hash := rawdb.ReadHeadHeaderHash(db)
 
-	if hash == (libcommon.Hash{}) {
+	if hash == (common.Hash{}) {
 		return 0, 0, 0, 0, fmt.Errorf("can't get head header hash")
 	}
 
@@ -86,9 +85,10 @@ func (f eip1559Calculator) CurrentFees(chainConfig *chain.Config, db kv.Getter) 
 		if currentHeader.ExcessBlobGas != nil {
 			excessBlobGas := CalcExcessBlobGas(chainConfig, currentHeader)
 			b, err := GetBlobGasPrice(chainConfig, excessBlobGas)
-			if err == nil {
-				blobFee = b.Uint64()
+			if err != nil {
+				return 0, 0, 0, 0, err
 			}
+			blobFee = b.Uint64()
 		}
 	}
 
