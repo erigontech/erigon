@@ -35,7 +35,7 @@ jobs:
         run: sudo apt update && sudo apt install build-essential
 
       - name: Build
-        run: make all
+        run: make BUILD_TAGS=nosqlite,noboltdb,nosilkworm all
 
       - name: Reproducible build test
         run: |
