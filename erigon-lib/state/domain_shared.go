@@ -190,12 +190,16 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 		}
 	}
 	for _, ii := range sd.aggTx.iis {
-		if _, err := ii.Prune(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, withWarmup, nil); err != nil {
+		if err := ii.Unwind(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, withWarmup, nil); err != nil {
 			return err
 		}
 	}
 
-	// Appendable type: doesn't need unwind
+	for _, ap := range sd.aggTx.appendable {
+		if err := ap.Unwind(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, withWarmup, nil); err != nil {
+			return err
+		}
+	}
 
 	sd.ClearRam(true)
 	sd.SetTxNum(txUnwindTo)
