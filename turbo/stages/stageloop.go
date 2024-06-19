@@ -8,7 +8,8 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
-	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"

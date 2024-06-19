@@ -8,11 +8,12 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
+	"google.golang.org/protobuf/types/known/emptypb"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	proto_txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
-	"github.com/ledgerwatch/log/v3"
-	"google.golang.org/protobuf/types/known/emptypb"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core/types"

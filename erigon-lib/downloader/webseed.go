@@ -18,14 +18,16 @@ import (
 
 	"github.com/anacrolix/torrent"
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/pelletier/go-toml/v2"
+
+	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 )
 
 // WebSeeds - allow use HTTP-based infrastrucutre to support Bittorrent network

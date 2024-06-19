@@ -5,9 +5,8 @@ go 1.22
 toolchain go1.22.2
 
 require (
-	github.com/erigontech/mdbx-go v0.38.3
+	github.com/erigontech/mdbx-go v0.38.4
 	github.com/erigontech/silkworm-go v0.18.0
-	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 )
 
@@ -90,7 +89,7 @@ require (
 	github.com/ugorji/go/codec v1.1.13
 	github.com/urfave/cli/v2 v2.27.2
 	github.com/valyala/fastjson v1.6.4
-	github.com/vektah/gqlparser/v2 v2.5.14
+	github.com/vektah/gqlparser/v2 v2.5.16
 	github.com/xsleonard/go-merkle v1.1.0
 	go.uber.org/mock v0.4.0
 	go.uber.org/zap v1.27.0

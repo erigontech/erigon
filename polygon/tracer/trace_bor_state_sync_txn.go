@@ -16,7 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/eth/tracers"
+	tracersConfig "github.com/ledgerwatch/erigon/eth/tracers/config"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -28,7 +28,7 @@ func TraceBorStateSyncTxnDebugAPI(
 	ctx context.Context,
 	dbTx kv.Tx,
 	chainConfig *chain.Config,
-	traceConfig *tracers.TraceConfig,
+	traceConfig *tracersConfig.TraceConfig,
 	ibs *state.IntraBlockState,
 	blockReader services.FullBlockReader,
 	blockHash libcommon.Hash,
