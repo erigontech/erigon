@@ -1571,6 +1571,10 @@ func (hi *StateAsOfIterDB) advanceSmallVals() error {
 			return err
 		}
 		if v == nil {
+			k, v, err = hi.valsCDup.Seek(k)
+			if err != nil {
+				return nil
+			}
 			continue
 		}
 		hi.nextKey = k
@@ -1932,7 +1936,6 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 			for {
 				k, v, err = hi.valsC.Next()
 				if err != nil {
-					panic(err)
 					return err
 				}
 				if k == nil {

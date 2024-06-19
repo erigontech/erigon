@@ -991,7 +991,6 @@ func TestHistoryScanFiles(t *testing.T) {
 }
 
 func TestIterateChanged(t *testing.T) {
-	t.Skip()
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
