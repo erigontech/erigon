@@ -122,6 +122,11 @@ func DecodeL1BatchData(txData []byte, daUrl string) ([][]byte, common.Address, u
 			return nil, common.Address{}, 0, fmt.Errorf("expected position 3 in the l1 call data to be address")
 		}
 		coinbase = cb
+		ts, ok := data[1].(uint64)
+		if !ok {
+			return nil, common.Address{}, 0, fmt.Errorf("expected position 1 in the l1 call data to be the limit timestamp")
+		}
+		limitTimstamp = ts
 	default:
 		return nil, common.Address{}, 0, fmt.Errorf("unknown l1 call data")
 	}

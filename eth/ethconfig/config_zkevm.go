@@ -35,6 +35,7 @@ type Zk struct {
 	ExecutorUrls                           []string
 	ExecutorStrictMode                     bool
 	ExecutorRequestTimeout                 time.Duration
+	DatastreamNewBlockTimeout              time.Duration
 	ExecutorMaxConcurrentRequests          int
 	AllowFreeTransactions                  bool
 	AllowPreEIP155Transactions             bool
