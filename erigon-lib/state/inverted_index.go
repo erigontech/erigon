@@ -913,7 +913,7 @@ func (iit *InvertedIndexRoTx) DebugEFAllValuesAreInRange(ctx context.Context, fa
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-logEvery.C:
-				log.Info(fmt.Sprintf("[integrity] progress EFAllValuesAreInRange: %s, prefix=%x", g.FileName(), common.Shorten(k, 8)))
+				log.Info(fmt.Sprintf("[integrity] InvertedIndex: %s, prefix=%x", g.FileName(), common.Shorten(k, 8)))
 			default:
 			}
 		}
