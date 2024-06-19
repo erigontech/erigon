@@ -2014,8 +2014,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		if cfg.NetworkID != 1 && !ctx.IsSet(ChainFlag.Name) {
 			chain = "" // don't default to mainnet if NetworkID != 1
 		}
-	} else {
-		cfg.NetworkID = params.NetworkIDByChainName(chain)
 	}
 
 	cfg.Sync.UseSnapshots = ethconfig.UseSnapshotsByChainName(chain)
@@ -2137,7 +2135,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 		genesisHash := libcommon.HexToHash(dConf.Root)
 		if !ctx.IsSet(NetworkIdFlag.Name) {
-			log.Warn("NetworkID is not set for dynamic chain", "chain", chain, "networkID", cfg.NetworkID)
+			cfg.NetworkID = params.NetworkIDByChainName(chain)
 		}
 		SetDNSDiscoveryDefaults(cfg, genesisHash)
 	} else {

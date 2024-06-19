@@ -39,6 +39,8 @@ import (
 	ethapi2 "github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	"github.com/ledgerwatch/erigon/zk/utils"
 )
 
 // EthAPI is a collection of functions that are exposed in the
@@ -167,6 +169,13 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 
 func (api *BaseAPI) chainConfig(ctx context.Context, tx kv.Tx) (*chain.Config, error) {
 	cfg, _, err := api.chainConfigWithGenesis(ctx, tx)
+
+	//[zkevm] get dynamic fork config
+	hermezDb := hermez_db.NewHermezDbReader(tx)
+	if err := utils.UpdateZkEVMBlockCfg(cfg, hermezDb, ""); err != nil {
+		return cfg, err
+	}
+
 	return cfg, err
 }
 
