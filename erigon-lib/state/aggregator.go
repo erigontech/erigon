@@ -1519,15 +1519,16 @@ func (ac *AggregatorRoTx) mergeFiles(ctx context.Context, files SelectedStaticFi
 	}
 
 	for id, rng := range r.ranges {
+		if !rng.needMerge {
+			continue
+		}
 		id := id
 		rng := rng
-		if rng.needMerge {
-			g.Go(func() error {
-				var err error
-				mf.iis[id], err = ac.iis[id].mergeFiles(ctx, files.ii[id], rng.from, rng.to, ac.a.ps)
-				return err
-			})
-		}
+		g.Go(func() error {
+			var err error
+			mf.iis[id], err = ac.iis[id].mergeFiles(ctx, files.ii[id], rng.from, rng.to, ac.a.ps)
+			return err
+		})
 	}
 
 	err := g.Wait()
