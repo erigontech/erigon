@@ -80,9 +80,17 @@ var snapshotCommand = cli.Command{
 	},
 	Subcommands: []*cli.Command{
 		{
-			Name:   "index",
-			Action: doIndicesCommand,
-			Usage:  "Create all missed indices for snapshots. It also removing unsupported versions of existing indices and re-build them",
+			Name: "index",
+			Action: func(c *cli.Context) error {
+				dirs, l, err := datadir.New(c.String(utils.DataDirFlag.Name)).MustFlock()
+				if err != nil {
+					return err
+				}
+				defer l.Unlock()
+
+				return doIndicesCommand(c, dirs)
+			},
+			Usage: "Create all missed indices for snapshots. It also removing unsupported versions of existing indices and re-build them",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&SnapshotFromFlag,
@@ -92,15 +100,12 @@ var snapshotCommand = cli.Command{
 		{
 			Name: "retire",
 			Action: func(c *cli.Context) error {
-				dirs := datadir.New(c.String(utils.DataDirFlag.Name))
-				l, locked, err := datadir.TryFlock(dirs)
+				dirs, l, err := datadir.New(c.String(utils.DataDirFlag.Name)).MustFlock()
 				if err != nil {
 					return err
 				}
-				if !locked {
-					return datadir.ErrDataDirLocked
-				}
 				defer l.Unlock()
+
 				return doRetireCommand(c, dirs)
 			},
 			Usage: "erigon snapshots uncompress a.seg | erigon snapshots compress b.seg",
@@ -580,7 +585,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 	return nil
 }
 
-func doIndicesCommand(cliCtx *cli.Context) error {
+func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
@@ -588,7 +593,6 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	defer logger.Info("Done")
 	ctx := cliCtx.Context
 
-	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	rebuild := cliCtx.Bool(SnapshotRebuildFlag.Name)
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
@@ -995,6 +999,7 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 		log.Error("Erigon startup", "err", err)
 		return err
 	}
+	defer ethNode.Close()
 
 	diagnostics.Setup(cliCtx, ethNode, metricsMux, pprofMux)
 
