@@ -40,7 +40,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	state3 "github.com/ledgerwatch/erigon-lib/state"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/merge"
@@ -53,7 +53,6 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/tests"
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
-	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
 const (
@@ -308,7 +307,7 @@ func Main(ctx *cli.Context) error {
 	}
 	defer tx.Rollback()
 
-	sd, err := state3.NewSharedDomains(tx, log.New())
+	sd, err := libstate.NewSharedDomains(tx, log.New())
 	if err != nil {
 		return err
 	}
@@ -618,6 +617,12 @@ func CalculateStateRoot(tx kv.RwTx) (*libcommon.Hash, error) {
 	}
 	h := libcommon.NewHasher()
 	defer libcommon.ReturnHasherToPool(h)
+	domains, err := libstate.NewSharedDomains(tx, log.New())
+	if err != nil {
+		return nil, fmt.Errorf("NewSharedDomains: %w", err)
+	}
+	defer domains.Close()
+
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return nil, fmt.Errorf("interate over plain state: %w", err)
@@ -650,10 +655,12 @@ func CalculateStateRoot(tx kv.RwTx) (*libcommon.Hash, error) {
 		}
 	}
 	c.Close()
-	root, err := trie.CalcRoot("", tx)
+	root, err := domains.ComputeCommitment(context.Background(), true, domains.BlockNum(), "")
 	if err != nil {
 		return nil, err
 	}
+	hashRoot := libcommon.Hash{}
+	hashRoot.SetBytes(root)
 
-	return &root, nil
+	return &hashRoot, nil
 }

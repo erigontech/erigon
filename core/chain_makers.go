@@ -29,7 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	state2 "github.com/ledgerwatch/erigon-lib/state"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -39,7 +39,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
 // BlockGen creates blocks for testing.
@@ -323,10 +322,10 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 
 	var stateReader state.StateReader
 	var stateWriter state.StateWriter
-	var domains *state2.SharedDomains
+	var domains *libstate.SharedDomains
 	if histV3 {
 		var err error
-		domains, err = state2.NewSharedDomains(tx, logger)
+		domains, err = libstate.NewSharedDomains(tx, logger)
 		if err != nil {
 			return nil, err
 		}
@@ -460,6 +459,12 @@ func hashKeyAndAddIncarnation(k []byte, h *libcommon.Hasher) (newK []byte, err e
 }
 
 func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) (hashRoot libcommon.Hash, err error) {
+	domains, err := libstate.NewSharedDomains(tx, log.New())
+	if err != nil {
+		return hashRoot, fmt.Errorf("NewSharedDomains: %w", err)
+	}
+	defer domains.Close()
+
 	if err := tx.ClearBucket(kv.HashedAccounts); err != nil {
 		return hashRoot, fmt.Errorf("clear HashedAccounts bucket: %w", err)
 	}
@@ -477,7 +482,7 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 		h := libcommon.NewHasher()
 		defer libcommon.ReturnHasherToPool(h)
 
-		it, err := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
+		it, err := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
 		if err != nil {
 			return libcommon.Hash{}, err
 		}
@@ -502,7 +507,7 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 			}
 		}
 
-		it, err = tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).DomainRangeLatest(tx, kv.StorageDomain, nil, nil, -1)
+		it, err = tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).DomainRangeLatest(tx, kv.StorageDomain, nil, nil, -1)
 		if err != nil {
 			return libcommon.Hash{}, err
 		}
@@ -550,11 +555,19 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 				}
 				fmt.Printf("===============================\n")
 			}
-			root, err := trie.CalcRootTrace("GenerateChain", tx)
-			return root, err
+			root, err := domains.ComputeCommitment(context.Background(), true, domains.BlockNum(), "")
+			if err != nil {
+				return hashRoot, err
+			}
+			hashRoot.SetBytes(root)
+			return hashRoot, nil
 		}
-		root, err := trie.CalcRoot("GenerateChain", tx)
-		return root, err
+		root, err := domains.ComputeCommitment(context.Background(), true, domains.BlockNum(), "")
+		if err != nil {
+			return hashRoot, err
+		}
+		hashRoot.SetBytes(root)
+		return hashRoot, nil
 
 		//var root libcommon.Hash
 		//rootB, err := tx.(*temporal.Tx).Agg().ComputeCommitment(false, false)
@@ -619,8 +632,10 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 		}
 		fmt.Printf("===============================\n")
 	}
-	if hash, err := trie.CalcRoot("GenerateChain", tx); err == nil {
-		return hash, nil
+
+	if root, err := domains.ComputeCommitment(context.Background(), true, domains.BlockNum(), ""); err == nil {
+		hashRoot.SetBytes(root)
+		return hashRoot, nil
 	} else {
 		return libcommon.Hash{}, fmt.Errorf("call to CalcTrieRoot: %w", err)
 	}

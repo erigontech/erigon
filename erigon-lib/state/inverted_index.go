@@ -33,6 +33,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
@@ -875,9 +877,10 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	return stat, err
 }
 
-func (iit *InvertedIndexRoTx) DebugEFAllValuesAreInRange(ctx context.Context) error {
+func (iit *InvertedIndexRoTx) DebugEFAllValuesAreInRange(ctx context.Context, failFast bool, fromStep uint64) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
+	fromTxNum := fromStep * iit.ii.aggregationStep
 	iterStep := func(item ctxItem) error {
 		g := item.src.decompressor.MakeGetter()
 		g.Reset(0)
@@ -892,25 +895,27 @@ func (iit *InvertedIndexRoTx) DebugEFAllValuesAreInRange(ctx context.Context) er
 				continue
 			}
 			if item.startTxNum > ef.Min() {
-				err := fmt.Errorf("DebugEFAllValuesAreInRange1: %d > %d, %s, %x", item.startTxNum, ef.Min(), g.FileName(), k)
-				log.Warn(err.Error())
-				//return err
+				err := fmt.Errorf("[integrity] .ef file has foreign txNum: %d > %d, %s, %x", item.startTxNum, ef.Min(), g.FileName(), common.Shorten(k, 8))
+				if failFast {
+					return err
+				} else {
+					log.Warn(err.Error())
+				}
 			}
 			if item.endTxNum < ef.Max() {
-				err := fmt.Errorf("DebugEFAllValuesAreInRange2: %d < %d, %s, %x", item.endTxNum, ef.Max(), g.FileName(), k)
-				log.Warn(err.Error())
-				//return err
+				err := fmt.Errorf("[integrity] .ef file has foreign txNum: %d < %d, %s, %x", item.endTxNum, ef.Max(), g.FileName(), common.Shorten(k, 8))
+				if failFast {
+					return err
+				} else {
+					log.Warn(err.Error())
+				}
 			}
 
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-logEvery.C:
-				shortK := k
-				if len(shortK) > 8 {
-					shortK = shortK[:8]
-				}
-				log.Info(fmt.Sprintf("[integrity] progress EFAllValuesAreInRange: %s, prefix=%x", g.FileName(), shortK))
+				log.Info(fmt.Sprintf("[integrity] InvertedIndex: %s, prefix=%x", g.FileName(), common.Shorten(k, 8)))
 			default:
 			}
 		}
@@ -919,6 +924,9 @@ func (iit *InvertedIndexRoTx) DebugEFAllValuesAreInRange(ctx context.Context) er
 
 	for _, item := range iit.files {
 		if item.src.decompressor == nil {
+			continue
+		}
+		if item.endTxNum <= fromTxNum {
 			continue
 		}
 		if err := iterStep(item); err != nil {
