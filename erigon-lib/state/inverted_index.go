@@ -925,7 +925,7 @@ func (iit *InvertedIndexRoTx) DebugEFAllValuesAreInRange(ctx context.Context, fa
 		if item.src.decompressor == nil {
 			continue
 		}
-		if item.endTxNum < fromTxNum {
+		if item.endTxNum <= fromTxNum {
 			continue
 		}
 		if err := iterStep(item); err != nil {
