@@ -52,7 +52,7 @@ import (
 // - Each record key has `AutoIncrementID` format.
 // - Use external table to refer it.
 // - Only data which belongs to `canonical` block moving from DB to files.
-// - It doesn't need Unwind
+// - It doesn't need Unwind - because `AutoIncrementID` always-growing
 type Appendable struct {
 	cfg AppendableCfg
 
@@ -792,4 +792,9 @@ func (ap *Appendable) integrateDirtyFiles(sf AppendableFiles, txNumFrom, txNumTo
 	fi.decompressor = sf.decomp
 	fi.index = sf.index
 	ap.dirtyFiles.Set(fi)
+}
+
+func (tx *AppendableRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced, withWarmup bool, fn func(key []byte, txnum []byte) error) error {
+	//Appendable type is unwind-less - means doesn't need perform any operation on Unwind
+	return nil
 }

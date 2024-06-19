@@ -191,7 +191,7 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 		}
 	}
 
-	// appendable type doesn't need unwind
+	// Appendable type: doesn't need unwind
 
 	sd.ClearRam(true)
 	sd.SetTxNum(txUnwindTo)
