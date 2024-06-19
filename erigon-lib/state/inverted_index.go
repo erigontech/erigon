@@ -23,6 +23,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"math"
 	"os"
 	"path"
@@ -892,7 +893,7 @@ func (iit *InvertedIndexRoTx) DebugEFAllValuesAreInRange(ctx context.Context, fa
 				continue
 			}
 			if item.startTxNum > ef.Min() {
-				err := fmt.Errorf("DebugEFAllValuesAreInRange1: %d > %d, %s, %x", item.startTxNum, ef.Min(), g.FileName(), k)
+				err := fmt.Errorf("DebugEFAllValuesAreInRange1: %d > %d, %s, %x", item.startTxNum, ef.Min(), g.FileName(), common.Shorten(k, 8))
 				if failFast {
 					return err
 				} else {
@@ -900,7 +901,7 @@ func (iit *InvertedIndexRoTx) DebugEFAllValuesAreInRange(ctx context.Context, fa
 				}
 			}
 			if item.endTxNum < ef.Max() {
-				err := fmt.Errorf("DebugEFAllValuesAreInRange2: %d < %d, %s, %x", item.endTxNum, ef.Max(), g.FileName(), k)
+				err := fmt.Errorf("DebugEFAllValuesAreInRange2: %d < %d, %s, %x", item.endTxNum, ef.Max(), g.FileName(), common.Shorten(k, 8))
 				if failFast {
 					return err
 				} else {
@@ -912,11 +913,7 @@ func (iit *InvertedIndexRoTx) DebugEFAllValuesAreInRange(ctx context.Context, fa
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-logEvery.C:
-				shortK := k
-				if len(shortK) > 8 {
-					shortK = shortK[:8]
-				}
-				log.Info(fmt.Sprintf("[integrity] progress EFAllValuesAreInRange: %s, prefix=%x", g.FileName(), shortK))
+				log.Info(fmt.Sprintf("[integrity] progress EFAllValuesAreInRange: %s, prefix=%x", g.FileName(), common.Shorten(k, 8)))
 			default:
 			}
 		}
