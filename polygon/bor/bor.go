@@ -1635,6 +1635,36 @@ func (c *Bor) GetTransferFunc() evmtypes.TransferFunc {
 	return BorTransfer
 }
 
+func AddFeeTransferLog(ibs evmtypes.IntraBlockState, sender libcommon.Address, coinbase libcommon.Address, result *evmtypes.ExecutionResult) {
+	/*
+
+		if st.isBor {
+			// Deprecating transfer log and will be removed in future fork. PLEASE DO NOT USE this transfer log going forward. Parameters won't get updated as expected going forward with EIP1559
+			// add transfer log
+			output1 := senderInitBalance.Clone()
+			output2 := coinbaseInitBalance.Clone()
+			AddFeeTransferLog(
+				st.state,
+
+				msg.From(),
+				coinbase,
+
+				amount,
+				senderInitBalance,
+				coinbaseInitBalance,
+				output1.Sub(output1, amount),
+				output2.Add(output2, amount),
+			)
+		}
+	*/
+
+	// TODO(yperbasis) FIXME
+}
+
+func (c *Bor) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
+	return AddFeeTransferLog
+}
+
 // In bor, RLP encoding of BlockExtraData will be stored in the Extra field in the header
 type BlockExtraData struct {
 	// Validator bytes of bor

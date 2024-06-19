@@ -304,12 +304,8 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error) {
 	coinbase := st.evm.Context.Coinbase
 
-	var input1 *uint256.Int
-	var input2 *uint256.Int
-	if st.isBor {
-		input1 = st.state.GetBalance(st.msg.From()).Clone()
-		input2 = st.state.GetBalance(coinbase).Clone()
-	}
+	senderInitBalance := st.state.GetBalance(st.msg.From()).Clone()
+	coinbaseInitBalance := st.state.GetBalance(coinbase).Clone()
 
 	// First check this message satisfies all consensus rules before
 	// applying the message. The rules include these clauses
@@ -409,31 +405,22 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 			st.state.AddBalance(*burntContractAddress, burnAmount)
 		}
 	}
-	if st.isBor {
-		// Deprecating transfer log and will be removed in future fork. PLEASE DO NOT USE this transfer log going forward. Parameters won't get updated as expected going forward with EIP1559
-		// add transfer log
-		output1 := input1.Clone()
-		output2 := input2.Clone()
-		AddFeeTransferLog(
-			st.state,
 
-			msg.From(),
-			coinbase,
-
-			amount,
-			input1,
-			input2,
-			output1.Sub(output1, amount),
-			output2.Add(output2, amount),
-		)
+	result := &evmtypes.ExecutionResult{
+		UsedGas:             st.gasUsed(),
+		Err:                 vmerr,
+		Reverted:            vmerr == vm.ErrExecutionReverted,
+		ReturnData:          ret,
+		SenderInitBalance:   senderInitBalance,
+		CoinbaseInitBalance: coinbaseInitBalance,
+		FeeTipped:           amount,
 	}
 
-	return &evmtypes.ExecutionResult{
-		UsedGas:    st.gasUsed(),
-		Err:        vmerr,
-		Reverted:   vmerr == vm.ErrExecutionReverted,
-		ReturnData: ret,
-	}, nil
+	if st.evm.Context.PostApplyMessage != nil {
+		st.evm.Context.PostApplyMessage(st.state, msg.From(), coinbase, result)
+	}
+
+	return result, nil
 }
 
 func (st *StateTransition) refundGas(refundQuotient uint64) {

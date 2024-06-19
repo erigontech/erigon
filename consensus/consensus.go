@@ -136,6 +136,8 @@ type EngineReader interface {
 
 	GetTransferFunc() evmtypes.TransferFunc
 
+	GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc
+
 	// Close terminates any background threads, DB's etc maintained by the consensus engine.
 	Close() error
 }

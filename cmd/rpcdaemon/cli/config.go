@@ -994,6 +994,14 @@ func (e *remoteConsensusEngine) GetTransferFunc() evmtypes.TransferFunc {
 	return e.engine.GetTransferFunc()
 }
 
+func (e *remoteConsensusEngine) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
+	if err := e.validateEngineReady(); err != nil {
+		panic(err)
+	}
+
+	return e.engine.GetPostApplyMessageFunc()
+}
+
 func (e *remoteConsensusEngine) VerifyHeader(_ consensus.ChainHeaderReader, _ *types.Header, _ bool) error {
 	panic("remoteConsensusEngine.VerifyHeader not supported")
 }

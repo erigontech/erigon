@@ -67,23 +67,26 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 	}
 
 	var transferFunc evmtypes.TransferFunc
+	var postApplyMessageFunc evmtypes.PostApplyMessageFunc
 	if engine != nil {
 		transferFunc = engine.GetTransferFunc()
+		postApplyMessageFunc = engine.GetPostApplyMessageFunc()
 	} else {
 		transferFunc = consensus.Transfer
 	}
 	return evmtypes.BlockContext{
-		CanTransfer: CanTransfer,
-		Transfer:    transferFunc,
-		GetHash:     blockHashFunc,
-		Coinbase:    beneficiary,
-		BlockNumber: header.Number.Uint64(),
-		Time:        header.Time,
-		Difficulty:  new(big.Int).Set(header.Difficulty),
-		BaseFee:     &baseFee,
-		GasLimit:    header.GasLimit,
-		PrevRanDao:  prevRandDao,
-		BlobBaseFee: blobBaseFee,
+		CanTransfer:      CanTransfer,
+		Transfer:         transferFunc,
+		GetHash:          blockHashFunc,
+		PostApplyMessage: postApplyMessageFunc,
+		Coinbase:         beneficiary,
+		BlockNumber:      header.Number.Uint64(),
+		Time:             header.Time,
+		Difficulty:       new(big.Int).Set(header.Difficulty),
+		BaseFee:          &baseFee,
+		GasLimit:         header.GasLimit,
+		PrevRanDao:       prevRandDao,
+		BlobBaseFee:      blobBaseFee,
 	}
 }
 

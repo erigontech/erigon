@@ -647,3 +647,7 @@ func (c *Clique) snapshots(latest uint64, total int) ([]*Snapshot, error) {
 func (c *Clique) GetTransferFunc() evmtypes.TransferFunc {
 	return consensus.Transfer
 }
+
+func (c *Clique) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
+	return nil
+}

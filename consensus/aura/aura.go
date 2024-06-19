@@ -1228,6 +1228,10 @@ func (c *AuRa) GetTransferFunc() evmtypes.TransferFunc {
 	return consensus.Transfer
 }
 
+func (c *AuRa) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
+	return nil
+}
+
 /*
 // extracts the empty steps from the header seal. should only be called when there are 3 fields in the seal
 // (i.e. header.number() >= self.empty_steps_transition).

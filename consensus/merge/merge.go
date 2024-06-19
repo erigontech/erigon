@@ -340,6 +340,10 @@ func (s *Merge) GetTransferFunc() evmtypes.TransferFunc {
 	return s.eth1Engine.GetTransferFunc()
 }
 
+func (s *Merge) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
+	return s.eth1Engine.GetPostApplyMessageFunc()
+}
+
 func (s *Merge) Close() error {
 	return s.eth1Engine.Close()
 }

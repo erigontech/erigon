@@ -579,3 +579,7 @@ func SeedHash(block uint64) []byte {
 func (ethash *Ethash) GetTransferFunc() evmtypes.TransferFunc {
 	return consensus.Transfer
 }
+
+func (ethash *Ethash) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
+	return nil
+}
