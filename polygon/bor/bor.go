@@ -1626,15 +1626,15 @@ func BorTransfer(db evmtypes.IntraBlockState, sender, recipient libcommon.Addres
 	output1 := db.GetBalance(sender).Clone()
 	output2 := db.GetBalance(recipient).Clone()
 
-	// add transfer log
-	AddTransferLog(db, sender, recipient, amount, input1, input2, output1, output2)
+	// add transfer log into state
+	addTransferLog(db, transferLogSig, sender, recipient, amount, input1, input2, output1, output2)
 }
 
 func (c *Bor) GetTransferFunc() evmtypes.TransferFunc {
 	return BorTransfer
 }
 
-// AddFeeTransferLog adds transfer log into state
+// AddFeeTransferLog adds fee transfer log into state
 // Deprecating transfer log and will be removed in future fork. PLEASE DO NOT USE this transfer log going forward. Parameters won't get updated as expected going forward with EIP1559
 func AddFeeTransferLog(ibs evmtypes.IntraBlockState, sender libcommon.Address, coinbase libcommon.Address, result *evmtypes.ExecutionResult) {
 	output1 := result.SenderInitBalance.Clone()
