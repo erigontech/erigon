@@ -21,11 +21,7 @@ func newTestACLDB(tb testing.TB, dir string) kv.RwDB {
 	tb.Helper()
 
 	if dir == "" {
-		dir = fmt.Sprintf("/tmp/acl-db-temp_%v", time.Now().UTC().Format(time.RFC3339Nano))
-
-		if err := os.Mkdir(dir, 0775); err != nil {
-			tb.Fatal(err)
-		}
+		dir = tb.TempDir()
 	}
 
 	state, err := OpenACLDB(context.Background(), dir)

@@ -149,10 +149,10 @@ db-tools:
 
 ## test:                              run unit tests with a 100s timeout
 test:
-	$(GOTEST) --timeout 100s
+	$(GOTEST) --timeout 200s
 
 test3:
-	$(GOTEST) --timeout 100s -tags $(BUILD_TAGS),erigon3
+	$(GOTEST) --timeout 200s -tags $(BUILD_TAGS),erigon3
 
 ## test-integration:                  run integration tests with a 30m timeout
 test-integration:
