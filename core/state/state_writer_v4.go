@@ -2,7 +2,6 @@ package state
 
 import (
 	"fmt"
-
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -23,6 +22,9 @@ func NewWriterV4(tx kv.TemporalPutDel) *WriterV4 {
 		trace: false,
 	}
 }
+
+func (cw *WriterV4) WriteChangeSets() error { return nil }
+func (cw *WriterV4) WriteHistory() error    { return nil }
 
 func (w *WriterV4) UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error {
 	if w.trace {

@@ -118,6 +118,44 @@ func (c *MockChainHeaderReaderConfigCall) DoAndReturn(f func() *chain.Config) *M
 	return c
 }
 
+// CurrentFinalizedHeader mocks base method.
+func (m *MockChainHeaderReader) CurrentFinalizedHeader() *types.Header {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CurrentFinalizedHeader")
+	ret0, _ := ret[0].(*types.Header)
+	return ret0
+}
+
+// CurrentFinalizedHeader indicates an expected call of CurrentFinalizedHeader.
+func (mr *MockChainHeaderReaderMockRecorder) CurrentFinalizedHeader() *MockChainHeaderReaderCurrentFinalizedHeaderCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CurrentFinalizedHeader", reflect.TypeOf((*MockChainHeaderReader)(nil).CurrentFinalizedHeader))
+	return &MockChainHeaderReaderCurrentFinalizedHeaderCall{Call: call}
+}
+
+// MockChainHeaderReaderCurrentFinalizedHeaderCall wrap *gomock.Call
+type MockChainHeaderReaderCurrentFinalizedHeaderCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockChainHeaderReaderCurrentFinalizedHeaderCall) Return(arg0 *types.Header) *MockChainHeaderReaderCurrentFinalizedHeaderCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockChainHeaderReaderCurrentFinalizedHeaderCall) Do(f func() *types.Header) *MockChainHeaderReaderCurrentFinalizedHeaderCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockChainHeaderReaderCurrentFinalizedHeaderCall) DoAndReturn(f func() *types.Header) *MockChainHeaderReaderCurrentFinalizedHeaderCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // CurrentHeader mocks base method.
 func (m *MockChainHeaderReader) CurrentHeader() *types.Header {
 	m.ctrl.T.Helper()
@@ -152,6 +190,44 @@ func (c *MockChainHeaderReaderCurrentHeaderCall) Do(f func() *types.Header) *Moc
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockChainHeaderReaderCurrentHeaderCall) DoAndReturn(f func() *types.Header) *MockChainHeaderReaderCurrentHeaderCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// CurrentSafeHeader mocks base method.
+func (m *MockChainHeaderReader) CurrentSafeHeader() *types.Header {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CurrentSafeHeader")
+	ret0, _ := ret[0].(*types.Header)
+	return ret0
+}
+
+// CurrentSafeHeader indicates an expected call of CurrentSafeHeader.
+func (mr *MockChainHeaderReaderMockRecorder) CurrentSafeHeader() *MockChainHeaderReaderCurrentSafeHeaderCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CurrentSafeHeader", reflect.TypeOf((*MockChainHeaderReader)(nil).CurrentSafeHeader))
+	return &MockChainHeaderReaderCurrentSafeHeaderCall{Call: call}
+}
+
+// MockChainHeaderReaderCurrentSafeHeaderCall wrap *gomock.Call
+type MockChainHeaderReaderCurrentSafeHeaderCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockChainHeaderReaderCurrentSafeHeaderCall) Return(arg0 *types.Header) *MockChainHeaderReaderCurrentSafeHeaderCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockChainHeaderReaderCurrentSafeHeaderCall) Do(f func() *types.Header) *MockChainHeaderReaderCurrentSafeHeaderCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockChainHeaderReaderCurrentSafeHeaderCall) DoAndReturn(f func() *types.Header) *MockChainHeaderReaderCurrentSafeHeaderCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

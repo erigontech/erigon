@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -14,10 +13,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
+
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	metrics2 "github.com/ledgerwatch/erigon-lib/common/metrics"
 	"github.com/ledgerwatch/erigon-lib/config3"
@@ -858,6 +860,12 @@ Loop:
 			ts += time.Since(start)
 			aggTx.RestrictSubsetFileDeletions(false)
 			doms.SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
+			if !inMemExec {
+				if err := state2.WriteDiffSet(applyTx, blockNum, b.Hash(), changeset); err != nil {
+					return err
+				}
+			}
+
 			doms.SetChangesetAccumulator(nil)
 		}
 

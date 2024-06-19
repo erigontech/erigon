@@ -3,7 +3,7 @@ package diagnostics
 import (
 	"context"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 func (d *DiagnosticClient) setupBodiesDiagnostics(rootCtx context.Context) {

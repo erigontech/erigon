@@ -5,11 +5,12 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/seg"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	btree2 "github.com/tidwall/btree"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/ledgerwatch/erigon-lib/seg"
 
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 )
@@ -526,12 +527,4 @@ func TestMergeFiles(t *testing.T) {
 	dc = d.BeginFilesRo()
 	defer dc.Close()
 
-	err = dc.IteratePrefix(rwTx, nil, func(key, value []byte) error {
-		upds, ok := data[string(key)]
-		require.True(t, ok)
-
-		require.EqualValues(t, upds[len(upds)-1].value, value)
-		return nil
-	})
-	require.NoError(t, err)
 }

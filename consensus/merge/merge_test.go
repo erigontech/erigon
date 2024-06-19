@@ -21,6 +21,14 @@ func (r readerMock) CurrentHeader() *types.Header {
 	return nil
 }
 
+func (cr readerMock) CurrentFinalizedHeader() *types.Header {
+	return nil
+}
+
+func (cr readerMock) CurrentSafeHeader() *types.Header {
+	return nil
+}
+
 func (r readerMock) GetHeader(libcommon.Hash, uint64) *types.Header {
 	return nil
 }

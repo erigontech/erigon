@@ -20,9 +20,22 @@ import (
 	"time"
 )
 
-type PeerStatisticsGetter interface {
-	GetPeersStatistics() map[string]*PeerStatistics
-}
+type SyncStageType string
+
+const (
+	Snapshots           SyncStageType = "Snapshots"
+	BlockHashes         SyncStageType = "BlockHashes"
+	Senders             SyncStageType = "Senders"
+	Execution           SyncStageType = "Execution"
+	HashState           SyncStageType = "HashState"
+	IntermediateHashes  SyncStageType = "IntermediateHashes"
+	CallTraces          SyncStageType = "CallTraces"
+	AccountHistoryIndex SyncStageType = "AccountHistoryIndex"
+	StorageHistoryIndex SyncStageType = "StorageHistoryIndex"
+	LogIndex            SyncStageType = "LogIndex"
+	TxLookup            SyncStageType = "TxLookup"
+	Finish              SyncStageType = "Finish"
+)
 
 type PeerStatistics struct {
 	PeerType     string
@@ -54,7 +67,6 @@ type PeerStatisticMsgUpdate struct {
 }
 
 type SyncStatistics struct {
-	SyncStages       []SyncStage                `json:"syncStages"`
 	SnapshotDownload SnapshotDownloadStatistics `json:"snapshotDownload"`
 	SnapshotIndexing SnapshotIndexingStatistics `json:"snapshotIndexing"`
 	BlockExecution   BlockExecutionStatistics   `json:"blockExecution"`
