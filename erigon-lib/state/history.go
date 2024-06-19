@@ -1571,7 +1571,7 @@ func (hi *StateAsOfIterDB) advanceSmallVals() error {
 			return err
 		}
 		if v == nil {
-			k, v, err = hi.valsCDup.Seek(k)
+			_, _, err = hi.valsCDup.Seek(k)
 			if err != nil {
 				return nil
 			}
@@ -1981,7 +1981,7 @@ func (hi *HistoryChangesIterDB) advanceSmallVals() (err error) {
 	for k != nil {
 		var v []byte
 		for {
-			k, v, err = hi.valsCDup.Seek(k)
+			k, _, err = hi.valsCDup.Seek(k)
 			if err != nil {
 				return err
 			}
@@ -1996,8 +1996,8 @@ func (hi *HistoryChangesIterDB) advanceSmallVals() (err error) {
 			if v != nil {
 				break
 			}
-			var ok bool
-			k, ok = kv.NextSubtree(k)
+			var ok bool               //nolint
+			k, ok = kv.NextSubtree(k) //nolint
 			if ok {
 				continue
 			}

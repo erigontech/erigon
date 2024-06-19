@@ -1840,7 +1840,7 @@ func (c *MdbxDupSortCursor) NextNoDup() ([]byte, []byte, error) {
 		}
 
 		panic(err)
-		return []byte{}, nil, fmt.Errorf("in NextNoDup: %w", err)
+		//return []byte{}, nil, fmt.Errorf("in NextNoDup: %w", err)
 	}
 	return k, v, nil
 }

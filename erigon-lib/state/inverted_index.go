@@ -1290,7 +1290,7 @@ func (it *InvertedIterator1) advanceInDb() {
 		if !ok {
 			break
 		}
-		if k, v, err = it.cursor.Seek(nextK); err != nil {
+		if k, _, err = it.cursor.Seek(nextK); err != nil {
 			panic(err)
 		}
 	}
