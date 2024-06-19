@@ -415,7 +415,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	}
 
 	ctx := cliCtx.Context
-	requestedAction := integrity.Check(cliCtx.String("action"))
+	requestedCheck := integrity.Check(cliCtx.String("check"))
 	failFast := cliCtx.Bool("failFast")
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
@@ -434,7 +434,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 
 	blockReader, _ := blockRetire.IO()
 	for _, chk := range integrity.AllChecks {
-		if requestedAction != "" && requestedAction != chk {
+		if requestedCheck != "" && requestedCheck != chk {
 			continue
 		}
 		switch chk {
