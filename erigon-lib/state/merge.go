@@ -1299,7 +1299,7 @@ func (dt *DomainRoTx) garbage(merged *filesItem) (outs []*filesItem) {
 				outs = append(outs, item)
 			}
 			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainRoTx`)
-			if item.isBefore(merged) && dt.hasCoverFile(item) {
+			if item.isBefore(merged) && hasCoverVisibleFile(dt.files, item) {
 				outs = append(outs, item)
 			}
 		}
@@ -1317,9 +1317,6 @@ func (iit *InvertedIndexRoTx) garbage(merged *filesItem) (outs []*filesItem) {
 	return garbage(iit.ii.dirtyFiles, iit.files, merged)
 }
 
-func (dt *DomainRoTx) hasCoverFile(item *filesItem) bool {
-	return hasCoverVisibleFile(dt.files, item)
-}
 func garbage(dirtyFiles *btree2.BTreeG[*filesItem], visibleFiles []ctxItem, merged *filesItem) (outs []*filesItem) {
 	if merged == nil {
 		return
