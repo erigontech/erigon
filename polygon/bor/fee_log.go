@@ -1,4 +1,4 @@
-package core
+package bor
 
 import (
 	"github.com/holiman/uint256"
@@ -28,35 +28,6 @@ func AddTransferLog(
 	addTransferLog(
 		state,
 		transferLogSig,
-
-		sender,
-		recipient,
-
-		amount,
-		input1,
-		input2,
-		output1,
-		output2,
-	)
-}
-
-// AddFeeTransferLog adds transfer log into state
-// Deprecating transfer log and will be removed in future fork. PLEASE DO NOT USE this transfer log going forward. Parameters won't get updated as expected going forward with EIP1559
-func AddFeeTransferLog(
-	state evmtypes.IntraBlockState,
-
-	sender,
-	recipient libcommon.Address,
-
-	amount,
-	input1,
-	input2,
-	output1,
-	output2 *uint256.Int,
-) {
-	addTransferLog(
-		state,
-		transferFeeLogSig,
 
 		sender,
 		recipient,

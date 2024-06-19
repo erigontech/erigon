@@ -1614,8 +1614,8 @@ func isSprintStart(number, sprint uint64) bool {
 // BorTransfer transfer in Bor
 func BorTransfer(db evmtypes.IntraBlockState, sender, recipient libcommon.Address, amount *uint256.Int, bailout bool) {
 	// get inputs before
-	//	input1 := db.GetBalance(sender).Clone()
-	//	input2 := db.GetBalance(recipient).Clone()
+	input1 := db.GetBalance(sender).Clone()
+	input2 := db.GetBalance(recipient).Clone()
 
 	if !bailout {
 		db.SubBalance(sender, amount)
@@ -1623,42 +1623,34 @@ func BorTransfer(db evmtypes.IntraBlockState, sender, recipient libcommon.Addres
 	db.AddBalance(recipient, amount)
 
 	// get outputs after
-	//	output1 := db.GetBalance(sender).Clone()
-	//	output2 := db.GetBalance(recipient).Clone()
+	output1 := db.GetBalance(sender).Clone()
+	output2 := db.GetBalance(recipient).Clone()
 
 	// add transfer log
-	// TODO(yperbasis) FIXME
-	//  AddTransferLog(db, sender, recipient, amount, input1, input2, output1, output2)
+	AddTransferLog(db, sender, recipient, amount, input1, input2, output1, output2)
 }
 
 func (c *Bor) GetTransferFunc() evmtypes.TransferFunc {
 	return BorTransfer
 }
 
+// AddFeeTransferLog adds transfer log into state
+// Deprecating transfer log and will be removed in future fork. PLEASE DO NOT USE this transfer log going forward. Parameters won't get updated as expected going forward with EIP1559
 func AddFeeTransferLog(ibs evmtypes.IntraBlockState, sender libcommon.Address, coinbase libcommon.Address, result *evmtypes.ExecutionResult) {
-	/*
+	output1 := result.SenderInitBalance.Clone()
+	output2 := result.CoinbaseInitBalance.Clone()
+	addTransferLog(
+		ibs,
+		transferFeeLogSig,
+		sender,
+		coinbase,
+		result.FeeTipped,
+		result.SenderInitBalance,
+		result.CoinbaseInitBalance,
+		output1.Sub(output1, result.FeeTipped),
+		output2.Add(output2, result.FeeTipped),
+	)
 
-		if st.isBor {
-			// Deprecating transfer log and will be removed in future fork. PLEASE DO NOT USE this transfer log going forward. Parameters won't get updated as expected going forward with EIP1559
-			// add transfer log
-			output1 := senderInitBalance.Clone()
-			output2 := coinbaseInitBalance.Clone()
-			AddFeeTransferLog(
-				st.state,
-
-				msg.From(),
-				coinbase,
-
-				amount,
-				senderInitBalance,
-				coinbaseInitBalance,
-				output1.Sub(output1, amount),
-				output2.Add(output2, amount),
-			)
-		}
-	*/
-
-	// TODO(yperbasis) FIXME
 }
 
 func (c *Bor) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
