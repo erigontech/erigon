@@ -7,6 +7,19 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/config3"
+	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
+	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal"
+	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/ledgerwatch/erigon-lib/seg"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
+	"github.com/ledgerwatch/erigon/diagnostics"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/node"
 	"io"
 	"math"
 	"net/http"
@@ -17,9 +30,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-
-	"github.com/c2h5oh/datasize"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
@@ -27,36 +37,25 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/disk"
 	"github.com/ledgerwatch/erigon-lib/common/mem"
-	"github.com/ledgerwatch/erigon-lib/config3"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon-lib/metrics"
-	"github.com/ledgerwatch/erigon-lib/seg"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
-	"github.com/ledgerwatch/erigon/diagnostics"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/integrity"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/params"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
-	"github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -434,27 +433,22 @@ func doIntegrity(cliCtx *cli.Context) error {
 	defer agg.Close()
 
 	blockReader, _ := blockRetire.IO()
-	for _, a := range integrity.AllChecks {
-		if requestedAction != "" && requestedAction != a {
+	for _, chk := range integrity.AllChecks {
+		if requestedAction != "" && requestedAction != chk {
 			continue
 		}
-		switch a {
+		switch chk {
+		case integrity.BlocksTxnID:
+			return blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(failFast)
 		case integrity.Blocks:
-			if err := integrity.SnapBlocksRead(chainDB, blockReader, ctx, failFast); err != nil {
-				return err
-			}
+			return integrity.SnapBlocksRead(chainDB, blockReader, ctx, failFast)
 		case integrity.InvertedIndex:
-			if err := integrity.E3EfFiles(ctx, chainDB, agg, failFast); err != nil {
-				return err
-			}
+			return integrity.E3EfFiles(ctx, chainDB, agg, failFast)
 		case integrity.HistoryNoSystemTxs:
-			if err := integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg); err != nil {
-				return err
-			}
+			return integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg)
+		default:
+			return fmt.Errorf("unknown check: %s", chk)
 		}
-		//if err := blockReader.IntegrityTxnID(false); err != nil {
-		//	return err
-		//}
 	}
 
 	return nil
