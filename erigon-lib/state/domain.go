@@ -850,6 +850,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 	binary.BigEndian.PutUint64(stepBytes, ^step)
 
 	var valsCursor kv.Cursor
+	fmt.Println("collating", d.filenameBase, "step", step, "txFrom", txFrom, "txTo", txTo)
 
 	if d.largeVals {
 		valsCursor, err = roTx.Cursor(d.valsTable)
