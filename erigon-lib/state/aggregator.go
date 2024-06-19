@@ -1603,6 +1603,10 @@ func (a *Aggregator) integrateMergedDirtyFiles(outs SelectedStaticFilesV3, in Me
 	for id, ii := range a.iis {
 		ii.integrateMergedDirtyFiles(outs.ii[id], in.iis[id])
 	}
+
+	for id, ap := range a.ap {
+		ap.integrateMergedDirtyFiles(outs.appendable[id], in.appendable[id])
+	}
 }
 
 func (a *Aggregator) cleanAfterMerge(in MergedFilesV3) {
