@@ -65,6 +65,8 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 					log.Error("[Diagnostics] Failed to update snapshot download info", "err", err)
 				}
 
+				d.saveSyncStagesToDB()
+
 				d.mu.Unlock()
 
 				if d.snapshotStageFinished() {
@@ -236,6 +238,8 @@ func (d *DiagnosticClient) addOrUpdateSegmentIndexingState(upd SnapshotIndexingS
 		TimeLeft:    "unknown",
 		Progress:    fmt.Sprintf("%d%%", totalProgress/len(d.syncStats.SnapshotIndexing.Segments)),
 	}, "Indexing snapshots")
+
+	d.saveSyncStagesToDB()
 }
 
 func (d *DiagnosticClient) runSnapshotFilesListListener(rootCtx context.Context) {
