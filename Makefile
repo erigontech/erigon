@@ -140,7 +140,6 @@ COMMANDS += txpool
 COMMANDS += verkle
 COMMANDS += evm
 COMMANDS += sentinel
-COMMANDS += erigon-el
 COMMANDS += acl
 
 # build each command using %.cmd rule
