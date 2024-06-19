@@ -10,11 +10,11 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	sentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/gossip"
 	"github.com/ledgerwatch/erigon/cl/phase1/network/subnets"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type ValidatorSyncCommitteeSubscriptionsRequest struct {

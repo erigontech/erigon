@@ -3,12 +3,13 @@ package diagnostics
 import (
 	"encoding/json"
 
-	"github.com/ledgerwatch/erigon-lib/diskutils"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
+
+	"github.com/ledgerwatch/erigon-lib/diskutils"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 var (
