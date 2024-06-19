@@ -888,10 +888,10 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 			}{common.Copy(k[:len(k)-8]), common.Copy(v)})
 		} else {
 			if err = comp.AddWord(k); err != nil {
-				return coll, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, kv.k, err)
+				return coll, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, k, err)
 			}
 			if err = comp.AddWord(common.Copy(v[8:])); err != nil {
-				return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, kv.k, kv.v, err)
+				return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, k, v[8:], err)
 			}
 		}
 	}
