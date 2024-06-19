@@ -117,6 +117,10 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 		sd.appendableWriter[id] = a.NewWriter()
 	}
 
+	for id, a := range sd.aggTx.appendable {
+		sd.appendableWriter[id] = a.NewWriter()
+	}
+
 	sd.SetTxNum(0)
 	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, commitment.VariantHexPatriciaTrie)
 
