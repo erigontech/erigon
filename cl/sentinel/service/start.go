@@ -15,13 +15,14 @@ import (
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+
 	"github.com/ledgerwatch/erigon-lib/direct"
 	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/log/v3"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 )
 
 type ServerConfig struct {

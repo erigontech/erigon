@@ -19,6 +19,7 @@ import (
 	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
 	txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -33,7 +34,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc/contracts"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type testAddresses struct {

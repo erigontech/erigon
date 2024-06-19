@@ -24,9 +24,10 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/sha3"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"

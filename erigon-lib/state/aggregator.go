@@ -34,7 +34,6 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/log/v3"
 	rand2 "golang.org/x/exp/rand"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -49,6 +48,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/seg"
 )
 
@@ -1829,25 +1829,25 @@ func (ac *AggregatorRoTx) DebugEFKey(domain kv.Domain, k []byte) error {
 	return ac.d[domain].DebugEFKey(k)
 }
 
-func (ac *AggregatorRoTx) DebugEFAllValuesAreInRange(ctx context.Context, name kv.InvertedIdx) error {
+func (ac *AggregatorRoTx) DebugEFAllValuesAreInRange(ctx context.Context, name kv.InvertedIdx, failFast bool) error {
 	switch name {
 	case kv.AccountsHistoryIdx:
-		err := ac.d[kv.AccountsDomain].ht.iit.DebugEFAllValuesAreInRange(ctx)
+		err := ac.d[kv.AccountsDomain].ht.iit.DebugEFAllValuesAreInRange(ctx, failFast)
 		if err != nil {
 			return err
 		}
 	case kv.StorageHistoryIdx:
-		err := ac.d[kv.CodeDomain].ht.iit.DebugEFAllValuesAreInRange(ctx)
+		err := ac.d[kv.CodeDomain].ht.iit.DebugEFAllValuesAreInRange(ctx, failFast)
 		if err != nil {
 			return err
 		}
 	case kv.CodeHistoryIdx:
-		err := ac.d[kv.StorageDomain].ht.iit.DebugEFAllValuesAreInRange(ctx)
+		err := ac.d[kv.StorageDomain].ht.iit.DebugEFAllValuesAreInRange(ctx, failFast)
 		if err != nil {
 			return err
 		}
 	case kv.CommitmentHistoryIdx:
-		err := ac.d[kv.CommitmentDomain].ht.iit.DebugEFAllValuesAreInRange(ctx)
+		err := ac.d[kv.CommitmentDomain].ht.iit.DebugEFAllValuesAreInRange(ctx, failFast)
 		if err != nil {
 			return err
 		}
@@ -1857,22 +1857,22 @@ func (ac *AggregatorRoTx) DebugEFAllValuesAreInRange(ctx context.Context, name k
 	//		return err
 	//	}
 	case kv.TracesFromIdx:
-		err := ac.iis[kv.TracesFromIdxPos].DebugEFAllValuesAreInRange(ctx)
+		err := ac.iis[kv.TracesFromIdxPos].DebugEFAllValuesAreInRange(ctx, failFast)
 		if err != nil {
 			return err
 		}
 	case kv.TracesToIdx:
-		err := ac.iis[kv.TracesToIdxPos].DebugEFAllValuesAreInRange(ctx)
+		err := ac.iis[kv.TracesToIdxPos].DebugEFAllValuesAreInRange(ctx, failFast)
 		if err != nil {
 			return err
 		}
 	case kv.LogAddrIdx:
-		err := ac.iis[kv.LogAddrIdxPos].DebugEFAllValuesAreInRange(ctx)
+		err := ac.iis[kv.LogAddrIdxPos].DebugEFAllValuesAreInRange(ctx, failFast)
 		if err != nil {
 			return err
 		}
 	case kv.LogTopicIdx:
-		err := ac.iis[kv.LogTopicIdxPos].DebugEFAllValuesAreInRange(ctx)
+		err := ac.iis[kv.LogTopicIdxPos].DebugEFAllValuesAreInRange(ctx, failFast)
 		if err != nil {
 			return err
 		}

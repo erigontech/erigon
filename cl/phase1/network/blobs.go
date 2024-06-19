@@ -4,12 +4,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/net/context"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/rpc"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/net/context"
 )
 
 var requestBlobBatchExpiration = 15 * time.Second

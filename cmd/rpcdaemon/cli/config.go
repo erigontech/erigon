@@ -14,12 +14,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
 	grpcHealth "google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"

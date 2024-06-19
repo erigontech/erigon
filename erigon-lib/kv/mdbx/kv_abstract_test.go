@@ -23,7 +23,6 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -36,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 func TestSequence(t *testing.T) {
