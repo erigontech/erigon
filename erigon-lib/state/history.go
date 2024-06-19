@@ -1573,7 +1573,7 @@ func (hi *StateAsOfIterDB) advanceSmallVals() error {
 		if v == nil {
 			_, _, err = hi.valsCDup.Seek(k)
 			if err != nil {
-				return nil
+				return err
 			}
 			continue
 		}
