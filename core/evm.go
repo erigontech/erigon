@@ -73,6 +73,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 		postApplyMessageFunc = engine.GetPostApplyMessageFunc()
 	} else {
 		transferFunc = consensus.Transfer
+		postApplyMessageFunc = nil
 	}
 	return evmtypes.BlockContext{
 		CanTransfer:      CanTransfer,
