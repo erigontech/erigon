@@ -1286,7 +1286,11 @@ func (it *InvertedIterator1) advanceInDb() {
 				return
 			}
 		}
-		if k, _, err = it.cursor.NextNoDup(); err != nil {
+		nextK, ok := kv.NextSubtree(k)
+		if !ok {
+			break
+		}
+		if k, v, err = it.cursor.Seek(nextK); err != nil {
 			panic(err)
 		}
 	}
