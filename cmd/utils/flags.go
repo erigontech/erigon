@@ -145,6 +145,10 @@ var (
 		Usage: `Default: use snapshots "true" for Mainnet, Goerli, Gnosis Chain and Chiado. use snapshots "false" in all other cases`,
 		Value: true,
 	}
+	ExternalConsensusFlag = cli.BoolFlag{
+		Name:  "externalcl",
+		Usage: "enables external consensus",
+	}
 	InternalConsensusFlag = cli.BoolFlag{
 		Name:  "internalcl",
 		Usage: "Enables internal consensus",
