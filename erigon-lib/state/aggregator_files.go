@@ -58,21 +58,22 @@ func (sf SelectedStaticFilesV3) Close() {
 
 func (ac *AggregatorRoTx) staticFilesInRange(r RangesV3) (sf SelectedStaticFilesV3, err error) {
 	for id := range ac.d {
-		if r.domain[id].any() {
-			sf.d[id], sf.dIdx[id], sf.dHist[id] = ac.d[id].staticFilesInRange(r.domain[id])
+		if !r.domain[id].any() {
+			continue
 		}
+		sf.d[id], sf.dIdx[id], sf.dHist[id] = ac.d[id].staticFilesInRange(r.domain[id])
 	}
 	for id, rng := range r.invertedIndex {
-		if rng != nil && rng.needMerge {
-			fi := ac.iis[id].staticFilesInRange(rng.from, rng.to)
-			sf.ii[id] = fi
+		if rng == nil || !rng.needMerge {
+			continue
 		}
+		sf.ii[id] = ac.iis[id].staticFilesInRange(rng.from, rng.to)
 	}
 	for id, rng := range r.appendable {
-		if rng != nil && rng.needMerge {
-			fi := ac.appendable[id].staticFilesInRange(rng.from, rng.to)
-			sf.appendable[id] = fi
+		if rng == nil || !rng.needMerge {
+			continue
 		}
+		sf.appendable[id] = ac.appendable[id].staticFilesInRange(rng.from, rng.to)
 	}
 	return sf, err
 }
