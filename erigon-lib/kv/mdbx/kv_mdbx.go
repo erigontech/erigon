@@ -1213,11 +1213,11 @@ func (tx *MdbxTx) Delete(table string, k []byte) error {
 }
 
 func (tx *MdbxTx) GetOne(bucket string, k []byte) ([]byte, error) {
-	c, err := tx.statelessCursor(bucket)
-	if err != nil {
-		return nil, err
+	v, err := tx.tx.Get(mdbx.DBI(tx.db.buckets[bucket].DBI), k)
+	//TODO: revise the logic, why we should drop not found err? maybe we need another function for get with key error
+	if mdbx.IsNotFound(err) {
+		return nil, nil
 	}
-	_, v, err := c.SeekExact(k)
 	return v, err
 }
 
