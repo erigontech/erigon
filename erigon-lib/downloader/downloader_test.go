@@ -7,11 +7,12 @@ import (
 	"testing"
 
 	lg "github.com/anacrolix/log"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/stretchr/testify/require"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 func TestChangeInfoHashOfSameFile(t *testing.T) {

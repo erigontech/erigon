@@ -7,8 +7,8 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	_debug "github.com/ledgerwatch/erigon/common/debug"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func ListenSignals(stack io.Closer, logger log.Logger) {

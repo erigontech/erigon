@@ -13,9 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/afero"
 	"google.golang.org/grpc"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
