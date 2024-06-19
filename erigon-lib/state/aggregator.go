@@ -1485,35 +1485,37 @@ func (ac *AggregatorRoTx) mergeFiles(ctx context.Context, files SelectedStaticFi
 	accStorageMerged := new(sync.WaitGroup)
 
 	for id := range ac.d {
+		if !r.d[id].any() {
+			continue
+		}
+
 		id := id
-		if r.d[id].any() {
-			kid := kv.Domain(id)
-			if ac.a.commitmentValuesTransform && (kid == kv.AccountsDomain || kid == kv.StorageDomain) {
-				accStorageMerged.Add(1)
+		kid := kv.Domain(id)
+		if ac.a.commitmentValuesTransform && (kid == kv.AccountsDomain || kid == kv.StorageDomain) {
+			accStorageMerged.Add(1)
+		}
+
+		g.Go(func() (err error) {
+			var vt valueTransformer
+			if ac.a.commitmentValuesTransform && kid == kv.CommitmentDomain {
+				ac.RestrictSubsetFileDeletions(true)
+				accStorageMerged.Wait()
+
+				vt = ac.d[kv.CommitmentDomain].commitmentValTransformDomain(ac.d[kv.AccountsDomain], ac.d[kv.StorageDomain],
+					mf.d[kv.AccountsDomain], mf.d[kv.StorageDomain])
 			}
 
-			g.Go(func() (err error) {
-				var vt valueTransformer
-				if ac.a.commitmentValuesTransform && kid == kv.CommitmentDomain {
-					ac.RestrictSubsetFileDeletions(true)
-					accStorageMerged.Wait()
-
-					vt = ac.d[kv.CommitmentDomain].commitmentValTransformDomain(ac.d[kv.AccountsDomain], ac.d[kv.StorageDomain],
-						mf.d[kv.AccountsDomain], mf.d[kv.StorageDomain])
+			mf.d[id], mf.dIdx[id], mf.dHist[id], err = ac.d[id].mergeFiles(ctx, files.d[id], files.dIdx[id], files.dHist[id], r.d[id], vt, ac.a.ps)
+			if ac.a.commitmentValuesTransform {
+				if kid == kv.AccountsDomain || kid == kv.StorageDomain {
+					accStorageMerged.Done()
 				}
-
-				mf.d[id], mf.dIdx[id], mf.dHist[id], err = ac.d[id].mergeFiles(ctx, files.d[id], files.dIdx[id], files.dHist[id], r.d[id], vt, ac.a.ps)
-				if ac.a.commitmentValuesTransform {
-					if kid == kv.AccountsDomain || kid == kv.StorageDomain {
-						accStorageMerged.Done()
-					}
-					if err == nil && kid == kv.CommitmentDomain {
-						ac.RestrictSubsetFileDeletions(false)
-					}
+				if err == nil && kid == kv.CommitmentDomain {
+					ac.RestrictSubsetFileDeletions(false)
 				}
-				return err
-			})
-		}
+			}
+			return err
+		})
 	}
 
 	for id, rng := range r.ranges {
