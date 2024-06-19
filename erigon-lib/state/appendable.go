@@ -795,6 +795,5 @@ func (ap *Appendable) integrateDirtyFiles(sf AppendableFiles, txNumFrom, txNumTo
 }
 
 func (tx *AppendableRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced, withWarmup bool, fn func(key []byte, txnum []byte) error) error {
-	//Appendable type is unwind-less - means doesn't need perform any operation on Unwind
-	return nil
+	return nil //Appendable type is unwind-less. See docs of Appendable type.
 }
