@@ -1,6 +1,6 @@
 module github.com/ledgerwatch/erigon
 
-go 1.21
+go 1.21.5
 
 require (
 	github.com/erigontech/mdbx-go v0.27.24
@@ -58,10 +58,12 @@ require (
 	github.com/huandu/xstrings v1.4.0
 	github.com/huin/goupnp v1.2.0
 	github.com/jackpal/go-nat-pmp v1.0.2
+	github.com/jedib0t/go-pretty/v6 v6.5.9
 	github.com/json-iterator/go v1.1.12
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/klauspost/compress v1.17.3
 	github.com/ledgerwatch/erigon-lib v1.0.0
+	github.com/ledgerwatch/erigonwatch v0.1.1
 	github.com/libp2p/go-libp2p v0.31.0
 	github.com/libp2p/go-libp2p-mplex v0.9.0
 	github.com/libp2p/go-libp2p-pubsub v0.9.3
@@ -179,7 +181,6 @@ require (
 	github.com/ipfs/go-cid v0.4.1 // indirect
 	github.com/ipfs/go-log/v2 v2.5.1 // indirect
 	github.com/jbenet/go-temp-err-catcher v0.1.0 // indirect
-	github.com/jedib0t/go-pretty/v6 v6.5.9 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.7 // indirect
 	github.com/koron/go-ssdp v0.0.4 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
