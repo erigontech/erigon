@@ -68,7 +68,7 @@ func (ac *AggregatorRoTx) staticFilesInRange(r RangesV3) (sf SelectedStaticFiles
 			sf.ii[id] = fi
 		}
 	}
-	for id, rng := range r.invertedIndex {
+	for id, rng := range r.appendable {
 		if rng != nil && rng.needMerge {
 			fi := ac.appendable[id].staticFilesInRange(rng.from, rng.to)
 			sf.appendable[id] = fi
