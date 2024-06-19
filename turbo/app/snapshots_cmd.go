@@ -291,21 +291,15 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
-			Name:   "integrity",
-			Action: doIntegrity,
+			Name:        "integrity",
+			Action:      doIntegrity,
+			Description: "run slow validation of files. use --check to run only 1 check.",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
-				&cli.StringFlag{Name: "action", Usage: fmt.Sprintf("one of: %s", integrity.AllActions)},
-				&cli.BoolFlag{Name: "failFast", Value: true},
+				&cli.StringFlag{Name: "check", Usage: fmt.Sprintf("one of: %s", integrity.AllChecks)},
+				&cli.BoolFlag{Name: "failFast", Value: true, Usage: "To stop after 1st problem or print WARN log and continue check"},
 			}),
 		},
-		//{
-		//	Name:   "bodies_decrement_datafix",
-		//	Action: doBodiesDecrement,
-		//	Flags: joinFlags([]cli.Flag{
-		//		&utils.DataDirFlag,
-		//	}),
-		//},
 	},
 }
 
@@ -422,7 +416,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	}
 
 	ctx := cliCtx.Context
-	requestedAction := integrity.Action(cliCtx.String("action"))
+	requestedAction := integrity.Check(cliCtx.String("action"))
 	failFast := cliCtx.Bool("failFast")
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
@@ -440,16 +434,16 @@ func doIntegrity(cliCtx *cli.Context) error {
 	defer agg.Close()
 
 	blockReader, _ := blockRetire.IO()
-	for _, a := range integrity.AllActions {
+	for _, a := range integrity.AllChecks {
 		if requestedAction != "" && requestedAction != a {
 			continue
 		}
 		switch a {
-		case integrity.BlocksRead:
+		case integrity.Blocks:
 			if err := integrity.SnapBlocksRead(chainDB, blockReader, ctx, false); err != nil {
 				return err
 			}
-		case integrity.EfFiles:
+		case integrity.InvertedIndex:
 			if err := integrity.E3EfFiles(ctx, chainDB, agg, failFast); err != nil {
 				return err
 			}
@@ -1005,104 +999,6 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 	}
 	return err
 }
-
-/*
-
-func doBodiesDecrement(cliCtx *cli.Context) error {
-	logger, _, err := debug.Setup(cliCtx, true)
-	if err != nil {
-		return err
-	}
-	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	ctx := cliCtx.Context
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-
-	list, err := snaptype.Segments(dirs.Snap, 1)
-	if err != nil {
-		return err
-	}
-	var l []snaptype.FileInfo
-	for _, f := range list {
-		if f.T != snaptype.Bodies {
-			continue
-		}
-		if f.From < 18_000_000 {
-			continue
-		}
-		l = append(l, f)
-	}
-	migrateSingleBody := func(srcF, dstF string) error {
-		src, err := seg.NewDecompressor(srcF)
-		if err != nil {
-			return err
-		}
-		defer src.Close()
-		dst, err := seg.NewCompressor(ctx, "compress", dstF, dirs.Tmp, seg.MinPatternScore, estimate.CompressSnapshot.Workers(), log.LvlInfo, logger)
-		if err != nil {
-			return err
-		}
-		defer dst.Close()
-
-		i := 0
-		srcG := src.MakeGetter()
-		var buf []byte
-		log.Info("start", "file", src.FileName())
-		dstBuf := bytes.NewBuffer(nil)
-		for srcG.HasNext() {
-			i++
-			if buf == nil {
-				panic(fmt.Sprintf("nil val at file: %s\n", srcG.FileName()))
-			}
-			buf, _ = srcG.Next(buf[:0])
-			if buf == nil {
-				panic(fmt.Sprintf("nil val at file: %s\n", srcG.FileName()))
-			}
-			body := &types.BodyForStorage{}
-			if err := rlp.Decode(bytes.NewReader(buf), body); err != nil {
-				return err
-			}
-			body.BaseTxId -= 1
-			dstBuf.Reset()
-			if err := rlp.Encode(dstBuf, body); err != nil {
-				return err
-			}
-
-			if err := dst.AddWord(dstBuf.Bytes()); err != nil {
-				return err
-			}
-
-			select {
-			case <-logEvery.C:
-				logger.Info("[bodies] progress", "f", src.FileName(), "progress", fmt.Sprintf("%dK/%dK", i/1_000, src.Count()/1_000))
-			default:
-			}
-		}
-		if err := dst.Compress(); err != nil {
-			return err
-		}
-		src.Close()
-		dst.Close()
-		os.Rename(srcF, srcF+".back")
-		os.Rename(dstF, srcF)
-		os.Remove(srcF + ".torrent")
-		os.Remove(srcF + ".idx")
-		ext := filepath.Ext(srcF)
-		withoutExt := srcF[:len(srcF)-len(ext)]
-		_ = os.Remove(withoutExt + ".idx")
-		log.Info("done", "file", src.FileName())
-		return nil
-	}
-	for _, f := range l {
-		srcF, dstF := f.Path, f.Path+"2"
-		if err := migrateSingleBody(srcF, dstF); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-*/
 
 func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 	const ThreadsLimit = 9_000

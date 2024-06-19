@@ -1,13 +1,13 @@
 package integrity
 
-type Action string
+type Check string
 
 const (
-	BlocksRead         Action = "BlocksRead"
-	EfFiles            Action = "EfFiles"
-	HistoryNoSystemTxs Action = "HistoryNoSystemTxs"
+	Blocks             Check = "Blocks"
+	InvertedIndex      Check = "InvertedIndex"
+	HistoryNoSystemTxs Check = "HistoryNoSystemTxs"
 )
 
-var AllActions = []Action{
-	BlocksRead, EfFiles, HistoryNoSystemTxs,
+var AllChecks = []Check{
+	Blocks, InvertedIndex, HistoryNoSystemTxs,
 }
