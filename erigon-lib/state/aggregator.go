@@ -1765,9 +1765,10 @@ func (a *Aggregator) Stats() FilesStats22 {
 //   - user will not see "partial writes" or "new files appearance"
 //   - last reader removing garbage files inside `Close` method
 type AggregatorRoTx struct {
-	a   *Aggregator
-	d   [kv.DomainLen]*DomainRoTx
-	iis [kv.StandaloneIdxLen]*InvertedIndexRoTx
+	a          *Aggregator
+	d          [kv.DomainLen]*DomainRoTx
+	iis        [kv.StandaloneIdxLen]*InvertedIndexRoTx
+	appendable [kv.AppendableLen]*AppendableRoTx
 
 	id      uint64 // auto-increment id of ctx for logs
 	_leakID uint64 // set only if TRACE_AGG=true
@@ -1786,6 +1787,9 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 	}
 	for id, d := range a.d {
 		ac.d[id] = d.BeginFilesRo()
+	}
+	for id, ap := range a.ap {
+		ac.appendable[id] = ap.BeginFilesRo()
 	}
 	a.visibleFilesLock.RUnlock()
 
@@ -1880,6 +1884,10 @@ func (ac *AggregatorRoTx) DebugEFAllValuesAreInRange(ctx context.Context, name k
 
 // --- Domain part END ---
 
+func (ac *AggregatorRoTx) Appendable(name kv.Appendable, ts uint64, v []byte, tx kv.RwTx) (err error) {
+	return ac.appendable[name].Append(ts, v, tx)
+}
+
 func (ac *AggregatorRoTx) Close() {
 	if ac == nil || ac.a == nil { // invariant: it's safe to call Close multiple times
 		return
@@ -1894,6 +1902,9 @@ func (ac *AggregatorRoTx) Close() {
 	}
 	for _, ii := range ac.iis {
 		ii.Close()
+	}
+	for _, ap := range ac.appendable {
+		ap.Close()
 	}
 }
 
