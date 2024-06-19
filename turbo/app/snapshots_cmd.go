@@ -293,7 +293,7 @@ var snapshotCommand = cli.Command{
 		{
 			Name:        "integrity",
 			Action:      doIntegrity,
-			Description: "run slow validation of files. use --check to run only 1 check.",
+			Description: "run slow validation of files. use --check to run single",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&cli.StringFlag{Name: "check", Usage: fmt.Sprintf("one of: %s", integrity.AllChecks)},
