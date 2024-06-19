@@ -1932,6 +1932,7 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 			for {
 				k, v, err = hi.valsC.Next()
 				if err != nil {
+					panic(err)
 					return err
 				}
 				if k == nil {
@@ -1974,19 +1975,39 @@ func (hi *HistoryChangesIterDB) advanceSmallVals() (err error) {
 			return err
 		}
 	}
-	for ; k != nil; k, _, err = hi.valsCDup.NextNoDup() {
-		if err != nil {
-			return err
-		}
-		v, err := hi.valsCDup.SeekBothRange(k, hi.startTxKey[:])
-		if err != nil {
-			return err
+	for k != nil {
+		var v []byte
+		for {
+			k, v, err = hi.valsCDup.Seek(k)
+			if err != nil {
+				return err
+			}
+			if k == nil {
+				v = nil
+				break
+			}
+			v, err = hi.valsCDup.SeekBothRange(k, hi.startTxKey[:])
+			if err != nil {
+				return err
+			}
+			if v != nil {
+				break
+			}
+			var ok bool
+			k, ok = kv.NextSubtree(k)
+			if ok {
+				continue
+			}
 		}
 		if v == nil {
-			continue
+			break
 		}
 		foundTxNumVal := v[:8]
 		if hi.endTxNum >= 0 && int(binary.BigEndian.Uint64(foundTxNumVal)) >= hi.endTxNum {
+			k, _, err = hi.valsCDup.NextNoDup()
+			if err != nil {
+				return err
+			}
 			continue
 		}
 		hi.nextKey = k
