@@ -49,7 +49,7 @@ type CacheValidationResult struct {
 }
 
 type Cache interface {
-	// View - returns CacheView consistent with givent kv.Tx
+	// View - returns CacheView consistent with given kv.Tx
 	View(ctx context.Context, tx kv.Tx) (CacheView, error)
 	OnNewBlock(sc *remote.StateChangeBatch)
 	Len() int
@@ -94,7 +94,7 @@ type CacheView interface {
 // Rules of set view.isCanonical value:
 //   - method View can't parent.Clone() - because parent view is not coherent with current kv.Tx
 //   - only OnNewBlock method may do parent.Clone() and apply StateChanges to create coherent view of kv.Tx
-//   - parent.Clone() can't be caled if parent.isCanonical=false
+//   - parent.Clone() can't be called if parent.isCanonical=false
 //   - only OnNewBlock method can set view.isCanonical=true
 //
 // Rules of filling cache.stateEvict:

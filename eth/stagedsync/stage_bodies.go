@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -384,7 +384,7 @@ func logWritingBodies(logPrefix string, committed, headerProgress uint64, logger
 		Sys:         m.Sys,
 	})
 
-	logger.Info(fmt.Sprintf("[%s] Writing block bodies", logPrefix),
+	logger.Info(fmt.Sprintf("[%s] Writing bodies", logPrefix),
 		"block_num", committed,
 		"remaining", remaining,
 		"alloc", libcommon.ByteCount(m.Alloc),
@@ -393,6 +393,8 @@ func logWritingBodies(logPrefix string, committed, headerProgress uint64, logger
 }
 
 func UnwindBodiesStage(u *UnwindState, tx kv.RwTx, cfg BodiesCfg, ctx context.Context) (err error) {
+	u.UnwindPoint = max(u.UnwindPoint, cfg.blockReader.FrozenBlocks()) // protect from unwind behind files
+
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)

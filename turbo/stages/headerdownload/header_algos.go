@@ -18,7 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -376,6 +376,9 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime time.Time) (*HeaderRequ
 	var penalties []PenaltyItem
 	var req *HeaderRequest
 	hd.anchorTree.Ascend(func(anchor *Anchor) bool {
+		if anchor.blockHeight == 0 { //has no parent
+			return true
+		}
 		if anchor.nextRetryTime.After(currentTime) {
 			// We are not ready to retry this anchor yet
 			dataflow.HeaderDownloadStates.AddChange(anchor.blockHeight-1, dataflow.HeaderRetryNotReady)

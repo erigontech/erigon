@@ -90,7 +90,7 @@ func (t *optimisticTestSuite) TestAddOptimisticCandidate() {
 	t.Require().Equal(&opNode{
 		execBlockNum: 1,
 		parent:       common.Hash{0},
-		children:     []common.Hash{common.Hash{2}},
+		children:     []common.Hash{{2}},
 	}, node)
 	node, ok = t.opStore.optimisticRoots[mockBlock2.StateRoot]
 	t.Require().True(ok)

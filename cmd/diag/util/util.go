@@ -41,25 +41,13 @@ func MakeHttpGetCall(ctx context.Context, url string, data interface{}) error {
 	err = json.Unmarshal(body, &data)
 	if err != nil {
 		if err.Error() == "invalid character 'p' after top-level value" {
-			return fmt.Errorf("diagnostics have not been initialized yet. Please try again in a few seconds")
+			return fmt.Errorf("diagnostics was not initialized yet. Please try again in a few seconds")
 		}
 
 		return err
 	}
 
 	return nil
-}
-
-func CalculateTime(amountLeft, rate uint64) string {
-	if rate == 0 {
-		return "999hrs:99m"
-	}
-	timeLeftInSeconds := amountLeft / rate
-
-	hours := timeLeftInSeconds / 3600
-	minutes := (timeLeftInSeconds / 60) % 60
-
-	return fmt.Sprintf("%dhrs:%dm", hours, minutes)
 }
 
 func RenderJson(data interface{}) {
@@ -105,5 +93,5 @@ func RenderUseDiagUI() {
 
 func RenderError(err error) {
 	txt := text.Colors{text.FgWhite, text.BgRed}
-	fmt.Printf("%s %s", txt.Sprint("[ERROR]"), err)
+	fmt.Printf("%s %s\n", txt.Sprint("[ERROR]"), err)
 }

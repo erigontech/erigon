@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/config3"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -34,7 +34,7 @@ var SqueezeCommitmentFiles = Migration{
 			return err
 		}
 		defer agg.Close()
-		if err = agg.OpenFolder(false); err != nil {
+		if err = agg.OpenFolder(); err != nil {
 			return err
 		}
 

@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 var (
@@ -60,6 +60,8 @@ var (
 	KvMadvNormalNoLastLvl = EnvString("KV_MADV_NORMAL_NO_LAST_LVL", "")
 	KvMadvNormal          = EnvString("KV_MADV_NORMAL", "")
 	OnlyCreateDB          = EnvBool("ONLY_CREATE_DB", false)
+
+	CommitEachStage = EnvBool("COMMIT_EACH_STAGE", false)
 )
 
 func ReadMemStats(m *runtime.MemStats) {

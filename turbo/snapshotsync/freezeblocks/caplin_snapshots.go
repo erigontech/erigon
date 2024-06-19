@@ -12,7 +12,8 @@ import (
 	"sync/atomic"
 
 	"github.com/klauspost/compress/zstd"
-	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"

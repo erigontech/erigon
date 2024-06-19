@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
@@ -15,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/seg"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
@@ -22,7 +24,6 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/crypto/cryptopool"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func init() {
@@ -231,7 +232,7 @@ var (
 						default:
 						}
 
-						for body.BaseTxId+uint64(body.TxAmount) <= firstTxID+i { // skip empty blocks
+						for body.BaseTxId+uint64(body.TxCount) <= firstTxID+i { // skip empty blocks
 							if !bodyGetter.HasNext() {
 								return fmt.Errorf("not enough bodies")
 							}
@@ -327,6 +328,6 @@ func txsAmountBasedOnBodiesSnapshots(bodiesSegment *seg.Decompressor, len uint64
 		return 0, 0, fmt.Errorf("negative txs count %s: lastBody.BaseTxId=%d < firstBody.BaseTxId=%d", bodiesSegment.FileName(), lastBody.BaseTxId, firstBody.BaseTxId)
 	}
 
-	expectedCount = int(lastBody.BaseTxId+uint64(lastBody.TxAmount)) - int(firstBody.BaseTxId)
+	expectedCount = int(lastBody.BaseTxId+uint64(lastBody.TxCount)) - int(firstBody.BaseTxId)
 	return
 }

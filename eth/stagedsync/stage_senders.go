@@ -9,8 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -365,7 +366,9 @@ func recoverSenders(ctx context.Context, logPrefix string, cryptoContext *secp25
 	}
 }
 
-func UnwindSendersStage(s *UnwindState, tx kv.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
+func UnwindSendersStage(u *UnwindState, tx kv.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
+	u.UnwindPoint = max(u.UnwindPoint, cfg.blockReader.FrozenBlocks()) // protect from unwind behind files
+
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -375,7 +378,7 @@ func UnwindSendersStage(s *UnwindState, tx kv.RwTx, cfg SendersCfg, ctx context.
 		defer tx.Rollback()
 	}
 
-	if err = s.Done(tx); err != nil {
+	if err = u.Done(tx); err != nil {
 		return err
 	}
 	if !useExternalTx {

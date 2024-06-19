@@ -29,7 +29,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
@@ -70,7 +70,7 @@ func TestState(t *testing.T) {
 						t.Fatal(err)
 					}
 					defer tx.Rollback()
-					_, err = test.Run(tx, subtest, vmconfig)
+					_, _, err = test.Run(tx, subtest, vmconfig)
 					tx.Rollback()
 					if err != nil && len(test.json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
 						// Ignore expected errors

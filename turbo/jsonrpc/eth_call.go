@@ -9,8 +9,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
@@ -523,7 +524,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		// Apply the transaction with the access list tracer
 		tracer := logger.NewAccessListTracer(accessList, excl, state)
 		config := vm.Config{Tracer: tracer, Debug: true, NoBaseFee: true}
-		blockCtx := transactions.NewEVMBlockContext(engine, header, bNrOrHash.RequireCanonical, tx, api._blockReader)
+		blockCtx := transactions.NewEVMBlockContext(engine, header, bNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
 		txCtx := core.NewEVMTxContext(msg)
 
 		evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, config)

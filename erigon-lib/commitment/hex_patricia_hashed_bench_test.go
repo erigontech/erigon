@@ -12,7 +12,7 @@ import (
 func Benchmark_HexPatriciaHashed_ReviewKeys(b *testing.B) {
 	ms := NewMockState(&testing.T{})
 	ctx := context.Background()
-	hph := NewHexPatriciaHashed(length.Addr, ms)
+	hph := NewHexPatriciaHashed(length.Addr, ms, ms.TempDir())
 	hph.SetTrace(false)
 
 	builder := NewUpdateBuilder()

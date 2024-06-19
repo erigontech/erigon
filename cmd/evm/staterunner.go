@@ -26,20 +26,20 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	mdbx2 "github.com/erigontech/mdbx-go/mdbx"
+	"github.com/urfave/cli/v2"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/tests"
-	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
 var stateTestCommand = cli.Command{
@@ -163,15 +163,7 @@ func aggregateResultsFromStateTests(
 			// Run the test and aggregate the result
 			result := &StatetestResult{Name: key, Fork: st.Fork, Pass: true}
 
-			var root libcommon.Hash
-			var calcRootErr error
-
-			statedb, err := test.Run(tx, st, cfg)
-			// print state root for evmlab tracing
-			root, calcRootErr = trie.CalcRoot("", tx)
-			if err == nil && calcRootErr != nil {
-				err = calcRootErr
-			}
+			statedb, root, err := test.Run(tx, st, cfg)
 			if err != nil {
 				// Test failed, mark as so and dump any state to aid debugging
 				result.Pass, result.Error = false, err.Error()

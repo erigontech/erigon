@@ -94,10 +94,18 @@ var DefaultFlags = []cli.Flag{
 	&OverlayGetLogsFlag,
 	&OverlayReplayBlockFlag,
 
+	&RpcSubscriptionFiltersMaxLogsFlag,
+	&RpcSubscriptionFiltersMaxHeadersFlag,
+	&RpcSubscriptionFiltersMaxTxsFlag,
+	&RpcSubscriptionFiltersMaxAddressesFlag,
+	&RpcSubscriptionFiltersMaxTopicsFlag,
+
 	&utils.SnapKeepBlocksFlag,
 	&utils.SnapStopFlag,
+	&utils.SnapStateStopFlag,
 	&utils.DbPageSizeFlag,
 	&utils.DbSizeLimitFlag,
+	&utils.DbWriteMapFlag,
 	&utils.TorrentPortFlag,
 	&utils.TorrentMaxPeersFlag,
 	&utils.TorrentConnsPerFileFlag,

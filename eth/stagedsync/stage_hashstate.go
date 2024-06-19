@@ -12,6 +12,8 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
+	"golang.org/x/sync/errgroup"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -22,8 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/sync/errgroup"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/types/accounts"

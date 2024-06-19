@@ -4,8 +4,9 @@ import (
 	"context"
 	"sync"
 
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon/eth/consensuschain"
@@ -206,7 +207,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 			return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */)
 		}
 
-		_, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, txTask.Requests, rw.chain, syscall, rw.logger)
+		_, _, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, txTask.Requests, rw.chain, syscall, rw.logger)
 		if err != nil {
 			txTask.Error = err
 		} else {

@@ -8,7 +8,7 @@ import (
 	"github.com/shirou/gopsutil/v3/process"
 )
 
-func ReadVirtualMemStats() (process.MemoryMapsStat, error) {
+func ReadVirtualMemStats() (process.MemoryMapsStat, error) { //nolint
 	return process.MemoryMapsStat{}, errors.New("unsupported platform")
 }
 

@@ -3,18 +3,21 @@ package eth1
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 	"sync/atomic"
 
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	execution "github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -152,7 +155,35 @@ func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, b
 		return libcommon.Hash{}, nil
 	}
 	return canonical, nil
+}
 
+func (e *EthereumExecutionModule) unwindToCommonCanonical(tx kv.RwTx, header *types.Header) error {
+	currentHeader := header
+
+	for isCanonical, err := e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()); !isCanonical && err == nil; isCanonical, err = e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()) {
+		if err != nil {
+			return err
+		}
+		if currentHeader == nil {
+			return fmt.Errorf("header %v not found", currentHeader.Hash())
+		}
+		currentHeader, err = e.getHeader(e.bacgroundCtx, tx, currentHeader.ParentHash, currentHeader.Number.Uint64()-1)
+		if err != nil {
+			return err
+		}
+	}
+	if e.hook != nil {
+		if err := e.hook.BeforeRun(tx, true); err != nil {
+			return err
+		}
+	}
+	if err := e.executionPipeline.UnwindTo(currentHeader.Number.Uint64(), stagedsync.ExecUnwind, tx); err != nil {
+		return err
+	}
+	if err := e.executionPipeline.RunUnwind(nil, wrap.TxContainer{Tx: tx}); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execution.ValidationRequest) (*execution.ValidationReceipt, error) {
@@ -172,47 +203,67 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	}); err != nil {
 		return nil, err
 	}
-
-	tx, err := e.db.BeginRw(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
 	e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
 	blockHash := gointerfaces.ConvertH256ToHash(req.Hash)
-	header, err := e.blockReader.Header(ctx, tx, blockHash, req.Number)
-	if err != nil {
+
+	var (
+		header             *types.Header
+		body               *types.Body
+		currentBlockNumber *uint64
+		err                error
+	)
+	if err := e.db.View(ctx, func(tx kv.Tx) error {
+		header, err = e.blockReader.Header(ctx, tx, blockHash, req.Number)
+		if err != nil {
+			return err
+		}
+
+		body, err = e.blockReader.BodyWithTransactions(ctx, tx, blockHash, req.Number)
+		if err != nil {
+			return err
+		}
+		currentBlockNumber = rawdb.ReadCurrentBlockNumber(tx)
+		return nil
+	}); err != nil {
 		return nil, err
 	}
-
-	body, err := e.blockReader.BodyWithTransactions(ctx, tx, blockHash, req.Number)
-	if err != nil {
-		return nil, err
-	}
-
 	if header == nil || body == nil {
 		return &execution.ValidationReceipt{
 			LatestValidHash:  gointerfaces.ConvertHashToH256(libcommon.Hash{}),
 			ValidationStatus: execution.ExecutionStatus_MissingSegment,
 		}, nil
 	}
-	currentBlockNumber := rawdb.ReadCurrentBlockNumber(tx)
 
 	if math.AbsoluteDifference(*currentBlockNumber, req.Number) >= maxBlocksLookBehind {
 		return &execution.ValidationReceipt{
 			ValidationStatus: execution.ExecutionStatus_TooFarAway,
 			LatestValidHash:  gointerfaces.ConvertHashToH256(libcommon.Hash{}),
-		}, tx.Commit()
+		}, nil
 	}
 
-	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
+	if err := e.db.Update(ctx, func(tx kv.RwTx) error {
+		return e.unwindToCommonCanonical(tx, header)
+	}); err != nil {
+		return nil, err
+	}
 
-	extendingHash := e.forkValidator.ExtendingForkHeadHash()
-	extendCanonical := extendingHash == libcommon.Hash{} && header.ParentHash == currentHeadHash
-	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), extendCanonical, e.logger)
+	tx, err := e.db.BeginRw(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), e.logger)
 	if criticalError != nil {
 		return nil, criticalError
 	}
+	// Throw away the tx and start a new one (do not persist changes to the canonical chain)
+	tx.Rollback()
+	tx, err = e.db.BeginRw(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
 
 	// if the block is deemed invalid then we delete it. perhaps we want to keep bad blocks and just keep an index of bad ones.
 	validationStatus := execution.ExecutionStatus_Success

@@ -4,11 +4,12 @@ import (
 	"os"
 	"sync/atomic"
 
+	btree2 "github.com/tidwall/btree"
+
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/seg"
-	"github.com/ledgerwatch/log/v3"
-	btree2 "github.com/tidwall/btree"
 )
 
 // filesItem is "dirty" file - means file which can be:
@@ -131,6 +132,30 @@ func (i *filesItem) closeFilesAndRemove() {
 	}
 }
 
+func deleteMergeFile(dirtyFiles *btree2.BTreeG[*filesItem], outs []*filesItem, filenameBase string, logger log.Logger) {
+	for _, out := range outs {
+		if out == nil {
+			panic("must not happen: " + filenameBase)
+		}
+		dirtyFiles.Delete(out)
+		out.canDelete.Store(true)
+
+		// if merged file not visible for any alive reader (even for us): can remove it immediately
+		// otherwise: mark it as `canDelete=true` and last reader of this file - will remove it inside `aggRoTx.Close()`
+		if out.refcount.Load() == 0 {
+			out.closeFilesAndRemove()
+
+			if filenameBase == traceFileLife && out.decompressor != nil {
+				logger.Info("[agg.dbg] deleteMergeFile: remove", "f", out.decompressor.FileName())
+			}
+		} else {
+			if filenameBase == traceFileLife && out.decompressor != nil {
+				logger.Info("[agg.dbg] deleteMergeFile: mark as canDelete=true", "f", out.decompressor.FileName())
+			}
+		}
+	}
+}
+
 // ctxItem is like filesItem but only for good/visible files (indexed, not overlaped, not marked for deletion, etc...)
 // it's ok to store ctxItem in array
 type ctxItem struct {
@@ -143,6 +168,7 @@ type ctxItem struct {
 	src *filesItem
 }
 
+func (i *ctxItem) hasTS(ts uint64) bool       { return i.startTxNum <= ts && i.endTxNum > ts }
 func (i *ctxItem) isSubSetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) } //nolint
 func (i *ctxItem) isSubsetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) } //nolint
 

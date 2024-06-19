@@ -9,7 +9,8 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -135,7 +136,7 @@ func HeadersPOW(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg 
 	}
 	if hash == (libcommon.Hash{}) { // restore canonical markers after unwind
 		headHash := rawdb.ReadHeadHeaderHash(tx)
-		if err = fixCanonicalChain(logPrefix, logEvery, startProgress, headHash, tx, cfg.blockReader, logger); err != nil {
+		if _, _, err = fixCanonicalChain(logPrefix, logEvery, startProgress, headHash, tx, cfg.blockReader, logger); err != nil {
 			return err
 		}
 		hash, err = cfg.blockReader.CanonicalHash(ctx, tx, startProgress)
@@ -312,21 +313,14 @@ Loop:
 		}
 		defer doms.Close()
 
-		allowedUnwindTo, ok, err := tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx).CanUnwindBeforeBlockNum(unwindTo, tx)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindTo, allowedUnwindTo)
-		}
-		if err := u.UnwindTo(allowedUnwindTo, StagedUnwind, tx); err != nil {
+		if err := u.UnwindTo(unwindTo, StagedUnwind, tx); err != nil {
 			return err
 		}
 
 	}
 	if headerInserter.GetHighest() != 0 {
 		if !headerInserter.Unwind() {
-			if err := fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader, logger); err != nil {
+			if _, _, err := fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader, logger); err != nil {
 				return fmt.Errorf("fix canonical chain: %w", err)
 			}
 		}
@@ -369,26 +363,33 @@ Loop:
 	return nil
 }
 
-func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, hash libcommon.Hash, tx kv.StatelessRwTx, headerReader services.FullBlockReader, logger log.Logger) error {
+type chainNode struct {
+	hash   libcommon.Hash
+	number uint64
+}
+
+func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, hash libcommon.Hash, tx kv.StatelessRwTx, headerReader services.FullBlockReader, logger log.Logger) ([]chainNode, []chainNode, error) {
 	if height == 0 {
-		return nil
+		return nil, nil, nil
 	}
 	ancestorHash := hash
 	ancestorHeight := height
 
+	var newNodes, badNodes []chainNode
+	var emptyHash libcommon.Hash
 	var ch libcommon.Hash
 	var err error
 	for ch, err = headerReader.CanonicalHash(context.Background(), tx, ancestorHeight); err == nil && ch != ancestorHash; ch, err = headerReader.CanonicalHash(context.Background(), tx, ancestorHeight) {
 		if err = rawdb.WriteCanonicalHash(tx, ancestorHash, ancestorHeight); err != nil {
-			return fmt.Errorf("marking canonical header %d %x: %w", ancestorHeight, ancestorHash, err)
+			return nil, nil, fmt.Errorf("marking canonical header %d %x: %w", ancestorHeight, ancestorHash, err)
 		}
 
 		ancestor, err := headerReader.Header(context.Background(), tx, ancestorHash, ancestorHeight)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 		if ancestor == nil {
-			return fmt.Errorf("ancestor is nil. height %d, hash %x", ancestorHeight, ancestorHash)
+			return nil, nil, fmt.Errorf("ancestor is nil. height %d, hash %x", ancestorHeight, ancestorHash)
 		}
 
 		select {
@@ -397,17 +398,32 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 			logger.Info(fmt.Sprintf("[%s] write canonical markers", logPrefix), "ancestor", ancestorHeight, "hash", ancestorHash)
 		default:
 		}
+
+		if ch != emptyHash {
+			badNodes = append(badNodes, chainNode{
+				hash:   ch,
+				number: ancestorHeight,
+			})
+		}
+
+		newNodes = append(newNodes, chainNode{
+			hash:   ancestorHash,
+			number: ancestorHeight,
+		})
+
 		ancestorHash = ancestor.ParentHash
 		ancestorHeight--
 	}
 	if err != nil {
-		return fmt.Errorf("reading canonical hash for %d: %w", ancestorHeight, err)
+		return nil, nil, fmt.Errorf("reading canonical hash for %d: %w", ancestorHeight, err)
 	}
 
-	return nil
+	return newNodes, badNodes, nil
 }
 
 func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, test bool) (err error) {
+	u.UnwindPoint = max(u.UnwindPoint, cfg.blockReader.FrozenBlocks()) // protect from unwind behind files
+
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(context.Background())
@@ -570,6 +586,32 @@ func NewChainReaderImpl(config *chain.Config, tx kv.Tx, blockReader services.Ful
 
 func (cr ChainReaderImpl) Config() *chain.Config        { return cr.config }
 func (cr ChainReaderImpl) CurrentHeader() *types.Header { panic("") }
+func (cr ChainReaderImpl) CurrentFinalizedHeader() *types.Header {
+	hash := rawdb.ReadForkchoiceFinalized(cr.tx)
+	if hash == (libcommon.Hash{}) {
+		return nil
+	}
+
+	number := rawdb.ReadHeaderNumber(cr.tx, hash)
+	if number == nil {
+		return nil
+	}
+
+	return rawdb.ReadHeader(cr.tx, hash, *number)
+}
+func (cr ChainReaderImpl) CurrentSafeHeader() *types.Header {
+	hash := rawdb.ReadForkchoiceSafe(cr.tx)
+	if hash == (libcommon.Hash{}) {
+		return nil
+	}
+
+	number := rawdb.ReadHeaderNumber(cr.tx, hash)
+	if number == nil {
+		return nil
+	}
+
+	return rawdb.ReadHeader(cr.tx, hash, *number)
+}
 func (cr ChainReaderImpl) GetHeader(hash libcommon.Hash, number uint64) *types.Header {
 	if cr.blockReader != nil {
 		h, _ := cr.blockReader.Header(context.Background(), cr.tx, hash, number)
@@ -604,9 +646,8 @@ func (cr ChainReaderImpl) GetTd(hash libcommon.Hash, number uint64) *big.Int {
 	}
 	return td
 }
-func (cr ChainReaderImpl) FrozenBlocks() uint64 {
-	return cr.blockReader.FrozenBlocks()
-}
+func (cr ChainReaderImpl) FrozenBlocks() uint64    { return cr.blockReader.FrozenBlocks() }
+func (cr ChainReaderImpl) FrozenBorBlocks() uint64 { return cr.blockReader.FrozenBorBlocks() }
 func (cr ChainReaderImpl) GetBlock(hash libcommon.Hash, number uint64) *types.Block {
 	b, _, _ := cr.blockReader.BlockWithSenders(context.Background(), cr.tx, hash, number)
 	return b

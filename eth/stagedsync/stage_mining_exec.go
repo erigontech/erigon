@@ -10,11 +10,12 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
+	"golang.org/x/net/context"
+
 	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/net/context"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -175,12 +176,13 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	}
 
 	var err error
-	_, current.Txs, current.Receipts, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txs, current.Uncles, &state.NoopWriter{}, &cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, current.Requests, ChainReaderImpl{config: &cfg.chainConfig, tx: txc.Tx, blockReader: cfg.blockReader, logger: logger}, true, logger)
+	var block *types.Block
+	block, current.Txs, current.Receipts, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txs, current.Uncles, &state.NoopWriter{}, &cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, current.Requests, ChainReaderImpl{config: &cfg.chainConfig, tx: txc.Tx, blockReader: cfg.blockReader, logger: logger}, true, logger)
 	if err != nil {
-		return err
+		return fmt.Errorf("cannot finalize block execution: %s", err)
 	}
+	current.Requests = block.Requests()
 
-	block := types.NewBlock(current.Header, current.Txs, current.Uncles, current.Receipts, current.Withdrawals, current.Requests)
 	// Simulate the block execution to get the final state root
 	if err := rawdb.WriteHeader(txc.Tx, block.Header()); err != nil {
 		return fmt.Errorf("cannot write header: %s", err)

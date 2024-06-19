@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -69,7 +69,11 @@ func MiningBorHeimdallForward(
 		ctx,
 		header,
 		tx,
-		cfg,
+		cfg.borConfig,
+		cfg.blockReader,
+		cfg.heimdallClient,
+		cfg.chainConfig.ChainID.String(),
+		cfg.stateReceiverABI,
 		logPrefix,
 		logger,
 		lastStateSyncEventID,

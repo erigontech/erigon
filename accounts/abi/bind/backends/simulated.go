@@ -26,7 +26,8 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -720,7 +721,7 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 
 	txContext := core.NewEVMTxContext(msg)
 	header := block.Header()
-	evmContext := core.NewEVMBlockContext(header, core.GetHashFn(header, b.getHeader), b.m.Engine, nil)
+	evmContext := core.NewEVMBlockContext(header, core.GetHashFn(header, b.getHeader), b.m.Engine, nil, b.m.ChainConfig)
 	// Create a new environment which holds all relevant information
 	// about the transaction and calling mechanisms.
 	vmEnv := vm.NewEVM(evmContext, txContext, statedb, b.m.ChainConfig, vm.Config{})

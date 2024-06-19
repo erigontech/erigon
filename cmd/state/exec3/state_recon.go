@@ -7,8 +7,9 @@ import (
 	"sync"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/eth/consensuschain"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -308,7 +309,7 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) error {
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */)
 			}
-			if _, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, txTask.Requests, rw.chain, syscall, rw.logger); err != nil {
+			if _, _, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, txTask.Requests, rw.chain, syscall, rw.logger); err != nil {
 				if _, readError := rw.stateReader.ReadError(); !readError {
 					return fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err)
 				}

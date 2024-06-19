@@ -3,7 +3,7 @@ package diagnostics
 import (
 	"context"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 func (d *DiagnosticClient) setupBlockExecutionDiagnostics(rootCtx context.Context) {
@@ -25,7 +25,7 @@ func (d *DiagnosticClient) runBlockExecutionListener(rootCtx context.Context) {
 				d.syncStats.BlockExecution = info
 				d.mu.Unlock()
 
-				if int(d.syncStats.SyncStages.CurrentStage) >= len(d.syncStats.SyncStages.StagesList) {
+				if d.syncStats.SyncFinished {
 					return
 				}
 			}

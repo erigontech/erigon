@@ -4,14 +4,18 @@ import (
 	"context"
 	"testing"
 
+	"github.com/holiman/uint256"
+
+	"github.com/ledgerwatch/erigon/core/types"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
 
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
 
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/eth/filters"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func createLog() *remote.SubscribeLogsReply {
@@ -49,7 +53,7 @@ func TestFilters_GenerateSubscriptionID(t *testing.T) {
 		v := <-subs
 		_, ok := set[v]
 		if ok {
-			t.Errorf("SubscriptionID Confict: %s", v)
+			t.Errorf("SubscriptionID Conflict: %s", v)
 			return
 		}
 		set[v] = struct{}{}
@@ -58,7 +62,8 @@ func TestFilters_GenerateSubscriptionID(t *testing.T) {
 
 func TestFilters_SingleSubscription_OnlyTopicsSubscribedAreBroadcast(t *testing.T) {
 	t.Parallel()
-	f := New(context.TODO(), nil, nil, nil, func() {}, log.New())
+	config := FiltersConfig{}
+	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
 
 	subbedTopic := libcommon.BytesToHash([]byte{10, 20})
 
@@ -90,7 +95,8 @@ func TestFilters_SingleSubscription_OnlyTopicsSubscribedAreBroadcast(t *testing.
 
 func TestFilters_SingleSubscription_EmptyTopicsInCriteria_OnlyTopicsSubscribedAreBroadcast(t *testing.T) {
 	t.Parallel()
-	f := New(context.TODO(), nil, nil, nil, func() {}, log.New())
+	config := FiltersConfig{}
+	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
 
 	var nilTopic libcommon.Hash
 	subbedTopic := libcommon.BytesToHash([]byte{10, 20})
@@ -123,7 +129,8 @@ func TestFilters_SingleSubscription_EmptyTopicsInCriteria_OnlyTopicsSubscribedAr
 
 func TestFilters_TwoSubscriptionsWithDifferentCriteria(t *testing.T) {
 	t.Parallel()
-	f := New(context.TODO(), nil, nil, nil, func() {}, log.New())
+	config := FiltersConfig{}
+	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
 
 	criteria1 := filters.FilterCriteria{
 		Addresses: nil,
@@ -163,7 +170,8 @@ func TestFilters_TwoSubscriptionsWithDifferentCriteria(t *testing.T) {
 
 func TestFilters_ThreeSubscriptionsWithDifferentCriteria(t *testing.T) {
 	t.Parallel()
-	f := New(context.TODO(), nil, nil, nil, func() {}, log.New())
+	config := FiltersConfig{}
+	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
 
 	criteria1 := filters.FilterCriteria{
 		Addresses: nil,
@@ -238,7 +246,8 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 		return nil
 	}
 
-	f := New(context.TODO(), nil, nil, nil, func() {}, log.New())
+	config := FiltersConfig{}
+	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
 	f.logsRequestor.Store(loadRequester)
 
 	// first request has no filters
@@ -270,7 +279,7 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	if lastFilterRequest.AllTopics == false {
 		t.Error("2: expected all topics to be true")
 	}
-	if len(lastFilterRequest.Addresses) != 1 && lastFilterRequest.Addresses[0] != address1H160 {
+	if len(lastFilterRequest.Addresses) != 1 && gointerfaces.ConvertH160toAddress(lastFilterRequest.Addresses[0]) != gointerfaces.ConvertH160toAddress(address1H160) {
 		t.Error("2: expected the address to match the last request")
 	}
 
@@ -288,10 +297,10 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	if lastFilterRequest.AllTopics == false {
 		t.Error("3: expected all topics to be true")
 	}
-	if len(lastFilterRequest.Addresses) != 1 && lastFilterRequest.Addresses[0] != address1H160 {
+	if len(lastFilterRequest.Addresses) != 1 && gointerfaces.ConvertH160toAddress(lastFilterRequest.Addresses[0]) != gointerfaces.ConvertH160toAddress(address1H160) {
 		t.Error("3: expected the address to match the previous request")
 	}
-	if len(lastFilterRequest.Topics) != 1 && lastFilterRequest.Topics[0] != topic1H256 {
+	if len(lastFilterRequest.Topics) != 1 && gointerfaces.ConvertH256ToHash(lastFilterRequest.Topics[0]) != gointerfaces.ConvertH256ToHash(topic1H256) {
 		t.Error("3: expected the topics to match the last request")
 	}
 
@@ -307,10 +316,10 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	if lastFilterRequest.AllTopics == false {
 		t.Error("4: expected all topics to be true")
 	}
-	if len(lastFilterRequest.Addresses) != 1 && lastFilterRequest.Addresses[0] != address1H160 {
+	if len(lastFilterRequest.Addresses) != 1 && gointerfaces.ConvertH160toAddress(lastFilterRequest.Addresses[0]) != gointerfaces.ConvertH160toAddress(address1H160) {
 		t.Error("4: expected an address to be present")
 	}
-	if len(lastFilterRequest.Topics) != 1 && lastFilterRequest.Topics[0] != topic1H256 {
+	if len(lastFilterRequest.Topics) != 1 && gointerfaces.ConvertH256ToHash(lastFilterRequest.Topics[0]) != gointerfaces.ConvertH256ToHash(topic1H256) {
 		t.Error("4: expected a topic to be present")
 	}
 
@@ -327,7 +336,7 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	if len(lastFilterRequest.Addresses) != 0 {
 		t.Error("5: expected addresses to be empty")
 	}
-	if len(lastFilterRequest.Topics) != 1 && lastFilterRequest.Topics[0] != topic1H256 {
+	if len(lastFilterRequest.Topics) != 1 && gointerfaces.ConvertH256ToHash(lastFilterRequest.Topics[0]) != gointerfaces.ConvertH256ToHash(topic1H256) {
 		t.Error("5: expected a topic to be present")
 	}
 
@@ -335,15 +344,145 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	// and nothing in the address or topics lists
 	f.UnsubscribeLogs(id3)
 	if lastFilterRequest.AllAddresses == true {
-		t.Error("5: expected all addresses to be false")
+		t.Error("6: expected all addresses to be false")
 	}
 	if lastFilterRequest.AllTopics == true {
-		t.Error("5: expected all topics to be false")
+		t.Error("6: expected all topics to be false")
 	}
 	if len(lastFilterRequest.Addresses) != 0 {
-		t.Error("5: expected addresses to be empty")
+		t.Error("6: expected addresses to be empty")
 	}
 	if len(lastFilterRequest.Topics) != 0 {
-		t.Error("5: expected topics to be empty")
+		t.Error("6: expected topics to be empty")
+	}
+}
+
+func TestFilters_AddLogs(t *testing.T) {
+	config := FiltersConfig{RpcSubscriptionFiltersMaxLogs: 5}
+	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
+	logID := LogsSubID("test-log")
+	logEntry := &types.Log{}
+
+	// Add 10 logs to the store, but limit is 5
+	for i := 0; i < 10; i++ {
+		f.AddLogs(logID, logEntry)
+	}
+
+	logs, found := f.ReadLogs(logID)
+	if !found {
+		t.Error("expected to find logs in the store")
+	}
+	if len(logs) != 5 {
+		t.Errorf("expected 5 logs in the store, got %d", len(logs))
+	}
+}
+
+func TestFilters_AddLogs_Unlimited(t *testing.T) {
+	config := FiltersConfig{RpcSubscriptionFiltersMaxLogs: 0}
+	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
+	logID := LogsSubID("test-log")
+	logEntry := &types.Log{}
+
+	// Add 10 logs to the store, limit is unlimited
+	for i := 0; i < 10; i++ {
+		f.AddLogs(logID, logEntry)
+	}
+
+	logs, found := f.ReadLogs(logID)
+	if !found {
+		t.Error("expected to find logs in the store")
+	}
+	if len(logs) != 10 {
+		t.Errorf("expected 10 logs in the store, got %d", len(logs))
+	}
+}
+
+func TestFilters_AddPendingBlocks(t *testing.T) {
+	config := FiltersConfig{RpcSubscriptionFiltersMaxHeaders: 3}
+	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
+	headerID := HeadsSubID("test-header")
+	header := &types.Header{}
+
+	// Add 5 headers to the store, but limit is 3
+	for i := 0; i < 5; i++ {
+		f.AddPendingBlock(headerID, header)
+	}
+
+	headers, found := f.ReadPendingBlocks(headerID)
+	if !found {
+		t.Error("expected to find headers in the store")
+	}
+	if len(headers) != 3 {
+		t.Errorf("expected 3 headers in the store, got %d", len(headers))
+	}
+}
+
+func TestFilters_AddPendingBlocks_Unlimited(t *testing.T) {
+	config := FiltersConfig{RpcSubscriptionFiltersMaxHeaders: 0}
+	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
+	headerID := HeadsSubID("test-header")
+	header := &types.Header{}
+
+	// Add 5 headers to the store, limit is unlimited
+	for i := 0; i < 5; i++ {
+		f.AddPendingBlock(headerID, header)
+	}
+
+	headers, found := f.ReadPendingBlocks(headerID)
+	if !found {
+		t.Error("expected to find headers in the store")
+	}
+	if len(headers) != 5 {
+		t.Errorf("expected 5 headers in the store, got %d", len(headers))
+	}
+}
+
+func TestFilters_AddPendingTxs(t *testing.T) {
+	config := FiltersConfig{RpcSubscriptionFiltersMaxTxs: 4}
+	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
+	txID := PendingTxsSubID("test-tx")
+	var tx types.Transaction = types.NewTransaction(0, libcommon.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87"), uint256.NewInt(10), 50000, uint256.NewInt(10), nil)
+	tx, _ = tx.WithSignature(*types.LatestSignerForChainID(nil), libcommon.Hex2Bytes("9bea4c4daac7c7c52e093e6a4c35dbbcf8856f1af7b059ba20253e70848d094f8a8fae537ce25ed8cb5af9adac3f141af69bd515bd2ba031522df09b97dd72b100"))
+
+	// Add 6 txs to the store, but limit is 4
+	for i := 0; i < 6; i++ {
+		f.AddPendingTxs(txID, []types.Transaction{tx})
+	}
+
+	txs, found := f.ReadPendingTxs(txID)
+	if !found {
+		t.Error("expected to find txs in the store")
+	}
+	totalTxs := 0
+	for _, batch := range txs {
+		totalTxs += len(batch)
+	}
+	if totalTxs != 4 {
+		t.Errorf("expected 4 txs in the store, got %d", totalTxs)
+	}
+}
+
+func TestFilters_AddPendingTxs_Unlimited(t *testing.T) {
+	config := FiltersConfig{RpcSubscriptionFiltersMaxTxs: 0}
+	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
+	txID := PendingTxsSubID("test-tx")
+	var tx types.Transaction = types.NewTransaction(0, libcommon.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87"), uint256.NewInt(10), 50000, uint256.NewInt(10), nil)
+	tx, _ = tx.WithSignature(*types.LatestSignerForChainID(nil), libcommon.Hex2Bytes("9bea4c4daac7c7c52e093e6a4c35dbbcf8856f1af7b059ba20253e70848d094f8a8fae537ce25ed8cb5af9adac3f141af69bd515bd2ba031522df09b97dd72b100"))
+
+	// Add 6 txs to the store, limit is unlimited
+	for i := 0; i < 6; i++ {
+		f.AddPendingTxs(txID, []types.Transaction{tx})
+	}
+
+	txs, found := f.ReadPendingTxs(txID)
+	if !found {
+		t.Error("expected to find txs in the store")
+	}
+	totalTxs := 0
+	for _, batch := range txs {
+		totalTxs += len(batch)
+	}
+	if totalTxs != 6 {
+		t.Errorf("expected 6 txs in the store, got %d", totalTxs)
 	}
 }

@@ -21,6 +21,14 @@ func (r readerMock) CurrentHeader() *types.Header {
 	return nil
 }
 
+func (cr readerMock) CurrentFinalizedHeader() *types.Header {
+	return nil
+}
+
+func (cr readerMock) CurrentSafeHeader() *types.Header {
+	return nil
+}
+
 func (r readerMock) GetHeader(libcommon.Hash, uint64) *types.Header {
 	return nil
 }
@@ -40,6 +48,7 @@ func (r readerMock) GetTd(libcommon.Hash, uint64) *big.Int {
 func (r readerMock) FrozenBlocks() uint64 {
 	return 0
 }
+func (r readerMock) FrozenBorBlocks() uint64 { return 0 }
 
 func (r readerMock) BorSpan(spanId uint64) []byte {
 	return nil

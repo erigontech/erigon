@@ -8,11 +8,11 @@ import (
 	"reflect"
 
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	borsnaptype "github.com/ledgerwatch/erigon/polygon/bor/snaptype"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func (br *BlockRetire) dbHasEnoughDataForBorRetire(ctx context.Context) (bool, error) {
@@ -33,19 +33,13 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 
 	blocksRetired := false
 
+	minBlockNum = max(blockReader.FrozenBorBlocks(), minBlockNum)
 	for _, snaptype := range blockReader.BorSnapshots().Types() {
-		minSnapNum := minBlockNum
-
-		if available := blockReader.BorSnapshots().SegmentsMax(); available < minBlockNum {
-			minSnapNum = available
-		}
-
-		if maxBlockNum <= minSnapNum {
+		if maxBlockNum <= minBlockNum {
 			continue
 		}
 
-		blockFrom, blockTo, ok := canRetire(minSnapNum, maxBlockNum+1, snaptype.Enum(), br.chainConfig)
-
+		blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum, snaptype.Enum(), br.chainConfig)
 		if ok {
 			blocksRetired = true
 

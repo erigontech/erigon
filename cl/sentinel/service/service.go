@@ -17,13 +17,14 @@ import (
 	"github.com/ledgerwatch/erigon/cl/sentinel"
 	"github.com/ledgerwatch/erigon/cl/sentinel/httpreqresp"
 
+	"github.com/libp2p/go-libp2p/core/peer"
+
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 const gracePeerCount = 8
@@ -96,7 +97,8 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 		gossip.TopicNameVoluntaryExit,
 		gossip.TopicNameProposerSlashing,
 		gossip.TopicNameSyncCommitteeContributionAndProof,
-		gossip.TopicNameAttesterSlashing:
+		gossip.TopicNameAttesterSlashing,
+		gossip.TopicNameBlsToExecutionChange:
 		subscription = manager.GetMatchingSubscription(msg.Name)
 	default:
 		// check subnets

@@ -17,7 +17,6 @@
 package state
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 
@@ -37,10 +36,9 @@ type Dumper struct {
 	blockNumber uint64
 	db          kv.Tx
 	hashedState bool
-	historyV3   bool
 }
 
-// DumpAccount represents an account in the state.
+// DumpAccount represents tan account in the state.
 type DumpAccount struct {
 	Balance   string             `json:"balance"`
 	Nonce     uint64             `json:"nonce"`
@@ -189,25 +187,12 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 			account.CodeHash = acc.CodeHash[:]
 
 			if !excludeCode {
-				addr := libcommon.BytesToAddress(k)
-				r, err := ttx.DomainRange(kv.CodeDomain, addr[:], nil, txNumForStorage, order.Asc, kv.Unlim)
+				r, _, err := ttx.DomainGet(kv.CodeDomain, k, nil)
 				if err != nil {
-					return nil, fmt.Errorf("walking over storage for %x: %w", addr, err)
+					return nil, err
 				}
-				defer r.Close()
-				for r.HasNext() {
-					k, vs, err := r.Next()
-					if err != nil {
-						return nil, fmt.Errorf("walking over storage for %x: %w", addr, err)
-					}
-					if len(vs) == 0 {
-						continue // Skip deleted entries
-					}
-					if !bytes.Equal(k, addr[:]) {
-						fmt.Printf("unexpected key %x while addr %x\n", k, addr[:])
-						continue
-					}
-					account.Code = vs
+				if r != nil {
+					account.Code = r
 				}
 			}
 		}

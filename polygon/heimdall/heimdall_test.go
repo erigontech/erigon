@@ -6,10 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/crypto"

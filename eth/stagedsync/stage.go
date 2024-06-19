@@ -1,7 +1,7 @@
 package stagedsync
 
 import (
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -41,7 +41,8 @@ type Stage struct {
 }
 
 type CurrentSyncCycleInfo struct {
-	IsInitialCycle bool
+	IsInitialCycle bool //deprecated. use IsFirstCycle and IsOnChainTip
+	IsFirstCycle   bool
 }
 
 // StageState is the state of the stage.
