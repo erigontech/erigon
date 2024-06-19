@@ -1320,12 +1320,6 @@ func (iit *InvertedIndexRoTx) garbage(merged *filesItem) (outs []*filesItem) {
 func (dt *DomainRoTx) hasCoverFile(item *filesItem) bool {
 	return hasCoverVisibleFile(dt.files, item)
 }
-func (ht *HistoryRoTx) hasCoverFile(item *filesItem) bool {
-	return hasCoverVisibleFile(ht.files, item)
-}
-func (iit *InvertedIndexRoTx) hasCoverFile(item *filesItem) bool {
-	return hasCoverVisibleFile(iit.files, item)
-}
 func garbage(dirtyFiles *btree2.BTreeG[*filesItem], visibleFiles []ctxItem, merged *filesItem) (outs []*filesItem) {
 	if merged == nil {
 		return
