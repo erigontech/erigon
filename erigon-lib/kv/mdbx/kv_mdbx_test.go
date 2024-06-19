@@ -382,30 +382,15 @@ func TestForPrefix(t *testing.T) {
 
 	table := "Table"
 
-	var keys []string
-
-	err := tx.ForPrefix(table, []byte("key"), func(k, v []byte) error {
-		keys = append(keys, string(k))
-		return nil
-	})
+	keys, err := tx.Prefix(table, []byte("key"))
 	require.Nil(t, err)
 	require.Equal(t, []string{"key1", "key1", "key3", "key3"}, keys)
 
-	var keys1 []string
-
-	err = tx.ForPrefix(table, []byte("key1"), func(k, v []byte) error {
-		keys1 = append(keys1, string(k))
-		return nil
-	})
+	keys1, err := tx.Prefix(table, []byte("key1"))
 	require.Nil(t, err)
 	require.Equal(t, []string{"key1", "key1"}, keys1)
 
-	var keys2 []string
-
-	err = tx.ForPrefix(table, []byte("e"), func(k, v []byte) error {
-		keys2 = append(keys2, string(k))
-		return nil
-	})
+	keys2, err := tx.Prefix(table, []byte("e"))
 	require.Nil(t, err)
 	require.Nil(t, keys2)
 }

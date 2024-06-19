@@ -210,31 +210,19 @@ func TestForPrefix(t *testing.T) {
 	var keys1 []string
 	var values1 []string
 
-	err := batch.ForPrefix(kv.HashedAccounts, []byte("AB"), func(k, v []byte) error {
-		keys1 = append(keys1, string(k))
-		values1 = append(values1, string(v))
-		return nil
-	})
+	_, err := batch.Prefix(kv.HashedAccounts, []byte("AB"))
 	require.Nil(t, err)
 	require.Nil(t, keys1)
 	require.Nil(t, values1)
 
-	err = batch.ForPrefix(kv.HashedAccounts, []byte("AAAA"), func(k, v []byte) error {
-		keys1 = append(keys1, string(k))
-		values1 = append(values1, string(v))
-		return nil
-	})
+	_, err = batch.ForPrefix(kv.HashedAccounts, []byte("AAAA"))
 	require.Nil(t, err)
 	require.Equal(t, []string{"AAAA"}, keys1)
 	require.Equal(t, []string{"value"}, values1)
 
 	var keys []string
 	var values []string
-	err = batch.ForPrefix(kv.HashedAccounts, []byte("C"), func(k, v []byte) error {
-		keys = append(keys, string(k))
-		values = append(values, string(v))
-		return nil
-	})
+	_, err = batch.Prefix(kv.HashedAccounts, []byte("C"))
 	require.Nil(t, err)
 	require.Equal(t, []string{"CAAA", "CBAA", "CCAA"}, keys)
 	require.Equal(t, []string{"value1", "value2", "value3"}, values)
