@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
@@ -107,7 +108,7 @@ func TestBlockhashV2(t *testing.T) {
 	}
 
 	var (
-		env            = NewEVM(evmtypes.BlockContext{GetHash: gethashFn}, evmtypes.TxContext{}, nil, params.TestChainConfig, Config{})
+		env            = NewEVM(evmtypes.BlockContext{GetHash: gethashFn}, evmtypes.TxContext{}, TestIntraBlockState{}, params.TestChainConfig, Config{})
 		stack          = stack.New()
 		evmInterpreter = NewZKEVMInterpreter(env, NewZkConfig(env.Config(), nil))
 		pc             = uint64(0)
@@ -178,7 +179,7 @@ func TestDifficultyV2(t *testing.T) {
 
 func TestExtCodeHashV2(t *testing.T) {
 	var (
-		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, params.TestChainConfig, Config{})
+		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, TestIntraBlockState{}, params.TestChainConfig, Config{})
 		stack          = stack.New()
 		evmInterpreter = NewEVMInterpreter(env, env.Config())
 		pc             = uint64(0)
@@ -268,8 +269,23 @@ func (ibs TestIntraBlockState) AddressInAccessList(addr libcommon.Address) bool 
 func (ibs TestIntraBlockState) SlotInAccessList(addr libcommon.Address, slot libcommon.Hash) (addressOk bool, slotOk bool) {
 	return false, false
 }
-func (ibs TestIntraBlockState) AddAddressToAccessList(addr libcommon.Address)                   {}
-func (ibs TestIntraBlockState) AddSlotToAccessList(addr libcommon.Address, slot libcommon.Hash) {}
-func (ibs TestIntraBlockState) RevertToSnapshot(int)                                            {}
-func (ibs TestIntraBlockState) Snapshot() int                                                   { return 0 }
-func (ibs TestIntraBlockState) AddLog_zkEvm(*types.Log)                                         {}
+func (ibs TestIntraBlockState) AddAddressToAccessList(addr libcommon.Address) bool { return false }
+func (ibs TestIntraBlockState) AddSlotToAccessList(addr libcommon.Address, slot libcommon.Hash) (bool, bool) {
+	return false, false
+}
+func (ibs TestIntraBlockState) RevertToSnapshot(int)    {}
+func (ibs TestIntraBlockState) Snapshot() int           { return 0 }
+func (ibs TestIntraBlockState) AddLog_zkEvm(*types.Log) {}
+
+func (ibs TestIntraBlockState) GetTransientState(addr common.Address, key common.Hash) uint256.Int {
+	return uint256.Int{}
+}
+
+func (ibs TestIntraBlockState) SetTransientState(addr common.Address, key common.Hash, value uint256.Int) {
+}
+
+func (ibs TestIntraBlockState) Prepare(rules *chain.Rules, sender, coinbase common.Address, dest *common.Address,
+	precompiles []common.Address, txAccesses types2.AccessList) {
+}
+
+func (ibs TestIntraBlockState) Selfdestruct6780(common.Address) {}
