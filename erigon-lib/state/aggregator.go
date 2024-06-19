@@ -1014,8 +1014,9 @@ func (a *Aggregator) StepsRangeInDBAsStr(tx kv.Tx) string {
 }
 
 type AggregatorPruneStat struct {
-	Domains map[string]*DomainPruneStat
-	Indices map[string]*InvertedIndexPruneStat
+	Domains    map[string]*DomainPruneStat
+	Indices    map[string]*InvertedIndexPruneStat
+	Appendable map[string]*AppendablePruneStat
 }
 
 func newAggregatorPruneStat() *AggregatorPruneStat {
@@ -1149,6 +1150,14 @@ func (ac *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, w
 
 	for i := 0; i < int(kv.StandaloneIdxLen); i++ {
 		aggStat.Indices[ac.iis[i].ii.filenameBase] = stats[i]
+	}
+
+	for i := 0; i < int(kv.AppendableLen); i++ {
+		var err error
+		aggStat.Appendable[ac.appendable[i].ap.filenameBase], err = ac.appendable[i].Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, withWarmup, nil)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return aggStat, nil
