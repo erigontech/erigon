@@ -34,7 +34,6 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/log/v3"
 	rand2 "golang.org/x/exp/rand"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -49,6 +48,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/seg"
 )
 
@@ -1485,35 +1485,37 @@ func (ac *AggregatorRoTx) mergeFiles(ctx context.Context, files SelectedStaticFi
 	accStorageMerged := new(sync.WaitGroup)
 
 	for id := range ac.d {
+		if !r.d[id].any() {
+			continue
+		}
+
 		id := id
-		if r.d[id].any() {
-			kid := kv.Domain(id)
-			if ac.a.commitmentValuesTransform && (kid == kv.AccountsDomain || kid == kv.StorageDomain) {
-				accStorageMerged.Add(1)
+		kid := kv.Domain(id)
+		if ac.a.commitmentValuesTransform && (kid == kv.AccountsDomain || kid == kv.StorageDomain) {
+			accStorageMerged.Add(1)
+		}
+
+		g.Go(func() (err error) {
+			var vt valueTransformer
+			if ac.a.commitmentValuesTransform && kid == kv.CommitmentDomain {
+				ac.RestrictSubsetFileDeletions(true)
+				accStorageMerged.Wait()
+
+				vt = ac.d[kv.CommitmentDomain].commitmentValTransformDomain(ac.d[kv.AccountsDomain], ac.d[kv.StorageDomain],
+					mf.d[kv.AccountsDomain], mf.d[kv.StorageDomain])
 			}
 
-			g.Go(func() (err error) {
-				var vt valueTransformer
-				if ac.a.commitmentValuesTransform && kid == kv.CommitmentDomain {
-					ac.RestrictSubsetFileDeletions(true)
-					accStorageMerged.Wait()
-
-					vt = ac.d[kv.CommitmentDomain].commitmentValTransformDomain(ac.d[kv.AccountsDomain], ac.d[kv.StorageDomain],
-						mf.d[kv.AccountsDomain], mf.d[kv.StorageDomain])
+			mf.d[id], mf.dIdx[id], mf.dHist[id], err = ac.d[id].mergeFiles(ctx, files.d[id], files.dIdx[id], files.dHist[id], r.d[id], vt, ac.a.ps)
+			if ac.a.commitmentValuesTransform {
+				if kid == kv.AccountsDomain || kid == kv.StorageDomain {
+					accStorageMerged.Done()
 				}
-
-				mf.d[id], mf.dIdx[id], mf.dHist[id], err = ac.d[id].mergeFiles(ctx, files.d[id], files.dIdx[id], files.dHist[id], r.d[id], vt, ac.a.ps)
-				if ac.a.commitmentValuesTransform {
-					if kid == kv.AccountsDomain || kid == kv.StorageDomain {
-						accStorageMerged.Done()
-					}
-					if err == nil && kid == kv.CommitmentDomain {
-						ac.RestrictSubsetFileDeletions(false)
-					}
+				if err == nil && kid == kv.CommitmentDomain {
+					ac.RestrictSubsetFileDeletions(false)
 				}
-				return err
-			})
-		}
+			}
+			return err
+		})
 	}
 
 	for id, rng := range r.ranges {
@@ -1765,9 +1767,10 @@ func (a *Aggregator) Stats() FilesStats22 {
 //   - user will not see "partial writes" or "new files appearance"
 //   - last reader removing garbage files inside `Close` method
 type AggregatorRoTx struct {
-	a   *Aggregator
-	d   [kv.DomainLen]*DomainRoTx
-	iis [kv.StandaloneIdxLen]*InvertedIndexRoTx
+	a          *Aggregator
+	d          [kv.DomainLen]*DomainRoTx
+	iis        [kv.StandaloneIdxLen]*InvertedIndexRoTx
+	appendable [kv.AppendableLen]*AppendableRoTx
 
 	id      uint64 // auto-increment id of ctx for logs
 	_leakID uint64 // set only if TRACE_AGG=true
@@ -1786,6 +1789,9 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 	}
 	for id, d := range a.d {
 		ac.d[id] = d.BeginFilesRo()
+	}
+	for id, ap := range a.ap {
+		ac.appendable[id] = ap.BeginFilesRo()
 	}
 	a.visibleFilesLock.RUnlock()
 
@@ -1825,25 +1831,25 @@ func (ac *AggregatorRoTx) DebugEFKey(domain kv.Domain, k []byte) error {
 	return ac.d[domain].DebugEFKey(k)
 }
 
-func (ac *AggregatorRoTx) DebugEFAllValuesAreInRange(ctx context.Context, name kv.InvertedIdx) error {
+func (ac *AggregatorRoTx) DebugEFAllValuesAreInRange(ctx context.Context, name kv.InvertedIdx, failFast bool, fromStep uint64) error {
 	switch name {
 	case kv.AccountsHistoryIdx:
-		err := ac.d[kv.AccountsDomain].ht.iit.DebugEFAllValuesAreInRange(ctx)
+		err := ac.d[kv.AccountsDomain].ht.iit.DebugEFAllValuesAreInRange(ctx, failFast, fromStep)
 		if err != nil {
 			return err
 		}
 	case kv.StorageHistoryIdx:
-		err := ac.d[kv.CodeDomain].ht.iit.DebugEFAllValuesAreInRange(ctx)
+		err := ac.d[kv.CodeDomain].ht.iit.DebugEFAllValuesAreInRange(ctx, failFast, fromStep)
 		if err != nil {
 			return err
 		}
 	case kv.CodeHistoryIdx:
-		err := ac.d[kv.StorageDomain].ht.iit.DebugEFAllValuesAreInRange(ctx)
+		err := ac.d[kv.StorageDomain].ht.iit.DebugEFAllValuesAreInRange(ctx, failFast, fromStep)
 		if err != nil {
 			return err
 		}
 	case kv.CommitmentHistoryIdx:
-		err := ac.d[kv.CommitmentDomain].ht.iit.DebugEFAllValuesAreInRange(ctx)
+		err := ac.d[kv.CommitmentDomain].ht.iit.DebugEFAllValuesAreInRange(ctx, failFast, fromStep)
 		if err != nil {
 			return err
 		}
@@ -1853,22 +1859,22 @@ func (ac *AggregatorRoTx) DebugEFAllValuesAreInRange(ctx context.Context, name k
 	//		return err
 	//	}
 	case kv.TracesFromIdx:
-		err := ac.iis[kv.TracesFromIdxPos].DebugEFAllValuesAreInRange(ctx)
+		err := ac.iis[kv.TracesFromIdxPos].DebugEFAllValuesAreInRange(ctx, failFast, fromStep)
 		if err != nil {
 			return err
 		}
 	case kv.TracesToIdx:
-		err := ac.iis[kv.TracesToIdxPos].DebugEFAllValuesAreInRange(ctx)
+		err := ac.iis[kv.TracesToIdxPos].DebugEFAllValuesAreInRange(ctx, failFast, fromStep)
 		if err != nil {
 			return err
 		}
 	case kv.LogAddrIdx:
-		err := ac.iis[kv.LogAddrIdxPos].DebugEFAllValuesAreInRange(ctx)
+		err := ac.iis[kv.LogAddrIdxPos].DebugEFAllValuesAreInRange(ctx, failFast, fromStep)
 		if err != nil {
 			return err
 		}
 	case kv.LogTopicIdx:
-		err := ac.iis[kv.LogTopicIdxPos].DebugEFAllValuesAreInRange(ctx)
+		err := ac.iis[kv.LogTopicIdxPos].DebugEFAllValuesAreInRange(ctx, failFast, fromStep)
 		if err != nil {
 			return err
 		}
@@ -1879,6 +1885,10 @@ func (ac *AggregatorRoTx) DebugEFAllValuesAreInRange(ctx context.Context, name k
 }
 
 // --- Domain part END ---
+
+func (ac *AggregatorRoTx) Appendable(name kv.Appendable, ts uint64, v []byte, tx kv.RwTx) (err error) {
+	return ac.appendable[name].Append(ts, v, tx)
+}
 
 func (ac *AggregatorRoTx) Close() {
 	if ac == nil || ac.a == nil { // invariant: it's safe to call Close multiple times
@@ -1894,6 +1904,9 @@ func (ac *AggregatorRoTx) Close() {
 	}
 	for _, ii := range ac.iis {
 		ii.Close()
+	}
+	for _, ap := range ac.appendable {
+		ap.Close()
 	}
 }
 

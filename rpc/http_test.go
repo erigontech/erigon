@@ -22,7 +22,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 func confirmStatusCode(t *testing.T, got, want int) {

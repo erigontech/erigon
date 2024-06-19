@@ -39,6 +39,11 @@ type StateReader interface {
 	ReadAccountIncarnation(address common.Address) (uint64, error)
 }
 
+type HistoricalStateReader interface {
+	GetTxNum() uint64
+	SetTxNum(txNum uint64)
+}
+
 type StateWriter interface {
 	UpdateAccountData(address common.Address, original, account *accounts.Account) error
 	UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error
