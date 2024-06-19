@@ -296,6 +296,7 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&cli.StringFlag{Name: "action", Usage: fmt.Sprintf("one of: %s", integrity.AllActions)},
+				&cli.BoolFlag{Name: "failFast", Value: true},
 			}),
 		},
 		//{
@@ -422,6 +423,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 
 	ctx := cliCtx.Context
 	requestedAction := integrity.Action(cliCtx.String("action"))
+	failFast := cliCtx.Bool("failFast")
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
@@ -448,7 +450,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 				return err
 			}
 		case integrity.EfFiles:
-			if err := integrity.E3EfFiles(ctx, chainDB, agg); err != nil {
+			if err := integrity.E3EfFiles(ctx, chainDB, agg, failFast); err != nil {
 				return err
 			}
 		case integrity.HistoryNoSystemTxs:

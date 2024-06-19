@@ -875,7 +875,7 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	return stat, err
 }
 
-func (iit *InvertedIndexRoTx) DebugEFAllValuesAreInRange(ctx context.Context) error {
+func (iit *InvertedIndexRoTx) DebugEFAllValuesAreInRange(ctx context.Context, failFast bool) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	iterStep := func(item ctxItem) error {
@@ -893,13 +893,19 @@ func (iit *InvertedIndexRoTx) DebugEFAllValuesAreInRange(ctx context.Context) er
 			}
 			if item.startTxNum > ef.Min() {
 				err := fmt.Errorf("DebugEFAllValuesAreInRange1: %d > %d, %s, %x", item.startTxNum, ef.Min(), g.FileName(), k)
-				log.Warn(err.Error())
-				//return err
+				if failFast {
+					return err
+				} else {
+					log.Warn(err.Error())
+				}
 			}
 			if item.endTxNum < ef.Max() {
 				err := fmt.Errorf("DebugEFAllValuesAreInRange2: %d < %d, %s, %x", item.endTxNum, ef.Max(), g.FileName(), k)
-				log.Warn(err.Error())
-				//return err
+				if failFast {
+					return err
+				} else {
+					log.Warn(err.Error())
+				}
 			}
 
 			select {
