@@ -603,8 +603,9 @@ type TemporalPutDel interface {
 	//   - if `val == nil` it will call DomainDel
 	DomainDel(domain Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error
 	DomainDelPrefix(domain Domain, prefix []byte) error
-}
 
+	AppendablePut(name Appendable, ts uint64, v []byte) error
+}
 type CanWarmupDB interface {
 	WarmupDB(force bool) error
 	LockDBInRam() error
