@@ -297,6 +297,7 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 				&cli.StringFlag{Name: "check", Usage: fmt.Sprintf("one of: %s", integrity.AllChecks)},
 				&cli.BoolFlag{Name: "failFast", Value: true, Usage: "to stop after 1st problem or print WARN log and continue check"},
+				&cli.Uint64Flag{Name: "fromStep", Value: 0, Usage: "skip files before given step"},
 			}),
 		},
 	},
@@ -417,6 +418,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	ctx := cliCtx.Context
 	requestedCheck := integrity.Check(cliCtx.String("check"))
 	failFast := cliCtx.Bool("failFast")
+	fromStep := cliCtx.Uint64("fromStep")
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
@@ -443,7 +445,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 		case integrity.Blocks:
 			return integrity.SnapBlocksRead(chainDB, blockReader, ctx, failFast)
 		case integrity.InvertedIndex:
-			return integrity.E3EfFiles(ctx, chainDB, agg, failFast)
+			return integrity.E3EfFiles(ctx, chainDB, agg, failFast, fromStep)
 		case integrity.HistoryNoSystemTxs:
 			return integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg)
 		default:

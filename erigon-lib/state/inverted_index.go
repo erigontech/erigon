@@ -876,9 +876,10 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	return stat, err
 }
 
-func (iit *InvertedIndexRoTx) DebugEFAllValuesAreInRange(ctx context.Context, failFast bool) error {
+func (iit *InvertedIndexRoTx) DebugEFAllValuesAreInRange(ctx context.Context, failFast bool, fromStep uint64) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
+	fromTxNum := fromStep * iit.ii.aggregationStep
 	iterStep := func(item ctxItem) error {
 		g := item.src.decompressor.MakeGetter()
 		g.Reset(0)
@@ -922,6 +923,9 @@ func (iit *InvertedIndexRoTx) DebugEFAllValuesAreInRange(ctx context.Context, fa
 
 	for _, item := range iit.files {
 		if item.src.decompressor == nil {
+			continue
+		}
+		if item.endTxNum < fromTxNum {
 			continue
 		}
 		if err := iterStep(item); err != nil {
