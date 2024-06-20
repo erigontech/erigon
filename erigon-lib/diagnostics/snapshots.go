@@ -55,10 +55,16 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 				downloadTimeLeft := CalculateTime(remainingBytes, info.DownloadRate)
 				totalDownloadTimeString := time.Duration(info.TotalTime) * time.Second
 
+				progress := downloadedPercent
+
+				if info.TorrentMetadataReady < info.Files {
+					progress = "calculating..."
+				}
+
 				d.updateSnapshotStageStats(SyncStageStats{
 					TimeElapsed: totalDownloadTimeString.String(),
 					TimeLeft:    downloadTimeLeft,
-					Progress:    downloadedPercent,
+					Progress:    progress,
 				}, "Downloading snapshots")
 
 				if err := d.db.Update(d.ctx, SnapshotDownloadUpdater(d.syncStats.SnapshotDownload)); err != nil {
