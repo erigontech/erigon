@@ -204,7 +204,6 @@ func TestRemoteKvVersion(t *testing.T) {
 }
 
 func TestRemoteKvRange(t *testing.T) {
-	t.Skip()
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please")
 	}
