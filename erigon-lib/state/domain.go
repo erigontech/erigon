@@ -872,6 +872,8 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 		k, v []byte
 	}{}
 	dbgFile, _ := os.Create("collate-" + d.filenameBase + "-" + fmt.Sprintf("%d", step) + ".txt")
+	defer dbgFile.Sync()
+	defer dbgFile.Close()
 	var stepInDB []byte
 	for k, v, err := valsCursor.First(); k != nil; {
 		if err != nil {
