@@ -50,21 +50,15 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 				d.syncStats.SnapshotDownload.DownloadFinished = info.DownloadFinished
 				d.syncStats.SnapshotDownload.TorrentMetadataReady = info.TorrentMetadataReady
 
-				downloadedPercent := getPercentDownloaded(info.Downloaded, info.Total)
+				downloadedPercent := GetShanpshotsPercentDownloaded(info.Downloaded, info.Total, info.TorrentMetadataReady, info.Files)
 				remainingBytes := info.Total - info.Downloaded
 				downloadTimeLeft := CalculateTime(remainingBytes, info.DownloadRate)
 				totalDownloadTimeString := time.Duration(info.TotalTime) * time.Second
 
-				progress := downloadedPercent
-
-				if info.TorrentMetadataReady < info.Files {
-					progress = "calculating..."
-				}
-
 				d.updateSnapshotStageStats(SyncStageStats{
 					TimeElapsed: totalDownloadTimeString.String(),
 					TimeLeft:    downloadTimeLeft,
-					Progress:    progress,
+					Progress:    downloadedPercent,
 				}, "Downloading snapshots")
 
 				if err := d.db.Update(d.ctx, SnapshotDownloadUpdater(d.syncStats.SnapshotDownload)); err != nil {
@@ -83,7 +77,11 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 	}()
 }
 
-func getPercentDownloaded(downloaded, total uint64) string {
+func GetShanpshotsPercentDownloaded(downloaded uint64, total uint64, torrentMetadataReady int32, files int32) string {
+	if torrentMetadataReady < files {
+		return "calculating..."
+	}
+
 	percent := float32(downloaded) / float32(total/100)
 
 	if percent > 100 {

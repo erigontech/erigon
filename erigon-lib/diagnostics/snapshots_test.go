@@ -55,3 +55,16 @@ var (
 		DownloadedStats: diagnostics.FileDownloadedStatistics{},
 	}
 )
+
+func TestPercentDiownloaded(t *testing.T) {
+	downloaded := uint64(10)
+	total := uint64(100)
+	files := int32(20)
+	torrentMetadataReady := int32(10)
+
+	progress := diagnostics.GetShanpshotsPercentDownloaded(downloaded, total, torrentMetadataReady, files)
+	require.Equal(t, progress, "calculating...")
+
+	progress = diagnostics.GetShanpshotsPercentDownloaded(downloaded, total, files, files)
+	require.Equal(t, progress, "10.00%")
+}
