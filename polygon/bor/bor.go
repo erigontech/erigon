@@ -17,6 +17,7 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/xsleonard/go-merkle"
@@ -34,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/crypto/cryptopool"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
@@ -1567,6 +1569,52 @@ func getUpdatedValidatorSet(oldValidatorSet *valset.ValidatorSet, newVals []*val
 
 func isSprintStart(number, sprint uint64) bool {
 	return number%sprint == 0
+}
+
+// BorTransfer transfer in Bor
+func BorTransfer(db evmtypes.IntraBlockState, sender, recipient libcommon.Address, amount *uint256.Int, bailout bool) {
+	// get inputs before
+	input1 := db.GetBalance(sender).Clone()
+	input2 := db.GetBalance(recipient).Clone()
+
+	if !bailout {
+		db.SubBalance(sender, amount)
+	}
+	db.AddBalance(recipient, amount)
+
+	// get outputs after
+	output1 := db.GetBalance(sender).Clone()
+	output2 := db.GetBalance(recipient).Clone()
+
+	// add transfer log into state
+	addTransferLog(db, transferLogSig, sender, recipient, amount, input1, input2, output1, output2)
+}
+
+func (c *Bor) GetTransferFunc() evmtypes.TransferFunc {
+	return BorTransfer
+}
+
+// AddFeeTransferLog adds fee transfer log into state
+// Deprecating transfer log and will be removed in future fork. PLEASE DO NOT USE this transfer log going forward. Parameters won't get updated as expected going forward with EIP1559
+func AddFeeTransferLog(ibs evmtypes.IntraBlockState, sender libcommon.Address, coinbase libcommon.Address, result *evmtypes.ExecutionResult) {
+	output1 := result.SenderInitBalance.Clone()
+	output2 := result.CoinbaseInitBalance.Clone()
+	addTransferLog(
+		ibs,
+		transferFeeLogSig,
+		sender,
+		coinbase,
+		result.FeeTipped,
+		result.SenderInitBalance,
+		result.CoinbaseInitBalance,
+		output1.Sub(output1, result.FeeTipped),
+		output2.Add(output2, result.FeeTipped),
+	)
+
+}
+
+func (c *Bor) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
+	return AddFeeTransferLog
 }
 
 // In bor, RLP encoding of BlockExtraData will be stored in the Extra field in the header

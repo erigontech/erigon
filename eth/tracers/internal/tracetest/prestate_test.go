@@ -30,6 +30,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -100,7 +101,7 @@ func testPrestateDiffTracer(tracerName string, dirPath string, t *testing.T) {
 			signer := types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), uint64(test.Context.Time))
 			context := evmtypes.BlockContext{
 				CanTransfer: core.CanTransfer,
-				Transfer:    core.Transfer,
+				Transfer:    consensus.Transfer,
 				Coinbase:    test.Context.Miner,
 				BlockNumber: uint64(test.Context.Number),
 				Time:        uint64(test.Context.Time),

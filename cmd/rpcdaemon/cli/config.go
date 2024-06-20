@@ -54,6 +54,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
@@ -991,6 +992,22 @@ func (e *remoteConsensusEngine) Initialize(config *chain.Config, chain consensus
 	}
 
 	e.engine.Initialize(config, chain, header, state, syscall, logger)
+}
+
+func (e *remoteConsensusEngine) GetTransferFunc() evmtypes.TransferFunc {
+	if err := e.validateEngineReady(); err != nil {
+		panic(err)
+	}
+
+	return e.engine.GetTransferFunc()
+}
+
+func (e *remoteConsensusEngine) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
+	if err := e.validateEngineReady(); err != nil {
+		panic(err)
+	}
+
+	return e.engine.GetPostApplyMessageFunc()
 }
 
 func (e *remoteConsensusEngine) VerifyHeader(_ consensus.ChainHeaderReader, _ *types.Header, _ bool) error {
