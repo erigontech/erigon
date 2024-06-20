@@ -2075,14 +2075,11 @@ func (s *cursor2iter) init(table string, tx kv.Tx) error {
 	}
 	if s.nextK == nil {
 		s.nextK, s.nextV, err = s.c.Last()
-		if err != nil {
-			return err
-		}
 	} else {
 		s.nextK, s.nextV, err = s.c.Prev()
-		if err != nil {
-			return err
-		}
+	}
+	if err != nil {
+		return err
 	}
 	if s.nextK == nil {
 		return nil
