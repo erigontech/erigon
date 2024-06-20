@@ -1301,18 +1301,6 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	return nil
 }
 
-func (d *Domain) isEmpty(tx kv.Tx) (bool, error) {
-	k2, err := kv.FirstKey(tx, d.valsTable)
-	if err != nil {
-		return false, err
-	}
-	isEmptyHist, err := d.History.isEmpty(tx)
-	if err != nil {
-		return false, err
-	}
-	return k2 == nil && isEmptyHist, nil
-}
-
 var (
 	UseBtree = true // if true, will use btree for all files
 )
