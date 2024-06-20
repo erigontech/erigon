@@ -215,18 +215,28 @@ downloader --datadir=<your> --chain=mainnet
 ## Launch new network or new type of snapshots
 
 Usually Erigon's network is self-sufficient - peers automatically producing and
-seedingsnapshots. But new network or new type of snapshots need Bootstrapping
+seeding snapshots. But new network or new type of snapshots need Bootstrapping
 step - no peers yet have this files.
 
 **WebSeed** - is centralized file-storage - used to Bootstrap network. For
-example S3 with signed_url.
+example S3 with signed_url or R2 public.
 
-Erigon dev team can share existing **webseed_url**. Or you can create own.
+Upload data to R2 bucket (or any HTTP server) and create `manifest.txt`:
 
 ```
-downloader --datadir=<your> --chain=mainnet --webseed=<webseed_url>
+go run ./cmd/downloader manifest --datadir=/erigon/ --chain="$CHAIN" > /erigon/snapshots/manifest.txt
 
-# See also: `downloader --help` of `--webseed` flag. There is an option to pass it by `datadir/webseed.toml` file.   
+rclone sync /erigon/snapshots/   your_account:your-bucket-name-$CHAIN/ -L --progress --files-from=/erigon/snapshots/manifest.txt --s3-use-multipart-uploads=true --s3-use-multipart-etag=true --s3-upload-cutoff=300Mi
+```
+
+Say for Erigon to use this webseed:
+```
+erigon --datadir=<your> --chain=mainnet --webseed=<webseed_url>
+or
+downloader --datadir=<your> --chain=mainnet --webseed=<webseed_url> --seedbox 
+
+// default urls list: `erigon-snapshot/webseed/mainnet.toml`   
 ```
 
 ---------------
+
