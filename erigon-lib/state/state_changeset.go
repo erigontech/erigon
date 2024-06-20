@@ -328,7 +328,7 @@ func ReadLowestUnwindableBlock(tx kv.Tx) (uint64, error) {
 		In the table there are 2 kinds of keys:
 			1. BlockBodyKey(blockNumber, blockHash) -> chunkCount
 			2. BlockBodyKey(blockNumber, blockHash) + index -> chunk
-		Since key 1 is always lexigographically smaller than key 2, then if we have key 1, we also must have all key 2s for that block number without chunks.
+		Since key 1 is always lexigographically smaller than key 2, then if we have key 1, we also must have all key 2s for that block number without gaps in chunks.
 		Therefore, we can iterate over the keys and find the first key that conform to key 1 (aka len(key) == 40).
 	*/
 	var first []byte
