@@ -96,6 +96,8 @@ type (
 	// and is used by the BLOCKHASH EVM op code.
 	GetHashFunc func(uint64) common.Hash
 
+	// PostApplyMessageFunc is an extension point to execute custom logic at the end of core.ApplyMessage.
+	// It's used in Bor for AddFeeTransferLog.
 	PostApplyMessageFunc func(ibs IntraBlockState, sender common.Address, coinbase common.Address, result *ExecutionResult)
 )
 
