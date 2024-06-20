@@ -130,7 +130,9 @@ func operationBlockHeaderHandler(t *testing.T, root fs.FS, c spectest.TestCase) 
 	if err := spectest.ReadSszOld(root, block, c.Version(), blockFileName); err != nil {
 		return err
 	}
-	if err := c.Machine.ProcessBlockHeader(preState, block); err != nil {
+	bodyRoot, err := block.Body.HashSSZ()
+	require.NoError(t, err)
+	if err := c.Machine.ProcessBlockHeader(preState, block.Slot, block.ProposerIndex, block.ParentRoot, bodyRoot); err != nil {
 		if expectedError {
 			return nil
 		}
