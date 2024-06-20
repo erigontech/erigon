@@ -2044,27 +2044,32 @@ func (s *cursor2iter) init(table string, tx kv.Tx) error {
 		if err != nil {
 			return err
 		}
-		return err
+		return nil
 	}
 
-	// to find key LAST <= s.fromPrefix and take last value of this key
-	nextSubtree, ok := kv.NextSubtree(s.fromPrefix)
+	// `Seek(s.fromPrefix)` find first key with prefix `s.fromPrefix`, but we need LAST one.
+	// `Seek(nextPrefix)+Prev()` will do the job.
+	nextPrefix, ok := kv.NextSubtree(s.fromPrefix)
 	if !ok {
 		s.nextK, s.nextV, err = s.c.Last()
 		if err != nil {
 			return err
 		}
-		if s.nextK != nil { // go to last value of this key
-			if casted, ok := s.c.(kv.CursorDupSort); ok {
-				s.nextV, err = casted.LastDup()
-				if err != nil {
-					return err
-				}
+		if s.nextK == nil {
+			return nil
+		}
+
+		// go to last value of this key
+		if casted, ok := s.c.(kv.CursorDupSort); ok {
+			s.nextV, err = casted.LastDup()
+			if err != nil {
+				return err
 			}
 		}
 		return nil
 	}
-	s.nextK, s.nextV, err = s.c.Seek(nextSubtree)
+
+	s.nextK, s.nextV, err = s.c.Seek(nextPrefix)
 	if err != nil {
 		return err
 	}
