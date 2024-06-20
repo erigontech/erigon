@@ -28,7 +28,7 @@ func GenerateBlocks(t *testing.T, gspec *types.Genesis, blocks int, txs map[int]
 	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, blocks, func(blockNum int, block *core.BlockGen) {
-		var tx types.Transaction
+		var txn types.Transaction
 		var isContractCall bool
 		signer := types.LatestSignerForChainID(nil)
 
@@ -36,23 +36,23 @@ func GenerateBlocks(t *testing.T, gspec *types.Genesis, blocks int, txs map[int]
 
 		for i := 0; i < txCount; i++ {
 			if txToSend, ok := txs[i%len(txs)]; ok {
-				tx, isContractCall = txToSend.Fn(block, contractBackend)
+				txn, isContractCall = txToSend.Fn(block, contractBackend)
 				var err error
-				tx, err = types.SignTx(tx, *signer, txToSend.Key)
+				txn, err = types.SignTx(txn, *signer, txToSend.Key)
 				if err != nil {
 					return
 				}
 			}
 
-			if tx != nil {
+			if txn != nil {
 				if !isContractCall {
-					err := contractBackend.SendTransaction(context.Background(), tx)
+					err := contractBackend.SendTransaction(context.Background(), txn)
 					if err != nil {
 						return
 					}
 				}
 
-				block.AddTx(tx)
+				block.AddTx(txn)
 			}
 		}
 

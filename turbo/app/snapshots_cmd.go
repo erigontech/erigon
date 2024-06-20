@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+
 	"io"
 	"math"
 	"net/http"
@@ -17,31 +18,28 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-
 	"github.com/c2h5oh/datasize"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
-
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-
-	"github.com/ledgerwatch/erigon-lib/common/disk"
-	"github.com/ledgerwatch/erigon-lib/common/mem"
-	"github.com/ledgerwatch/erigon-lib/config3"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal"
-	"github.com/ledgerwatch/erigon/cl/clparams"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/common/disk"
+	"github.com/ledgerwatch/erigon-lib/common/mem"
+	"github.com/ledgerwatch/erigon-lib/config3"
+	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon-lib/seg"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -82,9 +80,17 @@ var snapshotCommand = cli.Command{
 	},
 	Subcommands: []*cli.Command{
 		{
-			Name:   "index",
-			Action: doIndicesCommand,
-			Usage:  "Create all missed indices for snapshots. It also removing unsupported versions of existing indices and re-build them",
+			Name: "index",
+			Action: func(c *cli.Context) error {
+				dirs, l, err := datadir.New(c.String(utils.DataDirFlag.Name)).MustFlock()
+				if err != nil {
+					return err
+				}
+				defer l.Unlock()
+
+				return doIndicesCommand(c, dirs)
+			},
+			Usage: "Create all missed indices for snapshots. It also removing unsupported versions of existing indices and re-build them",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&SnapshotFromFlag,
@@ -92,9 +98,17 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
-			Name:   "retire",
-			Action: doRetireCommand,
-			Usage:  "erigon snapshots uncompress a.seg | erigon snapshots compress b.seg",
+			Name: "retire",
+			Action: func(c *cli.Context) error {
+				dirs, l, err := datadir.New(c.String(utils.DataDirFlag.Name)).MustFlock()
+				if err != nil {
+					return err
+				}
+				defer l.Unlock()
+
+				return doRetireCommand(c, dirs)
+			},
+			Usage: "erigon snapshots uncompress a.seg | erigon snapshots compress b.seg",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&SnapshotFromFlag,
@@ -291,20 +305,16 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
-			Name:   "integrity",
-			Action: doIntegrity,
+			Name:        "integrity",
+			Action:      doIntegrity,
+			Description: "run slow validation of files. use --check to run single",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
-				&cli.StringFlag{Name: "action", Usage: fmt.Sprintf("one of: %s", integrity.AllActions)},
+				&cli.StringFlag{Name: "check", Usage: fmt.Sprintf("one of: %s", integrity.AllChecks)},
+				&cli.BoolFlag{Name: "failFast", Value: true, Usage: "to stop after 1st problem or print WARN log and continue check"},
+				&cli.Uint64Flag{Name: "fromStep", Value: 0, Usage: "skip files before given step"},
 			}),
 		},
-		//{
-		//	Name:   "bodies_decrement_datafix",
-		//	Action: doBodiesDecrement,
-		//	Flags: joinFlags([]cli.Flag{
-		//		&utils.DataDirFlag,
-		//	}),
-		//},
 	},
 }
 
@@ -421,7 +431,9 @@ func doIntegrity(cliCtx *cli.Context) error {
 	}
 
 	ctx := cliCtx.Context
-	requestedAction := integrity.Action(cliCtx.String("action"))
+	requestedCheck := integrity.Check(cliCtx.String("check"))
+	failFast := cliCtx.Bool("failFast")
+	fromStep := cliCtx.Uint64("fromStep")
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
@@ -438,27 +450,22 @@ func doIntegrity(cliCtx *cli.Context) error {
 	defer agg.Close()
 
 	blockReader, _ := blockRetire.IO()
-	for _, a := range integrity.AllActions {
-		if requestedAction != "" && requestedAction != a {
+	for _, chk := range integrity.AllChecks {
+		if requestedCheck != "" && requestedCheck != chk {
 			continue
 		}
-		switch a {
-		case integrity.BlocksRead:
-			if err := integrity.SnapBlocksRead(chainDB, blockReader, ctx, false); err != nil {
-				return err
-			}
-		case integrity.EfFiles:
-			if err := integrity.E3EfFiles(ctx, chainDB, agg); err != nil {
-				return err
-			}
+		switch chk {
+		case integrity.BlocksTxnID:
+			return blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(failFast)
+		case integrity.Blocks:
+			return integrity.SnapBlocksRead(chainDB, blockReader, ctx, failFast)
+		case integrity.InvertedIndex:
+			return integrity.E3EfFiles(ctx, chainDB, agg, failFast, fromStep)
 		case integrity.HistoryNoSystemTxs:
-			if err := integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg); err != nil {
-				return err
-			}
+			return integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg)
+		default:
+			return fmt.Errorf("unknown check: %s", chk)
 		}
-		//if err := blockReader.IntegrityTxnID(false); err != nil {
-		//	return err
-		//}
 	}
 
 	return nil
@@ -578,7 +585,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 	return nil
 }
 
-func doIndicesCommand(cliCtx *cli.Context) error {
+func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
@@ -586,7 +593,6 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	defer logger.Info("Done")
 	ctx := cliCtx.Context
 
-	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	rebuild := cliCtx.Bool(SnapshotRebuildFlag.Name)
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
@@ -777,7 +783,7 @@ func doCompress(cliCtx *cli.Context) error {
 
 	return nil
 }
-func doRetireCommand(cliCtx *cli.Context) error {
+func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
@@ -785,7 +791,6 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	defer logger.Info("Done")
 	ctx := cliCtx.Context
 
-	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	from := cliCtx.Uint64(SnapshotFromFlag.Name)
 	to := cliCtx.Uint64(SnapshotToFlag.Name)
 	every := cliCtx.Uint64(SnapshotEveryFlag.Name)
@@ -994,6 +999,7 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 		log.Error("Erigon startup", "err", err)
 		return err
 	}
+	defer ethNode.Close()
 
 	diagnostics.Setup(cliCtx, ethNode, metricsMux, pprofMux)
 
@@ -1003,104 +1009,6 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 	}
 	return err
 }
-
-/*
-
-func doBodiesDecrement(cliCtx *cli.Context) error {
-	logger, _, err := debug.Setup(cliCtx, true)
-	if err != nil {
-		return err
-	}
-	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	ctx := cliCtx.Context
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-
-	list, err := snaptype.Segments(dirs.Snap, 1)
-	if err != nil {
-		return err
-	}
-	var l []snaptype.FileInfo
-	for _, f := range list {
-		if f.T != snaptype.Bodies {
-			continue
-		}
-		if f.From < 18_000_000 {
-			continue
-		}
-		l = append(l, f)
-	}
-	migrateSingleBody := func(srcF, dstF string) error {
-		src, err := seg.NewDecompressor(srcF)
-		if err != nil {
-			return err
-		}
-		defer src.Close()
-		dst, err := seg.NewCompressor(ctx, "compress", dstF, dirs.Tmp, seg.MinPatternScore, estimate.CompressSnapshot.Workers(), log.LvlInfo, logger)
-		if err != nil {
-			return err
-		}
-		defer dst.Close()
-
-		i := 0
-		srcG := src.MakeGetter()
-		var buf []byte
-		log.Info("start", "file", src.FileName())
-		dstBuf := bytes.NewBuffer(nil)
-		for srcG.HasNext() {
-			i++
-			if buf == nil {
-				panic(fmt.Sprintf("nil val at file: %s\n", srcG.FileName()))
-			}
-			buf, _ = srcG.Next(buf[:0])
-			if buf == nil {
-				panic(fmt.Sprintf("nil val at file: %s\n", srcG.FileName()))
-			}
-			body := &types.BodyForStorage{}
-			if err := rlp.Decode(bytes.NewReader(buf), body); err != nil {
-				return err
-			}
-			body.BaseTxId -= 1
-			dstBuf.Reset()
-			if err := rlp.Encode(dstBuf, body); err != nil {
-				return err
-			}
-
-			if err := dst.AddWord(dstBuf.Bytes()); err != nil {
-				return err
-			}
-
-			select {
-			case <-logEvery.C:
-				logger.Info("[bodies] progress", "f", src.FileName(), "progress", fmt.Sprintf("%dK/%dK", i/1_000, src.Count()/1_000))
-			default:
-			}
-		}
-		if err := dst.Compress(); err != nil {
-			return err
-		}
-		src.Close()
-		dst.Close()
-		os.Rename(srcF, srcF+".back")
-		os.Rename(dstF, srcF)
-		os.Remove(srcF + ".torrent")
-		os.Remove(srcF + ".idx")
-		ext := filepath.Ext(srcF)
-		withoutExt := srcF[:len(srcF)-len(ext)]
-		_ = os.Remove(withoutExt + ".idx")
-		log.Info("done", "file", src.FileName())
-		return nil
-	}
-	for _, f := range l {
-		srcF, dstF := f.Path, f.Path+"2"
-		if err := migrateSingleBody(srcF, dstF); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-*/
 
 func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 	const ThreadsLimit = 9_000

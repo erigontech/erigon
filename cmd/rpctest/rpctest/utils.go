@@ -35,22 +35,22 @@ func compareBlocks(b, bg *EthBlockByNumber) bool {
 		fmt.Printf("Num of txs different: %d %d\n", len(r.Transactions), len(rg.Transactions))
 		return false
 	}
-	for i, tx := range r.Transactions {
+	for i, txn := range r.Transactions {
 		txg := rg.Transactions[i]
-		if tx.From != txg.From {
-			fmt.Printf("Tx %d different From: %x %x\n", i, tx.From, txg.From)
+		if txn.From != txg.From {
+			fmt.Printf("Tx %d different From: %x %x\n", i, txn.From, txg.From)
 			return false
 		}
-		if (tx.To == nil && txg.To != nil) || (tx.To != nil && txg.To == nil) {
-			fmt.Printf("Tx %d different To nilness: %t %t\n", i, tx.To == nil, txg.To == nil)
+		if (txn.To == nil && txg.To != nil) || (txn.To != nil && txg.To == nil) {
+			fmt.Printf("Tx %d different To nilness: %t %t\n", i, txn.To == nil, txg.To == nil)
 			return false
 		}
-		if tx.To != nil && txg.To != nil && *tx.To != *txg.To {
-			fmt.Printf("Tx %d different To: %x %x\n", i, *tx.To, *txg.To)
+		if txn.To != nil && txg.To != nil && *txn.To != *txg.To {
+			fmt.Printf("Tx %d different To: %x %x\n", i, *txn.To, *txg.To)
 			return false
 		}
-		if tx.Hash != txg.Hash {
-			fmt.Printf("Tx %x different Hash: %s %s\n", i, tx.Hash, txg.Hash)
+		if txn.Hash != txg.Hash {
+			fmt.Printf("Tx %x different Hash: %s %s\n", i, txn.Hash, txg.Hash)
 			return false
 		}
 	}
@@ -430,7 +430,7 @@ func compareReceipts(receipt, receiptg *EthReceipt) bool {
 	r := receipt.Result
 	rg := receiptg.Result
 	if r.TxHash != rg.TxHash {
-		fmt.Printf("Different tx hashes: %x %x\n", r.TxHash, rg.TxHash)
+		fmt.Printf("Different txn hashes: %x %x\n", r.TxHash, rg.TxHash)
 		return false
 	}
 	if r.Status != rg.Status {
@@ -795,58 +795,58 @@ func compareBlockTransactions(b, bg *OtsBlockTransactions) bool {
 			return false
 		}
 	}
-	for i, tx := range r.FullBlock.Transactions {
+	for i, txn := range r.FullBlock.Transactions {
 		txg := rg.FullBlock.Transactions[i]
-		if tx.From != txg.From {
-			fmt.Printf("Tx %d different From: %x %x\n", i, tx.From, txg.From)
+		if txn.From != txg.From {
+			fmt.Printf("Tx %d different From: %x %x\n", i, txn.From, txg.From)
 			return false
 		}
-		if (tx.To == nil && txg.To != nil) || (tx.To != nil && txg.To == nil) {
-			fmt.Printf("Tx %d different To nilness: %t %t\n", i, tx.To == nil, txg.To == nil)
+		if (txn.To == nil && txg.To != nil) || (txn.To != nil && txg.To == nil) {
+			fmt.Printf("Tx %d different To nilness: %t %t\n", i, txn.To == nil, txg.To == nil)
 			return false
 		}
-		if tx.To != nil && txg.To != nil && *tx.To != *txg.To {
-			fmt.Printf("Tx %d different To: %x %x\n", i, *tx.To, *txg.To)
+		if txn.To != nil && txg.To != nil && *txn.To != *txg.To {
+			fmt.Printf("Tx %d different To: %x %x\n", i, *txn.To, *txg.To)
 			return false
 		}
-		if tx.Hash != txg.Hash {
-			fmt.Printf("Tx %d different Hash: %s %s\n", i, tx.Hash, txg.Hash)
+		if txn.Hash != txg.Hash {
+			fmt.Printf("Tx %d different Hash: %s %s\n", i, txn.Hash, txg.Hash)
 			return false
 		}
-		if tx.BlockHash.String() != txg.BlockHash.String() {
-			fmt.Printf("Tx %d different BlockHash: %s %s\n", i, tx.BlockHash.String(), txg.BlockHash.String())
+		if txn.BlockHash.String() != txg.BlockHash.String() {
+			fmt.Printf("Tx %d different BlockHash: %s %s\n", i, txn.BlockHash.String(), txg.BlockHash.String())
 			return false
 		}
-		if tx.BlockNumber.String() != txg.BlockNumber.String() {
-			fmt.Printf("Tx %d different TransactionHash: %s %s\n", i, tx.BlockNumber.String(), txg.BlockNumber.String())
+		if txn.BlockNumber.String() != txg.BlockNumber.String() {
+			fmt.Printf("Tx %d different TransactionHash: %s %s\n", i, txn.BlockNumber.String(), txg.BlockNumber.String())
 			return false
 		}
-		if tx.Gas.ToInt().Cmp(txg.Gas.ToInt()) != 0 {
-			fmt.Printf("Tx %d different Gas: %d %d\n", i, tx.Gas.ToInt(), txg.Gas.ToInt())
+		if txn.Gas.ToInt().Cmp(txg.Gas.ToInt()) != 0 {
+			fmt.Printf("Tx %d different Gas: %d %d\n", i, txn.Gas.ToInt(), txg.Gas.ToInt())
 			return false
 		}
-		if tx.GasPrice.ToInt().Cmp(txg.GasPrice.ToInt()) != 0 {
-			fmt.Printf("Tx %d different GasPrice: %d %d\n", i, tx.GasPrice.ToInt(), txg.GasPrice.ToInt())
+		if txn.GasPrice.ToInt().Cmp(txg.GasPrice.ToInt()) != 0 {
+			fmt.Printf("Tx %d different GasPrice: %d %d\n", i, txn.GasPrice.ToInt(), txg.GasPrice.ToInt())
 			return false
 		}
-		if tx.Input.String() != txg.Input.String() {
-			fmt.Printf("Tx %d different Input: %s %s\n", i, tx.Input.String(), txg.Input.String())
+		if txn.Input.String() != txg.Input.String() {
+			fmt.Printf("Tx %d different Input: %s %s\n", i, txn.Input.String(), txg.Input.String())
 			return false
 		}
-		if tx.TransactionIndex.String() != txg.TransactionIndex.String() {
-			fmt.Printf("Tx %d different TransactionIndex: %s %s\n", i, tx.TransactionIndex.String(), txg.TransactionIndex.String())
+		if txn.TransactionIndex.String() != txg.TransactionIndex.String() {
+			fmt.Printf("Tx %d different TransactionIndex: %s %s\n", i, txn.TransactionIndex.String(), txg.TransactionIndex.String())
 			return false
 		}
-		if tx.Value.ToInt().Cmp(txg.Value.ToInt()) != 0 {
-			fmt.Printf("Tx %d different Value: %d %d\n", i, tx.Value.ToInt(), txg.Value.ToInt())
+		if txn.Value.ToInt().Cmp(txg.Value.ToInt()) != 0 {
+			fmt.Printf("Tx %d different Value: %d %d\n", i, txn.Value.ToInt(), txg.Value.ToInt())
 			return false
 		}
-		if tx.Type.ToInt().Cmp(txg.Type.ToInt()) != 0 {
-			fmt.Printf("Tx %d different Type: %d %d\n", i, tx.Type.ToInt(), txg.Type.ToInt())
+		if txn.Type.ToInt().Cmp(txg.Type.ToInt()) != 0 {
+			fmt.Printf("Tx %d different Type: %d %d\n", i, txn.Type.ToInt(), txg.Type.ToInt())
 			return false
 		}
-		if tx.ChainId.ToInt().Cmp(txg.ChainId.ToInt()) != 0 {
-			fmt.Printf("Tx %d different ChainId: %d %d\n", i, tx.ChainId.ToInt(), txg.ChainId.ToInt())
+		if txn.ChainId.ToInt().Cmp(txg.ChainId.ToInt()) != 0 {
+			fmt.Printf("Tx %d different ChainId: %d %d\n", i, txn.ChainId.ToInt(), txg.ChainId.ToInt())
 			return false
 		}
 	}

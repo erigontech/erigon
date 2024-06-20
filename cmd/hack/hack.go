@@ -147,8 +147,8 @@ func printTxHashes(chaindata string, block uint64) error {
 			if block == nil {
 				break
 			}
-			for i, tx := range block.Transactions() {
-				fmt.Printf("%d: %x\n", i, tx.Hash())
+			for i, txn := range block.Transactions() {
+				fmt.Printf("%d: %x\n", i, txn.Hash())
 			}
 		}
 		return nil
@@ -904,7 +904,7 @@ func trimTxs(chaindata string) error {
 		// Remove from the map
 		toDelete.RemoveRange(body.BaseTxId, body.BaseTxId+uint64(body.TxCount))
 	}
-	fmt.Printf("Number of tx records to delete: %d\n", toDelete.GetCardinality())
+	fmt.Printf("Number of txn records to delete: %d\n", toDelete.GetCardinality())
 	// Takes 20min to iterate 1.4b
 	toDelete2 := roaring64.New()
 	var iterated int
@@ -918,9 +918,9 @@ func trimTxs(chaindata string) error {
 			fmt.Printf("Iterated %d\n", iterated)
 		}
 	}
-	fmt.Printf("Number of tx records: %d\n", toDelete2.GetCardinality())
+	fmt.Printf("Number of txn records: %d\n", toDelete2.GetCardinality())
 	toDelete.And(toDelete2)
-	fmt.Printf("Number of tx records to delete: %d\n", toDelete.GetCardinality())
+	fmt.Printf("Number of txn records to delete: %d\n", toDelete.GetCardinality())
 	fmt.Printf("Roaring size: %d\n", toDelete.GetSizeInBytes())
 
 	iter := toDelete.Iterator()

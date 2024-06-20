@@ -51,10 +51,10 @@ func BenchTraceReplayTransaction(erigonUrl, gethUrl string, needCompare bool, bl
 		if b.Error != nil {
 			return fmt.Errorf("retrieving block (Erigon): %d %s", b.Error.Code, b.Error.Message)
 		}
-		for _, tx := range b.Result.Transactions {
+		for _, txn := range b.Result.Transactions {
 			reqGen.reqID++
-			request := reqGen.traceReplayTransaction(tx.Hash)
-			errCtx := fmt.Sprintf("block %d, tx %s", bn, tx.Hash)
+			request := reqGen.traceReplayTransaction(txn.Hash)
+			errCtx := fmt.Sprintf("block %d, txn %s", bn, txn.Hash)
 			if err := requestAndCompare(request, "trace_replayTransaction", errCtx, reqGen, needCompare, rec, errs, nil,
 				/* insertOnlyIfSuccess */ false); err != nil {
 				fmt.Println(err)

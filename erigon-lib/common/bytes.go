@@ -74,3 +74,9 @@ func EnsureEnoughSize(in []byte, size int) []byte {
 func BitLenToByteLen(bitLen int) (byteLen int) {
 	return (bitLen + 7) / 8
 }
+func Shorten(k []byte, l int) []byte {
+	if len(k) > l {
+		return k[:l]
+	}
+	return k
+}
