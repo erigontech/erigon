@@ -106,6 +106,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 				return fmt.Errorf("failed to add block to optimistic store: %v", err)
 			}
 		case execution_client.PayloadStatusInvalidated:
+			log.Warn("OnBlock: block is invalid", "block", libcommon.Hash(blockRoot), "err", err)
 			log.Debug("OnBlock: block is invalid", "block", libcommon.Hash(blockRoot))
 			f.forkGraph.MarkHeaderAsInvalid(blockRoot)
 			// remove from optimistic candidate

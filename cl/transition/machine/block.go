@@ -14,11 +14,10 @@ import (
 )
 
 // ProcessBlock processes a block with the block processor
-func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, signedBlock *cltypes.SignedBeaconBlock) error {
-	block := signedBlock.Block
+func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block *cltypes.BeaconBlock) error {
 	version := s.Version()
 	// Check the state version is correct.
-	if signedBlock.Version() != version {
+	if block.Version() != version {
 		return fmt.Errorf("processBlock: wrong state version for block at slot %d", block.Slot)
 	}
 	h := metrics.NewHistTimer("beacon_process_block")
@@ -72,16 +71,15 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, signedBlock *clty
 	return nil
 }
 
-func ProcessBlindedBlock(impl BlockProcessor, s abstract.BeaconState, signedBlock *cltypes.SignedBlindedBeaconBlock) error {
+func ProcessBlindedBlock(impl BlockProcessor, s abstract.BeaconState, block *cltypes.BlindedBeaconBlock) error {
 	var (
-		block   = signedBlock.Block
 		version = s.Version()
 		// Process the execution payload. Note that the execution payload does not contain txs and withdrawals.
 		partialExecutionBody = block.Body.Full(nil, nil)
 	)
 
 	// Check the state version is correct.
-	if signedBlock.Version() != version {
+	if block.Version() != version {
 		return fmt.Errorf("processBlindedBlock: wrong state version for block at slot %d", block.Slot)
 	}
 	h := metrics.NewHistTimer("beacon_process_blinded_block")

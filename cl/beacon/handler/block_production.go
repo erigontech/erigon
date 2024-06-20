@@ -99,7 +99,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 ) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 	// parse request data
-
 	randaoRevealString := r.URL.Query().Get("randao_reveal")
 	var randaoReveal common.Bytes96
 	if err := randaoReveal.UnmarshalText([]byte(randaoRevealString)); err != nil {
@@ -154,11 +153,13 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 
 	baseBlockRoot, err := s.BlockRoot()
 	if err != nil {
+		log.Warn("Failed to get block root", "err", err)
 		return nil, err
 	}
 
 	sourceBlock, err := a.blockReader.ReadBlockByRoot(ctx, tx, baseBlockRoot)
 	if err != nil {
+		log.Warn("Failed to get source block", "err", err, "root", baseBlockRoot)
 		return nil, err
 	}
 	if sourceBlock == nil {
@@ -185,40 +186,26 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	}
 	block, err := a.produceBlock(ctx, builderBoostFactor, sourceBlock.Block, baseState, targetSlot, randaoReveal, graffiti)
 	if err != nil {
+		log.Warn("Failed to produce block", "err", err, "slot", targetSlot)
 		return nil, err
 	}
 
+	// do state transition
 	if block.IsBlinded() {
-		signedBlock := &cltypes.SignedBlindedBeaconBlock{
-			Block: &cltypes.BlindedBeaconBlock{
-				Slot:          block.Slot,
-				ProposerIndex: block.ProposerIndex,
-				ParentRoot:    block.ParentRoot,
-				Body:          block.BlindedBeaconBody,
-			},
-		}
-		if err := machine.ProcessBlindedBlock(transition.DefaultMachine, baseState, signedBlock); err != nil {
+		if err := machine.ProcessBlindedBlock(transition.DefaultMachine, baseState, block.ToBlinded()); err != nil {
+			log.Warn("Failed to process blinded block", "err", err, "slot", targetSlot)
 			return nil, err
 		}
 	} else {
-		signedBeaconBlock := &cltypes.SignedBeaconBlock{
-			Block: &cltypes.BeaconBlock{
-				Slot:          block.Slot,
-				ProposerIndex: block.ProposerIndex,
-				ParentRoot:    block.ParentRoot,
-				Body:          block.BeaconBody,
-			},
-		}
-		if err := machine.ProcessBlock(transition.DefaultMachine, baseState, signedBeaconBlock); err != nil {
+		if err := machine.ProcessBlock(transition.DefaultMachine, baseState, block.ToExecution()); err != nil {
+			log.Warn("Failed to process execution block", "err", err, "slot", targetSlot)
 			return nil, err
 		}
 	}
 	block.StateRoot, err = baseState.HashSSZ()
 	if err != nil {
+		log.Warn("Failed to get state root", "err", err)
 		return nil, err
-	}
-	if block.IsBlinded() {
-		log.Info("BlockProduction: produced a blinded block")
 	}
 
 	log.Info("BlockProduction: Block produced",
@@ -281,16 +268,19 @@ func (a *ApiHandler) produceBlock(
 	)
 	go func() {
 		defer wg.Done()
-		builderHeader, builderErr = a.getBuilderPayload(ctx, baseBlock, baseState, targetSlot)
-		if builderErr != nil && builderErr != errBuilderNotEnabled {
-			log.Error("Failed to get builder payload", "err", builderErr)
+		if a.routerCfg.Builder && a.builderClient != nil {
+			builderHeader, builderErr = a.getBuilderPayload(ctx, baseBlock, baseState, targetSlot)
+			if builderErr != nil && builderErr != errBuilderNotEnabled {
+				log.Warn("Failed to get builder payload", "err", builderErr)
+			}
 		}
 	}()
+	// wait for both tasks to finish
 	wg.Wait()
 
 	if localErr != nil {
 		// if we failed to locally produce the beacon body, we should not proceed with the block production
-		log.Error("Failed to produce beacon body", "err", localErr)
+		log.Error("Failed to produce beacon body", "err", localErr, "slot", targetSlot)
 		return nil, localErr
 	}
 	// prepare basic block
@@ -323,7 +313,8 @@ func (a *ApiHandler) produceBlock(
 	builderValue := builderHeader.BlockValue()
 	boostFactorBig := new(big.Int).SetUint64(boostFactor)
 	useLocalExec := new(big.Int).Mul(execValue, big.NewInt(100)).Cmp(new(big.Int).Mul(builderValue, boostFactorBig)) >= 0
-	log.Info("[mev] check bid", "useLocalExec", useLocalExec, "execValue", execValue, "builderValue", builderValue, "boostFactor", boostFactor, "targetSlot", targetSlot)
+	log.Info("Check mev bid", "useLocalExec", useLocalExec, "execValue", execValue, "builderValue", builderValue, "boostFactor", boostFactor, "targetSlot", targetSlot)
+
 	if useLocalExec {
 		block.BeaconBody = beaconBody
 		block.ExecutionValue = execValue
@@ -338,10 +329,10 @@ func (a *ApiHandler) produceBlock(
 		for i := 0; i < builderHeader.Data.Message.BlobKzgCommitments.Len(); i++ {
 			c := builderHeader.Data.Message.BlobKzgCommitments.Get(i)
 			cpy := cltypes.KZGCommitment{}
-			copy(cpy[:], (*c)[:])
+			copy(cpy[:], c[:])
 			cpyCommitments.Append(&cpy)
 		}
-
+		// setup blinded block
 		block.BlindedBeaconBody = blindedBody.
 			SetHeader(builderHeader.Data.Message.Header).
 			SetBlobKzgCommitments(cpyCommitments)
@@ -375,7 +366,7 @@ func (a *ApiHandler) getBuilderPayload(
 	if err != nil {
 		return nil, err
 	} else if header == nil {
-		return nil, fmt.Errorf("nil header")
+		return nil, fmt.Errorf("no error but nil header")
 	}
 
 	// check the version
@@ -778,7 +769,7 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 	// todo: broadcast_validation
 
 	signedBlindedBlock := cltypes.NewSignedBlindedBeaconBlock(a.beaconChainCfg)
-	signedBlindedBlock.Block.Body.Version = version
+	signedBlindedBlock.Block.SetVersion(version)
 	b, err := io.ReadAll(r.Body)
 	defer r.Body.Close()
 	if err != nil {
@@ -814,10 +805,6 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("commitments length mismatch"))
 		}
 		for i := range blobsBundle.Commitments {
-			//blockCommitment := blockCommitments.Get(i)
-			/*if !bytes.Equal(commitment, blockCommitment[:]) {
-				return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("commitment mismatch: %d", i))
-			}*/
 			// add the bundle to recently produced blobs
 			a.blobBundles.Add(libcommon.Bytes48(blobsBundle.Commitments[i]), BlobBundle{
 				Blob:       (*cltypes.Blob)(blobsBundle.Blobs[i]),

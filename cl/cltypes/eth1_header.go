@@ -49,9 +49,7 @@ func NewEth1Header(version clparams.StateVersion) *Eth1Header {
 }
 
 func (e *Eth1Header) SetVersion(v clparams.StateVersion) {
-	if e != nil {
-		e.version = v
-	}
+	e.version = v
 }
 
 func (e *Eth1Header) Copy() *Eth1Header {
