@@ -48,7 +48,7 @@ func NewBlockCollector(logger log.Logger, engine execution_client.ExecutionEngin
 		beaconChainCfg: beaconChainCfg,
 		logger:         logger,
 		engine:         engine,
-		syncBackLoop:   syncBackLoopAmount,
+		syncBackLoop:   100_000,
 	}
 }
 
