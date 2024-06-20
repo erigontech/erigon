@@ -115,7 +115,7 @@ func txHashInBlock(client *rpc.Client, hashmap map[libcommon.Hash]bool, blockNum
 	}
 
 	for _, txnHash := range currBlock.Transactions {
-		// check if tx is in the hash set and remove it from the set if it is present
+		// check if txn is in the hash set and remove it from the set if it is present
 		if _, ok := hashmap[txnHash]; ok {
 			numFound++
 			logger.Info("SUCCESS => Tx included into block", "txHash", txnHash, "blockNum", blockNumber)

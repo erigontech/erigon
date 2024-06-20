@@ -13,7 +13,7 @@ func init() {
 
 var verifyTxLookupCmd = &cobra.Command{
 	Use:   "verifyTxLookup",
-	Short: "Generate tx lookup index",
+	Short: "Generate txn lookup index",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "verify_txlookup")
 		return verify.ValidateTxLookups(chaindata, logger)
