@@ -1,6 +1,6 @@
 module github.com/ledgerwatch/erigon
 
-go 1.21.5
+go 1.21
 
 require (
 	github.com/erigontech/mdbx-go v0.27.24
@@ -63,7 +63,7 @@ require (
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/klauspost/compress v1.17.3
 	github.com/ledgerwatch/erigon-lib v1.0.0
-	github.com/ledgerwatch/erigonwatch v0.1.1
+	github.com/ledgerwatch/erigonwatch v0.1.2
 	github.com/libp2p/go-libp2p v0.31.0
 	github.com/libp2p/go-libp2p-mplex v0.9.0
 	github.com/libp2p/go-libp2p-pubsub v0.9.3
