@@ -1,21 +1,21 @@
 - [Introduction](#introduction)
 - [Getting Started](#getting-started)
-    - [Running locally](#running-locally)
-    - [Running remotely](#running-remotely)
-    - [Healthcheck](#healthcheck)
-    - [Testing](#testing)
+  - [Running locally](#running-locally)
+  - [Running remotely](#running-remotely)
+  - [Healthcheck](#healthcheck)
+  - [Testing](#testing)
 - [FAQ](#faq)
-    - [Relations between prune options and rpc methods](#relations-between-prune-options-and-rpc-method)
-    - [RPC Implementation Status](#rpc-implementation-status)
-    - [Securing the communication between RPC daemon and Erigon instance via TLS and authentication](#securing-the-communication-between-rpc-daemon-and-erigon-instance-via-tls-and-authentication)
-    - [Ethstats](#ethstats)
-    - [Allowing only specific methods (Allowlist)](#allowing-only-specific-methods--allowlist-)
-    - [Trace transactions progress](#trace-transactions-progress)
-    - [Clients getting timeout, but server load is low](#clients-getting-timeout--but-server-load-is-low)
-    - [Server load too high](#server-load-too-high)
-    - [Faster Batch requests](#faster-batch-requests)
+  - [Relations between prune options and rpc methods](#relations-between-prune-options-and-rpc-method)
+  - [RPC Implementation Status](#rpc-implementation-status)
+  - [Securing the communication between RPC daemon and Erigon instance via TLS and authentication](#securing-the-communication-between-rpc-daemon-and-erigon-instance-via-tls-and-authentication)
+  - [Ethstats](#ethstats)
+  - [Allowing only specific methods (Allowlist)](#allowing-only-specific-methods--allowlist-)
+  - [Trace transactions progress](#trace-transactions-progress)
+  - [Clients getting timeout, but server load is low](#clients-getting-timeout--but-server-load-is-low)
+  - [Server load too high](#server-load-too-high)
+  - [Faster Batch requests](#faster-batch-requests)
 - [For Developers](#for-developers)
-    - [Code generation](#code-generation)
+  - [Code generation](#code-generation)
 
 ## Introduction
 
@@ -190,7 +190,7 @@ Next options available (by `--prune` flag):
 ```
 * h - prune history (ChangeSets, HistoryIndices - used to access historical state, like eth_getStorageAt, eth_getBalanceAt, debug_traceTransaction, trace_block, trace_transaction, etc.)
 * r - prune receipts (Receipts, Logs, LogTopicIndex, LogAddressIndex - used by eth_getLogs and similar RPC methods)
-* t - prune tx lookup (used to get transaction by hash)
+* t - prune txn lookup (used to get transaction by hash)
 * c - prune call traces (used by trace_filter method)
 ```
 
@@ -238,7 +238,7 @@ Label "remote" means: `--private.api.addr` flag is required.
 The following table shows the current implementation status of Erigon's RPC daemon.
 
 | Command                                    | Avail   | Notes                                |
-|--------------------------------------------|---------|--------------------------------------|
+| ------------------------------------------ | ------- | ------------------------------------ |
 | admin_nodeInfo                             | Yes     |                                      |
 | admin_peers                                | Yes     |                                      |
 | admin_addPeer                              | Yes     |                                      |
@@ -301,7 +301,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_signTransaction                        | -       | not yet implemented                  |
 | eth_signTypedData                          | -       | ????                                 |
 |                                            |         |                                      |
-| eth_getProof                               | Yes     | Limited to last 100000 blocks          |
+| eth_getProof                               | Yes     | Limited to last 100000 blocks        |
 |                                            |         |                                      |
 | eth_mining                                 | Yes     | returns true if --mine flag provided |
 | eth_coinbase                               | Yes     |                                      |
@@ -386,7 +386,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 ### GraphQL
 
 | Command         | Avail | Notes |
-|-----------------|-------|-------|
+| --------------- | ----- | ----- |
 | GetBlockDetails | Yes   |       |
 | GetChainID      | Yes   |       |
 
@@ -544,10 +544,7 @@ with `rpc.accessList` flag.
 
 ```json
 {
-  "allow": [
-    "net_version",
-    "web3_eth_getBlockByHash"
-  ]
+  "allow": ["net_version", "web3_eth_getBlockByHash"]
 }
 ```
 

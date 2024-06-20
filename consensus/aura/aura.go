@@ -1102,7 +1102,7 @@ func (c *AuRa) IsServiceTransaction(sender libcommon.Address, syscall consensus.
 	}
 	res, err := certifierAbi().Unpack("certified", out)
 	if err != nil {
-		log.Warn("error while detecting service tx on AuRa", "err", err)
+		log.Warn("error while detecting service txn on AuRa", "err", err)
 		return false
 	}
 	if len(res) == 0 {

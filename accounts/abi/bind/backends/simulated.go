@@ -732,38 +732,38 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 
 // SendTransaction updates the pending block to include the given transaction.
 // It panics if the transaction is invalid.
-func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transaction) error {
+func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transaction) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	// Check transaction validity.
 	signer := types.MakeSigner(b.m.ChainConfig, b.pendingBlock.NumberU64(), b.pendingBlock.Time())
-	sender, senderErr := tx.Sender(*signer)
+	sender, senderErr := txn.Sender(*signer)
 	if senderErr != nil {
 		return fmt.Errorf("invalid transaction: %w", senderErr)
 	}
 	nonce := b.pendingState.GetNonce(sender)
-	if tx.GetNonce() != nonce {
-		return fmt.Errorf("invalid transaction nonce: got %d, want %d", tx.GetNonce(), nonce)
+	if txn.GetNonce() != nonce {
+		return fmt.Errorf("invalid transaction nonce: got %d, want %d", txn.GetNonce(), nonce)
 	}
 
-	b.pendingState.SetTxContext(tx.Hash(), libcommon.Hash{}, len(b.pendingBlock.Transactions()))
+	b.pendingState.SetTxContext(txn.Hash(), libcommon.Hash{}, len(b.pendingBlock.Transactions()))
 	//fmt.Printf("==== Start producing block %d, header: %d\n", b.pendingBlock.NumberU64(), b.pendingHeader.Number.Uint64())
 	if _, _, err := core.ApplyTransaction(
 		b.m.ChainConfig, core.GetHashFn(b.pendingHeader, b.getHeader), b.m.Engine,
 		&b.pendingHeader.Coinbase, b.gasPool,
 		b.pendingState, state.NewNoopWriter(),
-		b.pendingHeader, tx,
+		b.pendingHeader, txn,
 		&b.pendingHeader.GasUsed, b.pendingHeader.BlobGasUsed,
 		vm.Config{}); err != nil {
 		return err
 	}
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
 	chain, err := core.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(number int, block *core.BlockGen) {
-		for _, tx := range b.pendingBlock.Transactions() {
-			block.AddTxWithChain(b.getHeader, b.m.Engine, tx)
+		for _, txn := range b.pendingBlock.Transactions() {
+			block.AddTxWithChain(b.getHeader, b.m.Engine, txn)
 		}
-		block.AddTxWithChain(b.getHeader, b.m.Engine, tx)
+		block.AddTxWithChain(b.getHeader, b.m.Engine, txn)
 	})
 	if err != nil {
 		return err
@@ -805,8 +805,8 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 	}
 
 	chain, err := core.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(number int, block *core.BlockGen) {
-		for _, tx := range b.pendingBlock.Transactions() {
-			block.AddTxWithChain(b.getHeader, b.m.Engine, tx)
+		for _, txn := range b.pendingBlock.Transactions() {
+			block.AddTxWithChain(b.getHeader, b.m.Engine, txn)
 		}
 		block.OffsetTime(int64(adjustment.Seconds()))
 	})
