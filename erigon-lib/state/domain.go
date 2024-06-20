@@ -1699,6 +1699,7 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 	if step > maxPrunableStep {
 		step = maxPrunableStep
 	}
+	fmt.Println("pruning2", step)
 
 	st := time.Now()
 	mxPruneInProgress.Inc()
