@@ -292,7 +292,7 @@ func (tx *LegacyTx) EncodeRLP(w io.Writer) error {
 func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
 	_, err := s.List()
 	if err != nil {
-		return fmt.Errorf("legacy tx must be a list: %w", err)
+		return fmt.Errorf("legacy txn must be a list: %w", err)
 	}
 	if tx.Nonce, err = s.Uint(); err != nil {
 		return fmt.Errorf("read Nonce: %w", err)
@@ -335,7 +335,7 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
 	}
 	tx.S.SetBytes(b)
 	if err = s.ListEnd(); err != nil {
-		return fmt.Errorf("close tx struct: %w", err)
+		return fmt.Errorf("close txn struct: %w", err)
 	}
 	return nil
 }

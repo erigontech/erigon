@@ -104,7 +104,7 @@ func DefaultStages(ctx context.Context,
 		},
 		{
 			ID:          stages.Senders,
-			Description: "Recover senders from tx signatures",
+			Description: "Recover senders from txn signatures",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				return SpawnRecoverSendersStage(senders, s, u, txc.Tx, 0, ctx, logger)
 			},
@@ -241,7 +241,7 @@ func DefaultStages(ctx context.Context,
 		},
 		{
 			ID:          stages.TxLookup,
-			Description: "Generate tx lookup index",
+			Description: "Generate txn lookup index",
 			Disabled:    dbg.StagesOnlyBlocks,
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				return SpawnTxLookup(s, txc.Tx, 0 /* toBlock */, txLookup, ctx, logger)
@@ -302,7 +302,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 		},
 		{
 			ID:          stages.Senders,
-			Description: "Recover senders from tx signatures",
+			Description: "Recover senders from txn signatures",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				return SpawnRecoverSendersStage(senders, s, u, txc.Tx, 0, ctx, logger)
 			},
@@ -421,7 +421,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 		},
 		{
 			ID:          stages.TxLookup,
-			Description: "Generate tx lookup index",
+			Description: "Generate txn lookup index",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				return SpawnTxLookup(s, txc.Tx, 0 /* toBlock */, txLookup, ctx, logger)
 			},
@@ -511,7 +511,7 @@ func UploaderPipelineStages(ctx context.Context, snapshots SnapshotsCfg, headers
 		},
 		{
 			ID:          stages.Senders,
-			Description: "Recover senders from tx signatures",
+			Description: "Recover senders from txn signatures",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				return SpawnRecoverSendersStage(senders, s, u, txc.Tx, 0, ctx, logger)
 			},
@@ -630,7 +630,7 @@ func UploaderPipelineStages(ctx context.Context, snapshots SnapshotsCfg, headers
 		},
 		{
 			ID:          stages.TxLookup,
-			Description: "Generate tx lookup index",
+			Description: "Generate txn lookup index",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				return SpawnTxLookup(s, txc.Tx, 0 /* toBlock */, txLookup, ctx, logger)
 			},
@@ -692,7 +692,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 		},
 		{
 			ID:          stages.Senders,
-			Description: "Recover senders from tx signatures",
+			Description: "Recover senders from txn signatures",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				return SpawnRecoverSendersStage(senders, s, u, txc.Tx, 0, ctx, logger)
 			},
@@ -777,7 +777,7 @@ func PolygonSyncStages(
 		},
 		{
 			ID:          stages.Senders,
-			Description: "Recover senders from tx signatures",
+			Description: "Recover senders from txn signatures",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				return SpawnRecoverSendersStage(senders, s, u, txc.Tx, 0, ctx, logger)
 			},
@@ -804,7 +804,7 @@ func PolygonSyncStages(
 		},
 		{
 			ID:          stages.TxLookup,
-			Description: "Generate tx lookup index",
+			Description: "Generate txn lookup index",
 			Disabled:    dbg.StagesOnlyBlocks,
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				return SpawnTxLookup(s, txc.Tx, 0 /* toBlock */, txLookup, ctx, logger)
@@ -854,7 +854,7 @@ var DefaultForwardOrder = UnwindOrder{
 
 // UnwindOrder represents the order in which the stages needs to be unwound.
 // The unwind order is important and not always just stages going backwards.
-// Let's say, there is tx pool can be unwound only after execution.
+// Let's say, there is txn pool can be unwound only after execution.
 // It's ok to remove some stage from here to disable only unwind of stage
 type UnwindOrder []stages.SyncStage
 type PruneOrder []stages.SyncStage

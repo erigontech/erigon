@@ -171,8 +171,8 @@ func (ot *opcodeTracer) CaptureTxEnd(restGas uint64) {}
 func (ot *opcodeTracer) captureStartOrEnter(from, to libcommon.Address, create bool, input []byte) {
 	//fmt.Fprint(ot.summary, ot.lastLine)
 
-	// When a CaptureStart is called, a Tx is starting. Create its entry in our list and initialize it with the partial data available
-	//calculate the "address" of the Tx in its tree
+	// When a CaptureStart is called, a Txn is starting. Create its entry in our list and initialize it with the partial data available
+	//calculate the "address" of the Txn in its tree
 	ltid := len(ot.txsInDepth)
 	if ltid-1 != ot.depth {
 		panic(fmt.Sprintf("Wrong addr slice depth: d=%d, slice len=%d", ot.depth, ltid))
@@ -208,7 +208,7 @@ func (ot *opcodeTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to l
 }
 
 func (ot *opcodeTracer) captureEndOrExit(err error) {
-	// When a CaptureEnd is called, a Tx has finished. Pop our stack
+	// When a CaptureEnd is called, a Txn has finished. Pop our stack
 	ls := len(ot.stack)
 	currentEntry := ot.stack[ls-1]
 	ot.stack = ot.stack[:ls-1]
@@ -216,7 +216,7 @@ func (ot *opcodeTracer) captureEndOrExit(err error) {
 
 	// sanity check: depth of stack == depth reported by system
 	if ls-1 != ot.depth || ot.depth != currentEntry.Depth {
-		panic(fmt.Sprintf("End of Tx at d=%d but stack has d=%d and entry has d=%d", ot.depth, ls, currentEntry.Depth))
+		panic(fmt.Sprintf("End of Txn at d=%d but stack has d=%d and entry has d=%d", ot.depth, ls, currentEntry.Depth))
 	}
 
 	// Close the last bblock
@@ -269,9 +269,9 @@ func (ot *opcodeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, 
 		panic(fmt.Sprintf("Depth should be the same but isn't: current tx's %d, current entry's %d", currentTxDepth, currentEntry.Depth))
 	}
 
-	// is the Tx entry still not fully initialized?
+	// is the txn entry still not fully initialized?
 	if currentEntry.TxHash == nil {
-		// CaptureStart creates the entry for a new Tx, but doesn't have access to EVM data, like the Tx Hash
+		// CaptureStart creates the entry for a new Tx, but doesn't have access to EVM data, like the txn Hash
 		// here we ASSUME that the txn entry was recently created by CaptureStart
 		// AND that this is the first CaptureState that has happened since then
 		// AND that both Captures are for the same transaction

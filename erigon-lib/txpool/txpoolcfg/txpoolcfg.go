@@ -34,7 +34,7 @@ const BorDefaultTxPoolPriceLimit = 30 * common.GWei
 
 type Config struct {
 	DBDir               string
-	TracedSenders       []string // List of senders for which tx pool should print out debugging info
+	TracedSenders       []string // List of senders for which txn pool should print out debugging info
 	PendingSubPoolLimit int
 	BaseFeeSubPoolLimit int
 	QueuedSubPoolLimit  int
@@ -43,7 +43,7 @@ type Config struct {
 	BlobSlots           uint64 // Total number of blobs (not txs) allowed per account
 	TotalBlobPoolLimit  uint64 // Total number of blobs (not txs) allowed within the txpool
 	PriceBump           uint64 // Price bump percentage to replace an already existing transaction
-	BlobPriceBump       uint64 //Price bump percentage to replace an existing 4844 blob tx (type-3)
+	BlobPriceBump       uint64 //Price bump percentage to replace an existing 4844 blob txn (type-3)
 
 	// regular batch tasks processing
 	SyncToNewPeersEvery   time.Duration
@@ -162,7 +162,7 @@ func (r DiscardReason) String() string {
 	case NotReplaced:
 		return "could not replace existing tx"
 	case DuplicateHash:
-		return "existing tx with same hash"
+		return "existing txn with same hash"
 	case InitCodeTooLarge:
 		return "initcode too large"
 	case TypeNotActivated:

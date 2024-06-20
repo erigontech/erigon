@@ -1278,7 +1278,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 					hasWork = true
 
 				case <-s.notifyMiningAboutNewTxs:
-					// Skip mining based on new tx notif for bor consensus
+					// Skip mining based on new txn notif for bor consensus
 					hasWork = s.chainConfig.Bor == nil
 					if hasWork {
 						s.logger.Debug("Start mining based on txpool notif")
