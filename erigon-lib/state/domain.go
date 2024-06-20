@@ -871,7 +871,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 	kvs := []struct {
 		k, v []byte
 	}{}
-	dbgFile, _ := os.Create("collate-" + d.filenameBase + ".txt")
+	dbgFile, _ := os.Create("collate-" + d.filenameBase + "-" + fmt.Sprintf("%d", step) + ".txt")
 	var stepInDB []byte
 	for k, v, err := valsCursor.First(); k != nil; {
 		if err != nil {
@@ -900,9 +900,9 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 			if err = comp.AddWord(common.Copy(v[8:])); err != nil {
 				return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, k, v[8:], err)
 			}
+			dbgFile.WriteString(hex.EncodeToString(k) + "\n")
 			k, v, err = valsCursor.(kv.CursorDupSort).NextNoDup()
 			// Write k as hex to file
-			dbgFile.WriteString(hex.EncodeToString(k) + "\n")
 		}
 	}
 
