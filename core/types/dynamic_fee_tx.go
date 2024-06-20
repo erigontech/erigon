@@ -196,7 +196,7 @@ func (tx *DynamicFeeTransaction) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen int) error {
+func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, _, _, accessListLen int) error {
 	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
@@ -222,18 +222,8 @@ func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSiz
 		return err
 	}
 	// encode To
-	if tx.To == nil {
-		b[0] = 128
-	} else {
-		b[0] = 128 + 20
-	}
-	if _, err := w.Write(b[:1]); err != nil {
+	if err := rlp.EncodeAddress(tx.To, w, b); err != nil {
 		return err
-	}
-	if tx.To != nil {
-		if _, err := w.Write(tx.To.Bytes()); err != nil {
-			return err
-		}
 	}
 	// encode Value
 	if err := tx.Value.EncodeRLP(w); err != nil {
@@ -269,10 +259,10 @@ func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSiz
 func (tx *DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize()
 	// size of struct prefix and TxType
-	envelopeSize := 1 + rlp2.ListPrefixLen(payloadSize) + payloadSize
+	envelopSize := 1 + rlp2.ListPrefixLen(payloadSize) + payloadSize
 	var b [33]byte
 	// envelope
-	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStringSizePrefix(envelopSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode TxType
@@ -429,7 +419,7 @@ func (tx *DynamicFeeTransaction) GetChainID() *uint256.Int {
 	return tx.ChainID
 }
 
-func (tx *DynamicFeeTransaction) cashedSender() (sender libcommon.Address, ok bool) {
+func (tx *DynamicFeeTransaction) cachedSender() (sender libcommon.Address, ok bool) {
 	s := tx.from.Load()
 	if s == nil {
 		return sender, false

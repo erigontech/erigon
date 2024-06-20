@@ -161,11 +161,7 @@ func encodeAccessList(al types2.AccessList, w io.Writer, b []byte) error {
 		if err := EncodeStructSizePrefix(tupleLen, w, b); err != nil {
 			return err
 		}
-		b[0] = 128 + 20
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-		if _, err := w.Write(tuple.Address.Bytes()); err != nil {
+		if err := rlp.EncodeAddress(&tuple.Address, w, b); err != nil {
 			return err
 		}
 		if err := EncodeStructSizePrefix(storageLen, w, b); err != nil {
@@ -507,7 +503,7 @@ func (tx *AccessListTx) GetChainID() *uint256.Int {
 	return tx.ChainID
 }
 
-func (tx *AccessListTx) cashedSender() (sender libcommon.Address, ok bool) {
+func (tx *AccessListTx) cachedSender() (sender libcommon.Address, ok bool) {
 	s := tx.from.Load()
 	if s == nil {
 		return sender, false

@@ -437,7 +437,7 @@ func (rl Receipts) DeriveFieldsV3ForSingleReceipt(i int, blockHash libcommon.Has
 	r := rl[i]
 	logIndex := r.firstLogIndex // logIdx is unique within the block and starts from 0
 
-	sender, ok := txn.cashedSender()
+	sender, ok := txn.cachedSender()
 	if !ok {
 		return nil, fmt.Errorf("tx must have cached sender")
 	}
