@@ -199,6 +199,8 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 		} else {
 			t = &BlobTx{}
 		}
+	case SetCodeTxType:
+		t = &SetCodeTransaction{}
 	default:
 		if data[0] >= 0x80 {
 			// txn is type legacy which is RLP encoded

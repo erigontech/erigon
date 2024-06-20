@@ -85,13 +85,13 @@ func (tx *SetCodeTransaction) payloadSize() (payloadSize, nonceLen, gasLen, acce
 }
 
 func authorizationsSize(authorizations []Authorization) int {
-	size := 0
+	totalSize := 0
 	// ChainID uint64
 	// Address common.Address
 	// Nonce   *uint256.Int
 	// V, R, S uint256.Int // signature values
 	for _, auth := range authorizations {
-		size += rlp2.U64Len(auth.ChainID) // chainId
+		size := rlp2.U64Len(auth.ChainID) // chainId
 		size += 1 + length.Addr           // address
 
 		size++
@@ -107,8 +107,10 @@ func authorizationsSize(authorizations []Authorization) int {
 
 		size++
 		size += rlp.Uint256LenExcludingHead(&auth.S)
+
+		totalSize += size + rlp2.ListPrefixLen(size)
 	}
-	return size
+	return totalSize
 }
 
 func (tx *SetCodeTransaction) WithSignature(signer Signer, sig []byte) (Transaction, error) {
@@ -292,7 +294,7 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 	}
 	var b []byte
 	i := 0
-	for _, err := s.List(); err == nil; _, err = s.List() {
+	for _, err = s.List(); err == nil; _, err = s.List() {
 		auth := Authorization{}
 		if auth.ChainID, err = s.Uint(); err != nil {
 			return err
@@ -337,7 +339,6 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 		}
 		i++
 	}
-
 	if !errors.Is(err, rlp.EOL) {
 		return fmt.Errorf("open authorizations: %d %w", i, err)
 	}
