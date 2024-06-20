@@ -750,6 +750,14 @@ func (iit *InvertedIndexRoTx) Warmup(ctx context.Context) (cleanup func()) {
 	}
 }
 
+func (iit *InvertedIndexRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced, withWarmup bool, fn func(key []byte, txnum []byte) error) error {
+	_, err := iit.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, withWarmup, fn)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 // [txFrom; txTo)
 // forced - prune even if CanPrune returns false, so its true only when we do Unwind.
 func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced, withWarmup bool, fn func(key []byte, txnum []byte) error) (stat *InvertedIndexPruneStat, err error) {
