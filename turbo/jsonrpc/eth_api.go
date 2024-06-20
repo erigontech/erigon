@@ -382,28 +382,29 @@ func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpoo
 
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction
 type RPCTransaction struct {
-	BlockHash           *common.Hash       `json:"blockHash"`
-	BlockNumber         *hexutil.Big       `json:"blockNumber"`
-	From                common.Address     `json:"from"`
-	Gas                 hexutil.Uint64     `json:"gas"`
-	GasPrice            *hexutil.Big       `json:"gasPrice,omitempty"`
-	Tip                 *hexutil.Big       `json:"maxPriorityFeePerGas,omitempty"`
-	FeeCap              *hexutil.Big       `json:"maxFeePerGas,omitempty"`
-	Hash                common.Hash        `json:"hash"`
-	Input               hexutility.Bytes   `json:"input"`
-	Nonce               hexutil.Uint64     `json:"nonce"`
-	To                  *common.Address    `json:"to"`
-	TransactionIndex    *hexutil.Uint64    `json:"transactionIndex"`
-	Value               *hexutil.Big       `json:"value"`
-	Type                hexutil.Uint64     `json:"type"`
-	Accesses            *types2.AccessList `json:"accessList,omitempty"`
-	ChainID             *hexutil.Big       `json:"chainId,omitempty"`
-	MaxFeePerBlobGas    *hexutil.Big       `json:"maxFeePerBlobGas,omitempty"`
-	BlobVersionedHashes []common.Hash      `json:"blobVersionedHashes,omitempty"`
-	V                   *hexutil.Big       `json:"v"`
-	YParity             *hexutil.Big       `json:"yParity,omitempty"`
-	R                   *hexutil.Big       `json:"r"`
-	S                   *hexutil.Big       `json:"s"`
+	BlockHash           *common.Hash               `json:"blockHash"`
+	BlockNumber         *hexutil.Big               `json:"blockNumber"`
+	From                common.Address             `json:"from"`
+	Gas                 hexutil.Uint64             `json:"gas"`
+	GasPrice            *hexutil.Big               `json:"gasPrice,omitempty"`
+	Tip                 *hexutil.Big               `json:"maxPriorityFeePerGas,omitempty"`
+	FeeCap              *hexutil.Big               `json:"maxFeePerGas,omitempty"`
+	Hash                common.Hash                `json:"hash"`
+	Input               hexutility.Bytes           `json:"input"`
+	Nonce               hexutil.Uint64             `json:"nonce"`
+	To                  *common.Address            `json:"to"`
+	TransactionIndex    *hexutil.Uint64            `json:"transactionIndex"`
+	Value               *hexutil.Big               `json:"value"`
+	Type                hexutil.Uint64             `json:"type"`
+	Accesses            *types2.AccessList         `json:"accessList,omitempty"`
+	ChainID             *hexutil.Big               `json:"chainId,omitempty"`
+	MaxFeePerBlobGas    *hexutil.Big               `json:"maxFeePerBlobGas,omitempty"`
+	BlobVersionedHashes []common.Hash              `json:"blobVersionedHashes,omitempty"`
+	Authorizations      *[]types.JsonAuthorization `json:"authorizationList,omitempty"`
+	V                   *hexutil.Big               `json:"v"`
+	YParity             *hexutil.Big               `json:"yParity,omitempty"`
+	R                   *hexutil.Big               `json:"r"`
+	S                   *hexutil.Big               `json:"s"`
 }
 
 // NewRPCTransaction returns a transaction that will serialize to the RPC
@@ -470,6 +471,22 @@ func NewRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 		result.GasPrice = computeGasPrice(tx, blockHash, baseFee)
 		result.MaxFeePerBlobGas = (*hexutil.Big)(t.MaxFeePerBlobGas.ToBig())
 		result.BlobVersionedHashes = t.BlobVersionedHashes
+	case *types.SetCodeTransaction:
+		chainId.Set(t.ChainID)
+		result.ChainID = (*hexutil.Big)(chainId.ToBig())
+		result.Tip = (*hexutil.Big)(t.Tip.ToBig())
+		result.FeeCap = (*hexutil.Big)(t.FeeCap.ToBig())
+		result.YParity = (*hexutil.Big)(t.V.ToBig())
+		result.V = (*hexutil.Big)(t.V.ToBig())
+		result.R = (*hexutil.Big)(t.R.ToBig())
+		result.S = (*hexutil.Big)(t.S.ToBig())
+		result.Accesses = &t.AccessList
+		result.GasPrice = computeGasPrice(tx, blockHash, baseFee)
+		ats := make([]types.JsonAuthorization, len(t.Authorizations))
+		for i, a := range t.Authorizations {
+			ats[i] = types.JsonAuthorization{}.FromAuthorization(a)
+		}
+		result.Authorizations = &ats
 	}
 	signer := types.LatestSignerForChainID(chainId.ToBig())
 	var err error

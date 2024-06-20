@@ -475,6 +475,51 @@ func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
 
 		return &dynamicFeeTx, nil
 
+	case types.SetCodeTxType:
+		var tip *uint256.Int
+		var feeCap *uint256.Int
+		if txJson.Tip != nil {
+			tip, overflow = uint256.FromBig((*big.Int)(txJson.Tip))
+			if overflow {
+				return nil, fmt.Errorf("maxPriorityFeePerGas field caused an overflow (uint256)")
+			}
+		}
+
+		if txJson.FeeCap != nil {
+			feeCap, overflow = uint256.FromBig((*big.Int)(txJson.FeeCap))
+			if overflow {
+				return nil, fmt.Errorf("maxFeePerGas field caused an overflow (uint256)")
+			}
+		}
+
+		auths := make([]types.Authorization, 0)
+		for _, auth := range *txJson.Authorizations {
+			auths = append(auths, auth.ToAuthorization())
+		}
+
+		setCodeTx := types.SetCodeTransaction{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{
+					Nonce: uint64(txJson.Nonce),
+					To:    txJson.To,
+					Value: value,
+					Gas:   uint64(txJson.Gas),
+					Data:  txJson.Input,
+				},
+				ChainID:    chainId,
+				Tip:        tip,
+				FeeCap:     feeCap,
+				AccessList: *txJson.Accesses,
+			},
+			Authorizations: auths,
+		}
+
+		setCodeTx.V.SetFromBig(txJson.V.ToInt())
+		setCodeTx.S.SetFromBig(txJson.S.ToInt())
+		setCodeTx.R.SetFromBig(txJson.R.ToInt())
+
+		return &setCodeTx, nil
+
 	default:
 		return nil, nil
 	}

@@ -115,6 +115,7 @@ const (
 	AccessListTxType byte = 1 // EIP-2930
 	DynamicFeeTxType byte = 2 // EIP-1559
 	BlobTxType       byte = 3 // EIP-4844
+	SetCodeTxType    byte = 4 // EIP-7702
 )
 
 var ErrParseTxn = fmt.Errorf("%w transaction", rlp.ErrParse)

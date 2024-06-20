@@ -22,10 +22,12 @@ type SetCodeTransaction struct {
 }
 
 type Authorization struct {
-	ChainID uint64
-	Address libcommon.Address
-	Nonce   *uint256.Int
-	V, R, S uint256.Int // signature values
+	ChainID uint64            `json:"chainId"`
+	Address libcommon.Address `json:"address"`
+	Nonce   *uint256.Int      `json:"nonce,omitempty"`
+	V       uint256.Int       `json:"v"`
+	R       uint256.Int       `json:"r"`
+	S       uint256.Int       `json:"s"`
 }
 
 func (ath *Authorization) copy() *Authorization {
@@ -313,7 +315,6 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 			return err
 		}
 		if len(b) > 0 {
-			// TODO: check this: if nonce == nil, encode then decode really gives nil
 			auth.Nonce = new(uint256.Int).SetBytes(b)
 		}
 

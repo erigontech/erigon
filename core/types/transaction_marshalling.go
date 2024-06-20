@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
@@ -52,8 +53,9 @@ type txJSON struct {
 	To       *libcommon.Address `json:"to"`
 
 	// Access list transaction fields:
-	ChainID    *hexutil.Big       `json:"chainId,omitempty"`
-	AccessList *types2.AccessList `json:"accessList,omitempty"`
+	ChainID        *hexutil.Big         `json:"chainId,omitempty"`
+	AccessList     *types2.AccessList   `json:"accessList,omitempty"`
+	Authorizations *[]JsonAuthorization `json:"authorizationList,omitempty"`
 
 	// Blob transaction fields:
 	MaxFeePerBlobGas    *hexutil.Big     `json:"maxFeePerBlobGas,omitempty"`
@@ -65,6 +67,40 @@ type txJSON struct {
 
 	// Only used for encoding:
 	Hash libcommon.Hash `json:"hash"`
+}
+
+type JsonAuthorization struct {
+	ChainID uint64            `json:"chainId"`
+	Address libcommon.Address `json:"address"`
+	Nonce   *hexutil.Big      `json:"nonce,omitempty"`
+	V       hexutil.Big       `json:"v"`
+	R       hexutil.Big       `json:"r"`
+	S       hexutil.Big       `json:"s"`
+}
+
+func (a JsonAuthorization) FromAuthorization(authorization Authorization) JsonAuthorization {
+	a.ChainID = authorization.ChainID
+	a.Address = authorization.Address
+	a.Nonce = (*hexutil.Big)(authorization.Nonce.ToBig())
+	a.V = hexutil.Big(*authorization.V.ToBig())
+	a.R = hexutil.Big(*authorization.R.ToBig())
+	a.S = hexutil.Big(*authorization.S.ToBig())
+	return a
+}
+
+func (a JsonAuthorization) ToAuthorization() Authorization {
+	nonce, _ := uint256.FromBig((*big.Int)(a.Nonce))
+	v, _ := uint256.FromBig((*big.Int)(&a.V))
+	r, _ := uint256.FromBig((*big.Int)(&a.R))
+	s, _ := uint256.FromBig((*big.Int)(&a.S))
+	return Authorization{
+		ChainID: a.ChainID,
+		Address: a.Address,
+		Nonce:   nonce,
+		V:       *v,
+		R:       *r,
+		S:       *s,
+	}
 }
 
 func (tx *LegacyTx) MarshalJSON() ([]byte, error) {
@@ -198,6 +234,12 @@ func UnmarshalTransactionFromJSON(input []byte) (Transaction, error) {
 	case BlobTxType:
 		tx, err := UnmarshalBlobTxJSON(input)
 		if err != nil {
+			return nil, err
+		}
+		return tx, nil
+	case SetCodeTxType:
+		tx := &SetCodeTransaction{}
+		if err = tx.UnmarshalJSON(input); err != nil {
 			return nil, err
 		}
 		return tx, nil
@@ -350,11 +392,7 @@ func (tx *AccessListTx) UnmarshalJSON(input []byte) error {
 	return nil
 }
 
-func (tx *DynamicFeeTransaction) UnmarshalJSON(input []byte) error {
-	var dec txJSON
-	if err := json.Unmarshal(input, &dec); err != nil {
-		return err
-	}
+func (tx *DynamicFeeTransaction) unmarshalJson(dec txJSON) error {
 	// Access list is optional for now.
 	if dec.AccessList != nil {
 		tx.AccessList = *dec.AccessList
@@ -429,6 +467,34 @@ func (tx *DynamicFeeTransaction) UnmarshalJSON(input []byte) error {
 		if err := sanityCheckSignature(&tx.V, &tx.R, &tx.S, false); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (tx *DynamicFeeTransaction) UnmarshalJSON(input []byte) error {
+	var dec txJSON
+	if err := json.Unmarshal(input, &dec); err != nil {
+		return err
+	}
+
+	return tx.unmarshalJson(dec)
+}
+
+func (tx *SetCodeTransaction) UnmarshalJSON(input []byte) error {
+	var dec txJSON
+	if err := json.Unmarshal(input, &dec); err != nil {
+		return err
+	}
+
+	dTx := DynamicFeeTransaction{}
+	if err := dTx.unmarshalJson(dec); err != nil {
+		return err
+	}
+
+	tx.DynamicFeeTransaction = dTx
+	tx.Authorizations = make([]Authorization, len(*dec.Authorizations))
+	for i, auth := range *dec.Authorizations {
+		tx.Authorizations[i] = auth.ToAuthorization()
 	}
 	return nil
 }
