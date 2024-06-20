@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/ledgerwatch/erigon-lib/state"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -135,6 +136,15 @@ func (s *Sync) IsAfter(stage1, stage2 stages.SyncStage) bool {
 
 func (s *Sync) HasUnwindPoint() bool { return s.unwindPoint != nil }
 func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error {
+	if tx != nil {
+		lowestUnwindableBlock, err := state.ReadLowestUnwindableBlock(tx)
+		if err != nil {
+			return err
+		}
+		if lowestUnwindableBlock > unwindPoint {
+			return fmt.Errorf("cannot unwind to block %d, lowest unwindable block is %d", unwindPoint, lowestUnwindableBlock)
+		}
+	}
 	if reason.Block != nil {
 		s.logger.Debug("UnwindTo", "block", unwindPoint, "block_hash", reason.Block.String(), "err", reason.Err, "stack", dbg.Stack())
 	} else {

@@ -76,9 +76,9 @@ func TestWaitDeployed(t *testing.T) {
 
 			// Create the transaction.
 			// Create the transaction.
-			var tx types.Transaction = types.NewContractCreation(0, u256.Num0, test.gas, u256.Num1, common.FromHex(test.code))
+			var txn types.Transaction = types.NewContractCreation(0, u256.Num0, test.gas, u256.Num1, common.FromHex(test.code))
 			signer := types.MakeSigner(params.TestChainConfig, 1, 0)
-			tx, _ = types.SignTx(tx, *signer, testKey)
+			txn, _ = types.SignTx(txn, *signer, testKey)
 
 			// Wait for it to get mined in the background.
 			var (
@@ -89,13 +89,13 @@ func TestWaitDeployed(t *testing.T) {
 			)
 
 			// Send and mine the transaction.
-			if err = backend.SendTransaction(ctx, tx); err != nil {
+			if err = backend.SendTransaction(ctx, txn); err != nil {
 				t.Fatalf("test %q: failed to set tx: %v", name, err)
 			}
 			backend.Commit()
 
 			go func() {
-				address, err = bind.WaitDeployed(ctx, backend, tx)
+				address, err = bind.WaitDeployed(ctx, backend, txn)
 				close(mined)
 			}()
 
@@ -128,24 +128,24 @@ func TestWaitDeployedCornerCases(t *testing.T) {
 	// Create a transaction to an account.
 	code := "6060604052600a8060106000396000f360606040526008565b00"
 	signer := types.MakeSigner(params.TestChainConfig, 1, 0)
-	var tx types.Transaction = types.NewTransaction(0, libcommon.HexToAddress("0x01"), u256.Num0, 3000000, u256.Num1, common.FromHex(code))
-	tx, _ = types.SignTx(tx, *signer, testKey)
+	var txn types.Transaction = types.NewTransaction(0, libcommon.HexToAddress("0x01"), u256.Num0, 3000000, u256.Num1, common.FromHex(code))
+	txn, _ = types.SignTx(txn, *signer, testKey)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if err := backend.SendTransaction(ctx, tx); err != nil {
+	if err := backend.SendTransaction(ctx, txn); err != nil {
 		t.Errorf("error when sending tx: %v", err)
 	}
 	backend.Commit()
 	notContentCreation := errors.New("tx is not contract creation")
-	if _, err := bind.WaitDeployed(ctx, backend, tx); err.Error() != notContentCreation.Error() {
+	if _, err := bind.WaitDeployed(ctx, backend, txn); err.Error() != notContentCreation.Error() {
 		t.Errorf("error mismatch: want %q, got %q, ", notContentCreation, err)
 	}
 
 	// Create a transaction that is not mined.
-	tx = types.NewContractCreation(1, u256.Num0, 3000000, u256.Num1, common.FromHex(code))
-	tx, _ = types.SignTx(tx, *signer, testKey)
+	txn = types.NewContractCreation(1, u256.Num0, 3000000, u256.Num1, common.FromHex(code))
+	txn, _ = types.SignTx(txn, *signer, testKey)
 
-	if err := backend.SendTransaction(ctx, tx); err != nil {
+	if err := backend.SendTransaction(ctx, txn); err != nil {
 		t.Errorf("error when sending tx: %v", err)
 	}
 
@@ -153,7 +153,7 @@ func TestWaitDeployedCornerCases(t *testing.T) {
 	go func() {
 		defer close(done)
 		contextCanceled := errors.New("context canceled")
-		if _, err := bind.WaitDeployed(ctx, backend, tx); err.Error() != contextCanceled.Error() {
+		if _, err := bind.WaitDeployed(ctx, backend, txn); err.Error() != contextCanceled.Error() {
 			t.Errorf("error missmatch: want %q, got %q, ", contextCanceled, err)
 		}
 		done <- true
