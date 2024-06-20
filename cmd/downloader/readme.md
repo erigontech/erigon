@@ -183,7 +183,10 @@ downloader torrent_clean --datadir <datadir> # remote all .torrent files in data
 ```
 
 ## Remote manifest verify
-To check that remote webseeds has available manifest and all manifested files are available, has correct format of ETag, does not have dangling torrents etc.
+
+To check that remote webseeds has available manifest and all manifested files are available, has correct format of ETag,
+does not have dangling torrents etc.
+
 ```
 downloader manifest-verify --chain <chain> [--webseeds 'a','b','c']
 ```
@@ -230,6 +233,7 @@ rclone sync /erigon/snapshots/   your_account:your-bucket-name-$CHAIN/ -L --prog
 ```
 
 Say for Erigon to use this webseed:
+
 ```
 erigon --datadir=<your> --chain=mainnet --webseed=<webseed_url>
 or
