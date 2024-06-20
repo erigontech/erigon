@@ -9,10 +9,10 @@ import (
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	eritypes "github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/zk/datastream/proto/github.com/0xPolygonHermez/zkevm-node/state/datastream"
 	"github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/ledgerwatch/erigon/zk/datastream/proto/github.com/0xPolygonHermez/zkevm-node/state/datastream"
 )
 
 const GenesisForkId = 0 // genesis fork is always 0 in the datastream
@@ -138,7 +138,7 @@ func WriteBlocksToStream(
 			return err
 		}
 
-		blockEntries, err := srv.CreateStreamEntriesProto(block, reader, tx, lastBlock, batchNum, prevBatchNum, gersInBetween, make(map[uint64]uint64), isBatchEnd)
+		blockEntries, err := srv.CreateStreamEntriesProto(block, reader, tx, lastBlock, batchNum, prevBatchNum, gersInBetween, make(map[uint64]uint64), isBatchEnd, nil)
 		if err != nil {
 			return err
 		}

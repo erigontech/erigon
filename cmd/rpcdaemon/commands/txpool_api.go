@@ -15,11 +15,13 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/zkevm/jsonrpc/client"
+	"github.com/ledgerwatch/erigon/zk/txpool"
 )
 
 // NetAPI the interface for the net_ RPC commands
 type TxPoolAPI interface {
 	Content(ctx context.Context) (interface{}, error)
+	Limbo(ctx context.Context) (interface{}, error)
 }
 
 // TxPoolAPIImpl data structure to store things needed for net_ commands
@@ -28,15 +30,17 @@ type TxPoolAPIImpl struct {
 	pool     proto_txpool.TxpoolClient
 	db       kv.RoDB
 	l2RPCUrl string
+	rawPool  *txpool.TxPool
 }
 
 // NewTxPoolAPI returns NetAPIImplImpl instance
-func NewTxPoolAPI(base *BaseAPI, db kv.RoDB, pool proto_txpool.TxpoolClient, l2RPCUrl string) *TxPoolAPIImpl {
+func NewTxPoolAPI(base *BaseAPI, db kv.RoDB, pool proto_txpool.TxpoolClient, rawPool *txpool.TxPool, l2RPCUrl string) *TxPoolAPIImpl {
 	return &TxPoolAPIImpl{
 		BaseAPI:  base,
 		pool:     pool,
 		db:       db,
 		l2RPCUrl: l2RPCUrl,
+		rawPool:  rawPool,
 	}
 }
 
@@ -151,40 +155,9 @@ func (api *TxPoolAPIImpl) Status(ctx context.Context) (interface{}, error) {
 	}, nil
 }
 
-/*
+func (api *TxPoolAPIImpl) Limbo(ctx context.Context) (interface{}, error) {
+	// Get the limbo transactions
+	details := api.rawPool.GetLimboDetails()
 
-// Inspect retrieves the content of the transaction pool and flattens it into an
-// easily inspectable list.
-func (s *PublicTxPoolAPI) Inspect() map[string]map[string]map[string]string {
-	content := map[string]map[string]map[string]string{
-		"pending": make(map[string]map[string]string),
-		"queued":  make(map[string]map[string]string),
-	}
-	pending, queue := s.b.TxPoolContent()
-
-	// Define a formatter to flatten a transaction into a string
-	var format = func(tx *types.Transaction) string {
-		if to := tx.To(); to != nil {
-			return fmt.Sprintf("%s: %v wei + %v gas × %v wei", tx.To().Hex(), tx.Value(), tx.Gas(), tx.GasPrice())
-		}
-		return fmt.Sprintf("contract creation: %v wei + %v gas × %v wei", tx.Value(), tx.Gas(), tx.GasPrice())
-	}
-	// Flatten the pending transactions
-	for account, txs := range pending {
-		dump := make(map[string]string)
-		for _, tx := range txs {
-			dump[fmt.Sprintf("%d", tx.Nonce())] = format(tx)
-		}
-		content["pending"][account.Hex()] = dump
-	}
-	// Flatten the queued transactions
-	for account, txs := range queue {
-		dump := make(map[string]string)
-		for _, tx := range txs {
-			dump[fmt.Sprintf("%d", tx.Nonce())] = format(tx)
-		}
-		content["queued"][account.Hex()] = dump
-	}
-	return content
+	return details, nil
 }
-*/

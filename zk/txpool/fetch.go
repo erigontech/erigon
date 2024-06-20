@@ -22,7 +22,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/holiman/uint256"
 	"github.com/gateway-fm/cdk-erigon-lib/common/dbg"
 	"github.com/gateway-fm/cdk-erigon-lib/direct"
 	"github.com/gateway-fm/cdk-erigon-lib/gointerfaces/grpcutil"
@@ -31,6 +30,7 @@ import (
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/gateway-fm/cdk-erigon-lib/rlp"
 	types2 "github.com/gateway-fm/cdk-erigon-lib/types"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -464,11 +464,12 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 		var unwindTxs, minedTxs types2.TxSlots
 		for _, change := range req.ChangeBatch {
 			if change.Direction == remote.Direction_FORWARD {
-				minedTxs.Resize(uint(len(change.Txs)))
+				oldSize := len(minedTxs.Txs)
+				minedTxs.Resize(uint(oldSize + len(change.Txs)))
 				for i := range change.Txs {
-					minedTxs.Txs[i] = &types2.TxSlot{}
+					minedTxs.Txs[oldSize+i] = &types2.TxSlot{}
 					if err = f.threadSafeParseStateChangeTxn(func(parseContext *types2.TxParseContext) error {
-						_, err := parseContext.ParseTransaction(change.Txs[i], 0, minedTxs.Txs[i], minedTxs.Senders.At(i), false /* hasEnvelope */, nil)
+						_, err := parseContext.ParseTransaction(change.Txs[i], 0, minedTxs.Txs[oldSize+i], minedTxs.Senders.At(oldSize+i), false /* hasEnvelope */, nil)
 						return err
 					}); err != nil {
 						log.Warn("stream.Recv", "err", err)
@@ -477,11 +478,12 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 				}
 			}
 			if change.Direction == remote.Direction_UNWIND {
-				unwindTxs.Resize(uint(len(change.Txs)))
+				oldSize := len(unwindTxs.Txs)
+				unwindTxs.Resize(uint(oldSize + len(change.Txs)))
 				for i := range change.Txs {
-					unwindTxs.Txs[i] = &types2.TxSlot{}
+					unwindTxs.Txs[oldSize+i] = &types2.TxSlot{}
 					if err = f.threadSafeParseStateChangeTxn(func(parseContext *types2.TxParseContext) error {
-						_, err = parseContext.ParseTransaction(change.Txs[i], 0, unwindTxs.Txs[i], unwindTxs.Senders.At(i), false /* hasEnvelope */, nil)
+						_, err = parseContext.ParseTransaction(change.Txs[i], 0, unwindTxs.Txs[oldSize+i], unwindTxs.Senders.At(oldSize+i), false /* hasEnvelope */, nil)
 						return err
 					}); err != nil {
 						log.Warn("stream.Recv", "err", err)
@@ -490,6 +492,9 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 				}
 			}
 		}
+
+		// transactions are marked as local in order bo by pass the spammer check
+		markAsLocal(&unwindTxs)
 		if err := f.db.View(ctx, func(tx kv.Tx) error {
 			return f.pool.OnNewBlock(ctx, req, unwindTxs, minedTxs, tx)
 		}); err != nil {

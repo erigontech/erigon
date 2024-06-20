@@ -34,6 +34,7 @@ import (
 	erigonchain "github.com/gateway-fm/cdk-erigon-lib/chain"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/zk/sequencer"
+	"github.com/ledgerwatch/erigon/zk/txpool"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 	"google.golang.org/grpc"
@@ -838,6 +839,11 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				backend.dataStream,
 			)
 
+			if cfg.Zk.Limbo {
+				limboSubPoolProcessor := txpool.NewLimboSubPoolProcessor(ctx, backend.chainConfig, backend.chainDB, backend.txPool2, verifier)
+				limboSubPoolProcessor.StartWork()
+			}
+
 			// we need to make sure the pool is always aware of the latest block for when
 			// we switch context from being an RPC node to a sequencer
 			backend.txPool2.ForceUpdateLatestBlock(executionProgress)
@@ -1017,7 +1023,7 @@ func (backend *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error 
 	if casted, ok := backend.engine.(*bor.Bor); ok {
 		borDb = casted.DB
 	}
-	apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, backend.agg, httpRpcCfg, backend.engine, config, backend.l1Syncer)
+	apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, backend.txPool2, miningRpcClient, ff, stateCache, blockReader, backend.agg, httpRpcCfg, backend.engine, config, backend.l1Syncer)
 	authApiList := commands.AuthAPIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, backend.agg, httpRpcCfg, backend.engine, config)
 	go func() {
 		if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList, authApiList); err != nil {

@@ -15,8 +15,8 @@ import (
 	"encoding/binary"
 
 	ethTypes "github.com/ledgerwatch/erigon/core/types"
-	types "github.com/ledgerwatch/erigon/zk/rpcdaemon"
 	"github.com/ledgerwatch/erigon/rpc"
+	types "github.com/ledgerwatch/erigon/zk/rpcdaemon"
 )
 
 var (
@@ -272,13 +272,6 @@ func (s *L1Syncer) L1QueryHeaders(logs []ethTypes.Log) (map[uint64]*ethTypes.Hea
 	}
 
 	return headersMap, nil
-}
-
-func tryToLogL1QueryBlocks(logPrefix string, current, total, threadNum int, durationTick *time.Time) {
-	if time.Since(*durationTick).Seconds() > 10 {
-		log.Info(fmt.Sprintf("[%s] %s %d/%d", logPrefix, "Query L1 blocks", current, total), "thread", threadNum)
-		*durationTick = time.Now()
-	}
 }
 
 func (s *L1Syncer) getLatestL1Block() (uint64, error) {

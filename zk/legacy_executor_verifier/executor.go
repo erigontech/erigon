@@ -3,19 +3,26 @@ package legacy_executor_verifier
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"encoding/json"
+	"os"
+	"path"
+
+	"github.com/dustin/go-humanize"
 	"github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/ledgerwatch/erigon/zk/legacy_executor_verifier/proto/github.com/0xPolygonHermez/zkevm-node/state/runtime/executor"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
-	"github.com/dustin/go-humanize"
 	"google.golang.org/grpc/credentials/insecure"
-	"encoding/json"
-	"os"
-	"path"
+)
+
+var (
+	ErrExecutorStateRootMismatch = errors.New("executor state root mismatches")
+	ErrExecutorUnknownError      = errors.New("unknown error from executor")
 )
 
 type Config struct {
@@ -108,6 +115,14 @@ func (e *Executor) QueueLength() int {
 	return len(e.semaphore)
 }
 
+func (e *Executor) AquireAccess() {
+	e.semaphore <- struct{}{}
+}
+
+func (e *Executor) ReleaseAccess() {
+	<-e.semaphore
+}
+
 func (e *Executor) CheckOnline() bool {
 	// first ensure there is a connection to work with
 	if e.conn == nil {
@@ -142,10 +157,7 @@ func (e *Executor) CheckOnline() bool {
 	return true
 }
 
-func (e *Executor) Verify(p *Payload, request *VerifierRequest, oldStateRoot common.Hash) (bool, error) {
-	e.semaphore <- struct{}{}
-	defer func() { <-e.semaphore }()
-
+func (e *Executor) Verify(p *Payload, request *VerifierRequest, oldStateRoot common.Hash) (bool, *executor.ProcessBatchResponseV2, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
@@ -170,12 +182,12 @@ func (e *Executor) Verify(p *Payload, request *VerifierRequest, oldStateRoot com
 	if e.outputLocation != "" {
 		asJson, err := json.Marshal(grpcRequest)
 		if err != nil {
-			return false, err
+			return false, nil, err
 		}
 		file := path.Join(e.outputLocation, fmt.Sprintf("payload_%d.json", request.BatchNumber))
 		err = os.WriteFile(file, asJson, 0644)
 		if err != nil {
-			return false, err
+			return false, nil, err
 		}
 
 		// now save the witness as a hex string along with the datastream
@@ -184,20 +196,20 @@ func (e *Executor) Verify(p *Payload, request *VerifierRequest, oldStateRoot com
 		witnessAsHex := fmt.Sprintf("0x%x", p.Witness)
 		err = os.WriteFile(witnessHexFile, []byte(witnessAsHex), 0644)
 		if err != nil {
-			return false, err
+			return false, nil, err
 		}
 
 		dataStreamHexFile := path.Join(e.outputLocation, fmt.Sprintf("datastream_%d.hex", request.BatchNumber))
 		dataStreamAsHex := fmt.Sprintf("0x%x", p.DataStream)
 		err = os.WriteFile(dataStreamHexFile, []byte(dataStreamAsHex), 0644)
 		if err != nil {
-			return false, err
+			return false, nil, err
 		}
 	}
 
 	resp, err := e.client.ProcessStatelessBatchV2(ctx, grpcRequest, grpc.MaxCallSendMsgSize(size), grpc.MaxCallRecvMsgSize(size))
 	if err != nil {
-		return false, fmt.Errorf("failed to process stateless batch: %w", err)
+		return false, nil, fmt.Errorf("failed to process stateless batch: %w", err)
 	}
 
 	counters := map[string]int{
@@ -256,9 +268,9 @@ func (e *Executor) Verify(p *Payload, request *VerifierRequest, oldStateRoot com
 	return responseCheck(resp, request)
 }
 
-func responseCheck(resp *executor.ProcessBatchResponseV2, request *VerifierRequest) (bool, error) {
+func responseCheck(resp *executor.ProcessBatchResponseV2, request *VerifierRequest) (bool, *executor.ProcessBatchResponseV2, error) {
 	if resp == nil {
-		return false, fmt.Errorf("nil response")
+		return false, nil, fmt.Errorf("nil response")
 	}
 
 	if resp.ForkId != request.ForkId {
@@ -267,7 +279,7 @@ func responseCheck(resp *executor.ProcessBatchResponseV2, request *VerifierReque
 
 	if resp.Debug != nil && resp.Debug.ErrorLog != "" {
 		log.Error("executor error", "detail", resp.Debug.ErrorLog)
-		return false, fmt.Errorf("error in response: %s", resp.Debug.ErrorLog)
+		return false, resp, fmt.Errorf("error in response: %s", resp.Debug.ErrorLog)
 	}
 
 	if resp.Error != executor.ExecutorError_EXECUTOR_ERROR_UNSPECIFIED &&
@@ -275,20 +287,19 @@ func responseCheck(resp *executor.ProcessBatchResponseV2, request *VerifierReque
 		// prover id here is the only string field in the response and will contain info on what key failed from
 		// the provided witness
 		log.Error("executor error", "detail", resp.ProverId)
-		return false, fmt.Errorf("error in response: %s", resp.Error)
+		return false, resp, fmt.Errorf("%w: error in response: %s", ErrExecutorUnknownError, resp.Error)
 	}
 
 	if resp.ErrorRom != executor.RomError_ROM_ERROR_NO_ERROR && resp.ErrorRom != executor.RomError_ROM_ERROR_UNSPECIFIED {
 		log.Error("executor ROM error", "detail", resp.ErrorRom)
-		return false, fmt.Errorf("error in response: %s", resp.ErrorRom)
+		return false, resp, fmt.Errorf("error in response: %s", resp.ErrorRom)
 	}
 
-	erigonStateRoot := request.StateRoot
-	if !bytes.Equal(resp.NewStateRoot, erigonStateRoot.Bytes()) {
-		return false, fmt.Errorf("erigon state root mismatch: expected %s, got %s", erigonStateRoot, common.BytesToHash(resp.NewStateRoot))
+	if !bytes.Equal(resp.NewStateRoot, request.StateRoot.Bytes()) {
+		return false, resp, fmt.Errorf("%w: expected %s, got %s", ErrExecutorStateRootMismatch, request.StateRoot, common.BytesToHash(resp.NewStateRoot))
 	}
 
-	return true, nil
+	return true, resp, nil
 }
 
 func counterUndershootCheck(respCounters, counters map[string]int, batchNo uint64) {

@@ -34,7 +34,9 @@ func main() {
 
 		// TODO: Replace with correct consensus Engine
 		engine := ethash.NewFaker()
-		apiList := commands.APIList(db, borDb, backend, txPool, mining, ff, stateCache, blockReader, agg, *cfg, engine, &ethConfig, nil)
+		// zkevm: the raw pool needed for limbo calls will not work if rpcdaemon is running as a standalone process.  Only the sequencer would have this detail
+		// so we pass a nil raw pool here
+		apiList := commands.APIList(db, borDb, backend, txPool, nil, mining, ff, stateCache, blockReader, agg, *cfg, engine, &ethconfig.Defaults, nil)
 		if err := cli.StartRpcServer(ctx, *cfg, apiList, nil); err != nil {
 			log.Error(err.Error())
 			return nil

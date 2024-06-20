@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/zk"
 )
 
 type Sync struct {
@@ -357,7 +359,11 @@ func (s *Sync) runStage(stage *Stage, db kv.RwDB, tx kv.RwTx, firstCycle bool, b
 
 	if err = stage.Forward(firstCycle, badBlockUnwind, stageState, s, tx, quiet); err != nil {
 		wrappedError := fmt.Errorf("[%s] %w", s.LogPrefix(), err)
-		log.Error("Error while executing stage", "err", wrappedError)
+		if !errors.Is(err, zk.ErrLimboState) {
+			log.Error("Error while executing stage", "err", wrappedError)
+		} else {
+			log.Info(err.Error())
+		}
 		return wrappedError
 	}
 

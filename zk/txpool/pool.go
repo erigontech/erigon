@@ -41,6 +41,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/status-im/keycard-go/hexutils"
 
 	"github.com/gateway-fm/cdk-erigon-lib/chain"
 	"github.com/gateway-fm/cdk-erigon-lib/common"
@@ -143,6 +144,7 @@ const (
 	OverflowZkCounters     DiscardReason = 24 // unsupported transaction type
 	SenderDisallowedSendTx DiscardReason = 25 // sender is not allowed to send transactions by ACL policy
 	SenderDisallowedDeploy DiscardReason = 26 // sender is not allowed to deploy contracts by ACL policy
+	DiscardByLimbo         DiscardReason = 27
 )
 
 func (r DiscardReason) String() string {
@@ -201,6 +203,8 @@ func (r DiscardReason) String() string {
 		return "sender disallowed to send tx by ACL policy"
 	case SenderDisallowedDeploy:
 		return "sender disallowed to deploy contract by ACL policy"
+	case DiscardByLimbo:
+		return "limbo error"
 	default:
 		panic(fmt.Sprintf("discard reason: %d", r))
 	}
@@ -235,6 +239,9 @@ type SubPoolType uint8
 const PendingSubPool SubPoolType = 1
 const BaseFeeSubPool SubPoolType = 2
 const QueuedSubPool SubPoolType = 3
+const LimboSubPool SubPoolType = 4
+
+const LimboSubPoolSize = 100_000 // overkill but better too large than too small
 
 func (sp SubPoolType) String() string {
 	switch sp {
@@ -315,6 +322,9 @@ type TxPool struct {
 	// exposed publicly so anything wanting to get "best" transactions can ensure a flush isn't happening and
 	// vice versa
 	flushMtx *sync.Mutex
+
+	// limbo specific fields where bad batch transactions identified by the executor go
+	limbo *Limbo
 }
 
 func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, ethCfg *ethconfig.Config, cache kvcache.Cache, chainID uint256.Int, shanghaiTime *big.Int, londonBlock *big.Int, aclDB kv.RwDB) (*TxPool, error) {
@@ -360,12 +370,14 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		allowFreeTransactions:   ethCfg.AllowFreeTransactions,
 		flushMtx:                &sync.Mutex{},
 		aclDB:                   aclDB,
+		limbo:                   newLimbo(),
 	}, nil
 }
 
 func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs, minedTxs types.TxSlots, tx kv.Tx) error {
 	defer newBlockTimer.UpdateDuration(time.Now())
-	//t := time.Now()
+
+	isAfterLimbo := len(unwindTxs.Txs) > 0
 
 	cache := p.cache()
 	cache.OnNewBlock(stateChanges)
@@ -417,14 +429,20 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 		p.queued.worst.pendingBaseFee = pendingBaseFee
 	}
 
+	p.addLimboToUnwindTxs(&unwindTxs)
+
 	p.blockGasLimit.Store(stateChanges.BlockGasLimit)
 	if err := p.senders.onNewBlock(stateChanges, unwindTxs, minedTxs); err != nil {
 		return err
 	}
-	_, unwindTxs, err = p.validateTxs(&unwindTxs, cacheView)
-	if err != nil {
-		return err
-	}
+
+	// No point to validate transactions that have already been executed.
+	// It is clear that some of them will not pass the validation, because a unwound tx may depend on another unwound transaction. In this case the depended tx will be discarded
+	// Let's all of them pass so they can stay in the queue subpool.
+	// _, unwindTxs, err = p.validateTxs(&unwindTxs, cacheView)
+	// if err != nil {
+	// 	return err
+	// }
 
 	if assert.Enable {
 		for _, txn := range unwindTxs.Txs {
@@ -443,14 +461,34 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 		return err
 	}
 
+	blockNum := p.lastSeenBlock.Load()
+
+	sendersWithChangedStateBeforeLimboTrim := prepareSendersWithChangedState(&unwindTxs)
+	unwindTxs, limboTxs, forDiscard := p.trimLimboSlots(&unwindTxs)
+
 	//log.Debug("[txpool] new block", "unwinded", len(unwindTxs.txs), "mined", len(minedTxs.txs), "baseFee", baseFee, "blockHeight", blockHeight)
 
-	announcements, err := addTxsOnNewBlock(p.lastSeenBlock.Load(), cacheView, stateChanges, p.senders, unwindTxs,
-		pendingBaseFee, stateChanges.BlockGasLimit,
-		p.pending, p.baseFee, p.queued, p.all, p.byHash, p.addLocked, p.discardLocked)
+	announcements, err := addTxsOnNewBlock(
+		blockNum,
+		cacheView,
+		stateChanges,
+		p.senders,
+		unwindTxs,
+		pendingBaseFee,
+		stateChanges.BlockGasLimit,
+		p.pending,
+		p.baseFee,
+		p.queued,
+		p.all,
+		p.byHash,
+		sendersWithChangedStateBeforeLimboTrim,
+		p.addLocked,
+		p.discardLocked,
+	)
 	if err != nil {
 		return err
 	}
+
 	p.pending.EnforceWorstInvariants()
 	p.baseFee.EnforceInvariants()
 	p.queued.EnforceInvariants()
@@ -468,6 +506,16 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 		case p.newPendingTxs <- p.promoted.Copy():
 		default:
 		}
+	}
+
+	for idx, slot := range forDiscard.Txs {
+		mt := newMetaTx(slot, forDiscard.IsLocal[idx], blockNum)
+		p.discardLocked(mt, DiscardByLimbo)
+		log.Info("[txpool] Discarding", "tx-hash", hexutils.BytesToHex(slot.IDHash[:]))
+	}
+	p.finalizeLimboOnNewBlock(limboTxs)
+	if isAfterLimbo {
+		p.allowYieldingTransactions()
 	}
 
 	//log.Info("[txpool] new block", "number", p.lastSeenBlock.Load(), "pendngBaseFee", pendingBaseFee, "in", time.Since(t))
@@ -1003,7 +1051,7 @@ func addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
 func addTxsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges *remote.StateChangeBatch,
 	senders *sendersBatch, newTxs types.TxSlots, pendingBaseFee uint64, blockGasLimit uint64,
 	pending *PendingPool, baseFee, queued *SubPool,
-	byNonce *BySenderAndNonce, byHash map[string]*metaTx, add func(*metaTx, *types.Announcements) DiscardReason, discard func(*metaTx, DiscardReason)) (types.Announcements, error) {
+	byNonce *BySenderAndNonce, byHash map[string]*metaTx, sendersWithChangedStateBeforeLimboTrim *LimboSendersWithChangedState, add func(*metaTx, *types.Announcements) DiscardReason, discard func(*metaTx, DiscardReason)) (types.Announcements, error) {
 	protocolBaseFee := calcProtocolBaseFee(pendingBaseFee)
 	if assert.Enable {
 		for _, txn := range newTxs.Txs {
@@ -1025,11 +1073,13 @@ func addTxsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges
 	announcements := types.Announcements{}
 	for i, txn := range newTxs.Txs {
 		if _, ok := byHash[string(txn.IDHash[:])]; ok {
+			sendersWithChangedStateBeforeLimboTrim.decrement(txn.SenderID)
 			continue
 		}
 		mt := newMetaTx(txn, newTxs.IsLocal[i], blockNum)
 		if reason := add(mt, &announcements); reason != NotSet {
 			discard(mt, reason)
+			sendersWithChangedStateBeforeLimboTrim.decrement(txn.SenderID)
 			continue
 		}
 		sendersWithChangedState[mt.Tx.SenderID] = struct{}{}
@@ -1038,17 +1088,24 @@ func addTxsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges
 	for _, changesList := range stateChanges.ChangeBatch {
 		for _, change := range changesList.Changes {
 			switch change.Action {
-			case remote.Action_UPSERT, remote.Action_UPSERT_CODE:
+			case remote.Action_UPSERT, remote.Action_UPSERT_CODE, remote.Action_REMOVE:
 				if change.Incarnation > 0 {
 					continue
 				}
 				addr := gointerfaces.ConvertH160toAddress(change.Address)
 				id, ok := senders.getID(addr)
 				if !ok {
+					sendersWithChangedStateBeforeLimboTrim.decrement(id)
 					continue
 				}
 				sendersWithChangedState[id] = struct{}{}
 			}
+		}
+	}
+
+	for senderId, counter := range sendersWithChangedStateBeforeLimboTrim.Storage {
+		if counter > 0 {
+			sendersWithChangedState[senderId] = struct{}{}
 		}
 	}
 
@@ -1510,6 +1567,9 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 	if err := PutLastSeenBlock(tx, p.lastSeenBlock.Load(), encID); err != nil {
 		return err
 	}
+	if err := p.flushLockedLimbo(tx); err != nil {
+		return err
+	}
 
 	// clean - in-memory data structure as later as possible - because if during this Tx will happen error,
 	// DB will stay consistent but some in-memory structures may be already cleaned, and retry will not work
@@ -1602,6 +1662,10 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 		return err
 	}
 	p.pendingBaseFee.Store(pendingBaseFee)
+
+	if err = p.fromDBLimbo(ctx, tx, cacheView); err != nil {
+		return err
+	}
 
 	return nil
 }

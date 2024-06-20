@@ -211,11 +211,22 @@ func (srv *DataStreamServer) CreateStreamEntriesProto(
 	gers []types.GerUpdateProto,
 	l1InfoTreeMinTimestamps map[uint64]uint64,
 	isBatchEnd bool,
+	transactionsToIncludeByIndex []int, // passing nil here will include all transactions in the blocks
 ) ([]DataStreamEntryProto, error) {
+	filteredTransactions := block.Transactions()
+	if transactionsToIncludeByIndex != nil {
+		filteredTransactionsBuilder := make(eritypes.Transactions, len(transactionsToIncludeByIndex))
+		for i, txIndexInBlock := range transactionsToIncludeByIndex {
+			filteredTransactionsBuilder[i] = filteredTransactions[txIndexInBlock]
+		}
+
+		filteredTransactions = filteredTransactionsBuilder
+	}
+
 	blockNum := block.NumberU64()
 
 	entryCount := 2                         // l2 block bookmark + l2 block
-	entryCount += len(block.Transactions()) // transactions
+	entryCount += len(filteredTransactions) // transactions
 	entryCount += len(gers)
 
 	var err error
@@ -332,7 +343,7 @@ func (srv *DataStreamServer) CreateStreamEntriesProto(
 	l2Block := srv.CreateL2BlockProto(block, blockHash, batchNumber, ger, uint32(deltaTimestamp), uint32(l1InfoIndex), l1BlockHash, l1InfoTreeMinTimestamps[l1InfoIndex], blockInfoRoot)
 	entries.Add(l2Block)
 
-	for _, tx := range block.Transactions() {
+	for _, tx := range filteredTransactions {
 		effectiveGasPricePercentage, err := reader.GetEffectiveGasPricePercentage(tx.Hash())
 		if err != nil {
 			return nil, err
@@ -437,13 +448,14 @@ func (srv *DataStreamServer) CreateAndBuildStreamEntryBytesProto(
 	lastBatchNumber uint64,
 	l1InfoTreeMinTimestamps map[uint64]uint64,
 	isBatchEnd bool,
+	transactionsToIncludeByIndex []int, // passing nil here will include all transactions in the blocks
 ) ([]byte, error) {
 	gersInBetween, err := reader.GetBatchGlobalExitRootsProto(lastBatchNumber, batchNumber)
 	if err != nil {
 		return nil, err
 	}
 
-	entries, err := srv.CreateStreamEntriesProto(block, reader, tx, lastBlock, batchNumber, lastBatchNumber, gersInBetween, l1InfoTreeMinTimestamps, isBatchEnd)
+	entries, err := srv.CreateStreamEntriesProto(block, reader, tx, lastBlock, batchNumber, lastBatchNumber, gersInBetween, l1InfoTreeMinTimestamps, isBatchEnd, transactionsToIncludeByIndex)
 	if err != nil {
 		return nil, err
 	}

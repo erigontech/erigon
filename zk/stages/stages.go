@@ -16,6 +16,7 @@ func SequencerZkStages(
 	l1InfoTreeCfg L1InfoTreeCfg,
 	sequencerL1BlockSyncCfg SequencerL1BlockSyncCfg,
 	dataStreamCatchupCfg DataStreamCatchupCfg,
+	sequencerInterhashesCfg SequencerInterhashesCfg,
 	exec SequenceBlockCfg,
 	hashState stages.HashStateCfg,
 	zkInterHashesCfg ZkInterHashesCfg,
@@ -88,13 +89,26 @@ func SequencerZkStages(
 			ID:          stages2.Execution,
 			Description: "Sequence transactions",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return SpawnSequencingStage(s, u, tx, 0, ctx, exec, firstCycle, quiet)
+				return SpawnSequencingStage(s, u, tx, ctx, exec, firstCycle, quiet)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
 				return UnwindSequenceExecutionStage(u, s, tx, ctx, exec, firstCycle)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
 				return PruneSequenceExecutionStage(p, tx, exec, ctx, firstCycle)
+			},
+		},
+		{
+			ID:          stages2.IntermediateHashes,
+			Description: "Sequencer Intermediate Hashes",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
+				return SpawnSequencerInterhashesStage(s, u, tx, ctx, sequencerInterhashesCfg, firstCycle, quiet)
+			},
+			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
+				return UnwindSequencerInterhashsStage(u, s, tx, ctx, sequencerInterhashesCfg, firstCycle)
+			},
+			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
+				return PruneSequencerInterhashesStage(p, tx, sequencerInterhashesCfg, ctx, firstCycle)
 			},
 		},
 		{
@@ -472,15 +486,17 @@ var AllStagesZk = []stages2.SyncStage{
 }
 
 var ZkSequencerUnwindOrder = stages.UnwindOrder{
-	stages2.IntermediateHashes, // need to unwind SMT before we remove history
-	stages2.HashState,
-	stages2.Execution,
-	stages2.CallTraces,
-	stages2.AccountHistoryIndex,
-	stages2.StorageHistoryIndex,
-	stages2.LogIndex,
-	stages2.TxLookup,
 	stages2.Finish,
+	stages2.TxLookup,
+	stages2.LogIndex,
+	stages2.HashState,
+	stages2.SequenceExecutorVerify,
+	stages2.IntermediateHashes, // need to unwind SMT before we remove history
+	stages2.StorageHistoryIndex,
+	stages2.AccountHistoryIndex,
+	stages2.CallTraces,
+	stages2.Execution, // need to happen after history and calltraces
+	stages2.L1Syncer,
 }
 
 var ZkUnwindOrder = stages.UnwindOrder{
@@ -492,8 +508,7 @@ var ZkUnwindOrder = stages.UnwindOrder{
 	stages2.StorageHistoryIndex,
 	stages2.AccountHistoryIndex,
 	stages2.CallTraces,
-
-	stages2.Execution,
+	stages2.Execution, // need to happen after history and calltraces
 	stages2.Senders,
 	stages2.BlockHashes,
 	stages2.Batches,

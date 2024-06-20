@@ -467,6 +467,10 @@ func UnwindExecutionStageZk(u *UnwindState, s *StageState, tx kv.RwTx, ctx conte
 	if err = unwindExecutionStage(u, s, tx, ctx, cfg, initialCycle); err != nil {
 		return err
 	}
+	if err = UnwindExecutionStageDbWrites(ctx, u, s, tx); err != nil {
+		return err
+	}
+
 	if err = u.Done(tx); err != nil {
 		return err
 	}
@@ -477,6 +481,10 @@ func UnwindExecutionStageZk(u *UnwindState, s *StageState, tx kv.RwTx, ctx conte
 		}
 	}
 	return nil
+}
+
+func UnwindExecutionStageErigon(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) error {
+	return unwindExecutionStage(u, s, tx, ctx, cfg, initialCycle)
 }
 
 func PruneExecutionStageZk(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx context.Context, initialCycle bool) (err error) {
@@ -540,5 +548,30 @@ func PruneExecutionStageZk(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx c
 			return err
 		}
 	}
+	return nil
+}
+
+func UnwindExecutionStageDbWrites(ctx context.Context, u *UnwindState, s *StageState, tx kv.RwTx) error {
+	// backward values that by default handinged in stage_headers
+	// TODO: check for other missing value like - WriteHeader_zkEvm, WriteHeadHeaderHash, WriteCanonicalHash, WriteBody, WriteSenders, WriteTxLookupEntries_zkEvm
+	hash, err := rawdb.ReadCanonicalHash(tx, u.UnwindPoint)
+	if err != nil {
+		return err
+	}
+	rawdb.WriteHeadHeaderHash(tx, hash)
+
+	if err = rawdbZk.TruncateSenders(tx, u.UnwindPoint+1, s.BlockNumber); err != nil {
+		return fmt.Errorf("delete senders: %w", err)
+	}
+	if err = rawdb.TruncateTxLookupEntries_zkEvm(tx, u.UnwindPoint+1, s.BlockNumber); err != nil {
+		return fmt.Errorf("delete tx lookup entires: %w", err)
+	}
+	if err = rawdb.TruncateCanonicalHash(tx, u.UnwindPoint+1, true); err != nil {
+		return fmt.Errorf("delete cannonical hash with headers: %w", err)
+	}
+	if err = rawdb.TruncateBlocks(ctx, tx, u.UnwindPoint+1); err != nil {
+		return fmt.Errorf("delete blocks: %w", err)
+	}
+
 	return nil
 }

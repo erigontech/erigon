@@ -143,7 +143,7 @@ func (bcc *BatchCounterCollector) CheckForOverflow() (bool, error) {
 	return overflow, nil
 }
 
-func (bcc *BatchCounterCollector) newCounters() Counters {
+func (bcc *BatchCounterCollector) NewCounters() Counters {
 	var combined Counters
 	if bcc.unlimitedCounters {
 		combined = unlimitedCounters()
@@ -158,7 +158,7 @@ func (bcc *BatchCounterCollector) newCounters() Counters {
 // rlp level counters and execution level counters
 func (bcc *BatchCounterCollector) CombineCollectors() (Counters, error) {
 	// combine all the counters we have so far
-	combined := bcc.newCounters()
+	combined := bcc.NewCounters()
 
 	if err := bcc.processBatchLevelData(); err != nil {
 		return nil, err

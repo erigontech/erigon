@@ -7,7 +7,6 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/holiman/uint256"
 	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/common/datadir"
 	"github.com/gateway-fm/cdk-erigon-lib/common/dbg"
@@ -16,9 +15,11 @@ import (
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/gateway-fm/cdk-erigon-lib/kv/memdb"
 	"github.com/gateway-fm/cdk-erigon-lib/state"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/chain"
+	"github.com/ledgerwatch/erigon/zk"
 
 	"github.com/ledgerwatch/erigon/consensus"
 
@@ -101,7 +102,9 @@ func StageLoop(
 				return
 			}
 
-			log.Error("Staged Sync", "err", err)
+			if !errors.Is(err, zk.ErrLimboState) {
+				log.Error("Staged Sync", "err", err)
+			}
 			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
 				log.Error("Failed to recover header sentriesClient", "err", recoveryErr)
 			}

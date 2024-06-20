@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/smt/pkg/blockinfo"
+	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/zk/erigon_db"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	zktypes "github.com/ledgerwatch/erigon/zk/types"
@@ -74,13 +75,14 @@ func finaliseBlock(
 	parentBlock *types.Block,
 	forkId uint64,
 	batch uint64,
+	accumulator *shards.Accumulator,
 	ger common.Hash,
 	l1BlockHash common.Hash,
 	transactions []types.Transaction,
 	receipts types.Receipts,
 	effectiveGases []uint8,
-) error {
-	stateWriter := state.NewPlainStateWriter(sdb.tx, sdb.tx, newHeader.Number.Uint64())
+) (*types.Block, error) {
+	stateWriter := state.NewPlainStateWriter(sdb.tx, sdb.tx, newHeader.Number.Uint64()).SetAccumulator(accumulator)
 	chainReader := stagedsync.ChainReader{
 		Cfg: *cfg.chainConfig,
 		Db:  sdb.tx,
@@ -102,7 +104,7 @@ func finaliseBlock(
 			signer := types.MakeSigner(cfg.chainConfig, newHeader.Number.Uint64())
 			from, err = tx.Sender(*signer)
 			if err != nil {
-				return err
+				return nil, err
 			}
 		}
 		txInfos = append(txInfos, blockinfo.ExecutedTxInfo{
@@ -113,7 +115,7 @@ func finaliseBlock(
 		})
 	}
 	if err := postBlockStateHandling(cfg, ibs, sdb.hermezDb, newHeader, ger, l1BlockHash, parentBlock.Root(), txInfos); err != nil {
-		return err
+		return nil, err
 	}
 
 	finalBlock, finalTransactions, finalReceipts, err := core.FinalizeBlockExecutionWithHistoryWrite(
@@ -132,15 +134,15 @@ func finaliseBlock(
 		excessDataGas,
 	)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	newRoot, err := zkIncrementIntermediateHashes(ctx, s.LogPrefix(), s, sdb.tx, sdb.eridb, sdb.smt, newHeader.Number.Uint64()-1, newHeader.Number.Uint64())
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	finalHeader := finalBlock.Header()
+	finalHeader := finalBlock.HeaderNoCopy()
 	finalHeader.Root = newRoot
 	finalHeader.Coinbase = cfg.zk.AddressSequencer
 	finalHeader.GasLimit = getGasLimit(forkId)
@@ -150,44 +152,44 @@ func finaliseBlock(
 
 	err = rawdb.WriteHeader_zkEvm(sdb.tx, finalHeader)
 	if err != nil {
-		return fmt.Errorf("failed to write header: %v", err)
+		return nil, fmt.Errorf("failed to write header: %v", err)
 	}
 	if err := rawdb.WriteHeadHeaderHash(sdb.tx, finalHeader.Hash()); err != nil {
-		return err
+		return nil, err
 	}
 	err = rawdb.WriteCanonicalHash(sdb.tx, finalHeader.Hash(), newNum.Uint64())
 	if err != nil {
-		return fmt.Errorf("failed to write header: %v", err)
+		return nil, fmt.Errorf("failed to write header: %v", err)
 	}
 
 	erigonDB := erigon_db.NewErigonDb(sdb.tx)
 	err = erigonDB.WriteBody(newNum, finalHeader.Hash(), finalTransactions)
 	if err != nil {
-		return fmt.Errorf("failed to write body: %v", err)
+		return nil, fmt.Errorf("failed to write body: %v", err)
 	}
 
 	// write the new block lookup entries
 	rawdb.WriteTxLookupEntries(sdb.tx, finalBlock)
 
 	if err = rawdb.WriteReceipts(sdb.tx, newNum.Uint64(), finalReceipts); err != nil {
-		return err
+		return nil, err
 	}
 
 	if err = sdb.hermezDb.WriteForkId(batch, forkId); err != nil {
-		return err
+		return nil, err
 	}
 
 	// now process the senders to avoid a stage by itself
 	if err := addSenders(cfg, newNum, finalTransactions, sdb.tx, finalHeader); err != nil {
-		return err
+		return nil, err
 	}
 
 	// now add in the zk batch to block references
 	if err := sdb.hermezDb.WriteBlockBatch(newNum.Uint64(), batch); err != nil {
-		return fmt.Errorf("write block batch error: %v", err)
+		return nil, fmt.Errorf("write block batch error: %v", err)
 	}
 
-	return nil
+	return finalBlock, nil
 }
 
 func postBlockStateHandling(
