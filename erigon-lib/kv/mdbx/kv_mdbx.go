@@ -2050,20 +2050,30 @@ func (s *cursor2iter) init(table string, tx kv.Tx) error {
 	// to find LAST key with given prefix:
 	nextSubtree, ok := kv.NextSubtree(s.fromPrefix)
 	if ok {
-		s.nextK, s.nextV, err = s.c.SeekExact(nextSubtree)
+		s.nextK, s.nextV, err = s.c.Seek(nextSubtree)
 		if err != nil {
 			return err
 		}
-		s.nextK, s.nextV, err = s.c.Prev()
-		if err != nil {
-			return err
+		if s.nextK == nil {
+			s.nextK, s.nextV, err = s.c.Last()
+			if err != nil {
+				return err
+			}
+		} else {
+			s.nextK, s.nextV, err = s.c.Prev()
+			if err != nil {
+				return err
+			}
 		}
-		if s.nextK != nil { // go to last value of this key
-			if casted, ok := s.c.(kv.CursorDupSort); ok {
-				s.nextV, err = casted.LastDup()
-				if err != nil {
-					return err
-				}
+		if s.nextK == nil || !bytes.HasPrefix(s.nextK, s.fromPrefix) {
+			return nil
+		}
+
+		// go to last value of this key
+		if casted, ok := s.c.(kv.CursorDupSort); ok {
+			s.nextV, err = casted.LastDup()
+			if err != nil {
+				return err
 			}
 		}
 	} else {
