@@ -420,34 +420,36 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 	accountGetter := NewArchiveGetter(accountItem.decompressor.MakeGetter(), acc.d.compression)
 
 	aux := make([]byte, 0, 256)
+	keyBuf := make([]byte, 0, 64)
 	return branch.ReplacePlainKeys(aux, func(key []byte, isStorage bool) ([]byte, error) {
+		var found bool
 		if isStorage {
 			if len(key) == length.Addr+length.Hash {
 				return nil, nil // save storage key as is
 			}
 			// Optimised key referencing a state file record (file number and offset within the file)
-			storagePlainKey, found := sto.lookupByShortenedKey(key, storageGetter)
+			keyBuf, found = sto.lookupByShortenedKey(key, storageGetter, keyBuf[:0])
 			if !found {
 				s0, s1 := fStartTxNum/sd.aggTx.a.StepSize(), fEndTxNum/sd.aggTx.a.StepSize()
 				sd.logger.Crit("replace back lost storage full key", "shortened", fmt.Sprintf("%x", key),
 					"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, decodeShorterKey(key)))
 				return nil, fmt.Errorf("replace back lost storage full key: %x", key)
 			}
-			return storagePlainKey, nil
+			return keyBuf, nil
 		}
 
 		if len(key) == length.Addr {
 			return nil, nil // save account key as is
 		}
 
-		apkBuf, found := acc.lookupByShortenedKey(key, accountGetter)
+		keyBuf, found = acc.lookupByShortenedKey(key, accountGetter, keyBuf[:0])
 		if !found {
 			s0, s1 := fStartTxNum/sd.aggTx.a.StepSize(), fEndTxNum/sd.aggTx.a.StepSize()
 			sd.logger.Crit("replace back lost account full key", "shortened", fmt.Sprintf("%x", key),
 				"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, decodeShorterKey(key)))
 			return nil, fmt.Errorf("replace back lost account full key: %x", key)
 		}
-		return apkBuf, nil
+		return keyBuf, nil
 	})
 }
 
