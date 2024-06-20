@@ -870,7 +870,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 		k, v []byte
 	}{}
 	var stepInDB []byte
-	for k, v, err := valsCursor.First(); k != nil; k, v, err = valsCursor.Next() {
+	for k, v, err := valsCursor.First(); k != nil; {
 		if err != nil {
 			return coll, err
 		}
@@ -881,6 +881,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 			stepInDB = v[:8]
 		}
 		if !bytes.Equal(stepBytes, stepInDB) { // [txFrom; txTo)
+			k, v, err = valsCursor.Next()
 			continue
 		}
 
@@ -888,6 +889,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 			kvs = append(kvs, struct {
 				k, v []byte
 			}{common.Copy(k[:len(k)-8]), common.Copy(v)})
+			k, v, err = valsCursor.Next()
 		} else {
 			if err = comp.AddWord(k); err != nil {
 				return coll, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, k, err)
@@ -895,6 +897,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 			if err = comp.AddWord(common.Copy(v[8:])); err != nil {
 				return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, k, v[8:], err)
 			}
+			k, v, err = valsCursor.(kv.CursorDupSort).NextNoDup()
 		}
 	}
 
