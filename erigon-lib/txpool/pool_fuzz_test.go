@@ -340,16 +340,16 @@ func FuzzOnNewBlocks(f *testing.F) {
 				t.Fatalf("pending worst too small %b", worst.subPool)
 			}
 			for _, txn := range pending.best.ms {
-				i := tx.Tx
-				if tx.subPool&NoNonceGaps > 0 {
+				i := txn.Tx
+				if txn.subPool&NoNonceGaps > 0 {
 					assert.GreaterOrEqual(i.Nonce, senders[i.SenderID].nonce, msg, i.SenderID)
 				}
-				if tx.subPool&EnoughFeeCapBlock > 0 {
-					assert.LessOrEqual(pendingBaseFee, tx.Tx.FeeCap, msg)
+				if txn.subPool&EnoughFeeCapBlock > 0 {
+					assert.LessOrEqual(pendingBaseFee, txn.Tx.FeeCap, msg)
 				}
 
 				// side data structures must have all txs
-				assert.True(pool.all.has(tx), msg)
+				assert.True(pool.all.has(txn), msg)
 				_, ok = pool.byHash[string(i.IDHash[:])]
 				assert.True(ok)
 
