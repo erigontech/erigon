@@ -277,7 +277,7 @@ func (l *LogForStorage) EncodeRLP(w io.Writer) error {
 
 // DecodeRLP implements rlp.Decoder.
 //
-// Note some redundant fields(e.g. block number, tx hash etc) will be assembled later.
+// Note some redundant fields(e.g. block number, txn hash etc) will be assembled later.
 func (l *LogForStorage) DecodeRLP(s *rlp.Stream) error {
 	blob, err := s.Raw()
 	if err != nil {

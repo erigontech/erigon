@@ -482,7 +482,7 @@ func fetchAndWriteHeimdallStateSyncEvents(
 
 		data, err := eventRecord.Pack(stateReceiverABI)
 		if err != nil {
-			logger.Error(fmt.Sprintf("[%s] Unable to pack tx for commitState", logPrefix), "err", err)
+			logger.Error(fmt.Sprintf("[%s] Unable to pack txn for commitState", logPrefix), "err", err)
 			return lastStateSyncEventID, i, time.Since(fetchStart), err
 		}
 

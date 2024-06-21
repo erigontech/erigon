@@ -9,8 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/hashicorp/golang-lru/v2"
-
+	lru "github.com/hashicorp/golang-lru/v2"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 
@@ -551,7 +550,7 @@ func checkFirstValidatorSetProof(contract_address libcommon.Address, oldHeader *
 		    let (data, decoder) = validator_set::functions::get_validators::call();
 
 		    let from = Address::default();
-		    let tx = TypedTransaction::Legacy(Transaction {
+		    let txn = TypedTransaction::Legacy(Transaction {
 		        nonce: machine.account_start_nonce(number),
 		        action: Action::Call(contract_address),
 		        gas: PROVIDED_GAS.into(),
