@@ -377,7 +377,7 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs, minedTxs types.TxSlots, tx kv.Tx) error {
 	defer newBlockTimer.UpdateDuration(time.Now())
 
-	isAfterLimbo := len(unwindTxs.Txs) > 0
+	isAfterLimbo := len(unwindTxs.Txs) > 0 && p.isDeniedYieldingTransactions()
 
 	cache := p.cache()
 	cache.OnNewBlock(stateChanges)
