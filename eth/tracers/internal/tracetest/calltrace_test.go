@@ -285,7 +285,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 }
 
 // TestZeroValueToNotExitCall tests the calltracer(s) on the following:
-// Tx to A, A calls B with zero value. B does not already exist.
+// txn to A, A calls B with zero value. B does not already exist.
 // Expected: that enter/exit is invoked and the inner call is shown in the result
 func TestZeroValueToNotExitCall(t *testing.T) {
 	var to = libcommon.HexToAddress("0x00000000000000000000000000000000deadbeef")

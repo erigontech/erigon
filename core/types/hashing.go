@@ -193,7 +193,7 @@ func prefixedRlpHash(prefix byte, x interface{}) (h libcommon.Hash) {
 }
 
 // prefixedSSZHash writes the prefix into the hasher before SSZ encoding x.  It's used for
-// computing the tx id & signing hashes of signed blob transactions.
+// computing the txn id & signing hashes of signed blob transactions.
 func prefixedSSZHash(prefix byte, obj codec.Serializable) (h libcommon.Hash) {
 	sha := crypto.NewKeccakState()
 	sha.Write([]byte{prefix})
