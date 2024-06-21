@@ -150,7 +150,7 @@ func countBlockByTxnum(ctx context.Context, tx kv.Tx, blockReader services.FullB
 
 	for i := uint64(0); i < math.MaxUint64; i++ {
 		if i%1000000 == 0 {
-			fmt.Printf("\r [%s] Counting block for tx %d: cur block %dM cur tx %d\n", "restoreCommit", txnum, i/1_000_000, txCounter)
+			fmt.Printf("\r [%s] Counting block for txn %d: cur block %dM cur txn %d\n", "restoreCommit", txnum, i/1_000_000, txCounter)
 		}
 
 		h, err := blockReader.HeaderByNumber(ctx, tx, i)
@@ -174,7 +174,7 @@ func countBlockByTxnum(ctx context.Context, tx kv.Tx, blockReader services.FullB
 			return bb, nil
 		}
 	}
-	return blockBorders{}, fmt.Errorf("block with tx %x not found", txnum)
+	return blockBorders{}, fmt.Errorf("block with txn %x not found", txnum)
 }
 
 func RebuildPatriciaTrieBasedOnFiles(rwTx kv.RwTx, cfg TrieCfg, ctx context.Context, logger log.Logger) (libcommon.Hash, error) {

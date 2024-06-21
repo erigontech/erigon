@@ -41,7 +41,7 @@ type DeprecatedTxPoolConfig struct {
 
 	Lifetime      time.Duration // Maximum amount of time non-executable transaction are queued
 	StartOnInit   bool
-	TracedSenders []string // List of senders for which tx pool should print out debugging info
+	TracedSenders []string // List of senders for which txn pool should print out debugging info
 	CommitEvery   time.Duration
 }
 

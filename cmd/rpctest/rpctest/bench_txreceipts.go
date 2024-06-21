@@ -73,10 +73,10 @@ func BenchTxReceipt(erigonURL, gethURL string, needCompare bool, blockFrom uint6
 			return fmt.Errorf("Error retrieving block (Erigon): %d %s\n", b.Error.Code, b.Error.Message)
 		}
 
-		for _, tx := range b.Result.Transactions {
+		for _, txn := range b.Result.Transactions {
 			reqGen.reqID++
-			request := reqGen.getTransactionReceipt(tx.Hash)
-			errCtx := fmt.Sprintf("block %d, tx %s", bn, tx.Hash)
+			request := reqGen.getTransactionReceipt(txn.Hash)
+			errCtx := fmt.Sprintf("block %d, txn %s", bn, txn.Hash)
 			if err := requestAndCompare(request, "eth_getTransactionReceipt", errCtx, reqGen, needCompare, rec, errs, resultsCh,
 				/* insertOnlyIfSuccess */ false); err != nil {
 				return err

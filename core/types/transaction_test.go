@@ -199,7 +199,7 @@ func TestEIP2930Signer(t *testing.T) {
 			wantHash:       libcommon.HexToHash("1ccd12d8bbdb96ea391af49a35ab641e219b2dd638dea375f2bc94dd290f2549"),
 		},
 		{
-			// This checks what happens when trying to sign an unsigned tx for the wrong chain.
+			// This checks what happens when trying to sign an unsigned txn for the wrong chain.
 			tx:             tx1,
 			signer:         signer2,
 			chainID:        big.NewInt(2),
@@ -208,7 +208,7 @@ func TestEIP2930Signer(t *testing.T) {
 			wantSignErr:    ErrInvalidChainId,
 		},
 		{
-			// This checks what happens when trying to re-sign a signed tx for the wrong chain.
+			// This checks what happens when trying to re-sign a signed txn for the wrong chain.
 			tx:             tx2,
 			signer:         signer1,
 			chainID:        big.NewInt(1),
@@ -236,7 +236,7 @@ func TestEIP2930Signer(t *testing.T) {
 		}
 		if signedTx != nil {
 			if signedTx.Hash() != test.wantHash {
-				t.Errorf("test %d: wrong tx hash after signing: got %x, want %x", i, signedTx.Hash(), test.wantHash)
+				t.Errorf("test %d: wrong txn hash after signing: got %x, want %x", i, signedTx.Hash(), test.wantHash)
 			}
 		}
 	}
@@ -394,7 +394,7 @@ func TestTransactionCoding(t *testing.T) {
 				GasPrice: u256.Num2,
 			}
 		case 1:
-			// Legacy tx contract creation.
+			// Legacy txn contract creation.
 			txdata = &LegacyTx{
 				CommonTx: CommonTx{
 					Nonce: i,
@@ -404,7 +404,7 @@ func TestTransactionCoding(t *testing.T) {
 				GasPrice: u256.Num2,
 			}
 		case 2:
-			// Tx with non-zero access list.
+			// txn with non-zero access list.
 			txdata = &AccessListTx{
 				ChainID: uint256.NewInt(1),
 				LegacyTx: LegacyTx{
@@ -419,7 +419,7 @@ func TestTransactionCoding(t *testing.T) {
 				AccessList: accesses,
 			}
 		case 3:
-			// Tx with empty access list.
+			// txn with empty access list.
 			txdata = &AccessListTx{
 				ChainID: uint256.NewInt(1),
 				LegacyTx: LegacyTx{
@@ -498,7 +498,7 @@ func encodeDecodeBinary(tx Transaction) (Transaction, error) {
 func assertEqual(orig Transaction, cpy Transaction) error {
 	// compare nonce, price, gaslimit, recipient, amount, payload, V, R, S
 	if want, got := orig.Hash(), cpy.Hash(); want != got {
-		return fmt.Errorf("parsed tx differs from original tx, want %v, got %v", want, got)
+		return fmt.Errorf("parsed txn differs from original tx, want %v, got %v", want, got)
 	}
 	if want, got := orig.GetChainID(), cpy.GetChainID(); want.Cmp(got) != 0 {
 		return fmt.Errorf("invalid chain id, want %d, got %d", want, got)
@@ -517,27 +517,27 @@ func assertEqual(orig Transaction, cpy Transaction) error {
 func assertEqualBlobWrapper(orig *BlobTxWrapper, cpy *BlobTxWrapper) error {
 	// compare commitments, blobs, proofs
 	if want, got := len(orig.Commitments), len(cpy.Commitments); want != got {
-		return fmt.Errorf("parsed tx commitments have unequal size: want%v, got %v", want, got)
+		return fmt.Errorf("parsed txn commitments have unequal size: want%v, got %v", want, got)
 	}
 
 	if want, got := len(orig.Blobs), len(cpy.Blobs); want != got {
-		return fmt.Errorf("parsed tx blobs have unequal size: want%v, got %v", want, got)
+		return fmt.Errorf("parsed txn blobs have unequal size: want%v, got %v", want, got)
 	}
 
 	if want, got := len(orig.Proofs), len(cpy.Proofs); want != got {
-		return fmt.Errorf("parsed tx proofs have unequal size: want%v, got %v", want, got)
+		return fmt.Errorf("parsed txn proofs have unequal size: want%v, got %v", want, got)
 	}
 
 	if want, got := orig.Commitments, cpy.Commitments; !reflect.DeepEqual(want, got) {
-		return fmt.Errorf("parsed tx commitments unequal: want%v, got %v", want, got)
+		return fmt.Errorf("parsed txn commitments unequal: want%v, got %v", want, got)
 	}
 
 	if want, got := orig.Blobs, cpy.Blobs; !reflect.DeepEqual(want, got) {
-		return fmt.Errorf("parsed tx blobs unequal: want%v, got %v", want, got)
+		return fmt.Errorf("parsed txn blobs unequal: want%v, got %v", want, got)
 	}
 
 	if want, got := orig.Proofs, cpy.Proofs; !reflect.DeepEqual(want, got) {
-		return fmt.Errorf("parsed tx proofs unequal: want%v, got %v", want, got)
+		return fmt.Errorf("parsed txn proofs unequal: want%v, got %v", want, got)
 	}
 
 	return nil

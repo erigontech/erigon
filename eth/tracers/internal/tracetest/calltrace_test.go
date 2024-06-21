@@ -24,18 +24,18 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -142,7 +142,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 				}
 				context = evmtypes.BlockContext{
 					CanTransfer: core.CanTransfer,
-					Transfer:    core.Transfer,
+					Transfer:    consensus.Transfer,
 					Coinbase:    test.Context.Miner,
 					BlockNumber: uint64(test.Context.Number),
 					Time:        uint64(test.Context.Time),
@@ -251,7 +251,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 	}
 	context := evmtypes.BlockContext{
 		CanTransfer: core.CanTransfer,
-		Transfer:    core.Transfer,
+		Transfer:    consensus.Transfer,
 		Coinbase:    test.Context.Miner,
 		BlockNumber: uint64(test.Context.Number),
 		Time:        uint64(test.Context.Time),
@@ -285,7 +285,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 }
 
 // TestZeroValueToNotExitCall tests the calltracer(s) on the following:
-// Tx to A, A calls B with zero value. B does not already exist.
+// txn to A, A calls B with zero value. B does not already exist.
 // Expected: that enter/exit is invoked and the inner call is shown in the result
 func TestZeroValueToNotExitCall(t *testing.T) {
 	var to = libcommon.HexToAddress("0x00000000000000000000000000000000deadbeef")
@@ -311,7 +311,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 	}
 	context := evmtypes.BlockContext{
 		CanTransfer: core.CanTransfer,
-		Transfer:    core.Transfer,
+		Transfer:    consensus.Transfer,
 		Coinbase:    libcommon.Address{},
 		BlockNumber: 8000000,
 		Time:        5,

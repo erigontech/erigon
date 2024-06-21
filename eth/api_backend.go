@@ -162,7 +162,7 @@ func (b *EthAPIBackend) getReceiptsByReApplyingTransactions(block *types.Block, 
 	var usedGas = new(uint64)
 	var gp = new(core.GasPool).AddGas(block.GasLimit())
 	vmConfig := vm.Config{}
-	for i, tx := range block.Transactions() {
+	for i, txn := range block.Transactions() {
 		statedb.Prepare(tx.Hash(), block.Hash(), i)
 
 		receipt, err := core.ApplyTransaction(b.ChainConfig(), b.eth.blockchain.GetHeader, b.eth.blockchain.Engine(), nil, gp, statedb, dbstate, header, tx, usedGas, vmConfig)

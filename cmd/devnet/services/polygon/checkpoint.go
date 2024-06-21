@@ -420,7 +420,7 @@ func (h *Heimdall) createAndSendCheckpointToRootchain(ctx context.Context, start
 		// proof
 		tx, err := helper.QueryTxWithProof(cp.cliCtx, txHash)
 		if err != nil {
-			h.logger.Error("Error querying checkpoint tx proof", "txHash", txHash)
+			h.logger.Error("Error querying checkpoint txn proof", "txHash", txHash)
 			return err
 		}
 
