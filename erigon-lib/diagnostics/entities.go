@@ -69,6 +69,7 @@ type PeerStatisticMsgUpdate struct {
 type SyncStatistics struct {
 	SnapshotDownload SnapshotDownloadStatistics `json:"snapshotDownload"`
 	SnapshotIndexing SnapshotIndexingStatistics `json:"snapshotIndexing"`
+	SnapshotFillDB   SnapshotFillDBStatistics   `json:"snapshotFillDB"`
 	BlockExecution   BlockExecutionStatistics   `json:"blockExecution"`
 	SyncFinished     bool                       `json:"syncFinished"`
 }
@@ -128,6 +129,16 @@ type SnapshotSegmentIndexingStatistics struct {
 
 type SnapshotSegmentIndexingFinishedUpdate struct {
 	SegmentName string `json:"segmentName"`
+}
+
+type SnapshotFillDBStatistics struct {
+	Stages []SnapshotFillDBStage `json:"stages"`
+}
+
+type SnapshotFillDBStage struct {
+	StageName       string `json:"stageName"`
+	ProcessedBlocks uint64 `json:"processedBlocks"`
+	AvailableBlocks uint64 `json:"availableBlocks"`
 }
 
 type BlockExecutionStatistics struct {

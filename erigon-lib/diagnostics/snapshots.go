@@ -13,6 +13,7 @@ import (
 var (
 	SnapshotDownloadStatisticsKey = []byte("diagSnapshotDownloadStatistics")
 	SnapshotIndexingStatisticsKey = []byte("diagSnapshotIndexingStatistics")
+	SnapshotFillDBStatisticsKey   = []byte("diagSnapshotFillDBStatistics")
 )
 
 func (d *DiagnosticClient) setupSnapshotDiagnostics(rootCtx context.Context) {
@@ -393,10 +394,32 @@ func ReadSnapshotIndexingInfo(db kv.RoDB) (info SnapshotIndexingStatistics) {
 	}
 }
 
+func ReadSnapshotFillDBInfo(db kv.RoDB) SnapshotFillDBStatistics {
+	data := ReadDataFromTable(db, kv.DiagSyncStages, SnapshotFillDBStatisticsKey)
+
+	if len(data) == 0 {
+		return SnapshotFillDBStatistics{}
+	}
+
+	var info SnapshotFillDBStatistics
+	err := json.Unmarshal(data, &info)
+
+	if err != nil {
+		log.Error("[Diagnostics] Failed to read snapshot fill db info", "err", err)
+		return SnapshotFillDBStatistics{}
+	} else {
+		return info
+	}
+}
+
 func SnapshotDownloadUpdater(info SnapshotDownloadStatistics) func(tx kv.RwTx) error {
 	return PutDataToTable(kv.DiagSyncStages, SnapshotDownloadStatisticsKey, info)
 }
 
 func SnapshotIndexingUpdater(info SnapshotIndexingStatistics) func(tx kv.RwTx) error {
 	return PutDataToTable(kv.DiagSyncStages, SnapshotIndexingStatisticsKey, info)
+}
+
+func SnapshotFillDBUpdater(info SnapshotFillDBStatistics) func(tx kv.RwTx) error {
+	return PutDataToTable(kv.DiagSyncStages, SnapshotFillDBStatisticsKey, info)
 }
