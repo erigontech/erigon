@@ -3,8 +3,6 @@ package stagedsync
 import (
 	"context"
 	"fmt"
-	"time"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -58,32 +56,32 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 		tx = txc.Ttx.(kv.TemporalRwTx)
 	}
 
-	endBlock, err := s.ExecutionAt(tx)
-	if err != nil {
-		return fmt.Errorf("getting last executed block: %w", err)
-	}
-	if s.BlockNumber > endBlock { // Erigon will self-heal (download missed blocks) eventually
-		return nil
-	}
-	// if prematureEndBlock is nonzero and less than the latest executed block,
-	// then we only run the log index stage until prematureEndBlock
-	if prematureEndBlock != 0 && prematureEndBlock < endBlock {
-		endBlock = prematureEndBlock
-	}
-	// It is possible that prematureEndBlock < s.BlockNumber,
-	// in which case it is important that we skip this stage,
-	// or else we could overwrite stage_at with prematureEndBlock
-	if endBlock <= s.BlockNumber {
-		return nil
-	}
-
-	startBlock := s.BlockNumber
-	if startBlock > 0 {
-		startBlock++
-	}
-
-	logEvery := time.NewTicker(10 * time.Second)
-	defer logEvery.Stop()
+	//endBlock, err := s.ExecutionAt(tx)
+	//if err != nil {
+	//	return fmt.Errorf("getting last executed block: %w", err)
+	//}
+	//if s.BlockNumber > endBlock { // Erigon will self-heal (download missed blocks) eventually
+	//	return nil
+	//}
+	//// if prematureEndBlock is nonzero and less than the latest executed block,
+	//// then we only run the log index stage until prematureEndBlock
+	//if prematureEndBlock != 0 && prematureEndBlock < endBlock {
+	//	endBlock = prematureEndBlock
+	//}
+	//// It is possible that prematureEndBlock < s.BlockNumber,
+	//// in which case it is important that we skip this stage,
+	//// or else we could overwrite stage_at with prematureEndBlock
+	//if endBlock <= s.BlockNumber {
+	//	return nil
+	//}
+	//
+	//startBlock := s.BlockNumber
+	//if startBlock > 0 {
+	//	startBlock++
+	//}
+	//
+	//logEvery := time.NewTicker(10 * time.Second)
+	//defer logEvery.Stop()
 	//var m runtime.MemStats
 	//var prevBlockNumLog uint64 = startBlock
 
@@ -163,12 +161,12 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 	//	return err
 	//}
 
-	if err = s.Update(tx.(kv.RwTx), endBlock); err != nil {
-		return err
-	}
+	//if err = s.Update(tx.(kv.RwTx), endBlock); err != nil {
+	//	return err
+	//}
 
 	if !useExternalTx {
-		if err = tx.Commit(); err != nil {
+		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}
