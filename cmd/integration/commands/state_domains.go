@@ -124,11 +124,11 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 
 	r := state.NewReaderV4(domains)
 	if err != nil && startTxNum != 0 {
-		return fmt.Errorf("failed to seek commitment to tx %d: %w", startTxNum, err)
+		return fmt.Errorf("failed to seek commitment to txn %d: %w", startTxNum, err)
 	}
 	latestTx := domains.TxNum()
 	if latestTx < startTxNum {
-		return fmt.Errorf("latest available tx to start is  %d and its less than start tx %d", latestTx, startTxNum)
+		return fmt.Errorf("latest available txn to start is  %d and its less than start txn %d", latestTx, startTxNum)
 	}
 	logger.Info("seek commitment", "block", domains.BlockNum(), "tx", latestTx)
 

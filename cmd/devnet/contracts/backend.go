@@ -80,8 +80,8 @@ func (cb contractBackend) EstimateGas(ctx context.Context, call ethereum.CallMsg
 	//return cb.node.EstimateGas(call, requests.BlockNumbers.Pending)
 }
 
-func (cb contractBackend) SendTransaction(ctx context.Context, tx types.Transaction) error {
-	_, err := cb.node.SendTransaction(tx)
+func (cb contractBackend) SendTransaction(ctx context.Context, txn types.Transaction) error {
+	_, err := cb.node.SendTransaction(txn)
 	return err
 }
 

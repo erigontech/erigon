@@ -50,7 +50,7 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 				d.syncStats.SnapshotDownload.DownloadFinished = info.DownloadFinished
 				d.syncStats.SnapshotDownload.TorrentMetadataReady = info.TorrentMetadataReady
 
-				downloadedPercent := getPercentDownloaded(info.Downloaded, info.Total)
+				downloadedPercent := GetShanpshotsPercentDownloaded(info.Downloaded, info.Total, info.TorrentMetadataReady, info.Files)
 				remainingBytes := info.Total - info.Downloaded
 				downloadTimeLeft := CalculateTime(remainingBytes, info.DownloadRate)
 				totalDownloadTimeString := time.Duration(info.TotalTime) * time.Second
@@ -65,6 +65,8 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 					log.Error("[Diagnostics] Failed to update snapshot download info", "err", err)
 				}
 
+				d.saveSyncStagesToDB()
+
 				d.mu.Unlock()
 
 				if d.snapshotStageFinished() {
@@ -75,7 +77,11 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 	}()
 }
 
-func getPercentDownloaded(downloaded, total uint64) string {
+func GetShanpshotsPercentDownloaded(downloaded uint64, total uint64, torrentMetadataReady int32, files int32) string {
+	if torrentMetadataReady < files {
+		return "calculating..."
+	}
+
 	percent := float32(downloaded) / float32(total/100)
 
 	if percent > 100 {
@@ -236,6 +242,8 @@ func (d *DiagnosticClient) addOrUpdateSegmentIndexingState(upd SnapshotIndexingS
 		TimeLeft:    "unknown",
 		Progress:    fmt.Sprintf("%d%%", totalProgress/len(d.syncStats.SnapshotIndexing.Segments)),
 	}, "Indexing snapshots")
+
+	d.saveSyncStagesToDB()
 }
 
 func (d *DiagnosticClient) runSnapshotFilesListListener(rootCtx context.Context) {
